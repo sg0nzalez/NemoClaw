@@ -50,11 +50,47 @@ fail() {
   echo -e "${YELLOW}[DIAG]${NC} Session: $(cat "${SESSION_FILE}" 2>/dev/null || echo 'not found')" >&2
   echo -e "${YELLOW}[DIAG]${NC} Sandboxes: $(openshell sandbox list 2>&1 || echo 'openshell unavailable')" >&2
   echo -e "${YELLOW}[DIAG]${NC} Docker: $(docker ps --format '{{.Names}} {{.Image}} {{.Status}}' 2>&1 | head -5)" >&2
+  dump_hermes_sandbox_logs >&2 || true
   echo -e "${YELLOW}[DIAG]${NC} --- End diagnostics ---" >&2
   exit 1
 }
 info() { echo -e "${YELLOW}[INFO]${NC} $1"; }
 diag() { echo -e "${YELLOW}[DIAG]${NC} $1"; }
+
+dump_hermes_sandbox_logs() {
+  command -v openshell >/dev/null 2>&1 || {
+    diag "openshell is not available for sandbox log diagnostics"
+    return
+  }
+  openshell sandbox list 2>&1 | grep -Fq -- "$SANDBOX_NAME" || {
+    diag "sandbox '${SANDBOX_NAME}' is not visible to openshell"
+    return
+  }
+
+  diag "Hermes sandbox runtime logs:"
+  # shellcheck disable=SC2016  # script is intentionally evaluated inside the sandbox
+  openshell sandbox exec -n "$SANDBOX_NAME" -- sh -lc '
+set +e
+echo "== identity =="
+id 2>&1 || true
+echo "== listening sockets =="
+ss -tlnp 2>&1 || ss -tln 2>&1 || true
+echo "== log and state paths =="
+ls -ld /tmp /sandbox/.hermes /sandbox/.hermes/logs 2>&1 || true
+ls -l /tmp/nemoclaw-start.log /tmp/gateway.log 2>&1 || true
+echo "== hermes-related processes =="
+for p in /proc/[0-9]*; do
+  cmd=$(tr "\000" " " < "$p/cmdline" 2>/dev/null || true)
+  case "$cmd" in
+    *hermes*|*socat*|*nemoclaw-decode-proxy*) echo "$(basename "$p") $cmd" ;;
+  esac
+done
+echo "== /tmp/nemoclaw-start.log tail =="
+tail -n 80 /tmp/nemoclaw-start.log 2>&1 || true
+echo "== /tmp/gateway.log tail =="
+tail -n 120 /tmp/gateway.log 2>&1 || true
+' 2>&1 | sed 's/^/[DIAG]   /'
+}
 
 export NEMOCLAW_REBUILD_VERBOSE=1
 

@@ -94,6 +94,14 @@ describe("Hermes sandbox provisioning", () => {
       expect(dockerSrc).toContain("/sandbox/.hermes/cache");
     }
   });
+
+  it("captures Hermes entrypoint and gateway startup logs for diagnostics", () => {
+    expect(startSrc).toContain('_START_LOG="/tmp/nemoclaw-start.log"');
+    expect(startSrc).toContain('exec > >(tee -a "$_START_LOG") 2> >(tee -a "$_START_LOG" >&2)');
+    expect(startSrc).toContain("start_gateway_log_stream");
+    expect(startSrc).toContain("sed -u 's/^/[gateway-log:] /'");
+    expect(startSrc).toContain('SANDBOX_CHILD_PIDS+=("$GATEWAY_LOG_TAIL_PID")');
+  });
 });
 
 describe("sandbox provisioning: gateway auth token externalization (#2378)", () => {
