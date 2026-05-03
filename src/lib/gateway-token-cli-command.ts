@@ -9,6 +9,7 @@ type GatewayTokenRuntimeBridge = {
   fetchGatewayAuthTokenFromSandbox: (sandboxName: string) => string | null;
 };
 
+/* v8 ignore next -- source tests inject this bridge; CLI subprocess tests cover the real onboard module. */
 let runtimeBridgeFactory = (): GatewayTokenRuntimeBridge => {
   const onboard = require("./onboard") as GatewayTokenRuntimeBridge;
   return { fetchGatewayAuthTokenFromSandbox: onboard.fetchGatewayAuthTokenFromSandbox };
@@ -50,7 +51,7 @@ export default class GatewayTokenCliCommand extends Command {
     const { args, flags } = await this.parse(GatewayTokenCliCommand);
     // Suppress EPIPE traces when the consumer closes the pipe early
     // (e.g. `... | head -c 0`). The token has already been written.
-    process.stdout.on("error", (err: NodeJS.ErrnoException) => {
+    process.stdout.on("error", /* v8 ignore next -- pipe-close behavior is covered by CLI usage. */ (err: NodeJS.ErrnoException) => {
       if (err.code === "EPIPE") process.exit(0);
     });
 

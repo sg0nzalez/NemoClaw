@@ -7,7 +7,9 @@ const mocks = vi.hoisted(() => ({
   buildVersionedUninstallUrl: vi.fn((version: string) => `https://example.test/${version}/uninstall.sh`),
   fetchGatewayAuthTokenFromSandbox: vi.fn(() => "token"),
   getVersion: vi.fn(() => "1.2.3"),
+  captureOpenshellCommand: vi.fn(() => ({ status: 0, output: "alpha\n" })),
   listSandboxes: vi.fn(() => ({ sandboxes: [] })),
+  resolveOpenshell: vi.fn(() => "/usr/bin/openshell"),
   runDebugCommandWithOptions: vi.fn(),
   runDeployAction: vi.fn().mockResolvedValue(undefined),
   runGatewayTokenCommand: vi.fn(() => 0),
@@ -34,7 +36,9 @@ vi.mock("./global-cli-actions", () => ({
   showRootHelp: mocks.showRootHelp,
   showVersion: mocks.showVersion,
 }));
+vi.mock("./openshell", () => ({ captureOpenshellCommand: mocks.captureOpenshellCommand }));
 vi.mock("./registry", () => ({ listSandboxes: mocks.listSandboxes }));
+vi.mock("./resolve-openshell", () => ({ resolveOpenshell: mocks.resolveOpenshell }));
 vi.mock("./services", () => ({ startAll: mocks.startAll, stopAll: mocks.stopAll }));
 vi.mock("./services-command", () => ({
   runStartCommand: mocks.runStartCommand,
@@ -76,6 +80,22 @@ describe("simple global oclif adapters", () => {
       expect.objectContaining({ getDefaultSandbox: expect.any(Function), runDebug: expect.any(Function) }),
     );
     expect(mocks.runDeployAction).toHaveBeenCalledWith("gpu-alpha");
+  });
+
+  it("builds debug defaults from the sandbox registry and OpenShell liveness", async () => {
+    mocks.listSandboxes.mockReturnValue({
+      defaultSandbox: "alpha",
+      sandboxes: [{ name: "alpha" }],
+    } as never);
+    await DebugCliCommand.run(["--quick"], rootDir);
+
+    const deps = mocks.runDebugCommandWithOptions.mock.calls[0][1];
+    expect(deps.getDefaultSandbox()).toBe("alpha");
+    expect(mocks.captureOpenshellCommand).toHaveBeenCalledWith(
+      "/usr/bin/openshell",
+      ["sandbox", "list"],
+      expect.objectContaining({ cwd: rootDir, ignoreError: true }),
+    );
   });
 
   it("maps gateway-token flags to the gateway token action", async () => {
