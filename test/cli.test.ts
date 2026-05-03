@@ -794,6 +794,16 @@ describe("CLI dispatch", () => {
     expect(r.out).not.toContain("No SKILL.md found");
   });
 
+  it("requires a skill install path before action dispatch", () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-cli-skill-missing-path-"));
+    writeSandboxRegistry(home);
+
+    const r = runWithEnv("alpha skill install 2>&1", { HOME: home });
+
+    expect(r.code).not.toBe(0);
+    expect(r.out).toContain("path");
+  });
+
   it("points plugin-shaped directories away from skill install", () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-cli-plugin-hint-"));
     const pluginDir = path.join(home, "openclaw-plugin");
