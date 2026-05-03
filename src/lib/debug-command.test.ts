@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   parseDebugArgs,
+  parseDebugArgsResult,
   printDebugHelp,
   runDebugCommand,
   runDebugCommandWithOptions,
@@ -31,6 +32,15 @@ describe("debug command", () => {
       exit: exitWithCode,
     });
     expect(opts).toEqual({ quick: true, output: "/tmp/out.tgz", sandboxName: "alpha" });
+  });
+
+  it("returns typed parse errors without exiting", () => {
+    expect(parseDebugArgsResult(["--output"], { getDefaultSandbox: () => undefined })).toEqual({
+      ok: false,
+      exitCode: 1,
+      kind: "error",
+      messages: ["Error: --output requires a file path argument"],
+    });
   });
 
   it("runs the debug command with parsed options", () => {
