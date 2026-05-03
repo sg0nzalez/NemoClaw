@@ -21,7 +21,7 @@ export type UsageErrorDispatch = {
 
 export type LegacyDispatch = {
   kind: "legacy";
-  target: "doctor" | "policy-add" | "skill" | "snapshot";
+  target: "policy-add" | "skill" | "snapshot";
 };
 
 export type UnknownSubcommandDispatch = {
@@ -112,7 +112,7 @@ export function resolveSandboxOclifDispatch(
       if (hasHelpFlag(actionArgs)) return { kind: "help", usage: "logs [--follow]" };
       return { kind: "oclif", commandId: "sandbox:logs", args: [sandboxName, ...actionArgs] };
     case "doctor":
-      return { kind: "legacy", target: "doctor" };
+      return { kind: "oclif", commandId: "sandbox:doctor", args: [sandboxName, ...actionArgs] };
     case "policy-add":
       if (hasHelpFlag(actionArgs)) {
         return {

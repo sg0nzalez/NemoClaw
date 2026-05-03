@@ -20,4 +20,12 @@ describe("resolveSandboxOclifDispatch", () => {
       usage: "status",
     });
   });
+
+  it("routes sandbox doctor through oclif", () => {
+    expect(resolveSandboxOclifDispatch("alpha", "doctor", ["--json"])).toEqual({
+      kind: "oclif",
+      commandId: "sandbox:doctor",
+      args: ["alpha", "--json"],
+    });
+  });
 });
