@@ -4,14 +4,14 @@
 export type SandboxImageRow = { tag: string; size: string };
 
 export function parseSandboxImageRows(imagesOutput: string): SandboxImageRow[] {
-  return imagesOutput
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const [tag, size] = line.split("\t");
-      return { tag, size: size || "unknown" };
-    });
+  const rows: SandboxImageRow[] = [];
+  for (const rawLine of imagesOutput.split("\n")) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const [tag, size] = line.split("\t");
+    rows.push({ tag, size: size || "unknown" });
+  }
+  return rows;
 }
 
 export function getRegisteredImageTags(
@@ -29,5 +29,11 @@ export function findOrphanedSandboxImages(
   sandboxes: Array<{ imageTag?: string | null }>,
 ): SandboxImageRow[] {
   const registeredTags = getRegisteredImageTags(sandboxes);
-  return images.filter((image) => !registeredTags.has(image.tag));
+  const orphans: SandboxImageRow[] = [];
+  for (const image of images) {
+    if (!registeredTags.has(image.tag)) {
+      orphans.push(image);
+    }
+  }
+  return orphans;
 }
