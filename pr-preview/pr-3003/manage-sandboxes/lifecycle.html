@@ -621,6 +621,8 @@ Refer to <a class="reference internal" href="../reference/commands.html#nemoclaw
 </pre></div>
 </div>
 <p>Rebuild preserves the mounted workspace and registered policies while recreating the container.
+If some state paths cannot be archived, NemoClaw reports a partial backup and restores only the verified backup entries after the new sandbox starts.
+If no requested state can be backed up, NemoClaw stops before deleting the original sandbox.
 Refer to <a class="reference internal" href="../reference/commands.html#nemoclaw-name-rebuild"><span class="std std-ref"><code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">&lt;name&gt;</span> <span class="pre">rebuild</span></code></span></a> for flag details.</p>
 </section>
 <section id="add-a-network-preset-after-onboarding">
@@ -673,7 +675,8 @@ NemoClaw protects your data through the same backup-and-restore flow as <a class
 <li><p>NemoClaw does not preserve runtime changes outside the workspace state directories. This includes packages installed inside the running container with <code class="docutils literal notranslate"><span class="pre">apt</span></code> or <code class="docutils literal notranslate"><span class="pre">pip</span></code>, files in non-workspace paths, and in-memory or process state. If you have customized the running container at runtime, capture that as <code class="docutils literal notranslate"><span class="pre">Dockerfile</span></code> changes for <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span> <span class="pre">--from</span></code> or a manual <code class="docutils literal notranslate"><span class="pre">openshell</span> <span class="pre">sandbox</span> <span class="pre">download</span></code> before the rebuild starts.</p></li>
 </ul>
 <p>Aborts before the destroy step are non-destructive.
-The flow refuses to proceed past preflight if a credential is missing or past backup if the snapshot fails with <code class="docutils literal notranslate"><span class="pre">&quot;Aborting</span> <span class="pre">rebuild</span> <span class="pre">to</span> <span class="pre">prevent</span> <span class="pre">data</span> <span class="pre">loss&quot;</span></code>, so a failed run leaves the original sandbox intact and ready to retry.</p>
+The flow refuses to proceed past preflight if a credential is missing or past backup if no manifest-defined state can be copied, so a failed run leaves the original sandbox intact and ready to retry.
+When only some paths fail, for example unreadable or root-owned files, NemoClaw logs the partial backup details, continues, and restores only verified backup entries.</p>
 <p>See <a class="reference internal" href="backup-restore.html"><span class="std std-doc">Backup and Restore</span></a> for the full list of state-preservation guarantees, snapshot retention, and instructions for manual backups when the auto-flow is not enough.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>

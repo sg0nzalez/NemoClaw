@@ -590,7 +590,10 @@ This means they survive normal container restarts, but they are deleted when you
 <h3>Preserved During Restart, Rebuild, and Upgrade<a class="headerlink" href="#preserved-during-restart-rebuild-and-upgrade" title="Link to this heading">#</a></h3>
 <p>Sandbox restarts preserve workspace files because the persistent state volume outlives individual container restarts.</p>
 <p>The <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">&lt;name&gt;</span> <span class="pre">rebuild</span></code> command and the sandbox upgrade flow also preserve workspace state.
-Before replacing the container, NemoClaw snapshots the workspace state directories and restores them into the rebuilt sandbox.</p>
+Before replacing the container, NemoClaw snapshots the workspace state directories and restores them into the rebuilt sandbox.
+If some files are unreadable, NemoClaw can continue with a partial backup when at least one requested state directory or file was saved.
+It reports the skipped paths and restores only verified backup entries.
+If no state can be backed up, it stops before replacing the sandbox.</p>
 </section>
 <section id="deleted-during-sandbox-destroy">
 <h3>Deleted During Sandbox Destroy<a class="headerlink" href="#deleted-during-sandbox-destroy" title="Link to this heading">#</a></h3>

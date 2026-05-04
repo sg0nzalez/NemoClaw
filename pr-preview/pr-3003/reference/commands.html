@@ -1111,6 +1111,8 @@ Policy presets applied to the old sandbox are reapplied to the new one so your e
 <p>If another terminal has an active SSH session to the sandbox, <code class="docutils literal notranslate"><span class="pre">rebuild</span></code> prints an active-session warning and requires confirmation before destroying the sandbox.
 Pass <code class="docutils literal notranslate"><span class="pre">--yes</span></code> or <code class="docutils literal notranslate"><span class="pre">--force</span></code> to skip the prompt in scripted workflows.</p>
 <p>The sandbox must be running for the backup step to succeed.
+If some manifest-defined state paths cannot be archived, <code class="docutils literal notranslate"><span class="pre">rebuild</span></code> prints a partial backup warning and continues only when at least one requested directory or file was backed up.
+If nothing can be backed up, it exits before destroying the original sandbox.
 After restore, the command runs <code class="docutils literal notranslate"><span class="pre">openclaw</span> <span class="pre">doctor</span> <span class="pre">--fix</span></code> for cross-version structure repair.</p>
 </section>
 <section id="nemoclaw-upgrade-sandboxes">
