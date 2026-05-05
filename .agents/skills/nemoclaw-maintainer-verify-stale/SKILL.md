@@ -70,7 +70,10 @@ Apply these rules in order. Drop any issue that fails a rule.
 
 **Component allowlist (must have at least one):** `NemoClaw CLI`, `Sandbox`, `OpenShell`, `Docker`, `Getting Started`, or any `Platform:` label that survived the platform skip.
 
-**Idempotency:** drop if any comment body on the issue contains `<!-- nemoclaw-verify-stale v1 -->`. The skill never re-verifies an issue within the same release window. (The release sweep in `nemoclaw-maintainer-cut-release-tag` clears prior `fixed-on-latest` and `verify-inconclusive` labels on each release, which is what re-opens the candidate set.)
+**Idempotency:** drop if **either** of these is true:
+
+- The issue carries a `fixed-on-latest` or `verify-inconclusive` label. (Cleared by the release sweep in `nemoclaw-maintainer-cut-release-tag` so the issue re-opens on each release.)
+- A `<!-- nemoclaw-verify-stale v1 YYYY-MM-DD -->` comment was posted **within the last 7 days**. The marker carries a date so the candidate filter can apply a TTL — useful for the still-reproduces case (Step 9), where no label is applied and we want next week's run to re-verify rather than skip forever.
 
 **Candidate rule:** keep the issue if **either**:
 
@@ -111,6 +114,8 @@ grep -Fxq "$V" /tmp/nemoclaw-tags.txt || drop_version "$V"
 After validation, **pick the smallest surviving version** as the reported version (most conservative — it maximizes versions-behind). This handles "this bug was first reported on v0.0.6 and still happens on v0.0.10" cleanly: we verify against latest, and if the bug is gone, both reports are addressed.
 
 If no version survives, drop the issue from the candidate set — we cannot establish "previous version".
+
+**Variable format for downstream steps.** Set `REPORTED_VERSION` to the **full tag string** (e.g., `REPORTED_VERSION="v0.0.32"`), not just the patch number. Step 8a's installer expects the full tag via the `NEMOCLAW_INSTALL_TAG` env var.
 
 ### Implementer note: regex-pipeline pitfalls
 
@@ -211,6 +216,8 @@ trap '[ "$PROVISIONED_NEW" = "1" ] && brev delete "$INSTANCE_NAME" --yes || true
 
 Wallclock cap per verification: **25 minutes** to accommodate two installs (reported version baseline + latest). If a provisioned box isn't ready in time, abort and treat as an infra failure (Step 11).
 
+**Extended budget for time-sensitive bugs.** If the issue body contains keywords suggesting the bug only manifests over time (`after N minutes`, `after N requests`, `eventually`, `over time`, `memory leak`, `long-running`, `idle for`), bump the cap to **60 minutes**. Detection is simple keyword match. Hard ceiling at 60 min — bugs that genuinely require hours fall out of v1 scope.
+
 ---
 
 ## Step 8: Validate on Baseline, Verify on Latest
@@ -222,15 +229,36 @@ Two-pass design.
 
 Without the baseline gate, a clean run on latest is ambiguous: maybe the bug really got fixed, maybe the script was never capable of triggering it. The baseline disambiguates.
 
-### Step 8a: Install reported version
+### Comprehensive reset (run before each install)
+
+NemoClaw spawns OpenShell sandboxes (containers), runtime services, and listening processes. A naive `rm -rf ~/.nemoclaw` doesn't clean those — the latest install would inherit baseline state and contaminate the result. Use this fuller reset between installs:
 
 ```bash
-RESET="rm -rf ~/.nemoclaw 2>/dev/null; sudo rm -f /usr/local/bin/nemoclaw 2>/dev/null; true"
+RESET=$(cat <<'SCRIPT'
+nemoclaw destroy --all --force 2>/dev/null || true
+pkill -9 -f nemoclaw 2>/dev/null || true
+pkill -9 -f openshell 2>/dev/null || true
+docker ps -a --filter "name=openshell-" -q 2>/dev/null | xargs -r docker rm -f 2>/dev/null || true
+docker ps -a --filter "name=nemoclaw-" -q 2>/dev/null | xargs -r docker rm -f 2>/dev/null || true
+rm -rf ~/.nemoclaw 2>/dev/null
+sudo rm -f /usr/local/bin/nemoclaw 2>/dev/null
+sudo rm -rf /usr/local/lib/nemoclaw 2>/dev/null
+for port in 8080 18789 9119; do fuser -k -n tcp $port 2>/dev/null || true; done
+true
+SCRIPT
+)
+```
 
+Idempotent — fails silently when there's nothing to clean. Run via `brev exec "$INSTANCE_NAME" "$RESET"` before 8a's install and again before 8d's install.
+
+### Step 8a: Install reported version
+
+The installer accepts the target ref via the `NEMOCLAW_INSTALL_TAG` env var (verified against `install.sh` source — defaults to `latest` if unset). It is **not** a `--version` flag.
+
+```bash
 brev exec "$INSTANCE_NAME" "$RESET"
 
-# Install reported version. URL pattern may need adjustment per release line.
-brev exec "$INSTANCE_NAME" "curl -fsSL https://nemoclaw.nvidia.com/install.sh | bash -s -- --version $REPORTED_VERSION" \
+brev exec "$INSTANCE_NAME" "NEMOCLAW_INSTALL_TAG=$REPORTED_VERSION bash -c 'curl -fsSL https://nemoclaw.nvidia.com/install.sh | bash'" \
   || BASELINE_INSTALL_FAILED=1
 brev exec "$INSTANCE_NAME" "nemoclaw --version"
 ```
@@ -241,15 +269,27 @@ If install fails (old releases rot — installer URLs, deps, OS images all drift
 
 If `./reproducer.sh` exists (verbatim from Step 6), run it. Otherwise synth on demand from the issue body (apply −30 penalty now, locked in for the rest of the run).
 
+**Interactive subcommand handling.** Many `nemoclaw onboard` / `nemoclaw configure` invocations prompt for input and will hang in a non-interactive shell. Auto-detect such subcommands in the script and apply, in order:
+
+1. Add `--non-interactive` if the version supports it.
+2. Add `--dangerously-skip-prompts` (issue #2168 confirmed this exists for at least some Jetson paths).
+3. Pre-feed answers via stdin: `printf 'yes\n\n\n' | nemoclaw onboard ...`
+
+If none work, route the script to Step 8c (synth-repro) so the LLM can rewrite it using non-interactive equivalents.
+
 ```bash
 brev copy ./reproducer.sh "$INSTANCE_NAME":~/reproducer.sh
 brev exec "$INSTANCE_NAME" "bash ~/reproducer.sh" 2>&1 | tee ./baseline-transcript.log
 ```
 
-LLM compares `baseline-transcript.log` against the issue's "Actual result" / error description.
+**Match rubric.** LLM compares `baseline-transcript.log` to the issue's "Actual result" / error description. Match criteria:
 
-- **Match** (script produced the bug as described): reproducer validated. Proceed to 8d.
-- **No match** (silent pass, or wrong/unrelated error): script has gaps. Proceed to 8c.
+1. **Exit code agrees** with what the issue describes (non-zero if issue describes a failure, zero if issue describes a wrong-output bug). Necessary but not sufficient.
+2. **Symptom phrase match:** transcript contains a key error phrase from the issue (e.g., issue says `Permission denied on generate-openclaw-config.py`, transcript says `EACCES: permission denied, open '...generate-openclaw-config.py'` — semantic equivalence counts).
+3. **Distinguish bug from infra noise:** generic network / DNS / auth errors don't count as a match unless the issue itself describes them. A bug about config parsing that fails at "could not resolve nvidia.com" is an infra failure, not a reproduction.
+
+- **Match** → reproducer validated. Proceed to 8d.
+- **No match** (silent pass, wrong error, or infra noise): script has gaps. Proceed to 8c.
 
 ### Step 8c: Synth-repro and retry on baseline
 
@@ -302,7 +342,7 @@ Total is clamped to `[0, 100]`.
 
 **Baseline-validation gating.** The +50 weight assumes the reproducer was *validated* — i.e., it produced the bug symptom on baseline (Step 8b/8c match). If `BASELINE_INSTALL_FAILED=1` (Step 8a fall-through, baseline pass skipped), the +50 still applies but **cap the total at 84** unless commits-touched-area or merged-PR-mention also fires. Without baseline AND without corroborating evidence, the cleanest landing is the 60–84 band where the reporter is asked to confirm — we don't have enough on our own to claim ≥85.
 
-**Action:**
+**Action (when latest run was clean — bug not reproduced):**
 
 | Score | Label | Comment |
 |---|---|---|
@@ -310,7 +350,16 @@ Total is clamped to `[0, 100]`.
 | 60–84 | `fixed-on-latest` | Evidence-rich, **@-mention the original reporter** to confirm. |
 | <60 | `verify-inconclusive` | Short, honest "couldn't verify" explanation. |
 
-The skill **never closes issues**. A maintainer pulls that trigger after reviewing the label and comment.
+**Special case: latest output matches the issue symptom (bug still reproduces on latest).**
+
+This is not a flake — the skill positively confirmed the bug is still live. Don't apply the +50 weight (the bug isn't fixed) and skip the score table entirely.
+
+- Post a "still reproduces on latest" comment with both transcripts.
+- Apply **no label**.
+- Include the marker `<!-- nemoclaw-verify-stale v1 YYYY-MM-DD -->` with today's date so the candidate filter applies the 7-day TTL (Step 3 idempotency).
+- Next weekly run picks the issue back up after the TTL — if the bug gets fixed in the meantime, that run catches it.
+
+The skill **never closes issues** in any branch. A maintainer pulls that trigger after reviewing the label and comment.
 
 ---
 
@@ -322,26 +371,45 @@ The skill **never closes issues**. A maintainer pulls that trigger after reviewi
 - URLs containing `@` (basic-auth credentials).
 - File paths under the reporter's home directory (replace with `~/`).
 
-**Comment template:**
+**Comment template (fixed / inconclusive — bug not reproduced on latest):**
 
 ````markdown
 ## Stale-issue verification — automated
 
 **Reported on:** v0.0.31
-**Verified on:** v0.0.35 (commit abc1234)
+**Verified on:** v0.0.34 (commit abc1234)
 **Environment:** Brev <instance-class> (<instance-type>) / Ubuntu 22.04 / <CUDA version if GPU>
-**Reproducer source:** extracted verbatim from issue body | LLM-synthesized from narrative
 
-**Result:** not reproducible — exit 0, expected output observed.
-**Confidence:** 88 / 100. Labelling `fixed-on-latest`.
+### Baseline (reported version)
 
-<details><summary>Reproduction transcript</summary>
+- Install: succeeded · skipped (install rotted)
+- Reproducer: extracted verbatim · synthesized (−30 penalty)
+- Result: bug symptom matched (validated) · could not validate (skipped Step 8c gate)
+
+<details><summary>Baseline transcript</summary>
 
 ```text
-<full transcript here>
+<full baseline transcript>
 ```
 
 </details>
+
+### Latest
+
+- Install: succeeded
+- Result: not reproducible — clean run, no bug symptom observed
+
+<details><summary>Latest transcript</summary>
+
+```text
+<full latest transcript>
+```
+
+</details>
+
+### Verdict
+
+**Confidence:** 88 / 100. Labelling `fixed-on-latest`.
 
 <details><summary>Relevant changes since v0.0.31</summary>
 
@@ -352,10 +420,42 @@ The skill **never closes issues**. A maintainer pulls that trigger after reviewi
 
 If this verification is wrong, please reopen the issue with a comment and the skill will re-verify on the next release.
 
-<!-- nemoclaw-verify-stale v1 -->
+<!-- nemoclaw-verify-stale v1 2026-05-12 -->
 ````
 
-The trailing HTML comment is the **idempotency marker** Step 3 looks for. Never omit it.
+**Comment template (still reproduces — Step 9 special case):**
+
+````markdown
+## Stale-issue verification — still reproducible
+
+**Reported on:** v0.0.31
+**Verified on:** v0.0.34 (commit abc1234)
+**Environment:** Brev <instance-class> (<instance-type>) / Ubuntu 22.04
+
+The skill ran the reported reproducer on v0.0.34 and observed the same bug symptom described in this issue. The bug is still live.
+
+No label applied. Will re-verify automatically next weekly run; if a fix lands in the interim, the next pass catches it.
+
+<details><summary>Baseline transcript (validated reproducer)</summary>
+
+```text
+<baseline transcript>
+```
+
+</details>
+
+<details><summary>Latest transcript (bug still observed)</summary>
+
+```text
+<latest transcript>
+```
+
+</details>
+
+<!-- nemoclaw-verify-stale v1 2026-05-12 -->
+````
+
+The trailing HTML comment is the **idempotency marker** Step 3 looks for. Always include today's date in `YYYY-MM-DD` format so the candidate filter can apply the 7-day TTL.
 
 **Post the comment and apply the label:**
 
@@ -389,6 +489,8 @@ The next weekly run retries naturally.
 
 This degradation is expected — old releases rot. We still want to extract whatever signal we can from the latest run plus PR/commit evidence, just at a more conservative confidence ceiling.
 
+**Keep-box-on-inconclusive.** When `verify-inconclusive` lands (Step 8c gave up, or Step 9 score < 60), **delay the cleanup `brev delete` by 30 minutes** if the box was provisioned by this run. Print the `brev shell "$INSTANCE_NAME"` command in the run output so a maintainer can hop in and triage. Reused boxes stay regardless. Ship-failed verifications are the exact case where having an inspectable artifact pays for itself.
+
 ---
 
 ## Step 12: Log to Activity
@@ -399,12 +501,15 @@ After each issue (verified, inconclusive, or infra-failed), append to `~/develop
 ### NVIDIA/NemoClaw#<number> — <title>
 **Date:** YYYY-MM-DD
 **Reported on:** v0.0.31
-**Verified on:** v0.0.35
+**Verified on:** v0.0.34
 **Environment:** CPU | GPU (<instance type>)
 **Box:** reused <name> | provisioned <name>
-**Reproducer:** verbatim | synthesized | none
-**Confidence:** 88 / 100
-**Label applied:** fixed-on-latest | verify-inconclusive | none (infra)
+**Baseline install:** succeeded | failed (degraded mode)
+**Baseline match:** validated (verbatim) | validated (synth) | failed (verify-inconclusive) | skipped
+**Latest install:** succeeded | failed (infra error)
+**Latest result:** not-reproduced (clean) | still-reproduces | partial / flake | n/a (skipped 8d)
+**Confidence:** 88 / 100 | n/a (still-reproduces)
+**Label applied:** fixed-on-latest | verify-inconclusive | none (still-reproduces) | none (infra)
 **Brev wall time (approx):** N min
 
 ---
