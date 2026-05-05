@@ -83,15 +83,43 @@ For NemoClaw's current `0.0.x` line, "rightmost-incrementing component" is the p
 
 ## Step 4: Parse Reported Version
 
+The regex is intentionally **release-line agnostic**. Today NemoClaw ships `v0.0.x`, but the same parser must keep working when it moves to `v0.1.x`, `v1.x.x`, or anything else. Don't hardcode the major/minor digits.
+
 Sources, in order of trust:
 
-1. A label that exactly matches a released version pattern (e.g. `v0.0.32`). Reject labels that match a version newer than `$LATEST` — those are roadmap/release-target labels, not "reported on".
-2. The body, with a tight regex: first try `\bv0\.0\.(\d+)\b` (require the `v` prefix and word boundaries). Only if nothing matches, fall back to `\b0\.0\.(\d+)\b` **but only on lines containing `nemoclaw` or `version` (case-insensitive)**. The loose form alone is unsafe — without context anchoring, it matches `0.0.0.0:11434` (Ollama bind address), `127.0.0.1`, IPs in log lines, etc., and produces phantom "v0.0.0" or "v0.0.1" candidates.
-3. Comments by the original reporter (same regex as the body).
+1. A label that exactly matches a real released version (e.g. `v0.0.32`). Reject labels that match a version newer than `$LATEST` — those are roadmap/release-target labels, not "reported on".
+2. The body. Two-pass regex:
+   - **Primary:** `\bv\d+\.\d+\.\d+\b` — require the `v` prefix and word boundaries. Matches any `vMAJOR.MINOR.PATCH`.
+   - **Fallback:** `\b\d+\.\d+\.\d+\b` **only on lines containing `nemoclaw` or `version` (case-insensitive)**. Without that line filter, the fallback alone matches IPs and bind addresses (`0.0.0.0:11434`, `127.0.0.1`) and other unrelated semver-ish strings, producing phantom candidates.
+3. Comments by the original reporter (same two-pass regex as the body).
 
-After parsing, **clamp**: if the parsed version is greater than `$LATEST`, treat it as unparseable. This catches roadmap labels that slipped past step 1.
+After parsing, run two validation passes:
 
-If no version can be parsed, drop the issue from the candidate set — we cannot establish "previous version".
+- **Clamp future:** if the parsed version is greater than `$LATEST`, treat it as unparseable. This catches roadmap labels that slipped past source 1.
+- **Validate against tags:** confirm the parsed version exists as an actual git tag. This catches reporter typos such as `NemoClaw: v0.1.0` (no such release in the current `v0.0.x` line) and calver mistakes like `NemoClaw: 2026.3.11` (date string, not a tag).
+
+```bash
+git ls-remote --tags --refs git@github.com:NVIDIA/NemoClaw.git \
+  | awk -F/ '{print $NF}' \
+  | grep -Fx "v$PARSED_VERSION" >/dev/null \
+  || PARSED_VERSION=""   # treat as unparseable
+```
+
+If no version survives both passes, drop the issue from the candidate set — we cannot establish "previous version".
+
+### Implementer note: regex-pipeline pitfall
+
+In the v1 dry-run, a naive jq pipeline that chained the primary and fallback regexes via `[scan(primary)] | first | .[0] | tonumber // [scan(fallback)] | first | .[0] | tonumber` silently dropped 9 real candidates (e.g. #2861 with `NemoClaw 0.0.32` in body, #2604 with `NemoClaw: 0.0.28`). When the primary regex matched empty, `null | first` errored, and `//` did not propagate cleanly to the fallback.
+
+Whichever language you implement in, structure the parser so the empty-match path returns null cleanly (not an error). Bind each pass to a named variable and `coalesce` them at the end:
+
+```text
+primary  := first match of \bv\d+\.\d+\.\d+\b in body  (or null)
+fallback := first match of \b\d+\.\d+\.\d+\b on nemoclaw/version lines  (or null)
+result   := primary ?? fallback
+```
+
+Always test against an issue body with **no** version mention before trusting the result — that's the path that exercises the empty-match handling.
 
 ---
 
