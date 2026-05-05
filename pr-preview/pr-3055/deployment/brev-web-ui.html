@@ -9,7 +9,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <title>Get Started with NemoClaw on Brev (Web UI) &#8212; NVIDIA NemoClaw Developer Guide</title>
+    <title>Launch NemoClaw with the Brev Web UI &#8212; NVIDIA NemoClaw Developer Guide</title>
   
   
   
@@ -52,9 +52,7 @@
     <script src="../_static/copybutton.js?v=6dbb43f8"></script>
     <script src="../_static/search-assets.bundle.js?v=099b119e"></script>
     <script src="../_static/design-tabs.js?v=f930bc37"></script>
-    <script>window.MathJax = {"options": {"processHtmlClass": "tex2jax_process|mathjax_process|math|output_area"}}</script>
-    <script defer="defer" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
-    <script>DOCUMENTATION_OPTIONS.pagename = 'get-started/brev-web-ui-quickstart';</script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'deployment/brev-web-ui';</script>
     <script>
         DOCUMENTATION_OPTIONS.theme_version = '0.16.1';
         DOCUMENTATION_OPTIONS.theme_switcher_json_url = '../versions1.json';
@@ -63,12 +61,12 @@
             false;
         </script>
 
-    <link rel="canonical" href="https://docs.nvidia.com/nemoclaw/latest/get-started/brev-web-ui-quickstart.html" />
+    <link rel="canonical" href="https://docs.nvidia.com/nemoclaw/latest/deployment/brev-web-ui.html" />
     <link rel="icon" href="../_static/favicon.png"/>
 
     <link rel="search" title="Search" href="../search.html" />
-    <link rel="next" title="Install OpenClaw Plugins" href="../deployment/install-openclaw-plugins.html" />
-    <link rel="prev" title="Deploy NemoClaw to a Remote GPU Instance" href="../deployment/deploy-to-remote-gpu.html" />
+    <link rel="next" title="Install OpenClaw Plugins" href="install-openclaw-plugins.html" />
+    <link rel="prev" title="Deploy NemoClaw to a Remote GPU Instance" href="deploy-to-remote-gpu.html" />
 
 
 
@@ -392,12 +390,12 @@
 </ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Get Started</span></p>
 <ul class="nav bd-sidenav">
-<li class="toctree-l1 has-children"><a class="reference internal" href="prerequisites.html">Prerequisites</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
-<li class="toctree-l2"><a class="reference internal" href="windows-preparation.html">Prepare Windows for NemoClaw</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../get-started/prerequisites.html">Prerequisites</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../get-started/windows-preparation.html">Prepare Windows for NemoClaw</a></li>
 </ul>
 </details></li>
-<li class="toctree-l1"><a class="reference internal" href="quickstart.html">Quickstart with OpenClaw</a></li>
-<li class="toctree-l1"><a class="reference internal" href="quickstart-hermes.html">Quickstart with Hermes</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../get-started/quickstart.html">Quickstart with OpenClaw</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../get-started/quickstart-hermes.html">Quickstart with Hermes</a></li>
 </ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Inference</span></p>
 <ul class="nav bd-sidenav">
@@ -420,10 +418,10 @@
 </ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Deployment</span></p>
 <ul class="current nav bd-sidenav">
-<li class="toctree-l1"><a class="reference internal" href="../deployment/deploy-to-remote-gpu.html">Deploy to a Remote GPU Instance</a></li>
+<li class="toctree-l1"><a class="reference internal" href="deploy-to-remote-gpu.html">Deploy to a Remote GPU Instance</a></li>
 <li class="toctree-l1 current active"><a class="current reference internal" href="#">Brev Web UI</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../deployment/install-openclaw-plugins.html">Install OpenClaw Plugins</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../deployment/sandbox-hardening.html">Sandbox Hardening</a></li>
+<li class="toctree-l1"><a class="reference internal" href="install-openclaw-plugins.html">Install OpenClaw Plugins</a></li>
+<li class="toctree-l1"><a class="reference internal" href="sandbox-hardening.html">Sandbox Hardening</a></li>
 </ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Monitoring</span></p>
 <ul class="nav bd-sidenav">
@@ -483,7 +481,7 @@
         <i class="fa-solid fa-home"></i>
       </a>
     </li>
-    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">Get Started with NemoClaw on Brev (Web UI)</span></li>
+    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">Launch NemoClaw with the Brev Web UI</span></li>
   </ul>
 </nav>
 </div>
@@ -504,82 +502,88 @@
   SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
   SPDX-License-Identifier: Apache-2.0
 -->
-<section class="tex2jax_ignore mathjax_ignore" id="get-started-with-nemoclaw-on-brev-web-ui">
-<h1>Get Started with NemoClaw on Brev (Web UI)<a class="headerlink" href="#get-started-with-nemoclaw-on-brev-web-ui" title="Link to this heading">#</a></h1>
-<p>Run a sandboxed NemoClaw agent in minutes using the Brev web interface.
-No CLI installation, no local setup, and no GPU required on your machine.</p>
+<section class="tex2jax_ignore mathjax_ignore" id="launch-nemoclaw-with-the-brev-web-ui">
+<h1>Launch NemoClaw with the Brev Web UI<a class="headerlink" href="#launch-nemoclaw-with-the-brev-web-ui" title="Link to this heading">#</a></h1>
+<p>Use the Brev web UI to launch a hosted NemoClaw sandbox from your browser.
+This flow provisions a remote VM, configures inference, starts OpenClaw inside an OpenShell sandbox, and opens the OpenClaw dashboard.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-<p>This guide covers the Brev web UI flow, which is the fastest way to try NemoClaw.
-If you prefer the CLI-based remote deployment, see <a class="reference internal" href="../deployment/deploy-to-remote-gpu.html"><span class="std std-doc">Deploy to a Remote GPU Instance</span></a>.</p>
+<p>Use this guide when you want to try NemoClaw without installing the CLI or using a local GPU.
+If you want to manage the remote host from a terminal, see <a class="reference internal" href="deploy-to-remote-gpu.html"><span class="std std-doc">Deploy to a Remote GPU Instance</span></a>.</p>
 </div>
+<section id="what-this-flow-creates">
+<h2>What This Flow Creates<a class="headerlink" href="#what-this-flow-creates" title="Link to this heading">#</a></h2>
+<p>The Brev web flow creates the following resources:</p>
+<ul class="simple">
+<li><p>A Brev-managed Linux VM.</p></li>
+<li><p>Docker and the OpenShell runtime on that VM.</p></li>
+<li><p>A NemoClaw sandbox running OpenClaw.</p></li>
+<li><p>Inference routing for the provider you select during setup.</p></li>
+<li><p>A browser-accessible OpenClaw dashboard.</p></li>
+</ul>
+</section>
 <section id="prerequisites">
 <h2>Prerequisites<a class="headerlink" href="#prerequisites" title="Link to this heading">#</a></h2>
 <ul class="simple">
-<li><p>An NVIDIA Brev account at <a class="reference external" href="https://brev.nvidia.com" rel="noreferer noopener" target="_blank">brev.nvidia.com</a></p></li>
-<li><p>An NVIDIA API key from <a class="reference external" href="https://build.nvidia.com" rel="noreferer noopener" target="_blank">build.nvidia.com</a></p></li>
+<li><p>An NVIDIA Brev account at <a class="reference external" href="https://brev.nvidia.com" rel="noreferer noopener" target="_blank">brev.nvidia.com</a>.</p></li>
+<li><p>An NVIDIA API key from <a class="reference external" href="https://build.nvidia.com/settings/api-keys" rel="noreferer noopener" target="_blank">build.nvidia.com</a> if you use the default NVIDIA Cloud provider.</p></li>
 </ul>
-<p>No local software installation is needed.</p>
+<p>You do not need to install local software for this flow.</p>
 </section>
 <section id="get-your-nvidia-api-key">
 <h2>Get Your NVIDIA API Key<a class="headerlink" href="#get-your-nvidia-api-key" title="Link to this heading">#</a></h2>
+<p>If you already have an NVIDIA API key skip this section. Otherwise, follow these steps to generate a new key:</p>
 <ol class="arabic simple">
 <li><p>Go to <a class="reference external" href="https://build.nvidia.com" rel="noreferer noopener" target="_blank">build.nvidia.com</a>.</p></li>
-<li><p>Sign in or create a free account.</p></li>
+<li><p>Sign in or create an account.</p></li>
 <li><p>Click your profile icon in the top right.</p></li>
 <li><p>Select <strong>API Keys</strong>.</p></li>
 <li><p>Click <strong>Generate API Key</strong>.</p></li>
-<li><p>Copy the key – it starts with <code class="docutils literal notranslate"><span class="pre">nvapi-</span></code>.</p></li>
+<li><p>Copy the key. It starts with <code class="docutils literal notranslate"><span class="pre">nvapi-</span></code>.</p></li>
 </ol>
 <p>Keep this key ready for the next step.</p>
 </section>
-<section id="deploy-nemoclaw-on-brev">
-<h2>Deploy NemoClaw on Brev<a class="headerlink" href="#deploy-nemoclaw-on-brev" title="Link to this heading">#</a></h2>
+<section id="launch-nemoclaw-from-brev">
+<h2>Launch NemoClaw from Brev<a class="headerlink" href="#launch-nemoclaw-from-brev" title="Link to this heading">#</a></h2>
+<p>Use the <a class="reference external" href="https://brev.nvidia.com/launchable/deploy/now?launchableID=env-3Azt0aYgVNFEuz7opyx3gscmowS" rel="noreferer noopener" target="_blank">NemoClaw Brev launchable</a> to launch a NemoClaw sandbox from your browser.</p>
 <ol class="arabic simple">
-<li><p>Go to <a class="reference external" href="https://brev.nvidia.com" rel="noreferer noopener" target="_blank">brev.nvidia.com</a> and sign in.</p></li>
-<li><p>On the <strong>GPUs</strong> page, look for the banner: <strong>“Your agents are waiting. Meet NemoClaw”</strong>.</p></li>
-<li><p>Click <strong>Try NemoClaw</strong>.</p></li>
-<li><p>The NemoClaw setup page shows the following:</p>
-<ul class="simple">
-<li><p>Instance type: CPU (4 CPUs, 16 GiB RAM)</p></li>
-<li><p>Cloud Provider: GCP</p></li>
-<li><p>Cost: $0.18/hr</p></li>
-</ul>
-</li>
+<li><p>Open the <a class="reference external" href="https://brev.nvidia.com/launchable/deploy/now?launchableID=env-3Azt0aYgVNFEuz7opyx3gscmowS" rel="noreferer noopener" target="_blank">NemoClaw Brev launchable</a> and sign in if prompted.</p></li>
+<li><p>Review the instance type, cloud provider, and estimated hourly cost on the NemoClaw setup page.</p></li>
 <li><p>Click <strong>Deploy NemoClaw</strong>.</p></li>
 </ol>
+<p>The right-side deployment panel shows progress while Brev deploys the CPU instance and prepares VM mode.
+Keep this page open until the deployment completes.
+When the panel shows the <strong>NemoClaw</strong> button, click it to open the agent setup page.</p>
 </section>
 <section id="configure-your-agent">
 <h2>Configure Your Agent<a class="headerlink" href="#configure-your-agent" title="Link to this heading">#</a></h2>
-<p>NemoClaw walks you through three configuration steps.</p>
-<section id="connect-to-ai">
-<h3>Connect to AI<a class="headerlink" href="#connect-to-ai" title="Link to this heading">#</a></h3>
-<ul class="simple">
-<li><p><strong>NVIDIA Cloud</strong> is selected by default (recommended).</p></li>
-<li><p>This uses Nemotron-3-Super-120B hosted by NVIDIA.</p></li>
-<li><p>Paste your <code class="docutils literal notranslate"><span class="pre">nvapi-</span></code> API key in the field.</p></li>
+<p>The setup page walks you through three stages: <strong>Configure</strong>, <strong>Setup</strong>, and <strong>Launch</strong>.</p>
+<section id="configure">
+<h3>Configure<a class="headerlink" href="#configure" title="Link to this heading">#</a></h3>
+<p>The Configure stage opens the <strong>Connect to AI</strong> screen.
+Use the NVIDIA Cloud provider shown on this screen.</p>
+<ol class="arabic simple">
+<li><p>Leave <strong>NVIDIA Cloud</strong> selected.</p></li>
+<li><p>Paste your <code class="docutils literal notranslate"><span class="pre">nvapi-</span></code> API key.</p></li>
 <li><p>Click <strong>Create Agent</strong>.</p></li>
-</ul>
+</ol>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-<p>Other providers are available: OpenAI, Anthropic, Google Gemini, and Local Ollama.
-Click <strong>Show Other Providers</strong> to see all options.</p>
+<p>The <strong>Show Other Providers</strong> dropdown appears below the <strong>NVIDIA Cloud</strong> card and can be easy to miss.
+Click it to expand the provider list.
+The expanded list includes <strong>OpenAI</strong>, <strong>Anthropic</strong>, and <strong>Google Gemini</strong>.
+For these providers, get the API key from the provider’s own console before you create the agent.</p>
 </div>
 </section>
 <section id="setup">
 <h3>Setup<a class="headerlink" href="#setup" title="Link to this heading">#</a></h3>
-<p>NemoClaw automatically performs the following:</p>
-<ul class="simple">
-<li><p>Provisions a secure Linux VM on GCP.</p></li>
-<li><p>Installs Docker and the OpenShell runtime.</p></li>
-<li><p>Sets up the sandboxed agent environment.</p></li>
-<li><p>Configures inference routing to NVIDIA Cloud.</p></li>
-</ul>
-<p>This takes approximately 2-3 minutes.</p>
+<p>NemoClaw configures the remote host and sandbox automatically.
+This stage usually takes about 5 minutes.</p>
+<p>During setup, NemoClaw installs the runtime, prepares the sandboxed agent environment, and configures inference routing for the provider you selected.</p>
 </section>
 <section id="launch">
 <h3>Launch<a class="headerlink" href="#launch" title="Link to this heading">#</a></h3>
-<p>When setup completes, the following confirmation appears:</p>
+<p>When setup finishes, Brev shows the following confirmation:</p>
 <div class="highlight-text notranslate"><div class="highlight"><pre><span></span>AGENT CREATED SUCCESSFULLY
 Your agent is running in a secure sandbox and ready to use.
 
@@ -588,64 +592,64 @@ Model: nemotron-3-super-120b
 Provider: NVIDIA Cloud
 </pre></div>
 </div>
-<p>Click <strong>Chat With Agent</strong> to open the OpenClaw gateway dashboard.</p>
+<p>Click <strong>Chat With Agent</strong> to open the OpenClaw dashboard.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>The dashboard might initially show a <strong>Pairing required</strong> warning.
+This means the gateway is still completing pairing in the background.
+Wait for about a few minutes for pairing to finish automatically. Refresh the dashboard to see if the warning is resolved and the connection is established.
+If pairing does not finish, go to the <strong>Overview</strong> page in the OpenClaw UI, find the <strong>Gateway Access</strong> panel, and click <strong>Connect</strong>.</p>
+</div>
 </section>
 </section>
-<section id="have-your-first-conversation">
-<h2>Have Your First Conversation<a class="headerlink" href="#have-your-first-conversation" title="Link to this heading">#</a></h2>
-<p>In the Chat box, type the following:</p>
+<section id="start-a-chat">
+<h2>Start a Chat<a class="headerlink" href="#start-a-chat" title="Link to this heading">#</a></h2>
+<p>Use the dashboard chat box to send your first message:</p>
 <div class="highlight-text notranslate"><div class="highlight"><pre><span></span>Hello! What can you do for me? What skills do you have available?
 </pre></div>
 </div>
 <p>The agent reads its workspace files and introduces itself.
-By default it has three skills available:</p>
+The starter workspace includes example skills such as:</p>
 <ul class="simple">
-<li><p><strong>Weather</strong> – Get current weather and forecasts.</p></li>
-<li><p><strong>Healthcheck</strong> – Security audit and hardening.</p></li>
-<li><p><strong>Skill-Creator</strong> – Create new custom skills.</p></li>
+<li><p><strong>Weather</strong> gets current weather and forecasts.</p></li>
+<li><p><strong>Healthcheck</strong> runs security audit and hardening checks.</p></li>
+<li><p><strong>Skill-Creator</strong> creates new custom skills.</p></li>
 </ul>
 </section>
-<section id="tell-the-agent-who-you-are">
-<h2>Tell the Agent Who You Are<a class="headerlink" href="#tell-the-agent-who-you-are" title="Link to this heading">#</a></h2>
-<p>The agent starts with an empty <code class="docutils literal notranslate"><span class="pre">USER.md</span></code> file – it knows nothing about you.
-Update it so the agent personalizes its responses.</p>
+<section id="personalize-agent-memory">
+<h2>Personalize Agent Memory<a class="headerlink" href="#personalize-agent-memory" title="Link to this heading">#</a></h2>
+<p>The agent starts with an empty <code class="docutils literal notranslate"><span class="pre">USER.md</span></code> file.
+Ask the agent to add details that help it personalize future responses.</p>
 <p>In the chat, type the following:</p>
 <div class="highlight-text notranslate"><div class="highlight"><pre><span></span>Please update my USER.md file with the following:
 Name: [your name]
-Timezone: [your timezone, e.g. EST]
+Timezone: [your timezone, such as &quot;America/New_York&quot;]
 Notes: [what you are working on]
 </pre></div>
 </div>
-<p>The agent writes this to your workspace so it remembers you across sessions.</p>
+<p>The agent writes this information to its workspace so it can use it across sessions on the same sandbox.</p>
 </section>
 <section id="stop-your-instance-when-done">
 <h2>Stop Your Instance When Done<a class="headerlink" href="#stop-your-instance-when-done" title="Link to this heading">#</a></h2>
-<p>To avoid unnecessary charges, stop your instance when you are finished experimenting.</p>
+<p>Brev continues billing while the instance runs.
+Stop the instance when you finish experimenting.</p>
 <ol class="arabic simple">
 <li><p>Go back to <a class="reference external" href="https://brev.nvidia.com" rel="noreferer noopener" target="_blank">brev.nvidia.com</a>.</p></li>
 <li><p>Click <strong>GPUs</strong> in the nav bar.</p></li>
 <li><p>Find your NemoClaw instance.</p></li>
 <li><p>Click <strong>Stop</strong>.</p></li>
 </ol>
-<p>At <span class="math notranslate nohighlight">\(0.18/hr, a 3-hour session costs approximately \)</span>0.54.</p>
-</section>
-<section id="what-to-try-next">
-<h2>What to Try Next<a class="headerlink" href="#what-to-try-next" title="Link to this heading">#</a></h2>
-<p>Now that your agent is running, explore these capabilities.</p>
-<p><strong>Connect a messaging channel.</strong>
-Go to <strong>Channels</strong> in the dashboard to connect your agent to Telegram, Slack, or Discord so it can message you proactively.</p>
-<p><strong>Use a different AI model.</strong>
-The agent supports switching inference providers at runtime.
-See <a class="reference internal" href="../inference/switch-inference-providers.html"><span class="std std-doc">Switch Inference Providers</span></a> for instructions.</p>
+<p>Check the Brev UI for the current hourly price before leaving the instance running.</p>
 </section>
 <section id="next-steps">
 <h2>Next Steps<a class="headerlink" href="#next-steps" title="Link to this heading">#</a></h2>
+<p>After your agent is running, explore these related tasks:</p>
 <ul class="simple">
-<li><p><a class="reference internal" href="prerequisites.html"><span class="std std-doc">Prerequisites</span></a> – System requirements before getting started.</p></li>
-<li><p><a class="reference internal" href="quickstart.html"><span class="std std-doc">Quickstart</span></a> – CLI-based local setup.</p></li>
-<li><p><a class="reference internal" href="../deployment/deploy-to-remote-gpu.html"><span class="std std-doc">Deploy to a Remote GPU Instance</span></a> – CLI-based Brev deployment.</p></li>
-<li><p><a class="reference internal" href="../reference/troubleshooting.html"><span class="std std-doc">Troubleshooting</span></a> – Common issues and fixes.</p></li>
-<li><p><a class="reference internal" href="../monitoring/monitor-sandbox-activity.html"><span class="std std-doc">Monitor Sandbox Activity</span></a></p></li>
+<li><p><a class="reference internal" href="../manage-sandboxes/messaging-channels.html"><span class="std std-doc">Set Up Messaging Channels</span></a> to learn how to connect Telegram, Slack, or Discord.</p></li>
+<li><p><a class="reference internal" href="../inference/switch-inference-providers.html"><span class="std std-doc">Switch Inference Providers</span></a> to learn how to change the model provider after setup.</p></li>
+<li><p><a class="reference internal" href="../monitoring/monitor-sandbox-activity.html"><span class="std std-doc">Monitor Sandbox Activity</span></a> to learn how to inspect sandbox health and logs.</p></li>
+<li><p><a class="reference internal" href="deploy-to-remote-gpu.html"><span class="std std-doc">Deploy to a Remote GPU Instance</span></a> to learn how to deploy NemoClaw to a remote GPU instance using the CLI.</p></li>
+<li><p><a class="reference internal" href="../reference/troubleshooting.html"><span class="std std-doc">Troubleshooting</span></a> to learn how to fix common setup and runtime issues.</p></li>
 </ul>
 </section>
 </section>
@@ -661,7 +665,7 @@ See <a class="reference internal" href="../inference/switch-inference-providers.
                   
 <div class="prev-next-area">
     <a class="left-prev"
-       href="../deployment/deploy-to-remote-gpu.html"
+       href="deploy-to-remote-gpu.html"
        title="previous page">
       <i class="fa-solid fa-angle-left"></i>
       <div class="prev-next-info">
@@ -670,7 +674,7 @@ See <a class="reference internal" href="../inference/switch-inference-providers.
       </div>
     </a>
     <a class="right-next"
-       href="../deployment/install-openclaw-plugins.html"
+       href="install-openclaw-plugins.html"
        title="next page">
       <div class="prev-next-info">
         <p class="prev-next-subtitle">next</p>
@@ -699,19 +703,19 @@ See <a class="reference internal" href="../inference/switch-inference-providers.
   </div>
   <nav class="bd-toc-nav page-toc" aria-labelledby="pst-page-navigation-heading-2">
     <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#what-this-flow-creates">What This Flow Creates</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#prerequisites">Prerequisites</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#get-your-nvidia-api-key">Get Your NVIDIA API Key</a></li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#deploy-nemoclaw-on-brev">Deploy NemoClaw on Brev</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#launch-nemoclaw-from-brev">Launch NemoClaw from Brev</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#configure-your-agent">Configure Your Agent</a><ul class="nav section-nav flex-column">
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#connect-to-ai">Connect to AI</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#configure">Configure</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#setup">Setup</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#launch">Launch</a></li>
 </ul>
 </li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#have-your-first-conversation">Have Your First Conversation</a></li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#tell-the-agent-who-you-are">Tell the Agent Who You Are</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#start-a-chat">Start a Chat</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#personalize-agent-memory">Personalize Agent Memory</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#stop-your-instance-when-done">Stop Your Instance When Done</a></li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#what-to-try-next">What to Try Next</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#next-steps">Next Steps</a></li>
 </ul>
   </nav></div>
