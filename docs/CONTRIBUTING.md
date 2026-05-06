@@ -49,13 +49,13 @@ The current generated skills and their source pages are:
 | `nemoclaw-user-reference` | `docs/reference/architecture.md`, `docs/reference/commands.md`, `docs/reference/cli-selection-guide.md`, `docs/reference/network-policies.md`, `docs/reference/troubleshooting.md` |
 | `nemoclaw-user-configure-security` | `docs/security/best-practices.md`, `docs/security/credential-storage.md`, `docs/security/openclaw-controls.md` |
 
-### Regenerating skills after doc changes
+### Handling skills after doc changes
 
 Pull requests that change docs should normally include only the source pages under `docs/`, not the generated `.agents/skills/nemoclaw-user-*` output.
 Local hooks and PR CI run `scripts/docs-to-skills.py --dry-run` to confirm the docs still convert cleanly without writing files.
 
-After a docs change merges to `main`, the `Docs to Skills` workflow regenerates `.agents/skills/nemoclaw-user-*` from `docs/` and publishes the generated update.
-The workflow pushes the generated commit directly when branch protection allows it; otherwise it opens or updates a small sync PR for maintainers to merge.
+The NemoClaw maintainers run the `nemoclaw-contributor-update-docs` skill and refresh `.agents/skills/nemoclaw-user-*` as part of the release documentation update.
+Individual contributors do not need to include generated user-skill changes in ordinary docs PRs.
 
 To regenerate skills manually (for example, when reviewing the sync workflow output), run from the repo root:
 
