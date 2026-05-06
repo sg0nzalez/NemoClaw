@@ -158,13 +158,70 @@ The "give up immediately" path is gone. Synthesis happens at validation time so 
 
 ---
 
+## Step 6.5: Verify Preconditions
+
+Confirm `brev` is authenticated and the install URL resolves before paying any cost. Credentials live in `~/.brev/credentials.json` and are reused across shells under the same OS user, so once authenticated the auth check is a no-op until the token expires.
+
+```bash
+# Brev auth — short-circuit only after the auth check, not before.
+brev ls --json >/dev/null 2>&1 || {
+  echo "Brev not authenticated. Choose one:"
+  echo "  1) brev login --skip-browser     # prints a URL, works from any shell"
+  echo "  2) brev login                    # opens browser, run in a separate terminal if your shell lacks a TTY"
+  echo "  3) brev login --token \"\$BREV_API_TOKEN\"  # non-interactive, same env var used by test/e2e/brev-e2e.test.ts"
+  exit 1
+}
+
+# Install URL reachable — fails fast instead of mid-Brev-run if the host is down or the URL changed.
+INSTALL_URL=${NEMOCLAW_INSTALL_URL:-https://nemoclaw.nvidia.com/install.sh}
+curl -fsI "$INSTALL_URL" >/dev/null 2>&1 || {
+  echo "ERROR: install URL not reachable: $INSTALL_URL"
+  echo "Set NEMOCLAW_INSTALL_URL or check https://nemoclaw.nvidia.com is up."
+  exit 1
+}
+```
+
+If invoked from an environment without a TTY (some agent harnesses), prefer `brev login --skip-browser` or `--token` over the default browser flow.
+
+---
+
+## Step 6.7: Try Local Reproduction First
+
+For pure-CLI reproducers (no sandbox state, no GPU, no integration tokens), try locally before paying for a Brev box. The evidence is identical — `nemoclaw <args>` on a maintainer laptop produces the same exit code and stdout as on a fresh Brev VM, modulo platform differences — and the run is free.
+
+**Predicate** — local-first applies if **all** of these hold:
+
+- Reproducer is a sequence of `nemoclaw <args>` invocations only. No `docker`, `kubectl`, `curl`, `npm`, networking setup, or filesystem fixtures.
+- Issue has no `Sandbox`-only or `Docker` label and no GPU signal from Step 5.
+- `which nemoclaw` resolves on the maintainer's machine and `nemoclaw --version` reports a build at or past `$LATEST` (a build between `$LATEST` and `$LATEST+main` is fine — these only differ by unmerged WIP).
+- Maintainer is on Linux or macOS. Windows local repros are out of scope (per Step 3 platform skip rules).
+
+**If the predicate fires:**
+
+```bash
+LOCAL_VERSION=$(nemoclaw --version 2>&1)
+LOCAL_TRANSCRIPT=$(mktemp)
+{ time bash reproducer.sh; } >"$LOCAL_TRANSCRIPT" 2>&1
+LOCAL_EXIT=$?
+echo "Local: $LOCAL_VERSION, exit $LOCAL_EXIT"
+```
+
+Compare local result to the issue's "Actual Result" section using the same match rubric Step 8b applies on baseline:
+
+- **Local matches the issue symptom exactly** (same exit code + same diagnostic output) AND the symptom is the post-fix expected output → skip Brev. Use the local transcript as the verified-on-latest evidence. Step 10's comment must say `Environment: local install (<version>) — Brev provisioning skipped, outcome deterministic from CLI surface alone`.
+- **Local result differs from the reported "Actual Result"** → continue to Step 7 and run on Brev. The local environment may be a confound (different OS, dirty config, partial build); remote confirms.
+- **Local repro errors out for environmental reasons** (`nemoclaw: command not found`, npm link broken) → continue to Step 7. Treat as inconclusive locally, not a verification failure.
+
+**If the predicate does not fire:** proceed to Step 7 normally. Most sandbox-touching bugs need Brev.
+
+---
+
 ## Step 7: Reuse or Provision a Brev Box
 
 The skill prefers reuse over provisioning. A pool of `verify-stale-*` boxes (CPU and GPU) can be kept warm; reuse the matching one if available, otherwise provision.
 
 ```bash
-# Ensure an active Brev session. brev ls fails if not authenticated.
-brev ls --json >/dev/null 2>&1 || brev login
+# Auth + install URL already verified by Step 6.5 — no need to re-check or auto-login here.
 
 # Determine class from Step 5: "cpu" or "gpu"
 INSTANCE_CLASS="cpu"   # or "gpu"
@@ -201,9 +258,12 @@ else
     # (>=20GB VRAM, >=500GB disk, compute >=8.0). Override with --type if needed.
     brev create "$INSTANCE_NAME"
   else
-    # CPU case: pass an explicit --type from your team's allowed CPU SKUs
-    # (brev create defaults to GPU). Pin this in your team config.
-    brev create "$INSTANCE_NAME" --type "<your-team's-CPU-SKU>"
+    # CPU case: pick the cheapest stoppable Linux SKU at runtime so the skill
+    # doesn't rot when SKUs change. Override by exporting VERIFY_STALE_CPU_TYPE.
+    CPU_TYPE=${VERIFY_STALE_CPU_TYPE:-$(brev search cpu --sort price --json \
+      | jq -r '[.[] | select(.stoppable == true)] | .[0].type')}
+    [ -n "$CPU_TYPE" ] || { echo "ERROR: no stoppable CPU SKU available"; exit 1; }
+    brev create "$INSTANCE_NAME" --type "$CPU_TYPE"
   fi
 
   PROVISIONED_NEW=1
@@ -211,7 +271,9 @@ fi
 
 # Cleanup runs on success, error, and SIGINT.
 # Delete only what we provisioned. Reused boxes stay warm for next time.
-trap '[ "$PROVISIONED_NEW" = "1" ] && brev delete "$INSTANCE_NAME" --yes || true' EXIT
+# `brev delete` is non-interactive by default — there is no --yes flag, and passing one errors.
+echo ">>> Brev instance: $INSTANCE_NAME (provisioned_new=$PROVISIONED_NEW; manual cleanup: brev delete $INSTANCE_NAME)"
+trap '[ "$PROVISIONED_NEW" = "1" ] && brev delete "$INSTANCE_NAME" >/dev/null 2>&1 || true' EXIT
 ```
 
 Wallclock cap per verification: **25 minutes** to accommodate two installs (reported version baseline + latest). If a provisioned box isn't ready in time, abort and treat as an infra failure (Step 11).
@@ -260,7 +322,7 @@ The installer accepts the target ref via the `NEMOCLAW_INSTALL_TAG` env var (ver
 ```bash
 brev exec "$INSTANCE_NAME" "$RESET"
 
-brev exec "$INSTANCE_NAME" "NEMOCLAW_INSTALL_TAG=$REPORTED_VERSION bash -c 'curl -fsSL https://nemoclaw.nvidia.com/install.sh | bash'" \
+brev exec "$INSTANCE_NAME" "NEMOCLAW_INSTALL_TAG=$REPORTED_VERSION bash -c 'curl -fsSL $INSTALL_URL | bash'" \
   || BASELINE_INSTALL_FAILED=1
 brev exec "$INSTANCE_NAME" "nemoclaw --version"
 ```
@@ -315,7 +377,7 @@ brev exec "$INSTANCE_NAME" "bash ~/reproducer.sh" 2>&1 | tee ./baseline-transcri
 
 ```bash
 brev exec "$INSTANCE_NAME" "$RESET"
-brev exec "$INSTANCE_NAME" "curl -fsSL https://nemoclaw.nvidia.com/install.sh | bash"
+brev exec "$INSTANCE_NAME" "curl -fsSL $INSTALL_URL | bash"
 brev exec "$INSTANCE_NAME" "nemoclaw --version"
 
 brev copy ./reproducer.sh "$INSTANCE_NAME":~/reproducer.sh
