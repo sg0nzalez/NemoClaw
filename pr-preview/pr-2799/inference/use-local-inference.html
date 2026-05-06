@@ -45,7 +45,7 @@
 
 
 
-    <script src="../_static/documentation_options.js?v=78871a90"></script>
+    <script src="../_static/documentation_options.js?v=9d992d0d"></script>
     <script src="../_static/doctools.js?v=9a2dae69"></script>
     <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
@@ -56,7 +56,7 @@
     <script>
         DOCUMENTATION_OPTIONS.theme_version = '0.16.1';
         DOCUMENTATION_OPTIONS.theme_switcher_json_url = '../versions1.json';
-        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.32';
+        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.35';
         DOCUMENTATION_OPTIONS.show_version_warning_banner =
             false;
         </script>
@@ -404,10 +404,29 @@
 <li class="toctree-l1"><a class="reference internal" href="switch-inference-providers.html">Switch Inference Providers</a></li>
 <li class="toctree-l1"><a class="reference internal" href="set-up-sub-agent.html">Set Up Task-Specific Sub-Agents</a></li>
 </ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Manage Sandboxes</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../manage-sandboxes/lifecycle.html">Manage Sandbox Lifecycle</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../manage-sandboxes/messaging-channels.html">Set Up Messaging Channels</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../manage-sandboxes/workspace-files.html">Workspace Files</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../manage-sandboxes/backup-restore.html">Backup and Restore</a></li>
+</ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Network Policy</span></p>
 <ul class="nav bd-sidenav">
 <li class="toctree-l1"><a class="reference internal" href="../network-policy/approve-network-requests.html">Approve or Deny Network Requests</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../network-policy/customize-network-policy.html">Customize the Network Policy</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../network-policy/integration-policy-examples.html">Integration Policy Examples</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Deployment</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../deployment/deploy-to-remote-gpu.html">Deploy to a Remote GPU Instance</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../deployment/brev-web-ui.html">Brev Web UI</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../deployment/install-openclaw-plugins.html">Install OpenClaw Plugins</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../deployment/sandbox-hardening.html">Sandbox Hardening</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Monitoring</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../monitoring/monitor-sandbox-activity.html">Monitor Sandbox Activity</a></li>
 </ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Security</span></p>
 <ul class="nav bd-sidenav">
@@ -415,26 +434,11 @@
 <li class="toctree-l1"><a class="reference internal" href="../security/credential-storage.html">Credential Storage</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../security/openclaw-controls.html">OpenClaw Controls</a></li>
 </ul>
-<p aria-level="2" class="caption" role="heading"><span class="caption-text">Deployment</span></p>
-<ul class="nav bd-sidenav">
-<li class="toctree-l1"><a class="reference internal" href="../deployment/deploy-to-remote-gpu.html">Deploy to a Remote GPU Instance</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../deployment/set-up-telegram-bridge.html">Set Up Telegram</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../deployment/install-openclaw-plugins.html">Install OpenClaw Plugins</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../deployment/sandbox-hardening.html">Sandbox Hardening</a></li>
-</ul>
-<p aria-level="2" class="caption" role="heading"><span class="caption-text">Workspace</span></p>
-<ul class="nav bd-sidenav">
-<li class="toctree-l1"><a class="reference internal" href="../workspace/workspace-files.html">Workspace Files</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../workspace/backup-restore.html">Backup &amp; Restore</a></li>
-</ul>
-<p aria-level="2" class="caption" role="heading"><span class="caption-text">Monitoring</span></p>
-<ul class="nav bd-sidenav">
-<li class="toctree-l1"><a class="reference internal" href="../monitoring/monitor-sandbox-activity.html">Monitor Sandbox Activity</a></li>
-</ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Reference</span></p>
 <ul class="nav bd-sidenav">
 <li class="toctree-l1"><a class="reference internal" href="../reference/architecture.html">Architecture</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../reference/commands.html">Commands</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../reference/commands.html">CLI Commands Reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../reference/cli-selection-guide.html">CLI Selection Guide</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../reference/network-policies.html">Network Policies</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../reference/troubleshooting.html">Troubleshooting</a></li>
 </ul>
@@ -496,13 +500,13 @@
                 <article class="bd-article">
                   
   <!--
-  SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+  SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
   SPDX-License-Identifier: Apache-2.0
 -->
 <section class="tex2jax_ignore mathjax_ignore" id="use-a-local-inference-server">
 <h1>Use a Local Inference Server<a class="headerlink" href="#use-a-local-inference-server" title="Link to this heading">#</a></h1>
 <p>NemoClaw can route inference to a model server running on your machine instead of a cloud API.
-This page covers Ollama, compatible-endpoint paths for other servers, and two experimental options for vLLM and NVIDIA NIM.</p>
+This page covers Ollama, compatible-endpoint paths for other servers, and experimental managed options for vLLM and NVIDIA NIM.</p>
 <p>All approaches use the same <code class="docutils literal notranslate"><span class="pre">inference.local</span></code> routing model.
 The agent inside the sandbox never connects to your model server directly.
 OpenShell intercepts inference traffic and forwards it to the local endpoint you configure.</p>
@@ -511,15 +515,16 @@ OpenShell intercepts inference traffic and forwards it to the local endpoint you
 <ul class="simple">
 <li><p>NemoClaw installed.
 Refer to the <a class="reference internal" href="../get-started/quickstart.html"><span class="std std-doc">Quickstart</span></a> if you have not installed yet.</p></li>
-<li><p>A local model server running, or Ollama installed. The NemoClaw onboard wizard can also start Ollama for you.</p></li>
+<li><p>A local model server running, or a supported Ollama, vLLM, or NIM setup that the NemoClaw onboard wizard can use, start, or install.</p></li>
 </ul>
 </section>
 <section id="ollama">
 <h2>Ollama<a class="headerlink" href="#ollama" title="Link to this heading">#</a></h2>
 <p>Ollama is the default local inference option.
 The onboard wizard detects Ollama automatically when it is installed or running on the host.</p>
-<p>If Ollama is not running, NemoClaw starts it for you.
-On macOS, the wizard also offers to install Ollama through Homebrew if it is not present.</p>
+<p>If Ollama is installed but not running, NemoClaw starts it for you.
+On macOS and Linux, the wizard can also offer to install Ollama when it is not present.
+On WSL, the wizard can use, start, restart, or install Ollama on the Windows host through PowerShell interop.</p>
 <p>Run the onboard wizard.</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>nemoclaw<span class="w"> </span>onboard
 </pre></div>
@@ -527,15 +532,29 @@ On macOS, the wizard also offers to install Ollama through Homebrew if it is not
 <p>Select <strong>Local Ollama</strong> from the provider list.
 NemoClaw lists installed models or offers starter models if none are installed.
 It pulls the selected model, loads it into memory, and validates it before continuing.
-On WSL, if Ollama is running on the Windows host, NemoClaw pulls missing models through the Ollama HTTP API instead of requiring the <code class="docutils literal notranslate"><span class="pre">ollama</span></code> CLI inside WSL.</p>
+On WSL, if you choose the Windows-host Ollama path, NemoClaw uses <code class="docutils literal notranslate"><span class="pre">host.docker.internal:11434</span></code> and pulls missing models through the Ollama HTTP API instead of requiring the <code class="docutils literal notranslate"><span class="pre">ollama</span></code> CLI inside WSL.</p>
+<section id="wsl-with-windows-host-ollama">
+<h3>WSL with Windows-Host Ollama<a class="headerlink" href="#wsl-with-windows-host-ollama" title="Link to this heading">#</a></h3>
+<p>When NemoClaw runs inside WSL, the provider menu can include Windows-host Ollama actions:</p>
+<ul class="simple">
+<li><p><strong>Use Ollama on Windows host</strong> when the Windows daemon is already reachable.</p></li>
+<li><p><strong>Restart Ollama on Windows host</strong> when the daemon is installed but only bound to Windows loopback.</p></li>
+<li><p><strong>Start Ollama on Windows host</strong> when Ollama is installed but not running.</p></li>
+<li><p><strong>Install Ollama on Windows host</strong> when Windows does not have Ollama installed.</p></li>
+</ul>
+<p>The install and restart paths set <code class="docutils literal notranslate"><span class="pre">OLLAMA_HOST=0.0.0.0:11434</span></code> on the Windows side so Docker and WSL can reach the daemon through <code class="docutils literal notranslate"><span class="pre">host.docker.internal</span></code>.
+Use one Ollama instance on port <code class="docutils literal notranslate"><span class="pre">11434</span></code> at a time.
+If both WSL and Windows-host Ollama are running, pick the intended menu entry during onboarding so NemoClaw validates and pulls models against the right daemon.</p>
+</section>
 <section id="authenticated-reverse-proxy">
 <h3>Authenticated Reverse Proxy<a class="headerlink" href="#authenticated-reverse-proxy" title="Link to this heading">#</a></h3>
-<p>NemoClaw keeps Ollama bound to <code class="docutils literal notranslate"><span class="pre">127.0.0.1:11434</span></code> and starts a token-gated
-reverse proxy on <code class="docutils literal notranslate"><span class="pre">0.0.0.0:11435</span></code>.
+<p>On non-WSL hosts, NemoClaw keeps Ollama bound to <code class="docutils literal notranslate"><span class="pre">127.0.0.1:11434</span></code> and starts a token-gated reverse proxy on <code class="docutils literal notranslate"><span class="pre">0.0.0.0:11435</span></code>.
 Containers and other hosts on the local network reach Ollama only through the
 proxy, which validates a Bearer token before forwarding requests.
 Ollama itself is never exposed without authentication.</p>
-<p>The onboard wizard manages the proxy automatically:</p>
+<p>WSL Ollama paths do not use this proxy.
+Windows-host Ollama uses the Windows daemon through <code class="docutils literal notranslate"><span class="pre">host.docker.internal</span></code>.</p>
+<p>For non-WSL Ollama setups, the onboard wizard manages the proxy automatically:</p>
 <ul class="simple">
 <li><p>Generates a random 24-byte token on first run and stores it in
 <code class="docutils literal notranslate"><span class="pre">~/.nemoclaw/ollama-proxy-token</span></code> with <code class="docutils literal notranslate"><span class="pre">0600</span></code> permissions.</p></li>
@@ -566,10 +585,13 @@ This does not delete downloaded model files.</p>
 <h3>Non-Interactive Setup<a class="headerlink" href="#non-interactive-setup" title="Link to this heading">#</a></h3>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span><span class="nv">NEMOCLAW_PROVIDER</span><span class="o">=</span>ollama<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span><span class="nv">NEMOCLAW_MODEL</span><span class="o">=</span>qwen2.5:14b<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>nemoclaw<span class="w"> </span>onboard<span class="w"> </span>--non-interactive
+<span class="w">  </span>nemoclaw<span class="w"> </span>onboard<span class="w"> </span>--non-interactive<span class="w"> </span>--yes
 </pre></div>
 </div>
 <p>If <code class="docutils literal notranslate"><span class="pre">NEMOCLAW_MODEL</span></code> is not set, NemoClaw selects a default model based on available memory.</p>
+<p><code class="docutils literal notranslate"><span class="pre">--yes</span></code> (or <code class="docutils literal notranslate"><span class="pre">NEMOCLAW_YES=1</span></code>) authorises the Ollama model download without an interactive confirmation prompt.
+Under <code class="docutils literal notranslate"><span class="pre">--non-interactive</span></code>, <code class="docutils literal notranslate"><span class="pre">--yes</span></code> (or <code class="docutils literal notranslate"><span class="pre">NEMOCLAW_YES=1</span></code>) is required to authorise the download — onboard exits otherwise, since it cannot prompt.
+Run onboard without <code class="docutils literal notranslate"><span class="pre">--non-interactive</span></code> to get the interactive <code class="docutils literal notranslate"><span class="pre">[y/N]</span></code> prompt that shows the model size before downloading.</p>
 <div class="pst-scrollable-table-container"><table class="table">
 <thead>
 <tr class="row-odd"><th class="head"><p>Variable</p></th>
@@ -582,6 +604,9 @@ This does not delete downloaded model files.</p>
 </tr>
 <tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_MODEL</span></code></p></td>
 <td><p>Ollama model tag to use. Optional.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_YES</span></code></p></td>
+<td><p>Set to <code class="docutils literal notranslate"><span class="pre">1</span></code> to auto-accept the model-download confirmation prompt. Optional.</p></td>
 </tr>
 </tbody>
 </table>
@@ -693,15 +718,40 @@ Refer to <a class="reference internal" href="switch-inference-providers.html"><s
 </pre></div>
 </div>
 </section>
-<section id="vllm-auto-detection-experimental">
-<h2>vLLM Auto-Detection (Experimental)<a class="headerlink" href="#vllm-auto-detection-experimental" title="Link to this heading">#</a></h2>
-<p>When vLLM is already running on <code class="docutils literal notranslate"><span class="pre">localhost:8000</span></code>, NemoClaw can detect it automatically and query the <code class="docutils literal notranslate"><span class="pre">/v1/models</span></code> endpoint to determine the loaded model.</p>
+<section id="vllm-experimental">
+<h2>vLLM (Experimental)<a class="headerlink" href="#vllm-experimental" title="Link to this heading">#</a></h2>
+<p>When vLLM is already running on <code class="docutils literal notranslate"><span class="pre">localhost:8000</span></code>, NemoClaw can detect it automatically and query the <code class="docutils literal notranslate"><span class="pre">/v1/models</span></code> endpoint to determine the loaded model.
+On supported Linux hosts with NVIDIA GPUs, the onboard wizard can also install or start a managed vLLM container for you.</p>
 <p>Set the experimental flag and run onboard.</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span><span class="nv">NEMOCLAW_EXPERIMENTAL</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>nemoclaw<span class="w"> </span>onboard
 </pre></div>
 </div>
 <p>Select <strong>Local vLLM [experimental]</strong> from the provider list.
-NemoClaw detects the running model and validates the endpoint.</p>
+If vLLM is already running, NemoClaw detects the running model and validates the endpoint.
+If vLLM is not running and your host matches a managed profile, select the <strong>Install vLLM</strong> or <strong>Start vLLM</strong> entry.
+NemoClaw pulls the vLLM image, downloads model weights into <code class="docutils literal notranslate"><span class="pre">~/.cache/huggingface</span></code>, starts the <code class="docutils literal notranslate"><span class="pre">nemoclaw-vllm</span></code> container on <code class="docutils literal notranslate"><span class="pre">localhost:8000</span></code>, and prints progress markers while the model loads.
+The first run can take 10 to 30 minutes.
+Later runs reuse the cached image and model weights.</p>
+<p>Managed vLLM uses these profiles:</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Host profile</p></th>
+<th class="head"><p>Default model</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>DGX Spark</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">Qwen/Qwen3.6-27B-FP8</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p>DGX Station</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">Qwen/Qwen3.6-27B-FP8</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p>Linux with an NVIDIA GPU</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">nvidia/NVIDIA-Nemotron-3-Nano-4B-FP8</span></code></p></td>
+</tr>
+</tbody>
+</table>
+</div>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
 <p>NemoClaw forces the <code class="docutils literal notranslate"><span class="pre">chat/completions</span></code> API path for vLLM.
@@ -709,13 +759,20 @@ The vLLM <code class="docutils literal notranslate"><span class="pre">/v1/respon
 </div>
 <section id="id2">
 <h3>Non-Interactive Setup<a class="headerlink" href="#id2" title="Link to this heading">#</a></h3>
+<p>Use an already-running vLLM server:</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span><span class="nv">NEMOCLAW_EXPERIMENTAL</span><span class="o">=</span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
 <span class="w">  </span><span class="nv">NEMOCLAW_PROVIDER</span><span class="o">=</span>vllm<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>nemoclaw<span class="w"> </span>onboard<span class="w"> </span>--non-interactive
 </pre></div>
 </div>
-<p>NemoClaw auto-detects the model from the running vLLM instance.
-To override the model, set <code class="docutils literal notranslate"><span class="pre">NEMOCLAW_MODEL</span></code>.</p>
+<p>Install or start managed vLLM when a supported profile is detected:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span><span class="nv">NEMOCLAW_EXPERIMENTAL</span><span class="o">=</span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="nv">NEMOCLAW_PROVIDER</span><span class="o">=</span>install-vllm<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>nemoclaw<span class="w"> </span>onboard<span class="w"> </span>--non-interactive
+</pre></div>
+</div>
+<p>NemoClaw records the model returned by vLLM’s <code class="docutils literal notranslate"><span class="pre">/v1/models</span></code> endpoint.
+Start vLLM with the model you want before onboarding if you manage the server yourself.</p>
 </section>
 </section>
 <section id="nvidia-nim-experimental">
@@ -838,6 +895,7 @@ Refer to <a class="reference internal" href="switch-inference-providers.html"><s
     <ul class="visible nav section-nav flex-column">
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#prerequisites">Prerequisites</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#ollama">Ollama</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#wsl-with-windows-host-ollama">WSL with Windows-Host Ollama</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#authenticated-reverse-proxy">Authenticated Reverse Proxy</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#gpu-memory-cleanup">GPU Memory Cleanup</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#non-interactive-setup">Non-Interactive Setup</a></li>
@@ -849,7 +907,7 @@ Refer to <a class="reference internal" href="switch-inference-providers.html"><s
 </ul>
 </li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#anthropic-compatible-server">Anthropic-Compatible Server</a></li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#vllm-auto-detection-experimental">vLLM Auto-Detection (Experimental)</a><ul class="nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#vllm-experimental">vLLM (Experimental)</a><ul class="nav section-nav flex-column">
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id2">Non-Interactive Setup</a></li>
 </ul>
 </li>

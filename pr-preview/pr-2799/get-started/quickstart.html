@@ -45,7 +45,7 @@
 
 
 
-    <script src="../_static/documentation_options.js?v=78871a90"></script>
+    <script src="../_static/documentation_options.js?v=9d992d0d"></script>
     <script src="../_static/doctools.js?v=9a2dae69"></script>
     <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
@@ -56,7 +56,7 @@
     <script>
         DOCUMENTATION_OPTIONS.theme_version = '0.16.1';
         DOCUMENTATION_OPTIONS.theme_switcher_json_url = '../versions1.json';
-        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.32';
+        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.35';
         DOCUMENTATION_OPTIONS.show_version_warning_banner =
             false;
         </script>
@@ -404,10 +404,29 @@
 <li class="toctree-l1"><a class="reference internal" href="../inference/switch-inference-providers.html">Switch Inference Providers</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../inference/set-up-sub-agent.html">Set Up Task-Specific Sub-Agents</a></li>
 </ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Manage Sandboxes</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../manage-sandboxes/lifecycle.html">Manage Sandbox Lifecycle</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../manage-sandboxes/messaging-channels.html">Set Up Messaging Channels</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../manage-sandboxes/workspace-files.html">Workspace Files</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../manage-sandboxes/backup-restore.html">Backup and Restore</a></li>
+</ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Network Policy</span></p>
 <ul class="nav bd-sidenav">
 <li class="toctree-l1"><a class="reference internal" href="../network-policy/approve-network-requests.html">Approve or Deny Network Requests</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../network-policy/customize-network-policy.html">Customize the Network Policy</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../network-policy/integration-policy-examples.html">Integration Policy Examples</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Deployment</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../deployment/deploy-to-remote-gpu.html">Deploy to a Remote GPU Instance</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../deployment/brev-web-ui.html">Brev Web UI</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../deployment/install-openclaw-plugins.html">Install OpenClaw Plugins</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../deployment/sandbox-hardening.html">Sandbox Hardening</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Monitoring</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../monitoring/monitor-sandbox-activity.html">Monitor Sandbox Activity</a></li>
 </ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Security</span></p>
 <ul class="nav bd-sidenav">
@@ -415,26 +434,11 @@
 <li class="toctree-l1"><a class="reference internal" href="../security/credential-storage.html">Credential Storage</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../security/openclaw-controls.html">OpenClaw Controls</a></li>
 </ul>
-<p aria-level="2" class="caption" role="heading"><span class="caption-text">Deployment</span></p>
-<ul class="nav bd-sidenav">
-<li class="toctree-l1"><a class="reference internal" href="../deployment/deploy-to-remote-gpu.html">Deploy to a Remote GPU Instance</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../deployment/set-up-telegram-bridge.html">Set Up Telegram</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../deployment/install-openclaw-plugins.html">Install OpenClaw Plugins</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../deployment/sandbox-hardening.html">Sandbox Hardening</a></li>
-</ul>
-<p aria-level="2" class="caption" role="heading"><span class="caption-text">Workspace</span></p>
-<ul class="nav bd-sidenav">
-<li class="toctree-l1"><a class="reference internal" href="../workspace/workspace-files.html">Workspace Files</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../workspace/backup-restore.html">Backup &amp; Restore</a></li>
-</ul>
-<p aria-level="2" class="caption" role="heading"><span class="caption-text">Monitoring</span></p>
-<ul class="nav bd-sidenav">
-<li class="toctree-l1"><a class="reference internal" href="../monitoring/monitor-sandbox-activity.html">Monitor Sandbox Activity</a></li>
-</ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Reference</span></p>
 <ul class="nav bd-sidenav">
 <li class="toctree-l1"><a class="reference internal" href="../reference/architecture.html">Architecture</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../reference/commands.html">Commands</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../reference/commands.html">CLI Commands Reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../reference/cli-selection-guide.html">CLI Selection Guide</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../reference/network-policies.html">Network Policies</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../reference/troubleshooting.html">Troubleshooting</a></li>
 </ul>
@@ -517,6 +521,11 @@ The script installs Node.js if it is not already present, then runs the guided o
 <div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>curl<span class="w"> </span>-fsSL<span class="w"> </span>https://www.nvidia.com/nemoclaw.sh<span class="w"> </span><span class="p">|</span><span class="w"> </span>bash
 </pre></div>
 </div>
+<p>The piped installer prompts through your terminal. In headless scripts or CI,
+pass explicit acceptance to the <code class="docutils literal notranslate"><span class="pre">bash</span></code> side of the pipe:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>curl<span class="w"> </span>-fsSL<span class="w"> </span>https://www.nvidia.com/nemoclaw.sh<span class="w"> </span><span class="p">|</span><span class="w"> </span><span class="nv">NEMOCLAW_NON_INTERACTIVE</span><span class="o">=</span><span class="m">1</span><span class="w"> </span><span class="nv">NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>bash
+</pre></div>
+</div>
 <p>If you use nvm or fnm to manage Node.js, the installer might not update your current shell’s PATH.
 If <code class="docutils literal notranslate"><span class="pre">nemoclaw</span></code> is not found after install, run <code class="docutils literal notranslate"><span class="pre">source</span> <span class="pre">~/.bashrc</span></code> (or <code class="docutils literal notranslate"><span class="pre">source</span> <span class="pre">~/.zshrc</span></code> for zsh) or open a new terminal.</p>
 <div class="admonition note">
@@ -543,12 +552,12 @@ If existing sandbox sessions are running, the installer warns before onboarding 
 </div>
 <p>Pick the option that matches where you want inference traffic to go, then expand the matching helper below for the follow-up prompts and the API key environment variable to set.
 For the full list of providers and validation behavior, refer to <a class="reference internal" href="../inference/inference-options.html"><span class="std std-doc">Inference Options</span></a>.
-Local Ollama appears only when NemoClaw detects Ollama on the host.</p>
+Local Ollama appears when NemoClaw detects a usable local Ollama path or can offer an install or start action for your platform.</p>
 <div class="admonition tip">
 <p class="admonition-title">Tip</p>
 <p>Export the API key before launching the installer so the wizard does not have to ask for it.
 For example, run <code class="docutils literal notranslate"><span class="pre">export</span> <span class="pre">NVIDIA_API_KEY=&lt;your-key&gt;</span></code> before <code class="docutils literal notranslate"><span class="pre">curl</span> <span class="pre">...</span> <span class="pre">|</span> <span class="pre">bash</span></code>.
-If you entered a key incorrectly, refer to <a class="reference internal" href="#reset-a-stored-credential">Reset a Stored Credential</a> to clear and re-enter it.</p>
+If you entered a key incorrectly, refer to <a class="reference internal" href="../manage-sandboxes/lifecycle.html#reset-a-stored-credential"><span class="std std-ref">Reset a Stored Credential</span></a> to clear and re-enter it.</p>
 </div>
 <details class="sd-sphinx-override sd-dropdown sd-card sd-mb-3">
 <summary class="sd-summary-title sd-card-header">
@@ -559,7 +568,7 @@ If you entered a key incorrectly, refer to <a class="reference internal" href="#
 <ol class="arabic simple">
 <li><p class="sd-card-text">At the <code class="docutils literal notranslate"><span class="pre">Choose</span> <span class="pre">[1]:</span></code> prompt, press Enter (or type <code class="docutils literal notranslate"><span class="pre">1</span></code>) to select <strong>NVIDIA Endpoints</strong>.</p></li>
 <li><p class="sd-card-text">At the <code class="docutils literal notranslate"><span class="pre">NVIDIA_API_KEY:</span></code> prompt, paste your key if it is not already exported.</p></li>
-<li><p class="sd-card-text">At the <code class="docutils literal notranslate"><span class="pre">Choose</span> <span class="pre">model</span> <span class="pre">[1]:</span></code> prompt, pick a curated model from the list (for example, <strong>Nemotron 3 Super 120B</strong>, <strong>GLM-5.1</strong>, <strong>MiniMax M2.5</strong>, or <strong>GPT-OSS 120B</strong>), or pick <strong>Other…</strong> to enter any model ID from the <a class="reference external" href="https://build.nvidia.com" rel="noreferer noopener" target="_blank">NVIDIA Endpoints catalog</a>.</p></li>
+<li><p class="sd-card-text">At the <code class="docutils literal notranslate"><span class="pre">Choose</span> <span class="pre">model</span> <span class="pre">[1]:</span></code> prompt, pick a curated model from the list (for example, <code class="docutils literal notranslate"><span class="pre">Nemotron</span> <span class="pre">3</span> <span class="pre">Super</span> <span class="pre">120B</span></code>, <code class="docutils literal notranslate"><span class="pre">GLM-5</span></code>, <code class="docutils literal notranslate"><span class="pre">MiniMax</span> <span class="pre">M2.7</span></code>, <code class="docutils literal notranslate"><span class="pre">GPT-OSS</span> <span class="pre">120B</span></code>, or <code class="docutils literal notranslate"><span class="pre">DeepSeek</span> <span class="pre">V4</span> <span class="pre">Pro</span></code>), or pick <code class="docutils literal notranslate"><span class="pre">Other...</span></code> to enter any model ID from the <a class="reference external" href="https://build.nvidia.com" rel="noreferer noopener" target="_blank">NVIDIA Endpoints catalog</a>.</p></li>
 </ol>
 <p class="sd-card-text">NemoClaw validates the model against the catalog API before creating the sandbox.</p>
 <div class="admonition tip">
@@ -643,32 +652,27 @@ If the endpoint does not return the streaming events OpenClaw needs from the Res
 </details><details class="sd-sphinx-override sd-dropdown sd-card sd-mb-3">
 <summary class="sd-summary-title sd-card-header">
 <span class="sd-summary-icon"><svg version="1.1" width="1.0em" height="1.0em" class="sd-octicon sd-octicon-cpu" viewBox="0 0 16 16" aria-hidden="true"><path d="M6.5.75V2h3V.75a.75.75 0 0 1 1.5 0V2h1.25c.966 0 1.75.784 1.75 1.75V5h1.25a.75.75 0 0 1 0 1.5H14v3h1.25a.75.75 0 0 1 0 1.5H14v1.25A1.75 1.75 0 0 1 12.25 14H11v1.25a.75.75 0 0 1-1.5 0V14h-3v1.25a.75.75 0 0 1-1.5 0V14H3.75A1.75 1.75 0 0 1 2 12.25V11H.75a.75.75 0 0 1 0-1.5H2v-3H.75a.75.75 0 0 1 0-1.5H2V3.75C2 2.784 2.784 2 3.75 2H5V.75a.75.75 0 0 1 1.5 0Zm5.75 11.75a.25.25 0 0 0 .25-.25v-8.5a.25.25 0 0 0-.25-.25h-8.5a.25.25 0 0 0-.25.25v8.5c0 .138.112.25.25.25ZM5.75 5h4.5a.75.75 0 0 1 .75.75v4.5a.75.75 0 0 1-.75.75h-4.5a.75.75 0 0 1-.75-.75v-4.5A.75.75 0 0 1 5.75 5Zm.75 4.5h3v-3h-3Z"></path></svg></span><span class="sd-summary-text">Option 7: Local Ollama</span><span class="sd-summary-state-marker sd-summary-chevron-right"><svg version="1.1" width="1.5em" height="1.5em" class="sd-octicon sd-octicon-chevron-right" viewBox="0 0 24 24" aria-hidden="true"><path d="M8.72 18.78a.75.75 0 0 1 0-1.06L14.44 12 8.72 6.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018l6.25 6.25a.75.75 0 0 1 0 1.06l-6.25 6.25a.75.75 0 0 1-1.06 0Z"></path></svg></span></summary><div class="sd-summary-content sd-card-body docutils">
-<p class="sd-card-text">Routes inference to a local Ollama instance on <code class="docutils literal notranslate"><span class="pre">localhost:11434</span></code>. This option only appears when Ollama is installed or running on the host.</p>
-<p class="sd-card-text">No API key is required. NemoClaw generates a token and starts an authenticated proxy so containers can reach Ollama without exposing it to your network.</p>
+<p class="sd-card-text">Routes inference to a local Ollama instance. Depending on your platform, the wizard can use an existing daemon, start an installed daemon, or offer an install action.</p>
+<p class="sd-card-text">No API key is required. On non-WSL hosts, NemoClaw generates a token and starts an authenticated proxy so containers can reach Ollama without exposing the daemon directly to your network.
+On WSL, NemoClaw can also use Ollama on the Windows host through <code class="docutils literal notranslate"><span class="pre">host.docker.internal</span></code>.</p>
 <p class="sd-card-text">Respond to the wizard as follows.</p>
 <ol class="arabic simple">
 <li><p class="sd-card-text">At the <code class="docutils literal notranslate"><span class="pre">Choose</span> <span class="pre">[1]:</span></code> prompt, type <code class="docutils literal notranslate"><span class="pre">7</span></code> to select <strong>Local Ollama</strong>.</p></li>
 <li><p class="sd-card-text">At the <code class="docutils literal notranslate"><span class="pre">Choose</span> <span class="pre">model</span> <span class="pre">[1]:</span></code> prompt, pick from <strong>Ollama models</strong> if any are already installed. If none are installed, pick a <strong>starter model</strong> to pull and load now, or pick <strong>Other…</strong> to enter any Ollama model ID.</p></li>
 </ol>
 <p class="sd-card-text">For setup details, including GPU recommendations and starter model choices, refer to <a class="reference internal" href="../inference/use-local-inference.html"><span class="std std-doc">Use a Local Inference Server</span></a>.</p>
-<div class="admonition warning">
-<p class="admonition-title">Warning</p>
-<p class="sd-card-text">Ollama binds to <code class="docutils literal notranslate"><span class="pre">0.0.0.0</span></code> so the sandbox can reach it through Docker. On public WiFi, any device on the same network can send prompts to your GPU through the Ollama API. Refer to CNVD-2025-04094 and CVE-2024-37032.</p>
 </div>
-</div>
-</details><div class="docutils">
-<details class="sd-sphinx-override sd-dropdown sd-card sd-mb-3">
+</details><details class="sd-sphinx-override sd-dropdown sd-card sd-mb-3">
 <summary class="sd-summary-title sd-card-header">
 <span class="sd-summary-icon"><svg version="1.1" width="1.0em" height="1.0em" class="sd-octicon sd-octicon-beaker" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 5.782V2.5h-.25a.75.75 0 0 1 0-1.5h6.5a.75.75 0 0 1 0 1.5H11v3.282l3.666 5.76C15.619 13.04 14.543 15 12.767 15H3.233c-1.776 0-2.852-1.96-1.899-3.458Zm-2.4 6.565a.75.75 0 0 0 .633 1.153h9.534a.75.75 0 0 0 .633-1.153L12.225 10.5h-8.45ZM9.5 2.5h-3V6c0 .143-.04.283-.117.403L4.73 9h6.54L9.617 6.403A.746.746 0 0 1 9.5 6Z"></path></svg></span><span class="sd-summary-text">Experimental: Local NIM and Local vLLM</span><span class="sd-summary-state-marker sd-summary-chevron-right"><svg version="1.1" width="1.5em" height="1.5em" class="sd-octicon sd-octicon-chevron-right" viewBox="0 0 24 24" aria-hidden="true"><path d="M8.72 18.78a.75.75 0 0 1 0-1.06L14.44 12 8.72 6.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018l6.25 6.25a.75.75 0 0 1 0 1.06l-6.25 6.25a.75.75 0 0 1-1.06 0Z"></path></svg></span></summary><div class="sd-summary-content sd-card-body docutils">
 <p class="sd-card-text">These options appear when <code class="docutils literal notranslate"><span class="pre">NEMOCLAW_EXPERIMENTAL=1</span></code> is set and the prerequisites are met.</p>
 <ul class="simple">
 <li><p class="sd-card-text"><strong>Local NVIDIA NIM</strong> requires a NIM-capable GPU. NemoClaw pulls and manages a NIM container.</p></li>
-<li><p class="sd-card-text"><strong>Local vLLM</strong> requires a vLLM server already running on <code class="docutils literal notranslate"><span class="pre">localhost:8000</span></code>. NemoClaw auto-detects the loaded model.</p></li>
+<li><p class="sd-card-text"><strong>Local vLLM</strong> uses a vLLM server already running on <code class="docutils literal notranslate"><span class="pre">localhost:8000</span></code>, or installs and starts a managed vLLM container on supported DGX Spark, DGX Station, and Linux NVIDIA GPU hosts. NemoClaw auto-detects the loaded model.</p></li>
 </ul>
 <p class="sd-card-text">For setup, refer to <a class="reference internal" href="../inference/use-local-inference.html"><span class="std std-doc">Use a Local Inference Server</span></a>.</p>
 </div>
-</details></div>
-</section>
+</details></section>
 <section id="review-the-configuration-before-the-sandbox-build">
 <h3>Review the Configuration Before the Sandbox Build<a class="headerlink" href="#review-the-configuration-before-the-sandbox-build" title="Link to this heading">#</a></h3>
 <p>After you enter the sandbox name, the wizard prints a review summary and asks for final confirmation before registering the provider, prompting for optional integrations, and building the sandbox image.
@@ -682,7 +686,7 @@ For example, if you picked an OpenAI-compatible endpoint, the summary looks like
   Web search:    disabled
   Messaging:     none
   Sandbox name:  my-gpt-claw
-  Note:          Sandbox build takes ~6 minutes on this host.
+  Note:          Sandbox build typically takes 5–15 minutes on this host.
   ──────────────────────────────────────────────────
   Web search and messaging channels will be prompted next.
   Apply this configuration? [Y/n]:
@@ -726,192 +730,49 @@ Logs:        nemoclaw my-gpt-claw logs --follow
 <p>If you picked a different option, the <code class="docutils literal notranslate"><span class="pre">Model</span></code> line shows that provider’s model and label instead. For example, you might see <code class="docutils literal notranslate"><span class="pre">gpt-5.4</span> <span class="pre">(OpenAI)</span></code>, <code class="docutils literal notranslate"><span class="pre">claude-sonnet-4-6</span> <span class="pre">(Anthropic)</span></code>, <code class="docutils literal notranslate"><span class="pre">gemini-2.5-flash</span> <span class="pre">(Google</span> <span class="pre">Gemini)</span></code>, <code class="docutils literal notranslate"><span class="pre">llama3.1:8b</span> <span class="pre">(Local</span> <span class="pre">Ollama)</span></code>, or <code class="docutils literal notranslate"><span class="pre">&lt;your-model&gt;</span> <span class="pre">(Other</span> <span class="pre">OpenAI-compatible</span> <span class="pre">endpoint)</span></code>.</p>
 </section>
 </section>
-<section id="open-the-openclaw-ui-in-a-browser">
-<h2>Open the OpenClaw UI in a Browser<a class="headerlink" href="#open-the-openclaw-ui-in-a-browser" title="Link to this heading">#</a></h2>
-<p>The onboard wizard starts a background port forward to the sandbox dashboard, then prints a tokenized URL in the install summary.
+<section id="run-your-first-agent-prompt">
+<h2>Run Your First Agent Prompt<a class="headerlink" href="#run-your-first-agent-prompt" title="Link to this heading">#</a></h2>
+<p>You can chat with the agent from the terminal or the browser.</p>
+<section id="open-the-openclaw-ui-in-a-browser-to-chat-with-the-agent">
+<h3>Open the OpenClaw UI in a Browser to Chat with the Agent<a class="headerlink" href="#open-the-openclaw-ui-in-a-browser-to-chat-with-the-agent" title="Link to this heading">#</a></h3>
+<p>The onboard wizard starts a background port forward to the sandbox dashboard, then prints the dashboard URL in the install summary.
 The default host port is <code class="docutils literal notranslate"><span class="pre">18789</span></code>.
-If that port is already taken, NemoClaw uses the next free dashboard port, such as <code class="docutils literal notranslate"><span class="pre">18790</span></code>, and prints that port in the final URL.</p>
+If that port is already taken, NemoClaw uses the next free dashboard port, such as <code class="docutils literal notranslate"><span class="pre">18790</span></code>, and prints that port in the final URL.
+The gateway token is redacted from displayed output; retrieve it explicitly when the browser asks for authentication.</p>
 <div class="highlight-text notranslate"><div class="highlight"><pre><span></span>──────────────────────────────────────────────────
-OpenClaw UI (tokenized URL; treat it like a password; save it now - it will not be printed again)
+OpenClaw UI (auth token redacted from displayed URLs)
 Port 18790 must be forwarded before opening these URLs.
-Dashboard: http://127.0.0.1:18790/#token=&lt;auth-token&gt;
+Dashboard: http://127.0.0.1:18790/
+Token:       nemoclaw my-gpt-claw gateway-token --quiet
+             append  #token=&lt;token&gt; locally if the browser asks for auth.
 ──────────────────────────────────────────────────
 </pre></div>
 </div>
-<p>Open the printed URL in your browser.
-The <code class="docutils literal notranslate"><span class="pre">#token=&lt;auth-token&gt;</span></code> fragment authenticates the browser to the sandbox gateway, so save the URL securely and treat it like a password.
-NemoClaw prints the token only once.</p>
-<section id="restart-the-port-forward">
-<h3>Restart the Port Forward<a class="headerlink" href="#restart-the-port-forward" title="Link to this heading">#</a></h3>
-<p>If the forward stopped, or the installer reported that no active forward was found and the URL does not load, restart it manually with the port from the install summary.</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>openshell<span class="w"> </span>forward<span class="w"> </span>start<span class="w"> </span>--background<span class="w"> </span>&lt;dashboard-port&gt;<span class="w"> </span>my-gpt-claw
-</pre></div>
-</div>
-<p>To list active forwards across all sandboxes, run the following command.</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>openshell<span class="w"> </span>forward<span class="w"> </span>list
-</pre></div>
-</div>
-</section>
-<section id="run-multiple-sandboxes">
-<h3>Run Multiple Sandboxes<a class="headerlink" href="#run-multiple-sandboxes" title="Link to this heading">#</a></h3>
-<p>Each sandbox needs its own dashboard port, since <code class="docutils literal notranslate"><span class="pre">openshell</span> <span class="pre">forward</span></code> refuses to bind a port that another sandbox is already using.
-When the default port is already held by another sandbox, <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span></code> scans ports <code class="docutils literal notranslate"><span class="pre">18789</span></code> through <code class="docutils literal notranslate"><span class="pre">18799</span></code> and uses the next free port.</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>nemoclaw<span class="w"> </span>onboard<span class="w">                                      </span><span class="c1"># first sandbox uses 18789</span>
-<span class="gp">$ </span>nemoclaw<span class="w"> </span>onboard<span class="w">                                      </span><span class="c1"># second sandbox uses the next free port, such as 18790</span>
-</pre></div>
-</div>
-<p>To choose a specific port, pass <code class="docutils literal notranslate"><span class="pre">--control-ui-port</span></code>:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>nemoclaw<span class="w"> </span>onboard<span class="w"> </span>--control-ui-port<span class="w"> </span><span class="m">19000</span>
-</pre></div>
-</div>
-<p>You can also set <code class="docutils literal notranslate"><span class="pre">CHAT_UI_URL</span></code> or <code class="docutils literal notranslate"><span class="pre">NEMOCLAW_DASHBOARD_PORT</span></code> before onboarding:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span><span class="nv">CHAT_UI_URL</span><span class="o">=</span>http://127.0.0.1:19000<span class="w"> </span>nemoclaw<span class="w"> </span>onboard
-<span class="gp">$ </span><span class="nv">NEMOCLAW_DASHBOARD_PORT</span><span class="o">=</span><span class="m">19000</span><span class="w"> </span>nemoclaw<span class="w"> </span>onboard
-</pre></div>
-</div>
-<p>For full details on port conflicts and overrides, refer to <a class="reference internal" href="../reference/troubleshooting.html#port-already-in-use"><span class="std std-ref">Port already in use</span></a>.</p>
-</section>
-<section id="open-the-ui-from-a-remote-host">
-<h3>Open the UI from a Remote Host<a class="headerlink" href="#open-the-ui-from-a-remote-host" title="Link to this heading">#</a></h3>
-<p>If NemoClaw is running on a remote GPU instance and you want to open the UI from a laptop, refer to <a class="reference internal" href="../deployment/deploy-to-remote-gpu.html#remote-dashboard-access"><span class="std std-ref">Remote Dashboard Access</span></a>. Set <code class="docutils literal notranslate"><span class="pre">CHAT_UI_URL</span></code> to the origin the browser uses before running onboard, so the gateway’s CORS allowlist accepts the remote browser.</p>
-</section>
+<p>Open the dashboard URL in your browser.
+If the browser asks for authentication, run the printed <code class="docutils literal notranslate"><span class="pre">gateway-token</span> <span class="pre">--quiet</span></code> command and append <code class="docutils literal notranslate"><span class="pre">#token=&lt;token&gt;</span></code> locally.
+Treat the token like a password.</p>
 </section>
 <section id="chat-with-the-agent-from-the-terminal">
-<h2>Chat with the Agent from the Terminal<a class="headerlink" href="#chat-with-the-agent-from-the-terminal" title="Link to this heading">#</a></h2>
-<p>If you prefer a terminal-based chat, connect to the sandbox and use the OpenClaw CLI.</p>
+<h3>Chat with the Agent from the Terminal<a class="headerlink" href="#chat-with-the-agent-from-the-terminal" title="Link to this heading">#</a></h3>
+<p>Connect to the sandbox and use the OpenClaw CLI.</p>
 <div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>nemoclaw<span class="w"> </span>my-assistant<span class="w"> </span>connect
 </pre></div>
 </div>
-<p>In the sandbox shell, open the OpenClaw terminal UI and start a chat.</p>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>openclaw<span class="w"> </span>tui
-</pre></div>
-</div>
-<p>Alternatively, send a single message and print the response.</p>
+<p>In the sandbox shell, send a single message and print the response.</p>
 <div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>openclaw<span class="w"> </span>agent<span class="w"> </span>--agent<span class="w"> </span>main<span class="w"> </span>--local<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;hello&quot;</span><span class="w"> </span>--session-id<span class="w"> </span><span class="nb">test</span>
 </pre></div>
 </div>
 </section>
-<section id="reconfigure-or-recover">
-<h2>Reconfigure or Recover<a class="headerlink" href="#reconfigure-or-recover" title="Link to this heading">#</a></h2>
-<p>Recover from a misconfigured sandbox without re-running the full onboard wizard or destroying workspace state.</p>
-<section id="change-inference-model-or-api">
-<h3>Change Inference Model or API<a class="headerlink" href="#change-inference-model-or-api" title="Link to this heading">#</a></h3>
-<p>Change the active model or provider at runtime without rebuilding the sandbox:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>openshell<span class="w"> </span>inference<span class="w"> </span><span class="nb">set</span><span class="w"> </span>-g<span class="w"> </span>nemoclaw<span class="w"> </span>--model<span class="w"> </span>&lt;model&gt;<span class="w"> </span>--provider<span class="w"> </span>&lt;provider&gt;
-</pre></div>
-</div>
-<p>Refer to <a class="reference internal" href="../inference/switch-inference-providers.html"><span class="std std-doc">Switch inference providers</span></a> for provider-specific model IDs and API compatibility notes.</p>
-</section>
-<section id="reset-a-stored-credential">
-<h3>Reset a Stored Credential<a class="headerlink" href="#reset-a-stored-credential" title="Link to this heading">#</a></h3>
-<p>If a provider credential was entered incorrectly during onboarding, clear the gateway-registered value and re-enter it on the next onboard run:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>nemoclaw<span class="w"> </span>credentials<span class="w"> </span>list<span class="w">                </span><span class="c1"># see which providers are registered</span>
-<span class="gp">$ </span>nemoclaw<span class="w"> </span>credentials<span class="w"> </span>reset<span class="w"> </span>&lt;PROVIDER&gt;<span class="w">    </span><span class="c1"># clear a single provider, for example nvidia-prod</span>
-<span class="gp">$ </span>nemoclaw<span class="w"> </span>onboard<span class="w">                         </span><span class="c1"># re-run to re-enter the cleared provider</span>
-</pre></div>
-</div>
-<p>The credentials command is documented in full at <a class="reference internal" href="../reference/commands.html#nemoclaw-credentials-reset-provider"><span class="std std-ref"><code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">credentials</span> <span class="pre">reset</span> <span class="pre">&lt;PROVIDER&gt;</span></code></span></a>.</p>
-</section>
-<section id="rebuild-a-sandbox-while-preserving-workspace-state">
-<h3>Rebuild a Sandbox While Preserving Workspace State<a class="headerlink" href="#rebuild-a-sandbox-while-preserving-workspace-state" title="Link to this heading">#</a></h3>
-<p>If you changed the underlying Dockerfile, upgraded OpenClaw, or want to pick up a new base image without losing your sandbox’s workspace files, use <code class="docutils literal notranslate"><span class="pre">rebuild</span></code> instead of destroying and recreating:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>nemoclaw<span class="w"> </span>&lt;sandbox-name&gt;<span class="w"> </span>rebuild
-</pre></div>
-</div>
-<p>Rebuild preserves the mounted workspace and registered policies while recreating the container. Refer to <a class="reference internal" href="../reference/commands.html#nemoclaw-name-rebuild"><span class="std std-ref"><code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">&lt;name&gt;</span> <span class="pre">rebuild</span></code></span></a> for flag details.</p>
-</section>
-<section id="add-a-network-preset-after-onboarding">
-<h3>Add a Network Preset After Onboarding<a class="headerlink" href="#add-a-network-preset-after-onboarding" title="Link to this heading">#</a></h3>
-<p>Apply an additional preset (for example, Telegram or GitHub) to a running sandbox without re-onboarding:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>nemoclaw<span class="w"> </span>&lt;sandbox-name&gt;<span class="w"> </span>policy-add
-</pre></div>
-</div>
-<p>Refer to <a class="reference internal" href="../reference/commands.html#nemoclaw-name-policy-add"><span class="std std-ref"><code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">&lt;name&gt;</span> <span class="pre">policy-add</span></code></span></a> for usage details and flags.</p>
-</section>
-</section>
-<section id="update-to-the-latest-version">
-<h2>Update to the Latest Version<a class="headerlink" href="#update-to-the-latest-version" title="Link to this heading">#</a></h2>
-<p>When a new NemoClaw release becomes available, update the <code class="docutils literal notranslate"><span class="pre">nemoclaw</span></code> CLI on your host and check existing sandboxes for stale agent/runtime versions.</p>
-<section id="update-the-nemoclaw-cli">
-<h3>Update the NemoClaw CLI<a class="headerlink" href="#update-the-nemoclaw-cli" title="Link to this heading">#</a></h3>
-<p>Re-run the installer.
-Before it onboards anything, the installer calls <a class="reference internal" href="../reference/commands.html#nemoclaw-backup-all"><span class="std std-ref"><code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">backup-all</span></code></span></a> automatically, storing a snapshot of each running sandbox in <code class="docutils literal notranslate"><span class="pre">~/.nemoclaw/rebuild-backups/</span></code> as a safety net.</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>curl<span class="w"> </span>-fsSL<span class="w"> </span>https://www.nvidia.com/nemoclaw.sh<span class="w"> </span><span class="p">|</span><span class="w"> </span>bash
-</pre></div>
-</div>
-</section>
-<section id="upgrade-sandboxes-with-stale-agent-and-runtime-versions">
-<h3>Upgrade sandboxes with stale agent and runtime versions<a class="headerlink" href="#upgrade-sandboxes-with-stale-agent-and-runtime-versions" title="Link to this heading">#</a></h3>
-<p>The installer checks registered sandboxes after onboarding succeeds and runs <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">upgrade-sandboxes</span> <span class="pre">--auto</span></code> for stale running sandboxes. Use <code class="docutils literal notranslate"><span class="pre">upgrade-sandboxes</span></code> directly to verify the result, rebuild when you skipped the installer or onboarding step, or handle sandboxes that were stopped or could not be version-checked. The upgrade flow is non-destructive by default because NemoClaw preserves manifest-defined workspace state, but a manual snapshot before any major upgrade gives you a state restore point.</p>
-<p><strong>Safe upgrade flow:</strong></p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>nemoclaw<span class="w"> </span>&lt;sandbox-name&gt;<span class="w"> </span>snapshot<span class="w"> </span>create<span class="w"> </span>--name<span class="w"> </span>pre-upgrade<span class="w">   </span><span class="c1"># optional, recommended</span>
-<span class="gp">$ </span>curl<span class="w"> </span>-fsSL<span class="w"> </span>https://www.nvidia.com/nemoclaw.sh<span class="w"> </span><span class="p">|</span><span class="w"> </span>bash<span class="w">          </span><span class="c1"># updates CLI; auto-upgrades stale running sandboxes</span>
-<span class="gp">$ </span>nemoclaw<span class="w"> </span>upgrade-sandboxes<span class="w"> </span>--check<span class="w">                            </span><span class="c1"># verify or list remaining stale/unknown sandboxes</span>
-<span class="gp">$ </span>nemoclaw<span class="w"> </span>upgrade-sandboxes<span class="w">                                    </span><span class="c1"># manually rebuild remaining stale running sandboxes</span>
-</pre></div>
-</div>
-<p>For scripted manual rebuilds, use <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">upgrade-sandboxes</span> <span class="pre">--auto</span></code> to skip the confirmation prompt.</p>
-<p>If the upgraded sandbox needs its workspace state reverted, restore the pre-upgrade snapshot into the running sandbox. This restores saved state directories only; it does not downgrade the sandbox image or agent/runtime:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>nemoclaw<span class="w"> </span>&lt;sandbox-name&gt;<span class="w"> </span>snapshot<span class="w"> </span>restore<span class="w"> </span>pre-upgrade
-</pre></div>
-</div>
-<section id="what-changes-during-a-rebuild">
-<h4>What changes during a rebuild<a class="headerlink" href="#what-changes-during-a-rebuild" title="Link to this heading">#</a></h4>
-<p>Each rebuild destroys the existing container and creates a new one. NemoClaw protects your data through the same backup-and-restore flow as <a class="reference internal" href="../reference/commands.html#nemoclaw-name-rebuild"><span class="std std-ref"><code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">&lt;name&gt;</span> <span class="pre">rebuild</span></code></span></a>:</p>
-<ul class="simple">
-<li><p>NemoClaw preserves manifest-defined workspace state. Before deleting the old container, NemoClaw snapshots the state directories defined in the agent manifest (typically <code class="docutils literal notranslate"><span class="pre">/sandbox/.openclaw/workspace/</span></code>) and restores them into the new container. Stored credentials (<code class="docutils literal notranslate"><span class="pre">~/.nemoclaw/credentials.json</span></code>) and registered policy presets live on the host and are re-applied to the new sandbox automatically.</p></li>
-<li><p>NemoClaw does not preserve runtime changes outside the workspace state directories. This includes packages installed inside the running container with <code class="docutils literal notranslate"><span class="pre">apt</span></code> or <code class="docutils literal notranslate"><span class="pre">pip</span></code>, files in non-workspace paths, and in-memory or process state. If you have customized the running container at runtime, capture that as <code class="docutils literal notranslate"><span class="pre">Dockerfile</span></code> changes (for <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span> <span class="pre">--from</span></code>) or a manual <code class="docutils literal notranslate"><span class="pre">openshell</span> <span class="pre">sandbox</span> <span class="pre">download</span></code> before the rebuild starts.</p></li>
-</ul>
-<p>Aborts before the destroy step are non-destructive. The flow refuses to proceed past preflight if a credential is missing (see below) or past backup if the snapshot fails (with <code class="docutils literal notranslate"><span class="pre">&quot;Aborting</span> <span class="pre">rebuild</span> <span class="pre">to</span> <span class="pre">prevent</span> <span class="pre">data</span> <span class="pre">loss&quot;</span></code>), so a botched run leaves the original sandbox intact and ready to retry.</p>
-<p>See <a class="reference internal" href="../workspace/backup-restore.html"><span class="std std-doc">Backup and Restore</span></a> for the full list of state-preservation guarantees, snapshot retention, and instructions for manual backups when the auto-flow is not enough.</p>
-<div class="admonition note">
-<p class="admonition-title">Note</p>
-<p>If the rebuild aborts with <code class="docutils literal notranslate"><span class="pre">Missing</span> <span class="pre">credential:</span> <span class="pre">&lt;KEY&gt;</span></code>
-The rebuild preflight reads the provider credential recorded by your last <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span></code> session. If you have switched providers since onboarding (for example, from a remote API to a local Ollama setup) the preflight may still reference the old key and fail before any destroy step runs.</p>
-<p>To recover, re-run <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span></code> and select your current provider. This refreshes the session metadata. Your existing container keeps serving traffic until the new image is ready.</p>
-</div>
-</section>
-</section>
-</section>
-<section id="uninstall">
-<h2>Uninstall<a class="headerlink" href="#uninstall" title="Link to this heading">#</a></h2>
-<p>To remove NemoClaw and all resources created during setup, run the CLI’s built-in uninstall command:</p>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>nemoclaw<span class="w"> </span>uninstall
-</pre></div>
-</div>
-<div class="pst-scrollable-table-container"><table class="table">
-<thead>
-<tr class="row-odd"><th class="head"><p>Flag</p></th>
-<th class="head"><p>Effect</p></th>
-</tr>
-</thead>
-<tbody>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--yes</span></code></p></td>
-<td><p>Skip the confirmation prompt.</p></td>
-</tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--keep-openshell</span></code></p></td>
-<td><p>Leave the <code class="docutils literal notranslate"><span class="pre">openshell</span></code> binary installed.</p></td>
-</tr>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--delete-models</span></code></p></td>
-<td><p>Also remove NemoClaw-pulled Ollama models.</p></td>
-</tr>
-</tbody>
-</table>
-</div>
-<p><code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">uninstall</span></code> runs the version-pinned <code class="docutils literal notranslate"><span class="pre">uninstall.sh</span></code> that shipped with your installed CLI, so it does not fetch anything over the network at uninstall time.</p>
-<p>If the <code class="docutils literal notranslate"><span class="pre">nemoclaw</span></code> CLI is missing or broken, fall back to the hosted script:</p>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>curl<span class="w"> </span>-fsSL<span class="w"> </span>https://raw.githubusercontent.com/NVIDIA/NemoClaw/refs/heads/main/uninstall.sh<span class="w"> </span><span class="p">|</span><span class="w"> </span>bash
-</pre></div>
-</div>
-<p>For a full comparison of the two forms — what they fetch, what they trust, and when to prefer each — see <a class="reference internal" href="../reference/commands.html#nemoclaw-uninstall-vs-the-hosted-uninstall-sh"><span class="std std-ref"><code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">uninstall</span></code> vs. the hosted <code class="docutils literal notranslate"><span class="pre">uninstall.sh</span></code></span></a>.</p>
 </section>
 <section id="next-steps">
 <h2>Next Steps<a class="headerlink" href="#next-steps" title="Link to this heading">#</a></h2>
 <ul class="simple">
 <li><p><a class="reference internal" href="quickstart-hermes.html"><span class="std std-doc">NemoHermes Quickstart</span></a> to launch Hermes instead of the default OpenClaw agent.</p></li>
+<li><p><a class="reference internal" href="../manage-sandboxes/lifecycle.html"><span class="std std-doc">Manage NemoClaw sandboxes</span></a> for port forwards, rebuilds, upgrades, and uninstall.</p></li>
 <li><p><a class="reference internal" href="../inference/switch-inference-providers.html"><span class="std std-doc">Switch inference providers</span></a> to use a different model or endpoint.</p></li>
 <li><p><a class="reference internal" href="../network-policy/approve-network-requests.html"><span class="std std-doc">Approve or deny network requests</span></a> when the agent tries to reach external hosts.</p></li>
 <li><p><a class="reference internal" href="../network-policy/customize-network-policy.html"><span class="std std-doc">Customize the network policy</span></a> to pre-approve trusted domains.</p></li>
+<li><p><a class="reference internal" href="../network-policy/integration-policy-examples.html"><span class="std std-doc">Common integration policy examples</span></a> for maintained policy presets such as Outlook, messaging, GitHub, Jira, Brave Search, package managers, Hugging Face, and local inference.</p></li>
 <li><p><a class="reference internal" href="../deployment/deploy-to-remote-gpu.html"><span class="std std-doc">Deploy to a remote GPU instance</span></a> for always-on operation.</p></li>
 <li><p><a class="reference internal" href="../monitoring/monitor-sandbox-activity.html"><span class="std std-doc">Monitor sandbox activity</span></a> through the OpenShell TUI.</p></li>
 <li><p><a class="reference internal" href="../reference/troubleshooting.html"><span class="std std-doc">Consult the troubleshooting guide</span></a> for common error messages and resolution steps.</p></li>
@@ -975,29 +836,11 @@ The rebuild preflight reads the provider credential recorded by your last <code 
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#choose-network-policy-presets">Choose Network Policy Presets</a></li>
 </ul>
 </li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#open-the-openclaw-ui-in-a-browser">Open the OpenClaw UI in a Browser</a><ul class="nav section-nav flex-column">
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#restart-the-port-forward">Restart the Port Forward</a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#run-multiple-sandboxes">Run Multiple Sandboxes</a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#open-the-ui-from-a-remote-host">Open the UI from a Remote Host</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#run-your-first-agent-prompt">Run Your First Agent Prompt</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#open-the-openclaw-ui-in-a-browser-to-chat-with-the-agent">Open the OpenClaw UI in a Browser to Chat with the Agent</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#chat-with-the-agent-from-the-terminal">Chat with the Agent from the Terminal</a></li>
 </ul>
 </li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#chat-with-the-agent-from-the-terminal">Chat with the Agent from the Terminal</a></li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#reconfigure-or-recover">Reconfigure or Recover</a><ul class="nav section-nav flex-column">
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#change-inference-model-or-api">Change Inference Model or API</a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#reset-a-stored-credential">Reset a Stored Credential</a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#rebuild-a-sandbox-while-preserving-workspace-state">Rebuild a Sandbox While Preserving Workspace State</a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#add-a-network-preset-after-onboarding">Add a Network Preset After Onboarding</a></li>
-</ul>
-</li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#update-to-the-latest-version">Update to the Latest Version</a><ul class="nav section-nav flex-column">
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#update-the-nemoclaw-cli">Update the NemoClaw CLI</a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#upgrade-sandboxes-with-stale-agent-and-runtime-versions">Upgrade sandboxes with stale agent and runtime versions</a><ul class="nav section-nav flex-column">
-<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#what-changes-during-a-rebuild">What changes during a rebuild</a></li>
-</ul>
-</li>
-</ul>
-</li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#uninstall">Uninstall</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#next-steps">Next Steps</a></li>
 </ul>
   </nav></div>

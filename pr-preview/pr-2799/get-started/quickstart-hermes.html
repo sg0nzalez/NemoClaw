@@ -45,7 +45,7 @@
 
 
 
-    <script src="../_static/documentation_options.js?v=78871a90"></script>
+    <script src="../_static/documentation_options.js?v=9d992d0d"></script>
     <script src="../_static/doctools.js?v=9a2dae69"></script>
     <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
@@ -56,7 +56,7 @@
     <script>
         DOCUMENTATION_OPTIONS.theme_version = '0.16.1';
         DOCUMENTATION_OPTIONS.theme_switcher_json_url = '../versions1.json';
-        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.32';
+        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.35';
         DOCUMENTATION_OPTIONS.show_version_warning_banner =
             false;
         </script>
@@ -404,10 +404,29 @@
 <li class="toctree-l1"><a class="reference internal" href="../inference/switch-inference-providers.html">Switch Inference Providers</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../inference/set-up-sub-agent.html">Set Up Task-Specific Sub-Agents</a></li>
 </ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Manage Sandboxes</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../manage-sandboxes/lifecycle.html">Manage Sandbox Lifecycle</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../manage-sandboxes/messaging-channels.html">Set Up Messaging Channels</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../manage-sandboxes/workspace-files.html">Workspace Files</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../manage-sandboxes/backup-restore.html">Backup and Restore</a></li>
+</ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Network Policy</span></p>
 <ul class="nav bd-sidenav">
 <li class="toctree-l1"><a class="reference internal" href="../network-policy/approve-network-requests.html">Approve or Deny Network Requests</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../network-policy/customize-network-policy.html">Customize the Network Policy</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../network-policy/integration-policy-examples.html">Integration Policy Examples</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Deployment</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../deployment/deploy-to-remote-gpu.html">Deploy to a Remote GPU Instance</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../deployment/brev-web-ui.html">Brev Web UI</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../deployment/install-openclaw-plugins.html">Install OpenClaw Plugins</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../deployment/sandbox-hardening.html">Sandbox Hardening</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Monitoring</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../monitoring/monitor-sandbox-activity.html">Monitor Sandbox Activity</a></li>
 </ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Security</span></p>
 <ul class="nav bd-sidenav">
@@ -415,26 +434,11 @@
 <li class="toctree-l1"><a class="reference internal" href="../security/credential-storage.html">Credential Storage</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../security/openclaw-controls.html">OpenClaw Controls</a></li>
 </ul>
-<p aria-level="2" class="caption" role="heading"><span class="caption-text">Deployment</span></p>
-<ul class="nav bd-sidenav">
-<li class="toctree-l1"><a class="reference internal" href="../deployment/deploy-to-remote-gpu.html">Deploy to a Remote GPU Instance</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../deployment/set-up-telegram-bridge.html">Set Up Telegram</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../deployment/install-openclaw-plugins.html">Install OpenClaw Plugins</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../deployment/sandbox-hardening.html">Sandbox Hardening</a></li>
-</ul>
-<p aria-level="2" class="caption" role="heading"><span class="caption-text">Workspace</span></p>
-<ul class="nav bd-sidenav">
-<li class="toctree-l1"><a class="reference internal" href="../workspace/workspace-files.html">Workspace Files</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../workspace/backup-restore.html">Backup &amp; Restore</a></li>
-</ul>
-<p aria-level="2" class="caption" role="heading"><span class="caption-text">Monitoring</span></p>
-<ul class="nav bd-sidenav">
-<li class="toctree-l1"><a class="reference internal" href="../monitoring/monitor-sandbox-activity.html">Monitor Sandbox Activity</a></li>
-</ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Reference</span></p>
 <ul class="nav bd-sidenav">
 <li class="toctree-l1"><a class="reference internal" href="../reference/architecture.html">Architecture</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../reference/commands.html">Commands</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../reference/commands.html">CLI Commands Reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../reference/cli-selection-guide.html">CLI Selection Guide</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../reference/network-policies.html">Network Policies</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../reference/troubleshooting.html">Troubleshooting</a></li>
 </ul>
@@ -527,15 +531,20 @@ The installer installs the CLI, selects the <code class="docutils literal notran
 <h2>Respond to the Wizard<a class="headerlink" href="#respond-to-the-wizard" title="Link to this heading">#</a></h2>
 <p>The onboard wizard asks for a sandbox name, inference provider, model, credentials, and network policy preset.
 At any prompt, press Enter to accept the default shown in <code class="docutils literal notranslate"><span class="pre">[brackets]</span></code>, type <code class="docutils literal notranslate"><span class="pre">back</span></code> to return to the previous prompt, or type <code class="docutils literal notranslate"><span class="pre">exit</span></code> to quit.</p>
-<p>Use a distinct sandbox name, such as <code class="docutils literal notranslate"><span class="pre">my-hermes</span></code>, so you can run Hermes and OpenClaw sandboxes side by side.</p>
-<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>Sandbox name [my-assistant]: my-hermes
+<p>The default Hermes sandbox name is <code class="docutils literal notranslate"><span class="pre">hermes</span></code>.
+Use a distinct sandbox name, such as <code class="docutils literal notranslate"><span class="pre">my-hermes</span></code>, so you can run Hermes and OpenClaw sandboxes side by side.
+NemoClaw prevents same-name reuse when an existing sandbox uses a different agent.</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>Sandbox name [hermes]: my-hermes
 </pre></div>
 </div>
 <p>Choose the inference provider that matches where you want Hermes model traffic to go.
 The provider options and credential environment variables are the same as the standard NemoClaw quickstart.
-For provider-specific prompts, refer to the <a class="reference internal" href="quickstart.html#respond-to-the-onboard-wizard"><span class="std std-ref">Respond to the Onboard Wizard</span></a> section and the <a class="reference internal" href="../inference/inference-options.html"><span class="std std-doc">Inference Options</span></a> page.</p>
+For provider-specific prompts, refer to the <a class="reference internal" href="quickstart.html#respond-to-the-onboard-wizard"><span class="std std-ref">Respond to the Onboard Wizard</span></a> section and the <a class="reference internal" href="../inference/inference-options.html"><span class="std std-doc">Inference Options</span></a> page.
+The Hermes wizard does not ask for Brave Web Search because Hermes does not use NemoClaw’s OpenClaw web-search configuration.</p>
 <p>After provider and policy selection, review the summary and confirm the build.
-NemoClaw writes Hermes configuration into <code class="docutils literal notranslate"><span class="pre">/sandbox/.hermes</span></code>, routes model traffic through <code class="docutils literal notranslate"><span class="pre">inference.local</span></code>, and starts the Hermes gateway inside the sandbox.</p>
+NemoClaw writes Hermes configuration into <code class="docutils literal notranslate"><span class="pre">/sandbox/.hermes</span></code>, routes model traffic through <code class="docutils literal notranslate"><span class="pre">inference.local</span></code>, and starts the Hermes gateway inside the sandbox.
+The Hermes image includes runtime dependencies for the supported NemoClaw messaging integrations, API service, and health endpoint.
+The base image does not include unsupported Hermes integrations.</p>
 </section>
 <section id="use-non-interactive-setup">
 <h2>Use Non-Interactive Setup<a class="headerlink" href="#use-non-interactive-setup" title="Link to this heading">#</a></h2>
@@ -601,7 +610,8 @@ Do not append an OpenClaw <code class="docutils literal notranslate"><span class
 <section id="manage-the-sandbox">
 <h2>Manage the Sandbox<a class="headerlink" href="#manage-the-sandbox" title="Link to this heading">#</a></h2>
 <p>Use the same lifecycle commands as a standard NemoClaw sandbox.
-The <code class="docutils literal notranslate"><span class="pre">nemohermes</span></code> alias keeps help text and recovery messages aligned with Hermes, while targeting the same registered sandbox.</p>
+The <code class="docutils literal notranslate"><span class="pre">nemohermes</span></code> alias keeps help text and recovery messages aligned with Hermes, while targeting the same registered sandbox.
+<code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">list</span></code> shows the agent type for each sandbox so you can distinguish Hermes and OpenClaw entries.</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>nemohermes<span class="w"> </span>my-hermes<span class="w"> </span>status
 <span class="gp">$ </span>nemohermes<span class="w"> </span>my-hermes<span class="w"> </span>logs<span class="w"> </span>--follow
 <span class="gp">$ </span>nemohermes<span class="w"> </span>my-hermes<span class="w"> </span>snapshot<span class="w"> </span>create<span class="w"> </span>--name<span class="w"> </span>before-change
@@ -622,7 +632,7 @@ The <code class="docutils literal notranslate"><span class="pre">nemohermes</spa
 <ul class="simple">
 <li><p><a class="reference internal" href="../inference/inference-options.html"><span class="std std-doc">Inference Options</span></a> to choose a provider and model.</p></li>
 <li><p><a class="reference internal" href="../reference/commands.html"><span class="std std-doc">Commands</span></a> to see the full <code class="docutils literal notranslate"><span class="pre">nemohermes</span></code> alias behavior.</p></li>
-<li><p><a class="reference internal" href="../workspace/backup-restore.html"><span class="std std-doc">Backup and Restore</span></a> to preserve sandbox state before destructive operations.</p></li>
+<li><p><a class="reference internal" href="../manage-sandboxes/backup-restore.html"><span class="std std-doc">Backup and Restore</span></a> to preserve sandbox state before destructive operations.</p></li>
 <li><p><a class="reference internal" href="../monitoring/monitor-sandbox-activity.html"><span class="std std-doc">Monitor Sandbox Activity</span></a> to inspect OpenShell events and sandbox logs.</p></li>
 </ul>
 </section>

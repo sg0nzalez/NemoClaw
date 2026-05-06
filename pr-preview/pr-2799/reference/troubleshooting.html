@@ -45,7 +45,7 @@
 
 
 
-    <script src="../_static/documentation_options.js?v=78871a90"></script>
+    <script src="../_static/documentation_options.js?v=9d992d0d"></script>
     <script src="../_static/doctools.js?v=9a2dae69"></script>
     <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
@@ -56,7 +56,7 @@
     <script>
         DOCUMENTATION_OPTIONS.theme_version = '0.16.1';
         DOCUMENTATION_OPTIONS.theme_switcher_json_url = '../versions1.json';
-        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.32';
+        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.35';
         DOCUMENTATION_OPTIONS.show_version_warning_banner =
             false;
         </script>
@@ -404,10 +404,29 @@
 <li class="toctree-l1"><a class="reference internal" href="../inference/switch-inference-providers.html">Switch Inference Providers</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../inference/set-up-sub-agent.html">Set Up Task-Specific Sub-Agents</a></li>
 </ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Manage Sandboxes</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../manage-sandboxes/lifecycle.html">Manage Sandbox Lifecycle</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../manage-sandboxes/messaging-channels.html">Set Up Messaging Channels</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../manage-sandboxes/workspace-files.html">Workspace Files</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../manage-sandboxes/backup-restore.html">Backup and Restore</a></li>
+</ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Network Policy</span></p>
 <ul class="nav bd-sidenav">
 <li class="toctree-l1"><a class="reference internal" href="../network-policy/approve-network-requests.html">Approve or Deny Network Requests</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../network-policy/customize-network-policy.html">Customize the Network Policy</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../network-policy/integration-policy-examples.html">Integration Policy Examples</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Deployment</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../deployment/deploy-to-remote-gpu.html">Deploy to a Remote GPU Instance</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../deployment/brev-web-ui.html">Brev Web UI</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../deployment/install-openclaw-plugins.html">Install OpenClaw Plugins</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../deployment/sandbox-hardening.html">Sandbox Hardening</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Monitoring</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../monitoring/monitor-sandbox-activity.html">Monitor Sandbox Activity</a></li>
 </ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Security</span></p>
 <ul class="nav bd-sidenav">
@@ -415,26 +434,11 @@
 <li class="toctree-l1"><a class="reference internal" href="../security/credential-storage.html">Credential Storage</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../security/openclaw-controls.html">OpenClaw Controls</a></li>
 </ul>
-<p aria-level="2" class="caption" role="heading"><span class="caption-text">Deployment</span></p>
-<ul class="nav bd-sidenav">
-<li class="toctree-l1"><a class="reference internal" href="../deployment/deploy-to-remote-gpu.html">Deploy to a Remote GPU Instance</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../deployment/set-up-telegram-bridge.html">Set Up Telegram</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../deployment/install-openclaw-plugins.html">Install OpenClaw Plugins</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../deployment/sandbox-hardening.html">Sandbox Hardening</a></li>
-</ul>
-<p aria-level="2" class="caption" role="heading"><span class="caption-text">Workspace</span></p>
-<ul class="nav bd-sidenav">
-<li class="toctree-l1"><a class="reference internal" href="../workspace/workspace-files.html">Workspace Files</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../workspace/backup-restore.html">Backup &amp; Restore</a></li>
-</ul>
-<p aria-level="2" class="caption" role="heading"><span class="caption-text">Monitoring</span></p>
-<ul class="nav bd-sidenav">
-<li class="toctree-l1"><a class="reference internal" href="../monitoring/monitor-sandbox-activity.html">Monitor Sandbox Activity</a></li>
-</ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Reference</span></p>
 <ul class="current nav bd-sidenav">
 <li class="toctree-l1"><a class="reference internal" href="architecture.html">Architecture</a></li>
-<li class="toctree-l1"><a class="reference internal" href="commands.html">Commands</a></li>
+<li class="toctree-l1"><a class="reference internal" href="commands.html">CLI Commands Reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="cli-selection-guide.html">CLI Selection Guide</a></li>
 <li class="toctree-l1"><a class="reference internal" href="network-policies.html">Network Policies</a></li>
 <li class="toctree-l1 current active"><a class="current reference internal" href="#">Troubleshooting</a></li>
 </ul>
@@ -730,7 +734,7 @@ If the installed OpenShell version exceeds the configured maximum, <code class="
 </section>
 <section id="invalid-sandbox-name">
 <h3>Invalid sandbox name<a class="headerlink" href="#invalid-sandbox-name" title="Link to this heading">#</a></h3>
-<p>Sandbox names must follow RFC 1123 subdomain rules: lowercase alphanumeric characters and hyphens only, and must start and end with an alphanumeric character.
+<p>Sandbox names must be lowercase, start with a letter, contain only letters, numbers, and internal hyphens, and end with a letter or number.
 Uppercase letters are automatically lowercased.</p>
 <p>Names that collide with global CLI commands are also rejected.
 Reserved names include <code class="docutils literal notranslate"><span class="pre">onboard</span></code>, <code class="docutils literal notranslate"><span class="pre">list</span></code>, <code class="docutils literal notranslate"><span class="pre">deploy</span></code>, <code class="docutils literal notranslate"><span class="pre">setup</span></code>, <code class="docutils literal notranslate"><span class="pre">start</span></code>, <code class="docutils literal notranslate"><span class="pre">stop</span></code>, <code class="docutils literal notranslate"><span class="pre">status</span></code>, <code class="docutils literal notranslate"><span class="pre">debug</span></code>, <code class="docutils literal notranslate"><span class="pre">uninstall</span></code>, <code class="docutils literal notranslate"><span class="pre">credentials</span></code>, and <code class="docutils literal notranslate"><span class="pre">help</span></code>.
@@ -752,6 +756,19 @@ If neither is found, verify that Colima is running:</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>colima<span class="w"> </span>status
 </pre></div>
 </div>
+</section>
+<section id="sandbox-build-is-slow-or-hangs-under-provisioned-container-runtime">
+<h3>Sandbox build is slow or hangs (under-provisioned container runtime)<a class="headerlink" href="#sandbox-build-is-slow-or-hangs-under-provisioned-container-runtime" title="Link to this heading">#</a></h3>
+<p>Default Colima ships with 2 vCPU and 2 GiB of memory, which is not enough headroom for the BuildKit-driven sandbox image build.
+On macOS Apple Silicon, the build can stall part-way through with no progress and no error, leaving the wizard waiting indefinitely.</p>
+<p>Preflight inspects <code class="docutils literal notranslate"><span class="pre">docker</span> <span class="pre">info</span></code> for <code class="docutils literal notranslate"><span class="pre">NCPU</span></code> and <code class="docutils literal notranslate"><span class="pre">MemTotal</span></code> and prints a warning when the runtime falls below 4 vCPU or 8 GiB.
+On Colima, raise the resources before re-running onboard:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>colima<span class="w"> </span>stop
+<span class="gp">$ </span>colima<span class="w"> </span>start<span class="w"> </span>--cpu<span class="w"> </span><span class="m">6</span><span class="w"> </span>--memory<span class="w"> </span><span class="m">12</span><span class="w"> </span>--disk<span class="w"> </span><span class="m">100</span>
+</pre></div>
+</div>
+<p>On Docker Desktop, raise CPU and memory limits in <em>Settings → Resources</em>, then apply and restart.</p>
+<p>To silence the warning when the host is intentionally small, set <code class="docutils literal notranslate"><span class="pre">NEMOCLAW_IGNORE_RUNTIME_RESOURCES=1</span></code> before running <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span></code>.</p>
 </section>
 <section id="re-onboard-fails-because-port-18789-is-held-by-ssh">
 <h3>Re-onboard fails because port 18789 is held by SSH<a class="headerlink" href="#re-onboard-fails-because-port-18789-is-held-by-ssh" title="Link to this heading">#</a></h3>
@@ -876,7 +893,7 @@ You do not need to edit <code class="docutils literal notranslate"><span class="
 <p class="admonition-title">If the sandbox does not recover</p>
 <p>If the sandbox remains missing after restarting the gateway, run <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span></code> to recreate it.
 The wizard prompts for confirmation before destroying an existing sandbox. If you confirm, it <strong>destroys and recreates</strong> the sandbox. Workspace files (SOUL.md, USER.md, IDENTITY.md, AGENTS.md, MEMORY.md, and daily memory notes) are lost.
-Back up your workspace first by following the instructions at <a class="reference internal" href="../workspace/backup-restore.html"><span class="std std-doc">Back Up and Restore</span></a>.</p>
+Back up your workspace first by following the instructions at <a class="reference internal" href="../manage-sandboxes/backup-restore.html"><span class="std std-doc">Back Up and Restore</span></a>.</p>
 </div>
 </section>
 <section id="sandbox-is-running-an-outdated-agent-version">
@@ -976,6 +993,8 @@ onboarding so the wizard rebuilds the image with chat completions:</p>
 </div>
 <p>If you previously set <code class="docutils literal notranslate"><span class="pre">NEMOCLAW_PREFERRED_API=openai-responses</span></code> to force the
 Responses API, unset it before re-running onboard.</p>
+<p>When you enable Telegram messaging with an OpenAI-compatible endpoint, onboarding also checks <code class="docutils literal notranslate"><span class="pre">inference.local</span></code> from inside the sandbox.
+If that smoke check fails, fix the compatible-endpoint base URL, credentials, model, or network route before testing the Telegram bot again.</p>
 <p>Do not rely on <code class="docutils literal notranslate"><span class="pre">NEMOCLAW_INFERENCE_API_OVERRIDE</span></code> alone — it patches the config
 at container startup but does not update the Dockerfile ARG baked into the
 image.
@@ -1009,12 +1028,17 @@ In non-interactive mode (<code class="docutils literal notranslate"><span class=
 <p>This is expected.
 The sandbox’s OpenClaw configuration (<code class="docutils literal notranslate"><span class="pre">/sandbox/.openclaw/openclaw.json</span></code>) is baked into the container image at build time.
 NemoClaw’s sandbox entrypoint installs a guard that intercepts <code class="docutils literal notranslate"><span class="pre">openclaw</span> <span class="pre">config</span> <span class="pre">set</span></code> and <code class="docutils literal notranslate"><span class="pre">openclaw</span> <span class="pre">config</span> <span class="pre">unset</span></code> and prints an actionable error, because changes made inside the running sandbox do not persist across rebuilds.</p>
-<p>To change your configuration, exit the sandbox and rerun onboarding:</p>
+<p>For most configuration changes, exit the sandbox and rerun onboarding:</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>nemoclaw<span class="w"> </span>onboard
 </pre></div>
 </div>
 <p>If NemoClaw reports a resumable failed onboarding session, run <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span> <span class="pre">--resume</span></code> instead.
 This rebuilds the sandbox with your updated settings.</p>
+<p>For advanced live edits, use the host-side config command instead of running <code class="docutils literal notranslate"><span class="pre">openclaw</span> <span class="pre">config</span> <span class="pre">set</span></code> inside the sandbox:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>nemoclaw<span class="w"> </span>&lt;sandbox&gt;<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>--key<span class="w"> </span>&lt;dotpath&gt;<span class="w"> </span>--value<span class="w"> </span><span class="s1">&#39;&lt;json-or-string&gt;&#39;</span><span class="w"> </span>--restart
+</pre></div>
+</div>
+<p>Host-side <code class="docutils literal notranslate"><span class="pre">config</span> <span class="pre">set</span></code> validates any HTTP or HTTPS URLs in the new value, including URLs nested inside JSON objects or arrays. NemoClaw rejects loopback, private, reserved, and internal hosts; DNS names must resolve successfully and must not resolve to private/internal addresses. HTTP URLs are written with the validated IP address pinned to reduce DNS-rebinding risk. Avoid putting credentials in config values; rotate provider credentials with <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">&lt;sandbox&gt;</span> <span class="pre">config</span> <span class="pre">rotate-token</span></code> instead.</p>
 </section>
 <section id="openclaw-doctor-fix-cannot-repair-discord-channel-config-inside-the-sandbox">
 <h3><code class="docutils literal notranslate"><span class="pre">openclaw</span> <span class="pre">doctor</span> <span class="pre">--fix</span></code> cannot repair Discord channel config inside the sandbox<a class="headerlink" href="#openclaw-doctor-fix-cannot-repair-discord-channel-config-inside-the-sandbox" title="Link to this heading">#</a></h3>
@@ -1059,7 +1083,7 @@ If logs show errors such as <code class="docutils literal notranslate"><span cla
 <h3>Messaging bridge appears running but no messages arrive<a class="headerlink" href="#messaging-bridge-appears-running-but-no-messages-arrive" title="Link to this heading">#</a></h3>
 <p>Bot tokens for Telegram (<code class="docutils literal notranslate"><span class="pre">getUpdates</span></code>), Discord (gateway), and Slack (Socket Mode) only allow one active consumer per token. If two NemoClaw sandboxes are configured with the same bot token, each one kicks the other off its polling connection and neither delivers messages. <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">status</span></code> still reports the bridge as running because the gateway process itself is alive.</p>
 <p>To diagnose, open a shell in the sandbox and inspect the gateway log:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>openshell<span class="w"> </span>term<span class="w"> </span>&lt;sandbox-name&gt;
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>nemoclaw<span class="w"> </span>&lt;sandbox-name&gt;<span class="w"> </span>connect
 <span class="gp">$ </span>tail<span class="w"> </span>-f<span class="w"> </span>/tmp/gateway.log
 </pre></div>
 </div>
@@ -1382,6 +1406,7 @@ If you encounter issues with Podman, switch to a tested runtime (Docker Engine, 
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#invalid-sandbox-name">Invalid sandbox name</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#sandbox-creation-fails-on-dgx">Sandbox creation fails on DGX</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#colima-socket-not-detected-macos">Colima socket not detected (macOS)</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#sandbox-build-is-slow-or-hangs-under-provisioned-container-runtime">Sandbox build is slow or hangs (under-provisioned container runtime)</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#re-onboard-fails-because-port-18789-is-held-by-ssh">Re-onboard fails because port 18789 is held by SSH</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#updated-messaging-token-is-not-picked-up">Updated messaging token is not picked up</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#sandbox-creation-killed-by-oom-exit-137">Sandbox creation killed by OOM (exit 137)</a></li>
