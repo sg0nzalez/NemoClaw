@@ -521,14 +521,33 @@ brev exec "$INSTANCE_NAME" "
   NEMOCLAW_NON_INTERACTIVE=1 \
   NEMOCLAW_PROVIDER=${NEMOCLAW_PROVIDER:-ollama} \
   NEMOCLAW_MODEL=${NEMOCLAW_MODEL:-nemotron-3-nano:4b} \
-  NEMOCLAW_SANDBOX_NAME=__verify_stale_install__ \
+  NEMOCLAW_SANDBOX_NAME=verify-stale-install \
   ${NVIDIA_API_KEY:+NVIDIA_API_KEY=$NVIDIA_API_KEY} \
   bash -c 'curl -fsSL $INSTALL_URL | bash'
 " || BASELINE_INSTALL_FAILED=1
-brev exec "$INSTANCE_NAME" "nemoclaw --version"
 
-# The bundled onboard creates a sandbox named __verify_stale_install__ that we don't want.
-# Destroy it so the reproducer starts from a clean state.
+# Verify the resolved install version matches the requested version. This guards against the
+# `VAR=val curl ... | bash` shell-scoping footgun where the env var binds to curl, not the
+# downstream bash, and the install silently falls through to "latest". Surfaced during a
+# rot-debugging investigation where v0.0.36 was silently installed when v0.0.26 was requested
+# and several minutes of "convincing" output ran before anyone noticed. Always print the
+# resolved state, never trust the requested state.
+RESOLVED=$(brev exec "$INSTANCE_NAME" "bash -lc 'nemoclaw --version'" 2>&1 | tail -1)
+echo "[verify-stale] baseline requested: $REPORTED_VERSION; resolved: $RESOLVED"
+case "$RESOLVED" in
+  *"$REPORTED_VERSION"*) ;;  # match — proceed
+  *)
+    echo "ERROR: baseline install resolved to '$RESOLVED' but $REPORTED_VERSION was requested."
+    echo "  Common cause: env-var scoping in the install command. Verify the env vars are on"
+    echo "  the BASH side of the curl|bash pipe, not the curl side. Setting"
+    echo "  BASELINE_INSTALL_FAILED=1 to prevent verifying against the wrong version."
+    BASELINE_INSTALL_FAILED=1
+    ;;
+esac
+
+# The bundled onboard creates a sandbox name we don't want carrying through to the reproducer.
+# Use a hyphen-only name (NemoClaw's name validator rejects underscores). Destroy it so the
+# reproducer starts from a clean state.
 brev exec "$INSTANCE_NAME" "sg docker -c 'nemoclaw destroy --all --force 2>/dev/null || true'"
 ```
 
@@ -717,7 +736,15 @@ brev exec "$INSTANCE_NAME" "bash ~/reproducer.sh" 2>&1 | tee ./baseline-transcri
 ```bash
 brev exec "$INSTANCE_NAME" "$RESET"
 brev exec "$INSTANCE_NAME" "curl -fsSL $INSTALL_URL | bash"
-brev exec "$INSTANCE_NAME" "nemoclaw --version"
+
+# Same resolved-version check as Step 8a — guard against env-var scoping or default fallthrough
+# silently installing the wrong version. The latest install should resolve to $LATEST.
+RESOLVED=$(brev exec "$INSTANCE_NAME" "bash -lc 'nemoclaw --version'" 2>&1 | tail -1)
+echo "[verify-stale] latest requested: $LATEST; resolved: $RESOLVED"
+case "$RESOLVED" in
+  *"$LATEST"*) ;;  # match — proceed
+  *) echo "WARN: latest install resolved to '$RESOLVED' (expected match for $LATEST). Proceeding but flag in comment." ;;
+esac
 
 brev copy ./reproducer.sh "$INSTANCE_NAME":~/reproducer.sh
 brev exec "$INSTANCE_NAME" "bash ~/reproducer.sh" 2>&1 | tee ./latest-transcript.log
