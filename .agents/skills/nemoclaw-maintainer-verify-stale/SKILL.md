@@ -206,6 +206,41 @@ CPU default keeps cost low. Only escalate to GPU when the reproducer needs one.
 
 Most bugs are `functional`. The other three classes need verification harnesses that the standard rubric can't produce honestly — e.g., one clean run of a perf reproducer doesn't tell you the p50 budget was met; one onboard run doesn't tell you a config survives a rebuild. Set `BUG_CLASS=<class>` so downstream steps can branch.
 
+**Provider classification.** Some bugs are tied to a specific inference provider (NVIDIA NIM, Gemini, Anthropic, OpenAI) and won't reproduce faithfully under Ollama substitution. Classify which provider the issue references so downstream steps either prompt for the right API key or accept the substitution penalty:
+
+| Detection signal | Provider |
+|---|---|
+| `Provider: NVIDIA` label, body mentions `NVIDIA NIM`, `build.nvidia.com`, `nvapi-...`, `NVIDIA_API_KEY`, or `NEMOCLAW_PROVIDER=build` | `nim` |
+| `Provider: Gemini` label, body mentions `Gemini`, `gemini-flash`, `gemini-pro`, `GEMINI_API_KEY` | `gemini` |
+| `Provider: Anthropic` / `Provider: AWS` (Bedrock) labels or matching keywords | `anthropic`/`bedrock` |
+| `Provider: Ollama`, body mentions `ollama` or `NEMOCLAW_PROVIDER=ollama`, or no provider mentioned at all | `ollama` (default) |
+
+Set `BUG_PROVIDER=<provider>`.
+
+**Required-API-key prompt.** When `BUG_PROVIDER` is anything other than `ollama` AND the bug's reproducer actually exercises inference (not pure CLI surface or sandbox build), the skill MUST stop here and prompt the maintainer interactively before any Brev cost is incurred:
+
+```text
+The reporter's reproducer uses the <provider> provider, which requires a real API key
+to verify faithfully. Three options:
+
+  1. Provide an API key now. Export NVIDIA_API_KEY=<key> (or GEMINI_API_KEY=<key>, etc.)
+     in the environment running this skill, then re-run. The key is propagated to the
+     Brev box via `brev exec` and removed when the box is deleted.
+
+  2. Substitute Ollama and accept the -30 confidence penalty (per Step 8a.5). The
+     verdict will be capped because we're not exercising the real provider's code
+     path.
+
+  3. Skip this issue. Mark `verify-inconclusive` with the reason "requires <provider>
+     API key — not provided in this run."
+
+Choose 1, 2, or 3:
+```
+
+This prompt blocks before Step 7 provisions a box. Don't burn cost on a verification path the maintainer hasn't agreed to.
+
+**Pure-CLI / pure-sandbox-build bugs are exempt** — those don't actually exercise inference, so the provider doesn't matter even if the issue body mentions one. Heuristic: if Step 6.7's local-first predicate would have fired (no sandbox state, no model server interaction), skip the prompt.
+
 ---
 
 ## Step 6: Extract the Reproducer
@@ -217,7 +252,7 @@ NV QA files most bugs through an HTML form, so issue bodies are typically a mix 
 1. **Verbatim:** the first markdown fence (```` ``` ```` or ```` ~~~ ````) **or** HTML `<pre>` block containing a `nemoclaw` invocation. Strip surrounding tags and unescape HTML entities before saving to `./reproducer.sh`. No confidence penalty (yet).
 2. **No verbatim block found:** leave `./reproducer.sh` absent. Step 8b will synthesize from the issue body on demand and apply the **−30 synth penalty** at that point.
 
-A robust extractor handles both shapes with the body fetched as JSON:
+A robust extractor handles both shapes with the body fetched as JSON. The "anchor word" — what marks a block as a reproducer — must include `nemoclaw`, `openclaw`, AND `openshell`. Issue #2592 surfaced this gap: its reproducer was `openclaw channels add telegram` run inside the sandbox; a `nemoclaw`-only regex would have missed the verbatim block and forced the run through Step 8c synth-repro with a -30 penalty:
 
 ```bash
 BODY=$(gh issue view "$ISSUE_NUMBER" --repo NVIDIA/NemoClaw --json body -q .body)
@@ -225,9 +260,12 @@ BODY=$(gh issue view "$ISSUE_NUMBER" --repo NVIDIA/NemoClaw --json body -q .body
 REPRODUCER=$(printf '%s' "$BODY" | python3 -c '
 import re, sys, html
 b = sys.stdin.read()
-m = re.search(r"```(?:bash|sh)?\n(.*?nemoclaw.*?)\n```", b, re.S)
-if not m: m = re.search(r"~~~(?:bash|sh)?\n(.*?nemoclaw.*?)\n~~~", b, re.S)
-if not m: m = re.search(r"<pre[^>]*>(.*?nemoclaw.*?)</pre>", b, re.S)
+# Anchor word: any of nemoclaw / openclaw / openshell. Issue bodies use whichever
+# tool the reporter ran (host-side nemoclaw vs in-sandbox openclaw vs openshell CLI).
+ANCHOR = r"(?:nemoclaw|openclaw|openshell)"
+m = re.search(rf"```(?:bash|sh)?\n(.*?{ANCHOR}.*?)\n```", b, re.S)
+if not m: m = re.search(rf"~~~(?:bash|sh)?\n(.*?{ANCHOR}.*?)\n~~~", b, re.S)
+if not m: m = re.search(rf"<pre[^>]*>(.*?{ANCHOR}.*?)</pre>", b, re.S)
 if m:
     text = re.sub(r"<[^>]+>", "", m.group(1))
     print(html.unescape(text).strip())
@@ -471,12 +509,32 @@ The installer accepts the target ref via the `NEMOCLAW_INSTALL_TAG` env var (ver
 ```bash
 brev exec "$INSTANCE_NAME" "$RESET"
 
-brev exec "$INSTANCE_NAME" "NEMOCLAW_INSTALL_TAG=$REPORTED_VERSION bash -c 'curl -fsSL $INSTALL_URL | bash'" \
-  || BASELINE_INSTALL_FAILED=1
+# Pass the provider env vars through so install.sh's bundled `[3/3] Onboarding` step
+# doesn't fall back to the default `build` (NIM) provider — which requires NVIDIA_API_KEY
+# and otherwise fails the install with a misleading error. When NEMOCLAW_PROVIDER=ollama
+# (the common case), the bundled onboard uses the local Ollama we set up in Step 8a.5
+# and either succeeds (ideal) or fails on a real Dockerfile/sandbox-build issue (which
+# is what we want to detect). Pass NVIDIA_API_KEY only if the maintainer provided one
+# at Step 5's prompt.
+brev exec "$INSTANCE_NAME" "
+  NEMOCLAW_INSTALL_TAG=$REPORTED_VERSION \
+  NEMOCLAW_NON_INTERACTIVE=1 \
+  NEMOCLAW_PROVIDER=${NEMOCLAW_PROVIDER:-ollama} \
+  NEMOCLAW_MODEL=${NEMOCLAW_MODEL:-nemotron-3-nano:4b} \
+  NEMOCLAW_SANDBOX_NAME=__verify_stale_install__ \
+  ${NVIDIA_API_KEY:+NVIDIA_API_KEY=$NVIDIA_API_KEY} \
+  bash -c 'curl -fsSL $INSTALL_URL | bash'
+" || BASELINE_INSTALL_FAILED=1
 brev exec "$INSTANCE_NAME" "nemoclaw --version"
+
+# The bundled onboard creates a sandbox named __verify_stale_install__ that we don't want.
+# Destroy it so the reproducer starts from a clean state.
+brev exec "$INSTANCE_NAME" "sg docker -c 'nemoclaw destroy --all --force 2>/dev/null || true'"
 ```
 
-If install fails (old releases rot — installer URLs, deps, OS images all drift over time), set `BASELINE_INSTALL_FAILED=1` and **skip 8b/8c**, going straight to 8d. Note "baseline-install-skipped" in the final comment. Step 9's scoring rule handles the degraded mode.
+If install fails (old releases rot — installer URLs, deps, OS images all drift over time, or the in-image Dockerfile patch step asserts against a code shape that's since changed), set `BASELINE_INSTALL_FAILED=1` and **skip 8b/8c**, going straight to 8d. Note "baseline-install-skipped" or "baseline-build-skipped" in the final comment depending on which phase rotted. Step 9's scoring rule handles the degraded mode (cap at 84).
+
+**The reproducer's own `nemoclaw onboard` (Step 8b) must pass `--fresh`.** If install.sh's bundled onboard was in an in-progress or failed state when we destroyed the install sandbox, the reproducer's onboard would error with `Previous onboarding session failed. Re-run with --fresh to discard it`. `--fresh` ensures a clean start.
 
 ### Step 8a.5: Bootstrap reproducer dependencies
 
@@ -516,6 +574,22 @@ Bootstrap **once before Step 8b's baseline run** and reuse for Step 8d's latest 
 
 **If bootstrap fails** (network issue pulling the model, service won't start, etc.), this is an infra failure — abort to Step 11. Do not silently substitute; the user opted into faithfulness for a reason.
 
+**Ollama coverage table.** Ollama is the default provider for verification runs because it's free, local, and self-hosted. It covers most bug classes faithfully but not all. Use this table to decide whether Ollama is sufficient or whether Step 5's API-key prompt should fire:
+
+| Bug class | Ollama covers? | Notes |
+|---|---|---|
+| CLI surface (subcommand parsing, flag handling, oclif dispatch) | ✓ Always | Provider not exercised |
+| Sandbox structure (build, file permissions, mounts, layout) | ✓ Always | Provider not exercised |
+| Networking / policy (port forwards, NAT, egress rules, channels guards) | ✓ Always | Provider not exercised |
+| Generic inference flow (does an agent turn complete, does the proxy route correctly) | ✓ Usually | Ollama can fail in the same shape as NIM/Gemini for most flow bugs |
+| Provider-specific behavior (`Provider: NVIDIA` symptom, NIM-only error handling, `Provider: Gemini` quirks) | ✗ No | Different code paths; substitution doesn't exercise the bug |
+| Model-specific behavior (`gemini-flash-3-preview` doesn't handle prompt X, `nemotron-3-nano:4b` works fine) | ✗ No | Wrong model = wrong outputs |
+| Ollama-shape-specific (#2519 "Ollama-local 401" — local-vs-networked Ollama config) | △ Sometimes | A generic Ollama install may or may not reproduce; may need specific configuration |
+| Performance / latency on specific silicon | ✗ No | Hardware substitution caveat (Step 10) and Step 8e perf rubric apply |
+| Quota / rate-limit / API-key validation | ✗ No | Ollama doesn't have those failure modes |
+
+When the table says ✗ No or △ Sometimes, Step 5's API-key prompt fires. When it says ✓, proceed with Ollama and skip the prompt.
+
 ### Step 8a.5b: Brev exec environment quirks
 
 Two non-obvious gotchas surfaced during the #2007 e2e run that every subsequent `brev exec` call has to handle. Encode them once here so reproducer scripts don't have to relearn each time.
@@ -538,6 +612,36 @@ brev exec "$INSTANCE" "sg docker -c 'bash ~/reproducer.sh'"
 ```
 
 Both patterns appear in the canonical setup script committed alongside the skill (or are encoded in your reproducer wrapper). Don't rely on the user discovering them mid-run.
+
+**`openshell sandbox exec` argument-order footgun.** When the reproducer needs to run a command *inside* the sandbox (channels-guard checks, in-sandbox file inspection, etc.), the correct non-interactive form uses `-n <name>` and a `--` separator:
+
+```bash
+# Correct:
+openshell sandbox exec -n ai -- bash -c 'source /sandbox/.bashrc; openclaw channels add telegram; echo "EXIT=$?"'
+
+# Wrong (silently auto-detects sandbox by "last used", stuffs the leftover positional
+# `ai` into bash's $0, prints "/bin/bash: line 1: ai: command not found" — the
+# reproducer appears to fail but actually never ran inside the sandbox at all):
+openshell sandbox exec ai bash -c '...'
+```
+
+Issue #2592's first run hit this — wasted ~15 min before the maintainer noticed. Always use the `-n <name> -- <cmd>` form when the reproducer touches in-sandbox commands.
+
+**`brev exec` SSH-drop re-execution guard.** Brev's CLI silently retries from the top when the SSH connection drops mid-run, producing two parallel reproducer executions (we hit this on #2592 — one onboard process clobbered another's state, and both got billed). Use a sentinel file in the reproducer wrapper to make the script idempotent:
+
+```bash
+# At the top of the reproducer wrapper script:
+SENTINEL=~/.verify-stale-running
+if [ -f "$SENTINEL" ]; then
+  echo "ERROR: another verify-stale run is in progress (sentinel: $SENTINEL)."
+  echo "       If you're sure no other run is active, rm $SENTINEL and re-invoke."
+  exit 1
+fi
+trap 'rm -f "$SENTINEL"' EXIT
+touch "$SENTINEL"
+```
+
+The sentinel survives an SSH drop because it lives on the Brev box's filesystem; the trap removes it on script exit. A second `brev exec` invocation that tries to retry from the top will hit the sentinel and bail instead of double-running.
 
 ---
 
@@ -1147,6 +1251,12 @@ The next weekly run retries naturally.
 Both baseline-rot variants share the same downstream effect: Step 9 cap, Step 10 caveat, @-mention reporter to confirm. Distinguishing them in the comment helps a reviewer understand the failure mode without re-running.
 
 This degradation is expected — old releases rot at multiple phases (binary installer URL drift, base-image dependencies vanish, in-image Dockerfile layers get removed by structural refactors). We still want to extract whatever signal we can from the latest run plus PR/commit evidence, just at a more conservative confidence ceiling.
+
+**Empirical reality after two e2e runs:** baseline-build-rot is the **dominant** failure mode for any reported version more than ~5–7 patches behind, not an edge case. Both #2007 (v0.0.18, 17 patches behind) and #2592 (v0.0.28, 7 patches behind) hit it. The cap-at-84 with reporter @-mention is the **modal** verdict shape for stale-issue verification, not the exception. Reframe expectations accordingly:
+
+- For issues reported >5 patches behind `$LATEST`, plan for the cap-at-84 path. Pre-flight (PR-search, pickaxe) carries more weight than baseline runtime evidence.
+- For issues reported within 1–4 patches of `$LATEST`, baseline is more likely to install cleanly and the full +50 path is reachable.
+- The skill's design assumes baseline + latest both run cleanly; in practice latest-only with cap-at-84 is the workhorse path. The score-cap is doing real work, not just a fallback.
 
 **Keep-box-on-inconclusive.** When `verify-inconclusive` lands (Step 8c gave up, or Step 9 score < 60), **skip the cleanup trap** for this run if the box was provisioned by this run — set `PROVISIONED_NEW=0` before the trap fires so the EXIT handler is a no-op. Print the `brev shell "$INSTANCE_NAME"` command and an explicit `brev delete "$INSTANCE_NAME"` reminder in the run output so the maintainer can triage and clean up manually. Reused boxes stay regardless. Ship-failed verifications are the exact case where having an inspectable artifact pays for itself; an unbounded sleep-and-delete in the background isn't reliable across session ends, so we leave deletion explicit.
 
