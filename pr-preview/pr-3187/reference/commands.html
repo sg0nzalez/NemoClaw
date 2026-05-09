@@ -45,7 +45,7 @@
 
 
 
-    <script src="../_static/documentation_options.js?v=30c95dc1"></script>
+    <script src="../_static/documentation_options.js?v=218434ba"></script>
     <script src="../_static/doctools.js?v=9a2dae69"></script>
     <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
@@ -56,7 +56,7 @@
     <script>
         DOCUMENTATION_OPTIONS.theme_version = '0.16.1';
         DOCUMENTATION_OPTIONS.theme_switcher_json_url = '../versions1.json';
-        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.36';
+        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.38';
         DOCUMENTATION_OPTIONS.show_version_warning_banner =
             false;
         </script>
@@ -557,7 +557,7 @@ Running <code class="docutils literal notranslate"><span class="pre">nemoclaw</s
 <p>Run the interactive setup wizard (recommended for new installs).
 The wizard creates an OpenShell gateway, registers inference providers, builds the sandbox image, and creates the sandbox.
 Use this command for new installs and for recreating a sandbox after changes to policy or configuration.</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>nemoclaw<span class="w"> </span>onboard<span class="w"> </span><span class="o">[</span>--non-interactive<span class="o">]</span><span class="w"> </span><span class="o">[</span>--resume<span class="w"> </span><span class="p">|</span><span class="w"> </span>--fresh<span class="o">]</span><span class="w"> </span><span class="o">[</span>--recreate-sandbox<span class="o">]</span><span class="w"> </span><span class="o">[</span>--gpu<span class="w"> </span><span class="p">|</span><span class="w"> </span>--no-gpu<span class="o">]</span><span class="w"> </span><span class="o">[</span>--from<span class="w"> </span>&lt;Dockerfile&gt;<span class="o">]</span><span class="w"> </span><span class="o">[</span>--name<span class="w"> </span>&lt;sandbox&gt;<span class="o">]</span><span class="w"> </span><span class="o">[</span>--agent<span class="w"> </span>&lt;name&gt;<span class="o">]</span><span class="w"> </span><span class="o">[</span>--control-ui-port<span class="w"> </span>&lt;N&gt;<span class="o">]</span><span class="w"> </span><span class="o">[</span>--yes-i-accept-third-party-software<span class="o">]</span>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>nemoclaw<span class="w"> </span>onboard<span class="w"> </span><span class="o">[</span>--non-interactive<span class="o">]</span><span class="w"> </span><span class="o">[</span>--resume<span class="w"> </span><span class="p">|</span><span class="w"> </span>--fresh<span class="o">]</span><span class="w"> </span><span class="o">[</span>--recreate-sandbox<span class="o">]</span><span class="w"> </span><span class="o">[</span>--gpu<span class="w"> </span><span class="p">|</span><span class="w"> </span>--no-gpu<span class="o">]</span><span class="w"> </span><span class="o">[</span>--from<span class="w"> </span>&lt;Dockerfile&gt;<span class="o">]</span><span class="w"> </span><span class="o">[</span>--name<span class="w"> </span>&lt;sandbox&gt;<span class="o">]</span><span class="w"> </span><span class="o">[</span>--agent<span class="w"> </span>&lt;name&gt;<span class="o">]</span><span class="w"> </span><span class="o">[</span>--control-ui-port<span class="w"> </span>&lt;N&gt;<span class="o">]</span><span class="w"> </span><span class="o">[</span>--yes<span class="w"> </span><span class="p">|</span><span class="w"> </span>-y<span class="o">]</span><span class="w"> </span><span class="o">[</span>--yes-i-accept-third-party-software<span class="o">]</span>
 </pre></div>
 </div>
 <div class="admonition warning">
@@ -747,7 +747,7 @@ To add GPU to an existing sandbox, rerun with <code class="docutils literal notr
 Pass <code class="docutils literal notranslate"><span class="pre">--json</span></code> for machine-readable output that includes a <code class="docutils literal notranslate"><span class="pre">schemaVersion</span></code>, the default sandbox, recovery metadata, and the sandbox inventory.
 Sandboxes with an active SSH session are marked with a <code class="docutils literal notranslate"><span class="pre">●</span></code> indicator so you can tell at a glance which sandbox you are already connected to in another terminal.
 When a sandbox has a recorded dashboard port, the output includes its local dashboard URL.</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>nemoclaw<span class="w"> </span>list
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>nemoclaw<span class="w"> </span>list<span class="w"> </span><span class="o">[</span>--json<span class="o">]</span>
 <span class="gp">$ </span>nemoclaw<span class="w"> </span>list<span class="w"> </span>--json
 </pre></div>
 </div>
@@ -780,9 +780,11 @@ If another terminal is already connected to the sandbox, <code class="docutils l
 <p>After a host reboot, the OpenShell gateway rotates its SSH host keys.
 <code class="docutils literal notranslate"><span class="pre">connect</span></code> detects the resulting identity drift, prunes stale <code class="docutils literal notranslate"><span class="pre">openshell-*</span></code> entries from <code class="docutils literal notranslate"><span class="pre">~/.ssh/known_hosts</span></code>, and retries automatically.
 You no longer need to re-run <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span></code> after a reboot in this case.</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>nemoclaw<span class="w"> </span>my-assistant<span class="w"> </span>connect
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>nemoclaw<span class="w"> </span>my-assistant<span class="w"> </span>connect<span class="w"> </span><span class="o">[</span>--probe-only<span class="o">]</span>
 </pre></div>
 </div>
+<p>The <code class="docutils literal notranslate"><span class="pre">--probe-only</span></code> flag verifies the sandbox is reachable over SSH and exits without opening a shell.
+Use it for health checks and scripted readiness probes.</p>
 </section>
 <section id="nemoclaw-name-recover">
 <h3><code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">&lt;name&gt;</span> <span class="pre">recover</span></code><a class="headerlink" href="#nemoclaw-name-recover" title="Link to this heading">#</a></h3>
@@ -830,12 +832,28 @@ Gateway and dashboard health checks treat HTTP <code class="docutils literal not
 <p>A <code class="docutils literal notranslate"><span class="pre">Connected</span></code> line reports whether the sandbox has any active SSH sessions and, if so, how many.
 The sandbox list in the status output includes the dashboard port suffix for sandboxes with a recorded dashboard port.</p>
 <p>The Policy section displays the live enforced policy (fetched via <code class="docutils literal notranslate"><span class="pre">openshell</span> <span class="pre">policy</span> <span class="pre">get</span> <span class="pre">--full</span></code>), which reflects presets added or removed after sandbox creation.
+When OpenShell reports an active policy version, the displayed YAML <code class="docutils literal notranslate"><span class="pre">version</span></code> line uses that active version instead of the static schema version.
 If the sandbox is running an outdated agent version, the output includes an <code class="docutils literal notranslate"><span class="pre">Update</span></code> line with the available version and a <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">&lt;name&gt;</span> <span class="pre">rebuild</span></code> hint.</p>
 <p>When other sandboxes have the same messaging channel enabled (Telegram, Discord, or Slack) with the same bot token, the output includes a cross-sandbox overlap warning so you can resolve the conflict before messages start dropping.
 The command also tails <code class="docutils literal notranslate"><span class="pre">/tmp/gateway.log</span></code> inside the default sandbox and flags Telegram <code class="docutils literal notranslate"><span class="pre">409</span> <span class="pre">Conflict</span></code> errors that indicate a duplicate consumer for the bot token.</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>nemoclaw<span class="w"> </span>my-assistant<span class="w"> </span>status
 </pre></div>
 </div>
+<section id="checking-the-openclaw-version">
+<h4>Checking the OpenClaw version<a class="headerlink" href="#checking-the-openclaw-version" title="Link to this heading">#</a></h4>
+<p>NemoClaw pins the OpenClaw version inside the sandbox at build time, not at runtime.
+The minimum version comes from <code class="docutils literal notranslate"><span class="pre">min_openclaw_version</span></code> in <code class="docutils literal notranslate"><span class="pre">nemoclaw-blueprint/blueprint.yaml</span></code>, and the sandbox image upgrades OpenClaw to that version during <code class="docutils literal notranslate"><span class="pre">docker</span> <span class="pre">build</span></code> if the cached base image is older.
+Existing sandboxes do not auto-upgrade when a newer NemoClaw release ships a newer pin — you upgrade by rebuilding the sandbox.</p>
+<p><code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">&lt;name&gt;</span> <span class="pre">status</span></code> prints the running OpenClaw version on the <code class="docutils literal notranslate"><span class="pre">Agent</span></code> line:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>nemoclaw<span class="w"> </span>my-assistant<span class="w"> </span>status
+<span class="go">...</span>
+<span class="go">    Agent:    OpenClaw v2026.4.24</span>
+<span class="go">...</span>
+</pre></div>
+</div>
+<p>If the sandbox is running an OpenClaw older than the version this NemoClaw release pins, <code class="docutils literal notranslate"><span class="pre">status</span></code> and <code class="docutils literal notranslate"><span class="pre">connect</span></code> add an <code class="docutils literal notranslate"><span class="pre">Update</span></code> line pointing at <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">&lt;name&gt;</span> <span class="pre">rebuild</span></code> to pick up the newer version.
+The rebuild reuses the existing sandbox name and persisted credentials, so messaging tokens and provider keys carry over.</p>
+</section>
 </section>
 <section id="nemoclaw-name-doctor">
 <h3><code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">&lt;name&gt;</span> <span class="pre">doctor</span></code><a class="headerlink" href="#nemoclaw-name-doctor" title="Link to this heading">#</a></h3>
@@ -891,8 +909,10 @@ Back up your workspace first with <code class="docutils literal notranslate"><sp
 If you want to upgrade the sandbox while preserving state, use <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">&lt;name&gt;</span> <span class="pre">rebuild</span></code> instead.</p>
 </div>
 <p>If another terminal has an active SSH session to the sandbox, <code class="docutils literal notranslate"><span class="pre">destroy</span></code> prints an active-session warning and requires a second confirmation before it proceeds.
-Pass <code class="docutils literal notranslate"><span class="pre">--yes</span></code>, <code class="docutils literal notranslate"><span class="pre">-y</span></code>, or <code class="docutils literal notranslate"><span class="pre">--force</span></code> to skip the prompt in scripted workflows.</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>nemoclaw<span class="w"> </span>my-assistant<span class="w"> </span>destroy
+Pass <code class="docutils literal notranslate"><span class="pre">--yes</span></code>, <code class="docutils literal notranslate"><span class="pre">-y</span></code>, or <code class="docutils literal notranslate"><span class="pre">--force</span></code> to skip the prompt in scripted workflows.
+By default, <code class="docutils literal notranslate"><span class="pre">destroy</span></code> preserves the shared NemoClaw gateway.
+Pass <code class="docutils literal notranslate"><span class="pre">--cleanup-gateway</span></code> to remove the shared gateway when destroying the last sandbox, or <code class="docutils literal notranslate"><span class="pre">--no-cleanup-gateway</span></code> to force preservation when environment defaults request cleanup.</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>nemoclaw<span class="w"> </span>my-assistant<span class="w"> </span>destroy<span class="w"> </span><span class="o">[</span>--yes<span class="p">|</span>-y<span class="p">|</span>--force<span class="o">]</span><span class="w"> </span><span class="o">[</span>--cleanup-gateway<span class="p">|</span>--no-cleanup-gateway<span class="o">]</span>
 </pre></div>
 </div>
 </section>
@@ -1131,7 +1151,8 @@ Policy presets applied to the old sandbox are reapplied to the new one so your e
 <p>If another terminal has an active SSH session to the sandbox, <code class="docutils literal notranslate"><span class="pre">rebuild</span></code> prints an active-session warning and requires confirmation before destroying the sandbox.
 Pass <code class="docutils literal notranslate"><span class="pre">--yes</span></code>, <code class="docutils literal notranslate"><span class="pre">-y</span></code>, or <code class="docutils literal notranslate"><span class="pre">--force</span></code> to skip the prompt in scripted workflows.</p>
 <p>The sandbox must be running for the backup step to succeed.
-If any manifest-defined state path cannot be archived, <code class="docutils literal notranslate"><span class="pre">rebuild</span></code> reports the failed paths and exits before destroying the original sandbox.
+If an archive command reports partial output while still producing usable data, <code class="docutils literal notranslate"><span class="pre">rebuild</span></code> keeps the captured backup entries and reports only the manifest-defined paths that could not be archived.
+If any required state path still cannot be backed up, <code class="docutils literal notranslate"><span class="pre">rebuild</span></code> exits before destroying the original sandbox.
 After restore, the command runs <code class="docutils literal notranslate"><span class="pre">openclaw</span> <span class="pre">doctor</span> <span class="pre">--fix</span></code> for cross-version structure repair.</p>
 </section>
 <section id="nemoclaw-upgrade-sandboxes">
@@ -1378,7 +1399,7 @@ Pass <code class="docutils literal notranslate"><span class="pre">--json</span><
 <p>The <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">setup</span></code> command is deprecated.
 Use <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span></code> instead.</p>
 </div>
-<p>This command remains as a compatibility alias to <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span></code>.</p>
+<p>This command remains as a compatibility alias to <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span></code> and accepts the same flags: <code class="docutils literal notranslate"><span class="pre">--non-interactive</span></code>, <code class="docutils literal notranslate"><span class="pre">--resume</span></code>, <code class="docutils literal notranslate"><span class="pre">--fresh</span></code>, <code class="docutils literal notranslate"><span class="pre">--recreate-sandbox</span></code>, <code class="docutils literal notranslate"><span class="pre">--gpu</span></code> / <code class="docutils literal notranslate"><span class="pre">--no-gpu</span></code>, <code class="docutils literal notranslate"><span class="pre">--from</span></code>, <code class="docutils literal notranslate"><span class="pre">--name</span></code>, <code class="docutils literal notranslate"><span class="pre">--agent</span></code>, <code class="docutils literal notranslate"><span class="pre">--control-ui-port</span></code>, <code class="docutils literal notranslate"><span class="pre">--yes</span></code> / <code class="docutils literal notranslate"><span class="pre">-y</span></code>, <code class="docutils literal notranslate"><span class="pre">--yes-i-accept-third-party-software</span></code>.</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>nemoclaw<span class="w"> </span>setup
 </pre></div>
 </div>
@@ -1390,7 +1411,7 @@ Use <code class="docutils literal notranslate"><span class="pre">nemoclaw</span>
 <p>The <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">setup-spark</span></code> command is deprecated.
 Use the standard installer and run <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span></code> instead, because current OpenShell releases handle the older DGX Spark cgroup behavior.</p>
 </div>
-<p>This command remains as a compatibility alias to <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span></code>.</p>
+<p>This command remains as a compatibility alias to <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span></code> and accepts the same flags: <code class="docutils literal notranslate"><span class="pre">--non-interactive</span></code>, <code class="docutils literal notranslate"><span class="pre">--resume</span></code>, <code class="docutils literal notranslate"><span class="pre">--fresh</span></code>, <code class="docutils literal notranslate"><span class="pre">--recreate-sandbox</span></code>, <code class="docutils literal notranslate"><span class="pre">--gpu</span></code> / <code class="docutils literal notranslate"><span class="pre">--no-gpu</span></code>, <code class="docutils literal notranslate"><span class="pre">--from</span></code>, <code class="docutils literal notranslate"><span class="pre">--name</span></code>, <code class="docutils literal notranslate"><span class="pre">--agent</span></code>, <code class="docutils literal notranslate"><span class="pre">--control-ui-port</span></code>, <code class="docutils literal notranslate"><span class="pre">--yes</span></code> / <code class="docutils literal notranslate"><span class="pre">-y</span></code>, <code class="docutils literal notranslate"><span class="pre">--yes-i-accept-third-party-software</span></code>.</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>nemoclaw<span class="w"> </span>setup-spark
 </pre></div>
 </div>
@@ -1487,7 +1508,8 @@ The CLI runs the local <code class="docutils literal notranslate"><span class="p
 If that local script is missing, the CLI does not auto-fetch a remote copy.
 It prints the versioned URL of the matching <code class="docutils literal notranslate"><span class="pre">uninstall.sh</span></code> so you can download, review, and run it manually.</p>
 <p>Uninstall also stops any orphaned <code class="docutils literal notranslate"><span class="pre">openshell</span></code> host processes left behind by previous onboard or destroy cycles, including <code class="docutils literal notranslate"><span class="pre">openshell</span> <span class="pre">sandbox</span> <span class="pre">create</span></code>, <code class="docutils literal notranslate"><span class="pre">openshell</span> <span class="pre">ssh-proxy</span></code>, and SSH sessions spawned by OpenShell.
-Earlier releases only stopped <code class="docutils literal notranslate"><span class="pre">openshell</span> <span class="pre">forward</span></code> processes, so those orphans accumulated across runs.</p>
+Earlier releases only stopped <code class="docutils literal notranslate"><span class="pre">openshell</span> <span class="pre">forward</span></code> processes, so those orphans accumulated across runs.
+For Local Ollama setups, uninstall also stops matching Ollama auth proxy processes before deleting <code class="docutils literal notranslate"><span class="pre">~/.nemoclaw</span></code> state so stale proxy listeners do not block a later reinstall.</p>
 <div class="pst-scrollable-table-container"><table class="table">
 <thead>
 <tr class="row-odd"><th class="head"><p>Flag</p></th>
@@ -1504,10 +1526,13 @@ Earlier releases only stopped <code class="docutils literal notranslate"><span c
 <tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--delete-models</span></code></p></td>
 <td><p>Also remove NemoClaw-pulled Ollama models</p></td>
 </tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--gateway</span> <span class="pre">&lt;name&gt;</span></code></p></td>
+<td><p>Override the gateway name to remove (default: <code class="docutils literal notranslate"><span class="pre">nemoclaw</span></code>)</p></td>
+</tr>
 </tbody>
 </table>
 </div>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>nemoclaw<span class="w"> </span>uninstall<span class="w"> </span><span class="o">[</span>--yes<span class="o">]</span><span class="w"> </span><span class="o">[</span>--keep-openshell<span class="o">]</span><span class="w"> </span><span class="o">[</span>--delete-models<span class="o">]</span>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>nemoclaw<span class="w"> </span>uninstall<span class="w"> </span><span class="o">[</span>--yes<span class="o">]</span><span class="w"> </span><span class="o">[</span>--keep-openshell<span class="o">]</span><span class="w"> </span><span class="o">[</span>--delete-models<span class="o">]</span><span class="w"> </span><span class="o">[</span>--gateway<span class="w"> </span>&lt;name&gt;<span class="o">]</span>
 </pre></div>
 </div>
 <section id="nemoclaw-uninstall-vs-the-hosted-uninstall-sh">
@@ -1551,7 +1576,7 @@ Use the hosted <code class="docutils literal notranslate"><span class="pre">curl
 </section>
 <section id="environment-variables">
 <h2>Environment Variables<a class="headerlink" href="#environment-variables" title="Link to this heading">#</a></h2>
-<p>NemoClaw reads the following environment variables to configure service ports.
+<p>NemoClaw reads the following environment variables to configure service ports, onboarding behavior, and lifecycle defaults.
 Set them before running <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span></code> or any command that starts services.
 All ports must be non-privileged integers between 1024 and 65535.</p>
 <div class="pst-scrollable-table-container"><table class="table">
@@ -1598,7 +1623,8 @@ If <code class="docutils literal notranslate"><span class="pre">NEMOCLAW_DASHBOA
 Pass <code class="docutils literal notranslate"><span class="pre">--control-ui-port</span> <span class="pre">&lt;N&gt;</span></code> to require a specific port.</p>
 <section id="onboarding-configuration">
 <h3>Onboarding Configuration<a class="headerlink" href="#onboarding-configuration" title="Link to this heading">#</a></h3>
-<p>These variables let you tune onboarding without editing the Dockerfile or passing repeated flags. Set them before running <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span></code>.</p>
+<p>These variables let you tune onboarding without editing the Dockerfile or passing repeated flags.
+Set them before running <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span></code>.</p>
 <div class="pst-scrollable-table-container"><table class="table">
 <thead>
 <tr class="row-odd"><th class="head"><p>Variable</p></th>
@@ -1639,31 +1665,35 @@ Pass <code class="docutils literal notranslate"><span class="pre">--control-ui-p
 <td><p><code class="docutils literal notranslate"><span class="pre">true</span></code> or <code class="docutils literal notranslate"><span class="pre">false</span></code></p></td>
 <td><p>Overrides the model’s reasoning-mode flag in the built OpenClaw config.</p></td>
 </tr>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_OLLAMA_REQUIRE_TOOLS</span></code></p></td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_AGENT_HEARTBEAT_EVERY</span></code></p></td>
+<td><p>duration with <code class="docutils literal notranslate"><span class="pre">s</span></code>, <code class="docutils literal notranslate"><span class="pre">m</span></code>, or <code class="docutils literal notranslate"><span class="pre">h</span></code> suffix (for example <code class="docutils literal notranslate"><span class="pre">30m</span></code>, <code class="docutils literal notranslate"><span class="pre">1h</span></code>, or <code class="docutils literal notranslate"><span class="pre">0m</span></code>)</p></td>
+<td><p>Overrides <code class="docutils literal notranslate"><span class="pre">agents.defaults.heartbeat.every</span></code> in the built OpenClaw config. Set <code class="docutils literal notranslate"><span class="pre">0m</span></code> to disable periodic agent turns.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_OLLAMA_REQUIRE_TOOLS</span></code></p></td>
 <td><p><code class="docutils literal notranslate"><span class="pre">0</span></code> to disable, anything else to keep the default</p></td>
 <td><p>When set to <code class="docutils literal notranslate"><span class="pre">0</span></code>, skips the Ollama tool-calling capability check during local-inference onboarding.</p></td>
 </tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_PROXY_HOST</span></code></p></td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_PROXY_HOST</span></code></p></td>
 <td><p>hostname or IP</p></td>
 <td><p>Overrides the sandbox-side outbound HTTP proxy host. Defaults to <code class="docutils literal notranslate"><span class="pre">10.200.0.1</span></code>.</p></td>
 </tr>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_PROXY_PORT</span></code></p></td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_PROXY_PORT</span></code></p></td>
 <td><p>integer port</p></td>
 <td><p>Overrides the sandbox-side outbound HTTP proxy port. Defaults to <code class="docutils literal notranslate"><span class="pre">3128</span></code>.</p></td>
 </tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_OPENSHELL_BIN</span></code></p></td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_OPENSHELL_BIN</span></code></p></td>
 <td><p>path</p></td>
 <td><p>Overrides the <code class="docutils literal notranslate"><span class="pre">openshell</span></code> binary the CLI invokes. Defaults to <code class="docutils literal notranslate"><span class="pre">openshell</span></code> (resolved via <code class="docutils literal notranslate"><span class="pre">PATH</span></code>).</p></td>
 </tr>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_SANDBOX</span></code></p></td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_SANDBOX</span></code></p></td>
 <td><p>sandbox name</p></td>
 <td><p>Alternate spelling of <code class="docutils literal notranslate"><span class="pre">NEMOCLAW_SANDBOX_NAME</span></code>; used by <code class="docutils literal notranslate"><span class="pre">services</span></code> and <code class="docutils literal notranslate"><span class="pre">debug</span></code> lookups when neither a flag nor <code class="docutils literal notranslate"><span class="pre">NEMOCLAW_SANDBOX_NAME</span></code> is set.</p></td>
 </tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_INSTALL_REF</span></code></p></td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_INSTALL_REF</span></code></p></td>
 <td><p>git ref</p></td>
 <td><p>For internal installer commands: the git ref to install from. Overridden by the <code class="docutils literal notranslate"><span class="pre">--install-ref</span></code> flag.</p></td>
 </tr>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_INSTALL_TAG</span></code></p></td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_INSTALL_TAG</span></code></p></td>
 <td><p>release tag</p></td>
 <td><p>For internal installer commands: the release tag to install. Overridden by the <code class="docutils literal notranslate"><span class="pre">--install-tag</span></code> flag.</p></td>
 </tr>
@@ -1673,6 +1703,7 @@ Pass <code class="docutils literal notranslate"><span class="pre">--control-ui-p
 </section>
 <section id="onboarding-behavior-flags">
 <h3>Onboarding Behavior Flags<a class="headerlink" href="#onboarding-behavior-flags" title="Link to this heading">#</a></h3>
+<p>These flags toggle optional behaviors during onboarding; set them before running <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span></code>.</p>
 <div class="pst-scrollable-table-container"><table class="table">
 <thead>
 <tr class="row-odd"><th class="head"><p>Variable</p></th>
@@ -1715,7 +1746,8 @@ Pass <code class="docutils literal notranslate"><span class="pre">--control-ui-p
 </section>
 <section id="probe-timeouts">
 <h3>Probe Timeouts<a class="headerlink" href="#probe-timeouts" title="Link to this heading">#</a></h3>
-<p>These tune how long internal probes wait before giving up. Defaults are sized for typical hardware; override only if you see false-positive timeouts.</p>
+<p>These tune how long internal probes wait before giving up.
+Defaults are sized for typical hardware; override only if you see false-positive timeouts.</p>
 <div class="pst-scrollable-table-container"><table class="table">
 <thead>
 <tr class="row-odd"><th class="head"><p>Variable</p></th>
@@ -1736,6 +1768,50 @@ Pass <code class="docutils literal notranslate"><span class="pre">--control-ui-p
 </table>
 </div>
 </section>
+<section id="onboard-timeouts">
+<h3>Onboard Timeouts<a class="headerlink" href="#onboard-timeouts" title="Link to this heading">#</a></h3>
+<p>The following environment variables tune onboard-time wall-clock limits.
+Set them before running <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span></code> if a slow connection or large model pull risks tripping the default.</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Variable</p></th>
+<th class="head"><p>Default</p></th>
+<th class="head"><p>Purpose</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_OLLAMA_PULL_TIMEOUT</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">1800</span></code> (30 minutes)</p></td>
+<td><p>Wall-clock timeout for <code class="docutils literal notranslate"><span class="pre">ollama</span> <span class="pre">pull</span></code> during onboard, in seconds. Accepts integer or float values. Already-downloaded layers are kept; re-running the pull resumes them.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span><span class="nb">export</span><span class="w"> </span><span class="nv">NEMOCLAW_OLLAMA_PULL_TIMEOUT</span><span class="o">=</span><span class="m">3600</span>
+<span class="gp">$ </span>nemoclaw<span class="w"> </span>onboard
+</pre></div>
+</div>
+<p>If the pull exceeds the limit, onboarding emits the timeout in minutes plus a hint to raise this variable, and the partial download is preserved for the next attempt.</p>
+</section>
+<section id="lifecycle-behavior-flags">
+<h3>Lifecycle Behavior Flags<a class="headerlink" href="#lifecycle-behavior-flags" title="Link to this heading">#</a></h3>
+<p>These flags change defaults for commands that manage existing sandboxes.</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Variable</p></th>
+<th class="head"><p>Format</p></th>
+<th class="head"><p>Effect</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_CLEANUP_GATEWAY</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">1</span></code>, <code class="docutils literal notranslate"><span class="pre">true</span></code>, or <code class="docutils literal notranslate"><span class="pre">yes</span></code> to enable; <code class="docutils literal notranslate"><span class="pre">0</span></code>, <code class="docutils literal notranslate"><span class="pre">false</span></code>, or <code class="docutils literal notranslate"><span class="pre">no</span></code> to disable</p></td>
+<td><p>Sets the default for whether <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">&lt;name&gt;</span> <span class="pre">destroy</span></code> removes the shared gateway when destroying the last sandbox. Command-line <code class="docutils literal notranslate"><span class="pre">--cleanup-gateway</span></code> and <code class="docutils literal notranslate"><span class="pre">--no-cleanup-gateway</span></code> still take precedence.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
 </section>
 <section id="nemohermes-alias">
 <h2>NemoHermes Alias<a class="headerlink" href="#nemohermes-alias" title="Link to this heading">#</a></h2>
@@ -1748,7 +1824,7 @@ Every <code class="docutils literal notranslate"><span class="pre">nemohermes</s
 </pre></div>
 </div>
 <p>The alias is installed alongside <code class="docutils literal notranslate"><span class="pre">nemoclaw</span></code> via <code class="docutils literal notranslate"><span class="pre">npm</span> <span class="pre">link</span></code> or <code class="docutils literal notranslate"><span class="pre">npm</span> <span class="pre">install</span> <span class="pre">-g</span></code>.
-Help text, version output, and error messages automatically adjust to show <code class="docutils literal notranslate"><span class="pre">nemohermes</span></code> when launched through the alias.</p>
+Help text, version output, uninstall progress, completion text, and error messages automatically adjust to show <code class="docutils literal notranslate"><span class="pre">nemohermes</span></code> when launched through the alias.</p>
 <section id="legacy-nemoclaw-setup">
 <h3>Legacy <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">setup</span></code><a class="headerlink" href="#legacy-nemoclaw-setup" title="Link to this heading">#</a></h3>
 <p>Deprecated. Use <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span></code> instead.
@@ -1824,7 +1900,10 @@ Running <code class="docutils literal notranslate"><span class="pre">nemoclaw</s
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#nemoclaw-deploy"><code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">deploy</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#nemoclaw-name-connect"><code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">&lt;name&gt;</span> <span class="pre">connect</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#nemoclaw-name-recover"><code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">&lt;name&gt;</span> <span class="pre">recover</span></code></a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#nemoclaw-name-status"><code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">&lt;name&gt;</span> <span class="pre">status</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#nemoclaw-name-status"><code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">&lt;name&gt;</span> <span class="pre">status</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#checking-the-openclaw-version">Checking the OpenClaw version</a></li>
+</ul>
+</li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#nemoclaw-name-doctor"><code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">&lt;name&gt;</span> <span class="pre">doctor</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#nemoclaw-name-logs"><code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">&lt;name&gt;</span> <span class="pre">logs</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#nemoclaw-name-gateway-token"><code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">&lt;name&gt;</span> <span class="pre">gateway-token</span></code></a></li>
@@ -1871,6 +1950,8 @@ Running <code class="docutils literal notranslate"><span class="pre">nemoclaw</s
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#onboarding-configuration">Onboarding Configuration</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#onboarding-behavior-flags">Onboarding Behavior Flags</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#probe-timeouts">Probe Timeouts</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#onboard-timeouts">Onboard Timeouts</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#lifecycle-behavior-flags">Lifecycle Behavior Flags</a></li>
 </ul>
 </li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#nemohermes-alias">NemoHermes Alias</a><ul class="nav section-nav flex-column">

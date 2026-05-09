@@ -45,7 +45,7 @@
 
 
 
-    <script src="../_static/documentation_options.js?v=30c95dc1"></script>
+    <script src="../_static/documentation_options.js?v=218434ba"></script>
     <script src="../_static/doctools.js?v=9a2dae69"></script>
     <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
@@ -56,7 +56,7 @@
     <script>
         DOCUMENTATION_OPTIONS.theme_version = '0.16.1';
         DOCUMENTATION_OPTIONS.theme_switcher_json_url = '../versions1.json';
-        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.36';
+        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.38';
         DOCUMENTATION_OPTIONS.show_version_warning_banner =
             false;
         </script>
@@ -251,6 +251,10 @@
     </div>
   
 
+  
+    <button class="pst-navbar-icon sidebar-toggle secondary-toggle" aria-label="On this page">
+      <span class="fa-solid fa-outdent"></span>
+    </button>
   
 </div>
 
@@ -524,6 +528,44 @@
 </tbody>
 </table>
 </div>
+<section id="behavior-changes">
+<h2>Behavior Changes<a class="headerlink" href="#behavior-changes" title="Link to this heading">#</a></h2>
+<section id="v0-0-38-reliability-updates">
+<h3>v0.0.38 Reliability Updates<a class="headerlink" href="#v0-0-38-reliability-updates" title="Link to this heading">#</a></h3>
+<p>NemoClaw v0.0.38 improves several day-two workflows:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">&lt;name&gt;</span> <span class="pre">status</span></code> shows the gateway’s active policy version in the displayed policy YAML when OpenShell reports one.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">uninstall</span></code> stops matching Local Ollama auth proxy processes before it removes <code class="docutils literal notranslate"><span class="pre">~/.nemoclaw</span></code>, which prevents stale listeners from blocking a later reinstall.</p></li>
+<li><p>Local Ollama onboarding validates structured chat-completions tool calls and rejects models that leak tool-call payloads as plain text.</p></li>
+<li><p>Blueprint policy additions under <code class="docutils literal notranslate"><span class="pre">components.policy.additions</span></code> are validated, merged into the live policy, applied through OpenShell, and recorded in run metadata.</p></li>
+<li><p>Rebuild backups tolerate partial archive output when usable data was produced, then report only the manifest-defined paths that could not be archived.</p></li>
+<li><p>NemoHermes uninstall output uses NemoHermes-specific help, progress, and completion text.</p></li>
+</ul>
+</section>
+<section id="v0-0-34-installer-requires-explicit-acceptance-in-non-tty-environments">
+<h3>v0.0.34 Installer Requires Explicit Acceptance in Non-TTY Environments<a class="headerlink" href="#v0-0-34-installer-requires-explicit-acceptance-in-non-tty-environments" title="Link to this heading">#</a></h3>
+<p>Starting with NemoClaw v0.0.34, the <code class="docutils literal notranslate"><span class="pre">curl</span> <span class="pre">-fsSL</span> <span class="pre">https://www.nvidia.com/nemoclaw.sh</span> <span class="pre">|</span> <span class="pre">bash</span></code> installer pipeline no longer auto-accepts the third-party software notice when stdin is piped and <code class="docutils literal notranslate"><span class="pre">/dev/tty</span></code> is unavailable (for example, deeply detached SSH sessions or some container shells).
+In environments without a TTY, accept upfront in the pipe:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>curl<span class="w"> </span>-fsSL<span class="w"> </span>https://www.nvidia.com/nemoclaw.sh<span class="w"> </span><span class="p">|</span><span class="w"> </span><span class="nv">NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>bash
+</pre></div>
+</div>
+<p>Or pass the flag through to the installer:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>curl<span class="w"> </span>-fsSL<span class="w"> </span>https://www.nvidia.com/nemoclaw.sh<span class="w"> </span><span class="p">|</span><span class="w"> </span>bash<span class="w"> </span>-s<span class="w"> </span>--<span class="w"> </span>--yes-i-accept-third-party-software
+</pre></div>
+</div>
+<p>Or re-run from a terminal with a controlling TTY:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>bash<span class="w"> </span>&lt;<span class="o">(</span>curl<span class="w"> </span>-fsSL<span class="w"> </span>https://www.nvidia.com/nemoclaw.sh<span class="o">)</span>
+</pre></div>
+</div>
+<p>The installer error message in v0.0.35+ surfaces all three invocations directly so users can copy-paste a recovery without leaving the terminal.</p>
+</section>
+</section>
+<section id="component-version-policy">
+<h2>Component Version Policy<a class="headerlink" href="#component-version-policy" title="Link to this heading">#</a></h2>
+<p>NemoClaw pins the OpenClaw version inside the sandbox at build time via <code class="docutils literal notranslate"><span class="pre">min_openclaw_version</span></code> in <code class="docutils literal notranslate"><span class="pre">nemoclaw-blueprint/blueprint.yaml</span></code>; existing sandboxes do not auto-upgrade.
+Run <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">&lt;name&gt;</span> <span class="pre">status</span></code> to see the OpenClaw version currently running in a sandbox, and <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">&lt;name&gt;</span> <span class="pre">rebuild</span></code> to pick up a newer pin from a NemoClaw upgrade.
+See <a class="reference internal" href="../reference/commands.html#checking-the-openclaw-version"><span class="std std-ref">Checking the OpenClaw version</span></a> for the full policy.</p>
+</section>
 </section>
 
 
@@ -561,9 +603,30 @@
             
             
 
-<div class="bd-sidebar-secondary"></div>
+
+              
+                <dialog id="pst-secondary-sidebar-modal"></dialog>
+                <div id="pst-secondary-sidebar" class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
 
 
+  <div class="sidebar-secondary-item">
+<div
+    id="pst-page-navigation-heading-2"
+    class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> On this page
+  </div>
+  <nav class="bd-toc-nav page-toc" aria-labelledby="pst-page-navigation-heading-2">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#behavior-changes">Behavior Changes</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#v0-0-38-reliability-updates">v0.0.38 Reliability Updates</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#v0-0-34-installer-requires-explicit-acceptance-in-non-tty-environments">v0.0.34 Installer Requires Explicit Acceptance in Non-TTY Environments</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#component-version-policy">Component Version Policy</a></li>
+</ul>
+  </nav></div>
+
+</div></div>
               
             
 

@@ -45,7 +45,7 @@
 
 
 
-    <script src="../_static/documentation_options.js?v=30c95dc1"></script>
+    <script src="../_static/documentation_options.js?v=218434ba"></script>
     <script src="../_static/doctools.js?v=9a2dae69"></script>
     <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
@@ -56,7 +56,7 @@
     <script>
         DOCUMENTATION_OPTIONS.theme_version = '0.16.1';
         DOCUMENTATION_OPTIONS.theme_switcher_json_url = '../versions1.json';
-        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.36';
+        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.38';
         DOCUMENTATION_OPTIONS.show_version_warning_banner =
             false;
         </script>
@@ -635,6 +635,10 @@ To change these values, set the corresponding environment variables before runni
 <td><p>Positive integer (seconds)</p></td>
 <td><p><code class="docutils literal notranslate"><span class="pre">600</span></code></p></td>
 </tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_AGENT_HEARTBEAT_EVERY</span></code></p></td>
+<td><p>Go-style duration (<code class="docutils literal notranslate"><span class="pre">30m</span></code>, <code class="docutils literal notranslate"><span class="pre">1h</span></code>, <code class="docutils literal notranslate"><span class="pre">0m</span></code> to disable)</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">unset</span></code> (OpenClaw default)</p></td>
+</tr>
 </tbody>
 </table>
 </div>
@@ -645,6 +649,7 @@ Use <code class="docutils literal notranslate"><span class="pre">NEMOCLAW_INFERE
 <span class="gp">$ </span><span class="nb">export</span><span class="w"> </span><span class="nv">NEMOCLAW_REASONING</span><span class="o">=</span><span class="nb">true</span>
 <span class="gp">$ </span><span class="nb">export</span><span class="w"> </span><span class="nv">NEMOCLAW_INFERENCE_INPUTS</span><span class="o">=</span>text,image
 <span class="gp">$ </span><span class="nb">export</span><span class="w"> </span><span class="nv">NEMOCLAW_AGENT_TIMEOUT</span><span class="o">=</span><span class="m">1800</span>
+<span class="gp">$ </span><span class="nb">export</span><span class="w"> </span><span class="nv">NEMOCLAW_AGENT_HEARTBEAT_EVERY</span><span class="o">=</span>0m
 <span class="gp">$ </span>nemoclaw<span class="w"> </span>onboard
 </pre></div>
 </div>
@@ -653,6 +658,14 @@ Use <code class="docutils literal notranslate"><span class="pre">NEMOCLAW_INFERE
 example, CPU-only Ollama or vLLM on modest hardware). <code class="docutils literal notranslate"><span class="pre">openclaw.json</span></code> is
 immutable at runtime, so this value can only be changed by rebuilding the
 sandbox via <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span></code>.</p>
+<p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_AGENT_HEARTBEAT_EVERY</span></code> sets <code class="docutils literal notranslate"><span class="pre">agents.defaults.heartbeat.every</span></code>.
+This controls OpenClaw’s periodic main-session agent turn.
+Each interval, the agent wakes up to review follow-ups and read <code class="docutils literal notranslate"><span class="pre">HEARTBEAT.md</span></code> if present in the workspace.
+The OpenClaw default is 30 minutes (1 hour for Anthropic OAuth / Claude CLI reuse).
+Tune the cadence with a duration string like <code class="docutils literal notranslate"><span class="pre">5m</span></code> or <code class="docutils literal notranslate"><span class="pre">2h</span></code>, or set <code class="docutils literal notranslate"><span class="pre">0m</span></code> to disable the periodic turns entirely.
+Disabling also drops <code class="docutils literal notranslate"><span class="pre">HEARTBEAT.md</span></code> from normal-run bootstrap context per upstream behavior, so the model no longer sees heartbeat-only instructions.
+<code class="docutils literal notranslate"><span class="pre">openclaw.json</span></code> is immutable at runtime, so the in-sandbox <code class="docutils literal notranslate"><span class="pre">openclaw</span> <span class="pre">config</span> <span class="pre">set</span></code> command cannot change this.
+Rebuild the sandbox via <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span> <span class="pre">--resume</span></code> to apply a new value.</p>
 <p>These variables are build-time settings.
 If you change them on an existing sandbox, recreate the sandbox so the new values bake into the image:</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>nemoclaw<span class="w"> </span>onboard<span class="w"> </span>--resume<span class="w"> </span>--recreate-sandbox

@@ -45,7 +45,7 @@
 
 
 
-    <script src="../_static/documentation_options.js?v=30c95dc1"></script>
+    <script src="../_static/documentation_options.js?v=218434ba"></script>
     <script src="../_static/doctools.js?v=9a2dae69"></script>
     <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
@@ -56,7 +56,7 @@
     <script>
         DOCUMENTATION_OPTIONS.theme_version = '0.16.1';
         DOCUMENTATION_OPTIONS.theme_switcher_json_url = '../versions1.json';
-        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.36';
+        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.38';
         DOCUMENTATION_OPTIONS.show_version_warning_banner =
             false;
         </script>
@@ -524,7 +524,7 @@ See <a class="reference internal" href="../reference/troubleshooting.html#agent-
 <blockquote>
 <div><p>[!IMPORTANT]
 Make static policy edits on the host, not inside the sandbox.
-The sandbox image is intentionally minimal and may not include editors or package-management tools.
+The sandbox image includes a small set of operational tools such as <code class="docutils literal notranslate"><span class="pre">vi</span></code>, <code class="docutils literal notranslate"><span class="pre">jq</span></code>, and <code class="docutils literal notranslate"><span class="pre">dos2unix</span></code>, but host-side policy files remain the durable source of truth.
 Changes made only inside the sandbox are also ephemeral and are lost when the sandbox is recreated.</p>
 </div></blockquote>
 </section>
@@ -567,6 +567,12 @@ Changes made only inside the sandbox are also ephemeral and are lost when the sa
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>nemoclaw<span class="w"> </span>&lt;name&gt;<span class="w"> </span>status
 </pre></div>
 </div>
+</section>
+<section id="add-blueprint-policy-additions">
+<h3>Add Blueprint Policy Additions<a class="headerlink" href="#add-blueprint-policy-additions" title="Link to this heading">#</a></h3>
+<p>If you maintain a custom blueprint, you can add extra policy entries under <code class="docutils literal notranslate"><span class="pre">components.policy.additions</span></code> in <code class="docutils literal notranslate"><span class="pre">nemoclaw-blueprint/blueprint.yaml</span></code>.
+NemoClaw validates those entries with the same policy schema used by preset files, fetches the live policy during sandbox creation, merges the additions into <code class="docutils literal notranslate"><span class="pre">network_policies</span></code>, and applies the merged policy through OpenShell.
+The applied additions are recorded in the run metadata so you can audit which blueprint-level policy entries were active for that sandbox run.</p>
 </section>
 </section>
 <section id="dynamic-changes">
@@ -661,7 +667,7 @@ You can add or remove individual presets in the interactive preset screen that f
 <td><p>Homebrew (Linuxbrew) package manager</p></td>
 </tr>
 <tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">discord</span></code></p></td>
-<td><p>Discord webhook API</p></td>
+<td><p>Discord API, gateway, and CDN access</p></td>
 </tr>
 <tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">github</span></code></p></td>
 <td><p>GitHub and GitHub REST API</p></td>
@@ -848,6 +854,7 @@ Review every host in a custom preset before applying it, especially when the fil
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#edit-the-policy-file">Edit the Policy File</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#re-run-onboard">Re-Run Onboard</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#verify-the-policy">Verify the Policy</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#add-blueprint-policy-additions">Add Blueprint Policy Additions</a></li>
 </ul>
 </li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#dynamic-changes">Dynamic Changes</a><ul class="nav section-nav flex-column">

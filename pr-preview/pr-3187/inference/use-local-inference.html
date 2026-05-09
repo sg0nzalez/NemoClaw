@@ -45,7 +45,7 @@
 
 
 
-    <script src="../_static/documentation_options.js?v=30c95dc1"></script>
+    <script src="../_static/documentation_options.js?v=218434ba"></script>
     <script src="../_static/doctools.js?v=9a2dae69"></script>
     <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
@@ -56,7 +56,7 @@
     <script>
         DOCUMENTATION_OPTIONS.theme_version = '0.16.1';
         DOCUMENTATION_OPTIONS.theme_switcher_json_url = '../versions1.json';
-        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.36';
+        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.38';
         DOCUMENTATION_OPTIONS.show_version_warning_banner =
             false;
         </script>
@@ -533,6 +533,8 @@ On WSL, the wizard can use, start, restart, or install Ollama on the Windows hos
 NemoClaw lists installed models or offers starter models if none are installed.
 It pulls the selected model, loads it into memory, and validates it before continuing.
 If the selected model declares that it does not support tool calling, onboarding stops with guidance to choose a model whose <code class="docutils literal notranslate"><span class="pre">ollama</span> <span class="pre">show</span> <span class="pre">&lt;model&gt;</span></code> capabilities include <code class="docutils literal notranslate"><span class="pre">tools</span></code>.
+The validation also requires structured chat-completions tool calls.
+If the model leaks tool-call JSON as plain message text, onboarding stops so you can choose a model that returns tool calls in the expected response field.
 On WSL, if you choose the Windows-host Ollama path, NemoClaw uses <code class="docutils literal notranslate"><span class="pre">host.docker.internal:11434</span></code> and pulls missing models through the Ollama HTTP API instead of requiring the <code class="docutils literal notranslate"><span class="pre">ollama</span></code> CLI inside WSL.</p>
 <section id="wsl-with-windows-host-ollama">
 <h3>WSL with Windows-Host Ollama<a class="headerlink" href="#wsl-with-windows-host-ollama" title="Link to this heading">#</a></h3>
@@ -563,6 +565,7 @@ Windows-host Ollama uses the Windows daemon through <code class="docutils litera
 <li><p>Starts the proxy after Ollama and verifies it before continuing.</p></li>
 <li><p>Cleans up stale proxy processes from previous runs.</p></li>
 <li><p>Retries the sandbox container reachability check and can continue when the host-side proxy is healthy even if the container probe fails.</p></li>
+<li><p>Stops matching proxy processes during uninstall before deleting NemoClaw state.</p></li>
 <li><p>Reuses the persisted token after a host reboot so you do not need to re-run
 onboard.</p></li>
 </ul>

@@ -45,7 +45,7 @@
 
 
 
-    <script src="../_static/documentation_options.js?v=30c95dc1"></script>
+    <script src="../_static/documentation_options.js?v=218434ba"></script>
     <script src="../_static/doctools.js?v=9a2dae69"></script>
     <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
@@ -56,7 +56,7 @@
     <script>
         DOCUMENTATION_OPTIONS.theme_version = '0.16.1';
         DOCUMENTATION_OPTIONS.theme_switcher_json_url = '../versions1.json';
-        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.36';
+        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.38';
         DOCUMENTATION_OPTIONS.show_version_warning_banner =
             false;
         </script>
@@ -563,7 +563,8 @@ Use <code class="docutils literal notranslate"><span class="pre">SLACK_BOT_TOKEN
 <h2>Enable Channels During Onboarding<a class="headerlink" href="#enable-channels-during-onboarding" title="Link to this heading">#</a></h2>
 <p>When the wizard reaches <strong>Messaging channels</strong>, it lists Telegram, Discord, and Slack.
 Press a channel number to toggle it on or off, then press <strong>Enter</strong> when done.
-If a token is not already in the environment or credential store, the wizard prompts for it and saves it.</p>
+If a token is not already in the environment or credential store, the wizard prompts for it and saves it.
+NemoClaw also selects the matching network policy preset during policy setup so the channel can reach its provider API.</p>
 <p>For scripted setup, export the credentials and optional settings for the channels you want to enable before you run onboarding:</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span><span class="nb">export</span><span class="w"> </span><span class="nv">TELEGRAM_BOT_TOKEN</span><span class="o">=</span>&lt;your-bot-token&gt;
 <span class="gp">$ </span><span class="nb">export</span><span class="w"> </span><span class="nv">TELEGRAM_REQUIRE_MENTION</span><span class="o">=</span><span class="m">1</span>

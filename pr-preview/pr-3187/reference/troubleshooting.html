@@ -45,7 +45,7 @@
 
 
 
-    <script src="../_static/documentation_options.js?v=30c95dc1"></script>
+    <script src="../_static/documentation_options.js?v=218434ba"></script>
     <script src="../_static/doctools.js?v=9a2dae69"></script>
     <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
@@ -56,7 +56,7 @@
     <script>
         DOCUMENTATION_OPTIONS.theme_version = '0.16.1';
         DOCUMENTATION_OPTIONS.theme_switcher_json_url = '../versions1.json';
-        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.36';
+        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.38';
         DOCUMENTATION_OPTIONS.show_version_warning_banner =
             false;
         </script>
@@ -1256,6 +1256,19 @@ Destroy and restart the gateway, then re-run setup.</p>
 It is expected to work when you pass <code class="docutils literal notranslate"><span class="pre">--gpu</span></code> and the NVIDIA Container Toolkit is configured.
 Verify the toolkit is configured by running <code class="docutils literal notranslate"><span class="pre">docker</span> <span class="pre">run</span> <span class="pre">--rm</span> <span class="pre">--runtime=nvidia</span> <span class="pre">--gpus</span> <span class="pre">all</span> <span class="pre">nvidia/cuda:12.8.0-base-ubuntu24.04</span> <span class="pre">nvidia-smi</span></code> from the host.</p>
 </section>
+<section id="unresolvable-cdi-devices-nvidia-com-gpu-all-during-gateway-start">
+<h3><code class="docutils literal notranslate"><span class="pre">unresolvable</span> <span class="pre">CDI</span> <span class="pre">devices</span> <span class="pre">nvidia.com/gpu=all</span></code> during gateway start<a class="headerlink" href="#unresolvable-cdi-devices-nvidia-com-gpu-all-during-gateway-start" title="Link to this heading">#</a></h3>
+<p>Recent NVIDIA Container Toolkit installs configure the Docker daemon for Container Device Interface (CDI) device injection, which OpenShell’s <code class="docutils literal notranslate"><span class="pre">gateway</span> <span class="pre">start</span> <span class="pre">--gpu</span></code> then auto-selects.
+If no <code class="docutils literal notranslate"><span class="pre">nvidia.com/gpu</span></code> CDI spec has been generated on the host yet, gateway start fails with <code class="docutils literal notranslate"><span class="pre">Docker</span> <span class="pre">responded</span> <span class="pre">with</span> <span class="pre">status</span> <span class="pre">code</span> <span class="pre">500:</span> <span class="pre">CDI</span> <span class="pre">device</span> <span class="pre">injection</span> <span class="pre">failed:</span> <span class="pre">unresolvable</span> <span class="pre">CDI</span> <span class="pre">devices</span> <span class="pre">nvidia.com/gpu=all</span></code>.
+<code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span></code> now detects this gap during preflight and prints the remediation up front, but the underlying fix is the same on any Docker host whose <code class="docutils literal notranslate"><span class="pre">docker</span> <span class="pre">info</span></code> advertises a non-empty <code class="docutils literal notranslate"><span class="pre">CDISpecDirs</span></code>.</p>
+<p>Generate the spec, verify it lists <code class="docutils literal notranslate"><span class="pre">nvidia.com/gpu</span></code> entries, then rerun onboarding:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>sudo<span class="w"> </span>nvidia-ctk<span class="w"> </span>cdi<span class="w"> </span>generate<span class="w"> </span>--output<span class="o">=</span>/etc/cdi/nvidia.yaml
+<span class="gp">$ </span>nvidia-ctk<span class="w"> </span>cdi<span class="w"> </span>list
+<span class="gp">$ </span>nemoclaw<span class="w"> </span>onboard
+</pre></div>
+</div>
+<p>If GPU passthrough is not required on this host, rerun onboarding with <code class="docutils literal notranslate"><span class="pre">--no-gpu</span></code> instead.</p>
+</section>
 <section id="pip-install-fails-with-a-system-packages-error">
 <h3><code class="docutils literal notranslate"><span class="pre">pip</span> <span class="pre">install</span></code> fails with a system-packages error<a class="headerlink" href="#pip-install-fails-with-a-system-packages-error" title="Link to this heading">#</a></h3>
 <p>Recent Ubuntu releases (including DGX Spark’s Ubuntu 24.04) mark the system Python install as externally managed, so <code class="docutils literal notranslate"><span class="pre">pip</span> <span class="pre">install</span></code> without a virtual environment fails.
@@ -1444,6 +1457,7 @@ If you encounter issues with Podman, switch to a tested runtime (Docker Engine, 
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#coredns-crashloop-after-onboarding">CoreDNS CrashLoop after onboarding</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#k3s-cannot-find-a-freshly-built-image"><code class="docutils literal notranslate"><span class="pre">k3s</span></code> cannot find a freshly built image</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#gpu-passthrough-on-spark">GPU passthrough on Spark</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#unresolvable-cdi-devices-nvidia-com-gpu-all-during-gateway-start"><code class="docutils literal notranslate"><span class="pre">unresolvable</span> <span class="pre">CDI</span> <span class="pre">devices</span> <span class="pre">nvidia.com/gpu=all</span></code> during gateway start</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pip-install-fails-with-a-system-packages-error"><code class="docutils literal notranslate"><span class="pre">pip</span> <span class="pre">install</span></code> fails with a system-packages error</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#port-3000-conflict-with-ai-workbench">Port 3000 conflict with AI Workbench</a></li>
 </ul>
