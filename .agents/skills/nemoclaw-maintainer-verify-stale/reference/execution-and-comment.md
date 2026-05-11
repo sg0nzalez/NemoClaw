@@ -999,7 +999,7 @@ gh issue edit "$ISSUE_NUMBER" --repo NVIDIA/NemoClaw --add-label "fixed-on-lates
 # gh issue edit "$ISSUE_NUMBER" --repo NVIDIA/NemoClaw --add-label "verify-inconclusive"
 ```
 
-**Move the issue to "Needs Review" on the NemoClaw Development Tracker (only on `fixed-on-latest`).** The tracker is GitHub Project [NVIDIA/199](https://github.com/orgs/NVIDIA/projects/199) ("NemoClaw Development Tracker"). When the skill's verdict is `fixed-on-latest`, the issue moves to **Needs Review** so the maintainer queue picks it up for confirmation; after the reporter confirms and the maintainer closes, existing Project automation (or a manual move) advances it to Done. **No move on `wontfix` / `verify-inconclusive` / no-label-still-reproduces** — those have separate close paths.
+**Move the issue to "Needs Review" on the NemoClaw Development Tracker AND self-assign (only on `fixed-on-latest`).** The tracker is GitHub Project [NVIDIA/199](https://github.com/orgs/NVIDIA/projects/199) ("NemoClaw Development Tracker"). When the skill's verdict is `fixed-on-latest`, the issue moves to **Needs Review** AND the issue is assigned to the maintainer who ran the skill (`$GH_IDENTITY` from Step 6.5) — assignment puts the issue in their personal review queue so they don't lose track of what they've staked their name on. After the reporter confirms and the maintainer closes, existing Project automation (or a manual move) advances it to Done. **No move and no assign on `wontfix` / `verify-inconclusive` / no-label-still-reproduces** — those have separate close paths.
 
 This step requires the `project` scope on the maintainer's gh CLI (`gh auth refresh -h github.com -s project` in a real terminal once; OAuth device-code flow). If the scope is missing, the lookup query returns an auth error — fall through with a one-line warning rather than failing the whole run.
 
@@ -1044,6 +1044,11 @@ if [ "$VERDICT" = "fixed-on-latest" ]; then
   else
     echo "[verify-stale] WARN could not resolve project item for #$ISSUE_NUMBER on Project 199 — label applied but tracker not moved"
   fi
+
+  # Self-assign the issue to the maintainer who ran the skill — puts it in their
+  # personal review queue alongside the Needs Review state.
+  gh issue edit "$ISSUE_NUMBER" --repo NVIDIA/NemoClaw --add-assignee "$GH_IDENTITY" \
+    >/dev/null && echo "[verify-stale] assigned #$ISSUE_NUMBER to @$GH_IDENTITY"
 fi
 ```
 
@@ -1109,6 +1114,7 @@ After each issue (verified, inconclusive, by-design, or infra-failed), append to
 **Confidence:** 88 / 100 | n/a (still-reproduces)
 **Label applied:** fixed-on-latest | verify-inconclusive | status: wont-fix | none (still-reproduces) | none (infra)
 **Tracker:** moved to Needs Review on Project 199 | not moved (verdict: <X>) | not moved (project lookup failed)
+**Assignee:** @<GH_IDENTITY> | not assigned (verdict: <X>)
 **Brev wall time (approx):** N min
 
 ---
