@@ -45,7 +45,7 @@
 
 
 
-    <script src="../_static/documentation_options.js?v=218434ba"></script>
+    <script src="../_static/documentation_options.js?v=454be4fe"></script>
     <script src="../_static/doctools.js?v=9a2dae69"></script>
     <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
@@ -56,7 +56,7 @@
     <script>
         DOCUMENTATION_OPTIONS.theme_version = '0.16.1';
         DOCUMENTATION_OPTIONS.theme_switcher_json_url = '../versions1.json';
-        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.38';
+        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.39';
         DOCUMENTATION_OPTIONS.show_version_warning_banner =
             false;
         </script>
@@ -530,8 +530,16 @@ a sandbox user can spawn. This mitigates fork-bomb attacks. The startup script
 </section>
 <section id="dropping-linux-capabilities">
 <h2>Dropping Linux Capabilities<a class="headerlink" href="#dropping-linux-capabilities" title="Link to this heading">#</a></h2>
-<p>When running the sandbox container, drop all Linux capabilities and re-add only
-what is strictly required:</p>
+<p>The NemoClaw entrypoint drops dangerous capabilities from the process bounding
+set before it starts agent services.
+It removes <code class="docutils literal notranslate"><span class="pre">CAP_SYS_ADMIN</span></code>, <code class="docutils literal notranslate"><span class="pre">CAP_SYS_PTRACE</span></code>, <code class="docutils literal notranslate"><span class="pre">CAP_NET_RAW</span></code>,
+<code class="docutils literal notranslate"><span class="pre">CAP_DAC_OVERRIDE</span></code>, <code class="docutils literal notranslate"><span class="pre">CAP_SYS_CHROOT</span></code>, <code class="docutils literal notranslate"><span class="pre">CAP_FSETID</span></code>, <code class="docutils literal notranslate"><span class="pre">CAP_SETFCAP</span></code>,
+<code class="docutils literal notranslate"><span class="pre">CAP_MKNOD</span></code>, <code class="docutils literal notranslate"><span class="pre">CAP_AUDIT_WRITE</span></code>, and <code class="docutils literal notranslate"><span class="pre">CAP_NET_BIND_SERVICE</span></code>.
+When <code class="docutils literal notranslate"><span class="pre">setpriv</span></code> is available, the entrypoint also removes the remaining
+privilege-separation capabilities during the switch from root to the
+<code class="docutils literal notranslate"><span class="pre">sandbox</span></code> and <code class="docutils literal notranslate"><span class="pre">gateway</span></code> users.</p>
+<p>For defense-in-depth, also drop all Linux capabilities at the container runtime
+when you launch the image directly:</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>docker<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>--cap-drop<span class="o">=</span>ALL<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>--ulimit<span class="w"> </span><span class="nv">nproc</span><span class="o">=</span><span class="m">512</span>:512<span class="w"> </span><span class="se">\</span>

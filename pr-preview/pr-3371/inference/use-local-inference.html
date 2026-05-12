@@ -45,7 +45,7 @@
 
 
 
-    <script src="../_static/documentation_options.js?v=218434ba"></script>
+    <script src="../_static/documentation_options.js?v=454be4fe"></script>
     <script src="../_static/doctools.js?v=9a2dae69"></script>
     <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
@@ -56,7 +56,7 @@
     <script>
         DOCUMENTATION_OPTIONS.theme_version = '0.16.1';
         DOCUMENTATION_OPTIONS.theme_switcher_json_url = '../versions1.json';
-        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.38';
+        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.39';
         DOCUMENTATION_OPTIONS.show_version_warning_banner =
             false;
         </script>
@@ -546,6 +546,8 @@ On WSL, if you choose the Windows-host Ollama path, NemoClaw uses <code class="d
 <li><p><strong>Install Ollama on Windows host</strong> when Windows does not have Ollama installed.</p></li>
 </ul>
 <p>The install and restart paths set <code class="docutils literal notranslate"><span class="pre">OLLAMA_HOST=0.0.0.0:11434</span></code> on the Windows side so Docker and WSL can reach the daemon through <code class="docutils literal notranslate"><span class="pre">host.docker.internal</span></code>.
+After an install or restart action, NemoClaw relaunches Ollama from the detected Windows tray app or verified <code class="docutils literal notranslate"><span class="pre">ollama.exe</span></code> path and waits until <code class="docutils literal notranslate"><span class="pre">host.docker.internal:11434</span></code> responds.
+If the daemon does not become reachable, onboarding prints PowerShell commands you can run to inspect the Windows-side process and port state.
 Use one Ollama instance on port <code class="docutils literal notranslate"><span class="pre">11434</span></code> at a time.
 If both WSL and Windows-host Ollama are running, pick the intended menu entry during onboarding so NemoClaw validates and pulls models against the right daemon.</p>
 </section>
@@ -788,11 +790,14 @@ Start vLLM with the model you want before onboarding if you manage the server yo
 </pre></div>
 </div>
 <p>Select <strong>Local NVIDIA NIM [experimental]</strong> from the provider list.
-NemoClaw filters available models by GPU VRAM, pulls the NIM container image, starts it, and waits for it to become healthy before continuing.</p>
+NemoClaw filters available models by GPU VRAM, pulls the NIM container image, starts it, and waits for it to become healthy before continuing.
+On hosts with mixed NVIDIA GPU models, the preflight summary shows each detected GPU model and the total VRAM so you can confirm which device class the model selection used.</p>
 <p>NIM container images are hosted on <code class="docutils literal notranslate"><span class="pre">nvcr.io</span></code> and require NGC registry authentication before <code class="docutils literal notranslate"><span class="pre">docker</span> <span class="pre">pull</span></code> succeeds.
 If Docker is not already logged in to <code class="docutils literal notranslate"><span class="pre">nvcr.io</span></code>, onboard prompts for an <a class="reference external" href="https://org.ngc.nvidia.com/setup/api-key" rel="noreferer noopener" target="_blank">NGC API key</a> and runs <code class="docutils literal notranslate"><span class="pre">docker</span> <span class="pre">login</span> <span class="pre">nvcr.io</span></code> over <code class="docutils literal notranslate"><span class="pre">--password-stdin</span></code> so the key is never written to disk or shell history.
 The prompt masks the key during input and retries once on a bad key before failing.
-In non-interactive mode, onboard exits with login instructions if Docker is not already authenticated; run <code class="docutils literal notranslate"><span class="pre">docker</span> <span class="pre">login</span> <span class="pre">nvcr.io</span></code> yourself, then re-run <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span> <span class="pre">--non-interactive</span></code>.</p>
+In non-interactive mode, onboard exits with login instructions if Docker is not already authenticated; run <code class="docutils literal notranslate"><span class="pre">docker</span> <span class="pre">login</span> <span class="pre">nvcr.io</span></code> yourself, then re-run <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span> <span class="pre">--non-interactive</span></code>.
+If <code class="docutils literal notranslate"><span class="pre">NGC_API_KEY</span></code> or <code class="docutils literal notranslate"><span class="pre">NVIDIA_API_KEY</span></code> is already exported, NemoClaw passes it into the managed NIM container through the process environment instead of command-line arguments.
+If the NIM container exits before the health endpoint becomes ready, onboarding stops early and prints the last container log lines.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
 <p>NIM uses vLLM internally.

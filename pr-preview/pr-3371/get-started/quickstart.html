@@ -45,7 +45,7 @@
 
 
 
-    <script src="../_static/documentation_options.js?v=218434ba"></script>
+    <script src="../_static/documentation_options.js?v=454be4fe"></script>
     <script src="../_static/doctools.js?v=9a2dae69"></script>
     <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
@@ -56,7 +56,7 @@
     <script>
         DOCUMENTATION_OPTIONS.theme_version = '0.16.1';
         DOCUMENTATION_OPTIONS.theme_switcher_json_url = '../versions1.json';
-        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.38';
+        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.39';
         DOCUMENTATION_OPTIONS.show_version_warning_banner =
             false;
         </script>
@@ -528,6 +528,16 @@ pass explicit acceptance to the <code class="docutils literal notranslate"><span
 </div>
 <p>If you use nvm or fnm to manage Node.js, the installer might not update your current shell’s PATH.
 If <code class="docutils literal notranslate"><span class="pre">nemoclaw</span></code> is not found after install, run <code class="docutils literal notranslate"><span class="pre">source</span> <span class="pre">~/.bashrc</span></code> (or <code class="docutils literal notranslate"><span class="pre">source</span> <span class="pre">~/.zshrc</span></code> for zsh) or open a new terminal.</p>
+<p>On Linux, the installer checks Docker before it installs NemoClaw.
+If Docker is missing, the installer downloads the official Docker convenience script, asks for <code class="docutils literal notranslate"><span class="pre">sudo</span></code>, installs Docker, and starts the Docker service when systemd is available.
+If Docker is installed but your current shell cannot use the Docker socket yet, the installer adds your user to the <code class="docutils literal notranslate"><span class="pre">docker</span></code> group when needed and exits with a recovery command.</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>newgrp<span class="w"> </span>docker
+<span class="gp">$ </span>curl<span class="w"> </span>-fsSL<span class="w"> </span>https://www.nvidia.com/nemoclaw.sh<span class="w"> </span><span class="p">|</span><span class="w"> </span>bash
+</pre></div>
+</div>
+<p>On DGX Spark and DGX Station, an interactive installer can offer express install after you accept the third-party software notice.
+Express install switches onboarding to non-interactive mode, applies the suggested security policy, and selects the managed local inference path for that platform.
+Set <code class="docutils literal notranslate"><span class="pre">NEMOCLAW_NO_EXPRESS=1</span></code> to skip the express prompt, or set <code class="docutils literal notranslate"><span class="pre">NEMOCLAW_PROVIDER</span></code> before launching the installer when you want to choose a provider yourself.</p>
 <p>The installer auto-launches <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span></code> when it can locate the freshly-installed binary.
 If it cannot locate the binary, or if blocking host preflight checks fail, it does not launch the wizard automatically.
 In that case, the installer prints the relevant diagnostics and a <code class="docutils literal notranslate"><span class="pre">To</span> <span class="pre">finish</span> <span class="pre">setup,</span> <span class="pre">run:</span></code> block with the explicit <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span></code> command.</p>

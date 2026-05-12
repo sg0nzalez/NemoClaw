@@ -45,7 +45,7 @@
 
 
 
-    <script src="../_static/documentation_options.js?v=218434ba"></script>
+    <script src="../_static/documentation_options.js?v=454be4fe"></script>
     <script src="../_static/doctools.js?v=9a2dae69"></script>
     <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
@@ -56,7 +56,7 @@
     <script>
         DOCUMENTATION_OPTIONS.theme_version = '0.16.1';
         DOCUMENTATION_OPTIONS.theme_switcher_json_url = '../versions1.json';
-        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.38';
+        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.39';
         DOCUMENTATION_OPTIONS.show_version_warning_banner =
             false;
         </script>
@@ -677,6 +677,9 @@ Set <code class="docutils literal notranslate"><span class="pre">NEMOCLAW_RECREA
 It verifies that Docker is reachable, warns on untested runtimes such as Podman, and prints host remediation guidance when prerequisites are missing.
 The preflight also enforces the OpenShell version range declared in the blueprint (<code class="docutils literal notranslate"><span class="pre">min_openshell_version</span></code> and <code class="docutils literal notranslate"><span class="pre">max_openshell_version</span></code>).
 If the installed OpenShell version falls outside this range, onboarding exits with an actionable error and a link to compatible releases.</p>
+<p>When an existing gateway is detected for reuse, NemoClaw probes the host gateway HTTP endpoint (<code class="docutils literal notranslate"><span class="pre">http://127.0.0.1:${NEMOCLAW_GATEWAY_PORT}/</span></code>) before declaring it reusable, so a gateway whose container is running but whose upstream is still warming up (e.g. immediately after a Docker daemon restart) is rebuilt instead of trusted.
+Tune the wait via <code class="docutils literal notranslate"><span class="pre">NEMOCLAW_REUSE_HEALTH_POLL_COUNT</span></code> (default <code class="docutils literal notranslate"><span class="pre">6</span></code>) and <code class="docutils literal notranslate"><span class="pre">NEMOCLAW_REUSE_HEALTH_POLL_INTERVAL</span></code> (default <code class="docutils literal notranslate"><span class="pre">5</span></code> seconds).
+The poll count is clamped to a minimum of <code class="docutils literal notranslate"><span class="pre">1</span></code> so the probe always runs at least once, and the interval is clamped to a minimum of <code class="docutils literal notranslate"><span class="pre">0</span></code> (no sleep between attempts).</p>
 <section id="from-dockerfile">
 <h4><code class="docutils literal notranslate"><span class="pre">--from</span> <span class="pre">&lt;Dockerfile&gt;</span></code><a class="headerlink" href="#from-dockerfile" title="Link to this heading">#</a></h4>
 <p>Build the sandbox image from a custom Dockerfile instead of the stock NemoClaw image.
@@ -1822,47 +1825,51 @@ Set them before running <code class="docutils literal notranslate"><span class="
 <td><p><code class="docutils literal notranslate"><span class="pre">1</span></code> to enable</p></td>
 <td><p>Auto-accepts confirmation prompts (<code class="docutils literal notranslate"><span class="pre">--yes</span></code> equivalent) including in helpers like the Ollama proxy auth setup.</p></td>
 </tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_EXPERIMENTAL</span></code></p></td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_NO_EXPRESS</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">1</span></code> to enable</p></td>
+<td><p>Installer-only. Skips the DGX Spark and DGX Station express install prompt and continues with the normal interactive onboarding flow.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_EXPERIMENTAL</span></code></p></td>
 <td><p><code class="docutils literal notranslate"><span class="pre">1</span></code> to enable</p></td>
 <td><p>Surfaces experimental providers and flows in onboarding.</p></td>
 </tr>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_IGNORE_RUNTIME_RESOURCES</span></code></p></td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_IGNORE_RUNTIME_RESOURCES</span></code></p></td>
 <td><p><code class="docutils literal notranslate"><span class="pre">1</span></code> to enable</p></td>
 <td><p>Suppresses the under-provisioned runtime warning during preflight. Use only when you know the sandbox host meets the minimums.</p></td>
 </tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_DISABLE_OVERLAY_FIX</span></code></p></td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_DISABLE_OVERLAY_FIX</span></code></p></td>
 <td><p><code class="docutils literal notranslate"><span class="pre">1</span></code> to enable</p></td>
 <td><p>Skips the Docker overlay-fix step during sandbox build. For environments where the fix is incompatible.</p></td>
 </tr>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_OVERLAY_SNAPSHOTTER</span></code></p></td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_OVERLAY_SNAPSHOTTER</span></code></p></td>
 <td><p>snapshotter name</p></td>
 <td><p>Selects the containerd overlay snapshotter for sandbox builds. Empty (default) preserves containerd’s choice.</p></td>
 </tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_SKIP_TELEGRAM_REACHABILITY</span></code></p></td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_SKIP_TELEGRAM_REACHABILITY</span></code></p></td>
 <td><p><code class="docutils literal notranslate"><span class="pre">1</span></code> to enable</p></td>
 <td><p>Skips the Telegram bot reachability probe during onboard (useful in restricted networks).</p></td>
 </tr>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_CONFIG_ACCEPT_NEW_PATH</span></code></p></td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_CONFIG_ACCEPT_NEW_PATH</span></code></p></td>
 <td><p><code class="docutils literal notranslate"><span class="pre">1</span></code> to enable</p></td>
 <td><p>Accepts a new sandbox config path without an interactive prompt when the stored path differs from the discovered one.</p></td>
 </tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_SANDBOX_GPU</span></code></p></td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_SANDBOX_GPU</span></code></p></td>
 <td><p><code class="docutils literal notranslate"><span class="pre">auto</span></code>, <code class="docutils literal notranslate"><span class="pre">1</span></code>, or <code class="docutils literal notranslate"><span class="pre">0</span></code></p></td>
 <td><p>Controls sandbox GPU passthrough during onboarding. <code class="docutils literal notranslate"><span class="pre">auto</span></code> enables GPU passthrough when an NVIDIA GPU is detected, <code class="docutils literal notranslate"><span class="pre">1</span></code> requires GPU passthrough, and <code class="docutils literal notranslate"><span class="pre">0</span></code> forces CPU-only sandbox creation.</p></td>
 </tr>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_SANDBOX_GPU_DEVICE</span></code></p></td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_SANDBOX_GPU_DEVICE</span></code></p></td>
 <td><p>OpenShell GPU device selector</p></td>
 <td><p>Selects the GPU device passed with <code class="docutils literal notranslate"><span class="pre">openshell</span> <span class="pre">sandbox</span> <span class="pre">create</span> <span class="pre">--gpu-device</span></code>. Setting this value enables sandbox GPU passthrough unless <code class="docutils literal notranslate"><span class="pre">NEMOCLAW_SANDBOX_GPU=0</span></code> is also set, which is rejected.</p></td>
 </tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_OPENSHELL_GATEWAY_BIN</span></code></p></td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_OPENSHELL_GATEWAY_BIN</span></code></p></td>
 <td><p>path</p></td>
 <td><p>Advanced override for the <code class="docutils literal notranslate"><span class="pre">openshell-gateway</span></code> binary used by the Linux Docker-driver gateway. Defaults to the binary next to <code class="docutils literal notranslate"><span class="pre">openshell</span></code>, then common install paths.</p></td>
 </tr>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_OPENSHELL_SANDBOX_BIN</span></code></p></td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_OPENSHELL_SANDBOX_BIN</span></code></p></td>
 <td><p>path</p></td>
 <td><p>Advanced override for the <code class="docutils literal notranslate"><span class="pre">openshell-sandbox</span></code> binary passed to the Linux Docker-driver gateway supervisor. Defaults to the binary next to <code class="docutils literal notranslate"><span class="pre">openshell</span></code>, then common install paths.</p></td>
 </tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_OPENSHELL_GATEWAY_STATE_DIR</span></code></p></td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_OPENSHELL_GATEWAY_STATE_DIR</span></code></p></td>
 <td><p>path</p></td>
 <td><p>Advanced override for the Linux Docker-driver gateway pid file and SQLite state directory. Defaults to <code class="docutils literal notranslate"><span class="pre">~/.local/state/nemoclaw/openshell-docker-gateway</span></code>.</p></td>
 </tr>

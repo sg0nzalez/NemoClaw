@@ -45,7 +45,7 @@
 
 
 
-    <script src="../_static/documentation_options.js?v=218434ba"></script>
+    <script src="../_static/documentation_options.js?v=454be4fe"></script>
     <script src="../_static/doctools.js?v=9a2dae69"></script>
     <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
@@ -56,7 +56,7 @@
     <script>
         DOCUMENTATION_OPTIONS.theme_version = '0.16.1';
         DOCUMENTATION_OPTIONS.theme_switcher_json_url = '../versions1.json';
-        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.38';
+        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.39';
         DOCUMENTATION_OPTIONS.show_version_warning_banner =
             false;
         </script>
@@ -559,12 +559,18 @@ If you see a Docker connection error, start the Docker daemon:</p>
 <section id="docker-permission-denied-on-linux">
 <h3>Docker permission denied on Linux<a class="headerlink" href="#docker-permission-denied-on-linux" title="Link to this heading">#</a></h3>
 <p>On Linux, if the Docker daemon is running but you see “permission denied” errors, your user may not be in the <code class="docutils literal notranslate"><span class="pre">docker</span></code> group.
+The installer can add your user to the group, but Linux does not activate that membership in the current shell automatically.
 Add your user and activate the group in the current shell:</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>sudo<span class="w"> </span>usermod<span class="w"> </span>-aG<span class="w"> </span>docker<span class="w"> </span><span class="nv">$USER</span>
 <span class="gp">$ </span>newgrp<span class="w"> </span>docker
 </pre></div>
 </div>
-<p>Then retry <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span></code>.</p>
+<p>Then retry <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span></code>.
+If the installer stopped after printing <code class="docutils literal notranslate"><span class="pre">newgrp</span> <span class="pre">docker</span></code>, run that command and then re-run the installer:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>newgrp<span class="w"> </span>docker
+<span class="gp">$ </span>curl<span class="w"> </span>-fsSL<span class="w"> </span>https://www.nvidia.com/nemoclaw.sh<span class="w"> </span><span class="p">|</span><span class="w"> </span>bash
+</pre></div>
+</div>
 </section>
 <section id="macos-first-run-failures">
 <h3>macOS first-run failures<a class="headerlink" href="#macos-first-run-failures" title="Link to this heading">#</a></h3>
@@ -1367,14 +1373,14 @@ To add a binary to the sandbox image, update the sandbox <code class="docutils l
 </div>
 <p>After the rebuild completes, return to the Skills page to confirm the skill status has changed from <code class="docutils literal notranslate"><span class="pre">blocked</span></code> to <code class="docutils literal notranslate"><span class="pre">ready</span></code>.</p>
 </section>
-<section id="openclaw-config-set-fails-with-a-permission-error-on-brev-shields-up">
-<h3><code class="docutils literal notranslate"><span class="pre">openclaw</span> <span class="pre">config</span> <span class="pre">set</span></code> fails with a permission error on Brev (Shields Up)<a class="headerlink" href="#openclaw-config-set-fails-with-a-permission-error-on-brev-shields-up" title="Link to this heading">#</a></h3>
-<p>When <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">&lt;name&gt;</span> <span class="pre">shields</span> <span class="pre">up</span></code> has been run, <code class="docutils literal notranslate"><span class="pre">openclaw.json</span></code> is owned by root and mounted read-only inside the sandbox.
+<section id="openclaw-config-set-fails-with-a-permission-error-on-brev">
+<h3><code class="docutils literal notranslate"><span class="pre">openclaw</span> <span class="pre">config</span> <span class="pre">set</span></code> fails with a permission error on Brev<a class="headerlink" href="#openclaw-config-set-fails-with-a-permission-error-on-brev" title="Link to this heading">#</a></h3>
+<p>When the sandbox config has been locked from the host, <code class="docutils literal notranslate"><span class="pre">openclaw.json</span></code> is owned by root and mounted read-only inside the sandbox.
 Running <code class="docutils literal notranslate"><span class="pre">openclaw</span> <span class="pre">config</span> <span class="pre">set</span></code> inside the sandbox then returns:</p>
 <div class="highlight-text notranslate"><div class="highlight"><pre><span></span>EACCES: permission denied, open &#39;/sandbox/.openclaw/openclaw.json&#39;
 </pre></div>
 </div>
-<p>In the default sandbox state (before <code class="docutils literal notranslate"><span class="pre">shields</span> <span class="pre">up</span></code>), <code class="docutils literal notranslate"><span class="pre">openclaw.json</span></code> is writable by the sandbox user.
+<p>In the default sandbox state, <code class="docutils literal notranslate"><span class="pre">openclaw.json</span></code> is writable by the sandbox user.
 If you see this error, use the host-side config command instead:</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>nemoclaw<span class="w"> </span>&lt;name&gt;<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>--key<span class="w"> </span>&lt;dotpath&gt;<span class="w"> </span>--value<span class="w"> </span><span class="s1">&#39;&lt;json-or-string&gt;&#39;</span><span class="w"> </span>--restart
 </pre></div>
@@ -1537,7 +1543,7 @@ To install a skill dependency, add it to the sandbox image and rebuild:</p>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#podman">Podman</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#brev">Brev</a><ul class="nav section-nav flex-column">
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#most-openclaw-skills-show-as-blocked">Most OpenClaw skills show as blocked</a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#openclaw-config-set-fails-with-a-permission-error-on-brev-shields-up"><code class="docutils literal notranslate"><span class="pre">openclaw</span> <span class="pre">config</span> <span class="pre">set</span></code> fails with a permission error on Brev (Shields Up)</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#openclaw-config-set-fails-with-a-permission-error-on-brev"><code class="docutils literal notranslate"><span class="pre">openclaw</span> <span class="pre">config</span> <span class="pre">set</span></code> fails with a permission error on Brev</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#openclaw-dashboard-is-unreachable-after-extended-uptime-on-brev">OpenClaw dashboard is unreachable after extended uptime on Brev</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#skill-install-buttons-do-not-work-on-brev">Skill install buttons do not work on Brev</a></li>
 </ul>

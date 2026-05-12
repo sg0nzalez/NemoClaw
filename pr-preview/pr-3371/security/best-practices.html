@@ -45,7 +45,7 @@
 
 
 
-    <script src="../_static/documentation_options.js?v=218434ba"></script>
+    <script src="../_static/documentation_options.js?v=454be4fe"></script>
     <script src="../_static/doctools.js?v=9a2dae69"></script>
     <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
@@ -492,7 +492,7 @@ window.runMermaid = runMermaid;</script>
     <script>
         DOCUMENTATION_OPTIONS.theme_version = '0.16.1';
         DOCUMENTATION_OPTIONS.theme_switcher_json_url = '../versions1.json';
-        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.38';
+        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.39';
         DOCUMENTATION_OPTIONS.show_version_warning_banner =
             false;
         </script>
@@ -1374,10 +1374,12 @@ See the [Process Controls](https://docs.nvidia.com/openshell/latest/security/bes
 <section id="capability-drops">
 <h3>Capability Drops<a class="headerlink" href="#capability-drops" title="Link to this heading">#</a></h3>
 <p>The entrypoint drops dangerous Linux capabilities from the bounding set at startup using <code class="docutils literal notranslate"><span class="pre">capsh</span></code>.
-This limits what capabilities any child process (gateway, sandbox, agent) can ever acquire.</p>
-<p>The entrypoint drops these capabilities: <code class="docutils literal notranslate"><span class="pre">cap_net_raw</span></code>, <code class="docutils literal notranslate"><span class="pre">cap_dac_override</span></code>, <code class="docutils literal notranslate"><span class="pre">cap_sys_chroot</span></code>, <code class="docutils literal notranslate"><span class="pre">cap_fsetid</span></code>, <code class="docutils literal notranslate"><span class="pre">cap_setfcap</span></code>, <code class="docutils literal notranslate"><span class="pre">cap_mknod</span></code>, <code class="docutils literal notranslate"><span class="pre">cap_audit_write</span></code>, <code class="docutils literal notranslate"><span class="pre">cap_net_bind_service</span></code>.
-The entrypoint keeps these because it needs them for privilege separation using gosu: <code class="docutils literal notranslate"><span class="pre">cap_chown</span></code>, <code class="docutils literal notranslate"><span class="pre">cap_setuid</span></code>, <code class="docutils literal notranslate"><span class="pre">cap_setgid</span></code>, <code class="docutils literal notranslate"><span class="pre">cap_fowner</span></code>, <code class="docutils literal notranslate"><span class="pre">cap_kill</span></code>.</p>
+This limits what capabilities any child process (gateway, sandbox, agent) can ever acquire.
+When the entrypoint switches from root to the <code class="docutils literal notranslate"><span class="pre">sandbox</span></code> and <code class="docutils literal notranslate"><span class="pre">gateway</span></code> users, it uses <code class="docutils literal notranslate"><span class="pre">setpriv</span></code> when available to remove the remaining privilege-separation capabilities from the child process at the same time as the user change.</p>
+<p>The initial entrypoint drop removes <code class="docutils literal notranslate"><span class="pre">cap_sys_admin</span></code>, <code class="docutils literal notranslate"><span class="pre">cap_sys_ptrace</span></code>, <code class="docutils literal notranslate"><span class="pre">cap_net_raw</span></code>, <code class="docutils literal notranslate"><span class="pre">cap_dac_override</span></code>, <code class="docutils literal notranslate"><span class="pre">cap_sys_chroot</span></code>, <code class="docutils literal notranslate"><span class="pre">cap_fsetid</span></code>, <code class="docutils literal notranslate"><span class="pre">cap_setfcap</span></code>, <code class="docutils literal notranslate"><span class="pre">cap_mknod</span></code>, <code class="docutils literal notranslate"><span class="pre">cap_audit_write</span></code>, and <code class="docutils literal notranslate"><span class="pre">cap_net_bind_service</span></code>.
+During <code class="docutils literal notranslate"><span class="pre">setpriv</span></code> step-down, the child process also loses <code class="docutils literal notranslate"><span class="pre">cap_setuid</span></code>, <code class="docutils literal notranslate"><span class="pre">cap_setgid</span></code>, <code class="docutils literal notranslate"><span class="pre">cap_fowner</span></code>, <code class="docutils literal notranslate"><span class="pre">cap_chown</span></code>, and <code class="docutils literal notranslate"><span class="pre">cap_kill</span></code>.</p>
 <p>This is best-effort: if <code class="docutils literal notranslate"><span class="pre">capsh</span></code> is not available or <code class="docutils literal notranslate"><span class="pre">CAP_SETPCAP</span></code> is not in the bounding set, the entrypoint logs a warning and continues with the default capability set.
+If <code class="docutils literal notranslate"><span class="pre">setpriv</span></code> is unavailable, the entrypoint falls back to <code class="docutils literal notranslate"><span class="pre">gosu</span></code> and logs a warning that the remaining bounding-set capabilities were retained for the child process.
 For additional protection, pass <code class="docutils literal notranslate"><span class="pre">--cap-drop=ALL</span></code> with <code class="docutils literal notranslate"><span class="pre">docker</span> <span class="pre">run</span></code> or Compose (see <a class="reference internal" href="../deployment/sandbox-hardening.html"><span class="std std-doc">Sandbox Hardening</span></a>).</p>
 <div class="pst-scrollable-table-container"><table class="table">
 <thead>
@@ -1387,16 +1389,16 @@ For additional protection, pass <code class="docutils literal notranslate"><span
 </thead>
 <tbody>
 <tr class="row-even"><td><p>Default</p></td>
-<td><p>The entrypoint drops dangerous capabilities at startup using <code class="docutils literal notranslate"><span class="pre">capsh</span></code>. Best-effort.</p></td>
+<td><p>The entrypoint drops dangerous capabilities at startup using <code class="docutils literal notranslate"><span class="pre">capsh</span></code>, then uses <code class="docutils literal notranslate"><span class="pre">setpriv</span></code> during user step-down when possible. Best-effort.</p></td>
 </tr>
 <tr class="row-odd"><td><p>What you can change</p></td>
 <td><p>When launching with <code class="docutils literal notranslate"><span class="pre">docker</span> <span class="pre">run</span></code> directly, pass <code class="docutils literal notranslate"><span class="pre">--cap-drop=ALL</span> <span class="pre">--cap-add=NET_BIND_SERVICE</span></code> for stricter enforcement. In the standard NemoClaw flow (with <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span></code>), the entrypoint handles capability dropping automatically.</p></td>
 </tr>
 <tr class="row-even"><td><p>Risk if relaxed</p></td>
-<td><p><code class="docutils literal notranslate"><span class="pre">CAP_NET_RAW</span></code> allows raw socket access for network sniffing. <code class="docutils literal notranslate"><span class="pre">CAP_DAC_OVERRIDE</span></code> bypasses filesystem permission checks. Attackers can use <code class="docutils literal notranslate"><span class="pre">CAP_SYS_CHROOT</span></code> in container escape chains. If <code class="docutils literal notranslate"><span class="pre">capsh</span></code> is unavailable, the container runs with the default Docker capability set.</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">CAP_SYS_ADMIN</span></code> and <code class="docutils literal notranslate"><span class="pre">CAP_SYS_PTRACE</span></code> expand kernel and process attack surface. <code class="docutils literal notranslate"><span class="pre">CAP_NET_RAW</span></code> allows raw socket access for network sniffing. <code class="docutils literal notranslate"><span class="pre">CAP_DAC_OVERRIDE</span></code> bypasses filesystem permission checks. If <code class="docutils literal notranslate"><span class="pre">capsh</span></code> or <code class="docutils literal notranslate"><span class="pre">setpriv</span></code> cannot run, the container retains more of the runtime-provided capability set.</p></td>
 </tr>
 <tr class="row-odd"><td><p>Recommendation</p></td>
-<td><p>Run on an image that includes <code class="docutils literal notranslate"><span class="pre">capsh</span></code> (the NemoClaw image includes it through <code class="docutils literal notranslate"><span class="pre">libcap2-bin</span></code>). For defense-in-depth, also pass <code class="docutils literal notranslate"><span class="pre">--cap-drop=ALL</span></code> at the container runtime level.</p></td>
+<td><p>Run on an image that includes <code class="docutils literal notranslate"><span class="pre">capsh</span></code> and <code class="docutils literal notranslate"><span class="pre">setpriv</span></code> (the NemoClaw image includes them). For defense-in-depth, also pass <code class="docutils literal notranslate"><span class="pre">--cap-drop=ALL</span></code> at the container runtime level.</p></td>
 </tr>
 </tbody>
 </table>

@@ -45,7 +45,7 @@
 
 
 
-    <script src="../_static/documentation_options.js?v=218434ba"></script>
+    <script src="../_static/documentation_options.js?v=454be4fe"></script>
     <script src="../_static/doctools.js?v=9a2dae69"></script>
     <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
@@ -56,7 +56,7 @@
     <script>
         DOCUMENTATION_OPTIONS.theme_version = '0.16.1';
         DOCUMENTATION_OPTIONS.theme_switcher_json_url = '../versions1.json';
-        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.38';
+        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.39';
         DOCUMENTATION_OPTIONS.show_version_warning_banner =
             false;
         </script>
@@ -548,12 +548,17 @@
 <tr class="row-odd"><td><p>npm</p></td>
 <td><p>10 or later</p></td>
 </tr>
-<tr class="row-even"><td><p>Platform</p></td>
+<tr class="row-even"><td><p>Docker</p></td>
+<td><p>Docker Engine, Docker Desktop, or Colima on a tested platform</p></td>
+</tr>
+<tr class="row-odd"><td><p>Platform</p></td>
 <td><p>See <a class="reference internal" href="#platforms">Platforms</a> below</p></td>
 </tr>
 </tbody>
 </table>
 </div>
+<p>On Linux, the installer can install Docker, start the Docker service, and add your user to the <code class="docutils literal notranslate"><span class="pre">docker</span></code> group.
+If the group change is not active in the current shell, the installer exits with <code class="docutils literal notranslate"><span class="pre">newgrp</span> <span class="pre">docker</span></code> guidance before it starts onboarding.</p>
 <div class="admonition warning">
 <p class="admonition-title">Warning</p>
 <p>OpenShell Lifecycle
