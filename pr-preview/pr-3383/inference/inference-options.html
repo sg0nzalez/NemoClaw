@@ -578,7 +578,7 @@ NemoClaw uses provider-specific local tokens for those routes, and rebuilds of l
 <tr class="row-odd"><td><p>Local vLLM</p></td>
 <td><p>Experimental</p></td>
 <td><p>Local OpenAI-compatible</p></td>
-<td><p>Requires <code class="docutils literal notranslate"><span class="pre">NEMOCLAW_EXPERIMENTAL=1</span></code> and a server already running on <code class="docutils literal notranslate"><span class="pre">localhost:8000</span></code></p></td>
+<td><p>Appears when a vLLM server is already running on <code class="docutils literal notranslate"><span class="pre">localhost:8000</span></code>; managed install/start requires <code class="docutils literal notranslate"><span class="pre">NEMOCLAW_EXPERIMENTAL=1</span></code></p></td>
 </tr>
 </tbody>
 </table>
@@ -590,7 +590,8 @@ NemoClaw uses provider-specific local tokens for those routes, and rebuilds of l
 <p>The onboard wizard presents the following provider options by default.
 The first six are always available.
 Ollama appears when it is installed or running on the host.
-Experimental local vLLM appears when you opt in and NemoClaw detects either a running vLLM server or a supported NVIDIA GPU host profile.</p>
+Experimental local vLLM appears when NemoClaw detects a running vLLM server.
+The managed install/start vLLM entry appears when you opt in and NemoClaw detects a supported NVIDIA GPU host profile.</p>
 <div class="pst-scrollable-table-container"><table class="table">
 <thead>
 <tr class="row-odd"><th class="head"><p>Option</p></th>
@@ -689,7 +690,8 @@ To use the router in scripted setup, set:</p>
 </section>
 <section id="experimental-options">
 <h2>Experimental Options<a class="headerlink" href="#experimental-options" title="Link to this heading">#</a></h2>
-<p>The following local inference options require <code class="docutils literal notranslate"><span class="pre">NEMOCLAW_EXPERIMENTAL=1</span></code> and, when prerequisites are met, appear in the onboarding selection list.</p>
+<p>The following local inference options are experimental.
+Local NIM and managed vLLM install/start require <code class="docutils literal notranslate"><span class="pre">NEMOCLAW_EXPERIMENTAL=1</span></code>; an already-running vLLM server appears directly in the onboarding selection list.</p>
 <div class="pst-scrollable-table-container"><table class="table">
 <thead>
 <tr class="row-odd"><th class="head"><p>Option</p></th>
@@ -704,7 +706,7 @@ To use the router in scripted setup, set:</p>
 </tr>
 <tr class="row-odd"><td><p>Local vLLM</p></td>
 <td><p>vLLM running on <code class="docutils literal notranslate"><span class="pre">localhost:8000</span></code>, or a supported DGX Spark, DGX Station, or Linux NVIDIA GPU profile</p></td>
-<td><p>Auto-detects the loaded model. Can install or start a managed vLLM container for supported profiles.</p></td>
+<td><p>Auto-detects the loaded model when vLLM is already running. Can install or start a managed vLLM container for supported profiles after experimental opt-in.</p></td>
 </tr>
 </tbody>
 </table>

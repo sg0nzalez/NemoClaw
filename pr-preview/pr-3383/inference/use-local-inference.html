@@ -729,13 +729,12 @@ Refer to <a class="reference internal" href="switch-inference-providers.html"><s
 <h2>vLLM (Experimental)<a class="headerlink" href="#vllm-experimental" title="Link to this heading">#</a></h2>
 <p>When vLLM is already running on <code class="docutils literal notranslate"><span class="pre">localhost:8000</span></code>, NemoClaw can detect it automatically and query the <code class="docutils literal notranslate"><span class="pre">/v1/models</span></code> endpoint to determine the loaded model.
 On supported Linux hosts with NVIDIA GPUs, the onboard wizard can also install or start a managed vLLM container for you.</p>
-<p>Set the experimental flag and run onboard.</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span><span class="nv">NEMOCLAW_EXPERIMENTAL</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>nemoclaw<span class="w"> </span>onboard
+<p>For an already-running vLLM server, run <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span></code> and select <strong>Local vLLM [experimental]</strong> from the provider list.</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>nemoclaw<span class="w"> </span>onboard
 </pre></div>
 </div>
-<p>Select <strong>Local vLLM [experimental]</strong> from the provider list.
-If vLLM is already running, NemoClaw detects the running model and validates the endpoint.
-If vLLM is not running and your host matches a managed profile, select the <strong>Install vLLM</strong> or <strong>Start vLLM</strong> entry.
+<p>If vLLM is already running, NemoClaw detects the running model and validates the endpoint.
+If vLLM is not running and your host matches a managed profile, set <code class="docutils literal notranslate"><span class="pre">NEMOCLAW_EXPERIMENTAL=1</span></code>, rerun <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span></code>, and select the <strong>Install vLLM</strong> or <strong>Start vLLM</strong> entry.
 NemoClaw pulls the vLLM image, downloads model weights into <code class="docutils literal notranslate"><span class="pre">~/.cache/huggingface</span></code>, starts the <code class="docutils literal notranslate"><span class="pre">nemoclaw-vllm</span></code> container on <code class="docutils literal notranslate"><span class="pre">localhost:8000</span></code>, and prints progress markers while the model loads.
 The first run can take 10 to 30 minutes.
 Later runs reuse the cached image and model weights.</p>
@@ -767,8 +766,7 @@ The vLLM <code class="docutils literal notranslate"><span class="pre">/v1/respon
 <section id="id2">
 <h3>Non-Interactive Setup<a class="headerlink" href="#id2" title="Link to this heading">#</a></h3>
 <p>Use an already-running vLLM server:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span><span class="nv">NEMOCLAW_EXPERIMENTAL</span><span class="o">=</span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
-<span class="w">  </span><span class="nv">NEMOCLAW_PROVIDER</span><span class="o">=</span>vllm<span class="w"> </span><span class="se">\</span>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span><span class="nv">NEMOCLAW_PROVIDER</span><span class="o">=</span>vllm<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>nemoclaw<span class="w"> </span>onboard<span class="w"> </span>--non-interactive
 </pre></div>
 </div>
