@@ -1087,7 +1087,7 @@ If someone replaces a binary while the sandbox runs, the hash mismatch triggers 
 </thead>
 <tbody>
 <tr class="row-even"><td><p>Default</p></td>
-<td><p>Each endpoint restricts access to specific binaries. For example, the <code class="docutils literal notranslate"><span class="pre">github</span></code> preset restricts access so only <code class="docutils literal notranslate"><span class="pre">/usr/bin/gh</span></code> and <code class="docutils literal notranslate"><span class="pre">/usr/bin/git</span></code> can reach <code class="docutils literal notranslate"><span class="pre">github.com</span></code>. Binary paths support glob patterns (<code class="docutils literal notranslate"><span class="pre">*</span></code> matches one path component, <code class="docutils literal notranslate"><span class="pre">**</span></code> matches recursively).</p></td>
+<td><p>Each endpoint restricts access to specific binaries. For example, the <code class="docutils literal notranslate"><span class="pre">github</span></code> preset restricts access so only <code class="docutils literal notranslate"><span class="pre">/usr/bin/git</span></code> can reach <code class="docutils literal notranslate"><span class="pre">github.com</span></code>. Binary paths support glob patterns (<code class="docutils literal notranslate"><span class="pre">*</span></code> matches one path component, <code class="docutils literal notranslate"><span class="pre">**</span></code> matches recursively).</p></td>
 </tr>
 <tr class="row-odd"><td><p>What you can change</p></td>
 <td><p>Add binaries to an endpoint entry, or omit the <code class="docutils literal notranslate"><span class="pre">binaries</span></code> field to allow any executable.</p></td>
@@ -1206,7 +1206,7 @@ The <code class="docutils literal notranslate"><span class="pre">protocol</span>
 </tr>
 <tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">github</span></code></p></td>
 <td><p>GitHub and GitHub REST API.</p></td>
-<td><p>Gives agent read/write access to repositories and issues via <code class="docutils literal notranslate"><span class="pre">gh</span></code> and <code class="docutils literal notranslate"><span class="pre">git</span></code>.</p></td>
+<td><p>Gives agent read/write access to repositories and issues via <code class="docutils literal notranslate"><span class="pre">git</span></code>.</p></td>
 </tr>
 <tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">huggingface</span></code></p></td>
 <td><p>Hugging Face Hub (download-only) and inference router.</p></td>
