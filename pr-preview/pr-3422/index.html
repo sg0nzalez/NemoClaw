@@ -65,7 +65,7 @@
     <link rel="icon" href="_static/favicon.png"/>
 
     <link rel="search" title="Search" href="search.html" />
-    <link rel="next" title="Overview" href="about/overview.html" />
+    <link rel="next" title="Overview of NVIDIA NemoClaw" href="about/overview.html" />
 
 
 
@@ -390,7 +390,7 @@
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Get Started</span></p>
 <ul class="nav bd-sidenav">
 <li class="toctree-l1 has-children"><a class="reference internal" href="get-started/prerequisites.html">Prerequisites</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
-<li class="toctree-l2"><a class="reference internal" href="get-started/windows-preparation.html">Prepare Windows for NemoClaw</a></li>
+<li class="toctree-l2"><a class="reference internal" href="get-started/windows-preparation.html">(Windows Only) Windows Prerequisites</a></li>
 </ul>
 </details></li>
 <li class="toctree-l1"><a class="reference internal" href="get-started/quickstart.html">Quickstart with OpenClaw</a></li>
@@ -486,10 +486,10 @@
 <a class="reference external" href="https://discord.gg/XFpfPv9Uvx" rel="noreferer noopener" target="_blank"><img alt="Discord" src="https://img.shields.io/badge/Discord-Join-7289da" /></a></p>
 <p>NVIDIA NemoClaw is an open-source reference stack that simplifies running <a class="reference external" href="https://openclaw.ai" rel="noreferer noopener" target="_blank">OpenClaw</a> always-on assistants more safely.
 NemoClaw provides onboarding, lifecycle management, and OpenClaw operations within OpenShell containers.
-It installs the <a class="reference external" href="https://github.com/NVIDIA/OpenShell" rel="noreferer noopener" target="_blank">NVIDIA OpenShell</a> runtime, part of NVIDIA Agent Toolkit, an environment designed for executing claws with additional security, and open-source models like <a class="reference external" href="https://build.nvidia.com" rel="noreferer noopener" target="_blank">NVIDIA Nemotron</a>.</p>
+It installs the <a class="reference external" href="https://github.com/NVIDIA/OpenShell" rel="noreferer noopener" target="_blank">NVIDIA OpenShell</a> runtime, part of NVIDIA Agent Toolkit, setting up an environment designed for executing agents with additional security and inference routing capabilities.</p>
 <section id="get-started">
 <h2>Get Started<a class="headerlink" href="#get-started" title="Link to this heading">#</a></h2>
-<p>Install the CLI and launch a sandboxed OpenClaw instance in a few commands.</p>
+<p>Run the following command to install NemoClaw and run your first sandboxed agent.</p>
 <style>
 .nc-term {
   background: #1a1a2e;
@@ -591,9 +591,8 @@ It installs the <a class="reference external" href="https://github.com/NVIDIA/Op
   <div class="nc-term-body">
     <div><span class="nc-ps">$ </span><span class="nc-cmd">curl -fsSL https://www.nvidia.com/nemoclaw.sh | bash</span></div>
   </div>
-</div><p>Run <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">--help</span></code> in your terminal to view the full CLI reference.
-You can also clone the <a class="reference external" href="https://github.com/NVIDIA/NemoClaw" rel="noreferer noopener" target="_blank">NemoClaw repository</a> to explore the plugin source and blueprint.</p>
-<p>Proceed to the <a class="reference internal" href="get-started/quickstart.html"><span class="std std-doc">Quickstart</span></a> for step-by-step instructions.</p>
+</div><p>To find detailed instructions on the installation process, refer to the <a class="reference internal" href="get-started/quickstart.html"><span class="std std-doc">Quickstart</span></a> guide.</p>
+<p>To learn more about NemoClaw at a high level, refer to the <a class="reference internal" href="about/overview.html"><span class="std std-doc">NemoClaw Overview</span></a>, <a class="reference internal" href="about/how-it-works.html"><span class="std std-doc">Architecture Overview</span></a>, and <a class="reference internal" href="about/ecosystem.html"><span class="std std-doc">Ecosystem</span></a> pages.</p>
 </section>
 <hr class="docutils" />
 <section id="explore">
@@ -605,19 +604,31 @@ You can also clone the <a class="reference external" href="https://github.com/NV
 <div class="sd-card-body docutils">
 <div class="sd-card-title sd-font-weight-bold docutils">
 About NemoClaw</div>
-<p class="sd-card-text">What NemoClaw is: capabilities, benefits, and typical uses.</p>
+<p class="sd-card-text">Learn what NemoClaw is and its capabilities, benefits, and common use cases.</p>
 </div>
 <div class="sd-card-footer docutils">
 <p class="sd-card-text"><span class="sd-sphinx-override sd-badge sd-bg-secondary sd-bg-text-secondary">Concept</span></p>
 </div>
-<a class="sd-stretched-link sd-hide-link-text reference internal" href="about/overview.html"><span class="doc">Overview</span></a></div>
+<a class="sd-stretched-link sd-hide-link-text reference internal" href="about/overview.html"><span class="doc">Overview of NVIDIA NemoClaw</span></a></div>
+</div>
+<div class="sd-col sd-d-flex-row docutils">
+<div class="sd-card sd-sphinx-override sd-w-100 sd-shadow-sm sd-card-hover docutils">
+<div class="sd-card-body docutils">
+<div class="sd-card-title sd-font-weight-bold docutils">
+Architecture Overview</div>
+<p class="sd-card-text">High-level overview of plugin, blueprint, sandbox lifecycle, and protection layers.</p>
+</div>
+<div class="sd-card-footer docutils">
+<p class="sd-card-text"><span class="sd-sphinx-override sd-badge sd-bg-secondary sd-bg-text-secondary">Concept</span></p>
+</div>
+<a class="sd-stretched-link sd-hide-link-text reference internal" href="about/how-it-works.html"><span class="doc">NemoClaw Architecture Overview</span></a></div>
 </div>
 <div class="sd-col sd-d-flex-row docutils">
 <div class="sd-card sd-sphinx-override sd-w-100 sd-shadow-sm sd-card-hover docutils">
 <div class="sd-card-body docutils">
 <div class="sd-card-title sd-font-weight-bold docutils">
 Ecosystem</div>
-<p class="sd-card-text">How OpenClaw, OpenShell, and NemoClaw form a stack and when to use NemoClaw versus OpenShell alone.</p>
+<p class="sd-card-text">Learn how OpenClaw, OpenShell, and NemoClaw form a stack and when to use NemoClaw versus OpenShell alone.</p>
 </div>
 <div class="sd-card-footer docutils">
 <p class="sd-card-text"><span class="sd-sphinx-override sd-badge sd-bg-secondary sd-bg-text-secondary">Concept</span></p>
@@ -628,7 +639,7 @@ Ecosystem</div>
 <div class="sd-card sd-sphinx-override sd-w-100 sd-shadow-sm sd-card-hover docutils">
 <div class="sd-card-body docutils">
 <div class="sd-card-title sd-font-weight-bold docutils">
-Quickstart</div>
+Quickstart with OpenClaw</div>
 <p class="sd-card-text">Install the CLI, configure inference, and launch your first sandboxed agent.</p>
 </div>
 <div class="sd-card-footer docutils">
@@ -640,7 +651,7 @@ Quickstart</div>
 <div class="sd-card sd-sphinx-override sd-w-100 sd-shadow-sm sd-card-hover docutils">
 <div class="sd-card-body docutils">
 <div class="sd-card-title sd-font-weight-bold docutils">
-NemoClaw Quickstart for Hermes</div>
+Quickstart with Hermes</div>
 <p class="sd-card-text">Launch Hermes in an OpenShell sandbox with the <code class="docutils literal notranslate"><span class="pre">nemohermes</span></code> alias.</p>
 </div>
 <div class="sd-card-footer docutils">
@@ -652,23 +663,11 @@ NemoClaw Quickstart for Hermes</div>
 <div class="sd-card sd-sphinx-override sd-w-100 sd-shadow-sm sd-card-hover docutils">
 <div class="sd-card-body docutils">
 <div class="sd-card-title sd-font-weight-bold docutils">
-Commands</div>
-<p class="sd-card-text">CLI commands for launching, connecting, monitoring, and managing sandboxes.</p>
-</div>
-<div class="sd-card-footer docutils">
-<p class="sd-card-text"><span class="sd-sphinx-override sd-badge sd-bg-secondary sd-bg-text-secondary">Reference</span></p>
-</div>
-<a class="sd-stretched-link sd-hide-link-text reference internal" href="reference/commands.html"><span class="doc">CLI Commands Reference</span></a></div>
-</div>
-<div class="sd-col sd-d-flex-row docutils">
-<div class="sd-card sd-sphinx-override sd-w-100 sd-shadow-sm sd-card-hover docutils">
-<div class="sd-card-body docutils">
-<div class="sd-card-title sd-font-weight-bold docutils">
 Inference Options</div>
 <p class="sd-card-text">Providers available during onboarding and how inference routing works.</p>
 </div>
 <div class="sd-card-footer docutils">
-<p class="sd-card-text"><span class="sd-sphinx-override sd-badge sd-bg-secondary sd-bg-text-secondary">Concept</span></p>
+<p class="sd-card-text"><span class="sd-sphinx-override sd-badge sd-bg-secondary sd-bg-text-secondary">Reference</span></p>
 </div>
 <a class="sd-stretched-link sd-hide-link-text reference internal" href="inference/inference-options.html"><span class="doc">Inference Options</span></a></div>
 </div>
@@ -676,25 +675,13 @@ Inference Options</div>
 <div class="sd-card sd-sphinx-override sd-w-100 sd-shadow-sm sd-card-hover docutils">
 <div class="sd-card-body docutils">
 <div class="sd-card-title sd-font-weight-bold docutils">
-How It Works</div>
-<p class="sd-card-text">How NemoClaw runs: plugin, blueprint, OpenShell orchestration, routing, and policy layers.</p>
+Manage Sandboxes</div>
+<p class="sd-card-text">Understand <code class="docutils literal notranslate"><span class="pre">SOUL.md</span></code>, <code class="docutils literal notranslate"><span class="pre">USER.md</span></code>, and other workspace files, plus backup and restore.</p>
 </div>
 <div class="sd-card-footer docutils">
 <p class="sd-card-text"><span class="sd-sphinx-override sd-badge sd-bg-secondary sd-bg-text-secondary">Concept</span></p>
 </div>
-<a class="sd-stretched-link sd-hide-link-text reference internal" href="about/how-it-works.html"><span class="doc">How NemoClaw Works</span></a></div>
-</div>
-<div class="sd-col sd-d-flex-row docutils">
-<div class="sd-card sd-sphinx-override sd-w-100 sd-shadow-sm sd-card-hover docutils">
-<div class="sd-card-body docutils">
-<div class="sd-card-title sd-font-weight-bold docutils">
-Architecture</div>
-<p class="sd-card-text">Plugin structure, blueprint system, and sandbox lifecycle.</p>
-</div>
-<div class="sd-card-footer docutils">
-<p class="sd-card-text"><span class="sd-sphinx-override sd-badge sd-bg-secondary sd-bg-text-secondary">Reference</span></p>
-</div>
-<a class="sd-stretched-link sd-hide-link-text reference internal" href="reference/architecture.html"><span class="doc">Architecture</span></a></div>
+<a class="sd-stretched-link sd-hide-link-text reference internal" href="manage-sandboxes/workspace-files.html"><span class="doc">Workspace Files</span></a></div>
 </div>
 <div class="sd-col sd-d-flex-row docutils">
 <div class="sd-card sd-sphinx-override sd-w-100 sd-shadow-sm sd-card-hover docutils">
@@ -712,18 +699,6 @@ Network Policies</div>
 <div class="sd-card sd-sphinx-override sd-w-100 sd-shadow-sm sd-card-hover docutils">
 <div class="sd-card-body docutils">
 <div class="sd-card-title sd-font-weight-bold docutils">
-Workspace Files</div>
-<p class="sd-card-text">Understand <code class="docutils literal notranslate"><span class="pre">SOUL.md</span></code>, <code class="docutils literal notranslate"><span class="pre">USER.md</span></code>, and other workspace files, plus backup and restore.</p>
-</div>
-<div class="sd-card-footer docutils">
-<p class="sd-card-text"><span class="sd-sphinx-override sd-badge sd-bg-secondary sd-bg-text-secondary">Concept</span></p>
-</div>
-<a class="sd-stretched-link sd-hide-link-text reference internal" href="manage-sandboxes/workspace-files.html"><span class="doc">Workspace Files</span></a></div>
-</div>
-<div class="sd-col sd-d-flex-row docutils">
-<div class="sd-card sd-sphinx-override sd-w-100 sd-shadow-sm sd-card-hover docutils">
-<div class="sd-card-body docutils">
-<div class="sd-card-title sd-font-weight-bold docutils">
 Security Best Practices</div>
 <p class="sd-card-text">Controls reference, risk framework, and posture profiles for sandbox security.</p>
 </div>
@@ -736,13 +711,25 @@ Security Best Practices</div>
 <div class="sd-card sd-sphinx-override sd-w-100 sd-shadow-sm sd-card-hover docutils">
 <div class="sd-card-body docutils">
 <div class="sd-card-title sd-font-weight-bold docutils">
-How-To Guides</div>
-<p class="sd-card-text">Task-oriented guides for inference, deployment, and policy management.</p>
+Architecture Details</div>
+<p class="sd-card-text">Learn the detailed architecture of NemoClaw, including plugin structure, blueprint system, and sandbox lifecycle.</p>
 </div>
 <div class="sd-card-footer docutils">
-<p class="sd-card-text"><span class="sd-sphinx-override sd-badge sd-bg-secondary sd-bg-text-secondary">How-To</span></p>
+<p class="sd-card-text"><span class="sd-sphinx-override sd-badge sd-bg-secondary sd-bg-text-secondary">Reference</span></p>
 </div>
-<a class="sd-stretched-link sd-hide-link-text reference internal" href="inference/switch-inference-providers.html"><span class="doc">Switch Inference Models at Runtime</span></a></div>
+<a class="sd-stretched-link sd-hide-link-text reference internal" href="reference/architecture.html"><span class="doc">Architecture</span></a></div>
+</div>
+<div class="sd-col sd-d-flex-row docutils">
+<div class="sd-card sd-sphinx-override sd-w-100 sd-shadow-sm sd-card-hover docutils">
+<div class="sd-card-body docutils">
+<div class="sd-card-title sd-font-weight-bold docutils">
+Commands</div>
+<p class="sd-card-text">CLI commands for launching, connecting, monitoring, and managing sandboxes.</p>
+</div>
+<div class="sd-card-footer docutils">
+<p class="sd-card-text"><span class="sd-sphinx-override sd-badge sd-bg-secondary sd-bg-text-secondary">Reference</span></p>
+</div>
+<a class="sd-stretched-link sd-hide-link-text reference internal" href="reference/commands.html"><span class="doc">CLI Commands Reference</span></a></div>
 </div>
 <div class="sd-col sd-d-flex-row docutils">
 <div class="sd-card sd-sphinx-override sd-w-100 sd-shadow-sm sd-card-hover docutils">
@@ -801,7 +788,7 @@ Agent Skills</div>
        title="next page">
       <div class="prev-next-info">
         <p class="prev-next-subtitle">next</p>
-        <p class="prev-next-title">Overview</p>
+        <p class="prev-next-title">Overview of NVIDIA NemoClaw</p>
       </div>
       <i class="fa-solid fa-angle-right"></i>
     </a>

@@ -9,7 +9,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <title>How NemoClaw Works &#8212; NVIDIA NemoClaw Developer Guide</title>
+    <title>NemoClaw Architecture Overview &#8212; NVIDIA NemoClaw Developer Guide</title>
   
   
   
@@ -52,442 +52,6 @@
     <script src="../_static/copybutton.js?v=6dbb43f8"></script>
     <script src="../_static/search-assets.bundle.js?v=099b119e"></script>
     <script src="../_static/design-tabs.js?v=f930bc37"></script>
-    <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
-    <script type="module">import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.12.1/dist/mermaid.esm.min.mjs";
-
-
-
-
-
-const initStyles = () => {
-    const defaultStyle = document.createElement('style');
-    defaultStyle.textContent = `pre.mermaid {
-    /* Same as .mermaid-container > pre */
-    display: block;
-    width: 100%;
-}
-
-pre.mermaid > svg {
-    /* Same as .mermaid-container > pre > svg */
-    height: 500px;
-    width: 100%;
-    max-width: 100% !important;
-}`;
-    document.head.appendChild(defaultStyle);
-
-    const fullscreenStyle = document.createElement('style');
-    fullscreenStyle.textContent = `.mermaid-container {
-    display: flex;
-    flex-direction: row;
-    width: 100%;
-}
-
-.mermaid-container > pre {
-    display: block;
-    width: 100%;
-}
-
-.mermaid-container > pre > svg {
-    height: 500px;
-    width: 100%;
-    max-width: 100% !important;
-}
-
-.mermaid-fullscreen-btn {
-    width: 28px;
-    height: 28px;
-    background: rgba(255, 255, 255, 0.95);
-    border: 1px solid rgba(0, 0, 0, 0.3);
-    border-radius: 4px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.2s;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
-    font-size: 14px;
-    line-height: 1;
-    padding: 0;
-    color: #333;
-}
-
-.mermaid-fullscreen-btn:hover {
-    opacity: 100% !important;
-    background: rgba(255, 255, 255, 1);
-    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
-    transform: scale(1.1);
-}
-
-.mermaid-fullscreen-btn.dark-theme {
-    background: rgba(50, 50, 50, 0.95);
-    border: 1px solid rgba(255, 255, 255, 0.3);
-    color: #e0e0e0;
-}
-
-.mermaid-fullscreen-btn.dark-theme:hover {
-    background: rgba(60, 60, 60, 1);
-    box-shadow: 0 3px 10px rgba(255, 255, 255, 0.2);
-}
-
-.mermaid-fullscreen-modal {
-    display: none;
-    position: fixed !important;
-    top: 0 !important;
-    left: 0 !important;
-    width: 95vw;
-    height: 100vh;
-    background: rgba(255, 255, 255, 0.98);
-    z-index: 9999;
-    padding: 20px;
-    overflow: auto;
-}
-
-.mermaid-fullscreen-modal.dark-theme {
-    background: rgba(0, 0, 0, 0.98);
-}
-
-.mermaid-fullscreen-modal.active {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.mermaid-container-fullscreen {
-    position: relative;
-    width: 95vw;
-    height: 90vh;
-    max-width: 95vw;
-    max-height: 90vh;
-    background: white;
-    border-radius: 8px;
-    padding: 20px;
-    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
-    overflow: auto;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.mermaid-container-fullscreen.dark-theme {
-    background: #1a1a1a;
-    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.8);
-}
-
-.mermaid-container-fullscreen pre.mermaid {
-    width: 100%;
-    height: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.mermaid-container-fullscreen .mermaid svg {
-    height: 100% !important;
-    width: 100% !important;
-    cursor: grab;
-}
-
-.mermaid-fullscreen-close {
-    position: fixed !important;
-    top: 20px !important;
-    right: 20px !important;
-    width: 40px;
-    height: 40px;
-    background: rgba(255, 255, 255, 0.95);
-    border: 1px solid rgba(0, 0, 0, 0.2);
-    border-radius: 50%;
-    cursor: pointer;
-    z-index: 10000;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-    transition: all 0.2s;
-    font-size: 24px;
-    line-height: 1;
-    color: #333;
-}
-
-.mermaid-fullscreen-close:hover {
-    background: white;
-    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
-    transform: scale(1.1);
-}
-
-.mermaid-fullscreen-close.dark-theme {
-    background: rgba(50, 50, 50, 0.95);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    color: #e0e0e0;
-}
-
-.mermaid-fullscreen-close.dark-theme:hover {
-    background: rgba(60, 60, 60, 1);
-    box-shadow: 0 6px 16px rgba(255, 255, 255, 0.2);
-}
-
-.mermaid-fullscreen-modal .mermaid-fullscreen-btn {
-    display: none !important;
-}`;
-    document.head.appendChild(fullscreenStyle);
-}
-
-// Detect if page has dark background
-const isDarkTheme = () => {
-    // We use a set of heuristics:
-    // 1. Check for common dark mode classes or attributes
-    // 2. Check computed background color brightness
-    if (document.documentElement.classList.contains('dark') ||
-        document.documentElement.getAttribute('data-theme') === 'dark' ||
-        document.body.classList.contains('dark') ||
-        document.body.getAttribute('data-theme') === 'dark') {
-        // console.log("Dark theme detected via class/attribute");
-        return true;
-    }
-    if (document.documentElement.classList.contains('light') ||
-        document.documentElement.getAttribute('data-theme') === 'light' ||
-        document.body.classList.contains('light') ||
-        document.body.getAttribute('data-theme') === 'light') {
-        // console.log("Light theme detected via class/attribute");
-        return false;
-    }
-    if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-        // console.log("Dark theme detected via prefers-color-scheme");
-        return true;
-    }
-    const bgColor = window.getComputedStyle(document.body).backgroundColor;
-    const match = bgColor.match(/rgb\((\d+),\s*(\d+),\s*(\d+)/);
-    if (match) {
-        const r = parseInt(match[1]);
-        const g = parseInt(match[2]);
-        const b = parseInt(match[3]);
-        const brightness = (r * 299 + g * 587 + b * 114) / 1000;
-        // console.log("Background color brightness:", brightness);
-        return brightness < 128;
-    }
-    // console.log("No dark or light theme detected, defaulting to light theme");
-    return false;
-};
-
-let darkTheme = isDarkTheme();
-let modal = null;
-let modalContent = null;
-let previousScrollOffset = [window.scrollX, window.scrollY];
-
-const runMermaid = async (rerun) => {
-    console.log("Running mermaid diagrams, rerun =", rerun);
-    // clear all existing mermaid charts
-    let all_mermaids = document.querySelectorAll(".mermaid");
-
-    if (rerun) {
-        all_mermaids.forEach((el) => {
-            if(!el.hasAttribute("data-original-code")) {
-                // store original code
-                // console.log(`Storing original code for first run: `, el.innerHTML);
-                el.setAttribute('data-original-code', el.innerHTML);
-            }
-            if(el.getAttribute("data-processed") === "true") {
-                // remove and restore original
-                el.removeAttribute("data-processed");
-                // console.log(`Restoring original code for re-run: `, el.getAttribute('data-original-code'));
-                el.innerHTML = el.getAttribute('data-original-code');
-            } else {
-                // store original code
-                // console.log(`Storing original code for re-run: `, el.innerHTML);
-                el.setAttribute('data-original-code', el.innerHTML);
-            }
-        });
-        await mermaid.run();
-    }
-
-    all_mermaids = document.querySelectorAll(".mermaid");
-    const mermaids_processed = document.querySelectorAll(".mermaid[data-processed='true']");
-
-    if ("False" === "True") {
-        const mermaids_to_add_zoom = -1 === -1 ? all_mermaids.length : -1;
-        if(mermaids_to_add_zoom > 0) {
-            var svgs = d3.selectAll("");
-            if(all_mermaids.length !== mermaids_processed.length) {
-                setTimeout(() => runMermaid(false), 200);
-                return;
-            } else if(svgs.size() !== mermaids_to_add_zoom) {
-                setTimeout(() => runMermaid(false), 200);
-                return;
-            } else {
-                svgs.each(function() {
-                    var svg = d3.select(this);
-                    svg.html("<g class='wrapper'>" + svg.html() + "</g>");
-                    var inner = svg.select("g");
-                    var zoom = d3.zoom().on("zoom", function(event) {
-                        inner.attr("transform", event.transform);
-                    });
-                    svg.call(zoom);
-                });
-            }
-        }
-    } else if(all_mermaids.length !== mermaids_processed.length) {
-        // Wait for mermaid to process all diagrams
-        setTimeout(() => runMermaid(false), 200);
-        return;
-    }
-
-    // Stop here if not adding fullscreen capability
-    if ("True" !== "True") return;
-
-    if (modal !== null ) {
-        // Destroy existing modal
-        modal.remove();
-        modal = null;
-        modalContent = null;
-    }
-
-    modal = document.createElement('div');
-    modal.className = 'mermaid-fullscreen-modal' + (darkTheme ? ' dark-theme' : '');
-    modal.setAttribute('role', 'dialog');
-    modal.setAttribute('aria-modal', 'true');
-    modal.setAttribute('aria-label', 'Fullscreen diagram viewer');
-    modal.innerHTML = `
-        <button class="mermaid-fullscreen-close${darkTheme ? ' dark-theme' : ''}" aria-label="Close fullscreen">✕</button>
-        <div class="mermaid-container-fullscreen${darkTheme ? ' dark-theme' : ''}"></div>
-    `;
-    document.body.appendChild(modal);
-
-    modalContent = modal.querySelector('.mermaid-container-fullscreen');
-    const closeBtn = modal.querySelector('.mermaid-fullscreen-close');
-
-    const closeModal = () => {
-        modal.classList.remove('active');
-        modalContent.innerHTML = '';
-        document.body.style.overflow = ''
-        window.scrollTo({left: previousScrollOffset[0], top: previousScrollOffset[1], behavior: 'instant'});
-    };
-
-    closeBtn.addEventListener('click', closeModal);
-    modal.addEventListener('click', (e) => {
-        if (e.target === modal) closeModal();
-    });
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && modal.classList.contains('active')) {
-            closeModal();
-        }
-    });
-
-    document.querySelectorAll('.mermaid').forEach((mermaidDiv) => {
-        if (mermaidDiv.parentNode.classList.contains('mermaid-container') ||
-            mermaidDiv.closest('.mermaid-fullscreen-modal')) {
-            // Already processed, adjust button class if needed
-            const existingBtn = mermaidDiv.parentNode.querySelector('.mermaid-fullscreen-btn');
-            if (existingBtn) {
-                existingBtn.className = 'mermaid-fullscreen-btn' + (darkTheme ? ' dark-theme' : '');
-            }
-            return;
-        }
-
-        const container = document.createElement('div');
-        container.className = 'mermaid-container';
-        mermaidDiv.parentNode.insertBefore(container, mermaidDiv);
-        container.appendChild(mermaidDiv);
-
-        const fullscreenBtn = document.createElement('button');
-        fullscreenBtn.className = 'mermaid-fullscreen-btn' + (darkTheme ? ' dark-theme' : '');
-        fullscreenBtn.setAttribute('aria-label', 'View diagram in fullscreen');
-        fullscreenBtn.textContent = '⛶';
-        fullscreenBtn.style.opacity = '50%';
-
-        // Calculate dynamic position based on diagram's margin and padding
-        const diagramStyle = window.getComputedStyle(mermaidDiv);
-        const marginTop = parseFloat(diagramStyle.marginTop) || 0;
-        const marginRight = parseFloat(diagramStyle.marginRight) || 0;
-        const paddingTop = parseFloat(diagramStyle.paddingTop) || 0;
-        const paddingRight = parseFloat(diagramStyle.paddingRight) || 0;
-        fullscreenBtn.style.top = `${marginTop + paddingTop + 4}px`;
-        fullscreenBtn.style.right = `${marginRight + paddingRight + 4}px`;
-
-        fullscreenBtn.addEventListener('click', () => {
-            previousScrollOffset = [window.scroll, window.scrollY];
-            const clone = mermaidDiv.cloneNode(true);
-            modalContent.innerHTML = '';
-            modalContent.appendChild(clone);
-
-            const svg = clone.querySelector('svg');
-            if (svg) {
-                svg.removeAttribute('width');
-                svg.removeAttribute('height');
-                svg.style.width = '100%';
-                svg.style.height = 'auto';
-                svg.style.maxWidth = '100%';
-                svg.style.sdisplay = 'block';
-
-                if ("False" === "True") {
-                    setTimeout(() => {
-                        const g = svg.querySelector('g');
-                        if (g) {
-                            var svgD3 = d3.select(svg);
-                            svgD3.html("<g class='wrapper'>" + svgD3.html() + "</g>");
-                            var inner = svgD3.select("g");
-                            var zoom = d3.zoom().on("zoom", function(event) {
-                                inner.attr("transform", event.transform);
-                            });
-                            svgD3.call(zoom);
-                        }
-                    }, 100);
-                }
-            }
-
-            modal.classList.add('active');
-            document.body.style.overflow = 'hidden';
-        });
-        container.appendChild(fullscreenBtn);
-    });
-};
-
-const load = async () => {
-    initStyles();
-
-    await runMermaid(true);
-
-    const reRunIfThemeChanges = async () => {
-        const newDarkTheme = isDarkTheme();
-        if (newDarkTheme !== darkTheme) {
-            darkTheme = newDarkTheme;
-            console.log("Theme change detected, re-running mermaid with", darkTheme ? "dark" : "default", "theme");
-            await mermaid.initialize(
-                {...JSON.parse(
-                    `{"startOnLoad": false}`
-                ),
-                ...{ darkMode: darkTheme, theme: darkTheme ? 'dark' : 'default' },
-                }
-            );
-            await runMermaid(true);
-        }
-    };
-
-    // Update theme classes when theme changes
-    const themeObserver = new MutationObserver(reRunIfThemeChanges);
-    themeObserver.observe(document.documentElement, {
-        attributes: true,
-        attributeFilter: ['class', 'style', 'data-theme']
-    });
-    themeObserver.observe(document.body, {
-        attributes: true,
-        attributeFilter: ['class', 'style', 'data-theme']
-    });
-};
-
-
-
-
-
-console.log("Initializing mermaid with", darkTheme ? "dark" : "default", "theme");
-mermaid.initialize(
-    {...JSON.parse(
-        `{"startOnLoad": false}`
-    ),
-    ...{ darkMode: darkTheme, theme: darkTheme ? 'dark' : 'default' },
-    }
-);
-
-window.addEventListener("load", load);
-window.runMermaid = runMermaid;</script>
     <script>DOCUMENTATION_OPTIONS.pagename = 'about/how-it-works';</script>
     <script>
         DOCUMENTATION_OPTIONS.theme_version = '0.16.1';
@@ -502,7 +66,7 @@ window.runMermaid = runMermaid;</script>
 
     <link rel="search" title="Search" href="../search.html" />
     <link rel="next" title="Ecosystem" href="ecosystem.html" />
-    <link rel="prev" title="Overview" href="overview.html" />
+    <link rel="prev" title="Overview of NVIDIA NemoClaw" href="overview.html" />
 
 
 
@@ -827,7 +391,7 @@ window.runMermaid = runMermaid;</script>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Get Started</span></p>
 <ul class="nav bd-sidenav">
 <li class="toctree-l1 has-children"><a class="reference internal" href="../get-started/prerequisites.html">Prerequisites</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
-<li class="toctree-l2"><a class="reference internal" href="../get-started/windows-preparation.html">Prepare Windows for NemoClaw</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../get-started/windows-preparation.html">(Windows Only) Windows Prerequisites</a></li>
 </ul>
 </details></li>
 <li class="toctree-l1"><a class="reference internal" href="../get-started/quickstart.html">Quickstart with OpenClaw</a></li>
@@ -918,7 +482,7 @@ window.runMermaid = runMermaid;</script>
         <i class="fa-solid fa-home"></i>
       </a>
     </li>
-    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">How NemoClaw Works</span></li>
+    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">NemoClaw Architecture Overview</span></li>
   </ul>
 </nav>
 </div>
@@ -939,80 +503,63 @@ window.runMermaid = runMermaid;</script>
   SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
   SPDX-License-Identifier: Apache-2.0
 -->
-<section class="tex2jax_ignore mathjax_ignore" id="how-nemoclaw-works">
-<h1>How NemoClaw Works<a class="headerlink" href="#how-nemoclaw-works" title="Link to this heading">#</a></h1>
-<p>This page explains how NemoClaw operates, which parts run where, how the blueprint drives OpenShell, and how inference and policy attach to the sandbox.</p>
-<section id="how-the-pieces-connect">
-<h2>How the Pieces Connect<a class="headerlink" href="#how-the-pieces-connect" title="Link to this heading">#</a></h2>
-<p>The <code class="docutils literal notranslate"><span class="pre">nemoclaw</span></code> CLI is the primary entrypoint for setting up and managing sandboxed OpenClaw agents.
-It delegates heavy lifting to a versioned blueprint, a Python artifact that orchestrates sandbox creation, policy application, and inference provider setup through the OpenShell CLI.</p>
-<p>Between your shell and the running sandbox, NemoClaw contributes these integration layers:</p>
+<section class="tex2jax_ignore mathjax_ignore" id="nemoclaw-architecture-overview">
+<h1>NemoClaw Architecture Overview<a class="headerlink" href="#nemoclaw-architecture-overview" title="Link to this heading">#</a></h1>
+<p>This page explains how NemoClaw runs OpenClaw inside an OpenShell sandbox and how the gateway connects the agent to inference, integrations, and policy.</p>
+<p>NemoClaw does not replace OpenClaw or OpenShell.
+It packages them into a repeatable setup with a host CLI, a versioned blueprint, default policies, inference setup, plugin configuration, and state helpers.
+You can use that setup directly or adapt it for your own OpenShell integration.</p>
+<section id="high-level-flow">
+<h2>High-Level Flow<a class="headerlink" href="#high-level-flow" title="Link to this heading">#</a></h2>
+<p>NemoClaw keeps the user workflow on the host while OpenShell enforces the sandbox boundary.
+The gateway sits between NemoClaw control, the sandbox, inference providers, and external integrations.
+That placement lets NemoClaw configure the environment without giving the agent direct access to host credentials or uncontrolled network egress.</p>
+<figure class="align-center" id="id1">
+<a class="reference internal image-reference" href="../_images/nemoclaw-highlevel-component-diagram.png"><img alt="NemoClaw High-Level Component Diagram" src="../_images/nemoclaw-highlevel-component-diagram.png" style="width: 100%;" />
+</a>
+<figcaption>
+<p><span class="caption-text">NemoClaw High-Level Component Diagram</span><a class="headerlink" href="#id1" title="Link to this image">#</a></p>
+</figcaption>
+</figure>
+<p>The diagram has the following components:</p>
 <div class="pst-scrollable-table-container"><table class="table">
 <thead>
-<tr class="row-odd"><th class="head"><p>Layer</p></th>
+<tr class="row-odd"><th class="head"><p>Component</p></th>
 <th class="head"><p>Role in the flow</p></th>
 </tr>
 </thead>
 <tbody>
-<tr class="row-even"><td><p>Onboarding</p></td>
-<td><p><code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span></code> validates credentials, selects providers, and drives blueprint execution until the sandbox is ready.</p></td>
+<tr class="row-even"><td><p>Users and operators</p></td>
+<td><p>Start from the CLI, installer, dashboard, or an end-user channel.</p></td>
 </tr>
-<tr class="row-odd"><td><p>Blueprint</p></td>
-<td><p>Supplies the hardened image definition, default policies, capability posture, and orchestration steps the runner applies through OpenShell.</p></td>
+<tr class="row-odd"><td><p>NemoClaw control</p></td>
+<td><p>Collects configuration, runs onboarding, prepares the blueprint, and asks OpenShell to create or update resources.</p></td>
 </tr>
-<tr class="row-even"><td><p>State management</p></td>
-<td><p>Migrates agent state across machines with credential stripping and integrity checks.</p></td>
+<tr class="row-even"><td><p>OpenShell gateway</p></td>
+<td><p>Owns sandbox lifecycle, networking, policy enforcement, inference routing, and integration egress.</p></td>
 </tr>
-<tr class="row-odd"><td><p>Channel messaging</p></td>
-<td><p>OpenShell-managed processes connect Telegram, Discord, Slack, and similar platforms to the agent. NemoClaw enables this through onboarding and blueprint wiring; delivery is not a separate NemoClaw host daemon.</p></td>
+<tr class="row-odd"><td><p>NemoClaw sandbox</p></td>
+<td><p>Runs OpenClaw with the NemoClaw plugin, the selected blueprint contents, and supporting tools.</p></td>
+</tr>
+<tr class="row-even"><td><p>Inference</p></td>
+<td><p>Receives model requests through the gateway, using NVIDIA endpoints, NIM, or compatible APIs.</p></td>
+</tr>
+<tr class="row-odd"><td><p>Integrations</p></td>
+<td><p>Reach messaging services, MCP servers, GitHub, package indexes, or model hubs through gateway-managed egress.</p></td>
+</tr>
+<tr class="row-even"><td><p>State and artifacts</p></td>
+<td><p>Store configuration, credentials, logs, workspace files, policies, and transcripts outside the running agent process.</p></td>
 </tr>
 </tbody>
 </table>
 </div>
 <p>For repository layout, file paths, and deeper diagrams, see <a class="reference internal" href="../reference/architecture.html"><span class="std std-doc">Architecture</span></a>.</p>
-<pre  class="mermaid">
-        flowchart TB
-    subgraph Host
-        CMD[&quot;nemoclaw onboard&quot;]
-        PLUGIN[nemoclaw plugin]
-        BLUEPRINT[blueprint runner]
-        CLI[&quot;openshell CLI sandbox · gateway · inference · policy&quot;]
-
-        CMD --&gt; PLUGIN
-        PLUGIN --&gt; BLUEPRINT
-        BLUEPRINT --&gt; CLI
-    end
-
-    subgraph Sandbox[&quot;OpenShell Sandbox&quot;]
-        AGENT[OpenClaw agent]
-        INF[NVIDIA inference, routed]
-        NET[default network policy]
-        FS[filesystem isolation]
-
-        AGENT --- INF
-        AGENT --- NET
-        AGENT --- FS
-    end
-
-    PLUGIN --&gt; AGENT
-
-    classDef nv fill:#76b900,stroke:#333,color:#fff
-    classDef nvLight fill:#e6f2cc,stroke:#76b900,color:#1a1a1a
-    classDef nvDark fill:#333,stroke:#76b900,color:#fff
-
-    class CMD,PLUGIN,BLUEPRINT nvDark
-    class CLI nv
-    class AGENT nv
-    class INF,NET,FS nvLight
-
-    style Host fill:none,stroke:#76b900,stroke-width:2px,color:#1a1a1a
-    style Sandbox fill:#f5faed,stroke:#76b900,stroke-width:2px,color:#1a1a1a
-    </pre></section>
+</section>
 <section id="design-principles">
 <h2>Design Principles<a class="headerlink" href="#design-principles" title="Link to this heading">#</a></h2>
 <p>NemoClaw architecture follows the following principles.</p>
 <dl class="simple myst">
-<dt>Thin plugin, versioned blueprint</dt><dd><p>The plugin stays small and stable. Orchestration logic lives in the blueprint and evolves on its own release cadence.</p>
+<dt>Thin plugin, versioned blueprint</dt><dd><p>The sandbox plugin stays small and stable. Host-side orchestration uses a versioned blueprint and runner that can evolve on its own release cadence.</p>
 </dd>
 <dt>Respect CLI boundaries</dt><dd><p>The <code class="docutils literal notranslate"><span class="pre">nemoclaw</span></code> CLI is the primary interface for sandbox management.</p>
 </dd>
@@ -1025,25 +572,26 @@ is the supported operator entry point for creating or recreating NemoClaw-manage
 </dd>
 </dl>
 </section>
-<section id="plugin-and-blueprint">
-<h2>Plugin and Blueprint<a class="headerlink" href="#plugin-and-blueprint" title="Link to this heading">#</a></h2>
-<p>NemoClaw is split into two parts:</p>
+<section id="cli-plugin-and-blueprint">
+<h2>CLI, Plugin, and Blueprint<a class="headerlink" href="#cli-plugin-and-blueprint" title="Link to this heading">#</a></h2>
+<p>NemoClaw is split into three integration pieces:</p>
 <ul class="simple">
-<li><p>The <em>plugin</em> is a TypeScript package that registers an inference provider and the <code class="docutils literal notranslate"><span class="pre">/nemoclaw</span></code> slash command inside the sandbox.
-It handles user interaction and delegates orchestration work to the blueprint.</p></li>
-<li><p>The <em>blueprint</em> is a versioned Python artifact that contains all the logic for creating sandboxes, applying policies, and configuring inference.
-The plugin resolves, verifies, and executes the blueprint as a subprocess.</p></li>
+<li><p>The <em>host CLI</em> runs onboarding, validates provider choices, stores configuration, and calls OpenShell commands for gateway, provider, sandbox, and policy operations.</p></li>
+<li><p>The <em>plugin</em> is a TypeScript package that runs with OpenClaw inside the sandbox.
+It registers the managed inference provider metadata, the <code class="docutils literal notranslate"><span class="pre">/nemoclaw</span></code> slash command, and runtime context hooks.</p></li>
+<li><p>The <em>blueprint</em> is a versioned YAML package with the sandbox image, policy, inference profile, and supporting assets.
+The runner resolves and verifies the blueprint before applying it through OpenShell.</p></li>
 </ul>
-<p>This separation keeps the plugin small and stable while allowing the blueprint to evolve on its own release cadence.</p>
+<p>This separation keeps the sandbox plugin small while allowing host orchestration and blueprint contents to evolve on their own release cadence.</p>
 </section>
 <section id="sandbox-creation">
 <h2>Sandbox Creation<a class="headerlink" href="#sandbox-creation" title="Link to this heading">#</a></h2>
 <p>When you run <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span></code>, NemoClaw creates an OpenShell sandbox that runs OpenClaw in an isolated container.
-The blueprint orchestrates this process through the OpenShell CLI:</p>
+The host CLI and blueprint runner orchestrate this process through the OpenShell CLI:</p>
 <ol class="arabic simple">
-<li><p>The plugin downloads the blueprint artifact, checks version compatibility, and verifies the digest.</p></li>
-<li><p>The blueprint determines which OpenShell resources to create or update, such as the gateway, inference providers, sandbox, and network policy.</p></li>
-<li><p>The blueprint calls OpenShell CLI commands to create the sandbox and configure each resource.</p></li>
+<li><p>NemoClaw resolves the blueprint, checks version compatibility, and verifies the digest.</p></li>
+<li><p>The onboarding flow determines which OpenShell resources to create or update, such as the gateway, inference providers, sandbox, and network policy.</p></li>
+<li><p>The runner calls OpenShell CLI commands to create the sandbox and configure each resource.</p></li>
 </ol>
 <p>After the sandbox starts, the agent runs inside it with all network, filesystem, and inference controls in place.</p>
 </section>
@@ -1115,7 +663,7 @@ If you select the Model Router provider, <code class="docutils literal notransla
       <i class="fa-solid fa-angle-left"></i>
       <div class="prev-next-info">
         <p class="prev-next-subtitle">previous</p>
-        <p class="prev-next-title">Overview</p>
+        <p class="prev-next-title">Overview of NVIDIA NemoClaw</p>
       </div>
     </a>
     <a class="right-next"
@@ -1148,9 +696,9 @@ If you select the Model Router provider, <code class="docutils literal notransla
   </div>
   <nav class="bd-toc-nav page-toc" aria-labelledby="pst-page-navigation-heading-2">
     <ul class="visible nav section-nav flex-column">
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#how-the-pieces-connect">How the Pieces Connect</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#high-level-flow">High-Level Flow</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#design-principles">Design Principles</a></li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#plugin-and-blueprint">Plugin and Blueprint</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#cli-plugin-and-blueprint">CLI, Plugin, and Blueprint</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#sandbox-creation">Sandbox Creation</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#inference-routing">Inference Routing</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#protection-layers">Protection Layers</a></li>

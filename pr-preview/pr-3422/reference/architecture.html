@@ -827,7 +827,7 @@ window.runMermaid = runMermaid;</script>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Get Started</span></p>
 <ul class="nav bd-sidenav">
 <li class="toctree-l1 has-children"><a class="reference internal" href="../get-started/prerequisites.html">Prerequisites</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
-<li class="toctree-l2"><a class="reference internal" href="../get-started/windows-preparation.html">Prepare Windows for NemoClaw</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../get-started/windows-preparation.html">(Windows Only) Windows Prerequisites</a></li>
 </ul>
 </details></li>
 <li class="toctree-l1"><a class="reference internal" href="../get-started/quickstart.html">Quickstart with OpenClaw</a></li>
@@ -941,7 +941,7 @@ window.runMermaid = runMermaid;</script>
 -->
 <section class="tex2jax_ignore mathjax_ignore" id="architecture">
 <h1>Architecture<a class="headerlink" href="#architecture" title="Link to this heading">#</a></h1>
-<p>NemoClaw has two main components: a TypeScript plugin that integrates with the OpenClaw CLI, and a Python blueprint that orchestrates OpenShell resources.</p>
+<p>NemoClaw combines a host CLI, a TypeScript plugin that runs with OpenClaw inside the sandbox, and a versioned YAML blueprint that defines the sandbox image, policies, and inference profiles applied through OpenShell.</p>
 <section id="system-overview">
 <h2>System Overview<a class="headerlink" href="#system-overview" title="Link to this heading">#</a></h2>
 <p>NVIDIA OpenShell is a general-purpose agent runtime. It provides sandbox containers, a credential-storing gateway, inference proxying, and policy enforcement, but has no opinions about what runs inside. NemoClaw is an opinionated reference stack built on OpenShell that handles what goes in the sandbox and makes the setup accessible.</p>
@@ -1124,9 +1124,9 @@ When the policy or phase changes during a session, the plugin sends a smaller up
 </section>
 <section id="nemoclaw-blueprint">
 <h2>NemoClaw Blueprint<a class="headerlink" href="#nemoclaw-blueprint" title="Link to this heading">#</a></h2>
-<p>The blueprint is a versioned Python artifact with its own release stream.
-The plugin resolves, verifies, and executes the blueprint as a subprocess.
-The blueprint drives all interactions with the OpenShell CLI.</p>
+<p>The blueprint is a versioned YAML package with its own release stream.
+The runner resolves, verifies, and applies the blueprint through the OpenShell CLI.
+The blueprint defines the sandbox shape, default policies, and inference profiles; the runner performs the OpenShell operations.</p>
 <div class="highlight-text notranslate"><div class="highlight"><pre><span></span>nemoclaw-blueprint/
 ├── blueprint.yaml                  Manifest: version, profiles, compatibility
 ├── model-specific-setup/           Agent-scoped model/provider compatibility manifests
