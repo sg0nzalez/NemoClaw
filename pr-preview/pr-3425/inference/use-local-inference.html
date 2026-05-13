@@ -531,6 +531,7 @@ On WSL, the wizard can use, start, restart, or install Ollama on the Windows hos
 </div>
 <p>Select <strong>Local Ollama</strong> from the provider list.
 NemoClaw lists installed models or offers starter models if none are installed.
+On hosts with at least 32 GiB of detected GPU memory, the starter list includes <code class="docutils literal notranslate"><span class="pre">qwen3.6:35b</span></code> and selects it by default.
 It pulls the selected model, loads it into memory, and validates it before continuing.
 If the selected model declares that it does not support tool calling, onboarding stops with guidance to choose a model whose <code class="docutils literal notranslate"><span class="pre">ollama</span> <span class="pre">show</span> <span class="pre">&lt;model&gt;</span></code> capabilities include <code class="docutils literal notranslate"><span class="pre">tools</span></code>.
 The validation also requires structured chat-completions tool calls.
