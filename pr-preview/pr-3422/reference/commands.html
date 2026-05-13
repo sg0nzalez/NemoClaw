@@ -570,6 +570,10 @@ To make the installer abort instead of continuing, set <code class="docutils lit
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span><span class="nv">NEMOCLAW_SINGLE_SESSION</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>curl<span class="w"> </span>-fsSL<span class="w"> </span>https://www.nvidia.com/nemoclaw.sh<span class="w"> </span><span class="p">|</span><span class="w"> </span>bash
 </pre></div>
 </div>
+<p>When existing sandboxes were created with OpenShell earlier than <code class="docutils literal notranslate"><span class="pre">0.0.37</span></code>, the installer prompts before running the new automatic gateway upgrade path.
+For scripted installs, set <code class="docutils literal notranslate"><span class="pre">NEMOCLAW_ACCEPT_EXPERIMENTAL_OPENSHELL_UPGRADE=1</span></code> to allow the installer to back up registered sandbox state, retire the old gateway, install the current supported OpenShell release, and restore state during onboarding.
+The automatic path is disabled if the existing <code class="docutils literal notranslate"><span class="pre">nemoclaw</span></code> CLI does not advertise <code class="docutils literal notranslate"><span class="pre">backup-all</span></code>; preserve sandbox state manually before retiring the old gateway in that case.
+To perform those steps manually, run <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">backup-all</span></code>, retire the old gateway with <code class="docutils literal notranslate"><span class="pre">openshell</span> <span class="pre">gateway</span> <span class="pre">destroy</span> <span class="pre">-g</span> <span class="pre">nemoclaw</span> <span class="pre">||</span> <span class="pre">openshell</span> <span class="pre">gateway</span> <span class="pre">destroy</span></code>, then rerun the installer as <code class="docutils literal notranslate"><span class="pre">curl</span> <span class="pre">-fsSL</span> <span class="pre">https://www.nvidia.com/nemoclaw.sh</span> <span class="pre">|</span> <span class="pre">NEMOCLAW_OPENSHELL_UPGRADE_PREPARED=1</span> <span class="pre">bash</span></code>.</p>
 <p>The wizard prompts for a provider first, then collects the provider credential if needed.
 Supported non-experimental choices include NVIDIA Endpoints, OpenAI, Anthropic, Google Gemini, and compatible OpenAI or Anthropic endpoints.
 Credentials are registered with the OpenShell gateway and never persisted to host disk. See <a class="reference internal" href="../security/credential-storage.html"><span class="std std-doc">Credential Storage</span></a> for details on inspection, rotation, and migration from earlier releases.
@@ -1475,6 +1479,20 @@ Pass <code class="docutils literal notranslate"><span class="pre">--json</span><
 <span class="gp">$ </span>nemoclaw<span class="w"> </span>status<span class="w"> </span>--json
 </pre></div>
 </div>
+<p>When at least one sandbox is registered and the named NemoClaw gateway is unreachable, unhealthy, or attached to a different sandbox, the command prints a <code class="docutils literal notranslate"><span class="pre">gateway:</span> <span class="pre">down</span> <span class="pre">[state]</span> <span class="pre">(reason)</span></code> line between the sandbox list and the host-service list.
+The command suggests <code class="docutils literal notranslate"><span class="pre">openshell</span> <span class="pre">gateway</span> <span class="pre">start</span> <span class="pre">--name</span> <span class="pre">nemoclaw</span></code> or <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span> <span class="pre">--resume</span></code> to recover.
+It exits with code <code class="docutils literal notranslate"><span class="pre">1</span></code> so shell scripts and CI can detect the degraded state from <code class="docutils literal notranslate"><span class="pre">$?</span></code>.
+For <code class="docutils literal notranslate"><span class="pre">--json</span></code>, the structured output includes <code class="docutils literal notranslate"><span class="pre">gatewayHealth</span></code>, and the exit code is set after the report is generated.
+A clean machine with no registered sandboxes keeps the legacy <code class="docutils literal notranslate"><span class="pre">0</span></code> exit because no gateway is expected to be configured yet.</p>
+</section>
+<section id="nemoclaw-inference-get">
+<h3><code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">inference</span> <span class="pre">get</span></code><a class="headerlink" href="#nemoclaw-inference-get" title="Link to this heading">#</a></h3>
+<p>Show the active live inference provider and model from the NemoClaw-managed OpenShell gateway.
+Use this command when you want the direct runtime route without the rest of the sandbox status output.</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>nemoclaw<span class="w"> </span>inference<span class="w"> </span>get
+<span class="gp">$ </span>nemoclaw<span class="w"> </span>inference<span class="w"> </span>get<span class="w"> </span>--json
+</pre></div>
+</div>
 </section>
 <section id="nemoclaw-inference-set">
 <h3><code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">inference</span> <span class="pre">set</span></code><a class="headerlink" href="#nemoclaw-inference-set" title="Link to this heading">#</a></h3>
@@ -2075,6 +2093,7 @@ Running <code class="docutils literal notranslate"><span class="pre">nemoclaw</s
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#nemoclaw-start"><code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">start</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#nemoclaw-stop"><code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">stop</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#nemoclaw-status"><code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">status</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#nemoclaw-inference-get"><code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">inference</span> <span class="pre">get</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#nemoclaw-inference-set"><code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">inference</span> <span class="pre">set</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#nemoclaw-setup"><code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">setup</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#nemoclaw-setup-spark"><code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">setup-spark</span></code></a></li>

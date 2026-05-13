@@ -574,11 +574,6 @@ Run <code class="docutils literal notranslate"><span class="pre">nemoclaw</span>
 </pre></div>
 </div>
 </li>
-<li><p>Inspect the live gateway inference route:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>openshell<span class="w"> </span>inference<span class="w"> </span>get<span class="w"> </span>-g<span class="w"> </span>nemoclaw
-</pre></div>
-</div>
-</li>
 <li><p>Manage dashboard or service port forwards:</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>openshell<span class="w"> </span>forward<span class="w"> </span>start<span class="w"> </span>--background<span class="w"> </span>&lt;port&gt;<span class="w"> </span>&lt;sandbox-name&gt;
 <span class="gp">$ </span>openshell<span class="w"> </span>forward<span class="w"> </span>list
@@ -645,8 +640,9 @@ The OpenShell TUI owns live network activity and operator approval prompts.</p>
 </section>
 <section id="change-models-or-providers">
 <h3>Change Models or Providers<a class="headerlink" href="#change-models-or-providers" title="Link to this heading">#</a></h3>
-<p>Use the NemoClaw command for model or provider switches so the OpenShell route and the running agent config stay consistent:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>nemoclaw<span class="w"> </span>inference<span class="w"> </span><span class="nb">set</span><span class="w"> </span>--provider<span class="w"> </span>nvidia-prod<span class="w"> </span>--model<span class="w"> </span>nvidia/nemotron-3-super-120b-a12b
+<p>Use the NemoClaw commands for model or provider inspection and switches so the OpenShell route and the running agent config stay consistent:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>nemoclaw<span class="w"> </span>inference<span class="w"> </span>get
+<span class="gp">$ </span>nemoclaw<span class="w"> </span>inference<span class="w"> </span><span class="nb">set</span><span class="w"> </span>--provider<span class="w"> </span>nvidia-prod<span class="w"> </span>--model<span class="w"> </span>nvidia/nemotron-3-super-120b-a12b
 </pre></div>
 </div>
 <p>For Hermes sandboxes, use the alias; it updates the route and <code class="docutils literal notranslate"><span class="pre">/sandbox/.hermes/config.yaml</span></code> without a rebuild or restart:</p>
