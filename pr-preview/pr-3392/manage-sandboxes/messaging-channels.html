@@ -401,6 +401,7 @@
 <ul class="nav bd-sidenav">
 <li class="toctree-l1"><a class="reference internal" href="../inference/inference-options.html">Inference Options</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../inference/use-local-inference.html">Use Local Inference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../inference/tool-calling-reliability.html">Tool-Calling Reliability</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../inference/switch-inference-providers.html">Switch Inference Providers</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../inference/set-up-sub-agent.html">Set Up Task-Specific Sub-Agents</a></li>
 </ul>
@@ -507,6 +508,7 @@
 <h1>Messaging Channels<a class="headerlink" href="#messaging-channels" title="Link to this heading">#</a></h1>
 <p>Telegram, Discord, Slack, and WhatsApp reach your agent through OpenShell-managed processes and gateway constructs.
 For token-based channels, NemoClaw registers credentials with OpenShell providers; WhatsApp pairs inside the sandbox via QR scan and stores session state there.
+WhatsApp is experimental and is only surfaced to the onboard wizard and <code class="docutils literal notranslate"><span class="pre">channels</span> <span class="pre">add</span></code> when <code class="docutils literal notranslate"><span class="pre">NEMOCLAW_EXPERIMENTAL=1</span></code> is set; without the flag the picker and <code class="docutils literal notranslate"><span class="pre">channels</span> <span class="pre">list</span></code> hide it.
 NemoClaw bakes the selected channel configuration into the sandbox image and keeps runtime delivery under OpenShell control.</p>
 <p>You can enable channels during <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span></code> or add them later with host-side <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">&lt;sandbox&gt;</span> <span class="pre">channels</span></code> commands.
 Do not run <code class="docutils literal notranslate"><span class="pre">openclaw</span> <span class="pre">channels</span> <span class="pre">add</span></code> or <code class="docutils literal notranslate"><span class="pre">openclaw</span> <span class="pre">channels</span> <span class="pre">remove</span></code> inside the sandbox because <code class="docutils literal notranslate"><span class="pre">/sandbox/.openclaw/openclaw.json</span></code> is generated at image build time and changes inside the running container do not persist across rebuilds.</p>
@@ -609,6 +611,8 @@ Use <code class="docutils literal notranslate"><span class="pre">channels</span>
 </div>
 <p><code class="docutils literal notranslate"><span class="pre">channels</span> <span class="pre">add</span></code> prompts for missing credentials, registers the bridge with the OpenShell gateway, updates the sandbox registry, and asks whether to rebuild immediately.
 Choose the rebuild so the running sandbox image picks up the new channel.
+If the matching network policy preset (<code class="docutils literal notranslate"><span class="pre">telegram</span></code>, <code class="docutils literal notranslate"><span class="pre">discord</span></code>, <code class="docutils literal notranslate"><span class="pre">slack</span></code>, or <code class="docutils literal notranslate"><span class="pre">whatsapp</span></code>) is not yet applied to the sandbox, <code class="docutils literal notranslate"><span class="pre">channels</span> <span class="pre">add</span></code> prints a hint to run <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">&lt;sandbox&gt;</span> <span class="pre">policy-add</span> <span class="pre">&lt;channel&gt;</span></code> first.
+Apply the preset before the rebuild so the channel can reach its provider API; otherwise the bridge will start but its egress requests will be denied.
 If you need optional channel settings such as <code class="docutils literal notranslate"><span class="pre">TELEGRAM_ALLOWED_IDS</span></code>, <code class="docutils literal notranslate"><span class="pre">TELEGRAM_REQUIRE_MENTION</span></code>, <code class="docutils literal notranslate"><span class="pre">DISCORD_SERVER_ID</span></code>, <code class="docutils literal notranslate"><span class="pre">DISCORD_USER_ID</span></code>, or <code class="docutils literal notranslate"><span class="pre">DISCORD_REQUIRE_MENTION</span></code>, export them before the rebuild starts.
 If you defer the rebuild, apply the change later:</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>nemoclaw<span class="w"> </span>my-assistant<span class="w"> </span>rebuild

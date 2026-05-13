@@ -401,6 +401,7 @@
 <ul class="nav bd-sidenav">
 <li class="toctree-l1"><a class="reference internal" href="../inference/inference-options.html">Inference Options</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../inference/use-local-inference.html">Use Local Inference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../inference/tool-calling-reliability.html">Tool-Calling Reliability</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../inference/switch-inference-providers.html">Switch Inference Providers</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../inference/set-up-sub-agent.html">Set Up Task-Specific Sub-Agents</a></li>
 </ul>
@@ -681,7 +682,8 @@ Set <code class="docutils literal notranslate"><span class="pre">NEMOCLAW_RECREA
 It verifies that Docker is reachable, warns on untested runtimes such as Podman, and prints host remediation guidance when prerequisites are missing.
 The preflight also enforces the OpenShell version range declared in the blueprint (<code class="docutils literal notranslate"><span class="pre">min_openshell_version</span></code> and <code class="docutils literal notranslate"><span class="pre">max_openshell_version</span></code>).
 If the installed OpenShell version falls outside this range, onboarding exits with an actionable error and a link to compatible releases.</p>
-<p>When an existing gateway is detected for reuse, NemoClaw probes the host gateway HTTP endpoint (<code class="docutils literal notranslate"><span class="pre">http://127.0.0.1:${NEMOCLAW_GATEWAY_PORT}/</span></code>) before declaring it reusable, so a gateway whose container is running but whose upstream is still warming up (e.g. immediately after a Docker daemon restart) is rebuilt instead of trusted.
+<p>When NemoClaw finds an existing gateway to reuse, it probes the host gateway HTTP endpoint before declaring the gateway reusable.
+If the container is running but the upstream is still warming up (for example, immediately after a Docker daemon restart), NemoClaw rebuilds the gateway instead of trusting stale metadata.
 Tune the wait via <code class="docutils literal notranslate"><span class="pre">NEMOCLAW_REUSE_HEALTH_POLL_COUNT</span></code> (default <code class="docutils literal notranslate"><span class="pre">6</span></code>) and <code class="docutils literal notranslate"><span class="pre">NEMOCLAW_REUSE_HEALTH_POLL_INTERVAL</span></code> (default <code class="docutils literal notranslate"><span class="pre">5</span></code> seconds).
 The poll count is clamped to a minimum of <code class="docutils literal notranslate"><span class="pre">1</span></code> so the probe always runs at least once, and the interval is clamped to a minimum of <code class="docutils literal notranslate"><span class="pre">0</span></code> (no sleep between attempts).</p>
 <section id="from-dockerfile">
@@ -1704,21 +1706,25 @@ All ports must be non-privileged integers between 1024 and 65535.</p>
 <tbody>
 <tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_GATEWAY_PORT</span></code></p></td>
 <td><p>8080</p></td>
-<td><p>OpenShell gateway</p></td>
+<td><p>OpenShell gateway port</p></td>
 </tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_DASHBOARD_PORT</span></code></p></td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_GATEWAY_BIND_ADDRESS</span></code></p></td>
+<td><p>127.0.0.1</p></td>
+<td><p>OpenShell gateway bind address (<code class="docutils literal notranslate"><span class="pre">127.0.0.1</span></code> or <code class="docutils literal notranslate"><span class="pre">0.0.0.0</span></code>)</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_DASHBOARD_PORT</span></code></p></td>
 <td><p>18789 (auto-derived from <code class="docutils literal notranslate"><span class="pre">CHAT_UI_URL</span></code> port if set)</p></td>
 <td><p>Dashboard UI</p></td>
 </tr>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_VLLM_PORT</span></code></p></td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_VLLM_PORT</span></code></p></td>
 <td><p>8000</p></td>
 <td><p>vLLM / NIM inference</p></td>
 </tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_OLLAMA_PORT</span></code></p></td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_OLLAMA_PORT</span></code></p></td>
 <td><p>11434</p></td>
 <td><p>Ollama inference</p></td>
 </tr>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_OLLAMA_PROXY_PORT</span></code></p></td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_OLLAMA_PROXY_PORT</span></code></p></td>
 <td><p>11435</p></td>
 <td><p>Ollama auth proxy</p></td>
 </tr>
@@ -1726,10 +1732,16 @@ All ports must be non-privileged integers between 1024 and 65535.</p>
 </table>
 </div>
 <p>If a port value is not a valid integer or falls outside the allowed range, the CLI exits with an error.
+<code class="docutils literal notranslate"><span class="pre">NEMOCLAW_GATEWAY_PORT</span></code> also cannot overlap the configured dashboard, vLLM, Ollama, or Ollama proxy ports, and cannot use the dashboard auto-allocation range <code class="docutils literal notranslate"><span class="pre">18789</span></code> through <code class="docutils literal notranslate"><span class="pre">18799</span></code> or the default inference/proxy ports <code class="docutils literal notranslate"><span class="pre">8000</span></code>, <code class="docutils literal notranslate"><span class="pre">11434</span></code>, and <code class="docutils literal notranslate"><span class="pre">11435</span></code>.
 On non-WSL hosts, <code class="docutils literal notranslate"><span class="pre">NEMOCLAW_OLLAMA_PORT</span></code> and <code class="docutils literal notranslate"><span class="pre">NEMOCLAW_OLLAMA_PROXY_PORT</span></code> must be different.
 If you run Ollama on port 11435, set <code class="docutils literal notranslate"><span class="pre">NEMOCLAW_OLLAMA_PROXY_PORT</span></code> to another free port before onboarding.</p>
+<p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_GATEWAY_BIND_ADDRESS</span></code> accepts only <code class="docutils literal notranslate"><span class="pre">127.0.0.1</span></code> and <code class="docutils literal notranslate"><span class="pre">0.0.0.0</span></code>.
+Binding the OpenShell gateway to <code class="docutils literal notranslate"><span class="pre">0.0.0.0</span></code> may make it reachable from other hosts on the network.</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span><span class="nb">export</span><span class="w"> </span><span class="nv">NEMOCLAW_DASHBOARD_PORT</span><span class="o">=</span><span class="m">19000</span>
 <span class="gp">$ </span>nemoclaw<span class="w"> </span>onboard
+</pre></div>
+</div>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span><span class="nv">NEMOCLAW_GATEWAY_BIND_ADDRESS</span><span class="o">=</span><span class="m">0</span>.0.0.0<span class="w"> </span><span class="nv">NEMOCLAW_GATEWAY_PORT</span><span class="o">=</span><span class="m">8990</span><span class="w"> </span>nemoclaw<span class="w"> </span>onboard
 </pre></div>
 </div>
 <p>These overrides apply to onboarding, status checks, health probes, and the uninstaller.

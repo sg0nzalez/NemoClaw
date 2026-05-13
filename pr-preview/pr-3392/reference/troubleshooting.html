@@ -401,6 +401,7 @@
 <ul class="nav bd-sidenav">
 <li class="toctree-l1"><a class="reference internal" href="../inference/inference-options.html">Inference Options</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../inference/use-local-inference.html">Use Local Inference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../inference/tool-calling-reliability.html">Tool-Calling Reliability</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../inference/switch-inference-providers.html">Switch Inference Providers</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../inference/set-up-sub-agent.html">Set Up Task-Specific Sub-Agents</a></li>
 </ul>
@@ -653,6 +654,18 @@ Pass <code class="docutils literal notranslate"><span class="pre">--control-ui-p
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span><span class="nv">NEMOCLAW_DASHBOARD_PORT</span><span class="o">=</span><span class="m">19000</span><span class="w"> </span>nemoclaw<span class="w"> </span>onboard
 </pre></div>
 </div>
+<p>For an OpenShell gateway port conflict, set <code class="docutils literal notranslate"><span class="pre">NEMOCLAW_GATEWAY_PORT</span></code> to a free
+non-privileged port that does not overlap NemoClaw’s dashboard, vLLM, Ollama,
+or Ollama proxy ports:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span><span class="nv">NEMOCLAW_GATEWAY_PORT</span><span class="o">=</span><span class="m">8990</span><span class="w"> </span>nemoclaw<span class="w"> </span>onboard
+</pre></div>
+</div>
+<p>Remote/headless hosts can bind the OpenShell gateway to all IPv4 interfaces:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span><span class="nv">NEMOCLAW_GATEWAY_BIND_ADDRESS</span><span class="o">=</span><span class="m">0</span>.0.0.0<span class="w"> </span><span class="nv">NEMOCLAW_GATEWAY_PORT</span><span class="o">=</span><span class="m">8990</span><span class="w"> </span>nemoclaw<span class="w"> </span>onboard
+</pre></div>
+</div>
+<p>Use <code class="docutils literal notranslate"><span class="pre">NEMOCLAW_GATEWAY_BIND_ADDRESS=0.0.0.0</span></code> only when other hosts on the
+network should be able to reach the gateway.</p>
 <p>See <a class="reference internal" href="commands.html#environment-variables"><span class="std std-ref">Environment Variables</span></a> for the full list of port overrides.</p>
 </section>
 <section id="running-multiple-sandboxes-simultaneously">
