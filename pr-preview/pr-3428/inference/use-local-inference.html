@@ -45,7 +45,7 @@
 
 
 
-    <script src="../_static/documentation_options.js?v=3f434bd6"></script>
+    <script src="../_static/documentation_options.js?v=f6dceb5e"></script>
     <script src="../_static/doctools.js?v=9a2dae69"></script>
     <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
@@ -56,7 +56,7 @@
     <script>
         DOCUMENTATION_OPTIONS.theme_version = '0.16.1';
         DOCUMENTATION_OPTIONS.theme_switcher_json_url = '../versions1.json';
-        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.40';
+        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.42';
         DOCUMENTATION_OPTIONS.show_version_warning_banner =
             false;
         </script>
@@ -579,11 +579,18 @@ Windows-host Ollama uses the Windows daemon through <code class="docutils litera
 <code class="docutils literal notranslate"><span class="pre">~/.nemoclaw/ollama-proxy-token</span></code> with <code class="docutils literal notranslate"><span class="pre">0600</span></code> permissions.</p></li>
 <li><p>Starts the proxy after Ollama and verifies it before continuing.</p></li>
 <li><p>Cleans up stale proxy processes from previous runs.</p></li>
-<li><p>Retries the sandbox container reachability check and can continue when the host-side proxy is healthy even if the container probe fails.</p></li>
+<li><p>Probes the sandbox Docker network path to the proxy before committing the inference route.</p></li>
 <li><p>Stops matching proxy processes during uninstall before deleting NemoClaw state.</p></li>
 <li><p>Reuses the persisted token after a host reboot so you do not need to re-run
 onboard.</p></li>
 </ul>
+<p>On native Linux hosts, a firewall can allow the host proxy health check while still blocking sandbox containers on the OpenShell Docker bridge.
+When the sandbox-side proxy probe fails with a TCP error, onboarding exits before it saves the inference route and prints a command like:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>sudo<span class="w"> </span>ufw<span class="w"> </span>allow<span class="w"> </span>from<span class="w"> </span>&lt;openshell-docker-subnet&gt;<span class="w"> </span>to<span class="w"> </span>any<span class="w"> </span>port<span class="w"> </span><span class="m">11435</span><span class="w"> </span>proto<span class="w"> </span>tcp
+<span class="gp">$ </span>nemoclaw<span class="w"> </span>onboard
+</pre></div>
+</div>
+<p>If the probe cannot run, for example because Docker Desktop or WSL uses a different host routing model, onboarding continues and relies on the regular proxy health check.</p>
 <p>The sandbox provider is configured to use proxy port <code class="docutils literal notranslate"><span class="pre">11435</span></code> with the generated
 token as its <code class="docutils literal notranslate"><span class="pre">OPENAI_API_KEY</span></code> credential.
 OpenShell’s L7 proxy injects the token at egress, so the agent inside the
@@ -655,7 +662,9 @@ Enter the base URL of your local server, for example <code class="docutils liter
 If your server does not require authentication, enter any non-empty string (for example, <code class="docutils literal notranslate"><span class="pre">dummy</span></code>).</p>
 <p>NemoClaw validates the endpoint by sending a test inference request before continuing.
 The wizard probes <code class="docutils literal notranslate"><span class="pre">/v1/chat/completions</span></code> by default for the compatible-endpoint provider.
-If you set <code class="docutils literal notranslate"><span class="pre">NEMOCLAW_PREFERRED_API=openai-responses</span></code>, NemoClaw probes <code class="docutils literal notranslate"><span class="pre">/v1/responses</span></code> instead and only selects it when the response includes the streaming events OpenClaw requires.</p>
+If you set <code class="docutils literal notranslate"><span class="pre">NEMOCLAW_PREFERRED_API=openai-responses</span></code>, NemoClaw probes <code class="docutils literal notranslate"><span class="pre">/v1/responses</span></code> instead and only selects it when the response includes the streaming events OpenClaw requires.
+If a reasoning model returns only reasoning content before producing a final answer, NemoClaw retries the smoke request with a larger response budget.
+Route, configuration, and authentication failures still fail immediately.</p>
 <section id="id1">
 <h3>Non-Interactive Setup<a class="headerlink" href="#id1" title="Link to this heading">#</a></h3>
 <p>Set the following environment variables for scripted or CI/CD deployments.</p>
@@ -844,7 +853,9 @@ Changing it after onboarding requires re-running <code class="docutils literal n
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>nemoclaw<span class="w"> </span>&lt;name&gt;<span class="w"> </span>status
 </pre></div>
 </div>
-<p>The output shows the provider label (for example, “Local vLLM” or “Other OpenAI-compatible endpoint”) and the active model.</p>
+<p>The output shows the provider label (for example, “Local vLLM” or “Other OpenAI-compatible endpoint”) and the active model.
+For Local Ollama, status also checks the authenticated proxy when a proxy token is available.
+If <code class="docutils literal notranslate"><span class="pre">Inference</span></code> is healthy but <code class="docutils literal notranslate"><span class="pre">Inference</span> <span class="pre">(auth</span> <span class="pre">proxy)</span></code> is not, rerun onboarding to repair the proxy path that sandbox requests use.</p>
 </section>
 <section id="switch-models-at-runtime">
 <h2>Switch Models at Runtime<a class="headerlink" href="#switch-models-at-runtime" title="Link to this heading">#</a></h2>
