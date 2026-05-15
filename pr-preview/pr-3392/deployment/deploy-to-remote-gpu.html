@@ -45,7 +45,7 @@
 
 
 
-    <script src="../_static/documentation_options.js?v=5b8c9b92"></script>
+    <script src="../_static/documentation_options.js?v=f6dceb5e"></script>
     <script src="../_static/doctools.js?v=9a2dae69"></script>
     <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
@@ -56,7 +56,7 @@
     <script>
         DOCUMENTATION_OPTIONS.theme_version = '0.16.1';
         DOCUMENTATION_OPTIONS.theme_switcher_json_url = '../versions1.json';
-        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.41';
+        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.42';
         DOCUMENTATION_OPTIONS.show_version_warning_banner =
             false;
         </script>
@@ -408,6 +408,7 @@
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Manage Sandboxes</span></p>
 <ul class="nav bd-sidenav">
 <li class="toctree-l1"><a class="reference internal" href="../manage-sandboxes/lifecycle.html">Manage Sandbox Lifecycle</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../manage-sandboxes/runtime-controls.html">Runtime Controls</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../manage-sandboxes/messaging-channels.html">Set Up Messaging Channels</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../manage-sandboxes/workspace-files.html">Workspace Files</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../manage-sandboxes/backup-restore.html">Backup and Restore</a></li>
@@ -598,6 +599,23 @@ When <code class="docutils literal notranslate"><span class="pre">CHAT_UI_URL</s
 Any device that can reach the configured dashboard origin can connect without pairing, so avoid exposing that origin on internet-reachable or shared-network deployments.</p>
 </div>
 </section>
+<section id="first-run-readiness-budget">
+<h2>First-Run Readiness Budget<a class="headerlink" href="#first-run-readiness-budget" title="Link to this heading">#</a></h2>
+<p>On a remote GPU host, the first <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span></code> typically does the slowest work of the lifecycle: the sandbox image is built locally and uploaded into the OpenShell gateway, which can stream hundreds of MiB over the VM’s link before the readiness wait even starts.
+The post-create readiness wait defaults to 180 seconds (<code class="docutils literal notranslate"><span class="pre">NEMOCLAW_SANDBOX_READY_TIMEOUT</span></code>), which is sized for warm-cache, workstation-class onboarding and can be exceeded on:</p>
+<ul class="simple">
+<li><p>DGX Station first runs with large quantised models (70B+ parameter footprints, NVFP4 weights).</p></li>
+<li><p>Cloud VMs where the local image-build cache is cold and the upload runs over the public network.</p></li>
+<li><p>Hosts onboarding the Brave Web Search preset on the first run (the egress policy stack adds boot work).</p></li>
+</ul>
+<p>Raise the budget before re-running onboard:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span><span class="nb">export</span><span class="w"> </span><span class="nv">NEMOCLAW_SANDBOX_READY_TIMEOUT</span><span class="o">=</span><span class="m">600</span>
+<span class="gp">$ </span>nemoclaw<span class="w"> </span>onboard
+</pre></div>
+</div>
+<p>If onboard ends with <code class="docutils literal notranslate"><span class="pre">Sandbox</span> <span class="pre">'&lt;name&gt;'</span> <span class="pre">was</span> <span class="pre">created</span> <span class="pre">but</span> <span class="pre">did</span> <span class="pre">not</span> <span class="pre">become</span> <span class="pre">ready</span> <span class="pre">within</span> <span class="pre">180s</span></code>, onboard deletes the partially-created sandbox first, so the next attempt with the raised budget starts from a clean state.
+For the inference-probe budget that runs earlier in onboarding, see <a class="reference internal" href="../inference/use-local-inference.html#timeout-configuration"><span class="std std-ref"><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_LOCAL_INFERENCE_TIMEOUT</span></code></span></a>.</p>
+</section>
 <section id="proxy-configuration">
 <h2>Proxy Configuration<a class="headerlink" href="#proxy-configuration" title="Link to this heading">#</a></h2>
 <p>NemoClaw routes sandbox traffic through a gateway proxy that defaults to <code class="docutils literal notranslate"><span class="pre">10.200.0.1:3128</span></code>.
@@ -689,6 +707,7 @@ Set this variable before running <code class="docutils literal notranslate"><spa
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#monitor-the-remote-sandbox">Monitor the Remote Sandbox</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#verify-inference">Verify Inference</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#remote-dashboard-access">Remote Dashboard Access</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#first-run-readiness-budget">First-Run Readiness Budget</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#proxy-configuration">Proxy Configuration</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#gpu-configuration">GPU Configuration</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#related-topics">Related Topics</a></li>

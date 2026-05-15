@@ -45,7 +45,7 @@
 
 
 
-    <script src="../_static/documentation_options.js?v=5b8c9b92"></script>
+    <script src="../_static/documentation_options.js?v=f6dceb5e"></script>
     <script src="../_static/doctools.js?v=9a2dae69"></script>
     <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
@@ -56,7 +56,7 @@
     <script>
         DOCUMENTATION_OPTIONS.theme_version = '0.16.1';
         DOCUMENTATION_OPTIONS.theme_switcher_json_url = '../versions1.json';
-        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.41';
+        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.42';
         DOCUMENTATION_OPTIONS.show_version_warning_banner =
             false;
         </script>
@@ -408,6 +408,7 @@
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Manage Sandboxes</span></p>
 <ul class="nav bd-sidenav">
 <li class="toctree-l1"><a class="reference internal" href="../manage-sandboxes/lifecycle.html">Manage Sandbox Lifecycle</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../manage-sandboxes/runtime-controls.html">Runtime Controls</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../manage-sandboxes/messaging-channels.html">Set Up Messaging Channels</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../manage-sandboxes/workspace-files.html">Workspace Files</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../manage-sandboxes/backup-restore.html">Backup and Restore</a></li>
@@ -632,6 +633,8 @@ For JetPack 7 (L4T 39.x), bridge netfilter is loaded only when the host is missi
 <p>The NemoClaw dashboard uses port <code class="docutils literal notranslate"><span class="pre">18789</span></code> by default and the gateway uses port <code class="docutils literal notranslate"><span class="pre">8080</span></code>.
 If another sandbox already owns the dashboard port, onboarding scans ports <code class="docutils literal notranslate"><span class="pre">18789</span></code> through <code class="docutils literal notranslate"><span class="pre">18799</span></code> and uses the next free port.
 If all ports in that range are occupied, the error lists the owner for each port and suggests using <code class="docutils literal notranslate"><span class="pre">--control-ui-port</span></code> with a port outside the range.</p>
+<p>On macOS, the port check also tries a privileged <code class="docutils literal notranslate"><span class="pre">lsof</span></code> probe without prompting for a password so root-owned listeners are detected before the sandbox build starts.
+If a port becomes occupied after preflight but before <code class="docutils literal notranslate"><span class="pre">openshell</span> <span class="pre">forward</span> <span class="pre">start</span></code> runs, onboarding deletes the just-created sandbox and exits with a retry message instead of leaving a sandbox with an unreachable dashboard URL.</p>
 <p>When a previous onboard, upgrade, or sandbox crash leaves a stale <code class="docutils literal notranslate"><span class="pre">openclaw-gateway</span></code> host process holding the dashboard port, <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span> <span class="pre">--fresh</span></code>, <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">&lt;name&gt;</span> <span class="pre">destroy</span></code> (when destroying the last sandbox), and <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">uninstall</span></code> automatically sweep the dashboard port range and signal <code class="docutils literal notranslate"><span class="pre">SIGTERM</span></code> then <code class="docutils literal notranslate"><span class="pre">SIGKILL</span></code> to recover.
 The sweep only targets processes owned by the current user whose command line matches <code class="docutils literal notranslate"><span class="pre">openclaw-gateway</span></code> or <code class="docutils literal notranslate"><span class="pre">openshell</span> <span class="pre">forward</span></code> markers, and skips dashboard ports owned by other live sandboxes.</p>
 <p>If a non-NemoClaw process is already bound to the dashboard port or the gateway port, identify the conflicting process, verify it is safe to stop, and terminate it:</p>
@@ -789,7 +792,8 @@ The wizard cleans up stale port forwards and waits for gateway readiness automat
 <section id="colima-socket-not-detected-macos">
 <h3>Colima socket not detected (macOS)<a class="headerlink" href="#colima-socket-not-detected-macos" title="Link to this heading">#</a></h3>
 <p>Newer Colima versions use the XDG base directory (<code class="docutils literal notranslate"><span class="pre">~/.config/colima/default/docker.sock</span></code>) instead of the legacy path (<code class="docutils literal notranslate"><span class="pre">~/.colima/default/docker.sock</span></code>).
-NemoClaw checks both paths.
+Some installations expose a top-level Colima socket at <code class="docutils literal notranslate"><span class="pre">~/.colima/docker.sock</span></code>.
+NemoClaw checks all three paths.
 If neither is found, verify that Colima is running:</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>colima<span class="w"> </span>status
 </pre></div>
@@ -1003,7 +1007,9 @@ Check the active provider and endpoint:</p>
 </pre></div>
 </div>
 <p>For local Ollama and local vLLM, <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">&lt;name&gt;</span> <span class="pre">status</span></code> also prints an <code class="docutils literal notranslate"><span class="pre">Inference</span></code> line that probes the host-side health endpoint directly.
-If that line shows <code class="docutils literal notranslate"><span class="pre">unreachable</span></code>, start the local backend first and then retry the request.</p>
+If that line shows <code class="docutils literal notranslate"><span class="pre">unreachable</span></code>, start the local backend first and then retry the request.
+For Local Ollama, current releases also print <code class="docutils literal notranslate"><span class="pre">Inference</span> <span class="pre">(auth</span> <span class="pre">proxy)</span></code> when a proxy token is available.
+If the backend is healthy but the auth proxy is <code class="docutils literal notranslate"><span class="pre">unauthorized</span></code> or <code class="docutils literal notranslate"><span class="pre">unreachable</span></code>, re-run onboarding so NemoClaw can recreate the proxy token, restart the proxy, and refresh the route.</p>
 <p>If the endpoint is correct but requests still fail, check for network policy rules that may block the connection.
 Then verify the credential and base URL for the provider you selected during onboarding.</p>
 <p>For Ollama, vLLM, NIM, and compatible-endpoint setup, the default timeout is 180 seconds.
@@ -1014,6 +1020,35 @@ If large prompts still cause timeouts, increase it with <code class="docutils li
 </div>
 <p>For local Ollama and vLLM, onboarding retries the container reachability check and can fall back to the host-side health check when the local backend is healthy.
 If all attempts fail, the error includes container reachability diagnostics such as HTTP status and host gateway resolution.</p>
+<p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_LOCAL_INFERENCE_TIMEOUT</span></code> only covers the inference-server validation probe.
+The post-create readiness wait has its own budget (<code class="docutils literal notranslate"><span class="pre">NEMOCLAW_SANDBOX_READY_TIMEOUT</span></code>); see <a class="reference internal" href="#sandbox-onboard-times-out-with-did-not-become-ready-within-ns">Sandbox onboard times out with “did not become ready within Ns”</a> for the readiness path.</p>
+</section>
+<section id="sandbox-onboard-times-out-with-did-not-become-ready-within-ns">
+<h3>Sandbox onboard times out with “did not become ready within Ns”<a class="headerlink" href="#sandbox-onboard-times-out-with-did-not-become-ready-within-ns" title="Link to this heading">#</a></h3>
+<p>Onboarding ends with:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>  Sandbox &#39;my-assistant&#39; was created but did not become ready within 180s.
+  The orphaned sandbox has been removed — you can safely retry.
+</pre></div>
+</div>
+<p>This is a separate budget from <code class="docutils literal notranslate"><span class="pre">NEMOCLAW_LOCAL_INFERENCE_TIMEOUT</span></code> — it covers the readiness wait that follows sandbox creation (in-sandbox boot, OpenClaw start, policy load), not the inference probe.
+The 180-second default fits typical workstations but can be exceeded when:</p>
+<ul class="simple">
+<li><p>The host is building or uploading the sandbox image for the first time (cold caches, slow link).</p></li>
+<li><p>The selected model is large (70B+ parameters or 4-bit/8-bit quantisations that take time to memory-map).</p></li>
+<li><p>Onboarding runs on a remote VM where image upload to the gateway streams over the network (for example DGX Station first-run installer).</p></li>
+</ul>
+<p>Raise the budget before re-running onboard:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span><span class="nb">export</span><span class="w"> </span><span class="nv">NEMOCLAW_SANDBOX_READY_TIMEOUT</span><span class="o">=</span><span class="m">600</span>
+<span class="gp">$ </span>nemoclaw<span class="w"> </span>onboard
+</pre></div>
+</div>
+<p>The variable accepts seconds and applies to the readiness wait only.
+When the deadline expires, NemoClaw deletes the partially-created sandbox before printing the retry hint, so the next <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span></code> starts from a clean state.
+If readiness still fails after the extended budget, inspect the gateway and sandbox status:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>openshell<span class="w"> </span>sandbox<span class="w"> </span>list
+<span class="gp">$ </span>nemoclaw<span class="w"> </span>&lt;name&gt;<span class="w"> </span>status
+</pre></div>
+</div>
 </section>
 <section id="agent-fails-at-runtime-after-onboarding-succeeds-with-a-compatible-endpoint">
 <h3>Agent fails at runtime after onboarding succeeds with a compatible endpoint<a class="headerlink" href="#agent-fails-at-runtime-after-onboarding-succeeds-with-a-compatible-endpoint" title="Link to this heading">#</a></h3>
@@ -1328,11 +1363,19 @@ Verify the toolkit is configured by running <code class="docutils literal notran
 <h3><code class="docutils literal notranslate"><span class="pre">unresolvable</span> <span class="pre">CDI</span> <span class="pre">devices</span> <span class="pre">nvidia.com/gpu=all</span></code> during gateway start<a class="headerlink" href="#unresolvable-cdi-devices-nvidia-com-gpu-all-during-gateway-start" title="Link to this heading">#</a></h3>
 <p>Recent NVIDIA Container Toolkit installs configure the Docker daemon for Container Device Interface (CDI) device injection, which OpenShell’s <code class="docutils literal notranslate"><span class="pre">gateway</span> <span class="pre">start</span> <span class="pre">--gpu</span></code> then auto-selects.
 If no <code class="docutils literal notranslate"><span class="pre">nvidia.com/gpu</span></code> CDI spec has been generated on the host yet, gateway start fails with <code class="docutils literal notranslate"><span class="pre">Docker</span> <span class="pre">responded</span> <span class="pre">with</span> <span class="pre">status</span> <span class="pre">code</span> <span class="pre">500:</span> <span class="pre">CDI</span> <span class="pre">device</span> <span class="pre">injection</span> <span class="pre">failed:</span> <span class="pre">unresolvable</span> <span class="pre">CDI</span> <span class="pre">devices</span> <span class="pre">nvidia.com/gpu=all</span></code>.
-<code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span></code> now detects this gap during preflight and prints the remediation up front, but the underlying fix is the same on any Docker host whose <code class="docutils literal notranslate"><span class="pre">docker</span> <span class="pre">info</span></code> advertises a non-empty <code class="docutils literal notranslate"><span class="pre">CDISpecDirs</span></code>.</p>
-<p>Generate the spec, verify it lists <code class="docutils literal notranslate"><span class="pre">nvidia.com/gpu</span></code> entries, then rerun onboarding:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>sudo<span class="w"> </span>nvidia-ctk<span class="w"> </span>cdi<span class="w"> </span>generate<span class="w"> </span>--output<span class="o">=</span>/etc/cdi/nvidia.yaml
+The standard NemoClaw installer detects this gap before onboarding, first tries to enable the NVIDIA CDI refresh systemd units, and falls back to generating the spec directly with <code class="docutils literal notranslate"><span class="pre">nvidia-ctk</span></code>.
+If you run <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span></code> directly, preflight prints the manual remediation instead.
+The underlying fix is the same on any Docker host whose <code class="docutils literal notranslate"><span class="pre">docker</span> <span class="pre">info</span></code> advertises a non-empty <code class="docutils literal notranslate"><span class="pre">CDISpecDirs</span></code>.</p>
+<p>Enable the refresh units, verify they list <code class="docutils literal notranslate"><span class="pre">nvidia.com/gpu</span></code> entries, then rerun onboarding:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>sudo<span class="w"> </span>systemctl<span class="w"> </span><span class="nb">enable</span><span class="w"> </span>--now<span class="w"> </span>nvidia-cdi-refresh.path<span class="w"> </span>nvidia-cdi-refresh.service
 <span class="gp">$ </span>nvidia-ctk<span class="w"> </span>cdi<span class="w"> </span>list
 <span class="gp">$ </span>nemoclaw<span class="w"> </span>onboard
+</pre></div>
+</div>
+<p>If the refresh units are unavailable or do not generate CDI devices, generate the spec directly:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>sudo<span class="w"> </span>mkdir<span class="w"> </span>-p<span class="w"> </span>/etc/cdi
+<span class="gp">$ </span>sudo<span class="w"> </span>nvidia-ctk<span class="w"> </span>cdi<span class="w"> </span>generate<span class="w"> </span>--output<span class="o">=</span>/etc/cdi/nvidia.yaml
+<span class="gp">$ </span>nvidia-ctk<span class="w"> </span>cdi<span class="w"> </span>list
 </pre></div>
 </div>
 <p>If GPU passthrough is not required on this host, rerun onboarding with <code class="docutils literal notranslate"><span class="pre">--no-gpu</span></code> instead.</p>
@@ -1581,6 +1624,7 @@ To install a skill dependency, add it to the sandbox image and rebuild:</p>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#sandbox-creation-reports-a-tls-certificate-mismatch">Sandbox creation reports a TLS certificate mismatch</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#openclaw-update-hangs-or-times-out-inside-the-sandbox"><code class="docutils literal notranslate"><span class="pre">openclaw</span> <span class="pre">update</span></code> hangs or times out inside the sandbox</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#inference-requests-time-out">Inference requests time out</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#sandbox-onboard-times-out-with-did-not-become-ready-within-ns">Sandbox onboard times out with “did not become ready within Ns”</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#agent-fails-at-runtime-after-onboarding-succeeds-with-a-compatible-endpoint">Agent fails at runtime after onboarding succeeds with a compatible endpoint</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#nemoclaw-disable-device-auth-1-does-not-change-an-existing-sandbox"><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_DISABLE_DEVICE_AUTH=1</span></code> does not change an existing sandbox</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#openclaw-json-is-empty-after-changing-inference"><code class="docutils literal notranslate"><span class="pre">openclaw.json</span></code> is empty after changing inference</a></li>

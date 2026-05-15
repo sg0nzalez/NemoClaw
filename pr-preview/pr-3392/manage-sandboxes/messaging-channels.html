@@ -45,7 +45,7 @@
 
 
 
-    <script src="../_static/documentation_options.js?v=5b8c9b92"></script>
+    <script src="../_static/documentation_options.js?v=f6dceb5e"></script>
     <script src="../_static/doctools.js?v=9a2dae69"></script>
     <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
@@ -56,7 +56,7 @@
     <script>
         DOCUMENTATION_OPTIONS.theme_version = '0.16.1';
         DOCUMENTATION_OPTIONS.theme_switcher_json_url = '../versions1.json';
-        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.41';
+        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.42';
         DOCUMENTATION_OPTIONS.show_version_warning_banner =
             false;
         </script>
@@ -66,7 +66,7 @@
 
     <link rel="search" title="Search" href="../search.html" />
     <link rel="next" title="Workspace Files" href="workspace-files.html" />
-    <link rel="prev" title="Manage Sandbox Lifecycle" href="lifecycle.html" />
+    <link rel="prev" title="Runtime Controls and Sandbox Mutability" href="runtime-controls.html" />
 
 
 
@@ -408,6 +408,7 @@
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Manage Sandboxes</span></p>
 <ul class="current nav bd-sidenav">
 <li class="toctree-l1"><a class="reference internal" href="lifecycle.html">Manage Sandbox Lifecycle</a></li>
+<li class="toctree-l1"><a class="reference internal" href="runtime-controls.html">Runtime Controls</a></li>
 <li class="toctree-l1 current active"><a class="current reference internal" href="#">Set Up Messaging Channels</a></li>
 <li class="toctree-l1"><a class="reference internal" href="workspace-files.html">Workspace Files</a></li>
 <li class="toctree-l1"><a class="reference internal" href="backup-restore.html">Backup and Restore</a></li>
@@ -609,6 +610,8 @@ Use <code class="docutils literal notranslate"><span class="pre">channels</span>
 </pre></div>
 </div>
 <p><code class="docutils literal notranslate"><span class="pre">channels</span> <span class="pre">add</span></code> prompts for missing credentials, registers the bridge with the OpenShell gateway, updates the sandbox registry, and asks whether to rebuild immediately.
+The command accepts mixed-case input such as <code class="docutils literal notranslate"><span class="pre">Telegram</span></code>, then stores and prints the canonical lowercase channel name.
+If the matching built-in network policy preset exists but is not applied yet, the command prints a <code class="docutils literal notranslate"><span class="pre">policy-add</span> <span class="pre">&lt;channel&gt;</span></code> hint after it registers the channel.
 Choose the rebuild so the running sandbox image picks up the new channel.
 If the matching network policy preset (<code class="docutils literal notranslate"><span class="pre">telegram</span></code>, <code class="docutils literal notranslate"><span class="pre">discord</span></code>, <code class="docutils literal notranslate"><span class="pre">slack</span></code>, or <code class="docutils literal notranslate"><span class="pre">whatsapp</span></code>) is not yet applied to the sandbox, <code class="docutils literal notranslate"><span class="pre">channels</span> <span class="pre">add</span></code> prints a hint to run <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">&lt;sandbox&gt;</span> <span class="pre">policy-add</span> <span class="pre">&lt;channel&gt;</span></code> first.
 Apply the preset before the rebuild so the channel can reach its provider API; otherwise the bridge will start but its egress requests will be denied.
@@ -694,12 +697,12 @@ The older <code class="docutils literal notranslate"><span class="pre">nemoclaw<
                   
 <div class="prev-next-area">
     <a class="left-prev"
-       href="lifecycle.html"
+       href="runtime-controls.html"
        title="previous page">
       <i class="fa-solid fa-angle-left"></i>
       <div class="prev-next-info">
         <p class="prev-next-subtitle">previous</p>
-        <p class="prev-next-title">Manage Sandbox Lifecycle</p>
+        <p class="prev-next-title">Runtime Controls and Sandbox Mutability</p>
       </div>
     </a>
     <a class="right-next"

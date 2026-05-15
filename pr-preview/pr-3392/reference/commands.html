@@ -45,7 +45,7 @@
 
 
 
-    <script src="../_static/documentation_options.js?v=5b8c9b92"></script>
+    <script src="../_static/documentation_options.js?v=f6dceb5e"></script>
     <script src="../_static/doctools.js?v=9a2dae69"></script>
     <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
@@ -56,7 +56,7 @@
     <script>
         DOCUMENTATION_OPTIONS.theme_version = '0.16.1';
         DOCUMENTATION_OPTIONS.theme_switcher_json_url = '../versions1.json';
-        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.41';
+        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.42';
         DOCUMENTATION_OPTIONS.show_version_warning_banner =
             false;
         </script>
@@ -408,6 +408,7 @@
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Manage Sandboxes</span></p>
 <ul class="nav bd-sidenav">
 <li class="toctree-l1"><a class="reference internal" href="../manage-sandboxes/lifecycle.html">Manage Sandbox Lifecycle</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../manage-sandboxes/runtime-controls.html">Runtime Controls</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../manage-sandboxes/messaging-channels.html">Set Up Messaging Channels</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../manage-sandboxes/workspace-files.html">Workspace Files</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../manage-sandboxes/backup-restore.html">Backup and Restore</a></li>
@@ -844,9 +845,11 @@ If the gateway is already running, the command exits zero with a probe message a
 </div>
 <p>Local providers (Ollama, vLLM) probe the host-side health endpoint.
 Remote providers (NVIDIA Endpoints, OpenAI, Anthropic, Gemini) use a lightweight reachability check; any HTTP response, including <code class="docutils literal notranslate"><span class="pre">401</span></code> or <code class="docutils literal notranslate"><span class="pre">403</span></code>, counts as reachable.
-No API keys are sent.
-For cloud-only providers, the output omits the NIM status line unless a NIM container is registered or an unexpected NIM container is running.
-If the sandbox or gateway cannot be verified, the command exits non-zero instead of reporting healthy inference from stale registry state.
+No API keys are sent.</p>
+<p>For Local Ollama, the command also probes the authenticated proxy and prints an <code class="docutils literal notranslate"><span class="pre">Inference</span> <span class="pre">(auth</span> <span class="pre">proxy)</span></code> line when a proxy token is available.
+Use that line to distinguish a healthy backend from a broken proxy path that the sandbox uses for inference.</p>
+<p>For cloud-only providers, the output omits the NIM status line unless a NIM container is registered or an unexpected NIM container is running.</p>
+<p>If the sandbox or gateway cannot be verified, the command exits non-zero instead of reporting healthy inference from stale registry state.
 Gateway and dashboard health checks treat HTTP <code class="docutils literal notranslate"><span class="pre">401</span></code> from device auth as a live service, not as an offline gateway.</p>
 <p>A <code class="docutils literal notranslate"><span class="pre">Connected</span></code> line reports whether the sandbox has any active SSH sessions and, if so, how many.
 The sandbox list in the status output includes the dashboard port suffix for sandboxes with a recorded dashboard port.</p>
@@ -1088,7 +1091,9 @@ The command is a static reference; it does not consult credentials or the runnin
 <h3><code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">&lt;name&gt;</span> <span class="pre">channels</span> <span class="pre">add</span> <span class="pre">&lt;channel&gt;</span></code><a class="headerlink" href="#nemoclaw-name-channels-add-channel" title="Link to this heading">#</a></h3>
 <p>Store credentials for a messaging channel (<code class="docutils literal notranslate"><span class="pre">telegram</span></code>, <code class="docutils literal notranslate"><span class="pre">discord</span></code>, or <code class="docutils literal notranslate"><span class="pre">slack</span></code>) and rebuild the sandbox so the image picks up the new channel.
 The command prompts for any missing token, registers it with the OpenShell gateway, then asks whether to rebuild immediately.
-Running <code class="docutils literal notranslate"><span class="pre">add</span></code> for an already-configured channel simply overwrites the stored tokens — the operation is idempotent.</p>
+Running <code class="docutils literal notranslate"><span class="pre">add</span></code> for an already-configured channel simply overwrites the stored tokens — the operation is idempotent.
+Channel names are trimmed and lowercased before NemoClaw stores credentials, names bridge providers, or prints rebuild messages.
+After a successful add, NemoClaw prints a <code class="docutils literal notranslate"><span class="pre">policy-add</span> <span class="pre">&lt;channel&gt;</span></code> hint when a matching built-in network policy preset exists but is not applied to the sandbox yet.</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>nemoclaw<span class="w"> </span>my-assistant<span class="w"> </span>channels<span class="w"> </span>add<span class="w"> </span>telegram
 </pre></div>
 </div>
@@ -1484,7 +1489,8 @@ Use <code class="docutils literal notranslate"><span class="pre">nemoclaw</span>
 <section id="nemoclaw-status">
 <h3><code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">status</span></code><a class="headerlink" href="#nemoclaw-status" title="Link to this heading">#</a></h3>
 <p>Show the sandbox list and the status of host auxiliary services (for example cloudflared).
-Pass <code class="docutils literal notranslate"><span class="pre">--json</span></code> for machine-readable output with registered sandboxes, service state, inference routes, and messaging health.</p>
+Pass <code class="docutils literal notranslate"><span class="pre">--json</span></code> for machine-readable output with registered sandboxes, service state, inference routes, and messaging health.
+For each listed sandbox, the text output includes the configured inference provider and model plus whether an active SSH session is connected.</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>nemoclaw<span class="w"> </span>status
 <span class="gp">$ </span>nemoclaw<span class="w"> </span>status<span class="w"> </span>--json
 </pre></div>
@@ -1493,7 +1499,8 @@ Pass <code class="docutils literal notranslate"><span class="pre">--json</span><
 The command suggests <code class="docutils literal notranslate"><span class="pre">openshell</span> <span class="pre">gateway</span> <span class="pre">start</span> <span class="pre">--name</span> <span class="pre">nemoclaw</span></code> or <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span> <span class="pre">--resume</span></code> to recover.
 It exits with code <code class="docutils literal notranslate"><span class="pre">1</span></code> so shell scripts and CI can detect the degraded state from <code class="docutils literal notranslate"><span class="pre">$?</span></code>.
 For <code class="docutils literal notranslate"><span class="pre">--json</span></code>, the structured output includes <code class="docutils literal notranslate"><span class="pre">gatewayHealth</span></code>, and the exit code is set after the report is generated.
-A clean machine with no registered sandboxes keeps the legacy <code class="docutils literal notranslate"><span class="pre">0</span></code> exit because no gateway is expected to be configured yet.</p>
+A clean machine with no registered sandboxes keeps the legacy <code class="docutils literal notranslate"><span class="pre">0</span></code> exit because no gateway is expected to be configured yet.
+If cloudflared is installed but not running, the host-service section reports whether the PID file is missing, invalid, or points at a dead process, then suggests <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">tunnel</span> <span class="pre">start</span></code> as the recovery command.</p>
 </section>
 <section id="nemoclaw-inference-get">
 <h3><code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">inference</span> <span class="pre">get</span></code><a class="headerlink" href="#nemoclaw-inference-get" title="Link to this heading">#</a></h3>
@@ -1736,6 +1743,10 @@ All ports must be non-privileged integers between 1024 and 65535.</p>
 <td><p>11435</p></td>
 <td><p>Ollama auth proxy</p></td>
 </tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_DASHBOARD_BIND</span></code></p></td>
+<td><p><em>unset</em> (loopback)</p></td>
+<td><p>Dashboard forward bind address — set to <code class="docutils literal notranslate"><span class="pre">0.0.0.0</span></code> to opt in to remote bind for SSH-deployed hosts</p></td>
+</tr>
 </tbody>
 </table>
 </div>
@@ -1745,6 +1756,11 @@ On non-WSL hosts, <code class="docutils literal notranslate"><span class="pre">N
 If you run Ollama on port 11435, set <code class="docutils literal notranslate"><span class="pre">NEMOCLAW_OLLAMA_PROXY_PORT</span></code> to another free port before onboarding.</p>
 <p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_GATEWAY_BIND_ADDRESS</span></code> accepts only <code class="docutils literal notranslate"><span class="pre">127.0.0.1</span></code> and <code class="docutils literal notranslate"><span class="pre">0.0.0.0</span></code>.
 Binding the OpenShell gateway to <code class="docutils literal notranslate"><span class="pre">0.0.0.0</span></code> may make it reachable from other hosts on the network.</p>
+<p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_DASHBOARD_BIND</span></code> controls the dashboard port forward bind address.
+By default the forward stays on <code class="docutils literal notranslate"><span class="pre">127.0.0.1</span></code> (loopback only).
+Set <code class="docutils literal notranslate"><span class="pre">NEMOCLAW_DASHBOARD_BIND=0.0.0.0</span></code> before <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span></code> (or <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">&lt;sandbox&gt;</span> <span class="pre">connect</span></code>) to bind the dashboard on all interfaces — useful when the host is reached over SSH (Brev, cloud workstations) and the dashboard URL needs to be opened from a different machine on the network.
+Only <code class="docutils literal notranslate"><span class="pre">0.0.0.0</span></code> enables the remote bind; other values are ignored.
+When the remote bind is opted in, the dashboard auth flow accepts non-loopback origins.</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span><span class="nb">export</span><span class="w"> </span><span class="nv">NEMOCLAW_DASHBOARD_PORT</span><span class="o">=</span><span class="m">19000</span>
 <span class="gp">$ </span>nemoclaw<span class="w"> </span>onboard
 </pre></div>
@@ -1959,14 +1975,25 @@ Set them before running <code class="docutils literal notranslate"><span class="
 <td><p><code class="docutils literal notranslate"><span class="pre">1800</span></code> (30 minutes)</p></td>
 <td><p>Wall-clock timeout for <code class="docutils literal notranslate"><span class="pre">ollama</span> <span class="pre">pull</span></code> during onboard, in seconds. Accepts integer or float values. Already-downloaded layers are kept; re-running the pull resumes them.</p></td>
 </tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_LOCAL_INFERENCE_TIMEOUT</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">180</span></code></p></td>
+<td><p>Wall-clock timeout for the inference-server validation probe during onboard, in seconds. Raise on slow networks or for very large prompts.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_SANDBOX_READY_TIMEOUT</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">180</span></code></p></td>
+<td><p>Wall-clock timeout for the post-create readiness wait, in seconds. Raise when the sandbox image build, gateway upload, or in-sandbox boot exceeds the default (typical on 70B+ models, first-time gateway uploads over slow links, or DGX Station / remote-VM first runs). When the deadline expires onboarding deletes the orphaned sandbox and prints the retry hint.</p></td>
+</tr>
 </tbody>
 </table>
 </div>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span><span class="nb">export</span><span class="w"> </span><span class="nv">NEMOCLAW_OLLAMA_PULL_TIMEOUT</span><span class="o">=</span><span class="m">3600</span>
+<span class="gp">$ </span><span class="nb">export</span><span class="w"> </span><span class="nv">NEMOCLAW_SANDBOX_READY_TIMEOUT</span><span class="o">=</span><span class="m">600</span>
 <span class="gp">$ </span>nemoclaw<span class="w"> </span>onboard
 </pre></div>
 </div>
-<p>If the pull exceeds the limit, onboarding emits the timeout in minutes plus a hint to raise this variable, and the partial download is preserved for the next attempt.</p>
+<p>If a timeout fires, onboarding emits the elapsed budget plus a hint to raise the relevant variable.
+The Ollama pull preserves its partial download for the next attempt.
+The readiness wait deletes the orphaned sandbox first so the next <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span></code> starts clean.</p>
 </section>
 <section id="lifecycle-behavior-flags">
 <h3>Lifecycle Behavior Flags<a class="headerlink" href="#lifecycle-behavior-flags" title="Link to this heading">#</a></h3>

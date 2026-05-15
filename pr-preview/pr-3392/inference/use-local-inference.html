@@ -45,7 +45,7 @@
 
 
 
-    <script src="../_static/documentation_options.js?v=5b8c9b92"></script>
+    <script src="../_static/documentation_options.js?v=f6dceb5e"></script>
     <script src="../_static/doctools.js?v=9a2dae69"></script>
     <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
@@ -56,7 +56,7 @@
     <script>
         DOCUMENTATION_OPTIONS.theme_version = '0.16.1';
         DOCUMENTATION_OPTIONS.theme_switcher_json_url = '../versions1.json';
-        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.41';
+        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.42';
         DOCUMENTATION_OPTIONS.show_version_warning_banner =
             false;
         </script>
@@ -408,6 +408,7 @@
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Manage Sandboxes</span></p>
 <ul class="nav bd-sidenav">
 <li class="toctree-l1"><a class="reference internal" href="../manage-sandboxes/lifecycle.html">Manage Sandbox Lifecycle</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../manage-sandboxes/runtime-controls.html">Runtime Controls</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../manage-sandboxes/messaging-channels.html">Set Up Messaging Channels</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../manage-sandboxes/workspace-files.html">Workspace Files</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../manage-sandboxes/backup-restore.html">Backup and Restore</a></li>
@@ -662,7 +663,9 @@ Enter the base URL of your local server, for example <code class="docutils liter
 If your server does not require authentication, enter any non-empty string (for example, <code class="docutils literal notranslate"><span class="pre">dummy</span></code>).</p>
 <p>NemoClaw validates the endpoint by sending a test inference request before continuing.
 The wizard probes <code class="docutils literal notranslate"><span class="pre">/v1/chat/completions</span></code> by default for the compatible-endpoint provider.
-If you set <code class="docutils literal notranslate"><span class="pre">NEMOCLAW_PREFERRED_API=openai-responses</span></code>, NemoClaw probes <code class="docutils literal notranslate"><span class="pre">/v1/responses</span></code> instead and only selects it when the response includes the streaming events OpenClaw requires.</p>
+If you set <code class="docutils literal notranslate"><span class="pre">NEMOCLAW_PREFERRED_API=openai-responses</span></code>, NemoClaw probes <code class="docutils literal notranslate"><span class="pre">/v1/responses</span></code> instead and only selects it when the response includes the streaming events OpenClaw requires.
+If a reasoning model returns only reasoning content before producing a final answer, NemoClaw retries the smoke request with a larger response budget.
+Route, configuration, and authentication failures still fail immediately.</p>
 <section id="id1">
 <h3>Non-Interactive Setup<a class="headerlink" href="#id1" title="Link to this heading">#</a></h3>
 <p>Set the following environment variables for scripted or CI/CD deployments.</p>
@@ -844,6 +847,15 @@ Large prompts on hardware such as DGX Spark can exceed shorter timeouts, so Nemo
 <p>The value is in seconds.
 This setting is baked into the sandbox at build time.
 Changing it after onboarding requires re-running <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span></code>.</p>
+<p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_LOCAL_INFERENCE_TIMEOUT</span></code> only governs the inference-server validation probe.
+The post-create readiness wait (image build, gateway upload, in-sandbox boot) has its own budget, <code class="docutils literal notranslate"><span class="pre">NEMOCLAW_SANDBOX_READY_TIMEOUT</span></code>, also defaulting to 180 seconds.
+On hosts where the sandbox image takes minutes to build or upload — large quantised models, DGX Station first runs, or remote VMs over a slow link — raise both together:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span><span class="nb">export</span><span class="w"> </span><span class="nv">NEMOCLAW_LOCAL_INFERENCE_TIMEOUT</span><span class="o">=</span><span class="m">300</span>
+<span class="gp">$ </span><span class="nb">export</span><span class="w"> </span><span class="nv">NEMOCLAW_SANDBOX_READY_TIMEOUT</span><span class="o">=</span><span class="m">600</span>
+<span class="gp">$ </span>nemoclaw<span class="w"> </span>onboard
+</pre></div>
+</div>
+<p>If onboard ends with <code class="docutils literal notranslate"><span class="pre">Sandbox</span> <span class="pre">'&lt;name&gt;'</span> <span class="pre">was</span> <span class="pre">created</span> <span class="pre">but</span> <span class="pre">did</span> <span class="pre">not</span> <span class="pre">become</span> <span class="pre">ready</span> <span class="pre">within</span> <span class="pre">180s</span></code>, refer to <a class="reference internal" href="../reference/troubleshooting.html#sandbox-onboard-times-out-with-did-not-become-ready-within-ns"><span class="std std-ref">Troubleshooting</span></a>.</p>
 </section>
 <section id="verify-the-configuration">
 <h2>Verify the Configuration<a class="headerlink" href="#verify-the-configuration" title="Link to this heading">#</a></h2>
@@ -851,7 +863,9 @@ Changing it after onboarding requires re-running <code class="docutils literal n
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>nemoclaw<span class="w"> </span>&lt;name&gt;<span class="w"> </span>status
 </pre></div>
 </div>
-<p>The output shows the provider label (for example, “Local vLLM” or “Other OpenAI-compatible endpoint”) and the active model.</p>
+<p>The output shows the provider label (for example, “Local vLLM” or “Other OpenAI-compatible endpoint”) and the active model.
+For Local Ollama, status also checks the authenticated proxy when a proxy token is available.
+If <code class="docutils literal notranslate"><span class="pre">Inference</span></code> is healthy but <code class="docutils literal notranslate"><span class="pre">Inference</span> <span class="pre">(auth</span> <span class="pre">proxy)</span></code> is not, rerun onboarding to repair the proxy path that sandbox requests use.</p>
 </section>
 <section id="switch-models-at-runtime">
 <h2>Switch Models at Runtime<a class="headerlink" href="#switch-models-at-runtime" title="Link to this heading">#</a></h2>
