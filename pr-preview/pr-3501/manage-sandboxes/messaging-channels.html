@@ -45,7 +45,7 @@
 
 
 
-    <script src="../_static/documentation_options.js?v=3f434bd6"></script>
+    <script src="../_static/documentation_options.js?v=f6dceb5e"></script>
     <script src="../_static/doctools.js?v=9a2dae69"></script>
     <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
@@ -56,7 +56,7 @@
     <script>
         DOCUMENTATION_OPTIONS.theme_version = '0.16.1';
         DOCUMENTATION_OPTIONS.theme_switcher_json_url = '../versions1.json';
-        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.40';
+        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.42';
         DOCUMENTATION_OPTIONS.show_version_warning_banner =
             false;
         </script>
@@ -596,6 +596,8 @@ Use <code class="docutils literal notranslate"><span class="pre">channels</span>
 </pre></div>
 </div>
 <p><code class="docutils literal notranslate"><span class="pre">channels</span> <span class="pre">add</span></code> prompts for missing credentials, registers the bridge with the OpenShell gateway, updates the sandbox registry, and asks whether to rebuild immediately.
+The command accepts mixed-case input such as <code class="docutils literal notranslate"><span class="pre">Telegram</span></code>, then stores and prints the canonical lowercase channel name.
+If the matching built-in network policy preset exists but is not applied yet, the command prints a <code class="docutils literal notranslate"><span class="pre">policy-add</span> <span class="pre">&lt;channel&gt;</span></code> hint after it registers the channel.
 Choose the rebuild so the running sandbox image picks up the new channel.
 If you need optional channel settings such as <code class="docutils literal notranslate"><span class="pre">TELEGRAM_ALLOWED_IDS</span></code>, <code class="docutils literal notranslate"><span class="pre">TELEGRAM_REQUIRE_MENTION</span></code>, <code class="docutils literal notranslate"><span class="pre">DISCORD_SERVER_ID</span></code>, <code class="docutils literal notranslate"><span class="pre">DISCORD_USER_ID</span></code>, or <code class="docutils literal notranslate"><span class="pre">DISCORD_REQUIRE_MENTION</span></code>, export them before the rebuild starts.
 If you defer the rebuild, apply the change later:</p>

@@ -45,7 +45,7 @@
 
 
 
-    <script src="../_static/documentation_options.js?v=3f434bd6"></script>
+    <script src="../_static/documentation_options.js?v=f6dceb5e"></script>
     <script src="../_static/doctools.js?v=9a2dae69"></script>
     <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
@@ -56,7 +56,7 @@
     <script>
         DOCUMENTATION_OPTIONS.theme_version = '0.16.1';
         DOCUMENTATION_OPTIONS.theme_switcher_json_url = '../versions1.json';
-        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.40';
+        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.42';
         DOCUMENTATION_OPTIONS.show_version_warning_banner =
             false;
         </script>
@@ -561,8 +561,10 @@
 </div>
 <p>On Linux, the installer can install Docker, start the Docker service, and add your user to the <code class="docutils literal notranslate"><span class="pre">docker</span></code> group.
 If the group change is not active in the current shell, the installer exits with <code class="docutils literal notranslate"><span class="pre">newgrp</span> <span class="pre">docker</span></code> guidance before it starts onboarding.
-If you choose the native Linux Ollama install path, the onboard wizard also requires <code class="docutils literal notranslate"><span class="pre">zstd</span></code> for Ollama archive extraction.
-On Debian and Ubuntu, NemoClaw installs <code class="docutils literal notranslate"><span class="pre">zstd</span></code> with <code class="docutils literal notranslate"><span class="pre">apt-get</span></code> if it is missing; on other Linux distributions, install <code class="docutils literal notranslate"><span class="pre">zstd</span></code> before onboarding.</p>
+If you choose the native Linux Ollama install path, the onboard wizard also requires <code class="docutils literal notranslate"><span class="pre">zstd</span></code> for Ollama archive extraction.</p>
+<p>On Debian and Ubuntu, NemoClaw installs <code class="docutils literal notranslate"><span class="pre">zstd</span></code> with <code class="docutils literal notranslate"><span class="pre">apt-get</span></code> if it is missing; on other Linux distributions, install <code class="docutils literal notranslate"><span class="pre">zstd</span></code> before onboarding.</p>
+<p>On macOS, NemoClaw uses the Docker-driver OpenShell gateway path with Docker Desktop or Colima.
+You do not need to install or sign a separate OpenShell VM driver helper for standard macOS onboarding.</p>
 <div class="admonition warning">
 <p class="admonition-title">Warning</p>
 <p>OpenShell Lifecycle

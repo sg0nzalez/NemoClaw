@@ -45,7 +45,7 @@
 
 
 
-    <script src="../_static/documentation_options.js?v=3f434bd6"></script>
+    <script src="../_static/documentation_options.js?v=f6dceb5e"></script>
     <script src="../_static/doctools.js?v=9a2dae69"></script>
     <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
@@ -56,7 +56,7 @@
     <script>
         DOCUMENTATION_OPTIONS.theme_version = '0.16.1';
         DOCUMENTATION_OPTIONS.theme_switcher_json_url = '../versions1.json';
-        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.40';
+        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.42';
         DOCUMENTATION_OPTIONS.show_version_warning_banner =
             false;
         </script>
@@ -633,6 +633,8 @@ For JetPack 7 (L4T 39.x), bridge netfilter is loaded only when the host is missi
 <p>The NemoClaw dashboard uses port <code class="docutils literal notranslate"><span class="pre">18789</span></code> by default and the gateway uses port <code class="docutils literal notranslate"><span class="pre">8080</span></code>.
 If another sandbox already owns the dashboard port, onboarding scans ports <code class="docutils literal notranslate"><span class="pre">18789</span></code> through <code class="docutils literal notranslate"><span class="pre">18799</span></code> and uses the next free port.
 If all ports in that range are occupied, the error lists the owner for each port and suggests using <code class="docutils literal notranslate"><span class="pre">--control-ui-port</span></code> with a port outside the range.</p>
+<p>On macOS, the port check also tries a privileged <code class="docutils literal notranslate"><span class="pre">lsof</span></code> probe without prompting for a password so root-owned listeners are detected before the sandbox build starts.
+If a port becomes occupied after preflight but before <code class="docutils literal notranslate"><span class="pre">openshell</span> <span class="pre">forward</span> <span class="pre">start</span></code> runs, onboarding deletes the just-created sandbox and exits with a retry message instead of leaving a sandbox with an unreachable dashboard URL.</p>
 <p>When a previous onboard, upgrade, or sandbox crash leaves a stale <code class="docutils literal notranslate"><span class="pre">openclaw-gateway</span></code> host process holding the dashboard port, <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span> <span class="pre">--fresh</span></code>, <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">&lt;name&gt;</span> <span class="pre">destroy</span></code> (when destroying the last sandbox), and <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">uninstall</span></code> automatically sweep the dashboard port range and signal <code class="docutils literal notranslate"><span class="pre">SIGTERM</span></code> then <code class="docutils literal notranslate"><span class="pre">SIGKILL</span></code> to recover.
 The sweep only targets processes owned by the current user whose command line matches <code class="docutils literal notranslate"><span class="pre">openclaw-gateway</span></code> or <code class="docutils literal notranslate"><span class="pre">openshell</span> <span class="pre">forward</span></code> markers, and skips dashboard ports owned by other live sandboxes.</p>
 <p>If a non-NemoClaw process is already bound to the dashboard port or the gateway port, identify the conflicting process, verify it is safe to stop, and terminate it:</p>
@@ -752,7 +754,24 @@ If the installed OpenShell version exceeds the configured maximum, <code class="
 </pre></div>
 </div>
 <p>Upgrade NemoClaw to a version that supports your OpenShell release, or install a supported OpenShell version from the <a class="reference external" href="https://github.com/NVIDIA/OpenShell/releases" rel="noreferer noopener" target="_blank">OpenShell releases page</a>.</p>
-<p>The <code class="docutils literal notranslate"><span class="pre">install-openshell.sh</span></code> script also enforces this constraint and pins fresh installs to the validated maximum version.</p>
+<p>For fresh installs, NemoClaw passes the blueprint range to <code class="docutils literal notranslate"><span class="pre">install-openshell.sh</span></code> and resolves a compatible published OpenShell release before downloading.
+If GitHub release metadata is unavailable, the script uses its bundled fallback pin and the post-install gate still enforces the configured range.</p>
+</section>
+<section id="sandbox-containers-cannot-reach-the-gateway">
+<h3>Sandbox containers cannot reach the gateway<a class="headerlink" href="#sandbox-containers-cannot-reach-the-gateway" title="Link to this heading">#</a></h3>
+<p>On native Linux Docker-driver hosts, <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span></code> verifies the route that sandbox containers use to reach the OpenShell gateway.
+If a host firewall blocks that path, onboarding exits with output like:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>✗ Sandbox containers cannot reach the gateway at host.openshell.internal:8080.
+  A host firewall may be blocking traffic from the OpenShell Docker bridge.
+</pre></div>
+</div>
+<p>Apply the <code class="docutils literal notranslate"><span class="pre">ufw</span></code> command printed by onboarding, then rerun onboarding.
+If the message does not include a subnet, derive it from the OpenShell Docker network:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span><span class="nv">SUBNET</span><span class="o">=</span><span class="k">$(</span>docker<span class="w"> </span>network<span class="w"> </span>inspect<span class="w"> </span>openshell-docker<span class="w"> </span>--format<span class="w"> </span><span class="s1">&#39;{{(index .IPAM.Config 0).Subnet}}&#39;</span><span class="k">)</span>
+<span class="gp">$ </span>sudo<span class="w"> </span>ufw<span class="w"> </span>allow<span class="w"> </span>from<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SUBNET</span><span class="s2">&quot;</span><span class="w"> </span>to<span class="w"> </span>any<span class="w"> </span>port<span class="w"> </span><span class="m">8080</span><span class="w"> </span>proto<span class="w"> </span>tcp
+<span class="gp">$ </span>nemoclaw<span class="w"> </span>onboard
+</pre></div>
+</div>
 </section>
 <section id="invalid-sandbox-name">
 <h3>Invalid sandbox name<a class="headerlink" href="#invalid-sandbox-name" title="Link to this heading">#</a></h3>
@@ -773,7 +792,8 @@ The wizard cleans up stale port forwards and waits for gateway readiness automat
 <section id="colima-socket-not-detected-macos">
 <h3>Colima socket not detected (macOS)<a class="headerlink" href="#colima-socket-not-detected-macos" title="Link to this heading">#</a></h3>
 <p>Newer Colima versions use the XDG base directory (<code class="docutils literal notranslate"><span class="pre">~/.config/colima/default/docker.sock</span></code>) instead of the legacy path (<code class="docutils literal notranslate"><span class="pre">~/.colima/default/docker.sock</span></code>).
-NemoClaw checks both paths.
+Some installations expose a top-level Colima socket at <code class="docutils literal notranslate"><span class="pre">~/.colima/docker.sock</span></code>.
+NemoClaw checks all three paths.
 If neither is found, verify that Colima is running:</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>colima<span class="w"> </span>status
 </pre></div>
@@ -987,7 +1007,9 @@ Check the active provider and endpoint:</p>
 </pre></div>
 </div>
 <p>For local Ollama and local vLLM, <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">&lt;name&gt;</span> <span class="pre">status</span></code> also prints an <code class="docutils literal notranslate"><span class="pre">Inference</span></code> line that probes the host-side health endpoint directly.
-If that line shows <code class="docutils literal notranslate"><span class="pre">unreachable</span></code>, start the local backend first and then retry the request.</p>
+If that line shows <code class="docutils literal notranslate"><span class="pre">unreachable</span></code>, start the local backend first and then retry the request.
+For Local Ollama, current releases also print <code class="docutils literal notranslate"><span class="pre">Inference</span> <span class="pre">(auth</span> <span class="pre">proxy)</span></code> when a proxy token is available.
+If the backend is healthy but the auth proxy is <code class="docutils literal notranslate"><span class="pre">unauthorized</span></code> or <code class="docutils literal notranslate"><span class="pre">unreachable</span></code>, re-run onboarding so NemoClaw can recreate the proxy token, restart the proxy, and refresh the route.</p>
 <p>If the endpoint is correct but requests still fail, check for network policy rules that may block the connection.
 Then verify the credential and base URL for the provider you selected during onboarding.</p>
 <p>For Ollama, vLLM, NIM, and compatible-endpoint setup, the default timeout is 180 seconds.
@@ -1249,6 +1271,24 @@ permissions.
 If the file is missing or unreadable after a host reboot, re-running
 <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span></code> regenerates it.</p>
 </section>
+<section id="ollama-auth-proxy-is-unreachable-from-the-sandbox">
+<h3>Ollama auth proxy is unreachable from the sandbox<a class="headerlink" href="#ollama-auth-proxy-is-unreachable-from-the-sandbox" title="Link to this heading">#</a></h3>
+<p>On native Linux Docker-driver hosts, a host firewall can allow the host proxy check but block sandbox traffic to the Ollama auth proxy.
+When that happens, onboarding exits before it saves the inference route and prints output like:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>✗ Sandbox containers cannot reach the Ollama auth proxy at host.openshell.internal:11435.
+  A host firewall may be blocking traffic from the OpenShell Docker bridge.
+</pre></div>
+</div>
+<p>Apply the <code class="docutils literal notranslate"><span class="pre">ufw</span></code> command printed by onboarding, then rerun onboarding.
+If the message does not include a subnet, derive it from the OpenShell Docker network:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span><span class="nv">SUBNET</span><span class="o">=</span><span class="k">$(</span>docker<span class="w"> </span>network<span class="w"> </span>inspect<span class="w"> </span>openshell-docker<span class="w"> </span>--format<span class="w"> </span><span class="s1">&#39;{{(index .IPAM.Config 0).Subnet}}&#39;</span><span class="k">)</span>
+<span class="gp">$ </span>sudo<span class="w"> </span>ufw<span class="w"> </span>allow<span class="w"> </span>from<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SUBNET</span><span class="s2">&quot;</span><span class="w"> </span>to<span class="w"> </span>any<span class="w"> </span>port<span class="w"> </span><span class="m">11435</span><span class="w"> </span>proto<span class="w"> </span>tcp
+<span class="gp">$ </span>nemoclaw<span class="w"> </span>onboard
+</pre></div>
+</div>
+<p>Docker Desktop, WSL, and hosts without the OpenShell Docker network use different routing models.
+In those cases NemoClaw treats an unavailable sandbox-side probe as non-blocking and relies on the regular proxy health check.</p>
+</section>
 <section id="local-inference-health-check-resolves-to-ipv6">
 <h3>Local inference health check resolves to IPv6<a class="headerlink" href="#local-inference-health-check-resolves-to-ipv6" title="Link to this heading">#</a></h3>
 <p>Local inference health checks now use <code class="docutils literal notranslate"><span class="pre">127.0.0.1</span></code> instead of <code class="docutils literal notranslate"><span class="pre">localhost</span></code>.
@@ -1294,14 +1334,34 @@ Verify the toolkit is configured by running <code class="docutils literal notran
 <h3><code class="docutils literal notranslate"><span class="pre">unresolvable</span> <span class="pre">CDI</span> <span class="pre">devices</span> <span class="pre">nvidia.com/gpu=all</span></code> during gateway start<a class="headerlink" href="#unresolvable-cdi-devices-nvidia-com-gpu-all-during-gateway-start" title="Link to this heading">#</a></h3>
 <p>Recent NVIDIA Container Toolkit installs configure the Docker daemon for Container Device Interface (CDI) device injection, which OpenShell’s <code class="docutils literal notranslate"><span class="pre">gateway</span> <span class="pre">start</span> <span class="pre">--gpu</span></code> then auto-selects.
 If no <code class="docutils literal notranslate"><span class="pre">nvidia.com/gpu</span></code> CDI spec has been generated on the host yet, gateway start fails with <code class="docutils literal notranslate"><span class="pre">Docker</span> <span class="pre">responded</span> <span class="pre">with</span> <span class="pre">status</span> <span class="pre">code</span> <span class="pre">500:</span> <span class="pre">CDI</span> <span class="pre">device</span> <span class="pre">injection</span> <span class="pre">failed:</span> <span class="pre">unresolvable</span> <span class="pre">CDI</span> <span class="pre">devices</span> <span class="pre">nvidia.com/gpu=all</span></code>.
-<code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span></code> now detects this gap during preflight and prints the remediation up front, but the underlying fix is the same on any Docker host whose <code class="docutils literal notranslate"><span class="pre">docker</span> <span class="pre">info</span></code> advertises a non-empty <code class="docutils literal notranslate"><span class="pre">CDISpecDirs</span></code>.</p>
-<p>Generate the spec, verify it lists <code class="docutils literal notranslate"><span class="pre">nvidia.com/gpu</span></code> entries, then rerun onboarding:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>sudo<span class="w"> </span>nvidia-ctk<span class="w"> </span>cdi<span class="w"> </span>generate<span class="w"> </span>--output<span class="o">=</span>/etc/cdi/nvidia.yaml
+The standard NemoClaw installer detects this gap before onboarding, first tries to enable the NVIDIA CDI refresh systemd units, and falls back to generating the spec directly with <code class="docutils literal notranslate"><span class="pre">nvidia-ctk</span></code>.
+If you run <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span></code> directly, preflight prints the manual remediation instead.
+The underlying fix is the same on any Docker host whose <code class="docutils literal notranslate"><span class="pre">docker</span> <span class="pre">info</span></code> advertises a non-empty <code class="docutils literal notranslate"><span class="pre">CDISpecDirs</span></code>.</p>
+<p>Enable the refresh units, verify they list <code class="docutils literal notranslate"><span class="pre">nvidia.com/gpu</span></code> entries, then rerun onboarding:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>sudo<span class="w"> </span>systemctl<span class="w"> </span><span class="nb">enable</span><span class="w"> </span>--now<span class="w"> </span>nvidia-cdi-refresh.path<span class="w"> </span>nvidia-cdi-refresh.service
 <span class="gp">$ </span>nvidia-ctk<span class="w"> </span>cdi<span class="w"> </span>list
 <span class="gp">$ </span>nemoclaw<span class="w"> </span>onboard
 </pre></div>
 </div>
+<p>If the refresh units are unavailable or do not generate CDI devices, generate the spec directly:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>sudo<span class="w"> </span>mkdir<span class="w"> </span>-p<span class="w"> </span>/etc/cdi
+<span class="gp">$ </span>sudo<span class="w"> </span>nvidia-ctk<span class="w"> </span>cdi<span class="w"> </span>generate<span class="w"> </span>--output<span class="o">=</span>/etc/cdi/nvidia.yaml
+<span class="gp">$ </span>nvidia-ctk<span class="w"> </span>cdi<span class="w"> </span>list
+</pre></div>
+</div>
 <p>If GPU passthrough is not required on this host, rerun onboarding with <code class="docutils literal notranslate"><span class="pre">--no-gpu</span></code> instead.</p>
+</section>
+<section id="docker-gpu-patch-failed-during-sandbox-create">
+<h3>Docker GPU patch failed during sandbox create<a class="headerlink" href="#docker-gpu-patch-failed-during-sandbox-create" title="Link to this heading">#</a></h3>
+<p>On Linux Docker-driver gateways, NemoClaw may create the sandbox first and then recreate the OpenShell-managed Docker container with NVIDIA GPU flags.
+If that compatibility patch fails, onboarding leaves the failed sandbox and diagnostic bundle in place so you can inspect the OpenShell and Docker state.
+The output includes a cleanup command such as:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>openshell<span class="w"> </span>sandbox<span class="w"> </span>delete<span class="w"> </span>&lt;sandbox-name&gt;
+</pre></div>
+</div>
+<p>Fix the NVIDIA Container Toolkit or CDI configuration reported in the diagnostics, clean up the failed sandbox, then rerun onboarding.
+If you do not need GPU access inside the sandbox, rerun with <code class="docutils literal notranslate"><span class="pre">--no-sandbox-gpu</span></code>.
+Set <code class="docutils literal notranslate"><span class="pre">NEMOCLAW_DOCKER_GPU_PATCH=0</span></code> only when you need to bypass this compatibility path during troubleshooting.</p>
 </section>
 <section id="pip-install-fails-with-a-system-packages-error">
 <h3><code class="docutils literal notranslate"><span class="pre">pip</span> <span class="pre">install</span></code> fails with a system-packages error<a class="headerlink" href="#pip-install-fails-with-a-system-packages-error" title="Link to this heading">#</a></h3>
@@ -1515,6 +1575,7 @@ To install a skill dependency, add it to the sandbox image and rebuild:</p>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#cgroup-v2-errors-during-onboard">Cgroup v2 errors during onboard</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#cluster-fails-with-overlayfs-snapshotter-cannot-be-enabled-on-docker-26">Cluster fails with <code class="docutils literal notranslate"><span class="pre">overlayfs</span> <span class="pre">snapshotter</span> <span class="pre">cannot</span> <span class="pre">be</span> <span class="pre">enabled</span></code> on Docker 26+</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#openshell-version-above-maximum">OpenShell version above maximum</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#sandbox-containers-cannot-reach-the-gateway">Sandbox containers cannot reach the gateway</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#invalid-sandbox-name">Invalid sandbox name</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#sandbox-creation-fails-on-dgx">Sandbox creation fails on DGX</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#colima-socket-not-detected-macos">Colima socket not detected (macOS)</a></li>
@@ -1549,6 +1610,7 @@ To install a skill dependency, add it to the sandbox image and rebuild:</p>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#agent-cannot-reach-an-external-host">Agent cannot reach an external host</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#dashboard-not-reachable-after-setting-a-custom-port">Dashboard not reachable after setting a custom port</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#ollama-auth-proxy-did-not-start">Ollama auth proxy did not start</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#ollama-auth-proxy-is-unreachable-from-the-sandbox">Ollama auth proxy is unreachable from the sandbox</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#local-inference-health-check-resolves-to-ipv6">Local inference health check resolves to IPv6</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#blueprint-run-failed">Blueprint run failed</a></li>
 </ul>
@@ -1558,6 +1620,7 @@ To install a skill dependency, add it to the sandbox image and rebuild:</p>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#k3s-cannot-find-a-freshly-built-image"><code class="docutils literal notranslate"><span class="pre">k3s</span></code> cannot find a freshly built image</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#gpu-passthrough-on-spark">GPU passthrough on Spark</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#unresolvable-cdi-devices-nvidia-com-gpu-all-during-gateway-start"><code class="docutils literal notranslate"><span class="pre">unresolvable</span> <span class="pre">CDI</span> <span class="pre">devices</span> <span class="pre">nvidia.com/gpu=all</span></code> during gateway start</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#docker-gpu-patch-failed-during-sandbox-create">Docker GPU patch failed during sandbox create</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pip-install-fails-with-a-system-packages-error"><code class="docutils literal notranslate"><span class="pre">pip</span> <span class="pre">install</span></code> fails with a system-packages error</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#port-3000-conflict-with-ai-workbench">Port 3000 conflict with AI Workbench</a></li>
 </ul>
