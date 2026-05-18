@@ -1,0 +1,829 @@
+
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Runtime Controls and Sandbox Mutability &#8212; NVIDIA NemoClaw Developer Guide</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  <!--
+    this give us a css class that will be invisible only if js is disabled
+  -->
+  <noscript>
+    <style>
+      .pst-js-only { display: none !important; }
+
+    </style>
+  </noscript>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../_static/styles/theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
+<link href="../_static/styles/pydata-sphinx-theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
+
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="../_static/styles/nvidia-sphinx-theme.css?v=933278ad" />
+    <link rel="stylesheet" type="text/css" href="../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../_static/enhanced-search.css?v=ef2c6a0b" />
+    <link rel="stylesheet" type="text/css" href="../_static/sphinx-design.min.css?v=95c83b7e" />
+  
+  <!-- So that users can add custom icons -->
+  <script src="../_static/scripts/fontawesome.js?digest=8878045cc6db502f8baf"></script>
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf" />
+<link rel="preload" as="script" href="../_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf" />
+
+
+
+    <script src="../_static/documentation_options.js?v=770d0c87"></script>
+    <script src="../_static/doctools.js?v=9a2dae69"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../_static/copybutton.js?v=6dbb43f8"></script>
+    <script src="../_static/search-assets.bundle.js?v=ea7bf99c"></script>
+    <script src="../_static/design-tabs.js?v=f930bc37"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'manage-sandboxes/runtime-controls';</script>
+    <script>
+        DOCUMENTATION_OPTIONS.theme_version = '0.16.1';
+        DOCUMENTATION_OPTIONS.theme_switcher_json_url = '../versions1.json';
+        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.0.44';
+        DOCUMENTATION_OPTIONS.show_version_warning_banner =
+            false;
+        </script>
+
+    <link rel="canonical" href="https://docs.nvidia.com/nemoclaw/latest/manage-sandboxes/runtime-controls.html" />
+    <link rel="icon" href="../_static/favicon.png"/>
+
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Messaging Channels" href="messaging-channels.html" />
+    <link rel="prev" title="Manage Sandbox Lifecycle" href="lifecycle.html" />
+
+
+
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  <meta name="docsearch:version" content="" />
+
+
+<script src="https://assets.adobedtm.com/5d4962a43b79/c1061d2c5e7b/launch-191c2462b890.min.js"></script>
+
+  </head>
+
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+
+
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <dialog id="pst-search-dialog">
+    
+<form class="bd-search d-flex align-items-center"
+      action="../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         placeholder="Search the docs ..."
+         aria-label="Search the docs ..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form>
+  </dialog>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+<aside class="bd-header-announcement" aria-label="Announcement">
+  <div class="bd-header-announcement__content">&#x1F514; NVIDIA NemoClaw is <strong>alpha software</strong>. APIs and behavior may change without notice. Do not use in production.</div>
+</aside>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+<div class="bd-header__inner bd-page-width">
+  <button class="pst-navbar-icon sidebar-toggle primary-toggle" aria-label="Site navigation">
+    <span class="fa-solid fa-bars"></span>
+  </button>
+  
+  
+  <div class="col-lg-3 navbar-header-items__start">
+    
+      <div class="navbar-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../index.html">
+  
+  
+  
+  
+  
+    
+    
+      
+    
+    
+    <img src="../_static/nvidia-logo-horiz-rgb-blk-for-screen.svg" class="logo__image only-light" alt="NVIDIA NemoClaw Developer Guide - Home"/>
+    <img src="../_static/nvidia-logo-horiz-rgb-wht-for-screen.svg" class="logo__image only-dark pst-js-only" alt="NVIDIA NemoClaw Developer Guide - Home"/>
+  
+  
+    <p class="title logo__title">NVIDIA NemoClaw Developer Guide</p>
+  
+</a></div>
+    
+  </div>
+  
+  <div class="col-lg-9 navbar-header-items">
+    
+    <div class="me-auto navbar-header-items__center">
+      
+        <div class="navbar-item">
+
+
+<div class="version-switcher__container dropdown pst-js-only">
+  <button id="pst-version-switcher-button-2"
+    type="button"
+    class="version-switcher__button btn btn-sm dropdown-toggle"
+    data-bs-toggle="dropdown"
+    aria-haspopup="listbox"
+    aria-controls="pst-version-switcher-list-2"
+    aria-label="Version switcher list"
+  >
+    Choose version  <!-- this text may get changed later by javascript -->
+    <span class="caret"></span>
+  </button>
+  <div id="pst-version-switcher-list-2"
+    class="version-switcher__menu dropdown-menu list-group-flush py-0"
+    role="listbox" aria-labelledby="pst-version-switcher-button-2">
+    <!-- dropdown will be populated by javascript on page load -->
+  </div>
+</div></div>
+      
+    </div>
+    
+    
+    <div class="navbar-header-items__end">
+      
+        <div class="navbar-item navbar-persistent--container">
+          
+
+<button class="btn search-button-field search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <i class="fa-solid fa-magnifying-glass"></i>
+ <span class="search-button__default-text">Search</span>
+ <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+</button>
+        </div>
+      
+      
+        <div class="navbar-item">
+
+<button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button pst-js-only" aria-label="Color mode" data-bs-title="Color mode"  data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <i class="theme-switch fa-solid fa-sun                fa-lg" data-mode="light" title="Light"></i>
+  <i class="theme-switch fa-solid fa-moon               fa-lg" data-mode="dark"  title="Dark"></i>
+  <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"  title="System Settings"></i>
+</button></div>
+      
+        <div class="navbar-item"><ul class="navbar-icon-links"
+    aria-label="Icon Links">
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://github.com/NVIDIA/NemoClaw" title="NemoClaw GitHub" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-github fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">NemoClaw GitHub</span></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://discord.gg/XFpfPv9Uvx" title="NemoClaw Discord" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-discord fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">NemoClaw Discord</span></a>
+        </li>
+</ul></div>
+      
+    </div>
+    
+  </div>
+  
+  
+    <div class="navbar-persistent--mobile">
+
+<button class="btn search-button-field search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <i class="fa-solid fa-magnifying-glass"></i>
+ <span class="search-button__default-text">Search</span>
+ <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+</button>
+    </div>
+  
+
+  
+    <button class="pst-navbar-icon sidebar-toggle secondary-toggle" aria-label="On this page">
+      <span class="fa-solid fa-outdent"></span>
+    </button>
+  
+</div>
+
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <dialog id="pst-primary-sidebar-modal"></dialog>
+      <div id="pst-primary-sidebar" class="bd-sidebar-primary bd-sidebar">
+        
+
+
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../index.html">
+  
+  
+  
+  
+  
+    
+    
+      
+    
+    
+    <img src="../_static/nvidia-logo-horiz-rgb-blk-for-screen.svg" class="logo__image only-light" alt="NVIDIA NemoClaw Developer Guide - Home"/>
+    <img src="../_static/nvidia-logo-horiz-rgb-wht-for-screen.svg" class="logo__image only-dark pst-js-only" alt="NVIDIA NemoClaw Developer Guide - Home"/>
+  
+  
+    <p class="title logo__title">NVIDIA NemoClaw Developer Guide</p>
+  
+</a>
+
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+      <div class="sidebar-header-items__center">
+        
+          
+          
+            <div class="navbar-item">
+
+
+<div class="version-switcher__container dropdown pst-js-only">
+  <button id="pst-version-switcher-button-3"
+    type="button"
+    class="version-switcher__button btn btn-sm dropdown-toggle"
+    data-bs-toggle="dropdown"
+    aria-haspopup="listbox"
+    aria-controls="pst-version-switcher-list-3"
+    aria-label="Version switcher list"
+  >
+    Choose version  <!-- this text may get changed later by javascript -->
+    <span class="caret"></span>
+  </button>
+  <div id="pst-version-switcher-list-3"
+    class="version-switcher__menu dropdown-menu list-group-flush py-0"
+    role="listbox" aria-labelledby="pst-version-switcher-button-3">
+    <!-- dropdown will be populated by javascript on page load -->
+  </div>
+</div></div>
+          
+        
+      </div>
+    
+    
+    
+      <div class="sidebar-header-items__end">
+        
+          <div class="navbar-item">
+
+<button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button pst-js-only" aria-label="Color mode" data-bs-title="Color mode"  data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <i class="theme-switch fa-solid fa-sun                fa-lg" data-mode="light" title="Light"></i>
+  <i class="theme-switch fa-solid fa-moon               fa-lg" data-mode="dark"  title="Dark"></i>
+  <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"  title="System Settings"></i>
+</button></div>
+        
+          <div class="navbar-item"><ul class="navbar-icon-links"
+    aria-label="Icon Links">
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://github.com/NVIDIA/NemoClaw" title="NemoClaw GitHub" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-github fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">NemoClaw GitHub</span></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://discord.gg/XFpfPv9Uvx" title="NemoClaw Discord" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-discord fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">NemoClaw Discord</span></a>
+        </li>
+</ul></div>
+        
+      </div>
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+
+
+<nav class="bd-docs-nav bd-links"
+     aria-label="Table of Contents">
+  <p class="bd-links__title" role="heading" aria-level="1">Table of Contents</p>
+  <div class="bd-toc-item navbar-nav"><p aria-level="2" class="caption" role="heading"><span class="caption-text">About NemoClaw</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../about/overview.html">Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../about/how-it-works.html">Architecture Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../about/ecosystem.html">Ecosystem</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../about/release-notes.html">Release Notes</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Get Started</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="../get-started/prerequisites.html">Prerequisites</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../get-started/windows-preparation.html">(Windows Only) Windows Prerequisites</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../get-started/quickstart.html">Quickstart with OpenClaw</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../get-started/quickstart-hermes.html">Quickstart with Hermes</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Inference</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../inference/inference-options.html">Inference Options</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../inference/use-local-inference.html">Use Local Inference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../inference/tool-calling-reliability.html">Tool-Calling Reliability</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../inference/switch-inference-providers.html">Switch Inference Providers</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../inference/set-up-sub-agent.html">Set Up Task-Specific Sub-Agents</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Manage Sandboxes</span></p>
+<ul class="current nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="lifecycle.html">Manage Sandbox Lifecycle</a></li>
+<li class="toctree-l1 current active"><a class="current reference internal" href="#">Runtime Controls</a></li>
+<li class="toctree-l1"><a class="reference internal" href="messaging-channels.html">Set Up Messaging Channels</a></li>
+<li class="toctree-l1"><a class="reference internal" href="workspace-files.html">Workspace Files</a></li>
+<li class="toctree-l1"><a class="reference internal" href="backup-restore.html">Backup and Restore</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Network Policy</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../network-policy/approve-network-requests.html">Approve or Deny Network Requests</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../network-policy/customize-network-policy.html">Customize the Network Policy</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../network-policy/integration-policy-examples.html">Integration Policy Examples</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Deployment</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../deployment/deploy-to-remote-gpu.html">Deploy to a Remote GPU Instance</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../deployment/brev-web-ui.html">Brev Web UI</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../deployment/install-openclaw-plugins.html">Install OpenClaw Plugins</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../deployment/sandbox-hardening.html">Sandbox Hardening</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Monitoring</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../monitoring/monitor-sandbox-activity.html">Monitor Sandbox Activity</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Security</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../security/best-practices.html">Security Best Practices</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../security/credential-storage.html">Credential Storage</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../security/openclaw-controls.html">OpenClaw Controls</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Reference</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../reference/architecture.html">Architecture</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../reference/commands.html">CLI Commands Reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../reference/cli-selection-guide.html">CLI Selection Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../reference/network-policies.html">Network Policies</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../reference/troubleshooting.html">Troubleshooting</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Resources</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../resources/agent-skills.html">Agent Skills</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://github.com/NVIDIA/NemoClaw/blob/main/SECURITY.md">Report Vulnerabilities</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../resources/license.html">License</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://discord.gg/XFpfPv9Uvx">Discord</a></li>
+</ul>
+</div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item">
+
+<nav aria-label="Breadcrumb" class="d-print-none">
+  <ul class="bd-breadcrumbs">
+    
+    <li class="breadcrumb-item breadcrumb-home">
+      <a href="../index.html" class="nav-link" aria-label="Home">
+        <i class="fa-solid fa-home"></i>
+      </a>
+    </li>
+    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">Runtime Controls and Sandbox Mutability</span></li>
+  </ul>
+</nav>
+</div>
+      
+    </div>
+  
+  
+</div>
+</div>
+              
+              
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <!--
+  SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+  SPDX-License-Identifier: Apache-2.0
+-->
+<section class="tex2jax_ignore mathjax_ignore" id="runtime-controls-and-sandbox-mutability">
+<h1>Runtime Controls and Sandbox Mutability<a class="headerlink" href="#runtime-controls-and-sandbox-mutability" title="Link to this heading">#</a></h1>
+<p>This page is the single reference for two related operator questions about a running NemoClaw sandbox:</p>
+<ol class="arabic simple">
+<li><p><em>Which parts of my sandbox can I change while it is running, and which require a rebuild or re-onboard?</em></p></li>
+<li><p><em>How do I temporarily lower or restore the sandbox security posture for an operator session?</em></p></li>
+</ol>
+<p>The mutability table below answers question 1.
+The shields commands answer question 2.</p>
+<section id="what-you-can-change-at-runtime">
+<h2>What you can change at runtime<a class="headerlink" href="#what-you-can-change-at-runtime" title="Link to this heading">#</a></h2>
+<p>NemoClaw applies its security posture in three layers — what is baked into the sandbox image at onboard, what is hot-reloadable on the running sandbox, and what requires a rebuild or re-onboard.
+The table below maps each commonly changed item to the layer that owns it and the command that changes it.</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Item</p></th>
+<th class="head"><p>When the change takes effect</p></th>
+<th class="head"><p>How to change it</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Inference provider (cloud, NVIDIA Endpoints, local Ollama / vLLM, compatible-endpoint, …)</p></td>
+<td><p>Rebuild required (<code class="docutils literal notranslate"><span class="pre">openclaw.json</span></code> is locked at sandbox creation)</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">&lt;name&gt;</span> <span class="pre">rebuild</span></code> after picking a different provider via <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">inference</span> <span class="pre">set</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p>Inference model on the current provider</p></td>
+<td><p>Rebuild required for OpenClaw; hot-reloadable for managed routers</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">&lt;name&gt;</span> <span class="pre">rebuild</span></code> (OpenClaw) or <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">inference</span> <span class="pre">set</span></code> (router-based)</p></td>
+</tr>
+<tr class="row-even"><td><p>Sub-agent (Hermes / OpenClaw / …)</p></td>
+<td><p>Re-onboard required (the sub-agent and its workspace are baked at onboard)</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span> <span class="pre">--recreate-sandbox</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p>Network policy preset (slack, discord, telegram, brave, …)</p></td>
+<td><p>Runtime — applies on the next request; rebuild only required if the preset adds bind-mounted secrets</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">&lt;name&gt;</span> <span class="pre">policy-add</span> <span class="pre">&lt;preset&gt;</span></code> / <code class="docutils literal notranslate"><span class="pre">policy-remove</span> <span class="pre">&lt;preset&gt;</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p>Network allow-list (custom hosts)</p></td>
+<td><p>Runtime — picks up at next request</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">openshell</span> <span class="pre">policy</span> <span class="pre">set</span></code> or interactive approval prompt at the gateway</p></td>
+</tr>
+<tr class="row-odd"><td><p>Channel tokens (Slack / Discord / Telegram bot credentials)</p></td>
+<td><p>Rebuild required (tokens are baked into the sandbox image at onboard so they never leave the host clear-text)</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">&lt;name&gt;</span> <span class="pre">channels</span> <span class="pre">add</span> <span class="pre">&lt;channel&gt;</span></code> then accept the rebuild prompt</p></td>
+</tr>
+<tr class="row-even"><td><p>Channel enable/disable (turn a configured channel off without removing the token)</p></td>
+<td><p>Rebuild required (<code class="docutils literal notranslate"><span class="pre">openclaw.json</span></code> is the source of truth at runtime, see #3453)</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">&lt;name&gt;</span> <span class="pre">channels</span> <span class="pre">stop</span> <span class="pre">&lt;channel&gt;</span></code> then rebuild</p></td>
+</tr>
+<tr class="row-odd"><td><p>Dashboard forward port</p></td>
+<td><p>Runtime — port is re-resolved on next <code class="docutils literal notranslate"><span class="pre">connect</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_DASHBOARD_PORT=&lt;port&gt;</span> <span class="pre">nemoclaw</span> <span class="pre">&lt;name&gt;</span> <span class="pre">connect</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p>Dashboard bind address (loopback vs all interfaces)</p></td>
+<td><p>Runtime — applies on next <code class="docutils literal notranslate"><span class="pre">connect</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">NEMOCLAW_DASHBOARD_BIND=0.0.0.0</span> <span class="pre">nemoclaw</span> <span class="pre">&lt;name&gt;</span> <span class="pre">connect</span></code> (see #3259)</p></td>
+</tr>
+<tr class="row-odd"><td><p>Web search backend (Brave, Tavily, etc.)</p></td>
+<td><p>Runtime via <code class="docutils literal notranslate"><span class="pre">web.backend</span></code> config flag; rebuild only if <code class="docutils literal notranslate"><span class="pre">web.fetchEnabled</span></code> flips</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">&lt;name&gt;</span> <span class="pre">config</span> <span class="pre">set</span> <span class="pre">--key</span> <span class="pre">web.backend</span> <span class="pre">--value</span> <span class="pre">tavily</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p>Filesystem layout (Landlock zones, read-only mounts, container caps)</p></td>
+<td><p><strong>Locked at creation</strong> — no runtime change</p></td>
+<td><p>Re-onboard with <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">onboard</span> <span class="pre">--recreate-sandbox</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p>Sandbox name</p></td>
+<td><p><strong>Locked at creation</strong></p></td>
+<td><p>Re-onboard with a different <code class="docutils literal notranslate"><span class="pre">--name</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p>GPU passthrough enable / device selector</p></td>
+<td><p><strong>Locked at creation</strong></p></td>
+<td><p>Re-onboard with <code class="docutils literal notranslate"><span class="pre">--gpu</span></code> / <code class="docutils literal notranslate"><span class="pre">--sandbox-gpu-device</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p>Shields posture (locked ↔ default mutable)</p></td>
+<td><p>Runtime (operator-only)</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">&lt;name&gt;</span> <span class="pre">shields</span> <span class="pre">up</span></code> / <code class="docutils literal notranslate"><span class="pre">shields</span> <span class="pre">down</span></code> — see the next section</p></td>
+</tr>
+<tr class="row-even"><td><p>Agents allow-list (<code class="docutils literal notranslate"><span class="pre">agents.list</span></code> in <code class="docutils literal notranslate"><span class="pre">openclaw.json</span></code>)</p></td>
+<td><p>Runtime — hot-reloaded by OpenClaw on config change</p></td>
+<td><p>Edit <code class="docutils literal notranslate"><span class="pre">openclaw.json</span></code> while shields are down</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">openclaw.json</span></code> keys (general — model, agents.list, web.backend, channel config, etc.)</p></td>
+<td><p>Mixed: locked under <code class="docutils literal notranslate"><span class="pre">shields</span> <span class="pre">up</span></code>, runtime-editable under <code class="docutils literal notranslate"><span class="pre">shields</span> <span class="pre">down</span></code>. Individual keys still follow the rebuild rules in the rows above (e.g. provider switch requires rebuild even after editing the JSON).</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">&lt;name&gt;</span> <span class="pre">shields</span> <span class="pre">down</span></code>, edit <code class="docutils literal notranslate"><span class="pre">/opt/nemoclaw/openclaw.json</span></code> inside the sandbox, then <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">&lt;name&gt;</span> <span class="pre">shields</span> <span class="pre">up</span></code></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>If a row above conflicts with what you observe, the runtime source of truth inside the sandbox is <code class="docutils literal notranslate"><span class="pre">/opt/nemoclaw/openclaw.json</span></code>; the host registry caches metadata but the image and OpenClaw read from the in-sandbox file.</p>
+</section>
+<section id="shields-commands">
+<h2>Shields commands<a class="headerlink" href="#shields-commands" title="Link to this heading">#</a></h2>
+<p>Shields are an operator-only switch that toggles the sandbox between its default mutable state and a locked-down posture.
+The sandbox itself cannot raise or lower its own shields — every transition is initiated from the host so a compromised agent cannot escape its policy by editing config.</p>
+<p>Three commands manage the posture.
+The commands are hidden from the standard <code class="docutils literal notranslate"><span class="pre">--help</span></code> output because they are operator workflows, not developer workflows; everything below documents the full surface.</p>
+<section id="shields-status">
+<h3><code class="docutils literal notranslate"><span class="pre">shields</span> <span class="pre">status</span></code><a class="headerlink" href="#shields-status" title="Link to this heading">#</a></h3>
+<p>Print the current shields mode (<code class="docutils literal notranslate"><span class="pre">mutable_default</span></code>, <code class="docutils literal notranslate"><span class="pre">locked</span></code>, or <code class="docutils literal notranslate"><span class="pre">temporarily_unlocked</span></code>), the active policy preset, and any pending automatic restore timer.</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>nemoclaw<span class="w"> </span>my-assistant<span class="w"> </span>shields<span class="w"> </span>status
+<span class="go">Shields:   locked</span>
+<span class="go">Policy:    strict</span>
+<span class="go">Auto-restore: not scheduled (use `shields down --timeout 10m` to schedule)</span>
+</pre></div>
+</div>
+</section>
+<section id="shields-up">
+<h3><code class="docutils literal notranslate"><span class="pre">shields</span> <span class="pre">up</span></code><a class="headerlink" href="#shields-up" title="Link to this heading">#</a></h3>
+<p>Raise shields: lock <code class="docutils literal notranslate"><span class="pre">openclaw.json</span></code> (and other mutable config files) against in-sandbox edits and apply the restrictive network policy that was captured the last time the sandbox was shielded.
+This is the default expected state for a sandbox the operator has handed off to an agent.</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>nemoclaw<span class="w"> </span>my-assistant<span class="w"> </span>shields<span class="w"> </span>up
+<span class="go">✓ Shields raised: config locked, restrictive policy applied</span>
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">shields</span> <span class="pre">up</span></code> takes no flags.
+If no saved snapshot exists yet (a fresh sandbox), the snapshot is taken from the current state.</p>
+</section>
+<section id="shields-down">
+<h3><code class="docutils literal notranslate"><span class="pre">shields</span> <span class="pre">down</span></code><a class="headerlink" href="#shields-down" title="Link to this heading">#</a></h3>
+<p>Lower shields: unlock config and apply a permissive (or operator-named) network policy so the operator can edit <code class="docutils literal notranslate"><span class="pre">openclaw.json</span></code>, swap presets, or run interactive maintenance.</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>nemoclaw<span class="w"> </span>my-assistant<span class="w"> </span>shields<span class="w"> </span>down<span class="w"> </span>--timeout<span class="w"> </span>10m<span class="w"> </span>--reason<span class="w"> </span><span class="s2">&quot;rotating slack token&quot;</span>
+<span class="go">✓ Shields lowered for 10m (policy: permissive); auto-restore at 14:32 UTC</span>
+</pre></div>
+</div>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Flag</p></th>
+<th class="head"><p>Default</p></th>
+<th class="head"><p>Effect</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--timeout</span> <span class="pre">&lt;duration&gt;</span></code></p></td>
+<td><p><em>no auto-restore</em></p></td>
+<td><p>After the duration elapses, a detached host-side timer re-runs <code class="docutils literal notranslate"><span class="pre">shields</span> <span class="pre">up</span></code> automatically. Accepts <code class="docutils literal notranslate"><span class="pre">5m</span></code>, <code class="docutils literal notranslate"><span class="pre">30s</span></code>, <code class="docutils literal notranslate"><span class="pre">1h</span></code>, etc.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--reason</span> <span class="pre">&lt;text&gt;</span></code></p></td>
+<td><p><em>empty</em></p></td>
+<td><p>Recorded in the shields audit log on the host. Required by some org policies; recommended for any cross-team session.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--policy</span> <span class="pre">&lt;name&gt;</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">permissive</span></code></p></td>
+<td><p>Apply this named policy preset while shields are down instead of the default permissive set. Use a tighter preset (e.g. <code class="docutils literal notranslate"><span class="pre">messaging-only</span></code>) when the maintenance window only needs a subset of egress.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>The auto-restore timer is detached from the <code class="docutils literal notranslate"><span class="pre">shields</span> <span class="pre">down</span></code> invocation — closing your terminal does not cancel the restore.
+If the timer process is killed before the deadline (e.g. host reboot), <code class="docutils literal notranslate"><span class="pre">shields</span> <span class="pre">status</span></code> will surface the inconsistency on the next check (see #3112 for the fail-open fix).</p>
+</section>
+</section>
+<section id="see-also">
+<h2>See also<a class="headerlink" href="#see-also" title="Link to this heading">#</a></h2>
+<p>The mutability table above is a consolidated index of information that lives in more detail on per-topic pages:</p>
+<ul class="simple">
+<li><p><a class="reference internal" href="lifecycle.html"><span class="std std-doc">Manage Sandbox Lifecycle</span></a> — full rebuild / re-onboard / upgrade workflow.</p></li>
+<li><p><a class="reference internal" href="../inference/switch-inference-providers.html"><span class="std std-doc">Switch Inference Providers</span></a> — the rebuild path for provider and model changes.</p></li>
+<li><p><a class="reference internal" href="../network-policy/customize-network-policy.html"><span class="std std-doc">Customize Network Policy</span></a> and <a class="reference internal" href="../network-policy/approve-network-requests.html"><span class="std std-doc">Approve Network Requests</span></a> — runtime policy editing and operator approval flow.</p></li>
+<li><p><a class="reference internal" href="../security/best-practices.html"><span class="std std-doc">Security Best Practices</span></a> — the per-attack-surface posture table that this page complements.</p></li>
+<li><p><a class="reference internal" href="../security/openclaw-controls.html"><span class="std std-doc">OpenClaw Security Controls</span></a> — application-layer controls that operate independently of NemoClaw.</p></li>
+<li><p><a class="reference internal" href="../reference/commands.html"><span class="std std-doc">CLI Commands Reference</span></a> — full flag surface for every <code class="docutils literal notranslate"><span class="pre">nemoclaw</span></code> command, including the env vars that affect runtime behavior.</p></li>
+</ul>
+</section>
+</section>
+
+
+                </article>
+              
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="lifecycle.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">Manage Sandbox Lifecycle</p>
+      </div>
+    </a>
+    <a class="right-next"
+       href="messaging-channels.html"
+       title="next page">
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">Messaging Channels</p>
+      </div>
+      <i class="fa-solid fa-angle-right"></i>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+
+
+              
+                <dialog id="pst-secondary-sidebar-modal"></dialog>
+                <div id="pst-secondary-sidebar" class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item">
+<div
+    id="pst-page-navigation-heading-2"
+    class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> On this page
+  </div>
+  <nav class="bd-toc-nav page-toc" aria-labelledby="pst-page-navigation-heading-2">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#what-you-can-change-at-runtime">What you can change at runtime</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#shields-commands">Shields commands</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#shields-status"><code class="docutils literal notranslate"><span class="pre">shields</span> <span class="pre">status</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#shields-up"><code class="docutils literal notranslate"><span class="pre">shields</span> <span class="pre">up</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#shields-down"><code class="docutils literal notranslate"><span class="pre">shields</span> <span class="pre">down</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#see-also">See also</a></li>
+</ul>
+  </nav></div>
+
+</div></div>
+              
+            
+
+          </div>
+          <footer class="bd-footer-content">
+            
+          </footer>
+        
+      </main>
+    </div>
+  </div>
+  
+
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script defer src="../_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf"></script>
+<script defer src="../_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf"></script>
+
+
+
+  <footer class="bd-footer">
+<div class="bd-footer__inner bd-page-width">
+  
+    <div class="footer-items__start">
+      
+        <div class="footer-item">
+<a class="footer-brand logo" href="https://www.nvidia.com">
+  <img src="../_static/nvidia-logo-horiz-rgb-1c-blk-for-screen.svg" class="logo__image only-light" alt="NVIDIA"/>
+  <img src="../_static/nvidia-logo-horiz-rgb-1c-wht-for-screen.svg" class="logo__image only-dark" alt="NVIDIA"/>
+</a></div>
+      
+        <div class="footer-item">
+
+<div class="footer-links">
+  
+  
+  <a class="external" href="https://www.nvidia.com/en-us/about-nvidia/privacy-policy/">Privacy Policy</a>
+   | 
+  
+  
+  
+  <a class="external" href="https://www.nvidia.com/en-us/about-nvidia/privacy-center/">Your Privacy Choices</a>
+   | 
+  
+  
+  
+  <a class="external" href="https://www.nvidia.com/en-us/about-nvidia/terms-of-service/">Terms of Service</a>
+   | 
+  
+  
+  
+  <a class="external" href="https://www.nvidia.com/en-us/about-nvidia/accessibility/">Accessibility</a>
+   | 
+  
+  
+  
+  <a class="external" href="https://www.nvidia.com/en-us/about-nvidia/company-policies/">Corporate Policies</a>
+   | 
+  
+  
+  
+  <a class="external" href="https://www.nvidia.com/en-us/product-security/">Product Security</a>
+   | 
+  
+  
+  
+  <a class="external" href="https://www.nvidia.com/en-us/contact/">Contact</a>
+  
+  
+  
+</div>
+</div>
+      
+        <div class="footer-item">
+
+
+
+
+  <p class="copyright">
+    
+      Copyright © 2026, NVIDIA Corporation.
+      <br/>
+    
+  </p>
+</div>
+      
+    </div>
+  
+  
+  
+</div>
+
+  </footer>
+<script type="text/javascript">if (typeof _satellite !== "undefined") {_satellite.pageBottom();}</script>
+
+  </body>
+</html>
