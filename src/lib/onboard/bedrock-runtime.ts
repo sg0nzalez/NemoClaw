@@ -118,7 +118,8 @@ export async function setupBedrockRuntimeInference(options: {
       : null;
   if (classification?.kind !== "bedrock-runtime") return { handled: false };
 
-  const compatibleCredential = getExplicitCompatibleCredential(options.credentialEnv);
+  const credentialEnv = options.credentialEnv || BEDROCK_RUNTIME_COMPATIBLE_CREDENTIAL_ENV;
+  const compatibleCredential = getExplicitCompatibleCredential(credentialEnv);
   if (!hasBedrockRuntimeAwsAuthEnv() && !compatibleCredential) {
     printMissingBedrockAuth();
     if (options.isNonInteractive()) process.exit(1);
