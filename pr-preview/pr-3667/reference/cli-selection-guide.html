@@ -589,12 +589,12 @@ Run <code class="docutils literal notranslate"><span class="pre">nemoclaw</span>
 </pre></div>
 </div>
 </li>
-<li><p>Run one-off commands or move files without starting a NemoClaw chat session:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>openshell<span class="w"> </span>sandbox<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>-n<span class="w"> </span>&lt;sandbox-name&gt;<span class="w"> </span>--<span class="w"> </span>ls<span class="w"> </span>-la<span class="w"> </span>/sandbox
-<span class="gp">$ </span>openshell<span class="w"> </span>sandbox<span class="w"> </span>upload<span class="w"> </span>&lt;sandbox-name&gt;<span class="w"> </span>./local-file<span class="w"> </span>/sandbox/
+<li><p>Move files between the host and a sandbox without starting a NemoClaw chat session:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>openshell<span class="w"> </span>sandbox<span class="w"> </span>upload<span class="w"> </span>&lt;sandbox-name&gt;<span class="w"> </span>./local-file<span class="w"> </span>/sandbox/
 <span class="gp">$ </span>openshell<span class="w"> </span>sandbox<span class="w"> </span>download<span class="w"> </span>&lt;sandbox-name&gt;<span class="w"> </span>/sandbox/output<span class="w"> </span>./output
 </pre></div>
 </div>
+<p>For one-off commands, use <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">&lt;name&gt;</span> <span class="pre">exec</span></code> instead — it runs as the sandbox user (HOME=/sandbox) and finds NemoClaw-provisioned config that raw <code class="docutils literal notranslate"><span class="pre">openshell</span> <span class="pre">sandbox</span> <span class="pre">exec</span></code> (or <code class="docutils literal notranslate"><span class="pre">docker</span> <span class="pre">exec</span></code>) can miss.</p>
 </li>
 <li><p>Inspect or replace raw OpenShell policy:</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>openshell<span class="w"> </span>policy<span class="w"> </span>get<span class="w"> </span>--full<span class="w"> </span>&lt;sandbox-name&gt;<span class="w"> </span>&gt;<span class="w"> </span>live-policy.yaml
