@@ -273,7 +273,7 @@
           "text": "B11: Bedrock Runtime adapter host log was not written",
           "polarity": "fail",
           "normalized_id": "b11.bedrock.runtime.adapter.host.log.was.not.written",
-          "mapping_status": "unmapped"
+          "mapping_status": "deferred"
         },
         {
           "script": "test/e2e/test-bedrock-runtime-compatible-anthropic.sh",
@@ -281,7 +281,7 @@
           "text": "B11: Bedrock Runtime adapter host log records safe Converse and ConverseStream breadcrumbs",
           "polarity": "pass",
           "normalized_id": "b11.bedrock.runtime.adapter.host.log.records.safe.converse.and.conversestream.breadcrumbs",
-          "mapping_status": "unmapped"
+          "mapping_status": "deferred"
         },
         {
           "script": "test/e2e/test-bedrock-runtime-compatible-anthropic.sh",
@@ -289,7 +289,7 @@
           "text": "B11: Bedrock Runtime adapter host log did not record a ConverseStream breadcrumb",
           "polarity": "fail",
           "normalized_id": "b11.bedrock.runtime.adapter.host.log.did.not.record.a.conversestream.breadcrumb",
-          "mapping_status": "unmapped"
+          "mapping_status": "deferred"
         },
         {
           "script": "test/e2e/test-bedrock-runtime-compatible-anthropic.sh",
@@ -297,7 +297,7 @@
           "text": "B11: Bedrock Runtime adapter host log records safe Converse breadcrumbs",
           "polarity": "pass",
           "normalized_id": "b11.bedrock.runtime.adapter.host.log.records.safe.converse.breadcrumbs",
-          "mapping_status": "unmapped"
+          "mapping_status": "deferred"
         },
         {
           "script": "test/e2e/test-bedrock-runtime-compatible-anthropic.sh",
@@ -305,7 +305,7 @@
           "text": "B11: Bedrock Runtime adapter host log did not record expected request breadcrumbs",
           "polarity": "fail",
           "normalized_id": "b11.bedrock.runtime.adapter.host.log.did.not.record.expected.request.breadcrumbs",
-          "mapping_status": "unmapped"
+          "mapping_status": "deferred"
         },
         {
           "script": "test/e2e/test-bedrock-runtime-compatible-anthropic.sh",
@@ -321,7 +321,7 @@
           "text": "B12: sandbox configs, env, proc, and logs contain no Bedrock token or hostname leaks",
           "polarity": "pass",
           "normalized_id": "b12.sandbox.configs.env.proc.and.logs.contain.no.bedrock.token.or.hostname.leaks",
-          "mapping_status": "unmapped"
+          "mapping_status": "deferred"
         },
         {
           "script": "test/e2e/test-bedrock-runtime-compatible-anthropic.sh",
@@ -329,7 +329,7 @@
           "text": "B12: leak scan found forbidden Bedrock token or hostname locations",
           "polarity": "fail",
           "normalized_id": "b12.leak.scan.found.forbidden.bedrock.token.or.hostname.locations",
-          "mapping_status": "unmapped"
+          "mapping_status": "deferred"
         },
         {
           "script": "test/e2e/test-bedrock-runtime-compatible-anthropic.sh",
