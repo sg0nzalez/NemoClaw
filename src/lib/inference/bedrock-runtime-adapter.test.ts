@@ -244,6 +244,33 @@ describe("Bedrock Runtime OpenAI adapter", () => {
     expect(body.error.message).toContain("Unsupported OpenAI chat field");
   });
 
+  it("exposes loopback health without leaking or requiring the adapter bearer token", async () => {
+    const server = createBedrockRuntimeAdapterServer({
+      token: "local-token",
+      endpointUrl: "https://bedrock-runtime.us-east-1.amazonaws.com",
+      region: "us-east-1",
+      client: { send: vi.fn() },
+    });
+    const baseUrl = await listen(server);
+
+    const health = await fetch(`${baseUrl}/health`);
+    expect(health.status).toBe(200);
+    const body = (await health.json()) as any;
+    expect(body.ok).toBe(true);
+    expect(body.tokenHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(JSON.stringify(body)).not.toContain("local-token");
+
+    const chat = await fetch(`${baseUrl}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "anthropic.claude",
+        messages: [{ role: "user", content: "hello" }],
+      }),
+    });
+    expect(chat.status).toBe(401);
+  });
+
   it("maps Bedrock auth and region failures to adapter errors", async () => {
     const server = createBedrockRuntimeAdapterServer({
       token: "local-token",

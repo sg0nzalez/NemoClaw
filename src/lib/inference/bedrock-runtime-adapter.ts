@@ -658,6 +658,10 @@ function authMatches(actual: string | string[] | undefined, token: string): bool
   return received.length === expected.length && crypto.timingSafeEqual(received, expected);
 }
 
+function adapterTokenHash(token: string): string {
+  return crypto.createHash("sha256").update(token).digest("hex");
+}
+
 function sendJson(res: http.ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { "Content-Type": "application/json" });
   res.end(JSON.stringify(body));
@@ -715,17 +719,18 @@ export function createBedrockRuntimeAdapterServer(options: {
   return http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url || "/", "http://127.0.0.1");
-      if (!authMatches(req.headers.authorization, options.token)) {
-        sendJson(res, 401, {
-          error: { message: "Unauthorized", type: "unauthorized", code: "unauthorized" },
-        });
-        return;
-      }
       if (req.method === "GET" && url.pathname === "/health") {
         sendJson(res, 200, {
           ok: true,
           endpointUrl: options.endpointUrl,
           region: options.region,
+          tokenHash: adapterTokenHash(options.token),
+        });
+        return;
+      }
+      if (!authMatches(req.headers.authorization, options.token)) {
+        sendJson(res, 401, {
+          error: { message: "Unauthorized", type: "unauthorized", code: "unauthorized" },
         });
         return;
       }
@@ -852,22 +857,40 @@ function adapterCredentialHash(options: {
   return crypto.createHash("sha256").update(stableJson(values)).digest("hex");
 }
 
-function probeAdapterHealth(token: string, port = BEDROCK_RUNTIME_ADAPTER_PORT): Promise<boolean> {
+function probeAdapterHealth(options: {
+  port?: number;
+  tokenHash?: string | null;
+} = {}): Promise<boolean> {
   return new Promise((resolve) => {
-    // The token is a 0600 local adapter secret and this probe is fixed to the loopback host.
+    const tokenHash = options.tokenHash || null;
+    const port = options.port || BEDROCK_RUNTIME_ADAPTER_PORT;
     const req = http.request(
-      // codeql[js/file-access-to-http]
       {
         hostname: BEDROCK_RUNTIME_ADAPTER_BIND_HOST,
         port,
         path: "/health",
         method: "GET",
-        headers: { Authorization: `Bearer ${token}` },
         timeout: 1000,
       },
       (res) => {
-        res.resume();
-        resolve(res.statusCode === 200);
+        const chunks: Buffer[] = [];
+        res.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+        res.on("end", () => {
+          if (res.statusCode !== 200) {
+            resolve(false);
+            return;
+          }
+          if (!tokenHash) {
+            resolve(true);
+            return;
+          }
+          try {
+            const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { tokenHash?: unknown };
+            resolve(body.tokenHash === tokenHash);
+          } catch {
+            resolve(false);
+          }
+        });
       },
     );
     req.on("timeout", () => {
@@ -880,8 +903,9 @@ function probeAdapterHealth(token: string, port = BEDROCK_RUNTIME_ADAPTER_PORT):
 }
 
 async function waitForAdapterHealth(token: string, port = BEDROCK_RUNTIME_ADAPTER_PORT): Promise<boolean> {
+  const tokenHash = adapterTokenHash(token);
   for (let attempt = 0; attempt < 20; attempt++) {
-    if (await probeAdapterHealth(token, port)) return true;
+    if (await probeAdapterHealth({ port, tokenHash })) return true;
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   return false;
@@ -909,7 +933,7 @@ export async function ensureBedrockRuntimeAdapter(options: {
     priorState?.endpointUrl === endpointUrl &&
     priorState?.region === region &&
     priorState?.credentialHash === credentialHash &&
-    (await probeAdapterHealth(priorToken))
+    (await probeAdapterHealth({ tokenHash: adapterTokenHash(priorToken) }))
   ) {
     process.env[BEDROCK_RUNTIME_ADAPTER_PROVIDER_CREDENTIAL_ENV] = priorToken;
     return {
