@@ -293,6 +293,7 @@ const { resolveSandboxImageTagFromCreateOutput } =
   require("./domain/sandbox/image-tag") as typeof import("./domain/sandbox/image-tag");
 const nim: typeof import("./inference/nim") = require("./inference/nim");
 const onboardSession: typeof import("./state/onboard-session") = require("./state/onboard-session");
+const { OnboardRuntimeBoundary }: typeof import("./onboard/runtime-boundary") = require("./onboard/runtime-boundary");
 const policies: typeof import("./policy") = require("./policy");
 const tiers: typeof import("./policy/tiers") = require("./policy/tiers");
 const { ensureUsageNoticeConsent } = require("./onboard/usage-notice");
@@ -7824,7 +7825,7 @@ async function setupMessagingChannels(
       output.write(`    [${i + 1}] ${marker} ${ch.name} — ${ch.description}${status}\n`);
     });
     output.write("\n");
-    output.write(`  Press 1-${availableChannels.length} to toggle, Enter when done: `);
+    output.write(`  Press 1-${availableChannels.length} to toggle, Enter when done (none selected skips): `);
   };
 
   showList();
@@ -8915,27 +8916,15 @@ function toSessionUpdates(
   return normalized;
 }
 
-function startRecordedStep(
-  stepName: string,
-  updates: {
-    sandboxName?: string | null;
-    provider?: string | null;
-    model?: string | null;
-    policyPresets?: string[] | null;
-  } = {},
-): void {
-  onboardSession.markStepStarted(stepName);
-  if (Object.keys(updates).length > 0) {
-    onboardSession.updateSession((session: Session) => {
-      if (updates.sandboxName !== undefined) session.sandboxName = updates.sandboxName;
-      if (updates.provider !== undefined) session.provider = updates.provider;
-      if (updates.model !== undefined) session.model = updates.model;
-      if (updates.policyPresets !== undefined) session.policyPresets = updates.policyPresets;
-      return session;
-    });
-  }
-  maybeForceE2eStepFailure(stepName);
-}
+const onboardRuntimeBoundary = new OnboardRuntimeBoundary({
+  toSessionUpdates,
+  maybeForceE2eStepFailure,
+});
+const startRecordedStep = onboardRuntimeBoundary.startRecordedStep.bind(onboardRuntimeBoundary);
+const recordStepComplete = onboardRuntimeBoundary.recordStepComplete.bind(onboardRuntimeBoundary);
+const recordStepSkipped = onboardRuntimeBoundary.recordStepSkipped.bind(onboardRuntimeBoundary);
+const recordStepFailed = onboardRuntimeBoundary.recordStepFailed.bind(onboardRuntimeBoundary);
+const recordSessionComplete = onboardRuntimeBoundary.recordSessionComplete.bind(onboardRuntimeBoundary);
 
 const ONBOARD_STEP_INDEX: Record<string, { number: number; title: string }> = {
   preflight: { number: 1, title: "Preflight checks" },
@@ -8972,6 +8961,7 @@ async function onboard(opts: OnboardOptions = {}): Promise<void> {
   RECREATE_SANDBOX = opts.recreateSandbox || process.env.NEMOCLAW_RECREATE_SANDBOX === "1";
   AUTO_YES = opts.autoYes === true || process.env.NEMOCLAW_YES === "1";
   _preflightDashboardPort = opts.controlUiPort || null;
+  onboardRuntimeBoundary.reset();
   delete process.env.OPENSHELL_GATEWAY;
   const resume = opts.resume === true;
   const fresh = opts.fresh === true;
@@ -9341,9 +9331,9 @@ async function onboard(opts: OnboardOptions = {}): Promise<void> {
       assertCdiNvidiaGpuSpecPresent(assessHost(), resumeOptedOutGpuPassthrough);
       validateSandboxGpuPreflight(resumeSandboxGpuConfig);
     } else {
-      startRecordedStep("preflight");
+      await startRecordedStep("preflight");
       gpu = await preflight({ ...opts, optedOutGpuPassthrough: opts.noGpu === true });
-      onboardSession.markStepComplete("preflight");
+      await recordStepComplete("preflight");
     }
     const sandboxGpuConfig = resolveSandboxGpuConfig(gpu, {
       flag: effectiveSandboxGpuFlag,
@@ -9480,11 +9470,11 @@ async function onboard(opts: OnboardOptions = {}): Promise<void> {
       resume && session?.steps?.gateway?.status === "complete" && canReuseHealthyGateway;
     if (resumeGateway) {
       skippedStepMessage("gateway", "running");
-      onboardSession.markStepComplete("gateway");
+      await recordStepComplete("gateway");
     } else if (!resume && canReuseHealthyGateway) {
       skippedStepMessage("gateway", "running", "reuse");
       note("  Reusing healthy NemoClaw gateway.");
-      onboardSession.markStepComplete("gateway");
+      await recordStepComplete("gateway");
     } else {
       if (resume && session?.steps?.gateway?.status === "complete") {
         if (gatewayReuseState === "active-unnamed") {
@@ -9502,9 +9492,9 @@ async function onboard(opts: OnboardOptions = {}): Promise<void> {
         retireLegacyGatewayForDockerDriverUpgrade();
         gatewayReuseState = "missing";
       }
-      startRecordedStep("gateway");
+      await startRecordedStep("gateway");
       await startGateway(gpu, { gpuPassthrough });
-      onboardSession.markStepComplete("gateway");
+      await recordStepComplete("gateway");
     }
 
     // #2753: prefer requestedSandboxName over an unconfirmed session name.
@@ -9555,7 +9545,7 @@ async function onboard(opts: OnboardOptions = {}): Promise<void> {
         // below). A SIGINT between any earlier step and createSandbox would
         // otherwise leave a phantom that `nemoclaw list` resurrects until
         // manually destroyed.
-        startRecordedStep("provider_selection");
+        await startRecordedStep("provider_selection");
         const selection = await setupNim(gpu, sandboxName, agent);
         model = selection.model;
         provider = selection.provider;
@@ -9565,7 +9555,7 @@ async function onboard(opts: OnboardOptions = {}): Promise<void> {
         hermesToolGateways = selection.hermesToolGateways;
         preferredInferenceApi = selection.preferredInferenceApi;
         nimContainer = selection.nimContainer;
-        onboardSession.markStepComplete(
+        await recordStepComplete(
           "provider_selection",
           toSessionUpdates({
             provider,
@@ -9598,7 +9588,7 @@ async function onboard(opts: OnboardOptions = {}): Promise<void> {
           if (!sandboxName) {
             sandboxName = await promptValidatedSandboxName(agent);
           }
-          startRecordedStep("inference", { provider, model });
+          await startRecordedStep("inference", { provider, model });
           const inferenceResult = await setupInference(
             sandboxName,
             model,
@@ -9612,7 +9602,7 @@ async function onboard(opts: OnboardOptions = {}): Promise<void> {
             forceProviderSelection = true;
             continue;
           }
-          onboardSession.markStepComplete(
+          await recordStepComplete(
             "inference",
             toSessionUpdates({ provider, model, hermesAuthMethod, nimContainer, hermesToolGateways }),
           );
@@ -9632,7 +9622,7 @@ async function onboard(opts: OnboardOptions = {}): Promise<void> {
         if (nimContainer && sandboxName) {
           registry.updateSandbox(sandboxName, { nimContainer });
         }
-        onboardSession.markStepComplete(
+        await recordStepComplete(
           "inference",
           toSessionUpdates({ provider, model, hermesAuthMethod, nimContainer, hermesToolGateways }),
         );
@@ -9671,7 +9661,7 @@ async function onboard(opts: OnboardOptions = {}): Promise<void> {
         }
       }
 
-      startRecordedStep("inference", { provider, model });
+      await startRecordedStep("inference", { provider, model });
       const inferenceResult = await setupInference(
         sandboxName,
         model,
@@ -9689,7 +9679,7 @@ async function onboard(opts: OnboardOptions = {}): Promise<void> {
       if (nimContainer && sandboxName) {
         registry.updateSandbox(sandboxName, { nimContainer });
       }
-      onboardSession.markStepComplete(
+      await recordStepComplete(
         "inference",
         toSessionUpdates({ provider, model, hermesAuthMethod, nimContainer, hermesToolGateways }),
       );
@@ -9831,7 +9821,7 @@ async function onboard(opts: OnboardOptions = {}): Promise<void> {
       } else {
         nextWebSearchConfig = await configureWebSearch(null, agent, webSearchSupportProbePath);
       }
-      startRecordedStep("sandbox", { provider, model });
+      await startRecordedStep("sandbox", { provider, model });
       const recordedMessagingChannels = getRecordedMessagingChannelsForResume(resume, session, sandboxName);
       if (recordedMessagingChannels) {
         selectedMessagingChannels = recordedMessagingChannels;
@@ -9885,7 +9875,7 @@ async function onboard(opts: OnboardOptions = {}): Promise<void> {
         ...getSandboxAgentRegistryFields(agent, !fromDockerfile),
       });
       registry.setDefault(sandboxName);
-      onboardSession.markStepComplete(
+      await recordStepComplete(
         "sandbox",
         toSessionUpdates({
           sandboxName,
@@ -9915,10 +9905,12 @@ async function onboard(opts: OnboardOptions = {}): Promise<void> {
         openshellShellCommand,
         openshellBinary: getOpenshellBinary(),
         startRecordedStep,
+        recordStepComplete,
+        recordStepFailed,
         skippedStepMessage,
       });
       ensureAgentDashboardForward(sandboxName, agent);
-      onboardSession.markStepSkipped("openclaw");
+      await recordStepSkipped("openclaw");
     } else {
       const resumeOpenclaw = resume && sandboxName && isOpenclawReady(sandboxName);
       if (resumeOpenclaw) {
@@ -9927,19 +9919,19 @@ async function onboard(opts: OnboardOptions = {}): Promise<void> {
         // zero-byte placeholder; re-sync to avoid loadOnboardConfig
         // SyntaxError. Fixes #3999.
         syncNemoClawConfigInSandbox(sandboxName, provider, model);
-        onboardSession.markStepComplete(
+        await recordStepComplete(
           "openclaw",
           toSessionUpdates({ sandboxName, provider, model, hermesAuthMethod, hermesToolGateways }),
         );
       } else {
-        startRecordedStep("openclaw", { sandboxName, provider, model });
+        await startRecordedStep("openclaw", { sandboxName, provider, model });
         await setupOpenclaw(sandboxName, model, provider);
-        onboardSession.markStepComplete(
+        await recordStepComplete(
           "openclaw",
           toSessionUpdates({ sandboxName, provider, model, hermesAuthMethod, hermesToolGateways }),
         );
       }
-      onboardSession.markStepSkipped("agent_setup");
+      await recordStepSkipped("agent_setup");
     }
 
     const latestSession = onboardSession.loadSession();
@@ -9999,7 +9991,7 @@ async function onboard(opts: OnboardOptions = {}): Promise<void> {
       arePolicyPresetsApplied(sandboxName, recordedPolicyPresetsForSupport);
     if (resumePolicies) {
       skippedStepMessage("policies", recordedPolicyPresetsForSupport.join(", "));
-      onboardSession.markStepComplete(
+      await recordStepComplete(
         "policies",
         toSessionUpdates({
           sandboxName,
@@ -10009,7 +10001,7 @@ async function onboard(opts: OnboardOptions = {}): Promise<void> {
         }),
       );
     } else {
-      startRecordedStep("policies", {
+      await startRecordedStep("policies", {
         sandboxName,
         provider,
         model,
@@ -10035,7 +10027,7 @@ async function onboard(opts: OnboardOptions = {}): Promise<void> {
           });
         },
       });
-      onboardSession.markStepComplete(
+      await recordStepComplete(
         "policies",
         toSessionUpdates({ sandboxName, provider, model, policyPresets: appliedPolicyPresets }),
       );
@@ -10045,7 +10037,7 @@ async function onboard(opts: OnboardOptions = {}): Promise<void> {
       ensureAgentDashboardForward(sandboxName, agent);
     }
 
-    onboardSession.completeSession(
+    await recordSessionComplete(
       toSessionUpdates({ sandboxName, provider, model, hermesAuthMethod, hermesToolGateways }),
     );
     completed = true;
@@ -10125,6 +10117,7 @@ async function onboard(opts: OnboardOptions = {}): Promise<void> {
     printDashboard(sandboxName, model, provider, nimContainer, agent);
   } finally {
     releaseOnboardLock();
+    onboardRuntimeBoundary.clear();
   }
 }
 
