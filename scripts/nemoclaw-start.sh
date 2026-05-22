@@ -1472,171 +1472,6 @@ export http_proxy="$_PROXY_URL"
 export https_proxy="$_PROXY_URL"
 export no_proxy="$_NO_PROXY_VAL"
 
-DISCORD_LOOPBACK_PROXY_PORT="${NEMOCLAW_DISCORD_PROXY_PORT:-${NEMOCLAW_PROXY_PORT:-3128}}"
-case "$DISCORD_LOOPBACK_PROXY_PORT" in
-  *[!0-9]* | '')
-    echo "[channels] Invalid NEMOCLAW_DISCORD_PROXY_PORT='${NEMOCLAW_DISCORD_PROXY_PORT:-}' - using 3128" >&2
-    DISCORD_LOOPBACK_PROXY_PORT=3128
-    ;;
-esac
-if [ "$DISCORD_LOOPBACK_PROXY_PORT" -lt 1 ] || [ "$DISCORD_LOOPBACK_PROXY_PORT" -gt 65535 ]; then
-  echo "[channels] Invalid NEMOCLAW_DISCORD_PROXY_PORT='${DISCORD_LOOPBACK_PROXY_PORT}' - using 3128" >&2
-  DISCORD_LOOPBACK_PROXY_PORT=3128
-fi
-
-_DISCORD_LOOPBACK_PROXY_SCRIPT="/tmp/nemoclaw-discord-loopback-proxy.js"
-_DISCORD_LOOPBACK_PROXY_SOURCE="/usr/local/lib/nemoclaw/preloads/discord-loopback-proxy.js"
-
-canonical_openshell_loopback_proxy_url() {
-  python3 - "${1:-}" <<'PYOPENSHELLLOOPBACK' 2>/dev/null
-import re
-import sys
-from urllib.parse import urlparse
-
-
-def is_loopback(hostname):
-    normalized = (hostname or "").strip().lower().strip("[]")
-    return normalized == "localhost" or normalized == "::1" or re.match(r"^127(?:\.\d{1,3}){3}$", normalized)
-
-
-value = (sys.argv[1] if len(sys.argv) > 1 else "").strip()
-if not value:
-    sys.exit(1)
-if not re.match(r"^[a-z][a-z0-9+.-]*://", value, re.IGNORECASE):
-    value = f"http://{value}"
-try:
-    parsed = urlparse(value)
-    port = parsed.port
-except ValueError:
-    sys.exit(1)
-if parsed.scheme != "http" or not parsed.hostname or not is_loopback(parsed.hostname):
-    sys.exit(1)
-hostname = parsed.hostname.lower()
-host = f"[{hostname}]" if ":" in hostname and not hostname.startswith("[") else hostname
-port_suffix = f":{port}" if port is not None else ""
-print(f"http://{host}{port_suffix}")
-PYOPENSHELLLOOPBACK
-}
-
-is_openshell_loopback_proxy_url() {
-  canonical_openshell_loopback_proxy_url "${1:-}" >/dev/null
-}
-
-read_openclaw_discord_proxy_url() {
-  local config_file="${OPENCLAW_CONFIG_PATH:-/sandbox/.openclaw/openclaw.json}"
-  [ -f "$config_file" ] || return 1
-  python3 - "$config_file" <<'PYDISCORDPROXY' 2>/dev/null
-import json
-import sys
-
-try:
-    with open(sys.argv[1], encoding="utf-8") as f:
-        cfg = json.load(f)
-    accounts = cfg.get("channels", {}).get("discord", {}).get("accounts", {}) or {}
-    account = accounts.get("default") or accounts.get("main") or {}
-    proxy = account.get("proxy") or ""
-    if proxy:
-        print(proxy)
-except Exception:
-    sys.exit(1)
-PYDISCORDPROXY
-}
-
-openshell_loopback_proxy_is_reachable() {
-  python3 - "${1:-}" <<'PYLOOPBACKPROBE' 2>/dev/null
-import ipaddress
-import socket
-import sys
-from urllib.parse import urlparse
-
-try:
-    parsed = urlparse(sys.argv[1])
-    if parsed.scheme != "http" or not parsed.hostname or parsed.port is None:
-        sys.exit(1)
-
-    infos = socket.getaddrinfo(parsed.hostname, parsed.port, type=socket.SOCK_STREAM)
-    loopback_addrs = []
-    for info in infos:
-        addr = info[4][0]
-        if ipaddress.ip_address(addr).is_loopback:
-            loopback_addrs.append(info[4])
-    if not loopback_addrs:
-        sys.exit(1)
-
-    last_exc = None
-    for sockaddr in loopback_addrs:
-        try:
-            with socket.create_connection(sockaddr, timeout=0.5):
-                pass
-            sys.exit(0)
-        except OSError as exc:
-            last_exc = exc
-    raise last_exc or OSError("loopback proxy unreachable")
-except Exception:
-    sys.exit(1)
-PYLOOPBACKPROBE
-}
-
-start_discord_loopback_proxy() {
-  local configured_discord_proxy openshell_loopback_proxy_url
-  [ -n "${DISCORD_BOT_TOKEN:-}" ] || return 0
-  openshell_loopback_proxy_url="$(canonical_openshell_loopback_proxy_url "${OPENSHELL_LOOPBACK_PROXY_URL:-}" || true)"
-  if [ -n "$openshell_loopback_proxy_url" ]; then
-    configured_discord_proxy="$(read_openclaw_discord_proxy_url || true)"
-    if [ "$configured_discord_proxy" = "$openshell_loopback_proxy_url" ] && openshell_loopback_proxy_is_reachable "$openshell_loopback_proxy_url"; then
-      echo "[channels] Discord loopback proxy provided by OpenShell (${openshell_loopback_proxy_url}); skipping NemoClaw helper" >&2
-      return 0
-    fi
-    if [ "$configured_discord_proxy" = "$openshell_loopback_proxy_url" ]; then
-      echo "[channels] OpenShell loopback proxy (${openshell_loopback_proxy_url}) is configured for Discord but is not reachable; keeping NemoClaw helper fallback" >&2
-    elif [ -n "$configured_discord_proxy" ]; then
-      echo "[channels] OpenShell loopback proxy (${openshell_loopback_proxy_url}) does not match Discord config (${configured_discord_proxy}); keeping NemoClaw helper fallback" >&2
-    else
-      echo "[channels] OpenShell loopback proxy (${openshell_loopback_proxy_url}) could not be verified against Discord config; keeping NemoClaw helper fallback" >&2
-    fi
-  fi
-  command -v node >/dev/null 2>&1 || {
-    echo "[channels] Discord loopback proxy skipped: node is not available" >&2
-    return 0
-  }
-  if [ ! -f "$_DISCORD_LOOPBACK_PROXY_SOURCE" ]; then
-    echo "[channels] Discord loopback proxy skipped: helper is not installed" >&2
-    return 0
-  fi
-
-  local log="/tmp/nemoclaw-discord-loopback-proxy.log"
-  local port="$DISCORD_LOOPBACK_PROXY_PORT"
-
-  if node -e '
-const net = require("net");
-const port = Number(process.argv[1]);
-const socket = net.createConnection({ host: "127.0.0.1", port, timeout: 500 });
-socket.on("connect", () => process.exit(0));
-socket.on("error", () => process.exit(1));
-socket.on("timeout", () => process.exit(1));
-' "$port" >/dev/null 2>&1; then
-    echo "[channels] Discord loopback proxy already listening on 127.0.0.1:${port}" >&2
-    return 0
-  fi
-
-  emit_sandbox_sourced_file "$_DISCORD_LOOPBACK_PROXY_SCRIPT" <"$_DISCORD_LOOPBACK_PROXY_SOURCE"
-  : >"$log"
-  chmod 600 "$log" 2>/dev/null || true
-
-  if [ "$(id -u)" -eq 0 ]; then
-    chown root:root "$log" 2>/dev/null || true
-    nohup "${STEP_DOWN_PREFIX_SANDBOX[@]}" env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY \
-      -u http_proxy -u https_proxy -u all_proxy NODE_USE_ENV_PROXY=0 \
-      node "$_DISCORD_LOOPBACK_PROXY_SCRIPT" "$port" "$PROXY_HOST" "$PROXY_PORT" >>"$log" 2>&1 &
-  else
-    nohup env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY \
-      -u http_proxy -u https_proxy -u all_proxy NODE_USE_ENV_PROXY=0 \
-      node "$_DISCORD_LOOPBACK_PROXY_SCRIPT" "$port" "$PROXY_HOST" "$PROXY_PORT" >>"$log" 2>&1 &
-  fi
-  DISCORD_LOOPBACK_PROXY_PID=$!
-  echo "[channels] Discord loopback proxy launched (pid ${DISCORD_LOOPBACK_PROXY_PID}, 127.0.0.1:${port} -> ${PROXY_HOST}:${PROXY_PORT})" >&2
-}
-
 # Git TLS CA bundle fix (NemoClaw#2270).
 # OpenShell's L7 proxy does MITM TLS termination and re-signs with its own CA.
 # OpenShell injects SSL_CERT_FILE and CURL_CA_BUNDLE pointing at the CA bundle,
@@ -2422,7 +2257,6 @@ if [ "$(id -u)" -ne 0 ]; then
   fi
 
   configure_messaging_channels
-  start_discord_loopback_proxy
   install_telegram_diagnostics
   install_slack_channel_guard
   verify_no_slack_secrets_on_disk
@@ -2467,7 +2301,7 @@ if [ "$(id -u)" -ne 0 ]; then
   # Pass the HTTP proxy-fix path so it is validated alongside proxy-env.sh
   # (both are trust-boundary files; tampering would let the sandbox user
   # inject code into any Node process via NODE_OPTIONS).
-  validate_tmp_permissions "$_SANDBOX_SAFETY_NET" "$_PROXY_FIX_SCRIPT" "$_NEMOTRON_FIX_SCRIPT" "$_WS_FIX_SCRIPT" "$_SECCOMP_GUARD_SCRIPT" "$_CIAO_GUARD_SCRIPT" "$_TELEGRAM_DIAGNOSTICS_SCRIPT" "$_SLACK_GUARD_SCRIPT" "$_DISCORD_LOOPBACK_PROXY_SCRIPT"
+  validate_tmp_permissions "$_SANDBOX_SAFETY_NET" "$_PROXY_FIX_SCRIPT" "$_NEMOTRON_FIX_SCRIPT" "$_WS_FIX_SCRIPT" "$_SECCOMP_GUARD_SCRIPT" "$_CIAO_GUARD_SCRIPT" "$_TELEGRAM_DIAGNOSTICS_SCRIPT" "$_SLACK_GUARD_SCRIPT"
 
   # Start gateway in background, auto-pair, then wait
   nohup "$OPENCLAW" gateway run --port "${_DASHBOARD_PORT}" >/tmp/gateway.log 2>&1 &
@@ -2484,7 +2318,6 @@ if [ "$(id -u)" -ne 0 ]; then
   # registration and the final append is a small race window (same as before
   # the shared-library refactor). Acceptable for entrypoint-level cleanup.
   SANDBOX_CHILD_PIDS=("$GATEWAY_PID")
-  [ -n "${DISCORD_LOOPBACK_PROXY_PID:-}" ] && SANDBOX_CHILD_PIDS+=("$DISCORD_LOOPBACK_PROXY_PID")
   [ -n "${AUTO_PAIR_PID:-}" ] && SANDBOX_CHILD_PIDS+=("$AUTO_PAIR_PID")
   [ -n "${GATEWAY_LOG_TAIL_PID:-}" ] && SANDBOX_CHILD_PIDS+=("$GATEWAY_LOG_TAIL_PID")
   [ -n "${GATEWAY_LOG_PERSIST_PID:-}" ] && SANDBOX_CHILD_PIDS+=("$GATEWAY_LOG_PERSIST_PID")
@@ -2562,7 +2395,6 @@ lock_rc_files "$_SANDBOX_HOME"
 # Must run AFTER integrity check (to detect build-time tampering) and
 # BEFORE chattr +i (which locks the config permanently).
 configure_messaging_channels
-start_discord_loopback_proxy
 install_telegram_diagnostics
 install_slack_channel_guard
 verify_no_slack_secrets_on_disk
@@ -2679,7 +2511,7 @@ seed_default_workspace_templates_as_sandbox
 # Pass the HTTP proxy-fix path so it is validated alongside proxy-env.sh
 # (both are trust-boundary files; tampering would let the sandbox user
 # inject code into any Node process via NODE_OPTIONS).
-validate_tmp_permissions "$_SANDBOX_SAFETY_NET" "$_PROXY_FIX_SCRIPT" "$_NEMOTRON_FIX_SCRIPT" "$_WS_FIX_SCRIPT" "$_SECCOMP_GUARD_SCRIPT" "$_CIAO_GUARD_SCRIPT" "$_TELEGRAM_DIAGNOSTICS_SCRIPT" "$_SLACK_GUARD_SCRIPT" "$_DISCORD_LOOPBACK_PROXY_SCRIPT"
+validate_tmp_permissions "$_SANDBOX_SAFETY_NET" "$_PROXY_FIX_SCRIPT" "$_NEMOTRON_FIX_SCRIPT" "$_WS_FIX_SCRIPT" "$_SECCOMP_GUARD_SCRIPT" "$_CIAO_GUARD_SCRIPT" "$_TELEGRAM_DIAGNOSTICS_SCRIPT" "$_SLACK_GUARD_SCRIPT"
 
 # Start the gateway as the 'gateway' user.
 # SECURITY: The sandbox user cannot kill this process because it runs
@@ -2712,7 +2544,6 @@ start_auto_pair
 # registration and the final append is a small race window (same as before
 # the shared-library refactor). Acceptable for entrypoint-level cleanup.
 SANDBOX_CHILD_PIDS=("$GATEWAY_PID")
-[ -n "${DISCORD_LOOPBACK_PROXY_PID:-}" ] && SANDBOX_CHILD_PIDS+=("$DISCORD_LOOPBACK_PROXY_PID")
 [ -n "${AUTO_PAIR_PID:-}" ] && SANDBOX_CHILD_PIDS+=("$AUTO_PAIR_PID")
 [ -n "${GATEWAY_LOG_TAIL_PID:-}" ] && SANDBOX_CHILD_PIDS+=("$GATEWAY_LOG_TAIL_PID")
 [ -n "${GATEWAY_LOG_PERSIST_PID:-}" ] && SANDBOX_CHILD_PIDS+=("$GATEWAY_LOG_PERSIST_PID")

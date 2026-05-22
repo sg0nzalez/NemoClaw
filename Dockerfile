@@ -445,17 +445,6 @@ USER sandbox
 # is opt-in via `shields up` (DAC 444 root:root + chattr +i).
 # Build args (NEMOCLAW_MODEL, CHAT_UI_URL) customize per deployment.
 #
-# Temporary workaround for NemoClaw#1738: the OpenClaw Discord extension's
-# gateway uses `ws` (via @buape/carbon), which ignores HTTPS_PROXY/HTTP_PROXY
-# env vars and opens a direct TCP socket to gateway.discord.gg. Sandbox netns
-# blocks direct egress, so the WSS handshake never reaches Discord and the
-# bot loops on close-code 1006. Baking `accounts.default.proxy` into
-# openclaw.json feeds DiscordAccountConfig.proxy, which the gateway plugin
-# threads through to the `ws` `agent` option, routing the upgrade through
-# the OpenShell proxy. Prefer OpenShell's managed loopback listener when it is
-# available; NemoClaw's startup helper remains a compatibility fallback until
-# the OpenShell minimum version includes that listener. Mirror of the Telegram
-# treatment immediately below.
 # Generate openclaw.json from environment variables. Config generation logic
 # lives in scripts/generate-openclaw-config.py — see that file for the full
 # list of env vars and derivation rules.

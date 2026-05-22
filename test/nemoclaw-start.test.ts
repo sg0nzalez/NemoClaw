@@ -2040,154 +2040,6 @@ describe("Slack secrets-on-disk tripwire (#2085)", () => {
   });
 });
 
-describe("Discord loopback proxy compatibility", () => {
-  const src = fs.readFileSync(START_SCRIPT, "utf-8");
-
-  it("skips the NemoClaw helper when OpenShell provides a loopback proxy", () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-discord-loopback-"));
-    const scriptPath = path.join(tmpDir, "run.sh");
-    const fn = [
-      extractShellFunctionFromSource(src, "canonical_openshell_loopback_proxy_url"),
-      extractShellFunctionFromSource(src, "is_openshell_loopback_proxy_url"),
-      'read_openclaw_discord_proxy_url() { printf "%s\\n" "$OPENSHELL_LOOPBACK_PROXY_URL"; }',
-      "openshell_loopback_proxy_is_reachable() { return 0; }",
-      extractShellFunctionFromSource(src, "start_discord_loopback_proxy"),
-    ].join("\n");
-
-    try {
-      fs.writeFileSync(
-        scriptPath,
-        [
-          "#!/usr/bin/env bash",
-          "set -euo pipefail",
-          "DISCORD_BOT_TOKEN=x",
-          "OPENSHELL_LOOPBACK_PROXY_URL=http://127.0.0.1:3128",
-          "DISCORD_LOOPBACK_PROXY_PORT=3128",
-          "_DISCORD_LOOPBACK_PROXY_SOURCE=/missing",
-          "_DISCORD_LOOPBACK_PROXY_SCRIPT=/missing",
-          'emit_sandbox_sourced_file() { echo "BAD_EMIT"; exit 7; }',
-          'node() { echo "BAD_NODE"; exit 8; }',
-          fn,
-          "start_discord_loopback_proxy",
-        ].join("\n"),
-        { mode: 0o700 },
-      );
-
-      const result = spawnSync("bash", [scriptPath], { encoding: "utf-8", timeout: 5000 });
-      expect(result.status).toBe(0);
-      expect(result.stderr).toContain("Discord loopback proxy provided by OpenShell");
-      expect(result.stdout).not.toContain("BAD_");
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it("keeps the helper fallback when the OpenShell URL does not match the baked Discord config", () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-discord-loopback-"));
-    const scriptPath = path.join(tmpDir, "run.sh");
-    const fn = [
-      extractShellFunctionFromSource(src, "canonical_openshell_loopback_proxy_url"),
-      extractShellFunctionFromSource(src, "is_openshell_loopback_proxy_url"),
-      'read_openclaw_discord_proxy_url() { printf "%s\\n" "http://127.0.0.1:3128"; }',
-      "openshell_loopback_proxy_is_reachable() { return 0; }",
-      extractShellFunctionFromSource(src, "start_discord_loopback_proxy"),
-    ].join("\n");
-
-    try {
-      fs.writeFileSync(
-        scriptPath,
-        [
-          "#!/usr/bin/env bash",
-          "set -euo pipefail",
-          "DISCORD_BOT_TOKEN=x",
-          "OPENSHELL_LOOPBACK_PROXY_URL=http://127.0.0.1:45211",
-          "DISCORD_LOOPBACK_PROXY_PORT=3128",
-          "_DISCORD_LOOPBACK_PROXY_SOURCE=/missing",
-          "_DISCORD_LOOPBACK_PROXY_SCRIPT=/missing",
-          fn,
-          "start_discord_loopback_proxy",
-        ].join("\n"),
-        { mode: 0o700 },
-      );
-
-      const result = spawnSync("bash", [scriptPath], { encoding: "utf-8", timeout: 5000 });
-      expect(result.status).toBe(0);
-      expect(result.stderr).toContain("does not match Discord config");
-      expect(result.stderr).toContain("Discord loopback proxy skipped: helper is not installed");
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it("keeps the helper fallback when the matching OpenShell listener is unreachable", () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-discord-loopback-"));
-    const scriptPath = path.join(tmpDir, "run.sh");
-    const fn = [
-      extractShellFunctionFromSource(src, "canonical_openshell_loopback_proxy_url"),
-      extractShellFunctionFromSource(src, "is_openshell_loopback_proxy_url"),
-      'read_openclaw_discord_proxy_url() { printf "%s\\n" "http://127.0.0.1:3128"; }',
-      "openshell_loopback_proxy_is_reachable() { return 1; }",
-      extractShellFunctionFromSource(src, "start_discord_loopback_proxy"),
-    ].join("\n");
-
-    try {
-      fs.writeFileSync(
-        scriptPath,
-        [
-          "#!/usr/bin/env bash",
-          "set -euo pipefail",
-          "DISCORD_BOT_TOKEN=x",
-          "OPENSHELL_LOOPBACK_PROXY_URL=http://127.0.0.1:3128",
-          "DISCORD_LOOPBACK_PROXY_PORT=3128",
-          "_DISCORD_LOOPBACK_PROXY_SOURCE=/missing",
-          "_DISCORD_LOOPBACK_PROXY_SCRIPT=/missing",
-          fn,
-          "start_discord_loopback_proxy",
-        ].join("\n"),
-        { mode: 0o700 },
-      );
-
-      const result = spawnSync("bash", [scriptPath], { encoding: "utf-8", timeout: 5000 });
-      expect(result.status).toBe(0);
-      expect(result.stderr).toContain("is configured for Discord but is not reachable");
-      expect(result.stderr).toContain("Discord loopback proxy skipped: helper is not installed");
-      expect(result.stderr).not.toContain("does not match Discord config");
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it("recognizes IPv6 loopback OpenShell proxy URLs", () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-discord-loopback-"));
-    const scriptPath = path.join(tmpDir, "run.sh");
-    const fn = [
-      extractShellFunctionFromSource(src, "canonical_openshell_loopback_proxy_url"),
-      extractShellFunctionFromSource(src, "is_openshell_loopback_proxy_url"),
-    ].join("\n");
-
-    try {
-      fs.writeFileSync(
-        scriptPath,
-        [
-          "#!/usr/bin/env bash",
-          "set -euo pipefail",
-          fn,
-          'canonical_openshell_loopback_proxy_url "[::1]:45211"',
-          'is_openshell_loopback_proxy_url "http://[::1]:45211"',
-          'if is_openshell_loopback_proxy_url "http://127.example.com:45211"; then exit 9; fi',
-        ].join("\n"),
-        { mode: 0o700 },
-      );
-
-      const result = spawnSync("bash", [scriptPath], { encoding: "utf-8", timeout: 5000 });
-      expect(result.status).toBe(0);
-      expect(result.stdout.trim()).toBe("http://[::1]:45211");
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-});
-
 describe("Telegram diagnostics (#2766)", () => {
   const src = fs.readFileSync(START_SCRIPT, "utf-8");
   const telegramDiagnosticsScript = startScriptHeredoc(src, "TELEGRAM_DIAGNOSTICS_EOF");
@@ -2268,7 +2120,6 @@ describe("Telegram diagnostics (#2766)", () => {
         'ensure_runtime_shell_env_shim() { :; }',
         'lock_rc_files() { :; }',
         'configure_messaging_channels() { echo "ORDER:configure"; }',
-        'start_discord_loopback_proxy() { echo "ORDER:discord-loopback"; }',
         'install_slack_channel_guard() { :; }',
         'verify_no_slack_secrets_on_disk() { :; }',
         'seed_default_workspace_templates() { :; }',
@@ -2294,7 +2145,6 @@ describe("Telegram diagnostics (#2766)", () => {
         `_SECCOMP_GUARD_SCRIPT=${JSON.stringify(path.join(tmpDir, "seccomp-guard.js"))}`,
         `_CIAO_GUARD_SCRIPT=${JSON.stringify(path.join(tmpDir, "ciao-guard.js"))}`,
         `_SLACK_GUARD_SCRIPT=${JSON.stringify(path.join(tmpDir, "slack-guard.js"))}`,
-        `_DISCORD_LOOPBACK_PROXY_SCRIPT=${JSON.stringify(path.join(tmpDir, "discord-loopback-proxy.js"))}`,
         "NEMOCLAW_CMD=()",
         telegramDiagnosticsSection(preloadPath, configPath),
         preGatewaySetupBlock(kind, gatewayLog, autoPairLog),
@@ -2417,7 +2267,6 @@ process.stderr.write('FailoverError: token=123456:LATER\\n');
       expect(setup.preloadExists).toBe(true);
       expect(setup.preloadMode).toBe("444");
       expect(setup.result.stdout).toContain("ORDER:configure");
-      expect(setup.result.stdout).toContain("ORDER:discord-loopback");
       expect(setup.result.stdout).toContain("VALIDATE:");
       expect(setup.result.stdout).toContain(setup.preloadPath);
     }
