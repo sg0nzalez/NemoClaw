@@ -932,7 +932,8 @@ print(account.get('proxy', ''))
 " 2>/dev/null || true)
 
   default_dc_proxy="http://127.0.0.1:${NEMOCLAW_DISCORD_PROXY_PORT:-${NEMOCLAW_PROXY_PORT:-3128}}"
-  expected_dc_proxy=$(python3 - "$default_dc_proxy" "${OPENSHELL_LOOPBACK_PROXY_URL:-}" <<'PYLOOPBACKURL' 2>/dev/null || printf '%s' "$default_dc_proxy"
+  expected_dc_proxy=$(
+    python3 - "$default_dc_proxy" "${OPENSHELL_LOOPBACK_PROXY_URL:-}" <<'PYLOOPBACKURL' 2>/dev/null || printf '%s' "$default_dc_proxy"
 import re
 import sys
 from urllib.parse import urlparse
@@ -964,7 +965,7 @@ host = f"[{hostname}]" if ":" in hostname and not hostname.startswith("[") else 
 port_suffix = f":{port}" if port is not None else ""
 print(f"http://{host}{port_suffix}")
 PYLOOPBACKURL
-)
+  )
   if [ -n "$dc_token" ] && [ "$dc_proxy" = "$expected_dc_proxy" ]; then
     pass "M9b: Discord account loopback proxy is baked into openclaw.json for Gateway WebSocket routing"
   elif [ -n "$dc_token" ]; then
