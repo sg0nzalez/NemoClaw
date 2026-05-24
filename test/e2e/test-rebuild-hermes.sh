@@ -13,6 +13,10 @@
 #   7. Run `nemoclaw <name> rebuild --yes`
 #   8. Verify marker files survived + version upgraded
 #
+# Set NEMOCLAW_HERMES_STALE_BASE_REBUILD_E2E=1 to leave the cached
+# ghcr.io/nvidia/nemoclaw/hermes-sandbox-base:latest tag on the older Hermes
+# base before rebuild. That mode is the regression coverage for issue #3025.
+#
 # Prerequisites:
 #   - Docker running
 #   - NVIDIA_API_KEY set (real key, starts with nvapi-)
@@ -33,6 +37,7 @@ register_sandbox_for_teardown "$SANDBOX_NAME"
 OLD_HERMES_VERSION="v2026.4.13"
 OLD_HERMES_REGISTRY_VERSION="${OLD_HERMES_VERSION#v}"
 OLD_HERMES_TARBALL_SHA256="5e4529b8cb6e4821eb916b81517e48125109b1764d6d1e68a204a9f0ddf2d98c"
+STALE_BASE_REBUILD="${NEMOCLAW_HERMES_STALE_BASE_REBUILD_E2E:-0}"
 MARKER_FILE="/sandbox/.hermes/memories/rebuild-marker.txt"
 MARKER_CONTENT="REBUILD_HM_E2E_$(date +%s)"
 DISCORD_PLACEHOLDER="openshell:resolve:env:DISCORD_BOT_TOKEN"
@@ -77,7 +82,7 @@ dump_hermes_sandbox_logs() {
   diag_script+='; echo "== log and state paths =="; ls -ld /tmp /sandbox/.hermes /sandbox/.hermes/logs 2>&1 || true; ls -l /tmp/nemoclaw-start.log /tmp/gateway.log 2>&1 || true'
   diag_script+='; echo "== hermes-related processes =="'
   # shellcheck disable=SC2016  # script is intentionally evaluated inside the sandbox
-  diag_script+='; for p in /proc/[0-9]*; do cmd=$(tr "\000" " " < "$p/cmdline" 2>/dev/null || true); case "$cmd" in *hermes*|*socat*|*nemoclaw-decode-proxy*) echo "$(basename "$p") $cmd" ;; esac; done'
+  diag_script+='; for p in /proc/[0-9]*; do cmd=$(tr "\000" " " < "$p/cmdline" 2>/dev/null || true); case "$cmd" in *hermes*|*socat*) echo "$(basename "$p") $cmd" ;; esac; done'
   diag_script+='; echo "== /tmp/nemoclaw-start.log tail =="; tail -n 80 /tmp/nemoclaw-start.log 2>&1 || true'
   diag_script+='; echo "== /tmp/gateway.log tail =="; tail -n 120 /tmp/gateway.log 2>&1 || true'
 
@@ -93,8 +98,14 @@ export NEMOCLAW_REBUILD_VERBOSE=1
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+EXPECTED_HERMES_VERSION="$(grep -E '^expected_version:' "${REPO_ROOT}/agents/hermes/manifest.yaml" | sed -E 's/.*"([^"]+)".*/\1/')"
+[ -n "${EXPECTED_HERMES_VERSION}" ] || fail "Could not parse expected Hermes version from manifest"
 
-info "Hermes rebuild upgrade E2E (old: ${OLD_HERMES_VERSION}, sandbox: ${SANDBOX_NAME})"
+if [ "${STALE_BASE_REBUILD}" = "1" ]; then
+  info "Hermes stale-base rebuild E2E (old: ${OLD_HERMES_VERSION}, expected: ${EXPECTED_HERMES_VERSION}, sandbox: ${SANDBOX_NAME})"
+else
+  info "Hermes rebuild upgrade E2E (old: ${OLD_HERMES_VERSION}, expected: ${EXPECTED_HERMES_VERSION}, sandbox: ${SANDBOX_NAME})"
+fi
 
 # ── Phase 1: Install NemoClaw ───────────────────────────────────────
 info "Phase 1: Installing NemoClaw via install.sh..."
@@ -131,6 +142,11 @@ pass "NemoClaw installed"
 # Delete the sandbox that install.sh created — we'll make our own old one.
 # Use openshell directly to preserve the 'nemoclaw' gateway for the rebuild.
 openshell sandbox delete "${SANDBOX_NAME}" 2>/dev/null || true
+# Raw OpenShell deletion can leave the prior Hermes API/dashboard forward
+# bound for a short window. The rebuild create path intentionally rolls back if
+# the baked dashboard port is host-bound after image build, so make this phase
+# cleanup synchronous before creating the old fixture sandbox.
+openshell forward stop 8642 >/dev/null 2>&1 || true
 diag "Deleted Phase 1 sandbox, gateway preserved: $(docker ps --filter name=openshell --format '{{.Names}} {{.Status}}' 2>/dev/null)"
 
 # ── Phase 2: Build old Hermes base image ───────────────────────────
@@ -148,6 +164,11 @@ docker build \
   || fail "Failed to build old Hermes base image"
 
 pass "Old Hermes base image built (${OLD_HERMES_VERSION})"
+
+if [ "${STALE_BASE_REBUILD}" = "1" ]; then
+  docker tag "${OLD_BASE_TAG}" "ghcr.io/nvidia/nemoclaw/hermes-sandbox-base:latest"
+  pass "Cached Hermes base tag now points at old version"
+fi
 
 # ── Phase 3: Create old sandbox via openshell ───────────────────────
 info "Phase 3: Creating sandbox with old Hermes via openshell..."
@@ -261,16 +282,21 @@ print('Registry and session updated')
 
 pass "Markers written, sandbox registered"
 
-# ── Phase 5: Restore current Hermes base image ─────────────────────
-info "Phase 5: Building current Hermes base image..."
+# ── Phase 5: Prepare current base-image cache state ─────────────────
+if [ "${STALE_BASE_REBUILD}" = "1" ]; then
+  info "Phase 5: Leaving cached Hermes base image stale..."
+  diag "Cached ghcr.io/nvidia/nemoclaw/hermes-sandbox-base:latest intentionally points at ${OLD_HERMES_VERSION}; rebuild must refresh it from agents/hermes/Dockerfile.base."
+else
+  info "Phase 5: Building current Hermes base image..."
 
-docker build \
-  -f "${REPO_ROOT}/agents/hermes/Dockerfile.base" \
-  -t "ghcr.io/nvidia/nemoclaw/hermes-sandbox-base:latest" \
-  "${REPO_ROOT}" \
-  || fail "Failed to build current Hermes base image"
+  docker build \
+    -f "${REPO_ROOT}/agents/hermes/Dockerfile.base" \
+    -t "ghcr.io/nvidia/nemoclaw/hermes-sandbox-base:latest" \
+    "${REPO_ROOT}" \
+    || fail "Failed to build current Hermes base image"
 
-pass "Current Hermes base image built"
+  pass "Current Hermes base image built"
+fi
 
 # ── Phase 6: Rebuild ────────────────────────────────────────────────
 info "Phase 6: Running nemoclaw rebuild..."
@@ -296,6 +322,18 @@ if [ "$RESTORED" = "${MARKER_CONTENT}" ]; then
   pass "Marker file survived rebuild"
 else
   fail "Marker file lost: got '${RESTORED}', expected '${MARKER_CONTENT}'"
+fi
+
+# Actual Hermes binary version updated
+HERMES_VERSION_OUTPUT=$(openshell sandbox exec --name "${SANDBOX_NAME}" -- hermes --version 2>&1 || true)
+diag "Hermes version after rebuild: ${HERMES_VERSION_OUTPUT//$'\n'/ | }"
+if echo "${HERMES_VERSION_OUTPUT}" | grep -Fq "${OLD_HERMES_REGISTRY_VERSION}"; then
+  fail "Hermes binary still reports old version ${OLD_HERMES_REGISTRY_VERSION}"
+fi
+if echo "${HERMES_VERSION_OUTPUT}" | grep -Fq "${EXPECTED_HERMES_VERSION}"; then
+  pass "Hermes binary reports expected version ${EXPECTED_HERMES_VERSION}"
+else
+  fail "Hermes binary version mismatch: expected output to contain '${EXPECTED_HERMES_VERSION}'"
 fi
 
 # Hermes messaging config survived through non-interactive rebuild without
@@ -361,4 +399,8 @@ info "Cleaning up..."
 docker rmi "${OLD_BASE_TAG}" 2>/dev/null || true
 
 echo ""
-echo -e "${GREEN}Hermes rebuild upgrade E2E passed.${NC}"
+if [ "${STALE_BASE_REBUILD}" = "1" ]; then
+  echo -e "${GREEN}Hermes stale-base rebuild E2E passed.${NC}"
+else
+  echo -e "${GREEN}Hermes rebuild upgrade E2E passed.${NC}"
+fi
