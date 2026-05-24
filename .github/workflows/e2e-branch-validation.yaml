@@ -352,7 +352,7 @@ jobs:
               {
                 name = $0
                 sub(/^[^ ]+[ ]+[^ ]+[ ]+[^ ]+[ ]+[^ ]+[ ]+[^ ]+[ ]+[^ ]+[ ]+[^ ]+[ ]+/, "", name)
-                if (name !~ /^nemoclaw-traces\// || name ~ /(^|\/)\.\.($|\//) || name !~ /\.json$/) {
+                if (name !~ /^nemoclaw-traces\// || name ~ /(^|\/)\.\.($|\/)/ || name !~ /\.json$/) {
                   bad = 1; print "unsafe trace archive member: " name > "/dev/stderr"
                 }
               }
