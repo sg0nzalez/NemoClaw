@@ -264,7 +264,7 @@ jobs:
           set -euo pipefail
           mkdir -p '$env:WSL_CHECKOUT_DIR/_nemoclaw-traces'
           if [ -d '/tmp/nemoclaw-traces/wsl-e2e' ]; then
-            cp -a '/tmp/nemoclaw-traces/wsl-e2e'/.' '$env:WSL_CHECKOUT_DIR/_nemoclaw-traces/'
+            cp -a '/tmp/nemoclaw-traces/wsl-e2e'/. '$env:WSL_CHECKOUT_DIR/_nemoclaw-traces/'
           fi
           "@
           $tmp = "$env:RUNNER_TEMP\wsl-step.sh"
