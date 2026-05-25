@@ -510,6 +510,33 @@ describe("generate-openclaw-config.py: config generation", () => {
     expect(config.channels.discord.guilds).toBeUndefined();
   });
 
+  it("keeps an explicit Discord user allowlist when guilds are configured", () => {
+    const channels = Buffer.from(JSON.stringify(["discord"])).toString("base64");
+    const discordGuilds = Buffer.from(
+      JSON.stringify({
+        "1491590992753590594": {
+          requireMention: true,
+        },
+      }),
+    ).toString("base64");
+    const allowedUsers = ["1005536447329222676"];
+    const allowedIds = Buffer.from(
+      JSON.stringify({
+        discord: allowedUsers,
+      }),
+    ).toString("base64");
+    const config = runConfigScript({
+      NEMOCLAW_MESSAGING_CHANNELS_B64: channels,
+      NEMOCLAW_DISCORD_GUILDS_B64: discordGuilds,
+      NEMOCLAW_MESSAGING_ALLOWED_IDS_B64: allowedIds,
+    });
+
+    expect(config.channels.discord.accounts.default).toMatchObject({
+      dmPolicy: "allowlist",
+      allowFrom: allowedUsers,
+    });
+  });
+
   it("#3894: routes Discord gateway traffic through OpenClaw's managed proxy", () => {
     const channels = Buffer.from(JSON.stringify(["discord"])).toString("base64");
     const config = runConfigScript({
