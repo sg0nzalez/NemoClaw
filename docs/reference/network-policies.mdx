@@ -38,12 +38,13 @@ The following endpoint groups are allowed by default:
 | Policy | Endpoints | Binaries | Rules |
 | --- | --- | --- | --- |
 | `nvidia` | `integrate.api.nvidia.com:443`, `inference-api.nvidia.com:443` | `/usr/local/bin/openclaw` | POST to inference and embedding paths, GET to model listings |
-| `clawhub` | `clawhub.ai:443` | `/usr/local/bin/openclaw`, `/usr/local/bin/node` | GET, POST |
-| `openclaw_api` | `openclaw.ai:443` | `/usr/local/bin/openclaw`, `/usr/local/bin/node` | GET, POST |
+| `clawhub` | `clawhub.ai:443` | `/usr/local/bin/openclaw`, `/usr/local/bin/node`, `/usr/bin/node` | GET, POST |
+| `openclaw_api` | `openclaw.ai:443` | `/usr/local/bin/openclaw`, `/usr/local/bin/node`, `/usr/bin/node` | GET, POST |
 | `openclaw_docs` | `docs.openclaw.ai:443` | `/usr/local/bin/openclaw` | GET only |
-| `npm_registry` | `registry.npmjs.org:443` | `/usr/local/bin/openclaw` only (openclaw plugins install) | GET only |
+| `npm_registry` | `registry.npmjs.org:443` | `/usr/local/bin/openclaw`, npm/Node helper binaries (`openclaw plugins install`) | L4 tunnel |
 
-All endpoints use TLS termination and are enforced at port 443.
+REST endpoints use TLS termination and method/path enforcement at port 443.
+The `npm_registry` baseline uses L4 passthrough (`tls: skip`) for Node 22/undici compatibility and remains scoped to `registry.npmjs.org:443`.
 
 <Note>
 GitHub access (`github.com`, `api.github.com`) is not included in the baseline policy.

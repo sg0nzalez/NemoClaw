@@ -350,6 +350,26 @@ describe("base sandbox policy", () => {
     ]);
   });
 
+  it("regression #4015: clawhub allows Node helper paths used by OpenClaw plugin resolution", () => {
+    const np = policy.network_policies ?? {};
+    const binaries = (np.clawhub?.binaries ?? []).map((b) => b.path).sort();
+    expect(binaries).toEqual([
+      "/usr/bin/node",
+      "/usr/local/bin/node",
+      "/usr/local/bin/openclaw",
+    ]);
+  });
+
+  it("regression #4015: openclaw_api mirrors Node helper paths used by OpenClaw flows", () => {
+    const np = policy.network_policies ?? {};
+    const binaries = (np.openclaw_api?.binaries ?? []).map((b) => b.path).sort();
+    expect(binaries).toEqual([
+      "/usr/bin/node",
+      "/usr/local/bin/node",
+      "/usr/local/bin/openclaw",
+    ]);
+  });
+
   it("does not reference the absent Claude CLI binary", () => {
     const serialized = JSON.stringify(policy.network_policies ?? {});
     expect(serialized).not.toContain("/usr/local/bin/claude");
@@ -409,17 +429,35 @@ describe("base sandbox policy", () => {
     expect(slackHosts).toEqual([]);
   });
 
-  it("regression #1458: baseline npm_registry must not include npm or node binaries", () => {
+  it("regression #4015: baseline npm_registry supports openclaw plugin install helpers", () => {
     const np = policy.network_policies ?? {};
     const npmRegistry = np.npm_registry;
     expect(npmRegistry).toBeDefined();
+    const endpoints = npmRegistry?.endpoints ?? [];
+    expect(endpoints).toEqual([
+      expect.objectContaining({
+        host: "registry.npmjs.org",
+        port: 443,
+        access: "full",
+        tls: "skip",
+      }),
+    ]);
+    expect(endpoints[0]).not.toHaveProperty("protocol");
+    expect(endpoints[0]).not.toHaveProperty("rules");
+
     const binaries = npmRegistry?.binaries;
     expect(Array.isArray(binaries)).toBe(true);
     const paths = (binaries ?? []).map((b) => b.path).sort();
-    // Only openclaw CLI should reach the npm registry by default.
-    // npm/node being in this list lets the agent bypass 'none' policy preset.
-    // Exact allowlist — adding any binary here requires a deliberate review.
-    expect(paths).toEqual(["/usr/local/bin/openclaw"]);
+    // `openclaw plugins install <package>` shells out through npm's Node
+    // entrypoint. Keep this baseline tunnel limited to the registry host;
+    // broader package-manager access still requires the opt-in npm preset.
+    expect(paths).toEqual([
+      "/usr/bin/node*",
+      "/usr/bin/npm*",
+      "/usr/local/bin/node*",
+      "/usr/local/bin/npm*",
+      "/usr/local/bin/openclaw",
+    ]);
   });
 });
 
