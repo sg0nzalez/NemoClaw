@@ -75,7 +75,7 @@ else
     CPU_RAM_FLOOR=${CPU_RAM_FLOOR:-8}
     CPU_TYPE=${VERIFY_STALE_CPU_TYPE:-$(brev search cpu --sort price --json \
       | jq -r --argjson floor "$CPU_RAM_FLOOR" \
-          '[.[] | select(.stoppable == true and .ram_gb >= $floor)] | .[0].type')}
+          '[.[] | select(.stoppable == true and .ram_gb >= $floor)] | .[0].type // empty')}
     [ -n "$CPU_TYPE" ] || { echo "ERROR: no stoppable CPU SKU with >= ${CPU_RAM_FLOOR} GB RAM"; exit 1; }
     brev create "$INSTANCE_NAME" --type "$CPU_TYPE"
   fi

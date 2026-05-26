@@ -82,7 +82,10 @@ LLM rewrites `./reproducer.sh` using the full issue context (description, enviro
 
 ```bash
 brev copy ./reproducer.sh "$INSTANCE_NAME":~/reproducer.sh
-brev exec "$INSTANCE_NAME" "bash ~/reproducer.sh" 2>&1 | tee ./baseline-transcript-2.log
+# Same PATH safeguard as Step 8b — non-login shells don't pick up ~/.local/bin
+# automatically, and an empty PATH here misreads as `nemoclaw: command not found`
+# which would route to `verify-inconclusive` for the wrong reason.
+brev exec "$INSTANCE_NAME" 'export PATH="$HOME/.local/bin:$PATH" && bash ~/reproducer.sh' 2>&1 | tee ./baseline-transcript-2.log
 ```
 
 - **Match:** validated (with −30 baked in). Proceed to 8d.
@@ -163,10 +166,13 @@ Cross-version verification compares two moving targets: the reproducer assumes `
 
 ```bash
 # Extract the primary verification command from the reproducer (e.g. "openshell forward list").
-TOOL=$(grep -oE '\b(openshell|nemoclaw)[[:space:]]+[a-z-]+' reproducer.sh | sort -u)
+# Use mapfile + a quoted-array iteration so multi-word tool strings ("openshell forward")
+# stay intact — bare `for t in $TOOL` word-splits them on whitespace and would pickaxe
+# `openshell` and `forward` separately, weakening the drift signal.
+mapfile -t TOOLS < <(grep -oE '\b(openshell|nemoclaw)[[:space:]]+[a-z-]+' reproducer.sh | sort -u)
 
 # Pickaxe each tool name across the version range.
-for t in $TOOL; do
+for t in "${TOOLS[@]}"; do
   echo "=== drift check: $t ==="
   git log "$REPORTED_VERSION".."$LATEST" -S"$t" --oneline -- src/ bin/ nemoclaw/src/ 2>&1 | head -5
 done
@@ -210,11 +216,22 @@ Performance bugs (#2598 "10s P50", #2600 "hangs ~2 min", #2733 Ollama tool-call 
    done
    ```
 
-3. **Compute p50 and p90** for both sides. `sort -n ./latest-perf.log | awk 'NR==5'` for p50 of 10 runs.
-4. **Match rubric:**
-   - Latest's p50 within the SLA AND baseline's p50 outside the SLA → bug fixed; same Step 9 scoring (subject to baseline-validation gate).
-   - Latest's p50 outside the SLA → bug still reproduces (Step 9 special case).
-   - Latest p50 within SLA AND baseline p50 also within SLA → reproducer doesn't actually exercise the bug; route to Step 8c synth-repro.
+3. **Compute p50 and p90** for both sides. For N=10:
+
+   ```bash
+   # p50 = mean of the 5th and 6th values (standard median for even N).
+   P50_MS=$(sort -n ./latest-perf.log | awk 'NR==5||NR==6 {sum+=$1; n++} END {printf "%.2f", sum/n}')
+   # p90 = 9th value (nearest-rank / NIST method for N=10).
+   P90_MS=$(sort -n ./latest-perf.log | awk 'NR==9')
+   echo "[perf] latest p50=${P50_MS}s p90=${P90_MS}s"
+   ```
+
+   Apply the same two lines to `./baseline-perf.log` for the baseline side.
+4. **Match rubric (p50 fires first; p90 is the regression backstop):**
+   - Latest's p50 within `$SLA_P50_MS` AND baseline's p50 outside → bug fixed; same Step 9 scoring (subject to baseline-validation gate).
+   - Latest's p50 outside `$SLA_P50_MS` → bug still reproduces (Step 9 special case).
+   - Latest's p50 within `$SLA_P50_MS` AND baseline's p50 also within → reproducer doesn't actually exercise the bug; route to Step 8c synth-repro.
+   - **p90 backstop**: if `$SLA_P90_MS` was parsed from the issue, latest's p90 outside `$SLA_P90_MS` flips a within-SLA-p50 verdict to `still-reproduces` — tail-latency regressions matter for the issues that name them.
 
 **Hardware-substitution caveat.** Performance numbers are silicon-dependent. When the issue is `Platform: DGX Spark` or `Platform: GB10` and we're measuring on a Brev x86 GPU SKU, the comment must say so explicitly: a Brev p50 of 1.5s on a `H100` does not prove the DGX Spark p50 is fixed. Cap the score at 60 unless the bug is clearly silicon-independent (e.g. an algorithmic regression in user-space JS that would manifest the same on any silicon).
 

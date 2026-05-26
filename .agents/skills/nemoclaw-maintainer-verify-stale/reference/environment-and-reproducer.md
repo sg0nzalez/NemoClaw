@@ -52,11 +52,17 @@ The reporter's reproducer uses the <provider> provider, which requires a real AP
 to verify faithfully. Three options:
 
   1. Provide an API key via file (NEVER on the command line — keys in argv are
-     visible in `ps -ef` to anyone with shell access on either machine). Write
-     the key to a 600-perm file on your laptop:
+     visible in `ps -ef` to anyone with shell access on either machine, and
+     inline `printf '...' '<key>'` leaves the key in shell history). Read the
+     key with a no-echo, no-history prompt, then write it to a 600-perm file
+     on your laptop:
 
-       printf '%s' '<your-key>' > ~/.nvidia-api-key
+       umask 077
+       IFS= read -rs -p 'NVIDIA_API_KEY (input hidden): ' NVIDIA_API_KEY
+       printf '%s' "$NVIDIA_API_KEY" > ~/.nvidia-api-key
+       unset NVIDIA_API_KEY
        chmod 600 ~/.nvidia-api-key
+       echo  # restore newline after the hidden read
 
      The skill copies the file to the Brev box via `brev copy` (encrypted SSH),
      reads it inside the box with `NVIDIA_API_KEY=$(cat ~/.nvidia-api-key)`,
@@ -249,10 +255,11 @@ LOCAL_EXIT=$?
 echo "Local: $LOCAL_VERSION, exit $LOCAL_EXIT"
 ```
 
-Compare local result to the issue's "Actual Result" section using the same match rubric Step 8b applies on baseline:
+Compare local result to the issue's "Actual Result" section using the same match rubric Step 8b applies on baseline. The two ways the predicate can fire route to different verdicts — do not collapse them:
 
-- **Local matches the issue symptom exactly** (same exit code + same diagnostic output) AND the symptom is the post-fix expected output → skip Brev. Use the local transcript as the verified-on-latest evidence. Step 10's comment must say `Environment: local install (<version>) — Brev provisioning skipped, outcome deterministic from CLI surface alone`.
-- **Local result differs from the reported "Actual Result"** → continue to Step 7 and run on Brev. The local environment may be a confound (different OS, dirty config, partial build); remote confirms.
+- **Local matches the reported-bug symptom** (same exit code + same diagnostic output as the issue's "Actual Result") → route to `still-reproduces`. Use the local transcript as the verified-on-latest evidence. Step 10's comment must say `Environment: local install (<version>) — Brev provisioning skipped, bug confirmed live on latest from CLI surface alone`.
+- **Local matches the expected-fixed behavior** (the symptom is gone — exit code and output are what the issue says *should* happen after the fix) → route to `fixed-on-latest`. Use the local transcript as the verified-on-latest evidence. Step 10's comment must say `Environment: local install (<version>) — Brev provisioning skipped, outcome deterministic from CLI surface alone`.
+- **Local result differs from both** (neither the reported symptom nor the expected-fixed behavior) → continue to Step 7 and run on Brev. The local environment may be a confound (different OS, dirty config, partial build); remote confirms.
 - **Local repro errors out for environmental reasons** (`nemoclaw: command not found`, npm link broken) → continue to Step 7. Treat as inconclusive locally, not a verification failure.
 
 **If the predicate does not fire:** proceed to Step 7 normally. Most sandbox-touching bugs need Brev.

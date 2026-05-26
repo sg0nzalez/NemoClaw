@@ -118,7 +118,7 @@ Transcripts and synth-repro scripts are already plain text and skip the pre-pass
 
 **Order matters and the patterns below are in execution order.** Longest, most-specific patterns first; generic catchalls last. Otherwise the catchall masks specific matches and you lose track of what was actually redacted (JWT vs session blob vs random base64).
 
-Patterns live in a fenced block (not a markdown table) because patterns 8 and 9 use regex alternation `|` — markdown tables would treat the literal `|` as a column delimiter, and escaping it as `\|` makes the regex match a literal pipe instead of an alternation, which silently breaks credential redaction.
+Patterns live in a fenced block (not a Markdown table) because patterns 8 and 9 use regex alternation `|` — Markdown tables would treat the literal `|` as a column delimiter, and escaping it as `\|` makes the regex match a literal pipe instead of an alternation, which silently breaks credential redaction.
 
 ```regex
 1.  eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}
@@ -171,7 +171,7 @@ Patterns live in a fenced block (not a markdown table) because patterns 8 and 9 
 | `fixed-on-latest` | **200–300 words** | Header + evidence + verdict + @-mention. Add hardware-substitution caveat or related-failure-mode section only if they shift the maintainer's read. If you're past 300, you're padding. |
 | `wontfix` (by-design) | **200–300 words** | Structurally-fixed + vestigial + what's-not-the-same-bug, each one to two sentences max. The PR ref carries the detail; the comment carries the verdict. |
 | `verify-inconclusive` | 100–200 words | One paragraph naming what the skill couldn't establish. No transcripts beyond a single quoted line. |
-| **Still-reproduces (no label)** | **30–80 words** | The reporter already has the symptom; the maintainer can see the issue is open. The skill is just confirming + setting the TTL marker. **No transcripts** (the issue body has them), **no @-mention** (the reporter knows their bug is real), **no architectural prose**. One sentence stating "skill ran reproducer on `<latest>`, symptom still present" + one sentence on any partial-fix PR if relevant + marker. That's it. |
+| **Still-reproduces (no label)** | **30–80 words** | The reporter already has the symptom; the maintainer can see the issue is open. The skill is just confirming + setting the TTL marker. **No transcripts** (the issue body has them), **no closing reporter @-mention** (the reporter knows their bug is real), **no architectural prose**. One sentence stating "skill ran reproducer on `<latest>`, symptom still present" + one sentence on any partial-fix PR if relevant + marker. That's it. The unanswered-question lead paragraph (rule below) is the one allowed exception when `UNANSWERED_MAINT_LOGIN` is set — it adds one maintainer @-mention as a lead, never a closing pair. |
 
 **Cut, by default:**
 
@@ -188,7 +188,7 @@ Patterns live in a fenced block (not a markdown table) because patterns 8 and 9 
 
 **Mandatory `Verification mode` header line.** All three templates below include a `**Verification mode:**` line in the metadata block, naming what we did and didn't actually run (e.g., "runtime reproduction on Brev <SKU>; baseline + latest both installed and run" for the standard template; "static analysis at the verified-on tag — no runtime reproduction" for the by-design template; "runtime reproduction on Brev <SKU>; bug confirmed live on latest" for still-reproduces). Reader should never have to guess whether the verdict came from real install logs or from static analysis.
 
-**Link-pass self-verification (all templates).** Same rule as Step 8.5d's link pass, applied to every template. Resolve at least one rendered markdown link from each section that has them (`What's structurally fixed` / `Vestigial references` / `Existing CI coverage` for by-design; `Relevant changes since` / transcript code-anchor citations for the standard template) via `gh api repos/NVIDIA/NemoClaw/contents/<path>?ref=<tag>` (returns 200 + base64 if path exists at tag, 404 otherwise) or `curl -fsI <blob-url>`. A 404 on a citation in the rendered comment is worse than no citation — it advertises verification work that didn't actually happen. If any link fails to resolve, fix it or bail to `verify-inconclusive`.
+**Link-pass self-verification (all templates).** Same rule as Step 8.5d's link pass, applied to every template. Resolve at least one rendered Markdown link from each section that has them (`What's structurally fixed` / `Vestigial references` / `Existing CI coverage` for by-design; `Relevant changes since` / transcript code-anchor citations for the standard template) via `gh api repos/NVIDIA/NemoClaw/contents/<path>?ref=<tag>` (returns 200 + base64 if path exists at tag, 404 otherwise) or `curl -fsI <blob-url>`. A 404 on a citation in the rendered comment is worse than no citation — it advertises verification work that didn't actually happen. If any link fails to resolve, fix it or bail to `verify-inconclusive`.
 
 **Mandatory closing block — reporter @-mention with confirmation language.** Every template below **except `Still-reproduces`** ends with an explicit @-mention of the original reporter using this exact shape:
 
@@ -196,7 +196,7 @@ Patterns live in a fenced block (not a markdown table) because patterns 8 and 9 
 
 The skill cannot independently confirm a closed-as-fixed verdict — only the reporter knows whether their original symptom is gone in their environment. The @-mention is what converts a "skill says it's fixed" claim into actionable confirmation work for QA. Customize `<Z>` per case (the version that shipped the fix or `$LATEST`), but never omit the line.
 
-**Mandatory unanswered-question prefix and dual @-mention.** When Step 3 sets `UNANSWERED_MAINT_LOGIN` (a maintainer's question is older than 7 days and the reporter never replied), the verdict comment changes shape in two places:
+**Mandatory unanswered-question prefix and dual @-mention.** When Step 3 sets `UNANSWERED_MAINT_LOGIN` (a maintainer's question is older than 7 days and the reporter never replied), the verdict comment changes shape:
 
 1. **Prepend a lead paragraph** as the very first line of the body, before the `## Stale-issue verification` heading. The lead paragraph is a single line:
 
@@ -204,13 +204,15 @@ The skill cannot independently confirm a closed-as-fixed verdict — only the re
    [@UNANSWERED_MAINT_LOGIN's comment](UNANSWERED_MAINT_URL) from UNANSWERED_MAINT_DATE is still unanswered. Posting independent verification below to unstick the thread.
    ```
 
-   …with the bracketed variables expanded from the values exported by Step 3.
+   …with the bracketed variables expanded from the values exported by Step 3. **Applies to all three templates** (fixed, still-reproduces, by-design).
 
 2. **Replace the closing reporter-only @-mention with a dual @-mention** that names BOTH the maintainer (acknowledging the open question) and the reporter (per the standard confirmation pattern):
 
    > @\<UNANSWERED_MAINT_LOGIN\> — flagging that your question above is still open; the verification below may answer it. @\<reporter\> — please confirm the symptom is gone on a recent build (≥ v0.0.\<Z\>) and reopen with a fresh reproducer if you observe otherwise.
 
-This applies to all three templates (fixed, still-reproduces, by-design). The skill becomes the *unsticking voice* on a thread that has gone quiet — never a clueless interruption when discussion is fresh (Step 3 already filtered the within-7-day case).
+   **Applies to `fixed-on-latest` and `by-design` only.** Still-reproduces has no closing reporter @-mention by design (see L174), so there's nothing to replace; its only nod to the unanswered maintainer is the lead paragraph from step 1.
+
+The skill becomes the *unsticking voice* on a thread that has gone quiet — never a clueless interruption when discussion is fresh (Step 3 already filtered the within-7-day case).
 
 **Comment template (fixed / inconclusive — bug not reproduced on latest):**
 
@@ -262,43 +264,24 @@ This applies to all three templates (fixed, still-reproduces, by-design). The sk
 
 @<reporter> — please confirm the symptom is gone on a recent build (≥ v0.0.<Z>) and reopen with a fresh reproducer if you observe otherwise.
 
-<!-- nemoclaw-verify-stale v1 2026-05-12 -->
+<!-- nemoclaw-verify-stale v1 YYYY-MM-DD -->
 ````
 
-**Comment template (still reproduces — Step 9 special case):**
+**Comment template (still reproduces — Step 9 special case).** Keep this minimal — per L174 it caps at 30–80 words, drops transcripts (issue body has them), and omits the closing reporter @-mention (the reporter knows their own bug is real). Only the unanswered-question lead paragraph (when fired) adds an @-mention; no closing dual @-mention even then.
 
 ````markdown
 ## Stale-issue verification — still reproducible
 
 **Reported on:** v0.0.31
-**Verified on:** v0.0.34 (commit abc1234)
-**Verification mode:** runtime reproduction on Brev `<instance-class>` — baseline confirmed the symptom matches the issue; latest (v0.0.34) also produced the symptom. Bug is still live.
-**Environment:** Brev <instance-class> (<instance-type>) / Ubuntu 22.04
+**Verified on:** v0.0.34
+**Verification mode:** runtime reproduction on Brev `<instance-class>` — bug confirmed live on latest.
 
-The skill ran the reported reproducer on v0.0.34 and observed the same bug symptom described in this issue. The bug is still live.
+Skill ran the reported reproducer on v0.0.34 and observed the same symptom. No label applied; will re-verify on the next weekly pass.
 
-No label applied. Will re-verify automatically next weekly run; if a fix lands in the interim, the next pass catches it.
-
-@<reporter> — please confirm the symptom still matches your observation on v0.0.<Y> and reopen with any updated reproducer or environment details if it has shifted.
-
-<details><summary>Baseline transcript (validated reproducer)</summary>
-
-```text
-<baseline transcript>
-```
-
-</details>
-
-<details><summary>Latest transcript (bug still observed)</summary>
-
-```text
-<latest transcript>
-```
-
-</details>
-
-<!-- nemoclaw-verify-stale v1 2026-05-12 -->
+<!-- nemoclaw-verify-stale v1 YYYY-MM-DD -->
 ````
+
+If a partial-fix PR is in flight that targets the same surface, add one sentence naming it between the verification line and the marker: `Partial fix tracked in #NNNN (not yet released).` Keep the total under 80 words.
 
 The trailing HTML comment is the **idempotency marker** Step 3 looks for. Always include today's date in `YYYY-MM-DD` format so the candidate filter can apply the 7-day TTL.
 
