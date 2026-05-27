@@ -47,6 +47,9 @@ DRAFT-*.md
 key.json
 secrets.json
 secrets.yaml
+# Dogfood operator's local env file with BREV_API_TOKEN / GH_TOKEN. The
+# .sh.example template is tracked; the filled-in copy must never be.
+scripts/dogfood-env.sh
 service-account*.json
 token.json
 .e2e/
