@@ -274,23 +274,14 @@ resolve_onboarded_agent() {
 }
 
 restore_onboard_forward_after_post_checks() {
-  local sandbox_name agent_name agent_display port openshell_bin attempt state_dir pid_file watcher_script watcher_pid
+  local sandbox_name agent_name port state_dir pid_file
   sandbox_name="$(resolve_default_sandbox_name)"
   agent_name="$(resolve_onboarded_agent)"
-  agent_display="$(agent_display_name "$agent_name")"
 
   case "$agent_name" in
     hermes) port=8642 ;;
     *) return 0 ;;
   esac
-
-  if [[ -n "${NEMOCLAW_OPENSHELL_BIN:-}" && -x "$NEMOCLAW_OPENSHELL_BIN" ]]; then
-    openshell_bin="$NEMOCLAW_OPENSHELL_BIN"
-  elif command_exists openshell; then
-    openshell_bin="$(command -v openshell)"
-  else
-    return 0
-  fi
 
   state_dir="${HOME}/.nemoclaw/state"
   mkdir -p "$state_dir" 2>/dev/null || true
@@ -310,86 +301,9 @@ restore_onboard_forward_after_post_checks() {
     rm -f "$pid_file"
   fi
 
-  stop_agent_forward_if_owned() {
-    local forward_list owner status
-    "$openshell_bin" forward stop "$port" "$sandbox_name" >/dev/null 2>&1 && return 0
-    forward_list="$("$openshell_bin" forward list 2>/dev/null || true)"
-    owner="$(awk -v sandbox="$sandbox_name" -v port="$port" '
-      $1 == sandbox && $3 == port {
-        print $1
-        exit
-      }
-    ' <<<"$forward_list")"
-    status="$(awk -v sandbox="$sandbox_name" -v port="$port" '
-      $1 == sandbox && $3 == port {
-        print tolower($5)
-        exit
-      }
-    ' <<<"$forward_list")"
-    if [[ "$owner" == "$sandbox_name" && ("$status" == "running" || "$status" == "active") ]]; then
-      "$openshell_bin" forward stop "$port" "$sandbox_name" >/dev/null 2>&1 || true
-    fi
-  }
-
-  for attempt in 1 2 3; do
-    stop_agent_forward_if_owned
-    if [ "$attempt" -gt 1 ]; then
-      sleep 2
-    fi
-    "$openshell_bin" forward start --background "$port" "$sandbox_name" >/dev/null 2>&1 || true
-    watcher_pid=""
-    if [[ "${NEMOCLAW_SKIP_FORWARD_WATCHER:-}" != "1" ]] && command_exists node; then
-      watcher_script="${pid_file}.js"
-      cat >"$watcher_script" <<'NODE'
-const { spawnSync } = require("child_process");
-const [openshellBin, port, sandboxName] = process.argv.slice(2);
-function run(args) {
-  spawnSync(openshellBin, args, { stdio: "ignore" });
-}
-function healthy() {
-  return spawnSync("curl", ["-sf", "--max-time", "3", `http://127.0.0.1:${port}/health`], {
-    stdio: "ignore",
-  }).status === 0;
-}
-function tick() {
-  if (healthy()) return;
-  run(["forward", "stop", port, sandboxName]);
-  run(["forward", "start", "--background", port, sandboxName]);
-}
-tick();
-setInterval(tick, 10_000);
-NODE
-      node -e '
-        const { spawn } = require("child_process");
-        const fs = require("fs");
-        const [script, openshellBin, port, sandboxName, pidFile] = process.argv.slice(1);
-        const child = spawn(process.execPath, [script, openshellBin, port, sandboxName], {
-          detached: true,
-          stdio: "ignore",
-        });
-        fs.writeFileSync(pidFile, String(child.pid) + "\n");
-        child.unref();
-      ' "$watcher_script" "$openshell_bin" "$port" "$sandbox_name" "$pid_file" \
-        >/dev/null 2>&1 || true
-    fi
-    sleep 4
-    if command_exists curl \
-      && curl -sf --max-time 3 "http://127.0.0.1:${port}/health" >/dev/null 2>&1; then
-      return 0
-    fi
-    watcher_pid="$(cat "$pid_file" 2>/dev/null || true)"
-    if ! command_exists curl && [[ -n "$watcher_pid" ]] && kill -0 "$watcher_pid" >/dev/null 2>&1; then
-      return 0
-    fi
-    if [[ -n "$watcher_pid" ]]; then
-      kill "$watcher_pid" >/dev/null 2>&1 || true
-    fi
-    rm -f "$pid_file"
-  done
-
-  warn "Could not restore ${agent_display} host forward on port ${port}."
-  warn "Run: openshell forward start --background ${port} ${sandbox_name}"
-  return 1
+  # gRPC-only NemoClaw owns dashboard forwarding from the CLI itself. The
+  # installer must not resurrect OpenShell's SSH-backed forward helper here.
+  return 0
 }
 
 # step N "Description" — numbered section header

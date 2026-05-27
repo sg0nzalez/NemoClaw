@@ -24,7 +24,14 @@ function shellQuoteArg(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
-function legacyFakeRemoteCommand(argv: readonly string[]): string {
+function legacyFakeRemoteCommand(argv: readonly string[], input: Buffer = Buffer.alloc(0)): string {
+  if (
+    input.length > 0 &&
+    (argv[0] === "sh" || argv[0] === "bash") &&
+    (argv[1] === "-s" || argv[1] === "-")
+  ) {
+    return input.toString("utf-8");
+  }
   if ((argv[0] === "sh" || argv[0] === "bash") && (argv[1] === "-c" || argv[1] === "-lc")) {
     return argv[2] ?? "";
   }
@@ -43,7 +50,7 @@ function runLegacyFakeSshTransport(
   }
 
   const sshBin = process.env.NEMOCLAW_GRPC_TEST_FAKE_SSH_BIN || "ssh";
-  const remoteCommand = legacyFakeRemoteCommand(request.argv);
+  const remoteCommand = legacyFakeRemoteCommand(request.argv, input);
   const helperArgs = [`openshell-${request.sandboxName}`, remoteCommand];
   const helperCommand = /\.(?:c|m)?js$/i.test(sshBin) ? process.execPath : sshBin;
   const helperArgv = helperCommand === process.execPath ? [sshBin, ...helperArgs] : helperArgs;

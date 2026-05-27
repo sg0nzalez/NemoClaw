@@ -13,6 +13,7 @@ const PRODUCTION_TARGETS = [
   "src/lib/state/sandbox.ts",
   "src/lib/skill-install.ts",
   "src/lib/onboard/dashboard.ts",
+  "src/lib/onboard/dashboard-access.ts",
   "src/lib/onboard/sandbox-verification-exec.ts",
   "src/lib/sandbox/version.ts",
   "src/lib/share-command.ts",
@@ -20,6 +21,7 @@ const PRODUCTION_TARGETS = [
   "src/lib/status-command-deps.ts",
   "src/lib/tunnel/services.ts",
   "src/lib/verify-deployment.ts",
+  "scripts/install.sh",
 ];
 
 const BANNED = [
