@@ -80,6 +80,12 @@ export interface ParityInventoryValidationResult {
   errors: string[];
 }
 
+export interface ParityInventoryValidationInput {
+  entries: ParityInventoryEntry[];
+  requiredLegacyScripts?: string[];
+  sourceRoot?: string;
+}
+
 export function inferPreviewParityStatus(contract: ScenarioContract): ParityStatus {
   const assertions = contract.assertions ?? [];
   if (assertions.length === 0 || assertions.every((assertion) => assertion.previewOnly)) {
@@ -88,10 +94,9 @@ export function inferPreviewParityStatus(contract: ScenarioContract): ParityStat
   return "partial";
 }
 
-export function validateParityInventory(input: {
-  entries: ParityInventoryEntry[];
-  requiredLegacyScripts?: string[];
-}): ParityInventoryValidationResult {
+export function validateParityInventory(
+  input: ParityInventoryValidationInput,
+): ParityInventoryValidationResult {
   const errors: string[] = [];
   const seenScripts = new Set<string>();
 

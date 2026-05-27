@@ -1,0 +1,141 @@
+// SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+import type { ParityInventoryEntry, ScenarioContractAssertion } from "./parity.ts";
+
+const AUDIT = "current-main-e2e-coverage-audit.md";
+
+export function getPhaseParityEntries(phase: number): ParityInventoryEntry[] {
+  if (phase === 3) return phase3Entries();
+  return [];
+}
+
+function phase3Entries(): ParityInventoryEntry[] {
+  return [
+    entry("test/e2e/test-full-e2e.sh", "onboarding.full.cloud-openclaw", {
+      manifest: { scenarioId: "ubuntu-repo-cloud-openclaw", installSource: "repo-current" },
+      fixtures: ["direct-cloud-prompt", "sandbox-route-prompt", "agent-mediated-prompt"],
+      actions: ["install.repo-current", "onboard.openclaw"],
+      assertions: [
+        assertion("onboarding.cloud.direct-provider-chat", "validation_suites/inference/cloud/01-chat-completion.sh", "live"),
+        assertion("onboarding.cloud.sandbox-inference-local-chat", "validation_suites/inference/cloud/02-inference-local-from-sandbox.sh", "sandbox"),
+        assertion("onboarding.cloud.agent-mediated-response", "validation_suites/baseline-onboarding/02-route-and-smoke.sh", "sandbox"),
+      ],
+    }),
+    entry("test/e2e/test-cloud-onboard-e2e.sh", "onboarding.cloud.openclaw.cli-state", {
+      manifest: { scenarioId: "ubuntu-repo-cloud-openclaw", installSource: "repo-current" },
+      fixtures: ["nvidia-credential-ref", "gateway-state-reader"],
+      actions: ["install.repo-current", "onboard.openclaw"],
+      assertions: [
+        assertion("onboarding.cloud.cli-openshell-available", "validation_suites/baseline-onboarding/00-cli-and-openshell.sh", "host"),
+        assertion("onboarding.cloud.registry-session-provider-model-policies", "validation_suites/onboarding/state/00-registry-provider-model-policies.sh", "host"),
+      ],
+    }),
+    entry("test/e2e/test-cloud-inference-e2e.sh", "onboarding.cloud.inference-surfaces", {
+      manifest: { scenarioId: "ubuntu-repo-cloud-openclaw", installSource: "repo-current" },
+      fixtures: ["direct-cloud-prompt", "sandbox-route-prompt"],
+      actions: ["onboard.openclaw"],
+      assertions: [
+        assertion("onboarding.cloud.direct-provider-chat", "validation_suites/inference/cloud/01-chat-completion.sh", "live"),
+        assertion("onboarding.cloud.sandbox-inference-local-chat", "validation_suites/inference/cloud/02-inference-local-from-sandbox.sh", "sandbox"),
+      ],
+    }),
+    entry("test/e2e/test-double-onboard.sh", "onboarding.double.gateway-reuse", {
+      manifest: { scenarioId: "ubuntu-repo-openai-compatible-double-onboard", installSource: "repo-current" },
+      fixtures: ["fake-openai-endpoint", "gateway-port-probe"],
+      actions: ["onboard.openclaw", "onboard.openclaw.second-pass"],
+      assertions: [
+        assertion("onboarding.double.gateway-reuse", "validation_suites/baseline-onboarding/01-sandbox-state.sh", "host"),
+        assertion("onboarding.double.no-port-conflict", "validation_suites/sandbox/lifecycle/00-gateway-health.sh", "host"),
+      ],
+    }),
+    entry("test/e2e/test-onboard-negative-paths.sh", "onboarding.negative.invalid-key-port-conflict", {
+      manifest: { scenarioId: "ubuntu-invalid-nvidia-key-negative", installSource: "repo-current" },
+      fixtures: ["bad-key", "gateway-port-holder"],
+      actions: ["onboard.expect-failure"],
+      assertions: [
+        assertion("onboarding.negative.failure-message", "validation_suites/onboarding/negative/00-failure-message.sh", "host"),
+        assertion("onboarding.negative.no-stack-trace", "validation_suites/onboarding/negative/01-no-stack-trace.sh", "host"),
+        assertion("onboarding.negative.no-side-effects", "validation_suites/onboarding/negative/02-no-side-effects.sh", "host"),
+      ],
+    }),
+    entry("test/e2e/test-onboard-resume.sh", "onboarding.resume.after-interrupt", {
+      manifest: { scenarioId: "ubuntu-openclaw-resume-after-interrupt", installSource: "repo-current" },
+      fixtures: ["interrupted-onboard-session"],
+      actions: ["onboard.resume"],
+      assertions: [
+        assertion("onboarding.resume.cached-steps-skipped", "validation_suites/onboarding/resume/00-cached-steps-skipped.sh", "host"),
+        assertion("onboarding.resume.session-completed", "validation_suites/onboarding/resume/01-session-completed.sh", "host"),
+      ],
+    }),
+    entry("test/e2e/test-onboard-repair.sh", "onboarding.repair.existing-config", {
+      manifest: { scenarioId: "ubuntu-openclaw-repair-existing-config", installSource: "repo-current" },
+      fixtures: ["missing-recorded-sandbox", "conflicting-resume-request"],
+      actions: ["onboard.repair"],
+      assertions: [
+        assertion("onboarding.repair.recreates-missing-sandbox", "validation_suites/onboarding/repair/00-recreates-missing-sandbox.sh", "host"),
+        assertion("onboarding.repair.rejects-conflicting-resume", "validation_suites/onboarding/repair/01-rejects-conflicting-resume.sh", "host"),
+      ],
+    }),
+    entry("test/e2e/test-launchable-smoke.sh", "installer.launchable.smoke", {
+      manifest: { scenarioId: "brev-launchable-cloud-openclaw", installSource: "launchable" },
+      fixtures: ["launchable-clone", "launchable-sentinel"],
+      actions: ["install.launchable", "onboard.openclaw"],
+      assertions: [
+        assertion("installer.launchable.artifacts", "validation_suites/installer/launchable/00-artifacts.sh", "host"),
+        assertion("installer.launchable.sentinel-ready", "validation_suites/installer/launchable/01-sentinel-ready.sh", "host"),
+      ],
+    }),
+    entry("test/e2e/test-spark-install.sh", "installer.dgx-spark.setup-only", {
+      noManifestReason: "setup-only installer scenario for DGX Spark host",
+      manifest: undefined,
+      fixtures: ["spark-host-preflight", "public-installer-ref"],
+      actions: ["install.public-curl"],
+      assertions: [
+        assertion("installer.spark.install-source-ref", "validation_suites/installer/spark/00-install-source-ref.sh", "host"),
+        assertion("installer.spark.cli-available", "validation_suites/installer/spark/01-cli-available.sh", "host"),
+      ],
+    }),
+  ];
+}
+
+function entry(
+  legacyScript: string,
+  assertionId: string,
+  opts: {
+    manifest?: Record<string, unknown>;
+    noManifestReason?: string;
+    fixtures: string[];
+    actions: string[];
+    assertions: ScenarioContractAssertion[];
+  },
+): ParityInventoryEntry {
+  return {
+    legacyScript,
+    assertionId,
+    owner: "scenario-framework",
+    sourceAudit: `${AUDIT}#top-level-e2e-assertion-audit`,
+    status: "mapped-hermetic",
+    contract: {
+      environment: { os: "ubuntu", runner: "e2e", requirements: ["docker", "node", "bash"] },
+      ...(opts.manifest ? { manifest: opts.manifest } : {}),
+      ...(opts.noManifestReason ? { noManifestReason: opts.noManifestReason } : {}),
+      fixtures: opts.fixtures.map((id) => ({ id, cleanup: "teardown" })),
+      runtimeActions: opts.actions.map((id, index) => ({ id, order: index + 1 })),
+      assertions: opts.assertions,
+    },
+  };
+}
+
+function assertion(
+  assertionId: string,
+  implementation: string,
+  boundary: ScenarioContractAssertion["boundary"],
+): ScenarioContractAssertion {
+  return {
+    assertionId,
+    implementation,
+    evidencePath: `.e2e/assertions/${assertionId}.json`,
+    boundary,
+  };
+}
