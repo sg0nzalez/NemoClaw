@@ -8,7 +8,50 @@ const AUDIT = "current-main-e2e-coverage-audit.md";
 export function getPhaseParityEntries(phase: number): ParityInventoryEntry[] {
   if (phase === 3) return phase3Entries();
   if (phase === 4) return phase4Entries();
+  if (phase === 5) return phase5Entries();
   return [];
+}
+
+function phase5Entries(): ParityInventoryEntry[] {
+  return [
+    entry("test/e2e/test-gpu-e2e.sh", "ollama.gpu.full", {
+      manifest: { scenarioId: "local-ollama-openclaw-gpu-full", installSource: "repo-current" },
+      fixtures: ["ollama-install-start-model-pull", "docker-container-reachability-probe"],
+      actions: ["onboard.local-ollama-openclaw"],
+      assertions: [
+        assertion("ollama.gpu.sandbox-status-gpu-enabled", "validation_suites/inference/ollama-gpu/00-gpu-status.sh", "sandbox"),
+        assertion("ollama.gpu.install-log-proof-markers", "validation_suites/inference/ollama-gpu/01-install-log-proof.sh", "host"),
+        assertion("ollama.gpu.host-api-reachable", "validation_suites/inference/ollama-gpu/00-ollama-models-health.sh", "host"),
+        assertion("ollama.gpu.inference-local-chat", "validation_suites/inference/ollama-gpu/01-ollama-chat-completion.sh", "sandbox"),
+      ],
+    }),
+    entry("test/e2e/test-gpu-double-onboard.sh", "ollama.gpu.reonboard", {
+      manifest: { scenarioId: "local-ollama-openclaw-reonboard", installSource: "repo-current" },
+      fixtures: ["ollama-auth-proxy", "persisted-token", "divergent-token"],
+      actions: ["onboard.local-ollama-openclaw", "onboard.local-ollama-openclaw.second-pass"],
+      assertions: [
+        assertion("ollama.reonboard.token-matches-live-proxy", "validation_suites/inference/ollama-auth-proxy/02-reonboard-token-match.sh", "host"),
+        assertion("ollama.reonboard.inference-local-repeat-chat", "validation_suites/inference/ollama-gpu/01-ollama-chat-completion.sh", "sandbox"),
+      ],
+    }),
+    entry("test/e2e/test-ollama-auth-proxy-e2e.sh", "ollama.proxy.host-only-auth", {
+      noManifestReason: "host-only auth proxy scenario",
+      fixtures: ["ollama-auth-proxy", "persisted-token"],
+      actions: ["ollama.proxy.start", "ollama.proxy.restart"],
+      assertions: [
+        assertion("ollama.proxy.rejects-unauthenticated-and-wrong-token", "validation_suites/inference/ollama-auth-proxy/01-auth-enforcement.sh", "host"),
+        assertion("ollama.proxy.accepts-persisted-token", "validation_suites/inference/ollama-auth-proxy/00-proxy-reachable.sh", "host"),
+        assertion("ollama.proxy.token-file-0600", "validation_suites/inference/ollama-auth-proxy/03-token-file-mode.sh", "host"),
+        assertion("ollama.proxy.restart-stable-token", "validation_suites/inference/ollama-auth-proxy/04-restart-stable-token.sh", "host"),
+      ],
+    }),
+  ].map((entry) => {
+    entry.contract = {
+      ...entry.contract,
+      environment: { os: "ubuntu", runner: "self-hosted-gpu", requirements: ["docker-cdi", "nvidia-smi"] },
+    };
+    return entry;
+  });
 }
 
 function phase4Entries(): ParityInventoryEntry[] {
