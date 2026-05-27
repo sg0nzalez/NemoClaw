@@ -381,7 +381,7 @@ Add or verify manifests for:
 - Kimi compatibility is not mapped unless trajectory/tool-call semantics are asserted.
 - Inference switch is not mapped unless route state, registry/session state, config hash/shape, and live post-switch request are covered.
 
-## Phase 5: Local GPU and Ollama Parity
+## Phase 5: Local GPU and Ollama Parity [COMPLETED: e4ee216d4]
 
 ### Audit sections covered
 
