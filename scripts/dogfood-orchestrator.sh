@@ -79,8 +79,12 @@ DOGFOOD_CONFIRM_BEFORE_VERIFY="${DOGFOOD_CONFIRM_BEFORE_VERIFY:-0}"
 info "Phase 2 — CLI install"
 
 install_jq() {
-  apt-get update -y >/dev/null 2>&1 && apt-get install -y jq >/dev/null 2>&1 \
-    || fail "failed to install jq via apt; sandbox base image may need updating."
+  if ! apt-get update -y >/dev/null 2>&1; then
+    fail "apt-get update failed; can't install jq."
+  fi
+  if ! apt-get install -y jq >/dev/null 2>&1; then
+    fail "failed to install jq via apt; sandbox base image may need updating."
+  fi
 }
 
 install_gh() {
@@ -89,25 +93,36 @@ install_gh() {
     | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg 2>/dev/null
   chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
   echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
-    > /etc/apt/sources.list.d/github-cli.list
+    >/etc/apt/sources.list.d/github-cli.list
   apt-get update -y >/dev/null 2>&1
-  apt-get install -y gh >/dev/null 2>&1 \
-    || fail "failed to install gh via apt."
+  if ! apt-get install -y gh >/dev/null 2>&1; then
+    fail "failed to install gh via apt."
+  fi
 }
 
 install_brev() {
   # Brev CLI install (one-shot script from brevdev).
-  curl -fsSL https://raw.githubusercontent.com/brevdev/brev-cli/main/install.sh \
-    | bash >/dev/null 2>&1 \
-    || fail "failed to install brev CLI."
+  if ! curl -fsSL https://raw.githubusercontent.com/brevdev/brev-cli/main/install.sh \
+    | bash >/dev/null 2>&1; then
+    fail "failed to install brev CLI."
+  fi
   # The installer drops the binary into /root/.local/bin or similar — make sure
   # it's on PATH for the rest of this script and any child agent processes.
   export PATH="$HOME/.local/bin:$PATH"
 }
 
-command -v jq >/dev/null 2>&1 || { info "  installing jq..."; install_jq; }
-command -v gh >/dev/null 2>&1 || { info "  installing gh..."; install_gh; }
-command -v brev >/dev/null 2>&1 || { info "  installing brev..."; install_brev; }
+command -v jq >/dev/null 2>&1 || {
+  info "  installing jq..."
+  install_jq
+}
+command -v gh >/dev/null 2>&1 || {
+  info "  installing gh..."
+  install_gh
+}
+command -v brev >/dev/null 2>&1 || {
+  info "  installing brev..."
+  install_brev
+}
 command -v openclaw >/dev/null 2>&1 || fail "openclaw not in PATH — the maintainer sandbox image is missing OpenClaw."
 
 # The sandbox is a fresh container — gh reads GH_TOKEN from env automatically,
@@ -121,7 +136,7 @@ if [ ! -f "$HOME/.brev/credentials.json" ] && [ -n "${BREV_API_TOKEN:-}" ]; then
   mkdir -p "$HOME/.brev"
   jq -n --arg access "$BREV_API_TOKEN" --arg refresh "${BREV_REFRESH_TOKEN:-}" \
     'if $refresh == "" then {access_token: $access} else {access_token: $access, refresh_token: $refresh} end' \
-    > "$HOME/.brev/credentials.json"
+    >"$HOME/.brev/credentials.json"
   chmod 600 "$HOME/.brev/credentials.json"
 fi
 
@@ -149,17 +164,33 @@ esac
 brev ls >/dev/null 2>&1 \
   || fail "brev ls failed; BREV_API_TOKEN invalid or the brev policy preset isn't allowing egress."
 
-# Ollama reachability + model presence.
-if ! curl -sf -m 5 "$OLLAMA_URL/api/tags" >/dev/null 2>&1; then
-  fail "Ollama not reachable at $OLLAMA_URL. Confirm ollama is running on the host AND the local-inference policy preset is selected."
-fi
-if ! curl -sf -m 5 "$OLLAMA_URL/api/tags" \
-   | jq -e --arg m "$OLLAMA_MODEL" '.models[] | select(.name == $m or .name == ($m + ":latest"))' >/dev/null; then
-  warn "Ollama model '$OLLAMA_MODEL' not loaded on host. Run: ollama pull $OLLAMA_MODEL"
-  fail "missing model on host"
+# Ollama-on-host reachability check fires only when the maintainer agent is
+# actually using Ollama (NEMOCLAW_PROVIDER=ollama). For Anthropic/NVIDIA/etc.
+# the agent's inference doesn't depend on host Ollama; the verification
+# sandboxes the skill provisions may still pull their own Ollama for some
+# reproducers, but that's a per-candidate concern handled by the skill.
+if [ "${NEMOCLAW_PROVIDER:-}" = "ollama" ]; then
+  if ! curl -sf -m 5 "$OLLAMA_URL/api/tags" >/dev/null 2>&1; then
+    fail "Ollama not reachable at $OLLAMA_URL. Confirm ollama is running on the host AND the local-inference policy preset is selected."
+  fi
+  if ! curl -sf -m 5 "$OLLAMA_URL/api/tags" \
+    | jq -e --arg m "$OLLAMA_MODEL" '.models[] | select(.name == $m or .name == ($m + ":latest"))' >/dev/null; then
+    warn "Ollama model '$OLLAMA_MODEL' not loaded on host. Run: ollama pull $OLLAMA_MODEL"
+    fail "missing model on host"
+  fi
+  info "  ollama + model reachable"
 fi
 
-info "  gh, brev, ollama-model all reachable."
+# Anthropic-specific check: key is required and the onboard's curated model
+# list rejects mistyped names with a confusing error message — surface it here.
+if [ "${NEMOCLAW_PROVIDER:-}" = "anthropic" ]; then
+  if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+    fail "ANTHROPIC_API_KEY is not set; required for NEMOCLAW_PROVIDER=anthropic. Export it in your shell and re-source dogfood-env.sh."
+  fi
+  info "  ANTHROPIC_API_KEY set (length=${#ANTHROPIC_API_KEY}); model=${NEMOCLAW_MODEL:-claude-sonnet-4-6}"
+fi
+
+info "  gh, brev, agent-provider creds all reachable."
 
 # -----------------------------------------------------------------------------
 # Phase 4 — log dir + skill workspace install
@@ -172,7 +203,7 @@ RUN_ID="$(date +%Y%m%d-%H%M%S)"
 RUN_DIR="$VERIFY_STALE_LOG_DIR/$RUN_ID"
 mkdir -p "$RUN_DIR"
 ln -sfn "$RUN_DIR" "$VERIFY_STALE_LOG_DIR/latest"
-echo 0 > "$VERIFY_STALE_LOG_DIR/.spent-usd"
+echo 0 >"$VERIFY_STALE_LOG_DIR/.spent-usd"
 
 # Snapshot config for the run.
 jq -n \
@@ -188,7 +219,7 @@ jq -n \
   '{run_id: $run_id, started_at: $started, auto_approve: $auto, dry_run: $dry,
     batch_cap: $cap, log_dir: $log_dir, budget_usd: $budget,
     force_ollama_only: $ollama_only, ollama_model: $model}' \
-  > "$RUN_DIR/run-config.json"
+  >"$RUN_DIR/run-config.json"
 
 # Symlink the skill into the agent's per-workspace skills dir so
 # `openclaw agent` auto-loads it. The agent looks at <workspace>/skills (per
@@ -208,7 +239,8 @@ info "  skill symlinked at $WORKSPACE_SKILLS/nemoclaw-maintainer-verify-stale"
 
 info "Phase 5 — candidate selection (max $VERIFY_STALE_BATCH_CAP)"
 
-LIST_PROMPT=$(cat <<EOF
+LIST_PROMPT=$(
+  cat <<EOF
 Load the nemoclaw-maintainer-verify-stale skill. Execute Step 1 (select
 candidates), Step 3 (filter), and Step 4 (parse reported version) ONLY —
 do not proceed to Step 5+. Honor:
@@ -220,7 +252,7 @@ EOF
 )
 
 # Capture stdout to a file so we can grep the JSON line.
-$OPENCLAW_AGENT_CMD --json --message "$LIST_PROMPT" > "$RUN_DIR/candidates.raw" 2>&1 \
+$OPENCLAW_AGENT_CMD --json --message "$LIST_PROMPT" >"$RUN_DIR/candidates.raw" 2>&1 \
   || warn "candidate-selection agent returned non-zero; trying to parse output anyway"
 
 # Extract the JSON array. The agent's --json output wraps text; find the array.
@@ -251,7 +283,7 @@ if [ "$CANDIDATE_COUNT" -eq 0 ]; then
 fi
 
 info "  candidates: $CANDIDATE_COUNT — $(echo "$CANDIDATES" | jq -r 'map("#" + (.issue | tostring)) | join(" ")')"
-echo "$CANDIDATES" > "$RUN_DIR/candidates.json"
+echo "$CANDIDATES" >"$RUN_DIR/candidates.json"
 
 # Optional pre-verify confirm gate. Reads from /dev/tty so the prompt
 # works even with NEMOCLAW_NON_INTERACTIVE=1 set. If /dev/tty is not a
@@ -268,7 +300,7 @@ if [ "$DOGFOOD_CONFIRM_BEFORE_VERIFY" = "1" ] && [ -r /dev/tty ]; then
   echo
   read -r -p "Type 'yes' to proceed, anything else to abort: " ans </dev/tty
   case "$ans" in
-    yes|YES|y|Y) info "  confirmed; proceeding to Phase 6" ;;
+    yes | YES | y | Y) info "  confirmed; proceeding to Phase 6" ;;
     *) fail "aborted by operator after candidate listing" ;;
   esac
 fi
@@ -301,7 +333,8 @@ echo "$CANDIDATES" | jq -c '.[]' | while IFS= read -r candidate; do
   fi
 
   # Single-issue agent invocation. Skill runs Steps 5-12 for this one issue.
-  PROMPT=$(cat <<EOF
+  PROMPT=$(
+    cat <<EOF
 Load the nemoclaw-maintainer-verify-stale skill. Run single-issue mode on
 issue #$issue (reported version: $reported). Honor the env vars set by the
 operator: VERIFY_STALE_AUTO_APPROVE=$VERIFY_STALE_AUTO_APPROVE,
@@ -324,12 +357,12 @@ EOF
   # is one instance name per line. Filter for our verify-stale- prefix and
   # save as a newline-separated list (the wrap-up's diff is line-based).
   brev ls 2>/dev/null | grep '^verify-stale-' \
-    > "$RUN_DIR/$issue/brev-pre.txt" 2>/dev/null \
-    || : > "$RUN_DIR/$issue/brev-pre.txt"
+    >"$RUN_DIR/$issue/brev-pre.txt" 2>/dev/null \
+    || : >"$RUN_DIR/$issue/brev-pre.txt"
 
   candidate_start_epoch=$(date +%s)
   set +e
-  $OPENCLAW_AGENT_CMD --json --message "$PROMPT" > "$RUN_DIR/$issue/agent.log" 2>&1
+  $OPENCLAW_AGENT_CMD --json --message "$PROMPT" >"$RUN_DIR/$issue/agent.log" 2>&1
   agent_rc=$?
   set -e
   candidate_end_epoch=$(date +%s)
@@ -340,16 +373,16 @@ EOF
   # (it currently doesn't), and is conservative-by-design — the operator
   # tunes DOGFOOD_BREV_HOURLY_USD to over-estimate the actual SKU.
   candidate_cost=$(awk -v sec="$wallclock_sec" -v rate="$DOGFOOD_BREV_HOURLY_USD" \
-    'BEGIN { printf "%d", (sec/3600.0)*rate + 0.999 }')  # ceil
+    'BEGIN { printf "%d", (sec/3600.0)*rate + 0.999 }') # ceil
   new_spent=$((spent + candidate_cost))
-  echo "$new_spent" > "$VERIFY_STALE_LOG_DIR/.spent-usd"
+  echo "$new_spent" >"$VERIFY_STALE_LOG_DIR/.spent-usd"
 
   # Persist per-candidate cost + timing so the run-summary aggregator picks
   # it up. We write to a sibling cost.json (not metadata.json) so we don't
   # clobber anything the skill writes.
   brev ls 2>/dev/null | grep '^verify-stale-' \
-    > "$RUN_DIR/$issue/brev-post.txt" 2>/dev/null \
-    || : > "$RUN_DIR/$issue/brev-post.txt"
+    >"$RUN_DIR/$issue/brev-post.txt" 2>/dev/null \
+    || : >"$RUN_DIR/$issue/brev-post.txt"
 
   # `date -u -r <epoch>` is BSD/macOS syntax; `date -u -d @<epoch>` is GNU.
   # The sandbox runs Linux (GNU) but a maintainer might smoke-test on a mac,
@@ -371,7 +404,7 @@ EOF
     '{wallclock_sec: $sec, cost_usd: $cost, hourly_rate_usd: $rate,
       agent_exit: $rc, started_at: $start, ended_at: $end,
       cost_method: "wallclock × hourly_rate (conservative; not actual brev billing)"}' \
-    > "$RUN_DIR/$issue/cost.json"
+    >"$RUN_DIR/$issue/cost.json"
 
   info "    completed in ${wallclock_sec}s, cost +\$$candidate_cost (cumulative \$$new_spent / \$$BREV_BUDGET_USD)"
 
@@ -486,7 +519,7 @@ GIST_URL=$(gh gist create "${GIST_FLAGS[@]}" \
 
 if [ -n "$GIST_URL" ]; then
   info "  Wrap-up Gist: $GIST_URL"
-  echo "$GIST_URL" > "$RUN_DIR/gist-url.txt"
+  echo "$GIST_URL" >"$RUN_DIR/gist-url.txt"
 else
   warn "  Gist creation failed — full run artifacts remain at $RUN_DIR on the persistent volume."
 fi

@@ -108,13 +108,27 @@ export VERIFY_STALE_FORCE_OLLAMA_ONLY="1"
 # line 577 and elsewhere.)
 export NEMOCLAW_NON_INTERACTIVE="1"
 
-# Tells `nemoclaw onboard` to pick the Ollama provider in non-interactive
-# mode. The canonical blueprint doesn't declare an Ollama profile, but the
-# onboard code accepts "ollama" as a valid NEMOCLAW_PROVIDER value (see
-# src/lib/onboard/providers.ts) and configures the sandbox to use Ollama at
-# the host gateway. Without this, non-interactive onboard falls back to the
-# default `build` provider which demands a real NVIDIA_API_KEY.
-export NEMOCLAW_PROVIDER="ollama"
+# Maintainer-agent inference provider + model. The verify-stale skill is a
+# reasoning-heavy workload (issue classification, reproducer synthesis, score
+# rubrics, comment authoring) — running it on a 4B-param model produces
+# unreliable verdicts even if the plumbing works. Default is Anthropic
+# Claude Opus 4.7 for best quality. Alternatives:
+#   - NEMOCLAW_PROVIDER=build         → nvidia/nemotron-3-super-120b-a12b (NVIDIA_API_KEY)
+#   - NEMOCLAW_PROVIDER=ollama        → local nemotron-3-nano:4b (plumbing-only quality)
+#   - NEMOCLAW_PROVIDER=nim-local     → NCP / internal NIM endpoints
+# See src/lib/onboard/providers.ts for the full provider table.
+export NEMOCLAW_PROVIDER="anthropic"
+export NEMOCLAW_MODEL="claude-opus-4-7"
+
+# ANTHROPIC_API_KEY: REQUIRED when NEMOCLAW_PROVIDER=anthropic. The recommended
+# pattern is to export it in your shell BEFORE sourcing this file, so a real
+# key never lives in a file (even a gitignored one):
+#     export ANTHROPIC_API_KEY="sk-ant-..."   ← run this in your shell
+#     source scripts/dogfood-env.sh           ← then source
+# If unset, onboard's Phase 3 will fail-fast with a clear message.
+if [ -z "${ANTHROPIC_API_KEY:-}" ] && [ "${NEMOCLAW_PROVIDER:-}" = "anthropic" ]; then
+  echo "[dogfood-env] warning: ANTHROPIC_API_KEY not set; nemoclaw onboard Phase 3 will fail. Export it in your shell before sourcing this file." >&2
+fi
 
 # -----------------------------------------------------------------------------
 # OPTIONAL — overrides with sensible defaults.
