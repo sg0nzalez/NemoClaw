@@ -200,7 +200,7 @@ Each phase must follow this order so parity cannot be claimed before real behavi
 5. **Evidence before status upgrade:** update a parity entry to `mapped-live` or `mapped-hermetic` only after the executable assertion module emits stable assertion IDs and evidence paths for every required behavior.
 6. **Phase closeout:** mark the phase complete only after every assigned row is `mapped-live`, `mapped-hermetic`, or `retired` with rationale; any `partial`, `metadata-only`, or `deferred` row keeps the phase open.
 
-## Phase 1: Parity Contract Foundation
+## Phase 1: Parity Contract Foundation [COMPLETED: 3e3873351]
 
 ### Audit sections covered
 
