@@ -9,7 +9,49 @@ export function getPhaseParityEntries(phase: number): ParityInventoryEntry[] {
   if (phase === 3) return phase3Entries();
   if (phase === 4) return phase4Entries();
   if (phase === 5) return phase5Entries();
+  if (phase === 6) return phase6Entries();
   return [];
+}
+
+function phase6Entries(): ParityInventoryEntry[] {
+  return [
+    entry("test/e2e/test-channels-add-remove.sh", "messaging.lifecycle.add-remove", {
+      manifest: { scenarioId: "openclaw-nvidia-telegram-channel-lifecycle", channels: [] },
+      fixtures: ["channel-fake-token-id", "provider-cache-reader"],
+      actions: ["channels.add", "channels.remove", "rebuild"],
+      assertions: [
+        assertion("messaging.lifecycle.baseline-no-channel", "validation_suites/messaging/lifecycle/00-baseline-no-channel.sh", "host"),
+        assertion("messaging.lifecycle.add-remove-rebuild-effects", "validation_suites/messaging/lifecycle/01-add-remove-rebuild-effects.sh", "host"),
+      ],
+    }),
+    entry("test/e2e/test-channels-stop-start.sh", "messaging.lifecycle.stop-start", {
+      manifest: { scenarioId: "openclaw-nvidia-telegram-channel-lifecycle", channels: ["telegram"] },
+      fixtures: ["provider-cache-reader"],
+      actions: ["channels.stop", "channels.start"],
+      assertions: [assertion("messaging.lifecycle.stop-start-registry-cache", "validation_suites/messaging/lifecycle/02-stop-start-registry-cache.sh", "host")],
+    }),
+    entry("test/e2e/test-messaging-providers.sh", "messaging.matrix.all-channels", {
+      manifest: { scenarioId: "cloud-nvidia-openclaw-messaging-full-matrix", channels: ["telegram", "discord", "slack", "wechat", "whatsapp"] },
+      fixtures: ["messaging-policy-premerge", "whatsapp-add-rebuild"],
+      actions: ["channels.add.matrix", "rebuild"],
+      assertions: [assertion("messaging.matrix.openclaw-and-hermes-config", "validation_suites/messaging/matrix/00-openclaw-hermes-config.sh", "host")],
+    }),
+    entry("test/e2e/test-token-rotation.sh", "messaging.token-rotation", {
+      manifest: { scenarioId: "openclaw-nvidia-messaging-token-rotation", channels: ["telegram", "discord", "slack"] },
+      fixtures: ["token-a-b", "provider-cache-reader"],
+      actions: ["channels.rotate-token", "rebuild"],
+      assertions: [
+        assertion("messaging.rotation.changed-provider-only-rebuild", "validation_suites/messaging/token-rotation/00-provider-rotation-isolated.sh", "host"),
+        assertion("messaging.rotation.same-token-no-rebuild", "validation_suites/messaging/token-rotation/01-same-token-no-rebuild.sh", "host"),
+      ],
+    }),
+    entry("test/e2e/test-telegram-injection.sh", "messaging.telegram.injection", {
+      manifest: { scenarioId: "openclaw-nvidia-telegram-security", channels: ["telegram"] },
+      fixtures: ["injection-payloads", "proof-file-cleanup"],
+      actions: ["channels.add.telegram"],
+      assertions: [assertion("messaging.telegram.injection-no-exec-no-secret-leak", "validation_suites/messaging/telegram/00-telegram-injection-safety.sh", "host")],
+    }),
+  ];
 }
 
 function phase5Entries(): ParityInventoryEntry[] {
