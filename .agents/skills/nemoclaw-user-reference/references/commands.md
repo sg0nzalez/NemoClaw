@@ -1299,6 +1299,21 @@ These flags toggle optional behaviors during onboarding; set them before running
 | `NEMOCLAW_OPENSHELL_SANDBOX_BIN` | path | Advanced override for the `openshell-sandbox` binary passed to the Linux Docker-driver gateway supervisor. Defaults to the binary next to `openshell`, then common install paths. |
 | `NEMOCLAW_OPENSHELL_GATEWAY_STATE_DIR` | path | Advanced override for the Linux Docker-driver gateway pid file and SQLite state directory. Defaults to `~/.local/state/nemoclaw/openshell-docker-gateway`. |
 
+### Onboard Profiling Traces
+
+Set `NEMOCLAW_TRACE=1` before `nemoclaw onboard` to write an OpenTelemetry-style JSON trace for the run.
+When no explicit path is provided, NemoClaw writes a timestamped file under `.e2e/traces/` in the current working directory.
+Use `NEMOCLAW_TRACE_DIR` to choose the output directory, or `NEMOCLAW_TRACE_FILE` to choose the exact output file.
+
+```console
+$ NEMOCLAW_TRACE=1 nemoclaw onboard
+$ NEMOCLAW_TRACE_DIR=/tmp/nemoclaw-traces nemoclaw onboard
+$ NEMOCLAW_TRACE_FILE=/tmp/nemoclaw-onboard-trace.json nemoclaw onboard
+```
+
+Trace artifacts include onboard phase timing, sandbox and dashboard readiness waits, policy application, inference validation probes, curl probe results, and sandbox build progress events.
+Secret-like metadata such as API keys, bearer tokens, cookies, and credentials is redacted before the file is written.
+
 ### Probe Timeouts
 
 These tune how long internal probes wait before giving up.
