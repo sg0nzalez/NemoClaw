@@ -92,10 +92,22 @@ export NEMOCLAW_NON_INTERACTIVE="1"
 # orchestrator slows the first run; do it ahead of time when possible).
 export OLLAMA_MODEL="${OLLAMA_MODEL:-nemotron-3-nano:4b}"
 
-# OpenClaw invocation override. Default is `openclaw agent --local --timeout
-# 3600 --message "$prompt"` per node_modules/openclaw/docs/tools/agent-send.md.
-# Override only if your sandbox image ships a non-standard openclaw build.
-# export OPENCLAW_AGENT_CMD="openclaw agent --local --timeout 3600"
+# Per-candidate agent timeout, in seconds. Drop this to 1800 (30 min) for
+# the first real run — the skill's default per-candidate cap is also 60 min
+# at the trap level, so setting this lower than 3600 means whichever fires
+# first wins. Catches runaway agents before they burn the budget.
+export OPENCLAW_AGENT_TIMEOUT_SEC="${OPENCLAW_AGENT_TIMEOUT_SEC:-3600}"
+
+# Full agent invocation override. By default the orchestrator builds it as
+# `openclaw agent --local --timeout $OPENCLAW_AGENT_TIMEOUT_SEC` per
+# node_modules/openclaw/docs/tools/agent-send.md. Override only if your
+# sandbox image ships a non-standard openclaw build.
+# export OPENCLAW_AGENT_CMD="openclaw agent --local --timeout 1800"
+
+# When =1, the orchestrator pauses after candidate selection (Phase 5) and
+# prompts you via /dev/tty to confirm before any verification fires. Useful
+# for the first single-candidate run; flip back to 0 for autonomous batches.
+export DOGFOOD_CONFIRM_BEFORE_VERIFY="${DOGFOOD_CONFIRM_BEFORE_VERIFY:-0}"
 
 # Wrap-up Gist visibility. "secret" (default) keeps the Gist URL-only; "public"
 # is org-discoverable. Run logs may contain agent reasoning over issue bodies —

@@ -59,9 +59,15 @@ require_env VERIFY_STALE_FORCE_OLLAMA_ONLY
 
 OLLAMA_MODEL="${OLLAMA_MODEL:-nemotron-3-nano:4b}"
 OLLAMA_URL="${OLLAMA_URL:-http://host.openshell.internal:11434}"
-OPENCLAW_AGENT_CMD="${OPENCLAW_AGENT_CMD:-openclaw agent --local --timeout 3600}"
+OPENCLAW_AGENT_TIMEOUT_SEC="${OPENCLAW_AGENT_TIMEOUT_SEC:-3600}"
+OPENCLAW_AGENT_CMD="${OPENCLAW_AGENT_CMD:-openclaw agent --local --timeout $OPENCLAW_AGENT_TIMEOUT_SEC}"
 DOGFOOD_GIST_VISIBILITY="${DOGFOOD_GIST_VISIBILITY:-secret}"
 DOGFOOD_BREV_HOURLY_USD="${DOGFOOD_BREV_HOURLY_USD:-3}"
+# When =1, pause after candidate selection and prompt for go/no-go before
+# invoking the agent for verification. Reads from /dev/tty so it works
+# even with NEMOCLAW_NON_INTERACTIVE=1 (which controls the skill's own
+# prompts, not the orchestrator's). For unattended runs leave unset.
+DOGFOOD_CONFIRM_BEFORE_VERIFY="${DOGFOOD_CONFIRM_BEFORE_VERIFY:-0}"
 
 [ "${NEMOCLAW_NON_INTERACTIVE:-}" = "1" ] \
   || warn "NEMOCLAW_NON_INTERACTIVE is not '1' — interactive prompts may stall the run."
@@ -231,6 +237,26 @@ fi
 
 info "  candidates: $CANDIDATE_COUNT — $(echo "$CANDIDATES" | jq -r 'map("#" + (.issue | tostring)) | join(" ")')"
 echo "$CANDIDATES" > "$RUN_DIR/candidates.json"
+
+# Optional pre-verify confirm gate. Reads from /dev/tty so the prompt
+# works even with NEMOCLAW_NON_INTERACTIVE=1 set. If /dev/tty is not a
+# real terminal (e.g., redirected stdin or backgrounded), fall through
+# without prompting — operator presumably set this flag in error.
+if [ "$DOGFOOD_CONFIRM_BEFORE_VERIFY" = "1" ] && [ -r /dev/tty ]; then
+  echo
+  echo "===== Candidates to verify ====="
+  echo "$CANDIDATES" | jq -r '.[] | "  #\(.issue)  (reported: \(.reported_version // "—"))"'
+  echo
+  echo "Proceed with verification for the candidates above? Each candidate"
+  echo "will provision one Brev verification box (~\$$DOGFOOD_BREV_HOURLY_USD/hr,"
+  echo "60-min cap), run the skill's Steps 5-12, then tear down."
+  echo
+  read -r -p "Type 'yes' to proceed, anything else to abort: " ans </dev/tty
+  case "$ans" in
+    yes|YES|y|Y) info "  confirmed; proceeding to Phase 6" ;;
+    *) fail "aborted by operator after candidate listing" ;;
+  esac
+fi
 
 # -----------------------------------------------------------------------------
 # Phase 6 — per-candidate verification loop with preflight + budget check
