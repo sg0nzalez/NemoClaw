@@ -108,43 +108,36 @@ export VERIFY_STALE_FORCE_OLLAMA_ONLY="1"
 # line 577 and elsewhere.)
 export NEMOCLAW_NON_INTERACTIVE="1"
 
-# Maintainer-agent inference provider + model. The verify-stale skill is a
-# reasoning-heavy workload (issue classification, reproducer synthesis, score
-# rubrics, comment authoring) — running it on a 4B-param model produces
-# unreliable verdicts even if the plumbing works. Default is Anthropic
-# Claude Opus 4.7 for best quality. Alternatives:
-#   - NEMOCLAW_PROVIDER=build         → nvidia/nemotron-3-super-120b-a12b (NVIDIA_API_KEY)
-#   - NEMOCLAW_PROVIDER=ollama        → local nemotron-3-nano:4b (plumbing-only quality)
-#   - NEMOCLAW_PROVIDER=nim-local     → NCP / internal NIM endpoints
-# See src/lib/onboard/providers.ts for the full provider table.
-export NEMOCLAW_PROVIDER="anthropic"
-export NEMOCLAW_MODEL="claude-opus-4-7"
-
-# ANTHROPIC_API_KEY + ANTHROPIC_BASE_URL: REQUIRED when NEMOCLAW_PROVIDER=anthropic.
+# Maintainer-agent inference provider + endpoint + model. The verify-stale
+# skill is reasoning-heavy (issue classification, reproducer synthesis,
+# scoring rubrics, comment authoring) — a 4B-param model produces unreliable
+# verdicts even when the plumbing works.
 #
-# At NVIDIA, do NOT use a real `sk-ant-...` key directly. Instead route through
-# the internal proxy at inference-api.nvidia.com (privacy/legal/compliance reasons):
-#   1. Get a key at https://inference.nvidia.com/key-management
-#   2. export ANTHROPIC_API_KEY='<inference.nvidia.com-issued key>'
-#   3. export ANTHROPIC_BASE_URL='https://inference-api.nvidia.com'
+# At NVIDIA, the documented path (per docs/get-started/quickstart.mdx) is the
+# OpenAI-compatible NVIDIA proxy at https://inference-api.nvidia.com, which
+# routes to any model NVIDIA exposes via that endpoint — including the AWS
+# Bedrock-hosted Claude models. This is the same proxy the canonical sandbox
+# policy already allowlists (nemoclaw-blueprint/policies/openclaw-sandbox.yaml),
+# so no extra network policy work is needed.
 #
-# Export both BEFORE sourcing this file so the actual key never lives in a file
-# (even a gitignored one):
-#     export ANTHROPIC_API_KEY='<your inference.nvidia.com key>'
-#     export ANTHROPIC_BASE_URL='https://inference-api.nvidia.com'
+# Get an inference.nvidia.com key at https://inference.nvidia.com/key-management
+# and export it as COMPATIBLE_API_KEY (NOT a real sk-ant-... key) in your shell
+# before sourcing this file:
+#     export COMPATIBLE_API_KEY='<inference.nvidia.com-issued key>'
 #     source scripts/dogfood-env.sh
 #
-# The Anthropic SDK respects ANTHROPIC_BASE_URL natively, so the proxy override
-# applies to anything in the agent's call path that uses the SDK. (Note: if
-# NemoClaw's onboard hardcodes the endpoint past the env var, fall back to
-# NEMOCLAW_PROVIDER=anthropicCompatible with COMPATIBLE_ANTHROPIC_API_KEY set.)
-if [ "${NEMOCLAW_PROVIDER:-}" = "anthropic" ]; then
-  if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
-    echo "[dogfood-env] warning: ANTHROPIC_API_KEY not set; nemoclaw onboard Phase 3 will fail. Export it in your shell before sourcing this file." >&2
-  fi
-  if [ -z "${ANTHROPIC_BASE_URL:-}" ]; then
-    echo "[dogfood-env] warning: ANTHROPIC_BASE_URL not set; at NVIDIA, route through inference-api.nvidia.com (see comment block above)." >&2
-  fi
+# Alternatives (see src/lib/onboard/providers.ts for the full table):
+#   - NEMOCLAW_PROVIDER=build         → nvidia/nemotron-3-super-120b-a12b (needs NVIDIA_API_KEY)
+#   - NEMOCLAW_PROVIDER=ollama        → local nemotron-3-nano:4b (plumbing-only quality)
+#   - NEMOCLAW_PROVIDER=nim-local     → NCP / internal NIM endpoints
+export NEMOCLAW_PROVIDER="custom"
+export NEMOCLAW_ENDPOINT_URL="https://inference-api.nvidia.com"
+export NEMOCLAW_MODEL="aws/anthropic/bedrock-claude-opus-4-7"
+
+# COMPATIBLE_API_KEY: REQUIRED when NEMOCLAW_PROVIDER=custom. Export in your
+# shell — never in a file (even gitignored).
+if [ "${NEMOCLAW_PROVIDER:-}" = "custom" ] && [ -z "${COMPATIBLE_API_KEY:-}" ]; then
+  echo "[dogfood-env] warning: COMPATIBLE_API_KEY not set; nemoclaw onboard will fail. Get a key at https://inference.nvidia.com/key-management and export it in your shell before sourcing this file." >&2
 fi
 
 # -----------------------------------------------------------------------------

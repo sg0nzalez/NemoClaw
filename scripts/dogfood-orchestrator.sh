@@ -181,11 +181,27 @@ if [ "${NEMOCLAW_PROVIDER:-}" = "ollama" ]; then
   info "  ollama + model reachable"
 fi
 
-# Anthropic-specific check: key is required and the onboard's curated model
-# list rejects mistyped names with a confusing error message — surface it here.
+# Custom (OpenAI-compatible) provider check — the path NVIDIA uses for the
+# inference-api.nvidia.com proxy. Required env: COMPATIBLE_API_KEY,
+# NEMOCLAW_ENDPOINT_URL, NEMOCLAW_MODEL.
+if [ "${NEMOCLAW_PROVIDER:-}" = "custom" ]; then
+  if [ -z "${COMPATIBLE_API_KEY:-}" ]; then
+    fail "COMPATIBLE_API_KEY is not set; required for NEMOCLAW_PROVIDER=custom. Get a key at https://inference.nvidia.com/key-management and export it in your shell before sourcing dogfood-env.sh."
+  fi
+  if [ -z "${NEMOCLAW_ENDPOINT_URL:-}" ]; then
+    fail "NEMOCLAW_ENDPOINT_URL is not set; the custom provider needs an endpoint. dogfood-env.sh.example sets it to https://inference-api.nvidia.com by default."
+  fi
+  if [ -z "${NEMOCLAW_MODEL:-}" ]; then
+    fail "NEMOCLAW_MODEL is not set; the custom provider expects an explicit model ID (e.g., aws/anthropic/bedrock-claude-opus-4-7)."
+  fi
+  info "  COMPATIBLE_API_KEY set (length=${#COMPATIBLE_API_KEY}); endpoint=$NEMOCLAW_ENDPOINT_URL; model=$NEMOCLAW_MODEL"
+fi
+
+# Anthropic native provider check (path NOT recommended at NVIDIA — see
+# dogfood-env.sh.example comment block — but supported for completeness).
 if [ "${NEMOCLAW_PROVIDER:-}" = "anthropic" ]; then
   if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
-    fail "ANTHROPIC_API_KEY is not set; required for NEMOCLAW_PROVIDER=anthropic. Export it in your shell and re-source dogfood-env.sh."
+    fail "ANTHROPIC_API_KEY is not set; required for NEMOCLAW_PROVIDER=anthropic."
   fi
   info "  ANTHROPIC_API_KEY set (length=${#ANTHROPIC_API_KEY}); model=${NEMOCLAW_MODEL:-claude-sonnet-4-6}"
 fi
