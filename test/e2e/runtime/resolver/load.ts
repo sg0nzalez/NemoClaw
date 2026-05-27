@@ -177,6 +177,18 @@ function validateScenarios(doc: Record<string, unknown>, file: string): Scenario
     if (typeof e.alias_for_plan === "string") {
       continue;
     }
+    if ("scenario_type" in e && typeof e.scenario_type !== "string") {
+      throw new Error(`scenario ${id}.scenario_type must be a string`);
+    }
+    if ("no_manifest_reason" in e && typeof e.no_manifest_reason !== "string") {
+      throw new Error(`scenario ${id}.no_manifest_reason must be a string`);
+    }
+    if (
+      (e.scenario_type === "host-only" || e.scenario_type === "setup-only") &&
+      typeof e.no_manifest_reason !== "string"
+    ) {
+      throw new Error(`scenario ${id} must declare no_manifest_reason for ${e.scenario_type}`);
+    }
     if (typeof e.expected_state !== "string") {
       throw new Error(`scenario ${id} must declare a string 'expected_state'`);
     }

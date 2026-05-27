@@ -204,6 +204,8 @@ export function resolveScenario(scenarioId: string, meta: ResolverInput): Resolv
     overrides: layeredPlan?.overrides ?? legacy?.overrides,
     runner_requirements: runnerRequirements.length > 0 ? runnerRequirements : undefined,
     required_secrets: layeredPlan?.required_secrets,
+    scenario_type: legacy?.scenario_type,
+    no_manifest_reason: legacy?.no_manifest_reason,
     ...(expectedFailure ? { expected_failure: expectedFailure } : {}),
   };
 }

@@ -111,6 +111,8 @@ export interface TestPlan extends AnyRecord {
 
 export interface SetupScenario {
   alias_for_plan?: string;
+  scenario_type?: "sandbox" | "host-only" | "setup-only" | string;
+  no_manifest_reason?: string;
   dimensions?: {
     platform: string;
     install: string;
@@ -209,4 +211,6 @@ export interface ResolvedPlan {
    * the runner expects setup to succeed.
    */
   expected_failure?: ExpectedFailure;
+  scenario_type?: string;
+  no_manifest_reason?: string;
 }
