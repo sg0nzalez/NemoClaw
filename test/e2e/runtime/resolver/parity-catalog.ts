@@ -10,7 +10,39 @@ export function getPhaseParityEntries(phase: number): ParityInventoryEntry[] {
   if (phase === 4) return phase4Entries();
   if (phase === 5) return phase5Entries();
   if (phase === 6) return phase6Entries();
+  if (phase === 7) return phase7Entries();
   return [];
+}
+
+function phase7Entries(): ParityInventoryEntry[] {
+  return [
+    deepMessagingEntry("test/e2e/test-hermes-discord-e2e.sh", "cloud-nvidia-hermes-discord", "discord"),
+    deepMessagingEntry("test/e2e/test-hermes-slack-e2e.sh", "cloud-nvidia-hermes-slack", "slack"),
+    pairingEntry("test/e2e/test-openclaw-discord-pairing.sh", "openclaw-nvidia-discord-pairing", "discord"),
+    pairingEntry("test/e2e/test-openclaw-slack-pairing.sh", "openclaw-nvidia-slack-pairing", "slack"),
+  ];
+}
+
+function deepMessagingEntry(script: string, scenarioId: string, channel: string): ParityInventoryEntry {
+  return entry(script, `messaging.deep.${channel}`, {
+    manifest: { scenarioId, channels: [channel] },
+    fixtures: [`fake-${channel}-gateway`, "native-websocket-credential-rewrite"],
+    actions: [`channels.add.${channel}`],
+    assertions: [
+      assertion("messaging.hermes.channel-health-config-env", "validation_suites/messaging/hermes/00-health-config-env.sh", "sandbox"),
+      assertion("messaging.gateway.captures-host-token-not-placeholder", "validation_suites/messaging/common/04-gateway-captures-host-token.sh", "fake-service"),
+      assertion("messaging.secret-absent-config-env-process-files-logs", "validation_suites/messaging/common/02-no-secret-leak.sh", "host"),
+    ],
+  });
+}
+
+function pairingEntry(script: string, scenarioId: string, channel: string): ParityInventoryEntry {
+  return entry(script, `messaging.pairing.${channel}`, {
+    manifest: { scenarioId, channels: [channel] },
+    fixtures: ["pairing-request", "no-allowlist", "allowfrom-store-reader"],
+    actions: ["connect-shell.approve"],
+    assertions: [assertion("messaging.pairing.pending-approve-allowfrom-failclosed", "validation_suites/messaging/pairing/00-pending-approve-allowfrom.sh", "host")],
+  });
 }
 
 function phase6Entries(): ParityInventoryEntry[] {
