@@ -262,7 +262,7 @@ Add reusable primitives for:
 - Dangerous fixtures include cleanup/restore tests.
 - `test-gateway-drift-preflight.sh`, `test-gateway-health-honest.sh`, `test-openshell-version-pin.sh`, and `test-onboard-inference-smoke.sh` can be represented as hermetic scenario contracts with real assertions.
 
-## Phase 3: Onboarding and Installer Parity
+## Phase 3: Onboarding and Installer Parity [COMPLETED: 4f152818f]
 
 ### Audit sections covered
 
