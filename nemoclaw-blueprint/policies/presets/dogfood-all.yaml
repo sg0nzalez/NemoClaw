@@ -1,0 +1,41 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# All-in-one preset for the verify-stale dogfood. Combines what would
+# otherwise be `policy-add github brev npm pypi huggingface brew local-inference`
+# into a single named preset so the reconciliation loop keeps it active.
+# Split out into the canonical presets/ dir (rather than applied via
+# --from-file) because file-based custom presets are not persistent
+# across reconciliation in NemoClaw's policy proxy.
+
+preset:
+  name: dogfood-all
+  description: "All-in-one preset for the verify-stale dogfood (github + brev + npm + pypi + huggingface + brew + local-inference + NVIDIA inference proxy)"
+
+network_policies:
+  dogfood-all:
+    name: dogfood-all
+    endpoints:
+      - { host: registry.npmjs.org, port: 443, access: full }
+      - { host: registry.yarnpkg.com, port: 443, access: full }
+      - { host: pypi.org, port: 443, access: full }
+      - { host: files.pythonhosted.org, port: 443, access: full }
+      - { host: huggingface.co, port: 443, access: full }
+      - { host: cdn-lfs.huggingface.co, port: 443, access: full }
+      - { host: router.huggingface.co, port: 443, access: full }
+      - { host: formulae.brew.sh, port: 443, access: full }
+      - { host: github.com, port: 443, access: full }
+      - { host: api.github.com, port: 443, access: full }
+      - { host: ghcr.io, port: 443, access: full }
+      - { host: pkg-containers.githubusercontent.com, port: 443, access: full }
+      - { host: objects.githubusercontent.com, port: 443, access: full }
+      - { host: raw.githubusercontent.com, port: 443, access: full }
+      - { host: brev.dev, port: 443, access: full }
+      - { host: api.brev.dev, port: 443, access: full }
+      - { host: app.brev.dev, port: 443, access: full }
+      - { host: brevdev.us.auth0.com, port: 443, access: full }
+      - { host: "*.brev.dev", port: 443, access: full }
+      - { host: inference-api.nvidia.com, port: 443, access: full }
+    binaries:
+      - { path: /usr/bin/git }
+      - { path: /usr/bin/curl }
