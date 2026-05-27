@@ -135,19 +135,24 @@ fi
 
 # ---------------------------------------------------------------------------
 # Check 7 — Cost budget (deterministic via remaining-budget file)
+#
+# Per-candidate projection uses the orchestrator's conservative rate
+# (DOGFOOD_BREV_HOURLY_USD, default 3) × the skill's 60-min wallclock cap.
+# The orchestrator updates .spent-usd after each candidate from actual
+# wallclock, so this projection is purely the gate for whether to even
+# attempt the next candidate.
 # ---------------------------------------------------------------------------
 SPENT_FILE="$VERIFY_STALE_LOG_DIR/.spent-usd"
 SPENT_USD=$(cat "$SPENT_FILE" 2>/dev/null || echo 0)
-# Conservative per-candidate estimate: 60-min cap × ~$0.50/hr (cheapest stoppable CPU SKU).
-# GPU candidates can run higher; the agent's Step 7 picks the actual SKU. This is a floor.
-PER_CANDIDATE_FLOOR=1
-PROJECTED=$((SPENT_USD + PER_CANDIDATE_FLOOR))
+HOURLY="${DOGFOOD_BREV_HOURLY_USD:-3}"
+PER_CANDIDATE_CEIL="$HOURLY"   # 60-min cap × $HOURLY/hr ≈ $HOURLY at the ceiling
+PROJECTED=$((SPENT_USD + PER_CANDIDATE_CEIL))
 if [ "$PROJECTED" -gt "$BREV_BUDGET_USD" ]; then
-  record_check cost_budget fail "projected spend $PROJECTED USD exceeds budget $BREV_BUDGET_USD (already spent: $SPENT_USD)"
+  record_check cost_budget fail "projected $PROJECTED USD (\$$SPENT_USD spent + \$$PER_CANDIDATE_CEIL ceiling) exceeds budget \$$BREV_BUDGET_USD"
 elif [ "$SPENT_USD" -gt $((BREV_BUDGET_USD / 2)) ]; then
-  record_check cost_budget caveat "already at $SPENT_USD / $BREV_BUDGET_USD USD"
+  record_check cost_budget caveat "already at \$$SPENT_USD / \$$BREV_BUDGET_USD"
 else
-  record_check cost_budget pass "$SPENT_USD / $BREV_BUDGET_USD USD spent"
+  record_check cost_budget pass "\$$SPENT_USD / \$$BREV_BUDGET_USD spent"
 fi
 
 # ---------------------------------------------------------------------------

@@ -58,10 +58,18 @@ export VERIFY_STALE_BATCH_CAP="10"
 # Use a persistent path so logs survive sandbox restarts.
 export VERIFY_STALE_LOG_DIR="$HOME/verify-stale-runs"
 
-# Hard ceiling on cumulative Brev spend across the batch. Orchestrator
-# accumulates per-candidate cost from `brev ls --json` (instance type + uptime)
-# and halts the batch if the next candidate would push past this limit.
+# Hard ceiling on cumulative Brev spend across the batch. The orchestrator
+# accumulates per-candidate cost as (candidate wallclock seconds / 3600) ×
+# DOGFOOD_BREV_HOURLY_USD and halts the batch if the next candidate would
+# push past this limit.
 export BREV_BUDGET_USD="200"
+
+# Conservative per-hour Brev rate used by the cost accumulator. Set higher
+# than your expected SKU price so the budget gate stays safe even if the
+# skill provisions a more expensive box than expected. Defaults assume a
+# mid-tier GPU box (T4/L40S range); bump to 4-5 if you expect H100 SKUs,
+# drop to 0.5 if you constrain to CPU-only candidates.
+export DOGFOOD_BREV_HOURLY_USD="${DOGFOOD_BREV_HOURLY_USD:-3}"
 
 # When =1, the Step 3 candidate filter drops any issue whose body or labels
 # imply a non-ollama inference provider, so the skill never stalls at the

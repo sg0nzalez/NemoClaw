@@ -61,6 +61,7 @@ OLLAMA_MODEL="${OLLAMA_MODEL:-nemotron-3-nano:4b}"
 OLLAMA_URL="${OLLAMA_URL:-http://host.openshell.internal:11434}"
 OPENCLAW_AGENT_CMD="${OPENCLAW_AGENT_CMD:-openclaw agent --local --timeout 3600}"
 DOGFOOD_GIST_VISIBILITY="${DOGFOOD_GIST_VISIBILITY:-secret}"
+DOGFOOD_BREV_HOURLY_USD="${DOGFOOD_BREV_HOURLY_USD:-3}"
 
 [ "${NEMOCLAW_NON_INTERACTIVE:-}" = "1" ] \
   || warn "NEMOCLAW_NON_INTERACTIVE is not '1' — interactive prompts may stall the run."
@@ -274,17 +275,50 @@ $RUN_DIR/activity.md summarizing the verdict.
 EOF
   )
 
+  # Snapshot pre-candidate Brev state so the wrap-up can compare. We
+  # don't gate on it (sweep happens at Phase 7), but it surfaces stragglers
+  # left behind by previous candidates in the per-candidate log.
+  brev ls --json 2>/dev/null \
+    | jq '[.[] | select(.name | startswith("verify-stale-")) | {name, status, instance_type}]' \
+    > "$RUN_DIR/$issue/brev-pre.json" 2>/dev/null || echo "[]" > "$RUN_DIR/$issue/brev-pre.json"
+
+  candidate_start_epoch=$(date +%s)
   set +e
   $OPENCLAW_AGENT_CMD --json --message "$PROMPT" > "$RUN_DIR/$issue/agent.log" 2>&1
   agent_rc=$?
   set -e
+  candidate_end_epoch=$(date +%s)
+  wallclock_sec=$((candidate_end_epoch - candidate_start_epoch))
 
-  # Update spent total from this candidate's metadata if present.
-  if [ -f "$RUN_DIR/$issue/metadata.json" ]; then
-    candidate_cost=$(jq -r '.brev_cost_usd // 0' "$RUN_DIR/$issue/metadata.json" 2>/dev/null || echo 0)
-    new_spent=$((spent + candidate_cost))
-    echo "$new_spent" > "$VERIFY_STALE_LOG_DIR/.spent-usd"
-  fi
+  # Orchestrator-owned cost calc: wallclock × conservative hourly rate.
+  # This is independent of whether the skill emits cost in metadata.json
+  # (it currently doesn't), and is conservative-by-design — the operator
+  # tunes DOGFOOD_BREV_HOURLY_USD to over-estimate the actual SKU.
+  candidate_cost=$(awk -v sec="$wallclock_sec" -v rate="$DOGFOOD_BREV_HOURLY_USD" \
+    'BEGIN { printf "%d", (sec/3600.0)*rate + 0.999 }')  # ceil
+  new_spent=$((spent + candidate_cost))
+  echo "$new_spent" > "$VERIFY_STALE_LOG_DIR/.spent-usd"
+
+  # Persist per-candidate cost + timing so the run-summary aggregator picks
+  # it up. We write to a sibling cost.json (not metadata.json) so we don't
+  # clobber anything the skill writes.
+  brev ls --json 2>/dev/null \
+    | jq '[.[] | select(.name | startswith("verify-stale-")) | {name, status, instance_type}]' \
+    > "$RUN_DIR/$issue/brev-post.json" 2>/dev/null || echo "[]" > "$RUN_DIR/$issue/brev-post.json"
+
+  jq -n \
+    --argjson sec "$wallclock_sec" \
+    --argjson cost "$candidate_cost" \
+    --argjson rate "$DOGFOOD_BREV_HOURLY_USD" \
+    --argjson rc "$agent_rc" \
+    --arg start "$(date -u -r "$candidate_start_epoch" +%Y-%m-%dT%H:%M:%SZ)" \
+    --arg end "$(date -u -r "$candidate_end_epoch" +%Y-%m-%dT%H:%M:%SZ)" \
+    '{wallclock_sec: $sec, cost_usd: $cost, hourly_rate_usd: $rate,
+      agent_exit: $rc, started_at: $start, ended_at: $end,
+      cost_method: "wallclock × hourly_rate (conservative; not actual brev billing)"}' \
+    > "$RUN_DIR/$issue/cost.json"
+
+  info "    completed in ${wallclock_sec}s, cost +\$$candidate_cost (cumulative \$$new_spent / \$$BREV_BUDGET_USD)"
 
   if [ "$agent_rc" -ne 0 ]; then
     warn "    agent exit $agent_rc on #$issue — see $RUN_DIR/$issue/agent.log"
@@ -320,9 +354,10 @@ fi
 info "Phase 8 — run-summary.json"
 
 SUMMARY="$RUN_DIR/run-summary.json"
-python3 - "$RUN_DIR" "$SUMMARY" <<'PY'
+SPENT_FILE="$VERIFY_STALE_LOG_DIR/.spent-usd"
+python3 - "$RUN_DIR" "$SUMMARY" "$SPENT_FILE" <<'PY'
 import json, os, sys, glob
-run_dir, out_path = sys.argv[1], sys.argv[2]
+run_dir, out_path, spent_file = sys.argv[1], sys.argv[2], sys.argv[3]
 issues = []
 for issue_dir in sorted(glob.glob(os.path.join(run_dir, "[0-9]*"))):
     issue_num = os.path.basename(issue_dir)
@@ -330,7 +365,8 @@ for issue_dir in sorted(glob.glob(os.path.join(run_dir, "[0-9]*"))):
     for f, key in [("metadata.json", "metadata"),
                    ("preflight.json", "preflight"),
                    ("self-check.json", "self_check"),
-                   ("score.json", "score")]:
+                   ("score.json", "score"),
+                   ("cost.json", "cost")]:
         p = os.path.join(issue_dir, f)
         if os.path.exists(p):
             try:
@@ -346,13 +382,16 @@ for r in issues:
         or (r.get("preflight") or {}).get("verdict") \
         or "unknown"
     verdicts[v] = verdicts.get(v, 0) + 1
-    c = (r.get("metadata") or {}).get("brev_cost_usd")
+    c = (r.get("cost") or {}).get("cost_usd")
     if c is not None:
         costs.append(c)
 
-with open(os.path.join(run_dir, ".spent-usd")) as f:
-    spent_str = f.read().strip()
-spent = int(spent_str) if spent_str.isdigit() else None
+try:
+    with open(spent_file) as f:
+        spent_str = f.read().strip()
+    spent = int(spent_str) if spent_str.isdigit() else None
+except FileNotFoundError:
+    spent = None
 
 summary = {
     "run_dir": run_dir,
@@ -360,6 +399,7 @@ summary = {
     "verdict_histogram": verdicts,
     "total_cost_usd": spent,
     "per_candidate_cost_usd": costs,
+    "cost_method": "wallclock × DOGFOOD_BREV_HOURLY_USD (orchestrator-owned, conservative)",
     "issues": issues,
 }
 json.dump(summary, open(out_path, "w"), indent=2)
