@@ -159,6 +159,14 @@ function isTestForwardPid(pid: number): boolean {
   return useTestForwardBridge() && pid === testForwardPid();
 }
 
+function readOpenFileDescriptor(fd: number): string {
+  const stat = fs.fstatSync(fd);
+  if (stat.size <= 0) return "";
+  const buffer = Buffer.alloc(Math.min(stat.size, 64 * 1024));
+  const bytesRead = fs.readSync(fd, buffer, 0, buffer.length, 0);
+  return buffer.subarray(0, bytesRead).toString("utf-8");
+}
+
 export function startForwardBridgeDetached(
   sandboxName: string,
   options: ForwardBridgeStartOptions,
@@ -182,11 +190,13 @@ export function startForwardBridgeDetached(
   }
   const { command, args } = runnerCommand();
   ensureStateDir();
+  const safeSandbox = sandboxName.replace(/[^A-Za-z0-9._-]/g, "_");
+  const diagnosticDir = fs.mkdtempSync(path.join(stateDir(), `${safeSandbox}-${options.port}-`));
   const diagnosticPath = path.join(
-    stateDir(),
-    `${sandboxName.replace(/[^A-Za-z0-9._-]/g, "_")}-${options.port}.log`,
+    diagnosticDir,
+    "bridge.log",
   );
-  const out = fs.openSync(diagnosticPath, "w", 0o600);
+  const out = fs.openSync(diagnosticPath, "w+", 0o600);
   const child = spawn(
     command,
     [
@@ -202,12 +212,12 @@ export function startForwardBridgeDetached(
     { detached: true, stdio: ["ignore", out, out], env: process.env },
   );
   child.unref();
-  fs.closeSync(out);
 
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const state = getForwardState(sandboxName, options.port);
     if (state?.pid === child.pid) {
+      fs.closeSync(out);
       return { ok: true, state: state ?? undefined, diagnostic: "" };
     }
     sleepMs(250);
@@ -215,10 +225,11 @@ export function startForwardBridgeDetached(
 
   let diagnostic = "";
   try {
-    diagnostic = fs.readFileSync(diagnosticPath, "utf-8").trim();
+    diagnostic = readOpenFileDescriptor(out).trim();
   } catch {
     /* ignore */
   }
+  fs.closeSync(out);
   try {
     if (child.pid) process.kill(child.pid, "SIGTERM");
   } catch {

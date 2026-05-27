@@ -239,8 +239,6 @@ function recoverSandboxProcesses(sandboxName: string): boolean {
       result &&
       (result.stdout.includes("GATEWAY_PID=") || result.stdout.includes("ALREADY_RUNNING"))
     );
-  const recoveredCommand = (result: SandboxCommandResult | null) =>
-    !!(result && result.status === 0 && hasRecoveryMarker(result));
 
   if (agentScript) {
     const execResult = executeSandboxCommand(sandboxName, agentScript);
