@@ -17,7 +17,7 @@ import {
 import { basename, join } from "node:path";
 import { dockerSpawnSync } from "../adapters/docker";
 import { resolveOpenshell } from "../adapters/openshell/resolve";
-import { execTextSync } from "../adapters/openshell/grpc";
+import { execInputStreamSync } from "../adapters/openshell/grpc";
 import { renderBox } from "../cli/banner";
 import { AGENT_PRODUCT_NAME, CLI_DISPLAY_NAME, CLI_NAME } from "../cli/branding";
 import { isRecord } from "../core/json-types";
@@ -454,16 +454,20 @@ export function stopSandboxChannels(sandboxName: string): void {
   if (reportStopResult(privilegedResult)) return;
 
   try {
-    const fallbackResult = execTextSync(sandboxName, ["sh", "-lc", GATEWAY_STOP_SCRIPT], {
+    const fallbackResult = execInputStreamSync(sandboxName, ["sh", "-s"], GATEWAY_STOP_SCRIPT, {
       timeoutMs: 20000,
     });
     reportStopResult({
       status: fallbackResult.status,
       signal: null,
-      stdout: fallbackResult.stdout,
-      stderr: fallbackResult.stderr,
+      stdout: fallbackResult.stdout.toString("utf-8"),
+      stderr: fallbackResult.stderr.toString("utf-8"),
       pid: 0,
-      output: [null, fallbackResult.stdout, fallbackResult.stderr],
+      output: [
+        null,
+        fallbackResult.stdout.toString("utf-8"),
+        fallbackResult.stderr.toString("utf-8"),
+      ],
     } as StopAttemptResult);
   } catch (error) {
     warn(

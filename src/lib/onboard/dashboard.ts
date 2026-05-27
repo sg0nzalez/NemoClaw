@@ -2,10 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { AgentDefinition } from "../agent/defs";
+import * as agentRuntime from "../agent/runtime";
 import { DASHBOARD_PORT } from "../core/ports";
 import { buildChain, buildControlUiUrls } from "../dashboard/contract";
 import * as nim from "../inference/nim";
 import { runCapture as defaultRunCapture } from "../runner";
+import * as registry from "../state/registry";
 import * as dashboardAccess from "./dashboard-access";
 import {
   findAvailableDashboardPort,
@@ -42,6 +44,7 @@ export interface OnboardDashboardDeps {
   redact(value: unknown): string;
   sleep(seconds: number): void;
   fetchGatewayAuthTokenFromSandbox?: (sandboxName: string) => string | null;
+  resolveSandboxDashboardTargetPort?: (sandboxName: string, fallbackPort: number) => number;
   printAgentDashboardUi(
     sandboxName: string,
     token: string | null,
@@ -140,6 +143,23 @@ function parseForwardTarget(target: string): { bind: string; port: number } {
     bind: url.hostname || "127.0.0.1",
     port,
   };
+}
+
+function isValidPort(value: unknown): value is number {
+  return (
+    typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= 1 &&
+    value <= 65535
+  );
+}
+
+function resolveSandboxDashboardTargetPort(sandboxName: string, fallbackPort: number): number {
+  const agent = agentRuntime.getSessionAgent(sandboxName);
+  if (agent && isValidPort(agent.forwardPort)) return agent.forwardPort;
+  const sandbox = registry.getSandbox(sandboxName);
+  if (isValidPort(sandbox?.dashboardPort)) return sandbox.dashboardPort;
+  return fallbackPort;
 }
 
 function dashboardUrlForDisplay(url: string, deps: OnboardDashboardDeps): string {
@@ -255,16 +275,17 @@ export function createOnboardDashboardHelpers(deps: OnboardDashboardDeps): Onboa
       }
     }
 
-    const parsedUrl = new URL(chatUiUrl.includes("://") ? chatUiUrl : `http://${chatUiUrl}`);
-    parsedUrl.port = String(actualPort);
-    const actualTarget = getDashboardForwardTarget(parsedUrl.toString());
+    const actualTarget = getDashboardForwardTarget(chatUiUrl);
     stopForwardForSandbox(actualPort);
     const target = parseForwardTarget(actualTarget);
+    const targetPort = (
+      deps.resolveSandboxDashboardTargetPort ?? resolveSandboxDashboardTargetPort
+    )(sandboxName, target.port);
     const { ok: fwdOk, diagnostic: fwdDiagnostic } = startForwardBridgeDetached(sandboxName, {
       bind: target.bind,
       port: actualPort,
       targetHost: "127.0.0.1",
-      targetPort: target.port,
+      targetPort,
       timeoutMs: 30_000,
     });
     if (!fwdOk) {

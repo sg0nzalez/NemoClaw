@@ -3,7 +3,11 @@
 
 
 import { spawnSync } from "node:child_process";
-import { createSandboxGrpcClient, execTextSync } from "../../adapters/openshell/grpc";
+import {
+  createSandboxGrpcClient,
+  execInputStreamSync,
+  execTextSync,
+} from "../../adapters/openshell/grpc";
 import {
   forwardStatesAsListOutput,
   startForwardBridgeDetached,
@@ -72,17 +76,27 @@ function getSandboxHealthProbeUrl(sandboxName: string): string {
 }
 
 /** Run a shell command inside the sandbox over OpenShell gRPC. */
+function executeSandboxShellSync(
+  sandboxName: string,
+  command: string,
+  timeoutMs: number,
+): SandboxCommandResult {
+  const result = /[\r\n]/.test(command)
+    ? execInputStreamSync(sandboxName, ["sh", "-s"], command, { timeoutMs })
+    : execTextSync(sandboxName, ["sh", "-c", command], { timeoutMs });
+  return {
+    status: result.status,
+    stdout: result.stdout.toString().trim(),
+    stderr: result.stderr.toString().trim(),
+  };
+}
+
 export function executeSandboxCommand(
   sandboxName: string,
   command: string,
 ): SandboxCommandResult | null {
   try {
-    const result = execTextSync(sandboxName, ["sh", "-c", command], { timeoutMs: 15_000 });
-    return {
-      status: result.status,
-      stdout: result.stdout.trim(),
-      stderr: result.stderr.trim(),
-    };
+    return executeSandboxShellSync(sandboxName, command, 15_000);
   } catch {
     return null;
   }
@@ -93,14 +107,12 @@ export function executeSandboxExecCommand(
   command: string,
   timeout = 15000,
 ): SandboxCommandResult | null {
-  const markedCommand = `printf '%s\n' '${SANDBOX_EXEC_STARTED_MARKER}'; ${command}`;
+  const markedCommand = `printf '%s\\n' '${SANDBOX_EXEC_STARTED_MARKER}'; ${command}`;
   const timeoutOverride = Number(process.env.NEMOCLAW_SANDBOX_EXEC_TIMEOUT_MS || "");
   const effectiveTimeout =
     Number.isFinite(timeoutOverride) && timeoutOverride > 0 ? timeoutOverride : timeout;
   try {
-    const result = execTextSync(sandboxName, ["sh", "-c", markedCommand], {
-      timeoutMs: effectiveTimeout,
-    });
+    const result = executeSandboxShellSync(sandboxName, markedCommand, effectiveTimeout);
     const stdout = result.stdout.trim();
     const stdoutLines = stdout.split(/\r?\n/);
     const markerIndex = stdoutLines.indexOf(SANDBOX_EXEC_STARTED_MARKER);
@@ -123,13 +135,21 @@ async function executeSandboxExecCommandForStatus(
   if (process.env.NEMOCLAW_GRPC_TEST_TRANSPORT === "1") {
     return executeSandboxExecCommand(sandboxName, command, OPENSHELL_PROBE_TIMEOUT_MS);
   }
-  const markedCommand = `printf '%s\n' '${SANDBOX_EXEC_STARTED_MARKER}'; ${command}`;
+  const markedCommand = `printf '%s\\n' '${SANDBOX_EXEC_STARTED_MARKER}'; ${command}`;
   const client = createSandboxGrpcClient();
   try {
-    const result = await client.execText(sandboxName, ["sh", "-c", markedCommand], {
-      timeoutMs: OPENSHELL_PROBE_TIMEOUT_MS,
-    });
-    const stdout = result.stdout.trim();
+    const result = /[\r\n]/.test(markedCommand)
+      ? await client.execInputStream(
+          sandboxName,
+          ["sh", "-s"],
+          markedCommand,
+          { timeoutMs: OPENSHELL_PROBE_TIMEOUT_MS },
+        )
+      : await client.execText(sandboxName, ["sh", "-c", markedCommand], {
+          timeoutMs: OPENSHELL_PROBE_TIMEOUT_MS,
+        });
+    const stdout =
+      typeof result.stdout === "string" ? result.stdout.trim() : result.stdout.toString("utf-8").trim();
     const stdoutLines = stdout.split(/\r?\n/);
     const markerIndex = stdoutLines.indexOf(SANDBOX_EXEC_STARTED_MARKER);
     if (markerIndex === -1) return null;
@@ -137,7 +157,8 @@ async function executeSandboxExecCommandForStatus(
     return {
       status: result.status,
       stdout: commandStdoutLines.join("\n").trim(),
-      stderr: result.stderr.trim(),
+      stderr:
+        typeof result.stderr === "string" ? result.stderr.trim() : result.stderr.toString("utf-8").trim(),
     };
   } catch {
     return null;

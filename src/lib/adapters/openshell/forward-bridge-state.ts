@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -167,6 +167,26 @@ function readOpenFileDescriptor(fd: number): string {
   return buffer.subarray(0, bytesRead).toString("utf-8");
 }
 
+function probeForwardReady(bind: string, port: number): boolean {
+  const host = bind === "0.0.0.0" || bind === "::" ? "127.0.0.1" : bind;
+  const script =
+    "const net=require('node:net');" +
+    `const socket=net.createConnection({host:${JSON.stringify(host)},port:${port}});` +
+    "let data='';let done=false;" +
+    "const finish=(code)=>{if(done)return;done=true;socket.destroy();process.exit(code);};" +
+    "socket.setTimeout(1000);" +
+    "socket.on('connect',()=>socket.write('GET /health HTTP/1.1\\r\\nHost: 127.0.0.1\\r\\nConnection: close\\r\\n\\r\\n'));" +
+    "socket.on('data',(chunk)=>{data+=chunk.toString('utf8');if(/^HTTP\\//.test(data))finish(0);});" +
+    "socket.on('error',()=>finish(1));" +
+    "socket.on('timeout',()=>finish(1));" +
+    "socket.on('end',()=>finish(/^HTTP\\//.test(data)?0:1));";
+  const result = spawnSync(process.execPath, ["-e", script], {
+    stdio: "ignore",
+    timeout: 1500,
+  });
+  return result.status === 0;
+}
+
 export function startForwardBridgeDetached(
   sandboxName: string,
   options: ForwardBridgeStartOptions,
@@ -217,8 +237,10 @@ export function startForwardBridgeDetached(
   while (Date.now() < deadline) {
     const state = getForwardState(sandboxName, options.port);
     if (state?.pid === child.pid) {
-      fs.closeSync(out);
-      return { ok: true, state: state ?? undefined, diagnostic: "" };
+      if (probeForwardReady(bind, options.port)) {
+        fs.closeSync(out);
+        return { ok: true, state: state ?? undefined, diagnostic: "" };
+      }
     }
     sleepMs(250);
   }
@@ -241,3 +263,7 @@ export function startForwardBridgeDetached(
       diagnostic || `forward bridge did not become ready within ${String(timeoutMs)}ms`,
   };
 }
+
+export const __forwardBridgeTestHooks = {
+  probeForwardReady,
+};

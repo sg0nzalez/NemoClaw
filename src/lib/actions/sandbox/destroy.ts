@@ -5,6 +5,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import {
+  listForwardStates,
+  stopForwardBridge,
+} from "../../adapters/openshell/forward-bridge-state";
 import { resolveOpenshell } from "../../adapters/openshell/resolve";
 import { OPENSHELL_PROBE_TIMEOUT_MS } from "../../adapters/openshell/timeouts";
 import { CLI_NAME } from "../../cli/branding";
@@ -45,6 +49,8 @@ type RemoveSandboxImageDeps = {
 type RemoveSandboxRegistryEntryDeps = {
   removeImage?: (sandboxName: string) => void;
   removeSandbox?: typeof registry.removeSandbox;
+  listForwardStates?: typeof listForwardStates;
+  stopForwardBridge?: typeof stopForwardBridge;
 };
 
 type RunOpenshell = (
@@ -383,7 +389,14 @@ export function removeSandboxRegistryEntry(
 ): boolean {
   const removeImage = deps.removeImage ?? removeSandboxImage;
   const removeSandbox = deps.removeSandbox ?? registry.removeSandbox;
+  const listForwards = deps.listForwardStates ?? listForwardStates;
+  const stopForward = deps.stopForwardBridge ?? stopForwardBridge;
   removeImage(sandboxName);
+  for (const state of listForwards()) {
+    if (state.sandboxName === sandboxName) {
+      stopForward(sandboxName, state.port);
+    }
+  }
   return removeSandbox(sandboxName);
 }
 

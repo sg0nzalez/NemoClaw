@@ -104,6 +104,37 @@ describe("onboard dashboard helpers", () => {
     }
   });
 
+  it("keeps the sandbox dashboard target port separate from the reallocated host port", () => {
+    const originalHome = process.env.HOME;
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-dashboard-target-port-"));
+    process.env.HOME = home;
+    const helpers = createOnboardDashboardHelpers({
+      runOpenshell: vi.fn(() => ({ status: 0 })),
+      runCaptureOpenshell: vi.fn(() => ""),
+      openshellArgv: (args: string[]) => [process.execPath, "-e", "", ...args],
+      cliName: () => "nemoclaw",
+      agentProductName: () => "NemoClaw",
+      getProviderLabel: (provider: string) => provider,
+      note: vi.fn(),
+      isWsl: () => false,
+      redact: (value: unknown) => String(value),
+      sleep: vi.fn(),
+      resolveSandboxDashboardTargetPort: vi.fn(() => 18789),
+      printAgentDashboardUi: vi.fn(),
+    });
+
+    try {
+      const hostPort = helpers.ensureDashboardForward("my-sandbox", "http://127.0.0.1:18790");
+      const state = listForwardStates().find((entry) => entry.sandboxName === "my-sandbox");
+      expect(state).toMatchObject({
+        port: hostPort,
+        targetPort: 18789,
+      });
+    } finally {
+      process.env.HOME = originalHome;
+    }
+  });
+
   it("prints the dashboard-url command instead of raw gateway-token guidance", () => {
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
     const nimStatus = vi.fn(() => ({ running: false, container: "nemoclaw-nim-test" }));

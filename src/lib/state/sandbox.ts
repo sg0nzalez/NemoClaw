@@ -41,6 +41,14 @@ const HOME_DIR = path.resolve(process.env.HOME || os.homedir());
 const REBUILD_BACKUPS_DIR = path.join(HOME_DIR, ".nemoclaw", "rebuild-backups");
 
 const MANIFEST_VERSION = 1;
+const DIR_DISCOVERY_STATUS_MARKER = "__NEMOCLAW_DIR_DISCOVERY_STATUS__";
+const PRE_BACKUP_AUDIT_STATUS_MARKER = "__NEMOCLAW_PRE_BACKUP_AUDIT_STATUS__";
+const TAR_BACKUP_STATUS_MARKER = "__NEMOCLAW_TAR_BACKUP_STATUS__";
+const STATE_FILE_BACKUP_STATUS_MARKER = "__NEMOCLAW_STATE_FILE_BACKUP_STATUS__";
+const RESTORE_CLEANUP_STATUS_MARKER = "__NEMOCLAW_RESTORE_CLEANUP_STATUS__";
+const RESTORE_EXTRACT_STATUS_MARKER = "__NEMOCLAW_RESTORE_EXTRACT_STATUS__";
+const RESTORE_USABILITY_STATUS_MARKER = "__NEMOCLAW_RESTORE_USABILITY_STATUS__";
+const STATE_FILE_RESTORE_STATUS_MARKER = "__NEMOCLAW_STATE_FILE_RESTORE_STATUS__";
 
 function parseJson<T>(text: string): T {
   return JSON.parse(text);
@@ -634,6 +642,57 @@ function existingBackupDirs(backupPath: string, dirNames: string[]): string[] {
   return existing;
 }
 
+function pythonCommand(script: string): string {
+  const encoded = Buffer.from(script, "utf-8").toString("base64");
+  return `python3 -c ${shellQuote(`import base64; exec(base64.b64decode(${JSON.stringify(encoded)}))`)}`;
+}
+
+function wrapShellCommandWithStatusMarker(command: string, marker: string): string {
+  return `( ${command} ); __nemoclaw_status=$?; printf '\\n%s:%s\\n' ${shellQuote(marker)} "$__nemoclaw_status" >&2; exit "$__nemoclaw_status"`;
+}
+
+function markerRegex(marker: string): RegExp {
+  return new RegExp(`(?:^|\\r?\\n)${marker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:(-?\\d+)(?=\\r?\\n|$)`);
+}
+
+function statusFromMarker(
+  result: { status: number; stderr: string | Buffer },
+  marker: string,
+): { status: number; stderr: string; found: boolean } {
+  const stderr = Buffer.isBuffer(result.stderr) ? result.stderr.toString("utf-8") : result.stderr;
+  const match = markerRegex(marker).exec(stderr);
+  if (!match) return { status: result.status, stderr, found: false };
+  const parsed = Number(match[1]);
+  const cleanStderr = stderr.replace(markerRegex(marker), "\n").trim();
+  return {
+    status: Number.isFinite(parsed) ? parsed : result.status,
+    stderr: cleanStderr,
+    found: true,
+  };
+}
+
+function parseExistingStateDirs(
+  output: string,
+  declaredStateDirs: readonly string[],
+): { ok: true; dirs: string[] } | { ok: false; error: string } {
+  const declared = new Set(declaredStateDirs);
+  const seen = new Set<string>();
+  const dirs: string[] = [];
+  for (const raw of output.split(/\r?\n/)) {
+    const dirName = raw.trim();
+    if (!dirName || seen.has(dirName)) continue;
+    if (
+      !isSafeStateDirPath(dirName) ||
+      (!declared.has(dirName) && !/^workspace-[A-Za-z0-9._-]+$/.test(dirName))
+    ) {
+      return { ok: false, error: `unsafe or undeclared state directory '${dirName}'` };
+    }
+    seen.add(dirName);
+    dirs.push(dirName);
+  }
+  return { ok: true, dirs };
+}
+
 function shouldPreserveOpenClawManagedExtensions(
   manifest: RebuildManifest,
   dir: string,
@@ -791,7 +850,7 @@ function buildStateFileBackupCommand(dir: string, spec: StateFileSpec): string {
       '[ "${hardlink_count:-0}" = "0" ] || { echo "hard-linked sqlite state file rejected: $src" >&2; exit 11; }',
       'tmp="$(mktemp /tmp/nemoclaw-sqlite-backup.XXXXXX)"',
       'trap \'rm -f "$tmp"\' EXIT',
-      `python3 -c ${shellQuote(SQLITE_BACKUP_PY)} "$src" "$tmp"`,
+      `${pythonCommand(SQLITE_BACKUP_PY)} "$src" "$tmp"`,
       'cat -- "$tmp"',
     ].join("; ");
   }
@@ -812,7 +871,10 @@ function backupStateFile(
   spec: StateFileSpec,
   backupPath: string,
 ): "backed_up" | "missing" | "failed" {
-  const command = buildStateFileBackupCommand(dir, spec);
+  const command = wrapShellCommandWithStatusMarker(
+    buildStateFileBackupCommand(dir, spec),
+    STATE_FILE_BACKUP_STATUS_MARKER,
+  );
   _log(`Backing up state file ${spec.path} (${spec.strategy})`);
   let result: ReturnType<typeof execBinaryStreamSync>;
   try {
@@ -826,10 +888,11 @@ function backupStateFile(
     return "failed";
   }
 
-  if (result.status === 2) return "missing";
-  if (result.status !== 0 || !result.stdout) {
+  const marked = statusFromMarker(result, STATE_FILE_BACKUP_STATUS_MARKER);
+  if (marked.status === 2) return "missing";
+  if (marked.status !== 0 || !result.stdout) {
     const detail =
-      result.stderr.toString().trim() || `exit ${String(result.status)}`;
+      marked.stderr.trim() || `exit ${String(marked.status)}`;
     _log(`FAILED: state file backup ${spec.path}: ${detail.substring(0, 200)}`);
     return "failed";
   }
@@ -858,7 +921,7 @@ function buildStateFileRestoreCommand(dir: string, spec: StateFileSpec): string 
       'trap \'rm -f "$tmp"\' EXIT',
       'cat > "$tmp"',
       'chmod 600 "$tmp"',
-      `umask 0007; python3 -c ${shellQuote(SQLITE_RESTORE_PY)} "$tmp" "$dst"`,
+      `umask 0007; ${pythonCommand(SQLITE_RESTORE_PY)} "$tmp" "$dst"`,
     ].join("; ");
   }
 
@@ -885,7 +948,10 @@ function restoreStateFile(
   const localPath = path.join(backupPath, spec.path);
   if (!existsSync(localPath)) return true;
 
-  const command = buildStateFileRestoreCommand(dir, spec);
+  const command = wrapShellCommandWithStatusMarker(
+    buildStateFileRestoreCommand(dir, spec),
+    STATE_FILE_RESTORE_STATUS_MARKER,
+  );
   _log(`Restoring state file ${spec.path} (${spec.strategy})`);
   let result: ReturnType<typeof execInputStreamSync>;
   try {
@@ -901,10 +967,11 @@ function restoreStateFile(
     return false;
   }
 
-  if (result.status === 0) return true;
+  const marked = statusFromMarker(result, STATE_FILE_RESTORE_STATUS_MARKER);
+  if (marked.status === 0) return true;
 
   const detail =
-    result.stderr.toString().trim() || `exit ${String(result.status)}`;
+    marked.stderr.trim() || `exit ${String(marked.status)}`;
   _log(`FAILED: state file restore ${spec.path}: ${detail.substring(0, 200)}`);
   return false;
 }
@@ -1017,7 +1084,10 @@ export function backupSandboxState(sandboxName: string, options: BackupOptions =
         .map((d) => `[ -d ${shellQuote(`${dir}/${d}`)} ] && printf '%s\\n' ${shellQuote(d)}`)
         .join("; ");
       const workspaceGlobCmd = `for d in ${shellQuote(dir)}/workspace-*/; do [ -d "$d" ] || continue; name="\${d%/}"; printf '%s\\n' "\${name##*/}"; done`;
-      const fullCheckCmd = `{ ${existCheckCmd}; ${workspaceGlobCmd}; } 2>/dev/null || true`;
+      const fullCheckCmd = wrapShellCommandWithStatusMarker(
+        `{ ${existCheckCmd}; ${workspaceGlobCmd}; } 2>/dev/null || true`,
+        DIR_DISCOVERY_STATUS_MARKER,
+      );
       _log(`Checking existing dirs via gRPC exec: ${fullCheckCmd.substring(0, 100)}...`);
       let existResult: ReturnType<typeof execTextSync>;
       try {
@@ -1042,23 +1112,29 @@ export function backupSandboxState(sandboxName: string, options: BackupOptions =
       _log(
         `Dir check: exit=${existResult.status}, stdout=${(existResult.stdout || "").trim().substring(0, 200)}, stderr=${(existResult.stderr || "").trim().substring(0, 200)}`,
       );
-      const seenExistingDirs = new Set<string>();
-      const existingDirs = (existResult.stdout || "")
-        .trim()
-        .split("\n")
-        .map((d) => d.trim())
-        .filter((d) => {
-          if (d.length === 0 || seenExistingDirs.has(d)) return false;
-          seenExistingDirs.add(d);
-          return true;
-        });
+      const markedDirCheck = statusFromMarker(existResult, DIR_DISCOVERY_STATUS_MARKER);
+      const parsedExistingDirs = parseExistingStateDirs(existResult.stdout || "", stateDirs);
+      if (!parsedExistingDirs.ok) {
+        _log(`FAILED: gRPC dir check produced invalid output — ${parsedExistingDirs.error}`);
+        return {
+          success: false,
+          manifest,
+          backedUpDirs,
+          failedDirs: [...stateDirs],
+          backedUpFiles,
+          failedFiles: stateFiles.map((f) => f.path),
+          error: `Directory discovery failed: ${parsedExistingDirs.error}`,
+        };
+      }
+      const existingDirs = parsedExistingDirs.dirs;
       _log(
         `Existing dirs in sandbox: [${existingDirs.join(",")}] (${existingDirs.length}/${stateDirs.length})`,
       );
 
-      if (existResult.status !== 0) {
+      if (markedDirCheck.status !== 0) {
+        const detail = markedDirCheck.stderr.trim() || `exit ${String(markedDirCheck.status)}`;
         _log(
-          `FAILED: gRPC dir check exited ${existResult.status} — cannot determine which dirs exist`,
+          `FAILED: gRPC dir check exited ${markedDirCheck.status} — cannot determine which dirs exist`,
         );
         return {
           success: false,
@@ -1067,6 +1143,7 @@ export function backupSandboxState(sandboxName: string, options: BackupOptions =
           failedDirs: [...stateDirs],
           backedUpFiles,
           failedFiles: stateFiles.map((f) => f.path),
+          error: `Directory discovery failed: ${detail}`,
         };
       }
 
@@ -1089,12 +1166,15 @@ export function backupSandboxState(sandboxName: string, options: BackupOptions =
         // stdout (the printf-emitted symlink/hardlink/special-file rows);
         // letting one perm-denied subdir abort the whole chain blocks legitimate
         // rebuilds.
-        const auditCmd = existingDirs
-          .map(
-            (d) =>
-              `{ find ${shellQuote(`${dir}/${d}`)} \\( -type l -o \\( -type f -a -links +1 \\) -o \\( ! -type f -a ! -type d \\) \\) -printf "%y\\t%p\\t%l\\n" 2>/dev/null || true; }`,
-          )
-          .join("; ");
+        const auditCmd = wrapShellCommandWithStatusMarker(
+          existingDirs
+            .map(
+              (d) =>
+                `{ find ${shellQuote(`${dir}/${d}`)} \\( -type l -o \\( -type f -a -links +1 \\) -o \\( ! -type f -a ! -type d \\) \\) -printf "%y\\t%p\\t%l\\n" 2>/dev/null || true; }`,
+            )
+            .join("; "),
+          PRE_BACKUP_AUDIT_STATUS_MARKER,
+        );
         _log(`Pre-backup audit: checking for symlinks, hard links, and special files`);
         let auditResult: ReturnType<typeof execTextSync>;
         try {
@@ -1114,9 +1194,9 @@ export function backupSandboxState(sandboxName: string, options: BackupOptions =
             error: `Pre-backup audit failed: ${detail}`,
           };
         }
-        if (auditResult.status !== 0) {
-          const stderr = auditResult.stderr.trim();
-          const detail = stderr || `exit ${String(auditResult.status)}`;
+        const markedAudit = statusFromMarker(auditResult, PRE_BACKUP_AUDIT_STATUS_MARKER);
+        if (markedAudit.status !== 0) {
+          const detail = markedAudit.stderr.trim() || `exit ${String(markedAudit.status)}`;
           _log(`FAILED: Pre-backup audit command failed — ${detail}`);
           return {
             success: false,
@@ -1177,7 +1257,10 @@ export function backupSandboxState(sandboxName: string, options: BackupOptions =
         // NC-2227-04: Removed -h flag (was following symlinks). State dirs are
         // now agent-writable and co-located with config — a compromised agent
         // could create symlinks to exfiltrate config contents via backup.
-        const tarCmd = `tar -cf - -C ${shellQuote(dir)} -- ${existingDirs.map(shellQuote).join(" ")}`;
+        const tarCmd = wrapShellCommandWithStatusMarker(
+          `tar -cf - -C ${shellQuote(dir)} -- ${existingDirs.map(shellQuote).join(" ")}`,
+          TAR_BACKUP_STATUS_MARKER,
+        );
         _log(`Downloading via gRPC+tar: ${tarCmd}`);
         let result: ReturnType<typeof execBinaryStreamSync>;
         try {
@@ -1195,17 +1278,20 @@ export function backupSandboxState(sandboxName: string, options: BackupOptions =
         _log(
           `gRPC+tar download: exit=${result.status}, stdout=${result.stdout ? result.stdout.length + " bytes" : "null"}, stderr=${result.stderr.toString().substring(0, 200)}`,
         );
+        const markedTar = statusFromMarker(result, TAR_BACKUP_STATUS_MARKER);
 
         // GNU tar exit codes: 0 = success, 1 = files changed during archive,
         // 2 = errors (e.g. permission denied) but archive still written to stdout.
         // Accept exit 0, 1, or 2 when stdout has data — extract what tar produced
         // and determine per-dir success from tar's reported read errors.
         const tarExitedWithData =
-          result.stdout && result.stdout.length > 0 && (result.status === 0 || result.status === 1 || result.status === 2);
+          result.stdout &&
+          result.stdout.length > 0 &&
+          (markedTar.status === 0 || markedTar.status === 1 || markedTar.status === 2);
 
-        if (result.status !== 0 && result.stdout && result.stdout.length > 0) {
+        if (markedTar.status !== 0 && result.stdout && result.stdout.length > 0) {
           _log(
-            `tar exited ${result.status} but produced ${result.stdout.length} bytes — attempting partial extraction`,
+            `tar exited ${markedTar.status} but produced ${result.stdout.length} bytes — attempting partial extraction`,
           );
         }
 
@@ -1214,7 +1300,7 @@ export function backupSandboxState(sandboxName: string, options: BackupOptions =
           const extractResult = safeTarExtract(result.stdout, backupPath);
           if (extractResult.success) {
             const extractedDirs = new Set(existingBackupDirs(backupPath, existingDirs));
-            if (result.status === 0) {
+            if (markedTar.status === 0) {
               for (const d of existingDirs) {
                 if (extractedDirs.has(d)) {
                   backedUpDirs.push(d);
@@ -1225,12 +1311,12 @@ export function backupSandboxState(sandboxName: string, options: BackupOptions =
               }
             } else {
               const tarFailedDirs = failedDirsFromTarStderr(
-                result.stderr.toString() || "",
+                markedTar.stderr || "",
                 existingDirs,
               );
               if (tarFailedDirs.size === 0) {
                 _log(
-                  `tar exited ${result.status} without attributable failed dirs — marking all dirs failed`,
+                  `tar exited ${markedTar.status} without attributable failed dirs — marking all dirs failed`,
                 );
                 failedDirs.push(...existingDirs);
               } else {
@@ -1391,7 +1477,10 @@ export function restoreSandboxState(sandboxName: string, backupPath: string): Re
       // image-managed extensions are preserved from the freshly built image and
       // excluded from the restore tar; only user/non-managed extension entries
       // are cleared and restored from the backup.
-      const rmCmd = buildRestoreCleanupCommand(dir, localDirs, preserveManagedExtensions);
+      const rmCmd = wrapShellCommandWithStatusMarker(
+        buildRestoreCleanupCommand(dir, localDirs, preserveManagedExtensions),
+        RESTORE_CLEANUP_STATUS_MARKER,
+      );
       _log(`Cleaning target dirs before restore: ${rmCmd}`);
       let rmResult: ReturnType<typeof execBinaryStreamSync>;
       try {
@@ -1409,9 +1498,9 @@ export function restoreSandboxState(sandboxName: string, backupPath: string): Re
           failedFiles: localFiles.map((f) => f.path),
         };
       }
-      if (rmResult.status !== 0) {
-        const stderr = rmResult.stderr.toString().trim();
-        const detail = stderr || `exit ${String(rmResult.status)}`;
+      const markedCleanup = statusFromMarker(rmResult, RESTORE_CLEANUP_STATUS_MARKER);
+      if (markedCleanup.status !== 0) {
+        const detail = markedCleanup.stderr.trim() || `exit ${String(markedCleanup.status)}`;
         _log(`FAILED: pre-restore cleanup failed: ${detail.substring(0, 200)}`);
         return {
           success: false,
@@ -1422,7 +1511,10 @@ export function restoreSandboxState(sandboxName: string, backupPath: string): Re
         };
       }
 
-      const extractCmd = `tar --no-same-owner -xf - -C ${shellQuote(dir)}`;
+      const extractCmd = wrapShellCommandWithStatusMarker(
+        `tar --no-same-owner -xf - -C ${shellQuote(dir)}`,
+        RESTORE_EXTRACT_STATUS_MARKER,
+      );
       let extractResult: ReturnType<typeof execInputStreamSync>;
       try {
         extractResult = execInputStreamSync(sandboxName, ["sh", "-c", extractCmd], tarResult.stdout, {
@@ -1437,7 +1529,8 @@ export function restoreSandboxState(sandboxName: string, backupPath: string): Re
         extractResult = { status: 1, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) };
       }
 
-      if (extractResult.status === 0) {
+      const markedExtract = statusFromMarker(extractResult, RESTORE_EXTRACT_STATUS_MARKER);
+      if (markedExtract.status === 0) {
         const restoredPaths = localDirs.map((d) => `${dir}/${d}`);
 
         // Best-effort only: OpenShell gRPC exec normally runs as the sandbox user,
@@ -1455,12 +1548,15 @@ export function restoreSandboxState(sandboxName: string, backupPath: string): Re
           );
         }
 
-        const usabilityCmd = restoredPaths
-          .map(
-            (p) =>
-              `[ -d ${shellQuote(p)} ] && [ ! -L ${shellQuote(p)} ] && [ -r ${shellQuote(p)} ] && [ -w ${shellQuote(p)} ]`,
-          )
-          .join(" && ");
+        const usabilityCmd = wrapShellCommandWithStatusMarker(
+          restoredPaths
+            .map(
+              (p) =>
+                `[ -d ${shellQuote(p)} ] && [ ! -L ${shellQuote(p)} ] && [ -r ${shellQuote(p)} ] && [ -w ${shellQuote(p)} ]`,
+            )
+            .join(" && "),
+          RESTORE_USABILITY_STATUS_MARKER,
+        );
         _log(`Verifying restored state usability: ${usabilityCmd}`);
         let usabilityResult: ReturnType<typeof execBinaryStreamSync>;
         try {
@@ -1474,11 +1570,11 @@ export function restoreSandboxState(sandboxName: string, backupPath: string): Re
             stderr: Buffer.from(error instanceof Error ? error.message : String(error)),
           };
         }
-        if (usabilityResult.status === 0) {
+        const markedUsability = statusFromMarker(usabilityResult, RESTORE_USABILITY_STATUS_MARKER);
+        if (markedUsability.status === 0) {
           restoredDirs.push(...localDirs);
         } else {
-          const stderr = usabilityResult.stderr.toString().trim();
-          const detail = stderr || `exit ${String(usabilityResult.status)}`;
+          const detail = markedUsability.stderr.trim() || `exit ${String(markedUsability.status)}`;
           _log(`FAILED: restored state usability check failed: ${detail.substring(0, 200)}`);
           failedDirs.push(...localDirs);
         }

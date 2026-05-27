@@ -11,7 +11,10 @@ import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import type { CleanupSandboxServicesDeps } from "../dist/lib/actions/sandbox/destroy.js";
-import { cleanupSandboxServices } from "../dist/lib/actions/sandbox/destroy.js";
+import {
+  cleanupSandboxServices,
+  removeSandboxRegistryEntry,
+} from "../dist/lib/actions/sandbox/destroy.js";
 
 type SandboxLike = { provider?: string | null } | null;
 
@@ -111,5 +114,44 @@ describe("cleanupSandboxServices Ollama unload (#2717)", () => {
       "regression-2717-slack-app",
       "regression-2717-wechat-bridge",
     ]);
+  });
+});
+
+describe("removeSandboxRegistryEntry forward cleanup", () => {
+  it("stops NemoClaw-managed gRPC forward bridges for the removed sandbox", () => {
+    const stopForwardBridge = vi.fn();
+    const removeSandbox = vi.fn(() => true);
+
+    expect(
+      removeSandboxRegistryEntry("alpha", {
+        removeImage: vi.fn(),
+        removeSandbox,
+        listForwardStates: vi.fn(() => [
+          {
+            sandboxName: "alpha",
+            bind: "127.0.0.1",
+            port: 18789,
+            targetHost: "127.0.0.1",
+            targetPort: 18789,
+            pid: 123,
+            startedAt: "2026-05-27T00:00:00.000Z",
+          },
+          {
+            sandboxName: "beta",
+            bind: "127.0.0.1",
+            port: 18790,
+            targetHost: "127.0.0.1",
+            targetPort: 18790,
+            pid: 456,
+            startedAt: "2026-05-27T00:00:00.000Z",
+          },
+        ]),
+        stopForwardBridge,
+      }),
+    ).toBe(true);
+
+    expect(stopForwardBridge).toHaveBeenCalledWith("alpha", 18789);
+    expect(stopForwardBridge).toHaveBeenCalledTimes(1);
+    expect(removeSandbox).toHaveBeenCalledWith("alpha");
   });
 });

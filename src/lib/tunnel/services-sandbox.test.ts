@@ -145,7 +145,8 @@ describe("stopSandboxChannels", () => {
 
     const payload = readSyncRunnerPayload(spawnSyncSpy);
     expect(payload.sandboxName).toBe("my-sandbox");
-    expect(payload.argv?.slice(0, 2)).toEqual(["sh", "-lc"]);
+    expect(payload.argv).toEqual(["sh", "-s"]);
+    expect(payload.argv?.some((arg) => /[\r\n]/.test(arg))).toBe(false);
     const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
     expect(output).toContain("OpenClaw gateway stopped inside sandbox");
     logSpy.mockRestore();
@@ -217,7 +218,8 @@ describe("stopSandboxChannels", () => {
 
     const payload = readSyncRunnerPayload(spawnSyncSpy);
     expect(payload.sandboxName).toBe("my-sandbox");
-    expect(payload.argv?.slice(0, 2)).toEqual(["sh", "-lc"]);
+    expect(payload.argv).toEqual(["sh", "-s"]);
+    expect(payload.argv?.some((arg) => /[\r\n]/.test(arg))).toBe(false);
     logSpy.mockRestore();
   });
 

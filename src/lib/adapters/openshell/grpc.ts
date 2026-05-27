@@ -177,6 +177,13 @@ function bufferFromData(data: unknown): Buffer {
   return Buffer.alloc(0);
 }
 
+function exitCodeFromEvent(event: any): number | null {
+  const raw = event?.exit?.exit_code ?? event?.exit?.exitCode;
+  if (raw === undefined || raw === null) return null;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : 1;
+}
+
 function stdinBuffer(input: Buffer | string | undefined): Buffer | undefined {
   if (input === undefined) return undefined;
   return Buffer.isBuffer(input) ? input : Buffer.from(input);
@@ -225,10 +232,8 @@ function collectExecStream(
     stream.on("data", (event: any) => {
       if (event?.stdout?.data !== undefined) stdout.push(bufferFromData(event.stdout.data));
       if (event?.stderr?.data !== undefined) stderr.push(bufferFromData(event.stderr.data));
-      if (event?.exit?.exit_code !== undefined) {
-        const parsed = Number(event.exit.exit_code);
-        exitCode = Number.isFinite(parsed) ? parsed : 1;
-      }
+      const parsedExitCode = exitCodeFromEvent(event);
+      if (parsedExitCode !== null) exitCode = parsedExitCode;
     });
     stream.on("error", (error) => {
       settle(() => reject(new Error(`${label} failed: ${formatGrpcError(error)}`)));
@@ -662,6 +667,11 @@ export function execInputStreamSync(
     stderr: Buffer.from(response.result.stderrBase64 || "", "base64"),
   };
 }
+
+export const __grpcTestHooks = {
+  collectExecStream,
+  exitCodeFromEvent,
+};
 
 // Keep CommonJS transpilation happy if this file is ever executed through ESM-aware tooling.
 void fileURLToPath;
