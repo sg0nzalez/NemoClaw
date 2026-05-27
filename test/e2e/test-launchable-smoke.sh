@@ -184,18 +184,8 @@ else
   exit 1
 fi
 
-models_http_code="000"
-for attempt in 1 2 3; do
-  models_http_code=$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 5 --max-time 20 \
-    -H "Authorization: Bearer $NVIDIA_API_KEY" \
-    https://integrate.api.nvidia.com/v1/models 2>/dev/null || printf '000')
-  if [ "$models_http_code" != "000" ]; then
-    break
-  fi
-  [ "$attempt" -lt 3 ] && sleep 5
-done
-if [ "$models_http_code" != "000" ]; then
-  pass "Network access to integrate.api.nvidia.com (HTTP ${models_http_code})"
+if curl -sf --max-time 10 https://integrate.api.nvidia.com/v1/models >/dev/null 2>&1; then
+  pass "Network access to integrate.api.nvidia.com"
 else
   fail "Cannot reach integrate.api.nvidia.com"
   exit 1
