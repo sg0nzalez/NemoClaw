@@ -206,12 +206,14 @@ if command -v gh >/dev/null 2>&1; then
   if [ -n "$LABEL_HIT" ]; then
     record_check idempotency fail "issue already labeled $LABEL_HIT"
   else
-    # Recent marker check.
+    # Recent marker check. `gh issue view --jq` does not accept `--arg` (the
+    # `gh` parser stops at the first positional after `--jq`), so pipe through
+    # standalone jq with --arg.
     SEVEN_DAYS_AGO=$(date -u -v-7d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '-7 days' +%Y-%m-%dT%H:%M:%SZ)
-    RECENT_MARKER=$(gh issue view "$ISSUE" --repo NVIDIA/NemoClaw --json comments \
-      --jq --arg cutoff "$SEVEN_DAYS_AGO" \
-      '.comments | map(select(.body | test("<!-- nemoclaw-verify-stale v[0-9]+ [0-9-]+ -->"))) |
-       map(select(.createdAt > $cutoff)) | length' 2>/dev/null || echo 0)
+    RECENT_MARKER=$(gh issue view "$ISSUE" --repo NVIDIA/NemoClaw --json comments --jq '.comments' \
+      | jq --arg cutoff "$SEVEN_DAYS_AGO" \
+        'map(select(.body | test("<!-- nemoclaw-verify-stale v[0-9]+ [0-9-]+ -->"))) |
+         map(select(.createdAt > $cutoff)) | length' 2>/dev/null || echo 0)
     if [ "$RECENT_MARKER" -gt 0 ]; then
       record_check idempotency fail "marker posted within last 7 days"
     else

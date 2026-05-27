@@ -94,9 +94,12 @@ SEVEN_DAYS_AGO=$(date -u -v-7d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
   || date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ)
 
 # Returns the timestamp of the most recent marker comment within the TTL, or empty.
-RECENT_MARKER=$(gh issue view "$ISSUE_NUMBER" --repo NVIDIA/NemoClaw --json comments \
-  --jq --arg cutoff "$SEVEN_DAYS_AGO" '
-    .comments[]
+# `gh issue view --jq` does not accept `--arg` (the `gh` parser stops at the first
+# positional after `--jq`). Pass shell variables through a standalone `jq --arg`
+# downstream of the gh call.
+RECENT_MARKER=$(gh issue view "$ISSUE_NUMBER" --repo NVIDIA/NemoClaw --json comments --jq '.comments' \
+  | jq -r --arg cutoff "$SEVEN_DAYS_AGO" '
+    .[]
     | select(.body | test("<!-- nemoclaw-verify-stale v\\d+ \\d{4}-\\d{2}-\\d{2} -->"))
     | select(.createdAt > $cutoff)
     | .createdAt' \
@@ -123,8 +126,8 @@ REPORTER=$(gh issue view "$ISSUE_NUMBER" --repo NVIDIA/NemoClaw --json author --
 # Question-detection patterns are chained as separate test() calls so each
 # heuristic is independently readable and a future addition (e.g. "what about",
 # "why does") is a one-line append rather than a regex-alternation patch.
-UNANSWERED_MAINT=$(gh issue view "$ISSUE_NUMBER" --repo NVIDIA/NemoClaw --json comments \
-  --jq --arg reporter "$REPORTER" --arg cutoff "$SEVEN_DAYS_AGO" '
+UNANSWERED_MAINT=$(gh issue view "$ISSUE_NUMBER" --repo NVIDIA/NemoClaw --json comments --jq '.' \
+  | jq --arg reporter "$REPORTER" --arg cutoff "$SEVEN_DAYS_AGO" '
     (.comments
      | map(select((.authorAssociation == "MEMBER" or .authorAssociation == "OWNER" or .authorAssociation == "COLLABORATOR")
          and (.body | test("\\?")                                                                       # literal "?"

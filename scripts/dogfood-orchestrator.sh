@@ -310,13 +310,23 @@ EOF
     > "$RUN_DIR/$issue/brev-post.txt" 2>/dev/null \
     || : > "$RUN_DIR/$issue/brev-post.txt"
 
+  # `date -u -r <epoch>` is BSD/macOS syntax; `date -u -d @<epoch>` is GNU.
+  # The sandbox runs Linux (GNU) but a maintainer might smoke-test on a mac,
+  # so try BSD first and fall back. Matches the preflight script's pattern.
+  fmt_epoch() {
+    date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+      || date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ
+  }
+  candidate_start_iso=$(fmt_epoch "$candidate_start_epoch")
+  candidate_end_iso=$(fmt_epoch "$candidate_end_epoch")
+
   jq -n \
     --argjson sec "$wallclock_sec" \
     --argjson cost "$candidate_cost" \
     --argjson rate "$DOGFOOD_BREV_HOURLY_USD" \
     --argjson rc "$agent_rc" \
-    --arg start "$(date -u -r "$candidate_start_epoch" +%Y-%m-%dT%H:%M:%SZ)" \
-    --arg end "$(date -u -r "$candidate_end_epoch" +%Y-%m-%dT%H:%M:%SZ)" \
+    --arg start "$candidate_start_iso" \
+    --arg end "$candidate_end_iso" \
     '{wallclock_sec: $sec, cost_usd: $cost, hourly_rate_usd: $rate,
       agent_exit: $rc, started_at: $start, ended_at: $end,
       cost_method: "wallclock × hourly_rate (conservative; not actual brev billing)"}' \
