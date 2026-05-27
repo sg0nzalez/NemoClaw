@@ -7,7 +7,87 @@ const AUDIT = "current-main-e2e-coverage-audit.md";
 
 export function getPhaseParityEntries(phase: number): ParityInventoryEntry[] {
   if (phase === 3) return phase3Entries();
+  if (phase === 4) return phase4Entries();
   return [];
+}
+
+function phase4Entries(): ParityInventoryEntry[] {
+  return [
+    entry("test/e2e/test-bedrock-runtime-compatible-anthropic.sh", "inference.bedrock.compatible-anthropic", {
+      manifest: { scenarioId: "openclaw-bedrock-compatible-anthropic", installSource: "repo-current" },
+      fixtures: ["fake-bedrock-runtime-endpoint", "bedrock-host-mapping", "bedrock-adapter-state", "provider-key-leak-scan"],
+      actions: ["onboard.bedrock-compatible"],
+      assertions: [
+        assertion("inference.bedrock.adapter-health", "validation_suites/inference/bedrock/00-adapter-health.sh", "fake-service"),
+        assertion("inference.bedrock.config-shape", "validation_suites/inference/bedrock/01-config-shape.sh", "host"),
+        assertion("inference.bedrock.runtime-chat", "validation_suites/inference/bedrock/02-runtime-chat.sh", "sandbox"),
+        assertion("inference.bedrock.traffic-observed", "validation_suites/inference/bedrock/03-traffic-observed.sh", "fake-service"),
+        assertion("inference.bedrock.leak-scan", "validation_suites/inference/bedrock/04-leak-scan.sh", "host"),
+      ],
+    }),
+    entry("test/e2e/test-inference-routing.sh", "inference.routing.provider-identity", {
+      manifest: { scenarioId: "openai-openclaw-routing", installSource: "repo-current" },
+      fixtures: ["fake-compatible-openai-endpoint", "provider-registry-reader"],
+      actions: ["onboard.openclaw-compatible"],
+      assertions: [
+        assertion("inference.routing.provider-route-identity", "validation_suites/inference/routing/01-provider-route-health.sh", "sandbox"),
+        assertion("inference.routing.sandbox-chat", "validation_suites/inference/routing/00-inference-local-chat-completion.sh", "sandbox"),
+      ],
+    }),
+    entry("test/e2e/test-kimi-inference-compat.sh", "inference.kimi.tool-trajectory", {
+      manifest: { scenarioId: "compatible-openclaw-kimi", installSource: "repo-current" },
+      fixtures: ["fake-kimi-endpoint", "trajectory-session-artifact-reader"],
+      actions: ["onboard.kimi-compatible", "agent.prompt.tool-trajectory"],
+      assertions: [
+        assertion("inference.kimi.trajectory.hostname", "validation_suites/inference/kimi-compatibility/00-plugin-wiring.sh", "sandbox"),
+        assertion("inference.kimi.trajectory.date", "validation_suites/inference/kimi-compatibility/01-kimi-compatible-models-route.sh", "sandbox"),
+        assertion("inference.kimi.trajectory.uptime", "validation_suites/inference/kimi-compatibility/02-tool-trajectory.sh", "sandbox"),
+      ],
+    }),
+    entry("test/e2e/test-model-router-provider-routed-inference.sh", "inference.model-router.routed-completion", {
+      manifest: { scenarioId: "routed-nvidia-openclaw-model-router", installSource: "repo-current" },
+      fixtures: ["model-router-health-endpoint"],
+      actions: ["onboard.model-router"],
+      assertions: [
+        assertion("inference.model-router.healthy-count", "validation_suites/inference/model-router/00-healthy-endpoint.sh", "fake-service"),
+        assertion("inference.model-router.routed-completion", "validation_suites/inference/model-router/01-provider-routed-completion.sh", "sandbox"),
+      ],
+    }),
+    switchEntry("test/e2e/test-openclaw-inference-switch.sh", "openclaw-nvidia-inference-switch"),
+    switchEntry("test/e2e/test-hermes-inference-switch.sh", "cloud-nvidia-hermes-inference-switch"),
+    entry("test/e2e/test-messaging-compatible-endpoint.sh", "inference.messaging-compatible-endpoint", {
+      manifest: { scenarioId: "telegram-compatible-openclaw", installSource: "repo-current" },
+      fixtures: ["fake-compatible-openai-endpoint", "fake-telegram"],
+      actions: ["onboard.compatible", "channels.add.telegram"],
+      assertions: [
+        assertion("inference.messaging.config-shape", "validation_suites/messaging/common/01-placeholder-configured.sh", "host"),
+        assertion("inference.messaging.runtime-route", "validation_suites/inference/routing/00-inference-local-chat-completion.sh", "sandbox"),
+      ],
+    }),
+    entry("test/e2e/test-runtime-overrides.sh", "inference.runtime-overrides", {
+      manifest: { scenarioId: "openclaw-runtime-overrides", installSource: "repo-current" },
+      fixtures: ["runtime-override-container", "config-hash-reader"],
+      actions: ["runtime.override.valid", "runtime.override.invalid"],
+      assertions: [
+        assertion("inference.runtime-overrides.config-hash", "validation_suites/inference/runtime-overrides/00-config-hash.sh", "host"),
+        assertion("inference.runtime-overrides.reject-invalid", "validation_suites/inference/runtime-overrides/01-reject-invalid.sh", "host"),
+      ],
+    }),
+  ];
+}
+
+function switchEntry(legacyScript: string, scenarioId: string): ParityInventoryEntry {
+  return entry(legacyScript, "inference.switch.state-registry-config-live", {
+    manifest: { scenarioId, installSource: "repo-current" },
+    fixtures: ["provider-registry-reader", "session-state-reader", "config-hash-reader"],
+    actions: ["inference.set"],
+    assertions: [
+      assertion("inference.switch.route-state", "validation_suites/inference/switch/00-route-state-updated.sh", "host"),
+      assertion("inference.switch.registry-session-state", "validation_suites/inference/switch/01-registry-session-state.sh", "host"),
+      assertion("inference.switch.config-hash-shape", "validation_suites/inference/switch/02-config-hash-shape.sh", "host"),
+      assertion("inference.switch.post-switch-live-request", "validation_suites/inference/switch/01-switched-inference-local-chat.sh", "sandbox"),
+    ],
+  });
 }
 
 function phase3Entries(): ParityInventoryEntry[] {
