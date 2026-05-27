@@ -470,49 +470,37 @@ fi
 # agent runtime or openclaw's HTTP client. See NemoClaw #2490 for the
 # openclaw 4.9 SSRF regression that was invisible to assertions of this shape.
 info "[ROUTING] inference.local DNS + OpenShell proxy reachable from Hermes sandbox..."
-TIMEOUT_CMD=""
-command -v timeout >/dev/null 2>&1 && TIMEOUT_CMD="timeout 90"
-command -v gtimeout >/dev/null 2>&1 && TIMEOUT_CMD="gtimeout 90"
-sandbox_content=""
+ssh_config="$(mktemp)"
 sandbox_response=""
-sandbox_detail=""
-pong_ok=false
-for pong_attempt in 1 2 3; do
-  ssh_config="$(mktemp)"
-  sandbox_response=""
-  if openshell sandbox ssh-config "$SANDBOX_NAME" >"$ssh_config" 2>/dev/null; then
-    sandbox_response=$($TIMEOUT_CMD ssh -F "$ssh_config" \
-      -o StrictHostKeyChecking=no \
-      -o UserKnownHostsFile=/dev/null \
-      -o ConnectTimeout=10 \
-      -o LogLevel=ERROR \
-      "openshell-${SANDBOX_NAME}" \
-      "if [ -r /tmp/nemoclaw-proxy-env.sh ]; then . /tmp/nemoclaw-proxy-env.sh; fi; curl -sS --max-time 60 https://inference.local/v1/chat/completions \
-        -H 'Content-Type: application/json' \
-        -d '{\"model\":\"nvidia/nemotron-3-super-120b-a12b\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly one word: PONG\"}],\"max_tokens\":100}'" \
-      2>&1) || true
-  fi
-  rm -f "$ssh_config"
-  if [ -n "$sandbox_response" ]; then
-    sandbox_content=$(echo "$sandbox_response" | parse_chat_content 2>/dev/null) || true
-    sandbox_detail="${sandbox_content:-$sandbox_response}"
-  else
-    sandbox_content=""
-    sandbox_detail="empty response"
-  fi
-  if grep -qi "PONG" <<<"$sandbox_content"; then
-    pong_ok=true
-    break
-  fi
-  info "Sandbox inference attempt ${pong_attempt}/3: got '${sandbox_detail:0:120}'"
-  [ "$pong_attempt" -lt 3 ] && sleep 5
-done
 
-if $pong_ok; then
-  pass "[ROUTING] inference.local: OpenShell routed curl to NVIDIA Endpoints and returned PONG"
-  info "Routing path proven: sandbox curl → DNS forwarder → gateway proxy → NVIDIA Endpoints (does not exercise the Hermes agent runtime or openclaw HTTP client)"
+if openshell sandbox ssh-config "$SANDBOX_NAME" >"$ssh_config" 2>/dev/null; then
+  # Use timeout if available (Linux, Homebrew), fall back to plain ssh
+  TIMEOUT_CMD=""
+  command -v timeout >/dev/null 2>&1 && TIMEOUT_CMD="timeout 90"
+  command -v gtimeout >/dev/null 2>&1 && TIMEOUT_CMD="gtimeout 90"
+  sandbox_response=$($TIMEOUT_CMD ssh -F "$ssh_config" \
+    -o StrictHostKeyChecking=no \
+    -o UserKnownHostsFile=/dev/null \
+    -o ConnectTimeout=10 \
+    -o LogLevel=ERROR \
+    "openshell-${SANDBOX_NAME}" \
+    "curl -s --max-time 60 https://inference.local/v1/chat/completions \
+      -H 'Content-Type: application/json' \
+      -d '{\"model\":\"nvidia/nemotron-3-super-120b-a12b\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly one word: PONG\"}],\"max_tokens\":100}'" \
+    2>&1) || true
+fi
+rm -f "$ssh_config"
+
+if [ -n "$sandbox_response" ]; then
+  sandbox_content=$(echo "$sandbox_response" | parse_chat_content 2>/dev/null) || true
+  if grep -qi "PONG" <<<"$sandbox_content"; then
+    pass "[ROUTING] inference.local: OpenShell routed curl to NVIDIA Endpoints and returned PONG"
+    info "Routing path proven: sandbox curl → DNS forwarder → gateway proxy → NVIDIA Endpoints (does not exercise the Hermes agent runtime or openclaw HTTP client)"
+  else
+    fail "[ROUTING] inference.local: expected PONG, got: ${sandbox_content:0:200}"
+  fi
 else
-  fail "[ROUTING] inference.local: expected PONG after 3 attempts, got: ${sandbox_detail:0:200}"
+  fail "[ROUTING] inference.local: no response from inference.local inside Hermes sandbox"
 fi
 
 # ══════════════════════════════════════════════════════════════════

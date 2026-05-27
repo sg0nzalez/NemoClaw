@@ -59,10 +59,6 @@ command -v base64 >/dev/null 2>&1 || die "base64 not on PATH"
 
 prompt_b64=$(printf '%s' "$PROMPT" | base64 | tr -d '\n')
 nv_b64=$(printf '%s' "$NVIDIA_API_KEY" | base64 | tr -d '\n')
-remote_env_prefix='[ -r /tmp/nemoclaw-proxy-env.sh ] && . /tmp/nemoclaw-proxy-env.sh; '
-if [ "${NEMOCLAW_ALLOW_RESIDUAL_CAPS:-0}" = "1" ]; then
-  remote_env_prefix+='export NEMOCLAW_ALLOW_RESIDUAL_CAPS=1; '
-fi
 
 ssh_config="$(mktemp)"
 trap 'rm -f "$ssh_config"' EXIT
@@ -79,7 +75,7 @@ _lock_rm=""
 if [ "${SKILL_VERIFY_NO_CLEAR_LOCK:-0}" != "1" ]; then
   _lock_rm="rm -f '/sandbox/.openclaw/agents/main/sessions/${SESSION_ID}.jsonl.lock' 2>/dev/null || true; "
 fi
-remote_cmd="${remote_env_prefix}pm=\$(printf '%s' '${prompt_b64}' | base64 -d) || exit 1; nv=\$(printf '%s' '${nv_b64}' | base64 -d) || exit 1; export NVIDIA_API_KEY=\"\$nv\"; ${_lock_rm}${AGENT_LAUNCHER}openclaw agent --agent main --local -m \"\$pm\" --session-id '${SESSION_ID}'"
+remote_cmd="pm=\$(printf '%s' '${prompt_b64}' | base64 -d) || exit 1; nv=\$(printf '%s' '${nv_b64}' | base64 -d) || exit 1; export NVIDIA_API_KEY=\"\$nv\"; ${_lock_rm}${AGENT_LAUNCHER}openclaw agent --agent main --local -m \"\$pm\" --session-id '${SESSION_ID}'"
 
 info "Running openclaw agent in sandbox '${SANDBOX_NAME}' (session ${SESSION_ID})..."
 
