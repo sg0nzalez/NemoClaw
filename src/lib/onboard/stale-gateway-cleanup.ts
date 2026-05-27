@@ -66,6 +66,11 @@ export interface StaleGatewayOptions {
    * disrupt the forward of an existing sandbox (#3260).
    */
   protectedPorts?: Iterable<number>;
+  /**
+   * Additional non-default dashboard ports to scan. Agent sandboxes such as
+   * Hermes can use fixed service ports outside the OpenClaw dashboard range.
+   */
+  extraPorts?: Iterable<number>;
 }
 
 const CMDLINE_MARKERS = ["openclaw-gateway", "openshell-forward", "openshell forward"];
@@ -246,7 +251,15 @@ export function stopStaleDashboardListeners(
   if (deps.commandExists && !deps.commandExists("lsof")) return result;
 
   const seen = new Set<number>();
+  const portsToScan = new Set<number>();
   for (let port = DASHBOARD_PORT_RANGE_START; port <= DASHBOARD_PORT_RANGE_END; port += 1) {
+    portsToScan.add(port);
+  }
+  for (const port of options.extraPorts ?? []) {
+    if (Number.isFinite(port)) portsToScan.add(port);
+  }
+
+  for (const port of portsToScan) {
     if (protectedPorts.has(port)) {
       const pids = lsofPidsForPort(port, deps);
       if (pids.length > 0) {

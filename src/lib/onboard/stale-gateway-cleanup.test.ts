@@ -115,6 +115,35 @@ describe("stopStaleDashboardListeners", () => {
     expect(log).toHaveBeenCalledWith(expect.stringContaining("Stopped stale dashboard gateway listener 2522044"));
   });
 
+  it("can scan an agent dashboard port outside the OpenClaw dashboard range", () => {
+    const kill = vi.fn<(pid: number, signal?: NodeJS.Signals | number) => boolean>(() => true);
+    let pidGone = false;
+    const responses = new Map<string, RunResult | ((args: string[]) => RunResult)>([
+      ["lsof -ti :8642 -sTCP:LISTEN", { status: 0, stdout: "864200\n", stderr: "" }],
+      ["ps -p 864200 -o user=", { status: 0, stdout: "tester\n", stderr: "" }],
+      [
+        "ps -p 864200 -o args=",
+        { status: 0, stdout: "openshell-forward --port 8642\n", stderr: "" },
+      ],
+      [
+        "ps -p 864200 -o pid=",
+        () => (pidGone ? { status: 1, stdout: "", stderr: "" } : { status: 0, stdout: "864200\n", stderr: "" }),
+      ],
+    ]);
+    const { run } = makeRun(responses);
+    const customKill: StaleGatewayDeps["kill"] = (pid, signal) => {
+      kill(pid, signal);
+      if (signal === "SIGTERM") pidGone = true;
+      return true;
+    };
+    const result = stopStaleDashboardListeners(
+      { ...baseDeps({ run, kill: customKill }) },
+      { extraPorts: [8642] },
+    );
+    expect(result.stopped).toEqual([864200]);
+    expect(kill).toHaveBeenCalledWith(864200, "SIGTERM");
+  });
+
   it("escalates to SIGKILL when SIGTERM does not free the process", () => {
     const sentSignals: NodeJS.Signals[] = [];
     let pidGone = false;

@@ -25,7 +25,10 @@ const { stopStaleDashboardListenersForSandbox } = require("./onboard/stale-gatew
 const {
   ensureOllamaLoopbackSystemdOverride,
 }: typeof import("./onboard/ollama-systemd") = require("./onboard/ollama-systemd");
-const { bestEffortForwardStop } = require("./onboard/forward-cleanup");
+const {
+  bestEffortForwardStop,
+  stopTrackedGrpcForwardBridgeForPort,
+} = require("./onboard/forward-cleanup");
 const {
   CUSTOM_BUILD_CONTEXT_WARN_BYTES,
   isInsideIgnoredCustomBuildContextPath,
@@ -2071,6 +2074,24 @@ async function preflight(
             `  ✓ Port ${port} already owned by NemoClaw OpenShell Docker gateway (${label})`,
           );
           continue;
+        }
+      }
+      if (
+        port === DASHBOARD_PORT &&
+        (gatewayReuseState === "stale" ||
+          gatewayReuseState === "missing" ||
+          gatewayReuseState === "active-unnamed")
+      ) {
+        const stoppedBridge = stopTrackedGrpcForwardBridgeForPort(port, { pid: portCheck.pid });
+        if (stoppedBridge) {
+          console.log(
+            `  Cleaning up stale gRPC dashboard bridge on port ${port} for sandbox '${stoppedBridge.sandboxName}'...`,
+          );
+          portCheck = await checkPortAvailable(port, portCheckOptions);
+          if (portCheck.ok) {
+            console.log(`  ✓ Port ${port} available after stale gRPC bridge cleanup (${label})`);
+            continue;
+          }
         }
       }
       // Auto-cleanup orphaned SSH port-forward from a previous NemoClaw session

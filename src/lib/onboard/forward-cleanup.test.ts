@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   bestEffortForwardStop,
   bestEffortForwardStopForSandbox,
+  stopTrackedGrpcForwardBridgeForPort,
 } from "../../../dist/lib/onboard/forward-cleanup";
 
 function forwardListWith(entries: Array<{ sandbox: string; port: number; status?: string }>): string {
@@ -111,5 +112,52 @@ describe("bestEffortForwardStopForSandbox", () => {
 
     expect(outcome).toBe("no-entry");
     expect(run).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("stopTrackedGrpcForwardBridgeForPort", () => {
+  it("stops a tracked gRPC bridge when its port and PID match the listener", () => {
+    const stop = vi.fn(() => true);
+    const state = {
+      sandboxName: "my-sandbox",
+      bind: "127.0.0.1",
+      port: 18789,
+      targetHost: "127.0.0.1",
+      targetPort: 4000,
+      pid: 4242,
+      startedAt: "2026-05-27T00:00:00.000Z",
+    };
+
+    const stopped = stopTrackedGrpcForwardBridgeForPort(18789, {
+      pid: 4242,
+      listForwardStates: () => [state],
+      stopForwardBridge: stop,
+    });
+
+    expect(stopped).toEqual(state);
+    expect(stop).toHaveBeenCalledWith("my-sandbox", 18789);
+  });
+
+  it("leaves a tracked bridge alone when the port listener PID differs", () => {
+    const stop = vi.fn(() => true);
+
+    const stopped = stopTrackedGrpcForwardBridgeForPort(18789, {
+      pid: 9999,
+      listForwardStates: () => [
+        {
+          sandboxName: "my-sandbox",
+          bind: "127.0.0.1",
+          port: 18789,
+          targetHost: "127.0.0.1",
+          targetPort: 4000,
+          pid: 4242,
+          startedAt: "2026-05-27T00:00:00.000Z",
+        },
+      ],
+      stopForwardBridge: stop,
+    });
+
+    expect(stopped).toBeNull();
+    expect(stop).not.toHaveBeenCalled();
   });
 });

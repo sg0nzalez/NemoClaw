@@ -2,6 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { OPENSHELL_PROBE_TIMEOUT_MS } from "../adapters/openshell/timeouts";
+import {
+  listForwardStates,
+  stopForwardBridge,
+  type SandboxForwardState,
+} from "../adapters/openshell/forward-bridge-state";
 
 import { getOccupiedPorts } from "./dashboard-port";
 
@@ -14,6 +19,12 @@ export type ForwardListRunner = (
   args: string[],
   opts: { ignoreError?: boolean; timeout?: number },
 ) => string;
+
+export interface TrackedGrpcForwardBridgeCleanupOptions {
+  pid?: number | null;
+  listForwardStates?: () => SandboxForwardState[];
+  stopForwardBridge?: (sandboxName: string, port: number | string) => boolean;
+}
 
 /**
  * `openshell forward stop <port>` — port-scoped, kills whatever forward is
@@ -86,4 +97,23 @@ export function bestEffortForwardStopForSandbox(
     suppressOutput: true,
   });
   return owner === sandboxName ? "stopped" : "no-entry";
+}
+
+export function stopTrackedGrpcForwardBridgeForPort(
+  port: number | string,
+  options: TrackedGrpcForwardBridgeCleanupOptions = {},
+): SandboxForwardState | null {
+  const numericPort = Number(port);
+  if (!Number.isInteger(numericPort)) return null;
+
+  const states = (options.listForwardStates ?? listForwardStates)();
+  const state = states.find(
+    (entry) =>
+      entry.port === numericPort &&
+      (options.pid == null || entry.pid === options.pid),
+  );
+  if (!state) return null;
+
+  (options.stopForwardBridge ?? stopForwardBridge)(state.sandboxName, state.port);
+  return state;
 }

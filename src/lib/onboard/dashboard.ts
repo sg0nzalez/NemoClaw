@@ -22,6 +22,10 @@ import {
   stopAllForwardBridges,
   stopForwardBridge,
 } from "../adapters/openshell/forward-bridge-state";
+import {
+  getProtectedDashboardPortsForSandbox,
+  stopStaleDashboardListeners,
+} from "./stale-gateway-cleanup";
 
 const ANSI_RE = /\x1B(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\)|[@-_])/g;
 export const CONTROL_UI_PORT = DASHBOARD_PORT;
@@ -230,6 +234,20 @@ export function createOnboardDashboardHelpers(deps: OnboardDashboardDeps): Onboa
     process.exit(1);
   }
 
+  function stopLegacyForwardOnPreferredPort(sandboxName: string, preferredPort: number): boolean {
+    const result = stopStaleDashboardListeners(
+      {},
+      {
+        extraPorts: [preferredPort],
+        protectedPorts: getProtectedDashboardPortsForSandbox(
+          registry.listSandboxes().sandboxes,
+          sandboxName,
+        ),
+      },
+    );
+    return result.stopped.length > 0;
+  }
+
   function ensureDashboardForward(
     sandboxName: string,
     chatUiUrl = `http://127.0.0.1:${CONTROL_UI_PORT}`,
@@ -257,15 +275,30 @@ export function createOnboardDashboardHelpers(deps: OnboardDashboardDeps): Onboa
 
     if (actualPort !== preferredPort) {
       if (rollbackSandboxOnFailure) {
-        const err = new Error(
-          `Dashboard port ${preferredPort} became host-bound during sandbox build; ` +
-            `cannot reallocate to ${actualPort} after the sandbox has been created with ` +
-            `CHAT_UI_URL=${preferredPort}. Free the port and re-run \`${deps.cliName()} onboard\`, ` +
-            `or pass \`--control-ui-port <N>\` to pick a different dashboard port.`,
-        );
-        rollbackSandboxAndExit(sandboxName, err);
+        if (stopLegacyForwardOnPreferredPort(sandboxName, preferredPort)) {
+          existingForwards = forwardStatesAsListOutput();
+          try {
+            actualPort = findAvailableDashboardPort(sandboxName, preferredPort, existingForwards);
+          } catch (err) {
+            rollbackSandboxAndExit(sandboxName, err);
+          }
+          if (actualPort === preferredPort) {
+            console.warn(`  Reclaimed stale dashboard listener on port ${preferredPort}.`);
+          }
+        }
       }
-      console.warn(`  ! Port ${preferredPort} is taken. Using port ${actualPort} instead.`);
+      if (actualPort !== preferredPort) {
+        if (rollbackSandboxOnFailure) {
+          const err = new Error(
+            `Dashboard port ${preferredPort} became host-bound during sandbox build; ` +
+              `cannot reallocate to ${actualPort} after the sandbox has been created with ` +
+              `CHAT_UI_URL=${preferredPort}. Free the port and re-run \`${deps.cliName()} onboard\`, ` +
+              `or pass \`--control-ui-port <N>\` to pick a different dashboard port.`,
+          );
+          rollbackSandboxAndExit(sandboxName, err);
+        }
+        console.warn(`  ! Port ${preferredPort} is taken. Using port ${actualPort} instead.`);
+      }
     }
 
     const occupied = getOccupiedPorts(existingForwards);
