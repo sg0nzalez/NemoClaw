@@ -329,7 +329,7 @@ export function createOnboardDashboardHelpers(deps: OnboardDashboardDeps): Onboa
             ? `Failed to start dashboard forward on port ${actualPort} — the host port ` +
                 `is held by another process. Free it and run \`${deps.cliName()} onboard\` again, ` +
                 `or pass \`--control-ui-port <N>\` to pick a different dashboard port.`
-            : `Failed to start dashboard gRPC forward on port ${actualPort}: ${fwdDiagnostic.slice(0, 240)}`,
+            : `Failed to start dashboard SDK forward on port ${actualPort}: ${fwdDiagnostic.slice(0, 240)}`,
         );
         rollbackSandboxAndExit(sandboxName, err);
       }
@@ -342,7 +342,7 @@ export function createOnboardDashboardHelpers(deps: OnboardDashboardDeps): Onboa
         );
         console.warn(`  Free the port, then reconnect: ${deps.cliName()} ${sandboxName} connect`);
       } else {
-        console.warn(`! Port ${actualPort} gRPC forward did not start: ${fwdDiagnostic.slice(0, 240)}`);
+        console.warn(`! Port ${actualPort} SDK forward did not start: ${fwdDiagnostic.slice(0, 240)}`);
         console.warn(`  Reconnect after resolving the issue: ${deps.cliName()} ${sandboxName} connect`);
       }
     }

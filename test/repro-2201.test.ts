@@ -154,8 +154,8 @@ function createFixture({
 
   const sandboxName = rebuildTarget.name;
 
-  // ── Dummy workspace dir for the fake ssh tar call ─────────────
-  const workspaceDir = path.join(tmpDir, "fake-sandbox-root", "workspace");
+  // ── Dummy workspace dir for the fake SDK exec tar call ─────────────
+  const workspaceDir = path.join(tmpDir, "sandbox-root", "workspace");
   fs.mkdirSync(workspaceDir, { recursive: true });
   fs.writeFileSync(path.join(workspaceDir, ".keep"), "");
 
@@ -196,11 +196,11 @@ process.exit(0);
     { mode: 0o755 },
   );
 
-  // ── Fake ssh ──────────────────────────────────────────────────
+  // ── Fake SDK exec ──────────────────────────────────────────────────
   // backupSandboxState makes two ssh calls:
   //   1. dir-existence check (command has "[ -d") → print "workspace"
   //   2. tar download (command has "tar") → produce a real tar archive
-  const fakeRoot = path.join(tmpDir, "fake-sandbox-root");
+  const fakeRoot = path.join(tmpDir, "sandbox-root");
   fs.writeFileSync(
     path.join(tmpDir, "ssh"),
     `#!/usr/bin/env node
@@ -240,9 +240,8 @@ function runRebuild(fixture: ReturnType<typeof createFixture>) {
         PATH: fixture.tmpDir + ":" + NODE_BIN + ":/usr/bin:/bin",
         NEMOCLAW_NON_INTERACTIVE: "1",
         NEMOCLAW_NO_CONNECT_HINT: "1",
-        NEMOCLAW_GRPC_TEST_TRANSPORT: "1",
-        NEMOCLAW_GRPC_TEST_LEGACY_FAKE_SSH: "1",
-        NEMOCLAW_GRPC_TEST_FAKE_SSH_BIN: path.join(fixture.tmpDir, "ssh"),
+        NEMOCLAW_SDK_TEST_TRANSPORT: "1",
+        NEMOCLAW_SDK_TEST_FAKE_EXEC_BIN: path.join(fixture.tmpDir, "ssh"),
         NO_COLOR: "1",
       },
       timeout: 30_000,

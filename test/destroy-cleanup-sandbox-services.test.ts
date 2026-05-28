@@ -118,7 +118,7 @@ describe("cleanupSandboxServices Ollama unload (#2717)", () => {
 });
 
 describe("removeSandboxRegistryEntry forward cleanup", () => {
-  it("stops NemoClaw-managed gRPC forward bridges for the removed sandbox", () => {
+  it("stops NemoClaw-managed SDK forward bridges for the removed sandbox", () => {
     const stopForwardBridge = vi.fn();
     const removeSandbox = vi.fn(() => true);
 

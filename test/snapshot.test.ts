@@ -22,9 +22,8 @@ process.env.HOME = TMP_HOME;
 
 const REPO_ROOT = path.join(import.meta.dirname, "..");
 const GRPC_TEST_ENV_KEYS = [
-  "NEMOCLAW_GRPC_TEST_TRANSPORT",
-  "NEMOCLAW_GRPC_TEST_LEGACY_FAKE_SSH",
-  "NEMOCLAW_GRPC_TEST_FAKE_SSH_BIN",
+  "NEMOCLAW_SDK_TEST_TRANSPORT",
+  "NEMOCLAW_SDK_TEST_FAKE_EXEC_BIN",
 ] as const;
 
 type BackupScalar = string | number | boolean | null | undefined;
@@ -96,9 +95,8 @@ beforeEach(() => {
 });
 
 function enableFakeGrpcTransportViaLegacySsh(binDir: string): void {
-  process.env.NEMOCLAW_GRPC_TEST_TRANSPORT = "1";
-  process.env.NEMOCLAW_GRPC_TEST_LEGACY_FAKE_SSH = "1";
-  process.env.NEMOCLAW_GRPC_TEST_FAKE_SSH_BIN = path.join(binDir, "ssh");
+  process.env.NEMOCLAW_SDK_TEST_TRANSPORT = "1";
+  process.env.NEMOCLAW_SDK_TEST_FAKE_EXEC_BIN = path.join(binDir, "ssh");
 }
 
 function clearFakeGrpcTransport(): void {

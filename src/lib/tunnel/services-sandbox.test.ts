@@ -135,7 +135,7 @@ describe("stopSandboxChannels", () => {
     logSpy.mockRestore();
   });
 
-  it("falls back to OpenShell gRPC exec when the gateway container is unavailable", () => {
+  it("falls back to OpenShell SDK exec when the gateway container is unavailable", () => {
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     spawnSyncSpy
       .mockReturnValueOnce({ status: 1, stdout: "" })
@@ -203,7 +203,7 @@ describe("stopSandboxChannels", () => {
 
     expect(spawnSyncSpy).toHaveBeenCalledTimes(2);
     const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
-    expect(output).toContain("OpenShell gRPC exec could not stop");
+    expect(output).toContain("OpenShell SDK exec could not stop");
     expect(output).toContain("sync runner missing");
     logSpy.mockRestore();
   });

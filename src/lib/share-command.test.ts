@@ -152,7 +152,7 @@ describe("ShareCommand mount/status actions", () => {
       ShareCommandError,
     );
     await expect(runShareMount({ sandboxName: "alpha" }, deps)).rejects.toThrow(
-      /OpenShell gRPC/,
+      /OpenShell SDK/,
     );
     expect(deps.ensureLive).toHaveBeenCalledWith("alpha");
   });

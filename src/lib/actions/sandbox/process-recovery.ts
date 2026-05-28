@@ -75,7 +75,7 @@ function getSandboxHealthProbeUrl(sandboxName: string): string {
   return `http://127.0.0.1:${resolveSandboxDashboardPort(sandboxName)}/health`;
 }
 
-/** Run a shell command inside the sandbox over OpenShell gRPC. */
+/** Run a shell command inside the sandbox over the OpenShell SDK. */
 function executeSandboxShellSync(
   sandboxName: string,
   command: string,
@@ -132,7 +132,7 @@ async function executeSandboxExecCommandForStatus(
   sandboxName: string,
   command: string,
 ): Promise<SandboxCommandResult | null> {
-  if (process.env.NEMOCLAW_GRPC_TEST_TRANSPORT === "1") {
+  if (process.env.NEMOCLAW_SDK_TEST_TRANSPORT === "1") {
     return executeSandboxExecCommand(sandboxName, command, OPENSHELL_PROBE_TIMEOUT_MS);
   }
   const markedCommand = `printf '%s\\n' '${SANDBOX_EXEC_STARTED_MARKER}'; ${command}`;
@@ -203,7 +203,7 @@ export async function isSandboxGatewayRunningForStatus(
 
 /**
  * Probe the full inference chain by curling `https://inference.local/v1/models`
- * from inside the sandbox via OpenShell gRPC exec. This is the path agent
+ * from inside the sandbox via OpenShell SDK exec. This is the path agent
  * traffic actually takes (openclaw gateway -> auth proxy -> backend). Any HTTP
  * response (including 401) means routing works; 000 / no response means DNS,
  * proxy, or gateway is broken. The optional 3rd line in #3265.
@@ -330,7 +330,7 @@ function ensureSandboxPortForward(sandboxName: string): boolean {
 }
 
 /**
- * Probe NemoClaw's gRPC forward state for the sandbox's dashboard forward.
+ * Probe NemoClaw's SDK forward state for the sandbox's dashboard forward.
  * Returns true when an entry exists for the expected sandbox+port pair
  * with STATUS=running, false when the entry is missing or non-running,
  * "occupied" when another sandbox already owns the expected port, and

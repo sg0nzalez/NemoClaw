@@ -12,7 +12,7 @@ import { execTimeout, testTimeout, testTimeoutOptions } from "./helpers/timeouts
 
 const CLI = path.join(import.meta.dirname, "..", "bin", "nemoclaw.js");
 const HERMES_CLI = path.join(import.meta.dirname, "..", "bin", "nemohermes.js");
-const GRPC_FAKE_SSH = path.join(import.meta.dirname, "helpers", "grpc-fake-ssh.cjs");
+const SDK_FAKE_EXEC = path.join(import.meta.dirname, "helpers", "sdk-fake-exec.cjs");
 const PARSER_EXIT_CODE = 2;
 
 type CliRunResult = {
@@ -94,9 +94,8 @@ function runWithEnv(
         HOME: "/tmp/nemoclaw-cli-test-" + Date.now(),
         NEMOCLAW_HEALTH_POLL_COUNT: "1",
         NEMOCLAW_HEALTH_POLL_INTERVAL: "0",
-        NEMOCLAW_GRPC_TEST_TRANSPORT: "1",
-        NEMOCLAW_GRPC_TEST_LEGACY_FAKE_SSH: "1",
-        NEMOCLAW_GRPC_TEST_FAKE_SSH_BIN: GRPC_FAKE_SSH,
+        NEMOCLAW_SDK_TEST_TRANSPORT: "1",
+        NEMOCLAW_SDK_TEST_FAKE_EXEC_BIN: SDK_FAKE_EXEC,
         ...env,
       },
     });
@@ -3725,7 +3724,7 @@ describe("CLI dispatch", () => {
     expect(fs.existsSync(sshCalls)).toBe(false);
   });
 
-  it("recovers non-OpenClaw agents over gRPC sandbox exec when the recovery marker is present", () => {
+  it("recovers non-OpenClaw agents over SDK sandbox exec when the recovery marker is present", () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-cli-connect-probe-agent-"));
     const localBin = path.join(home, "bin");
     const openshellCalls = path.join(home, "openshell-calls");

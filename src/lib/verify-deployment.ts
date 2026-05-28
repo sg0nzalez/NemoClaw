@@ -290,7 +290,7 @@ export async function verifyDeployment(
     detail: dashboard.detail,
     hint: dashboard.reachable
       ? ""
-      : `Dashboard gRPC forward on ${chain.port} is not working. Retry: nemoclaw ${sandboxName} connect --probe-only`,
+      : `Dashboard SDK forward on ${chain.port} is not working. Retry: nemoclaw ${sandboxName} connect --probe-only`,
   });
 
   // 4. Inference route

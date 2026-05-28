@@ -9,7 +9,7 @@ import { pathToFileURL } from "url";
 import { spawnSync } from "child_process";
 import { describe, it, expect } from "vitest";
 
-const GRPC_FAKE_SSH = path.join(import.meta.dirname, "helpers", "grpc-fake-ssh.cjs");
+const SDK_FAKE_EXEC = path.join(import.meta.dirname, "helpers", "sdk-fake-exec.cjs");
 
 describe("sandboxName command hardening in onboard.js", () => {
   it("re-validates sandboxName at the createSandbox boundary", async () => {
@@ -82,9 +82,8 @@ for (const key of Object.keys(process.env)) {
     delete process.env[key];
   }
 }
-process.env.NEMOCLAW_GRPC_TEST_TRANSPORT = "1";
-process.env.NEMOCLAW_GRPC_TEST_LEGACY_FAKE_SSH = "1";
-process.env.NEMOCLAW_GRPC_TEST_FAKE_SSH_BIN = ${JSON.stringify(GRPC_FAKE_SSH)};
+process.env.NEMOCLAW_SDK_TEST_TRANSPORT = "1";
+process.env.NEMOCLAW_SDK_TEST_FAKE_EXEC_BIN = ${JSON.stringify(SDK_FAKE_EXEC)};
 const commands = [];
 const asText = (command) => Array.isArray(command) ? command.join(" ") : String(command);
 runner.run = (command, opts = {}) => {
@@ -139,9 +138,8 @@ try {
         env: {
           HOME: tmpDir,
           PATH: `${fakeBin}:${process.env.PATH || ""}`,
-          NEMOCLAW_GRPC_TEST_TRANSPORT: "1",
-          NEMOCLAW_GRPC_TEST_LEGACY_FAKE_SSH: "1",
-          NEMOCLAW_GRPC_TEST_FAKE_SSH_BIN: GRPC_FAKE_SSH,
+          NEMOCLAW_SDK_TEST_TRANSPORT: "1",
+          NEMOCLAW_SDK_TEST_FAKE_EXEC_BIN: SDK_FAKE_EXEC,
         },
         timeout: 30_000,
       });

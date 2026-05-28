@@ -10,7 +10,7 @@ import { describe, expect, it } from "vitest";
 import { stageOptimizedSandboxBuildContext } from "../dist/lib/sandbox/build-context.js";
 import { testTimeoutOptions } from "./helpers/timeouts";
 
-const GRPC_FAKE_SSH = path.join(import.meta.dirname, "helpers", "grpc-fake-ssh.cjs");
+const SDK_FAKE_EXEC = path.join(import.meta.dirname, "helpers", "sdk-fake-exec.cjs");
 
 type ShimScalar = string | number | boolean | null | undefined;
 type ShimCallable = (...args: readonly string[]) => ShimValue;
@@ -63,9 +63,8 @@ function stripMessagingEnv(source: NodeJS.ProcessEnv): Record<string, string | u
 
 function grpcTestEnv(): Record<string, string> {
   return {
-    NEMOCLAW_GRPC_TEST_TRANSPORT: "1",
-    NEMOCLAW_GRPC_TEST_LEGACY_FAKE_SSH: "1",
-    NEMOCLAW_GRPC_TEST_FAKE_SSH_BIN: GRPC_FAKE_SSH,
+    NEMOCLAW_SDK_TEST_TRANSPORT: "1",
+    NEMOCLAW_SDK_TEST_FAKE_EXEC_BIN: SDK_FAKE_EXEC,
   };
 }
 

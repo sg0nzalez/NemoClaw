@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { execTimeout, testTimeoutOptions } from "./helpers/timeouts";
 
 const tmpFixtures: string[] = [];
-const GRPC_FAKE_SSH = path.join(import.meta.dirname, "helpers", "grpc-fake-ssh.cjs");
+const SDK_FAKE_EXEC = path.join(import.meta.dirname, "helpers", "sdk-fake-exec.cjs");
 
 // Each fixture grabs a unique high port. Sharing port 18789 across tests
 // collides with real nemoclaw installs on the developer's machine: the
@@ -170,9 +170,8 @@ function runRecover(fixture: Fixture) {
         HOME: fixture.tmpDir,
         PATH: "/usr/bin:/bin",
         NEMOCLAW_NO_CONNECT_HINT: "1",
-        NEMOCLAW_GRPC_TEST_TRANSPORT: "1",
-        NEMOCLAW_GRPC_TEST_LEGACY_FAKE_SSH: "1",
-        NEMOCLAW_GRPC_TEST_FAKE_SSH_BIN: GRPC_FAKE_SSH,
+        NEMOCLAW_SDK_TEST_TRANSPORT: "1",
+        NEMOCLAW_SDK_TEST_FAKE_EXEC_BIN: SDK_FAKE_EXEC,
       },
       timeout: execTimeout(15_000),
     },

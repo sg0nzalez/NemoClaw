@@ -32,15 +32,11 @@
     "reason": "Internal installer sentinel exported only during OpenShell gateway replacement so onboard restores the pre-upgrade sandbox backup. Not user-facing."
   },
   {
-    "name": "NEMOCLAW_GRPC_TEST_FAKE_SSH_BIN",
-    "reason": "Vitest-only compatibility shim used by the OpenShell gRPC sync runner to drive existing hermetic fake OpenShell fixtures. Never user-set in production."
+    "name": "NEMOCLAW_SDK_TEST_FAKE_EXEC_BIN",
+    "reason": "Vitest-only helper used by the OpenShell SDK sync runner to drive hermetic fake OpenShell fixtures without loading the native SDK binding. Never user-set in production."
   },
   {
-    "name": "NEMOCLAW_GRPC_TEST_LEGACY_FAKE_SSH",
-    "reason": "Vitest-only sentinel that enables the OpenShell gRPC sync runner's legacy fake transport while CLI tests migrate away from SSH-shaped fixtures. Never user-set in production."
-  },
-  {
-    "name": "NEMOCLAW_GRPC_TEST_TRANSPORT",
+    "name": "NEMOCLAW_SDK_TEST_TRANSPORT",
     "reason": "Vitest-only sentinel that prevents hermetic CLI tests from loading real OpenShell gateway metadata and routes sandbox exec calls through test fixtures. Never user-set in production."
   },
   {

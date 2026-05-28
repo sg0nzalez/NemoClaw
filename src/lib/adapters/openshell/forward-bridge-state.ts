@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -178,20 +178,8 @@ export function forwardStatesAsListOutput(states = listForwardStates()): string 
   return `${lines.join("\n")}\n`;
 }
 
-function runnerCommand(): { command: string; args: string[] } {
-  const built = path.join(__dirname, "forward-bridge-runner.js");
-  if (fs.existsSync(built)) return { command: process.execPath, args: [built] };
-
-  const source = path.join(__dirname, "forward-bridge-runner.ts");
-  const root = path.resolve(__dirname, "..", "..", "..", "..");
-  const tsxBin = path.join(root, "node_modules", ".bin", process.platform === "win32" ? "tsx.cmd" : "tsx");
-  if (fs.existsSync(source) && fs.existsSync(tsxBin)) return { command: tsxBin, args: [source] };
-
-  throw new Error("OpenShell gRPC forward bridge runner is not available. Run `npm run build:cli` first.");
-}
-
 function useTestForwardBridge(): boolean {
-  return process.env.NEMOCLAW_GRPC_TEST_TRANSPORT === "1" || process.env.VITEST_WORKER_ID !== undefined;
+  return process.env.NEMOCLAW_SDK_TEST_TRANSPORT === "1" || process.env.VITEST_WORKER_ID !== undefined;
 }
 
 function testForwardPid(): number {
@@ -200,14 +188,6 @@ function testForwardPid(): number {
 
 function isTestForwardPid(pid: number): boolean {
   return useTestForwardBridge() && pid === testForwardPid();
-}
-
-function readOpenFileDescriptor(fd: number): string {
-  const stat = fs.fstatSync(fd);
-  if (stat.size <= 0) return "";
-  const buffer = Buffer.alloc(Math.min(stat.size, 64 * 1024));
-  const bytesRead = fs.readSync(fd, buffer, 0, buffer.length, 0);
-  return buffer.subarray(0, bytesRead).toString("utf-8");
 }
 
 function probeForwardReady(bind: string, port: number): boolean {
@@ -250,59 +230,12 @@ export function startForwardBridgeDetached(
     writeForwardState(state);
     return { ok: true, state, diagnostic: "" };
   }
-  const { command, args } = runnerCommand();
-  ensureStateDir();
-  const safeSandbox = sandboxName.replace(/[^A-Za-z0-9._-]/g, "_");
-  const diagnosticDir = fs.mkdtempSync(path.join(stateDir(), `${safeSandbox}-${options.port}-`));
-  const diagnosticPath = path.join(
-    diagnosticDir,
-    "bridge.log",
-  );
-  const out = fs.openSync(diagnosticPath, "w+", 0o600);
-  const child = spawn(
-    command,
-    [
-      ...args,
-      JSON.stringify({
-        sandboxName,
-        bind,
-        port: options.port,
-        targetHost,
-        targetPort: options.targetPort,
-      }),
-    ],
-    { detached: true, stdio: ["ignore", out, out], env: process.env },
-  );
-  child.unref();
-
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const state = getForwardState(sandboxName, options.port);
-    if (state?.pid === child.pid) {
-      if (probeForwardReady(bind, options.port)) {
-        fs.closeSync(out);
-        return { ok: true, state: state ?? undefined, diagnostic: "" };
-      }
-    }
-    sleepMs(250);
-  }
-
-  let diagnostic = "";
-  try {
-    diagnostic = readOpenFileDescriptor(out).trim();
-  } catch {
-    /* ignore */
-  }
-  fs.closeSync(out);
-  try {
-    if (child.pid) process.kill(child.pid, "SIGTERM");
-  } catch {
-    /* ignore */
-  }
+  void targetHost;
+  void timeoutMs;
   return {
     ok: false,
     diagnostic:
-      diagnostic || `forward bridge did not become ready within ${String(timeoutMs)}ms`,
+      "OpenShell SDK forwarding is not available yet. Land an upstream @openshell/sdk forwarding API before enabling dashboard forwarding.",
   };
 }
 

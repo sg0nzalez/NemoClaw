@@ -175,7 +175,7 @@ export async function runShareMount(
   await deps.ensureLive(sandboxName);
   shareFail([
     "  Live sandbox filesystem mounts are no longer supported.",
-    "  NemoClaw now uses OpenShell gRPC for sandbox lifecycle operations, and OpenShell does not provide a live filesystem mount API on that transport.",
+    "  NemoClaw now uses OpenShell SDK for sandbox lifecycle operations, and OpenShell does not provide a live filesystem mount API on that transport.",
     `  Existing legacy mounts can still be inspected or removed with '${deps.cliName} ${sandboxName} share status' and '${deps.cliName} ${sandboxName} share unmount'.`,
   ]);
 }

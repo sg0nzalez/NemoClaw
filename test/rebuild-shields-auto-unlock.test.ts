@@ -143,7 +143,7 @@ function createFixture(opts: { shieldsLocked: boolean }) {
   );
 
   // Workspace dir for the backup tar
-  const fakeRoot = path.join(tmpDir, "fake-sandbox-root");
+  const fakeRoot = path.join(tmpDir, "sandbox-root");
   fs.mkdirSync(path.join(fakeRoot, "workspace"), { recursive: true });
   fs.writeFileSync(path.join(fakeRoot, "workspace", "marker.txt"), "test");
   const lockStatePath = path.join(tmpDir, "config-lock-state.txt");
@@ -260,7 +260,7 @@ process.exit(0);
     { mode: 0o755 },
   );
 
-  // Fake ssh — backup tars from the real fakeRoot
+  // Fake SDK exec — backup tars from the real fakeRoot
   fs.writeFileSync(
     path.join(tmpDir, "ssh"),
     `#!/usr/bin/env node
@@ -297,9 +297,8 @@ function runRebuild(fixture: ReturnType<typeof createFixture>) {
       env: {
         HOME: fixture.tmpDir,
         PATH: fixture.tmpDir + ":" + NODE_BIN + ":/usr/bin:/bin",
-        NEMOCLAW_GRPC_TEST_TRANSPORT: "1",
-        NEMOCLAW_GRPC_TEST_LEGACY_FAKE_SSH: "1",
-        NEMOCLAW_GRPC_TEST_FAKE_SSH_BIN: path.join(fixture.tmpDir, "ssh"),
+        NEMOCLAW_SDK_TEST_TRANSPORT: "1",
+        NEMOCLAW_SDK_TEST_FAKE_EXEC_BIN: path.join(fixture.tmpDir, "ssh"),
         NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE: "1",
         NEMOCLAW_NON_INTERACTIVE: "1",
         NEMOCLAW_NO_CONNECT_HINT: "1",

@@ -244,7 +244,7 @@ function probeSandboxInferenceRoute(
     lastProbe = {
       healthy: probe.status === 0 && /^OK\s+[0-9]{3}\b/.test(detail),
       broken: /^BROKEN\s+[0-9]{3}\b/.test(detail),
-      detail: detail || `OpenShell gRPC exec exited with status ${String(probe.status)}`,
+      detail: detail || `OpenShell SDK exec exited with status ${String(probe.status)}`,
     };
     if (lastProbe.healthy || attempt === boundedAttempts) return lastProbe;
     sleepSync(delayMs);

@@ -38,7 +38,7 @@ afterEach(() => {
  * optionally a saved credential in credentials.json.
  *
  * The fake openshell binary responds to sandbox list, ssh-config, and
- * delete commands.  The fake ssh supports backup tar operations.
+ * delete commands.  The fake SDK exec supports backup tar operations.
  */
 function createFixture(opts: {
   sandboxName?: string;
@@ -185,7 +185,7 @@ function createFixture(opts: {
   }
 
   // ── Fake workspace dir for the backup tar call ────────────────
-  const fakeRoot = path.join(tmpDir, "fake-sandbox-root");
+  const fakeRoot = path.join(tmpDir, "sandbox-root");
   const workspaceDir = path.join(fakeRoot, "workspace");
   fs.mkdirSync(workspaceDir, { recursive: true });
   fs.writeFileSync(path.join(workspaceDir, "marker.txt"), "test-workspace");
@@ -237,7 +237,7 @@ process.exit(1);
     { mode: 0o755 },
   );
 
-  // ── Fake ssh ──────────────────────────────────────────────────
+  // ── Fake SDK exec ──────────────────────────────────────────────────
   fs.writeFileSync(
     path.join(tmpDir, "ssh"),
     `#!/usr/bin/env node
@@ -261,7 +261,7 @@ process.exit(0);
     { mode: 0o755 },
   );
 
-  // Patch the PLACEHOLDER in the fake ssh to point at the real fakeRoot
+  // Patch the PLACEHOLDER in the fake SDK exec to point at the real fakeRoot
   const sshScript = fs.readFileSync(path.join(tmpDir, "ssh"), "utf-8");
   fs.writeFileSync(
     path.join(tmpDir, "ssh"),
@@ -290,9 +290,8 @@ function runRebuild(
       env: {
         HOME: fixture.tmpDir,
         PATH: fixture.tmpDir + ":" + NODE_BIN + ":/usr/bin:/bin",
-        NEMOCLAW_GRPC_TEST_TRANSPORT: "1",
-        NEMOCLAW_GRPC_TEST_LEGACY_FAKE_SSH: "1",
-        NEMOCLAW_GRPC_TEST_FAKE_SSH_BIN: path.join(fixture.tmpDir, "ssh"),
+        NEMOCLAW_SDK_TEST_TRANSPORT: "1",
+        NEMOCLAW_SDK_TEST_FAKE_EXEC_BIN: path.join(fixture.tmpDir, "ssh"),
         NEMOCLAW_NON_INTERACTIVE: "1",
         NEMOCLAW_NO_CONNECT_HINT: "1",
         NO_COLOR: "1",

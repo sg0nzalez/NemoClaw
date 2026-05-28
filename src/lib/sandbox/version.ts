@@ -32,7 +32,7 @@ function resolveAgentForSandbox(sandboxName: string): ReturnType<typeof loadAgen
 }
 
 /**
- * Probe the live agent version inside a sandbox via OpenShell gRPC.
+ * Probe the live agent version inside a sandbox via OpenShell SDK.
  * Returns the parsed version string or null on failure.
  */
 export function probeAgentVersion(sandboxName: string): string | null {

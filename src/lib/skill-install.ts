@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Skill install logic for `nemoclaw <sandbox> skill install <path>`.
-// Validates a local SKILL.md, uploads it to the sandbox via OpenShell gRPC, and
+// Validates a local SKILL.md, uploads it to the sandbox via OpenShell SDK, and
 // performs agent-specific post-install steps (session refresh for
 // OpenClaw). Non-OpenClaw agents get a "restart gateway" hint until a
 // generic refresh contract is defined in the manifest schema.

@@ -471,7 +471,7 @@ export function stopSandboxChannels(sandboxName: string): void {
     } as StopAttemptResult);
   } catch (error) {
     warn(
-      `OpenShell gRPC exec could not stop in-sandbox messaging channels: ${
+      `OpenShell SDK exec could not stop in-sandbox messaging channels: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );

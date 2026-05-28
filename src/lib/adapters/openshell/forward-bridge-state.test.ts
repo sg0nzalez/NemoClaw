@@ -51,7 +51,7 @@ async function canListen(port: number): Promise<boolean> {
   });
 }
 
-describe("OpenShell gRPC forward bridge readiness", () => {
+describe("OpenShell SDK forward bridge readiness", () => {
   it("does not treat state-file presence as readiness when the local port is unreachable", async () => {
     const port = await unusedLocalPort();
     expect(__forwardBridgeTestHooks.probeForwardReady("127.0.0.1", port)).toBe(false);

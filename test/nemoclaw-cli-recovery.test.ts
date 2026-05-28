@@ -15,7 +15,7 @@ describe("nemoclaw CLI runtime recovery", () => {
     testTimeoutOptions(),
     () => {
       const repoRoot = path.join(import.meta.dirname, "..");
-      const grpcFakeSsh = path.join(import.meta.dirname, "helpers", "grpc-fake-ssh.cjs");
+      const sdkFakeExec = path.join(import.meta.dirname, "helpers", "sdk-fake-exec.cjs");
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-cli-recovery-"));
       const homeLocalBin = path.join(tmpDir, ".local", "bin");
       const stateDir = path.join(tmpDir, "state");
@@ -107,9 +107,8 @@ process.exit(0);
           env: {
             ...process.env,
             HOME: tmpDir,
-            NEMOCLAW_GRPC_TEST_TRANSPORT: "1",
-            NEMOCLAW_GRPC_TEST_LEGACY_FAKE_SSH: "1",
-            NEMOCLAW_GRPC_TEST_FAKE_SSH_BIN: grpcFakeSsh,
+            NEMOCLAW_SDK_TEST_TRANSPORT: "1",
+            NEMOCLAW_SDK_TEST_FAKE_EXEC_BIN: sdkFakeExec,
             PATH: "/usr/bin:/bin",
           },
         },

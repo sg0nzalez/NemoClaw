@@ -10,7 +10,7 @@ import path from "node:path";
 const require = createRequire(import.meta.url);
 const { buildStatusCommandDeps } =
   require("../../dist/lib/status-command-deps.js") as typeof import("../../dist/lib/status-command-deps");
-const GRPC_FAKE_SSH = path.join(import.meta.dirname, "..", "..", "test", "helpers", "grpc-fake-ssh.cjs");
+const SDK_FAKE_EXEC = path.join(import.meta.dirname, "..", "..", "test", "helpers", "sdk-fake-exec.cjs");
 
 function writeExecutable(target: string, body: string): void {
   fs.writeFileSync(target, body, { mode: 0o755 });
@@ -20,9 +20,8 @@ describe("buildStatusCommandDeps", () => {
   let previousOverride: string | undefined;
   let previousHome: string | undefined;
   let previousPath: string | undefined;
-  let previousGrpcTransport: string | undefined;
-  let previousGrpcLegacy: string | undefined;
-  let previousGrpcFakeSsh: string | undefined;
+  let previousSdkTransport: string | undefined;
+  let previousSdkFakeExec: string | undefined;
   let tmp: string;
   let callsFile: string;
   let openshell: string;
@@ -31,18 +30,16 @@ describe("buildStatusCommandDeps", () => {
     previousOverride = process.env.NEMOCLAW_OPENSHELL_BIN;
     previousHome = process.env.HOME;
     previousPath = process.env.PATH;
-    previousGrpcTransport = process.env.NEMOCLAW_GRPC_TEST_TRANSPORT;
-    previousGrpcLegacy = process.env.NEMOCLAW_GRPC_TEST_LEGACY_FAKE_SSH;
-    previousGrpcFakeSsh = process.env.NEMOCLAW_GRPC_TEST_FAKE_SSH_BIN;
+    previousSdkTransport = process.env.NEMOCLAW_SDK_TEST_TRANSPORT;
+    previousSdkFakeExec = process.env.NEMOCLAW_SDK_TEST_FAKE_EXEC_BIN;
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-status-deps-"));
     callsFile = path.join(tmp, "openshell.calls");
     openshell = path.join(tmp, "openshell");
     process.env.NEMOCLAW_OPENSHELL_BIN = openshell;
     process.env.HOME = tmp;
     process.env.PATH = `${tmp}${path.delimiter}${previousPath || ""}`;
-    process.env.NEMOCLAW_GRPC_TEST_TRANSPORT = "1";
-    process.env.NEMOCLAW_GRPC_TEST_LEGACY_FAKE_SSH = "1";
-    process.env.NEMOCLAW_GRPC_TEST_FAKE_SSH_BIN = GRPC_FAKE_SSH;
+    process.env.NEMOCLAW_SDK_TEST_TRANSPORT = "1";
+    process.env.NEMOCLAW_SDK_TEST_FAKE_EXEC_BIN = SDK_FAKE_EXEC;
   });
 
   afterEach(() => {
@@ -61,20 +58,15 @@ describe("buildStatusCommandDeps", () => {
     } else {
       process.env.PATH = previousPath;
     }
-    if (previousGrpcTransport === undefined) {
-      delete process.env.NEMOCLAW_GRPC_TEST_TRANSPORT;
+    if (previousSdkTransport === undefined) {
+      delete process.env.NEMOCLAW_SDK_TEST_TRANSPORT;
     } else {
-      process.env.NEMOCLAW_GRPC_TEST_TRANSPORT = previousGrpcTransport;
+      process.env.NEMOCLAW_SDK_TEST_TRANSPORT = previousSdkTransport;
     }
-    if (previousGrpcLegacy === undefined) {
-      delete process.env.NEMOCLAW_GRPC_TEST_LEGACY_FAKE_SSH;
+    if (previousSdkFakeExec === undefined) {
+      delete process.env.NEMOCLAW_SDK_TEST_FAKE_EXEC_BIN;
     } else {
-      process.env.NEMOCLAW_GRPC_TEST_LEGACY_FAKE_SSH = previousGrpcLegacy;
-    }
-    if (previousGrpcFakeSsh === undefined) {
-      delete process.env.NEMOCLAW_GRPC_TEST_FAKE_SSH_BIN;
-    } else {
-      process.env.NEMOCLAW_GRPC_TEST_FAKE_SSH_BIN = previousGrpcFakeSsh;
+      process.env.NEMOCLAW_SDK_TEST_FAKE_EXEC_BIN = previousSdkFakeExec;
     }
     fs.rmSync(tmp, { recursive: true, force: true });
   });
