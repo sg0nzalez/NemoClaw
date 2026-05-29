@@ -45,6 +45,9 @@ NEMOCLAW_REF="${NEMOCLAW_REF:-main}"
 TARGET_USER="${SUDO_USER:-$(id -un)}"
 TARGET_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
 NEMOCLAW_CLONE_DIR="${NEMOCLAW_CLONE_DIR:-${TARGET_HOME}/NemoClaw}"
+DOCKER_BRIDGE_POOL_CIDR="172.16.0.0/12"
+OPENSHELL_GATEWAY_PORT="8080"
+OLLAMA_AUTH_PROXY_PORT="11435"
 
 LAUNCH_LOG="${LAUNCH_LOG:-/tmp/launch-plugin.log}"
 SENTINEL="/var/run/nemoclaw-launchable-ready"
@@ -90,6 +93,31 @@ retry() {
     sleep "$sleep_sec"
     ((attempt++))
   done
+}
+
+allow_docker_bridge_host_port() {
+  local port="$1"
+  local label="$2"
+
+  if ! command -v ufw >/dev/null 2>&1; then
+    warn "ufw not installed — skipping Docker bridge allow rule for $label"
+    return
+  fi
+
+  if sudo -n ufw allow from "$DOCKER_BRIDGE_POOL_CIDR" to any port "$port" proto tcp >/dev/null 2>&1; then
+    info "Allowed Docker bridge traffic to $label on port $port"
+  else
+    warn "Could not add UFW allow rule for $label on port $port"
+  fi
+}
+
+configure_openshell_bridge_firewall() {
+  # The openshell-docker network is created later, so this setup cannot know the
+  # exact future bridge subnet. Brev CI launchable VMs are single-use hosts; allow
+  # Docker's default local bridge pool to the host services sandbox containers
+  # must reach during onboarding.
+  allow_docker_bridge_host_port "$OPENSHELL_GATEWAY_PORT" "OpenShell gateway"
+  allow_docker_bridge_host_port "$OLLAMA_AUTH_PROXY_PORT" "Ollama auth proxy"
 }
 
 # ── Wait for apt locks ───────────────────────────────────────────────
@@ -144,6 +172,7 @@ sudo usermod -aG docker "$TARGET_USER" 2>/dev/null || true
 # short-lived CI VM — socket security is not a concern.
 sudo chmod 666 /var/run/docker.sock
 info "Docker enabled ($(docker --version 2>/dev/null | head -c 40))"
+configure_openshell_bridge_firewall
 
 # ══════════════════════════════════════════════════════════════════════
 # 3. Node.js 22

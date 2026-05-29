@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 
 import { readYaml } from "./helpers/e2e-workflow-contract";
 
@@ -52,5 +53,20 @@ describe("Brev nightly workflow contract", () => {
     expect(dispatchInputs).not.toContain("launchable_id");
     expect(callerInputs).not.toContain("launchable_id");
     expect(callerInputs).not.toContain("use_published_launchable");
+  });
+
+  it("keeps the CI launchable Docker bridge firewall rules", () => {
+    const script = readFileSync("scripts/brev-launchable-ci-cpu.sh", "utf8");
+
+    expect(script).toContain('DOCKER_BRIDGE_POOL_CIDR="172.16.0.0/12"');
+    expect(script).toContain(
+      'sudo -n ufw allow from "$DOCKER_BRIDGE_POOL_CIDR" to any port "$port" proto tcp',
+    );
+    expect(script).toContain(
+      'allow_docker_bridge_host_port "$OPENSHELL_GATEWAY_PORT" "OpenShell gateway"',
+    );
+    expect(script).toContain(
+      'allow_docker_bridge_host_port "$OLLAMA_AUTH_PROXY_PORT" "Ollama auth proxy"',
+    );
   });
 });
