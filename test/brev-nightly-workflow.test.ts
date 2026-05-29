@@ -1,8 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { spawnSync } from "node:child_process";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
 
 import { readYaml } from "./helpers/e2e-workflow-contract";
 
@@ -55,14 +58,85 @@ describe("Brev nightly workflow contract", () => {
     expect(callerInputs).not.toContain("use_published_launchable");
   });
 
-  it("keeps the CI launchable Docker bridge firewall rules", () => {
-    const script = readFileSync("scripts/brev-launchable-ci-cpu.sh", "utf8");
+  it("configures Docker bridge firewall rules in the CI launchable", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "nemoclaw-brev-firewall-"));
 
-    expect(script).toContain('DOCKER_BRIDGE_POOL_CIDR="172.16.0.0/12"');
-    expect(script).toContain(
-      'sudo -n ufw allow from "$DOCKER_BRIDGE_POOL_CIDR" to any port "$port" proto tcp',
-    );
-    expect(script).toContain('allow_bridge_port "$OPENSHELL_GATEWAY_PORT" gateway');
-    expect(script).toContain('allow_bridge_port "$OLLAMA_AUTH_PROXY_PORT" auth-proxy');
+    try {
+      const sudoLog = join(tmp, "sudo.log");
+      const ufwLog = join(tmp, "ufw.log");
+      const launchLog = join(tmp, "launch.log");
+
+      writeExecutable(
+        join(tmp, "sudo"),
+        `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "$NEMOCLAW_FAKE_SUDO_LOG"
+if [ "\${1:-}" = "-n" ]; then
+  shift
+fi
+exec "$@"
+`,
+      );
+      writeExecutable(
+        join(tmp, "ufw"),
+        `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "$NEMOCLAW_FAKE_UFW_LOG"
+`,
+      );
+      writeExecutable(
+        join(tmp, "getent"),
+        `#!/usr/bin/env bash
+if [ "\${1:-}" = "passwd" ]; then
+  printf '%s:x:1000:1000::%s:/bin/bash\\n' "\${2:-ci}" "$HOME"
+fi
+`,
+      );
+
+      const result = spawnSync(
+        "bash",
+        [
+          "--noprofile",
+          "--norc",
+          "-c",
+          `
+set -euo pipefail
+source <(awk '/Wait for apt locks/{exit} {print}' scripts/brev-launchable-ci-cpu.sh)
+configure_openshell_bridge_firewall
+`,
+        ],
+        {
+          cwd: process.cwd(),
+          encoding: "utf-8",
+          env: {
+            ...process.env,
+            LAUNCH_LOG: launchLog,
+            NEMOCLAW_FAKE_SUDO_LOG: sudoLog,
+            NEMOCLAW_FAKE_UFW_LOG: ufwLog,
+            PATH: `${tmp}:${process.env.PATH ?? ""}`,
+          },
+        },
+      );
+
+      expect(result.stderr).toBe("");
+      expect(result.status).toBe(0);
+      expect(readFileSync(sudoLog, "utf-8").trim().split("\n")).toEqual([
+        "-n ufw allow from 172.16.0.0/12 to any port 8080 proto tcp",
+        "-n ufw allow from 172.16.0.0/12 to any port 11435 proto tcp",
+      ]);
+      expect(readFileSync(ufwLog, "utf-8").trim().split("\n")).toEqual([
+        "allow from 172.16.0.0/12 to any port 8080 proto tcp",
+        "allow from 172.16.0.0/12 to any port 11435 proto tcp",
+      ]);
+      expect(readFileSync(launchLog, "utf-8")).toMatch(/Allowed Docker bridge to gateway:8080/);
+      expect(readFileSync(launchLog, "utf-8")).toMatch(
+        /Allowed Docker bridge to auth-proxy:11435/,
+      );
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });
+
+function writeExecutable(path: string, contents: string): void {
+  writeFileSync(path, contents);
+  chmodSync(path, 0o755);
+}
