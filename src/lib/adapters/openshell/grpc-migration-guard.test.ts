@@ -23,6 +23,8 @@ const PRODUCTION_TARGETS = [
   "src/lib/status-command-deps.ts",
   "src/lib/tunnel/services.ts",
   "src/lib/verify-deployment.ts",
+  "src/lib/adapters/openshell/direct-grpc.ts",
+  "src/lib/adapters/openshell/forward-bridge-runner.ts",
   "src/lib/adapters/openshell/grpc.ts",
   "src/lib/adapters/openshell/sync-runner.ts",
   "package.json",
@@ -30,12 +32,6 @@ const PRODUCTION_TARGETS = [
 ];
 
 const BANNED = [
-  /@grpc\/grpc-js/,
-  /@grpc\/proto-loader/,
-  /\bprotoLoader\b/,
-  /\bloadPackageDefinition\b/,
-  /\bCreateSshSession\b/,
-  /\bForwardTcp\b/,
   /captureSandboxSshConfig/,
   /sandbox ssh-config/,
   /spawnSync\(\s*["']ssh["']/,
@@ -44,7 +40,6 @@ const BANNED = [
   /sandbox download/,
   /forward start --background/,
   /openshell forward start/,
-  /copy-openshell-protos/,
 ];
 
 function filesUnder(target: string): string[] {
@@ -65,7 +60,7 @@ function filesUnder(target: string): string[] {
 }
 
 describe("OpenShell SDK migration guard", () => {
-  it("keeps sandbox lifecycle production code off SSH and SSH-backed forwards", () => {
+  it("keeps sandbox lifecycle production code off SSH shelling and legacy OpenShell CLI forwards", () => {
     const violations: string[] = [];
     for (const target of PRODUCTION_TARGETS) {
       for (const file of filesUnder(target)) {

@@ -19,6 +19,14 @@ import {
   type ResolvedGatewayMetadata,
   resolveGatewayMetadata,
 } from "./gateway-metadata";
+import {
+  formatDirectGrpcError,
+  OpenShellDirectGrpcClient,
+  type SandboxLogsResult,
+  type SandboxWatchEvent,
+} from "./direct-grpc";
+
+export type { SandboxLogLine, SandboxLogsResult, SandboxWatchEvent } from "./direct-grpc";
 
 export interface SandboxExecOptions {
   workdir?: string;
@@ -155,6 +163,14 @@ export function formatSdkError(error: unknown): string {
 
 export const formatGrpcError = formatSdkError;
 
+function shouldTryDirectGrpcFallback(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    message.includes("@openshell/sdk is not published yet") ||
+    message.includes("does not expose client-certificate auth yet")
+  );
+}
+
 export class SandboxGrpcClient {
   readonly gateway: ResolvedGatewayMetadata;
 
@@ -235,6 +251,21 @@ export class SandboxGrpcClient {
       const result = await (await this.sdk()).exec(sandboxName, argv, toSdkExecOptions(opts));
       return sdkResultToStream(result);
     } catch (error) {
+      if (shouldTryDirectGrpcFallback(error)) {
+        const direct = new OpenShellDirectGrpcClient({ gateway: this.gateway });
+        try {
+          return await direct.execBinaryStream(sandboxName, argv, opts);
+        } catch (directError) {
+          const detail =
+            directError instanceof Error ? directError.message : formatDirectGrpcError(directError);
+          throw new Error(
+            `OpenShell SDK exec '${sandboxName}' failed: ${formatSdkError(error)}; ` +
+              `direct gRPC ExecSandbox fallback failed: ${detail}`,
+          );
+        } finally {
+          direct.close();
+        }
+      }
       throw new Error(`OpenShell SDK exec '${sandboxName}' failed: ${formatSdkError(error)}`);
     }
   }
@@ -271,7 +302,7 @@ export class SandboxGrpcClient {
 
   async startForward(
     sandboxName: string,
-    _options: {
+    options: {
       localPort: number;
       localHost?: string;
       targetHost?: string;
@@ -279,10 +310,66 @@ export class SandboxGrpcClient {
       serviceId?: string;
     },
   ): Promise<SandboxForwardHandle> {
-    throw new Error(
-      `OpenShell SDK forwarding is not available for '${sandboxName}' yet. ` +
-        "Land an upstream @openshell/sdk forwarding API before enabling dashboard forwarding through the SDK.",
-    );
+    const direct = new OpenShellDirectGrpcClient({ gateway: this.gateway });
+    try {
+      const handle = await direct.startForward(sandboxName, options);
+      return {
+        ...handle,
+        close: async () => {
+          try {
+            await handle.close();
+          } finally {
+            direct.close();
+          }
+        },
+      };
+    } catch (error) {
+      direct.close();
+      const detail = error instanceof Error ? error.message : formatDirectGrpcError(error);
+      throw new Error(`OpenShell gRPC ForwardTcp '${sandboxName}' failed: ${detail}`);
+    }
+  }
+
+  async getSandboxLogs(
+    sandboxName: string,
+    opts: {
+      lines?: number;
+      sinceMs?: number;
+      sources?: string[];
+      minLevel?: string;
+      timeoutMs?: number;
+    } = {},
+  ): Promise<SandboxLogsResult> {
+    const direct = new OpenShellDirectGrpcClient({ gateway: this.gateway });
+    try {
+      return await direct.getSandboxLogs(sandboxName, opts);
+    } finally {
+      direct.close();
+    }
+  }
+
+  async watchSandbox(
+    sandboxName: string,
+    opts: {
+      followStatus?: boolean;
+      followLogs?: boolean;
+      followEvents?: boolean;
+      logTailLines?: number;
+      eventTail?: number;
+      stopOnTerminal?: boolean;
+      logSinceMs?: number;
+      logSources?: string[];
+      logMinLevel?: string;
+      timeoutMs?: number;
+      onEvent?: (event: SandboxWatchEvent) => void;
+    } = {},
+  ): Promise<void> {
+    const direct = new OpenShellDirectGrpcClient({ gateway: this.gateway });
+    try {
+      await direct.watchSandbox(sandboxName, opts);
+    } finally {
+      direct.close();
+    }
   }
 }
 
@@ -400,4 +487,5 @@ export const __grpcTestHooks = {
   toSdkExecOptions,
   sdkResultToStream,
   cacheKey,
+  shouldTryDirectGrpcFallback,
 };

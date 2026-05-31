@@ -5,13 +5,36 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import * as grpc from "@grpc/grpc-js";
+import * as protoLoader from "@grpc/proto-loader";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@openshell/sdk", () => ({
   OpenShellClient: { connect: vi.fn() },
 }));
 
-import { __grpcTestHooks, execBinaryStreamSync } from "./grpc";
+import { __directGrpcTestHooks } from "./direct-grpc";
+import {
+  __clearSandboxSdkClientCacheForTests,
+  __grpcTestHooks,
+  createSandboxGrpcClient,
+  execBinaryStreamSync,
+} from "./grpc";
+
+function loadOpenShellService(): grpc.ServiceDefinition {
+  const protoRoot = __directGrpcTestHooks.protoRoot();
+  const definition = protoLoader.loadSync(path.join(protoRoot, "openshell.proto"), {
+    defaults: false,
+    enums: String,
+    includeDirs: [protoRoot],
+    keepCase: true,
+    longs: String,
+    oneofs: true,
+    bytes: Buffer,
+  });
+  const loaded = grpc.loadPackageDefinition(definition) as any;
+  return loaded.openshell.v1.OpenShell.service as grpc.ServiceDefinition;
+}
 
 describe("OpenShell SDK adapter", () => {
   it("maps NemoClaw exec options to SDK exec options", () => {
@@ -47,6 +70,53 @@ describe("OpenShell SDK adapter", () => {
       "not_found: sandbox missing",
     );
     expect(__grpcTestHooks.formatSdkError(new Error("plain failure"))).toBe("plain failure");
+  });
+
+  it("falls back to raw ExecSandbox when the SDK package is still the placeholder", async () => {
+    const { OpenShellClient } = await import("@openshell/sdk");
+    vi.mocked(OpenShellClient.connect).mockRejectedValueOnce(
+      new Error("@openshell/sdk is not published yet"),
+    );
+    __clearSandboxSdkClientCacheForTests();
+
+    const server = new grpc.Server();
+    server.addService(loadOpenShellService(), {
+      GetSandbox: (_call: grpc.ServerUnaryCall<any, any>, callback: grpc.sendUnaryData<any>) => {
+        callback(null, {
+          sandbox: {
+            metadata: { id: "sandbox-123", name: "alpha" },
+            phase: "SANDBOX_PHASE_READY",
+          },
+        });
+      },
+      ExecSandbox: (call: grpc.ServerWritableStream<any, any>) => {
+        expect(call.request).toMatchObject({
+          sandbox_id: "sandbox-123",
+          command: ["sh", "-c", "printf ok"],
+          timeout_seconds: 1,
+        });
+        call.write({ stdout: { data: Buffer.from("ok") } });
+        call.write({ exit: { exit_code: 0 } });
+        call.end();
+      },
+    });
+    const port = await new Promise<number>((resolve, reject) => {
+      server.bindAsync("127.0.0.1:0", grpc.ServerCredentials.createInsecure(), (error, boundPort) => {
+        if (error) reject(error);
+        else resolve(boundPort);
+      });
+    });
+    const client = createSandboxGrpcClient({ gatewayEndpoint: `http://127.0.0.1:${port}` });
+    try {
+      await expect(client.execText("alpha", ["sh", "-c", "printf ok"], { timeoutMs: 1_000 })).resolves.toEqual({
+        status: 0,
+        stdout: "ok",
+        stderr: "",
+      });
+    } finally {
+      client.close();
+      server.forceShutdown();
+    }
   });
 
   it("preserves large sync-runner binary stdout through the fake SDK runner", () => {
