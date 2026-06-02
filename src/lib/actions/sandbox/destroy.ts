@@ -13,6 +13,7 @@ import { prompt as askPrompt } from "../../credentials/store";
 import {
   type DestroySandboxOptions,
   normalizeDestroySandboxOptions,
+  shouldCleanupGatewayByDefaultAfterLastSandbox,
 } from "../../domain/lifecycle/options";
 import {
   getSandboxDeleteOutcome,
@@ -144,13 +145,15 @@ function isNonInteractive(): boolean {
 
 /**
  * Decide whether to tear down the shared NemoClaw gateway after destroying
- * the last sandbox. Default is to preserve it (#2166); explicit opt-in via
- * `cleanupGateway: true` (which `normalizeDestroySandboxOptions` also reads
- * from `--cleanup-gateway` / `NEMOCLAW_CLEANUP_GATEWAY`).
+ * the last sandbox. Default preserves it on Linux (#2166) but cleans it up for
+ * unattended macOS destroys so port 8080 is released (#4662). Explicit
+ * `cleanupGateway` options always win (including `--cleanup-gateway`,
+ * `--no-cleanup-gateway`, and `NEMOCLAW_CLEANUP_GATEWAY`).
  *
  * Prompt rules:
  *   - explicit `cleanupGateway` set         → honour it without prompting
- *   - non-interactive or `--yes` / `--force` → preserve gateway (safe default)
+ *   - macOS + non-interactive or `--yes` / `--force` → destroy gateway
+ *   - other non-interactive or `--yes` / `--force` → preserve gateway
  *   - interactive without `--yes`           → prompt the user
  */
 async function resolveCleanupGatewayDecision(
@@ -158,6 +161,16 @@ async function resolveCleanupGatewayDecision(
 ): Promise<boolean> {
   if (options.cleanupGateway === true) return true;
   if (options.cleanupGateway === false) return false;
+  if (
+    shouldCleanupGatewayByDefaultAfterLastSandbox({
+      platform: process.platform,
+      yes: options.yes,
+      force: options.force,
+      nonInteractive: isNonInteractive(),
+    })
+  ) {
+    return true;
+  }
   if (options.yes === true || options.force === true) return false;
   if (isNonInteractive()) return false;
   console.log(`  ${YW}This was the last sandbox.${R}`);

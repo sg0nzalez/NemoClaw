@@ -8,6 +8,7 @@ import {
   normalizeGarbageCollectImagesOptions,
   normalizeRebuildSandboxOptions,
   normalizeUpgradeSandboxesOptions,
+  shouldCleanupGatewayByDefaultAfterLastSandbox,
 } from "./options";
 
 describe("lifecycle option normalization", () => {
@@ -114,6 +115,25 @@ describe("lifecycle option normalization", () => {
         process.env[ENV_KEY] = noise;
         expect(normalizeDestroySandboxOptions({}).cleanupGateway).toBeUndefined();
       }
+    });
+
+    it("defaults final-sandbox gateway cleanup on macOS but preserves the #2166 Linux default", () => {
+      expect(
+        shouldCleanupGatewayByDefaultAfterLastSandbox({
+          platform: "darwin",
+          yes: true,
+          force: false,
+          nonInteractive: true,
+        }),
+      ).toBe(true);
+      expect(
+        shouldCleanupGatewayByDefaultAfterLastSandbox({
+          platform: "linux",
+          yes: true,
+          force: false,
+          nonInteractive: true,
+        }),
+      ).toBe(false);
     });
   });
 

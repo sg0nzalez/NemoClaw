@@ -3858,7 +3858,7 @@ describe("CLI dispatch", () => {
     expect(log).not.toContain("sandbox exec alpha sh -c");
   });
 
-  it("preserves the gateway runtime by default when the last sandbox is destroyed (#2166)", () => {
+  it("uses the platform default when the last sandbox is destroyed (#2166, #4662)", () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-cli-destroy-last-"));
     const localBin = path.join(home, "bin");
     const registryDir = path.join(home, ".nemoclaw");
@@ -3906,6 +3906,8 @@ describe("CLI dispatch", () => {
       ].join("\n"),
       { mode: 0o755 },
     );
+    fs.writeFileSync(path.join(localBin, "pgrep"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+    fs.writeFileSync(path.join(localBin, "lsof"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
 
     const r = runWithEnv("alpha destroy -y", {
       HOME: home,
@@ -3916,13 +3918,18 @@ describe("CLI dispatch", () => {
     const openshellOutput = fs.readFileSync(openshellLog, "utf8");
     expect(openshellOutput).toContain("sandbox delete alpha");
     expect(openshellOutput).toContain("NAME STATUS");
-    // Gateway preservation is now the default. `--yes` confirms only the
-    // sandbox; the shared NemoClaw gateway must stay up so the next
-    // `nemoclaw onboard` reuses it.
-    expect(openshellOutput).not.toContain("forward stop 18789");
-    expect(openshellOutput).not.toContain("gateway destroy -g nemoclaw");
-    expect(openshellOutput).not.toContain("gateway remove nemoclaw");
-    expect(fs.readFileSync(bashLog, "utf8")).not.toContain("volume ls -q --filter");
+    if (process.platform === "darwin") {
+      expect(openshellOutput).toContain("forward stop 18789");
+      expect(openshellOutput).toContain("gateway destroy -g nemoclaw");
+      expect(fs.readFileSync(bashLog, "utf8")).toContain("volume ls -q --filter");
+    } else {
+      // Keep the #2166 default on Linux/Jetson: `--yes` confirms only the
+      // sandbox; the shared gateway stays up so the next onboard can reuse it.
+      expect(openshellOutput).not.toContain("forward stop 18789");
+      expect(openshellOutput).not.toContain("gateway destroy -g nemoclaw");
+      expect(openshellOutput).not.toContain("gateway remove nemoclaw");
+      expect(fs.readFileSync(bashLog, "utf8")).not.toContain("volume ls -q --filter");
+    }
   });
 
   it("tears down the gateway runtime when --cleanup-gateway is passed (#2166)", testTimeoutOptions(30_000), () => {
