@@ -238,6 +238,57 @@ read_plan_failure_field() {
   " "${E2E_CONTEXT_DIR}/plan.json" "${key}"
 }
 
+run_onboarding_assertions() {
+  local rows
+  if ! rows="$(
+    PLAN_JSON_PATH="${E2E_CONTEXT_DIR}/plan.json" SCENARIOS_YAML_PATH="${E2E_ROOT}/nemoclaw_scenarios/scenarios.yaml" node <<'NODE'
+const fs = require('fs');
+const yaml = require('js-yaml');
+
+const planPath = process.env.PLAN_JSON_PATH;
+const scenariosPath = process.env.SCENARIOS_YAML_PATH;
+const plan = JSON.parse(fs.readFileSync(planPath, 'utf8'));
+const scenarios = yaml.load(fs.readFileSync(scenariosPath, 'utf8'));
+const assertionIds = Array.isArray(plan.onboarding_assertions) ? plan.onboarding_assertions : [];
+for (const id of assertionIds) {
+  const assertion = scenarios?.onboarding_assertions?.[id];
+  if (!assertion || typeof assertion.script !== 'string') {
+    process.stderr.write(`run-scenario: unknown onboarding assertion: ${id}\n`);
+    process.exit(1);
+  }
+  const stableId = typeof assertion.assertion_id === 'string' ? assertion.assertion_id : `onboarding.${id}`;
+  process.stdout.write(`${id}\t${assertion.script}\t${stableId}\n`);
+}
+NODE
+  )"; then
+    return 1
+  fi
+
+  if [[ -z "${rows}" ]]; then
+    return 0
+  fi
+
+  echo "== onboarding assertions =="
+  local assertion_id script stable_id full_path
+  while IFS=$'\t' read -r assertion_id script stable_id; do
+    [[ -n "${assertion_id}" ]] || continue
+    full_path="${E2E_ROOT}/${script}"
+    if [[ ! -f "${full_path}" ]]; then
+      echo "run-scenario: onboarding assertion ${assertion_id} script not found: ${full_path}" >&2
+      return 1
+    fi
+    if e2e_env_is_dry_run; then
+      e2e_env_trace "onboarding-assertion:${assertion_id}"
+      echo "PASS: ${stable_id} (dry-run skipped)"
+      continue
+    fi
+    if ! bash "${full_path}"; then
+      echo "run-scenario: onboarding assertion ${assertion_id} failed" >&2
+      return 1
+    fi
+  done <<<"${rows}"
+}
+
 EXPECTED_FAILURE_PHASE="$(read_plan_failure_field phase)"
 
 if [[ -n "${EXPECTED_FAILURE_PHASE}" ]]; then
@@ -298,6 +349,11 @@ if [[ -n "${EXPECTED_FAILURE_PHASE}" ]]; then
     observed_side_effects="${observed_side_effects:+${observed_side_effects},}credentials-written"
   fi
 
+  if ! run_onboarding_assertions; then
+    echo "run-scenario: onboarding assertions failed for negative scenario" >&2
+    exit 4
+  fi
+
   # `--observed-error-class` is intentionally omitted: the runner does not yet
   # derive a structured error class from the actual failure output, and
   # reporting the planned class back to the matcher would make the check
@@ -335,6 +391,10 @@ if [[ "${EXPECTED_STATE_ID}" == "preflight-failure-no-sandbox" ]]; then
   fi
   if openshell sandbox list 2>/dev/null | grep -Fq "${sandbox_name}"; then
     echo "run-scenario: negative preflight left behind sandbox ${sandbox_name}" >&2
+    exit 4
+  fi
+  if ! run_onboarding_assertions; then
+    echo "run-scenario: onboarding assertions failed for negative preflight" >&2
     exit 4
   fi
   echo "run-scenario: negative preflight passed; Docker daemon unavailable and no sandbox was created"
@@ -410,6 +470,11 @@ else
     e2e_gateway_assert_healthy
   fi
   e2e_sandbox_assert_running
+fi
+
+if ! run_onboarding_assertions; then
+  echo "run-scenario: onboarding assertions failed" >&2
+  exit 3
 fi
 
 # Expected state validation. The validator reads E2E_PROBE_OVERRIDE_* env

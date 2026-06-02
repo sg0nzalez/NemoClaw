@@ -70,6 +70,8 @@ describe("Phase 6: ubuntu-repo-cloud-openclaw migration", () => {
         "onboard:cloud-openclaw",
         "gateway:check",
         "sandbox:check",
+        "onboarding-assertion:base-installed",
+        "onboarding-assertion:preflight-passed",
       ];
       let pos = 0;
       for (const marker of order) {
@@ -80,6 +82,9 @@ describe("Phase 6: ubuntu-repo-cloud-openclaw migration", () => {
       // The run should also seed the context and produce plan.json.
       expect(fs.existsSync(path.join(tmp, "context.env"))).toBe(true);
       expect(fs.existsSync(path.join(tmp, "plan.json"))).toBe(true);
+      expect(r.stdout).toContain("== onboarding assertions ==");
+      expect(r.stdout).toContain("PASS: onboarding.base.cli-installed (dry-run skipped)");
+      expect(r.stdout).toContain("PASS: onboarding.preflight.passed (dry-run skipped)");
       // After dry-run, suite runner should be able to execute the full
       // suite sequence against the emitted context.
       const suites = spawnSync(
