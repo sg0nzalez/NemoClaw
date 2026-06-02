@@ -7,8 +7,10 @@ export interface DestroySandboxOptions {
   /**
    * When the sandbox being destroyed is the last one, also tear down the
    * shared NemoClaw gateway (port forward, gateway pod, cluster volumes).
-   * Default `false` — gateway is preserved so the next `nemoclaw onboard`
-   * can reuse it without a full re-bootstrap. See #2166.
+   * Default is platform-aware: preserve on Linux so the next
+   * `nemoclaw onboard` can reuse the gateway without a full re-bootstrap
+   * (#2166), but clean up unattended final-sandbox destroys on macOS so
+   * port 8080 is released for automation (#4662).
    *
    * Resolution order during normalization: explicit option, then
    * `--cleanup-gateway` argv flag, then `NEMOCLAW_CLEANUP_GATEWAY=1` env
@@ -64,6 +66,18 @@ export function normalizeDestroySandboxOptions(
       ? { cleanupGateway: envCleanupGateway }
       : {}),
   };
+}
+
+export function shouldCleanupGatewayByDefaultAfterLastSandbox(input: {
+  platform: NodeJS.Platform;
+  yes?: boolean;
+  force?: boolean;
+  nonInteractive?: boolean;
+}): boolean {
+  return (
+    input.platform === "darwin" &&
+    (input.yes === true || input.force === true || input.nonInteractive === true)
+  );
 }
 
 export function normalizeRebuildSandboxOptions(
