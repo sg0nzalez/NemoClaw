@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { getSandboxFailurePhase } from "../state/gateway";
 import type {
   DockerGpuPatchBackend,
   DockerGpuPatchDeps,
@@ -19,7 +20,6 @@ import {
   shouldApplyDockerGpuPatch,
   waitForOpenShellSupervisorReconnect,
 } from "./docker-gpu-patch";
-import { getSandboxFailurePhase } from "../state/gateway";
 
 type DockerGpuSandboxCreateDeps = Pick<
   DockerGpuPatchDeps,
@@ -140,8 +140,14 @@ export function createDockerGpuSandboxCreatePatch(
           // the full reconnect timeout window when the patched container
           // crashed on startup (#4316).
           runCaptureOpenshell: options.deps.runCaptureOpenshell,
+          // Pass `dockerCapture` so the wait can inspect the patched
+          // container's State and avoid short-circuiting on a transient Error
+          // phase while a still-running GPU container finishes bringing up its
+          // supervisor (WSL2/Docker Desktop, #4664).
+          dockerCapture: options.deps.dockerCapture,
           sleep: options.deps.sleep,
         },
+        { patchedContainerId: result?.newContainerId ?? null },
       );
       if (supervisorReady) return;
       printDockerGpuPatchFailureAndExit(

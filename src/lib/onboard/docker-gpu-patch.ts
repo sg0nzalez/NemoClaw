@@ -851,10 +851,41 @@ function sandboxListShowsErrorPhase(
   }
 }
 
+/**
+ * Returns true only when the patched GPU container is positively confirmed to
+ * still be running (Status=running and not otherwise failed). Used to decide
+ * whether an Error-phase report during the supervisor-reconnect wait is a real
+ * terminal failure (#4316) or a transient phase while a still-booting container
+ * finishes initializing its supervisor (#4664). When the container id is
+ * unknown or its State cannot be inspected we return false so the caller keeps
+ * its prior behavior (treating Error phase as terminal).
+ */
+function patchedGpuContainerStillRunning(
+  patchedContainerId: string | null | undefined,
+  deps: DockerGpuPatchDeps,
+): boolean {
+  const target = String(patchedContainerId || "").trim();
+  if (!target) return false;
+  const d = depsWithDefaults(deps);
+  let stateJson = "";
+  try {
+    stateJson = d.dockerCapture(["inspect", "--format", "{{json .State}}", target], {
+      ignoreError: true,
+      timeout: DOCKER_GPU_PATCH_TIMEOUT_MS,
+    });
+  } catch {
+    return false;
+  }
+  const state = parseDockerContainerState(stateJson);
+  if (!state || patchedContainerLooksFailed(state)) return false;
+  return String(state.Status || "").toLowerCase() === "running";
+}
+
 function waitForOpenShellSandboxExec(
   sandboxName: string,
   timeoutSecs: number,
   deps: DockerGpuPatchDeps,
+  options: { patchedContainerId?: string | null } = {},
 ): boolean {
   if (!deps.runOpenshell) return true;
   const d = depsWithDefaults(deps);
@@ -869,9 +900,18 @@ function waitForOpenShellSandboxExec(
     // terminal failure phase. Without this, a patched container that exits
     // on startup leaves the user staring at the supervisor-reconnect
     // timeout (default 900s) before any Error-phase diagnostics run (#4316).
+    //
+    // BUT only when the patched container is not still running: on slower
+    // runtimes (WSL2/Docker Desktop) OpenShell can briefly report Error phase
+    // while the recreated GPU container is still bringing up its OCSF
+    // supervisor, even though the container is Status=running / Health=starting
+    // / ExitCode=0. Bailing on that transient Error mislabels a healthy,
+    // still-booting GPU container as a fatal reconnect failure. Keep retrying
+    // until the deadline whenever the container is confirmed running (#4664).
     if (
       deps.runCaptureOpenshell &&
-      sandboxListShowsErrorPhase(sandboxName, deps.runCaptureOpenshell)
+      sandboxListShowsErrorPhase(sandboxName, deps.runCaptureOpenshell) &&
+      !patchedGpuContainerStillRunning(options.patchedContainerId, deps)
     ) {
       return false;
     }
@@ -1021,6 +1061,7 @@ export function recreateOpenShellDockerSandboxWithGpu(
         options.sandboxName,
         options.timeoutSecs ?? DOCKER_GPU_PATCH_WAIT_SECS,
         deps,
+        { patchedContainerId: newContainerId },
       );
       if (!execReady) {
         throw new Error("OpenShell supervisor did not reconnect to the GPU-enabled container.");

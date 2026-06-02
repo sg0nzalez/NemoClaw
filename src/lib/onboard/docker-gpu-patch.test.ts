@@ -862,6 +862,76 @@ describe("docker-gpu-patch Error-phase diagnostics (#4316)", () => {
     expect(sleep).toHaveBeenCalledTimes(1);
   });
 
+  it("does not short-circuit on a transient Error phase while the patched container is still running (#4664)", () => {
+    // On WSL2/Docker Desktop the recreated GPU container is slow to bring up
+    // its OCSF supervisor, so OpenShell briefly reports the sandbox in Error
+    // phase even though the container is Status=running / Health=starting /
+    // ExitCode=0. The supervisor-reconnect wait must keep retrying (not bail)
+    // until the supervisor reconnects and `sandbox exec` succeeds.
+    const execResults = [
+      { status: 1, stderr: "sandbox not ready" },
+      { status: 1, stderr: "sandbox not ready" },
+      { status: 0 },
+    ];
+    let execCall = 0;
+    const runOpenshell = vi.fn(
+      () => execResults[Math.min(execCall++, execResults.length - 1)],
+    );
+    // The sandbox list reports Error phase the whole time the supervisor is
+    // still reconnecting.
+    const runCaptureOpenshell = vi.fn(() => "alpha   Error   2s ago");
+    // The patched container is healthy and still running.
+    const dockerCapture = vi.fn((args: readonly string[]) => {
+      if (args[0] === "inspect" && args[1] === "--format") {
+        return JSON.stringify({ Status: "running", Health: { Status: "starting" } });
+      }
+      return "";
+    });
+    const sleep = vi.fn();
+
+    const ok = waitForOpenShellSupervisorReconnect(
+      "alpha",
+      600,
+      { runOpenshell, runCaptureOpenshell, dockerCapture, sleep },
+      { patchedContainerId: "new-container-id" },
+    );
+
+    expect(ok).toBe(true);
+    // Three exec attempts: two failures (container still booting), then success.
+    expect(runOpenshell).toHaveBeenCalledTimes(3);
+    // It inspected the patched container State to decide the Error was transient.
+    expect(
+      dockerCapture.mock.calls.some(
+        ([args]) => args[0] === "inspect" && args[1] === "--format",
+      ),
+    ).toBe(true);
+  });
+
+  it("still short-circuits on Error phase when the patched container has exited (#4316 preserved)", () => {
+    // The #4664 guard must not mask a genuine crash-on-startup: when the
+    // patched container itself has exited, the Error-phase short-circuit must
+    // still fire so users get diagnostics instead of waiting the full timeout.
+    const runOpenshell = vi.fn(() => ({ status: 1, stderr: "sandbox not ready" }));
+    const runCaptureOpenshell = vi.fn(() => "alpha   Error   3s ago");
+    const dockerCapture = vi.fn((args: readonly string[]) => {
+      if (args[0] === "inspect" && args[1] === "--format") {
+        return JSON.stringify({ Status: "exited", ExitCode: 125 });
+      }
+      return "";
+    });
+    const sleep = vi.fn();
+
+    const ok = waitForOpenShellSupervisorReconnect(
+      "alpha",
+      600,
+      { runOpenshell, runCaptureOpenshell, dockerCapture, sleep },
+      { patchedContainerId: "new-container-id" },
+    );
+
+    expect(ok).toBe(false);
+    expect(runOpenshell).toHaveBeenCalledTimes(1);
+  });
+
   it("prefers `sandbox list` phase over `sandbox get` when both are present (stale get)", () => {
     // Regression guard for #4316 CodeRabbit feedback: when `sandbox get`
     // returns a stale Phase (e.g. Provisioning while the gateway has already
