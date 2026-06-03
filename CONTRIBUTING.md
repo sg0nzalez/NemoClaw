@@ -1,6 +1,38 @@
+<!--
+  SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+  SPDX-License-Identifier: Apache-2.0
+-->
+
 # Contributing to NVIDIA NemoClaw
 
 Thank you for your interest in contributing to NVIDIA NemoClaw. This guide covers how to set up your development environment, run tests, and submit changes.
+
+All participants are expected to follow our [Code of Conduct](CODE_OF_CONDUCT.md).
+
+## Types of Contributions
+
+We welcome many types of contributions:
+
+| Contribution type | Description |
+|---|---|
+| **Bug reports** | Confirmed bugs with reproduction steps — see [Before You Open an Issue](#before-you-open-an-issue) |
+| **Documentation fixes** | Typos, clarifications, and missing information in `docs/` |
+| **Tests** | New or improved test coverage in `test/` or `nemoclaw/test/` |
+| **Feature proposals** | Design-first proposals opened as issues before any implementation |
+| **Integrations** | Support for new inference backends, providers, or tools |
+| **Examples** | Worked usage examples added under `docs/` |
+
+Security vulnerabilities must follow [SECURITY.md](SECURITY.md) — **not** GitHub issues.
+
+## Where to Start
+
+New contributors should start with issues labeled [`good first issue`](https://github.com/NVIDIA/NemoClaw/issues?q=is%3Aopen+is%3Aissue+label%3A%22good+first+issue%22). These are scoped tasks with clear acceptance criteria that do not require deep project knowledge.
+
+Before starting larger work:
+
+- Search open issues and pull requests to avoid duplicates.
+- Open an issue to discuss your approach before writing code for significant changes.
+- For questions, open a [GitHub Discussion](https://github.com/NVIDIA/NemoClaw/discussions) or comment on a related issue.
 
 ## Before You Open an Issue
 
@@ -73,11 +105,13 @@ These are the primary `make` and `npm` targets for day-to-day development:
 | `make check` | Run all linters (TypeScript + Python) |
 | `make lint` | Same as `make check` |
 | `make format` | Auto-format TypeScript and Python source |
-| `npm run typecheck:cli` | Type-check CLI TypeScript (`bin/`, `scripts/`) |
+| `npm run typecheck:cli` | Type-check CLI TypeScript using `tsconfig.cli.json` (`bin/`, `scripts/`, `src/`, `test/`, `nemoclaw-blueprint/scripts/`) |
 | `npm test` | Run root-level tests (`test/*.test.js`) |
 | `cd nemoclaw && npm test` | Run plugin unit tests (Vitest) |
-| `make docs` | Build documentation (Sphinx/MyST) |
-| `make docs-live` | Serve docs locally with auto-rebuild |
+| `npm run docs` | Validate Fern documentation with the pinned Fern CLI version |
+| `npm run docs:live` | Serve Fern docs locally with auto-rebuild |
+| `npm run docs:preview:watch` | Publish branch-based Fern previews when docs files change |
+| `npm run docs:deps` | Print the pinned Fern CLI version used by docs commands |
 | `npx prek run --all-files` | Run all hooks from `.pre-commit-config.yaml` — see below |
 
 ### Git hooks (prek)
@@ -86,15 +120,31 @@ All git hooks are managed by [prek](https://prek.j178.dev/), a fast, single-bina
 
 | Hook | What runs |
 |------|-----------|
-| **pre-commit** | File fixers, formatters, linters, doc-to-skills regeneration, Vitest (plugin) |
+| **pre-commit** | File fixers, formatters, linters, docs-to-skills dry-run validation, Vitest (plugin) |
 | **commit-msg** | commitlint (Conventional Commits) |
 | **pre-push** | TypeScript type check (`tsc --noEmit` for plugin, JS, and CLI) |
 
 For a full manual check: `npx prek run --all-files`. For scoped runs: `npx prek run --from-ref <base> --to-ref HEAD`.
 
+For TypeScript changes under `src/`, `test/`, `scripts/`, `bin/`, or
+`nemoclaw-blueprint/scripts/` (and for `tsconfig.cli.json` updates), also run
+`npm run typecheck:cli` before opening a PR. CI runs this unconditionally, and the
+pre-push hook runs it with `tsconfig.cli.json` before pushes.
+
 If you still have `core.hooksPath` set from an old Husky setup, Git will ignore `.git/hooks`. Run `git config --unset core.hooksPath` in this repo, then `npm install` so `prek install` (via `prepare`) can register the hooks.
 
 `make check` remains the primary documented linter entry point.
+
+For doc-only changes, you do not need to run the full test suite by default.
+Run the docs and hook checks instead:
+
+```bash
+npx prek run --all-files
+npm run docs
+```
+
+Leave `npm test` unchecked in the PR verification checklist unless you actually ran it.
+Run `npm test` when the change touches code, generated behavior, or anything that affects runtime behavior.
 
 ## Project Structure
 
@@ -107,7 +157,8 @@ The repository is organized as follows.
 | `bin/` | CLI entry point (`nemoclaw.js`) |
 | `scripts/` | Install helpers and automation scripts |
 | `test/` | Root-level integration tests |
-| `docs/` | User-facing documentation (Sphinx/MyST) |
+| `docs/` | User-facing documentation (Fern MDX plus legacy MyST source during migration) |
+| `fern/` | Fern site configuration, theme, and assets |
 
 ## Language Policy
 
@@ -122,67 +173,39 @@ Shell scripts (`scripts/*.sh`) must pass ShellCheck and use `shfmt` formatting.
 If your change affects user-facing behavior (new commands, changed defaults, new features, bug fixes that contradict existing docs), update the relevant pages under `docs/` in the same PR.
 
 If you use an AI coding agent (Cursor, Claude Code, Codex, etc.), the repo includes the `nemoclaw-contributor-update-docs` skill that drafts doc updates. Use it before writing from scratch and follow the style guide in [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md).
+During release prep, run that skill first, make any doc version bumps, regenerate user skills, then open the docs refresh PR.
 
 To build and preview docs locally:
 
-```bash
-make docs       # build the docs
-make docs-live  # serve locally with auto-rebuild
+```console
+$ npm run docs                 # validate Fern docs with the pinned Fern CLI version
+$ npm run docs:live            # serve Fern docs locally with auto-rebuild
+$ npm run docs:preview:watch   # publish branch-based Fern previews on file changes
 ```
+
+Use these npm scripts when validating docs for a PR.
 
 See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for the full style guide and writing conventions.
 
 ### Doc-to-Skills Pipeline
 
-The `docs/` directory is the source of truth for user-facing documentation.
-The script `scripts/docs-to-skills.py` converts doc pages into agent skills under `.agents/skills/`.
-These generated skills let AI agents answer user questions and walk through procedures without reading raw doc pages.
-
-Always edit pages in `docs/`.
-Never edit generated skill files under `.agents/skills/nemoclaw-user-*/` — your changes will be overwritten on the next run.
-
-A pre-commit hook regenerates skills automatically whenever you commit changes to `docs/**/*.md` files. The hook runs `scripts/docs-to-skills.py` and stages the updated skills so they are included in the same commit. No manual step is needed for normal workflows.
-
-To regenerate skills manually (for example, after rebasing or outside of a commit), run from the repo root:
-
-```bash
-python scripts/docs-to-skills.py docs/ .agents/skills/ --prefix nemoclaw-user
-```
-
-Always use this exact output path (`.agents/skills/`) and prefix (`nemoclaw-user`) so skill names and locations stay consistent.
-
-Preview what would change before writing files:
-
-```bash
-python scripts/docs-to-skills.py docs/ .agents/skills/ --prefix nemoclaw-user --dry-run
-```
-
-Other useful flags:
-
-| Flag | Purpose |
-|------|---------|
-| `--strategy <name>` | Grouping strategy: `smart` (default), `grouped`, or `individual`. |
-| `--name-map CAT=NAME` | Override a generated skill name (e.g. `--name-map about=overview`). |
-| `--exclude <file>` | Skip specific files (e.g. `--exclude "release-notes.md"`). |
-
-#### Generated skill structure
-
-Each skill directory contains:
-
-```text
-.agents/skills/<skill-name>/
-├── SKILL.md              # Frontmatter + procedures + related skills
-└── references/           # Detailed concept and reference content (loaded on demand)
-    ├── <concept-page>.md
-    └── <reference-page>.md
-```
-
-Agents load the `references/` directory only when needed (progressive disclosure).
-The `SKILL.md` itself stays under 500 lines so agents can read it quickly.
+For user-skill definitions, docs-to-skills validation, release-prep regeneration, and script flags, see [Doc-to-Skills Pipeline](docs/CONTRIBUTING.md#doc-to-skills-pipeline).
 
 ## Pull Requests
 
-We welcome contributions. Every PR requires maintainer review. To keep the review queue healthy, limit the number of open PRs you have at any time to fewer than 10.
+We welcome contributions. Every PR requires maintainer review before merge. To keep the review queue healthy, limit the number of open PRs you have at any time to fewer than 10.
+
+Maintainers review all incoming PRs on a best-effort basis. Straightforward fixes typically receive initial feedback sooner than large or complex changes. If a PR has not received a response after two weeks, a polite comment asking for an update is welcome.
+
+### DCO Sign-Off
+
+This project requires a [Developer Certificate of Origin (DCO)](https://developercertificate.org/) sign-off on every commit. Add the following trailer to each commit message:
+
+```text
+Signed-off-by: Your Name <your.email@example.com>
+```
+
+Use `git commit -s` to add the sign-off automatically. CI will reject commits that are missing it.
 
 > [!WARNING]
 > Accounts that repeatedly exceed this limit or submit automated bulk PRs may have their PRs closed or their access restricted.
@@ -203,7 +226,7 @@ Follow these steps to submit a pull request.
 
 1. Create a feature branch from `main`.
 2. Make your changes with tests.
-3. Run `make check` and `npm test` to verify.
+3. Run the relevant checks. For code changes, run `make check` and `npm test`. For doc-only changes, run `npx prek run --all-files` and `npm run docs`.
 4. Open a PR.
 
 ### Commit Messages

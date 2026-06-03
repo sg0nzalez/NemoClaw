@@ -10,6 +10,7 @@ import {
   parseFrontmatter,
   resolveSkillPaths,
   collectFiles,
+  postInstall,
   validateRelativePath,
   shellQuote,
 } from "../../dist/lib/skill-install";
@@ -70,9 +71,14 @@ describe("parseFrontmatter", () => {
   });
 
   it("rejects names with invalid characters", () => {
-    expect(() => parseFrontmatter("---\nname: my skill\n---\n")).toThrow("invalid characters");
-    expect(() => parseFrontmatter("---\nname: ../escape\n---\n")).toThrow("invalid characters");
-    expect(() => parseFrontmatter("---\nname: a/b\n---\n")).toThrow("invalid characters");
+    expect(() => parseFrontmatter("---\nname: my skill\n---\n")).toThrow("is invalid");
+    expect(() => parseFrontmatter("---\nname: ../escape\n---\n")).toThrow("is invalid");
+    expect(() => parseFrontmatter("---\nname: a/b\n---\n")).toThrow("is invalid");
+  });
+
+  it("rejects dot and double-dot as skill names in frontmatter", () => {
+    expect(() => parseFrontmatter("---\nname: .\n---\n")).toThrow("is invalid");
+    expect(() => parseFrontmatter("---\nname: ..\n---\n")).toThrow("is invalid");
   });
 });
 
@@ -195,7 +201,7 @@ describe("resolveSkillPaths", () => {
     expect(paths.uploadDir).toBe("/sandbox/.openclaw/skills/weather");
     expect(paths.mirrorDir).toBe("$HOME/.openclaw/skills/weather");
     expect(paths.sessionFile).toBe(
-      "/sandbox/.openclaw-data/agents/main/sessions/sessions.json",
+      "/sandbox/.openclaw/agents/main/sessions/sessions.json",
     );
     expect(paths.isOpenClaw).toBe(true);
   });
@@ -204,25 +210,23 @@ describe("resolveSkillPaths", () => {
     const agent = {
       name: "openclaw",
       configPaths: {
-        immutableDir: "/sandbox/.openclaw",
-        writableDir: "/sandbox/.openclaw-data",
+        dir: "/sandbox/.openclaw",
       },
     };
     const paths = resolveSkillPaths(agent, "my-skill");
     expect(paths.uploadDir).toBe("/sandbox/.openclaw/skills/my-skill");
     expect(paths.mirrorDir).toBe("$HOME/.openclaw/skills/my-skill");
     expect(paths.sessionFile).toBe(
-      "/sandbox/.openclaw-data/agents/main/sessions/sessions.json",
+      "/sandbox/.openclaw/agents/main/sessions/sessions.json",
     );
     expect(paths.isOpenClaw).toBe(true);
   });
 
-  it("returns Hermes paths without mirror or session refresh", () => {
+  it("returns Hermes paths without session refresh", () => {
     const agent = {
       name: "hermes",
       configPaths: {
-        immutableDir: "/sandbox/.hermes",
-        writableDir: "/sandbox/.hermes-data",
+        dir: "/sandbox/.hermes",
       },
     };
     const paths = resolveSkillPaths(agent, "demo-skill");
@@ -236,8 +240,7 @@ describe("resolveSkillPaths", () => {
     const agent = {
       name: "future-agent",
       configPaths: {
-        immutableDir: "/sandbox/.future",
-        writableDir: "/sandbox/.future-data",
+        dir: "/sandbox/.future",
       },
     };
     const paths = resolveSkillPaths(agent, "test-skill");
@@ -245,5 +248,33 @@ describe("resolveSkillPaths", () => {
     expect(paths.mirrorDir).toBeNull();
     expect(paths.sessionFile).toBeNull();
     expect(paths.isOpenClaw).toBe(false);
+  });
+});
+
+describe("postInstall", () => {
+  it("refreshes OpenClaw sessions after installing an updated skill", () => {
+    const skillDir = mkdtempSync(join(tmpdir(), "skill-postinstall-"));
+    const commands: string[] = [];
+    try {
+      writeFileSync(skillDir + "/SKILL.md", "---\nname: weather\n---\n# Weather\n");
+      const result = postInstall(
+        { configFile: "/tmp/ssh-config", sandboxName: "alpha" },
+        resolveSkillPaths(null, "weather"),
+        skillDir,
+        {
+          sshExecImpl: (_ctx, command) => {
+            commands.push(command);
+            return { status: 0, stdout: "", stderr: "" };
+          },
+        },
+      );
+
+      expect(result).toEqual({ success: true, messages: [] });
+      expect(commands).toContain(
+        "printf '{}' > '/sandbox/.openclaw/agents/main/sessions/sessions.json'",
+      );
+    } finally {
+      rmSync(skillDir, { recursive: true, force: true });
+    }
   });
 });

@@ -8,11 +8,14 @@
 #   2. Build a base image with an OLDER OpenClaw version (2026.3.11)
 #   3. Create a sandbox from that old image via openshell directly
 #   4. Write marker files into workspace state dirs
+#   4.5 Apply policy presets (npm, pypi) and verify they are active (#1952)
 #   5. Restore the current base image
 #   6. Run `nemoclaw <name> rebuild --yes`
 #   7. Verify marker files survived the rebuild
 #   8. Verify the sandbox now reports the CURRENT version
-#   9. Verify no credentials leaked into the local backup
+#   9. Verify the OpenClaw gateway auth token rotated (#4517)
+#   10. Verify no credentials leaked into the local backup
+#   11. Verify policy presets survived the rebuild (#1952)
 #
 # Prerequisites:
 #   - Docker running
@@ -26,9 +29,15 @@
 set -euo pipefail
 
 SANDBOX_NAME="${NEMOCLAW_SANDBOX_NAME:-e2e-rebuild-oc}"
+
+# shellcheck source=test/e2e/lib/sandbox-teardown.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/sandbox-teardown.sh"
+register_sandbox_for_teardown "$SANDBOX_NAME"
+
 OLD_OPENCLAW_VERSION="2026.3.11"
-MARKER_FILE="/sandbox/.openclaw-data/workspace/rebuild-marker.txt"
+MARKER_FILE="/sandbox/.openclaw/workspace/rebuild-marker.txt"
 MARKER_CONTENT="REBUILD_OC_E2E_$(date +%s)"
+PRE_REBUILD_GATEWAY_TOKEN="nemoclaw-e2e-old-gateway-token-${MARKER_CONTENT}"
 REGISTRY_FILE="$HOME/.nemoclaw/sandboxes.json"
 SESSION_FILE="$HOME/.nemoclaw/onboard-session.json"
 
@@ -51,6 +60,21 @@ fail() {
 }
 info() { echo -e "${YELLOW}[INFO]${NC} $1"; }
 diag() { echo -e "${YELLOW}[DIAG]${NC} $1"; }
+
+read_sandbox_gateway_token() {
+  openshell sandbox exec --name "${SANDBOX_NAME}" -- \
+    python3 -c 'import json; cfg = json.load(open("/sandbox/.openclaw/openclaw.json")); print(cfg.get("gateway", {}).get("auth", {}).get("token", ""), end="")'
+}
+
+read_sandbox_runtime_gateway_token() {
+  # shellcheck disable=SC2016 # OPENCLAW_GATEWAY_TOKEN must expand inside the sandbox.
+  openshell sandbox exec --name "${SANDBOX_NAME}" -- \
+    bash -lc '. /tmp/nemoclaw-proxy-env.sh >/dev/null 2>&1 || exit 1; printf "%s" "${OPENCLAW_GATEWAY_TOKEN:-}"'
+}
+
+read_sandbox_config_hash() {
+  openshell sandbox exec --name "${SANDBOX_NAME}" -- cat /sandbox/.openclaw/.config-hash
+}
 
 # Enable verbose logging in rebuild command
 export NEMOCLAW_REBUILD_VERBOSE=1
@@ -135,7 +159,7 @@ cat >"${TESTDIR}/Dockerfile" <<DOCKERFILE
 FROM ${OLD_BASE_TAG}
 USER sandbox
 WORKDIR /sandbox
-RUN mkdir -p /sandbox/.openclaw-data/workspace /sandbox/.openclaw && echo '{}' > /sandbox/.openclaw/openclaw.json
+RUN mkdir -p /sandbox/.openclaw/workspace /sandbox/.openclaw && echo '{}' > /sandbox/.openclaw/openclaw.json
 CMD ["/bin/bash"]
 DOCKERFILE
 
@@ -161,8 +185,29 @@ pass "Old sandbox created (OpenClaw ${OLD_OPENCLAW_VERSION})"
 info "Phase 4: Writing markers and registering sandbox..."
 
 openshell sandbox exec --name "${SANDBOX_NAME}" -- \
-  sh -c "mkdir -p /sandbox/.openclaw-data/workspace && echo '${MARKER_CONTENT}' > ${MARKER_FILE}" \
+  sh -c "mkdir -p /sandbox/.openclaw/workspace && echo '${MARKER_CONTENT}' > ${MARKER_FILE}" \
   || fail "Failed to write marker file"
+
+# Seed an existing gateway token so the rebuild path must rotate it.
+openshell sandbox exec --name "${SANDBOX_NAME}" -- \
+  env "PRE_REBUILD_GATEWAY_TOKEN=${PRE_REBUILD_GATEWAY_TOKEN}" \
+  python3 -c 'import json, os; path = "/sandbox/.openclaw/openclaw.json"; cfg = json.load(open(path)); cfg.setdefault("gateway", {}).setdefault("auth", {})["token"] = os.environ["PRE_REBUILD_GATEWAY_TOKEN"]; f = open(path, "w"); json.dump(cfg, f, indent=2); f.write("\n"); f.close()' \
+  || fail "Failed to seed old gateway token"
+openshell sandbox exec --name "${SANDBOX_NAME}" -- \
+  sh -c "cd /sandbox/.openclaw && sha256sum openclaw.json > .config-hash" \
+  || fail "Failed to write pre-rebuild config hash"
+PRE_REBUILD_CONFIG_HASH="$(read_sandbox_config_hash 2>/dev/null || true)"
+SEEDED_GATEWAY_TOKEN="$(read_sandbox_gateway_token 2>/dev/null || true)"
+if [ "${SEEDED_GATEWAY_TOKEN}" = "${PRE_REBUILD_GATEWAY_TOKEN}" ]; then
+  pass "Old gateway token seeded before rebuild"
+else
+  fail "Failed to verify seeded gateway token before rebuild"
+fi
+if [ -n "${PRE_REBUILD_CONFIG_HASH}" ] && echo "${PRE_REBUILD_CONFIG_HASH}" | grep -q "openclaw.json"; then
+  pass "Pre-rebuild config hash recorded"
+else
+  fail "Pre-rebuild config hash missing openclaw.json"
+fi
 
 # Verify
 VERIFY=$(openshell sandbox exec --name "${SANDBOX_NAME}" -- cat "${MARKER_FILE}" 2>/dev/null || true)
@@ -177,7 +222,7 @@ reg = {'sandboxes': {'${SANDBOX_NAME}': {
     'model': 'nvidia/nemotron-3-super-120b-a12b',
     'provider': 'nvidia-prod',
     'gpuEnabled': False,
-    'policies': [],
+    'policies': ['npm', 'pypi'],
     'policyTier': None,
     'agent': None,
     'agentVersion': '${OLD_OPENCLAW_VERSION}'
@@ -185,7 +230,10 @@ reg = {'sandboxes': {'${SANDBOX_NAME}': {
 with open('${REGISTRY_FILE}', 'w') as f:
     json.dump(reg, f, indent=2)
 
-# Update session to point at this sandbox
+# Update session to point at this sandbox.
+# Mark preflight and gateway steps as complete so that rebuild's
+# onboard --resume skips them (the gateway is already running and
+# port 8080 is legitimately in use).
 sess_path = '${SESSION_FILE}'
 try:
     with open(sess_path) as f:
@@ -194,12 +242,98 @@ except Exception:
     sess = {}
 sess['sandboxName'] = '${SANDBOX_NAME}'
 sess['status'] = 'complete'
+sess['resumable'] = True
+sess['lastCompletedStep'] = 'gateway'
+sess['failure'] = None
+now = __import__('datetime').datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.000Z')
+complete = {'status': 'complete', 'startedAt': now, 'completedAt': now, 'error': None}
+pending  = {'status': 'pending',  'startedAt': None, 'completedAt': None, 'error': None}
+sess['steps'] = {
+    'preflight': complete,
+    'gateway': complete,
+    'sandbox': pending,
+    'provider_selection': pending,
+    'inference': pending,
+    'openclaw': pending,
+    'agent_setup': pending,
+    'policies': pending,
+}
 with open(sess_path, 'w') as f:
     json.dump(sess, f, indent=2)
 print('Registry and session updated')
 "
 
 pass "Markers written, sandbox registered"
+
+# ── Phase 4.5: Apply policy presets (#1952) ─────────────────────────
+info "Phase 4.5: Applying policy presets (npm, pypi) to sandbox..."
+
+# Apply each preset to the live gateway policy engine. Resolve the NemoClaw
+# module directory from the `nemoclaw` binary on PATH (portable across
+# install methods: npm link, npm -g, source checkout).
+NEMOCLAW_BIN="$(command -v nemoclaw)"
+# nemoclaw is a shell wrapper; extract the real node binary path from it
+# to find the node_modules root.
+NEMOCLAW_MODULE_DIR="$(node -e "
+  try { console.log(require.resolve('nemoclaw/package.json').replace('/package.json','')); }
+  catch(e) {
+    // Fallback: walk up from the nemoclaw bin wrapper
+    const fs = require('fs'), path = require('path');
+    const wrapper = fs.readFileSync('${NEMOCLAW_BIN}', 'utf-8');
+    const m = wrapper.match(/exec\\s+\"?([^\"\\s]+node)\"?/);
+    if (m) {
+      const nodeDir = path.dirname(path.dirname(m[1]));
+      const candidate = path.join(nodeDir, 'lib/node_modules/nemoclaw');
+      if (fs.existsSync(path.join(candidate, 'dist/lib/policy/index.js'))) {
+        console.log(candidate);
+        process.exit(0);
+      }
+    }
+    // Last resort: relative to the repo root
+    const repoCandidate = '${REPO_ROOT}';
+    if (fs.existsSync(path.join(repoCandidate, 'dist/lib/policy/index.js'))) {
+      console.log(repoCandidate);
+      process.exit(0);
+    }
+    console.error('Cannot locate nemoclaw module directory');
+    process.exit(1);
+  }
+" 2>/dev/null)" || fail "Cannot locate nemoclaw module directory"
+diag "NemoClaw module dir: ${NEMOCLAW_MODULE_DIR}"
+
+for preset in npm pypi; do
+  info "  Applying preset: ${preset}"
+  node -e "
+    const policies = require('${NEMOCLAW_MODULE_DIR}/dist/lib/policy/index.js');
+    const ok = policies.applyPreset('${SANDBOX_NAME}', '${preset}');
+    if (!ok) { console.error('applyPreset returned false for ${preset}'); process.exit(1); }
+  " || fail "Failed to apply preset: ${preset}"
+done
+
+# Verify presets are in the live gateway policy
+PRE_REBUILD_POLICY=$(openshell policy get --full "${SANDBOX_NAME}" 2>&1 || true)
+if echo "${PRE_REBUILD_POLICY}" | grep -qi "npm\|registry.npmjs.org"; then
+  pass "npm preset active in gateway policy"
+else
+  fail "npm preset not found in live gateway policy before rebuild"
+fi
+if echo "${PRE_REBUILD_POLICY}" | grep -qi "pypi\|pypi.org"; then
+  pass "pypi preset active in gateway policy"
+else
+  fail "pypi preset not found in live gateway policy before rebuild"
+fi
+
+# Verify presets in registry
+PRE_REBUILD_PRESETS=$(python3 -c "
+import json
+with open('${REGISTRY_FILE}') as f:
+    data = json.load(f)
+sb = data.get('sandboxes', {}).get('${SANDBOX_NAME}', {})
+print(','.join(sb.get('policies', [])))
+" 2>/dev/null || echo "error")
+diag "Pre-rebuild registry policies: ${PRE_REBUILD_PRESETS}"
+
+pass "Policy presets applied and verified"
 
 # Diagnostic dump before rebuild
 diag "Pre-rebuild state:"
@@ -262,6 +396,44 @@ else
   fail "Registry agentVersion not updated: got '${REGISTRY_VERSION}', expected != '${OLD_OPENCLAW_VERSION}'"
 fi
 
+# Gateway token rotated and runtime env matches (#4517)
+POST_REBUILD_GATEWAY_TOKEN="$(read_sandbox_gateway_token 2>/dev/null || true)"
+if [ -n "${POST_REBUILD_GATEWAY_TOKEN}" ]; then
+  pass "Gateway auth token present after rebuild"
+else
+  fail "Gateway auth token missing after rebuild — issue #4517"
+fi
+if [ "${POST_REBUILD_GATEWAY_TOKEN}" != "${PRE_REBUILD_GATEWAY_TOKEN}" ]; then
+  pass "Gateway auth token rotated after rebuild"
+else
+  fail "Gateway auth token did not rotate after rebuild — issue #4517"
+fi
+RUNTIME_GATEWAY_TOKEN="$(read_sandbox_runtime_gateway_token 2>/dev/null || true)"
+if [ "${RUNTIME_GATEWAY_TOKEN}" = "${POST_REBUILD_GATEWAY_TOKEN}" ]; then
+  pass "Runtime proxy env exports the rotated gateway token"
+elif [ "${RUNTIME_GATEWAY_TOKEN}" = "${PRE_REBUILD_GATEWAY_TOKEN}" ]; then
+  fail "Runtime proxy env still exports the old gateway token — issue #4517"
+else
+  fail "Runtime proxy env gateway token does not match openclaw.json — issue #4517"
+fi
+POST_REBUILD_CONFIG_HASH="$(read_sandbox_config_hash 2>/dev/null || true)"
+if [ -n "${POST_REBUILD_CONFIG_HASH}" ] && echo "${POST_REBUILD_CONFIG_HASH}" | grep -q "openclaw.json"; then
+  pass "Post-rebuild config hash references openclaw.json"
+else
+  fail "Post-rebuild config hash missing openclaw.json — issue #4517"
+fi
+if [ "${POST_REBUILD_CONFIG_HASH}" != "${PRE_REBUILD_CONFIG_HASH}" ]; then
+  pass "Config hash changed after gateway token rotation"
+else
+  fail "Config hash did not change after gateway token rotation — issue #4517"
+fi
+if openshell sandbox exec --name "${SANDBOX_NAME}" -- \
+  sh -c "cd /sandbox/.openclaw && sha256sum -c .config-hash --status" 2>/dev/null; then
+  pass "Config hash validates after gateway token rotation"
+else
+  fail "Config hash does not validate after gateway token rotation — issue #4517"
+fi
+
 # Inference works after rebuild (proves credential chain is intact)
 info "Verifying inference after rebuild..."
 INFERENCE_RESPONSE=$(openshell sandbox exec --name "${SANDBOX_NAME}" -- \
@@ -279,19 +451,90 @@ fi
 # No credentials in backup
 BACKUP_DIR="$HOME/.nemoclaw/rebuild-backups/${SANDBOX_NAME}"
 if [ -d "$BACKUP_DIR" ]; then
-  CRED_LEAKS=$(find "$BACKUP_DIR" \( -name "*.json" -o -name "*.env" -o -name ".env" \) -exec grep -l "nvapi-\|sk-\|Bearer " {} \; 2>/dev/null || true)
+  # Dependency lockfiles can contain public package metadata matching coarse
+  # token patterns; the product snapshot filter excludes them too.
+  CRED_LEAKS=$(find "$BACKUP_DIR" \
+    \( -name "package-lock.json" -o -name "npm-shrinkwrap.json" -o -name "yarn.lock" -o -name "pnpm-lock.yaml" -o -name "pnpm-lock.yml" \) -prune -o \
+    \( -name "*.json" -o -name "*.env" -o -name ".env" \) -type f \
+    -exec grep -l "nvapi-\|sk-\|Bearer " {} \; 2>/dev/null || true)
   if [ -z "$CRED_LEAKS" ]; then
     pass "No credentials in backup"
   else
     fail "Credentials found: $CRED_LEAKS"
   fi
+  GATEWAY_TOKEN_LEAKS=$(find "$BACKUP_DIR" -type f \
+    -exec grep -F -l "${PRE_REBUILD_GATEWAY_TOKEN}" {} \; 2>/dev/null || true)
+  if [ -z "${GATEWAY_TOKEN_LEAKS}" ]; then
+    pass "Old gateway token absent from backup"
+  else
+    fail "Old gateway token found in backup: ${GATEWAY_TOKEN_LEAKS}"
+  fi
 else
   fail "Backup directory missing: $BACKUP_DIR"
 fi
 
+# ── Phase 7b: Verify policy presets survived rebuild (#1952) ────────
+info "Verifying policy presets survived rebuild..."
+
+# Check registry still has the presets
+POST_REBUILD_PRESETS=$(python3 -c "
+import json
+with open('${REGISTRY_FILE}') as f:
+    data = json.load(f)
+sb = data.get('sandboxes', {}).get('${SANDBOX_NAME}', {})
+print(','.join(sb.get('policies', [])))
+" 2>/dev/null || echo "error")
+diag "Post-rebuild registry policies: ${POST_REBUILD_PRESETS}"
+
+if echo "${POST_REBUILD_PRESETS}" | grep -q "npm"; then
+  pass "npm preset survived rebuild (in registry)"
+else
+  fail "npm preset LOST after rebuild — issue #1952"
+fi
+if echo "${POST_REBUILD_PRESETS}" | grep -q "pypi"; then
+  pass "pypi preset survived rebuild (in registry)"
+else
+  fail "pypi preset LOST after rebuild — issue #1952"
+fi
+
+# Check the live gateway policy still has the preset endpoints
+POST_REBUILD_POLICY=$(openshell policy get --full "${SANDBOX_NAME}" 2>&1 || true)
+if echo "${POST_REBUILD_POLICY}" | grep -qi "npm\|registry.npmjs.org"; then
+  pass "npm preset active in gateway policy after rebuild"
+else
+  fail "npm preset not in live gateway policy after rebuild — issue #1952"
+fi
+if echo "${POST_REBUILD_POLICY}" | grep -qi "pypi\|pypi.org"; then
+  pass "pypi preset active in gateway policy after rebuild"
+else
+  fail "pypi preset not in live gateway policy after rebuild — issue #1952"
+fi
+
+# Check backup manifest recorded the presets
+if [ -d "$BACKUP_DIR" ]; then
+  MANIFEST_PRESETS=$(find "$BACKUP_DIR" -mindepth 1 -maxdepth 1 -type d 2>/dev/null \
+    | sort -r | head -1 \
+    | xargs -I{} python3 -c "
+import json, sys
+try:
+    with open('{}/rebuild-manifest.json') as f:
+        m = json.load(f)
+    presets = m.get('policyPresets', [])
+    print(','.join(presets) if presets else 'NONE')
+except Exception as e:
+    print('ERROR: ' + str(e))
+" 2>/dev/null || echo "error")
+  if echo "${MANIFEST_PRESETS}" | grep -q "npm" \
+    && echo "${MANIFEST_PRESETS}" | grep -q "pypi"; then
+    pass "Backup manifest contains policyPresets: ${MANIFEST_PRESETS}"
+  else
+    fail "Backup manifest missing expected policyPresets (npm,pypi): got '${MANIFEST_PRESETS}' — issue #1952"
+  fi
+fi
+
 # ── Cleanup ─────────────────────────────────────────────────────────
 info "Cleaning up..."
-nemoclaw "${SANDBOX_NAME}" destroy --yes 2>/dev/null || true
+[[ "${NEMOCLAW_E2E_KEEP_SANDBOX:-}" = "1" ]] || nemoclaw "${SANDBOX_NAME}" destroy --yes 2>/dev/null || true
 docker rmi "${OLD_BASE_TAG}" 2>/dev/null || true
 
 echo ""

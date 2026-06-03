@@ -1,4 +1,3 @@
-// @ts-nocheck
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
@@ -8,11 +7,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+const REPO_ROOT = path.dirname(import.meta.dirname);
 const CHECK_DOCS = path.join(import.meta.dirname, "e2e", "e2e-cloud-experimental", "check-docs.sh");
 
-function runCheckDocs(filePath) {
+function runCheckDocs(filePath: string, env: Record<string, string> = {}) {
   return spawnSync("bash", [CHECK_DOCS, "--only-links", "--local-only", filePath], {
     encoding: "utf-8",
+    env: { ...process.env, ...env },
   });
 }
 
@@ -55,6 +56,75 @@ describe("check-docs link validation", () => {
     const result = runCheckDocs(mdPath);
 
     expect(result.status).toBe(0);
+  });
+
+  it("resolves Fern user-guide variant routes in Markdown and MDX hrefs", () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-check-docs-fern-"));
+    const mdPath = path.join(tempDir, "guide.mdx");
+    fs.writeFileSync(
+      mdPath,
+      [
+        "# Guide",
+        "",
+        "[OpenClaw overview](/user-guide/openclaw/about/overview)",
+        "[OpenClaw home](/openclaw)",
+        "[OpenClaw hardening](/user-guide/openclaw/manage-sandboxes/sandbox-hardening)",
+        '<Card title="Hermes overview" href="/user-guide/hermes/about/overview">',
+        '<Card title="Hermes home" href="/user-guide/hermes">',
+        "",
+      ].join("\n"),
+    );
+
+    const result = runCheckDocs(mdPath);
+
+    expect(result.status).toBe(0);
+  });
+
+  it("resolves Fern extensionless and route-relative links from docs pages", () => {
+    const routeRelativePage = path.join(REPO_ROOT, "docs", "get-started", "windows-preparation.mdx");
+    const slugAliasPage = path.join(REPO_ROOT, "docs", "about", "how-it-works.mdx");
+
+    const routeRelativeResult = runCheckDocs(routeRelativePage);
+    const slugAliasResult = runCheckDocs(slugAliasPage);
+
+    expect(`${routeRelativeResult.stdout}${routeRelativeResult.stderr}`).not.toContain("../quickstart");
+    expect(routeRelativeResult.status).toBe(0);
+    expect(`${slugAliasResult.stdout}${slugAliasResult.stderr}`).not.toContain(
+      "../manage-sandboxes/sandbox-hardening",
+    );
+    expect(slugAliasResult.status).toBe(0);
+  });
+
+  it("rejects broken Fern site routes", () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-check-docs-bad-fern-"));
+    const mdPath = path.join(tempDir, "guide.mdx");
+    fs.writeFileSync(
+      mdPath,
+      ["# Guide", "", "[Missing](/user-guide/openclaw/no-such-section/no-such-page)", ""].join(
+        "\n",
+      ),
+    );
+
+    const result = runCheckDocs(mdPath);
+
+    expect(result.status).toBe(1);
+    expect(`${result.stdout}${result.stderr}`).toContain(
+      `broken site route in ${mdPath}:3 -> /user-guide/openclaw/no-such-section/no-such-page`,
+    );
+  });
+
+  it("fails loudly when the Fern route index cannot be built", () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-check-docs-bad-nav-"));
+    const mdPath = path.join(tempDir, "guide.mdx");
+    const navPath = path.join(tempDir, "index.yml");
+    fs.writeFileSync(navPath, "navigation: []\n");
+    fs.writeFileSync(mdPath, ["# Guide", "", "[Overview](/user-guide/openclaw/about/overview)", ""].join("\n"));
+
+    const result = runCheckDocs(mdPath, { CHECK_DOCS_FERN_NAV_YML: navPath });
+
+    expect(result.status).toBe(1);
+    expect(`${result.stdout}${result.stderr}`).toContain("failed to parse Fern navigation");
+    expect(`${result.stdout}${result.stderr}`).toContain("no Fern routes found");
   });
 
   it("ignores broken links inside tilde-fenced code blocks", () => {
@@ -141,18 +211,22 @@ describe("check-docs link validation", () => {
     );
   });
 
-  it("fails on malformed HTML comments", () => {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-check-docs-badcomment-"));
-    const mdPath = path.join(tempDir, "guide.md");
-    fs.writeFileSync(
-      mdPath,
-      ["# Guide", "<!-- missing close", "[ignored](./inside-comment.md)", ""].join("\n"),
-    );
+  it(
+    "fails on malformed HTML comments",
+    { timeout: 15000 },
+    () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-check-docs-badcomment-"));
+      const mdPath = path.join(tempDir, "guide.md");
+      fs.writeFileSync(
+        mdPath,
+        ["# Guide", "<!-- missing close", "[ignored](./inside-comment.md)", ""].join("\n"),
+      );
 
-    const result = runCheckDocs(mdPath);
+      const result = runCheckDocs(mdPath);
 
-    expect(result.status).toBe(1);
-    expect(`${result.stdout}${result.stderr}`).toContain(`malformed HTML comment in ${mdPath}`);
-    expect(`${result.stdout}${result.stderr}`).not.toContain("inside-comment.md");
-  });
+      expect(result.status).toBe(1);
+      expect(`${result.stdout}${result.stderr}`).toContain(`malformed HTML comment in ${mdPath}`);
+      expect(`${result.stdout}${result.stderr}`).not.toContain("inside-comment.md");
+    },
+  );
 });
