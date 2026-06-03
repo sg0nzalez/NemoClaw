@@ -374,6 +374,19 @@ describe("base sandbox policy", () => {
     ]);
   });
 
+  it("regression #4104: OpenClaw plugin registry policies allow apt-installed Node", () => {
+    const np = policy.network_policies ?? {};
+
+    for (const policyName of ["clawhub", "openclaw_api"]) {
+      const binaries = (np[policyName]?.binaries ?? []).map((b) => b.path).sort();
+      expect(binaries).toEqual([
+        "/usr/bin/node",
+        "/usr/local/bin/node",
+        "/usr/local/bin/openclaw",
+      ]);
+    }
+  });
+
   it("does not reference the absent Claude CLI binary", () => {
     const serialized = JSON.stringify(policy.network_policies ?? {});
     expect(serialized).not.toContain("/usr/local/bin/claude");
