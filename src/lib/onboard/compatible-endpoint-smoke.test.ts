@@ -74,7 +74,7 @@ ${bodyForCall}
     });
   }
 
-  it("runs only for OpenClaw compatible-endpoint sandboxes with messaging", () => {
+  it("runs for OpenClaw and Hermes compatible-endpoint sandboxes with messaging", () => {
     expect(shouldRunCompatibleEndpointSandboxSmoke("compatible-endpoint", ["telegram"])).toBe(
       true,
     );
@@ -83,9 +83,16 @@ ${bodyForCall}
         name: "openclaw",
       }),
     ).toBe(true);
+    // #4711: Hermes must also be validated through the sandbox so a broken
+    // inference.local route is caught instead of a false "ready".
+    expect(
+      shouldRunCompatibleEndpointSandboxSmoke("compatible-endpoint", ["slack"], {
+        name: "hermes",
+      }),
+    ).toBe(true);
     expect(
       shouldRunCompatibleEndpointSandboxSmoke("compatible-endpoint", ["telegram"], {
-        name: "hermes",
+        name: "some-other-agent",
       }),
     ).toBe(false);
     expect(shouldRunCompatibleEndpointSandboxSmoke("nvidia-prod", ["telegram"])).toBe(false);
@@ -109,6 +116,25 @@ ${bodyForCall}
     expect(script).toContain("INITIAL_MAX_TOKENS=256");
     expect(script).toContain("RETRY_MAX_TOKENS=1024");
     expect(script).toContain("MODEL='provider/model'\\'''");
+  });
+
+  it("omits the OpenClaw config assertion for non-OpenClaw agents but keeps the inference probe", () => {
+    const hermesScript = buildCompatibleEndpointSandboxSmokeScript("anthropic/model", {
+      agentName: "hermes",
+    });
+
+    // #4711: Hermes bakes its config at build time in a different format, so the
+    // openclaw.json assertion must not run; only the agent-agnostic
+    // inference.local completion probe applies.
+    expect(hermesScript).not.toContain("OPENCLAW_CONFIG_OK");
+    expect(hermesScript).not.toContain("openclaw.json");
+    expect(hermesScript).toContain("INFERENCE_SMOKE_OK");
+    expect(hermesScript).toContain("https://inference.local/v1/chat/completions");
+
+    // Explicit and default OpenClaw still include the config assertion.
+    expect(
+      buildCompatibleEndpointSandboxSmokeScript("anthropic/model", { agentName: "openclaw" }),
+    ).toContain("OPENCLAW_CONFIG_OK");
   });
 
   it("retries a reasoning-only length response before failing the sandbox smoke", () => {

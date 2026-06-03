@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { StdioOptions } from "node:child_process";
 import { shellQuote } from "../core/shell-quote";
 import { compactText } from "../core/url-utils";
 import { INFERENCE_ROUTE_URL, MANAGED_PROVIDER_ID } from "../inference/config";
-import type { StdioOptions } from "node:child_process";
 
 type CompatibleEndpointSmokeAgent = {
   name?: string | null;
@@ -15,6 +15,7 @@ type CompatibleEndpointSandboxSmokeScriptOptions = {
   inferenceUrl?: string;
   initialMaxTokens?: number;
   retryMaxTokens?: number;
+  agentName?: string | null;
 };
 
 type CompatibleEndpointSmokeRun = (
@@ -39,7 +40,15 @@ function positiveInt(value: number | undefined, fallback: number): number {
 
 /**
  * Returns whether onboarding should validate the compatible endpoint through
- * the OpenClaw sandbox instead of only checking host-side configuration.
+ * the sandbox instead of only checking host-side configuration.
+ *
+ * Covers both OpenClaw and Hermes (#4711): the host-side smoke probes the
+ * upstream endpoint directly, so it cannot catch a broken in-sandbox
+ * `inference.local` route. Without the sandbox-side check the non-interactive
+ * Hermes custom-provider onboard reported "ready" even when the agent's first
+ * inference call would fail. The OpenClaw-specific config assertion is skipped
+ * for other agents (see {@link buildCompatibleEndpointSandboxSmokeScript}); the
+ * `inference.local` completion probe is agent-agnostic.
  */
 export function shouldRunCompatibleEndpointSandboxSmoke(
   provider: string | null | undefined,
@@ -48,7 +57,7 @@ export function shouldRunCompatibleEndpointSandboxSmoke(
 ): boolean {
   const agentName = agent?.name || "openclaw";
   return (
-    agentName === "openclaw" &&
+    (agentName === "openclaw" || agentName === "hermes") &&
     provider === "compatible-endpoint" &&
     Array.isArray(messagingChannels) &&
     messagingChannels.length > 0
@@ -106,7 +115,7 @@ export function verifyCompatibleEndpointSandboxSmoke(options: {
       `  Compatible endpoint provider '${options.provider}' is missing from the OpenShell gateway.`,
     );
     console.error(
-      "  The sandbox would start Telegram, but agent turns would fail before reaching the model.",
+      "  The sandbox would start its messaging bridge, but agent turns would fail before reaching the model.",
     );
     if (providerDetails) {
       console.error(`  ${compactText(options.redact(providerDetails)).slice(0, 800)}`);
@@ -136,7 +145,7 @@ export function verifyCompatibleEndpointSandboxSmoke(options: {
     );
   }
 
-  const script = buildCompatibleEndpointSandboxSmokeCommand(options.model);
+  const script = buildCompatibleEndpointSandboxSmokeCommand(options.model, options.agent?.name);
   const smokeResult = options.runOpenshell(
     ["sandbox", "exec", "-n", options.sandboxName, "--", "sh", "-lc", script],
     {
@@ -155,7 +164,7 @@ export function verifyCompatibleEndpointSandboxSmoke(options: {
 
   if (smokeResult.status !== 0 || !/INFERENCE_SMOKE_OK/.test(smokeOutput)) {
     console.error("  Compatible endpoint sandbox smoke check failed.");
-    console.error("  Telegram provider startup is not the root cause; inference.local failed.");
+    console.error("  Messaging bridge startup is not the root cause; inference.local failed.");
     if (smokeOutput) console.error(`  ${compactText(options.redact(smokeOutput)).slice(0, 1200)}`);
     process.exit(smokeResult.status || 1);
   }
@@ -176,15 +185,15 @@ export function buildCompatibleEndpointSandboxSmokeScript(
   const inferenceUrl = options.inferenceUrl || `${INFERENCE_ROUTE_URL}/chat/completions`;
   const initialMaxTokens = positiveInt(options.initialMaxTokens, 256);
   const retryMaxTokens = positiveInt(options.retryMaxTokens, 1024);
-
-  return `
-set -eu
-MODEL=${shellQuote(model)}
+  // The config assertion validates OpenClaw's openclaw.json managed-provider
+  // wiring. Other agents (e.g. Hermes, #4711) bake their inference config at
+  // image-build time in a different format and path, so only the agent-agnostic
+  // inference.local completion probe applies to them. Default to OpenClaw to
+  // preserve behavior for existing callers.
+  const includeOpenClawConfigCheck = (options.agentName ?? "openclaw") === "openclaw";
+  const openClawConfigCheck = includeOpenClawConfigCheck
+    ? `
 CONFIG=${shellQuote(configPath)}
-INFERENCE_URL=${shellQuote(inferenceUrl)}
-INITIAL_MAX_TOKENS=${initialMaxTokens}
-RETRY_MAX_TOKENS=${retryMaxTokens}
-
 python3 - "$CONFIG" "$MODEL" <<'PYCFG'
 import json
 import sys
@@ -223,7 +232,16 @@ if primary != expected_primary:
 
 print("OPENCLAW_CONFIG_OK")
 PYCFG
+`
+    : "";
 
+  return `
+set -eu
+MODEL=${shellQuote(model)}
+INFERENCE_URL=${shellQuote(inferenceUrl)}
+INITIAL_MAX_TOKENS=${initialMaxTokens}
+RETRY_MAX_TOKENS=${retryMaxTokens}
+${openClawConfigCheck}
 payload_file="$(mktemp)"
 response_file="$(mktemp)"
 error_file="$(mktemp)"
@@ -335,8 +353,11 @@ check_response retry "$RETRY_MAX_TOKENS" 0
  * Wraps the sandbox smoke script as a one-line command suitable for execution
  * through the existing OpenShell command path.
  */
-export function buildCompatibleEndpointSandboxSmokeCommand(model: string): string {
-  const script = buildCompatibleEndpointSandboxSmokeScript(model);
+export function buildCompatibleEndpointSandboxSmokeCommand(
+  model: string,
+  agentName?: string | null,
+): string {
+  const script = buildCompatibleEndpointSandboxSmokeScript(model, { agentName });
   const encoded = Buffer.from(script, "utf8").toString("base64");
   return [
     "set -eu",
