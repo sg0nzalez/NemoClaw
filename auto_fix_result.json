@@ -1,0 +1,12 @@
+{
+  "fix_description": "Fixed NemoClaw issue #4764: `hermes whatsapp` QR pairing failed with EACCES because the Hermes WhatsApp adapter lazily ran `npm install` into /opt/hermes/scripts/whatsapp-bridge/node_modules on first use, but /opt/hermes is root-owned and read-only for the sandbox user at runtime. Root cause: the Hermes base image (agents/hermes/Dockerfile.base) pre-installs Node deps for the Hermes root project and the ui-tui/web sub-projects but never for the scripts/whatsapp-bridge Node project, even though WhatsApp is a declared NemoClaw-supported messaging integration. Fix: bake the WhatsApp bridge's node_modules into the base image at build time (as root), mirroring the existing ui-tui/web install pattern — `npm ci` when a lockfile ships, `npm install` as a fallback, and a graceful skip when the project is absent. With deps baked in, the runtime `hermes whatsapp` pairing needs no writes under /opt/hermes and reaches the QR screen.",
+  "verification_steps": [
+    "Added 3 focused tests to test/hermes-share-mount-deps.test.ts that extract the Hermes install layer from Dockerfile.base and assert: (1) `npm ci --prefix scripts/whatsapp-bridge ...` runs when a lockfile ships, (2) `npm install --prefix scripts/whatsapp-bridge ...` runs as fallback, (3) the bridge install is skipped when the project is absent.",
+    "Ran `npx vitest run test/hermes-share-mount-deps.test.ts` — 5 tests pass (2 pre-existing + 3 new).",
+    "Confirmed the existing ui-tui/web parity test still passes (no regression to the install-layer regex/behavior)."
+  ],
+  "commands_run": [
+    "npx vitest run test/hermes-share-mount-deps.test.ts",
+    "npx biome check test/hermes-share-mount-deps.test.ts"
+  ]
+}

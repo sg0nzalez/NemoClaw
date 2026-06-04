@@ -163,6 +163,14 @@ RUN printf '%s\n' \
 # by the agent workflow when they are enabled rather than shipped in the
 # base image by default.
 # Root Node dependencies provide Hermes browser tooling such as agent-browser.
+# The WhatsApp adapter ships a separate Node project under
+# scripts/whatsapp-bridge whose dependencies Hermes otherwise installs lazily
+# on the first `hermes whatsapp` run. That lazy `npm install` targets
+# /opt/hermes/scripts/whatsapp-bridge/node_modules, which is root-owned and
+# read-only for the sandbox user at runtime, so it fails with EACCES before the
+# QR pairing screen is reached (#4764). Bake the bridge's node_modules into the
+# image here, alongside the ui-tui/web installs, so runtime pairing needs no
+# writes under /opt/hermes.
 RUN pip3 install --no-cache-dir --break-system-packages "uv==${UV_VERSION}"
 RUN mkdir -p /opt/hermes \
     && curl -fsSL "https://github.com/NousResearch/hermes-agent/archive/refs/tags/${HERMES_VERSION}.tar.gz" -o /tmp/hermes.tar.gz \
@@ -185,6 +193,15 @@ RUN set -eu; \
             npm run build --prefix "${ui_dir}"; \
         else \
             echo "Skipping optional Hermes UI package ${ui_dir}: package-lock.json not found"; \
+        fi; \
+    done \
+    && for bridge_dir in scripts/whatsapp-bridge; do \
+        if [ -f "${bridge_dir}/package-lock.json" ]; then \
+            npm ci --prefix "${bridge_dir}" --prefer-offline --no-audit --no-fund; \
+        elif [ -f "${bridge_dir}/package.json" ]; then \
+            npm install --prefix "${bridge_dir}" --prefer-offline --no-audit --no-fund; \
+        else \
+            echo "Skipping optional Hermes bridge ${bridge_dir}: no package manifest found"; \
         fi; \
     done \
     && rm -rf /tmp/camoufox-* \
