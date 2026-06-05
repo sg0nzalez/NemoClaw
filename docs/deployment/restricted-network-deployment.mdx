@@ -1,0 +1,200 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+title: "Deploy NemoClaw in Restricted or Air-Gapped Networks"
+sidebar-title: "Restricted and Air-Gapped Deployment"
+description: "Stage NemoClaw artifacts for restricted production networks and install from a portable offline bundle."
+description-agent: "Explains how to deploy NemoClaw in restricted or fully air-gapped production environments, including staging artifacts through a proxy or internal registry and building a portable USB install bundle. Use when deploying NemoClaw without direct internet access, configuring proxy, registry, or certificate requirements, or preparing an offline install bundle on removable media."
+keywords: ["nemoclaw air-gapped deployment", "nemoclaw offline install bundle", "nemoclaw restricted network proxy registry"]
+content:
+  type: "how_to"
+skill:
+  priority: 20
+---
+Deploy NemoClaw in a restricted production network where the target host has no direct internet access.
+This page describes two supported paths: routing the install through a corporate proxy or internal mirror, and preparing a portable offline bundle on a connected machine that you copy to an isolated target.
+
+<Warning>
+A restricted-network deployment does not weaken the sandbox or network policy.
+The sandbox still enforces egress through the OpenShell gateway proxy.
+Plan for the inference provider and any messaging channels to reach their endpoints, or run them fully on-host.
+</Warning>
+
+## Production Prerequisites
+
+The target host must meet the standard [prerequisites](../get-started/prerequisites) plus the following for restricted networks:
+
+- Docker installed and running, with the NVIDIA Container Toolkit when a GPU is present.
+- Node.js 22.16 or newer already installed, because the offline path cannot download a runtime.
+- The OpenShell CLI installed and on `PATH`.
+- A reachable inference backend. Either a local runtime (Ollama, vLLM, TensorRT-LLM, NIM) with model weights already staged on the host, or an internal OpenAI-compatible endpoint your policy allows.
+- Any internal CA certificate the host needs to trust your proxy or registry.
+
+## Required Offline Artifacts
+
+A standard install reaches the public internet for the artifacts below.
+Stage each one before you cut over to a restricted network.
+
+| Artifact | Default source | Restricted-network option |
+| --- | --- | --- |
+| NemoClaw source | `https://github.com/NVIDIA/NemoClaw.git` (shallow clone of the install ref) | Clone or mirror the repository at a pinned ref on a connected machine, then copy it to the target. |
+| Node.js runtime | `nvm` installer over the public network | Install Node.js 22.16+ from your internal package mirror before onboarding. |
+| Docker engine | `https://get.docker.com` convenience script | Install Docker from your distribution's internal package mirror. |
+| NVIDIA Container Toolkit | Distribution package repositories | Mirror the toolkit packages in your internal repository. |
+| npm dependencies | Public npm registry (`npm ci`) | Point npm at an internal registry, or copy a prebuilt `node_modules` and `dist` tree in the bundle. |
+| OpenShell CLI | OpenShell release channel | Stage the OpenShell CLI binary in the bundle or your internal mirror. |
+| Sandbox base image | `ghcr.io/nvidia/nemoclaw/sandbox-base` | Pre-load the image into the Docker daemon with `docker load` (see [Pre-Stage Container Images](#pre-stage-container-images)). |
+| OpenShell gateway image | `ghcr.io/nvidia/openshell/cluster:<version>` | Pre-load the gateway image into the Docker daemon with `docker load`. |
+| Model weights | Provider-specific (Hugging Face, NGC, Ollama library) | Pre-pull weights with the provider's own tooling; NemoClaw does not download model weights during install or onboard. |
+| Network policy presets | Bundled in the NemoClaw source tree | No action needed; presets ship with the repository. |
+
+## Configure Proxy, Registry, and Certificates
+
+When the target reaches the internet through a corporate proxy, configure it before onboarding.
+
+### Proxy
+
+NemoClaw routes sandbox traffic through a gateway proxy that defaults to `10.200.0.1:3128`.
+To send NemoClaw's own host traffic through your corporate proxy during install and onboarding, export the standard proxy variables:
+
+```bash
+export HTTP_PROXY=http://proxy.example.com:8080
+export HTTPS_PROXY=http://proxy.example.com:8080
+export NO_PROXY=localhost,127.0.0.1,host.docker.internal,::1,0.0.0.0
+```
+
+NemoClaw honors `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` (and their lowercase forms) and automatically adds loopback hosts to `NO_PROXY` so sandbox-local traffic does not loop through the proxy.
+
+To change the gateway proxy that the sandbox uses, set `NEMOCLAW_PROXY_HOST` and `NEMOCLAW_PROXY_PORT` before onboarding:
+
+```bash
+export NEMOCLAW_PROXY_HOST=proxy.example.com
+export NEMOCLAW_PROXY_PORT=8080
+nemoclaw onboard
+```
+
+NemoClaw bakes these values into the sandbox image at build time and forwards them into the runtime container, so changing them later requires re-running `nemoclaw onboard`.
+The host accepts only alphanumeric characters, dots, hyphens, and colons, and the port must be numeric (0-65535).
+
+### Certificates
+
+When your proxy or internal registry presents a private CA, point the standard certificate variables at the CA bundle so Node.js, curl, Git, and Python trust it:
+
+```bash
+export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/internal-ca.pem
+export SSL_CERT_FILE=/etc/ssl/certs/internal-ca.pem
+```
+
+NemoClaw forwards `NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`, `SSL_CERT_DIR`, `CURL_CA_BUNDLE`, `REQUESTS_CA_BUNDLE`, `GIT_SSL_CAINFO`, and `GIT_SSL_CAPATH` into the processes it spawns.
+
+### Internal Registry
+
+NemoClaw does not expose a registry-host override.
+To pull images from an internal registry, configure a registry mirror in the Docker daemon (`/etc/docker/daemon.json`) or re-tag and pre-load images as described below.
+If the public image registry is unreachable, NemoClaw falls back to the unpinned `:latest` tag and reports that the digest could not be resolved instead of failing.
+
+## Pre-Stage Container Images
+
+On a connected machine, pull and export the images NemoClaw needs, then load them on the target.
+
+On the connected machine:
+
+```bash
+docker pull ghcr.io/nvidia/nemoclaw/sandbox-base:latest
+docker save ghcr.io/nvidia/nemoclaw/sandbox-base:latest -o sandbox-base.tar
+```
+
+On the isolated target:
+
+```bash
+docker load -i sandbox-base.tar
+export NEMOCLAW_SANDBOX_BASE_IMAGE_REF=ghcr.io/nvidia/nemoclaw/sandbox-base:latest
+nemoclaw onboard
+```
+
+When `NEMOCLAW_SANDBOX_BASE_IMAGE_REF` is set, onboarding inspects the local Docker daemon first and only attempts a pull if the image is absent, so a pre-loaded image is used without network access.
+For Hermes, use `NEMOCLAW_HERMES_SANDBOX_BASE_IMAGE_REF` instead.
+Stage the OpenShell gateway image (`ghcr.io/nvidia/openshell/cluster:<version>`) the same way, matching `<version>` to your installed OpenShell CLI.
+
+## Build a Portable Offline Bundle
+
+Use this path when the target machine has no network at all and you move artifacts on removable media such as a USB drive.
+
+### 1. Stage Artifacts on a Connected Machine
+
+Pin the install ref so the bundle is reproducible, then assemble the artifacts:
+
+```bash
+export NEMOCLAW_INSTALL_TAG=lkg   # or NEMOCLAW_INSTALL_REF=<commit-sha>
+git clone --depth 1 --branch "$NEMOCLAW_INSTALL_TAG" https://github.com/NVIDIA/NemoClaw.git
+docker pull ghcr.io/nvidia/nemoclaw/sandbox-base:latest
+docker save ghcr.io/nvidia/nemoclaw/sandbox-base:latest -o sandbox-base.tar
+```
+
+Add the remaining artifacts from the [table above](#required-offline-artifacts) to the bundle directory: the Node.js installer for the target's platform, the OpenShell CLI binary, a prebuilt `node_modules`/`dist` tree or an internal npm cache, your CA bundle, and any provider model weights.
+
+### 2. Copy the Bundle to Removable Media
+
+Copy the bundle directory to the USB drive, then move it to the isolated target.
+
+```bash
+cp -r ./nemoclaw-bundle /media/usb/nemoclaw-bundle
+```
+
+### 3. Install and Onboard on the Isolated Target
+
+Copy the bundle off the removable media, load the images, and run onboarding non-interactively against your staged artifacts:
+
+```bash
+docker load -i /path/to/nemoclaw-bundle/sandbox-base.tar
+export NEMOCLAW_SANDBOX_BASE_IMAGE_REF=ghcr.io/nvidia/nemoclaw/sandbox-base:latest
+export NEMOCLAW_NON_INTERACTIVE=1
+export NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE=1
+cd /path/to/nemoclaw-bundle/NemoClaw
+nemoclaw onboard
+```
+
+If a messaging channel or provider runs reachability probes that your restricted network blocks, skip the live checks:
+
+```bash
+export NEMOCLAW_SKIP_SLACK_AUTH_VALIDATION=1
+export NEMOCLAW_SKIP_TELEGRAM_REACHABILITY=1
+```
+
+## Handle Secrets in Production
+
+Do not embed secrets in images or offline bundles.
+
+The OpenShell gateway is the system of record for provider credentials.
+NemoClaw holds credentials only in the current process environment during onboarding and passes them to `openshell provider create` or `openshell provider update`.
+Nothing is written to disk on the host, and credentials are not baked into the sandbox image.
+
+Provide secrets at onboarding time through the environment on the target machine, for example:
+
+```bash
+export NVIDIA_API_KEY=...
+export HF_TOKEN=...
+nemoclaw onboard
+```
+
+Source these values from your secrets manager on the target rather than committing them to the bundle.
+For the full credential model, see [Credential Storage](../security/credential-storage).
+
+## Known Unsupported Combinations
+
+- NemoClaw does not download model weights during install or onboard.
+  Pre-stage weights with the provider's own tooling, and expect gated Hugging Face models to require `HF_TOKEN` even when staged.
+- Not every provider or model works offline.
+  Hosted providers (for example NVIDIA-hosted, OpenAI, or Anthropic endpoints) require network egress that an air-gapped policy blocks; use a local runtime instead.
+- There is no end-to-end offline installer.
+  The install script clones the repository and can fetch Node.js, Docker, the NVIDIA Container Toolkit, and npm packages over the network, so a fully air-gapped target requires the staged artifacts above or internal mirrors.
+- There is no registry-host override env var.
+  Use a Docker daemon registry mirror or pre-loaded images.
+- SOCKS proxies are not supported; use an HTTP or HTTPS proxy.
+
+## Related Topics
+
+- [Deploy to Remote GPU Instances](deploy-to-remote-gpu) for proxy and readiness-budget details on remote hosts.
+- [Use Local Inference](../inference/use-local-inference) to run model serving on-host without external providers.
+- [Customize the Network Policy](../network-policy/customize-network-policy) to align egress rules with your restricted environment.
+- [Credential Storage](../security/credential-storage) for how NemoClaw handles secrets without baking them into images.

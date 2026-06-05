@@ -111,6 +111,9 @@ navigation:
               - page: "Deploy to Remote GPU Instances"
                 path: deployment/deploy-to-remote-gpu.mdx
                 slug: deploy-to-remote-gpu
+              - page: "Restricted and Air-Gapped Deployment"
+                path: deployment/restricted-network-deployment.mdx
+                slug: restricted-network-deployment
               - page: "Brev Web UI"
                 path: deployment/brev-web-ui.mdx
                 slug: brev-web-ui
