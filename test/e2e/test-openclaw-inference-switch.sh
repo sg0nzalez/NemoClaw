@@ -303,7 +303,7 @@ else:
 }
 
 check_openclaw_agent_turn() {
-  local ssh_config session_id raw rc reply
+  local ssh_config session_id raw stderr_file rc reply warnings
   ssh_config="$(mktemp)"
   if ! openshell sandbox ssh-config "$SANDBOX_NAME" >"$ssh_config" 2>/dev/null; then
     rm -f "$ssh_config"
@@ -312,6 +312,7 @@ check_openclaw_agent_turn() {
   fi
 
   session_id="e2e-inference-switch-openclaw-$(date +%s)-$$"
+  stderr_file="$(mktemp)"
   rc=0
   raw=$(run_with_timeout 120 ssh -F "$ssh_config" \
     -o StrictHostKeyChecking=no \
@@ -319,18 +320,20 @@ check_openclaw_agent_turn() {
     -o ConnectTimeout=10 \
     -o LogLevel=ERROR \
     "openshell-${SANDBOX_NAME}" \
-    "openclaw agent --agent main --json --session-id '${session_id}' -m 'What is 6 multiplied by 7? Reply with only the integer, no extra words.'" \
-    2>&1) || rc=$?
+    "openclaw agent --agent main --json --session-id '${session_id}' -m 'Reply with exactly one word: PONG'" \
+    2>"$stderr_file") || rc=$?
+  warnings="$(cat "$stderr_file" 2>/dev/null || true)"
   rm -f "$ssh_config"
+  rm -f "$stderr_file"
 
   reply=$(printf '%s' "$raw" | parse_openclaw_agent_text 2>/dev/null) || true
 
-  if [ "$rc" -eq 0 ] && grep -qE '(^|[^0-9])42([^0-9]|$)' <<<"$reply"; then
+  if [ "$rc" -eq 0 ] && grep -qi "PONG" <<<"$reply"; then
     pass "OpenClaw agent answered through the switched inference route"
   elif [ "$rc" -eq 124 ]; then
     skip "OpenClaw agent turn timed out after switch; route/config checks already passed"
   else
-    fail "OpenClaw agent turn failed after switch (exit ${rc}); reply='${reply:0:200}', raw='${raw:0:200}'"
+    fail "OpenClaw agent turn failed after switch (exit ${rc}); reply='${reply:0:200}', raw='${raw:0:200}', stderr='${warnings:0:200}'"
   fi
 }
 
@@ -354,8 +357,11 @@ SANDBOX_NAME="${NEMOCLAW_SANDBOX_NAME:-e2e-openclaw-inference-switch}"
 SWITCH_PROVIDER="${NEMOCLAW_SWITCH_PROVIDER:-nvidia-prod}"
 SWITCH_MODEL="${NEMOCLAW_SWITCH_MODEL:-z-ai/glm-5.1}"
 SWITCH_INFERENCE_API="${NEMOCLAW_SWITCH_INFERENCE_API:-openai-completions}"
+# shellcheck disable=SC2034  # consumed by anthropic-switch-provider.sh helpers
 SWITCH_ENDPOINT_URL="${NEMOCLAW_SWITCH_ENDPOINT_URL:-}"
+# shellcheck disable=SC2034  # consumed by anthropic-switch-provider.sh helpers
 SWITCH_MOCK_ANTHROPIC="${NEMOCLAW_SWITCH_MOCK_ANTHROPIC:-0}"
+# shellcheck disable=SC2034  # consumed by anthropic-switch-provider.sh helpers
 SWITCH_MOCK_PORT="${NEMOCLAW_SWITCH_MOCK_PORT:-18767}"
 INSTALL_LOG="/tmp/nemoclaw-e2e-openclaw-inference-switch-install.log"
 
