@@ -28,7 +28,9 @@ except Exception as e:
 
 start_mock_anthropic_switch_provider() {
   local port="${SWITCH_MOCK_PORT:-18766}"
-  SWITCH_ENDPOINT_URL="http://127.0.0.1:${port}"
+  local host="${SWITCH_MOCK_HOST:-host.openshell.internal}"
+  local health_url="http://127.0.0.1:${port}/health"
+  SWITCH_ENDPOINT_URL="${SWITCH_ENDPOINT_URL:-http://${host}:${port}}"
   export SWITCH_ENDPOINT_URL
 
   python3 - "$port" >"$ANTHROPIC_SWITCH_MOCK_LOG" 2>&1 <<'PY' &
@@ -80,13 +82,13 @@ class Handler(BaseHTTPRequestHandler):
             "usage": {"input_tokens": 1, "output_tokens": 1},
         })
 
-ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
+ThreadingHTTPServer(("0.0.0.0", port), Handler).serve_forever()
 PY
   ANTHROPIC_SWITCH_MOCK_PID=$!
 
   local attempt=1
   while [ "$attempt" -le 5 ]; do
-    if curl -sf --max-time 2 "${SWITCH_ENDPOINT_URL}/health" >/dev/null 2>&1; then
+    if curl -sf --max-time 2 "$health_url" >/dev/null 2>&1; then
       pass "Mock Anthropic Messages provider is listening on ${SWITCH_ENDPOINT_URL}"
       return 0
     fi
