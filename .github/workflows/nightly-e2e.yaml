@@ -1017,7 +1017,6 @@ jobs:
       artifact_path: "/tmp/nemoclaw-e2e-hermes-inference-switch-install.log"
       env_json: '{"NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE":"1","NEMOCLAW_AGENT":"hermes","NEMOCLAW_NON_INTERACTIVE":"1","NEMOCLAW_RECREATE_SANDBOX":"1","NEMOCLAW_SANDBOX_NAME":"e2e-hermes-anthropic-inference-switch","NEMOCLAW_SWITCH_INFERENCE_API":"anthropic-messages","NEMOCLAW_SWITCH_MOCK_ANTHROPIC":"1","NEMOCLAW_SWITCH_MODEL":"mock-anthropic-model","NEMOCLAW_SWITCH_PROVIDER":"compatible-anthropic-endpoint"}'
       nvidia_api_key: true
-      github_token: true
     secrets: *nightly-e2e-default-secrets
   hermes-discord-e2e:
     if: >-
@@ -1340,9 +1339,8 @@ jobs:
       script: test/e2e/test-openclaw-inference-switch.sh
       artifact_name: "openclaw-anthropic-inference-switch-install-log"
       artifact_path: "/tmp/nemoclaw-e2e-openclaw-inference-switch-install.log"
-      env_json: '{"NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE":"1","NEMOCLAW_NON_INTERACTIVE":"1","NEMOCLAW_RECREATE_SANDBOX":"1","NEMOCLAW_SANDBOX_NAME":"e2e-openclaw-anthropic-inference-switch","NEMOCLAW_SWITCH_INFERENCE_API":"anthropic-messages","NEMOCLAW_SWITCH_MOCK_ANTHROPIC":"1","NEMOCLAW_SWITCH_MODEL":"mock-anthropic-model","NEMOCLAW_SWITCH_PROVIDER":"compatible-anthropic-endpoint"}'
+      env_json: '{"NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE":"1","NEMOCLAW_AGENT":"openclaw","NEMOCLAW_NON_INTERACTIVE":"1","NEMOCLAW_RECREATE_SANDBOX":"1","NEMOCLAW_SANDBOX_NAME":"e2e-openclaw-anthropic-inference-switch","NEMOCLAW_SWITCH_INFERENCE_API":"anthropic-messages","NEMOCLAW_SWITCH_MOCK_ANTHROPIC":"1","NEMOCLAW_SWITCH_MODEL":"mock-anthropic-model","NEMOCLAW_SWITCH_PROVIDER":"compatible-anthropic-endpoint"}'
       nvidia_api_key: true
-      github_token: true
     secrets: *nightly-e2e-default-secrets
   network-policy-e2e:
     if: >-

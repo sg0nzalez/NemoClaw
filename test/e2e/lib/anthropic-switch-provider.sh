@@ -165,8 +165,6 @@ ensure_compatible_anthropic_switch_provider() {
   if [ "${SWITCH_MOCK_ANTHROPIC:-}" = "1" ]; then
     start_mock_anthropic_switch_provider || return 1
     export COMPATIBLE_ANTHROPIC_API_KEY="${COMPATIBLE_ANTHROPIC_API_KEY:-test-compatible-anthropic-key}"
-  elif [ -z "${COMPATIBLE_ANTHROPIC_API_KEY:-}" ] && [ -n "${NVIDIA_API_KEY:-}" ]; then
-    export COMPATIBLE_ANTHROPIC_API_KEY="$NVIDIA_API_KEY"
   fi
 
   if [ -z "${SWITCH_ENDPOINT_URL:-}" ]; then
@@ -179,15 +177,21 @@ ensure_compatible_anthropic_switch_provider() {
   fi
 
   if openshell provider get -g nemoclaw compatible-anthropic-endpoint >/dev/null 2>&1; then
-    openshell provider update -g nemoclaw compatible-anthropic-endpoint \
+    if ! openshell provider update -g nemoclaw compatible-anthropic-endpoint \
       --credential COMPATIBLE_ANTHROPIC_API_KEY \
-      --config "ANTHROPIC_BASE_URL=${SWITCH_ENDPOINT_URL}" >/dev/null
+      --config "ANTHROPIC_BASE_URL=${SWITCH_ENDPOINT_URL}" >/dev/null; then
+      fail "Failed to update OpenShell provider compatible-anthropic-endpoint"
+      return 1
+    fi
   else
-    openshell provider create -g nemoclaw \
+    if ! openshell provider create -g nemoclaw \
       --name compatible-anthropic-endpoint \
       --type anthropic \
       --credential COMPATIBLE_ANTHROPIC_API_KEY \
-      --config "ANTHROPIC_BASE_URL=${SWITCH_ENDPOINT_URL}" >/dev/null
+      --config "ANTHROPIC_BASE_URL=${SWITCH_ENDPOINT_URL}" >/dev/null; then
+      fail "Failed to create OpenShell provider compatible-anthropic-endpoint"
+      return 1
+    fi
   fi
   pass "OpenShell provider compatible-anthropic-endpoint is registered for ${SWITCH_ENDPOINT_URL}"
 }
