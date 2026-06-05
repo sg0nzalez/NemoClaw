@@ -64,6 +64,8 @@ function readOpenClawRouteApi(config: ConfigObject, provider: string): Inference
     // session preferredInferenceApi. In OpenClaw config, the active provider
     // family is the primary model ref. Provider blocks are merged and may
     // contain stale sibling entries, so read them only after the primary ref.
+    // Remove the provider-block fallback once all supported runtime switches
+    // persist route family in registry/session metadata and rebuild migration.
     return (
       readOpenClawPrimaryRouteApi(config) ||
       readProviderApi(config, "anthropic") ||
@@ -122,6 +124,10 @@ export function resolveRuntimeInferenceApi(options: {
         : null;
   if (configApi) return configApi;
 
+  // Legacy compatible-Anthropic sandboxes may not have a persisted route
+  // family yet. Default new provider-family switches to Anthropic Messages;
+  // remove this fallback after route family is authoritative in registry or
+  // OpenShell provider metadata for every supported switch path.
   if (provider === "compatible-anthropic-endpoint") return "anthropic-messages";
   return null;
 }

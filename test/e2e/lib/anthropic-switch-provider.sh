@@ -128,6 +128,9 @@ class Handler(BaseHTTPRequestHandler):
             "usage": {"input_tokens": 1, "output_tokens": 1},
         })
 
+# The mock needs to be reachable from the sandbox through host.openshell.internal.
+# It carries only test responses and a synthetic key; runner network isolation is
+# the boundary that keeps this unauthenticated test endpoint off shared networks.
 ThreadingHTTPServer(("0.0.0.0", port), Handler).serve_forever()
 PY
   ANTHROPIC_SWITCH_MOCK_PID=$!
@@ -168,7 +171,7 @@ ensure_compatible_anthropic_switch_provider() {
   fi
 
   if [ -z "${SWITCH_ENDPOINT_URL:-}" ]; then
-    fail "NEMOCLAW_SWITCH_ENDPOINT_URL is required for compatible Anthropic inference switches"
+    fail "SWITCH_ENDPOINT_URL is required for compatible Anthropic inference switches"
     return 1
   fi
   if [ -z "${COMPATIBLE_ANTHROPIC_API_KEY:-}" ]; then

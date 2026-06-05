@@ -1016,6 +1016,8 @@ jobs:
       artifact_name: "hermes-anthropic-inference-switch-install-log"
       artifact_path: "/tmp/nemoclaw-e2e-hermes-inference-switch-install.log"
       env_json: '{"NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE":"1","NEMOCLAW_AGENT":"hermes","NEMOCLAW_NON_INTERACTIVE":"1","NEMOCLAW_RECREATE_SANDBOX":"1","NEMOCLAW_SANDBOX_NAME":"e2e-hermes-anthropic-inference-switch","NEMOCLAW_SWITCH_INFERENCE_API":"anthropic-messages","NEMOCLAW_SWITCH_MOCK_ANTHROPIC":"1","NEMOCLAW_SWITCH_MODEL":"mock-anthropic-model","NEMOCLAW_SWITCH_PROVIDER":"compatible-anthropic-endpoint"}'
+      # The runtime switch uses a mock Anthropic provider; the initial install/onboard path still
+      # boots the default managed NVIDIA route before the switch.
       nvidia_api_key: true
     secrets: *nightly-e2e-default-secrets
   hermes-discord-e2e:
@@ -1340,6 +1342,8 @@ jobs:
       artifact_name: "openclaw-anthropic-inference-switch-install-log"
       artifact_path: "/tmp/nemoclaw-e2e-openclaw-inference-switch-install.log"
       env_json: '{"NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE":"1","NEMOCLAW_AGENT":"openclaw","NEMOCLAW_NON_INTERACTIVE":"1","NEMOCLAW_RECREATE_SANDBOX":"1","NEMOCLAW_SANDBOX_NAME":"e2e-openclaw-anthropic-inference-switch","NEMOCLAW_SWITCH_INFERENCE_API":"anthropic-messages","NEMOCLAW_SWITCH_MOCK_ANTHROPIC":"1","NEMOCLAW_SWITCH_MODEL":"mock-anthropic-model","NEMOCLAW_SWITCH_PROVIDER":"compatible-anthropic-endpoint"}'
+      # The runtime switch uses a mock Anthropic provider; the initial install/onboard path still
+      # boots the default managed NVIDIA route before the switch.
       nvidia_api_key: true
     secrets: *nightly-e2e-default-secrets
   network-policy-e2e:
