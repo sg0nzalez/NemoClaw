@@ -4,7 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { withLocalNoProxy } from "../../dist/lib/subprocess-env";
 
-const LOCAL_NO_PROXY = "localhost,127.0.0.1,host.docker.internal,::1,0.0.0.0";
+const LOCAL_NO_PROXY = "localhost,127.0.0.1,host.docker.internal,::1,0.0.0.0,inference.local,.local";
 
 describe("withLocalNoProxy", () => {
   it("does nothing when no proxy vars are present", () => {
@@ -62,8 +62,12 @@ describe("withLocalNoProxy", () => {
       no_proxy: "example.com,localhost",
     };
     withLocalNoProxy(env);
-    expect(env.NO_PROXY).toBe("example.com,localhost,127.0.0.1,host.docker.internal,::1,0.0.0.0");
-    expect(env.no_proxy).toBe("example.com,localhost,127.0.0.1,host.docker.internal,::1,0.0.0.0");
+    expect(env.NO_PROXY).toBe(
+      "example.com,localhost,127.0.0.1,host.docker.internal,::1,0.0.0.0,inference.local,.local",
+    );
+    expect(env.no_proxy).toBe(
+      "example.com,localhost,127.0.0.1,host.docker.internal,::1,0.0.0.0,inference.local,.local",
+    );
   });
 
   it("does not duplicate entries when all local hosts are already present", () => {
@@ -75,6 +79,15 @@ describe("withLocalNoProxy", () => {
     withLocalNoProxy(env);
     expect(env.NO_PROXY).toBe(`${LOCAL_NO_PROXY},corp.internal`);
     expect(env.no_proxy).toBe(`${LOCAL_NO_PROXY},corp.internal`);
+  });
+
+  it("adds inference.local and .local so the managed inference route bypasses the host proxy (#4846)", () => {
+    const env: Record<string, string> = { HTTP_PROXY: "http://127.0.0.1:8118" };
+    withLocalNoProxy(env);
+    expect(env.NO_PROXY?.split(",")).toContain("inference.local");
+    expect(env.NO_PROXY?.split(",")).toContain(".local");
+    expect(env.no_proxy?.split(",")).toContain("inference.local");
+    expect(env.no_proxy?.split(",")).toContain(".local");
   });
 
   it("preserves existing NO_PROXY entries and adds local hosts", () => {

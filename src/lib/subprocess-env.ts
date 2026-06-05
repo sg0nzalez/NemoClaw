@@ -49,20 +49,44 @@ const ALLOWED_ENV_PREFIXES = ["LC_", "XDG_", "OPENSHELL_", "GRPC_"];
 // ── Public API ─────────────────────────────────────────────────
 
 /**
- * When any HTTP proxy is forwarded, ensure local host-bound traffic is not
- * routed through it. Without this, tools that respect HTTP_PROXY (curl, Node.js
- * http, Python requests) will tunnel loopback or WSL Windows-host requests to
- * the user's proxy (e.g. Privoxy), which fails with HTTP 500.
- * See: #2616
+ * Local host-bound names that must never be routed through a host proxy.
+ *
+ * - Loopback / WSL Windows-host names: tools that respect HTTP_PROXY (curl,
+ *   Node.js http, Python requests) would otherwise tunnel localhost traffic to
+ *   the user's proxy (e.g. Privoxy), which fails with HTTP 500. See: #2616
+ * - `inference.local` (and the `.local` suffix): NemoClaw's managed inference
+ *   route resolves locally within the OpenShell network stack. On macOS with
+ *   Colima the host's HTTP_PROXY leaks into the sandbox, and without this bypass
+ *   `https://inference.local/v1/*` is tunneled through a proxy that cannot hold
+ *   long-lived streaming connections — large-model chat then dies on the 120s
+ *   idle timeout ("Broken pipe"). See: #4846
+ */
+const LOCAL_NO_PROXY_HOSTS = [
+  "localhost",
+  "127.0.0.1",
+  "host.docker.internal",
+  "::1",
+  "0.0.0.0",
+  "inference.local",
+  ".local",
+];
+
+/**
+ * When any HTTP proxy is forwarded, ensure local host-bound traffic (loopback
+ * and NemoClaw's `inference.local` route) is not routed through it.
+ * See: #2616, #4846
  */
 export function withLocalNoProxy(env: Record<string, string>): void {
   const hasProxy = env.HTTP_PROXY || env.HTTPS_PROXY || env.http_proxy || env.https_proxy;
   if (!hasProxy) return;
   for (const key of ["NO_PROXY", "no_proxy"] as const) {
     const current = env[key] ?? "";
-    const parts = current.split(",").map((s) => s.trim()).filter(Boolean);
+    const parts = current
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
     let changed = false;
-    for (const host of ["localhost", "127.0.0.1", "host.docker.internal", "::1", "0.0.0.0"]) {
+    for (const host of LOCAL_NO_PROXY_HOSTS) {
       if (!parts.includes(host)) {
         parts.push(host);
         changed = true;
