@@ -37,6 +37,7 @@ start_mock_anthropic_switch_provider() {
 import json
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlparse
 
 port = int(sys.argv[1])
 
@@ -52,26 +53,71 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _sse(self, events):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+        for name, payload in events:
+            self.wfile.write(("event: " + name + "\n").encode("utf-8"))
+            self.wfile.write(("data: " + json.dumps(payload) + "\n\n").encode("utf-8"))
+        self.wfile.flush()
+
     def do_GET(self):
-        if self.path == "/health":
+        path = urlparse(self.path).path
+        if path == "/health":
             self._json(200, {"ok": True})
             return
-        if self.path in ("/v1/models", "/v1/models/mock-anthropic-model"):
+        if path in ("/v1/models", "/v1/models/mock-anthropic-model"):
             self._json(200, {"data": [{"id": "mock-anthropic-model"}]})
             return
-        self._json(404, {"error": "not found", "path": self.path})
+        self._json(404, {"error": "not found", "path": path})
 
     def do_POST(self):
+        path = urlparse(self.path).path
         length = int(self.headers.get("Content-Length") or "0")
         raw = self.rfile.read(length) if length else b"{}"
         try:
             payload = json.loads(raw.decode("utf-8") or "{}")
         except Exception:
             payload = {}
-        if self.path != "/v1/messages":
-            self._json(404, {"error": "unexpected path", "path": self.path})
+        if path != "/v1/messages":
+            self._json(404, {"error": "unexpected path", "path": path})
             return
         model = payload.get("model") or "mock-anthropic-model"
+        if payload.get("stream") is True:
+            message = {
+                "id": "msg_mock",
+                "type": "message",
+                "role": "assistant",
+                "model": model,
+                "content": [],
+                "stop_reason": None,
+                "stop_sequence": None,
+                "usage": {"input_tokens": 1, "output_tokens": 0},
+            }
+            self._sse([
+                ("message_start", {"type": "message_start", "message": message}),
+                (
+                    "content_block_start",
+                    {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}},
+                ),
+                (
+                    "content_block_delta",
+                    {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "PONG"}},
+                ),
+                ("content_block_stop", {"type": "content_block_stop", "index": 0}),
+                (
+                    "message_delta",
+                    {
+                        "type": "message_delta",
+                        "delta": {"stop_reason": "end_turn", "stop_sequence": None},
+                        "usage": {"output_tokens": 1},
+                    },
+                ),
+                ("message_stop", {"type": "message_stop"}),
+            ])
+            return
         self._json(200, {
             "id": "msg_mock",
             "type": "message",
