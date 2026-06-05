@@ -63,7 +63,7 @@ Install the following before you begin.
 - Node.js 22.16+ and npm 10+
 - Python 3.11+ (for blueprint and documentation builds)
 - Docker (running)
-- [uv](https://docs.astral.sh/uv/) (for Python dependency management)
+- [uv](https://docs.astral.sh/uv/) (for Python dependency management) — install this before running the blueprint setup commands below, which invoke `uv sync`
 - [hadolint](https://github.com/hadolint/hadolint) (Dockerfile linter — `brew install hadolint` on macOS)
 
 ## Getting Started
@@ -77,7 +77,7 @@ npm install
 # Install and build the TypeScript plugin
 cd nemoclaw && npm install && npm run build && cd ..
 
-# Install Python deps for the blueprint
+# Install Python deps for the blueprint (requires uv from Prerequisites above)
 cd nemoclaw-blueprint && uv sync && cd ..
 ```
 
