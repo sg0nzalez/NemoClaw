@@ -44,6 +44,7 @@ export interface InferenceSetResult {
 }
 
 type OpenshellRunResult = Pick<SpawnSyncReturns<string>, "status" | "stdout" | "stderr">;
+type InferenceApi = "openai-completions" | "anthropic-messages" | "openai-responses";
 
 export interface InferenceSetDeps {
   getDefaultSandbox: () => string | null;
@@ -91,6 +92,12 @@ const SUPPORTED_PROVIDER_NAMES = [
   "ollama-local",
   "vllm-local",
 ] as const;
+
+const SUPPORTED_INFERENCE_APIS = new Set<InferenceApi>([
+  "openai-completions",
+  "anthropic-messages",
+  "openai-responses",
+]);
 
 function defaultDeps(): InferenceSetDeps {
   return {
@@ -208,6 +215,97 @@ function asConfigObject(value: Record<string, unknown>): ConfigObject {
   return result;
 }
 
+function normalizeInferenceApi(value: unknown): InferenceApi | null {
+  return typeof value === "string" && SUPPORTED_INFERENCE_APIS.has(value as InferenceApi)
+    ? (value as InferenceApi)
+    : null;
+}
+
+function readProviderApi(config: ConfigObject, providerKey: string): InferenceApi | null {
+  const models = config.models;
+  if (!isConfigObject(models)) return null;
+  const providers = models.providers;
+  if (!isConfigObject(providers)) return null;
+  const provider = providers[providerKey];
+  if (!isConfigObject(provider)) return null;
+  return normalizeInferenceApi(provider.api);
+}
+
+function readOpenClawRouteApi(config: ConfigObject, provider: string): InferenceApi | null {
+  if (provider === "anthropic-prod") return readProviderApi(config, "anthropic");
+  if (provider === "compatible-anthropic-endpoint") {
+    return readProviderApi(config, "anthropic") || readProviderApi(config, "inference");
+  }
+  return readProviderApi(config, getSandboxInferenceConfig("", provider).providerKey);
+}
+
+function readHermesRouteApi(config: ConfigObject): InferenceApi | null {
+  const model = config.model;
+  if (!isConfigObject(model)) return null;
+  switch (model.api_mode) {
+    case "anthropic_messages":
+      return "anthropic-messages";
+    case "codex_responses":
+      return "openai-responses";
+    case undefined:
+    case null:
+    case "":
+      return "openai-completions";
+    default:
+      return null;
+  }
+}
+
+function sessionRouteApi(
+  session: onboardSession.Session | null,
+  sandboxName: string,
+  provider: string,
+): InferenceApi | null {
+  if (!session || session.sandboxName !== sandboxName || session.provider !== provider) return null;
+  return normalizeInferenceApi(session.preferredInferenceApi);
+}
+
+function resolveRuntimeInferenceApi(options: {
+  agentName: string;
+  config: ConfigObject;
+  currentProvider: string | null | undefined;
+  provider: string;
+  sandboxName: string;
+  session: onboardSession.Session | null;
+}): InferenceApi | null {
+  const { agentName, config, currentProvider, provider, sandboxName, session } = options;
+  if (provider === "anthropic-prod") return "anthropic-messages";
+
+  const sameProvider = currentProvider === provider;
+  const sessionApi = sameProvider ? sessionRouteApi(session, sandboxName, provider) : null;
+  if (sessionApi) return sessionApi;
+
+  const configApi =
+    sameProvider && agentName === "hermes"
+      ? readHermesRouteApi(config)
+      : sameProvider
+        ? readOpenClawRouteApi(config, provider)
+        : null;
+  if (configApi) return configApi;
+
+  if (provider === "compatible-anthropic-endpoint") return "anthropic-messages";
+  return null;
+}
+
+function hermesApiMode(inferenceApi: string): string | null {
+  switch (inferenceApi) {
+    case "":
+    case "openai-completions":
+      return null;
+    case "anthropic-messages":
+      return "anthropic_messages";
+    case "openai-responses":
+      return "codex_responses";
+    default:
+      return null;
+  }
+}
+
 function updateAgentPrimary(config: ConfigObject, primaryModelRef: string): void {
   const agents = ensureObject(config, "agents");
   const defaults = ensureObject(agents, "defaults");
@@ -263,13 +361,20 @@ export function patchHermesInferenceConfig(
   config: ConfigObject,
   provider: string,
   model: string,
+  preferredInferenceApi: string | null = null,
 ): { changed: boolean; route: SandboxInferenceConfig } {
   const before = JSON.stringify(config);
-  const route = getSandboxInferenceConfig(model, provider);
+  const route = getSandboxInferenceConfig(model, provider, preferredInferenceApi);
   const modelConfig = ensureObject(config, "model");
   modelConfig.default = model;
   modelConfig.base_url = route.inferenceBaseUrl;
   modelConfig.provider = "custom";
+  const apiMode = hermesApiMode(route.inferenceApi);
+  if (apiMode) {
+    modelConfig.api_mode = apiMode;
+  } else {
+    delete modelConfig.api_mode;
+  }
 
   return { changed: before !== JSON.stringify(config), route };
 }
@@ -278,6 +383,7 @@ function updateMatchingOnboardSession(
   sandboxName: string,
   provider: string,
   model: string,
+  route: SandboxInferenceConfig,
   deps: Pick<InferenceSetDeps, "loadSession" | "updateSession">,
 ): boolean {
   const session = deps.loadSession();
@@ -288,6 +394,7 @@ function updateMatchingOnboardSession(
     current.model = model;
     current.endpointUrl =
       getProviderSelectionConfig(provider, model)?.endpointUrl ?? current.endpointUrl;
+    current.preferredInferenceApi = route.inferenceApi;
     return current;
   });
   return true;
@@ -336,7 +443,7 @@ export async function runInferenceSet(
     );
   }
 
-  const { sandboxName, agentName } = resolveTargetSandbox(options.sandboxName, deps);
+  const { sandboxName, entry, agentName } = resolveTargetSandbox(options.sandboxName, deps);
   if (agentName !== "openclaw" && agentName !== "hermes") {
     throw new InferenceSetError(
       `nemoclaw inference set supports OpenClaw and Hermes sandboxes; '${sandboxName}' uses '${agentName}'.`,
@@ -373,10 +480,23 @@ export async function runInferenceSet(
   }
 
   const config = deps.readSandboxConfig(sandboxName, target);
+  const preferredInferenceApi = resolveRuntimeInferenceApi({
+    agentName,
+    config,
+    currentProvider: entry.provider,
+    provider,
+    sandboxName,
+    session: deps.loadSession(),
+  });
   const patched =
     agentName === "hermes"
-      ? patchHermesInferenceConfig(config, provider, model)
-      : patchOpenClawInferenceConfig(config, provider, model, getPreferredInferenceApi(config));
+      ? patchHermesInferenceConfig(config, provider, model, preferredInferenceApi)
+      : patchOpenClawInferenceConfig(
+          config,
+          provider,
+          model,
+          preferredInferenceApi || getPreferredInferenceApi(config),
+        );
 
   deps.log(
     agentName === "hermes"
@@ -414,7 +534,7 @@ export async function runInferenceSet(
       `  Run '${CLI_NAME} ${sandboxName} rebuild' to finish applying the model inside the sandbox.`,
     );
   }
-  const sessionUpdated = updateMatchingOnboardSession(sandboxName, provider, model, deps);
+  const sessionUpdated = updateMatchingOnboardSession(sandboxName, provider, model, patched.route, deps);
 
   deps.appendAuditEntry({
     action: "inference_set",

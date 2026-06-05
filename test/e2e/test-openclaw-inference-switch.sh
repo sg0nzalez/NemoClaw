@@ -188,25 +188,31 @@ assert_openclaw_config() {
     return
   }
 
-  probe=$(EXPECTED_MODEL="$SWITCH_MODEL" python3 -c '
+  probe=$(EXPECTED_MODEL="$SWITCH_MODEL" EXPECTED_INFERENCE_API="$SWITCH_INFERENCE_API" python3 -c '
 import json
 import os
 import sys
 
 expected = os.environ["EXPECTED_MODEL"]
+expected_api = os.environ["EXPECTED_INFERENCE_API"]
 doc = json.load(sys.stdin)
 errors = []
 primary = (((doc.get("agents") or {}).get("defaults") or {}).get("model") or {}).get("primary")
-if primary != f"inference/{expected}":
+expected_provider_key = "anthropic" if expected_api == "anthropic-messages" else "inference"
+expected_primary = f"{expected_provider_key}/{expected}"
+if primary != expected_primary:
     errors.append(f"primary={primary!r}")
 
-provider = (((doc.get("models") or {}).get("providers") or {}).get("inference") or {})
-if provider.get("baseUrl") != "https://inference.local/v1":
+provider = (((doc.get("models") or {}).get("providers") or {}).get(expected_provider_key) or {})
+expected_base = "https://inference.local" if expected_api == "anthropic-messages" else "https://inference.local/v1"
+if provider.get("baseUrl") != expected_base:
     errors.append("baseUrl={!r}".format(provider.get("baseUrl")))
+if provider.get("api") != expected_api:
+    errors.append("api={!r}".format(provider.get("api")))
 models = provider.get("models") or []
 if not models or models[0].get("id") != expected:
     errors.append("model id={!r}".format(models[0].get("id") if models else None))
-if not models or models[0].get("name") != f"inference/{expected}":
+if not models or models[0].get("name") != expected_primary:
     errors.append("model name={!r}".format(models[0].get("name") if models else None))
 
 if errors:
@@ -217,7 +223,7 @@ print("OK")
     fail "OpenClaw config was not patched correctly: ${probe:0:400}"
     return
   }
-  pass "OpenClaw config uses inference/${SWITCH_MODEL}"
+  pass "OpenClaw config uses ${SWITCH_INFERENCE_API} route for ${SWITCH_MODEL}"
 
   hash_check=$(openshell sandbox exec --name "$SANDBOX_NAME" -- sh -lc \
     'cd /sandbox/.openclaw && sha256sum -c .config-hash --status && echo OK' 2>&1 || true)
@@ -230,17 +236,28 @@ print("OK")
 
 check_sandbox_inference() {
   local payload payload_arg response rc content attempt last_fail http_code body remote transient=0
-  payload=$(SWITCH_MODEL="$SWITCH_MODEL" python3 -c '
+  payload=$(SWITCH_MODEL="$SWITCH_MODEL" SWITCH_INFERENCE_API="$SWITCH_INFERENCE_API" python3 -c '
 import json
 import os
-print(json.dumps({
-    "model": os.environ["SWITCH_MODEL"],
-    "messages": [{"role": "user", "content": "Reply with exactly one word: PONG"}],
-    "max_tokens": 100,
-}))
+if os.environ["SWITCH_INFERENCE_API"] == "anthropic-messages":
+    print(json.dumps({
+        "model": os.environ["SWITCH_MODEL"],
+        "messages": [{"role": "user", "content": "Reply with exactly one word: PONG"}],
+        "max_tokens": 32,
+    }))
+else:
+    print(json.dumps({
+        "model": os.environ["SWITCH_MODEL"],
+        "messages": [{"role": "user", "content": "Reply with exactly one word: PONG"}],
+        "max_tokens": 100,
+    }))
 ')
   payload_arg="$(printf '%q' "$payload")"
-  remote="tmp=\$(mktemp); code=\$(curl -sS -o \"\$tmp\" -w '%{http_code}' --max-time 90 https://inference.local/v1/chat/completions -H 'Content-Type: application/json' -d $payload_arg); rc=\$?; cat \"\$tmp\"; rm -f \"\$tmp\"; printf '\n__NEMOCLAW_HTTP_STATUS__=%s\n' \"\${code:-000}\"; exit \"\$rc\""
+  if [ "$SWITCH_INFERENCE_API" = "anthropic-messages" ]; then
+    remote="tmp=\$(mktemp); code=\$(curl -sS -o \"\$tmp\" -w '%{http_code}' --max-time 90 https://inference.local/v1/messages -H 'Content-Type: application/json' -H 'anthropic-version: 2023-06-01' -d $payload_arg); rc=\$?; cat \"\$tmp\"; rm -f \"\$tmp\"; printf '\n__NEMOCLAW_HTTP_STATUS__=%s\n' \"\${code:-000}\"; exit \"\$rc\""
+  else
+    remote="tmp=\$(mktemp); code=\$(curl -sS -o \"\$tmp\" -w '%{http_code}' --max-time 90 https://inference.local/v1/chat/completions -H 'Content-Type: application/json' -d $payload_arg); rc=\$?; cat \"\$tmp\"; rm -f \"\$tmp\"; printf '\n__NEMOCLAW_HTTP_STATUS__=%s\n' \"\${code:-000}\"; exit \"\$rc\""
+  fi
   last_fail=""
 
   for attempt in 1 2 3; do
@@ -260,7 +277,11 @@ print(json.dumps({
     elif [ "$http_code" != "200" ]; then
       last_fail="HTTP ${http_code}: ${body:0:300}"
     else
-      content=$(printf '%s' "$body" | parse_chat_content 2>/dev/null) || content=""
+      if [ "$SWITCH_INFERENCE_API" = "anthropic-messages" ]; then
+        content=$(printf '%s' "$body" | parse_anthropic_content 2>/dev/null) || content=""
+      else
+        content=$(printf '%s' "$body" | parse_chat_content 2>/dev/null) || content=""
+      fi
       if grep -qi "PONG" <<<"$content"; then
         pass "Sandbox inference.local returned PONG with ${SWITCH_MODEL}"
         return
@@ -327,13 +348,20 @@ E2E_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "${E2E_DIR}/lib/openclaw-json.sh"
 # shellcheck source=test/e2e/lib/inference-switch-retry.sh
 . "${E2E_DIR}/lib/inference-switch-retry.sh"
+# shellcheck source=test/e2e/lib/anthropic-switch-provider.sh
+. "${E2E_DIR}/lib/anthropic-switch-provider.sh"
 SANDBOX_NAME="${NEMOCLAW_SANDBOX_NAME:-e2e-openclaw-inference-switch}"
 SWITCH_PROVIDER="${NEMOCLAW_SWITCH_PROVIDER:-nvidia-prod}"
 SWITCH_MODEL="${NEMOCLAW_SWITCH_MODEL:-z-ai/glm-5.1}"
+SWITCH_INFERENCE_API="${NEMOCLAW_SWITCH_INFERENCE_API:-openai-completions}"
+SWITCH_ENDPOINT_URL="${NEMOCLAW_SWITCH_ENDPOINT_URL:-}"
+SWITCH_MOCK_ANTHROPIC="${NEMOCLAW_SWITCH_MOCK_ANTHROPIC:-0}"
+SWITCH_MOCK_PORT="${NEMOCLAW_SWITCH_MOCK_PORT:-18767}"
 INSTALL_LOG="/tmp/nemoclaw-e2e-openclaw-inference-switch-install.log"
 
 # shellcheck source=test/e2e/lib/sandbox-teardown.sh
 . "${E2E_DIR}/lib/sandbox-teardown.sh"
+trap 'stop_mock_anthropic_switch_provider; _nemoclaw_sandbox_teardown' EXIT
 # shellcheck source=test/e2e/lib/install-path-refresh.sh
 . "${E2E_DIR}/lib/install-path-refresh.sh"
 register_sandbox_for_teardown "$SANDBOX_NAME"
@@ -419,6 +447,7 @@ command -v openshell >/dev/null 2>&1 || {
   exit 1
 }
 pass "nemoclaw and openshell are on PATH"
+ensure_compatible_anthropic_switch_provider || exit 1
 
 section "Phase 3: Switch inference"
 pid_before="$(openclaw_gateway_pid)"
