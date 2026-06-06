@@ -183,7 +183,7 @@ describe("runUpdateAction", () => {
     expect(spawnSyncImpl).not.toHaveBeenCalled();
   });
 
-  it("does not pass shell startup or release override env into the installer shell", async () => {
+  it("strips shell-startup env and the release override on the maintained path", async () => {
     const spawnSyncImpl = vi.fn(() => ({ status: 0, stdout: "", stderr: "", signal: null } as never));
 
     await runUpdateAction(
@@ -194,8 +194,9 @@ describe("runUpdateAction", () => {
           ...process.env,
           BASH_ENV: "/tmp/review-bash-env",
           ENV: "/tmp/review-env",
-          NEMOCLAW_INSTALL_REF: "refs/heads/not-maintained",
-          NEMOCLAW_INSTALL_TAG: "not-maintained",
+          // No explicit pin set — default `update` tracks the maintained tag.
+          NEMOCLAW_INSTALL_REF: undefined,
+          NEMOCLAW_INSTALL_TAG: undefined,
         },
         getLatestVersion: () => "0.2.0",
         isSourceCheckout: () => false,
@@ -214,6 +215,68 @@ describe("runUpdateAction", () => {
     expect(options?.env?.NEMOCLAW_INSTALL_TAG).toBeUndefined();
   });
 
+  it("honors an explicit NEMOCLAW_INSTALL_TAG pin so advanced users opt into a specific release", async () => {
+    const spawnSyncImpl = vi.fn(() => ({ status: 0, stdout: "", stderr: "", signal: null } as never));
+    const log = vi.fn();
+
+    const result = await runUpdateAction(
+      { yes: true },
+      {
+        currentVersion: () => "0.0.55",
+        env: {
+          ...process.env,
+          BASH_ENV: "/tmp/review-bash-env",
+          NEMOCLAW_INSTALL_REF: undefined,
+          NEMOCLAW_INSTALL_TAG: "v0.0.60",
+        },
+        // lkg still points at the user's current version, so the maintained
+        // path would report "already up to date" — the pin must override that.
+        getLatestVersion: () => "0.0.55",
+        isSourceCheckout: () => false,
+        log,
+        spawnSyncImpl,
+      },
+    );
+
+    expect(result.ranInstaller).toBe(true);
+    expect(result.status).toBe(0);
+    const calls = spawnSyncImpl.mock.calls as unknown as Array<
+      [string, readonly string[], { env?: NodeJS.ProcessEnv }]
+    >;
+    const options = calls[0]?.[2];
+    // Shell-startup hardening still applies even when a pin is honored.
+    expect(options?.env?.BASH_ENV).toBeUndefined();
+    // The explicit pin is forwarded so install.sh resolves the requested ref.
+    expect(options?.env?.NEMOCLAW_INSTALL_TAG).toBe("v0.0.60");
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("pinned to v0.0.60"));
+  });
+
+  it("honors an explicit NEMOCLAW_INSTALL_REF pin over the maintained tag", async () => {
+    const spawnSyncImpl = vi.fn(() => ({ status: 0, stdout: "", stderr: "", signal: null } as never));
+
+    await runUpdateAction(
+      { yes: true },
+      {
+        currentVersion: () => "0.1.0",
+        env: {
+          ...process.env,
+          NEMOCLAW_INSTALL_REF: "v0.0.58",
+          NEMOCLAW_INSTALL_TAG: undefined,
+        },
+        getLatestVersion: () => "0.2.0",
+        isSourceCheckout: () => false,
+        log: vi.fn(),
+        spawnSyncImpl,
+      },
+    );
+
+    const calls = spawnSyncImpl.mock.calls as unknown as Array<
+      [string, readonly string[], { env?: NodeJS.ProcessEnv }]
+    >;
+    const options = calls[0]?.[2];
+    expect(options?.env?.NEMOCLAW_INSTALL_REF).toBe("v0.0.58");
+  });
+
   it("preserves the Hermes agent selection while sanitizing installer env", async () => {
     const spawnSyncImpl = vi.fn(() => ({ status: 0, stdout: "", stderr: "", signal: null } as never));
     const log = vi.fn();
@@ -226,7 +289,8 @@ describe("runUpdateAction", () => {
           ...process.env,
           BASH_ENV: "/tmp/review-bash-env",
           NEMOCLAW_AGENT: "hermes",
-          NEMOCLAW_INSTALL_REF: "refs/heads/not-maintained",
+          NEMOCLAW_INSTALL_REF: undefined,
+          NEMOCLAW_INSTALL_TAG: undefined,
         },
         getLatestVersion: () => "0.2.0",
         isSourceCheckout: () => false,

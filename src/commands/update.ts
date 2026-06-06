@@ -14,12 +14,13 @@ export default class UpdateCommand extends NemoClawCommand {
   static id = "update";
   static strict = true;
   static summary = `Run the maintained ${CLI_DISPLAY_NAME} installer update flow`;
-  static description = `Check for a ${CLI_DISPLAY_NAME} CLI update and run the maintained installer flow.`;
+  static description = `Check for a ${CLI_DISPLAY_NAME} CLI update and run the maintained installer flow.\n\nBy default this tracks the maintained release tag. Set NEMOCLAW_INSTALL_TAG (or NEMOCLAW_INSTALL_REF) to pin a specific GitHub release, e.g. NEMOCLAW_INSTALL_TAG=v0.0.60 ${CLI_DISPLAY_NAME.toLowerCase()} update --yes.`;
   static usage = ["update [--check] [--yes|-y]"];
   static examples = [
     "<%= config.bin %> update --check",
     "<%= config.bin %> update",
     "<%= config.bin %> update --yes",
+    "NEMOCLAW_INSTALL_TAG=v0.0.60 <%= config.bin %> update --yes",
   ];
   static flags = {
     check: Flags.boolean({ description: "Check update availability without running the installer" }),

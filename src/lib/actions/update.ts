@@ -180,12 +180,30 @@ function printStatus(input: {
   input.log(`  Maintained update path:   ${input.branding.maintainedUpdateCommand}`);
 }
 
-function updateInstallerEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+/**
+ * The explicit install ref the user pinned for this invocation, if any.
+ *
+ * The installer never persists NEMOCLAW_INSTALL_REF/NEMOCLAW_INSTALL_TAG into
+ * any shell profile, so a value present here is always a deliberate override
+ * (e.g. `NEMOCLAW_INSTALL_TAG=v0.0.60 nemoclaw update`). Advanced users rely on
+ * this to opt into a specific GitHub release instead of the maintained tag.
+ */
+export function explicitInstallPin(env: NodeJS.ProcessEnv): string | null {
+  return trimOutput(env.NEMOCLAW_INSTALL_REF) || trimOutput(env.NEMOCLAW_INSTALL_TAG) || null;
+}
+
+function updateInstallerEnv(env: NodeJS.ProcessEnv, options: { keepInstallRef?: boolean } = {}): NodeJS.ProcessEnv {
   const next = { ...env };
+  // Always strip shell-startup hooks so the installer's `bash -lc` cannot be
+  // hijacked by a stale or hostile BASH_ENV/ENV file.
   delete next.BASH_ENV;
   delete next.ENV;
-  delete next.NEMOCLAW_INSTALL_REF;
-  delete next.NEMOCLAW_INSTALL_TAG;
+  // Default `update` tracks the maintained tag, so the release-override vars are
+  // dropped. When the user explicitly pinned a ref we pass it through instead.
+  if (!options.keepInstallRef) {
+    delete next.NEMOCLAW_INSTALL_REF;
+    delete next.NEMOCLAW_INSTALL_TAG;
+  }
   return next;
 }
 
@@ -199,6 +217,7 @@ export async function runUpdateAction(
   const rootDir = deps.rootDir ?? process.cwd();
   const currentVersion = deps.currentVersion();
   const branding = updateBranding(env);
+  const pinnedRef = explicitInstallPin(env);
   const latestVersion = (deps.getLatestVersion ?? (() => getMaintainedNemoClawVersionFromGitTag({ env })))();
   const installType = deps.isSourceCheckout
     ? deps.isSourceCheckout()
@@ -208,6 +227,9 @@ export async function runUpdateAction(
   const available = updateAvailable(currentVersion, latestVersion);
 
   printStatus({ branding, currentVersion, installType, latestVersion, log, updateAvailable: available });
+  if (pinnedRef) {
+    log(`  Requested install ref:    ${pinnedRef} (explicit override)`);
+  }
 
   if (options.check) {
     return {
@@ -233,7 +255,7 @@ export async function runUpdateAction(
     };
   }
 
-  if (available === false) {
+  if (available === false && !pinnedRef) {
     log(`  ${branding.displayName} is already up to date.`);
     return {
       currentVersion,
@@ -285,9 +307,13 @@ export async function runUpdateAction(
     }
   }
 
-  log(`  Running maintained ${branding.displayName} installer...`);
+  log(
+    pinnedRef
+      ? `  Running ${branding.displayName} installer pinned to ${pinnedRef}...`
+      : `  Running maintained ${branding.displayName} installer...`,
+  );
   const result = (deps.spawnSyncImpl ?? spawnSync)("bash", ["-o", "pipefail", "-lc", NEMOCLAW_UPDATE_COMMAND], {
-    env: updateInstallerEnv(env),
+    env: updateInstallerEnv(env, { keepInstallRef: pinnedRef !== null }),
     stdio: "inherit",
   });
   const status = result.status ?? 1;
