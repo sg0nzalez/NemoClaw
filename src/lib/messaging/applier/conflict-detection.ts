@@ -48,22 +48,6 @@ export interface ConflictRegistryEntry {
 }
 
 // ---------------------------------------------------------------------------
-// Constants — provider name suffixes for legacy probe-based backfill.
-// NemoClaw attaches one OpenShell provider per messaging channel per sandbox.
-// When a sandbox predates the messagingChannels registry field, probing the
-// live gateway by known provider name is the only record of its channels.
-// ---------------------------------------------------------------------------
-
-export const PROVIDER_SUFFIXES: Record<string, string> = {
-  telegram: "-telegram-bridge",
-  discord: "-discord-bridge",
-  slack: "-slack-bridge",
-  wechat: "-wechat-bridge",
-};
-
-export const KNOWN_CHANNEL_IDS: readonly string[] = Object.keys(PROVIDER_SUFFIXES);
-
-// ---------------------------------------------------------------------------
 // Probe factory
 // ---------------------------------------------------------------------------
 
@@ -364,13 +348,14 @@ export function backfillLegacyEntryChannels(
   entries: readonly ConflictRegistryEntry[],
   probe: MessagingConflictProbe,
   updateEntry: (name: string, channels: string[]) => void,
+  providerSuffixes: Record<string, string>,
 ): void {
   for (const entry of entries) {
     if (Array.isArray(entry.messagingChannels)) continue;
     const discovered: string[] = [];
     let probeFailed = false;
-    for (const channel of KNOWN_CHANNEL_IDS) {
-      const providerName = `${entry.name}${PROVIDER_SUFFIXES[channel]}`;
+    for (const channel of Object.keys(providerSuffixes)) {
+      const providerName = `${entry.name}${providerSuffixes[channel]}`;
       let state: ProbeResult;
       try {
         state = probe.providerExists(providerName);

@@ -23,6 +23,15 @@ import {
   type ConflictReason,
   type MessagingConflictProbe,
 } from "./messaging/applier";
+import { BUILT_IN_CHANNEL_MANIFESTS } from "./messaging/channels";
+
+const PROVIDER_SUFFIXES: Record<string, string> = Object.fromEntries(
+  BUILT_IN_CHANNEL_MANIFESTS.flatMap((m) => {
+    const cred = m.credentials[0];
+    if (!cred?.providerName) return [];
+    return [[m.id, cred.providerName.replace("{sandboxName}", "")]];
+  }),
+);
 
 export { createMessagingConflictProbe } from "./messaging/applier";
 
@@ -55,7 +64,7 @@ export function backfillMessagingChannels(
   const { sandboxes } = registry.listSandboxes();
   backfillLegacyEntryChannels(sandboxes, probe, (name, channels) => {
     registry.updateSandbox(name, { messagingChannels: channels });
-  });
+  }, PROVIDER_SUFFIXES);
 }
 
 /**
