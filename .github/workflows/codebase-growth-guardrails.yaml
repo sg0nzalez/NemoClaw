@@ -123,9 +123,10 @@ jobs:
           base_budget_file="$(mktemp)"
           head_budget_file="$(mktemp)"
           base_budget_mode_file="$(mktemp)"
+          budget_changed=false
 
           gh api --paginate "/repos/${REPO}/pulls/${PR_NUMBER}/files" \
-            --jq '.[] | [.status, .filename] | @tsv' \
+            --jq '.[] | [.status, .filename, (.previous_filename // "")] | @tsv' \
             > "$changed_files_file"
 
           gh api --paginate "/repos/${REPO}/pulls/${PR_NUMBER}/files" \
@@ -141,7 +142,14 @@ jobs:
             echo "fallback" > "$base_budget_mode_file"
           fi
 
-          if grep -q $'\tci/test-file-size-budget.json$' "$changed_files_file"; then
+          while IFS=$'\t' read -r _file_status file_path previous_path; do
+            if [ "$file_path" = "ci/test-file-size-budget.json" ] || [ "$previous_path" = "ci/test-file-size-budget.json" ]; then
+              budget_changed=true
+              break
+            fi
+          done < "$changed_files_file"
+
+          if [ "$budget_changed" = true ]; then
             if ! gh api "/repos/${HEAD_REPO}/contents/ci/test-file-size-budget.json?ref=${HEAD_SHA}" --jq .content \
               | base64 --decode > "$head_budget_file" || [ ! -s "$head_budget_file" ]; then
               echo "FAIL: ci/test-file-size-budget.json must remain present and parseable at the PR head."
@@ -248,7 +256,9 @@ jobs:
                 );
               }
               const text = await fetchHeadTextFile(file);
-              if (text !== null && countLines(text) > headMax) {
+              if (text === null) {
+                violations.push(`${file} has a legacy budget but no matching test file at the PR head`);
+              } else if (countLines(text) > headMax) {
                 violations.push(`${file} has ${countLines(text)} line(s), above its legacy budget ${headMax}`);
               }
             }
