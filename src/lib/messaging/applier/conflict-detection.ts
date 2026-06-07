@@ -2,6 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { SandboxMessagingPlan } from "../manifest";
+import { BUILT_IN_CHANNEL_MANIFESTS } from "../channels";
+
+// Map channelId → providerEnvKey values declared in built-in manifests.
+// Used to scope legacy providerCredentialHashes to a single channel so hashes
+// from other channels on the same sandbox don't produce cross-channel conflicts.
+const CHANNEL_CREDENTIAL_ENV_KEYS: Readonly<Record<string, readonly string[]>> =
+  Object.fromEntries(
+    BUILT_IN_CHANNEL_MANIFESTS.map((m) => [m.id, m.credentials.map((c) => c.providerEnvKey)]),
+  );
 
 // ---------------------------------------------------------------------------
 // Types
@@ -126,11 +135,11 @@ export function getCredentialHashesFromPlan(
  * detection.
  */
 export function planToConflictChannelRequests(plan: SandboxMessagingPlan): ConflictRequest[] {
-  const disabledSet = new Set(plan.disabledChannels);
+  const activeChannelIds = new Set(getActiveChannelIdsFromPlan(plan));
   const byChannel = new Map<string, Record<string, string>>();
 
   for (const binding of plan.credentialBindings) {
-    if (disabledSet.has(binding.channelId) || !binding.credentialAvailable) continue;
+    if (!activeChannelIds.has(binding.channelId) || !binding.credentialAvailable) continue;
     const hashes = byChannel.get(binding.channelId) ?? {};
     if (binding.credentialHash) hashes[binding.providerEnvKey] = binding.credentialHash;
     byChannel.set(binding.channelId, hashes);
@@ -166,14 +175,18 @@ export function resolveActiveChannelsFromEntry(
 /**
  * Return credential hashes scoped to `channelId` for a registry entry.
  *
- * For plan-backed entries the lookup is channel-scoped. When the plan exists
- * but carries no hashes for the channel (e.g. a registry-only resume that did
- * not re-run the compiler), falls back to the legacy `providerCredentialHashes`
- * flat field so safety coverage is preserved.
+ * For plan-backed entries the lookup is channel-scoped via `getCredentialHashesFromPlan`.
+ * When the plan exists but carries no hashes for the channel (e.g. a registry-only
+ * resume that did not re-run the compiler), falls back to the legacy
+ * `providerCredentialHashes` flat field so safety coverage is preserved.
  *
- * For legacy entries without a plan the entire `providerCredentialHashes`
- * object is returned, which may include keys from other channels — callers
- * that need channel-scoped comparison should prefer plan-backed entries.
+ * For legacy entries without a plan, `providerCredentialHashes` is filtered to
+ * only the env keys that are declared for `channelId` in the built-in manifests.
+ * This prevents hashes from other channels on the same sandbox from producing
+ * cross-channel false positives (e.g. a Slack hash matching in a Telegram comparison).
+ * When no manifest-declared keys are found in the stored hashes the result is an
+ * empty map, which falls through to `"unknown-token"` conservative detection in
+ * the callers.
  */
 function resolveChannelHashesFromEntry(
   entry: ConflictRegistryEntry,
@@ -183,7 +196,14 @@ function resolveChannelHashesFromEntry(
     const planHashes = getCredentialHashesFromPlan(entry.messaging.plan, channelId);
     if (Object.keys(planHashes).length > 0) return planHashes;
   }
-  return (entry.providerCredentialHashes as Record<string, string>) ?? {};
+  const allHashes = (entry.providerCredentialHashes as Record<string, string>) ?? {};
+  const knownKeys = CHANNEL_CREDENTIAL_ENV_KEYS[channelId];
+  if (!knownKeys || knownKeys.length === 0) return allHashes;
+  const scoped: Record<string, string> = {};
+  for (const key of knownKeys) {
+    if (allHashes[key]) scoped[key] = allHashes[key];
+  }
+  return scoped;
 }
 
 // ---------------------------------------------------------------------------

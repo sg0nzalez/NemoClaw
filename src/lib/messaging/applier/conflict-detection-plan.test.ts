@@ -62,6 +62,20 @@ function tgBinding(hash?: string): SandboxMessagingPlan["credentialBindings"][nu
   };
 }
 
+function slackChannel() {
+  return {
+    channelId: "slack" as const,
+    displayName: "Slack",
+    authMode: "token-paste" as const,
+    active: true,
+    selected: true,
+    configured: true,
+    disabled: false,
+    inputs: [],
+    hooks: [],
+  };
+}
+
 function slackBindings(botHash?: string, appHash?: string) {
   return [
     {
@@ -161,7 +175,7 @@ describe("planToConflictChannelRequests", () => {
   });
 
   it("includes a channel with credentialAvailable=true but no hash (unknown-token fallback)", () => {
-    const plan = makePlan("sb", { credentialBindings: [tgBinding()] });
+    const plan = makePlan("sb", { channels: [tgChannel()], credentialBindings: [tgBinding()] });
     const requests = planToConflictChannelRequests(plan);
     expect(requests).toHaveLength(1);
     expect(requests[0].channel).toBe("telegram");
@@ -170,6 +184,7 @@ describe("planToConflictChannelRequests", () => {
 
   it("groups multiple bindings for the same channel (Slack bot + app tokens)", () => {
     const plan = makePlan("sb", {
+      channels: [slackChannel()],
       credentialBindings: slackBindings("hash-bot", "hash-app"),
     });
     expect(planToConflictChannelRequests(plan)).toEqual([
@@ -179,6 +194,7 @@ describe("planToConflictChannelRequests", () => {
 
   it("skips bindings where credentialAvailable is false", () => {
     const plan = makePlan("sb", {
+      channels: [tgChannel()],
       credentialBindings: [{ ...tgBinding("hash-tg"), credentialAvailable: false }],
     });
     expect(planToConflictChannelRequests(plan)).toEqual([]);
@@ -187,6 +203,20 @@ describe("planToConflictChannelRequests", () => {
   it("skips channels in disabledChannels", () => {
     const plan = makePlan("sb", {
       disabledChannels: ["telegram"],
+      channels: [tgChannel(true, true)],
+      credentialBindings: [tgBinding("hash-tg")],
+    });
+    expect(planToConflictChannelRequests(plan)).toEqual([]);
+  });
+
+  it("skips credentialAvailable bindings whose channel is absent from plan.channels", () => {
+    const plan = makePlan("sb", { credentialBindings: [tgBinding("hash-tg")] });
+    expect(planToConflictChannelRequests(plan)).toEqual([]);
+  });
+
+  it("skips credentialAvailable bindings whose channel.active is false", () => {
+    const plan = makePlan("sb", {
+      channels: [tgChannel(false, false)],
       credentialBindings: [tgBinding("hash-tg")],
     });
     expect(planToConflictChannelRequests(plan)).toEqual([]);

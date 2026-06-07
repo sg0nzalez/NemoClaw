@@ -317,3 +317,64 @@ describe("detectAllOverlapsInEntries", () => {
     expect(detectAllOverlapsInEntries([alice, bob])).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Legacy-entry cross-channel hash scoping
+// ---------------------------------------------------------------------------
+
+describe("legacy entry cross-channel hash scoping", () => {
+  it("conflictReasonForRequest — does not produce unknown-token from unrelated Slack keys on a Telegram request", () => {
+    // A legacy entry with both Telegram and Slack hashes stored in the flat
+    // providerCredentialHashes map must not make Slack keys visible when the
+    // request is for Telegram only.
+    const legacy: ConflictRegistryEntry = {
+      name: "alice",
+      messagingChannels: ["telegram", "slack"],
+      providerCredentialHashes: {
+        TELEGRAM_BOT_TOKEN: "hash-tg-a",
+        SLACK_BOT_TOKEN: "hash-slack",
+        SLACK_APP_TOKEN: "hash-slack-app",
+      },
+    };
+    expect(
+      conflictReasonForRequest(legacy, {
+        channel: "telegram",
+        credentialHashes: { TELEGRAM_BOT_TOKEN: "hash-tg-b" },
+      }),
+    ).toBeNull(); // distinct Telegram tokens — Slack keys must not inflate this to unknown-token
+  });
+
+  it("conflictReasonForRequest — still detects matching-token for the correct channel", () => {
+    const legacy: ConflictRegistryEntry = {
+      name: "alice",
+      messagingChannels: ["telegram", "slack"],
+      providerCredentialHashes: {
+        TELEGRAM_BOT_TOKEN: "hash-tg-shared",
+        SLACK_BOT_TOKEN: "hash-slack",
+      },
+    };
+    expect(
+      conflictReasonForRequest(legacy, {
+        channel: "telegram",
+        credentialHashes: { TELEGRAM_BOT_TOKEN: "hash-tg-shared" },
+      }),
+    ).toBe("matching-token");
+  });
+
+  it("conflictReasonForPair — does not report matching-token Telegram overlap from matching Slack hashes", () => {
+    const alice: ConflictRegistryEntry = {
+      name: "alice",
+      messagingChannels: ["telegram", "slack"],
+      providerCredentialHashes: { TELEGRAM_BOT_TOKEN: "hash-tg-a", SLACK_BOT_TOKEN: "shared-slack" },
+    };
+    const bob: ConflictRegistryEntry = {
+      name: "bob",
+      messagingChannels: ["telegram", "slack"],
+      providerCredentialHashes: { TELEGRAM_BOT_TOKEN: "hash-tg-b", SLACK_BOT_TOKEN: "shared-slack" },
+    };
+    // Telegram tokens differ — Slack match must not bleed into Telegram comparison
+    expect(conflictReasonForPair("telegram", alice, bob)).toBeNull();
+    // Slack comparison should still correctly flag the shared Slack hash
+    expect(conflictReasonForPair("slack", alice, bob)).toBe("matching-token");
+  });
+});

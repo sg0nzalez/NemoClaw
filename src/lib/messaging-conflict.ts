@@ -105,8 +105,10 @@ export function findAllOverlaps(registry: ConflictRegistry): Array<{
  * list from a compiled `SandboxMessagingPlan` instead of requiring the caller
  * to build credential hashes from raw channel constants.
  *
- * Disabled channels and bindings without a credential hash are excluded
- * automatically by `planToConflictChannelRequests`.
+ * Disabled channels and bindings where the credential is unavailable are excluded
+ * automatically by `planToConflictChannelRequests`. Bindings with `credentialAvailable`
+ * but no `credentialHash` are included and fall through to conservative
+ * `"unknown-token"` detection.
  */
 export function findChannelConflictsFromPlan(
   currentSandbox: string | null,
