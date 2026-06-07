@@ -92,7 +92,7 @@ const {
 const {
   setupMessagingChannels: setupMessagingChannelsImpl,
 } = require("./onboard/messaging-channel-setup") as typeof import("./onboard/messaging-channel-setup");
-const { MessagingHostStateApplier }: typeof import("./messaging") = require("./messaging");
+const { MessagingHostStateApplier, MessagingSetupApplier }: typeof import("./messaging") = require("./messaging");
 const {
   clearAgentScopedResumeState,
 }: typeof import("./onboard/agent-resume-state") = require("./onboard/agent-resume-state");
@@ -6499,6 +6499,8 @@ async function onboard(opts: OnboardOptions = {}): Promise<void> {
         getSandboxMessagingChannels: (name) => registry.getSandbox(name)?.messagingChannels,
         setupMessagingChannels,
         readMessagingChannelConfigFromEnv,
+        readMessagingPlanFromEnv: () => MessagingSetupApplier.readPlanFromEnv(),
+        writePlanToEnv: (plan) => MessagingSetupApplier.writePlanToEnv(plan),
         promptValidatedSandboxName,
         selectResourceProfileForSandbox: () => selectResourceProfileForSandbox({ isNonInteractive, note, prompt, promptOrDefault }),
         stopStaleDashboardListenersForSandbox,

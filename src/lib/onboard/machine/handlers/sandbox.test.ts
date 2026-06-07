@@ -72,6 +72,8 @@ function createDeps(overrides: Partial<SandboxStateOptions<Gpu, Agent, WebSearch
       getSandboxMessagingChannels: () => ["telegram"],
       setupMessagingChannels: calls.setupMessaging,
       readMessagingChannelConfigFromEnv: () => null,
+      readMessagingPlanFromEnv: () => null,
+      writePlanToEnv: () => undefined,
       promptValidatedSandboxName: calls.promptName,
       selectResourceProfileForSandbox: calls.selectResourceProfile,
       stopStaleDashboardListenersForSandbox: calls.stopStale,

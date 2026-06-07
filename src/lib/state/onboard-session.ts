@@ -18,6 +18,7 @@ import {
   type MessagingChannelConfig,
   sanitizeMessagingChannelConfig,
 } from "../messaging-channel-config";
+import type { SandboxMessagingPlan } from "../messaging/manifest";
 import {
   createOnboardMachineEvent,
   emitOnboardMachineEvent,
@@ -104,6 +105,7 @@ export interface Session {
   policyPresets: string[] | null;
   messagingChannels: string[] | null;
   messagingChannelConfig: MessagingChannelConfig | null;
+  messagingPlan: SandboxMessagingPlan | null;
   // Channels the operator paused via `nemoclaw <sb> channels stop <ch>`.
   // Mirrors `SandboxEntry.disabledChannels` so that `rebuild` — which
   // destroys the registry entry before calling `onboard --resume` —
@@ -182,6 +184,7 @@ export interface SessionUpdates {
   policyPresets?: string[] | null;
   messagingChannels?: string[] | null;
   messagingChannelConfig?: MessagingChannelConfig | null;
+  messagingPlan?: SandboxMessagingPlan | null;
   disabledChannels?: string[] | null;
   migratedLegacyValueHashes?: Record<string, string>;
   gpuPassthrough?: boolean;
@@ -305,6 +308,27 @@ function parseWechatConfig(value: unknown): WechatConfig | null {
   if (baseUrl) result.baseUrl = baseUrl;
   if (userId) result.userId = userId;
   return Object.keys(result).length > 0 ? result : null;
+}
+
+function parseSandboxMessagingPlan(value: unknown): SandboxMessagingPlan | null {
+  if (
+    !isObject(value) ||
+    value.schemaVersion !== 1 ||
+    typeof value.sandboxName !== "string" ||
+    typeof value.agent !== "string" ||
+    typeof value.workflow !== "string" ||
+    !Array.isArray(value.channels) ||
+    !Array.isArray(value.disabledChannels) ||
+    !Array.isArray(value.credentialBindings) ||
+    !isObject(value.networkPolicy) ||
+    !Array.isArray(value.agentRender) ||
+    !Array.isArray(value.buildSteps) ||
+    !Array.isArray(value.stateUpdates) ||
+    !Array.isArray(value.healthChecks)
+  ) {
+    return null;
+  }
+  return value as unknown as SandboxMessagingPlan;
 }
 
 function parseSessionMetadata(value: SessionJsonValue | undefined): SessionMetadata | undefined {
@@ -459,6 +483,7 @@ export function createSession(overrides: Partial<Session> = {}): Session {
     policyPresets: readStringArray(overrides.policyPresets),
     messagingChannels: readStringArray(overrides.messagingChannels),
     messagingChannelConfig: sanitizeMessagingChannelConfig(overrides.messagingChannelConfig),
+    messagingPlan: parseSandboxMessagingPlan(overrides.messagingPlan),
     disabledChannels: readStringArray(overrides.disabledChannels),
     migratedLegacyValueHashes: overrides.migratedLegacyValueHashes
       ? readStringRecord(overrides.migratedLegacyValueHashes)
@@ -501,6 +526,7 @@ export function normalizeSession(data: Session | SessionJsonValue | undefined): 
     policyPresets: readStringArray(data.policyPresets),
     messagingChannels: readStringArray(data.messagingChannels),
     messagingChannelConfig: sanitizeMessagingChannelConfig(data.messagingChannelConfig),
+    messagingPlan: parseSandboxMessagingPlan(data.messagingPlan),
     disabledChannels: readStringArray(data.disabledChannels),
     migratedLegacyValueHashes: readStringRecord(data.migratedLegacyValueHashes),
     gpuPassthrough: data.gpuPassthrough === true,
@@ -948,6 +974,12 @@ export function filterSafeUpdates(updates: SessionUpdates): Partial<Session> {
   } else {
     const messagingChannelConfig = sanitizeMessagingChannelConfig(updates.messagingChannelConfig);
     if (messagingChannelConfig) safe.messagingChannelConfig = messagingChannelConfig;
+  }
+  if (updates.messagingPlan === null) {
+    safe.messagingPlan = null;
+  } else {
+    const messagingPlan = parseSandboxMessagingPlan(updates.messagingPlan);
+    if (messagingPlan) safe.messagingPlan = messagingPlan;
   }
   if (updates.disabledChannels === null) {
     safe.disabledChannels = null;

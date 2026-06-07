@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { SandboxMessagingPlan } from "../../../messaging/manifest";
 import type { Session, SessionUpdates } from "../../../state/onboard-session";
 import { withSandboxPhaseTrace } from "../../tracing";
 import { branchTo, type OnboardStateTransitionResult } from "../result";
@@ -62,6 +63,8 @@ export interface SandboxStateOptions<Gpu, Agent, WebSearchConfig, MessagingChann
       sandboxName: string,
     ): Promise<string[]>;
     readMessagingChannelConfigFromEnv(): MessagingChannelConfig | null;
+    readMessagingPlanFromEnv(): SandboxMessagingPlan | null;
+    writePlanToEnv(plan: SandboxMessagingPlan): void;
     promptValidatedSandboxName(agent: Agent): Promise<string>;
     selectResourceProfileForSandbox(): Promise<ResourceProfile | null>;
     stopStaleDashboardListenersForSandbox(sandboxes: unknown[], sandboxName: string): void;
@@ -263,21 +266,32 @@ export async function handleSandboxState<Gpu, Agent, WebSearchConfig, MessagingC
     await deps.startRecordedStep("sandbox", { provider, model });
     if (!sandboxName) sandboxName = await deps.promptValidatedSandboxName(agent);
     const recordedMessagingChannels = deps.getRecordedMessagingChannelsForResume(resume, session, sandboxName);
+    let messagingPlan: SandboxMessagingPlan | null = null;
     if (recordedMessagingChannels) {
       selectedMessagingChannels = recordedMessagingChannels;
       if (selectedMessagingChannels.length > 0) {
         deps.note(`  [non-interactive] Reusing messaging channel configuration: ${selectedMessagingChannels.join(", ")}`);
+        // Restore the compiled plan to env so createSandbox can read it via
+        // MessagingHostStateApplier.readPlanStateFromEnv() and write it to the
+        // registry. Without this, the plan is lost across process restarts and
+        // the registry entry loses its messaging state on rebuild.
+        if (session?.messagingPlan) {
+          deps.writePlanToEnv(session.messagingPlan);
+          messagingPlan = session.messagingPlan;
+        }
       }
     } else {
       const existing = sandboxName
         ? deps.getSandboxMessagingChannels(sandboxName) ?? session?.messagingChannels ?? null
         : session?.messagingChannels ?? null;
       selectedMessagingChannels = await deps.setupMessagingChannels(agent, existing, sandboxName);
+      messagingPlan = deps.readMessagingPlanFromEnv();
     }
     const messagingChannelConfig = deps.readMessagingChannelConfigFromEnv();
     session = deps.updateSession((current) => {
       current.messagingChannels = selectedMessagingChannels;
       current.messagingChannelConfig = messagingChannelConfig as Session["messagingChannelConfig"];
+      current.messagingPlan = messagingPlan;
       return current;
     });
 
