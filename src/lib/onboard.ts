@@ -2805,10 +2805,8 @@ async function createSandbox(
     const { backfillMessagingChannels, findChannelConflictsFromPlan, createMessagingConflictProbe } =
       require("./messaging-conflict") as typeof import("./messaging-conflict");
     const probe = createMessagingConflictProbe({
-      checkGatewayLiveness: () => {
-        const result = runCaptureOpenshell(["sandbox", "list"], { ignoreError: true });
-        return typeof result === "string" && result.length > 0;
-      },
+      checkGatewayLiveness: () =>
+        runOpenshell(["sandbox", "list"], { ignoreError: true, suppressOutput: true }).status === 0,
       providerExists: (name) => providerExistsInGateway(name),
     });
     backfillMessagingChannels(registry, probe);

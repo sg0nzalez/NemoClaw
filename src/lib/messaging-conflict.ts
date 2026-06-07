@@ -16,7 +16,6 @@ import type { SandboxEntry } from "./state/registry";
 import type { SandboxMessagingPlan } from "./messaging/manifest";
 import {
   backfillLegacyEntryChannels,
-  createMessagingConflictProbe,
   detectAllOverlapsInEntries,
   findConflictsInEntries,
   planToConflictChannelRequests,
