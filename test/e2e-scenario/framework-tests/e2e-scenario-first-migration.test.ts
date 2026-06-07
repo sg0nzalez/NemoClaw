@@ -244,6 +244,54 @@ describe("Phase 6: ubuntu-repo-cloud-openclaw migration", () => {
     }
   });
 
+  it("run_scenario_should_execute_onboarding_assertion_scripts_when_requested_in_dry_run", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "e2e-assertion-exec-"));
+    try {
+      const metadataDir = createMetadataFixture(tmp, (contents) =>
+        replaceOnce(
+          contents,
+          "    - base-installed\n    - preflight-passed",
+          "    - preflight-passed",
+        ),
+      );
+      const r = runScenario(["ubuntu-repo-cloud-openclaw", "--dry-run"], {
+        E2E_CONTEXT_DIR: tmp,
+        E2E_DRY_RUN_EXECUTE_ONBOARDING_ASSERTIONS: "1",
+        E2E_METADATA_DIR: metadataDir,
+      });
+      expect(r.status, r.stderr).toBe(0);
+      expect(r.stdout).toContain("PASS: onboarding.preflight.passed");
+      expect(r.stdout).not.toContain("PASS: onboarding.preflight.passed (dry-run skipped)");
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("run_scenario_should_propagate_onboarding_assertion_script_failures_when_executed", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "e2e-assertion-fail-"));
+    try {
+      const metadataDir = createMetadataFixture(tmp, (contents) =>
+        replaceOnce(
+          contents,
+          "    - base-installed\n    - preflight-passed",
+          "    - preflight-expected-failed",
+        ),
+      );
+      const r = runScenario(["ubuntu-repo-cloud-openclaw", "--dry-run"], {
+        E2E_CONTEXT_DIR: tmp,
+        E2E_DRY_RUN_EXECUTE_ONBOARDING_ASSERTIONS: "1",
+        E2E_METADATA_DIR: metadataDir,
+      });
+      expect(r.status).toBe(3);
+      expect(r.stdout).toContain("FAIL: onboarding.preflight.expected-failed");
+      expect(r.stderr).toContain(
+        "run-scenario: onboarding assertion preflight-expected-failed failed",
+      );
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it("preflight_passed_assertion_should_ignore_benign_docker_mentions", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "e2e-preflight-ok-"));
     try {

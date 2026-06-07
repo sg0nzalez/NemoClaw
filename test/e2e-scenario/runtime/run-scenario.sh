@@ -327,7 +327,7 @@ NODE
   local assertion_id full_path stable_id
   while IFS=$'\t' read -r assertion_id full_path stable_id; do
     [[ -n "${assertion_id}" ]] || continue
-    if e2e_env_is_dry_run; then
+    if e2e_env_is_dry_run && [[ "${E2E_DRY_RUN_EXECUTE_ONBOARDING_ASSERTIONS:-0}" != "1" ]]; then
       e2e_env_trace "onboarding-assertion:${assertion_id}"
       echo "PASS: ${stable_id} (dry-run skipped)"
       continue
