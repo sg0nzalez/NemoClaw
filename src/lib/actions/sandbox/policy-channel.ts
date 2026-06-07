@@ -396,22 +396,22 @@ async function checkChannelAddConflict(
   acquired: Record<string, string>,
   force: boolean,
 ): Promise<boolean> {
-  // QR-paired / tokenless adds have empty `acquired` and no host-side
-  // credential to hash. Skip — there is no credential to collide on, and
-  // findChannelConflicts with empty credentialHashes would only ever report
-  // "unknown-token" noise against every other sandbox holding the channel.
+  // Build credential hashes from the manifest's declared providerEnvKey values.
+  // This scopes the lookup to the channel's known credential keys, mirroring
+  // what planToConflictChannelRequests() produces from bindings. QR-only
+  // channels (e.g. WhatsApp) have no manifest credentials → early exit with no
+  // conflict possible. Unknown channelName → also exits early.
+  const channelManifest = createBuiltInChannelManifestRegistry().list().find((m) => m.id === channelName);
+  if (!channelManifest || channelManifest.credentials.length === 0) return true;
+
   const credentialHashes: Record<string, string> = {};
-  for (const [envKey, token] of Object.entries(acquired)) {
-    const hash = hashCredential(token);
-    if (hash) credentialHashes[envKey] = hash;
+  for (const cred of channelManifest.credentials) {
+    const token = acquired[cred.providerEnvKey];
+    const hash = token ? hashCredential(token) : null;
+    if (hash) credentialHashes[cred.providerEnvKey] = hash;
   }
   if (Object.keys(credentialHashes).length === 0) return true;
 
-  // `channels add` does not have a compiled SandboxMessagingPlan in env — the
-  // plan is only written during full onboarding (createSandbox). Hashes are
-  // built directly from the acquired tokens keyed by providerEnvKey, which is
-  // equivalent to what planToConflictChannelRequests produces from bindings.
-  // Migrating this path to a plan-driven approach is tracked as follow-up work.
   const { backfillMessagingChannels, findChannelConflicts } =
     require("../../messaging-conflict") as typeof import("../../messaging-conflict");
 

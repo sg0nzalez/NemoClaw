@@ -117,3 +117,40 @@ export function findChannelConflictsFromPlan(
 ): ConflictMatch[] {
   return findChannelConflicts(currentSandbox, planToConflictChannelRequests(plan), registry);
 }
+
+/**
+ * Onboarding conflict check: runs the plan-based hash-precise check for
+ * channels represented in `plan`, plus a conservative channel-name-only check
+ * for any `selectedTokenChannels` NOT covered by the plan.
+ *
+ * Two paths are always unioned so a partial or stale plan cannot silently skip
+ * selected token-backed channels that it omits. Callers pass `null` for `plan`
+ * when no env plan is available; the fallback then covers all selected channels.
+ */
+export function findChannelConflictsForOnboarding(
+  currentSandbox: string | null,
+  plan: SandboxMessagingPlan | null,
+  selectedTokenChannels: string[],
+  registry: ConflictRegistry,
+): ConflictMatch[] {
+  const planConflicts = plan
+    ? findChannelConflicts(currentSandbox, planToConflictChannelRequests(plan), registry)
+    : [];
+
+  const planCoveredIds = new Set(
+    plan
+      ? plan.credentialBindings.filter((b) => b.credentialAvailable).map((b) => b.channelId)
+      : [],
+  );
+  const uncoveredChannels = selectedTokenChannels.filter((ch) => !planCoveredIds.has(ch));
+  const fallbackConflicts =
+    uncoveredChannels.length > 0
+      ? findChannelConflicts(currentSandbox, uncoveredChannels, registry)
+      : [];
+
+  const seen = new Set<string>();
+  return [...planConflicts, ...fallbackConflicts].filter(({ channel, sandbox }) => {
+    const key = `${channel}\0${sandbox}`;
+    return seen.has(key) ? false : (seen.add(key), true);
+  });
+}
