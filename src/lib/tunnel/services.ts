@@ -449,10 +449,17 @@ export function showStatus(opts: ServiceOptions = {}): void {
  *
  * The in-sandbox script intentionally does not rely on a bare `pkill -f`
  * result: `pkill -f openclaw[- ]gateway` can match the transient shell/pkill
- * command line and report success while the real `openclaw-gateway` process
- * survives.  Instead, it gathers concrete PIDs from `ps`, excludes its own
- * process tree, sends TERM/KILL as needed, and only reports success after a
- * post-stop process scan is empty.
+ * command line and report success while the real gateway process survives.
+ * Instead, it gathers concrete PIDs from `ps`, excludes its own process tree,
+ * sends TERM/KILL as needed, and only reports success after a post-stop process
+ * scan is empty.
+ *
+ * The argv matcher must also recognize the bare `openclaw` process name:
+ * OpenClaw rewrites its own argv via `process.title` after startup, so the
+ * running gateway no longer carries a `gateway` suffix. Matching only
+ * `openclaw-gateway`/`openclaw gateway` made `find_gateway_pids` return empty,
+ * which `reportStopResult` misreads as "not running" — so `tunnel stop` exited
+ * 0 while the gateway kept running and channels kept polling (#4951).
  */
 export function stopSandboxChannels(sandboxName: string): void {
   info(`Stopping in-sandbox OpenClaw gateway (sandbox: ${sandboxName})...`);
@@ -476,7 +483,27 @@ export function stopSandboxChannels(sandboxName: string): void {
 
 const GATEWAY_CLUSTER_CONTAINER = "openshell-cluster-nemoclaw";
 
-const GATEWAY_STOP_SCRIPT = String.raw`
+// Exported for tests so the matcher/kill logic can be executed end-to-end.
+//
+// The awk condition matches three forms of the gateway argv:
+//   - "openclaw-gateway"         the re-execed binary name
+//   - "openclaw gateway run ..." the launcher command nemoclaw-start runs
+//   - "openclaw"                 the post-startup form. OpenClaw rewrites its
+//                                own argv via process.title, so the running
+//                                gateway shows just "openclaw" with no
+//                                "gateway" suffix; in a gateway sandbox this
+//                                lone openclaw process is the gateway. Matching
+//                                only the first two forms made find_gateway_pids
+//                                return empty, which reportStopResult misread as
+//                                "not running" — so `tunnel stop` exited 0 while
+//                                the gateway kept running (#4951).
+//
+// IMPORTANT: keep example argv strings (e.g. "openclaw gateway") out of the awk
+// program text. awk's own argv is captured by the concurrent `ps` snapshot, so
+// any such literal inside the program makes awk match itself and the scan never
+// drains. The shell `sh -lc` process is exempt (excluded as $self), comments in
+// the shell portion below are fine, but the awk body must stay token-clean.
+export const GATEWAY_STOP_SCRIPT = String.raw`
 set -eu
 self="$$"
 parent="$PPID"
@@ -485,7 +512,7 @@ find_gateway_pids() {
     $1 ~ /^[0-9]+$/ && $1 != self && $1 != parent {
       cmd = $0
       sub(/^[[:space:]]*[0-9]+[[:space:]]+/, "", cmd)
-      if (cmd ~ /(^|[[:space:]\/])openclaw-gateway([[:space:]]|$)/ || cmd ~ /(^|[[:space:]\/])openclaw[[:space:]]+gateway([[:space:]]|$)/) {
+      if (cmd ~ /(^|[[:space:]\/])openclaw-gateway([[:space:]]|$)/ || cmd ~ /(^|[[:space:]\/])openclaw[[:space:]]+gateway([[:space:]]|$)/ || cmd ~ /(^|[[:space:]\/])openclaw[[:space:]]*$/) {
         seen[$1] = 1
       }
     }

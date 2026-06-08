@@ -5,6 +5,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, writeFileSync, existsSync, rmSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import assert from "node:assert/strict";
 
 // ---------------------------------------------------------------------------
 // We test stopSandboxChannels / stopAll by temporarily replacing the
@@ -15,7 +16,11 @@ import { tmpdir } from "node:os";
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const resolveOpenshellModule = require("../../../dist/lib/adapters/openshell/resolve");
 
-import { stopSandboxChannels, stopAll } from "../../../dist/lib/tunnel/services";
+import {
+  stopSandboxChannels,
+  stopAll,
+  GATEWAY_STOP_SCRIPT,
+} from "../../../dist/lib/tunnel/services";
 
 // ---------------------------------------------------------------------------
 // stopSandboxChannels
@@ -190,13 +195,101 @@ describe("stopSandboxChannels", () => {
 
     const args = spawnSyncSpy.mock.calls[1][1] as string[];
     const script = args[args.length - 1];
-    // Must match both the launcher form ("openclaw gateway run") and the
-    // re-exec'd binary ("openclaw-gateway"). The gateway re-execs after
-    // startup, dropping "run" from argv entirely.
+    // Must match all three gateway argv forms: the launcher
+    // ("openclaw gateway run"), the re-exec'd binary ("openclaw-gateway"),
+    // and the post-startup form where OpenClaw rewrites argv to a bare
+    // "openclaw" via process.title (#4951).
     expect(script).toContain("openclaw-gateway");
     expect(script).toContain("openclaw[[:space:]]+gateway");
+    expect(script).toContain("openclaw[[:space:]]*$");
     logSpy.mockRestore();
   });
+});
+
+// ---------------------------------------------------------------------------
+// GATEWAY_STOP_SCRIPT — executed end-to-end against real processes.
+//
+// Linux-only: relies on `ps -eo args=`, awk, and POSIX signals. CI runs on
+// Linux. These tests spawn fake processes that reproduce each gateway argv
+// form and assert the script finds and kills them (and leaves non-gateway
+// processes alone). This is the real guard for #4951: the bare "openclaw"
+// process (argv rewritten via process.title) must be detected and stopped.
+// ---------------------------------------------------------------------------
+
+describe("GATEWAY_STOP_SCRIPT (executed)", () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const cp = require("node:child_process");
+  const children: Array<{ pid?: number }> = [];
+
+  afterEach(() => {
+    const pids = children
+      .splice(0)
+      .map((child) => child.pid)
+      .filter((pid): pid is number => pid !== undefined);
+    for (const pid of pids) {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        // already gone
+      }
+    }
+  });
+
+  // Spawn a long-lived process with a chosen argv[0]. `cat` takes no arguments,
+  // so argv stays exactly `title`; an open (unwritten) stdin pipe keeps it
+  // blocked and alive until the stop script signals it. A /dev/null stdin
+  // ("ignore") would hit EOF and exit immediately, so use a pipe.
+  function spawnWithArgv0(title: string): number {
+    const child = cp.spawn("bash", ["-c", `exec -a '${title}' cat`], {
+      stdio: ["pipe", "ignore", "ignore"],
+    });
+    children.push(child);
+    assert(child.pid, `failed to spawn process with argv0 ${title}`);
+    return child.pid;
+  }
+
+  function isAlive(pid: number): boolean {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function runStopScript(): number {
+    const result = cp.spawnSync("sh", ["-lc", GATEWAY_STOP_SCRIPT], {
+      encoding: "utf-8",
+      timeout: 20000,
+    });
+    assert(result.status !== null, `stop script did not exit: ${result.signal} ${result.stderr}`);
+    return result.status;
+  }
+
+  it.runIf(process.platform === "linux")(
+    "finds and kills a gateway whose argv was rewritten to bare 'openclaw' (#4951)",
+    async () => {
+      const pid = spawnWithArgv0("openclaw");
+      expect(isAlive(pid)).toBe(true);
+
+      expect(runStopScript()).toBe(0);
+
+      // Give the kernel a moment to reap after SIGTERM.
+      await new Promise((r) => setTimeout(r, 300));
+      expect(isAlive(pid)).toBe(false);
+    },
+  );
+
+  it.runIf(process.platform === "linux")(
+    "exits 1 (not running) and spares non-gateway processes",
+    () => {
+      // A process whose name merely starts with "openclaw" must not match.
+      const decoy = spawnWithArgv0("openclawish");
+
+      expect(runStopScript()).toBe(1);
+      expect(isAlive(decoy)).toBe(true);
+    },
+  );
 });
 
 // ---------------------------------------------------------------------------
