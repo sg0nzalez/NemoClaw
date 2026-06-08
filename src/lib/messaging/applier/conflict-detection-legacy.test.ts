@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Legacy-field (messagingChannels / disabledChannels) conflict tests.
-// Hash-precise (plan-backed) tests live in src/lib/messaging/applier/conflict-detection-entry.test.ts
+// Hash-precise plan-backed tests are split across conflict-detection-entry, conflict-detection-overlap, and conflict-detection-multi-credential tests
 
 import { describe, expect, it, vi } from "vitest";
 
