@@ -31,9 +31,10 @@ export function createMessagingConflictProbe(
 }
 
 /**
- * For entries missing `messagingChannels`, probe OpenShell to infer which
- * channels the sandbox was onboarded with. Safe to call repeatedly. Probe
- * errors abort the write for that sandbox so future calls can retry.
+ * For pre-plan entries missing `messagingChannels`, probe OpenShell to infer
+ * which channels the sandbox was onboarded with. Plan-backed entries are
+ * skipped even when the flat legacy field is absent. Probe errors abort the
+ * write for that sandbox so future calls can retry.
  */
 export function backfillLegacyEntryChannels(
   entries: readonly ConflictRegistryEntry[],
@@ -42,7 +43,7 @@ export function backfillLegacyEntryChannels(
   providerSuffixes: Record<string, string[]>,
 ): void {
   for (const entry of entries) {
-    if (Array.isArray(entry.messagingChannels)) continue;
+    if (entry.messaging?.plan || Array.isArray(entry.messagingChannels)) continue;
     const discovered: string[] = [];
     let probeFailed = false;
     for (const channel of Object.keys(providerSuffixes)) {
