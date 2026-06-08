@@ -13,6 +13,14 @@ const CHANNEL_CREDENTIAL_ENV_KEYS: Readonly<Record<string, readonly string[]>> =
     BUILT_IN_CHANNEL_MANIFESTS.map((m) => [m.id, m.credentials.map((c) => c.providerEnvKey)]),
   );
 
+const PROVIDER_SUFFIXES: Record<string, string[]> = Object.fromEntries(
+  BUILT_IN_CHANNEL_MANIFESTS.flatMap((m) => {
+    const suffixes = m.credentials.map((c) => c.providerName.replace("{sandboxName}", ""));
+    if (suffixes.length === 0) return [];
+    return [[m.id, suffixes]];
+  }),
+);
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -45,6 +53,10 @@ export interface ConflictMatch {
   readonly reason: ConflictReason;
 }
 
+export type ChannelConflictRequest =
+  | string
+  | { channel: string; credentialHashes?: Record<string, string | null | undefined> };
+
 /**
  * Minimal shape of a registry entry that conflict detection needs.
  * Satisfied by `SandboxEntry` from `./state/registry`.
@@ -54,6 +66,22 @@ export interface ConflictRegistryEntry {
   readonly messaging?: { readonly plan: SandboxMessagingPlan } | null;
   readonly messagingChannels?: readonly string[] | null;
   readonly disabledChannels?: readonly string[] | null;
+}
+
+export interface ConflictRegistry {
+  listSandboxes: () => {
+    sandboxes: ConflictRegistryEntry[];
+    defaultSandbox?: string | null;
+  };
+  updateSandbox: (name: string, updates: { messagingChannels?: string[] }) => boolean;
+}
+
+function normalizeRequest(request: ChannelConflictRequest): ConflictRequest | null {
+  if (typeof request === "string") {
+    return request ? { channel: request, credentialHashes: {} } : null;
+  }
+  if (!request || typeof request.channel !== "string" || request.channel.length === 0) return null;
+  return request;
 }
 
 // ---------------------------------------------------------------------------
@@ -306,6 +334,36 @@ export function findConflictsInEntries(
 }
 
 /**
+ * Registry-backed conflict lookup for callers that do not already have a
+ * compiled plan request list.
+ */
+export function findChannelConflicts(
+  currentSandbox: string | null,
+  enabledChannels: ChannelConflictRequest[],
+  registry: ConflictRegistry,
+): ConflictMatch[] {
+  if (!Array.isArray(enabledChannels) || enabledChannels.length === 0) return [];
+  const requests = enabledChannels
+    .map(normalizeRequest)
+    .filter((request): request is ConflictRequest => request !== null);
+  if (requests.length === 0) return [];
+  const { sandboxes } = registry.listSandboxes();
+  return findConflictsInEntries(currentSandbox, requests, sandboxes);
+}
+
+/**
+ * Plan-driven variant of `findChannelConflicts`. Derives the channel request
+ * list from a compiled `SandboxMessagingPlan`.
+ */
+export function findChannelConflictsFromPlan(
+  currentSandbox: string | null,
+  plan: SandboxMessagingPlan,
+  registry: ConflictRegistry,
+): ConflictMatch[] {
+  return findChannelConflicts(currentSandbox, planToConflictChannelRequests(plan), registry);
+}
+
+/**
  * Detect overlaps across all entries, returning each pair at most once.
  * Used by `nemoclaw status` to surface sandboxes that already share a token.
  */
@@ -347,6 +405,16 @@ export function detectAllOverlapsInEntries(
 }
 
 /**
+ * Registry-backed overlap lookup used by status.
+ */
+export function findAllOverlaps(
+  registry: ConflictRegistry,
+): Array<{ channel: string; sandboxes: [string, string]; reason: ConflictReason }> {
+  const { sandboxes } = registry.listSandboxes();
+  return detectAllOverlapsInEntries(sandboxes);
+}
+
+/**
  * For entries missing `messagingChannels`, probe OpenShell to infer which
  * channels the sandbox was onboarded with, and call `updateEntry` for each
  * resolved sandbox. Safe to call repeatedly — entries with `messagingChannels`
@@ -372,8 +440,14 @@ export function backfillLegacyEntryChannels(
         } catch {
           state = "error";
         }
-        if (state === "present") { channelPresent = true; break; }
-        if (state === "error") { probeFailed = true; break; }
+        if (state === "present") {
+          channelPresent = true;
+          break;
+        }
+        if (state === "error") {
+          probeFailed = true;
+          break;
+        }
       }
       if (probeFailed) break;
       if (channelPresent) discovered.push(channel);
@@ -382,4 +456,22 @@ export function backfillLegacyEntryChannels(
       updateEntry(entry.name, discovered);
     }
   }
+}
+
+/**
+ * Backfill legacy registry entries using built-in manifest provider names.
+ */
+export function backfillMessagingChannels(
+  registry: ConflictRegistry,
+  probe: MessagingConflictProbe,
+): void {
+  const { sandboxes } = registry.listSandboxes();
+  backfillLegacyEntryChannels(
+    sandboxes,
+    probe,
+    (name, channels) => {
+      registry.updateSandbox(name, { messagingChannels: channels });
+    },
+    PROVIDER_SUFFIXES,
+  );
 }

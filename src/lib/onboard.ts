@@ -2777,7 +2777,7 @@ async function createSandbox(
   const hasPlanCredentials = currentPlan?.credentialBindings.some((b) => b.credentialAvailable) ?? false;
   if (hasPlanCredentials) {
     const { backfillMessagingChannels, findChannelConflictsFromPlan, createMessagingConflictProbe } =
-      require("./messaging-conflict") as typeof import("./messaging-conflict");
+      require("./messaging/applier") as typeof import("./messaging/applier");
     const probe = createMessagingConflictProbe({
       checkGatewayLiveness: () =>
         runOpenshell(["sandbox", "list"], { ignoreError: true, suppressOutput: true }).status === 0,

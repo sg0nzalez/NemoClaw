@@ -358,7 +358,7 @@ function bridgeProviderName(sandboxName: string, channelName: string, envKey: st
   return `${sandboxName}-${channelName}-bridge`;
 }
 
-// Tri-state gateway probe for cross-sandbox messaging-conflict backfill,
+// Tri-state gateway probe for cross-sandbox messaging conflict backfill,
 // mirroring onboard.ts makeConflictProbe(). An upfront liveness check keeps a
 // transient gateway failure ("error") from being mis-recorded as "no
 // providers" ("absent"), which would permanently suppress backfill retries.
@@ -413,7 +413,7 @@ async function checkChannelAddConflict(
   if (Object.keys(credentialHashes).length === 0) return true;
 
   const { backfillMessagingChannels, findChannelConflicts } =
-    require("../../messaging-conflict") as typeof import("../../messaging-conflict");
+    require("../../messaging/applier") as typeof import("../../messaging/applier");
 
   try {
     backfillMessagingChannels(registry, makeChannelsConflictProbe());

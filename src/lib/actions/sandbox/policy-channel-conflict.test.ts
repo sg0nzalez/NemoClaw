@@ -18,7 +18,7 @@
 // isNonInteractive is destructured at module load (`const { isNonInteractive }
 // = require("../../onboard")`), so it cannot be spied after load; it reads
 // process.env.NEMOCLAW_NON_INTERACTIVE === "1" at call time, which we drive
-// directly. The real messaging-conflict, sandbox/channels, and credential-hash
+// directly. The real messaging/applier, sandbox/channels, and credential-hash
 // modules run unmocked so the genuine hash + conflict logic is exercised.
 
 import { createRequire } from "node:module";

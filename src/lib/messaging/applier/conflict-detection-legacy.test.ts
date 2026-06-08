@@ -6,13 +6,13 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-import type { SandboxEntry } from "./state/registry";
+import type { SandboxEntry } from "../../state/registry";
 import {
   backfillMessagingChannels,
   findAllOverlaps,
   findChannelConflicts,
-} from "./messaging-conflict";
-import { type MessagingConflictProbe } from "./messaging/applier";
+  type MessagingConflictProbe,
+} from "./conflict-detection";
 
 type ProviderExists = MessagingConflictProbe["providerExists"];
 
@@ -117,7 +117,6 @@ describe("findAllOverlaps", () => {
       { channel: "telegram", sandboxes: ["b", "c"], reason: "unknown-token" },
     ]);
   });
-
 
   it("returns empty when channels do not overlap", () => {
     const registry = makeRegistry([
