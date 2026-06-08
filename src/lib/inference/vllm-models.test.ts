@@ -236,4 +236,20 @@ describe("preflightVllmModelEnv", () => {
       expect(result.message).toMatch(/Unknown NEMOCLAW_VLLM_MODEL='made-up-model'/);
     }
   });
+
+  // #4946 — the gated check must fire regardless of which spelling the user
+  // exported. Slugs route through the `envValue` branch; this pins the
+  // full-Hugging-Face-id branch so a gated model named by its canonical id
+  // (with no token) still fails fast instead of being silently ignored.
+  it("fails fast for a gated model named by its full Hugging Face id with no token", () => {
+    const result = preflightVllmModelEnv({
+      NEMOCLAW_VLLM_MODEL: "deepseek-ai/DeepSeek-R1-Distill-Llama-70B",
+    } as NodeJS.ProcessEnv);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.message).toMatch(/gated on Hugging Face/);
+      expect(result.message).toMatch(/HF_TOKEN/);
+      expect(result.message).toMatch(/HUGGING_FACE_HUB_TOKEN/);
+    }
+  });
 });
