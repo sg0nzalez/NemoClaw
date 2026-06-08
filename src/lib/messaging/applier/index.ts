@@ -7,5 +7,6 @@ export * from "./agent-config";
 export * from "./conflict-detection";
 export * from "./openshell-provider";
 export * from "./plan-filter";
+export * from "./plan-validation";
 export * from "./policy";
 export type * from "./types";

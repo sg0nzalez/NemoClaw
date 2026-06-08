@@ -91,6 +91,8 @@ const {
   MessagingSetupApplier,
   enabledPlanChannels,
   filterEnabledPlanEntries,
+  toMessagingAgentId,
+  validateBuiltInSandboxMessagingPlan,
 }: typeof import("./messaging") = require("./messaging");
 const {
   clearAgentScopedResumeState,
@@ -882,6 +884,42 @@ function upsertCompatibilityProviders(
 
 function resolveMessagingProviderCredential(envKey: string): string | null {
   return normalizeCredentialValue(process.env[envKey]) || getCredential(envKey) || null;
+}
+
+function selectValidatedMessagingPlan(
+  sandboxName: string,
+  agent: AgentDefinition | null,
+  configuredChannels: readonly string[] | null,
+  disabledChannels: readonly string[],
+): SandboxMessagingPlan | null {
+  const expectedAgent = toMessagingAgentId(agent);
+  const validate = (plan: SandboxMessagingPlan, source: "environment" | "registry") => {
+    const result = validateBuiltInSandboxMessagingPlan(plan, {
+      sandboxName,
+      agent: expectedAgent,
+      configuredChannels,
+      disabledChannels,
+    });
+    if (result.ok) return plan;
+    note(
+      `  Ignoring ${source} messaging plan for '${sandboxName}': ${result.reason ?? "validation failed"}.`,
+    );
+    return null;
+  };
+
+  try {
+    const envPlan = readMessagingPlanFromEnv();
+    if (envPlan) {
+      const selected = validate(envPlan, "environment");
+      if (selected) return selected;
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    note(`  Ignoring environment messaging plan for '${sandboxName}': ${message}.`);
+  }
+
+  const registryPlan = getRegistrySandboxMessagingPlan(sandboxName);
+  return registryPlan ? validate(registryPlan, "registry") : null;
 }
 
 function applyMessagingPlanCredentials(
@@ -2800,9 +2838,12 @@ async function createSandbox(
   // from the sandbox registry entry. Validate sandbox identity before trusting
   // the env plan: a stale plan from a prior run of a different sandbox must not
   // gate or bypass conflict detection for the current sandbox creation.
-  const envPlan = readMessagingPlanFromEnv();
-  const currentPlan =
-    envPlan?.sandboxName === sandboxName ? envPlan : getRegistrySandboxMessagingPlan(sandboxName);
+  const currentPlan = selectValidatedMessagingPlan(
+    sandboxName,
+    agent,
+    enabledChannels,
+    disabledChannels,
+  );
   const activeMessagingChannels = currentPlan
     ? enabledPlanChannels(currentPlan).map((channel) => channel.channelId)
     : [];
