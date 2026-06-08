@@ -344,20 +344,6 @@ export function listSandboxChannels(sandboxName: string) {
   console.log("");
 }
 
-// Map a channel + token-env-key to the OpenShell provider name onboarding
-// uses for it. Mirrors the names in src/lib/onboard.ts:3201-3221 so a
-// channels-add upsert collides with (i.e. updates) the same provider that
-// a later rebuild would have created from scratch.
-function bridgeProviderName(sandboxName: string, channelName: string, envKey: string): string {
-  const credential = messagingManifestRegistry
-    .get(channelName)
-    ?.credentials.find((entry) => entry.providerEnvKey === envKey);
-  if (credential) {
-    return credential.providerName.replaceAll("{sandboxName}", sandboxName);
-  }
-  return `${sandboxName}-${channelName}-bridge`;
-}
-
 // Tri-state gateway probe for cross-sandbox messaging conflict backfill,
 // mirroring onboard.ts makeConflictProbe(). An upfront liveness check keeps a
 // transient gateway failure ("error") from being mis-recorded as "no
@@ -924,14 +910,6 @@ function channelProviderNamesFromPlan(
   ];
 }
 
-function fallbackChannelProviderNames(
-  sandboxName: string,
-  channelName: string,
-  envKeys: readonly string[],
-): string[] {
-  return envKeys.map((envKey) => bridgeProviderName(sandboxName, channelName, envKey));
-}
-
 function assertAddChannelPlanActive(
   sandboxName: string,
   manifest: ChannelManifest,
@@ -1249,9 +1227,7 @@ async function rollbackChannelAdd(
   const result = await applyChannelRemoveToGatewayAndRegistry(
     sandboxName,
     canonical,
-    channelProviderNamesFromPlan(snapshot.plan, canonical).length > 0
-      ? channelProviderNamesFromPlan(snapshot.plan, canonical)
-      : fallbackChannelProviderNames(sandboxName, canonical, getChannelTokenKeys(channel)),
+    channelProviderNamesFromPlan(snapshot.plan, canonical),
     { bestEffort: true },
   );
   if (!result.ok) {
@@ -1450,7 +1426,6 @@ export async function removeSandboxChannel(
   }
 
   clearChannelTokens(channel);
-  const tokenKeys = getChannelTokenKeys(channel);
   const isQrChannel = channelUsesInSandboxQrPairing(channel);
 
   const registryEntry = registry.getSandbox(sandboxName);
@@ -1489,10 +1464,7 @@ export async function removeSandboxChannel(
     process.exit(1);
   }
 
-  const providerNames =
-    channelProviderNamesFromPlan(registryEntry?.messaging?.plan, canonical).length > 0
-      ? channelProviderNamesFromPlan(registryEntry?.messaging?.plan, canonical)
-      : fallbackChannelProviderNames(sandboxName, canonical, tokenKeys);
+  const providerNames = channelProviderNamesFromPlan(registryEntry?.messaging?.plan, canonical);
   await applyChannelRemoveToGatewayAndRegistry(sandboxName, canonical, providerNames);
   if (providerNames.length > 0) {
     console.log(`  ${G}✓${R} Removed ${canonical} bridge from the OpenShell gateway.`);

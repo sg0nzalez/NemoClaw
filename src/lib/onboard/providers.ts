@@ -335,7 +335,7 @@ function upsertProvider(name, type, credentialEnv, baseUrl, env, _runOpenshell, 
 }
 
 /**
- * Upsert all messaging providers that have tokens configured.
+ * Upsert all provider definitions that have credentials configured.
  * Returns the list of provider names that were successfully created/updated.
  * Exits the process if any upsert fails unless `options.bestEffort` is true.
  *
@@ -350,7 +350,7 @@ function upsertProvider(name, type, credentialEnv, baseUrl, env, _runOpenshell, 
  * @param {{replaceExisting?: boolean, bestEffort?: boolean}} options - Forwarded to every upsertProvider call.
  * @returns {string[]} Provider names that were upserted.
  */
-function upsertMessagingProviders(tokenDefs, _runOpenshell, options = {}) {
+function upsertProviderDefinitions(tokenDefs, _runOpenshell, options = {}) {
   const upserted = [];
   const failures = [];
   for (const { name, envKey, token, providerType } of tokenDefs) {
@@ -369,7 +369,7 @@ function upsertMessagingProviders(tokenDefs, _runOpenshell, options = {}) {
         failures.push(`${name}: ${result.message}`);
         continue;
       }
-      console.error(`\n  ✗ Failed to create messaging provider '${name}': ${result.message}`);
+      console.error(`\n  ✗ Failed to create provider '${name}': ${result.message}`);
       process.exit(1);
     }
     upserted.push(name);
@@ -399,6 +399,6 @@ module.exports = {
   buildProviderArgs,
   upsertProvider,
   providerExistsInGateway,
-  upsertMessagingProviders,
+  upsertProviderDefinitions,
   getSandboxInferenceConfig,
 };

@@ -1131,7 +1131,7 @@ const { createSandbox } = require(${onboardPath});
     },
   );
 
-  it("aborts onboard when a messaging provider upsert fails", { timeout: 60_000 }, async () => {
+  it("aborts onboard when manifest provider application fails", { timeout: 60_000 }, async () => {
     const repoRoot = path.join(import.meta.dirname, "..");
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-onboard-provider-fail-"));
     const fakeBin = path.join(tmpDir, "bin");

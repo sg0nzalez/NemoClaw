@@ -5,7 +5,7 @@ import { getCredential, normalizeCredentialValue } from "../credentials/store";
 import { getChannelTokenKeys, listChannels } from "../sandbox/channels";
 import * as webSearch from "../inference/web-search";
 
-interface MessagingTokenDefShape {
+interface ProviderDefinitionShape {
   name: string;
   envKey: string;
   token: string | null;
@@ -91,7 +91,7 @@ export function extraPlaceholderProviderSlug(envKey: string): string {
 
 export function registerExtraPlaceholderProviders(
   sandboxName: string,
-  messagingTokenDefs: MessagingTokenDefShape[],
+  providerDefs: ProviderDefinitionShape[],
   log: (message: string) => void = (m) => console.warn(`  ${m}`),
 ): string[] {
   const parsed = parseExtraPlaceholderKeys(
@@ -106,7 +106,7 @@ export function registerExtraPlaceholderProviders(
     // set`. Collapse the empty-string result from normalizeCredentialValue to
     // null so callers see one unambiguous "missing" sentinel.
     const token = getCredential(envKey) || normalizeCredentialValue(process.env[envKey]) || null;
-    messagingTokenDefs.push({
+    providerDefs.push({
       name: `${sandboxName}-extra-${extraPlaceholderProviderSlug(envKey)}`,
       envKey,
       token,

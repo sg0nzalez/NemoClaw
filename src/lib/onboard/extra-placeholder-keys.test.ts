@@ -187,7 +187,7 @@ describe("registerExtraPlaceholderProviders", () => {
     }
   }
 
-  it("appends one generic-provider tokenDef per validated extra key with the operator-supplied token", () => {
+  it("appends one generic provider definition per validated extra key with the operator-supplied token", () => {
     withEnv(
       {
         [EXTRA_PLACEHOLDER_KEYS_ENV]: "TELEGRAM_BOT_TOKEN_AGENT_A SLACK_BOT_TOKEN_AGENT_B",
@@ -195,7 +195,7 @@ describe("registerExtraPlaceholderProviders", () => {
         SLACK_BOT_TOKEN_AGENT_B: "slack-token-B",
       },
       () => {
-        const messagingTokenDefs: Array<{
+        const providerDefs: Array<{
           name: string;
           envKey: string;
           token: string | null;
@@ -204,7 +204,7 @@ describe("registerExtraPlaceholderProviders", () => {
         const warnings: string[] = [];
         const extraKeys = registerExtraPlaceholderProviders(
           "my-sandbox",
-          messagingTokenDefs,
+          providerDefs,
           (m) => warnings.push(m),
         );
         expect(extraKeys).toEqual([
@@ -212,7 +212,7 @@ describe("registerExtraPlaceholderProviders", () => {
           "SLACK_BOT_TOKEN_AGENT_B",
         ]);
         expect(warnings).toEqual([]);
-        expect(messagingTokenDefs).toEqual([
+        expect(providerDefs).toEqual([
           {
             name: "my-sandbox-extra-telegram-bot-token-agent-a",
             envKey: "TELEGRAM_BOT_TOKEN_AGENT_A",
@@ -230,7 +230,7 @@ describe("registerExtraPlaceholderProviders", () => {
     );
   });
 
-  it("registers a tokenDef with token=null when the operator forgot to export the credential", () => {
+  it("registers a provider definition with token=null when the operator forgot to export the credential", () => {
     // The generic provider upsert in onboard/providers.ts already skips
     // null-token entries so the row is not registered with the OpenShell
     // gateway. The unit assertion here pins the contract that
@@ -242,15 +242,15 @@ describe("registerExtraPlaceholderProviders", () => {
         TELEGRAM_BOT_TOKEN_AGENT_MISSING: undefined,
       },
       () => {
-        const messagingTokenDefs: Array<{
+        const providerDefs: Array<{
           name: string;
           envKey: string;
           token: string | null;
           providerType?: string;
         }> = [];
-        const extraKeys = registerExtraPlaceholderProviders("my-sandbox", messagingTokenDefs);
+        const extraKeys = registerExtraPlaceholderProviders("my-sandbox", providerDefs);
         expect(extraKeys).toEqual(["TELEGRAM_BOT_TOKEN_AGENT_MISSING"]);
-        expect(messagingTokenDefs).toEqual([
+        expect(providerDefs).toEqual([
           {
             name: "my-sandbox-extra-telegram-bot-token-agent-missing",
             envKey: "TELEGRAM_BOT_TOKEN_AGENT_MISSING",
@@ -270,7 +270,7 @@ describe("registerExtraPlaceholderProviders", () => {
         TELEGRAM_BOT_TOKEN_AGENT_A: "telegram-token-A",
       },
       () => {
-        const messagingTokenDefs: Array<{
+        const providerDefs: Array<{
           name: string;
           envKey: string;
           token: string | null;
@@ -279,14 +279,14 @@ describe("registerExtraPlaceholderProviders", () => {
         const warnings: string[] = [];
         const extraKeys = registerExtraPlaceholderProviders(
           "my-sandbox",
-          messagingTokenDefs,
+          providerDefs,
           (m) => warnings.push(m),
         );
         expect(extraKeys).toEqual(["TELEGRAM_BOT_TOKEN_AGENT_A"]);
-        expect(messagingTokenDefs.map((d) => d.envKey)).toEqual(["TELEGRAM_BOT_TOKEN_AGENT_A"]);
+        expect(providerDefs.map((d) => d.envKey)).toEqual(["TELEGRAM_BOT_TOKEN_AGENT_A"]);
         // The host secret never makes it onto a provider row, so the token
         // value cannot leak into the sandbox gateway.
-        expect(JSON.stringify(messagingTokenDefs)).not.toContain("would-leak-if-registered");
+        expect(JSON.stringify(providerDefs)).not.toContain("would-leak-if-registered");
         expect(warnings.some((w) => w.includes('"GITHUB_TOKEN"'))).toBe(true);
       },
     );

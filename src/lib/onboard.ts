@@ -860,12 +860,12 @@ function upsertCompatibilityProviders(
   options: { replaceExisting?: boolean } = {},
 ): string[] {
   braveProviderProfile.ensureBraveProviderProfile(tokenDefs, { root: ROOT, runOpenshell, redact });
-  const upserted = onboardProviders.upsertMessagingProviders(
+  const upserted = onboardProviders.upsertProviderDefinitions(
     tokenDefs,
     runOpenshell,
     options,
   );
-  // onboardProviders.upsertMessagingProviders process.exits on failure, so reaching this
+  // onboardProviders.upsertProviderDefinitions process.exits on failure, so reaching this
   // point means every entry in tokenDefs that had a token was registered.
   // Mark migrated only when the registered token equals the staged legacy
   // value — a token rotated since staging (or a fresh prompt) is not a

@@ -7,7 +7,7 @@ type RunResult = { status: number; stdout?: string; stderr?: string };
 type RunOptions = { env?: Record<string, string | undefined> };
 type RunOpenshell = (command: string[], opts?: RunOptions) => RunResult;
 
-const { buildProviderArgs, providerExistsInGateway, upsertProvider, upsertMessagingProviders } = require(
+const { buildProviderArgs, providerExistsInGateway, upsertProvider, upsertProviderDefinitions } = require(
   "../../../dist/lib/onboard/providers",
 ) as {
   buildProviderArgs: (
@@ -27,7 +27,7 @@ const { buildProviderArgs, providerExistsInGateway, upsertProvider, upsertMessag
     runOpenshell: RunOpenshell,
     options?: { replaceExisting?: boolean },
   ) => { ok: boolean; status?: number; message?: string };
-  upsertMessagingProviders: (
+  upsertProviderDefinitions: (
     tokenDefs: Array<{
       name: string;
       envKey: string;
@@ -244,7 +244,7 @@ describe("onboard provider helpers", () => {
 
   it("creates Brave Search providers with the Brave provider profile", () => {
     const commands: string[] = [];
-    const providers = upsertMessagingProviders(
+    const providers = upsertProviderDefinitions(
       [
         {
           name: "alpha-brave-search",
@@ -269,7 +269,7 @@ describe("onboard provider helpers", () => {
 
   it("updates an existing Brave Search provider in place on reuse paths", () => {
     const commands: string[] = [];
-    const providers = upsertMessagingProviders(
+    const providers = upsertProviderDefinitions(
       [
         {
           name: "alpha-brave-search",
@@ -293,14 +293,14 @@ describe("onboard provider helpers", () => {
     ]);
   });
 
-  it("throws instead of exiting when best-effort messaging provider upsert fails", () => {
+  it("throws instead of exiting when best-effort provider definition upsert fails", () => {
     const originalExit = process.exit;
     process.exit = ((code?: number | string | null) => {
       throw new Error(`unexpected process.exit(${code ?? 0})`);
     }) as typeof process.exit;
     try {
       expect(() =>
-        upsertMessagingProviders(
+        upsertProviderDefinitions(
           [
             {
               name: "telegram-bridge",
@@ -325,7 +325,7 @@ describe("onboard provider helpers", () => {
     // replaceExisting: true is only safe after the sandbox holding the
     // provider has been deleted. Used to migrate legacy generic-typed
     // Brave providers to the brave profile on `--recreate-sandbox`.
-    const providers = upsertMessagingProviders(
+    const providers = upsertProviderDefinitions(
       [
         {
           name: "alpha-brave-search",
