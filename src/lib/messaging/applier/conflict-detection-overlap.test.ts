@@ -8,6 +8,7 @@ import {
   planEntry,
   tgBinding,
   tgChannel,
+  whatsappChannel,
 } from "../../../../test/helpers/messaging-conflict-fixtures";
 import { detectAllOverlapsInEntries, findConflictsInEntries } from "./conflict-detection";
 
@@ -73,6 +74,12 @@ describe("detectAllOverlapsInEntries", () => {
       "bob",
       makePlan("bob", { channels: [tgChannel()], credentialBindings: [tgBinding("hash-a")] }),
     );
+    expect(detectAllOverlapsInEntries([alice, bob])).toEqual([]);
+  });
+
+  it("does not report overlap for credential-less channels", () => {
+    const alice = planEntry("alice", makePlan("alice", { channels: [whatsappChannel()] }));
+    const bob = planEntry("bob", makePlan("bob", { channels: [whatsappChannel()] }));
     expect(detectAllOverlapsInEntries([alice, bob])).toEqual([]);
   });
 });

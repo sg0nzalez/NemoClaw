@@ -91,7 +91,7 @@ export function conflictReasonForRequest(
   const requestedHashes = request.credentialHashes ?? {};
   const storedHashes = resolveChannelHashesFromEntry(entry, request.channel);
   const keys = comparisonKeys(request.channel, storedHashes, requestedHashes);
-  if (keys.length === 0) return "unknown-token";
+  if (keys.length === 0) return null;
 
   let sawUnknown = false;
   for (const key of keys) {
@@ -125,7 +125,7 @@ export function conflictReasonForPair(
     manifestKeys && manifestKeys.length > 0
       ? [...manifestKeys]
       : [...new Set([...Object.keys(lh), ...Object.keys(rh)])];
-  if (keys.length === 0) return "unknown-token";
+  if (keys.length === 0) return null;
 
   let sawUnknown = false;
   for (const key of keys) {

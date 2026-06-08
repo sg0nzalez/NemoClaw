@@ -12,6 +12,7 @@ import {
   slackChannel,
   tgBinding,
   tgChannel,
+  whatsappChannel,
 } from "../../../../test/helpers/messaging-conflict-fixtures";
 import {
   conflictReasonForPair,
@@ -99,6 +100,16 @@ describe("conflictReasonForRequest", () => {
       }),
     ).toBe("unknown-token");
   });
+
+  it("returns null for credential-less channels with no comparison keys", () => {
+    const entry = planEntry("alice", makePlan("alice", { channels: [whatsappChannel()] }));
+    expect(
+      conflictReasonForRequest(entry, {
+        channel: "whatsapp",
+        credentialHashes: {},
+      }),
+    ).toBeNull();
+  });
 });
 
 describe("conflictReasonForPair", () => {
@@ -170,5 +181,11 @@ describe("conflictReasonForPair", () => {
     );
     expect(conflictReasonForPair("telegram", alice, bob)).toBeNull();
     expect(conflictReasonForPair("slack", alice, bob)).toBe("matching-token");
+  });
+
+  it("returns null for credential-less channel pairs with no comparison keys", () => {
+    const alice = planEntry("alice", makePlan("alice", { channels: [whatsappChannel()] }));
+    const bob = planEntry("bob", makePlan("bob", { channels: [whatsappChannel()] }));
+    expect(conflictReasonForPair("whatsapp", alice, bob)).toBeNull();
   });
 });
