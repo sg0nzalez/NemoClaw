@@ -1,16 +1,20 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-type MessagingChannel = { name: string; envKey: string };
-type SandboxEntry = { messagingChannels?: string[] | null } | null | undefined;
+import {
+  getManifestProviderNamesForChannel,
+  getProviderNamesFromMessagingPlan,
+  type SandboxMessagingPlan,
+} from "../messaging";
 
-export function getMessagingProviderNamesForChannel(sandboxName: string, channel: string): string[] {
-  if (channel === "discord") return [`${sandboxName}-discord-bridge`];
-  if (channel === "telegram") return [`${sandboxName}-telegram-bridge`];
-  if (channel === "wechat") return [`${sandboxName}-wechat-bridge`];
-  if (channel === "slack") return [`${sandboxName}-slack-bridge`, `${sandboxName}-slack-app`];
-  return [];
-}
+type MessagingChannel = { name: string; envKey?: string };
+type SandboxEntry =
+  | {
+      messagingChannels?: string[] | null;
+      messaging?: { plan?: SandboxMessagingPlan | null } | null;
+    }
+  | null
+  | undefined;
 
 function getKnownMessagingChannels(
   channels: string[] | null | undefined,
@@ -37,19 +41,34 @@ export function getNonInteractiveStoredMessagingChannels(
     const knownSessionChannels = getKnownMessagingChannels(sessionChannels, messagingChannels);
     return knownSessionChannels;
   }
-  if (resume || !sandboxName || messagingChannels.some((channel) => hasMessagingToken(channel.envKey))) {
+  if (
+    resume ||
+    !sandboxName ||
+    messagingChannels.some((channel) => Boolean(channel.envKey && hasMessagingToken(channel.envKey)))
+  ) {
     return null;
   }
 
+  const sandboxEntry = getSandbox(sandboxName);
   const configuredChannels = getKnownMessagingChannels(
-    getSandbox(sandboxName)?.messagingChannels,
+    sandboxEntry?.messagingChannels,
     messagingChannels,
   );
   const disabledChannels = new Set(getDisabledChannels(sandboxName));
   const reusableChannels = configuredChannels.filter((channel) => {
     if (disabledChannels.has(channel)) return false;
-    const providers = getMessagingProviderNamesForChannel(sandboxName, channel);
+    const providers = getReusableProviderNames(sandboxName, sandboxEntry, channel);
     return providers.length > 0 && providers.every((provider) => providerExists(provider));
   });
   return reusableChannels.length > 0 ? reusableChannels : null;
+}
+
+function getReusableProviderNames(
+  sandboxName: string,
+  entry: SandboxEntry,
+  channel: string,
+): string[] {
+  const planned = getProviderNamesFromMessagingPlan(entry?.messaging?.plan, channel);
+  if (planned.length > 0) return planned;
+  return getManifestProviderNamesForChannel(sandboxName, channel) ?? [];
 }

@@ -1,12 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import fs from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-import {
-  getMessagingProviderNamesForChannel,
-  getNonInteractiveStoredMessagingChannels,
-} from "./messaging-reuse";
+import type { SandboxMessagingPlan } from "../messaging/manifest";
+import { getManifestProviderNamesForChannel } from "../messaging/provider-bindings";
+import { getNonInteractiveStoredMessagingChannels } from "./messaging-reuse";
 
 const messagingChannels = [
   { name: "discord", envKey: "DISCORD_BOT_TOKEN" },
@@ -15,24 +16,23 @@ const messagingChannels = [
 ];
 
 describe("onboard messaging reuse", () => {
-  it("maps one bridge provider for single-token messaging channels", () => {
-    expect(getMessagingProviderNamesForChannel("assistant", "discord")).toEqual([
+  it("derives reusable provider names from messaging manifests", () => {
+    expect(getManifestProviderNamesForChannel("assistant", "discord")).toEqual([
       "assistant-discord-bridge",
     ]);
-    expect(getMessagingProviderNamesForChannel("assistant", "telegram")).toEqual([
+    expect(getManifestProviderNamesForChannel("assistant", "telegram")).toEqual([
       "assistant-telegram-bridge",
     ]);
-    expect(getMessagingProviderNamesForChannel("assistant", "wechat")).toEqual([
+    expect(getManifestProviderNamesForChannel("assistant", "wechat")).toEqual([
       "assistant-wechat-bridge",
+    ]);
+    expect(getManifestProviderNamesForChannel("assistant", "slack")).toEqual([
+      "assistant-slack-bridge",
+      "assistant-slack-app",
     ]);
   });
 
   it("requires both Slack providers before reusing a stored Slack channel", () => {
-    expect(getMessagingProviderNamesForChannel("assistant", "slack")).toEqual([
-      "assistant-slack-bridge",
-      "assistant-slack-app",
-    ]);
-
     const reusedChannels = getNonInteractiveStoredMessagingChannels(
       false,
       null,
@@ -46,6 +46,34 @@ describe("onboard messaging reuse", () => {
     );
 
     expect(reusedChannels).toBeNull();
+  });
+
+  it("prefers stored manifest-plan credential bindings over compatibility fallback", () => {
+    const reusedChannels = getNonInteractiveStoredMessagingChannels(
+      false,
+      null,
+      "assistant",
+      messagingChannels,
+      () => false,
+      () => ({
+        messagingChannels: ["slack"],
+        messaging: {
+          plan: {
+            credentialBindings: [
+              { channelId: "slack", providerName: "assistant-slack-bot-from-plan" },
+              { channelId: "slack", providerName: "assistant-slack-app-from-plan" },
+            ],
+          } as unknown as SandboxMessagingPlan,
+        },
+      }),
+      () => [],
+      (provider) =>
+        provider === "assistant-slack-bot-from-plan" ||
+        provider === "assistant-slack-app-from-plan",
+      true,
+    );
+
+    expect(reusedChannels).toEqual(["slack"]);
   });
 
   it("reuses stored Slack channels when both Slack providers exist", () => {
@@ -111,5 +139,21 @@ describe("onboard messaging reuse", () => {
     );
 
     expect(reusedChannels).toEqual([]);
+  });
+
+  it("keeps provider-binding production paths free of channel-specific suffix branches", () => {
+    const sourcePaths = [
+      path.join(import.meta.dirname, "messaging-reuse.ts"),
+      path.join(import.meta.dirname, "..", "messaging", "provider-bindings.ts"),
+    ];
+    for (const sourcePath of sourcePaths) {
+      const source = fs.readFileSync(sourcePath, "utf-8");
+      expect(source).not.toMatch(
+        /\b(?:channel|channelId)\s*={2,3}\s*["'](?:discord|telegram|wechat|slack)["']/,
+      );
+      expect(source).not.toMatch(
+        /["'`][^"'`]*(?:-discord-bridge|-telegram-bridge|-wechat-bridge|-slack-bridge|-slack-app)/,
+      );
+    }
   });
 });

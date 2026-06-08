@@ -13,6 +13,8 @@ import {
   type ChannelManifest,
   createBuiltInChannelManifestRegistry,
   createBuiltInMessagingHookRegistry,
+  getManifestProviderNamesForChannel,
+  getProviderNamesFromMessagingPlan,
   getMessagingManifestAvailabilityContext,
   MessagingHostStateApplier,
   MessagingSetupApplier,
@@ -56,6 +58,7 @@ import {
   persistChannelTokens,
 } from "../../sandbox/channels";
 import * as registry from "../../state/registry";
+import type { SandboxEntry } from "../../state/registry";
 import {
   isDockerRuntimeDown,
   printDockerRuntimeDownGuidance,
@@ -896,18 +899,31 @@ function filterPlanToChannel(
   };
 }
 
-function channelProviderNamesFromPlan(
-  plan: SandboxMessagingPlan | null | undefined,
+function channelProviderNamesForRemove(
+  sandboxName: string,
+  entry: SandboxEntry | null,
   channelId: string,
 ): string[] {
-  if (!plan) return [];
-  return [
-    ...new Set(
-      plan.credentialBindings
-        .filter((binding) => binding.channelId === channelId)
-        .map((binding) => binding.providerName),
-    ),
-  ];
+  const planned = getProviderNamesFromMessagingPlan(entry?.messaging?.plan, channelId);
+  if (planned.length > 0) return planned;
+
+  // Pre-plan registry rows still record active channels in messagingChannels.
+  // Their gateway providers used the same deterministic manifest names, so
+  // derive those names before allowing local registry/policy cleanup.
+  const legacyEnabled = (entry?.messagingChannels || []).includes(channelId);
+  if (!legacyEnabled) return [];
+
+  const legacyProviderNames = getManifestProviderNamesForChannel(sandboxName, channelId);
+  if (legacyProviderNames === null) {
+    console.error(
+      `  Cannot remove legacy channel '${channelId}': no messaging plan or manifest is available to identify OpenShell provider cleanup.`,
+    );
+    console.error(
+      "  Registry and policy state were not updated; re-run after repairing channel manifests.",
+    );
+    process.exit(1);
+  }
+  return legacyProviderNames;
 }
 
 function assertAddChannelPlanActive(
@@ -1227,7 +1243,7 @@ async function rollbackChannelAdd(
   const result = await applyChannelRemoveToGatewayAndRegistry(
     sandboxName,
     canonical,
-    channelProviderNamesFromPlan(snapshot.plan, canonical),
+    getProviderNamesFromMessagingPlan(snapshot.plan, canonical),
     { bestEffort: true },
   );
   if (!result.ok) {
@@ -1464,7 +1480,7 @@ export async function removeSandboxChannel(
     process.exit(1);
   }
 
-  const providerNames = channelProviderNamesFromPlan(registryEntry?.messaging?.plan, canonical);
+  const providerNames = channelProviderNamesForRemove(sandboxName, registryEntry, canonical);
   await applyChannelRemoveToGatewayAndRegistry(sandboxName, canonical, providerNames);
   if (providerNames.length > 0) {
     console.log(`  ${G}✓${R} Removed ${canonical} bridge from the OpenShell gateway.`);

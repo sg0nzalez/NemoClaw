@@ -76,7 +76,17 @@ runner.run = () => ({ status: 0, stdout: "", stderr: "" });
 runner.runCapture = () => "";
 
 const adapterRuntime = require(${j("adapters/openshell/runtime.js")});
-adapterRuntime.runOpenshell = () => ({ status: 0, stdout: "", stderr: "" });
+const gatewayProviderCalls = [];
+adapterRuntime.runOpenshell = (args) => {
+  if (
+    Array.isArray(args) &&
+    ((args[0] === "sandbox" && args[1] === "provider" && args[2] === "detach") ||
+      (args[0] === "provider" && args[1] === "delete"))
+  ) {
+    gatewayProviderCalls.push(args);
+  }
+  return { status: 0, stdout: "", stderr: "" };
+};
 
 const processRecovery = require(${j("actions/sandbox/process-recovery.js")});
 const sandboxExecCalls = [];
@@ -175,6 +185,7 @@ module.exports = {
   removedPresets,
   registryUpdates,
   sessionStore,
+  gatewayProviderCalls,
   callOrder,
   getExitCode: () => exitCode,
 };
@@ -481,6 +492,7 @@ const ctx = module.exports;
     process.stdout.write("\\n__RESULT__" + JSON.stringify({
       sessionPolicyPresets: ctx.sessionStore.policyPresets,
       registryUpdates: ctx.registryUpdates,
+      gatewayProviderCalls: ctx.gatewayProviderCalls,
     }) + "\\n");
   } catch (err) {
     process.stdout.write("\\n__RESULT__" + JSON.stringify({ error: err.message, stack: err.stack }) + "\\n");
@@ -516,6 +528,79 @@ const ctx = module.exports;
       messagingChannelsUpdate.updates.messagingChannels,
       [],
       "messagingChannels must be empty after removing telegram",
+    );
+    assert.deepEqual(
+      payload.gatewayProviderCalls,
+      [
+        ["sandbox", "provider", "detach", "test-sb", "test-sb-telegram-bridge"],
+        ["provider", "delete", "test-sb-telegram-bridge"],
+      ],
+      "pre-plan telegram rows must still detach and delete the deterministic OpenShell provider",
+    );
+  });
+
+  it("deletes both Slack OpenShell providers for a pre-plan registry row", () => {
+    const script = `${buildPreamble({
+      presetNamesApplied: ["npm", "pypi", "slack", "brew"],
+      sandboxAgent: "openclaw",
+      channelInRegistry: "slack",
+    })}
+const ctx = module.exports;
+(async () => {
+  try {
+    await ctx.channelModule.removeSandboxChannel("test-sb", { channel: "slack" });
+    process.stdout.write("\\n__RESULT__" + JSON.stringify({
+      sessionPolicyPresets: ctx.sessionStore.policyPresets,
+      registryUpdates: ctx.registryUpdates,
+      removedPresets: ctx.removedPresets,
+      gatewayProviderCalls: ctx.gatewayProviderCalls,
+      exitCode: ctx.getExitCode(),
+    }) + "\\n");
+  } catch (err) {
+    process.stdout.write("\\n__RESULT__" + JSON.stringify({ error: err.message, stack: err.stack }) + "\\n");
+  }
+})();
+`;
+    const result = runScript(script, {
+      SLACK_BOT_TOKEN: "xoxb-slack-bot-token-for-test",
+      SLACK_APP_TOKEN: "xapp-slack-app-token-for-test",
+    });
+    assert.equal(result.status, 0, `script failed: ${result.stderr}\n${result.stdout}`);
+    const marker = result.stdout.lastIndexOf("__RESULT__");
+    assert.ok(marker >= 0, `no __RESULT__ marker:\n${result.stdout}`);
+    const payload = JSON.parse(result.stdout.slice(marker + "__RESULT__".length).trim());
+    assert.ok(!payload.error, `unexpected error: ${payload.error}\n${payload.stack || ""}`);
+    assert.equal(payload.exitCode, null, "must not exit on successful pre-plan slack removal");
+
+    assert.deepEqual(
+      payload.gatewayProviderCalls,
+      [
+        ["sandbox", "provider", "detach", "test-sb", "test-sb-slack-bridge"],
+        ["sandbox", "provider", "detach", "test-sb", "test-sb-slack-app"],
+        ["provider", "delete", "test-sb-slack-bridge"],
+        ["provider", "delete", "test-sb-slack-app"],
+      ],
+      "pre-plan slack rows must delete both deterministic OpenShell providers",
+    );
+    assert.deepEqual(payload.removedPresets, [{ sandboxName: "test-sb", presetName: "slack" }]);
+
+    const messagingChannelsUpdate = payload.registryUpdates.find(
+      (u: { updates: { messagingChannels?: string[] } }) =>
+        u.updates.messagingChannels !== undefined,
+    );
+    assert.ok(
+      messagingChannelsUpdate,
+      `expected an updateSandbox call that writes messagingChannels; got ${JSON.stringify(payload.registryUpdates)}`,
+    );
+    assert.deepEqual(
+      messagingChannelsUpdate.updates.messagingChannels,
+      [],
+      "messagingChannels must be empty after removing slack",
+    );
+    assert.deepEqual(
+      payload.sessionPolicyPresets,
+      ["npm", "pypi", "brew"],
+      "session.policyPresets must remove slack after provider cleanup",
     );
   });
 });

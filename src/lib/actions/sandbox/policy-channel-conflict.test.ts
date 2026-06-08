@@ -380,7 +380,7 @@ describe("addSandboxChannel cross-sandbox conflict check (#4305)", () => {
   // Scenario 6
   it("idempotent same-sandbox re-add does not self-conflict", async () => {
     arrangeRegistry({
-      current: makePlanEntry("alpha", "telegram", [{ providerEnvKey: "TELEGRAM_BOT_TOKEN", credentialHash: TELEGRAM_HASH }]),
+      current: { name: "alpha", messagingChannels: ["telegram"] },
     });
     getCredentialMock.mockReturnValue(TELEGRAM_TOKEN);
     promptMock.mockResolvedValue("n"); // would abort IF prompted

@@ -6,4 +6,5 @@ export * from "./compiler";
 export * from "./hooks";
 export * from "./applier";
 export * from "./manifest";
+export * from "./provider-bindings";
 export * from "./utils";
