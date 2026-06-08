@@ -19,6 +19,7 @@
 
 import type { DashboardDeliveryChain } from "./dashboard/contract";
 import { compareChannelSets, type RuntimeChannelStatus } from "./channel-runtime-status";
+import { getManifestProviderNamesForChannel } from "./messaging/provider-bindings";
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -317,7 +318,9 @@ function verifyMessagingBridges(
   }
   const missingProviders: string[] = [];
   for (const channel of channels) {
-    if (!deps.providerExistsInGateway(channel)) {
+    const providerNames = getManifestProviderNamesForChannel(sandboxName, channel);
+    const providersToCheck = providerNames ?? [channel];
+    if (providersToCheck.some((providerName: string) => !deps.providerExistsInGateway(providerName))) {
       missingProviders.push(channel);
     }
   }

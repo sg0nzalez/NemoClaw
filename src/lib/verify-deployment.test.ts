@@ -110,7 +110,7 @@ describe("verifyDeployment", () => {
   it("messaging failure is a warning, not a blocker", async () => {
     const deps = makeDeps({
       getMessagingChannels: () => ["slack", "discord"],
-      providerExistsInGateway: (name: string) => name !== "discord",
+      providerExistsInGateway: (name: string) => name !== "my-sandbox-discord-bridge",
     });
     const result = await verifyDeployment("my-sandbox", chain, deps, NO_RETRY);
     expect(result.healthy).toBe(true); // messaging is non-blocking
@@ -118,6 +118,23 @@ describe("verifyDeployment", () => {
     const msgDiag = result.diagnostics.find((d) => d.link === "messaging");
     expect(msgDiag?.status).toBe("warn");
     expect(msgDiag?.detail).toContain("discord");
+  });
+
+  it("checks manifest provider names instead of raw channel ids", async () => {
+    const checkedProviders: string[] = [];
+    const deps = makeDeps({
+      getMessagingChannels: () => ["slack"],
+      providerExistsInGateway: (name: string) => {
+        checkedProviders.push(name);
+        return name !== "my-sandbox-slack-app";
+      },
+    });
+    const result = await verifyDeployment("my-sandbox", chain, deps, NO_RETRY);
+    expect(checkedProviders).toEqual(["my-sandbox-slack-bridge", "my-sandbox-slack-app"]);
+    expect(result.healthy).toBe(true);
+    expect(result.verification.messagingBridgesHealthy).toBe(false);
+    const msgDiag = result.diagnostics.find((d) => d.link === "messaging");
+    expect(msgDiag?.detail).toContain("slack");
   });
 
   it("warns when an expected channel is absent from the runtime config entirely (stale rebuild)", async () => {
