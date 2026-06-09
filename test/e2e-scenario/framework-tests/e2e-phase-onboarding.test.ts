@@ -473,6 +473,78 @@ describe("onboarding phase fixture", () => {
     });
   });
 
+  it("fails repair onboarding before resume when sandbox deletion fails unexpectedly", async () => {
+    const runner = new FakeRunner();
+    runner.enqueue(shellResult(1, "Forced onboarding failure at step 'policies'"));
+    runner.enqueue(shellResult(2, "permission denied"));
+    const onboard = new OnboardingPhaseFixture(
+      new HostCliClient(runner),
+      new FakeSecrets({ NVIDIA_API_KEY: "secret-token" }),
+    );
+
+    await expect(
+      onboard.from(ready({ onboarding: "cloud-nvidia-openclaw-repair-existing-config" }), {
+        sandboxName: "e2e-repair-delete-fail",
+      }),
+    ).rejects.toThrow(/delete sandbox failed: permission denied/);
+
+    expect(runner.calls.map((call) => [call.command, call.args])).toEqual([
+      [
+        "nemoclaw",
+        ["onboard", "--non-interactive", "--yes", "--yes-i-accept-third-party-software"],
+      ],
+      ["openshell", ["sandbox", "delete", "e2e-repair-delete-fail"]],
+    ]);
+  });
+
+  it("fails repair onboarding before resume when forward stop fails unexpectedly", async () => {
+    const runner = new FakeRunner();
+    runner.enqueue(shellResult(1, "Forced onboarding failure at step 'policies'"));
+    runner.enqueue(shellResult(0, "sandbox deleted\n"));
+    runner.enqueue(shellResult(2, "permission denied"));
+    const onboard = new OnboardingPhaseFixture(
+      new HostCliClient(runner),
+      new FakeSecrets({ NVIDIA_API_KEY: "secret-token" }),
+    );
+
+    await expect(
+      onboard.from(ready({ onboarding: "cloud-nvidia-openclaw-repair-existing-config" }), {
+        sandboxName: "e2e-repair-forward-fail",
+      }),
+    ).rejects.toThrow(/stop forward failed: permission denied/);
+
+    expect(runner.calls.map((call) => [call.command, call.args])).toEqual([
+      [
+        "nemoclaw",
+        ["onboard", "--non-interactive", "--yes", "--yes-i-accept-third-party-software"],
+      ],
+      ["openshell", ["sandbox", "delete", "e2e-repair-forward-fail"]],
+      ["openshell", ["forward", "stop", "18789"]],
+    ]);
+  });
+
+  it("tolerates already-missing repair cleanup before resuming", async () => {
+    const runner = new FakeRunner();
+    runner.enqueue(shellResult(1, "Forced onboarding failure at step 'policies'"));
+    runner.enqueue(shellResult(1, "sandbox e2e-repair-missing not found"));
+    runner.enqueue(shellResult(1, "no active forward for port 18789"));
+    runner.enqueue(shellResult(0, "resumed\n"));
+    const onboard = new OnboardingPhaseFixture(
+      new HostCliClient(runner),
+      new FakeSecrets({ NVIDIA_API_KEY: "secret-token" }),
+    );
+
+    const instance = await onboard.from(
+      ready({ onboarding: "cloud-nvidia-openclaw-repair-existing-config" }),
+      { sandboxName: "e2e-repair-missing" },
+    );
+
+    expect(instance.result).toBe(instance.results?.resume);
+    expect(instance.results?.repairDelete?.exitCode).toBe(1);
+    expect(instance.results?.repairForwardStop?.exitCode).toBe(1);
+    expect(runner.calls).toHaveLength(4);
+  });
+
   it("reruns OpenClaw onboarding for the same provider with sandbox recreation enabled", async () => {
     const runner = new FakeRunner();
     runner.enqueue(shellResult(0, "onboarded\n"));

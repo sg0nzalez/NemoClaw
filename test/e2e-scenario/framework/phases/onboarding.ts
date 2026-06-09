@@ -51,6 +51,15 @@ const MISSING_SANDBOX_DELETE_PATTERNS = [
   /sandbox does not exist/i,
   /no such sandbox/i,
 ];
+const MISSING_FORWARD_STOP_PATTERNS = [
+  /\bNotFound\b/i,
+  /\bNot Found\b/i,
+  /forward .*not found/i,
+  /forward .*not running/i,
+  /no active forward/i,
+  /no such forward/i,
+  /port .*not forwarded/i,
+];
 const INVALID_NVIDIA_API_KEY_PATTERNS = [
   /Invalid NVIDIA API key/i,
   /Must start with nvapi-/i,
@@ -187,6 +196,10 @@ function hasMissingSandboxDeleteSignature(result: ShellProbeResult): boolean {
   return hasSignature(result, MISSING_SANDBOX_DELETE_PATTERNS);
 }
 
+function hasMissingForwardStopSignature(result: ShellProbeResult): boolean {
+  return hasSignature(result, MISSING_FORWARD_STOP_PATTERNS);
+}
+
 function hasSignature(result: ShellProbeResult, patterns: readonly RegExp[]): boolean {
   const text = resultText(result);
   return patterns.some((pattern) => pattern.test(text));
@@ -216,6 +229,19 @@ function assertExpectedFailureSignature(
   if (!hasSignature(result, patterns)) {
     throw new Error(`${label} failed without expected failure signature: ${resultText(result)}`);
   }
+}
+
+function assertRepairStepResult(
+  result: ShellProbeResult,
+  label: string,
+  isBenignMissing: (result: ShellProbeResult) => boolean,
+): void {
+  if (result.exitCode === 0) return;
+  if (hasStackTrace(result)) {
+    throw new Error(`${label} printed a stack trace: ${resultText(result)}`);
+  }
+  if (isBenignMissing(result)) return;
+  assertExitZero(result, label);
 }
 
 export class OnboardingPhaseFixture {
@@ -385,11 +411,21 @@ export class OnboardingPhaseFixture {
       env: buildAvailabilityProbeEnv(),
       timeoutMs: 60_000,
     });
+    assertRepairStepResult(
+      repairDelete,
+      "cloud-nvidia-openclaw-repair-existing-config delete sandbox",
+      hasMissingSandboxDeleteSignature,
+    );
     const repairForwardStop = await this.host.command("openshell", ["forward", "stop", "18789"], {
       artifactName: "onboard-cloud-nvidia-openclaw-repair-stop-forward",
       env: buildAvailabilityProbeEnv(),
       timeoutMs: 30_000,
     });
+    assertRepairStepResult(
+      repairForwardStop,
+      "cloud-nvidia-openclaw-repair-existing-config stop forward",
+      hasMissingForwardStopSignature,
+    );
     const resume = await this.resumeOnboard(environment, sandboxName, options, {
       artifactName: "onboard-cloud-nvidia-openclaw-repair-existing-config-resume",
     });
