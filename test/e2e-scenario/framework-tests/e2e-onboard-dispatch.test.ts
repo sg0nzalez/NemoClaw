@@ -48,6 +48,51 @@ async function canBindPort(port: number): Promise<boolean> {
 }
 
 describe("E2E onboarding shell dispatcher", () => {
+  it("rejects malformed gateway conflict ports before invoking onboarding", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "e2e-gateway-conflict-bad-port-"));
+    const fakeBin = path.join(tmp, "bin");
+    const invoked = path.join(tmp, "nemoclaw-invoked");
+    fs.mkdirSync(fakeBin);
+    fs.writeFileSync(
+      path.join(fakeBin, "nemoclaw"),
+      `#!/usr/bin/env bash
+touch "${invoked}"
+echo "nemoclaw should not have been invoked" >&2
+exit 2
+`,
+      { mode: 0o755 },
+    );
+    try {
+      fs.writeFileSync(
+        path.join(tmp, "context.env"),
+        "E2E_SCENARIO=ubuntu-gateway-port-conflict-negative\nE2E_SANDBOX_NAME=e2e-port-conflict\n",
+      );
+      const result = runBash(
+        `
+        set -euo pipefail
+        test/e2e-scenario/nemoclaw_scenarios/dispatch-action.sh e2e_onboard cloud-openclaw-gateway-port-conflict "${ONBOARD_DIR}/dispatch.sh"
+      `,
+        {
+          E2E_ACTION_ID: "onboarding.profile.cloud-openclaw-gateway-port-conflict",
+          E2E_CONTEXT_DIR: tmp,
+          E2E_PHASE: "onboarding",
+          NEMOCLAW_ONBOARD_NEGATIVE_CONFLICT_PORT: "../18080",
+          NVIDIA_API_KEY: "secret-token",
+          PATH: `${fakeBin}:${process.env.PATH ?? ""}`,
+          TMPDIR: tmp,
+        },
+      );
+      expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(2);
+      expect(`${result.stdout}\n${result.stderr}`).toContain("invalid gateway conflict port");
+      expect(fs.existsSync(invoked)).toBe(false);
+      expect(fs.readdirSync(tmp).some((entry) => entry.startsWith("gateway-port-holder-"))).toBe(
+        false,
+      );
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it("holds the requested gateway port during conflict-negative onboarding", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "e2e-gateway-conflict-"));
     const fakeBin = path.join(tmp, "bin");

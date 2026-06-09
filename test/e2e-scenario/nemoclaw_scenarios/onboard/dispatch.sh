@@ -21,6 +21,16 @@ _E2E_ONBOARD_RUNTIME_LIB="$(cd "${_E2E_ONBOARD_DIR}/../../runtime/lib" && pwd)"
 # shellcheck source=local-ollama-openclaw.sh
 . "${_E2E_ONBOARD_DIR}/local-ollama-openclaw.sh"
 
+_E2E_ONBOARD_GATEWAY_PORT_HOLDER_PID=""
+
+e2e_onboard_validate_gateway_conflict_port() {
+  local port="${1:-}"
+  if [[ ! "${port}" =~ ^[0-9]+$ ]] || ((port < 1 || port > 65535)); then
+    echo "e2e_onboard: invalid gateway conflict port: ${port}" >&2
+    return 2
+  fi
+}
+
 e2e_onboard_gateway_port_is_reachable() {
   local port="${1:-}"
   node -e 'const net=require("node:net"); const port=Number(process.argv[1]); const socket=net.connect(port, "127.0.0.1"); socket.once("connect", () => { socket.destroy(); process.exit(0); }); socket.once("error", () => process.exit(1)); setTimeout(() => process.exit(1), 250);' "${port}" >/dev/null 2>&1
@@ -46,18 +56,28 @@ NODE
   printf '%s\n' "$!"
 }
 
+e2e_onboard_cleanup_gateway_port_holder() {
+  if [[ -n "${_E2E_ONBOARD_GATEWAY_PORT_HOLDER_PID}" ]]; then
+    kill "${_E2E_ONBOARD_GATEWAY_PORT_HOLDER_PID}" >/dev/null 2>&1 || true
+    wait "${_E2E_ONBOARD_GATEWAY_PORT_HOLDER_PID}" >/dev/null 2>&1 || true
+    _E2E_ONBOARD_GATEWAY_PORT_HOLDER_PID=""
+  fi
+}
+
 e2e_onboard_cloud_openclaw_gateway_port_conflict() {
   local port="${NEMOCLAW_ONBOARD_NEGATIVE_CONFLICT_PORT:-18080}"
-  local holder_pid=""
+  e2e_onboard_validate_gateway_conflict_port "${port}" || return 2
+  trap e2e_onboard_cleanup_gateway_port_holder EXIT INT TERM
   if ! e2e_onboard_gateway_port_is_reachable "${port}"; then
-    holder_pid="$(e2e_onboard_start_gateway_port_holder "${port}")"
+    _E2E_ONBOARD_GATEWAY_PORT_HOLDER_PID="$(e2e_onboard_start_gateway_port_holder "${port}")"
     local attempts=0
     while ((attempts < 40)); do
       if e2e_onboard_gateway_port_is_reachable "${port}"; then
         break
       fi
-      if ! kill -0 "${holder_pid}" >/dev/null 2>&1; then
-        holder_pid=""
+      if ! kill -0 "${_E2E_ONBOARD_GATEWAY_PORT_HOLDER_PID}" >/dev/null 2>&1; then
+        _E2E_ONBOARD_GATEWAY_PORT_HOLDER_PID=""
+        trap - EXIT INT TERM
         echo "e2e_onboard: gateway port holder exited before port ${port} became reachable" >&2
         return 2
       fi
@@ -65,10 +85,8 @@ e2e_onboard_cloud_openclaw_gateway_port_conflict() {
       attempts=$((attempts + 1))
     done
     if ! e2e_onboard_gateway_port_is_reachable "${port}"; then
-      if [[ -n "${holder_pid}" ]]; then
-        kill "${holder_pid}" >/dev/null 2>&1 || true
-        wait "${holder_pid}" >/dev/null 2>&1 || true
-      fi
+      e2e_onboard_cleanup_gateway_port_holder
+      trap - EXIT INT TERM
       echo "e2e_onboard: failed to hold gateway port ${port}" >&2
       return 2
     fi
@@ -76,10 +94,8 @@ e2e_onboard_cloud_openclaw_gateway_port_conflict() {
 
   local status=0
   NEMOCLAW_GATEWAY_PORT="${port}" NEMOCLAW_POLICY_MODE=skip e2e_onboard_cloud_openclaw || status=$?
-  if [[ -n "${holder_pid}" ]]; then
-    kill "${holder_pid}" >/dev/null 2>&1 || true
-    wait "${holder_pid}" >/dev/null 2>&1 || true
-  fi
+  e2e_onboard_cleanup_gateway_port_holder
+  trap - EXIT INT TERM
   return "${status}"
 }
 
