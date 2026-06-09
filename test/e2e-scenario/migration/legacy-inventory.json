@@ -22,7 +22,7 @@
       "bridgeProbes": [],
       "retiredReason": "",
       "deletionReady": false,
-      "notes": "Do not delete until onboarding, gateway, sandbox, and inference smoke behavior has equivalent Vitest coverage."
+      "notes": "Partially exercised by the #5054 live-supported cloud OpenClaw Vitest scenario, but this broad script also covers install, gateway, sandbox, credentials, policy, and inference smoke behavior. Preserve until whole-script parity is recorded."
     },
     {
       "legacyScript": "test/e2e/test-cloud-onboard-e2e.sh",
@@ -33,7 +33,7 @@
       "bridgeProbes": [],
       "retiredReason": "",
       "deletionReady": false,
-      "notes": "Expected to migrate with the smoke/onboarding family after repo-local CLI smoke."
+      "notes": "Partially exercised by #5054 cloud OpenClaw Vitest onboarding coverage, but delegated sandbox, policy, Landlock, and inference-local checks still need whole-script parity before deletion."
     },
     {
       "legacyScript": "test/e2e/test-inference-routing.sh",
@@ -253,7 +253,7 @@
       "bridgeProbes": [],
       "retiredReason": "",
       "deletionReady": false,
-      "notes": "Initial completeness row; classify detailed coverage and deletion evidence in the owning migration issue before deleting."
+      "notes": "Device auth health behavior is not covered by the #5054 smoke/onboarding Vitest slice. Preserve until device-auth-specific fixture coverage exists."
     },
     {
       "legacyScript": "test/e2e/test-diagnostics.sh",
@@ -297,7 +297,7 @@
       "bridgeProbes": [],
       "retiredReason": "",
       "deletionReady": false,
-      "notes": "Initial completeness row; classify detailed coverage and deletion evidence in the owning migration issue before deleting."
+      "notes": "Partially exercised by the #5054 double-same-provider Vitest scenario, but the direct script's registry reconciliation, gateway reuse, alternate provider, and stale-state branches still need whole-script parity."
     },
     {
       "legacyScript": "test/e2e/test-gateway-drift-preflight.sh",
@@ -374,7 +374,7 @@
       "bridgeProbes": [],
       "retiredReason": "",
       "deletionReady": false,
-      "notes": "Initial completeness row; classify detailed coverage and deletion evidence in the owning migration issue before deleting."
+      "notes": "Hermes cloud onboarding is not covered by the #5054 OpenClaw-focused Vitest slice. Preserve until Hermes onboarding and health fixtures are wired."
     },
     {
       "legacyScript": "test/e2e/test-hermes-inference-switch.sh",
@@ -396,7 +396,7 @@
       "bridgeProbes": [],
       "retiredReason": "",
       "deletionReady": false,
-      "notes": "Initial completeness row; classify detailed coverage and deletion evidence in the owning migration issue before deleting."
+      "notes": "Hermes root-entrypoint smoke behavior is not covered by the #5054 OpenClaw-focused Vitest slice. Preserve until Hermes root-entrypoint fixture coverage exists."
     },
     {
       "legacyScript": "test/e2e/test-hermes-sandbox-secret-boundary.sh",
@@ -462,7 +462,7 @@
       "bridgeProbes": [],
       "retiredReason": "",
       "deletionReady": false,
-      "notes": "Initial completeness row; classify detailed coverage and deletion evidence in the owning migration issue before deleting."
+      "notes": "Launchable/public install behavior is not covered by the #5054 repo-current Vitest slice. Preserve until launchable source, sentinel, and installer evidence have parity."
     },
     {
       "legacyScript": "test/e2e/test-messaging-compatible-endpoint.sh",
@@ -517,7 +517,7 @@
       "bridgeProbes": [],
       "retiredReason": "",
       "deletionReady": false,
-      "notes": "Initial completeness row; classify detailed coverage and deletion evidence in the owning migration issue before deleting."
+      "notes": "Partially exercised by #5054 invalid-key, no-Docker, and gateway-conflict Vitest scenarios, but the direct script's policy-mode, custom-policy, bad-input, and side-effect checks still need whole-script parity."
     },
     {
       "legacyScript": "test/e2e/test-onboard-repair.sh",
@@ -528,7 +528,7 @@
       "bridgeProbes": [],
       "retiredReason": "",
       "deletionReady": false,
-      "notes": "Initial completeness row; classify detailed coverage and deletion evidence in the owning migration issue before deleting."
+      "notes": "Partially exercised by the #5054 repair Vitest scenario, but the direct script's conflicting resume and state-repair branches still need whole-script parity."
     },
     {
       "legacyScript": "test/e2e/test-onboard-resume.sh",
@@ -539,7 +539,7 @@
       "bridgeProbes": [],
       "retiredReason": "",
       "deletionReady": false,
-      "notes": "Initial completeness row; classify detailed coverage and deletion evidence in the owning migration issue before deleting."
+      "notes": "Partially exercised by the #5054 resume Vitest scenario, but the direct script's cached-step, session-file, and rerun assertions still need whole-script parity."
     },
     {
       "legacyScript": "test/e2e/test-openclaw-discord-pairing.sh",
@@ -849,13 +849,13 @@
       "paths": ["test/e2e-scenario/onboarding_assertions"],
       "domain": "smoke-onboarding",
       "ownerIssue": "#4348",
-      "status": "not-migrated",
+      "status": "covered",
       "replacementSurface": "test/e2e-scenario/framework/phases/onboarding.ts",
-      "targetVitestScenarios": [],
+      "targetVitestScenarios": ["test/e2e-scenario/live/registry-scenarios.test.ts"],
       "bridgeProbes": [],
       "retiredReason": "",
       "deletionReady": false,
-      "notes": "Retire after onboarding phase fixtures emit equivalent pass/fail evidence for base install and preflight assertions."
+      "notes": "Base install and preflight pass/fail assertion semantics are covered by the #5054 live registry Vitest onboarding fixture path. The legacy YAML/bash bridge still references these shell files, so deletionReady stays false until that bridge dependency is retired through #4357."
     },
     {
       "id": "legacy-validation-suites",

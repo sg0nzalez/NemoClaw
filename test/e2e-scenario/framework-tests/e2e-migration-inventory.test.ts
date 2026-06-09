@@ -4,7 +4,10 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import YAML from "yaml";
 import { describe, expect, it } from "vitest";
+
+import { onboardingAssertionGroups } from "../scenarios/assertions/registry.ts";
 
 const INVENTORY_PATH = path.resolve(import.meta.dirname, "../migration/legacy-inventory.json");
 const REPO_ROOT = path.resolve(import.meta.dirname, "../../..");
@@ -17,6 +20,23 @@ const INTERNAL_SURFACE_ROOTS = [
   "test/e2e-scenario/runtime/reports",
   "test/e2e-scenario/scenarios/orchestrators",
   "test/e2e-scenario/validation_suites",
+] as const;
+const SMOKE_ONBOARDING_LEGACY_SCRIPTS = [
+  "test/e2e/test-cloud-onboard-e2e.sh",
+  "test/e2e/test-device-auth-health.sh",
+  "test/e2e/test-double-onboard.sh",
+  "test/e2e/test-full-e2e.sh",
+  "test/e2e/test-hermes-e2e.sh",
+  "test/e2e/test-hermes-root-entrypoint-smoke.sh",
+  "test/e2e/test-launchable-smoke.sh",
+  "test/e2e/test-onboard-negative-paths.sh",
+  "test/e2e/test-onboard-repair.sh",
+  "test/e2e/test-onboard-resume.sh",
+] as const;
+const LEGACY_ONBOARDING_ASSERTION_SCRIPTS = [
+  "test/e2e-scenario/onboarding_assertions/base/00-cli-installed.sh",
+  "test/e2e-scenario/onboarding_assertions/preflight/00-preflight-expected-failed.sh",
+  "test/e2e-scenario/onboarding_assertions/preflight/00-preflight-passed.sh",
 ] as const;
 
 type MigrationStatus = "not-migrated" | "bridge-probe" | "covered" | "retired";
@@ -59,8 +79,21 @@ interface LegacyInventory {
   internalSurfaces: LegacyInternalSurface[];
 }
 
+interface YamlScenarioRegistry {
+  onboarding_assertions?: Record<string, { script?: string }>;
+}
+
 function loadInventory(): LegacyInventory {
   return JSON.parse(fs.readFileSync(INVENTORY_PATH, "utf8")) as LegacyInventory;
+}
+
+function loadYamlScenarioRegistry(): YamlScenarioRegistry {
+  return YAML.parse(
+    fs.readFileSync(
+      path.join(REPO_ROOT, "test/e2e-scenario/nemoclaw_scenarios/scenarios.yaml"),
+      "utf8",
+    ),
+  ) as YamlScenarioRegistry;
 }
 
 function repoPathExists(repoRelativePath: string): boolean {
@@ -97,6 +130,13 @@ function listRepoFilesUnder(repoRelativeDir: string): string[] {
 
 function isCoveredByInventoryPath(filePath: string, inventoryPath: string): boolean {
   return filePath === inventoryPath || filePath.startsWith(`${inventoryPath}/`);
+}
+
+function findInternalSurface(
+  inventory: LegacyInventory,
+  id: string,
+): LegacyInternalSurface | undefined {
+  return inventory.internalSurfaces.find((surface) => surface.id === id);
 }
 
 function expectPathListIsRepoRelative(paths: readonly string[]) {
@@ -218,5 +258,60 @@ describe("E2E migration inventory deletion gates", () => {
     for (const surface of inventory.internalSurfaces) {
       expectMigrationRecordDeletionGate(surface);
     }
+  });
+
+  it("keeps smoke/onboarding direct shell scripts preserved until whole-script parity exists", () => {
+    const inventory = loadInventory();
+    const smokeOnboardingEntries = inventory.entries
+      .filter((entry) => entry.domain === "smoke-onboarding")
+      .sort((left, right) => left.legacyScript.localeCompare(right.legacyScript));
+
+    expect(smokeOnboardingEntries.map((entry) => entry.legacyScript)).toEqual([
+      ...SMOKE_ONBOARDING_LEGACY_SCRIPTS,
+    ]);
+
+    for (const entry of smokeOnboardingEntries) {
+      expect(repoPathExists(entry.legacyScript)).toBe(true);
+      expect(entry.status).toBe("not-migrated");
+      expect(entry.targetVitestScenarios).toEqual([]);
+      expect(entry.bridgeProbes).toEqual([]);
+      expect(entry.deletionReady).toBe(false);
+      expect(entry.deletionApprovalIssue).toBeUndefined();
+      expect(entry.notes).toMatch(/whole-script|not covered|not deletion-ready|Preserve/i);
+    }
+  });
+
+  it("records onboarding assertion workers as covered but still required by the bridge", () => {
+    const inventory = loadInventory();
+    const surface = findInternalSurface(inventory, "legacy-onboarding-assertion-workers");
+
+    expect(surface).toBeTruthy();
+    expect(surface).toMatchObject({
+      status: "covered",
+      replacementSurface: "test/e2e-scenario/framework/phases/onboarding.ts",
+      targetVitestScenarios: ["test/e2e-scenario/live/registry-scenarios.test.ts"],
+      bridgeProbes: [],
+      deletionReady: false,
+    });
+    expect(surface?.deletionApprovalIssue).toBeUndefined();
+    expect(surface?.notes).toContain("legacy YAML/bash bridge still references");
+
+    const assertionRegistryRefs = onboardingAssertionGroups
+      .flatMap((group) => group.steps.map((step) => step.implementation?.ref))
+      .filter((ref): ref is string => Boolean(ref))
+      .sort();
+    const yamlScenarioRegistryRefs = Object.values(
+      loadYamlScenarioRegistry().onboarding_assertions ?? {},
+    )
+      .map((entry) => entry.script)
+      .filter((script): script is string => Boolean(script))
+      .map((script) => `test/e2e-scenario/${script}`)
+      .sort();
+
+    for (const script of LEGACY_ONBOARDING_ASSERTION_SCRIPTS) {
+      expect(repoPathExists(script)).toBe(true);
+    }
+    expect(assertionRegistryRefs).toEqual([...LEGACY_ONBOARDING_ASSERTION_SCRIPTS].sort());
+    expect(yamlScenarioRegistryRefs).toEqual([...LEGACY_ONBOARDING_ASSERTION_SCRIPTS].sort());
   });
 });

@@ -101,6 +101,14 @@ Do not set `deletionReady: true` on a script entry or internal surface unless
 the record is `covered` or `retired` and the deletion approval is recorded
 through #4357.
 
+A domain migration can still have useful partial coverage before a direct legacy
+script is deletion-ready. In that case, leave the broad `test/e2e/test-*.sh`
+entry as `not-migrated`, record the narrow covered behavior in the owning issue
+or PR, and keep `deletionReady: false`. Internal bridge surfaces may be marked
+`covered` when equivalent Vitest fixture coverage exists, but they must still
+stay `deletionReady: false` while the YAML/bash bridge or assertion registry
+references them.
+
 After #4357 completes final legacy E2E reconciliation, remove the inventory if
 there are no remaining legacy entrypoints to guard. If maintainers keep it, keep
 it as an audit artifact rather than as a living migration checklist.
