@@ -55,6 +55,7 @@ const DEFAULT_CHAT_PROMPT = "Say ok";
 const DEFAULT_CHAT_MAX_TOKENS = 8;
 const MODELS_PATH = "/v1/models";
 const CHAT_COMPLETIONS_PATH = "/v1/chat/completions";
+const SENSITIVE_HEADER_NAME = /(authorization|api[-_]?key|token|secret|credential|password)/i;
 
 function inferenceHost(route: InferenceRoute = "inference-local"): string {
   switch (route) {
@@ -93,13 +94,35 @@ function shellOptions(
   return {
     artifactName: options.artifactName ?? artifactName,
     env: buildAvailabilityProbeEnv(),
-    redactionValues: [...(options.redactionValues ?? [])],
+    redactionValues: uniqueRedactionValues([
+      ...(options.redactionValues ?? []),
+      ...sensitiveHeaderRedactionValues(options.headers),
+    ]),
     timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   };
 }
 
 function headerArgs(headers: readonly string[] = []): string[] {
   return headers.flatMap((header) => ["-H", header]);
+}
+
+function sensitiveHeaderRedactionValues(headers: readonly string[] = []): string[] {
+  const values = new Set<string>();
+  for (const header of headers) {
+    const separator = header.indexOf(":");
+    if (separator === -1) continue;
+    const name = header.slice(0, separator).trim();
+    const value = header.slice(separator + 1).trim();
+    if (!value || !SENSITIVE_HEADER_NAME.test(name)) continue;
+    values.add(header);
+    values.add(value);
+    values.add(value.replace(/^Bearer\s+/i, "").trim());
+  }
+  return [...values].filter(Boolean);
+}
+
+function uniqueRedactionValues(values: readonly string[]): string[] {
+  return [...new Set(values.filter(Boolean))];
 }
 
 function parseHttpStatus(result: ShellProbeResult, label: string): number {
@@ -182,7 +205,10 @@ function providerRequestOptions(
   body?: string,
 ): ProviderJsonRequestOptions {
   const headers = [...(options.headers ?? [])];
-  const redactionValues = [...(options.redactionValues ?? [])];
+  const redactionValues = uniqueRedactionValues([
+    ...(options.redactionValues ?? []),
+    ...sensitiveHeaderRedactionValues(headers),
+  ]);
   if (body !== undefined) {
     headers.unshift("Content-Type: application/json");
   }
@@ -193,6 +219,7 @@ function providerRequestOptions(
   return {
     artifactName: options.artifactName,
     body,
+    curlMaxTimeSeconds: options.curlMaxTimeSeconds ?? DEFAULT_CURL_MAX_TIME_SECONDS,
     headers,
     redactionValues,
     timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,

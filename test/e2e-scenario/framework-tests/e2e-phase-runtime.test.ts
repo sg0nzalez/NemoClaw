@@ -214,7 +214,11 @@ describe("runtime phase fixture", () => {
       ],
       options: {
         artifactName: "runtime-inference-local-status",
-        redactionValues: ["local-proxy-token"],
+        redactionValues: expect.arrayContaining([
+          "Authorization: Bearer local-proxy-token",
+          "Bearer local-proxy-token",
+          "local-proxy-token",
+        ]),
         timeoutMs: 60_000,
       },
     });
@@ -238,6 +242,8 @@ describe("runtime phase fixture", () => {
       command: "curl",
       args: [
         "-fsS",
+        "--max-time",
+        "20",
         "-H",
         "Content-Type: application/json",
         "-H",
@@ -253,6 +259,40 @@ describe("runtime phase fixture", () => {
       options: {
         artifactName: "curl-https-api.example.test-v1-chat-completions",
         redactionValues: ["provider-secret"],
+        timeoutMs: 60_000,
+      },
+    });
+  });
+
+  it("redacts sensitive custom headers and honors provider curl max time", async () => {
+    const runner = new FakeRunner();
+    runner.enqueue(shellResult(0, JSON.stringify({ data: [{ id: "nvidia/model" }] })));
+    const endpoint = trustedProviderEndpoint("https://api.example.test/v1/models", {
+      allowedHosts: ["api.example.test"],
+    });
+
+    await fixture(runner).expectProviderModels(endpoint, {
+      curlMaxTimeSeconds: 7,
+      headers: ["Authorization: Bearer custom-provider-token"],
+    });
+
+    expect(runner.calls[0]).toMatchObject({
+      command: "curl",
+      args: [
+        "-fsS",
+        "--max-time",
+        "7",
+        "-H",
+        "Authorization: Bearer custom-provider-token",
+        "https://api.example.test/v1/models",
+      ],
+      options: {
+        artifactName: "curl-https-api.example.test-v1-models",
+        redactionValues: expect.arrayContaining([
+          "Authorization: Bearer custom-provider-token",
+          "Bearer custom-provider-token",
+          "custom-provider-token",
+        ]),
         timeoutMs: 60_000,
       },
     });

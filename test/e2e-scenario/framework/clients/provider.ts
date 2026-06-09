@@ -27,6 +27,7 @@ export interface TrustedProviderEndpointOptions {
 
 export interface ProviderJsonRequestOptions extends ShellProbeRunOptions {
   readonly body?: string;
+  readonly curlMaxTimeSeconds?: number;
   readonly headers?: readonly string[];
 }
 
@@ -189,8 +190,11 @@ export class ProviderClient {
     endpoint: TrustedProviderEndpoint,
     options: ProviderJsonRequestOptions = {},
   ): Promise<ProviderJsonResponse<T>> {
-    const { body, headers, ...runOptions } = options;
+    const { body, curlMaxTimeSeconds, headers, ...runOptions } = options;
     const args = ["-fsS"];
+    if (curlMaxTimeSeconds !== undefined) {
+      args.push("--max-time", String(curlMaxTimeSeconds));
+    }
     for (const header of headers ?? []) {
       args.push("-H", header);
     }
