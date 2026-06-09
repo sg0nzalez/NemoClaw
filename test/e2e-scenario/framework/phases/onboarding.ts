@@ -5,6 +5,7 @@ import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { resolveExecutableOnboardingProfile } from "../../scenarios/onboarding-profiles.ts";
 import { redactString } from "../../scenarios/orchestrators/redaction.ts";
 import { buildAvailabilityProbeEnv } from "../availability-env.ts";
 import { artifactLabel, assertExitZero } from "../clients/command.ts";
@@ -245,10 +246,8 @@ function assertRepairStepResult(
 }
 
 function executableOnboardingEnvironment(environment: EnvironmentReady): EnvironmentReady {
-  if (environment.runtime === "docker-missing" && environment.onboarding === "cloud-openclaw") {
-    return { ...environment, onboarding: "cloud-openclaw-no-docker" };
-  }
-  return environment;
+  const onboarding = resolveExecutableOnboardingProfile(environment);
+  return onboarding === environment.onboarding ? environment : { ...environment, onboarding };
 }
 
 export class OnboardingPhaseFixture {
