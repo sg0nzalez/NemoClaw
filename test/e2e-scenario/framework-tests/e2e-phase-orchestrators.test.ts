@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { describe, expect, it } from "vitest";
 
 import { HostCliClient } from "../scenarios/clients/host-cli.ts";
 import { compileRunPlans } from "../scenarios/compiler.ts";
@@ -1006,6 +1006,25 @@ describe("framework-owned secret hygiene at the spawn boundary", () => {
       ?.actions.find((a) => a.id.startsWith("onboarding.profile."));
     expect(cloudOnboard?.secretEnv).toEqual(["NVIDIA_API_KEY"]);
     expect(localOnboard?.secretEnv).toEqual([]);
+  });
+
+  it("should not require a live NVIDIA API key for the invalid-key negative fixture", async () => {
+    const { compileRunPlans } = await import("../scenarios/compiler.ts");
+    const [invalidKeyPlan, portConflictPlan] = compileRunPlans([
+      "ubuntu-invalid-nvidia-key-negative",
+      "ubuntu-gateway-port-conflict-negative",
+    ]);
+    const invalidKeyOnboard = invalidKeyPlan.phases
+      .find((p) => p.name === "onboarding")
+      ?.actions.find((a) => a.id.startsWith("onboarding.profile."));
+    const portConflictOnboard = portConflictPlan.phases
+      .find((p) => p.name === "onboarding")
+      ?.actions.find((a) => a.id.startsWith("onboarding.profile."));
+
+    expect(invalidKeyPlan.requiredSecrets).toEqual([]);
+    expect(invalidKeyOnboard?.secretEnv).toEqual([]);
+    expect(portConflictPlan.requiredSecrets).toEqual(["NVIDIA_API_KEY"]);
+    expect(portConflictOnboard?.secretEnv).toEqual(["NVIDIA_API_KEY"]);
   });
 });
 
