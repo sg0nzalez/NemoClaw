@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { getExpectedState, probesForState } from "./expected-states.ts";
 import { loadManifest } from "./manifests.ts";
+import { resolveExecutableOnboardingProfile } from "./onboarding-profiles.ts";
 import { requireScenarios } from "./registry.ts";
 import type {
   AssertionGroup,
@@ -129,7 +130,9 @@ const ONBOARD_PROFILE_SECRET_ENV: Readonly<Record<string, readonly string[]>> = 
   // NVIDIA cloud provider via NVIDIA_API_KEY.
   "cloud-openclaw": ["NVIDIA_API_KEY"],
   "cloud-openclaw-custom-policies": ["NVIDIA_API_KEY"],
-  "cloud-openclaw-invalid-nvidia-key": ["NVIDIA_API_KEY"],
+  // Negative scenario: the fixture injects its own known-bad key and must not
+  // pass a live NVIDIA_API_KEY through from the parent environment.
+  "cloud-openclaw-invalid-nvidia-key": [],
   "cloud-openclaw-gateway-port-conflict": ["NVIDIA_API_KEY"],
   // Negative scenario: nemoclaw onboard runs against a docker shim that
   // exits non-zero. Onboard never reaches the cloud auth step, but the
@@ -179,17 +182,7 @@ function phaseActions(phase: PhaseName, scenario: ScenarioDefinition): PhaseActi
     if (!baseOnboardingId) {
       throw new Error(`Scenario ${scenario.id} is missing environment.onboarding`);
     }
-    // Negative-runtime scenarios route to a dedicated onboarding profile
-    // that sets up the failure condition (e.g. docker-missing) BEFORE
-    // invoking `nemoclaw onboard` and captures the resulting output to
-    // the log file the assertion phase reads. The profile id convention
-    // is `<base>-no-docker`. New negative profiles register a worker in
-    // nemoclaw_scenarios/onboard/dispatch.sh and a secret-env mapping
-    // above.
-    const onboardingId =
-      scenario.environment.runtime === "docker-missing"
-        ? `${baseOnboardingId}-no-docker`
-        : baseOnboardingId;
+    const onboardingId = resolveExecutableOnboardingProfile(scenario.environment);
     // secretEnv defaults to [] (no parent-env secrets pass through)
     // unless the profile is explicitly listed above. Unknown profiles
     // get the safest setting and surface the gap loudly the first

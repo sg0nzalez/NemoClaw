@@ -37,6 +37,7 @@ export default defineConfig({
             "**/node_modules/**",
             "**/.claude/**",
             "test/e2e/**",
+            "test/e2e-scenario/**",
             "test/install-preflight.test.ts",
             "test/install-openshell-version-check.test.ts",
           ],

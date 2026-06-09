@@ -2,19 +2,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-
+import config from "../../../vitest.config.ts";
+import { readYaml, type WorkflowStep } from "../../helpers/e2e-workflow-contract.ts";
 import {
   shouldRunBranchValidationE2E,
   shouldRunInstallerIntegration,
   shouldRunLiveE2EScenarios,
 } from "../framework/live-project-gate.ts";
-import config from "../../../vitest.config.ts";
-import { readYaml, type WorkflowStep } from "../../helpers/e2e-workflow-contract.ts";
 
 interface ProjectConfig {
   test?: {
     name?: string;
     include?: string[];
+    exclude?: string[];
   };
 }
 
@@ -28,6 +28,7 @@ const INSTALLER_INTEGRATION_TESTS = [
   "test/install-preflight.test.ts",
   "test/install-openshell-version-check.test.ts",
 ];
+const CLI_E2E_SCENARIO_EXCLUDES = ["test/e2e-scenario/**"];
 const LIVE_E2E_SCENARIO_TESTS = ["test/e2e-scenario/live/**/*.test.ts"];
 const BRANCH_VALIDATION_E2E_TESTS = ["test/e2e/brev-e2e.test.ts"];
 
@@ -50,6 +51,9 @@ function projectConfig(name: string): ProjectConfig {
 
 describe("gated E2E Vitest projects", () => {
   it("selects gated project includes from the current process environment", () => {
+    expect(projectConfig("cli").test?.exclude).toEqual(
+      expect.arrayContaining(CLI_E2E_SCENARIO_EXCLUDES),
+    );
     expect(projectConfig("installer-integration").test?.include).toEqual(
       shouldRunInstallerIntegration() ? INSTALLER_INTEGRATION_TESTS : [],
     );

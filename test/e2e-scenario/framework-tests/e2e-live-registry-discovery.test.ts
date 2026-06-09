@@ -39,15 +39,59 @@ describe("live Vitest registry discovery support", () => {
     });
   });
 
-  it("keeps no-Docker negatives skipped until runtime prep is matrix-owned", () => {
+  it("wires the smoke/onboarding migration family through phase fixtures", () => {
+    const supportedIds = [
+      "ubuntu-repo-cloud-openclaw",
+      "ubuntu-no-docker-preflight-negative",
+      "ubuntu-repo-cloud-openclaw-resume",
+      "ubuntu-repo-cloud-openclaw-repair",
+      "ubuntu-repo-cloud-openclaw-double-same-provider",
+      "ubuntu-repo-cloud-openclaw-custom-policies",
+      "ubuntu-invalid-nvidia-key-negative",
+      "ubuntu-gateway-port-conflict-negative",
+    ];
+
+    for (const id of supportedIds) {
+      const scenario = listScenarios().find((entry) => entry.id === id);
+      expect(scenario, `${id} must exist`).toBeTruthy();
+      expect(liveScenarioSupport(scenario!), `${id} should be live-supported`).toMatchObject({
+        supported: true,
+        reasons: [],
+      });
+    }
+  });
+
+  it("keeps provider-switch onboarding skipped until inference fixtures own it", () => {
     const scenario = listScenarios().find(
-      (entry) => entry.id === "ubuntu-no-docker-preflight-negative",
+      (entry) => entry.id === "ubuntu-repo-cloud-openclaw-double-provider-switch",
     );
 
     expect(scenario).toBeTruthy();
     expect(liveScenarioSupport(scenario!)).toMatchObject({
       supported: false,
-      reasons: ["runtime 'docker-missing' is not wired for live Vitest fixtures"],
+      reasons: [
+        "onboarding 'cloud-nvidia-openclaw-double-provider-switch' is not wired for live Vitest fixtures",
+      ],
+    });
+  });
+
+  it("keeps docker-missing scenarios skipped unless the executable onboarding profile is wired", () => {
+    const base = listScenarios().find((entry) => entry.id === "ubuntu-repo-cloud-hermes");
+    expect(base).toBeTruthy();
+    const scenario = {
+      ...base!,
+      id: "synthetic-docker-missing-hermes",
+      environment: {
+        ...base!.environment!,
+        runtime: "docker-missing",
+        onboarding: "cloud-hermes",
+      },
+      expectedStateId: "preflight-failure-no-sandbox",
+    };
+
+    expect(liveScenarioSupport(scenario)).toMatchObject({
+      supported: false,
+      reasons: ["onboarding 'cloud-hermes-no-docker' is not wired for live Vitest fixtures"],
     });
   });
 
@@ -57,9 +101,7 @@ describe("live Vitest registry discovery support", () => {
     expect(scenario).toBeTruthy();
     expect(liveScenarioSupport(scenario!)).toMatchObject({
       supported: false,
-      reasons: [
-        "lifecycle 'rebuild-current-version' is not wired for live Vitest fixtures",
-      ],
+      reasons: ["lifecycle 'rebuild-current-version' is not wired for live Vitest fixtures"],
     });
   });
 

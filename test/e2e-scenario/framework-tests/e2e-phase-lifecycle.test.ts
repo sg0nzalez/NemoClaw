@@ -3,11 +3,7 @@
 
 import { describe, expect, expectTypeOf, it } from "vitest";
 
-import {
-  HostCliClient,
-  SandboxClient,
-  type CommandRunner,
-} from "../framework/clients/index.ts";
+import { HostCliClient, SandboxClient, type CommandRunner } from "../framework/clients/index.ts";
 import type { E2EScenarioFixtures } from "../framework/e2e-test.ts";
 import {
   buildBackupContainerName,
@@ -106,10 +102,7 @@ describe("LifecyclePhaseFixture.simulate post-reboot-recovery (stop-original)", 
     runner.enqueue(shellResult(0)); // docker stop
     const cleanup = new FakeCleanup();
 
-    const result = await fixture(runner, cleanup).simulate(
-      "post-reboot-recovery",
-      instance(),
-    );
+    const result = await fixture(runner, cleanup).simulate("post-reboot-recovery", instance());
 
     expect(result.profile).toBe("post-reboot-recovery");
     expect(result.steps.map((step) => step.id)).toEqual([
@@ -143,10 +136,7 @@ describe("LifecyclePhaseFixture.simulate post-reboot-recovery (stop-original)", 
     runner.enqueue(shellResult(0)); // docker stop
     const cleanup = new FakeCleanup();
 
-    const result = await fixture(runner, cleanup).simulate(
-      "post-reboot-recovery",
-      instance(),
-    );
+    const result = await fixture(runner, cleanup).simulate("post-reboot-recovery", instance());
 
     expect(result.steps.find((step) => step.id === "gateway-stop")).toBeTruthy();
   });

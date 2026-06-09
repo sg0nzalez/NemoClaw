@@ -122,15 +122,11 @@ export class LifecyclePhaseFixture {
     }
     const originalName = containerNames[0];
 
-    const stop = await this.host.command(
-      "docker",
-      ["stop", originalName],
-      {
-        artifactName: `lifecycle-post-reboot-docker-stop-${originalName}`,
-        env: buildAvailabilityProbeEnv(),
-        timeoutMs: DOCKER_PROBE_TIMEOUT_MS,
-      },
-    );
+    const stop = await this.host.command("docker", ["stop", originalName], {
+      artifactName: `lifecycle-post-reboot-docker-stop-${originalName}`,
+      env: buildAvailabilityProbeEnv(),
+      timeoutMs: DOCKER_PROBE_TIMEOUT_MS,
+    });
     assertExitZero(stop, `docker stop ${originalName}`);
     steps.push({ id: `docker-stop:${originalName}`, results: [stop] });
     this.cleanup.add(`lifecycle.docker-start:${originalName}`, async () => {
@@ -143,15 +139,11 @@ export class LifecyclePhaseFixture {
 
     if (mode === "rename-to-gpu-backup") {
       const backupName = buildBackupContainerName(originalName, Date.now());
-      const rename = await this.host.command(
-        "docker",
-        ["rename", originalName, backupName],
-        {
-          artifactName: `lifecycle-post-reboot-docker-rename-${originalName}`,
-          env: buildAvailabilityProbeEnv(),
-          timeoutMs: DOCKER_PROBE_TIMEOUT_MS,
-        },
-      );
+      const rename = await this.host.command("docker", ["rename", originalName, backupName], {
+        artifactName: `lifecycle-post-reboot-docker-rename-${originalName}`,
+        env: buildAvailabilityProbeEnv(),
+        timeoutMs: DOCKER_PROBE_TIMEOUT_MS,
+      });
       assertExitZero(rename, `docker rename ${originalName} ${backupName}`);
       steps.push({ id: `docker-rename:${originalName}->${backupName}`, results: [rename] });
       this.cleanup.add(`lifecycle.docker-rename-back:${backupName}`, async () => {

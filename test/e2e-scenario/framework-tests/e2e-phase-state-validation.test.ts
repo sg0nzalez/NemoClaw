@@ -541,10 +541,7 @@ describe("state-validation host-side probes", () => {
   it("docker-sandbox-container-present matches *-nemoclaw-gpu-backup-* sibling containers", async () => {
     const runner = new FakeRunner();
     runner.enqueue(
-      shellResult(
-        0,
-        "e2e-ubuntu-repo-cloud-openclaw-nemoclaw-gpu-backup-1717280000000\n",
-      ),
+      shellResult(0, "e2e-ubuntu-repo-cloud-openclaw-nemoclaw-gpu-backup-1717280000000\n"),
     );
     const fx = fixture(runner);
 

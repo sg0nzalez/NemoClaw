@@ -5,14 +5,35 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { expect, test } from "../framework/e2e-test.ts";
-import type { LifecycleProfile } from "../framework/phases/index.ts";
+import type { LifecycleProfile, NemoClawInstance } from "../framework/phases/index.ts";
 import { listScenarios } from "../scenarios/registry.ts";
 import { liveScenarioSupport, liveScenarioTestName } from "../scenarios/runtime-support.ts";
+import type { ExpectedFailureContract, ScenarioDefinition } from "../scenarios/types.ts";
 
 const LIFECYCLE_PROFILES: ReadonlySet<LifecycleProfile> = new Set(["post-reboot-recovery"]);
 
 function isLifecycleProfile(value: string | undefined): value is LifecycleProfile {
   return value !== undefined && LIFECYCLE_PROFILES.has(value as LifecycleProfile);
+}
+
+function assertExpectedFailureContract(
+  scenario: Pick<ScenarioDefinition, "id" | "expectedFailure">,
+  instance: NemoClawInstance,
+): ExpectedFailureContract | undefined {
+  if (!scenario.expectedFailure) {
+    expect(instance.expectedFailure, `${scenario.id} must not report an expected failure`).toBe(
+      undefined,
+    );
+    return undefined;
+  }
+
+  expect(instance.expectedFailure, `${scenario.id} must report its expected failure`).toMatchObject(
+    {
+      phase: scenario.expectedFailure.phase,
+      errorClass: scenario.expectedFailure.errorClass,
+    },
+  );
+  return scenario.expectedFailure;
 }
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "../../..");
@@ -62,6 +83,7 @@ for (const scenario of listScenarios()) {
 
       const ready = await environment.assertReady(scenario.environment);
       const instance = await onboard.from(ready, { sandboxName: `e2e-${scenario.id}` });
+      const expectedFailure = assertExpectedFailureContract(scenario, instance);
 
       // Lifecycle phase runs between onboard and state-validation.
       // Scenarios opt in by setting `environment.lifecycle` to a
@@ -90,6 +112,7 @@ for (const scenario of listScenarios()) {
         expectedStateId: validation.state.id,
         probes: validation.probes.map((probe) => probe.id),
         pendingRuntimeSuites: support.pendingRuntimeSuites,
+        expectedFailure,
         lifecycle: lifecycleResult
           ? { profile: lifecycleResult.profile, steps: lifecycleResult.steps.map((s) => s.id) }
           : undefined,
