@@ -39,12 +39,12 @@
       "legacyScript": "test/e2e/test-inference-routing.sh",
       "domain": "inference",
       "ownerIssue": "#4349",
-      "status": "covered",
-      "targetVitestScenarios": ["test/e2e-scenario/live/registry-scenarios.test.ts"],
-      "bridgeProbes": [],
+      "status": "bridge-probe",
+      "targetVitestScenarios": [],
+      "bridgeProbes": ["test/e2e-scenario/live/registry-scenarios.test.ts"],
       "retiredReason": "",
       "deletionReady": false,
-      "notes": "Covered by the ubuntu-repo-cloud-openclaw live Vitest scenario via RuntimePhaseFixture suite 'inference-routing'. Do not delete until #4357 records cutover approval and downstream shell entrypoints are retired together."
+      "notes": "Partially represented by the ubuntu-repo-cloud-openclaw live Vitest scenario via RuntimePhaseFixture suite 'inference-routing'. Keep the legacy script until credential isolation, negative classification, cleanup, provider-route, and compatible-endpoint coverage migrate."
     },
     {
       "legacyScript": "test/e2e/test-openclaw-inference-switch.sh",
@@ -193,12 +193,12 @@
       "legacyScript": "test/e2e/test-cloud-inference-e2e.sh",
       "domain": "inference",
       "ownerIssue": "#4349",
-      "status": "covered",
-      "targetVitestScenarios": ["test/e2e-scenario/live/registry-scenarios.test.ts"],
-      "bridgeProbes": [],
+      "status": "bridge-probe",
+      "targetVitestScenarios": [],
+      "bridgeProbes": ["test/e2e-scenario/live/registry-scenarios.test.ts"],
       "retiredReason": "",
       "deletionReady": false,
-      "notes": "Covered by the ubuntu-repo-cloud-openclaw live Vitest scenario via RuntimePhaseFixture suite 'inference'. Do not delete until #4357 records cutover approval and downstream shell entrypoints are retired together."
+      "notes": "Partially represented by the ubuntu-repo-cloud-openclaw live Vitest scenario via RuntimePhaseFixture suite 'inference'. Keep the legacy script until repo-skill and sandbox skill filesystem validation migrate."
     },
     {
       "legacyScript": "test/e2e/test-common-egress-agent-e2e.sh",
