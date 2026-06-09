@@ -630,6 +630,46 @@ describe("onboarding phase fixture", () => {
     expect(cleanup.calls[0]?.name).toBe("destroy NemoClaw sandbox e2e-no-docker");
   });
 
+  it("routes raw docker-missing cloud onboarding metadata to the no-Docker executable profile", async () => {
+    const runner = new FakeRunner();
+    runner.enqueue(shellResult(7, "Cannot connect to the Docker daemon"));
+    const onboard = new OnboardingPhaseFixture(
+      new HostCliClient(runner),
+      new FakeSecrets({ NVIDIA_API_KEY: "secret-token" }),
+    );
+
+    const instance = await onboard.from(
+      ready({
+        runtime: "docker-missing",
+        onboarding: "cloud-openclaw",
+        docker: { id: "docker-missing", expectation: "missing", available: true },
+      }),
+      { sandboxName: "e2e-ubuntu-no-docker-preflight-negative" },
+    );
+
+    expect(instance).toMatchObject({
+      onboarding: "cloud-openclaw-no-docker",
+      sandboxName: "e2e-ubuntu-no-docker-preflight-negative",
+      expectedFailure: {
+        phase: "preflight",
+        errorClass: "docker-missing",
+      },
+    });
+    expect(runner.calls[0]).toMatchObject({
+      command: "nemoclaw",
+      args: ["onboard", "--non-interactive", "--yes", "--yes-i-accept-third-party-software"],
+      options: {
+        artifactName: "onboard-cloud-openclaw-no-docker",
+        env: expect.objectContaining({
+          NEMOCLAW_SANDBOX_NAME: "e2e-ubuntu-no-docker-preflight-negative",
+          NVIDIA_API_KEY: "secret-token",
+        }),
+        redactionValues: ["secret-token"],
+        timeoutMs: 900_000,
+      },
+    });
+  });
+
   it("publishes redacted legacy preflight evidence for the no-Docker negative path", async () => {
     const previousContextDir = process.env.E2E_CONTEXT_DIR;
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "e2e-typed-no-docker-"));

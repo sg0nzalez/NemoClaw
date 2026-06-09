@@ -244,6 +244,13 @@ function assertRepairStepResult(
   assertExitZero(result, label);
 }
 
+function executableOnboardingEnvironment(environment: EnvironmentReady): EnvironmentReady {
+  if (environment.runtime === "docker-missing" && environment.onboarding === "cloud-openclaw") {
+    return { ...environment, onboarding: "cloud-openclaw-no-docker" };
+  }
+  return environment;
+}
+
 export class OnboardingPhaseFixture {
   constructor(
     private readonly host: HostCliClient,
@@ -255,25 +262,26 @@ export class OnboardingPhaseFixture {
     environment: EnvironmentReady,
     options: OnboardingOptions = {},
   ): Promise<NemoClawInstance> {
-    switch (environment.onboarding) {
+    const executableEnvironment = executableOnboardingEnvironment(environment);
+    switch (executableEnvironment.onboarding) {
       case "cloud-openclaw":
-        return await this.cloudOpenClaw(environment, options);
+        return await this.cloudOpenClaw(executableEnvironment, options);
       case "cloud-openclaw-custom-policies":
-        return await this.cloudOpenClawCustomPolicies(environment, options);
+        return await this.cloudOpenClawCustomPolicies(executableEnvironment, options);
       case "cloud-openclaw-invalid-nvidia-key":
-        return await this.cloudOpenClawInvalidNvidiaKey(environment, options);
+        return await this.cloudOpenClawInvalidNvidiaKey(executableEnvironment, options);
       case "cloud-openclaw-gateway-port-conflict":
-        return await this.cloudOpenClawGatewayPortConflict(environment, options);
+        return await this.cloudOpenClawGatewayPortConflict(executableEnvironment, options);
       case "cloud-openclaw-no-docker":
-        return await this.cloudOpenClawNoDocker(environment, options);
+        return await this.cloudOpenClawNoDocker(executableEnvironment, options);
       case "cloud-nvidia-openclaw-resume-after-interrupt":
-        return await this.cloudNvidiaOpenClawResumeAfterInterrupt(environment, options);
+        return await this.cloudNvidiaOpenClawResumeAfterInterrupt(executableEnvironment, options);
       case "cloud-nvidia-openclaw-repair-existing-config":
-        return await this.cloudNvidiaOpenClawRepairExistingConfig(environment, options);
+        return await this.cloudNvidiaOpenClawRepairExistingConfig(executableEnvironment, options);
       case "cloud-nvidia-openclaw-double-same-provider":
-        return await this.cloudNvidiaOpenClawDoubleSameProvider(environment, options);
+        return await this.cloudNvidiaOpenClawDoubleSameProvider(executableEnvironment, options);
       default:
-        throw new Error(`Unsupported onboarding profile '${environment.onboarding}'.`);
+        throw new Error(`Unsupported onboarding profile '${executableEnvironment.onboarding}'.`);
     }
   }
 
