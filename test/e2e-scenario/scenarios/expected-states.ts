@@ -131,5 +131,15 @@ export function probesForState(state: ExpectedState): readonly StateProbeId[] {
   } else if (state.sandbox?.expected === "absent") {
     probes.push("sandbox-absent");
   }
+  // Host-side aspects. "absent" deliberately emits no probe today: it
+  // would require asserting the registry/container does NOT exist,
+  // which has no scenario in flight. Add when a negative scenario
+  // needs it.
+  if (state.localRegistry?.expected === "present") {
+    probes.push("local-registry-entry-present");
+  }
+  if (state.dockerSandboxContainer?.expected === "present") {
+    probes.push("docker-sandbox-container-present");
+  }
   return probes;
 }
