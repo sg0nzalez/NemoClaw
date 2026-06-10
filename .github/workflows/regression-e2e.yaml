@@ -336,28 +336,58 @@ jobs:
       github.repository == 'NVIDIA/NemoClaw' &&
       needs.select_regression_jobs.outputs.model_router_provider_routed_inference == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
 
-      - name: Run Model Router provider-routed inference E2E test
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install root dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Build CLI
+        run: npm run build:cli
+
+      - name: Install OpenShell
+        env:
+          NEMOCLAW_NON_INTERACTIVE: "1"
+        run: |
+          set -euo pipefail
+          bash scripts/install-openshell.sh
+          echo "${HOME}/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Run Model Router provider-routed inference Vitest E2E test
         env:
           NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
           NEMOCLAW_NON_INTERACTIVE: "1"
           NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE: "1"
-        run: bash test/e2e/test-model-router-provider-routed-inference.sh
+          NEMOCLAW_CLI_BIN: ${{ github.workspace }}/bin/nemoclaw.js
+          NEMOCLAW_RUN_E2E_SCENARIOS: "1"
+          E2E_ARTIFACT_DIR: ${{ github.workspace }}/e2e-artifacts/vitest/model-router-provider-routed-inference
+        run: |
+          set -euo pipefail
+          npx vitest run --project e2e-scenarios-live \
+            test/e2e-scenario/live/model-router-provider-routed-inference.test.ts \
+            --silent=false --reporter=default
 
-      - name: Upload Model Router provider-routed inference logs on failure
-        if: failure()
+      - name: Upload Model Router provider-routed inference artifacts
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: model-router-provider-routed-inference-logs
-          path: |
-            /tmp/nemoclaw-e2e-model-router-onboard.log
-            /tmp/nemoclaw-e2e-model-router-health.log
-            /tmp/nemoclaw-e2e-model-router-response.log
+          name: model-router-provider-routed-inference-artifacts
+          path: e2e-artifacts/vitest/model-router-provider-routed-inference/
+          include-hidden-files: false
           if-no-files-found: ignore
+          retention-days: 14
 
   # ── OpenClaw plugin runtime-deps EXDEV E2E ─────────────────────
   # Coverage guard for #3513 / #3127. On Ubuntu/OpenShell sandbox layouts
