@@ -417,15 +417,27 @@ jobs:
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: "22"
+          cache: npm
 
-      - name: Run WhatsApp compact-QR reporter-workflow E2E test
-        run: bash test/e2e/test-whatsapp-qr-compact-e2e.sh
+      - name: Install root dependencies
+        run: npm ci --ignore-scripts
 
-      - name: Upload WhatsApp compact-QR E2E logs on failure
-        if: failure()
+      - name: Run WhatsApp compact-QR Vitest E2E test
+        env:
+          NEMOCLAW_RUN_E2E_SCENARIOS: "1"
+          E2E_ARTIFACT_DIR: ${{ github.workspace }}/e2e-artifacts/vitest/whatsapp-qr-compact
+        run: |
+          set -euo pipefail
+          npx vitest run --project e2e-scenarios-live \
+            test/e2e-scenario/live/whatsapp-qr-compact.test.ts \
+            --silent=false --reporter=default
+
+      - name: Upload WhatsApp compact-QR E2E artifacts
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: whatsapp-qr-compact-e2e-logs
-          path: |
-            /tmp/nemoclaw-e2e-whatsapp-qr-install.log
+          name: whatsapp-qr-compact-e2e-artifacts
+          path: e2e-artifacts/vitest/whatsapp-qr-compact/
+          include-hidden-files: false
           if-no-files-found: ignore
+          retention-days: 14
