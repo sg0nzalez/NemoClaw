@@ -189,8 +189,7 @@ jobs:
         run: npm ci --ignore-scripts
 
       - name: Run OpenShell version-pin live test
-        # Migrated from test/e2e/test-openshell-version-pin.sh. Hermetic
-        # installer-script behavioral test — no real network, no real install.
+        # Hermetic installer-script behavioral test — no real network, no real install.
         run: |
           set -euo pipefail
           npx vitest run --project e2e-scenarios-live \

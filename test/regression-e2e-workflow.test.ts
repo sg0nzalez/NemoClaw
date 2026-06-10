@@ -23,8 +23,15 @@ type RegressionWorkflow = {
   >;
 };
 
+type VitestScenariosWorkflow = {
+  jobs?: Record<string, unknown>;
+};
+
 describe("Regression E2E workflow contract", () => {
   const workflow = readYaml<RegressionWorkflow>(".github/workflows/regression-e2e.yaml");
+  const vitestScenariosWorkflow = readYaml<VitestScenariosWorkflow>(
+    ".github/workflows/e2e-vitest-scenarios.yaml",
+  );
 
   it("does not advertise or select the retired docker-unreachable gateway-start lane", () => {
     const jobsDescription = workflow.on?.workflow_dispatch?.inputs?.jobs?.description ?? "";
@@ -35,5 +42,19 @@ describe("Regression E2E workflow contract", () => {
     expect(Object.keys(workflow.jobs ?? {})).not.toContain("docker-unreachable-gateway-start-e2e");
     expect(selectorScript).not.toContain("docker-unreachable-gateway-start-e2e");
     expect(selectorScript).not.toContain("docker_unreachable_gateway_start");
+  });
+
+  it("does not advertise or select the retired OpenShell version-pin legacy lane", () => {
+    const jobsDescription = workflow.on?.workflow_dispatch?.inputs?.jobs?.description ?? "";
+    const selectorScript =
+      workflow.jobs?.select_regression_jobs?.steps?.find((step) => step.id === "select")?.run ?? "";
+
+    expect(jobsDescription).not.toContain("openshell-version-pin-e2e");
+    expect(Object.keys(workflow.jobs ?? {})).not.toContain("openshell-version-pin-e2e");
+    expect(selectorScript).not.toContain("openshell-version-pin-e2e");
+    expect(selectorScript).not.toContain("openshell_version_pin");
+    expect(Object.keys(vitestScenariosWorkflow.jobs ?? {})).toContain(
+      "openshell-version-pin-vitest",
+    );
   });
 });

@@ -9,9 +9,8 @@ import path from "node:path";
 import { type ArtifactSink } from "../framework/artifacts.ts";
 import { expect, test } from "../framework/e2e-test.ts";
 
-// Migrated from test/e2e/test-openshell-version-pin.sh (regression guard for
-// #3474). The legacy bash script is a hermetic installer-script behavioral
-// test: it runs scripts/install-openshell.sh under a stubbed PATH where the
+// Regression guard for #3474. This hermetic installer-script behavioral test
+// runs scripts/install-openshell.sh under a stubbed PATH where the
 // already-installed openshell reports a too-new version (0.0.45) and the
 // downloaded archives produce a binary that reports the pinned 0.0.44.
 //
@@ -58,7 +57,7 @@ write_checksum() {
 }`;
 
 // Force Linux/x86_64 asset selection regardless of host arch (legacy script
-// is dispatched on ubuntu-latest via regression-e2e.yaml).
+// is dispatched on ubuntu-latest via e2e-vitest-scenarios.yaml).
 function createFakeUname(binDir: string): void {
   writeExecutable(
     path.join(binDir, "uname"),
