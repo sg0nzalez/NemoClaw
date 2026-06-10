@@ -205,6 +205,63 @@ describe("onboarding phase fixture", () => {
     expect(runner.calls).toEqual([]);
   });
 
+  it("runs provider-routed cloud OpenClaw onboarding with Model Router inputs", async () => {
+    const runner = new FakeRunner();
+    runner.enqueue(shellResult(0, "onboarded\n"));
+    const cleanup = new FakeCleanup();
+    const secrets = new FakeSecrets({ NVIDIA_API_KEY: "secret-token" });
+    const onboard = new OnboardingPhaseFixture(new HostCliClient(runner), secrets, cleanup);
+
+    const instance = await onboard.from(
+      ready({ onboarding: "cloud-openclaw-provider-routed" }),
+      { sandboxName: "e2e-provider-routed" },
+    );
+
+    expect(instance).toMatchObject({
+      onboarding: "cloud-openclaw-provider-routed",
+      sandboxName: "e2e-provider-routed",
+      agent: "openclaw",
+      provider: "nvidia",
+      providerEnv: "cloud",
+    });
+    expect(secrets.requiredCalls).toEqual(["NVIDIA_API_KEY"]);
+    expect(cleanup.calls[0]?.name).toBe("destroy NemoClaw sandbox e2e-provider-routed");
+    expect(runner.calls).toEqual([
+      {
+        command: "nemoclaw",
+        args: ["onboard", "--non-interactive", "--yes", "--yes-i-accept-third-party-software"],
+        options: {
+          artifactName: "onboard-cloud-openclaw-provider-routed",
+          env: expect.objectContaining({
+            NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE: "1",
+            NEMOCLAW_AGENT: "openclaw",
+            NEMOCLAW_POLICY_TIER: "open",
+            NEMOCLAW_PROVIDER: "routed",
+            NEMOCLAW_PROVIDER_KEY: "secret-token",
+            NEMOCLAW_SANDBOX_NAME: "e2e-provider-routed",
+            NVIDIA_API_KEY: "secret-token",
+            PATH: expect.any(String),
+          }),
+          redactionValues: ["secret-token"],
+          timeoutMs: 900_000,
+        },
+      },
+    ]);
+  });
+
+  it("requires Docker for provider-routed cloud OpenClaw onboarding", async () => {
+    const onboard = new OnboardingPhaseFixture(new HostCliClient(new FakeRunner()), new FakeSecrets({ NVIDIA_API_KEY: "secret" }));
+
+    await expect(
+      onboard.from(
+        ready({
+          onboarding: "cloud-openclaw-provider-routed",
+          docker: { id: "docker-running", expectation: "required", available: false },
+        }),
+      ),
+    ).rejects.toThrow(/cloud-openclaw-provider-routed onboarding requires an available Docker runtime/);
+  });
+
   it("requires Docker for cloud OpenClaw onboarding", async () => {
     const onboard = new OnboardingPhaseFixture(
       new HostCliClient(new FakeRunner()),

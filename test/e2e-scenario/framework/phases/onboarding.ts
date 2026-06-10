@@ -83,12 +83,16 @@ function sandboxNameFromOptions(onboarding: string, options: OnboardingOptions):
   return sandboxName;
 }
 
-function commandEnv(sandboxName: string, extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+function commandEnv(
+  sandboxName: string,
+  provider: "cloud" | "routed",
+  extra: NodeJS.ProcessEnv = {},
+): NodeJS.ProcessEnv {
   return {
     ...buildAvailabilityProbeEnv(),
     ...extra,
     NEMOCLAW_AGENT: "openclaw",
-    NEMOCLAW_PROVIDER: "cloud",
+    NEMOCLAW_PROVIDER: provider,
     NEMOCLAW_SANDBOX_NAME: sandboxName,
   };
 }
@@ -153,6 +157,9 @@ export class OnboardingPhaseFixture {
         case "cloud-openclaw":
           result = await this.cloudOpenClaw(environment, options);
           break;
+        case "cloud-openclaw-provider-routed":
+          result = await this.cloudOpenClawProviderRouted(environment, options);
+          break;
         case "cloud-openclaw-no-docker":
           result = await this.cloudOpenClawNoDocker(environment, options);
           break;
@@ -179,11 +186,44 @@ export class OnboardingPhaseFixture {
     this.registerSandboxCleanup(sandboxName);
     const result = await this.host.nemoclaw(ONBOARD_ARGS, {
       artifactName: "onboard-cloud-openclaw",
-      env: commandEnv(sandboxName, { NVIDIA_API_KEY: apiKey }),
+      env: commandEnv(sandboxName, "cloud", { NVIDIA_API_KEY: apiKey }),
       redactionValues: [apiKey],
       timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     });
     assertExitZero(result, "cloud-openclaw onboarding");
+    return {
+      onboarding: environment.onboarding,
+      sandboxName,
+      agent: "openclaw",
+      provider: "nvidia",
+      providerEnv: "cloud",
+      gatewayUrl: OPENCLAW_GATEWAY_URL,
+      result,
+    };
+  }
+
+  async cloudOpenClawProviderRouted(
+    environment: EnvironmentReady,
+    options: OnboardingOptions = {},
+  ): Promise<NemoClawInstance> {
+    if (!environment.docker.available) {
+      throw new Error("cloud-openclaw-provider-routed onboarding requires an available Docker runtime.");
+    }
+    const sandboxName = sandboxNameFromOptions(environment.onboarding, options);
+    const apiKey = this.secrets.required("NVIDIA_API_KEY");
+    this.registerSandboxCleanup(sandboxName);
+    const result = await this.host.nemoclaw(ONBOARD_ARGS, {
+      artifactName: "onboard-cloud-openclaw-provider-routed",
+      env: commandEnv(sandboxName, "routed", {
+        NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE: "1",
+        NEMOCLAW_POLICY_TIER: "open",
+        NEMOCLAW_PROVIDER_KEY: apiKey,
+        NVIDIA_API_KEY: apiKey,
+      }),
+      redactionValues: [apiKey],
+      timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    });
+    assertExitZero(result, "cloud-openclaw-provider-routed onboarding");
     return {
       onboarding: environment.onboarding,
       sandboxName,
@@ -212,7 +252,7 @@ export class OnboardingPhaseFixture {
     try {
       await writeFile(shimPath, noDockerShim(), "utf8");
       await chmod(shimPath, 0o700);
-      const env = commandEnv(sandboxName, { NVIDIA_API_KEY: apiKey });
+      const env = commandEnv(sandboxName, "cloud", { NVIDIA_API_KEY: apiKey });
       env.PATH = prependPath(shimDir, env.PATH);
       const result = await this.host.nemoclaw(ONBOARD_ARGS, {
         artifactName: "onboard-cloud-openclaw-no-docker",
