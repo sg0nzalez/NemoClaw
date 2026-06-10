@@ -193,6 +193,30 @@ function assertChatCompletionShape(json: unknown, label: string): void {
   }
 }
 
+function choiceContent(choice: unknown): string {
+  if (!choice || typeof choice !== "object") return "";
+  const message = (choice as { message?: unknown }).message;
+  if (message && typeof message === "object") {
+    const content = (message as { content?: unknown }).content;
+    if (typeof content === "string") return content;
+  }
+  const text = (choice as { text?: unknown }).text;
+  return typeof text === "string" ? text : "";
+}
+
+function assertModelRouterPongCompletion(json: unknown, label: string): void {
+  assertChatCompletionShape(json, label);
+  const body = json as { model?: unknown; choices?: unknown };
+  const model = typeof body.model === "string" ? body.model : "";
+  if (model !== "nvidia-routed" && !model.startsWith("nvidia-routed")) {
+    throw new Error(`${label} response model was not provider-routed`);
+  }
+  const choices = Array.isArray(body.choices) ? body.choices : [];
+  if (!choices.some((choice) => /\bPONG\b/i.test(choiceContent(choice)))) {
+    throw new Error(`${label} response missing PONG content`);
+  }
+}
+
 function hasModelIdentifier(entry: unknown): boolean {
   if (typeof entry === "string") return entry.trim().length > 0;
   if (!entry || typeof entry !== "object") return false;
@@ -297,6 +321,40 @@ export class RuntimePhaseFixture {
     assertChatCompletionShape(
       parseJsonBody(result.stdout, "inference.local chat completion"),
       "inference.local chat completion",
+    );
+    return { endpoint, result };
+  }
+
+  async expectModelRouterProviderRoutedCompletion(
+    instance: NemoClawInstance,
+    options: InferenceRuntimeChatOptions & { readonly route?: InferenceRoute } = {},
+  ): Promise<InferenceRuntimeProbeResult> {
+    const endpoint = inferenceRouteUrl(options.route, CHAT_COMPLETIONS_PATH);
+    const result = await this.sandbox.exec(
+      instance.sandboxName,
+      [
+        "curl",
+        "-fsS",
+        "--max-time",
+        curlMaxTime({ ...options, curlMaxTimeSeconds: options.curlMaxTimeSeconds ?? 90 }),
+        "-H",
+        "Content-Type: application/json",
+        ...headerArgs(options.headers),
+        "--data-raw",
+        openAiChatPayload({
+          ...options,
+          maxTokens: options.maxTokens ?? 50,
+          model: options.model ?? "nvidia-routed",
+          prompt: options.prompt ?? "Reply with exactly one word: PONG",
+        }),
+        endpoint,
+      ],
+      shellOptions(options, "runtime-model-router-provider-routed-completion"),
+    );
+    assertExitZero(result, "model-router provider-routed completion probe");
+    assertModelRouterPongCompletion(
+      parseJsonBody(result.stdout, "model-router provider-routed completion"),
+      "model-router provider-routed completion",
     );
     return { endpoint, result };
   }

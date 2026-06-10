@@ -192,6 +192,73 @@ describe("runtime phase fixture", () => {
     expect(call?.options?.artifactName).toBe("custom-chat");
   });
 
+  it("checks provider-routed Model Router completion semantics", async () => {
+    const runner = new FakeRunner();
+    runner.enqueue(
+      shellResult(
+        0,
+        JSON.stringify({
+          model: "nvidia-routed",
+          choices: [{ message: { content: "PONG" } }],
+        }),
+      ),
+    );
+
+    await fixture(runner).expectModelRouterProviderRoutedCompletion(instance());
+
+    const call = runner.calls[0];
+    expect(call?.command).toBe("openshell");
+    expect(call?.args).toEqual([
+      "sandbox",
+      "exec",
+      "e2e-ubuntu-repo-cloud-openclaw",
+      "--",
+      "curl",
+      "-fsS",
+      "--max-time",
+      "90",
+      "-H",
+      "Content-Type: application/json",
+      "--data-raw",
+      expect.any(String),
+      "https://inference.local/v1/chat/completions",
+    ]);
+    expect(JSON.parse(call?.args[11] ?? "{}")).toEqual({
+      model: "nvidia-routed",
+      messages: [{ role: "user", content: "Reply with exactly one word: PONG" }],
+      max_tokens: 50,
+    });
+    expect(call?.options?.artifactName).toBe("runtime-model-router-provider-routed-completion");
+  });
+
+  it("rejects provider-routed Model Router completions with the wrong model", async () => {
+    const runner = new FakeRunner();
+    runner.enqueue(
+      shellResult(
+        0,
+        JSON.stringify({ choices: [{ message: { content: "PONG" } }], model: "default" }),
+      ),
+    );
+
+    await expect(fixture(runner).expectModelRouterProviderRoutedCompletion(instance())).rejects.toThrow(
+      "model-router provider-routed completion response model was not provider-routed",
+    );
+  });
+
+  it("rejects provider-routed Model Router completions without PONG content", async () => {
+    const runner = new FakeRunner();
+    runner.enqueue(
+      shellResult(
+        0,
+        JSON.stringify({ choices: [{ message: { content: "hello" } }], model: "nvidia-routed" }),
+      ),
+    );
+
+    await expect(fixture(runner).expectModelRouterProviderRoutedCompletion(instance())).rejects.toThrow(
+      "model-router provider-routed completion response missing PONG content",
+    );
+  });
+
   it("accepts configured status codes for auth-proxy and route-health checks", async () => {
     const runner = new FakeRunner();
     runner.enqueue(shellResult(0, "403"));
