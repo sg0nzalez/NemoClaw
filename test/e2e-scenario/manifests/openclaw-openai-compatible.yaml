@@ -16,7 +16,7 @@ spec:
     agent: openclaw
     provider: openai-compatible
     modelRoute: inference-local
-    policyTier: balanced
+    policyTier: open
     messaging: []
   state:
     workspaceRef: default

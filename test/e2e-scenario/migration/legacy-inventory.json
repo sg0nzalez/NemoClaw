@@ -50,12 +50,12 @@
       "legacyScript": "test/e2e/test-openclaw-inference-switch.sh",
       "domain": "inference",
       "ownerIssue": "#4349",
-      "status": "bridge-probe",
+      "status": "not-migrated",
       "targetVitestScenarios": [],
-      "bridgeProbes": ["test/e2e-scenario/live/registry-scenarios.test.ts"],
+      "bridgeProbes": [],
       "retiredReason": "",
       "deletionReady": false,
-      "notes": "The typed registry now declares the provider-switch scenario and RuntimePhaseFixture can run the post-switch route-health/chat assertions, but the real compatible provider registration, inference set operation, route/config/state checks, and OpenClaw agent turn still live in this legacy script. Do not delete until those actions migrate into a lifecycle/runtime fixture."
+      "notes": "The typed registry now declares the provider-switch scenario and RuntimePhaseFixture can run the post-switch route-health/chat assertions, but live Vitest still skips it because the double-provider-switch lifecycle is not wired. The real compatible provider registration, inference set operation, route/config/state checks, and OpenClaw agent turn still live in this legacy script. Do not mark bridge-probe or delete until those actions migrate into a lifecycle/runtime fixture."
     },
     {
       "legacyScript": "test/e2e/test-messaging-providers.sh",
