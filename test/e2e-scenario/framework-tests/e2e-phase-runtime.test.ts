@@ -254,8 +254,13 @@ describe("runtime phase fixture", () => {
     ]);
     expect(JSON.parse(call?.args[12] ?? "{}")).toEqual({
       model: "nvidia-routed",
-      messages: [{ role: "user", content: "Reply with exactly one word: PONG" }],
-      max_tokens: 50,
+      messages: [
+        {
+          role: "user",
+          content: "Reply with exactly one word: PONG. Do not explain or include any other text.",
+        },
+      ],
+      max_tokens: 256,
     });
     expect(call?.options?.artifactName).toBe("runtime-model-router-provider-routed-completion");
   });
