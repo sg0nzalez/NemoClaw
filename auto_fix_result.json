@@ -1,0 +1,17 @@
+{
+  "fix_description": "Fixed OpenClaw MCP servers timing out with 'MCP server connection timed out after 30000ms' in NemoClaw sandboxes (issue #5120). Root cause: the OpenClaw gateway runs as the 'gateway' user (a member of the 'sandbox' group) and spawns npx-based MCP servers ('bundle-mcp'). The redirected tool-cache directories (npm_config_cache=/tmp/.npm-cache, /tmp/npm-global, and the XDG dirs) were created in scripts/nemoclaw-start.sh as mode 755 owned sandbox:sandbox, which grants write only to the OWNER (sandbox user). The gateway group member therefore could not write the npm/npx download+extract cache, so a gateway-spawned 'npx @modelcontextprotocol/server-filesystem ...' stalled writing its cache until OpenClaw's fixed 30s MCP connection timeout fired. This also explains why the user could run npx manually (their interactive shell runs as the sandbox user, who owns the cache) while the gateway-spawned MCP server timed out, and matches the regression window (the /tmp cache redirect from #804). Fix: create the shared cache directories setgid + group-writable (mode 2775), mirroring the existing /sandbox/.openclaw config-dir contract (2770), so both the gateway user and the sandbox user can write and new files inherit group=sandbox. GNUPGHOME stays private (700) because it holds secrets. The default Balanced policy tier already includes the 'npm' preset, so network egress was not the blocker.",
+  "verification_steps": [
+    "bash -n scripts/nemoclaw-start.sh (syntax check) — passed",
+    "Standalone repro of the dir-creation block: /tmp/.npm-cache, /tmp/npm-global, /tmp/.cache created as 2775 (setgid+group-write); /tmp/.gnupg stays 700",
+    "npx vitest run test/service-env.test.ts — 39/39 passed, including the existing #804 redirect test and the new #5120 setgid+group-writable assertion",
+    "Confirmed the 18 failures in test/nemoclaw-start.test.ts are pre-existing (reproduce identically with changes stashed) and are environmental (setpriv/gosu unavailable for privilege-separation in the unprivileged test runner), not caused by this change"
+  ],
+  "commands_run": [
+    "grep/Explore investigation of MCP, bundle-mcp, network policies, NODE_OPTIONS preloads, and proxy env handling",
+    "bash -n scripts/nemoclaw-start.sh",
+    "npm run build:cli",
+    "npx vitest run test/service-env.test.ts -t \"redirect\"",
+    "npx vitest run test/service-env.test.ts",
+    "git stash && npx vitest run test/nemoclaw-start.test.ts && git stash pop"
+  ]
+}

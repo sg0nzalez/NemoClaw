@@ -137,17 +137,31 @@ done
 # env vars — if it creates a dir first, it would be gateway:gateway 755 and
 # the sandbox user couldn't write subdirs later. Creating them as root with
 # explicit sandbox ownership ensures the sandbox user always has write access.
-# In non-root mode: we're already the sandbox user, so mkdir -p is sufficient —
-# directories are owned by us automatically. Using install -o would fail with
-# EPERM because only root can chown. Ref: #804
+#
+# These caches are SHARED between the gateway user and the sandbox user. The
+# gateway (a member of the sandbox group) spawns npx-based MCP servers
+# ("bundle-mcp") and other Node tooling that must populate the npm/npx download
+# and extract cache under npm_config_cache, while the sandbox-user agent writes
+# the same trees from connect sessions. Plain 755 only grants the OWNER
+# (sandbox) write, so the gateway group member could not write — a
+# gateway-spawned `npx @modelcontextprotocol/server-*` stalled trying to write
+# its cache until OpenClaw's 30s MCP connection timeout fired (#5120). Create
+# them setgid + group-writable (2775) — mirroring the /sandbox/.openclaw
+# config-dir contract (2770) — so both users can write and new files inherit
+# group=sandbox. GNUPGHOME stays private (700) because it holds secrets.
+# In non-root mode: we're already the sandbox user, but keep the same
+# setgid + group-writable mode for consistency. Omit -o/-g so install does not
+# attempt a chown (only root can chown; install -o would fail with EPERM).
+# Ref: #804, #5120
 if [ "$(id -u)" -eq 0 ]; then
-  install -d -o sandbox -g sandbox -m 755 \
+  install -d -o sandbox -g sandbox -m 2775 \
     /tmp/.npm-cache /tmp/.cache /tmp/.config /tmp/.local/share \
     /tmp/.local/state /tmp/.runtime /tmp/.claude \
     /tmp/npm-global
   install -d -o sandbox -g sandbox -m 700 /tmp/.gnupg
 else
-  mkdir -p /tmp/.npm-cache /tmp/.cache /tmp/.config /tmp/.local/share \
+  install -d -m 2775 \
+    /tmp/.npm-cache /tmp/.cache /tmp/.config /tmp/.local/share \
     /tmp/.local/state /tmp/.runtime /tmp/.claude \
     /tmp/npm-global
   install -d -m 700 /tmp/.gnupg

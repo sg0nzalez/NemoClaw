@@ -436,6 +436,75 @@ describe("service environment", () => {
         }
       }
     });
+
+    it("creates shared tool caches setgid + group-writable so the gateway user can write (issue #5120)", () => {
+      // The gateway runs as the `gateway` user (a member of the `sandbox`
+      // group) and spawns npx-based MCP servers ("bundle-mcp"). Those children
+      // must write the npm/npx download+extract cache under npm_config_cache.
+      // If the cache dirs are owner-only writable (755 sandbox:sandbox) the
+      // gateway group member cannot write and `npx @modelcontextprotocol/...`
+      // stalls until OpenClaw's 30s MCP connection timeout fires. The dirs must
+      // therefore be setgid + group-writable (2775), mirroring the
+      // /sandbox/.openclaw config-dir contract. GNUPGHOME stays private (700).
+      const scriptPath = join(import.meta.dirname, "../scripts/nemoclaw-start.sh");
+      const src = readFileSync(scriptPath, "utf-8");
+      const start = src.indexOf("# Pre-create redirected directories");
+      const end = src.indexOf("# ── Drop unnecessary Linux capabilities", start);
+      if (start === -1 || end === -1 || end <= start) {
+        throw new Error("Failed to extract redirected-directory setup block");
+      }
+
+      const fakeTmp = mkdtempSync(join(tmpdir(), "nemoclaw-tool-redirects-5120-"));
+      const block = src.slice(start, end).replaceAll("/tmp/", `${fakeTmp}/`);
+      const tmpFile = join(tmpdir(), `nemoclaw-tool-redirects-5120-${process.pid}.sh`);
+      try {
+        writeFileSync(
+          tmpFile,
+          [
+            "#!/usr/bin/env bash",
+            "set -euo pipefail",
+            // Exercise the non-root branch (CI runs unprivileged); it shares
+            // the same setgid + group-writable contract as the root branch.
+            'id() { if [ "${1:-}" = "-u" ]; then printf "1000\\n"; else command id "$@"; fi; }',
+            block,
+          ].join("\n"),
+          { mode: 0o700 },
+        );
+        execFileSync("bash", [tmpFile], { encoding: "utf-8" });
+
+        for (const dir of [
+          ".npm-cache",
+          ".cache",
+          ".config",
+          join(".local", "share"),
+          join(".local", "state"),
+          ".runtime",
+          ".claude",
+          "npm-global",
+        ]) {
+          const mode = lstatSync(join(fakeTmp, dir)).mode & 0o7777;
+          // setgid bit (02000) so group ownership is inherited by children.
+          expect(mode & 0o2000).toBe(0o2000);
+          // group write (00020) so the gateway user (sandbox group) can write.
+          expect(mode & 0o020).toBe(0o020);
+          expect(mode.toString(8)).toBe("2775");
+        }
+        // Secrets dir stays owner-only (no group/other access).
+        const gnupg = lstatSync(join(fakeTmp, ".gnupg"));
+        expect((gnupg.mode & 0o777).toString(8)).toBe("700");
+      } finally {
+        try {
+          unlinkSync(tmpFile);
+        } catch {
+          /* ignore */
+        }
+        try {
+          execFileSync("rm", ["-rf", fakeTmp]);
+        } catch {
+          /* ignore */
+        }
+      }
+    });
   });
 
   describe("proxy environment variables (issue #626)", () => {
