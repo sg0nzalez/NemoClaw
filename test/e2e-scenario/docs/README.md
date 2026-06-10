@@ -3,7 +3,7 @@
 
 # NemoClaw E2E Vitest Fixtures
 
-NemoClaw E2E now has one target execution model: **Vitest as the harness** and
+NemoClaw E2E now has one target execution model, Vitest as the harness and
 GitHub Actions as the matrix. Vitest owns discovery, filtering, timeouts,
 reporters, fixture lifecycle, skips, and CI integration. NemoClaw owns the
 domain layer: scenario metadata, phase fixtures, product clients, evidence
