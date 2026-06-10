@@ -1,13 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Buffer } from "node:buffer";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
 import { assertExitZero } from "../fixtures/clients/command.ts";
-import { trustedSandboxShellScript } from "../fixtures/clients/index.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
 import type { ScenarioEnvironment } from "../scenarios/types.ts";
 
@@ -94,8 +94,8 @@ function onboardEnv(apiKey: string): NodeJS.ProcessEnv {
   };
 }
 
-function pluginRuntimeDepsReplacementScript() {
-  return trustedSandboxShellScript(`set -eu
+function pluginRuntimeDepsReplacementCommand(): string[] {
+  const script = `set -eu
 rm -rf /sandbox/.openclaw/plugin-runtime-deps/exdev-guard 2>/dev/null || true
 rm -rf /dev/shm/nemoclaw-exdev-source 2>/dev/null || true
 mkdir -p /dev/shm/nemoclaw-exdev-source
@@ -126,7 +126,13 @@ replaceNodeModulesDir(
 );
 console.log('runtime deps replacement completed');
 NODE
-`);
+`;
+  const encoded = Buffer.from(script, "utf8").toString("base64");
+  return [
+    "sh",
+    "-lc",
+    `printf '%s' '${encoded}' | base64 -d > /tmp/nemoclaw-exdev-guard.sh && sh /tmp/nemoclaw-exdev-guard.sh`,
+  ];
 }
 
 test("openclaw plugin runtime deps replacement crosses sandbox filesystems", async ({
@@ -199,7 +205,7 @@ test("openclaw plugin runtime deps replacement crosses sandbox filesystems", asy
     },
   );
 
-  const replacement = await sandbox.execShell(SANDBOX_NAME, pluginRuntimeDepsReplacementScript(), {
+  const replacement = await sandbox.exec(SANDBOX_NAME, pluginRuntimeDepsReplacementCommand(), {
     artifactName: "openclaw-plugin-runtime-exdev-replacement",
     env: buildAvailabilityProbeEnv(),
     timeoutMs: 60_000,
