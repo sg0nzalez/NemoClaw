@@ -41,6 +41,7 @@ export interface LiveScenarioMatrixEntry extends ScenarioMatrixEntry {
   requiredSecrets: string[];
   supported: boolean;
   supportReasons: string[];
+  runtimeSuites: string[];
   pendingRuntimeSuites: string[];
 }
 
@@ -145,6 +146,7 @@ function liveMatrixEntry(
     requiredSecrets: scenario.requiredSecrets ?? [],
     supported: support.supported,
     supportReasons: support.reasons,
+    runtimeSuites: support.runtimeSuites,
     pendingRuntimeSuites: support.pendingRuntimeSuites,
   };
 }

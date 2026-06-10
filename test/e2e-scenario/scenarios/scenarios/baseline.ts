@@ -68,7 +68,7 @@ const canonicalScenarioInputs: CanonicalScenarioInput[] = [
     manifestName: "openclaw-nvidia",
     environment: ubuntuRepoDocker("cloud-openclaw"),
     expectedStateId: "cloud-openclaw-ready",
-    suiteIds: ["smoke", "inference", "credentials"],
+    suiteIds: ["smoke", "inference", "inference-routing", "credentials"],
     description: "Ubuntu repo checkout with Docker and cloud OpenClaw onboarding.",
     requiredSecrets: ["NVIDIA_API_KEY"],
   },

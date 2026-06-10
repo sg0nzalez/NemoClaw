@@ -90,10 +90,7 @@ describe("probesForState maps typed expected-state into probe ids", () => {
       cli: { installed: true },
       localRegistry: { expected: "present" },
     };
-    expect(probesForState(state)).toEqual([
-      "cli-installed",
-      "local-registry-entry-present",
-    ]);
+    expect(probesForState(state)).toEqual(["cli-installed", "local-registry-entry-present"]);
   });
 
   it("dockerSandboxContainer.expected=present emits the docker-sandbox-container-present probe", () => {
@@ -102,10 +99,7 @@ describe("probesForState maps typed expected-state into probe ids", () => {
       cli: { installed: true },
       dockerSandboxContainer: { expected: "present" },
     };
-    expect(probesForState(state)).toEqual([
-      "cli-installed",
-      "docker-sandbox-container-present",
-    ]);
+    expect(probesForState(state)).toEqual(["cli-installed", "docker-sandbox-container-present"]);
   });
 
   it("localRegistry/dockerSandboxContainer 'absent' emits no probe today", () => {

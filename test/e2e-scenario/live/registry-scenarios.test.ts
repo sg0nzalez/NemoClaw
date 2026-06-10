@@ -37,7 +37,7 @@ for (const scenario of listScenarios()) {
 
   test(
     liveScenarioTestName(scenario),
-    async ({ artifacts, environment, lifecycle, onboard, secrets, stateValidation }) => {
+    async ({ artifacts, environment, lifecycle, onboard, runtime, secrets, stateValidation }) => {
       for (const secret of scenario.requiredSecrets ?? []) {
         secrets.required(secret);
       }
@@ -57,6 +57,7 @@ for (const scenario of listScenarios()) {
         id: scenario.id,
         runner: "vitest",
         boundary: "typed-registry",
+        runtimeSuites: support.runtimeSuites,
         pendingRuntimeSuites: support.pendingRuntimeSuites,
       });
 
@@ -84,11 +85,19 @@ for (const scenario of listScenarios()) {
       }
 
       const validation = await stateValidation.from(scenario.expectedStateId, instance);
+      const runtimeResults = [];
+      for (const suiteId of support.runtimeSuites) {
+        runtimeResults.push(await runtime.runSuite(suiteId, instance));
+      }
 
       await artifacts.writeJson("scenario-result.json", {
         id: scenario.id,
         expectedStateId: validation.state.id,
         probes: validation.probes.map((probe) => probe.id),
+        runtimeSuites: runtimeResults.map((suite) => ({
+          id: suite.suiteId,
+          assertions: suite.assertions.map((assertion) => assertion.id),
+        })),
         pendingRuntimeSuites: support.pendingRuntimeSuites,
         lifecycle: lifecycleResult
           ? { profile: lifecycleResult.profile, steps: lifecycleResult.steps.map((s) => s.id) }

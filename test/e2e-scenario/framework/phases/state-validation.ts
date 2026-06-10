@@ -278,9 +278,7 @@ export class StateValidationPhaseFixture {
     return { id: "sandbox-running", status: "passed", results: [result] };
   }
 
-  private expectLocalRegistryEntryPresent(
-    instance: NemoClawInstance,
-  ): StateValidationProbeResult {
+  private expectLocalRegistryEntryPresent(instance: NemoClawInstance): StateValidationProbeResult {
     const reader = this.io.readRegistry ?? defaultReadRegistry;
     const registry = reader();
     if (!registry) {

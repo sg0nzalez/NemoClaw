@@ -18,6 +18,10 @@ import type { NemoClawInstance } from "./onboarding.ts";
 const OPENSHELL_SANDBOX_NAME_LABEL = "openshell.ai/sandbox-name";
 const DOCKER_PROBE_TIMEOUT_MS = 15_000;
 const GATEWAY_STOP_TIMEOUT_MS = 60_000;
+// Status invocation can take several minutes on unfixed code while
+// the gateway recovery path retries. Keep the budget generous; the
+// bug is independent of latency.
+const STATUS_TIMEOUT_MS = 5 * 60_000;
 
 export type LifecycleProfile = "post-reboot-recovery";
 
@@ -77,7 +81,7 @@ export class LifecyclePhaseFixture {
 
   /**
    * Reproduce the host-side conditions of a DGX Spark / Linux Docker-driver
-   * reboot:
+   * reboot AND drive the user-visible action that exposes the bug:
    *
    *   1. Ask OpenShell to stop its gateway runtime so the in-memory
    *      sandbox view drops to NotFound. The actual sandbox container
@@ -87,6 +91,21 @@ export class LifecyclePhaseFixture {
    *   2. Locate the OpenShell-labeled Docker container for the
    *      scenario's sandbox name and either stop it (default) or
    *      stop+rename it to a `*-nemoclaw-gpu-backup-*` sibling.
+   *
+   *   3. Invoke `nemoclaw <name> status` — the user-visible action
+   *      that documented the regression in #4423. On unfixed `main`
+   *      this restarts the gateway (per #4580) and then the
+   *      destructive `missing` branch in `status.ts` wipes the
+   *      registry entry. On the PR-A fix branch the new Docker-driver
+   *      recovery helper restarts the labeled container before
+   *      stale-removal can fire.
+   *
+   *   We deliberately do NOT assert on the status exit code here
+   *   because the bug is precisely that status "succeeds" at
+   *   destroying state. The state-validation phase that follows is
+   *   what catches the regression via the
+   *   `local-registry-entry-present` and `docker-sandbox-container-present`
+   *   probes.
    *
    * Cleanups (run in reverse order at end of test):
    *   - rename the backup sibling back to the original name (if we
@@ -122,15 +141,11 @@ export class LifecyclePhaseFixture {
     }
     const originalName = containerNames[0];
 
-    const stop = await this.host.command(
-      "docker",
-      ["stop", originalName],
-      {
-        artifactName: `lifecycle-post-reboot-docker-stop-${originalName}`,
-        env: buildAvailabilityProbeEnv(),
-        timeoutMs: DOCKER_PROBE_TIMEOUT_MS,
-      },
-    );
+    const stop = await this.host.command("docker", ["stop", originalName], {
+      artifactName: `lifecycle-post-reboot-docker-stop-${originalName}`,
+      env: buildAvailabilityProbeEnv(),
+      timeoutMs: DOCKER_PROBE_TIMEOUT_MS,
+    });
     assertExitZero(stop, `docker stop ${originalName}`);
     steps.push({ id: `docker-stop:${originalName}`, results: [stop] });
     this.cleanup.add(`lifecycle.docker-start:${originalName}`, async () => {
@@ -143,15 +158,11 @@ export class LifecyclePhaseFixture {
 
     if (mode === "rename-to-gpu-backup") {
       const backupName = buildBackupContainerName(originalName, Date.now());
-      const rename = await this.host.command(
-        "docker",
-        ["rename", originalName, backupName],
-        {
-          artifactName: `lifecycle-post-reboot-docker-rename-${originalName}`,
-          env: buildAvailabilityProbeEnv(),
-          timeoutMs: DOCKER_PROBE_TIMEOUT_MS,
-        },
-      );
+      const rename = await this.host.command("docker", ["rename", originalName, backupName], {
+        artifactName: `lifecycle-post-reboot-docker-rename-${originalName}`,
+        env: buildAvailabilityProbeEnv(),
+        timeoutMs: DOCKER_PROBE_TIMEOUT_MS,
+      });
       assertExitZero(rename, `docker rename ${originalName} ${backupName}`);
       steps.push({ id: `docker-rename:${originalName}->${backupName}`, results: [rename] });
       this.cleanup.add(`lifecycle.docker-rename-back:${backupName}`, async () => {
@@ -162,6 +173,20 @@ export class LifecyclePhaseFixture {
         });
       });
     }
+
+    // Final step: drive the user-visible action that exposed #4423.
+    // We invoke status through the host CLI client so artifacts are
+    // captured and the command goes through the same
+    // shellProbe/redaction layer the rest of the framework uses.
+    // Status is allowed to fail (exit non-zero) because on unfixed
+    // code it intentionally fails after destroying state — the
+    // post-action invariants are checked by state-validation.
+    const statusResult = await this.host.nemoclaw([instance.sandboxName, "status"], {
+      artifactName: `lifecycle-post-reboot-nemoclaw-status-${instance.sandboxName}`,
+      env: buildAvailabilityProbeEnv(),
+      timeoutMs: STATUS_TIMEOUT_MS,
+    });
+    steps.push({ id: `nemoclaw-status:${instance.sandboxName}`, results: [statusResult] });
 
     return { profile: "post-reboot-recovery", steps };
   }

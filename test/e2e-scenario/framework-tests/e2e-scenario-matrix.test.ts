@@ -144,7 +144,8 @@ describe("typed scenario matrix", () => {
       requiredSecrets: ["NVIDIA_API_KEY"],
       supported: true,
       supportReasons: [],
-      pendingRuntimeSuites: ["smoke", "inference", "credentials"],
+      runtimeSuites: ["inference", "inference-routing"],
+      pendingRuntimeSuites: ["smoke", "credentials"],
     });
     // Failing-test-first guard for #4423. Pinned in the matrix to
     // confirm the lifecycle whitelist + post-reboot-recovery scenario

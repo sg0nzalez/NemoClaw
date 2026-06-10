@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ScenarioDefinition } from "./types.ts";
+import { isRuntimeSuiteSupported, type RuntimeSuiteId } from "../framework/phases/index.ts";
 
 const SUPPORTED_PLATFORMS = new Set(["ubuntu-local"]);
 const SUPPORTED_INSTALLS = new Set(["repo-current"]);
@@ -17,6 +18,7 @@ const SUPPORTED_LIFECYCLES = new Set(["post-reboot-recovery"]);
 export interface LiveScenarioSupport {
   supported: boolean;
   reasons: string[];
+  runtimeSuites: RuntimeSuiteId[];
   pendingRuntimeSuites: string[];
 }
 
@@ -57,9 +59,14 @@ export function liveScenarioSupport(scenario: ScenarioDefinition): LiveScenarioS
     reasons.push("missing expectedStateId");
   }
 
+  const suiteIds = scenario.suiteIds ?? [];
+  const runtimeSuites = suiteIds.filter(isRuntimeSuiteSupported);
+  const pendingRuntimeSuites = suiteIds.filter((suiteId) => !isRuntimeSuiteSupported(suiteId));
+
   return {
     supported: reasons.length === 0,
     reasons,
-    pendingRuntimeSuites: scenario.suiteIds ?? [],
+    runtimeSuites,
+    pendingRuntimeSuites,
   };
 }

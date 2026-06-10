@@ -88,7 +88,7 @@ describe("deterministic scenario registry", () => {
       onboarding: "cloud-openclaw",
     });
     expect(plan.expectedStateId).toBe("cloud-openclaw-ready");
-    expect(plan.suiteIds).toEqual(["smoke", "inference", "credentials"]);
+    expect(plan.suiteIds).toEqual(["smoke", "inference", "inference-routing", "credentials"]);
     expect(plan.onboardingAssertionIds).toEqual(["base-installed", "preflight-passed"]);
   });
 });

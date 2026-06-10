@@ -170,6 +170,24 @@ const cloudInferenceSteps = [
   }),
 ];
 
+const inferenceRoutingSteps = [
+  shellStep({
+    id: "runtime.inference-routing.inference-local-chat-completion",
+    phase: "runtime",
+    ref: "test/e2e-scenario/validation_suites/inference/routing/00-inference-local-chat-completion.sh",
+    reliability: {
+      timeoutSeconds: 60,
+      retry: { attempts: 2, on: ["provider-transient", "model-toolcall-transient"] },
+    },
+  }),
+  shellStep({
+    id: "runtime.inference-routing.provider-route-health",
+    phase: "runtime",
+    ref: "test/e2e-scenario/validation_suites/inference/routing/01-provider-route-health.sh",
+    reliability: { timeoutSeconds: 30, retry: { attempts: 2, on: ["gateway-transient"] } },
+  }),
+];
+
 const credentialsSteps = [
   shellStep({
     id: "security.credentials.present",
@@ -283,7 +301,7 @@ export const validationSuiteGroups: AssertionGroup[] = [
     }),
   ]),
   suiteGroup("openai-compatible-inference", cloudInferenceSteps),
-  suiteGroup("inference-routing", cloudInferenceSteps),
+  suiteGroup("inference-routing", inferenceRoutingSteps),
   suiteGroup("inference-switch", cloudInferenceSteps),
   suiteGroup("kimi-compatibility", [
     shellStep({
