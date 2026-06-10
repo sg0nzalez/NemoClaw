@@ -5,8 +5,8 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { expect, test } from "../framework/e2e-test.ts";
-import { shouldRunLiveE2EScenarios } from "../framework/live-project-gate.ts";
+import { expect, test } from "../fixtures/e2e-test.ts";
+import { shouldRunLiveE2EScenarios } from "../fixtures/live-project-gate.ts";
 
 // Migrated from test/e2e/test-vm-driver-privileged-exec-routing.sh. This is a
 // hermetic host-side regression guard for #4245: it builds the CLI, writes a
