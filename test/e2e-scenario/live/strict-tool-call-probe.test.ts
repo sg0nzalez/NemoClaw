@@ -10,9 +10,9 @@ import os from "node:os";
 import path from "node:path";
 import type { Readable } from "node:stream";
 
-import type { ArtifactSink } from "../framework/artifacts.ts";
-import { expect, test } from "../framework/e2e-test.ts";
-import { shouldRunLiveE2EScenarios } from "../framework/live-project-gate.ts";
+import type { ArtifactSink } from "../fixtures/artifacts.ts";
+import { expect, test } from "../fixtures/e2e-test.ts";
+import { shouldRunLiveE2EScenarios } from "../fixtures/live-project-gate.ts";
 
 // Migrated from test/e2e/test-strict-tool-call-probe.sh. This hermetic
 // regression guard for #4537 exercises the Local Ollama strict Chat
