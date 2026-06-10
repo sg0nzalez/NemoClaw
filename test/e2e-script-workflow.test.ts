@@ -226,6 +226,34 @@ describe("E2E reusable workflow contract", () => {
     expect(cloudJob.with?.ref).toBe("${{ inputs.target_ref || github.ref }}");
   });
 
+  it("runs VM driver privileged-exec routing through Vitest", () => {
+    const job = nightlyWorkflow.jobs["vm-driver-privileged-exec-routing-e2e"];
+    const checkoutStep = job.steps?.find((step) =>
+      String(step.uses ?? "").startsWith("actions/checkout@"),
+    );
+    const runStep = job.steps?.find(
+      (step) => step.name === "Run VM driver privileged-exec routing Vitest E2E test",
+    );
+    const uploadStep = job.steps?.find(
+      (step) => step.name === "Upload VM driver privileged-exec routing artifacts",
+    );
+
+    expect(job.uses).toBeUndefined();
+    expect(job.with?.script).toBeUndefined();
+    expect(checkoutStep?.with?.ref).toBe("${{ inputs.target_ref || github.ref }}");
+    expect(checkoutStep?.with?.["persist-credentials"]).toBe(false);
+    expect(job.env?.E2E_ARTIFACT_DIR).toBe(
+      "${{ github.workspace }}/e2e-artifacts/vitest/vm-driver-privileged-exec-routing",
+    );
+    expect(job.env?.NEMOCLAW_RUN_E2E_SCENARIOS).toBe("1");
+    expect(runStep?.run).toContain("npx vitest run --project e2e-scenarios-live");
+    expect(runStep?.run).toContain(
+      "test/e2e-scenario/live/vm-driver-privileged-exec-routing.test.ts",
+    );
+    expect(uploadStep?.with?.path).toBe("e2e-artifacts/vitest/vm-driver-privileged-exec-routing/");
+    expect(uploadStep?.with?.["include-hidden-files"]).toBe(false);
+  });
+
   it("gates WhatsApp sandbox-owned preload acceptance on non-root entrypoint evidence", () => {
     const script = readFileSync(
       new URL("./e2e/test-messaging-providers.sh", import.meta.url),

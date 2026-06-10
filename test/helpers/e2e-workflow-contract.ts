@@ -9,6 +9,7 @@ import YAML from "yaml";
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 export type WorkflowJob = {
+  env?: Record<string, string>;
   uses?: string;
   secrets?: Record<string, string>;
   steps?: WorkflowStep[];
