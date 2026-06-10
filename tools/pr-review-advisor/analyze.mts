@@ -164,6 +164,7 @@ type DeterministicReviewContext = {
   workflowSignals: string[];
   localizedPatchSignals: LocalizedPatchSignal[];
   legacyE2eShellDeletionEvidence: LegacyE2eShellDeletionEvidence[];
+  retiredE2eMigrationLedgerChanges: RetiredE2eMigrationLedgerChange[];
   monolithDeltas: MonolithDelta[];
   driftEvidence: DriftEvidence[];
   previousAdvisorReview: PreviousAdvisorReview | null;
@@ -205,6 +206,11 @@ type LegacyE2eShellDeletionEvidence = {
   hasIntentionallyRetiredBehavior: boolean;
   hasFidelityVerification: boolean;
   missing: string[];
+};
+
+type RetiredE2eMigrationLedgerChange = {
+  file: string;
+  change: "added" | "modified";
 };
 
 type OpenPrOverlap = {
@@ -366,6 +372,7 @@ async function collectDeterministicContext(options: {
     options.diff,
     pullRequestBodyText(github?.pullRequest),
   );
+  const retiredE2eMigrationLedgerChanges = findRetiredE2eMigrationLedgerChanges(options.diff);
   return {
     diffStat: getDiffStat(options.baseRef, options.headRef),
     commits: getCommits(options.baseRef, options.headRef),
@@ -375,6 +382,7 @@ async function collectDeterministicContext(options: {
     workflowSignals: detectWorkflowSignals(options.changedFiles, options.diff),
     localizedPatchSignals: detectLocalizedPatchSignals(options.diff),
     legacyE2eShellDeletionEvidence,
+    retiredE2eMigrationLedgerChanges,
     monolithDeltas: computeMonolithDeltas(options.baseRef, options.changedFiles),
     driftEvidence: collectDriftEvidence(options.baseRef, options.changedFiles),
     github,
@@ -472,6 +480,28 @@ export function findDeletedLegacyE2eShellScripts(diff: string): string[] {
     }
   }
   return [...scripts].sort();
+}
+
+export function findRetiredE2eMigrationLedgerChanges(diff: string): RetiredE2eMigrationLedgerChange[] {
+  const retiredLedgers = new Set([
+    "test/e2e-scenario/migration/legacy-inventory.json",
+    "test/e2e/docs/parity-inventory.generated.json",
+  ]);
+  const changes = new Map<string, RetiredE2eMigrationLedgerChange>();
+  for (const block of diff.split(/\ndiff --git /)) {
+    const header = block.startsWith("diff --git ") ? block : `diff --git ${block}`;
+    const match = header.match(/^diff --git a\/(.+?) b\/(.+)$/m);
+    const before = match?.[1] ?? "";
+    const after = match?.[2] ?? "";
+    const file = retiredLedgers.has(after) ? after : retiredLedgers.has(before) ? before : "";
+    if (!file) continue;
+    if (/^deleted file mode\b/m.test(header) || /^\+\+\+ \/dev\/null$/m.test(header)) continue;
+    changes.set(file, {
+      file,
+      change: /^new file mode\b/m.test(header) || /^--- \/dev\/null$/m.test(header) ? "added" : "modified",
+    });
+  }
+  return [...changes.values()].sort((a, b) => a.file.localeCompare(b.file));
 }
 
 export function assessLegacyE2eShellDeletionEvidence(
@@ -798,7 +828,7 @@ export function buildSystemPrompt(): string {
     "5. Correctness: bug-path tests, negative tests, branch coverage, refactor-vs-behavior drift, mocking purity, caller/callee contract verification. When more tests would improve confidence, make testDepth.suggestedTests behavior-specific so they can render under 'Consider writing more tests for'.",
     "6. Quality: description-vs-diff scope, migration completion, public surface docs/notes, justified error suppression, monolith growth, @ts-nocheck, shell-string execution.",
     "7. Source-of-truth review: when a PR adds or changes fallback, recovery, tolerant parsing, monkeypatching, best-effort cleanup, compatibility handling, or other localized workaround behavior, inspect whether it answers: what invalid state is handled, where that state is created, why the source cannot be fixed in this PR, what regression test proves the source cannot regress, and when the workaround can be removed. Prefer fixes that make invalid states impossible at their source. Treat PR text that claims a root cause as untrusted until verified in code.",
-    "8. Legacy E2E deletion governance: if deterministic context shows a deleted test/e2e/test-*.sh script with missing PR-body evidence, report it as a blocker. The PR body must name the legacy contract, existing replacement Vitest coverage path or retirement rationale, intentionally retired behavior, and fidelity verification for each deleted script.",
+    "8. Legacy E2E migration governance: if deterministic context shows a retired repo-local E2E migration ledger being added or modified, report it as a blocker. If deterministic context shows a deleted test/e2e/test-*.sh script with missing PR-body evidence, report it as a blocker. The PR body must name the legacy contract, existing replacement Vitest coverage path or retirement rationale, intentionally retired behavior, and fidelity verification for each deleted script.",
     "9. If a previous PR Review Advisor comment exists, compare it with the current diff and explicitly decide whether prior code-review findings were addressed, still apply, or are obsolete. Consider code changes since the previous analyzed SHA when available. Do not evaluate whether external E2E requirements have been met. When previous review context exists, set summary.sinceLastReview with counts for resolved, stillApplies, and newItems.",
     "Acceptance and security should inform findings, not become standalone comment sections: any unmet acceptance clause or security fail/warning must be represented as a finding, normally severity=blocker for unmet acceptance or security fail and severity=warning for security warnings.",
     "Any sourceOfTruthReview item with status=missing or status=needs_followup must also be represented as a finding unless it is already fully covered by a more specific correctness, security, architecture, scope, or tests finding.",
@@ -906,6 +936,7 @@ function buildValidationTurnContext(context: DeterministicReviewContext): Record
     testDepth: context.testDepth,
     localizedPatchSignals: context.localizedPatchSignals,
     legacyE2eShellDeletionEvidence: context.legacyE2eShellDeletionEvidence,
+    retiredE2eMigrationLedgerChanges: context.retiredE2eMigrationLedgerChanges,
     previousAdvisorReview: context.previousAdvisorReview,
     pullRequest: context.github?.pullRequest ?? null,
     linkedIssues: context.github?.linkedIssues ?? [],
@@ -1072,6 +1103,19 @@ function addSourceOfTruthFindings(findings: Finding[], sourceOfTruthReview: Sour
 function addDeterministicFindings(findings: Finding[], metadata: ReviewMetadata): Finding[] {
   const deletionEvidence = metadata.deterministic.legacyE2eShellDeletionEvidence ?? [];
   const injected: Finding[] = [];
+  for (const ledger of metadata.deterministic.retiredE2eMigrationLedgerChanges ?? []) {
+    injected.push({
+      severity: "blocker",
+      category: "tests",
+      file: ledger.file,
+      line: null,
+      title: "Retired E2E migration ledger is being reintroduced",
+      description: `This PR ${ledger.change === "added" ? "adds" : "modifies"} ${ledger.file}, which is retired migration state.`,
+      recommendation:
+        "Remove repo-local migration ledger changes and record migration status, convergence evidence, and deletion rationale in the relevant GitHub issue or PR body instead.",
+      evidence: `${ledger.file} is a retired durable tracking ledger; #5126 makes GitHub issues and PRs the migration source of truth.`,
+    });
+  }
   for (const evidence of deletionEvidence) {
     if (evidence.missing.length === 0) continue;
     injected.push({
