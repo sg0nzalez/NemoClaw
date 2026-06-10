@@ -44,6 +44,8 @@ The durable E2E system has one execution path:
 - NemoClaw fixtures own setup, onboarding, lifecycle mutations,
   expected-state probes, assertion helpers, expected-failure evidence,
   cleanup, artifacts, and secret redaction.
+- The historical `test/e2e-scenario/framework/` path is fixture/support code,
+  not a separate E2E framework or runner.
 - Typed scenario definitions and matrix helpers describe stable scenario IDs
   and supported combinations without becoming a second runner.
 - Product-facing manifests describe desired setup/onboarding state, not test

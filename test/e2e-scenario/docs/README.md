@@ -52,6 +52,9 @@ Live execution happens through Vitest fixtures:
 - `artifacts`, `secrets`, `cleanup`, and `shellProbe` provide shared fixture
   services.
 
+The historical `test/e2e-scenario/framework/` path is a fixture/support layer,
+not a separate E2E framework or runner. Vitest remains the only test harness.
+
 `suiteIds` remain metadata for reporting and migration planning. They do not
 dispatch shell validation suites.
 
@@ -99,8 +102,8 @@ test/e2e-scenario/
 - Existing workflows such as `nightly-e2e.yaml`, `e2e-branch-validation.yaml`,
   `macos-e2e.yaml`, `wsl-e2e.yaml`, `ollama-proxy-e2e.yaml`, and
   `regression-e2e.yaml` still run direct legacy E2E scripts during migration.
-- `vitest.config.ts` contains `e2e-scenario-framework` for fast framework tests
-  and `e2e-scenarios-live` for opt-in live scenario execution.
+- `vitest.config.ts` contains `e2e-scenario-framework` for fast fixture/support
+  tests and `e2e-scenarios-live` for opt-in live scenario execution.
 
 ## Migration Tracking
 

@@ -62,6 +62,8 @@ export default defineConfig({
       },
       {
         test: {
+          // Fast tests for the E2E fixture/support layer. The project name is
+          // retained for CI compatibility; Vitest remains the only harness.
           name: "e2e-scenario-framework",
           testTimeout: testTimeout(),
           include: ["test/e2e-scenario/framework-tests/**/*.test.ts"],

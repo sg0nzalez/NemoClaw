@@ -38,6 +38,7 @@ describe("E2E migration tracking policy", () => {
     expect(docs).toContain("replacement Vitest coverage");
     expect(docs).toContain("retirement rationale");
     expect(docs).toContain("generated legacy assertion inventories");
+    expect(docs).toContain("not a separate E2E framework or runner");
   });
 
   it("keeps durable taxonomy out of the repo-local migration docs", () => {
