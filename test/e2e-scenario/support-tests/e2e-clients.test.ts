@@ -145,7 +145,7 @@ describe("E2E fixture clients", () => {
 
     expect(runner.calls[0]).toEqual({
       command: "openshell",
-      args: ["sandbox", "exec", "assistant", "--", "echo", "ok"],
+      args: ["sandbox", "exec", "-n", "assistant", "--", "echo", "ok"],
       options: {
         artifactName: "sandbox-exec-assistant",
       },
@@ -192,12 +192,50 @@ describe("E2E fixture clients", () => {
     expect(runner.calls[0]?.args).toEqual([
       "sandbox",
       "exec",
+      "-n",
       "assistant",
       "--",
       "sh",
       "-c",
       "echo '$TOKEN' && rm -rf /tmp/not-real",
     ]);
+  });
+
+  it("sandbox client wraps shell scripts with the named sandbox exec form", async () => {
+    const runner = new FakeRunner();
+    const sandbox = new SandboxClient(runner, { openshellPath: "openshell" });
+
+    await sandbox.execShell("assistant", "echo ready", {
+      artifactName: "custom-exec-shell",
+      timeoutMs: 123,
+    });
+
+    expect(runner.calls[0]).toEqual({
+      command: "openshell",
+      args: ["sandbox", "exec", "-n", "assistant", "--", "sh", "-lc", "echo ready"],
+      options: {
+        artifactName: "custom-exec-shell",
+        timeoutMs: 123,
+      },
+    });
+  });
+
+  it("sandbox client uploads host files into a sandbox", async () => {
+    const runner = new FakeRunner();
+    const sandbox = new SandboxClient(runner, { openshellPath: "openshell" });
+
+    await sandbox.upload("assistant", "/tmp/local.js", "/tmp/remote.js", {
+      timeoutMs: 123,
+    });
+
+    expect(runner.calls[0]).toEqual({
+      command: "openshell",
+      args: ["sandbox", "upload", "assistant", "/tmp/local.js", "/tmp/remote.js"],
+      options: {
+        artifactName: "sandbox-upload-assistant",
+        timeoutMs: 123,
+      },
+    });
   });
 
   it("provider client parses JSON from curl output", async () => {

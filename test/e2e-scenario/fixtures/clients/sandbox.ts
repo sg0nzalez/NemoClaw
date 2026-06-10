@@ -50,8 +50,33 @@ export class SandboxClient {
     options: ShellProbeRunOptions = {},
   ): Promise<ShellProbeResult> {
     validateSandboxName(name);
-    return this.openshell(["sandbox", "exec", name, "--", ...command], {
+    return this.openshell(["sandbox", "exec", "-n", name, "--", ...command], {
       artifactName: `sandbox-exec-${name}`,
+      ...options,
+    });
+  }
+
+  execShell(
+    name: string,
+    script: string,
+    options: ShellProbeRunOptions = {},
+  ): Promise<ShellProbeResult> {
+    validateSandboxName(name);
+    return this.openshell(["sandbox", "exec", "-n", name, "--", "sh", "-lc", script], {
+      artifactName: `sandbox-exec-shell-${name}`,
+      ...options,
+    });
+  }
+
+  upload(
+    name: string,
+    localPath: string,
+    remotePath: string,
+    options: ShellProbeRunOptions = {},
+  ): Promise<ShellProbeResult> {
+    validateSandboxName(name);
+    return this.openshell(["sandbox", "upload", name, localPath, remotePath], {
+      artifactName: `sandbox-upload-${name}`,
       ...options,
     });
   }
