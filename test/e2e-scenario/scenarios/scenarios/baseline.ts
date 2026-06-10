@@ -184,6 +184,17 @@ const canonicalScenarioInputs: CanonicalScenarioInput[] = [
       "the local registry entry and restart the labeled Docker container.",
   },
   {
+    id: "ubuntu-repo-cloud-openclaw-provider-routed",
+    manifestName: "openclaw-nvidia-provider-routed",
+    environment: ubuntuRepoDocker("cloud-openclaw-provider-routed"),
+    expectedStateId: "cloud-openclaw-ready",
+    suiteIds: ["smoke", "model-router"],
+    requiredSecrets: ["NVIDIA_API_KEY"],
+    description:
+      "Coverage guard for #3255: Model Router provider-routed onboarding must " +
+      "produce a working inference.local routed completion.",
+  },
+  {
     id: "ubuntu-repo-openai-compatible-openclaw",
     manifestName: "openclaw-openai-compatible",
     environment: ubuntuRepoDocker("openai-compatible-openclaw"),

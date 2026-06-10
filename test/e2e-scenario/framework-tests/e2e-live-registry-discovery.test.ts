@@ -57,6 +57,27 @@ describe("live Vitest registry discovery support", () => {
     ]);
   });
 
+  it("wires the provider-routed Model Router guard through live fixtures", () => {
+    const scenario = listScenarios().find(
+      (entry) => entry.id === "ubuntu-repo-cloud-openclaw-provider-routed",
+    );
+
+    expect(scenario).toBeTruthy();
+    expect(scenario!.environment?.onboarding).toBe("cloud-openclaw-provider-routed");
+    expect(scenario!.suiteIds).toEqual(["smoke", "model-router"]);
+    expect(liveScenarioSupport(scenario!)).toMatchObject({
+      supported: true,
+      reasons: [],
+    });
+    expect(buildLiveScenarioRunPlan(scenario!)).toEqual({
+      scenarioId: "ubuntu-repo-cloud-openclaw-provider-routed",
+      manifestPath: "test/e2e-scenario/manifests/openclaw-nvidia-provider-routed.yaml",
+      expectedStateId: "cloud-openclaw-ready",
+      suiteIds: ["smoke", "model-router"],
+      phases: ["environment", "onboarding", "state-validation"],
+    });
+  });
+
   it("keeps unsupported onboarding profiles skipped with a concrete reason", () => {
     const scenario = listScenarios().find((entry) => entry.id === "ubuntu-repo-cloud-hermes");
 
