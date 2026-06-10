@@ -174,6 +174,31 @@ describe("E2E reusable workflow contract", () => {
     }
   });
 
+  it("runs runtime overrides through Vitest with Node setup", () => {
+    const job = nightlyWorkflow.jobs["runtime-overrides-e2e"];
+    const setupNodeStep = job.steps?.find((step) =>
+      String(step.uses ?? "").startsWith("actions/setup-node@"),
+    );
+    const runStep = job.steps?.find(
+      (step) => step.name === "Run runtime overrides Vitest E2E test",
+    );
+    const uploadStep = job.steps?.find(
+      (step) => step.name === "Upload runtime overrides artifacts",
+    );
+
+    expect(setupNodeStep?.with?.["node-version"]).toBe(22);
+    expect(setupNodeStep?.with?.cache).toBe("npm");
+    expect(runStep?.run).toContain("npx vitest run --project e2e-scenarios-live");
+    expect(runStep?.run).toContain("test/e2e-scenario/live/runtime-overrides.test.ts");
+    expect(runStep?.run).not.toContain("test/e2e/test-runtime-overrides.sh");
+    expect(runStep?.env?.NEMOCLAW_RUN_E2E_SCENARIOS).toBe("1");
+    expect(runStep?.env?.E2E_ARTIFACT_DIR).toBe(
+      "${{ github.workspace }}/e2e-artifacts/vitest/runtime-overrides",
+    );
+    expect(uploadStep?.with?.path).toBe("e2e-artifacts/vitest/runtime-overrides/");
+    expect(uploadStep?.with?.["include-hidden-files"]).toBe(false);
+  });
+
   it("validates env_json keys before writing GITHUB_ENV", () => {
     const exportStep = runnerWorkflow.jobs.run.steps.find(
       (step) => step.name === "Export script environment",
