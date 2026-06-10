@@ -53,8 +53,9 @@ and artifact shape operators needed from the retired workflows:
 Direct legacy E2E scripts under `test/e2e/test-*.sh` remain in place. Those
 scripts are governed by #5098 and live GitHub issues and pull requests. They
 should be migrated by contract into the single Vitest E2E system. A PR that
-deletes a legacy E2E script must show the replacement Vitest coverage or explain
-the retirement rationale in the PR body and linked issue.
+retires a nightly-wired legacy E2E script removes the script, removes the
+`nightly-e2e.yaml` reference, and updates the workflow allowlist test in the
+same change.
 
 That includes the security and messaging contracts that the deleted typed-shell
 validation suites used to mirror. Until #5098 migrates those families into

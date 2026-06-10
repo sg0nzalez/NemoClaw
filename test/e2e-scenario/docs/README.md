@@ -29,7 +29,7 @@ runner cutover; migrate them by contract using the rules in `MIGRATION.md`.
 | Expected-state probes | `test/e2e-scenario/scenarios/expected-states.ts` |
 | Product-facing setup/onboarding state | `test/e2e-scenario/manifests/*.yaml` |
 | Legacy direct E2E coverage | `test/e2e/test-*.sh` and their workflows |
-| Migration status and deletion evidence | GitHub issues and pull requests |
+| Migration status and retirement decisions | GitHub issues and pull requests |
 
 ## Scenario Model
 
@@ -108,8 +108,8 @@ test/e2e-scenario/
 ## Migration Tracking
 
 Migration status is tracked outside the repository. GitHub issues and pull
-requests are the source of truth for script-by-script state, ownership, deletion
-evidence, replacement Vitest coverage, and retirement rationale.
+requests are the source of truth for script-by-script state, ownership,
+replacement Vitest coverage, and retirement decisions.
 
 GitHub issues and PRs own changing migration status. The key issues are:
 
@@ -120,11 +120,11 @@ GitHub issues and PRs own changing migration status. The key issues are:
 
 The former repo-local `legacy-inventory.json` ledger and generated legacy
 assertion inventories are removed because they duplicated live GitHub state and
-drifted quickly. A PR that deletes a legacy E2E script must show the replacement
-Vitest coverage or explain the retirement rationale in a per-script PR-body
-`Legacy E2E deletion evidence` block, with the legacy contract, intentionally
-retired behavior, and fidelity verification kept next to the deletion. The
-replacement coverage path must point at an existing `.test.ts` file.
+drifted quickly. The durable guardrail is the workflow contract test that
+freezes both the top-level legacy `test/e2e/test-*.sh` set and the scheduled
+`nightly-e2e.yaml` legacy wiring. When a nightly-wired legacy script is
+intentionally retired, remove the script, remove the nightly workflow reference,
+and update the allowlist test in the same PR.
 
 Prefer new E2E coverage in Vitest fixtures. When shell, installer, process,
 platform, or full user-flow behavior is the contract, invoke that real boundary

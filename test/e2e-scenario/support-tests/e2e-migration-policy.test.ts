@@ -36,13 +36,14 @@ describe("E2E migration tracking policy", () => {
     expect(docs).toContain("GitHub issues and pull requests");
     expect(docs).toContain("source of truth");
     expect(docs).toContain("replacement Vitest coverage");
-    expect(docs).toContain("retirement rationale");
-    expect(docs).toContain("Legacy E2E deletion evidence");
-    expect(docs).toContain("Fidelity verification");
-    expect(docs).toContain("machine-checkable boundary");
-    expect(docs).toContain("existing `.test.ts` file");
+    expect(docs).toContain("nightly-e2e.yaml");
+    expect(docs).toContain("allowlist test");
+    expect(docs).toContain("workflow contract test");
+    expect(docs).toContain("machine-checkable boundary is the source tree plus workflow tests");
     expect(docs).toContain("generated legacy assertion inventories");
     expect(docs).toMatch(/not a test\s+harness or runner/);
+    expect(docs).not.toContain("Legacy E2E deletion evidence");
+    expect(docs).not.toContain("Fidelity verification");
   });
 
   it("keeps durable taxonomy out of the repo-local migration docs", () => {

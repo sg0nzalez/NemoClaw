@@ -7,13 +7,11 @@ import Ajv2020 from "ajv/dist/2020.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { githubGraphql } from "../tools/advisors/github.mts";
 import {
-  assessLegacyE2eShellDeletionEvidence,
   buildPromptTurns,
   buildSystemPrompt,
   classifyMonolithDelta,
   classifyTestDepth,
   detectLocalizedPatchSignals,
-  findDeletedLegacyE2eShellScripts,
   findRetiredE2eMigrationLedgerChanges,
   normalizeReviewResult,
   readTrustedSecurityReviewSkill,
@@ -41,7 +39,6 @@ function metadata(overrides: Partial<ReviewMetadata> = {}): ReviewMetadata {
     previousAdvisorReview: null,
     workflowSignals: [],
     localizedPatchSignals: [],
-    legacyE2eShellDeletionEvidence: [],
     retiredE2eMigrationLedgerChanges: [],
     monolithDeltas: [],
     driftEvidence: [],
@@ -229,7 +226,8 @@ describe("PR review advisor", () => {
     );
     expect(prompt).toContain("Legacy E2E migration governance");
     expect(prompt).toContain("retired repo-local E2E migration ledger");
-    expect(prompt).toContain("existing replacement Vitest coverage path or retirement rationale");
+    expect(prompt).toContain("Do not infer migration fidelity from PR-body prose");
+    expect(prompt).toContain("deterministic workflow tests own the frozen legacy bash script");
     expect(prompt).toContain("multi-turn conversation");
     expect(prompt).toContain(
       "In the final synthesis turn, return JSON only matching the schema provided in that turn",
@@ -355,104 +353,6 @@ describe("PR review advisor", () => {
       }),
     ]);
     expect(signals[0]?.reviewRule).toContain("invalid state");
-  });
-
-  it("detects deleted legacy E2E shell scripts and complete PR-body evidence", () => {
-    const diff = `diff --git a/test/e2e/test-example.sh b/test/e2e/test-example.sh
-deleted file mode 100755
-index 1234567..0000000
---- a/test/e2e/test-example.sh
-+++ /dev/null
-@@ -1,2 +0,0 @@
--#!/usr/bin/env bash
--echo ok
-`;
-    const prBody = `
-## Legacy E2E deletion evidence
-
-- Script: \`test/e2e/test-example.sh\`
-  - Legacy contract: validates the example CLI path against a real shell.
-  - Replacement Vitest coverage: \`test/e2e-scenario/live/openshell-version-pin.test.ts\`
-  - Intentionally retired behavior: none.
-  - Fidelity verification: \`npx vitest run --project e2e-scenarios-live test/e2e-scenario/live/openshell-version-pin.test.ts\`
-`;
-
-    expect(findDeletedLegacyE2eShellScripts(diff)).toEqual(["test/e2e/test-example.sh"]);
-    expect(assessLegacyE2eShellDeletionEvidence(diff, prBody)).toEqual([
-      expect.objectContaining({
-        script: "test/e2e/test-example.sh",
-        hasScriptEvidenceBlock: true,
-        hasLegacyContract: true,
-        hasReplacementVitestCoverage: true,
-        replacementVitestCoveragePath: "test/e2e-scenario/live/openshell-version-pin.test.ts",
-        hasRetirementRationale: false,
-        hasIntentionallyRetiredBehavior: true,
-        hasFidelityVerification: true,
-        missing: [],
-      }),
-    ]);
-  });
-
-  it("adds a blocker finding when a legacy E2E deletion lacks PR-body evidence", () => {
-    const diff = `diff --git a/test/e2e/test-example.sh b/test/e2e/test-example.sh
-deleted file mode 100755
---- a/test/e2e/test-example.sh
-+++ /dev/null
-@@ -1 +0,0 @@
--echo ok
-`;
-    const deletionEvidence = assessLegacyE2eShellDeletionEvidence(
-      diff,
-      "- Script: `test/e2e/test-example.sh`\n  - Legacy contract: validates the example CLI path.\n",
-    );
-    const result = normalizeReviewResult(
-      validResult({ findings: [], sourceOfTruthReview: [] }),
-      metadata({
-        deterministic: {
-          ...metadata().deterministic,
-          legacyE2eShellDeletionEvidence: deletionEvidence,
-        },
-      }),
-    );
-
-    expect(deletionEvidence[0]?.missing).toEqual([
-      "existing replacement Vitest coverage path or retirement rationale",
-      "intentionally retired behavior",
-      "fidelity verification",
-    ]);
-    expect(result.findings[0]).toMatchObject({
-      severity: "blocker",
-      category: "tests",
-      file: "test/e2e/test-example.sh",
-      title: "Legacy E2E deletion evidence is missing",
-    });
-    expect(result.findings[0]?.evidence).toContain("existing replacement Vitest coverage path");
-  });
-
-  it("rejects replacement Vitest paths that do not exist in the checkout", () => {
-    const diff = `diff --git a/test/e2e/test-example.sh b/test/e2e/test-example.sh
-deleted file mode 100755
---- a/test/e2e/test-example.sh
-+++ /dev/null
-@@ -1 +0,0 @@
--echo ok
-`;
-    const [evidence] = assessLegacyE2eShellDeletionEvidence(
-      diff,
-      `
-- Script: \`test/e2e/test-example.sh\`
-  - Legacy contract: validates the example CLI path.
-  - Replacement Vitest coverage: \`test/e2e-scenario/live/does-not-exist.test.ts\`
-  - Intentionally retired behavior: none.
-  - Fidelity verification: focused Vitest run.
-`,
-    );
-
-    expect(evidence).toMatchObject({
-      replacementVitestCoveragePath: "test/e2e-scenario/live/does-not-exist.test.ts",
-      hasReplacementVitestCoverage: false,
-      missing: ["existing replacement Vitest coverage path or retirement rationale"],
-    });
   });
 
   it("detects retired E2E migration ledgers only when added or modified", () => {

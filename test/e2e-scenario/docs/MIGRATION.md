@@ -11,7 +11,7 @@ those boundaries are the contract.
 
 Migration state is tracked outside the repository in GitHub issues and pull
 requests. Use GitHub issues and pull requests as the source of truth for status
-changes, ownership, deletion evidence, and contract-preserving migration
+changes, ownership, replacement coverage, and contract-preserving migration
 decisions.
 
 ## Current State
@@ -59,23 +59,15 @@ The former `test/e2e-scenario/migration/legacy-inventory.json` ledger and
 generated legacy assertion inventories are removed because they duplicated live
 GitHub issues and pull requests and quickly became stale sources of truth.
 
-The useful deletion invariant is smaller:
+The useful deletion invariant is deterministic and smaller: the top-level
+legacy bash E2E script set and the scheduled `nightly-e2e.yaml` legacy wiring
+are frozen by workflow contract tests. When a PR intentionally retires a
+nightly-wired legacy script, it removes the script, removes the nightly workflow
+reference, and updates the workflow allowlist test in the same change.
 
-> A PR that deletes a legacy E2E script must show the replacement Vitest
-> coverage or explain the retirement rationale.
-
-Record that evidence in the PR body, which is the machine-checkable boundary for
-the deletion. Link or summarize that PR evidence from the issue when useful. For
-each deleted script, include a `Legacy E2E deletion evidence` block with:
-
-- `Script:` the deleted `test/e2e/test-*.sh` path.
-- `Legacy contract:` the observable behavior the shell script protected.
-- `Replacement Vitest coverage:` an existing `.test.ts` path, or `Retirement
-  rationale:` when the behavior is intentionally retired instead of replaced.
-- `Intentionally retired behavior:` any assertions, probes, or workflow hooks
-  that are deliberately not preserved.
-- `Fidelity verification:` the command, CI check, or review evidence proving the
-  Vitest coverage keeps the same contract value.
+GitHub issues and PRs still explain why a script is migrated or retired, but the
+repository should not depend on a separate PR-body proof format. The
+machine-checkable boundary is the source tree plus workflow tests.
 
 ## Migration Pattern
 
@@ -90,8 +82,9 @@ When moving behavior from a legacy E2E script:
 5. Preserve real boundaries. Use `bash`, login shells, `/proc`, process
    signals, `sudo`, Docker host state, installer scripts, or full journey flows
    from Vitest when they are the behavior being tested.
-6. Prove equivalence in the PR, then delete the bash harness when the Vitest
-   test preserves the same value.
+6. Prove equivalence in the PR discussion, then delete the bash harness when the
+   Vitest test preserves the same value. If the script is wired into nightly,
+   remove that workflow reference and update the allowlist test in the same PR.
 
 ## Useful Commands
 
