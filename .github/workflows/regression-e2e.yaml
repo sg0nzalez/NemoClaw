@@ -159,33 +159,45 @@ jobs:
       github.repository == 'NVIDIA/NemoClaw' &&
       needs.select_regression_jobs.outputs.gateway == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
 
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: "22"
+          cache: npm
 
-      - name: Run gateway health-honesty E2E test
+      - name: Install root dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Run gateway health-honesty Vitest E2E test
         env:
-          GITHUB_TOKEN: ${{ github.token }}
           NEMOCLAW_NON_INTERACTIVE: "1"
           NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE: "1"
-        run: bash test/e2e/test-gateway-health-honest.sh
+          NEMOCLAW_RUN_E2E_SCENARIOS: "1"
+          E2E_ARTIFACT_DIR: ${{ github.workspace }}/e2e-artifacts/vitest/gateway-health-honest
+        run: |
+          set -euo pipefail
+          npx vitest run --project e2e-scenarios-live \
+            test/e2e-scenario/live/gateway-health-honest.test.ts \
+            --silent=false --reporter=default
 
-      - name: Upload gateway health-honesty logs on failure
-        if: failure()
+      - name: Upload gateway health-honesty artifacts
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: gateway-health-honest-logs
-          path: |
-            /tmp/nemoclaw-e2e-gateway-health-honest.log
-            /tmp/nemoclaw-e2e-gateway-health-honest-start.log
-            /tmp/nemoclaw-e2e-gateway-health-honest-process.log
+          name: gateway-health-honest-artifacts
+          path: e2e-artifacts/vitest/gateway-health-honest/
+          include-hidden-files: false
           if-no-files-found: ignore
+          retention-days: 14
 
   # ── OpenShell version-pin E2E ──────────────────────────────
   # Coverage guard for #3474. If a host has sticky OpenShell 0.0.45 on PATH
