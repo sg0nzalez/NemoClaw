@@ -66,7 +66,7 @@ export default defineConfig({
           // only harness; this project does not define a separate runner.
           name: "e2e-vitest-support",
           testTimeout: testTimeout(),
-          include: ["test/e2e-scenario/framework-tests/**/*.test.ts"],
+          include: ["test/e2e-scenario/support-tests/**/*.test.ts"],
         },
       },
       {

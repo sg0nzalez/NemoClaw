@@ -87,10 +87,10 @@ paths must not be reintroduced.
 test/e2e-scenario/
   docs/                  # Fixture guide, migration notes, retirement record
   framework/             # Vitest fixtures, clients, redaction, artifacts, cleanup
-  framework-tests/       # Fast fixture/support and metadata tests
   live/                  # Opt-in live Vitest scenario tests
   manifests/             # Product-facing NemoClawInstance desired state
   scenarios/             # Typed registry, matrix helpers, expected states
+  support-tests/         # Fast fixture/support and metadata tests
 ```
 
 ## CI Entry Points

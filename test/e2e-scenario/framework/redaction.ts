@@ -21,9 +21,9 @@
  * coupling the framework to product runtime modules.
  *
  * Tests:
- *   test/e2e-scenario/framework-tests/e2e-redaction-entry.test.ts
- *   test/e2e-scenario/framework-tests/e2e-redaction-parity.test.ts
- *   test/e2e-scenario/framework-tests/e2e-phase-environment.test.ts
+ *   test/e2e-scenario/support-tests/e2e-redaction-entry.test.ts
+ *   test/e2e-scenario/support-tests/e2e-redaction-parity.test.ts
+ *   test/e2e-scenario/support-tests/e2e-phase-environment.test.ts
  *     - canonical token redaction parity with product runtime patterns
  *     - explicit per-test redaction values
  *     - child-env allowlist filtering for framework probes
@@ -38,12 +38,12 @@ const EXPLICIT_REDACTED = "[REDACTED]";
 // framework deliberately does not import from src/lib/security/ so it
 // stays decoupled from product runtime modules and the cross-tsconfig
 // boundary. A parity test
-// (test/e2e-scenario/framework-tests/e2e-redaction-parity.test.ts)
+// (test/e2e-scenario/support-tests/e2e-redaction-parity.test.ts)
 // asserts these regex sources stay in lockstep with the canonical
 // product source so adding a token shape there keeps both layers
 // honest at once.
 // Exported only so the parity test
-// (test/e2e-scenario/framework-tests/e2e-redaction-parity.test.ts) can
+// (test/e2e-scenario/support-tests/e2e-redaction-parity.test.ts) can
 // import the actual RegExp values rather than parsing source text.
 // Production code in this module continues to use them via the local
 // binding; nothing in the framework runtime imports these.

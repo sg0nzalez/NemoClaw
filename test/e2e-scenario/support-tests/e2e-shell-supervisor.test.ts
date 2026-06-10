@@ -13,7 +13,7 @@
  * Both come from the leaf modules under framework/shell/, so the
  * assertions live here at the leaf level. The end-to-end behaviour
  * (orchestrator log redaction, fixture artifact persistence, probe
- * outcome mapping) stays covered by the existing framework-tests
+ * outcome mapping) stays covered by the existing support-tests
  * (e2e-phase-orchestrators, e2e-fixture-context).
  */
 

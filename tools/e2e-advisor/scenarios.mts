@@ -233,7 +233,7 @@ export function buildSystemPrompt(schema: AdvisorSchema): string {
     "- `test/e2e-scenario/scenarios/registry.ts` and `test/e2e-scenario/scenarios/scenarios/` — typed scenario IDs and metadata.",
     "- `test/e2e-scenario/scenarios/runtime-support.ts` — which typed scenarios are wired for live Vitest execution.",
     "- `test/e2e-scenario/live/registry-scenarios.test.ts` — live Vitest registry scenario entry point.",
-    "- `test/e2e-scenario/framework/` and `test/e2e-scenario/framework-tests/` — shared Vitest fixtures, clients, and phase helpers.",
+    "- `test/e2e-scenario/framework/` and `test/e2e-scenario/support-tests/` — shared Vitest fixtures, clients, and phase helpers.",
     "",
     "Decision policy:",
     "- Required (all scenarios): changes to scenario registry, matrix emission, expected-state metadata, live support classification, shared fixtures, or the Vitest scenario workflow itself. Recommend the `e2e-scenarios-all` fan-out through `e2e-vitest-scenarios.yaml`.",
