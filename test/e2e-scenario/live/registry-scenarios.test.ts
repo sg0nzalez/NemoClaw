@@ -38,7 +38,7 @@ for (const scenario of listScenarios()) {
 
   test(
     liveScenarioTestName(scenario),
-    async ({ artifacts, environment, lifecycle, onboard, secrets, stateValidation }) => {
+    async ({ artifacts, environment, lifecycle, onboard, runtime, secrets, stateValidation }) => {
       for (const secret of scenario.requiredSecrets ?? []) {
         secrets.required(secret);
       }

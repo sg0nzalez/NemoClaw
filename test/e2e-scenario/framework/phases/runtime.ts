@@ -375,9 +375,10 @@ export class RuntimePhaseFixture {
     options: ProviderRuntimeRequestOptions = {},
   ): Promise<InferenceRuntimeProbeResult> {
     const response = await this.provider.requestJson(MODEL_ROUTER_HEALTH_ENDPOINT, {
-      artifactName: "runtime-model-router-health",
-      curlMaxTimeSeconds: 10,
       ...options,
+      artifactName: options.artifactName ?? "runtime-model-router-health",
+      curlMaxTimeSeconds: options.curlMaxTimeSeconds ?? 10,
+      redactionValues: options.redactionValues ? [...options.redactionValues] : undefined,
     });
     assertModelRouterHealthyEndpoint(response.json, "model-router health");
     return { endpoint: MODEL_ROUTER_HEALTH_ENDPOINT.logLabel, result: response.result };
