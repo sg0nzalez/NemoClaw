@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/NVIDIA/NemoClaw/tools/e2e-advisor/scenarios-schema.json",
-  "title": "NemoClaw E2E Scenario Advisor Result",
+  "title": "NemoClaw Vitest E2E Scenario Advisor Result",
   "type": "object",
   "required": [
     "version",
