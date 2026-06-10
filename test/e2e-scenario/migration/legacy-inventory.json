@@ -473,12 +473,14 @@
       "legacyScript": "test/e2e/test-model-router-provider-routed-inference.sh",
       "domain": "inference",
       "ownerIssue": "#4349",
-      "status": "bridge-probe",
-      "targetVitestScenarios": [],
+      "status": "covered",
+      "targetVitestScenarios": [
+        "test/e2e-scenario/live/registry-scenarios.test.ts"
+      ],
       "bridgeProbes": [],
       "retiredReason": "",
       "deletionReady": false,
-      "notes": "Initial completeness row; classify detailed coverage and deletion evidence in the owning migration issue before deleting."
+      "notes": "Covered by registry-driven live Vitest scenario ubuntu-repo-cloud-openclaw-provider-routed in PR #5151. Preserves ubuntu-latest runner, NVIDIA_API_KEY secret, provider-routed onboarding, host model-router health, and inference.local nvidia-routed PONG completion checks. Bash guard retained in regression-e2e.yaml; deletion remains a follow-up after #4357 approval."
     },
     {
       "legacyScript": "test/e2e/test-ollama-auth-proxy-e2e.sh",
