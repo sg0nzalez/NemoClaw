@@ -145,7 +145,7 @@ describe("E2E fixture clients", () => {
 
     expect(runner.calls[0]).toEqual({
       command: "openshell",
-      args: ["sandbox", "exec", "assistant", "--", "echo", "ok"],
+      args: ["sandbox", "exec", "--name", "assistant", "--", "echo", "ok"],
       options: {
         artifactName: "sandbox-exec-assistant",
       },
@@ -192,6 +192,7 @@ describe("E2E fixture clients", () => {
     expect(runner.calls[0]?.args).toEqual([
       "sandbox",
       "exec",
+      "--name",
       "assistant",
       "--",
       "sh",

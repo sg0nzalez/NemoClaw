@@ -50,7 +50,7 @@ export class SandboxClient {
     options: ShellProbeRunOptions = {},
   ): Promise<ShellProbeResult> {
     validateSandboxName(name);
-    return this.openshell(["sandbox", "exec", name, "--", ...command], {
+    return this.openshell(["sandbox", "exec", "--name", name, "--", ...command], {
       artifactName: `sandbox-exec-${name}`,
       ...options,
     });

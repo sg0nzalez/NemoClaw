@@ -111,6 +111,7 @@ describe("runtime phase fixture", () => {
         args: [
           "sandbox",
           "exec",
+          "--name",
           "e2e-ubuntu-repo-cloud-openclaw",
           "--",
           "curl",
@@ -170,6 +171,7 @@ describe("runtime phase fixture", () => {
     expect(call?.args).toEqual([
       "sandbox",
       "exec",
+      "--name",
       "e2e-ubuntu-repo-cloud-openclaw",
       "--",
       "curl",
@@ -183,7 +185,7 @@ describe("runtime phase fixture", () => {
       "https://inference.local/v1/chat/completions",
     ]);
     expect(call?.args).not.toContain("sh");
-    const payload = JSON.parse(call?.args[11] ?? "{}");
+    const payload = JSON.parse(call?.args[12] ?? "{}");
     expect(payload).toEqual({
       model: "default",
       messages: [{ role: "user", content: "Reply with ok" }],
@@ -237,6 +239,7 @@ describe("runtime phase fixture", () => {
     expect(call?.args).toEqual([
       "sandbox",
       "exec",
+      "--name",
       "e2e-ubuntu-repo-cloud-openclaw",
       "--",
       "curl",
@@ -249,7 +252,7 @@ describe("runtime phase fixture", () => {
       expect.any(String),
       "https://inference.local/v1/chat/completions",
     ]);
-    expect(JSON.parse(call?.args[11] ?? "{}")).toEqual({
+    expect(JSON.parse(call?.args[12] ?? "{}")).toEqual({
       model: "nvidia-routed",
       messages: [{ role: "user", content: "Reply with exactly one word: PONG" }],
       max_tokens: 50,
@@ -302,6 +305,7 @@ describe("runtime phase fixture", () => {
       args: [
         "sandbox",
         "exec",
+        "--name",
         "e2e-ubuntu-repo-cloud-openclaw",
         "--",
         "curl",
