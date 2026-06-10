@@ -50,9 +50,9 @@
  *   TELEGRAM_CHAT_ID_E2E     — Telegram chat ID for optional sendMessage test
  */
 
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { execSync, execFileSync, spawnSync, type StdioOptions } from "node:child_process";
+import { execFileSync, execSync, type StdioOptions, spawnSync } from "node:child_process";
 import path from "node:path";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 // Instance configuration
 const BREV_MIN_VCPU = parseInt(process.env.BREV_MIN_VCPU || "4", 10);
@@ -396,7 +396,7 @@ function waitForLaunchableReady(maxWaitMs = 1_200_000, pollIntervalMs = 15_000):
   );
 }
 
-function runRemoteTest(scriptPath: string): string {
+function runRemoteCommand(command: string): string {
   const cmd = [
     `set -o pipefail`,
     `source ~/.nvm/nvm.sh 2>/dev/null || true`,
@@ -405,7 +405,7 @@ function runRemoteTest(scriptPath: string): string {
     `export PATH=$HOME/.local/bin:$PATH`,
     // Docker socket is chmod 666 by setup script, no sg docker needed.
 
-    `bash ${scriptPath} 2>&1 | tee /tmp/test-output.log`,
+    `{ ${command}; } 2>&1 | tee /tmp/test-output.log`,
   ].join(" && ");
 
   // Stream test output to CI log AND capture it for assertions
@@ -417,6 +417,32 @@ function runRemoteTest(scriptPath: string): string {
   }
   // Retrieve the captured output for assertion checking
   return ssh("cat /tmp/test-output.log", { timeout: 30_000 });
+}
+
+function runRemoteTest(scriptPath: string): string {
+  return runRemoteCommand(`bash ${scriptPath}`);
+}
+
+function runRemoteVitest(testPath: string, env: Record<string, string> = {}): string {
+  const envPrefix = Object.entries(env)
+    .map(([name, value]) => {
+      if (!/^[A-Z_][A-Z0-9_]*$/.test(name)) {
+        throw new Error(`invalid remote env name: ${name}`);
+      }
+      return `${name}='${shellEscape(value)}'`;
+    })
+    .join(" ");
+  const command = [
+    envPrefix,
+    "NEMOCLAW_RUN_E2E_SCENARIOS=1",
+    "npx vitest run --project e2e-scenarios-live",
+    testPath,
+    "--silent=false --reporter=default",
+    "&& printf '\\nPASS: Vitest live E2E completed\\n'",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  return runRemoteCommand(command);
 }
 
 function printRemoteFailureDiagnostics(): void {
@@ -1235,7 +1261,9 @@ describe.runIf(hasRequiredVars && hasAuthenticatedBrev)("Brev E2E", () => {
   it.runIf(TEST_SUITE === "dashboard-remote-bind")(
     "dashboard forward binds to all interfaces for remote browser origins",
     () => {
-      const output = runRemoteTest("test/e2e/test-dashboard-remote-bind.sh");
+      const output = runRemoteVitest("test/e2e-scenario/live/dashboard-remote-bind.test.ts", {
+        NEMOCLAW_E2E_DASHBOARD_REMOTE_BIND: "1",
+      });
       expect(output).toContain("PASS");
       expect(output).not.toMatch(/FAIL:/);
     },
