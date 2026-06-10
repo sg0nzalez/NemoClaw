@@ -201,10 +201,15 @@ async function startCompatibleEndpointMock(): Promise<CompatibleEndpointMock> {
 
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
-    // Docker-backed OpenShell sandboxes reach host services through
-    // host.openshell.internal; binding only localhost makes the mock
-    // unreachable from the sandbox on Linux. Protected routes require
-    // the per-run bearer token above.
+    // Source boundary: this is host-side E2E fixture infrastructure, not a
+    // NemoClaw product service. Docker-backed OpenShell sandboxes reach host
+    // services through host.openshell.internal, and binding only localhost
+    // makes the mock unreachable from the sandbox on Linux.
+    //
+    // Removal condition: narrow this bind to loopback or a specific
+    // host-gateway address once OpenShell exposes a stable host-loopback alias
+    // or the fixture can discover the sandbox-reachable host address. Protected
+    // /v1 routes require the per-run bearer token above while this is broad.
     server.listen(0, "0.0.0.0", () => {
       server.off("error", reject);
       resolve();
