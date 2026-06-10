@@ -92,11 +92,20 @@ for (const scenario of listScenarios()) {
 
       const validation = await stateValidation.from(scenario.expectedStateId, instance);
 
+      const runtimeSteps: string[] = [];
+      if (scenario.suiteIds?.includes("model-router")) {
+        await runtime.expectModelRouterHealthyEndpoint();
+        runtimeSteps.push("runtime.model-router.healthy-endpoint");
+        await runtime.expectModelRouterProviderRoutedCompletion(instance);
+        runtimeSteps.push("runtime.model-router.provider-routed-completion");
+      }
+
       await artifacts.writeJson("scenario-result.json", {
         id: scenario.id,
         expectedStateId: validation.state.id,
         probes: validation.probes.map((probe) => probe.id),
         pendingRuntimeSuites: support.pendingRuntimeSuites,
+        runtimeSteps,
         lifecycle: lifecycleResult
           ? { profile: lifecycleResult.profile, steps: lifecycleResult.steps.map((s) => s.id) }
           : undefined,

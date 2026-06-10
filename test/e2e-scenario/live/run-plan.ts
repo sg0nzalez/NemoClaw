@@ -22,6 +22,7 @@ export function buildLiveScenarioRunPlan(scenario: ScenarioDefinition): LiveScen
       "onboarding",
       ...(scenario.environment?.lifecycle ? ["lifecycle"] : []),
       "state-validation",
+      ...(scenario.suiteIds?.includes("model-router") ? ["runtime"] : []),
     ],
   };
 }

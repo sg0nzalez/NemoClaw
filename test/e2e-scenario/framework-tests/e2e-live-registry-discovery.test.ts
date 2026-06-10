@@ -74,7 +74,7 @@ describe("live Vitest registry discovery support", () => {
       manifestPath: "test/e2e-scenario/manifests/openclaw-nvidia-provider-routed.yaml",
       expectedStateId: "cloud-openclaw-ready",
       suiteIds: ["smoke", "model-router"],
-      phases: ["environment", "onboarding", "state-validation"],
+      phases: ["environment", "onboarding", "state-validation", "runtime"],
     });
   });
 
