@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { describe, expect, it } from "vitest";
 
 import { compileRunPlans } from "../scenarios/compiler.ts";
 import {
@@ -45,11 +45,31 @@ describe("typed expected-state registry id coverage", () => {
   it("getExpectedState returns the state for known ids", () => {
     expect(getExpectedState("cloud-openclaw-ready")?.id).toBe("cloud-openclaw-ready");
   });
+
+  it("tracks compatible endpoint inference metadata separately from cloud OpenClaw", () => {
+    expect(getExpectedState("openai-compatible-openclaw-ready")).toMatchObject({
+      inference: {
+        expected: "available",
+        provider: "compatible-endpoint",
+        model: "mock-compatible-model",
+        policyTier: "open",
+      },
+      credentials: { expected: "present", refs: ["COMPATIBLE_API_KEY"] },
+    });
+  });
 });
 
 describe("probesForState maps typed expected-state into probe ids", () => {
   it("ready cloud state emits cli-installed, gateway-healthy, sandbox-running", () => {
     expect(probesForState(requireExpectedState("cloud-openclaw-ready"))).toEqual([
+      "cli-installed",
+      "gateway-healthy",
+      "sandbox-running",
+    ]);
+  });
+
+  it("compatible endpoint ready state emits the same available-sandbox probes", () => {
+    expect(probesForState(requireExpectedState("openai-compatible-openclaw-ready"))).toEqual([
       "cli-installed",
       "gateway-healthy",
       "sandbox-running",

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { randomBytes } from "node:crypto";
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -22,7 +23,6 @@ const ONBOARD_ARGS = [
 ];
 const DEFAULT_TIMEOUT_MS = 15 * 60_000;
 const OPENCLAW_GATEWAY_URL = "http://127.0.0.1:18789";
-const COMPATIBLE_ENDPOINT_API_KEY = "test-compatible-endpoint-key";
 const COMPATIBLE_ENDPOINT_MAX_BODY_BYTES = 64 * 1024;
 const COMPATIBLE_ENDPOINT_MODEL = "mock-compatible-model";
 const HOST_SANDBOX_ALIAS = "host.openshell.internal";
@@ -118,6 +118,7 @@ async function closeServer(server: Server): Promise<void> {
 }
 
 async function startCompatibleEndpointMock(): Promise<CompatibleEndpointMock> {
+  const apiKey = `test-compatible-endpoint-${randomBytes(16).toString("hex")}`;
   const server = createServer((req, res) => {
     const path = req.url?.split("?", 1)[0] ?? "/";
     const protectedRoute =
@@ -128,7 +129,7 @@ async function startCompatibleEndpointMock(): Promise<CompatibleEndpointMock> {
       res.writeHead(status, { "Content-Type": "application/json" });
       res.end(JSON.stringify(payload));
     };
-    if (protectedRoute && req.headers.authorization !== `Bearer ${COMPATIBLE_ENDPOINT_API_KEY}`) {
+    if (protectedRoute && req.headers.authorization !== `Bearer ${apiKey}`) {
       req.resume();
       writeJson(401, { error: "unauthorized" });
       return;
@@ -183,6 +184,10 @@ async function startCompatibleEndpointMock(): Promise<CompatibleEndpointMock> {
 
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
+    // Docker-backed OpenShell sandboxes reach host services through
+    // host.openshell.internal; binding only localhost makes the mock
+    // unreachable from the sandbox on Linux. Protected routes require
+    // the per-run bearer token above.
     server.listen(0, "0.0.0.0", () => {
       server.off("error", reject);
       resolve();
@@ -196,7 +201,7 @@ async function startCompatibleEndpointMock(): Promise<CompatibleEndpointMock> {
   let closed = false;
   return {
     endpointUrl: `http://${HOST_SANDBOX_ALIAS}:${(address as AddressInfo).port}/v1`,
-    apiKey: COMPATIBLE_ENDPOINT_API_KEY,
+    apiKey,
     model: COMPATIBLE_ENDPOINT_MODEL,
     close: async () => {
       if (closed) return;

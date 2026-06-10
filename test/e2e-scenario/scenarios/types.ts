@@ -81,9 +81,12 @@ export interface ExpectedState {
   inference?: {
     expected: ExpectedInferenceAvail;
     provider?: string;
+    model?: string;
+    policyTier?: string;
   };
   credentials?: {
     expected: ExpectedPresence;
+    refs?: readonly string[];
   };
   // Host-side registry entry for the scenario's sandbox name.
   // "present" means `~/.nemoclaw/sandboxes.json` retains the entry,

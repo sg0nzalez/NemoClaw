@@ -80,6 +80,7 @@ describe("live Vitest registry discovery support", () => {
     );
 
     expect(scenario).toBeTruthy();
+    expect(scenario!.expectedStateId).toBe("openai-compatible-openclaw-ready");
     expect(liveScenarioSupport(scenario!)).toMatchObject({
       supported: true,
       reasons: [],

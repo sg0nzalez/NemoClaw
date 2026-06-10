@@ -252,6 +252,10 @@ describe("onboarding phase fixture", () => {
         gatewayUrl: "http://127.0.0.1:18789",
       });
       expect(secrets.requiredCalls).toEqual([]);
+      const compatibleApiKey = String(runner.calls[0]?.options?.env?.COMPATIBLE_API_KEY);
+      expect(compatibleApiKey).toEqual(
+        expect.stringMatching(/^test-compatible-endpoint-[0-9a-f]{32}$/),
+      );
       expect(runner.calls).toEqual([
         {
           command: "nemoclaw",
@@ -259,7 +263,7 @@ describe("onboarding phase fixture", () => {
           options: {
             artifactName: "onboard-openai-compatible-openclaw",
             env: expect.objectContaining({
-              COMPATIBLE_API_KEY: "test-compatible-endpoint-key",
+              COMPATIBLE_API_KEY: compatibleApiKey,
               NEMOCLAW_AGENT: "openclaw",
               NEMOCLAW_ENDPOINT_URL: expect.stringMatching(
                 /^http:\/\/host\.openshell\.internal:\d+\/v1$/,
@@ -270,7 +274,7 @@ describe("onboarding phase fixture", () => {
               NEMOCLAW_SANDBOX_NAME: "e2e-openai-compatible",
               PATH: expect.any(String),
             }),
-            redactionValues: ["test-compatible-endpoint-key"],
+            redactionValues: [compatibleApiKey],
             timeoutMs: 900_000,
           },
         },
@@ -293,13 +297,13 @@ describe("onboarding phase fixture", () => {
       ).resolves.toMatchObject({ status: 401 });
       await expect(
         fetch(`${localEndpoint}/models`, {
-          headers: { Authorization: "Bearer test-compatible-endpoint-key" },
+          headers: { Authorization: `Bearer ${compatibleApiKey}` },
         }),
       ).resolves.toMatchObject({ status: 200 });
       await expect(
         fetch(`${localEndpoint}/chat/completions`, {
           body: "x".repeat(70 * 1024),
-          headers: { Authorization: "Bearer test-compatible-endpoint-key" },
+          headers: { Authorization: `Bearer ${compatibleApiKey}` },
           method: "POST",
         }),
       ).resolves.toMatchObject({ status: 413 });

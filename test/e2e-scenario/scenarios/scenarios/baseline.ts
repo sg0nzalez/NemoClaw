@@ -184,7 +184,7 @@ const canonicalScenarioInputs: CanonicalScenarioInput[] = [
     id: "ubuntu-repo-openai-compatible-openclaw",
     manifestName: "openclaw-openai-compatible",
     environment: ubuntuRepoDocker("openai-compatible-openclaw"),
-    expectedStateId: "cloud-openclaw-ready",
+    expectedStateId: "openai-compatible-openclaw-ready",
     suiteIds: ["smoke", "openai-compatible-inference"],
   },
   {

@@ -29,6 +29,18 @@ const cloudOpenclawCustomPoliciesReady: ExpectedState = {
   id: "cloud-openclaw-custom-policies-ready",
 };
 
+const openAiCompatibleOpenclawReady: ExpectedState = {
+  ...cloudOpenclawReady,
+  id: "openai-compatible-openclaw-ready",
+  inference: {
+    expected: "available",
+    provider: "compatible-endpoint",
+    model: "mock-compatible-model",
+    policyTier: "open",
+  },
+  credentials: { expected: "present", refs: ["COMPATIBLE_API_KEY"] },
+};
+
 const cloudHermesReady: ExpectedState = {
   id: "cloud-hermes-ready",
   cli: { installed: true },
@@ -105,6 +117,7 @@ const postRebootRecoveryReady: ExpectedState = {
 const REGISTRY: readonly ExpectedState[] = [
   cloudOpenclawReady,
   cloudOpenclawCustomPoliciesReady,
+  openAiCompatibleOpenclawReady,
   cloudHermesReady,
   localOllamaOpenclawReady,
   macosCliReadyDockerOptional,

@@ -171,7 +171,7 @@ describe("typed scenario matrix", () => {
       install: "repo-current",
       runtime: "docker-running",
       onboarding: "openai-compatible-openclaw",
-      expectedStateId: "cloud-openclaw-ready",
+      expectedStateId: "openai-compatible-openclaw-ready",
       requiredSecrets: [],
       supported: true,
       supportReasons: [],
