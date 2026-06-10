@@ -51,14 +51,14 @@ and artifact shape operators needed from the retired workflows:
 ## What Was Not Removed
 
 Direct legacy E2E scripts under `test/e2e/test-*.sh` remain in place. Those
-scripts are governed by #5098 and
-`test/e2e-scenario/migration/legacy-inventory.json`. They should be migrated,
-augmented, or kept by family according to their KEEP_BASH, HYBRID, or
-MIGRATE_TYPED classification.
+scripts are governed by #5098 and live GitHub issues and pull requests. They
+should be migrated by contract into the single Vitest E2E system. A PR that
+deletes a legacy E2E script must show the replacement Vitest coverage or explain
+the retirement rationale in the PR body and linked issue.
 
 That includes the security and messaging contracts that the deleted typed-shell
 validation suites used to mirror. Until #5098 migrates those families into
-Vitest scenario fixtures, the active source of truth remains:
+Vitest fixtures, the active source of truth remains:
 
 - `test/e2e/test-credential-sanitization.sh` and
   `test/e2e/test-credential-migration.sh` for credential leak prevention and
