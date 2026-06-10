@@ -194,12 +194,14 @@ test("openclaw plugin runtime deps replacement crosses sandbox filesystems", asy
     ["df", "-PT", "/", "/tmp", "/dev/shm", "/sandbox", "/sandbox/.openclaw/plugin-runtime-deps"],
     {
       artifactName: "openclaw-plugin-runtime-exdev-filesystems",
+      env: buildAvailabilityProbeEnv(),
       timeoutMs: 60_000,
     },
   );
 
   const replacement = await sandbox.execShell(SANDBOX_NAME, pluginRuntimeDepsReplacementScript(), {
     artifactName: "openclaw-plugin-runtime-exdev-replacement",
+    env: buildAvailabilityProbeEnv(),
     timeoutMs: 60_000,
   });
   const replacementOutput = `${replacement.stdout}\n${replacement.stderr}`;
