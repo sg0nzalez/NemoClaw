@@ -97,6 +97,98 @@ describe("mergeOpenClawRestoredConfig", () => {
     });
   });
 
+  it("preserves user-tuned model fields when the rebuilt model id is unchanged (#5202)", () => {
+    const merged = mergeOpenClawRestoredConfig(
+      {
+        models: {
+          providers: {
+            inference: {
+              baseUrl: "https://inference.local/v1",
+              apiKey: "unused",
+              api: "openai-completions",
+              models: [
+                {
+                  id: "nvidia/Qwen3.6-35B-A3B-NVFP4",
+                  name: "inference/nvidia/Qwen3.6-35B-A3B-NVFP4",
+                  reasoning: true,
+                  cost: { input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5 },
+                  contextWindow: 262000,
+                  maxTokens: 32768,
+                  compat: { thinkingFormat: "qwen-chat-template", supportsPromptCacheKey: true },
+                },
+              ],
+            },
+          },
+        },
+      },
+      {
+        models: {
+          providers: {
+            inference: {
+              baseUrl: "https://inference.local/v1",
+              apiKey: "unused",
+              api: "openai-completions",
+              models: [
+                {
+                  id: "nvidia/Qwen3.6-35B-A3B-NVFP4",
+                  name: "inference/nvidia/Qwen3.6-35B-A3B-NVFP4",
+                  reasoning: false,
+                  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+                  contextWindow: 262000,
+                  maxTokens: 4096,
+                },
+              ],
+            },
+          },
+        },
+      },
+    );
+
+    const model = (
+      merged as {
+        models: { providers: { inference: { models: Record<string, unknown>[] } } };
+      }
+    ).models.providers.inference.models[0];
+    expect(model).toMatchObject({
+      id: "nvidia/Qwen3.6-35B-A3B-NVFP4",
+      reasoning: true,
+      cost: { input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5 },
+      maxTokens: 32768,
+      compat: { thinkingFormat: "qwen-chat-template", supportsPromptCacheKey: true },
+    });
+  });
+
+  it("does not resurrect tuning from a model the user switched away from", () => {
+    const merged = mergeOpenClawRestoredConfig(
+      {
+        models: {
+          providers: {
+            inference: {
+              models: [{ id: "old/model", reasoning: true, maxTokens: 32768 }],
+            },
+          },
+        },
+      },
+      {
+        models: {
+          providers: {
+            inference: {
+              models: [{ id: "new/model", reasoning: false, maxTokens: 4096 }],
+            },
+          },
+        },
+      },
+    );
+
+    expect(merged).toMatchObject({
+      models: {
+        providers: {
+          inference: { models: [{ id: "new/model", reasoning: false, maxTokens: 4096 }] },
+        },
+      },
+    });
+  });
+
   it("keeps current provider and plugin entries for matching keys", () => {
     const merged = mergeOpenClawRestoredConfig(
       {

@@ -1,0 +1,15 @@
+{
+  "fix_description": "Fixed issue #5202 where `nemoclaw <name> rebuild` partially restored the OpenClaw config after a version upgrade, resetting user-tuned model fields (reasoning, cost, maxTokens, compat) to freshly generated defaults. Root cause: in src/lib/state/openclaw-config-merge.ts, `models.providers` was treated as a `currentGeneratedEntryMaps` entry, so `mergeOpenClawEntryMap` replaced any provider that existed in both the sanitized backup and the freshly rebuilt config wholesale with the fresh entry. The fresh entry (built by scripts/generate-openclaw-config.mts) carries default cost {0,0,0,0}, default maxTokens, env-derived reasoning, and omits compat, so the user's tuned values were lost. Replaced the wholesale provider replacement with a dedicated provider merge (mergeOpenClawProviders/mergeOneProvider/mergeProviderModels): provider identity/connection (baseUrl, api, apiKey) and model selection still follow the fresh rebuild (so switching models is honored), but when a rebuilt model shares its id with a backed-up model, the durable per-model tuning from the backup (reasoning, cost, maxTokens, contextWindow, compat, ...) is preserved. Models the user switched away from are not resurrected. plugins.entries continues to use the wholesale current-wins merge unchanged.",
+  "verification_steps": [
+    "Added two focused unit tests in src/lib/state/openclaw-config-merge.test.ts: one reproducing #5202 (same model id, fresh defaults must not clobber backup tuning) and one asserting tuning is NOT resurrected when the user switches model id.",
+    "Built CLI (npm run build:cli) and ran the merge unit tests + the openclaw-config snapshot integration test: 7 tests passed (all 4 pre-existing merge tests still pass, including the 'fresh model selection wins' case).",
+    "Ran the broader snapshot suites (snapshot.test.ts, snapshot-restore-existing-dest.test.ts, snapshot-gateway-guard.test.ts): 55 tests passed.",
+    "Biome check clean on both changed files."
+  ],
+  "commands_run": [
+    "npm run build:cli",
+    "npx vitest run src/lib/state/openclaw-config-merge.test.ts test/openclaw-config-snapshot.test.ts",
+    "npx vitest run test/snapshot.test.ts test/snapshot-restore-existing-dest.test.ts test/snapshot-gateway-guard.test.ts",
+    "npx biome check src/lib/state/openclaw-config-merge.ts src/lib/state/openclaw-config-merge.test.ts"
+  ]
+}

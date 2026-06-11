@@ -17,7 +17,14 @@ export const OPENCLAW_CONFIG_RESTORE_OWNERSHIP = {
   /** NemoClaw-managed channels reflect current add/remove/start/stop state. */
   managedChannels: ["discord", "slack", "telegram", "whatsapp", "wechat", "openclaw-weixin"],
   /** Current generated entries win by id; backup-only user entries are kept. */
-  currentGeneratedEntryMaps: ["models.providers", "plugins.entries"],
+  currentGeneratedEntryMaps: ["plugins.entries"],
+  /**
+   * Provider identity and model selection follow the fresh rebuild (the rebuilt
+   * model id wins so a model switch is honored), but durable per-model tuning
+   * the user set on the backed-up config is preserved when the model id is
+   * unchanged. See mergeOpenClawProviders.
+   */
+  mergedProviderMaps: ["models.providers"],
   /** Durable user-owned top-level sections are inherited from the backup. */
   backupDurableSections: ["mcpServers", "customAgents", "agents"],
 } as const;
@@ -97,12 +104,65 @@ function mergeOpenClawEntryMap(
   };
 }
 
+/**
+ * Merge a provider's model list, keeping the rebuilt model selection while
+ * restoring durable per-model tuning from the backup. The fresh list decides
+ * which models exist (so a model switch is honored), and each fresh model that
+ * shares an id with a backed-up model inherits the backed-up fields the user
+ * tuned (reasoning, cost, maxTokens, contextWindow, compat, ...). Models the
+ * user switched away from are not resurrected.
+ */
+function mergeProviderModels(backupModels: unknown, currentModels: unknown): unknown {
+  if (!Array.isArray(currentModels)) return cloneJson(currentModels);
+  if (!Array.isArray(backupModels)) return cloneJson(currentModels);
+
+  const backupById = new Map<string, Record<string, unknown>>();
+  for (const entry of backupModels) {
+    if (isPlainJsonObject(entry) && typeof entry.id === "string") backupById.set(entry.id, entry);
+  }
+
+  return currentModels.map((entry) => {
+    if (!isPlainJsonObject(entry) || typeof entry.id !== "string") return cloneJson(entry);
+    const backupEntry = backupById.get(entry.id);
+    // Backup-tuned fields win for the same model id; fresh-only fields are kept.
+    return backupEntry ? mergeJsonObjects(entry, backupEntry) : cloneJson(entry);
+  });
+}
+
+function mergeOneProvider(backupProvider: unknown, currentProvider: unknown): unknown {
+  if (!isPlainJsonObject(currentProvider)) return cloneJson(currentProvider ?? backupProvider);
+  if (!isPlainJsonObject(backupProvider)) return cloneJson(currentProvider);
+
+  // Provider identity/connection (baseUrl, api, apiKey) follows the rebuild.
+  const merged = mergeJsonObjects(backupProvider, currentProvider);
+  if ("models" in currentProvider) {
+    merged.models = mergeProviderModels(backupProvider.models, currentProvider.models);
+  }
+  return merged;
+}
+
+function mergeOpenClawProviders(
+  backupProviders: unknown,
+  currentProviders: unknown,
+): Record<string, unknown> | undefined {
+  if (!isPlainJsonObject(backupProviders) && !isPlainJsonObject(currentProviders)) return undefined;
+  const backup = isPlainJsonObject(backupProviders) ? backupProviders : {};
+  const current = isPlainJsonObject(currentProviders) ? currentProviders : {};
+
+  // Backup-only providers are kept; current/backup matches merge by model id.
+  const merged: Record<string, unknown> = cloneJson(backup);
+  for (const [key, value] of Object.entries(current)) {
+    merged[key] = key in backup ? mergeOneProvider(backup[key], value) : cloneJson(value);
+  }
+  return merged;
+}
+
 function mergeOpenClawModels(backupModels: unknown, currentModels: unknown): unknown {
   if (!isPlainJsonObject(backupModels)) return cloneJson(currentModels);
   if (!isPlainJsonObject(currentModels)) return cloneJson(backupModels);
 
   const merged = mergeJsonObjects(currentModels, backupModels);
-  const providers = mergeOpenClawEntryMap(backupModels.providers, currentModels.providers);
+  const providers = mergeOpenClawProviders(backupModels.providers, currentModels.providers);
   if (providers) merged.providers = providers;
   return merged;
 }
