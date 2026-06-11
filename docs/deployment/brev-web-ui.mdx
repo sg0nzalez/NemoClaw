@@ -17,6 +17,13 @@ Use this guide when you want to try NemoClaw without installing the CLI or using
 If you want to manage the remote host from a terminal, see [Deploy to a Remote GPU Instance](deploy-to-remote-gpu).
 </Note>
 
+<Warning>
+The Brev launchable in this guide deploys the **OpenClaw** runtime by default, and the **Launch** page reports `RUNTIME = OpenClaw`.
+The launchable selects the agent from the `NEMOCLAW_AGENT` environment variable, which defaults to `openclaw` when it is unset.
+To deploy Hermes (NemoHermes) instead, the launchable must run the installer with `NEMOCLAW_AGENT=hermes` set before onboarding.
+See [Deploy Hermes Instead of OpenClaw](#deploy-hermes-instead-of-openclaw).
+</Warning>
+
 ## What This Flow Creates
 
 The Brev web flow creates the following resources:
@@ -26,6 +33,23 @@ The Brev web flow creates the following resources:
 - A NemoClaw sandbox running OpenClaw.
 - Inference routing for the provider you select during setup.
 - A browser-accessible OpenClaw dashboard.
+
+## Deploy Hermes Instead of OpenClaw
+
+This launchable provisions the OpenClaw runtime by default.
+The deployed agent is selected from the `NEMOCLAW_AGENT` environment variable that the launchable passes to the installer:
+
+- When `NEMOCLAW_AGENT` is unset, the installer defaults to `openclaw`, and the **Launch** page shows `RUNTIME = OpenClaw`.
+- When `NEMOCLAW_AGENT=hermes`, the installer provisions the Hermes (NemoHermes) runtime, and the **Launch** page shows `RUNTIME = Hermes`.
+
+To deploy Hermes through the Brev web UI, the launchable's startup environment must export `NEMOCLAW_AGENT=hermes` so the installer selects Hermes, matching the documented Hermes installer entry point:
+
+```bash
+curl -fsSL https://www.nvidia.com/nemoclaw.sh | NEMOCLAW_AGENT=hermes bash
+```
+
+If a Hermes-targeted launchable does not set `NEMOCLAW_AGENT=hermes`, it silently falls back to the OpenClaw runtime even though Hermes was requested.
+For the terminal-driven Hermes flow, see the [Quickstart with Hermes](../get-started/quickstart-hermes).
 
 ## Prerequisites
 
