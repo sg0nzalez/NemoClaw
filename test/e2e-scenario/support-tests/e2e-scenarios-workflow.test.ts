@@ -115,6 +115,14 @@ describe("e2e-vitest-scenarios workflow boundary", () => {
       registryScenarios: [],
     });
     expect(
+      evaluateE2eVitestWorkflowDispatchSelectors({ jobs: "shields-config-vitest" }),
+    ).toMatchObject({
+      valid: true,
+      liveScenariosRuns: false,
+      selectedFreeStandingJobs: ["shields-config-vitest"],
+      registryScenarios: [],
+    });
+    expect(
       evaluateE2eVitestWorkflowDispatchSelectors({ jobs: "sandbox-rebuild-vitest" }),
     ).toMatchObject({
       valid: true,
@@ -148,6 +156,9 @@ describe("e2e-vitest-scenarios workflow boundary", () => {
     expect(
       generateMatrixForDispatch("model-router-provider-routed-inference-vitest"),
     ).toMatchObject({
+      matrix: "[]",
+    });
+    expect(generateMatrixForDispatch("shields-config-vitest")).toMatchObject({
       matrix: "[]",
     });
     expect(generateMatrixForDispatch("sandbox-rebuild-vitest")).toMatchObject({
