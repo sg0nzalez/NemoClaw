@@ -29,6 +29,7 @@ const FREE_STANDING_SCENARIO_JOBS = new Map([
   ["token-rotation", "token-rotation-vitest"],
   ["openclaw-tui-chat-correlation", "openclaw-tui-chat-correlation-vitest"],
   ["issue-4434-tui-unreachable-inference", "issue-4434-tui-unreachable-inference-vitest"],
+  ["issue-2478-crash-loop-recovery", "issue-2478-crash-loop-recovery-vitest"],
 ]);
 const ALLOWED_FREE_STANDING_JOBS = new Set([
   ...FREE_STANDING_SCENARIO_JOBS.values(),
@@ -290,6 +291,7 @@ function validateJobsSelector(errors: string[], jobs: WorkflowRecord): void {
   requireRunContains(errors, validate, "token-rotation-vitest");
   requireRunContains(errors, validate, "openclaw-tui-chat-correlation-vitest");
   requireRunContains(errors, validate, "gateway-guard-recovery");
+  requireRunContains(errors, validate, "issue-2478-crash-loop-recovery-vitest");
   requireRunContains(errors, validate, "^[A-Za-z0-9_-]+(,[A-Za-z0-9_-]+)*$");
   requireRunContains(errors, validate, "Invalid jobs input; use comma-separated job ids");
   requireRunDoesNotContain(errors, validate, "Invalid jobs input: ${JOBS}");
@@ -1177,6 +1179,8 @@ export function validateE2eVitestScenariosWorkflowBoundary(
   requireRunContains(errors, generate, "network-policy-vitest");
   requireRunContains(errors, generate, "rebuild-openclaw-vitest");
   requireRunContains(errors, generate, "token-rotation-vitest");
+  requireRunContains(errors, generate, "issue-2478-crash-loop-recovery-vitest");
+  requireRunContains(errors, generate, "issue-2478-crash-loop-recovery");
   requireRunContains(errors, generate, 'matrix="[]"');
   requireRunContains(errors, generate, "npx tsx test/e2e-scenario/scenarios/run.ts");
   requireRunContains(errors, generate, "--emit-live-matrix");
@@ -1350,6 +1354,12 @@ export function validateE2eVitestScenariosWorkflowBoundary(
     "issue-4434-tui-unreachable-inference-vitest",
     "issue-4434-tui-unreachable-inference",
   );
+  validateFreeStandingJobSelector(
+    errors,
+    jobs,
+    "issue-2478-crash-loop-recovery-vitest",
+    "issue-2478-crash-loop-recovery",
+  );
 
   const reportToPr = asRecord(jobs["report-to-pr"]);
   if (Object.keys(reportToPr).length === 0) {
@@ -1373,6 +1383,7 @@ export function validateE2eVitestScenariosWorkflowBoundary(
       "openclaw-tui-chat-correlation-vitest",
       "gateway-guard-recovery",
       "issue-4434-tui-unreachable-inference-vitest",
+      "issue-2478-crash-loop-recovery-vitest",
     ]) {
       if (!needs.includes(required)) errors.push(`report-to-pr job must wait for ${required}`);
     }

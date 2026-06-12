@@ -168,6 +168,16 @@ describe("e2e-vitest-scenarios workflow boundary", () => {
       selectedFreeStandingJobs: ["rebuild-openclaw-vitest"],
       registryScenarios: [],
     });
+    expect(
+      evaluateE2eVitestWorkflowDispatchSelectors({
+        scenarios: "issue-2478-crash-loop-recovery",
+      }),
+    ).toMatchObject({
+      valid: true,
+      liveScenariosRuns: false,
+      selectedFreeStandingJobs: ["issue-2478-crash-loop-recovery-vitest"],
+      registryScenarios: [],
+    });
   });
 
   it("keeps jobs-only dispatches from selecting the Hermes secret-bearing job", () => {
@@ -214,6 +224,18 @@ describe("e2e-vitest-scenarios workflow boundary", () => {
       matrix: "[]",
     });
     expect(generateMatrixForDispatch({ JOBS: "", SCENARIOS: "rebuild-openclaw" })).toMatchObject({
+      hermes_selected: "false",
+      matrix: "[]",
+    });
+    expect(
+      generateMatrixForDispatch({ JOBS: "issue-2478-crash-loop-recovery-vitest", SCENARIOS: "" }),
+    ).toMatchObject({
+      hermes_selected: "false",
+      matrix: "[]",
+    });
+    expect(
+      generateMatrixForDispatch({ JOBS: "", SCENARIOS: "issue-2478-crash-loop-recovery" }),
+    ).toMatchObject({
       hermes_selected: "false",
       matrix: "[]",
     });
@@ -440,6 +462,7 @@ jobs:
           "step 'Validate free-standing job selector' run script must include runtime-overrides-vitest",
           "step 'Validate free-standing job selector' run script must include double-onboard-vitest",
           "step 'Validate free-standing job selector' run script must include hermes-e2e-vitest",
+          "step 'Validate free-standing job selector' run script must include issue-2478-crash-loop-recovery-vitest",
           "step 'Validate free-standing job selector' run script must include Invalid jobs input; use comma-separated job ids",
           "step 'Validate free-standing job selector' run script must not include Invalid jobs input: ${JOBS}",
           "step 'Validate free-standing job selector' run script must include Unknown free-standing Vitest job",
@@ -587,6 +610,8 @@ jobs:
           "openclaw-tui-chat-correlation-vitest job must use the shared jobs selector condition",
           "gateway-guard-recovery job must depend on validate-jobs",
           "gateway-guard-recovery job must use the shared jobs selector condition",
+          "issue-2478-crash-loop-recovery-vitest job must depend on validate-jobs and generate-matrix",
+          "issue-2478-crash-loop-recovery-vitest job must use the shared jobs selector condition",
           "report-to-pr job must wait for validate-jobs",
           "report-to-pr job must wait for live-scenarios",
           "report-to-pr job must wait for double-onboard-vitest",
