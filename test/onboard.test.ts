@@ -353,97 +353,6 @@ startGateway(null).catch(() => {});
     },
   );
 
-  it(
-    "fast-fails gateway start before health polling when Docker is unreachable (#2347)",
-    testTimeoutOptions(20_000),
-    () => {
-      const repoRoot = path.join(import.meta.dirname, "..");
-      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-gateway-docker-down-"));
-      const fakeBin = path.join(tmpDir, "bin");
-      const scriptPath = path.join(tmpDir, "gateway-docker-down.cjs");
-      const onboardPath = JSON.stringify(path.join(repoRoot, "dist", "lib", "onboard.js"));
-
-      fs.mkdirSync(fakeBin, { recursive: true });
-      fs.writeFileSync(
-        path.join(fakeBin, "openshell"),
-        `#!/usr/bin/env bash
-if [[ "$*" == "gateway --help" ]]; then
-  printf "Commands: start destroy\\n"
-  exit 0
-fi
-if [[ "$*" == *"gateway"*"start"* ]]; then
-  printf "Error: Failed to create Docker client.\\n"
-  printf "Socket not found: /var/run/docker.sock\\n"
-  exit 1
-fi
-if [[ "$*" == *"status"* || "$*" == *"gateway"*"info"* ]]; then
-  printf "HEALTH POLL REACHED\\n"
-  exit 0
-fi
-exit 1
-`,
-        { mode: 0o755 },
-      );
-
-      const script = `
-const mod = require("module");
-const origLoad = mod._load;
-mod._load = function(req, parent, isMain) {
-  if (req === "p-retry") {
-    const pRetry = async (fn, opts) => {
-      try {
-        return await fn({ attemptNumber: 1, retriesLeft: 0 });
-      } catch (e) {
-        if (!(e instanceof pRetry.AbortError) && opts && opts.onFailedAttempt) {
-          opts.onFailedAttempt(Object.assign(e, { attemptNumber: 1, retriesLeft: 0 }));
-        }
-        throw e;
-      }
-    };
-    pRetry.AbortError = class AbortError extends Error {};
-    return pRetry;
-  }
-  return origLoad.call(this, req, parent, isMain);
-};
-Object.defineProperty(process, "platform", { value: "darwin" });
-Object.defineProperty(process, "arch", { value: "x64" });
-const { startGateway } = require(${onboardPath});
-startGateway(null).catch(() => {});
-`;
-      fs.writeFileSync(scriptPath, script);
-
-      const result = spawnSync(process.execPath, [scriptPath], {
-        cwd: repoRoot,
-        encoding: "utf-8",
-        env: {
-          ...process.env,
-          HOME: tmpDir,
-          PATH: `${fakeBin}:${process.env.PATH || ""}`,
-          NEMOCLAW_HEALTH_POLL_COUNT: "5",
-          NEMOCLAW_NON_INTERACTIVE: "1",
-        },
-      });
-
-      assert.equal(result.status, 1, `unexpected exit code; stderr:\n${result.stderr}`);
-      assert.ok(
-        result.stderr.includes("Docker daemon is not running"),
-        `expected Docker recovery guidance in stderr:\n${result.stderr}`,
-      );
-      assert.ok(
-        result.stderr.includes("colima start"),
-        `expected macOS Docker start hint in stderr:\n${result.stderr}`,
-      );
-      assert.ok(
-        !result.stdout.includes("Waiting for gateway health"),
-        `health polling should not start after Docker-unreachable output:\n${result.stdout}`,
-      );
-      assert.ok(
-        !result.stdout.includes("HEALTH POLL REACHED"),
-        `gateway status/info probes should not run after Docker-unreachable output:\n${result.stdout}`,
-      );
-    },
-  );
-
   it("normalizes sandbox name hints from the environment", () => {
     const previous = process.env.NEMOCLAW_SANDBOX_NAME;
     process.env.NEMOCLAW_SANDBOX_NAME = "  My-Assistant  ";
@@ -1172,7 +1081,6 @@ registry.getSandbox = (name) =>
         provider: "hermes-provider",
         model: "moonshotai/kimi-k2.6",
         hermesToolGateways: [],
-        messagingChannels: [],
         policies: ["nous-web"],
       }
     : null;
@@ -2733,11 +2641,7 @@ agentOnboard.createAgentSandbox = () => {
       "ARG NEMOCLAW_INFERENCE_BASE_URL=https://inference.local/v1",
       "ARG NEMOCLAW_INFERENCE_API=openai-completions",
       "ARG NEMOCLAW_INFERENCE_COMPAT_B64=e30=",
-      "ARG NEMOCLAW_MESSAGING_CHANNELS_B64=W10=",
-      "ARG NEMOCLAW_MESSAGING_ALLOWED_IDS_B64=e30=",
-      "ARG NEMOCLAW_DISCORD_GUILDS_B64=e30=",
-      "ARG NEMOCLAW_TELEGRAM_CONFIG_B64=e30=",
-      "ARG NEMOCLAW_WECHAT_CONFIG_B64=e30=",
+      "ARG NEMOCLAW_MESSAGING_PLAN_B64=",
       "ARG NEMOCLAW_HERMES_TOOL_GATEWAY_BROKER=0",
       "ARG NEMOCLAW_HERMES_TOOL_GATEWAY_PRESETS_B64=W10=",
       "ARG NEMOCLAW_BUILD_ID=default",
@@ -2933,11 +2837,7 @@ buildContext.stageOptimizedSandboxBuildContext = () => {
       "ARG NEMOCLAW_INFERENCE_BASE_URL=https://inference.local/v1",
       "ARG NEMOCLAW_INFERENCE_API=openai-completions",
       "ARG NEMOCLAW_INFERENCE_COMPAT_B64=e30=",
-      "ARG NEMOCLAW_MESSAGING_CHANNELS_B64=W10=",
-      "ARG NEMOCLAW_MESSAGING_ALLOWED_IDS_B64=e30=",
-      "ARG NEMOCLAW_DISCORD_GUILDS_B64=e30=",
-      "ARG NEMOCLAW_TELEGRAM_CONFIG_B64=e30=",
-      "ARG NEMOCLAW_WECHAT_CONFIG_B64=e30=",
+      "ARG NEMOCLAW_MESSAGING_PLAN_B64=",
       "ARG NEMOCLAW_BUILD_ID=default",
       "ARG NEMOCLAW_DARWIN_VM_COMPAT=0",
       "CMD [\"/bin/bash\"]",
