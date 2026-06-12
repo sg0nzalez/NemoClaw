@@ -17,8 +17,11 @@ import {
   HERMES_SECRET_BOUNDARY_VALIDATOR_PATH,
   __testing,
 } from "../../../dist/lib/agent/hermes-recovery-boundary";
+import { GATEWAY_PRELOAD_GUARDS } from "../../../dist/lib/agent/runtime-recovery-preload";
 import { buildRecoveryScript } from "../../../dist/lib/agent/runtime";
 import { hermesAgent } from "./hermes-recovery-boundary-fixtures";
+
+const [SAFETY_NET_GUARD, CIAO_GUARD] = GATEWAY_PRELOAD_GUARDS;
 
 function writeStub(dir: string, name: string, body: string) {
   const stub = path.join(dir, name);
@@ -184,7 +187,13 @@ describe("Hermes secret-boundary guard — full recovery script behaviour", () =
     const hermesLaunchMarker = path.join(tmp, "hermes-launched");
     const gatewayLogPath = path.join(tmp, "gateway.log");
     const recoveryFallbackLog = path.join(tmp, "gateway-recovery-fallback.log");
+    const preloadSourceSafetyNet = path.join(tmp, "preload-source-safety-net.js");
+    const preloadSourceCiao = path.join(tmp, "preload-source-ciao.js");
+    const preloadTmpSafetyNet = path.join(tmp, "preload-tmp-safety-net.js");
+    const preloadTmpCiao = path.join(tmp, "preload-tmp-ciao.js");
     fs.mkdirSync(stubsDir, { recursive: true });
+    fs.writeFileSync(preloadSourceSafetyNet, "module.exports = 'trusted safety net';\n");
+    fs.writeFileSync(preloadSourceCiao, "module.exports = 'trusted ciao guard';\n");
     return {
       tmp,
       stubsDir,
@@ -193,6 +202,10 @@ describe("Hermes secret-boundary guard — full recovery script behaviour", () =
       hermesLaunchMarker,
       gatewayLogPath,
       recoveryFallbackLog,
+      preloadSourceSafetyNet,
+      preloadSourceCiao,
+      preloadTmpSafetyNet,
+      preloadTmpCiao,
     };
   }
 
@@ -212,6 +225,10 @@ describe("Hermes secret-boundary guard — full recovery script behaviour", () =
     recoveryLogPath: string;
     gatewayLogPath: string;
     recoveryFallbackLog: string;
+    preloadSourceSafetyNet: string;
+    preloadSourceCiao: string;
+    preloadTmpSafetyNet: string;
+    preloadTmpCiao: string;
     tmp: string;
   }) {
     const recoveryScript = buildRecoveryScript(hermesAgent, 8642);
@@ -220,6 +237,10 @@ describe("Hermes secret-boundary guard — full recovery script behaviour", () =
       .replace(new RegExp(HERMES_SECRET_BOUNDARY_VALIDATOR_PATH, "g"), opts.validatorPath)
       .replace(/\/tmp\/gateway-recovery\.log/g, opts.recoveryLogPath)
       .replace(/\/tmp\/gateway\.log/g, opts.gatewayLogPath)
+      .replaceAll(SAFETY_NET_GUARD.tmpPath, opts.preloadTmpSafetyNet)
+      .replaceAll(SAFETY_NET_GUARD.sourcePath, opts.preloadSourceSafetyNet)
+      .replaceAll(CIAO_GUARD.tmpPath, opts.preloadTmpCiao)
+      .replaceAll(CIAO_GUARD.sourcePath, opts.preloadSourceCiao)
       .replace(
         /_GATEWAY_LOG=\/tmp\/gateway-recovery\.log/g,
         `_GATEWAY_LOG=${opts.recoveryFallbackLog}`,
@@ -402,6 +423,10 @@ describe("Hermes secret-boundary guard — full recovery script behaviour", () =
               .replace(/\/tmp\/gateway-recovery\.log/g, harness.recoveryLogPath)
               .replace(/\/tmp\/nemoclaw-proxy-env\.sh/g, proxyEnvFile)
               .replace(/\/tmp\/gateway\.log/g, harness.gatewayLogPath)
+              .replaceAll(SAFETY_NET_GUARD.tmpPath, harness.preloadTmpSafetyNet)
+              .replaceAll(SAFETY_NET_GUARD.sourcePath, harness.preloadSourceSafetyNet)
+              .replaceAll(CIAO_GUARD.tmpPath, harness.preloadTmpCiao)
+              .replaceAll(CIAO_GUARD.sourcePath, harness.preloadSourceCiao)
               .replace(
                 /_GATEWAY_LOG=\/tmp\/gateway-recovery\.log/g,
                 `_GATEWAY_LOG=${harness.recoveryFallbackLog}`,
