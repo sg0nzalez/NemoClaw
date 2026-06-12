@@ -569,7 +569,7 @@ describe("Vitest E2E scenario advisor — summary and comment rendering", () => 
     );
   });
 
-  it("renders duplicate fan-out dispatches as one run-once command", () => {
+  it("renders duplicate fan-out dispatches as one explicit full-fan-out command", () => {
     const result = sampleResult();
     result.required.push({
       id: "ubuntu-repo-cloud-openclaw",
@@ -588,6 +588,9 @@ describe("Vitest E2E scenario advisor — summary and comment rendering", () => 
       summary.match(/gh workflow run e2e-vitest-scenarios.yaml --ref <pr-head-ref>/g),
     ).toHaveLength(1);
     expect(summary).toContain("covered by the shared fan-out command above");
+    expect(summary).toContain("Typed scenario IDs are metadata-only");
+    expect(summary).toContain("full default fan-out");
+    expect(summary).toContain("not only this scenario");
   });
 
   it("builds a sticky scenario comment with the marker and run url", () => {

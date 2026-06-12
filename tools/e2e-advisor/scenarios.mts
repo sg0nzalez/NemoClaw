@@ -615,6 +615,14 @@ function stringArrayWithinChanged(value: unknown, changedFiles: string[]): strin
   return value.filter((file): file is string => typeof file === "string" && allowed.has(file));
 }
 
+function scenarioFanoutNote(recommendation: ScenarioRecommendation): string | undefined {
+  if (recommendation.selectorType !== "scenario") return undefined;
+  if (recommendation.dispatchCommand !== `gh workflow run ${SCENARIO_WORKFLOW} --ref <pr-head-ref>`) {
+    return undefined;
+  }
+  return "Typed scenario IDs are metadata-only in this jobs-only workflow: this dispatch runs the full default fan-out (all supported registry scenarios plus all free-standing Vitest jobs), not only this scenario.";
+}
+
 export function renderScenarioSummary(result: ScenarioAdvisorResult): string {
   const lines: string[] = [];
   lines.push("# Vitest E2E Scenario Advisor");
@@ -636,6 +644,8 @@ export function renderScenarioSummary(result: ScenarioAdvisorResult): string {
         seenDispatches.add(recommendation.dispatchCommand);
         lines.push(`  - Dispatch: \`${recommendation.dispatchCommand}\``);
       }
+      const fanoutNote = scenarioFanoutNote(recommendation);
+      if (fanoutNote) lines.push(`  - Note: ${fanoutNote}`);
     }
   }
   lines.push("");
@@ -652,6 +662,8 @@ export function renderScenarioSummary(result: ScenarioAdvisorResult): string {
         seenDispatches.add(recommendation.dispatchCommand);
         lines.push(`  - Dispatch: \`${recommendation.dispatchCommand}\``);
       }
+      const fanoutNote = scenarioFanoutNote(recommendation);
+      if (fanoutNote) lines.push(`  - Note: ${fanoutNote}`);
     }
   }
   lines.push("");
