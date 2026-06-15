@@ -10,6 +10,11 @@
       "name": "import cycles",
       "selector": "noImportCycles",
       "maxDiagnostics": 14
+    },
+    {
+      "name": "Node.js builtin import protocol",
+      "selector": "useNodejsImportProtocol",
+      "maxDiagnostics": 79
     }
   ]
 }
