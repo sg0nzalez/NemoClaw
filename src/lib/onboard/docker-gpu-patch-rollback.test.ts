@@ -105,6 +105,55 @@ describe("recreateOpenShellDockerSandboxWithGpu rollback path", () => {
     ).toBe(false);
   });
 
+  it("restores the pre-patch sandbox when the recreate run fails before the supervisor wait (#5512)", () => {
+    const dockerCapture = vi.fn((args: readonly string[]) => {
+      if (args[0] === "ps") return "old-container-id\n";
+      if (args[0] === "inspect") return JSON.stringify([inspectFixture()]);
+      if (args[0] === "info") return "";
+      return "";
+    });
+    const dockerRun = vi.fn(() => ({ status: 0, stdout: "probe-id\n" }));
+    // The recreate `docker run` fails after the original was renamed aside.
+    const dockerRunDetached = vi.fn(() => ({ status: 1, stderr: "docker: boom" }));
+    const dockerRename = vi.fn((_old: string, _next: string) => ({ status: 0 }));
+    const dockerStop = vi.fn(() => ({ status: 0 }));
+    const dockerStart = vi.fn(() => ({ status: 0 }));
+    const dockerRm = vi.fn((_name: string) => ({ status: 0 }));
+    const runCaptureOpenshell = vi.fn(() => "");
+
+    expect(() =>
+      recreateOpenShellDockerSandboxWithGpu(
+        { sandboxName: "alpha", timeoutSecs: 1 },
+        {
+          dockerCapture,
+          dockerRun,
+          dockerRunDetached,
+          dockerRename,
+          dockerStop,
+          dockerStart,
+          dockerRm,
+          runCaptureOpenshell,
+          sleep: vi.fn(),
+          now: () => new Date("2026-05-12T00:00:00Z"),
+        },
+      ),
+    ).toThrow(/Could not start GPU-enabled sandbox container/);
+
+    // The original sandbox is restored from the backup (rename backup -> original, then start).
+    const restoreRename = dockerRename.mock.calls.find(
+      (call) => String(call[0]).includes("nemoclaw-gpu-backup") && call[1] === "openshell-alpha",
+    );
+    expect(restoreRename).toBeDefined();
+    expect(dockerStart).toHaveBeenCalledWith(
+      "openshell-alpha",
+      expect.objectContaining({ ignoreError: true }),
+    );
+    // The backup is renamed back, never left as an orphaned container.
+    expect(
+      dockerRm.mock.calls.some((call) => String(call[0]).includes("nemoclaw-gpu-backup")),
+    ).toBe(false);
+  });
+
   it("reports rollback failure when restoring the backup container fails", () => {
     const dockerCapture = vi.fn((args: readonly string[]) => {
       if (args[0] === "ps") return "old-container-id\n";

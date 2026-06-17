@@ -14,7 +14,10 @@ import {
   dockerRunDetached,
   dockerStop,
 } from "../adapters/docker";
-import { reconcileSupervisorReconnect } from "./docker-gpu-patch-finalize";
+import {
+  reconcileSupervisorReconnect,
+  rollbackDockerGpuPatchOnRecreateFailure,
+} from "./docker-gpu-patch-finalize";
 import {
   DOCKER_GPU_SUPERVISOR_RECONNECT_ERROR_DEBOUNCE_ENV,
   DOCKER_GPU_SUPERVISOR_RECONNECT_TIMEOUT_ENV,
@@ -1101,10 +1104,15 @@ export function recreateOpenShellDockerSandboxWithGpu(
       timeout: DOCKER_GPU_PATCH_TIMEOUT_MS,
     });
     if (!isZeroStatus(runResult)) {
-      d.dockerRm(originalName, {
-        ignoreError: true,
-        timeout: DOCKER_GPU_PATCH_TIMEOUT_MS,
-      });
+      // #5512: the recreate failed after the original was renamed aside. Restore
+      // the pre-patch sandbox (remove the failed new container, rename the backup
+      // back, and start it) instead of leaving an orphaned
+      // `*-nemoclaw-gpu-backup-*` container and a sandbox with no live original
+      // behind — which otherwise collides on the next retry.
+      context.rolledBack = rollbackDockerGpuPatchOnRecreateFailure(
+        { newContainerId: originalName, backupContainerName, originalName },
+        deps,
+      );
       throw new Error(`Could not start GPU-enabled sandbox container: ${resultText(runResult)}`);
     }
 
