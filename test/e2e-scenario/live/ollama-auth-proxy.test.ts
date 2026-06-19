@@ -150,6 +150,19 @@ function generateResponse(body: string): string {
   return typeof parsed.response === "string" ? parsed.response.trim() : "";
 }
 
+function readTokenFileChecked(tokenFile: string): { mode: string; token: string } {
+  const fd = fs.openSync(tokenFile, "r");
+  try {
+    const stat = fs.fstatSync(fd);
+    return {
+      mode: (stat.mode & 0o777).toString(8),
+      token: fs.readFileSync(fd, "utf8").trim(),
+    };
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 test.skipIf(!shouldRunLiveE2EScenarios())(
   "Ollama auth proxy enforces tokens, proxies inference, persists tokens, and recovers",
   { timeout: LIVE_TIMEOUT_MS },
@@ -206,7 +219,13 @@ test.skipIf(!shouldRunLiveE2EScenarios())(
     if (ollamaExists.exitCode !== 0) {
       const install = await host.command(
         "bash",
-        ["-lc", "curl -fsSL https://ollama.com/install.sh | sh"],
+        [
+          "-lc",
+          // This live E2E intentionally mirrors the legacy user path and
+          // exercises the official Ollama installer boundary. The command runs
+          // before any repository/GitHub credentials are exposed to children.
+          "curl -fsSL https://ollama.com/install.sh | sh",
+        ],
         {
           artifactName: "phase-2-install-ollama",
           env: commandEnv(),
@@ -317,9 +336,9 @@ test.skipIf(!shouldRunLiveE2EScenarios())(
       }),
     ).toBe("401");
 
-    expect(fs.existsSync(tokenFile)).toBe(true);
-    expect((fs.statSync(tokenFile).mode & 0o777).toString(8)).toBe("600");
-    expect(fs.readFileSync(tokenFile, "utf8").trim()).toBe(proxyToken);
+    const persistedTokenFile = readTokenFileChecked(tokenFile);
+    expect(persistedTokenFile.mode).toBe("600");
+    expect(persistedTokenFile.token).toBe(proxyToken);
 
     await terminate(proxy);
     proxy = undefined;
@@ -328,7 +347,7 @@ test.skipIf(!shouldRunLiveE2EScenarios())(
     });
     expect(deadStatus === "000" || deadStatus === "").toBe(true);
 
-    const persistedToken = fs.readFileSync(tokenFile, "utf8").trim();
+    const persistedToken = readTokenFileChecked(tokenFile).token;
     proxy = spawnLogged(
       "node",
       [PROXY_SCRIPT],
@@ -392,6 +411,26 @@ test.skipIf(!shouldRunLiveE2EScenarios())(
       expect(containerReachability.stdout.trim(), resultText(containerReachability)).toMatch(
         /^[1-9][0-9]{2}$/u,
       );
+      const directBackendReachability = await host.command(
+        "docker",
+        [
+          "run",
+          "--rm",
+          "--add-host",
+          "host.openshell.internal:host-gateway",
+          "curlimages/curl:8.10.1",
+          "-sf",
+          "--connect-timeout",
+          "3",
+          `http://host.openshell.internal:${OLLAMA_PORT}/api/tags`,
+        ],
+        {
+          artifactName: "phase-8-container-direct-backend-negative-probe",
+          env: commandEnv(),
+          timeoutMs: 120_000,
+        },
+      );
+      expect(directBackendReachability.exitCode, resultText(directBackendReachability)).not.toBe(0);
     }
 
     const divergentToken = `divergent-${token()}`;
