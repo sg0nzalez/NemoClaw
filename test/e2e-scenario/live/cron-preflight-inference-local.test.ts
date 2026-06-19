@@ -190,15 +190,13 @@ function parseProbeJson(output: string): CronPreflightProbeJson | undefined {
 
 function probeShell(): string {
   const encoded = Buffer.from(PROBE_SOURCE, "utf8").toString("base64");
-  return [
-    ". /tmp/nemoclaw-proxy-env.sh",
-    '__probe="$(mktemp /tmp/nemoclaw-preflight-probe.XXXXXX.cjs)"',
-    `printf %s '${encoded}' | base64 -d > "$__probe"`,
-    'node "$__probe"',
-    "__rc=$?",
-    'rm -f "$__probe"',
-    'exit "$__rc"',
-  ].join(" && ");
+  return (
+    [
+      ". /tmp/nemoclaw-proxy-env.sh",
+      '__probe="$(mktemp /tmp/nemoclaw-preflight-probe.XXXXXX.cjs)"',
+      `printf %s '${encoded}' | base64 -d > "$__probe"`,
+    ].join(" && ") + '; node "$__probe"; __rc=$?; rm -f "$__probe"; exit "$__rc"'
+  );
 }
 
 async function cleanupCronSandbox(sandbox: SandboxClient): Promise<void> {
