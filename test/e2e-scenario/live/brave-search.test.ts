@@ -30,7 +30,7 @@ const SANDBOX_NAME = process.env.NEMOCLAW_SANDBOX_NAME ?? "e2e-brave-search";
 validateSandboxName(SANDBOX_NAME);
 const INSTALL_ATTEMPTS = process.env.CI === "true" || process.env.GITHUB_ACTIONS === "true" ? 3 : 1;
 const LIVE_TIMEOUT_MS = 35 * 60_000;
-const PLACEHOLDER_PATTERN = /openshell:resolve:env:([A-Za-z0-9_]+_)?BRAVE_API_KEY/;
+const PLACEHOLDER_PATTERN = /^openshell:resolve:env:([A-Za-z0-9_]+_)?BRAVE_API_KEY$/;
 
 function commandEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   return {
@@ -86,6 +86,29 @@ function parsePlaceholder(configText: string): string | undefined {
   };
   const value = parsed.tools?.web?.search?.apiKey;
   return typeof value === "string" && value ? value : undefined;
+}
+
+function extractOpenClawAgentText(output: string): string {
+  for (const index of [...output]
+    .map((char, idx) => (char === "{" ? idx : -1))
+    .filter((idx) => idx >= 0)) {
+    try {
+      const parsed = JSON.parse(output.slice(index)) as {
+        payloads?: Array<{ text?: unknown }>;
+        meta?: { finalAssistantVisibleText?: unknown };
+      };
+      const payloadText = parsed.payloads
+        ?.map((payload) => payload.text)
+        .find((value): value is string => typeof value === "string" && value.trim().length > 0);
+      if (payloadText) return payloadText;
+      if (typeof parsed.meta?.finalAssistantVisibleText === "string") {
+        return parsed.meta.finalAssistantVisibleText;
+      }
+    } catch {
+      // Keep scanning; OpenClaw can emit non-JSON progress before the result.
+    }
+  }
+  return "";
 }
 
 test.skipIf(!shouldRunLiveE2EScenarios())(
@@ -196,7 +219,27 @@ test.skipIf(!shouldRunLiveE2EScenarios())(
       timeoutMs: 60_000,
     });
     expect(config.exitCode, resultText(config)).toBe(0);
-    expect(config.stdout).not.toContain(braveKey);
+    const rawLeakCheck = await sandbox.execShell(
+      SANDBOX_NAME,
+      trustedSandboxShellScript(
+        `python3 - <<'PY'
+from pathlib import Path
+needle = ${JSON.stringify(braveKey)}
+body = Path('/sandbox/.openclaw/openclaw.json').read_text(encoding='utf-8')
+raise SystemExit(1 if needle in body else 0)
+PY`,
+      ),
+      {
+        artifactName: "phase-3-openclaw-config-raw-secret-leak-check",
+        env: commandEnv(),
+        redactionValues,
+        timeoutMs: 30_000,
+      },
+    );
+    expect(
+      rawLeakCheck.exitCode,
+      "raw BRAVE_API_KEY must not appear anywhere in openclaw.json",
+    ).toBe(0);
     const parsedConfig = JSON.parse(config.stdout) as {
       tools?: { web?: { search?: { enabled?: unknown; provider?: unknown; apiKey?: unknown } } };
     };
@@ -233,7 +276,8 @@ test.skipIf(!shouldRunLiveE2EScenarios())(
       /SsrFBlockedError|Blocked hostname|ECONNREFUSED|EAI_AGAIN|gateway unavailable|network connection error/i,
     );
     expect(agent.exitCode, resultText(agent)).toBe(0);
-    expect(resultText(agent)).toMatch(/nvidia|geforce|cuda|gpu/i);
+    const assistantText = extractOpenClawAgentText(agent.stdout);
+    expect(assistantText, resultText(agent)).toMatch(/nvidia|geforce|cuda|gpu/i);
 
     const curl = await sandboxShell(
       sandbox,
