@@ -1,0 +1,229 @@
+// SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+/** Live Vitest replacement for test/e2e/test-telegram-injection.sh. */
+
+import path from "node:path";
+
+import { expect, test } from "../fixtures/e2e-test.ts";
+import { shouldRunLiveE2EScenarios } from "../fixtures/live-project-gate.ts";
+import {
+  bestEffort,
+  CLI,
+  COMMAND_TIMEOUT_MS,
+  cleanupSandbox,
+  dockerInfo,
+  expectExitZero,
+  expectSandboxReady,
+  installSandbox,
+  phase6Env,
+  REPO_ROOT,
+  redactionValues,
+  resultText,
+  sandboxSh,
+  shellQuote,
+} from "./phase6-messaging-helpers.ts";
+
+const SANDBOX_NAME = process.env.NEMOCLAW_SANDBOX_NAME ?? "e2e-telegram-injection";
+const LIVE_TIMEOUT_MS = 35 * 60_000;
+
+function base64(value: string): string {
+  return Buffer.from(value, "utf8").toString("base64");
+}
+
+function openshellStdinCommand(payload: string, remoteShell: string): string {
+  return [
+    "set -euo pipefail",
+    `printf %s ${shellQuote(base64(payload))} | base64 -d | openshell sandbox exec --name ${shellQuote(SANDBOX_NAME)} -- sh -lc ${shellQuote(remoteShell)}`,
+  ].join("; ");
+}
+
+async function sendPayloadViaSandboxStdin(
+  host: import("../fixtures/clients/host.ts").HostCliClient,
+  payload: string,
+  remoteShell: string,
+  env: NodeJS.ProcessEnv,
+  artifactName: string,
+  redactions: string[],
+) {
+  return host.command("bash", ["-lc", openshellStdinCommand(payload, remoteShell)], {
+    artifactName,
+    env,
+    redactionValues: redactions,
+    timeoutMs: COMMAND_TIMEOUT_MS,
+  });
+}
+
+test.skipIf(!shouldRunLiveE2EScenarios())(
+  "Telegram bridge-style message handling treats shell metacharacters as data",
+  { timeout: LIVE_TIMEOUT_MS },
+  async ({ artifacts, cleanup, host, sandbox, secrets, skip }) => {
+    const apiKey = secrets.required("NVIDIA_INFERENCE_API_KEY");
+    const env = phase6Env({ sandboxName: SANDBOX_NAME, agent: "openclaw", apiKey });
+    const redactions = redactionValues(apiKey);
+
+    await artifacts.writeJson("scenario.json", {
+      id: "telegram-injection",
+      legacySource: "test/e2e/test-telegram-injection.sh",
+      boundary:
+        "install.sh OpenClaw sandbox + OpenShell sandbox exec stdin path + process table and validateName probes",
+      sandboxName: SANDBOX_NAME,
+      contracts: [
+        "command substitution payloads are literal input and do not create files",
+        "parameter expansion does not leak NVIDIA_INFERENCE_API_KEY",
+        "host and sandbox process tables do not expose the API key after setup",
+        "invalid sandbox names with shell metacharacters are rejected by validateName",
+        "normal messages and benign special characters still pass through",
+      ],
+    });
+
+    cleanup.add(`destroy telegram injection sandbox ${SANDBOX_NAME}`, () =>
+      cleanupSandbox(host, SANDBOX_NAME, env, redactions, "cleanup-telegram-injection"),
+    );
+    await cleanupSandbox(host, SANDBOX_NAME, env, redactions, "preclean-telegram-injection");
+
+    const docker = await dockerInfo(host, env);
+    expect(docker.exitCode, resultText(docker)).toBe(0);
+
+    try {
+      const install = await installSandbox(host, env, redactions, "install-telegram-injection");
+      expectExitZero(install, "install.sh --non-interactive");
+    } catch (error) {
+      if (String(error).includes("NVIDIA_ENDPOINT_RATE_LIMIT")) {
+        skip(
+          "NVIDIA endpoint validation was rate-limited before Telegram injection assertions ran",
+        );
+        return;
+      }
+      throw error;
+    }
+    await expectSandboxReady(
+      host,
+      SANDBOX_NAME,
+      env,
+      redactions,
+      "sandbox-list-telegram-injection",
+    );
+
+    for (const [label, marker, payload] of [
+      [
+        "command-substitution",
+        "/tmp/injection-proof-t1",
+        "$(touch /tmp/injection-proof-t1 && echo INJECTED)",
+      ],
+      ["backtick-substitution", "/tmp/injection-proof-t2", "`touch /tmp/injection-proof-t2`"],
+      [
+        "single-quote-breakout",
+        "/tmp/injection-proof-t3",
+        "'; touch /tmp/injection-proof-t3; echo '",
+      ],
+    ] as const) {
+      await sandboxSh(sandbox, SANDBOX_NAME, `rm -f ${shellQuote(marker)}`, {
+        artifactName: `remove-${label}-marker`,
+        redactionValues: redactions,
+      });
+      const send = await sendPayloadViaSandboxStdin(
+        host,
+        payload,
+        'MSG=$(cat) && echo "Received: $MSG"',
+        env,
+        `send-${label}-payload`,
+        redactions,
+      );
+      expect(send.exitCode, resultText(send)).toBe(0);
+      const markerCheck = await sandboxSh(
+        sandbox,
+        SANDBOX_NAME,
+        `test -f ${shellQuote(marker)} && echo EXPLOITED || echo SAFE`,
+        { artifactName: `check-${label}-marker`, redactionValues: redactions },
+      );
+      expectExitZero(markerCheck, `check ${label} marker`);
+      expect(markerCheck.stdout.trim(), resultText(markerCheck)).toBe("SAFE");
+    }
+
+    const envPayload = await sendPayloadViaSandboxStdin(
+      host,
+      "${NVIDIA_INFERENCE_API_KEY}",
+      'MSG=$(cat) && echo "$MSG"',
+      env,
+      "parameter-expansion-payload",
+      redactions,
+    );
+    expect(envPayload.exitCode, resultText(envPayload)).toBe(0);
+    expect(resultText(envPayload)).not.toContain(apiKey.slice(0, 15));
+    expect(resultText(envPayload)).toContain("${NVIDIA_INFERENCE_API_KEY}");
+
+    const apiKeyPrefix = apiKey.slice(0, 15);
+    const hostPs = await host.command("ps", ["aux"], {
+      artifactName: "host-process-table-telegram-injection",
+      env,
+      redactionValues: redactions,
+      timeoutMs: 30_000,
+    });
+    const sandboxPs = await sandboxSh(sandbox, SANDBOX_NAME, "ps aux", {
+      artifactName: "sandbox-process-table-telegram-injection",
+      redactionValues: redactions,
+    });
+    expect(resultText(hostPs)).not.toContain(apiKeyPrefix);
+    expect(resultText(sandboxPs)).not.toContain(apiKeyPrefix);
+
+    const invalidNames = [
+      "foo;rm -rf /",
+      "--help",
+      "$(whoami)",
+      "`id`",
+      "foo bar",
+      "../etc/passwd",
+      "UPPERCASE",
+    ];
+    for (const invalidName of invalidNames) {
+      const validation = await host.command(
+        "node",
+        [
+          "-e",
+          `const { validateName } = require(${JSON.stringify(path.join(REPO_ROOT, "dist/lib/runner"))});\ntry { validateName(process.argv[1], "SANDBOX_NAME"); console.log("ACCEPTED"); } catch (error) { console.log("REJECTED:" + error.message); }`,
+          invalidName,
+        ],
+        {
+          artifactName: `validate-name-${invalidName.replace(/[^a-z0-9]+/gi, "-")}`,
+          env,
+          redactionValues: redactions,
+          timeoutMs: 30_000,
+        },
+      );
+      expectExitZero(validation, `validateName ${invalidName}`);
+      expect(validation.stdout, invalidName).toContain("REJECTED");
+    }
+
+    const normal = await sendPayloadViaSandboxStdin(
+      host,
+      "Hello, what is two plus two?",
+      'MSG=$(cat) && echo "Received: $MSG"',
+      env,
+      "normal-message-passthrough",
+      redactions,
+    );
+    expect(normal.exitCode, resultText(normal)).toBe(0);
+    expect(resultText(normal)).toContain("Hello, what is two plus two?");
+
+    const special = await sendPayloadViaSandboxStdin(
+      host,
+      "What's the meaning of life? It costs $5 & is 100% free!",
+      'MSG=$(cat) && echo "$MSG"',
+      env,
+      "special-message-passthrough",
+      redactions,
+    );
+    expect(special.exitCode, resultText(special)).toBe(0);
+    expect(resultText(special).trim()).not.toBe("");
+
+    await bestEffort(() =>
+      host.command("node", [CLI, SANDBOX_NAME, "status"], {
+        artifactName: "post-assert-status-telegram-injection",
+        env,
+        redactionValues: redactions,
+        timeoutMs: 60_000,
+      }),
+    );
+  },
+);
