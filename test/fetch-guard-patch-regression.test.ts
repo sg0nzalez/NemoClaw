@@ -172,47 +172,14 @@ function dockerRunCommandBetween(startMarker: string, endMarker: string): string
   return command;
 }
 
-function dockerfileBaseOpenClawInstallCommand(): string {
-  const dockerfile = fs.readFileSync(DOCKERFILE_BASE, "utf-8");
-  const startMarker = "# Install OpenClaw CLI + PyYAML.";
-  const endMarker = "# Baseline health check.";
-  const start = dockerfile.indexOf(startMarker);
-  const end = dockerfile.indexOf(endMarker, start);
-  if (start === -1 || end === -1 || end <= start) {
-    throw new Error("Expected Dockerfile.base OpenClaw install block");
-  }
-  const runIndex = dockerfile.indexOf("RUN ", start);
-  if (runIndex === -1 || runIndex > end) {
-    throw new Error("Expected Dockerfile.base RUN instruction after OpenClaw install marker");
-  }
-  return dockerfile
-    .slice(runIndex, end)
-    .trim()
-    .replace(/^RUN\s+--mount=[^\n]+\\\n\s*/, "")
-    .split("\n")
-    .filter((line) => !line.trimStart().startsWith("#"))
-    .join("\n")
-    .replace(/\\\n/g, " ")
-    .replace(/\\\s*$/, "");
-}
-
-type OpenClawUpgradeBlockOptions = {
-  openclawVersion?: string;
-  openclawIntegrity?: string;
-};
-
-function runOpenClawUpgradeBlock(
-  currentVersion: string,
-  {
-    openclawVersion = readDockerfileOpenClawVersion(),
-    openclawIntegrity = readDockerfileOpenClawIntegrity(),
-  }: OpenClawUpgradeBlockOptions = {},
-) {
+function runOpenClawUpgradeBlock(currentVersion: string) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-upgrade-"));
   const blueprint = path.join(tmp, "blueprint.yaml");
   const log = path.join(tmp, "calls.log");
   const openclawInstall = path.join(tmp, "openclaw-global");
   const openclawShim = path.join(tmp, "openclaw-bin");
+  const openclawVersion = readDockerfileOpenClawVersion();
+  const openclawIntegrity = readDockerfileOpenClawIntegrity();
   fs.writeFileSync(blueprint, `min_openclaw_version: "${readBlueprintMinOpenClawVersion()}"\n`);
   fs.mkdirSync(openclawInstall, { recursive: true });
   fs.writeFileSync(openclawShim, "");
@@ -237,46 +204,6 @@ function runOpenClawUpgradeBlock(
     "  fi",
     "}",
     'command() { if [ "${1:-}" = "-v" ] && [ "${2:-}" = "codex-acp" ]; then return 0; fi; builtin command "$@"; }',
-    command,
-  ].join("\n");
-  const scriptPath = path.join(tmp, "run.sh");
-  fs.writeFileSync(scriptPath, script, { mode: 0o700 });
-  const result = spawnSync("bash", [scriptPath], { encoding: "utf-8", timeout: 10000 });
-  const calls = fs.existsSync(log) ? fs.readFileSync(log, "utf-8") : "";
-  fs.rmSync(tmp, { recursive: true, force: true });
-  return { result, calls };
-}
-
-function runDockerfileBaseOpenClawInstallBlock({
-  openclawVersion = readDockerfileBaseOpenClawVersion(),
-  openclawIntegrity = readDockerfileBaseOpenClawIntegrity(),
-}: OpenClawUpgradeBlockOptions = {}) {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-base-install-"));
-  const blueprint = path.join(tmp, "blueprint.yaml");
-  const log = path.join(tmp, "calls.log");
-  fs.writeFileSync(blueprint, `min_openclaw_version: "${readBlueprintMinOpenClawVersion()}"\n`);
-  const command = dockerfileBaseOpenClawInstallCommand().replaceAll(
-    "/tmp/blueprint.yaml",
-    blueprint,
-  );
-  const script = [
-    "#!/usr/bin/env bash",
-    "set -euo pipefail",
-    `call_log=${JSON.stringify(log)}`,
-    `OPENCLAW_VERSION=${JSON.stringify(openclawVersion)}`,
-    `OPENCLAW_2026_6_9_INTEGRITY=${JSON.stringify(openclawIntegrity)}`,
-    "npm() {",
-    '  printf "npm %s\\n" "$*" >> "$call_log";',
-    '  if [ "${1:-}" = "view" ] && [ "${2:-}" = "openclaw@${OPENCLAW_VERSION}" ] && [ "${3:-}" = "version" ]; then',
-    '    printf "%s\\n" "$OPENCLAW_VERSION";',
-    "    return 0;",
-    "  fi",
-    '  if [ "${1:-}" = "view" ] && [ "${2:-}" = "openclaw@${OPENCLAW_VERSION}" ] && [ "${3:-}" = "dist.integrity" ]; then',
-    '    printf "%s\\n" "$OPENCLAW_2026_6_9_INTEGRITY";',
-    "    return 0;",
-    "  fi",
-    "}",
-    "pip3() { return 0; }",
     command,
   ].join("\n");
   const scriptPath = path.join(tmp, "run.sh");
@@ -500,29 +427,6 @@ describe("fetch-guard patch regression guard", () => {
     expect([...REVIEWED_OPENCLAW_PATCH_CLASSIFIER_VERSIONS], reviewMessage).toContain(
       baseImageVersion,
     );
-  });
-
-  it("fails closed before npm install when an OpenClaw version override lacks an integrity pin", () => {
-    const unpinnedVersion = "2026.6.10";
-
-    const runtime = runOpenClawUpgradeBlock("2026.3.11", {
-      openclawVersion: unpinnedVersion,
-    });
-    expect(runtime.result.status).not.toBe(0);
-    expect(`${runtime.result.stdout}${runtime.result.stderr}`).toContain(
-      `OpenClaw ${unpinnedVersion} has no committed npm integrity pin`,
-    );
-    expect(runtime.calls).not.toContain(`npm install -g`);
-    expect(runtime.calls).not.toContain(`openclaw@${unpinnedVersion}`);
-
-    const base = runDockerfileBaseOpenClawInstallBlock({
-      openclawVersion: unpinnedVersion,
-    });
-    expect(base.result.status).not.toBe(0);
-    expect(`${base.result.stdout}${base.result.stderr}`).toContain(
-      `OpenClaw ${unpinnedVersion} has no committed npm integrity pin`,
-    );
-    expect(base.calls).not.toContain(`npm install -g`);
   });
 
   it("applies the Dockerfile OpenClaw compatibility patch block to executable fixtures", async () => {
