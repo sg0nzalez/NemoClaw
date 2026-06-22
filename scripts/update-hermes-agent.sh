@@ -69,20 +69,20 @@ usage() {
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-  --check) CHECK_ONLY=1 ;;
-  --build) DO_BUILD=1 ;;
-  --rebuild)
-    DO_BUILD=1
-    DO_REBUILD=1
-    UPDATE_INSTALLED_COPIES=1
-    ;;
-  --update-installed-copies) UPDATE_INSTALLED_COPIES=1 ;;
-  --tag)
-    [[ $# -ge 2 ]] || usage
-    REQUESTED_TAG="$2"
-    shift
-    ;;
-  *) usage ;;
+    --check) CHECK_ONLY=1 ;;
+    --build) DO_BUILD=1 ;;
+    --rebuild)
+      DO_BUILD=1
+      DO_REBUILD=1
+      UPDATE_INSTALLED_COPIES=1
+      ;;
+    --update-installed-copies) UPDATE_INSTALLED_COPIES=1 ;;
+    --tag)
+      [[ $# -ge 2 ]] || usage
+      REQUESTED_TAG="$2"
+      shift
+      ;;
+    *) usage ;;
   esac
   shift
 done
@@ -175,13 +175,13 @@ discover_installed_dockerfiles() {
       continue
     fi
     find "$root" -maxdepth 6 \( -name node_modules -o -name .git \) -prune \
-      -o \( -type f -o -type l \) -name 'Dockerfile*' -print 2>/dev/null |
-      while IFS= read -r file; do
+      -o \( -type f -o -type l \) -name 'Dockerfile*' -print 2>/dev/null \
+      | while IFS= read -r file; do
         safe_installed_dockerfile "$root" "$file" || continue
         grep -q '^ARG HERMES_VERSION=' "$file" && printf '%s\n' "$file"
       done
-  done |
-    sort -u
+  done \
+    | sort -u
 }
 
 # Rewrite the version pins in a Hermes base Dockerfile. Older saved copies
@@ -197,8 +197,8 @@ apply_dockerfile_pins() {
     -e "s|^ARG HERMES_NPM_INTEGRITY=.*|ARG HERMES_NPM_INTEGRITY=${NPM_INTEGRITY}|" \
     "$dockerfile"
   rm -f "${dockerfile}.bak"
-  grep -q "^ARG HERMES_VERSION=${TAG}$" "$dockerfile" &&
-    grep -q "^ARG HERMES_TARBALL_SHA256=${TARBALL_SHA256}$" "$dockerfile"
+  grep -q "^ARG HERMES_VERSION=${TAG}$" "$dockerfile" \
+    && grep -q "^ARG HERMES_TARBALL_SHA256=${TARBALL_SHA256}$" "$dockerfile"
 }
 
 apply_manifest_pin() {
@@ -214,8 +214,8 @@ apply_manifest_pin() {
 if [[ -n "$REQUESTED_TAG" ]]; then
   TAG="v${REQUESTED_TAG#v}"
 else
-  TAG=$(gh_api "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" |
-    python3 -c "import sys,json; print(json.load(sys.stdin)['tag_name'])")
+  TAG=$(gh_api "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" \
+    | python3 -c "import sys,json; print(json.load(sys.stdin)['tag_name'])")
 fi
 if ! [[ "$TAG" =~ ^v[0-9]+(\.[0-9]+)+$ ]]; then
   echo "ERROR: unexpected release tag format: ${TAG}" >&2
@@ -290,8 +290,8 @@ echo "Tarball sha256: ${TARBALL_SHA256}"
 # directory; read the project version from its top-level pyproject.toml only
 # (sub-packages may ship their own pyproject.toml files).
 TARBALL_PREFIX="${GITHUB_REPO#*/}-${CALVER}"
-SEMVER="$(tar -xzf "$TARBALL" -O "${TARBALL_PREFIX}/pyproject.toml" |
-  sed -n 's/^version = "\(.*\)"/\1/p' | head -1)"
+SEMVER="$(tar -xzf "$TARBALL" -O "${TARBALL_PREFIX}/pyproject.toml" \
+  | sed -n 's/^version = "\(.*\)"/\1/p' | head -1)"
 if ! [[ "$SEMVER" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   echo "ERROR: could not read package semver from ${TARBALL_PREFIX}/pyproject.toml (got: '${SEMVER}')" >&2
   exit 1
