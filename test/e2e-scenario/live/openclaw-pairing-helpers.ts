@@ -87,6 +87,18 @@ export async function cleanupPairingSandbox(
   );
 }
 
+function policyTextHasHost(text: string, host: string): boolean {
+  const accepted = new Set([
+    `host: ${host}`,
+    `host: "${host}"`,
+    `host: '${host}'`,
+    `- host: ${host}`,
+    `- host: "${host}"`,
+    `- host: '${host}'`,
+  ]);
+  return text.split(/\r?\n/).some((line) => accepted.has(line.trim()));
+}
+
 export async function premergeSlackPolicyIfNeeded(cleanup: CleanupRegistry): Promise<void> {
   const basePolicy = path.join(
     REPO_ROOT,
@@ -95,7 +107,7 @@ export async function premergeSlackPolicyIfNeeded(cleanup: CleanupRegistry): Pro
     "openclaw-sandbox.yaml",
   );
   const original = fs.readFileSync(basePolicy, "utf8");
-  if (original.includes("api.slack.com")) return;
+  if (policyTextHasHost(original, "api.slack.com")) return;
   fs.appendFileSync(
     basePolicy,
     `
