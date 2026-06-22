@@ -499,6 +499,7 @@ function runHermesGatewayRuntimeCleanup(opts: {
   stalePid?: boolean;
   lockedConfigRoot?: boolean;
   rootOwnedConfigRoot?: boolean;
+  preExistingLogFile?: boolean;
   preExistingHistory?: "regular" | "symlink" | "directory" | "hardlink-to-config";
 }) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-runtime-cleanup-"));
@@ -510,9 +511,14 @@ function runHermesGatewayRuntimeCleanup(opts: {
   const legacyPid = path.join(hermesHome, "gateway.pid");
   const runtimePid = path.join(runtimeDir, "gateway.pid");
   const runtimeLock = path.join(runtimeDir, "gateway.lock");
+  const agentLogPath = path.join(hermesHome, "logs", "agent.log");
 
   fs.mkdirSync(runtimeDir, { recursive: true });
   fs.mkdirSync(procRoot, { recursive: true });
+  if (opts.preExistingLogFile) {
+    fs.mkdirSync(path.dirname(agentLogPath), { recursive: true });
+    fs.writeFileSync(agentLogPath, "pre-existing log\n", { mode: 0o644 });
+  }
   if (opts.lockedConfigRoot || opts.rootOwnedConfigRoot) {
     fs.chmodSync(hermesHome, 0o755);
   }
@@ -588,6 +594,7 @@ function runHermesGatewayRuntimeCleanup(opts: {
       extractShellFunctionFromSource(src, "hermes_config_root_is_locked"),
       extractShellFunctionFromSource(src, "ensure_hermes_config_root_mode"),
       extractShellFunctionFromSource(src, "ensure_hermes_state_dir"),
+      extractShellFunctionFromSource(src, "repair_hermes_log_permissions"),
       extractShellFunctionFromSource(src, "ensure_hermes_history_file"),
       extractShellFunctionFromSource(src, "repair_hermes_startup_layout"),
       extractShellFunctionFromSource(src, "cleanup_stale_hermes_gateway_runtime"),
@@ -622,6 +629,15 @@ function runHermesGatewayRuntimeCleanup(opts: {
         ];
       }),
     );
+    const requiredDirFullModes = Object.fromEntries(
+      ["logs", "logs/curator"].map((entry) => {
+        const entryPath = path.join(hermesHome, entry);
+        return [
+          entry,
+          fs.existsSync(entryPath) ? (fs.statSync(entryPath).mode & 0o7777).toString(8) : "missing",
+        ];
+      }),
+    );
     const historyStat = lstatIfPresent(historyPath);
     let historyMode = "missing";
     let historyKind: "missing" | "regular" | "symlink" | "directory" | "other" = "missing";
@@ -650,6 +666,10 @@ function runHermesGatewayRuntimeCleanup(opts: {
       killLog: fs.existsSync(killLog) ? fs.readFileSync(killLog, "utf-8") : "",
       hermesDirMode: (fs.statSync(hermesHome).mode & 0o7777).toString(8),
       requiredDirs,
+      requiredDirFullModes,
+      agentLogMode: fs.existsSync(agentLogPath)
+        ? (fs.statSync(agentLogPath).mode & 0o777).toString(8)
+        : "missing",
       runtimePidExists: fs.existsSync(runtimePid),
       runtimeLockExists: fs.existsSync(runtimeLock),
       legacyPidExists: legacyPidStat !== null,
@@ -1069,6 +1089,7 @@ describe("agents/hermes/start.sh gateway runtime cleanup", () => {
       staleLock: false,
       stalePid: false,
       rootOwnedConfigRoot: true,
+      preExistingLogFile: true,
     });
 
     expect(run.result.status).toBe(0);
@@ -1080,6 +1101,11 @@ describe("agents/hermes/start.sh gateway runtime cleanup", () => {
       image_cache: "770",
       audio_cache: "770",
     });
+    expect(run.requiredDirFullModes).toMatchObject({
+      logs: "2770",
+      "logs/curator": "2770",
+    });
+    expect(run.agentLogMode).toBe("660");
     expect(run.historyKind).toBe("regular");
     expect(run.historyMode).toBe("660");
     expect(run.historyContent).toBe("");

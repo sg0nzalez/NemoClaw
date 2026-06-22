@@ -485,6 +485,16 @@ ensure_hermes_state_dir() {
   chmod "$mode" "$dir"
 }
 
+repair_hermes_log_permissions() {
+  ensure_hermes_state_dir "${HERMES_DIR}/logs" 2770
+  ensure_hermes_state_dir "${HERMES_DIR}/logs/curator" 2770
+
+  if [ "$(id -u)" -eq 0 ]; then
+    find -P "${HERMES_DIR}/logs" -type f -exec chown sandbox:sandbox {} +
+  fi
+  find -P "${HERMES_DIR}/logs" -type f -exec chmod 660 {} +
+}
+
 ensure_hermes_history_file() {
   local file="$1"
   local mode="$2"
@@ -596,8 +606,7 @@ repair_hermes_startup_layout() {
   fi
 
   ensure_hermes_config_root_mode
-  ensure_hermes_state_dir "${HERMES_DIR}/logs" 770
-  ensure_hermes_state_dir "${HERMES_DIR}/logs/curator" 770
+  repair_hermes_log_permissions
   ensure_hermes_state_dir "${HERMES_DIR}/hooks" 770
   ensure_hermes_state_dir "${HERMES_DIR}/image_cache" 770
   ensure_hermes_state_dir "${HERMES_DIR}/audio_cache" 770

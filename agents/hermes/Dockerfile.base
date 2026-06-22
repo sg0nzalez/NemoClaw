@@ -134,6 +134,8 @@ RUN mkdir -p /sandbox/.hermes/memories \
         /sandbox/.hermes/platforms/whatsapp/session \
         /sandbox/.hermes/runtime \
     && chmod 2770 \
+        /sandbox/.hermes/logs \
+        /sandbox/.hermes/logs/curator \
         /sandbox/.hermes/platforms \
         /sandbox/.hermes/platforms/whatsapp \
         /sandbox/.hermes/platforms/whatsapp/session \

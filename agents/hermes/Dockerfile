@@ -206,8 +206,9 @@ ENV HERMES_ENVIRONMENT_HINT="You are running inside an NVIDIA OpenShell sandbox,
 USER root
 
 # Run Hermes' upstream repair before NemoClaw applies the final permission and
-# hash contract. doctor may create or normalize files under HERMES_HOME; the
-# lock step below must be the last writer to those modes and trust anchors.
+# hash contract. NemoClaw emits the current Hermes schema directly, so doctor
+# should not need to migrate config.yaml; the trust anchor is still computed
+# only after doctor has finished.
 # hadolint ignore=DL3059
 RUN HERMES_HOME=/sandbox/.hermes /usr/local/bin/hermes doctor --fix
 
@@ -352,12 +353,16 @@ RUN set -eu; \
         /sandbox/.hermes/runtime \
         /sandbox/.hermes/dashboard-home \
     && chmod 2770 \
+        /sandbox/.hermes/logs \
+        /sandbox/.hermes/logs/curator \
         /sandbox/.hermes/platforms \
         /sandbox/.hermes/platforms/whatsapp \
         /sandbox/.hermes/platforms/whatsapp/session \
     && chmod 2770 /sandbox/.hermes/runtime \
     && chmod 640 /sandbox/.hermes/config.yaml \
     && chmod 640 /sandbox/.hermes/.env \
+    && find -P /sandbox/.hermes/logs -type f -exec chown sandbox:sandbox {} + \
+    && find -P /sandbox/.hermes/logs -type f -exec chmod 660 {} + \
     && for name in state.db state.db-wal state.db-shm gateway.lock gateway_state.json channel_directory.json; do \
         rm -f "/sandbox/.hermes/${name}"; \
         ln -s "runtime/${name}" "/sandbox/.hermes/${name}"; \

@@ -1,9 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
 import { DockerProbe, resultText, type DockerCommandResult } from "../fixtures/docker-probe.ts";
+import type { ArtifactSink } from "../fixtures/artifacts.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
 
 // Migrated from test/e2e/test-hermes-root-entrypoint-smoke.sh. This remains a
@@ -95,7 +99,36 @@ async function expectContainerShFails(
   expect(result.exitCode, `${container}: ${message}\n${resultText(result)}`).not.toBe(0);
 }
 
-async function dumpContainerDiagnostics(probe: DockerProbe, container: string): Promise<void> {
+async function copyStoppedContainerFile(
+  probe: DockerProbe,
+  artifacts: ArtifactSink,
+  redact: (text: string) => string,
+  container: string,
+  containerPath: string,
+  artifactName: string,
+): Promise<void> {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-root-smoke-diag-"));
+  const dest = path.join(tmp, path.basename(containerPath));
+  try {
+    const copied = await probe.run(["cp", `${container}:${containerPath}`, dest], {
+      artifactName: `diag-${container}-${artifactName}-copy`,
+      timeoutMs: 30_000,
+    });
+    if (copied.exitCode !== 0) return;
+
+    const text = redact(fs.readFileSync(dest, "utf-8"));
+    await artifacts.writeText(`docker/diag-${container}-${artifactName}.txt`, text);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+async function dumpContainerDiagnostics(
+  probe: DockerProbe,
+  artifacts: ArtifactSink,
+  redact: (text: string) => string,
+  container: string,
+): Promise<void> {
   const inspect = await probe.run(["inspect", container], {
     artifactName: `diag-${container}-inspect`,
     timeoutMs: 30_000,
@@ -117,6 +150,22 @@ async function dumpContainerDiagnostics(probe: DockerProbe, container: string): 
     artifactName: `diag-${container}-logs`,
     timeoutMs: 30_000,
   });
+  await copyStoppedContainerFile(
+    probe,
+    artifacts,
+    redact,
+    container,
+    "/tmp/nemoclaw-start.log",
+    "start-log",
+  );
+  await copyStoppedContainerFile(
+    probe,
+    artifacts,
+    redact,
+    container,
+    "/tmp/gateway.log",
+    "gateway-log",
+  );
   await probe.run(
     [
       "exec",
@@ -229,6 +278,27 @@ async function assertRuntimeLayout(probe: DockerProbe, container: string): Promi
   );
 }
 
+async function assertConfigHashContract(probe: DockerProbe, container: string): Promise<void> {
+  await expectContainerSh(
+    probe,
+    container,
+    "Hermes strict config hash is not a root-owned read-only trust anchor",
+    "test \"$(stat -c '%u:%g %a' /etc/nemoclaw/hermes.config-hash)\" = '0:0 444'",
+  );
+  await expectContainerSh(
+    probe,
+    container,
+    "Hermes strict config hash does not validate as sandbox user",
+    "gosu sandbox sha256sum -c /etc/nemoclaw/hermes.config-hash --status",
+  );
+  await expectContainerSh(
+    probe,
+    container,
+    "Hermes config or env file mode drifted after image startup",
+    "test \"$(stat -c '%U:%G %a' /sandbox/.hermes/config.yaml)\" = 'sandbox:sandbox 640' && test \"$(stat -c '%U:%G %a' /sandbox/.hermes/.env)\" = 'sandbox:sandbox 640'",
+  );
+}
+
 async function assertGatewayProcess(probe: DockerProbe, container: string): Promise<void> {
   await expectContainerSh(
     probe,
@@ -261,6 +331,7 @@ async function runCleanVariant(
   await assertGatewayProcess(probe, container);
   await assertGatewayLogClean(probe, container);
   await assertRuntimeLayout(probe, container);
+  await assertConfigHashContract(probe, container);
 }
 
 async function runLegacyVariant(
@@ -289,6 +360,7 @@ exec /usr/local/bin/nemoclaw-start /usr/local/bin/nemoclaw-start`;
   await assertGatewayProcess(probe, container);
   await assertGatewayLogClean(probe, container);
   await assertRuntimeLayout(probe, container);
+  await assertConfigHashContract(probe, container);
   await expectContainerSh(
     probe,
     container,
@@ -321,6 +393,7 @@ liveTest(
         "gateway process runs as gateway user",
         "gateway log has no PID race or config load failure",
         "Hermes v0.14 writable runtime directories are present",
+        "Hermes strict config hash validates against generated config.yaml and .env",
         "gateway.pid is migrated to a regular top-level file",
         "gateway user cannot remove config.yaml from sticky config root",
         "legacy gateway.pid symlink/state shape is repaired and booted",
@@ -346,7 +419,7 @@ liveTest(
       await runLegacyVariant(probe, image, runId, containers);
     } catch (error) {
       for (const container of containers) {
-        await dumpContainerDiagnostics(probe, container);
+        await dumpContainerDiagnostics(probe, artifacts, (text) => secrets.redact(text), container);
       }
       throw error;
     }
@@ -358,6 +431,7 @@ liveTest(
         cleanStartupHealthy: true,
         legacyStartupHealthy: true,
         runtimeLayoutVerified: true,
+        configHashContractVerified: true,
         gatewayPrivilegeSeparationVerified: true,
         legacyPidSymlinkMigrationVerified: true,
       },

@@ -1366,6 +1366,8 @@ describe("Hermes sandbox provisioning", () => {
         `test "\${HERMES_HOME:-}" = ${JSON.stringify(hermesDir)}`,
         'test "${1:-}" = "doctor"',
         'test "${2:-}" = "--fix"',
+        `printf 'doctor_migrated: true\\n' >>${JSON.stringify(configPath)}`,
+        `printf 'DOCTOR_MIGRATED=1\\n' >>${JSON.stringify(envPath)}`,
         `chmod 666 ${JSON.stringify(configPath)} ${JSON.stringify(envPath)}`,
       ].join("\n"),
       { mode: 0o700 },
@@ -1412,6 +1414,12 @@ describe("Hermes sandbox provisioning", () => {
       expect((fs.statSync(path.join(etcDir, "hermes.config-hash")).mode & 0o777).toString(8)).toBe(
         "444",
       );
+      expect(fs.readFileSync(configPath, "utf-8")).toContain("doctor_migrated: true");
+      const verifyHash = spawnSync("sha256sum", ["-c", path.join(etcDir, "hermes.config-hash")], {
+        encoding: "utf-8",
+        timeout: 5000,
+      });
+      expect(verifyHash.status).toBe(0);
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
@@ -1451,6 +1459,10 @@ describe("Hermes sandbox provisioning", () => {
         expect((fs.statSync(path.join(hermesDir, "platforms")).mode & 0o7777).toString(8)).toBe(
           "2770",
         );
+        expect((fs.statSync(path.join(hermesDir, "logs")).mode & 0o7777).toString(8)).toBe("2770");
+        expect(
+          (fs.statSync(path.join(hermesDir, "logs", "curator")).mode & 0o7777).toString(8),
+        ).toBe("2770");
         const whatsappSessionDir = path.join(hermesDir, "platforms", "whatsapp", "session");
         expect((fs.statSync(whatsappSessionDir).mode & 0o7777).toString(8)).toBe("2770");
         expect((fs.statSync(path.join(hermesDir, "runtime")).mode & 0o7777).toString(8)).toBe(

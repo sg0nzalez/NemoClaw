@@ -231,6 +231,33 @@ describe("agents/hermes/generate-config.ts", () => {
   it("generates API server config without messaging platform token blocks", () => {
     const { config, envFile } = runConfigScript();
 
+    expect(config._config_version).toBe(30);
+    expect(config.display).toMatchObject({
+      compact: false,
+      tool_progress: "all",
+      interim_assistant_messages: true,
+    });
+    expect(config.curator).toMatchObject({
+      enabled: true,
+      interval_hours: 168,
+      min_idle_hours: 2,
+      stale_after_days: 30,
+      archive_after_days: 90,
+      consolidate: false,
+      prune_builtins: true,
+      backup: {
+        enabled: true,
+        keep: 5,
+      },
+    });
+    expect(config.auxiliary?.curator).toEqual({
+      provider: "auto",
+      model: "",
+      base_url: "",
+      api_key: "",
+      timeout: 600,
+      extra_body: {},
+    });
     expect(config.model).toMatchObject({
       default: "test-model",
       provider: "custom",

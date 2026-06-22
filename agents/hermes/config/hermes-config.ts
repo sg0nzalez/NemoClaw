@@ -82,7 +82,7 @@ export function buildHermesConfig(settings: HermesBuildSettings): Record<string,
   };
 
   const config: Record<string, unknown> = {
-    _config_version: 12,
+    _config_version: 30,
     _nemoclaw_upstream: upstream,
     model: modelConfig,
     providers: {
@@ -107,6 +107,30 @@ export function buildHermesConfig(settings: HermesBuildSettings): Record<string,
     display: {
       compact: false,
       tool_progress: "all",
+      interim_assistant_messages: true,
+    },
+    curator: {
+      enabled: true,
+      interval_hours: 168,
+      min_idle_hours: 2,
+      stale_after_days: 30,
+      archive_after_days: 90,
+      consolidate: false,
+      prune_builtins: true,
+      backup: {
+        enabled: true,
+        keep: 5,
+      },
+    },
+    auxiliary: {
+      curator: {
+        provider: "auto",
+        model: "",
+        base_url: "",
+        api_key: "",
+        timeout: 600,
+        extra_body: {},
+      },
     },
     plugins: {
       enabled: ["nemoclaw"],
