@@ -174,7 +174,7 @@ The flag pair `--yes / --non-interactive` is required for scripted use: `--yes` 
 
 Use the following resources for more information:
 
-- [OpenClaw Sub-Agents](https://docs.openclaw.ai/tools/subagents) — runtime semantics of `sessions_spawn`, `subagents.allowAgents`, and nesting depth.
-- [Set Up Task-Specific Sub-Agents](set-up-sub-agent) — in-sandbox path that edits `agents.list` directly without a rebuild.
-- [Switch Inference Providers](switch-inference-providers) — swap the primary onboard provider before changing per-agent `model` refs, since refs must share that provider.
-- [Workspace Files](../manage-sandboxes/workspace-files) — how per-agent `workspace-<id>` directories are provisioned and persisted across rebuilds.
+- Use [OpenClaw Sub-Agents](https://docs.openclaw.ai/tools/subagents) for runtime semantics of `sessions_spawn`, `subagents.allowAgents`, and nesting depth.
+- Use [Set Up Task-Specific Sub-Agents](set-up-sub-agent) for the in-sandbox path that edits `agents.list` directly without a rebuild.
+- Use [Switch Inference Providers](switch-inference-providers) before changing per-agent `model` refs, since refs must share the primary onboard provider.
+- Use [Workspace Files](../manage-sandboxes/workspace-files) to learn how per-agent `workspace-<id>` directories are provisioned and persisted across rebuilds.

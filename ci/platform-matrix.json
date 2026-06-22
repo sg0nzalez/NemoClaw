@@ -39,7 +39,7 @@
       "status": "caveated",
       "prd_priority": "P0",
       "ci_tested": true,
-      "notes": "Start the container runtime (Colima or Docker Desktop) before running the installer. Xcode Command Line Tools (`xcode-select --install`) are typically required for Node native modules during install — recommended, not preflight-enforced by NemoClaw."
+      "notes": "Start the container runtime (Colima or Docker Desktop) before running the installer. Xcode Command Line Tools (`xcode-select --install`) are typically required for Node native modules during install. NemoClaw recommends them but does not enforce them during preflight."
     },
     {
       "name": "DGX Spark",
@@ -129,7 +129,7 @@
       "name": "Local NVIDIA NIM",
       "status": "experimental",
       "endpoint_type": "Local OpenAI-compatible",
-      "notes": "Requires `NEMOCLAW_EXPERIMENTAL=1` and a NIM-capable NVIDIA GPU. Host must have the NVIDIA Container Toolkit installed and a CDI spec present (`onboard` asserts CDI presence via `assertCdiNvidiaGpuSpecPresent`, `src/lib/onboard.ts:1581`). NIM images pull from `nvcr.io` and require NGC registry login. Gated behind the experimental flag because NemoClaw does not auto-select a NIM image for the host today — the user must explicitly pick from the validated image list (managed vLLM has per-host default models and so is not gated on the same boxes). Validated images referenced in `src/lib/inference/config.ts` and `nemoclaw/src/index.ts`: `nvidia/nemotron-3-super-120b-a12b` (default cloud model), `nvidia/nemotron-3-nano-30b-a3b`, `nvidia/llama-3.3-nemotron-super-49b-v1.5`."
+      "notes": "Requires `NEMOCLAW_EXPERIMENTAL=1` and a NIM-capable NVIDIA GPU. Host must have the NVIDIA Container Toolkit installed and a CDI spec present (`onboard` asserts CDI presence via `assertCdiNvidiaGpuSpecPresent`, `src/lib/onboard.ts:1581`). NIM images pull from `nvcr.io` and require NGC registry login. NemoClaw gates this path behind the experimental flag because it does not auto-select a NIM image for the host today. You must explicitly pick from the validated image list. Managed vLLM has per-host default models and is not gated on the same boxes. Validated images referenced in `src/lib/inference/config.ts` and `nemoclaw/src/index.ts`: `nvidia/nemotron-3-super-120b-a12b` (default cloud model), `nvidia/nemotron-3-nano-30b-a3b`, `nvidia/llama-3.3-nemotron-super-49b-v1.5`."
     },
     {
       "name": "Local vLLM (already running)",
@@ -141,7 +141,7 @@
       "name": "Local vLLM (managed install/start)",
       "status": "caveated",
       "endpoint_type": "Local OpenAI-compatible",
-      "notes": "Appears by default on DGX Spark and DGX Station. Generic Linux NVIDIA GPU hosts require `NEMOCLAW_EXPERIMENTAL=1` or `NEMOCLAW_PROVIDER=install-vllm`. Host must have the NVIDIA Container Toolkit installed and a CDI spec present (`onboard` asserts CDI presence). NemoClaw pulls/starts the stable NGC vLLM container per host profile (see `src/lib/inference/vllm.ts:55,177` for the pins): DGX Spark / DGX Station → `nvcr.io/nvidia/vllm:26.05.post1-py3`; generic Linux NVIDIA GPU → `nvcr.io/nvidia/vllm:26.03.post1-py3`. Validated defaults (`src/lib/inference/vllm-models.ts`): DGX Spark → `nvidia/Qwen3.6-35B-A3B-NVFP4`; DGX Station → `Qwen/Qwen3.6-27B-FP8`; Linux NVIDIA GPU → `nvidia/NVIDIA-Nemotron-3-Nano-4B-FP8`. Image pulls require NGC registry login (`docker login nvcr.io`); onboard prompts for the NGC API key when authentication is missing."
+      "notes": "Appears by default on DGX Spark and DGX Station. Generic Linux NVIDIA GPU hosts require `NEMOCLAW_EXPERIMENTAL=1` or `NEMOCLAW_PROVIDER=install-vllm`. Host must have the NVIDIA Container Toolkit installed and a CDI spec present (`onboard` asserts CDI presence). NemoClaw pulls or starts the stable NGC vLLM container per host profile. See `src/lib/inference/vllm.ts:55,177` for the pins. DGX Spark and DGX Station use `nvcr.io/nvidia/vllm:26.05.post1-py3`; generic Linux NVIDIA GPU hosts use `nvcr.io/nvidia/vllm:26.03.post1-py3`. Validated defaults are listed in `src/lib/inference/vllm-models.ts`: DGX Spark uses `nvidia/Qwen3.6-35B-A3B-NVFP4`, DGX Station uses `Qwen/Qwen3.6-27B-FP8`, and Linux NVIDIA GPU uses `nvidia/NVIDIA-Nemotron-3-Nano-4B-FP8`. Image pulls require NGC registry login (`docker login nvcr.io`); onboard prompts for the NGC API key when authentication is missing."
     }
   ],
 
@@ -204,7 +204,7 @@
     {
       "name": "Web search backend",
       "status": "caveated",
-      "notes": "Runtime-configurable web-search backend plumbed through the OpenShell gateway. Brave is the currently-implemented backend (see `src/lib/onboard/brave-provider-profile.ts` and `src/lib/onboard/web-search-flow.ts`); backend credentials are user-supplied via an onboard prompt — no NemoClaw-bundled key."
+      "notes": "Runtime-configurable web-search backend plumbed through the OpenShell gateway. Brave is the currently-implemented backend. See `src/lib/onboard/brave-provider-profile.ts` and `src/lib/onboard/web-search-flow.ts`. Backend credentials are user-supplied via an onboard prompt. NemoClaw does not bundle a key."
     }
   ],
 
