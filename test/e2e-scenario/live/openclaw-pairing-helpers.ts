@@ -12,15 +12,15 @@ import { expect } from "../fixtures/e2e-test.ts";
 import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
 import { type FakeDockerApi, startFakeDockerApi } from "./messaging-providers-helpers.ts";
 import {
+  base64,
   bestEffort,
   cleanupSandbox,
   expectExitZero,
   phase6Env,
   REPO_ROOT,
   resultText,
-  sandboxEncodedSh,
-  sandboxNode,
   sandboxSh,
+  shellQuote,
 } from "./phase6-messaging-helpers.ts";
 
 export type PairingChannel = "slack" | "discord";
@@ -505,6 +505,48 @@ console.log("PAIRING_E2E_RESULT " + JSON.stringify({ code: result.code, senderId
 NODE
 `.replace("__LOAD_CONVERSATION_RUNTIME_SOURCE__", LOAD_CONVERSATION_RUNTIME_SOURCE);
 
+export type PairingResult = {
+  code: string;
+  senderId: string;
+  channelId: string;
+  replyText: string;
+};
+
+export function extractPairingResult(output: string, marker: string): PairingResult {
+  const line = output.split(/\r?\n/).find((candidate) => candidate.startsWith(`${marker} `));
+  if (!line) throw new Error(`missing ${marker} line: ${output.slice(0, 500)}`);
+  const data = JSON.parse(line.slice(marker.length + 1)) as Partial<PairingResult>;
+  if (!data.code) throw new Error(`missing pairing code in ${line}`);
+  if (!data.senderId) throw new Error(`missing pairing sender in ${line}`);
+  if (!data.channelId) throw new Error(`missing pairing channel in ${line}`);
+  if (!data.replyText) throw new Error(`missing pairing reply text in ${line}`);
+  return {
+    code: data.code,
+    senderId: data.senderId,
+    channelId: data.channelId,
+    replyText: data.replyText,
+  };
+}
+
+function buildEncodedShellCommand(script: string, args: string[]): string {
+  return [
+    "tmp=$(mktemp)",
+    "trap 'rm -f \"$tmp\"' EXIT",
+    `printf %s ${shellQuote(base64(script))} | base64 -d > "$tmp"`,
+    `sh "$tmp" ${args.map(shellQuote).join(" ")}`,
+  ].join("; ");
+}
+
+function buildNodeShellCommand(source: string, env: Record<string, string>): string {
+  const exports = Object.entries(env)
+    .map(([key, value]) => `export ${key}=${shellQuote(value)}`)
+    .join("\n");
+  return buildEncodedShellCommand(
+    `${exports}\nnode --input-type=module <<'NODE'\n${source}\nNODE\n`,
+    [],
+  );
+}
+
 export function extractPairingCode(output: string, marker: string): string {
   const line = output.split(/\r?\n/).find((candidate) => candidate.startsWith(`${marker} `));
   if (!line) throw new Error(`missing ${marker} line: ${output.slice(0, 500)}`);
@@ -520,19 +562,32 @@ export async function issuePairingRequest(options: {
   redactions: string[];
   fakeSlackPort?: string;
 }): Promise<ShellProbeResult> {
-  return sandboxEncodedSh(
-    options.sandbox,
-    options.sandboxName,
-    options.channel === "slack" ? SLACK_PAIRING_SCRIPT : DISCORD_PAIRING_SCRIPT,
+  const script = options.channel === "slack" ? SLACK_PAIRING_SCRIPT : DISCORD_PAIRING_SCRIPT;
+  const args =
     options.channel === "slack"
       ? [options.fakeSlackPort ?? "", PAIRING_USER.slack]
-      : [PAIRING_USER.discord, DISCORD_DM_CHANNEL],
-    {
-      artifactName: `${options.channel}-issue-pairing-request`,
-      redactionValues: options.redactions,
-      timeoutMs: 120_000,
-    },
-  );
+      : [PAIRING_USER.discord, DISCORD_DM_CHANNEL];
+  return sandboxSh(options.sandbox, options.sandboxName, buildEncodedShellCommand(script, args), {
+    artifactName: `${options.channel}-issue-pairing-request`,
+    redactionValues: options.redactions,
+    timeoutMs: 120_000,
+  });
+}
+
+export function buildPairingPendingCommand(
+  channel: PairingChannel,
+  code: string,
+  user: string,
+): string {
+  return `test -f /sandbox/.openclaw/credentials/${channel}-pairing.json && grep -F ${shellQuote(code)} /sandbox/.openclaw/credentials/${channel}-pairing.json && grep -F ${shellQuote(user)} /sandbox/.openclaw/credentials/${channel}-pairing.json`;
+}
+
+export function buildPairingApproveCommand(channel: PairingChannel, code: string): string {
+  return `openclaw pairing approve ${channel} ${shellQuote(code)} 2>&1`;
+}
+
+export function buildPairingAllowFromCommand(channel: PairingChannel, user: string): string {
+  return `test -f /sandbox/.openclaw/credentials/${channel}-default-allowFrom.json && grep -F ${shellQuote(user)} /sandbox/.openclaw/credentials/${channel}-default-allowFrom.json`;
 }
 
 export async function approveAndAssertPairing(options: {
@@ -546,7 +601,7 @@ export async function approveAndAssertPairing(options: {
   const pending = await sandboxSh(
     options.sandbox,
     options.sandboxName,
-    `test -f /sandbox/.openclaw/credentials/${options.channel}-pairing.json && grep -F ${JSON.stringify(options.code)} /sandbox/.openclaw/credentials/${options.channel}-pairing.json && grep -F ${JSON.stringify(user)} /sandbox/.openclaw/credentials/${options.channel}-pairing.json`,
+    buildPairingPendingCommand(options.channel, options.code, user),
     { artifactName: `${options.channel}-pending-file`, redactionValues: options.redactions },
   );
   expectExitZero(pending, `${options.channel} pending file`);
@@ -568,7 +623,7 @@ export async function approveAndAssertPairing(options: {
   const approve = await sandboxSh(
     options.sandbox,
     options.sandboxName,
-    `openclaw pairing approve ${options.channel} ${JSON.stringify(options.code)} 2>&1`,
+    buildPairingApproveCommand(options.channel, options.code),
     { artifactName: `${options.channel}-pairing-approve`, redactionValues: options.redactions },
   );
   expectExitZero(approve, `${options.channel} pairing approve`);
@@ -593,7 +648,7 @@ export async function approveAndAssertPairing(options: {
   const allow = await sandboxSh(
     options.sandbox,
     options.sandboxName,
-    `test -f /sandbox/.openclaw/credentials/${options.channel}-default-allowFrom.json && grep -F ${JSON.stringify(user)} /sandbox/.openclaw/credentials/${options.channel}-default-allowFrom.json`,
+    buildPairingAllowFromCommand(options.channel, user),
     { artifactName: `${options.channel}-allow-from`, redactionValues: options.redactions },
   );
   expectExitZero(allow, `${options.channel} allowFrom file`);
@@ -601,7 +656,7 @@ export async function approveAndAssertPairing(options: {
   const repeat = await sandboxSh(
     options.sandbox,
     options.sandboxName,
-    `openclaw pairing approve ${options.channel} ${JSON.stringify(options.code)} 2>&1`,
+    buildPairingApproveCommand(options.channel, options.code),
     { artifactName: `${options.channel}-repeat-approve`, redactionValues: options.redactions },
   );
   if (repeat.exitCode === 0 || !resultText(repeat).includes("No pending pairing request found")) {
@@ -649,11 +704,10 @@ socket.on("error", (error) => { clearTimeout(timer); finish(` +
     "`ERROR:${error.message}`" +
     `); });
 `;
-  return sandboxNode(
+  return sandboxSh(
     options.sandbox,
     options.sandboxName,
-    source,
-    { FAKE_DISCORD_GATEWAY_PORT: options.port },
+    buildNodeShellCommand(source, { FAKE_DISCORD_GATEWAY_PORT: options.port }),
     {
       artifactName: "discord-gateway-proof",
       redactionValues: options.redactions,

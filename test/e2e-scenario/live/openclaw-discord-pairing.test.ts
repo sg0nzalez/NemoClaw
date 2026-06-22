@@ -13,7 +13,7 @@ import {
   assertOpenClawStateRoot,
   cleanupPairingSandbox,
   DISCORD_DM_CHANNEL,
-  extractPairingCode,
+  extractPairingResult,
   issuePairingRequest,
   PAIRING_USER,
   pairingEnv,
@@ -35,7 +35,7 @@ const SANDBOX_NAME = process.env.NEMOCLAW_SANDBOX_NAME ?? "e2e-openclaw-discord-
 const DISCORD_TOKEN = process.env.DISCORD_BOT_TOKEN ?? "test-fake-discord-pairing-e2e";
 const LIVE_TIMEOUT_MS = 55 * 60_000;
 
-function assertDiscordGatewayCapture(captureFile: string): void {
+function assertDiscordGatewayCapture(captureFile: string, expectedToken: string): void {
   const rows = fs
     .readFileSync(captureFile, "utf8")
     .trim()
@@ -44,6 +44,10 @@ function assertDiscordGatewayCapture(captureFile: string): void {
     .map((line) => JSON.parse(line) as Record<string, unknown>);
   const identify = rows.filter((row) => row.event === "identify").at(-1);
   expect(identify, "fake Discord Gateway did not capture IDENTIFY").toBeTruthy();
+  expect(identify).not.toHaveProperty("token");
+  expect(JSON.stringify(rows), "fake Discord Gateway capture persisted raw token").not.toContain(
+    expectedToken,
+  );
   expect(identify?.tokenMatchesExpected, "Discord token rewrite").toBe(true);
   expect(identify?.tokenLooksPlaceholder, "Discord placeholder leaked").toBe(false);
 }
@@ -105,13 +109,22 @@ test.skipIf(!shouldRunLiveE2EScenarios())(
     const config = await sandboxSh(
       sandbox,
       SANDBOX_NAME,
-      `python3 - <<'PY'\nimport json\ncfg=json.load(open('/sandbox/.openclaw/openclaw.json'))\naccount=(cfg.get('channels',{}).get('discord',{}).get('accounts',{}).get('default') or {})\nprint(json.dumps({'token': account.get('token',''), 'dmPolicy': account.get('dmPolicy',''), 'allowFrom': account.get('allowFrom', [])}))\nPY`,
+      `python3 - <<'PY'\nimport json\ncfg=json.load(open('/sandbox/.openclaw/openclaw.json'))\naccount=(cfg.get('channels',{}).get('discord',{}).get('accounts',{}).get('default') or {})\nproxy=cfg.get('proxy') or {}\nprint(json.dumps({'token': account.get('token',''), 'dmPolicy': account.get('dmPolicy',''), 'allowFrom': account.get('allowFrom', []), 'accountProxy': account.get('proxy',''), 'managedProxy': proxy.get('proxyUrl','') if proxy.get('enabled') is True else ''}))\nPY`,
       { artifactName: "discord-openclaw-config", redactionValues: redactions },
     );
     expectExitZero(config, "Discord OpenClaw config");
-    expect(config.stdout).toContain("openshell:resolve:env:");
-    expect(config.stdout).toContain("DISCORD_BOT_TOKEN");
-    expect(config.stdout).not.toContain('"dmPolicy": "allowlist"');
+    const configSummary = JSON.parse(config.stdout.trim()) as {
+      token: string;
+      dmPolicy: string;
+      allowFrom: string[];
+      accountProxy: string;
+      managedProxy: string;
+    };
+    expect(configSummary.token).toContain("openshell:resolve:env:");
+    expect(configSummary.token).toContain("DISCORD_BOT_TOKEN");
+    expect(configSummary.dmPolicy).not.toBe("allowlist");
+    expect(configSummary.accountProxy, "Discord account proxy").toMatch(/^http:\/\//);
+    expect(configSummary.managedProxy, "OpenClaw managed proxy").toMatch(/^http:\/\//);
 
     await assertOpenClawStateRoot(sandbox, SANDBOX_NAME, "discord", redactions);
 
@@ -144,7 +157,7 @@ test.skipIf(!shouldRunLiveE2EScenarios())(
     expect(resultText(gatewayProof)).toContain("IDENTIFY_SENT_PLACEHOLDER");
     expect(resultText(gatewayProof)).toContain("READY");
     expect(resultText(gatewayProof)).toContain("HEARTBEAT_ACK");
-    assertDiscordGatewayCapture(fakeGateway.captureFile);
+    assertDiscordGatewayCapture(fakeGateway.captureFile, DISCORD_TOKEN);
 
     const issue = await issuePairingRequest({
       sandbox,
@@ -153,14 +166,22 @@ test.skipIf(!shouldRunLiveE2EScenarios())(
       redactions,
     });
     expectExitZero(issue, "Discord pairing request creation");
-    const code = extractPairingCode(resultText(issue), "DISCORD_PAIRING_E2E_RESULT");
-    await writePairingArtifacts(artifacts, "discord", { code, user: PAIRING_USER.discord });
+    const pairing = extractPairingResult(resultText(issue), "DISCORD_PAIRING_E2E_RESULT");
+    expect(pairing.senderId).toBe(PAIRING_USER.discord);
+    expect(pairing.channelId).toBe(DISCORD_DM_CHANNEL);
+    expect(pairing.replyText, "Discord pairing reply includes generated code").toContain(
+      pairing.code,
+    );
+    expect(pairing.replyText, "Discord pairing reply includes sender identity").toContain(
+      PAIRING_USER.discord,
+    );
+    await writePairingArtifacts(artifacts, "discord", { ...pairing, user: PAIRING_USER.discord });
 
     await approveAndAssertPairing({
       sandbox,
       sandboxName: SANDBOX_NAME,
       channel: "discord",
-      code,
+      code: pairing.code,
       redactions,
     });
   },
