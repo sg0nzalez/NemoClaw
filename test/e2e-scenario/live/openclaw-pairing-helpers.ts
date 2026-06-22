@@ -9,12 +9,13 @@ import { expect } from "../fixtures/e2e-test.ts";
 import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
 import { type FakeDockerApi, startFakeDockerApi } from "./messaging-providers-helpers.ts";
 import {
-  base64,
   bestEffort,
   cleanupSandbox,
   expectExitZero,
   phase6Env,
   resultText,
+  sandboxEncodedSh,
+  sandboxNode,
   sandboxSh,
   shellQuote,
 } from "./phase6-messaging-helpers.ts";
@@ -238,7 +239,14 @@ export async function assertOpenClawStateRoot(
   expect(resultText(list)).toMatch(new RegExp(`"channel"\\s*:\\s*"${channel}"`));
 }
 
-const LOAD_CONVERSATION_RUNTIME_SOURCE = String.raw`
+// Source-of-truth boundary: the live pairing probe imports the conversation
+// runtime from the active `openclaw` binary installed in the sandbox. The invalid
+// state is an active OpenClaw package without `dist/plugin-sdk/conversation-runtime.js`;
+// this Discord migration fails closed for that installer/package drift instead of
+// searching secondary global installs. A support test covers the no-runtime path.
+// Remove this locator once OpenClaw exposes a stable CLI/import for issuing pairing
+// challenges from E2E probes.
+export const LOAD_CONVERSATION_RUNTIME_SOURCE = String.raw`
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
@@ -270,11 +278,6 @@ async function loadConversationRuntime() {
   const candidates = [];
   const binaryRoot = findOpenClawPackageRootFromBinary();
   if (binaryRoot) candidates.push(binaryRoot);
-  try {
-    const globalRoot = execFileSync("npm", ["root", "-g"], { encoding: "utf8" }).trim();
-    if (globalRoot) candidates.push(path.join(globalRoot, "openclaw"));
-  } catch {}
-  candidates.push("/usr/local/lib/node_modules/openclaw", "/usr/lib/node_modules/openclaw");
   for (const root of [...new Set(candidates)]) {
     const runtime = path.join(root, "dist/plugin-sdk/conversation-runtime.js");
     if (fs.existsSync(runtime)) return import(pathToFileURL(runtime).href);
@@ -499,25 +502,6 @@ export function extractPairingResult(output: string, marker: string): PairingRes
   };
 }
 
-function buildEncodedShellCommand(script: string, args: string[]): string {
-  return [
-    "tmp=$(mktemp)",
-    "trap 'rm -f \"$tmp\"' EXIT",
-    `printf %s ${shellQuote(base64(script))} | base64 -d > "$tmp"`,
-    `sh "$tmp" ${args.map(shellQuote).join(" ")}`,
-  ].join("; ");
-}
-
-function buildNodeShellCommand(source: string, env: Record<string, string>): string {
-  const exports = Object.entries(env)
-    .map(([key, value]) => `export ${key}=${shellQuote(value)}`)
-    .join("\n");
-  return buildEncodedShellCommand(
-    `${exports}\nnode --input-type=module <<'NODE'\n${source}\nNODE\n`,
-    [],
-  );
-}
-
 export function extractPairingCode(output: string, marker: string): string {
   const line = output.split(/\r?\n/).find((candidate) => candidate.startsWith(`${marker} `));
   if (!line) throw new Error(`missing ${marker} line: ${output.slice(0, 500)}`);
@@ -538,7 +522,7 @@ export async function issuePairingRequest(options: {
     options.channel === "slack"
       ? [options.fakeSlackPort ?? "", PAIRING_USER.slack]
       : [PAIRING_USER.discord, DISCORD_DM_CHANNEL];
-  return sandboxSh(options.sandbox, options.sandboxName, buildEncodedShellCommand(script, args), {
+  return sandboxEncodedSh(options.sandbox, options.sandboxName, script, args, {
     artifactName: `${options.channel}-issue-pairing-request`,
     redactionValues: options.redactions,
     timeoutMs: 120_000,
@@ -693,10 +677,11 @@ socket.on("error", (error) => { clearTimeout(timer); finish(` +
     "`ERROR:${error.message}`" +
     `); });
 `;
-  return sandboxSh(
+  return sandboxNode(
     options.sandbox,
     options.sandboxName,
-    buildNodeShellCommand(source, { FAKE_DISCORD_GATEWAY_PORT: options.port }),
+    source,
+    { FAKE_DISCORD_GATEWAY_PORT: options.port },
     {
       artifactName: "discord-gateway-proof",
       redactionValues: options.redactions,
