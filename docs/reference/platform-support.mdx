@@ -38,8 +38,7 @@ For per-version highlights, see [Release Notes](../about/release-notes).
 ## Owners
 
 {/* matrix-owners:begin */}
-- **Engineering owner:** @NVIDIA/nemoclaw-maintainer
-- **Product owner:** TBD (see PR review)
+- **Engineering owner:** @NVIDIA/nemoclaw-maintainer (reviews via CODEOWNERS and signs off on launch-facing claim changes before they reach demos or sales material).
 {/* matrix-owners:end */}
 
 The engineering owner is the GitHub team auto-assigned to review changes to `ci/platform-matrix.json` via CODEOWNERS. The product owner signs off on launch-facing claim changes before they reach demos, blog posts, or sales material.
@@ -60,7 +59,7 @@ NemoClaw supports the agent runtimes listed below. Pick the matching onboarding 
 | Agent | Status | Default | Notes |
 |-------|--------|---------|-------|
 | OpenClaw | Tested | Yes | Default agent runtime. Onboard with `$$nemoclaw onboard` (no `--agent` flag required). |
-| Hermes | Tested with limitations | No | First-class agent with dedicated CLI (`$$nemohermes`), Dockerfile, manifest, docs, and nightly E2E coverage. Onboard with `$$nemohermes onboard` or pass `--agent hermes` to `$$nemoclaw onboard`. Unlocks the Hermes Provider inference route. Known limitations: model-provider compatibility registry is empty (backfilled per failure, see `nemoclaw-blueprint/model-specific-setup/hermes/README.md`); no Hermes-specific unit tests in `nemoclaw/src/`; macOS and WSL CI suites do not differentiate agents; deployment-identity bugs in the active release window (see #5211, #5327). Suitable for evaluation and the documented onboarding paths; production parity with OpenClaw is not yet asserted. |
+| Hermes | Tested with limitations | No | First-class agent with dedicated CLI (`$$nemohermes`), Dockerfile, manifest, docs, and nightly E2E coverage. Onboard with `$$nemohermes onboard` or pass `--agent hermes` to `$$nemoclaw onboard`. Unlocks the Hermes Provider inference route. Known structural gaps: model-provider compatibility registry is empty (backfilled per failure, see `nemoclaw-blueprint/model-specific-setup/hermes/README.md`); no Hermes-specific unit tests in `nemoclaw/src/`; macOS and WSL CI suites do not differentiate agents. Suitable for evaluation and the documented onboarding paths; production parity with OpenClaw is not yet asserted. |
 {/* agent-status:end */}
 
 ## Platforms
@@ -74,10 +73,8 @@ The table below lists every platform tracked by NemoClaw, including deferred ent
 | macOS (Apple Silicon) | Colima, Docker Desktop | Tested with limitations | P0 | Yes | Install Xcode Command Line Tools (`xcode-select --install`) and start the runtime before running the installer. |
 | DGX Spark | Docker | Tested | P1 | Yes | Use the standard installer and `$$nemoclaw onboard`. For an end-to-end walkthrough with local Ollama inference, see the [NVIDIA Spark playbook](https://build.nvidia.com/spark/nemoclaw). |
 | Windows WSL2 | Docker Desktop (WSL backend) | Tested with limitations | P1 | No | Requires WSL2 with Docker Desktop backend. |
-| DGX Station | Docker | Deferred | P1 | No | P1 per PRD. Setup path not yet validated. |
-| RTX Spark | Docker | Deferred | P1 | No | P1 per PRD. Setup path not yet validated. |
-| NVIDIA RTX | Docker | Deferred | P1 | No | P1 per PRD. Setup path not yet validated. |
-| NVIDIA RTX Pro | Docker | Deferred | P1 | No | P1 per PRD. Setup path not yet validated. |
+| DGX Station | Docker | Deferred | P1 | No | P1 per PRD. Workstation form-factor with NVIDIA GPUs and the same Docker + NVIDIA Container Toolkit + CDI requirements as DGX Spark. Onboard path not yet validated end-to-end on the hardware; vLLM has a placeholder default model defined for this host class (`Qwen/Qwen3.6-27B-FP8`) that will move out of `deferred` once the hardware run is signed off. |
+| NVIDIA RTX (consumer and Pro workstation GPUs) | Docker | Deferred | P1 | No | P1 per PRD. Covers RTX consumer cards and RTX Pro workstation cards on Linux hosts that meet the generic-Linux-GPU requirements (NVIDIA Container Toolkit + CDI present). The provider menu emits managed vLLM behind `NEMOCLAW_EXPERIMENTAL=1` or `NEMOCLAW_PROVIDER=install-vllm` for this host class today; the end-to-end onboard path on this hardware is not yet validated in CI. |
 {/* platform-matrix-full:end */}
 
 ## Inference providers
@@ -89,13 +86,13 @@ NemoClaw routes inference through the OpenShell gateway. Each row below is a pro
 |----------|--------|---------------|-------|
 | NVIDIA Endpoints | Tested | OpenAI-compatible | Hosted models on integrate.api.nvidia.com |
 | OpenAI | Tested | Native OpenAI-compatible | Uses OpenAI model IDs |
-| Other OpenAI-compatible endpoint | Tested | Custom OpenAI-compatible | For compatible proxies and gateways |
+| Other OpenAI-compatible endpoint | Tested with limitations | Custom OpenAI-compatible | Adapter path validated with OpenRouter (`https://openrouter.ai`, see `src/lib/onboard.ts:3673`). Behavior on other OpenAI-compatible proxies, gateways, and self-hosted implementations may vary; this row claims the adapter, not the universe of compatible endpoints. |
 | Anthropic | Tested | Native Anthropic | Uses anthropic-messages |
-| Other Anthropic-compatible endpoint | Tested | Custom Anthropic-compatible | For Claude proxies and compatible gateways |
+| Other Anthropic-compatible endpoint | Tested with limitations | Custom Anthropic-compatible | Adapter path validated with AWS Bedrock (`src/lib/onboard/bedrock-runtime.ts`). Behavior on other Anthropic-compatible proxies and gateways may vary; this row claims the adapter, not the universe of compatible endpoints. |
 | Google Gemini | Tested | OpenAI-compatible | Uses Google's OpenAI-compatible endpoint |
 | Hermes Provider | Hermes only | OpenAI-compatible route | Available when onboarding Hermes Agent through `nemohermes` |
 | Local Ollama | Tested with limitations | Local Ollama API | Available when Ollama is installed or running on the host. Validated default models: `qwen3.6:35b` (high VRAM), `nemotron-3-nano:30b` (medium VRAM), `qwen3.5:9b` (low VRAM fallback). |
-| Local NVIDIA NIM | Experimental | Local OpenAI-compatible | Requires `NEMOCLAW_EXPERIMENTAL=1` and a NIM-capable NVIDIA GPU. Host must have the NVIDIA Container Toolkit installed and a CDI spec present (`onboard` asserts CDI presence). NIM images pull from `nvcr.io` and require NGC registry login. Validated images: `nvidia/nemotron-3-super-120b-a12b` (40 GB), `nvidia/nemotron-3-nano-30b-a3b` (8 GB), `nvidia/llama-3.1-nemotron-70b-instruct` (81 GB), `nvidia/llama-3.3-nemotron-super-49b-v1` (24 GB), `meta/llama-3.1-8b-instruct` (16 GB). |
+| Local NVIDIA NIM | Experimental | Local OpenAI-compatible | Requires `NEMOCLAW_EXPERIMENTAL=1` and a NIM-capable NVIDIA GPU. Host must have the NVIDIA Container Toolkit installed and a CDI spec present (`onboard` asserts CDI presence). NIM images pull from `nvcr.io` and require NGC registry login. Gated behind the experimental flag because NemoClaw does not auto-select a NIM image for the host today — the user must explicitly pick from the validated image list (managed vLLM has per-host default models and so is not gated on the same boxes). Validated images: `nvidia/nemotron-3-super-120b-a12b` (40 GB), `nvidia/nemotron-3-nano-30b-a3b` (8 GB), `nvidia/llama-3.1-nemotron-70b-instruct` (81 GB), `nvidia/llama-3.3-nemotron-super-49b-v1` (24 GB), `meta/llama-3.1-8b-instruct` (16 GB). |
 | Local vLLM (already running) | Tested with limitations | Local OpenAI-compatible | Appears in the onboarding menu when NemoClaw detects a server already on `localhost:8000`. No flag required. Model is whatever the existing server serves. |
 | Local vLLM (managed install/start) | Tested with limitations | Local OpenAI-compatible | Appears by default on DGX Spark and DGX Station. Generic Linux NVIDIA GPU hosts require `NEMOCLAW_EXPERIMENTAL=1` or `NEMOCLAW_PROVIDER=install-vllm`. Host must have the NVIDIA Container Toolkit installed and a CDI spec present (`onboard` asserts CDI presence). NemoClaw pulls/starts the stable NGC `nvcr.io/nvidia/vllm:26.05.post1-py3` container image on a supported NVIDIA GPU host. Validated defaults: DGX Spark → `nvidia/Qwen3.6-35B-A3B-NVFP4`; DGX Station → `Qwen/Qwen3.6-27B-FP8`; Linux NVIDIA GPU → `nvidia/NVIDIA-Nemotron-3-Nano-4B-FP8`. Image pulls require NGC registry login (`docker login nvcr.io`); onboard prompts for the NGC API key when authentication is missing. |
 {/* provider-status-full:end */}

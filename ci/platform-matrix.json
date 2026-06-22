@@ -64,31 +64,15 @@
       "status": "deferred",
       "prd_priority": "P1",
       "ci_tested": false,
-      "notes": "P1 per PRD. Setup path not yet validated."
+      "notes": "P1 per PRD. Workstation form-factor with NVIDIA GPUs and the same Docker + NVIDIA Container Toolkit + CDI requirements as DGX Spark. Onboard path not yet validated end-to-end on the hardware; vLLM has a placeholder default model defined for this host class (`Qwen/Qwen3.6-27B-FP8`) that will move out of `deferred` once the hardware run is signed off."
     },
     {
-      "name": "RTX Spark",
+      "name": "NVIDIA RTX (consumer and Pro workstation GPUs)",
       "runtimes": ["Docker"],
       "status": "deferred",
       "prd_priority": "P1",
       "ci_tested": false,
-      "notes": "P1 per PRD. Setup path not yet validated."
-    },
-    {
-      "name": "NVIDIA RTX",
-      "runtimes": ["Docker"],
-      "status": "deferred",
-      "prd_priority": "P1",
-      "ci_tested": false,
-      "notes": "P1 per PRD. Setup path not yet validated."
-    },
-    {
-      "name": "NVIDIA RTX Pro",
-      "runtimes": ["Docker"],
-      "status": "deferred",
-      "prd_priority": "P1",
-      "ci_tested": false,
-      "notes": "P1 per PRD. Setup path not yet validated."
+      "notes": "P1 per PRD. Covers RTX consumer cards and RTX Pro workstation cards on Linux hosts that meet the generic-Linux-GPU requirements (NVIDIA Container Toolkit + CDI present). The provider menu emits managed vLLM behind `NEMOCLAW_EXPERIMENTAL=1` or `NEMOCLAW_PROVIDER=install-vllm` for this host class today; the end-to-end onboard path on this hardware is not yet validated in CI."
     }
   ],
 
@@ -107,9 +91,9 @@
     },
     {
       "name": "Other OpenAI-compatible endpoint",
-      "status": "tested",
+      "status": "caveated",
       "endpoint_type": "Custom OpenAI-compatible",
-      "notes": "For compatible proxies and gateways"
+      "notes": "Adapter path validated with OpenRouter (`https://openrouter.ai`, see `src/lib/onboard.ts:3673`). Behavior on other OpenAI-compatible proxies, gateways, and self-hosted implementations may vary; this row claims the adapter, not the universe of compatible endpoints."
     },
     {
       "name": "Anthropic",
@@ -119,9 +103,9 @@
     },
     {
       "name": "Other Anthropic-compatible endpoint",
-      "status": "tested",
+      "status": "caveated",
       "endpoint_type": "Custom Anthropic-compatible",
-      "notes": "For Claude proxies and compatible gateways"
+      "notes": "Adapter path validated with AWS Bedrock (`src/lib/onboard/bedrock-runtime.ts`). Behavior on other Anthropic-compatible proxies and gateways may vary; this row claims the adapter, not the universe of compatible endpoints."
     },
     {
       "name": "Google Gemini",
@@ -145,7 +129,7 @@
       "name": "Local NVIDIA NIM",
       "status": "experimental",
       "endpoint_type": "Local OpenAI-compatible",
-      "notes": "Requires `NEMOCLAW_EXPERIMENTAL=1` and a NIM-capable NVIDIA GPU. Host must have the NVIDIA Container Toolkit installed and a CDI spec present (`onboard` asserts CDI presence). NIM images pull from `nvcr.io` and require NGC registry login. Validated images: `nvidia/nemotron-3-super-120b-a12b` (40 GB), `nvidia/nemotron-3-nano-30b-a3b` (8 GB), `nvidia/llama-3.1-nemotron-70b-instruct` (81 GB), `nvidia/llama-3.3-nemotron-super-49b-v1` (24 GB), `meta/llama-3.1-8b-instruct` (16 GB)."
+      "notes": "Requires `NEMOCLAW_EXPERIMENTAL=1` and a NIM-capable NVIDIA GPU. Host must have the NVIDIA Container Toolkit installed and a CDI spec present (`onboard` asserts CDI presence). NIM images pull from `nvcr.io` and require NGC registry login. Gated behind the experimental flag because NemoClaw does not auto-select a NIM image for the host today — the user must explicitly pick from the validated image list (managed vLLM has per-host default models and so is not gated on the same boxes). Validated images: `nvidia/nemotron-3-super-120b-a12b` (40 GB), `nvidia/nemotron-3-nano-30b-a3b` (8 GB), `nvidia/llama-3.1-nemotron-70b-instruct` (81 GB), `nvidia/llama-3.3-nemotron-super-49b-v1` (24 GB), `meta/llama-3.1-8b-instruct` (16 GB)."
     },
     {
       "name": "Local vLLM (already running)",
@@ -172,7 +156,7 @@
       "name": "Hermes",
       "status": "caveated",
       "default": false,
-      "notes": "First-class agent with dedicated CLI (`$$nemohermes`), Dockerfile, manifest, docs, and nightly E2E coverage. Onboard with `$$nemohermes onboard` or pass `--agent hermes` to `$$nemoclaw onboard`. Unlocks the Hermes Provider inference route. Known limitations: model-provider compatibility registry is empty (backfilled per failure, see `nemoclaw-blueprint/model-specific-setup/hermes/README.md`); no Hermes-specific unit tests in `nemoclaw/src/`; macOS and WSL CI suites do not differentiate agents; deployment-identity bugs in the active release window (see #5211, #5327). Suitable for evaluation and the documented onboarding paths; production parity with OpenClaw is not yet asserted."
+      "notes": "First-class agent with dedicated CLI (`$$nemohermes`), Dockerfile, manifest, docs, and nightly E2E coverage. Onboard with `$$nemohermes onboard` or pass `--agent hermes` to `$$nemoclaw onboard`. Unlocks the Hermes Provider inference route. Known structural gaps: model-provider compatibility registry is empty (backfilled per failure, see `nemoclaw-blueprint/model-specific-setup/hermes/README.md`); no Hermes-specific unit tests in `nemoclaw/src/`; macOS and WSL CI suites do not differentiate agents. Suitable for evaluation and the documented onboarding paths; production parity with OpenClaw is not yet asserted."
     }
   ],
 
