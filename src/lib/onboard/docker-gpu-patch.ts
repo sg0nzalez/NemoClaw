@@ -1110,6 +1110,7 @@ export function recreateOpenShellDockerSandboxWithGpu(
       // `*-nemoclaw-gpu-backup-*` container and a sandbox with no live original
       // behind — which otherwise collides on the next retry.
       context.rolledBack = rollbackDockerGpuPatchOnRecreateFailure(
+        // newContainerId is originalName: the recreate `docker run` used `--name originalName`.
         { newContainerId: originalName, backupContainerName, originalName },
         deps,
       );

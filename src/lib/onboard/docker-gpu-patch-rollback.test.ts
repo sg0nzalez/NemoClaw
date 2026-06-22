@@ -148,6 +148,11 @@ describe("recreateOpenShellDockerSandboxWithGpu rollback path", () => {
       "openshell-alpha",
       expect.objectContaining({ ignoreError: true }),
     );
+    // The failed recreate container (named originalName by `docker run --name`) is removed.
+    expect(dockerRm).toHaveBeenCalledWith(
+      "openshell-alpha",
+      expect.objectContaining({ ignoreError: true }),
+    );
     // The backup is renamed back, never left as an orphaned container.
     expect(
       dockerRm.mock.calls.some((call) => String(call[0]).includes("nemoclaw-gpu-backup")),
