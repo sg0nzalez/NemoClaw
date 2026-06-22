@@ -1090,6 +1090,42 @@ jobs:
     }
   });
 
+  it("rejects OpenClaw Discord pairing workflow-boundary drift", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "e2e-vitest-workflow-"));
+    const workflowPath = path.join(tmp, "workflow.yaml");
+    const workflow = fs.readFileSync(
+      path.join(process.cwd(), ".github/workflows/e2e-vitest-scenarios.yaml"),
+      "utf8",
+    );
+    const parsedWorkflow = YAML.parse(workflow) as {
+      jobs: Record<
+        string,
+        {
+          env: Record<string, string>;
+          steps: Array<Record<string, unknown>>;
+        }
+      >;
+    };
+    const discordJob = parsedWorkflow.jobs["openclaw-discord-pairing-vitest"];
+    discordJob.env.DOCKER_CONFIG =
+      "${{ github.workspace }}/.docker-config-openclaw-discord-pairing";
+    const installOpenShell = discordJob.steps.find((step) => step.name === "Install OpenShell CLI");
+    expect(installOpenShell).toBeTruthy();
+    Object.assign(installOpenShell ?? {}, { run: "bash scripts/install-openshell.sh" });
+    fs.writeFileSync(workflowPath, YAML.stringify(parsedWorkflow));
+
+    try {
+      expect(validateE2eVitestScenariosWorkflowBoundary(workflowPath)).toEqual(
+        expect.arrayContaining([
+          "openclaw-discord-pairing-vitest job must not set DOCKER_CONFIG at job level",
+          "step 'Install OpenShell CLI' run script must include env -u DOCKER_CONFIG",
+        ]),
+      );
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it("requires runtime-overrides workflow and report coverage", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "e2e-vitest-workflow-"));
     const renamedWorkflowPath = path.join(tmp, "renamed-workflow.yaml");
