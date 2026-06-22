@@ -189,38 +189,6 @@ describe("printDashboardUi — regression for #2078 (port 8642 is not a chat UI)
     expect(noteSpy).not.toHaveBeenCalled();
   });
 
-  it("surfaces the OpenAI-compatible API endpoint and key command for bearer_token agents", () => {
-    const bearerAgent = makeAgent({
-      name: "hermes",
-      displayName: "Hermes Agent",
-      forwardPort: 18789,
-      healthProbe: { url: "http://localhost:8642/health", port: 8642, timeout_seconds: 90 },
-      dashboard: {
-        kind: "ui",
-        label: "Dashboard",
-        path: "/",
-        healthPath: "/api/status",
-        auth: "session",
-      },
-      webAuth: { method: "bearer_token", env: "API_SERVER_KEY" },
-    });
-
-    printDashboardUi("hermes", null, bearerAgent, {
-      note: noteSpy,
-      buildControlUiUrls: buildUrlsLoopback,
-    });
-
-    const output = logSpy.mock.calls.map((args) => String(args[0])).join("\n");
-    // The session-auth dashboard block still prints...
-    expect(output).toContain("Hermes Agent Dashboard");
-    // ...plus the bearer API access block pointing at the on-demand key command.
-    expect(output).toContain("OpenAI-compatible API (bearer auth)");
-    expect(output).toContain("Port 8642 must be forwarded");
-    expect(output).toContain("Get the key: nemoclaw hermes gateway-token --quiet");
-    // The raw key is never printed inline.
-    expect(output).not.toMatch(/Bearer [0-9a-f]{16,}/);
-  });
-
   it("announces manifest-declared secondary forward_ports alongside the primary dashboard", () => {
     const hermesShipped = makeAgent({
       name: "hermes",

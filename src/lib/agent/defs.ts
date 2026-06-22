@@ -9,6 +9,9 @@ import path from "node:path";
 import { DASHBOARD_PORT } from "../core/ports";
 import { ROOT } from "../runner";
 import { type AgentDashboardUi, readDashboardUi } from "./dashboard-ui";
+import { type AgentWebAuth, readWebAuth } from "./web-auth";
+
+export type { AgentWebAuth, AgentWebAuthMethod } from "./web-auth";
 
 export const AGENTS_DIR = path.join(ROOT, "agents");
 
@@ -47,19 +50,6 @@ export interface AgentDashboard {
   path: string;
   healthPath: string;
   auth: "url_token" | "session" | "none";
-}
-
-export type AgentWebAuthMethod = "bearer_token" | "none";
-
-export interface AgentWebAuth {
-  /** How clients authenticate to the agent's HTTP API surface. */
-  method: AgentWebAuthMethod;
-  /**
-   * For bearer_token agents, the in-sandbox env-var name (in the agent's
-   * .env) that holds the token — e.g. Hermes' API_SERVER_KEY. null when the
-   * agent has no token-based web auth.
-   */
-  env: string | null;
 }
 
 export interface AgentInference {
@@ -312,30 +302,6 @@ function readDashboard(record: ManifestRecord): AgentDashboard {
     healthPath: normalizePath("health_path", "/health"),
     auth: rawAuth ?? (kind === "api" ? "none" : "url_token"),
   };
-}
-
-function readWebAuth(record: ManifestRecord): AgentWebAuth {
-  // web_auth_method has a broad informational vocabulary across agents
-  // (device_pairing, session, bearer_token, ...). For NemoClaw's purposes we
-  // only care whether the agent exposes a fetchable bearer token; any other
-  // value (or none) collapses to method: "none".
-  const method: AgentWebAuthMethod =
-    record.web_auth_method === "bearer_token" ? "bearer_token" : "none";
-  const rawEnv = record.web_auth_env;
-  // Require an env-var-shaped name so the value can be safely interpolated into
-  // the in-sandbox grep that reads it; reject anything else.
-  const env =
-    method === "bearer_token" &&
-    typeof rawEnv === "string" &&
-    /^[A-Za-z_][A-Za-z0-9_]*$/.test(rawEnv)
-      ? rawEnv
-      : null;
-  if (method === "bearer_token" && !env) {
-    throw new Error(
-      "Agent manifest declares web_auth_method: bearer_token but web_auth_env is missing or not a valid env-var name",
-    );
-  }
-  return { method, env };
 }
 
 function readInference(record: ManifestRecord): AgentInference | undefined {

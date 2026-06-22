@@ -53,14 +53,20 @@ RUN set -eu; \
 
 ENV HERMES_WEB_DIST="/opt/hermes/hermes_cli/web_dist"
 
-# Harden: remove unnecessary build tools and network probes.
-# build-essential comes from the base image (node-gyp build during npm ci);
-# the final image does not compile anything, so strip the whole toolchain.
-RUN (apt-get remove --purge -y build-essential gcc gcc-12 gcc-14 g++ g++-12 g++-14 \
-        cpp cpp-12 cpp-14 make \
-        netcat-openbsd netcat-traditional ncat 2>/dev/null || true) \
-    && apt-get autoremove --purge -y \
-    && rm -rf /var/lib/apt/lists/*
+# Harden: remove unnecessary build tools and network probes. build-essential
+# comes from the base image for npm/node-gyp builds; the final image does not
+# compile anything, so strip the installed compiler packages and fail closed if
+# command shims survive.
+RUN set -eu; \
+    dpkg-query -W -f='${Package}\n' >/tmp/hermes-runtime-packages.txt; \
+    grep -E '^(build-essential|make|gcc|g\+\+|cpp|gcc-[0-9]+|g\+\+-[0-9]+|cpp-[0-9]+|[[:alnum:]_-]+-linux-gnu-(gcc|g\+\+|cpp)(-[0-9]+)?|netcat-openbsd|netcat-traditional|ncat)$' /tmp/hermes-runtime-packages.txt >/tmp/hermes-runtime-tool-packages.txt || true; \
+    if [ -s /tmp/hermes-runtime-tool-packages.txt ]; then xargs -r apt-get purge -y </tmp/hermes-runtime-tool-packages.txt; fi; \
+    rm -f /tmp/hermes-runtime-packages.txt /tmp/hermes-runtime-tool-packages.txt; \
+    apt-get autoremove --purge -y; \
+    rm -rf /var/lib/apt/lists/*; \
+    if command -v gcc >/dev/null 2>&1; then echo "ERROR: gcc survived runtime purge" >&2; exit 1; fi; \
+    if command -v g++ >/dev/null 2>&1; then echo "ERROR: g++ survived runtime purge" >&2; exit 1; fi; \
+    if command -v make >/dev/null 2>&1; then echo "ERROR: make survived runtime purge" >&2; exit 1; fi
 
 # Hermes' WeChat adapter (gateway/platforms/weixin.py:_make_ssl_connector)
 # builds aiohttp with ssl.create_default_context(cafile=certifi.where()),
@@ -160,12 +166,16 @@ USER sandbox
 RUN mkdir -p /sandbox/.nemoclaw/blueprints/0.1.0 \
     && cp -r /opt/nemoclaw-blueprint/* /sandbox/.nemoclaw/blueprints/0.1.0/
 
+# Run Hermes' upstream repair before NemoClaw writes the generated config.yaml
+# and .env that become the startup integrity trust anchor. Doctor-created
+# defaults are overwritten by the generator below.
 # Generate Hermes config.yaml and .env from build args.
 # Config is mutable by default (600 sandbox:sandbox). Immutability is opt-in
 # via `shields up`. .env holds API key placeholders for OpenShell provider pipeline.
 # SECURITY: Uses a separate script file instead of inline code to avoid
 # code injection via build-arg interpolation (same concern as OpenClaw C-2).
-RUN node --experimental-strip-types /opt/nemoclaw-hermes-config/generate-config.ts
+RUN HERMES_HOME=/sandbox/.hermes /usr/local/bin/hermes doctor --fix \
+    && node --experimental-strip-types /opt/nemoclaw-hermes-config/generate-config.ts
 
 # Apply messaging agent-install hooks before Hermes plugin installation.
 # hadolint ignore=DL3059
@@ -204,13 +214,6 @@ ENV HERMES_ENVIRONMENT_HINT="You are running inside an NVIDIA OpenShell sandbox,
 # 444 root:root + chattr +i.
 # hadolint ignore=DL3002
 USER root
-
-# Run Hermes' upstream repair before NemoClaw applies the final permission and
-# hash contract. NemoClaw emits the current Hermes schema directly, so doctor
-# should not need to migrate config.yaml; the trust anchor is still computed
-# only after doctor has finished.
-# hadolint ignore=DL3059
-RUN HERMES_HOME=/sandbox/.hermes /usr/local/bin/hermes doctor --fix
 
 # Flatten stale published base images that still contain the old .hermes-data
 # symlink bridge. OpenShell starts the sandbox as the sandbox user, so runtime

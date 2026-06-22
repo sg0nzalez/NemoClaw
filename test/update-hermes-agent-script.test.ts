@@ -53,4 +53,45 @@ describe("scripts/update-hermes-agent.sh", () => {
       fs.rmSync(tmpHome, { recursive: true, force: true });
     }
   });
+
+  it("refuses unsafe installed-copy rewrite candidates", () => {
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-update-unsafe-"));
+    const sourceRoot = path.join(tmpHome, "source-root");
+    const symlinkRoot = path.join(tmpHome, "symlink-root");
+    const symlinkTarget = path.join(tmpHome, "target-root");
+    const hardlinkedDockerfile = path.join(sourceRoot, "agents", "hermes", "Dockerfile.base");
+    const symlinkDockerfile = path.join(sourceRoot, "aliased", "Dockerfile.base");
+    fs.mkdirSync(path.dirname(hardlinkedDockerfile), { recursive: true });
+    fs.mkdirSync(path.dirname(symlinkDockerfile), { recursive: true });
+    fs.mkdirSync(symlinkTarget, { recursive: true });
+    fs.writeFileSync(hardlinkedDockerfile, "ARG HERMES_VERSION=v2026.6.5\n");
+    fs.linkSync(hardlinkedDockerfile, path.join(sourceRoot, "Dockerfile.hardlink"));
+    fs.symlinkSync(hardlinkedDockerfile, symlinkDockerfile);
+    fs.symlinkSync(symlinkTarget, symlinkRoot);
+
+    const run = (root: string) =>
+      spawnSync("bash", [SCRIPT, "--tag", TARGET_TAG, "--check", "--update-installed-copies"], {
+        encoding: "utf-8",
+        env: {
+          ...process.env,
+          HOME: tmpHome,
+          NEMOCLAW_SOURCE_ROOT: root,
+        },
+        timeout: 5000,
+      });
+
+    try {
+      const unsafeCandidates = run(sourceRoot);
+      expect(unsafeCandidates.status).toBe(0);
+      expect(unsafeCandidates.stdout).not.toContain("STALE: installed copy");
+      expect(unsafeCandidates.stderr).toContain("SKIP unsafe installed copy");
+      expect(fs.readFileSync(hardlinkedDockerfile, "utf-8")).toContain("v2026.6.5");
+
+      const unsafeRoot = run(symlinkRoot);
+      expect(unsafeRoot.status).toBe(0);
+      expect(unsafeRoot.stderr).toContain("SKIP unsafe installed-copy root");
+    } finally {
+      fs.rmSync(tmpHome, { recursive: true, force: true });
+    }
+  });
 });

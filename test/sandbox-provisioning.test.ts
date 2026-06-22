@@ -1344,7 +1344,7 @@ describe("Hermes sandbox provisioning", () => {
     }
   });
 
-  it("restores Hermes config locks after upstream doctor mutates config", () => {
+  it("keeps upstream doctor changes out of generated config hash inputs", () => {
     const dockerfile = fs.readFileSync(HERMES_DOCKERFILE, "utf-8");
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-doctor-lock-"));
     const sandboxRoot = path.join(tmp, "sandbox");
@@ -1352,9 +1352,15 @@ describe("Hermes sandbox provisioning", () => {
     const configPath = path.join(hermesDir, "config.yaml");
     const envPath = path.join(hermesDir, ".env");
     const fakeHermes = path.join(tmp, "hermes");
-    const doctorLog = path.join(tmp, "doctor.log");
+    const orderLogPath = path.join(tmp, "doctor-generate-order.log");
     const etcDir = path.join(tmp, "etc", "nemoclaw");
     const mode = (entry: string) => (fs.statSync(entry).mode & 0o777).toString(8);
+    const fakeGenerateCommand = [
+      `printf 'generate\\n' >>${JSON.stringify(orderLogPath)}`,
+      `printf 'model: trusted\\ncustom_providers: []\\n' >${JSON.stringify(configPath)}`,
+      `printf 'API_SERVER_KEY=trusted\\n' >${JSON.stringify(envPath)}`,
+      `chmod 600 ${JSON.stringify(configPath)} ${JSON.stringify(envPath)}`,
+    ].join("; ");
     fs.mkdirSync(hermesDir, { recursive: true });
     fs.writeFileSync(configPath, "model: test\n", { mode: 0o600 });
     fs.writeFileSync(envPath, "TOKEN=test\n", { mode: 0o600 });
@@ -1363,21 +1369,25 @@ describe("Hermes sandbox provisioning", () => {
       [
         "#!/usr/bin/env bash",
         "set -euo pipefail",
-        `printf 'HERMES_HOME=%s args=%s\\n' "\${HERMES_HOME:-}" "$*" > ${JSON.stringify(doctorLog)}`,
         `test "\${HERMES_HOME:-}" = ${JSON.stringify(hermesDir)}`,
         'test "${1:-} ${2:-}" = "doctor --fix"',
+        `printf 'doctor\\n' >>${JSON.stringify(orderLogPath)}`,
         `printf 'doctor_migrated: true\\n' >>${JSON.stringify(configPath)}; printf 'DOCTOR_MIGRATED=1\\n' >>${JSON.stringify(envPath)}; chmod 666 ${JSON.stringify(configPath)} ${JSON.stringify(envPath)}`,
       ].join("\n"),
       { mode: 0o700 },
     );
 
-    const doctorCommand = dockerRunCommandBetween(
+    const doctorAndGenerateCommand = dockerRunCommandBetween(
       dockerfile,
       "# Run Hermes' upstream repair",
-      "# Flatten stale published base images",
+      "# Apply messaging agent-install hooks",
     )
       .replaceAll("/sandbox", sandboxRoot)
-      .replaceAll("/usr/local/bin/hermes", fakeHermes);
+      .replaceAll("/usr/local/bin/hermes", fakeHermes)
+      .replaceAll(
+        "node --experimental-strip-types /opt/nemoclaw-hermes-config/generate-config.ts",
+        fakeGenerateCommand,
+      );
     const lockCommand = dockerRunCommandBetween(
       dockerfile,
       "# Flatten stale published base images",
@@ -1390,14 +1400,16 @@ describe("Hermes sandbox provisioning", () => {
     ).replaceAll("/etc/nemoclaw", etcDir);
 
     try {
-      const doctor = spawnSync("bash", ["-c", doctorCommand], {
+      const doctorAndGenerate = spawnSync("bash", ["-c", doctorAndGenerateCommand], {
         encoding: "utf-8",
         cwd: tmp,
         timeout: 5000,
       });
-      expect(doctor.status).toBe(0);
-      expect(fs.readFileSync(doctorLog, "utf-8")).toContain("args=doctor --fix");
-      expect([mode(configPath), mode(envPath)]).toEqual(["666", "666"]);
+      expect(doctorAndGenerate.status).toBe(0);
+      expect(fs.readFileSync(orderLogPath, "utf-8")).toBe("doctor\ngenerate\n");
+      expect([mode(configPath), mode(envPath)]).toEqual(["600", "600"]);
+      expect(fs.readFileSync(configPath, "utf-8")).not.toContain("doctor_migrated");
+      expect(fs.readFileSync(envPath, "utf-8")).not.toContain("DOCTOR_MIGRATED");
 
       const lock = runDockerShell(lockCommand, sandboxRoot);
       expect(lock.result.status).toBe(0);
@@ -1408,7 +1420,6 @@ describe("Hermes sandbox provisioning", () => {
       expect(hash.result.status).toBe(0);
       expect(hash.result.stderr).toBe("");
       expect(mode(path.join(etcDir, "hermes.config-hash"))).toBe("444");
-      expect(fs.readFileSync(configPath, "utf-8")).toContain("doctor_migrated: true");
       const verifyHash = spawnSync("sha256sum", ["-c", path.join(etcDir, "hermes.config-hash")], {
         encoding: "utf-8",
         timeout: 5000,
