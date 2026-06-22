@@ -161,7 +161,7 @@ describe.skipIf(!PY_YAML_AVAILABLE)("seed-dashboard-config.py", () => {
     });
   });
 
-  it("mirrors the gateway .env into the dashboard home for Hermes 0.16 chat setup", () => {
+  it("mirrors only dashboard-needed gateway .env keys for Hermes 0.16 chat setup", () => {
     const src = writeYaml("gw.yaml", GATEWAY_CONFIG);
     const dst = path.join(tmpDir, "dash.yaml");
     const envSrc = path.join(tmpDir, "gw.env");
@@ -173,6 +173,10 @@ describe.skipIf(!PY_YAML_AVAILABLE)("seed-dashboard-config.py", () => {
         "API_SERVER_PORT=18642",
         "API_SERVER_KEY=server-key",
         "FIRECRAWL_GATEWAY_URL=http://host.openshell.internal:11436/firecrawl",
+        "NEMOCLAW_HERMES_TOOL_GATEWAY_BROKER=1",
+        "MODAL_GATEWAY_URL=http://host.openshell.internal:11436/modal",
+        "OPENAI_API_KEY=do-not-copy",
+        "TELEGRAM_BOT_TOKEN=openshell:resolve:env:TELEGRAM_BOT_TOKEN",
         "TERMINAL_CWD=/sandbox",
         "",
       ].join("\n"),
@@ -187,6 +191,8 @@ describe.skipIf(!PY_YAML_AVAILABLE)("seed-dashboard-config.py", () => {
         "API_SERVER_PORT=18642",
         "API_SERVER_KEY=server-key",
         "FIRECRAWL_GATEWAY_URL=http://host.openshell.internal:11436/firecrawl",
+        "NEMOCLAW_HERMES_TOOL_GATEWAY_BROKER=1",
+        "MODAL_GATEWAY_URL=http://host.openshell.internal:11436/modal",
         "",
       ].join("\n"),
     );

@@ -19,13 +19,14 @@ things break (verified live):
 
 This script mirrors the routing keys (``model``, ``custom_providers``, and the
 informational ``_nemoclaw_upstream``) from the gateway config into the dashboard
-config, preserving every other dashboard-local key. It also mirrors the
-gateway's ``.env`` into the dashboard ``HERMES_HOME`` when paths are supplied,
-because Hermes 0.16 moved parts of dashboard chat/model setup behind dotenv
-loading. ``custom_providers`` carries ``discover_models: true`` so the dashboard
-live-lists ``/v1/models`` from the proxied endpoint rather than pinning a static
-catalog. It is idempotent: ``start.sh`` runs it on every launch so the dashboard
-stays in sync with the gateway's routed model.
+config, preserving every other dashboard-local key. It also copies only the
+dashboard-needed dotenv keys (local API server context and managed-tool gateway
+URLs) into the dashboard ``HERMES_HOME`` when paths are supplied, because Hermes
+0.16 moved parts of dashboard chat/model setup behind dotenv loading.
+``custom_providers`` carries ``discover_models: true`` so the dashboard live-lists
+``/v1/models`` from the proxied endpoint rather than pinning a static catalog.
+It is idempotent: ``start.sh`` runs it on every launch so the dashboard stays in
+sync with the gateway's routed model.
 
 Source-boundary note: this is a local compatibility bridge for the invalid state
 where Hermes 0.16+ dashboard code uses an isolated ``HERMES_HOME`` and therefore
@@ -57,12 +58,21 @@ from typing import Callable, TextIO
 # excludes platforms/plugins/messaging: the dashboard binds its own ports and
 # must not inherit the gateway's api_server bind (port conflict) or channels.
 _ROUTING_KEYS = ("model", "custom_providers", "_nemoclaw_upstream")
-_DASHBOARD_ENV_SKIP_KEYS = frozenset(
+_DASHBOARD_ENV_ALLOWED_KEYS = frozenset(
     {
-        # Hermes 0.16 migrates these into config.yaml and warns loudly when a
-        # dashboard-scoped .env keeps carrying the legacy values.
-        "MESSAGING_CWD",
-        "TERMINAL_CWD",
+        # Local API server context needed by dashboard chat/model calls.
+        "API_SERVER_HOST",
+        "API_SERVER_PORT",
+        "API_SERVER_KEY",
+        # Managed tool gateway broker URLs needed by dashboard-launched Hermes
+        # code paths. Do not copy messaging/provider/user credentials across
+        # this boundary; those stay in the gateway-owned .env.
+        "NEMOCLAW_HERMES_TOOL_GATEWAY_BROKER",
+        "FIRECRAWL_GATEWAY_URL",
+        "OPENAI_AUDIO_GATEWAY_URL",
+        "BROWSER_USE_GATEWAY_URL",
+        "FAL_QUEUE_GATEWAY_URL",
+        "MODAL_GATEWAY_URL",
     }
 )
 
@@ -114,6 +124,8 @@ def _read_regular_text_no_follow(path: str, label: str) -> str:
             try:
                 os.close(fd)
             except OSError:
+                # The descriptor is cleanup-only here; preserve the original
+                # read error, if any, instead of failing startup on close.
                 pass
 
 
@@ -165,11 +177,15 @@ def _atomic_write_no_follow(dst: str, label: str, writer: Callable[[TextIO], Non
             try:
                 os.close(fd)
             except OSError:
+                # Cleanup close failures are non-fatal and must not mask the
+                # earlier seed result.
                 pass
         if created:
             try:
                 os.unlink(tmp)
             except OSError:
+                # Best-effort temp cleanup after a failed atomic write; the
+                # caller already gets the seed failure above.
                 pass
 
 
@@ -356,7 +372,7 @@ def _mirror_env(src: str, dst: str) -> bool:
     def write_env(dst_handle: TextIO) -> None:
         for line in env_text.splitlines(keepends=True):
             key = line.split("=", 1)[0].strip()
-            if key not in _DASHBOARD_ENV_SKIP_KEYS:
+            if key in _DASHBOARD_ENV_ALLOWED_KEYS:
                 dst_handle.write(line)
 
     if not _atomic_write_no_follow(dst, "dashboard env", write_env):
