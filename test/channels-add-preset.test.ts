@@ -34,6 +34,7 @@ function runScript(
       SLACK_BOT_TOKEN: "xoxb-slack-bot-token-for-test",
       SLACK_APP_TOKEN: "xapp-slack-app-token-for-test",
       DISCORD_BOT_TOKEN: "test-discord-token",
+      ZALO_BOT_TOKEN: "test-zalo-token",
       NEMOCLAW_SKIP_TELEGRAM_REACHABILITY: "1",
       ...extraEnv,
     },
@@ -61,7 +62,7 @@ function parseResultPayload<T extends Record<string, any> = Record<string, any>>
 //     a console.log marker, so the test can assert the ordering invariant
 //     (apply MUST precede rebuild)
 function buildPreamble({
-  presetNamesAvailable = ["telegram", "slack", "discord", "npm", "github"],
+  presetNamesAvailable = ["telegram", "slack", "discord", "zalo", "npm", "github"],
   applyPresetResult = true,
   appliedPresets = [] as string[],
   sandboxAgent = "openclaw",
@@ -312,7 +313,7 @@ const ctx = module.exports;
     ]);
   });
 
-  for (const channel of ["telegram", "slack", "discord"]) {
+  for (const channel of ["telegram", "slack", "discord", "zalo"]) {
     it(`applies the '${channel}' preset before triggering rebuild`, () => {
       const script = `${buildPreamble()}
 const ctx = module.exports;
@@ -358,7 +359,6 @@ const ctx = module.exports;
       );
     });
   }
-
   it("applies the tokenless WhatsApp preset for Hermes before triggering rebuild", () => {
     const script = `${buildPreamble({
       presetNamesAvailable: ["telegram", "slack", "discord", "whatsapp", "npm", "github"],
