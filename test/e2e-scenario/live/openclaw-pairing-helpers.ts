@@ -252,13 +252,10 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
-function findOpenClawPackageRootFromBinary() {
-  let binary = "";
-  try { binary = execFileSync("sh", ["-lc", "command -v openclaw"], { encoding: "utf8" }).trim(); } catch { return null; }
-  if (!binary) return null;
+function packageRootFromBinary(binary) {
   let current = "";
   try { current = fs.realpathSync(binary); } catch { return null; }
-  if (fs.statSync(current).isFile()) current = path.dirname(current);
+  try { if (fs.statSync(current).isFile()) current = path.dirname(current); } catch { return null; }
   for (let depth = 0; depth < 8; depth += 1) {
     const manifest = path.join(current, "package.json");
     if (fs.existsSync(manifest)) {
@@ -274,10 +271,18 @@ function findOpenClawPackageRootFromBinary() {
   return null;
 }
 
+function findOpenClawPackageRootsFromActiveBinaries() {
+  const binaries = [];
+  try {
+    const binary = execFileSync("sh", ["-lc", "command -v openclaw"], { encoding: "utf8" }).trim();
+    if (binary) binaries.push(binary);
+  } catch {}
+  binaries.push("/usr/local/bin/openclaw", "/usr/bin/openclaw");
+  return binaries.filter((binary) => fs.existsSync(binary)).map(packageRootFromBinary).filter(Boolean);
+}
+
 async function loadConversationRuntime() {
-  const candidates = [];
-  const binaryRoot = findOpenClawPackageRootFromBinary();
-  if (binaryRoot) candidates.push(binaryRoot);
+  const candidates = findOpenClawPackageRootsFromActiveBinaries();
   for (const root of [...new Set(candidates)]) {
     const runtime = path.join(root, "dist/plugin-sdk/conversation-runtime.js");
     if (fs.existsSync(runtime)) return import(pathToFileURL(runtime).href);
@@ -660,13 +665,19 @@ function decodeFrame(buffer) { if (buffer.length < 2) return null; const opcode 
 const socket = net.createConnection({ host, port });
 const timer = setTimeout(() => { socket.destroy(); finish("TIMEOUT"); }, 20000);
 let handshake = Buffer.alloc(0), framed = Buffer.alloc(0), upgraded = false;
-socket.on("connect", () => { const key = crypto.randomBytes(16).toString("base64"); socket.write([` +
-    "`GET /gateway?v=10&encoding=json HTTP/1.1`" +
-    `, ` +
-    "`Host: ${host}:${port}`" +
-    `, "Upgrade: websocket", "Connection: Upgrade", ` +
-    "`Sec-WebSocket-Key: ${key}`" +
-    `, "Sec-WebSocket-Version: 13", "\r\n"].join("\r\n")); });
+socket.on("connect", () => {
+  const key = crypto.randomBytes(16).toString("base64");
+  const crlf = String.fromCharCode(13, 10);
+  socket.write([
+    "GET /gateway?v=10&encoding=json HTTP/1.1",
+    "Host: " + host + ":" + port,
+    "Upgrade: websocket",
+    "Connection: Upgrade",
+    "Sec-WebSocket-Key: " + key,
+    "Sec-WebSocket-Version: 13",
+    "",
+  ].join(crlf));
+});
 socket.on("data", (chunk) => {
   if (!upgraded) { handshake = Buffer.concat([handshake, chunk]); const end = handshake.indexOf("\r\n\r\n"); if (end === -1) return; const statusLine = handshake.slice(0, end).toString("latin1").split("\r\n")[0] || ""; if (!statusLine.includes("101")) { clearTimeout(timer); finish(` +
     "`HTTP_${statusLine}`" +

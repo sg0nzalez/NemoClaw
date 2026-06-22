@@ -162,10 +162,8 @@ describe("OpenClaw Discord pairing helper contracts", () => {
         expect.stringContaining("OpenClaw conversation runtime not found; checked:"),
       );
       expect(result.stderr).toEqual(expect.stringContaining(packageRoot));
-      expect(result.stderr).toEqual(
-        expect.not.stringContaining("/usr/local/lib/node_modules/openclaw"),
-      );
-      expect(result.stderr).toEqual(expect.not.stringContaining("/usr/lib/node_modules/openclaw"));
+      expect(result.stderr).toEqual(expect.not.stringContaining("/usr/local/bin/openclaw"));
+      expect(result.stderr).toEqual(expect.not.stringContaining("/usr/bin/openclaw"));
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
