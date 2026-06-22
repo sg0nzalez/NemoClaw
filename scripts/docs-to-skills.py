@@ -422,6 +422,7 @@ def parse_doc(path: Path, doc_platform: str = "myst-md") -> DocPage:
     fm, body = parse_yaml_frontmatter(raw)
     if doc_platform == "fern-mdx":
         body = body.replace("$$nemoclaw", "nemoclaw")
+        body = body.replace("$$nemohermes", "nemohermes")
     body = strip_commented_out_blocks(body)
 
     page = DocPage(path=path, raw=raw, frontmatter=fm, body=body)
@@ -1779,7 +1780,7 @@ def generate_skill(
         skill_dir = output_dir / name
         skill_dir.mkdir(parents=True, exist_ok=True)
         (skill_dir / "SKILL.md").write_text(
-            skill_md.rstrip("\n") + "\n", encoding="utf-8"
+            _with_spdx_header(skill_md), encoding="utf-8"
         )
         _copy_skill_images(skill_dir, skill_md_images)
 
@@ -1791,13 +1792,35 @@ def generate_skill(
                     existing.unlink()
             for fname, content in ref_files.items():
                 (refs_dir / fname).write_text(
-                    content.rstrip("\n") + "\n", encoding="utf-8"
+                    _with_spdx_header(content), encoding="utf-8"
                 )
                 _copy_skill_images(refs_dir, ref_images.get(fname, []))
         elif refs_dir.is_dir():
             shutil.rmtree(refs_dir)
 
     return summary
+
+
+_SPDX_HEADER = (
+    "<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->\n"
+    "<!-- SPDX-License-Identifier: Apache-2.0 -->\n"
+)
+
+
+def _with_spdx_header(body: str) -> str:
+    """Prefix generated Markdown with the SPDX HTML-comment header.
+
+    The source MDX files carry SPDX in YAML frontmatter, which gets
+    stripped during regen. The repo's coding guidelines require an
+    SPDX header on every Markdown file, so emit one here unless the
+    body already starts with one (idempotent).
+    """
+    stripped = body.lstrip("\n")
+    if stripped.startswith("<!-- SPDX-License-Identifier") or stripped.startswith(
+        "<!-- SPDX-FileCopyrightText"
+    ):
+        return stripped.rstrip("\n") + "\n"
+    return _SPDX_HEADER + "\n" + stripped.rstrip("\n") + "\n"
 
 
 def _copy_skill_images(target_dir: Path, copies: list[tuple[Path, str]]) -> None:

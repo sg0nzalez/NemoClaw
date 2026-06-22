@@ -94,7 +94,7 @@ Operators cannot set `default: true` on a secondary agent and cannot rename the 
 
 | Field | Required | Purpose |
 |---|---|---|
-| `id` | yes | Lowercase alphanumeric + `_`/`-`, 1-32 chars, must start with a letter. Cannot be `main`. |
+| `id` | yes | Lowercase alphanumeric + `_`/`-`, 1-32 chars, must start with a letter, and cannot be `main`. |
 | `workspace` | auto-filled | Defaults to `/sandbox/.openclaw/workspace-<id>`. Must match the canonical sandbox layout if supplied. |
 | `agentDir` | auto-filled | Defaults to `/sandbox/.openclaw/agents/<id>`. Must match the canonical sandbox layout if supplied. |
 | `tools` | yes | `{profile?, allow?, deny?}`. Must declare a non-empty `allow[]` or `deny[]` — secondary agents inherit no tools by default. |
@@ -174,7 +174,7 @@ The flag pair `--yes / --non-interactive` is required for scripted use: `--yes` 
 
 Use the following resources for more information:
 
-- Refer to [OpenClaw Sub-Agents](https://docs.openclaw.ai/tools/subagents) for the runtime semantics of `sessions_spawn`, `subagents.allowAgents`, and nesting depth.
-- Refer to [Set Up Task-Specific Sub-Agents](set-up-sub-agent) for the in-sandbox path that edits `agents.list` directly without a rebuild.
-- Refer to [Switch Inference Providers](switch-inference-providers) before swapping the primary onboard provider — per-agent `model` refs must share that provider.
-- Refer to [Workspace Files](../manage-sandboxes/workspace-files) to understand how per-agent `workspace-<id>` directories are provisioned and persisted across rebuilds.
+- [OpenClaw Sub-Agents](https://docs.openclaw.ai/tools/subagents) — runtime semantics of `sessions_spawn`, `subagents.allowAgents`, and nesting depth.
+- [Set Up Task-Specific Sub-Agents](set-up-sub-agent) — in-sandbox path that edits `agents.list` directly without a rebuild.
+- [Switch Inference Providers](switch-inference-providers) — swap the primary onboard provider before changing per-agent `model` refs, since refs must share that provider.
+- [Workspace Files](../manage-sandboxes/workspace-files) — how per-agent `workspace-<id>` directories are provisioned and persisted across rebuilds.

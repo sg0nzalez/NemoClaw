@@ -48,7 +48,7 @@ NemoClaw supports the agent runtimes listed below. Pick the matching onboarding 
 | Agent | Status | Default | Notes |
 |-------|--------|---------|-------|
 | OpenClaw | Tested | Yes | Default agent runtime. Onboard with `nemoclaw onboard` (no `--agent` flag required). |
-| Hermes | Tested with limitations | No | First-class agent with dedicated CLI (`$$nemohermes`), Dockerfile, manifest, docs, and nightly E2E coverage. Onboard with `$$nemohermes onboard` or pass `--agent hermes` to `nemoclaw onboard`. Unlocks the Hermes Provider inference route. Known limitations: model-provider compatibility registry is empty (backfilled per failure, see `nemoclaw-blueprint/model-specific-setup/hermes/README.md`); no Hermes-specific unit tests in `nemoclaw/src/`; macOS and WSL CI suites do not differentiate agents; deployment-identity bugs in the active release window (see #5211, #5327). Suitable for evaluation and the documented onboarding paths; production parity with OpenClaw is not yet asserted. |
+| Hermes | Tested with limitations | No | First-class agent with dedicated CLI (`nemohermes`), Dockerfile, manifest, docs, and nightly E2E coverage. Onboard with `nemohermes onboard` or pass `--agent hermes` to `nemoclaw onboard`. Unlocks the Hermes Provider inference route. Known limitations: model-provider compatibility registry is empty (backfilled per failure, see `nemoclaw-blueprint/model-specific-setup/hermes/README.md`); no Hermes-specific unit tests in `nemoclaw/src/`; macOS and WSL CI suites do not differentiate agents; deployment-identity bugs in the active release window (see #5211, #5327). Suitable for evaluation and the documented onboarding paths; production parity with OpenClaw is not yet asserted. |
 
 ## Platforms
 
