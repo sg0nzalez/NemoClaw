@@ -1109,9 +1109,10 @@ jobs:
     const discordJob = parsedWorkflow.jobs["openclaw-discord-pairing-vitest"];
     discordJob.env.DOCKER_CONFIG =
       "${{ github.workspace }}/.docker-config-openclaw-discord-pairing";
-    const installOpenShell = discordJob.steps.find((step) => step.name === "Install OpenShell CLI");
-    expect(installOpenShell).toBeTruthy();
-    Object.assign(installOpenShell ?? {}, { run: "bash scripts/install-openshell.sh" });
+    const installOpenShell = discordJob.steps.find(
+      (step) => step.name === "Install OpenShell CLI",
+    ) as Record<string, unknown>;
+    Object.assign(installOpenShell, { run: "bash scripts/install-openshell.sh" });
     fs.writeFileSync(workflowPath, YAML.stringify(parsedWorkflow));
 
     try {
