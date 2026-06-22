@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # Platform Support and Launch Claims
 
 This page is the canonical reference for what NemoClaw supports today. Any documentation, demo, blog post, sales conversation, or support reply that describes NemoClaw capability should agree with the entries below.

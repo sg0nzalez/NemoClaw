@@ -38,10 +38,10 @@ NemoClaw uses provider-specific local tokens for those routes, and rebuilds of l
 | Other Anthropic-compatible endpoint | Tested | Custom Anthropic-compatible | For Claude proxies and compatible gateways |
 | Google Gemini | Tested | OpenAI-compatible | Uses Google's OpenAI-compatible endpoint |
 | Hermes Provider | Hermes only | OpenAI-compatible route | Available when onboarding Hermes Agent through `nemohermes` |
-| Local Ollama | Caveated | Local Ollama API | Available when Ollama is installed or running on the host |
-| Local NVIDIA NIM | Experimental | Local OpenAI-compatible | Requires `NEMOCLAW_EXPERIMENTAL=1` and a NIM-capable GPU |
-| Local vLLM (already running) | Caveated | Local OpenAI-compatible | Appears in the onboarding menu when NemoClaw detects a server already on `localhost:8000`. No flag required. |
-| Local vLLM (managed install/start) | Caveated | Local OpenAI-compatible | Appears by default on DGX Spark and DGX Station. Generic Linux NVIDIA GPU hosts require `NEMOCLAW_EXPERIMENTAL=1` or `NEMOCLAW_PROVIDER=install-vllm`. NemoClaw pulls/starts a vLLM container on a supported NVIDIA GPU host. |
+| Local Ollama | Caveated | Local Ollama API | Available when Ollama is installed or running on the host. Validated default models: `qwen3.6:35b` (high VRAM), `nemotron-3-nano:30b` (medium VRAM), `qwen3.5:9b` (low VRAM fallback). |
+| Local NVIDIA NIM | Experimental | Local OpenAI-compatible | Requires `NEMOCLAW_EXPERIMENTAL=1` and a NIM-capable NVIDIA GPU. Host must have the NVIDIA Container Toolkit installed and a CDI spec present (`onboard` asserts CDI presence). NIM images pull from `nvcr.io` and require NGC registry login. Validated images: `nvidia/nemotron-3-super-120b-a12b` (40 GB), `nvidia/nemotron-3-nano-30b-a3b` (8 GB), `nvidia/llama-3.1-nemotron-70b-instruct` (81 GB), `nvidia/llama-3.3-nemotron-super-49b-v1` (24 GB), `meta/llama-3.1-8b-instruct` (16 GB). |
+| Local vLLM (already running) | Caveated | Local OpenAI-compatible | Appears in the onboarding menu when NemoClaw detects a server already on `localhost:8000`. No flag required. Model is whatever the existing server serves. |
+| Local vLLM (managed install/start) | Caveated | Local OpenAI-compatible | Appears by default on DGX Spark and DGX Station. Generic Linux NVIDIA GPU hosts require `NEMOCLAW_EXPERIMENTAL=1` or `NEMOCLAW_PROVIDER=install-vllm`. Host must have the NVIDIA Container Toolkit installed and a CDI spec present (`onboard` asserts CDI presence). NemoClaw pulls/starts the stable NGC `nvcr.io/nvidia/vllm:26.05.post1-py3` container image on a supported NVIDIA GPU host. Validated defaults: DGX Spark → `nvidia/Qwen3.6-35B-A3B-NVFP4`; DGX Station → `Qwen/Qwen3.6-27B-FP8`; Linux NVIDIA GPU → `nvidia/NVIDIA-Nemotron-3-Nano-4B-FP8`. Image pulls require NGC registry login (`docker login nvcr.io`); onboard prompts for the NGC API key when authentication is missing. |
 
 ## Provider Options
 

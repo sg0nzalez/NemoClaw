@@ -28,25 +28,6 @@ spec.loader.exec_module(module)
 `;
 }
 
-const MINIMAL_MATRIX_LITERAL = `{
-  "version": "test",
-  "updated": "2026-06-22",
-  "project_status": {"stage": "alpha", "label": "Early preview", "since": "2026-03-16", "notes": "n"},
-  "owners": {"engineering": "@NVIDIA/nemoclaw-maintainer"},
-  "statuses": {"tested": "Validated.", "caveated": "With caveats.", "deferred": "Planned."},
-  "platforms": [
-    {"name": "Linux", "runtimes": ["Docker"], "status": "tested", "ci_tested": true, "notes": "primary"},
-    {"name": "macOS", "runtimes": ["Colima"], "status": "caveated", "ci_tested": true, "notes": "ok"},
-    {"name": "WSL", "runtimes": ["Docker"], "status": "deferred", "ci_tested": false, "notes": "later"}
-  ],
-  "providers": [],
-  "agents": [],
-  "integrations": [],
-  "deployment_paths": [],
-  "capabilities": [],
-  "out_of_scope": []
-}`;
-
 describe("generate-platform-docs generator", () => {
   it("escapes pipes, newlines, and CRLFs in table cells", () => {
     const output = runPython(`

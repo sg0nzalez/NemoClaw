@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # Declarative Multi-Agent Manifest
 
 NemoClaw can bake a multi-agent OpenClaw layout into a sandbox image from a single checked-in manifest.

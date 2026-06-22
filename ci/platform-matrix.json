@@ -12,8 +12,7 @@
 
   "owners": {
     "engineering": "@NVIDIA/nemoclaw-maintainer",
-    "product": "TBD (see PR review)",
-    "$comment": "Engineering owner is the GitHub team that auto-reviews changes to this file via CODEOWNERS. Product owner is the human who signs off on launch-facing claim changes before they reach demos or sales material."
+    "$comment": "Engineering owner is the GitHub team that auto-reviews changes to this file via CODEOWNERS and signs off on launch-facing claim changes before they reach demos or sales material. NemoClaw is maintainer-run; there is no separate product owner role today."
   },
 
   "statuses": {

@@ -6,8 +6,6 @@ license: "Apache-2.0"
 
 # Use a Local Inference Server
 
-import { AgentOnly } from "../_components/AgentGuide";
-
 ## Gotchas
 
 - Ollama is convenient for local chat, but some model/template combinations can return tool calls as plain text under realistic agent load.
@@ -17,16 +15,10 @@ import { AgentOnly } from "../_components/AgentGuide";
 <AgentOnly variant="openclaw">
 
 - NemoClaw installed. Refer to the Quickstart (use the `nemoclaw-user-get-started` skill) if you have not installed yet.
-
-</AgentOnly>
-
-<AgentOnly variant="hermes">
-
 - NemoClaw installed. Refer to Quickstart with Hermes (use the `nemoclaw-user-get-started` skill) if you have not installed yet.
-
-</AgentOnly>
-
 - A local model server running, or a supported Ollama, vLLM, or NIM setup that the NemoClaw onboard wizard can use, start, or install.
+
+import { AgentOnly } from "../_components/AgentGuide";
 
 NemoClaw can route inference to a model server running on your machine instead of a cloud API.
 This page covers Ollama, compatible-endpoint paths for other servers, and experimental managed options for vLLM and NVIDIA NIM.
@@ -253,6 +245,7 @@ If the provider itself needs to change (for example, switching from vLLM to a cl
 ## References
 
 - **Load [references/switch-inference-providers.md](references/switch-inference-providers.md)** when switching inference providers, changing the model runtime, or reconfiguring inference routing. Changes the active inference model without restarting the sandbox.
+- **Load [references/declarative-agents-manifest.md](references/declarative-agents-manifest.md)** when users ask how to declare a manager-worker layout, how to give a secondary agent its own model, or how to express OpenClaw's `subagents.allowAgents` from NemoClaw. Documents the `nemoclaw onboard --agents <agents.yaml>` flag and the YAML schema it consumes.
 - **Load [references/set-up-sub-agent.md](references/set-up-sub-agent.md)** when users ask how to add a second model, configure a sub-agent model, use Omni for vision tasks, configure agents.list, or use sessions_spawn in NemoClaw. Shows the NemoClaw-specific file paths and update flow for adding an auxiliary OpenClaw sub-agent model.
 - **Load [references/inference-options.md](references/inference-options.md)** when explaining which providers are available, what the onboard wizard presents, or how inference routing works. Lists all inference providers offered during NemoClaw onboarding.
 - **[references/tool-calling-reliability.md](references/tool-calling-reliability.md)** — Explains Ollama tool-call leak symptoms, when to use vLLM with a tool-call parser, and how to repoint NemoClaw to a parser-aware local endpoint.

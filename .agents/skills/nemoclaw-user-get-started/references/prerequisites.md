@@ -62,11 +62,12 @@ Refer to the troubleshooting guide (use the `nemoclaw-user-reference` skill) for
 
 The following table lists tested platform and runtime combinations.
 Availability is not limited to these entries, but untested configurations can have issues.
+For the full canonical matrix including deferred platforms, inference providers, agents, messaging integrations, and deployment paths, see Platform Support and Launch Claims (use the `nemoclaw-user-reference` skill).
 The table comes from [`ci/platform-matrix.json`](https://github.com/NVIDIA/NemoClaw/blob/main/ci/platform-matrix.json), the single source of truth kept in sync by CI and QA.
 
 | OS | Container runtime | Status | Notes |
 |----|-------------------|--------|-------|
-| Linux | Docker | Tested | Primary tested path. |
+| Linux | Docker | Tested | Primary tested path. Ubuntu 22.04 and 24.04 are the validated distros; the installer's package-manager probes assume apt-get. Other distros (Fedora, Rocky, Alma, NixOS, Arch) may work but are not validated. |
 | macOS (Apple Silicon) | Colima, Docker Desktop | Tested with limitations | Install Xcode Command Line Tools (`xcode-select --install`) and start the runtime before running the installer. |
 | DGX Spark | Docker | Tested | Use the standard installer and `nemoclaw onboard`. For an end-to-end walkthrough with local Ollama inference, see the [NVIDIA Spark playbook](https://build.nvidia.com/spark/nemoclaw). |
 | Windows WSL2 | Docker Desktop (WSL backend) | Tested with limitations | Requires WSL2 with Docker Desktop backend. |
