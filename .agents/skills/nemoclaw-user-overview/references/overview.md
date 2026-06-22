@@ -11,8 +11,6 @@ NemoClaw pairs hosted models on inference providers or local endpoints with a ha
 The sandbox runtime comes from [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell).
 NemoClaw adds the blueprint, <AgentCli /> CLI, onboarding, and related tooling as the reference way to run supported agents there.
 
-For the canonical list of what NemoClaw supports today across platforms, inference providers, agents, messaging integrations, and deployment paths, see Platform Support and Launch Claims (use the `nemoclaw-user-reference` skill).
-
 | Capability              | Description                                                                                                                                          |
 |-------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Sandbox supported agents | Creates an OpenShell sandbox pre-configured for your selected agent, with filesystem and network policies applied from the first boot.                   |
