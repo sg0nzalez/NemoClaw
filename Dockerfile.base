@@ -179,6 +179,8 @@ RUN printf '%s\n' \
 # OpenClaw version: change the OPENCLAW_VERSION ARG default so CI rebuilds
 # the base image on push to main, or use workflow_dispatch on base-image.yaml
 # with the openclaw_version input for a one-off build without editing this file.
+# Dependency review evidence for this runtime pin lives in
+# docs/security/openclaw-2026.6.9-dependency-review.md.
 ARG OPENCLAW_VERSION=2026.6.9
 ARG OPENCLAW_2026_6_9_INTEGRITY=sha512-y0PGUdE87S8QtQXABPDL0CjNKhH3q/R1h9/WiRQkhVCGSBVhs63/M1iZn2DYVyJCAbDyMz3KNyAE0WzSQIWCRg==
 

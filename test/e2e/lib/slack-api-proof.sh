@@ -593,6 +593,12 @@ async function runOpenClawPrivateProof(location) {
     typeof createInboundSlackTestContext !== "function" ||
     typeof prepareSlackMessage !== "function"
   ) {
+    // OpenClaw 2026.6.9 exposes only the public runtime send helper for Slack.
+    // Source boundary: the missing inbound helpers live inside OpenClaw's
+    // package-private Slack ingress implementation, so this fallback must not
+    // fabricate @mention authorization coverage. Remove this branch once
+    // OpenClaw publishes a stable inbound Slack test/runtime facade, or once
+    // NemoClaw drives the installed Slack ingress path as a black-box event.
     const sendResult = await sendMessageSlack(`channel:${channelId}`, proofText, {
       cfg,
       token,

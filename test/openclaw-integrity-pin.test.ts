@@ -11,7 +11,16 @@ const REPO_ROOT = path.join(import.meta.dirname, "..");
 const DOCKERFILE = path.join(REPO_ROOT, "Dockerfile");
 const DOCKERFILE_BASE = path.join(REPO_ROOT, "Dockerfile.base");
 const BLUEPRINT = path.join(REPO_ROOT, "nemoclaw-blueprint", "blueprint.yaml");
+const DEPENDENCY_REVIEW_NOTE = path.join(
+  REPO_ROOT,
+  "docs",
+  "security",
+  "openclaw-2026.6.9-dependency-review.md",
+);
 const UNPINNED_OPENCLAW_VERSION = "2026.6.10";
+const PINNED_OPENCLAW_VERSION = "2026.6.9";
+const PINNED_OPENCLAW_INTEGRITY =
+  "sha512-y0PGUdE87S8QtQXABPDL0CjNKhH3q/R1h9/WiRQkhVCGSBVhs63/M1iZn2DYVyJCAbDyMz3KNyAE0WzSQIWCRg==";
 
 function extractRunBlock(file: string, startMarker: string, endMarker: string): string {
   const source = fs.readFileSync(file, "utf-8");
@@ -65,6 +74,21 @@ function runInstallBlock(command: string) {
 }
 
 describe("OpenClaw npm integrity pins", () => {
+  it("keeps the advisory review note aligned with the committed OpenClaw pin", () => {
+    const dockerfile = fs.readFileSync(DOCKERFILE, "utf-8");
+    const dockerfileBase = fs.readFileSync(DOCKERFILE_BASE, "utf-8");
+    const reviewNote = fs.readFileSync(DEPENDENCY_REVIEW_NOTE, "utf-8");
+
+    expect(dockerfile).toContain(`ARG OPENCLAW_VERSION=${PINNED_OPENCLAW_VERSION}`);
+    expect(dockerfileBase).toContain(`ARG OPENCLAW_VERSION=${PINNED_OPENCLAW_VERSION}`);
+    expect(dockerfile).toContain(PINNED_OPENCLAW_INTEGRITY);
+    expect(dockerfileBase).toContain(PINNED_OPENCLAW_INTEGRITY);
+    expect(reviewNote).toContain(`openclaw@${PINNED_OPENCLAW_VERSION}`);
+    expect(reviewNote).toContain(PINNED_OPENCLAW_INTEGRITY);
+    expect(reviewNote).toContain("`0` high");
+    expect(reviewNote).toContain("`0` critical");
+  });
+
   it("fails closed before npm install for unpinned production Dockerfile overrides", () => {
     const { result, calls } = runInstallBlock(
       extractRunBlock(

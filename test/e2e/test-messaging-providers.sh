@@ -2846,11 +2846,15 @@ fi
 #   - the configured Slack user can prepare a channel app_mention
 #   - another user is denied by channels.*.users
 #   - sendMessageSlack posts back to the channel through the hermetic fake API
-# OpenClaw 2026.6.9 ships only the public runtime API, so that package shape
-# falls back to the M-S17-runtime send/token-rewrite proof. It intentionally
-# does not claim private @mention allowlist or denied-feedback coverage; the
-# static config assertions above still prove the allowlist is rendered, and the
-# private-helper branch below keeps the stronger runtime proof for package
+# OpenClaw 2026.6.9 ships only the public runtime send API, so that package
+# shape falls back to the M-S17-runtime send/token-rewrite proof. Source
+# boundary: inbound @mention authorization lives behind OpenClaw's private
+# Slack ingress internals in this package shape. This intentionally does not
+# claim private @mention allowlist or denied-feedback coverage; remove the gap
+# when OpenClaw exposes a stable inbound Slack test/runtime facade, or when
+# NemoClaw has a black-box event harness for the installed Slack ingress path.
+# The static config assertions above still prove the allowlist is rendered, and
+# the private-helper branch below keeps the stronger runtime proof for package
 # shapes that expose that surface.
 info "Running Slack channel @mention allowlist proof through installed OpenClaw..."
 sl_channel_proof=""
