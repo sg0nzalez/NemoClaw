@@ -12,10 +12,9 @@ import {
   bestEffort,
   cleanupSandbox,
   expectExitZero,
+  base64,
   phase6Env,
   resultText,
-  sandboxEncodedSh,
-  sandboxNode,
   shellQuote,
   sandboxSh,
 } from "./phase6-messaging-helpers.ts";
@@ -247,17 +246,35 @@ export function extractPairingResult(output: string, marker: string): PairingRes
   };
 }
 
+function buildEncodedShellCommand(script: string, args: string[]): string {
+  return [
+    "tmp=$(mktemp)",
+    "trap 'rm -f \"$tmp\"' EXIT",
+    `printf %s ${shellQuote(base64(script))} | base64 -d > "$tmp"`,
+    `sh "$tmp" ${args.map(shellQuote).join(" ")}`,
+  ].join("; ");
+}
+
+function buildNodeShellCommand(source: string, env: Record<string, string>): string {
+  const exports = Object.entries(env)
+    .map(([key, value]) => `export ${key}=${shellQuote(value)}`)
+    .join("\n");
+  return buildEncodedShellCommand(
+    `${exports}\nnode --input-type=module <<'NODE'\n${source}\nNODE\n`,
+    [],
+  );
+}
+
 export async function issuePairingRequest(options: {
   sandbox: SandboxClient;
   sandboxName: string;
   channel: PairingChannel;
   redactions: string[];
 }): Promise<ShellProbeResult> {
-  return sandboxEncodedSh(
+  return sandboxSh(
     options.sandbox,
     options.sandboxName,
-    DISCORD_PAIRING_SCRIPT,
-    [PAIRING_USER.discord, DISCORD_DM_CHANNEL],
+    buildEncodedShellCommand(DISCORD_PAIRING_SCRIPT, [PAIRING_USER.discord, DISCORD_DM_CHANNEL]),
     {
       artifactName: `${options.channel}-issue-pairing-request`,
       redactionValues: options.redactions,
@@ -396,11 +413,10 @@ socket.on("error", (error) => { clearTimeout(timer); finish(` +
     "`ERROR:${error.message}`" +
     `); });
 `;
-  return sandboxNode(
+  return sandboxSh(
     options.sandbox,
     options.sandboxName,
-    source,
-    { FAKE_DISCORD_GATEWAY_PORT: options.port },
+    buildNodeShellCommand(source, { FAKE_DISCORD_GATEWAY_PORT: options.port }),
     {
       artifactName: "discord-gateway-proof",
       redactionValues: options.redactions,

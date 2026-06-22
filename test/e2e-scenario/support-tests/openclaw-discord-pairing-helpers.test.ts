@@ -34,8 +34,11 @@ function encodeClientText(payload: string): Buffer {
 async function waitForPort(portFile: string): Promise<number> {
   const deadline = Date.now() + 5_000;
   while (Date.now() < deadline) {
-    if (fs.existsSync(portFile)) return Number(fs.readFileSync(portFile, "utf8").trim());
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    try {
+      return Number(fs.readFileSync(portFile, "utf8").trim());
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
   }
   throw new Error("fake Discord Gateway did not write a port file");
 }
@@ -65,18 +68,25 @@ async function sendDiscordIdentify(port: number, token: string): Promise<void> {
     });
     socket.on("data", (chunk) => {
       buffer = Buffer.concat([buffer, Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)]);
-      if (!buffer.toString("latin1").includes("\r\n\r\n")) return;
-      socket.write(
-        encodeClientText(
-          JSON.stringify({
-            op: 2,
-            d: { token, intents: 0, properties: { os: "linux", browser: "test", device: "test" } },
-          }),
-        ),
-      );
-      clearTimeout(timer);
-      socket.end();
-      resolve();
+      buffer.toString("latin1").includes("\r\n\r\n")
+        ? (() => {
+            socket.write(
+              encodeClientText(
+                JSON.stringify({
+                  op: 2,
+                  d: {
+                    token,
+                    intents: 0,
+                    properties: { os: "linux", browser: "test", device: "test" },
+                  },
+                }),
+              ),
+            );
+            clearTimeout(timer);
+            socket.end();
+            resolve();
+          })()
+        : undefined;
     });
     socket.on("error", (error) => {
       clearTimeout(timer);
