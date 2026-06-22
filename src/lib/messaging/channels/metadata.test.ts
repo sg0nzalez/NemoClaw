@@ -138,6 +138,7 @@ describe("built-in messaging channel metadata", () => {
       wechat: "npm:@tencent-weixin/openclaw-weixin@2.4.3",
       slack: "npm:@openclaw/slack@{{openclaw.version}}",
       whatsapp: "npm:@openclaw/whatsapp@{{openclaw.version}}",
+      zalo: "npm:@openclaw/zalo@{{openclaw.version}}",
     });
     expect(listMessagingPackageInstallSpecs({ agent: "hermes" })).toEqual([]);
   });
