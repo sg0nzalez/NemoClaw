@@ -240,12 +240,14 @@ export async function assertOpenClawStateRoot(
 }
 
 // Source-of-truth boundary: the live pairing probe imports the conversation
-// runtime from the active `openclaw` binary installed in the sandbox. The invalid
+// runtime from the active `openclaw` binary installed in the sandbox. Connect
+// shells may shadow that binary with a shell function, so the locator asks bash
+// for `type -P openclaw` and intentionally ignores functions/aliases. The invalid
 // state is an active OpenClaw package without `dist/plugin-sdk/conversation-runtime.js`;
-// this Discord migration fails closed for that installer/package drift instead of
-// searching secondary global installs. A support test covers the no-runtime path.
-// Remove this locator once OpenClaw exposes a stable CLI/import for issuing pairing
-// challenges from E2E probes.
+// this pairing migration fails closed for that installer/package drift instead of
+// searching secondary global installs. Support tests cover shell-function shadows
+// and the no-runtime path. Remove this locator once OpenClaw exposes a stable
+// CLI/import for issuing pairing challenges from E2E probes.
 export const LOAD_CONVERSATION_RUNTIME_SOURCE = String.raw`
 import fs from "node:fs";
 import path from "node:path";
@@ -254,7 +256,7 @@ import { pathToFileURL } from "node:url";
 
 function findOpenClawPackageRootFromBinary() {
   let binary = "";
-  try { binary = execFileSync("sh", ["-lc", "command -v openclaw"], { encoding: "utf8" }).trim(); } catch { return null; }
+  try { binary = execFileSync("bash", ["-lc", "type -P openclaw || command -v openclaw"], { encoding: "utf8" }).trim(); } catch { return null; }
   if (!binary) return null;
   let current = "";
   try { current = fs.realpathSync(binary); } catch { return null; }
@@ -720,7 +722,24 @@ function decodeFrame(buffer) {
   };
 }
 
-const socket = net.createConnection({ host, port });
+function parseProxyTarget() {
+  const raw = process.env.HTTP_PROXY || process.env.http_proxy || "";
+  if (!raw) return null;
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new Error("HTTP proxy for Discord Gateway proof is malformed");
+  }
+  if (parsed.protocol !== "http:") throw new Error("Discord Gateway proof only supports HTTP proxies");
+  const proxyPort = Number(parsed.port || "80");
+  if (!Number.isInteger(proxyPort) || proxyPort < 1 || proxyPort > 65535) throw new Error("HTTP proxy port for Discord Gateway proof is invalid");
+  if (parsed.hostname !== "10.200.0.1" || proxyPort !== 3128) throw new Error("unexpected HTTP proxy for Discord Gateway proof");
+  return { host: parsed.hostname, port: proxyPort };
+}
+
+const proxy = parseProxyTarget();
+const socket = proxy ? net.createConnection({ host: proxy.host, port: proxy.port }) : net.createConnection({ host, port });
 const timer = setTimeout(() => {
   try { socket.destroy(); } catch {}
   finish("TIMEOUT");
@@ -731,8 +750,9 @@ let upgraded = false;
 
 socket.on("connect", () => {
   const key = crypto.randomBytes(16).toString("base64");
+  const requestTarget = proxy ? "http://" + host + ":" + port + "/gateway?v=10&encoding=json" : "/gateway?v=10&encoding=json";
   socket.write([
-    "GET /gateway?v=10&encoding=json HTTP/1.1",
+    "GET " + requestTarget + " HTTP/1.1",
     "Host: " + host + ":" + port,
     "Upgrade: websocket",
     "Connection: Upgrade",
