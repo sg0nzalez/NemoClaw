@@ -515,10 +515,10 @@ function runHermesGatewayRuntimeCleanup(opts: {
 
   fs.mkdirSync(runtimeDir, { recursive: true });
   fs.mkdirSync(procRoot, { recursive: true });
-  if (opts.preExistingLogFile) {
-    fs.mkdirSync(path.dirname(agentLogPath), { recursive: true });
-    fs.writeFileSync(agentLogPath, "pre-existing log\n", { mode: 0o644 });
-  }
+  void (opts.preExistingLogFile
+    ? (fs.mkdirSync(path.dirname(agentLogPath), { recursive: true }),
+      fs.writeFileSync(agentLogPath, "pre-existing log\n", { mode: 0o644 }))
+    : undefined);
   if (opts.lockedConfigRoot || opts.rootOwnedConfigRoot) {
     fs.chmodSync(hermesHome, 0o755);
   }

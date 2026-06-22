@@ -1354,6 +1354,7 @@ describe("Hermes sandbox provisioning", () => {
     const fakeHermes = path.join(tmp, "hermes");
     const doctorLog = path.join(tmp, "doctor.log");
     const etcDir = path.join(tmp, "etc", "nemoclaw");
+    const mode = (entry: string) => (fs.statSync(entry).mode & 0o777).toString(8);
     fs.mkdirSync(hermesDir, { recursive: true });
     fs.writeFileSync(configPath, "model: test\n", { mode: 0o600 });
     fs.writeFileSync(envPath, "TOKEN=test\n", { mode: 0o600 });
@@ -1364,11 +1365,8 @@ describe("Hermes sandbox provisioning", () => {
         "set -euo pipefail",
         `printf 'HERMES_HOME=%s args=%s\\n' "\${HERMES_HOME:-}" "$*" > ${JSON.stringify(doctorLog)}`,
         `test "\${HERMES_HOME:-}" = ${JSON.stringify(hermesDir)}`,
-        'test "${1:-}" = "doctor"',
-        'test "${2:-}" = "--fix"',
-        `printf 'doctor_migrated: true\\n' >>${JSON.stringify(configPath)}`,
-        `printf 'DOCTOR_MIGRATED=1\\n' >>${JSON.stringify(envPath)}`,
-        `chmod 666 ${JSON.stringify(configPath)} ${JSON.stringify(envPath)}`,
+        'test "${1:-} ${2:-}" = "doctor --fix"',
+        `printf 'doctor_migrated: true\\n' >>${JSON.stringify(configPath)}; printf 'DOCTOR_MIGRATED=1\\n' >>${JSON.stringify(envPath)}; chmod 666 ${JSON.stringify(configPath)} ${JSON.stringify(envPath)}`,
       ].join("\n"),
       { mode: 0o700 },
     );
@@ -1399,21 +1397,17 @@ describe("Hermes sandbox provisioning", () => {
       });
       expect(doctor.status).toBe(0);
       expect(fs.readFileSync(doctorLog, "utf-8")).toContain("args=doctor --fix");
-      expect((fs.statSync(configPath).mode & 0o777).toString(8)).toBe("666");
-      expect((fs.statSync(envPath).mode & 0o777).toString(8)).toBe("666");
+      expect([mode(configPath), mode(envPath)]).toEqual(["666", "666"]);
 
       const lock = runDockerShell(lockCommand, sandboxRoot);
       expect(lock.result.status).toBe(0);
       expect(lock.result.stderr).toBe("");
-      expect((fs.statSync(configPath).mode & 0o777).toString(8)).toBe("640");
-      expect((fs.statSync(envPath).mode & 0o777).toString(8)).toBe("640");
+      expect([mode(configPath), mode(envPath)]).toEqual(["640", "640"]);
 
       const hash = runDockerShell(hashCommand, sandboxRoot);
       expect(hash.result.status).toBe(0);
       expect(hash.result.stderr).toBe("");
-      expect((fs.statSync(path.join(etcDir, "hermes.config-hash")).mode & 0o777).toString(8)).toBe(
-        "444",
-      );
+      expect(mode(path.join(etcDir, "hermes.config-hash"))).toBe("444");
       expect(fs.readFileSync(configPath, "utf-8")).toContain("doctor_migrated: true");
       const verifyHash = spawnSync("sha256sum", ["-c", path.join(etcDir, "hermes.config-hash")], {
         encoding: "utf-8",

@@ -114,10 +114,12 @@ async function copyStoppedContainerFile(
       artifactName: `diag-${container}-${artifactName}-copy`,
       timeoutMs: 30_000,
     });
-    if (copied.exitCode !== 0) return;
-
-    const text = redact(fs.readFileSync(dest, "utf-8"));
-    await artifacts.writeText(`docker/diag-${container}-${artifactName}.txt`, text);
+    await (copied.exitCode === 0
+      ? artifacts.writeText(
+          `docker/diag-${container}-${artifactName}.txt`,
+          redact(fs.readFileSync(dest, "utf-8")),
+        )
+      : Promise.resolve());
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
