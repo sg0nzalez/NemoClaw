@@ -129,7 +129,7 @@
       "name": "Local NVIDIA NIM",
       "status": "experimental",
       "endpoint_type": "Local OpenAI-compatible",
-      "notes": "Requires `NEMOCLAW_EXPERIMENTAL=1` and a NIM-capable NVIDIA GPU. Host must have the NVIDIA Container Toolkit installed and a CDI spec present (`onboard` asserts CDI presence). NIM images pull from `nvcr.io` and require NGC registry login. Gated behind the experimental flag because NemoClaw does not auto-select a NIM image for the host today — the user must explicitly pick from the validated image list (managed vLLM has per-host default models and so is not gated on the same boxes). Validated images: `nvidia/nemotron-3-super-120b-a12b` (40 GB), `nvidia/nemotron-3-nano-30b-a3b` (8 GB), `nvidia/llama-3.1-nemotron-70b-instruct` (81 GB), `nvidia/llama-3.3-nemotron-super-49b-v1` (24 GB), `meta/llama-3.1-8b-instruct` (16 GB)."
+      "notes": "Requires `NEMOCLAW_EXPERIMENTAL=1` and a NIM-capable NVIDIA GPU. Host must have the NVIDIA Container Toolkit installed and a CDI spec present (`onboard` asserts CDI presence via `assertCdiNvidiaGpuSpecPresent`, `src/lib/onboard.ts:1581`). NIM images pull from `nvcr.io` and require NGC registry login. Gated behind the experimental flag because NemoClaw does not auto-select a NIM image for the host today — the user must explicitly pick from the validated image list (managed vLLM has per-host default models and so is not gated on the same boxes). Validated images referenced in `src/lib/inference/config.ts` and `nemoclaw/src/index.ts`: `nvidia/nemotron-3-super-120b-a12b` (default cloud model), `nvidia/nemotron-3-nano-30b-a3b`, `nvidia/llama-3.3-nemotron-super-49b-v1.5`."
     },
     {
       "name": "Local vLLM (already running)",
@@ -204,7 +204,7 @@
     {
       "name": "Web search backend",
       "status": "caveated",
-      "notes": "Runtime-configurable web-search backend (Brave, Tavily) plumbed through the OpenShell gateway. Backend credentials are user-supplied; no NemoClaw-bundled key. Backend availability depends on the chosen provider."
+      "notes": "Runtime-configurable web-search backend plumbed through the OpenShell gateway. Brave is the currently-implemented backend (see `src/lib/onboard/brave-provider-profile.ts` and `src/lib/onboard/web-search-flow.ts`); backend credentials are user-supplied via an onboard prompt — no NemoClaw-bundled key."
     }
   ],
 
@@ -212,7 +212,7 @@
     {
       "name": "Podman / other container runtimes",
       "status": "unsupported",
-      "notes": "Onboard rejects Podman explicitly (`src/lib/onboard.ts:1564` and `src/lib/onboard/preflight.ts:586`). Only Docker Engine, Docker Desktop, and Colima are supported. See issue #420 (closed)."
+      "notes": "Onboard surfaces an explicit unsupported-runtime error for Podman (`src/lib/onboard.ts:1611` prints the rejection; `src/lib/onboard/preflight.ts:586` flags the unsupported runtime upstream). Only Docker Engine, Docker Desktop, and Colima are supported. See issue #420 (closed)."
     },
     {
       "name": "Intel Mac (macOS x86_64)",
@@ -242,7 +242,7 @@
     {
       "name": "Non-NVIDIA GPUs (AMD/ROCm, Intel Arc, Apple Metal)",
       "status": "unsupported",
-      "notes": "Local vLLM and NIM paths assert NVIDIA CDI presence (`src/lib/onboard.ts:5041`). NemoClaw does not install non-NVIDIA accelerator drivers."
+      "notes": "Local vLLM and NIM paths assert NVIDIA CDI presence via `assertCdiNvidiaGpuSpecPresent` (`src/lib/onboard.ts:1581`, called at `:1646`). NemoClaw does not install non-NVIDIA accelerator drivers."
     },
     {
       "name": "LangChain, AutoGen, CrewAI, or other agent harnesses",
