@@ -11,6 +11,7 @@ import { createBuiltInMessagingHookRegistry, MessagingHookRegistry } from "../ho
 import {
   type ChannelManifest,
   ChannelManifestRegistry,
+  type SandboxMessagingJsonRenderPlan,
   type SandboxMessagingPlan,
 } from "../manifest";
 import { ManifestCompiler } from "./manifest-compiler";
@@ -119,16 +120,6 @@ async function withEnv<T>(
       }
     }
   }
-}
-
-function zaloChannelRender(plan: SandboxMessagingPlan) {
-  const render = plan.agentRender.find(
-    (entry) => entry.channelId === "zalo" && entry.renderId === "zalo-openclaw-channel",
-  );
-  if (!render || render.kind !== "json-fragment") {
-    throw new Error("expected a zalo channels.zalo json-fragment render");
-  }
-  return render;
 }
 
 describe("ManifestCompiler", () => {
@@ -347,7 +338,14 @@ describe("ManifestCompiler", () => {
 
     // Zalo renders a flat channels.zalo fragment (no accounts.default nesting,
     // which @openclaw/zalo rejects); dmPolicy/allowFrom stay omitted without an allowlist.
-    const zaloValue = zaloChannelRender(plan).value as Record<string, unknown>;
+    const zaloRender = plan.agentRender.find(
+      (render): render is SandboxMessagingJsonRenderPlan =>
+        render.channelId === "zalo" &&
+        render.renderId === "zalo-openclaw-channel" &&
+        render.kind === "json-fragment",
+    );
+    expect(zaloRender).toBeDefined();
+    const zaloValue = zaloRender?.value as Record<string, unknown>;
     expect(zaloValue).not.toHaveProperty("accounts");
     expect(zaloValue).toMatchObject({
       enabled: true,
