@@ -28,20 +28,32 @@ function encodeClientText(payload: string): Buffer {
   const mask = crypto.randomBytes(4);
   const masked = Buffer.alloc(body.length);
   for (let i = 0; i < body.length; i += 1) masked[i] = body[i] ^ mask[i % 4];
-  if (body.length < 126)
-    return Buffer.concat([Buffer.from([0x81, 0x80 | body.length]), mask, masked]);
-  if (body.length <= 0xffff) {
-    const header = Buffer.alloc(4);
-    header[0] = 0x81;
-    header[1] = 0x80 | 126;
-    header.writeUInt16BE(body.length, 2);
-    return Buffer.concat([header, mask, masked]);
-  }
-  const header = Buffer.alloc(10);
-  header[0] = 0x81;
-  header[1] = 0x80 | 127;
-  header.writeBigUInt64BE(BigInt(body.length), 2);
-  return Buffer.concat([header, mask, masked]);
+  const header = [
+    { max: 125, encode: (length: number) => Buffer.from([0x81, 0x80 | length]) },
+    {
+      max: 0xffff,
+      encode: (length: number) => {
+        const value = Buffer.alloc(4);
+        value[0] = 0x81;
+        value[1] = 0x80 | 126;
+        value.writeUInt16BE(length, 2);
+        return value;
+      },
+    },
+    {
+      max: Number.MAX_SAFE_INTEGER,
+      encode: (length: number) => {
+        const value = Buffer.alloc(10);
+        value[0] = 0x81;
+        value[1] = 0x80 | 127;
+        value.writeBigUInt64BE(BigInt(length), 2);
+        return value;
+      },
+    },
+  ]
+    .find(({ max }) => body.length <= max)
+    ?.encode(body.length);
+  return Buffer.concat([header ?? Buffer.alloc(0), mask, masked]);
 }
 
 async function waitForPort(portFile: string): Promise<number> {
