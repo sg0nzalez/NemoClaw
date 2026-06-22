@@ -43,7 +43,19 @@ function extractRunBlock(file: string, startMarker: string, endMarker: string): 
     .replace(/\\\s*$/, "");
 }
 
-function runInstallBlock(command: string) {
+function runInstallBlock(
+  command: string,
+  options: {
+    openclawVersion?: string;
+    committedIntegrity?: string;
+    registryIntegrity?: string;
+  } = {},
+) {
+  const {
+    openclawVersion = UNPINNED_OPENCLAW_VERSION,
+    committedIntegrity = "sha512-reviewed-pin",
+    registryIntegrity = committedIntegrity,
+  } = options;
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-integrity-"));
   const blueprint = path.join(tmp, "blueprint.yaml");
   const log = path.join(tmp, "calls.log");
@@ -52,13 +64,14 @@ function runInstallBlock(command: string) {
     "#!/usr/bin/env bash",
     "set -euo pipefail",
     `call_log=${JSON.stringify(log)}`,
-    `OPENCLAW_VERSION=${JSON.stringify(UNPINNED_OPENCLAW_VERSION)}`,
-    'OPENCLAW_2026_6_9_INTEGRITY="sha512-reviewed-pin"',
+    `OPENCLAW_VERSION=${JSON.stringify(openclawVersion)}`,
+    `OPENCLAW_2026_6_9_INTEGRITY=${JSON.stringify(committedIntegrity)}`,
     'openclaw() { if [ "${1:-}" = "--version" ]; then printf \'openclaw 2026.3.11\\n\'; else return 127; fi; }',
+    "codex-acp() { :; }",
     "npm() {",
     '  printf "npm %s\\n" "$*" >> "$call_log";',
     '  if [ "${1:-}" = "view" ] && [ "${3:-}" = "version" ]; then printf "%s\\n" "$OPENCLAW_VERSION"; return 0; fi',
-    '  if [ "${1:-}" = "view" ] && [ "${3:-}" = "dist.integrity" ]; then printf "%s\\n" "$OPENCLAW_2026_6_9_INTEGRITY"; return 0; fi',
+    `  if [ "\${1:-}" = "view" ] && [ "\${3:-}" = "dist.integrity" ]; then printf "%s\\n" ${JSON.stringify(registryIntegrity)}; return 0; fi`,
     "}",
     "pip3() { return 0; }",
     command
@@ -75,18 +88,54 @@ function runInstallBlock(command: string) {
 
 describe("OpenClaw npm integrity pins", () => {
   it("keeps the advisory review note aligned with the committed OpenClaw pin", () => {
-    const dockerfile = fs.readFileSync(DOCKERFILE, "utf-8");
-    const dockerfileBase = fs.readFileSync(DOCKERFILE_BASE, "utf-8");
     const reviewNote = fs.readFileSync(DEPENDENCY_REVIEW_NOTE, "utf-8");
 
-    expect(dockerfile).toContain(`ARG OPENCLAW_VERSION=${PINNED_OPENCLAW_VERSION}`);
-    expect(dockerfileBase).toContain(`ARG OPENCLAW_VERSION=${PINNED_OPENCLAW_VERSION}`);
-    expect(dockerfile).toContain(PINNED_OPENCLAW_INTEGRITY);
-    expect(dockerfileBase).toContain(PINNED_OPENCLAW_INTEGRITY);
     expect(reviewNote).toContain(`openclaw@${PINNED_OPENCLAW_VERSION}`);
     expect(reviewNote).toContain(PINNED_OPENCLAW_INTEGRITY);
     expect(reviewNote).toContain("`0` high");
     expect(reviewNote).toContain("`0` critical");
+  });
+
+  it("installs the reviewed pin when registry integrity matches the committed pin", () => {
+    const production = runInstallBlock(
+      extractRunBlock(
+        DOCKERFILE,
+        "# OPENCLAW_VERSION is the NemoClaw runtime build target",
+        "# Patch OpenClaw media fetch",
+      ),
+      {
+        openclawVersion: PINNED_OPENCLAW_VERSION,
+        committedIntegrity: PINNED_OPENCLAW_INTEGRITY,
+        registryIntegrity: PINNED_OPENCLAW_INTEGRITY,
+      },
+    );
+    const base = runInstallBlock(
+      extractRunBlock(
+        DOCKERFILE_BASE,
+        "# Install OpenClaw CLI + PyYAML.",
+        "# Baseline health check.",
+      ),
+      {
+        openclawVersion: PINNED_OPENCLAW_VERSION,
+        committedIntegrity: PINNED_OPENCLAW_INTEGRITY,
+        registryIntegrity: PINNED_OPENCLAW_INTEGRITY,
+      },
+    );
+
+    expect(production.result.status).toBe(0);
+    expect(base.result.status).toBe(0);
+    expect(production.calls).toContain(
+      `npm view openclaw@${PINNED_OPENCLAW_VERSION} dist.integrity`,
+    );
+    expect(production.calls).toContain(
+      `npm install -g --no-audit --no-fund --no-progress openclaw@${PINNED_OPENCLAW_VERSION}`,
+    );
+    expect(production.calls).toContain(
+      "npm install -g --no-audit --no-fund --no-progress @zed-industries/codex-acp@0.11.1",
+    );
+    expect(base.calls).toContain(`npm view openclaw@${PINNED_OPENCLAW_VERSION} version`);
+    expect(base.calls).toContain(`npm view openclaw@${PINNED_OPENCLAW_VERSION} dist.integrity`);
+    expect(base.calls).toContain(`npm install -g openclaw@${PINNED_OPENCLAW_VERSION}`);
   });
 
   it("fails closed before npm install for unpinned production Dockerfile overrides", () => {
