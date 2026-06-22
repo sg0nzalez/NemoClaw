@@ -22,11 +22,15 @@ type GatewayTokenRuntimeBridge = {
 let runtimeBridgeFactory = (): GatewayTokenRuntimeBridge => {
   const onboard = require("../../../lib/onboard") as {
     fetchGatewayAuthTokenFromSandbox: (sandboxName: string) => string | null;
-    fetchAgentWebAuthTokenFromSandbox: (
-      sandboxName: string,
-      agent: AgentDefinition,
-    ) => string | null;
   };
+  const agentWebAuth =
+    require("../../../lib/onboard/agent-web-auth-token") as typeof import("../../../lib/onboard/agent-web-auth-token");
+  const openshellResolver =
+    require("../../../lib/adapters/openshell/resolve") as typeof import("../../../lib/adapters/openshell/resolve");
+  const runner = require("../../../lib/runner") as Pick<
+    typeof import("../../../lib/runner"),
+    "runCapture"
+  >;
   const registry = require("../../../lib/state/registry") as {
     getSandbox: (name: string) => { agent?: string | null } | null;
   };
@@ -40,6 +44,11 @@ let runtimeBridgeFactory = (): GatewayTokenRuntimeBridge => {
     } catch {
       return null;
     }
+  };
+  const runCaptureOpenshell = (args: string[], opts?: Record<string, unknown>): string | null => {
+    const openshell = openshellResolver.resolveOpenshell();
+    if (!openshell) return null;
+    return runner.runCapture([openshell, ...args], opts);
   };
 
   // null / "openclaw" → OpenClaw gateway token. Otherwise the agent must
@@ -64,7 +73,11 @@ let runtimeBridgeFactory = (): GatewayTokenRuntimeBridge => {
       const agentName = getSandboxAgent(sandboxName);
       const bearerAgent = resolveBearerAgent(agentName);
       if (bearerAgent) {
-        return onboard.fetchAgentWebAuthTokenFromSandbox(sandboxName, bearerAgent);
+        return agentWebAuth.fetchAgentWebAuthTokenFromSandbox(
+          runCaptureOpenshell,
+          sandboxName,
+          bearerAgent,
+        );
       }
       return onboard.fetchGatewayAuthTokenFromSandbox(sandboxName);
     },

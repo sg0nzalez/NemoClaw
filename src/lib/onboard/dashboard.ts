@@ -9,7 +9,8 @@ import type { AgentDefinition } from "../agent/defs";
 import { DASHBOARD_PORT } from "../core/ports";
 import { buildChain, buildControlUiUrls } from "../dashboard/contract";
 import * as nim from "../inference/nim";
-import { runCapture as defaultRunCapture, shellQuote } from "../runner";
+import { runCapture as defaultRunCapture } from "../runner";
+import { fetchAgentWebAuthTokenFromSandbox as fetchAgentWebAuthToken } from "./agent-web-auth-token";
 import { ensureAgentDashboardForward as ensureAgentDashboardForwardForAgent } from "./agent-dashboard-forward";
 import { ensureAgentFixedForward as ensureFixedAgentForward } from "./agent-fixed-forward";
 import * as dashboardAccess from "./dashboard-access";
@@ -365,32 +366,7 @@ export function createOnboardDashboardHelpers(deps: OnboardDashboardDeps): Onboa
     sandboxName: string,
     agent: AgentDefinition,
   ): string | null {
-    const { method, env } = agent.webAuth;
-    if (method !== "bearer_token" || !env) return null;
-    const envFile = agent.configPaths.envFile;
-    if (!envFile) return null;
-    const dir = agent.configPaths.dir.replace(/\/+$/, "");
-    const envPath = `${dir}/${envFile}`;
-    // env is validated env-var-shaped in defs.ts, and shellQuote guards the
-    // path, so the interpolation below is injection-safe.
-    const script =
-      `f=${shellQuote(envPath)}; [ -f "$f" ] || exit 3; ` +
-      `grep -m1 ${shellQuote(`^${env}=`)} "$f" 2>/dev/null | cut -d= -f2-`;
-    const out = deps.runCaptureOpenshell(
-      ["sandbox", "exec", "-n", sandboxName, "--", "sh", "-lc", script],
-      { ignoreError: true },
-    );
-    if (out == null) return null;
-    let value = out.replace(/\r?\n$/, "").trim();
-    // Strip one layer of surrounding matching quotes if present.
-    if (
-      value.length >= 2 &&
-      (value[0] === '"' || value[0] === "'") &&
-      value[value.length - 1] === value[0]
-    ) {
-      value = value.slice(1, -1);
-    }
-    return value.length > 0 ? value : null;
+    return fetchAgentWebAuthToken(deps.runCaptureOpenshell, sandboxName, agent);
   }
 
   function fetchGatewayAuthTokenFromSandbox(sandboxName: string): string | null {
