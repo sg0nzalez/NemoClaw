@@ -38,6 +38,10 @@ fail() {
   exit 1
 }
 
+if [ -z "$EXPECTED_OPENCLAW_VERSION" ]; then
+  fail "could not parse OPENCLAW_VERSION from ${SCRIPT_DIR}/../../Dockerfile.base"
+fi
+
 cleanup_firewall() {
   local ip
   for ip in "${INSERTED_IPS[@]}"; do
@@ -108,7 +112,7 @@ done
 
 openclaw_version="$(openshell sandbox exec --name "$SANDBOX_NAME" -- openclaw --version 2>&1 || true)"
 info "sandbox OpenClaw version: ${openclaw_version}"
-if ! grep -q "$EXPECTED_OPENCLAW_VERSION" <<<"$openclaw_version"; then
+if ! grep -Fq "$EXPECTED_OPENCLAW_VERSION" <<<"$openclaw_version"; then
   fail "expected sandbox OpenClaw ${EXPECTED_OPENCLAW_VERSION}"
 fi
 

@@ -18,6 +18,10 @@ REPO="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 SANDBOX_NAME="${NEMOCLAW_SANDBOX_NAME:-e2e-openclaw-tui-correlation}"
 INSTALL_LOG="${E2E_OPENCLAW_TUI_CORRELATION_INSTALL_LOG:-/tmp/nemoclaw-e2e-openclaw-tui-correlation-install.log}"
 EXPECTED_OPENCLAW_VERSION="${E2E_OPENCLAW_TUI_CORRELATION_PINNED_VERSION:-$(sed -nE 's/^ARG OPENCLAW_VERSION=([^[:space:]]+).*/\1/p' "${REPO}/Dockerfile.base" | head -n 1)}"
+if [ -z "$EXPECTED_OPENCLAW_VERSION" ]; then
+  echo "Failed to parse OPENCLAW_VERSION from ${REPO}/Dockerfile.base" >&2
+  exit 1
+fi
 
 cleanup() {
   if [ "${NEMOCLAW_E2E_SKIP_CLEANUP:-0}" = "1" ]; then
