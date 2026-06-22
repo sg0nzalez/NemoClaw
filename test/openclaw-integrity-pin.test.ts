@@ -17,13 +17,11 @@ function extractRunBlock(file: string, startMarker: string, endMarker: string): 
   const source = fs.readFileSync(file, "utf-8");
   const start = source.indexOf(startMarker);
   const end = source.indexOf(endMarker, start);
-  if (start === -1 || end === -1 || end <= start) {
-    throw new Error(`Expected block between ${startMarker} and ${endMarker}`);
-  }
+  expect(start, `Expected start marker in ${file}: ${startMarker}`).toBeGreaterThanOrEqual(0);
+  expect(end, `Expected end marker in ${file}: ${endMarker}`).toBeGreaterThan(start);
   const runIndex = source.indexOf("RUN ", start);
-  if (runIndex === -1 || runIndex > end) {
-    throw new Error(`Expected RUN instruction after ${startMarker}`);
-  }
+  expect(runIndex, `Expected RUN instruction after ${startMarker}`).toBeGreaterThanOrEqual(0);
+  expect(runIndex, `Expected RUN instruction before ${endMarker}`).toBeLessThanOrEqual(end);
   return source
     .slice(runIndex, end)
     .trim()
