@@ -317,6 +317,25 @@ describe.skipIf(!PY_YAML_AVAILABLE)("seed-dashboard-config.py", () => {
     expect(readYaml(realTarget)).toEqual({ secret: "do-not-touch" });
   });
 
+  it("refuses to read a symlinked gateway config source", () => {
+    const realTarget = writeYaml("real-target.yaml", {
+      model: {
+        default: "secret-model",
+        provider: "secret-provider",
+        base_url: "https://secret.invalid/v1",
+      },
+    });
+    const src = path.join(tmpDir, "gw.yaml");
+    const dst = path.join(tmpDir, "dash.yaml");
+    fs.symlinkSync(realTarget, src);
+
+    const res = runSeed(src, dst);
+
+    expect(res.status).toBe(1);
+    expect(res.stderr).toContain("[SECURITY]");
+    expect(fs.existsSync(dst)).toBe(false);
+  });
+
   it("refuses a pre-existing temp symlink when writing the dashboard config", () => {
     const src = writeYaml("gw.yaml", GATEWAY_CONFIG);
     const dst = path.join(tmpDir, "dash.yaml");
@@ -344,6 +363,23 @@ describe.skipIf(!PY_YAML_AVAILABLE)("seed-dashboard-config.py", () => {
     expect(res.status).toBe(1);
     expect(res.stderr).toContain("[SECURITY]");
     expect(fs.readFileSync(realTarget, "utf-8")).toBe("SECRET=do-not-touch\n");
+  });
+
+  it("refuses to read a symlinked gateway env source", () => {
+    const src = writeYaml("gw.yaml", GATEWAY_CONFIG);
+    const dst = path.join(tmpDir, "dash.yaml");
+    const realTarget = path.join(tmpDir, "real-target.env");
+    const envSrc = path.join(tmpDir, "gw.env");
+    const envDst = path.join(tmpDir, "dash.env");
+    fs.writeFileSync(realTarget, "API_SERVER_KEY=do-not-copy\n");
+    fs.symlinkSync(realTarget, envSrc);
+
+    const res = runSeed(src, dst, envSrc, envDst);
+
+    expect(res.status).toBe(1);
+    expect(res.stderr).toContain("[SECURITY]");
+    expect(fs.existsSync(envDst)).toBe(false);
+    expect(fs.readFileSync(realTarget, "utf-8")).toBe("API_SERVER_KEY=do-not-copy\n");
   });
 
   it("refuses a pre-existing temp symlink when writing the dashboard env", () => {

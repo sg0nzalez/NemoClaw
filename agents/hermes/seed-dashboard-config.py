@@ -27,6 +27,13 @@ live-lists ``/v1/models`` from the proxied endpoint rather than pinning a static
 catalog. It is idempotent: ``start.sh`` runs it on every launch so the dashboard
 stays in sync with the gateway's routed model.
 
+Source-boundary note: this is a local compatibility bridge for the invalid state
+where Hermes 0.16+ dashboard code uses an isolated ``HERMES_HOME`` and therefore
+cannot see NemoClaw's gateway-owned routing config. Remove it when Hermes exposes
+one authoritative dashboard/gateway routing source or accepts the gateway config
+directly; until then, every source read must be descriptor-based and no-follow
+because the root entrypoint may invoke this helper over sandbox-writable paths.
+
 Usage:
     seed-dashboard-config.py <gateway-config.yaml> <dashboard-config.yaml>
     seed-dashboard-config.py <gateway-config.yaml> <dashboard-config.yaml> <gateway.env> <dashboard.env>
@@ -42,6 +49,7 @@ import errno
 import grp
 import os
 import pwd
+import stat
 import sys
 from typing import Callable, TextIO
 
@@ -57,6 +65,14 @@ _DASHBOARD_ENV_SKIP_KEYS = frozenset(
         "TERMINAL_CWD",
     }
 )
+
+
+class UnsafeDashboardSeedPathError(Exception):
+    pass
+
+
+class MissingDashboardSeedPathError(Exception):
+    pass
 
 
 def _lookup_uid(value: str) -> int:
@@ -77,11 +93,34 @@ def _seed_owner_ids() -> tuple[int, int] | None:
     return uid, gid
 
 
-def _load_yaml(path: str) -> dict:
+def _read_regular_text_no_follow(path: str, label: str) -> str:
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    fd = -1
+    try:
+        fd = os.open(path, flags)
+        file_stat = os.fstat(fd)
+        if not stat.S_ISREG(file_stat.st_mode):
+            raise UnsafeDashboardSeedPathError(f"{label} {path} is not a regular file")
+        with os.fdopen(fd, "r", encoding="utf-8", closefd=False) as handle:
+            return handle.read()
+    except FileNotFoundError as exc:
+        raise MissingDashboardSeedPathError(path) from exc
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            raise UnsafeDashboardSeedPathError(f"{label} {path} is a symlink") from exc
+        raise
+    finally:
+        if fd >= 0:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+
+def _load_yaml(path: str, label: str) -> dict:
     import yaml
 
-    with open(path, encoding="utf-8") as handle:
-        data = yaml.safe_load(handle)
+    data = yaml.safe_load(_read_regular_text_no_follow(path, label))
     return data if isinstance(data, dict) else {}
 
 
@@ -298,8 +337,16 @@ def _normalized_routing(gateway: dict) -> dict:
 
 
 def _mirror_env(src: str, dst: str) -> bool:
-    if not os.path.isfile(src):
+    try:
+        env_text = _read_regular_text_no_follow(src, "gateway env")
+    except MissingDashboardSeedPathError:
         print(f"[dashboard] gateway env {src} missing; skipping env seed", file=sys.stderr)
+        return True
+    except UnsafeDashboardSeedPathError as exc:
+        print(f"[SECURITY] Refusing to seed dashboard env because {exc}", file=sys.stderr)
+        return False
+    except OSError as exc:
+        print(f"[dashboard] gateway env {src} unreadable ({exc}); skipping env seed", file=sys.stderr)
         return True
 
     if os.path.islink(dst):
@@ -307,11 +354,10 @@ def _mirror_env(src: str, dst: str) -> bool:
         return False
 
     def write_env(dst_handle: TextIO) -> None:
-        with open(src, encoding="utf-8") as src_handle:
-            for line in src_handle:
-                key = line.split("=", 1)[0].strip()
-                if key not in _DASHBOARD_ENV_SKIP_KEYS:
-                    dst_handle.write(line)
+        for line in env_text.splitlines(keepends=True):
+            key = line.split("=", 1)[0].strip()
+            if key not in _DASHBOARD_ENV_SKIP_KEYS:
+                dst_handle.write(line)
 
     if not _atomic_write_no_follow(dst, "dashboard env", write_env):
         return False
@@ -334,18 +380,6 @@ def main(argv: list[str]) -> int:
     if len(argv) == 5:
         env_ok = _mirror_env(argv[3], argv[4])
 
-    if not os.path.isfile(src):
-        # Cold paths where the gateway config has not been written yet are not an
-        # error: there is simply nothing to mirror.
-        print(f"[dashboard] gateway config {src} missing; skipping model seed", file=sys.stderr)
-        return 0 if env_ok else 1
-
-    if os.path.islink(dst):
-        # Defence-in-depth: never follow a symlink planted at the dashboard config
-        # path (HERMES_DASHBOARD_HOME is sandbox-writable).
-        print(f"[SECURITY] Refusing to seed dashboard config because {dst} is a symlink", file=sys.stderr)
-        return 1
-
     try:
         import yaml  # noqa: F401  (import here so a missing PyYAML is a clean skip)
     except Exception as exc:  # pragma: no cover - PyYAML ships in the Hermes venv
@@ -353,7 +387,15 @@ def main(argv: list[str]) -> int:
         return 0 if env_ok else 1
 
     try:
-        gateway = _load_yaml(src)
+        gateway = _load_yaml(src, "gateway config")
+    except MissingDashboardSeedPathError:
+        # Cold paths where the gateway config has not been written yet are not an
+        # error: there is simply nothing to mirror.
+        print(f"[dashboard] gateway config {src} missing; skipping model seed", file=sys.stderr)
+        return 0 if env_ok else 1
+    except UnsafeDashboardSeedPathError as exc:
+        print(f"[SECURITY] Refusing to seed dashboard config because {exc}", file=sys.stderr)
+        return 1
     except Exception as exc:
         print(f"[dashboard] gateway config {src} unreadable ({exc}); skipping model seed", file=sys.stderr)
         return 0 if env_ok else 1
@@ -364,17 +406,21 @@ def main(argv: list[str]) -> int:
         return 0 if env_ok else 1
 
     dashboard: dict = {}
-    if os.path.exists(dst):
-        try:
-            dashboard = _load_yaml(dst)
-        except Exception as exc:
-            # A corrupt dashboard config is owned by Hermes and is regenerated on
-            # launch; recreate from the routing keys rather than abort startup.
-            print(
-                f"[dashboard] existing dashboard config {dst} unreadable ({exc}); recreating",
-                file=sys.stderr,
-            )
-            dashboard = {}
+    try:
+        dashboard = _load_yaml(dst, "existing dashboard config")
+    except MissingDashboardSeedPathError:
+        dashboard = {}
+    except UnsafeDashboardSeedPathError as exc:
+        print(f"[SECURITY] Refusing to seed dashboard config because {exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:
+        # A corrupt dashboard config is owned by Hermes and is regenerated on
+        # launch; recreate from the routing keys rather than abort startup.
+        print(
+            f"[dashboard] existing dashboard config {dst} unreadable ({exc}); recreating",
+            file=sys.stderr,
+        )
+        dashboard = {}
 
     dashboard.update(routing)
 
