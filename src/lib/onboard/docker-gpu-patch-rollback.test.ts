@@ -106,12 +106,14 @@ describe("recreateOpenShellDockerSandboxWithGpu rollback path", () => {
   });
 
   it("restores the pre-patch sandbox when the recreate run fails before the supervisor wait (#5512)", () => {
-    const dockerCapture = vi.fn((args: readonly string[]) => {
-      if (args[0] === "ps") return "old-container-id\n";
-      if (args[0] === "inspect") return JSON.stringify([inspectFixture()]);
-      if (args[0] === "info") return "";
-      return "";
-    });
+    const captureResponses: Record<string, string> = {
+      ps: "old-container-id\n",
+      inspect: JSON.stringify([inspectFixture()]),
+      info: "",
+    };
+    const dockerCapture = vi.fn(
+      (args: readonly string[]) => captureResponses[String(args[0])] ?? "",
+    );
     const dockerRun = vi.fn(() => ({ status: 0, stdout: "probe-id\n" }));
     // The recreate `docker run` fails after the original was renamed aside.
     const dockerRunDetached = vi.fn(() => ({ status: 1, stderr: "docker: boom" }));
