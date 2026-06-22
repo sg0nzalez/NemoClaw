@@ -489,10 +489,107 @@ repair_hermes_log_permissions() {
   ensure_hermes_state_dir "${HERMES_DIR}/logs" 2770
   ensure_hermes_state_dir "${HERMES_DIR}/logs/curator" 2770
 
-  if [ "$(id -u)" -eq 0 ]; then
-    find -P "${HERMES_DIR}/logs" -type f -exec chown sandbox:sandbox {} +
-  fi
-  find -P "${HERMES_DIR}/logs" -type f -exec chmod 660 {} +
+  NEMOCLAW_HERMES_LOG_DIR="${HERMES_DIR}/logs" \
+    python3 - <<'PYLOGS'
+import errno
+import grp
+import os
+import pwd
+import stat
+import sys
+
+root = os.environ["NEMOCLAW_HERMES_LOG_DIR"]
+mode = 0o660
+
+if not hasattr(os, "O_NOFOLLOW"):
+    print("[SECURITY] Refusing Hermes log repair because O_NOFOLLOW is unavailable", file=sys.stderr)
+    sys.exit(1)
+
+root_real = os.path.realpath(root)
+flags = os.O_RDONLY | os.O_NOFOLLOW
+for optional_flag in ("O_CLOEXEC", "O_NONBLOCK"):
+    flags |= getattr(os, optional_flag, 0)
+
+
+def fail(message: str) -> None:
+    print(f"[SECURITY] Refusing Hermes log repair because {message}", file=sys.stderr)
+    sys.exit(1)
+
+
+def describe_unsafe_existing_path(path: str) -> str:
+    try:
+        st = os.lstat(path)
+    except OSError:
+        return "could not be opened safely"
+    if stat.S_ISLNK(st.st_mode):
+        return "is a symlink"
+    if not stat.S_ISREG(st.st_mode):
+        return "is not a regular file"
+    return "could not be opened safely"
+
+
+def repair_file(path: str) -> None:
+    try:
+        current = os.lstat(path)
+    except OSError as exc:
+        fail(f"{path} could not be statted safely: {exc.strerror}")
+    if stat.S_ISLNK(current.st_mode):
+        fail(f"{path} is a symlink")
+    if not stat.S_ISREG(current.st_mode):
+        fail(f"{path} is not a regular file")
+
+    try:
+        fd = os.open(path, flags)
+    except OSError as exc:
+        reason = describe_unsafe_existing_path(path)
+        detail = exc.strerror or errno.errorcode.get(exc.errno, str(exc.errno))
+        fail(f"{path} {reason}: {detail}")
+
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            fail(f"{path} is not a regular file")
+        if st.st_nlink != 1:
+            fail(f"{path} has hard-link count {st.st_nlink}")
+        current = os.stat(path, follow_symlinks=False)
+        if (current.st_dev, current.st_ino) != (st.st_dev, st.st_ino):
+            fail(f"{path} changed during repair")
+        if os.geteuid() == 0:
+            try:
+                uid = pwd.getpwnam("sandbox").pw_uid
+                gid = grp.getgrnam("sandbox").gr_gid
+            except KeyError as exc:
+                fail(f"sandbox account lookup failed: {exc}")
+            os.fchown(fd, uid, gid)
+        os.fchmod(fd, mode)
+        current = os.stat(path, follow_symlinks=False)
+        if (current.st_dev, current.st_ino) != (st.st_dev, st.st_ino):
+            fail(f"{path} changed during repair")
+    finally:
+        os.close(fd)
+
+
+def on_walk_error(exc: OSError) -> None:
+    fail(f"{exc.filename} could not be scanned safely: {exc.strerror}")
+
+
+for dirpath, dirnames, filenames in os.walk(root, topdown=True, onerror=on_walk_error, followlinks=False):
+    dir_real = os.path.realpath(dirpath)
+    if os.path.commonpath([root_real, dir_real]) != root_real:
+        fail(f"{dirpath} escapes {root}")
+    for dirname in list(dirnames):
+        entry = os.path.join(dirpath, dirname)
+        try:
+            st = os.lstat(entry)
+        except OSError as exc:
+            fail(f"{entry} could not be statted safely: {exc.strerror}")
+        if stat.S_ISLNK(st.st_mode):
+            fail(f"{entry} is a symlink")
+        if not stat.S_ISDIR(st.st_mode):
+            fail(f"{entry} is not a directory")
+    for filename in filenames:
+        repair_file(os.path.join(dirpath, filename))
+PYLOGS
 }
 
 ensure_hermes_history_file() {

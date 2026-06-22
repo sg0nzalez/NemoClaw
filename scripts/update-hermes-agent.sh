@@ -184,9 +184,52 @@ discover_installed_dockerfiles() {
     | sort -u
 }
 
-# Rewrite the version pins in a Hermes base Dockerfile. Older saved copies
-# may predate the HERMES_SEMVER/HERMES_NPM_INTEGRITY ARGs — those rewrites
-# are no-ops there; HERMES_VERSION and HERMES_TARBALL_SHA256 must land.
+# Saved installed copies are only safe to rewrite when they already carry the
+# current Hermes integration contract. A legacy source tree with fresh pins
+# but stale Dockerfile/start/config code can rebuild an image that looks
+# version-current while missing the v0.17 runtime hardening.
+installed_copy_schema_error() {
+  local dockerfile_base="$1"
+  local dockerfile="${dockerfile_base%/Dockerfile.base}/Dockerfile"
+  local -a missing=()
+  local item joined
+
+  for item in \
+    "ARG HERMES_VERSION=" \
+    "ARG HERMES_SEMVER=" \
+    "ARG HERMES_TARBALL_SHA256=" \
+    "ARG HERMES_NPM_INTEGRITY="; do
+    grep -q "^${item}" "$dockerfile_base" || missing+=("${item%?}")
+  done
+
+  if [[ ! -f "$dockerfile" ]]; then
+    missing+=("agents/hermes/Dockerfile")
+  else
+    for item in \
+      "validate-hermes-env-secret-boundary.py" \
+      "seed-hermes-dashboard-config.py" \
+      "HERMES_HOME=/sandbox/.hermes /usr/local/bin/hermes doctor --fix" \
+      "node --experimental-strip-types /opt/nemoclaw-hermes-config/generate-config.ts" \
+      "/sandbox/.hermes/dashboard-home"; do
+      grep -Fq "$item" "$dockerfile" || missing+=("marker ${item}")
+    done
+  fi
+
+  if ((${#missing[@]} == 0)); then
+    return 0
+  fi
+
+  joined=""
+  for item in "${missing[@]}"; do
+    [[ -z "$joined" ]] || joined+=", "
+    joined+="$item"
+  done
+  printf '%s\n' "$joined"
+  return 1
+}
+
+# Rewrite the version pins in a Hermes base Dockerfile. Callers that operate on
+# installed copies must validate `installed_copy_schema_error` before mutation.
 apply_dockerfile_pins() {
   local dockerfile="$1"
   sed -i.bak \
@@ -198,7 +241,9 @@ apply_dockerfile_pins() {
     "$dockerfile"
   rm -f "${dockerfile}.bak"
   grep -q "^ARG HERMES_VERSION=${TAG}$" "$dockerfile" \
-    && grep -q "^ARG HERMES_TARBALL_SHA256=${TARBALL_SHA256}$" "$dockerfile"
+    && grep -q "^ARG HERMES_SEMVER=${SEMVER}$" "$dockerfile" \
+    && grep -q "^ARG HERMES_TARBALL_SHA256=${TARBALL_SHA256}$" "$dockerfile" \
+    && grep -q "^ARG HERMES_NPM_INTEGRITY=${NPM_INTEGRITY}$" "$dockerfile"
 }
 
 apply_manifest_pin() {
@@ -253,6 +298,11 @@ if [[ "$CHECK_ONLY" == 1 ]]; then
   if [[ "$UPDATE_INSTALLED_COPIES" == 1 ]]; then
     while IFS= read -r installed_df; do
       [[ -n "$installed_df" ]] || continue
+      schema_error="$(installed_copy_schema_error "$installed_df")" || {
+        echo "INVALID: installed copy ${installed_df} uses a legacy Hermes source schema (${schema_error}); refresh or reinstall the installed source before updating pins."
+        status=1
+        continue
+      }
       installed_tag="$(pinned_tag_of "$installed_df")"
       if [[ "$installed_tag" == "$TAG" ]]; then
         echo "OK: installed copy ${installed_df} pins Hermes ${TAG}."
@@ -353,15 +403,15 @@ if [[ "$UPDATE_INSTALLED_COPIES" == 1 ]]; then
       echo "  installed copy ${installed_df}: already pins ${TAG}, left as-is"
       continue
     fi
+    schema_error="$(installed_copy_schema_error "$installed_df")" || {
+      echo "ERROR: refusing to update legacy installed copy ${installed_df}: ${schema_error}. Refresh or reinstall the installed source, then re-run this script." >&2
+      exit 1
+    }
     apply_dockerfile_pins "$installed_df" || {
       echo "ERROR: failed to update pins in installed copy ${installed_df}" >&2
       exit 1
     }
     echo "  installed copy ${installed_df}: HERMES_VERSION ${installed_tag} -> ${TAG}"
-    if ! grep -q '^ARG HERMES_SEMVER=' "$installed_df"; then
-      echo "  NOTE: ${installed_df} predates the HERMES_SEMVER/HERMES_NPM_INTEGRITY pins;" \
-        "only the version and tarball sha256 were updated. Consider re-running the installer."
-    fi
     installed_manifest="$(dirname "$installed_df")/manifest.yaml"
     if [[ -f "$installed_manifest" ]] && grep -q '^expected_version: "' "$installed_manifest"; then
       apply_manifest_pin "$installed_manifest" || {

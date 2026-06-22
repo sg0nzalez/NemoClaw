@@ -499,7 +499,7 @@ function runHermesGatewayRuntimeCleanup(opts: {
   stalePid?: boolean;
   lockedConfigRoot?: boolean;
   rootOwnedConfigRoot?: boolean;
-  preExistingLogFile?: boolean;
+  preExistingLogFile?: boolean | "hardlink-to-config" | "hardlink-to-env";
   preExistingHistory?: "regular" | "symlink" | "directory" | "hardlink-to-config";
 }) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-runtime-cleanup-"));
@@ -512,18 +512,30 @@ function runHermesGatewayRuntimeCleanup(opts: {
   const runtimePid = path.join(runtimeDir, "gateway.pid");
   const runtimeLock = path.join(runtimeDir, "gateway.lock");
   const agentLogPath = path.join(hermesHome, "logs", "agent.log");
+  const configYamlPath = path.join(hermesHome, "config.yaml");
+  const envFilePath = path.join(hermesHome, ".env");
 
   fs.mkdirSync(runtimeDir, { recursive: true });
   fs.mkdirSync(procRoot, { recursive: true });
-  void (opts.preExistingLogFile
+  void (opts.lockedConfigRoot || opts.preExistingLogFile === "hardlink-to-config"
+    ? fs.writeFileSync(configYamlPath, "model: test\n", { mode: 0o600 })
+    : undefined);
+  void (opts.lockedConfigRoot || opts.preExistingLogFile === "hardlink-to-env"
+    ? fs.writeFileSync(envFilePath, "HERMES_TEST=1\n", { mode: 0o600 })
+    : undefined);
+  void (opts.preExistingLogFile === true
     ? (fs.mkdirSync(path.dirname(agentLogPath), { recursive: true }),
       fs.writeFileSync(agentLogPath, "pre-existing log\n", { mode: 0o644 }))
-    : undefined);
+    : opts.preExistingLogFile === "hardlink-to-config"
+      ? (fs.mkdirSync(path.dirname(agentLogPath), { recursive: true }),
+        fs.linkSync(configYamlPath, agentLogPath))
+      : opts.preExistingLogFile === "hardlink-to-env"
+        ? (fs.mkdirSync(path.dirname(agentLogPath), { recursive: true }),
+          fs.linkSync(envFilePath, agentLogPath))
+        : undefined);
   if (opts.lockedConfigRoot || opts.rootOwnedConfigRoot) {
     fs.chmodSync(hermesHome, 0o755);
   }
-  const configYamlPath = path.join(hermesHome, "config.yaml");
-  const envFilePath = path.join(hermesHome, ".env");
   if (opts.lockedConfigRoot) {
     fs.writeFileSync(configYamlPath, "model: test\n", { mode: 0o600 });
     fs.writeFileSync(envFilePath, "HERMES_TEST=1\n", { mode: 0o600 });
@@ -661,6 +673,10 @@ function runHermesGatewayRuntimeCleanup(opts: {
     const configYamlContent = fs.existsSync(configYamlPath)
       ? fs.readFileSync(configYamlPath, "utf-8")
       : "";
+    const envFileMode = fs.existsSync(envFilePath)
+      ? (fs.statSync(envFilePath).mode & 0o777).toString(8)
+      : "missing";
+    const envFileContent = fs.existsSync(envFilePath) ? fs.readFileSync(envFilePath, "utf-8") : "";
     return {
       result,
       killLog: fs.existsSync(killLog) ? fs.readFileSync(killLog, "utf-8") : "",
@@ -680,6 +696,8 @@ function runHermesGatewayRuntimeCleanup(opts: {
       symlinkTargetContent,
       configYamlMode,
       configYamlContent,
+      envFileMode,
+      envFileContent,
     };
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -1200,6 +1218,30 @@ describe("agents/hermes/start.sh gateway runtime cleanup", () => {
     expect(run.result.stderr).toContain("has hard-link count");
     expect(run.configYamlMode).toBe("600");
     expect(run.configYamlContent).toBe("model: test\n");
+  });
+
+  it("repair_hermes_log_permissions rejects log files hard-linked to config.yaml or .env and preserves config/env owner, mode, and content", () => {
+    const configRun = runHermesGatewayRuntimeCleanup({
+      staleLock: false,
+      stalePid: false,
+      preExistingLogFile: "hardlink-to-config",
+    });
+    const envRun = runHermesGatewayRuntimeCleanup({
+      staleLock: false,
+      stalePid: false,
+      preExistingLogFile: "hardlink-to-env",
+    });
+
+    expect(configRun.result.status).not.toBe(0);
+    expect(configRun.result.stderr).toContain("Refusing Hermes log repair because");
+    expect(configRun.result.stderr).toContain("has hard-link count");
+    expect(configRun.configYamlMode).toBe("600");
+    expect(configRun.configYamlContent).toBe("model: test\n");
+    expect(envRun.result.status).not.toBe(0);
+    expect(envRun.result.stderr).toContain("Refusing Hermes log repair because");
+    expect(envRun.result.stderr).toContain("has hard-link count");
+    expect(envRun.envFileMode).toBe("600");
+    expect(envRun.envFileContent).toBe("HERMES_TEST=1\n");
   });
 
   it("fails Hermes startup when the locked-root history path is a directory", () => {
