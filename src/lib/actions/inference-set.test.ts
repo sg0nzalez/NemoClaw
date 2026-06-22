@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it, vi } from "vitest";
+import { HERMES_PROXY_API_KEY_PLACEHOLDER } from "../hermes-proxy-api-key";
 import type { AgentConfigTarget } from "../sandbox/config";
 import type { ConfigObject } from "../security/credential-filter";
 import type { Session } from "../state/onboard-session";
@@ -13,6 +14,15 @@ vi.mock("../adapters/openshell/runtime", () => ({
 
 vi.mock("../inference/local", () => ({
   DEFAULT_OLLAMA_MODEL: "llama3.1",
+  validateLocalProvider: vi.fn(() => ({ ok: true })),
+}));
+
+vi.mock("../onboard/local-inference-topology", () => ({
+  ensureLocalProviderReachable: vi.fn(() => true),
+}));
+
+vi.mock("../inference/context-window", () => ({
+  resolveContextWindowForModel: vi.fn(() => null),
 }));
 
 vi.mock("../sandbox/config", () => ({
@@ -26,6 +36,7 @@ vi.mock("../shields/audit", () => ({
   appendAuditEntry: vi.fn(),
 }));
 
+import type { ValidationResult } from "../inference/local";
 import {
   type InferenceSetDeps,
   patchHermesInferenceConfig,
@@ -76,9 +87,7 @@ function baseSession(overrides: Partial<Session> = {}): Session {
     routerCredentialHash: null,
     webSearchConfig: null,
     policyPresets: null,
-    messagingChannels: null,
-    messagingChannelConfig: null,
-    disabledChannels: null,
+    messagingPlan: null,
     migratedLegacyValueHashes: null,
     hermesToolGateways: null,
     gpuPassthrough: false,
@@ -105,6 +114,9 @@ function createDeps(options: {
   target?: AgentConfigTarget;
   session?: Session | null;
   openshellStatus?: number;
+  localValidation?: ValidationResult;
+  localReachable?: boolean;
+  contextWindow?: number | null;
 }): InferenceSetDeps & {
   calls: {
     runOpenshell: ReturnType<typeof vi.fn>;
@@ -114,6 +126,9 @@ function createDeps(options: {
     updateSession: ReturnType<typeof vi.fn>;
     appendAuditEntry: ReturnType<typeof vi.fn>;
     log: ReturnType<typeof vi.fn>;
+    validateLocalProvider: ReturnType<typeof vi.fn>;
+    ensureLocalProviderReachable: ReturnType<typeof vi.fn>;
+    resolveContextWindowForModel: ReturnType<typeof vi.fn>;
   };
   getSession: () => Session | null;
 } {
@@ -124,7 +139,7 @@ function createDeps(options: {
     return acc;
   }, {});
   const defaultSandbox =
-    options.defaultSandbox === undefined ? entries[0]?.name ?? null : options.defaultSandbox;
+    options.defaultSandbox === undefined ? (entries[0]?.name ?? null) : options.defaultSandbox;
   const calls = {
     runOpenshell: vi.fn(() => ({ status: options.openshellStatus ?? 0, stdout: "", stderr: "" })),
     writeSandboxConfig: vi.fn(),
@@ -137,6 +152,11 @@ function createDeps(options: {
     }),
     appendAuditEntry: vi.fn(),
     log: vi.fn(),
+    validateLocalProvider: vi.fn((): ValidationResult => options.localValidation ?? { ok: true }),
+    ensureLocalProviderReachable: vi.fn(() => options.localReachable ?? true),
+    resolveContextWindowForModel: vi.fn((_provider: string, _model: string) =>
+      options.contextWindow === undefined ? null : options.contextWindow,
+    ),
   };
   return {
     getDefaultSandbox: () => defaultSandbox,
@@ -153,6 +173,11 @@ function createDeps(options: {
     runOpenshell: calls.runOpenshell,
     appendAuditEntry: calls.appendAuditEntry,
     log: calls.log,
+    isLocalInferenceProvider: (provider) =>
+      provider === "ollama-local" || provider === "vllm-local",
+    validateLocalProvider: calls.validateLocalProvider,
+    ensureLocalProviderReachable: calls.ensureLocalProviderReachable,
+    resolveContextWindowForModel: calls.resolveContextWindowForModel,
     calls,
     getSession: () => session,
   };
@@ -284,6 +309,7 @@ describe("patchHermesInferenceConfig", () => {
       default: "openai/gpt-5.4-mini",
       provider: "custom",
       base_url: "https://inference.local/v1",
+      api_key: HERMES_PROXY_API_KEY_PLACEHOLDER,
       temperature: 0.2,
     });
     expect(config.models).toEqual({
@@ -294,6 +320,93 @@ describe("patchHermesInferenceConfig", () => {
       },
     });
     expect(config.terminal).toEqual({ backend: "local" });
+  });
+
+  it("replaces stale Hermes API keys with the OpenShell proxy placeholder", () => {
+    for (const api_key of ["no-key-required", "sk-real-looking-key-that-must-not-survive"]) {
+      const config: ConfigObject = {
+        model: {
+          default: "old-model",
+          provider: "custom",
+          base_url: "https://old.example/v1",
+          api_key,
+        },
+      };
+
+      patchHermesInferenceConfig(config, "hermes-provider", "openai/gpt-5.4-mini");
+
+      expect((config.model as ConfigObject).api_key).toBe(HERMES_PROXY_API_KEY_PLACEHOLDER);
+    }
+  });
+
+  it("sets Hermes Anthropic Messages mode for Anthropic routes", () => {
+    const config: ConfigObject = {
+      model: {
+        default: "openai/gpt-5.4-mini",
+        provider: "custom",
+        base_url: "https://inference.local/v1",
+      },
+    };
+
+    const result = patchHermesInferenceConfig(config, "anthropic-prod", "claude-sonnet-4-6");
+
+    expect(result.route).toMatchObject({
+      providerKey: "anthropic",
+      primaryModelRef: "anthropic/claude-sonnet-4-6",
+      inferenceBaseUrl: "https://inference.local",
+      inferenceApi: "anthropic-messages",
+    });
+    expect(config.model).toEqual({
+      default: "claude-sonnet-4-6",
+      provider: "custom",
+      base_url: "https://inference.local",
+      api_key: HERMES_PROXY_API_KEY_PLACEHOLDER,
+      api_mode: "anthropic_messages",
+    });
+  });
+
+  it("clears stale Hermes API mode when switching back to OpenAI-style routes", () => {
+    const config: ConfigObject = {
+      model: {
+        default: "claude-sonnet-4-6",
+        provider: "custom",
+        base_url: "https://inference.local",
+        api_mode: "anthropic_messages",
+      },
+    };
+
+    patchHermesInferenceConfig(config, "nvidia-prod", "nvidia/nemotron-3-super-120b-a12b");
+
+    expect(config.model).toEqual({
+      default: "nvidia/nemotron-3-super-120b-a12b",
+      provider: "custom",
+      base_url: "https://inference.local/v1",
+      api_key: HERMES_PROXY_API_KEY_PLACEHOLDER,
+    });
+  });
+
+  it("keeps Bedrock Runtime adapter routes OpenAI-compatible for Hermes", () => {
+    const config: ConfigObject = { model: {} };
+
+    const result = patchHermesInferenceConfig(
+      config,
+      "compatible-anthropic-endpoint",
+      "anthropic.claude-3-5-sonnet-20240620-v1:0",
+      "openai-completions",
+    );
+
+    expect(result.route).toMatchObject({
+      providerKey: "inference",
+      primaryModelRef: "inference/anthropic.claude-3-5-sonnet-20240620-v1:0",
+      inferenceBaseUrl: "https://inference.local/v1",
+      inferenceApi: "openai-completions",
+    });
+    expect(config.model).toEqual({
+      default: "anthropic.claude-3-5-sonnet-20240620-v1:0",
+      provider: "custom",
+      base_url: "https://inference.local/v1",
+      api_key: HERMES_PROXY_API_KEY_PLACEHOLDER,
+    });
   });
 });
 
@@ -351,7 +464,7 @@ describe("runInferenceSet", () => {
     });
     expect(deps.calls.appendAuditEntry).toHaveBeenCalledWith(
       expect.objectContaining({
-        action: "shields_down",
+        action: "inference_set",
         sandbox: "alpha",
         reason: "inference set openclaw:nvidia-prod:nvidia/nemotron-3-super-120b-a12b",
       }),
@@ -414,10 +527,15 @@ describe("runInferenceSet", () => {
       { ignoreError: true },
     );
     expect(config).toEqual({
+      _nemoclaw_upstream: {
+        provider: "hermes-provider",
+        model: "openai/gpt-5.4-mini",
+      },
       model: {
         default: "openai/gpt-5.4-mini",
         provider: "custom",
         base_url: "https://inference.local/v1",
+        api_key: HERMES_PROXY_API_KEY_PLACEHOLDER,
       },
       terminal: { backend: "local" },
     });
@@ -435,10 +553,11 @@ describe("runInferenceSet", () => {
       provider: "hermes-provider",
       model: "openai/gpt-5.4-mini",
       endpointUrl: "https://inference.local/v1",
+      preferredInferenceApi: "openai-completions",
     });
     expect(deps.calls.appendAuditEntry).toHaveBeenCalledWith(
       expect.objectContaining({
-        action: "shields_down",
+        action: "inference_set",
         sandbox: "hermes",
         reason: "inference set hermes:hermes-provider:openai/gpt-5.4-mini",
       }),
@@ -451,6 +570,240 @@ describe("runInferenceSet", () => {
       providerKey: "inference",
       configChanged: true,
       sessionUpdated: true,
+    });
+  });
+
+  it("syncs OpenClaw compatible Anthropic switches to Anthropic Messages when changing provider families", async () => {
+    const config: ConfigObject = {
+      agents: { defaults: { model: { primary: "inference/nvidia/model-a" } } },
+      models: {
+        providers: {
+          inference: {
+            baseUrl: "https://inference.local/v1",
+            api: "openai-completions",
+            models: [{ id: "nvidia/model-a", name: "inference/nvidia/model-a" }],
+          },
+        },
+      },
+    };
+    const deps = createDeps({ config, session: baseSession() });
+
+    const result = await runInferenceSet(
+      {
+        provider: "compatible-anthropic-endpoint",
+        model: "claude-sonnet-proxy",
+        noVerify: true,
+      },
+      deps,
+    );
+
+    expect(config.agents).toEqual({
+      defaults: { model: { primary: "anthropic/claude-sonnet-proxy" } },
+    });
+    expect(config.models).toEqual({
+      mode: "merge",
+      providers: {
+        inference: {
+          baseUrl: "https://inference.local/v1",
+          api: "openai-completions",
+          models: [{ id: "nvidia/model-a", name: "inference/nvidia/model-a" }],
+        },
+        anthropic: {
+          baseUrl: "https://inference.local",
+          apiKey: "unused",
+          api: "anthropic-messages",
+          models: [{ id: "claude-sonnet-proxy", name: "anthropic/claude-sonnet-proxy" }],
+        },
+      },
+    });
+    expect(deps.getSession()).toMatchObject({
+      provider: "compatible-anthropic-endpoint",
+      model: "claude-sonnet-proxy",
+      preferredInferenceApi: "anthropic-messages",
+    });
+    expect(result).toMatchObject({
+      providerKey: "anthropic",
+      primaryModelRef: "anthropic/claude-sonnet-proxy",
+    });
+  });
+
+  it("preserves same-provider Bedrock Runtime adapter routing for OpenClaw switches", async () => {
+    const config: ConfigObject = {
+      agents: {
+        defaults: {
+          model: { primary: "inference/anthropic.claude-3-5-sonnet-20240620-v1:0" },
+        },
+      },
+      models: {
+        providers: {
+          inference: {
+            baseUrl: "https://inference.local/v1",
+            api: "openai-completions",
+            models: [
+              {
+                id: "anthropic.claude-3-5-sonnet-20240620-v1:0",
+                name: "inference/anthropic.claude-3-5-sonnet-20240620-v1:0",
+              },
+            ],
+          },
+        },
+      },
+    };
+    const deps = createDeps({
+      config,
+      entry: {
+        name: "alpha",
+        agent: "openclaw",
+        provider: "compatible-anthropic-endpoint",
+        model: "anthropic.claude-3-5-sonnet-20240620-v1:0",
+      },
+      session: baseSession({
+        provider: "compatible-anthropic-endpoint",
+        model: "anthropic.claude-3-5-sonnet-20240620-v1:0",
+        preferredInferenceApi: "openai-completions",
+      }),
+    });
+
+    const result = await runInferenceSet(
+      {
+        provider: "compatible-anthropic-endpoint",
+        model: "anthropic.claude-sonnet-4-6-20260101-v1:0",
+        noVerify: true,
+      },
+      deps,
+    );
+
+    expect(config.agents).toEqual({
+      defaults: {
+        model: { primary: "inference/anthropic.claude-sonnet-4-6-20260101-v1:0" },
+      },
+    });
+    expect(config.models).toMatchObject({
+      providers: {
+        inference: {
+          baseUrl: "https://inference.local/v1",
+          api: "openai-completions",
+          models: [
+            {
+              id: "anthropic.claude-sonnet-4-6-20260101-v1:0",
+              name: "inference/anthropic.claude-sonnet-4-6-20260101-v1:0",
+            },
+          ],
+        },
+      },
+    });
+    expect(result).toMatchObject({
+      providerKey: "inference",
+      primaryModelRef: "inference/anthropic.claude-sonnet-4-6-20260101-v1:0",
+    });
+  });
+
+  it("syncs Hermes compatible Anthropic switches to Anthropic Messages when changing provider families", async () => {
+    const config: ConfigObject = {
+      model: {
+        default: "openai/gpt-5.4-mini",
+        provider: "custom",
+        base_url: "https://inference.local/v1",
+      },
+    };
+    const deps = createDeps({
+      config,
+      entry: {
+        name: "hermes",
+        agent: "hermes",
+        provider: "hermes-provider",
+        model: "openai/gpt-5.4-mini",
+      },
+      defaultSandbox: "hermes",
+      target: HERMES_TARGET,
+      session: baseSession({
+        agent: "hermes",
+        sandboxName: "hermes",
+        provider: "hermes-provider",
+        model: "openai/gpt-5.4-mini",
+      }),
+    });
+
+    const result = await runInferenceSet(
+      {
+        provider: "compatible-anthropic-endpoint",
+        model: "claude-sonnet-proxy",
+        sandboxName: "hermes",
+        noVerify: true,
+      },
+      deps,
+    );
+
+    expect(config.model).toEqual({
+      default: "claude-sonnet-proxy",
+      provider: "custom",
+      base_url: "https://inference.local",
+      api_key: HERMES_PROXY_API_KEY_PLACEHOLDER,
+      api_mode: "anthropic_messages",
+    });
+    // The upstream annotation must track the selected provider together with
+    // the API-family field, so the two cannot drift apart on later switches.
+    expect(config._nemoclaw_upstream).toEqual({
+      provider: "compatible-anthropic-endpoint",
+      model: "claude-sonnet-proxy",
+    });
+    expect(deps.getSession()).toMatchObject({
+      provider: "compatible-anthropic-endpoint",
+      model: "claude-sonnet-proxy",
+      preferredInferenceApi: "anthropic-messages",
+    });
+    expect(result).toMatchObject({
+      providerKey: "anthropic",
+      primaryModelRef: "anthropic/claude-sonnet-proxy",
+    });
+  });
+
+  it("preserves same-provider Bedrock Runtime adapter routing for Hermes switches", async () => {
+    const config: ConfigObject = {
+      model: {
+        default: "anthropic.claude-3-5-sonnet-20240620-v1:0",
+        provider: "custom",
+        base_url: "https://inference.local/v1",
+      },
+    };
+    const deps = createDeps({
+      config,
+      entry: {
+        name: "hermes",
+        agent: "hermes",
+        provider: "compatible-anthropic-endpoint",
+        model: "anthropic.claude-3-5-sonnet-20240620-v1:0",
+      },
+      defaultSandbox: "hermes",
+      target: HERMES_TARGET,
+      session: baseSession({
+        agent: "hermes",
+        sandboxName: "hermes",
+        provider: "compatible-anthropic-endpoint",
+        model: "anthropic.claude-3-5-sonnet-20240620-v1:0",
+        preferredInferenceApi: "openai-completions",
+      }),
+    });
+
+    const result = await runInferenceSet(
+      {
+        provider: "compatible-anthropic-endpoint",
+        model: "anthropic.claude-sonnet-4-6-20260101-v1:0",
+        sandboxName: "hermes",
+        noVerify: true,
+      },
+      deps,
+    );
+
+    expect(config.model).toEqual({
+      default: "anthropic.claude-sonnet-4-6-20260101-v1:0",
+      provider: "custom",
+      base_url: "https://inference.local/v1",
+      api_key: HERMES_PROXY_API_KEY_PLACEHOLDER,
+    });
+    expect(result).toMatchObject({
+      providerKey: "inference",
+      primaryModelRef: "inference/anthropic.claude-sonnet-4-6-20260101-v1:0",
     });
   });
 
@@ -469,11 +822,7 @@ describe("runInferenceSet", () => {
 
     await runInferenceSet({ provider: "hermes-provider", model: "z-ai/glm-5.1" }, deps);
 
-    expect(deps.calls.writeSandboxConfig).toHaveBeenCalledWith(
-      "hermes-one",
-      HERMES_TARGET,
-      config,
-    );
+    expect(deps.calls.writeSandboxConfig).toHaveBeenCalledWith("hermes-one", HERMES_TARGET, config);
     expect(deps.calls.updateSandbox).toHaveBeenCalledWith("hermes-one", {
       provider: "hermes-provider",
       model: "z-ai/glm-5.1",
@@ -602,5 +951,132 @@ describe("runInferenceSet", () => {
     expect(logged).toMatch(/integrity hash/);
     expect(logged).toMatch(/rebuild/);
     expect(logged).not.toMatch(/Inference route synced/);
+  });
+});
+
+describe("runInferenceSet local-provider verification", () => {
+  const localConfig = (): ConfigObject => ({
+    agents: { defaults: { model: { primary: "inference/qwen2.5:7b" } } },
+    models: {
+      providers: {
+        inference: {
+          api: "openai-completions",
+          models: [{ id: "qwen2.5:7b", name: "inference/qwen2.5:7b" }],
+        },
+      },
+    },
+  });
+
+  it("forces --no-verify for a local provider whose host validation passes", async () => {
+    const deps = createDeps({ config: localConfig(), session: baseSession() });
+
+    await runInferenceSet({ provider: "ollama-local", model: "qwen2.5:7b" }, deps);
+
+    expect(deps.calls.validateLocalProvider).toHaveBeenCalledWith("ollama-local");
+    const args = deps.calls.runOpenshell.mock.calls[0][0] as string[];
+    expect(args).toContain("--no-verify");
+    expect(deps.calls.ensureLocalProviderReachable).not.toHaveBeenCalled();
+  });
+
+  it("warns and proceeds with --no-verify when the host stack is reachable despite a failed probe", async () => {
+    const deps = createDeps({
+      config: localConfig(),
+      session: baseSession(),
+      localValidation: {
+        ok: false,
+        message: "Local Ollama is responding on 127.0.0.1, but the container check failed.",
+        diagnostic: "add-host probe timed out",
+      },
+      localReachable: true,
+    });
+
+    await runInferenceSet({ provider: "ollama-local", model: "qwen2.5:7b" }, deps);
+
+    expect(deps.calls.ensureLocalProviderReachable).toHaveBeenCalledWith("ollama-local");
+    const args = deps.calls.runOpenshell.mock.calls[0][0] as string[];
+    expect(args).toContain("--no-verify");
+    const logged = deps.calls.log.mock.calls.map((a) => String(a[0])).join("\n");
+    expect(logged).toMatch(/reachable/);
+  });
+
+  it("aborts without touching the route when the host stack is unreachable", async () => {
+    const deps = createDeps({
+      config: localConfig(),
+      session: baseSession(),
+      localValidation: {
+        ok: false,
+        message: "Local Ollama was selected, but nothing is responding on http://127.0.0.1:11434.",
+      },
+      localReachable: false,
+    });
+
+    await expect(
+      runInferenceSet({ provider: "ollama-local", model: "qwen2.5:7b" }, deps),
+    ).rejects.toThrow(/Cannot reach local provider 'ollama-local'/);
+    expect(deps.calls.runOpenshell).not.toHaveBeenCalled();
+    expect(deps.calls.updateSandbox).not.toHaveBeenCalled();
+  });
+
+  it("does not run local validation or force --no-verify for cloud providers", async () => {
+    const deps = createDeps({
+      config: localConfig(),
+      session: baseSession(),
+    });
+
+    await runInferenceSet(
+      { provider: "nvidia-prod", model: "nvidia/nemotron-3-super-120b-a12b" },
+      deps,
+    );
+
+    expect(deps.calls.validateLocalProvider).not.toHaveBeenCalled();
+    expect(deps.calls.ensureLocalProviderReachable).not.toHaveBeenCalled();
+    const args = deps.calls.runOpenshell.mock.calls[0][0] as string[];
+    expect(args).not.toContain("--no-verify");
+  });
+});
+
+describe("runInferenceSet context window", () => {
+  const ollamaConfig = (): ConfigObject => ({
+    agents: { defaults: { model: { primary: "inference/llama3.2:3b" } } },
+    models: {
+      providers: {
+        inference: {
+          api: "openai-completions",
+          models: [{ id: "llama3.2:3b", name: "inference/llama3.2:3b", contextWindow: 131072 }],
+        },
+      },
+    },
+  });
+
+  function inferenceModels(config: ConfigObject): Array<Record<string, unknown>> {
+    const models = config.models as { providers: { inference: { models: unknown } } };
+    return models.providers.inference.models as Array<Record<string, unknown>>;
+  }
+
+  it("writes the recomputed context window into the in-sandbox config", async () => {
+    const config = ollamaConfig();
+    const deps = createDeps({ config, session: baseSession(), contextWindow: 16384 });
+
+    await runInferenceSet({ provider: "ollama-local", model: "qwen2.5:7b", noVerify: true }, deps);
+
+    expect(deps.calls.resolveContextWindowForModel).toHaveBeenCalledWith(
+      "ollama-local",
+      "qwen2.5:7b",
+    );
+    expect(inferenceModels(config)[0].contextWindow).toBe(16384);
+    const logged = deps.calls.log.mock.calls.map((a) => String(a[0])).join("\n");
+    expect(logged).toMatch(/Context window for 'qwen2\.5:7b': 16384 tokens/);
+  });
+
+  it("keeps the existing window and warns when it cannot be determined", async () => {
+    const config = ollamaConfig();
+    const deps = createDeps({ config, session: baseSession(), contextWindow: null });
+
+    await runInferenceSet({ provider: "ollama-local", model: "qwen2.5:7b", noVerify: true }, deps);
+
+    expect(inferenceModels(config)[0].contextWindow).toBe(131072);
+    const logged = deps.calls.log.mock.calls.map((a) => String(a[0])).join("\n");
+    expect(logged).toMatch(/could not determine the context window/i);
+    expect(logged).toMatch(/rebuild/);
   });
 });

@@ -284,10 +284,19 @@ describe("OpenAI-compatible inference probes", () => {
     });
   });
 
-  it("keeps the default chat-completions probe minimal for other models", () => {
+  it("keeps the default chat-completions probe bounded for other models", () => {
     expect(getChatCompletionsProbePayload("nvidia/nemotron-3-super-120b-a12b")).toEqual({
       model: "nvidia/nemotron-3-super-120b-a12b",
       messages: [{ role: "user", content: "Reply with exactly: OK" }],
+      max_tokens: 8,
+    });
+  });
+
+  it("bounds the hosted compatible inference probe for the served Nemotron model", () => {
+    expect(getChatCompletionsProbePayload("nvidia/nvidia/nemotron-3-super-v3")).toEqual({
+      model: "nvidia/nvidia/nemotron-3-super-v3",
+      messages: [{ role: "user", content: "Reply with exactly: OK" }],
+      max_tokens: 8,
     });
   });
 
@@ -431,7 +440,9 @@ describe("OpenAI-compatible inference probes", () => {
       );
 
       expect(result).toMatchObject({ ok: false });
-      expect(result.message).toMatch(/cannot be validated.*structured Chat Completions tool calls/i);
+      expect(result.message).toMatch(
+        /cannot be validated.*structured Chat Completions tool calls/i,
+      );
     });
   });
 
@@ -651,9 +662,7 @@ exit 0
         expect(fs.readFileSync(counter, "utf8").trim()).toBe("2");
         for (const call of ["1", "2"]) {
           const args = fs.readFileSync(path.join(tmpDir, `args-${call}.txt`), "utf8");
-          expect(args).toContain(
-            "https://api.example.com/v1/chat/completions?key=secret%20key",
-          );
+          expect(args).toContain("https://api.example.com/v1/chat/completions?key=secret%20key");
           expect(args).not.toContain("Authorization: Bearer");
         }
       } finally {

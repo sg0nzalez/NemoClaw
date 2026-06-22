@@ -1,10 +1,21 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { SandboxMessagingPlan } from "../../../messaging/manifest";
+import { hashCredential } from "../../../security/credential-hash";
 import type { Session, SessionUpdates } from "../../../state/onboard-session";
+import { getActiveChannelsFromPlan, getChannelsFromPlan } from "../../messaging-plan-session";
 import { withSandboxPhaseTrace } from "../../tracing";
+import { branchTo, type OnboardStateTransitionResult } from "../result";
 
-export interface SandboxStateOptions<Gpu, Agent, WebSearchConfig, MessagingChannelConfig, SandboxGpuConfig, ResourceProfile> {
+export interface SandboxStateOptions<
+  Gpu,
+  Agent,
+  WebSearchConfig,
+  MessagingChannelConfig,
+  SandboxGpuConfig,
+  ResourceProfile,
+> {
   resume: boolean;
   fresh: boolean;
   resumeAgentChanged: boolean;
@@ -25,17 +36,26 @@ export interface SandboxStateOptions<Gpu, Agent, WebSearchConfig, MessagingChann
   rootDir: string;
   deps: {
     resolvePath(value: string): string;
-    agentSupportsWebSearch(agent: Agent, dockerfilePathOverride: string | null, rootDir: string): boolean;
+    agentSupportsWebSearch(
+      agent: Agent,
+      dockerfilePathOverride: string | null,
+      rootDir: string,
+    ): boolean;
     note(message: string): void;
     updateSession(mutator: (session: Session) => Session | void): Session;
-    getStoredMessagingChannelConfig(sandboxName: string | null, session: Session | null): MessagingChannelConfig | null;
-    hydrateMessagingChannelConfig(config: MessagingChannelConfig | null): MessagingChannelConfig | null;
-    messagingChannelConfigsEqual(left: MessagingChannelConfig | null, right: MessagingChannelConfig | null): boolean;
-    persistMessagingChannelConfigToSession(config: MessagingChannelConfig | null): void;
+    getStoredMessagingChannelConfig(
+      sandboxName: string | null,
+      session: Session | null,
+    ): MessagingChannelConfig | null;
+    hydrateMessagingChannelConfig(
+      config: MessagingChannelConfig | null,
+    ): MessagingChannelConfig | null;
+    messagingChannelConfigsEqual(
+      left: MessagingChannelConfig | null,
+      right: MessagingChannelConfig | null,
+    ): boolean;
     getSandboxReuseState(sandboxName: string | null): string;
-    computeTelegramRequireMention(): boolean | null;
     hasSandboxGpuDrift(sandboxName: string, config: SandboxGpuConfig): boolean;
-    hasWechatConfigDrift(session: Session | null): boolean;
     getSandboxHermesToolGateways(sandboxName: string): unknown;
     normalizeHermesToolGatewaySelections(value: unknown): string[];
     stringSetsEqual(left: string[], right: string[]): boolean;
@@ -48,15 +68,23 @@ export interface SandboxStateOptions<Gpu, Agent, WebSearchConfig, MessagingChann
       agent: Agent,
       dockerfilePathOverride: string | null,
     ): Promise<WebSearchConfig | null>;
-    startRecordedStep(stepName: string, updates: { provider: string; model: string }): Promise<void>;
+    startRecordedStep(
+      stepName: string,
+      updates: { provider: string; model: string },
+    ): Promise<void>;
     getRecordedMessagingChannelsForResume(
       resume: boolean,
       session: Session | null,
       sandboxName: string | null,
     ): string[] | null;
-    getSandboxMessagingChannels(sandboxName: string): string[] | null | undefined;
-    setupMessagingChannels(agent: Agent, existingChannels: string[] | null): Promise<string[]>;
-    readMessagingChannelConfigFromEnv(): MessagingChannelConfig | null;
+    setupMessagingChannels(
+      agent: Agent,
+      existingChannels: string[] | null,
+      sandboxName: string,
+    ): Promise<string[]>;
+    readMessagingPlanFromEnv(): SandboxMessagingPlan | null;
+    writePlanToEnv(plan: SandboxMessagingPlan): void;
+    getRegistrySandboxMessagingPlan(sandboxName: string): SandboxMessagingPlan | null;
     promptValidatedSandboxName(agent: Agent): Promise<string>;
     selectResourceProfileForSandbox(): Promise<ResourceProfile | null>;
     stopStaleDashboardListenersForSandbox(sandboxes: unknown[], sandboxName: string): void;
@@ -77,14 +105,24 @@ export interface SandboxStateOptions<Gpu, Agent, WebSearchConfig, MessagingChann
       hermesToolGateways: string[],
     ): Promise<string>;
     updateSandboxRegistry(sandboxName: string, updates: Record<string, unknown>): void;
-    getSandboxAgentRegistryFields(agent: Agent, agentVersionKnown: boolean): Record<string, unknown>;
+    getSandboxAgentRegistryFields(
+      agent: Agent,
+      agentVersionKnown: boolean,
+    ): Record<string, unknown>;
     recordStepComplete(stepName: string, updates: SessionUpdates): Promise<Session>;
     toSessionUpdates(updates: Record<string, unknown>): SessionUpdates;
     skippedStepMessage(stepName: string, detail?: string | null): void;
-    recordStateSkipped(state: "sandbox", metadata?: Record<string, unknown> | null): Promise<Session>;
+    recordStateSkipped(
+      state: "sandbox",
+      metadata?: Record<string, unknown> | null,
+    ): Promise<Session>;
     recordRepairEvent(
       type: "state.repair.started" | "state.repair.completed" | "state.repair.failed",
-      options?: { state?: "sandbox"; error?: string | null; metadata?: Record<string, unknown> | null },
+      options?: {
+        state?: "sandbox";
+        error?: string | null;
+        metadata?: Record<string, unknown> | null;
+      },
     ): Promise<Session>;
     error(message?: string): void;
     exitProcess(code: number): never;
@@ -97,13 +135,33 @@ export interface SandboxStateResult<WebSearchConfig> {
   selectedMessagingChannels: string[];
   webSearchSupported: boolean;
   session: Session | null;
+  stateResult: OnboardStateTransitionResult;
 }
 
-function sameEffectiveTelegramRequireMention(left: boolean | null, right: boolean | null): boolean {
-  return (left ?? false) === (right ?? false);
+function refreshCredentialHashesFromEnv(plan: SandboxMessagingPlan): {
+  plan: SandboxMessagingPlan;
+  changed: boolean;
+} {
+  let changed = false;
+  const credentialBindings = plan.credentialBindings.map((binding) => {
+    if (binding.credentialAvailable !== true) return binding;
+    const credentialHash = hashCredential(process.env[binding.providerEnvKey]);
+    if (!credentialHash || credentialHash === binding.credentialHash) return binding;
+    changed = true;
+    return { ...binding, credentialHash };
+  });
+
+  return changed ? { plan: { ...plan, credentialBindings }, changed } : { plan, changed };
 }
 
-export async function handleSandboxState<Gpu, Agent, WebSearchConfig, MessagingChannelConfig, SandboxGpuConfig, ResourceProfile>({
+export async function handleSandboxState<
+  Gpu,
+  Agent,
+  WebSearchConfig,
+  MessagingChannelConfig,
+  SandboxGpuConfig,
+  ResourceProfile,
+>({
   resume,
   fresh,
   resumeAgentChanged,
@@ -147,48 +205,41 @@ export async function handleSandboxState<Gpu, Agent, WebSearchConfig, MessagingC
   }
 
   const storedMessagingChannelConfig = deps.getStoredMessagingChannelConfig(sandboxName, session);
-  const effectiveMessagingChannelConfig = deps.hydrateMessagingChannelConfig(storedMessagingChannelConfig);
+  const effectiveMessagingChannelConfig = deps.hydrateMessagingChannelConfig(
+    storedMessagingChannelConfig,
+  );
   const messagingChannelConfigChanged = !deps.messagingChannelConfigsEqual(
     effectiveMessagingChannelConfig,
     storedMessagingChannelConfig,
   );
-  if (effectiveMessagingChannelConfig) {
-    deps.persistMessagingChannelConfigToSession(effectiveMessagingChannelConfig);
-    if (session) session.messagingChannelConfig = effectiveMessagingChannelConfig as Session["messagingChannelConfig"];
-  }
 
   const sandboxReuseState = deps.getSandboxReuseState(sandboxName);
-  const webSearchConfigChanged = webSearchSupportDropped || Boolean(session?.webSearchConfig) !== Boolean(webSearchConfig);
-  const currentTelegramRequireMention = deps.computeTelegramRequireMention();
-  const recordedTelegramRequireMention = session?.telegramConfig?.requireMention ?? null;
-  // Telegram mention-mode is baked into openclaw.json at sandbox build time.
-  // Compare effective modes because null and false both produce groupPolicy: open
-  // during config generation. This preserves the original #1737/#2417 drift rule.
-  const telegramConfigChanged = !sameEffectiveTelegramRequireMention(
-    currentTelegramRequireMention,
-    recordedTelegramRequireMention,
-  );
-  const sandboxGpuConfigChanged = sandboxName ? deps.hasSandboxGpuDrift(sandboxName, sandboxGpuConfig) : false;
-  const wechatConfigChanged = deps.hasWechatConfigDrift(session);
+  const webSearchConfigChanged =
+    webSearchSupportDropped || Boolean(session?.webSearchConfig) !== Boolean(webSearchConfig);
+  const sandboxGpuConfigChanged = sandboxName
+    ? deps.hasSandboxGpuDrift(sandboxName, sandboxGpuConfig)
+    : false;
   const recordedHermesToolGateways = sandboxName
     ? deps.normalizeHermesToolGatewaySelections(deps.getSandboxHermesToolGateways(sandboxName))
     : [];
-  const hermesToolGatewayConfigChanged = !deps.stringSetsEqual(recordedHermesToolGateways, hermesToolGateways);
+  const hermesToolGatewayConfigChanged = !deps.stringSetsEqual(
+    recordedHermesToolGateways,
+    hermesToolGateways,
+  );
   const resumeSandbox =
     resume &&
     !resumeAgentChanged &&
     !webSearchConfigChanged &&
-    !telegramConfigChanged &&
     !sandboxGpuConfigChanged &&
-    !wechatConfigChanged &&
     !messagingChannelConfigChanged &&
     !hermesToolGatewayConfigChanged &&
     session?.steps?.sandbox?.status === "complete" &&
     sandboxReuseState === "ready";
 
   if (resumeSandbox) {
-    if (webSearchConfig) deps.note("  [resume] Reusing Brave Search configuration already baked into the sandbox.");
-    selectedMessagingChannels = session?.messagingChannels ?? [];
+    if (webSearchConfig)
+      deps.note("  [resume] Reusing Brave Search configuration already baked into the sandbox.");
+    selectedMessagingChannels = getActiveChannelsFromPlan(session?.messagingPlan) ?? [];
     deps.skippedStepMessage("sandbox", sandboxName);
     await deps.recordStateSkipped("sandbox", { reason: "resume", sandboxName });
   } else {
@@ -198,14 +249,8 @@ export async function handleSandboxState<Gpu, Agent, WebSearchConfig, MessagingC
       } else if (webSearchConfigChanged) {
         deps.note("  [resume] Web Search configuration changed; recreating sandbox.");
         if (sandboxName) deps.removeSandboxFromRegistry(sandboxName);
-      } else if (telegramConfigChanged) {
-        deps.note("  [resume] TELEGRAM_REQUIRE_MENTION changed; recreating sandbox.");
-        if (sandboxName) deps.removeSandboxFromRegistry(sandboxName);
       } else if (sandboxGpuConfigChanged) {
         deps.note("  [resume] Sandbox GPU settings changed; recreating sandbox.");
-        if (sandboxName) deps.removeSandboxFromRegistry(sandboxName);
-      } else if (wechatConfigChanged) {
-        deps.note("  [resume] WeChat account metadata changed; recreating sandbox.");
         if (sandboxName) deps.removeSandboxFromRegistry(sandboxName);
       } else if (messagingChannelConfigChanged) {
         deps.note("  [resume] Messaging channel configuration changed; recreating sandbox.");
@@ -214,7 +259,9 @@ export async function handleSandboxState<Gpu, Agent, WebSearchConfig, MessagingC
         deps.note("  [resume] Hermes managed tool gateway selection changed; recreating sandbox.");
         if (sandboxName) deps.removeSandboxFromRegistry(sandboxName);
       } else if (sandboxReuseState === "not_ready") {
-        deps.note(`  [resume] Recorded sandbox '${sandboxName}' exists but is not ready; recreating it.`);
+        deps.note(
+          `  [resume] Recorded sandbox '${sandboxName}' exists but is not ready; recreating it.`,
+        );
         const repairMetadata = { repair: "recorded-sandbox-cleanup", sandboxName };
         await deps.recordRepairEvent("state.repair.started", {
           state: "sandbox",
@@ -255,29 +302,62 @@ export async function handleSandboxState<Gpu, Agent, WebSearchConfig, MessagingC
     }
 
     await deps.startRecordedStep("sandbox", { provider, model });
-    const recordedMessagingChannels = deps.getRecordedMessagingChannelsForResume(resume, session, sandboxName);
+    if (!sandboxName) sandboxName = await deps.promptValidatedSandboxName(agent);
+    const recordedMessagingChannels = deps.getRecordedMessagingChannelsForResume(
+      resume,
+      session,
+      sandboxName,
+    );
+    let messagingPlan: SandboxMessagingPlan | null = null;
+    const envMessagingPlan = deps.readMessagingPlanFromEnv();
+    const registryMessagingPlan = sandboxName
+      ? deps.getRegistrySandboxMessagingPlan(sandboxName)
+      : null;
     if (recordedMessagingChannels) {
       selectedMessagingChannels = recordedMessagingChannels;
-      if (selectedMessagingChannels.length > 0) {
-        deps.note(`  [non-interactive] Reusing messaging channel configuration: ${selectedMessagingChannels.join(", ")}`);
+      if (envMessagingPlan) {
+        const refreshed = refreshCredentialHashesFromEnv(envMessagingPlan);
+        messagingPlan = refreshed.plan;
+        if (refreshed.changed) deps.writePlanToEnv(refreshed.plan);
+        selectedMessagingChannels = getActiveChannelsFromPlan(messagingPlan) ?? [];
+      } else if (registryMessagingPlan) {
+        const refreshed = refreshCredentialHashesFromEnv(registryMessagingPlan);
+        deps.writePlanToEnv(refreshed.plan);
+        messagingPlan = refreshed.plan;
+        selectedMessagingChannels = getActiveChannelsFromPlan(messagingPlan) ?? [];
       }
+      if (selectedMessagingChannels.length > 0) {
+        deps.note(
+          `  [non-interactive] Reusing messaging channel configuration: ${selectedMessagingChannels.join(", ")}`,
+        );
+      }
+    } else if (envMessagingPlan) {
+      const refreshed = refreshCredentialHashesFromEnv(envMessagingPlan);
+      messagingPlan = refreshed.plan;
+      if (refreshed.changed) deps.writePlanToEnv(refreshed.plan);
+      selectedMessagingChannels = getActiveChannelsFromPlan(messagingPlan) ?? [];
+    } else if (registryMessagingPlan) {
+      const refreshed = refreshCredentialHashesFromEnv(registryMessagingPlan);
+      deps.writePlanToEnv(refreshed.plan);
+      messagingPlan = refreshed.plan;
+      selectedMessagingChannels = getActiveChannelsFromPlan(messagingPlan) ?? [];
     } else {
-      const existing = sandboxName
-        ? deps.getSandboxMessagingChannels(sandboxName) ?? session?.messagingChannels ?? null
-        : session?.messagingChannels ?? null;
-      selectedMessagingChannels = await deps.setupMessagingChannels(agent, existing);
+      const existing = getChannelsFromPlan(session?.messagingPlan);
+      selectedMessagingChannels = await deps.setupMessagingChannels(agent, existing, sandboxName);
+      messagingPlan = deps.readMessagingPlanFromEnv();
     }
-    const messagingChannelConfig = deps.readMessagingChannelConfigFromEnv();
     session = deps.updateSession((current) => {
-      current.messagingChannels = selectedMessagingChannels;
-      current.messagingChannelConfig = messagingChannelConfig as Session["messagingChannelConfig"];
+      current.messagingPlan = messagingPlan;
       return current;
     });
 
-    if (!sandboxName) sandboxName = await deps.promptValidatedSandboxName(agent);
     const confirmedSandboxName = sandboxName;
     const resourceProfile = await deps.selectResourceProfileForSandbox();
-    if (fresh) deps.stopStaleDashboardListenersForSandbox(deps.listRegistrySandboxes().sandboxes, confirmedSandboxName);
+    if (fresh)
+      deps.stopStaleDashboardListenersForSandbox(
+        deps.listRegistrySandboxes().sandboxes,
+        confirmedSandboxName,
+      );
     sandboxName = await withSandboxPhaseTrace(
       confirmedSandboxName,
       provider,
@@ -301,14 +381,21 @@ export async function handleSandboxState<Gpu, Agent, WebSearchConfig, MessagingC
         ),
     );
     webSearchConfig = nextWebSearchConfig;
+    // createSandbox() already wrote the NemoClaw build fingerprint correctly:
+    // a fresh build stamps the current version, while reuse preserves the
+    // existing value (updateReusedSandboxMetadata never overwrites it). Drop it
+    // from this supplementary update so reusing a sandbox after a NemoClaw
+    // upgrade does not re-stamp a stale image as current and mask drift (#5026).
+    const { nemoclawVersion: _builtFingerprint, ...agentRegistryFields } =
+      deps.getSandboxAgentRegistryFields(agent, !fromDockerfile);
     deps.updateSandboxRegistry(sandboxName, {
       model,
       provider,
-      ...deps.getSandboxAgentRegistryFields(agent, !fromDockerfile),
+      ...agentRegistryFields,
     });
     // Default-marking is deferred to finalization so a cancelled onboard never
     // leaves this sandbox registered as default (#4614).
-    session = await deps.recordStepComplete(
+    await deps.recordStepComplete(
       "sandbox",
       deps.toSessionUpdates({
         sandboxName,
@@ -316,7 +403,7 @@ export async function handleSandboxState<Gpu, Agent, WebSearchConfig, MessagingC
         model,
         nimContainer,
         webSearchConfig,
-        messagingChannelConfig,
+        messagingPlan,
         hermesToolGateways,
       }),
     );
@@ -335,5 +422,12 @@ export async function handleSandboxState<Gpu, Agent, WebSearchConfig, MessagingC
     selectedMessagingChannels,
     webSearchSupported,
     session,
+    stateResult: branchTo(agent ? "agent_setup" : "openclaw", {
+      metadata: {
+        state: "sandbox",
+        sandboxName: completedSandboxName,
+        agent: (agent as { name?: string } | null)?.name ?? "openclaw",
+      },
+    }),
   };
 }

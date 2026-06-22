@@ -21,23 +21,30 @@ describe("messaging channel config", () => {
       "WECHAT_ALLOWED_IDS",
       "SLACK_ALLOWED_USERS",
       "SLACK_ALLOWED_CHANNELS",
+      "WHATSAPP_ALLOWED_IDS",
+      "TELEGRAM_GROUP_POLICY",
+      "WECHAT_ACCOUNT_ID",
+      "WECHAT_BASE_URL",
+      "WECHAT_USER_ID",
     ]);
   });
 
-  it("sanitizes persisted config and rejects malformed reply-mode values", () => {
+  it("sanitizes persisted config and rejects malformed choice values", () => {
     expect(
       sanitizeMessagingChannelConfig({
         TELEGRAM_ALLOWED_IDS: "  123,456  ",
-        TELEGRAM_AUTHORIZED_CHAT_IDS: "ignored-because-canonical-wins",
         TELEGRAM_REQUIRE_MENTION: "yes",
+        TELEGRAM_GROUP_POLICY: "allowlist",
+        TELEGRAM_GROUP_POLICY_INVALID: "disabled",
         DISCORD_SERVER_ID: "1491590992753590594",
         DISCORD_REQUIRE_MENTION: "0",
         SLACK_ALLOWED_USERS: "  U01ABC2DEF3, U04GHI5JKL6  ",
         SLACK_ALLOWED_CHANNELS: "  C012AB3CD, C987ZY6XW  ",
-        NVIDIA_API_KEY: "not-channel-config",
+        NVIDIA_INFERENCE_API_KEY: "not-channel-config",
       }),
     ).toEqual({
       TELEGRAM_ALLOWED_IDS: "123,456",
+      TELEGRAM_GROUP_POLICY: "allowlist",
       DISCORD_SERVER_ID: "1491590992753590594",
       DISCORD_REQUIRE_MENTION: "0",
       SLACK_ALLOWED_USERS: "U01ABC2DEF3, U04GHI5JKL6",
@@ -45,22 +52,39 @@ describe("messaging channel config", () => {
     });
   });
 
-  it("canonicalizes Telegram allowlist aliases from env and persisted config", () => {
+  it("leaves Telegram compatibility aliases to Telegram enrollment hooks", () => {
     expect(
       sanitizeMessagingChannelConfig({
         TELEGRAM_AUTHORIZED_CHAT_IDS: "  123, 456  ",
       }),
-    ).toEqual({
-      TELEGRAM_ALLOWED_IDS: "123, 456",
-    });
+    ).toBeNull();
 
     expect(
       readMessagingChannelConfigFromEnv({
         TELEGRAM_CHAT_ID: "8388960805",
       }),
-    ).toEqual({
-      TELEGRAM_ALLOWED_IDS: "8388960805",
+    ).toBeNull();
+  });
+
+  it("normalizes Discord compatibility aliases to canonical channel config", () => {
+    const env: NodeJS.ProcessEnv = {
+      DISCORD_SERVER_IDS: "1491590992753590594",
+      DISCORD_ALLOWED_IDS: "1005536447329222676",
+      DISCORD_REQUIRE_MENTION: "0",
+    };
+
+    expect(readMessagingChannelConfigFromEnv(env)).toEqual({
+      DISCORD_SERVER_ID: "1491590992753590594",
+      DISCORD_USER_ID: "1005536447329222676",
+      DISCORD_REQUIRE_MENTION: "0",
     });
+    expect(hydrateMessagingChannelConfig(null, env)).toEqual({
+      DISCORD_SERVER_ID: "1491590992753590594",
+      DISCORD_USER_ID: "1005536447329222676",
+      DISCORD_REQUIRE_MENTION: "0",
+    });
+    expect(env.DISCORD_SERVER_ID).toBe("1491590992753590594");
+    expect(env.DISCORD_USER_ID).toBe("1005536447329222676");
   });
 
   it("hydrates missing env values but preserves explicit env overrides", () => {
@@ -73,6 +97,7 @@ describe("messaging channel config", () => {
         {
           TELEGRAM_ALLOWED_IDS: "stored-user",
           TELEGRAM_REQUIRE_MENTION: "1",
+          TELEGRAM_GROUP_POLICY: "nonsense",
           DISCORD_REQUIRE_MENTION: "maybe",
         },
         env,
@@ -83,18 +108,17 @@ describe("messaging channel config", () => {
     });
     expect(env.TELEGRAM_ALLOWED_IDS).toBe("env-user");
     expect(env.TELEGRAM_REQUIRE_MENTION).toBe("1");
+    expect(env.TELEGRAM_GROUP_POLICY).toBeUndefined();
     expect(env.DISCORD_REQUIRE_MENTION).toBeUndefined();
   });
 
-  it("hydrates Telegram aliases into the canonical env key for downstream build code", () => {
+  it("does not hydrate Telegram aliases outside the enrollment hook", () => {
     const env: NodeJS.ProcessEnv = {
       TELEGRAM_AUTHORIZED_CHAT_IDS: "alias-user",
     };
 
-    expect(hydrateMessagingChannelConfig(null, env)).toEqual({
-      TELEGRAM_ALLOWED_IDS: "alias-user",
-    });
-    expect(env.TELEGRAM_ALLOWED_IDS).toBe("alias-user");
+    expect(hydrateMessagingChannelConfig(null, env)).toBeNull();
+    expect(env.TELEGRAM_ALLOWED_IDS).toBeUndefined();
   });
 
   it("reads effective config from env", () => {
@@ -103,10 +127,12 @@ describe("messaging channel config", () => {
         DISCORD_SERVER_ID: "1491590992753590594",
         DISCORD_REQUIRE_MENTION: "2",
         TELEGRAM_REQUIRE_MENTION: "0",
+        TELEGRAM_GROUP_POLICY: "disabled",
       }),
     ).toEqual({
       DISCORD_SERVER_ID: "1491590992753590594",
       TELEGRAM_REQUIRE_MENTION: "0",
+      TELEGRAM_GROUP_POLICY: "disabled",
     });
   });
 });

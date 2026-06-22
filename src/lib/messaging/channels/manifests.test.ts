@@ -5,13 +5,17 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
-import {
-  buildDiscordConfig,
-  buildMessagingEnvLines,
-} from "../../../../agents/hermes/config/messaging-config.ts";
 import { getChannelTokenKeys, KNOWN_CHANNELS, knownChannelNames } from "../../sandbox/channels";
-import { COMMON_TOKEN_PASTE_HOOK_HANDLER_ID } from "../hooks/common";
-import type { ChannelInputSpec, ChannelManifest, ChannelRenderSpec } from "../manifest";
+import {
+  COMMON_CONFIG_PROMPT_HOOK_HANDLER_ID,
+  COMMON_TOKEN_PASTE_HOOK_HANDLER_ID,
+} from "../hooks/common";
+import type {
+  ChannelHookSpec,
+  ChannelInputSpec,
+  ChannelManifest,
+  ChannelRenderSpec,
+} from "../manifest";
 import {
   BUILT_IN_CHANNEL_MANIFESTS,
   createBuiltInChannelManifestRegistry,
@@ -21,6 +25,15 @@ import {
   wechatManifest,
   whatsappManifest,
 } from "./index";
+import {
+  SLACK_SOCKET_MODE_GATEWAY_CONFLICT_HOOK_HANDLER_ID,
+  SLACK_SOCKET_MODE_GATEWAY_STATUS_HOOK_HANDLER_ID,
+  SLACK_VALIDATE_CREDENTIALS_HOOK_HANDLER_ID,
+} from "./slack/hooks";
+import {
+  TELEGRAM_ALLOWLIST_ALIASES_HOOK_ID,
+  TELEGRAM_GATEWAY_CONFLICT_STATUS_HOOK_HANDLER_ID,
+} from "./telegram/hooks";
 
 function findInput(manifest: ChannelManifest, inputId: string): ChannelInputSpec {
   const input = manifest.inputs.find((entry) => entry.id === inputId);
@@ -34,8 +47,29 @@ function findRender(manifest: ChannelManifest, renderId: string): ChannelRenderS
   return render;
 }
 
+function findHook(manifest: ChannelManifest, hookId: string): ChannelHookSpec {
+  const hook = manifest.hooks.find((entry) => entry.id === hookId);
+  if (!hook) throw new Error(`missing hook ${manifest.id}.${hookId}`);
+  return hook;
+}
+
 function renderJson(manifest: ChannelManifest): string {
   return JSON.stringify(manifest.render);
+}
+
+function expectEnvRenderLines(
+  manifest: ChannelManifest,
+  renderId: string,
+  lines: readonly string[],
+): void {
+  const render = findRender(manifest, renderId);
+  expect(render).toMatchObject({
+    kind: "env-lines",
+    agent: "hermes",
+    target: "~/.hermes/.env",
+  });
+  if (render.kind !== "env-lines") throw new Error(`${manifest.id}.${renderId} is not env-lines`);
+  expect(render.lines).toEqual(lines);
 }
 
 function policyPresetNames(manifest: ChannelManifest): string[] {
@@ -58,13 +92,109 @@ function expectTokenPasteEnrollHook(manifest: ChannelManifest, outputIds: readon
   });
 }
 
+function expectConfigPromptEnrollHook(
+  manifest: ChannelManifest,
+  outputIds: readonly string[],
+): void {
+  expect(manifest.hooks).toContainEqual({
+    id: `${manifest.id}-config-prompt`,
+    phase: "enroll",
+    handler: COMMON_CONFIG_PROMPT_HOOK_HANDLER_ID,
+    outputs: outputIds.map((id) => ({
+      id,
+      kind: "config",
+    })),
+  });
+}
+
+function expectReachabilityHook(manifest: ChannelManifest, inputIds: readonly string[]): void {
+  expect(manifest.hooks).toContainEqual({
+    id: `${manifest.id}-get-me-reachability`,
+    phase: "reachability-check",
+    handler: `${manifest.id}.getMeReachability`,
+    inputs: inputIds,
+    onFailure: "skip-channel",
+  });
+}
+
+function expectSlackCredentialValidationHook(inputIds: readonly string[]): void {
+  expect(slackManifest.hooks).toContainEqual({
+    id: "slack-credential-validation",
+    phase: "reachability-check",
+    handler: SLACK_VALIDATE_CREDENTIALS_HOOK_HANDLER_ID,
+    inputs: inputIds,
+    onFailure: "skip-channel",
+  });
+}
+
+function expectSlackSocketModeGatewayConflictHook(): void {
+  expect(slackManifest.hooks).toContainEqual({
+    id: "slack-socket-mode-gateway-conflict",
+    phase: "pre-enable",
+    handler: SLACK_SOCKET_MODE_GATEWAY_CONFLICT_HOOK_HANDLER_ID,
+    onFailure: "abort",
+  });
+}
+
+function expectOpenClawBridgeHealthHook(
+  manifest: ChannelManifest,
+  hookId: string,
+  handler: string,
+): void {
+  const hook = findHook(manifest, hookId);
+  expect(hook).toMatchObject({
+    id: hookId,
+    phase: "health-check",
+    handler,
+    agents: ["openclaw"],
+    onFailure: "abort",
+  });
+  expect(hook.outputs).toBeUndefined();
+}
+
+function expectConcreteStatusHook(
+  manifest: ChannelManifest,
+  hookId: string,
+  handler: string,
+  outputId: string,
+): void {
+  expect(findHook(manifest, hookId)).toMatchObject({
+    id: hookId,
+    phase: "status",
+    handler,
+    outputs: [
+      {
+        id: outputId,
+        kind: "status",
+      },
+    ],
+  });
+}
+
+function expectOpenClawRuntimeVisibility(
+  manifest: ChannelManifest,
+  configKeys: readonly string[],
+  logPatterns: readonly string[],
+  channelName = configKeys[0],
+): void {
+  expect(manifest.runtime?.openclaw?.channelName).toBe(channelName);
+  expect(manifest.runtime?.openclaw?.visibility).toEqual({
+    configKeys,
+    logPatterns,
+  });
+}
+
+function expectOpenClawNodePreload(manifest: ChannelManifest, module: string): void {
+  expect(manifest.runtime?.openclaw?.nodePreloads ?? []).toEqual(
+    expect.arrayContaining([expect.objectContaining({ module })]),
+  );
+}
+
 describe("built-in channel manifests", () => {
   it("registers the phase-1 built-in manifests without consuming them in workflows", () => {
     const registry = createBuiltInChannelManifestRegistry();
 
-    expect(BUILT_IN_CHANNEL_MANIFESTS.map((manifest) => manifest.id)).toEqual(
-      knownChannelNames(),
-    );
+    expect(BUILT_IN_CHANNEL_MANIFESTS.map((manifest) => manifest.id)).toEqual(knownChannelNames());
     expect(registry.list().map((manifest) => manifest.id)).toEqual(knownChannelNames());
     expect(registry.listAvailable({ agent: "openclaw" }).map((manifest) => manifest.id)).toEqual([
       "telegram",
@@ -91,14 +221,24 @@ describe("built-in channel manifests", () => {
   it("keeps phase-1 manifest and hook files free of production side-effect imports", () => {
     const manifestPaths = [
       "src/lib/messaging/channels/telegram/manifest.ts",
+      "src/lib/messaging/channels/telegram/hooks/gateway-conflict-status.ts",
+      "src/lib/messaging/channels/telegram/hooks/openclaw-bridge-health.ts",
       "src/lib/messaging/channels/discord/manifest.ts",
+      "src/lib/messaging/channels/discord/hooks/index.ts",
+      "src/lib/messaging/channels/discord/hooks/openclaw-bridge-health.ts",
       "src/lib/messaging/channels/wechat/manifest.ts",
       "src/lib/messaging/channels/wechat/hooks/health-check.ts",
       "src/lib/messaging/channels/wechat/hooks/ilink-login.ts",
       "src/lib/messaging/channels/wechat/hooks/index.ts",
       "src/lib/messaging/channels/wechat/hooks/seed-openclaw-account.ts",
+      "src/lib/messaging/channels/openclaw-bridge-health.ts",
       "src/lib/messaging/channels/slack/manifest.ts",
+      "src/lib/messaging/channels/slack/hooks/openclaw-bridge-health.ts",
+      "src/lib/messaging/channels/slack/hooks/socket-mode-gateway-conflict.ts",
+      "src/lib/messaging/channels/slack/hooks/socket-mode-gateway-status.ts",
+      "src/lib/messaging/channels/slack/hooks/validate-credentials.ts",
       "src/lib/messaging/channels/whatsapp/manifest.ts",
+      "src/lib/messaging/hooks/common/config-prompt.ts",
       "src/lib/messaging/hooks/common/token-paste.ts",
     ];
     const forbiddenImports = [
@@ -106,7 +246,7 @@ describe("built-in channel manifests", () => {
       "state/registry",
       "adapters/openshell",
       "host-qr-handlers",
-      "ext/wechat",
+      "../ext/",
       "node:fs",
       "node:child_process",
     ];
@@ -164,18 +304,19 @@ describe("built-in channel manifests", () => {
     const botToken = findInput(telegramManifest, "botToken");
     const allowedIds = findInput(telegramManifest, "allowedIds");
     const requireMention = findInput(telegramManifest, "requireMention");
-    const hermesLines = buildMessagingEnvLines(
-      new Set(["telegram"]),
-      { telegram: ["123456789"] },
-      {},
-      {},
-      {},
-    );
-
+    const groupPolicy = findInput(telegramManifest, "groupPolicy");
     expect(getChannelTokenKeys(KNOWN_CHANNELS.telegram)).toEqual(["TELEGRAM_BOT_TOKEN"]);
     expect(botToken.envKey).toBe("TELEGRAM_BOT_TOKEN");
     expect(allowedIds.envKey).toBe("TELEGRAM_ALLOWED_IDS");
     expect(requireMention.envKey).toBe("TELEGRAM_REQUIRE_MENTION");
+    expect(requireMention).toMatchObject({ kind: "config", defaultValue: "1" });
+    expect(groupPolicy).toMatchObject({
+      kind: "config",
+      envKey: "TELEGRAM_GROUP_POLICY",
+      statePath: "telegramConfig.groupPolicy",
+      defaultValue: "open",
+      validValues: ["open", "allowlist", "disabled"],
+    });
     expect(KNOWN_CHANNELS.telegram.allowIdsMode).toBe("dm");
     expect(telegramManifest.credentials).toEqual([
       {
@@ -186,22 +327,58 @@ describe("built-in channel manifests", () => {
         placeholder: "openshell:resolve:env:TELEGRAM_BOT_TOKEN",
       },
     ]);
-    expect(hermesLines).toContain(
-      "TELEGRAM_BOT_TOKEN=openshell:resolve:env:TELEGRAM_BOT_TOKEN",
-    );
-    expect(hermesLines).toContain("TELEGRAM_ALLOWED_USERS=123456789");
-    expect(renderJson(telegramManifest)).toContain("channels.telegram.accounts.default");
+    expectEnvRenderLines(telegramManifest, "telegram-hermes-env", [
+      "TELEGRAM_BOT_TOKEN={{credential.telegramBotToken.placeholder}}",
+      "TELEGRAM_ALLOWED_USERS={{allowedIds.telegram.csv}}",
+    ]);
+    expect(renderJson(telegramManifest)).toContain('"path":"channels.telegram"');
+    expect(renderJson(telegramManifest)).toContain('"accounts"');
     expect(renderJson(telegramManifest)).toContain("groupPolicy");
     expect(renderJson(telegramManifest)).toContain("channels.telegram.groups");
     expect(renderJson(telegramManifest)).toContain("telegramConfig.requireMention");
+    expect(renderJson(telegramManifest)).toContain("telegramConfig.groupPolicy");
+    expect(renderJson(telegramManifest)).toContain("telegramConfig.openclawGroups");
+    expect(renderJson(telegramManifest)).toContain("platforms.telegram");
     expectTokenPasteEnrollHook(telegramManifest, ["botToken"]);
     expect(telegramManifest.hooks).toContainEqual({
-      id: "telegram-reachability",
-      phase: "reachability-check",
-      handler: "telegram.getMeReachability",
-      inputs: ["botToken"],
-      onFailure: "abort",
+      id: "telegram-allowlist-aliases",
+      phase: "enroll",
+      handler: TELEGRAM_ALLOWLIST_ALIASES_HOOK_ID,
+      outputs: [
+        {
+          id: "allowedIds",
+          kind: "config",
+        },
+      ],
     });
+    expectConfigPromptEnrollHook(telegramManifest, ["requireMention", "allowedIds"]);
+    expect(telegramManifest.hooks).toContainEqual({
+      id: "telegram-openclaw-config-prompt",
+      phase: "enroll",
+      handler: COMMON_CONFIG_PROMPT_HOOK_HANDLER_ID,
+      agents: ["openclaw"],
+      outputs: [
+        {
+          id: "groupPolicy",
+          kind: "config",
+        },
+      ],
+    });
+    expectReachabilityHook(telegramManifest, ["botToken"]);
+    expectOpenClawNodePreload(telegramManifest, "telegram-diagnostics");
+    expect(JSON.stringify(telegramManifest.runtime?.openclaw)).toContain("telegram-diagnostics");
+    expectOpenClawBridgeHealthHook(
+      telegramManifest,
+      "telegram-openclaw-bridge-health",
+      "telegram.openclawBridgeHealth",
+    );
+    expectOpenClawRuntimeVisibility(telegramManifest, ["telegram"], ["telegram"]);
+    expectConcreteStatusHook(
+      telegramManifest,
+      "telegram-gateway-conflict-status",
+      TELEGRAM_GATEWAY_CONFLICT_STATUS_HOOK_HANDLER_ID,
+      "bridgeHealth",
+    );
   });
 
   it("declares Discord guild and allowlist render intent for both agents", () => {
@@ -209,23 +386,11 @@ describe("built-in channel manifests", () => {
     const serverId = findInput(discordManifest, "serverId");
     const requireMention = findInput(discordManifest, "requireMention");
     const userId = findInput(discordManifest, "userId");
-    const hermesLines = buildMessagingEnvLines(
-      new Set(["discord"]),
-      {},
-      {
-        "1491590992753590594": {
-          requireMention: false,
-          users: ["1005536447329222676"],
-        },
-      },
-      {},
-      {},
-    );
-
     expect(getChannelTokenKeys(KNOWN_CHANNELS.discord)).toEqual(["DISCORD_BOT_TOKEN"]);
     expect(botToken.envKey).toBe("DISCORD_BOT_TOKEN");
     expect(serverId.envKey).toBe("DISCORD_SERVER_ID");
     expect(requireMention.envKey).toBe("DISCORD_REQUIRE_MENTION");
+    expect(requireMention).toMatchObject({ kind: "config", defaultValue: "1" });
     expect(userId.envKey).toBe("DISCORD_USER_ID");
     expect(KNOWN_CHANNELS.discord.allowIdsMode).toBe("guild");
     expect(discordManifest.credentials).toEqual([
@@ -237,38 +402,35 @@ describe("built-in channel manifests", () => {
         placeholder: "openshell:resolve:env:DISCORD_BOT_TOKEN",
       },
     ]);
-    expect(buildDiscordConfig({ "1491590992753590594": { requireMention: false } })).toEqual({
-      require_mention: false,
-      free_response_channels: "",
-      allowed_channels: "",
-      auto_thread: true,
-      reactions: true,
-      channel_prompts: {},
-    });
-    expect(hermesLines).toContain(
-      "DISCORD_BOT_TOKEN=openshell:resolve:env:DISCORD_BOT_TOKEN",
-    );
-    expect(hermesLines).toContain("NEMOCLAW_DISCORD_GUILD_IDS=1491590992753590594");
-    expect(hermesLines).toContain("DISCORD_ALLOWED_USERS=1005536447329222676");
-    expect(renderJson(discordManifest)).toContain("channels.discord.accounts.default");
+    expect(renderJson(discordManifest)).toContain('"path":"discord"');
+    expect(renderJson(discordManifest)).toContain('"require_mention"');
+    expect(renderJson(discordManifest)).toContain('"path":"platforms.discord"');
+    expectEnvRenderLines(discordManifest, "discord-hermes-env", [
+      "DISCORD_BOT_TOKEN={{credential.discordBotToken.placeholder}}",
+      "NEMOCLAW_DISCORD_GUILD_IDS={{discord.guildIds.csv}}",
+      "DISCORD_ALLOWED_USERS={{discord.allowedUsers.csv}}",
+      "DISCORD_ALLOW_ALL_USERS={{discord.allowAllUsers}}",
+    ]);
+    expect(renderJson(discordManifest)).toContain('"path":"channels.discord"');
+    expect(renderJson(discordManifest)).toContain('"accounts"');
     expect(renderJson(discordManifest)).toContain("channels.discord");
     expect(renderJson(discordManifest)).toContain("discord.guilds");
     expect(renderJson(discordManifest)).toContain("require_mention");
     expectTokenPasteEnrollHook(discordManifest, ["botToken"]);
+    expectConfigPromptEnrollHook(discordManifest, ["serverId", "requireMention", "userId"]);
+    expectOpenClawBridgeHealthHook(
+      discordManifest,
+      "discord-openclaw-bridge-health",
+      "discord.openclawBridgeHealth",
+    );
+    expectOpenClawRuntimeVisibility(discordManifest, ["discord"], ["discord"]);
   });
 
   it("declares Slack Bolt-compatible placeholders and allowlist render intent", () => {
     const botToken = findInput(slackManifest, "botToken");
     const appToken = findInput(slackManifest, "appToken");
     const allowedUsers = findInput(slackManifest, "allowedUsers");
-    const hermesLines = buildMessagingEnvLines(
-      new Set(["slack"]),
-      { slack: ["U0123456789"] },
-      {},
-      {},
-      {},
-    );
-
+    const allowedChannels = findInput(slackManifest, "allowedChannels");
     expect(getChannelTokenKeys(KNOWN_CHANNELS.slack)).toEqual([
       "SLACK_BOT_TOKEN",
       "SLACK_APP_TOKEN",
@@ -276,6 +438,13 @@ describe("built-in channel manifests", () => {
     expect(botToken.envKey).toBe("SLACK_BOT_TOKEN");
     expect(appToken.envKey).toBe("SLACK_APP_TOKEN");
     expect(allowedUsers.envKey).toBe("SLACK_ALLOWED_USERS");
+    expect(allowedChannels.envKey).toBe("SLACK_ALLOWED_CHANNELS");
+    expect(allowedChannels.statePath).toBe("slackConfig.allowedChannels");
+    expect(allowedChannels.prompt).toEqual({
+      label: "Slack Channel IDs (comma-separated allowlist)",
+      help: "Optional: enter comma-separated Slack channel IDs where the bot may answer @mentions. Channel IDs look like C012AB3CD.",
+      emptyValueMessage: "channel @mentions stay unrestricted by channel ID",
+    });
     expect(KNOWN_CHANNELS.slack.allowIdsMode).toBe("dm");
     expect(slackManifest.credentials).toEqual([
       {
@@ -284,6 +453,7 @@ describe("built-in channel manifests", () => {
         providerName: "{sandboxName}-slack-bridge",
         providerEnvKey: "SLACK_BOT_TOKEN",
         placeholder: "xoxb-OPENSHELL-RESOLVE-ENV-SLACK_BOT_TOKEN",
+        primary: true,
       },
       {
         id: "slackAppToken",
@@ -293,16 +463,50 @@ describe("built-in channel manifests", () => {
         placeholder: "xapp-OPENSHELL-RESOLVE-ENV-SLACK_APP_TOKEN",
       },
     ]);
-    expect(hermesLines).toContain(
-      "SLACK_BOT_TOKEN=xoxb-OPENSHELL-RESOLVE-ENV-SLACK_BOT_TOKEN",
-    );
-    expect(hermesLines).toContain(
-      "SLACK_APP_TOKEN=xapp-OPENSHELL-RESOLVE-ENV-SLACK_APP_TOKEN",
-    );
-    expect(hermesLines).toContain("SLACK_ALLOWED_USERS=U0123456789");
-    expect(renderJson(slackManifest)).toContain("channels.slack.accounts.default");
+    expectEnvRenderLines(slackManifest, "slack-hermes-env", [
+      "SLACK_BOT_TOKEN={{credential.slackBotToken.placeholder}}",
+      "SLACK_APP_TOKEN={{credential.slackAppToken.placeholder}}",
+      "SLACK_ALLOWED_USERS={{allowedIds.slack.csv}}",
+      "SLACK_ALLOWED_CHANNELS={{slackConfig.allowedChannels.csv}}",
+    ]);
+    expect(renderJson(slackManifest)).toContain('"path":"channels.slack"');
+    expect(renderJson(slackManifest)).toContain('"accounts"');
     expect(renderJson(slackManifest)).toContain("allowedIds.slack.channels");
+    expectSlackSocketModeGatewayConflictHook();
+    expectOpenClawNodePreload(slackManifest, "slack-channel-guard");
+    expect(JSON.stringify(slackManifest.runtime?.openclaw)).toContain("slack-channel-guard");
+    expect(JSON.stringify(slackManifest.runtime?.openclaw)).toContain("SLACK_BOT_TOKEN");
     expectTokenPasteEnrollHook(slackManifest, ["botToken", "appToken"]);
+    expectConfigPromptEnrollHook(slackManifest, ["allowedUsers", "allowedChannels"]);
+    expectSlackCredentialValidationHook(["botToken", "appToken"]);
+    expectOpenClawBridgeHealthHook(
+      slackManifest,
+      "slack-openclaw-bridge-health",
+      "slack.openclawBridgeHealth",
+    );
+    expectOpenClawRuntimeVisibility(slackManifest, ["slack"], ["slack"]);
+    expectConcreteStatusHook(
+      slackManifest,
+      "slack-socket-mode-gateway-status",
+      SLACK_SOCKET_MODE_GATEWAY_STATUS_HOOK_HANDLER_ID,
+      "gatewayOverlaps",
+    );
+    expect(slackManifest.state).toEqual({
+      persist: {
+        allowedIds: ["allowedUsers"],
+        slackConfig: ["allowedChannels"],
+      },
+      rebuildHydration: [
+        {
+          statePath: "allowedIds.slack",
+          env: "SLACK_ALLOWED_USERS",
+        },
+        {
+          statePath: "slackConfig.allowedChannels",
+          env: "SLACK_ALLOWED_CHANNELS",
+        },
+      ],
+    });
   });
 
   it("declares WeChat host-QR hooks, state hydration, provider binding, and Hermes env intent", () => {
@@ -311,18 +515,6 @@ describe("built-in channel manifests", () => {
     const baseUrl = findInput(wechatManifest, "baseUrl");
     const userId = findInput(wechatManifest, "userId");
     const allowedIds = findInput(wechatManifest, "allowedIds");
-    const hermesLines = buildMessagingEnvLines(
-      new Set(["wechat"]),
-      { wechat: ["bot_other_friend"] },
-      {},
-      {
-        accountId: "test_account_42",
-        baseUrl: "https://ilinkai.wechat.com",
-        userId: "operator_self_id",
-      },
-      {},
-    );
-
     expect(getChannelTokenKeys(KNOWN_CHANNELS.wechat)).toEqual(["WECHAT_BOT_TOKEN"]);
     expect(wechatManifest.auth.mode).toBe("host-qr");
     expect(botToken.envKey).toBe("WECHAT_BOT_TOKEN");
@@ -362,18 +554,36 @@ describe("built-in channel manifests", () => {
         env: "WECHAT_ALLOWED_IDS",
       },
     ]);
-    expect(hermesLines).toContain("WEIXIN_TOKEN=openshell:resolve:env:WECHAT_BOT_TOKEN");
-    expect(hermesLines).toContain("WEIXIN_ACCOUNT_ID=test_account_42");
-    expect(hermesLines).toContain("WEIXIN_BASE_URL=https://ilinkai.wechat.com");
-    expect(hermesLines).toContain("WEIXIN_ALLOWED_USERS=operator_self_id,bot_other_friend");
+    expectEnvRenderLines(wechatManifest, "wechat-hermes-env", [
+      "WEIXIN_TOKEN={{credential.wechatBotToken.placeholder}}",
+      "WEIXIN_ACCOUNT_ID={{wechatConfig.accountId}}",
+      "WEIXIN_BASE_URL={{wechatConfig.baseUrl}}",
+      "WEIXIN_ALLOWED_USERS={{allowedIds.wechat.csv}}",
+    ]);
+    expect(renderJson(wechatManifest)).toContain("platforms.weixin");
     expect(renderJson(wechatManifest)).toContain("WEIXIN_TOKEN");
     expect(renderJson(wechatManifest)).toContain("credential.wechatBotToken.placeholder");
+    expect(wechatManifest.agentPackages).toContainEqual({
+      id: "openclawPluginPackage",
+      agent: "openclaw",
+      manager: "openclaw-plugin",
+      spec: "npm:@tencent-weixin/openclaw-weixin@2.4.3",
+      pin: true,
+      required: true,
+    });
     expect(wechatManifest.hooks.map((hook) => hook.handler)).toEqual([
       "wechat.ilinkLogin",
+      "common.configPrompt",
       "wechat.seedOpenClawAccount",
       "wechat.healthCheck",
     ]);
-    expect(wechatManifest.hooks[1]?.outputs).toEqual(
+    expectOpenClawNodePreload(wechatManifest, "wechat-diagnostics");
+    expect(JSON.stringify(wechatManifest.runtime?.openclaw)).toContain("wechat-diagnostics");
+    expectConfigPromptEnrollHook(wechatManifest, ["allowedIds"]);
+    const seedHook = wechatManifest.hooks.find(
+      (hook) => hook.id === "wechat-seed-openclaw-account",
+    );
+    expect(seedHook?.outputs).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           id: "openclawWeixinAccountFile",
@@ -385,23 +595,34 @@ describe("built-in channel manifests", () => {
         }),
       ]),
     );
-    expect(wechatManifest.hooks[2]).toMatchObject({
+    expect(wechatManifest.hooks.find((hook) => hook.id === "wechat-health-check")).toMatchObject({
       id: "wechat-health-check",
       phase: "health-check",
       handler: "wechat.healthCheck",
       inputs: ["wechatConfig.accountId"],
       onFailure: "abort",
     });
+    expectOpenClawRuntimeVisibility(
+      wechatManifest,
+      ["openclaw-weixin"],
+      ["wechat", "openclaw-weixin"],
+    );
   });
 
-  it("declares WhatsApp as in-sandbox QR with no host-side token bindings", () => {
-    const openclawRender = findRender(whatsappManifest, "whatsapp-openclaw-account");
+  it("declares WhatsApp as in-sandbox QR with optional allowlist config", () => {
+    const openclawRender = findRender(whatsappManifest, "whatsapp-openclaw-channel");
     const hermesRender = findRender(whatsappManifest, "whatsapp-hermes-env");
-    const hermesLines = buildMessagingEnvLines(new Set(["whatsapp"]), {}, {}, {}, {});
 
     expect(getChannelTokenKeys(KNOWN_CHANNELS.whatsapp)).toEqual([]);
     expect(whatsappManifest.auth.mode).toBe("in-sandbox-qr");
-    expect(whatsappManifest.inputs).toEqual([]);
+    expect(whatsappManifest.inputs).toEqual([
+      expect.objectContaining({
+        id: "allowedIds",
+        kind: "config",
+        envKey: "WHATSAPP_ALLOWED_IDS",
+        statePath: "allowedIds.whatsapp",
+      }),
+    ]);
     expect(whatsappManifest.credentials).toEqual([]);
     expect(whatsappManifest.policyPresets).toEqual(["whatsapp"]);
     expect(openclawRender).toMatchObject({
@@ -409,15 +630,23 @@ describe("built-in channel manifests", () => {
       agent: "openclaw",
       target: "openclaw.json",
     });
-    expect(JSON.stringify(openclawRender)).toContain("channels.whatsapp.accounts.default");
+    expect(JSON.stringify(openclawRender)).toContain('"path":"channels.whatsapp"');
+    expect(JSON.stringify(openclawRender)).toContain('"accounts"');
     expect(hermesRender).toMatchObject({
       kind: "env-lines",
       agent: "hermes",
       target: "~/.hermes/.env",
     });
-    expect(hermesLines).toContain("WHATSAPP_ENABLED=true");
-    expect(hermesLines).toContain("WHATSAPP_MODE=bot");
+    expectEnvRenderLines(whatsappManifest, "whatsapp-hermes-env", [
+      "WHATSAPP_ENABLED=true",
+      "WHATSAPP_MODE=bot",
+      "WHATSAPP_ALLOWED_USERS={{allowedIds.whatsapp.csv}}",
+    ]);
+    expect(renderJson(whatsappManifest)).toContain("platforms.whatsapp");
     expect(renderJson(whatsappManifest)).not.toContain("WHATSAPP_BOT_TOKEN");
     expect(renderJson(whatsappManifest)).not.toContain("openshell:resolve:env:WHATSAPP");
+    expectOpenClawNodePreload(whatsappManifest, "whatsapp-qr-compact");
+    expect(JSON.stringify(whatsappManifest.runtime?.openclaw)).toContain("whatsapp-qr-compact");
+    expectOpenClawRuntimeVisibility(whatsappManifest, ["whatsapp"], ["whatsapp"]);
   });
 });

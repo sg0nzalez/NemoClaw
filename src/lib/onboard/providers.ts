@@ -5,6 +5,7 @@
 // Provider metadata, lookup helpers, and gateway provider CRUD.
 
 const { redact } = require("../runner");
+const { normalizeCredentialValue } = require("../credentials/store");
 const {
   DEFAULT_CLOUD_MODEL,
   DEFAULT_HERMES_PROVIDER_MODEL,
@@ -22,13 +23,17 @@ const OPENAI_ENDPOINT_URL = "https://api.openai.com/v1";
 const ANTHROPIC_ENDPOINT_URL = "https://api.anthropic.com";
 const GEMINI_ENDPOINT_URL = "https://generativelanguage.googleapis.com/v1beta/openai/";
 const HERMES_INFERENCE_ENDPOINT_URL = "https://inference-api.nousresearch.com/v1";
+const HOSTED_INFERENCE_SOURCE_ENV = "NVIDIA_INFERENCE_API_KEY";
+const HOSTED_INFERENCE_CREDENTIAL_ENV = "COMPATIBLE_API_KEY";
+const HOSTED_INFERENCE_ENDPOINT_URL = "https://inference-api.nvidia.com/v1";
+const HOSTED_INFERENCE_MODEL = "nvidia/nvidia/nemotron-3-super-v3";
 
 const REMOTE_PROVIDER_CONFIG = {
   build: {
     label: "NVIDIA Endpoints",
     providerName: "nvidia-prod",
     providerType: "nvidia",
-    credentialEnv: "NVIDIA_API_KEY",
+    credentialEnv: "NVIDIA_INFERENCE_API_KEY",
     endpointUrl: BUILD_ENDPOINT_URL,
     helpUrl: "https://build.nvidia.com/settings/api-keys",
     modelMode: "catalog",
@@ -77,8 +82,15 @@ const REMOTE_PROVIDER_CONFIG = {
     defaultModel: "gemini-2.5-flash",
     skipVerify: true,
   },
+  // Hermes Provider is a single menu entry by design: every model family it
+  // serves (Moonshot, Z-AI, MiniMax, Qwen, Xiaomi, Tencent, StepFun, xAI,
+  // Arcee) routes through the same Nous portal endpoint and the same
+  // credential. After this entry is selected, the model picker lists the
+  // family options via nousModels.getHermesProviderModelOptions(). The label
+  // names all nine families so QA scripts and operators can discover them
+  // without first selecting the entry.
   hermesProvider: {
-    label: "Hermes Provider",
+    label: "Hermes Provider (Moonshot, Z-AI, MiniMax, Qwen, Xiaomi, Tencent, StepFun, xAI, Arcee)",
     providerName: "hermes-provider",
     providerType: "openai",
     credentialEnv: "OPENAI_API_KEY",
@@ -160,6 +172,7 @@ function getEffectiveProviderName(providerKey) {
 // ── Non-interactive helpers ──────────────────────────────────────
 
 function getNonInteractiveProvider() {
+  stageHostedInferenceSourceSecretEnv();
   const providerKey = (process.env.NEMOCLAW_PROVIDER || "").trim().toLowerCase();
   if (!providerKey) return null;
   const aliases = {
@@ -201,6 +214,52 @@ function getNonInteractiveProvider() {
   return normalized;
 }
 
+function stageHostedInferenceSourceSecretEnv() {
+  const sourceKey = normalizeCredentialValue(process.env[HOSTED_INFERENCE_SOURCE_ENV] ?? "");
+  if (!sourceKey) return false;
+
+  const rawProvider = (process.env.NEMOCLAW_PROVIDER || "").trim().toLowerCase();
+  const aliases = {
+    cloud: "build",
+    anthropiccompatible: "anthropicCompatible",
+    hermes: "hermesProvider",
+    "hermes-provider": "hermesProvider",
+    hermesprovider: "hermesProvider",
+    nous: "hermesProvider",
+    "nous-portal": "hermesProvider",
+  };
+  const normalizedProvider = aliases[rawProvider] || rawProvider;
+  const hostedFlag = (process.env.NEMOCLAW_E2E_USE_HOSTED_INFERENCE || "").trim() === "1";
+  const compatibleKey = normalizeCredentialValue(
+    process.env[HOSTED_INFERENCE_CREDENTIAL_ENV] ?? "",
+  );
+  const explicitHostedCustom =
+    normalizedProvider === "custom" &&
+    (hostedFlag || (!compatibleKey && !sourceKey.startsWith("nvapi-")));
+  const implicitHostedCustom =
+    !normalizedProvider && (hostedFlag || !sourceKey.startsWith("nvapi-"));
+  const shouldStage = explicitHostedCustom || implicitHostedCustom;
+
+  if (!shouldStage) return false;
+
+  if (!normalizedProvider) {
+    process.env.NEMOCLAW_PROVIDER = "custom";
+  }
+  process.env.NEMOCLAW_ENDPOINT_URL =
+    (process.env.NEMOCLAW_ENDPOINT_URL || "").trim() || HOSTED_INFERENCE_ENDPOINT_URL;
+  const model =
+    (process.env.NEMOCLAW_MODEL || "").trim() ||
+    (process.env.NEMOCLAW_COMPAT_MODEL || "").trim() ||
+    (process.env.NEMOCLAW_CLOUD_EXPERIMENTAL_MODEL || "").trim() ||
+    HOSTED_INFERENCE_MODEL;
+  process.env.NEMOCLAW_MODEL = model;
+  process.env.NEMOCLAW_COMPAT_MODEL = (process.env.NEMOCLAW_COMPAT_MODEL || "").trim() || model;
+  process.env.NEMOCLAW_PREFERRED_API =
+    (process.env.NEMOCLAW_PREFERRED_API || "").trim() || "openai-completions";
+  process.env[HOSTED_INFERENCE_CREDENTIAL_ENV] = sourceKey;
+  return true;
+}
+
 function getNonInteractiveModel(providerKey) {
   const model = (process.env.NEMOCLAW_MODEL || "").trim();
   if (!model) return null;
@@ -234,13 +293,23 @@ function getRequestedModelHint(nonInteractive) {
  * @param {string} type - Provider type (e.g. "openai", "anthropic", "generic").
  * @param {string} credentialEnv - Credential environment variable name.
  * @param {string|null} baseUrl - Optional base URL for API-compatible endpoints.
+ * @param {{ includeCredential?: boolean }} [opts] - When `includeCredential` is
+ *   false, the `--credential` flag is omitted from the args. Used on the
+ *   `provider update` path when the host env does not carry the credential and
+ *   the gateway already holds it (no rotation needed). OpenShell's CLI rejects
+ *   `--credential KEY` when the local env var is empty, so passing the flag
+ *   would fail before reaching the gateway.
  * @returns {string[]} Argument array for runOpenshell().
  */
-function buildProviderArgs(action, name, type, credentialEnv, baseUrl) {
+function buildProviderArgs(action, name, type, credentialEnv, baseUrl, opts = {}) {
+  const { includeCredential = true } = opts;
   const args =
     action === "create"
-      ? ["provider", "create", "--name", name, "--type", type, "--credential", credentialEnv]
-      : ["provider", "update", name, "--credential", credentialEnv];
+      ? ["provider", "create", "--name", name, "--type", type]
+      : ["provider", "update", name];
+  if (includeCredential) {
+    args.push("--credential", credentialEnv);
+  }
   if (baseUrl && type === "openai") {
     args.push("--config", `OPENAI_BASE_URL=${baseUrl}`);
   } else if (baseUrl && type === "anthropic") {
@@ -290,20 +359,30 @@ function providerExistsInGateway(name, _runOpenshell) {
 function upsertProvider(name, type, credentialEnv, baseUrl, env, _runOpenshell, options = {}) {
   const exists = providerExistsInGateway(name, _runOpenshell);
   if (exists && options.replaceExisting) {
-    const deleteResult = _runOpenshell(["provider", "delete", name], {
-      ignoreError: true,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    if (deleteResult.status !== 0) {
-      const output =
-        compactText(redact(`${deleteResult.stderr || ""}`)) ||
-        compactText(redact(`${deleteResult.stdout || ""}`)) ||
+    const { deleteProviderWithRecovery } = require("./sandbox-provider-cleanup");
+    const r = deleteProviderWithRecovery(name, { runOpenshell: _runOpenshell });
+    if (!r.ok) {
+      const base =
+        compactText(redact(r.stderr)) ||
+        compactText(redact(r.stdout)) ||
         `Failed to replace provider '${name}'.`;
-      return { ok: false, status: deleteResult.status || 1, message: output };
+      const detail =
+        r.recoveryFailures.length > 0
+          ? ` (detach failures: ${r.recoveryFailures.map((f) => `${f.sandbox}: ${compactText(redact(f.output))}`).join("; ")})`
+          : "";
+      return { ok: false, status: r.status || 1, message: `${base}${detail}` };
     }
   }
   const action = exists && !options.replaceExisting ? "update" : "create";
-  const args = buildProviderArgs(action, name, type, credentialEnv, baseUrl);
+  // On the update path, the OpenShell CLI's `--credential KEY` form reads the
+  // value from the host env and aborts when empty. If the caller did not stage
+  // a credential value (rebuild after `channels add` with the original env
+  // unset), drop the flag so `provider update` becomes a no-op merge — the
+  // gateway already holds the secret.
+  const credentialValueAvailable =
+    !!credentialEnv && typeof env[credentialEnv] === "string" && env[credentialEnv].length > 0;
+  const includeCredential = action === "create" || credentialValueAvailable;
+  const args = buildProviderArgs(action, name, type, credentialEnv, baseUrl, { includeCredential });
   const runOpts = { ignoreError: true, env, stdio: ["ignore", "pipe", "pipe"] };
   const result = _runOpenshell(args, runOpts);
   if (result.status !== 0) {
@@ -372,8 +451,13 @@ module.exports = {
   OLLAMA_PROXY_CREDENTIAL_ENV,
   VLLM_LOCAL_CREDENTIAL_ENV,
   DISCORD_SNOWFLAKE_RE,
+  HOSTED_INFERENCE_SOURCE_ENV,
+  HOSTED_INFERENCE_CREDENTIAL_ENV,
+  HOSTED_INFERENCE_ENDPOINT_URL,
+  HOSTED_INFERENCE_MODEL,
   getProviderLabel,
   getEffectiveProviderName,
+  stageHostedInferenceSourceSecretEnv,
   getNonInteractiveProvider,
   getNonInteractiveModel,
   getRequestedProviderHint,

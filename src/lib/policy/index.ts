@@ -3,7 +3,13 @@
 //
 // Policy preset management — list, load, merge, and apply presets.
 
-import type { JsonValue, JsonObject } from "../core/json-types";
+import type { JsonObject, JsonValue } from "../core/json-types";
+import {
+  getMessagingPolicyKeyAliases,
+  getMessagingPolicyPresetValidationWarnings,
+  listBuiltInMessagingChannelManifests,
+  listMessagingPolicyPresetMetadata,
+} from "../messaging/channels";
 
 const fs = require("fs");
 const path = require("path");
@@ -61,7 +67,7 @@ function listPresets(): PresetInfo[] {
     .map((f: string) => {
       const content = fs.readFileSync(path.join(PRESETS_DIR, f), "utf-8");
       const nameMatch = content.match(/^\s*name:\s*(.+)$/m);
-      const descMatch = content.match(/^\s*description:\s*"?([^"]*)"?$/m);
+      const descMatch = content.match(/^\s*description:\s*"?([^\n"]*)"?$/m);
       return {
         file: f,
         name: nameMatch ? nameMatch[1].trim() : f.replace(".yaml", ""),
@@ -108,9 +114,8 @@ function parsePresetPolicyKeys(presetContent: string | null | undefined): string
   return Object.keys(parseNetworkPolicies(`network_policies:\n${presetEntries}`) || {});
 }
 
-const AGENT_PRESET_KEY_ALIASES: Record<string, string[]> = {
-  wechat: ["wechat_bridge"],
-};
+const AGENT_PRESET_KEY_ALIASES: Readonly<Record<string, readonly string[]>> =
+  getMessagingPolicyKeyAliases();
 
 function selectAgentPolicyKeys(
   agentPolicies: PolicyObject,
@@ -152,9 +157,7 @@ function loadAgentPresetContent(
     const agent = loadAgent(sandbox.agent);
     if (!agent?.policyAdditionsPath || !fs.existsSync(agent.policyAdditionsPath)) return null;
 
-    const agentPolicies = parseNetworkPolicies(
-      fs.readFileSync(agent.policyAdditionsPath, "utf-8"),
-    );
+    const agentPolicies = parseNetworkPolicies(fs.readFileSync(agent.policyAdditionsPath, "utf-8"));
     if (!agentPolicies) return null;
 
     const keys = selectAgentPolicyKeys(agentPolicies, presetName, builtinPresetContent);
@@ -205,23 +208,28 @@ function getPresetEndpoints(content: string): string[] {
  * having enabled the channel opens the firewall but leaves the sandbox
  * without a running bridge. See #1691.
  */
-const MESSAGING_PRESET_LABELS: Record<string, string> = {
-  telegram: "Telegram",
-  discord: "Discord",
-  slack: "Slack",
-  wechat: "WeChat",
-  whatsapp: "WhatsApp",
-};
+const MESSAGING_PRESET_LABELS: Readonly<Record<string, string>> = Object.fromEntries(
+  listMessagingPolicyPresetMetadata().flatMap((preset) => {
+    const manifest = listBuiltInMessagingChannelManifests().find(
+      (entry) => entry.id === preset.channelId,
+    );
+    return manifest ? [[preset.presetName, manifest.displayName]] : [];
+  }),
+);
+
+const MESSAGING_PRESET_VALIDATION_WARNING_LINES: Readonly<Record<string, readonly string[]>> =
+  getMessagingPolicyPresetValidationWarnings();
 
 function getPresetValidationWarning(presetName: string): string | null {
   if (presetName === "jira") {
     return [
       "Jira preset validation uses per-binary policy signals.",
       "Node HTTPS is allowed for Atlassian API traffic:",
-      'node -e "require(\'https\').get(\'https://api.atlassian.com\', r => console.log(r.statusCode))"',
+      "node -e \"require('https').get('https://api.atlassian.com', r => console.log(r.statusCode))\"",
       "curl is intentionally not in the preset binary allowlist. Avoid plain",
       "curl -s probes for auth.atlassian.com: Atlassian can return an empty",
-      "redirect body, which looks the same as a blocked request. Use a",
+      "redirect body, which looks the same as a blocked request. Empty curl -s",
+      "output from that endpoint is inconclusive before or after approval. Use a",
       "body-visible API probe instead:",
       "curl -sS --max-time 10 -w '\\n%{http_code}\\n' https://api.atlassian.com/oauth/token/accessible-resources",
       "Before approval, expect 000 or a local policy denial. After explicitly",
@@ -239,17 +247,7 @@ function getPresetValidationWarning(presetName: string): string | null {
     "configuration are wired up at onboard time and are not added by applying",
     "this preset alone.",
   ];
-
-  if (presetName === "discord") {
-    lines.push(
-      "For Discord preset validation, do not use curl as the success signal:",
-      "curl is not in the preset binary allowlist, so curl probes can fail even",
-      "when the policy is working. Use Node HTTPS against",
-      "https://discord.com/api/v10/gateway or validate the configured",
-      'messaging bridge/gateway path. DNS-only checks such as dns.resolve("gateway.discord.gg")',
-      "can also be inconclusive behind a proxy.",
-    );
-  }
+  lines.push(...(MESSAGING_PRESET_VALIDATION_WARNING_LINES[presetName] ?? []));
 
   return lines.join("\n  ");
 }
@@ -785,6 +783,12 @@ function applyPresetContent(
   }
 
   const currentPolicy = parseCurrentPolicy(rawPolicy);
+  if (rawPolicy.trim() && !currentPolicy) {
+    console.error(
+      `  Could not read the current policy for sandbox '${sandboxName}'; refusing to apply '${presetName}' to avoid overwriting it.`,
+    );
+    return false;
+  }
   const merged = mergePresetIntoPolicy(currentPolicy, presetEntries);
 
   const endpoints = getPresetEndpoints(presetContent);
@@ -834,6 +838,20 @@ function applyPresetContent(
       }
       registry.updateSandbox(sandboxName, { policies: pols });
     }
+  } else if (options.custom) {
+    // The preset reached the gateway, but sandbox `sandboxName` has no local
+    // registry entry, so it cannot be recorded under `customPolicies`. Custom
+    // presets are surfaced only from the registry (both `listCustomPresets`
+    // and `getGatewayPresets` read `registry.getCustomPolicies`), so an
+    // unrecorded custom preset never appears in `policy-list` or `status`.
+    // Report the gap instead of exiting 0 as if the preset were fully applied. (#4510)
+    console.error(
+      `  Warning: '${presetName}' was applied to the gateway but could not be ` +
+        `recorded locally because sandbox '${sandboxName}' is not in the ` +
+        `registry, so it will not appear in policy-list or status. Recover or ` +
+        `re-onboard the sandbox, then re-apply.`,
+    );
+    return false;
   }
 
   return true;
@@ -883,6 +901,12 @@ function applyPresets(sandboxName: string, presetNames: string[]): boolean {
   }
 
   let merged = parseCurrentPolicy(rawPolicy);
+  if (rawPolicy.trim() && !merged) {
+    console.error(
+      `  Could not read the current policy for sandbox '${sandboxName}'; refusing to apply presets to avoid overwriting it.`,
+    );
+    return false;
+  }
   const endpointLogs: string[][] = [];
 
   for (const presetName of uniquePresetNames) {
@@ -1273,35 +1297,35 @@ function applyPermissivePolicy(sandboxName: string): void {
 }
 
 export {
-  PRESETS_DIR,
-  PERMISSIVE_POLICY_PATH,
-  listPresets,
-  loadPreset,
-  getPresetEndpoints,
-  getPresetValidationWarning,
-  setupPolicyPresetSupported,
-  filterSetupPolicyPresets,
-  listSetupPolicyPresets,
+  applyPermissivePolicy,
+  applyPreset,
+  applyPresetContent,
+  applyPresets,
+  assertOpenshellResolvable,
+  buildPolicyGetCommand,
+  buildPolicySetCommand,
   clampSetupPolicyPresetNames,
   extractPresetEntries,
-  parsePresetPolicyKeys,
-  parseCurrentPolicy,
-  buildPolicySetCommand,
-  buildPolicyGetCommand,
-  assertOpenshellResolvable,
-  mergePresetIntoPolicy,
-  mergePresetNamesIntoPolicy,
-  removePresetFromPolicy,
-  applyPreset,
-  applyPresets,
-  applyPresetContent,
-  loadPresetFromFile,
-  removePreset,
-  applyPermissivePolicy,
-  resolvePermissivePolicyPath,
+  filterSetupPolicyPresets,
   getAppliedPresets,
   getGatewayPresets,
+  getPresetEndpoints,
+  getPresetValidationWarning,
   listCustomPresets,
-  selectFromList,
+  listPresets,
+  listSetupPolicyPresets,
+  loadPreset,
+  loadPresetFromFile,
+  mergePresetIntoPolicy,
+  mergePresetNamesIntoPolicy,
+  PERMISSIVE_POLICY_PATH,
+  PRESETS_DIR,
+  parseCurrentPolicy,
+  parsePresetPolicyKeys,
+  removePreset,
+  removePresetFromPolicy,
+  resolvePermissivePolicyPath,
   selectForRemoval,
+  selectFromList,
+  setupPolicyPresetSupported,
 };

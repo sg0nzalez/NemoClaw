@@ -10,6 +10,7 @@ import os from "os";
 import path from "path";
 
 import { dockerBuild, dockerImageInspect } from "../adapters/docker";
+import { buildValidatedCurlCommandArgs } from "../adapters/http/curl-args";
 import { getAgentBranding } from "../cli/branding";
 import type { JsonObject as LooseObject } from "../core/json-types";
 import { sleepSeconds } from "../core/wait";
@@ -428,7 +429,15 @@ export async function handleAgentSetup(
     const probe = agent.healthProbe;
     if (probe?.url) {
       const result = runCaptureOpenshell(
-        ["sandbox", "exec", "-n", sandboxName, "--", "curl", "-sf", "--max-time", "3", probe.url],
+        [
+          "sandbox",
+          "exec",
+          "-n",
+          sandboxName,
+          "--",
+          "curl",
+          ...buildValidatedCurlCommandArgs(["-sf", "--max-time", "3", probe.url]),
+        ],
         { ignoreError: true },
       );
       if (isHealthProbeOk(result)) {
@@ -468,7 +477,15 @@ export async function handleAgentSetup(
     let healthy = false;
     for (let i = 0; i < maxAttempts; i++) {
       const result = runCaptureOpenshell(
-        ["sandbox", "exec", "-n", sandboxName, "--", "curl", "-sf", "--max-time", "3", probe.url],
+        [
+          "sandbox",
+          "exec",
+          "-n",
+          sandboxName,
+          "--",
+          "curl",
+          ...buildValidatedCurlCommandArgs(["-sf", "--max-time", "3", probe.url]),
+        ],
         { ignoreError: true },
       );
       if (isHealthProbeOk(result)) {
@@ -537,7 +554,7 @@ export function printDashboardUi(
   },
 ): void {
   const info = getAgentDashboardInfo(agent);
-  const { kind, label, path } = agent.dashboard;
+  const { auth, kind, label, path } = agent.dashboard;
   const cliName = getAgentBranding(agent.name).cli;
 
   if (kind === "api") {
@@ -552,13 +569,23 @@ export function printDashboardUi(
       console.log(`  ${dashboardUrlForDisplay(url)}`);
     }
     printOptionalDashboardUi(agent, { ...deps, redactUrl: dashboardUrlForDisplay });
+    printAdditionalForwardPorts(agent, info.port, deps.buildControlUiUrls);
+    return;
+  }
+
+  if (auth !== "url_token") {
+    console.log(`  ${info.displayName} ${label}`);
+    console.log(`  Port ${info.port} must be forwarded before opening this URL.`);
+    for (const url of deps.buildControlUiUrls(null, info.port)) {
+      console.log(`  ${dashboardUrlForDisplay(url)}`);
+    }
+    printOptionalDashboardUi(agent, { ...deps, redactUrl: dashboardUrlForDisplay });
+    printAdditionalForwardPorts(agent, info.port, deps.buildControlUiUrls);
     return;
   }
 
   if (token) {
-    console.log(
-      `  ${info.displayName} ${label} (auth token redacted from displayed URLs)`,
-    );
+    console.log(`  ${info.displayName} ${label} (auth token redacted from displayed URLs)`);
     console.log(`  Port ${info.port} must be forwarded before opening this URL.`);
     for (const url of deps.buildControlUiUrls(token, info.port)) {
       console.log(`  ${dashboardUrlForDisplay(url)}`);
@@ -574,4 +601,90 @@ export function printDashboardUi(
     }
   }
   printOptionalDashboardUi(agent, { ...deps, redactUrl: dashboardUrlForDisplay });
+  printAdditionalForwardPorts(agent, info.port, deps.buildControlUiUrls);
+}
+
+/**
+ * Print one block per manifest-declared `forward_ports` entry that is not
+ * the primary dashboard port. Each block announces the port and renders a
+ * loopback URL using the same `buildControlUiUrls` chain as the primary
+ * dashboard so WSL host-address fallbacks remain consistent.
+ *
+ * The label is sourced from the agent's `health_probe.port` match — that
+ * is the only manifest signal today that a declared secondary port is the
+ * OpenAI-compatible API surface (Hermes manifest sets
+ * `health_probe.port: 8642` alongside `forward_ports: [18789, 8642]`).
+ * Any other declared port gets a neutral "additional port" label.
+ *
+ * The URL filter normalises empty `URL.port` results to the scheme
+ * default. `new URL("http://h:80").port` returns `""` because WHATWG
+ * URL elides the default scheme port; a strict `urlPort === String(port)`
+ * comparison would silently drop URLs for ports 80 and 443 even though
+ * the underlying `forward_ports` validation accepts them. The
+ * normalisation keeps the filter sound while still excluding any URL
+ * whose port truly does not match the declared entry.
+ */
+function printAdditionalForwardPorts(
+  agent: AgentDefinition,
+  primaryPort: number,
+  buildControlUiUrls: (token: string | null, port: number) => string[],
+): void {
+  const declared = Array.isArray(agent.forward_ports) ? agent.forward_ports : [];
+  if (declared.length === 0) return;
+  const apiPort = agent.healthProbe.port;
+  for (const port of declared) {
+    if (!Number.isInteger(port) || port < 1 || port > 65535) continue;
+    if (port === primaryPort) continue;
+    const isApi = port === apiPort;
+    const sectionLabel = isApi ? "OpenAI-compatible API" : "additional port";
+    console.log("");
+    console.log(`  ${agent.displayName} ${sectionLabel}`);
+    console.log(`  Port ${port} must be forwarded before connecting.`);
+    const seen = new Set<string>();
+    for (const baseUrl of buildControlUiUrls(null, port)) {
+      const withoutHash = baseUrl.split("#")[0].replace(/\/$/, "");
+      const resolvedUrlPort = resolveUrlPort(withoutHash);
+      if (resolvedUrlPort !== port) continue;
+      const url = isApi ? `${withoutHash}/v1` : `${withoutHash}/`;
+      if (seen.has(url)) continue;
+      seen.add(url);
+      console.log(`  ${dashboardUrlForDisplay(url)}`);
+    }
+  }
+}
+
+/**
+ * Resolve the effective port of `candidate`, normalising the WHATWG
+ * URL behaviour that returns an empty string for the scheme-default
+ * port (`http://h:80` → `""`, `https://h:443` → `""`). Returns the
+ * integer port, or `null` when the input is unparseable or carries no
+ * recoverable port. The mapping is intentionally limited to `http` /
+ * `https` / `ws` / `wss` — the four schemes the dashboard URL builder
+ * emits — so an unknown scheme falls through to `null` instead of
+ * silently mapping to 80 or 443.
+ */
+function resolveUrlPort(candidate: string): number | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(candidate);
+  } catch {
+    return null;
+  }
+  if (parsed.port !== "") {
+    const numeric = Number(parsed.port);
+    return Number.isInteger(numeric) ? numeric : null;
+  }
+  const protocol = parsed.protocol.replace(/:$/, "").toLowerCase();
+  switch (protocol) {
+    case "http":
+      return 80;
+    case "https":
+      return 443;
+    case "ws":
+      return 80;
+    case "wss":
+      return 443;
+    default:
+      return null;
+  }
 }

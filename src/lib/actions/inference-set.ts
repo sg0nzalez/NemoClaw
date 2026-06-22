@@ -5,11 +5,15 @@ import type { SpawnSyncReturns } from "node:child_process";
 
 import { runOpenshell } from "../adapters/openshell/runtime";
 import { CLI_NAME } from "../cli/branding";
+import { HERMES_PROXY_API_KEY_PLACEHOLDER } from "../hermes-proxy-api-key";
 import {
   getProviderSelectionConfig,
   getSandboxInferenceConfig,
   type SandboxInferenceConfig,
 } from "../inference/config";
+import { resolveContextWindowForModel } from "../inference/context-window";
+import { type ValidationResult, validateLocalProvider } from "../inference/local";
+import { ensureLocalProviderReachable } from "../onboard/local-inference-topology";
 import {
   type AgentConfigTarget,
   readSandboxConfig,
@@ -24,6 +28,7 @@ import * as onboardSession from "../state/onboard-session";
 import type { SandboxEntry } from "../state/registry";
 import * as registry from "../state/registry";
 import { isSafeModelId } from "../validation";
+import { hermesApiMode, resolveRuntimeInferenceApi } from "./inference-route-api";
 
 export interface InferenceSetOptions {
   provider: string;
@@ -66,6 +71,10 @@ export interface InferenceSetDeps {
   runOpenshell: (args: string[], opts?: { ignoreError?: boolean }) => OpenshellRunResult;
   appendAuditEntry: typeof appendAuditEntry;
   log: (message: string) => void;
+  isLocalInferenceProvider: (provider: string) => boolean;
+  validateLocalProvider: (provider: string) => ValidationResult;
+  ensureLocalProviderReachable: (provider: string) => boolean;
+  resolveContextWindowForModel: (provider: string, model: string) => number | null;
 }
 
 export class InferenceSetError extends Error {
@@ -108,6 +117,11 @@ function defaultDeps(): InferenceSetDeps {
     runOpenshell: (args, opts) => runOpenshell(args, opts),
     appendAuditEntry,
     log: console.log,
+    isLocalInferenceProvider: (provider) =>
+      provider === "ollama-local" || provider === "vllm-local",
+    validateLocalProvider,
+    ensureLocalProviderReachable,
+    resolveContextWindowForModel,
   };
 }
 
@@ -219,6 +233,7 @@ function buildProviderConfig(
   existing: ConfigObject,
   model: string,
   route: SandboxInferenceConfig,
+  contextWindow?: number,
 ): ConfigObject {
   const firstExistingModel = Array.isArray(existing.models)
     ? cloneConfigObject(existing.models[0])
@@ -226,6 +241,11 @@ function buildProviderConfig(
   delete firstExistingModel.compat;
   firstExistingModel.id = model;
   firstExistingModel.name = route.primaryModelRef;
+  // Recompute for the new model rather than inheriting the prior model's window.
+  // Omitted (undefined) → keep whatever the existing entry had.
+  if (typeof contextWindow === "number") {
+    firstExistingModel.contextWindow = contextWindow;
+  }
   if (route.inferenceCompat) {
     firstExistingModel.compat = asConfigObject(route.inferenceCompat);
   }
@@ -244,6 +264,7 @@ export function patchOpenClawInferenceConfig(
   provider: string,
   model: string,
   preferredInferenceApi: string | null = null,
+  contextWindow?: number,
 ): { changed: boolean; route: SandboxInferenceConfig } {
   const before = JSON.stringify(config);
   const route = getSandboxInferenceConfig(model, provider, preferredInferenceApi);
@@ -254,7 +275,7 @@ export function patchOpenClawInferenceConfig(
   models.mode = "merge";
   const providers = ensureObject(models, "providers");
   const existingProvider = cloneConfigObject(providers[route.providerKey]);
-  providers[route.providerKey] = buildProviderConfig(existingProvider, model, route);
+  providers[route.providerKey] = buildProviderConfig(existingProvider, model, route, contextWindow);
 
   return { changed: before !== JSON.stringify(config), route };
 }
@@ -263,13 +284,24 @@ export function patchHermesInferenceConfig(
   config: ConfigObject,
   provider: string,
   model: string,
+  preferredInferenceApi: string | null = null,
 ): { changed: boolean; route: SandboxInferenceConfig } {
   const before = JSON.stringify(config);
-  const route = getSandboxInferenceConfig(model, provider);
+  const route = getSandboxInferenceConfig(model, provider, preferredInferenceApi);
+  const upstream = ensureObject(config, "_nemoclaw_upstream");
+  upstream.provider = provider;
+  upstream.model = model;
   const modelConfig = ensureObject(config, "model");
   modelConfig.default = model;
   modelConfig.base_url = route.inferenceBaseUrl;
   modelConfig.provider = "custom";
+  modelConfig.api_key = HERMES_PROXY_API_KEY_PLACEHOLDER;
+  const apiMode = hermesApiMode(route.inferenceApi);
+  if (apiMode) {
+    modelConfig.api_mode = apiMode;
+  } else {
+    delete modelConfig.api_mode;
+  }
 
   return { changed: before !== JSON.stringify(config), route };
 }
@@ -278,6 +310,7 @@ function updateMatchingOnboardSession(
   sandboxName: string,
   provider: string,
   model: string,
+  route: SandboxInferenceConfig,
   deps: Pick<InferenceSetDeps, "loadSession" | "updateSession">,
 ): boolean {
   const session = deps.loadSession();
@@ -288,6 +321,7 @@ function updateMatchingOnboardSession(
     current.model = model;
     current.endpointUrl =
       getProviderSelectionConfig(provider, model)?.endpointUrl ?? current.endpointUrl;
+    current.preferredInferenceApi = route.inferenceApi;
     return current;
   });
   return true;
@@ -336,7 +370,7 @@ export async function runInferenceSet(
     );
   }
 
-  const { sandboxName, agentName } = resolveTargetSandbox(options.sandboxName, deps);
+  const { sandboxName, entry, agentName } = resolveTargetSandbox(options.sandboxName, deps);
   if (agentName !== "openclaw" && agentName !== "hermes") {
     throw new InferenceSetError(
       `nemoclaw inference set supports OpenClaw and Hermes sandboxes; '${sandboxName}' uses '${agentName}'.`,
@@ -352,9 +386,38 @@ export async function runInferenceSet(
     );
   }
 
+  // Local providers (ollama-local, vllm-local) route through the sandbox-facing
+  // host.openshell.internal hostname, which the host-side `openshell inference set`
+  // verify cannot resolve — its default verification is a guaranteed false negative
+  // on a valid route. Validate the host stack ourselves, then skip the gateway-side
+  // verify. Only a genuinely-unreachable host stack hard-fails here, before the
+  // route is touched.
+  let effectiveNoVerify = options.noVerify === true;
+  if (deps.isLocalInferenceProvider(provider)) {
+    const localValidation = deps.validateLocalProvider(provider);
+    if (localValidation.ok) {
+      effectiveNoVerify = true;
+    } else if (deps.ensureLocalProviderReachable(provider)) {
+      if (localValidation.message) deps.log(`  ⚠ ${localValidation.message}`);
+      deps.log(
+        "  Host inference service is reachable — proceeding. The sandbox reaches it " +
+          "through the gateway route at runtime; host-side verification cannot resolve " +
+          "the container hostname, so it is skipped.",
+      );
+      effectiveNoVerify = true;
+    } else {
+      throw new InferenceSetError(
+        `Cannot reach local provider '${provider}': ${
+          localValidation.message ?? "the host inference service is not responding."
+        }${localValidation.diagnostic ? `\n  Diagnostic: ${localValidation.diagnostic}` : ""}`,
+        1,
+      );
+    }
+  }
+
   deps.log(`  Setting OpenShell inference route: ${provider} / ${model}`);
   const setResult = deps.runOpenshell(
-    openshellInferenceSetArgs({ provider, model, noVerify: options.noVerify }),
+    openshellInferenceSetArgs({ provider, model, noVerify: effectiveNoVerify }),
     {
       ignoreError: true,
     },
@@ -373,10 +436,37 @@ export async function runInferenceSet(
   }
 
   const config = deps.readSandboxConfig(sandboxName, target);
-  const patched =
-    agentName === "hermes"
-      ? patchHermesInferenceConfig(config, provider, model)
-      : patchOpenClawInferenceConfig(config, provider, model, getPreferredInferenceApi(config));
+  const preferredInferenceApi = resolveRuntimeInferenceApi({
+    agentName,
+    config,
+    currentProvider: entry.provider,
+    provider,
+    sandboxName,
+    session: deps.loadSession(),
+  });
+  let patched: { changed: boolean; route: SandboxInferenceConfig };
+  if (agentName === "hermes") {
+    patched = patchHermesInferenceConfig(config, provider, model, preferredInferenceApi);
+  } else {
+    // Recompute the context window for the model being switched to, so it does
+    // not inherit the prior model's window (#context-window-on-switch).
+    const contextWindow = deps.resolveContextWindowForModel(provider, model);
+    if (contextWindow != null) {
+      deps.log(`  Context window for '${model}': ${contextWindow} tokens`);
+    } else {
+      deps.log(
+        `  Warning: could not determine the context window for '${model}'; keeping the ` +
+          `existing value. Run '${CLI_NAME} ${sandboxName} rebuild' to re-probe it.`,
+      );
+    }
+    patched = patchOpenClawInferenceConfig(
+      config,
+      provider,
+      model,
+      preferredInferenceApi || getPreferredInferenceApi(config),
+      contextWindow ?? undefined,
+    );
+  }
 
   deps.log(
     agentName === "hermes"
@@ -414,10 +504,16 @@ export async function runInferenceSet(
       `  Run '${CLI_NAME} ${sandboxName} rebuild' to finish applying the model inside the sandbox.`,
     );
   }
-  const sessionUpdated = updateMatchingOnboardSession(sandboxName, provider, model, deps);
+  const sessionUpdated = updateMatchingOnboardSession(
+    sandboxName,
+    provider,
+    model,
+    patched.route,
+    deps,
+  );
 
   deps.appendAuditEntry({
-    action: "shields_down",
+    action: "inference_set",
     sandbox: sandboxName,
     timestamp: new Date().toISOString(),
     reason: `inference set ${agentName}:${provider}:${model}${

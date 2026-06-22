@@ -8,6 +8,7 @@ import {
   createBuiltInMessagingHookRegistry,
   MessagingHookRegistry,
   runMessagingHook,
+  runMessagingHookSync,
 } from "./index";
 
 const HOST_QR_HOOK = {
@@ -30,41 +31,116 @@ const HOST_QR_HOOK = {
 
 describe("MessagingHookRegistry", () => {
   it("constructs the production built-in hook registry", () => {
-    const registry = createBuiltInMessagingHookRegistry({
-      common: {
-        prompt: async () => "unused",
-      },
-      telegram: {
-        fetch: async () => ({
-          ok: true,
-          status: 200,
-          async json() {
-            return { ok: true };
-          },
-          async text() {
-            return "";
-          },
-        }),
-      },
-      wechat: {
-        ilinkLogin: {
-          runLogin: async () => ({
-            kind: "timeout",
-          }),
-        },
-        seedOpenClawAccount: {
-          now: () => "2026-01-01T00:00:00.000Z",
-        },
-      },
-    });
+    const registry = createBuiltInMessagingHookRegistry();
 
     expect(registry.listIds()).toEqual([
+      "common.staticOutputs",
       "common.tokenPaste",
+      "common.configPrompt",
+      "discord.openclawBridgeHealth",
+      "slack.socketModeGatewayConflict",
+      "slack.socketModeGatewayStatus",
+      "slack.openclawBridgeHealth",
+      "slack.validateCredentials",
+      "telegram.allowlistAliases",
+      "telegram.openclawBridgeHealth",
+      "telegram.gatewayConflictStatus",
       "telegram.getMeReachability",
       "wechat.ilinkLogin",
       "wechat.seedOpenClawAccount",
       "wechat.healthCheck",
     ]);
+  });
+
+  it("runs synchronous status hooks with the same output validation", () => {
+    const registry = new MessagingHookRegistry([
+      {
+        id: "status.demo",
+        handler: () => ({
+          outputs: {
+            bridgeHealth: {
+              kind: "status",
+              value: {
+                type: "messaging-bridge-health",
+                channel: "demo",
+                conflicts: 1,
+              },
+            },
+          },
+        }),
+      },
+    ]);
+    const hook = {
+      id: "demo-status",
+      phase: "status",
+      handler: "status.demo",
+      outputs: [{ id: "bridgeHealth", kind: "status" }],
+    } as const satisfies ChannelHookSpec;
+
+    expect(runMessagingHookSync(hook, registry, { channelId: "demo" })).toEqual({
+      hookId: "demo-status",
+      handlerId: "status.demo",
+      phase: "status",
+      outputs: {
+        bridgeHealth: {
+          kind: "status",
+          value: {
+            type: "messaging-bridge-health",
+            channel: "demo",
+            conflicts: 1,
+          },
+        },
+      },
+    });
+  });
+
+  it("returns declared static outputs for manifest-owned render hooks", async () => {
+    const registry = createBuiltInMessagingHookRegistry();
+    const hook = {
+      id: "discord-openclaw-render",
+      phase: "render",
+      handler: "common.staticOutputs",
+      outputs: [
+        {
+          id: "render",
+          kind: "agent-render",
+          required: true,
+          value: {
+            kind: "json-fragment",
+            agent: "openclaw",
+            target: "openclaw.json",
+            fragment: {
+              path: "channels.discord",
+              value: {
+                enabled: true,
+              },
+            },
+          },
+        },
+      ],
+    } as const satisfies ChannelHookSpec;
+
+    await expect(runMessagingHook(hook, registry, { channelId: "discord" })).resolves.toEqual({
+      hookId: "discord-openclaw-render",
+      handlerId: "common.staticOutputs",
+      phase: "render",
+      outputs: {
+        render: {
+          kind: "agent-render",
+          value: {
+            kind: "json-fragment",
+            agent: "openclaw",
+            target: "openclaw.json",
+            fragment: {
+              path: "channels.discord",
+              value: {
+                enabled: true,
+              },
+            },
+          },
+        },
+      },
+    });
   });
 
   it("registers handlers by stable handler id", async () => {

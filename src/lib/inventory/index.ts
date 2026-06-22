@@ -3,7 +3,10 @@
 
 import { CLI_NAME } from "../cli/branding";
 import type { GatewayInference } from "../inference/config";
+import { getActiveChannelIdsFromPlan } from "../messaging/plan-validation";
 import { redactFull } from "../security/redact";
+import { getSandboxEntryDisplayInference, type SandboxMessagingState } from "../state/registry";
+import { resolveDefaultSandboxName } from "../tunnel/service-command";
 
 export interface SandboxEntry {
   name: string;
@@ -17,8 +20,7 @@ export interface SandboxEntry {
   openshellDriver?: string | null;
   openshellVersion?: string | null;
   policies?: string[] | null;
-  providerCredentialHashes?: Record<string, string> | null;
-  messagingChannels?: string[] | null;
+  messaging?: SandboxMessagingState | null;
   agent?: string | null;
   dashboardPort?: number | null;
 }
@@ -85,7 +87,8 @@ export interface SandboxInventoryResult {
 export interface MessagingOverlap {
   channel: string;
   sandboxes: [string, string];
-  reason?: "matching-token" | "unknown-token";
+  reason?: "matching-token" | "unknown-token" | string;
+  message?: string;
 }
 
 export interface GatewayHealth {
@@ -117,8 +120,9 @@ export interface ShowStatusCommandDeps {
   checkMessagingBridgeHealth?: (
     sandboxName: string,
     channels: string[],
+    agent?: string | null,
   ) => MessagingBridgeHealth[];
-  backfillAndFindOverlaps?: () => MessagingOverlap[];
+  findMessagingOverlaps?: () => MessagingOverlap[];
   readGatewayLog?: (sandboxName: string) => string | null;
   log?: (message?: string) => void;
 }
@@ -173,11 +177,12 @@ function buildSandboxInventoryRow(
     typeof sandbox.sandboxGpuEnabled === "boolean"
       ? sandbox.sandboxGpuEnabled
       : sandbox.gpuEnabled === true;
+  const inference = getSandboxEntryDisplayInference(sandbox);
 
   return {
     name: sandbox.name,
-    model: sandbox.model || null,
-    provider: sandbox.provider || null,
+    model: inference.model,
+    provider: inference.provider,
     gpuEnabled: sandbox.gpuEnabled === true,
     hostGpuDetected: sandbox.hostGpuDetected === true,
     sandboxGpuEnabled,
@@ -198,7 +203,8 @@ export async function getSandboxInventory(
   deps: ListSandboxesCommandDeps,
 ): Promise<SandboxInventoryResult> {
   const recovery = await deps.recoverRegistryEntries();
-  const defaultSandbox = recovery.defaultSandbox || null;
+  const resolvedDefault =
+    resolveDefaultSandboxName(() => ({ defaultSandbox: recovery.defaultSandbox ?? null })) ?? null;
   const lastSession = deps.loadLastSession();
   // #2753: only surface the last-onboarded name when its sandbox step
   // actually completed. Otherwise an interrupted onboard would leave the
@@ -210,14 +216,14 @@ export async function getSandboxInventory(
 
   return {
     schemaVersion: 1,
-    defaultSandbox,
+    defaultSandbox: resolvedDefault,
     recovery: {
       recoveredFromSession: recovery.recoveredFromSession === true,
       recoveredFromGateway: recovery.recoveredFromGateway || 0,
     },
     lastOnboardedSandbox,
     sandboxes: recovery.sandboxes.map((sandbox) =>
-      buildSandboxInventoryRow(sandbox, defaultSandbox, deps.getActiveSessionCount),
+      buildSandboxInventoryRow(sandbox, resolvedDefault, deps.getActiveSessionCount),
     ),
   };
 }
@@ -272,9 +278,16 @@ export function renderSandboxInventoryText(
     const def = sandbox.isDefault ? " *" : "";
     const model = (useLive && liveInference.model) || sandbox.model || "unknown";
     const provider = (useLive && liveInference.provider) || sandbox.provider || "unknown";
-    const modelDrifted = !!(useLive && liveInference.model && liveInference.model !== sandbox.model);
-    const providerDrifted =
-      !!(useLive && liveInference.provider && liveInference.provider !== sandbox.provider);
+    const modelDrifted = !!(
+      useLive &&
+      liveInference.model &&
+      liveInference.model !== sandbox.model
+    );
+    const providerDrifted = !!(
+      useLive &&
+      liveInference.provider &&
+      liveInference.provider !== sandbox.provider
+    );
     const gpu = sandbox.sandboxGpuEnabled ? "sandbox GPU" : "CPU sandbox";
     const presets = sandbox.policies.length > 0 ? sandbox.policies.join(", ") : "none";
     const connected = sandbox.connected ? " ●" : "";
@@ -313,6 +326,7 @@ function buildStatusSandboxRow(
   const isDefault = sandbox.name === defaultSandbox;
   const liveModel = isDefault ? liveInference?.model : null;
   const liveProvider = isDefault ? liveInference?.provider : null;
+  const inference = getSandboxEntryDisplayInference(sandbox);
   const dashboardPort =
     typeof sandbox.dashboardPort === "number" && Number.isFinite(sandbox.dashboardPort)
       ? sandbox.dashboardPort
@@ -323,8 +337,8 @@ function buildStatusSandboxRow(
       : sandbox.gpuEnabled === true;
   return {
     name: safeStatusString(sandbox.name) || sandbox.name,
-    model: safeStatusString(liveModel || sandbox.model || null),
-    provider: safeStatusString(liveProvider || sandbox.provider || null),
+    model: safeStatusString(liveModel || inference.model),
+    provider: safeStatusString(liveProvider || inference.provider),
     gpuEnabled: sandbox.gpuEnabled === true,
     hostGpuDetected: sandbox.hostGpuDetected === true,
     sandboxGpuEnabled,
@@ -361,15 +375,16 @@ function normalizeGatewayHealth(health: GatewayHealth | null | undefined): Gatew
 }
 
 export function getStatusReport(deps: ShowStatusCommandDeps): StatusReport {
-  const { sandboxes, defaultSandbox } = deps.listSandboxes();
-  const resolvedDefault = defaultSandbox || null;
+  const sandboxList = deps.listSandboxes();
+  const { sandboxes } = sandboxList;
+  const resolvedDefault = resolveDefaultSandboxName(() => sandboxList) ?? null;
   const liveInference = sandboxes.length > 0 ? deps.getLiveInference() : null;
   const gatewayHealth =
     deps.getGatewayHealth && sandboxes.length > 0 ? deps.getGatewayHealth() : null;
   const services =
-    deps.getServiceStatuses?.({ sandboxName: resolvedDefault || undefined }).map(
-      normalizeServiceStatus,
-    ) ?? [];
+    deps
+      .getServiceStatuses?.({ sandboxName: resolvedDefault || undefined })
+      .map(normalizeServiceStatus) ?? [];
 
   return {
     schemaVersion: 1,
@@ -398,24 +413,27 @@ export function getStatusReport(deps: ShowStatusCommandDeps): StatusReport {
  */
 export function showStatusCommand(deps: ShowStatusCommandDeps): void {
   const log = deps.log ?? console.log;
-  const { sandboxes, defaultSandbox } = deps.listSandboxes();
+  const sandboxList = deps.listSandboxes();
+  const { sandboxes } = sandboxList;
+  const resolvedDefault = resolveDefaultSandboxName(() => sandboxList) ?? null;
   if (sandboxes.length > 0) {
     const live = deps.getLiveInference();
     log("");
     log("  Sandboxes:");
     for (const sb of sandboxes) {
-      const isDefault = sb.name === defaultSandbox;
+      const isDefault = sb.name === resolvedDefault;
       const def = isDefault ? " *" : "";
       // Prefer the live gateway model for the default sandbox so `status`
       // agrees with `openshell inference get` (#2369).
       const liveModel = isDefault && live ? live.model : null;
       const liveProvider = isDefault && live ? live.provider : null;
-      const model = liveModel || sb.model;
-      const provider = liveProvider || sb.provider;
+      const inference = getSandboxEntryDisplayInference(sb);
+      const model = liveModel || inference.model;
+      const provider = liveProvider || inference.provider;
       const portSuffix = sb.dashboardPort != null ? ` :${sb.dashboardPort}` : "";
       log(`    ${sb.name}${def}${model ? ` (${model})` : ""}${portSuffix}`);
-      if (isDefault && liveModel && liveModel !== sb.model) {
-        log(`      (onboarded: ${sb.model || "unknown"})`);
+      if (isDefault && liveModel && liveModel !== inference.model) {
+        log(`      (onboarded: ${inference.model || "unknown"})`);
       }
       // #2604: surface the configured Inference (provider/model) and
       // Connected (active-session count) as labeled fields. Bare
@@ -459,13 +477,17 @@ export function showStatusCommand(deps: ShowStatusCommandDeps): void {
     }
   }
 
-  deps.showServiceStatus({ sandboxName: defaultSandbox || undefined });
+  deps.showServiceStatus({ sandboxName: resolvedDefault || undefined });
 
-  if (deps.backfillAndFindOverlaps) {
-    const overlaps = deps.backfillAndFindOverlaps();
+  if (deps.findMessagingOverlaps) {
+    const overlaps = deps.findMessagingOverlaps();
     if (overlaps.length > 0) {
       log("");
-      for (const { channel, sandboxes: pair, reason } of overlaps) {
+      for (const { channel, sandboxes: pair, reason, message } of overlaps) {
+        if (message) {
+          log(`  ⚠ ${formatMessagingOverlapMessage(message, channel, pair)}`);
+          continue;
+        }
         const detail =
           reason === "matching-token"
             ? `share the same ${channel} credential`
@@ -480,21 +502,20 @@ export function showStatusCommand(deps: ShowStatusCommandDeps): void {
     }
   }
 
-  if (deps.checkMessagingBridgeHealth && defaultSandbox) {
-    // Re-fetch: backfillAndFindOverlaps above may have populated
-    // messagingChannels for the default sandbox on first run after upgrade,
-    // and the original `sandboxes` snapshot is stale.
+  if (deps.checkMessagingBridgeHealth && resolvedDefault) {
     const refreshed = deps.listSandboxes().sandboxes;
-    const defaultEntry = refreshed.find((sb) => sb.name === defaultSandbox);
-    const channels = defaultEntry?.messagingChannels;
-    if (Array.isArray(channels) && channels.length > 0) {
-      const degraded = deps.checkMessagingBridgeHealth(defaultSandbox, channels);
+    const defaultEntry = refreshed.find((sb) => sb.name === resolvedDefault);
+    const channels = getActiveChannelIdsFromPlan(defaultEntry?.messaging?.plan);
+    if (channels.length > 0) {
+      const degraded = deps.checkMessagingBridgeHealth(
+        resolvedDefault,
+        channels,
+        defaultEntry?.agent,
+      );
       if (degraded.length > 0) {
         log("");
         for (const { channel, conflicts } of degraded) {
-          log(
-            `  ⚠ ${channel} bridge: degraded (${conflicts} conflict errors in /tmp/gateway.log)`,
-          );
+          log(`  ⚠ ${channel} bridge: degraded (${conflicts} conflict errors in /tmp/gateway.log)`);
         }
         log(
           "    Another sandbox is likely polling with the same bot token. See docs/reference/troubleshooting.mdx.",
@@ -502,7 +523,7 @@ export function showStatusCommand(deps: ShowStatusCommandDeps): void {
 
         // Surface gateway log tail for Hermes sandboxes when messaging is degraded.
         if (deps.readGatewayLog && defaultEntry?.agent === "hermes") {
-          const logTail = deps.readGatewayLog(defaultSandbox);
+          const logTail = deps.readGatewayLog(resolvedDefault);
           if (logTail) {
             log("");
             log("  Messaging gateway log (last 10 lines):");
@@ -514,4 +535,15 @@ export function showStatusCommand(deps: ShowStatusCommandDeps): void {
       }
     }
   }
+}
+
+function formatMessagingOverlapMessage(
+  template: string,
+  channel: string,
+  pair: readonly [string, string],
+): string {
+  return template
+    .replaceAll("{channel}", channel)
+    .replaceAll("{first}", pair[0])
+    .replaceAll("{second}", pair[1]);
 }

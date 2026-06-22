@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock heavy dependencies that pull in the full module graph
@@ -17,8 +17,12 @@ vi.mock("../adapters/openshell/client.js", () => ({
     return match ? match[1] : null;
   },
   versionGte: (left = "0.0.0", right = "0.0.0") => {
-    const lhs = String(left).split(".").map((p) => parseInt(p, 10) || 0);
-    const rhs = String(right).split(".").map((p) => parseInt(p, 10) || 0);
+    const lhs = String(left)
+      .split(".")
+      .map((p) => parseInt(p, 10) || 0);
+    const rhs = String(right)
+      .split(".")
+      .map((p) => parseInt(p, 10) || 0);
     const length = Math.max(lhs.length, rhs.length);
     for (let i = 0; i < length; i++) {
       const a = lhs[i] || 0;
@@ -36,7 +40,7 @@ vi.mock("../agent/defs.js", () => ({
     name,
     displayName: name === "openclaw" ? "OpenClaw" : "Hermes Agent",
     versionCommand: name === "openclaw" ? "openclaw --version" : "hermes --version",
-    expectedVersion: name === "openclaw" ? "2026.5.22" : "2026.5.16",
+    expectedVersion: name === "openclaw" ? "2026.5.27" : "2026.5.16",
     stateDirs: [],
     configPaths: { dir: "/sandbox/.openclaw" },
   })),
@@ -77,12 +81,12 @@ describe("checkAgentVersion", () => {
     registry.registerSandbox({
       name: "test-sb",
       agent: null,
-      agentVersion: "2026.5.22",
+      agentVersion: "2026.5.27",
     });
 
     const result = checkAgentVersion("test-sb");
     expect(result.detectionMethod).toBe("registry");
-    expect(result.sandboxVersion).toBe("2026.5.22");
+    expect(result.sandboxVersion).toBe("2026.5.27");
     expect(result.isStale).toBe(false);
   });
 
@@ -103,7 +107,7 @@ describe("checkAgentVersion", () => {
     registry.registerSandbox({
       name: "test-sb",
       agent: null,
-      agentVersion: "2026.5.22",
+      agentVersion: "2026.5.27",
     });
 
     const result = checkAgentVersion("test-sb");
@@ -120,7 +124,7 @@ describe("checkAgentVersion", () => {
 
     vi.mocked(spawnSync).mockReturnValue({
       status: 0,
-      stdout: "OpenClaw 2026.5.22 (abc123)\n",
+      stdout: "OpenClaw 2026.5.27 (abc123)\n",
       stderr: "",
       pid: 1234,
       output: [],
@@ -129,17 +133,24 @@ describe("checkAgentVersion", () => {
 
     const result = checkAgentVersion("test-sb");
     expect(result.detectionMethod).toBe("ssh-exec");
-    expect(result.sandboxVersion).toBe("2026.5.22");
+    expect(result.sandboxVersion).toBe("2026.5.27");
     expect(result.isStale).toBe(false);
     expect(captureSandboxSshConfigCommand).toHaveBeenCalledWith(
       "/usr/local/bin/openshell",
       "test-sb",
       { ignoreError: true, timeout: OPENSHELL_PROBE_TIMEOUT_MS },
     );
+    const sshArgs = vi.mocked(spawnSync).mock.calls[0]?.[1] as string[];
+    const configFile = sshArgs[sshArgs.indexOf("-F") + 1];
+    const configDir = dirname(configFile);
+    expect(configDir).not.toBe(tmpdir());
+    expect(basename(configDir)).toMatch(/^nemoclaw-ver-/);
+    expect(basename(configFile)).toBe("ssh_config");
+    expect(existsSync(configDir)).toBe(false);
 
     // Should have cached the version in registry
     const updated = registry.getSandbox("test-sb");
-    expect(updated?.agentVersion).toBe("2026.5.22");
+    expect(updated?.agentVersion).toBe("2026.5.27");
   });
 
   it("returns unavailable when SSH config fails", () => {
@@ -183,7 +194,7 @@ describe("checkAgentVersion", () => {
 
     vi.mocked(spawnSync).mockReturnValue({
       status: 0,
-      stdout: "OpenClaw 2026.5.22 (abc123)\n",
+      stdout: "OpenClaw 2026.5.27 (abc123)\n",
       stderr: "",
       pid: 1234,
       output: [],
@@ -192,7 +203,7 @@ describe("checkAgentVersion", () => {
 
     const result = checkAgentVersion("test-sb", { forceProbe: true });
     expect(result.detectionMethod).toBe("ssh-exec");
-    expect(result.sandboxVersion).toBe("2026.5.22");
+    expect(result.sandboxVersion).toBe("2026.5.27");
   });
 
   it("force probe does not trust cached metadata when live version probing is unavailable", () => {
@@ -240,14 +251,14 @@ describe("formatStalenessWarning", () => {
   it("includes sandbox name, versions, and rebuild hint", () => {
     const lines = formatStalenessWarning("my-sb", {
       sandboxVersion: "2026.3.11",
-      expectedVersion: "2026.5.22",
+      expectedVersion: "2026.5.27",
       isStale: true,
       detectionMethod: "registry",
     });
     const joined = lines.join("\n");
     expect(joined).toContain("my-sb");
     expect(joined).toContain("2026.3.11");
-    expect(joined).toContain("2026.5.22");
+    expect(joined).toContain("2026.5.27");
     expect(joined).toContain("rebuild");
   });
 });
