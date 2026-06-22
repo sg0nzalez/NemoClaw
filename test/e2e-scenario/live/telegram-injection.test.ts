@@ -15,7 +15,7 @@ import {
   dockerInfo,
   expectExitZero,
   expectSandboxReady,
-  installSandbox,
+  installSandboxOrSkipOnRateLimit,
   phase6Env,
   REPO_ROOT,
   redactionValues,
@@ -85,18 +85,15 @@ test.skipIf(!shouldRunLiveE2EScenarios())(
     const docker = await dockerInfo(host, env);
     expect(docker.exitCode, resultText(docker)).toBe(0);
 
-    try {
-      const install = await installSandbox(host, env, redactions, "install-telegram-injection");
-      expectExitZero(install, "install.sh --non-interactive");
-    } catch (error) {
-      if (String(error).includes("NVIDIA_ENDPOINT_RATE_LIMIT")) {
-        skip(
-          "NVIDIA endpoint validation was rate-limited before Telegram injection assertions ran",
-        );
-        return;
-      }
-      throw error;
-    }
+    const install = await installSandboxOrSkipOnRateLimit(
+      host,
+      env,
+      redactions,
+      "install-telegram-injection",
+      skip,
+      "NVIDIA endpoint validation was rate-limited before Telegram injection assertions ran",
+    );
+    expectExitZero(install, "install.sh --non-interactive");
     await expectSandboxReady(
       host,
       SANDBOX_NAME,

@@ -207,6 +207,24 @@ export async function installSandbox(
   return result;
 }
 
+export async function installSandboxOrSkipOnRateLimit(
+  host: HostCliClient,
+  env: NodeJS.ProcessEnv,
+  redactions: string[],
+  artifactName: string,
+  skip: (note?: string) => never,
+  skipMessage: string,
+): Promise<ShellProbeResult> {
+  try {
+    return await installSandbox(host, env, redactions, artifactName);
+  } catch (error) {
+    if (String(error).includes("NVIDIA_ENDPOINT_RATE_LIMIT")) {
+      skip(skipMessage);
+    }
+    throw error;
+  }
+}
+
 export async function rebuildSandbox(
   host: HostCliClient,
   sandboxName: string,
