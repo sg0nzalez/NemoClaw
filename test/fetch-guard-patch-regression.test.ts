@@ -15,11 +15,12 @@ const REVIEWED_OPENCLAW_PATCH_CLASSIFIER_VERSIONS = [
   "2026.5.18",
   "2026.5.22",
   "2026.5.27",
+  "2026.6.9",
 ] as const;
-const CURRENT_REVIEWED_OPENCLAW_PATCH_CLASSIFIER_VERSION = "2026.5.27";
+const CURRENT_REVIEWED_OPENCLAW_PATCH_CLASSIFIER_VERSION = "2026.6.9";
 const EXPECTED_OPENCLAW_INTEGRITY =
-  "sha512-2N93zhdAo88KAbHt6T7KvYXf4s7XIkYXBgv1npYpn7e1Y9FvrtgtpsA38my9rtFW+70uXEojRPX5/OqnuDqJPw==";
-const REVIEWED_OPENCLAW_2026_5_27_WEB_FETCH_SHAPE = [
+  "sha512-y0PGUdE87S8QtQXABPDL0CjNKhH3q/R1h9/WiRQkhVCGSBVhs63/M1iZn2DYVyJCAbDyMz3KNyAE0WzSQIWCRg==";
+const REVIEWED_OPENCLAW_2026_6_9_WEB_FETCH_SHAPE = [
   "async function fetchWithWebToolsNetworkGuard(params) {",
   "  const { timeoutSeconds, useEnvProxy, ...rest } = params;",
   "  const resolved = {",
@@ -32,9 +33,9 @@ const REVIEWED_OPENCLAW_2026_5_27_WEB_FETCH_SHAPE = [
   "  return fetchWithSsrFGuard(useEnvProxy ? withTrustedEnvProxyGuardedFetchMode(resolved) : withStrictGuardedFetchMode(resolved));",
   "}",
 ].join("\n");
-const REVIEWED_OPENCLAW_2026_5_27_MANAGED_PROXY_SHAPE =
+const REVIEWED_OPENCLAW_2026_6_9_MANAGED_PROXY_SHAPE =
   "const canUseManagedProxy = mode === GUARDED_FETCH_MODE.STRICT && isManagedProxyActive() && hasProxyEnvConfigured();";
-const REVIEWED_OPENCLAW_2026_5_27_SSRF_POLICY_SHAPE = [
+const REVIEWED_OPENCLAW_2026_6_9_SSRF_POLICY_SHAPE = [
   "function shouldSkipPrivateNetworkChecks(hostname, policy) {",
   "  return isPrivateNetworkAllowedByPolicy(policy) || normalizeHostnameSet(policy?.allowedHostnames).has(hostname);",
   "}",
@@ -52,7 +53,7 @@ const REVIEWED_OPENCLAW_2026_5_27_SSRF_POLICY_SHAPE = [
   "}",
 ].join("\n");
 
-function loadReviewedOpenClaw20260527SsrfPolicyShape() {
+function loadReviewedOpenClaw20260609SsrfPolicyShape() {
   return new Function(`
 class SsrFBlockedError extends Error {}
 function normalizeHostname(value) {
@@ -77,7 +78,7 @@ function assertAllowedHostOrIpOrThrow(hostnameOrIp) {
     throw new SsrFBlockedError("blocked " + hostnameOrIp);
   }
 }
-${REVIEWED_OPENCLAW_2026_5_27_SSRF_POLICY_SHAPE}
+${REVIEWED_OPENCLAW_2026_6_9_SSRF_POLICY_SHAPE}
 return { shouldSkipPrivateNetworkChecks, resolveHostnamePolicyChecks };
   `)() as {
     shouldSkipPrivateNetworkChecks: (hostname: string, policy?: Record<string, unknown>) => boolean;
@@ -135,7 +136,7 @@ function readDockerfileOpenClawVersion(): string {
 function readDockerfileBaseOpenClawIntegrity(): string {
   return readRequiredMatch(
     DOCKERFILE_BASE,
-    /^ARG OPENCLAW_2026_5_27_INTEGRITY=([^\s]+)/m,
+    /^ARG OPENCLAW_2026_6_9_INTEGRITY=([^\s]+)/m,
     "OpenClaw base image integrity",
   );
 }
@@ -143,7 +144,7 @@ function readDockerfileBaseOpenClawIntegrity(): string {
 function readDockerfileOpenClawIntegrity(): string {
   return readRequiredMatch(
     DOCKERFILE,
-    /^ARG OPENCLAW_2026_5_27_INTEGRITY=([^\s]+)/m,
+    /^ARG OPENCLAW_2026_6_9_INTEGRITY=([^\s]+)/m,
     "OpenClaw runtime integrity",
   );
 }
@@ -194,12 +195,12 @@ function runOpenClawUpgradeBlock(currentVersion: string) {
     "set -euo pipefail",
     `call_log=${JSON.stringify(log)}`,
     `OPENCLAW_VERSION=${JSON.stringify(openclawVersion)}`,
-    `OPENCLAW_2026_5_27_INTEGRITY=${JSON.stringify(openclawIntegrity)}`,
+    `OPENCLAW_2026_6_9_INTEGRITY=${JSON.stringify(openclawIntegrity)}`,
     `openclaw() { if [ "\${1:-}" = "--version" ]; then printf 'openclaw ${currentVersion}\\n'; else return 127; fi; }`,
     "npm() {",
     '  printf "npm %s\\n" "$*" >> "$call_log";',
     '  if [ "${1:-}" = "view" ] && [ "${2:-}" = "openclaw@${OPENCLAW_VERSION}" ] && [ "${3:-}" = "dist.integrity" ]; then',
-    '    printf "%s\\n" "$OPENCLAW_2026_5_27_INTEGRITY";',
+    '    printf "%s\\n" "$OPENCLAW_2026_6_9_INTEGRITY";',
     "  fi",
     "}",
     'command() { if [ "${1:-}" = "-v" ] && [ "${2:-}" = "codex-acp" ]; then return 0; fi; builtin command "$@"; }',
@@ -254,7 +255,7 @@ function runDockerfilePatchBlock(
   dist: string,
   tmp: string,
   endMarker: string,
-  version = "2026.5.27",
+  version = CURRENT_REVIEWED_OPENCLAW_PATCH_CLASSIFIER_VERSION,
 ) {
   const command = dockerRunCommandBetween(
     "# Patch OpenClaw media fetch for proxy-only sandbox",
@@ -278,7 +279,11 @@ function runDockerfilePatchBlock(
   });
 }
 
-function runFetchGuardPatchBlock(dist: string, tmp: string, version = "2026.5.27") {
+function runFetchGuardPatchBlock(
+  dist: string,
+  tmp: string,
+  version = CURRENT_REVIEWED_OPENCLAW_PATCH_CLASSIFIER_VERSION,
+) {
   return runDockerfilePatchBlock(
     dist,
     tmp,
@@ -321,21 +326,21 @@ function webGuardedFetchFixtureSource(): string {
 }
 
 describe("fetch-guard patch regression guard", () => {
-  it("anchors web_fetch host-gateway policy to the reviewed OpenClaw 2026.5.27 SSRF contract", () => {
-    expect(REVIEWED_OPENCLAW_2026_5_27_WEB_FETCH_SHAPE).toContain(
+  it("anchors web_fetch host-gateway policy to the reviewed OpenClaw 2026.6.9 SSRF contract", () => {
+    expect(REVIEWED_OPENCLAW_2026_6_9_WEB_FETCH_SHAPE).toContain(
       "function fetchWithWebToolsNetworkGuard(params)",
     );
-    expect(REVIEWED_OPENCLAW_2026_5_27_WEB_FETCH_SHAPE).toContain(
+    expect(REVIEWED_OPENCLAW_2026_6_9_WEB_FETCH_SHAPE).toContain(
       "withTrustedEnvProxyGuardedFetchMode(resolved)",
     );
-    expect(REVIEWED_OPENCLAW_2026_5_27_SSRF_POLICY_SHAPE).toContain(
+    expect(REVIEWED_OPENCLAW_2026_6_9_SSRF_POLICY_SHAPE).toContain(
       "normalizeHostnameSet(policy?.allowedHostnames).has(hostname)",
     );
-    expect(REVIEWED_OPENCLAW_2026_5_27_SSRF_POLICY_SHAPE).toContain(
+    expect(REVIEWED_OPENCLAW_2026_6_9_SSRF_POLICY_SHAPE).toContain(
       "normalizeHostnameAllowlist(policy?.hostnameAllowlist)",
     );
 
-    const reviewed = loadReviewedOpenClaw20260527SsrfPolicyShape();
+    const reviewed = loadReviewedOpenClaw20260609SsrfPolicyShape();
     expect(
       reviewed.shouldSkipPrivateNetworkChecks("host.openshell.internal", {
         allowedHostnames: ["HOST.OPENSHELL.INTERNAL."],
@@ -1107,7 +1112,7 @@ if (!blocked) throw new Error('private IP literal was not blocked');`,
         "function isManagedProxyActive() { return process.env.OPENCLAW_PROXY_ACTIVE === '1'; }",
         "function hasProxyEnvConfigured() { return true; }",
         "function computeCanUseManagedProxy(mode, params) {",
-        `  ${REVIEWED_OPENCLAW_2026_5_27_MANAGED_PROXY_SHAPE}`,
+        `  ${REVIEWED_OPENCLAW_2026_6_9_MANAGED_PROXY_SHAPE}`,
         "  return canUseManagedProxy;",
         "}",
         "export { withStrictGuardedFetchMode as a, withTrustedEnvProxyGuardedFetchMode as b, computeCanUseManagedProxy as g };",
@@ -1312,7 +1317,7 @@ if (!blocked) throw new Error('private IP literal was not blocked');`,
       const patch = runFetchGuardPatchBlock(dist, tmp);
       expect(patch.status, `${patch.stdout}${patch.stderr}`).toBe(0);
       expect(patch.stdout).toContain(
-        "Patch 6 applied to OpenClaw 2026.5.27 cron preflight trusted env-proxy",
+        "Patch 6 applied to OpenClaw 2026.6.9 cron preflight trusted env-proxy",
       );
       const patched = fs.readFileSync(preflightPath, "utf-8");
       expect(
@@ -1353,7 +1358,7 @@ if (!blocked) throw new Error('private IP literal was not blocked');`,
       const patch = runFetchGuardPatchBlock(dist, tmp);
       expect(patch.status, `${patch.stdout}${patch.stderr}`).toBe(0);
       expect(patch.stdout).toContain(
-        "OpenClaw 2026.5.27 has no cron model-provider preflight; Patch 6 not needed",
+        "OpenClaw 2026.6.9 has no cron model-provider preflight; Patch 6 not needed",
       );
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });

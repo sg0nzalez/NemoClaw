@@ -36,10 +36,10 @@ RUN ln -s /opt/nemoclaw/node_modules /opt/nemoclaw-root/node_modules \
 # Stage 3: Runtime image — pull cached base from GHCR
 # hadolint ignore=DL3006
 FROM ${BASE_IMAGE}
-ARG OPENCLAW_VERSION=2026.5.27
-ARG OPENCLAW_2026_5_27_INTEGRITY=sha512-2N93zhdAo88KAbHt6T7KvYXf4s7XIkYXBgv1npYpn7e1Y9FvrtgtpsA38my9rtFW+70uXEojRPX5/OqnuDqJPw==
+ARG OPENCLAW_VERSION=2026.6.9
+ARG OPENCLAW_2026_6_9_INTEGRITY=sha512-y0PGUdE87S8QtQXABPDL0CjNKhH3q/R1h9/WiRQkhVCGSBVhs63/M1iZn2DYVyJCAbDyMz3KNyAE0WzSQIWCRg==
 
-# OpenClaw 2026.5.27 loads some generated source through jiti. Disable its
+# OpenClaw 2026.6.9 loads some generated source through jiti. Disable its
 # filesystem transform cache so source fragments that mention provider marker
 # names do not persist under /tmp/jiti inside the sandbox.
 ENV JITI_FS_CACHE=false
@@ -123,7 +123,7 @@ RUN set -eu; \
         echo "ERROR: OpenClaw build target ${OPENCLAW_VERSION} is below blueprint minimum ${MIN_VER}" >&2; exit 1; \
     fi; \
     EXPECTED_INTEGRITY=""; \
-    if [ "$OPENCLAW_VERSION" = "2026.5.27" ]; then EXPECTED_INTEGRITY="$OPENCLAW_2026_5_27_INTEGRITY"; fi; \
+    if [ "$OPENCLAW_VERSION" = "2026.6.9" ]; then EXPECTED_INTEGRITY="$OPENCLAW_2026_6_9_INTEGRITY"; fi; \
     if [ -n "$EXPECTED_INTEGRITY" ]; then \
         REGISTRY_INTEGRITY=$(npm view "openclaw@${OPENCLAW_VERSION}" dist.integrity); \
         if [ "$REGISTRY_INTEGRITY" != "$EXPECTED_INTEGRITY" ]; then \
@@ -321,7 +321,7 @@ RUN set -eu; \
         fi; \
     fi; \
     # --- Patch 2b: allow OpenShell host gateway only through web_fetch trusted env proxy --- \
-    # Reviewed against openclaw@2026.5.27 dist: fetchWithWebToolsNetworkGuard \
+    # Reviewed against openclaw@2026.6.9 dist: fetchWithWebToolsNetworkGuard \
     # passes useEnvProxy into withTrustedEnvProxyGuardedFetchMode(resolved), and \
     # the SSRF guard consumes policy.allowedHostnames to skip private-network \
     # checks for an exact normalized hostname. hostnameAllowlist only gates \
@@ -355,7 +355,7 @@ RUN set -eu; \
         fi; \
     fi; \
     # --- Patch 4: route unconfigured strict fetches through the sandbox egress proxy (#4687) --- \
-    # Reviewed against openclaw@2026.5.27 dist fetch-guard: the STRICT-mode \
+    # Reviewed against openclaw@2026.6.9 dist fetch-guard: the STRICT-mode \
     # managed-proxy gate is `mode === GUARDED_FETCH_MODE.STRICT && \
     # isManagedProxyActive() && hasProxyEnvConfigured()`. Extend activation to \
     # OPENSHELL_SANDBOX=1 only for fetches with no explicit dispatcherPolicy so \
@@ -389,7 +389,7 @@ RUN set -eu; \
         fi; \
     fi; \
     # --- Patch 6: cron model-provider preflight opts into trusted env-proxy mode --- \
-    # Reviewed against openclaw@2026.5.27 dist: the cron isolated-agent preflight \
+    # Reviewed against openclaw@2026.6.9 dist: the cron isolated-agent preflight \
     # (`probeLocalProviderEndpoint`) calls `fetchWithSsrFGuard` with \
     # `auditContext: "cron-model-provider-preflight"` and a narrow hostname-allowlist \
     # SsrFPolicy from `buildLocalProviderSsrFPolicy`, but does not pass a `mode`. \
@@ -496,7 +496,7 @@ RUN set -eu; \
     if grep -REq --include='*.js' 'DEFAULT_PREAUTH_HANDSHAKE_TIMEOUT_MS = (1e4|15e3)' "$OC_DIST"; then echo "ERROR: Patch 5 left a short handshake-timeout constant" >&2; exit 1; fi; \
     if ! grep -REq --include='*.js' 'DEFAULT_PREAUTH_HANDSHAKE_TIMEOUT_MS = 6e4' "$OC_DIST"; then echo "ERROR: Patch 5 did not find patched 6e4 constant" >&2; exit 1; fi
 
-# Patch OpenClaw chat.send gateway behavior for OpenClaw 2026.5.x.
+# Patch OpenClaw chat.send gateway behavior for OpenClaw 2026.6.9.
 #
 # OpenClaw can accept rapid TUI/WebChat chat.send requests and then emit a
 # terminal chat event with state="final" but no assistant message for the later
@@ -507,16 +507,14 @@ RUN set -eu; \
 # adds the submitted run ID as the transcript idempotency key.
 #
 # Removal criteria: drop when upstream OpenClaw fixes openclaw/openclaw#70164
-# and openclaw/openclaw#50298, or when NemoClaw no longer ships OpenClaw 2026.5.x.
+# and openclaw/openclaw#50298, or when NemoClaw no longer ships an affected OpenClaw.
 # hadolint ignore=DL3059
 RUN node /usr/local/lib/nemoclaw/patch-openclaw-chat-send.js \
     /usr/local/lib/node_modules/openclaw/dist
 
-# Patch OpenClaw's pinned 2026.5.27 compiled selection runtime to expose a
-# compact searchable tool catalog to the model while preserving the full
-# effective tool set behind tool_call. NEMOCLAW_TOOL_CATALOG=0 disables this
-# wrapper if an emergency rollback is needed. The script fails closed if the
-# pinned selection-*.js shape changes.
+# Run the compact tool catalog shim for OpenClaw selection runtimes that still
+# need it. OpenClaw 2026.6.9 ships a built-in catalog surface, so the script
+# skips cleanly after classifying the compiled selection-*.js shape.
 # hadolint ignore=DL3059
 RUN node /usr/local/lib/nemoclaw/patch-openclaw-tool-catalog.js \
     /usr/local/lib/node_modules/openclaw/dist

@@ -61,6 +61,68 @@ function writeChatSendFixture(dist: string): string {
   return fixture;
 }
 
+function writeChatSend20260609Fixture(dist: string): string {
+  const fixture = path.join(dist, "chat-fixture.js");
+  fs.writeFileSync(
+    fixture,
+    [
+      "const chatHandlers = {",
+      '  "chat.send": async ({ params, context }) => {',
+      "    const clientRunId = params.idempotencyKey;",
+      '    const sessionKey = "issue2603";',
+      '    const agentId = "main";',
+      "    let agentRunStarted = false;",
+      "    const replyOptions = {",
+      "      runId: clientRunId,",
+      "      onAgentRunStart: (runId) => {",
+      "        agentRunStarted = true;",
+      "        emitServerTiming('agent-run-started');",
+      "      }",
+      "    };",
+      "    void replyOptions;",
+      "    if (!agentRunStarted) {",
+      "      const transcriptReply = '';",
+      "      const persistedContentForAppend = [];",
+      "      const assistantContent = [];",
+      "      const broadcastAssistantContent = assistantContent;",
+      "      let message;",
+      "      const shouldAppendAssistantTranscript = Boolean(transcriptReply || persistedContentForAppend?.length);",
+      "      if (shouldAppendAssistantTranscript) {",
+      "        const appended = await appendAssistantTranscriptMessage({",
+      "          sessionKey,",
+      "          message: transcriptReply,",
+      "          sessionId,",
+      "          storePath: latestStorePath,",
+      "          sessionFile: latestEntry?.sessionFile,",
+      "          agentId,",
+      "          createIfMissing: true,",
+      "          ttsSupplement: ttsSupplementMarker,",
+      "          cfg",
+      "        });",
+      "        if (appended.ok) message = appended.message;",
+      "      } else if (broadcastAssistantContent?.length) message = {",
+      '        role: "assistant",',
+      "        content: broadcastAssistantContent,",
+      '        text: "",',
+      "        timestamp: Date.now()",
+      "      };",
+      "      if (hasVisibleAssistantFinalMessage(message)) emitFirstAssistantServerTiming();",
+      "      broadcastChatFinal({",
+      "        context,",
+      "        runId: clientRunId,",
+      "        sessionKey,",
+      "        agentId,",
+      "        message",
+      "      });",
+      "    }",
+      "  }",
+      "};",
+      "",
+    ].join("\n"),
+  );
+  return fixture;
+}
+
 function writeFollowupRunnerFixture(dist: string): string {
   const fixture = path.join(dist, "agent-runner.fixture.js");
   fs.writeFileSync(
@@ -156,6 +218,46 @@ function writeFollowupRunner20260527Fixture(dist: string): string {
   return fixture;
 }
 
+function writeFollowupRunner20260609Fixture(dist: string): string {
+  const fixture = path.join(dist, "agent-runner.fixture.js");
+  fs.writeFileSync(
+    fixture,
+    [
+      "function createFollowupRunner(params) {",
+      "  const { opts, typing, sessionEntry } = params;",
+      "  return async (queued) => {",
+      "    let replyOperation;",
+      "    let run = queued.run;",
+      "    let effectiveQueued = queued;",
+      "    const replySessionKey = queued.run.sessionKey ?? sessionKey;",
+      "    const admission = await admitReplyTurn({",
+      "      sessionId: effectiveQueued.admissionSessionId ?? run.sessionId,",
+      '      sessionKey: replySessionKey ?? "",',
+      '      kind: "queued_followup",',
+      "      resetTriggered: false,",
+      "      routeThreadId: queued.originatingThreadId,",
+      "      upstreamAbortSignal: queued.abortSignal",
+      "    });",
+      '    if (admission.status === "skipped") return;',
+      "    replyOperation = admission.operation;",
+      "    if (replyOperation.sessionId !== run.sessionId) {",
+      "      run = { ...run, sessionId: replyOperation.sessionId };",
+      "      effectiveQueued = { ...effectiveQueued, run };",
+      "    }",
+      "    const runId = crypto.randomUUID();",
+      "    if (run.sessionKey) registerAgentRunContext(runId, {",
+      "      sessionKey: run.sessionKey,",
+      "      verboseLevel: run.verboseLevel",
+      "    });",
+      "    return runId;",
+      "  }",
+      "}",
+      "",
+    ].join("\n"),
+  );
+  return fixture;
+}
+
 function writeFollowupRunnerWithoutOptsBindingFixture(dist: string): string {
   const fixture = path.join(dist, "agent-runner.fixture.js");
   fs.writeFileSync(
@@ -214,6 +316,42 @@ function writeGetReplyFixture(dist: string): string {
       "    run: { sessionId: preparedSessionState.sessionId }",
       "  };",
       "  return { resolvedQueue, piRuntime, followupRun };",
+      "}",
+      "",
+    ].join("\n"),
+  );
+  return fixture;
+}
+
+function writeGetReply20260609Fixture(dist: string): string {
+  const fixture = path.join(dist, "get-reply.fixture.js");
+  fs.writeFileSync(
+    fixture,
+    [
+      "async function getReplyFromConfig(params) {",
+      "  const { cfg, opts, sessionCtx, sessionEntry, perMessageQueueMode, perMessageQueueOptions } = params;",
+      "  const resolvedQueue = useFastReplyRuntime ? {",
+      '    mode: "collect",',
+      "    debounceMs: 0,",
+      "    cap: 1,",
+      '    dropPolicy: "summarize"',
+      "  } : resolveQueueSettings({",
+      "    cfg,",
+      "    channel: sessionCtx.Provider,",
+      "    sessionEntry,",
+      "    inlineMode: perMessageQueueMode,",
+      "    inlineOptions: perMessageQueueOptions",
+      "  });",
+      '  const embeddedAgentRuntime = useFastReplyRuntime ? null : await traceRunPhase("reply.load_embedded_agent_runtime", () => loadEmbeddedAgentRuntime());',
+      "  const followupRun = {",
+      "    prompt: queuedBody,",
+      "    transcriptPrompt: transcriptCommandBody,",
+      "    currentInboundEventKind: inboundEventKind,",
+      "    currentInboundContext,",
+      "    abortSignal: opts?.abortSignal,",
+      "    run: { sessionId: preparedSessionState.sessionId }",
+      "  };",
+      "  return { resolvedQueue, embeddedAgentRuntime, followupRun };",
       "}",
       "",
     ].join("\n"),
@@ -393,6 +531,48 @@ describe("OpenClaw chat.send compatibility patch", () => {
           { run: { sessionId: "session", sessionKey: "key" } },
         ),
       ).resolves.toMatchObject({ runId: "fallback-run-id", registeredRuns: ["fallback-run-id"] });
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("recognizes the 2026.6.9 chat final and followup runner admission shape", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-chat-send-669-"));
+    const dist = path.join(tmp, "dist");
+    fs.mkdirSync(dist);
+    const chatFixture = writeChatSend20260609Fixture(dist);
+    const followupFixture = writeFollowupRunner20260609Fixture(dist);
+    const getReplyFixture = writeGetReply20260609Fixture(dist);
+
+    try {
+      const patch = runPatch(dist);
+      expect(patch.status, `${patch.stdout}${patch.stderr}`).toBe(0);
+      const patchedChat = fs.readFileSync(chatFixture, "utf-8");
+      expect(patchedChat).toContain("context.addChatRun(runId, { sessionKey, clientRunId });");
+      expect(patchedChat).toContain("idempotencyKey: clientRunId");
+      expect(patchedChat).toContain(
+        "if (hasVisibleAssistantFinalMessage(message)) emitFirstAssistantServerTiming();",
+      );
+      expect(patchedChat).toContain("if (message) broadcastChatFinal({");
+      expect(patchedChat).toContain("suppressing empty final event");
+
+      const patchedFollowup = fs.readFileSync(followupFixture, "utf-8");
+      expect(patchedFollowup).toContain(
+        "const runId = queued.runId ?? opts?.runId ?? crypto.randomUUID(); // nemoclaw: preserve chat.send run ids in followup queue (#2603, #3145)",
+      );
+      const patchedGetReply = fs.readFileSync(getReplyFixture, "utf-8");
+      expect(patchedGetReply).toContain("let resolvedQueue = useFastReplyRuntime ? {");
+      expect(patchedGetReply).toContain(
+        'const embeddedAgentRuntime = useFastReplyRuntime ? null : await traceRunPhase("reply.load_embedded_agent_runtime", () => loadEmbeddedAgentRuntime());',
+      );
+      expect(patchedGetReply).toContain("force webchat chat.send queued turns");
+      await expect(
+        runPatchedFollowupFixture(
+          patchedFollowup,
+          { opts: { runId: "opts-run-id" } },
+          { runId: "queued-run-id", run: { sessionId: "session", sessionKey: "key" } },
+        ),
+      ).resolves.toMatchObject({ runId: "queued-run-id", registeredRuns: ["queued-run-id"] });
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }

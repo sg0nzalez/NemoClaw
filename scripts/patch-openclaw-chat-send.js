@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * Temporary NemoClaw compatibility shim for OpenClaw 2026.5.x chat.send
+ * Temporary NemoClaw compatibility shim for OpenClaw chat.send
  * gateway behavior. Remove this when upstream OpenClaw preserves submitted
  * chat.send run lineage and stops emitting empty terminal chat events.
  */
@@ -64,7 +64,7 @@ function patchChatSendFile(file) {
   }
 
   if (!source.includes("suppressing empty final event")) {
-    const next = source.replace(
+    let next = source.replace(
       /\n(\s*)broadcastChatFinal\(\{\n(\s*)context,\n\s*runId: clientRunId,\n\s*sessionKey,\n\s*message\n\s*\}\);/,
       (_match, outerIndent, innerIndent) =>
         `\n${outerIndent}if (message) broadcastChatFinal({\n` +
@@ -74,6 +74,20 @@ function patchChatSendFile(file) {
         `${innerIndent}message\n` +
         `${outerIndent}}); else context.logGateway.warn("webchat chat.send completed without visible assistant reply; suppressing empty final event (nemoclaw #2603/#3145)");`,
     );
+    if (next === source) {
+      next = source.replace(
+        /\n(\s*)if \(hasVisibleAssistantFinalMessage\(message\)\) emitFirstAssistantServerTiming\(\);\n\s*broadcastChatFinal\(\{\n(\s*)context,\n\s*runId: clientRunId,\n\s*sessionKey,\n\s*agentId,\n\s*message\n\s*\}\);/,
+        (_match, outerIndent, innerIndent) =>
+          `\n${outerIndent}if (hasVisibleAssistantFinalMessage(message)) emitFirstAssistantServerTiming();\n` +
+          `${outerIndent}if (message) broadcastChatFinal({\n` +
+          `${innerIndent}context,\n` +
+          `${innerIndent}runId: clientRunId,\n` +
+          `${innerIndent}sessionKey,\n` +
+          `${innerIndent}agentId,\n` +
+          `${innerIndent}message\n` +
+          `${outerIndent}}); else context.logGateway.warn("webchat chat.send completed without visible assistant reply; suppressing empty final event (nemoclaw #2603/#3145)");`,
+      );
+    }
     if (next === source) {
       fail(`OpenClaw chat.send empty-final shape not recognized in ${file}`);
     }
@@ -113,8 +127,10 @@ function patchFollowupRunnerFile(file) {
     // Source boundary: OpenClaw 2026.5.18 passed opts into runQueuedFollowup,
     // 2026.5.22 closes over params.opts and uses createReplyOperation, and
     // 2026.5.27 closes over params.opts and admits a queued reply turn before
-    // creating the run id. All reviewed shapes must have opts and queued in
-    // scope before this NemoClaw run-id preservation shim is inserted.
+    // creating the run id. 2026.6.9 keeps that admission flow but routes the
+    // session id through effectiveQueued and includes routeThreadId. All
+    // reviewed shapes must have opts and queued in scope before this NemoClaw
+    // run-id preservation shim is inserted.
     let next = source.replace(
       /(replyOperation = createReplyOperation\(\{\n\s*sessionId: run\.sessionId,\n\s*sessionKey: replySessionKey \?\? "",\n\s*resetTriggered: false,\n\s*upstreamAbortSignal: queued\.abortSignal(?: \?\? opts\?\.abortSignal)?\n\s*\}\);\n\s*)const runId = crypto\.randomUUID\(\);/,
       (_match, prefix) =>
@@ -123,7 +139,7 @@ function patchFollowupRunnerFile(file) {
     );
     if (next === source) {
       next = source.replace(
-        /(const admission = await admitReplyTurn\(\{\n\s*sessionId: run\.sessionId,\n\s*sessionKey: replySessionKey \?\? "",\n\s*kind: "queued_followup",\n\s*resetTriggered: false,\n\s*upstreamAbortSignal: queued\.abortSignal\n\s*\}\);[\s\S]*?replyOperation = admission\.operation;[\s\S]*?\n\s*)const runId = crypto\.randomUUID\(\);/,
+        /(const admission = await admitReplyTurn\(\{\n\s*sessionId: (?:run\.sessionId|effectiveQueued\.admissionSessionId \?\? run\.sessionId),\n\s*sessionKey: replySessionKey \?\? "",\n\s*kind: "queued_followup",\n\s*resetTriggered: false,\n(?:\s*routeThreadId: queued\.originatingThreadId,\n)?\s*upstreamAbortSignal: queued\.abortSignal\n\s*\}\);[\s\S]*?replyOperation = admission\.operation;[\s\S]*?\n\s*)const runId = crypto\.randomUUID\(\);/,
         (_match, prefix) =>
           `${prefix}const runId = queued.runId ?? opts?.runId ?? crypto.randomUUID(); ` +
           `// nemoclaw: preserve chat.send run ids in followup queue (#2603, #3145)`,
@@ -170,7 +186,7 @@ function patchGetReplyFile(file) {
       fail(`OpenClaw get-reply queue settings shape not recognized in ${file}`);
     }
 
-    const next = source.replace(
+    let next = source.replace(
       /\n(\s*)const piRuntime = useFastReplyRuntime \? null : await traceRunPhase\("reply\.load_pi_runtime", \(\) => loadPiEmbeddedRuntime\(\)\);/,
       (_match, indent) =>
         `\n${indent}if (opts?.runId && sessionCtx.Provider === "webchat" && resolvedQueue.mode === "steer") resolvedQueue = {\n` +
@@ -181,7 +197,19 @@ function patchGetReplyFile(file) {
         `${indent}const piRuntime = useFastReplyRuntime ? null : await traceRunPhase("reply.load_pi_runtime", () => loadPiEmbeddedRuntime());`,
     );
     if (next === source) {
-      fail(`OpenClaw get-reply pi runtime shape not recognized in ${file}`);
+      next = source.replace(
+        /\n(\s*)const embeddedAgentRuntime = useFastReplyRuntime \? null : await traceRunPhase\("reply\.load_embedded_agent_runtime", \(\) => loadEmbeddedAgentRuntime\(\)\);/,
+        (_match, indent) =>
+          `\n${indent}if (opts?.runId && sessionCtx.Provider === "webchat" && resolvedQueue.mode === "steer") resolvedQueue = {\n` +
+          `${indent}\t...resolvedQueue,\n` +
+          `${indent}\tmode: "followup",\n` +
+          `${indent}\tdebounceMs: 0\n` +
+          `${indent}}; // nemoclaw: force webchat chat.send queued turns to keep per-message replies (#2603, #3145)\n` +
+          `${indent}const embeddedAgentRuntime = useFastReplyRuntime ? null : await traceRunPhase("reply.load_embedded_agent_runtime", () => loadEmbeddedAgentRuntime());`,
+      );
+    }
+    if (next === source) {
+      fail(`OpenClaw get-reply runtime load shape not recognized in ${file}`);
     }
     source = next;
   }
