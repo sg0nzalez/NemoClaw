@@ -21,6 +21,11 @@ const UNPINNED_OPENCLAW_VERSION = "2026.6.10";
 const PINNED_OPENCLAW_VERSION = "2026.6.9";
 const PINNED_OPENCLAW_INTEGRITY =
   "sha512-y0PGUdE87S8QtQXABPDL0CjNKhH3q/R1h9/WiRQkhVCGSBVhs63/M1iZn2DYVyJCAbDyMz3KNyAE0WzSQIWCRg==";
+const LEGACY_REBUILD_OPENCLAW_VERSION = "2026.3.11";
+const LEGACY_REBUILD_OPENCLAW_INTEGRITY =
+  "sha512-bxwiBmHPakwfpY5tqC9lrV5TCu5PKf0c1bHNc3nhrb+pqKcPEWV4zOjDVFLQUHr98ihgWA+3pacy4b3LQ8wduQ==";
+const LEGACY_GATEWAY_UPGRADE_OPENCLAW_INTEGRITY =
+  "sha512-W6u4XeIIP4+uG4DYV9G3JeS6QNuKwfhQIej1GIoL4BdcnUFgrnB8kHYNXL3MxiHRKuhZB9OYwUMGs8jKFZR/Vg==";
 
 function extractRunBlock(file: string, startMarker: string, endMarker: string): string {
   const source = fs.readFileSync(file, "utf-8");
@@ -66,6 +71,8 @@ function runInstallBlock(
     `call_log=${JSON.stringify(log)}`,
     `OPENCLAW_VERSION=${JSON.stringify(openclawVersion)}`,
     `OPENCLAW_2026_6_9_INTEGRITY=${JSON.stringify(committedIntegrity)}`,
+    `OPENCLAW_2026_3_11_INTEGRITY=${JSON.stringify(LEGACY_REBUILD_OPENCLAW_INTEGRITY)}`,
+    `OPENCLAW_2026_4_24_INTEGRITY=${JSON.stringify(LEGACY_GATEWAY_UPGRADE_OPENCLAW_INTEGRITY)}`,
     'openclaw() { if [ "${1:-}" = "--version" ]; then printf \'openclaw 2026.3.11\\n\'; else return 127; fi; }',
     "codex-acp() { :; }",
     "npm() {",
@@ -136,6 +143,27 @@ describe("OpenClaw npm integrity pins", () => {
     expect(base.calls).toContain(`npm view openclaw@${PINNED_OPENCLAW_VERSION} version`);
     expect(base.calls).toContain(`npm view openclaw@${PINNED_OPENCLAW_VERSION} dist.integrity`);
     expect(base.calls).toContain(`npm install -g openclaw@${PINNED_OPENCLAW_VERSION}`);
+  });
+
+  it("allows exact legacy fixture pins used by stale-upgrade E2Es", () => {
+    const base = runInstallBlock(
+      extractRunBlock(
+        DOCKERFILE_BASE,
+        "# Install OpenClaw CLI + PyYAML.",
+        "# Baseline health check.",
+      ),
+      {
+        openclawVersion: LEGACY_REBUILD_OPENCLAW_VERSION,
+        registryIntegrity: LEGACY_REBUILD_OPENCLAW_INTEGRITY,
+      },
+    );
+
+    expect(base.result.status).toBe(0);
+    expect(base.calls).toContain(`npm view openclaw@${LEGACY_REBUILD_OPENCLAW_VERSION} version`);
+    expect(base.calls).toContain(
+      `npm view openclaw@${LEGACY_REBUILD_OPENCLAW_VERSION} dist.integrity`,
+    );
+    expect(base.calls).toContain(`npm install -g openclaw@${LEGACY_REBUILD_OPENCLAW_VERSION}`);
   });
 
   it("fails closed before npm install for unpinned production Dockerfile overrides", () => {

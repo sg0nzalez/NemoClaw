@@ -40,6 +40,10 @@ FROM ${BASE_IMAGE}
 # docs/security/openclaw-2026.6.9-dependency-review.md.
 ARG OPENCLAW_VERSION=2026.6.9
 ARG OPENCLAW_2026_6_9_INTEGRITY=sha512-y0PGUdE87S8QtQXABPDL0CjNKhH3q/R1h9/WiRQkhVCGSBVhs63/M1iZn2DYVyJCAbDyMz3KNyAE0WzSQIWCRg==
+# Legacy fixture pins used by stale-sandbox/rebuild E2Es that intentionally
+# build an older OpenClaw base image before proving upgrade behavior.
+ARG OPENCLAW_2026_3_11_INTEGRITY=sha512-bxwiBmHPakwfpY5tqC9lrV5TCu5PKf0c1bHNc3nhrb+pqKcPEWV4zOjDVFLQUHr98ihgWA+3pacy4b3LQ8wduQ==
+ARG OPENCLAW_2026_4_24_INTEGRITY=sha512-W6u4XeIIP4+uG4DYV9G3JeS6QNuKwfhQIej1GIoL4BdcnUFgrnB8kHYNXL3MxiHRKuhZB9OYwUMGs8jKFZR/Vg==
 
 # OpenClaw 2026.6.9 loads some generated source through jiti. Disable its
 # filesystem transform cache so source fragments that mention provider marker
@@ -126,6 +130,8 @@ RUN set -eu; \
     fi; \
     EXPECTED_INTEGRITY=""; \
     if [ "$OPENCLAW_VERSION" = "2026.6.9" ]; then EXPECTED_INTEGRITY="$OPENCLAW_2026_6_9_INTEGRITY"; fi; \
+    if [ "$OPENCLAW_VERSION" = "2026.3.11" ]; then EXPECTED_INTEGRITY="$OPENCLAW_2026_3_11_INTEGRITY"; fi; \
+    if [ "$OPENCLAW_VERSION" = "2026.4.24" ]; then EXPECTED_INTEGRITY="$OPENCLAW_2026_4_24_INTEGRITY"; fi; \
     if [ -z "$EXPECTED_INTEGRITY" ]; then \
         echo "ERROR: OpenClaw ${OPENCLAW_VERSION} has no committed npm integrity pin" >&2; exit 1; \
     fi; \
