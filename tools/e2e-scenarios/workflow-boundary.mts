@@ -3516,6 +3516,28 @@ function validateOpenClawDiscordPairingVitestJob(errors: string[], jobs: Workflo
     requireEnvDoesNotExposeSecret(errors, stepName, stepEnv, "GITHUB_TOKEN");
   }
 
+  const checkout = steps.find((step) => stringValue(step.uses).startsWith("actions/checkout@"));
+  if (!checkout) errors.push("openclaw-discord-pairing-vitest job missing checkout step");
+  requireFullShaAction(errors, checkout, "openclaw-discord-pairing-vitest checkout");
+  if (asRecord(checkout?.with)["persist-credentials"] !== false) {
+    errors.push("openclaw-discord-pairing-vitest checkout step must set persist-credentials=false");
+  }
+
+  const setupNode = namedStep(steps, "Set up Node");
+  if (!setupNode) errors.push("openclaw-discord-pairing-vitest job missing step: Set up Node");
+  requireFullShaAction(errors, setupNode, "openclaw-discord-pairing-vitest setup-node");
+
+  const installRootDependencies = requireJobStep(
+    errors,
+    jobName,
+    steps,
+    "Install root dependencies",
+  );
+  requireRunContains(errors, installRootDependencies, "npm ci --ignore-scripts");
+
+  const buildCli = requireJobStep(errors, jobName, steps, "Build CLI");
+  requireRunContains(errors, buildCli, "npm run build:cli");
+
   const configureDockerAuth = requireJobStep(
     errors,
     jobName,
