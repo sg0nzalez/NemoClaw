@@ -11,6 +11,7 @@ import {
   applyFakePolicy,
   approveAndAssertPairing,
   assertOpenClawStateRoot,
+  assertSlackPresetPolicySemantics,
   cleanupPairingSandbox,
   extractPairingCode,
   issuePairingRequest,
@@ -119,6 +120,12 @@ test.skipIf(!shouldRunLiveE2EScenarios())(
     }
 
     await assertOpenClawStateRoot(sandbox, SANDBOX_NAME, "slack", redactions);
+    await assertSlackPresetPolicySemantics({
+      host,
+      sandboxName: SANDBOX_NAME,
+      env,
+      redactions,
+    });
 
     const fakeSlack = await startFakeSlackApi(
       host,

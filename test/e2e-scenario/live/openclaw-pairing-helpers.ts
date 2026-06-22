@@ -99,6 +99,19 @@ function policyTextHasHost(text: string, host: string): boolean {
   return text.split(/\r?\n/).some((line) => accepted.has(line.trim()));
 }
 
+/**
+ * Temporary first-boot mitigation for the Slack pairing migration.
+ *
+ * Source boundary: `openclaw-sandbox.yaml` intentionally excludes messaging
+ * endpoints; `policies/presets/slack.yaml` is the source of Slack policy
+ * semantics. This helper only handles the current installer boot-order invalid
+ * state where the Slack SDK may connect before the opt-in preset has been
+ * applied. Keep the appended block semantically aligned with that preset and
+ * assert the effective sandbox policy before fake-host overrides. Remove this
+ * helper once Slack preset application happens before any Slack SDK connection,
+ * or once the scenario can apply the real preset before startup without
+ * mutating the baseline policy.
+ */
 export async function premergeSlackPolicyIfNeeded(cleanup: CleanupRegistry): Promise<void> {
   const basePolicy = path.join(
     REPO_ROOT,
@@ -120,6 +133,7 @@ export async function premergeSlackPolicyIfNeeded(cleanup: CleanupRegistry): Pro
         port: 443
         protocol: rest
         enforcement: enforce
+        request_body_credential_rewrite: true
         rules:
           - allow: { method: GET, path: "/**" }
           - allow: { method: POST, path: "/**" }
@@ -127,6 +141,7 @@ export async function premergeSlackPolicyIfNeeded(cleanup: CleanupRegistry): Pro
         port: 443
         protocol: rest
         enforcement: enforce
+        request_body_credential_rewrite: true
         rules:
           - allow: { method: GET, path: "/**" }
           - allow: { method: POST, path: "/**" }
@@ -134,6 +149,7 @@ export async function premergeSlackPolicyIfNeeded(cleanup: CleanupRegistry): Pro
         port: 443
         protocol: rest
         enforcement: enforce
+        request_body_credential_rewrite: true
         rules:
           - allow: { method: GET, path: "/**" }
           - allow: { method: POST, path: "/**" }
@@ -141,6 +157,7 @@ export async function premergeSlackPolicyIfNeeded(cleanup: CleanupRegistry): Pro
         port: 443
         protocol: websocket
         enforcement: enforce
+        websocket_credential_rewrite: true
         rules:
           - allow: { method: GET, path: "/**" }
           - allow: { method: WEBSOCKET_TEXT, path: "/**" }
@@ -148,6 +165,7 @@ export async function premergeSlackPolicyIfNeeded(cleanup: CleanupRegistry): Pro
         port: 443
         protocol: websocket
         enforcement: enforce
+        websocket_credential_rewrite: true
         rules:
           - allow: { method: GET, path: "/**" }
           - allow: { method: WEBSOCKET_TEXT, path: "/**" }
@@ -159,6 +177,40 @@ export async function premergeSlackPolicyIfNeeded(cleanup: CleanupRegistry): Pro
   cleanup.add("restore Slack pairing base policy pre-merge", async () => {
     fs.writeFileSync(basePolicy, original);
   });
+}
+
+export async function assertSlackPresetPolicySemantics(options: {
+  host: HostCliClient;
+  sandboxName: string;
+  env: NodeJS.ProcessEnv;
+  redactions: string[];
+}): Promise<void> {
+  const policy = await options.host.command(
+    "openshell",
+    ["policy", "get", "--full", options.sandboxName],
+    {
+      artifactName: "slack-preset-policy-before-fake-overrides",
+      env: options.env,
+      redactionValues: options.redactions,
+      timeoutMs: 60_000,
+    },
+  );
+  expectExitZero(policy, "Slack preset policy before fake-host overrides");
+  const text = resultText(policy);
+  const requiredRestHosts = ["slack.com", "api.slack.com", "hooks.slack.com"];
+  const requiredWebsocketHosts = ["wss-primary.slack.com", "wss-backup.slack.com"];
+  for (const host of requiredRestHosts) {
+    expect(text, `Slack policy includes ${host}`).toContain(`host: ${host}`);
+  }
+  for (const host of requiredWebsocketHosts) {
+    expect(text, `Slack websocket policy includes ${host}`).toContain(`host: ${host}`);
+  }
+  expect(text, "Slack REST preset preserves request-body credential rewrite").toContain(
+    "request_body_credential_rewrite: true",
+  );
+  expect(text, "Slack websocket preset preserves websocket credential rewrite").toContain(
+    "websocket_credential_rewrite: true",
+  );
 }
 
 export async function startFakeDiscordGateway(
