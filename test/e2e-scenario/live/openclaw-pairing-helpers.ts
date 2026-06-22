@@ -739,7 +739,9 @@ function parseProxyTarget() {
 }
 
 const proxy = parseProxyTarget();
-const socket = proxy ? net.createConnection({ host: proxy.host, port: proxy.port }) : net.createConnection({ host, port });
+const socket = proxy
+  ? net.createConnection({ host: proxy.host, port: proxy.port })
+  : net.createConnection({ host, port });
 const timer = setTimeout(() => {
   try { socket.destroy(); } catch {}
   finish("TIMEOUT");
@@ -747,10 +749,13 @@ const timer = setTimeout(() => {
 let handshake = Buffer.alloc(0);
 let framed = Buffer.alloc(0);
 let upgraded = false;
+let sawReady = false;
 
 socket.on("connect", () => {
   const key = crypto.randomBytes(16).toString("base64");
-  const requestTarget = proxy ? "http://" + host + ":" + port + "/gateway?v=10&encoding=json" : "/gateway?v=10&encoding=json";
+  const requestTarget = proxy
+    ? "http://" + host + ":" + port + "/gateway?v=10&encoding=json"
+    : "/gateway?v=10&encoding=json";
   socket.write([
     "GET " + requestTarget + " HTTP/1.1",
     "Host: " + host + ":" + port,
@@ -797,6 +802,7 @@ socket.on("data", (chunk) => {
         })));
         results.push("IDENTIFY_SENT_PLACEHOLDER");
       } else if (message.op === 0 && message.t === "READY") {
+        sawReady = true;
         results.push("READY");
         socket.write(encodeClientText(JSON.stringify({ op: 1, d: message.s ?? null })));
       } else if (message.op === 11) {
@@ -806,15 +812,20 @@ socket.on("data", (chunk) => {
         finish();
       }
     } else if (frame.opcode === 8) {
+      const code = frame.payload.length >= 2 ? frame.payload.readUInt16BE(0) : 0;
       clearTimeout(timer);
-      finish("CLOSE_BEFORE_ACK");
+      finish("CLOSE_" + code);
     }
   }
 });
 
 socket.on("error", (error) => {
   clearTimeout(timer);
-  finish("ERROR:" + error.message);
+  finish("ERROR " + error.message);
+});
+socket.on("close", () => {
+  clearTimeout(timer);
+  if (!sawReady) finish("CLOSED");
 });
 `;
 
