@@ -1,6 +1,3 @@
-<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
-<!-- SPDX-License-Identifier: Apache-2.0 -->
-
 # NemoClaw Enterprise Readiness and Admin Capability Guidance
 
 import { AgentOnly } from "../_components/AgentGuide";

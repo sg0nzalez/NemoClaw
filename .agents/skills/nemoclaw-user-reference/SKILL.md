@@ -1,6 +1,3 @@
-<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
-<!-- SPDX-License-Identifier: Apache-2.0 -->
-
 ---
 name: "nemoclaw-user-reference"
 description: "Describes the NemoClaw integration layer and blueprint architecture and how they orchestrate compatible agent sandboxes. Use when looking up architecture, agent integration, plugin structure, or blueprint design. Trigger keywords - nemoclaw architecture, nemoclaw agent architecture, nemoclaw plugin blueprint structure, nemoclaw vs openshell, which cli, nemoclaw cli, openshell cli, sandbox commands, nemoclaw cli commands, nemoclaw command reference, nemoclaw enterprise readiness, nemoclaw support boundaries, nemoclaw admin capabilities, nemoclaw control plane, nemoclaw network policy, sandbox egress control operator approval, nemoclaw platform support, nemoclaw launch claims, nemoclaw support matrix, nemoclaw what is supported, nemoclaw status, nemoclaw troubleshooting, nemoclaw debug sandbox issues."

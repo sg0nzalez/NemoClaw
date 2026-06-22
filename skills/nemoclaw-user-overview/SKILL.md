@@ -1,6 +1,3 @@
-<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
-<!-- SPDX-License-Identifier: Apache-2.0 -->
-
 ---
 name: "nemoclaw-user-overview"
 description: "Explains what NemoClaw covers: onboarding, lifecycle management, and agent operations within OpenShell containers, plus capabilities and why it exists. Use when users ask what NemoClaw is or what the project provides. For ecosystem placement or OpenShell-only paths, use the Ecosystem page; for internal mechanics, use How It Works. Trigger keywords - nemoclaw overview, openclaw always-on assistants, hermes agent, nvidia openshell, nvidia nemotron, nemoclaw ecosystem, nemohermes, nemoclaw vs openshell, run hermes openshell sandbox, openclaw openshell, sandboxed openclaw, how nemoclaw works, nemoclaw sandbox lifecycle blueprint, nemoclaw release notes, nemoclaw changelog."
