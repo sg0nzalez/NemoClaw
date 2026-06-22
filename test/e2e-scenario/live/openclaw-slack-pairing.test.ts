@@ -34,7 +34,7 @@ const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN ?? "xoxb-fake-slack-pairing-
 const SLACK_APP_TOKEN = process.env.SLACK_APP_TOKEN ?? "xapp-fake-slack-pairing-e2e";
 const LIVE_TIMEOUT_MS = 55 * 60_000;
 
-function assertSlackCapture(captureFile: string): void {
+function assertSlackCapture(captureFile: string, expectedCode: string, expectedUser: string): void {
   const rows = fs
     .readFileSync(captureFile, "utf8")
     .trim()
@@ -59,6 +59,14 @@ function assertSlackCapture(captureFile: string): void {
   expect(post?.tokenMatchesExpected, "Slack xoxb auth rewrite").toBe(true);
   expect(post?.bodyMatchesExpected, "Slack xoxb body rewrite").toBe(true);
   expect(post?.tokenLooksPlaceholder, "Slack xoxb placeholder leaked").toBe(false);
+  expect(String(post?.text ?? ""), "Slack pairing reply includes generated code").toContain(
+    expectedCode,
+  );
+  const replyText = String(post?.text ?? "");
+  expect(
+    replyText.includes(expectedUser) || replyText.includes(`Slack user ID: ${expectedUser}`),
+    "Slack pairing reply includes sender identity",
+  ).toBe(true);
 }
 
 test.skipIf(!shouldRunLiveE2EScenarios())(
@@ -163,7 +171,7 @@ test.skipIf(!shouldRunLiveE2EScenarios())(
     });
     expectExitZero(issue, "Slack pairing request creation");
     const code = extractPairingCode(resultText(issue), "PAIRING_E2E_RESULT");
-    assertSlackCapture(fakeSlack.captureFile);
+    assertSlackCapture(fakeSlack.captureFile, code, PAIRING_USER.slack);
     await writePairingArtifacts(artifacts, "slack", { code, user: PAIRING_USER.slack });
 
     await approveAndAssertPairing({

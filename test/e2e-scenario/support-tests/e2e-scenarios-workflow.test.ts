@@ -604,6 +604,25 @@ describe("e2e-vitest-scenarios workflow boundary", () => {
     ).toBe(true);
   });
 
+  it("requires OpenShell setup for OpenClaw pairing free-standing jobs", () => {
+    const workflow = readWorkflow() as {
+      jobs: Record<string, { steps?: Array<Record<string, unknown>> }>;
+    };
+    for (const [jobId, runStepName] of [
+      ["openclaw-discord-pairing-vitest", "Run OpenClaw Discord pairing live test"],
+      ["openclaw-slack-pairing-vitest", "Run OpenClaw Slack pairing live test"],
+    ] as const) {
+      const steps = workflow.jobs[jobId]?.steps ?? [];
+      expect(steps.some((step) => step.name === "Install OpenShell CLI")).toBe(true);
+      const runStep = steps.find((step) => step.name === runStepName);
+      expect(String(runStep?.run ?? "")).toContain(
+        'export PATH="$HOME/.local/bin:$HOME/.npm-global/bin:$PATH"',
+      );
+      expect(String(runStep?.run ?? "")).toContain('OPENSHELL_BIN="$(command -v openshell)"');
+      expect(String(runStep?.run ?? "")).toContain('"$OPENSHELL_BIN" --version');
+    }
+  });
+
   it("rejects malformed free-standing workflow metadata before matrix generation", {
     timeout: 60_000,
   }, () => {

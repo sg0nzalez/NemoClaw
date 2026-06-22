@@ -252,7 +252,10 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
-function packageRootFromBinary(binary) {
+function findOpenClawPackageRootFromBinary() {
+  let binary = "";
+  try { binary = execFileSync("sh", ["-lc", "command -v openclaw"], { encoding: "utf8" }).trim(); } catch { return null; }
+  if (!binary) return null;
   let current = "";
   try { current = fs.realpathSync(binary); } catch { return null; }
   try { if (fs.statSync(current).isFile()) current = path.dirname(current); } catch { return null; }
@@ -271,18 +274,10 @@ function packageRootFromBinary(binary) {
   return null;
 }
 
-function findOpenClawPackageRootsFromActiveBinaries() {
-  const binaries = [];
-  try {
-    const binary = execFileSync("sh", ["-lc", "command -v openclaw"], { encoding: "utf8" }).trim();
-    if (binary) binaries.push(binary);
-  } catch {}
-  binaries.push("/usr/local/bin/openclaw", "/usr/bin/openclaw");
-  return binaries.filter((binary) => fs.existsSync(binary)).map(packageRootFromBinary).filter(Boolean);
-}
-
 async function loadConversationRuntime() {
-  const candidates = findOpenClawPackageRootsFromActiveBinaries();
+  const candidates = [];
+  const binaryRoot = findOpenClawPackageRootFromBinary();
+  if (binaryRoot) candidates.push(binaryRoot);
   for (const root of [...new Set(candidates)]) {
     const runtime = path.join(root, "dist/plugin-sdk/conversation-runtime.js");
     if (fs.existsSync(runtime)) return import(pathToFileURL(runtime).href);
@@ -302,7 +297,7 @@ discord_dm_channel="$2"
 : "${"$"}{OPENCLAW_STATE_DIR:?OPENCLAW_STATE_DIR missing}"
 : "${"$"}{OPENCLAW_CONFIG_PATH:?OPENCLAW_CONFIG_PATH missing}"
 : "${"$"}{OPENCLAW_OAUTH_DIR:?OPENCLAW_OAUTH_DIR missing}"
-exec env HOME=/sandbox OPENCLAW_HOME="$OPENCLAW_HOME" OPENCLAW_STATE_DIR="$OPENCLAW_STATE_DIR" OPENCLAW_CONFIG_PATH="$OPENCLAW_CONFIG_PATH" OPENCLAW_OAUTH_DIR="$OPENCLAW_OAUTH_DIR" HTTP_PROXY="${"$"}{HTTP_PROXY:-}" HTTPS_PROXY="${"$"}{HTTPS_PROXY:-}" http_proxy="${"$"}{http_proxy:-}" https_proxy="${"$"}{https_proxy:-}" NO_PROXY="${"$"}{NO_PROXY:-}" no_proxy="${"$"}{no_proxy:-}" NODE_OPTIONS="${"$"}{NODE_OPTIONS:-}" DISCORD_PAIRING_USER="$discord_pairing_user" DISCORD_DM_CHANNEL="$discord_dm_channel" node --input-type=module <<'NODE'
+exec env HOME=/sandbox PATH="/usr/local/bin:/usr/bin:/bin:${"$"}{PATH:-}" OPENCLAW_HOME="$OPENCLAW_HOME" OPENCLAW_STATE_DIR="$OPENCLAW_STATE_DIR" OPENCLAW_CONFIG_PATH="$OPENCLAW_CONFIG_PATH" OPENCLAW_OAUTH_DIR="$OPENCLAW_OAUTH_DIR" HTTP_PROXY="${"$"}{HTTP_PROXY:-}" HTTPS_PROXY="${"$"}{HTTPS_PROXY:-}" http_proxy="${"$"}{http_proxy:-}" https_proxy="${"$"}{https_proxy:-}" NO_PROXY="${"$"}{NO_PROXY:-}" no_proxy="${"$"}{no_proxy:-}" NODE_OPTIONS="${"$"}{NODE_OPTIONS:-}" DISCORD_PAIRING_USER="$discord_pairing_user" DISCORD_DM_CHANNEL="$discord_dm_channel" node --input-type=module <<'NODE'
 __LOAD_CONVERSATION_RUNTIME_SOURCE__
 const { issuePairingChallenge, upsertChannelPairingRequest } = await loadConversationRuntime();
 const senderId = process.env.DISCORD_PAIRING_USER;
@@ -332,21 +327,31 @@ slack_pairing_user="$2"
 : "${"$"}{OPENCLAW_STATE_DIR:?OPENCLAW_STATE_DIR missing}"
 : "${"$"}{OPENCLAW_CONFIG_PATH:?OPENCLAW_CONFIG_PATH missing}"
 : "${"$"}{OPENCLAW_OAUTH_DIR:?OPENCLAW_OAUTH_DIR missing}"
-exec env HOME=/sandbox OPENCLAW_HOME="$OPENCLAW_HOME" OPENCLAW_STATE_DIR="$OPENCLAW_STATE_DIR" OPENCLAW_CONFIG_PATH="$OPENCLAW_CONFIG_PATH" OPENCLAW_OAUTH_DIR="$OPENCLAW_OAUTH_DIR" HTTP_PROXY="${"$"}{HTTP_PROXY:-}" HTTPS_PROXY="${"$"}{HTTPS_PROXY:-}" http_proxy="${"$"}{http_proxy:-}" https_proxy="${"$"}{https_proxy:-}" NO_PROXY="${"$"}{NO_PROXY:-}" no_proxy="${"$"}{no_proxy:-}" NODE_OPTIONS="${"$"}{NODE_OPTIONS:-}" FAKE_SLACK_API_HOST="host.openshell.internal" FAKE_SLACK_API_PORT="$fake_slack_api_port" SLACK_PAIRING_USER="$slack_pairing_user" node --input-type=module <<'NODE'
+exec env HOME=/sandbox PATH="/usr/local/bin:/usr/bin:/bin:${"$"}{PATH:-}" OPENCLAW_HOME="$OPENCLAW_HOME" OPENCLAW_STATE_DIR="$OPENCLAW_STATE_DIR" OPENCLAW_CONFIG_PATH="$OPENCLAW_CONFIG_PATH" OPENCLAW_OAUTH_DIR="$OPENCLAW_OAUTH_DIR" HTTP_PROXY="${"$"}{HTTP_PROXY:-}" HTTPS_PROXY="${"$"}{HTTPS_PROXY:-}" http_proxy="${"$"}{http_proxy:-}" https_proxy="${"$"}{https_proxy:-}" NO_PROXY="${"$"}{NO_PROXY:-}" no_proxy="${"$"}{no_proxy:-}" NODE_OPTIONS="${"$"}{NODE_OPTIONS:-}" FAKE_SLACK_API_HOST="host.openshell.internal" FAKE_SLACK_API_PORT="$fake_slack_api_port" SLACK_PAIRING_USER="$slack_pairing_user" node --input-type=module <<'NODE'
 __LOAD_CONVERSATION_RUNTIME_SOURCE__
 import crypto from "node:crypto";
 import http from "node:http";
 import net from "node:net";
 
+function parseFakeSlackPort() {
+  const raw = process.env.FAKE_SLACK_API_PORT || "";
+  const port = Number(raw);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("FAKE_SLACK_API_PORT must be an integer in 1..65535");
+  return port;
+}
 function parseProxyTarget() {
   const raw = process.env.HTTP_PROXY || process.env.http_proxy || "";
   if (!raw) return null;
+  let parsed;
   try {
-    const parsed = new URL(raw);
-    return parsed.protocol === "http:" ? { host: parsed.hostname, port: Number(parsed.port || "80") } : null;
+    parsed = new URL(raw);
   } catch {
-    return null;
+    throw new Error("HTTP proxy for Slack pairing probe is malformed");
   }
+  if (parsed.protocol !== "http:") throw new Error("Slack pairing probe only supports HTTP proxies");
+  const port = Number(parsed.port || "80");
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("HTTP proxy port for Slack pairing probe is invalid");
+  return { host: parsed.hostname, port };
 }
 function encodeClientText(payload) {
   const body = Buffer.from(payload, "utf8");
@@ -379,7 +384,7 @@ function decodeServerFrame(buffer) {
 }
 function receiveSlackSocketEvent() {
   const host = "host.openshell.internal";
-  const port = Number(process.env.FAKE_SLACK_API_PORT);
+  const port = parseFakeSlackPort();
   const proxy = parseProxyTarget();
   return new Promise((resolve, reject) => {
     const socket = proxy ? net.createConnection({ host: proxy.host, port: proxy.port }) : net.createConnection({ host, port });
@@ -437,7 +442,7 @@ function receiveSlackSocketEvent() {
 }
 function postPairingReply(text, channel) {
   const host = "host.openshell.internal";
-  const port = Number(process.env.FAKE_SLACK_API_PORT);
+  const port = parseFakeSlackPort();
   const token = "xoxb-OPENSHELL-RESOLVE-ENV-SLACK_BOT_TOKEN";
   const data = new URLSearchParams({ token, channel, text }).toString();
   return new Promise((resolve, reject) => {
@@ -675,6 +680,7 @@ socket.on("connect", () => {
     "Connection: Upgrade",
     "Sec-WebSocket-Key: " + key,
     "Sec-WebSocket-Version: 13",
+    "",
     "",
   ].join(crlf));
 });
