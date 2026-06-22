@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import net from "node:net";
@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   buildPairingApproveCommand,
   buildPairingPendingCommand,
+  LOAD_CONVERSATION_RUNTIME_SOURCE,
 } from "../live/openclaw-pairing-helpers.ts";
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "../../..");
@@ -133,6 +134,41 @@ describe("OpenClaw Discord pairing helper contracts", () => {
     expect(approveCommand).toContain("'abc$(touch /tmp/e2e-should-not-run)'");
     expect(pendingCommand).not.toContain('"abc$(touch /tmp/e2e-should-not-run)"');
     expect(approveCommand).not.toContain('"abc$(touch /tmp/e2e-should-not-run)"');
+  });
+
+  it("fails closed when the active OpenClaw package lacks the conversation runtime", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-runtime-missing-"));
+    try {
+      const packageRoot = path.join(tmp, "openclaw-package");
+      const packageBin = path.join(packageRoot, "bin");
+      const pathBin = path.join(tmp, "path-bin");
+      fs.mkdirSync(packageBin, { recursive: true });
+      fs.mkdirSync(pathBin, { recursive: true });
+      fs.writeFileSync(
+        path.join(packageRoot, "package.json"),
+        JSON.stringify({ name: "openclaw" }),
+      );
+      fs.writeFileSync(path.join(packageBin, "openclaw"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+      fs.symlinkSync(path.join(packageBin, "openclaw"), path.join(pathBin, "openclaw"));
+
+      const result = spawnSync(process.execPath, ["--input-type=module"], {
+        input: `${LOAD_CONVERSATION_RUNTIME_SOURCE}\nawait loadConversationRuntime();\n`,
+        encoding: "utf8",
+        env: { ...process.env, PATH: `${pathBin}:${process.env.PATH ?? ""}` },
+      });
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toEqual(
+        expect.stringContaining("OpenClaw conversation runtime not found; checked:"),
+      );
+      expect(result.stderr).toEqual(expect.stringContaining(packageRoot));
+      expect(result.stderr).toEqual(
+        expect.not.stringContaining("/usr/local/lib/node_modules/openclaw"),
+      );
+      expect(result.stderr).toEqual(expect.not.stringContaining("/usr/lib/node_modules/openclaw"));
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   });
 
   it("fake Discord Gateway capture omits raw identify token while preserving rewrite booleans", async () => {

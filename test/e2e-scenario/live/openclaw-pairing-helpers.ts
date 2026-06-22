@@ -12,9 +12,10 @@ import {
   bestEffort,
   cleanupSandbox,
   expectExitZero,
-  base64,
   phase6Env,
   resultText,
+  sandboxEncodedSh,
+  sandboxNode,
   shellQuote,
   sandboxSh,
 } from "./phase6-messaging-helpers.ts";
@@ -148,7 +149,14 @@ export async function assertOpenClawStateRoot(
   expect(resultText(list)).toMatch(new RegExp(`"channel"\\s*:\\s*"${channel}"`));
 }
 
-const LOAD_CONVERSATION_RUNTIME_SOURCE = String.raw`
+// Source-of-truth boundary: the live pairing probe imports the conversation
+// runtime from the active `openclaw` binary installed in the sandbox. The invalid
+// state is an active OpenClaw package without `dist/plugin-sdk/conversation-runtime.js`;
+// this Discord migration fails closed for that installer/package drift instead of
+// searching secondary global installs. A support test covers the no-runtime path.
+// Remove this locator once OpenClaw exposes a stable CLI/import for issuing pairing
+// challenges from E2E probes.
+export const LOAD_CONVERSATION_RUNTIME_SOURCE = String.raw`
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
@@ -180,11 +188,6 @@ async function loadConversationRuntime() {
   const candidates = [];
   const binaryRoot = findOpenClawPackageRootFromBinary();
   if (binaryRoot) candidates.push(binaryRoot);
-  try {
-    const globalRoot = execFileSync("npm", ["root", "-g"], { encoding: "utf8" }).trim();
-    if (globalRoot) candidates.push(path.join(globalRoot, "openclaw"));
-  } catch {}
-  candidates.push("/usr/local/lib/node_modules/openclaw", "/usr/lib/node_modules/openclaw");
   for (const root of [...new Set(candidates)]) {
     const runtime = path.join(root, "dist/plugin-sdk/conversation-runtime.js");
     if (fs.existsSync(runtime)) return import(pathToFileURL(runtime).href);
@@ -246,35 +249,17 @@ export function extractPairingResult(output: string, marker: string): PairingRes
   };
 }
 
-function buildEncodedShellCommand(script: string, args: string[]): string {
-  return [
-    "tmp=$(mktemp)",
-    "trap 'rm -f \"$tmp\"' EXIT",
-    `printf %s ${shellQuote(base64(script))} | base64 -d > "$tmp"`,
-    `sh "$tmp" ${args.map(shellQuote).join(" ")}`,
-  ].join("; ");
-}
-
-function buildNodeShellCommand(source: string, env: Record<string, string>): string {
-  const exports = Object.entries(env)
-    .map(([key, value]) => `export ${key}=${shellQuote(value)}`)
-    .join("\n");
-  return buildEncodedShellCommand(
-    `${exports}\nnode --input-type=module <<'NODE'\n${source}\nNODE\n`,
-    [],
-  );
-}
-
 export async function issuePairingRequest(options: {
   sandbox: SandboxClient;
   sandboxName: string;
   channel: PairingChannel;
   redactions: string[];
 }): Promise<ShellProbeResult> {
-  return sandboxSh(
+  return sandboxEncodedSh(
     options.sandbox,
     options.sandboxName,
-    buildEncodedShellCommand(DISCORD_PAIRING_SCRIPT, [PAIRING_USER.discord, DISCORD_DM_CHANNEL]),
+    DISCORD_PAIRING_SCRIPT,
+    [PAIRING_USER.discord, DISCORD_DM_CHANNEL],
     {
       artifactName: `${options.channel}-issue-pairing-request`,
       redactionValues: options.redactions,
@@ -431,10 +416,11 @@ socket.on("error", (error) => { clearTimeout(timer); finish(` +
     "`ERROR:${error.message}`" +
     `); });
 `;
-  return sandboxSh(
+  return sandboxNode(
     options.sandbox,
     options.sandboxName,
-    buildNodeShellCommand(source, { FAKE_DISCORD_GATEWAY_PORT: options.port }),
+    source,
+    { FAKE_DISCORD_GATEWAY_PORT: options.port },
     {
       artifactName: "discord-gateway-proof",
       redactionValues: options.redactions,
