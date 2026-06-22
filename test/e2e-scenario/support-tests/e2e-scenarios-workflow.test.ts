@@ -15,6 +15,7 @@ import {
   validateFreeStandingWorkflowInventory,
 } from "../../../tools/e2e-scenarios/workflow-boundary.mts";
 import { testTimeoutOptions } from "../../helpers/timeouts";
+import { assertChannelsStopStartSandboxName } from "../live/channels-stop-start-safety.ts";
 
 function readWorkflow(): Record<string, unknown> {
   return YAML.parse(
@@ -72,6 +73,18 @@ function generateMatrixForDispatch(env: {
 }
 
 describe("e2e-vitest-scenarios workflow boundary", () => {
+  it("guards channels-stop-start destructive cleanup to test-owned sandboxes", () => {
+    expect(() => assertChannelsStopStartSandboxName("personal-dev")).toThrow(
+      /only accepts sandbox names with prefix e2e-channels-stop-start-/,
+    );
+    expect(() =>
+      assertChannelsStopStartSandboxName("e2e-channels-stop-start-openclaw"),
+    ).not.toThrow();
+    expect(() =>
+      assertChannelsStopStartSandboxName("e2e-channels-stop-start-hermes"),
+    ).not.toThrow();
+  });
+
   it("keeps the live Vitest scenario workflow manual, pinned, and artifact-safe", () => {
     expect(validateE2eVitestScenariosWorkflowBoundary()).toEqual([]);
   });
@@ -1109,71 +1122,6 @@ jobs:
     }
   });
 
-  it("rejects OpenClaw Discord pairing workflow-boundary drift", () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "e2e-vitest-workflow-"));
-    const workflowPath = path.join(tmp, "workflow.yaml");
-    const workflow = fs.readFileSync(
-      path.join(process.cwd(), ".github/workflows/e2e-vitest-scenarios.yaml"),
-      "utf8",
-    );
-    const parsedWorkflow = YAML.parse(workflow) as {
-      jobs: Record<
-        string,
-        {
-          env: Record<string, string>;
-          steps: Array<Record<string, unknown>>;
-        }
-      >;
-    };
-    const discordJob = parsedWorkflow.jobs["openclaw-discord-pairing-vitest"];
-    discordJob.env.DOCKER_CONFIG =
-      "${{ github.workspace }}/.docker-config-openclaw-discord-pairing";
-    const checkout = discordJob.steps.find((step) =>
-      String(step.uses).startsWith("actions/checkout@"),
-    ) as { uses: string; with: Record<string, unknown> };
-    checkout.uses = "actions/checkout@v4";
-    checkout.with["persist-credentials"] = true;
-    const setupNode = discordJob.steps.find((step) => step.name === "Set up Node") as {
-      uses: string;
-    };
-    setupNode.uses = "actions/setup-node@v4";
-    const installRootDependencies = discordJob.steps.find(
-      (step) => step.name === "Install root dependencies",
-    ) as Record<string, unknown>;
-    Object.assign(installRootDependencies, { run: "npm install" });
-    const buildCli = discordJob.steps.find((step) => step.name === "Build CLI") as Record<
-      string,
-      unknown
-    >;
-    Object.assign(buildCli, { run: "echo skipping build" });
-    const liveStep = discordJob.steps.find(
-      (step) => step.name === "Run OpenClaw Discord pairing live test",
-    ) as { env: Record<string, string> };
-    liveStep.env.NVIDIA_API_KEY = "${{ secrets.NVIDIA_API_KEY }}";
-    const installOpenShell = discordJob.steps.find(
-      (step) => step.name === "Install OpenShell CLI",
-    ) as Record<string, unknown>;
-    Object.assign(installOpenShell, { run: "bash scripts/install-openshell.sh" });
-    fs.writeFileSync(workflowPath, YAML.stringify(parsedWorkflow));
-
-    try {
-      expect(validateE2eVitestScenariosWorkflowBoundary(workflowPath)).toEqual(
-        expect.arrayContaining([
-          "openclaw-discord-pairing-vitest job must not set DOCKER_CONFIG at job level",
-          "openclaw-discord-pairing-vitest checkout action must be pinned to a full commit SHA",
-          "openclaw-discord-pairing-vitest checkout step must set persist-credentials=false",
-          "openclaw-discord-pairing-vitest setup-node action must be pinned to a full commit SHA",
-          "step 'Install root dependencies' run script must include npm ci --ignore-scripts",
-          "step 'Build CLI' run script must include npm run build:cli",
-          "openclaw-discord-pairing-vitest step 'Run OpenClaw Discord pairing live test' env must not include NVIDIA_API_KEY",
-          "step 'Install OpenShell CLI' run script must include env -u DOCKER_CONFIG",
-        ]),
-      );
-    } finally {
-      fs.rmSync(tmp, { recursive: true, force: true });
-    }
-  });
-
   it("requires runtime-overrides workflow and report coverage", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "e2e-vitest-workflow-"));
     const renamedWorkflowPath = path.join(tmp, "renamed-workflow.yaml");
@@ -1197,6 +1145,110 @@ jobs:
       );
       expect(validateE2eVitestScenariosWorkflowBoundary(missingReportNeedPath)).toContain(
         "report-to-pr job must wait for runtime-overrides-vitest",
+      );
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects channels stop/start workflow-boundary drift for secret and artifact handling", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "e2e-vitest-workflow-"));
+    const workflowPath = path.join(tmp, "workflow.yaml");
+    const workflow = readWorkflow() as {
+      jobs: Record<
+        string,
+        {
+          env: Record<string, unknown>;
+          steps: Array<Record<string, unknown>>;
+          strategy: { matrix: { agent: string[] }; "fail-fast": boolean };
+          "timeout-minutes"?: number;
+        }
+      >;
+    };
+    const job = workflow.jobs["channels-stop-start-vitest"];
+    expect(job).toBeDefined();
+    job["timeout-minutes"] = 45;
+    job.strategy["fail-fast"] = true;
+    job.strategy.matrix.agent = ["openclaw"];
+    job.env.NEMOCLAW_SANDBOX_NAME = "personal-dev-${{ matrix.agent }}";
+    job.env.DOCKER_CONFIG = "${{ github.workspace }}/.docker-config-shared";
+    job.env.NVIDIA_API_KEY = "${{ secrets.NVIDIA_API_KEY }}";
+    const checkoutStep = job.steps.find(
+      (step) => typeof step.uses === "string" && step.uses.startsWith("actions/checkout@"),
+    );
+    expect(checkoutStep).toBeDefined();
+    checkoutStep!.with = {
+      ...(checkoutStep!.with as Record<string, unknown>),
+      "persist-credentials": true,
+    };
+
+    const dockerAuthStep = job.steps.find((step) => step.name === "Authenticate to Docker Hub");
+    expect(dockerAuthStep).toBeDefined();
+    dockerAuthStep!.run =
+      "docker login docker.io --username user --password ${{ secrets.DOCKERHUB_TOKEN }}";
+
+    const installRootStep = job.steps.find((step) => step.name === "Install root dependencies");
+    expect(installRootStep).toBeDefined();
+    installRootStep!.run = "npm install";
+
+    const installOpenShellStep = job.steps.find((step) => step.name === "Install OpenShell");
+    expect(installOpenShellStep).toBeDefined();
+    installOpenShellStep!.run = "bash scripts/install-openshell.sh";
+
+    const runStep = job.steps.find((step) => step.name === "Run channels stop/start live test");
+    expect(runStep).toBeDefined();
+    runStep!.env = {
+      NVIDIA_API_KEY: "${{ secrets.NVIDIA_API_KEY }}",
+      TELEGRAM_BOT_TOKEN: "real-token",
+    };
+    runStep!.run = String(runStep!.run).replace(
+      "test/e2e-scenario/live/channels-stop-start.test.ts",
+      "test/e2e-scenario/live/channels-add-remove.test.ts",
+    );
+
+    const uploadStep = job.steps.find(
+      (step) => step.name === "Upload channels stop/start artifacts",
+    );
+    expect(uploadStep).toBeDefined();
+    uploadStep!.uses = "actions/upload-artifact@v4";
+    uploadStep!.with = {
+      ...(uploadStep!.with as Record<string, unknown>),
+      name: "channels-stop-start",
+      path: "e2e-artifacts/vitest/channels-stop-start/",
+      "include-hidden-files": true,
+      "retention-days": 1,
+    };
+
+    const cleanupStep = job.steps.find((step) => step.name === "Clean up Docker auth");
+    expect(cleanupStep).toBeDefined();
+    delete cleanupStep!.if;
+    cleanupStep!.run = "docker logout docker.io";
+    fs.writeFileSync(workflowPath, YAML.stringify(workflow));
+
+    try {
+      const errors = validateE2eVitestScenariosWorkflowBoundary(workflowPath);
+      expect(errors).toEqual(
+        expect.arrayContaining([
+          "channels-stop-start-vitest job must keep the 90 minute timeout",
+          "channels-stop-start-vitest strategy.fail-fast must be false",
+          "channels-stop-start-vitest matrix.agent must be openclaw,hermes",
+          "channels-stop-start-vitest job must derive NEMOCLAW_SANDBOX_NAME from matrix.agent with the e2e-channels-stop-start- prefix",
+          "channels-stop-start-vitest job must isolate Docker auth by matrix agent",
+          "channels-stop-start-vitest job env must not include NVIDIA_API_KEY",
+          "channels-stop-start-vitest checkout step must set persist-credentials=false",
+          "step 'Install root dependencies' run script must include npm ci --ignore-scripts",
+          "step 'Install OpenShell' run script must include env -u DOCKER_CONFIG",
+          "channels-stop-start-vitest step 'Run channels stop/start live test' env must not include NVIDIA_API_KEY",
+          "channels-stop-start-vitest step must receive NVIDIA_INFERENCE_API_KEY from secrets",
+          "channels-stop-start-vitest step must set the fake Telegram token",
+          "step 'Run channels stop/start live test' run script must include test/e2e-scenario/live/channels-stop-start.test.ts",
+          "channels-stop-start-vitest upload-artifact action must be pinned to a full commit SHA",
+          "channels-stop-start-vitest artifact upload name must include matrix.agent",
+          "channels-stop-start-vitest artifact upload must set include-hidden-files: false",
+          "channels-stop-start-vitest artifact upload retention-days must be 14",
+          "channels-stop-start-vitest Docker auth cleanup must always run",
+          "step 'Clean up Docker auth' run script must include rm -rf \"${DOCKER_CONFIG}\"",
+        ]),
       );
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
