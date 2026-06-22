@@ -1109,6 +1109,10 @@ jobs:
     const discordJob = parsedWorkflow.jobs["openclaw-discord-pairing-vitest"];
     discordJob.env.DOCKER_CONFIG =
       "${{ github.workspace }}/.docker-config-openclaw-discord-pairing";
+    const liveStep = discordJob.steps.find(
+      (step) => step.name === "Run OpenClaw Discord pairing live test",
+    ) as { env: Record<string, string> };
+    liveStep.env.NVIDIA_API_KEY = "${{ secrets.NVIDIA_API_KEY }}";
     const installOpenShell = discordJob.steps.find(
       (step) => step.name === "Install OpenShell CLI",
     ) as Record<string, unknown>;
@@ -1119,6 +1123,7 @@ jobs:
       expect(validateE2eVitestScenariosWorkflowBoundary(workflowPath)).toEqual(
         expect.arrayContaining([
           "openclaw-discord-pairing-vitest job must not set DOCKER_CONFIG at job level",
+          "openclaw-discord-pairing-vitest step 'Run OpenClaw Discord pairing live test' env must not include NVIDIA_API_KEY",
           "step 'Install OpenShell CLI' run script must include env -u DOCKER_CONFIG",
         ]),
       );
