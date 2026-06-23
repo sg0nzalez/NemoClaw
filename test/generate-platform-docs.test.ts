@@ -54,6 +54,21 @@ print(module._escape_cell("<script>alert(1)</script>"))
     expect(sections[4]).toBe("&lt;script&gt;alert(1)&lt;/script&gt;");
   });
 
+  it("escapes MDX expression braces in table cells", () => {
+    const output = runPython(`
+${loadGeneratorAs("g")}
+
+# MDX evaluates {expression}. A future matrix note that mentions a
+# JSON snippet or destructuring pattern should not get parsed as JSX.
+print(module._escape_cell("{user.name}"))
+print("---")
+print(module._escape_cell("config = {key: value}"))
+`);
+    const sections = output.split("---\n").map((s) => s.trim());
+    expect(sections[0]).toBe("&#123;user.name&#125;");
+    expect(sections[1]).toBe("config = &#123;key: value&#125;");
+  });
+
   it("escapes pipes when rendered through a real platform table row", () => {
     const output = runPython(`
 ${loadGeneratorAs("g")}

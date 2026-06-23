@@ -163,14 +163,18 @@ def _escape_cell(value) -> str:
     embedded newline turns one row into two malformed rows). `<` and `>` are
     HTML control characters in MDX, so a future matrix edit that contains
     `<script>` or even a benign `<...>` snippet would be interpreted as JSX,
-    not literal text. Backticks already protect inline code spans in the
-    notes; this function targets the structural and HTML-control hazards.
-    Encoding is HTML-entity style so MDX renders the original glyph.
+    not literal text. `{` and `}` are MDX expression delimiters, so a raw
+    `{foo}` in a matrix note would be evaluated as a JSX expression rather
+    than rendered as text. Backticks already protect inline code spans in
+    the notes; this function targets the structural, HTML, and MDX
+    expression hazards. Encoding is HTML-entity style so MDX renders the
+    original glyph.
     """
     text = "" if value is None else str(value)
     text = text.replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
     text = text.replace("|", "\\|")
     text = text.replace("<", "&lt;").replace(">", "&gt;")
+    text = text.replace("{", "&#123;").replace("}", "&#125;")
     return text
 
 

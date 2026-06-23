@@ -63,17 +63,22 @@ docker exec --user root "$SANDBOX_CTR" cat /sandbox/.openclaw/openclaw.json > /t
 If `SANDBOX_CTR` is empty, the sandbox is not running on this host.
 Start the sandbox, confirm that `docker ps` shows the matching `openshell.ai/sandbox-name` label, then rerun the export commands before continuing.
 
-Create `/tmp/openclaw.updated.json` with the OpenClaw sub-agent config.
+Produce the patched OpenClaw sub-agent config in a mode-0600 temp directory.
 For the Omni example, the demo provides `vlm-demo/vlm-subagent/openclaw-patch.py`.
 Set `VLM_DEMO_DIR` to the local `vlm-demo` directory from the demo assets, then run the patch helper:
 
 ```bash
 export VLM_DEMO_DIR=/path/to/nemoclaw-demos/vlm-demo
-python3 "$VLM_DEMO_DIR/vlm-subagent/openclaw-patch.py" "$NVIDIA_API_KEY" < /tmp/openclaw.json > /tmp/openclaw.updated.json
+umask 077
+WORK_DIR=$(mktemp -d -t nemoclaw-subagent-XXXXXX)
+trap 'rm -rf "$WORK_DIR"' EXIT
+NVIDIA_API_KEY="$NVIDIA_API_KEY" python3 "$VLM_DEMO_DIR/vlm-subagent/openclaw-patch.py" \
+  < /tmp/openclaw.json > "$WORK_DIR/openclaw.updated.json"
 ```
 
-The helper reads `/tmp/openclaw.json` from standard input, adds the Omni provider and `vision-operator` entry, and writes the patched config to `/tmp/openclaw.updated.json`.
-Do not commit `/tmp/openclaw.updated.json` or any other file that contains a real API key.
+The helper reads `NVIDIA_API_KEY` from the environment (so it never appears in process listings or shell history), reads `/tmp/openclaw.json` from standard input, adds the Omni provider and `vision-operator` entry, and writes the patched config to a mode-0600 temp file under `$WORK_DIR`.
+The `trap` cleans up the temp directory on shell exit so the patched JSON does not linger on disk.
+Do not commit the patched config or any other file that contains a real API key.
 
 Upload the patched config and refresh the hash.
 In the default mutable state, this keeps the local hash consistent but does not make it tamper-proof.
@@ -82,7 +87,7 @@ Use NemoClaw runtime controls when the sandbox needs a hardened config posture a
 ```bash
 docker exec --user root "$SANDBOX_CTR" chmod 644 /sandbox/.openclaw/openclaw.json
 docker exec --user root "$SANDBOX_CTR" chmod 644 /sandbox/.openclaw/.config-hash
-docker exec --user root -i "$SANDBOX_CTR" sh -c 'cat > /sandbox/.openclaw/openclaw.json' < /tmp/openclaw.updated.json
+docker exec --user root -i "$SANDBOX_CTR" sh -c 'cat > /sandbox/.openclaw/openclaw.json' < "$WORK_DIR/openclaw.updated.json"
 docker exec --user root "$SANDBOX_CTR" /bin/bash -c "cd /sandbox/.openclaw && sha256sum openclaw.json > .config-hash"
 docker exec --user root "$SANDBOX_CTR" chown sandbox:sandbox /sandbox/.openclaw/openclaw.json /sandbox/.openclaw/.config-hash
 docker exec --user root "$SANDBOX_CTR" chmod 444 /sandbox/.openclaw/openclaw.json
@@ -115,11 +120,14 @@ For the Omni example:
 ```
 
 Use the same provider ID that appears in `models.providers`, such as `nvidia-omni`.
-Create `/tmp/auth-profiles.json` from `vlm-demo/vlm-subagent/auth-profiles.template.json`, replace `YOUR_NVIDIA_API_KEY_HERE` with the provider key, then upload it into the sandbox:
+Create the auth profile in the same mode-0600 work directory used above (so the trap from the patch step also cleans this file up on exit), then upload it into the sandbox.
+The example below pulls `$NVIDIA_API_KEY` from the environment and writes the auth profile through `envsubst` so the key never appears in argv or shell history:
 
 ```bash
 docker exec --user root "$SANDBOX_CTR" mkdir -p /sandbox/.openclaw/agents/vision-operator/agent
-docker exec --user root -i "$SANDBOX_CTR" sh -c 'cat > /sandbox/.openclaw/agents/vision-operator/agent/auth-profiles.json' < /tmp/auth-profiles.json
+NVIDIA_API_KEY="$NVIDIA_API_KEY" envsubst < "$VLM_DEMO_DIR/vlm-subagent/auth-profiles.template.json" \
+  > "$WORK_DIR/auth-profiles.json"
+docker exec --user root -i "$SANDBOX_CTR" sh -c 'cat > /sandbox/.openclaw/agents/vision-operator/agent/auth-profiles.json' < "$WORK_DIR/auth-profiles.json"
 docker exec --user root "$SANDBOX_CTR" chmod 600 /sandbox/.openclaw/agents/vision-operator/agent/auth-profiles.json
 ```
 

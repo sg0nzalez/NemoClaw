@@ -162,7 +162,7 @@
       "name": "LangChain Deep Agents Code",
       "status": "experimental",
       "default": false,
-      "notes": "Terminal-oriented coding harness (no in-sandbox gateway, no dashboard) built on the Deep Agents SDK; manifest at `agents/langchain-deepagents-code/manifest.yaml` with binary `dcode`. Onboard with `$$nemoclaw onboard --agent deepagents-code` and follow [the quickstart](../get-started/quickstart-langchain-deepagents-code). NemoClaw runs it as a managed harness: unmanaged sandbox/MCP/shell overrides are rejected and credential-bearing proxy URLs are dropped from persisted shell env. Inference routes through OpenShell's `inference.local` endpoint via Deep Agents Code's OpenAI-compatible provider. Live runtime acceptance, broader launch material, and terminal-agent diagnostics are tracked at open issue #4861."
+      "notes": "Terminal-oriented coding harness (no in-sandbox gateway, no dashboard) built on the Deep Agents SDK; manifest at `agents/langchain-deepagents-code/manifest.yaml` with binary `dcode`. Onboard with `$$nemoclaw onboard --agent langchain-deepagents-code` and follow [the quickstart](../get-started/quickstart-langchain-deepagents-code). NemoClaw runs it as a managed harness: unmanaged sandbox/MCP/shell overrides are rejected and credential-bearing proxy URLs are dropped from persisted shell env. Inference routes through OpenShell's `inference.local` endpoint via Deep Agents Code's OpenAI-compatible provider. Live runtime acceptance, broader launch material, and terminal-agent diagnostics are tracked at open issue #4861."
     }
   ],
 
@@ -251,9 +251,9 @@
       "notes": "Local vLLM and NIM paths assert NVIDIA CDI presence with `assertCdiNvidiaGpuSpecPresent` (`src/lib/onboard.ts:1581`, called at `:1646`). NemoClaw does not install non-NVIDIA accelerator drivers."
     },
     {
-      "name": "LangChain, AutoGen, CrewAI, or other agent harnesses",
+      "name": "Other LangChain, AutoGen, CrewAI, or non-listed agent harnesses",
       "status": "unsupported",
-      "notes": "Only OpenClaw and Hermes are integrated. Bringing other harnesses is tracked as a research epic (see open issue #4861) but is not on the current roadmap."
+      "notes": "LangChain Deep Agents Code is the only integrated LangChain-family harness (see the Agents section above; status `Experimental`). Other LangChain harnesses, AutoGen, CrewAI, and any agent runtime not listed in the Agents table are not integrated. Bringing more harnesses is tracked as a research epic (see open issue #4861) but is not on the current roadmap."
     },
     {
       "name": "Multi-user host sharing",
