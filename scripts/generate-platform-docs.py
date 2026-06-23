@@ -391,17 +391,17 @@ def generate_out_of_scope_table(out_of_scope: list[dict]) -> str:
 
 def generate_project_status_block(status: dict) -> str:
     lines = [
-        f"- **Stage:** {status['stage']}",
-        f"- **Label:** {status['label']}",
-        f"- **Since:** {status['since']}",
-        f"- **Notes:** {status['notes']}",
+        f"- **Stage:** {_escape_cell(status['stage'])}",
+        f"- **Label:** {_escape_cell(status['label'])}",
+        f"- **Since:** {_escape_cell(status['since'])}",
+        f"- **Notes:** {_escape_cell(status['notes'])}",
     ]
     return "\n".join(lines)
 
 
 def generate_owners_block(owners: dict) -> str:
     return (
-        f"- **Engineering owner:** {owners['engineering']} "
+        f"- **Engineering owner:** {_escape_cell(owners['engineering'])} "
         "(reviews through CODEOWNERS and signs off on launch-facing claim changes "
         "before they reach demos or sales material)."
     )
