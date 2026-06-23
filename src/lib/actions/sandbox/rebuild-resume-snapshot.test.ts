@@ -29,6 +29,7 @@ describe("rebuild resume snapshot repair", () => {
     preRepairMachineState: null as string | null,
     preRepairStatus: null as string | null,
     preRepairResumable: null as boolean | null,
+    preRepairLastCompletedStep: null as string | null,
     repairedMachineState: null as string | null,
   };
 
@@ -38,6 +39,7 @@ describe("rebuild resume snapshot repair", () => {
     observed.preRepairMachineState = null;
     observed.preRepairStatus = null;
     observed.preRepairResumable = null;
+    observed.preRepairLastCompletedStep = null;
     observed.repairedMachineState = null;
     delete require.cache[requireDist.resolve(rebuildModulePath)];
 
@@ -146,6 +148,7 @@ describe("rebuild resume snapshot repair", () => {
         observed.preRepairMachineState = reopened.machine.state;
         observed.preRepairStatus = reopened.status;
         observed.preRepairResumable = reopened.resumable;
+        observed.preRepairLastCompletedStep = reopened.lastCompletedStep;
         resumeRepair.repairResumeMachineSnapshot(reopened, "2026-06-01T00:01:00.000Z");
         observed.repairedMachineState = reopened.machine.state;
         throw new Error("stop-after-resume-repair-probe");
@@ -181,6 +184,7 @@ describe("rebuild resume snapshot repair", () => {
     expect(observed.preRepairMachineState).toBe("complete");
     expect(observed.preRepairStatus).toBe("in_progress");
     expect(observed.preRepairResumable).toBe(true);
+    expect(observed.preRepairLastCompletedStep).toBe("gateway");
     expect(observed.repairedMachineState).toBe("provider_selection");
     expect(process.env.NEMOCLAW_SANDBOX_NAME).toBe("alpha");
   });
@@ -188,6 +192,8 @@ describe("rebuild resume snapshot repair", () => {
   it("normalizes stale nonterminal machine snapshots before resume repair", async () => {
     session.machine.state = "sandbox";
     session.machine.revision = 20;
+    session.lastCompletedStep = "inference";
+    session.steps.inference.status = "complete";
 
     await expect(rebuildSandbox("alpha", ["--yes"], { throwOnError: true })).rejects.toThrow(
       "Recreate failed",
@@ -196,6 +202,7 @@ describe("rebuild resume snapshot repair", () => {
     expect(observed.preRepairMachineState).toBe("complete");
     expect(observed.preRepairStatus).toBe("in_progress");
     expect(observed.preRepairResumable).toBe(true);
+    expect(observed.preRepairLastCompletedStep).toBe("gateway");
     expect(observed.repairedMachineState).toBe("provider_selection");
   });
 });

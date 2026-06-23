@@ -731,10 +731,29 @@ export async function rebuildSandbox(
     onboardSession.updateSession((s: Session) => {
       const now = new Date().toISOString();
       const machine = s.machine;
+      const rewindStepNames = [
+        "provider_selection",
+        "inference",
+        "sandbox",
+        "openclaw",
+        "agent_setup",
+        "policies",
+      ];
       s.sandboxName = sandboxName;
       s.resumable = true;
       s.status = "in_progress";
-      if (machine?.state !== "complete" && machine?.state !== "failed") {
+      s.failure = null;
+      s.lastCompletedStep = "gateway";
+      s.lastStepStarted = "gateway";
+      for (const stepName of rewindStepNames) {
+        const step = s.steps[stepName];
+        if (!step) continue;
+        step.status = "pending";
+        step.startedAt = null;
+        step.completedAt = null;
+        step.error = null;
+      }
+      if (machine?.state !== "complete") {
         s.machine = {
           version: MACHINE_SNAPSHOT_VERSION,
           state: "complete",
