@@ -42,6 +42,7 @@ ARG OPENCLAW_VERSION=2026.6.9
 ARG OPENCLAW_2026_6_9_INTEGRITY=sha512-y0PGUdE87S8QtQXABPDL0CjNKhH3q/R1h9/WiRQkhVCGSBVhs63/M1iZn2DYVyJCAbDyMz3KNyAE0WzSQIWCRg==
 # Legacy fixture pins used by stale-sandbox/rebuild E2Es that intentionally
 # build an older OpenClaw base image before proving upgrade behavior.
+ARG NEMOCLAW_ALLOW_LEGACY_OPENCLAW_FIXTURE=0
 ARG OPENCLAW_2026_3_11_INTEGRITY=sha512-bxwiBmHPakwfpY5tqC9lrV5TCu5PKf0c1bHNc3nhrb+pqKcPEWV4zOjDVFLQUHr98ihgWA+3pacy4b3LQ8wduQ==
 ARG OPENCLAW_2026_4_24_INTEGRITY=sha512-W6u4XeIIP4+uG4DYV9G3JeS6QNuKwfhQIej1GIoL4BdcnUFgrnB8kHYNXL3MxiHRKuhZB9OYwUMGs8jKFZR/Vg==
 ARG CODEX_ACP_0_11_1_INTEGRITY=sha512-My2VSlBtvJipJhImHjFDej2ut/p00QqOISRnZgLgLrSIzjgvdcQvAhaZviWj7XPhk4UIdIb0OoA+Lrls824uiQ==
@@ -150,6 +151,11 @@ RUN set -eu; \
     [ -n "$MIN_VER" ] || { echo "ERROR: Could not parse min_openclaw_version from blueprint.yaml" >&2; exit 1; }; \
     if [ "$(printf '%s\n%s' "$MIN_VER" "$OPENCLAW_VERSION" | sort -V | head -n1)" != "$MIN_VER" ]; then \
         echo "ERROR: OpenClaw build target ${OPENCLAW_VERSION} is below blueprint minimum ${MIN_VER}" >&2; exit 1; \
+    fi; \
+    if [ "$OPENCLAW_VERSION" = "2026.3.11" ] || [ "$OPENCLAW_VERSION" = "2026.4.24" ]; then \
+        if [ "$NEMOCLAW_ALLOW_LEGACY_OPENCLAW_FIXTURE" != "1" ]; then \
+            echo "ERROR: OpenClaw ${OPENCLAW_VERSION} is a legacy E2E fixture pin; set NEMOCLAW_ALLOW_LEGACY_OPENCLAW_FIXTURE=1 for stale-upgrade fixture builds" >&2; exit 1; \
+        fi; \
     fi; \
     EXPECTED_INTEGRITY=""; \
     if [ "$OPENCLAW_VERSION" = "2026.6.9" ]; then EXPECTED_INTEGRITY="$OPENCLAW_2026_6_9_INTEGRITY"; fi; \

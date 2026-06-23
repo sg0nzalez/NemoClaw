@@ -29,13 +29,13 @@ Command run from a temporary directory:
 
 ```bash
 npm init -y
-npm install --package-lock-only --ignore-scripts --no-fund --no-audit openclaw@2026.6.9
+npm install --package-lock-only --ignore-scripts --no-fund --no-audit openclaw@2026.6.9 @zed-industries/codex-acp@0.11.1
 npm audit --omit=dev --json
 ```
 
-Result: npm audit exited `0` and reported `0` info, `0` low, `0` moderate, `0` high, and `0` critical vulnerabilities.
+Result: npm audit exited `0` and reported `0` info, `0` low, `0` moderate, `0` high, and `0` critical vulnerabilities across `313` total dependencies.
 
-This review is an advisory snapshot for the direct OpenClaw runtime package and its npm dependency graph at review time. It complements, but does not replace, the committed npm integrity pins, Dockerfile install-time registry integrity check, and Slack plugin install-time registry integrity check.
+This review is an advisory snapshot for the direct OpenClaw runtime package, Codex ACP runtime helper, and their npm dependency graphs at review time. It complements, but does not replace, the committed npm integrity pins, Dockerfile install-time registry integrity checks, and plugin install-time registry integrity checks.
 
 ## Slack Source Review
 
@@ -45,21 +45,21 @@ The main `openclaw@2026.6.9` package excludes `dist/extensions/slack/**`; its ch
 - `dist/pipeline.runtime-*.js`, which exports `prepareSlackMessage`; and
 - the denied channel-user gate containing `Blocked unauthorized slack sender ${senderId} (not in channel users)`, which NemoClaw's `slack-channel-guard` preload patches to emit one bounded sender-facing denial notice for explicit `app_mention` events.
 
-`test/e2e/lib/slack-api-proof.sh` now prefers the installed `@openclaw/slack` pipeline runtime over the older `test-api.js` facade. It sources `/tmp/nemoclaw-proxy-env.sh` before importing the plugin so the same `NODE_OPTIONS` preload chain used by OpenClaw is active. The proof drives one allowed and one denied `app_mention` through installed `prepareSlackMessage`, then sends the allowed reply through installed `sendMessageSlack` and the hermetic fake Slack API. If a future package shape only exposes `runtime-api.js`, the helper falls back to send-only coverage and reports `openclaw-runtime-api` instead of claiming inbound authorization coverage.
+The retained Slack proof scripts still require the older `test-api.js` facade or `openclaw-private-helper` proof kind for full inbound authorization coverage. This PR does not claim live `pipeline.runtime-*.js` proof coverage for the external `@openclaw/slack@2026.6.9` package. Until that proof path is added, the 2026.6.9 Slack source review is package-shape evidence plus install-time integrity enforcement, not a replacement for the existing full inbound `app_mention` proof contract.
 
 ## PR Review Follow-ups
 
+### Legacy Fixture Pins
+
+The legacy `2026.3.11` and `2026.4.24` OpenClaw pins are retained only for stale-upgrade fixture builds. Production Dockerfile install blocks now reject those versions unless `NEMOCLAW_ALLOW_LEGACY_OPENCLAW_FIXTURE=1` is set explicitly. The stale-upgrade E2E build contexts pass that flag when they intentionally build an old base image, and `test/openclaw-integrity-pin.test.ts` verifies both the default rejection and the explicit fixture opt-in.
+
+Invalid state: a production image build overriding `OPENCLAW_VERSION` to an old fixture pin while still passing integrity checks. Source boundary: Dockerfile and Dockerfile.base install blocks. Source-fix constraint: keep stale-upgrade E2Es able to build old images without normalizing those pins as production targets. Regression test: `test/openclaw-integrity-pin.test.ts` rejects legacy pins without the fixture flag. Removal condition: delete the legacy pins and fixture flag after the stale-upgrade/rebuild E2Es no longer need old OpenClaw base images.
+
 ### Slack Inbound `app_mention`
 
-The PR review warning for the Slack fallback is resolved for the 2026.6.9 external Slack plugin shape. The installed `@openclaw/slack@2026.6.9` dist does not expose `createInboundSlackTestContext`, but it does expose `prepareSlackMessage` from `dist/pipeline.runtime-*.js`. NemoClaw now imports that installed pipeline directly for the E2E proof and keeps the older private-helper path for package shapes that still expose `test-api.js`.
+The external `@openclaw/slack@2026.6.9` package shape review is intentionally narrower than full inbound authorization proof. The package exposes `dist/runtime-api.js` and `dist/pipeline.runtime-*.js`, but this PR does not change `test/e2e/lib/slack-api-proof.sh` or `test/e2e/test-messaging-providers.sh` to import that pipeline. Keep the older private-helper proof contract as authoritative until a follow-up adds and validates installed `pipeline.runtime-*.js` coverage.
 
-Current coverage remains deliberately narrower:
-
-- `test/e2e/lib/slack-api-proof.sh` detects the installed `pipeline.runtime-*.js` shape and returns the `openclaw-pipeline-runtime` proof kind after proving allowed prepare, denied prepare, bounded denial feedback, installed `sendMessageSlack`, and host-side Slack bot-token rewrite.
-- `test/e2e/test-messaging-providers.sh` treats `openclaw-pipeline-runtime` and the older `openclaw-private-helper` proof kind as full `M-S17` coverage.
-- The send-only `openclaw-runtime-api` branch remains as an explicit fallback for future package shapes that expose outbound send but no importable inbound pipeline.
-
-Do not close this gap by changing the send-only fallback to a soft pass for inbound authorization. The fallback must continue to report `openclaw-runtime-api` unless it actually imports and exercises an installed inbound pipeline or a stable public inbound facade.
+Invalid state: claiming `openclaw-pipeline-runtime` inbound proof without checked-in proof scripts that import and exercise that runtime. Source boundary: retained Slack proof scripts, not the dependency review note. Source-fix constraint: do not treat send-only `runtime-api.js` coverage as inbound authorization coverage. Regression test to add in a follow-up: a fake installed `@openclaw/slack` with `dist/pipeline.runtime-fixture.js` and no `test-api.js` must report full coverage only after allowed prepare, denied prepare, bounded denial feedback, and installed send evidence.
 
 ### Issue #4434 TUI Unreachable Inference
 

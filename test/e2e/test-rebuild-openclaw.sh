@@ -140,6 +140,7 @@ mv "${BLUEPRINT}.tmp" "${BLUEPRINT}"
 
 docker build \
   --build-arg "OPENCLAW_VERSION=${OLD_OPENCLAW_VERSION}" \
+  --build-arg "NEMOCLAW_ALLOW_LEGACY_OPENCLAW_FIXTURE=1" \
   -f "${REPO_ROOT}/Dockerfile.base" \
   -t "${OLD_BASE_TAG}" \
   "${REPO_ROOT}"

@@ -185,6 +185,7 @@ ARG OPENCLAW_VERSION=2026.6.9
 ARG OPENCLAW_2026_6_9_INTEGRITY=sha512-y0PGUdE87S8QtQXABPDL0CjNKhH3q/R1h9/WiRQkhVCGSBVhs63/M1iZn2DYVyJCAbDyMz3KNyAE0WzSQIWCRg==
 # Legacy fixture pins used by stale-sandbox/rebuild E2Es that intentionally
 # build an older OpenClaw base image before proving upgrade behavior.
+ARG NEMOCLAW_ALLOW_LEGACY_OPENCLAW_FIXTURE=0
 ARG OPENCLAW_2026_3_11_INTEGRITY=sha512-bxwiBmHPakwfpY5tqC9lrV5TCu5PKf0c1bHNc3nhrb+pqKcPEWV4zOjDVFLQUHr98ihgWA+3pacy4b3LQ8wduQ==
 ARG OPENCLAW_2026_4_24_INTEGRITY=sha512-W6u4XeIIP4+uG4DYV9G3JeS6QNuKwfhQIej1GIoL4BdcnUFgrnB8kHYNXL3MxiHRKuhZB9OYwUMGs8jKFZR/Vg==
 
@@ -206,6 +207,11 @@ RUN --mount=type=bind,source=nemoclaw-blueprint/blueprint.yaml,target=/tmp/bluep
     if [ "$(printf '%s\n%s' "$OPENCLAW_MIN_VERSION" "$OPENCLAW_VERSION" | sort -V | head -n1)" != "$OPENCLAW_MIN_VERSION" ]; then \
         echo "Error: OpenClaw version ${OPENCLAW_VERSION} is below the minimum required version ${OPENCLAW_MIN_VERSION}"; \
         echo "Hint: Update min_openclaw_version in nemoclaw-blueprint/blueprint.yaml or use a newer version."; exit 1; \
+    fi; \
+    if [ "$OPENCLAW_VERSION" = "2026.3.11" ] || [ "$OPENCLAW_VERSION" = "2026.4.24" ]; then \
+        if [ "$NEMOCLAW_ALLOW_LEGACY_OPENCLAW_FIXTURE" != "1" ]; then \
+            echo "Error: OpenClaw ${OPENCLAW_VERSION} is a legacy E2E fixture pin; set NEMOCLAW_ALLOW_LEGACY_OPENCLAW_FIXTURE=1 for stale-upgrade fixture builds"; exit 1; \
+        fi; \
     fi; \
     if ! npm view openclaw@${OPENCLAW_VERSION} version > /dev/null 2>&1; then \
         echo "Error: OpenClaw version ${OPENCLAW_VERSION} not found on npm registry"; \

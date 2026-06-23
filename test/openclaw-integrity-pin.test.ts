@@ -67,6 +67,7 @@ function runInstallBlock(
     registryIntegrity?: string;
     codexAcpCommittedIntegrity?: string;
     codexAcpRegistryIntegrity?: string;
+    allowLegacyFixture?: boolean;
   } = {},
 ) {
   const {
@@ -75,6 +76,7 @@ function runInstallBlock(
     registryIntegrity = committedIntegrity,
     codexAcpCommittedIntegrity = PINNED_CODEX_ACP_INTEGRITY,
     codexAcpRegistryIntegrity = codexAcpCommittedIntegrity,
+    allowLegacyFixture = false,
   } = options;
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-integrity-"));
   const blueprint = path.join(tmp, "blueprint.yaml");
@@ -86,6 +88,7 @@ function runInstallBlock(
     `call_log=${JSON.stringify(log)}`,
     `OPENCLAW_VERSION=${JSON.stringify(openclawVersion)}`,
     `OPENCLAW_2026_6_9_INTEGRITY=${JSON.stringify(committedIntegrity)}`,
+    `NEMOCLAW_ALLOW_LEGACY_OPENCLAW_FIXTURE=${allowLegacyFixture ? "1" : "0"}`,
     `OPENCLAW_2026_3_11_INTEGRITY=${JSON.stringify(LEGACY_REBUILD_OPENCLAW_INTEGRITY)}`,
     `OPENCLAW_2026_4_24_INTEGRITY=${JSON.stringify(LEGACY_GATEWAY_UPGRADE_OPENCLAW_INTEGRITY)}`,
     `CODEX_ACP_0_11_1_INTEGRITY=${JSON.stringify(codexAcpCommittedIntegrity)}`,
@@ -127,13 +130,18 @@ describe("OpenClaw npm integrity pins", () => {
     expect(reviewNote).toContain("@tencent-weixin/openclaw-weixin@2.4.3");
     expect(reviewNote).toContain(PINNED_WECHAT_PLUGIN_INTEGRITY);
     expect(reviewNote).toContain("each reviewed npm plugin registry integrity");
+    expect(reviewNote).toContain(
+      "openclaw@2026.6.9 @zed-industries/codex-acp@0.11.1",
+    );
     expect(reviewNote).toContain("`0` high");
     expect(reviewNote).toContain("`0` critical");
+    expect(reviewNote).toContain("`313` total dependencies");
     expect(reviewNote).toContain(
       "`dist/pipeline.runtime-*.js`, which exports `prepareSlackMessage`",
     );
-    expect(reviewNote).toContain("openclaw-pipeline-runtime");
-    expect(reviewNote).toContain("send-only `openclaw-runtime-api` branch remains");
+    expect(reviewNote).toContain("does not claim live `pipeline.runtime-*.js` proof coverage");
+    expect(reviewNote).toContain("NEMOCLAW_ALLOW_LEGACY_OPENCLAW_FIXTURE=1");
+    expect(reviewNote).toContain("claiming `openclaw-pipeline-runtime` inbound proof");
     expect(reviewNote).toContain("gateway/upstream reporting layer");
     expect(reviewNote).toContain("one-line recovery hint");
     expect(reviewNote).toContain("default 180-second timeout");
@@ -197,7 +205,18 @@ describe("OpenClaw npm integrity pins", () => {
     expect(base.calls).toContain(`npm install -g openclaw@${PINNED_OPENCLAW_VERSION}`);
   });
 
-  it("allows exact legacy fixture pins used by stale-upgrade E2Es", () => {
+  it("rejects legacy fixture pins unless stale-upgrade fixture mode is explicit", () => {
+    const production = runInstallBlock(
+      extractRunBlock(
+        DOCKERFILE,
+        "# OPENCLAW_VERSION is the NemoClaw runtime build target",
+        "# Patch OpenClaw media fetch",
+      ),
+      {
+        openclawVersion: LEGACY_REBUILD_OPENCLAW_VERSION,
+        registryIntegrity: LEGACY_REBUILD_OPENCLAW_INTEGRITY,
+      },
+    );
     const base = runInstallBlock(
       extractRunBlock(
         DOCKERFILE_BASE,
@@ -209,13 +228,36 @@ describe("OpenClaw npm integrity pins", () => {
         registryIntegrity: LEGACY_REBUILD_OPENCLAW_INTEGRITY,
       },
     );
+    const fixtureBase = runInstallBlock(
+      extractRunBlock(
+        DOCKERFILE_BASE,
+        "# Install OpenClaw CLI + PyYAML.",
+        "# Baseline health check.",
+      ),
+      {
+        openclawVersion: LEGACY_REBUILD_OPENCLAW_VERSION,
+        registryIntegrity: LEGACY_REBUILD_OPENCLAW_INTEGRITY,
+        allowLegacyFixture: true,
+      },
+    );
 
-    expect(base.result.status).toBe(0);
-    expect(base.calls).toContain(`npm view openclaw@${LEGACY_REBUILD_OPENCLAW_VERSION} version`);
-    expect(base.calls).toContain(
+    for (const rejected of [production, base]) {
+      expect(rejected.result.status).not.toBe(0);
+      expect(`${rejected.result.stdout}${rejected.result.stderr}`).toContain(
+        `OpenClaw ${LEGACY_REBUILD_OPENCLAW_VERSION} is a legacy E2E fixture pin`,
+      );
+      expect(rejected.calls).not.toContain("npm install -g");
+    }
+    expect(fixtureBase.result.status).toBe(0);
+    expect(fixtureBase.calls).toContain(
+      `npm view openclaw@${LEGACY_REBUILD_OPENCLAW_VERSION} version`,
+    );
+    expect(fixtureBase.calls).toContain(
       `npm view openclaw@${LEGACY_REBUILD_OPENCLAW_VERSION} dist.integrity`,
     );
-    expect(base.calls).toContain(`npm install -g openclaw@${LEGACY_REBUILD_OPENCLAW_VERSION}`);
+    expect(fixtureBase.calls).toContain(
+      `npm install -g openclaw@${LEGACY_REBUILD_OPENCLAW_VERSION}`,
+    );
   });
 
   it("fails closed before npm install when the registry integrity drifts", () => {
