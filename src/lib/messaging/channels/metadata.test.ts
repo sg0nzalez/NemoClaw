@@ -140,19 +140,44 @@ describe("built-in messaging channel metadata", () => {
   });
 
   it("requires committed npm integrity pins for built-in OpenClaw plugin installs", () => {
-    for (const manifest of listBuiltInMessagingChannelManifests({ agent: "openclaw" })) {
-      for (const agentPackage of manifest.agentPackages ?? []) {
-        if (agentPackage.agent !== "openclaw") continue;
-        if (agentPackage.manager !== "openclaw-plugin") continue;
-        if (!agentPackage.spec.startsWith("npm:")) continue;
-        const committedIntegrity =
-          agentPackage.integrity ?? agentPackage.integrityByVersion?.["2026.6.9"];
-        expect(
-          committedIntegrity,
-          `${manifest.id}/${agentPackage.id} must carry a committed npm integrity pin`,
-        ).toMatch(/^sha512-/);
-      }
-    }
+    const npmPluginInstalls = listBuiltInMessagingChannelManifests({ agent: "openclaw" }).flatMap(
+      (manifest) =>
+        (manifest.agentPackages ?? [])
+          .filter(
+            (agentPackage) =>
+              agentPackage.agent === "openclaw" &&
+              agentPackage.manager === "openclaw-plugin" &&
+              agentPackage.spec.startsWith("npm:"),
+          )
+          .map((agentPackage) => ({
+            packageKey: `${manifest.id}/${agentPackage.id}`,
+            committedIntegrity:
+              agentPackage.integrity ?? agentPackage.integrityByVersion?.["2026.6.9"],
+          })),
+    );
+
+    expect(npmPluginInstalls).toEqual([
+      {
+        packageKey: "discord/openclawPluginPackage",
+        committedIntegrity:
+          "sha512-esFhwYW0nrFQvBhkPeK/1qmvumlVAY8ddhYBt7geIYLlBriwPJRwtnVLLfp0n1LbS0/XVZ0ORqlvkWq8Vv61vg==",
+      },
+      {
+        packageKey: "wechat/openclawPluginPackage",
+        committedIntegrity:
+          "sha512-dPQbidUNWigC6V10vGW4i+GLH09x+6zUhafZRjuxkJ9GDu8o62WBsnUTojp4KqUH756hz+t2v9khiCRSi0dBDw==",
+      },
+      {
+        packageKey: "slack/openclawPluginPackage",
+        committedIntegrity:
+          "sha512-JZHc0L3s6s+yBsWowZtE/DWZJOuy4lTE6uTuUbF5QNjUvQQUlCHMFrwPycrXLesVq1il5yAvo82VbERRsIzgxQ==",
+      },
+      {
+        packageKey: "whatsapp/openclawPluginPackage",
+        committedIntegrity:
+          "sha512-HWz9CryGcSk5ork03DlESVlRcDBnwuXPEKgqdSz/Qt0OnQ2Z1wqNGpwVlAqngvDQDH2AzkNXWuTu2M0C16R8vA==",
+      },
+    ]);
   });
 
   it("merges duplicate policy preset metadata by preset name", () => {
