@@ -30,7 +30,6 @@ For version highlights, see Release Notes (use the `nemoclaw-user-overview` skil
 - **Engineering owner:** @NVIDIA/nemoclaw-maintainer (reviews through CODEOWNERS and signs off on launch-facing claim changes before they reach demos or sales material).
 
 The engineering owner is the GitHub team auto-assigned to review changes to `ci/platform-matrix.json` through CODEOWNERS, and the same team signs off on launch-facing claim changes before they reach demos, blog posts, or sales material.
-NemoClaw is maintainer-run today; there is no separate product owner role.
 
 ### Review process
 
