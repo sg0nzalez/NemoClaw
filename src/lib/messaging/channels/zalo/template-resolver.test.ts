@@ -27,4 +27,25 @@ describe("Zalo template resolver", () => {
 
     expect(resolveZaloTemplateReference("zalo.groupPolicy", { inputs })?.value).toBe(expected);
   });
+
+  it("dedups allowed users and derives the allowlist dm policy", () => {
+    const inputs: SandboxMessagingInputReference[] = [
+      {
+        channelId: "zalo",
+        inputId: "allowedIds",
+        kind: "config",
+        required: false,
+        statePath: "allowedIds.zalo",
+        value: "123,456,123",
+      },
+    ];
+
+    expect(resolveZaloTemplateReference("zalo.allowedUsers.values", { inputs })?.value).toEqual([
+      "123",
+      "456",
+    ]);
+    expect(resolveZaloTemplateReference("zalo.allowedUsers.dmPolicy", { inputs })?.value).toBe(
+      "allowlist",
+    );
+  });
 });
