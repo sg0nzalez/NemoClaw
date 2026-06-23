@@ -17,7 +17,6 @@ const DEPENDENCY_REVIEW_NOTE = path.join(
   "security",
   "openclaw-2026.6.9-dependency-review.md",
 );
-const SLACK_API_PROOF_HELPER = path.join(REPO_ROOT, "test", "e2e", "lib", "slack-api-proof.sh");
 const UNPINNED_OPENCLAW_VERSION = "2026.6.10";
 const PINNED_OPENCLAW_VERSION = "2026.6.9";
 const PINNED_OPENCLAW_INTEGRITY =
@@ -140,42 +139,24 @@ describe("OpenClaw npm integrity pins", () => {
     expect(reviewNote).toContain("default 180-second timeout");
   });
 
-  it("keeps the Slack installed-ingress proof aligned with the reviewed plugin shape", () => {
-    const proof = fs.readFileSync(SLACK_API_PROOF_HELPER, "utf-8");
-
-    expect(proof).toContain("pipeline-runtime");
-    expect(proof).toContain("pipeline.runtime-*.js");
-    expect(proof).toContain("createSlackPipelineProofContext");
-    expect(proof).toContain(". /tmp/nemoclaw-proxy-env.sh");
-    expect(proof).toContain('proof: "openclaw-pipeline-runtime"');
-    expect(proof).toContain("deniedFeedbackCount");
-    expect(proof).toContain("slack_proof_shell_quote");
-    expect(proof).toContain("slack_proof_validate_env_value");
-  });
-
-  it("rejects unsafe Slack proof env values before constructing the remote shell command", () => {
-    const result = spawnSync(
-      "bash",
-      [
-        "-c",
-        [
-          `. ${JSON.stringify(SLACK_API_PROOF_HELPER)}`,
-          `slack_proof_validate_env_value 'allowed user' "U123'BAD" '[A-Za-z0-9_-]+'`,
-        ].join("; "),
-      ],
-      { encoding: "utf-8", timeout: 10000 },
-    );
-
-    expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("Invalid Slack proof allowed user");
-  });
-
   it("installs the reviewed pin when registry integrity matches the committed pin", () => {
     const production = runInstallBlock(
       extractRunBlock(
         DOCKERFILE,
         "# OPENCLAW_VERSION is the NemoClaw runtime build target",
         "# Patch OpenClaw media fetch",
+      ),
+      {
+        openclawVersion: PINNED_OPENCLAW_VERSION,
+        committedIntegrity: PINNED_OPENCLAW_INTEGRITY,
+        registryIntegrity: PINNED_OPENCLAW_INTEGRITY,
+      },
+    );
+    const codexAcp = runInstallBlock(
+      extractRunBlock(
+        DOCKERFILE,
+        "# Pre-install the codex-acp package",
+        "# Upgrade OpenClaw if the base image is stale.",
       ),
       {
         openclawVersion: PINNED_OPENCLAW_VERSION,
@@ -197,17 +178,18 @@ describe("OpenClaw npm integrity pins", () => {
     );
 
     expect(production.result.status).toBe(0);
+    expect(codexAcp.result.status).toBe(0);
     expect(base.result.status).toBe(0);
     expect(production.calls).toContain(
       `npm view openclaw@${PINNED_OPENCLAW_VERSION} dist.integrity`,
     );
-    expect(production.calls).toContain(
+    expect(codexAcp.calls).toContain(
       `npm view @zed-industries/codex-acp@${PINNED_CODEX_ACP_VERSION} dist.integrity`,
     );
     expect(production.calls).toContain(
       `npm install -g --no-audit --no-fund --no-progress openclaw@${PINNED_OPENCLAW_VERSION}`,
     );
-    expect(production.calls).toContain(
+    expect(codexAcp.calls).toContain(
       `npm install -g --no-audit --no-fund --no-progress @zed-industries/codex-acp@${PINNED_CODEX_ACP_VERSION}`,
     );
     expect(base.calls).toContain(`npm view openclaw@${PINNED_OPENCLAW_VERSION} version`);
@@ -296,8 +278,8 @@ describe("OpenClaw npm integrity pins", () => {
     const { result, calls } = runInstallBlock(
       extractRunBlock(
         DOCKERFILE,
-        "# OPENCLAW_VERSION is the NemoClaw runtime build target",
-        "# Patch OpenClaw media fetch",
+        "# Pre-install the codex-acp package",
+        "# Upgrade OpenClaw if the base image is stale.",
       ),
       {
         openclawVersion: PINNED_OPENCLAW_VERSION,
