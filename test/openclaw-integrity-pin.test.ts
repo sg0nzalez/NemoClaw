@@ -17,6 +17,7 @@ const DEPENDENCY_REVIEW_NOTE = path.join(
   "security",
   "openclaw-2026.6.9-dependency-review.md",
 );
+const SLACK_API_PROOF_HELPER = path.join(REPO_ROOT, "test", "e2e", "lib", "slack-api-proof.sh");
 const UNPINNED_OPENCLAW_VERSION = "2026.6.10";
 const PINNED_OPENCLAW_VERSION = "2026.6.9";
 const PINNED_OPENCLAW_INTEGRITY =
@@ -99,14 +100,31 @@ describe("OpenClaw npm integrity pins", () => {
 
     expect(reviewNote).toContain(`openclaw@${PINNED_OPENCLAW_VERSION}`);
     expect(reviewNote).toContain(PINNED_OPENCLAW_INTEGRITY);
+    expect(reviewNote).toContain("@openclaw/slack@2026.6.9");
+    expect(reviewNote).toContain(
+      "sha512-JZHc0L3s6s+yBsWowZtE/DWZJOuy4lTE6uTuUbF5QNjUvQQUlCHMFrwPycrXLesVq1il5yAvo82VbERRsIzgxQ==",
+    );
     expect(reviewNote).toContain("`0` high");
     expect(reviewNote).toContain("`0` critical");
-    expect(reviewNote).toContain("Slack inbound `app_mention` allow/deny path");
-    expect(reviewNote).toContain("openclaw-runtime-api");
-    expect(reviewNote).toContain("stable Slack inbound runtime/test facade");
+    expect(reviewNote).toContain(
+      "`dist/pipeline.runtime-*.js`, which exports `prepareSlackMessage`",
+    );
+    expect(reviewNote).toContain("openclaw-pipeline-runtime");
+    expect(reviewNote).toContain("send-only `openclaw-runtime-api` branch remains");
     expect(reviewNote).toContain("gateway/upstream reporting layer");
     expect(reviewNote).toContain("one-line recovery hint");
     expect(reviewNote).toContain("default 180-second timeout");
+  });
+
+  it("keeps the Slack installed-ingress proof aligned with the reviewed plugin shape", () => {
+    const proof = fs.readFileSync(SLACK_API_PROOF_HELPER, "utf-8");
+
+    expect(proof).toContain("pipeline-runtime");
+    expect(proof).toContain("pipeline.runtime-*.js");
+    expect(proof).toContain("createSlackPipelineProofContext");
+    expect(proof).toContain(". /tmp/nemoclaw-proxy-env.sh");
+    expect(proof).toContain('proof: "openclaw-pipeline-runtime"');
+    expect(proof).toContain("deniedFeedbackCount");
   });
 
   it("installs the reviewed pin when registry integrity matches the committed pin", () => {

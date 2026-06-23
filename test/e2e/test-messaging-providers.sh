@@ -2857,8 +2857,8 @@ fi
 # when OpenClaw exposes a stable inbound Slack test/runtime facade, or when
 # NemoClaw has a black-box event harness for the installed Slack ingress path.
 # The static config assertions above still prove the allowlist is rendered, and
-# the private-helper branch below keeps the stronger runtime proof for package
-# shapes that expose that surface.
+# the private-helper and pipeline-runtime branches below keep the stronger
+# runtime proof for package shapes that expose an importable inbound surface.
 info "Running Slack channel @mention allowlist proof through installed OpenClaw..."
 sl_channel_proof=""
 sl_allowed_user="${SLACK_IDS%%,*}"
@@ -2898,11 +2898,12 @@ if echo "$sl_channel_proof" | grep -q '"ok":true' \
   else
     fail "M-S17b: fake Slack did not capture expected channel reply metadata: ${sl_message_capture:0:300}"
   fi
-  if [ "$sl_proof_kind" = "openclaw-private-helper" ] && [ "$sl_message_capture" = "OK" ]; then
+  if { [ "$sl_proof_kind" = "openclaw-private-helper" ] || [ "$sl_proof_kind" = "openclaw-pipeline-runtime" ]; } \
+    && [ "$sl_message_capture" = "OK" ]; then
     slack_openclaw_plugin_mock_send_ok=1
-    pass "M-S17c: installed OpenClaw Slack send helper drove the host-side fake Slack message"
+    pass "M-S17c: installed OpenClaw Slack inbound/send helper drove the host-side fake Slack message"
   else
-    fail "M-S17c: Slack proof did not use the installed OpenClaw Slack send helper (proof=${sl_proof_kind:-missing})"
+    fail "M-S17c: Slack proof did not use the installed OpenClaw Slack inbound/send helper (proof=${sl_proof_kind:-missing})"
   fi
   # M-S17d (#4752): a denied explicit @-mention prepares no command but must
   # still emit exactly one bounded sender-facing feedback action.
