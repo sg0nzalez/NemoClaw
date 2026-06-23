@@ -15,7 +15,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -35,20 +35,14 @@ import { ubuntuRepoDocker } from "../scenarios/matrix.ts";
 const ENVIRONMENT = ubuntuRepoDocker("cloud-openclaw");
 
 const SANDBOX_NAME = "e2e-openclaw-tui-corr";
-const REPO_ROOT = join(import.meta.dirname, "../../..");
 
-function readBundledOpenClawVersion(): string {
-  const dockerfile = readFileSync(join(REPO_ROOT, "Dockerfile.base"), "utf8");
-  const match = dockerfile.match(/^ARG OPENCLAW_VERSION=(\S+)\s*$/m);
-  expect(match?.[1], "could not parse OPENCLAW_VERSION from Dockerfile.base").toBeTruthy();
-  return match![1]!;
-}
-
-// Historical buggy builds were older than the post-fix regression guard; this
-// live guard asserts the fixed protocol/history contract stays stable on the
-// pinned OpenClaw carried by Dockerfile.base. Override via env for bisects.
+// The legacy bash script currently pins 2026.5.27 as the post-fix
+// regression-guard version for #2603 + #3145. Historical buggy builds
+// were older; this live guard asserts the fixed protocol/history contract
+// stays stable on the pinned OpenClaw carried by the retained bash lane.
+// Override via env so future pin bumps do not require a code edit.
 const EXPECTED_OPENCLAW_VERSION =
-  process.env.E2E_OPENCLAW_TUI_CORRELATION_PINNED_VERSION ?? readBundledOpenClawVersion();
+  process.env.E2E_OPENCLAW_TUI_CORRELATION_PINNED_VERSION ?? "2026.5.27";
 
 const LIVE_SCRIPT_NAME = "openclaw-issue2603-chat-correlation.cjs";
 const SANDBOX_GATEWAY_PORT = 18789;
@@ -508,8 +502,9 @@ test(
       sandboxName: SANDBOX_NAME,
     });
 
-    // Assertion: openclaw-version-pinned. If the sandbox installed a different
-    // version, the rest of the regression guard is not testing this checkout.
+    // Assertion: openclaw-version-pinned. The regression target only
+    // reproduces against the 2026.5.27 build; if the sandbox installed
+    // a different version, the rest of the test is meaningless.
     //
     // Every sandbox.* call must pass `env: buildAvailabilityProbeEnv()`:
     // ShellProbe.run spawns with an empty env when none is provided,

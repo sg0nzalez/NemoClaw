@@ -2844,21 +2844,11 @@ else
   fail "M-S16b: Unexpected response (status=$sl_app_canon_status): ${sl_app_canonical:0:200}"
 fi
 
-# M-S17: Slack channel @mention allowlist proof (#3729). When the installed
-# OpenClaw Slack package still exposes private test helpers, this verifies:
+# M-S17: Slack channel @mention allowlist proof (#3729). This runs inside the
+# sandbox, imports OpenClaw's installed Slack test API, and verifies:
 #   - the configured Slack user can prepare a channel app_mention
 #   - another user is denied by channels.*.users
 #   - sendMessageSlack posts back to the channel through the hermetic fake API
-# OpenClaw 2026.6.9 ships only the public runtime send API, so that package
-# shape falls back to the M-S17-runtime send/token-rewrite proof. Source
-# boundary: inbound @mention authorization lives behind OpenClaw's private
-# Slack ingress internals in this package shape. This intentionally does not
-# claim private @mention allowlist or denied-feedback coverage; remove the gap
-# when OpenClaw exposes a stable inbound Slack test/runtime facade, or when
-# NemoClaw has a black-box event harness for the installed Slack ingress path.
-# The static config assertions above still prove the allowlist is rendered, and
-# the private-helper and pipeline-runtime branches below keep the stronger
-# runtime proof for package shapes that expose an importable inbound surface.
 info "Running Slack channel @mention allowlist proof through installed OpenClaw..."
 sl_channel_proof=""
 sl_allowed_user="${SLACK_IDS%%,*}"
@@ -2869,20 +2859,6 @@ if [ "$fake_slack_ready" = "1" ] && [ -n "$sl_allowed_user" ]; then
 fi
 
 info "Slack channel @mention proof response: ${sl_channel_proof:0:500}"
-sl_proof_kind=$(printf '%s\n' "$sl_channel_proof" | python3 -c '
-import json
-import sys
-for line in sys.stdin:
-    line = line.strip()
-    if not line.startswith("{"):
-        continue
-    try:
-        value = json.loads(line)
-    except Exception:
-        continue
-    print(value.get("proof", ""))
-    break
-' 2>/dev/null || true)
 if echo "$sl_channel_proof" | grep -q '"ok":true' \
   && echo "$sl_channel_proof" | grep -q '"deniedPrepared":true'; then
   pass "M-S17: Slack channel @mention allowlist accepts configured user and denies another user"
@@ -2898,12 +2874,25 @@ if echo "$sl_channel_proof" | grep -q '"ok":true' \
   else
     fail "M-S17b: fake Slack did not capture expected channel reply metadata: ${sl_message_capture:0:300}"
   fi
-  if { [ "$sl_proof_kind" = "openclaw-private-helper" ] || [ "$sl_proof_kind" = "openclaw-pipeline-runtime" ]; } \
-    && [ "$sl_message_capture" = "OK" ]; then
+  sl_proof_kind=$(printf '%s\n' "$sl_channel_proof" | python3 -c '
+import json
+import sys
+for line in sys.stdin:
+    line = line.strip()
+    if not line.startswith("{"):
+        continue
+    try:
+        value = json.loads(line)
+    except Exception:
+        continue
+    print(value.get("proof", ""))
+    break
+' 2>/dev/null || true)
+  if [ "$sl_proof_kind" = "openclaw-private-helper" ] && [ "$sl_message_capture" = "OK" ]; then
     slack_openclaw_plugin_mock_send_ok=1
-    pass "M-S17c: installed OpenClaw Slack inbound/send helper drove the host-side fake Slack message"
+    pass "M-S17c: installed OpenClaw Slack send helper drove the host-side fake Slack message"
   else
-    fail "M-S17c: Slack proof did not use the installed OpenClaw Slack inbound/send helper (proof=${sl_proof_kind:-missing})"
+    fail "M-S17c: Slack proof did not use the installed OpenClaw Slack send helper (proof=${sl_proof_kind:-missing})"
   fi
   # M-S17d (#4752): a denied explicit @-mention prepares no command but must
   # still emit exactly one bounded sender-facing feedback action.
@@ -2913,25 +2902,6 @@ if echo "$sl_channel_proof" | grep -q '"ok":true' \
   else
     fail "M-S17d: denied Slack @mention did not send bounded sender feedback: ${sl_channel_proof:0:500}"
   fi
-elif echo "$sl_channel_proof" | grep -q '"ok":true' \
-  && [ "$sl_proof_kind" = "openclaw-runtime-api" ]; then
-  pass "M-S17-runtime: installed OpenClaw Slack runtime API posted through host fake Slack"
-  sl_post_capture=$(check_fake_slack_capture_token "/api/chat.postMessage" "$SLACK_TOKEN" || true)
-  if [ "$sl_post_capture" = "OK" ]; then
-    pass "M-S17-runtime-a: fake Slack saw host-side bot token for runtime API channel send"
-  else
-    fail "M-S17-runtime-a: fake Slack capture did not prove runtime API token rewrite: ${sl_post_capture:0:300}"
-  fi
-  sl_message_capture=$(check_fake_slack_capture_message "/api/chat.postMessage" "C0E2ESLACK" "NemoClaw Slack channel mention proof" || true)
-  if [ "$sl_message_capture" = "OK" ]; then
-    slack_openclaw_plugin_mock_send_ok=1
-    pass "M-S17-runtime-b: fake Slack captured runtime API channel/text metadata"
-    pass "M-S17-runtime-c: installed OpenClaw Slack send helper drove the host-side fake Slack message"
-  else
-    fail "M-S17-runtime-b: fake Slack did not capture expected runtime API channel send: ${sl_message_capture:0:300}"
-  fi
-  skip "M-S17: OpenClaw 2026.6.9 runtime API does not expose private @mention allowlist helpers"
-  skip "M-S17d: OpenClaw 2026.6.9 ships Slack runtime API but not private @mention test helpers"
 elif [ "$fake_slack_ready" != "1" ]; then
   skip "M-S17: fake Slack API was not ready"
 elif [ -z "$sl_allowed_user" ]; then

@@ -2,16 +2,9 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
-# Opt-in partial #4434 live regression guard for the OpenClaw version bump:
-#   openclaw tui must show a visible run-error line, and stop the active
-#   spinner, when the NVIDIA endpoint is unreachable from the sandbox.
-#
-# This is not the full #4434 expected-result gate for OpenClaw 2026.6.9:
-# upstream currently renders the synthetic iptables outage as
-# `run error: <cause>` plus a final `... | error` status line, but does not add
-# a gateway/upstream reporting layer or one-line recovery hint. Keep this script
-# scoped to the visible-error/status regression boundary until that upstream
-# output exists, then tighten the assertions to require the layer and hint.
+# Opt-in live repro for #4434:
+#   openclaw tui must show a visible error, and stop the active spinner, when
+#   the NVIDIA endpoint is unreachable from the sandbox.
 #
 # This mutates host firewall state. Run only on a Linux Docker host you control:
 #
@@ -30,10 +23,7 @@ CAPTURE_DIR="${NEMOCLAW_ISSUE_4434_CAPTURE_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/nem
 CAPTURE_FILE="${CAPTURE_DIR}/openclaw-tui-capture.log"
 PLAIN_CAPTURE_FILE="${CAPTURE_DIR}/openclaw-tui-capture.plain.log"
 TUI_TIMEOUT_SEC="${NEMOCLAW_ISSUE_4434_TUI_TIMEOUT_SEC:-180}"
-EXPECTED_OPENCLAW_VERSION="${NEMOCLAW_ISSUE_4434_OPENCLAW_VERSION:-$(sed -nE 's/^ARG OPENCLAW_VERSION=([^[:space:]]+).*/\1/p' "${SCRIPT_DIR}/../../Dockerfile.base" | head -n 1)}"
 VISIBLE_ERROR_RE="error|failed|timeout|timed out|unavailable|fetch failed|ETIMEDOUT|ECONN|upstream"
-TUI_RUN_ERROR_RE="run[[:space:]]+error:"
-TUI_ERROR_CAUSE_RE="run[[:space:]]+error:.*(${VISIBLE_ERROR_RE})"
 SPINNER_CONNECTED_RE="flibbertigibbeting|[0-9]+m[[:space:]][0-9]+s[[:space:]]*\\|[[:space:]]*connected"
 STATUS_LINE_RE="(connecting|gateway connected|connected|sending|running|flibbertigibbeting).*\\|[[:space:]]*(connected|error)"
 BLOCKED_IPS=("75.2.113.119" "99.83.136.103")
@@ -46,10 +36,6 @@ fail() {
   printf '[issue-4434] capture: %s\n' "$CAPTURE_FILE" >&2
   exit 1
 }
-
-if [ -z "$EXPECTED_OPENCLAW_VERSION" ]; then
-  fail "could not parse OPENCLAW_VERSION from ${SCRIPT_DIR}/../../Dockerfile.base"
-fi
 
 cleanup_firewall() {
   local ip
@@ -121,8 +107,8 @@ done
 
 openclaw_version="$(openshell sandbox exec --name "$SANDBOX_NAME" -- openclaw --version 2>&1 || true)"
 info "sandbox OpenClaw version: ${openclaw_version}"
-if ! grep -Fq "$EXPECTED_OPENCLAW_VERSION" <<<"$openclaw_version"; then
-  fail "expected sandbox OpenClaw ${EXPECTED_OPENCLAW_VERSION}"
+if ! grep -q "2026.5.27" <<<"$openclaw_version"; then
+  fail "expected sandbox OpenClaw 2026.5.27"
 fi
 
 status_log="${CAPTURE_DIR}/nemoclaw-status-before-block.log"
@@ -223,28 +209,21 @@ if ! grep -Eiq "$VISIBLE_ERROR_RE" "$PLAIN_CAPTURE_FILE"; then
   if grep -Eiq "$SPINNER_CONNECTED_RE" "$PLAIN_CAPTURE_FILE"; then
     fail "matched #4434 signature: spinner plus connected status with no visible error"
   fi
-  fail "partial #4434 guard did not surface a visible inference error before the timeout window"
-fi
-if ! grep -Eiq "$TUI_RUN_ERROR_RE" "$PLAIN_CAPTURE_FILE"; then
-  fail "partial #4434 guard did not include the upstream run-error line"
-fi
-if ! grep -Eiq "$TUI_ERROR_CAUSE_RE" "$PLAIN_CAPTURE_FILE"; then
-  fail "partial #4434 guard did not include a concrete unreachable-inference cause on the run-error line"
+  fail "TUI did not surface a visible inference error before the timeout window"
 fi
 if [ "$expect_rc" -ne 0 ]; then
   fail "expect harness exited ${expect_rc} even though an error-looking capture was found"
 fi
 last_status_line="$(grep -E "$STATUS_LINE_RE" "$PLAIN_CAPTURE_FILE" | tail -1 || true)"
 if [ -z "$last_status_line" ]; then
-  fail "partial #4434 guard did not include a recognizable final status line"
+  fail "TUI capture did not include a recognizable final status line"
 fi
 if ! grep -Eiq "\\|[[:space:]]*error\\b" <<<"$last_status_line"; then
   if grep -Eiq "$SPINNER_CONNECTED_RE" <<<"$last_status_line"; then
-    fail "partial #4434 guard still ends with active connected spinner after the visible error"
+    fail "TUI capture still ends with active connected spinner after the visible error"
   fi
-  fail "partial #4434 guard did not end with a visible error status after the failed run"
+  fail "TUI capture did not end with a visible error status after the failed run"
 fi
 
-info "PASS: partial #4434 guard surfaced a visible unreachable-inference run error and stopped the spinner"
-info "accepted upstream gap: OpenClaw ${EXPECTED_OPENCLAW_VERSION} does not emit a gateway/upstream layer or recovery hint for this synthetic iptables block"
+info "PASS: openclaw tui surfaced a visible unreachable-inference error and stopped the spinner"
 info "capture: ${PLAIN_CAPTURE_FILE}"

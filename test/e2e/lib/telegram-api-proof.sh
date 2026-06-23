@@ -115,9 +115,7 @@ function addPathWalk(candidates, seen, start) {
     if (!seen.has(current)) {
       seen.add(current);
       candidates.push(path.join(current, "node_modules/openclaw/dist/extensions/telegram/test-api.js"));
-      candidates.push(path.join(current, "node_modules/openclaw/dist/extensions/telegram/runtime-api.js"));
       candidates.push(path.join(current, "dist/extensions/telegram/test-api.js"));
-      candidates.push(path.join(current, "dist/extensions/telegram/runtime-api.js"));
     }
     const parent = path.dirname(current);
     if (parent === current) break;
@@ -138,16 +136,13 @@ function resolveTelegramTestApiPath() {
 
   for (const base of [process.cwd(), "/sandbox", "/usr/local/lib/node_modules", "/tmp/npm-global/lib/node_modules"]) {
     try {
-      const packageRoot = path.dirname(require.resolve("openclaw/package.json", { paths: [base] }));
-      add(path.join(packageRoot, "dist/extensions/telegram/test-api.js"));
-      add(path.join(packageRoot, "dist/extensions/telegram/runtime-api.js"));
+      add(path.join(path.dirname(require.resolve("openclaw/package.json", { paths: [base] })), "dist/extensions/telegram/test-api.js"));
     } catch {}
   }
 
   try {
     const globalRoot = execFileSync("npm", ["root", "-g"], { encoding: "utf8" }).trim();
     add(path.join(globalRoot, "openclaw/dist/extensions/telegram/test-api.js"));
-    add(path.join(globalRoot, "openclaw/dist/extensions/telegram/runtime-api.js"));
   } catch {}
 
   try {
@@ -163,13 +158,8 @@ function resolveTelegramTestApiPath() {
     if (searchRoots.length) {
       const discovered = execFileSync("find", [
         ...searchRoots,
-        "(",
         "-path",
         "*/node_modules/openclaw/dist/extensions/telegram/test-api.js",
-        "-o",
-        "-path",
-        "*/node_modules/openclaw/dist/extensions/telegram/runtime-api.js",
-        ")",
         "-print",
         "-quit",
       ], { encoding: "utf8" }).trim();
@@ -228,11 +218,11 @@ function requestFakeTelegram(endpoint, fields, token) {
 
 async function main() {
   const testApiPath = resolveTelegramTestApiPath();
-  if (!testApiPath) throw new Error("could not find installed OpenClaw Telegram test-api.js or runtime-api.js");
+  if (!testApiPath) throw new Error("could not find installed OpenClaw Telegram test-api.js");
 
   const { sendMessageTelegram } = await import(pathToFileURL(testApiPath).href);
   if (typeof sendMessageTelegram !== "function") {
-    throw new Error("installed Telegram API does not export sendMessageTelegram");
+    throw new Error("installed Telegram test API does not export sendMessageTelegram");
   }
 
   const cfg = JSON.parse(fs.readFileSync("/sandbox/.openclaw/openclaw.json", "utf8"));

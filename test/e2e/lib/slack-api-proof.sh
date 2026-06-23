@@ -24,23 +24,6 @@ cleanup_fake_slack_api() {
   fi
 }
 
-slack_proof_shell_quote() {
-  local value="$1"
-  printf "'"
-  printf '%s' "$value" | sed "s/'/'\\\\''/g"
-  printf "'"
-}
-
-slack_proof_validate_env_value() {
-  local label="$1"
-  local value="$2"
-  local pattern="$3"
-  if [ -z "$value" ] || [[ ! "$value" =~ ^${pattern}$ ]]; then
-    echo "Invalid Slack proof ${label}: value contains unsupported characters" >&2
-    return 1
-  fi
-}
-
 start_fake_slack_api() {
   local bot_token="$1"
   local app_token="$2"
@@ -131,12 +114,7 @@ run_fake_slack_api_node_request() {
   local path="$2"
   local authorization="$3"
   local host="${FAKE_SLACK_API_HOST:-host.openshell.internal}"
-  local quoted_host quoted_port quoted_path quoted_authorization
-  quoted_host="$(slack_proof_shell_quote "$host")"
-  quoted_port="$(slack_proof_shell_quote "$port")"
-  quoted_path="$(slack_proof_shell_quote "$path")"
-  quoted_authorization="$(slack_proof_shell_quote "$authorization")"
-  sandbox_exec_stdin "FAKE_SLACK_API_HOST=$quoted_host FAKE_SLACK_API_PORT=$quoted_port FAKE_SLACK_API_PATH=$quoted_path FAKE_SLACK_API_AUTH=$quoted_authorization node - 2>&1" <<'NODE'
+  sandbox_exec_stdin "FAKE_SLACK_API_HOST='$host' FAKE_SLACK_API_PORT='$port' FAKE_SLACK_API_PATH='$path' FAKE_SLACK_API_AUTH='$authorization' node - 2>&1" <<'NODE'
 const http = require("http");
 
 const authorization = process.env.FAKE_SLACK_API_AUTH || "";
@@ -181,16 +159,7 @@ run_fake_slack_channel_mention_proof() {
   local allowed_user="$2"
   local denied_user="$3"
   local host="${FAKE_SLACK_API_HOST:-host.openshell.internal}"
-  slack_proof_validate_env_value "host" "$host" '[A-Za-z0-9._-]+' || return 1
-  slack_proof_validate_env_value "port" "$port" '[0-9]+' || return 1
-  slack_proof_validate_env_value "allowed user" "$allowed_user" '[A-Za-z0-9_-]+' || return 1
-  slack_proof_validate_env_value "denied user" "$denied_user" '[A-Za-z0-9_-]+' || return 1
-  local quoted_host quoted_port quoted_allowed_user quoted_denied_user
-  quoted_host="$(slack_proof_shell_quote "$host")"
-  quoted_port="$(slack_proof_shell_quote "$port")"
-  quoted_allowed_user="$(slack_proof_shell_quote "$allowed_user")"
-  quoted_denied_user="$(slack_proof_shell_quote "$denied_user")"
-  sandbox_exec_stdin "FAKE_SLACK_API_HOST=$quoted_host FAKE_SLACK_API_PORT=$quoted_port SLACK_ALLOWED_USER=$quoted_allowed_user SLACK_DENIED_USER=$quoted_denied_user bash -lc '. /tmp/nemoclaw-proxy-env.sh 2>/dev/null || true; exec node --preserve-symlinks --input-type=module - 2>&1'" <<'NODE'
+  sandbox_exec_stdin "FAKE_SLACK_API_HOST='$host' FAKE_SLACK_API_PORT='$port' SLACK_ALLOWED_USER='$allowed_user' SLACK_DENIED_USER='$denied_user' node --preserve-symlinks --input-type=module - 2>&1" <<'NODE'
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import http from "node:http";
@@ -236,15 +205,6 @@ function resolveOpenClawSlackApiLocation() {
       current = parent;
     }
   };
-  const externalLocation = (candidate, apiKind, apiPath) => {
-    console.error(`OpenClaw Slack external ${apiKind} root: ${candidate}`);
-    if (openclawRoot) console.error(`OpenClaw Slack external peer OpenClaw root: ${openclawRoot}`);
-    return { kind: "external", apiKind, root: candidate, apiPath, openclawRoot };
-  };
-  const coreLocation = (candidate, apiKind) => {
-    console.error(`OpenClaw Slack core ${apiKind} root: ${candidate}`);
-    return { kind: "core", apiKind, root: candidate };
-  };
 
   if (process.env.OPENCLAW_SLACK_PACKAGE_ROOT) {
     addExternalCandidate(process.env.OPENCLAW_SLACK_PACKAGE_ROOT);
@@ -285,22 +245,10 @@ function resolveOpenClawSlackApiLocation() {
           ...searchRoots,
           "(",
           "-path",
-	          "*/node_modules/@openclaw/slack/dist/test-api.js",
-	          "-o",
-	          "-path",
-	          "*/node_modules/@openclaw/slack/dist/pipeline.runtime-*.js",
-	          "-o",
-	          "-path",
-	          "*/node_modules/@openclaw/slack/dist/runtime-api.js",
-	          "-o",
-	          "-path",
-	          "*/node_modules/openclaw/dist/extensions/slack/test-api.js",
-	          "-o",
-	          "-path",
-	          "*/node_modules/openclaw/dist/extensions/slack/pipeline.runtime-*.js",
-	          "-o",
-	          "-path",
-	          "*/node_modules/openclaw/dist/extensions/slack/runtime-api.js",
+          "*/node_modules/@openclaw/slack/dist/test-api.js",
+          "-o",
+          "-path",
+          "*/node_modules/openclaw/dist/extensions/slack/test-api.js",
           ")",
           "-print",
           "-quit",
@@ -308,14 +256,10 @@ function resolveOpenClawSlackApiLocation() {
           encoding: "utf8",
         }).trim()
       : "";
-	    if (discovered.endsWith("/node_modules/@openclaw/slack/dist/test-api.js")) {
-	      addExternalCandidate(path.resolve(discovered, "../.."));
-	    } else if (discovered.includes("/node_modules/@openclaw/slack/dist/pipeline.runtime-")) {
-	      addExternalCandidate(path.resolve(discovered, "../.."));
-	    } else if (discovered.endsWith("/node_modules/@openclaw/slack/dist/runtime-api.js")) {
-	      addExternalCandidate(path.resolve(discovered, "../.."));
-	    } else if (discovered) {
-	      addCoreCandidate(path.resolve(discovered, "../../../.."));
+    if (discovered.endsWith("/node_modules/@openclaw/slack/dist/test-api.js")) {
+      addExternalCandidate(path.resolve(discovered, "../.."));
+    } else if (discovered) {
+      addCoreCandidate(path.resolve(discovered, "../../../.."));
     }
   } catch {}
   addExternalCandidate("/usr/local/lib/node_modules/@openclaw/slack");
@@ -323,48 +267,25 @@ function resolveOpenClawSlackApiLocation() {
   addCoreCandidate("/usr/local/lib/node_modules/openclaw");
   addCoreCandidate("/tmp/npm-global/lib/node_modules/openclaw");
 
-	  const openclawRoot = coreCandidates.find((candidate) =>
-	    fs.existsSync(path.join(candidate, "package.json")) &&
-	    fs.existsSync(path.join(candidate, "dist/plugin-sdk/temp-path.js"))
-	  );
+  const openclawRoot = coreCandidates.find((candidate) =>
+    fs.existsSync(path.join(candidate, "package.json")) &&
+    fs.existsSync(path.join(candidate, "dist/plugin-sdk/temp-path.js"))
+  );
 
-	  const findPipelineRuntimePath = (slackDistDir) => {
-	    try {
-	      return fs.readdirSync(slackDistDir)
-	        .filter((entry) => /^pipeline\.runtime-.*\.js$/.test(entry))
-	        .sort()
-	        .map((entry) => path.join(slackDistDir, entry))[0] ?? null;
-	    } catch {
-	      return null;
-	    }
-	  };
-
-	  for (const candidate of externalCandidates) {
-	    const testApiPath = path.join(candidate, "dist/test-api.js");
-	    if (fs.existsSync(testApiPath)) {
-	      return externalLocation(candidate, "test-api", testApiPath);
-	    }
-	    const pipelineRuntimePath = findPipelineRuntimePath(path.join(candidate, "dist"));
-	    if (pipelineRuntimePath) {
-	      return externalLocation(candidate, "pipeline-runtime", pipelineRuntimePath);
-	    }
-	    const runtimeApiPath = path.join(candidate, "dist/runtime-api.js");
-	    if (fs.existsSync(runtimeApiPath)) {
-	      return externalLocation(candidate, "runtime-api", runtimeApiPath);
-	    }
-	  }
-	  for (const candidate of coreCandidates) {
-	    const slackDistDir = path.join(candidate, "dist/extensions/slack");
-	    if (fs.existsSync(path.join(slackDistDir, "test-api.js"))) {
-	      return coreLocation(candidate, "test-api");
-	    }
-	    if (findPipelineRuntimePath(slackDistDir)) {
-	      return coreLocation(candidate, "pipeline-runtime");
-	    }
-	    if (fs.existsSync(path.join(slackDistDir, "runtime-api.js"))) {
-	      return coreLocation(candidate, "runtime-api");
-	    }
-	  }
+  for (const candidate of externalCandidates) {
+    const testApiPath = path.join(candidate, "dist/test-api.js");
+    if (fs.existsSync(testApiPath)) {
+      console.error(`OpenClaw Slack external test API root: ${candidate}`);
+      if (openclawRoot) console.error(`OpenClaw Slack external peer OpenClaw root: ${openclawRoot}`);
+      return { kind: "external", root: candidate, testApiPath, openclawRoot };
+    }
+  }
+  for (const candidate of coreCandidates) {
+    if (fs.existsSync(path.join(candidate, "dist/extensions/slack/test-api.js"))) {
+      console.error(`OpenClaw Slack core test API root: ${candidate}`);
+      return { kind: "core", root: candidate };
+    }
+  }
   return null;
 }
 
@@ -499,30 +420,7 @@ function createExternalOpenClawSlackProofRoot(location) {
   return slackProofRoot;
 }
 
-async function importSlackProofModulesFromDir(slackDir, apiKind) {
-  const findPipelineRuntimePath = () =>
-    fs.readdirSync(slackDir)
-      .filter((entry) => /^pipeline\.runtime-.*\.js$/.test(entry))
-      .sort()
-      .map((entry) => path.join(slackDir, entry))[0];
-  if (apiKind === "pipeline-runtime") {
-    const [pipelineModule, runtimeModule] = await Promise.all([
-      import(pathToFileURL(findPipelineRuntimePath()).href),
-      import(pathToFileURL(path.join(slackDir, "runtime-api.js")).href),
-    ]);
-    return {
-      proofApiKind: "pipeline-runtime",
-      prepareSlackMessage: pipelineModule.prepareSlackMessage,
-      sendMessageSlack: runtimeModule.sendMessageSlack,
-    };
-  }
-  if (apiKind === "runtime-api") {
-    const runtimeModule = await import(pathToFileURL(path.join(slackDir, "runtime-api.js")).href);
-    return {
-      proofApiKind: "runtime-api",
-      sendMessageSlack: runtimeModule.sendMessageSlack,
-    };
-  }
+async function importSlackProofModulesFromDir(slackDir) {
   const testApiSource = fs.readFileSync(path.join(slackDir, "test-api.js"), "utf8");
   const helperPath = resolveSlackTestApiImport(testApiSource, "createInboundSlackTestContext");
   const preparePath = resolveSlackTestApiImport(testApiSource, "prepareSlackMessage");
@@ -533,7 +431,6 @@ async function importSlackProofModulesFromDir(slackDir, apiKind) {
     import(pathToFileURL(path.join(slackDir, sendPath)).href),
   ]);
   return {
-    proofApiKind: "test-api",
     createInboundSlackTestContext: helperModule.createInboundSlackTestContext ?? helperModule.t,
     prepareSlackMessage: prepareModule.prepareSlackMessage ?? prepareModule.t,
     sendMessageSlack: sendModule.sendMessageSlack ?? sendModule.t,
@@ -543,66 +440,11 @@ async function importSlackProofModulesFromDir(slackDir, apiKind) {
 async function importOpenClawSlackProofApi(location) {
   if (location.kind === "external") {
     const proofRoot = createExternalOpenClawSlackProofRoot(location);
-    return importSlackProofModulesFromDir(path.join(proofRoot, "dist"), location.apiKind);
+    return importSlackProofModulesFromDir(path.join(proofRoot, "dist"));
   }
 
   const proofRoot = createOpenClawSlackProofRoot(location.root);
-  return importSlackProofModulesFromDir(path.join(proofRoot, "dist/extensions/slack"), location.apiKind);
-}
-
-function createSlackPipelineProofContext(appClient) {
-  const channelsConfig = slackAccount.channels ?? {};
-  const logger = {
-    debug: () => {},
-    error: () => {},
-    info: () => {},
-    warn: () => {},
-  };
-  return {
-    cfg,
-    runtime: {},
-    app: { client: appClient },
-    logger,
-    botToken: slackAccount.botToken,
-    botUserId: "B1",
-    botId: "B1",
-    teamId: "T1",
-    apiAppId: "A1",
-    channelsConfig,
-    channelsConfigKeys: Object.keys(channelsConfig),
-    defaultRequireMention: slackAccount.requireMention ?? true,
-    allowFrom: slackAccount.allowFrom ?? [],
-    dmPolicy: slackAccount.dmPolicy,
-    allowNameMatching: false,
-    threadRequireExplicitMention: false,
-    threadInheritParent: false,
-    threadHistoryScope: "channel",
-    channelHistories: new Map(),
-    historyLimit: 0,
-    dmHistoryLimit: 0,
-    mediaMaxBytes: 0,
-    removeAckAfterReply: false,
-    ackReactionScope: "mention",
-    getSlackAssistantThreadContext: () => undefined,
-    saveSlackAssistantThreadContext: () => {},
-    resolveChannelName: async (channelId) => ({
-      id: channelId,
-      name: "nemoclaw-test",
-      type: "channel",
-      is_channel: true,
-    }),
-    resolveUserName: async (userId) => ({
-      id: userId,
-      name: userId,
-      profile: { display_name: userId, real_name: userId },
-    }),
-    isChannelAllowed: ({ channelId, channelName }) => {
-      const exact = channelsConfig[channelId];
-      const named = channelName ? channelsConfig[channelName] ?? channelsConfig[`#${channelName}`] : undefined;
-      const wildcardConfig = channelsConfig["*"];
-      return (exact ?? named ?? wildcardConfig)?.enabled !== false;
-    },
-  };
+  return importSlackProofModulesFromDir(path.join(proofRoot, "dist/extensions/slack"));
 }
 
 function postForm(pathname, fields, authorization) {
@@ -694,188 +536,73 @@ async function postChannelProofMessage() {
 async function runOpenClawPrivateProof(location) {
   const slackApi = await importOpenClawSlackProofApi(location);
   const { createInboundSlackTestContext, prepareSlackMessage, sendMessageSlack } = slackApi;
-  if (typeof sendMessageSlack !== "function") {
-    fail("installed OpenClaw Slack API does not expose sendMessageSlack");
-  }
-	  const fakeClient = {
-	    chat: {
-	      postMessage: async (payload) => {
-        const response = await postForm(
-          "/api/chat.postMessage",
-          {
-            token,
-            channel: payload.channel || "",
-            text: payload.text || "",
-            ...(payload.thread_ts ? { thread_ts: payload.thread_ts } : {}),
-            ...(payload.blocks ? { blocks: JSON.stringify(payload.blocks) } : {}),
-          },
-          `Bearer ${token}`,
-        );
-        if (response.statusCode !== 200 || response.body?.ok !== true) {
-          throw new Error(`fake Slack chat.postMessage failed: ${response.statusCode} ${JSON.stringify(response.body)}`);
-        }
-        return response.body;
-	      },
-	    },
-	  };
-	  // Records sender-facing feedback actions (chat.postEphemeral / chat.postMessage)
-	  // so the proof can assert that a denied explicit @-mention still produces
-	  // bounded feedback without preparing a command (NemoClaw #4752).
-	  const senderFeedbackCalls = [];
-	  const appClient = {
-	    assistant: {
-	      threads: {
-	        setStatus: async () => ({ ok: true }),
-	      },
-	    },
-	    conversations: {
-	      info: async () => ({
-	        ok: true,
-	        channel: {
-	          id: channelId,
-	          name: "nemoclaw-test",
-	          is_channel: true,
-	        },
-	      }),
-	      open: async ({ users }) => ({
-	        ok: true,
-	        channel: { id: `D${users}` },
-	      }),
-	    },
-	    reactions: {
-	      add: async () => ({ ok: true }),
-	      remove: async () => ({ ok: true }),
-	    },
-	    users: {
-	      info: async ({ user }) => ({
-	        ok: true,
-	        user: {
-	          id: user,
-	          name: user,
-	          profile: { display_name: user, real_name: user },
-	        },
-	      }),
-	    },
-	    chat: {
-	      postEphemeral: async (payload) => {
-	        senderFeedbackCalls.push({
-	          method: "chat.postEphemeral",
-	          channel: payload.channel,
-	          user: payload.user,
-	          text: payload.text,
-	        });
-	        return { ok: true, message_ts: "1710000000.000200" };
-	      },
-	      postMessage: async (payload) => {
-	        senderFeedbackCalls.push({
-	          method: "chat.postMessage",
-	          channel: payload.channel,
-	          text: payload.text,
-	        });
-	        return { ok: true, ts: "1710000000.000201" };
-	      },
-	    },
-	  };
-	  if (
-	    typeof createInboundSlackTestContext !== "function" ||
-	    typeof prepareSlackMessage !== "function"
+  if (
+    typeof createInboundSlackTestContext !== "function" ||
+    typeof prepareSlackMessage !== "function" ||
+    typeof sendMessageSlack !== "function"
   ) {
-    if (slackApi.proofApiKind === "pipeline-runtime" && typeof prepareSlackMessage === "function") {
-      const ctx = createSlackPipelineProofContext(appClient);
-      const account = {
-        accountId: "default",
-        botToken: slackAccount.botToken,
-        appToken: slackAccount.appToken,
-        config: slackAccount,
-      };
-      const allowedPrepared = await prepareSlackMessage({
-        ctx,
-        account,
-        message: { ...baseMessage, user: allowedUser, ts: "1710000000.000100" },
-        opts: { source: "app_mention", wasMentioned: true },
-      });
-      if (!allowedPrepared) fail("allowed Slack app_mention did not prepare");
-      if (allowedPrepared.replyTarget !== `channel:${channelId}`) {
-        fail(`unexpected allowed replyTarget: ${allowedPrepared.replyTarget}`);
-      }
-      if (senderFeedbackCalls.length !== 0) {
-        fail(`allowed Slack app_mention unexpectedly produced sender feedback: ${JSON.stringify(senderFeedbackCalls)}`);
-      }
-
-      senderFeedbackCalls.length = 0;
-      const deniedPrepared = await prepareSlackMessage({
-        ctx,
-        account,
-        message: { ...baseMessage, user: deniedUser, ts: "1710000000.000101" },
-        opts: { source: "app_mention", wasMentioned: true },
-      });
-      if (deniedPrepared !== null) fail("denied Slack app_mention unexpectedly prepared");
-      if (senderFeedbackCalls.length !== 1) {
-        fail(
-          `denied Slack app_mention expected exactly one sender feedback action, got ${senderFeedbackCalls.length}: ${JSON.stringify(senderFeedbackCalls)}`,
-        );
-      }
-      const deniedFeedback = senderFeedbackCalls[0];
-      if (deniedFeedback.method !== "chat.postEphemeral") {
-        fail(`denied Slack app_mention expected an ephemeral feedback action, got ${deniedFeedback.method}`);
-      }
-      if (deniedFeedback.channel !== channelId) {
-        fail(`denied Slack feedback targeted unexpected channel: ${deniedFeedback.channel}`);
-      }
-      if (deniedFeedback.user !== deniedUser) {
-        fail(`denied Slack feedback addressed unexpected user: ${deniedFeedback.user}`);
-      }
-      const deniedFeedbackText = deniedFeedback.text ?? "";
-      if (!deniedFeedbackText) {
-        fail("denied Slack feedback message text was empty");
-      }
-      if (deniedFeedbackText.includes(allowedUser) || /allow\s*list|allowlist|allowed users/i.test(deniedFeedbackText)) {
-        fail(`denied Slack feedback leaked allowlist details: ${deniedFeedbackText}`);
-      }
-
-      const sendResult = await sendMessageSlack(allowedPrepared.replyTarget, proofText, {
-        cfg,
-        token,
-        client: fakeClient,
-        accountId: "default",
-      });
-      if (sendResult.channelId !== channelId) {
-        fail(`sendMessageSlack returned unexpected channelId: ${sendResult.channelId}`);
-      }
-      return {
-        proof: "openclaw-pipeline-runtime",
-        allowedReplyTarget: allowedPrepared.replyTarget,
-        deniedPrepared: deniedPrepared === null,
-        deniedFeedbackMethod: deniedFeedback.method,
-        deniedFeedbackCount: senderFeedbackCalls.length,
-        messageId: sendResult.messageId,
-        channelId: sendResult.channelId,
-      };
-    }
-    // OpenClaw 2026.6.9 exposes only the public runtime send helper for Slack.
-    // Source boundary: the missing inbound helpers live inside OpenClaw's
-    // package-private Slack ingress implementation, so this fallback must not
-    // fabricate @mention authorization coverage. Remove this branch once
-    // OpenClaw publishes a stable inbound Slack test/runtime facade, or once
-    // NemoClaw drives the installed Slack ingress path as a black-box event.
-    const sendResult = await sendMessageSlack(`channel:${channelId}`, proofText, {
-      cfg,
-      token,
-      client: fakeClient,
-      accountId: "default",
-    });
-    if (sendResult.channelId !== channelId) {
-      fail(`sendMessageSlack returned unexpected channelId: ${sendResult.channelId}`);
-    }
-    return {
-      proof: "openclaw-runtime-api",
-      allowedReplyTarget: `channel:${channelId}`,
-      privateMentionHelpers: false,
-      messageId: sendResult.messageId,
-      channelId: sendResult.channelId,
-    };
+    fail("installed OpenClaw Slack test API does not expose the required proof helpers");
   }
-	  const ctx = createInboundSlackTestContext({
+  // Records sender-facing feedback actions (chat.postEphemeral / chat.postMessage)
+  // so the proof can assert that a denied explicit @-mention still produces
+  // bounded feedback without preparing a command (NemoClaw #4752).
+  const senderFeedbackCalls = [];
+  const appClient = {
+    assistant: {
+      threads: {
+        setStatus: async () => ({ ok: true }),
+      },
+    },
+    conversations: {
+      info: async () => ({
+        ok: true,
+        channel: {
+          id: channelId,
+          name: "nemoclaw-test",
+          is_channel: true,
+        },
+      }),
+      open: async ({ users }) => ({
+        ok: true,
+        channel: { id: `D${users}` },
+      }),
+    },
+    reactions: {
+      add: async () => ({ ok: true }),
+      remove: async () => ({ ok: true }),
+    },
+    users: {
+      info: async ({ user }) => ({
+        ok: true,
+        user: {
+          id: user,
+          name: user,
+          profile: { display_name: user, real_name: user },
+        },
+      }),
+    },
+    chat: {
+      postEphemeral: async (payload) => {
+        senderFeedbackCalls.push({
+          method: "chat.postEphemeral",
+          channel: payload.channel,
+          user: payload.user,
+          text: payload.text,
+        });
+        return { ok: true, message_ts: "1710000000.000200" };
+      },
+      postMessage: async (payload) => {
+        senderFeedbackCalls.push({
+          method: "chat.postMessage",
+          channel: payload.channel,
+          text: payload.text,
+        });
+        return { ok: true, ts: "1710000000.000201" };
+      },
+    },
+  };
+
+  const ctx = createInboundSlackTestContext({
     cfg,
     appClient,
     channelsConfig: slackAccount.channels,
@@ -941,6 +668,28 @@ async function runOpenClawPrivateProof(location) {
   if (deniedFeedbackText.includes(allowedUser) || /allow\s*list|allowlist|allowed users/i.test(deniedFeedbackText)) {
     fail(`denied Slack feedback leaked allowlist details: ${deniedFeedbackText}`);
   }
+
+  const fakeClient = {
+    chat: {
+      postMessage: async (payload) => {
+        const response = await postForm(
+          "/api/chat.postMessage",
+          {
+            token,
+            channel: payload.channel || "",
+            text: payload.text || "",
+            ...(payload.thread_ts ? { thread_ts: payload.thread_ts } : {}),
+            ...(payload.blocks ? { blocks: JSON.stringify(payload.blocks) } : {}),
+          },
+          `Bearer ${token}`,
+        );
+        if (response.statusCode !== 200 || response.body?.ok !== true) {
+          throw new Error(`fake Slack chat.postMessage failed: ${response.statusCode} ${JSON.stringify(response.body)}`);
+        }
+        return response.body;
+      },
+    },
+  };
 
   const sendResult = await sendMessageSlack(allowedPrepared.replyTarget, proofText, {
     cfg,
