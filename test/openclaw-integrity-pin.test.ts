@@ -130,9 +130,7 @@ describe("OpenClaw npm integrity pins", () => {
     expect(reviewNote).toContain("@tencent-weixin/openclaw-weixin@2.4.3");
     expect(reviewNote).toContain(PINNED_WECHAT_PLUGIN_INTEGRITY);
     expect(reviewNote).toContain("each reviewed npm plugin registry integrity");
-    expect(reviewNote).toContain(
-      "openclaw@2026.6.9 @zed-industries/codex-acp@0.11.1",
-    );
+    expect(reviewNote).toContain("openclaw@2026.6.9 @zed-industries/codex-acp@0.11.1");
     expect(reviewNote).toContain("`0` high");
     expect(reviewNote).toContain("`0` critical");
     expect(reviewNote).toContain("`313` total dependencies");
