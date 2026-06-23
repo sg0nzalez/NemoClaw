@@ -745,13 +745,15 @@ export async function rebuildSandbox(
       s.failure = null;
       s.lastCompletedStep = "gateway";
       s.lastStepStarted = "gateway";
-      for (const stepName of rewindStepNames) {
-        const step = s.steps[stepName];
-        if (!step) continue;
-        step.status = "pending";
-        step.startedAt = null;
-        step.completedAt = null;
-        step.error = null;
+      if (s.steps) {
+        for (const stepName of rewindStepNames) {
+          const step = s.steps[stepName];
+          if (!step) continue;
+          step.status = "pending";
+          step.startedAt = null;
+          step.completedAt = null;
+          step.error = null;
+        }
       }
       if (machine?.state !== "complete") {
         s.machine = {
