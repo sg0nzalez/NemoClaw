@@ -9,9 +9,12 @@ import path from "node:path";
 import { DASHBOARD_PORT } from "../core/ports";
 import { ROOT } from "../runner";
 import { type AgentDashboardUi, readDashboardUi } from "./dashboard-ui";
+import { readAgentRuntime, type AgentRuntime } from "./runtime-manifest";
 import { type AgentWebAuth, readWebAuth } from "./web-auth";
 
+export type { AgentRuntime, AgentRuntimeKind } from "./runtime-manifest";
 export type { AgentWebAuth, AgentWebAuthMethod } from "./web-auth";
+export { getAgentRuntimeKind, isTerminalAgent } from "./runtime-manifest";
 
 export const AGENTS_DIR = path.join(ROOT, "agents");
 
@@ -73,6 +76,7 @@ export interface AgentDefinition {
   version_command?: string;
   expected_version?: string;
   gateway_command?: string;
+  runtime?: AgentRuntime;
   device_pairing?: boolean;
   phone_home_hosts?: string[];
   forward_ports?: number[];
@@ -86,7 +90,7 @@ export interface AgentDefinition {
   agentDir: string;
   manifestPath: string;
   readonly displayName: string;
-  readonly healthProbe: AgentHealthProbe;
+  readonly healthProbe: AgentHealthProbe | null;
   readonly forwardPort: number;
   readonly dashboard: AgentDashboard;
   readonly webAuth: AgentWebAuth;
@@ -376,6 +380,7 @@ export function loadAgent(name: string): AgentDefinition {
   const versionCommand = readString(raw, "version_command");
   const expectedVersion = readString(raw, "expected_version");
   const gatewayCommand = readString(raw, "gateway_command");
+  const runtime = readAgentRuntime(raw);
   const forwardPorts = readPortArray(raw, "forward_ports");
   const dashboard = readDashboard(raw);
   const webAuth = readWebAuth(raw);
@@ -398,6 +403,7 @@ export function loadAgent(name: string): AgentDefinition {
     version_command: versionCommand,
     expected_version: expectedVersion,
     gateway_command: gatewayCommand,
+    runtime,
     device_pairing: readBoolean(raw, "device_pairing"),
     phone_home_hosts: phoneHomeHosts,
     forward_ports: forwardPorts,
@@ -415,7 +421,10 @@ export function loadAgent(name: string): AgentDefinition {
       return displayName ?? manifestName;
     },
 
-    get healthProbe(): AgentHealthProbe {
+    get healthProbe(): AgentHealthProbe | null {
+      if (runtime.kind === "terminal" && !healthProbe) {
+        return null;
+      }
       return (
         healthProbe ?? {
           url: `http://localhost:${String(DASHBOARD_PORT)}/`,
@@ -426,6 +435,9 @@ export function loadAgent(name: string): AgentDefinition {
     },
 
     get forwardPort(): number {
+      if (runtime.kind === "terminal" && !forwardPorts?.[0]) {
+        return 0;
+      }
       return forwardPorts?.[0] ?? DASHBOARD_PORT;
     },
 
