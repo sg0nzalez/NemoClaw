@@ -312,8 +312,7 @@ describe("MessagingSetupApplier", () => {
     }> = [];
     const runOpenshell: MessagingOpenShellRunner = (args, options) => {
       calls.push({ args, env: options?.env });
-      if (args[0] === "provider" && args[1] === "get") return { status: 1 };
-      return { status: 0 };
+      return { status: args[0] === "provider" && args[1] === "get" ? 1 : 0 };
     };
 
     const result = MessagingSetupApplier.applyCredentialsAtOpenShell(plan, {

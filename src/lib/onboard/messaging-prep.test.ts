@@ -10,6 +10,16 @@ import {
 } from "../../../dist/lib/onboard/messaging-prep";
 import { listChannels } from "../../../dist/lib/sandbox/channels";
 
+const CHANNEL_BY_ENV_KEY: Readonly<Record<string, string>> = {
+  DISCORD_BOT_TOKEN: "discord",
+  SLACK_BOT_TOKEN: "slack",
+  SLACK_APP_TOKEN: "slack",
+  TELEGRAM_BOT_TOKEN: "telegram",
+  WECHAT_BOT_TOKEN: "wechat",
+  WECOM_BOT_ID: "wecom",
+  WECOM_SECRET: "wecom",
+};
+
 function normalizeCredentialValue(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -28,16 +38,7 @@ function createInput(
     getCredential: () => null,
     normalizeCredentialValue,
     registerExtraPlaceholderProviders: vi.fn(() => []),
-    getMessagingChannelForEnvKey: (envKey) => {
-      if (envKey === "DISCORD_BOT_TOKEN") return "discord";
-      if (envKey === "SLACK_BOT_TOKEN") return "slack";
-      if (envKey === "SLACK_APP_TOKEN") return "slack";
-      if (envKey === "TELEGRAM_BOT_TOKEN") return "telegram";
-      if (envKey === "WECHAT_BOT_TOKEN") return "wechat";
-      if (envKey === "WECOM_BOT_ID") return "wecom";
-      if (envKey === "WECOM_SECRET") return "wecom";
-      return null;
-    },
+    getMessagingChannelForEnvKey: (envKey) => CHANNEL_BY_ENV_KEY[envKey] ?? null,
     providerExistsInGateway: () => false,
     ...overrides,
   };
