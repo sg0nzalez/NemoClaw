@@ -177,11 +177,13 @@ function expectOpenClawRuntimeVisibility(
   configKeys: readonly string[],
   logPatterns: readonly string[],
   channelName = configKeys[0],
+  configShape?: "accounts" | "enabled-flag",
 ): void {
   expect(manifest.runtime?.openclaw?.channelName).toBe(channelName);
   expect(manifest.runtime?.openclaw?.visibility).toEqual({
     configKeys,
     logPatterns,
+    ...(configShape ? { configShape } : {}),
   });
 }
 
@@ -695,7 +697,13 @@ describe("built-in channel manifests", () => {
     });
     expectTokenPasteEnrollHook(wecomManifest, ["botId", "secret"]);
     expectConfigPromptEnrollHook(wecomManifest, ["allowedUsers", "dmPolicy"]);
-    expectOpenClawRuntimeVisibility(wecomManifest, ["wecom"], ["wecom", "WeCom"]);
+    expectOpenClawRuntimeVisibility(
+      wecomManifest,
+      ["wecom"],
+      ["wecom", "WeCom"],
+      "wecom",
+      "enabled-flag",
+    );
   });
 
   it("declares WhatsApp as in-sandbox QR with optional allowlist config", () => {
