@@ -254,21 +254,54 @@ describe("ManifestCompiler", () => {
     expect(plan.buildSteps).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
+          channelId: "discord",
           kind: "package-install",
-          value: {
+          value: expect.objectContaining({
+            integrityByVersion: {
+              "2026.6.9":
+                "sha512-esFhwYW0nrFQvBhkPeK/1qmvumlVAY8ddhYBt7geIYLlBriwPJRwtnVLLfp0n1LbS0/XVZ0ORqlvkWq8Vv61vg==",
+            },
             manager: "openclaw-plugin",
             spec: "npm:@openclaw/discord@{{openclaw.version}}",
             pin: true,
-          },
+          }),
         }),
         expect.objectContaining({
           channelId: "wechat",
           kind: "package-install",
-          value: {
+          value: expect.objectContaining({
+            integrity:
+              "sha512-dPQbidUNWigC6V10vGW4i+GLH09x+6zUhafZRjuxkJ9GDu8o62WBsnUTojp4KqUH756hz+t2v9khiCRSi0dBDw==",
             manager: "openclaw-plugin",
             spec: "npm:@tencent-weixin/openclaw-weixin@2.4.3",
             pin: true,
-          },
+          }),
+        }),
+        expect.objectContaining({
+          channelId: "slack",
+          kind: "package-install",
+          value: expect.objectContaining({
+            integrityByVersion: {
+              "2026.6.9":
+                "sha512-JZHc0L3s6s+yBsWowZtE/DWZJOuy4lTE6uTuUbF5QNjUvQQUlCHMFrwPycrXLesVq1il5yAvo82VbERRsIzgxQ==",
+            },
+            manager: "openclaw-plugin",
+            spec: "npm:@openclaw/slack@{{openclaw.version}}",
+            pin: true,
+          }),
+        }),
+        expect.objectContaining({
+          channelId: "whatsapp",
+          kind: "package-install",
+          value: expect.objectContaining({
+            integrityByVersion: {
+              "2026.6.9":
+                "sha512-HWz9CryGcSk5ork03DlESVlRcDBnwuXPEKgqdSz/Qt0OnQ2Z1wqNGpwVlAqngvDQDH2AzkNXWuTu2M0C16R8vA==",
+            },
+            manager: "openclaw-plugin",
+            spec: "npm:@openclaw/whatsapp@{{openclaw.version}}",
+            pin: true,
+          }),
         }),
       ]),
     );
