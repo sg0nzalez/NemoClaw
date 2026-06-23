@@ -48,6 +48,7 @@ export interface OpenClawRuntimeChannelMetadata {
   readonly channelId: string;
   readonly configKeys: readonly string[];
   readonly logPatterns: readonly string[];
+  readonly configShape: "accounts" | "enabled-flag";
 }
 
 export interface MessagingPackageInstallMetadata {
@@ -292,6 +293,7 @@ export function listOpenClawRuntimeChannelMetadata(
         channelId: manifest.id,
         configKeys: [...visibility.configKeys],
         logPatterns: [...visibility.logPatterns],
+        configShape: visibility.configShape ?? "accounts",
       },
     ];
   });

@@ -124,6 +124,20 @@ describe("extractEnabledChannelsFromOpenclawConfig", () => {
     expect(extractEnabledChannelsFromOpenclawConfig(config)).toEqual(["telegram"]);
   });
 
+  it("recognizes rendered accountless WeCom config", () => {
+    const config = {
+      channels: {
+        wecom: {
+          enabled: true,
+          connectionMode: "websocket",
+          botId: "openshell:resolve:env:WECOM_BOT_ID",
+          secret: "openshell:resolve:env:WECOM_SECRET",
+        },
+      },
+    };
+    expect(extractEnabledChannelsFromOpenclawConfig(config)).toEqual(["wecom"]);
+  });
+
   it("treats missing accounts block as no enabled accounts", () => {
     const config = {
       channels: {
@@ -316,6 +330,28 @@ describe("probeChannelRuntimeStatus", () => {
     expect(result.ok).toBe(true);
     expect(result.logProbeOk).toBe(true);
     expect(result.visibleChannels).toEqual(["telegram"]);
+    expect(result.configuredButNotRunning).toEqual([]);
+  });
+
+  it("treats rendered WeCom config as visible when the gateway log mentions it", () => {
+    const config = JSON.stringify({
+      channels: {
+        wecom: {
+          enabled: true,
+          connectionMode: "websocket",
+          botId: "openshell:resolve:env:WECOM_BOT_ID",
+          secret: "openshell:resolve:env:WECOM_SECRET",
+        },
+      },
+    });
+    const result = probeChannelRuntimeStatus({
+      configFilePath: "/sandbox/.openclaw/openclaw.json",
+      executeSandboxCommand: makeMockExec(config, ["WeCom"]),
+    });
+    expect(result.ok).toBe(true);
+    expect(result.logProbeOk).toBe(true);
+    expect(result.configuredChannels).toEqual(["wecom"]);
+    expect(result.visibleChannels).toEqual(["wecom"]);
     expect(result.configuredButNotRunning).toEqual([]);
   });
 

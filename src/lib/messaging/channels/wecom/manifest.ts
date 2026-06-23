@@ -147,6 +147,7 @@ export const wecomManifest = {
       visibility: {
         configKeys: ["wecom"],
         logPatterns: ["wecom", "WeCom"],
+        configShape: "enabled-flag",
       },
     },
   },

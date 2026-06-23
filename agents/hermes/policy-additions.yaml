@@ -301,7 +301,6 @@ network_policies:
         enforcement: enforce
         request_body_credential_rewrite: true
         rules:
-          - allow: { method: GET, path: "/cgi-bin/gettoken" }
           - allow: { method: GET, path: "/cgi-bin/media/get" }
           - allow: { method: POST, path: "/cgi-bin/message/send" }
           - allow: { method: POST, path: "/cgi-bin/appchat/send" }

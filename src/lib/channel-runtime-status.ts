@@ -112,13 +112,18 @@ export function extractEnabledChannelsFromOpenclawConfig(json: unknown): string[
   if (!json || typeof json !== "object") return [];
   const channels = (json as Record<string, unknown>).channels;
   if (!channels || typeof channels !== "object") return [];
-  const channelKeyToName = runtimeConfigKeyToChannelName(DEFAULT_RUNTIME_VISIBILITY_METADATA);
+  const metadataByConfigKey = runtimeConfigKeyToMetadata(DEFAULT_RUNTIME_VISIBILITY_METADATA);
   const visible = new Set<string>();
   for (const [key, value] of Object.entries(channels as Record<string, unknown>)) {
-    const canonical = channelKeyToName.get(key);
-    if (!canonical) continue;
+    const metadata = metadataByConfigKey.get(key);
+    if (!metadata) continue;
     if (!value || typeof value !== "object") continue;
-    const accounts = (value as Record<string, unknown>).accounts;
+    const channelConfig = value as Record<string, unknown>;
+    if (metadata.configShape === "enabled-flag") {
+      if (channelConfig.enabled === true) visible.add(metadata.channelId);
+      continue;
+    }
+    const accounts = channelConfig.accounts;
     if (!accounts || typeof accounts !== "object") continue;
     for (const account of Object.values(accounts as Record<string, unknown>)) {
       if (
@@ -126,7 +131,7 @@ export function extractEnabledChannelsFromOpenclawConfig(json: unknown): string[
         typeof account === "object" &&
         (account as Record<string, unknown>).enabled === true
       ) {
-        visible.add(canonical);
+        visible.add(metadata.channelId);
         break;
       }
     }
@@ -216,13 +221,13 @@ export function parseGatewayLogScanOutput(stdout: string): Set<string> {
 
 const DEFAULT_GATEWAY_LOG_PATH = "/tmp/gateway.log";
 
-function runtimeConfigKeyToChannelName(
+function runtimeConfigKeyToMetadata(
   outputs: readonly OpenClawRuntimeChannelMetadata[],
-): ReadonlyMap<string, string> {
-  const aliases = new Map<string, string>();
+): ReadonlyMap<string, OpenClawRuntimeChannelMetadata> {
+  const aliases = new Map<string, OpenClawRuntimeChannelMetadata>();
   for (const output of outputs) {
     for (const key of output.configKeys) {
-      aliases.set(key, output.channelId);
+      aliases.set(key, output);
     }
   }
   return aliases;

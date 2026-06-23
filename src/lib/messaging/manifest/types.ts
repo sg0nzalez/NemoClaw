@@ -169,6 +169,7 @@ export interface ChannelRuntimeSpec {
 export interface ChannelRuntimeVisibilitySpec {
   readonly configKeys: readonly string[];
   readonly logPatterns: readonly string[];
+  readonly configShape?: "accounts" | "enabled-flag";
 }
 
 export type ChannelRuntimeNodePreloadScope = "boot" | "connect";
