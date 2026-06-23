@@ -110,6 +110,10 @@ export const whatsappManifest = {
       manager: "openclaw-plugin",
       spec: "npm:@openclaw/whatsapp@{{openclaw.version}}",
       pin: true,
+      integrityByVersion: {
+        "2026.6.9":
+          "sha512-HWz9CryGcSk5ork03DlESVlRcDBnwuXPEKgqdSz/Qt0OnQ2Z1wqNGpwVlAqngvDQDH2AzkNXWuTu2M0C16R8vA==",
+      },
       required: true,
     },
   ],

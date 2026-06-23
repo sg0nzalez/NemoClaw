@@ -196,6 +196,10 @@ export const discordManifest = {
       manager: "openclaw-plugin",
       spec: "npm:@openclaw/discord@{{openclaw.version}}",
       pin: true,
+      integrityByVersion: {
+        "2026.6.9":
+          "sha512-esFhwYW0nrFQvBhkPeK/1qmvumlVAY8ddhYBt7geIYLlBriwPJRwtnVLLfp0n1LbS0/XVZ0ORqlvkWq8Vv61vg==",
+      },
       required: true,
     },
   ],

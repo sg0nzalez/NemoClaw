@@ -27,8 +27,14 @@ const GENERATOR_PATH = path.join(
   "scripts",
   "generate-openclaw-config.mts",
 );
+const OPENCLAW_DISCORD_2026_6_9_INTEGRITY =
+  "sha512-esFhwYW0nrFQvBhkPeK/1qmvumlVAY8ddhYBt7geIYLlBriwPJRwtnVLLfp0n1LbS0/XVZ0ORqlvkWq8Vv61vg==";
 const OPENCLAW_SLACK_2026_6_9_INTEGRITY =
   "sha512-JZHc0L3s6s+yBsWowZtE/DWZJOuy4lTE6uTuUbF5QNjUvQQUlCHMFrwPycrXLesVq1il5yAvo82VbERRsIzgxQ==";
+const OPENCLAW_WHATSAPP_2026_6_9_INTEGRITY =
+  "sha512-HWz9CryGcSk5ork03DlESVlRcDBnwuXPEKgqdSz/Qt0OnQ2Z1wqNGpwVlAqngvDQDH2AzkNXWuTu2M0C16R8vA==";
+const TENCENT_WEIXIN_2_4_3_INTEGRITY =
+  "sha512-dPQbidUNWigC6V10vGW4i+GLH09x+6zUhafZRjuxkJ9GDu8o62WBsnUTojp4KqUH756hz+t2v9khiCRSi0dBDw==";
 
 const BASE_GENERATOR_ENV: Record<string, string> = {
   NEMOCLAW_MODEL: "test-model",
@@ -326,8 +332,91 @@ describe("messaging-build-applier.mts: agent-install", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-package-plan-"));
     const tracePath = path.join(tmp, "openclaw.trace");
     const fakeOpenclaw = path.join(tmp, "openclaw");
+    const fakeNpm = path.join(tmp, "npm");
     fs.writeFileSync(
       fakeOpenclaw,
+      [
+        "#!/usr/bin/env node",
+        "require('node:fs').appendFileSync(process.env.OPENCLAW_TRACE, `${process.argv.slice(2).join('|')}\\n`);",
+        "process.exit(0);",
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    fs.writeFileSync(
+      fakeNpm,
+      [
+        "#!/bin/sh",
+        'printf \'npm|%s|%s|%s\\n\' "$1" "$2" "$3" >> "$OPENCLAW_TRACE"',
+        'if [ "${1:-}" = "view" ] && [ "${2:-}" = "@example/manifest-owned-plugin@2026.5.22" ] && [ "${3:-}" = "dist.integrity" ]; then printf "sha512-example\\n"; exit 0; fi',
+        "exit 1",
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+
+    const plan = {
+      schemaVersion: 1,
+      sandboxName: "test-sandbox",
+      agent: "openclaw",
+      channels: [{ channelId: "discord", active: true }],
+      credentialBindings: [],
+      agentRender: [],
+      buildSteps: [
+        {
+          channelId: "discord",
+          kind: "package-install",
+          outputId: "openclawPluginPackage",
+          required: true,
+          value: {
+            manager: "openclaw-plugin",
+            spec: "npm:@example/manifest-owned-plugin@{{openclaw.version}}",
+            integrity: "sha512-example",
+            pin: false,
+          },
+        },
+      ],
+    };
+
+    try {
+      const result = spawnSync(
+        "node",
+        [
+          "--experimental-strip-types",
+          SCRIPT_PATH,
+          "--agent",
+          "openclaw",
+          "--phase",
+          "agent-install",
+        ],
+        {
+          encoding: "utf-8",
+          stdio: ["pipe", "pipe", "pipe"],
+          env: {
+            PATH: tmp + ":" + (process.env.PATH || "/usr/bin:/bin"),
+            OPENCLAW_TRACE: tracePath,
+            OPENCLAW_VERSION: "2026.5.22",
+            NEMOCLAW_MESSAGING_PLAN_B64: Buffer.from(JSON.stringify(plan)).toString("base64"),
+          },
+          timeout: 10_000,
+        },
+      );
+
+      expect(result.status, result.stderr).toBe(0);
+      expect(fs.readFileSync(tracePath, "utf-8").trim().split("\n")).toEqual([
+        "npm|view|@example/manifest-owned-plugin@2026.5.22|dist.integrity",
+        "plugins|install|npm:@example/manifest-owned-plugin@2026.5.22",
+      ]);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("fails closed before installing npm plugin specs without committed integrity", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-package-plan-"));
+    const tracePath = path.join(tmp, "openclaw.trace");
+    fs.writeFileSync(
+      path.join(tmp, "openclaw"),
       [
         "#!/usr/bin/env node",
         "require('node:fs').appendFileSync(process.env.OPENCLAW_TRACE, `${process.argv.slice(2).join('|')}\\n`);",
@@ -383,10 +472,11 @@ describe("messaging-build-applier.mts: agent-install", () => {
         },
       );
 
-      expect(result.status, result.stderr).toBe(0);
-      expect(fs.readFileSync(tracePath, "utf-8").trim()).toBe(
-        "plugins|install|npm:@example/manifest-owned-plugin@2026.5.22",
+      expect(result.status).toBe(2);
+      expect(result.stderr).toContain(
+        "OpenClaw plugin @example/manifest-owned-plugin@2026.5.22 has no committed npm integrity pin",
       );
+      expect(fs.existsSync(tracePath)).toBe(false);
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
@@ -396,6 +486,7 @@ describe("messaging-build-applier.mts: agent-install", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-message-plugins-"));
     const tracePath = path.join(tmp, "openclaw.trace");
     const fakeOpenclaw = path.join(tmp, "openclaw");
+    const fakeNpm = path.join(tmp, "npm");
     fs.writeFileSync(
       fakeOpenclaw,
       [
@@ -406,13 +497,34 @@ describe("messaging-build-applier.mts: agent-install", () => {
       ].join("\n"),
       { mode: 0o755 },
     );
+    fs.writeFileSync(
+      fakeNpm,
+      [
+        "#!/bin/sh",
+        'printf \'npm|%s|%s|%s\\n\' "$1" "$2" "$3" >> "$OPENCLAW_TRACE"',
+        'if [ "${1:-}" != "view" ] || [ "${3:-}" != "dist.integrity" ]; then exit 1; fi',
+        'case "${2:-}" in',
+        `  "@openclaw/discord@2026.6.9") printf "%s\\n" "${OPENCLAW_DISCORD_2026_6_9_INTEGRITY}"; exit 0 ;;`,
+        `  "@tencent-weixin/openclaw-weixin@2.4.3") printf "%s\\n" "${TENCENT_WEIXIN_2_4_3_INTEGRITY}"; exit 0 ;;`,
+        `  "@openclaw/slack@2026.6.9") printf "%s\\n" "${OPENCLAW_SLACK_2026_6_9_INTEGRITY}"; exit 0 ;;`,
+        `  "@openclaw/whatsapp@2026.6.9") printf "%s\\n" "${OPENCLAW_WHATSAPP_2026_6_9_INTEGRITY}"; exit 0 ;;`,
+        "esac",
+        "exit 1",
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
 
     try {
       const planEnv = withLegacyMessagingPlanEnv(
         {
           PATH: `${tmp}:${process.env.PATH || "/usr/bin:/bin"}`,
           OPENCLAW_TRACE: tracePath,
-          OPENCLAW_VERSION: "2026.5.22",
+          OPENCLAW_DISCORD_2026_6_9_INTEGRITY,
+          OPENCLAW_SLACK_2026_6_9_INTEGRITY,
+          OPENCLAW_WHATSAPP_2026_6_9_INTEGRITY,
+          TENCENT_WEIXIN_2_4_3_INTEGRITY,
+          OPENCLAW_VERSION: "2026.6.9",
           NEMOCLAW_MESSAGING_CHANNELS_B64: channelsB64([
             "telegram",
             "discord",
@@ -444,10 +556,14 @@ describe("messaging-build-applier.mts: agent-install", () => {
 
       expect(result.status, result.stderr).toBe(0);
       expect(fs.readFileSync(tracePath, "utf-8").trim().split("\n")).toEqual([
-        "plugins|install|npm:@openclaw/discord@2026.5.22|--pin|||",
+        "npm|view|@openclaw/discord@2026.6.9|dist.integrity",
+        "plugins|install|npm:@openclaw/discord@2026.6.9|--pin|||",
+        "npm|view|@tencent-weixin/openclaw-weixin@2.4.3|dist.integrity",
         "plugins|install|npm:@tencent-weixin/openclaw-weixin@2.4.3|--pin|||",
-        "plugins|install|npm:@openclaw/slack@2026.5.22|--pin|||",
-        "plugins|install|npm:@openclaw/whatsapp@2026.5.22|--pin|||",
+        "npm|view|@openclaw/slack@2026.6.9|dist.integrity",
+        "plugins|install|npm:@openclaw/slack@2026.6.9|--pin|||",
+        "npm|view|@openclaw/whatsapp@2026.6.9|dist.integrity",
+        "plugins|install|npm:@openclaw/whatsapp@2026.6.9|--pin|||",
       ]);
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
@@ -589,6 +705,7 @@ describe("messaging-build-applier.mts: agent-install", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-discord-runtime-contract-"));
     const tracePath = path.join(tmp, "openclaw.trace");
     const fakeOpenclaw = path.join(tmp, "openclaw");
+    const fakeNpm = path.join(tmp, "npm");
     const discordChannels = channelsB64(["discord"]);
     fs.writeFileSync(
       fakeOpenclaw,
@@ -598,7 +715,7 @@ describe("messaging-build-applier.mts: agent-install", () => {
         "const args = process.argv.slice(2);",
         'fs.appendFileSync(process.env.OPENCLAW_TRACE, `${args.join("|")}|${process.env.DISCORD_BOT_TOKEN || ""}|${process.env.BRAVE_API_KEY || ""}\\n`);',
         'if (args[0] === "plugins" && args[1] === "install") {',
-        '  if (args[2] !== "npm:@openclaw/discord@2026.5.22") process.exit(41);',
+        '  if (args[2] !== "npm:@openclaw/discord@2026.6.9") process.exit(41);',
         '  if (args[3] !== "--pin") process.exit(47);',
         "  process.exit(0);",
         "}",
@@ -611,6 +728,17 @@ describe("messaging-build-applier.mts: agent-install", () => {
         "  process.exit(0);",
         "}",
         "process.exit(46);",
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    fs.writeFileSync(
+      fakeNpm,
+      [
+        "#!/bin/sh",
+        'printf \'npm|%s|%s|%s||\\n\' "$1" "$2" "$3" >> "$OPENCLAW_TRACE"',
+        'if [ "${1:-}" = "view" ] && [ "${2:-}" = "@openclaw/discord@2026.6.9" ] && [ "${3:-}" = "dist.integrity" ]; then printf "%s\\n" "$OPENCLAW_DISCORD_2026_6_9_INTEGRITY"; exit 0; fi',
+        "exit 1",
         "",
       ].join("\n"),
       { mode: 0o755 },
@@ -640,7 +768,8 @@ describe("messaging-build-applier.mts: agent-install", () => {
         PATH: `${tmp}:${process.env.PATH || "/usr/bin:/bin"}`,
         HOME: tmp,
         OPENCLAW_TRACE: tracePath,
-        OPENCLAW_VERSION: "2026.5.22",
+        OPENCLAW_DISCORD_2026_6_9_INTEGRITY,
+        OPENCLAW_VERSION: "2026.6.9",
         NEMOCLAW_MESSAGING_PLAN_B64: generatorEnv.NEMOCLAW_MESSAGING_PLAN_B64,
         NEMOCLAW_WEB_SEARCH_ENABLED: "1",
       };
@@ -683,7 +812,8 @@ describe("messaging-build-applier.mts: agent-install", () => {
 
       expect(postInstallResult.status, postInstallResult.stderr).toBe(0);
       expect(fs.readFileSync(tracePath, "utf-8").trim().split("\n")).toEqual([
-        "plugins|install|npm:@openclaw/discord@2026.5.22|--pin||",
+        "npm|view|@openclaw/discord@2026.6.9|dist.integrity||",
+        "plugins|install|npm:@openclaw/discord@2026.6.9|--pin||",
         "doctor|--fix|--non-interactive|openshell:resolve:env:DISCORD_BOT_TOKEN|openshell:resolve:env:BRAVE_API_KEY",
       ]);
     } finally {

@@ -12,6 +12,7 @@ import {
   getMessagingPolicyKeysByChannel,
   getMessagingPolicyPresetValidationWarnings,
   getMessagingProviderSuffixesByChannel,
+  listBuiltInMessagingChannelManifests,
   listAvailableMessagingChannelIds,
   listMessagingChannelsWithoutCredentials,
   listMessagingConfigEnvKeys,
@@ -136,6 +137,22 @@ describe("built-in messaging channel metadata", () => {
       whatsapp: "npm:@openclaw/whatsapp@{{openclaw.version}}",
     });
     expect(listMessagingPackageInstallSpecs({ agent: "hermes" })).toEqual([]);
+  });
+
+  it("requires committed npm integrity pins for built-in OpenClaw plugin installs", () => {
+    for (const manifest of listBuiltInMessagingChannelManifests({ agent: "openclaw" })) {
+      for (const agentPackage of manifest.agentPackages ?? []) {
+        if (agentPackage.agent !== "openclaw") continue;
+        if (agentPackage.manager !== "openclaw-plugin") continue;
+        if (!agentPackage.spec.startsWith("npm:")) continue;
+        const committedIntegrity =
+          agentPackage.integrity ?? agentPackage.integrityByVersion?.["2026.6.9"];
+        expect(
+          committedIntegrity,
+          `${manifest.id}/${agentPackage.id} must carry a committed npm integrity pin`,
+        ).toMatch(/^sha512-/);
+      }
+    }
   });
 
   it("merges duplicate policy preset metadata by preset name", () => {

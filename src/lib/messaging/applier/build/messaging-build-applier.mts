@@ -904,10 +904,15 @@ function runCommand(args: readonly string[], env: Env): void {
 }
 
 function verifyOpenClawPluginNpmIntegrity(install: OpenClawPluginInstall, env: Env): void {
-  if (!install.integrity) return;
   if (!install.npmPackageSpec) {
+    if (!install.integrity) return;
     throw new MessagingBuildApplierError(
       `Cannot verify npm integrity for non-npm OpenClaw plugin spec ${install.spec}`,
+    );
+  }
+  if (!install.integrity) {
+    throw new MessagingBuildApplierError(
+      `OpenClaw plugin ${install.npmPackageSpec} has no committed npm integrity pin`,
     );
   }
   const result = spawnSync("npm", ["view", install.npmPackageSpec, "dist.integrity"], {

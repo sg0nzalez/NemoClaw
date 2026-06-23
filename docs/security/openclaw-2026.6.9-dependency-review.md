@@ -10,10 +10,16 @@ Scope: NemoClaw runtime pin `openclaw@2026.6.9`.
 - npm tarball: `https://registry.npmjs.org/openclaw/-/openclaw-2026.6.9.tgz`
 - npm integrity: `sha512-y0PGUdE87S8QtQXABPDL0CjNKhH3q/R1h9/WiRQkhVCGSBVhs63/M1iZn2DYVyJCAbDyMz3KNyAE0WzSQIWCRg==`
 - npm publish time: `2026-06-21T01:37:53.047Z`
+- Discord channel plugin package: `@openclaw/discord@2026.6.9`
+- Discord channel plugin npm integrity: `sha512-esFhwYW0nrFQvBhkPeK/1qmvumlVAY8ddhYBt7geIYLlBriwPJRwtnVLLfp0n1LbS0/XVZ0ORqlvkWq8Vv61vg==`
 - Slack channel plugin package: `@openclaw/slack@2026.6.9`
 - Slack channel plugin npm integrity: `sha512-JZHc0L3s6s+yBsWowZtE/DWZJOuy4lTE6uTuUbF5QNjUvQQUlCHMFrwPycrXLesVq1il5yAvo82VbERRsIzgxQ==`
+- WhatsApp channel plugin package: `@openclaw/whatsapp@2026.6.9`
+- WhatsApp channel plugin npm integrity: `sha512-HWz9CryGcSk5ork03DlESVlRcDBnwuXPEKgqdSz/Qt0OnQ2Z1wqNGpwVlAqngvDQDH2AzkNXWuTu2M0C16R8vA==`
+- WeChat channel plugin package: `@tencent-weixin/openclaw-weixin@2.4.3`
+- WeChat channel plugin npm integrity: `sha512-dPQbidUNWigC6V10vGW4i+GLH09x+6zUhafZRjuxkJ9GDu8o62WBsnUTojp4KqUH756hz+t2v9khiCRSi0dBDw==`
 
-NemoClaw enforces the main `openclaw@2026.6.9` integrity in the Dockerfile install blocks before `npm install`. It also enforces the reviewed `@openclaw/slack@2026.6.9` registry integrity in the messaging build applier before running `openclaw plugins install npm:@openclaw/slack@2026.6.9 --pin`.
+NemoClaw enforces the main `openclaw@2026.6.9` integrity in the Dockerfile install blocks before `npm install`. It also enforces each reviewed npm plugin registry integrity in the messaging build applier before running `openclaw plugins install`.
 
 ## Advisory Check
 

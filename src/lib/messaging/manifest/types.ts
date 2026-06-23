@@ -205,6 +205,7 @@ export interface ChannelAgentPackageSpec {
   readonly manager: ChannelAgentPackageManager;
   readonly spec: MessagingTemplateString;
   readonly pin?: boolean;
+  readonly integrity?: string;
   readonly integrityByVersion?: Readonly<Record<string, string>>;
   readonly required?: boolean;
 }

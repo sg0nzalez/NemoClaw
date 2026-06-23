@@ -22,8 +22,14 @@ const UNPINNED_OPENCLAW_VERSION = "2026.6.10";
 const PINNED_OPENCLAW_VERSION = "2026.6.9";
 const PINNED_OPENCLAW_INTEGRITY =
   "sha512-y0PGUdE87S8QtQXABPDL0CjNKhH3q/R1h9/WiRQkhVCGSBVhs63/M1iZn2DYVyJCAbDyMz3KNyAE0WzSQIWCRg==";
+const PINNED_OPENCLAW_DISCORD_INTEGRITY =
+  "sha512-esFhwYW0nrFQvBhkPeK/1qmvumlVAY8ddhYBt7geIYLlBriwPJRwtnVLLfp0n1LbS0/XVZ0ORqlvkWq8Vv61vg==";
 const PINNED_OPENCLAW_SLACK_INTEGRITY =
   "sha512-JZHc0L3s6s+yBsWowZtE/DWZJOuy4lTE6uTuUbF5QNjUvQQUlCHMFrwPycrXLesVq1il5yAvo82VbERRsIzgxQ==";
+const PINNED_OPENCLAW_WHATSAPP_INTEGRITY =
+  "sha512-HWz9CryGcSk5ork03DlESVlRcDBnwuXPEKgqdSz/Qt0OnQ2Z1wqNGpwVlAqngvDQDH2AzkNXWuTu2M0C16R8vA==";
+const PINNED_WECHAT_PLUGIN_INTEGRITY =
+  "sha512-dPQbidUNWigC6V10vGW4i+GLH09x+6zUhafZRjuxkJ9GDu8o62WBsnUTojp4KqUH756hz+t2v9khiCRSi0dBDw==";
 const LEGACY_REBUILD_OPENCLAW_VERSION = "2026.3.11";
 const LEGACY_REBUILD_OPENCLAW_INTEGRITY =
   "sha512-bxwiBmHPakwfpY5tqC9lrV5TCu5PKf0c1bHNc3nhrb+pqKcPEWV4zOjDVFLQUHr98ihgWA+3pacy4b3LQ8wduQ==";
@@ -102,10 +108,15 @@ describe("OpenClaw npm integrity pins", () => {
 
     expect(reviewNote).toContain(`openclaw@${PINNED_OPENCLAW_VERSION}`);
     expect(reviewNote).toContain(PINNED_OPENCLAW_INTEGRITY);
+    expect(reviewNote).toContain("@openclaw/discord@2026.6.9");
+    expect(reviewNote).toContain(PINNED_OPENCLAW_DISCORD_INTEGRITY);
     expect(reviewNote).toContain("@openclaw/slack@2026.6.9");
     expect(reviewNote).toContain(PINNED_OPENCLAW_SLACK_INTEGRITY);
-    expect(reviewNote).toContain("Slack plugin install-time registry integrity check");
-    expect(reviewNote).toContain("openclaw plugins install npm:@openclaw/slack@2026.6.9 --pin");
+    expect(reviewNote).toContain("@openclaw/whatsapp@2026.6.9");
+    expect(reviewNote).toContain(PINNED_OPENCLAW_WHATSAPP_INTEGRITY);
+    expect(reviewNote).toContain("@tencent-weixin/openclaw-weixin@2.4.3");
+    expect(reviewNote).toContain(PINNED_WECHAT_PLUGIN_INTEGRITY);
+    expect(reviewNote).toContain("each reviewed npm plugin registry integrity");
     expect(reviewNote).toContain("`0` high");
     expect(reviewNote).toContain("`0` critical");
     expect(reviewNote).toContain(
