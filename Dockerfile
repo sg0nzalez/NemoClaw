@@ -110,6 +110,28 @@ COPY scripts/patch-openclaw-chat-send.js /usr/local/lib/nemoclaw/patch-openclaw-
 RUN chmod 755 /usr/local/lib/nemoclaw/patch-openclaw-tool-catalog.js \
         /usr/local/lib/nemoclaw/patch-openclaw-chat-send.js
 
+# Pre-install the codex-acp package so the embedded ACPx runtime can
+# call the local binary instead of `npx @zed-industries/codex-acp`.
+#
+# The sandbox's L7 proxy denies @zed-industries/* package URLs
+# (403 policy_denied), and npm still refreshes registry metadata for
+# versioned npx package specs even when the package is globally installed.
+# Installing the binary at build time and configuring ACPx to use it
+# directly keeps TC-SBX-02 off the runtime npm path.
+#
+# hadolint ignore=DL3059,DL4006,DL3016
+RUN set -eu; \
+    CODEX_ACP_SPEC='@zed-industries/codex-acp@0.11.1'; \
+    REGISTRY_CODEX_ACP_INTEGRITY=$(npm view "${CODEX_ACP_SPEC}" dist.integrity); \
+    if [ "$REGISTRY_CODEX_ACP_INTEGRITY" != "$CODEX_ACP_0_11_1_INTEGRITY" ]; then \
+        echo "ERROR: ${CODEX_ACP_SPEC} npm integrity mismatch" >&2; \
+        echo "Expected: ${CODEX_ACP_0_11_1_INTEGRITY}" >&2; \
+        echo "Actual:   ${REGISTRY_CODEX_ACP_INTEGRITY}" >&2; exit 1; \
+    fi; \
+    npm install -g --no-audit --no-fund --no-progress \
+        "${CODEX_ACP_SPEC}"; \
+    command -v codex-acp >/dev/null
+
 # Upgrade OpenClaw if the base image is stale.
 #
 # The GHCR base image (sandbox-base:latest) may lag behind the version pinned
@@ -120,7 +142,7 @@ RUN chmod 755 /usr/local/lib/nemoclaw/patch-openclaw-tool-catalog.js \
 #
 # OPENCLAW_VERSION is the NemoClaw runtime build target. It must be at least the
 # blueprint minimum, which also supports the legacy direct-blueprint image path.
-# hadolint ignore=DL3059,DL4006
+# hadolint ignore=DL3059,DL4006,DL3016
 RUN set -eu; \
     echo "$OPENCLAW_VERSION" | grep -qxE '[0-9]+(\.[0-9]+)*' \
         || { echo "ERROR: OPENCLAW_VERSION='$OPENCLAW_VERSION' is invalid (expected e.g. 2026.3.11)" >&2; exit 1; }; \
@@ -157,24 +179,7 @@ RUN set -eu; \
         # rmdir failure inside npm's own install path.
         rm -rf /usr/local/lib/node_modules/openclaw /usr/local/bin/openclaw; \
         npm install -g --no-audit --no-fund --no-progress "openclaw@${OPENCLAW_VERSION}"; \
-    fi; \
-    # Pre-install the codex-acp package so the embedded ACPx runtime can
-    # call the local binary instead of `npx @zed-industries/codex-acp`.
-    # The sandbox's L7 proxy denies @zed-industries/* package URLs
-    # (403 policy_denied), and npm still refreshes registry metadata for
-    # versioned npx package specs even when the package is globally installed.
-    # Installing the binary at build time and configuring ACPx to use it
-    # directly keeps TC-SBX-02 off the runtime npm path.
-    CODEX_ACP_SPEC='@zed-industries/codex-acp@0.11.1'; \
-    REGISTRY_CODEX_ACP_INTEGRITY=$(npm view "${CODEX_ACP_SPEC}" dist.integrity); \
-    if [ "$REGISTRY_CODEX_ACP_INTEGRITY" != "$CODEX_ACP_0_11_1_INTEGRITY" ]; then \
-        echo "ERROR: ${CODEX_ACP_SPEC} npm integrity mismatch" >&2; \
-        echo "Expected: ${CODEX_ACP_0_11_1_INTEGRITY}" >&2; \
-        echo "Actual:   ${REGISTRY_CODEX_ACP_INTEGRITY}" >&2; exit 1; \
-    fi; \
-    npm install -g --no-audit --no-fund --no-progress \
-        "${CODEX_ACP_SPEC}"; \
-    command -v codex-acp >/dev/null
+    fi
 
 # Patch OpenClaw media fetch for proxy-only sandbox (NVIDIA/NemoClaw#1755).
 #
