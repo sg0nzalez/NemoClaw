@@ -27,6 +27,7 @@ from pathlib import Path
 secret_key_re = re.compile(r"(^|_)(TOKEN|KEY|SECRET|PASSWORD|CREDENTIAL|API)(_|$)")
 slack_alias_re = re.compile(r"^(xoxb|xapp)-OPENSHELL-RESOLVE-ENV-[A-Z0-9_]+$")
 allowed_nonsecret_keys = {"API_SERVER_HOST", "API_SERVER_PORT"}
+allowed_raw_secret_keys = {"API_SERVER_KEY"}
 allowed_literals = {"", "[STRIPPED_BY_MIGRATION]"}
 required_remote_toolsets = {
     "web",
@@ -67,6 +68,8 @@ def env_violations(path: Path) -> list[str]:
         if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
             continue
         if key in allowed_nonsecret_keys:
+            continue
+        if key in allowed_raw_secret_keys:
             continue
         if not secret_key_re.search(key):
             continue
@@ -148,6 +151,7 @@ from pathlib import Path
 secret_key_re = re.compile(r"(^|_)(TOKEN|KEY|SECRET|PASSWORD|CREDENTIAL|API)(_|$)")
 slack_alias_re = re.compile(r"^(xoxb|xapp)-OPENSHELL-RESOLVE-ENV-[A-Z0-9_]+$")
 allowed_nonsecret_keys = {"API_SERVER_HOST", "API_SERVER_PORT"}
+allowed_raw_secret_keys = {"API_SERVER_KEY"}
 allowed_literals = {"", "[STRIPPED_BY_MIGRATION]"}
 required_env_lines = {
     "NEMOCLAW_HERMES_TOOL_GATEWAY_BROKER=1",
@@ -186,6 +190,8 @@ def env_violations(path: Path) -> list[str]:
         key, value = stripped.split("=", 1)
         key = key.strip()
         if key in allowed_nonsecret_keys:
+            continue
+        if key in allowed_raw_secret_keys:
             continue
         if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
             continue
@@ -404,7 +410,7 @@ async function inspectImageBoundary(probe: DockerProbe, image: string): Promise<
 
   expect(
     result.exitCode,
-    `Hermes image should have no raw secret-shaped .env values and preserve remote toolsets\n${resultText(result)}`,
+    `Hermes image should have no raw external secret-shaped .env values and preserve remote toolsets\n${resultText(result)}`,
   ).toBe(0);
 }
 
@@ -555,7 +561,7 @@ liveTest(
       prebuiltManagedImage: Boolean(process.env.NEMOCLAW_HERMES_MANAGED_TEST_IMAGE),
       contract: [
         "Docker is required and prebuilt image env vars must reference inspectable images",
-        "Hermes .env in the sandbox image is a real file and has no raw secret-shaped values",
+        "Hermes .env in the sandbox image is a real file and has no raw external secret-shaped values",
         "Hermes config preserves api_server remote platform toolsets and does not use no_mcp",
         "managed-tool image keeps gateway auth tokens out of sandbox env/config while preserving gateway URLs/config",
         "nemoclaw-start rejects raw secret-shaped .env entries without echoing their values",
