@@ -57,26 +57,26 @@ if [ -z "$SANDBOX_CTR" ]; then
   echo "No running sandbox container found for $SANDBOX. Start the sandbox before editing its config."
   exit 1
 fi
-docker exec --user root "$SANDBOX_CTR" cat /sandbox/.openclaw/openclaw.json > /tmp/openclaw.json
+umask 077
+WORK_DIR=$(mktemp -d -t nemoclaw-subagent-XXXXXX)
+trap 'rm -rf "$WORK_DIR"' EXIT
+docker exec --user root "$SANDBOX_CTR" cat /sandbox/.openclaw/openclaw.json > "$WORK_DIR/openclaw.json"
 ```
 
 If `SANDBOX_CTR` is empty, the sandbox is not running on this host.
 Start the sandbox, confirm that `docker ps` shows the matching `openshell.ai/sandbox-name` label, then rerun the export commands before continuing.
 
-Produce the patched OpenClaw sub-agent config in a mode-0600 temp directory.
+Produce the patched OpenClaw sub-agent config in the same mode-0600 temp directory.
 For the Omni example, the demo provides `vlm-demo/vlm-subagent/openclaw-patch.py`.
 Set `VLM_DEMO_DIR` to the local `vlm-demo` directory from the demo assets, then run the patch helper:
 
 ```bash
 export VLM_DEMO_DIR=/path/to/nemoclaw-demos/vlm-demo
-umask 077
-WORK_DIR=$(mktemp -d -t nemoclaw-subagent-XXXXXX)
-trap 'rm -rf "$WORK_DIR"' EXIT
 NVIDIA_API_KEY="$NVIDIA_API_KEY" python3 "$VLM_DEMO_DIR/vlm-subagent/openclaw-patch.py" \
-  < /tmp/openclaw.json > "$WORK_DIR/openclaw.updated.json"
+  < "$WORK_DIR/openclaw.json" > "$WORK_DIR/openclaw.updated.json"
 ```
 
-The helper reads `NVIDIA_API_KEY` from the environment (so the key avoids argv and shell history), reads `/tmp/openclaw.json` from standard input, adds the Omni provider and `vision-operator` entry, and writes the patched config to a mode-0600 temp file under `$WORK_DIR`.
+The helper reads `NVIDIA_API_KEY` from the environment (so the key avoids argv and shell history), reads the unmodified config from `$WORK_DIR/openclaw.json`, adds the Omni provider and `vision-operator` entry, and writes the patched config to a mode-0600 temp file under `$WORK_DIR`.
 The `trap` cleans up the temp directory on shell exit so the patched JSON does not linger on disk.
 Do not commit the patched config or any other file that contains a real API key.
 

@@ -339,6 +339,10 @@ print(block)
         body,
         `${rel} reintroduces a fixed secret-bearing /tmp/openclaw\\.updated\\.json output`,
       ).not.toMatch(/\/tmp\/openclaw\.updated\.json/);
+      expect(
+        body,
+        `${rel} exports openclaw.json to a fixed /tmp path instead of the protected $WORK_DIR`,
+      ).not.toMatch(/\/tmp\/openclaw\.json/);
     }
   });
 });
