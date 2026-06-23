@@ -30,7 +30,7 @@ function makeState(): SetupNimSelectionState {
 function requireValueForTest<T>(value: T | null | undefined, message: string): T {
   assert.notEqual(value, null, message);
   assert.notEqual(value, undefined, message);
-  return value;
+  return value as T;
 }
 
 describe("setupNim selection state helpers", () => {
