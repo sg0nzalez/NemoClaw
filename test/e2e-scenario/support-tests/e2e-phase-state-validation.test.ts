@@ -790,6 +790,22 @@ describe("state-validation host-side probes", () => {
       path.join(backupDir, "raw-bearer.json"),
       JSON.stringify({ authorization: "Bearer abcdef0123456789" }),
     );
+    fs.writeFileSync(
+      path.join(backupDir, "unsafe-bearer-env-suffix.json"),
+      JSON.stringify({ authorization: "Bearer openshell:resolve:env:REMOTE_MCP_TOKEN-extra" }),
+    );
+    fs.writeFileSync(
+      path.join(backupDir, "unsafe-bearer-stripped-suffix.json"),
+      JSON.stringify({ authorization: "Bearer [STRIPPED_BY_MIGRATION]suffix" }),
+    );
+    fs.writeFileSync(
+      path.join(backupDir, "unsafe-bearer-unused-suffix.json"),
+      JSON.stringify({ authorization: "Bearer unused-secret" }),
+    );
+    fs.writeFileSync(
+      path.join(backupDir, "unsafe-bearer-unused-word.json"),
+      JSON.stringify({ authorization: "Bearer unusedABC" }),
+    );
     try {
       const latest = latestRebuildBackupDir("e2e-rebuild", { backupRoot });
       expect(latest).toBe(backupDir);
@@ -797,6 +813,10 @@ describe("state-validation host-side probes", () => {
       expect(listCredentialLeakPaths(latest)).toEqual([
         path.join(backupDir, "leak.json"),
         path.join(backupDir, "raw-bearer.json"),
+        path.join(backupDir, "unsafe-bearer-env-suffix.json"),
+        path.join(backupDir, "unsafe-bearer-stripped-suffix.json"),
+        path.join(backupDir, "unsafe-bearer-unused-suffix.json"),
+        path.join(backupDir, "unsafe-bearer-unused-word.json"),
       ]);
     } finally {
       fs.rmSync(home, { recursive: true, force: true });

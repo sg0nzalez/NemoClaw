@@ -395,9 +395,18 @@ describe("fetch-guard patch regression guard", () => {
     const current = runOpenClawUpgradeBlock(CURRENT_REVIEWED_OPENCLAW_PATCH_CLASSIFIER_VERSION);
     expect(current.result.status).toBe(0);
     expect(current.result.stdout).toContain(
-      `is current (>= ${CURRENT_REVIEWED_OPENCLAW_PATCH_CLASSIFIER_VERSION})`,
+      `matches reviewed target ${CURRENT_REVIEWED_OPENCLAW_PATCH_CLASSIFIER_VERSION}`,
     );
     expect(current.calls).not.toContain(
+      `npm install -g --no-audit --no-fund --no-progress openclaw@${CURRENT_REVIEWED_OPENCLAW_PATCH_CLASSIFIER_VERSION}`,
+    );
+
+    const newer = runOpenClawUpgradeBlock("2026.6.10");
+    expect(newer.result.status).toBe(1);
+    expect(newer.result.stderr).toContain(
+      "newer than reviewed target " + CURRENT_REVIEWED_OPENCLAW_PATCH_CLASSIFIER_VERSION,
+    );
+    expect(newer.calls).not.toContain(
       `npm install -g --no-audit --no-fund --no-progress openclaw@${CURRENT_REVIEWED_OPENCLAW_PATCH_CLASSIFIER_VERSION}`,
     );
   });

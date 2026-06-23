@@ -246,9 +246,10 @@ export function listCredentialLeakPaths(
     "pnpm-lock.yaml",
     "pnpm-lock.yml",
   ]);
-  const candidatePattern = /(?:nvapi-|sk-|Bearer )/;
+  const secretTokenPattern = /(?:nvapi-|sk-)/;
+  const bearerCandidatePattern = /Bearer /;
   const safeBearerReferencePattern =
-    /Bearer\s+(?:unused|\[STRIPPED_BY_MIGRATION\]|openshell:resolve:env:[A-Za-z0-9_]+)/gi;
+    /Bearer\s+(?:unused|\[STRIPPED_BY_MIGRATION\]|openshell:resolve:env:[A-Za-z0-9_]+)(?=$|[\r\n"',}\]])/gi;
   const extraSecrets = options.extraSecrets?.filter(Boolean) ?? [];
 
   function scan(dir: string): void {
@@ -266,7 +267,12 @@ export function listCredentialLeakPaths(
       }
       if (skippedLockfiles.has(entry.name)) continue;
       const isJsonOrEnv = /\.json$|\.env$|^\.env$/i.test(entry.name);
-      if (isJsonOrEnv && candidatePattern.test(text.replace(safeBearerReferencePattern, ""))) {
+      const textWithoutSafeBearerReferences = text.replace(safeBearerReferencePattern, "");
+      if (
+        isJsonOrEnv &&
+        (secretTokenPattern.test(text) ||
+          bearerCandidatePattern.test(textWithoutSafeBearerReferences))
+      ) {
         leaks.push(fullPath);
       }
     }

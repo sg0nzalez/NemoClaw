@@ -141,9 +141,12 @@ RUN set -eu; \
         echo "Expected: ${EXPECTED_INTEGRITY}" >&2; \
         echo "Actual:   ${REGISTRY_INTEGRITY}" >&2; exit 1; \
     fi; \
-    CUR_VER=$(openclaw --version 2>/dev/null | awk '{print $2}' || echo "0.0.0"); \
-    if [ "$(printf '%s\n%s' "$OPENCLAW_VERSION" "$CUR_VER" | sort -V | head -n1)" = "$OPENCLAW_VERSION" ]; then \
-        echo "INFO: OpenClaw $CUR_VER is current (>= $OPENCLAW_VERSION), no upgrade needed"; \
+    CUR_VER=$(openclaw --version 2>/dev/null | awk '{print $2}' || true); \
+    CUR_VER="${CUR_VER:-0.0.0}"; \
+    if [ "$CUR_VER" = "$OPENCLAW_VERSION" ]; then \
+        echo "INFO: OpenClaw $CUR_VER matches reviewed target $OPENCLAW_VERSION, no upgrade needed"; \
+    elif [ "$(printf '%s\n%s' "$OPENCLAW_VERSION" "$CUR_VER" | sort -V | head -n1)" = "$OPENCLAW_VERSION" ]; then \
+        echo "ERROR: Base image has OpenClaw $CUR_VER, which is newer than reviewed target $OPENCLAW_VERSION" >&2; exit 1; \
     else \
         echo "INFO: Base image has OpenClaw $CUR_VER, upgrading to $OPENCLAW_VERSION"; \
         # npm 10's atomic-move install can hit EROFS on overlayfs when the
