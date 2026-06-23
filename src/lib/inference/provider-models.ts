@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { CurlProbeResult } from "../adapters/http/probe";
+import { cleanupAuthCurlConfig, createAuthCurlConfig } from "../adapters/http/curl-auth-config";
+import type { CurlProbeOptions, CurlProbeResult } from "../adapters/http/probe";
 import { getCurlTimingArgs, runCurlProbe } from "../adapters/http/probe";
 import type { ModelCatalogFetchResult, ModelValidationResult } from "../onboard/types";
 
@@ -9,9 +10,10 @@ import type { ModelCatalogFetchResult, ModelValidationResult } from "../onboard/
 const { normalizeCredentialValue } = require("../credentials/store");
 
 export const BUILD_ENDPOINT_URL = "https://integrate.api.nvidia.com/v1";
+const NVIDIA_MODELS_CURL_CONFIG_PREFIX = "nemoclaw-nvidia-models-curl";
 
 export interface ProviderModelOptions {
-  runCurlProbeImpl?: (argv: string[]) => CurlProbeResult;
+  runCurlProbeImpl?: (argv: string[], opts?: CurlProbeOptions) => CurlProbeResult;
   buildEndpointUrl?: string;
   /** When "query-param", send the API key as a ?key= URL parameter instead of
    *  an Authorization: Bearer header. Required for Google Gemini which rejects
@@ -82,16 +84,24 @@ export function fetchNvidiaEndpointModels(
 ): ModelCatalogFetchResult {
   const runCurlProbeImpl = options.runCurlProbeImpl ?? runCurlProbe;
   const buildEndpointUrl = options.buildEndpointUrl ?? BUILD_ENDPOINT_URL;
+  let authConfigPath = "";
   try {
-    const result = runCurlProbeImpl([
-      "-sS",
-      ...getCurlTimingArgs(),
-      "-H",
-      "Content-Type: application/json",
-      "-H",
+    authConfigPath = createAuthCurlConfig(
       `Authorization: Bearer ${normalizeCredentialValue(apiKey)}`,
-      `${buildEndpointUrl}/models`,
-    ]);
+      NVIDIA_MODELS_CURL_CONFIG_PREFIX,
+    );
+    const result = runCurlProbeImpl(
+      [
+        "-sS",
+        ...getCurlTimingArgs(),
+        "-H",
+        "Content-Type: application/json",
+        "--config",
+        authConfigPath,
+        `${buildEndpointUrl}/models`,
+      ],
+      { trustedConfigFiles: [authConfigPath] },
+    );
     return toModelCatalogFetchResult(result);
   } catch (error) {
     return {
@@ -100,6 +110,10 @@ export function fetchNvidiaEndpointModels(
       curlStatus: 0,
       message: error instanceof Error ? error.message : String(error),
     };
+  } finally {
+    if (authConfigPath) {
+      cleanupAuthCurlConfig(authConfigPath, NVIDIA_MODELS_CURL_CONFIG_PREFIX);
+    }
   }
 }
 

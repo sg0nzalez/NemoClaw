@@ -9,7 +9,7 @@ function normalizeBaseUrl(value) {
   return String(value || "").trim().replace(/\/+$/, "");
 }
 
-const KIMI_MODEL_IDS = new Set(["moonshotai/kimi-k2.6", "moonshotai/kimi-k2.7-code"]);
+const KIMI_MODEL_IDS = new Set(["moonshotai/kimi-k2.6"]);
 
 function isKimiModelId(value) {
   const modelId = normalize(value);

@@ -141,4 +141,72 @@ describe("createRemoteModelValidator", () => {
     assert.equal(state.model, "nvidia/local-nim");
     assert.equal(state.nimContainer, "nemoclaw-nim-test");
   });
+
+  it("returns to provider selection when catalog-present K2.7 fails route validation", async () => {
+    const state = makeState();
+    state.provider = "nvidia-prod";
+    state.endpointUrl = "https://integrate.api.nvidia.com/v1";
+    state.credentialEnv = "NVIDIA_INFERENCE_API_KEY";
+    state.model = "moonshotai/kimi-k2.7-code";
+    let validationCall: {
+      label: string;
+      endpointUrl: string;
+      model: string;
+      credentialEnv: string | null;
+      retryMessage?: string;
+      options?: Record<string, unknown>;
+    } | null = null;
+    const { validateSelectedRemoteModel } = createRemoteModelValidator({
+      OPENAI_ENDPOINT_URL: "https://default-openai.example/v1",
+      ANTHROPIC_ENDPOINT_URL: "https://default-anthropic.example/v1",
+      requireValue: (value, message) => {
+        if (value === null || value === undefined) throw new Error(message);
+        return value;
+      },
+      isBackToSelection: (_value): _value is never => false,
+      validateCustomOpenAiLikeSelection: async () => ({ ok: false, retry: "selection" }),
+      validateCustomAnthropicSelection: async () => ({ ok: false, retry: "selection" }),
+      validateAnthropicSelectionWithRetryMessage: async () => ({ ok: false, retry: "selection" }),
+      validateOpenAiLikeSelection: async (
+        label,
+        endpointUrl,
+        model,
+        credentialEnv,
+        retryMessage,
+        _helpUrl,
+        options,
+      ) => {
+        validationCall = { label, endpointUrl, model, credentialEnv, retryMessage, options };
+        return { ok: false, retry: "selection" };
+      },
+      shouldRequireResponsesToolCalling: () => false,
+      shouldSkipResponsesProbe: () => false,
+      getProbeAuthMode: () => undefined,
+    });
+
+    const result = await validateSelectedRemoteModel({
+      selected: { key: "build" },
+      remoteConfig: {
+        label: "NVIDIA Endpoints",
+        endpointUrl: "https://integrate.api.nvidia.com/v1",
+        helpUrl: "https://build.nvidia.com/",
+      },
+      state,
+      selectedCredentialEnv: "NVIDIA_INFERENCE_API_KEY",
+    });
+
+    assert.equal(result, "retry-selection");
+    assert.deepEqual(validationCall, {
+      label: "NVIDIA Endpoints",
+      endpointUrl: "https://integrate.api.nvidia.com/v1",
+      model: "moonshotai/kimi-k2.7-code",
+      credentialEnv: "NVIDIA_INFERENCE_API_KEY",
+      retryMessage: "Please choose a provider/model again.",
+      options: {
+        requireResponsesToolCalling: false,
+        skipResponsesProbe: false,
+        authMode: undefined,
+      },
+    });
+  });
 });

@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import fs from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -15,10 +17,18 @@ import {
 
 describe("provider model helpers", () => {
   it("fetches NVIDIA endpoint model ids", () => {
+    let authConfigPath = "";
     const result = fetchNvidiaEndpointModels("nvapi-x", {
-      runCurlProbeImpl: (argv) => {
+      runCurlProbeImpl: (argv, opts) => {
         expect(argv.at(-1)).toBe(`${BUILD_ENDPOINT_URL}/models`);
-        expect(argv).toContain("Authorization: Bearer nvapi-x");
+        expect(argv.join(" ")).not.toContain("Authorization: Bearer nvapi-x");
+        const configIndex = argv.indexOf("--config");
+        expect(configIndex).toBeGreaterThanOrEqual(0);
+        authConfigPath = argv[configIndex + 1];
+        expect(opts?.trustedConfigFiles).toContain(authConfigPath);
+        expect(fs.readFileSync(authConfigPath, "utf8")).toContain(
+          'header = "Authorization: Bearer nvapi-x"',
+        );
         return {
           ok: true,
           httpStatus: 200,
@@ -31,6 +41,7 @@ describe("provider model helpers", () => {
     });
 
     expect(result).toEqual({ ok: true, ids: ["nemotron", "llama"] });
+    expect(fs.existsSync(authConfigPath)).toBe(false);
   });
 
   it("returns explicit validated=true for NVIDIA model matches", () => {

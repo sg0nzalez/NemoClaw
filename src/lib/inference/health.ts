@@ -7,10 +7,7 @@
  * and performs lightweight reachability checks for remote cloud providers.
  */
 
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
-
+import { cleanupAuthCurlConfig, createAuthCurlConfig } from "../adapters/http/curl-auth-config";
 import type { CurlProbeOptions, CurlProbeResult } from "../adapters/http/probe";
 import { runCurlProbe } from "../adapters/http/probe";
 import { normalizeCredentialValue, resolveProviderCredential } from "../credentials/store";
@@ -97,36 +94,6 @@ function useStatusProbeTiming(argv: string[]): string[] {
     "--max-time",
     KIMI_STATUS_MAX_TIME_SECONDS,
   );
-}
-
-function quoteCurlConfigValue(value: string): string {
-  return value
-    .replace(/\\/g, "\\\\")
-    .replace(/"/g, '\\"')
-    .replace(/[\r\n]+/g, " ");
-}
-
-function createAuthCurlConfig(headerValue: string): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `${KIMI_HEALTH_CURL_CONFIG_PREFIX}-`));
-  try {
-    fs.chmodSync(dir, 0o700);
-    const configPath = path.join(dir, "auth.conf");
-    fs.writeFileSync(configPath, `header = "${quoteCurlConfigValue(headerValue)}"\n`, {
-      mode: 0o600,
-      encoding: "utf8",
-    });
-    return configPath;
-  } catch (error) {
-    fs.rmSync(dir, { recursive: true, force: true });
-    throw error;
-  }
-}
-
-function cleanupAuthCurlConfig(configPath: string): void {
-  const dir = path.dirname(configPath);
-  if (dir !== os.tmpdir() && path.basename(dir).startsWith(`${KIMI_HEALTH_CURL_CONFIG_PREFIX}-`)) {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
 }
 
 function buildKimiStatusProbeCurlArgs(
@@ -239,7 +206,10 @@ function probeNvidiaKimiHealth(
   const runCurlProbeImpl = options.runCurlProbeImpl ?? runCurlProbe;
   let authConfigPath = "";
   try {
-    authConfigPath = createAuthCurlConfig(`Authorization: Bearer ${apiKey}`);
+    authConfigPath = createAuthCurlConfig(
+      `Authorization: Bearer ${apiKey}`,
+      KIMI_HEALTH_CURL_CONFIG_PREFIX,
+    );
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     return {
@@ -260,7 +230,7 @@ function probeNvidiaKimiHealth(
         { trustedConfigFiles: [authConfigPath] },
       );
     } finally {
-      cleanupAuthCurlConfig(authConfigPath);
+      cleanupAuthCurlConfig(authConfigPath, KIMI_HEALTH_CURL_CONFIG_PREFIX);
     }
   })();
   const healthy = result.ok;

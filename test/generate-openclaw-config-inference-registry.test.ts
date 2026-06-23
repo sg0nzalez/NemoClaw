@@ -33,8 +33,8 @@ function buildInferenceConfig(model: string): any {
 }
 
 describe("generate-openclaw-config.mts: managed inference registry", () => {
-  it("adds Kimi K2.7 Code compat through the existing managed inference setup", () => {
-    const config = buildInferenceConfig("moonshotai/kimi-k2.7-code");
+  it("adds Kimi K2.6 compat through the existing managed inference setup", () => {
+    const config = buildInferenceConfig("moonshotai/kimi-k2.6");
 
     expect(config.models.providers.inference.models[0].compat).toEqual({
       supportsStore: false,
@@ -43,5 +43,12 @@ describe("generate-openclaw-config.mts: managed inference registry", () => {
       requiresToolResultName: true,
     });
     expect(config.plugins.entries["nemoclaw-kimi-inference-compat"]).toEqual({ enabled: true });
+  });
+
+  it("does not apply the K2.6 compat shim to Kimi K2.7 Code without source evidence", () => {
+    const config = buildInferenceConfig("moonshotai/kimi-k2.7-code");
+
+    expect(config.models.providers.inference.models[0].compat).toBeUndefined();
+    expect(config.plugins.entries).not.toHaveProperty("nemoclaw-kimi-inference-compat");
   });
 });

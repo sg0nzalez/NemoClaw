@@ -278,7 +278,7 @@ describe("getSandboxInferenceConfig", () => {
     });
   });
 
-  it("leaves Kimi K2.7 Code compat to the model-specific setup registry", () => {
+  it("routes Kimi K2.7 Code through managed inference without the K2.6 compat shim", () => {
     expect(
       getSandboxInferenceConfig("moonshotai/kimi-k2.7-code", "nvidia-prod", "openai-completions"),
     ).toEqual({

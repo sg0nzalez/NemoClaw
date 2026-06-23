@@ -2,9 +2,9 @@
   "$schema": "../schema.json",
   "id": "kimi-k2.6-managed-inference",
   "agent": "openclaw",
-  "description": "Preserves OpenClaw request, tool-call, and reasoning-output compatibility for Kimi K2.6 and catalog-gated Kimi K2.7 Code through NemoClaw managed inference.local chat completions; remove the K2.7 match when it emits discrete OpenClaw-safe tool calls without reasoning fields.",
+  "description": "Preserves OpenClaw request, tool-call, and reasoning-output compatibility for Kimi K2.6 through NemoClaw managed inference.local chat completions. Add later Kimi variants only after captured or source-confirmed managed-route output proves they need the same shim.",
   "match": {
-    "modelIds": ["moonshotai/kimi-k2.6", "moonshotai/kimi-k2.7-code"],
+    "modelIds": ["moonshotai/kimi-k2.6"],
     "providerKey": "inference",
     "inferenceApi": "openai-completions",
     "baseUrl": "https://inference.local/v1"
