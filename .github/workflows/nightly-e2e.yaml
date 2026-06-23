@@ -464,14 +464,12 @@ jobs:
 
       - name: Run OpenClaw TUI chat correlation E2E test
         env:
-          NVIDIA_INFERENCE_API_KEY: ${{ (github.event_name != 'workflow_dispatch' || inputs.target_ref == '') && secrets.NVIDIA_INFERENCE_API_KEY || '' }}
-          NEMOCLAW_E2E_USE_HOSTED_INFERENCE: "1"
-          NEMOCLAW_PROVIDER: custom
-          NEMOCLAW_ENDPOINT_URL: https://inference-api.nvidia.com/v1
-          NEMOCLAW_MODEL: nvidia/nvidia/nemotron-3-super-v3
-          NEMOCLAW_COMPAT_MODEL: nvidia/nvidia/nemotron-3-super-v3
+          # Use the NVIDIA Endpoints path for this timeout-sensitive lane instead
+          # of the hosted OpenAI-compatible CI endpoint.
+          NVIDIA_INFERENCE_API_KEY: ${{ (github.event_name != 'workflow_dispatch' || inputs.target_ref == '') && secrets.NVIDIA_API_KEY || '' }}
+          NEMOCLAW_PROVIDER: cloud
+          NEMOCLAW_MODEL: nvidia/nemotron-3-super-120b-a12b
           NEMOCLAW_PREFERRED_API: openai-completions
-          COMPATIBLE_API_KEY: ${{ (github.event_name != 'workflow_dispatch' || inputs.target_ref == '') && secrets.NVIDIA_INFERENCE_API_KEY || '' }}
           NEMOCLAW_NON_INTERACTIVE: "1"
           NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE: "1"
           NEMOCLAW_RECREATE_SANDBOX: "1"
@@ -1830,27 +1828,23 @@ jobs:
       - *dockerhub-auth-step
       - name: Install NemoClaw
         env:
-          NVIDIA_INFERENCE_API_KEY: ${{ (github.event_name != 'workflow_dispatch' || inputs.target_ref == '') && secrets.NVIDIA_INFERENCE_API_KEY || '' }}
-          NEMOCLAW_E2E_USE_HOSTED_INFERENCE: "1"
-          NEMOCLAW_PROVIDER: custom
-          NEMOCLAW_ENDPOINT_URL: https://inference-api.nvidia.com/v1
-          NEMOCLAW_MODEL: nvidia/nvidia/nemotron-3-super-v3
-          NEMOCLAW_COMPAT_MODEL: nvidia/nvidia/nemotron-3-super-v3
+          # Use the NVIDIA Endpoints path for this timeout-sensitive lane instead
+          # of the hosted OpenAI-compatible CI endpoint.
+          NVIDIA_INFERENCE_API_KEY: ${{ (github.event_name != 'workflow_dispatch' || inputs.target_ref == '') && secrets.NVIDIA_API_KEY || '' }}
+          NEMOCLAW_PROVIDER: cloud
+          NEMOCLAW_MODEL: nvidia/nemotron-3-super-120b-a12b
           NEMOCLAW_PREFERRED_API: openai-completions
-          COMPATIBLE_API_KEY: ${{ (github.event_name != 'workflow_dispatch' || inputs.target_ref == '') && secrets.NVIDIA_INFERENCE_API_KEY || '' }}
           NEMOCLAW_NON_INTERACTIVE: "1"
           NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE: "1"
         run: bash install.sh --non-interactive --yes-i-accept-third-party-software
       - name: Run onboard repair E2E test
         env:
-          NVIDIA_INFERENCE_API_KEY: ${{ (github.event_name != 'workflow_dispatch' || inputs.target_ref == '') && secrets.NVIDIA_INFERENCE_API_KEY || '' }}
-          NEMOCLAW_E2E_USE_HOSTED_INFERENCE: "1"
-          NEMOCLAW_PROVIDER: custom
-          NEMOCLAW_ENDPOINT_URL: https://inference-api.nvidia.com/v1
-          NEMOCLAW_MODEL: nvidia/nvidia/nemotron-3-super-v3
-          NEMOCLAW_COMPAT_MODEL: nvidia/nvidia/nemotron-3-super-v3
+          # Use the NVIDIA Endpoints path for this timeout-sensitive lane instead
+          # of the hosted OpenAI-compatible CI endpoint.
+          NVIDIA_INFERENCE_API_KEY: ${{ (github.event_name != 'workflow_dispatch' || inputs.target_ref == '') && secrets.NVIDIA_API_KEY || '' }}
+          NEMOCLAW_PROVIDER: cloud
+          NEMOCLAW_MODEL: nvidia/nemotron-3-super-120b-a12b
           NEMOCLAW_PREFERRED_API: openai-completions
-          COMPATIBLE_API_KEY: ${{ (github.event_name != 'workflow_dispatch' || inputs.target_ref == '') && secrets.NVIDIA_INFERENCE_API_KEY || '' }}
           NEMOCLAW_NON_INTERACTIVE: "1"
           NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE: "1"
         run: |
@@ -1882,27 +1876,23 @@ jobs:
       - *dockerhub-auth-step
       - name: Install NemoClaw
         env:
-          NVIDIA_INFERENCE_API_KEY: ${{ (github.event_name != 'workflow_dispatch' || inputs.target_ref == '') && secrets.NVIDIA_INFERENCE_API_KEY || '' }}
-          NEMOCLAW_E2E_USE_HOSTED_INFERENCE: "1"
-          NEMOCLAW_PROVIDER: custom
-          NEMOCLAW_ENDPOINT_URL: https://inference-api.nvidia.com/v1
-          NEMOCLAW_MODEL: nvidia/nvidia/nemotron-3-super-v3
-          NEMOCLAW_COMPAT_MODEL: nvidia/nvidia/nemotron-3-super-v3
+          # Use the NVIDIA Endpoints path for this timeout-sensitive lane instead
+          # of the hosted OpenAI-compatible CI endpoint.
+          NVIDIA_INFERENCE_API_KEY: ${{ (github.event_name != 'workflow_dispatch' || inputs.target_ref == '') && secrets.NVIDIA_API_KEY || '' }}
+          NEMOCLAW_PROVIDER: cloud
+          NEMOCLAW_MODEL: nvidia/nemotron-3-super-120b-a12b
           NEMOCLAW_PREFERRED_API: openai-completions
-          COMPATIBLE_API_KEY: ${{ (github.event_name != 'workflow_dispatch' || inputs.target_ref == '') && secrets.NVIDIA_INFERENCE_API_KEY || '' }}
           NEMOCLAW_NON_INTERACTIVE: "1"
           NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE: "1"
         run: bash install.sh --non-interactive --yes-i-accept-third-party-software
       - name: Run onboard resume E2E test
         env:
-          NVIDIA_INFERENCE_API_KEY: ${{ (github.event_name != 'workflow_dispatch' || inputs.target_ref == '') && secrets.NVIDIA_INFERENCE_API_KEY || '' }}
-          NEMOCLAW_E2E_USE_HOSTED_INFERENCE: "1"
-          NEMOCLAW_PROVIDER: custom
-          NEMOCLAW_ENDPOINT_URL: https://inference-api.nvidia.com/v1
-          NEMOCLAW_MODEL: nvidia/nvidia/nemotron-3-super-v3
-          NEMOCLAW_COMPAT_MODEL: nvidia/nvidia/nemotron-3-super-v3
+          # Use the NVIDIA Endpoints path for this timeout-sensitive lane instead
+          # of the hosted OpenAI-compatible CI endpoint.
+          NVIDIA_INFERENCE_API_KEY: ${{ (github.event_name != 'workflow_dispatch' || inputs.target_ref == '') && secrets.NVIDIA_API_KEY || '' }}
+          NEMOCLAW_PROVIDER: cloud
+          NEMOCLAW_MODEL: nvidia/nemotron-3-super-120b-a12b
           NEMOCLAW_PREFERRED_API: openai-completions
-          COMPATIBLE_API_KEY: ${{ (github.event_name != 'workflow_dispatch' || inputs.target_ref == '') && secrets.NVIDIA_INFERENCE_API_KEY || '' }}
           NEMOCLAW_NON_INTERACTIVE: "1"
           NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE: "1"
         run: |

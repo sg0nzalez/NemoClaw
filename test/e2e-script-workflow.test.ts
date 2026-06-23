@@ -960,6 +960,13 @@ describe("E2E reusable workflow contract", () => {
     const trustedWorkflowSecretExceptions = new Set([
       "issue-4434-tui-unreachable-inference-e2e:Sanitize issue #4434 logs on failure",
     ]);
+    const directNvidiaEndpointSteps = new Set([
+      "openclaw-tui-chat-correlation-e2e:Run OpenClaw TUI chat correlation E2E test",
+      "onboard-repair-e2e:Install NemoClaw",
+      "onboard-repair-e2e:Run onboard repair E2E test",
+      "onboard-resume-e2e:Install NemoClaw",
+      "onboard-resume-e2e:Run onboard resume E2E test",
+    ]);
     const directSecretSteps = Object.entries(nightlyWorkflow.jobs).flatMap(([jobName, job]) =>
       job.uses
         ? []
@@ -967,22 +974,28 @@ describe("E2E reusable workflow contract", () => {
             .filter((step) => envReferencesHostedInferenceSecret(step.env))
             .map((step) => ({ jobName, step })),
     );
+    const directNvidiaEndpointSecretSteps = Object.entries(nightlyWorkflow.jobs).flatMap(
+      ([jobName, job]) =>
+        job.uses
+          ? []
+          : (job.steps ?? [])
+              .filter((step) => step.env?.NVIDIA_INFERENCE_API_KEY === GUARDED_PUBLIC_NVIDIA_SECRET)
+              .map((step) => ({ jobName, step })),
+    );
     const directSecretStepNames = directSecretSteps.map(
+      ({ jobName, step }) => `${jobName}:${step.name ?? "<unnamed>"}`,
+    );
+    const directNvidiaEndpointStepNames = directNvidiaEndpointSecretSteps.map(
       ({ jobName, step }) => `${jobName}:${step.name ?? "<unnamed>"}`,
     );
 
     expect(directSecretStepNames).toEqual(
       expect.arrayContaining([
-        "openclaw-tui-chat-correlation-e2e:Run OpenClaw TUI chat correlation E2E test",
         "issue-4434-tui-unreachable-inference-e2e:Run issue #4434 TUI unreachable inference E2E test",
         "issue-4434-tui-unreachable-inference-e2e:Sanitize issue #4434 logs on failure",
         "token-rotation-e2e:Run token rotation E2E test",
         "sandbox-operations-e2e:Run sandbox operations E2E test",
         "credential-migration-e2e:Run credential migration Vitest test",
-        "onboard-repair-e2e:Install NemoClaw",
-        "onboard-repair-e2e:Run onboard repair E2E test",
-        "onboard-resume-e2e:Install NemoClaw",
-        "onboard-resume-e2e:Run onboard resume E2E test",
         "onboard-negative-paths-e2e:Install NemoClaw",
         "onboard-negative-paths-e2e:Run onboard negative-path E2E test",
         "runtime-overrides-e2e:Install NemoClaw",
@@ -992,8 +1005,14 @@ describe("E2E reusable workflow contract", () => {
         "launchable-smoke-e2e:Run launchable install-flow smoke test",
       ]),
     );
+    expect(directSecretStepNames).not.toEqual(
+      expect.arrayContaining([...directNvidiaEndpointSteps]),
+    );
+    expect(directNvidiaEndpointStepNames).toEqual(
+      expect.arrayContaining([...directNvidiaEndpointSteps]),
+    );
 
-    expect(directSecretSteps.length).toBeGreaterThanOrEqual(17);
+    expect(directSecretSteps.length).toBeGreaterThanOrEqual(12);
     for (const { jobName, step } of directSecretSteps) {
       const stepKey = `${jobName}:${step.name ?? "<unnamed>"}`;
       expect(step.env?.NVIDIA_INFERENCE_API_KEY, stepKey).toBe(GUARDED_HOSTED_INFERENCE_SECRET);
@@ -1007,6 +1026,16 @@ describe("E2E reusable workflow contract", () => {
       expect(step.env?.NEMOCLAW_COMPAT_MODEL, jobName).toBe("nvidia/nvidia/nemotron-3-super-v3");
       expect(step.env?.NEMOCLAW_PREFERRED_API, jobName).toBe("openai-completions");
       expect(step.env?.COMPATIBLE_API_KEY, jobName).toBe(GUARDED_HOSTED_INFERENCE_SECRET);
+    }
+
+    for (const { jobName, step } of directNvidiaEndpointSecretSteps) {
+      expect(step.env?.NEMOCLAW_PROVIDER, jobName).toBe("cloud");
+      expect(step.env?.NEMOCLAW_MODEL, jobName).toBe("nvidia/nemotron-3-super-120b-a12b");
+      expect(step.env?.NEMOCLAW_PREFERRED_API, jobName).toBe("openai-completions");
+      expect(step.env?.NEMOCLAW_E2E_USE_HOSTED_INFERENCE, jobName).toBeUndefined();
+      expect(step.env?.NEMOCLAW_ENDPOINT_URL, jobName).toBeUndefined();
+      expect(step.env?.NEMOCLAW_COMPAT_MODEL, jobName).toBeUndefined();
+      expect(step.env?.COMPATIBLE_API_KEY, jobName).toBeUndefined();
     }
 
     const runStep = nightlyWorkflow.jobs["token-rotation-e2e"].steps?.find(
