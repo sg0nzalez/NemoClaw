@@ -13,6 +13,8 @@ import {
 
 const DEFAULT_PROXY_HOST = "10.200.0.1";
 const DEFAULT_PROXY_PORT = "3128";
+const DEFAULT_ZALO_GROUP_POLICY = "allowlist";
+const ZALO_GROUP_POLICIES = new Set(["open", "allowlist", "disabled"]);
 
 export const resolveZaloTemplateReference: BuiltInRenderTemplateResolver = (reference, context) => {
   if (reference === "zaloProxyUrl") return resolvedRenderTemplateReference(proxyUrl(context.env));
@@ -36,7 +38,8 @@ function zaloAllowedUsers(context: RenderTemplateContext): string[] {
 }
 
 function zaloGroupPolicy(context: RenderTemplateContext): string {
-  return nonEmptyString(stateValue(context, "zaloConfig.groupPolicy")) ?? "allowlist";
+  const value = nonEmptyString(stateValue(context, "zaloConfig.groupPolicy"));
+  return value && ZALO_GROUP_POLICIES.has(value) ? value : DEFAULT_ZALO_GROUP_POLICY;
 }
 
 function proxyUrl(env: RenderTemplateContext["env"]): string {
