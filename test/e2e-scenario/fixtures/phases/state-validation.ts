@@ -247,6 +247,8 @@ export function listCredentialLeakPaths(
     "pnpm-lock.yml",
   ]);
   const candidatePattern = /(?:nvapi-|sk-|Bearer )/;
+  const safeBearerReferencePattern =
+    /Bearer\s+(?:unused|\[STRIPPED_BY_MIGRATION\]|openshell:resolve:env:[A-Za-z0-9_]+)/gi;
   const extraSecrets = options.extraSecrets?.filter(Boolean) ?? [];
 
   function scan(dir: string): void {
@@ -264,7 +266,9 @@ export function listCredentialLeakPaths(
       }
       if (skippedLockfiles.has(entry.name)) continue;
       const isJsonOrEnv = /\.json$|\.env$|^\.env$/i.test(entry.name);
-      if (isJsonOrEnv && candidatePattern.test(text)) leaks.push(fullPath);
+      if (isJsonOrEnv && candidatePattern.test(text.replace(safeBearerReferencePattern, ""))) {
+        leaks.push(fullPath);
+      }
     }
   }
 

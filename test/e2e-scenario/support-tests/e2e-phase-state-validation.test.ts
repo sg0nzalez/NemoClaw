@@ -775,12 +775,29 @@ describe("state-validation host-side probes", () => {
       JSON.stringify({ stateDirs: [] }),
     );
     fs.writeFileSync(path.join(backupDir, "safe.json"), JSON.stringify({ value: "ok" }));
+    fs.writeFileSync(
+      path.join(backupDir, "safe-bearer.json"),
+      JSON.stringify({
+        headers: [
+          "Bearer unused",
+          "Bearer [STRIPPED_BY_MIGRATION]",
+          "Bearer openshell:resolve:env:REMOTE_MCP_TOKEN",
+        ],
+      }),
+    );
     fs.writeFileSync(path.join(backupDir, "leak.json"), JSON.stringify({ key: "nvapi-secret" }));
+    fs.writeFileSync(
+      path.join(backupDir, "raw-bearer.json"),
+      JSON.stringify({ authorization: "Bearer abcdef0123456789" }),
+    );
     try {
       const latest = latestRebuildBackupDir("e2e-rebuild", { backupRoot });
       expect(latest).toBe(backupDir);
       expect(readRebuildBackupManifest(latest!)).toEqual({ stateDirs: [] });
-      expect(listCredentialLeakPaths(latest)).toEqual([path.join(backupDir, "leak.json")]);
+      expect(listCredentialLeakPaths(latest)).toEqual([
+        path.join(backupDir, "leak.json"),
+        path.join(backupDir, "raw-bearer.json"),
+      ]);
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }
