@@ -34,6 +34,10 @@ type ProbeRunOptions = {
   curlStatus?: string;
 };
 
+type HelperRouteRunOptions = {
+  env?: Record<string, string>;
+};
+
 function runHostedProbe(options: ProbeRunOptions = {}) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hosted-probe-"));
   const callsPath = path.join(tmpDir, "curl.calls");
@@ -75,6 +79,26 @@ nemoclaw_e2e_probe_hosted_inference
   const calls = fs.existsSync(callsPath) ? fs.readFileSync(callsPath, "utf-8") : "";
   fs.rmSync(tmpDir, { recursive: true, force: true });
   return { result, calls };
+}
+
+function runHelperRoute(options: HelperRouteRunOptions = {}) {
+  const script = `#!/usr/bin/env bash
+set -euo pipefail
+. ${JSON.stringify(COMPAT_HELPER)}
+printf 'compatible=%s\n' "$(nemoclaw_e2e_using_compatible_inference && echo yes || echo no)"
+printf 'base=%s\n' "$(nemoclaw_e2e_hosted_inference_base_url)"
+printf 'provider=%s\n' "$(nemoclaw_e2e_expected_route_provider)"
+printf 'model=%s\n' "$(nemoclaw_e2e_hosted_inference_model)"
+`;
+  const result = spawnSync("bash", ["-c", script], {
+    encoding: "utf-8",
+    env: {
+      ...process.env,
+      NVIDIA_INFERENCE_API_KEY: "nvapi-test-key",
+      ...options.env,
+    },
+  });
+  return result;
 }
 
 describe("hosted inference E2E config", () => {
@@ -119,15 +143,60 @@ describe("hosted inference E2E config", () => {
     expect(calls).not.toContain("Bearer");
   });
 
-  it("uses the NVIDIA Endpoints reachability probe for nvapi cloud routes", () => {
+  it.each([
+    "build",
+    "cloud",
+    "nvidia",
+    "nvidia-prod",
+  ])("uses NVIDIA Endpoints defaults for %s provider routes", (provider) => {
+    const route = runHelperRoute({
+      env: {
+        NVIDIA_INFERENCE_API_KEY: "nvapi-test-key",
+        NEMOCLAW_E2E_USE_HOSTED_INFERENCE: "",
+        NEMOCLAW_PROVIDER: provider,
+      },
+    });
     const { result, calls } = runHostedProbe({
       env: {
         NVIDIA_INFERENCE_API_KEY: "nvapi-test-key",
         NEMOCLAW_E2E_USE_HOSTED_INFERENCE: "",
-        NEMOCLAW_PROVIDER: "cloud",
+        NEMOCLAW_PROVIDER: provider,
       },
     });
 
+    expect(route.status).toBe(0);
+    expect(route.stdout).toContain("compatible=no");
+    expect(route.stdout).toContain("base=https://integrate.api.nvidia.com/v1");
+    expect(route.stdout).toContain("provider=nvidia-prod");
+    expect(route.stdout).toContain("model=nvidia/nemotron-3-super-120b-a12b");
+    expect(result.status).toBe(0);
+    expect(calls).toContain("ARG:https://integrate.api.nvidia.com/v1");
+    expect(calls).not.toContain("/models");
+    expect(calls).not.toContain("Authorization");
+    expect(calls).not.toContain("Bearer");
+  });
+
+  it("uses NVIDIA Endpoints defaults for nvapi-prefixed keys without hosted override", () => {
+    const route = runHelperRoute({
+      env: {
+        NVIDIA_INFERENCE_API_KEY: "nvapi-test-key",
+        NEMOCLAW_E2E_USE_HOSTED_INFERENCE: "",
+        NEMOCLAW_PROVIDER: "custom",
+      },
+    });
+    const { result, calls } = runHostedProbe({
+      env: {
+        NVIDIA_INFERENCE_API_KEY: "nvapi-test-key",
+        NEMOCLAW_E2E_USE_HOSTED_INFERENCE: "",
+        NEMOCLAW_PROVIDER: "custom",
+      },
+    });
+
+    expect(route.status).toBe(0);
+    expect(route.stdout).toContain("compatible=no");
+    expect(route.stdout).toContain("base=https://integrate.api.nvidia.com/v1");
+    expect(route.stdout).toContain("provider=nvidia-prod");
+    expect(route.stdout).toContain("model=nvidia/nemotron-3-super-120b-a12b");
     expect(result.status).toBe(0);
     expect(calls).toContain("ARG:https://integrate.api.nvidia.com/v1");
     expect(calls).not.toContain("/models");

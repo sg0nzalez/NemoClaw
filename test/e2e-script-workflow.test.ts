@@ -974,16 +974,24 @@ describe("E2E reusable workflow contract", () => {
             .filter((step) => envReferencesHostedInferenceSecret(step.env))
             .map((step) => ({ jobName, step })),
     );
-    const directNvidiaEndpointSecretSteps = Object.entries(nightlyWorkflow.jobs).flatMap(
+    const directPublicNvidiaSecretConsumers = Object.entries(nightlyWorkflow.jobs).flatMap(
       ([jobName, job]) =>
         job.uses
           ? []
-          : (job.steps ?? [])
-              .filter((step) => step.env?.NVIDIA_INFERENCE_API_KEY === GUARDED_PUBLIC_NVIDIA_SECRET)
-              .map((step) => ({ jobName, step })),
+          : (job.steps ?? []).flatMap((step) =>
+              Object.entries(step.env ?? {})
+                .filter(([, value]) => String(value).includes("secrets.NVIDIA_API_KEY"))
+                .map(([envName, value]) => ({ jobName, step, envName, value })),
+            ),
     );
+    const directNvidiaEndpointSecretSteps = directPublicNvidiaSecretConsumers
+      .filter(({ envName }) => envName === "NVIDIA_INFERENCE_API_KEY")
+      .map(({ jobName, step }) => ({ jobName, step }));
     const directSecretStepNames = directSecretSteps.map(
       ({ jobName, step }) => `${jobName}:${step.name ?? "<unnamed>"}`,
+    );
+    const directPublicNvidiaSecretConsumerNames = directPublicNvidiaSecretConsumers.map(
+      ({ jobName, step, envName }) => `${jobName}:${step.name ?? "<unnamed>"}:${envName}`,
     );
     const directNvidiaEndpointStepNames = directNvidiaEndpointSecretSteps.map(
       ({ jobName, step }) => `${jobName}:${step.name ?? "<unnamed>"}`,
@@ -1008,8 +1016,35 @@ describe("E2E reusable workflow contract", () => {
     expect(directSecretStepNames).not.toEqual(
       expect.arrayContaining([...directNvidiaEndpointSteps]),
     );
-    expect(directNvidiaEndpointStepNames).toEqual(
-      expect.arrayContaining([...directNvidiaEndpointSteps]),
+    expect([...directNvidiaEndpointStepNames].sort()).toEqual(
+      Array.from(directNvidiaEndpointSteps).sort(),
+    );
+    expect([...directPublicNvidiaSecretConsumerNames].sort()).toEqual(
+      [
+        "kimi-inference-compat-e2e:Run Kimi inference compatibility E2E test:NVIDIA_API_KEY",
+        "kimi-inference-compat-e2e:Sanitize Kimi logs on failure:NVIDIA_API_KEY",
+        "onboard-repair-e2e:Install NemoClaw:NVIDIA_INFERENCE_API_KEY",
+        "onboard-repair-e2e:Run onboard repair E2E test:NVIDIA_INFERENCE_API_KEY",
+        "onboard-resume-e2e:Install NemoClaw:NVIDIA_INFERENCE_API_KEY",
+        "onboard-resume-e2e:Run onboard resume E2E test:NVIDIA_INFERENCE_API_KEY",
+        "openclaw-tui-chat-correlation-e2e:Run OpenClaw TUI chat correlation E2E test:NVIDIA_INFERENCE_API_KEY",
+      ].sort(),
+    );
+    for (const { value, jobName, step, envName } of directPublicNvidiaSecretConsumers) {
+      expect(value, `${jobName}:${step.name ?? "<unnamed>"}:${envName}`).toBe(
+        GUARDED_PUBLIC_NVIDIA_SECRET,
+      );
+    }
+
+    const nightlyWorkflowText = readFileSync(".github/workflows/nightly-e2e.yaml", "utf8");
+    expect(nightlyWorkflowText).toContain(
+      "NVIDIA_API_KEY: selected timeout-sensitive direct lanes",
+    );
+    expect(nightlyWorkflowText).toContain("https://integrate.api.nvidia.com/v1");
+    expect(nightlyWorkflowText).toContain("reviewed\n#     direct-lane allowlist");
+    expect(nightlyWorkflowText).toContain("withheld from workflow_dispatch target_ref runs");
+    expect(nightlyWorkflowText).toContain(
+      "Return\n# these lanes to hosted-compatible inference only after",
     );
 
     expect(directSecretSteps.length).toBeGreaterThanOrEqual(12);

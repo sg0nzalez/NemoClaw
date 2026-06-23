@@ -99,11 +99,27 @@
 # Runs directly on the runner (not inside Docker) because OpenShell bootstraps
 # a K3s cluster inside a privileged Docker container — nesting would break networking.
 #
-# NVIDIA_INFERENCE_API_KEY for hosted CI inference:
-#   - Repository secret: Settings → Secrets and variables → Actions → Repository secrets.
-#   - Environment secret: only available if the job sets `environment: <that environment name>`.
-#     (Storing the key under Environments / NVIDIA_INFERENCE_API_KEY without `environment:` here leaves the
-#     variable empty in the job — repository secrets and environment secrets are separate.)
+# Live inference secret routing:
+#   - NVIDIA_INFERENCE_API_KEY: hosted OpenAI-compatible CI endpoint lanes
+#     (`custom`, https://inference-api.nvidia.com/v1). This is the default
+#     hosted-nightly route and is also exported as COMPATIBLE_API_KEY where the
+#     product expects an OpenAI-compatible credential env var.
+#   - NVIDIA_API_KEY: selected timeout-sensitive direct lanes that intentionally
+#     use the public NVIDIA Endpoints/Build route (`cloud`/`nvidia-prod`,
+#     https://integrate.api.nvidia.com/v1). Those scripts read the common
+#     NVIDIA_INFERENCE_API_KEY env name, so the workflow exports the repository
+#     NVIDIA_API_KEY secret as NVIDIA_INFERENCE_API_KEY only for the reviewed
+#     direct-lane allowlist.
+#   - Repository secrets: Settings → Secrets and variables → Actions → Repository secrets.
+#   - Environment secrets are only available if the job sets `environment: <that environment name>`;
+#     storing these keys under Environments without `environment:` here leaves them empty.
+#   - Secrets are withheld from workflow_dispatch target_ref runs so trusted
+#     workflows never pass live inference keys to untrusted checked-out code.
+# Source boundary: the direct-lane route split isolates timeout-prone
+# hosted-compatible endpoint reachability from the product provider path. Return
+# these lanes to hosted-compatible inference only after that endpoint is proven
+# reachable/reliable for the same jobs and this source-of-truth plus contract
+# allowlist are updated together.
 # Only runs on schedule and manual dispatch — never on PRs (secret protection).
 
 name: E2E / Nightly
