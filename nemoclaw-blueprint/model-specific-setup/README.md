@@ -20,7 +20,7 @@ Manifests follow `schema.json`:
 - `match`: model/provider route predicates.
 - `effects`: declarative, agent-scoped effects.
 
-The first OpenClaw entry is `openclaw/kimi-k2.6-managed-inference.json`. It preserves the Kimi K2.6 managed `inference.local` compatibility behavior from PR #3046 and also covers later Kimi Code variants that need the same OpenClaw route handling.
+The first OpenClaw entry is `openclaw/kimi-k2.6-managed-inference.json`. It preserves the Kimi K2.6 managed `inference.local` compatibility behavior from PR #3046 and also covers later Kimi Code variants that need the same OpenClaw route handling. The Kimi K2.7 Code entry is a compatibility-prep path only: keep its curated NVIDIA Endpoints exposure catalog-gated until the authenticated NVIDIA `/v1/models` catalog and chat-completions route both list it, and remove the shared compatibility entry when Kimi returns discrete OpenClaw-safe tool calls without reasoning fields on the managed `inference.local` route.
 
 ## Contributor Guidance
 

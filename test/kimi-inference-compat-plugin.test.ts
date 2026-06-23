@@ -449,7 +449,19 @@ describe("nemoclaw Kimi inference compat plugin", () => {
   });
 
   it("matches Kimi K2.7 Code managed inference refs", async () => {
-    const message = toolMessage("hostname; date; uptime");
+    // Compatibility-prep fixture for the K2.7 rollout: if the managed route
+    // returns the same OpenClaw-incompatible reasoning fields plus combined
+    // safe exec diagnostics observed on K2.6, this plugin keeps the sandbox
+    // route usable. Remove the K2.7 manifest match when the managed K2.7 route
+    // emits discrete OpenClaw-safe tool calls without reasoning fields.
+    const message = {
+      ...toolMessage("hostname; date; uptime"),
+      reasoning: "PRIVATE K2.7 reasoning",
+      content: [
+        { type: "thinking", text: "PRIVATE K2.7 thinking block" },
+        ...toolMessage("hostname; date; uptime").content,
+      ],
+    };
     const provider = makeProvider();
     const wrapper = provider.wrapStreamFn({
       ...managedKimiCtx(() => ({
@@ -473,6 +485,7 @@ describe("nemoclaw Kimi inference compat plugin", () => {
 
     expect(result.content.map(toolCommand)).toEqual(["hostname", "date", "uptime"]);
     expect(JSON.stringify(result)).not.toContain("hostname; date; uptime");
+    expect(JSON.stringify(result)).not.toContain("PRIVATE K2.7");
   });
 
   it("rewrites object tool-call deltas at their content index without retaining compound commands", () => {

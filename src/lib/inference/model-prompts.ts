@@ -14,6 +14,11 @@ const { getCredential, prompt } = require("../credentials/store");
 export type { BackToSelection };
 export { BACK_TO_SELECTION };
 export type ModelPromptResult = string | BackToSelection;
+export type CloudModelOption = {
+  id: string;
+  label: string;
+  requiresCatalogValidation?: boolean;
+};
 
 export const REMOTE_MODEL_OPTIONS: Record<string, string[]> = {
   openai: ["gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano", "gpt-5.4-pro-2026-03-05"],
@@ -43,7 +48,7 @@ export interface ModelPromptOptions {
   getNavigationChoiceFn?: (value?: string) => "back" | "exit" | null;
   getCredentialFn?: (envName: string) => string | null;
   validateNvidiaEndpointModelFn?: (model: string, apiKey: string) => PromptValidationResult;
-  cloudModelOptions?: Array<{ id: string; label: string }>;
+  cloudModelOptions?: CloudModelOption[];
   remoteModelOptions?: Record<string, string[]>;
   backToSelection?: BackToSelection;
   /** Pre-fill this model ID as the default in interactive prompts. */
@@ -133,55 +138,80 @@ export async function promptCloudModel(
 ): Promise<ModelPromptResult> {
   const deps = resolvePromptOptions(options);
   const defaultModelId = options.defaultModelId ?? "";
+  const catalogRejectedModelIds = new Set<string>();
+  while (true) {
+    // Find if the default matches a curated option
+    const defaultCuratedIdx = defaultModelId
+      ? deps.cloudModelOptions.findIndex(
+          (o) => o.id === defaultModelId && !catalogRejectedModelIds.has(o.id),
+        )
+      : -1;
+    // Default list selection: match defaultModelId, or fall back to first option (index 0)
+    const defaultListChoice = defaultCuratedIdx >= 0 ? defaultCuratedIdx + 1 : 1;
 
-  // Find if the default matches a curated option
-  const defaultCuratedIdx = defaultModelId
-    ? deps.cloudModelOptions.findIndex((o) => o.id === defaultModelId)
-    : -1;
-  // Default list selection: match defaultModelId, or fall back to first option (index 0)
-  const defaultListChoice = defaultCuratedIdx >= 0 ? defaultCuratedIdx + 1 : 1;
+    deps.writeLine("");
+    deps.writeLine("  Cloud models:");
+    deps.cloudModelOptions.forEach((option, index) => {
+      deps.writeLine(`    ${index + 1}) ${option.label} (${option.id})`);
+    });
+    deps.writeLine(`    ${deps.cloudModelOptions.length + 1}) Other...`);
+    deps.writeLine("");
 
-  deps.writeLine("");
-  deps.writeLine("  Cloud models:");
-  deps.cloudModelOptions.forEach((option, index) => {
-    deps.writeLine(`    ${index + 1}) ${option.label} (${option.id})`);
-  });
-  deps.writeLine(`    ${deps.cloudModelOptions.length + 1}) Other...`);
-  deps.writeLine("");
+    const choice = await deps.promptFn(`  Choose model [${defaultListChoice}]: `);
+    const navigation = deps.getNavigationChoiceFn(choice);
+    if (navigation === "back") {
+      return deps.backToSelection;
+    }
+    if (navigation === "exit") {
+      deps.exitFn();
+    }
+    const index = parseInt(choice || String(defaultListChoice), 10) - 1;
+    if (Number.isFinite(index) && index >= 0 && index < deps.cloudModelOptions.length) {
+      const selected = deps.cloudModelOptions[index];
+      if (!selected.requiresCatalogValidation) {
+        return selected.id;
+      }
+      const nvidiaApiKey = deps.getCredentialFn("NVIDIA_INFERENCE_API_KEY");
+      if (!nvidiaApiKey) {
+        deps.errorLine(
+          `  NVIDIA_INFERENCE_API_KEY is required before selecting ${selected.label}; NemoClaw must first confirm it appears in the NVIDIA Endpoints catalog.`,
+        );
+        return deps.backToSelection;
+      }
+      const validation = deps.validateNvidiaEndpointModelFn(selected.id, nvidiaApiKey);
+      if (validation.ok) {
+        return selected.id;
+      }
+      deps.errorLine(
+        `  ${validation.message || `${selected.label} is not currently available from NVIDIA Endpoints.`}`,
+      );
+      catalogRejectedModelIds.add(selected.id);
+      continue;
+    }
 
-  const choice = await deps.promptFn(`  Choose model [${defaultListChoice}]: `);
-  const navigation = deps.getNavigationChoiceFn(choice);
-  if (navigation === "back") {
-    return deps.backToSelection;
-  }
-  if (navigation === "exit") {
-    deps.exitFn();
-  }
-  const index = parseInt(choice || String(defaultListChoice), 10) - 1;
-  if (Number.isFinite(index) && index >= 0 && index < deps.cloudModelOptions.length) {
-    return deps.cloudModelOptions[index].id;
-  }
+    const nvidiaApiKey = deps.getCredentialFn("NVIDIA_INFERENCE_API_KEY");
+    if (!nvidiaApiKey) {
+      deps.errorLine(
+        "  NVIDIA_INFERENCE_API_KEY is required before validating a custom NVIDIA Endpoints model.",
+      );
+      return deps.backToSelection;
+    }
 
-  const nvidiaApiKey = deps.getCredentialFn("NVIDIA_INFERENCE_API_KEY");
-  if (!nvidiaApiKey) {
-    deps.errorLine(
-      "  NVIDIA_INFERENCE_API_KEY is required before validating a custom NVIDIA Endpoints model.",
+    // If default is a custom (non-curated) model ID, pre-fill it in the manual prompt
+    const manualDefault =
+      defaultCuratedIdx < 0 && defaultModelId && isSafeModelId(defaultModelId)
+        ? defaultModelId
+        : "";
+    const manualLabel = manualDefault
+      ? `  NVIDIA Endpoints model id [${manualDefault}]: `
+      : "  NVIDIA Endpoints model id: ";
+    return promptManualModelId(
+      manualLabel,
+      "NVIDIA Endpoints",
+      (model) => deps.validateNvidiaEndpointModelFn(model, nvidiaApiKey),
+      { ...deps, promptFn: async (q) => (await deps.promptFn(q)) || manualDefault },
     );
-    return deps.backToSelection;
   }
-
-  // If default is a custom (non-curated) model ID, pre-fill it in the manual prompt
-  const manualDefault =
-    defaultCuratedIdx < 0 && defaultModelId && isSafeModelId(defaultModelId) ? defaultModelId : "";
-  const manualLabel = manualDefault
-    ? `  NVIDIA Endpoints model id [${manualDefault}]: `
-    : "  NVIDIA Endpoints model id: ";
-  return promptManualModelId(
-    manualLabel,
-    "NVIDIA Endpoints",
-    (model) => deps.validateNvidiaEndpointModelFn(model, nvidiaApiKey),
-    { ...deps, promptFn: async (q) => (await deps.promptFn(q)) || manualDefault },
-  );
 }
 
 export async function promptRemoteModel(

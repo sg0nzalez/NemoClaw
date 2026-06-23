@@ -36,13 +36,17 @@ describe("inference selection config", () => {
       "openai/gpt-oss-120b",
       "deepseek-ai/deepseek-v4-pro",
     ]);
+    expect(CLOUD_MODEL_OPTIONS[5]).toMatchObject({
+      id: "moonshotai/kimi-k2.7-code",
+      requiresCatalogValidation: true,
+    });
     expect(DEFAULT_CLOUD_MODEL).toBe("nvidia/nemotron-3-super-120b-a12b");
   });
 
   it("aligns Hermes Provider defaults with the Hermes Agent Nous catalog", () => {
-    expect(DEFAULT_HERMES_PROVIDER_MODEL).toBe("moonshotai/kimi-k2.7-code");
+    expect(DEFAULT_HERMES_PROVIDER_MODEL).toBe("moonshotai/kimi-k2.6");
     expect(HERMES_PROVIDER_MODEL_OPTIONS.slice(0, 10)).toEqual([
-      "moonshotai/kimi-k2.7-code",
+      "moonshotai/kimi-k2.6",
       "xiaomi/mimo-v2.5-pro",
       "xiaomi/mimo-v2.5",
       "tencent/hy3-preview",
