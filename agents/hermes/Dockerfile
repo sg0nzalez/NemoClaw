@@ -6,7 +6,7 @@
 # Layers PR-specific code (plugin, config, startup script) on top of the
 # pre-built Hermes base image. Mirrors the OpenClaw Dockerfile structure.
 
-ARG BASE_IMAGE=ghcr.io/nvidia/nemoclaw/hermes-sandbox-base:latest
+ARG BASE_IMAGE=ghcr.io/nvidia/nemoclaw/hermes-sandbox-base@sha256:60333c1982ad855d55887b4488e867eb343f3930a30aa8e0268e5397fc6f2926
 
 # hadolint ignore=DL3006
 FROM ${BASE_IMAGE}

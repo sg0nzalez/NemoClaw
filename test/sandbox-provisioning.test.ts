@@ -1320,6 +1320,16 @@ describe("Hermes sandbox provisioning", () => {
     }
   });
 
+  it("pins the Hermes final image default base to an immutable digest", () => {
+    const dockerfile = fs.readFileSync(HERMES_DOCKERFILE, "utf-8");
+    const baseImage = dockerfile.match(/^ARG BASE_IMAGE=(.+)$/m)?.[1];
+
+    expect(baseImage).toMatch(
+      /^ghcr\.io\/nvidia\/nemoclaw\/hermes-sandbox-base@sha256:[0-9a-f]{64}$/,
+    );
+    expect(baseImage).not.toContain(":latest");
+  });
+
   it("prebuilds the Hermes dashboard bundle in final images built from stale bases", () => {
     const dockerfile = fs.readFileSync(HERMES_DOCKERFILE, "utf-8");
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-dashboard-build-"));
