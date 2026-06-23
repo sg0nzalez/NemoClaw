@@ -111,6 +111,17 @@ type OpenClawPluginInstall = {
 
 export class MessagingBuildApplierError extends Error {}
 
+const REVIEWED_OPENCLAW_PLUGIN_INTEGRITY_BY_PACKAGE_SPEC: Readonly<Record<string, string>> = {
+  "@openclaw/discord@2026.6.9":
+    "sha512-esFhwYW0nrFQvBhkPeK/1qmvumlVAY8ddhYBt7geIYLlBriwPJRwtnVLLfp0n1LbS0/XVZ0ORqlvkWq8Vv61vg==",
+  "@openclaw/slack@2026.6.9":
+    "sha512-JZHc0L3s6s+yBsWowZtE/DWZJOuy4lTE6uTuUbF5QNjUvQQUlCHMFrwPycrXLesVq1il5yAvo82VbERRsIzgxQ==",
+  "@openclaw/whatsapp@2026.6.9":
+    "sha512-HWz9CryGcSk5ork03DlESVlRcDBnwuXPEKgqdSz/Qt0OnQ2Z1wqNGpwVlAqngvDQDH2AzkNXWuTu2M0C16R8vA==",
+  "@tencent-weixin/openclaw-weixin@2.4.3":
+    "sha512-dPQbidUNWigC6V10vGW4i+GLH09x+6zUhafZRjuxkJ9GDu8o62WBsnUTojp4KqUH756hz+t2v9khiCRSi0dBDw==",
+};
+
 export const DEFAULT_MESSAGING_RUNTIME_PLAN_PATH =
   "/usr/local/share/nemoclaw/messaging-runtime-plan.json";
 
@@ -422,9 +433,9 @@ function collectOpenClawMessagingPluginInstalls(
     const install = readOpenClawPackageInstall(step.value, step.outputId);
     const resolvedSpec = resolveOpenClawPackageSpec(install.spec, env);
     const npmPackage = parseNpmPackageSpec(resolvedSpec);
-    const integrity =
-      (npmPackage?.version ? install.integrityByVersion?.[npmPackage.version] : undefined) ??
-      install.integrity;
+    const integrity = npmPackage
+      ? REVIEWED_OPENCLAW_PLUGIN_INTEGRITY_BY_PACKAGE_SPEC[npmPackage.packageSpec]
+      : undefined;
     const resolvedInstall: OpenClawPluginInstall = {
       spec: resolvedSpec,
       ...(npmPackage ? { npmPackageSpec: npmPackage.packageSpec } : {}),

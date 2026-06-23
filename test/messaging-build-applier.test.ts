@@ -328,7 +328,7 @@ describe("messaging-build-applier.mts: agent-install", () => {
     }
   });
 
-  it("installs package-install specs supplied by the compiled plan", () => {
+  it("installs reviewed packages using code-owned integrity instead of serialized plan pins", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-package-plan-"));
     const tracePath = path.join(tmp, "openclaw.trace");
     const fakeOpenclaw = path.join(tmp, "openclaw");
@@ -348,7 +348,7 @@ describe("messaging-build-applier.mts: agent-install", () => {
       [
         "#!/bin/sh",
         'printf \'npm|%s|%s|%s\\n\' "$1" "$2" "$3" >> "$OPENCLAW_TRACE"',
-        'if [ "${1:-}" = "view" ] && [ "${2:-}" = "@example/manifest-owned-plugin@2026.5.22" ] && [ "${3:-}" = "dist.integrity" ]; then printf "sha512-example\\n"; exit 0; fi',
+        'if [ "${1:-}" = "view" ] && [ "${2:-}" = "@openclaw/discord@2026.6.9" ] && [ "${3:-}" = "dist.integrity" ]; then printf "%s\\n" "$OPENCLAW_DISCORD_2026_6_9_INTEGRITY"; exit 0; fi',
         "exit 1",
         "",
       ].join("\n"),
@@ -370,8 +370,11 @@ describe("messaging-build-applier.mts: agent-install", () => {
           required: true,
           value: {
             manager: "openclaw-plugin",
-            spec: "npm:@example/manifest-owned-plugin@{{openclaw.version}}",
-            integrity: "sha512-example",
+            spec: "npm:@openclaw/discord@{{openclaw.version}}",
+            integrity: "sha512-plan-controlled-pin",
+            integrityByVersion: {
+              "2026.6.9": "sha512-plan-controlled-version-pin",
+            },
             pin: false,
           },
         },
@@ -395,7 +398,8 @@ describe("messaging-build-applier.mts: agent-install", () => {
           env: {
             PATH: tmp + ":" + (process.env.PATH || "/usr/bin:/bin"),
             OPENCLAW_TRACE: tracePath,
-            OPENCLAW_VERSION: "2026.5.22",
+            OPENCLAW_DISCORD_2026_6_9_INTEGRITY,
+            OPENCLAW_VERSION: "2026.6.9",
             NEMOCLAW_MESSAGING_PLAN_B64: Buffer.from(JSON.stringify(plan)).toString("base64"),
           },
           timeout: 10_000,
@@ -404,15 +408,15 @@ describe("messaging-build-applier.mts: agent-install", () => {
 
       expect(result.status, result.stderr).toBe(0);
       expect(fs.readFileSync(tracePath, "utf-8").trim().split("\n")).toEqual([
-        "npm|view|@example/manifest-owned-plugin@2026.5.22|dist.integrity",
-        "plugins|install|npm:@example/manifest-owned-plugin@2026.5.22",
+        "npm|view|@openclaw/discord@2026.6.9|dist.integrity",
+        "plugins|install|npm:@openclaw/discord@2026.6.9",
       ]);
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
   });
 
-  it("fails closed before installing npm plugin specs without committed integrity", () => {
+  it("fails closed before installing unreviewed npm plugin specs even when plans carry integrity", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-package-plan-"));
     const tracePath = path.join(tmp, "openclaw.trace");
     fs.writeFileSync(
@@ -442,6 +446,7 @@ describe("messaging-build-applier.mts: agent-install", () => {
           value: {
             manager: "openclaw-plugin",
             spec: "npm:@example/manifest-owned-plugin@{{openclaw.version}}",
+            integrity: "sha512-plan-controlled-pin",
             pin: false,
           },
         },
