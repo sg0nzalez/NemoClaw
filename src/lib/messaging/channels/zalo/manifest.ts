@@ -22,6 +22,8 @@ export const zaloManifest = {
       kind: "secret",
       required: true,
       envKey: "ZALO_BOT_TOKEN",
+      formatPattern: "^\\d+:.+$",
+      formatHint: "Zalo bot tokens are <numeric-id>:<secret> from the Zalo Bot Platform.",
       prompt: {
         label: "Zalo Bot Token",
         help: "Create a bot at the Zalo Bot Platform (https://bot.zaloplatforms.com), then copy the token (format id:secret).",
@@ -33,6 +35,8 @@ export const zaloManifest = {
       required: false,
       envKey: "ZALO_ALLOWED_IDS",
       statePath: "allowedIds.zalo",
+      formatPattern: "^\\d+(,\\d+)*$",
+      formatHint: "Comma-separated numeric Zalo user IDs (e.g. 123,456).",
       prompt: {
         label: "Zalo User ID (for DM access)",
         help: "Numeric Zalo user IDs allowed to DM the bot. Zalo has no username lookup, so use numeric IDs.",
