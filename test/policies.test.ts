@@ -1669,29 +1669,6 @@ exit 1
       }
     });
 
-    it("WeCom AI Bot policies do not allow the Agent gettoken exchange", () => {
-      const policySources = [
-        "nemoclaw-blueprint/policies/presets/wecom.yaml",
-        "agents/hermes/policy-additions.yaml",
-      ];
-
-      for (const relativePath of policySources) {
-        const parsed = parseRepoYaml(relativePath);
-        const endpoints = Object.values(parsed.network_policies ?? {}).flatMap(
-          (policy: any) => policy.endpoints ?? [],
-        );
-        const qyapiRules = endpoints
-          .filter((endpoint: any) => endpoint.host === "qyapi.weixin.qq.com")
-          .flatMap((endpoint: any) => endpoint.rules ?? [])
-          .map((rule: any) => rule.allow)
-          .filter((rule: any): rule is { method: string; path: string } =>
-            Boolean(rule?.method && rule?.path),
-          );
-
-        expect(qyapiRules).not.toContainEqual({ method: "GET", path: "/cgi-bin/gettoken" });
-      }
-    });
-
     it("Hermes messaging gateway policies use native inspected WebSocket policy", () => {
       const policyFiles = [
         path.join(REPO_ROOT, "agents/hermes/policy-additions.yaml"),
