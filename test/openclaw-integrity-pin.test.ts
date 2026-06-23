@@ -101,6 +101,12 @@ describe("OpenClaw npm integrity pins", () => {
     expect(reviewNote).toContain(PINNED_OPENCLAW_INTEGRITY);
     expect(reviewNote).toContain("`0` high");
     expect(reviewNote).toContain("`0` critical");
+    expect(reviewNote).toContain("Slack inbound `app_mention` allow/deny path");
+    expect(reviewNote).toContain("openclaw-runtime-api");
+    expect(reviewNote).toContain("stable Slack inbound runtime/test facade");
+    expect(reviewNote).toContain("gateway/upstream reporting layer");
+    expect(reviewNote).toContain("one-line recovery hint");
+    expect(reviewNote).toContain("default 180-second timeout");
   });
 
   it("installs the reviewed pin when registry integrity matches the committed pin", () => {

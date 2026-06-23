@@ -18,6 +18,11 @@ import { ubuntuRepoDocker } from "../scenarios/matrix.ts";
 // broken spinner+connected signature from #4434. The legacy bash lane remains
 // wired until Phase 11 shell retirement; this file adds the equivalent Vitest
 // coverage without introducing shared framework or registry helpers.
+//
+// This is still a partial #4434 guard for OpenClaw 2026.6.9: it does not
+// require a gateway/upstream reporting layer or one-line recovery hint because
+// that upstream TUI output does not exist yet for this synthetic iptables block.
+// Tighten this scenario and the legacy shell guard together when it does.
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "../../..");
 const DOCKERFILE_BASE = path.join(REPO_ROOT, "Dockerfile.base");
@@ -154,6 +159,10 @@ runIssue4434LiveTest(
       ],
       migratedFrom: "test/e2e/test-issue-4434-tui-unreachable-inference.sh",
       issue: "#4434",
+      acceptedGap: [
+        "OpenClaw 2026.6.9 does not emit a gateway/upstream reporting layer for this synthetic iptables block",
+        "OpenClaw 2026.6.9 does not emit a one-line recovery hint for this synthetic iptables block",
+      ],
     });
 
     const prereq = await host.command(
