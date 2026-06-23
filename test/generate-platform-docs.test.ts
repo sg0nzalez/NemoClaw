@@ -252,9 +252,9 @@ print(block)
   // credential-boundary invariants. Each test reads the actual matrix and
   // docs at the PR head, not a fixture, so a future edit that breaks the
   // invariant fails this suite before the change ships.
-  it("every documented `--agent <id>` in the matrix resolves to an installed manifest whose name field agrees", () => {
-    const matrixPath = path.join(import.meta.dirname, "..", "ci", "platform-matrix.json");
-    const matrix = JSON.parse(readFileSync(matrixPath, "utf-8"));
+  it("every `--agent <id>` example across matrix, docs, and generated skills resolves to a manifest whose name field agrees", () => {
+    const repoRoot = path.join(import.meta.dirname, "..");
+    const matrix = JSON.parse(readFileSync(path.join(repoRoot, "ci", "platform-matrix.json"), "utf-8"));
     const onboardExample = /(?:\$\$)?nemoclaw onboard --agent ([a-z0-9-]+)/g;
     const agentIds = new Set<string>();
     for (const section of ["agents", "out_of_scope"] as const) {
@@ -263,23 +263,35 @@ print(block)
         for (const match of notes.matchAll(onboardExample)) agentIds.add(match[1]);
       }
     }
+    const docTargets = [
+      "docs/get-started/quickstart-langchain-deepagents-code.mdx",
+      "docs/reference/platform-support.mdx",
+      ".agents/skills/nemoclaw-user-reference/references/platform-support.md",
+      "skills/nemoclaw-user-reference/references/platform-support.md",
+    ];
+    for (const rel of docTargets) {
+      const fullPath = path.join(repoRoot, rel);
+      if (!existsSync(fullPath)) continue;
+      const body = readFileSync(fullPath, "utf-8");
+      for (const match of body.matchAll(onboardExample)) agentIds.add(match[1]);
+    }
     expect(agentIds.size).toBeGreaterThan(0);
-    const agentsRoot = path.join(import.meta.dirname, "..", "agents");
+    const agentsRoot = path.join(repoRoot, "agents");
     for (const id of agentIds) {
       const manifest = path.join(agentsRoot, id, "manifest.yaml");
       expect(
         existsSync(manifest),
-        `Matrix advertises \`--agent ${id}\` but agents/${id}/manifest.yaml is missing`,
+        `\`--agent ${id}\` advertised somewhere in matrix/docs/skills but agents/${id}/manifest.yaml is missing`,
       ).toBe(true);
       const manifestBody = readFileSync(manifest, "utf-8");
       const nameMatch = manifestBody.match(/^name:\s*([a-z0-9-]+)\s*$/m);
       expect(
         nameMatch?.[1],
-        `Matrix advertises \`--agent ${id}\` but agents/${id}/manifest.yaml lacks a name field`,
+        `agents/${id}/manifest.yaml lacks a name field`,
       ).toBeDefined();
       expect(
         nameMatch?.[1],
-        `Matrix advertises \`--agent ${id}\` but agents/${id}/manifest.yaml declares name ${nameMatch?.[1]}, breaking the loader contract`,
+        `agents/${id}/manifest.yaml declares name ${nameMatch?.[1]}, breaking the loader contract for documented \`--agent ${id}\``,
       ).toBe(id);
     }
   });
@@ -313,8 +325,20 @@ print(block)
       ).toMatch(/credential-bearing/);
       expect(
         body,
+        `${rel} missing the /proc readability caveat that distinguishes env delivery from full process isolation`,
+      ).toMatch(/\/proc/);
+      expect(
+        body,
         `${rel} still passes \$NVIDIA_API_KEY via argv`,
       ).not.toMatch(/python3 [^\n]*"\$NVIDIA_API_KEY"/);
+      expect(
+        body,
+        `${rel} reintroduces a fixed secret-bearing /tmp/auth-profiles.json output`,
+      ).not.toMatch(/\/tmp\/auth-profiles\.json/);
+      expect(
+        body,
+        `${rel} reintroduces a fixed secret-bearing /tmp/openclaw\\.updated\\.json output`,
+      ).not.toMatch(/\/tmp\/openclaw\.updated\.json/);
     }
   });
 });
