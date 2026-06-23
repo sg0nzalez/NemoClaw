@@ -252,7 +252,7 @@ print(block)
   // credential-boundary invariants. Each test reads the actual matrix and
   // docs at the PR head, not a fixture, so a future edit that breaks the
   // invariant fails this suite before the change ships.
-  it("every documented `--agent <id>` in the matrix resolves to an installed agent manifest", () => {
+  it("every documented `--agent <id>` in the matrix resolves to an installed manifest whose name field agrees", () => {
     const matrixPath = path.join(import.meta.dirname, "..", "ci", "platform-matrix.json");
     const matrix = JSON.parse(readFileSync(matrixPath, "utf-8"));
     const onboardExample = /(?:\$\$)?nemoclaw onboard --agent ([a-z0-9-]+)/g;
@@ -271,6 +271,16 @@ print(block)
         existsSync(manifest),
         `Matrix advertises \`--agent ${id}\` but agents/${id}/manifest.yaml is missing`,
       ).toBe(true);
+      const manifestBody = readFileSync(manifest, "utf-8");
+      const nameMatch = manifestBody.match(/^name:\s*([a-z0-9-]+)\s*$/m);
+      expect(
+        nameMatch?.[1],
+        `Matrix advertises \`--agent ${id}\` but agents/${id}/manifest.yaml lacks a name field`,
+      ).toBeDefined();
+      expect(
+        nameMatch?.[1],
+        `Matrix advertises \`--agent ${id}\` but agents/${id}/manifest.yaml declares name ${nameMatch?.[1]}, breaking the loader contract`,
+      ).toBe(id);
     }
   });
 
@@ -285,19 +295,26 @@ print(block)
     expect(langchainRow.notes).not.toMatch(/Only OpenClaw and Hermes are integrated\.?\s*$/);
   });
 
-  it("sub-agent credential guide retains safe temp-file and boundary-warning properties", () => {
-    const docPath = path.join(
-      import.meta.dirname,
-      "..",
-      "docs",
-      "inference",
-      "set-up-sub-agent.mdx",
-    );
-    const body = readFileSync(docPath, "utf-8");
-    expect(body).toMatch(/umask 077/);
-    expect(body).toMatch(/mktemp -d/);
-    expect(body).toMatch(/trap .* EXIT/);
-    expect(body).toMatch(/<Warning>[\s\S]*credential-bearing[\s\S]*<\/Warning>/);
-    expect(body).not.toMatch(/python3 [^\n]*"\$NVIDIA_API_KEY"/);
+  it("sub-agent credential guide retains safe temp-file and boundary-warning properties across source and generated skill copies", () => {
+    const repoRoot = path.join(import.meta.dirname, "..");
+    const targets = [
+      "docs/inference/set-up-sub-agent.mdx",
+      ".agents/skills/nemoclaw-user-configure-inference/references/set-up-sub-agent.md",
+      "skills/nemoclaw-user-configure-inference/references/set-up-sub-agent.md",
+    ];
+    for (const rel of targets) {
+      const body = readFileSync(path.join(repoRoot, rel), "utf-8");
+      expect(body, `${rel} missing umask 077`).toMatch(/umask 077/);
+      expect(body, `${rel} missing mktemp -d`).toMatch(/mktemp -d/);
+      expect(body, `${rel} missing trap EXIT cleanup`).toMatch(/trap .* EXIT/);
+      expect(
+        body,
+        `${rel} missing credential-boundary callout`,
+      ).toMatch(/credential-bearing/);
+      expect(
+        body,
+        `${rel} still passes \$NVIDIA_API_KEY via argv`,
+      ).not.toMatch(/python3 [^\n]*"\$NVIDIA_API_KEY"/);
+    }
   });
 });
