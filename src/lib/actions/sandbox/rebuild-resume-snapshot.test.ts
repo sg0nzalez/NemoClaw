@@ -184,4 +184,18 @@ describe("rebuild resume snapshot repair", () => {
     expect(observed.repairedMachineState).toBe("provider_selection");
     expect(process.env.NEMOCLAW_SANDBOX_NAME).toBe("alpha");
   });
+
+  it("normalizes stale nonterminal machine snapshots before resume repair", async () => {
+    session.machine.state = "sandbox";
+    session.machine.revision = 20;
+
+    await expect(rebuildSandbox("alpha", ["--yes"], { throwOnError: true })).rejects.toThrow(
+      "Recreate failed",
+    );
+
+    expect(observed.preRepairMachineState).toBe("complete");
+    expect(observed.preRepairStatus).toBe("in_progress");
+    expect(observed.preRepairResumable).toBe(true);
+    expect(observed.repairedMachineState).toBe("provider_selection");
+  });
 });

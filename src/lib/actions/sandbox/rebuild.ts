@@ -730,16 +730,18 @@ export async function rebuildSandbox(
     // by resolveAgentName() and the wrong Dockerfile would be used.  (#2201)
     onboardSession.updateSession((s: Session) => {
       const now = new Date().toISOString();
+      const machine = s.machine;
       s.sandboxName = sandboxName;
       s.resumable = true;
       s.status = "in_progress";
-      s.failure = null;
-      s.machine = {
-        version: MACHINE_SNAPSHOT_VERSION,
-        state: "init",
-        stateEnteredAt: now,
-        revision: (s.machine?.revision ?? 0) + 1,
-      };
+      if (machine?.state !== "complete" && machine?.state !== "failed") {
+        s.machine = {
+          version: MACHINE_SNAPSHOT_VERSION,
+          state: "complete",
+          stateEnteredAt: now,
+          revision: (machine?.revision ?? 0) + 1,
+        };
+      }
       s.agent = rebuildAgent;
       s.messagingPlan = rebuildMessagingPlan;
       s.hermesToolGateways = rebuildsHermesSandbox ? rebuildHermesToolGateways : [];
