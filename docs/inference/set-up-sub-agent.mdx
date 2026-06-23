@@ -87,9 +87,14 @@ NVIDIA_API_KEY="$NVIDIA_API_KEY" python3 "$VLM_DEMO_DIR/vlm-subagent/openclaw-pa
   < /tmp/openclaw.json > "$WORK_DIR/openclaw.updated.json"
 ```
 
-The helper reads `NVIDIA_API_KEY` from the environment (so it never appears in process listings or shell history), reads `/tmp/openclaw.json` from standard input, adds the Omni provider and `vision-operator` entry, and writes the patched config to a mode-0600 temp file under `$WORK_DIR`.
+The helper reads `NVIDIA_API_KEY` from the environment (so the key avoids argv and shell history), reads `/tmp/openclaw.json` from standard input, adds the Omni provider and `vision-operator` entry, and writes the patched config to a mode-0600 temp file under `$WORK_DIR`.
 The `trap` cleans up the temp directory on shell exit so the patched JSON does not linger on disk.
 Do not commit the patched config or any other file that contains a real API key.
+
+<Warning>
+The auxiliary sub-agent path writes a real provider key into sandbox state at `/sandbox/.openclaw/agents/<id>/agent/auth-profiles.json`. That file sits outside NemoClaw's normal host-side OpenShell credential-store boundary, so a snapshot, backup, or cloned sandbox image carries the key with it. Use this flow only when the normal host-side credential route cannot serve the auxiliary provider, and treat the affected sandbox as credential-bearing.
+Environment-delivered keys also remain readable from `/proc` by same-user or root processes on most Linux configurations; this pattern avoids argv and shell history, not all process inspection. Prefer a stdin or mode-0600 input file when the demo helper supports it.
+</Warning>
 
 Upload the patched config and refresh the hash.
 In the default mutable state, this keeps the local hash consistent but does not make it tamper-proof.
