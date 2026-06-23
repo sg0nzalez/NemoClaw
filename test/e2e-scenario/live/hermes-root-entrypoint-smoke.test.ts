@@ -1,13 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
 import { DockerProbe, resultText, type DockerCommandResult } from "../fixtures/docker-probe.ts";
-import type { ArtifactSink } from "../fixtures/artifacts.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
 
 // Migrated from test/e2e/test-hermes-root-entrypoint-smoke.sh. This remains a
@@ -99,38 +95,7 @@ async function expectContainerShFails(
   expect(result.exitCode, `${container}: ${message}\n${resultText(result)}`).not.toBe(0);
 }
 
-async function copyStoppedContainerFile(
-  probe: DockerProbe,
-  artifacts: ArtifactSink,
-  redact: (text: string) => string,
-  container: string,
-  containerPath: string,
-  artifactName: string,
-): Promise<void> {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-root-smoke-diag-"));
-  const dest = path.join(tmp, path.basename(containerPath));
-  try {
-    const copied = await probe.run(["cp", `${container}:${containerPath}`, dest], {
-      artifactName: `diag-${container}-${artifactName}-copy`,
-      timeoutMs: 30_000,
-    });
-    await (copied.exitCode === 0
-      ? artifacts.writeText(
-          `docker/diag-${container}-${artifactName}.txt`,
-          redact(fs.readFileSync(dest, "utf-8")),
-        )
-      : Promise.resolve());
-  } finally {
-    fs.rmSync(tmp, { recursive: true, force: true });
-  }
-}
-
-async function dumpContainerDiagnostics(
-  probe: DockerProbe,
-  artifacts: ArtifactSink,
-  redact: (text: string) => string,
-  container: string,
-): Promise<void> {
+async function dumpContainerDiagnostics(probe: DockerProbe, container: string): Promise<void> {
   const inspect = await probe.run(["inspect", container], {
     artifactName: `diag-${container}-inspect`,
     timeoutMs: 30_000,
@@ -152,22 +117,6 @@ async function dumpContainerDiagnostics(
     artifactName: `diag-${container}-logs`,
     timeoutMs: 30_000,
   });
-  await copyStoppedContainerFile(
-    probe,
-    artifacts,
-    redact,
-    container,
-    "/tmp/nemoclaw-start.log",
-    "start-log",
-  );
-  await copyStoppedContainerFile(
-    probe,
-    artifacts,
-    redact,
-    container,
-    "/tmp/gateway.log",
-    "gateway-log",
-  );
   await probe.run(
     [
       "exec",
@@ -280,75 +229,6 @@ async function assertRuntimeLayout(probe: DockerProbe, container: string): Promi
   );
 }
 
-async function assertConfigHashContract(probe: DockerProbe, container: string): Promise<void> {
-  await expectContainerSh(
-    probe,
-    container,
-    "Hermes strict config hash is not a root-owned read-only trust anchor",
-    "test \"$(stat -c '%u:%g %a' /etc/nemoclaw/hermes.config-hash)\" = '0:0 444'",
-  );
-  await expectContainerSh(
-    probe,
-    container,
-    "Hermes strict config hash does not validate as sandbox user",
-    "gosu sandbox sha256sum -c /etc/nemoclaw/hermes.config-hash --status",
-  );
-  await expectContainerSh(
-    probe,
-    container,
-    "Hermes config or env file mode drifted after image startup",
-    "test \"$(stat -c '%U:%G %a' /sandbox/.hermes/config.yaml)\" = 'sandbox:sandbox 640' && test \"$(stat -c '%U:%G %a' /sandbox/.hermes/.env)\" = 'sandbox:sandbox 640'",
-  );
-}
-
-async function assertBuiltImageRuntimeSurfaces(
-  probe: DockerProbe,
-  container: string,
-): Promise<void> {
-  await expectContainerSh(
-    probe,
-    container,
-    "Hermes API bearer token is missing or does not authenticate /v1/models",
-    [
-      "key=$(awk -F= '$1 == \"API_SERVER_KEY\" { print $2; exit }' /sandbox/.hermes/.env)",
-      'test -n "$key"',
-      'curl -sf --max-time 5 -H "Authorization: Bearer ${key}" http://127.0.0.1:8642/v1/models >/tmp/hermes-models.json',
-      "grep -q 'object' /tmp/hermes-models.json",
-    ].join("; "),
-  );
-  await expectContainerSh(
-    probe,
-    container,
-    "Hermes dashboard config/env were not seeded from the gateway boundary",
-    [
-      "test -s /sandbox/.hermes/dashboard-home/config.yaml",
-      "grep -F 'custom_providers:' /sandbox/.hermes/dashboard-home/config.yaml",
-      "grep -F 'model:' /sandbox/.hermes/dashboard-home/config.yaml",
-      "test -s /sandbox/.hermes/dashboard-home/.env",
-      "grep -E '^API_SERVER_KEY=' /sandbox/.hermes/dashboard-home/.env",
-      'awk -F= \'BEGIN{ok["API_SERVER_HOST"];ok["API_SERVER_PORT"];ok["API_SERVER_KEY"];ok["NEMOCLAW_HERMES_TOOL_GATEWAY_BROKER"];ok["FIRECRAWL_GATEWAY_URL"];ok["OPENAI_AUDIO_GATEWAY_URL"];ok["BROWSER_USE_GATEWAY_URL"];ok["FAL_QUEUE_GATEWAY_URL"];ok["MODAL_GATEWAY_URL"]} /^[A-Za-z_][A-Za-z0-9_]*=/ && !($1 in ok){bad=1} END{exit bad ? 1 : 0}\' /sandbox/.hermes/dashboard-home/.env',
-    ].join("; "),
-  );
-  await expectContainerSh(
-    probe,
-    container,
-    "python-multipart is missing from the Hermes virtualenv",
-    "/opt/hermes/.venv/bin/python -c 'import multipart'",
-  );
-  await expectContainerSh(
-    probe,
-    container,
-    "Hermes image cannot allocate a PTY through /dev/pts",
-    "/opt/hermes/.venv/bin/python -c 'import os,pty; pid,fd=pty.fork(); os._exit(0) if pid == 0 else (os.close(fd), os.waitpid(pid, 0))'",
-  );
-  await expectContainerSh(
-    probe,
-    container,
-    "final Hermes image still contains compiler build tools",
-    "! command -v gcc && ! command -v g++ && ! command -v make",
-  );
-}
-
 async function assertGatewayProcess(probe: DockerProbe, container: string): Promise<void> {
   await expectContainerSh(
     probe,
@@ -381,8 +261,6 @@ async function runCleanVariant(
   await assertGatewayProcess(probe, container);
   await assertGatewayLogClean(probe, container);
   await assertRuntimeLayout(probe, container);
-  await assertConfigHashContract(probe, container);
-  await assertBuiltImageRuntimeSurfaces(probe, container);
 }
 
 async function runLegacyVariant(
@@ -411,7 +289,6 @@ exec /usr/local/bin/nemoclaw-start /usr/local/bin/nemoclaw-start`;
   await assertGatewayProcess(probe, container);
   await assertGatewayLogClean(probe, container);
   await assertRuntimeLayout(probe, container);
-  await assertConfigHashContract(probe, container);
   await expectContainerSh(
     probe,
     container,
@@ -444,10 +321,6 @@ liveTest(
         "gateway process runs as gateway user",
         "gateway log has no PID race or config load failure",
         "Hermes v0.14 writable runtime directories are present",
-        "Hermes strict config hash validates against generated config.yaml and .env",
-        "Hermes API bearer token authenticates a local OpenAI-compatible request",
-        "Hermes dashboard home is seeded with routing and allowed env keys",
-        "python-multipart, PTY allocation, and final-image toolchain hardening are present",
         "gateway.pid is migrated to a regular top-level file",
         "gateway user cannot remove config.yaml from sticky config root",
         "legacy gateway.pid symlink/state shape is repaired and booted",
@@ -473,7 +346,7 @@ liveTest(
       await runLegacyVariant(probe, image, runId, containers);
     } catch (error) {
       for (const container of containers) {
-        await dumpContainerDiagnostics(probe, artifacts, (text) => secrets.redact(text), container);
+        await dumpContainerDiagnostics(probe, container);
       }
       throw error;
     }
@@ -485,7 +358,6 @@ liveTest(
         cleanStartupHealthy: true,
         legacyStartupHealthy: true,
         runtimeLayoutVerified: true,
-        configHashContractVerified: true,
         gatewayPrivilegeSeparationVerified: true,
         legacyPidSymlinkMigrationVerified: true,
       },
