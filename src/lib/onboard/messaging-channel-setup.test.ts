@@ -457,6 +457,21 @@ describe("setupMessagingChannels", () => {
     expect(prompt).not.toHaveBeenCalled();
   });
 
+  it("seeds WeCom with both static credentials in non-interactive mode", async () => {
+    process.env.WECOM_BOT_ID = "wecom-bot-id";
+    process.env.WECOM_SECRET = "wecom-secret";
+    const notes: string[] = [];
+
+    const result = await setupMessagingChannels(null, null, {
+      note: (message) => notes.push(message),
+      isNonInteractive: () => true,
+    });
+
+    expect(result).toEqual(["wecom"]);
+    expect(notes).toEqual(["  [non-interactive] Messaging channel inputs detected: wecom"]);
+    expect(prompt).not.toHaveBeenCalled();
+  });
+
   it("validates detected non-interactive Slack inputs before returning enabled channels", async () => {
     process.env.SLACK_BOT_TOKEN = "not-a-slack-token";
     process.env.SLACK_APP_TOKEN = "xapp-existing-token";

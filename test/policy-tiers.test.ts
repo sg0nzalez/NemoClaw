@@ -143,12 +143,13 @@ describe("tiers", () => {
       expect(accessByName.get("weather")).toBe("read");
     });
 
-    it("does not include messaging presets (slack, discord, telegram, wechat, whatsapp)", () => {
+    it("does not include messaging presets (slack, discord, telegram, wechat, wecom, whatsapp)", () => {
       const names = mustGetTier("balanced").presets.map((preset: TierPreset) => preset.name);
       expect(names).not.toContain("slack");
       expect(names).not.toContain("discord");
       expect(names).not.toContain("telegram");
       expect(names).not.toContain("wechat");
+      expect(names).not.toContain("wecom");
       expect(names).not.toContain("whatsapp");
     });
   });
@@ -174,6 +175,7 @@ describe("tiers", () => {
         "discord",
         "telegram",
         "wechat",
+        "wecom",
         "whatsapp",
         "jira",
         "outlook",
@@ -184,12 +186,13 @@ describe("tiers", () => {
       expect(accessByName.get("public-reference")).toBe("read");
     });
 
-    it("includes messaging presets (slack, discord, telegram, wechat, whatsapp)", () => {
+    it("includes messaging presets (slack, discord, telegram, wechat, wecom, whatsapp)", () => {
       const names = mustGetTier("open").presets.map((preset: TierPreset) => preset.name);
       expect(names).toContain("slack");
       expect(names).toContain("discord");
       expect(names).toContain("telegram");
       expect(names).toContain("wechat");
+      expect(names).toContain("wecom");
       expect(names).toContain("whatsapp");
     });
 

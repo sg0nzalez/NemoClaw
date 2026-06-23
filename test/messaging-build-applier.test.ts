@@ -9,7 +9,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { withLegacyMessagingPlanEnv } from "./messaging-plan-test-helper";
+import { encodeJson, withLegacyMessagingPlanEnv } from "./messaging-plan-test-helper";
 
 const SCRIPT_PATH = path.join(
   import.meta.dirname,
@@ -103,6 +103,7 @@ describe("messaging-build-applier.mts: agent-install", () => {
         "slack",
         "whatsapp",
         "wechat",
+        "wecom",
       ]),
       NEMOCLAW_WECHAT_CONFIG_B64: wechatConfigB64(),
     });
@@ -110,6 +111,7 @@ describe("messaging-build-applier.mts: agent-install", () => {
     expect(payload.installSpecs).toEqual([
       "npm:@openclaw/discord@2026.5.22",
       "npm:@tencent-weixin/openclaw-weixin@2.4.3",
+      "npm:@wecom/wecom-openclaw-plugin@2026.5.25",
       "npm:@openclaw/slack@2026.5.22",
       "npm:@openclaw/whatsapp@2026.5.22",
     ]);
@@ -119,6 +121,8 @@ describe("messaging-build-applier.mts: agent-install", () => {
       SLACK_BOT_TOKEN: "xoxb-OPENSHELL-RESOLVE-ENV-SLACK_BOT_TOKEN",
       TELEGRAM_BOT_TOKEN: "openshell:resolve:env:TELEGRAM_BOT_TOKEN",
       WECHAT_BOT_TOKEN: "openshell:resolve:env:WECHAT_BOT_TOKEN",
+      WECOM_BOT_ID: "openshell:resolve:env:WECOM_BOT_ID",
+      WECOM_SECRET: "openshell:resolve:env:WECOM_SECRET",
     });
   });
 
@@ -155,6 +159,18 @@ describe("messaging-build-applier.mts: agent-install", () => {
     expect(payload.installSpecs).toEqual(["npm:@tencent-weixin/openclaw-weixin@2.4.3"]);
     expect(payload.doctorEnv).toEqual({
       WECHAT_BOT_TOKEN: "openshell:resolve:env:WECHAT_BOT_TOKEN",
+    });
+  });
+
+  it("installs the fixed WeCom OpenClaw plugin without OPENCLAW_VERSION", () => {
+    const payload = parseDryRun({
+      NEMOCLAW_MESSAGING_CHANNELS_B64: channelsB64(["wecom"]),
+    });
+
+    expect(payload.installSpecs).toEqual(["npm:@wecom/wecom-openclaw-plugin@2026.5.25"]);
+    expect(payload.doctorEnv).toEqual({
+      WECOM_BOT_ID: "openshell:resolve:env:WECOM_BOT_ID",
+      WECOM_SECRET: "openshell:resolve:env:WECOM_SECRET",
     });
   });
 
@@ -417,6 +433,7 @@ describe("messaging-build-applier.mts: agent-install", () => {
             "slack",
             "whatsapp",
             "wechat",
+            "wecom",
           ]),
           NEMOCLAW_WECHAT_CONFIG_B64: wechatConfigB64(),
         },
@@ -444,6 +461,7 @@ describe("messaging-build-applier.mts: agent-install", () => {
       expect(fs.readFileSync(tracePath, "utf-8").trim().split("\n")).toEqual([
         "plugins|install|npm:@openclaw/discord@2026.5.22|--pin|||",
         "plugins|install|npm:@tencent-weixin/openclaw-weixin@2.4.3|--pin|||",
+        "plugins|install|npm:@wecom/wecom-openclaw-plugin@2026.5.25|--pin|||",
         "plugins|install|npm:@openclaw/slack@2026.5.22|--pin|||",
         "plugins|install|npm:@openclaw/whatsapp@2026.5.22|--pin|||",
       ]);
@@ -562,7 +580,7 @@ describe("messaging-build-applier.mts: agent-install", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-doctor-rewrite-"));
     const tracePath = path.join(tmp, "openclaw.trace");
     const fakeOpenclaw = path.join(tmp, "openclaw");
-    const channels = channelsB64(["telegram", "discord", "slack", "wechat"]);
+    const channels = channelsB64(["telegram", "discord", "slack", "wechat", "wecom"]);
     const wechatConfig = Buffer.from(
       JSON.stringify({ accountId: "primary", baseUrl: "https://ilinkai.wechat.com", userId: "u1" }),
     ).toString("base64");
@@ -583,6 +601,9 @@ describe("messaging-build-applier.mts: agent-install", () => {
         "if (config.plugins?.entries?.discord?.enabled !== true) process.exit(42);",
         "if (config.plugins?.entries?.slack?.enabled !== true) process.exit(43);",
         'if (config.channels?.["openclaw-weixin"]?.accounts?.primary?.enabled !== true) process.exit(44);',
+        'if (config.channels?.wecom?.botId !== "openshell:resolve:env:WECOM_BOT_ID") process.exit(45);',
+        'if (config.channels?.wecom?.secret !== "openshell:resolve:env:WECOM_SECRET") process.exit(46);',
+        "if (config.plugins?.entries?.wecom?.enabled !== true) process.exit(47);",
         'fs.writeFileSync(configPath, JSON.stringify({ channels: { telegram: { accounts: { default: { botToken: "openshell:resolve:env:v42_TELEGRAM_BOT_TOKEN" } } } }, plugins: { entries: {} } }, null, 2) + String.fromCharCode(10));',
         "process.exit(0);",
         "",
@@ -597,6 +618,9 @@ describe("messaging-build-applier.mts: agent-install", () => {
           HOME: tmp,
           ...BASE_GENERATOR_ENV,
           NEMOCLAW_MESSAGING_CHANNELS_B64: channels,
+          NEMOCLAW_MESSAGING_ALLOWED_IDS_B64: encodeJson({
+            wecom: ["wecom-user-one", "wecom-user-two"],
+          }),
           NEMOCLAW_WECHAT_CONFIG_B64: wechatConfig,
           NEMOCLAW_OPENCLAW_MANAGED_PROXY: "0",
         },
@@ -646,6 +670,17 @@ describe("messaging-build-applier.mts: agent-install", () => {
       expect(config.plugins?.entries?.discord).toEqual({ enabled: true });
       expect(config.channels?.slack?.enabled).toBe(true);
       expect(config.plugins?.entries?.slack).toEqual({ enabled: true });
+      expect(config.channels?.wecom).toMatchObject({
+        enabled: true,
+        connectionMode: "websocket",
+        botId: "openshell:resolve:env:WECOM_BOT_ID",
+        secret: "openshell:resolve:env:WECOM_SECRET",
+        dmPolicy: "open",
+        allowFrom: ["wecom-user-one", "wecom-user-two"],
+      });
+      expect(config.channels?.wecom?.websocketUrl).toBeUndefined();
+      expect(config.channels?.wecom?.groupPolicy).toBeUndefined();
+      expect(config.plugins?.entries?.wecom).toEqual({ enabled: true });
       expect(config.channels?.["openclaw-weixin"]?.accounts?.primary).toEqual({ enabled: true });
       expect(config.channels?.wechat).toBeUndefined();
     } finally {
@@ -873,7 +908,10 @@ describe("messaging-build-applier.mts: agent-install", () => {
         {
           PATH: process.env.PATH || "/usr/bin:/bin",
           HOME: tmp,
-          NEMOCLAW_MESSAGING_CHANNELS_B64: channelsB64(["telegram"]),
+          NEMOCLAW_MESSAGING_CHANNELS_B64: channelsB64(["telegram", "wecom"]),
+          NEMOCLAW_MESSAGING_ALLOWED_IDS_B64: encodeJson({
+            wecom: ["wecom-user-one", "wecom-user-two"],
+          }),
         },
         "hermes",
       );
@@ -900,9 +938,20 @@ describe("messaging-build-applier.mts: agent-install", () => {
       const configYaml = fs.readFileSync(path.join(hermesDir, "config.yaml"), "utf-8");
       expect(configYaml).toContain("telegram:");
       expect(configYaml).toContain("enabled: true");
+      expect(configYaml).toContain("wecom:");
+      expect(configYaml).toContain("dm_policy: open");
+      expect(configYaml).toContain("allow_from:");
+      expect(configYaml).toContain("- wecom-user-one");
+      expect(configYaml).toContain("- wecom-user-two");
+      expect(configYaml).not.toContain("websocket_url:");
+      expect(configYaml).not.toContain("group_policy:");
       const envFile = fs.readFileSync(path.join(hermesDir, ".env"), "utf-8");
       expect(envFile).toContain("API_SERVER_PORT=18642\n");
       expect(envFile).toContain("TELEGRAM_BOT_TOKEN=openshell:resolve:env:TELEGRAM_BOT_TOKEN\n");
+      expect(envFile).toContain("WECOM_BOT_ID=openshell:resolve:env:WECOM_BOT_ID\n");
+      expect(envFile).toContain("WECOM_SECRET=openshell:resolve:env:WECOM_SECRET\n");
+      expect(envFile).toContain("WECOM_ALLOWED_USERS=wecom-user-one,wecom-user-two\n");
+      expect(envFile).toContain("WECOM_DM_POLICY=open\n");
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }

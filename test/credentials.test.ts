@@ -81,6 +81,8 @@ describe("messaging legacy bridge credentials", () => {
     // the known list, sanitization and rotation will silently skip it and
     // the token may leak through diagnostic dumps.
     expect(KNOWN_CREDENTIAL_ENV_KEYS).toContain("WECHAT_BOT_TOKEN");
+    expect(KNOWN_CREDENTIAL_ENV_KEYS).toContain("WECOM_BOT_ID");
+    expect(KNOWN_CREDENTIAL_ENV_KEYS).toContain("WECOM_SECRET");
     expect(KNOWN_CREDENTIAL_ENV_KEYS).toContain("TELEGRAM_BOT_TOKEN");
     expect(KNOWN_CREDENTIAL_ENV_KEYS).toContain("DISCORD_BOT_TOKEN");
     expect(KNOWN_CREDENTIAL_ENV_KEYS).toContain("SLACK_BOT_TOKEN");

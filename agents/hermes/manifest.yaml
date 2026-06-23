@@ -113,6 +113,7 @@ messaging_platforms:
     - discord
     - slack
     - wechat
+    - wecom
     - whatsapp
   # Future: signal, matrix, mattermost, email, etc.
   # Each needs a network policy entry before enabling.

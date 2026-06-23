@@ -53,6 +53,7 @@ describe("agent definitions", () => {
       "discord",
       "slack",
       "wechat",
+      "wecom",
       "whatsapp",
     ]);
     expect(openclaw.inferenceProviderOptions).toEqual([]);
@@ -92,6 +93,7 @@ describe("agent definitions", () => {
       "discord",
       "slack",
       "wechat",
+      "wecom",
       "whatsapp",
     ]);
   });

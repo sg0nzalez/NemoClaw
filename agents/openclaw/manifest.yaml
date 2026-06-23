@@ -52,6 +52,7 @@ state_dirs:
   - memory
   - telegram
   - wechat
+  - wecom
   - whatsapp
   - credentials
 
@@ -79,6 +80,7 @@ messaging_platforms:
     - discord
     - slack
     - wechat
+    - wecom
     - whatsapp
 
 # ── Inference ───────────────────────────────────────────────────

@@ -15,11 +15,13 @@ import {
 } from "../manifest";
 import { ManifestCompiler } from "./manifest-compiler";
 
-const ALL_CHANNELS = ["telegram", "discord", "wechat", "slack", "whatsapp"] as const;
+const ALL_CHANNELS = ["telegram", "discord", "wechat", "wecom", "slack", "whatsapp"] as const;
 const TEST_CREDENTIALS: Readonly<Record<string, string>> = {
   TELEGRAM_BOT_TOKEN: "123456:test-telegram-token",
   DISCORD_BOT_TOKEN: "test-discord-token",
   WECHAT_BOT_TOKEN: "test-wechat-token",
+  WECOM_BOT_ID: "test-wecom-bot-id",
+  WECOM_SECRET: "test-wecom-secret",
   SLACK_BOT_TOKEN: "xoxb-test-slack-token",
   SLACK_APP_TOKEN: "xapp-test-slack-token",
 };
@@ -127,7 +129,7 @@ describe("ManifestCompiler", () => {
       agent: "openclaw",
       workflow: "onboard",
       isInteractive: true,
-      configuredChannels: ["slack", "telegram", "wechat", "discord", "whatsapp"],
+      configuredChannels: ["slack", "telegram", "wechat", "wecom", "discord", "whatsapp"],
       credentialAvailability: {
         TELEGRAM_BOT_TOKEN: true,
         DISCORD_BOT_TOKEN: true,
@@ -143,6 +145,8 @@ describe("ManifestCompiler", () => {
       "demo-telegram-bridge",
       "demo-discord-bridge",
       "demo-wechat-bridge",
+      "demo-wecom-bot-id",
+      "demo-wecom-secret",
       "demo-slack-bridge",
       "demo-slack-app",
     ]);
@@ -150,6 +154,8 @@ describe("ManifestCompiler", () => {
       "openshell:resolve:env:TELEGRAM_BOT_TOKEN",
       "openshell:resolve:env:DISCORD_BOT_TOKEN",
       "openshell:resolve:env:WECHAT_BOT_TOKEN",
+      "openshell:resolve:env:WECOM_BOT_ID",
+      "openshell:resolve:env:WECOM_SECRET",
       "xoxb-OPENSHELL-RESOLVE-ENV-SLACK_BOT_TOKEN",
       "xapp-OPENSHELL-RESOLVE-ENV-SLACK_APP_TOKEN",
     ]);
@@ -173,6 +179,12 @@ describe("ManifestCompiler", () => {
         source: "manifest",
       },
       {
+        channelId: "wecom",
+        presetName: "wecom",
+        policyKeys: ["wecom_aibot"],
+        source: "manifest",
+      },
+      {
         channelId: "slack",
         presetName: "slack",
         policyKeys: ["slack"],
@@ -192,6 +204,8 @@ describe("ManifestCompiler", () => {
       "discord:discord-openclaw-channel",
       "discord:discord-openclaw-plugin",
       "wechat:wechat-openclaw-plugin",
+      "wecom:wecom-openclaw-channel",
+      "wecom:wecom-openclaw-plugin",
       "slack:slack-openclaw-channel",
       "slack:slack-openclaw-plugin",
       "whatsapp:whatsapp-openclaw-channel",
@@ -239,6 +253,12 @@ describe("ManifestCompiler", () => {
         required: true,
       },
       {
+        channelId: "wecom",
+        kind: "package-install",
+        outputId: "openclawPluginPackage",
+        required: true,
+      },
+      {
         channelId: "slack",
         kind: "package-install",
         outputId: "openclawPluginPackage",
@@ -267,6 +287,15 @@ describe("ManifestCompiler", () => {
           value: {
             manager: "openclaw-plugin",
             spec: "npm:@tencent-weixin/openclaw-weixin@2.4.3",
+            pin: true,
+          },
+        }),
+        expect.objectContaining({
+          channelId: "wecom",
+          kind: "package-install",
+          value: {
+            manager: "openclaw-plugin",
+            spec: "npm:@wecom/wecom-openclaw-plugin@2026.5.25",
             pin: true,
           },
         }),
@@ -312,10 +341,11 @@ describe("ManifestCompiler", () => {
     ).toEqual([]);
   });
 
-  it("compiles Hermes render and manifest-owned WeChat policy intent", async () => {
+  it("compiles Hermes render and manifest-owned WeChat and WeCom policy intent", async () => {
     const plan = await withEnv(
       {
         WECHAT_ACCOUNT_ID: "test-wechat-account",
+        WECOM_ALLOWED_USERS: "wecom-user-one,wecom-user-two",
       },
       () =>
         compiler().compile({
@@ -328,6 +358,8 @@ describe("ManifestCompiler", () => {
             TELEGRAM_BOT_TOKEN: true,
             DISCORD_BOT_TOKEN: true,
             WECHAT_BOT_TOKEN: true,
+            WECOM_BOT_ID: true,
+            WECOM_SECRET: true,
             SLACK_BOT_TOKEN: true,
             SLACK_APP_TOKEN: true,
           },
@@ -340,6 +372,12 @@ describe("ManifestCompiler", () => {
       policyKeys: ["wechat_bridge"],
       source: "manifest",
     });
+    expect(plan.networkPolicy.entries.find((entry) => entry.channelId === "wecom")).toEqual({
+      channelId: "wecom",
+      presetName: "wecom",
+      policyKeys: ["wecom_aibot"],
+      source: "manifest",
+    });
     expect(plan.agentRender.map((render) => `${render.channelId}:${render.target}`)).toEqual([
       "telegram:~/.hermes/.env",
       "telegram:~/.hermes/config.yaml",
@@ -349,6 +387,8 @@ describe("ManifestCompiler", () => {
       "discord:~/.hermes/config.yaml",
       "wechat:~/.hermes/.env",
       "wechat:~/.hermes/config.yaml",
+      "wecom:~/.hermes/.env",
+      "wecom:~/.hermes/config.yaml",
       "slack:~/.hermes/.env",
       "slack:~/.hermes/config.yaml",
       "whatsapp:~/.hermes/.env",
@@ -357,6 +397,17 @@ describe("ManifestCompiler", () => {
     expect(JSON.stringify(plan.agentRender)).toContain(
       "WEIXIN_TOKEN=openshell:resolve:env:WECHAT_BOT_TOKEN",
     );
+    expect(JSON.stringify(plan.agentRender)).toContain(
+      "WECOM_BOT_ID=openshell:resolve:env:WECOM_BOT_ID",
+    );
+    expect(JSON.stringify(plan.agentRender)).toContain(
+      "WECOM_SECRET=openshell:resolve:env:WECOM_SECRET",
+    );
+    expect(JSON.stringify(plan.agentRender)).toContain(
+      "WECOM_ALLOWED_USERS=wecom-user-one,wecom-user-two",
+    );
+    expect(JSON.stringify(plan.agentRender)).toContain("WECOM_DM_POLICY=open");
+    expect(JSON.stringify(plan.agentRender)).not.toContain("wss://openws.work.weixin.qq.com");
     expect(plan.buildSteps).toEqual([]);
     expect(
       plan.channels
@@ -427,6 +478,29 @@ describe("ManifestCompiler", () => {
         ),
       ).rejects.toThrow(/line breaks/);
     }
+  });
+
+  it("rejects unsafe WeCom Hermes DM policy render values", async () => {
+    await expect(
+      withEnv(
+        {
+          WECOM_ALLOWED_USERS: "user-one",
+          WECOM_DM_POLICY: "open\nEVIL=1",
+        },
+        () =>
+          compiler().compile({
+            sandboxName: "demo",
+            agent: "hermes",
+            workflow: "rebuild",
+            isInteractive: false,
+            configuredChannels: ["wecom"],
+            credentialAvailability: {
+              WECOM_BOT_ID: true,
+              WECOM_SECRET: true,
+            },
+          }),
+      ),
+    ).rejects.toThrow(/line breaks/);
   });
 
   it("rejects non-HTTPS or non-iLink WeChat baseUrl values", async () => {

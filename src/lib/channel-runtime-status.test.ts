@@ -151,7 +151,15 @@ describe("buildGatewayLogScanScript", () => {
     expect(script).toContain("(launched|respawning)");
     expect(script).toContain('buf=""');
     expect(script).toContain("grep -iwoE '");
-    for (const token of ["telegram", "discord", "slack", "whatsapp", "wechat", "openclaw-weixin"]) {
+    for (const token of [
+      "telegram",
+      "discord",
+      "slack",
+      "whatsapp",
+      "wechat",
+      "wecom",
+      "openclaw-weixin",
+    ]) {
       expect(script).toContain(token);
     }
     expect(script).not.toContain("tail -n");

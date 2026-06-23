@@ -26,6 +26,8 @@ const TEST_CREDENTIALS: Readonly<Record<string, string>> = {
   TELEGRAM_BOT_TOKEN: "123456:test-telegram-token",
   DISCORD_BOT_TOKEN: "test-discord-token",
   WECHAT_BOT_TOKEN: "test-wechat-token",
+  WECOM_BOT_ID: "test-wecom-bot-id",
+  WECOM_SECRET: "test-wecom-secret",
   SLACK_BOT_TOKEN: "xoxb-test-slack-token",
   SLACK_APP_TOKEN: "xapp-test-slack-token",
 };
@@ -297,6 +299,69 @@ describe("MessagingSetupApplier", () => {
     ]);
     expect(JSON.stringify(result)).not.toContain("telegram-token");
     expect(JSON.stringify(result)).not.toContain("slack-token");
+  });
+
+  it("upserts both WeCom credential providers from plan bindings", async () => {
+    const plan = await buildOnboardPlan(
+      { WECOM_BOT_ID: "raw-wecom-bot-id-secret", WECOM_SECRET: "raw-wecom-secret-value" },
+      ["wecom"],
+    );
+    const calls: Array<{
+      args: readonly string[];
+      env?: Readonly<Record<string, string>>;
+    }> = [];
+    const runOpenshell: MessagingOpenShellRunner = (args, options) => {
+      calls.push({ args, env: options?.env });
+      if (args[0] === "provider" && args[1] === "get") return { status: 1 };
+      return { status: 0 };
+    };
+
+    const result = MessagingSetupApplier.applyCredentialsAtOpenShell(plan, {
+      env: {
+        WECOM_BOT_ID: "raw-wecom-bot-id-secret",
+        WECOM_SECRET: "raw-wecom-secret-value",
+      },
+      runOpenshell,
+    });
+
+    expect(calls.map((call) => call.args)).toEqual([
+      ["provider", "get", "demo-wecom-bot-id"],
+      [
+        "provider",
+        "create",
+        "--name",
+        "demo-wecom-bot-id",
+        "--type",
+        "generic",
+        "--credential",
+        "WECOM_BOT_ID",
+      ],
+      ["provider", "get", "demo-wecom-secret"],
+      [
+        "provider",
+        "create",
+        "--name",
+        "demo-wecom-secret",
+        "--type",
+        "generic",
+        "--credential",
+        "WECOM_SECRET",
+      ],
+    ]);
+    expect(calls[1]?.env).toEqual({ WECOM_BOT_ID: "raw-wecom-bot-id-secret" });
+    expect(calls[3]?.env).toEqual({ WECOM_SECRET: "raw-wecom-secret-value" });
+    expect(result.upserted.map((entry) => `${entry.action}:${entry.providerName}`)).toEqual([
+      "create:demo-wecom-bot-id",
+      "create:demo-wecom-secret",
+    ]);
+    expect(result.sandboxCreateProviderArgs).toEqual([
+      "--provider",
+      "demo-wecom-bot-id",
+      "--provider",
+      "demo-wecom-secret",
+    ]);
+    expect(JSON.stringify(result)).not.toContain("raw-wecom-bot-id-secret");
+    expect(JSON.stringify(result)).not.toContain("raw-wecom-secret-value");
   });
 
   it("redacts OpenShell provider failure output", async () => {
@@ -810,10 +875,12 @@ describe("MessagingSetupApplier", () => {
         DISCORD_BOT_TOKEN: "test-discord-token",
         WECHAT_BOT_TOKEN: "test-wechat-token",
         WECHAT_ACCOUNT_ID: "wechat-account",
+        WECOM_BOT_ID: "test-wecom-bot-id",
+        WECOM_SECRET: "test-wecom-secret",
         SLACK_BOT_TOKEN: "xoxb-slack-token",
         SLACK_APP_TOKEN: "xapp-slack-token",
       },
-      ["discord", "wechat", "slack"],
+      ["discord", "wechat", "wecom", "slack"],
       "hermes",
     );
     const policyCalls: string[][] = [];
@@ -827,15 +894,15 @@ describe("MessagingSetupApplier", () => {
       },
     });
 
-    expect(policyCalls).toEqual([["demo", "discord", "wechat", "slack"]]);
+    expect(policyCalls).toEqual([["demo", "discord", "wechat", "wecom", "slack"]]);
     expect(applyContext).toEqual({
       agent: "hermes",
       entries: plan.networkPolicy.entries,
-      policyKeys: ["discord", "wechat_bridge", "slack"],
+      policyKeys: ["discord", "wechat_bridge", "wecom_aibot", "slack"],
     });
     expect(result).toEqual({
-      appliedPresets: ["discord", "wechat", "slack"],
-      appliedPolicyKeys: ["discord", "wechat_bridge", "slack"],
+      appliedPresets: ["discord", "wechat", "wecom", "slack"],
+      appliedPolicyKeys: ["discord", "wechat_bridge", "wecom_aibot", "slack"],
     });
   });
 });

@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 
 import { shellQuote } from "../src/lib/core/shell-quote";
@@ -622,6 +622,8 @@ describe("agents/hermes/start.sh runtime shell env", () => {
 
     expect(run.result.status).toBe(0);
     expect(run.envFileMode).toBe("444");
+    expect(run.envFileContent).toContain('export WS_PROXY="http://10.200.0.1:3128"');
+    expect(run.envFileContent).toContain('export WSS_PROXY="http://10.200.0.1:3128"');
     expect(run.envFileContent).toContain(`export HERMES_HOME="${run.hermesHome}"`);
     expect(run.envFileContent).toContain('export HERMES_TUI_DIR="/opt/hermes/ui-tui"');
     expect(run.envFileContent).not.toContain('HERMES_TUI_DIR="${HERMES_TUI_DIR:-');

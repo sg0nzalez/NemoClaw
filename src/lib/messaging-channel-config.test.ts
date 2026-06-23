@@ -19,6 +19,7 @@ describe("messaging channel config", () => {
       "DISCORD_USER_ID",
       "DISCORD_REQUIRE_MENTION",
       "WECHAT_ALLOWED_IDS",
+      "WECOM_ALLOWED_USERS",
       "SLACK_ALLOWED_USERS",
       "SLACK_ALLOWED_CHANNELS",
       "WHATSAPP_ALLOWED_IDS",
@@ -26,6 +27,7 @@ describe("messaging channel config", () => {
       "WECHAT_ACCOUNT_ID",
       "WECHAT_BASE_URL",
       "WECHAT_USER_ID",
+      "WECOM_DM_POLICY",
     ]);
   });
 
@@ -40,6 +42,8 @@ describe("messaging channel config", () => {
         DISCORD_REQUIRE_MENTION: "0",
         SLACK_ALLOWED_USERS: "  U01ABC2DEF3, U04GHI5JKL6  ",
         SLACK_ALLOWED_CHANNELS: "  C012AB3CD, C987ZY6XW  ",
+        WECOM_ALLOWED_USERS: "  zhangsan,lisi  ",
+        WECOM_DM_POLICY: "pairing",
         NVIDIA_INFERENCE_API_KEY: "not-channel-config",
       }),
     ).toEqual({
@@ -49,6 +53,8 @@ describe("messaging channel config", () => {
       DISCORD_REQUIRE_MENTION: "0",
       SLACK_ALLOWED_USERS: "U01ABC2DEF3, U04GHI5JKL6",
       SLACK_ALLOWED_CHANNELS: "C012AB3CD, C987ZY6XW",
+      WECOM_ALLOWED_USERS: "zhangsan,lisi",
+      WECOM_DM_POLICY: "pairing",
     });
   });
 

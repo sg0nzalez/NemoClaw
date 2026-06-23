@@ -19,6 +19,8 @@ const CANONICAL_ENVKEYS_FIXTURE = new Set([
   "SLACK_BOT_TOKEN",
   "SLACK_APP_TOKEN",
   "WECHAT_BOT_TOKEN",
+  "WECOM_BOT_ID",
+  "WECOM_SECRET",
   "BRAVE_API_KEY",
 ]);
 
@@ -147,6 +149,8 @@ describe("canonicalPlaceholderKeys", () => {
       "SLACK_BOT_TOKEN",
       "SLACK_APP_TOKEN",
       "WECHAT_BOT_TOKEN",
+      "WECOM_BOT_ID",
+      "WECOM_SECRET",
       "BRAVE_API_KEY",
     ]) {
       expect(canonical.has(expected)).toBe(true);

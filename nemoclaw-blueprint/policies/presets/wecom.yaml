@@ -1,0 +1,36 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+preset:
+  name: wecom
+  description: "WeCom AI Bot WebSocket and API access (OpenClaw + Hermes)"
+
+network_policies:
+  wecom_aibot:
+    name: wecom_aibot
+    endpoints:
+      - host: openws.work.weixin.qq.com
+        port: 443
+        protocol: websocket
+        enforcement: enforce
+        websocket_credential_rewrite: true
+        rules:
+          - allow: { method: GET, path: "/**" }
+          - allow: { method: WEBSOCKET_TEXT, path: "/**" }
+      - host: qyapi.weixin.qq.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        request_body_credential_rewrite: true
+        rules:
+          - allow: { method: GET, path: "/cgi-bin/gettoken" }
+          - allow: { method: GET, path: "/cgi-bin/media/get" }
+          - allow: { method: POST, path: "/cgi-bin/message/send" }
+          - allow: { method: POST, path: "/cgi-bin/appchat/send" }
+          - allow: { method: POST, path: "/cgi-bin/media/upload" }
+    binaries:
+      - { path: /usr/local/bin/node }
+      - { path: /usr/bin/node }
+      - { path: /usr/local/bin/hermes }
+      - { path: /usr/bin/python3* }
+      - { path: /opt/hermes/.venv/bin/python }

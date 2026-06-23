@@ -206,6 +206,7 @@ network_policies:
         "  discord: {}",
         "  slack: {}",
         "  wechat_bridge: {}",
+        "  wecom_aibot: {}",
         "",
       ].join("\n"),
     );
@@ -236,6 +237,39 @@ network_policies:
     expect(policyNames?.has("telegram")).toBe(false);
     expect(policyNames?.has("slack")).toBe(false);
     expect(policyNames?.has("wechat_bridge")).toBe(false);
+    expect(policyNames?.has("wecom_aibot")).toBe(false);
+    expect(prepared.cleanup?.()).toBe(true);
+    expect(fs.existsSync(prepared.policyPath)).toBe(false);
+  });
+
+  it("keeps active Hermes WeCom policy in the create-time policy", () => {
+    const hermesPolicyPath = path.relative(
+      process.cwd(),
+      path.join(import.meta.dirname, "..", "..", "..", "agents", "hermes", "policy-additions.yaml"),
+    );
+
+    const prepared = prepareInitialSandboxCreatePolicy(hermesPolicyPath, ["wecom"], {
+      agentName: "hermes",
+    });
+    const policy = fs.readFileSync(prepared.policyPath, "utf-8");
+    const parsed = YAML.parse(policy);
+    const policyNames = getNetworkPolicyNames(policy);
+
+    expect(policyNames?.has("wecom_aibot")).toBe(true);
+    expect(policyNames?.has("telegram")).toBe(false);
+    expect(policyNames?.has("discord")).toBe(false);
+    expect(policyNames?.has("slack")).toBe(false);
+    expect(policyNames?.has("wechat_bridge")).toBe(false);
+    expect(parsed.network_policies.wecom_aibot.endpoints).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          host: "openws.work.weixin.qq.com",
+          port: 443,
+          protocol: "websocket",
+          enforcement: "enforce",
+        }),
+      ]),
+    );
     expect(prepared.cleanup?.()).toBe(true);
     expect(fs.existsSync(prepared.policyPath)).toBe(false);
   });

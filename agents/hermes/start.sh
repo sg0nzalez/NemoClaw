@@ -723,9 +723,13 @@ _PROXY_URL="http://${PROXY_HOST}:${PROXY_PORT}"
 _NO_PROXY_VAL="localhost,127.0.0.1,::1,${PROXY_HOST}"
 export HTTP_PROXY="$_PROXY_URL"
 export HTTPS_PROXY="$_PROXY_URL"
+export WS_PROXY="$_PROXY_URL"
+export WSS_PROXY="$_PROXY_URL"
 export NO_PROXY="$_NO_PROXY_VAL"
 export http_proxy="$_PROXY_URL"
 export https_proxy="$_PROXY_URL"
+export ws_proxy="$_PROXY_URL"
+export wss_proxy="$_PROXY_URL"
 export no_proxy="$_NO_PROXY_VAL"
 
 # OpenShell injects SSL_CERT_FILE/CURL_CA_BUNDLE for its L7 proxy CA. Persist
@@ -758,9 +762,13 @@ write_runtime_shell_env() {
 # Proxy configuration (overrides narrow OpenShell defaults on connect)
 export HTTP_PROXY="$_PROXY_URL"
 export HTTPS_PROXY="$_PROXY_URL"
+export WS_PROXY="$_PROXY_URL"
+export WSS_PROXY="$_PROXY_URL"
 export NO_PROXY="$_NO_PROXY_VAL"
 export http_proxy="$_PROXY_URL"
 export https_proxy="$_PROXY_URL"
+export ws_proxy="$_PROXY_URL"
+export wss_proxy="$_PROXY_URL"
 export no_proxy="$_NO_PROXY_VAL"
 export HERMES_HOME="${HERMES_DIR}"
 PROXYEOF

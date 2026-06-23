@@ -158,7 +158,7 @@ RUN printf '%s\n' \
 # Install Hermes Agent from the selected GitHub release.
 # The image prebakes only the extras mapped to NemoClaw-supported onboarding
 # integrations: anthropic (native Anthropic Messages routing), messaging
-# (Telegram, Discord, Slack, WeChat, WhatsApp), web (API health/UI runtime),
+# (Telegram, Discord, Slack, WeChat, WeCom, WhatsApp), web (API health/UI runtime),
 # and pty (optional browser TUI bridge). These extras are resolved from the
 # selected Hermes release's uv.lock via `uv sync --frozen`, so dependency
 # changes remain tied to HERMES_VERSION/HERMES_TARBALL_SHA256 review.

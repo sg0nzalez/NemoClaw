@@ -34,6 +34,8 @@ function createInput(
       if (envKey === "SLACK_APP_TOKEN") return "slack";
       if (envKey === "TELEGRAM_BOT_TOKEN") return "telegram";
       if (envKey === "WECHAT_BOT_TOKEN") return "wechat";
+      if (envKey === "WECOM_BOT_ID") return "wecom";
+      if (envKey === "WECOM_SECRET") return "wecom";
       return null;
     },
     providerExistsInGateway: () => false,
@@ -148,6 +150,8 @@ describe("prepareCreateSandboxMessaging", () => {
       "SLACK_BOT_TOKEN",
       "TELEGRAM_BOT_TOKEN",
       "WECHAT_BOT_TOKEN",
+      "WECOM_BOT_ID",
+      "WECOM_SECRET",
     ]);
     expect(result.reusableMessagingProviders).toEqual([]);
     expect(result.reusableMessagingChannels).toEqual([]);

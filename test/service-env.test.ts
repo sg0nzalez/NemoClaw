@@ -1,22 +1,22 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect } from "vitest";
 import {
-  execSync,
-  execFileSync,
   type ExecFileSyncOptionsWithStringEncoding,
+  execFileSync,
+  execSync,
 } from "node:child_process";
 import {
   existsSync,
-  mkdtempSync,
-  writeFileSync,
-  unlinkSync,
-  readFileSync,
   lstatSync,
+  mkdtempSync,
+  readFileSync,
+  unlinkSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { describe, expect, it } from "vitest";
 import { resolveOpenshell } from "../dist/lib/adapters/openshell/resolve";
 
 const NEMOCLAW_START_SCRIPT = join(import.meta.dirname, "../scripts/nemoclaw-start.sh");
@@ -475,9 +475,13 @@ describe("service environment", () => {
         proxyBlock.trimEnd(),
         'echo "HTTP_PROXY=${HTTP_PROXY}"',
         'echo "HTTPS_PROXY=${HTTPS_PROXY}"',
+        'echo "WS_PROXY=${WS_PROXY}"',
+        'echo "WSS_PROXY=${WSS_PROXY}"',
         'echo "NO_PROXY=${NO_PROXY}"',
         'echo "http_proxy=${http_proxy}"',
         'echo "https_proxy=${https_proxy}"',
+        'echo "ws_proxy=${ws_proxy}"',
+        'echo "wss_proxy=${wss_proxy}"',
         'echo "no_proxy=${no_proxy}"',
       ].join("\n");
       const tmpFile = join(tmpdir(), `nemoclaw-proxy-test-${process.pid}.sh`);
@@ -512,6 +516,12 @@ describe("service environment", () => {
       expect(vars.HTTPS_PROXY).toBe("http://10.200.0.1:3128");
     });
 
+    it("sets websocket proxy variants for aiohttp websocket clients", () => {
+      const vars = extractProxyVars();
+      expect(vars.WS_PROXY).toBe("http://10.200.0.1:3128");
+      expect(vars.WSS_PROXY).toBe("http://10.200.0.1:3128");
+    });
+
     it("NEMOCLAW_PROXY_HOST overrides default gateway IP", () => {
       const vars = extractProxyVars({ NEMOCLAW_PROXY_HOST: "192.168.64.1" });
       expect(vars.HTTP_PROXY).toBe("http://192.168.64.1:3128");
@@ -542,6 +552,8 @@ describe("service environment", () => {
       const vars = extractProxyVars();
       expect(vars.http_proxy).toBe("http://10.200.0.1:3128");
       expect(vars.https_proxy).toBe("http://10.200.0.1:3128");
+      expect(vars.ws_proxy).toBe("http://10.200.0.1:3128");
+      expect(vars.wss_proxy).toBe("http://10.200.0.1:3128");
       const noProxy = vars.no_proxy.split(",");
       expect(noProxy).not.toContain("inference.local");
       expect(noProxy).toContain("10.200.0.1");
@@ -574,6 +586,8 @@ describe("service environment", () => {
         const envFile = readFileSync(join(fakeDataDir, "proxy-env.sh"), "utf-8");
         expect(envFile).toContain('export HTTP_PROXY="http://10.200.0.1:3128"');
         expect(envFile).toContain('export HTTPS_PROXY="http://10.200.0.1:3128"');
+        expect(envFile).toContain('export WS_PROXY="http://10.200.0.1:3128"');
+        expect(envFile).toContain('export WSS_PROXY="http://10.200.0.1:3128"');
         expect(envFile).toContain("export NO_PROXY=");
         expect(envFile).not.toContain("inference.local");
         expect(envFile).toContain("10.200.0.1");

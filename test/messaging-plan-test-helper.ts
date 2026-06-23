@@ -111,6 +111,7 @@ function legacyMessagingConfigEnv(env: Record<string, string>): Record<string, s
   assignCsv(next, "TELEGRAM_ALLOWED_IDS", allowedIds.telegram);
   assignCsv(next, "SLACK_ALLOWED_USERS", allowedIds.slack);
   assignCsv(next, "WECHAT_ALLOWED_IDS", allowedIds.wechat);
+  assignCsv(next, "WECOM_ALLOWED_USERS", allowedIds.wecom);
   assignCsv(next, "WHATSAPP_ALLOWED_IDS", allowedIds.whatsapp);
 
   const telegramConfig = decodeJsonEnv<Record<string, unknown>>(
@@ -136,6 +137,9 @@ function legacyMessagingConfigEnv(env: Record<string, string>): Record<string, s
   assignString(next, "WECHAT_ACCOUNT_ID", wechatConfig.accountId);
   assignString(next, "WECHAT_BASE_URL", wechatConfig.baseUrl);
   assignString(next, "WECHAT_USER_ID", wechatConfig.userId);
+
+  const wecomConfig = decodeJsonEnv<Record<string, unknown>>(env, "NEMOCLAW_WECOM_CONFIG_B64", {});
+  assignString(next, "WECOM_DM_POLICY", wecomConfig.dmPolicy);
 
   const slackConfig = decodeJsonEnv<Record<string, unknown>>(env, "NEMOCLAW_SLACK_CONFIG_B64", {});
   assignCsv(next, "SLACK_ALLOWED_CHANNELS", slackConfig.allowedChannels);
@@ -227,16 +231,22 @@ function credentialAvailability(): Record<string, boolean> {
     "telegram.botToken",
     "discord.botToken",
     "wechat.botToken",
+    "wecom.botId",
+    "wecom.secret",
     "slack.botToken",
     "slack.appToken",
     "telegramBotToken",
     "discordBotToken",
     "wechatBotToken",
+    "wecomBotId",
+    "wecomSecret",
     "slackBotToken",
     "slackAppToken",
     "TELEGRAM_BOT_TOKEN",
     "DISCORD_BOT_TOKEN",
     "WECHAT_BOT_TOKEN",
+    "WECOM_BOT_ID",
+    "WECOM_SECRET",
     "SLACK_BOT_TOKEN",
     "SLACK_APP_TOKEN",
   ];

@@ -2436,9 +2436,13 @@ _PROXY_URL="http://${PROXY_HOST}:${PROXY_PORT}"
 _NO_PROXY_VAL="localhost,127.0.0.1,::1,${PROXY_HOST}"
 export HTTP_PROXY="$_PROXY_URL"
 export HTTPS_PROXY="$_PROXY_URL"
+export WS_PROXY="$_PROXY_URL"
+export WSS_PROXY="$_PROXY_URL"
 export NO_PROXY="$_NO_PROXY_VAL"
 export http_proxy="$_PROXY_URL"
 export https_proxy="$_PROXY_URL"
+export ws_proxy="$_PROXY_URL"
+export wss_proxy="$_PROXY_URL"
 export no_proxy="$_NO_PROXY_VAL"
 
 # Git TLS CA bundle fix (NemoClaw#2270).
@@ -2585,7 +2589,8 @@ export NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--require $_SECCOMP_GUARD_SC
 #
 # Both uppercase and lowercase variants are required: Node.js undici prefers
 # lowercase (no_proxy) over uppercase (NO_PROXY) when both are set.
-# curl/wget use uppercase.  gRPC C-core uses lowercase.
+# curl/wget use uppercase.  gRPC C-core uses lowercase. aiohttp maps
+# wss:// and ws:// lookups through WSS_PROXY and WS_PROXY respectively.
 _RUNTIME_SHELL_ENV_FILE="/tmp/nemoclaw-proxy-env.sh"
 _RUNTIME_SHELL_ENV_SHIM="[ -f ${_RUNTIME_SHELL_ENV_FILE} ] && . ${_RUNTIME_SHELL_ENV_FILE}"
 
@@ -2596,9 +2601,13 @@ write_runtime_shell_env() {
 # Proxy configuration (overrides narrow OpenShell defaults on connect)
 export HTTP_PROXY="$_PROXY_URL"
 export HTTPS_PROXY="$_PROXY_URL"
+export WS_PROXY="$_PROXY_URL"
+export WSS_PROXY="$_PROXY_URL"
 export NO_PROXY="$_NO_PROXY_VAL"
 export http_proxy="$_PROXY_URL"
 export https_proxy="$_PROXY_URL"
+export ws_proxy="$_PROXY_URL"
+export wss_proxy="$_PROXY_URL"
 export no_proxy="$_NO_PROXY_VAL"
 export JITI_FS_CACHE="false"
 PROXYEOF

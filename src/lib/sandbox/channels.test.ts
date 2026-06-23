@@ -16,8 +16,15 @@ import {
 } from "./channels";
 
 describe("sandbox-channels KNOWN_CHANNELS", () => {
-  it("covers telegram, discord, wechat, slack, and whatsapp", () => {
-    expect(knownChannelNames()).toEqual(["telegram", "discord", "wechat", "slack", "whatsapp"]);
+  it("covers telegram, discord, wechat, wecom, slack, and whatsapp", () => {
+    expect(knownChannelNames()).toEqual([
+      "telegram",
+      "discord",
+      "wechat",
+      "wecom",
+      "slack",
+      "whatsapp",
+    ]);
   });
 
   it("exposes the primary bot-token env var for token-based channels", () => {
@@ -25,6 +32,7 @@ describe("sandbox-channels KNOWN_CHANNELS", () => {
     expect(getChannelDef("discord")?.envKey).toBe("DISCORD_BOT_TOKEN");
     expect(getChannelDef("slack")?.envKey).toBe("SLACK_BOT_TOKEN");
     expect(getChannelDef("wechat")?.envKey).toBe("WECHAT_BOT_TOKEN");
+    expect(getChannelDef("wecom")?.envKey).toBe("WECOM_BOT_ID");
   });
 
   it("classifies channels by login method", () => {
@@ -40,12 +48,21 @@ describe("sandbox-channels KNOWN_CHANNELS", () => {
     expect(getChannelDef("telegram")?.loginMethod).toBeUndefined();
     expect(getChannelDef("discord")?.loginMethod).toBeUndefined();
     expect(getChannelDef("slack")?.loginMethod).toBeUndefined();
+    expect(getChannelDef("wecom")?.loginMethod).toBeUndefined();
   });
 
-  it("declares wechat as DM-only with the WECHAT_ALLOWED_IDS env key", () => {
+  it("declares WeChat as DM-only with an allowlist env key", () => {
     const wechat = getChannelDef("wechat");
     expect(wechat?.allowIdsMode).toBe("dm");
     expect(wechat?.userIdEnvKey).toBe("WECHAT_ALLOWED_IDS");
+  });
+
+  it("exposes WeCom user IDs as a DM allowlist prompt", () => {
+    const wecom = getChannelDef("wecom");
+    expect(wecom?.allowIdsMode).toBe("dm");
+    expect(wecom?.userIdEnvKey).toBe("WECOM_ALLOWED_USERS");
+    expect(wecom?.userIdLabel).toBe("WeCom User IDs (DM allowlist)");
+    expect(wecom?.userIdHelp).toContain("comma-separated WeCom user IDs");
   });
 
   it("omits envKey for in-sandbox QR-paired channels (whatsapp)", () => {
@@ -55,6 +72,7 @@ describe("sandbox-channels KNOWN_CHANNELS", () => {
     expect(channelUsesInSandboxQrPairing(KNOWN_CHANNELS.whatsapp)).toBe(true);
     expect(channelUsesInSandboxQrPairing(KNOWN_CHANNELS.wechat)).toBe(false);
     expect(channelUsesInSandboxQrPairing(KNOWN_CHANNELS.slack)).toBe(false);
+    expect(channelUsesInSandboxQrPairing(KNOWN_CHANNELS.wecom)).toBe(false);
   });
 
   it("declares no provider-credential metadata for WhatsApp", () => {
@@ -66,10 +84,11 @@ describe("sandbox-channels KNOWN_CHANNELS", () => {
     expect(getChannelTokenKeys(KNOWN_CHANNELS.whatsapp)).toEqual([]);
   });
 
-  it("only slack declares a secondary app-token env var", () => {
+  it("declares secondary credential env vars for multi-secret channels", () => {
     expect(getChannelDef("telegram")?.appTokenEnvKey).toBeUndefined();
     expect(getChannelDef("discord")?.appTokenEnvKey).toBeUndefined();
     expect(getChannelDef("slack")?.appTokenEnvKey).toBe("SLACK_APP_TOKEN");
+    expect(getChannelDef("wecom")?.appTokenEnvKey).toBe("WECOM_SECRET");
     expect(getChannelDef("whatsapp")?.appTokenEnvKey).toBeUndefined();
   });
 
@@ -107,6 +126,7 @@ describe("sandbox-channels KNOWN_CHANNELS", () => {
     expect(getChannelDef("  Telegram  ")).toBe(KNOWN_CHANNELS.telegram);
     expect(getChannelDef("DISCORD")).toBe(KNOWN_CHANNELS.discord);
     expect(getChannelDef("  WhatsApp  ")).toBe(KNOWN_CHANNELS.whatsapp);
+    expect(getChannelDef("WECOM")).toBe(KNOWN_CHANNELS.wecom);
   });
 
   it("returns undefined for unknown channel names", () => {
@@ -121,11 +141,12 @@ describe("sandbox-channels getChannelTokenKeys", () => {
     expect(getChannelTokenKeys(KNOWN_CHANNELS.discord)).toEqual(["DISCORD_BOT_TOKEN"]);
   });
 
-  it("returns primary then app token for slack", () => {
+  it("returns all provider token keys for multi-secret channels", () => {
     expect(getChannelTokenKeys(KNOWN_CHANNELS.slack)).toEqual([
       "SLACK_BOT_TOKEN",
       "SLACK_APP_TOKEN",
     ]);
+    expect(getChannelTokenKeys(KNOWN_CHANNELS.wecom)).toEqual(["WECOM_BOT_ID", "WECOM_SECRET"]);
   });
 
   it("returns an empty list for QR-paired channels", () => {
@@ -145,6 +166,7 @@ describe("sandbox-channels token-shape helpers", () => {
     expect(channelUsesInSandboxQrPairing(KNOWN_CHANNELS.whatsapp)).toBe(true);
     expect(channelUsesInSandboxQrPairing(KNOWN_CHANNELS.wechat)).toBe(false);
     expect(channelUsesInSandboxQrPairing(KNOWN_CHANNELS.telegram)).toBe(false);
+    expect(channelUsesInSandboxQrPairing(KNOWN_CHANNELS.wecom)).toBe(false);
     expect(channelUsesInSandboxQrPairing(KNOWN_CHANNELS.slack)).toBe(false);
   });
 
@@ -163,10 +185,20 @@ describe("sandbox-channels token-shape helpers", () => {
 describe("sandbox-channels listChannels", () => {
   it("materialises an array with the name merged into each entry", () => {
     const list = listChannels();
-    expect(list.map((c) => c.name)).toEqual(["telegram", "discord", "wechat", "slack", "whatsapp"]);
+    expect(list.map((c) => c.name)).toEqual([
+      "telegram",
+      "discord",
+      "wechat",
+      "wecom",
+      "slack",
+      "whatsapp",
+    ]);
     const telegram = list.find((c) => c.name === "telegram");
     expect(telegram?.envKey).toBe("TELEGRAM_BOT_TOKEN");
     expect(telegram?.allowIdsMode).toBe("dm");
+    const wecom = list.find((c) => c.name === "wecom");
+    expect(wecom?.envKey).toBe("WECOM_BOT_ID");
+    expect(wecom?.appTokenEnvKey).toBe("WECOM_SECRET");
     const whatsapp = list.find((c) => c.name === "whatsapp");
     expect(whatsapp?.envKey).toBeUndefined();
   });

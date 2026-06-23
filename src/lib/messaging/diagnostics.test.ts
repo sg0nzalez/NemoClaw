@@ -13,6 +13,7 @@ describe("messaging channel diagnostics", () => {
       "telegram",
       "discord",
       "wechat",
+      "wecom",
       "slack",
       "whatsapp",
     ]);
@@ -22,6 +23,9 @@ describe("messaging channel diagnostics", () => {
     });
     expect(specs.find((spec) => spec.channelId === "wechat")).toMatchObject({
       policyPresets: ["wechat"],
+    });
+    expect(specs.find((spec) => spec.channelId === "wecom")).toMatchObject({
+      policyPresets: ["wecom"],
     });
     expect(specs.find((spec) => spec.channelId === "whatsapp")).toMatchObject({
       policyPresets: ["whatsapp"],

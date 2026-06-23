@@ -1,13 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
-import { createRequire } from "node:module";
 import type { Interface as ReadlineInterface } from "node:readline";
-import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
-import { spawnSync } from "node:child_process";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as policies from "../dist/lib/policy";
 import { execTimeout } from "./helpers/timeouts";
 
@@ -41,7 +41,6 @@ type PolicyCall = {
 type AppliedOptions = {
   applied?: string[];
 };
-
 function requirePresetContent(content: string | null): string {
   expect(content).toBeTruthy();
   if (!content) {
@@ -147,6 +146,7 @@ describe("policies", () => {
         "telegram",
         "weather",
         "wechat",
+        "wecom",
         "whatsapp",
       ];
       expect(names).toEqual(expected);

@@ -36,6 +36,8 @@ describe("SANDBOX_PROVIDER_SUFFIXES", () => {
         "telegram-bridge",
         "discord-bridge",
         "wechat-bridge",
+        "wecom-bot-id",
+        "wecom-secret",
         "slack-bridge",
         "slack-app",
         "brave-search",

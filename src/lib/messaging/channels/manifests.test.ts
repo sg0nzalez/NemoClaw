@@ -23,6 +23,7 @@ import {
   slackManifest,
   telegramManifest,
   wechatManifest,
+  wecomManifest,
   whatsappManifest,
 } from "./index";
 import {
@@ -200,6 +201,7 @@ describe("built-in channel manifests", () => {
       "telegram",
       "discord",
       "wechat",
+      "wecom",
       "slack",
       "whatsapp",
     ]);
@@ -207,6 +209,7 @@ describe("built-in channel manifests", () => {
       "telegram",
       "discord",
       "wechat",
+      "wecom",
       "slack",
       "whatsapp",
     ]);
@@ -227,6 +230,7 @@ describe("built-in channel manifests", () => {
       "src/lib/messaging/channels/discord/hooks/index.ts",
       "src/lib/messaging/channels/discord/hooks/openclaw-bridge-health.ts",
       "src/lib/messaging/channels/wechat/manifest.ts",
+      "src/lib/messaging/channels/wecom/manifest.ts",
       "src/lib/messaging/channels/wechat/hooks/health-check.ts",
       "src/lib/messaging/channels/wechat/hooks/ilink-login.ts",
       "src/lib/messaging/channels/wechat/hooks/index.ts",
@@ -264,6 +268,7 @@ describe("built-in channel manifests", () => {
       telegram: telegramManifest,
       discord: discordManifest,
       wechat: wechatManifest,
+      wecom: wecomManifest,
       slack: slackManifest,
       whatsapp: whatsappManifest,
     };
@@ -297,6 +302,14 @@ describe("built-in channel manifests", () => {
     expect(findInput(wechatManifest, "botToken").prompt).toEqual({
       label: KNOWN_CHANNELS.wechat.label,
       help: KNOWN_CHANNELS.wechat.help,
+    });
+    expect(findInput(wecomManifest, "botId").prompt).toEqual({
+      label: KNOWN_CHANNELS.wecom.label,
+      help: KNOWN_CHANNELS.wecom.help,
+    });
+    expect(findInput(wecomManifest, "secret").prompt).toEqual({
+      label: KNOWN_CHANNELS.wecom.appTokenLabel,
+      help: KNOWN_CHANNELS.wecom.appTokenHelp,
     });
   });
 
@@ -607,6 +620,82 @@ describe("built-in channel manifests", () => {
       ["openclaw-weixin"],
       ["wechat", "openclaw-weixin"],
     );
+  });
+
+  it("declares WeCom bot credentials, access policies, and OpenClaw/Hermes render intent", () => {
+    const botId = findInput(wecomManifest, "botId");
+    const secret = findInput(wecomManifest, "secret");
+    const allowedUsers = findInput(wecomManifest, "allowedUsers");
+    const dmPolicy = findInput(wecomManifest, "dmPolicy");
+
+    expect(getChannelTokenKeys(KNOWN_CHANNELS.wecom)).toEqual(["WECOM_BOT_ID", "WECOM_SECRET"]);
+    expect(botId.envKey).toBe("WECOM_BOT_ID");
+    expect(secret.envKey).toBe("WECOM_SECRET");
+    expect(allowedUsers).toMatchObject({
+      kind: "config",
+      envKey: "WECOM_ALLOWED_USERS",
+      statePath: "allowedIds.wecom",
+    });
+    expect(dmPolicy).toMatchObject({
+      kind: "config",
+      envKey: "WECOM_DM_POLICY",
+      statePath: "wecomConfig.dmPolicy",
+      defaultValue: "open",
+      validValues: ["open", "allowlist", "disabled", "pairing"],
+    });
+    expect(wecomManifest.credentials).toEqual([
+      {
+        id: "wecomBotId",
+        sourceInput: "botId",
+        providerName: "{sandboxName}-wecom-bot-id",
+        providerEnvKey: "WECOM_BOT_ID",
+        placeholder: "openshell:resolve:env:WECOM_BOT_ID",
+        primary: true,
+      },
+      {
+        id: "wecomSecret",
+        sourceInput: "secret",
+        providerName: "{sandboxName}-wecom-secret",
+        providerEnvKey: "WECOM_SECRET",
+        placeholder: "openshell:resolve:env:WECOM_SECRET",
+      },
+    ]);
+    expect(wecomManifest.policyPresets).toEqual([{ name: "wecom", policyKeys: ["wecom_aibot"] }]);
+    expectEnvRenderLines(wecomManifest, "wecom-hermes-env", [
+      "WECOM_BOT_ID={{credential.wecomBotId.placeholder}}",
+      "WECOM_SECRET={{credential.wecomSecret.placeholder}}",
+      "WECOM_ALLOWED_USERS={{allowedIds.wecom.csv}}",
+      "WECOM_DM_POLICY={{wecomConfig.dmPolicy}}",
+    ]);
+    expect(renderJson(wecomManifest)).toContain("channels.wecom");
+    expect(renderJson(wecomManifest)).toContain("platforms.wecom");
+    expect(renderJson(wecomManifest)).toContain("credential.wecomBotId.placeholder");
+    expect(renderJson(wecomManifest)).toContain("credential.wecomSecret.placeholder");
+    expect(renderJson(wecomManifest)).toContain("wecomConfig.dmPolicy");
+    expect(renderJson(wecomManifest)).toContain("allowedIds.wecom.values");
+    expect(renderJson(wecomManifest)).not.toContain("wecomConfig.groupAllowFrom");
+    expect(renderJson(wecomManifest)).not.toContain("wecomConfig.websocketUrl");
+    expect(wecomManifest.agentPackages).toContainEqual({
+      id: "openclawPluginPackage",
+      agent: "openclaw",
+      manager: "openclaw-plugin",
+      spec: "npm:@wecom/wecom-openclaw-plugin@2026.5.25",
+      pin: true,
+      required: true,
+    });
+    expect(wecomManifest.state).toEqual({
+      persist: {
+        allowedIds: ["wecom"],
+        wecomConfig: ["dmPolicy"],
+      },
+      rebuildHydration: [
+        { statePath: "allowedIds.wecom", env: "WECOM_ALLOWED_USERS" },
+        { statePath: "wecomConfig.dmPolicy", env: "WECOM_DM_POLICY" },
+      ],
+    });
+    expectTokenPasteEnrollHook(wecomManifest, ["botId", "secret"]);
+    expectConfigPromptEnrollHook(wecomManifest, ["allowedUsers", "dmPolicy"]);
+    expectOpenClawRuntimeVisibility(wecomManifest, ["wecom"], ["wecom", "WeCom"]);
   });
 
   it("declares WhatsApp as in-sandbox QR with optional allowlist config", () => {

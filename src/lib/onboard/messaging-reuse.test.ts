@@ -12,6 +12,7 @@ const messagingChannels = [
   { name: "discord", envKey: "DISCORD_BOT_TOKEN" },
   { name: "slack", envKey: "SLACK_BOT_TOKEN" },
   { name: "wechat", envKey: "WECHAT_BOT_TOKEN" },
+  { name: "wecom", envKey: "WECOM_BOT_ID" },
 ];
 
 describe("onboard messaging reuse", () => {
@@ -24,6 +25,10 @@ describe("onboard messaging reuse", () => {
     ]);
     expect(getMessagingProviderNamesForChannel("assistant", "wechat")).toEqual([
       "assistant-wechat-bridge",
+    ]);
+    expect(getMessagingProviderNamesForChannel("assistant", "wecom")).toEqual([
+      "assistant-wecom-bot-id",
+      "assistant-wecom-secret",
     ]);
   });
 
@@ -62,6 +67,22 @@ describe("onboard messaging reuse", () => {
     );
 
     expect(reusedChannels).toEqual(["slack"]);
+  });
+
+  it("requires both WeCom providers before reusing a stored WeCom channel", () => {
+    const reusedChannels = getNonInteractiveStoredMessagingChannels(
+      false,
+      null,
+      "assistant",
+      messagingChannels,
+      () => false,
+      () => ["wecom"],
+      () => [],
+      (provider) => provider === "assistant-wecom-bot-id",
+      true,
+    );
+
+    expect(reusedChannels).toBeNull();
   });
 
   it("reuses a stored WeChat channel when its bridge provider exists", () => {

@@ -28,6 +28,7 @@ describe("built-in messaging channel metadata", () => {
       "telegram",
       "discord",
       "wechat",
+      "wecom",
       "slack",
       "whatsapp",
     ]);
@@ -35,6 +36,7 @@ describe("built-in messaging channel metadata", () => {
       "telegram",
       "discord",
       "wechat",
+      "wecom",
       "slack",
       "whatsapp",
     ]);
@@ -45,15 +47,18 @@ describe("built-in messaging channel metadata", () => {
       telegram: ["TELEGRAM_BOT_TOKEN"],
       discord: ["DISCORD_BOT_TOKEN"],
       wechat: ["WECHAT_BOT_TOKEN"],
+      wecom: ["WECOM_BOT_ID", "WECOM_SECRET"],
       slack: ["SLACK_BOT_TOKEN", "SLACK_APP_TOKEN"],
       whatsapp: [],
     });
     expect(getMessagingChannelForCredentialEnvKey("SLACK_APP_TOKEN")).toBe("slack");
+    expect(getMessagingChannelForCredentialEnvKey("WECOM_SECRET")).toBe("wecom");
     expect(getMessagingChannelForCredentialEnvKey("WHATSAPP_ALLOWED_IDS")).toBeNull();
     expect(getMessagingProviderSuffixesByChannel()).toMatchObject({
       telegram: ["-telegram-bridge"],
       discord: ["-discord-bridge"],
       wechat: ["-wechat-bridge"],
+      wecom: ["-wecom-bot-id", "-wecom-secret"],
       slack: ["-slack-bridge", "-slack-app"],
     });
     expect(listMessagingProviderNamesForChannel("demo", "slack")).toEqual([
@@ -75,6 +80,8 @@ describe("built-in messaging channel metadata", () => {
       "WECHAT_BASE_URL",
       "WECHAT_USER_ID",
       "WECHAT_ALLOWED_IDS",
+      "WECOM_ALLOWED_USERS",
+      "WECOM_DM_POLICY",
       "SLACK_ALLOWED_USERS",
       "SLACK_ALLOWED_CHANNELS",
       "WHATSAPP_ALLOWED_IDS",
@@ -90,6 +97,7 @@ describe("built-in messaging channel metadata", () => {
       telegram: ["telegram_bot", "telegram"],
       discord: ["discord"],
       wechat: ["wechat_bridge"],
+      wecom: ["wecom_aibot"],
       slack: ["slack"],
       whatsapp: ["whatsapp"],
     });
@@ -97,6 +105,7 @@ describe("built-in messaging channel metadata", () => {
       telegram: ["telegram"],
       discord: ["discord"],
       wechat: ["wechat_bridge"],
+      wecom: ["wecom_aibot"],
       slack: ["slack"],
       whatsapp: ["whatsapp"],
     });
@@ -108,6 +117,7 @@ describe("built-in messaging channel metadata", () => {
       "telegram",
       "discord",
       "openclaw-weixin",
+      "wecom",
       "slack",
       "whatsapp",
     ]);
@@ -119,6 +129,7 @@ describe("built-in messaging channel metadata", () => {
       telegram: ["telegram"],
       discord: ["discord"],
       wechat: ["openclaw-weixin"],
+      wecom: ["wecom"],
       slack: ["slack"],
       whatsapp: ["whatsapp"],
     });
@@ -132,6 +143,7 @@ describe("built-in messaging channel metadata", () => {
     ).toMatchObject({
       discord: "npm:@openclaw/discord@{{openclaw.version}}",
       wechat: "npm:@tencent-weixin/openclaw-weixin@2.4.3",
+      wecom: "npm:@wecom/wecom-openclaw-plugin@2026.5.25",
       slack: "npm:@openclaw/slack@{{openclaw.version}}",
       whatsapp: "npm:@openclaw/whatsapp@{{openclaw.version}}",
     });
