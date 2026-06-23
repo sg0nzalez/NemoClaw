@@ -120,6 +120,12 @@ export const zaloManifest = {
       },
     },
   },
+  // @openclaw/zalo is the trusted upstream OpenClaw plugin implementing the Zalo
+  // Bot API bridge. The spec is coupled to {{openclaw.version}} because the plugin's
+  // config schema tracks the OpenClaw core release, and pin: true installs exactly
+  // that version for a reproducible, schema-matched build. Treat this as a build-time
+  // trusted-code boundary: do not loosen the spec, drop the pin, or change the package
+  // source without re-reviewing it.
   agentPackages: [
     {
       id: "openclawPluginPackage",
