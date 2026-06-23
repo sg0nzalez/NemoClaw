@@ -378,6 +378,30 @@ nemoclaw <name> connect
 
 Run `nemoclaw status` for a broader gateway health report.
 
+### Sandbox container reports `(unhealthy)` while the agent gateway process is still alive
+
+The in-sandbox OpenClaw gateway can drop its HTTP listener while its process stays alive.
+A restart-class configuration change makes the gateway restart itself in place, and if that restart fails the process parks with no listener (`/tmp/gateway.log` shows `gateway startup failed: ... Process will stay alive`).
+Docker then marks the container `(unhealthy)` even though `pgrep` still finds the gateway.
+
+NemoClaw prevents this state and recovers it when it happens:
+
+- The generated sandbox config pins `gateway.reload.mode` to `hot`, so configuration changes never make the gateway restart itself out from under the sandbox supervisor.
+- A serving watchdog inside the sandbox kills a gateway that stops listening after it has served, and the supervisor relaunches it (look for `[gateway-watchdog]` lines in `nemoclaw <name> logs`).
+
+Because of the `hot` pin, restart-class configuration changes made inside the sandbox, for example `openclaw plugins install`, log `config reload requires gateway restart; hot mode ignoring` and do not take effect until the gateway restarts.
+Apply them with a supervised restart:
+
+```bash
+nemoclaw <name> recover
+```
+
+For changes that affect provisioning, rebuild the sandbox:
+
+```bash
+nemoclaw <name> rebuild --yes
+```
+
 ### Invalid sandbox name
 
 Sandbox names must be lowercase, start with a letter, contain only letters, numbers, and internal hyphens, and end with a letter or number.

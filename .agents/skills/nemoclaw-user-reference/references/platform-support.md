@@ -1,14 +1,5 @@
----
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-title: "Platform Support and Launch Claims"
-sidebar-title: "Platform Support"
-description: "Canonical matrix of supported platforms, inference providers, agents, integrations, and deployment paths for NemoClaw, with explicit status for each row."
-description-agent: "Single source of truth for what NemoClaw supports today. Use when verifying whether a platform, inference provider, agent, messaging integration, or deployment path is validated, partially validated, experimental, or out of scope before relying on it in docs, demos, sales material, or support conversations."
-keywords: ["nemoclaw platform support", "nemoclaw launch claims", "nemoclaw support matrix", "nemoclaw what is supported", "nemoclaw status"]
-content:
-  type: "reference"
----
+# Platform Support and Launch Claims
+
 This page is the canonical reference for what NemoClaw supports today. Any documentation, demo, blog post, sales conversation, or support reply that describes NemoClaw capability should agree with the entries below.
 
 The tables on this page are generated from [`ci/platform-matrix.json`](https://github.com/NVIDIA/NemoClaw/blob/main/ci/platform-matrix.json).
@@ -27,20 +18,16 @@ Update the JSON; the tables and the partial views on other pages stay in sync wi
 
 ## Project status
 
-For version highlights, see [Release Notes](../about/release-notes).
+For version highlights, see Release Notes (use the `nemoclaw-user-overview` skill).
 
-{/* project-status:begin */}
 - **Stage:** alpha
 - **Label:** Early preview
 - **Since:** 2026-03-16
 - **Notes:** Maintainers review issues, discussions, and PRs on a best-effort basis without guaranteed response timelines.
-{/* project-status:end */}
 
 ## Owners
 
-{/* matrix-owners:begin */}
 - **Engineering owner:** @NVIDIA/nemoclaw-maintainer (reviews through CODEOWNERS and signs off on launch-facing claim changes before they reach demos or sales material).
-{/* matrix-owners:end */}
 
 The engineering owner is the GitHub team auto-assigned to review changes to `ci/platform-matrix.json` through CODEOWNERS, and the same team signs off on launch-facing claim changes before they reach demos, blog posts, or sales material.
 NemoClaw is maintainer-run today; there is no separate product owner role.
@@ -58,36 +45,31 @@ NemoClaw is maintainer-run today; there is no separate product owner role.
 NemoClaw supports the agent runtimes listed below.
 Pick the matching onboarding entry point for each agent.
 
-{/* agent-status:begin */}
 | Agent | Status | Default | Notes |
 |-------|--------|---------|-------|
-| OpenClaw | Tested | Yes | Default agent runtime. Onboard with `$$nemoclaw onboard` (no `--agent` flag required). |
-| Hermes | Tested with limitations | No | First-class agent with dedicated CLI (`$$nemohermes`), Dockerfile, manifest, docs, and nightly E2E job coverage (`hermes-e2e` job in `.github/workflows/nightly-e2e.yaml` plus the `hermes-*-vitest` jobs in `e2e-vitest-scenarios.yaml`). Onboard with `$$nemohermes onboard` or pass `--agent hermes` to `$$nemoclaw onboard`. Unlocks the Hermes Provider inference route. Known structural gaps: model-provider compatibility registry is empty (backfilled after failures, see `nemoclaw-blueprint/model-specific-setup/hermes/README.md`); no Hermes-specific unit tests in `nemoclaw/src/`; macOS and WSL CI suites do not differentiate agents. Suitable for evaluation and the documented onboarding paths; production parity with OpenClaw is not yet asserted. |
-{/* agent-status:end */}
+| OpenClaw | Tested | Yes | Default agent runtime. Onboard with `nemoclaw onboard` (no `--agent` flag required). |
+| Hermes | Tested with limitations | No | First-class agent with dedicated CLI (`nemohermes`), Dockerfile, manifest, docs, and nightly E2E job coverage (`hermes-e2e` job in `.github/workflows/nightly-e2e.yaml` plus the `hermes-*-vitest` jobs in `e2e-vitest-scenarios.yaml`). Onboard with `nemohermes onboard` or pass `--agent hermes` to `nemoclaw onboard`. Unlocks the Hermes Provider inference route. Known structural gaps: model-provider compatibility registry is empty (backfilled after failures, see `nemoclaw-blueprint/model-specific-setup/hermes/README.md`); no Hermes-specific unit tests in `nemoclaw/src/`; macOS and WSL CI suites do not differentiate agents. Suitable for evaluation and the documented onboarding paths; production parity with OpenClaw is not yet asserted. |
 
 ## Platforms
 
 The table below lists every platform tracked by NemoClaw, including deferred entries that are on the roadmap but not yet validated.
 The `CI` column reports whether the platform has a dedicated GitHub Actions job.
 A "Tested with limitations" row that is not in CI carries a stronger caveat than one that is.
-For the onboarding-time supported set without deferred rows, see [Prerequisites](../get-started/prerequisites#platforms).
+For the onboarding-time supported set without deferred rows, see Prerequisites (use the `nemoclaw-user-get-started` skill).
 
-{/* platform-matrix-full:begin */}
 | OS | Container runtime | Status | PRD priority | CI | Notes |
 |----|-------------------|--------|--------------|----|-------|
 | Linux | Docker | Tested | P0 | Yes | Primary tested path. Ubuntu 24.04 is the validated distro in production source (`DEFAULT_COMPAT_IMAGE` in `src/lib/onboard/docker-driver-gateway-launch.ts:10` and the preflight tests pin 24.04 only); the installer's package-manager probes assume apt-get. Other distros (Ubuntu 22.04, Fedora, Rocky, Alma, NixOS, Arch) may work but are not validated. |
 | macOS (Apple Silicon) | Colima, Docker Desktop | Tested with limitations | P0 | Yes | Start the container runtime (Colima or Docker Desktop) before running the installer. Xcode Command Line Tools (`xcode-select --install`) are typically required for Node native modules during install. NemoClaw recommends them but does not enforce them during preflight. |
-| DGX Spark | Docker | Tested | P1 | Yes | Use the standard installer and `$$nemoclaw onboard`. For an end-to-end walkthrough with local Ollama inference, see the [NVIDIA Spark playbook](https://build.nvidia.com/spark/nemoclaw). |
+| DGX Spark | Docker | Tested | P1 | Yes | Use the standard installer and `nemoclaw onboard`. For an end-to-end walkthrough with local Ollama inference, see the [NVIDIA Spark playbook](https://build.nvidia.com/spark/nemoclaw). |
 | Windows WSL2 | Docker Desktop (WSL backend) | Tested with limitations | P1 | No | Requires WSL2 with Docker Desktop backend. |
 | DGX Station | Docker | Deferred | P1 | No | The PRD marks this platform as P1. Workstation form-factor with NVIDIA GPUs and the same Docker + NVIDIA Container Toolkit + CDI requirements as DGX Spark. Onboard path not yet validated end-to-end on the hardware; vLLM has a placeholder default model defined for this host class (`Qwen/Qwen3.6-27B-FP8`) that will move out of `deferred` once the hardware run is signed off. |
 | NVIDIA RTX (consumer and Pro workstation GPUs) | Docker | Deferred | P1 | No | The PRD marks this platform as P1. Covers RTX consumer cards and RTX Pro workstation cards on Linux hosts that meet the generic-Linux-GPU requirements (NVIDIA Container Toolkit + CDI present). The provider menu emits managed vLLM behind `NEMOCLAW_EXPERIMENTAL=1` or `NEMOCLAW_PROVIDER=install-vllm` for this host class today; the end-to-end onboard path on this hardware is not yet validated in CI. |
-{/* platform-matrix-full:end */}
 
 ## Inference providers
 
 NemoClaw routes inference through the OpenShell gateway. Each row below is a provider the onboarding wizard can configure end-to-end.
 
-{/* provider-status-full:begin */}
 | Provider | Status | Endpoint type | Notes |
 |----------|--------|---------------|-------|
 | NVIDIA Endpoints | Tested | OpenAI-compatible | Hosted models on integrate.api.nvidia.com |
@@ -101,13 +83,11 @@ NemoClaw routes inference through the OpenShell gateway. Each row below is a pro
 | Local NVIDIA NIM | Experimental | Local OpenAI-compatible | Requires `NEMOCLAW_EXPERIMENTAL=1` and a NIM-capable NVIDIA GPU. Host must have the NVIDIA Container Toolkit installed and a CDI spec present (`onboard` asserts CDI presence with `assertCdiNvidiaGpuSpecPresent`, `src/lib/onboard.ts:1581`). NIM images pull from `nvcr.io` and require NGC registry login. NemoClaw gates this path behind the experimental flag because it does not auto-select a NIM image for the host today. You must explicitly pick from the validated image list. Managed vLLM has host-specific default models and is not gated on the same boxes. Validated images referenced in `src/lib/inference/config.ts` and `nemoclaw/src/index.ts`: `nvidia/nemotron-3-super-120b-a12b` (default cloud model), `nvidia/nemotron-3-nano-30b-a3b`, `nvidia/llama-3.3-nemotron-super-49b-v1.5`. |
 | Local vLLM (already running) | Tested with limitations | Local OpenAI-compatible | Appears in the onboarding menu when NemoClaw detects a server already on `localhost:8000`. No flag required. Model is whatever the existing server serves. |
 | Local vLLM (managed install/start) | Tested with limitations | Local OpenAI-compatible | Appears by default on DGX Spark and DGX Station. Generic Linux NVIDIA GPU hosts require `NEMOCLAW_EXPERIMENTAL=1` or `NEMOCLAW_PROVIDER=install-vllm`. Host must have the NVIDIA Container Toolkit installed and a CDI spec present (`onboard` asserts CDI presence). NemoClaw pulls or starts the stable NGC vLLM container for each host profile. See `src/lib/inference/vllm.ts:55,177` for the pins. DGX Spark and DGX Station use `nvcr.io/nvidia/vllm:26.05.post1-py3`; generic Linux NVIDIA GPU hosts use `nvcr.io/nvidia/vllm:26.03.post1-py3`. Validated defaults are listed in `src/lib/inference/vllm-models.ts`: DGX Spark uses `nvidia/Qwen3.6-35B-A3B-NVFP4`, DGX Station uses `Qwen/Qwen3.6-27B-FP8`, and Linux NVIDIA GPU uses `nvidia/NVIDIA-Nemotron-3-Nano-4B-FP8`. Image pulls require NGC registry login (`docker login nvcr.io`); onboard prompts for the NGC API key when authentication is missing. |
-{/* provider-status-full:end */}
 
 ## Messaging integrations
 
 NemoClaw configures messaging channels during onboarding. The OpenShell gateway runs each channel as a supervised process; NemoClaw supplies onboarding, credential delivery, and policy presets for the sandbox egress rules.
 
-{/* integration-status:begin */}
 | Channel | Status | Notes |
 |---------|--------|-------|
 | Slack | Tested | Configured through an OpenShell-managed channel during onboarding. Sandbox egress allowed by the `slack` policy preset. |
@@ -115,43 +95,37 @@ NemoClaw configures messaging channels during onboarding. The OpenShell gateway 
 | Telegram | Tested | Configured through an OpenShell-managed channel during onboarding. |
 | WeChat | Tested with limitations | Channel hook available. Verify regional account access before relying on this path. |
 | WhatsApp | Tested with limitations | Channel hook available. Verify Meta Business API access before relying on this path. |
-{/* integration-status:end */}
 
 ## Capabilities
 
 Each row below is a launch-facing capability claim that NemoClaw makes in docs, blog posts, or demos. Use the status to decide whether the claim is safe to repeat verbatim or needs a caveat.
 
-{/* capability-status:begin */}
 | Capability | Status | Notes |
 |------------|--------|-------|
-| Guided onboarding | Tested | Single-command interactive wizard (`$$nemoclaw onboard`) that walks the user through inference provider selection, credential setup, sandbox creation, and dashboard launch. Non-interactive mode is supported with `--non-interactive` + `NEMOCLAW_*` environment variables for CI and scripted installs. |
+| Guided onboarding | Tested | Single-command interactive wizard (`nemoclaw onboard`) that walks the user through inference provider selection, credential setup, sandbox creation, and dashboard launch. Non-interactive mode is supported with `--non-interactive` + `NEMOCLAW_*` environment variables for CI and scripted installs. |
 | Sandboxed execution | Tested with limitations | Landlock, seccomp, network namespace isolation, no-new-privileges, privilege dropping, and process limits (ulimit -u 512 at `scripts/lib/sandbox-init.sh:237`) are tested and on by default. The `DANGEROUS_CAPS` list at `scripts/lib/sandbox-init.sh:288-299` drops cap_sys_admin, cap_sys_ptrace, cap_net_raw, cap_dac_override, cap_sys_chroot, cap_fsetid, cap_setfcap, cap_mknod, cap_audit_write, cap_net_bind_service with `capsh --drop` when CAP_SETPCAP is present. Limitation (active issue #3280): the fail-closed bounding-set gate is opt-in via `NEMOCLAW_REQUIRE_CAP_DROP=1`; the default is warn-and-continue so hosts without CAP_SETPCAP still boot, which means dangerous caps can remain in the bounding set on some hosts even though the effective set is empty. |
 | Routed inference | Tested | Provider-routed model calls through the OpenShell gateway, transparent to the agent. The agent uses `inference.local` inside the sandbox; provider credentials stay on the host. Supports every entry in the Providers table. |
-| Declarative network policy | Tested | YAML-defined egress with policy presets. Presets include `slack`, `discord`, `telegram`, `weather`, `openclaw-pricing`, `huggingface`, `npm`, `pypi`, `brew`, and others. Hot-reloadable at runtime with `$$nemoclaw &lt;name&gt; policy-add`. |
-| Snapshot and restore | Tested | Create, list, and restore named snapshots of sandbox state with the `$$nemoclaw &lt;name&gt; snapshot` subcommands (`create`, `list`, `restore`). Credential stripping is enforced on capture. Unsafe symlinks are rejected on restore. |
-| Agent skills | Tested | Packaged agent skills are discoverable by Cursor, Claude Code, and other coding assistants under `.agents/skills/`. Skills also install into the sandbox with `$$nemoclaw &lt;name&gt; skill install`. |
+| Declarative network policy | Tested | YAML-defined egress with policy presets. Presets include `slack`, `discord`, `telegram`, `weather`, `openclaw-pricing`, `huggingface`, `npm`, `pypi`, `brew`, and others. Hot-reloadable at runtime with `nemoclaw &lt;name&gt; policy-add`. |
+| Snapshot and restore | Tested | Create, list, and restore named snapshots of sandbox state with the `nemoclaw &lt;name&gt; snapshot` subcommands (`create`, `list`, `restore`). Credential stripping is enforced on capture. Unsafe symlinks are rejected on restore. |
+| Agent skills | Tested | Packaged agent skills are discoverable by Cursor, Claude Code, and other coding assistants under `.agents/skills/`. Skills also install into the sandbox with `nemoclaw &lt;name&gt; skill install`. |
 | State migration | Tested | Sandbox state migrates across rebuilds with credentials intentionally excluded. Hermes excludes `auth.json` and restores its SQLite session DB through the backup API. OpenClaw config merge prevents stale state from overwriting fresh values. |
-| Blueprint versioning | Tested | Versioned, digest-verified, and reproducible blueprint lifecycle. Drives `$$nemoclaw &lt;name&gt; rebuild` and the migration safeguards above. |
+| Blueprint versioning | Tested | Versioned, digest-verified, and reproducible blueprint lifecycle. Drives `nemoclaw &lt;name&gt; rebuild` and the migration safeguards above. |
 | Web search backend | Tested with limitations | Runtime-configurable web-search backend plumbed through the OpenShell gateway. Brave is the currently-implemented backend. See `src/lib/onboard/brave-provider-profile.ts` and `src/lib/onboard/web-search-flow.ts`. Users supply backend credentials during an onboard prompt. NemoClaw does not bundle a key. |
-{/* capability-status:end */}
 
 ## Deployment paths
 
 How NemoClaw can be brought up on a given host. Pick the row that matches the target environment.
 
-{/* deployment-status:begin */}
 | Path | Status | Notes |
 |------|--------|-------|
-| Local CLI onboard | Tested | Run `$$nemoclaw onboard` on a tested platform with Docker available locally. Primary path. |
-| Remote GPU with Brev CLI | Tested with limitations | Legacy compatibility wrapper provisions a Brev VM, installs Docker + NVIDIA Container Toolkit, and runs `$$nemoclaw onboard` on that host. Defaults to GCP; override with `NEMOCLAW_BREV_PROVIDER`. The preferred path is the standard installer followed by `$$nemoclaw onboard` after the VM is reachable. |
+| Local CLI onboard | Tested | Run `nemoclaw onboard` on a tested platform with Docker available locally. Primary path. |
+| Remote GPU with Brev CLI | Tested with limitations | Legacy compatibility wrapper provisions a Brev VM, installs Docker + NVIDIA Container Toolkit, and runs `nemoclaw onboard` on that host. Defaults to GCP; override with `NEMOCLAW_BREV_PROVIDER`. The preferred path is the standard installer followed by `nemoclaw onboard` after the VM is reachable. |
 | Brev web UI | Tested | Browser-driven launcher provisions a Brev-managed Linux VM with Docker, the OpenShell runtime, a NemoClaw sandbox running OpenClaw, inference routing, and the OpenClaw dashboard. |
-{/* deployment-status:end */}
 
 ## Out of scope and not supported
 
 The items below come up in conversations but are explicitly out of scope. They are listed here so launch material, sales conversations, and support triage have a clear "we do not claim to do this" reference.
 
-{/* out-of-scope:begin */}
 | Item | Status | Why |
 |------|--------|-----|
 | Podman / other container runtimes | Unsupported | Onboard surfaces an explicit unsupported-runtime error for Podman (`src/lib/onboard.ts:1611` prints the rejection; `src/lib/onboard/preflight.ts:586` flags the unsupported runtime upstream). Only Docker Engine, Docker Desktop, and Colima are supported. See issue #420 (closed). |
@@ -166,7 +140,6 @@ The items below come up in conversations but are explicitly out of scope. They a
 | Hosted SaaS / managed NemoClaw | Unsupported | There is no managed offering. Supported deployment paths are Local CLI onboard, Remote GPU with Brev CLI, and Brev web UI. |
 | Native provider integrations not in the Providers table | Unsupported | Vertex AI, Azure OpenAI, SageMaker, Together.ai, Replicate, and HuggingFace Inference Endpoints are not first-class onboarding entries. AWS Bedrock works through the `compatible-anthropic-endpoint` adapter (`src/lib/onboard/bedrock-runtime.ts`). |
 | Production SLA or guaranteed response times | Unsupported | NemoClaw is an early-preview alpha project. Maintainers respond on a best-effort basis. No SLA is offered. |
-{/* out-of-scope:end */}
 
 ## Known caveats and active blockers
 

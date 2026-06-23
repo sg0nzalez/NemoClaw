@@ -245,6 +245,7 @@ If the provider itself needs to change (for example, switching from vLLM to a cl
 ## References
 
 - **Load [references/switch-inference-providers.md](references/switch-inference-providers.md)** when switching inference providers, changing the model runtime, or reconfiguring inference routing. Changes the active inference model without restarting the sandbox.
+- **Load [references/declarative-agents-manifest.md](references/declarative-agents-manifest.md)** when users ask how to declare a manager-worker layout, how to give a secondary agent its own model, or how to express OpenClaw's `subagents.allowAgents` from NemoClaw. Documents the `nemoclaw onboard --agents <agents.yaml>` flag and the YAML schema it consumes.
 - **Load [references/set-up-sub-agent.md](references/set-up-sub-agent.md)** when users ask how to add a second model, configure a sub-agent model, use Omni for vision tasks, configure agents.list, or use sessions_spawn in NemoClaw. Shows the NemoClaw-specific file paths and update flow for adding an auxiliary OpenClaw sub-agent model.
 - **Load [references/inference-options.md](references/inference-options.md)** when explaining which providers are available, what the onboard wizard presents, or how inference routing works. Lists all inference providers offered during NemoClaw onboarding.
 - **[references/tool-calling-reliability.md](references/tool-calling-reliability.md)** — Explains Ollama tool-call leak symptoms, when to use vLLM with a tool-call parser, and how to repoint NemoClaw to a parser-aware local endpoint.

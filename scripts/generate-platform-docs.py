@@ -157,17 +157,21 @@ def _is_placeholder_owner(value: str) -> bool:
 
 
 def _escape_cell(value) -> str:
-    """Escape Markdown table cells.
+    """Escape Markdown table cells for safe MDX rendering.
 
     `|` breaks the column count; literal newlines break the row layout (an
-    embedded newline turns one row into two malformed rows). HTML/MDX-like
-    content is left intact because the canonical page renders MDX, but the
-    delimiter and line-break hazards are mechanical and have nothing to do
-    with formatting intent.
+    embedded newline turns one row into two malformed rows). `<` and `>` are
+    HTML control characters in MDX, so a future matrix edit that contains
+    `<script>` or even a benign `<...>` snippet would be interpreted as JSX,
+    not literal text. Backticks already protect inline code spans in the
+    notes; this function targets the structural and HTML-control hazards.
+    Encoding is HTML-entity style so MDX renders the original glyph.
     """
     text = "" if value is None else str(value)
     text = text.replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
-    return text.replace("|", "\\|")
+    text = text.replace("|", "\\|")
+    text = text.replace("<", "&lt;").replace(">", "&gt;")
+    return text
 
 
 def _validate_matrix(matrix: dict) -> None:

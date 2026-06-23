@@ -29,7 +29,7 @@ spec.loader.exec_module(module)
 }
 
 describe("generate-platform-docs generator", () => {
-  it("escapes pipes, newlines, and CRLFs in table cells", () => {
+  it("escapes pipes, newlines, CRLFs, and HTML control characters in table cells", () => {
     const output = runPython(`
 ${loadGeneratorAs("g")}
 
@@ -39,15 +39,19 @@ print(module._escape_cell("first\\nsecond"))
 print("---")
 print(module._escape_cell("crlf\\r\\nline"))
 print("---")
-# MDX-like text is intentionally NOT escaped — only structural hazards are.
+# MDX would interpret raw <...> as JSX. Encode as HTML entities so the
+# rendered page shows the original glyph but never parses it as a tag.
 print(module._escape_cell("<MyComponent prop='x' />"))
+print("---")
+print(module._escape_cell("<script>alert(1)</script>"))
 `);
     const sections = output.split("---\n").map((s) => s.trim());
     expect(sections[0]).toBe("a\\|b");
     expect(sections[1]).toBe("first second");
     // CRLF is collapsed to a single space (the \r\n branch runs first).
     expect(sections[2]).toBe("crlf line");
-    expect(sections[3]).toBe("<MyComponent prop='x' />");
+    expect(sections[3]).toBe("&lt;MyComponent prop='x' /&gt;");
+    expect(sections[4]).toBe("&lt;script&gt;alert(1)&lt;/script&gt;");
   });
 
   it("escapes pipes when rendered through a real platform table row", () => {
@@ -126,6 +130,32 @@ module._validate_matrix(matrix)
 print("OK")
 `);
     expect(output.trim()).toBe("OK");
+  });
+
+  // PRA-4 on #5345: the partial provider table renders the canonical label
+  // for caveated entries, omits deferred entries, and escapes pipes across
+  // name, endpoint type, and notes so a future matrix edit cannot break the
+  // launch-claims page.
+  it("provider table uses canonical labels, excludes deferred entries, and escapes pipes across all cells", () => {
+    const output = runPython(`
+${loadGeneratorAs("g")}
+
+providers = [
+  {"name": "Caveated|Provider", "status": "caveated", "endpoint_type": "Type|A", "notes": "note|A"},
+  {"name": "Deferred|Provider", "status": "deferred", "endpoint_type": "Type|B", "notes": "note|B"},
+]
+print(module.generate_provider_table(providers))
+`);
+    const lines = output.trim().split("\n");
+    const dataRows = lines.slice(2);
+    expect(dataRows).toHaveLength(1);
+    const row = dataRows[0];
+    expect(row).toContain("Caveated\\|Provider");
+    expect(row).toContain("Tested with limitations");
+    expect(row).not.toContain("Caveated |");
+    expect(row).toContain("Type\\|A");
+    expect(row).toContain("note\\|A");
+    expect(output).not.toContain("Deferred\\|Provider");
   });
 
   it("full platform table includes deferred rows; partial table excludes them", () => {
