@@ -94,7 +94,7 @@ NemoClaw configures messaging channels during onboarding. The OpenShell gateway 
 | Discord | Tested | Configured through an OpenShell-managed channel during onboarding. Sandbox egress allowed by the `discord` policy preset. |
 | Telegram | Tested | Configured through an OpenShell-managed channel during onboarding. |
 | WeChat | Tested with limitations | Channel hook available. Verify regional account access before relying on this path. |
-| WhatsApp | Tested with limitations | Channel hook available. Verify Meta Business API access before relying on this path. |
+| WhatsApp | Tested with limitations | Hermes-only channel. Pairs in the sandbox through WhatsApp Web by running `hermes whatsapp` and scanning the QR code; QR-paired session credentials persist under `~/.hermes/platforms/whatsapp/session` (`agents/hermes/manifest.yaml:69-71`). The selected channel bakes `WHATSAPP_ENABLED`/`WHATSAPP_MODE` into the sandbox `.env`. No Meta Business API integration today; that path is out of scope for this matrix. |
 
 ## Capabilities
 
