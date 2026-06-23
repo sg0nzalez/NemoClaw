@@ -17,6 +17,7 @@ REPO="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 SANDBOX_NAME="${NEMOCLAW_SANDBOX_NAME:-e2e-openclaw-tui-correlation}"
 INSTALL_LOG="${E2E_OPENCLAW_TUI_CORRELATION_INSTALL_LOG:-/tmp/nemoclaw-e2e-openclaw-tui-correlation-install.log}"
+EXPECTED_OPENCLAW_VERSION="${E2E_OPENCLAW_TUI_CORRELATION_PINNED_VERSION:-2026.6.9}"
 
 cleanup() {
   if [ "${NEMOCLAW_E2E_SKIP_CLEANUP:-0}" = "1" ]; then
@@ -46,8 +47,8 @@ openclaw_version="$(
   openshell sandbox exec --name "$SANDBOX_NAME" -- openclaw --version 2>&1 || true
 )"
 echo "Sandbox OpenClaw version: ${openclaw_version}"
-if ! grep -Fq "2026.5.27" <<<"$openclaw_version"; then
-  echo "Expected fresh sandbox to run OpenClaw 2026.5.27" >&2
+if ! grep -Fq "$EXPECTED_OPENCLAW_VERSION" <<<"$openclaw_version"; then
+  echo "Expected fresh sandbox to run OpenClaw ${EXPECTED_OPENCLAW_VERSION}" >&2
   exit 1
 fi
 

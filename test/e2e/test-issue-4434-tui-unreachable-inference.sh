@@ -22,6 +22,7 @@ INSTALL_LOG="${E2E_ISSUE_4434_INSTALL_LOG:-/tmp/nemoclaw-e2e-issue-4434-install.
 CAPTURE_DIR="${NEMOCLAW_ISSUE_4434_CAPTURE_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/nemoclaw-issue-4434.XXXXXX")}"
 CAPTURE_FILE="${CAPTURE_DIR}/openclaw-tui-capture.log"
 PLAIN_CAPTURE_FILE="${CAPTURE_DIR}/openclaw-tui-capture.plain.log"
+EXPECTED_OPENCLAW_VERSION="${NEMOCLAW_EXPECTED_OPENCLAW_VERSION:-2026.6.9}"
 TUI_TIMEOUT_SEC="${NEMOCLAW_ISSUE_4434_TUI_TIMEOUT_SEC:-180}"
 VISIBLE_ERROR_RE="error|failed|timeout|timed out|unavailable|fetch failed|ETIMEDOUT|ECONN|upstream"
 SPINNER_CONNECTED_RE="flibbertigibbeting|[0-9]+m[[:space:]][0-9]+s[[:space:]]*\\|[[:space:]]*connected"
@@ -107,8 +108,8 @@ done
 
 openclaw_version="$(openshell sandbox exec --name "$SANDBOX_NAME" -- openclaw --version 2>&1 || true)"
 info "sandbox OpenClaw version: ${openclaw_version}"
-if ! grep -q "2026.5.27" <<<"$openclaw_version"; then
-  fail "expected sandbox OpenClaw 2026.5.27"
+if ! grep -q "$EXPECTED_OPENCLAW_VERSION" <<<"$openclaw_version"; then
+  fail "expected sandbox OpenClaw ${EXPECTED_OPENCLAW_VERSION}"
 fi
 
 status_log="${CAPTURE_DIR}/nemoclaw-status-before-block.log"
