@@ -799,7 +799,7 @@ function validateSkillAgentVitestJob(
   const runEnv = asRecord(runVitest?.env);
   if (
     runEnv.NVIDIA_INFERENCE_API_KEY !==
-    "${{ secrets.NVIDIA_API_KEY }}"
+    "${{ secrets.NVIDIA_INFERENCE_API_KEY }}"
   ) {
     errors.push(
       "skill-agent-vitest run step must receive NVIDIA_INFERENCE_API_KEY from secrets",
@@ -1031,7 +1031,7 @@ function validateNetworkPolicyVitestJob(
   const runVitestEnv = asRecord(runVitest?.env);
   if (
     runVitestEnv.NVIDIA_INFERENCE_API_KEY !==
-    "${{ secrets.NVIDIA_API_KEY }}"
+    "${{ secrets.NVIDIA_INFERENCE_API_KEY }}"
   ) {
     errors.push(
       "network-policy-vitest Vitest step must receive NVIDIA_INFERENCE_API_KEY from secrets",
@@ -1458,7 +1458,7 @@ function validateShieldsConfigVitestJob(
   const runVitestEnv = asRecord(runVitest?.env);
   if (
     runVitestEnv.NVIDIA_INFERENCE_API_KEY !==
-    "${{ secrets.NVIDIA_API_KEY }}"
+    "${{ secrets.NVIDIA_INFERENCE_API_KEY }}"
   ) {
     errors.push(
       "shields-config-vitest step must receive NVIDIA_INFERENCE_API_KEY from secrets",
@@ -1656,7 +1656,7 @@ function validateRebuildOpenClawVitestJob(
   const runVitestEnv = asRecord(runVitest?.env);
   if (
     runVitestEnv.NVIDIA_INFERENCE_API_KEY !==
-    "${{ secrets.NVIDIA_API_KEY }}"
+    "${{ secrets.NVIDIA_INFERENCE_API_KEY }}"
   ) {
     errors.push(
       "rebuild-openclaw-vitest step must receive NVIDIA_INFERENCE_API_KEY from secrets",
@@ -1878,7 +1878,7 @@ function validateRebuildHermesVitestJob(
   const runVitestEnv = asRecord(runVitest?.env);
   if (
     runVitestEnv.NVIDIA_INFERENCE_API_KEY !==
-    "${{ secrets.NVIDIA_API_KEY }}"
+    "${{ secrets.NVIDIA_INFERENCE_API_KEY }}"
   ) {
     errors.push(
       `${jobName} step must receive NVIDIA_INFERENCE_API_KEY from secrets`,
@@ -2102,7 +2102,7 @@ function validateSandboxRebuildVitestJob(
   const runVitestEnv = asRecord(runVitest?.env);
   if (
     runVitestEnv.NVIDIA_INFERENCE_API_KEY !==
-    "${{ secrets.NVIDIA_API_KEY }}"
+    "${{ secrets.NVIDIA_INFERENCE_API_KEY }}"
   ) {
     errors.push(
       "sandbox-rebuild-vitest step must receive NVIDIA_INFERENCE_API_KEY from secrets",
@@ -2610,7 +2610,7 @@ function validateUpgradeStaleSandboxVitestJob(
   const runVitestEnv = asRecord(runVitest?.env);
   if (
     runVitestEnv.NVIDIA_INFERENCE_API_KEY !==
-    "${{ secrets.NVIDIA_API_KEY }}"
+    "${{ secrets.NVIDIA_INFERENCE_API_KEY }}"
   ) {
     errors.push(
       "upgrade-stale-sandbox-vitest step must receive NVIDIA_INFERENCE_API_KEY from secrets",
@@ -3889,7 +3889,7 @@ function validateHermesE2EVitestJob(
   const runVitestEnv = asRecord(runVitest?.env);
   if (
     runVitestEnv.NVIDIA_INFERENCE_API_KEY !==
-    "${{ secrets.NVIDIA_API_KEY }}"
+    "${{ secrets.NVIDIA_INFERENCE_API_KEY }}"
   ) {
     errors.push(
       "hermes-e2e-vitest Vitest step must receive NVIDIA_INFERENCE_API_KEY from secrets",
@@ -4952,7 +4952,7 @@ function validateModelRouterProviderRoutedInferenceVitestJob(
   const runVitestEnv = asRecord(runVitest?.env);
   if (
     runVitestEnv.NVIDIA_INFERENCE_API_KEY !==
-    "${{ secrets.NVIDIA_API_KEY }}"
+    "${{ secrets.NVIDIA_INFERENCE_API_KEY }}"
   ) {
     errors.push(
       "model-router-provider-routed-inference-vitest Vitest step must receive NVIDIA_INFERENCE_API_KEY from secrets",
@@ -5236,7 +5236,7 @@ function validateTunnelLifecycleVitestJob(
   const runVitestEnv = asRecord(runVitest?.env);
   if (
     runVitestEnv.NVIDIA_INFERENCE_API_KEY !==
-    "${{ secrets.NVIDIA_API_KEY }}"
+    "${{ secrets.NVIDIA_INFERENCE_API_KEY }}"
   ) {
     errors.push(
       "tunnel-lifecycle-vitest Vitest step must receive NVIDIA_INFERENCE_API_KEY from secrets",
@@ -6026,7 +6026,7 @@ function validateOpenClawDiscordPairingVitestJob(
   const runVitestEnv = asRecord(runVitest?.env);
   if (
     runVitestEnv.NVIDIA_INFERENCE_API_KEY !==
-    "${{ secrets.NVIDIA_API_KEY }}"
+    "${{ secrets.NVIDIA_INFERENCE_API_KEY }}"
   ) {
     errors.push(
       "openclaw-discord-pairing-vitest step must receive NVIDIA_INFERENCE_API_KEY from secrets",
@@ -6279,7 +6279,7 @@ function validateOpenClawSlackPairingVitestJob(
   const runVitestEnv = asRecord(runVitest?.env);
   if (
     runVitestEnv.NVIDIA_INFERENCE_API_KEY !==
-    "${{ secrets.NVIDIA_API_KEY }}"
+    "${{ secrets.NVIDIA_INFERENCE_API_KEY }}"
   ) {
     errors.push(
       "openclaw-slack-pairing-vitest step must receive NVIDIA_INFERENCE_API_KEY from secrets",
@@ -6593,7 +6593,7 @@ function validateChannelsStopStartVitestJob(
   );
   if (
     runVitestEnv.NVIDIA_INFERENCE_API_KEY !==
-    "${{ secrets.NVIDIA_API_KEY }}"
+    "${{ secrets.NVIDIA_INFERENCE_API_KEY }}"
   ) {
     errors.push(
       "channels-stop-start-vitest step must receive NVIDIA_INFERENCE_API_KEY from secrets",
@@ -6855,7 +6855,7 @@ function validateTelegramInjectionVitestJob(
   const runVitestEnv = asRecord(runVitest?.env);
   if (
     runVitestEnv.NVIDIA_INFERENCE_API_KEY !==
-    "${{ secrets.NVIDIA_API_KEY }}"
+    "${{ secrets.NVIDIA_INFERENCE_API_KEY }}"
   ) {
     errors.push(
       "telegram-injection-vitest step must receive NVIDIA_INFERENCE_API_KEY from secrets",
@@ -7432,7 +7432,7 @@ export function validateE2eVitestScenariosWorkflowBoundary(
   }
   if (
     runVitestEnv.NVIDIA_INFERENCE_API_KEY !==
-    "${{ secrets.NVIDIA_API_KEY }}"
+    "${{ secrets.NVIDIA_INFERENCE_API_KEY }}"
   ) {
     errors.push(
       "Vitest step must receive NVIDIA_INFERENCE_API_KEY from secrets",
