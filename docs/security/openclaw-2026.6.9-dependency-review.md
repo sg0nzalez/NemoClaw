@@ -13,6 +13,8 @@ Scope: NemoClaw runtime pin `openclaw@2026.6.9`.
 - Slack channel plugin package: `@openclaw/slack@2026.6.9`
 - Slack channel plugin npm integrity: `sha512-JZHc0L3s6s+yBsWowZtE/DWZJOuy4lTE6uTuUbF5QNjUvQQUlCHMFrwPycrXLesVq1il5yAvo82VbERRsIzgxQ==`
 
+NemoClaw enforces the main `openclaw@2026.6.9` integrity in the Dockerfile install blocks before `npm install`. It also enforces the reviewed `@openclaw/slack@2026.6.9` registry integrity in the messaging build applier before running `openclaw plugins install npm:@openclaw/slack@2026.6.9 --pin`.
+
 ## Advisory Check
 
 Command run from a temporary directory:
@@ -25,7 +27,7 @@ npm audit --omit=dev --json
 
 Result: npm audit exited `0` and reported `0` info, `0` low, `0` moderate, `0` high, and `0` critical vulnerabilities.
 
-This review is an advisory snapshot for the direct OpenClaw runtime package and its npm dependency graph at review time. It complements, but does not replace, the committed npm integrity pin and Dockerfile install-time registry integrity check.
+This review is an advisory snapshot for the direct OpenClaw runtime package and its npm dependency graph at review time. It complements, but does not replace, the committed npm integrity pins, Dockerfile install-time registry integrity check, and Slack plugin install-time registry integrity check.
 
 ## Slack Source Review
 

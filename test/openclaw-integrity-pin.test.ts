@@ -22,6 +22,8 @@ const UNPINNED_OPENCLAW_VERSION = "2026.6.10";
 const PINNED_OPENCLAW_VERSION = "2026.6.9";
 const PINNED_OPENCLAW_INTEGRITY =
   "sha512-y0PGUdE87S8QtQXABPDL0CjNKhH3q/R1h9/WiRQkhVCGSBVhs63/M1iZn2DYVyJCAbDyMz3KNyAE0WzSQIWCRg==";
+const PINNED_OPENCLAW_SLACK_INTEGRITY =
+  "sha512-JZHc0L3s6s+yBsWowZtE/DWZJOuy4lTE6uTuUbF5QNjUvQQUlCHMFrwPycrXLesVq1il5yAvo82VbERRsIzgxQ==";
 const LEGACY_REBUILD_OPENCLAW_VERSION = "2026.3.11";
 const LEGACY_REBUILD_OPENCLAW_INTEGRITY =
   "sha512-bxwiBmHPakwfpY5tqC9lrV5TCu5PKf0c1bHNc3nhrb+pqKcPEWV4zOjDVFLQUHr98ihgWA+3pacy4b3LQ8wduQ==";
@@ -101,9 +103,9 @@ describe("OpenClaw npm integrity pins", () => {
     expect(reviewNote).toContain(`openclaw@${PINNED_OPENCLAW_VERSION}`);
     expect(reviewNote).toContain(PINNED_OPENCLAW_INTEGRITY);
     expect(reviewNote).toContain("@openclaw/slack@2026.6.9");
-    expect(reviewNote).toContain(
-      "sha512-JZHc0L3s6s+yBsWowZtE/DWZJOuy4lTE6uTuUbF5QNjUvQQUlCHMFrwPycrXLesVq1il5yAvo82VbERRsIzgxQ==",
-    );
+    expect(reviewNote).toContain(PINNED_OPENCLAW_SLACK_INTEGRITY);
+    expect(reviewNote).toContain("Slack plugin install-time registry integrity check");
+    expect(reviewNote).toContain("openclaw plugins install npm:@openclaw/slack@2026.6.9 --pin");
     expect(reviewNote).toContain("`0` high");
     expect(reviewNote).toContain("`0` critical");
     expect(reviewNote).toContain(
@@ -125,6 +127,25 @@ describe("OpenClaw npm integrity pins", () => {
     expect(proof).toContain(". /tmp/nemoclaw-proxy-env.sh");
     expect(proof).toContain('proof: "openclaw-pipeline-runtime"');
     expect(proof).toContain("deniedFeedbackCount");
+    expect(proof).toContain("slack_proof_shell_quote");
+    expect(proof).toContain("slack_proof_validate_env_value");
+  });
+
+  it("rejects unsafe Slack proof env values before constructing the remote shell command", () => {
+    const result = spawnSync(
+      "bash",
+      [
+        "-c",
+        [
+          `. ${JSON.stringify(SLACK_API_PROOF_HELPER)}`,
+          `slack_proof_validate_env_value 'allowed user' "U123'BAD" '[A-Za-z0-9_-]+'`,
+        ].join("; "),
+      ],
+      { encoding: "utf-8", timeout: 10000 },
+    );
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("Invalid Slack proof allowed user");
   });
 
   it("installs the reviewed pin when registry integrity matches the committed pin", () => {

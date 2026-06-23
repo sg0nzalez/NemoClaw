@@ -197,6 +197,10 @@ export const slackManifest = {
       manager: "openclaw-plugin",
       spec: "npm:@openclaw/slack@{{openclaw.version}}",
       pin: true,
+      integrityByVersion: {
+        "2026.6.9":
+          "sha512-JZHc0L3s6s+yBsWowZtE/DWZJOuy4lTE6uTuUbF5QNjUvQQUlCHMFrwPycrXLesVq1il5yAvo82VbERRsIzgxQ==",
+      },
       required: true,
     },
   ],

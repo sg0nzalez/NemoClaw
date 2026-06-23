@@ -27,6 +27,8 @@ const GENERATOR_PATH = path.join(
   "scripts",
   "generate-openclaw-config.mts",
 );
+const OPENCLAW_SLACK_2026_6_9_INTEGRITY =
+  "sha512-JZHc0L3s6s+yBsWowZtE/DWZJOuy4lTE6uTuUbF5QNjUvQQUlCHMFrwPycrXLesVq1il5yAvo82VbERRsIzgxQ==";
 
 const BASE_GENERATOR_ENV: Record<string, string> = {
   NEMOCLAW_MODEL: "test-model",
@@ -447,6 +449,137 @@ describe("messaging-build-applier.mts: agent-install", () => {
         "plugins|install|npm:@openclaw/slack@2026.5.22|--pin|||",
         "plugins|install|npm:@openclaw/whatsapp@2026.5.22|--pin|||",
       ]);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("verifies reviewed npm integrity before installing the 2026.6.9 Slack plugin", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-slack-integrity-"));
+    const tracePath = path.join(tmp, "openclaw.trace");
+    fs.writeFileSync(
+      path.join(tmp, "npm"),
+      [
+        "#!/bin/sh",
+        'printf \'npm|%s|%s|%s\\n\' "$1" "$2" "$3" >> "$OPENCLAW_TRACE"',
+        'if [ "${1:-}" = "view" ] && [ "${3:-}" = "dist.integrity" ]; then printf "%s\\n" "$OPENCLAW_SLACK_INTEGRITY"; exit 0; fi',
+        "exit 1",
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    fs.writeFileSync(
+      path.join(tmp, "openclaw"),
+      [
+        "#!/bin/sh",
+        'printf \'openclaw|%s|%s|%s|%s\\n\' "$1" "$2" "$3" "$4" >> "$OPENCLAW_TRACE"',
+        "exit 0",
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+
+    try {
+      const env = withLegacyMessagingPlanEnv(
+        {
+          PATH: `${tmp}:${process.env.PATH || "/usr/bin:/bin"}`,
+          OPENCLAW_TRACE: tracePath,
+          OPENCLAW_SLACK_INTEGRITY: OPENCLAW_SLACK_2026_6_9_INTEGRITY,
+          OPENCLAW_VERSION: "2026.6.9",
+          NEMOCLAW_MESSAGING_CHANNELS_B64: channelsB64(["slack"]),
+        },
+        "openclaw",
+      );
+      const result = spawnSync(
+        "node",
+        [
+          "--experimental-strip-types",
+          SCRIPT_PATH,
+          "--agent",
+          "openclaw",
+          "--phase",
+          "agent-install",
+        ],
+        {
+          encoding: "utf-8",
+          stdio: ["pipe", "pipe", "pipe"],
+          env,
+          timeout: 10_000,
+        },
+      );
+
+      expect(result.status, result.stderr).toBe(0);
+      expect(fs.readFileSync(tracePath, "utf-8").trim().split("\n")).toEqual([
+        "npm|view|@openclaw/slack@2026.6.9|dist.integrity",
+        "openclaw|plugins|install|npm:@openclaw/slack@2026.6.9|--pin",
+      ]);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("fails closed before installing the 2026.6.9 Slack plugin when registry integrity drifts", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-slack-integrity-"));
+    const tracePath = path.join(tmp, "openclaw.trace");
+    fs.writeFileSync(
+      path.join(tmp, "npm"),
+      [
+        "#!/bin/sh",
+        'printf \'npm|%s|%s|%s\\n\' "$1" "$2" "$3" >> "$OPENCLAW_TRACE"',
+        'if [ "${1:-}" = "view" ] && [ "${3:-}" = "dist.integrity" ]; then printf "sha512-drift\\n"; exit 0; fi',
+        "exit 1",
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    fs.writeFileSync(
+      path.join(tmp, "openclaw"),
+      [
+        "#!/bin/sh",
+        'printf \'openclaw|%s|%s|%s|%s\\n\' "$1" "$2" "$3" "$4" >> "$OPENCLAW_TRACE"',
+        "exit 0",
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+
+    try {
+      const env = withLegacyMessagingPlanEnv(
+        {
+          PATH: `${tmp}:${process.env.PATH || "/usr/bin:/bin"}`,
+          OPENCLAW_TRACE: tracePath,
+          OPENCLAW_VERSION: "2026.6.9",
+          NEMOCLAW_MESSAGING_CHANNELS_B64: channelsB64(["slack"]),
+        },
+        "openclaw",
+      );
+      const result = spawnSync(
+        "node",
+        [
+          "--experimental-strip-types",
+          SCRIPT_PATH,
+          "--agent",
+          "openclaw",
+          "--phase",
+          "agent-install",
+        ],
+        {
+          encoding: "utf-8",
+          stdio: ["pipe", "pipe", "pipe"],
+          env,
+          timeout: 10_000,
+        },
+      );
+
+      expect(result.status).toBe(2);
+      expect(result.stderr).toContain(
+        "OpenClaw plugin @openclaw/slack@2026.6.9 npm integrity mismatch",
+      );
+      expect(result.stderr).toContain(`Expected: ${OPENCLAW_SLACK_2026_6_9_INTEGRITY}`);
+      expect(result.stderr).toContain("Actual: sha512-drift");
+      expect(fs.readFileSync(tracePath, "utf-8").trim()).toBe(
+        "npm|view|@openclaw/slack@2026.6.9|dist.integrity",
+      );
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }

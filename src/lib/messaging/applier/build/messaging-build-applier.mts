@@ -104,6 +104,8 @@ export type BuildCommandResult = {
 
 type OpenClawPluginInstall = {
   readonly spec: string;
+  readonly npmPackageSpec?: string;
+  readonly integrity?: string;
   readonly pin: boolean;
 };
 
@@ -419,7 +421,16 @@ function collectOpenClawMessagingPluginInstalls(
     }
     const install = readOpenClawPackageInstall(step.value, step.outputId);
     const resolvedSpec = resolveOpenClawPackageSpec(install.spec, env);
-    const resolvedInstall = { spec: resolvedSpec, pin: install.pin === true };
+    const npmPackage = parseNpmPackageSpec(resolvedSpec);
+    const integrity =
+      (npmPackage?.version ? install.integrityByVersion?.[npmPackage.version] : undefined) ??
+      install.integrity;
+    const resolvedInstall: OpenClawPluginInstall = {
+      spec: resolvedSpec,
+      ...(npmPackage ? { npmPackageSpec: npmPackage.packageSpec } : {}),
+      ...(integrity ? { integrity } : {}),
+      pin: install.pin === true,
+    };
     const key = JSON.stringify(resolvedInstall);
     if (seen.has(key)) continue;
     seen.add(key);
@@ -449,6 +460,7 @@ export function openClawDoctorEnvOverrides(
 
 export function installOpenClawMessagingPlugins(plan: MessagingBuildPlan | null, env: Env): void {
   for (const install of collectOpenClawMessagingPluginInstalls(plan, env)) {
+    verifyOpenClawPluginNpmIntegrity(install, env);
     runCommand(
       ["openclaw", "plugins", "install", install.spec, ...(install.pin ? ["--pin"] : [])],
       env,
@@ -805,6 +817,8 @@ function readOpenClawPackageInstall(
 ): {
   readonly manager: "openclaw-plugin";
   readonly spec: string;
+  readonly integrity?: string;
+  readonly integrityByVersion?: Readonly<Record<string, string>>;
   readonly pin?: boolean;
 } {
   if (!isObject(value)) {
@@ -828,9 +842,21 @@ function readOpenClawPackageInstall(
       `Messaging package-install output ${outputId} pin must be boolean`,
     );
   }
+  if (install.integrity !== undefined && typeof install.integrity !== "string") {
+    throw new MessagingBuildApplierError(
+      `Messaging package-install output ${outputId} integrity must be a string`,
+    );
+  }
+  if (install.integrityByVersion !== undefined && !isStringRecord(install.integrityByVersion)) {
+    throw new MessagingBuildApplierError(
+      `Messaging package-install output ${outputId} integrityByVersion must map versions to strings`,
+    );
+  }
   return install as {
     readonly manager: "openclaw-plugin";
     readonly spec: string;
+    readonly integrity?: string;
+    readonly integrityByVersion?: Readonly<Record<string, string>>;
     readonly pin?: boolean;
   };
 }
@@ -851,6 +877,18 @@ function resolveOpenClawPackageSpec(spec: string, env: Env): string {
   return resolved;
 }
 
+function parseNpmPackageSpec(
+  spec: string,
+): { readonly packageSpec: string; readonly version?: string } | null {
+  if (!spec.startsWith("npm:")) return null;
+  const packageSpec = spec.slice("npm:".length);
+  const versionAt = packageSpec.startsWith("@")
+    ? packageSpec.indexOf("@", 1)
+    : packageSpec.lastIndexOf("@");
+  if (versionAt <= 0 || versionAt === packageSpec.length - 1) return { packageSpec };
+  return { packageSpec, version: packageSpec.slice(versionAt + 1) };
+}
+
 function runCommand(args: readonly string[], env: Env): void {
   console.log(`+ ${args.join(" ")}`);
   const result = spawnSync(args[0] as string, args.slice(1), {
@@ -861,6 +899,33 @@ function runCommand(args: readonly string[], env: Env): void {
   if (result.status !== 0) {
     throw new MessagingBuildApplierError(
       `${args[0]} exited with status ${String(result.status ?? "unknown")}`,
+    );
+  }
+}
+
+function verifyOpenClawPluginNpmIntegrity(install: OpenClawPluginInstall, env: Env): void {
+  if (!install.integrity) return;
+  if (!install.npmPackageSpec) {
+    throw new MessagingBuildApplierError(
+      `Cannot verify npm integrity for non-npm OpenClaw plugin spec ${install.spec}`,
+    );
+  }
+  const result = spawnSync("npm", ["view", install.npmPackageSpec, "dist.integrity"], {
+    encoding: "utf-8",
+    env: env as NodeJS.ProcessEnv,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    const detail = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
+    throw new MessagingBuildApplierError(
+      `npm view ${install.npmPackageSpec} dist.integrity failed${detail ? `: ${detail}` : ""}`,
+    );
+  }
+  const actual = String(result.stdout ?? "").trim();
+  if (actual !== install.integrity) {
+    throw new MessagingBuildApplierError(
+      `OpenClaw plugin ${install.npmPackageSpec} npm integrity mismatch. Expected: ${install.integrity}. Actual: ${actual}`,
     );
   }
 }
@@ -1256,6 +1321,10 @@ function assertSafeObjectKey(key: string, context: string): void {
 
 function isObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isStringRecord(value: unknown): value is Record<string, string> {
+  return isObject(value) && Object.values(value).every((item) => typeof item === "string");
 }
 
 function uniqueStrings<T>(values: readonly T[]): T[] {

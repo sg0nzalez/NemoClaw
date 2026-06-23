@@ -24,6 +24,23 @@ cleanup_fake_slack_api() {
   fi
 }
 
+slack_proof_shell_quote() {
+  local value="$1"
+  printf "'"
+  printf '%s' "$value" | sed "s/'/'\\\\''/g"
+  printf "'"
+}
+
+slack_proof_validate_env_value() {
+  local label="$1"
+  local value="$2"
+  local pattern="$3"
+  if [ -z "$value" ] || [[ ! "$value" =~ ^${pattern}$ ]]; then
+    echo "Invalid Slack proof ${label}: value contains unsupported characters" >&2
+    return 1
+  fi
+}
+
 start_fake_slack_api() {
   local bot_token="$1"
   local app_token="$2"
@@ -114,7 +131,12 @@ run_fake_slack_api_node_request() {
   local path="$2"
   local authorization="$3"
   local host="${FAKE_SLACK_API_HOST:-host.openshell.internal}"
-  sandbox_exec_stdin "FAKE_SLACK_API_HOST='$host' FAKE_SLACK_API_PORT='$port' FAKE_SLACK_API_PATH='$path' FAKE_SLACK_API_AUTH='$authorization' node - 2>&1" <<'NODE'
+  local quoted_host quoted_port quoted_path quoted_authorization
+  quoted_host="$(slack_proof_shell_quote "$host")"
+  quoted_port="$(slack_proof_shell_quote "$port")"
+  quoted_path="$(slack_proof_shell_quote "$path")"
+  quoted_authorization="$(slack_proof_shell_quote "$authorization")"
+  sandbox_exec_stdin "FAKE_SLACK_API_HOST=$quoted_host FAKE_SLACK_API_PORT=$quoted_port FAKE_SLACK_API_PATH=$quoted_path FAKE_SLACK_API_AUTH=$quoted_authorization node - 2>&1" <<'NODE'
 const http = require("http");
 
 const authorization = process.env.FAKE_SLACK_API_AUTH || "";
@@ -159,7 +181,16 @@ run_fake_slack_channel_mention_proof() {
   local allowed_user="$2"
   local denied_user="$3"
   local host="${FAKE_SLACK_API_HOST:-host.openshell.internal}"
-  sandbox_exec_stdin "FAKE_SLACK_API_HOST='$host' FAKE_SLACK_API_PORT='$port' SLACK_ALLOWED_USER='$allowed_user' SLACK_DENIED_USER='$denied_user' bash -lc '. /tmp/nemoclaw-proxy-env.sh 2>/dev/null || true; exec node --preserve-symlinks --input-type=module - 2>&1'" <<'NODE'
+  slack_proof_validate_env_value "host" "$host" '[A-Za-z0-9._-]+' || return 1
+  slack_proof_validate_env_value "port" "$port" '[0-9]+' || return 1
+  slack_proof_validate_env_value "allowed user" "$allowed_user" '[A-Za-z0-9_-]+' || return 1
+  slack_proof_validate_env_value "denied user" "$denied_user" '[A-Za-z0-9_-]+' || return 1
+  local quoted_host quoted_port quoted_allowed_user quoted_denied_user
+  quoted_host="$(slack_proof_shell_quote "$host")"
+  quoted_port="$(slack_proof_shell_quote "$port")"
+  quoted_allowed_user="$(slack_proof_shell_quote "$allowed_user")"
+  quoted_denied_user="$(slack_proof_shell_quote "$denied_user")"
+  sandbox_exec_stdin "FAKE_SLACK_API_HOST=$quoted_host FAKE_SLACK_API_PORT=$quoted_port SLACK_ALLOWED_USER=$quoted_allowed_user SLACK_DENIED_USER=$quoted_denied_user bash -lc '. /tmp/nemoclaw-proxy-env.sh 2>/dev/null || true; exec node --preserve-symlinks --input-type=module - 2>&1'" <<'NODE'
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import http from "node:http";
