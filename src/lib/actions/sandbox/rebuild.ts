@@ -60,7 +60,7 @@ import { shellQuote } from "../../runner";
 import * as sandboxVersion from "../../sandbox/version";
 import { redact } from "../../security/redact";
 import * as shields from "../../shields";
-import type { Session } from "../../state/onboard-session";
+import { MACHINE_SNAPSHOT_VERSION, type Session } from "../../state/onboard-session";
 import * as onboardSession from "../../state/onboard-session";
 import * as registry from "../../state/registry";
 import * as sandboxState from "../../state/sandbox";
@@ -729,9 +729,17 @@ export async function rebuildSandbox(
     // from a previous onboard of a *different* agent type would be picked up
     // by resolveAgentName() and the wrong Dockerfile would be used.  (#2201)
     onboardSession.updateSession((s: Session) => {
+      const now = new Date().toISOString();
       s.sandboxName = sandboxName;
       s.resumable = true;
       s.status = "in_progress";
+      s.failure = null;
+      s.machine = {
+        version: MACHINE_SNAPSHOT_VERSION,
+        state: "init",
+        stateEnteredAt: now,
+        revision: (s.machine?.revision ?? 0) + 1,
+      };
       s.agent = rebuildAgent;
       s.messagingPlan = rebuildMessagingPlan;
       s.hermesToolGateways = rebuildsHermesSandbox ? rebuildHermesToolGateways : [];

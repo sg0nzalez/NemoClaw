@@ -178,6 +178,12 @@ function createFixture({
       policyPresets: [],
       messagingPlan: lastOnboardedMessagingPlan,
       metadata: { gatewayName: "nemoclaw", fromDockerfile: fromDockerfile },
+      machine: {
+        version: 1,
+        state: "sandbox",
+        stateEnteredAt: "2026-01-01",
+        revision: 7,
+      },
       steps: {
         preflight: { status: "complete", startedAt: null, completedAt: null, error: null },
         gateway: { status: "complete", startedAt: null, completedAt: null, error: null },
@@ -290,6 +296,7 @@ function runRebuild(fixture: ReturnType<typeof createFixture>) {
 type SessionFixture = {
   agent?: string | null;
   messagingPlan?: { channels?: Array<{ channelId?: string }> } | null;
+  machine?: { state?: string; revision?: number };
 };
 
 /**
@@ -317,6 +324,19 @@ function readSessionMessagingPlan(
 }
 
 describe("Issue #2201: rebuild syncs agent from registry, not stale session", () => {
+  it("resets stale onboard machine state before rebuild resume", {
+    timeout: 60_000,
+  }, () => {
+    const f = createFixture({
+      rebuildTarget: { name: "openclaw", agent: null },
+      lastOnboarded: { name: "openclaw", agent: null },
+    });
+    const result = runRebuild(f);
+    const output = `${result.stderr}\n${result.stdout}`;
+
+    expect(output).not.toContain("Unexpected onboarding live flow state before slice entry");
+  });
+
   it("rebuild openclaw after hermes was onboarded last (reporter scenario)", {
     timeout: 60_000,
   }, () => {
