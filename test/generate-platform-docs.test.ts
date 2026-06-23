@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -246,5 +246,58 @@ print(block)
     expect(output).toContain("@NVIDIA/nemoclaw-maintainer");
     expect(output).not.toContain("Product owner");
     expect(output).not.toContain("TBD");
+  });
+
+  // PRA-3 on #5345: semantic regression tests for launch-claim and
+  // credential-boundary invariants. Each test reads the actual matrix and
+  // docs at the PR head, not a fixture, so a future edit that breaks the
+  // invariant fails this suite before the change ships.
+  it("every documented `--agent <id>` in the matrix resolves to an installed agent manifest", () => {
+    const matrixPath = path.join(import.meta.dirname, "..", "ci", "platform-matrix.json");
+    const matrix = JSON.parse(readFileSync(matrixPath, "utf-8"));
+    const onboardExample = /(?:\$\$)?nemoclaw onboard --agent ([a-z0-9-]+)/g;
+    const agentIds = new Set<string>();
+    for (const section of ["agents", "out_of_scope"] as const) {
+      for (const row of matrix[section] ?? []) {
+        const notes: string = row.notes ?? "";
+        for (const match of notes.matchAll(onboardExample)) agentIds.add(match[1]);
+      }
+    }
+    expect(agentIds.size).toBeGreaterThan(0);
+    const agentsRoot = path.join(import.meta.dirname, "..", "agents");
+    for (const id of agentIds) {
+      const manifest = path.join(agentsRoot, id, "manifest.yaml");
+      expect(
+        existsSync(manifest),
+        `Matrix advertises \`--agent ${id}\` but agents/${id}/manifest.yaml is missing`,
+      ).toBe(true);
+    }
+  });
+
+  it("out-of-scope LangChain row scopes itself and names Deep Agents Code as the integrated exception", () => {
+    const matrixPath = path.join(import.meta.dirname, "..", "ci", "platform-matrix.json");
+    const matrix = JSON.parse(readFileSync(matrixPath, "utf-8"));
+    const langchainRow = (matrix.out_of_scope ?? []).find((row: { name: string; notes: string }) =>
+      /LangChain/i.test(row.name) || /LangChain/i.test(row.notes),
+    );
+    expect(langchainRow, "expected an out_of_scope row mentioning LangChain").toBeDefined();
+    expect(langchainRow.name + " " + langchainRow.notes).toMatch(/Deep Agents Code/);
+    expect(langchainRow.notes).not.toMatch(/Only OpenClaw and Hermes are integrated\.?\s*$/);
+  });
+
+  it("sub-agent credential guide retains safe temp-file and boundary-warning properties", () => {
+    const docPath = path.join(
+      import.meta.dirname,
+      "..",
+      "docs",
+      "inference",
+      "set-up-sub-agent.mdx",
+    );
+    const body = readFileSync(docPath, "utf-8");
+    expect(body).toMatch(/umask 077/);
+    expect(body).toMatch(/mktemp -d/);
+    expect(body).toMatch(/trap .* EXIT/);
+    expect(body).toMatch(/<Warning>[\s\S]*credential-bearing[\s\S]*<\/Warning>/);
+    expect(body).not.toMatch(/python3 [^\n]*"\$NVIDIA_API_KEY"/);
   });
 });
