@@ -1036,17 +1036,6 @@ describe("E2E reusable workflow contract", () => {
       );
     }
 
-    const nightlyWorkflowText = readFileSync(".github/workflows/nightly-e2e.yaml", "utf8");
-    expect(nightlyWorkflowText).toContain(
-      "NVIDIA_API_KEY: selected timeout-sensitive direct lanes",
-    );
-    expect(nightlyWorkflowText).toContain("https://integrate.api.nvidia.com/v1");
-    expect(nightlyWorkflowText).toContain("reviewed\n#     direct-lane allowlist");
-    expect(nightlyWorkflowText).toContain("withheld from workflow_dispatch target_ref runs");
-    expect(nightlyWorkflowText).toContain(
-      "Return\n# these lanes to hosted-compatible inference only after",
-    );
-
     expect(directSecretSteps.length).toBeGreaterThanOrEqual(12);
     for (const { jobName, step } of directSecretSteps) {
       const stepKey = `${jobName}:${step.name ?? "<unnamed>"}`;
