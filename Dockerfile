@@ -44,6 +44,7 @@ ARG OPENCLAW_2026_6_9_INTEGRITY=sha512-y0PGUdE87S8QtQXABPDL0CjNKhH3q/R1h9/WiRQkh
 # build an older OpenClaw base image before proving upgrade behavior.
 ARG OPENCLAW_2026_3_11_INTEGRITY=sha512-bxwiBmHPakwfpY5tqC9lrV5TCu5PKf0c1bHNc3nhrb+pqKcPEWV4zOjDVFLQUHr98ihgWA+3pacy4b3LQ8wduQ==
 ARG OPENCLAW_2026_4_24_INTEGRITY=sha512-W6u4XeIIP4+uG4DYV9G3JeS6QNuKwfhQIej1GIoL4BdcnUFgrnB8kHYNXL3MxiHRKuhZB9OYwUMGs8jKFZR/Vg==
+ARG CODEX_ACP_0_11_1_INTEGRITY=sha512-My2VSlBtvJipJhImHjFDej2ut/p00QqOISRnZgLgLrSIzjgvdcQvAhaZviWj7XPhk4UIdIb0OoA+Lrls824uiQ==
 
 # OpenClaw 2026.6.9 loads some generated source through jiti. Disable its
 # filesystem transform cache so source fragments that mention provider marker
@@ -164,8 +165,15 @@ RUN set -eu; \
     # versioned npx package specs even when the package is globally installed.
     # Installing the binary at build time and configuring ACPx to use it
     # directly keeps TC-SBX-02 off the runtime npm path.
+    CODEX_ACP_SPEC='@zed-industries/codex-acp@0.11.1'; \
+    REGISTRY_CODEX_ACP_INTEGRITY=$(npm view "${CODEX_ACP_SPEC}" dist.integrity); \
+    if [ "$REGISTRY_CODEX_ACP_INTEGRITY" != "$CODEX_ACP_0_11_1_INTEGRITY" ]; then \
+        echo "ERROR: ${CODEX_ACP_SPEC} npm integrity mismatch" >&2; \
+        echo "Expected: ${CODEX_ACP_0_11_1_INTEGRITY}" >&2; \
+        echo "Actual:   ${REGISTRY_CODEX_ACP_INTEGRITY}" >&2; exit 1; \
+    fi; \
     npm install -g --no-audit --no-fund --no-progress \
-        '@zed-industries/codex-acp@0.11.1'; \
+        "${CODEX_ACP_SPEC}"; \
     command -v codex-acp >/dev/null
 
 # Patch OpenClaw media fetch for proxy-only sandbox (NVIDIA/NemoClaw#1755).

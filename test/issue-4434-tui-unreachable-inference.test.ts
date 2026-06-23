@@ -16,7 +16,10 @@ type TuiState = {
 };
 
 const VISIBLE_ERROR_RE =
-  /\b(error|failed|timeout|timed out|unavailable|fetch failed|upstream|connection)\b/i;
+  /\b(error|failed|timeout|timed out|unavailable|fetch failed|ETIMEDOUT|ECONN|upstream)\b/i;
+const TUI_RUN_ERROR_RE = /\brun\s+error:/i;
+const TUI_ERROR_CAUSE_RE =
+  /\brun\s+error:.*\b(error|failed|timeout|timed out|unavailable|fetch failed|ETIMEDOUT|ECONN|upstream)\b/i;
 const CONNECTED_SPINNER_RE =
   /(?:flibbertigibbeting|thinking|waiting|processing).*?\|\s*connected|[0-9]+m\s+[0-9]+s\s*\|\s*connected/i;
 
@@ -26,10 +29,16 @@ function stripAnsi(value: string): string {
 
 function analyzeIssue4434TuiCapture(capture: string) {
   const plain = stripAnsi(capture);
+  const lines = plain.split(/\n/).map((line) => line.trim());
+  const runErrorLines = lines.filter((line) => TUI_RUN_ERROR_RE.test(line));
+  const runErrorLineWithCause = runErrorLines.find((line) => TUI_ERROR_CAUSE_RE.test(line)) ?? "";
   const visibleError = VISIBLE_ERROR_RE.test(plain);
   const connectedSpinner = CONNECTED_SPINNER_RE.test(plain);
   return {
     visibleError,
+    runErrorLinePresent: runErrorLines.length > 0,
+    runErrorLine: runErrorLineWithCause || runErrorLines.at(-1) || "",
+    runErrorLineHasCause: runErrorLineWithCause.length > 0,
     connectedSpinner,
     issue4434Signature: connectedSpinner && !visibleError,
   };
@@ -38,7 +47,7 @@ function analyzeIssue4434TuiCapture(capture: string) {
 function renderTui(state: TuiState): string {
   const statusLine = state.spinnerActive
     ? "flibbertigibbeting... | connected"
-    : `status: ${state.status}`;
+    : `running | ${state.status}`;
   return [...state.terminalLines, statusLine].join("\n");
 }
 
@@ -48,7 +57,7 @@ function applyChatEventToTui(state: TuiState, event: ChatEvent): TuiState {
     return {
       spinnerActive: false,
       status: "error",
-      terminalLines: [...state.terminalLines, `Error: ${text}`],
+      terminalLines: [...state.terminalLines, `run error: ${text}`],
     };
   }
   if (event.state === "final") {
@@ -108,6 +117,9 @@ describe("issue #4434 unreachable inference TUI behavior", () => {
 
     expect(analyzeIssue4434TuiCapture(capture)).toEqual({
       visibleError: false,
+      runErrorLinePresent: false,
+      runErrorLine: "",
+      runErrorLineHasCause: false,
       connectedSpinner: true,
       issue4434Signature: true,
     });
@@ -130,6 +142,28 @@ describe("issue #4434 unreachable inference TUI behavior", () => {
     expect(result.state.status).toBe("error");
     expect(analyzeIssue4434TuiCapture(result.capture)).toMatchObject({
       visibleError: true,
+      runErrorLinePresent: true,
+      runErrorLine:
+        "run error: upstream inference endpoint fetch failed: connect ETIMEDOUT 75.2.113.119:443. Check network connectivity or retry after restoring endpoint access.",
+      runErrorLineHasCause: true,
+      connectedSpinner: false,
+      issue4434Signature: false,
+    });
+  });
+
+  it("requires the unreachable-inference cause on the same run error line", () => {
+    const capture = [
+      "user: hello",
+      "run error:",
+      "upstream inference endpoint fetch failed: connect ETIMEDOUT 75.2.113.119:443",
+      "running | error",
+    ].join("\n");
+
+    expect(analyzeIssue4434TuiCapture(capture)).toMatchObject({
+      visibleError: true,
+      runErrorLinePresent: true,
+      runErrorLine: "run error:",
+      runErrorLineHasCause: false,
       connectedSpinner: false,
       issue4434Signature: false,
     });

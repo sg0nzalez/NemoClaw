@@ -905,9 +905,8 @@ function runCommand(args: readonly string[], env: Env): void {
 
 function verifyOpenClawPluginNpmIntegrity(install: OpenClawPluginInstall, env: Env): void {
   if (!install.npmPackageSpec) {
-    if (!install.integrity) return;
     throw new MessagingBuildApplierError(
-      `Cannot verify npm integrity for non-npm OpenClaw plugin spec ${install.spec}`,
+      `OpenClaw plugin spec ${install.spec} must use an npm: package with committed integrity pin`,
     );
   }
   if (!install.integrity) {

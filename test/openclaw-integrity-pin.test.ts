@@ -22,6 +22,9 @@ const UNPINNED_OPENCLAW_VERSION = "2026.6.10";
 const PINNED_OPENCLAW_VERSION = "2026.6.9";
 const PINNED_OPENCLAW_INTEGRITY =
   "sha512-y0PGUdE87S8QtQXABPDL0CjNKhH3q/R1h9/WiRQkhVCGSBVhs63/M1iZn2DYVyJCAbDyMz3KNyAE0WzSQIWCRg==";
+const PINNED_CODEX_ACP_VERSION = "0.11.1";
+const PINNED_CODEX_ACP_INTEGRITY =
+  "sha512-My2VSlBtvJipJhImHjFDej2ut/p00QqOISRnZgLgLrSIzjgvdcQvAhaZviWj7XPhk4UIdIb0OoA+Lrls824uiQ==";
 const PINNED_OPENCLAW_DISCORD_INTEGRITY =
   "sha512-esFhwYW0nrFQvBhkPeK/1qmvumlVAY8ddhYBt7geIYLlBriwPJRwtnVLLfp0n1LbS0/XVZ0ORqlvkWq8Vv61vg==";
 const PINNED_OPENCLAW_SLACK_INTEGRITY =
@@ -63,12 +66,16 @@ function runInstallBlock(
     openclawVersion?: string;
     committedIntegrity?: string;
     registryIntegrity?: string;
+    codexAcpCommittedIntegrity?: string;
+    codexAcpRegistryIntegrity?: string;
   } = {},
 ) {
   const {
     openclawVersion = UNPINNED_OPENCLAW_VERSION,
     committedIntegrity = "sha512-reviewed-pin",
     registryIntegrity = committedIntegrity,
+    codexAcpCommittedIntegrity = PINNED_CODEX_ACP_INTEGRITY,
+    codexAcpRegistryIntegrity = codexAcpCommittedIntegrity,
   } = options;
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-integrity-"));
   const blueprint = path.join(tmp, "blueprint.yaml");
@@ -82,11 +89,13 @@ function runInstallBlock(
     `OPENCLAW_2026_6_9_INTEGRITY=${JSON.stringify(committedIntegrity)}`,
     `OPENCLAW_2026_3_11_INTEGRITY=${JSON.stringify(LEGACY_REBUILD_OPENCLAW_INTEGRITY)}`,
     `OPENCLAW_2026_4_24_INTEGRITY=${JSON.stringify(LEGACY_GATEWAY_UPGRADE_OPENCLAW_INTEGRITY)}`,
+    `CODEX_ACP_0_11_1_INTEGRITY=${JSON.stringify(codexAcpCommittedIntegrity)}`,
     'openclaw() { if [ "${1:-}" = "--version" ]; then printf \'openclaw 2026.3.11\\n\'; else return 127; fi; }',
     "codex-acp() { :; }",
     "npm() {",
     '  printf "npm %s\\n" "$*" >> "$call_log";',
     '  if [ "${1:-}" = "view" ] && [ "${3:-}" = "version" ]; then printf "%s\\n" "$OPENCLAW_VERSION"; return 0; fi',
+    `  if [ "\${1:-}" = "view" ] && [ "\${2:-}" = "@zed-industries/codex-acp@${PINNED_CODEX_ACP_VERSION}" ] && [ "\${3:-}" = "dist.integrity" ]; then printf "%s\\n" ${JSON.stringify(codexAcpRegistryIntegrity)}; return 0; fi`,
     `  if [ "\${1:-}" = "view" ] && [ "\${3:-}" = "dist.integrity" ]; then printf "%s\\n" ${JSON.stringify(registryIntegrity)}; return 0; fi`,
     "}",
     "pip3() { return 0; }",
@@ -108,6 +117,8 @@ describe("OpenClaw npm integrity pins", () => {
 
     expect(reviewNote).toContain(`openclaw@${PINNED_OPENCLAW_VERSION}`);
     expect(reviewNote).toContain(PINNED_OPENCLAW_INTEGRITY);
+    expect(reviewNote).toContain(`@zed-industries/codex-acp@${PINNED_CODEX_ACP_VERSION}`);
+    expect(reviewNote).toContain(PINNED_CODEX_ACP_INTEGRITY);
     expect(reviewNote).toContain("@openclaw/discord@2026.6.9");
     expect(reviewNote).toContain(PINNED_OPENCLAW_DISCORD_INTEGRITY);
     expect(reviewNote).toContain("@openclaw/slack@2026.6.9");
@@ -191,10 +202,13 @@ describe("OpenClaw npm integrity pins", () => {
       `npm view openclaw@${PINNED_OPENCLAW_VERSION} dist.integrity`,
     );
     expect(production.calls).toContain(
+      `npm view @zed-industries/codex-acp@${PINNED_CODEX_ACP_VERSION} dist.integrity`,
+    );
+    expect(production.calls).toContain(
       `npm install -g --no-audit --no-fund --no-progress openclaw@${PINNED_OPENCLAW_VERSION}`,
     );
     expect(production.calls).toContain(
-      "npm install -g --no-audit --no-fund --no-progress @zed-industries/codex-acp@0.11.1",
+      `npm install -g --no-audit --no-fund --no-progress @zed-industries/codex-acp@${PINNED_CODEX_ACP_VERSION}`,
     );
     expect(base.calls).toContain(`npm view openclaw@${PINNED_OPENCLAW_VERSION} version`);
     expect(base.calls).toContain(`npm view openclaw@${PINNED_OPENCLAW_VERSION} dist.integrity`);
@@ -276,6 +290,36 @@ describe("OpenClaw npm integrity pins", () => {
       `OpenClaw ${UNPINNED_OPENCLAW_VERSION} has no committed npm integrity pin`,
     );
     expect(calls).not.toContain("npm install -g");
+  });
+
+  it("fails closed before installing codex-acp when its registry integrity drifts", () => {
+    const { result, calls } = runInstallBlock(
+      extractRunBlock(
+        DOCKERFILE,
+        "# OPENCLAW_VERSION is the NemoClaw runtime build target",
+        "# Patch OpenClaw media fetch",
+      ),
+      {
+        openclawVersion: PINNED_OPENCLAW_VERSION,
+        committedIntegrity: PINNED_OPENCLAW_INTEGRITY,
+        registryIntegrity: PINNED_OPENCLAW_INTEGRITY,
+        codexAcpCommittedIntegrity: PINNED_CODEX_ACP_INTEGRITY,
+        codexAcpRegistryIntegrity: "sha512-codex-acp-drift",
+      },
+    );
+
+    expect(result.status).not.toBe(0);
+    expect(`${result.stdout}${result.stderr}`).toContain(
+      `@zed-industries/codex-acp@${PINNED_CODEX_ACP_VERSION} npm integrity mismatch`,
+    );
+    expect(`${result.stdout}${result.stderr}`).toContain(`Expected: ${PINNED_CODEX_ACP_INTEGRITY}`);
+    expect(`${result.stdout}${result.stderr}`).toContain("Actual:   sha512-codex-acp-drift");
+    expect(calls).toContain(
+      `npm view @zed-industries/codex-acp@${PINNED_CODEX_ACP_VERSION} dist.integrity`,
+    );
+    expect(calls).not.toContain(
+      `npm install -g --no-audit --no-fund --no-progress @zed-industries/codex-acp@${PINNED_CODEX_ACP_VERSION}`,
+    );
   });
 
   it("fails closed before npm install for unpinned base Dockerfile overrides", () => {

@@ -2,7 +2,7 @@
 
 Review date: 2026-06-22
 
-Scope: NemoClaw runtime pin `openclaw@2026.6.9`.
+Scope: NemoClaw runtime pin `openclaw@2026.6.9` and runtime helper pin `@zed-industries/codex-acp@0.11.1`.
 
 ## Package Identity
 
@@ -10,6 +10,8 @@ Scope: NemoClaw runtime pin `openclaw@2026.6.9`.
 - npm tarball: `https://registry.npmjs.org/openclaw/-/openclaw-2026.6.9.tgz`
 - npm integrity: `sha512-y0PGUdE87S8QtQXABPDL0CjNKhH3q/R1h9/WiRQkhVCGSBVhs63/M1iZn2DYVyJCAbDyMz3KNyAE0WzSQIWCRg==`
 - npm publish time: `2026-06-21T01:37:53.047Z`
+- Codex ACP runtime helper package: `@zed-industries/codex-acp@0.11.1`
+- Codex ACP runtime helper npm integrity: `sha512-My2VSlBtvJipJhImHjFDej2ut/p00QqOISRnZgLgLrSIzjgvdcQvAhaZviWj7XPhk4UIdIb0OoA+Lrls824uiQ==`
 - Discord channel plugin package: `@openclaw/discord@2026.6.9`
 - Discord channel plugin npm integrity: `sha512-esFhwYW0nrFQvBhkPeK/1qmvumlVAY8ddhYBt7geIYLlBriwPJRwtnVLLfp0n1LbS0/XVZ0ORqlvkWq8Vv61vg==`
 - Slack channel plugin package: `@openclaw/slack@2026.6.9`
@@ -19,7 +21,7 @@ Scope: NemoClaw runtime pin `openclaw@2026.6.9`.
 - WeChat channel plugin package: `@tencent-weixin/openclaw-weixin@2.4.3`
 - WeChat channel plugin npm integrity: `sha512-dPQbidUNWigC6V10vGW4i+GLH09x+6zUhafZRjuxkJ9GDu8o62WBsnUTojp4KqUH756hz+t2v9khiCRSi0dBDw==`
 
-NemoClaw enforces the main `openclaw@2026.6.9` integrity in the Dockerfile install blocks before `npm install`. It also enforces each reviewed npm plugin registry integrity in the messaging build applier before running `openclaw plugins install`.
+NemoClaw enforces the main `openclaw@2026.6.9` and `@zed-industries/codex-acp@0.11.1` integrity pins in the Dockerfile install blocks before `npm install`. It also enforces each reviewed npm plugin registry integrity in the messaging build applier before running `openclaw plugins install`.
 
 ## Advisory Check
 

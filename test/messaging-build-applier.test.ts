@@ -482,6 +482,76 @@ describe("messaging-build-applier.mts: agent-install", () => {
     }
   });
 
+  it("fails closed before installing non-npm OpenClaw plugin specs", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-package-plan-"));
+    const tracePath = path.join(tmp, "openclaw.trace");
+    fs.writeFileSync(
+      path.join(tmp, "openclaw"),
+      [
+        "#!/usr/bin/env node",
+        "require('node:fs').appendFileSync(process.env.OPENCLAW_TRACE, `${process.argv.slice(2).join('|')}\\n`);",
+        "process.exit(0);",
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+
+    const plan = {
+      schemaVersion: 1,
+      sandboxName: "test-sandbox",
+      agent: "openclaw",
+      channels: [{ channelId: "discord", active: true }],
+      credentialBindings: [],
+      agentRender: [],
+      buildSteps: [
+        {
+          channelId: "discord",
+          kind: "package-install",
+          outputId: "openclawPluginPackage",
+          required: true,
+          value: {
+            manager: "openclaw-plugin",
+            spec: "github:example/unreviewed-plugin",
+            pin: true,
+          },
+        },
+      ],
+    };
+
+    try {
+      const result = spawnSync(
+        "node",
+        [
+          "--experimental-strip-types",
+          SCRIPT_PATH,
+          "--agent",
+          "openclaw",
+          "--phase",
+          "agent-install",
+        ],
+        {
+          encoding: "utf-8",
+          stdio: ["pipe", "pipe", "pipe"],
+          env: {
+            PATH: tmp + ":" + (process.env.PATH || "/usr/bin:/bin"),
+            OPENCLAW_TRACE: tracePath,
+            OPENCLAW_VERSION: "2026.5.22",
+            NEMOCLAW_MESSAGING_PLAN_B64: Buffer.from(JSON.stringify(plan)).toString("base64"),
+          },
+          timeout: 10_000,
+        },
+      );
+
+      expect(result.status).toBe(2);
+      expect(result.stderr).toContain(
+        "OpenClaw plugin spec github:example/unreviewed-plugin must use an npm: package with committed integrity pin",
+      );
+      expect(fs.existsSync(tracePath)).toBe(false);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it("runs pinned installs during agent-install without doctor env injection", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-message-plugins-"));
     const tracePath = path.join(tmp, "openclaw.trace");
