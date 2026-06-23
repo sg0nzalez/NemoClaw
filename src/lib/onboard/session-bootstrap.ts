@@ -112,23 +112,12 @@ async function exitForResumeConflicts(
   deps.exitProcess(1);
 }
 
-function assertRecoverableResumeSandboxName(
+function recoverableResumeSandboxName(
   session: Session | null,
   input: OnboardSessionBootstrapInput,
-  deps: OnboardSessionBootstrapDeps,
-): void {
+): string | null {
   const sandboxStepCompleted = session?.steps?.sandbox?.status === "complete";
-  const recoveredSandboxName =
-    input.requestedSandboxName || (sandboxStepCompleted ? session?.sandboxName || null : null);
-  if (input.cannotPrompt && !recoveredSandboxName) {
-    deps.error(
-      "  Cannot resume non-interactive onboard: the previous run was interrupted before sandbox creation completed,",
-    );
-    deps.error(
-      "  so no sandbox name was recorded. Re-run with --name <sandbox> (or set NEMOCLAW_SANDBOX_NAME).",
-    );
-    deps.exitProcess(1);
-  }
+  return input.requestedSandboxName || (sandboxStepCompleted ? session?.sandboxName || null : null);
 }
 
 async function prepareResumeSession(
@@ -157,6 +146,18 @@ async function prepareResumeSession(
     await exitForResumeConflicts(resumeConflicts, deps);
   }
 
+  // A non-interactive resume with no recoverable sandbox name means the
+  // previous run was interrupted before sandbox creation completed, so there
+  // is nothing to resume and no TTY to prompt for a name. Rather than aborting
+  // (which left curl|bash installs with no recovery path, #5626), auto-recover
+  // by discarding the stale session and starting a fresh onboard.
+  if (input.cannotPrompt && !recoverableResumeSandboxName(session, input)) {
+    deps.error(
+      "  Interrupted onboarding session has no sandbox recorded yet; starting a fresh onboard.",
+    );
+    return prepareFreshSession({ ...input, fresh: true }, deps);
+  }
+
   deps.updateSession((current: Session) => {
     deps.repairResumeMachineSnapshot(current);
     current.mode = mode(input.nonInteractive);
@@ -165,7 +166,6 @@ async function prepareResumeSession(
     return current;
   });
   session = deps.loadSession();
-  assertRecoverableResumeSandboxName(session, input, deps);
   return { session, fromDockerfile };
 }
 

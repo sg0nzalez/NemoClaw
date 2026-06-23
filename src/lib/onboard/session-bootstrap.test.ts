@@ -190,29 +190,55 @@ describe("prepareOnboardSession", () => {
     expect(deps.updateSession).not.toHaveBeenCalled();
   });
 
-  it("rejects non-interactive resume when no sandbox name can be recovered", async () => {
-    const { deps } = createDeps(createSession({ sandboxName: null }));
-
-    await expect(
-      prepareOnboardSession(
-        {
-          resume: true,
-          fresh: false,
-          requestedFromDockerfile: null,
-          requestedSandboxName: null,
-          cannotPrompt: true,
-          nonInteractive: true,
-        },
-        deps,
-      ),
-    ).rejects.toThrow(ExitError);
-
-    expect(deps.error).toHaveBeenCalledWith(
-      "  Cannot resume non-interactive onboard: the previous run was interrupted before sandbox creation completed,",
+  it("auto-recovers a non-interactive resume when no sandbox name was recorded", async () => {
+    // The previous run was interrupted before sandbox creation, so the
+    // in_progress session has no sandbox to resume. Non-interactive onboard
+    // must auto-recover by starting fresh instead of aborting (#5626).
+    const { deps, getSession } = createDeps(
+      createSession({ sessionId: "stale-session", sandboxName: null }),
     );
-    expect(deps.error).toHaveBeenCalledWith(
-      "  so no sandbox name was recorded. Re-run with --name <sandbox> (or set NEMOCLAW_SANDBOX_NAME).",
+
+    const result = await prepareOnboardSession(
+      {
+        resume: true,
+        fresh: false,
+        requestedFromDockerfile: null,
+        requestedSandboxName: null,
+        cannotPrompt: true,
+        nonInteractive: true,
+      },
+      deps,
     );
-    expect(deps.exitProcess).toHaveBeenCalledTimes(1);
+
+    expect(deps.exitProcess).not.toHaveBeenCalled();
+    expect(deps.clearSession).toHaveBeenCalledTimes(1);
+    expect(result.session?.mode).toBe("non-interactive");
+    expect(result.session?.sessionId).not.toBe("stale-session");
+    expect(getSession()?.sessionId).not.toBe("stale-session");
+    expect(deps.error).toHaveBeenCalledWith(
+      "  Interrupted onboarding session has no sandbox recorded yet; starting a fresh onboard.",
+    );
+  });
+
+  it("still resumes a non-interactive session when a sandbox name was requested", async () => {
+    // A recoverable name (here via --name / NEMOCLAW_SANDBOX_NAME) must still
+    // resume the existing session rather than be discarded.
+    const { deps } = createDeps(createSession({ sessionId: "keep-session", sandboxName: null }));
+
+    const result = await prepareOnboardSession(
+      {
+        resume: true,
+        fresh: false,
+        requestedFromDockerfile: null,
+        requestedSandboxName: "my-box",
+        cannotPrompt: true,
+        nonInteractive: true,
+      },
+      deps,
+    );
+
+    expect(deps.exitProcess).not.toHaveBeenCalled();
+    expect(deps.clearSession).not.toHaveBeenCalled();
+    expect(result.session?.status).toBe("in_progress");
   });
 });
