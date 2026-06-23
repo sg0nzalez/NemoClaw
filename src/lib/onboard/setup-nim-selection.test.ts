@@ -27,6 +27,12 @@ function makeState(): SetupNimSelectionState {
   };
 }
 
+function requireValueForTest<T>(value: T | null | undefined, message: string): T {
+  assert.notEqual(value, null, message);
+  assert.notEqual(value, undefined, message);
+  return value;
+}
+
 describe("setupNim selection state helpers", () => {
   it("applies a complete cloud fallback and clears stale local-provider state", () => {
     const state = makeState();
@@ -74,10 +80,7 @@ describe("createRemoteModelValidator", () => {
     const { validateSelectedRemoteModel } = createRemoteModelValidator({
       OPENAI_ENDPOINT_URL: "https://default-openai.example/v1",
       ANTHROPIC_ENDPOINT_URL: "https://default-anthropic.example/v1",
-      requireValue: (value, message) => {
-        if (value === null || value === undefined) throw new Error(message);
-        return value;
-      },
+      requireValue: requireValueForTest,
       isBackToSelection: (_value): _value is never => false,
       validateCustomOpenAiLikeSelection: async (_label, endpointUrl) => {
         calledEndpoint = endpointUrl;
@@ -112,10 +115,7 @@ describe("createRemoteModelValidator", () => {
     const { validateSelectedRemoteModel } = createRemoteModelValidator({
       OPENAI_ENDPOINT_URL: "https://default-openai.example/v1",
       ANTHROPIC_ENDPOINT_URL: "https://default-anthropic.example/v1",
-      requireValue: (value, message) => {
-        if (value === null || value === undefined) throw new Error(message);
-        return value;
-      },
+      requireValue: requireValueForTest,
       isBackToSelection: (_value): _value is never => false,
       validateCustomOpenAiLikeSelection: async () => ({ ok: false, retry: "selection" }),
       validateCustomAnthropicSelection: async () => ({ ok: false, retry: "model" }),
@@ -159,10 +159,7 @@ describe("createRemoteModelValidator", () => {
     const { validateSelectedRemoteModel } = createRemoteModelValidator({
       OPENAI_ENDPOINT_URL: "https://default-openai.example/v1",
       ANTHROPIC_ENDPOINT_URL: "https://default-anthropic.example/v1",
-      requireValue: (value, message) => {
-        if (value === null || value === undefined) throw new Error(message);
-        return value;
-      },
+      requireValue: requireValueForTest,
       isBackToSelection: (_value): _value is never => false,
       validateCustomOpenAiLikeSelection: async () => ({ ok: false, retry: "selection" }),
       validateCustomAnthropicSelection: async () => ({ ok: false, retry: "selection" }),
