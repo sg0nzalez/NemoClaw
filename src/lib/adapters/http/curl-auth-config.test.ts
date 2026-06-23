@@ -38,7 +38,7 @@ describe("auth curl config helpers", () => {
     cleanupPaths.push(parentDir);
     fs.mkdirSync(outsideDir);
     const configPath = path.join(outsideDir, "auth.conf");
-    fs.writeFileSync(configPath, "header = \"Authorization: Bearer nvapi-x\"\n", {
+    fs.writeFileSync(configPath, 'header = "Authorization: Bearer nvapi-x"\n', {
       mode: 0o600,
       encoding: "utf8",
     });
