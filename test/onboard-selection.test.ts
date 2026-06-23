@@ -389,7 +389,6 @@ runner.runCapture = (command) => {
 registry.updateSandbox = (_name, update) => updates.push(update);
 
 const { setupNim } = require(${onboardPath});
-
 (async () => {
   const originalLog = console.log;
   const lines = [];

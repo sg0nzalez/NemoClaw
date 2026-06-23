@@ -276,11 +276,7 @@ describe("getSandboxInferenceConfig", () => {
 
   it("leaves Kimi K2.7 Code compat to the model-specific setup registry", () => {
     expect(
-      getSandboxInferenceConfig(
-        "moonshotai/kimi-k2.7-code",
-        "nvidia-prod",
-        "openai-completions",
-      ),
+      getSandboxInferenceConfig("moonshotai/kimi-k2.7-code", "nvidia-prod", "openai-completions"),
     ).toEqual({
       providerKey: MANAGED_PROVIDER_ID,
       primaryModelRef: `${MANAGED_PROVIDER_ID}/moonshotai/kimi-k2.7-code`,
