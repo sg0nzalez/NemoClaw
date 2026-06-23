@@ -34,7 +34,7 @@ function runScript(
       SLACK_BOT_TOKEN: "xoxb-slack-bot-token-for-test",
       SLACK_APP_TOKEN: "xapp-slack-app-token-for-test",
       DISCORD_BOT_TOKEN: "test-discord-token",
-      ZALO_BOT_TOKEN: "test-zalo-token",
+      ZALO_BOT_TOKEN: "123456:test-zalo-token",
       NEMOCLAW_SKIP_TELEGRAM_REACHABILITY: "1",
       ...extraEnv,
     },
