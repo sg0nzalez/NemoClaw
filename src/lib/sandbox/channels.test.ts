@@ -16,7 +16,7 @@ import {
 } from "./channels";
 
 describe("sandbox-channels KNOWN_CHANNELS", () => {
-  it("covers telegram, discord, wechat, slack, whatsapp, teams, and zalo", () => {
+  it("covers telegram, discord, wechat, slack, whatsapp, zalo, and teams", () => {
     expect(knownChannelNames()).toEqual([
       "telegram",
       "discord",
