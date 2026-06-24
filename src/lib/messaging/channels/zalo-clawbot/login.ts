@@ -139,6 +139,7 @@ export async function runZaloClawbotHostQrLogin(
     session = await requestZaloClawbotLogin({
       fetch: opts.fetch,
       sessionServiceUrl: opts.sessionServiceUrl,
+      signal: opts.signal,
     });
   } catch (err) {
     return { kind: "error", message: errorMessage(err) };
@@ -200,6 +201,7 @@ export async function runZaloClawbotHostQrLogin(
         session = await requestZaloClawbotLogin({
           fetch: opts.fetch,
           sessionServiceUrl: opts.sessionServiceUrl,
+          signal: opts.signal,
         });
       } catch (err) {
         return { kind: "error", message: errorMessage(err) };

@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 
 import { normalizeClawbotAccountId, runZaloClawbotHostQrLogin } from "./login";
-import type { FetchLike } from "./qr";
+import { type FetchLike, requestZaloClawbotLogin } from "./qr";
 
 function jsonResponse(status: number, body: unknown) {
   return {
@@ -112,5 +112,17 @@ describe("Zalo ClawBot host QR login", () => {
       fetch: fakeFetch([{ result: { isLogin: false } }], [{ result: {} }]),
     });
     expect(result).toMatchObject({ kind: "error" });
+  });
+
+  it("forwards the abort signal to the underlying request", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    let sawAbortedSignal = false;
+    const fetch = ((_url: string, init?: { signal?: AbortSignal }) => {
+      sawAbortedSignal = init?.signal?.aborted === true;
+      return Promise.reject(new Error("aborted"));
+    }) as unknown as FetchLike;
+    await expect(requestZaloClawbotLogin({ fetch, signal: controller.signal })).rejects.toThrow();
+    expect(sawAbortedSignal).toBe(true);
   });
 });

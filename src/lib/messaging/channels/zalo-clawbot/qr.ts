@@ -124,6 +124,7 @@ export async function requestZaloClawbotLogin(params: {
   sessionServiceUrl?: string;
   fetch?: FetchLike;
   timeoutMs?: number;
+  signal?: AbortSignal;
 }): Promise<ZaloClawbotLoginSession> {
   const transport = params.fetch ?? (globalThis.fetch as FetchLike | undefined);
   if (!transport) throw new ZaloClawbotQrError("network", "global fetch unavailable; pass fetch");
@@ -132,6 +133,7 @@ export async function requestZaloClawbotLogin(params: {
     `${base}/agent/request-login`,
     transport,
     params.timeoutMs ?? ZALOCLAWBOT_REQUEST_TIMEOUT_MS,
+    params.signal,
   );
   if (!ok) throw new ZaloClawbotQrError("http", `request-login returned ${status}`, status);
   const loginUrl = typeof body.loginUrl === "string" ? body.loginUrl : undefined;
