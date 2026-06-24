@@ -468,8 +468,8 @@ jobs:
           NEMOCLAW_E2E_USE_HOSTED_INFERENCE: "1"
           NEMOCLAW_PROVIDER: custom
           NEMOCLAW_ENDPOINT_URL: https://inference.nvidia.com/v1
-          NEMOCLAW_MODEL: nvidia/nvidia/nemotron-3-super-v3
-          NEMOCLAW_COMPAT_MODEL: nvidia/nvidia/nemotron-3-super-v3
+          NEMOCLAW_MODEL: nvidia/nemotron-3-super-120b-a12b
+          NEMOCLAW_COMPAT_MODEL: nvidia/nemotron-3-super-120b-a12b
           NEMOCLAW_PREFERRED_API: openai-completions
           COMPATIBLE_API_KEY: ${{ (github.event_name != 'workflow_dispatch' || inputs.target_ref == '') && secrets.NVIDIA_API_KEY || '' }}
           NEMOCLAW_NON_INTERACTIVE: "1"
@@ -544,8 +544,8 @@ jobs:
           NEMOCLAW_E2E_USE_HOSTED_INFERENCE: "1"
           NEMOCLAW_PROVIDER: custom
           NEMOCLAW_ENDPOINT_URL: https://inference.nvidia.com/v1
-          NEMOCLAW_MODEL: nvidia/nvidia/nemotron-3-super-v3
-          NEMOCLAW_COMPAT_MODEL: nvidia/nvidia/nemotron-3-super-v3
+          NEMOCLAW_MODEL: nvidia/nemotron-3-super-120b-a12b
+          NEMOCLAW_COMPAT_MODEL: nvidia/nemotron-3-super-120b-a12b
           NEMOCLAW_PREFERRED_API: openai-completions
           COMPATIBLE_API_KEY: ${{ (github.event_name != 'workflow_dispatch' || inputs.target_ref == '') && secrets.NVIDIA_API_KEY || '' }}
           NEMOCLAW_ISSUE_4434_LIVE: "1"
@@ -1006,8 +1006,8 @@ jobs:
           NEMOCLAW_E2E_USE_HOSTED_INFERENCE: "1"
           NEMOCLAW_PROVIDER: custom
           NEMOCLAW_ENDPOINT_URL: https://inference.nvidia.com/v1
-          NEMOCLAW_MODEL: nvidia/nvidia/nemotron-3-super-v3
-          NEMOCLAW_COMPAT_MODEL: nvidia/nvidia/nemotron-3-super-v3
+          NEMOCLAW_MODEL: nvidia/nemotron-3-super-120b-a12b
+          NEMOCLAW_COMPAT_MODEL: nvidia/nemotron-3-super-120b-a12b
           NEMOCLAW_PREFERRED_API: openai-completions
           COMPATIBLE_API_KEY: ${{ (github.event_name != 'workflow_dispatch' || inputs.target_ref == '') && secrets.NVIDIA_API_KEY || '' }}
           NEMOCLAW_NON_INTERACTIVE: "1"
@@ -1304,8 +1304,8 @@ jobs:
           NEMOCLAW_E2E_USE_HOSTED_INFERENCE: "1"
           NEMOCLAW_PROVIDER: custom
           NEMOCLAW_ENDPOINT_URL: https://inference.nvidia.com/v1
-          NEMOCLAW_MODEL: nvidia/nvidia/nemotron-3-super-v3
-          NEMOCLAW_COMPAT_MODEL: nvidia/nvidia/nemotron-3-super-v3
+          NEMOCLAW_MODEL: nvidia/nemotron-3-super-120b-a12b
+          NEMOCLAW_COMPAT_MODEL: nvidia/nemotron-3-super-120b-a12b
           NEMOCLAW_PREFERRED_API: openai-completions
           COMPATIBLE_API_KEY: ${{ (github.event_name != 'workflow_dispatch' || inputs.target_ref == '') && secrets.NVIDIA_API_KEY || '' }}
           NEMOCLAW_NON_INTERACTIVE: "1"
@@ -1611,8 +1611,8 @@ jobs:
           NVIDIA_API_KEY: ${{ (github.event_name != 'workflow_dispatch' || inputs.target_ref == '') && secrets.NVIDIA_API_KEY || '' }}
           NEMOCLAW_PROVIDER: custom
           NEMOCLAW_ENDPOINT_URL: https://inference.nvidia.com/v1
-          NEMOCLAW_MODEL: nvidia/nvidia/nemotron-3-super-v3
-          NEMOCLAW_COMPAT_MODEL: nvidia/nvidia/nemotron-3-super-v3
+          NEMOCLAW_MODEL: nvidia/nemotron-3-super-120b-a12b
+          NEMOCLAW_COMPAT_MODEL: nvidia/nemotron-3-super-120b-a12b
           NEMOCLAW_PREFERRED_API: openai-completions
           COMPATIBLE_API_KEY: ${{ (github.event_name != 'workflow_dispatch' || inputs.target_ref == '') && secrets.NVIDIA_API_KEY || '' }}
           E2E_ARTIFACT_DIR: ${{ github.workspace }}/e2e-artifacts/vitest/credential-migration
@@ -1837,8 +1837,8 @@ jobs:
           NEMOCLAW_E2E_USE_HOSTED_INFERENCE: "1"
           NEMOCLAW_PROVIDER: custom
           NEMOCLAW_ENDPOINT_URL: https://inference.nvidia.com/v1
-          NEMOCLAW_MODEL: nvidia/nvidia/nemotron-3-super-v3
-          NEMOCLAW_COMPAT_MODEL: nvidia/nvidia/nemotron-3-super-v3
+          NEMOCLAW_MODEL: nvidia/nemotron-3-super-120b-a12b
+          NEMOCLAW_COMPAT_MODEL: nvidia/nemotron-3-super-120b-a12b
           NEMOCLAW_PREFERRED_API: openai-completions
           COMPATIBLE_API_KEY: ${{ (github.event_name != 'workflow_dispatch' || inputs.target_ref == '') && secrets.NVIDIA_API_KEY || '' }}
           NEMOCLAW_NON_INTERACTIVE: "1"
@@ -1850,8 +1850,8 @@ jobs:
           NEMOCLAW_E2E_USE_HOSTED_INFERENCE: "1"
           NEMOCLAW_PROVIDER: custom
           NEMOCLAW_ENDPOINT_URL: https://inference.nvidia.com/v1
-          NEMOCLAW_MODEL: nvidia/nvidia/nemotron-3-super-v3
-          NEMOCLAW_COMPAT_MODEL: nvidia/nvidia/nemotron-3-super-v3
+          NEMOCLAW_MODEL: nvidia/nemotron-3-super-120b-a12b
+          NEMOCLAW_COMPAT_MODEL: nvidia/nemotron-3-super-120b-a12b
           NEMOCLAW_PREFERRED_API: openai-completions
           COMPATIBLE_API_KEY: ${{ (github.event_name != 'workflow_dispatch' || inputs.target_ref == '') && secrets.NVIDIA_API_KEY || '' }}
           NEMOCLAW_NON_INTERACTIVE: "1"
@@ -1889,8 +1889,8 @@ jobs:
           NEMOCLAW_E2E_USE_HOSTED_INFERENCE: "1"
           NEMOCLAW_PROVIDER: custom
           NEMOCLAW_ENDPOINT_URL: https://inference.nvidia.com/v1
-          NEMOCLAW_MODEL: nvidia/nvidia/nemotron-3-super-v3
-          NEMOCLAW_COMPAT_MODEL: nvidia/nvidia/nemotron-3-super-v3
+          NEMOCLAW_MODEL: nvidia/nemotron-3-super-120b-a12b
+          NEMOCLAW_COMPAT_MODEL: nvidia/nemotron-3-super-120b-a12b
           NEMOCLAW_PREFERRED_API: openai-completions
           COMPATIBLE_API_KEY: ${{ (github.event_name != 'workflow_dispatch' || inputs.target_ref == '') && secrets.NVIDIA_API_KEY || '' }}
           NEMOCLAW_NON_INTERACTIVE: "1"
@@ -1902,8 +1902,8 @@ jobs:
           NEMOCLAW_E2E_USE_HOSTED_INFERENCE: "1"
           NEMOCLAW_PROVIDER: custom
           NEMOCLAW_ENDPOINT_URL: https://inference.nvidia.com/v1
-          NEMOCLAW_MODEL: nvidia/nvidia/nemotron-3-super-v3
-          NEMOCLAW_COMPAT_MODEL: nvidia/nvidia/nemotron-3-super-v3
+          NEMOCLAW_MODEL: nvidia/nemotron-3-super-120b-a12b
+          NEMOCLAW_COMPAT_MODEL: nvidia/nemotron-3-super-120b-a12b
           NEMOCLAW_PREFERRED_API: openai-completions
           COMPATIBLE_API_KEY: ${{ (github.event_name != 'workflow_dispatch' || inputs.target_ref == '') && secrets.NVIDIA_API_KEY || '' }}
           NEMOCLAW_NON_INTERACTIVE: "1"
@@ -1941,8 +1941,8 @@ jobs:
           NEMOCLAW_E2E_USE_HOSTED_INFERENCE: "1"
           NEMOCLAW_PROVIDER: custom
           NEMOCLAW_ENDPOINT_URL: https://inference.nvidia.com/v1
-          NEMOCLAW_MODEL: nvidia/nvidia/nemotron-3-super-v3
-          NEMOCLAW_COMPAT_MODEL: nvidia/nvidia/nemotron-3-super-v3
+          NEMOCLAW_MODEL: nvidia/nemotron-3-super-120b-a12b
+          NEMOCLAW_COMPAT_MODEL: nvidia/nemotron-3-super-120b-a12b
           NEMOCLAW_PREFERRED_API: openai-completions
           COMPATIBLE_API_KEY: ${{ (github.event_name != 'workflow_dispatch' || inputs.target_ref == '') && secrets.NVIDIA_API_KEY || '' }}
           NEMOCLAW_NON_INTERACTIVE: "1"
@@ -1954,8 +1954,8 @@ jobs:
           NEMOCLAW_E2E_USE_HOSTED_INFERENCE: "1"
           NEMOCLAW_PROVIDER: custom
           NEMOCLAW_ENDPOINT_URL: https://inference.nvidia.com/v1
-          NEMOCLAW_MODEL: nvidia/nvidia/nemotron-3-super-v3
-          NEMOCLAW_COMPAT_MODEL: nvidia/nvidia/nemotron-3-super-v3
+          NEMOCLAW_MODEL: nvidia/nemotron-3-super-120b-a12b
+          NEMOCLAW_COMPAT_MODEL: nvidia/nemotron-3-super-120b-a12b
           NEMOCLAW_PREFERRED_API: openai-completions
           COMPATIBLE_API_KEY: ${{ (github.event_name != 'workflow_dispatch' || inputs.target_ref == '') && secrets.NVIDIA_API_KEY || '' }}
           NEMOCLAW_NON_INTERACTIVE: "1"
@@ -1994,8 +1994,8 @@ jobs:
           NEMOCLAW_E2E_USE_HOSTED_INFERENCE: "1"
           NEMOCLAW_PROVIDER: custom
           NEMOCLAW_ENDPOINT_URL: https://inference.nvidia.com/v1
-          NEMOCLAW_MODEL: nvidia/nvidia/nemotron-3-super-v3
-          NEMOCLAW_COMPAT_MODEL: nvidia/nvidia/nemotron-3-super-v3
+          NEMOCLAW_MODEL: nvidia/nemotron-3-super-120b-a12b
+          NEMOCLAW_COMPAT_MODEL: nvidia/nemotron-3-super-120b-a12b
           NEMOCLAW_PREFERRED_API: openai-completions
           COMPATIBLE_API_KEY: ${{ (github.event_name != 'workflow_dispatch' || inputs.target_ref == '') && secrets.NVIDIA_API_KEY || '' }}
           NEMOCLAW_NON_INTERACTIVE: "1"
@@ -2007,8 +2007,8 @@ jobs:
           NEMOCLAW_E2E_USE_HOSTED_INFERENCE: "1"
           NEMOCLAW_PROVIDER: custom
           NEMOCLAW_ENDPOINT_URL: https://inference.nvidia.com/v1
-          NEMOCLAW_MODEL: nvidia/nvidia/nemotron-3-super-v3
-          NEMOCLAW_COMPAT_MODEL: nvidia/nvidia/nemotron-3-super-v3
+          NEMOCLAW_MODEL: nvidia/nemotron-3-super-120b-a12b
+          NEMOCLAW_COMPAT_MODEL: nvidia/nemotron-3-super-120b-a12b
           NEMOCLAW_PREFERRED_API: openai-completions
           COMPATIBLE_API_KEY: ${{ (github.event_name != 'workflow_dispatch' || inputs.target_ref == '') && secrets.NVIDIA_API_KEY || '' }}
           NEMOCLAW_NON_INTERACTIVE: "1"
@@ -2047,8 +2047,8 @@ jobs:
           NEMOCLAW_E2E_USE_HOSTED_INFERENCE: "1"
           NEMOCLAW_PROVIDER: custom
           NEMOCLAW_ENDPOINT_URL: https://inference.nvidia.com/v1
-          NEMOCLAW_MODEL: nvidia/nvidia/nemotron-3-super-v3
-          NEMOCLAW_COMPAT_MODEL: nvidia/nvidia/nemotron-3-super-v3
+          NEMOCLAW_MODEL: nvidia/nemotron-3-super-120b-a12b
+          NEMOCLAW_COMPAT_MODEL: nvidia/nemotron-3-super-120b-a12b
           NEMOCLAW_PREFERRED_API: openai-completions
           COMPATIBLE_API_KEY: ${{ (github.event_name != 'workflow_dispatch' || inputs.target_ref == '') && secrets.NVIDIA_API_KEY || '' }}
           NEMOCLAW_NON_INTERACTIVE: "1"
@@ -2061,8 +2061,8 @@ jobs:
           NEMOCLAW_E2E_USE_HOSTED_INFERENCE: "1"
           NEMOCLAW_PROVIDER: custom
           NEMOCLAW_ENDPOINT_URL: https://inference.nvidia.com/v1
-          NEMOCLAW_MODEL: nvidia/nvidia/nemotron-3-super-v3
-          NEMOCLAW_COMPAT_MODEL: nvidia/nvidia/nemotron-3-super-v3
+          NEMOCLAW_MODEL: nvidia/nemotron-3-super-120b-a12b
+          NEMOCLAW_COMPAT_MODEL: nvidia/nemotron-3-super-120b-a12b
           NEMOCLAW_PREFERRED_API: openai-completions
           COMPATIBLE_API_KEY: ${{ (github.event_name != 'workflow_dispatch' || inputs.target_ref == '') && secrets.NVIDIA_API_KEY || '' }}
           NEMOCLAW_NON_INTERACTIVE: "1"
@@ -2103,8 +2103,8 @@ jobs:
           NEMOCLAW_E2E_USE_HOSTED_INFERENCE: "1"
           NEMOCLAW_PROVIDER: custom
           NEMOCLAW_ENDPOINT_URL: https://inference.nvidia.com/v1
-          NEMOCLAW_MODEL: nvidia/nvidia/nemotron-3-super-v3
-          NEMOCLAW_COMPAT_MODEL: nvidia/nvidia/nemotron-3-super-v3
+          NEMOCLAW_MODEL: nvidia/nemotron-3-super-120b-a12b
+          NEMOCLAW_COMPAT_MODEL: nvidia/nemotron-3-super-120b-a12b
           NEMOCLAW_PREFERRED_API: openai-completions
           COMPATIBLE_API_KEY: ${{ (github.event_name != 'workflow_dispatch' || inputs.target_ref == '') && secrets.NVIDIA_API_KEY || '' }}
           NEMOCLAW_NON_INTERACTIVE: "1"
@@ -2117,8 +2117,8 @@ jobs:
           NEMOCLAW_E2E_USE_HOSTED_INFERENCE: "1"
           NEMOCLAW_PROVIDER: custom
           NEMOCLAW_ENDPOINT_URL: https://inference.nvidia.com/v1
-          NEMOCLAW_MODEL: nvidia/nvidia/nemotron-3-super-v3
-          NEMOCLAW_COMPAT_MODEL: nvidia/nvidia/nemotron-3-super-v3
+          NEMOCLAW_MODEL: nvidia/nemotron-3-super-120b-a12b
+          NEMOCLAW_COMPAT_MODEL: nvidia/nemotron-3-super-120b-a12b
           NEMOCLAW_PREFERRED_API: openai-completions
           COMPATIBLE_API_KEY: ${{ (github.event_name != 'workflow_dispatch' || inputs.target_ref == '') && secrets.NVIDIA_API_KEY || '' }}
           NEMOCLAW_NON_INTERACTIVE: "1"
@@ -2197,8 +2197,8 @@ jobs:
           NEMOCLAW_E2E_USE_HOSTED_INFERENCE: "1"
           NEMOCLAW_PROVIDER: custom
           NEMOCLAW_ENDPOINT_URL: https://inference.nvidia.com/v1
-          NEMOCLAW_MODEL: nvidia/nvidia/nemotron-3-super-v3
-          NEMOCLAW_COMPAT_MODEL: nvidia/nvidia/nemotron-3-super-v3
+          NEMOCLAW_MODEL: nvidia/nemotron-3-super-120b-a12b
+          NEMOCLAW_COMPAT_MODEL: nvidia/nemotron-3-super-120b-a12b
           NEMOCLAW_PREFERRED_API: openai-completions
           COMPATIBLE_API_KEY: ${{ (github.event_name != 'workflow_dispatch' || inputs.target_ref == '') && secrets.NVIDIA_API_KEY || '' }}
           NEMOCLAW_NON_INTERACTIVE: "1"

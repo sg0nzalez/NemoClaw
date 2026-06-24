@@ -46,11 +46,11 @@ function commandEnv(apiKey?: string, extra: NodeJS.ProcessEnv = {}): NodeJS.Proc
       NEMOCLAW_E2E_USE_HOSTED_INFERENCE: "1",
       NEMOCLAW_PROVIDER: process.env.NEMOCLAW_PROVIDER ?? "custom",
       NEMOCLAW_ENDPOINT_URL: process.env.NEMOCLAW_ENDPOINT_URL ?? "https://inference.nvidia.com/v1",
-      NEMOCLAW_MODEL: process.env.NEMOCLAW_MODEL ?? "nvidia/nvidia/nemotron-3-super-v3",
+      NEMOCLAW_MODEL: process.env.NEMOCLAW_MODEL ?? "nvidia/nemotron-3-super-120b-a12b",
       NEMOCLAW_COMPAT_MODEL:
         process.env.NEMOCLAW_COMPAT_MODEL ??
         process.env.NEMOCLAW_MODEL ??
-        "nvidia/nvidia/nemotron-3-super-v3",
+        "nvidia/nemotron-3-super-120b-a12b",
       NEMOCLAW_PREFERRED_API: process.env.NEMOCLAW_PREFERRED_API ?? "openai-completions",
       DISCORD_BOT_TOKEN: DISCORD_TOKEN,
       DISCORD_SERVER_IDS,
