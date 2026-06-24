@@ -16,6 +16,8 @@ import {
 } from "../manifest";
 import { ManifestCompiler } from "./manifest-compiler";
 
+// Cross-agent baseline used by the Hermes rebuild test too; zalo is OpenClaw-only,
+// so it is added explicitly to the OpenClaw aggregate below rather than here.
 const ALL_CHANNELS = ["telegram", "discord", "wechat", "slack", "whatsapp", "teams"] as const;
 const TEST_CREDENTIALS: Readonly<Record<string, string>> = {
   TELEGRAM_BOT_TOKEN: "123456:test-telegram-token",
@@ -131,24 +133,34 @@ async function withEnv<T>(
 
 describe("ManifestCompiler", () => {
   it("compiles built-in manifests into a deterministic OpenClaw plan", async () => {
-    const plan = await compiler().compile({
-      sandboxName: "demo",
-      agent: "openclaw",
-      workflow: "onboard",
-      isInteractive: true,
-      configuredChannels: ["slack", "telegram", "wechat", "discord", "whatsapp", "zalo", "teams"],
-      credentialAvailability: {
-        TELEGRAM_BOT_TOKEN: true,
-        DISCORD_BOT_TOKEN: true,
-        WECHAT_BOT_TOKEN: true,
-        SLACK_BOT_TOKEN: true,
-        SLACK_APP_TOKEN: true,
-        ZALO_BOT_TOKEN: true,
-        MSTEAMS_APP_PASSWORD: true,
-      },
-    });
+    const plan = await withEnv(TEST_TEAMS_ENV, () =>
+      compiler().compile({
+        sandboxName: "demo",
+        agent: "openclaw",
+        workflow: "onboard",
+        isInteractive: true,
+        configuredChannels: ["slack", "telegram", "wechat", "discord", "whatsapp", "zalo", "teams"],
+        credentialAvailability: {
+          TELEGRAM_BOT_TOKEN: true,
+          DISCORD_BOT_TOKEN: true,
+          WECHAT_BOT_TOKEN: true,
+          SLACK_BOT_TOKEN: true,
+          SLACK_APP_TOKEN: true,
+          ZALO_BOT_TOKEN: true,
+          MSTEAMS_APP_PASSWORD: true,
+        },
+      }),
+    );
 
-    expect(plan.channels.map((channel) => channel.channelId)).toEqual([...ALL_CHANNELS, "zalo"]);
+    expect(plan.channels.map((channel) => channel.channelId)).toEqual([
+      "telegram",
+      "discord",
+      "wechat",
+      "slack",
+      "whatsapp",
+      "zalo",
+      "teams",
+    ]);
     expect(plan.channels.every((channel) => channel.active)).toBe(true);
     expect(plan.credentialBindings.map((binding) => binding.providerName)).toEqual([
       "demo-telegram-bridge",
