@@ -81,6 +81,7 @@ messaging_platforms:
     - wechat
     - whatsapp
     - zalo
+    - teams
 
 # ── Inference ───────────────────────────────────────────────────
 inference:

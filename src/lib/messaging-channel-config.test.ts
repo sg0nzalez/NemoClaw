@@ -23,11 +23,16 @@ describe("messaging channel config", () => {
       "SLACK_ALLOWED_CHANNELS",
       "WHATSAPP_ALLOWED_IDS",
       "ZALO_ALLOWED_IDS",
+      "TEAMS_ALLOWED_USERS",
+      "TEAMS_REQUIRE_MENTION",
       "TELEGRAM_GROUP_POLICY",
       "WECHAT_ACCOUNT_ID",
       "WECHAT_BASE_URL",
       "WECHAT_USER_ID",
       "ZALO_GROUP_POLICY",
+      "MSTEAMS_APP_ID",
+      "MSTEAMS_TENANT_ID",
+      "MSTEAMS_PORT",
     ]);
   });
 
@@ -42,6 +47,11 @@ describe("messaging channel config", () => {
         DISCORD_REQUIRE_MENTION: "0",
         SLACK_ALLOWED_USERS: "  U01ABC2DEF3, U04GHI5JKL6  ",
         SLACK_ALLOWED_CHANNELS: "  C012AB3CD, C987ZY6XW  ",
+        TEAMS_ALLOWED_USERS: "  aad-one, aad-two  ",
+        TEAMS_REQUIRE_MENTION: "1",
+        MSTEAMS_APP_ID: "  teams-app  ",
+        MSTEAMS_TENANT_ID: "  teams-tenant  ",
+        MSTEAMS_PORT: "3978",
         NVIDIA_INFERENCE_API_KEY: "not-channel-config",
       }),
     ).toEqual({
@@ -51,6 +61,11 @@ describe("messaging channel config", () => {
       DISCORD_REQUIRE_MENTION: "0",
       SLACK_ALLOWED_USERS: "U01ABC2DEF3, U04GHI5JKL6",
       SLACK_ALLOWED_CHANNELS: "C012AB3CD, C987ZY6XW",
+      TEAMS_ALLOWED_USERS: "aad-one, aad-two",
+      TEAMS_REQUIRE_MENTION: "1",
+      MSTEAMS_APP_ID: "teams-app",
+      MSTEAMS_TENANT_ID: "teams-tenant",
+      MSTEAMS_PORT: "3978",
     });
   });
 
@@ -87,6 +102,16 @@ describe("messaging channel config", () => {
     });
     expect(env.DISCORD_SERVER_ID).toBe("1491590992753590594");
     expect(env.DISCORD_USER_ID).toBe("1005536447329222676");
+  });
+
+  it("normalizes Teams port compatibility aliases to canonical channel config", () => {
+    expect(
+      readMessagingChannelConfigFromEnv({
+        TEAMS_PORT: "3979",
+      }),
+    ).toEqual({
+      MSTEAMS_PORT: "3979",
+    });
   });
 
   it("hydrates missing env values but preserves explicit env overrides", () => {

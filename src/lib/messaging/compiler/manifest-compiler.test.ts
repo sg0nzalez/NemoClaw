@@ -16,7 +16,7 @@ import {
 } from "../manifest";
 import { ManifestCompiler } from "./manifest-compiler";
 
-const ALL_CHANNELS = ["telegram", "discord", "wechat", "slack", "whatsapp"] as const;
+const ALL_CHANNELS = ["telegram", "discord", "wechat", "slack", "whatsapp", "teams"] as const;
 const TEST_CREDENTIALS: Readonly<Record<string, string>> = {
   TELEGRAM_BOT_TOKEN: "123456:test-telegram-token",
   DISCORD_BOT_TOKEN: "test-discord-token",
@@ -24,7 +24,14 @@ const TEST_CREDENTIALS: Readonly<Record<string, string>> = {
   SLACK_BOT_TOKEN: "xoxb-test-slack-token",
   SLACK_APP_TOKEN: "xapp-test-slack-token",
   ZALO_BOT_TOKEN: "987654321:test-zalo-token",
+  MSTEAMS_APP_PASSWORD: "test-teams-client-secret",
 };
+const TEST_TEAMS_ENV = {
+  MSTEAMS_APP_ID: "test-teams-app-id",
+  MSTEAMS_TENANT_ID: "test-teams-tenant-id",
+  TEAMS_ALLOWED_USERS: "00000000-0000-0000-0000-000000000001",
+  MSTEAMS_PORT: "3978",
+} as const;
 const TEST_WECHAT_LOGIN = {
   token: "test-wechat-token",
   accountId: "test-wechat-account",
@@ -139,6 +146,23 @@ describe("ManifestCompiler", () => {
         ZALO_BOT_TOKEN: true,
       },
     });
+    const plan = await withEnv(TEST_TEAMS_ENV, () =>
+      compiler().compile({
+        sandboxName: "demo",
+        agent: "openclaw",
+        workflow: "onboard",
+        isInteractive: true,
+        configuredChannels: ["slack", "telegram", "wechat", "discord", "whatsapp", "teams"],
+        credentialAvailability: {
+          TELEGRAM_BOT_TOKEN: true,
+          DISCORD_BOT_TOKEN: true,
+          WECHAT_BOT_TOKEN: true,
+          SLACK_BOT_TOKEN: true,
+          SLACK_APP_TOKEN: true,
+          MSTEAMS_APP_PASSWORD: true,
+        },
+      }),
+    );
 
     expect(plan.channels.map((channel) => channel.channelId)).toEqual([...ALL_CHANNELS, "zalo"]);
     expect(plan.channels.every((channel) => channel.active)).toBe(true);
@@ -149,6 +173,7 @@ describe("ManifestCompiler", () => {
       "demo-slack-bridge",
       "demo-slack-app",
       "demo-zalo-bridge",
+      "demo-teams-bridge",
     ]);
     expect(plan.credentialBindings.map((binding) => binding.placeholder)).toEqual([
       "openshell:resolve:env:TELEGRAM_BOT_TOKEN",
@@ -157,6 +182,7 @@ describe("ManifestCompiler", () => {
       "xoxb-OPENSHELL-RESOLVE-ENV-SLACK_BOT_TOKEN",
       "xapp-OPENSHELL-RESOLVE-ENV-SLACK_APP_TOKEN",
       "openshell:resolve:env:ZALO_BOT_TOKEN",
+      "openshell:resolve:env:MSTEAMS_APP_PASSWORD",
     ]);
     expect(plan.networkPolicy.entries).toEqual([
       {
@@ -193,6 +219,9 @@ describe("ManifestCompiler", () => {
         channelId: "zalo",
         presetName: "zalo",
         policyKeys: ["zalo"],
+        channelId: "teams",
+        presetName: "teams",
+        policyKeys: ["teams"],
         source: "manifest",
       },
     ]);
@@ -209,6 +238,8 @@ describe("ManifestCompiler", () => {
       "whatsapp:whatsapp-openclaw-plugin",
       "zalo:zalo-openclaw-channel",
       "zalo:zalo-openclaw-plugin",
+      "teams:teams-openclaw-channel",
+      "teams:teams-openclaw-plugin",
     ]);
     expect(plan.agentRender.every((render) => render.handler === "common.staticOutputs")).toBe(
       true,
@@ -265,6 +296,7 @@ describe("ManifestCompiler", () => {
       },
       {
         channelId: "zalo",
+        channelId: "teams",
         kind: "package-install",
         outputId: "openclawPluginPackage",
         required: true,
@@ -289,6 +321,15 @@ describe("ManifestCompiler", () => {
             pin: true,
           },
         }),
+        expect.objectContaining({
+          channelId: "teams",
+          kind: "package-install",
+          value: {
+            manager: "openclaw-plugin",
+            spec: "npm:@openclaw/msteams@{{openclaw.version}}",
+            pin: true,
+          },
+        }),
       ]),
     );
     expect(plan.buildSteps.every((step) => step.value !== undefined)).toBe(true);
@@ -297,6 +338,12 @@ describe("ManifestCompiler", () => {
       kind: "rebuild-hydration",
       statePath: "wechatConfig.accountId",
       env: "WECHAT_ACCOUNT_ID",
+    });
+    expect(plan.stateUpdates).toContainEqual({
+      channelId: "teams",
+      kind: "rebuild-hydration",
+      statePath: "teamsConfig.appId",
+      env: "MSTEAMS_APP_ID",
     });
     expect(plan.healthChecks).toEqual([
       {
@@ -360,6 +407,7 @@ describe("ManifestCompiler", () => {
     const plan = await withEnv(
       {
         WECHAT_ACCOUNT_ID: "test-wechat-account",
+        ...TEST_TEAMS_ENV,
       },
       () =>
         compiler().compile({
@@ -374,6 +422,7 @@ describe("ManifestCompiler", () => {
             WECHAT_BOT_TOKEN: true,
             SLACK_BOT_TOKEN: true,
             SLACK_APP_TOKEN: true,
+            MSTEAMS_APP_PASSWORD: true,
           },
         }),
     );
@@ -382,6 +431,12 @@ describe("ManifestCompiler", () => {
       channelId: "wechat",
       presetName: "wechat",
       policyKeys: ["wechat_bridge"],
+      source: "manifest",
+    });
+    expect(plan.networkPolicy.entries.find((entry) => entry.channelId === "teams")).toEqual({
+      channelId: "teams",
+      presetName: "teams",
+      policyKeys: ["teams"],
       source: "manifest",
     });
     expect(plan.agentRender.map((render) => `${render.channelId}:${render.target}`)).toEqual([
@@ -397,11 +452,37 @@ describe("ManifestCompiler", () => {
       "slack:~/.hermes/config.yaml",
       "whatsapp:~/.hermes/.env",
       "whatsapp:~/.hermes/config.yaml",
+      "teams:~/.hermes/.env",
+      "teams:~/.hermes/config.yaml",
     ]);
     expect(JSON.stringify(plan.agentRender)).toContain(
       "WEIXIN_TOKEN=openshell:resolve:env:WECHAT_BOT_TOKEN",
     );
-    expect(plan.buildSteps).toEqual([]);
+    expect(JSON.stringify(plan.agentRender)).toContain(
+      "TEAMS_CLIENT_SECRET=openshell:resolve:env:MSTEAMS_APP_PASSWORD",
+    );
+    expect(plan.buildSteps).toEqual([
+      {
+        channelId: "teams",
+        kind: "package-install",
+        outputId: "hermesTeamsAppsPackage",
+        required: true,
+        value: {
+          manager: "hermes-uv-pip",
+          spec: "microsoft-teams-apps==2.0.13.4",
+        },
+      },
+      {
+        channelId: "teams",
+        kind: "package-install",
+        outputId: "hermesAiohttpPackage",
+        required: true,
+        value: {
+          manager: "hermes-uv-pip",
+          spec: "aiohttp==3.14.1",
+        },
+      },
+    ]);
     expect(
       plan.channels
         .find((channel) => channel.channelId === "wechat")
@@ -439,6 +520,166 @@ describe("ManifestCompiler", () => {
         ),
       ).rejects.toThrow(/line breaks/);
     }
+  });
+
+  it("rejects unsafe Microsoft Teams Hermes env render values", async () => {
+    const cases: Array<readonly [string, string]> = [
+      ["MSTEAMS_APP_ID", "teams-app\nEVIL=1"],
+      ["MSTEAMS_TENANT_ID", "teams-tenant\nEVIL=1"],
+      ["TEAMS_ALLOWED_USERS", "user-one\nEVIL=1"],
+    ];
+
+    for (const [envKey, value] of cases) {
+      await expect(
+        withEnv(
+          {
+            ...TEST_TEAMS_ENV,
+            [envKey]: value,
+          },
+          () =>
+            compiler().compile({
+              sandboxName: "demo",
+              agent: "hermes",
+              workflow: "rebuild",
+              isInteractive: false,
+              configuredChannels: ["teams"],
+              credentialAvailability: {
+                MSTEAMS_APP_PASSWORD: true,
+              },
+            }),
+        ),
+      ).rejects.toThrow(/line breaks/);
+    }
+  });
+
+  it("applies Microsoft Teams manifest defaults when optional env keys are unset", async () => {
+    const plan = await withEnv(
+      {
+        MSTEAMS_APP_ID: "test-teams-app-id",
+        MSTEAMS_TENANT_ID: "test-teams-tenant-id",
+        TEAMS_ALLOWED_USERS: "00000000-0000-0000-0000-000000000001",
+        MSTEAMS_PORT: undefined,
+        TEAMS_PORT: undefined,
+        TEAMS_REQUIRE_MENTION: undefined,
+      },
+      () =>
+        compiler().compile({
+          sandboxName: "demo",
+          agent: "openclaw",
+          workflow: "rebuild",
+          isInteractive: false,
+          configuredChannels: ["teams"],
+          credentialAvailability: {
+            MSTEAMS_APP_PASSWORD: true,
+          },
+        }),
+    );
+
+    const teams = plan.channels.find((channel) => channel.channelId === "teams");
+    expect(teams?.inputs).toContainEqual(
+      expect.objectContaining({
+        inputId: "webhookPort",
+        kind: "config",
+        value: "3978",
+      }),
+    );
+    expect(teams?.hostForward).toEqual({
+      channelId: "teams",
+      port: 3978,
+      label: "Microsoft Teams webhook",
+    });
+    expect(teams?.inputs).toContainEqual(
+      expect.objectContaining({
+        inputId: "requireMention",
+        kind: "config",
+        value: "1",
+      }),
+    );
+    expect(JSON.stringify(plan.agentRender)).toContain('"port":3978');
+    expect(JSON.stringify(plan.agentRender)).toContain('"groupPolicy":"open"');
+    expect(JSON.stringify(plan.agentRender)).not.toContain("groupAllowFrom");
+    expect(JSON.stringify(plan.agentRender)).toContain('"requireMention":true');
+  });
+
+  it("keeps Microsoft Teams active when no explicit user allowlist is provided", async () => {
+    const plan = await withEnv(
+      {
+        MSTEAMS_APP_ID: "test-teams-app-id",
+        MSTEAMS_TENANT_ID: "test-teams-tenant-id",
+        TEAMS_ALLOWED_USERS: undefined,
+      },
+      () =>
+        compiler().compile({
+          sandboxName: "demo",
+          agent: "openclaw",
+          workflow: "rebuild",
+          isInteractive: false,
+          configuredChannels: ["teams"],
+          credentialAvailability: {
+            MSTEAMS_APP_PASSWORD: true,
+          },
+        }),
+    );
+
+    expect(plan.channels.find((channel) => channel.channelId === "teams")).toMatchObject({
+      active: true,
+      configured: true,
+      disabled: false,
+    });
+    expect(JSON.stringify(plan.agentRender)).toContain("channels.msteams");
+    expect(JSON.stringify(plan.agentRender)).toContain('"groupPolicy":"open"');
+    expect(JSON.stringify(plan.agentRender)).not.toContain("dmPolicy");
+    expect(JSON.stringify(plan.agentRender)).not.toContain("allowFrom");
+  });
+
+  it("uses the configured Microsoft Teams webhook port for host forwarding", async () => {
+    const plan = await withEnv(
+      {
+        ...TEST_TEAMS_ENV,
+        MSTEAMS_PORT: "3977",
+      },
+      () =>
+        compiler().compile({
+          sandboxName: "demo",
+          agent: "openclaw",
+          workflow: "rebuild",
+          isInteractive: false,
+          configuredChannels: ["teams"],
+          credentialAvailability: {
+            MSTEAMS_APP_PASSWORD: true,
+          },
+        }),
+    );
+
+    const teams = plan.channels.find((channel) => channel.channelId === "teams");
+    expect(teams?.hostForward).toEqual({
+      channelId: "teams",
+      port: 3977,
+      label: "Microsoft Teams webhook",
+    });
+    expect(JSON.stringify(plan.agentRender)).toContain('"port":3977');
+  });
+
+  it("rejects invalid Microsoft Teams webhook ports", async () => {
+    await expect(
+      withEnv(
+        {
+          ...TEST_TEAMS_ENV,
+          MSTEAMS_PORT: "70000",
+        },
+        () =>
+          compiler().compile({
+            sandboxName: "demo",
+            agent: "openclaw",
+            workflow: "rebuild",
+            isInteractive: false,
+            configuredChannels: ["teams"],
+            credentialAvailability: {
+              MSTEAMS_APP_PASSWORD: true,
+            },
+          }),
+      ),
+    ).rejects.toThrow(/Microsoft Teams webhook port/);
   });
 
   it("rejects unsafe WeChat Hermes env render values", async () => {
@@ -522,8 +763,9 @@ describe("ManifestCompiler", () => {
     });
     expect(plan.disabledChannels).toEqual(["wechat"]);
     expect(plan.networkPolicy.entries.map((entry) => entry.channelId)).toEqual(["wechat"]);
-    expect(plan.agentRender.map((render) => render.channelId)).toEqual(["wechat", "wechat"]);
-    expect(plan.healthChecks.map((entry) => entry.channelId)).toEqual(["wechat"]);
+    expect(plan.agentRender).toEqual([]);
+    expect(plan.buildSteps).toEqual([]);
+    expect(plan.healthChecks).toEqual([]);
   });
 
   it("runs enrollment hooks before returning the final channel input plan", async () => {
@@ -603,7 +845,7 @@ describe("ManifestCompiler", () => {
     expect(plan.runtimeSetup).toEqual({ nodePreloads: [], envAliases: [], secretScans: [] });
     expect(plan.credentialBindings.map((binding) => binding.channelId)).toEqual(["telegram"]);
     expect(plan.networkPolicy.entries.map((entry) => entry.channelId)).toEqual(["telegram"]);
-    expect(plan.agentRender.map((render) => render.channelId)).toEqual(["telegram", "telegram"]);
+    expect(plan.agentRender).toEqual([]);
     expect(plan.buildSteps).toEqual([]);
     expect(plan.stateUpdates.map((entry) => entry.channelId)).toEqual([
       "telegram",
@@ -612,7 +854,7 @@ describe("ManifestCompiler", () => {
       "telegram",
       "telegram",
     ]);
-    expect(plan.healthChecks.map((entry) => entry.channelId)).toEqual(["telegram"]);
+    expect(plan.healthChecks).toEqual([]);
   });
 
   it("runs non-interactive enrollment hooks to validate and feed reachability checks", async () => {
@@ -1020,7 +1262,7 @@ describe("ManifestCompiler", () => {
     ] satisfies Array<keyof SandboxMessagingPlan>);
   });
 
-  it("records disabled configured channels and leaves applier exclusion to disabledChannels", async () => {
+  it("records disabled configured channels without side-effect plans", async () => {
     const plan = await compiler().compile({
       sandboxName: "demo",
       agent: "openclaw",
@@ -1040,11 +1282,7 @@ describe("ManifestCompiler", () => {
     expect(plan.disabledChannels).toEqual(["telegram"]);
     expect(plan.credentialBindings.map((binding) => binding.channelId)).toEqual(["telegram"]);
     expect(plan.networkPolicy.entries.map((entry) => entry.channelId)).toEqual(["telegram"]);
-    expect(plan.agentRender.map((render) => render.channelId)).toEqual([
-      "telegram",
-      "telegram",
-      "telegram",
-    ]);
+    expect(plan.agentRender).toEqual([]);
     expect(plan.buildSteps).toEqual([]);
     expect(plan.stateUpdates.map((entry) => entry.channelId)).toEqual([
       "telegram",
@@ -1053,7 +1291,7 @@ describe("ManifestCompiler", () => {
       "telegram",
       "telegram",
     ]);
-    expect(plan.healthChecks.map((entry) => entry.channelId)).toEqual(["telegram"]);
+    expect(plan.healthChecks).toEqual([]);
     expect(plan.channels[0]?.hooks.map((hook) => hook.id)).toEqual([
       "telegram-token-paste",
       "telegram-allowlist-aliases",
