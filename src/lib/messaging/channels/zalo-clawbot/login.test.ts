@@ -114,6 +114,14 @@ describe("Zalo ClawBot host QR login", () => {
     expect(result).toMatchObject({ kind: "error" });
   });
 
+  it("fails fast on an unexpected 4xx from get-login-status", async () => {
+    const result = await runZaloClawbotHostQrLogin({
+      ...silent,
+      fetch: fakeFetch([{ __status: 401 }]),
+    });
+    expect(result).toMatchObject({ kind: "error" });
+  });
+
   it("forwards the abort signal to the underlying request", async () => {
     const controller = new AbortController();
     controller.abort();

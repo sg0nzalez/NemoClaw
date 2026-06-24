@@ -145,7 +145,9 @@ export async function requestZaloClawbotLogin(params: {
 }
 
 /** Single status poll. Network errors and gateway 5xx surface as a benign
- *  pending result so the orchestrator simply re-polls until its deadline. */
+ *  pending result so the orchestrator simply re-polls until its deadline.
+ *  Non-498 4xx responses are permanent (auth/contract/config) and throw so the
+ *  caller fails fast instead of spinning to the deadline. */
 export async function pollZaloClawbotLoginStatus(params: {
   zbsk: string;
   sessionServiceUrl?: string;
@@ -174,6 +176,9 @@ export async function pollZaloClawbotLoginStatus(params: {
     return { connected: false, expired: true, message: "QR/session expired." };
   }
   if (status >= 500) return { connected: false, expired: false };
+  if (status >= 400) {
+    throw new ZaloClawbotQrError("http", `get-login-status returned ${status}`, status);
+  }
   // Truthy (not strictly `true`) — the server may signal login with 1/"true".
   if (body.isLogin && typeof body.botToken === "string") {
     return {
