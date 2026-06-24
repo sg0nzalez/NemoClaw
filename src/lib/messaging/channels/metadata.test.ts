@@ -30,6 +30,7 @@ describe("built-in messaging channel metadata", () => {
       "wechat",
       "slack",
       "whatsapp",
+      "zalo-clawbot",
     ]);
     expect(listAvailableMessagingChannelIds({ agent: "hermes" })).toEqual([
       "telegram",
@@ -47,14 +48,17 @@ describe("built-in messaging channel metadata", () => {
       wechat: ["WECHAT_BOT_TOKEN"],
       slack: ["SLACK_BOT_TOKEN", "SLACK_APP_TOKEN"],
       whatsapp: [],
+      "zalo-clawbot": ["ZALOCLAWBOT_BOT_TOKEN"],
     });
     expect(getMessagingChannelForCredentialEnvKey("SLACK_APP_TOKEN")).toBe("slack");
     expect(getMessagingChannelForCredentialEnvKey("WHATSAPP_ALLOWED_IDS")).toBeNull();
+    expect(getMessagingChannelForCredentialEnvKey("ZALOCLAWBOT_BOT_TOKEN")).toBe("zalo-clawbot");
     expect(getMessagingProviderSuffixesByChannel()).toMatchObject({
       telegram: ["-telegram-bridge"],
       discord: ["-discord-bridge"],
       wechat: ["-wechat-bridge"],
       slack: ["-slack-bridge", "-slack-app"],
+      "zalo-clawbot": ["-zaloclawbot-bridge"],
     });
     expect(listMessagingProviderNamesForChannel("demo", "slack")).toEqual([
       "demo-slack-bridge",
@@ -78,6 +82,10 @@ describe("built-in messaging channel metadata", () => {
       "SLACK_ALLOWED_USERS",
       "SLACK_ALLOWED_CHANNELS",
       "WHATSAPP_ALLOWED_IDS",
+      "ZALOCLAWBOT_ACCOUNT_ID",
+      "ZALOCLAWBOT_BOT_ID",
+      "ZALOCLAWBOT_OWNER_ID",
+      "ZALOCLAWBOT_OA_ID",
     ]);
     expect(getMessagingConfigEnvAliases()).toEqual({
       DISCORD_SERVER_ID: ["DISCORD_SERVER_IDS"],
@@ -110,6 +118,7 @@ describe("built-in messaging channel metadata", () => {
       "openclaw-weixin",
       "slack",
       "whatsapp",
+      "openclaw-zaloclawbot",
     ]);
     expect(
       Object.fromEntries(
@@ -134,6 +143,7 @@ describe("built-in messaging channel metadata", () => {
       wechat: "npm:@tencent-weixin/openclaw-weixin@2.4.3",
       slack: "npm:@openclaw/slack@{{openclaw.version}}",
       whatsapp: "npm:@openclaw/whatsapp@{{openclaw.version}}",
+      "zalo-clawbot": "npm:@zalo-platforms/openclaw-zaloclawbot@0.1.4",
     });
     expect(listMessagingPackageInstallSpecs({ agent: "hermes" })).toEqual([]);
   });

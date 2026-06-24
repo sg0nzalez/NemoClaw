@@ -148,6 +148,7 @@ describe("policies", () => {
         "weather",
         "wechat",
         "whatsapp",
+        "zalo-clawbot",
       ];
       expect(names).toEqual(expected);
     });

@@ -16,8 +16,15 @@ import {
 } from "./channels";
 
 describe("sandbox-channels KNOWN_CHANNELS", () => {
-  it("covers telegram, discord, wechat, slack, and whatsapp", () => {
-    expect(knownChannelNames()).toEqual(["telegram", "discord", "wechat", "slack", "whatsapp"]);
+  it("covers telegram, discord, wechat, slack, whatsapp, and zalo-clawbot", () => {
+    expect(knownChannelNames()).toEqual([
+      "telegram",
+      "discord",
+      "wechat",
+      "slack",
+      "whatsapp",
+      "zalo-clawbot",
+    ]);
   });
 
   it("exposes the primary bot-token env var for token-based channels", () => {
@@ -37,6 +44,7 @@ describe("sandbox-channels KNOWN_CHANNELS", () => {
     // of these silently misroutes the channel.
     expect(getChannelDef("wechat")?.loginMethod).toBe("host-qr");
     expect(getChannelDef("whatsapp")?.loginMethod).toBe("in-sandbox-qr");
+    expect(getChannelDef("zalo-clawbot")?.loginMethod).toBe("host-qr");
     expect(getChannelDef("telegram")?.loginMethod).toBeUndefined();
     expect(getChannelDef("discord")?.loginMethod).toBeUndefined();
     expect(getChannelDef("slack")?.loginMethod).toBeUndefined();
@@ -53,6 +61,8 @@ describe("sandbox-channels KNOWN_CHANNELS", () => {
     expect(getChannelDef("whatsapp")?.userIdEnvKey).toBe("WHATSAPP_ALLOWED_IDS");
     expect(getChannelDef("whatsapp")?.allowIdsMode).toBe("dm");
     expect(channelUsesInSandboxQrPairing(KNOWN_CHANNELS.whatsapp)).toBe(true);
+    // zalo-clawbot is host-qr (captured during onboarding), not in-sandbox.
+    expect(channelUsesInSandboxQrPairing(KNOWN_CHANNELS["zalo-clawbot"])).toBe(false);
     expect(channelUsesInSandboxQrPairing(KNOWN_CHANNELS.wechat)).toBe(false);
     expect(channelUsesInSandboxQrPairing(KNOWN_CHANNELS.slack)).toBe(false);
   });
@@ -163,7 +173,14 @@ describe("sandbox-channels token-shape helpers", () => {
 describe("sandbox-channels listChannels", () => {
   it("materialises an array with the name merged into each entry", () => {
     const list = listChannels();
-    expect(list.map((c) => c.name)).toEqual(["telegram", "discord", "wechat", "slack", "whatsapp"]);
+    expect(list.map((c) => c.name)).toEqual([
+      "telegram",
+      "discord",
+      "wechat",
+      "slack",
+      "whatsapp",
+      "zalo-clawbot",
+    ]);
     const telegram = list.find((c) => c.name === "telegram");
     expect(telegram?.envKey).toBe("TELEGRAM_BOT_TOKEN");
     expect(telegram?.allowIdsMode).toBe("dm");

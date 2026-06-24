@@ -26,6 +26,10 @@ describe("messaging channel config", () => {
       "WECHAT_ACCOUNT_ID",
       "WECHAT_BASE_URL",
       "WECHAT_USER_ID",
+      "ZALOCLAWBOT_ACCOUNT_ID",
+      "ZALOCLAWBOT_BOT_ID",
+      "ZALOCLAWBOT_OWNER_ID",
+      "ZALOCLAWBOT_OA_ID",
     ]);
   });
 

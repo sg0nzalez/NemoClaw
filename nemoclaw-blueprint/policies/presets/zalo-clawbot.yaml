@@ -1,0 +1,34 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+preset:
+  name: zalo-clawbot
+  description: "Zalo ClawBot (owner-bound personal bot) — QR login + Bot Platform long-polling"
+
+network_policies:
+  zalo-clawbot:
+    name: zalo-clawbot
+    endpoints:
+      # Runtime: the @zalo-platforms/openclaw-zaloclawbot plugin drives a
+      # persistent long-poll loop (getUpdates, GET) and sends replies (POST)
+      # against the Zalo Bot Platform API.
+      - host: bot-api.zaloplatforms.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        rules:
+          - allow: { method: GET, path: "/**" }
+          - allow: { method: POST, path: "/**" }
+      # Login/provisioning: `openclaw channels login` provisions a private
+      # owner-bound bot under the shared official account during the in-sandbox
+      # QR handshake. The QR deep link itself (zalo.me/s/...) is opened on the
+      # operator's phone, not from the sandbox, so it is not listed here.
+      - host: bot.zaloplatforms.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        rules:
+          - allow: { method: GET, path: "/**" }
+          - allow: { method: POST, path: "/**" }
+    binaries:
+      - { path: /usr/local/bin/node }
+      - { path: /usr/bin/node }

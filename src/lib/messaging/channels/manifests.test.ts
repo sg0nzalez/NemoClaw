@@ -24,6 +24,7 @@ import {
   telegramManifest,
   wechatManifest,
   whatsappManifest,
+  zaloClawbotManifest,
 } from "./index";
 import {
   SLACK_SOCKET_MODE_GATEWAY_CONFLICT_HOOK_HANDLER_ID,
@@ -202,6 +203,7 @@ describe("built-in channel manifests", () => {
       "wechat",
       "slack",
       "whatsapp",
+      "zalo-clawbot",
     ]);
     expect(registry.listAvailable({ agent: "hermes" }).map((manifest) => manifest.id)).toEqual([
       "telegram",
@@ -238,6 +240,10 @@ describe("built-in channel manifests", () => {
       "src/lib/messaging/channels/slack/hooks/socket-mode-gateway-status.ts",
       "src/lib/messaging/channels/slack/hooks/validate-credentials.ts",
       "src/lib/messaging/channels/whatsapp/manifest.ts",
+      "src/lib/messaging/channels/zalo-clawbot/manifest.ts",
+      "src/lib/messaging/channels/zalo-clawbot/hooks/index.ts",
+      "src/lib/messaging/channels/zalo-clawbot/hooks/qr-login.ts",
+      "src/lib/messaging/channels/zalo-clawbot/hooks/seed-openclaw-account.ts",
       "src/lib/messaging/hooks/common/config-prompt.ts",
       "src/lib/messaging/hooks/common/token-paste.ts",
     ];
@@ -648,5 +654,62 @@ describe("built-in channel manifests", () => {
     expectOpenClawNodePreload(whatsappManifest, "whatsapp-qr-compact");
     expect(JSON.stringify(whatsappManifest.runtime?.openclaw)).toContain("whatsapp-qr-compact");
     expectOpenClawRuntimeVisibility(whatsappManifest, ["whatsapp"], ["whatsapp"]);
+  });
+
+  it("declares Zalo ClawBot as host-qr with a captured token, seed hook, and no allowlist", () => {
+    const botToken = findInput(zaloClawbotManifest, "botToken");
+    const pluginRender = findRender(zaloClawbotManifest, "zalo-clawbot-openclaw-plugin");
+
+    expect(zaloClawbotManifest.auth.mode).toBe("host-qr");
+    expect(zaloClawbotManifest.supportedAgents).toEqual(["openclaw"]);
+    expect(getChannelTokenKeys(KNOWN_CHANNELS["zalo-clawbot"])).toEqual(["ZALOCLAWBOT_BOT_TOKEN"]);
+    expect(botToken).toMatchObject({ kind: "secret", envKey: "ZALOCLAWBOT_BOT_TOKEN" });
+    expect(zaloClawbotManifest.credentials).toEqual([
+      {
+        id: "zaloClawbotBotToken",
+        sourceInput: "botToken",
+        providerName: "{sandboxName}-zaloclawbot-bridge",
+        providerEnvKey: "ZALOCLAWBOT_BOT_TOKEN",
+        placeholder: "openshell:resolve:env:ZALOCLAWBOT_BOT_TOKEN",
+      },
+    ]);
+    expect(zaloClawbotManifest.policyPresets).toEqual(["zalo-clawbot"]);
+    // Owner-bound at the Zalo platform level — no DM allowlist input.
+    expect(zaloClawbotManifest.inputs.map((input) => input.id)).toEqual([
+      "botToken",
+      "accountId",
+      "botId",
+      "ownerId",
+      "oaId",
+    ]);
+    expect(JSON.stringify(pluginRender)).toContain('"path":"plugins.entries.openclaw-zaloclawbot"');
+    // host-qr enroll hook captures the token; seed hook writes the account file
+    // with the OpenShell placeholder (token never lands raw in the build).
+    expect(zaloClawbotManifest.hooks.map((hook) => hook.handler)).toEqual([
+      "zalo-clawbot.qrLogin",
+      "zalo-clawbot.seedOpenClawAccount",
+    ]);
+    const seedHook = zaloClawbotManifest.hooks.find(
+      (hook) => hook.id === "zalo-clawbot-seed-openclaw-account",
+    );
+    expect(seedHook?.outputs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "openclawZaloclawbotAccountFile", kind: "build-file" }),
+        expect.objectContaining({ id: "openclawConfigPatch", kind: "build-file" }),
+      ]),
+    );
+    expect(zaloClawbotManifest.agentPackages).toContainEqual({
+      id: "openclawPluginPackage",
+      agent: "openclaw",
+      manager: "openclaw-plugin",
+      spec: "npm:@zalo-platforms/openclaw-zaloclawbot@0.1.4",
+      pin: true,
+      required: true,
+    });
+    expectOpenClawRuntimeVisibility(
+      zaloClawbotManifest,
+      ["openclaw-zaloclawbot"],
+      ["zaloclawbot", "openclaw-zaloclawbot"],
+    );
   });
 });

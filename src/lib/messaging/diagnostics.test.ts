@@ -15,6 +15,7 @@ describe("messaging channel diagnostics", () => {
       "wechat",
       "slack",
       "whatsapp",
+      "zalo-clawbot",
     ]);
     expect(specs.find((spec) => spec.channelId === "telegram")).toMatchObject({
       policyPresets: ["telegram"],
@@ -31,5 +32,12 @@ describe("messaging channel diagnostics", () => {
         hint: "run `{cli} {sandbox} channels status --channel {channel}` to probe inbound delivery",
       }),
     });
+    // zalo-clawbot is host-qr: captured during onboarding, so no in-sandbox
+    // deep probe and not a preferred QuickStart default.
+    expect(specs.find((spec) => spec.channelId === "zalo-clawbot")).toMatchObject({
+      policyPresets: ["zalo-clawbot"],
+      preferredDefault: false,
+    });
+    expect(specs.find((spec) => spec.channelId === "zalo-clawbot")?.deepProbe).toBeUndefined();
   });
 });

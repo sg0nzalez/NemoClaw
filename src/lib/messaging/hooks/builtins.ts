@@ -9,6 +9,10 @@ import {
   type TelegramHookOptions,
 } from "../channels/telegram/hooks";
 import { createWechatHookRegistrations, type WechatHookOptions } from "../channels/wechat/hooks";
+import {
+  createZaloClawbotHookRegistrations,
+  type ZaloClawbotHookOptions,
+} from "../channels/zalo-clawbot/hooks";
 import { type CommonHookOptions, createCommonHookRegistrations } from "./common";
 import { MessagingHookRegistry } from "./registry";
 import type { MessagingHookRegistration } from "./types";
@@ -20,6 +24,7 @@ export interface BuiltInMessagingHookOptions {
   readonly slack?: SlackHookOptions;
   readonly telegram?: TelegramHookOptions;
   readonly wechat?: WechatHookOptions;
+  readonly zaloClawbot?: ZaloClawbotHookOptions;
 }
 
 export function createBuiltInMessagingHookRegistrations(
@@ -37,6 +42,7 @@ export function createBuiltInMessagingHookRegistrations(
       withOpenClawBridgeHealthOptions(options.telegram, options.openclawBridgeHealth),
     ),
     ...createWechatHookRegistrations(options.wechat),
+    ...createZaloClawbotHookRegistrations(options.zaloClawbot),
   ];
 }
 

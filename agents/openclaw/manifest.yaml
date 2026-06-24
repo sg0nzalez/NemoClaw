@@ -80,6 +80,7 @@ messaging_platforms:
     - slack
     - wechat
     - whatsapp
+    - zalo-clawbot
 
 # ── Inference ───────────────────────────────────────────────────
 inference:

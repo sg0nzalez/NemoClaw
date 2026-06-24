@@ -148,6 +148,7 @@ describe("prepareCreateSandboxMessaging", () => {
       "SLACK_BOT_TOKEN",
       "TELEGRAM_BOT_TOKEN",
       "WECHAT_BOT_TOKEN",
+      "ZALOCLAWBOT_BOT_TOKEN",
     ]);
     expect(result.reusableMessagingProviders).toEqual([]);
     expect(result.reusableMessagingChannels).toEqual([]);
