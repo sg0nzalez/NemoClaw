@@ -16,6 +16,7 @@ describe("messaging channel diagnostics", () => {
       "slack",
       "whatsapp",
       "zalo-clawbot",
+      "teams",
     ]);
     expect(specs.find((spec) => spec.channelId === "telegram")).toMatchObject({
       policyPresets: ["telegram"],
@@ -39,5 +40,9 @@ describe("messaging channel diagnostics", () => {
       preferredDefault: false,
     });
     expect(specs.find((spec) => spec.channelId === "zalo-clawbot")?.deepProbe).toBeUndefined();
+    expect(specs.find((spec) => spec.channelId === "teams")).toMatchObject({
+      policyPresets: ["teams"],
+      preferredDefault: false,
+    });
   });
 });

@@ -39,6 +39,7 @@ describe("SANDBOX_PROVIDER_SUFFIXES", () => {
         "zaloclawbot-bridge",
         "slack-bridge",
         "slack-app",
+        "teams-bridge",
         "brave-search",
       ].sort(),
     );
