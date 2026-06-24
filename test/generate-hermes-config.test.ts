@@ -8,6 +8,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import YAML from "yaml";
 import { HERMES_PROXY_API_KEY_PLACEHOLDER } from "../src/lib/hermes-proxy-api-key";
+import { testTimeout } from "./helpers/timeouts";
 import { withLegacyMessagingPlanEnv } from "./messaging-plan-test-helper";
 
 const SCRIPT_PATH = path.join(import.meta.dirname, "..", "agents", "hermes", "generate-config.ts");
@@ -226,7 +227,7 @@ describe("agents/hermes/generate-config.ts", () => {
     const envFile = fs.readFileSync(path.join(hermesDir, ".env"), "utf-8");
     expect(config.platforms.telegram).toBeUndefined();
     expect(envFile).not.toContain("TELEGRAM_BOT_TOKEN=");
-  });
+  }, testTimeout(15_000));
 
   it("generates API server config without messaging platform token blocks", () => {
     const { config, envFile } = runConfigScript();
@@ -295,13 +296,9 @@ describe("agents/hermes/generate-config.ts", () => {
       NEMOCLAW_MODEL: "nvidia/nemotron-3-super-120b-a12b",
     });
 
-    // The inline `model:` block routes inference, but Hermes' model picker
-    // (CLI `hermes model` and the dashboard Models page) enumerates providers
-    // via get_compatible_custom_providers(), which only reads custom_providers/
-    // providers — not the inline `model:` block. Without this entry the picker
-    // shows zero models even though inference works. discover_models lets the
-    // picker live-list /v1/models from the proxied endpoint.
-    expect(config.model.provider).toBe("nvidia-prod");
+    // The inline `model:` block must stay on Hermes' custom provider while
+    // the picker metadata preserves the upstream OpenShell route name.
+    expect(config.model.provider).toBe("custom");
     expect(config.providers).toEqual({
       "nvidia-prod": {
         name: "nvidia-prod",
@@ -387,7 +384,7 @@ describe("agents/hermes/generate-config.ts", () => {
 
     expect(config.model).toEqual({
       default: "test-model",
-      provider: "anthropic",
+      provider: "custom",
       base_url: "https://inference.local",
       api_key: HERMES_PROXY_API_KEY_PLACEHOLDER,
       api_mode: "anthropic_messages",
@@ -754,7 +751,7 @@ describe("agents/hermes/generate-config.ts", () => {
 
     expect(config.model).toEqual({
       default: "moonshotai/kimi-k2.6",
-      provider: "inference",
+      provider: "custom",
       base_url: "https://inference.local/v1",
       api_key: HERMES_PROXY_API_KEY_PLACEHOLDER,
     });

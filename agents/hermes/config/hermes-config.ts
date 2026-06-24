@@ -38,10 +38,11 @@ function hermesApiMode(inferenceApi: string): string | null {
 
 export function buildHermesConfig(settings: HermesBuildSettings): Record<string, unknown> {
   const remotePlatformToolsets = buildHermesRemotePlatformToolsets(settings);
-  const providerName = settings.upstreamProvider || "nemoclaw-inference";
+  const modelProviderName = "custom";
+  const pickerProviderName = settings.upstreamProvider || "nemoclaw-inference";
   const modelConfig: Record<string, unknown> = {
     default: settings.model,
-    provider: providerName,
+    provider: modelProviderName,
     base_url: settings.baseUrl,
     api_key: "sk-OPENSHELL-PROXY-REWRITE",
   };
@@ -61,14 +62,14 @@ export function buildHermesConfig(settings: HermesBuildSettings): Record<string,
   // default changes, and we omit an explicit `models:` list precisely so the
   // picker reflects the live catalog rather than a single hard-coded id.
   const customProvider: Record<string, unknown> = {
-    name: providerName,
+    name: pickerProviderName,
     base_url: settings.baseUrl,
     api_key: "sk-OPENSHELL-PROXY-REWRITE",
     discover_models: true,
   };
   if (apiMode) customProvider.api_mode = apiMode;
   const providerConfig: Record<string, unknown> = {
-    name: providerName,
+    name: pickerProviderName,
     api: settings.baseUrl,
     api_key: "sk-OPENSHELL-PROXY-REWRITE",
     default_model: settings.model,
@@ -86,7 +87,7 @@ export function buildHermesConfig(settings: HermesBuildSettings): Record<string,
     _nemoclaw_upstream: upstream,
     model: modelConfig,
     providers: {
-      [providerName]: providerConfig,
+      [pickerProviderName]: providerConfig,
     },
     custom_providers: [customProvider],
     terminal: {
