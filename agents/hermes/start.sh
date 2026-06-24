@@ -1285,12 +1285,25 @@ refresh_hermes_runtime_config_hashes() {
   fi
 
   if [ -f "$compat_hash" ] || [ -w "$HERMES_DIR" ]; then
-    [ ! -f "$compat_hash" ] || chmod u+w "$compat_hash" 2>/dev/null || true
-    if sha256sum "${HERMES_DIR}/config.yaml" "${HERMES_DIR}/.env" >"$compat_hash"; then
+    if [ "$(id -u)" -eq 0 ]; then
+      # shellcheck disable=SC2016  # inner shell expands after sandbox step-down
+      "${STEP_DOWN_PREFIX_SANDBOX[@]}" sh -c '
+        set -eu
+        compat_hash="$1"
+        hermes_dir="$2"
+        [ ! -f "$compat_hash" ] || chmod u+w "$compat_hash" 2>/dev/null || true
+        sha256sum "${hermes_dir}/config.yaml" "${hermes_dir}/.env" >"$compat_hash"
+        chmod 600 "$compat_hash" 2>/dev/null || true
+      ' sh "$compat_hash" "$HERMES_DIR" || _write_rc=$?
       chown sandbox:sandbox "$compat_hash" 2>/dev/null || true
       chmod 600 "$compat_hash" 2>/dev/null || true
     else
-      _write_rc=$?
+      [ ! -f "$compat_hash" ] || chmod u+w "$compat_hash" 2>/dev/null || true
+      if sha256sum "${HERMES_DIR}/config.yaml" "${HERMES_DIR}/.env" >"$compat_hash"; then
+        chmod 600 "$compat_hash" 2>/dev/null || true
+      else
+        _write_rc=$?
+      fi
     fi
   fi
 

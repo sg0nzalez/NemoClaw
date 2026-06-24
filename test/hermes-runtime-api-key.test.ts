@@ -68,6 +68,7 @@ function runHermesRuntimeApiServerKeyMint(
       extractShellFunctionFromSource(src, "ensure_hermes_runtime_api_server_key"),
       `HERMES_DIR=${shellQuote(hermesHome)}`,
       `HERMES_HASH_FILE=${shellQuote(hashPath)}`,
+      "STEP_DOWN_PREFIX_SANDBOX=(env NEMOCLAW_TEST_STEPPED_DOWN=1)",
       `ensure_hermes_runtime_api_server_key ${opts.mode ?? "strict"}`,
     ].join("\n"),
     { mode: 0o700 },
