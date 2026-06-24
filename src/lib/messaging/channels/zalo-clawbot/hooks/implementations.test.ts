@@ -71,6 +71,34 @@ describe("Zalo ClawBot hook implementations", () => {
     });
   });
 
+  it("clears stale owner/oa env when a login omits them", async () => {
+    const env: NodeJS.ProcessEnv = {
+      ZALOCLAWBOT_OWNER_ID: "stale-owner",
+      ZALOCLAWBOT_OA_ID: "stale-oa",
+    };
+    const registry = new MessagingHookRegistry([
+      {
+        id: ZALOCLAWBOT_QR_LOGIN_HOOK_ID,
+        handler: createZaloClawbotQrLoginHook({
+          env,
+          log: () => {},
+          saveCredential: () => {},
+          runLogin: async () => ({
+            kind: "ok",
+            credentials: { token: "456:secret", accountId: "clawbot-456", botId: "456" },
+          }),
+        }),
+      },
+    ]);
+
+    const result = await runMessagingHook(enrollHook(), registry, { channelId: "zalo-clawbot" });
+
+    expect(result.outputs).not.toHaveProperty("ownerId");
+    expect(result.outputs).not.toHaveProperty("oaId");
+    expect(env).not.toHaveProperty("ZALOCLAWBOT_OWNER_ID");
+    expect(env).not.toHaveProperty("ZALOCLAWBOT_OA_ID");
+  });
+
   it("skips the channel when QR login does not complete", async () => {
     const registry = new MessagingHookRegistry([
       {

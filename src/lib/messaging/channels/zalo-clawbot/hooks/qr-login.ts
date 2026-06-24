@@ -73,7 +73,9 @@ export function createZaloClawbotQrLoginHook(
     env.ZALOCLAWBOT_ACCOUNT_ID = accountId;
     env.ZALOCLAWBOT_BOT_ID = botId;
     if (ownerId) env.ZALOCLAWBOT_OWNER_ID = ownerId;
+    else delete env.ZALOCLAWBOT_OWNER_ID;
     if (oaId) env.ZALOCLAWBOT_OA_ID = oaId;
+    else delete env.ZALOCLAWBOT_OA_ID;
     const suffix = result.summary ? ` (${result.summary})` : ` (account ${accountId})`;
     (options.log ?? console.log)(`  ✓ ${context.channelId} login captured${suffix}`);
 
