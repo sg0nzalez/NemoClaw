@@ -141,11 +141,13 @@ The example below pulls `$NVIDIA_API_KEY` from the environment and writes the au
 
 ```bash
 docker exec --user root "$SANDBOX_CTR" mkdir -p /sandbox/.openclaw/agents/vision-operator/agent
-NVIDIA_API_KEY="$NVIDIA_API_KEY" envsubst < "$VLM_DEMO_DIR/vlm-subagent/auth-profiles.template.json" \
+NVIDIA_API_KEY="$NVIDIA_API_KEY" envsubst '$NVIDIA_API_KEY' < "$VLM_DEMO_DIR/vlm-subagent/auth-profiles.template.json" \
   > "$WORK_DIR/auth-profiles.json"
 docker exec --user root -i "$SANDBOX_CTR" sh -c 'cat > /sandbox/.openclaw/agents/vision-operator/agent/auth-profiles.json' < "$WORK_DIR/auth-profiles.json"
 docker exec --user root "$SANDBOX_CTR" chmod 600 /sandbox/.openclaw/agents/vision-operator/agent/auth-profiles.json
 ```
+
+The `'$NVIDIA_API_KEY'` argument to `envsubst` is an allowlist: only that one variable is expanded in the template. Any other `$VAR` references the demo template uses for unrelated text are left intact, so a stray placeholder cannot accidentally pull in another environment variable.
 
 After uploading the auth profile, make sure the sandbox user owns the sub-agent directory:
 

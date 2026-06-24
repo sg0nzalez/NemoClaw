@@ -305,6 +305,46 @@ print(block)
     expect(langchainRow.notes).not.toMatch(/Only OpenClaw and Hermes are integrated\.?\s*$/);
   });
 
+  it("every `path:line` citation embedded in matrix notes resolves to a non-empty line in the repo", () => {
+    const repoRoot = path.join(import.meta.dirname, "..");
+    const matrix = JSON.parse(readFileSync(path.join(repoRoot, "ci", "platform-matrix.json"), "utf-8"));
+    const citationRe = /([a-z][a-z0-9_/.-]*\.(?:ts|sh|py|yaml|yml|mdx|md|json)):(\d+)/gi;
+    const citations: Array<{ section: string; file: string; line: number }> = [];
+    for (const section of [
+      "platforms",
+      "providers",
+      "agents",
+      "integrations",
+      "deployment_paths",
+      "capabilities",
+      "out_of_scope",
+    ] as const) {
+      for (const row of matrix[section] ?? []) {
+        const notes: string = row.notes ?? "";
+        for (const match of notes.matchAll(citationRe)) {
+          citations.push({ section, file: match[1], line: Number(match[2]) });
+        }
+      }
+    }
+    expect(citations.length).toBeGreaterThan(0);
+    for (const { section, file, line } of citations) {
+      const fullPath = path.join(repoRoot, file);
+      expect(
+        existsSync(fullPath),
+        `${section} row cites ${file}:${line} but ${file} is missing`,
+      ).toBe(true);
+      const fileBody = readFileSync(fullPath, "utf-8").split(/\r?\n/);
+      expect(
+        line <= fileBody.length,
+        `${section} row cites ${file}:${line} but ${file} only has ${fileBody.length} lines`,
+      ).toBe(true);
+      expect(
+        fileBody[line - 1].trim(),
+        `${section} row cites ${file}:${line} but that line is empty`,
+      ).not.toBe("");
+    }
+  });
+
   it("sub-agent credential guide retains safe temp-file and boundary-warning properties across source and generated skill copies", () => {
     const repoRoot = path.join(import.meta.dirname, "..");
     const targets = [
