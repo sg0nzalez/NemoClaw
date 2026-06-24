@@ -31,6 +31,7 @@ describe("built-in messaging channel metadata", () => {
       "wechat",
       "slack",
       "whatsapp",
+      "teams",
     ]);
     expect(listAvailableMessagingChannelIds({ agent: "hermes" })).toEqual([
       "telegram",
@@ -38,6 +39,7 @@ describe("built-in messaging channel metadata", () => {
       "wechat",
       "slack",
       "whatsapp",
+      "teams",
     ]);
   });
 
@@ -48,6 +50,7 @@ describe("built-in messaging channel metadata", () => {
       wechat: ["WECHAT_BOT_TOKEN"],
       slack: ["SLACK_BOT_TOKEN", "SLACK_APP_TOKEN"],
       whatsapp: [],
+      teams: ["MSTEAMS_APP_PASSWORD"],
     });
     expect(getMessagingChannelForCredentialEnvKey("SLACK_APP_TOKEN")).toBe("slack");
     expect(getMessagingChannelForCredentialEnvKey("WHATSAPP_ALLOWED_IDS")).toBeNull();
@@ -56,6 +59,7 @@ describe("built-in messaging channel metadata", () => {
       discord: ["-discord-bridge"],
       wechat: ["-wechat-bridge"],
       slack: ["-slack-bridge", "-slack-app"],
+      teams: ["-teams-bridge"],
     });
     expect(listMessagingProviderNamesForChannel("demo", "slack")).toEqual([
       "demo-slack-bridge",
@@ -79,10 +83,19 @@ describe("built-in messaging channel metadata", () => {
       "SLACK_ALLOWED_USERS",
       "SLACK_ALLOWED_CHANNELS",
       "WHATSAPP_ALLOWED_IDS",
+      "MSTEAMS_APP_ID",
+      "MSTEAMS_TENANT_ID",
+      "TEAMS_ALLOWED_USERS",
+      "MSTEAMS_PORT",
+      "TEAMS_REQUIRE_MENTION",
     ]);
     expect(getMessagingConfigEnvAliases()).toEqual({
       DISCORD_SERVER_ID: ["DISCORD_SERVER_IDS"],
       DISCORD_USER_ID: ["DISCORD_ALLOWED_IDS"],
+      MSTEAMS_APP_ID: ["TEAMS_CLIENT_ID"],
+      MSTEAMS_TENANT_ID: ["TEAMS_TENANT_ID"],
+      TEAMS_ALLOWED_USERS: ["MSTEAMS_ALLOWED_USERS"],
+      MSTEAMS_PORT: ["TEAMS_PORT"],
     });
   });
 
@@ -93,6 +106,7 @@ describe("built-in messaging channel metadata", () => {
       wechat: ["wechat_bridge"],
       slack: ["slack"],
       whatsapp: ["whatsapp"],
+      teams: ["teams"],
     });
     expect(getMessagingPolicyKeysByChannel({ agent: "hermes" })).toMatchObject({
       telegram: ["telegram"],
@@ -100,6 +114,7 @@ describe("built-in messaging channel metadata", () => {
       wechat: ["wechat_bridge"],
       slack: ["slack"],
       whatsapp: ["whatsapp"],
+      teams: ["teams"],
     });
     expect(listRequiredCreateTimeMessagingPolicyPresetNames()).toEqual(["slack"]);
     expect(getMessagingPolicyPresetValidationWarnings().discord).toContain(
@@ -111,6 +126,7 @@ describe("built-in messaging channel metadata", () => {
       "openclaw-weixin",
       "slack",
       "whatsapp",
+      "msteams",
     ]);
     expect(
       Object.fromEntries(
@@ -122,6 +138,7 @@ describe("built-in messaging channel metadata", () => {
       wechat: ["openclaw-weixin"],
       slack: ["slack"],
       whatsapp: ["whatsapp"],
+      teams: ["msteams"],
     });
     expect(
       Object.fromEntries(
@@ -135,8 +152,24 @@ describe("built-in messaging channel metadata", () => {
       wechat: "npm:@tencent-weixin/openclaw-weixin@2.4.3",
       slack: "npm:@openclaw/slack@{{openclaw.version}}",
       whatsapp: "npm:@openclaw/whatsapp@{{openclaw.version}}",
+      teams: "npm:@openclaw/msteams@{{openclaw.version}}",
     });
-    expect(listMessagingPackageInstallSpecs({ agent: "hermes" })).toEqual([]);
+    expect(listMessagingPackageInstallSpecs({ agent: "hermes" })).toEqual([
+      {
+        channelId: "teams",
+        packageId: "hermesTeamsAppsPackage",
+        agents: ["hermes"],
+        manager: "hermes-uv-pip",
+        spec: "microsoft-teams-apps==2.0.13.4",
+      },
+      {
+        channelId: "teams",
+        packageId: "hermesAiohttpPackage",
+        agents: ["hermes"],
+        manager: "hermes-uv-pip",
+        spec: "aiohttp==3.14.1",
+      },
+    ]);
   });
 
   it("requires committed npm integrity pins for built-in OpenClaw plugin installs", () => {

@@ -9,6 +9,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { execTimeout, testTimeout } from "./helpers/timeouts";
 import { withLegacyMessagingPlanEnv } from "./messaging-plan-test-helper";
 
 const SCRIPT_PATH = path.join(
@@ -33,6 +34,8 @@ const OPENCLAW_SLACK_2026_6_9_INTEGRITY =
   "sha512-JZHc0L3s6s+yBsWowZtE/DWZJOuy4lTE6uTuUbF5QNjUvQQUlCHMFrwPycrXLesVq1il5yAvo82VbERRsIzgxQ==";
 const OPENCLAW_WHATSAPP_2026_6_9_INTEGRITY =
   "sha512-HWz9CryGcSk5ork03DlESVlRcDBnwuXPEKgqdSz/Qt0OnQ2Z1wqNGpwVlAqngvDQDH2AzkNXWuTu2M0C16R8vA==";
+const OPENCLAW_MSTEAMS_2026_6_9_INTEGRITY =
+  "sha512-Ye1nf2fZYGM3lqQJ/zGlhToThyz1lLZE7HqR2F31iWcD5pV89+eEyRFNNH2FrwYeDVjw+EyWpQh2RkN1r867qg==";
 const TENCENT_WEIXIN_2_4_3_INTEGRITY =
   "sha512-dPQbidUNWigC6V10vGW4i+GLH09x+6zUhafZRjuxkJ9GDu8o62WBsnUTojp4KqUH756hz+t2v9khiCRSi0dBDw==";
 
@@ -62,6 +65,18 @@ function wechatConfigB64(overrides: Record<string, string> = {}): string {
       accountId: "primary",
       baseUrl: "https://ilinkai.wechat.com",
       userId: "u1",
+      ...overrides,
+    }),
+  ).toString("base64");
+}
+
+function teamsConfigB64(overrides: Record<string, string | string[]> = {}): string {
+  return Buffer.from(
+    JSON.stringify({
+      appId: "test-teams-app-id",
+      tenantId: "test-teams-tenant-id",
+      allowedUsers: ["00000000-0000-0000-0000-000000000001"],
+      webhookPort: "3978",
       ...overrides,
     }),
   ).toString("base64");
@@ -101,6 +116,14 @@ function parseDryRun(envOverrides: Record<string, string> = {}) {
   return JSON.parse(result.stdout);
 }
 
+function decodePlan(encoded: string): any {
+  return JSON.parse(Buffer.from(encoded, "base64").toString("utf-8"));
+}
+
+function encodePlan(plan: any): string {
+  return Buffer.from(JSON.stringify(plan)).toString("base64");
+}
+
 describe("messaging-build-applier.mts: agent-install", () => {
   it("collects selected messaging plugin install specs", () => {
     const payload = parseDryRun({
@@ -111,8 +134,10 @@ describe("messaging-build-applier.mts: agent-install", () => {
         "slack",
         "whatsapp",
         "wechat",
+        "teams",
       ]),
       NEMOCLAW_WECHAT_CONFIG_B64: wechatConfigB64(),
+      NEMOCLAW_TEAMS_CONFIG_B64: teamsConfigB64(),
     });
 
     expect(payload.installSpecs).toEqual([
@@ -120,15 +145,17 @@ describe("messaging-build-applier.mts: agent-install", () => {
       "npm:@tencent-weixin/openclaw-weixin@2.4.3",
       "npm:@openclaw/slack@2026.5.22",
       "npm:@openclaw/whatsapp@2026.5.22",
+      "npm:@openclaw/msteams@2026.5.22",
     ]);
     expect(payload.doctorEnv).toEqual({
       DISCORD_BOT_TOKEN: "openshell:resolve:env:DISCORD_BOT_TOKEN",
+      MSTEAMS_APP_PASSWORD: "openshell:resolve:env:MSTEAMS_APP_PASSWORD",
       SLACK_APP_TOKEN: "xapp-OPENSHELL-RESOLVE-ENV-SLACK_APP_TOKEN",
       SLACK_BOT_TOKEN: "xoxb-OPENSHELL-RESOLVE-ENV-SLACK_BOT_TOKEN",
       TELEGRAM_BOT_TOKEN: "openshell:resolve:env:TELEGRAM_BOT_TOKEN",
       WECHAT_BOT_TOKEN: "openshell:resolve:env:WECHAT_BOT_TOKEN",
     });
-  });
+  }, testTimeout(15_000));
 
   it("does not inject placeholder token env vars for unselected channels", () => {
     const payload = parseDryRun({
@@ -583,6 +610,7 @@ describe("messaging-build-applier.mts: agent-install", () => {
         `  "@tencent-weixin/openclaw-weixin@2.4.3") printf "%s\\n" "${TENCENT_WEIXIN_2_4_3_INTEGRITY}"; exit 0 ;;`,
         `  "@openclaw/slack@2026.6.9") printf "%s\\n" "${OPENCLAW_SLACK_2026_6_9_INTEGRITY}"; exit 0 ;;`,
         `  "@openclaw/whatsapp@2026.6.9") printf "%s\\n" "${OPENCLAW_WHATSAPP_2026_6_9_INTEGRITY}"; exit 0 ;;`,
+        `  "@openclaw/msteams@2026.6.9") printf "%s\\n" "${OPENCLAW_MSTEAMS_2026_6_9_INTEGRITY}"; exit 0 ;;`,
         "esac",
         "exit 1",
         "",
@@ -598,6 +626,7 @@ describe("messaging-build-applier.mts: agent-install", () => {
           OPENCLAW_DISCORD_2026_6_9_INTEGRITY,
           OPENCLAW_SLACK_2026_6_9_INTEGRITY,
           OPENCLAW_WHATSAPP_2026_6_9_INTEGRITY,
+          OPENCLAW_MSTEAMS_2026_6_9_INTEGRITY,
           TENCENT_WEIXIN_2_4_3_INTEGRITY,
           OPENCLAW_VERSION: "2026.6.9",
           NEMOCLAW_MESSAGING_CHANNELS_B64: channelsB64([
@@ -606,8 +635,10 @@ describe("messaging-build-applier.mts: agent-install", () => {
             "slack",
             "whatsapp",
             "wechat",
+            "teams",
           ]),
           NEMOCLAW_WECHAT_CONFIG_B64: wechatConfigB64(),
+          NEMOCLAW_TEAMS_CONFIG_B64: teamsConfigB64(),
         },
         "openclaw",
       );
@@ -639,6 +670,8 @@ describe("messaging-build-applier.mts: agent-install", () => {
         "plugins|install|npm:@openclaw/slack@2026.6.9|--pin|||",
         "npm|view|@openclaw/whatsapp@2026.6.9|dist.integrity",
         "plugins|install|npm:@openclaw/whatsapp@2026.6.9|--pin|||",
+        "npm|view|@openclaw/msteams@2026.6.9|dist.integrity",
+        "plugins|install|npm:@openclaw/msteams@2026.6.9|--pin|||",
       ]);
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
@@ -776,6 +809,130 @@ describe("messaging-build-applier.mts: agent-install", () => {
     }
   });
 
+  it("installs Hermes Python packages supplied by the compiled Teams plan", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-teams-packages-"));
+    const tracePath = path.join(tmp, "uv.trace");
+    const fakeUv = path.join(tmp, "uv");
+    fs.writeFileSync(
+      fakeUv,
+      ["#!/bin/sh", 'printf \'%s\\n\' "$*" >> "$UV_TRACE"', "exit 0", ""].join("\n"),
+      { mode: 0o755 },
+    );
+
+    try {
+      const planEnv = withLegacyMessagingPlanEnv(
+        {
+          PATH: `${tmp}:${process.env.PATH || "/usr/bin:/bin"}`,
+          UV_TRACE: tracePath,
+          NEMOCLAW_MESSAGING_CHANNELS_B64: channelsB64(["teams"]),
+          NEMOCLAW_TEAMS_CONFIG_B64: teamsConfigB64(),
+        },
+        "hermes",
+      );
+
+      const dryRun = spawnSync(
+        "node",
+        [
+          "--experimental-strip-types",
+          SCRIPT_PATH,
+          "--agent",
+          "hermes",
+          "--phase",
+          "agent-install",
+          "--dry-run",
+        ],
+        {
+          encoding: "utf-8",
+          stdio: ["pipe", "pipe", "pipe"],
+          env: planEnv,
+          timeout: 10_000,
+        },
+      );
+      expect(dryRun.status, dryRun.stderr).toBe(0);
+      expect(JSON.parse(dryRun.stdout).hermesUvPackages).toEqual([
+        "microsoft-teams-apps==2.0.13.4",
+        "aiohttp==3.14.1",
+      ]);
+
+      const result = spawnSync(
+        "node",
+        [
+          "--experimental-strip-types",
+          SCRIPT_PATH,
+          "--agent",
+          "hermes",
+          "--phase",
+          "agent-install",
+        ],
+        {
+          encoding: "utf-8",
+          stdio: ["pipe", "pipe", "pipe"],
+          env: planEnv,
+          timeout: 10_000,
+        },
+      );
+
+      expect(result.status, result.stderr).toBe(0);
+      expect(fs.readFileSync(tracePath, "utf-8").trim()).toBe(
+        "pip install --python /opt/hermes/.venv/bin/python --no-cache -- microsoft-teams-apps==2.0.13.4 aiohttp==3.14.1",
+      );
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects Hermes Python packages not declared by trusted built-in channel manifests", () => {
+    const baseEnv = withLegacyMessagingPlanEnv(
+      {
+        PATH: process.env.PATH || "/usr/bin:/bin",
+        NEMOCLAW_MESSAGING_CHANNELS_B64: channelsB64(["teams"]),
+        NEMOCLAW_TEAMS_CONFIG_B64: teamsConfigB64(),
+      },
+      "hermes",
+    );
+    const plan = decodePlan(baseEnv.NEMOCLAW_MESSAGING_PLAN_B64);
+    plan.buildSteps = [
+      ...plan.buildSteps,
+      {
+        channelId: "teams",
+        kind: "package-install",
+        outputId: "tamperedHermesPackage",
+        required: true,
+        value: {
+          manager: "hermes-uv-pip",
+          spec: "unexpected-package==1.2.3",
+        },
+      },
+    ];
+
+    const result = spawnSync(
+      "node",
+      [
+        "--experimental-strip-types",
+        SCRIPT_PATH,
+        "--agent",
+        "hermes",
+        "--phase",
+        "agent-install",
+        "--dry-run",
+      ],
+      {
+        encoding: "utf-8",
+        stdio: ["pipe", "pipe", "pipe"],
+        env: {
+          ...baseEnv,
+          NEMOCLAW_MESSAGING_PLAN_B64: encodePlan(plan),
+        },
+        timeout: 10_000,
+      },
+    );
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("tamperedHermesPackage");
+    expect(result.stderr).toContain("not declared by a trusted built-in manifest");
+    expect(result.stderr).toContain("unexpected-package==1.2.3");
+  });
+
   it("#4246: messaging post-agent-install render reaches the mocked OpenClaw doctor boundary", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-discord-runtime-contract-"));
     const tracePath = path.join(tmp, "openclaw.trace");
@@ -835,7 +992,7 @@ describe("messaging-build-applier.mts: agent-install", () => {
         encoding: "utf-8",
         stdio: ["pipe", "pipe", "pipe"],
         env: generatorEnv,
-        timeout: 10_000,
+        timeout: execTimeout(20_000),
       });
       expect(generatorResult.status, generatorResult.stderr).toBe(0);
 
@@ -967,7 +1124,7 @@ describe("messaging-build-applier.mts: agent-install", () => {
             OPENCLAW_TRACE: tracePath,
             NEMOCLAW_MESSAGING_PLAN_B64: generatorEnv.NEMOCLAW_MESSAGING_PLAN_B64,
           },
-          timeout: 10_000,
+          timeout: execTimeout(20_000),
         },
       );
       expect(postInstallResult.status, postInstallResult.stderr).toBe(0);
