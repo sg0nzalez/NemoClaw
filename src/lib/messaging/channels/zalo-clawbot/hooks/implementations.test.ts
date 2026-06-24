@@ -12,9 +12,7 @@ import {
 } from "./seed-openclaw-account";
 
 function enrollHook() {
-  const hook = zaloClawbotManifest.hooks.find((entry) => entry.id === "zalo-clawbot-host-qr");
-  if (!hook) throw new Error("missing Zalo ClawBot host QR hook");
-  return hook;
+  return zaloClawbotManifest.hooks.find((entry) => entry.id === "zalo-clawbot-host-qr")!;
 }
 
 describe("Zalo ClawBot hook implementations", () => {

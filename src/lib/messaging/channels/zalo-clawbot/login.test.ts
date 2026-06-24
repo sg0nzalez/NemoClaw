@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { runZaloClawbotHostQrLogin, normalizeClawbotAccountId } from "./login";
+import { normalizeClawbotAccountId, runZaloClawbotHostQrLogin } from "./login";
 import type { FetchLike } from "./qr";
 
 function jsonResponse(status: number, body: unknown) {
@@ -17,23 +17,26 @@ function jsonResponse(status: number, body: unknown) {
 
 /** Build a fetch fake that returns request-login once and walks a scripted
  *  list of get-login-status responses on each poll. */
+function pollResponse(next: unknown) {
+  const override =
+    next && typeof next === "object" && "__status" in next
+      ? (next as { __status: number }).__status
+      : null;
+  return override === null ? jsonResponse(200, next) : jsonResponse(override, {});
+}
+
 function fakeFetch(statuses: unknown[], loginBodies?: unknown[]): FetchLike {
   let loginCalls = 0;
   let pollCalls = 0;
   return async (url: string) => {
-    if (url.includes("/agent/request-login")) {
-      const body = loginBodies?.[loginCalls] ?? {
-        result: { loginUrl: "https://zalo.me/s/abc", zbsk: "zbsk-1" },
-      };
-      loginCalls += 1;
-      return jsonResponse(200, body);
-    }
-    const next = statuses[Math.min(pollCalls, statuses.length - 1)];
-    pollCalls += 1;
-    if (next && typeof next === "object" && "__status" in next) {
-      return jsonResponse((next as { __status: number }).__status, {});
-    }
-    return jsonResponse(200, next);
+    const isLogin = url.includes("/agent/request-login");
+    const loginBody = loginBodies?.[loginCalls] ?? {
+      result: { loginUrl: "https://zalo.me/s/abc", zbsk: "zbsk-1" },
+    };
+    const poll = pollResponse(statuses[Math.min(pollCalls, statuses.length - 1)]);
+    loginCalls += isLogin ? 1 : 0;
+    pollCalls += isLogin ? 0 : 1;
+    return isLogin ? jsonResponse(200, loginBody) : poll;
   };
 }
 
