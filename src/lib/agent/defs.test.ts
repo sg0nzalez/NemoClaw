@@ -54,6 +54,7 @@ describe("agent definitions", () => {
       "slack",
       "wechat",
       "whatsapp",
+      "teams",
     ]);
     expect(openclaw.inferenceProviderOptions).toEqual([]);
     // OpenClaw uses device_pairing web auth — no fetchable bearer token.
@@ -97,6 +98,7 @@ describe("agent definitions", () => {
       "slack",
       "wechat",
       "whatsapp",
+      "teams",
     ]);
   });
 
