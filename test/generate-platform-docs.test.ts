@@ -268,11 +268,9 @@ print(block)
       "docs/reference/platform-support.mdx",
       ".agents/skills/nemoclaw-user-reference/references/platform-support.md",
       "skills/nemoclaw-user-reference/references/platform-support.md",
-    ];
+    ].filter((rel) => existsSync(path.join(repoRoot, rel)));
     for (const rel of docTargets) {
-      const fullPath = path.join(repoRoot, rel);
-      if (!existsSync(fullPath)) continue;
-      const body = readFileSync(fullPath, "utf-8");
+      const body = readFileSync(path.join(repoRoot, rel), "utf-8");
       for (const match of body.matchAll(onboardExample)) agentIds.add(match[1]);
     }
     expect(agentIds.size).toBeGreaterThan(0);
