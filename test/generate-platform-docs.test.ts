@@ -254,7 +254,9 @@ print(block)
   // invariant fails this suite before the change ships.
   it("every `--agent <id>` example across matrix, docs, and generated skills resolves to a manifest whose name field agrees", () => {
     const repoRoot = path.join(import.meta.dirname, "..");
-    const matrix = JSON.parse(readFileSync(path.join(repoRoot, "ci", "platform-matrix.json"), "utf-8"));
+    const matrix = JSON.parse(
+      readFileSync(path.join(repoRoot, "ci", "platform-matrix.json"), "utf-8"),
+    );
     const onboardExample = /(?:\$\$)?nemoclaw onboard --agent ([a-z0-9-]+)/g;
     const agentIds = new Set<string>();
     for (const section of ["agents", "out_of_scope"] as const) {
@@ -283,10 +285,7 @@ print(block)
       ).toBe(true);
       const manifestBody = readFileSync(manifest, "utf-8");
       const nameMatch = manifestBody.match(/^name:\s*([a-z0-9-]+)\s*$/m);
-      expect(
-        nameMatch?.[1],
-        `agents/${id}/manifest.yaml lacks a name field`,
-      ).toBeDefined();
+      expect(nameMatch?.[1], `agents/${id}/manifest.yaml lacks a name field`).toBeDefined();
       expect(
         nameMatch?.[1],
         `agents/${id}/manifest.yaml declares name ${nameMatch?.[1]}, breaking the loader contract for documented \`--agent ${id}\``,
@@ -297,8 +296,9 @@ print(block)
   it("out-of-scope LangChain row scopes itself and names Deep Agents Code as the integrated exception", () => {
     const matrixPath = path.join(import.meta.dirname, "..", "ci", "platform-matrix.json");
     const matrix = JSON.parse(readFileSync(matrixPath, "utf-8"));
-    const langchainRow = (matrix.out_of_scope ?? []).find((row: { name: string; notes: string }) =>
-      /LangChain/i.test(row.name) || /LangChain/i.test(row.notes),
+    const langchainRow = (matrix.out_of_scope ?? []).find(
+      (row: { name: string; notes: string }) =>
+        /LangChain/i.test(row.name) || /LangChain/i.test(row.notes),
     );
     expect(langchainRow, "expected an out_of_scope row mentioning LangChain").toBeDefined();
     expect(langchainRow.name + " " + langchainRow.notes).toMatch(/Deep Agents Code/);
@@ -317,18 +317,14 @@ print(block)
       expect(body, `${rel} missing umask 077`).toMatch(/umask 077/);
       expect(body, `${rel} missing mktemp -d`).toMatch(/mktemp -d/);
       expect(body, `${rel} missing trap EXIT cleanup`).toMatch(/trap .* EXIT/);
-      expect(
-        body,
-        `${rel} missing credential-boundary callout`,
-      ).toMatch(/credential-bearing/);
+      expect(body, `${rel} missing credential-boundary callout`).toMatch(/credential-bearing/);
       expect(
         body,
         `${rel} missing the /proc readability caveat that distinguishes env delivery from full process isolation`,
       ).toMatch(/\/proc/);
-      expect(
-        body,
-        `${rel} still passes \$NVIDIA_API_KEY via argv`,
-      ).not.toMatch(/python3 [^\n]*"\$NVIDIA_API_KEY"/);
+      expect(body, `${rel} still passes \$NVIDIA_API_KEY via argv`).not.toMatch(
+        /python3 [^\n]*"\$NVIDIA_API_KEY"/,
+      );
       expect(
         body,
         `${rel} reintroduces a fixed secret-bearing /tmp/auth-profiles.json output`,
