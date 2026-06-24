@@ -110,7 +110,7 @@ describe("Issue #2273 Layer 1: credential hydration from legacy storage", () => 
   const providers = [
     {
       name: "NVIDIA Endpoints",
-      credentialEnv: "NVIDIA_INFERENCE_API_KEY",
+      credentialEnv: "NVIDIA_API_KEY",
       value: "nvapi-test-hydrate",
     },
     {

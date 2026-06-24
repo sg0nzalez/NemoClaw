@@ -34,16 +34,16 @@ describe("setupNim selection state helpers", () => {
 
     applyCloudFallbackSelection(state, {
       providerName: "nvidia-prod",
-      endpointUrl: "https://integrate.api.nvidia.com/v1",
-      credentialEnv: "NVIDIA_INFERENCE_API_KEY",
+      endpointUrl: "https://inference.nvidia.com/v1",
+      credentialEnv: "NVIDIA_API_KEY",
       defaultModel: "meta/llama-3.3-70b-instruct",
     });
 
     assert.deepEqual(state, {
       model: "meta/llama-3.3-70b-instruct",
       provider: "nvidia-prod",
-      endpointUrl: "https://integrate.api.nvidia.com/v1",
-      credentialEnv: "NVIDIA_INFERENCE_API_KEY",
+      endpointUrl: "https://inference.nvidia.com/v1",
+      credentialEnv: "NVIDIA_API_KEY",
       hermesAuthMethod: null,
       hermesToolGateways: [],
       preferredInferenceApi: null,

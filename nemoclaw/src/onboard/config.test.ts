@@ -40,12 +40,12 @@ vi.mock("node:fs", async (importOriginal) => {
 
 function makeConfig(overrides: Partial<NemoClawOnboardConfig> = {}): NemoClawOnboardConfig {
   return {
-    endpointType: "build",
-    endpointUrl: "https://api.build.nvidia.com/v1",
+    endpointType: "nvidia",
+    endpointUrl: "https://inference.nvidia.com/v1",
     ncpPartner: null,
     model: "nvidia/nemotron-3-super-120b-a12b",
     profile: "default",
-    credentialEnv: "NVIDIA_INFERENCE_API_KEY",
+    credentialEnv: "NVIDIA_API_KEY",
     onboardedAt: "2026-03-01T00:00:00.000Z",
     ...overrides,
   };
@@ -106,7 +106,7 @@ describe("onboard/config", () => {
     });
 
     const endpointCases: [EndpointType, string][] = [
-      ["build", "NVIDIA Endpoints"],
+      ["nvidia", "NVIDIA Endpoints"],
       ["openai", "OpenAI"],
       ["anthropic", "Anthropic"],
       ["gemini", "Google Gemini"],
@@ -126,7 +126,7 @@ describe("onboard/config", () => {
 
     it("returns Unknown for unsupported endpoint types", () => {
       const config = makeConfig({
-        endpointType: "build",
+        endpointType: "nvidia",
         providerLabel: undefined,
       });
       expect(describeOnboardProvider({ ...config, endpointType: "bogus" as EndpointType })).toBe(

@@ -12,7 +12,7 @@
 #
 # Prerequisites:
 #   - Docker running
-#   - NVIDIA_INFERENCE_API_KEY set (real key, starts with nvapi-)
+#   - NVIDIA_API_KEY set (real key, starts with nvapi-)
 #   - NEMOCLAW_NON_INTERACTIVE=1, NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE=1
 #
 # Environment:
@@ -24,7 +24,7 @@
 #
 # Usage:
 #   NEMOCLAW_NON_INTERACTIVE=1 NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE=1 \
-#     NVIDIA_INFERENCE_API_KEY=nvapi-... bash test/e2e/test-cloud-inference-e2e.sh
+#     NVIDIA_API_KEY=nvapi-... bash test/e2e/test-cloud-inference-e2e.sh
 
 set -uo pipefail
 

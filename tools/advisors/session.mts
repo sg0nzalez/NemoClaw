@@ -16,7 +16,7 @@ import {
 
 export const DEFAULT_ADVISOR_PROVIDER = "openai";
 export const DEFAULT_ADVISOR_MODEL = "openai/openai/gpt-5.5";
-export const ADVISOR_OPENAI_COMPATIBLE_BASE_URL = "https://inference-api.nvidia.com/v1";
+export const ADVISOR_OPENAI_COMPATIBLE_BASE_URL = "https://inference.nvidia.com/v1";
 export const READ_ONLY_TOOLS = ["read", "grep", "find", "ls"];
 
 const ZERO_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };

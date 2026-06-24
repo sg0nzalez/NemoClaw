@@ -647,7 +647,7 @@ function probeOpenAiLikeEndpoint(endpointUrl, model, apiKey, options = {}) {
           }),
   };
 
-  // NVIDIA Build does not expose /v1/responses; probing it always returns
+  // NVIDIA-hosted inference does not expose /v1/responses; probing it always returns
   // "404 page not found" and only adds noise to error messages. Skip it
   // entirely for that provider. See issue #1601.
   const probes = options.skipResponsesProbe

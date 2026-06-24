@@ -47,7 +47,7 @@
       "status": "tested",
       "prd_priority": "P1",
       "ci_tested": true,
-      "notes": "Use the standard installer and `$$nemoclaw onboard`. For an end-to-end walkthrough with local Ollama inference, see the [NVIDIA Spark playbook](https://build.nvidia.com/spark/nemoclaw)."
+      "notes": "Use the standard installer and `$$nemoclaw onboard`. For an end-to-end walkthrough with local Ollama inference, see the [NVIDIA Spark playbook](https://inference.nvidia.com/spark/nemoclaw)."
     },
     {
       "name": "Windows WSL2",
@@ -81,7 +81,7 @@
       "name": "NVIDIA Endpoints",
       "status": "tested",
       "endpoint_type": "OpenAI-compatible",
-      "notes": "Hosted models on integrate.api.nvidia.com"
+      "notes": "Hosted models on inference.nvidia.com"
     },
     {
       "name": "OpenAI",

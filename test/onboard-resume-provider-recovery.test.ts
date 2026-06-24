@@ -59,7 +59,7 @@ describe("providerNameToOptionKey", () => {
   it("maps local provider names to option keys", () => {
     expect(providerNameToOptionKey("ollama-local")).toBe("ollama");
     // nvidia-nim is a legacy alias for cloud NVIDIA Endpoints, not Local NIM.
-    expect(providerNameToOptionKey("nvidia-nim")).toBe("build");
+    expect(providerNameToOptionKey("nvidia-nim")).toBe("nvidia");
   });
 
   it("disambiguates vllm-local via nimContainer", () => {
@@ -73,7 +73,7 @@ describe("providerNameToOptionKey", () => {
   });
 
   it("maps remote provider names via REMOTE_PROVIDER_CONFIG reverse lookup", () => {
-    expect(providerNameToOptionKey("nvidia-prod")).toBe("build");
+    expect(providerNameToOptionKey("nvidia-prod")).toBe("nvidia");
     expect(providerNameToOptionKey("openai-api")).toBe("openai");
     expect(providerNameToOptionKey("anthropic-prod")).toBe("anthropic");
     expect(providerNameToOptionKey("gemini-api")).toBe("gemini");

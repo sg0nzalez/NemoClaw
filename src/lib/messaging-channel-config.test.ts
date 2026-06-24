@@ -50,7 +50,7 @@ describe("messaging channel config", () => {
         MSTEAMS_APP_ID: "  teams-app  ",
         MSTEAMS_TENANT_ID: "  teams-tenant  ",
         MSTEAMS_PORT: "3978",
-        NVIDIA_INFERENCE_API_KEY: "not-channel-config",
+        NVIDIA_API_KEY: "not-channel-config",
       }),
     ).toEqual({
       TELEGRAM_ALLOWED_IDS: "123,456",

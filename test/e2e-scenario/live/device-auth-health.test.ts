@@ -39,7 +39,7 @@ test.skipIf(!shouldRunLiveE2EScenarios())(
   "device auth health probes treat 401 as live instead of offline (#2342)",
   { timeout: LIVE_TIMEOUT_MS },
   async ({ artifacts, cleanup, host, sandbox, secrets, skip }) => {
-    const apiKey = secrets.required("NVIDIA_INFERENCE_API_KEY");
+    const apiKey = secrets.required("NVIDIA_API_KEY");
     const installLog = artifacts.pathFor("phase-1-install-device-auth-health.log");
 
     await artifacts.writeJson("scenario.json", {

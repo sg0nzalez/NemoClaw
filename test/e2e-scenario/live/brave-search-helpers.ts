@@ -184,7 +184,6 @@ export async function onboardBrave(
         cwd: REPO_ROOT,
         env: commandEnv({
           BRAVE_API_KEY: braveKey,
-          NVIDIA_INFERENCE_API_KEY: inferenceKey,
           NVIDIA_API_KEY: inferenceKey,
         }),
         redactionValues,

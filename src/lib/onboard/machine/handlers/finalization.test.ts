@@ -193,8 +193,8 @@ describe("handleFinalizationState", () => {
 
     await handleFinalizationState({
       ...baseOptions(deps),
-      stagedLegacyKeys: ["NVIDIA_INFERENCE_API_KEY", "SLACK_BOT_TOKEN"],
-      migratedLegacyKeys: new Set(["NVIDIA_INFERENCE_API_KEY", "SLACK_BOT_TOKEN"]),
+      stagedLegacyKeys: ["NVIDIA_API_KEY", "SLACK_BOT_TOKEN"],
+      migratedLegacyKeys: new Set(["NVIDIA_API_KEY", "SLACK_BOT_TOKEN"]),
     });
 
     expect(calls.removeLegacy).toHaveBeenCalledOnce();
@@ -206,8 +206,8 @@ describe("handleFinalizationState", () => {
 
     const result = await handleFinalizationState({
       ...baseOptions(deps),
-      stagedLegacyKeys: ["NVIDIA_INFERENCE_API_KEY", "SLACK_BOT_TOKEN"],
-      migratedLegacyKeys: new Set(["NVIDIA_INFERENCE_API_KEY"]),
+      stagedLegacyKeys: ["NVIDIA_API_KEY", "SLACK_BOT_TOKEN"],
+      migratedLegacyKeys: new Set(["NVIDIA_API_KEY"]),
     });
 
     expect(calls.removeLegacy).not.toHaveBeenCalled();

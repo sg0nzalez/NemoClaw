@@ -340,7 +340,7 @@ describe("validateNvidiaApiKeyValue", () => {
     expect(validateNvidiaApiKeyValue("sk-abc123")).toBeTruthy();
   });
 
-  it("accepts non-nvapi keys when credentialEnv is not NVIDIA_INFERENCE_API_KEY", () => {
+  it("accepts non-nvapi keys when credentialEnv is not NVIDIA_API_KEY", () => {
     expect(validateNvidiaApiKeyValue("sk-ant-abc123", "ANTHROPIC_API_KEY")).toBeNull();
     expect(validateNvidiaApiKeyValue("sk-openai-xyz", "OPENAI_API_KEY")).toBeNull();
     expect(validateNvidiaApiKeyValue("AIza-gemini", "GEMINI_API_KEY")).toBeNull();
@@ -397,11 +397,11 @@ describe("isNvcfFunctionNotFoundForAccount", () => {
 });
 
 describe("nvcfFunctionNotFoundMessage", () => {
-  it("includes the model id and points the user at build.nvidia.com", () => {
+  it("includes the model id without pointing at an external key page", () => {
     const msg = nvcfFunctionNotFoundMessage("mistralai/mistral-large");
     expect(msg).toContain("mistralai/mistral-large");
-    expect(msg).toContain("not deployed for your account");
-    expect(msg).toContain("https://build.nvidia.com");
+    expect(msg).toContain("not available for your account");
+    expect(msg).not.toContain("settings/api-keys");
   });
 
   it("opens with 'Model <id> not found' so classifyValidationFailure routes to the model recovery path", () => {

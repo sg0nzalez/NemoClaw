@@ -32,9 +32,9 @@ jobs:
     steps:
       - name: Run launchable install-flow smoke test
         env:
-          NVIDIA_INFERENCE_API_KEY: \${{ (github.event_name != 'workflow_dispatch' || inputs.target_ref == '') && secrets.NVIDIA_INFERENCE_API_KEY || '' }}
+          NVIDIA_API_KEY: \${{ (github.event_name != 'workflow_dispatch' || inputs.target_ref == '') && secrets.NVIDIA_API_KEY || '' }}
           NEMOCLAW_E2E_USE_HOSTED_INFERENCE: "1"
-          COMPATIBLE_API_KEY: \${{ (github.event_name != 'workflow_dispatch' || inputs.target_ref == '') && secrets.NVIDIA_INFERENCE_API_KEY || '' }}
+          COMPATIBLE_API_KEY: \${{ (github.event_name != 'workflow_dispatch' || inputs.target_ref == '') && secrets.NVIDIA_API_KEY || '' }}
         run: bash test/e2e/test-launchable-smoke.sh
   report-to-pr:
     steps: []

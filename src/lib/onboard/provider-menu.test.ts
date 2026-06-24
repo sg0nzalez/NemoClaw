@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { buildInferenceProviderMenu } from "../../../dist/lib/onboard/provider-menu";
 
 const REMOTE_PROVIDER_CONFIG = {
-  build: { label: "NVIDIA Endpoints" },
+  nvidia: { label: "NVIDIA Endpoints" },
   openai: { label: "OpenAI" },
   custom: { label: "Other OpenAI-compatible endpoint" },
   anthropic: { label: "Anthropic" },
@@ -46,7 +46,7 @@ describe("buildInferenceProviderMenu", () => {
 
     expect(result.hermesProviderAvailable).toBe(false);
     expect(result.options.map((option) => option.key)).toEqual([
-      "build",
+      "nvidia",
       "openai",
       "custom",
       "anthropic",
@@ -57,7 +57,7 @@ describe("buildInferenceProviderMenu", () => {
 
   it("adds local, routed, and agent-scoped providers after the base remote entries", () => {
     const result = buildMenu({
-      agentProviderOptions: ["hermesProvider", "build"],
+      agentProviderOptions: ["hermesProvider", "nvidia"],
       experimental: true,
       gpuNimCapable: true,
       hasOllama: true,
@@ -71,7 +71,7 @@ describe("buildInferenceProviderMenu", () => {
 
     expect(result.hermesProviderAvailable).toBe(true);
     expect(result.options.map((option) => option.key)).toEqual([
-      "build",
+      "nvidia",
       "openai",
       "custom",
       "anthropic",
@@ -84,7 +84,9 @@ describe("buildInferenceProviderMenu", () => {
       "routed",
       "hermesProvider",
     ]);
-    expect(result.options.find((option) => option.key === "build")?.label).toBe("NVIDIA Endpoints");
+    expect(result.options.find((option) => option.key === "nvidia")?.label).toBe(
+      "NVIDIA Endpoints",
+    );
     expect(result.options.find((option) => option.key === "hermesProvider")?.label).toBe(
       "Hermes Provider",
     );

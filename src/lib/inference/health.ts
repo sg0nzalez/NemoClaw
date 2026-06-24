@@ -18,7 +18,7 @@ import { getProviderSelectionConfig } from "./config";
 import type { LocalProviderHealthProbeOptions } from "./local";
 import { probeLocalProviderHealth } from "./local";
 import { getChatCompletionsProbeCurlArgs } from "./onboard-probes";
-import { BUILD_ENDPOINT_URL } from "./provider-models";
+import { NVIDIA_INFERENCE_ENDPOINT_URL } from "./provider-models";
 
 export interface ProviderHealthStatus {
   ok: boolean;
@@ -50,7 +50,7 @@ export interface ProviderHealthProbeOptions {
 
 const COMPATIBLE_PROVIDERS = new Set(["compatible-endpoint", "compatible-anthropic-endpoint"]);
 const NVIDIA_MANAGED_PROVIDERS = new Set(["nvidia-prod", "nvidia-nim"]);
-const NVIDIA_HEALTH_CREDENTIAL_ENV = "NVIDIA_INFERENCE_API_KEY";
+const NVIDIA_HEALTH_CREDENTIAL_ENV = "NVIDIA_API_KEY";
 const KIMI_K26_MODEL = "moonshotai/kimi-k2.6";
 const KIMI_STATUS_CONNECT_TIMEOUT_SECONDS = "3";
 const KIMI_STATUS_MAX_TIME_SECONDS = "5";
@@ -148,7 +148,7 @@ export function getRemoteProviderHealthEndpoint(provider: string): string | null
   switch (provider) {
     case "nvidia-prod":
     case "nvidia-nim":
-      return `${BUILD_ENDPOINT_URL}/models`;
+      return `${NVIDIA_INFERENCE_ENDPOINT_URL}/models`;
     case "openai-api":
       return "https://api.openai.com/v1/models";
     case "anthropic-prod":
@@ -198,7 +198,7 @@ function probeNvidiaKimiK26Health(
 ): ProviderHealthStatus {
   const config = getProviderSelectionConfig(provider, model);
   const providerLabel = config?.providerLabel ?? provider;
-  const endpoint = `${BUILD_ENDPOINT_URL}/chat/completions`;
+  const endpoint = `${NVIDIA_INFERENCE_ENDPOINT_URL}/chat/completions`;
   let apiKey = "";
   try {
     apiKey = resolveProbeCredential(NVIDIA_HEALTH_CREDENTIAL_ENV, options);

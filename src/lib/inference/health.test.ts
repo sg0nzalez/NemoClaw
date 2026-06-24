@@ -12,16 +12,20 @@ import {
   probeProviderHealth,
 } from "../../../dist/lib/inference/health";
 
-import { BUILD_ENDPOINT_URL } from "../../../dist/lib/inference/provider-models";
+import { NVIDIA_INFERENCE_ENDPOINT_URL } from "../../../dist/lib/inference/provider-models";
 
 describe("inference health", () => {
   describe("getRemoteProviderHealthEndpoint", () => {
     it("returns NVIDIA endpoint for nvidia-prod", () => {
-      expect(getRemoteProviderHealthEndpoint("nvidia-prod")).toBe(`${BUILD_ENDPOINT_URL}/models`);
+      expect(getRemoteProviderHealthEndpoint("nvidia-prod")).toBe(
+        `${NVIDIA_INFERENCE_ENDPOINT_URL}/models`,
+      );
     });
 
     it("returns NVIDIA endpoint for nvidia-nim", () => {
-      expect(getRemoteProviderHealthEndpoint("nvidia-nim")).toBe(`${BUILD_ENDPOINT_URL}/models`);
+      expect(getRemoteProviderHealthEndpoint("nvidia-nim")).toBe(
+        `${NVIDIA_INFERENCE_ENDPOINT_URL}/models`,
+      );
     });
 
     it("returns OpenAI endpoint for openai-api", () => {
@@ -206,8 +210,7 @@ describe("inference health", () => {
       let authConfigContent = "";
       const result = probeRemoteProviderHealth("nvidia-prod", {
         model: "moonshotai/kimi-k2.6",
-        getCredentialImpl: (envName) =>
-          envName === "NVIDIA_INFERENCE_API_KEY" ? "nvapi-test" : null,
+        getCredentialImpl: (envName) => (envName === "NVIDIA_API_KEY" ? "nvapi-test" : null),
         runCurlProbeImpl: (argv) => {
           capturedArgv = argv;
           const configIndex = argv.indexOf("--config");
@@ -226,7 +229,7 @@ describe("inference health", () => {
 
       expect(result?.ok).toBe(true);
       expect(result?.probed).toBe(true);
-      expect(result?.endpoint).toBe(`${BUILD_ENDPOINT_URL}/chat/completions`);
+      expect(result?.endpoint).toBe(`${NVIDIA_INFERENCE_ENDPOINT_URL}/chat/completions`);
       expect(capturedArgv.join(" ")).not.toContain("nvapi-test");
       expect(capturedArgv.join(" ")).not.toContain("Authorization: Bearer");
       expect(capturedArgv).toContain("--config");
@@ -236,7 +239,7 @@ describe("inference health", () => {
       expect(capturedArgv[capturedArgv.indexOf("--connect-timeout") + 1]).toBe("3");
       expect(capturedArgv).toContain("--max-time");
       expect(capturedArgv[capturedArgv.indexOf("--max-time") + 1]).toBe("5");
-      expect(capturedArgv.at(-1)).toBe(`${BUILD_ENDPOINT_URL}/chat/completions`);
+      expect(capturedArgv.at(-1)).toBe(`${NVIDIA_INFERENCE_ENDPOINT_URL}/chat/completions`);
 
       const payload = JSON.parse(capturedArgv[capturedArgv.indexOf("-d") + 1]);
       expect(payload).toEqual({
@@ -268,8 +271,8 @@ describe("inference health", () => {
       expect(called).toBe(false);
       expect(result?.ok).toBe(true);
       expect(result?.probed).toBe(false);
-      expect(result?.endpoint).toBe(`${BUILD_ENDPOINT_URL}/chat/completions`);
-      expect(result?.detail).toContain("NVIDIA_INFERENCE_API_KEY");
+      expect(result?.endpoint).toBe(`${NVIDIA_INFERENCE_ENDPOINT_URL}/chat/completions`);
+      expect(result?.detail).toContain("NVIDIA_API_KEY");
       expect(result?.detail).toContain("provider-level /models");
     });
 
@@ -354,9 +357,9 @@ describe("inference health", () => {
       });
 
       expect(result?.ok).toBe(true);
-      expect(result?.endpoint).toBe(`${BUILD_ENDPOINT_URL}/models`);
-      expect(capturedArgv.at(-1)).toBe(`${BUILD_ENDPOINT_URL}/models`);
-      expect(capturedArgv).not.toContain(`${BUILD_ENDPOINT_URL}/chat/completions`);
+      expect(result?.endpoint).toBe(`${NVIDIA_INFERENCE_ENDPOINT_URL}/models`);
+      expect(capturedArgv.at(-1)).toBe(`${NVIDIA_INFERENCE_ENDPOINT_URL}/models`);
+      expect(capturedArgv).not.toContain(`${NVIDIA_INFERENCE_ENDPOINT_URL}/chat/completions`);
     });
 
     it("uses model-aware Kimi probing through the unified health entry point", () => {
@@ -380,8 +383,8 @@ describe("inference health", () => {
       expect(result?.ok).toBe(false);
       expect(result?.probed).toBe(true);
       expect(result?.failureLabel).toBe("unhealthy");
-      expect(result?.endpoint).toBe(`${BUILD_ENDPOINT_URL}/chat/completions`);
-      expect(capturedArgv.at(-1)).toBe(`${BUILD_ENDPOINT_URL}/chat/completions`);
+      expect(result?.endpoint).toBe(`${NVIDIA_INFERENCE_ENDPOINT_URL}/chat/completions`);
+      expect(capturedArgv.at(-1)).toBe(`${NVIDIA_INFERENCE_ENDPOINT_URL}/chat/completions`);
     });
 
     it("returns not-probed for compatible-endpoint", () => {

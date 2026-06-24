@@ -193,13 +193,12 @@ export function classifyGatewayStartFailure(output = ""): GatewayStartFailure {
 
 export function validateNvidiaApiKeyValue(
   key: string,
-  credentialEnv: string = "NVIDIA_INFERENCE_API_KEY",
+  credentialEnv: string = "NVIDIA_API_KEY",
 ): string | null {
   // The nvapi- prefix check is specific to NVIDIA keys; skip it for keys
   // from other providers (e.g. ANTHROPIC_API_KEY, OPENAI_API_KEY) so that
   // a valid Anthropic key is not rejected with an NVIDIA-specific error.
-  const isNvidia =
-    credentialEnv === "NVIDIA_INFERENCE_API_KEY" || credentialEnv === "NVIDIA_API_KEY";
+  const isNvidia = credentialEnv === "NVIDIA_API_KEY";
   if (!key) {
     return isNvidia ? "  NVIDIA API Key is required." : "  API Key is required.";
   }
@@ -216,9 +215,8 @@ export function isSafeModelId(value: string): boolean {
 /**
  * Detect NVIDIA Cloud Functions "Function not found for account" errors.
  *
- * NVIDIA Build (integrate.api.nvidia.com) returns this when a model is in the
- * public catalog but is not deployed for the caller's account/org. The raw
- * body looks like:
+ * NVIDIA-hosted inference can return this when a model is listed but is not
+ * available to the caller's account/org. The raw body looks like:
  *
  *   {"status":404,"title":"Not Found",
  *    "detail":"Function '<uuid>': Not found for account '<account-id>'"}
@@ -241,16 +239,15 @@ export function isNvcfFunctionNotFoundForAccount(message: string): boolean {
  */
 export function nvcfFunctionNotFoundMessage(model: string): string {
   return (
-    `Model '${model}' not found — it is in the NVIDIA Build catalog but is not deployed ` +
-    "for your account. Pick a different model, or check the model card on " +
-    "https://build.nvidia.com to see if it requires org-level access."
+    `Model '${model}' not found — it is listed by NVIDIA Endpoints but is not available ` +
+    "for your account. Pick a different model or check whether the model requires org-level access."
   );
 }
 
 /**
  * Whether the wizard should skip probing the OpenAI Responses API entirely
- * for the given inference provider. NVIDIA Build does not expose
- * `/v1/responses` for any model — every probe to that path returns
+ * for the given inference provider. NVIDIA-hosted inference does not expose
+ * `/v1/responses` for these models — every probe to that path returns
  * "404 page not found". Google Gemini also does not support the Responses
  * API. Skipping the probe removes wasted round-trips and stops the
  * failure-message noise from leaking into chat-completions errors.

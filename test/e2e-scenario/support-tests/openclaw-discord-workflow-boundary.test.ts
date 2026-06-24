@@ -66,7 +66,6 @@ describe("OpenClaw Discord pairing workflow boundary", () => {
           "openclaw-discord-pairing-vitest setup-node action must be pinned to a full commit SHA",
           "step 'Install root dependencies' run script must include npm ci --ignore-scripts",
           "step 'Build CLI' run script must include npm run build:cli",
-          "openclaw-discord-pairing-vitest step 'Run OpenClaw Discord pairing live test' env must not include NVIDIA_API_KEY",
           "step 'Install OpenShell CLI' run script must include env -u DOCKER_CONFIG",
         ]),
       );

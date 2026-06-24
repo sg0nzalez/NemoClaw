@@ -20,7 +20,6 @@ import { listMessagingCredentialMetadata } from "../messaging/channels";
 import { SECRET_PATTERNS, TOKEN_PREFIX_PATTERNS } from "./secret-patterns";
 
 const SENSITIVE_ENV_ASSIGNMENT_KEYS = [
-  "NVIDIA_INFERENCE_API_KEY",
   "NVIDIA_API_KEY",
   "NOUS_API_KEY",
   "OPENAI_API_KEY",
@@ -103,10 +102,7 @@ export function writeRedactedResult(
 // ── Full redaction (debug.ts style) ─────────────────────────────
 
 const FULL_REDACT_PATTERNS: [RegExp, string][] = [
-  [
-    /(NVIDIA_INFERENCE_API_KEY|NVIDIA_API_KEY|API_KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|_KEY)=\S+/gi,
-    "$1=<REDACTED>",
-  ],
+  [/(NVIDIA_API_KEY|API_KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|_KEY)=\S+/gi, "$1=<REDACTED>"],
   ...TOKEN_PREFIX_PATTERNS.map((p): [RegExp, string] => [
     new RegExp(p.source, p.flags),
     "<REDACTED>",

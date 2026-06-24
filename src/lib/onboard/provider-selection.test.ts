@@ -9,14 +9,14 @@ import { resolveRequestedProviderSelection } from "../../../dist/lib/onboard/pro
 const option = (key: string) => ({ key, label: key });
 
 const remoteProviderConfig = {
-  build: { providerName: "nvidia-prod" },
+  nvidia: { providerName: "nvidia-prod" },
   openai: { providerName: "openai-api" },
   hermesProvider: { providerName: "hermes-provider" },
 };
 
 function resolve(overrides: Partial<Parameters<typeof resolveRequestedProviderSelection>[0]> = {}) {
   return resolveRequestedProviderSelection({
-    options: [option("build")],
+    options: [option("nvidia")],
     requestedProvider: null,
     sandboxName: "sandbox",
     remoteProviderConfig,
@@ -34,7 +34,7 @@ function resolve(overrides: Partial<Parameters<typeof resolveRequestedProviderSe
 describe("resolveRequestedProviderSelection", () => {
   it("falls back install action keys to currently available providers", () => {
     const result = resolve({
-      options: [option("build"), option("ollama")],
+      options: [option("nvidia"), option("ollama")],
       requestedProvider: "install-ollama",
     });
 
@@ -48,7 +48,7 @@ describe("resolveRequestedProviderSelection", () => {
 
   it("recovers the recorded provider and model when no provider was requested", () => {
     const result = resolve({
-      options: [option("build"), option("openai")],
+      options: [option("nvidia"), option("openai")],
       readRecordedProvider: () => "openai-api",
       readRecordedModel: () => "gpt-example",
     });
@@ -63,7 +63,7 @@ describe("resolveRequestedProviderSelection", () => {
 
   it("does not silently map a recorded WSL Ollama provider to Windows-host Ollama", () => {
     const result = resolve({
-      options: [option("build"), option("ollama")],
+      options: [option("nvidia"), option("ollama")],
       isWsl: true,
       isWindowsHostOllama: true,
       windowsHostOllamaSupported: true,
@@ -78,7 +78,7 @@ describe("resolveRequestedProviderSelection", () => {
 
   it("returns a Windows-host hint when recorded Ollama is unavailable but a host action exists", () => {
     const result = resolve({
-      options: [option("build"), option("start-windows-ollama")],
+      options: [option("nvidia"), option("start-windows-ollama")],
       readRecordedProvider: () => "ollama-local",
     });
 
@@ -119,12 +119,12 @@ describe("resolveRequestedProviderSelection", () => {
 
   it("defaults to NVIDIA Endpoints when no requested or recorded provider is available", () => {
     const result = resolve({
-      options: [option("build"), option("openai")],
+      options: [option("nvidia"), option("openai")],
     });
 
     assert.equal(result.kind, "selected");
     if (result.kind === "selected") {
-      assert.equal(result.selected.key, "build");
+      assert.equal(result.selected.key, "nvidia");
       assert.equal(result.recoveredFromSandbox, false);
     }
   });

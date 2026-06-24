@@ -49,7 +49,7 @@
   },
   {
     "name": "NEMOCLAW_E2E_USE_HOSTED_INFERENCE",
-    "reason": "Internal E2E-only sentinel that tells CI to route the repository NVIDIA_INFERENCE_API_KEY secret through the hosted inference-api.nvidia.com OpenAI-compatible endpoint. Not user-facing."
+    "reason": "Internal E2E-only sentinel that tells CI to route the repository NVIDIA_API_KEY secret through the hosted inference.nvidia.com OpenAI-compatible endpoint. Not user-facing."
   },
   {
     "name": "NEMOCLAW_COMPAT_MODEL",

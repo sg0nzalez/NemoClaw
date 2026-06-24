@@ -279,7 +279,7 @@ export async function runTunnelLifecycleContract({
       cwd: REPO_ROOT,
       env: commandEnv({
         ...hosted.env,
-        NVIDIA_INFERENCE_API_KEY: apiKey,
+        NVIDIA_API_KEY: apiKey,
         NEMOCLAW_E2E_USE_HOSTED_INFERENCE: "1",
       }),
       redactionValues: [apiKey],

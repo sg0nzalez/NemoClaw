@@ -272,7 +272,7 @@ describe("OpenAI-compatible inference probe response parsing", () => {
 });
 
 describe("OpenAI-compatible inference probes", () => {
-  it("uses the NVIDIA Build request shape for DeepSeek V4 Pro", () => {
+  it("uses the NVIDIA Endpoints request shape for DeepSeek V4 Pro", () => {
     expect(getChatCompletionsProbePayload("deepseek-ai/deepseek-v4-pro")).toEqual({
       model: "deepseek-ai/deepseek-v4-pro",
       messages: [{ role: "user", content: "Reply with exactly: OK" }],
@@ -325,12 +325,12 @@ describe("OpenAI-compatible inference probes", () => {
     }
   });
 
-  it("uses an extended validation budget for slow NVIDIA Build models", () => {
+  it("uses an extended validation budget for slow NVIDIA Endpoints models", () => {
     for (const model of ["qwen/qwen3.5-397b-a17b", "deepseek-ai/deepseek-v4-flash"]) {
       const args = getChatCompletionsProbeCurlArgs({
         authHeader: ["-H", "Authorization: Bearer nvapi-test"],
         model,
-        url: "https://integrate.api.nvidia.com/v1/chat/completions",
+        url: "https://inference.nvidia.com/v1/chat/completions",
         isWsl: false,
       });
       expect(args[args.indexOf("--connect-timeout") + 1]).toBe("10");
@@ -340,7 +340,7 @@ describe("OpenAI-compatible inference probes", () => {
     const wslArgs = getChatCompletionsProbeCurlArgs({
       authHeader: ["-H", "Authorization: Bearer nvapi-test"],
       model: "qwen/qwen3.5-397b-a17b",
-      url: "https://integrate.api.nvidia.com/v1/chat/completions",
+      url: "https://inference.nvidia.com/v1/chat/completions",
       isWsl: true,
     });
     expect(wslArgs[wslArgs.indexOf("--connect-timeout") + 1]).toBe("30");
@@ -371,7 +371,7 @@ describe("OpenAI-compatible inference probes", () => {
     const args = getChatCompletionsProbeCurlArgs({
       authHeader: ["-H", "Authorization: Bearer nvapi-test"],
       model: "moonshotai/kimi-k2.6",
-      url: "https://integrate.api.nvidia.com/v1/chat/completions",
+      url: "https://inference.nvidia.com/v1/chat/completions",
       isWsl: false,
     });
 
@@ -397,7 +397,7 @@ describe("OpenAI-compatible inference probes", () => {
     const args = getChatCompletionsProbeCurlArgs({
       authHeader: ["-H", "Authorization: Bearer nvapi-test"],
       model: "deepseek-ai/deepseek-v4-pro",
-      url: "https://integrate.api.nvidia.com/v1/chat/completions",
+      url: "https://inference.nvidia.com/v1/chat/completions",
       isWsl: false,
     });
 
@@ -513,7 +513,7 @@ exit 0
       console.log = (...args) => lines.push(args.join(" "));
       try {
         const result = probeOpenAiLikeEndpoint(
-          "https://integrate.api.nvidia.com/v1",
+          "https://inference.nvidia.com/v1",
           "nvidia/nemotron-3-super-120b-a12b",
           "nvapi-test",
           { skipResponsesProbe: true },
@@ -867,7 +867,7 @@ exit 0
       console.log = (...args) => lines.push(args.join(" "));
       try {
         const result = probeOpenAiLikeEndpoint(
-          "https://integrate.api.nvidia.com/v1",
+          "https://inference.nvidia.com/v1",
           "nvidia/nemotron-3-super-120b-a12b",
           "nvapi-test",
           { skipResponsesProbe: true },
@@ -920,7 +920,7 @@ exit 28
     console.log = (...args) => lines.push(args.join(" "));
     try {
       const result = probeOpenAiLikeEndpoint(
-        "https://integrate.api.nvidia.com/v1",
+        "https://inference.nvidia.com/v1",
         "deepseek-ai/deepseek-v4-pro",
         "nvapi-test",
         { skipResponsesProbe: true },

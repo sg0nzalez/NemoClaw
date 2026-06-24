@@ -16,7 +16,7 @@
 #
 # Prerequisites:
 #   - Docker running
-#   - NVIDIA_INFERENCE_API_KEY set (needed to onboard the sandbox)
+#   - NVIDIA_API_KEY set (needed to onboard the sandbox)
 #   - NEMOCLAW_NON_INTERACTIVE=1, NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE=1
 #
 # Environment:
@@ -25,7 +25,7 @@
 #
 # Usage:
 #   NEMOCLAW_NON_INTERACTIVE=1 NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE=1 \
-#     NVIDIA_INFERENCE_API_KEY=... bash test/e2e/test-openclaw-skill-cli-e2e.sh
+#     NVIDIA_API_KEY=... bash test/e2e/test-openclaw-skill-cli-e2e.sh
 
 # shellcheck disable=SC2317
 set -uo pipefail

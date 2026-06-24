@@ -184,7 +184,7 @@ const {
   pullAndResolveBaseImageDigest,
 }: typeof import("./onboard/base-image") = require("./onboard/base-image");
 const { requireValue }: typeof import("./core/require-value") = require("./core/require-value");
-const buildCredentialReuse: typeof import("./onboard/build-credential-reuse") = require("./onboard/build-credential-reuse");
+const nvidiaCredentialReuse: typeof import("./onboard/nvidia-credential-reuse") = require("./onboard/nvidia-credential-reuse");
 
 type RunnerOptions = {
   env?: NodeJS.ProcessEnv;
@@ -3492,7 +3492,6 @@ async function handleRoutedSelection(
   } else if (!resolveProviderCredential(routerCredentialEnv)) {
     console.log("");
     console.log("  Model Router accepts NVIDIA API keys (nvapi-...).");
-    console.log("  Get one at https://build.nvidia.com");
     console.log("");
     const routerCredentialResult = await ensureNamedCredential(
       routerCredentialEnv,
@@ -3530,7 +3529,7 @@ async function handleNimLocalSelection(
   const models = nim.listModels().filter((m) => m.minGpuMemoryMB <= localGpu.totalMemoryMB);
   if (models.length === 0) {
     console.log("  No NIM models fit your GPU VRAM. Falling back to cloud API.");
-    applyCloudFallbackSelection(state, REMOTE_PROVIDER_CONFIG.build);
+    applyCloudFallbackSelection(state, REMOTE_PROVIDER_CONFIG.nvidia);
     return "selected";
   }
 
@@ -3592,8 +3591,7 @@ async function handleNimLocalSelection(
     }
     ngcApiKey = ngcKey;
   } else {
-    ngcApiKey =
-      hydrateCredentialEnv("NGC_API_KEY") || hydrateCredentialEnv("NVIDIA_INFERENCE_API_KEY");
+    ngcApiKey = hydrateCredentialEnv("NGC_API_KEY") || hydrateCredentialEnv("NVIDIA_API_KEY");
     if (!ngcApiKey && !isNonInteractive()) {
       console.log("");
       console.log("  NGC API Key required to download NIM model weights at runtime.");
@@ -3616,7 +3614,7 @@ async function handleNimLocalSelection(
   console.log("  Waiting for NIM to become healthy...");
   if (!nim.waitForNimHealth(undefined, undefined, { container: nimContainerNameLocal })) {
     console.error("  NIM failed to start. Falling back to cloud API.");
-    applyCloudFallbackSelection(state, REMOTE_PROVIDER_CONFIG.build);
+    applyCloudFallbackSelection(state, REMOTE_PROVIDER_CONFIG.nvidia);
     return "selected";
   }
 
@@ -3777,18 +3775,16 @@ async function handleRemoteProviderSelection(
 
   hydrateCredentialEnv(state.credentialEnv);
 
-  if (selected.key === "build") {
+  if (selected.key === "nvidia") {
     const _nvProviderKey = (process.env.NEMOCLAW_PROVIDER_KEY || "").trim();
-    const existingNvidiaKey = ["NVIDIA_INFERENCE_API_KEY", "NVIDIA_API_KEY"]
-      .map((envName) => normalizeCredentialValue(process.env[envName] ?? ""))
-      .find(Boolean);
+    const existingNvidiaKey = normalizeCredentialValue(getCredential("NVIDIA_API_KEY"));
     if (_nvProviderKey && !existingNvidiaKey) {
-      process.env.NVIDIA_INFERENCE_API_KEY = _nvProviderKey;
+      process.env.NVIDIA_API_KEY = _nvProviderKey;
     }
     if (isNonInteractive()) {
-      state.skipHostInferenceSmoke = buildCredentialReuse.resolveNonInteractiveBuildCredential({
+      state.skipHostInferenceSmoke = nvidiaCredentialReuse.resolveNonInteractiveNvidiaCredential({
         provider: state.provider,
-        helpUrl: REMOTE_PROVIDER_CONFIG.build.helpUrl,
+        helpUrl: REMOTE_PROVIDER_CONFIG.nvidia.helpUrl,
         recoveredFromSandbox,
         providerExistsInGateway,
       });
@@ -3920,19 +3916,19 @@ async function handleRemoteProviderSelection(
     }
   }
 
-  if (selected.key === "build") {
-    const buildModel = requireValue(
+  if (selected.key === "nvidia") {
+    const nvidiaModel = requireValue(
       isBackToSelection(state.model) ? null : state.model,
       `Missing model for ${remoteConfig.label}`,
     );
-    const buildValidation = await buildCredentialReuse.resolveBuildPreferredInferenceApi({
+    const nvidiaValidation = await nvidiaCredentialReuse.resolveNvidiaPreferredInferenceApi({
       reuseGatewayCredentialWithoutLocalKey: state.skipHostInferenceSmoke === true,
       note,
       probe: () =>
         validateOpenAiLikeSelection(
           remoteConfig.label,
           requireValue(state.endpointUrl, `Missing endpoint URL for ${remoteConfig.label}`),
-          buildModel,
+          nvidiaModel,
           state.credentialEnv,
           "Please choose a provider/model again.",
           remoteConfig.helpUrl,
@@ -3943,8 +3939,8 @@ async function handleRemoteProviderSelection(
           },
         ),
     });
-    if (buildValidation.retrySelection) return "retry-selection";
-    state.preferredInferenceApi = buildValidation.preferredInferenceApi;
+    if (nvidiaValidation.retrySelection) return "retry-selection";
+    state.preferredInferenceApi = nvidiaValidation.preferredInferenceApi;
   }
 
   console.log(`  Using ${remoteConfig.label} with model: ${state.model}`);
@@ -3970,10 +3966,10 @@ async function setupNim(
   step(3, 8, "Configuring inference provider");
 
   let model: string | typeof BACK_TO_SELECTION | null = null;
-  let provider: string = REMOTE_PROVIDER_CONFIG.build.providerName;
+  let provider: string = REMOTE_PROVIDER_CONFIG.nvidia.providerName;
   let nimContainer: string | null = null;
-  let endpointUrl: string | null = REMOTE_PROVIDER_CONFIG.build.endpointUrl;
-  let credentialEnv: string | null = REMOTE_PROVIDER_CONFIG.build.credentialEnv;
+  let endpointUrl: string | null = REMOTE_PROVIDER_CONFIG.nvidia.endpointUrl;
+  let credentialEnv: string | null = REMOTE_PROVIDER_CONFIG.nvidia.credentialEnv;
   let hermesAuthMethod: HermesAuthMethod | null = null;
   let hermesToolGateways: string[] = [];
   let preferredInferenceApi: string | null = null;
@@ -4004,7 +4000,7 @@ async function setupNim(
   } = providerHostState;
   const requestedProvider = getNonInteractiveProvider();
   const requestedModel = isNonInteractive()
-    ? getNonInteractiveModel(requestedProvider || "build")
+    ? getNonInteractiveModel(requestedProvider || "nvidia")
     : null;
   const agentProviderOptions = getAgentInferenceProviderOptions(agent);
 

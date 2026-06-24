@@ -37,7 +37,7 @@ test.skipIf(!shouldRunLiveE2EScenarios())(
   "upgrade-sandboxes detects and rebuilds stale OpenClaw sandboxes (#1904)",
   { timeout: LIVE_TIMEOUT_MS },
   async ({ artifacts, cleanup, host, sandbox, secrets, skip }) => {
-    const apiKey = secrets.required("NVIDIA_INFERENCE_API_KEY");
+    const apiKey = secrets.required("NVIDIA_API_KEY");
 
     await artifacts.writeJson("scenario.json", {
       id: "upgrade-stale-sandbox",

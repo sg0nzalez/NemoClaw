@@ -18,8 +18,8 @@ import { shouldRunLiveE2EScenarios } from "../fixtures/live-project-gate.ts";
 // a successful real onboard registers the migrated value with the OpenShell
 // gateway, the plaintext file is removed after success, credentials list reads
 // from the gateway, and secure unlink removes a planted symlink without touching
-// its target. The repository secret is named NVIDIA_INFERENCE_API_KEY, but the
-// hosted E2E service is the OpenAI-compatible inference-api.nvidia.com endpoint,
+// its target. The repository secret is named NVIDIA_API_KEY, but the
+// hosted E2E service is the OpenAI-compatible inference.nvidia.com endpoint,
 // so the migration contract stages that value as COMPATIBLE_API_KEY and expects
 // the compatible-endpoint gateway provider.
 
@@ -108,10 +108,7 @@ async function cleanupCredentialMigrationState(host: HostCliClient, home: string
     host.command("node", [CLI_ENTRYPOINT, SANDBOX_NAME, "destroy", "--yes"], {
       artifactName: "cleanup-nemoclaw-destroy",
       env,
-      redactionValues: [
-        process.env.NVIDIA_INFERENCE_API_KEY ?? "",
-        process.env.COMPATIBLE_API_KEY ?? "",
-      ],
+      redactionValues: [process.env.NVIDIA_API_KEY ?? "", process.env.COMPATIBLE_API_KEY ?? ""],
       timeoutMs: 120_000,
     }),
   );

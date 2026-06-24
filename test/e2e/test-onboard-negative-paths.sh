@@ -78,9 +78,9 @@ SANDBOX_NAME="${NEMOCLAW_SANDBOX_NAME:-e2e-onboard-negative}"
 PORT_CONFLICT_PORT="${NEMOCLAW_ONBOARD_NEGATIVE_CONFLICT_PORT:-18080}"
 SESSION_FILE="$HOME/.nemoclaw/onboard-session.json"
 REGISTRY_FILE="$HOME/.nemoclaw/sandboxes.json"
-RESTORE_API_KEY="${NVIDIA_INFERENCE_API_KEY:-}"
+RESTORE_API_KEY="${NVIDIA_API_KEY:-}"
 if [ -n "$RESTORE_API_KEY" ]; then
-  export NVIDIA_INFERENCE_API_KEY="$RESTORE_API_KEY"
+  export NVIDIA_API_KEY="$RESTORE_API_KEY"
 fi
 nemoclaw_e2e_configure_compatible_inference || {
   fail "Hosted CI inference could not be configured"
@@ -92,7 +92,7 @@ EXPECTED_PROVIDER="$(nemoclaw_e2e_expected_route_provider)"
 ONBOARD_INFERENCE_ENV=(
   "NEMOCLAW_PROVIDER=cloud"
   "NEMOCLAW_MODEL=$CLOUD_MODEL"
-  "NVIDIA_INFERENCE_API_KEY=$RESTORE_API_KEY"
+  "NVIDIA_API_KEY=$RESTORE_API_KEY"
 )
 if nemoclaw_e2e_using_compatible_inference; then
   ONBOARD_INFERENCE_ENV=(
@@ -101,7 +101,7 @@ if nemoclaw_e2e_using_compatible_inference; then
     "NEMOCLAW_MODEL=$CLOUD_MODEL"
     "NEMOCLAW_COMPAT_MODEL=$CLOUD_MODEL"
     "COMPATIBLE_API_KEY=$RESTORE_API_KEY"
-    "NVIDIA_INFERENCE_API_KEY=$RESTORE_API_KEY"
+    "NVIDIA_API_KEY=$RESTORE_API_KEY"
   )
 fi
 
@@ -243,7 +243,7 @@ const path = require("node:path");
 const repo = process.argv[2];
 const { validateNvidiaApiKeyValue } = require(path.join(repo, "dist", "lib", "validation.js"));
 
-const nvidiaError = validateNvidiaApiKeyValue("not-a-nvidia-key", "NVIDIA_INFERENCE_API_KEY");
+const nvidiaError = validateNvidiaApiKeyValue("not-a-nvidia-key", "NVIDIA_API_KEY");
 if (!nvidiaError || !nvidiaError.includes("Must start with nvapi-")) {
   throw new Error(`expected NVIDIA key prefix rejection, got: ${nvidiaError}`);
 }
@@ -426,7 +426,7 @@ NEMOCLAW_NON_INTERACTIVE=1 \
   NEMOCLAW_RECREATE_SANDBOX=1 \
   NEMOCLAW_PROVIDER=cloud \
   NEMOCLAW_POLICY_MODE=skip \
-  NVIDIA_INFERENCE_API_KEY=not-a-nvidia-key \
+  NVIDIA_API_KEY=not-a-nvidia-key \
   node "$REPO/bin/nemoclaw.js" onboard --non-interactive >"$INVALID_KEY_LOG" 2>&1
 invalid_key_exit=$?
 invalid_key_output="$(cat "$INVALID_KEY_LOG")"

@@ -128,7 +128,7 @@ Patterns live in a fenced block (not a Markdown table) because patterns 8 and 9 
     → GitHub PATs / install tokens
 
 3.  (?i)nvapi-[A-Za-z0-9_-]{20,}
-    → NVIDIA API keys (NIM / build.nvidia.com)
+    → NVIDIA API keys (NIM / inference.nvidia.com)
 
 4.  AKIA[0-9A-Z]{16}
     → AWS access key IDs

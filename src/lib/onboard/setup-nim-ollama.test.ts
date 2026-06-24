@@ -13,7 +13,7 @@ function makeState(): SetupNimSelectionState {
     model: null,
     provider: "nvidia-prod",
     endpointUrl: null,
-    credentialEnv: "NVIDIA_INFERENCE_API_KEY",
+    credentialEnv: "NVIDIA_API_KEY",
     hermesAuthMethod: null,
     hermesToolGateways: [],
     preferredInferenceApi: null,

@@ -45,8 +45,7 @@ function commandEnv(apiKey?: string, extra: NodeJS.ProcessEnv = {}): NodeJS.Proc
     extra: {
       NEMOCLAW_E2E_USE_HOSTED_INFERENCE: "1",
       NEMOCLAW_PROVIDER: process.env.NEMOCLAW_PROVIDER ?? "custom",
-      NEMOCLAW_ENDPOINT_URL:
-        process.env.NEMOCLAW_ENDPOINT_URL ?? "https://inference-api.nvidia.com/v1",
+      NEMOCLAW_ENDPOINT_URL: process.env.NEMOCLAW_ENDPOINT_URL ?? "https://inference.nvidia.com/v1",
       NEMOCLAW_MODEL: process.env.NEMOCLAW_MODEL ?? "nvidia/nvidia/nemotron-3-super-v3",
       NEMOCLAW_COMPAT_MODEL:
         process.env.NEMOCLAW_COMPAT_MODEL ??
@@ -360,7 +359,7 @@ test.skipIf(!shouldRunLiveE2EScenarios())(
   "hermes-discord: Hermes Discord schema, credential isolation, native gateway rewrite, and rebuild credential reuse",
   { timeout: LIVE_TIMEOUT_MS },
   async ({ artifacts, cleanup, host, sandbox, secrets }) => {
-    const apiKey = secrets.required("NVIDIA_INFERENCE_API_KEY");
+    const apiKey = secrets.required("NVIDIA_API_KEY");
     const env = commandEnv(apiKey);
     const redactionValues = redactions(apiKey);
 
@@ -701,7 +700,7 @@ done`,
     );
 
     const rebuildEnv = commandEnv();
-    delete rebuildEnv.NVIDIA_INFERENCE_API_KEY;
+    delete rebuildEnv.NVIDIA_API_KEY;
     delete rebuildEnv.NVIDIA_API_KEY;
     delete rebuildEnv.COMPATIBLE_API_KEY;
     const rebuild = await host.command("nemoclaw", [SANDBOX_NAME, "rebuild", "--yes"], {
@@ -710,7 +709,7 @@ done`,
       redactionValues,
       timeoutMs: 45 * 60_000,
     });
-    expectExitZero(rebuild, "Hermes rebuild without NVIDIA_INFERENCE_API_KEY");
+    expectExitZero(rebuild, "Hermes rebuild without NVIDIA_API_KEY");
     expect(resultText(rebuild)).not.toMatch(/provider credential not found/i);
 
     await (async (): Promise<void> => {

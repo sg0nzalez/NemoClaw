@@ -222,7 +222,7 @@ liveTest(
   "issue 4462 scope-upgrade approval stays on gateway path without admin leak",
   { timeout: LIVE_TIMEOUT_MS },
   async ({ artifacts, cleanup: cleanupRegistry, host, sandbox, secrets, skip }) => {
-    const apiKey = secrets.required("NVIDIA_INFERENCE_API_KEY");
+    const apiKey = secrets.required("NVIDIA_API_KEY");
     await artifacts.writeJson("scenario.json", {
       id: "issue-4462-scope-upgrade-approval",
       legacySource: "test/e2e/test-issue-4462-scope-upgrade-approval.sh",
@@ -254,7 +254,7 @@ liveTest(
       {
         artifactName: "phase-1-install-sh",
         cwd: REPO_ROOT,
-        env: env({ NVIDIA_INFERENCE_API_KEY: apiKey }),
+        env: env({ NVIDIA_API_KEY: apiKey }),
         redactionValues: [apiKey],
         timeoutMs: 30 * 60_000,
       },

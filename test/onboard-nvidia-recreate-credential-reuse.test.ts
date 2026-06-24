@@ -11,7 +11,7 @@ import { describe, it } from "vitest";
 import { testTimeoutOptions } from "./helpers/timeouts";
 
 // Regression guard for #5441. In non-interactive `onboard --recreate-sandbox`
-// the NVIDIA Endpoints ("build") provider is recovered from the existing
+// the NVIDIA Endpoints ("nvidia") provider is recovered from the existing
 // sandbox's saved gateway state. The OpenShell gateway already holds the
 // validated credential and nothing is written to disk, so the host process has
 // no local API key. The flow used to probe the endpoint anyway — unauthenticated
@@ -19,15 +19,15 @@ import { testTimeoutOptions } from "./helpers/timeouts";
 // the gateway credential and skip endpoint re-validation.
 const REPO_ROOT = path.join(import.meta.dirname, "..");
 
-describe("onboard build recreate credential reuse (#5441)", () => {
+describe("onboard NVIDIA recreate credential reuse (#5441)", () => {
   it(
     "reuses the gateway credential and skips endpoint re-validation when no local key is staged",
     testTimeoutOptions(90_000),
     () => {
-      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-build-recreate-"));
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-nvidia-recreate-"));
       const fakeBin = path.join(tmpDir, "bin");
       const home = path.join(tmpDir, "home");
-      const scriptPath = path.join(tmpDir, "build-recreate.cjs");
+      const scriptPath = path.join(tmpDir, "nvidia-recreate.cjs");
       const curlLogPath = path.join(tmpDir, "curl-probes.log");
       const onboardPath = JSON.stringify(path.join(REPO_ROOT, "dist", "lib", "onboard.js"));
 
@@ -77,9 +77,8 @@ exit 1
 process.env.NEMOCLAW_NON_INTERACTIVE = "1";
 process.env.NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE = "1";
 process.env.NEMOCLAW_TEST_NO_SLEEP = "1";
-// Critically: NVIDIA_INFERENCE_API_KEY is NOT set — the credential lives only
+// Critically: NVIDIA_API_KEY is NOT set — the credential lives only
 // in the gateway, mirroring an interactive onboard that typed the key.
-delete process.env.NVIDIA_INFERENCE_API_KEY;
 delete process.env.NVIDIA_API_KEY;
 delete process.env.NEMOCLAW_PROVIDER_KEY;
 delete process.env.NEMOCLAW_PROVIDER;
@@ -122,7 +121,6 @@ const { setupNim, setupInference } = require(${onboardPath});
             VITEST: "false",
             NEMOCLAW_TEST_NO_SLEEP: "1",
             NEMOCLAW_FAKE_CURL_LOG: curlLogPath,
-            NVIDIA_INFERENCE_API_KEY: "",
             NVIDIA_API_KEY: "",
           },
           timeout: 80_000,
@@ -132,7 +130,7 @@ const { setupNim, setupInference } = require(${onboardPath});
         assert.equal(
           result.status,
           0,
-          `onboarding aborted non-interactive build recreate instead of reusing the gateway credential; output:\n${output}`,
+          `onboarding aborted non-interactive NVIDIA recreate instead of reusing the gateway credential; output:\n${output}`,
         );
         assert.match(
           output,
@@ -147,7 +145,7 @@ const { setupNim, setupInference } = require(${onboardPath});
         assert.match(
           output,
           /"outcome":"resolved"/,
-          `setupNim did not resolve the build provider selection; output:\n${output}`,
+          `setupNim did not resolve the nvidia provider selection; output:\n${output}`,
         );
         assert.match(
           output,
@@ -172,13 +170,13 @@ const { setupNim, setupInference } = require(${onboardPath});
   );
 
   it(
-    "requires a local key for explicit build selection even when a gateway provider exists",
+    "requires a local key for explicit NVIDIA selection even when a gateway provider exists",
     testTimeoutOptions(90_000),
     () => {
-      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-build-explicit-"));
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-nvidia-explicit-"));
       const fakeBin = path.join(tmpDir, "bin");
       const home = path.join(tmpDir, "home");
-      const scriptPath = path.join(tmpDir, "build-explicit.cjs");
+      const scriptPath = path.join(tmpDir, "nvidia-explicit.cjs");
       const curlLogPath = path.join(tmpDir, "curl-probes.log");
       const onboardPath = JSON.stringify(path.join(REPO_ROOT, "dist", "lib", "onboard.js"));
 
@@ -206,8 +204,7 @@ exit 1
         scriptPath,
         String.raw`
 process.env.NEMOCLAW_NON_INTERACTIVE = "1";
-process.env.NEMOCLAW_PROVIDER = "build";
-delete process.env.NVIDIA_INFERENCE_API_KEY;
+process.env.NEMOCLAW_PROVIDER = "nvidia";
 delete process.env.NVIDIA_API_KEY;
 delete process.env.NEMOCLAW_PROVIDER_KEY;
 const { setupNim } = require(${onboardPath});
@@ -229,7 +226,6 @@ setupNim(null, null, null).catch((error) => {
             VITEST: "false",
             NEMOCLAW_TEST_NO_SLEEP: "1",
             NEMOCLAW_FAKE_CURL_LOG: curlLogPath,
-            NVIDIA_INFERENCE_API_KEY: "",
             NVIDIA_API_KEY: "",
           },
           timeout: 80_000,
@@ -239,18 +235,18 @@ setupNim(null, null, null).catch((error) => {
         assert.equal(
           result.status,
           1,
-          `explicit build selection without a local key should fail instead of silently reusing a gateway provider; output:\n${output}`,
+          `explicit NVIDIA endpoint selection without a local key should fail instead of silently reusing a gateway provider; output:\n${output}`,
         );
         assert.match(
           output,
-          /NVIDIA_INFERENCE_API_KEY \(or NEMOCLAW_PROVIDER_KEY\) is required/,
-          `explicit build selection did not report the missing local key; output:\n${output}`,
+          /NVIDIA_API_KEY \(or NEMOCLAW_PROVIDER_KEY\) is required/,
+          `explicit NVIDIA selection did not report the missing local key; output:\n${output}`,
         );
         const curlLog = fs.existsSync(curlLogPath) ? fs.readFileSync(curlLogPath, "utf8") : "";
         assert.equal(
           curlLog,
           "",
-          `explicit build selection should fail before probing; curl log:\n${curlLog}`,
+          `explicit NVIDIA selection should fail before probing; curl log:\n${curlLog}`,
         );
       } finally {
         fs.rmSync(tmpDir, { recursive: true, force: true });

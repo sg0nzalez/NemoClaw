@@ -54,7 +54,7 @@ function overlayEnv(apiKey: string, extra: NodeJS.ProcessEnv = {}): NodeJS.Proce
     ...buildAvailabilityProbeEnv(),
     ...hosted.env,
     ...extra,
-    NVIDIA_INFERENCE_API_KEY: apiKey,
+    NVIDIA_API_KEY: apiKey,
     NEMOCLAW_E2E_USE_HOSTED_INFERENCE: "1",
     NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE: "1",
     NEMOCLAW_NON_INTERACTIVE: "1",
@@ -163,7 +163,7 @@ test.skipIf(!shouldRunLiveE2EScenarios() || overlayfsAutofixNotInRuntimePath())(
       ],
     });
 
-    const apiKey = secrets.required("NVIDIA_INFERENCE_API_KEY");
+    const apiKey = secrets.required("NVIDIA_API_KEY");
     const redactionValues = [apiKey];
 
     const dockerPrereq = await host.command("docker", ["info"], {

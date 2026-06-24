@@ -139,7 +139,7 @@ function getRebuildCredentialEnvFromRegistry(provider: string | null | undefined
   }
   const remoteConfig =
     provider === "nvidia-nim"
-      ? REMOTE_PROVIDER_CONFIG.build
+      ? REMOTE_PROVIDER_CONFIG.nvidia
       : Object.values(REMOTE_PROVIDER_CONFIG).find((entry) => entry.providerName === provider);
   return remoteConfig?.credentialEnv || null;
 }

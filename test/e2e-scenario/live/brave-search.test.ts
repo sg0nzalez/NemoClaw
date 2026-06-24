@@ -29,7 +29,7 @@ test.skipIf(!shouldRunLiveE2EScenarios())(
   { timeout: LIVE_TIMEOUT_MS },
   async ({ artifacts, cleanup, host, sandbox, secrets, skip }) => {
     const braveKey = secrets.required("BRAVE_API_KEY");
-    const inferenceKey = secrets.required("NVIDIA_INFERENCE_API_KEY");
+    const inferenceKey = secrets.required("NVIDIA_API_KEY");
     const redactionValues = [braveKey, inferenceKey];
 
     await artifacts.writeJson("scenario.json", {

@@ -17,13 +17,13 @@
 #   NEMOCLAW_POLICY_TIER=open              - auto-set if not already set
 #   NEMOCLAW_SANDBOX_NAME                  - sandbox name (default: e2e-hermes-slack)
 #   NEMOCLAW_RECREATE_SANDBOX=1            - auto-set
-#   NVIDIA_INFERENCE_API_KEY                         - required for Hermes onboarding
+#   NVIDIA_API_KEY                         - required for Hermes onboarding
 #   SLACK_BOT_TOKEN                        - defaults to a fake xoxb- token
 #   SLACK_APP_TOKEN                        - defaults to a fake xapp- token
 #
 # Usage:
 #   NEMOCLAW_NON_INTERACTIVE=1 NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE=1 \
-#     NVIDIA_INFERENCE_API_KEY=... bash test/e2e/test-hermes-slack-e2e.sh
+#     NVIDIA_API_KEY=... bash test/e2e/test-hermes-slack-e2e.sh
 
 set -uo pipefail
 

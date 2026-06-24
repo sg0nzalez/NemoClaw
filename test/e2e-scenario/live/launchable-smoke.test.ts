@@ -234,10 +234,8 @@ runLaunchableSmokeTest(
       workflowRetirement: "deferred to #5098 Phase 11",
     });
 
-    const apiKey = secrets.required("NVIDIA_INFERENCE_API_KEY");
-    expect(apiKey.startsWith("nvapi-"), "NVIDIA_INFERENCE_API_KEY must start with nvapi-").toBe(
-      true,
-    );
+    const apiKey = secrets.required("NVIDIA_API_KEY");
+    expect(apiKey.startsWith("nvapi-"), "NVIDIA_API_KEY must start with nvapi-").toBe(true);
 
     expect(fs.existsSync(LAUNCHABLE_SCRIPT), `${LAUNCHABLE_SCRIPT} missing`).toBe(true);
 
@@ -257,10 +255,10 @@ runLaunchableSmokeTest(
 
     const network = await host.command(
       "curl",
-      ["-sf", "--max-time", "10", "https://inference-api.nvidia.com/v1/models"],
+      ["-sf", "--max-time", "10", "https://inference.nvidia.com/v1/models"],
       { artifactName: "prereq-inference-api-models", env: runEnv(), timeoutMs: 30_000 },
     );
-    expectExitZero(network, "inference-api.nvidia.com reachable");
+    expectExitZero(network, "inference.nvidia.com reachable");
 
     const cloneDir = path.join(os.tmpdir(), `NemoClaw-launchable-vitest-${randomUUID()}`);
     cleanup.add(`remove launchable clone ${cloneDir}`, async () =>
@@ -335,7 +333,7 @@ runLaunchableSmokeTest(
         cwd: cloneDir,
         env: runEnv({
           PATH: `/usr/local/bin:${process.env.PATH ?? ""}`,
-          NVIDIA_INFERENCE_API_KEY: apiKey,
+          NVIDIA_API_KEY: apiKey,
           NEMOCLAW_MODEL: MODEL,
           NEMOCLAW_SANDBOX_NAME: SANDBOX_NAME,
           NEMOCLAW_RECREATE_SANDBOX: "1",
@@ -414,7 +412,7 @@ runLaunchableSmokeTest(
         "30",
         "-X",
         "POST",
-        "https://inference-api.nvidia.com/v1/chat/completions",
+        "https://inference.nvidia.com/v1/chat/completions",
         "-H",
         "Content-Type: application/json",
         "-H",

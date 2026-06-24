@@ -134,7 +134,7 @@ describe("OpenClaw durable config file (#5027)", () => {
           mode: "merge",
           providers: {
             nvidia: {
-              baseUrl: "https://integrate.api.nvidia.com/v1",
+              baseUrl: "https://inference.nvidia.com/v1",
               apiKey: "unused",
               models: [{ id: "moonshotai/kimi-k2" }],
             },

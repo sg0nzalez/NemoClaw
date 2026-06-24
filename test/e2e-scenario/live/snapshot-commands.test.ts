@@ -36,7 +36,7 @@ const LIVE_TIMEOUT_MS = 30 * 60_000;
 const INSTALL_ATTEMPTS = process.env.CI === "true" || process.env.GITHUB_ACTIONS === "true" ? 3 : 1;
 const CREDENTIAL_TOKEN_VALUE_PATTERN = /(?:nvapi-|sk-|Bearer )/;
 const CREDENTIAL_ENV_ASSIGNMENT_PATTERN =
-  /(?:^|\n)\s*(?:export\s+)?(?:NVIDIA_API_KEY|NVIDIA_INFERENCE_API_KEY|OPENAI_API_KEY|ANTHROPIC_API_KEY|COMPATIBLE_API_KEY|NGC_API_KEY|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY)\s*=/i;
+  /(?:^|\n)\s*(?:export\s+)?(?:NVIDIA_API_KEY|OPENAI_API_KEY|ANTHROPIC_API_KEY|COMPATIBLE_API_KEY|NGC_API_KEY|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY)\s*=/i;
 const STRUCTURED_CREDENTIAL_KEY_PATTERN =
   /["']?(?:apiKey|api_key|accessToken|access_token|secretKey|secret_key|bearerToken|bearer_token)["']?\s*[:=]\s*["'][^"']+["']/i;
 

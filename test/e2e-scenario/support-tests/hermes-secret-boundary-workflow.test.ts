@@ -63,7 +63,7 @@ it("rejects Hermes sandbox secret-boundary workflow secret and Docker-auth drift
 
   job.env = {
     ...job.env,
-    NVIDIA_INFERENCE_API_KEY: "${{ secrets.NVIDIA_INFERENCE_API_KEY }}",
+    NVIDIA_API_KEY: "${{ secrets.NVIDIA_API_KEY }}",
     DOCKERHUB_USERNAME: "${{ secrets.DOCKERHUB_USERNAME }}",
     DOCKERHUB_TOKEN: "${{ secrets.DOCKERHUB_TOKEN }}",
   };
@@ -80,21 +80,21 @@ it("rejects Hermes sandbox secret-boundary workflow secret and Docker-auth drift
   );
   expect(runVitest).toBeDefined();
   runVitest!.env = {
-    NVIDIA_INFERENCE_API_KEY: "${{ secrets.NVIDIA_INFERENCE_API_KEY }}",
+    NVIDIA_API_KEY: "${{ secrets.NVIDIA_API_KEY }}",
   };
   fs.writeFileSync(workflowPath, YAML.stringify(workflow));
 
   try {
     expect(validateE2eVitestScenariosWorkflowBoundary(workflowPath)).toEqual(
       expect.arrayContaining([
-        "hermes-sandbox-secret-boundary-vitest job env must not include NVIDIA_INFERENCE_API_KEY",
+        "hermes-sandbox-secret-boundary-vitest job env must not include NVIDIA_API_KEY",
         "hermes-sandbox-secret-boundary-vitest job env must not include DOCKERHUB_USERNAME",
         "hermes-sandbox-secret-boundary-vitest job env must not include DOCKERHUB_TOKEN",
         "hermes-sandbox-secret-boundary-vitest must not authenticate to Docker Hub before branch-controlled test code runs",
         "hermes-sandbox-secret-boundary-vitest step 'Authenticate to Docker Hub' env must not include DOCKERHUB_USERNAME",
         "hermes-sandbox-secret-boundary-vitest step 'Authenticate to Docker Hub' env must not include DOCKERHUB_TOKEN",
         "hermes-sandbox-secret-boundary-vitest step 'Authenticate to Docker Hub' run script must not use docker login or inline secret interpolation",
-        "hermes-sandbox-secret-boundary-vitest step 'Run Hermes sandbox secret-boundary live test' env must not include NVIDIA_INFERENCE_API_KEY",
+        "hermes-sandbox-secret-boundary-vitest step 'Run Hermes sandbox secret-boundary live test' env must not include NVIDIA_API_KEY",
       ]),
     );
   } finally {

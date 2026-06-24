@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  BUILD_ENDPOINT_URL,
+  NVIDIA_INFERENCE_ENDPOINT_URL,
   fetchAnthropicModels,
   fetchNvidiaEndpointModels,
   fetchOpenAiLikeModels,
@@ -17,7 +17,7 @@ describe("provider model helpers", () => {
   it("fetches NVIDIA endpoint model ids", () => {
     const result = fetchNvidiaEndpointModels("nvapi-x", {
       runCurlProbeImpl: (argv) => {
-        expect(argv.at(-1)).toBe(`${BUILD_ENDPOINT_URL}/models`);
+        expect(argv.at(-1)).toBe(`${NVIDIA_INFERENCE_ENDPOINT_URL}/models`);
         expect(argv).toContain("Authorization: Bearer nvapi-x");
         return {
           ok: true,
@@ -64,7 +64,7 @@ describe("provider model helpers", () => {
       ok: false,
       httpStatus: 200,
       curlStatus: 0,
-      message: `Model 'missing' is not available from NVIDIA Endpoints. Checked ${BUILD_ENDPOINT_URL}/models.`,
+      message: `Model 'missing' is not available from NVIDIA Endpoints. Checked ${NVIDIA_INFERENCE_ENDPOINT_URL}/models.`,
     });
   });
 

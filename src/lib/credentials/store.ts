@@ -32,7 +32,6 @@ export type CredentialPromptIntent =
 // Exported so tests can import the same source-of-truth list and stay in
 // sync without a second hand-maintained copy.
 export const KNOWN_CREDENTIAL_ENV_KEYS: readonly string[] = [
-  "NVIDIA_INFERENCE_API_KEY",
   "NVIDIA_API_KEY",
   "OPENAI_API_KEY",
   "ANTHROPIC_API_KEY",
@@ -47,9 +46,7 @@ export const KNOWN_CREDENTIAL_ENV_KEYS: readonly string[] = [
   ...listMessagingCredentialMetadata().map((credential) => credential.providerEnvKey),
 ];
 
-const LEGACY_CREDENTIAL_ENV_ALIASES: Partial<Record<string, readonly string[]>> = {
-  NVIDIA_INFERENCE_API_KEY: ["NVIDIA_API_KEY"],
-};
+const LEGACY_CREDENTIAL_ENV_ALIASES: Partial<Record<string, readonly string[]>> = {};
 
 // Hard upper bound on the legacy credentials.json size we are willing to
 // read into memory. The largest realistic credential set NemoClaw has ever
@@ -694,17 +691,15 @@ export async function readCredentialPrompt(
 }
 
 /**
- * Ensure `NVIDIA_INFERENCE_API_KEY` is staged for this process. Returns immediately
+ * Ensure `NVIDIA_API_KEY` is staged for this process. Returns immediately
  * if it is already in env, otherwise prompts interactively (validating
  * the `nvapi-` prefix) and stages the result. Onboarding registers the
  * value with the OpenShell gateway later in the flow.
  */
 export async function ensureApiKey(): Promise<CredentialPromptIntent> {
-  let key =
-    getCredential("NVIDIA_INFERENCE_API_KEY") ||
-    getLegacyCredentialAlias("NVIDIA_INFERENCE_API_KEY");
+  let key = getCredential("NVIDIA_API_KEY") || getLegacyCredentialAlias("NVIDIA_API_KEY");
   if (key) {
-    process.env.NVIDIA_INFERENCE_API_KEY = key;
+    process.env.NVIDIA_API_KEY = key;
     return { kind: "credential", value: key };
   }
 
@@ -712,10 +707,8 @@ export async function ensureApiKey(): Promise<CredentialPromptIntent> {
   console.log("  ┌─────────────────────────────────────────────────────────────────┐");
   console.log("  │  NVIDIA API Key required                                        │");
   console.log("  │                                                                 │");
-  console.log("  │  1. Go to https://build.nvidia.com/settings/api-keys            │");
-  console.log("  │  2. Sign in with your NVIDIA account                            │");
-  console.log("  │  3. Click 'Generate API Key' button                             │");
-  console.log("  │  4. Paste the key below (starts with nvapi-)                    │");
+  console.log("  │  Paste an NVIDIA API key for https://inference.nvidia.com/v1.    │");
+  console.log("  │  Keys start with nvapi-.                                        │");
   console.log("  └─────────────────────────────────────────────────────────────────┘");
   console.log("");
 
@@ -741,8 +734,8 @@ export async function ensureApiKey(): Promise<CredentialPromptIntent> {
     break;
   }
 
-  saveCredential("NVIDIA_INFERENCE_API_KEY", key);
-  process.env.NVIDIA_INFERENCE_API_KEY = key;
+  saveCredential("NVIDIA_API_KEY", key);
+  process.env.NVIDIA_API_KEY = key;
   console.log("");
   console.log("  Key staged for the OpenShell gateway. It is held in process memory only;");
   console.log("  onboarding registers it with the gateway and nothing is written to disk.");

@@ -57,7 +57,7 @@ test.skipIf(!shouldRunLiveE2EScenarios())(
   "OpenClaw Discord pairing request is shared with connect-shell approval",
   { timeout: LIVE_TIMEOUT_MS },
   async ({ artifacts, cleanup, host, sandbox, secrets, skip }) => {
-    const apiKey = secrets.required("NVIDIA_INFERENCE_API_KEY");
+    const apiKey = secrets.required("NVIDIA_API_KEY");
     const env = pairingEnv({
       sandboxName: SANDBOX_NAME,
       apiKey,

@@ -43,8 +43,7 @@ function hermesSlackEnv(apiKey?: string): NodeJS.ProcessEnv {
       NEMOCLAW_COMPAT_MODEL:
         process.env.NEMOCLAW_COMPAT_MODEL ?? "nvidia/nvidia/nemotron-3-super-v3",
       NEMOCLAW_E2E_USE_HOSTED_INFERENCE: "1",
-      NEMOCLAW_ENDPOINT_URL:
-        process.env.NEMOCLAW_ENDPOINT_URL ?? "https://inference-api.nvidia.com/v1",
+      NEMOCLAW_ENDPOINT_URL: process.env.NEMOCLAW_ENDPOINT_URL ?? "https://inference.nvidia.com/v1",
       NEMOCLAW_MODEL: process.env.NEMOCLAW_MODEL ?? "nvidia/nvidia/nemotron-3-super-v3",
       NEMOCLAW_POLICY_TIER: process.env.NEMOCLAW_POLICY_TIER ?? "open",
       NEMOCLAW_PREFERRED_API: process.env.NEMOCLAW_PREFERRED_API ?? "openai-completions",
@@ -216,7 +215,7 @@ export async function runHermesSlackE2E({
   secrets,
   skip,
 }: HermesSlackE2EFixtures): Promise<void> {
-  const apiKey = secrets.required("NVIDIA_INFERENCE_API_KEY");
+  const apiKey = secrets.required("NVIDIA_API_KEY");
   const env = hermesSlackEnv(apiKey);
   const redactionValues = redactions(apiKey);
 

@@ -19,12 +19,12 @@
 #
 # Prerequisites:
 #   - Docker running
-#   - NVIDIA_INFERENCE_API_KEY set for hosted inference
+#   - NVIDIA_API_KEY set for hosted inference
 #
 # Environment variables:
 #   NEMOCLAW_NON_INTERACTIVE=1             — required
 #   NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE=1 — required
-#   NVIDIA_INFERENCE_API_KEY                         — required
+#   NVIDIA_API_KEY                         — required
 #   NEMOCLAW_SANDBOX_NAME                  — sandbox name (default: e2e-shields)
 #   NEMOCLAW_E2E_TIMEOUT_SECONDS           — overall timeout (default: 900)
 

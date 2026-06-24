@@ -74,7 +74,7 @@ describe("onboard flow context helpers", () => {
       provider: "nvidia-prod",
       model: "model",
       endpointUrl: "https://example.test/v1",
-      credentialEnv: "NVIDIA_INFERENCE_API_KEY",
+      credentialEnv: "NVIDIA_API_KEY",
       hermesAuthMethod: null,
       hermesToolGateways: [],
       preferredInferenceApi: "openai-responses",
@@ -86,7 +86,7 @@ describe("onboard flow context helpers", () => {
       sandboxName: "my-assistant",
       provider: "nvidia-prod",
       model: "model",
-      credentialEnv: "NVIDIA_INFERENCE_API_KEY",
+      credentialEnv: "NVIDIA_API_KEY",
     });
   });
 

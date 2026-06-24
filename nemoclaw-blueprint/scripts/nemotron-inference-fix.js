@@ -27,7 +27,7 @@
 //   silently ignore the extra field per the OpenAI-compatible API contract.
 //
 // Source-of-truth / removal contract (NemoClaw#4063):
-//   Invalid state: sandboxed OpenClaw channel clients can send NVIDIA Build
+//   Invalid state: sandboxed OpenClaw channel clients can send NVIDIA Endpoints
 //   OpenAI-compatible chat-completions requests for DeepSeek V4 Pro / Kimi
 //   K2.6 without `chat_template_kwargs.thinking=false`, which routes simple
 //   channel prompts through the slow thinking path observed as multi-minute
@@ -52,7 +52,7 @@
 //
 //   Removal condition: remove this preload branch once the upstream client or
 //   provider configuration always sends the required model-specific kwargs (or
-//   NVIDIA Build no longer requires them) and the DeepSeek/Kimi channel latency
+//   NVIDIA Endpoints no longer requires them) and the DeepSeek/Kimi channel latency
 //   validation passes without the monkeypatch.
 //
 // Source-of-truth / removal contract (NemoClaw#4851):
@@ -63,11 +63,11 @@
 //   this — verified via direct curl with and without that kwarg.
 //
 //   Source boundary: the chat template / vLLM-NIM serving stack for this
-//   model on NVIDIA Build is the actual origin; the model's emission shape
+//   model on NVIDIA Endpoints is the actual origin; the model's emission shape
 //   is outside this repository. Inside the sandbox we own the preload that
 //   wraps every chat-completions request on the way out.
 //
-//   Why not fix only at the origin: the NVIDIA Build chat template + Ultra
+//   Why not fix only at the origin: the NVIDIA Endpoints chat template + Ultra
 //   weight pairing is owned upstream. NVB#6272828 tracks the upstream fix.
 //   Until that lands, a sandbox-side preload is the only way to keep the
 //   Ultra path usable in the niche tool-less configuration that triggers
@@ -78,7 +78,7 @@
 //   against a local OpenAI-compatible endpoint, asserting both the injected
 //   system message and the refreshed Content-Length. The runtime model-
 //   output behavior (acceptance criteria from #4851) is validated against
-//   integrate.api.nvidia.com via the checked-in runbook at
+//   inference.nvidia.com via the checked-in runbook at
 //   test/e2e-runtime/4851-ultra-toolless-validation.md — anyone reviewing
 //   acceptance can re-run it directly. Re-run when this preload changes
 //   or when OpenClaw bumps a version that may shift Ultra's chat template.
@@ -112,7 +112,7 @@
   //
   // Scope boundary: this preload runs inside NemoClaw-managed sandboxes
   // where the chat-completions destination is the OpenShell-gateway
-  // `inference.local` route bound to NVIDIA Build. The path+model regex
+  // `inference.local` route bound to NVIDIA Endpoints. The path+model regex
   // is the intentional trust boundary; non-sandbox OpenAI-compatible
   // callers do not load this preload.
   var TOOL_LESS_SYSTEM_PROMPT_RULES = [

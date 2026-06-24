@@ -13,7 +13,7 @@ import {
 
 describe("installer provider helpers", () => {
   it("normalizes installer provider aliases and case variants", () => {
-    expect(normalizeInstallerProvider("cloud")).toBe("build");
+    expect(normalizeInstallerProvider("cloud")).toBe("nvidia");
     expect(normalizeInstallerProvider("nim")).toBe("nim-local");
     expect(normalizeInstallerProvider("anthropiccompatible")).toBe("anthropicCompatible");
     expect(normalizeInstallerProvider(" AnthropicCompatible ")).toBe("anthropicCompatible");
@@ -34,12 +34,12 @@ describe("installer provider helpers", () => {
 
   it("keeps help text values aligned with install.sh usage", () => {
     expect(installerProviderHelpValues()).toBe(
-      "build, openai, anthropic, anthropicCompatible, gemini, ollama, custom, nim-local, vllm, routed",
+      "nvidia, openai, anthropic, anthropicCompatible, gemini, ollama, custom, nim-local, vllm, routed",
     );
     expect(installerProviderUsageLines()).toEqual([
-      "build | openai | anthropic | anthropicCompatible",
+      "nvidia | openai | anthropic | anthropicCompatible",
       "gemini | ollama | custom | nim-local | vllm | routed",
-      "aliases: anthropiccompatible -> anthropicCompatible, cloud -> build, nim -> nim-local",
+      "aliases: anthropiccompatible -> anthropicCompatible, cloud -> nvidia, nim -> nim-local",
     ]);
   });
 });

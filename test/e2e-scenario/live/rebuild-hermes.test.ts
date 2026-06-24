@@ -51,8 +51,7 @@ const DISCORD_FAKE_TOKEN = "test-fake-discord-token-rebuild-e2e";
 const REGISTRY_FILE = path.join(os.homedir(), ".nemoclaw", "sandboxes.json");
 const SESSION_FILE = path.join(os.homedir(), ".nemoclaw", "onboard-session.json");
 const BACKUP_ROOT = path.join(os.homedir(), ".nemoclaw", "rebuild-backups");
-const HOSTED_ENDPOINT_URL =
-  process.env.NEMOCLAW_ENDPOINT_URL ?? "https://inference-api.nvidia.com/v1";
+const HOSTED_ENDPOINT_URL = process.env.NEMOCLAW_ENDPOINT_URL ?? "https://inference.nvidia.com/v1";
 const HOSTED_MODEL =
   process.env.NEMOCLAW_MODEL ??
   process.env.NEMOCLAW_COMPAT_MODEL ??
@@ -113,7 +112,7 @@ function testEnv(apiKey?: string, extra: NodeJS.ProcessEnv = {}): NodeJS.Process
     ...(apiKey
       ? {
           COMPATIBLE_API_KEY: apiKey,
-          NVIDIA_INFERENCE_API_KEY: apiKey,
+          NVIDIA_API_KEY: apiKey,
         }
       : {}),
     ...extra,
@@ -347,7 +346,7 @@ test.skipIf(!shouldRunLiveE2EScenarios())(
     : "rebuild-hermes: old Hermes sandbox rebuild preserves messaging state and upgrades runtime",
   { timeout: LIVE_TIMEOUT_MS },
   async ({ artifacts, cleanup, host, secrets, skip }) => {
-    const apiKey = secrets.required("NVIDIA_INFERENCE_API_KEY");
+    const apiKey = secrets.required("NVIDIA_API_KEY");
     const redactionValues = [apiKey, DISCORD_FAKE_TOKEN];
     const expectedVersion = expectedHermesVersion();
 

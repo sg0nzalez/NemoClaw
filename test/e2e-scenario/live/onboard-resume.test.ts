@@ -17,7 +17,7 @@ import { shouldRunLiveE2EScenarios } from "../fixtures/live-project-gate.ts";
 // Shape: drive the real `nemoclaw onboard` CLI through the deterministic E2E
 // failure-injection hook (NEMOCLAW_E2E_FAILURE_INJECTION +
 // NEMOCLAW_E2E_FORCE_FAIL_AT_STEP), then invoke
-// `nemoclaw onboard --resume --non-interactive` with NVIDIA_INFERENCE_API_KEY stripped
+// `nemoclaw onboard --resume --non-interactive` with NVIDIA_API_KEY stripped
 // from the environment to prove the credential is hydrated from the onboard
 // session file.
 //
@@ -94,7 +94,7 @@ function containsExactJsonToken(value: unknown, token: string): boolean {
 }
 
 // Gate the test on NEMOCLAW_RUN_E2E_SCENARIOS=1 so accidental cli-test-shard
-// discovery does not run it without real `openshell`, Docker, or NVIDIA_INFERENCE_API_KEY.
+// discovery does not run it without real `openshell`, Docker, or NVIDIA_API_KEY.
 // Live-only tests opt in to the same gate used by the `e2e-scenarios-live`
 // project include glob in vitest.config.ts.
 test.skipIf(!shouldRunLiveE2EScenarios())(
@@ -114,7 +114,7 @@ test.skipIf(!shouldRunLiveE2EScenarios())(
     // env (includes PATH, HOME, etc.) so spawn can locate `docker`.
     // The shell-probe boundary defaults to no env inheritance; fixture spawns
     // must opt in via buildAvailabilityProbeEnv() to keep secret-passthrough
-    // explicit (NVIDIA_INFERENCE_API_KEY is NOT in the allowlist; we layer it explicitly
+    // explicit (NVIDIA_API_KEY is NOT in the allowlist; we layer it explicitly
     // in Phase 2 below).
     const dockerInfo = await host.command("docker", ["info"], {
       artifactName: "prereq-docker-info",
@@ -133,7 +133,7 @@ test.skipIf(!shouldRunLiveE2EScenarios())(
     expect(openshellVersion.exitCode, openshellVersion.stderr).toBe(0);
 
     // Assertion: hosted-inference-secret-present — the workflow passes the
-    // scoped NVIDIA_INFERENCE_API_KEY secret through the compatible-endpoint
+    // scoped NVIDIA_API_KEY secret through the compatible-endpoint
     // contract, matching the legacy hosted-compatible E2E helper.
     const hosted = requireHostedInferenceConfig(secrets);
     const apiKey = hosted.apiKey;
@@ -211,7 +211,7 @@ test.skipIf(!shouldRunLiveE2EScenarios())(
       artifactName: "phase-2-onboard-interrupted",
       env: {
         ...buildAvailabilityProbeEnv(),
-        NVIDIA_INFERENCE_API_KEY: apiKey,
+        NVIDIA_API_KEY: apiKey,
         ...hosted.env,
         NEMOCLAW_SANDBOX_NAME: SANDBOX_NAME,
         NEMOCLAW_RECREATE_SANDBOX: "1",
@@ -258,7 +258,7 @@ test.skipIf(!shouldRunLiveE2EScenarios())(
     expect(interrupted.failure?.step).toBe("policies");
 
     // ──────────────────────────────────────────────────────────────────
-    // Phase 3: resume — NVIDIA_INFERENCE_API_KEY removed from env so the resume run
+    // Phase 3: resume — NVIDIA_API_KEY removed from env so the resume run
     // must hydrate the credential from the session file.
     // ──────────────────────────────────────────────────────────────────
     const resumeRun = await host.command(
@@ -266,10 +266,10 @@ test.skipIf(!shouldRunLiveE2EScenarios())(
       [CLI_ENTRYPOINT, "onboard", "--resume", "--non-interactive"],
       {
         artifactName: "phase-3-onboard-resume",
-        // buildAvailabilityProbeEnv() does NOT pass NVIDIA_INFERENCE_API_KEY through —
+        // buildAvailabilityProbeEnv() does NOT pass NVIDIA_API_KEY through —
         // it's outside the fixture env allowlist. Resume must hydrate the
         // credential from the session file. This is exactly the bash test's
-        // `env -u NVIDIA_INFERENCE_API_KEY` invariant, expressed via explicit
+        // `env -u NVIDIA_API_KEY` invariant, expressed via explicit
         // secret-passthrough.
         env: {
           ...buildAvailabilityProbeEnv(),

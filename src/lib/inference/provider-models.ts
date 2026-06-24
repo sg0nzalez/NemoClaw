@@ -8,11 +8,11 @@ import type { ModelCatalogFetchResult, ModelValidationResult } from "../onboard/
 // credentials.ts still uses CommonJS-style exports.
 const { normalizeCredentialValue } = require("../credentials/store");
 
-export const BUILD_ENDPOINT_URL = "https://integrate.api.nvidia.com/v1";
+export const NVIDIA_INFERENCE_ENDPOINT_URL = "https://inference.nvidia.com/v1";
 
 export interface ProviderModelOptions {
   runCurlProbeImpl?: (argv: string[]) => CurlProbeResult;
-  buildEndpointUrl?: string;
+  nvidiaInferenceEndpointUrl?: string;
   /** When "query-param", send the API key as a ?key= URL parameter instead of
    *  an Authorization: Bearer header. Required for Google Gemini which rejects
    *  requests carrying both auth methods. See issue #1960. */
@@ -81,7 +81,7 @@ export function fetchNvidiaEndpointModels(
   options: ProviderModelOptions = {},
 ): ModelCatalogFetchResult {
   const runCurlProbeImpl = options.runCurlProbeImpl ?? runCurlProbe;
-  const buildEndpointUrl = options.buildEndpointUrl ?? BUILD_ENDPOINT_URL;
+  const endpointUrl = options.nvidiaInferenceEndpointUrl ?? NVIDIA_INFERENCE_ENDPOINT_URL;
   try {
     const result = runCurlProbeImpl([
       "-sS",
@@ -90,7 +90,7 @@ export function fetchNvidiaEndpointModels(
       "Content-Type: application/json",
       "-H",
       `Authorization: Bearer ${normalizeCredentialValue(apiKey)}`,
-      `${buildEndpointUrl}/models`,
+      `${endpointUrl}/models`,
     ]);
     return toModelCatalogFetchResult(result);
   } catch (error) {
@@ -108,14 +108,14 @@ export function validateNvidiaEndpointModel(
   apiKey: string,
   options: ProviderModelOptions = {},
 ): ModelValidationResult {
-  const buildEndpointUrl = options.buildEndpointUrl ?? BUILD_ENDPOINT_URL;
+  const endpointUrl = options.nvidiaInferenceEndpointUrl ?? NVIDIA_INFERENCE_ENDPOINT_URL;
   const available = fetchNvidiaEndpointModels(apiKey, options);
   if (!available.ok) {
     return {
       ok: false,
       httpStatus: available.httpStatus,
       curlStatus: available.curlStatus,
-      message: `Could not validate model against ${buildEndpointUrl}/models: ${available.message}`,
+      message: `Could not validate model against ${endpointUrl}/models: ${available.message}`,
     };
   }
   if (available.ids.includes(model)) {
@@ -125,7 +125,7 @@ export function validateNvidiaEndpointModel(
     ok: false,
     httpStatus: 200,
     curlStatus: 0,
-    message: `Model '${model}' is not available from NVIDIA Endpoints. Checked ${buildEndpointUrl}/models.`,
+    message: `Model '${model}' is not available from NVIDIA Endpoints. Checked ${endpointUrl}/models.`,
   };
 }
 

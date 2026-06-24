@@ -68,7 +68,7 @@ nemoclaw_e2e_probe_hosted_inference
     env: {
       ...process.env,
       PATH: `${tmpDir}:${process.env.PATH ?? ""}`,
-      NVIDIA_INFERENCE_API_KEY: "hosted-compatible-key",
+      NVIDIA_API_KEY: "hosted-compatible-key",
       ...options.env,
     },
   });
@@ -78,13 +78,10 @@ nemoclaw_e2e_probe_hosted_inference
 }
 
 describe("hosted inference E2E config", () => {
-  it("uses NVIDIA_INFERENCE_API_KEY as the hosted compatible endpoint source secret", () => {
-    const cfg = requireHostedInferenceConfig(
-      secrets({ NVIDIA_INFERENCE_API_KEY: "repo-hosted-key" }),
-      {},
-    );
+  it("uses NVIDIA_API_KEY as the hosted compatible endpoint source secret", () => {
+    const cfg = requireHostedInferenceConfig(secrets({ NVIDIA_API_KEY: "repo-hosted-key" }), {});
 
-    expect(cfg.sourceSecretName).toBe("NVIDIA_INFERENCE_API_KEY");
+    expect(cfg.sourceSecretName).toBe("NVIDIA_API_KEY");
     expect(cfg.provider).toBe("custom");
     expect(cfg.providerName).toBe("compatible-endpoint");
     expect(cfg.credentialEnv).toBe("COMPATIBLE_API_KEY");
@@ -94,7 +91,7 @@ describe("hosted inference E2E config", () => {
   it("does not require an nvapi-prefixed source secret", () => {
     const cfg = requireHostedInferenceConfig(
       secrets({
-        NVIDIA_INFERENCE_API_KEY: "sk-compatible-key",
+        NVIDIA_API_KEY: "sk-compatible-key",
       }),
       {},
     );
@@ -107,12 +104,12 @@ describe("hosted inference E2E config", () => {
     const { result, calls } = runHostedProbe({
       env: {
         NEMOCLAW_E2E_USE_HOSTED_INFERENCE: "1",
-        NEMOCLAW_ENDPOINT_URL: "https://inference-api.nvidia.com/v1",
+        NEMOCLAW_ENDPOINT_URL: "https://inference.nvidia.com/v1",
       },
     });
 
     expect(result.status).toBe(0);
-    expect(calls).toContain("ARG:https://inference-api.nvidia.com/v1");
+    expect(calls).toContain("ARG:https://inference.nvidia.com/v1");
     expect(calls).not.toContain("chat/completions");
     expect(calls).not.toContain("/models");
     expect(calls).not.toContain("Authorization");
@@ -122,14 +119,14 @@ describe("hosted inference E2E config", () => {
   it("uses a lightweight nvapi reachability probe without /models or auth", () => {
     const { result, calls } = runHostedProbe({
       env: {
-        NVIDIA_INFERENCE_API_KEY: "nvapi-test-key",
+        NVIDIA_API_KEY: "nvapi-test-key",
         NEMOCLAW_E2E_USE_HOSTED_INFERENCE: "",
         NEMOCLAW_PROVIDER: "cloud",
       },
     });
 
     expect(result.status).toBe(0);
-    expect(calls).toContain("ARG:https://inference-api.nvidia.com/v1");
+    expect(calls).toContain("ARG:https://inference.nvidia.com/v1");
     expect(calls).not.toContain("/models");
     expect(calls).not.toContain("Authorization");
     expect(calls).not.toContain("Bearer");
@@ -147,15 +144,14 @@ describe("hosted inference E2E config", () => {
     expect(result.status).not.toBe(0);
   });
 
-  it("configures the custom provider route for inference-api.nvidia.com", () => {
-    const cfg = requireHostedInferenceConfig(
-      secrets({ NVIDIA_INFERENCE_API_KEY: "repo-hosted-key" }),
-      { NEMOCLAW_MODEL: "nvidia/custom-model" },
-    );
+  it("configures the custom provider route for inference.nvidia.com", () => {
+    const cfg = requireHostedInferenceConfig(secrets({ NVIDIA_API_KEY: "repo-hosted-key" }), {
+      NEMOCLAW_MODEL: "nvidia/custom-model",
+    });
 
     expect(cfg.env).toMatchObject({
       NEMOCLAW_PROVIDER: "custom",
-      NEMOCLAW_ENDPOINT_URL: "https://inference-api.nvidia.com/v1",
+      NEMOCLAW_ENDPOINT_URL: "https://inference.nvidia.com/v1",
       NEMOCLAW_MODEL: "nvidia/custom-model",
       NEMOCLAW_COMPAT_MODEL: "nvidia/custom-model",
       COMPATIBLE_API_KEY: "repo-hosted-key",

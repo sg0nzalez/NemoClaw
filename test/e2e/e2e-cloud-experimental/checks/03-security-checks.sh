@@ -12,7 +12,7 @@
 set -euo pipefail
 
 # The caller can point this check at the active hosted-inference credential.
-_api_key_env_name="${NEMOCLAW_E2E_CLOUD_API_KEY_ENV:-NVIDIA_INFERENCE_API_KEY}"
+_api_key_env_name="${NEMOCLAW_E2E_CLOUD_API_KEY_ENV:-NVIDIA_API_KEY}"
 if [[ ! "$_api_key_env_name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
   printf '%s\n' "03-security-checks: FAIL: invalid cloud API token env var name: ${_api_key_env_name}" >&2
   exit 1

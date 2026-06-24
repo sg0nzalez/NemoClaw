@@ -48,7 +48,7 @@ function extractSemver(raw: string): string | undefined {
 function installEnv(apiKey: string): NodeJS.ProcessEnv {
   return {
     ...buildAvailabilityProbeEnv(),
-    NVIDIA_INFERENCE_API_KEY: apiKey,
+    NVIDIA_API_KEY: apiKey,
     NEMOCLAW_NON_INTERACTIVE: "1",
     NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE: "1",
     NEMOCLAW_SANDBOX_NAME: SANDBOX_NAME,
@@ -84,10 +84,8 @@ test.skipIf(!shouldRunLiveE2EScenarios())(
     skip,
     stateValidation,
   }) => {
-    const apiKey = secrets.required("NVIDIA_INFERENCE_API_KEY");
-    expect(apiKey.startsWith("nvapi-"), "NVIDIA_INFERENCE_API_KEY must start with nvapi-").toBe(
-      true,
-    );
+    const apiKey = secrets.required("NVIDIA_API_KEY");
+    expect(apiKey.startsWith("nvapi-"), "NVIDIA_API_KEY must start with nvapi-").toBe(true);
 
     await artifacts.writeJson("scenario.json", {
       id: "sandbox-survival",
@@ -119,7 +117,7 @@ test.skipIf(!shouldRunLiveE2EScenarios())(
 
     const modelsReachable = await host.command(
       "curl",
-      ["-sf", "--max-time", "10", "https://inference-api.nvidia.com/v1/models"],
+      ["-sf", "--max-time", "10", "https://inference.nvidia.com/v1/models"],
       {
         artifactName: "prereq-inference-api-models",
         env: buildAvailabilityProbeEnv(),

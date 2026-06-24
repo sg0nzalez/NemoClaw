@@ -159,13 +159,12 @@ function commandEnv(apiKey?: string): NodeJS.ProcessEnv {
     NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE: "1",
     NEMOCLAW_MODEL: MODEL,
     NEMOCLAW_NON_INTERACTIVE: "1",
-    NEMOCLAW_PROVIDER: process.env.NEMOCLAW_PROVIDER ?? "build",
+    NEMOCLAW_PROVIDER: process.env.NEMOCLAW_PROVIDER ?? "nvidia",
     NEMOCLAW_RECREATE_SANDBOX: "1",
     NEMOCLAW_SANDBOX_NAME: SANDBOX_NAME,
     OPENSHELL_GATEWAY: process.env.OPENSHELL_GATEWAY ?? "nemoclaw",
   };
   if (apiKey) {
-    env.NVIDIA_INFERENCE_API_KEY = apiKey;
     env.NVIDIA_API_KEY = apiKey;
   }
   return env;
@@ -213,7 +212,7 @@ test.skipIf(!shouldRunLiveE2EScenarios())(
   "cron preflight reaches managed inference.local provider without EAI_AGAIN",
   { timeout: LIVE_TIMEOUT_MS },
   async ({ artifacts, cleanup, host, sandbox, secrets, skip }) => {
-    const apiKey = secrets.required("NVIDIA_INFERENCE_API_KEY");
+    const apiKey = secrets.required("NVIDIA_API_KEY");
 
     await artifacts.writeJson("scenario.json", {
       id: "cron-preflight-inference-local",

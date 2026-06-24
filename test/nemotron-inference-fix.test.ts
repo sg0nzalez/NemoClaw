@@ -546,7 +546,7 @@ console.log(JSON.stringify(records));
     // path (/v1/chat/completions) + model regex, not by destination host.
     // This preload runs inside NemoClaw-managed sandboxes where the only
     // chat-completions destination is the inference.local route bound to
-    // NVIDIA Build. The path+model boundary is the intentional contract.
+    // NVIDIA Endpoints. The path+model boundary is the intentional contract.
     // This test pins that contract so a future change toward narrower
     // (host-aware) gating is a deliberate decision, not silent drift.
     const preload = extractStartScriptHeredoc(src, "NEMOTRON_FIX_EOF");
@@ -578,7 +578,7 @@ send('inference.local', JSON.stringify({
   model: 'nvidia/nemotron-3-ultra-550b-a55b',
   messages: [{ role: 'user', content: 'hi' }],
 }));
-send('integrate.api.nvidia.com', JSON.stringify({
+send('inference.nvidia.com', JSON.stringify({
   model: 'nvidia/nemotron-3-ultra-550b-a55b',
   messages: [{ role: 'user', content: 'hi' }],
 }));

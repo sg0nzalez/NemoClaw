@@ -13,7 +13,7 @@
 #
 # Prerequisites:
 #   - Docker running
-#   - NVIDIA_INFERENCE_API_KEY set for hosted inference
+#   - NVIDIA_API_KEY set for hosted inference
 #   - NEMOCLAW_NON_INTERACTIVE=1, NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE=1
 #
 # Environment:
@@ -24,7 +24,7 @@
 #
 # Usage:
 #   NEMOCLAW_NON_INTERACTIVE=1 NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE=1 \
-#     NVIDIA_INFERENCE_API_KEY=... bash test/e2e/test-skill-agent-e2e.sh
+#     NVIDIA_API_KEY=... bash test/e2e/test-skill-agent-e2e.sh
 
 # ShellCheck cannot see EXIT trap invocations of cleanup helpers in this E2E script.
 # shellcheck disable=SC2317
@@ -194,7 +194,7 @@ while [ "$attempt" -le "$MAX_ATTEMPTS" ]; do
 
   set +e
   agent_out=$(
-    NVIDIA_INFERENCE_API_KEY="$NVIDIA_INFERENCE_API_KEY" \
+    NVIDIA_API_KEY="$NVIDIA_API_KEY" \
       SANDBOX_NAME="$SANDBOX_NAME" \
       SKILL_ID="$SKILL_ID" \
       VERIFY_TOKEN="$VERIFY_PHRASE" \

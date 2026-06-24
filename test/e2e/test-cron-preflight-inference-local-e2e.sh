@@ -19,7 +19,7 @@
 #
 # Prerequisites:
 #   - Docker running
-#   - NVIDIA_INFERENCE_API_KEY set for hosted inference
+#   - NVIDIA_API_KEY set for hosted inference
 #   - NEMOCLAW_NON_INTERACTIVE=1, NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE=1
 #
 # Environment:
@@ -30,7 +30,7 @@
 #
 # Usage:
 #   NEMOCLAW_NON_INTERACTIVE=1 NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE=1 \
-#     NVIDIA_INFERENCE_API_KEY=... bash test/e2e/test-cron-preflight-inference-local-e2e.sh
+#     NVIDIA_API_KEY=... bash test/e2e/test-cron-preflight-inference-local-e2e.sh
 
 set -uo pipefail
 
@@ -112,13 +112,13 @@ if nemoclaw_e2e_using_compatible_inference; then
     exit 1
   fi
 else
-  if [ -z "${NVIDIA_INFERENCE_API_KEY:-}" ]; then
-    skip "NVIDIA_INFERENCE_API_KEY not set"
+  if [ -z "${NVIDIA_API_KEY:-}" ]; then
+    skip "NVIDIA_API_KEY not set"
     echo "  Total: $TOTAL  Pass: $PASS  Fail: $FAIL  Skip: $SKIP"
     exit 0
   fi
-  if [ "${NVIDIA_INFERENCE_API_KEY:0:6}" != "nvapi-" ]; then
-    skip "NVIDIA_INFERENCE_API_KEY does not start with nvapi-"
+  if [ "${NVIDIA_API_KEY:0:6}" != "nvapi-" ]; then
+    skip "NVIDIA_API_KEY does not start with nvapi-"
     echo "  Total: $TOTAL  Pass: $PASS  Fail: $FAIL  Skip: $SKIP"
     exit 0
   fi
@@ -139,7 +139,7 @@ pass "prerequisites satisfied"
 section "Install NemoClaw + onboard sandbox '$SANDBOX'"
 export NEMOCLAW_SANDBOX_NAME="$SANDBOX"
 export NEMOCLAW_RECREATE_SANDBOX="${NEMOCLAW_RECREATE_SANDBOX:-1}"
-export NEMOCLAW_PROVIDER="${NEMOCLAW_PROVIDER:-build}"
+export NEMOCLAW_PROVIDER="${NEMOCLAW_PROVIDER:-nvidia}"
 export NEMOCLAW_MODEL="${NEMOCLAW_MODEL:-$MODEL}"
 
 info "Installing NemoClaw via install.sh --non-interactive..."

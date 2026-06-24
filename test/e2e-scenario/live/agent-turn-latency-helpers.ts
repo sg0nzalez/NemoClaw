@@ -58,13 +58,12 @@ export function env(
     OPENSHELL_GATEWAY: process.env.OPENSHELL_GATEWAY ?? "nemoclaw",
   };
   agent === "hermes" && (out.NEMOCLAW_AGENT = "hermes");
-  apiKey && Object.assign(out, { NVIDIA_INFERENCE_API_KEY: apiKey, NVIDIA_API_KEY: apiKey });
+  apiKey && Object.assign(out, { NVIDIA_API_KEY: apiKey });
   PROVIDER === "custom" &&
     Object.assign(out, {
       COMPATIBLE_API_KEY: apiKey,
       NEMOCLAW_COMPAT_MODEL: MODEL,
-      NEMOCLAW_ENDPOINT_URL:
-        process.env.NEMOCLAW_ENDPOINT_URL ?? "https://inference-api.nvidia.com/v1",
+      NEMOCLAW_ENDPOINT_URL: process.env.NEMOCLAW_ENDPOINT_URL ?? "https://inference.nvidia.com/v1",
       NEMOCLAW_PREFERRED_API: process.env.NEMOCLAW_PREFERRED_API ?? "openai-completions",
     });
   return out;

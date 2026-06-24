@@ -129,7 +129,7 @@ liveTest(
     const install = await host.command("bash", ["install.sh", "--non-interactive", "--fresh"], {
       artifactName: "phase-1-install-sh",
       cwd: REPO_ROOT,
-      env: env({ ...hosted.env, NVIDIA_INFERENCE_API_KEY: hosted.apiKey }),
+      env: env({ ...hosted.env, NVIDIA_API_KEY: hosted.apiKey }),
       redactionValues,
       timeoutMs: 25 * 60_000,
     });

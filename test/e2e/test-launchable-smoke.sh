@@ -28,8 +28,8 @@
 # Prerequisites:
 #   - Ubuntu runner (ubuntu-latest)
 #   - Docker running
-#   - NVIDIA_INFERENCE_API_KEY set for hosted inference
-#   - Network access to inference-api.nvidia.com
+#   - NVIDIA_API_KEY set for hosted inference
+#   - Network access to inference.nvidia.com
 #   - NEMOCLAW_NON_INTERACTIVE=1
 #   - NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE=1
 #
@@ -37,12 +37,12 @@
 #   NEMOCLAW_REF              — git ref for brev-launchable-ci-cpu.sh (default: current branch)
 #   NEMOCLAW_SANDBOX_NAME     — sandbox name (default: e2e-launchable)
 #   NEMOCLAW_RECREATE_SANDBOX — set to 1 to recreate if exists
-#   NVIDIA_INFERENCE_API_KEY            — required for hosted inference
+#   NVIDIA_API_KEY            — required for hosted inference
 #   SKIP_DOCKER_PULL          — set to 1 to skip Docker image pre-pulls (speeds up CI)
 #
 # Usage:
 #   NEMOCLAW_NON_INTERACTIVE=1 NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE=1 \
-#     NVIDIA_INFERENCE_API_KEY=... bash test/e2e/test-launchable-smoke.sh
+#     NVIDIA_API_KEY=... bash test/e2e/test-launchable-smoke.sh
 #
 # See: https://github.com/NVIDIA/NemoClaw/issues/2599
 

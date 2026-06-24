@@ -123,7 +123,7 @@ liveTest(
         artifactName: "phase-1-public-install",
         env: env({
           ...hosted.env,
-          NVIDIA_INFERENCE_API_KEY: hosted.apiKey,
+          NVIDIA_API_KEY: hosted.apiKey,
           NEMOCLAW_INSTALL_REF: ref,
           NEMOCLAW_INSTALL_TAG: ref,
           NEMOCLAW_INSTALL_SCRIPT_URL: installUrl,

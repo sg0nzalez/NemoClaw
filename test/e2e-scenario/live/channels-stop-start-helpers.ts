@@ -416,7 +416,7 @@ export async function runChannelsStopStartScenario({
 }: import("../fixtures/e2e-test.ts").E2EScenarioFixtures & {
   skip: (note?: string) => never;
 }): Promise<void> {
-  const apiKey = secrets.required("NVIDIA_INFERENCE_API_KEY");
+  const apiKey = secrets.required("NVIDIA_API_KEY");
   const tokens = phase6Tokens(AGENT);
   const env = phase6Env({
     sandboxName: SANDBOX_NAME,

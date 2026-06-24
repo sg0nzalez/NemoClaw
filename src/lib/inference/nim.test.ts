@@ -12,7 +12,7 @@ const require = createRequire(import.meta.url);
 const NIM_DIST_PATH = require.resolve("../../../dist/lib/inference/nim");
 const RUNNER_PATH = require.resolve("../../../dist/lib/runner");
 const fs = require("fs");
-const NIM_API_KEY_ENV_KEYS = ["NGC_API_KEY", "NVIDIA_INFERENCE_API_KEY", "NVIDIA_API_KEY"];
+const NIM_API_KEY_ENV_KEYS = ["NGC_API_KEY", "NVIDIA_API_KEY"];
 function clearNimApiKeyEnv(): Array<[string, string | undefined]> {
   const snapshot: Array<[string, string | undefined]> = NIM_API_KEY_ENV_KEYS.map((key) => [
     key,
@@ -1738,9 +1738,9 @@ describe("nim", () => {
       }
     });
 
-    it("falls back to process.env.NVIDIA_INFERENCE_API_KEY when NGC_API_KEY is unset", () => {
+    it("falls back to process.env.NVIDIA_API_KEY when NGC_API_KEY is unset", () => {
       const envSnapshot = clearNimApiKeyEnv();
-      process.env.NVIDIA_INFERENCE_API_KEY = "nvapi-env-nvidia";
+      process.env.NVIDIA_API_KEY = "nvapi-env-nvidia";
       const run = vi.fn();
       const { nimModule, restore } = loadNimWithMockedRunner(
         vi.fn(() => ""),

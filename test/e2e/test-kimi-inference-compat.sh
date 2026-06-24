@@ -5,7 +5,8 @@
 # Kimi inference compatibility E2E (#2620 / #3046)
 #
 # Live path:
-#   - uses the public NVIDIA Endpoints provider with moonshotai/kimi-k2.6
+#   - uses NVIDIA_API_KEY against https://inference.nvidia.com/v1 as an
+#     OpenAI-compatible endpoint with moonshotai/kimi-k2.6
 #   - onboards a fresh sandbox through the managed inference.local route
 #   - asks Kimi to exercise exec tool calls
 #   - verifies the NemoClaw Kimi plugin splits it into three exec tool calls
@@ -110,10 +111,6 @@ use_kimi_mock() {
 
 ensure_public_nvidia_api_key() {
   if [ -n "${NVIDIA_API_KEY:-}" ] && [[ "${NVIDIA_API_KEY}" == nvapi-* ]]; then
-    # NemoClaw's NVIDIA Endpoints provider still reads NVIDIA_INFERENCE_API_KEY.
-    # Source the public Kimi credential from NVIDIA_API_KEY, then mirror it only
-    # for the shared onboarding/provider-registration path.
-    export NVIDIA_INFERENCE_API_KEY="$NVIDIA_API_KEY"
     return 0
   fi
   return 1
@@ -416,15 +413,18 @@ run_kimi_onboard() {
     export NEMOCLAW_PROVIDER=custom
     export NEMOCLAW_ENDPOINT_URL="$KIMI_ENDPOINT_URL"
     export COMPATIBLE_API_KEY="$KIMI_MOCK_API_KEY"
-    unset NVIDIA_INFERENCE_API_KEY NVIDIA_API_KEY OPENAI_API_KEY ANTHROPIC_API_KEY GEMINI_API_KEY
+    unset NVIDIA_API_KEY OPENAI_API_KEY ANTHROPIC_API_KEY GEMINI_API_KEY
   else
-    export NEMOCLAW_PROVIDER=cloud
-    unset NEMOCLAW_ENDPOINT_URL NEMOCLAW_COMPAT_MODEL NEMOCLAW_E2E_USE_HOSTED_INFERENCE COMPATIBLE_API_KEY
-    unset OPENAI_API_KEY ANTHROPIC_API_KEY GEMINI_API_KEY
     if ! ensure_public_nvidia_api_key; then
       fail "K1: NVIDIA_API_KEY must be a public NVIDIA Endpoints nvapi-* key"
       summary
     fi
+    export NEMOCLAW_E2E_USE_HOSTED_INFERENCE=1
+    export NEMOCLAW_PROVIDER=custom
+    export NEMOCLAW_ENDPOINT_URL="${NEMOCLAW_ENDPOINT_URL:-https://inference.nvidia.com/v1}"
+    export NEMOCLAW_COMPAT_MODEL="${NEMOCLAW_COMPAT_MODEL:-$KIMI_MODEL}"
+    export COMPATIBLE_API_KEY="$NVIDIA_API_KEY"
+    unset OPENAI_API_KEY ANTHROPIC_API_KEY GEMINI_API_KEY
   fi
   unset TELEGRAM_BOT_TOKEN DISCORD_BOT_TOKEN SLACK_BOT_TOKEN SLACK_APP_TOKEN
 

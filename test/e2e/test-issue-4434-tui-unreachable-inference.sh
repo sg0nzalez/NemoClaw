@@ -8,7 +8,7 @@
 #
 # This mutates host firewall state. Run only on a Linux Docker host you control:
 #
-#   NEMOCLAW_ISSUE_4434_LIVE=1 NVIDIA_INFERENCE_API_KEY=... \
+#   NEMOCLAW_ISSUE_4434_LIVE=1 NVIDIA_API_KEY=... \
 #     bash test/e2e/test-issue-4434-tui-unreachable-inference.sh
 
 set -euo pipefail
@@ -159,12 +159,12 @@ done
 block_probe_log="${CAPTURE_DIR}/blocked-endpoint-probe.log"
 set +e
 timeout 25 openshell sandbox exec --name "$SANDBOX_NAME" -- sh -lc \
-  'curl -sk --connect-timeout 5 --max-time 12 https://inference-api.nvidia.com/v1/models >/tmp/issue4434-models.out 2>&1' \
+  'curl -sk --connect-timeout 5 --max-time 12 https://inference.nvidia.com/v1/models >/tmp/issue4434-models.out 2>&1' \
   >"$block_probe_log" 2>&1
 block_probe_rc=$?
 set -e
 if [ "$block_probe_rc" -eq 0 ]; then
-  fail "inference-api.nvidia.com was still reachable from inside the sandbox after firewall block"
+  fail "inference.nvidia.com was still reachable from inside the sandbox after firewall block"
 fi
 info "sandbox endpoint block verified (probe exit ${block_probe_rc})"
 

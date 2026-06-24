@@ -11,8 +11,8 @@
 #
 # Prerequisites:
 #   - Docker running
-#   - NVIDIA_INFERENCE_API_KEY set for hosted inference
-#   - Network access to inference-api.nvidia.com
+#   - NVIDIA_API_KEY set for hosted inference
+#   - Network access to inference.nvidia.com
 #
 # Environment variables:
 #   NEMOCLAW_NON_INTERACTIVE=1             — required (enables non-interactive install + onboard)
@@ -22,10 +22,10 @@
 #   NEMOCLAW_RECREATE_SANDBOX=1            — recreate sandbox if it exists from a previous run
 #   NEMOCLAW_E2E_HERMES_DASHBOARD=1        — validate the built-in Hermes web dashboard end-to-end
 #   NEMOCLAW_HERMES_DASHBOARD_TUI=1        — enable Hermes' optional in-browser TUI tab during onboard
-#   NVIDIA_INFERENCE_API_KEY                         — required for hosted inference
+#   NVIDIA_API_KEY                         — required for hosted inference
 #
 # Usage:
-#   NEMOCLAW_NON_INTERACTIVE=1 NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE=1 NVIDIA_INFERENCE_API_KEY=... bash test/e2e/test-hermes-e2e.sh
+#   NEMOCLAW_NON_INTERACTIVE=1 NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE=1 NVIDIA_API_KEY=... bash test/e2e/test-hermes-e2e.sh
 
 set -uo pipefail
 

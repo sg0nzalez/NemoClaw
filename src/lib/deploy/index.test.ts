@@ -15,7 +15,7 @@ import { validateName } from "../../../dist/lib/runner";
 describe("inferDeployProvider", () => {
   it("prefers an explicit provider override", () => {
     const provider = inferDeployProvider("openai", {
-      NVIDIA_INFERENCE_API_KEY: "nvapi-test",
+      NVIDIA_API_KEY: "nvapi-test",
     });
 
     expect(provider).toBe("openai");
@@ -31,7 +31,7 @@ describe("inferDeployProvider", () => {
 
   it("returns null when multiple provider credentials are present without an override", () => {
     const provider = inferDeployProvider("", {
-      NVIDIA_INFERENCE_API_KEY: "nvapi-test",
+      NVIDIA_API_KEY: "nvapi-test",
       OPENAI_API_KEY: "sk-openai-test",
     });
 
@@ -47,9 +47,9 @@ describe("buildDeployEnvLines", () => {
         NEMOCLAW_POLICY_MODE: "suggested",
       },
       sandboxName: "my-assistant",
-      provider: "build",
+      provider: "nvidia",
       credentials: {
-        NVIDIA_INFERENCE_API_KEY: "nvapi-test",
+        NVIDIA_API_KEY: "nvapi-test",
       },
       shellQuote: (value: string) => `'${value}'`,
     });
@@ -57,17 +57,17 @@ describe("buildDeployEnvLines", () => {
     expect(envLines).toContain("NEMOCLAW_NON_INTERACTIVE=1");
     expect(envLines).toContain("NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE=1");
     expect(envLines).toContain("NEMOCLAW_SANDBOX_NAME='my-assistant'");
-    expect(envLines).toContain("NEMOCLAW_PROVIDER='build'");
+    expect(envLines).toContain("NEMOCLAW_PROVIDER='nvidia'");
     expect(envLines).toContain("CHAT_UI_URL='https://chat.example.com'");
     expect(envLines).toContain("NEMOCLAW_POLICY_MODE='suggested'");
-    expect(envLines).toContain("NVIDIA_INFERENCE_API_KEY='nvapi-test'");
+    expect(envLines).toContain("NVIDIA_API_KEY='nvapi-test'");
   });
 
   it("passes ALLOWED_CHAT_IDS through when Telegram is configured", () => {
     const envLines = buildDeployEnvLines({
       env: {},
       sandboxName: "my-assistant",
-      provider: "build",
+      provider: "nvidia",
       credentials: {
         TELEGRAM_BOT_TOKEN: "123456:telegram-token",
         ALLOWED_CHAT_IDS: "111,222",
@@ -83,9 +83,9 @@ describe("buildDeployEnvLines", () => {
     const envLines = buildDeployEnvLines({
       env: {},
       sandboxName: "my-assistant",
-      provider: "build",
+      provider: "nvidia",
       credentials: {
-        NVIDIA_INFERENCE_API_KEY: "nvapi-test",
+        NVIDIA_API_KEY: "nvapi-test",
         HF_TOKEN: "hf_abc123",
         HUGGING_FACE_HUB_TOKEN: "hf_def456",
       },
@@ -100,7 +100,7 @@ describe("buildDeployEnvLines", () => {
     const envLines = buildDeployEnvLines({
       env: {},
       sandboxName: "my-assistant",
-      provider: "build",
+      provider: "nvidia",
       credentials: {
         ALLOWED_CHAT_IDS: "111,222",
       },
@@ -126,7 +126,7 @@ describe("executeDeploy", () => {
         NEMOCLAW_SANDBOX_NAME: "my-box",
       },
       rootDir: "/repo/root",
-      getCredential: (key: string) => (key === "NVIDIA_INFERENCE_API_KEY" ? "nvapi-test" : null),
+      getCredential: (key: string) => (key === "NVIDIA_API_KEY" ? "nvapi-test" : null),
       validateName: (value: string) => value,
       shellQuote: (value: string) => `'${value}'`,
       run: (command: readonly string[]) => {
@@ -263,7 +263,7 @@ describe("executeDeploy", () => {
     const fixture = makeDeployOptions({
       env: {
         NEMOCLAW_SANDBOX_NAME: "bad name",
-        NEMOCLAW_PROVIDER: "build",
+        NEMOCLAW_PROVIDER: "nvidia",
         NEMOCLAW_DEPLOY_NO_START_SERVICES: "1",
       },
       validateName,

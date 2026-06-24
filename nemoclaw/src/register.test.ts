@@ -14,7 +14,7 @@ vi.mock("node:fs", async (importOriginal) => {
 
 vi.mock("./onboard/config.js", () => ({
   loadOnboardConfig: vi.fn(),
-  describeOnboardEndpoint: vi.fn(() => "build.nvidia.com"),
+  describeOnboardEndpoint: vi.fn(() => "inference.nvidia.com"),
   describeOnboardProvider: vi.fn(() => "NVIDIA Endpoint API"),
 }));
 
@@ -112,12 +112,12 @@ describe("plugin registration", () => {
 
   it("prefers the live primary model from openclaw.json over stale onboard config", () => {
     mockedLoadOnboardConfig.mockReturnValue({
-      endpointType: "build",
-      endpointUrl: "https://api.build.nvidia.com/v1",
+      endpointType: "nvidia",
+      endpointUrl: "https://inference.nvidia.com/v1",
       ncpPartner: null,
       model: "nvidia/stale-model",
       profile: "default",
-      credentialEnv: "NVIDIA_INFERENCE_API_KEY",
+      credentialEnv: "NVIDIA_API_KEY",
       onboardedAt: "2026-03-01T00:00:00.000Z",
     });
     mockedReadFileSync.mockReset();
@@ -146,12 +146,12 @@ describe("plugin registration", () => {
 
   it("falls back to onboard config when openclaw.json has no primary model", () => {
     mockedLoadOnboardConfig.mockReturnValue({
-      endpointType: "build",
-      endpointUrl: "https://api.build.nvidia.com/v1",
+      endpointType: "nvidia",
+      endpointUrl: "https://inference.nvidia.com/v1",
       ncpPartner: null,
       model: "nvidia/custom-model",
       profile: "default",
-      credentialEnv: "NVIDIA_INFERENCE_API_KEY",
+      credentialEnv: "NVIDIA_API_KEY",
       onboardedAt: "2026-03-01T00:00:00.000Z",
     });
     mockedReadFileSync.mockReset();
@@ -179,7 +179,7 @@ describe("plugin registration", () => {
     ]);
 
     const logLines = vi.mocked(api.logger.info).mock.calls.map(([message]) => message);
-    expect(logLines.some((line) => line.includes("Endpoint:  build.nvidia.com"))).toBe(true);
+    expect(logLines.some((line) => line.includes("Endpoint:  inference.nvidia.com"))).toBe(true);
     expect(logLines.some((line) => line.includes("Provider:  NVIDIA Endpoints"))).toBe(true);
     expect(
       logLines.some((line) => line.includes("Model:     nvidia/nemotron-3-super-120b-a12b")),

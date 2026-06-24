@@ -282,9 +282,7 @@ function registeredProviderForConfig(
   activeModel: string,
   providerCredentialEnv: string,
 ): ProviderPlugin {
-  const isNvidiaCredential =
-    providerCredentialEnv === "NVIDIA_INFERENCE_API_KEY" ||
-    providerCredentialEnv === "NVIDIA_API_KEY";
+  const isNvidiaCredential = providerCredentialEnv === "NVIDIA_API_KEY";
   const authLabel = isNvidiaCredential
     ? `NVIDIA API Key (${providerCredentialEnv})`
     : `OpenAI API Key (${providerCredentialEnv})`;
@@ -367,11 +365,11 @@ export default function register(api: OpenClawPluginApi): void {
     );
   }
 
-  const bannerEndpoint = onboardCfg ? describeOnboardEndpoint(onboardCfg) : "build.nvidia.com";
+  const bannerEndpoint = onboardCfg ? describeOnboardEndpoint(onboardCfg) : "inference.nvidia.com";
   const bannerProvider = onboardCfg ? describeOnboardProvider(onboardCfg) : "NVIDIA Endpoints";
   const bannerModel = activeModel || DEFAULT_INFERENCE_MODEL;
 
-  const providerCredentialEnv = onboardCfg?.credentialEnv ?? "NVIDIA_INFERENCE_API_KEY";
+  const providerCredentialEnv = onboardCfg?.credentialEnv ?? "NVIDIA_API_KEY";
   api.registerProvider(registeredProviderForConfig(activeModel, providerCredentialEnv));
 
   // 3. Register before_tool_call hook to block secrets in memory writes (#1233)

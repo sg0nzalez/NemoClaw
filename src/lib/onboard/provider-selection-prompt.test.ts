@@ -7,7 +7,7 @@ import { describe, it, vi } from "vitest";
 import { promptForInferenceProviderSelection } from "../../../dist/lib/onboard/provider-selection-prompt";
 
 const options = [
-  { key: "build", label: "NVIDIA Endpoints" },
+  { key: "nvidia", label: "NVIDIA Endpoints" },
   { key: "openai", label: "OpenAI" },
   { key: "custom", label: "Other OpenAI-compatible endpoint" },
 ];
@@ -25,7 +25,7 @@ function makeLog() {
 }
 
 describe("promptForInferenceProviderSelection", () => {
-  it("renders the provider menu and defaults to the build provider", async () => {
+  it("renders the provider menu and defaults to the nvidia provider", async () => {
     const prompt = makePrompt("");
     const log = makeLog();
     const selectFromNumberedMenu = makeSelectSpy();
@@ -40,7 +40,7 @@ describe("promptForInferenceProviderSelection", () => {
       selectFromNumberedMenu,
     });
 
-    assert.equal(selected.key, "build");
+    assert.equal(selected.key, "nvidia");
     assert.deepEqual(
       log.mock.calls.map((call) => call[0]),
       [
@@ -113,7 +113,7 @@ describe("promptForInferenceProviderSelection", () => {
       selectFromNumberedMenu,
     });
 
-    assert.equal(selected.key, "build");
+    assert.equal(selected.key, "nvidia");
     assert.equal(prompt.mock.calls[0]?.[0], "  Choose [3]: ");
     assert.deepEqual(selectFromNumberedMenu.mock.calls[0], ["", 3, reorderedOptions]);
   });

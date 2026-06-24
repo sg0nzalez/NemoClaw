@@ -35,7 +35,7 @@ describe("promptOrDefault interactive default fallback (#4387)", () => {
 
 describe("selectFromNumberedMenuOrExit (#4514)", () => {
   const options = [
-    { key: "build", label: "NVIDIA Endpoints" },
+    { key: "nvidia", label: "NVIDIA Endpoints" },
     { key: "openai", label: "OpenAI" },
     { key: "custom", label: "Other OpenAI-compatible endpoint" },
   ];

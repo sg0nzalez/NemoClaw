@@ -118,7 +118,7 @@ export function resolveRequestedProviderSelection<T extends ProviderOption>(
       recoveredFromSandbox = true;
       recoveredModel = input.readRecordedModel(input.sandboxName);
     } else {
-      providerKey = "build";
+      providerKey = "nvidia";
     }
   }
 

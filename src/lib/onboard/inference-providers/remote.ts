@@ -43,7 +43,7 @@ export async function setupRemoteProviderInference(
 
   const config =
     provider === "nvidia-nim"
-      ? REMOTE_PROVIDER_CONFIG.build
+      ? REMOTE_PROVIDER_CONFIG.nvidia
       : Object.values(REMOTE_PROVIDER_CONFIG).find((entry) => entry.providerName === provider);
   if (!config) {
     console.error(`  Unsupported provider configuration: ${provider}`);

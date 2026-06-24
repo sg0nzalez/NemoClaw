@@ -13,8 +13,8 @@
 #
 # Prerequisites:
 #   - Docker running
-#   - NVIDIA_INFERENCE_API_KEY set (real key, starts with nvapi-)
-#   - Network access to inference-api.nvidia.com
+#   - NVIDIA_API_KEY set (real key, starts with nvapi-)
+#   - Network access to inference.nvidia.com
 #
 # Environment:
 #   NEMOCLAW_NON_INTERACTIVE=1                         — required for non-interactive install
@@ -32,7 +32,7 @@
 #
 # Usage:
 #   NEMOCLAW_NON_INTERACTIVE=1 NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE=1 \
-#     NVIDIA_INFERENCE_API_KEY=nvapi-... bash test/e2e/test-cloud-onboard-e2e.sh
+#     NVIDIA_API_KEY=nvapi-... bash test/e2e/test-cloud-onboard-e2e.sh
 
 set -uo pipefail
 
@@ -283,9 +283,9 @@ section "Phase 4: Sandbox checks (Landlock, security, inference.local)"
 if nemoclaw_e2e_using_compatible_inference; then
   export NEMOCLAW_E2E_CLOUD_API_KEY_ENV=COMPATIBLE_API_KEY
 else
-  export NEMOCLAW_E2E_CLOUD_API_KEY_ENV=NVIDIA_INFERENCE_API_KEY
+  export NEMOCLAW_E2E_CLOUD_API_KEY_ENV=NVIDIA_API_KEY
 fi
-export SANDBOX_NAME CLOUD_EXPERIMENTAL_MODEL="$CLOUD_MODEL" REPO NVIDIA_INFERENCE_API_KEY COMPATIBLE_API_KEY
+export SANDBOX_NAME CLOUD_EXPERIMENTAL_MODEL="$CLOUD_MODEL" REPO NVIDIA_API_KEY COMPATIBLE_API_KEY
 export PATH="/usr/local/bin:${HOME}/.local/bin:${PATH}"
 
 shopt -s nullglob

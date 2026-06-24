@@ -3,8 +3,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # CI-only hosted inference shim: live E2E lanes use the repository's
-# NVIDIA_INFERENCE_API_KEY secret against the hosted OpenAI-compatible endpoint
-# at inference-api.nvidia.com. Keep this helper in test/e2e so the
+# NVIDIA_API_KEY secret against the hosted OpenAI-compatible endpoint
+# at inference.nvidia.com. Keep this helper in test/e2e so the
 # product-facing provider/default endpoint remain unchanged.
 
 NEMOCLAW_E2E_COMPATIBLE_INFERENCE_MODEL_DEFAULT="nvidia/nvidia/nemotron-3-super-v3"
@@ -16,11 +16,11 @@ nemoclaw_e2e_using_compatible_inference() {
     return 0
   fi
   case "${NEMOCLAW_PROVIDER:-}" in
-    build | cloud | nvidia | nvidia-prod)
+    cloud | nvidia | nvidia-prod)
       return 1
       ;;
   esac
-  [ -n "${NVIDIA_INFERENCE_API_KEY:-}" ] && [[ "${NVIDIA_INFERENCE_API_KEY}" != nvapi-* ]]
+  [ -n "${NVIDIA_API_KEY:-}" ] && [[ "${NVIDIA_API_KEY}" != nvapi-* ]]
 }
 
 nemoclaw_e2e_configure_compatible_inference() {
@@ -28,28 +28,28 @@ nemoclaw_e2e_configure_compatible_inference() {
     return 0
   fi
 
-  if [ -z "${NVIDIA_INFERENCE_API_KEY:-}" ]; then
-    echo "ERROR: NVIDIA_INFERENCE_API_KEY is required for hosted CI inference" >&2
+  if [ -z "${NVIDIA_API_KEY:-}" ]; then
+    echo "ERROR: NVIDIA_API_KEY is required for hosted CI inference" >&2
     return 1
   fi
 
   export NEMOCLAW_PROVIDER="${NEMOCLAW_PROVIDER:-custom}"
-  export NEMOCLAW_ENDPOINT_URL="${NEMOCLAW_ENDPOINT_URL:-https://inference-api.nvidia.com/v1}"
+  export NEMOCLAW_ENDPOINT_URL="${NEMOCLAW_ENDPOINT_URL:-https://inference.nvidia.com/v1}"
   export NEMOCLAW_MODEL="${NEMOCLAW_MODEL:-${NEMOCLAW_CLOUD_EXPERIMENTAL_MODEL:-$NEMOCLAW_E2E_COMPATIBLE_INFERENCE_MODEL_DEFAULT}}"
   export NEMOCLAW_COMPAT_MODEL="${NEMOCLAW_COMPAT_MODEL:-$NEMOCLAW_MODEL}"
   export NEMOCLAW_PREFERRED_API="${NEMOCLAW_PREFERRED_API:-openai-completions}"
-  export COMPATIBLE_API_KEY="$NVIDIA_INFERENCE_API_KEY"
+  export COMPATIBLE_API_KEY="$NVIDIA_API_KEY"
 }
 
 nemoclaw_e2e_hosted_inference_key() {
-  printf '%s' "${NVIDIA_INFERENCE_API_KEY:-}"
+  printf '%s' "${NVIDIA_API_KEY:-}"
 }
 
 nemoclaw_e2e_hosted_inference_base_url() {
   if nemoclaw_e2e_using_compatible_inference; then
-    printf '%s' "${NEMOCLAW_ENDPOINT_URL:-https://inference-api.nvidia.com/v1}"
+    printf '%s' "${NEMOCLAW_ENDPOINT_URL:-https://inference.nvidia.com/v1}"
   else
-    printf '%s' "https://inference-api.nvidia.com/v1"
+    printf '%s' "https://inference.nvidia.com/v1"
   fi
 }
 
@@ -126,18 +126,18 @@ nemoclaw_e2e_require_hosted_inference_key() {
 
   if nemoclaw_e2e_using_compatible_inference; then
     if [ -n "$key" ]; then
-      nemoclaw_e2e_note_pass "NVIDIA_INFERENCE_API_KEY is set for hosted CI inference"
+      nemoclaw_e2e_note_pass "NVIDIA_API_KEY is set for hosted CI inference"
     else
-      nemoclaw_e2e_note_fail "NVIDIA_INFERENCE_API_KEY not set - required for hosted CI inference"
+      nemoclaw_e2e_note_fail "NVIDIA_API_KEY not set - required for hosted CI inference"
       return 1
     fi
     return 0
   fi
 
   if [ -n "$key" ] && [[ "$key" == nvapi-* ]]; then
-    nemoclaw_e2e_note_pass "NVIDIA_INFERENCE_API_KEY is set (starts with nvapi-)"
+    nemoclaw_e2e_note_pass "NVIDIA_API_KEY is set (starts with nvapi-)"
   else
-    nemoclaw_e2e_note_fail "NVIDIA_INFERENCE_API_KEY not set or invalid - required for live inference"
+    nemoclaw_e2e_note_fail "NVIDIA_API_KEY not set or invalid - required for live inference"
     return 1
   fi
 }

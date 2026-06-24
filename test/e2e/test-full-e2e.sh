@@ -10,18 +10,18 @@
 #
 # Prerequisites:
 #   - Docker running
-#   - NVIDIA_INFERENCE_API_KEY set (real key, starts with nvapi-)
-#   - Network access to inference-api.nvidia.com
+#   - NVIDIA_API_KEY set (real key, starts with nvapi-)
+#   - Network access to inference.nvidia.com
 #
 # Environment variables:
 #   NEMOCLAW_NON_INTERACTIVE=1             — required (enables non-interactive install + onboard)
 #   NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE=1 — required for non-interactive install/onboard
 #   NEMOCLAW_SANDBOX_NAME                  — sandbox name (default: e2e-nightly)
 #   NEMOCLAW_RECREATE_SANDBOX=1            — recreate sandbox if it exists from a previous run
-#   NVIDIA_INFERENCE_API_KEY                         — required for NVIDIA Endpoints inference
+#   NVIDIA_API_KEY                         — required for NVIDIA Endpoints inference
 #
 # Usage:
-#   NEMOCLAW_NON_INTERACTIVE=1 NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE=1 NVIDIA_INFERENCE_API_KEY=nvapi-... bash test/e2e/test-full-e2e.sh
+#   NEMOCLAW_NON_INTERACTIVE=1 NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE=1 NVIDIA_API_KEY=nvapi-... bash test/e2e/test-full-e2e.sh
 #
 # See: https://github.com/NVIDIA/NemoClaw/issues/71
 

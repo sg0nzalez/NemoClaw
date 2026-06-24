@@ -40,7 +40,7 @@ test.skipIf(!shouldRunLiveE2EScenarios())(
   "Hermes inference set updates route/config and preserves live runtime",
   { timeout: TIMEOUT_MS },
   async ({ artifacts, cleanup, host, sandbox, secrets }) => {
-    const apiKey = secrets.required("NVIDIA_INFERENCE_API_KEY");
+    const apiKey = secrets.required("NVIDIA_API_KEY");
     await artifacts.writeJson("scenario.json", {
       id: "hermes-inference-switch",
       legacySource: "test/e2e/test-hermes-inference-switch.sh",

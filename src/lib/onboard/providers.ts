@@ -18,24 +18,24 @@ const { compactText } = require("../core/url-utils");
 
 // ── Constants ────────────────────────────────────────────────────
 
-const BUILD_ENDPOINT_URL = "https://integrate.api.nvidia.com/v1";
+const NVIDIA_INFERENCE_ENDPOINT_URL = "https://inference.nvidia.com/v1";
 const OPENAI_ENDPOINT_URL = "https://api.openai.com/v1";
 const ANTHROPIC_ENDPOINT_URL = "https://api.anthropic.com";
 const GEMINI_ENDPOINT_URL = "https://generativelanguage.googleapis.com/v1beta/openai/";
 const HERMES_INFERENCE_ENDPOINT_URL = "https://inference-api.nousresearch.com/v1";
-const HOSTED_INFERENCE_SOURCE_ENV = "NVIDIA_INFERENCE_API_KEY";
+const HOSTED_INFERENCE_SOURCE_ENV = "NVIDIA_API_KEY";
 const HOSTED_INFERENCE_CREDENTIAL_ENV = "COMPATIBLE_API_KEY";
-const HOSTED_INFERENCE_ENDPOINT_URL = "https://inference-api.nvidia.com/v1";
+const HOSTED_INFERENCE_ENDPOINT_URL = "https://inference.nvidia.com/v1";
 const HOSTED_INFERENCE_MODEL = "nvidia/nvidia/nemotron-3-super-v3";
 
 const REMOTE_PROVIDER_CONFIG = {
-  build: {
+  nvidia: {
     label: "NVIDIA Endpoints",
     providerName: "nvidia-prod",
-    providerType: "nvidia",
-    credentialEnv: "NVIDIA_INFERENCE_API_KEY",
-    endpointUrl: BUILD_ENDPOINT_URL,
-    helpUrl: "https://build.nvidia.com/settings/api-keys",
+    providerType: "openai",
+    credentialEnv: "NVIDIA_API_KEY",
+    endpointUrl: NVIDIA_INFERENCE_ENDPOINT_URL,
+    helpUrl: null,
     modelMode: "catalog",
     defaultModel: DEFAULT_CLOUD_MODEL,
     skipVerify: true,
@@ -176,7 +176,7 @@ function getNonInteractiveProvider() {
   const providerKey = (process.env.NEMOCLAW_PROVIDER || "").trim().toLowerCase();
   if (!providerKey) return null;
   const aliases = {
-    cloud: "build",
+    cloud: "nvidia",
     nim: "nim-local",
     vllm: "vllm",
     anthropiccompatible: "anthropicCompatible",
@@ -188,7 +188,7 @@ function getNonInteractiveProvider() {
   };
   const normalized = aliases[providerKey] || providerKey;
   const validProviders = new Set([
-    "build",
+    "nvidia",
     "openai",
     "anthropic",
     "anthropicCompatible",
@@ -207,7 +207,7 @@ function getNonInteractiveProvider() {
   if (!validProviders.has(normalized)) {
     console.error(`  Unsupported NEMOCLAW_PROVIDER: ${providerKey}`);
     console.error(
-      "  Valid values: build, openai, anthropic, anthropicCompatible, gemini, hermes-provider, ollama, custom, nim-local, vllm, routed, install-vllm, install-ollama, install-windows-ollama, start-windows-ollama",
+      "  Valid values: nvidia, openai, anthropic, anthropicCompatible, gemini, hermes-provider, ollama, custom, nim-local, vllm, routed, install-vllm, install-ollama, install-windows-ollama, start-windows-ollama",
     );
     process.exit(1);
   }
@@ -220,7 +220,7 @@ function stageHostedInferenceSourceSecretEnv() {
 
   const rawProvider = (process.env.NEMOCLAW_PROVIDER || "").trim().toLowerCase();
   const aliases = {
-    cloud: "build",
+    cloud: "nvidia",
     anthropiccompatible: "anthropicCompatible",
     hermes: "hermesProvider",
     "hermes-provider": "hermesProvider",
@@ -278,7 +278,7 @@ function getRequestedProviderHint(nonInteractive) {
 
 function getRequestedModelHint(nonInteractive) {
   if (!nonInteractive) return null;
-  const providerKey = getRequestedProviderHint(nonInteractive) || "cloud";
+  const providerKey = getRequestedProviderHint(nonInteractive) || "nvidia";
   return getNonInteractiveModel(providerKey);
 }
 
@@ -442,7 +442,7 @@ function upsertMessagingProviders(tokenDefs, _runOpenshell, options = {}) {
 }
 
 module.exports = {
-  BUILD_ENDPOINT_URL,
+  NVIDIA_INFERENCE_ENDPOINT_URL,
   OPENAI_ENDPOINT_URL,
   ANTHROPIC_ENDPOINT_URL,
   GEMINI_ENDPOINT_URL,

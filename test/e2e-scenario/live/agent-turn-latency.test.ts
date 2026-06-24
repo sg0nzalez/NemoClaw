@@ -39,7 +39,7 @@ test.skipIf(!shouldRunLiveE2EScenarios())(
   "OpenClaw and Hermes complete real hosted inference turns within the latency cap",
   { timeout: TIMEOUT_MS },
   async ({ artifacts, cleanup, host, sandbox, secrets }) => {
-    const apiKey = secrets.required("NVIDIA_INFERENCE_API_KEY");
+    const apiKey = secrets.required("NVIDIA_API_KEY");
     const results: Record<string, unknown> = { model: MODEL, maxTurnSeconds: MAX_TURN_SECONDS };
     await artifacts.writeJson("scenario.json", {
       id: "agent-turn-latency",

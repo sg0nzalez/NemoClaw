@@ -11,7 +11,7 @@
 #       and the Hermes agent fetches Wikidata through its API-server agent path.
 #
 # Required env:
-#   NVIDIA_INFERENCE_API_KEY                         hosted inference credential
+#   NVIDIA_API_KEY                         hosted inference credential
 #   NEMOCLAW_NON_INTERACTIVE=1             required
 #   NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE=1 required
 #

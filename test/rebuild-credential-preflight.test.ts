@@ -87,7 +87,7 @@ function createFixture(opts: {
   const {
     sandboxName = "my-assistant",
     provider = "nvidia-prod",
-    credentialEnv = "NVIDIA_INFERENCE_API_KEY",
+    credentialEnv = "NVIDIA_API_KEY",
     savedCredential,
     providerSelectionStatus = "complete",
     agent = null,
@@ -365,7 +365,7 @@ describe("Issue #2273: atomic rebuild", () => {
       timeout: 60_000,
     }, () => {
       const f = createFixture({
-        credentialEnv: "NVIDIA_INFERENCE_API_KEY",
+        credentialEnv: "NVIDIA_API_KEY",
         providerRegistered: false,
       });
 
@@ -384,9 +384,9 @@ describe("Issue #2273: atomic rebuild", () => {
       timeout: 60_000,
     }, () => {
       const f = createFixture({
-        credentialEnv: "NVIDIA_INFERENCE_API_KEY",
+        credentialEnv: "NVIDIA_API_KEY",
         savedCredential: {
-          key: "NVIDIA_INFERENCE_API_KEY",
+          key: "NVIDIA_API_KEY",
           value: "nvapi-test-key-for-rebuild",
         },
       });
@@ -406,7 +406,7 @@ describe("Issue #2273: atomic rebuild", () => {
       const f = createFixture({
         agents: [{ name: "openclaw" }, { name: "hermes" }],
         savedCredential: {
-          key: "NVIDIA_INFERENCE_API_KEY",
+          key: "NVIDIA_API_KEY",
           value: "nvapi-test-key-for-rebuild",
         },
       });
@@ -427,7 +427,7 @@ describe("Issue #2273: atomic rebuild", () => {
       const f = createFixture({
         activeSessionCount: 2,
         savedCredential: {
-          key: "NVIDIA_INFERENCE_API_KEY",
+          key: "NVIDIA_API_KEY",
           value: "nvapi-test-key-for-rebuild",
         },
       });
@@ -449,7 +449,7 @@ describe("Issue #2273: atomic rebuild", () => {
       const f = createFixture({
         activeSessionCount: null,
         savedCredential: {
-          key: "NVIDIA_INFERENCE_API_KEY",
+          key: "NVIDIA_API_KEY",
           value: "nvapi-test-key-for-rebuild",
         },
       });
@@ -470,7 +470,7 @@ describe("Issue #2273: atomic rebuild", () => {
       // No credential in env or credentials.json AND no gateway-registered
       // provider — preflight must still abort so the sandbox is preserved.
       const f = createFixture({
-        credentialEnv: "NVIDIA_INFERENCE_API_KEY",
+        credentialEnv: "NVIDIA_API_KEY",
         providerRegistered: false,
         // no savedCredential
       });
@@ -480,7 +480,7 @@ describe("Issue #2273: atomic rebuild", () => {
 
       // Should mention preflight failure
       expect(output).toContain("preflight failed");
-      expect(output).toContain("NVIDIA_INFERENCE_API_KEY");
+      expect(output).toContain("NVIDIA_API_KEY");
       // Should say sandbox is untouched
       expect(output).toContain("untouched");
       // Sandbox should still be in the registry (not destroyed)
@@ -492,9 +492,9 @@ describe("Issue #2273: atomic rebuild", () => {
     }, () => {
       // Credential saved in credentials.json but NOT in process.env
       const f = createFixture({
-        credentialEnv: "NVIDIA_INFERENCE_API_KEY",
+        credentialEnv: "NVIDIA_API_KEY",
         savedCredential: {
-          key: "NVIDIA_INFERENCE_API_KEY",
+          key: "NVIDIA_API_KEY",
           value: "nvapi-test-key-for-rebuild",
         },
       });
@@ -514,9 +514,9 @@ describe("Issue #2273: atomic rebuild", () => {
       const f = createFixture({
         agent: "hermes",
         messagingPlanChannels: ["discord"],
-        credentialEnv: "NVIDIA_INFERENCE_API_KEY",
+        credentialEnv: "NVIDIA_API_KEY",
         savedCredential: {
-          key: "NVIDIA_INFERENCE_API_KEY",
+          key: "NVIDIA_API_KEY",
           value: "nvapi-test-key-for-rebuild",
         },
       });
@@ -539,9 +539,9 @@ describe("Issue #2273: atomic rebuild", () => {
     }, () => {
       const f = createFixture({
         agent: "hermes",
-        credentialEnv: "NVIDIA_INFERENCE_API_KEY",
+        credentialEnv: "NVIDIA_API_KEY",
         savedCredential: {
-          key: "NVIDIA_INFERENCE_API_KEY",
+          key: "NVIDIA_API_KEY",
           value: "nvapi-test-key-for-rebuild",
         },
         dockerBuildExitCode: 23,
@@ -747,24 +747,24 @@ describe("Issue #2273: atomic rebuild", () => {
       expect(output).toContain("Backing up sandbox state");
     });
 
-    it("uses the registered nvidia-prod provider in OpenShell instead of requiring NVIDIA_INFERENCE_API_KEY", {
+    it("uses the registered nvidia-prod provider in OpenShell instead of requiring NVIDIA_API_KEY", {
       timeout: 60_000,
     }, () => {
       // After `nemohermes channels add wechat` the rebuild preflight used to
-      // abort because NVIDIA_INFERENCE_API_KEY was not set in the environment, even
+      // abort because NVIDIA_API_KEY was not set in the environment, even
       // though `nvidia-prod` was already registered in the OpenShell
       // gateway. Reuse the gateway-stored credential instead.
       const f = createFixture({
         provider: "nvidia-prod",
-        credentialEnv: "NVIDIA_INFERENCE_API_KEY",
+        credentialEnv: "NVIDIA_API_KEY",
         providerRegistered: true,
-        // no savedCredential — host env has no NVIDIA_INFERENCE_API_KEY
+        // no savedCredential — host env has no NVIDIA_API_KEY
       });
 
       const result = runRebuild(f);
       const output = (result.stderr || "") + (result.stdout || "");
 
-      expect(output).not.toContain("Missing credential: NVIDIA_INFERENCE_API_KEY");
+      expect(output).not.toContain("Missing credential: NVIDIA_API_KEY");
       expect(output).not.toContain("provider credential not found");
       expect(output).toContain("Backing up sandbox state");
     });
@@ -777,7 +777,7 @@ describe("Issue #2273: atomic rebuild", () => {
       // empty, the preflight must still bail so the sandbox is preserved.
       const f = createFixture({
         provider: "nvidia-prod",
-        credentialEnv: "NVIDIA_INFERENCE_API_KEY",
+        credentialEnv: "NVIDIA_API_KEY",
         providerRegistered: false,
       });
 
@@ -786,7 +786,7 @@ describe("Issue #2273: atomic rebuild", () => {
 
       expect(result.status).not.toBe(0);
       expect(output).toContain("preflight failed");
-      expect(output).toContain("NVIDIA_INFERENCE_API_KEY");
+      expect(output).toContain("NVIDIA_API_KEY");
       expect(output).toContain("untouched");
       expect(registryHasSandbox(f)).toBe(true);
     });
@@ -823,9 +823,9 @@ describe("Issue #2273: atomic rebuild", () => {
       // The key thing: rebuild should catch the failure and print
       // recovery instructions instead of silently exiting.
       const f = createFixture({
-        credentialEnv: "NVIDIA_INFERENCE_API_KEY",
+        credentialEnv: "NVIDIA_API_KEY",
         savedCredential: {
-          key: "NVIDIA_INFERENCE_API_KEY",
+          key: "NVIDIA_API_KEY",
           value: "nvapi-test-key-for-rebuild",
         },
         // Force provider_selection to re-run (not resume) so onboard
@@ -855,7 +855,7 @@ describe("Issue #2273: atomic rebuild", () => {
       // observable CLI behavior — the preflight check fails and bail()
       // calls process.exit with a non-zero code.
       const f = createFixture({
-        credentialEnv: "NVIDIA_INFERENCE_API_KEY",
+        credentialEnv: "NVIDIA_API_KEY",
         providerRegistered: false,
         // No credential — preflight will fail and exit non-zero
       });

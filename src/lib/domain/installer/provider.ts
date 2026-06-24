@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 export const INSTALLER_PROVIDER_VALUES = [
-  "build",
+  "nvidia",
   "openai",
   "anthropic",
   "anthropicCompatible",
@@ -18,7 +18,7 @@ export type InstallerProvider = (typeof INSTALLER_PROVIDER_VALUES)[number];
 
 export const INSTALLER_PROVIDER_ALIASES: Readonly<Record<string, InstallerProvider>> = {
   anthropiccompatible: "anthropicCompatible",
-  cloud: "build",
+  cloud: "nvidia",
   nim: "nim-local",
 };
 

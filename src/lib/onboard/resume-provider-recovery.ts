@@ -55,7 +55,7 @@ export function getRemoteProviderConfigForName(
   remoteProviderConfig: Record<string, RemoteProviderConfigEntry>,
 ): RemoteProviderConfigEntry | null {
   if (!provider) return null;
-  if (provider === "nvidia-nim") return remoteProviderConfig.build;
+  if (provider === "nvidia-nim") return remoteProviderConfig.nvidia;
   return (
     Object.values(remoteProviderConfig).find((entry) => entry.providerName === provider) || null
   );

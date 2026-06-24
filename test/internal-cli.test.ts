@@ -92,7 +92,7 @@ describe("internal oclif namespace", () => {
     expect(result.status).toBe(0);
     expect(JSON.parse(result.stdout)).toMatchObject({
       installRef: "v1.2.3",
-      provider: { normalized: "build", raw: "cloud", valid: true },
+      provider: { normalized: "nvidia", raw: "cloud", valid: true },
       runtime: { ok: true },
     });
   });

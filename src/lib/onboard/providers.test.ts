@@ -54,7 +54,7 @@ const {
 
 function withProviderEnv(next: Record<string, string | undefined>, testBody: () => void): void {
   const keys = new Set([
-    "NVIDIA_INFERENCE_API_KEY",
+    "NVIDIA_API_KEY",
     "NEMOCLAW_PROVIDER",
     "NEMOCLAW_ENDPOINT_URL",
     "NEMOCLAW_MODEL",
@@ -112,20 +112,8 @@ describe("onboard provider helpers", () => {
   });
 
   it("builds update arguments", () => {
-    const args = buildProviderArgs(
-      "update",
-      "inference",
-      "openai",
-      "NVIDIA_INFERENCE_API_KEY",
-      null,
-    );
-    expect(args).toEqual([
-      "provider",
-      "update",
-      "inference",
-      "--credential",
-      "NVIDIA_INFERENCE_API_KEY",
-    ]);
+    const args = buildProviderArgs("update", "inference", "openai", "NVIDIA_API_KEY", null);
+    expect(args).toEqual(["provider", "update", "inference", "--credential", "NVIDIA_API_KEY"]);
   });
 
   it("appends OPENAI_BASE_URL config for openai providers with a base URL", () => {
@@ -133,7 +121,7 @@ describe("onboard provider helpers", () => {
       "create",
       "inference",
       "openai",
-      "NVIDIA_INFERENCE_API_KEY",
+      "NVIDIA_API_KEY",
       "https://api.example.com/v1",
     );
     expect(args).toContain("--config");
@@ -215,8 +203,8 @@ describe("onboard provider helpers", () => {
     const result = upsertProvider(
       "inference",
       "openai",
-      "NVIDIA_INFERENCE_API_KEY",
-      "https://integrate.api.nvidia.com/v1",
+      "NVIDIA_API_KEY",
+      "https://inference.nvidia.com/v1",
       {},
       (command) => {
         commands.push(command.join(" "));
@@ -228,9 +216,7 @@ describe("onboard provider helpers", () => {
     expect(commands).toHaveLength(2);
     expect(commands[0]).toMatch(/provider get/);
     expect(commands[1]).toMatch(/provider update/);
-    expect(commands[1]).toMatch(
-      /--config OPENAI_BASE_URL=https:\/\/integrate\.api\.nvidia\.com\/v1/,
-    );
+    expect(commands[1]).toMatch(/--config OPENAI_BASE_URL=https:\/\/inference\.nvidia\.com\/v1/);
   });
 
   it("omits --credential from the update args when the env value is empty", () => {
@@ -238,8 +224,8 @@ describe("onboard provider helpers", () => {
     const result = upsertProvider(
       "nvidia-prod",
       "openai",
-      "NVIDIA_INFERENCE_API_KEY",
-      "https://integrate.api.nvidia.com/v1",
+      "NVIDIA_API_KEY",
+      "https://inference.nvidia.com/v1",
       {},
       (command) => {
         commands.push(command.join(" "));
@@ -254,7 +240,7 @@ describe("onboard provider helpers", () => {
     // OpenShell CLI rejects `--credential KEY` when the host env is empty;
     // dropping the flag turns the call into a no-op merge that succeeds.
     expect(commands[1]).not.toMatch(/--credential/);
-    expect(commands[1]).toMatch(/OPENAI_BASE_URL=https:\/\/integrate\.api\.nvidia\.com\/v1/);
+    expect(commands[1]).toMatch(/OPENAI_BASE_URL=https:\/\/inference\.nvidia\.com\/v1/);
   });
 
   it("keeps --credential on the create path even when env is empty", () => {
@@ -277,9 +263,9 @@ describe("onboard provider helpers", () => {
     upsertProvider(
       "nvidia-prod",
       "openai",
-      "NVIDIA_INFERENCE_API_KEY",
+      "NVIDIA_API_KEY",
       null,
-      { NVIDIA_INFERENCE_API_KEY: "nvapi-staged" },
+      { NVIDIA_API_KEY: "nvapi-staged" },
       (command) => {
         commands.push(command.join(" "));
         return { status: 0, stdout: "", stderr: "" };
@@ -288,13 +274,13 @@ describe("onboard provider helpers", () => {
 
     expect(commands).toHaveLength(2);
     expect(commands[1]).toMatch(/^provider update nvidia-prod /);
-    expect(commands[1]).toMatch(/--credential NVIDIA_INFERENCE_API_KEY/);
+    expect(commands[1]).toMatch(/--credential NVIDIA_API_KEY/);
   });
 
-  it("stages non-nvapi NVIDIA_INFERENCE_API_KEY as hosted custom inference", () => {
+  it("stages non-nvapi NVIDIA_API_KEY as hosted custom inference", () => {
     withProviderEnv(
       {
-        NVIDIA_INFERENCE_API_KEY: "  repo-hosted-key  ",
+        NVIDIA_API_KEY: "  repo-hosted-key  ",
       },
       () => {
         expect(stageHostedInferenceSourceSecretEnv()).toBe(true);
@@ -313,7 +299,7 @@ describe("onboard provider helpers", () => {
   it("does not override an explicit hosted inference API preference", () => {
     withProviderEnv(
       {
-        NVIDIA_INFERENCE_API_KEY: "repo-hosted-key",
+        NVIDIA_API_KEY: "repo-hosted-key",
         NEMOCLAW_E2E_USE_HOSTED_INFERENCE: "1",
         NEMOCLAW_PREFERRED_API: "openai-responses",
       },
@@ -324,26 +310,26 @@ describe("onboard provider helpers", () => {
     );
   });
 
-  it("keeps explicit cloud provider selection on the Build provider path", () => {
+  it("keeps explicit cloud provider selection on the NVIDIA provider path", () => {
     withProviderEnv(
       {
-        NVIDIA_INFERENCE_API_KEY: "repo-hosted-key",
+        NVIDIA_API_KEY: "repo-hosted-key",
         NEMOCLAW_PROVIDER: "cloud",
       },
       () => {
         expect(stageHostedInferenceSourceSecretEnv()).toBe(false);
-        expect(getRequestedProviderHint(true)).toBe("build");
+        expect(getRequestedProviderHint(true)).toBe("nvidia");
         expect(process.env.COMPATIBLE_API_KEY).toBeUndefined();
         expect(process.env.NEMOCLAW_ENDPOINT_URL).toBeUndefined();
       },
     );
   });
 
-  it("preserves explicit custom provider credentials when NVIDIA_INFERENCE_API_KEY is unrelated", () => {
+  it("preserves explicit custom provider credentials when NVIDIA_API_KEY is unrelated", () => {
     withProviderEnv(
       {
         COMPATIBLE_API_KEY: "custom-endpoint-key",
-        NVIDIA_INFERENCE_API_KEY: "repo-hosted-key",
+        NVIDIA_API_KEY: "repo-hosted-key",
         NEMOCLAW_PROVIDER: "custom",
       },
       () => {

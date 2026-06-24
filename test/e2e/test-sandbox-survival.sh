@@ -22,20 +22,20 @@
 #
 # Prerequisites:
 #   - Docker running
-#   - NVIDIA_INFERENCE_API_KEY set for hosted inference
-#   - Network access to inference-api.nvidia.com
+#   - NVIDIA_API_KEY set for hosted inference
+#   - Network access to inference.nvidia.com
 #
 # Environment variables:
 #   NEMOCLAW_NON_INTERACTIVE=1             — required
 #   NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE=1 — required
-#   NVIDIA_INFERENCE_API_KEY                         — required for hosted inference
+#   NVIDIA_API_KEY                         — required for hosted inference
 #   NEMOCLAW_SANDBOX_NAME                  — sandbox name (default: e2e-survival)
 #   NEMOCLAW_E2E_TIMEOUT_SECONDS           — overall timeout (default: 900)
 #
 # Usage:
 #   NEMOCLAW_NON_INTERACTIVE=1 \
 #   NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE=1 \
-#   NVIDIA_INFERENCE_API_KEY=... \
+#   NVIDIA_API_KEY=... \
 #     bash test/e2e/test-sandbox-survival.sh
 
 set -uo pipefail

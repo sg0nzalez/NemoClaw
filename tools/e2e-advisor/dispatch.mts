@@ -375,7 +375,7 @@ function isTargetRefSecretBlockedJob(body: string): boolean {
   if (callsScriptRunnerWithHostedInference) return true;
 
   const hasTargetRefGuardedInferenceSecret =
-    body.includes("inputs.target_ref == ''") && body.includes("secrets.NVIDIA_INFERENCE_API_KEY");
+    body.includes("inputs.target_ref == ''") && body.includes("secrets.NVIDIA_API_KEY");
   const usesHostedInferenceSecret =
     body.includes("NEMOCLAW_E2E_USE_HOSTED_INFERENCE") || body.includes("COMPATIBLE_API_KEY");
   return hasTargetRefGuardedInferenceSecret && usesHostedInferenceSecret;

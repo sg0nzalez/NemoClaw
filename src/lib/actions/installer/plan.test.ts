@@ -30,7 +30,7 @@ describe("installer plan actions", () => {
 
     expect(plan.installRef).toBe("feature/refactor");
     expect(plan.installerVersion).toBe("feature/refactor");
-    expect(plan.provider).toMatchObject({ normalized: "build", raw: "cloud", valid: true });
+    expect(plan.provider).toMatchObject({ normalized: "nvidia", raw: "cloud", valid: true });
     expect(plan.runtime).toEqual({ ok: true, nodeVersion: "v22.16.0", npmVersion: "10.1.0" });
     expect(plan.npm?.globalBin).toBe(path.join("/tmp/npm-prefix", "bin"));
     expect(plan.npm?.pathWithGlobalBin).toBe(

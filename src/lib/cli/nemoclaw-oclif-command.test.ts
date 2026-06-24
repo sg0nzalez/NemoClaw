@@ -62,10 +62,10 @@ describe("NemoClawCommand", () => {
   it("redacts sensitive JSON output before logging", () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
 
-    makeCommand().json({ provider: "build", apiKey: "nvapi-" + "a".repeat(24) });
+    makeCommand().json({ provider: "nvidia", apiKey: "nvapi-" + "a".repeat(24) });
 
     expect(log).toHaveBeenCalledWith(
-      JSON.stringify({ provider: "build", apiKey: "<REDACTED>" }, null, 2),
+      JSON.stringify({ provider: "nvidia", apiKey: "<REDACTED>" }, null, 2),
     );
   });
 });

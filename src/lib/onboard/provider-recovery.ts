@@ -21,10 +21,10 @@ export function providerNameToOptionKey(
   // recovery doesn't carry container info either, but the caller's
   // option-availability check still gates on whether vllm is actually running.
   if (name === "vllm-local") return opts.hasNimContainer ? "nim-local" : "vllm";
-  // `nvidia-nim` is a legacy alias for cloud NVIDIA Endpoints (see
-  // setupInference: it routes nvidia-nim through REMOTE_PROVIDER_CONFIG.build),
+  // `nvidia-nim` is a legacy alias for NVIDIA Endpoints (see setupInference:
+  // it routes nvidia-nim through REMOTE_PROVIDER_CONFIG.nvidia),
   // not a marker for Local NIM. Local NIM persists as vllm-local + nimContainer.
-  if (name === "nvidia-nim") return "build";
+  if (name === "nvidia-nim") return "nvidia";
   for (const [key, cfg] of Object.entries(remoteProviderConfig)) {
     if (cfg.providerName === name) return key;
   }

@@ -92,10 +92,10 @@ async function assertParameterPayloadStaysLiteral(
   env: NodeJS.ProcessEnv,
   redactions: string[],
 ): Promise<void> {
-  const payload = "${NVIDIA_INFERENCE_API_KEY}";
+  const payload = "${NVIDIA_API_KEY}";
   const command = [
     "set -euo pipefail",
-    'prefix="${NVIDIA_INFERENCE_API_KEY:0:15}"',
+    'prefix="${NVIDIA_API_KEY:0:15}"',
     `out="$(printf %s "\${PAYLOAD_B64}" | base64 -d | openshell sandbox exec --name ${shellQuote(SANDBOX_NAME)} -- sh -lc 'MSG=$(cat) && echo "$MSG"' 2>&1)"`,
     'if printf %s "$out" | grep -Fq "$prefix"; then echo SECRET_LEAK; exit 20; fi',
     'printf "%s\\n" "$out"',
@@ -116,10 +116,10 @@ async function assertSshParameterPayloadStaysLiteral(
   env: NodeJS.ProcessEnv,
   redactions: string[],
 ): Promise<void> {
-  const payload = "${NVIDIA_INFERENCE_API_KEY}";
+  const payload = "${NVIDIA_API_KEY}";
   const command = [
     "set -euo pipefail",
-    'prefix="${NVIDIA_INFERENCE_API_KEY:0:15}"',
+    'prefix="${NVIDIA_API_KEY:0:15}"',
     'ssh_config="$(mktemp)"',
     'out_file="$(mktemp)"',
     `trap 'rm -f "$ssh_config" "$out_file"' EXIT`,
@@ -157,7 +157,7 @@ async function assertHostProcessTableDoesNotExposeSecret(
 ): Promise<void> {
   const command = [
     "set -euo pipefail",
-    'prefix="${NVIDIA_INFERENCE_API_KEY:0:15}"',
+    'prefix="${NVIDIA_API_KEY:0:15}"',
     'matches="$(ps aux 2>/dev/null | grep -F "$prefix" | grep -v grep || true)"',
     'if [ -n "$matches" ]; then echo SECRET_LEAK; exit 21; fi',
     "echo SECRET_ABSENT",
@@ -179,7 +179,7 @@ async function assertSandboxProcessTableDoesNotExposeSecret(
 ): Promise<void> {
   const command = [
     "set -euo pipefail",
-    'prefix="${NVIDIA_INFERENCE_API_KEY:0:15}"',
+    'prefix="${NVIDIA_API_KEY:0:15}"',
     `out="$(openshell sandbox exec --name ${shellQuote(SANDBOX_NAME)} -- sh -lc 'ps aux' 2>&1)"`,
     'if printf %s "$out" | grep -Fq "$prefix"; then echo SECRET_LEAK; exit 22; fi',
     "echo SECRET_ABSENT",
@@ -198,7 +198,7 @@ test.skipIf(!shouldRunLiveE2EScenarios())(
   "Telegram bridge-style message handling treats shell metacharacters as data",
   { timeout: LIVE_TIMEOUT_MS },
   async ({ artifacts, cleanup, host, sandbox, secrets, skip }) => {
-    const apiKey = secrets.required("NVIDIA_INFERENCE_API_KEY");
+    const apiKey = secrets.required("NVIDIA_API_KEY");
     const env = phase6Env({
       sandboxName: SANDBOX_NAME,
       agent: "openclaw",
@@ -214,7 +214,7 @@ test.skipIf(!shouldRunLiveE2EScenarios())(
       sandboxName: SANDBOX_NAME,
       contracts: [
         "command substitution payloads are literal input through exec and ssh-config paths and do not create files",
-        "parameter expansion does not leak NVIDIA_INFERENCE_API_KEY",
+        "parameter expansion does not leak NVIDIA_API_KEY",
         "host and sandbox process tables do not expose the API key after setup",
         "invalid sandbox names with shell metacharacters are rejected by validateName",
         "normal messages and benign special characters still pass through",

@@ -15,7 +15,7 @@ import { join } from "node:path";
 let configDir = join(homedir(), ".nemoclaw");
 
 export type EndpointType =
-  | "build"
+  | "nvidia"
   | "openai"
   | "anthropic"
   | "gemini"
@@ -55,7 +55,7 @@ function isRecord(value: object | null): value is OnboardConfigSource {
 
 function isEndpointType(value: string | null | undefined): value is EndpointType {
   return (
-    value === "build" ||
+    value === "nvidia" ||
     value === "openai" ||
     value === "anthropic" ||
     value === "gemini" ||
@@ -114,7 +114,7 @@ export function describeOnboardProvider(config: NemoClawOnboardConfig): string {
   }
 
   switch (config.endpointType) {
-    case "build":
+    case "nvidia":
       return "NVIDIA Endpoints";
     case "openai":
       return "OpenAI";

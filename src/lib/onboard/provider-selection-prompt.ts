@@ -19,8 +19,9 @@ function getDefaultProviderIndex(options: ProviderMenuChoice[], env: NodeJS.Proc
     ? options.findIndex((option) => option.key.toLowerCase() === envProviderHint)
     : -1;
   return (
-    (envProviderIdx >= 0 ? envProviderIdx : options.findIndex((option) => option.key === "build")) +
-    1
+    (envProviderIdx >= 0
+      ? envProviderIdx
+      : options.findIndex((option) => option.key === "nvidia")) + 1
   );
 }
 
