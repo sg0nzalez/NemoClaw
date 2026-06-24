@@ -172,9 +172,9 @@ function findRawSecretEnvEntries(envFile: string): string[] {
   const allowedNonsecretKeys = new Set(["API_SERVER_HOST", "API_SERVER_PORT"]);
   // Mirror ENV_FILE_ALLOWED_RAW_SECRET_KEYS in
   // agents/hermes/validate-env-secret-boundary.py. API_SERVER_KEY is the bearer
-  // token Hermes' own api_server (v0.16.0+) requires; it is self-generated in
-  // the sandbox (messaging-config.ts) and never travels through the OpenShell
-  // proxy, so it has no resolver placeholder and is allowed to be raw.
+  // token Hermes' own api_server (v0.16.0+) requires; it is minted at sandbox
+  // startup and never travels through the OpenShell proxy, so it has no resolver
+  // placeholder and is allowed to be raw.
   const allowedRawSecretKeys = new Set(["API_SERVER_KEY"]);
   const allowedLiterals = new Set(["", "[STRIPPED_BY_MIGRATION]"]);
   const violations: string[] = [];
@@ -280,6 +280,7 @@ describe("agents/hermes/generate-config.ts", () => {
     });
     expect(envFile).toContain("API_SERVER_PORT=18642\n");
     expect(envFile).toContain("API_SERVER_HOST=127.0.0.1\n");
+    expect(envFile).not.toContain("API_SERVER_KEY=");
   });
 
   it("records the upstream provider and model as a self-describing annotation", () => {

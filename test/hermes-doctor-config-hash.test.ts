@@ -26,7 +26,7 @@ describe("Hermes doctor and config hash boundary", () => {
     const fakeGenerateCommand = [
       `printf 'generate\\n' >>${JSON.stringify(orderLogPath)}`,
       `printf 'model: trusted\\ncustom_providers: []\\n' >${JSON.stringify(configPath)}`,
-      `printf 'API_SERVER_KEY=trusted\\n' >${JSON.stringify(envPath)}`,
+      `printf 'API_SERVER_HOST=127.0.0.1\\nAPI_SERVER_PORT=18642\\n' >${JSON.stringify(envPath)}`,
       `chmod 600 ${JSON.stringify(configPath)} ${JSON.stringify(envPath)}`,
     ].join("; ");
     fs.mkdirSync(hermesDir, { recursive: true });
