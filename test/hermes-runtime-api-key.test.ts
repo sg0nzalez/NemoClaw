@@ -18,10 +18,8 @@ function escapeRegExp(value: string): string {
 function extractShellFunctionFromSource(src: string, name: string): string {
   const escapedName = escapeRegExp(name);
   const match = src.match(new RegExp(`${escapedName}\\(\\) \\{([\\s\\S]*?)^\\}`, "m"));
-  if (!match) {
-    throw new Error(`Expected ${name} in agents/hermes/start.sh`);
-  }
-  return `${name}() {${match[1]}\n}`;
+  expect(match, `Expected ${name} in agents/hermes/start.sh`).not.toBeNull();
+  return `${name}() {${match![1]}\n}`;
 }
 
 function writeHermesHash(hashPath: string, configPath: string, envPath: string): void {
@@ -29,9 +27,7 @@ function writeHermesHash(hashPath: string, configPath: string, envPath: string):
     encoding: "utf-8",
     timeout: 5000,
   });
-  if (result.status !== 0) {
-    throw new Error(`sha256sum failed: ${result.stderr}`);
-  }
+  expect(result.status, result.stderr).toBe(0);
   fs.writeFileSync(hashPath, result.stdout, { mode: 0o644 });
 }
 
