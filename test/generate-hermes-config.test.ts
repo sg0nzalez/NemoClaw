@@ -217,17 +217,21 @@ afterEach(() => {
 });
 
 describe("agents/hermes/generate-config.ts", () => {
-  it("leaves messaging render to the messaging build applier", () => {
-    const result = runConfigScriptRaw({
-      NEMOCLAW_MESSAGING_CHANNELS_B64: encodeJson(["telegram"]),
-    });
-    expect(result.status, result.stderr).toBe(0);
-    const hermesDir = path.join(tmpDir, ".hermes");
-    const config = YAML.parse(fs.readFileSync(path.join(hermesDir, "config.yaml"), "utf-8"));
-    const envFile = fs.readFileSync(path.join(hermesDir, ".env"), "utf-8");
-    expect(config.platforms.telegram).toBeUndefined();
-    expect(envFile).not.toContain("TELEGRAM_BOT_TOKEN=");
-  }, testTimeout(15_000));
+  it(
+    "leaves messaging render to the messaging build applier",
+    () => {
+      const result = runConfigScriptRaw({
+        NEMOCLAW_MESSAGING_CHANNELS_B64: encodeJson(["telegram"]),
+      });
+      expect(result.status, result.stderr).toBe(0);
+      const hermesDir = path.join(tmpDir, ".hermes");
+      const config = YAML.parse(fs.readFileSync(path.join(hermesDir, "config.yaml"), "utf-8"));
+      const envFile = fs.readFileSync(path.join(hermesDir, ".env"), "utf-8");
+      expect(config.platforms.telegram).toBeUndefined();
+      expect(envFile).not.toContain("TELEGRAM_BOT_TOKEN=");
+    },
+    testTimeout(15_000),
+  );
 
   it("generates API server config without messaging platform token blocks", () => {
     const { config, envFile } = runConfigScript();

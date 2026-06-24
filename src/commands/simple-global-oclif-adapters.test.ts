@@ -220,8 +220,9 @@ describe("simple global oclif adapters", () => {
       throw new mocks.GatewayTokenCommandError(hermesLines, 1);
     });
     setGatewayTokenRuntimeBridgeFactoryForTest(() => ({
-      fetchGatewayAuthTokenFromSandbox: mocks.fetchGatewayAuthTokenFromSandbox,
+      fetchToken: mocks.fetchGatewayAuthTokenFromSandbox,
       getSandboxAgent: () => "hermes",
+      agentExposesToken: () => false,
     }));
 
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
