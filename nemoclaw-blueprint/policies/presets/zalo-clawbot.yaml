@@ -8,9 +8,10 @@ network_policies:
   zalo-clawbot:
     name: zalo-clawbot
     endpoints:
-      # Runtime: the @zalo-platforms/openclaw-zaloclawbot plugin drives a
+      # Runtime only: the @zalo-platforms/openclaw-zaloclawbot plugin drives a
       # persistent long-poll loop (getUpdates, GET) and sends replies (POST)
-      # against the Zalo Bot Platform API.
+      # against the Zalo Bot Platform API. This is the sole egress the running
+      # sandbox requires.
       - host: bot-api.zaloplatforms.com
         port: 443
         protocol: rest
@@ -18,17 +19,11 @@ network_policies:
         rules:
           - allow: { method: GET, path: "/**" }
           - allow: { method: POST, path: "/**" }
-      # Login/provisioning: `openclaw channels login` provisions a private
-      # owner-bound bot under the shared official account during the in-sandbox
-      # QR handshake. The QR deep link itself (zalo.me/s/...) is opened on the
-      # operator's phone, not from the sandbox, so it is not listed here.
-      - host: bot.zaloplatforms.com
-        port: 443
-        protocol: rest
-        enforcement: enforce
-        rules:
-          - allow: { method: GET, path: "/**" }
-          - allow: { method: POST, path: "/**" }
+      # NOTE: QR login/provisioning (bot.zaloplatforms.com) runs HOST-SIDE during
+      # `nemoclaw onboard` (see src/lib/messaging/channels/zalo-clawbot/qr.ts) and
+      # the captured bot token is seeded into the sandbox. The sandbox therefore
+      # never contacts the login host, so it is deliberately omitted here to keep
+      # sandbox egress minimal.
     binaries:
       - { path: /usr/local/bin/node }
       - { path: /usr/bin/node }
