@@ -238,6 +238,10 @@ function parseOpenClawAgentText(raw: string): string {
   return parts.join("\n");
 }
 
+function agentReplyHasInteger42(reply: string): boolean {
+  return /(^|[^0-9])42([^0-9]|$)/u.test(reply.replace(/\s+/gu, ""));
+}
+
 async function assertAgentCanAnswer(host: HostCliClient, sandboxName: string): Promise<void> {
   const sessionId = `e2e-sbx-02-${Date.now()}-${process.pid}`;
   const result = await host.nemoclaw(
@@ -266,7 +270,7 @@ async function assertAgentCanAnswer(host: HostCliClient, sandboxName: string): P
   );
   const reply = parseOpenClawAgentText(result.stdout);
   expectExitZero(result, "openclaw agent --json");
-  expect(reply, resultText(result)).toMatch(/(^|[^0-9])42([^0-9]|$)/);
+  expect(agentReplyHasInteger42(reply), resultText(result)).toBe(true);
 }
 
 async function assertStatusFields(host: HostCliClient, sandboxName: string): Promise<void> {

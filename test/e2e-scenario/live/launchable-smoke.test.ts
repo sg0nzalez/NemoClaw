@@ -120,6 +120,10 @@ function parseAgentText(raw: string): string {
     .join("\n");
 }
 
+function agentReplyHasInteger42(reply: string): boolean {
+  return /(^|[^0-9])42([^0-9]|$)/u.test(reply.replace(/\s+/gu, ""));
+}
+
 async function preseedLaunchableClone(
   host: HostCliClient,
   cloneDir: string,
@@ -463,7 +467,7 @@ runLaunchableSmokeTest(
     ).toBe(0);
     const agentReply = parseAgentText(agent.stdout);
     expect(
-      /(^|[^0-9])42([^0-9]|$)/.test(agentReply),
+      agentReplyHasInteger42(agentReply),
       `expected agent reply to contain 42; rc=${agent.exitCode}; reply='${agentReply.slice(0, 200)}'; stdout='${agent.stdout.slice(0, 300)}'; stderr='${agent.stderr.slice(0, 300)}'`,
     ).toBe(true);
 

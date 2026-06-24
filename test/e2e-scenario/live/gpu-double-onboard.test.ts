@@ -109,6 +109,10 @@ function parseReplyCommand(): string {
   return String.raw`python3 -c 'import json,sys; d=json.load(sys.stdin); m=d["choices"][0]["message"]; print((m.get("content") or m.get("reasoning_content") or m.get("reasoning") or "").strip())'`;
 }
 
+function agentReplyHasInteger42(reply: string): boolean {
+  return /(^|[^0-9])42([^0-9]|$)/u.test(reply.replace(/\s+/gu, ""));
+}
+
 function fileMode(pathname: string): string {
   return (fs.statSync(pathname).mode & 0o777).toString(8).padStart(3, "0");
 }
@@ -145,7 +149,7 @@ async function expectSandboxInference42(
     },
   );
   expect(response.exitCode, resultText(response)).toBe(0);
-  expect(response.stdout).toMatch(/(^|[^0-9])42([^0-9]|$)/);
+  expect(agentReplyHasInteger42(response.stdout), resultText(response)).toBe(true);
 }
 
 liveTest(

@@ -88,3 +88,23 @@ except Exception:
 print("\n".join(parts))
 '
 }
+
+nemoclaw_e2e_compact_agent_reply() {
+  tr -d '[:space:]'
+}
+
+nemoclaw_e2e_agent_reply_contains_token() {
+  local reply="${1:-}"
+  local expected="${2:-}"
+  local compact_reply compact_expected
+
+  compact_reply="$(printf '%s' "$reply" | nemoclaw_e2e_compact_agent_reply)"
+  compact_expected="$(printf '%s' "$expected" | nemoclaw_e2e_compact_agent_reply)"
+  [ -n "$compact_expected" ] && grep -Fq -- "$compact_expected" <<<"$compact_reply"
+}
+
+nemoclaw_e2e_agent_reply_has_integer_42() {
+  local compact_reply
+  compact_reply="$(printf '%s' "${1:-}" | nemoclaw_e2e_compact_agent_reply)"
+  [[ "$compact_reply" =~ (^|[^0-9])42([^0-9]|$) ]]
+}

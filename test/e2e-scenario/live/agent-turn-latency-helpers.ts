@@ -169,6 +169,10 @@ export function chatContent(raw: string): string {
   );
 }
 
+export function agentReplyHasInteger42(reply: string): boolean {
+  return /(^|[^0-9])42([^0-9]|$)/u.test(reply.replace(/\s+/gu, ""));
+}
+
 export function msSince(start: bigint): number {
   return Number((process.hrtime.bigint() - start) / 1_000_000n);
 }

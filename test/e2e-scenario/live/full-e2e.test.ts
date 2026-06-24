@@ -92,6 +92,10 @@ function parseReplyCommand(): string {
   return String.raw`python3 -c 'import json,sys; d=json.load(sys.stdin); m=d["choices"][0]["message"]; print((m.get("content") or m.get("reasoning_content") or "").strip())'`;
 }
 
+function agentReplyHasInteger42(reply: string): boolean {
+  return /(^|[^0-9])42([^0-9]|$)/u.test(reply.replace(/\s+/gu, ""));
+}
+
 liveTest(
   "full e2e: install, onboard, inference, cli operations, and cleanup",
   { timeout: LIVE_TIMEOUT_MS },
@@ -204,7 +208,9 @@ liveTest(
       },
     );
     expect(sandboxInference.exitCode, resultText(sandboxInference)).toBe(0);
-    expect(sandboxInference.stdout).toMatch(/(^|[^0-9])42([^0-9]|$)/);
+    expect(agentReplyHasInteger42(sandboxInference.stdout), resultText(sandboxInference)).toBe(
+      true,
+    );
 
     const logs = await repoNemoclaw(
       host,
