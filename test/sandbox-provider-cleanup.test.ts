@@ -36,6 +36,7 @@ describe("SANDBOX_PROVIDER_SUFFIXES", () => {
         "telegram-bridge",
         "discord-bridge",
         "wechat-bridge",
+        "zaloclawbot-bridge",
         "slack-bridge",
         "slack-app",
         "brave-search",

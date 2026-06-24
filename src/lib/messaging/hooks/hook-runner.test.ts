@@ -49,6 +49,8 @@ describe("MessagingHookRegistry", () => {
       "wechat.ilinkLogin",
       "wechat.seedOpenClawAccount",
       "wechat.healthCheck",
+      "zalo-clawbot.qrLogin",
+      "zalo-clawbot.seedOpenClawAccount",
     ]);
   });
 

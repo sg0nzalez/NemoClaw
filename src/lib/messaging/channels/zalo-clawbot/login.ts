@@ -12,8 +12,8 @@ import {
   type FetchLike,
   pollZaloClawbotLoginStatus,
   requestZaloClawbotLogin,
-  ZaloClawbotQrError,
   type ZaloClawbotLoginSession,
+  ZaloClawbotQrError,
 } from "./qr";
 
 /** Total deadline for one login attempt — long enough for a slow human, short
@@ -147,11 +147,7 @@ export async function runZaloClawbotHostQrLogin(
 
   let qrRefreshCount = 0;
   const deadline = opts.now() + opts.totalTimeoutMs;
-  const debug =
-    process.env.NEMOCLAW_ZALOCLAWBOT_QUIET === "1"
-      ? (_msg: string) => {}
-      : (msg: string) => opts.log(`  [zalo-clawbot] ${msg}`);
-  debug("waiting for Zalo login confirmation…");
+  opts.log("  [zalo-clawbot] waiting for Zalo login confirmation…");
 
   while (opts.now() < deadline) {
     if (opts.signal?.aborted) return { kind: "aborted" };

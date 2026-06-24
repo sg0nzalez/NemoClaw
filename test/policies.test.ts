@@ -119,10 +119,8 @@ describe("policies", () => {
     });
 
     it("returns expected preset names", () => {
-      const names = policies
-        .listPresets()
-        .map((p: { name: string }) => p.name)
-        .sort();
+      const names = policies.listPresets().map((p: { name: string }) => p.name);
+      names.sort();
       const expected = [
         "brave",
         "brew",
