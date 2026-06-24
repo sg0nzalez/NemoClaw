@@ -136,7 +136,7 @@ describe("ManifestCompiler", () => {
       agent: "openclaw",
       workflow: "onboard",
       isInteractive: true,
-      configuredChannels: ["slack", "telegram", "wechat", "discord", "whatsapp", "zalo"],
+      configuredChannels: ["slack", "telegram", "wechat", "discord", "whatsapp", "zalo", "teams"],
       credentialAvailability: {
         TELEGRAM_BOT_TOKEN: true,
         DISCORD_BOT_TOKEN: true,
@@ -144,25 +144,9 @@ describe("ManifestCompiler", () => {
         SLACK_BOT_TOKEN: true,
         SLACK_APP_TOKEN: true,
         ZALO_BOT_TOKEN: true,
+        MSTEAMS_APP_PASSWORD: true,
       },
     });
-    const plan = await withEnv(TEST_TEAMS_ENV, () =>
-      compiler().compile({
-        sandboxName: "demo",
-        agent: "openclaw",
-        workflow: "onboard",
-        isInteractive: true,
-        configuredChannels: ["slack", "telegram", "wechat", "discord", "whatsapp", "teams"],
-        credentialAvailability: {
-          TELEGRAM_BOT_TOKEN: true,
-          DISCORD_BOT_TOKEN: true,
-          WECHAT_BOT_TOKEN: true,
-          SLACK_BOT_TOKEN: true,
-          SLACK_APP_TOKEN: true,
-          MSTEAMS_APP_PASSWORD: true,
-        },
-      }),
-    );
 
     expect(plan.channels.map((channel) => channel.channelId)).toEqual([...ALL_CHANNELS, "zalo"]);
     expect(plan.channels.every((channel) => channel.active)).toBe(true);
@@ -219,6 +203,9 @@ describe("ManifestCompiler", () => {
         channelId: "zalo",
         presetName: "zalo",
         policyKeys: ["zalo"],
+        source: "manifest",
+      },
+      {
         channelId: "teams",
         presetName: "teams",
         policyKeys: ["teams"],
@@ -296,6 +283,11 @@ describe("ManifestCompiler", () => {
       },
       {
         channelId: "zalo",
+        kind: "package-install",
+        outputId: "openclawPluginPackage",
+        required: true,
+      },
+      {
         channelId: "teams",
         kind: "package-install",
         outputId: "openclawPluginPackage",
