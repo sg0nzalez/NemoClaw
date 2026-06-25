@@ -7,6 +7,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { containsInteger42Answer } from "../../helpers/e2e-answer-assertions.ts";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
 import { type HostCliClient } from "../fixtures/clients/host.ts";
 import { type SandboxClient, validateSandboxName } from "../fixtures/clients/sandbox.ts";
@@ -109,10 +110,6 @@ function parseReplyCommand(): string {
   return String.raw`python3 -c 'import json,sys; d=json.load(sys.stdin); m=d["choices"][0]["message"]; print((m.get("content") or m.get("reasoning_content") or m.get("reasoning") or "").strip())'`;
 }
 
-function agentReplyHasInteger42(reply: string): boolean {
-  return /(^|[^0-9])42([^0-9]|$)/u.test(reply.replace(/\s+/gu, ""));
-}
-
 function fileMode(pathname: string): string {
   return (fs.statSync(pathname).mode & 0o777).toString(8).padStart(3, "0");
 }
@@ -149,7 +146,7 @@ async function expectSandboxInference42(
     },
   );
   expect(response.exitCode, resultText(response)).toBe(0);
-  expect(agentReplyHasInteger42(response.stdout), resultText(response)).toBe(true);
+  expect(containsInteger42Answer(response.stdout), resultText(response)).toBe(true);
 }
 
 liveTest(

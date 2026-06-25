@@ -13,6 +13,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { containsInteger42Answer } from "../../helpers/e2e-answer-assertions.ts";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
 import type { HostCliClient } from "../fixtures/clients/host.ts";
 import { type SandboxClient, trustedSandboxShellScript } from "../fixtures/clients/sandbox.ts";
@@ -238,10 +239,6 @@ function parseOpenClawAgentText(raw: string): string {
   return parts.join("\n");
 }
 
-function agentReplyHasInteger42(reply: string): boolean {
-  return /(^|[^0-9])42([^0-9]|$)/u.test(reply.replace(/\s+/gu, ""));
-}
-
 async function assertAgentCanAnswer(host: HostCliClient, sandboxName: string): Promise<void> {
   const sessionId = `e2e-sbx-02-${Date.now()}-${process.pid}`;
   const result = await host.nemoclaw(
@@ -270,7 +267,7 @@ async function assertAgentCanAnswer(host: HostCliClient, sandboxName: string): P
   );
   const reply = parseOpenClawAgentText(result.stdout);
   expectExitZero(result, "openclaw agent --json");
-  expect(agentReplyHasInteger42(reply), resultText(result)).toBe(true);
+  expect(containsInteger42Answer(reply), resultText(result)).toBe(true);
 }
 
 async function assertStatusFields(host: HostCliClient, sandboxName: string): Promise<void> {

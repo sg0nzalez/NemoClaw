@@ -5,6 +5,7 @@
 
 import fs from "node:fs";
 
+import { containsInteger42Answer } from "../../helpers/e2e-answer-assertions.ts";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
 import { resultText } from "../fixtures/clients/index.ts";
 import { trustedSandboxShellScript } from "../fixtures/clients/sandbox.ts";
@@ -14,7 +15,6 @@ import {
   assertHermesConfig,
   assertNoOpenClawTransportErrors,
   assertOpenClawConfig,
-  agentReplyHasInteger42,
   CLI,
   chatContent,
   cleanupTurnSandboxes,
@@ -90,7 +90,7 @@ test.skipIf(!shouldRunLiveE2EScenarios())(
     expect(openclaw.result.exitCode, resultText(openclaw.result)).toBe(0);
     assertNoOpenClawTransportErrors(resultText(openclaw.result));
     expect(
-      agentReplyHasInteger42(extractOpenClawAgentText(openclaw.result.stdout)),
+      containsInteger42Answer(extractOpenClawAgentText(openclaw.result.stdout)),
       resultText(openclaw.result),
     ).toBe(true);
     expect(openclaw.elapsedMs).toBeLessThanOrEqual(MAX_TURN_SECONDS * 1000);
@@ -154,7 +154,7 @@ test.skipIf(!shouldRunLiveE2EScenarios())(
     expect(hermesTurn.exitCode, resultText(hermesTurn)).toBe(0);
     const hermesResponse = responseBodyAndStatus(hermesTurn.stdout);
     expect(hermesResponse.status, resultText(hermesTurn)).toBe("200");
-    expect(agentReplyHasInteger42(chatContent(hermesResponse.body)), resultText(hermesTurn)).toBe(
+    expect(containsInteger42Answer(chatContent(hermesResponse.body)), resultText(hermesTurn)).toBe(
       true,
     );
     expect(hermesMs).toBeLessThanOrEqual(MAX_TURN_SECONDS * 1000);

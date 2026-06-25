@@ -58,7 +58,7 @@ export function env(
     OPENSHELL_GATEWAY: process.env.OPENSHELL_GATEWAY ?? "nemoclaw",
   };
   agent === "hermes" && (out.NEMOCLAW_AGENT = "hermes");
-  apiKey && Object.assign(out, { NVIDIA_INFERENCE_API_KEY: apiKey, NVIDIA_API_KEY: apiKey });
+  apiKey && Object.assign(out, { NVIDIA_INFERENCE_API_KEY: apiKey });
   PROVIDER === "custom" &&
     Object.assign(out, {
       COMPATIBLE_API_KEY: apiKey,
@@ -167,10 +167,6 @@ export function chatContent(raw: string): string {
       .find((value): value is string => typeof value === "string" && value.trim().length > 0)
       ?.trim() ?? ""
   );
-}
-
-export function agentReplyHasInteger42(reply: string): boolean {
-  return /(^|[^0-9])42([^0-9]|$)/u.test(reply.replace(/\s+/gu, ""));
 }
 
 export function msSince(start: bigint): number {
