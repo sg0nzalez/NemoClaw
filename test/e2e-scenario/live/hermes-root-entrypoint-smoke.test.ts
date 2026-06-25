@@ -159,16 +159,18 @@ printf '%s\n%s' "$code" "$body"
     );
     const [code = "000", ...bodyLines] = health.stdout.split(/\r?\n/);
     const body = bodyLines.join("\n");
-    if (code === "200") {
-      expect(body, `${container}: health response did not report status ok`).toMatch(
-        /"status"\s*:\s*"ok"/,
-      );
-      expect(body, `${container}: health response did not report Hermes platform`).toMatch(
-        /"platform"\s*:\s*"hermes-agent"/,
-      );
-      return;
+    switch (code) {
+      case "200":
+        expect(body, `${container}: health response did not report status ok`).toMatch(
+          /"status"\s*:\s*"ok"/,
+        );
+        expect(body, `${container}: health response did not report Hermes platform`).toMatch(
+          /"platform"\s*:\s*"hermes-agent"/,
+        );
+        return;
+      case "401":
+        return;
     }
-    if (code === "401") return;
 
     const running = await probe.run(["inspect", "-f", "{{.State.Running}}", container], {
       artifactName: `${container}-running-${attempt}`,
