@@ -257,27 +257,25 @@ describe("GATEWAY_STOP_SCRIPT (executed)", () => {
     }
   }
 
-  function runStopScript(env: Record<string, string> = {}): number {
-    const result = cp.spawnSync("sh", ["-lc", GATEWAY_STOP_SCRIPT], {
+  function runStopScript(script = GATEWAY_STOP_SCRIPT): number {
+    const result = cp.spawnSync("sh", ["-lc", script], {
       encoding: "utf-8",
-      env: { ...process.env, ...env },
       timeout: 20000,
     });
     assert(result.status !== null, `stop script did not exit: ${result.signal} ${result.stderr}`);
     return result.status;
   }
 
-  function gatewayIdentityEnv(pid: number): Record<string, string> {
+  function stopScriptWithGatewayIdentity(pid: number): string {
     const dir = mkdtempSync(join(tmpdir(), "nemoclaw-gateway-stop-identity-"));
     const pidFile = join(dir, "nemoclaw-gateway.pid");
     const markerFile = join(dir, "nemoclaw-gateway-local");
     writeFileSync(pidFile, `${pid}\n`);
     writeFileSync(markerFile, "");
-    return {
-      NEMOCLAW_GATEWAY_STOP_PID_FILE: pidFile,
-      NEMOCLAW_GATEWAY_STOP_MARKER_FILE: markerFile,
-      NEMOCLAW_GATEWAY_STOP_EXTRA_USERS: process.env.USER ?? "",
-    };
+    return GATEWAY_STOP_SCRIPT.replaceAll("/tmp/nemoclaw-gateway.pid", pidFile).replaceAll(
+      "/tmp/nemoclaw-gateway-local",
+      markerFile,
+    );
   }
 
   it.runIf(process.platform === "linux")("kills openclaw-gateway argv0 process", async () => {
@@ -306,7 +304,7 @@ describe("GATEWAY_STOP_SCRIPT (executed)", () => {
       const pid = spawnWithArgv0("openclaw");
       expect(isAlive(pid)).toBe(true);
 
-      expect(runStopScript(gatewayIdentityEnv(pid))).toBe(0);
+      expect(runStopScript(stopScriptWithGatewayIdentity(pid))).toBe(0);
 
       // Give the kernel a moment to reap after SIGTERM.
       await new Promise((r) => setTimeout(r, 300));

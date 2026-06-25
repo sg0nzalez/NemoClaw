@@ -508,19 +508,15 @@ export const GATEWAY_STOP_SCRIPT = String.raw`
 set -eu
 self="$$"
 parent="$PPID"
-gateway_pid_file="$(printenv NEMOCLAW_GATEWAY_STOP_PID_FILE 2>/dev/null || true)"
-[ -n "$gateway_pid_file" ] || gateway_pid_file="/tmp/nemoclaw-gateway.pid"
-gateway_marker_file="$(printenv NEMOCLAW_GATEWAY_STOP_MARKER_FILE 2>/dev/null || true)"
-[ -n "$gateway_marker_file" ] || gateway_marker_file="/tmp/nemoclaw-gateway-local"
+gateway_pid_file="/tmp/nemoclaw-gateway.pid"
+gateway_marker_file="/tmp/nemoclaw-gateway-local"
 pidfile_pid=""
 if [ -f "$gateway_pid_file" ]; then
   pidfile_pid="$(cat "$gateway_pid_file" 2>/dev/null | tr -cd '0-9' | head -c 20)"
 fi
 marker_exists=0
 [ -f "$gateway_marker_file" ] && marker_exists=1
-extra_bare_users="$(printenv NEMOCLAW_GATEWAY_STOP_EXTRA_USERS 2>/dev/null || true)"
 allowed_bare_users="gateway,sandbox"
-[ -n "$extra_bare_users" ] && allowed_bare_users="$allowed_bare_users,$extra_bare_users"
 find_gateway_pids() {
   ps -eo user=,pid=,args= 2>/dev/null | awk \
     -v self="$self" \
