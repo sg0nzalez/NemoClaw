@@ -598,7 +598,11 @@ type StopAttemptResult = ReturnType<typeof spawnSync>;
 function isSandboxPodName(line: string, sandboxName: string): boolean {
   if (!line.startsWith("pod/")) return false;
   const podName = line.slice("pod/".length);
-  return podName === sandboxName || podName === `${sandboxName}-0`;
+  if (podName === sandboxName) return true;
+  const prefix = `${sandboxName}-`;
+  if (!podName.startsWith(prefix)) return false;
+  const generatedSuffix = podName.slice(prefix.length);
+  return /^[a-z0-9]+$/.test(generatedSuffix);
 }
 
 function stopSandboxChannelsViaKubectl(sandboxName: string): StopAttemptResult | null {

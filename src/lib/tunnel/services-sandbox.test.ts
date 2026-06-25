@@ -118,24 +118,37 @@ describe("stopSandboxChannels", () => {
     logSpy.mockRestore();
   });
 
-  it("does not select overlapping sandbox pod names for privileged shutdown", () => {
+  it("uses the generated sandbox pod name for privileged shutdown", () => {
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     spawnSyncSpy
-      .mockReturnValueOnce({ status: 0, stdout: "pod/prod-app-0\npod/app-0\n" })
+      .mockReturnValueOnce({ status: 0, stdout: "pod/app-abc\n" })
       .mockReturnValueOnce({ status: 0 });
 
     stopSandboxChannels("app");
 
     const args = spawnSyncSpy.mock.calls[1][1] as string[];
-    expect(args).toContain("pod/app-0");
-    expect(args).not.toContain("pod/prod-app-0");
+    expect(args).toContain("pod/app-abc");
     logSpy.mockRestore();
   });
 
-  it("falls back when no exact sandbox pod name is available", () => {
+  it("does not select overlapping sandbox pod names for privileged shutdown", () => {
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     spawnSyncSpy
-      .mockReturnValueOnce({ status: 0, stdout: "pod/prod-app-0\npod/app-copy-0\n" })
+      .mockReturnValueOnce({ status: 0, stdout: "pod/prod-app-abc\npod/app-abc\n" })
+      .mockReturnValueOnce({ status: 0 });
+
+    stopSandboxChannels("app");
+
+    const args = spawnSyncSpy.mock.calls[1][1] as string[];
+    expect(args).toContain("pod/app-abc");
+    expect(args).not.toContain("pod/prod-app-abc");
+    logSpy.mockRestore();
+  });
+
+  it("falls back when no exact generated sandbox pod name is available", () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    spawnSyncSpy
+      .mockReturnValueOnce({ status: 0, stdout: "pod/prod-app-abc\npod/app-copy-abc\n" })
       .mockReturnValueOnce({ status: 0 });
 
     stopSandboxChannels("app");
