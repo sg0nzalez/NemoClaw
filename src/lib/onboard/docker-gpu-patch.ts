@@ -1114,7 +1114,13 @@ export function recreateOpenShellDockerSandboxWithGpu(
         { newContainerId: originalName, backupContainerName, originalName },
         deps,
       );
-      throw new Error(`Could not start GPU-enabled sandbox container: ${resultText(runResult)}`);
+      throw new Error(
+        `Could not start GPU-enabled sandbox container: ${resultText(runResult)}; ${
+          context.rolledBack
+            ? "pre-patch sandbox restored"
+            : "rollback failed; pre-patch sandbox was NOT restored"
+        }`,
+      );
     }
 
     const stdoutId = String(runResult.stdout || "").trim();
