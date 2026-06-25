@@ -82,6 +82,7 @@ messaging_platforms:
     - wechat
     - wecom
     - whatsapp
+    - teams
 
 # ── Inference ───────────────────────────────────────────────────
 inference:

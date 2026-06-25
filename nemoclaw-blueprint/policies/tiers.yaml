@@ -45,5 +45,6 @@ tiers:
       - { name: wechat,       access: read-write }
       - { name: wecom,       access: read-write }
       - { name: whatsapp,     access: read-write }
+      - { name: teams,        access: read-write }
       - { name: jira,         access: read-write }
       - { name: outlook,      access: read-write }

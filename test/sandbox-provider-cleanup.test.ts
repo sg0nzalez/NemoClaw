@@ -40,6 +40,7 @@ describe("SANDBOX_PROVIDER_SUFFIXES", () => {
         "wecom-secret",
         "slack-bridge",
         "slack-app",
+        "teams-bridge",
         "brave-search",
       ].sort(),
     );

@@ -49,7 +49,9 @@ const COMMON_SECRET_ENV_NAMES = [
 const FREE_STANDING_SELECTOR_SPECIAL_CASES = new Set([
   "hermes-e2e-vitest",
   "hermes-root-entrypoint-smoke-vitest",
+  "jetson-nvmap-gpu-vitest",
 ]);
+const FULL_SUITE_EXCLUDED_FREE_STANDING_JOBS = new Set(["jetson-nvmap-gpu-vitest"]);
 
 function asRecord(value: unknown): WorkflowRecord {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -275,7 +277,9 @@ export function evaluateE2eVitestWorkflowDispatchSelectors(input: {
     return {
       valid: true,
       errors: [],
-      selectedFreeStandingJobs: [...freeStandingVitestJobIds].sort(),
+      selectedFreeStandingJobs: freeStandingVitestJobIds
+        .filter((job) => !FULL_SUITE_EXCLUDED_FREE_STANDING_JOBS.has(job))
+        .sort(),
       registryScenarios: [],
       liveScenariosRuns: true,
     };
@@ -319,9 +323,12 @@ function requireInput(
   errors: string[],
   inputs: WorkflowRecord,
   name: string,
-): void {
-  if (!Object.hasOwn(inputs, name))
+): WorkflowRecord {
+  if (!Object.hasOwn(inputs, name)) {
     errors.push(`workflow_dispatch missing input: ${name}`);
+    return {};
+  }
+  return asRecord(inputs[name]);
 }
 
 function requireStep(
@@ -448,6 +455,13 @@ function freeStandingJobIf(jobName: string, scenarioName?: string): string {
     ? ` || contains(format(',{0},', inputs.scenarios), ',${scenarioName},')`
     : "";
   return `\${{ (inputs.jobs == '' && inputs.scenarios == '') || contains(format(',{0},', inputs.jobs), ',${jobName},')${scenarioSelector} }}`;
+}
+
+function explicitOnlyFreeStandingJobIf(jobName: string, scenarioName?: string): string {
+  const scenarioSelector = scenarioName
+    ? ` || contains(format(',{0},', inputs.scenarios), ',${scenarioName},')`
+    : "";
+  return `\${{ contains(format(',{0},', inputs.jobs), ',${jobName},')${scenarioSelector} }}`;
 }
 
 function validateFreeStandingJobSelector(
@@ -1757,10 +1771,10 @@ function validateRebuildHermesVitestJob(
   if (jobEnv.NEMOCLAW_ENDPOINT_URL !== "https://inference-api.nvidia.com/v1") {
     errors.push(`${jobName} job must target hosted CI inference endpoint`);
   }
-  if (jobEnv.NEMOCLAW_MODEL !== "nvidia/nvidia/nemotron-3-super-v3") {
+  if (jobEnv.NEMOCLAW_MODEL !== "nvidia/nvidia/nemotron-3-ultra") {
     errors.push(`${jobName} job must pin the CI-safe Hermes rebuild model`);
   }
-  if (jobEnv.NEMOCLAW_COMPAT_MODEL !== "nvidia/nvidia/nemotron-3-super-v3") {
+  if (jobEnv.NEMOCLAW_COMPAT_MODEL !== "nvidia/nvidia/nemotron-3-ultra") {
     errors.push(`${jobName} job must pin the CI-safe compatible model`);
   }
   if (jobEnv.OPENSHELL_GATEWAY !== "nemoclaw") {
@@ -4140,6 +4154,135 @@ function validateHermesRootEntrypointSmokeVitestJob(
     );
   }
 }
+
+function validateHermesSandboxSecretBoundaryVitestJob(
+  errors: string[],
+  jobs: WorkflowRecord,
+): void {
+  const jobName = "hermes-sandbox-secret-boundary-vitest";
+  const scenarioName = "hermes-sandbox-secret-boundary";
+  const job = asRecord(jobs[jobName]);
+  if (Object.keys(job).length === 0) {
+    errors.push("workflow missing hermes-sandbox-secret-boundary-vitest job");
+    return;
+  }
+
+  if (job["runs-on"] !== "ubuntu-latest") {
+    errors.push("hermes-sandbox-secret-boundary-vitest job must run on ubuntu-latest");
+  }
+  validateFreeStandingJobSelector(errors, jobs, jobName, scenarioName);
+  if (job["timeout-minutes"] !== 60) {
+    errors.push("hermes-sandbox-secret-boundary-vitest job must keep the 60 minute timeout");
+  }
+
+  const jobEnv = asRecord(job.env);
+  if (jobEnv.NEMOCLAW_RUN_E2E_SCENARIOS !== "1") {
+    errors.push("hermes-sandbox-secret-boundary-vitest job must set NEMOCLAW_RUN_E2E_SCENARIOS=1");
+  }
+  if (
+    jobEnv.E2E_ARTIFACT_DIR !==
+    "${{ github.workspace }}/e2e-artifacts/vitest/hermes-sandbox-secret-boundary"
+  ) {
+    errors.push(
+      "hermes-sandbox-secret-boundary-vitest job must write artifacts under e2e-artifacts/vitest/hermes-sandbox-secret-boundary",
+    );
+  }
+  for (const secret of ["NVIDIA_INFERENCE_API_KEY", "DOCKERHUB_USERNAME", "DOCKERHUB_TOKEN"]) {
+    requireEnvDoesNotExposeSecret(
+      errors,
+      "hermes-sandbox-secret-boundary-vitest job",
+      jobEnv,
+      secret,
+    );
+  }
+
+  const steps = asSteps(job.steps);
+  requireNoDispatchInputInterpolation(errors, steps);
+  for (const step of steps) {
+    const stepName = `hermes-sandbox-secret-boundary-vitest step '${
+      step.name ?? step.uses ?? "<unnamed>"
+    }'`;
+    const stepEnv = asRecord(step.env);
+    requireEnvDoesNotExposeSecret(errors, stepName, stepEnv, "NVIDIA_INFERENCE_API_KEY");
+    requireEnvDoesNotExposeSecret(errors, stepName, stepEnv, "DOCKERHUB_USERNAME");
+    requireEnvDoesNotExposeSecret(errors, stepName, stepEnv, "DOCKERHUB_TOKEN");
+    requireNoDockerHubAuthInRun(errors, stepName, stringValue(step.run));
+  }
+
+  if (namedStep(steps, "Authenticate to Docker Hub")) {
+    errors.push(
+      "hermes-sandbox-secret-boundary-vitest must not authenticate to Docker Hub before branch-controlled test code runs",
+    );
+  }
+
+  const checkout = steps.find((step) => stringValue(step.uses).startsWith("actions/checkout@"));
+  if (!checkout) errors.push("hermes-sandbox-secret-boundary-vitest job missing checkout step");
+  requireFullShaAction(errors, checkout, "hermes-sandbox-secret-boundary-vitest checkout");
+  if (asRecord(checkout?.with)["persist-credentials"] !== false) {
+    errors.push(
+      "hermes-sandbox-secret-boundary-vitest checkout step must set persist-credentials=false",
+    );
+  }
+
+  const setupNode = namedStep(steps, "Set up Node");
+  if (!setupNode)
+    errors.push("hermes-sandbox-secret-boundary-vitest job missing step: Set up Node");
+  requireFullShaAction(errors, setupNode, "hermes-sandbox-secret-boundary-vitest setup-node");
+
+  const installRootDependencies = requireJobStep(
+    errors,
+    jobName,
+    steps,
+    "Install root dependencies",
+  );
+  requireRunContains(errors, installRootDependencies, "npm ci --ignore-scripts");
+
+  const runVitest = requireJobStep(
+    errors,
+    jobName,
+    steps,
+    "Run Hermes sandbox secret-boundary live test",
+  );
+  requireRunContains(errors, runVitest, "npx vitest run --project e2e-scenarios-live");
+  requireRunContains(
+    errors,
+    runVitest,
+    "test/e2e-scenario/live/hermes-sandbox-secret-boundary.test.ts",
+  );
+  requireRunDoesNotContain(errors, runVitest, "${{ inputs.");
+
+  const upload = requireJobStep(
+    errors,
+    jobName,
+    steps,
+    "Upload Hermes sandbox secret-boundary artifacts",
+  );
+  requireFullShaAction(errors, upload, "hermes-sandbox-secret-boundary-vitest upload-artifact");
+  const uploadWith = asRecord(upload?.with);
+  if (uploadWith.name !== "e2e-vitest-scenarios-hermes-sandbox-secret-boundary") {
+    errors.push("hermes-sandbox-secret-boundary-vitest artifact upload name must be stable");
+  }
+  const uploadPath = stringValue(uploadWith.path);
+  requireUploadPathContains(
+    errors,
+    uploadPath,
+    "e2e-artifacts/vitest/hermes-sandbox-secret-boundary/",
+  );
+  if (uploadWith["include-hidden-files"] !== false) {
+    errors.push(
+      "hermes-sandbox-secret-boundary-vitest artifact upload must set include-hidden-files: false",
+    );
+  }
+  if (uploadWith["if-no-files-found"] !== "ignore") {
+    errors.push(
+      "hermes-sandbox-secret-boundary-vitest artifact upload must ignore missing fixture artifacts",
+    );
+  }
+  if (uploadWith["retention-days"] !== 14) {
+    errors.push("hermes-sandbox-secret-boundary-vitest artifact upload retention-days must be 14");
+  }
+}
+
 
 function validateDiagnosticsVitestJob(
   errors: string[],
@@ -7221,7 +7364,18 @@ export function validateE2eVitestScenariosWorkflowBoundary(
 
   const dispatchInputs = asRecord(workflowDispatch.inputs);
   requireInput(errors, dispatchInputs, "scenarios");
-  requireInput(errors, dispatchInputs, "jobs");
+  const jobsInput = requireInput(errors, dispatchInputs, "jobs");
+  const jobsDescription = stringValue(jobsInput.description);
+  if (!jobsDescription.includes("default-enabled jobs")) {
+    errors.push(
+      "workflow_dispatch jobs input description must say empty dispatch runs default-enabled jobs",
+    );
+  }
+  if (!jobsDescription.includes("explicit-only jobs")) {
+    errors.push(
+      "workflow_dispatch jobs input description must say explicit-only jobs are skipped unless selected",
+    );
+  }
   if (Object.hasOwn(dispatchInputs, "test_filter")) {
     errors.push("workflow_dispatch must not expose legacy test_filter input");
   }
@@ -7564,6 +7718,7 @@ export function validateE2eVitestScenariosWorkflowBoundary(
   validateHermesE2EVitestJob(errors, jobs);
   validateFreeStandingJobSelector(errors, jobs, "hermes-discord-vitest", "hermes-discord");
   validateHermesRootEntrypointSmokeVitestJob(errors, jobs);
+  validateHermesSandboxSecretBoundaryVitestJob(errors, jobs);
   validateNetworkPolicyVitestJob(errors, jobs);
   validateCommonEgressAgentVitestJob(errors, jobs);
   validateShieldsConfigVitestJob(errors, jobs);
@@ -7619,6 +7774,13 @@ export function validateE2eVitestScenariosWorkflowBoundary(
     "gateway-health-honest",
   );
 
+  const jetsonJob = asRecord(jobs["jetson-nvmap-gpu-vitest"]);
+  if (jetsonJob.needs !== "generate-matrix") {
+    errors.push("jetson-nvmap-gpu-vitest job must depend on generate-matrix");
+  }
+  if (jetsonJob.if !== explicitOnlyFreeStandingJobIf("jetson-nvmap-gpu-vitest", "jetson-nvmap-gpu")) {
+    errors.push("jetson-nvmap-gpu-vitest job must run only when explicitly selected");
+  }
   validateFreeStandingJobSelector(
     errors,
     jobs,
@@ -7719,6 +7881,31 @@ export function validateE2eVitestScenariosWorkflowBoundary(
     if (!reportScript.includes("**Requested scenarios:**")) {
       errors.push(
         "step 'Post Vitest scenario results to PR' run script must include **Requested scenarios:**",
+      );
+    }
+    if (!reportScript.includes("All default jobs passed")) {
+      errors.push(
+        "step 'Post Vitest scenario results to PR' run script must label empty dispatch as default jobs passed",
+      );
+    }
+    if (!reportScript.includes("default-enabled free-standing jobs")) {
+      errors.push(
+        "step 'Post Vitest scenario results to PR' run script must say empty dispatch uses default-enabled free-standing jobs",
+      );
+    }
+    if (!reportScript.includes("Explicit-only jobs skipped")) {
+      errors.push(
+        "step 'Post Vitest scenario results to PR' run script must list explicit-only skipped jobs on default dispatch",
+      );
+    }
+    if (!reportScript.includes("jobs=${job}") || !reportScript.includes("jetson-nvmap-gpu-vitest")) {
+      errors.push(
+        "step 'Post Vitest scenario results to PR' run script must document the explicit Jetson jobs selector",
+      );
+    }
+    if (!reportScript.includes("scenarios=${scenario}") || !reportScript.includes("jetson-nvmap-gpu")) {
+      errors.push(
+        "step 'Post Vitest scenario results to PR' run script must document the explicit Jetson scenario selector",
       );
     }
     for (const forbidden of [

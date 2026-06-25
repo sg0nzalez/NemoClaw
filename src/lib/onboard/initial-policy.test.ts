@@ -205,6 +205,7 @@ network_policies:
         "  telegram: {}",
         "  discord: {}",
         "  slack: {}",
+        "  teams: {}",
         "  wechat_bridge: {}",
         "  wecom_aibot: {}",
         "",
@@ -236,6 +237,7 @@ network_policies:
     expect(policyNames?.has("discord")).toBe(true);
     expect(policyNames?.has("telegram")).toBe(false);
     expect(policyNames?.has("slack")).toBe(false);
+    expect(policyNames?.has("teams")).toBe(false);
     expect(policyNames?.has("wechat_bridge")).toBe(false);
     expect(policyNames?.has("wecom_aibot")).toBe(false);
     expect(prepared.cleanup?.()).toBe(true);
