@@ -21,6 +21,8 @@ import {
   resolveRenderTemplatesInValue,
 } from "./compiler/engines/template";
 import type { ManifestCompilerContext } from "./compiler/types";
+import type { MessagingHookInputMap, MessagingHookOutputMap } from "./hooks";
+import { BUILT_IN_MESSAGING_HOOK_REGISTRY, runMessagingHookSync } from "./hooks";
 import type {
   ChannelHookSpec,
   ChannelInputSpec,
@@ -39,9 +41,11 @@ import type {
   SandboxMessagingPlan,
   SandboxMessagingRuntimeSetupPlan,
 } from "./manifest";
-import type { MessagingHookInputMap, MessagingHookOutputMap } from "./hooks";
-import { BUILT_IN_MESSAGING_HOOK_REGISTRY, runMessagingHookSync } from "./hooks";
-import { normalizeProviderPlaceholderForEnvKey } from "./provider-placeholders";
+import {
+  hasFullPersistedCredentialBindingShape,
+  normalizeFullPersistedCredentialBindings,
+  normalizePersistedAgentCredentialPlaceholders,
+} from "./persisted-placeholders";
 
 export type PersistedSandboxMessagingInputReference = Pick<
   SandboxMessagingInputReference,
@@ -201,7 +205,7 @@ export function normalizePersistedSandboxMessagingPlanShape(
       plan.networkPolicy && Array.isArray(plan.networkPolicy.entries)
         ? plan.networkPolicy
         : { presets: [], entries: [] },
-    agentRender: normalizePersistedAgentRender(
+    agentRender: normalizePersistedAgentCredentialPlaceholders(
       Array.isArray(plan.agentRender) ? [...plan.agentRender] : [],
       credentialBindings,
     ),
@@ -364,24 +368,9 @@ function normalizePersistedCredentialBindings(
   if (
     Array.isArray(plan.credentialBindings) &&
     plan.channels.every(hasFullChannelShape) &&
-    persisted.every(hasFullCredentialBindingShape)
+    persisted.every(hasFullPersistedCredentialBindingShape)
   ) {
-    return persisted.map((binding) => ({
-      channelId: binding.channelId as string,
-      credentialId: binding.credentialId as string,
-      sourceInput: binding.sourceInput as string,
-      providerName: binding.providerName as string,
-      providerEnvKey: binding.providerEnvKey as string,
-      placeholder:
-        normalizeProviderPlaceholderForEnvKey(
-          binding.placeholder as string,
-          binding.providerEnvKey as string,
-        ) ?? (binding.placeholder as string),
-      credentialAvailable: binding.credentialAvailable === true,
-      ...(typeof binding.credentialHash === "string"
-        ? { credentialHash: binding.credentialHash }
-        : {}),
-    }));
+    return normalizeFullPersistedCredentialBindings(persisted);
   }
 
   const manifests = channels.flatMap((channel) => {
@@ -405,34 +394,6 @@ function normalizePersistedCredentialBindings(
     new Map(channels.map((channel) => [channel.channelId, channel.inputs] as const)),
   );
   return generated.map((binding) => overlayPersistedCredentialBinding(binding, persisted));
-}
-
-function normalizePersistedAgentRender(
-  render: readonly SandboxMessagingAgentRenderPlan[],
-  credentialBindings: readonly SandboxMessagingCredentialBindingPlan[],
-): SandboxMessagingAgentRenderPlan[] {
-  const credentialEnvKeys = new Set(
-    credentialBindings.map((binding) => binding.providerEnvKey).filter(Boolean),
-  );
-  if (credentialEnvKeys.size === 0) return [...render];
-
-  return render.map((entry) => {
-    if (entry.kind !== "env-lines") return entry;
-    return {
-      ...entry,
-      lines: entry.lines.map((line) => normalizeCredentialEnvLine(line, credentialEnvKeys)),
-    };
-  });
-}
-
-function normalizeCredentialEnvLine(line: string, credentialEnvKeys: ReadonlySet<string>): string {
-  const index = line.indexOf("=");
-  if (index <= 0) return line;
-  const envKey = line.slice(0, index).trim();
-  if (!credentialEnvKeys.has(envKey)) return line;
-  const value = line.slice(index + 1);
-  const normalized = normalizeProviderPlaceholderForEnvKey(value, envKey);
-  return normalized ? `${envKey}=${normalized}` : line;
 }
 
 function hydrateChannelFromManifest(
@@ -602,20 +563,6 @@ function hasFullChannelShape(
     typeof channel.configured === "boolean" &&
     typeof channel.disabled === "boolean" &&
     Array.isArray(channel.inputs)
-  );
-}
-
-function hasFullCredentialBindingShape(
-  binding: Partial<SandboxMessagingCredentialBindingPlan>,
-): binding is SandboxMessagingCredentialBindingPlan {
-  return (
-    typeof binding.channelId === "string" &&
-    typeof binding.credentialId === "string" &&
-    typeof binding.sourceInput === "string" &&
-    typeof binding.providerName === "string" &&
-    typeof binding.providerEnvKey === "string" &&
-    typeof binding.placeholder === "string" &&
-    typeof binding.credentialAvailable === "boolean"
   );
 }
 

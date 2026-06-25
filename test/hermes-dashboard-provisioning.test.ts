@@ -1,45 +1,28 @@
-// @ts-nocheck
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { SpawnSyncReturns } from "node:child_process";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { dockerRunCommandBetween } from "./helpers/hermes-dockerfile-run";
+
 const ROOT = path.resolve(import.meta.dirname, "..");
 const HERMES_DOCKERFILE = path.join(ROOT, "agents", "hermes", "Dockerfile");
 
-function dockerRunCommandBetween(
-  dockerfile: string,
-  startMarker: string,
-  endMarker: string,
-): string {
-  const start = dockerfile.indexOf(startMarker);
-  const end = dockerfile.indexOf(endMarker, start);
-  expect(start, `Expected Dockerfile start marker ${startMarker}`).toBeGreaterThanOrEqual(0);
-  expect(end, `Expected Dockerfile end marker ${endMarker}`).toBeGreaterThan(start);
-  const runIndex = dockerfile.indexOf("RUN ", start);
-  expect(runIndex, `Expected RUN instruction after ${startMarker}`).toBeGreaterThanOrEqual(0);
-  expect(runIndex, `Expected RUN instruction before ${endMarker}`).toBeLessThan(end);
-  const candidateLines = dockerfile.slice(runIndex, end).split("\n");
-  const finalLineIndex = candidateLines.findIndex((line) => !line.trimEnd().endsWith("\\"));
-  expect(
-    finalLineIndex,
-    `Expected complete RUN instruction before ${endMarker}`,
-  ).toBeGreaterThanOrEqual(0);
-  const runLines = candidateLines.slice(0, finalLineIndex + 1);
-  const lastLine = runLines[runLines.length - 1]?.trimEnd() ?? "";
-  expect(lastLine.endsWith("\\")).toBe(false);
-  return runLines
-    .join("\n")
-    .trim()
-    .replace(/^RUN\s+/, "")
-    .replace(/\\\n/g, " ");
+interface LoggedDockerShellResult {
+  calls: string;
+  result: SpawnSyncReturns<string>;
 }
 
-function runLoggedDockerShell(command: string, tmp: string, functionDefs: string[] = []) {
+function runLoggedDockerShell(
+  command: string,
+  tmp: string,
+  functionDefs: string[] = [],
+): LoggedDockerShellResult {
   const logPath = path.join(tmp, "calls.log");
   fs.rmSync(logPath, { force: true });
   const script = [
@@ -56,7 +39,7 @@ function runLoggedDockerShell(command: string, tmp: string, functionDefs: string
   return { result, calls };
 }
 
-function dashboardBuildCommand(hermesRoot: string) {
+function dashboardBuildCommand(hermesRoot: string): string {
   const dockerfile = fs.readFileSync(HERMES_DOCKERFILE, "utf-8");
   return dockerRunCommandBetween(
     dockerfile,
