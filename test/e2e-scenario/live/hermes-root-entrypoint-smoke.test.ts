@@ -147,18 +147,28 @@ async function waitForHealth(probe: DockerProbe, container: string): Promise<voi
     const health = await dockerExecSh(
       probe,
       container,
-      "curl -sf --max-time 2 http://127.0.0.1:8642/health",
+      String.raw`
+tmp="$(mktemp)"
+code="$(curl -sS -o "$tmp" -w '%{http_code}' --max-time 2 http://127.0.0.1:8642/health 2>/dev/null || true)"
+body="$(cat "$tmp" 2>/dev/null || true)"
+rm -f "$tmp"
+[ -n "$code" ] || code=000
+printf '%s\n%s' "$code" "$body"
+`,
       `${container}-health-${attempt}`,
     );
-    if (health.exitCode === 0) {
-      expect(health.stdout, `${container}: health response did not report status ok`).toMatch(
+    const [code = "000", ...bodyLines] = health.stdout.split(/\r?\n/);
+    const body = bodyLines.join("\n");
+    if (code === "200") {
+      expect(body, `${container}: health response did not report status ok`).toMatch(
         /"status"\s*:\s*"ok"/,
       );
-      expect(health.stdout, `${container}: health response did not report Hermes platform`).toMatch(
+      expect(body, `${container}: health response did not report Hermes platform`).toMatch(
         /"platform"\s*:\s*"hermes-agent"/,
       );
       return;
     }
+    if (code === "401") return;
 
     const running = await probe.run(["inspect", "-f", "{{.State.Running}}", container], {
       artifactName: `${container}-running-${attempt}`,
@@ -415,7 +425,7 @@ liveTest(
       image,
       prebuiltImage: Boolean(process.env.NEMOCLAW_HERMES_TEST_IMAGE),
       contract: [
-        "clean root-entrypoint startup reaches Hermes health",
+        "clean root-entrypoint startup reaches Hermes health or bearer-auth readiness",
         "gateway process runs as gateway user",
         "gateway log has no PID race or config load failure",
         "Hermes v0.14 writable runtime directories are present",
