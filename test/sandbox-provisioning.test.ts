@@ -1353,6 +1353,65 @@ describe("Hermes sandbox provisioning", () => {
     }
   });
 
+  it("prebuilds the Hermes dashboard bundle from a root workspace lockfile in stale bases", () => {
+    const dockerfile = fs.readFileSync(HERMES_DOCKERFILE, "utf-8");
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-dashboard-workspace-"));
+    const hermesRoot = path.join(tmp, "hermes");
+    const hermesWebDir = path.join(hermesRoot, "web");
+    const hermesWebDist = path.join(hermesRoot, "hermes_cli", "web_dist");
+    fs.mkdirSync(hermesWebDir, { recursive: true });
+    fs.writeFileSync(path.join(hermesRoot, "package-lock.json"), '{"packages":{"web":{}}}\n');
+    fs.writeFileSync(path.join(hermesWebDir, "package.json"), "{}\n");
+
+    const command = dockerRunCommandBetween(
+      dockerfile,
+      "# Published base images can lag Dockerfile.base",
+      "# Harden: remove unnecessary build tools",
+    ).replaceAll("/opt/hermes", hermesRoot);
+
+    try {
+      const { result, calls } = runLoggedDockerShell(command, tmp, [
+        'npm() { printf "npm %s\\n" "$*" >> "$call_log"; if [ -n "${hermes_web_dist:-}" ] && [ "${1:-}" = "run" ] && [ "${2:-}" = "build" ]; then mkdir -p "$hermes_web_dist"; fi; }',
+      ]);
+
+      expect(result.status, result.stderr).toBe(0);
+      expect(calls).toContain(`npm ci --prefix ${hermesRoot}`);
+      expect(calls).toContain(`npm run build --prefix ${hermesRoot} --workspace web`);
+      expect(calls).toContain(`npm ci --omit=dev --prefix ${hermesRoot}`);
+      expect(fs.existsSync(hermesWebDist)).toBe(true);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects stale Hermes dashboard sources that are missing pinned lockfile coverage", () => {
+    const dockerfile = fs.readFileSync(HERMES_DOCKERFILE, "utf-8");
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-dashboard-unpinned-"));
+    const hermesRoot = path.join(tmp, "hermes");
+    const hermesWebDir = path.join(hermesRoot, "web");
+    fs.mkdirSync(hermesWebDir, { recursive: true });
+    fs.writeFileSync(path.join(hermesRoot, "package-lock.json"), "{}\n");
+    fs.writeFileSync(path.join(hermesWebDir, "package.json"), "{}\n");
+
+    const command = dockerRunCommandBetween(
+      dockerfile,
+      "# Published base images can lag Dockerfile.base",
+      "# Harden: remove unnecessary build tools",
+    ).replaceAll("/opt/hermes", hermesRoot);
+
+    try {
+      const { result, calls } = runLoggedDockerShell(command, tmp, [
+        'npm() { printf "npm %s\\n" "$*" >> "$call_log"; }',
+      ]);
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("not covered by a pinned lockfile");
+      expect(calls).toBe("");
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it("adds root to the Hermes sandbox group during base user setup", () => {
     const { result, calls, tmp, sandboxRoot } = runHermesUserSetupBlock();
     try {

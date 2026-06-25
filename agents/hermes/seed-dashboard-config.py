@@ -369,9 +369,17 @@ def _mirror_env(src: str, dst: str) -> bool:
         print(f"[SECURITY] Refusing to seed dashboard env because {dst} is a symlink", file=sys.stderr)
         return False
 
+    def parse_env_key(line: str) -> str | None:
+        candidate = line.lstrip()
+        if candidate.startswith("export "):
+            candidate = candidate[len("export ") :].lstrip()
+        if "=" not in candidate:
+            return None
+        return candidate.split("=", 1)[0].strip()
+
     def write_env(dst_handle: TextIO) -> None:
         for line in env_text.splitlines(keepends=True):
-            key = line.split("=", 1)[0].strip()
+            key = parse_env_key(line)
             if key in _DASHBOARD_ENV_ALLOWED_KEYS:
                 dst_handle.write(line)
 

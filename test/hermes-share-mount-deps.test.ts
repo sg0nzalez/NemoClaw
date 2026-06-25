@@ -49,15 +49,25 @@ function runLoggedShell(command: string, tmp: string) {
 function runHermesInstallLayer(
   command: string,
   tmp: string,
-  opts: { whatsappBridge?: "lockfile" | "package-json" } = {},
+  opts: {
+    webLockfile?: "directory" | "workspace" | "missing";
+    whatsappBridge?: "lockfile" | "package-json";
+  } = {},
 ) {
   const fixture = path.join(tmp, "hermes");
   const logPath = path.join(tmp, "calls.log");
   const scriptPath = path.join(tmp, "run-hermes-install-layer.sh");
+  const webLockfile = opts.webLockfile ?? "directory";
   fs.mkdirSync(path.join(fixture, "web"), { recursive: true });
   fs.writeFileSync(path.join(fixture, "pyproject.toml"), 'version = "0.16.0"\n');
-  fs.writeFileSync(path.join(fixture, "package-lock.json"), "{}\n");
-  fs.writeFileSync(path.join(fixture, "web", "package-lock.json"), "{}\n");
+  fs.writeFileSync(
+    path.join(fixture, "package-lock.json"),
+    webLockfile === "workspace" ? '{"packages":{"web":{}}}\n' : "{}\n",
+  );
+  fs.writeFileSync(path.join(fixture, "web", "package.json"), "{}\n");
+  if (webLockfile === "directory") {
+    fs.writeFileSync(path.join(fixture, "web", "package-lock.json"), "{}\n");
+  }
   if (opts.whatsappBridge) {
     const bridgeDir = path.join(fixture, "scripts", "whatsapp-bridge");
     fs.mkdirSync(bridgeDir, { recursive: true });
@@ -144,6 +154,26 @@ describe("Hermes share mount package parity (#2947)", () => {
       expect(calls).not.toContain("--prefix ui-tui");
       expect(calls).toContain("npm ci --prefix web --prefer-offline --no-audit --no-fund");
       expect(calls).toContain("npm run build --prefix web");
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("builds the Hermes web workspace from the root package-lock.json", () => {
+    const dockerfile = fs.readFileSync(HERMES_DOCKERFILE_BASE, "utf-8");
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-ui-workspace-"));
+
+    try {
+      const command = extractHermesInstallCommand(dockerfile);
+      const { result, calls } = runHermesInstallLayer(command, tmp, {
+        webLockfile: "workspace",
+      });
+
+      expect(result.status, result.stderr).toBe(0);
+      expect(calls).toContain("npm ci --prefer-offline --no-audit --no-fund");
+      expect(calls).not.toContain("npm ci --prefix web");
+      expect(calls).toContain("npm run build --workspace web");
+      expect(calls).toContain("npm ci --omit=dev --prefer-offline --no-audit --no-fund");
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }

@@ -199,6 +199,29 @@ describe.skipIf(!PY_YAML_AVAILABLE)("seed-dashboard-config.py", () => {
     expect(fs.statSync(envDst).mode & 0o777).toBe(0o600);
   });
 
+  it("mirrors export-prefixed API_SERVER_KEY into the dashboard .env", () => {
+    const src = writeYaml("gw.yaml", GATEWAY_CONFIG);
+    const dst = path.join(tmpDir, "dash.yaml");
+    const envSrc = path.join(tmpDir, "gw.env");
+    const envDst = path.join(tmpDir, "dash.env");
+    fs.writeFileSync(
+      envSrc,
+      [
+        "export API_SERVER_KEY=server-key",
+        "export OPENAI_API_KEY=do-not-copy",
+        "API_SERVER_HOST=127.0.0.1",
+        "",
+      ].join("\n"),
+    );
+
+    const res = runSeed(src, dst, envSrc, envDst);
+    expect(res.status).toBe(0);
+
+    expect(fs.readFileSync(envDst, "utf-8")).toBe(
+      ["export API_SERVER_KEY=server-key", "API_SERVER_HOST=127.0.0.1", ""].join("\n"),
+    );
+  });
+
   it("applies requested dashboard seed owner and mode before the atomic rename", () => {
     const uid = process.getuid?.() ?? Number.NaN;
     const gid = process.getgid?.() ?? Number.NaN;

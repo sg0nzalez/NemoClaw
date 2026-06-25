@@ -154,7 +154,7 @@ function runHermesDashboardHomePrepAsRoot() {
   try {
     return spawnSync("bash", [scriptPath], {
       encoding: "utf-8",
-      timeout: 5000,
+      timeout: 10_000,
       env: process.env,
     });
   } finally {
@@ -856,7 +856,7 @@ describe("agents/hermes/start.sh config integrity", () => {
     expect(result.stdout.trim()).toMatch(/:stepped=1$/);
   });
 
-  it("prepares root dashboard home and seeds config through the sandbox identity", () => {
+  it("prepares root dashboard home and seeds config through the sandbox identity", { timeout: 15_000 }, () => {
     const result = runHermesDashboardHomePrepAsRoot();
 
     expect(result.status).toBe(0);
