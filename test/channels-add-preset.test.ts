@@ -1,10 +1,6 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
-//
-// Regression test for #3437 — `nemoclaw <sandbox> channels add <channel>`
-// must apply the channel's matching network policy preset BEFORE triggering
-// the rebuild, so the rebuild's backup manifest captures the preset and
-// the bridge has egress to its upstream API after the new sandbox boots.
+// Regression for #3437: channel add applies the matching network policy before rebuild.
 
 import assert from "node:assert/strict";
 import { type SpawnSyncReturns, spawnSync } from "node:child_process";
@@ -53,13 +49,7 @@ function parseResultPayload<T extends Record<string, any> = Record<string, any>>
   return payload;
 }
 
-// Build a preamble that:
-//   - stubs every module touched by addSandboxChannel so no real openshell,
-//     gateway, or filesystem credential write happens
-//   - records every policies.applyPreset call in `appliedCalls`
-//   - records the relative order of applyPreset vs promptAndRebuild via
-//     a console.log marker, so the test can assert the ordering invariant
-//     (apply MUST precede rebuild)
+// Stubs addSandboxChannel boundaries and records policy/rebuild ordering.
 function buildPreamble({
   presetNamesAvailable = ["telegram", "slack", "discord", "npm", "github"],
   applyPresetResult = true,
