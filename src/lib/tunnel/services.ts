@@ -510,19 +510,35 @@ self="$$"
 parent="$PPID"
 gateway_pid_file="/tmp/nemoclaw-gateway.pid"
 gateway_marker_file="/tmp/nemoclaw-gateway-local"
+trusted_identity_owners="root,gateway,sandbox"
+trusted_identity_file() {
+  file="$1"
+  [ -f "$file" ] || return 1
+  [ ! -L "$file" ] || return 1
+  mode="$(stat -c '%a' "$file" 2>/dev/null)" || return 1
+  owner="$(stat -c '%U' "$file" 2>/dev/null)" || return 1
+  case "$mode" in
+    *00) ;;
+    *) return 1 ;;
+  esac
+  case ",$trusted_identity_owners," in
+    *,"$owner",*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
 pidfile_pid=""
-if [ -f "$gateway_pid_file" ]; then
+identity_files_trusted=0
+if trusted_identity_file "$gateway_pid_file" && trusted_identity_file "$gateway_marker_file"; then
   pidfile_pid="$(cat "$gateway_pid_file" 2>/dev/null | tr -cd '0-9' | head -c 20)"
+  [ -n "$pidfile_pid" ] && identity_files_trusted=1
 fi
-marker_exists=0
-[ -f "$gateway_marker_file" ] && marker_exists=1
 allowed_bare_users="gateway,sandbox"
 find_gateway_pids() {
   ps -eo user=,pid=,args= 2>/dev/null | awk \
     -v self="$self" \
     -v parent="$parent" \
     -v pidfile_pid="$pidfile_pid" \
-    -v marker_exists="$marker_exists" \
+    -v identity_files_trusted="$identity_files_trusted" \
     -v allowed_bare_users="$allowed_bare_users" '
     function allowed_bare_user(user) {
       return index("," allowed_bare_users ",", "," user ",") > 0
@@ -534,7 +550,7 @@ find_gateway_pids() {
       sub(/^[[:space:]]*[^[:space:]]+[[:space:]]+[0-9]+[[:space:]]+/, "", cmd)
       if (cmd ~ /(^|[[:space:]\/])openclaw-gateway([[:space:]]|$)/ || cmd ~ /(^|[[:space:]\/])openclaw[[:space:]]+gateway([[:space:]]|$)/) {
         seen[pid] = 1
-      } else if (pidfile_pid != "" && marker_exists == "1" && pid == pidfile_pid && allowed_bare_user(user) && cmd ~ /(^|[[:space:]\/])openclaw[[:space:]]*$/) {
+      } else if (identity_files_trusted == "1" && pid == pidfile_pid && allowed_bare_user(user) && cmd ~ /(^|[[:space:]\/])openclaw[[:space:]]*$/) {
         seen[pid] = 1
       }
     }

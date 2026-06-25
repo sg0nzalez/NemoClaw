@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync, writeFileSync, existsSync, rmSync, mkdirSync } from "node:fs";
+import { chmodSync, mkdtempSync, writeFileSync, existsSync, rmSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import assert from "node:assert/strict";
@@ -266,17 +266,23 @@ describe("GATEWAY_STOP_SCRIPT (executed)", () => {
     return result.status;
   }
 
-  function stopScriptWithGatewayIdentity(pid: number): string {
+  function stopScriptWithGatewayIdentity(pid: number, mode = 0o600): string {
     const dir = mkdtempSync(join(tmpdir(), "nemoclaw-gateway-stop-identity-"));
     const pidFile = join(dir, "nemoclaw-gateway.pid");
     const markerFile = join(dir, "nemoclaw-gateway-local");
-    writeFileSync(pidFile, `${pid}\n`);
-    writeFileSync(markerFile, "");
+    writeFileSync(pidFile, `${pid}\n`, { mode });
+    writeFileSync(markerFile, "", { mode });
+    chmodSync(pidFile, mode);
+    chmodSync(markerFile, mode);
     return GATEWAY_STOP_SCRIPT.replaceAll("/tmp/nemoclaw-gateway.pid", pidFile)
       .replaceAll("/tmp/nemoclaw-gateway-local", markerFile)
       .replace(
         'allowed_bare_users="gateway,sandbox"',
         `allowed_bare_users="gateway,sandbox,${process.env.USER ?? ""}"`,
+      )
+      .replace(
+        'trusted_identity_owners="root,gateway,sandbox"',
+        `trusted_identity_owners="root,gateway,sandbox,${process.env.USER ?? ""}"`,
       );
   }
 
@@ -320,6 +326,16 @@ describe("GATEWAY_STOP_SCRIPT (executed)", () => {
       const decoy = spawnWithArgv0("openclaw");
 
       expect(runStopScript()).toBe(1);
+      expect(isAlive(decoy)).toBe(true);
+    },
+  );
+
+  it.runIf(process.platform === "linux")(
+    "exits 1 (not running) and spares bare openclaw when gateway identity files are unsafe",
+    () => {
+      const decoy = spawnWithArgv0("openclaw");
+
+      expect(runStopScript(stopScriptWithGatewayIdentity(decoy, 0o644))).toBe(1);
       expect(isAlive(decoy)).toBe(true);
     },
   );
