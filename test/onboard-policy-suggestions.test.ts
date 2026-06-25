@@ -3,32 +3,41 @@
 
 import { describe, expect, it } from "vitest";
 
-const { computeSetupPresetSuggestions, filterSetupPolicyPresets, getSuggestedPolicyPresets } =
-  require("../dist/lib/onboard") as {
-    computeSetupPresetSuggestions: (
-      tierName: string,
-      options: {
-        enabledChannels?: string[] | null;
-        knownPresetNames: string[];
-        provider?: string | null;
-        agent?: string | null;
-        webSearchConfig?: { fetchEnabled?: boolean; provider?: string | null } | null;
-        webSearchSupported?: boolean | null;
-        hermesToolGateways?: string[] | null;
-        env?: NodeJS.ProcessEnv;
-      },
-    ) => string[];
-    filterSetupPolicyPresets: <T extends { name: string }>(
-      presets: T[],
-      options?: { webSearchSupported?: boolean | null },
-    ) => T[];
-    getSuggestedPolicyPresets: (options?: {
+const {
+  computeSetupPresetSuggestions,
+  filterSetupPolicyPresets,
+  getSuggestedPolicyPresets,
+  suppressedAgentRequiredPresets,
+} = require("../dist/lib/onboard") as {
+  computeSetupPresetSuggestions: (
+    tierName: string,
+    options: {
       enabledChannels?: string[] | null;
+      knownPresetNames: string[];
       provider?: string | null;
       agent?: string | null;
+      webSearchConfig?: { fetchEnabled?: boolean; provider?: string | null } | null;
+      webSearchSupported?: boolean | null;
+      hermesToolGateways?: string[] | null;
       env?: NodeJS.ProcessEnv;
-    }) => string[];
-  };
+    },
+  ) => string[];
+  filterSetupPolicyPresets: <T extends { name: string }>(
+    presets: T[],
+    options?: { webSearchSupported?: boolean | null },
+  ) => T[];
+  getSuggestedPolicyPresets: (options?: {
+    enabledChannels?: string[] | null;
+    provider?: string | null;
+    agent?: string | null;
+    env?: NodeJS.ProcessEnv;
+  }) => string[];
+  suppressedAgentRequiredPresets: (
+    tierName: string,
+    agent: string | null | undefined,
+    env?: NodeJS.ProcessEnv,
+  ) => string[];
+};
 const { filterSetupPolicyPresetsForAgent } =
   require("../dist/lib/onboard/agent-policy-presets") as {
     filterSetupPolicyPresetsForAgent: <T extends { name: string }>(
@@ -421,5 +430,92 @@ describe("onboard policy preset suggestions", () => {
     expect(suggestions).not.toContain("telegram");
     expect(suggestions).not.toContain("slack");
     expect(suggestions).not.toContain("discord");
+  });
+
+  describe("restricted tier suppresses agent-required preset additions", () => {
+    const knownWithPricing = [...known, "openclaw-pricing", "openclaw-diagnostics-otel-local"];
+
+    it("does not auto-add openclaw-pricing for an OpenClaw sandbox on the restricted tier", () => {
+      const suggestions = computeSetupPresetSuggestions("restricted", {
+        agent: "openclaw",
+        knownPresetNames: knownWithPricing,
+      });
+      expect(suggestions).toEqual([]);
+    });
+
+    it("still auto-adds openclaw-pricing for an OpenClaw sandbox on the balanced tier", () => {
+      const suggestions = computeSetupPresetSuggestions("balanced", {
+        agent: "openclaw",
+        knownPresetNames: knownWithPricing,
+      });
+      expect(suggestions).toContain("openclaw-pricing");
+    });
+
+    it("does not auto-add the local OTEL preset on the restricted tier even when OTEL is enabled", () => {
+      const originalOtel = process.env.NEMOCLAW_OPENCLAW_OTEL;
+      process.env.NEMOCLAW_OPENCLAW_OTEL = "1";
+      try {
+        const suggestions = computeSetupPresetSuggestions("restricted", {
+          agent: "openclaw",
+          knownPresetNames: knownWithPricing,
+          env: process.env,
+        });
+        expect(suggestions).not.toContain("openclaw-diagnostics-otel-local");
+      } finally {
+        if (originalOtel === undefined) delete process.env.NEMOCLAW_OPENCLAW_OTEL;
+        else process.env.NEMOCLAW_OPENCLAW_OTEL = originalOtel;
+      }
+    });
+
+    it("treats a null agent as OpenClaw and still suppresses openclaw-pricing on restricted", () => {
+      const suggestions = computeSetupPresetSuggestions("restricted", {
+        agent: null,
+        knownPresetNames: knownWithPricing,
+      });
+      expect(suggestions).not.toContain("openclaw-pricing");
+    });
+
+    it("leaves Hermes sandboxes on restricted unchanged (no OpenClaw-only suppression needed)", () => {
+      const suggestions = computeSetupPresetSuggestions("restricted", {
+        agent: "hermes",
+        knownPresetNames: knownWithPricing,
+      });
+      expect(suggestions).toEqual([]);
+    });
+  });
+
+  describe("suppressedAgentRequiredPresets", () => {
+    it("reports openclaw-pricing as suppressed on restricted + openclaw", () => {
+      expect(suppressedAgentRequiredPresets("restricted", "openclaw")).toEqual([
+        "openclaw-pricing",
+      ]);
+    });
+
+    it("also reports the local OTEL preset when OTEL is enabled", () => {
+      const originalOtel = process.env.NEMOCLAW_OPENCLAW_OTEL;
+      process.env.NEMOCLAW_OPENCLAW_OTEL = "1";
+      try {
+        expect(suppressedAgentRequiredPresets("restricted", "openclaw")).toEqual([
+          "openclaw-pricing",
+          "openclaw-diagnostics-otel-local",
+        ]);
+      } finally {
+        if (originalOtel === undefined) delete process.env.NEMOCLAW_OPENCLAW_OTEL;
+        else process.env.NEMOCLAW_OPENCLAW_OTEL = originalOtel;
+      }
+    });
+
+    it("returns no suppressed presets for balanced or open tiers", () => {
+      expect(suppressedAgentRequiredPresets("balanced", "openclaw")).toEqual([]);
+      expect(suppressedAgentRequiredPresets("open", "openclaw")).toEqual([]);
+    });
+
+    it("returns no suppressed presets for non-OpenClaw agents on restricted", () => {
+      expect(suppressedAgentRequiredPresets("restricted", "hermes")).toEqual([]);
+    });
+
+    it("treats a null agent on restricted as OpenClaw and reports the suppression", () => {
+      expect(suppressedAgentRequiredPresets("restricted", null)).toEqual(["openclaw-pricing"]);
+    });
   });
 });

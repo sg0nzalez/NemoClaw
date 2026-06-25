@@ -27,6 +27,8 @@ import {
 import { seedInitialPolicyContext } from "./policy-context-seed";
 import { withPolicyApplicationTrace } from "./tracing";
 
+const RESTRICTED_TIER_NAME = "restricted";
+
 type Preset = { name: string; access?: string };
 type SupportOptions = { webSearchSupported?: boolean | null };
 type PoliciesApi = {
@@ -141,6 +143,16 @@ export function isStaleBuiltinBravePolicyPreset(
   return name === "brave" && !options.webSearchConfig && !options.customPresetNames?.has(name);
 }
 
+export function suppressedAgentRequiredPresets(
+  tierName: string,
+  agent: string | null | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+): string[] {
+  if (tierName !== RESTRICTED_TIER_NAME) return [];
+  if (!isOpenclawAgent(agent)) return [];
+  return ["openclaw-pricing", ...requiredOpenclawOtelPolicyPresets(agent, env)];
+}
+
 export function computeSetupPresetSuggestions(
   deps: {
     policies: PoliciesApi;
@@ -176,7 +188,7 @@ export function computeSetupPresetSuggestions(
   };
   if (webSearchConfig) add("brave");
   if (provider && deps.localInferenceProviders.includes(provider)) add("local-inference");
-  if (isOpenclawAgent(agent)) {
+  if (tierName !== RESTRICTED_TIER_NAME && isOpenclawAgent(agent)) {
     add("openclaw-pricing");
     for (const preset of requiredOpenclawOtelPolicyPresets(agent, env)) add(preset);
   }
@@ -390,6 +402,12 @@ async function setupPoliciesWithSelectionInner(
       env: deps.env,
     }),
   );
+  const suppressedForTier = suppressedAgentRequiredPresets(tierName, agent, deps.env);
+  if (suppressedForTier.length > 0) {
+    deps.note(
+      `  Restricted tier suppresses agent-required preset(s): ${suppressedForTier.join(", ")}. Apply later with 'nemoclaw <name> policy-add <preset>' if needed.`,
+    );
+  }
 
   if (deps.isNonInteractive()) {
     const policyMode = (deps.env?.NEMOCLAW_POLICY_MODE || "suggested").trim().toLowerCase();
