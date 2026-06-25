@@ -18,10 +18,8 @@ function escapeRegExp(value: string): string {
 function extractShellFunctionFromSource(src: string, name: string): string {
   const escapedName = escapeRegExp(name);
   const match = src.match(new RegExp(`${escapedName}\\(\\) \\{([\\s\\S]*?)^\\}`, "m"));
-  if (!match) {
-    throw new Error(`Expected ${name} in agents/hermes/start.sh`);
-  }
-  return `${name}() {${match[1]}\n}`;
+  expect(match, `Expected ${name} in agents/hermes/start.sh`).not.toBeNull();
+  return `${name}() {${match?.[1] ?? ""}\n}`;
 }
 
 function runHermesConfigIntegrityVerifierAsRoot() {

@@ -18,24 +18,20 @@ function dockerRunCommandBetween(
 ): string {
   const start = dockerfile.indexOf(startMarker);
   const end = dockerfile.indexOf(endMarker, start);
-  if (start === -1 || end === -1 || end <= start) {
-    throw new Error(`Expected Dockerfile block between ${startMarker} and ${endMarker}`);
-  }
+  expect(start, `Expected Dockerfile start marker ${startMarker}`).toBeGreaterThanOrEqual(0);
+  expect(end, `Expected Dockerfile end marker ${endMarker}`).toBeGreaterThan(start);
   const runIndex = dockerfile.indexOf("RUN ", start);
-  if (runIndex === -1 || runIndex > end) {
-    throw new Error(`Expected RUN instruction after ${startMarker}`);
-  }
-  const runLines: string[] = [];
-  for (const line of dockerfile.slice(runIndex, end).split("\n")) {
-    runLines.push(line);
-    if (!line.trimEnd().endsWith("\\")) {
-      break;
-    }
-  }
+  expect(runIndex, `Expected RUN instruction after ${startMarker}`).toBeGreaterThanOrEqual(0);
+  expect(runIndex, `Expected RUN instruction before ${endMarker}`).toBeLessThan(end);
+  const candidateLines = dockerfile.slice(runIndex, end).split("\n");
+  const finalLineIndex = candidateLines.findIndex((line) => !line.trimEnd().endsWith("\\"));
+  expect(
+    finalLineIndex,
+    `Expected complete RUN instruction before ${endMarker}`,
+  ).toBeGreaterThanOrEqual(0);
+  const runLines = candidateLines.slice(0, finalLineIndex + 1);
   const lastLine = runLines[runLines.length - 1]?.trimEnd() ?? "";
-  if (lastLine.endsWith("\\")) {
-    throw new Error(`Expected complete RUN instruction before ${endMarker}`);
-  }
+  expect(lastLine.endsWith("\\")).toBe(false);
   return runLines
     .join("\n")
     .trim()
