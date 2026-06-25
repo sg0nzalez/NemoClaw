@@ -461,9 +461,10 @@ export function showStatus(opts: ServiceOptions = {}): void {
  * processes while still finding the rewritten gateway (#4951).
  */
 export function stopSandboxChannels(sandboxName: string): void {
-  info(`Stopping in-sandbox OpenClaw gateway (sandbox: ${sandboxName})...`);
+  const validatedSandboxName = validateSandboxName(sandboxName);
+  info(`Stopping in-sandbox OpenClaw gateway (sandbox: ${validatedSandboxName})...`);
 
-  const privilegedResult = stopSandboxChannelsViaKubectl(sandboxName);
+  const privilegedResult = stopSandboxChannelsViaKubectl(validatedSandboxName);
   if (reportStopResult(privilegedResult)) return;
 
   const openshell = resolveOpenshell();
@@ -474,7 +475,7 @@ export function stopSandboxChannels(sandboxName: string): void {
 
   const fallbackResult = spawnSync(
     openshell,
-    ["sandbox", "exec", "--name", sandboxName, "--", "sh", "-lc", GATEWAY_STOP_SCRIPT],
+    ["sandbox", "exec", "--name", validatedSandboxName, "--", "sh", "-lc", GATEWAY_STOP_SCRIPT],
     { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"], timeout: 20000 },
   );
   reportStopResult(fallbackResult);
@@ -529,8 +530,14 @@ trusted_identity_file() {
 pidfile_pid=""
 identity_files_trusted=0
 if trusted_identity_file "$gateway_pid_file" && trusted_identity_file "$gateway_marker_file"; then
-  pidfile_pid="$(cat "$gateway_pid_file" 2>/dev/null | tr -cd '0-9' | head -c 20)"
-  [ -n "$pidfile_pid" ] && identity_files_trusted=1
+  raw_pidfile_pid="$(head -n 1 "$gateway_pid_file" 2>/dev/null | tr -d '[:space:]')"
+  case "$raw_pidfile_pid" in
+    ''|*[!0-9]*) ;;
+    *)
+      pidfile_pid="$raw_pidfile_pid"
+      identity_files_trusted=1
+      ;;
+  esac
 fi
 allowed_bare_users="gateway,sandbox"
 find_gateway_pids() {

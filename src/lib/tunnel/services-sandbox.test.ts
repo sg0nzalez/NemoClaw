@@ -204,6 +204,11 @@ describe("stopSandboxChannels", () => {
     expect(script).toContain("openclaw[[:space:]]*$");
     logSpy.mockRestore();
   });
+
+  it("rejects malformed sandbox names before spawning docker or openshell", () => {
+    expect(() => stopSandboxChannels("../escape")).toThrow("Invalid sandbox name");
+    expect(spawnSyncSpy).not.toHaveBeenCalled();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -266,11 +271,15 @@ describe("GATEWAY_STOP_SCRIPT (executed)", () => {
     return result.status;
   }
 
-  function stopScriptWithGatewayIdentity(pid: number, mode = 0o600): string {
+  function stopScriptWithGatewayIdentity(
+    pid: number,
+    mode = 0o600,
+    pidContent = `${pid}\n`,
+  ): string {
     const dir = mkdtempSync(join(tmpdir(), "nemoclaw-gateway-stop-identity-"));
     const pidFile = join(dir, "nemoclaw-gateway.pid");
     const markerFile = join(dir, "nemoclaw-gateway-local");
-    writeFileSync(pidFile, `${pid}\n`, { mode });
+    writeFileSync(pidFile, pidContent, { mode });
     writeFileSync(markerFile, "", { mode });
     chmodSync(pidFile, mode);
     chmodSync(markerFile, mode);
@@ -336,6 +345,16 @@ describe("GATEWAY_STOP_SCRIPT (executed)", () => {
       const decoy = spawnWithArgv0("openclaw");
 
       expect(runStopScript(stopScriptWithGatewayIdentity(decoy, 0o644))).toBe(1);
+      expect(isAlive(decoy)).toBe(true);
+    },
+  );
+
+  it.runIf(process.platform === "linux")(
+    "rejects malformed gateway pid file contents instead of digit-stripping to another PID",
+    () => {
+      const decoy = spawnWithArgv0("openclaw");
+
+      expect(runStopScript(stopScriptWithGatewayIdentity(decoy, 0o600, `x${decoy}y\n`))).toBe(1);
       expect(isAlive(decoy)).toBe(true);
     },
   );
