@@ -65,20 +65,24 @@ function runHermesRuntimeApiServerKeyMint(
 
   fs.mkdirSync(hermesHome, { recursive: true });
   fs.writeFileSync(configTarget, "model:\n  default: test-model\n");
-  if (opts.configPathKind === "symlink") {
-    fs.symlinkSync(configTarget, configPath);
-  } else {
-    fs.copyFileSync(configTarget, configPath);
-  }
-  if (opts.envPathKind === "symlink") {
-    fs.writeFileSync(envTarget, initialEnvFile);
-    fs.symlinkSync(envTarget, envPath);
-  } else if (opts.envPathKind === "hardlink") {
-    fs.writeFileSync(envTarget, initialEnvFile);
-    fs.linkSync(envTarget, envPath);
-  } else {
-    fs.writeFileSync(envPath, initialEnvFile, { mode: 0o640 });
-  }
+  const writeConfigPath = {
+    regular: () => fs.copyFileSync(configTarget, configPath),
+    symlink: () => fs.symlinkSync(configTarget, configPath),
+  } satisfies Record<NonNullable<typeof opts.configPathKind>, () => void>;
+  writeConfigPath[opts.configPathKind ?? "regular"]();
+
+  const writeEnvPath = {
+    regular: () => fs.writeFileSync(envPath, initialEnvFile, { mode: 0o640 }),
+    symlink: () => {
+      fs.writeFileSync(envTarget, initialEnvFile);
+      fs.symlinkSync(envTarget, envPath);
+    },
+    hardlink: () => {
+      fs.writeFileSync(envTarget, initialEnvFile);
+      fs.linkSync(envTarget, envPath);
+    },
+  } satisfies Record<NonNullable<typeof opts.envPathKind>, () => void>;
+  writeEnvPath[opts.envPathKind ?? "regular"]();
   writeHermesHash(hashPath, configPath, envPath);
   writeHermesHash(compatHashPath, configPath, envPath);
 
