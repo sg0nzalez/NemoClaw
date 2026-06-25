@@ -190,6 +190,28 @@ describe("agents/hermes/start.sh runtime API server key", () => {
     expect(run.result.stderr).not.toContain("Minted Hermes API_SERVER_KEY");
   });
 
+  it("ensure_hermes_runtime_api_server_key rotates malformed existing API_SERVER_KEY values and refreshes hashes", () => {
+    for (const { envLine, weakValue } of [
+      { envLine: "API_SERVER_KEY=x", weakValue: "x" },
+      { envLine: "API_SERVER_KEY=server-key", weakValue: "server-key" },
+      { envLine: "export API_SERVER_KEY='server-key'", weakValue: "server-key" },
+    ]) {
+      const run = runHermesRuntimeApiServerKeyMint({
+        envFile: ["API_SERVER_PORT=18642", "API_SERVER_HOST=127.0.0.1", envLine, ""].join("\n"),
+        fakeRoot: true,
+      });
+
+      expect(run.result.status, `${envLine}: ${run.result.stderr}`).toBe(0);
+      expect(run.apiServerKey, envLine).toMatch(/^[0-9a-f]{64}$/);
+      expect(run.apiServerKey, envLine).not.toBe(weakValue);
+      expect(run.envFileContent, envLine).not.toContain(envLine);
+      expect(run.envFileContent, envLine).not.toContain(weakValue);
+      expect(run.strictHashValid, envLine).toBe(true);
+      expect(run.compatHashValid, envLine).toBe(true);
+      expect(run.result.stderr, envLine).toContain("Minted Hermes API_SERVER_KEY");
+    }
+  });
+
   it("generates distinct API_SERVER_KEY values for separate sandbox homes", () => {
     const first = runHermesRuntimeApiServerKeyMint({ fakeRoot: true });
     const second = runHermesRuntimeApiServerKeyMint({ fakeRoot: true });

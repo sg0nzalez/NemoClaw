@@ -10,12 +10,14 @@ import argparse
 import errno
 import hashlib
 import os
+import re
 import secrets
 import stat
 import sys
 from dataclasses import dataclass
 
 
+API_SERVER_KEY_RE = re.compile(r"^[0-9a-f]{64}$")
 SCOPED_PLACEHOLDER_PREFIX = "openshell:resolve:env:"
 PROVIDER_PLACEHOLDER_KEYS = (
     "TELEGRAM_BOT_TOKEN",
@@ -327,6 +329,13 @@ def _parse_env_assignment(line: str) -> tuple[str, str, str] | None:
     return prefix, key, value
 
 
+def _is_generated_api_server_key(value: str) -> bool:
+    candidate = value.strip()
+    if len(candidate) >= 2 and candidate[0] == candidate[-1] and candidate[0] in ("'", '"'):
+        candidate = candidate[1:-1]
+    return API_SERVER_KEY_RE.fullmatch(candidate) is not None
+
+
 def ensure_api_key(hermes_dir: str, hash_file: str, mode: str) -> None:
     env_path = os.path.join(hermes_dir, ".env")
     if not os.path.exists(env_path):
@@ -349,7 +358,7 @@ def ensure_api_key(hermes_dir: str, hash_file: str, mode: str) -> None:
             changed = True
             continue
         seen = True
-        if value.strip().strip("\"'"):
+        if _is_generated_api_server_key(value):
             updated.append(line)
             continue
         updated.append(f"{prefix}API_SERVER_KEY={secrets.token_hex(32)}\n")
