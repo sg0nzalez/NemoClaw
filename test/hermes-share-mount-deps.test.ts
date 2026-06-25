@@ -65,9 +65,12 @@ function runHermesInstallLayer(
     webLockfile === "workspace" ? '{"packages":{"web":{}}}\n' : "{}\n",
   );
   fs.writeFileSync(path.join(fixture, "web", "package.json"), "{}\n");
-  if (webLockfile === "directory") {
-    fs.writeFileSync(path.join(fixture, "web", "package-lock.json"), "{}\n");
-  }
+  const writeWebLockfile = {
+    directory: () => fs.writeFileSync(path.join(fixture, "web", "package-lock.json"), "{}\n"),
+    missing: () => undefined,
+    workspace: () => undefined,
+  } satisfies Record<typeof webLockfile, () => void>;
+  writeWebLockfile[webLockfile]();
   if (opts.whatsappBridge) {
     const bridgeDir = path.join(fixture, "scripts", "whatsapp-bridge");
     fs.mkdirSync(bridgeDir, { recursive: true });
