@@ -27,6 +27,7 @@ export function buildMessagingEnvLines(
   slackConfig: SlackConfig,
   managedToolGatewayPresets: string[] = [],
 ): string[] {
+  const normalizedDiscordGuilds = normalizeDiscordGuilds(discordGuilds);
   const envLines = ["API_SERVER_PORT=18642", "API_SERVER_HOST=127.0.0.1"];
 
   if (managedToolGatewayPresets.length > 0) {
@@ -47,7 +48,7 @@ export function buildMessagingEnvLines(
       envLines.push(`${envKey}=${buildTokenPlaceholder(channel, envKey)}`);
     }
     if (channel === "discord") {
-      const guildIds = Object.keys(discordGuilds).filter(Boolean);
+      const guildIds = Object.keys(normalizedDiscordGuilds);
       if (guildIds.length > 0) {
         envLines.push(`NEMOCLAW_DISCORD_GUILD_IDS=${guildIds.join(",")}`);
       }
@@ -60,7 +61,7 @@ export function buildMessagingEnvLines(
     }
   }
 
-  const discordAllowedUsers = collectDiscordAllowedUsers(allowedIds, discordGuilds);
+  const discordAllowedUsers = collectDiscordAllowedUsers(allowedIds, normalizedDiscordGuilds);
   if (discordAllowedUsers.length > 0) {
     envLines.push(`DISCORD_ALLOWED_USERS=${discordAllowedUsers.join(",")}`);
   } else if (
@@ -150,14 +151,26 @@ function buildWhatsappEnvLines(allowedIds: MessagingAllowedIds): string[] {
 }
 
 export function buildDiscordConfig(discordGuilds: DiscordGuilds): Record<string, unknown> {
+  const normalizedDiscordGuilds = normalizeDiscordGuilds(discordGuilds);
   return {
-    require_mention: getDiscordRequireMention(discordGuilds),
+    require_mention: getDiscordRequireMention(normalizedDiscordGuilds),
     free_response_channels: "",
     allowed_channels: "",
     auto_thread: true,
     reactions: true,
     channel_prompts: {},
   };
+}
+
+function normalizeDiscordGuilds(discordGuilds: DiscordGuilds): DiscordGuilds {
+  const normalized: DiscordGuilds = {};
+  for (const [rawGuildId, guildConfig] of Object.entries(discordGuilds)) {
+    const guildId = rawGuildId.trim();
+    if (guildId) {
+      normalized[guildId] = guildConfig;
+    }
+  }
+  return normalized;
 }
 
 function getDiscordRequireMention(discordGuilds: DiscordGuilds): boolean {

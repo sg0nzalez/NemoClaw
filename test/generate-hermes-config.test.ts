@@ -230,12 +230,36 @@ describe("agents/hermes/generate-config.ts", () => {
       NEMOCLAW_DISCORD_GUILDS_B64: encodeJson({
         " ": {
           requireMention: false,
+          users: ["blank-guild-user"],
         },
       }),
     });
 
     expect(envFile).not.toContain("DISCORD_ALLOW_ALL_USERS=true\n");
     expect(envFile).not.toContain("DISCORD_ALLOWED_USERS=");
+    expect(envFile).not.toContain("NEMOCLAW_DISCORD_GUILD_IDS=");
+    expect(envFile).not.toContain("blank-guild-user");
+  });
+
+  it("filters blank Discord guild keys while preserving valid guild access", () => {
+    const { config, envFile } = runConfigScript({
+      NEMOCLAW_MESSAGING_CHANNELS_B64: encodeJson(["discord"]),
+      NEMOCLAW_DISCORD_GUILDS_B64: encodeJson({
+        "1491590992753590594": {
+          requireMention: false,
+        },
+        " ": {
+          requireMention: true,
+          users: ["blank-guild-user"],
+        },
+      }),
+    });
+
+    expect(config.discord.require_mention).toBe(false);
+    expect(envFile).toContain("NEMOCLAW_DISCORD_GUILD_IDS=1491590992753590594\n");
+    expect(envFile).toContain("DISCORD_ALLOW_ALL_USERS=true\n");
+    expect(envFile).not.toContain("DISCORD_ALLOWED_USERS=");
+    expect(envFile).not.toContain("blank-guild-user");
   });
 
   it("does not emit generic platforms blocks for Telegram or Slack messaging tokens", () => {
