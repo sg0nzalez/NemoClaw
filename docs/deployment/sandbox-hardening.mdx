@@ -133,9 +133,9 @@ System-wide shell hooks that read `/tmp/nemoclaw-proxy-env.sh` source the runtim
 ### Landlock Kernel Requirements
 
 Landlock LSM requires Linux kernel 5.13 or later with `CONFIG_SECURITY_LANDLOCK=y`.
-The NemoClaw sandbox policy uses `compatibility: best_effort`, which means Landlock enforcement is silently skipped on kernels that do not support it.
+The NemoClaw sandbox policy uses `compatibility: best_effort` at the OpenShell policy layer, and NemoClaw onboarding separately fails closed when it detects a host or Docker VM kernel that cannot support Landlock.
 
-On such kernels, protection falls back to DAC (file ownership and permissions) only.
+On such kernels, `nemoclaw onboard` aborts before creating or reusing a sandbox.
 Files outside the writable paths would be inaccessible to the agent regardless of DAC permissions.
 
 Operators should verify Landlock availability:
@@ -144,7 +144,7 @@ Operators should verify Landlock availability:
 ls /sys/kernel/security/landlock
 ```
 
-For production deployments, kernel 5.13+ with Landlock enabled is strongly recommended.
+For production deployments, kernel 5.13+ with Landlock enabled is required by onboarding.
 The `test/e2e/e2e-cloud-experimental/checks/04-landlock-readonly.sh` script validates enforcement at runtime.
 
 ## References

@@ -1049,19 +1049,18 @@ A repeating line like the following confirms the conflict:
 
 To fix, run `$$nemoclaw <other-sandbox> destroy` on whichever sandbox should stop polling, or rerun onboarding on it with the channel disabled. Current NemoClaw warns at `$$nemoclaw onboard` time when another sandbox already has the same channel enabled, but sandboxes created before that check was added may still be in a conflict loop.
 
-### Landlock filesystem restrictions silently degraded
+### Landlock kernel requirement blocks onboarding
 
-After sandbox creation, NemoClaw checks whether the host kernel supports Landlock (Linux 5.13+).
-If the kernel is too old or you are running on macOS (where the Docker VM kernel may lack Landlock), a warning prints:
+Before sandbox creation or reuse, NemoClaw checks whether the host kernel supports Landlock (Linux 5.13+).
+If the kernel is too old or you are running on macOS (where the Docker VM kernel may lack Landlock), onboarding aborts:
 
 ```text
-⚠ Landlock: Docker VM kernel <version> does not support Landlock (requires ≥5.13).
-  Sandbox filesystem restrictions will silently degrade (best_effort mode).
+Landlock: Docker VM kernel <version> does not support Landlock (requires >=5.13).
+NemoClaw onboard requires fail-closed filesystem isolation and will not create or reuse a sandbox in best_effort Landlock mode.
 ```
 
-This warning is informational and does not block sandbox creation.
-The sandbox runs without kernel-level filesystem restrictions, relying on container mount configuration instead.
-For full filesystem enforcement, run on a Linux kernel 5.13 or later (Ubuntu 22.04 LTS and later include Landlock support).
+This check prevents a new sandbox from being created with reduced filesystem isolation.
+Run on a Linux kernel 5.13 or later with Landlock enabled (Ubuntu 22.04 LTS and later include Landlock support), then retry onboarding.
 
 ### Sandbox lost after gateway restart
 

@@ -273,10 +273,10 @@ Landlock is a Linux Security Module that enforces filesystem access rules at the
 
 | Aspect | Detail |
 |---|---|
-| Default | `compatibility: best_effort`. The entrypoint applies Landlock rules when the kernel supports them and silently skips them on older kernels. |
+| Default | `compatibility: best_effort` at the OpenShell policy layer. NemoClaw onboarding fails closed when it detects a host or Docker VM kernel older than 5.13, so managed sandboxes are not created in reduced Landlock mode. |
 | What you can change | This is a NemoClaw default, not a user-facing knob. |
-| Risk if relaxed | On kernels without Landlock support (pre-5.13), filesystem restrictions rely solely on container mount configuration, which is less granular. |
-| Recommendation | Run on a kernel that supports Landlock (5.13+). Ubuntu 22.04 LTS and later include Landlock support. |
+| Risk if bypassed | On kernels without Landlock support (pre-5.13), filesystem restrictions rely solely on container mount configuration, which is less granular. |
+| Recommendation | Run on a kernel that supports Landlock (5.13+). Ubuntu 22.04 LTS and later include Landlock support. Do not bypass the onboarding gate for production sandboxes. |
 
 ## Process Controls
 

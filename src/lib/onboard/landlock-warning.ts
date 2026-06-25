@@ -9,11 +9,10 @@ function parseKernelMajorMinor(value: string): { major: number; minor: number } 
   return { major, minor };
 }
 
-function warnIfUnsupported(kernel: string, label: string, warn: (message: string) => void): void {
+function unsupportedLandlockMessage(kernel: string, label: string): string | null {
   const parsed = parseKernelMajorMinor(kernel);
-  if (!parsed || parsed.major > 5 || (parsed.major === 5 && parsed.minor >= 13)) return;
-  warn(`  ⚠ Landlock: ${label} ${kernel} does not support Landlock (requires ≥5.13).`);
-  warn("    Sandbox filesystem restrictions will silently degrade (best_effort mode).");
+  if (!parsed || parsed.major > 5 || (parsed.major === 5 && parsed.minor >= 13)) return null;
+  return `Landlock: ${label} ${kernel} does not support Landlock (requires >=5.13).`;
 }
 
 export function warnIfLandlockUnsupported({
@@ -27,15 +26,25 @@ export function warnIfLandlockUnsupported({
   runCapture: (args: string[], options?: { ignoreError?: boolean }) => string;
   warn?: (message: string) => void;
 }): void {
+  let unsupportedMessage: string | null = null;
   try {
     if (platform === "darwin") {
       const vmKernel = dockerInfoFormat("{{.KernelVersion}}", { ignoreError: true }).trim();
-      if (vmKernel) warnIfUnsupported(vmKernel, "Docker VM kernel", warn);
+      if (vmKernel) unsupportedMessage = unsupportedLandlockMessage(vmKernel, "Docker VM kernel");
     } else if (platform === "linux") {
       const uname = runCapture(["uname", "-r"], { ignoreError: true }).trim();
-      if (uname) warnIfUnsupported(uname, "Kernel", warn);
+      if (uname) unsupportedMessage = unsupportedLandlockMessage(uname, "Kernel");
     }
   } catch {
-    /* best effort warning */
+    warn("  Warning: could not verify Landlock kernel support.");
+  }
+  if (unsupportedMessage) {
+    throw new Error(
+      [
+        unsupportedMessage,
+        "NemoClaw onboard requires fail-closed filesystem isolation and will not create or reuse a sandbox in best_effort Landlock mode.",
+        "Run on Linux kernel 5.13 or later with Landlock enabled, then retry `nemoclaw onboard`.",
+      ].join("\n"),
+    );
   }
 }

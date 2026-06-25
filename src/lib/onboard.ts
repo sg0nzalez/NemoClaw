@@ -2643,6 +2643,8 @@ async function createSandbox(
     },
   );
 
+  warnIfLandlockUnsupported({ dockerInfoFormat, runCapture });
+
   const existingRegistryEntryBeforePrune = registry.getSandbox(sandboxName);
 
   // Reconcile local registry state with the live OpenShell gateway state.
@@ -3268,8 +3270,6 @@ async function createSandbox(
   }
 
   console.log(`  ✓ Sandbox '${sandboxName}' created`);
-
-  warnIfLandlockUnsupported({ dockerInfoFormat, runCapture });
 
   // #4614: arm rollback only when the sandbox was not live before (never a recreate/rebuild).
   if (!liveExists) sandboxCancelRollback.arm(sandboxName);
