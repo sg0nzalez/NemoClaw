@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -12,6 +12,58 @@ const agentDir = path.join(process.cwd(), "agents", "langchain-deepagents-code")
 
 function readAgentFile(name: string): string {
   return fs.readFileSync(path.join(agentDir, name), "utf8");
+}
+
+function makeWrapperFixture(tempDir: string): { marker: string; scriptPath: string } {
+  const marker = path.join(tempDir, "dcode-started");
+  const scriptPath = path.join(tempDir, "dcode-wrapper.sh");
+  const binDir = path.join(tempDir, "bin");
+  const moduleDir = path.join(tempDir, "deepagents_code");
+  fs.mkdirSync(binDir, { recursive: true });
+  fs.mkdirSync(moduleDir, { recursive: true });
+  fs.writeFileSync(path.join(moduleDir, "__init__.py"), "", "utf8");
+  fs.writeFileSync(
+    path.join(moduleDir, "__main__.py"),
+    [
+      "import os, pathlib, sys",
+      "pathlib.Path(os.environ['NEMOCLAW_DCODE_MARKER']).write_text('started\\n')",
+      "print('ARGV:' + repr(sys.argv[1:]))",
+    ].join("\n"),
+    "utf8",
+  );
+  const wrapper = readAgentFile("dcode-wrapper.sh").replace(
+    'export PATH="/usr/local/bin:${PATH}"',
+    `export PATH=${JSON.stringify(binDir)}:\"\${PATH}\"`,
+  );
+  fs.writeFileSync(scriptPath, wrapper, "utf8");
+  fs.chmodSync(scriptPath, 0o755);
+  const pythonPath = execFileSync("which", ["python3"], { encoding: "utf8" }).trim();
+  fs.symlinkSync(pythonPath, path.join(binDir, "python3"));
+  return { marker, scriptPath };
+}
+
+function runWrapperFixture(
+  args: string[],
+  options: { env?: Record<string, string>; envFileText?: string } = {},
+) {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-dcode-wrapper-"));
+  const { marker, scriptPath } = makeWrapperFixture(tempDir);
+  const envFile = path.join(tempDir, ".env");
+  if (options.envFileText !== undefined) {
+    fs.writeFileSync(envFile, options.envFileText, "utf8");
+  }
+  const result = spawnSync("bash", [scriptPath, ...args], {
+    env: {
+      PATH: process.env.PATH ?? "/usr/bin:/bin",
+      HOME: tempDir,
+      PYTHONPATH: tempDir,
+      NEMOCLAW_DCODE_MARKER: marker,
+      DEEPAGENTS_ENV_FILE: envFile,
+      ...options.env,
+    },
+    encoding: "utf8",
+  });
+  return { ...result, markerStarted: fs.existsSync(marker) };
 }
 
 function makeStartScriptFixture(tempDir: string): {
@@ -179,6 +231,57 @@ describe("LangChain Deep Agents Code image contracts", () => {
     expect(envFileText).not.toContain("user:pass");
     expect(envFileText).not.toContain("user:pass@proxy.example:8443");
     expect(envFileText).not.toContain("user:pass@proxy.example:8080");
+  });
+
+  it("refuses secret-shaped runtime env before dcode starts", () => {
+    const secret = "sk-TEST-FAKE-DO-NOT-USE-0000000000000000000000";
+    const result = runWrapperFixture(["-n", "Reply PING"], {
+      env: { OPENAI_API_KEY: secret },
+    });
+
+    expect(result.status).toBe(2);
+    expect(result.markerStarted).toBe(false);
+    expect(result.stderr).toContain(
+      "runtime environment contains secret-shaped value for OPENAI_API_KEY",
+    );
+    expect(result.stderr).toContain("nemoclaw credentials");
+    expect(result.stderr).not.toContain(secret);
+  });
+
+  it("refuses secret-shaped Deep Agents env-file values before dcode starts", () => {
+    const secret = "nvapi-TEST-FAKE-DO-NOT-USE-0000000000000000000000";
+    const result = runWrapperFixture(["-n", "Reply PING"], {
+      envFileText: `OPENAI_API_KEY=${secret}\n`,
+    });
+
+    expect(result.status).toBe(2);
+    expect(result.markerStarted).toBe(false);
+    expect(result.stderr).toContain("contains secret-shaped value for OPENAI_API_KEY");
+    expect(result.stderr).not.toContain(secret);
+  });
+
+  it("allows managed messaging token-shaped env values through the wrapper", () => {
+    const result = runWrapperFixture(["-n", "Reply PING"], {
+      env: { SLACK_BOT_TOKEN: "xoxb-TESTFAKEDONOTUSE" },
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.markerStarted).toBe(true);
+    expect(result.stdout).toContain("ARGV:['--sandbox', 'none', '--no-mcp', '-n', 'Reply PING']");
+  });
+
+  it("fails fast on empty non-interactive prompts without entering dcode", () => {
+    for (const args of [
+      ["-n", ""],
+      ["-n", " \t "],
+      ["--non-interactive", ""],
+      ["--non-interactive=  "],
+    ]) {
+      const result = runWrapperFixture(args);
+      expect(result.status, args.join(" ")).toBe(2);
+      expect(result.markerStarted, args.join(" ")).toBe(false);
+      expect(result.stderr).toContain("empty Deep Agents Code non-interactive prompts");
+    }
   });
 
   it("keeps all Deep Agents Code entry points behind the managed wrapper boundary", () => {

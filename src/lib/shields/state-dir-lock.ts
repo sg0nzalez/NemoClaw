@@ -61,6 +61,7 @@ export const HIGH_RISK_STATE_DIRS = [
   "skills",
   "hooks",
   "cron",
+  "agent",
   "agents",
   "extensions",
   "plugins", // Hermes equivalent of extensions

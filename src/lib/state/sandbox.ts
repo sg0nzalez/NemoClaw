@@ -758,6 +758,22 @@ function normalizeStateFileSpecs(
   return normalized;
 }
 
+function normalizeUserManagedFilePath(filePath: string): string | null {
+  return normalizeStateFilePath(filePath);
+}
+
+function normalizeUserManagedFilePaths(filePaths: readonly string[]): string[] {
+  const normalized: string[] = [];
+  const seen = new Set<string>();
+  for (const filePath of filePaths) {
+    const next = normalizeUserManagedFilePath(filePath);
+    if (!next || seen.has(next)) continue;
+    seen.add(next);
+    normalized.push(next);
+  }
+  return normalized;
+}
+
 function stateFileRemotePath(dir: string, filePath: string): string {
   return `${dir.replace(/\/+$/, "")}/${filePath}`;
 }
@@ -1018,6 +1034,43 @@ function restoreStateFile(
  * Back up all state directories from a running sandbox.
  * Uses the agent manifest to determine which directories contain state.
  */
+export function getUserManagedFilesPresentInSandbox(
+  sandboxName: string,
+  dir: string,
+  userManagedFiles: readonly string[],
+): string[] {
+  const files = normalizeUserManagedFilePaths(userManagedFiles);
+  if (files.length === 0) return [];
+  const sshConfig = getSshConfig(sandboxName);
+  if (!sshConfig) return [];
+  const tempSshConfig = createTempSshConfig(sshConfig, "nemoclaw-user-files-");
+  try {
+    const configFile = tempSshConfig.file;
+    const command = files
+      .map((filePath) => {
+        const remotePath = stateFileRemotePath(dir, filePath);
+        return `[ -f ${shellQuote(remotePath)} ] && printf '%s\\n' ${shellQuote(filePath)}`;
+      })
+      .join("; ");
+    const result = spawnSync("ssh", [...sshArgs(configFile, sandboxName), command], {
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: OPENSHELL_PROBE_TIMEOUT_MS,
+    });
+    if (result.status !== 0) return [];
+    return (result.stdout || "")
+      .trim()
+      .split("\n")
+      .filter((entry) => entry.length > 0);
+  } finally {
+    try {
+      tempSshConfig.cleanup();
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
 export function backupSandboxState(sandboxName: string, options: BackupOptions = {}): BackupResult {
   const sb = registry.getSandbox(sandboxName);
   const agentName = sb?.agent || "openclaw";

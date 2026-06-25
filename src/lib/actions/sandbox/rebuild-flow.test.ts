@@ -64,6 +64,7 @@ type RebuildFlowHarness = {
   restoreSandboxStateSpy: MockInstance;
   runOpenshellSpy: MockInstance;
   messagingRebuildPlanSpy: MockInstance;
+  warnSpy: MockInstance;
   session: RebuildFlowSession;
 };
 
@@ -165,6 +166,8 @@ function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): Rebuild
     name: "openclaw",
     expectedVersion: "0.2.0",
     messagingPlatforms: ["telegram", "discord", "slack", "wechat", "whatsapp"],
+    configPaths: { dir: "/sandbox/.openclaw" },
+    userManagedFiles: [],
   };
 
   vi.spyOn(gatewayDrift, "detectOpenShellStateRpcPreflightIssue").mockReturnValue(null);
@@ -226,6 +229,7 @@ function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): Rebuild
       policyPresets: ["npm", "bad", "throw"],
     },
   });
+  vi.spyOn(sandboxState, "getUserManagedFilesPresentInSandbox").mockReturnValue([]);
   const restoreSandboxStateSpy = vi.spyOn(sandboxState, "restoreSandboxState").mockImplementation(
     overrides.restoreSandboxState ??
       (() => ({
@@ -288,6 +292,7 @@ function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): Rebuild
     restoreSandboxStateSpy,
     runOpenshellSpy,
     messagingRebuildPlanSpy,
+    warnSpy,
     session,
   };
 }
@@ -413,6 +418,24 @@ describe("rebuildSandbox flow", () => {
     expect(harness.logSpy.mock.calls.map((call) => String(call[0])).join("\n")).toContain(
       "rebuilt successfully",
     );
+  });
+
+  it("warns when user-managed files will not be preserved by rebuild", async () => {
+    const harness = createRebuildFlowHarness({
+      applyPreset: () => true,
+    });
+    const sandboxState = requireDist("../../../../dist/lib/state/sandbox.js");
+    sandboxState.getUserManagedFilesPresentInSandbox.mockReturnValue([".env", ".mcp.json"]);
+
+    await expect(
+      harness.rebuildSandbox("alpha", ["--yes"], { throwOnError: true }),
+    ).resolves.toBeUndefined();
+
+    const warnings = harness.warnSpy.mock.calls.map((call) => String(call[0])).join("\n");
+    expect(warnings).toContain(
+      "User-managed files in sandbox not preserved by rebuild: .env, .mcp.json",
+    );
+    expect(warnings).toContain("Re-add them after rebuild, or manage them from the host.");
   });
 
   it("aborts before backup/delete when messaging manifest staging fails", async () => {

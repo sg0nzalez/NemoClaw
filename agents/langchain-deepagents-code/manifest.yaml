@@ -37,11 +37,13 @@ config:
 
 # ── State directories ──────────────────────────────────────────
 # Upstream Deep Agents Code stores app state under ~/.deepagents/.state and
-# user-authored skills under ~/.deepagents/skills. The wrapper sets HOME=/sandbox
-# before launching dcode, so these paths resolve under /sandbox/.deepagents.
+# user-authored skills under ~/.deepagents/skills plus ~/.deepagents/agent/skills.
+# The wrapper sets HOME=/sandbox before launching dcode, so these paths resolve
+# under /sandbox/.deepagents.
 state_dirs:
   - .state
   - skills
+  - agent/skills
 
 # ── Top-level durable state files ───────────────────────────────
 # config.toml is non-secret NemoClaw-generated provider/model configuration.
@@ -50,6 +52,10 @@ state_dirs:
 state_files:
   - path: config.toml
   - path: hooks.json
+
+user_managed_files:
+  - .env
+  - .mcp.json
 
 device_pairing: false
 

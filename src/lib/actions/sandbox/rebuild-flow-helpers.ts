@@ -205,6 +205,19 @@ export function backupSandboxStateForRebuild(
     bail("Failed to record backup metadata.");
     return undefined;
   }
+  const rebuildAgent = loadAgent(sb.agent || "openclaw");
+  const userManagedFiles = sandboxState.getUserManagedFilesPresentInSandbox(
+    sandboxName,
+    rebuildAgent.configPaths.dir,
+    rebuildAgent.userManagedFiles,
+  );
+  if (userManagedFiles.length > 0) {
+    console.warn(
+      `  ${YW}⚠${R} User-managed files in sandbox not preserved by rebuild: ${userManagedFiles.join(", ")}`,
+    );
+    console.warn("    Re-add them after rebuild, or manage them from the host.");
+  }
+
   if (!backup.success) {
     console.warn(
       `  ${YW}⚠${R} Partial backup: ${backup.backedUpDirs.length} dirs and ${backup.backedUpFiles.length} files OK; ${backup.failedDirs.length} dirs and ${backup.failedFiles.length} files failed`,
