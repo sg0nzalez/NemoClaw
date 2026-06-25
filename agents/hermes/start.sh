@@ -214,6 +214,12 @@ if [ ! -f "$_HERMES_DASHBOARD_CONFIG_SEEDER" ]; then
   _HERMES_DASHBOARD_CONFIG_SEEDER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/seed-dashboard-config.py"
 fi
 
+# Descriptor-safe updater for runtime-mutable Hermes config/env/hash files.
+_HERMES_RUNTIME_CONFIG_GUARD="/usr/local/lib/nemoclaw/hermes-runtime-config-guard.py"
+if [ ! -f "$_HERMES_RUNTIME_CONFIG_GUARD" ]; then
+  _HERMES_RUNTIME_CONFIG_GUARD="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/runtime-config-guard.py"
+fi
+
 # The seeder imports PyYAML, which ships ONLY in the Hermes venv — not in the
 # base-image python3 that is first on PATH at container boot. (An interactive
 # login shell activates the venv, masking this: `python3` there resolves to
@@ -1169,8 +1175,6 @@ migrate_legacy_layout() {
 
 refresh_hermes_provider_placeholders() {
   local env_file="${HERMES_DIR}/.env"
-  local hash_file="${HERMES_HASH_FILE}"
-  local compat_hash="${HERMES_DIR}/.config-hash"
   [ -f "$env_file" ] || return 0
 
   local keys="TELEGRAM_BOT_TOKEN DISCORD_BOT_TOKEN SLACK_BOT_TOKEN SLACK_APP_TOKEN"
@@ -1184,130 +1188,17 @@ refresh_hermes_provider_placeholders() {
   done
   [ "$has_scoped_placeholder" -eq 1 ] || return 0
 
-  if [ -L "$env_file" ] || [ -L "$hash_file" ] || { [ -e "$compat_hash" ] && [ -L "$compat_hash" ]; }; then
-    echo "[SECURITY] Refusing Hermes provider placeholder refresh — config or hash path is a symlink" >&2
-    return 1
-  fi
-
-  if [ "$(id -u)" -eq 0 ]; then
-    chown root:sandbox "$env_file" || return 1
-    chmod 640 "$env_file" || return 1
-    chmod u+w "$hash_file" || return 1
-    [ ! -f "$compat_hash" ] || chmod u+w "$compat_hash" 2>/dev/null || true
-  elif [ ! -w "$env_file" ] || [ ! -w "$hash_file" ]; then
-    echo "[config] Hermes provider placeholders supplied by OpenShell runtime env; .env refresh skipped without write access" >&2
-    return 0
-  fi
-
-  local _write_rc=0
-  NEMOCLAW_PROVIDER_PLACEHOLDER_KEYS="$keys" \
-    python3 - "$env_file" <<'PYPLACEHOLDERS' || _write_rc=$?
-import os
-import sys
-
-env_file = sys.argv[1]
-prefix = "openshell:resolve:env:"
-keys = os.environ.get("NEMOCLAW_PROVIDER_PLACEHOLDER_KEYS", "").split()
-replacements = {}
-
-for key in keys:
-    value = os.environ.get(key, "")
-    if value.startswith(prefix):
-        replacements[key] = value
-
-if not replacements:
-    sys.exit(0)
-
-with open(env_file, encoding="utf-8") as f:
-    lines = f.readlines()
-
-changed = False
-updated = []
-for line in lines:
-    stripped = line.rstrip("\n")
-    replaced = False
-    for key, value in replacements.items():
-        if stripped.startswith(f"{key}="):
-            new_line = f"{key}={value}\n"
-            updated.append(new_line)
-            changed = changed or new_line != line
-            replaced = True
-            break
-    if not replaced:
-        updated.append(line)
-
-if not changed:
-    sys.exit(0)
-
-with open(env_file, "w", encoding="utf-8") as f:
-    f.writelines(updated)
-
-print("refreshed=" + ",".join(sorted(replacements)))
-PYPLACEHOLDERS
-
-  if [ "$_write_rc" -eq 0 ]; then
-    refresh_hermes_runtime_config_hashes strict || _write_rc=$?
-    [ "$_write_rc" -ne 0 ] || echo "[config] Refreshed Hermes provider placeholders from OpenShell runtime env" >&2
-  fi
-
-  if [ "$(id -u)" -eq 0 ]; then
-    chown sandbox:sandbox "$env_file" 2>/dev/null || true
-    chmod 640 "$env_file" 2>/dev/null || true
-  fi
-
-  [ "$_write_rc" -eq 0 ] || return "$_write_rc"
+  "$_HERMES_PYTHON" "$_HERMES_RUNTIME_CONFIG_GUARD" provider-placeholders \
+    --hermes-dir "$HERMES_DIR" \
+    --hash-file "$HERMES_HASH_FILE"
 }
 
 refresh_hermes_runtime_config_hashes() {
   local mode="${1:-strict}"
-  local hash_file="${HERMES_HASH_FILE}"
-  local compat_hash="${HERMES_DIR}/.config-hash"
-  local _write_rc=0
-
-  if [ -L "$hash_file" ] || { [ -e "$compat_hash" ] && [ -L "$compat_hash" ]; }; then
-    echo "[SECURITY] Refusing Hermes config hash refresh — config hash path is a symlink" >&2
-    return 1
-  fi
-
-  if [ "$mode" = "strict" ]; then
-    if [ "$(id -u)" -eq 0 ]; then
-      chmod u+w "$hash_file" || return 1
-    elif [ ! -w "$hash_file" ]; then
-      echo "[config] Hermes config hash refresh skipped without write access" >&2
-      return 1
-    fi
-    if sha256sum "${HERMES_DIR}/config.yaml" "${HERMES_DIR}/.env" >"$hash_file"; then
-      chown root:root "$hash_file" 2>/dev/null || true
-      chmod 444 "$hash_file" 2>/dev/null || true
-    else
-      return 1
-    fi
-  fi
-
-  if [ -f "$compat_hash" ] || [ -w "$HERMES_DIR" ]; then
-    if [ "$(id -u)" -eq 0 ]; then
-      # shellcheck disable=SC2016  # inner shell expands after sandbox step-down
-      "${STEP_DOWN_PREFIX_SANDBOX[@]}" sh -c '
-        set -eu
-        compat_hash="$1"
-        hermes_dir="$2"
-        [ ! -f "$compat_hash" ] || chmod u+w "$compat_hash" 2>/dev/null || true
-        sha256sum "${hermes_dir}/config.yaml" "${hermes_dir}/.env" >"$compat_hash"
-        chmod 600 "$compat_hash" 2>/dev/null || true
-      ' sh "$compat_hash" "$HERMES_DIR" || _write_rc=$?
-      chown sandbox:sandbox "$compat_hash" 2>/dev/null || true
-      chmod 600 "$compat_hash" 2>/dev/null || true
-    else
-      [ ! -f "$compat_hash" ] || chmod u+w "$compat_hash" 2>/dev/null || true
-      if sha256sum "${HERMES_DIR}/config.yaml" "${HERMES_DIR}/.env" >"$compat_hash"; then
-        chmod 600 "$compat_hash" 2>/dev/null || true
-      else
-        _write_rc=$?
-      fi
-    fi
-  fi
-
-  [ "$_write_rc" -eq 0 ] || return "$_write_rc"
+  "$_HERMES_PYTHON" "$_HERMES_RUNTIME_CONFIG_GUARD" refresh-hashes \
+    --hermes-dir "$HERMES_DIR" \
+    --hash-file "$HERMES_HASH_FILE" \
+    --mode "$mode"
 }
 
 ensure_hermes_runtime_api_server_key() {
@@ -1315,80 +1206,12 @@ ensure_hermes_runtime_api_server_key() {
   local env_file="${HERMES_DIR}/.env"
   [ -f "$env_file" ] || return 0
 
-  if [ -L "$env_file" ]; then
-    echo "[SECURITY] Refusing Hermes API key mint because ${env_file} is a symlink" >&2
-    return 1
-  fi
-
   local result
   result="$(
-    python3 - "$env_file" <<'PYAPIKEY'
-import os
-import secrets
-import stat
-import sys
-import tempfile
-
-env_file = sys.argv[1]
-st = os.lstat(env_file)
-if stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode):
-    print("unsafe-env-file", file=sys.stderr)
-    sys.exit(1)
-
-with open(env_file, encoding="utf-8") as handle:
-    lines = handle.readlines()
-
-changed = False
-seen = False
-updated = []
-for line in lines:
-    stripped = line.rstrip("\n")
-    prefix = ""
-    candidate = stripped
-    if candidate.startswith("export "):
-        prefix = "export "
-        candidate = candidate[len(prefix):].lstrip()
-    if candidate.startswith("API_SERVER_KEY="):
-        if seen:
-            changed = True
-            continue
-        seen = True
-        value = candidate.split("=", 1)[1].strip().strip("\"'")
-        if value:
-            updated.append(line)
-            continue
-        token = secrets.token_hex(32)
-        updated.append(f"{prefix}API_SERVER_KEY={token}\n")
-        changed = True
-        continue
-    updated.append(line)
-
-if not seen:
-    if updated and not updated[-1].endswith("\n"):
-        updated[-1] = updated[-1] + "\n"
-    updated.append(f"API_SERVER_KEY={secrets.token_hex(32)}\n")
-    changed = True
-
-if not changed:
-    print("minted=0")
-    sys.exit(0)
-
-directory = os.path.dirname(env_file) or "."
-fd, tmp = tempfile.mkstemp(prefix=".env.api-key.", dir=directory, text=True)
-try:
-    with os.fdopen(fd, "w", encoding="utf-8") as handle:
-        handle.writelines(updated)
-    os.chmod(tmp, 0o640)
-    os.replace(tmp, env_file)
-except Exception:
-    try:
-        os.unlink(tmp)
-    except FileNotFoundError:
-        pass
-    raise
-
-print("minted=1")
-PYAPIKEY
+    "$_HERMES_PYTHON" "$_HERMES_RUNTIME_CONFIG_GUARD" ensure-api-key \
+      --hermes-dir "$HERMES_DIR" \
+      --hash-file "$HERMES_HASH_FILE" \
+      --mode "$mode"
   )" || return $?
 
   case "$result" in
@@ -1400,11 +1223,6 @@ PYAPIKEY
       ;;
   esac
 
-  if [ "$(id -u)" -eq 0 ]; then
-    chown sandbox:sandbox "$env_file" 2>/dev/null || true
-    chmod 640 "$env_file" 2>/dev/null || true
-  fi
-  refresh_hermes_runtime_config_hashes "$mode" || return $?
   echo "[config] Minted Hermes API_SERVER_KEY for this sandbox and refreshed config hash" >&2
 }
 

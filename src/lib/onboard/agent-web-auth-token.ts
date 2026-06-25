@@ -27,9 +27,11 @@ export function fetchAgentWebAuthTokenFromSandbox(
   const envPath = `${dir}/${envFile}`;
   // env is validated env-var-shaped in defs.ts, and shellQuote guards the
   // path, so the interpolation below is injection-safe.
+  const assignmentPattern = `^[[:space:]]*(export[[:space:]]+)?${env}=`;
   const script =
     `f=${shellQuote(envPath)}; [ -f "$f" ] || exit 3; ` +
-    `grep -m1 ${shellQuote(`^${env}=`)} "$f" 2>/dev/null | cut -d= -f2-`;
+    `grep -m1 -E ${shellQuote(assignmentPattern)} "$f" 2>/dev/null | ` +
+    `sed -E ${shellQuote(`s/${assignmentPattern}//`)}`;
   const out = runCaptureOpenshell(
     ["sandbox", "exec", "-n", sandboxName, "--", "sh", "-lc", script],
     { ignoreError: true },

@@ -42,7 +42,22 @@ describe("fetchAgentWebAuthTokenFromSandbox", () => {
     expect(args.slice(0, 5)).toEqual(["sandbox", "exec", "-n", "hermes", "--"]);
     const script = args[args.length - 1];
     expect(script).toContain("/sandbox/.hermes/.env");
-    expect(script).toContain("^API_SERVER_KEY=");
+    expect(script).toContain("export[[:space:]]+");
+    expect(script).toContain("API_SERVER_KEY=");
+  });
+
+  it("accepts export-prefixed dotenv assignments", () => {
+    const calls: string[][] = [];
+    const helpers = makeHelpers((args) => {
+      calls.push(args);
+      return `"exported-value"\n`;
+    });
+
+    expect(helpers.fetchAgentWebAuthTokenFromSandbox("hermes", hermes)).toBe("exported-value");
+    const script = calls[0][calls[0].length - 1];
+    expect(script).toContain("grep -m1 -E");
+    expect(script).toContain("sed -E");
+    expect(script).toContain("(export[[:space:]]+)?API_SERVER_KEY=");
   });
 
   it("strips a single layer of surrounding quotes", () => {

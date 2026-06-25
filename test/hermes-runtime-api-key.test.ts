@@ -10,6 +10,13 @@ import { describe, expect, it } from "vitest";
 import { shellQuote } from "../src/lib/core/shell-quote";
 
 const START_SCRIPT = path.join(import.meta.dirname, "..", "agents", "hermes", "start.sh");
+const RUNTIME_CONFIG_GUARD = path.join(
+  import.meta.dirname,
+  "..",
+  "agents",
+  "hermes",
+  "runtime-config-guard.py",
+);
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -32,26 +39,46 @@ function writeHermesHash(hashPath: string, configPath: string, envPath: string):
 }
 
 function parseApiServerKey(envFileContent: string): string | null {
-  const match = envFileContent.match(/^API_SERVER_KEY=([0-9a-f]{64})$/m);
+  const match = envFileContent.match(/^(?:export\s+)?API_SERVER_KEY=([0-9a-f]{64})$/m);
   return match?.[1] ?? null;
 }
 
 function runHermesRuntimeApiServerKeyMint(
-  opts: { envFile?: string; mode?: "strict" | "compat"; fakeRoot?: boolean } = {},
+  opts: {
+    envFile?: string;
+    mode?: "strict" | "compat";
+    fakeRoot?: boolean;
+    envPathKind?: "regular" | "symlink" | "hardlink";
+    configPathKind?: "regular" | "symlink";
+  } = {},
 ) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-api-key-"));
   const hermesHome = path.join(tmpDir, ".hermes");
   const configPath = path.join(hermesHome, "config.yaml");
   const envPath = path.join(hermesHome, ".env");
+  const configTarget = path.join(tmpDir, "config-target.yaml");
+  const envTarget = path.join(tmpDir, "env-target");
   const hashPath = path.join(tmpDir, "hermes.config-hash");
   const compatHashPath = path.join(hermesHome, ".config-hash");
   const scriptPath = path.join(tmpDir, "run.sh");
+  const initialEnvFile = opts.envFile ?? "API_SERVER_PORT=18642\nAPI_SERVER_HOST=127.0.0.1\n";
 
   fs.mkdirSync(hermesHome, { recursive: true });
-  fs.writeFileSync(configPath, "model:\n  default: test-model\n");
-  fs.writeFileSync(envPath, opts.envFile ?? "API_SERVER_PORT=18642\nAPI_SERVER_HOST=127.0.0.1\n", {
-    mode: 0o640,
-  });
+  fs.writeFileSync(configTarget, "model:\n  default: test-model\n");
+  if (opts.configPathKind === "symlink") {
+    fs.symlinkSync(configTarget, configPath);
+  } else {
+    fs.copyFileSync(configTarget, configPath);
+  }
+  if (opts.envPathKind === "symlink") {
+    fs.writeFileSync(envTarget, initialEnvFile);
+    fs.symlinkSync(envTarget, envPath);
+  } else if (opts.envPathKind === "hardlink") {
+    fs.writeFileSync(envTarget, initialEnvFile);
+    fs.linkSync(envTarget, envPath);
+  } else {
+    fs.writeFileSync(envPath, initialEnvFile, { mode: 0o640 });
+  }
   writeHermesHash(hashPath, configPath, envPath);
   writeHermesHash(compatHashPath, configPath, envPath);
 
@@ -68,6 +95,8 @@ function runHermesRuntimeApiServerKeyMint(
       extractShellFunctionFromSource(src, "ensure_hermes_runtime_api_server_key"),
       `HERMES_DIR=${shellQuote(hermesHome)}`,
       `HERMES_HASH_FILE=${shellQuote(hashPath)}`,
+      "_HERMES_PYTHON=python3",
+      `_HERMES_RUNTIME_CONFIG_GUARD=${shellQuote(RUNTIME_CONFIG_GUARD)}`,
       "STEP_DOWN_PREFIX_SANDBOX=(env NEMOCLAW_TEST_STEPPED_DOWN=1)",
       `ensure_hermes_runtime_api_server_key ${opts.mode ?? "strict"}`,
     ].join("\n"),
@@ -94,6 +123,8 @@ function runHermesRuntimeApiServerKeyMint(
       envFileContent,
       apiServerKey: parseApiServerKey(envFileContent),
       envFileMode: (fs.statSync(envPath).mode & 0o777).toString(8),
+      envTargetContent: fs.existsSync(envTarget) ? fs.readFileSync(envTarget, "utf-8") : null,
+      configTargetContent: fs.readFileSync(configTarget, "utf-8"),
       strictHashContent: fs.readFileSync(hashPath, "utf-8"),
       compatHashContent: fs.readFileSync(compatHashPath, "utf-8"),
       strictHashValid: strictHashCheck.status === 0,
@@ -137,6 +168,24 @@ describe("agents/hermes/start.sh runtime API server key", () => {
     expect(run.strictHashValid).toBe(true);
   });
 
+  it("preserves export-prefixed API_SERVER_KEY lines", () => {
+    const existingKey = "b".repeat(64);
+    const run = runHermesRuntimeApiServerKeyMint({
+      envFile: [
+        "API_SERVER_PORT=18642",
+        "API_SERVER_HOST=127.0.0.1",
+        `export API_SERVER_KEY=${existingKey}`,
+        "",
+      ].join("\n"),
+      fakeRoot: true,
+    });
+
+    expect(run.result.status, run.result.stderr).toBe(0);
+    expect(run.apiServerKey).toBe(existingKey);
+    expect(run.envFileContent).toContain(`export API_SERVER_KEY=${existingKey}`);
+    expect(run.result.stderr).not.toContain("Minted Hermes API_SERVER_KEY");
+  });
+
   it("generates distinct API_SERVER_KEY values for separate sandbox homes", () => {
     const first = runHermesRuntimeApiServerKeyMint({ fakeRoot: true });
     const second = runHermesRuntimeApiServerKeyMint({ fakeRoot: true });
@@ -146,5 +195,46 @@ describe("agents/hermes/start.sh runtime API server key", () => {
     expect(first.apiServerKey).toMatch(/^[0-9a-f]{64}$/);
     expect(second.apiServerKey).toMatch(/^[0-9a-f]{64}$/);
     expect(first.apiServerKey).not.toBe(second.apiServerKey);
+  });
+
+  it("refuses a symlinked .env without modifying the symlink target", () => {
+    const originalEnv = "API_SERVER_PORT=18642\nAPI_SERVER_HOST=127.0.0.1\n";
+    const run = runHermesRuntimeApiServerKeyMint({
+      envFile: originalEnv,
+      envPathKind: "symlink",
+      fakeRoot: true,
+    });
+
+    expect(run.result.status).toBe(1);
+    expect(run.result.stderr).toContain("refusing unsafe Hermes runtime config path");
+    expect(run.envTargetContent).toBe(originalEnv);
+    expect(run.strictHashValid).toBe(true);
+  });
+
+  it("refuses a hardlinked .env without modifying the shared inode", () => {
+    const originalEnv = "API_SERVER_PORT=18642\nAPI_SERVER_HOST=127.0.0.1\n";
+    const run = runHermesRuntimeApiServerKeyMint({
+      envFile: originalEnv,
+      envPathKind: "hardlink",
+      fakeRoot: true,
+    });
+
+    expect(run.result.status).toBe(1);
+    expect(run.result.stderr).toContain("refusing hardlinked runtime config path");
+    expect(run.envTargetContent).toBe(originalEnv);
+    expect(run.strictHashValid).toBe(true);
+  });
+
+  it("refuses a symlinked config path before refreshing trusted hashes", () => {
+    const run = runHermesRuntimeApiServerKeyMint({
+      configPathKind: "symlink",
+      fakeRoot: true,
+    });
+
+    expect(run.result.status).toBe(1);
+    expect(run.result.stderr).toContain("refusing unsafe Hermes runtime config path");
+    expect(run.configTargetContent).toBe("model:\n  default: test-model\n");
+    expect(run.strictHashValid).toBe(false);
+    expect(run.compatHashValid).toBe(false);
   });
 });

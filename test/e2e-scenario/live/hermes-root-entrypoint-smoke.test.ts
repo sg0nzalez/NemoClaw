@@ -229,6 +229,102 @@ async function assertRuntimeLayout(probe: DockerProbe, container: string): Promi
   );
 }
 
+async function assertBearerAuth(probe: DockerProbe, container: string): Promise<void> {
+  await expectContainerSh(
+    probe,
+    container,
+    "Hermes API bearer auth did not reject missing/wrong tokens and accept API_SERVER_KEY",
+    String.raw`
+set -eu
+token="$(python3 - <<'PY'
+from pathlib import Path
+
+for raw_line in Path("/sandbox/.hermes/.env").read_text(encoding="utf-8").splitlines():
+    line = raw_line.strip()
+    if line.startswith("export "):
+        line = line[len("export "):].lstrip()
+    if line.startswith("API_SERVER_KEY="):
+        print(line.split("=", 1)[1].strip().strip("\"'"))
+        break
+else:
+    raise SystemExit("API_SERVER_KEY missing")
+PY
+)"
+test -n "$token"
+probe_status() {
+  tmp="$(mktemp)"
+  code="$(curl -sS -o "$tmp" -w '%{http_code}' --max-time 15 "$@" || printf '000')"
+  cat "$tmp" >/dev/null
+  rm -f "$tmp"
+  printf '%s' "$code"
+}
+missing="$(probe_status http://127.0.0.1:8642/v1/models)"
+wrong="$(probe_status -H "Authorization: Bearer wrong-token" http://127.0.0.1:8642/v1/models)"
+valid="$(probe_status -H "Authorization: Bearer $token" http://127.0.0.1:8642/v1/models)"
+printf 'missing=%s wrong=%s valid=%s\n' "$missing" "$wrong" "$valid"
+[ "$missing" = "401" ]
+[ "$wrong" = "401" ]
+case "$valid" in
+  2??|3??|404) ;;
+  *) exit 1 ;;
+esac
+`,
+  );
+}
+
+async function assertDashboardHome(probe: DockerProbe, container: string): Promise<void> {
+  await expectContainerSh(
+    probe,
+    container,
+    "Hermes dashboard-home was not seeded with sandbox-owned 0700/0600 allowlisted config",
+    String.raw`
+set -eu
+for _ in $(seq 1 30); do
+  [ -f /sandbox/.hermes/dashboard-home/config.yaml ] && [ -f /sandbox/.hermes/dashboard-home/.env ] && break
+  sleep 1
+done
+[ "$(stat -c '%a' /sandbox/.hermes/dashboard-home)" = "700" ]
+[ "$(stat -c '%U:%G' /sandbox/.hermes/dashboard-home)" = "sandbox:sandbox" ]
+[ "$(stat -c '%a' /sandbox/.hermes/dashboard-home/config.yaml)" = "600" ]
+[ "$(stat -c '%a' /sandbox/.hermes/dashboard-home/.env)" = "600" ]
+[ "$(stat -c '%U:%G' /sandbox/.hermes/dashboard-home/config.yaml)" = "sandbox:sandbox" ]
+[ "$(stat -c '%U:%G' /sandbox/.hermes/dashboard-home/.env)" = "sandbox:sandbox" ]
+python3 - <<'PY'
+from pathlib import Path
+
+allowed = {
+    "API_SERVER_HOST",
+    "API_SERVER_PORT",
+    "API_SERVER_KEY",
+    "NEMOCLAW_HERMES_TOOL_GATEWAY_BROKER",
+    "FIRECRAWL_GATEWAY_URL",
+    "OPENAI_AUDIO_GATEWAY_URL",
+    "BROWSER_USE_GATEWAY_URL",
+    "FAL_QUEUE_GATEWAY_URL",
+    "MODAL_GATEWAY_URL",
+}
+env_path = Path("/sandbox/.hermes/dashboard-home/.env")
+keys = set()
+for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+    line = raw_line.strip()
+    if not line or line.startswith("#") or "=" not in line:
+        continue
+    if line.startswith("export "):
+        line = line[len("export "):].lstrip()
+    keys.add(line.split("=", 1)[0].strip())
+extra = sorted(keys - allowed)
+missing = sorted({"API_SERVER_HOST", "API_SERVER_PORT", "API_SERVER_KEY"} - keys)
+if extra or missing:
+    raise SystemExit(f"dashboard .env allowlist mismatch extra={extra} missing={missing}")
+config_text = Path("/sandbox/.hermes/dashboard-home/config.yaml").read_text(encoding="utf-8")
+for fragment in ("model:", "custom_providers:", "_nemoclaw_upstream:"):
+    if fragment not in config_text:
+        raise SystemExit(f"dashboard config missing {fragment}")
+PY
+`,
+  );
+}
+
 async function assertGatewayProcess(probe: DockerProbe, container: string): Promise<void> {
   await expectContainerSh(
     probe,
@@ -261,6 +357,8 @@ async function runCleanVariant(
   await assertGatewayProcess(probe, container);
   await assertGatewayLogClean(probe, container);
   await assertRuntimeLayout(probe, container);
+  await assertBearerAuth(probe, container);
+  await assertDashboardHome(probe, container);
 }
 
 async function runLegacyVariant(
@@ -323,6 +421,8 @@ liveTest(
         "Hermes v0.14 writable runtime directories are present",
         "gateway.pid is migrated to a regular top-level file",
         "gateway user cannot remove config.yaml from sticky config root",
+        "Hermes API denies missing/wrong bearer tokens and accepts API_SERVER_KEY",
+        "dashboard-home is sandbox-owned 0700 with 0600 allowlisted config/env",
         "legacy gateway.pid symlink/state shape is repaired and booted",
       ],
     });
@@ -359,6 +459,8 @@ liveTest(
         legacyStartupHealthy: true,
         runtimeLayoutVerified: true,
         gatewayPrivilegeSeparationVerified: true,
+        bearerAuthVerified: true,
+        dashboardHomeVerified: true,
         legacyPidSymlinkMigrationVerified: true,
       },
     });

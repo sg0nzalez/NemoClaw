@@ -20,7 +20,10 @@ const RAW_REFRESH_TOKEN = "raw-refresh-token";
 const liveTest = process.env.NEMOCLAW_RUN_E2E_SCENARIOS === "1" ? test : test.skip;
 
 const IMAGE_INSPECTION_SCRIPT = String.raw`
+import os
 import re
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -144,6 +147,31 @@ if missing:
 if "no_mcp" in api_server_toolsets:
     print("platform_toolsets.api_server unexpectedly disables default MCP servers with no_mcp", file=sys.stderr)
     sys.exit(1)
+
+multipart = subprocess.run(
+    ["/opt/hermes/.venv/bin/python", "-c", "import multipart; print(multipart.__version__)"],
+    text=True,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.PIPE,
+    timeout=15,
+)
+if multipart.returncode != 0:
+    print("python-multipart import failed: " + multipart.stderr[-300:], file=sys.stderr)
+    sys.exit(1)
+
+for tool in ("gcc", "g++", "make"):
+    if shutil.which(tool):
+        print(f"{tool} survived Hermes runtime image purge", file=sys.stderr)
+        sys.exit(1)
+
+master, slave = os.openpty()
+try:
+    if not os.ttyname(slave).startswith("/dev/pts/"):
+        print("openpty did not allocate from /dev/pts", file=sys.stderr)
+        sys.exit(1)
+finally:
+    os.close(master)
+    os.close(slave)
 `;
 
 const MANAGED_TOOL_INSPECTION_SCRIPT = String.raw`
@@ -671,6 +699,8 @@ liveTest(
       contract: [
         "Docker is required and prebuilt image env vars must reference inspectable images",
         "Hermes .env in the sandbox image is a real file with no baked API_SERVER_KEY or raw external secret-shaped values",
+        "Hermes final image imports python-multipart from /opt/hermes/.venv and has no gcc, g++, or make commands",
+        "Hermes final image can allocate a PTY through /dev/pts",
         "Hermes startup mints a unique API_SERVER_KEY per sandbox and refreshes strict and compatibility config hashes",
         "Hermes config preserves api_server remote platform toolsets and does not use no_mcp",
         "managed-tool image keeps gateway auth tokens out of sandbox env/config while preserving gateway URLs/config",
