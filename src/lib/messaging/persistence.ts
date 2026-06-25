@@ -41,6 +41,7 @@ import type {
 } from "./manifest";
 import type { MessagingHookInputMap, MessagingHookOutputMap } from "./hooks";
 import { BUILT_IN_MESSAGING_HOOK_REGISTRY, runMessagingHookSync } from "./hooks";
+import { normalizeProviderPlaceholderForEnvKey } from "./provider-placeholders";
 
 export type PersistedSandboxMessagingInputReference = Pick<
   SandboxMessagingInputReference,
@@ -507,26 +508,6 @@ function credentialBindingMatches(
   if (candidate.credentialId && candidate.credentialId === binding.credentialId) return true;
   if (candidate.sourceInput && candidate.sourceInput === binding.sourceInput) return true;
   return false;
-}
-
-function normalizeProviderPlaceholderForEnvKey(value: string, envKey: string): string | null {
-  const openShellPrefix = "openshell:resolve:env:";
-  if (value.startsWith(openShellPrefix)) {
-    return placeholderSuffixMatchesEnvKey(value.slice(openShellPrefix.length), envKey)
-      ? `${openShellPrefix}${envKey}`
-      : null;
-  }
-  const aliasMatch = value.match(/^[A-Za-z0-9]+-OPENSHELL-RESOLVE-ENV-(.+)$/);
-  if (!aliasMatch || !placeholderSuffixMatchesEnvKey(aliasMatch[1] as string, envKey)) {
-    return null;
-  }
-  return value.replace(/-OPENSHELL-RESOLVE-ENV-.+$/, `-OPENSHELL-RESOLVE-ENV-${envKey}`);
-}
-
-function placeholderSuffixMatchesEnvKey(suffix: string, envKey: string): boolean {
-  if (suffix === envKey) return true;
-  const revisionMatch = suffix.match(/^v[0-9]+_(.+)$/);
-  return revisionMatch?.[1] === envKey;
 }
 
 function buildStepsFromManifests(

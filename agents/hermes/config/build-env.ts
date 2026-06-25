@@ -3,6 +3,8 @@
 
 import { Buffer } from "node:buffer";
 
+import { normalizeProviderPlaceholderForEnvKey } from "../../../src/lib/messaging/provider-placeholders.ts";
+
 export type HermesBuildSettings = {
   model: string;
   baseUrl: string;
@@ -113,24 +115,4 @@ function isSafeEnvKey(value: string): boolean {
 function planHasEnvLineRender(plan: Record<string, unknown> | null): boolean {
   const renderEntries = Array.isArray(plan?.agentRender) ? plan.agentRender : [];
   return renderEntries.some((entry) => isRecord(entry) && entry.kind === "env-lines");
-}
-
-function normalizeProviderPlaceholderForEnvKey(value: string, envKey: string): string | null {
-  const openShellPrefix = "openshell:resolve:env:";
-  if (value.startsWith(openShellPrefix)) {
-    return placeholderSuffixMatchesEnvKey(value.slice(openShellPrefix.length), envKey)
-      ? `${openShellPrefix}${envKey}`
-      : null;
-  }
-  const aliasMatch = value.match(/^[A-Za-z0-9]+-OPENSHELL-RESOLVE-ENV-(.+)$/);
-  if (!aliasMatch || !placeholderSuffixMatchesEnvKey(aliasMatch[1] as string, envKey)) {
-    return null;
-  }
-  return value.replace(/-OPENSHELL-RESOLVE-ENV-.+$/, `-OPENSHELL-RESOLVE-ENV-${envKey}`);
-}
-
-function placeholderSuffixMatchesEnvKey(suffix: string, envKey: string): boolean {
-  if (suffix === envKey) return true;
-  const revisionMatch = suffix.match(/^v[0-9]+_(.+)$/);
-  return revisionMatch?.[1] === envKey;
 }

@@ -50,6 +50,7 @@ import errno
 import grp
 import os
 import pwd
+import re
 import stat
 import sys
 from typing import Callable, TextIO
@@ -75,6 +76,7 @@ _DASHBOARD_ENV_ALLOWED_KEYS = frozenset(
         "MODAL_GATEWAY_URL",
     }
 )
+API_SERVER_KEY_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 class UnsafeDashboardSeedPathError(Exception):
@@ -91,6 +93,13 @@ def _lookup_uid(value: str) -> int:
 
 def _lookup_gid(value: str) -> int:
     return int(value) if value.isdigit() else grp.getgrnam(value).gr_gid
+
+
+def _is_generated_api_server_key(value: str) -> bool:
+    candidate = value.strip()
+    if len(candidate) >= 2 and candidate[0] == candidate[-1] and candidate[0] in ("'", '"'):
+        candidate = candidate[1:-1]
+    return API_SERVER_KEY_RE.fullmatch(candidate) is not None
 
 
 def _seed_owner_ids() -> tuple[int, int] | None:
@@ -369,19 +378,35 @@ def _mirror_env(src: str, dst: str) -> bool:
         print(f"[SECURITY] Refusing to seed dashboard env because {dst} is a symlink", file=sys.stderr)
         return False
 
-    def parse_env_key(line: str) -> str | None:
+    def parse_env_assignment(line: str) -> tuple[str, str] | None:
         candidate = line.lstrip()
         if candidate.startswith("export "):
             candidate = candidate[len("export ") :].lstrip()
         if "=" not in candidate:
             return None
-        return candidate.split("=", 1)[0].strip()
+        key, value = candidate.split("=", 1)
+        return key.strip(), value.strip()
+
+    mirrored_lines: list[str] = []
+    for line in env_text.splitlines(keepends=True):
+        parsed = parse_env_assignment(line)
+        if parsed is None:
+            continue
+        key, value = parsed
+        if key not in _DASHBOARD_ENV_ALLOWED_KEYS:
+            continue
+        if key == "API_SERVER_KEY" and not _is_generated_api_server_key(value):
+            print(
+                "[SECURITY] Refusing to seed dashboard env because API_SERVER_KEY "
+                "does not match the generated-token contract",
+                file=sys.stderr,
+            )
+            return False
+        mirrored_lines.append(line)
 
     def write_env(dst_handle: TextIO) -> None:
-        for line in env_text.splitlines(keepends=True):
-            key = parse_env_key(line)
-            if key in _DASHBOARD_ENV_ALLOWED_KEYS:
-                dst_handle.write(line)
+        for line in mirrored_lines:
+            dst_handle.write(line)
 
     if not _atomic_write_no_follow(dst, "dashboard env", write_env):
         return False

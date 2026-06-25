@@ -14,47 +14,38 @@ const SECRET_BOUNDARY_VALIDATOR_SCRIPT = path.join(
   "hermes",
   "validate-env-secret-boundary.py",
 );
-const GENERATED_API_SERVER_KEY =
-  "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const GENERATED_HEX_TOKEN = Array.from({ length: 64 }, (_value, index) =>
+  (index % 16).toString(16),
+).join("");
 
 function runEnvFileValidator(envFileContent: string) {
-  const tmpDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), "nemoclaw-hermes-api-key-boundary-"),
-  );
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-api-key-boundary-"));
   const envFile = path.join(tmpDir, ".env");
   fs.writeFileSync(envFile, envFileContent);
 
   try {
-    return spawnSync(
-      "python3",
-      [SECRET_BOUNDARY_VALIDATOR_SCRIPT, "env-file", envFile],
-      {
-        encoding: "utf-8",
-        timeout: 5000,
-        env: {
-          PATH: process.env.PATH ?? "",
-        },
+    return spawnSync("python3", [SECRET_BOUNDARY_VALIDATOR_SCRIPT, "env-file", envFile], {
+      encoding: "utf-8",
+      timeout: 5000,
+      env: {
+        PATH: process.env.PATH ?? "",
       },
-    );
+    });
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 }
 
 function runRuntimeEnvValidator(envOverrides: Record<string, string>) {
-  return spawnSync(
-    "python3",
-    [SECRET_BOUNDARY_VALIDATOR_SCRIPT, "runtime-env"],
-    {
-      encoding: "utf-8",
-      timeout: 5000,
-      env: {
-        HOME: os.tmpdir(),
-        PATH: process.env.PATH ?? "",
-        ...envOverrides,
-      },
+  return spawnSync("python3", [SECRET_BOUNDARY_VALIDATOR_SCRIPT, "runtime-env"], {
+    encoding: "utf-8",
+    timeout: 5000,
+    env: {
+      HOME: os.tmpdir(),
+      PATH: process.env.PATH ?? "",
+      ...envOverrides,
     },
-  );
+  });
 }
 
 describe("agents/hermes/validate-env-secret-boundary API_SERVER_KEY contract", () => {
@@ -63,14 +54,14 @@ describe("agents/hermes/validate-env-secret-boundary API_SERVER_KEY contract", (
       [
         "API_SERVER_PORT=18642",
         "API_SERVER_HOST=127.0.0.1",
-        `API_SERVER_KEY=${GENERATED_API_SERVER_KEY}`,
+        `API_SERVER_KEY=${GENERATED_HEX_TOKEN}`,
         "",
       ].join("\n"),
     );
     const runtimeEnvResult = runRuntimeEnvValidator({
       API_SERVER_HOST: "127.0.0.1",
       API_SERVER_PORT: "18642",
-      API_SERVER_KEY: GENERATED_API_SERVER_KEY,
+      API_SERVER_KEY: GENERATED_HEX_TOKEN,
     });
 
     expect(envFileResult.status, envFileResult.stderr).toBe(0);
@@ -89,12 +80,7 @@ describe("agents/hermes/validate-env-secret-boundary API_SERVER_KEY contract", (
       },
     ]) {
       const result = runEnvFileValidator(
-        [
-          "API_SERVER_PORT=18642",
-          "API_SERVER_HOST=127.0.0.1",
-          envLine,
-          "",
-        ].join("\n"),
+        ["API_SERVER_PORT=18642", "API_SERVER_HOST=127.0.0.1", envLine, ""].join("\n"),
       );
 
       expect(result.status, `${envLine}: ${result.stderr}`).toBe(1);

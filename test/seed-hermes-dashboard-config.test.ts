@@ -30,6 +30,9 @@ const SCRIPT_PATH = path.join(
 // Skip gracefully (rather than fail spuriously) where python3 or PyYAML is absent.
 const PY_YAML_AVAILABLE =
   spawnSync("python3", ["-c", "import yaml"], { stdio: "ignore" }).status === 0;
+const GENERATED_HEX_TOKEN = Array.from({ length: 64 }, (_value, index) =>
+  (index % 16).toString(16),
+).join("");
 
 const GATEWAY_CONFIG = {
   _config_version: 12,
@@ -171,7 +174,7 @@ describe.skipIf(!PY_YAML_AVAILABLE)("seed-dashboard-config.py", () => {
       [
         "API_SERVER_HOST=127.0.0.1",
         "API_SERVER_PORT=18642",
-        "API_SERVER_KEY=server-key",
+        `API_SERVER_KEY=${GENERATED_HEX_TOKEN}`,
         "FIRECRAWL_GATEWAY_URL=http://host.openshell.internal:11436/firecrawl",
         "NEMOCLAW_HERMES_TOOL_GATEWAY_BROKER=1",
         "MODAL_GATEWAY_URL=http://host.openshell.internal:11436/modal",
@@ -189,7 +192,7 @@ describe.skipIf(!PY_YAML_AVAILABLE)("seed-dashboard-config.py", () => {
       [
         "API_SERVER_HOST=127.0.0.1",
         "API_SERVER_PORT=18642",
-        "API_SERVER_KEY=server-key",
+        `API_SERVER_KEY=${GENERATED_HEX_TOKEN}`,
         "FIRECRAWL_GATEWAY_URL=http://host.openshell.internal:11436/firecrawl",
         "NEMOCLAW_HERMES_TOOL_GATEWAY_BROKER=1",
         "MODAL_GATEWAY_URL=http://host.openshell.internal:11436/modal",
@@ -207,7 +210,7 @@ describe.skipIf(!PY_YAML_AVAILABLE)("seed-dashboard-config.py", () => {
     fs.writeFileSync(
       envSrc,
       [
-        "export API_SERVER_KEY=server-key",
+        `export API_SERVER_KEY=${GENERATED_HEX_TOKEN}`,
         "export OPENAI_API_KEY=do-not-copy",
         "API_SERVER_HOST=127.0.0.1",
         "",
@@ -218,8 +221,31 @@ describe.skipIf(!PY_YAML_AVAILABLE)("seed-dashboard-config.py", () => {
     expect(res.status).toBe(0);
 
     expect(fs.readFileSync(envDst, "utf-8")).toBe(
-      ["export API_SERVER_KEY=server-key", "API_SERVER_HOST=127.0.0.1", ""].join("\n"),
+      [`export API_SERVER_KEY=${GENERATED_HEX_TOKEN}`, "API_SERVER_HOST=127.0.0.1", ""].join("\n"),
     );
+  });
+
+  it("rejects weak API_SERVER_KEY values instead of mirroring them into the dashboard .env", () => {
+    const weakLines = [
+      "API_SERVER_KEY=server-key",
+      "API_SERVER_KEY='server-key'",
+      'export API_SERVER_KEY="server-key"',
+    ];
+
+    for (const [index, weakLine] of weakLines.entries()) {
+      const src = writeYaml(`gw-${index}.yaml`, GATEWAY_CONFIG);
+      const dst = path.join(tmpDir, `dash-${index}.yaml`);
+      const envSrc = path.join(tmpDir, `gw-${index}.env`);
+      const envDst = path.join(tmpDir, `dash-${index}.env`);
+      fs.writeFileSync(envSrc, `${weakLine}\nAPI_SERVER_HOST=127.0.0.1\n`);
+
+      const res = runSeed(src, dst, envSrc, envDst);
+
+      expect(res.status, weakLine).toBe(1);
+      expect(res.stderr, weakLine).toContain("API_SERVER_KEY");
+      expect(res.stderr, weakLine).not.toContain("server-key");
+      expect(fs.existsSync(envDst), weakLine).toBe(false);
+    }
   });
 
   it("applies requested dashboard seed owner and mode before the atomic rename", () => {
@@ -229,7 +255,7 @@ describe.skipIf(!PY_YAML_AVAILABLE)("seed-dashboard-config.py", () => {
     const dst = path.join(tmpDir, "dash.yaml");
     const envSrc = path.join(tmpDir, "gw.env");
     const envDst = path.join(tmpDir, "dash.env");
-    fs.writeFileSync(envSrc, "API_SERVER_KEY=server-key\n");
+    fs.writeFileSync(envSrc, `API_SERVER_KEY=${GENERATED_HEX_TOKEN}\n`);
 
     const res = runSeed(src, dst, envSrc, envDst, {
       NEMOCLAW_DASHBOARD_SEED_OWNER: `${uid}:${gid}`,
@@ -315,13 +341,13 @@ describe.skipIf(!PY_YAML_AVAILABLE)("seed-dashboard-config.py", () => {
     const dst = path.join(tmpDir, "dash.yaml");
     const envSrc = path.join(tmpDir, "gw.env");
     const envDst = path.join(tmpDir, "dash.env");
-    fs.writeFileSync(envSrc, "API_SERVER_KEY=server-key\n");
+    fs.writeFileSync(envSrc, `API_SERVER_KEY=${GENERATED_HEX_TOKEN}\n`);
 
     const res = runSeed(path.join(tmpDir, "absent.yaml"), dst, envSrc, envDst);
 
     expect(res.status).toBe(0);
     expect(fs.existsSync(dst)).toBe(false);
-    expect(fs.readFileSync(envDst, "utf-8")).toBe("API_SERVER_KEY=server-key\n");
+    expect(fs.readFileSync(envDst, "utf-8")).toBe(`API_SERVER_KEY=${GENERATED_HEX_TOKEN}\n`);
   });
 
   it("skips seeding when the gateway config has no model routing", () => {
@@ -384,7 +410,7 @@ describe.skipIf(!PY_YAML_AVAILABLE)("seed-dashboard-config.py", () => {
     const envSrc = path.join(tmpDir, "gw.env");
     const realTarget = path.join(tmpDir, "real-target.env");
     const envDst = path.join(tmpDir, "dash.env");
-    fs.writeFileSync(envSrc, "API_SERVER_KEY=server-key\n");
+    fs.writeFileSync(envSrc, `API_SERVER_KEY=${GENERATED_HEX_TOKEN}\n`);
     fs.writeFileSync(realTarget, "SECRET=do-not-touch\n");
     fs.symlinkSync(realTarget, envDst);
 
@@ -417,7 +443,7 @@ describe.skipIf(!PY_YAML_AVAILABLE)("seed-dashboard-config.py", () => {
     const envSrc = path.join(tmpDir, "gw.env");
     const envDst = path.join(tmpDir, "dash.env");
     const realTarget = path.join(tmpDir, "real-target.env");
-    fs.writeFileSync(envSrc, "API_SERVER_KEY=server-key\n");
+    fs.writeFileSync(envSrc, `API_SERVER_KEY=${GENERATED_HEX_TOKEN}\n`);
     fs.writeFileSync(realTarget, "SECRET=do-not-touch\n");
     fs.symlinkSync(realTarget, `${envDst}.nemoclaw.tmp`);
 
