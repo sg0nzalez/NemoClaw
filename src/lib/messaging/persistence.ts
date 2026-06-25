@@ -190,16 +190,20 @@ export function normalizePersistedSandboxMessagingPlanShape(
   const channels = plan.channels.map((channel) =>
     normalizePersistedChannel(channel, disabledSet, manifestRegistry.get(channel.channelId)),
   );
+  const credentialBindings = normalizePersistedCredentialBindings(plan, channels, manifestRegistry);
   const normalizedPlan: SandboxMessagingPlan = {
     ...plan,
     channels,
     disabledChannels,
-    credentialBindings: normalizePersistedCredentialBindings(plan, channels, manifestRegistry),
+    credentialBindings,
     networkPolicy:
       plan.networkPolicy && Array.isArray(plan.networkPolicy.entries)
         ? plan.networkPolicy
         : { presets: [], entries: [] },
-    agentRender: Array.isArray(plan.agentRender) ? [...plan.agentRender] : [],
+    agentRender: normalizePersistedAgentRender(
+      Array.isArray(plan.agentRender) ? [...plan.agentRender] : [],
+      credentialBindings,
+    ),
     buildSteps: Array.isArray(plan.buildSteps) ? [...plan.buildSteps] : [],
     ...(plan.runtimeSetup !== undefined
       ? { runtimeSetup: normalizeRuntimeSetup(plan.runtimeSetup) }
@@ -367,7 +371,11 @@ function normalizePersistedCredentialBindings(
       sourceInput: binding.sourceInput as string,
       providerName: binding.providerName as string,
       providerEnvKey: binding.providerEnvKey as string,
-      placeholder: binding.placeholder as string,
+      placeholder:
+        normalizeProviderPlaceholderForEnvKey(
+          binding.placeholder as string,
+          binding.providerEnvKey as string,
+        ) ?? (binding.placeholder as string),
       credentialAvailable: binding.credentialAvailable === true,
       ...(typeof binding.credentialHash === "string"
         ? { credentialHash: binding.credentialHash }
@@ -396,6 +404,34 @@ function normalizePersistedCredentialBindings(
     new Map(channels.map((channel) => [channel.channelId, channel.inputs] as const)),
   );
   return generated.map((binding) => overlayPersistedCredentialBinding(binding, persisted));
+}
+
+function normalizePersistedAgentRender(
+  render: readonly SandboxMessagingAgentRenderPlan[],
+  credentialBindings: readonly SandboxMessagingCredentialBindingPlan[],
+): SandboxMessagingAgentRenderPlan[] {
+  const credentialEnvKeys = new Set(
+    credentialBindings.map((binding) => binding.providerEnvKey).filter(Boolean),
+  );
+  if (credentialEnvKeys.size === 0) return [...render];
+
+  return render.map((entry) => {
+    if (entry.kind !== "env-lines") return entry;
+    return {
+      ...entry,
+      lines: entry.lines.map((line) => normalizeCredentialEnvLine(line, credentialEnvKeys)),
+    };
+  });
+}
+
+function normalizeCredentialEnvLine(line: string, credentialEnvKeys: ReadonlySet<string>): string {
+  const index = line.indexOf("=");
+  if (index <= 0) return line;
+  const envKey = line.slice(0, index).trim();
+  if (!credentialEnvKeys.has(envKey)) return line;
+  const value = line.slice(index + 1);
+  const normalized = normalizeProviderPlaceholderForEnvKey(value, envKey);
+  return normalized ? `${envKey}=${normalized}` : line;
 }
 
 function hydrateChannelFromManifest(
@@ -471,6 +507,26 @@ function credentialBindingMatches(
   if (candidate.credentialId && candidate.credentialId === binding.credentialId) return true;
   if (candidate.sourceInput && candidate.sourceInput === binding.sourceInput) return true;
   return false;
+}
+
+function normalizeProviderPlaceholderForEnvKey(value: string, envKey: string): string | null {
+  const openShellPrefix = "openshell:resolve:env:";
+  if (value.startsWith(openShellPrefix)) {
+    return placeholderSuffixMatchesEnvKey(value.slice(openShellPrefix.length), envKey)
+      ? `${openShellPrefix}${envKey}`
+      : null;
+  }
+  const aliasMatch = value.match(/^[A-Za-z0-9]+-OPENSHELL-RESOLVE-ENV-(.+)$/);
+  if (!aliasMatch || !placeholderSuffixMatchesEnvKey(aliasMatch[1] as string, envKey)) {
+    return null;
+  }
+  return value.replace(/-OPENSHELL-RESOLVE-ENV-.+$/, `-OPENSHELL-RESOLVE-ENV-${envKey}`);
+}
+
+function placeholderSuffixMatchesEnvKey(suffix: string, envKey: string): boolean {
+  if (suffix === envKey) return true;
+  const revisionMatch = suffix.match(/^v[0-9]+_(.+)$/);
+  return revisionMatch?.[1] === envKey;
 }
 
 function buildStepsFromManifests(
