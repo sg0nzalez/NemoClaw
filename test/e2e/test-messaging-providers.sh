@@ -2880,7 +2880,7 @@ else
 fi
 
 # M-S17: Slack channel @mention allowlist proof (#3729). This runs inside the
-# sandbox, imports OpenClaw's installed Slack test API, and verifies:
+# sandbox, imports OpenClaw's installed Slack test API or pipeline runtime, and verifies:
 #   - the configured Slack user can prepare a channel app_mention
 #   - another user is denied by channels.*.users
 #   - sendMessageSlack posts back to the channel through the hermetic fake API
@@ -2923,7 +2923,8 @@ for line in sys.stdin:
     print(value.get("proof", ""))
     break
 ' 2>/dev/null || true)
-  if [ "$sl_proof_kind" = "openclaw-private-helper" ] && [ "$sl_message_capture" = "OK" ]; then
+  if { [ "$sl_proof_kind" = "openclaw-private-helper" ] || [ "$sl_proof_kind" = "openclaw-pipeline-runtime" ]; } \
+    && [ "$sl_message_capture" = "OK" ]; then
     slack_openclaw_plugin_mock_send_ok=1
     pass "M-S17c: installed OpenClaw Slack send helper drove the host-side fake Slack message"
   else

@@ -49,11 +49,13 @@ import type {
 import {
   createBuiltInChannelManifestRegistry,
   createBuiltInRenderTemplateResolver,
+  isMessagingSupportedAgent,
   MessagingSetupApplier,
   MessagingWorkflowPlanner,
-  toMessagingAgentId,
+  tryGetMessagingAgentId,
 } from "../../messaging";
 import { hydrateMessagingChannelConfig } from "../../messaging-channel-config";
+import { markLastStartedStepFailed } from "../../onboard/exit-step-failure";
 import { getStoredMessagingChannelConfig } from "../../onboard/messaging-config";
 import { pruneDisabledMessagingPolicyPresets } from "../../onboard/messaging-policy-presets";
 import * as policies from "../../policy";
@@ -72,14 +74,14 @@ import {
 import { removeSandboxRegistryEntry } from "./destroy";
 import { ensureMessagingHostForwardAfterRebuild } from "./messaging-host-forward-lifecycle";
 import { executeSandboxCommand } from "./process-recovery";
-import { buildRebuildRecreateOnboardOpts } from "./rebuild-gpu-opt-out";
 import {
   backupSandboxStateForRebuild,
   ensureRebuildAgentBaseImage,
   openRebuildShieldsWindowForState,
-  resolveRebuildLiveState,
   type RebuildSandboxEntry,
+  resolveRebuildLiveState,
 } from "./rebuild-flow-helpers";
+import { buildRebuildRecreateOnboardOpts } from "./rebuild-gpu-opt-out";
 import { printRebuildShieldsRecovery, relockRebuildShieldsWindow } from "./rebuild-shields";
 
 export function buildRefreshMutableOpenClawConfigHashCommand(
@@ -117,6 +119,73 @@ function refreshMutableOpenClawConfigHashAfterPostRestoreWrites(
     : "could not obtain sandbox SSH config";
   console.error(`  ${YW}⚠${R} Mutable OpenClaw config hash was not refreshed: ${redact(detail)}`);
   return false;
+}
+
+function rewindSessionForRebuildResume(
+  s: Session,
+  options: {
+    sandboxName: string;
+    rebuildAgent: string | null;
+    rebuildMessagingPlan: SandboxMessagingPlan | null;
+    rebuildsHermesSandbox: boolean;
+    rebuildHermesToolGateways: string[];
+    sandboxEntry: RebuildSandboxEntry;
+  },
+): Session {
+  const {
+    sandboxName,
+    rebuildAgent,
+    rebuildMessagingPlan,
+    rebuildsHermesSandbox,
+    rebuildHermesToolGateways,
+    sandboxEntry,
+  } = options;
+  const now = new Date().toISOString();
+  const machine = s.machine;
+  const rewindStepNames = [
+    "provider_selection",
+    "inference",
+    "sandbox",
+    "openclaw",
+    "agent_setup",
+    "policies",
+  ];
+
+  // Source boundary: the registry entry is the last durable source once
+  // rebuild deletes the sandbox. Rewind only the recreate-onboard steps and
+  // preserve provider/model explicitly so onboard --resume can recreate the
+  // same sandbox after the registry row is removed.
+  s.sandboxName = sandboxName;
+  s.resumable = true;
+  s.status = "in_progress";
+  s.failure = null;
+  s.lastCompletedStep = "gateway";
+  s.lastStepStarted = "gateway";
+  if (s.steps) {
+    for (const stepName of rewindStepNames) {
+      const step = s.steps[stepName];
+      if (!step) continue;
+      step.status = "pending";
+      step.startedAt = null;
+      step.completedAt = null;
+      step.error = null;
+    }
+  }
+  if (machine?.state !== "complete") {
+    s.machine = {
+      version: MACHINE_SNAPSHOT_VERSION,
+      state: "complete",
+      stateEnteredAt: now,
+      revision: (machine?.revision ?? 0) + 1,
+    };
+  }
+  s.agent = rebuildAgent;
+  s.messagingPlan = rebuildMessagingPlan;
+  s.hermesToolGateways = rebuildsHermesSandbox ? rebuildHermesToolGateways : [];
+  s.provider = sandboxEntry.provider ?? null;
+  s.model = sandboxEntry.model ?? null;
+  s.nimContainer = sandboxEntry.nimContainer ?? null;
+  return s;
 }
 
 /**
@@ -226,13 +295,28 @@ function preflightHermesProviderCredentials(
   return false;
 }
 
-async function stageMessagingManifestPlanForRebuild(
+export async function stageMessagingManifestPlanForRebuild(
   sandboxName: string,
   sandboxEntry: registry.SandboxEntry,
   rebuildAgent: string | null,
   log: (msg: string) => void,
 ): Promise<SandboxMessagingPlan | null> {
   const agent = loadAgent(rebuildAgent || "openclaw");
+  const agentId = tryGetMessagingAgentId(agent);
+  if (agentId === null) {
+    MessagingSetupApplier.clearPlanEnv();
+    log(
+      `Messaging manifest rebuild plan skipped: agent '${agent.name}' is not a messaging-capable runtime`,
+    );
+    return null;
+  }
+  if (!isMessagingSupportedAgent(agent)) {
+    MessagingSetupApplier.clearPlanEnv();
+    log(
+      `Messaging manifest rebuild plan skipped: agent '${agent.name}' declares no supported messaging channels`,
+    );
+    return null;
+  }
   const planner = new MessagingWorkflowPlanner(
     createBuiltInChannelManifestRegistry(),
     undefined,
@@ -240,7 +324,7 @@ async function stageMessagingManifestPlanForRebuild(
   );
   const plan = await planner.buildRebuildPlanFromSandboxEntry({
     sandboxName,
-    agent: toMessagingAgentId(agent),
+    agent: agentId,
     sandboxEntry,
     supportedChannelIds: agent.messagingPlatforms,
   });
@@ -735,53 +819,14 @@ export async function rebuildSandbox(
     // from a previous onboard of a *different* agent type would be picked up
     // by resolveAgentName() and the wrong Dockerfile would be used.  (#2201)
     onboardSession.updateSession((s: Session) => {
-      const now = new Date().toISOString();
-      const machine = s.machine;
-      const rewindStepNames = [
-        "provider_selection",
-        "inference",
-        "sandbox",
-        "openclaw",
-        "agent_setup",
-        "policies",
-      ];
-      s.sandboxName = sandboxName;
-      s.resumable = true;
-      s.status = "in_progress";
-      s.failure = null;
-      s.lastCompletedStep = "gateway";
-      s.lastStepStarted = "gateway";
-      if (s.steps) {
-        for (const stepName of rewindStepNames) {
-          const step = s.steps[stepName];
-          if (!step) continue;
-          step.status = "pending";
-          step.startedAt = null;
-          step.completedAt = null;
-          step.error = null;
-        }
-      }
-      if (machine?.state !== "complete") {
-        s.machine = {
-          version: MACHINE_SNAPSHOT_VERSION,
-          state: "complete",
-          stateEnteredAt: now,
-          revision: (machine?.revision ?? 0) + 1,
-        };
-      }
-      s.agent = rebuildAgent;
-      s.messagingPlan = rebuildMessagingPlan;
-      s.hermesToolGateways = rebuildsHermesSandbox ? rebuildHermesToolGateways : [];
-      // Persist inference selection from the about-to-be-removed registry entry
-      // so onboard --resume can recreate with the same provider/model in
-      // non-interactive mode. Without this the registry is gone by the time
-      // setupNim runs, leaving no recovery source. Assign explicitly (with a
-      // null fallback) so a missing registry value doesn't silently leave a
-      // stale session entry from an earlier sandbox in place.
-      s.provider = sb.provider ?? null;
-      s.model = sb.model ?? null;
-      s.nimContainer = sb.nimContainer ?? null;
-      return s;
+      return rewindSessionForRebuildResume(s, {
+        sandboxName,
+        rebuildAgent,
+        rebuildMessagingPlan,
+        rebuildsHermesSandbox,
+        rebuildHermesToolGateways,
+        sandboxEntry: sb,
+      });
     });
     process.env.NEMOCLAW_SANDBOX_NAME = sandboxName;
 
@@ -872,10 +917,7 @@ export async function rebuildSandbox(
         /* best effort */
       }
       try {
-        const failedStep = onboardSession.loadSession()?.lastStepStarted;
-        if (failedStep) {
-          onboardSession.markStepFailed(failedStep, "Rebuild recreate failed");
-        }
+        markLastStartedStepFailed(onboardSession, "Rebuild recreate failed");
       } catch {
         /* best effort */
       }

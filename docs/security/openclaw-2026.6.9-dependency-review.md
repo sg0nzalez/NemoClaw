@@ -12,16 +12,22 @@ Scope: NemoClaw runtime pin `openclaw@2026.6.9` and runtime helper pin `@zed-ind
 - npm publish time: `2026-06-21T01:37:53.047Z`
 - Codex ACP runtime helper package: `@zed-industries/codex-acp@0.11.1`
 - Codex ACP runtime helper npm integrity: `sha512-My2VSlBtvJipJhImHjFDej2ut/p00QqOISRnZgLgLrSIzjgvdcQvAhaZviWj7XPhk4UIdIb0OoA+Lrls824uiQ==`
+- Diagnostics OTEL plugin package: `@openclaw/diagnostics-otel@2026.6.9`
+- Diagnostics OTEL plugin npm integrity: `sha512-jU2q4L6L3qdZZDEIDXrWgwCWOGUaTSF+YzUlfgHED42TB4N3maF6seYchFpwKLB8neOzIDpnzMagEMjxZ/7Wqw==`
+- Brave search plugin package: `@openclaw/brave-plugin@2026.6.9`
+- Brave search plugin npm integrity: `sha512-8HawXB5ylo+vkvkmDJZAE9uhOtm0l9YtzrVqJdM4UqwXeF4uGAkVEOrR3Hxy0sI3Moi5ZBzq2Jx/K5ZQKdiWjQ==`
 - Discord channel plugin package: `@openclaw/discord@2026.6.9`
 - Discord channel plugin npm integrity: `sha512-esFhwYW0nrFQvBhkPeK/1qmvumlVAY8ddhYBt7geIYLlBriwPJRwtnVLLfp0n1LbS0/XVZ0ORqlvkWq8Vv61vg==`
 - Slack channel plugin package: `@openclaw/slack@2026.6.9`
 - Slack channel plugin npm integrity: `sha512-JZHc0L3s6s+yBsWowZtE/DWZJOuy4lTE6uTuUbF5QNjUvQQUlCHMFrwPycrXLesVq1il5yAvo82VbERRsIzgxQ==`
 - WhatsApp channel plugin package: `@openclaw/whatsapp@2026.6.9`
 - WhatsApp channel plugin npm integrity: `sha512-HWz9CryGcSk5ork03DlESVlRcDBnwuXPEKgqdSz/Qt0OnQ2Z1wqNGpwVlAqngvDQDH2AzkNXWuTu2M0C16R8vA==`
+- Microsoft Teams channel plugin package: `@openclaw/msteams@2026.6.9`
+- Microsoft Teams channel plugin npm integrity: `sha512-Ye1nf2fZYGM3lqQJ/zGlhToThyz1lLZE7HqR2F31iWcD5pV89+eEyRFNNH2FrwYeDVjw+EyWpQh2RkN1r867qg==`
 - WeChat channel plugin package: `@tencent-weixin/openclaw-weixin@2.4.3`
 - WeChat channel plugin npm integrity: `sha512-dPQbidUNWigC6V10vGW4i+GLH09x+6zUhafZRjuxkJ9GDu8o62WBsnUTojp4KqUH756hz+t2v9khiCRSi0dBDw==`
 
-NemoClaw enforces the main `openclaw@2026.6.9` and `@zed-industries/codex-acp@0.11.1` integrity pins in the Dockerfile install blocks before `npm install`. It also enforces each reviewed npm plugin registry integrity in the messaging build applier before running `openclaw plugins install`.
+NemoClaw enforces the main `openclaw@2026.6.9`, `@zed-industries/codex-acp@0.11.1`, and each reviewed npm plugin registry integrity, including optional OTEL/brave plugins and messaging plugins, before running `npm install` or `openclaw plugins install`.
 
 ## Advisory Check
 
@@ -45,7 +51,7 @@ The main `openclaw@2026.6.9` package excludes `dist/extensions/slack/**`; its ch
 - `dist/pipeline.runtime-*.js`, which exports `prepareSlackMessage`; and
 - the denied channel-user gate containing `Blocked unauthorized slack sender ${senderId} (not in channel users)`, which NemoClaw's `slack-channel-guard` preload patches to emit one bounded sender-facing denial notice for explicit `app_mention` events.
 
-The retained Slack proof scripts still require the older `test-api.js` facade or `openclaw-private-helper` proof kind for full inbound authorization coverage. This PR does not claim live `pipeline.runtime-*.js` proof coverage for the external `@openclaw/slack@2026.6.9` package. Until that proof path is added, the 2026.6.9 Slack source review is package-shape evidence plus install-time integrity enforcement, not a replacement for the existing full inbound `app_mention` proof contract.
+The retained Slack proof scripts now import the installed external `@openclaw/slack@2026.6.9` runtime files when the older private `test-api.js` facade is absent. The installed-runtime proof exercises `prepareSlackMessage` from `dist/pipeline.runtime-*.js`, verifies an allowed channel `app_mention`, verifies a denied channel user receives exactly one bounded sender-facing feedback action, and sends through `sendMessageSlack` from `dist/runtime-api.js` against the hermetic fake Slack API.
 
 ## PR Review Follow-ups
 
@@ -57,9 +63,9 @@ Invalid state: a production image build overriding `OPENCLAW_VERSION` to an old 
 
 ### Slack Inbound `app_mention`
 
-The external `@openclaw/slack@2026.6.9` package shape review is intentionally narrower than full inbound authorization proof. The package exposes `dist/runtime-api.js` and `dist/pipeline.runtime-*.js`, but this PR does not change `test/e2e/lib/slack-api-proof.sh` or `test/e2e/test-messaging-providers.sh` to import that pipeline. Keep the older private-helper proof contract as authoritative until a follow-up adds and validates installed `pipeline.runtime-*.js` coverage.
+The external `@openclaw/slack@2026.6.9` package no longer needs to be treated as package-shape-only evidence. `test/e2e/lib/slack-api-proof.sh` discovers the installed external runtime files, imports the hashed pipeline runtime for `prepareSlackMessage`, imports the runtime API for `sendMessageSlack`, and only reports `openclaw-pipeline-runtime` after allowed prepare, denied prepare, bounded denied-user feedback, and fake Slack send evidence all pass.
 
-Invalid state: claiming `openclaw-pipeline-runtime` inbound proof without checked-in proof scripts that import and exercise that runtime. Source boundary: retained Slack proof scripts, not the dependency review note. Source-fix constraint: do not treat send-only `runtime-api.js` coverage as inbound authorization coverage. Regression test to add in a follow-up: a fake installed `@openclaw/slack` with `dist/pipeline.runtime-fixture.js` and no `test-api.js` must report full coverage only after allowed prepare, denied prepare, bounded denial feedback, and installed send evidence.
+Invalid state: claiming `openclaw-pipeline-runtime` inbound proof without both checked-in import logic and fake Slack capture evidence. Source boundary: `test/e2e/lib/slack-api-proof.sh` and `test/e2e/test-messaging-providers.sh`. Source-fix constraint: send-only `runtime-api.js` coverage is not enough for inbound authorization coverage. Regression test: a fake installed `@openclaw/slack` with `dist/pipeline.runtime-fixture.js` and no `test-api.js` must report full coverage only after allowed prepare, denied prepare, bounded denial feedback, and installed send evidence.
 
 ### Issue #4434 TUI Unreachable Inference
 

@@ -187,6 +187,10 @@ export const teamsManifest = {
       manager: "openclaw-plugin",
       spec: "npm:@openclaw/msteams@{{openclaw.version}}",
       pin: true,
+      integrityByVersion: {
+        "2026.6.9":
+          "sha512-Ye1nf2fZYGM3lqQJ/zGlhToThyz1lLZE7HqR2F31iWcD5pV89+eEyRFNNH2FrwYeDVjw+EyWpQh2RkN1r867qg==",
+      },
       required: true,
     },
     {

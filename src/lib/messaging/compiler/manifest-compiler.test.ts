@@ -318,11 +318,15 @@ describe("ManifestCompiler", () => {
         expect.objectContaining({
           channelId: "teams",
           kind: "package-install",
-          value: {
+          value: expect.objectContaining({
             manager: "openclaw-plugin",
             spec: "npm:@openclaw/msteams@{{openclaw.version}}",
             pin: true,
-          },
+            integrityByVersion: {
+              "2026.6.9":
+                "sha512-Ye1nf2fZYGM3lqQJ/zGlhToThyz1lLZE7HqR2F31iWcD5pV89+eEyRFNNH2FrwYeDVjw+EyWpQh2RkN1r867qg==",
+            },
+          }),
         }),
       ]),
     );
@@ -1408,5 +1412,18 @@ describe("ManifestCompiler", () => {
     );
     expect(hookCalls).toEqual(["enroll", "reachability:!room:example.com"]);
     expect(JSON.stringify(plan)).not.toContain("raw-matrix-token");
+  });
+
+  it("treats supportedChannelIds: [] as deny-all and reports the requested channel as missing", async () => {
+    await expect(
+      compiler().compile({
+        sandboxName: "demo",
+        agent: "openclaw",
+        workflow: "onboard",
+        isInteractive: false,
+        configuredChannels: ["telegram"],
+        supportedChannelIds: [],
+      }),
+    ).rejects.toThrow("Missing messaging channel manifest(s): telegram");
   });
 });

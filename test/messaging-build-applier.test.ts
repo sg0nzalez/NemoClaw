@@ -125,37 +125,41 @@ function encodePlan(plan: any): string {
 }
 
 describe("messaging-build-applier.mts: agent-install", () => {
-  it("collects selected messaging plugin install specs", () => {
-    const payload = parseDryRun({
-      OPENCLAW_VERSION: "2026.5.22",
-      NEMOCLAW_MESSAGING_CHANNELS_B64: channelsB64([
-        "telegram",
-        "discord",
-        "slack",
-        "whatsapp",
-        "wechat",
-        "teams",
-      ]),
-      NEMOCLAW_WECHAT_CONFIG_B64: wechatConfigB64(),
-      NEMOCLAW_TEAMS_CONFIG_B64: teamsConfigB64(),
-    });
+  it(
+    "collects selected messaging plugin install specs",
+    () => {
+      const payload = parseDryRun({
+        OPENCLAW_VERSION: "2026.5.22",
+        NEMOCLAW_MESSAGING_CHANNELS_B64: channelsB64([
+          "telegram",
+          "discord",
+          "slack",
+          "whatsapp",
+          "wechat",
+          "teams",
+        ]),
+        NEMOCLAW_WECHAT_CONFIG_B64: wechatConfigB64(),
+        NEMOCLAW_TEAMS_CONFIG_B64: teamsConfigB64(),
+      });
 
-    expect(payload.installSpecs).toEqual([
-      "npm:@openclaw/discord@2026.5.22",
-      "npm:@tencent-weixin/openclaw-weixin@2.4.3",
-      "npm:@openclaw/slack@2026.5.22",
-      "npm:@openclaw/whatsapp@2026.5.22",
-      "npm:@openclaw/msteams@2026.5.22",
-    ]);
-    expect(payload.doctorEnv).toEqual({
-      DISCORD_BOT_TOKEN: "openshell:resolve:env:DISCORD_BOT_TOKEN",
-      MSTEAMS_APP_PASSWORD: "openshell:resolve:env:MSTEAMS_APP_PASSWORD",
-      SLACK_APP_TOKEN: "xapp-OPENSHELL-RESOLVE-ENV-SLACK_APP_TOKEN",
-      SLACK_BOT_TOKEN: "xoxb-OPENSHELL-RESOLVE-ENV-SLACK_BOT_TOKEN",
-      TELEGRAM_BOT_TOKEN: "openshell:resolve:env:TELEGRAM_BOT_TOKEN",
-      WECHAT_BOT_TOKEN: "openshell:resolve:env:WECHAT_BOT_TOKEN",
-    });
-  }, testTimeout(15_000));
+      expect(payload.installSpecs).toEqual([
+        "npm:@openclaw/discord@2026.5.22",
+        "npm:@tencent-weixin/openclaw-weixin@2.4.3",
+        "npm:@openclaw/slack@2026.5.22",
+        "npm:@openclaw/whatsapp@2026.5.22",
+        "npm:@openclaw/msteams@2026.5.22",
+      ]);
+      expect(payload.doctorEnv).toEqual({
+        DISCORD_BOT_TOKEN: "openshell:resolve:env:DISCORD_BOT_TOKEN",
+        MSTEAMS_APP_PASSWORD: "openshell:resolve:env:MSTEAMS_APP_PASSWORD",
+        SLACK_APP_TOKEN: "xapp-OPENSHELL-RESOLVE-ENV-SLACK_APP_TOKEN",
+        SLACK_BOT_TOKEN: "xoxb-OPENSHELL-RESOLVE-ENV-SLACK_BOT_TOKEN",
+        TELEGRAM_BOT_TOKEN: "openshell:resolve:env:TELEGRAM_BOT_TOKEN",
+        WECHAT_BOT_TOKEN: "openshell:resolve:env:WECHAT_BOT_TOKEN",
+      });
+    },
+    testTimeout(15_000),
+  );
 
   it("does not inject placeholder token env vars for unselected channels", () => {
     const payload = parseDryRun({
@@ -436,7 +440,7 @@ describe("messaging-build-applier.mts: agent-install", () => {
       expect(result.status, result.stderr).toBe(0);
       expect(fs.readFileSync(tracePath, "utf-8").trim().split("\n")).toEqual([
         "npm|view|@openclaw/discord@2026.6.9|dist.integrity",
-        "plugins|install|npm:@openclaw/discord@2026.6.9",
+        "plugins|install|npm:@openclaw/discord@2026.6.9|--pin",
       ]);
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
@@ -1282,6 +1286,82 @@ describe("messaging-build-applier.mts: agent-install", () => {
       expect(result.status).toBe(2);
       expect(result.stderr).toContain("must stay inside");
       expect(fs.existsSync(path.join(tmp, "escaped.json"))).toBe(false);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("applies DeepAgents messaging render to .env and messaging.json without raw tokens", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-deepagents-render-"));
+    const plan = {
+      schemaVersion: 1,
+      sandboxName: "test-sandbox",
+      agent: "langchain-deepagents-code",
+      channels: [{ channelId: "discord", active: true }],
+      credentialBindings: [
+        {
+          channelId: "discord",
+          credentialId: "botToken",
+          providerEnvKey: "DISCORD_BOT_TOKEN",
+          placeholder: "openshell:resolve:env:DISCORD_BOT_TOKEN",
+        },
+      ],
+      agentRender: [
+        {
+          channelId: "discord",
+          agent: "langchain-deepagents-code",
+          target: "~/.deepagents/.env",
+          kind: "env-lines",
+          renderId: "discord-deepagents-env",
+          lines: [
+            "DISCORD_BOT_TOKEN=openshell:resolve:env:DISCORD_BOT_TOKEN",
+            "NEMOCLAW_DISCORD_GUILD_IDS=1234567890",
+          ],
+        },
+        {
+          channelId: "discord",
+          agent: "langchain-deepagents-code",
+          target: "~/.deepagents/messaging.json",
+          kind: "json-fragment",
+          path: "channels.discord",
+          value: { enabled: true, requireMention: true },
+        },
+      ],
+      buildSteps: [],
+    };
+
+    try {
+      const result = spawnSync(
+        "node",
+        [
+          "--experimental-strip-types",
+          SCRIPT_PATH,
+          "--agent",
+          "langchain-deepagents-code",
+          "--phase",
+          "post-agent-install",
+        ],
+        {
+          encoding: "utf-8",
+          stdio: ["pipe", "pipe", "pipe"],
+          env: {
+            PATH: process.env.PATH || "/usr/bin:/bin",
+            HOME: tmp,
+            NEMOCLAW_MESSAGING_PLAN_B64: Buffer.from(JSON.stringify(plan)).toString("base64"),
+            DISCORD_BOT_TOKEN: "raw-discord-token",
+          },
+          timeout: 10_000,
+        },
+      );
+
+      expect(result.status, result.stderr).toBe(0);
+      const envText = fs.readFileSync(path.join(tmp, ".deepagents", ".env"), "utf-8");
+      expect(envText).toContain("DISCORD_BOT_TOKEN=openshell:resolve:env:DISCORD_BOT_TOKEN");
+      expect(envText).toContain("NEMOCLAW_DISCORD_GUILD_IDS=1234567890");
+      expect(envText).not.toContain("raw-discord-token");
+      expect(
+        JSON.parse(fs.readFileSync(path.join(tmp, ".deepagents", "messaging.json"), "utf-8")),
+      ).toEqual({ channels: { discord: { enabled: true, requireMention: true } } });
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }

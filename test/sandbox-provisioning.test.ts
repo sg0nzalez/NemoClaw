@@ -269,6 +269,8 @@ describe("sandbox provisioning: runtime npm online state", () => {
 
 describe("sandbox provisioning: non-messaging OpenClaw plugins", () => {
   it("pins Brave web-search and preserves its placeholder during build-time doctor", () => {
+    const braveIntegrity =
+      "sha512-8HawXB5ylo+vkvkmDJZAE9uhOtm0l9YtzrVqJdM4UqwXeF4uGAkVEOrR3Hxy0sI3Moi5ZBzq2Jx/K5ZQKdiWjQ==";
     const dockerfile = fs.readFileSync(DOCKERFILE, "utf-8");
     const command = dockerRunCommandBetween(
       dockerfile,
@@ -282,6 +284,14 @@ describe("sandbox provisioning: non-messaging OpenClaw plugins", () => {
         tmp,
         [
           [
+            "npm() {",
+            '  printf "npm %s|BRAVE_API_KEY=%s\\n" "$*" "${BRAVE_API_KEY:-}" >> "$call_log"',
+            '  if [ "$1" = "view" ] && [ "$2" = "@openclaw/brave-plugin@2026.6.9" ] && [ "$3" = "dist.integrity" ]; then',
+            `    printf "%s\\n" "${braveIntegrity}"`,
+            "    return 0",
+            "  fi",
+            "  return 1",
+            "}",
             "openclaw() {",
             '  printf "%s|BRAVE_API_KEY=%s\\n" "$*" "${BRAVE_API_KEY:-}" >> "$call_log"',
             "}",
@@ -290,13 +300,15 @@ describe("sandbox provisioning: non-messaging OpenClaw plugins", () => {
         {
           NEMOCLAW_OPENCLAW_OTEL: "0",
           NEMOCLAW_WEB_SEARCH_ENABLED: "1",
-          OPENCLAW_VERSION: "2026.5.22",
+          OPENCLAW_VERSION: "2026.6.9",
+          OPENCLAW_BRAVE_PLUGIN_2026_6_9_INTEGRITY: braveIntegrity,
         },
       );
 
       expect(result.status, `stderr: ${result.stderr}`).toBe(0);
       expect(calls.trim().split("\n")).toEqual([
-        "plugins install npm:@openclaw/brave-plugin@2026.5.22 --pin|BRAVE_API_KEY=",
+        "npm view @openclaw/brave-plugin@2026.6.9 dist.integrity|BRAVE_API_KEY=",
+        "plugins install npm:@openclaw/brave-plugin@2026.6.9 --pin|BRAVE_API_KEY=",
         "doctor --fix --non-interactive|BRAVE_API_KEY=openshell:resolve:env:BRAVE_API_KEY",
       ]);
     } finally {

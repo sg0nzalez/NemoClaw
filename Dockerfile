@@ -40,6 +40,8 @@ FROM ${BASE_IMAGE}
 # docs/security/openclaw-2026.6.9-dependency-review.md.
 ARG OPENCLAW_VERSION=2026.6.9
 ARG OPENCLAW_2026_6_9_INTEGRITY=sha512-y0PGUdE87S8QtQXABPDL0CjNKhH3q/R1h9/WiRQkhVCGSBVhs63/M1iZn2DYVyJCAbDyMz3KNyAE0WzSQIWCRg==
+ARG OPENCLAW_DIAGNOSTICS_OTEL_2026_6_9_INTEGRITY=sha512-jU2q4L6L3qdZZDEIDXrWgwCWOGUaTSF+YzUlfgHED42TB4N3maF6seYchFpwKLB8neOzIDpnzMagEMjxZ/7Wqw==
+ARG OPENCLAW_BRAVE_PLUGIN_2026_6_9_INTEGRITY=sha512-8HawXB5ylo+vkvkmDJZAE9uhOtm0l9YtzrVqJdM4UqwXeF4uGAkVEOrR3Hxy0sI3Moi5ZBzq2Jx/K5ZQKdiWjQ==
 # Legacy fixture pins used by stale-sandbox/rebuild E2Es that intentionally
 # build an older OpenClaw base image before proving upgrade behavior.
 ARG NEMOCLAW_ALLOW_LEGACY_OPENCLAW_FIXTURE=0
@@ -728,14 +730,40 @@ RUN NEMOCLAW_OPENCLAW_MANAGED_PROXY=0 node --experimental-strip-types /scripts/g
 # Install non-messaging OpenClaw plugins that need to match the runtime.
 # hadolint ignore=DL3059,DL4006
 RUN set -eu; \
+    verify_openclaw_plugin_integrity() { \
+        plugin_spec="$1"; \
+        expected_integrity=""; \
+        case "$plugin_spec" in \
+            "@openclaw/diagnostics-otel@2026.6.9") expected_integrity="$OPENCLAW_DIAGNOSTICS_OTEL_2026_6_9_INTEGRITY" ;; \
+            "@openclaw/brave-plugin@2026.6.9") expected_integrity="$OPENCLAW_BRAVE_PLUGIN_2026_6_9_INTEGRITY" ;; \
+        esac; \
+        if [ -z "$expected_integrity" ]; then \
+            echo "ERROR: OpenClaw plugin ${plugin_spec} has no committed npm integrity pin" >&2; exit 1; \
+        fi; \
+        registry_integrity="$(npm view "$plugin_spec" dist.integrity)"; \
+        if [ -z "$registry_integrity" ]; then \
+            echo "ERROR: OpenClaw plugin ${plugin_spec} registry integrity missing" >&2; exit 1; \
+        fi; \
+        if [ "$registry_integrity" != "$expected_integrity" ]; then \
+            echo "ERROR: OpenClaw plugin ${plugin_spec} npm integrity mismatch" >&2; \
+            echo "Expected: $expected_integrity" >&2; \
+            echo "Actual:   $registry_integrity" >&2; \
+            exit 1; \
+        fi; \
+    }; \
+    install_reviewed_openclaw_plugin() { \
+        plugin_spec="${1}@${OPENCLAW_VERSION}"; \
+        verify_openclaw_plugin_integrity "$plugin_spec"; \
+        openclaw plugins install "npm:${plugin_spec}" --pin; \
+    }; \
     if [ "$NEMOCLAW_OPENCLAW_OTEL" = "1" ] || [ "$NEMOCLAW_WEB_SEARCH_ENABLED" = "1" ]; then \
         test -n "$OPENCLAW_VERSION"; \
     fi; \
     if [ "$NEMOCLAW_OPENCLAW_OTEL" = "1" ]; then \
-        openclaw plugins install "npm:@openclaw/diagnostics-otel@${OPENCLAW_VERSION}" --pin; \
+        install_reviewed_openclaw_plugin "@openclaw/diagnostics-otel"; \
     fi; \
     if [ "$NEMOCLAW_WEB_SEARCH_ENABLED" = "1" ]; then \
-        openclaw plugins install "npm:@openclaw/brave-plugin@${OPENCLAW_VERSION}" --pin; \
+        install_reviewed_openclaw_plugin "@openclaw/brave-plugin"; \
         BRAVE_API_KEY=openshell:resolve:env:BRAVE_API_KEY openclaw doctor --fix --non-interactive; \
     elif [ "$NEMOCLAW_OPENCLAW_OTEL" = "1" ]; then \
         openclaw doctor --fix --non-interactive; \

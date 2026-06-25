@@ -24,6 +24,11 @@ CAPTURE_FILE="${CAPTURE_DIR}/openclaw-tui-capture.log"
 PLAIN_CAPTURE_FILE="${CAPTURE_DIR}/openclaw-tui-capture.plain.log"
 EXPECTED_OPENCLAW_VERSION="${NEMOCLAW_EXPECTED_OPENCLAW_VERSION:-2026.6.9}"
 TUI_TIMEOUT_SEC="${NEMOCLAW_ISSUE_4434_TUI_TIMEOUT_SEC:-180}"
+
+if [ -z "$EXPECTED_OPENCLAW_VERSION" ]; then
+  printf '[issue-4434] FAIL: expected OpenClaw version is empty\n' >&2
+  exit 1
+fi
 VISIBLE_ERROR_RE="error|failed|timeout|timed out|unavailable|fetch failed|ETIMEDOUT|ECONN|upstream"
 SPINNER_CONNECTED_RE="flibbertigibbeting|[0-9]+m[[:space:]][0-9]+s[[:space:]]*\\|[[:space:]]*connected"
 STATUS_LINE_RE="(connecting|gateway connected|connected|sending|running|flibbertigibbeting).*\\|[[:space:]]*(connected|error)"
@@ -108,7 +113,7 @@ done
 
 openclaw_version="$(openshell sandbox exec --name "$SANDBOX_NAME" -- openclaw --version 2>&1 || true)"
 info "sandbox OpenClaw version: ${openclaw_version}"
-if ! grep -q "$EXPECTED_OPENCLAW_VERSION" <<<"$openclaw_version"; then
+if ! grep -Fq "$EXPECTED_OPENCLAW_VERSION" <<<"$openclaw_version"; then
   fail "expected sandbox OpenClaw ${EXPECTED_OPENCLAW_VERSION}"
 fi
 

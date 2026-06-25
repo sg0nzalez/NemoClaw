@@ -24,12 +24,18 @@ const PINNED_OPENCLAW_INTEGRITY =
 const PINNED_CODEX_ACP_VERSION = "0.11.1";
 const PINNED_CODEX_ACP_INTEGRITY =
   "sha512-My2VSlBtvJipJhImHjFDej2ut/p00QqOISRnZgLgLrSIzjgvdcQvAhaZviWj7XPhk4UIdIb0OoA+Lrls824uiQ==";
+const PINNED_OPENCLAW_DIAGNOSTICS_OTEL_INTEGRITY =
+  "sha512-jU2q4L6L3qdZZDEIDXrWgwCWOGUaTSF+YzUlfgHED42TB4N3maF6seYchFpwKLB8neOzIDpnzMagEMjxZ/7Wqw==";
+const PINNED_OPENCLAW_BRAVE_PLUGIN_INTEGRITY =
+  "sha512-8HawXB5ylo+vkvkmDJZAE9uhOtm0l9YtzrVqJdM4UqwXeF4uGAkVEOrR3Hxy0sI3Moi5ZBzq2Jx/K5ZQKdiWjQ==";
 const PINNED_OPENCLAW_DISCORD_INTEGRITY =
   "sha512-esFhwYW0nrFQvBhkPeK/1qmvumlVAY8ddhYBt7geIYLlBriwPJRwtnVLLfp0n1LbS0/XVZ0ORqlvkWq8Vv61vg==";
 const PINNED_OPENCLAW_SLACK_INTEGRITY =
   "sha512-JZHc0L3s6s+yBsWowZtE/DWZJOuy4lTE6uTuUbF5QNjUvQQUlCHMFrwPycrXLesVq1il5yAvo82VbERRsIzgxQ==";
 const PINNED_OPENCLAW_WHATSAPP_INTEGRITY =
   "sha512-HWz9CryGcSk5ork03DlESVlRcDBnwuXPEKgqdSz/Qt0OnQ2Z1wqNGpwVlAqngvDQDH2AzkNXWuTu2M0C16R8vA==";
+const PINNED_OPENCLAW_MSTEAMS_INTEGRITY =
+  "sha512-Ye1nf2fZYGM3lqQJ/zGlhToThyz1lLZE7HqR2F31iWcD5pV89+eEyRFNNH2FrwYeDVjw+EyWpQh2RkN1r867qg==";
 const PINNED_WECHAT_PLUGIN_INTEGRITY =
   "sha512-dPQbidUNWigC6V10vGW4i+GLH09x+6zUhafZRjuxkJ9GDu8o62WBsnUTojp4KqUH756hz+t2v9khiCRSi0dBDw==";
 const LEGACY_REBUILD_OPENCLAW_VERSION = "2026.3.11";
@@ -113,6 +119,58 @@ function runInstallBlock(
   return { result, calls };
 }
 
+function runOptionalOpenClawPluginBlock(
+  options: {
+    openclawVersion?: string;
+    otel?: boolean;
+    webSearch?: boolean;
+    diagnosticsRegistryIntegrity?: string;
+    braveRegistryIntegrity?: string;
+  } = {},
+) {
+  const {
+    openclawVersion = PINNED_OPENCLAW_VERSION,
+    otel = true,
+    webSearch = true,
+    diagnosticsRegistryIntegrity = PINNED_OPENCLAW_DIAGNOSTICS_OTEL_INTEGRITY,
+    braveRegistryIntegrity = PINNED_OPENCLAW_BRAVE_PLUGIN_INTEGRITY,
+  } = options;
+  const command = extractRunBlock(
+    DOCKERFILE,
+    "# Install non-messaging OpenClaw plugins that need to match the runtime.",
+    "RUN node --experimental-strip-types /src/lib/messaging/applier/build/messaging-build-applier.mts",
+  );
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-plugin-integrity-"));
+  const log = path.join(tmp, "calls.log");
+  const script = [
+    "#!/usr/bin/env bash",
+    "set -euo pipefail",
+    `call_log=${JSON.stringify(log)}`,
+    `OPENCLAW_VERSION=${JSON.stringify(openclawVersion)}`,
+    `OPENCLAW_DIAGNOSTICS_OTEL_2026_6_9_INTEGRITY=${JSON.stringify(PINNED_OPENCLAW_DIAGNOSTICS_OTEL_INTEGRITY)}`,
+    `OPENCLAW_BRAVE_PLUGIN_2026_6_9_INTEGRITY=${JSON.stringify(PINNED_OPENCLAW_BRAVE_PLUGIN_INTEGRITY)}`,
+    `NEMOCLAW_OPENCLAW_OTEL=${otel ? "1" : "0"}`,
+    `NEMOCLAW_WEB_SEARCH_ENABLED=${webSearch ? "1" : "0"}`,
+    'openclaw() { printf \'openclaw %s\\n\' "$*" >> "$call_log"; }',
+    "npm() {",
+    '  printf "npm %s\\n" "$*" >> "$call_log";',
+    '  if [ "${1:-}" != "view" ] || [ "${3:-}" != "dist.integrity" ]; then exit 1; fi',
+    '  case "${2:-}" in',
+    `    "@openclaw/diagnostics-otel@${PINNED_OPENCLAW_VERSION}") printf "%s\\n" ${JSON.stringify(diagnosticsRegistryIntegrity)}; return 0 ;;`,
+    `    "@openclaw/brave-plugin@${PINNED_OPENCLAW_VERSION}") printf "%s\\n" ${JSON.stringify(braveRegistryIntegrity)}; return 0 ;;`,
+    "  esac",
+    "  return 1",
+    "}",
+    command,
+  ].join("\n");
+  const scriptPath = path.join(tmp, "run.sh");
+  fs.writeFileSync(scriptPath, script, { mode: 0o700 });
+  const result = spawnSync("bash", [scriptPath], { encoding: "utf-8", timeout: 10000 });
+  const calls = fs.existsSync(log) ? fs.readFileSync(log, "utf-8") : "";
+  fs.rmSync(tmp, { recursive: true, force: true });
+  return { result, calls };
+}
+
 describe("OpenClaw npm integrity pins", () => {
   it("keeps the advisory review note aligned with the committed OpenClaw pin", () => {
     const reviewNote = fs.readFileSync(DEPENDENCY_REVIEW_NOTE, "utf-8");
@@ -121,12 +179,18 @@ describe("OpenClaw npm integrity pins", () => {
     expect(reviewNote).toContain(PINNED_OPENCLAW_INTEGRITY);
     expect(reviewNote).toContain(`@zed-industries/codex-acp@${PINNED_CODEX_ACP_VERSION}`);
     expect(reviewNote).toContain(PINNED_CODEX_ACP_INTEGRITY);
+    expect(reviewNote).toContain("@openclaw/diagnostics-otel@2026.6.9");
+    expect(reviewNote).toContain(PINNED_OPENCLAW_DIAGNOSTICS_OTEL_INTEGRITY);
+    expect(reviewNote).toContain("@openclaw/brave-plugin@2026.6.9");
+    expect(reviewNote).toContain(PINNED_OPENCLAW_BRAVE_PLUGIN_INTEGRITY);
     expect(reviewNote).toContain("@openclaw/discord@2026.6.9");
     expect(reviewNote).toContain(PINNED_OPENCLAW_DISCORD_INTEGRITY);
     expect(reviewNote).toContain("@openclaw/slack@2026.6.9");
     expect(reviewNote).toContain(PINNED_OPENCLAW_SLACK_INTEGRITY);
     expect(reviewNote).toContain("@openclaw/whatsapp@2026.6.9");
     expect(reviewNote).toContain(PINNED_OPENCLAW_WHATSAPP_INTEGRITY);
+    expect(reviewNote).toContain("@openclaw/msteams@2026.6.9");
+    expect(reviewNote).toContain(PINNED_OPENCLAW_MSTEAMS_INTEGRITY);
     expect(reviewNote).toContain("@tencent-weixin/openclaw-weixin@2.4.3");
     expect(reviewNote).toContain(PINNED_WECHAT_PLUGIN_INTEGRITY);
     expect(reviewNote).toContain("each reviewed npm plugin registry integrity");
@@ -137,12 +201,64 @@ describe("OpenClaw npm integrity pins", () => {
     expect(reviewNote).toContain(
       "`dist/pipeline.runtime-*.js`, which exports `prepareSlackMessage`",
     );
-    expect(reviewNote).toContain("does not claim live `pipeline.runtime-*.js` proof coverage");
+    expect(reviewNote).toContain("imports the hashed pipeline runtime for `prepareSlackMessage`");
+    expect(reviewNote).toContain("only reports `openclaw-pipeline-runtime` after allowed prepare");
     expect(reviewNote).toContain("NEMOCLAW_ALLOW_LEGACY_OPENCLAW_FIXTURE=1");
     expect(reviewNote).toContain("claiming `openclaw-pipeline-runtime` inbound proof");
     expect(reviewNote).toContain("gateway/upstream reporting layer");
     expect(reviewNote).toContain("one-line recovery hint");
     expect(reviewNote).toContain("default 180-second timeout");
+  });
+
+  it("verifies optional non-messaging OpenClaw plugin integrity before install", () => {
+    const { result, calls } = runOptionalOpenClawPluginBlock();
+
+    expect(result.status, `${result.stdout}${result.stderr}`).toBe(0);
+    expect(calls).toContain(
+      `npm view @openclaw/diagnostics-otel@${PINNED_OPENCLAW_VERSION} dist.integrity`,
+    );
+    expect(calls).toContain(
+      `openclaw plugins install npm:@openclaw/diagnostics-otel@${PINNED_OPENCLAW_VERSION} --pin`,
+    );
+    expect(calls).toContain(
+      `npm view @openclaw/brave-plugin@${PINNED_OPENCLAW_VERSION} dist.integrity`,
+    );
+    expect(calls).toContain(
+      `openclaw plugins install npm:@openclaw/brave-plugin@${PINNED_OPENCLAW_VERSION} --pin`,
+    );
+  });
+
+  it("fails closed before optional OpenClaw plugin install when registry integrity drifts", () => {
+    const { result, calls } = runOptionalOpenClawPluginBlock({
+      otel: false,
+      braveRegistryIntegrity: "sha512-brave-drift",
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(`${result.stdout}${result.stderr}`).toContain(
+      `OpenClaw plugin @openclaw/brave-plugin@${PINNED_OPENCLAW_VERSION} npm integrity mismatch`,
+    );
+    expect(`${result.stdout}${result.stderr}`).toContain(
+      `Expected: ${PINNED_OPENCLAW_BRAVE_PLUGIN_INTEGRITY}`,
+    );
+    expect(`${result.stdout}${result.stderr}`).toContain("Actual:   sha512-brave-drift");
+    expect(calls).toContain(
+      `npm view @openclaw/brave-plugin@${PINNED_OPENCLAW_VERSION} dist.integrity`,
+    );
+    expect(calls).not.toContain("openclaw plugins install npm:@openclaw/brave-plugin");
+  });
+
+  it("fails closed for optional OpenClaw plugin version overrides without committed pins", () => {
+    const { result, calls } = runOptionalOpenClawPluginBlock({
+      openclawVersion: UNPINNED_OPENCLAW_VERSION,
+      webSearch: false,
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(`${result.stdout}${result.stderr}`).toContain(
+      `OpenClaw plugin @openclaw/diagnostics-otel@${UNPINNED_OPENCLAW_VERSION} has no committed npm integrity pin`,
+    );
+    expect(calls).not.toContain("openclaw plugins install npm:@openclaw/diagnostics-otel");
   });
 
   it("installs the reviewed pin when registry integrity matches the committed pin", () => {
