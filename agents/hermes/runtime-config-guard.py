@@ -206,13 +206,18 @@ def _atomic_replace(
         try:
             os.fsync(dir_fd)
         except OSError:
+            # Directory fsync is best-effort; some container filesystems reject
+            # it even after the atomic replace has succeeded.
             pass
     except Exception:
         try:
             os.unlink(tmp_name, dir_fd=dir_fd)
         except FileNotFoundError:
+            # The temp file may not exist yet, or may already have been removed
+            # by the failing operation path.
             pass
         except OSError:
+            # Cleanup must not mask the original atomic-write failure.
             pass
         raise
     finally:
@@ -303,8 +308,8 @@ def refresh_hashes(hermes_dir: str, hash_file: str, mode: str) -> None:
         _write_hash(hash_file, hash_text)
 
     compat_exists = os.path.exists(compat_hash)
-    compat_parent_writable = os.access(hermes_dir, os.W_OK)
-    if compat_exists or compat_parent_writable:
+    compat_writable = os.access(compat_hash, os.W_OK) if compat_exists else os.access(hermes_dir, os.W_OK)
+    if mode == "compat" and compat_writable:
         assert_inputs_stable()
         _write_hash(compat_hash, hash_text)
 
@@ -365,7 +370,7 @@ def ensure_api_key(hermes_dir: str, hash_file: str, mode: str) -> None:
     print("minted=1")
 
 
-def provider_placeholders(hermes_dir: str, hash_file: str) -> None:
+def provider_placeholders(hermes_dir: str, hash_file: str, mode: str) -> None:
     env_path = os.path.join(hermes_dir, ".env")
     if not os.path.exists(env_path):
         return
@@ -399,7 +404,7 @@ def provider_placeholders(hermes_dir: str, hash_file: str) -> None:
 
     try:
         _write_existing(env_path, "".join(updated), snapshot, mode=0o640)
-        refresh_hashes(hermes_dir, hash_file, "strict")
+        refresh_hashes(hermes_dir, hash_file, mode)
     except PermissionError:
         if os.geteuid() != 0:
             print(
@@ -426,7 +431,7 @@ def main() -> int:
         elif args.action == "refresh-hashes":
             refresh_hashes(args.hermes_dir, args.hash_file, args.mode)
         elif args.action == "provider-placeholders":
-            provider_placeholders(args.hermes_dir, args.hash_file)
+            provider_placeholders(args.hermes_dir, args.hash_file, args.mode)
     except UnsafePathError as exc:
         _die(str(exc))
     except OSError as exc:

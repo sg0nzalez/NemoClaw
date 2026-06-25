@@ -293,8 +293,7 @@ verify_hermes_config_integrity() {
     # entrypoint runs. Verify the root-owned hash through the sandbox identity
     # that owns the mutable Hermes home.
     export -f verify_config_integrity
-    # shellcheck disable=SC2016  # inner bash expands $1/$2 after setpriv/gosu
-    "${STEP_DOWN_PREFIX_SANDBOX[@]}" bash -c 'verify_config_integrity "$1" "$2"' bash \
+    "${STEP_DOWN_PREFIX_SANDBOX[@]}" bash -c "verify_config_integrity \"\$1\" \"\$2\"" bash \
       "${HERMES_DIR}" "${HERMES_HASH_FILE}"
     return $?
   fi
@@ -1174,6 +1173,7 @@ migrate_legacy_layout() {
 }
 
 refresh_hermes_provider_placeholders() {
+  local mode="${1:-strict}"
   local env_file="${HERMES_DIR}/.env"
   [ -f "$env_file" ] || return 0
 
@@ -1190,15 +1190,23 @@ refresh_hermes_provider_placeholders() {
 
   "$_HERMES_PYTHON" "$_HERMES_RUNTIME_CONFIG_GUARD" provider-placeholders \
     --hermes-dir "$HERMES_DIR" \
-    --hash-file "$HERMES_HASH_FILE"
+    --hash-file "$HERMES_HASH_FILE" \
+    --mode "$mode"
 }
 
 refresh_hermes_runtime_config_hashes() {
   local mode="${1:-strict}"
-  "$_HERMES_PYTHON" "$_HERMES_RUNTIME_CONFIG_GUARD" refresh-hashes \
-    --hermes-dir "$HERMES_DIR" \
-    --hash-file "$HERMES_HASH_FILE" \
+  local cmd=(
+    "$_HERMES_PYTHON" "$_HERMES_RUNTIME_CONFIG_GUARD" refresh-hashes
+    --hermes-dir "$HERMES_DIR"
+    --hash-file "$HERMES_HASH_FILE"
     --mode "$mode"
+  )
+  if [ "$mode" = "compat" ] && [ "$(id -u)" -eq 0 ]; then
+    "${STEP_DOWN_PREFIX_SANDBOX[@]}" "${cmd[@]}"
+    return $?
+  fi
+  "${cmd[@]}"
 }
 
 ensure_hermes_runtime_api_server_key() {
@@ -1223,6 +1231,9 @@ ensure_hermes_runtime_api_server_key() {
       ;;
   esac
 
+  if [ "$mode" = "strict" ]; then
+    refresh_hermes_runtime_config_hashes compat
+  fi
   echo "[config] Minted Hermes API_SERVER_KEY for this sandbox and refreshed config hash" >&2
 }
 
@@ -1266,7 +1277,8 @@ if [ "$(id -u)" -ne 0 ]; then
   apply_shields_up_runtime_env
   validate_hermes_env_secret_boundary
   validate_hermes_runtime_env_secret_boundary
-  refresh_hermes_provider_placeholders
+  refresh_hermes_provider_placeholders compat
+  refresh_hermes_runtime_config_hashes compat
   configure_messaging_channels
   retry_tirith_marker_if_needed
 
@@ -1317,7 +1329,8 @@ ensure_hermes_runtime_api_server_key strict
 apply_shields_up_runtime_env
 validate_hermes_env_secret_boundary
 validate_hermes_runtime_env_secret_boundary
-refresh_hermes_provider_placeholders
+refresh_hermes_provider_placeholders strict
+refresh_hermes_runtime_config_hashes compat
 configure_messaging_channels
 retry_tirith_marker_if_needed
 
