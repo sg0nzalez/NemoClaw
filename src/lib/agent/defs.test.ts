@@ -128,7 +128,7 @@ describe("agent definitions", () => {
       format: "toml",
     });
     expect(deepAgentsCode.inference?.provider_type).toBe("openai_compatible");
-    expect(deepAgentsCode.stateDirs).toEqual([".state", "skills"]);
+    expect(deepAgentsCode.stateDirs).toEqual([".state", "skills", "agent/skills"]);
     expect(deepAgentsCode.stateFiles).toEqual([
       { path: "config.toml", strategy: "copy" },
       { path: "hooks.json", strategy: "copy" },
