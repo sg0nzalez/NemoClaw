@@ -26,7 +26,7 @@ OpenShell intercepts inference traffic and forwards it to the local endpoint you
 - NemoClaw installed. Refer to the [Quickstart](../get-started/quickstart) if you have not installed yet.
 </AgentOnly>
 <AgentOnly variant="hermes">
-- NemoClaw installed. Refer to [Quickstart with Hermes](../get-started/quickstart) if you have not installed yet.
+- NemoClaw installed. Refer to [Quickstart with Hermes](../get-started/quickstart-hermes) if you have not installed yet.
 </AgentOnly>
 - A local model server running, or a supported Ollama, vLLM, or NIM setup that the NemoClaw onboard wizard can use, start, or install.
 
@@ -115,7 +115,7 @@ Ollama is convenient for local chat, but some model/template combinations can
 return tool calls as plain text under realistic agent load. If the TUI shows raw
 JSON such as `{"name":"memory_search","arguments":{...}}` instead of running a
 tool, switch to vLLM with `--enable-auto-tool-choice` and the correct
-`--tool-call-parser`. See [Tool-Calling Reliability](tool-calling-reliability).
+`--tool-call-parser`. See [Tool-Calling Reliability](../../openclaw/inference/tool-calling-reliability).
 </Warning>
 </AgentOnly>
 
@@ -250,7 +250,7 @@ If the provider itself needs to change (for example, switching from vLLM to a cl
 <AgentOnly variant="openclaw">
 
 - [Inference Options](inference-options) for the full list of providers available during onboarding.
-- [Tool-Calling Reliability](tool-calling-reliability) for diagnosing raw JSON tool-call output with local models.
+- [Tool-Calling Reliability](../../openclaw/inference/tool-calling-reliability) for diagnosing raw JSON tool-call output with local models.
 - [Switch Inference Models](switch-inference-providers) for runtime model switching.
 - [Quickstart](../get-started/quickstart) for first-time installation.
 
@@ -259,6 +259,6 @@ If the provider itself needs to change (for example, switching from vLLM to a cl
 
 - [Inference Options](inference-options) for the full list of providers available during onboarding.
 - [Switch Inference Models](switch-inference-providers) for runtime model switching.
-- [Quickstart with Hermes](../get-started/quickstart) for first-time installation.
+- [Quickstart with Hermes](../get-started/quickstart-hermes) for first-time installation.
 
 </AgentOnly>
