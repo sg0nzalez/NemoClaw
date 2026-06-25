@@ -595,6 +595,12 @@ exit 2
 
 type StopAttemptResult = ReturnType<typeof spawnSync>;
 
+function isSandboxPodName(line: string, sandboxName: string): boolean {
+  if (!line.startsWith("pod/")) return false;
+  const podName = line.slice("pod/".length);
+  return podName === sandboxName || podName === `${sandboxName}-0`;
+}
+
 function stopSandboxChannelsViaKubectl(sandboxName: string): StopAttemptResult | null {
   const podsResult = dockerSpawnSync(
     ["exec", GATEWAY_CLUSTER_CONTAINER, "kubectl", "get", "pods", "-n", "openshell", "-o", "name"],
@@ -607,7 +613,7 @@ function stopSandboxChannelsViaKubectl(sandboxName: string): StopAttemptResult |
   const pod = podOutput
     .split(/\r?\n/)
     .map((line: string) => line.trim())
-    .find((line: string) => line.startsWith("pod/") && line.includes(sandboxName));
+    .find((line: string) => isSandboxPodName(line, sandboxName));
   if (!pod) return null;
 
   return dockerSpawnSync(

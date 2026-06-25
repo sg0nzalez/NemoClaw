@@ -118,6 +118,37 @@ describe("stopSandboxChannels", () => {
     logSpy.mockRestore();
   });
 
+  it("does not select overlapping sandbox pod names for privileged shutdown", () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    spawnSyncSpy
+      .mockReturnValueOnce({ status: 0, stdout: "pod/prod-app-0\npod/app-0\n" })
+      .mockReturnValueOnce({ status: 0 });
+
+    stopSandboxChannels("app");
+
+    const args = spawnSyncSpy.mock.calls[1][1] as string[];
+    expect(args).toContain("pod/app-0");
+    expect(args).not.toContain("pod/prod-app-0");
+    logSpy.mockRestore();
+  });
+
+  it("falls back when no exact sandbox pod name is available", () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    spawnSyncSpy
+      .mockReturnValueOnce({ status: 0, stdout: "pod/prod-app-0\npod/app-copy-0\n" })
+      .mockReturnValueOnce({ status: 0 });
+
+    stopSandboxChannels("app");
+
+    expect(spawnSyncSpy).toHaveBeenNthCalledWith(
+      2,
+      "/usr/local/bin/openshell",
+      ["sandbox", "exec", "--name", "app", "--", "sh", "-lc", expect.any(String)],
+      expect.objectContaining({ timeout: 20000 }),
+    );
+    logSpy.mockRestore();
+  });
+
   it("treats stop script exit 1 (no process matched) as already stopped", () => {
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     spawnSyncSpy
