@@ -272,10 +272,12 @@ describe("GATEWAY_STOP_SCRIPT (executed)", () => {
     const markerFile = join(dir, "nemoclaw-gateway-local");
     writeFileSync(pidFile, `${pid}\n`);
     writeFileSync(markerFile, "");
-    return GATEWAY_STOP_SCRIPT.replaceAll("/tmp/nemoclaw-gateway.pid", pidFile).replaceAll(
-      "/tmp/nemoclaw-gateway-local",
-      markerFile,
-    );
+    return GATEWAY_STOP_SCRIPT.replaceAll("/tmp/nemoclaw-gateway.pid", pidFile)
+      .replaceAll("/tmp/nemoclaw-gateway-local", markerFile)
+      .replace(
+        'allowed_bare_users="gateway,sandbox"',
+        `allowed_bare_users="gateway,sandbox,${process.env.USER ?? ""}"`,
+      );
   }
 
   it.runIf(process.platform === "linux")("kills openclaw-gateway argv0 process", async () => {
