@@ -511,7 +511,10 @@ self="$$"
 parent="$PPID"
 gateway_pid_file="/tmp/nemoclaw-gateway.pid"
 gateway_marker_file="/tmp/nemoclaw-gateway-local"
-trusted_identity_owners="root,gateway,sandbox"
+# A root-owned identity file can authorize any allowed gateway user. Otherwise,
+# the identity owner must match the bare process user. This preserves the
+# non-root sandbox startup path without letting sandbox-owned /tmp files
+# authorize privileged kills of gateway-owned processes.
 trusted_identity_file() {
   file="$1"
   [ -f "$file" ] || return 1
@@ -522,14 +525,17 @@ trusted_identity_file() {
     *00) ;;
     *) return 1 ;;
   esac
-  case ",$trusted_identity_owners," in
-    *,"$owner",*) return 0 ;;
+  case "$owner" in
+    root|gateway|sandbox) ;;
     *) return 1 ;;
   esac
+  printf '%s\n' "$owner"
 }
 pidfile_pid=""
 identity_files_trusted=0
-if trusted_identity_file "$gateway_pid_file" && trusted_identity_file "$gateway_marker_file"; then
+pidfile_owner="$(trusted_identity_file "$gateway_pid_file" || true)"
+marker_owner="$(trusted_identity_file "$gateway_marker_file" || true)"
+if [ -n "$pidfile_owner" ] && [ "$pidfile_owner" = "$marker_owner" ]; then
   raw_pidfile_pid="$(head -n 1 "$gateway_pid_file" 2>/dev/null | tr -d '[:space:]')"
   case "$raw_pidfile_pid" in
     ''|*[!0-9]*) ;;
@@ -546,6 +552,7 @@ find_gateway_pids() {
     -v parent="$parent" \
     -v pidfile_pid="$pidfile_pid" \
     -v identity_files_trusted="$identity_files_trusted" \
+    -v identity_owner="$pidfile_owner" \
     -v allowed_bare_users="$allowed_bare_users" '
     function allowed_bare_user(user) {
       return index("," allowed_bare_users ",", "," user ",") > 0
@@ -557,7 +564,7 @@ find_gateway_pids() {
       sub(/^[[:space:]]*[^[:space:]]+[[:space:]]+[0-9]+[[:space:]]+/, "", cmd)
       if (cmd ~ /(^|[[:space:]\/])openclaw-gateway([[:space:]]|$)/ || cmd ~ /(^|[[:space:]\/])openclaw[[:space:]]+gateway([[:space:]]|$)/) {
         seen[pid] = 1
-      } else if (identity_files_trusted == "1" && pid == pidfile_pid && allowed_bare_user(user) && cmd ~ /(^|[[:space:]\/])openclaw[[:space:]]*$/) {
+      } else if (identity_files_trusted == "1" && pid == pidfile_pid && allowed_bare_user(user) && (identity_owner == "root" || identity_owner == user) && cmd ~ /(^|[[:space:]\/])openclaw[[:space:]]*$/) {
         seen[pid] = 1
       }
     }

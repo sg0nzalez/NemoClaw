@@ -333,10 +333,7 @@ describe("GATEWAY_STOP_SCRIPT (executed)", () => {
         'allowed_bare_users="gateway,sandbox"',
         `allowed_bare_users="gateway,sandbox,${process.env.USER ?? ""}"`,
       )
-      .replace(
-        'trusted_identity_owners="root,gateway,sandbox"',
-        `trusted_identity_owners="root,gateway,sandbox,${process.env.USER ?? ""}"`,
-      );
+      .replace("root|gateway|sandbox) ;;", `root|gateway|sandbox|${process.env.USER ?? ""}) ;;`);
   }
 
   it.runIf(process.platform === "linux")("kills openclaw-gateway argv0 process", async () => {
@@ -399,6 +396,20 @@ describe("GATEWAY_STOP_SCRIPT (executed)", () => {
       const decoy = spawnWithArgv0("openclaw");
 
       expect(runStopScript(stopScriptWithGatewayIdentity(decoy, 0o600, `x${decoy}y\n`))).toBe(1);
+      expect(isAlive(decoy)).toBe(true);
+    },
+  );
+
+  it.runIf(process.platform === "linux")(
+    "exits 1 (not running) and spares bare openclaw when gateway identity owner mismatches the process user",
+    () => {
+      const decoy = spawnWithArgv0("openclaw");
+      const script = stopScriptWithGatewayIdentity(decoy).replace(
+        '-v identity_owner="$pidfile_owner"',
+        '-v identity_owner="sandbox"',
+      );
+
+      expect(runStopScript(script)).toBe(1);
       expect(isAlive(decoy)).toBe(true);
     },
   );
