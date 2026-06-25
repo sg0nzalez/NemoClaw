@@ -14,7 +14,7 @@ import path from "node:path";
 import { describe, it } from "vitest";
 
 const repoRoot = path.join(import.meta.dirname, "..");
-
+const SUPPORTED_IDS = ["telegram", "discord", "wechat", "slack", "whatsapp", "zalo", "teams"];
 function runScript(
   scriptBody: string,
   extraEnv: Record<string, string> = {},
@@ -308,15 +308,7 @@ const ctx = module.exports;
         isInteractive: false,
         configuredChannels: ["slack"],
         disabledChannels: [],
-        supportedChannelIds: [
-          "telegram",
-          "discord",
-          "wechat",
-          "slack",
-          "whatsapp",
-          "zalo",
-          "teams",
-        ],
+        supportedChannelIds: SUPPORTED_IDS,
       },
     ]);
   });
