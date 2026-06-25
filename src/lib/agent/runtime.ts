@@ -185,6 +185,8 @@ function hermesDashboardEnvPrefix(): string {
   return 'HERMES_HOME="$_HERMES_DASHBOARD_HOME" GATEWAY_HEALTH_URL="http://127.0.0.1:$_HERMES_DASHBOARD_GATEWAY_PORT"';
 }
 
+const HERMES_GATEWAY_INTERNAL_PORT = 18642;
+
 export interface HermesDashboardRecoveryConfig {
   publicPort: number;
   internalPort: number;
@@ -197,7 +199,7 @@ function buildHermesDashboardRecoveryLines(config: HermesDashboardRecoveryConfig
     '_DASHBOARD_LOG=/tmp/hermes-dashboard.log; if ! : >> "$_DASHBOARD_LOG" 2>/dev/null; then _DASHBOARD_LOG=/tmp/hermes-dashboard-recovery.log; : >> "$_DASHBOARD_LOG" 2>/dev/null || true; fi;';
   return [
     "_HERMES_DASHBOARD_HOME=/sandbox/.hermes/dashboard-home;",
-    `_HERMES_DASHBOARD_GATEWAY_PORT=${config.internalPort};`,
+    `_HERMES_DASHBOARD_GATEWAY_PORT=${HERMES_GATEWAY_INTERNAL_PORT};`,
     '_HERMES_PYTHON=/opt/hermes/.venv/bin/python; [ -x "$_HERMES_PYTHON" ] || _HERMES_PYTHON="$(command -v python3 || echo python3)";',
     "_HERMES_DASHBOARD_CONFIG_SEEDER=/usr/local/lib/nemoclaw/seed-hermes-dashboard-config.py;",
     `_DASH_CODE=$(curl -so /dev/null -w '%{http_code}' --max-time 3 http://127.0.0.1:${config.internalPort}/ 2>/dev/null || echo 000); case "$_DASH_CODE" in 200|301|302|307|308) echo DASHBOARD_ALREADY_RUNNING; ;; *)`,

@@ -118,7 +118,11 @@ describe("buildRecoveryScript", () => {
     expect(script).toContain("_HERMES_DASHBOARD_HOME=/sandbox/.hermes/dashboard-home");
     expect(script).toContain("/usr/local/lib/nemoclaw/seed-hermes-dashboard-config.py");
     expect(script).toContain("${_HERMES_DASHBOARD_HOME}/gateway_state.json");
+    expect(script).toContain("_HERMES_DASHBOARD_GATEWAY_PORT=18642");
     expect(script).toContain('HERMES_HOME="$_HERMES_DASHBOARD_HOME"');
+    expect(script).toContain(
+      'GATEWAY_HEALTH_URL="http://127.0.0.1:$_HERMES_DASHBOARD_GATEWAY_PORT"',
+    );
     expect(script).not.toContain("HERMES_HOME=/sandbox/.hermes nohup");
     expect(script).toContain(
       '"$AGENT_BIN" dashboard --host 127.0.0.1 --port 19119 --skip-build --no-open --tui',
@@ -142,8 +146,12 @@ describe("buildRecoveryScript", () => {
     expect(script).toContain('. "$_NEMOCLAW_RECOVERY_SOURCE_ENV"');
     expect(script).toContain("/usr/local/bin/hermes");
     expect(script).toContain("_HERMES_DASHBOARD_HOME=/sandbox/.hermes/dashboard-home");
+    expect(script).toContain("_HERMES_DASHBOARD_GATEWAY_PORT=18642");
     expect(script).toContain("/usr/local/lib/nemoclaw/seed-hermes-dashboard-config.py");
     expect(script).toContain('HERMES_HOME="$_HERMES_DASHBOARD_HOME"');
+    expect(script).toContain(
+      'GATEWAY_HEALTH_URL="http://127.0.0.1:$_HERMES_DASHBOARD_GATEWAY_PORT"',
+    );
     expect(script).toContain(
       '"$AGENT_BIN" dashboard --host 127.0.0.1 --port 19119 --skip-build --no-open',
     );

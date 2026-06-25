@@ -337,6 +337,122 @@ PY
   );
 }
 
+async function assertDashboardOnlyRecovery(probe: DockerProbe, container: string): Promise<void> {
+  await expectContainerSh(
+    probe,
+    container,
+    "Hermes dashboard-only recovery precondition setup failed",
+    String.raw`
+set -eu
+printf 'stale dashboard-scoped gateway state\n' >/sandbox/.hermes/dashboard-home/gateway_state.json
+printf 'broken_dashboard_config: true\n' >/sandbox/.hermes/dashboard-home/config.yaml
+printf 'BROKEN_DASHBOARD_ENV=1\n' >/sandbox/.hermes/dashboard-home/.env
+pkill -TERM -f '[h]ermes[[:space:]]+dashboard([[:space:]]|$)' 2>/dev/null || true
+sleep 1
+pkill -KILL -f '[h]ermes[[:space:]]+dashboard([[:space:]]|$)' 2>/dev/null || true
+`,
+  );
+
+  const recoveryScript = String.raw`
+set -eu
+_HERMES_DASHBOARD_HOME=/sandbox/.hermes/dashboard-home
+_HERMES_DASHBOARD_INTERNAL_PORT=19119
+_HERMES_DASHBOARD_GATEWAY_PORT=18642
+_HERMES_PYTHON=/opt/hermes/.venv/bin/python
+[ -x "$_HERMES_PYTHON" ] || _HERMES_PYTHON="$(command -v python3 || echo python3)"
+_HERMES_DASHBOARD_CONFIG_SEEDER=/usr/local/lib/nemoclaw/seed-hermes-dashboard-config.py
+[ -f "$_HERMES_DASHBOARD_CONFIG_SEEDER" ]
+[ ! -L "$_HERMES_DASHBOARD_HOME" ]
+mkdir -p "$_HERMES_DASHBOARD_HOME"
+[ -d "$_HERMES_DASHBOARD_HOME" ] && [ ! -L "$_HERMES_DASHBOARD_HOME" ]
+chmod 700 "$_HERMES_DASHBOARD_HOME"
+rm -f "$_HERMES_DASHBOARD_HOME/gateway_state.json" 2>/dev/null || true
+"$_HERMES_PYTHON" "$_HERMES_DASHBOARD_CONFIG_SEEDER" \
+  /sandbox/.hermes/config.yaml "$_HERMES_DASHBOARD_HOME/config.yaml" \
+  /sandbox/.hermes/.env "$_HERMES_DASHBOARD_HOME/.env"
+pkill -TERM -f '[h]ermes[[:space:]]+dashboard([[:space:]]|$)' 2>/dev/null || true
+sleep 1
+pkill -KILL -f '[h]ermes[[:space:]]+dashboard([[:space:]]|$)' 2>/dev/null || true
+_DASHBOARD_LOG=/tmp/hermes-dashboard.log
+: >> "$_DASHBOARD_LOG"
+AGENT_BIN=/usr/local/bin/hermes
+HERMES_HOME="$_HERMES_DASHBOARD_HOME" \
+GATEWAY_HEALTH_URL="http://127.0.0.1:$_HERMES_DASHBOARD_GATEWAY_PORT" \
+nohup "$AGENT_BIN" dashboard --host 127.0.0.1 --port "$_HERMES_DASHBOARD_INTERNAL_PORT" --skip-build --no-open >> "$_DASHBOARD_LOG" 2>&1 &
+DPID=$!
+sleep 2
+if kill -0 "$DPID" 2>/dev/null; then
+  echo "DASHBOARD_PID=$DPID"
+else
+  echo DASHBOARD_FAILED
+  tail -20 "$_DASHBOARD_LOG" 2>/dev/null || true
+  exit 1
+fi
+`;
+  const recovery = await probe.run(["exec", container, "bash", "-lc", recoveryScript], {
+    artifactName: `${container}-dashboard-only-recovery`,
+    timeoutMs: 60_000,
+  });
+  expect(
+    recovery.exitCode,
+    `${container}: dashboard-only recovery failed\n${resultText(recovery)}`,
+  ).toBe(0);
+  expect(recovery.stdout, `${container}: dashboard recovery did not relaunch`).toMatch(
+    /DASHBOARD_PID=/,
+  );
+  expect(
+    recovery.stdout,
+    `${container}: dashboard recovery skipped stale-state reseed`,
+  ).not.toMatch(/DASHBOARD_ALREADY_RUNNING/);
+
+  await expectContainerSh(
+    probe,
+    container,
+    "Hermes dashboard-only recovery did not reseed dashboard-home and relaunch dashboard",
+    String.raw`
+set -eu
+[ ! -e /sandbox/.hermes/dashboard-home/gateway_state.json ]
+[ "$(stat -c '%a' /sandbox/.hermes/dashboard-home)" = "700" ]
+[ "$(stat -c '%a' /sandbox/.hermes/dashboard-home/config.yaml)" = "600" ]
+[ "$(stat -c '%a' /sandbox/.hermes/dashboard-home/.env)" = "600" ]
+grep -F "_nemoclaw_upstream:" /sandbox/.hermes/dashboard-home/config.yaml >/dev/null
+grep -F "API_SERVER_KEY=" /sandbox/.hermes/dashboard-home/.env >/dev/null
+! grep -F "broken_dashboard_config" /sandbox/.hermes/dashboard-home/config.yaml >/dev/null
+! grep -F "BROKEN_DASHBOARD_ENV" /sandbox/.hermes/dashboard-home/.env >/dev/null
+python3 - <<'PY'
+import os
+import sys
+
+for pid in os.listdir("/proc"):
+    if not pid.isdigit():
+        continue
+    try:
+        cmdline = open(f"/proc/{pid}/cmdline", "rb").read().replace(b"\0", b" ")
+        environ = open(f"/proc/{pid}/environ", "rb").read()
+    except OSError:
+        continue
+    if b"hermes" not in cmdline or b"dashboard" not in cmdline:
+        continue
+    if b"HERMES_HOME=/sandbox/.hermes/dashboard-home\0" not in environ:
+        raise SystemExit("dashboard process is not using dashboard-home HERMES_HOME")
+    if b"GATEWAY_HEALTH_URL=http://127.0.0.1:18642\0" not in environ:
+        raise SystemExit("dashboard process is not using the Hermes gateway health URL")
+    sys.exit(0)
+raise SystemExit("dashboard process not found after recovery")
+PY
+for _ in $(seq 1 30); do
+  code="$(curl -sS -o /tmp/hermes-dashboard-recovery-body -w '%{http_code}' --max-time 3 http://127.0.0.1:19119/ 2>/dev/null || echo 000)"
+  case "$code" in
+    2??|3??) exit 0 ;;
+  esac
+  sleep 1
+done
+echo "dashboard listener did not respond after recovery" >&2
+exit 1
+`,
+  );
+}
+
 async function assertGatewayProcess(probe: DockerProbe, container: string): Promise<void> {
   await expectContainerSh(
     probe,
@@ -371,6 +487,7 @@ async function runCleanVariant(
   await assertRuntimeLayout(probe, container);
   await assertBearerAuth(probe, container);
   await assertDashboardHome(probe, container);
+  await assertDashboardOnlyRecovery(probe, container);
 }
 
 async function runLegacyVariant(
@@ -435,6 +552,7 @@ liveTest(
         "gateway user cannot remove config.yaml from sticky config root",
         "Hermes API denies missing/wrong bearer tokens and accepts API_SERVER_KEY",
         "dashboard-home is sandbox-owned 0700 with 0600 allowlisted config/env",
+        "dashboard-only recovery removes stale dashboard state, reseeds dashboard-home, and relaunches from that home",
         "legacy gateway.pid symlink/state shape is repaired and booted",
       ],
     });
@@ -473,6 +591,7 @@ liveTest(
         gatewayPrivilegeSeparationVerified: true,
         bearerAuthVerified: true,
         dashboardHomeVerified: true,
+        dashboardOnlyRecoveryVerified: true,
         legacyPidSymlinkMigrationVerified: true,
       },
     });
