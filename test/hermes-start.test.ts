@@ -1054,13 +1054,26 @@ describe("agents/hermes/start.sh env secret boundary", () => {
       NEMOCLAW_INFERENCE_API: "openai-completions",
       NEMOCLAW_PROVIDER_KEY: "custom",
       OPENCLAW_GATEWAY_TOKEN: "raw-gateway-token",
-      API_SERVER_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
       SLACK_BOT_TOKEN: "xoxb-OPENSHELL-RESOLVE-ENV-SLACK_BOT_TOKEN",
       TELEGRAM_BOT_TOKEN: "openshell:resolve:env:TELEGRAM_BOT_TOKEN",
     });
 
     expect(result.status).toBe(0);
     expect(result.stderr).toBe("");
+  });
+
+  it("rejects inherited API_SERVER_KEY process env values", () => {
+    const inheritedKey = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    const result = runHermesRuntimeEnvSecretBoundary({
+      API_SERVER_HOST: "127.0.0.1",
+      API_SERVER_PORT: "18642",
+      API_SERVER_KEY: inheritedKey,
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("process environment");
+    expect(result.stderr).toContain("API_SERVER_KEY");
+    expect(result.stderr).not.toContain(inheritedKey);
   });
 
   it("rejects raw secret-shaped process env values without printing the value", () => {

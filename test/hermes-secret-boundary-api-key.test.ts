@@ -49,7 +49,21 @@ function runRuntimeEnvValidator(envOverrides: Record<string, string>) {
 }
 
 describe("agents/hermes/validate-env-secret-boundary API_SERVER_KEY contract", () => {
-  it("allows generated API_SERVER_KEY values in env-file and runtime-env inputs", () => {
+  it("allows generated API_SERVER_KEY values in Hermes .env files", () => {
+    const envFileResult = runEnvFileValidator(
+      [
+        "API_SERVER_PORT=18642",
+        "API_SERVER_HOST=127.0.0.1",
+        `API_SERVER_KEY=${GENERATED_HEX_TOKEN}`,
+        "",
+      ].join("\n"),
+    );
+
+    expect(envFileResult.status, envFileResult.stderr).toBe(0);
+    expect(envFileResult.stderr).toBe("");
+  });
+
+  it("rejects inherited generated-looking API_SERVER_KEY values in process env", () => {
     const envFileResult = runEnvFileValidator(
       [
         "API_SERVER_PORT=18642",
@@ -61,13 +75,14 @@ describe("agents/hermes/validate-env-secret-boundary API_SERVER_KEY contract", (
     const runtimeEnvResult = runRuntimeEnvValidator({
       API_SERVER_HOST: "127.0.0.1",
       API_SERVER_PORT: "18642",
-      API_SERVER_KEY: GENERATED_HEX_TOKEN,
+      API_SERVER_KEY: "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
     });
 
     expect(envFileResult.status, envFileResult.stderr).toBe(0);
-    expect(envFileResult.stderr).toBe("");
-    expect(runtimeEnvResult.status, runtimeEnvResult.stderr).toBe(0);
-    expect(runtimeEnvResult.stderr).toBe("");
+    expect(runtimeEnvResult.status).toBe(1);
+    expect(runtimeEnvResult.stderr).toContain("process environment");
+    expect(runtimeEnvResult.stderr).toContain("API_SERVER_KEY");
+    expect(runtimeEnvResult.stderr).not.toContain("fedcba9876543210");
   });
 
   it("rejects weak API_SERVER_KEY values in Hermes .env without printing the value", () => {
