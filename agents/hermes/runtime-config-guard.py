@@ -336,6 +336,22 @@ def _is_generated_api_server_key(value: str) -> bool:
     return API_SERVER_KEY_RE.fullmatch(candidate) is not None
 
 
+def _placeholder_suffix_matches_env_key(suffix: str, env_key: str) -> bool:
+    if suffix == env_key:
+        return True
+    revision_match = re.fullmatch(r"v[0-9]+_(.+)", suffix)
+    return revision_match is not None and revision_match.group(1) == env_key
+
+
+def _normalize_provider_placeholder_for_env_key(value: str, env_key: str) -> str | None:
+    if not value.startswith(SCOPED_PLACEHOLDER_PREFIX):
+        return None
+    suffix = value[len(SCOPED_PLACEHOLDER_PREFIX) :]
+    if not _placeholder_suffix_matches_env_key(suffix, env_key):
+        return None
+    return f"{SCOPED_PLACEHOLDER_PREFIX}{env_key}"
+
+
 def ensure_api_key(hermes_dir: str, hash_file: str, mode: str) -> None:
     env_path = os.path.join(hermes_dir, ".env")
     if not os.path.exists(env_path):
@@ -385,9 +401,9 @@ def provider_placeholders(hermes_dir: str, hash_file: str, mode: str) -> None:
         return
 
     replacements = {
-        key: value
+        key: normalized
         for key in PROVIDER_PLACEHOLDER_KEYS
-        if (value := os.environ.get(key, "")).startswith(SCOPED_PLACEHOLDER_PREFIX)
+        if (normalized := _normalize_provider_placeholder_for_env_key(os.environ.get(key, ""), key))
     }
     if not replacements:
         return

@@ -139,6 +139,55 @@ function runHermesRuntimeApiServerKeyMint(
   }
 }
 
+function runHermesRuntimeProviderPlaceholderRefresh(opts: {
+  envFile: string;
+  envOverrides: Record<string, string>;
+}) {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-provider-placeholders-"));
+  const hermesHome = path.join(tmpDir, ".hermes");
+  const configPath = path.join(hermesHome, "config.yaml");
+  const envPath = path.join(hermesHome, ".env");
+  const hashPath = path.join(tmpDir, "hermes.config-hash");
+
+  fs.mkdirSync(hermesHome, { recursive: true });
+  fs.writeFileSync(configPath, "model:\n  default: test-model\n");
+  fs.writeFileSync(envPath, opts.envFile, { mode: 0o640 });
+  writeHermesHash(hashPath, configPath, envPath);
+
+  try {
+    const result = spawnSync(
+      "python3",
+      [
+        RUNTIME_CONFIG_GUARD,
+        "provider-placeholders",
+        "--hermes-dir",
+        hermesHome,
+        "--hash-file",
+        hashPath,
+        "--mode",
+        "strict",
+      ],
+      {
+        encoding: "utf-8",
+        timeout: 5000,
+        env: { ...process.env, ...opts.envOverrides },
+      },
+    );
+    const envFileContent = fs.readFileSync(envPath, "utf-8");
+    const strictHashCheck = spawnSync("sha256sum", ["-c", hashPath, "--status"], {
+      encoding: "utf-8",
+      timeout: 5000,
+    });
+    return {
+      result,
+      envFileContent,
+      strictHashValid: strictHashCheck.status === 0,
+    };
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+}
+
 describe("agents/hermes/start.sh runtime API server key", () => {
   it("mints API_SERVER_KEY at startup and refreshes Hermes config hashes", () => {
     const run = runHermesRuntimeApiServerKeyMint({ fakeRoot: true });
@@ -209,6 +258,28 @@ describe("agents/hermes/start.sh runtime API server key", () => {
       expect(run.strictHashValid, envLine).toBe(true);
       expect(run.compatHashValid, envLine).toBe(true);
       expect(run.result.stderr, envLine).toContain("Minted Hermes API_SERVER_KEY");
+    }
+  });
+
+  it("normalizes versioned provider placeholders from the runtime env before refreshing .env", () => {
+    for (const envFile of [
+      "DISCORD_BOT_TOKEN=openshell:resolve:env:DISCORD_BOT_TOKEN\n",
+      "DISCORD_BOT_TOKEN=openshell:resolve:env:v111_DISCORD_BOT_TOKEN\n",
+    ]) {
+      const run = runHermesRuntimeProviderPlaceholderRefresh({
+        envFile,
+        envOverrides: {
+          DISCORD_BOT_TOKEN: "openshell:resolve:env:v222_DISCORD_BOT_TOKEN",
+        },
+      });
+
+      expect(run.result.status, run.result.stderr).toBe(0);
+      expect(run.envFileContent).toContain(
+        "DISCORD_BOT_TOKEN=openshell:resolve:env:DISCORD_BOT_TOKEN\n",
+      );
+      expect(run.envFileContent).not.toContain("v222_DISCORD_BOT_TOKEN");
+      expect(run.envFileContent).not.toContain("v111_DISCORD_BOT_TOKEN");
+      expect(run.strictHashValid).toBe(true);
     }
   });
 
