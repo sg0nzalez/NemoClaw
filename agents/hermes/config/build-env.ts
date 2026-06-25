@@ -87,15 +87,16 @@ function readMessagingCredentialPlaceholders(
     const channelId = typeof binding.channelId === "string" ? binding.channelId : "";
     const envKey = typeof binding.providerEnvKey === "string" ? binding.providerEnvKey : "";
     const placeholder = typeof binding.placeholder === "string" ? binding.placeholder : "";
+    const normalizedPlaceholder = normalizeProviderPlaceholderForEnvKey(placeholder, envKey);
     if (
       !activeChannels.has(channelId) ||
       !isSafeEnvKey(envKey) ||
-      !isProviderPlaceholderForEnvKey(placeholder, envKey) ||
+      !normalizedPlaceholder ||
       placeholders.has(envKey)
     ) {
       continue;
     }
-    placeholders.set(envKey, placeholder);
+    placeholders.set(envKey, normalizedPlaceholder);
   }
 
   return [...placeholders].map(([envKey, placeholder]) => ({ envKey, placeholder }));
@@ -114,13 +115,18 @@ function planHasEnvLineRender(plan: Record<string, unknown> | null): boolean {
   return renderEntries.some((entry) => isRecord(entry) && entry.kind === "env-lines");
 }
 
-function isProviderPlaceholderForEnvKey(value: string, envKey: string): boolean {
+function normalizeProviderPlaceholderForEnvKey(value: string, envKey: string): string | null {
   const openShellPrefix = "openshell:resolve:env:";
   if (value.startsWith(openShellPrefix)) {
-    return placeholderSuffixMatchesEnvKey(value.slice(openShellPrefix.length), envKey);
+    return placeholderSuffixMatchesEnvKey(value.slice(openShellPrefix.length), envKey)
+      ? `${openShellPrefix}${envKey}`
+      : null;
   }
   const aliasMatch = value.match(/^[A-Za-z0-9]+-OPENSHELL-RESOLVE-ENV-(.+)$/);
-  return aliasMatch ? placeholderSuffixMatchesEnvKey(aliasMatch[1] as string, envKey) : false;
+  if (!aliasMatch || !placeholderSuffixMatchesEnvKey(aliasMatch[1] as string, envKey)) {
+    return null;
+  }
+  return value.replace(/-OPENSHELL-RESOLVE-ENV-.+$/, `-OPENSHELL-RESOLVE-ENV-${envKey}`);
 }
 
 function placeholderSuffixMatchesEnvKey(suffix: string, envKey: string): boolean {

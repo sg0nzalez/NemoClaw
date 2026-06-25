@@ -578,7 +578,7 @@ describe("agents/hermes/generate-config.ts", () => {
           channelId: "discord",
           credentialId: "discordBotToken",
           providerEnvKey: "DISCORD_BOT_TOKEN",
-          placeholder: "openshell:resolve:env:DISCORD_BOT_TOKEN",
+          placeholder: "openshell:resolve:env:v1442987827285932589_DISCORD_BOT_TOKEN",
           credentialAvailable: true,
         },
       ],
