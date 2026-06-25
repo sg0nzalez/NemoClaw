@@ -454,12 +454,11 @@ export function showStatus(opts: ServiceOptions = {}): void {
  * sends TERM/KILL as needed, and only reports success after a post-stop process
  * scan is empty.
  *
- * The argv matcher must also recognize the bare `openclaw` process name:
- * OpenClaw rewrites its own argv via `process.title` after startup, so the
- * running gateway no longer carries a `gateway` suffix. Matching only
- * `openclaw-gateway`/`openclaw gateway` made `find_gateway_pids` return empty,
- * which `reportStopResult` misreads as "not running" — so `tunnel stop` exited
- * 0 while the gateway kept running and channels kept polling (#4951).
+ * The matcher must also recognize the bare `openclaw` process name that
+ * OpenClaw reports after rewriting `process.title`, but that broad argv form is
+ * accepted only when it matches the recorded gateway PID plus local gateway
+ * marker. This keeps `tunnel stop` from killing unrelated bare OpenClaw
+ * processes while still finding the rewritten gateway (#4951).
  */
 export function stopSandboxChannels(sandboxName: string): void {
   info(`Stopping in-sandbox OpenClaw gateway (sandbox: ${sandboxName})...`);
@@ -488,15 +487,17 @@ const GATEWAY_CLUSTER_CONTAINER = "openshell-cluster-nemoclaw";
 // The awk condition matches three forms of the gateway argv:
 //   - "openclaw-gateway"         the re-execed binary name
 //   - "openclaw gateway run ..." the launcher command nemoclaw-start runs
-//   - "openclaw"                 the post-startup form. OpenClaw rewrites its
-//                                own argv via process.title, so the running
-//                                gateway shows just "openclaw" with no
-//                                "gateway" suffix; in a gateway sandbox this
-//                                lone openclaw process is the gateway. Matching
-//                                only the first two forms made find_gateway_pids
-//                                return empty, which reportStopResult misread as
-//                                "not running" — so `tunnel stop` exited 0 while
-//                                the gateway kept running (#4951).
+//   - "openclaw"                 the post-startup form, accepted only when it
+//                                matches /tmp/nemoclaw-gateway.pid and the
+//                                /tmp/nemoclaw-gateway-local marker exists.
+//                                OpenClaw rewrites its own argv via
+//                                process.title, so the running gateway shows
+//                                just "openclaw" with no "gateway" suffix.
+//                                Matching only the first two forms made
+//                                find_gateway_pids return empty, which
+//                                reportStopResult misread as "not running" — so
+//                                `tunnel stop` exited 0 while the gateway kept
+//                                running (#4951).
 //
 // IMPORTANT: keep example argv strings (e.g. "openclaw gateway") out of the awk
 // program text. awk's own argv is captured by the concurrent `ps` snapshot, so
@@ -507,13 +508,38 @@ export const GATEWAY_STOP_SCRIPT = String.raw`
 set -eu
 self="$$"
 parent="$PPID"
+gateway_pid_file="$(printenv NEMOCLAW_GATEWAY_STOP_PID_FILE 2>/dev/null || true)"
+[ -n "$gateway_pid_file" ] || gateway_pid_file="/tmp/nemoclaw-gateway.pid"
+gateway_marker_file="$(printenv NEMOCLAW_GATEWAY_STOP_MARKER_FILE 2>/dev/null || true)"
+[ -n "$gateway_marker_file" ] || gateway_marker_file="/tmp/nemoclaw-gateway-local"
+pidfile_pid=""
+if [ -f "$gateway_pid_file" ]; then
+  pidfile_pid="$(cat "$gateway_pid_file" 2>/dev/null | tr -cd '0-9' | head -c 20)"
+fi
+marker_exists=0
+[ -f "$gateway_marker_file" ] && marker_exists=1
+extra_bare_users="$(printenv NEMOCLAW_GATEWAY_STOP_EXTRA_USERS 2>/dev/null || true)"
+allowed_bare_users="gateway,sandbox"
+[ -n "$extra_bare_users" ] && allowed_bare_users="$allowed_bare_users,$extra_bare_users"
 find_gateway_pids() {
-  ps -eo pid=,args= 2>/dev/null | awk -v self="$self" -v parent="$parent" '
-    $1 ~ /^[0-9]+$/ && $1 != self && $1 != parent {
+  ps -eo user=,pid=,args= 2>/dev/null | awk \
+    -v self="$self" \
+    -v parent="$parent" \
+    -v pidfile_pid="$pidfile_pid" \
+    -v marker_exists="$marker_exists" \
+    -v allowed_bare_users="$allowed_bare_users" '
+    function allowed_bare_user(user) {
+      return index("," allowed_bare_users ",", "," user ",") > 0
+    }
+    $2 ~ /^[0-9]+$/ && $2 != self && $2 != parent {
+      user = $1
+      pid = $2
       cmd = $0
-      sub(/^[[:space:]]*[0-9]+[[:space:]]+/, "", cmd)
-      if (cmd ~ /(^|[[:space:]\/])openclaw-gateway([[:space:]]|$)/ || cmd ~ /(^|[[:space:]\/])openclaw[[:space:]]+gateway([[:space:]]|$)/ || cmd ~ /(^|[[:space:]\/])openclaw[[:space:]]*$/) {
-        seen[$1] = 1
+      sub(/^[[:space:]]*[^[:space:]]+[[:space:]]+[0-9]+[[:space:]]+/, "", cmd)
+      if (cmd ~ /(^|[[:space:]\/])openclaw-gateway([[:space:]]|$)/ || cmd ~ /(^|[[:space:]\/])openclaw[[:space:]]+gateway([[:space:]]|$)/) {
+        seen[pid] = 1
+      } else if (pidfile_pid != "" && marker_exists == "1" && pid == pidfile_pid && allowed_bare_user(user) && cmd ~ /(^|[[:space:]\/])openclaw[[:space:]]*$/) {
+        seen[pid] = 1
       }
     }
     END { for (pid in seen) print pid }
