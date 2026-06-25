@@ -856,7 +856,9 @@ describe("agents/hermes/start.sh config integrity", () => {
     expect(result.stdout.trim()).toMatch(/:stepped=1$/);
   });
 
-  it("prepares root dashboard home and seeds config through the sandbox identity", { timeout: 15_000 }, () => {
+  it("prepares root dashboard home and seeds config through the sandbox identity", {
+    timeout: 15_000,
+  }, () => {
     const result = runHermesDashboardHomePrepAsRoot();
 
     expect(result.status).toBe(0);
