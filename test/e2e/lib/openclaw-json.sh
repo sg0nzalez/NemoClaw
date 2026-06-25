@@ -108,3 +108,16 @@ nemoclaw_e2e_agent_reply_contains_token() {
   compact_expected="$(printf '%s' "$expected" | nemoclaw_e2e_compact_agent_reply)"
   [ -n "$compact_expected" ] && grep -Fq -- "$compact_expected" <<<"$compact_reply"
 }
+
+openclaw_agent_text_has_integer_42() {
+  local reply
+  reply="$(cat)"
+  e2e_text_contains_integer_42 "$reply"
+}
+
+openclaw_agent_text_has_token() {
+  local expected="$1"
+  local reply
+  reply="$(cat)"
+  nemoclaw_e2e_agent_reply_contains_token "$reply" "$expected"
+}
