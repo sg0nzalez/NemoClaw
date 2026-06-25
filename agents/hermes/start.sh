@@ -1325,6 +1325,7 @@ fi
 
 export HERMES_HOME="${HERMES_DIR}"
 verify_hermes_config_integrity
+ensure_hermes_config_root_mode
 ensure_hermes_runtime_api_server_key strict
 apply_shields_up_runtime_env
 validate_hermes_env_secret_boundary

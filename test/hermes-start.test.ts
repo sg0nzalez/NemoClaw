@@ -427,6 +427,7 @@ function runTirithExplicitCommandDispatch(mode: "non-root" | "root") {
       "verify_config_integrity_if_locked() { :; }",
       "verify_config_integrity() { :; }",
       "verify_hermes_config_integrity() { :; }",
+      "ensure_hermes_config_root_mode() { :; }",
       "apply_shields_up_runtime_env() { :; }",
       "validate_hermes_env_secret_boundary() { :; }",
       "validate_hermes_runtime_env_secret_boundary() { :; }",
@@ -453,6 +454,59 @@ function runTirithExplicitCommandDispatch(mode: "non-root" | "root") {
     return {
       result,
       markerExists: fs.existsSync(marker),
+    };
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+}
+
+function runHermesRootStartupMutableRootPreflight() {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-root-preflight-"));
+  const hermesHome = path.join(tmpDir, ".hermes");
+  const scriptPath = path.join(tmpDir, "run.sh");
+
+  fs.mkdirSync(hermesHome, { recursive: true });
+  fs.chmodSync(hermesHome, 0o750);
+
+  const src = fs.readFileSync(START_SCRIPT, "utf-8");
+  fs.writeFileSync(
+    scriptPath,
+    [
+      "#!/usr/bin/env bash",
+      "set -euo pipefail",
+      extractShellFunctionFromSource(src, "hermes_config_path_is_locked"),
+      extractShellFunctionFromSource(src, "hermes_config_root_is_locked"),
+      extractShellFunctionFromSource(src, "ensure_hermes_config_root_mode"),
+      'id() { [ "${1:-}" = "-u" ] && printf "1000\\n" || command id "$@"; }',
+      'dir_mode() { python3 -c "import os,sys; print(oct(os.stat(sys.argv[1]).st_mode & 0o777)[2:])" "$HERMES_DIR"; }',
+      'verify_hermes_config_integrity() { printf "verify mode=%s\\n" "$(dir_mode)"; }',
+      'ensure_hermes_runtime_api_server_key() { printf "api-key mode=%s\\n" "$(dir_mode)"; }',
+      "apply_shields_up_runtime_env() { :; }",
+      "validate_hermes_env_secret_boundary() { :; }",
+      "validate_hermes_runtime_env_secret_boundary() { :; }",
+      "refresh_hermes_provider_placeholders() { :; }",
+      "refresh_hermes_runtime_config_hashes() { :; }",
+      "configure_messaging_channels() { :; }",
+      "retry_tirith_marker_if_needed() { :; }",
+      'cleanup_stale_hermes_gateway_runtime() { echo "unexpected gateway cleanup" >&2; return 99; }',
+      `HERMES_DIR=${shellQuote(hermesHome)}`,
+      `HERMES_HASH_FILE=${shellQuote(path.join(tmpDir, "hermes.config-hash"))}`,
+      "STEP_DOWN_PREFIX_SANDBOX=()",
+      "NEMOCLAW_CMD=(bash -c 'exit 0')",
+      extractTirithDispatchBlock(src, "root"),
+    ].join("\n"),
+    { mode: 0o700 },
+  );
+
+  try {
+    const result = spawnSync("bash", [scriptPath], {
+      encoding: "utf-8",
+      timeout: 5000,
+      env: process.env,
+    });
+    return {
+      result,
+      hermesDirMode: (fs.statSync(hermesHome).mode & 0o7777).toString(8),
     };
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -1400,6 +1454,15 @@ describe("agents/hermes/start.sh Tirith marker bootstrap", () => {
         "download_failed marker present; letting Hermes runtime fallback retry Tirith",
       );
     }
+  });
+
+  it("repairs the Hermes config root before strict runtime config updates", () => {
+    const run = runHermesRootStartupMutableRootPreflight();
+
+    expect(run.result.status).toBe(0);
+    expect(run.result.stdout).toContain("verify mode=750");
+    expect(run.result.stdout).toContain("api-key mode=770");
+    expect(run.hermesDirMode).toBe("3770");
   });
 
   it("removes a retryable download_failed marker so Hermes runtime fallback can retry", () => {

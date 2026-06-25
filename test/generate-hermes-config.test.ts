@@ -565,6 +565,38 @@ describe("agents/hermes/generate-config.ts", () => {
     expect(envFile).toContain("DISCORD_ALLOWED_USERS=1005536447329222676\n");
   });
 
+  it("derives Hermes env placeholders from minimal persisted credential bindings", () => {
+    const plan = {
+      schemaVersion: 1,
+      sandboxName: "test-sandbox",
+      agent: "hermes",
+      workflow: "rebuild",
+      channels: [{ channelId: "discord", active: true, disabled: false }],
+      disabledChannels: [],
+      credentialBindings: [
+        {
+          channelId: "discord",
+          credentialId: "discordBotToken",
+          providerEnvKey: "DISCORD_BOT_TOKEN",
+          placeholder: "openshell:resolve:env:DISCORD_BOT_TOKEN",
+          credentialAvailable: true,
+        },
+      ],
+      agentRender: [],
+      buildSteps: [],
+    };
+
+    const result = runConfigScriptRaw({
+      NEMOCLAW_MESSAGING_CHANNELS_B64: encodeJson([]),
+      NEMOCLAW_MESSAGING_PLAN_B64: encodeJson(plan),
+    });
+    const envFile = fs.readFileSync(path.join(tmpDir, ".hermes", ".env"), "utf-8");
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(envFile).toContain("DISCORD_BOT_TOKEN=openshell:resolve:env:DISCORD_BOT_TOKEN\n");
+    expect(findRawSecretEnvEntries(envFile)).toEqual([]);
+  });
+
   it("preserves the Discord all-messages reply mode from onboarding", () => {
     const { config } = runConfigScript({
       NEMOCLAW_MESSAGING_CHANNELS_B64: encodeJson(["discord"]),
