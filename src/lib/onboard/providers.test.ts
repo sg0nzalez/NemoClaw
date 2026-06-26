@@ -447,6 +447,7 @@ describe("onboard provider helpers", () => {
   it("lets the hosted CI flag route explicit cloud selection through the compatible endpoint", () => {
     withProviderEnv(
       {
+        GITHUB_ACTIONS: "true",
         NVIDIA_INFERENCE_API_KEY: "repo-hosted-key",
         NEMOCLAW_E2E_USE_HOSTED_INFERENCE: "1",
         NEMOCLAW_PROVIDER: "cloud",
@@ -461,10 +462,26 @@ describe("onboard provider helpers", () => {
     );
   });
 
+  it("keeps hosted cloud selection on the Build path outside trusted CI", () => {
+    withProviderEnv(
+      {
+        NVIDIA_INFERENCE_API_KEY: "repo-hosted-key",
+        NEMOCLAW_E2E_USE_HOSTED_INFERENCE: "1",
+        NEMOCLAW_PROVIDER: "cloud",
+      },
+      () => {
+        expect(stageHostedInferenceSourceSecretEnv()).toBe(false);
+        expect(getRequestedProviderHint(true)).toBe("build");
+        expect(process.env.COMPATIBLE_API_KEY).toBeUndefined();
+      },
+    );
+  });
+
   it("keeps explicit compatible credentials when hosted CI overrides cloud selection", () => {
     withProviderEnv(
       {
         COMPATIBLE_API_KEY: "explicit-compatible-key",
+        GITHUB_ACTIONS: "true",
         NVIDIA_INFERENCE_API_KEY: "repo-hosted-key",
         NEMOCLAW_E2E_USE_HOSTED_INFERENCE: "1",
         NEMOCLAW_PROVIDER: "cloud",

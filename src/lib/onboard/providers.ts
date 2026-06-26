@@ -253,15 +253,17 @@ function stageHostedInferenceSourceSecretEnv() {
   const rawProvider = (process.env.NEMOCLAW_PROVIDER || "").trim().toLowerCase();
   const normalizedProvider = NON_INTERACTIVE_PROVIDER_ALIASES[rawProvider] || rawProvider;
   const hostedFlag = (process.env.NEMOCLAW_E2E_USE_HOSTED_INFERENCE || "").trim() === "1";
+  const hostedCiFlag = hostedFlag && (process.env.GITHUB_ACTIONS || "").trim() === "true";
   const compatibleKey = normalizeCredentialValue(
     // check-direct-credential-env-ignore -- read-only guard to avoid overwriting an explicit compatible endpoint key.
     process.env[HOSTED_INFERENCE_CREDENTIAL_ENV] ?? "",
   );
-  // CI-only hosted inference compatibility: nightly lanes set
+  // GitHub Actions-only hosted inference compatibility: nightly lanes set
   // NEMOCLAW_E2E_USE_HOSTED_INFERENCE=1 while some legacy E2E callers still
-  // pass NEMOCLAW_PROVIDER=cloud/build. Only that explicit CI flag is allowed
-  // to remap the public NVIDIA selector to the hosted OpenAI-compatible route.
-  const hostedCompatibleBuildSelection = hostedFlag && normalizedProvider === "build";
+  // pass NEMOCLAW_PROVIDER=cloud/build. Only that explicit trusted-CI flag
+  // pair is allowed to remap the public NVIDIA selector to the hosted
+  // OpenAI-compatible route.
+  const hostedCompatibleBuildSelection = hostedCiFlag && normalizedProvider === "build";
   const explicitHostedCustom =
     normalizedProvider === "custom" &&
     (hostedFlag || (!compatibleKey && !sourceKey.startsWith("nvapi-")));
