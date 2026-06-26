@@ -160,18 +160,6 @@ export function suppressedAgentRequiredPresets(
   return agentRequiredPresetAdditions(agent, env);
 }
 
-function dropSuppressedAgentRequiredPresets(
-  presets: string[],
-  tierName: string,
-  agent: string | null | undefined,
-  env: NodeJS.ProcessEnv | undefined,
-): string[] {
-  const suppressed = suppressedAgentRequiredPresets(tierName, agent, env ?? process.env);
-  if (suppressed.length === 0) return presets;
-  const suppressedSet = new Set(suppressed);
-  return presets.filter((name) => !suppressedSet.has(name));
-}
-
 export function computeSetupPresetSuggestions(
   deps: {
     policies: PoliciesApi;
@@ -427,6 +415,8 @@ async function setupPoliciesWithSelectionInner(
     );
   }
 
+  const suppressedNames = new Set(suppressedAgentRequiredPresets(tierName, agent, deps.env));
+
   if (deps.isNonInteractive()) {
     const policyMode = (deps.env?.NEMOCLAW_POLICY_MODE || "suggested").trim().toLowerCase();
     chosen = suggestions;
@@ -469,7 +459,7 @@ async function setupPoliciesWithSelectionInner(
       env: deps.env,
     });
     chosen = pruneDisabledPresets(chosen);
-    chosen = dropSuppressedAgentRequiredPresets(chosen, tierName, agent, deps.env);
+    chosen = chosen.filter((name) => !suppressedNames.has(name));
 
     const invalidPresets = chosen.filter((name) => !knownPresets.has(name));
     if (invalidPresets.length > 0) {
@@ -483,6 +473,7 @@ async function setupPoliciesWithSelectionInner(
       for (const name of appliedForPreservation) {
         if (chosenSet.has(name)) continue;
         if (isStaleBuiltinBrave(name)) continue;
+        if (suppressedNames.has(name)) continue;
         chosen.push(name);
         chosenSet.add(name);
         preserved.push(name);
@@ -514,23 +505,18 @@ async function setupPoliciesWithSelectionInner(
     allPresets,
     extraSelected,
   );
-  const interactiveChoice = dropSuppressedAgentRequiredPresets(
-    pruneDisabledPresets(
-      mergeRequiredSetupPolicyPresets(
-        resolvedPresets.map((preset) => preset.name),
-        {
-          enabledChannels,
-          hermesToolGateways,
-          agent,
-          knownPresetNames: knownNames,
-          env: deps.env,
-        },
-      ),
+  const interactiveChoice = pruneDisabledPresets(
+    mergeRequiredSetupPolicyPresets(
+      resolvedPresets.map((preset) => preset.name),
+      {
+        enabledChannels,
+        hermesToolGateways,
+        agent,
+        knownPresetNames: knownNames,
+        env: deps.env,
+      },
     ),
-    tierName,
-    agent,
-    deps.env,
-  );
+  ).filter((name) => !suppressedNames.has(name));
 
   if (onSelection) onSelection(interactiveChoice);
   if (!deps.waitForSandboxReady(sandboxName)) {
