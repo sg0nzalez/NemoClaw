@@ -500,6 +500,13 @@ const GATEWAY_CLUSTER_CONTAINER = "openshell-cluster-nemoclaw";
 //                                `tunnel stop` exited 0 while the gateway kept
 //                                running (#4951).
 //
+// Source boundary / removal condition: this bare-argv compatibility branch is
+// a NemoClaw-side workaround for current supported OpenClaw process-title
+// rewriting. Remove it only after supported OpenClaw versions expose a stable
+// gateway-specific argv/shutdown/status primitive, or after NemoClaw switches
+// this path to an authenticated gateway shutdown mechanism; keep/update the
+// Linux stop-script regressions when doing so.
+//
 // IMPORTANT: keep example argv strings (e.g. "openclaw gateway") out of the awk
 // program text. awk's own argv is captured by the concurrent `ps` snapshot, so
 // any such literal inside the program makes awk match itself and the scan never

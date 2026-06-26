@@ -277,6 +277,7 @@ describe("GATEWAY_STOP_SCRIPT (executed)", () => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const cp = require("node:child_process");
   const children: Array<{ pid?: number }> = [];
+  const identityDirs: string[] = [];
 
   afterEach(() => {
     const pids = children
@@ -289,6 +290,9 @@ describe("GATEWAY_STOP_SCRIPT (executed)", () => {
       } catch {
         // already gone
       }
+    }
+    for (const dir of identityDirs.splice(0)) {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 
@@ -354,6 +358,7 @@ ${script}`;
     pidContent = `${pid} ${processStartTime(pid)}\n`,
   ): string {
     const dir = mkdtempSync(join(tmpdir(), "nemoclaw-gateway-stop-identity-"));
+    identityDirs.push(dir);
     const pidFile = join(dir, "nemoclaw-gateway.pid");
     const markerFile = join(dir, "nemoclaw-gateway-local");
     writeFileSync(pidFile, pidContent, { mode });
