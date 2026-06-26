@@ -87,6 +87,12 @@ Invalid state: a real installed `openclaw@2026.6.9` dist changes semantics while
 
 Accepted residual risk: this dependency bump does not add a separate checked-in real-package runtime harness that imports the patched `openclaw@2026.6.9` dist after Dockerfile mutation for every patched path. That gap is accepted for this bump only with exact-head CI image builds, focused nightly proof for the affected E2Es, and final full nightly proof before merge. Removal condition: delete the localized patches when OpenClaw ships the behavior, or add a real-package/built-image runtime harness if NemoClaw keeps carrying these patches beyond this reviewed bump.
 
+### OpenClaw Diagnostics OTEL Host Gateway Boundary
+
+The default `NEMOCLAW_OPENCLAW_OTEL_ENDPOINT=http://host.openshell.internal:4318` is scoped to the local OTLP traces collector and requires the dedicated `openclaw-diagnostics-otel-local` policy preset. That preset allows only `POST /v1/traces` and `POST /v1/traces/**` to `host.openshell.internal:4318` for the OpenClaw/node binaries, separate from the `web_fetch` host-gateway exception in Patch 2b.
+
+The reviewed `@openclaw/diagnostics-otel@2026.6.9` package dist imports `OTLPTraceExporter` from `@opentelemetry/exporter-trace-otlp-proto`, resolves the configured OTLP endpoint, and contains no `web_fetch`, `fetchWithSsrFGuard`, or `withTrustedEnvProxy` references. That source boundary keeps diagnostics export traffic on the OpenTelemetry OTLP exporter path rather than NemoClaw's patched OpenClaw `web_fetch` helper. Removal condition: re-audit this boundary on the next diagnostics plugin bump or if the OTEL plugin starts routing exports through OpenClaw tool/web fetch APIs.
+
 ### Legacy Fixture Pins
 
 The legacy `2026.3.11` and `2026.4.24` OpenClaw pins are retained only for stale-upgrade fixture builds. Production Dockerfile install blocks now reject those versions unless `NEMOCLAW_E2E_FIXTURE_LEGACY_OPENCLAW=1` is set explicitly. The E2E-scoped name is intentionally noisy so production build workflows do not treat it as a general override. Production image workflows run `scripts/check-production-build-args.sh` before production Docker builds so the fixture flag cannot be passed through production build args. The stale-upgrade E2E build contexts pass that flag when they intentionally build an old base image, and `test/openclaw-integrity-pin.test.ts` verifies the default rejection, the explicit fixture opt-in, and the workflow guard.

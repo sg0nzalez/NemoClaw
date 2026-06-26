@@ -224,6 +224,10 @@ describe("OpenClaw npm integrity pins", () => {
     );
     expect(reviewNote).toContain("built-image runtime smoke on the exact head");
     expect(reviewNote).toContain("does not add a separate checked-in real-package runtime harness");
+    expect(reviewNote).toContain("OpenClaw Diagnostics OTEL Host Gateway Boundary");
+    expect(reviewNote).toContain("openclaw-diagnostics-otel-local");
+    expect(reviewNote).toContain("imports `OTLPTraceExporter`");
+    expect(reviewNote).toContain("contains no `web_fetch`, `fetchWithSsrFGuard`");
     expect(reviewNote).toContain("@openclaw/diagnostics-otel@2026.6.9");
     expect(reviewNote).toContain("@openclaw/brave-plugin@2026.6.9");
     expect(reviewNote).toContain("@tencent-weixin/openclaw-weixin@2.4.3");

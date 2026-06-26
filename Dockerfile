@@ -665,6 +665,11 @@ ARG NEMOCLAW_PROXY_PORT=3128
 # baked into the image.
 ARG NEMOCLAW_WEB_SEARCH_ENABLED=0
 ARG NEMOCLAW_OPENCLAW_OTEL=0
+# The default local OTEL endpoint is intentionally the single host-gateway
+# collector path covered by the openclaw-diagnostics-otel-local policy preset.
+# @openclaw/diagnostics-otel@2026.6.9 exports through OpenTelemetry's OTLP
+# trace exporter path, not OpenClaw web_fetch, so Patch 2b's host gateway
+# exception remains scoped to user-requested web_fetch proxy calls.
 ARG NEMOCLAW_OPENCLAW_OTEL_ENDPOINT=http://host.openshell.internal:4318
 ARG NEMOCLAW_OPENCLAW_OTEL_SERVICE_NAME=openclaw-gateway
 ARG NEMOCLAW_OPENCLAW_OTEL_SAMPLE_RATE=1.0
