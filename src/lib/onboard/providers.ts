@@ -257,6 +257,10 @@ function stageHostedInferenceSourceSecretEnv() {
     // check-direct-credential-env-ignore -- read-only guard to avoid overwriting an explicit compatible endpoint key.
     process.env[HOSTED_INFERENCE_CREDENTIAL_ENV] ?? "",
   );
+  // CI-only hosted inference compatibility: nightly lanes set
+  // NEMOCLAW_E2E_USE_HOSTED_INFERENCE=1 while some legacy E2E callers still
+  // pass NEMOCLAW_PROVIDER=cloud/build. Only that explicit CI flag is allowed
+  // to remap the public NVIDIA selector to the hosted OpenAI-compatible route.
   const hostedCompatibleBuildSelection = hostedFlag && normalizedProvider === "build";
   const explicitHostedCustom =
     normalizedProvider === "custom" &&
