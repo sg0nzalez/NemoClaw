@@ -143,14 +143,33 @@ export function isStaleBuiltinBravePolicyPreset(
   return name === "brave" && !options.webSearchConfig && !options.customPresetNames?.has(name);
 }
 
+function agentRequiredPresetAdditions(
+  agent: string | null | undefined,
+  env: NodeJS.ProcessEnv,
+): string[] {
+  if (!isOpenclawAgent(agent)) return [];
+  return ["openclaw-pricing", ...requiredOpenclawOtelPolicyPresets(agent, env)];
+}
+
 export function suppressedAgentRequiredPresets(
   tierName: string,
   agent: string | null | undefined,
   env: NodeJS.ProcessEnv = process.env,
 ): string[] {
   if (tierName !== RESTRICTED_TIER_NAME) return [];
-  if (!isOpenclawAgent(agent)) return [];
-  return ["openclaw-pricing", ...requiredOpenclawOtelPolicyPresets(agent, env)];
+  return agentRequiredPresetAdditions(agent, env);
+}
+
+function dropSuppressedAgentRequiredPresets(
+  presets: string[],
+  tierName: string,
+  agent: string | null | undefined,
+  env: NodeJS.ProcessEnv | undefined,
+): string[] {
+  const suppressed = suppressedAgentRequiredPresets(tierName, agent, env ?? process.env);
+  if (suppressed.length === 0) return presets;
+  const suppressedSet = new Set(suppressed);
+  return presets.filter((name) => !suppressedSet.has(name));
 }
 
 export function computeSetupPresetSuggestions(
@@ -188,9 +207,8 @@ export function computeSetupPresetSuggestions(
   };
   if (webSearchConfig) add("brave");
   if (provider && deps.localInferenceProviders.includes(provider)) add("local-inference");
-  if (tierName !== RESTRICTED_TIER_NAME && isOpenclawAgent(agent)) {
-    add("openclaw-pricing");
-    for (const preset of requiredOpenclawOtelPolicyPresets(agent, env)) add(preset);
+  if (tierName !== RESTRICTED_TIER_NAME) {
+    for (const preset of agentRequiredPresetAdditions(agent, env)) add(preset);
   }
   if (tierName === "open" && typeof agent === "string" && agent.trim().toLowerCase() === "hermes") {
     for (const preset of allHermesToolGatewayPolicyPresets()) add(preset);
@@ -451,6 +469,7 @@ async function setupPoliciesWithSelectionInner(
       env: deps.env,
     });
     chosen = pruneDisabledPresets(chosen);
+    chosen = dropSuppressedAgentRequiredPresets(chosen, tierName, agent, deps.env);
 
     const invalidPresets = chosen.filter((name) => !knownPresets.has(name));
     if (invalidPresets.length > 0) {
@@ -495,17 +514,22 @@ async function setupPoliciesWithSelectionInner(
     allPresets,
     extraSelected,
   );
-  const interactiveChoice = pruneDisabledPresets(
-    mergeRequiredSetupPolicyPresets(
-      resolvedPresets.map((preset) => preset.name),
-      {
-        enabledChannels,
-        hermesToolGateways,
-        agent,
-        knownPresetNames: knownNames,
-        env: deps.env,
-      },
+  const interactiveChoice = dropSuppressedAgentRequiredPresets(
+    pruneDisabledPresets(
+      mergeRequiredSetupPolicyPresets(
+        resolvedPresets.map((preset) => preset.name),
+        {
+          enabledChannels,
+          hermesToolGateways,
+          agent,
+          knownPresetNames: knownNames,
+          env: deps.env,
+        },
+      ),
     ),
+    tierName,
+    agent,
+    deps.env,
   );
 
   if (onSelection) onSelection(interactiveChoice);

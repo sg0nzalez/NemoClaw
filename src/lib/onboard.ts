@@ -587,7 +587,6 @@ import {
   type SetupPolicySelectionOptions,
   type SetupPresetSuggestionOptions,
   setupPoliciesWithSelection as setupPoliciesWithSelectionImpl,
-  suppressedAgentRequiredPresets,
 } from "./onboard/policy-selection";
 import { createPolicySelectionPromptHelpers } from "./onboard/policy-selection-prompts";
 import {
@@ -5407,7 +5406,6 @@ module.exports = {
   arePolicyPresetsApplied,
   getSuggestedPolicyPresets,
   computeSetupPresetSuggestions,
-  suppressedAgentRequiredPresets,
   mergeRequiredHermesToolGatewayPolicyPresets,
   filterSetupPolicyPresets: policies.filterSetupPolicyPresets,
   LOCAL_INFERENCE_PROVIDERS,

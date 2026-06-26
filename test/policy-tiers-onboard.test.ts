@@ -960,6 +960,160 @@ console.log = () => {};
       `tier-name hint should not appear for non-tier values, stderr: ${result.stderr}`,
     );
   });
+
+  it("setupPoliciesWithSelection restricted tier applies zero presets for OpenClaw in non-interactive suggested mode", () => {
+    const policiesPath = JSON.stringify(path.join(repoRoot, "dist", "lib", "policy", "index.js"));
+    const script =
+      buildPreamble({
+        tierEnv: "restricted",
+        policyMode: "suggested",
+        stubOpenshellBin: true,
+        runCaptureReturn: "Running",
+      }) +
+      String.raw`
+const policies = require(${policiesPath});
+const appliedCalls = [];
+policies.applyPreset = (_sandbox, name) => { appliedCalls.push(name); return true; };
+policies.applyPresets = (_sandbox, names) => { for (const name of names) appliedCalls.push(name); return true; };
+policies.getAppliedPresets = () => [];
+
+console.log = () => {};
+
+(async () => {
+  try {
+    const applied = await setupPoliciesWithSelection("test-sb", { agent: "openclaw" });
+    process.stdout.write(JSON.stringify({ applied, appliedCalls }) + "\n");
+  } catch (err) {
+    process.stdout.write(JSON.stringify({ error: err.message }) + "\n");
+  }
+})();
+`;
+    const result = runScript(script);
+    assert.equal(result.status, 0, result.stderr);
+    const payload = JSON.parse(result.stdout.trim());
+    assert.ok(!payload.error, `unexpected error: ${payload.error}`);
+    assert.deepEqual(payload.applied, [], `applied set must be empty for restricted OpenClaw`);
+    assert.deepEqual(
+      payload.appliedCalls,
+      [],
+      `no policy preset should be applied on restricted OpenClaw`,
+    );
+  });
+
+  it("setupPoliciesWithSelection restricted tier does not re-add openclaw-diagnostics-otel-local when NEMOCLAW_OPENCLAW_OTEL=1", () => {
+    const policiesPath = JSON.stringify(path.join(repoRoot, "dist", "lib", "policy", "index.js"));
+    const script =
+      buildPreamble({
+        tierEnv: "restricted",
+        policyMode: "suggested",
+        stubOpenshellBin: true,
+        runCaptureReturn: "Running",
+      }) +
+      String.raw`
+const policies = require(${policiesPath});
+const appliedCalls = [];
+policies.applyPreset = (_sandbox, name) => { appliedCalls.push(name); return true; };
+policies.applyPresets = (_sandbox, names) => { for (const name of names) appliedCalls.push(name); return true; };
+policies.getAppliedPresets = () => [];
+
+console.log = () => {};
+
+(async () => {
+  try {
+    const applied = await setupPoliciesWithSelection("test-sb", { agent: "openclaw" });
+    process.stdout.write(JSON.stringify({ applied, appliedCalls }) + "\n");
+  } catch (err) {
+    process.stdout.write(JSON.stringify({ error: err.message }) + "\n");
+  }
+})();
+`;
+    const result = runScript(script, {
+      NEMOCLAW_OPENCLAW_OTEL: "1",
+      NEMOCLAW_OPENCLAW_OTEL_ENDPOINT: undefined,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const payload = JSON.parse(result.stdout.trim());
+    assert.ok(!payload.error, `unexpected error: ${payload.error}`);
+    assert.ok(
+      !payload.applied.includes("openclaw-diagnostics-otel-local"),
+      `applied set must not contain openclaw-diagnostics-otel-local; got: ${JSON.stringify(payload.applied)}`,
+    );
+    assert.ok(
+      !payload.applied.includes("openclaw-pricing"),
+      `applied set must not contain openclaw-pricing; got: ${JSON.stringify(payload.applied)}`,
+    );
+    assert.ok(
+      !payload.appliedCalls.includes("openclaw-diagnostics-otel-local"),
+      `policies.applyPreset/applyPresets must not be called for openclaw-diagnostics-otel-local; got: ${JSON.stringify(payload.appliedCalls)}`,
+    );
+    assert.ok(
+      !payload.appliedCalls.includes("openclaw-pricing"),
+      `policies.applyPreset/applyPresets must not be called for openclaw-pricing; got: ${JSON.stringify(payload.appliedCalls)}`,
+    );
+  });
+
+  it("setupPoliciesWithSelection restricted tier note matches the final applied presets when agent-required presets are suppressed", () => {
+    const policiesPath = JSON.stringify(path.join(repoRoot, "dist", "lib", "policy", "index.js"));
+    const script =
+      buildPreamble({
+        tierEnv: "restricted",
+        policyMode: "suggested",
+        stubOpenshellBin: true,
+        runCaptureReturn: "Running",
+      }) +
+      String.raw`
+const policies = require(${policiesPath});
+const appliedCalls = [];
+policies.applyPreset = (_sandbox, name) => { appliedCalls.push(name); return true; };
+policies.applyPresets = (_sandbox, names) => { for (const name of names) appliedCalls.push(name); return true; };
+policies.getAppliedPresets = () => [];
+
+const lines = [];
+const origLog = console.log;
+console.log = (...args) => lines.push(args.join(" "));
+
+(async () => {
+  try {
+    const applied = await setupPoliciesWithSelection("test-sb", { agent: "openclaw" });
+    console.log = origLog;
+    origLog(JSON.stringify({ applied, appliedCalls, lines }));
+  } catch (err) {
+    console.log = origLog;
+    origLog(JSON.stringify({ error: err.message, lines }));
+  }
+})();
+`;
+    const result = runScript(script, {
+      NEMOCLAW_OPENCLAW_OTEL: "1",
+      NEMOCLAW_OPENCLAW_OTEL_ENDPOINT: undefined,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const payload = JSON.parse(result.stdout.trim());
+    assert.ok(!payload.error, `unexpected error: ${payload.error}`);
+    const noteLine: string | undefined = payload.lines.find((l: string) =>
+      l.includes("Restricted tier suppresses agent-required preset"),
+    );
+    assert.ok(noteLine, `suppression note must be printed, lines: ${JSON.stringify(payload.lines)}`);
+    const noteMentions = (name: string) => noteLine!.includes(name);
+    assert.ok(
+      noteMentions("openclaw-pricing"),
+      `note must mention openclaw-pricing, got: ${noteLine}`,
+    );
+    assert.ok(
+      noteMentions("openclaw-diagnostics-otel-local"),
+      `note must mention openclaw-diagnostics-otel-local when OTEL is enabled, got: ${noteLine}`,
+    );
+    for (const name of ["openclaw-pricing", "openclaw-diagnostics-otel-local"]) {
+      assert.ok(
+        !payload.applied.includes(name),
+        `note says ${name} is suppressed but final applied still contains it: ${JSON.stringify(payload.applied)}`,
+      );
+      assert.ok(
+        !payload.appliedCalls.includes(name),
+        `note says ${name} is suppressed but applyPreset/applyPresets was still called: ${JSON.stringify(payload.appliedCalls)}`,
+      );
+    }
+  });
 });
 
 describe("selectTierPresetsAndAccess", () => {
