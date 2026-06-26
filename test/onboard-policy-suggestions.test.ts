@@ -38,21 +38,22 @@ const { suppressedAgentRequiredPresets } =
     ) => string[];
   };
 
+function setOrUnset(key: string, value: string | undefined): void {
+  value === undefined ? delete process.env[key] : (process.env[key] = value);
+}
+
 function withOpenclawOtelEnv<T>(value: string | undefined, body: () => T): T {
   const otelKey = "NEMOCLAW_OPENCLAW_OTEL";
   const endpointKey = "NEMOCLAW_OPENCLAW_OTEL_ENDPOINT";
   const originalOtel = process.env[otelKey];
   const originalEndpoint = process.env[endpointKey];
-  if (value === undefined) delete process.env[otelKey];
-  else process.env[otelKey] = value;
+  setOrUnset(otelKey, value);
   delete process.env[endpointKey];
   try {
     return body();
   } finally {
-    if (originalOtel === undefined) delete process.env[otelKey];
-    else process.env[otelKey] = originalOtel;
-    if (originalEndpoint === undefined) delete process.env[endpointKey];
-    else process.env[endpointKey] = originalEndpoint;
+    setOrUnset(otelKey, originalOtel);
+    setOrUnset(endpointKey, originalEndpoint);
   }
 }
 const { filterSetupPolicyPresetsForAgent } =
