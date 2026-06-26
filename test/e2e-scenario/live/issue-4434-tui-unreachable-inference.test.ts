@@ -17,8 +17,10 @@ import { ubuntuRepoDocker } from "../scenarios/matrix.ts";
 // endpoint IPs, drives `openclaw tui` through `openshell sandbox exec --tty`,
 // and requires a visible inference error plus an error status instead of the
 // broken spinner+connected signature from #4434. The legacy bash lane remains
-// wired until Phase 11 shell retirement; this file adds the equivalent Vitest
-// coverage without introducing shared framework or registry helpers.
+// wired until Phase 11 shell retirement and still owns the route provider/model
+// assertion plus the direct `inference.local` pre-block completion probe; this
+// file adds complementary Vitest coverage without introducing shared framework
+// or registry helpers.
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "../../..");
 const DOCKERFILE_BASE = path.join(REPO_ROOT, "Dockerfile.base");

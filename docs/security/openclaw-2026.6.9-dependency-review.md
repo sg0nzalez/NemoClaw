@@ -2,7 +2,7 @@
 
 Review date: 2026-06-22
 
-Scope: NemoClaw runtime pin `openclaw@2026.6.9` and runtime helper pin `@zed-industries/codex-acp@0.11.1`.
+Scope: NemoClaw runtime pin `openclaw@2026.6.9`, runtime helper pin `@zed-industries/codex-acp@0.11.1`, optional OpenClaw plugins, and built-in messaging OpenClaw plugins.
 
 ## Package Identity
 
@@ -35,13 +35,23 @@ Command run from a temporary directory:
 
 ```bash
 npm init -y
-npm install --package-lock-only --ignore-scripts --no-fund --no-audit openclaw@2026.6.9 @zed-industries/codex-acp@0.11.1
+npm install --package-lock-only --ignore-scripts --no-fund --no-audit \
+  openclaw@2026.6.9 \
+  @zed-industries/codex-acp@0.11.1 \
+  @openclaw/diagnostics-otel@2026.6.9 \
+  @openclaw/brave-plugin@2026.6.9 \
+  @openclaw/discord@2026.6.9 \
+  @openclaw/slack@2026.6.9 \
+  @openclaw/whatsapp@2026.6.9 \
+  @openclaw/msteams@2026.6.9 \
+  @tencent-weixin/openclaw-weixin@2.4.3
 npm audit --omit=dev --json
 ```
 
-Result: npm audit exited `0` and reported `0` info, `0` low, `0` moderate, `0` high, and `0` critical vulnerabilities across `313` total dependencies.
+Result: npm audit exited `0` and reported `0` info, `0` low, `0` moderate, `0` high, and `0` critical vulnerabilities across `763` total dependencies.
+The local install emitted npm `EBADENGINE` warnings under Node `22.16.0` for packages that require newer Node `22.x` builds; the audit still completed and is used here only as advisory vulnerability evidence for the locked dependency graph.
 
-This review is an advisory snapshot for the direct OpenClaw runtime package, Codex ACP runtime helper, and their npm dependency graphs at review time. It complements, but does not replace, the committed npm integrity pins, Dockerfile install-time registry integrity checks, and plugin install-time registry integrity checks.
+This review is an advisory snapshot for the direct OpenClaw runtime package, Codex ACP runtime helper, optional plugins, messaging plugins, and their npm dependency graphs at review time. It complements, but does not replace, the committed npm integrity pins, Dockerfile install-time registry integrity checks, and plugin install-time registry integrity checks.
 
 ## Slack Source Review
 

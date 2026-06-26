@@ -138,7 +138,7 @@ function isPinnedHermesUvPackageSpec(spec: string): boolean {
 
 export class MessagingBuildApplierError extends Error {}
 
-const REVIEWED_OPENCLAW_PLUGIN_INTEGRITY_BY_PACKAGE_SPEC: Readonly<Record<string, string>> = {
+export const REVIEWED_OPENCLAW_PLUGIN_INTEGRITY_BY_PACKAGE_SPEC: Readonly<Record<string, string>> = {
   "@openclaw/discord@2026.6.9":
     "sha512-esFhwYW0nrFQvBhkPeK/1qmvumlVAY8ddhYBt7geIYLlBriwPJRwtnVLLfp0n1LbS0/XVZ0ORqlvkWq8Vv61vg==",
   "@openclaw/slack@2026.6.9":

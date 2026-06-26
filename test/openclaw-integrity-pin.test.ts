@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { createBuiltInChannelManifestRegistry } from "../src/lib/messaging";
+import { REVIEWED_OPENCLAW_PLUGIN_INTEGRITY_BY_PACKAGE_SPEC } from "../src/lib/messaging/applier/build/messaging-build-applier.mts";
 
 const REPO_ROOT = path.join(import.meta.dirname, "..");
 const DOCKERFILE = path.join(REPO_ROOT, "Dockerfile");
@@ -195,10 +196,12 @@ describe("OpenClaw npm integrity pins", () => {
     expect(reviewNote).toContain("@tencent-weixin/openclaw-weixin@2.4.3");
     expect(reviewNote).toContain(PINNED_WECHAT_PLUGIN_INTEGRITY);
     expect(reviewNote).toContain("each reviewed npm plugin registry integrity");
-    expect(reviewNote).toContain("openclaw@2026.6.9 @zed-industries/codex-acp@0.11.1");
+    expect(reviewNote).toContain("@openclaw/diagnostics-otel@2026.6.9");
+    expect(reviewNote).toContain("@openclaw/brave-plugin@2026.6.9");
+    expect(reviewNote).toContain("@tencent-weixin/openclaw-weixin@2.4.3");
     expect(reviewNote).toContain("`0` high");
     expect(reviewNote).toContain("`0` critical");
-    expect(reviewNote).toContain("`313` total dependencies");
+    expect(reviewNote).toContain("`763` total dependencies");
     expect(reviewNote).toContain(
       "`dist/pipeline.runtime-*.js`, which exports `prepareSlackMessage`",
     );
@@ -231,6 +234,35 @@ describe("OpenClaw npm integrity pins", () => {
         [PINNED_OPENCLAW_VERSION]: PINNED_OPENCLAW_MSTEAMS_INTEGRITY,
       },
     });
+  });
+
+  it("keeps reviewed OpenClaw messaging plugin integrity pins aligned with built-in manifests", () => {
+    const registry = createBuiltInChannelManifestRegistry();
+    const expectedEntries: [string, string][] = [];
+
+    for (const manifest of registry.list()) {
+      for (const agentPackage of manifest.agentPackages ?? []) {
+        if (agentPackage.agent !== "openclaw" || agentPackage.manager !== "openclaw-plugin") {
+          continue;
+        }
+        const packageSpec = agentPackage.spec
+          .replace(/^npm:/, "")
+          .replaceAll("{{openclaw.version}}", PINNED_OPENCLAW_VERSION);
+        const integrity =
+          agentPackage.integrity ?? agentPackage.integrityByVersion?.[PINNED_OPENCLAW_VERSION];
+
+        expect(agentPackage.pin, `${manifest.id}:${agentPackage.id}`).toBe(true);
+        expect(integrity, `${manifest.id}:${packageSpec}`).toBeDefined();
+        expectedEntries.push([packageSpec, integrity as string]);
+      }
+    }
+
+    const sortedEntries = (entries: [string, string][]) =>
+      Object.fromEntries(entries.sort(([left], [right]) => left.localeCompare(right)));
+
+    expect(
+      sortedEntries(Object.entries(REVIEWED_OPENCLAW_PLUGIN_INTEGRITY_BY_PACKAGE_SPEC)),
+    ).toEqual(sortedEntries(expectedEntries));
   });
 
   it("verifies optional non-messaging OpenClaw plugin integrity before install", () => {

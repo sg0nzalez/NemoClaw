@@ -157,10 +157,16 @@ function rewindSessionForRebuildResume(
     "policies",
   ];
 
-  // Source boundary: the registry entry is the last durable source once
-  // rebuild deletes the sandbox. Rewind only the recreate-onboard steps and
-  // preserve provider/model explicitly so onboard --resume can recreate the
-  // same sandbox after the registry row is removed.
+  // Invalid legacy shape: rebuild can inherit an onboard session whose durable
+  // machine snapshot is still inside a recreate step such as `sandbox` or
+  // `openclaw`, even though the registry is the only trustworthy target state.
+  // Producer boundary: those stale snapshots were persisted by earlier
+  // onboard-resume flows before rebuild owned this normalization point. Rebuild
+  // cannot fix already-written sessions at the producer after it has decided to
+  // delete and recreate the sandbox, so normalize the loaded session here.
+  // Removal condition: drop this legacy repair once a session-version migration
+  // or producer-level test proves recreate sessions are always persisted at a
+  // resumable pre-sandbox boundary.
   s.sandboxName = sandboxName;
   s.resumable = true;
   s.status = "in_progress";
