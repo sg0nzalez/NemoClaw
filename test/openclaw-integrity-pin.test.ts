@@ -11,6 +11,18 @@ const REPO_ROOT = path.join(import.meta.dirname, "..");
 const DOCKERFILE = path.join(REPO_ROOT, "Dockerfile");
 const DOCKERFILE_BASE = path.join(REPO_ROOT, "Dockerfile.base");
 const BLUEPRINT = path.join(REPO_ROOT, "nemoclaw-blueprint", "blueprint.yaml");
+const CHAT_SEND_PATCH = path.join(REPO_ROOT, "scripts", "patch-openclaw-chat-send.js");
+const SLACK_API_PROOF = path.join(REPO_ROOT, "test", "e2e", "lib", "slack-api-proof.sh");
+const TELEGRAM_API_PROOF = path.join(REPO_ROOT, "test", "e2e", "lib", "telegram-api-proof.sh");
+const TEAMS_MANIFEST = path.join(
+  REPO_ROOT,
+  "src",
+  "lib",
+  "messaging",
+  "channels",
+  "teams",
+  "manifest.ts",
+);
 const DEPENDENCY_REVIEW_NOTE = path.join(
   REPO_ROOT,
   "docs",
@@ -203,11 +215,53 @@ describe("OpenClaw npm integrity pins", () => {
     );
     expect(reviewNote).toContain("imports the hashed pipeline runtime for `prepareSlackMessage`");
     expect(reviewNote).toContain("only reports `openclaw-pipeline-runtime` after allowed prepare");
+    expect(reviewNote).toContain("`dist/extensions/telegram/runtime-api.js`");
+    expect(reviewNote).toContain("which exports `sendMessageTelegram`");
+    expect(reviewNote).toContain("fails closed if the installed runtime file is missing");
     expect(reviewNote).toContain("NEMOCLAW_ALLOW_LEGACY_OPENCLAW_FIXTURE=1");
     expect(reviewNote).toContain("claiming `openclaw-pipeline-runtime` inbound proof");
+    expect(reviewNote).toContain("imports `dist/extensions/telegram/test-api.js`");
     expect(reviewNote).toContain("gateway/upstream reporting layer");
     expect(reviewNote).toContain("one-line recovery hint");
     expect(reviewNote).toContain("default 180-second timeout");
+  });
+
+  it("keeps OpenClaw 2026.6.9 compatibility guardrails on the upgraded surfaces", () => {
+    const chatSendPatch = fs.readFileSync(CHAT_SEND_PATCH, "utf-8");
+    const slackProof = fs.readFileSync(SLACK_API_PROOF, "utf-8");
+    const telegramProof = fs.readFileSync(TELEGRAM_API_PROOF, "utf-8");
+    const teamsManifest = fs.readFileSync(TEAMS_MANIFEST, "utf-8");
+    const dockerfile = fs.readFileSync(DOCKERFILE, "utf-8");
+
+    expect(chatSendPatch).toContain('id: "chat-send"');
+    expect(chatSendPatch).toContain('id: "get-reply"');
+    expect(chatSendPatch).toContain('id: "followup-runner"');
+    expect(chatSendPatch).toContain('id: "run-start"');
+    expect(chatSendPatch).toContain('id: "transcript-idempotency"');
+    expect(chatSendPatch).toContain('id: "empty-final"');
+    expect(chatSendPatch).toContain('id: "followup-run-id"');
+    expect(chatSendPatch).toContain('id: "webchat-queue-mode"');
+    expect(chatSendPatch).toContain('id: "run-id-preservation"');
+
+    expect(slackProof).toContain("@openclaw/slack/dist/runtime-api.js");
+    expect(slackProof).toContain("pipeline\\.runtime-");
+    expect(slackProof).toContain("sendMessageSlack");
+    expect(slackProof).toContain("prepareSlackMessage");
+
+    expect(telegramProof).toContain("dist/extensions/telegram/runtime-api.js");
+    expect(telegramProof).toContain("sendMessageTelegram");
+    expect(telegramProof).toContain(
+      "installed Telegram runtime API does not export sendMessageTelegram",
+    );
+    expect(telegramProof).not.toContain("dist/extensions/telegram/test-api.js");
+
+    expect(teamsManifest).toContain("npm:@openclaw/msteams@{{openclaw.version}}");
+    expect(teamsManifest).toContain(PINNED_OPENCLAW_MSTEAMS_INTEGRITY);
+
+    expect(dockerfile).toContain("OPENCLAW_DIAGNOSTICS_OTEL_2026_6_9_INTEGRITY");
+    expect(dockerfile).toContain("OPENCLAW_BRAVE_PLUGIN_2026_6_9_INTEGRITY");
+    expect(dockerfile).toContain(PINNED_OPENCLAW_DIAGNOSTICS_OTEL_INTEGRITY);
+    expect(dockerfile).toContain(PINNED_OPENCLAW_BRAVE_PLUGIN_INTEGRITY);
   });
 
   it("verifies optional non-messaging OpenClaw plugin integrity before install", () => {

@@ -518,23 +518,23 @@ env \
   NEMOCLAW_POLICY_PRESETS=npm,pypi \
   node "$REPO/bin/nemoclaw.js" onboard --non-interactive >"$LIVE_LOG" 2>&1
 live_exit=$?
-live_output="$(cat "$LIVE_LOG")"
-rm -f "$LIVE_LOG"
 
 if [ "$live_exit" -eq 0 ]; then
   pass "Live non-interactive onboard completed"
 else
   fail "Live non-interactive onboard exited $live_exit"
-  printf '%s\n' "$live_output" | tail -120
+  tail -120 "$LIVE_LOG"
+  rm -f "$LIVE_LOG"
   print_summary
   exit 1
 fi
 
-if printf '%s\n' "$live_output" | grep -Fq "$CLOUD_MODEL"; then
+if grep -Fq -- "$CLOUD_MODEL" "$LIVE_LOG"; then
   pass "Live onboard selected requested hosted model"
 else
   fail "Live onboard output did not confirm requested hosted model"
 fi
+rm -f "$LIVE_LOG"
 
 if node - "$REGISTRY_FILE" "$SANDBOX_NAME" "$CLOUD_MODEL" "$EXPECTED_PROVIDER" <<'NODE'; then
 const fs = require("node:fs");

@@ -53,6 +53,12 @@ The main `openclaw@2026.6.9` package excludes `dist/extensions/slack/**`; its ch
 
 The retained Slack proof scripts now import the installed external `@openclaw/slack@2026.6.9` runtime files when the older private `test-api.js` facade is absent. The installed-runtime proof exercises `prepareSlackMessage` from `dist/pipeline.runtime-*.js`, verifies an allowed channel `app_mention`, verifies a denied channel user receives exactly one bounded sender-facing feedback action, and sends through `sendMessageSlack` from `dist/runtime-api.js` against the hermetic fake Slack API.
 
+## Telegram Source Review
+
+The main `openclaw@2026.6.9` package no longer includes `dist/extensions/telegram/test-api.js`. Its bundled Telegram channel still exposes `dist/extensions/telegram/runtime-api.js`, which exports `sendMessageTelegram` and accepts NemoClaw's hermetic fake Telegram API override for send proof.
+
+The retained Telegram proof script now resolves the installed `openclaw/dist/extensions/telegram/runtime-api.js` file, verifies that `sendMessageTelegram` is exported, sends through that runtime API against the host-side fake Telegram Bot API, and keeps the OpenShell REST policy, token rewrite assertion, chat/text capture, and placeholder-leak checks unchanged.
+
 ## PR Review Follow-ups
 
 ### Legacy Fixture Pins
@@ -66,6 +72,12 @@ Invalid state: a production image build overriding `OPENCLAW_VERSION` to an old 
 The external `@openclaw/slack@2026.6.9` package no longer needs to be treated as package-shape-only evidence. `test/e2e/lib/slack-api-proof.sh` discovers the installed external runtime files, imports the hashed pipeline runtime for `prepareSlackMessage`, imports the runtime API for `sendMessageSlack`, and only reports `openclaw-pipeline-runtime` after allowed prepare, denied prepare, bounded denied-user feedback, and fake Slack send evidence all pass.
 
 Invalid state: claiming `openclaw-pipeline-runtime` inbound proof without both checked-in import logic and fake Slack capture evidence. Source boundary: `test/e2e/lib/slack-api-proof.sh` and `test/e2e/test-messaging-providers.sh`. Source-fix constraint: send-only `runtime-api.js` coverage is not enough for inbound authorization coverage. Regression test: a fake installed `@openclaw/slack` with `dist/pipeline.runtime-fixture.js` and no `test-api.js` must report full coverage only after allowed prepare, denied prepare, bounded denial feedback, and installed send evidence.
+
+### Telegram Runtime Send
+
+The bundled OpenClaw Telegram channel proof must use the current `dist/extensions/telegram/runtime-api.js` surface. `test/e2e/lib/telegram-api-proof.sh` fails closed if the installed runtime file is missing or if it stops exporting `sendMessageTelegram`, because falling back to the removed private `test-api.js` facade would make the 2026.6.9 package-shape proof stale.
+
+Invalid state: a passing fake Telegram proof that imports `dist/extensions/telegram/test-api.js` or bypasses OpenClaw's installed runtime send helper. Source boundary: `test/e2e/lib/telegram-api-proof.sh` and `test/e2e/test-messaging-providers.sh`. Source-fix constraint: keep the host-side fake Telegram API, request-body credential rewrite policy, token rewrite assertion, chat/text capture, and placeholder-leak checks intact. Regression test: the OpenClaw compatibility guard must require `runtime-api.js`, `sendMessageTelegram`, the Slack installed-runtime proof, Teams integrity metadata, optional plugin integrity pins, and chat-send patch recognizers.
 
 ### Issue #4434 TUI Unreachable Inference
 
