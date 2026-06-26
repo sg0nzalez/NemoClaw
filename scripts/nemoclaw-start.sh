@@ -263,7 +263,7 @@ record_gateway_pid() {
   local pid="${1:-}"
   local starttime=""
   case "$pid" in
-    ''|*[!0-9]*) ;;
+    '' | *[!0-9]*) ;;
     *)
       starttime="$(awk '{ sub(/^[^)]*\) /, ""); split($0, fields, " "); print fields[20] }' "/proc/${pid}/stat" 2>/dev/null)" || starttime=""
       ;;
