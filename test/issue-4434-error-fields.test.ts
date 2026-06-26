@@ -66,22 +66,22 @@ describe("issue #4434 partial OpenClaw TUI error guard", () => {
   it("detects when upstream output grows the missing full-acceptance fields", () => {
     expect(readDockerfileOpenClawVersion()).toBe(CURRENT_REVIEWED_OPENCLAW_VERSION);
     expect(
-      detectIssue4434AcceptanceFields(
-        REVIEWED_OPENCLAW_2026_6_9_ISSUE_4434_TUI_ERROR_OUTPUT,
-      ),
+      detectIssue4434AcceptanceFields(REVIEWED_OPENCLAW_2026_6_9_ISSUE_4434_TUI_ERROR_OUTPUT),
     ).toEqual({
       httpStatusOrCause: false,
       reportingLayer: false,
       recoveryHint: false,
     });
-    expect(
-      missingIssue4434AcceptanceFields(FUTURE_COMPLETE_ISSUE_4434_TUI_ERROR_OUTPUT),
-    ).toEqual([]);
+    expect(missingIssue4434AcceptanceFields(FUTURE_COMPLETE_ISSUE_4434_TUI_ERROR_OUTPUT)).toEqual(
+      [],
+    );
   });
 
   it("keeps the dependency review tied to the detector and tightening condition", () => {
     const review = fs.readFileSync(DEPENDENCY_REVIEW, "utf-8");
     expect(review).toContain("test/issue-4434-error-fields.test.ts");
-    expect(review).toContain("Tighten both `test/e2e/test-issue-4434-tui-unreachable-inference.sh`");
+    expect(review).toContain(
+      "Tighten both `test/e2e/test-issue-4434-tui-unreachable-inference.sh`",
+    );
   });
 });
