@@ -102,6 +102,7 @@ export type PreparedPolicyResumeSelection = {
   policyPresets: string[];
   recordedPolicyPresetsNeedReconcile: boolean;
   disabledMessagingPolicyPresetApplied: boolean;
+  suppressedAgentRequiredPresetsLive: boolean;
 };
 
 export function mergeRequiredSetupPolicyPresets(
@@ -159,6 +160,41 @@ function agentRequiredPresetAdditions(
   return ["openclaw-pricing", ...requiredOpenclawOtelPolicyPresets(agent, env)];
 }
 
+/**
+ * Invalid state: OpenClaw onboarding adds `openclaw-pricing` (and, when
+ * `NEMOCLAW_OPENCLAW_OTEL=1` with a local endpoint, `openclaw-diagnostics-otel-local`)
+ * to every sandbox as agent-required presets, but the Restricted tier
+ * description promises "no third-party network access beyond inference and core
+ * agent tooling". The pricing fetch reaches LiteLLM/OpenRouter and the OTEL
+ * preset opens host-local OTLP egress, so on Restricted both additions
+ * contradict the tier description and the linked issue's zero-applied-preset
+ * acceptance.
+ *
+ * Source boundary: the agent-required additions list is hardcoded in this
+ * module (and `openclaw-otel-policy-presets.ts`) rather than declared in
+ * `nemoclaw-blueprint/policies/tiers.yaml`. Tier YAML can express a tier's
+ * default presets but cannot express "this preset is conditionally added by
+ * the active agent, except when the tier explicitly suppresses it" — so the
+ * suppression must live alongside the addition.
+ *
+ * Source-fix constraint: tier YAML has no schema for agent-conditional or
+ * tier-conditional preset gating, and `requiredOpenclawOtelPolicyPresets()`
+ * itself takes `agent` and `env` (OTEL endpoint locality) inputs that the YAML
+ * cannot evaluate at parse time.
+ *
+ * Regression test: `test/policy-tiers-onboard.test.ts` exercises
+ * `setupPoliciesWithSelection` end-to-end for restricted + OpenClaw across
+ * fresh-onboard, preservation, resume, and OTEL-enabled paths;
+ * `test/onboard-policy-suggestions.test.ts` covers `suppressedAgentRequiredPresets`
+ * and `computeSetupPresetSuggestions` directly.
+ *
+ * Removal condition: when the agent-required addition list moves into per-agent
+ * declarative metadata (per-preset application-source records in the registry,
+ * or per-agent YAML under `nemoclaw-blueprint/policies/`) so the tier filter
+ * can be applied at the metadata layer, `suppressedAgentRequiredPresets()` and
+ * the `tierName` plumbing through `mergeRequiredSetupPolicyPresets()` can be
+ * removed in one pass.
+ */
 export function suppressedAgentRequiredPresets(
   tierName: string,
   agent: string | null | undefined,
@@ -295,11 +331,19 @@ export function preparePolicyPresetResumeSelection(
       tierName: options.tierName,
     });
   }
+  const suppressedForTier = options.tierName
+    ? new Set(suppressedAgentRequiredPresets(options.tierName, options.agent, options.env))
+    : null;
+  const suppressedAgentRequiredPresetsLive =
+    suppressedForTier !== null &&
+    suppressedForTier.size > 0 &&
+    appliedPolicyPresets.some((name) => suppressedForTier.has(name));
 
   return {
     policyPresets,
     recordedPolicyPresetsNeedReconcile,
     disabledMessagingPolicyPresetApplied,
+    suppressedAgentRequiredPresetsLive,
   };
 }
 

@@ -69,6 +69,7 @@ function createDeps(overrides: Partial<PoliciesStateOptions<Agent, WebSearchConf
           "unsupported",
         ),
         disabledMessagingPolicyPresetApplied: false,
+        suppressedAgentRequiredPresetsLive: false,
       }),
     ),
     appliedCheck: vi.fn(() => false),
@@ -236,6 +237,7 @@ describe("handlePoliciesState", () => {
       policyPresets: [...(options.recordedPolicyPresets ?? []), ...options.hermesToolGateways],
       recordedPolicyPresetsNeedReconcile: false,
       disabledMessagingPolicyPresetApplied: false,
+      suppressedAgentRequiredPresetsLive: false,
     }));
     const { deps, calls, setSession } = createDeps({
       preparePolicyPresetResumeSelection: prepareResume,
@@ -377,5 +379,37 @@ describe("handlePoliciesState", () => {
 
     expect(calls.persistPolicies).not.toHaveBeenCalled();
     expect(result.appliedPolicyPresets).toEqual([]);
+  });
+
+  it("forces setup reconciliation on restricted resume when suppressed presets are live", async () => {
+    const session = createSession({ policyPresets: [] });
+    const prepareResume = vi.fn((_sandboxName, _options) => ({
+      policyPresets: [],
+      recordedPolicyPresetsNeedReconcile: false,
+      disabledMessagingPolicyPresetApplied: false,
+      suppressedAgentRequiredPresetsLive: true,
+    }));
+    const { deps, calls, setSession } = createDeps({
+      preparePolicyPresetResumeSelection: prepareResume,
+      arePolicyPresetsApplied: vi.fn(() => true),
+      getActiveSandbox: vi.fn(() => ({
+        messaging: { plan: makeMessagingPlan("my-assistant", []) },
+        policyTier: "restricted",
+      })),
+    });
+    setSession(session);
+
+    await handlePoliciesState({ ...baseOptions(deps), resume: true });
+
+    expect(prepareResume).toHaveBeenCalledWith(
+      "my-assistant",
+      expect.objectContaining({ tierName: "restricted" }),
+    );
+    expect(calls.skipped).not.toHaveBeenCalled();
+    expect(calls.recordSkip).not.toHaveBeenCalled();
+    expect(calls.setupPolicies).toHaveBeenCalledWith(
+      "my-assistant",
+      expect.objectContaining({ selectedPresets: [] }),
+    );
   });
 });
