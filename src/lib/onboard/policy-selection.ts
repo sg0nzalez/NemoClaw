@@ -518,14 +518,17 @@ async function setupPoliciesWithSelectionInner(
     extraSelected,
   );
   const interactiveChoice = pruneDisabledPresets(
-    mergeRequiredSetupPolicyPresets(resolvedPresets.map((preset) => preset.name), {
-      enabledChannels,
-      hermesToolGateways,
-      agent,
-      knownPresetNames: knownNames,
-      env: deps.env,
-      tierName,
-    }),
+    mergeRequiredSetupPolicyPresets(
+      resolvedPresets.map((preset) => preset.name),
+      {
+        enabledChannels,
+        hermesToolGateways,
+        agent,
+        knownPresetNames: knownNames,
+        env: deps.env,
+        tierName,
+      },
+    ),
   );
 
   if (onSelection) onSelection(interactiveChoice);
