@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { createBuiltInChannelManifestRegistry } from "../src/lib/messaging";
-import { REVIEWED_OPENCLAW_PLUGIN_INTEGRITY_BY_PACKAGE_SPEC } from "../src/lib/messaging/applier/build/messaging-build-applier.mts";
+import { reviewedOpenClawPluginIntegrityByPackageSpec } from "../src/lib/messaging/applier/build/messaging-build-applier.mts";
 
 const REPO_ROOT = path.join(import.meta.dirname, "..");
 const DOCKERFILE = path.join(REPO_ROOT, "Dockerfile");
@@ -96,7 +96,7 @@ function runInstallBlock(
     `call_log=${JSON.stringify(log)}`,
     `OPENCLAW_VERSION=${JSON.stringify(openclawVersion)}`,
     `OPENCLAW_2026_6_9_INTEGRITY=${JSON.stringify(committedIntegrity)}`,
-    `NEMOCLAW_ALLOW_LEGACY_OPENCLAW_FIXTURE=${allowLegacyFixture ? "1" : "0"}`,
+    `NEMOCLAW_E2E_FIXTURE_LEGACY_OPENCLAW=${allowLegacyFixture ? "1" : "0"}`,
     `OPENCLAW_2026_3_11_INTEGRITY=${JSON.stringify(LEGACY_REBUILD_OPENCLAW_INTEGRITY)}`,
     `OPENCLAW_2026_4_24_INTEGRITY=${JSON.stringify(LEGACY_GATEWAY_UPGRADE_OPENCLAW_INTEGRITY)}`,
     `CODEX_ACP_0_11_1_INTEGRITY=${JSON.stringify(codexAcpCommittedIntegrity)}`,
@@ -210,7 +210,7 @@ describe("OpenClaw npm integrity pins", () => {
     expect(reviewNote).toContain("`dist/extensions/telegram/runtime-api.js`");
     expect(reviewNote).toContain("which exports `sendMessageTelegram`");
     expect(reviewNote).toContain("fails closed if the installed runtime file is missing");
-    expect(reviewNote).toContain("NEMOCLAW_ALLOW_LEGACY_OPENCLAW_FIXTURE=1");
+    expect(reviewNote).toContain("NEMOCLAW_E2E_FIXTURE_LEGACY_OPENCLAW=1");
     expect(reviewNote).toContain("claiming `openclaw-pipeline-runtime` inbound proof");
     expect(reviewNote).toContain("imports `dist/extensions/telegram/test-api.js`");
     expect(reviewNote).toContain("gateway/upstream reporting layer");
@@ -261,7 +261,13 @@ describe("OpenClaw npm integrity pins", () => {
       Object.fromEntries(entries.sort(([left], [right]) => left.localeCompare(right)));
 
     expect(
-      sortedEntries(Object.entries(REVIEWED_OPENCLAW_PLUGIN_INTEGRITY_BY_PACKAGE_SPEC)),
+      sortedEntries(
+        Object.entries(
+          reviewedOpenClawPluginIntegrityByPackageSpec({
+            OPENCLAW_VERSION: PINNED_OPENCLAW_VERSION,
+          }),
+        ),
+      ),
     ).toEqual(sortedEntries(expectedEntries));
   });
 

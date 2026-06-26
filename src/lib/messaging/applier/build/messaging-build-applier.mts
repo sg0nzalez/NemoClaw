@@ -138,21 +138,33 @@ function isPinnedHermesUvPackageSpec(spec: string): boolean {
 
 export class MessagingBuildApplierError extends Error {}
 
-export const REVIEWED_OPENCLAW_PLUGIN_INTEGRITY_BY_PACKAGE_SPEC: Readonly<Record<string, string>> = {
-  "@openclaw/discord@2026.6.9":
-    "sha512-esFhwYW0nrFQvBhkPeK/1qmvumlVAY8ddhYBt7geIYLlBriwPJRwtnVLLfp0n1LbS0/XVZ0ORqlvkWq8Vv61vg==",
-  "@openclaw/slack@2026.6.9":
-    "sha512-JZHc0L3s6s+yBsWowZtE/DWZJOuy4lTE6uTuUbF5QNjUvQQUlCHMFrwPycrXLesVq1il5yAvo82VbERRsIzgxQ==",
-  "@openclaw/whatsapp@2026.6.9":
-    "sha512-HWz9CryGcSk5ork03DlESVlRcDBnwuXPEKgqdSz/Qt0OnQ2Z1wqNGpwVlAqngvDQDH2AzkNXWuTu2M0C16R8vA==",
-  "@openclaw/msteams@2026.6.9":
-    "sha512-Ye1nf2fZYGM3lqQJ/zGlhToThyz1lLZE7HqR2F31iWcD5pV89+eEyRFNNH2FrwYeDVjw+EyWpQh2RkN1r867qg==",
-  "@tencent-weixin/openclaw-weixin@2.4.3":
-    "sha512-dPQbidUNWigC6V10vGW4i+GLH09x+6zUhafZRjuxkJ9GDu8o62WBsnUTojp4KqUH756hz+t2v9khiCRSi0dBDw==",
-};
-
 export const DEFAULT_MESSAGING_RUNTIME_PLAN_PATH =
   "/usr/local/share/nemoclaw/messaging-runtime-plan.json";
+
+export function reviewedOpenClawPluginIntegrityByPackageSpec(
+  env: Env = process.env,
+  manifests: readonly ChannelManifest[] = TRUSTED_CHANNEL_MANIFESTS,
+): Readonly<Record<string, string>> {
+  const entries: [string, string][] = [];
+  for (const manifest of manifests) {
+    for (const packageSpec of manifest.agentPackages ?? []) {
+      if (packageSpec.agent !== "openclaw" || packageSpec.manager !== "openclaw-plugin") continue;
+      const resolvedSpec = resolveOpenClawPackageSpec(packageSpec.spec, env);
+      const npmPackage = parseNpmPackageSpec(resolvedSpec);
+      if (!npmPackage) {
+        throw new MessagingBuildApplierError(
+          `Trusted manifest ${manifest.id} declares a non-npm OpenClaw plugin package: ${resolvedSpec}`,
+        );
+      }
+      const integrity =
+        packageSpec.integrity ?? packageSpec.integrityByVersion?.[npmPackage.version ?? ""];
+      if (integrity) entries.push([npmPackage.packageSpec, integrity]);
+    }
+  }
+  return Object.freeze(
+    Object.fromEntries(entries.sort(([left], [right]) => left.localeCompare(right))),
+  );
+}
 
 export function readMessagingBuildPlanFromEnv(
   env: Env,
@@ -454,7 +466,9 @@ function collectOpenClawMessagingPluginInstalls(
 ): OpenClawPluginInstall[] {
   const installs: OpenClawPluginInstall[] = [];
   const seen = new Set<string>();
-  const trustedSpecs = trustedOpenClawPluginSpecsForPlan(plan, env);
+  const trustedManifests = trustedChannelManifestsForActivePlan(plan);
+  const trustedSpecs = trustedOpenClawPluginSpecsForManifests(trustedManifests, env);
+  const reviewedIntegrity = reviewedOpenClawPluginIntegrityByPackageSpec(env, trustedManifests);
   for (const step of enabledBuildStepsForPhase(plan, "agent-install")) {
     if (step.kind !== "package-install") continue;
     if (step.value === undefined) {
@@ -473,9 +487,7 @@ function collectOpenClawMessagingPluginInstalls(
         `Messaging package-install output ${step.outputId} is not declared by a trusted built-in manifest for active OpenClaw channels: ${resolvedSpec}`,
       );
     }
-    const integrity = npmPackage
-      ? REVIEWED_OPENCLAW_PLUGIN_INTEGRITY_BY_PACKAGE_SPEC[npmPackage.packageSpec]
-      : undefined;
+    const integrity = npmPackage ? reviewedIntegrity[npmPackage.packageSpec] : undefined;
     const resolvedInstall: OpenClawPluginInstall = {
       spec: resolvedSpec,
       ...(npmPackage ? { npmPackageSpec: npmPackage.packageSpec } : {}),
@@ -498,11 +510,17 @@ function collectOpenClawMessagingPluginInstalls(
  * plan/env. Remove this recheck only once package installs are no longer
  * serialized or plans are signed and attested at the Docker build boundary.
  */
-function trustedOpenClawPluginSpecsForPlan(plan: MessagingBuildPlan | null, env: Env): Set<string> {
+function trustedChannelManifestsForActivePlan(plan: MessagingBuildPlan | null): ChannelManifest[] {
   const active = new Set(activeChannels(plan));
+  return TRUSTED_CHANNEL_MANIFESTS.filter((manifest) => active.has(manifest.id));
+}
+
+function trustedOpenClawPluginSpecsForManifests(
+  manifests: readonly ChannelManifest[],
+  env: Env,
+): Set<string> {
   const specs = new Set<string>();
-  for (const manifest of TRUSTED_CHANNEL_MANIFESTS) {
-    if (!active.has(manifest.id)) continue;
+  for (const manifest of manifests) {
     for (const packageSpec of manifest.agentPackages ?? []) {
       if (packageSpec.agent !== "openclaw" || packageSpec.manager !== "openclaw-plugin") continue;
       const resolvedSpec = resolveOpenClawPackageSpec(packageSpec.spec, env);
