@@ -4592,6 +4592,7 @@ async function setupPoliciesWithSelection(
       selectPolicyTier,
       setPolicyTier: (sandbox, tierName) =>
         registry.updateSandbox(sandbox, { policyTier: tierName }),
+      getRecordedPolicyTier: (sandbox) => registry.getSandbox(sandbox)?.policyTier ?? null,
       selectTierPresetsAndAccess,
       parsePolicyPresetEnv,
       env: process.env,

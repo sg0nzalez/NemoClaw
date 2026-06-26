@@ -88,6 +88,7 @@ export type SetupPolicySelectionDeps = {
   ) => void;
   selectPolicyTier: () => Promise<string>;
   setPolicyTier?: (sandboxName: string, tierName: string) => void;
+  getRecordedPolicyTier?: (sandboxName: string) => string | null | undefined;
   selectTierPresetsAndAccess: (
     tierName: string,
     presets: Preset[],
@@ -380,6 +381,15 @@ async function setupPoliciesWithSelectionInner(
       env: deps.env,
     });
     chosen = pruneDisabledPresets(chosen);
+    const recordedTierName = deps.getRecordedPolicyTier?.(sandboxName) ?? null;
+    if (recordedTierName) {
+      const resumeSuppressed = new Set(
+        suppressedAgentRequiredPresets(recordedTierName, agent, deps.env),
+      );
+      if (resumeSuppressed.size > 0) {
+        chosen = chosen.filter((name) => !resumeSuppressed.has(name));
+      }
+    }
   }
 
   if (selectedPresets !== null) {
