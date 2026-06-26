@@ -45,6 +45,7 @@ export interface ProviderRecoveryHelpers {
   readRecordedProvider(sandboxName: string | null | undefined): string | null;
   readRecordedNimContainer(sandboxName: string | null | undefined): string | null;
   readRecordedModel(sandboxName: string | null | undefined): string | null;
+  readRecordedEndpointUrl(sandboxName: string | null | undefined): string | null;
 }
 
 export function createProviderRecoveryHelpers(deps: ProviderRecoveryDeps): ProviderRecoveryHelpers {
@@ -154,5 +155,29 @@ export function createProviderRecoveryHelpers(deps: ProviderRecoveryDeps): Provi
     return null;
   }
 
-  return { readLiveInference, readRecordedProvider, readRecordedNimContainer, readRecordedModel };
+  function readRecordedEndpointUrl(sandboxName: string | null | undefined): string | null {
+    if (!sandboxName) return null;
+    try {
+      const session = onboardSession.loadSession();
+      if (
+        session &&
+        session.sandboxName === sandboxName &&
+        typeof session.endpointUrl === "string" &&
+        session.endpointUrl
+      ) {
+        return session.endpointUrl;
+      }
+    } catch {
+      return null;
+    }
+    return null;
+  }
+
+  return {
+    readLiveInference,
+    readRecordedProvider,
+    readRecordedNimContainer,
+    readRecordedModel,
+    readRecordedEndpointUrl,
+  };
 }
