@@ -314,8 +314,28 @@ describe("GATEWAY_STOP_SCRIPT (executed)", () => {
     }
   }
 
-  function runStopScript(script = GATEWAY_STOP_SCRIPT): number {
-    const result = cp.spawnSync("sh", ["-lc", script], {
+  function liveChildPids(): number[] {
+    return children.map((child) => child.pid).filter((pid): pid is number => pid !== undefined);
+  }
+
+  function runStopScript(script = GATEWAY_STOP_SCRIPT, allowedPids = liveChildPids()): number {
+    const scopedScript = `
+allowed_test_pids="${allowedPids.join(" ")}"
+ps() {
+  if [ "$*" = "-eo user=,pid=,args=" ]; then
+    command ps -eo user=,pid=,args= | awk -v allowed="$allowed_test_pids" '
+      BEGIN {
+        split(allowed, pids, " ")
+        for (i in pids) if (pids[i] != "") keep[pids[i]] = 1
+      }
+      $2 in keep { print }
+    '
+  else
+    command ps "$@"
+  fi
+}
+${script}`;
+    const result = cp.spawnSync("sh", ["-lc", scopedScript], {
       encoding: "utf-8",
       timeout: 20000,
     });
@@ -380,6 +400,22 @@ describe("GATEWAY_STOP_SCRIPT (executed)", () => {
       // Give the kernel a moment to reap after SIGTERM.
       await new Promise((r) => setTimeout(r, 300));
       expect(isAlive(pid)).toBe(false);
+    },
+  );
+
+  it.runIf(process.platform === "linux")(
+    "only signals PIDs spawned by this test when executing the stop script",
+    async () => {
+      const unrelated = spawnWithArgv0("openclaw-gateway");
+      const intended = spawnWithArgv0("openclaw-gateway");
+      expect(isAlive(unrelated)).toBe(true);
+      expect(isAlive(intended)).toBe(true);
+
+      expect(runStopScript(GATEWAY_STOP_SCRIPT, [intended])).toBe(0);
+
+      await new Promise((r) => setTimeout(r, 300));
+      expect(isAlive(intended)).toBe(false);
+      expect(isAlive(unrelated)).toBe(true);
     },
   );
 
