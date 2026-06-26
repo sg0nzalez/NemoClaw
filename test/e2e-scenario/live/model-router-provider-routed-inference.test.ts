@@ -108,9 +108,8 @@ test.skipIf(!shouldRunLiveE2EScenarios())(
     }
 
     const apiKey = secrets.required("NVIDIA_INFERENCE_API_KEY");
-    if (!apiKey.startsWith("nvapi-")) {
+    apiKey.startsWith("nvapi-") ||
       skip("provider-routed Model Router E2E requires a public NVIDIA Endpoints nvapi-* key");
-    }
 
     await artifacts.writeJson("scenario.json", {
       id: "model-router-provider-routed-inference",

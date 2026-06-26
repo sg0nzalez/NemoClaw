@@ -187,21 +187,22 @@ function parseJsonFromText(raw: string): unknown {
     if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
       const offset = cursor + line.length - trimmed.length;
       const candidate = text.slice(offset);
-      try {
-        return JSON.parse(candidate);
-      } catch {
-        for (let end = candidate.length - 1; end >= 0; end -= 1) {
-          if (candidate[end] !== "}" && candidate[end] !== "]") continue;
-          try {
-            return JSON.parse(candidate.slice(0, end + 1));
-          } catch {
-            // Keep searching for the matching end of the first JSON envelope;
-            // stderr warnings can be appended after a valid pretty-printed JSON
-            // object when the E2E command captures diagnostics with 2>&1.
-          }
+      const candidates = [
+        candidate,
+        ...Array.from(candidate.matchAll(/[}\]]/g), ({ index = 0 }) =>
+          candidate.slice(0, index + 1),
+        ).reverse(),
+      ];
+      for (const jsonCandidate of candidates) {
+        try {
+          return JSON.parse(jsonCandidate);
+        } catch {
+          // Keep searching for the matching end of the first JSON envelope;
+          // stderr warnings can be appended after a valid pretty-printed JSON
+          // object when the E2E command captures diagnostics with 2>&1.
         }
-        throw new Error("JSON envelope was present but not parseable");
       }
+      throw new Error("JSON envelope was present but not parseable");
     }
     cursor += lineWithBreak.length;
   }
