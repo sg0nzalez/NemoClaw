@@ -80,6 +80,17 @@ jobs:
         if: inputs.openclaw_version != ''
         run: echo "${{ inputs.openclaw_version }}" | grep -qxE '[0-9]+(\.[0-9]+)*'
 
+      - name: Validate production Docker build args
+        env:
+          OPENCLAW_VERSION_INPUT: ${{ inputs.openclaw_version }}
+        run: |
+          set -euo pipefail
+          build_args=()
+          if [ -n "${OPENCLAW_VERSION_INPUT}" ]; then
+            build_args+=(--build-arg "OPENCLAW_VERSION=${OPENCLAW_VERSION_INPUT}")
+          fi
+          scripts/check-production-build-args.sh "${build_args[@]}"
+
       - name: Build and push
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
         with:

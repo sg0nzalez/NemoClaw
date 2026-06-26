@@ -19,6 +19,11 @@ const DEPENDENCY_REVIEW_NOTE = path.join(
   "security",
   "openclaw-2026.6.9-dependency-review.md",
 );
+const PRODUCTION_BUILD_ARG_GUARD = path.join(
+  REPO_ROOT,
+  "scripts",
+  "check-production-build-args.sh",
+);
 const UNPINNED_OPENCLAW_VERSION = "2026.6.10";
 const PINNED_OPENCLAW_VERSION = "2026.6.9";
 const PINNED_OPENCLAW_INTEGRITY =
@@ -119,6 +124,17 @@ function runInstallBlock(
   const calls = fs.existsSync(log) ? fs.readFileSync(log, "utf-8") : "";
   fs.rmSync(tmp, { recursive: true, force: true });
   return { result, calls };
+}
+
+function runProductionBuildArgGuard(
+  args: string[],
+  env: Record<string, string> = {},
+): ReturnType<typeof spawnSync> {
+  return spawnSync("bash", [PRODUCTION_BUILD_ARG_GUARD, ...args], {
+    cwd: REPO_ROOT,
+    encoding: "utf-8",
+    env: { ...process.env, ...env },
+  });
 }
 
 function runOptionalOpenClawPluginBlock(
@@ -223,6 +239,8 @@ describe("OpenClaw npm integrity pins", () => {
     expect(reviewNote).toContain("which exports `sendMessageTelegram`");
     expect(reviewNote).toContain("fails closed if the installed runtime file is missing");
     expect(reviewNote).toContain("NEMOCLAW_E2E_FIXTURE_LEGACY_OPENCLAW=1");
+    expect(reviewNote).toContain("scripts/check-production-build-args.sh");
+    expect(reviewNote).toContain("production build args");
     expect(reviewNote).toContain("claiming `openclaw-pipeline-runtime` inbound proof");
     expect(reviewNote).toContain("imports `dist/extensions/telegram/test-api.js`");
     expect(reviewNote).toContain("gateway/upstream reporting layer");
@@ -445,6 +463,29 @@ describe("OpenClaw npm integrity pins", () => {
     expect(fixtureBase.calls).toContain(
       `npm install -g openclaw@${LEGACY_REBUILD_OPENCLAW_VERSION}`,
     );
+  });
+
+  it("guards production Docker build args from the legacy OpenClaw fixture flag", () => {
+    expect(runProductionBuildArgGuard(["--build-arg", "BASE_IMAGE=base"]).status).toBe(0);
+    expect(
+      runProductionBuildArgGuard(["--build-arg=NEMOCLAW_E2E_FIXTURE_LEGACY_OPENCLAW=0"]).status,
+    ).toBe(0);
+
+    for (const args of [
+      ["--build-arg", "NEMOCLAW_E2E_FIXTURE_LEGACY_OPENCLAW=1"],
+      ["--build-arg=NEMOCLAW_E2E_FIXTURE_LEGACY_OPENCLAW=1"],
+      ["NEMOCLAW_E2E_FIXTURE_LEGACY_OPENCLAW=1"],
+    ]) {
+      const result = runProductionBuildArgGuard(args);
+      expect(result.status, args.join(" ")).toBe(1);
+      expect(result.stderr).toContain("only allowed in explicit stale-upgrade E2E fixture builds");
+    }
+
+    const envResult = runProductionBuildArgGuard([], {
+      NEMOCLAW_E2E_FIXTURE_LEGACY_OPENCLAW: "1",
+    });
+    expect(envResult.status).toBe(1);
+    expect(envResult.stderr).toContain("production Docker image build args");
   });
 
   it("fails closed before npm install when the registry integrity drifts", () => {
