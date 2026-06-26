@@ -29,14 +29,13 @@ const { computeSetupPresetSuggestions, filterSetupPolicyPresets, getSuggestedPol
       env?: NodeJS.ProcessEnv;
     }) => string[];
   };
-const { suppressedAgentRequiredPresets } =
-  require("../dist/lib/onboard/policy-selection") as {
-    suppressedAgentRequiredPresets: (
-      tierName: string,
-      agent: string | null | undefined,
-      env?: NodeJS.ProcessEnv,
-    ) => string[];
-  };
+const { suppressedAgentRequiredPresets } = require("../dist/lib/onboard/policy-selection") as {
+  suppressedAgentRequiredPresets: (
+    tierName: string,
+    agent: string | null | undefined,
+    env?: NodeJS.ProcessEnv,
+  ) => string[];
+};
 
 function setOrUnset(key: string, value: string | undefined): void {
   value === undefined ? delete process.env[key] : (process.env[key] = value);

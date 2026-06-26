@@ -1093,7 +1093,10 @@ console.log = (...args) => lines.push(args.join(" "));
     const noteLine: string | undefined = payload.lines.find((l: string) =>
       l.includes("Restricted tier suppresses agent-required preset"),
     );
-    assert.ok(noteLine, `suppression note must be printed, lines: ${JSON.stringify(payload.lines)}`);
+    assert.ok(
+      noteLine,
+      `suppression note must be printed, lines: ${JSON.stringify(payload.lines)}`,
+    );
     const noteMentions = (name: string) => noteLine!.includes(name);
     assert.ok(
       noteMentions("openclaw-pricing"),
