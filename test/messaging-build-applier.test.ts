@@ -531,7 +531,7 @@ describe("messaging-build-applier.mts: agent-install", () => {
     }
   });
 
-  it("fails closed before installing unreviewed npm plugin specs even when plans carry integrity", () => {
+  it("fails closed before installing reviewed OpenClaw plugins absent from active channel manifests", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-package-plan-"));
     const tracePath = path.join(tmp, "openclaw.trace");
     fs.writeFileSync(
@@ -560,7 +560,7 @@ describe("messaging-build-applier.mts: agent-install", () => {
           required: true,
           value: {
             manager: "openclaw-plugin",
-            spec: "npm:@example/manifest-owned-plugin@{{openclaw.version}}",
+            spec: "npm:@openclaw/slack@{{openclaw.version}}",
             integrity: "sha512-plan-controlled-pin",
             pin: false,
           },
@@ -585,7 +585,7 @@ describe("messaging-build-applier.mts: agent-install", () => {
           env: {
             PATH: tmp + ":" + (process.env.PATH || "/usr/bin:/bin"),
             OPENCLAW_TRACE: tracePath,
-            OPENCLAW_VERSION: "2026.5.22",
+            OPENCLAW_VERSION: "2026.6.9",
             NEMOCLAW_MESSAGING_PLAN_B64: Buffer.from(JSON.stringify(plan)).toString("base64"),
           },
           timeout: 10_000,
@@ -594,7 +594,7 @@ describe("messaging-build-applier.mts: agent-install", () => {
 
       expect(result.status).toBe(2);
       expect(result.stderr).toContain(
-        "OpenClaw plugin @example/manifest-owned-plugin@2026.5.22 has no committed npm integrity pin",
+        "Messaging package-install output openclawPluginPackage is not declared by a trusted built-in manifest for active OpenClaw channels: npm:@openclaw/slack@2026.6.9",
       );
       expect(fs.existsSync(tracePath)).toBe(false);
     } finally {

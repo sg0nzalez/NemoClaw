@@ -454,6 +454,7 @@ function collectOpenClawMessagingPluginInstalls(
 ): OpenClawPluginInstall[] {
   const installs: OpenClawPluginInstall[] = [];
   const seen = new Set<string>();
+  const trustedSpecs = trustedOpenClawPluginSpecsForPlan(plan, env);
   for (const step of enabledBuildStepsForPhase(plan, "agent-install")) {
     if (step.kind !== "package-install") continue;
     if (step.value === undefined) {
@@ -467,6 +468,11 @@ function collectOpenClawMessagingPluginInstalls(
     const install = readOpenClawPackageInstall(step.value, step.outputId);
     const resolvedSpec = resolveOpenClawPackageSpec(install.spec, env);
     const npmPackage = parseNpmPackageSpec(resolvedSpec);
+    if (npmPackage && !trustedSpecs.has(resolvedSpec)) {
+      throw new MessagingBuildApplierError(
+        `Messaging package-install output ${step.outputId} is not declared by a trusted built-in manifest for active OpenClaw channels: ${resolvedSpec}`,
+      );
+    }
     const integrity = npmPackage
       ? REVIEWED_OPENCLAW_PLUGIN_INTEGRITY_BY_PACKAGE_SPEC[npmPackage.packageSpec]
       : undefined;
@@ -482,6 +488,34 @@ function collectOpenClawMessagingPluginInstalls(
     installs.push(resolvedInstall);
   }
   return installs;
+}
+
+/**
+ * Security boundary: NEMOCLAW_MESSAGING_PLAN_B64 is a derived build artifact,
+ * not authority to choose root-time OpenClaw plugins. Invalid state: a serialized
+ * OpenClaw plan names a reviewed npm plugin for a channel that is not active.
+ * Source fix: update the selected channel's trusted manifest, not the serialized
+ * plan/env. Remove this recheck only once package installs are no longer
+ * serialized or plans are signed and attested at the Docker build boundary.
+ */
+function trustedOpenClawPluginSpecsForPlan(plan: MessagingBuildPlan | null, env: Env): Set<string> {
+  const active = new Set(activeChannels(plan));
+  const specs = new Set<string>();
+  for (const manifest of TRUSTED_CHANNEL_MANIFESTS) {
+    if (!active.has(manifest.id)) continue;
+    for (const packageSpec of manifest.agentPackages ?? []) {
+      if (packageSpec.agent !== "openclaw" || packageSpec.manager !== "openclaw-plugin") continue;
+      const resolvedSpec = resolveOpenClawPackageSpec(packageSpec.spec, env);
+      const npmPackage = parseNpmPackageSpec(resolvedSpec);
+      if (!npmPackage) {
+        throw new MessagingBuildApplierError(
+          `Trusted manifest ${manifest.id} declares a non-npm OpenClaw plugin package: ${resolvedSpec}`,
+        );
+      }
+      specs.add(resolvedSpec);
+    }
+  }
+  return specs;
 }
 
 function collectHermesMessagingUvPackageInstalls(
