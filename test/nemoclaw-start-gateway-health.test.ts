@@ -389,7 +389,7 @@ describe("record_gateway_pid", () => {
       // the content read — no check-then-use window.
       const fd = fs.openSync(pidFile, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
       try {
-        expect(fs.readFileSync(fd, "utf-8")).toBe("4242\n");
+        expect(fs.readFileSync(fd, "utf-8")).toMatch(/^4242( [0-9]+)?\n$/);
       } finally {
         fs.closeSync(fd);
       }
@@ -424,7 +424,7 @@ describe("record_gateway_pid", () => {
 
       const result = spawnSync("bash", [script], { encoding: "utf-8", timeout: 5000 });
       expect(result.status, `script failed: ${result.stderr}`).toBe(0);
-      expect(fs.readFileSync(pidFile, "utf-8")).toBe("4242\n");
+      expect(fs.readFileSync(pidFile, "utf-8")).toMatch(/^4242( [0-9]+)?\n$/);
       expect((fs.statSync(pidFile).mode & 0o777).toString(8)).toBe("600");
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -723,8 +723,8 @@ describe("respawn loop pidfile refresh (#4710)", () => {
       const result = spawnSync("bash", [scriptPath], { encoding: "utf-8", timeout: 20_000 });
       const stdout = typeof result.stdout === "string" ? result.stdout : "";
       expect(result.status, `script failed: ${result.stderr}`).toBe(0);
-      const initial = stdout.match(/^INITIAL=(\d+)$/m)?.[1];
-      const current = stdout.match(/^CURRENT=(\d+)$/m)?.[1];
+      const initial = stdout.match(/^INITIAL=(\d+)/m)?.[1];
+      const current = stdout.match(/^CURRENT=(\d+)/m)?.[1];
       expect(initial, `no initial pid in: ${stdout}`).toBeDefined();
       expect(current, `no current pid in: ${stdout}`).toBeDefined();
       expect(current).not.toBe(initial);

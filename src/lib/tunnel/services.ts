@@ -536,12 +536,18 @@ identity_files_trusted=0
 pidfile_owner="$(trusted_identity_file "$gateway_pid_file" || true)"
 marker_owner="$(trusted_identity_file "$gateway_marker_file" || true)"
 if [ -n "$pidfile_owner" ] && [ "$pidfile_owner" = "$marker_owner" ]; then
-  raw_pidfile_pid="$(head -n 1 "$gateway_pid_file" 2>/dev/null | tr -d '[:space:]')"
-  case "$raw_pidfile_pid" in
-    ''|*[!0-9]*) ;;
+  raw_pidfile_line="$(head -n 1 "$gateway_pid_file" 2>/dev/null)"
+  raw_pidfile_pid="$(printf '%s\n' "$raw_pidfile_line" | awk '{ print $1 }')"
+  raw_pidfile_starttime="$(printf '%s\n' "$raw_pidfile_line" | awk '{ print $2 }')"
+  raw_pidfile_fields="$(printf '%s\n' "$raw_pidfile_line" | awk '{ print NF }')"
+  case "$raw_pidfile_pid:$raw_pidfile_starttime:$raw_pidfile_fields" in
+    *[!0-9:]*|''|*:|*:*:0|*:*:1) ;;
     *)
-      pidfile_pid="$raw_pidfile_pid"
-      identity_files_trusted=1
+      current_starttime="$(awk '{ sub(/^[^)]*\) /, ""); split($0, fields, " "); print fields[20] }' "/proc/$raw_pidfile_pid/stat" 2>/dev/null)"
+      if [ -n "$current_starttime" ] && [ "$current_starttime" = "$raw_pidfile_starttime" ]; then
+        pidfile_pid="$raw_pidfile_pid"
+        identity_files_trusted=1
+      fi
       ;;
   esac
 fi

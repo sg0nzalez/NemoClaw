@@ -260,7 +260,19 @@ mark_in_container_gateway() {
 # is tracked and a window where the gateway is down reads as unhealthy.
 # Best-effort: a write failure must never block startup.
 record_gateway_pid() {
-  printf '%s\n' "${1:-}" | _nemoclaw_safe_replace_tmp_file "$GATEWAY_PID_FILE" 600 "" best-effort 2>/dev/null || true
+  local pid="${1:-}"
+  local starttime=""
+  case "$pid" in
+    ''|*[!0-9]*) ;;
+    *)
+      starttime="$(awk '{ sub(/^[^)]*\) /, ""); split($0, fields, " "); print fields[20] }' "/proc/${pid}/stat" 2>/dev/null)" || starttime=""
+      ;;
+  esac
+  if [ -n "$starttime" ]; then
+    printf '%s %s\n' "$pid" "$starttime"
+  else
+    printf '%s\n' "$pid"
+  fi | _nemoclaw_safe_replace_tmp_file "$GATEWAY_PID_FILE" 600 "" best-effort 2>/dev/null || true
 }
 
 _chat_ui_url_port() {
@@ -3755,7 +3767,7 @@ start_gateway_serving_watchdog() {
     [ -n "${_DASHBOARD_PORT:-}" ] || exit 0
     while :; do
       sleep "$interval"
-      pid="$(cat "$GATEWAY_PID_FILE" 2>/dev/null)" || pid=""
+      pid="$(awk '{ print $1 }' "$GATEWAY_PID_FILE" 2>/dev/null)" || pid=""
       case "$pid" in
         '' | *[!0-9]*)
           last_pid=""

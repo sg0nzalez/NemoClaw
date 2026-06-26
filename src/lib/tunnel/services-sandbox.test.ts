@@ -2,7 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { chmodSync, mkdtempSync, writeFileSync, existsSync, rmSync, mkdirSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import assert from "node:assert/strict";
@@ -315,10 +323,15 @@ describe("GATEWAY_STOP_SCRIPT (executed)", () => {
     return result.status;
   }
 
+  function processStartTime(pid: number): string {
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf-8");
+    return stat.replace(/^[^)]*\) /, "").split(" ")[19];
+  }
+
   function stopScriptWithGatewayIdentity(
     pid: number,
     mode = 0o600,
-    pidContent = `${pid}\n`,
+    pidContent = `${pid} ${processStartTime(pid)}\n`,
   ): string {
     const dir = mkdtempSync(join(tmpdir(), "nemoclaw-gateway-stop-identity-"));
     const pidFile = join(dir, "nemoclaw-gateway.pid");
@@ -410,6 +423,16 @@ describe("GATEWAY_STOP_SCRIPT (executed)", () => {
       );
 
       expect(runStopScript(script)).toBe(1);
+      expect(isAlive(decoy)).toBe(true);
+    },
+  );
+
+  it.runIf(process.platform === "linux")(
+    "exits 1 (not running) and spares bare openclaw when trusted gateway identity is stale",
+    () => {
+      const decoy = spawnWithArgv0("openclaw");
+
+      expect(runStopScript(stopScriptWithGatewayIdentity(decoy, 0o600, `${decoy} 1\n`))).toBe(1);
       expect(isAlive(decoy)).toBe(true);
     },
   );

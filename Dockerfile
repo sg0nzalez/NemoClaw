@@ -1124,7 +1124,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=45s --retries=3 \
         if [ "$rc" != 7 ]; then exit 1; fi; \
         [ -f /tmp/nemoclaw-gateway-local ] || exit 0; \
         if ! pgrep --ignore-ancestors -f 'openclaw[ -]gateway' > /dev/null 2>&1; then \
-            gwpid="$(cat /tmp/nemoclaw-gateway.pid 2>/dev/null)"; \
+            gwpid="$(awk '{ print $1 }' /tmp/nemoclaw-gateway.pid 2>/dev/null)"; \
             case "${gwpid:-x}" in *[!0-9]*) exit 1 ;; esac; \
             case "$(ps -p "$gwpid" -o comm= 2>/dev/null)" in openclaw*) ;; *) exit 1 ;; esac; \
         fi; \
