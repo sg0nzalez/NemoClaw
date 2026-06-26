@@ -257,16 +257,18 @@ function stageHostedInferenceSourceSecretEnv() {
     // check-direct-credential-env-ignore -- read-only guard to avoid overwriting an explicit compatible endpoint key.
     process.env[HOSTED_INFERENCE_CREDENTIAL_ENV] ?? "",
   );
+  const hostedCompatibleBuildSelection = hostedFlag && normalizedProvider === "build";
   const explicitHostedCustom =
     normalizedProvider === "custom" &&
     (hostedFlag || (!compatibleKey && !sourceKey.startsWith("nvapi-")));
   const implicitHostedCustom =
     !normalizedProvider && (hostedFlag || !sourceKey.startsWith("nvapi-"));
-  const shouldStage = explicitHostedCustom || implicitHostedCustom;
+  const shouldStage =
+    hostedCompatibleBuildSelection || explicitHostedCustom || implicitHostedCustom;
 
   if (!shouldStage) return false;
 
-  if (!normalizedProvider) {
+  if (!normalizedProvider || hostedCompatibleBuildSelection) {
     process.env.NEMOCLAW_PROVIDER = "custom";
   }
   process.env.NEMOCLAW_ENDPOINT_URL =

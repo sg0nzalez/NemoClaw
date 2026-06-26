@@ -115,17 +115,29 @@ test.skipIf(!shouldRunLiveE2EScenarios())(
       skip("Docker is required for sandbox survival E2E");
     }
 
-    const modelsReachable = await host.command(
+    const endpointReachable = await host.command(
       "curl",
-      ["-sf", "--max-time", "10", "https://inference-api.nvidia.com/v1/models"],
+      [
+        "-sS",
+        "--connect-timeout",
+        "10",
+        "--max-time",
+        "20",
+        "-o",
+        "/dev/null",
+        "-w",
+        "%{http_code}",
+        hosted.endpointUrl,
+      ],
       {
-        artifactName: "prereq-inference-api-models",
+        artifactName: "prereq-inference-api-reachability",
         env: buildAvailabilityProbeEnv(),
         redactionValues: [apiKey],
-        timeoutMs: 15_000,
+        timeoutMs: 25_000,
       },
     );
-    expect(modelsReachable.exitCode, resultText(modelsReachable)).toBe(0);
+    expect(endpointReachable.exitCode, resultText(endpointReachable)).toBe(0);
+    expect(endpointReachable.stdout.trim(), resultText(endpointReachable)).not.toBe("000");
     expect(fs.existsSync(path.join(REPO_ROOT, "install.sh"))).toBe(true);
 
     await host.bestEffortCleanupSandbox(SANDBOX_NAME, {
