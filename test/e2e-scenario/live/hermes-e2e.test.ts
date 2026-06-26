@@ -277,20 +277,8 @@ test.skipIf(!shouldRunLiveE2EScenarios())(
 
     expect(fs.existsSync(path.join(REPO_ROOT, "agents", "hermes", "manifest.yaml"))).toBe(true);
 
-    const providerReachability = await host.command(
-      "curl",
-      [
-        "-sS",
-        "--connect-timeout",
-        "10",
-        "--max-time",
-        "20",
-        "-o",
-        "/dev/null",
-        "-w",
-        "%{http_code}",
-        hosted.endpointUrl,
-      ],
+    const providerReachability = await provider.probeReachability(
+      trustedProviderEndpoint(hosted.endpointUrl, { allowedHosts: ["inference-api.nvidia.com"] }),
       {
         artifactName: "phase-1-inference-reachability",
         env: buildAvailabilityProbeEnv(),

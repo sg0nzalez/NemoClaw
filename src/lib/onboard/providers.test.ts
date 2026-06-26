@@ -461,6 +461,23 @@ describe("onboard provider helpers", () => {
     );
   });
 
+  it("keeps explicit compatible credentials when hosted CI overrides cloud selection", () => {
+    withProviderEnv(
+      {
+        COMPATIBLE_API_KEY: "explicit-compatible-key",
+        NVIDIA_INFERENCE_API_KEY: "repo-hosted-key",
+        NEMOCLAW_E2E_USE_HOSTED_INFERENCE: "1",
+        NEMOCLAW_PROVIDER: "cloud",
+      },
+      () => {
+        expect(stageHostedInferenceSourceSecretEnv()).toBe(true);
+        expect(getRequestedProviderHint(true)).toBe("custom");
+        expect(process.env.NEMOCLAW_PROVIDER).toBe("custom");
+        expect(process.env.COMPATIBLE_API_KEY).toBe("explicit-compatible-key");
+      },
+    );
+  });
+
   it("preserves explicit custom provider credentials when NVIDIA_INFERENCE_API_KEY is unrelated", () => {
     withProviderEnv(
       {
