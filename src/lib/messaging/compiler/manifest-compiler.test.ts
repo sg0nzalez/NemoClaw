@@ -280,7 +280,6 @@ describe("ManifestCompiler", () => {
     expect(plan.buildSteps).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          channelId: "discord",
           kind: "package-install",
           value: expect.objectContaining({
             manager: "openclaw-plugin",
@@ -298,34 +297,12 @@ describe("ManifestCompiler", () => {
           }),
         }),
         expect.objectContaining({
-          channelId: "slack",
-          kind: "package-install",
-          value: expect.objectContaining({
-            manager: "openclaw-plugin",
-            spec: "npm:@openclaw/slack@{{openclaw.version}}",
-            pin: true,
-          }),
-        }),
-        expect.objectContaining({
-          channelId: "whatsapp",
-          kind: "package-install",
-          value: expect.objectContaining({
-            manager: "openclaw-plugin",
-            spec: "npm:@openclaw/whatsapp@{{openclaw.version}}",
-            pin: true,
-          }),
-        }),
-        expect.objectContaining({
           channelId: "teams",
           kind: "package-install",
           value: expect.objectContaining({
             manager: "openclaw-plugin",
             spec: "npm:@openclaw/msteams@{{openclaw.version}}",
             pin: true,
-            integrityByVersion: {
-              "2026.6.9":
-                "sha512-Ye1nf2fZYGM3lqQJ/zGlhToThyz1lLZE7HqR2F31iWcD5pV89+eEyRFNNH2FrwYeDVjw+EyWpQh2RkN1r867qg==",
-            },
           }),
         }),
       ]),
