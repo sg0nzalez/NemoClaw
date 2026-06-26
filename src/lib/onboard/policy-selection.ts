@@ -112,6 +112,7 @@ export function mergeRequiredSetupPolicyPresets(
     agent?: string | null;
     knownPresetNames?: string[] | Set<string> | null;
     env?: NodeJS.ProcessEnv;
+    tierName?: string | null;
   } = {},
 ): string[] {
   const agentFilteredPresets = filterSetupPolicyPresetNamesForAgent(policyPresets, options.agent);
@@ -131,7 +132,13 @@ export function mergeRequiredSetupPolicyPresets(
       env: options.env,
     },
   );
-  return filterSetupPolicyPresetNamesForAgent(mergedPresets, options.agent);
+  const agentScoped = filterSetupPolicyPresetNamesForAgent(mergedPresets, options.agent);
+  if (!options.tierName) return agentScoped;
+  const suppressed = new Set(
+    suppressedAgentRequiredPresets(options.tierName, options.agent, options.env),
+  );
+  if (suppressed.size === 0) return agentScoped;
+  return agentScoped.filter((name) => !suppressed.has(name));
 }
 
 export function isStaleBuiltinBravePolicyPreset(
@@ -226,6 +233,7 @@ export function preparePolicyPresetResumeSelection(
     webSearchConfig?: WebSearchConfig | null;
     webSearchSupported?: boolean | null;
     env?: NodeJS.ProcessEnv;
+    tierName?: string | null;
   },
 ): PreparedPolicyResumeSelection {
   const supportOptions = { webSearchSupported: options.webSearchSupported };
@@ -284,6 +292,7 @@ export function preparePolicyPresetResumeSelection(
       agent: options.agent,
       knownPresetNames: selectablePolicyPresets.map((preset) => preset.name),
       env: options.env,
+      tierName: options.tierName,
     });
   }
 
@@ -371,6 +380,7 @@ async function setupPoliciesWithSelectionInner(
           customPresetNames,
         )
       : null;
+  const recordedTierName = deps.getRecordedPolicyTier?.(sandboxName) ?? null;
   if (chosen !== null) {
     const knownSelectablePresets = new Set(selectablePresets.map((preset) => preset.name));
     chosen = mergeRequiredSetupPolicyPresets(chosen, {
@@ -379,17 +389,9 @@ async function setupPoliciesWithSelectionInner(
       agent,
       knownPresetNames: knownSelectablePresets,
       env: deps.env,
+      tierName: recordedTierName,
     });
     chosen = pruneDisabledPresets(chosen);
-    const recordedTierName = deps.getRecordedPolicyTier?.(sandboxName) ?? null;
-    if (recordedTierName) {
-      const resumeSuppressed = new Set(
-        suppressedAgentRequiredPresets(recordedTierName, agent, deps.env),
-      );
-      if (resumeSuppressed.size > 0) {
-        chosen = chosen.filter((name) => !resumeSuppressed.has(name));
-      }
-    }
   }
 
   if (selectedPresets !== null) {
@@ -467,9 +469,9 @@ async function setupPoliciesWithSelectionInner(
       agent,
       knownPresetNames: knownPresets,
       env: deps.env,
+      tierName,
     });
     chosen = pruneDisabledPresets(chosen);
-    chosen = chosen.filter((name) => !suppressedNames.has(name));
 
     const invalidPresets = chosen.filter((name) => !knownPresets.has(name));
     if (invalidPresets.length > 0) {
@@ -516,17 +518,15 @@ async function setupPoliciesWithSelectionInner(
     extraSelected,
   );
   const interactiveChoice = pruneDisabledPresets(
-    mergeRequiredSetupPolicyPresets(
-      resolvedPresets.map((preset) => preset.name),
-      {
-        enabledChannels,
-        hermesToolGateways,
-        agent,
-        knownPresetNames: knownNames,
-        env: deps.env,
-      },
-    ),
-  ).filter((name) => !suppressedNames.has(name));
+    mergeRequiredSetupPolicyPresets(resolvedPresets.map((preset) => preset.name), {
+      enabledChannels,
+      hermesToolGateways,
+      agent,
+      knownPresetNames: knownNames,
+      env: deps.env,
+      tierName,
+    }),
+  );
 
   if (onSelection) onSelection(interactiveChoice);
   if (!deps.waitForSandboxReady(sandboxName)) {
