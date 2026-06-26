@@ -253,7 +253,7 @@ describe("OpenClaw npm integrity pins", () => {
 
           expect(agentPackage.pin, `${manifest.id}:${agentPackage.id}`).toBe(true);
           expect(integrity, `${manifest.id}:${packageSpec}`).toBeDefined();
-          return [packageSpec, integrity as string];
+          return [packageSpec, integrity as string] as [string, string];
         }),
     );
 
