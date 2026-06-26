@@ -79,8 +79,11 @@ export function rewindSessionForRebuildResume(
   s.nimContainer = resumeConfig.nimContainer;
   s.credentialEnv = resumeConfig.credentialEnv;
   s.preferredInferenceApi = resumeConfig.preferredInferenceApi;
-  if (resumeConfig.pinEndpoint) {
-    s.endpointUrl = resumeConfig.endpointUrl;
-  }
+  // `onboard --resume` uses the session as the recreate contract. Always
+  // overwrite the endpoint from the preflighted registry-derived config, even
+  // when the previous session matched this sandbox name: a stale retry session
+  // can otherwise leak an old provider URL into recreate. The resume config was
+  // resolved and validated before destructive work (#4497/#5869).
+  s.endpointUrl = resumeConfig.endpointUrl;
   return s;
 }

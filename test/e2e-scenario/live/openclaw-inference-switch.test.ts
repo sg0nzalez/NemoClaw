@@ -381,9 +381,9 @@ async function ensureCompatibleAnthropicSwitchProvider(
   host: HostCliClient,
   home: string,
   mockProvider: MockAnthropicProvider | undefined,
-): Promise<void> {
-  if (SWITCH_PROVIDER !== "compatible-anthropic-endpoint") return;
-  if (SWITCH_INFERENCE_API !== "anthropic-messages") return;
+): Promise<string | null> {
+  if (SWITCH_PROVIDER !== "compatible-anthropic-endpoint") return null;
+  if (SWITCH_INFERENCE_API !== "anthropic-messages") return null;
 
   const endpointUrl = process.env.NEMOCLAW_SWITCH_ENDPOINT_URL ?? mockProvider?.endpointUrl ?? "";
   const apiKey = process.env.COMPATIBLE_ANTHROPIC_API_KEY ?? "test-compatible-anthropic-key";
@@ -414,6 +414,7 @@ async function ensureCompatibleAnthropicSwitchProvider(
     timeoutMs: COMMAND_TIMEOUT_MS,
   });
   expect(provider.exitCode, resultText(provider)).toBe(0);
+  return endpointUrl;
 }
 
 async function openclawGatewayPid(sandbox: SandboxClient, home: string): Promise<string> {
@@ -703,6 +704,12 @@ function collectOpenClawAgentText(value: unknown, parts: string[], visited: Set<
   }
 }
 
+function agentReplyContainsToken(reply: string, expected: string): boolean {
+  const normalizedReply = reply.replace(/\s+/gu, "").toUpperCase();
+  const normalizedExpected = expected.replace(/\s+/gu, "").toUpperCase();
+  return normalizedExpected.length > 0 && normalizedReply === normalizedExpected;
+}
+
 function parseOpenClawAgentText(raw: string): string {
   if (!raw.trim()) return "";
   const parts: string[] = [];
@@ -782,7 +789,7 @@ exit "$rc"
   });
   const [raw = "", warnings = ""] = result.stdout.split("\n__NEMOCLAW_AGENT_STDERR__\n", 2);
   const reply = parseOpenClawAgentText(raw);
-  if (result.exitCode === 0 && /\bPONG\b/i.test(reply)) return "ok";
+  if (result.exitCode === 0 && agentReplyContainsToken(reply, "PONG")) return "ok";
   if (result.exitCode === 124) {
     return {
       skipped: "OpenClaw agent turn timed out after switch; route/config checks already passed",
@@ -797,6 +804,16 @@ exit "$rc"
     ].join("; "),
   );
 }
+
+test("openclaw-inference-switch agent reply matching tolerates wrapped PONG", () => {
+  expect(agentReplyContainsToken("P\nO N G", "PONG")).toBe(true);
+  expect(agentReplyContainsToken("wrapped: p o\nng", "PONG")).toBe(false);
+  expect(agentReplyContainsToken("the answer is PONG", "PONG")).toBe(false);
+  expect(agentReplyContainsToken("PONG because the route works", "PONG")).toBe(false);
+  expect(agentReplyContainsToken("PANG", "PONG")).toBe(false);
+  expect(agentReplyContainsToken("SPONGE", "PONG")).toBe(false);
+  expect(agentReplyContainsToken("pingpong", "PONG")).toBe(false);
+});
 
 function isTransientInferenceSetFailure(text: string): boolean {
   return /timed? out|timeout|ETIMEDOUT|ECONNRESET|EAI_AGAIN|ENOTFOUND|failed to connect|error sending request|failed to verify inference endpoint|502|503|504|temporar/i.test(
@@ -815,8 +832,29 @@ async function runInferenceSetWithRetry(
   host: HostCliClient,
   home: string,
   redactionValues: string[],
+  switchEndpointUrl: string | null,
 ): Promise<ShellProbeResult> {
   const attempts = parsePositiveIntEnv("NEMOCLAW_SWITCH_SET_ATTEMPTS", 3);
+  const compatibleCredentialEnv = (() => {
+    switch (SWITCH_PROVIDER) {
+      case "compatible-endpoint":
+        return "COMPATIBLE_API_KEY";
+      case "compatible-anthropic-endpoint":
+        return "COMPATIBLE_ANTHROPIC_API_KEY";
+      default:
+        return null;
+    }
+  })();
+  const compatibleMetadataArgs = switchEndpointUrl
+    ? [
+        "--endpoint-url",
+        switchEndpointUrl,
+        "--credential-env",
+        compatibleCredentialEnv ?? "",
+        "--inference-api",
+        SWITCH_INFERENCE_API,
+      ]
+    : [];
   const args = [
     "inference",
     "set",
@@ -826,6 +864,7 @@ async function runInferenceSetWithRetry(
     SWITCH_MODEL,
     "--sandbox",
     SANDBOX_NAME,
+    ...compatibleMetadataArgs,
   ];
 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
@@ -943,10 +982,13 @@ RUN_OPENCLAW_INFERENCE_SWITCH_TEST(
         endpointUrl: mockProvider.endpointUrl,
       });
     }
-    await ensureCompatibleAnthropicSwitchProvider(host, home, mockProvider);
+    const switchEndpointUrl =
+      SWITCH_PROVIDER === "compatible-endpoint"
+        ? hosted.endpointUrl
+        : await ensureCompatibleAnthropicSwitchProvider(host, home, mockProvider);
 
     const pidBefore = await openclawGatewayPid(sandbox, home);
-    const switchResult = await runInferenceSetWithRetry(host, home, [apiKey]);
+    const switchResult = await runInferenceSetWithRetry(host, home, [apiKey], switchEndpointUrl);
     expect(switchResult.exitCode, resultText(switchResult)).toBe(0);
 
     const pidAfter = await openclawGatewayPid(sandbox, home);
