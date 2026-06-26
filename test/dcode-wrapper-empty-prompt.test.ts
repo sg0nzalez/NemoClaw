@@ -58,8 +58,8 @@ function runWrapper(args: string[]): WrapperRun {
       fs
         .readFileSync(wrapperCopy, "utf-8")
         .replace(
-          'export PATH="/usr/local/bin:',
-          `export PATH=${JSON.stringify(`${bin}:/usr/local/bin:`)}`,
+          'export PATH="/usr/local/bin:/opt/venv/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin"',
+          `export PATH=${JSON.stringify(`${bin}:/usr/local/bin:/opt/venv/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin`)}`,
         ),
     );
     fs.chmodSync(wrapperCopy, 0o755);
