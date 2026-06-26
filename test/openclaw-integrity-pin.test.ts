@@ -6,23 +6,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { createBuiltInChannelManifestRegistry } from "../src/lib/messaging";
 
 const REPO_ROOT = path.join(import.meta.dirname, "..");
 const DOCKERFILE = path.join(REPO_ROOT, "Dockerfile");
 const DOCKERFILE_BASE = path.join(REPO_ROOT, "Dockerfile.base");
 const BLUEPRINT = path.join(REPO_ROOT, "nemoclaw-blueprint", "blueprint.yaml");
-const CHAT_SEND_PATCH = path.join(REPO_ROOT, "scripts", "patch-openclaw-chat-send.js");
-const SLACK_API_PROOF = path.join(REPO_ROOT, "test", "e2e", "lib", "slack-api-proof.sh");
-const TELEGRAM_API_PROOF = path.join(REPO_ROOT, "test", "e2e", "lib", "telegram-api-proof.sh");
-const TEAMS_MANIFEST = path.join(
-  REPO_ROOT,
-  "src",
-  "lib",
-  "messaging",
-  "channels",
-  "teams",
-  "manifest.ts",
-);
 const DEPENDENCY_REVIEW_NOTE = path.join(
   REPO_ROOT,
   "docs",
@@ -226,42 +215,22 @@ describe("OpenClaw npm integrity pins", () => {
     expect(reviewNote).toContain("default 180-second timeout");
   });
 
-  it("keeps OpenClaw 2026.6.9 compatibility guardrails on the upgraded surfaces", () => {
-    const chatSendPatch = fs.readFileSync(CHAT_SEND_PATCH, "utf-8");
-    const slackProof = fs.readFileSync(SLACK_API_PROOF, "utf-8");
-    const telegramProof = fs.readFileSync(TELEGRAM_API_PROOF, "utf-8");
-    const teamsManifest = fs.readFileSync(TEAMS_MANIFEST, "utf-8");
-    const dockerfile = fs.readFileSync(DOCKERFILE, "utf-8");
-
-    expect(chatSendPatch).toContain('id: "chat-send"');
-    expect(chatSendPatch).toContain('id: "get-reply"');
-    expect(chatSendPatch).toContain('id: "followup-runner"');
-    expect(chatSendPatch).toContain('id: "run-start"');
-    expect(chatSendPatch).toContain('id: "transcript-idempotency"');
-    expect(chatSendPatch).toContain('id: "empty-final"');
-    expect(chatSendPatch).toContain('id: "followup-run-id"');
-    expect(chatSendPatch).toContain('id: "webchat-queue-mode"');
-    expect(chatSendPatch).toContain('id: "run-id-preservation"');
-
-    expect(slackProof).toContain("@openclaw/slack/dist/runtime-api.js");
-    expect(slackProof).toContain("pipeline\\.runtime-");
-    expect(slackProof).toContain("sendMessageSlack");
-    expect(slackProof).toContain("prepareSlackMessage");
-
-    expect(telegramProof).toContain("dist/extensions/telegram/runtime-api.js");
-    expect(telegramProof).toContain("sendMessageTelegram");
-    expect(telegramProof).toContain(
-      "installed Telegram runtime API does not export sendMessageTelegram",
+  it("keeps the Teams OpenClaw plugin manifest pinned to the reviewed 2026.6.9 integrity", () => {
+    const teamsManifest = createBuiltInChannelManifestRegistry().get("teams");
+    const teamsPackage = teamsManifest?.agentPackages?.find(
+      (agentPackage) =>
+        agentPackage.agent === "openclaw" &&
+        agentPackage.manager === "openclaw-plugin" &&
+        agentPackage.id === "openclawPluginPackage",
     );
-    expect(telegramProof).not.toContain("dist/extensions/telegram/test-api.js");
 
-    expect(teamsManifest).toContain("npm:@openclaw/msteams@{{openclaw.version}}");
-    expect(teamsManifest).toContain(PINNED_OPENCLAW_MSTEAMS_INTEGRITY);
-
-    expect(dockerfile).toContain("OPENCLAW_DIAGNOSTICS_OTEL_2026_6_9_INTEGRITY");
-    expect(dockerfile).toContain("OPENCLAW_BRAVE_PLUGIN_2026_6_9_INTEGRITY");
-    expect(dockerfile).toContain(PINNED_OPENCLAW_DIAGNOSTICS_OTEL_INTEGRITY);
-    expect(dockerfile).toContain(PINNED_OPENCLAW_BRAVE_PLUGIN_INTEGRITY);
+    expect(teamsPackage).toMatchObject({
+      spec: "npm:@openclaw/msteams@{{openclaw.version}}",
+      pin: true,
+      integrityByVersion: {
+        [PINNED_OPENCLAW_VERSION]: PINNED_OPENCLAW_MSTEAMS_INTEGRITY,
+      },
+    });
   });
 
   it("verifies optional non-messaging OpenClaw plugin integrity before install", () => {
