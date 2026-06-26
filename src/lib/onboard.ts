@@ -5207,10 +5207,7 @@ async function onboard(opts: OnboardOptions = {}): Promise<void> {
         verifyCompatibleEndpointSandboxSmoke: (options) =>
           verifyCompatibleEndpointSandboxSmoke({ ...options, runOpenshell, redact }),
         preparePolicyPresetResumeSelection: (name, options) =>
-          preparePolicyPresetResumeSelection({ policies }, name, {
-            ...options,
-            tierName: registry.getSandbox(name)?.policyTier ?? null,
-          }),
+          preparePolicyPresetResumeSelection({ policies }, name, options),
         arePolicyPresetsApplied,
         skippedStepMessage,
         recordStateSkipped,

@@ -24,6 +24,7 @@ export interface PolicyPresetEntry {
 
 export interface ActiveSandboxPolicyState {
   messaging?: { plan: SandboxMessagingPlan } | null;
+  policyTier?: string | null;
 }
 
 export interface PolicyResumeSelection {
@@ -72,6 +73,7 @@ export interface PoliciesStateOptions<Agent, WebSearchConfig> {
         agent?: string | null;
         webSearchConfig: WebSearchConfig | null;
         webSearchSupported: boolean;
+        tierName?: string | null;
       },
     ): PolicyResumeSelection;
     arePolicyPresetsApplied(sandboxName: string, selectedPresets: string[]): boolean;
@@ -166,6 +168,7 @@ export async function handlePoliciesState<Agent, WebSearchConfig>({
     agent: normalizeAgentName((agent as { name?: string } | null)?.name),
     webSearchConfig,
     webSearchSupported,
+    tierName: activeSandbox?.policyTier ?? null,
   });
   const recordedPolicyPresetsForSupport = policyResumeSelection.policyPresets;
   const resumePolicies =
