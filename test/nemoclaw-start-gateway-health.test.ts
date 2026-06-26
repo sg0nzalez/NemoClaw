@@ -623,7 +623,7 @@ describe("gateway launch wiring (#4710)", () => {
     expect(run.markerExists).toBe(true);
     // The watchdog reads the gateway PID from the pidfile each cycle.
     expect(run.gatewayPid).toBeDefined();
-    expect(run.pidFileContent).toBe(run.gatewayPid);
+    expect(run.pidFileContent?.split(/\s+/)[0]).toBe(run.gatewayPid);
     // The watchdog runs and is registered for SIGTERM cleanup.
     expect(run.watchdogPid).toBeDefined();
     expect(run.stdout).toContain("WATCHDOG_ALIVE=1");
@@ -698,8 +698,8 @@ describe("respawn loop pidfile refresh (#4710)", () => {
         "LOOP_PID=$!",
         'INITIAL=""; CURRENT=""',
         "for _ in $(command seq 1 200); do",
-        `  INITIAL="$(cat ${JSON.stringify(initialPidFile)} 2>/dev/null || true)"`,
-        `  CURRENT="$(cat ${JSON.stringify(pidFile)} 2>/dev/null || true)"`,
+        `  INITIAL="$(awk '{ print $1 }' ${JSON.stringify(initialPidFile)} 2>/dev/null || true)"`,
+        `  CURRENT="$(awk '{ print $1 }' ${JSON.stringify(pidFile)} 2>/dev/null || true)"`,
         '  if [ -n "$INITIAL" ] && [ -n "$CURRENT" ] && [ "$CURRENT" != "$INITIAL" ]; then break; fi',
         "  command sleep 0.05",
         "done",
