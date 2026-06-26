@@ -26,6 +26,7 @@ const {
   clearNimContainerBeforeRetry,
   createRemoteModelValidator,
   requireProviderChoice,
+  resolveCompatibleEndpointInput,
 }: typeof import("./onboard/setup-nim-selection") = require("./onboard/setup-nim-selection");
 const {
   createSetupNimOllamaHandlers,
@@ -3265,15 +3266,11 @@ async function createSandbox(
 
 type ProviderChoice = import("./onboard/provider-menu").ProviderMenuChoice;
 
-const {
-  readRecordedProvider,
-  readRecordedNimContainer,
-  readRecordedModel,
-  readRecordedEndpointUrl,
-} = providerRecovery.createProviderRecoveryHelpers({
-  parseGatewayInference,
-  runCaptureOpenshell,
-});
+const { readRecordedProvider, readRecordedNimContainer, readRecordedModel, readRecordedEndpointUrl } =
+  providerRecovery.createProviderRecoveryHelpers({
+    parseGatewayInference,
+    runCaptureOpenshell,
+  });
 
 type OllamaModelSelectionOutcome =
   | { outcome: "selected"; model: string; allowToolsIncompatible: boolean }
@@ -3378,7 +3375,6 @@ type RemoteProviderSelectionArgs = {
   requestedModel: string | null;
   recoveredFromSandbox: boolean;
   recoveredModel: string | null;
-  recoveredEndpointUrl: string | null;
   sandboxName: string | null;
 };
 
@@ -3645,14 +3641,7 @@ async function handleRemoteProviderSelection(
   args: RemoteProviderSelectionArgs,
   state: SetupNimSelectionState,
 ): Promise<SetupNimSelectionResult> {
-  const {
-    selected,
-    requestedModel,
-    recoveredFromSandbox,
-    recoveredModel,
-    recoveredEndpointUrl,
-    sandboxName,
-  } = args;
+  const { selected, requestedModel, recoveredFromSandbox, recoveredModel, sandboxName } = args;
   const remoteConfig = REMOTE_PROVIDER_CONFIG[selected.key];
   state.provider = remoteConfig.providerName;
   state.credentialEnv = remoteConfig.credentialEnv;
@@ -3661,18 +3650,13 @@ async function handleRemoteProviderSelection(
 
   if (selected.key === "custom" || selected.key === "anthropicCompatible") {
     const kind = selected.key === "custom" ? "openai" : "anthropic";
-    const _envUrl = (process.env.NEMOCLAW_ENDPOINT_URL || "").trim();
-    const recordedUrl = recoveredFromSandbox ? (recoveredEndpointUrl || "").trim() : "";
-    const defaultEndpointUrl = _envUrl || recordedUrl;
-    const endpointInput = isNonInteractive()
-      ? defaultEndpointUrl
-      : (await prompt(
-          defaultEndpointUrl
-            ? `  ${kind === "openai" ? "OpenAI" : "Anthropic"}-compatible base URL [${defaultEndpointUrl}]: `
-            : kind === "openai"
-              ? "  OpenAI-compatible base URL (e.g., https://openrouter.ai): "
-              : "  Anthropic-compatible base URL (e.g., https://proxy.example.com): ",
-        )) || defaultEndpointUrl;
+    const endpointInput = await resolveCompatibleEndpointInput({
+      kind,
+      envUrl: process.env.NEMOCLAW_ENDPOINT_URL,
+      recoveredEndpointUrl: recoveredFromSandbox ? readRecordedEndpointUrl(sandboxName) : null,
+      nonInteractive: isNonInteractive(),
+      prompt,
+    });
     const navigation = getNavigationChoice(endpointInput);
     if (navigation === "back") {
       console.log("  Returning to provider selection.");
@@ -4098,16 +4082,7 @@ async function setupNim(
           allowToolsIncompatible,
         };
         const result = await handleRemoteProviderSelection(
-          {
-            selected,
-            requestedModel,
-            recoveredFromSandbox,
-            recoveredModel,
-            recoveredEndpointUrl: recoveredFromSandbox
-              ? readRecordedEndpointUrl(sandboxName)
-              : null,
-            sandboxName,
-          },
+          { selected, requestedModel, recoveredFromSandbox, recoveredModel, sandboxName },
           state,
         );
         ({
