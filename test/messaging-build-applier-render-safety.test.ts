@@ -22,14 +22,7 @@ const TEST_PATH = process.env.PATH || "/usr/bin:/bin";
 function runPostAgentInstall(tmp: string, agent: "hermes" | "openclaw", plan: unknown) {
   return spawnSync(
     "node",
-    [
-      "--experimental-strip-types",
-      SCRIPT_PATH,
-      "--agent",
-      agent,
-      "--phase",
-      "post-agent-install",
-    ],
+    ["--experimental-strip-types", SCRIPT_PATH, "--agent", agent, "--phase", "post-agent-install"],
     {
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
