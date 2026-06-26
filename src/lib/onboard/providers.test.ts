@@ -60,6 +60,7 @@ const {
 
 function withProviderEnv(next: Record<string, string | undefined>, testBody: () => void): void {
   const keys = new Set([
+    "GITHUB_ACTIONS",
     "NVIDIA_INFERENCE_API_KEY",
     "NEMOCLAW_AGENT",
     "NEMOCLAW_PROVIDER_KEY",
