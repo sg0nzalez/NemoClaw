@@ -52,17 +52,13 @@ function runWrapper(args: string[]): WrapperRun {
     const bin = path.join(dir, "bin");
     fs.mkdirSync(bin);
     const wrapperCopy = path.join(dir, "dcode");
-    fs.copyFileSync(WRAPPER, wrapperCopy);
-    fs.writeFileSync(
-      wrapperCopy,
-      fs
-        .readFileSync(wrapperCopy, "utf-8")
-        .replace(
-          'export PATH="/usr/local/bin:/opt/venv/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin"',
-          `export PATH=${JSON.stringify(`${bin}:/usr/local/bin:/opt/venv/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin`)}`,
-        ),
-    );
-    fs.chmodSync(wrapperCopy, 0o755);
+    const wrapperFixture = fs
+      .readFileSync(WRAPPER, "utf8")
+      .replace(
+        'export PATH="/usr/local/bin:/opt/venv/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin"',
+        `export PATH="${bin}:/usr/local/bin:/opt/venv/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin"`,
+      );
+    fs.writeFileSync(wrapperCopy, wrapperFixture, { mode: 0o755 });
     fs.writeFileSync(
       path.join(bin, "python3"),
       `#!/usr/bin/env bash\nprintf '%s' "$*" > ${JSON.stringify(marker)}\nexit 0\n`,
