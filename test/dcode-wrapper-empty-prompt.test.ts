@@ -48,19 +48,28 @@ type WrapperRun = {
 function runWrapper(args: string[]): WrapperRun {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-dcode-wrapper-"));
   try {
-    fs.copyFileSync(WRAPPER, path.join(dir, "dcode"));
-    fs.chmodSync(path.join(dir, "dcode"), 0o755);
-
     const marker = path.join(dir, "launched.txt");
     const bin = path.join(dir, "bin");
     fs.mkdirSync(bin);
+    const wrapperCopy = path.join(dir, "dcode");
+    fs.copyFileSync(WRAPPER, wrapperCopy);
+    fs.writeFileSync(
+      wrapperCopy,
+      fs
+        .readFileSync(wrapperCopy, "utf-8")
+        .replace(
+          'export PATH="/usr/local/bin:',
+          `export PATH=${JSON.stringify(`${bin}:/usr/local/bin:`)}`,
+        ),
+    );
+    fs.chmodSync(wrapperCopy, 0o755);
     fs.writeFileSync(
       path.join(bin, "python3"),
       `#!/usr/bin/env bash\nprintf '%s' "$*" > ${JSON.stringify(marker)}\nexit 0\n`,
       { mode: 0o755 },
     );
 
-    const result = spawnSync("bash", [path.join(dir, "dcode"), ...args], {
+    const result = spawnSync("bash", [wrapperCopy, ...args], {
       encoding: "utf-8",
       timeout: 10000,
       env: { PATH: `${bin}${path.delimiter}${process.env.PATH ?? ""}`, HOME: dir },
