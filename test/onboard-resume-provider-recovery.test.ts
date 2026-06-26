@@ -520,7 +520,9 @@ const { setupNim, __setNonInteractive } = onboardModule.exports;
     expect(payload.result.preferredInferenceApi).toBe("openai-completions");
     expect(
       payload.lines.some((line: string) =>
-        line.includes("[non-interactive] Provider: custom (recovered from sandbox 'dcode-station')"),
+        line.includes(
+          "[non-interactive] Provider: custom (recovered from sandbox 'dcode-station')",
+        ),
       ),
     ).toBe(true);
   });

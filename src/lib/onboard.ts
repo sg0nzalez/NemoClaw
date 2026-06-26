@@ -3266,11 +3266,15 @@ async function createSandbox(
 
 type ProviderChoice = import("./onboard/provider-menu").ProviderMenuChoice;
 
-const { readRecordedProvider, readRecordedNimContainer, readRecordedModel, readRecordedEndpointUrl } =
-  providerRecovery.createProviderRecoveryHelpers({
-    parseGatewayInference,
-    runCaptureOpenshell,
-  });
+const {
+  readRecordedProvider,
+  readRecordedNimContainer,
+  readRecordedModel,
+  readRecordedEndpointUrl,
+} = providerRecovery.createProviderRecoveryHelpers({
+  parseGatewayInference,
+  runCaptureOpenshell,
+});
 
 type OllamaModelSelectionOutcome =
   | { outcome: "selected"; model: string; allowToolsIncompatible: boolean }
