@@ -71,6 +71,22 @@ The retained Telegram proof script now resolves the installed `openclaw/dist/ext
 
 ## PR Review Follow-ups
 
+### Installer Integrity Transaction Boundary
+
+The committed npm SRI checks are registry-drift gates, not lockfile-style artifact binding. `Dockerfile`, `Dockerfile.base`, and the messaging build applier verify the reviewed `dist.integrity` for `openclaw@2026.6.9`, `@zed-industries/codex-acp@0.11.1`, optional OpenClaw plugins, and built-in messaging OpenClaw plugins before install, then `npm install -g` or `openclaw plugins install` performs its own registry transaction.
+
+Accepted residual risk: a compromised or inconsistent registry mirror could return the reviewed SRI for the preflight lookup and different install metadata later. This PR accepts that residual installer-trust risk for the OpenClaw 2026.6.9 bump because the change is a dependency-version compatibility update, not an installer architecture migration, and because the current guard still fails closed on missing or changed reviewed SRI before any install starts. Do not treat these checks as proving lockfile-enforced or tarball-enforced artifact pinning.
+
+Invalid state: claiming the committed SRI pins bind the later install transaction. Source boundary: Dockerfile npm install blocks, `Dockerfile.base`, optional plugin install blocks, and `src/lib/messaging/applier/build/messaging-build-applier.mts`. Source-fix constraint: robust artifact binding requires a lockfile, reviewed tarball path, or post-install artifact verifier that enforces the committed SRI against the installed artifact. Regression test: `test/openclaw-integrity-pin.test.ts` verifies fail-closed pre-install drift detection and keeps this accepted residual-risk note present. Removal condition: replace the preflight-only pattern with artifact-bound installation and add a split-registry fake test where `npm view` returns the reviewed SRI but the later install receives a different artifact.
+
+### OpenClaw Compiled-Dist Patch Runtime Boundary
+
+The OpenClaw 2026.6.9 compiled-dist patches are localized compatibility patches for sandbox fetch routing, cron preflight proxying, `host.openshell.internal` web_fetch scoping, unconfigured strict-fetch managed-proxy activation, and `chat.send`/`get-reply` correlation. The long-term source of truth for these behaviors remains upstream OpenClaw; NemoClaw's Dockerfile and patch scripts carry fail-closed version-shape patches only so the reviewed package can run inside the current NemoClaw/OpenShell sandbox contract.
+
+Invalid state: a real installed `openclaw@2026.6.9` dist changes semantics while fixture-compatible recognizers still pass. Source boundary: the installed OpenClaw generated `dist` files, the Dockerfile fetch-guard patch block, and `scripts/patch-openclaw-chat-send.js`. Source-fix constraint: upstream OpenClaw should own permanent fixes; NemoClaw patches must stay version-scoped, fail closed on unknown shapes, and be removed when upstream ships reviewed behavior. Regression tests: `test/fetch-guard-patch-regression.test.ts` and `test/openclaw-chat-send-patch.test.ts` execute patched fixtures for the reviewed shapes, while the PR CI image builds and focused/full nightly E2Es provide built-image runtime smoke on the exact head.
+
+Accepted residual risk: this dependency bump does not add a separate checked-in real-package runtime harness that imports the patched `openclaw@2026.6.9` dist after Dockerfile mutation for every patched path. That gap is accepted for this bump only with exact-head CI image builds, focused nightly proof for the affected E2Es, and final full nightly proof before merge. Removal condition: delete the localized patches when OpenClaw ships the behavior, or add a real-package/built-image runtime harness if NemoClaw keeps carrying these patches beyond this reviewed bump.
+
 ### Legacy Fixture Pins
 
 The legacy `2026.3.11` and `2026.4.24` OpenClaw pins are retained only for stale-upgrade fixture builds. Production Dockerfile install blocks now reject those versions unless `NEMOCLAW_E2E_FIXTURE_LEGACY_OPENCLAW=1` is set explicitly. The E2E-scoped name is intentionally noisy so production build workflows do not treat it as a general override. The stale-upgrade E2E build contexts pass that flag when they intentionally build an old base image, and `test/openclaw-integrity-pin.test.ts` verifies both the default rejection and the explicit fixture opt-in.
