@@ -281,29 +281,29 @@ describe("ManifestCompiler", () => {
       expect.arrayContaining([
         expect.objectContaining({
           kind: "package-install",
-          value: expect.objectContaining({
+          value: {
             manager: "openclaw-plugin",
             spec: "npm:@openclaw/discord@{{openclaw.version}}",
             pin: true,
-          }),
+          },
         }),
         expect.objectContaining({
           channelId: "wechat",
           kind: "package-install",
-          value: expect.objectContaining({
+          value: {
             manager: "openclaw-plugin",
             spec: "npm:@tencent-weixin/openclaw-weixin@2.4.3",
             pin: true,
-          }),
+          },
         }),
         expect.objectContaining({
           channelId: "teams",
           kind: "package-install",
-          value: expect.objectContaining({
+          value: {
             manager: "openclaw-plugin",
             spec: "npm:@openclaw/msteams@{{openclaw.version}}",
             pin: true,
-          }),
+          },
         }),
       ]),
     );

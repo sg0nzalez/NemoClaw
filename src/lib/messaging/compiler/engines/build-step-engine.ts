@@ -28,10 +28,6 @@ export async function planBuildSteps(
       manager: agentPackage.manager,
       spec: agentPackage.spec,
       ...(typeof agentPackage.pin === "boolean" ? { pin: agentPackage.pin } : {}),
-      ...(agentPackage.integrity ? { integrity: agentPackage.integrity } : {}),
-      ...(agentPackage.integrityByVersion
-        ? { integrityByVersion: { ...agentPackage.integrityByVersion } }
-        : {}),
     };
     steps.push({
       channelId: manifest.id,
