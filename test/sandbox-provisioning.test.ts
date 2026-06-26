@@ -752,6 +752,15 @@ describe("sandbox provisioning: image health checks (#1430)", () => {
         });
         expect(probe.result.status).toBe(1);
       });
+
+      it("reports unhealthy when recorded gateway PID start time is stale", () => {
+        const probe = runHealthProbe({
+          procTable: ["openclaw|openclaw"],
+          gatewayPid: "999999 123",
+          psTable: { "999999": "openclaw" },
+        });
+        expect(probe.result.status).toBe(1);
+      });
     });
   });
 
