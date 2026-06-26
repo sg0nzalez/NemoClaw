@@ -238,24 +238,24 @@ describe("OpenClaw npm integrity pins", () => {
 
   it("keeps reviewed OpenClaw messaging plugin integrity pins aligned with built-in manifests", () => {
     const registry = createBuiltInChannelManifestRegistry();
-    const expectedEntries: [string, string][] = [];
+    const expectedEntries: [string, string][] = registry.list().flatMap((manifest) =>
+      (manifest.agentPackages ?? [])
+        .filter(
+          (agentPackage) =>
+            agentPackage.agent === "openclaw" && agentPackage.manager === "openclaw-plugin",
+        )
+        .map((agentPackage) => {
+          const packageSpec = agentPackage.spec
+            .replace(/^npm:/, "")
+            .replaceAll("{{openclaw.version}}", PINNED_OPENCLAW_VERSION);
+          const integrity =
+            agentPackage.integrity ?? agentPackage.integrityByVersion?.[PINNED_OPENCLAW_VERSION];
 
-    for (const manifest of registry.list()) {
-      for (const agentPackage of manifest.agentPackages ?? []) {
-        if (agentPackage.agent !== "openclaw" || agentPackage.manager !== "openclaw-plugin") {
-          continue;
-        }
-        const packageSpec = agentPackage.spec
-          .replace(/^npm:/, "")
-          .replaceAll("{{openclaw.version}}", PINNED_OPENCLAW_VERSION);
-        const integrity =
-          agentPackage.integrity ?? agentPackage.integrityByVersion?.[PINNED_OPENCLAW_VERSION];
-
-        expect(agentPackage.pin, `${manifest.id}:${agentPackage.id}`).toBe(true);
-        expect(integrity, `${manifest.id}:${packageSpec}`).toBeDefined();
-        expectedEntries.push([packageSpec, integrity as string]);
-      }
-    }
+          expect(agentPackage.pin, `${manifest.id}:${agentPackage.id}`).toBe(true);
+          expect(integrity, `${manifest.id}:${packageSpec}`).toBeDefined();
+          return [packageSpec, integrity as string];
+        }),
+    );
 
     const sortedEntries = (entries: [string, string][]) =>
       Object.fromEntries(entries.sort(([left], [right]) => left.localeCompare(right)));
