@@ -36,6 +36,10 @@ function compiler(): ManifestCompiler {
   );
 }
 
+function setEnvValue(key: string, value: string | undefined): void {
+  value === undefined ? Reflect.deleteProperty(process.env, key) : (process.env[key] = value);
+}
+
 async function withEnv<T>(
   values: Readonly<Record<string, string | undefined>>,
   run: () => Promise<T>,
@@ -43,20 +47,12 @@ async function withEnv<T>(
   const previous = Object.fromEntries(Object.keys(values).map((key) => [key, process.env[key]]));
   try {
     for (const [key, value] of Object.entries(values)) {
-      if (value === undefined) {
-        delete process.env[key];
-      } else {
-        process.env[key] = value;
-      }
+      setEnvValue(key, value);
     }
     return await run();
   } finally {
     for (const [key, value] of Object.entries(previous)) {
-      if (value === undefined) {
-        delete process.env[key];
-      } else {
-        process.env[key] = value;
-      }
+      setEnvValue(key, value);
     }
   }
 }
