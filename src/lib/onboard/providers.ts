@@ -253,28 +253,20 @@ function stageHostedInferenceSourceSecretEnv() {
   const rawProvider = (process.env.NEMOCLAW_PROVIDER || "").trim().toLowerCase();
   const normalizedProvider = NON_INTERACTIVE_PROVIDER_ALIASES[rawProvider] || rawProvider;
   const hostedFlag = (process.env.NEMOCLAW_E2E_USE_HOSTED_INFERENCE || "").trim() === "1";
-  const hostedCiFlag = hostedFlag && (process.env.GITHUB_ACTIONS || "").trim() === "true";
   const compatibleKey = normalizeCredentialValue(
     // check-direct-credential-env-ignore -- read-only guard to avoid overwriting an explicit compatible endpoint key.
     process.env[HOSTED_INFERENCE_CREDENTIAL_ENV] ?? "",
   );
-  // GitHub Actions-only hosted inference compatibility: nightly lanes set
-  // NEMOCLAW_E2E_USE_HOSTED_INFERENCE=1 while some legacy E2E callers still
-  // pass NEMOCLAW_PROVIDER=cloud/build. Only that explicit trusted-CI flag
-  // pair is allowed to remap the public NVIDIA selector to the hosted
-  // OpenAI-compatible route.
-  const hostedCompatibleBuildSelection = hostedCiFlag && normalizedProvider === "build";
   const explicitHostedCustom =
     normalizedProvider === "custom" &&
     (hostedFlag || (!compatibleKey && !sourceKey.startsWith("nvapi-")));
   const implicitHostedCustom =
     !normalizedProvider && (hostedFlag || !sourceKey.startsWith("nvapi-"));
-  const shouldStage =
-    hostedCompatibleBuildSelection || explicitHostedCustom || implicitHostedCustom;
+  const shouldStage = explicitHostedCustom || implicitHostedCustom;
 
   if (!shouldStage) return false;
 
-  if (!normalizedProvider || hostedCompatibleBuildSelection) {
+  if (!normalizedProvider) {
     process.env.NEMOCLAW_PROVIDER = "custom";
   }
   process.env.NEMOCLAW_ENDPOINT_URL =
@@ -288,7 +280,7 @@ function stageHostedInferenceSourceSecretEnv() {
   process.env.NEMOCLAW_COMPAT_MODEL = (process.env.NEMOCLAW_COMPAT_MODEL || "").trim() || model;
   process.env.NEMOCLAW_PREFERRED_API =
     (process.env.NEMOCLAW_PREFERRED_API || "").trim() || "openai-completions";
-  process.env[HOSTED_INFERENCE_CREDENTIAL_ENV] = compatibleKey || sourceKey;
+  process.env[HOSTED_INFERENCE_CREDENTIAL_ENV] = sourceKey;
   return true;
 }
 

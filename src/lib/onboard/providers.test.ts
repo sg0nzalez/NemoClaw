@@ -60,7 +60,6 @@ const {
 
 function withProviderEnv(next: Record<string, string | undefined>, testBody: () => void): void {
   const keys = new Set([
-    "GITHUB_ACTIONS",
     "NVIDIA_INFERENCE_API_KEY",
     "NEMOCLAW_AGENT",
     "NEMOCLAW_PROVIDER_KEY",
@@ -441,57 +440,6 @@ describe("onboard provider helpers", () => {
         expect(getRequestedProviderHint(true)).toBe("build");
         expect(process.env.COMPATIBLE_API_KEY).toBeUndefined();
         expect(process.env.NEMOCLAW_ENDPOINT_URL).toBeUndefined();
-      },
-    );
-  });
-
-  it("lets the hosted CI flag route explicit cloud selection through the compatible endpoint", () => {
-    withProviderEnv(
-      {
-        GITHUB_ACTIONS: "true",
-        NVIDIA_INFERENCE_API_KEY: "repo-hosted-key",
-        NEMOCLAW_E2E_USE_HOSTED_INFERENCE: "1",
-        NEMOCLAW_PROVIDER: "cloud",
-      },
-      () => {
-        expect(stageHostedInferenceSourceSecretEnv()).toBe(true);
-        expect(getRequestedProviderHint(true)).toBe("custom");
-        expect(process.env.NEMOCLAW_PROVIDER).toBe("custom");
-        expect(process.env.COMPATIBLE_API_KEY).toBe("repo-hosted-key");
-        expect(process.env.NEMOCLAW_ENDPOINT_URL).toBe(HOSTED_INFERENCE_ENDPOINT_URL);
-      },
-    );
-  });
-
-  it("keeps hosted cloud selection on the Build path outside trusted CI", () => {
-    withProviderEnv(
-      {
-        NVIDIA_INFERENCE_API_KEY: "repo-hosted-key",
-        NEMOCLAW_E2E_USE_HOSTED_INFERENCE: "1",
-        NEMOCLAW_PROVIDER: "cloud",
-      },
-      () => {
-        expect(stageHostedInferenceSourceSecretEnv()).toBe(false);
-        expect(getRequestedProviderHint(true)).toBe("build");
-        expect(process.env.COMPATIBLE_API_KEY).toBeUndefined();
-      },
-    );
-  });
-
-  it("keeps explicit compatible credentials when hosted CI overrides cloud selection", () => {
-    withProviderEnv(
-      {
-        COMPATIBLE_API_KEY: "explicit-compatible-key",
-        GITHUB_ACTIONS: "true",
-        NVIDIA_INFERENCE_API_KEY: "repo-hosted-key",
-        NEMOCLAW_E2E_USE_HOSTED_INFERENCE: "1",
-        NEMOCLAW_PROVIDER: "cloud",
-      },
-      () => {
-        expect(stageHostedInferenceSourceSecretEnv()).toBe(true);
-        expect(getRequestedProviderHint(true)).toBe("custom");
-        expect(process.env.NEMOCLAW_PROVIDER).toBe("custom");
-        expect(process.env.COMPATIBLE_API_KEY).toBe("explicit-compatible-key");
       },
     );
   });
