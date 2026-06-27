@@ -265,7 +265,7 @@ network_policies:
     expect(prepared.cleanup?.()).toBe(true);
   });
 
-  it("merges openclaw-diagnostics-otel-local at create time when OTEL is enabled", () => {
+  it("merges openclaw-diagnostics-otel-local at create time when OTEL is enabled and the tier is known non-restricted", () => {
     const basePolicyPath = tmpPolicy("version: 1\nnetwork_policies:\n  base: {}\n");
     process.env.NEMOCLAW_OPENCLAW_OTEL = "1";
     process.env.NEMOCLAW_OPENCLAW_OTEL_ENDPOINT = "http://host.openshell.internal:4318";
@@ -273,11 +273,25 @@ network_policies:
     delete process.env.NEMOCLAW_OPENCLAW_OTEL_SAMPLE_RATE;
     const prepared = prepareInitialSandboxCreatePolicy(basePolicyPath, [], {
       agentName: "openclaw",
+      policyTier: "balanced",
     });
 
     expect(prepared.appliedPresets).toEqual(["openclaw-diagnostics-otel-local"]);
     expect(prepared.policyPath).not.toBe(basePolicyPath);
     expect(prepared.cleanup?.()).toBe(true);
+  });
+
+  it("defers openclaw-diagnostics-otel-local at create time when the tier is unknown (interactive flow)", () => {
+    const basePolicyPath = tmpPolicy("version: 1\nnetwork_policies:\n  base: {}\n");
+    process.env.NEMOCLAW_OPENCLAW_OTEL = "1";
+    process.env.NEMOCLAW_OPENCLAW_OTEL_ENDPOINT = "http://host.openshell.internal:4318";
+
+    const prepared = prepareInitialSandboxCreatePolicy(basePolicyPath, [], {
+      agentName: "openclaw",
+    });
+
+    expect(prepared.appliedPresets).toEqual([]);
+    expect(prepared.policyPath).toBe(basePolicyPath);
   });
 
   it("does not merge OpenClaw OTEL policy at create time for terminal agents", () => {
