@@ -285,8 +285,6 @@ main() {
 
   if grep -q "NEMOCLAW_TUI_READY" "$plain_capture_file" && is_tui_ready_capture <"$plain_capture_file"; then
     pass "dcode TUI rendered a usable startup prompt signature"
-  elif [ "$expect_rc" -eq 0 ] && grep -q "NEMOCLAW_TUI_EXIT_CAPTURED:" "$plain_capture_file"; then
-    pass "expect harness observed startup and clean-exit markers without stable prompt text"
   else
     fail_test "dcode TUI prompt-ready marker missing from capture"
   fi

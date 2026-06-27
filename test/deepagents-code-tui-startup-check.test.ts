@@ -105,25 +105,6 @@ describe("Deep Agents Code TUI startup check helpers", () => {
     expect(readiness("How can I help with the codebase today?")).toBe("ready");
   });
 
-  it("accepts expect-observed startup when upstream omits stable prompt text", () => {
-    const output = runTuiStartupCheckHelper(
-      [
-        "PASSED=0",
-        "FAILED=0",
-        'plain_capture_file="$(mktemp)"',
-        "expect_rc=0",
-        'printf "NEMOCLAW_TUI_READY\\nNEMOCLAW_TUI_EXIT_CAPTURED:130\\n" >"$plain_capture_file"',
-        'if grep -q "NEMOCLAW_TUI_READY" "$plain_capture_file" && is_tui_ready_capture <"$plain_capture_file"; then pass "dcode TUI rendered a usable startup prompt signature"; elif [ "$expect_rc" -eq 0 ] && grep -q "NEMOCLAW_TUI_EXIT_CAPTURED:" "$plain_capture_file"; then pass "expect harness observed startup and clean-exit markers without stable prompt text"; else fail_test "dcode TUI prompt-ready marker missing from capture"; fi',
-        'rm -f -- "$plain_capture_file"',
-        'printf "passed=%s failed=%s" "$PASSED" "$FAILED"',
-      ].join("; "),
-    );
-
-    expect(output).toBe(
-      "10-deepagents-code-tui-startup: OK (expect harness observed startup and clean-exit markers without stable prompt text)\npassed=1 failed=0",
-    );
-  });
-
   it("does not treat generic TUI exit status 1 as a clean Ctrl-C exit", () => {
     const assertExit = (exitCode: string) =>
       runTuiStartupCheckHelper(
