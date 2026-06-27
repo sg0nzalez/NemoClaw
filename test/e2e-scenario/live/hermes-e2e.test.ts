@@ -11,10 +11,7 @@ import { trustedProviderEndpoint } from "../fixtures/clients/provider.ts";
 import { trustedSandboxShellScript, validateSandboxName } from "../fixtures/clients/sandbox.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
 import { shouldRunLiveE2EScenarios } from "../fixtures/live-project-gate.ts";
-import {
-  DEFAULT_HOSTED_INFERENCE_MODEL,
-  requireHostedInferenceConfig,
-} from "../fixtures/hosted-inference.ts";
+import { requireHostedInferenceConfig } from "../fixtures/hosted-inference.ts";
 import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
 
 // Migrated from test/e2e/test-hermes-e2e.sh.
@@ -36,7 +33,6 @@ const HERMES_DASHBOARD_INTERNAL_PORT =
 const SESSION_FILE = path.join(os.homedir(), ".nemoclaw", "onboard-session.json");
 const REGISTRY_FILE = path.join(os.homedir(), ".nemoclaw", "sandboxes.json");
 const LIVE_TIMEOUT_MS = 70 * 60_000;
-const CHAT_MODEL = process.env.NEMOCLAW_MODEL ?? DEFAULT_HOSTED_INFERENCE_MODEL;
 const ONBOARD_VALIDATION_TIMEOUT_SECONDS =
   process.env.NEMOCLAW_ONBOARD_VALIDATION_TIMEOUT_SECONDS ?? "60";
 
@@ -76,7 +72,6 @@ function commandEnv(hostedEnv: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
     NEMOCLAW_AGENT: "hermes",
     NEMOCLAW_NON_INTERACTIVE: "1",
     NEMOCLAW_RECREATE_SANDBOX: "1",
-    NEMOCLAW_MODEL: hostedEnv.NEMOCLAW_MODEL ?? CHAT_MODEL,
     NEMOCLAW_ONBOARD_VALIDATION_TIMEOUT_SECONDS: ONBOARD_VALIDATION_TIMEOUT_SECONDS,
     NEMOCLAW_SANDBOX_NAME: SANDBOX_NAME,
   };
