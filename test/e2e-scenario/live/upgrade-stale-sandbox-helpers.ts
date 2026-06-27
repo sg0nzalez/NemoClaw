@@ -43,9 +43,10 @@ function assertSafeSandboxName(): void {
   }
 }
 
-export function commandEnv(apiKey?: string): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {
+export function commandEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  return {
     ...buildAvailabilityProbeEnv(),
+    ...extra,
     NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE: "1",
     NEMOCLAW_NON_INTERACTIVE: "1",
     NEMOCLAW_REBUILD_VERBOSE: "1",
@@ -53,8 +54,6 @@ export function commandEnv(apiKey?: string): NodeJS.ProcessEnv {
     NEMOCLAW_SANDBOX_NAME: SANDBOX_NAME,
     OPENSHELL_GATEWAY: process.env.OPENSHELL_GATEWAY ?? "nemoclaw",
   };
-  apiKey && Object.assign(env, { NVIDIA_INFERENCE_API_KEY: apiKey });
-  return env;
 }
 
 export async function bestEffort(run: () => Promise<unknown>): Promise<void> {
@@ -201,7 +200,7 @@ export async function cleanupOldImage(host: HostCliClient): Promise<void> {
 
 export async function installCurrentNemoclaw(
   host: HostCliClient,
-  apiKey: string,
+  hosted: { apiKey: string; env: NodeJS.ProcessEnv },
 ): Promise<ShellProbeResult> {
   let install: ShellProbeResult | undefined;
   for (let attempt = 1; attempt <= INSTALL_ATTEMPTS; attempt += 1) {
@@ -211,8 +210,8 @@ export async function installCurrentNemoclaw(
           ? "phase-1-install-current-nemoclaw"
           : `phase-1-install-current-nemoclaw-attempt-${attempt}`,
       cwd: REPO_ROOT,
-      env: commandEnv(apiKey),
-      redactionValues: [apiKey],
+      env: commandEnv(hosted.env),
+      redactionValues: [hosted.apiKey],
       timeoutMs: 20 * 60_000,
     });
     const retry =

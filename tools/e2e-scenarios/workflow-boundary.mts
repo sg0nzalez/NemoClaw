@@ -3874,8 +3874,8 @@ function validateHermesE2EVitestJob(
   if (jobEnv.NEMOCLAW_AGENT !== "hermes") {
     errors.push("hermes-e2e-vitest job must set NEMOCLAW_AGENT=hermes");
   }
-  if (jobEnv.NEMOCLAW_MODEL !== "minimaxai/minimax-m2.7") {
-    errors.push("hermes-e2e-vitest job must pin the CI-safe Hermes model");
+  if (jobEnv.NEMOCLAW_MODEL !== undefined) {
+    errors.push("hermes-e2e-vitest job must use the shared hosted-compatible model default");
   }
   if (jobEnv.NEMOCLAW_ONBOARD_VALIDATION_TIMEOUT_SECONDS !== "60") {
     errors.push(

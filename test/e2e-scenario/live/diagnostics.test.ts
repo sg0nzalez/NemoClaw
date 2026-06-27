@@ -18,13 +18,17 @@ import path from "node:path";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
 import { validateSandboxName } from "../fixtures/clients/sandbox.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
+import {
+  DEFAULT_HOSTED_INFERENCE_MODEL,
+  requireHostedInferenceConfig,
+} from "../fixtures/hosted-inference.ts";
 import { shouldRunLiveE2EScenarios } from "../fixtures/live-project-gate.ts";
 import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "../../..");
 const CLI_ENTRYPOINT = path.join(REPO_ROOT, "bin", "nemoclaw.js");
 const SANDBOX_NAME = process.env.NEMOCLAW_SANDBOX_NAME ?? `e2e-diag-${process.pid}`;
-const DIAGNOSTICS_MODEL = process.env.NEMOCLAW_MODEL ?? "openai/gpt-oss-120b";
+const DIAGNOSTICS_MODEL = process.env.NEMOCLAW_MODEL ?? DEFAULT_HOSTED_INFERENCE_MODEL;
 const DEBUG_QUICK_TIMEOUT_MS = 30_000;
 const INSTALL_TIMEOUT_MS = 35 * 60_000;
 const TEST_TIMEOUT_MS = 55 * 60_000;
@@ -138,7 +142,8 @@ runDiagnosticsTest(
       "run `npm run build:cli` before live repo CLI scenarios",
     ).toBe(true);
 
-    const apiKey = secrets.required("NVIDIA_INFERENCE_API_KEY");
+    const hosted = requireHostedInferenceConfig(secrets, process.env, { model: DIAGNOSTICS_MODEL });
+    const apiKey = hosted.apiKey;
     await artifacts.writeJson("scenario.json", {
       id: "diagnostics",
       runner: "vitest",
@@ -195,7 +200,7 @@ runDiagnosticsTest(
       fs.rmSync(home, { recursive: true, force: true });
     });
 
-    const env = testEnv(home, { NVIDIA_INFERENCE_API_KEY: apiKey });
+    const env = testEnv(home, hosted.env);
     await bestEffort(() =>
       host.command("node", [CLI_ENTRYPOINT, SANDBOX_NAME, "destroy", "--yes"], {
         artifactName: "pre-cleanup-nemoclaw-destroy-diagnostics",
