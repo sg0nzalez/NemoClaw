@@ -22,6 +22,7 @@ import {
 import {
   isOpenclawAgent,
   mergeRequiredOpenclawOtelPolicyPresets,
+  OPENCLAW_OTEL_LOCAL_POLICY_PRESET,
   requiredOpenclawOtelPolicyPresets,
 } from "./openclaw-otel-policy-presets";
 import { seedInitialPolicyContext } from "./policy-context-seed";
@@ -160,6 +161,11 @@ function agentRequiredPresetAdditions(
   return ["openclaw-pricing", ...requiredOpenclawOtelPolicyPresets(agent, env)];
 }
 
+function restrictedIncompatibleAgentRequiredPresets(agent: string | null | undefined): string[] {
+  if (!isOpenclawAgent(agent)) return [];
+  return ["openclaw-pricing", OPENCLAW_OTEL_LOCAL_POLICY_PRESET];
+}
+
 /**
  * Invalid state: OpenClaw onboarding adds `openclaw-pricing` (and, when
  * `NEMOCLAW_OPENCLAW_OTEL=1` with a local endpoint, `openclaw-diagnostics-otel-local`)
@@ -168,14 +174,23 @@ function agentRequiredPresetAdditions(
  * agent tooling". The pricing fetch reaches LiteLLM/OpenRouter and the OTEL
  * preset opens host-local OTLP egress, so on Restricted both additions
  * contradict the tier description and the linked issue's zero-applied-preset
- * acceptance.
+ * acceptance. The OTEL preset is restricted-incompatible whenever it is live,
+ * not only when the current process has `NEMOCLAW_OPENCLAW_OTEL` set — a
+ * restricted re-onboard with OTEL disabled must still classify a previously
+ * applied `openclaw-diagnostics-otel-local` as suppressed so the
+ * preservation / resume paths remove it instead of leaving stale host-local
+ * OTLP egress on a restricted sandbox.
  *
  * Source boundary: the agent-required additions list is hardcoded in this
  * module (and `openclaw-otel-policy-presets.ts`) rather than declared in
  * `nemoclaw-blueprint/policies/tiers.yaml`. Tier YAML can express a tier's
  * default presets but cannot express "this preset is conditionally added by
  * the active agent, except when the tier explicitly suppresses it" — so the
- * suppression must live alongside the addition.
+ * suppression must live alongside the addition. The suggestion / addition
+ * gate stays env-conditioned via `agentRequiredPresetAdditions()`; the
+ * suppression gate is env-independent via
+ * `restrictedIncompatibleAgentRequiredPresets()` so live cleanup catches
+ * presets applied by a prior process with a different env.
  *
  * Source-fix constraint: tier YAML has no schema for agent-conditional or
  * tier-conditional preset gating, and `requiredOpenclawOtelPolicyPresets()`
@@ -184,24 +199,26 @@ function agentRequiredPresetAdditions(
  *
  * Regression test: `test/policy-tiers-onboard.test.ts` exercises
  * `setupPoliciesWithSelection` end-to-end for restricted + OpenClaw across
- * fresh-onboard, preservation, resume, and OTEL-enabled paths;
- * `test/onboard-policy-suggestions.test.ts` covers `suppressedAgentRequiredPresets`
- * and `computeSetupPresetSuggestions` directly.
+ * fresh-onboard, preservation, resume, and OTEL-enabled / OTEL-disabled paths,
+ * including stale-applied OTEL-local cleanup with the current env disabled;
+ * `test/onboard-policy-suggestions.test.ts` covers
+ * `suppressedAgentRequiredPresets` (env-independent) and
+ * `computeSetupPresetSuggestions` (env-gated) directly.
  *
  * Removal condition: when the agent-required addition list moves into per-agent
  * declarative metadata (per-preset application-source records in the registry,
  * or per-agent YAML under `nemoclaw-blueprint/policies/`) so the tier filter
- * can be applied at the metadata layer, `suppressedAgentRequiredPresets()` and
- * the `tierName` plumbing through `mergeRequiredSetupPolicyPresets()` can be
- * removed in one pass.
+ * can be applied at the metadata layer, `suppressedAgentRequiredPresets()`,
+ * `restrictedIncompatibleAgentRequiredPresets()`, and the `tierName` plumbing
+ * through `mergeRequiredSetupPolicyPresets()` can be removed in one pass.
  */
 export function suppressedAgentRequiredPresets(
   tierName: string,
   agent: string | null | undefined,
-  env: NodeJS.ProcessEnv = process.env,
+  _env: NodeJS.ProcessEnv = process.env,
 ): string[] {
   if (tierName !== RESTRICTED_TIER_NAME) return [];
-  return agentRequiredPresetAdditions(agent, env);
+  return restrictedIncompatibleAgentRequiredPresets(agent);
 }
 
 export function computeSetupPresetSuggestions(

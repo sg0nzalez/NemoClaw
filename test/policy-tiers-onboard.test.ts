@@ -5,105 +5,14 @@
 // Verifies that selectPolicyTier and setupPoliciesWithSelection wire correctly.
 
 import assert from "node:assert/strict";
-import { spawnSync, type SpawnSyncReturns } from "node:child_process";
-import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { describe, it } from "vitest";
 
-const repoRoot = path.join(import.meta.dirname, "..");
-
-/**
- * Run a small inline Node script that mocks out the minimal dependencies of
- * onboard.js, calls the given async expression, and prints a JSON payload.
- */
-function runScript(
-  scriptBody: string,
-  envOverrides: Record<string, string | undefined> = {},
-): SpawnSyncReturns<string> {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-tier-onboard-"));
-  const scriptPath = path.join(tmpDir, "script.js");
-  fs.writeFileSync(scriptPath, scriptBody);
-  const env: NodeJS.ProcessEnv = {
-    ...process.env,
-    HOME: tmpDir,
-    NEMOCLAW_NON_INTERACTIVE: "1",
-    ...envOverrides,
-  };
-  for (const [key, value] of Object.entries(env)) {
-    if (value === undefined) delete env[key];
-  }
-  const result = spawnSync(process.execPath, [scriptPath], {
-    cwd: repoRoot,
-    encoding: "utf-8",
-    env,
-    timeout: 15000,
-  });
-  fs.rmSync(tmpDir, { recursive: true, force: true });
-  return result;
-}
-
-/**
- * Build a minimal mock preamble that stubs out the heavy I/O dependencies of
- * onboard.js so we can require it without a real openshell installation.
- *
- * Sets NEMOCLAW_POLICY_TIER, NEMOCLAW_POLICY_MODE, and NEMOCLAW_POLICY_PRESETS
- * before the require so non-interactive paths read the right values.
- */
-function buildPreamble({
-  tierEnv = "balanced",
-  policyMode = "skip",
-  policyPresets = "",
-  stubOpenshellBin = false,
-  runCaptureReturn = "",
-} = {}): string {
-  const credPath = JSON.stringify(path.join(repoRoot, "dist", "lib", "credentials", "store.js"));
-  const runnerPath = JSON.stringify(path.join(repoRoot, "dist", "lib", "runner.js"));
-  const registryPath = JSON.stringify(path.join(repoRoot, "dist", "lib", "state", "registry.js"));
-  const onboardPath = JSON.stringify(path.join(repoRoot, "dist", "lib", "onboard.js"));
-  const resolveOpenshellPath = JSON.stringify(
-    path.join(repoRoot, "dist", "lib", "adapters", "openshell", "resolve.js"),
-  );
-
-  // Both stubs must run before onboard.js is required — onboard destructures
-  // resolveOpenshell and runCapture at require time, so later overrides are
-  // too late for anything onboard calls internally.
-  const openshellStub = stubOpenshellBin
-    ? `require(${resolveOpenshellPath}).resolveOpenshell = () => "/usr/bin/true";`
-    : "";
-
-  return String.raw`
-const credentials = require(${credPath});
-const runner = require(${runnerPath});
-const registry = require(${registryPath});
-
-Object.defineProperty(process, "platform", { value: "darwin" });
-
-// Stub heavy I/O
-credentials.prompt = async (msg) => { throw new Error("unexpected prompt: " + msg); };
-credentials.ensureApiKey = async () => {};
-credentials.getCredential = () => null;
-runner.run = () => {};
-runner.runCapture = (command) => {
-  const text = Array.isArray(command) ? command.join(" ") : String(command);
-  if (text.includes("sandbox list")) return "test-sb Ready";
-  return ${JSON.stringify(runCaptureReturn)};
-};
-${openshellStub}
-
-const updates = [];
-registry.registerSandbox = () => true;
-registry.updateSandbox = (_name, fields) => { updates.push(fields); return true; };
-registry.getSandbox = () => ({ name: "test-sb", model: null, provider: null });
-
-// Set env vars before requiring onboard so module-level code sees them
-process.env.NEMOCLAW_POLICY_TIER = ${JSON.stringify(tierEnv)};
-process.env.NEMOCLAW_POLICY_MODE = ${JSON.stringify(policyMode)};
-process.env.NEMOCLAW_POLICY_PRESETS = ${JSON.stringify(policyPresets)};
-
-const { selectPolicyTier, setupPoliciesWithSelection } = require(${onboardPath});
-`;
-}
+import {
+  buildPolicyTierOnboardPreamble as buildPreamble,
+  policyTierOnboardScriptRepoRoot as repoRoot,
+  runPolicyTierOnboardScript as runScript,
+} from "./helpers/policy-tier-onboard-script";
 
 describe("policy tier onboarding integration", () => {
   it("selectPolicyTier returns selected tier name in non-interactive mode", () => {
@@ -1384,18 +1293,8 @@ ${body}
 `;
   }
 
-  function run(body: string): SpawnSyncReturns<string> {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-presets-"));
-    const scriptPath = path.join(tmpDir, "script.js");
-    fs.writeFileSync(scriptPath, buildPresetsScript(body));
-    const result = spawnSync(process.execPath, [scriptPath], {
-      cwd: repoRoot,
-      encoding: "utf-8",
-      env: { ...process.env, HOME: tmpDir, NEMOCLAW_NON_INTERACTIVE: "1" },
-      timeout: 10000,
-    });
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-    return result;
+  function run(body: string) {
+    return runScript(buildPresetsScript(body));
   }
 
   it("returns tier presets with their default access levels", () => {

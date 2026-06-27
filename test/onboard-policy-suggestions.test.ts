@@ -497,18 +497,32 @@ describe("onboard policy preset suggestions", () => {
   });
 
   describe("suppressedAgentRequiredPresets", () => {
-    it("reports openclaw-pricing as suppressed on restricted + openclaw", () => {
+    it("reports openclaw-pricing and openclaw-diagnostics-otel-local as suppressed on restricted + openclaw", () => {
       expect(suppressedAgentRequiredPresets("restricted", "openclaw")).toEqual([
         "openclaw-pricing",
+        "openclaw-diagnostics-otel-local",
       ]);
     });
 
-    it("also reports the local OTEL preset when OTEL is enabled", () => {
+    it("reports the same suppression list when OTEL is currently enabled", () => {
       withOpenclawOtelEnv("1", () => {
         expect(suppressedAgentRequiredPresets("restricted", "openclaw")).toEqual([
           "openclaw-pricing",
           "openclaw-diagnostics-otel-local",
         ]);
+      });
+    });
+
+    it("still reports openclaw-diagnostics-otel-local when OTEL is currently disabled", () => {
+      withOpenclawOtelEnv(undefined, () => {
+        expect(suppressedAgentRequiredPresets("restricted", "openclaw")).toContain(
+          "openclaw-diagnostics-otel-local",
+        );
+      });
+      withOpenclawOtelEnv("0", () => {
+        expect(suppressedAgentRequiredPresets("restricted", "openclaw")).toContain(
+          "openclaw-diagnostics-otel-local",
+        );
       });
     });
 
@@ -521,8 +535,11 @@ describe("onboard policy preset suggestions", () => {
       expect(suppressedAgentRequiredPresets("restricted", "hermes")).toEqual([]);
     });
 
-    it("treats a null agent on restricted as OpenClaw and reports the suppression", () => {
-      expect(suppressedAgentRequiredPresets("restricted", null)).toEqual(["openclaw-pricing"]);
+    it("treats a null agent on restricted as OpenClaw and reports the full suppression list", () => {
+      expect(suppressedAgentRequiredPresets("restricted", null)).toEqual([
+        "openclaw-pricing",
+        "openclaw-diagnostics-otel-local",
+      ]);
     });
   });
 });

@@ -483,6 +483,32 @@ RUN_NETWORK_POLICY_TEST(
     }
     expect(onboard?.exitCode, onboard ? text(onboard) : "onboard did not run").toBe(0);
 
+    // Invalid state: prior bugs left `openclaw-pricing` (and, under
+    // `NEMOCLAW_OPENCLAW_OTEL=1` with a local endpoint,
+    // `openclaw-diagnostics-otel-local`) live on restricted OpenClaw sandboxes
+    // even though the restricted tier promises zero third-party network access.
+    // Source boundary: live OpenShell `policy-list` after a successful
+    // restricted onboard and before any operator mutation (`policy-add brew`).
+    // Source-fix constraint: unit/handler tests stub policy APIs, so a
+    // regression in `syncPresetSelection`, OpenShell mutation, registry
+    // handoff, or applied-preset inspection cannot be observed without a live
+    // applied-preset read here. Removal condition: replace with a dedicated
+    // `restricted-openclaw-policy-suppression` scenario that asserts the same
+    // condition under both default and `NEMOCLAW_OPENCLAW_OTEL=1` envs.
+    const policyListAfterOnboard = await runNemoclaw(host, [SANDBOX_NAME, "policy-list"], {
+      artifactName: "tc-net-01-policy-list-after-onboard",
+      timeoutMs: SANDBOX_EXEC_TIMEOUT_MS,
+    });
+    expect(policyListAfterOnboard.exitCode, text(policyListAfterOnboard)).toBe(0);
+    expect(
+      policyListAfterOnboard.stdout,
+      `restricted onboard must not leave openclaw-pricing applied: ${text(policyListAfterOnboard)}`,
+    ).not.toMatch(/^[\s]*●[\s]+openclaw-pricing\b/m);
+    expect(
+      policyListAfterOnboard.stdout,
+      `restricted onboard must not leave openclaw-diagnostics-otel-local applied: ${text(policyListAfterOnboard)}`,
+    ).not.toMatch(/^[\s]*●[\s]+openclaw-diagnostics-otel-local\b/m);
+
     const denyDefault = await fetchStatus(
       sandbox,
       "https://example.com/",
