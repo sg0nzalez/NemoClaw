@@ -841,6 +841,17 @@ nemoclaw-start node /tmp/nemoclaw-web-fetch-e2e.mjs 'http://host.openshell.inter
 // above which proves `openclaw-diagnostics-otel-local` is absent through the
 // live OpenShell `policy-list`. A regression in `requiredOpenclawOtelPolicyPresets()`
 // or the merge boundary would surface in both layers.
+//
+// Acceptance note (`policy-add` escape hatch): the documented escape hatch —
+// `nemoclaw <sandbox> policy-add <preset>` to re-apply a suppressed preset on
+// a restricted sandbox — does not change behavior in this PR. `policy-add`
+// invokes `policies.applyPreset` directly and is independent of the onboarding
+// suggestion / preservation / resume paths the suppression module touches, so
+// existing CLI coverage for `policy-add` continues to gate it. A dedicated
+// live re-add scenario was considered but deferred to keep this scenario's
+// wall-clock to a single onboard; if the escape hatch ever stops working on
+// restricted, a regression would surface in the CLI `policy-add` tests rather
+// than here.
 RUN_NETWORK_POLICY_TEST(
   "network-policy: default restricted OpenClaw onboard leaves policy-list with zero active presets",
   { timeout: TEST_TIMEOUT_MS },

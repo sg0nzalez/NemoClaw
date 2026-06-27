@@ -96,3 +96,17 @@ export function filterSuppressedAgentRequiredPresets(
   if (suppressed.size === 0) return presetNames;
   return presetNames.filter((name) => !suppressed.has(name));
 }
+
+export function emitSuppressedAgentRequiredPresetsNote(
+  tierName: string,
+  agent: string | null | undefined,
+  note: (message: string) => void,
+): Set<string> {
+  const suppressed = suppressedAgentRequiredPresets(tierName, agent);
+  if (suppressed.length > 0) {
+    note(
+      `  Restricted tier suppresses agent-required preset(s): ${suppressed.join(", ")}. Apply later with 'nemoclaw <name> policy-add <preset>' if needed.`,
+    );
+  }
+  return new Set(suppressed);
+}

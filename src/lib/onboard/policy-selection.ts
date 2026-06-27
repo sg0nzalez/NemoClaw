@@ -23,6 +23,7 @@ import { mergeRequiredOpenclawOtelPolicyPresets } from "./openclaw-otel-policy-p
 import { seedInitialPolicyContext } from "./policy-context-seed";
 import {
   agentRequiredPresetAdditions,
+  emitSuppressedAgentRequiredPresetsNote,
   filterSuppressedAgentRequiredPresets,
   RESTRICTED_TIER_NAME,
   suppressedAgentRequiredPresets,
@@ -416,14 +417,7 @@ async function setupPoliciesWithSelectionInner(
       env: deps.env,
     }),
   );
-  const suppressedForTier = suppressedAgentRequiredPresets(tierName, agent);
-  if (suppressedForTier.length > 0) {
-    deps.note(
-      `  Restricted tier suppresses agent-required preset(s): ${suppressedForTier.join(", ")}. Apply later with 'nemoclaw <name> policy-add <preset>' if needed.`,
-    );
-  }
-
-  const suppressedNames = new Set(suppressedAgentRequiredPresets(tierName, agent));
+  const suppressedNames = emitSuppressedAgentRequiredPresetsNote(tierName, agent, deps.note);
 
   if (deps.isNonInteractive()) {
     const policyMode = (deps.env?.NEMOCLAW_POLICY_MODE || "suggested").trim().toLowerCase();

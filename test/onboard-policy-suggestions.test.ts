@@ -29,11 +29,30 @@ const { computeSetupPresetSuggestions, filterSetupPolicyPresets, getSuggestedPol
       env?: NodeJS.ProcessEnv;
     }) => string[];
   };
-const { suppressedAgentRequiredPresets } = require("../dist/lib/onboard/policy-selection") as {
-  suppressedAgentRequiredPresets: (tierName: string, agent: string | null | undefined) => string[];
-};
-const { filterSuppressedAgentRequiredPresets } =
+const { mergeRequiredSetupPolicyPresets, suppressedAgentRequiredPresets } =
+  require("../dist/lib/onboard/policy-selection") as {
+    mergeRequiredSetupPolicyPresets: (
+      policyPresets: string[],
+      options?: {
+        enabledChannels?: string[] | null;
+        hermesToolGateways?: string[] | null;
+        agent?: string | null;
+        knownPresetNames?: string[] | Set<string> | null;
+        env?: NodeJS.ProcessEnv;
+        tierName?: string | null;
+      },
+    ) => string[];
+    suppressedAgentRequiredPresets: (
+      tierName: string,
+      agent: string | null | undefined,
+    ) => string[];
+  };
+const { agentRequiredPresetAdditions, filterSuppressedAgentRequiredPresets } =
   require("../dist/lib/onboard/policy-tier-suppression") as {
+    agentRequiredPresetAdditions: (
+      agent: string | null | undefined,
+      env: NodeJS.ProcessEnv,
+    ) => string[];
     filterSuppressedAgentRequiredPresets: (
       presetNames: string[],
       tierName: string | null | undefined,
@@ -584,6 +603,98 @@ describe("onboard policy preset suggestions", () => {
           "hermes",
         ),
       ).toEqual(["openclaw-pricing", "hermes-tool"]);
+    });
+  });
+
+  describe("mergeRequiredSetupPolicyPresets tier plumbing", () => {
+    it("suppresses openclaw-pricing only when tierName is restricted", () => {
+      expect(
+        mergeRequiredSetupPolicyPresets(["npm", "openclaw-pricing"], {
+          agent: "openclaw",
+          tierName: "restricted",
+        }),
+      ).toEqual(["npm"]);
+      expect(
+        mergeRequiredSetupPolicyPresets(["npm", "openclaw-pricing"], {
+          agent: "openclaw",
+          tierName: "balanced",
+        }),
+      ).toEqual(["npm", "openclaw-pricing"]);
+      expect(
+        mergeRequiredSetupPolicyPresets(["npm", "openclaw-pricing"], {
+          agent: "openclaw",
+          tierName: "open",
+        }),
+      ).toEqual(["npm", "openclaw-pricing"]);
+    });
+
+    it("returns the input unchanged when tierName is omitted (covers the fresh-onboard call site that passes a freshly-selected tierName and the resume call site that passes the recorded tierName — passing null means no tier filter applies)", () => {
+      expect(
+        mergeRequiredSetupPolicyPresets(["npm", "openclaw-pricing"], { agent: "openclaw" }),
+      ).toEqual(["npm", "openclaw-pricing"]);
+      expect(
+        mergeRequiredSetupPolicyPresets(["npm", "openclaw-pricing"], {
+          agent: "openclaw",
+          tierName: null,
+        }),
+      ).toEqual(["npm", "openclaw-pricing"]);
+    });
+
+    it("preserves balanced presets when the originally recorded tier was restricted (tier-switch upgrade path)", () => {
+      // Caller would pass `tierName: <fresh selection>` for fresh onboarding
+      // and `tierName: <recordedTierName>` on resume. Either way, the function
+      // applies suppression based on the tier *passed in* — so a tier upgrade
+      // from restricted → balanced never re-suppresses the balanced presets.
+      const balancedPresets = ["npm", "pypi", "huggingface"];
+      expect(
+        mergeRequiredSetupPolicyPresets(balancedPresets, {
+          agent: "openclaw",
+          tierName: "balanced",
+        }),
+      ).toEqual(balancedPresets);
+    });
+  });
+
+  describe("restricted suppression list ⊇ env-gated additions (drift invariant)", () => {
+    // The restricted suppression list is hardcoded so live cleanup catches
+    // presets applied by a prior process with a different env. The env-gated
+    // addition list (`agentRequiredPresetAdditions`) is what actually gets
+    // added during fresh onboarding. The two can drift if a new OpenClaw
+    // agent-required preset is added to the addition path without also being
+    // added to the suppression set — leaving stale presets uncleaned on
+    // restricted re-onboarding. Lock the invariant: every preset the env-gated
+    // additions can produce for OpenClaw must also appear in the restricted
+    // suppression list.
+    function unionAdditionsAcrossOtelStates(): Set<string> {
+      const otelKey = "NEMOCLAW_OPENCLAW_OTEL";
+      const endpointKey = "NEMOCLAW_OPENCLAW_OTEL_ENDPOINT";
+      const original = { otel: process.env[otelKey], endpoint: process.env[endpointKey] };
+      const union = new Set<string>();
+      try {
+        delete process.env[otelKey];
+        delete process.env[endpointKey];
+        for (const name of agentRequiredPresetAdditions("openclaw", process.env)) union.add(name);
+        process.env[otelKey] = "1";
+        delete process.env[endpointKey];
+        for (const name of agentRequiredPresetAdditions("openclaw", process.env)) union.add(name);
+        process.env[endpointKey] = "https://otel.example.com:4318";
+        for (const name of agentRequiredPresetAdditions("openclaw", process.env)) union.add(name);
+      } finally {
+        setOrUnset(otelKey, original.otel);
+        setOrUnset(endpointKey, original.endpoint);
+      }
+      return union;
+    }
+
+    it("includes every env-gated OpenClaw agent-required preset in the restricted suppression list", () => {
+      const additionsUnion = unionAdditionsAcrossOtelStates();
+      const restrictedSet = new Set(suppressedAgentRequiredPresets("restricted", "openclaw"));
+      for (const preset of additionsUnion) {
+        expect(
+          restrictedSet.has(preset),
+          `addition '${preset}' missing from restricted suppression list`,
+        ).toBe(true);
+      }
     });
   });
 });
