@@ -42,6 +42,7 @@ const FREE_STANDING_JOB_MARKER = "FREE_STANDING_VITEST_JOB";
 const FREE_STANDING_SCENARIO_MARKER = "FREE_STANDING_SCENARIO_ID";
 const COMMON_SECRET_ENV_NAMES = [
   "NVIDIA_API_KEY",
+  "NVIDIA_INFERENCE_API_KEY",
   "DOCKERHUB_USERNAME",
   "DOCKERHUB_TOKEN",
   "GITHUB_TOKEN",
@@ -50,8 +51,16 @@ const FREE_STANDING_SELECTOR_SPECIAL_CASES = new Set([
   "hermes-e2e-vitest",
   "hermes-root-entrypoint-smoke-vitest",
   "jetson-nvmap-gpu-vitest",
+  "sandbox-rlimits-connect-vitest",
 ]);
-const FULL_SUITE_EXCLUDED_FREE_STANDING_JOBS = new Set(["jetson-nvmap-gpu-vitest"]);
+const FULL_SUITE_EXCLUDED_FREE_STANDING_JOBS = new Set([
+  "jetson-nvmap-gpu-vitest",
+  "sandbox-rlimits-connect-vitest",
+]);
+const PUBLIC_NVIDIA_ENDPOINT_KEY_JOBS = new Set([
+  "device-auth-health-vitest",
+  "model-router-provider-routed-inference-vitest",
+]);
 
 function asRecord(value: unknown): WorkflowRecord {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -479,6 +488,32 @@ function validateFreeStandingJobSelector(
   }
 }
 
+function validateGatewayGuardRecoveryVitestJob(errors: string[], jobs: WorkflowRecord): void {
+  const job = asRecord(jobs["gateway-guard-recovery"]);
+  if (Object.keys(job).length === 0) return;
+  const jobEnv = asRecord(job.env);
+  if (jobEnv.NEMOCLAW_E2E_USE_HOSTED_INFERENCE !== "1") {
+    errors.push("gateway-guard-recovery job must enable hosted-compatible inference mode");
+  }
+}
+
+function jobPassesNvidiaInferenceSecret(job: WorkflowRecord): boolean {
+  return asSteps(job.steps).some(
+    (step) => asRecord(step.env).NVIDIA_INFERENCE_API_KEY !== undefined,
+  );
+}
+
+function validateHostedCompatibleInferenceFlag(
+  errors: string[],
+  jobName: string,
+  jobEnv: WorkflowRecord,
+): void {
+  if (PUBLIC_NVIDIA_ENDPOINT_KEY_JOBS.has(jobName)) return;
+  if (jobEnv.NEMOCLAW_E2E_USE_HOSTED_INFERENCE !== "1") {
+    errors.push(`${jobName} job must enable hosted-compatible inference mode`);
+  }
+}
+
 function validateFreeStandingInventoryBoundary(
   errors: string[],
   jobs: WorkflowRecord,
@@ -502,6 +537,12 @@ function validateFreeStandingInventoryBoundary(
     }
 
     const jobEnv = asRecord(job.env);
+    if (
+      jobEnv.NEMOCLAW_RUN_E2E_SCENARIOS === "1" &&
+      jobPassesNvidiaInferenceSecret(job)
+    ) {
+      validateHostedCompatibleInferenceFlag(errors, jobName, jobEnv);
+    }
     for (const secret of COMMON_SECRET_ENV_NAMES) {
       requireEnvDoesNotExposeSecret(errors, `${jobName} job`, jobEnv, secret);
     }
@@ -1157,7 +1198,7 @@ function validateCommonEgressAgentVitestJob(
     );
   }
   for (const secret of [
-    "NVIDIA_API_KEY",
+    "NVIDIA_INFERENCE_API_KEY",
     "DOCKERHUB_USERNAME",
     "DOCKERHUB_TOKEN",
     "GITHUB_TOKEN",
@@ -1180,7 +1221,7 @@ function validateCommonEgressAgentVitestJob(
         errors,
         `common-egress-agent-vitest step '${stepName}'`,
         stepEnv,
-        "NVIDIA_API_KEY",
+        "NVIDIA_INFERENCE_API_KEY",
       );
     }
     for (const secret of [
@@ -1247,7 +1288,7 @@ function validateCommonEgressAgentVitestJob(
   requireRunContains(errors, installOpenShell, "env -u DOCKER_CONFIG");
   requireRunContains(errors, installOpenShell, "-u DOCKERHUB_USERNAME");
   requireRunContains(errors, installOpenShell, "-u DOCKERHUB_TOKEN");
-  requireRunContains(errors, installOpenShell, "-u NVIDIA_API_KEY");
+  requireRunContains(errors, installOpenShell, "-u NVIDIA_INFERENCE_API_KEY");
   requireRunContains(errors, installOpenShell, "-u GITHUB_TOKEN");
 
   const runVitest = requireJobStep(
@@ -1257,9 +1298,9 @@ function validateCommonEgressAgentVitestJob(
     "Run common-egress agent live test",
   );
   const runVitestEnv = asRecord(runVitest?.env);
-  if (runVitestEnv.NVIDIA_API_KEY !== "${{ secrets.NVIDIA_API_KEY }}") {
+  if (runVitestEnv.NVIDIA_INFERENCE_API_KEY !== "${{ secrets.NVIDIA_INFERENCE_API_KEY }}") {
     errors.push(
-      "common-egress-agent-vitest step must receive NVIDIA_API_KEY from secrets",
+      "common-egress-agent-vitest step must receive NVIDIA_INFERENCE_API_KEY from secrets",
     );
   }
   requireRunContains(errors, runVitest, "OPENSHELL_BIN");
@@ -2233,7 +2274,7 @@ function validateStateBackupRestoreVitestJob(
     );
   }
   for (const secret of [
-    "NVIDIA_API_KEY",
+    "NVIDIA_INFERENCE_API_KEY",
     "DOCKERHUB_USERNAME",
     "DOCKERHUB_TOKEN",
     "GITHUB_TOKEN",
@@ -2256,7 +2297,7 @@ function validateStateBackupRestoreVitestJob(
         errors,
         stepName,
         stepEnv,
-        "NVIDIA_API_KEY",
+        "NVIDIA_INFERENCE_API_KEY",
       );
     }
     if (step.name !== "Authenticate to Docker Hub") {
@@ -2351,7 +2392,7 @@ function validateStateBackupRestoreVitestJob(
   requireRunContains(errors, installOpenShell, "env -u DOCKER_CONFIG");
   requireRunContains(errors, installOpenShell, "-u DOCKERHUB_USERNAME");
   requireRunContains(errors, installOpenShell, "-u DOCKERHUB_TOKEN");
-  requireRunContains(errors, installOpenShell, "-u NVIDIA_API_KEY");
+  requireRunContains(errors, installOpenShell, "-u NVIDIA_INFERENCE_API_KEY");
   requireRunContains(errors, installOpenShell, "-u GITHUB_TOKEN");
 
   const runVitest = requireJobStep(
@@ -2361,9 +2402,9 @@ function validateStateBackupRestoreVitestJob(
     "Run state backup restore live test",
   );
   const runVitestEnv = asRecord(runVitest?.env);
-  if (runVitestEnv.NVIDIA_API_KEY !== "${{ secrets.NVIDIA_API_KEY }}") {
+  if (runVitestEnv.NVIDIA_INFERENCE_API_KEY !== "${{ secrets.NVIDIA_INFERENCE_API_KEY }}") {
     errors.push(
-      "state-backup-restore-vitest step must receive NVIDIA_API_KEY from secrets",
+      "state-backup-restore-vitest step must receive NVIDIA_INFERENCE_API_KEY from secrets",
     );
   }
   requireRunContains(errors, runVitest, "OPENSHELL_BIN");
@@ -2475,7 +2516,6 @@ function validateUpgradeStaleSandboxVitestJob(
     );
   }
   for (const secret of [
-    "NVIDIA_INFERENCE_API_KEY",
     ...COMMON_SECRET_ENV_NAMES,
   ]) {
     requireEnvDoesNotExposeSecret(
@@ -2502,7 +2542,7 @@ function validateUpgradeStaleSandboxVitestJob(
         errors,
         stepName,
         stepEnv,
-        "NVIDIA_API_KEY",
+        "NVIDIA_INFERENCE_API_KEY",
       );
     }
     if (step.name !== "Authenticate to Docker Hub") {
@@ -2612,7 +2652,6 @@ function validateUpgradeStaleSandboxVitestJob(
   requireRunContains(errors, installOpenShell, "-u DOCKERHUB_USERNAME");
   requireRunContains(errors, installOpenShell, "-u DOCKERHUB_TOKEN");
   requireRunContains(errors, installOpenShell, "-u NVIDIA_INFERENCE_API_KEY");
-  requireRunContains(errors, installOpenShell, "-u NVIDIA_API_KEY");
   requireRunContains(errors, installOpenShell, "-u GITHUB_TOKEN");
 
   const runVitest = requireJobStep(
@@ -2943,7 +2982,7 @@ function validateMessagingCompatibleEndpointVitestJob(
     errors,
     "messaging-compatible-endpoint-vitest job",
     jobEnv,
-    "NVIDIA_API_KEY",
+    "NVIDIA_INFERENCE_API_KEY",
   );
   requireEnvDoesNotExposeSecret(
     errors,
@@ -2967,7 +3006,7 @@ function validateMessagingCompatibleEndpointVitestJob(
       errors,
       `messaging-compatible-endpoint-vitest step '${stepName}'`,
       stepEnv,
-      "NVIDIA_API_KEY",
+      "NVIDIA_INFERENCE_API_KEY",
     );
     requireEnvDoesNotExposeSecret(
       errors,
@@ -3049,7 +3088,7 @@ function validateMessagingCompatibleEndpointVitestJob(
     errors,
     "messaging-compatible-endpoint-vitest step",
     runVitestEnv,
-    "NVIDIA_API_KEY",
+    "NVIDIA_INFERENCE_API_KEY",
   );
   if (runVitestEnv.NEMOCLAW_COMPAT_MOCK_API_KEY !== "fake-compatible-key-e2e") {
     errors.push(
@@ -3321,7 +3360,7 @@ function validateCloudInferenceVitestJob(
     errors,
     "cloud-inference-vitest job",
     jobEnv,
-    "NVIDIA_API_KEY",
+    "NVIDIA_INFERENCE_API_KEY",
   );
 
   const steps = asSteps(job.steps);
@@ -3332,7 +3371,7 @@ function validateCloudInferenceVitestJob(
         errors,
         `cloud-inference-vitest step '${step.name ?? step.uses ?? "<unnamed>"}'`,
         asRecord(step.env),
-        "NVIDIA_API_KEY",
+        "NVIDIA_INFERENCE_API_KEY",
       );
     }
   }
@@ -3376,9 +3415,9 @@ function validateCloudInferenceVitestJob(
     "Run cloud inference live test",
   );
   const runVitestEnv = asRecord(runVitest?.env);
-  if (runVitestEnv.NVIDIA_API_KEY !== "${{ secrets.NVIDIA_API_KEY }}") {
+  if (runVitestEnv.NVIDIA_INFERENCE_API_KEY !== "${{ secrets.NVIDIA_INFERENCE_API_KEY }}") {
     errors.push(
-      "cloud-inference-vitest run step must receive NVIDIA_API_KEY from secrets",
+      "cloud-inference-vitest run step must receive NVIDIA_INFERENCE_API_KEY from secrets",
     );
   }
   requireRunContains(
@@ -3835,8 +3874,8 @@ function validateHermesE2EVitestJob(
   if (jobEnv.NEMOCLAW_AGENT !== "hermes") {
     errors.push("hermes-e2e-vitest job must set NEMOCLAW_AGENT=hermes");
   }
-  if (jobEnv.NEMOCLAW_MODEL !== "minimaxai/minimax-m2.7") {
-    errors.push("hermes-e2e-vitest job must pin the CI-safe Hermes model");
+  if (jobEnv.NEMOCLAW_MODEL !== undefined) {
+    errors.push("hermes-e2e-vitest job must use the shared hosted-compatible model default");
   }
   if (jobEnv.NEMOCLAW_ONBOARD_VALIDATION_TIMEOUT_SECONDS !== "60") {
     errors.push(
@@ -4343,7 +4382,7 @@ function validateDiagnosticsVitestJob(
     errors.push("diagnostics-vitest job must force OPENSHELL_GATEWAY=nemoclaw");
   }
   for (const secret of [
-    "NVIDIA_API_KEY",
+    "NVIDIA_INFERENCE_API_KEY",
     "DOCKERHUB_USERNAME",
     "DOCKERHUB_TOKEN",
     "GITHUB_TOKEN",
@@ -4366,7 +4405,7 @@ function validateDiagnosticsVitestJob(
         errors,
         stepName,
         stepEnv,
-        "NVIDIA_API_KEY",
+        "NVIDIA_INFERENCE_API_KEY",
       );
     }
     requireEnvDoesNotExposeSecret(
@@ -4424,9 +4463,9 @@ function validateDiagnosticsVitestJob(
     "Run diagnostics live test",
   );
   const runVitestEnv = asRecord(runVitest?.env);
-  if (runVitestEnv.NVIDIA_API_KEY !== "${{ secrets.NVIDIA_API_KEY }}") {
+  if (runVitestEnv.NVIDIA_INFERENCE_API_KEY !== "${{ secrets.NVIDIA_INFERENCE_API_KEY }}") {
     errors.push(
-      "diagnostics-vitest Vitest step must receive NVIDIA_API_KEY from secrets",
+      "diagnostics-vitest Vitest step must receive NVIDIA_INFERENCE_API_KEY from secrets",
     );
   }
   requireRunContains(
@@ -4555,7 +4594,7 @@ function validateSparkInstallVitestJob(
         errors,
         stepName,
         stepEnv,
-        "NVIDIA_API_KEY",
+        "NVIDIA_INFERENCE_API_KEY",
       );
     }
     requireEnvDoesNotExposeSecret(
@@ -4606,9 +4645,9 @@ function validateSparkInstallVitestJob(
     "Run Spark install live test",
   );
   const runVitestEnv = asRecord(runVitest?.env);
-  if (runVitestEnv.NVIDIA_API_KEY !== "${{ secrets.NVIDIA_API_KEY }}") {
+  if (runVitestEnv.NVIDIA_INFERENCE_API_KEY !== "${{ secrets.NVIDIA_INFERENCE_API_KEY }}") {
     errors.push(
-      "spark-install-vitest Vitest step must receive NVIDIA_API_KEY from secrets",
+      "spark-install-vitest Vitest step must receive NVIDIA_INFERENCE_API_KEY from secrets",
     );
   }
   requireRunContains(errors, runVitest, "set -euo pipefail");
@@ -4717,7 +4756,7 @@ function validateSnapshotCommandsVitestJob(
     );
   }
   for (const secret of [
-    "NVIDIA_API_KEY",
+    "NVIDIA_INFERENCE_API_KEY",
     "DOCKERHUB_USERNAME",
     "DOCKERHUB_TOKEN",
     "GITHUB_TOKEN",
@@ -4740,7 +4779,7 @@ function validateSnapshotCommandsVitestJob(
         errors,
         stepName,
         stepEnv,
-        "NVIDIA_API_KEY",
+        "NVIDIA_INFERENCE_API_KEY",
       );
     }
     if (step.name !== "Authenticate to Docker Hub") {
@@ -4841,9 +4880,9 @@ function validateSnapshotCommandsVitestJob(
     "Run snapshot commands live test",
   );
   const runVitestEnv = asRecord(runVitest?.env);
-  if (runVitestEnv.NVIDIA_API_KEY !== "${{ secrets.NVIDIA_API_KEY }}") {
+  if (runVitestEnv.NVIDIA_INFERENCE_API_KEY !== "${{ secrets.NVIDIA_INFERENCE_API_KEY }}") {
     errors.push(
-      "snapshot-commands-vitest Vitest step must receive NVIDIA_API_KEY from secrets",
+      "snapshot-commands-vitest Vitest step must receive NVIDIA_INFERENCE_API_KEY from secrets",
     );
   }
   requireRunContains(
@@ -5245,7 +5284,7 @@ function validateTunnelLifecycleVitestJob(
         errors,
         stepName,
         stepEnv,
-        "NVIDIA_API_KEY",
+        "NVIDIA_INFERENCE_API_KEY",
       );
     }
     if (step.name !== "Authenticate to Docker Hub") {
@@ -5359,7 +5398,7 @@ function validateTunnelLifecycleVitestJob(
     errors,
     "tunnel-lifecycle-vitest cloudflared prerequisite step",
     cloudflaredPrereqEnv,
-    "NVIDIA_API_KEY",
+    "NVIDIA_INFERENCE_API_KEY",
   );
   requireRunContains(errors, cloudflaredPrereq, "cloudflared --version");
   requireRunContains(
@@ -5501,7 +5540,6 @@ function validateIssue2478CrashLoopRecoveryVitestJob(
     }
   }
   for (const secret of [
-    "NVIDIA_INFERENCE_API_KEY",
     ...COMMON_SECRET_ENV_NAMES,
   ]) {
     requireEnvDoesNotExposeSecret(
@@ -5523,7 +5561,7 @@ function validateIssue2478CrashLoopRecoveryVitestJob(
       stepEnv,
       "NVIDIA_INFERENCE_API_KEY",
     );
-    requireEnvDoesNotExposeSecret(errors, stepName, stepEnv, "NVIDIA_API_KEY");
+    requireEnvDoesNotExposeSecret(errors, stepName, stepEnv, "NVIDIA_INFERENCE_API_KEY");
     if (step.name !== "Authenticate to Docker Hub") {
       requireEnvDoesNotExposeSecret(
         errors,
@@ -5783,8 +5821,39 @@ function validateChannelsAddRemoveVitestJob(
       "channels-add-remove-vitest job must force OPENSHELL_GATEWAY=nemoclaw",
     );
   }
+  if (jobEnv.NEMOCLAW_E2E_USE_HOSTED_INFERENCE !== "1") {
+    errors.push(
+      "channels-add-remove-vitest job must enable hosted-compatible inference mode",
+    );
+  }
+  if (jobEnv.NEMOCLAW_PROVIDER !== "custom") {
+    errors.push(
+      "channels-add-remove-vitest job must route hosted inference through the custom provider",
+    );
+  }
+  if (jobEnv.NEMOCLAW_ENDPOINT_URL !== "https://inference-api.nvidia.com/v1") {
+    errors.push(
+      "channels-add-remove-vitest job must use the hosted compatible inference endpoint",
+    );
+  }
+  if (jobEnv.NEMOCLAW_MODEL !== "nvidia/nvidia/nemotron-3-ultra") {
+    errors.push(
+      "channels-add-remove-vitest job must use the hosted Inference Hub model id",
+    );
+  }
+  if (jobEnv.NEMOCLAW_COMPAT_MODEL !== "nvidia/nvidia/nemotron-3-ultra") {
+    errors.push(
+      "channels-add-remove-vitest job must set NEMOCLAW_COMPAT_MODEL to the hosted model id",
+    );
+  }
+  if (jobEnv.NEMOCLAW_PREFERRED_API !== "openai-completions") {
+    errors.push(
+      "channels-add-remove-vitest job must prefer openai-completions for hosted inference",
+    );
+  }
   for (const secret of [
-    "NVIDIA_API_KEY",
+    "NVIDIA_INFERENCE_API_KEY",
+    "COMPATIBLE_API_KEY",
     "DOCKERHUB_USERNAME",
     "DOCKERHUB_TOKEN",
     "GITHUB_TOKEN",
@@ -5807,7 +5876,13 @@ function validateChannelsAddRemoveVitestJob(
         errors,
         stepName,
         stepEnv,
-        "NVIDIA_API_KEY",
+        "NVIDIA_INFERENCE_API_KEY",
+      );
+      requireEnvDoesNotExposeSecret(
+        errors,
+        stepName,
+        stepEnv,
+        "COMPATIBLE_API_KEY",
       );
     }
     if (step.name !== "Authenticate to Docker Hub") {
@@ -5898,7 +5973,7 @@ function validateChannelsAddRemoveVitestJob(
   requireRunContains(errors, installOpenShell, "env -u DOCKER_CONFIG");
   requireRunContains(errors, installOpenShell, "-u DOCKERHUB_USERNAME");
   requireRunContains(errors, installOpenShell, "-u DOCKERHUB_TOKEN");
-  requireRunContains(errors, installOpenShell, "-u NVIDIA_API_KEY");
+  requireRunContains(errors, installOpenShell, "-u NVIDIA_INFERENCE_API_KEY");
   requireRunContains(errors, installOpenShell, "-u GITHUB_TOKEN");
 
   const runVitest = requireJobStep(
@@ -5908,9 +5983,14 @@ function validateChannelsAddRemoveVitestJob(
     "Run channels add/remove live test",
   );
   const runVitestEnv = asRecord(runVitest?.env);
-  if (runVitestEnv.NVIDIA_API_KEY !== "${{ secrets.NVIDIA_API_KEY }}") {
+  if (runVitestEnv.NVIDIA_INFERENCE_API_KEY !== "${{ secrets.NVIDIA_INFERENCE_API_KEY }}") {
     errors.push(
-      "channels-add-remove-vitest step must receive NVIDIA_API_KEY from secrets",
+      "channels-add-remove-vitest step must receive NVIDIA_INFERENCE_API_KEY from secrets",
+    );
+  }
+  if (runVitestEnv.COMPATIBLE_API_KEY !== "${{ secrets.NVIDIA_INFERENCE_API_KEY }}") {
+    errors.push(
+      "channels-add-remove-vitest step must stage NVIDIA_INFERENCE_API_KEY as COMPATIBLE_API_KEY",
     );
   }
   if (
@@ -6014,8 +6094,6 @@ function validateOpenClawDiscordPairingVitestJob(
     );
   }
   for (const secret of [
-    "NVIDIA_INFERENCE_API_KEY",
-    "NVIDIA_API_KEY",
     ...COMMON_SECRET_ENV_NAMES,
   ]) {
     requireEnvDoesNotExposeSecret(
@@ -6039,7 +6117,6 @@ function validateOpenClawDiscordPairingVitestJob(
         "NVIDIA_INFERENCE_API_KEY",
       );
     }
-    requireEnvDoesNotExposeSecret(errors, stepName, stepEnv, "NVIDIA_API_KEY");
     if (step.name !== "Authenticate to Docker Hub") {
       requireEnvDoesNotExposeSecret(
         errors,
@@ -6156,7 +6233,6 @@ function validateOpenClawDiscordPairingVitestJob(
   requireRunContains(errors, installOpenShell, "env -u DOCKER_CONFIG");
   requireRunContains(errors, installOpenShell, "-u DOCKERHUB_USERNAME");
   requireRunContains(errors, installOpenShell, "-u DOCKERHUB_TOKEN");
-  requireRunContains(errors, installOpenShell, "-u NVIDIA_API_KEY");
   requireRunContains(errors, installOpenShell, "-u NVIDIA_INFERENCE_API_KEY");
   requireRunContains(errors, installOpenShell, "-u GITHUB_TOKEN");
 
@@ -6269,8 +6345,6 @@ function validateOpenClawSlackPairingVitestJob(
     );
   }
   for (const secret of [
-    "NVIDIA_INFERENCE_API_KEY",
-    "NVIDIA_API_KEY",
     ...COMMON_SECRET_ENV_NAMES,
   ]) {
     requireEnvDoesNotExposeSecret(
@@ -6294,7 +6368,6 @@ function validateOpenClawSlackPairingVitestJob(
         "NVIDIA_INFERENCE_API_KEY",
       );
     }
-    requireEnvDoesNotExposeSecret(errors, stepName, stepEnv, "NVIDIA_API_KEY");
     if (step.name !== "Authenticate to Docker Hub") {
       requireEnvDoesNotExposeSecret(
         errors,
@@ -6409,7 +6482,6 @@ function validateOpenClawSlackPairingVitestJob(
   requireRunContains(errors, installOpenShell, "env -u DOCKER_CONFIG");
   requireRunContains(errors, installOpenShell, "-u DOCKERHUB_USERNAME");
   requireRunContains(errors, installOpenShell, "-u DOCKERHUB_TOKEN");
-  requireRunContains(errors, installOpenShell, "-u NVIDIA_API_KEY");
   requireRunContains(errors, installOpenShell, "-u NVIDIA_INFERENCE_API_KEY");
   requireRunContains(errors, installOpenShell, "-u GITHUB_TOKEN");
 
@@ -6595,7 +6667,6 @@ function validateChannelsStopStartVitestJob(
   }
   for (const secret of [
     "NVIDIA_INFERENCE_API_KEY",
-    "NVIDIA_API_KEY",
     "DOCKERHUB_USERNAME",
     "DOCKERHUB_TOKEN",
     "GITHUB_TOKEN",
@@ -6619,12 +6690,6 @@ function validateChannelsStopStartVitestJob(
         stepName,
         stepEnv,
         "NVIDIA_INFERENCE_API_KEY",
-      );
-      requireEnvDoesNotExposeSecret(
-        errors,
-        stepName,
-        stepEnv,
-        "NVIDIA_API_KEY",
       );
     }
     if (step.name !== "Authenticate to Docker Hub") {
@@ -6718,7 +6783,7 @@ function validateChannelsStopStartVitestJob(
   requireRunContains(errors, installOpenShell, "env -u DOCKER_CONFIG");
   requireRunContains(errors, installOpenShell, "-u DOCKERHUB_USERNAME");
   requireRunContains(errors, installOpenShell, "-u DOCKERHUB_TOKEN");
-  requireRunContains(errors, installOpenShell, "-u NVIDIA_API_KEY");
+  requireRunContains(errors, installOpenShell, "-u NVIDIA_INFERENCE_API_KEY");
   requireRunContains(errors, installOpenShell, "-u GITHUB_TOKEN");
 
   const runVitest = requireJobStep(
@@ -6728,12 +6793,6 @@ function validateChannelsStopStartVitestJob(
     "Run channels stop/start live test",
   );
   const runVitestEnv = asRecord(runVitest?.env);
-  requireEnvDoesNotExposeSecret(
-    errors,
-    "channels-stop-start-vitest step 'Run channels stop/start live test'",
-    runVitestEnv,
-    "NVIDIA_API_KEY",
-  );
   if (
     runVitestEnv.NVIDIA_INFERENCE_API_KEY !==
     "${{ secrets.NVIDIA_INFERENCE_API_KEY }}"
@@ -6880,8 +6939,6 @@ function validateTelegramInjectionVitestJob(
     );
   }
   for (const secret of [
-    "NVIDIA_INFERENCE_API_KEY",
-    "NVIDIA_API_KEY",
     ...COMMON_SECRET_ENV_NAMES,
   ]) {
     requireEnvDoesNotExposeSecret(
@@ -6908,7 +6965,7 @@ function validateTelegramInjectionVitestJob(
         errors,
         stepName,
         stepEnv,
-        "NVIDIA_API_KEY",
+        "NVIDIA_INFERENCE_API_KEY",
       );
     }
     if (step.name !== "Authenticate to Docker Hub") {
@@ -6985,7 +7042,6 @@ function validateTelegramInjectionVitestJob(
   requireRunContains(errors, installOpenShell, "env -u DOCKER_CONFIG");
   requireRunContains(errors, installOpenShell, "-u DOCKERHUB_USERNAME");
   requireRunContains(errors, installOpenShell, "-u DOCKERHUB_TOKEN");
-  requireRunContains(errors, installOpenShell, "-u NVIDIA_API_KEY");
   requireRunContains(errors, installOpenShell, "-u NVIDIA_INFERENCE_API_KEY");
   requireRunContains(errors, installOpenShell, "-u GITHUB_TOKEN");
 
@@ -7156,7 +7212,7 @@ function validateBedrockRuntimeCompatibleAnthropicVitestJob(
     );
   }
   for (const secret of [
-    "NVIDIA_API_KEY",
+    "NVIDIA_INFERENCE_API_KEY",
     "DOCKERHUB_USERNAME",
     "DOCKERHUB_TOKEN",
     "GITHUB_TOKEN",
@@ -7174,7 +7230,7 @@ function validateBedrockRuntimeCompatibleAnthropicVitestJob(
   for (const step of steps) {
     const stepName = `bedrock-runtime-compatible-anthropic-vitest step '${step.name ?? step.uses ?? "<unnamed>"}'`;
     const stepEnv = asRecord(step.env);
-    requireEnvDoesNotExposeSecret(errors, stepName, stepEnv, "NVIDIA_API_KEY");
+    requireEnvDoesNotExposeSecret(errors, stepName, stepEnv, "NVIDIA_INFERENCE_API_KEY");
     requireEnvDoesNotExposeSecret(errors, stepName, stepEnv, "GITHUB_TOKEN");
     if (step.name !== "Authenticate to Docker Hub") {
       requireEnvDoesNotExposeSecret(
@@ -7528,6 +7584,7 @@ export function validateE2eVitestScenariosWorkflowBoundary(
   if (jobEnv.NEMOCLAW_RUN_E2E_SCENARIOS !== "1") {
     errors.push("live-scenarios job must set NEMOCLAW_RUN_E2E_SCENARIOS=1");
   }
+  validateHostedCompatibleInferenceFlag(errors, "live-scenarios", jobEnv);
   if (!stringValue(jobEnv.E2E_ARTIFACT_DIR).includes("e2e-artifacts/vitest")) {
     errors.push(
       "live-scenarios job must write artifacts under e2e-artifacts/vitest",
@@ -7737,6 +7794,7 @@ export function validateE2eVitestScenariosWorkflowBoundary(
     "openclaw-tui-chat-correlation",
   );
   validateFreeStandingJobSelector(errors, jobs, "gateway-guard-recovery");
+  validateGatewayGuardRecoveryVitestJob(errors, jobs);
   validateFreeStandingJobSelector(
     errors,
     jobs,
@@ -7781,6 +7839,50 @@ export function validateE2eVitestScenariosWorkflowBoundary(
   if (jetsonJob.if !== explicitOnlyFreeStandingJobIf("jetson-nvmap-gpu-vitest", "jetson-nvmap-gpu")) {
     errors.push("jetson-nvmap-gpu-vitest job must run only when explicitly selected");
   }
+
+  const sandboxRlimitConnectJob = asRecord(jobs["sandbox-rlimits-connect-vitest"]);
+  if (sandboxRlimitConnectJob.needs !== "generate-matrix") {
+    errors.push("sandbox-rlimits-connect-vitest job must depend on generate-matrix");
+  }
+  if (
+    sandboxRlimitConnectJob.if !==
+    explicitOnlyFreeStandingJobIf(
+      "sandbox-rlimits-connect-vitest",
+      "sandbox-rlimits-connect",
+    )
+  ) {
+    errors.push("sandbox-rlimits-connect-vitest job must run only when explicitly selected");
+  }
+  const sandboxRlimitConnectEnv = asRecord(sandboxRlimitConnectJob.env);
+  if (sandboxRlimitConnectEnv.NEMOCLAW_RUN_E2E_SCENARIOS !== "1") {
+    errors.push("sandbox-rlimits-connect-vitest job must set NEMOCLAW_RUN_E2E_SCENARIOS=1");
+  }
+  if (sandboxRlimitConnectEnv.NEMOCLAW_E2E_CONNECT_RLIMITS !== "1") {
+    errors.push("sandbox-rlimits-connect-vitest job must opt in with NEMOCLAW_E2E_CONNECT_RLIMITS=1");
+  }
+  if (
+    sandboxRlimitConnectEnv.E2E_ARTIFACT_DIR !==
+    "${{ github.workspace }}/e2e-artifacts/vitest/sandbox-rlimits-connect"
+  ) {
+    errors.push("sandbox-rlimits-connect-vitest job must write artifacts under e2e-artifacts/vitest/sandbox-rlimits-connect");
+  }
+  const sandboxRlimitConnectSteps = asSteps(sandboxRlimitConnectJob.steps);
+  const sandboxRlimitConnectRun = namedStep(
+    sandboxRlimitConnectSteps,
+    "Run sandbox rlimit connect live test",
+  );
+  if (!sandboxRlimitConnectRun) {
+    errors.push("sandbox-rlimits-connect-vitest job missing step: Run sandbox rlimit connect live test");
+  } else {
+    const runScript = stringValue(sandboxRlimitConnectRun.run);
+    if (!runScript.includes("test/e2e-scenario/live/sandbox-rlimits-connect.test.ts")) {
+      errors.push("sandbox-rlimits-connect-vitest job must run sandbox-rlimits-connect.test.ts");
+    }
+    if (asRecord(sandboxRlimitConnectRun.env).NVIDIA_API_KEY !== "${{ secrets.NVIDIA_API_KEY }}") {
+      errors.push("sandbox-rlimits-connect-vitest step must receive NVIDIA_API_KEY from secrets");
+    }
+  }
+
   validateFreeStandingJobSelector(
     errors,
     jobs,
@@ -7906,6 +8008,16 @@ export function validateE2eVitestScenariosWorkflowBoundary(
     if (!reportScript.includes("scenarios=${scenario}") || !reportScript.includes("jetson-nvmap-gpu")) {
       errors.push(
         "step 'Post Vitest scenario results to PR' run script must document the explicit Jetson scenario selector",
+      );
+    }
+    if (!reportScript.includes("sandbox-rlimits-connect-vitest")) {
+      errors.push(
+        "step 'Post Vitest scenario results to PR' run script must document the explicit rlimit jobs selector",
+      );
+    }
+    if (!reportScript.includes("sandbox-rlimits-connect")) {
+      errors.push(
+        "step 'Post Vitest scenario results to PR' run script must document the explicit rlimit scenario selector",
       );
     }
     for (const forbidden of [

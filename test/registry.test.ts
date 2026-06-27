@@ -69,16 +69,24 @@ describe("registry", () => {
     expect(registry.getDefault()).toBe("alpha");
   });
 
-  it("stores provided model/provider at registration time", () => {
+  it("stores durable inference metadata at registration time", () => {
     registry.registerSandbox({
       name: "alpha",
       gpuEnabled: false,
       model: "nvidia/nemotron-3-super-120b-a12b",
       provider: "nvidia-prod",
+      endpointUrl: "https://integrate.api.nvidia.com/v1",
+      credentialEnv: "NVIDIA_INFERENCE_API_KEY",
+      preferredInferenceApi: "openai-completions",
+      nimContainer: null,
     });
     const data = JSON.parse(fs.readFileSync(regFile, "utf-8"));
     expect(data.sandboxes.alpha.model).toBe("nvidia/nemotron-3-super-120b-a12b");
     expect(data.sandboxes.alpha.provider).toBe("nvidia-prod");
+    expect(data.sandboxes.alpha.endpointUrl).toBe("https://integrate.api.nvidia.com/v1");
+    expect(data.sandboxes.alpha.credentialEnv).toBe("NVIDIA_INFERENCE_API_KEY");
+    expect(data.sandboxes.alpha.preferredInferenceApi).toBe("openai-completions");
+    expect(data.sandboxes.alpha.nimContainer).toBeNull();
   });
 
   it("persists distinct gateway bindings for two sandboxes on different ports (#4422)", () => {
@@ -102,6 +110,23 @@ describe("registry", () => {
     // The second registration must not retarget the first sandbox's binding.
     expect(registry.getSandbox("first").gatewayName).toBe("nemoclaw");
     expect(registry.getSandbox("first").gatewayPort).toBe(8080);
+  });
+
+  it("registry serialization and update strip recoveredFromGateway display marker (#5714)", () => {
+    // The transient #5714 display markers must never reach sandboxes.json even
+    // if a caller force-passes one through updateSandbox(). They are not part of
+    // the durable SandboxEntry type; serializeSandboxEntryForDisk strips them.
+    registry.registerSandbox({ name: "alpha", model: "m", provider: "p" });
+    registry.updateSandbox("alpha", {
+      policies: ["npm"],
+      recoveredFromGateway: true,
+      livePhase: "Ready",
+    });
+
+    const data = JSON.parse(fs.readFileSync(regFile, "utf-8"));
+    expect(data.sandboxes.alpha.policies).toEqual(["npm"]);
+    expect(data.sandboxes.alpha.recoveredFromGateway).toBeUndefined();
+    expect(data.sandboxes.alpha.livePhase).toBeUndefined();
   });
 
   it("normalizes configured inference fields into a discriminated view", () => {
