@@ -8,6 +8,7 @@ import {
 import type { InitialSandboxPolicy } from "./initial-policy";
 import type { MessagingChannel } from "./messaging-state";
 import { resolveQrSelectedChannels } from "./messaging-state";
+import { resolvePolicyTierForCreateTime } from "./policy-tier-env";
 import { buildSandboxGpuCreateArgs, type SandboxGpuCreateConfig } from "./sandbox-gpu-create";
 
 type MessagingTokenDef = {
@@ -206,7 +207,7 @@ export function prepareSandboxCreatePlan({
   getMessagingChannelForEnvKey,
   getHermesToolGatewayProviderName,
   agentName,
-  policyTier,
+  policyTier = resolvePolicyTierForCreateTime(),
   deps = {},
 }: PrepareSandboxCreatePlanInput): SandboxCreatePlan {
   const enabledMessagingTokenDefs = filterMessagingTokenDefsByEnabledChannel(

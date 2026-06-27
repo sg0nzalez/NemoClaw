@@ -2999,7 +2999,6 @@ async function createSandbox(
     getHermesToolGatewayProviderName: (targetSandbox) =>
       getHermesToolGatewayBroker().getHermesToolGatewayProviderName(targetSandbox),
     agentName: agent?.name,
-    policyTier: policyTierEnv.resolvePolicyTierForCreateTime(),
   });
   if (initialSandboxPolicy.cleanup) {
     process.on("exit", initialSandboxPolicy.cleanup);
