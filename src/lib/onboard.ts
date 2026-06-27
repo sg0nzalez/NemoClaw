@@ -2999,6 +2999,11 @@ async function createSandbox(
     getHermesToolGatewayProviderName: (targetSandbox) =>
       getHermesToolGatewayBroker().getHermesToolGatewayProviderName(targetSandbox),
     agentName: agent?.name,
+    // Read NEMOCLAW_POLICY_TIER early so non-interactive restricted onboards
+    // suppress the OpenClaw OTEL preset at sandbox-create time. Interactive
+    // mode leaves this null — `selectPolicyTier()` runs later and the
+    // suppression module strips any stale preset during the policy step.
+    policyTier: process.env.NEMOCLAW_POLICY_TIER?.trim().toLowerCase() || null,
   });
   if (initialSandboxPolicy.cleanup) {
     process.on("exit", initialSandboxPolicy.cleanup);

@@ -9,6 +9,7 @@ import { getMessagingPolicyKeysByChannel } from "../messaging/channels";
 import * as policies from "../policy";
 import { requiredMessagingChannelPolicyPresets } from "./messaging-policy-presets";
 import { requiredOpenclawOtelPolicyPresets } from "./openclaw-otel-policy-presets";
+import { filterSuppressedAgentRequiredPresets } from "./policy-tier-suppression";
 import { cleanupTempDir, secureTempFile } from "./temp-files";
 
 export type InitialSandboxPolicy = {
@@ -203,6 +204,7 @@ export function prepareInitialSandboxCreatePolicy(
     dockerGpuPatch?: boolean;
     additionalPresets?: string[];
     agentName?: string | null;
+    policyTier?: string | null;
   } = {},
 ): InitialSandboxPolicy {
   const directGpuPolicy = options.directGpu
@@ -214,13 +216,17 @@ export function prepareInitialSandboxCreatePolicy(
   const cleanupFns = directGpuPolicy?.cleanup ? [directGpuPolicy.cleanup] : [];
   const buildCleanup = () =>
     cleanupFns.length > 0 ? () => cleanupFns.map((cleanup) => cleanup()).every(Boolean) : undefined;
-  const requestedCreateTimePresets = [
-    ...new Set([
-      ...requiredMessagingChannelPolicyPresets(activeMessagingChannels),
-      ...requiredOpenclawOtelPolicyPresets(options.agentName ?? "openclaw"),
-      ...(options.additionalPresets || []),
-    ]),
-  ];
+  const requestedCreateTimePresets = filterSuppressedAgentRequiredPresets(
+    [
+      ...new Set([
+        ...requiredMessagingChannelPolicyPresets(activeMessagingChannels),
+        ...requiredOpenclawOtelPolicyPresets(options.agentName ?? "openclaw"),
+        ...(options.additionalPresets || []),
+      ]),
+    ],
+    options.policyTier ?? null,
+    options.agentName ?? null,
+  );
   const dedupe = (values: string[]) => [...new Set(values.filter(Boolean))];
 
   let basePolicy = fs.readFileSync(effectiveBasePolicyPath, "utf-8");

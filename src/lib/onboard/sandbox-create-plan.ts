@@ -49,6 +49,7 @@ export type PrepareSandboxCreatePlanInput = {
   getMessagingChannelForEnvKey(envKey: string): string | null;
   getHermesToolGatewayProviderName(sandboxName: string): string;
   agentName?: string | null;
+  policyTier?: string | null;
   deps?: SandboxCreatePlanDeps;
 };
 
@@ -205,6 +206,7 @@ export function prepareSandboxCreatePlan({
   getMessagingChannelForEnvKey,
   getHermesToolGatewayProviderName,
   agentName,
+  policyTier,
   deps = {},
 }: PrepareSandboxCreatePlanInput): SandboxCreatePlan {
   const enabledMessagingTokenDefs = filterMessagingTokenDefsByEnabledChannel(
@@ -234,6 +236,7 @@ export function prepareSandboxCreatePlan({
     dockerGpuPatch: useDockerGpuPatch,
     additionalPresets: hermesToolGateways,
     agentName,
+    policyTier,
   });
   const createArgs = [
     "--from",

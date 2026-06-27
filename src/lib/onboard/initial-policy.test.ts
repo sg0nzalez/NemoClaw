@@ -293,4 +293,32 @@ network_policies:
     expect(prepared.policyPath).toBe(basePolicyPath);
     expect(prepared.cleanup).toBeUndefined();
   });
+
+  it("suppresses openclaw-diagnostics-otel-local at create time on the restricted tier (defence-in-depth)", () => {
+    const basePolicyPath = tmpPolicy("version: 1\nnetwork_policies:\n  base: {}\n");
+    process.env.NEMOCLAW_OPENCLAW_OTEL = "1";
+    process.env.NEMOCLAW_OPENCLAW_OTEL_ENDPOINT = "http://host.openshell.internal:4318";
+
+    const prepared = prepareInitialSandboxCreatePolicy(basePolicyPath, [], {
+      agentName: "openclaw",
+      policyTier: "restricted",
+    });
+
+    expect(prepared.appliedPresets).toEqual([]);
+    expect(prepared.policyPath).toBe(basePolicyPath);
+  });
+
+  it("keeps openclaw-diagnostics-otel-local at create time on the balanced tier when OTEL is enabled", () => {
+    const basePolicyPath = tmpPolicy("version: 1\nnetwork_policies:\n  base: {}\n");
+    process.env.NEMOCLAW_OPENCLAW_OTEL = "1";
+    process.env.NEMOCLAW_OPENCLAW_OTEL_ENDPOINT = "http://host.openshell.internal:4318";
+
+    const prepared = prepareInitialSandboxCreatePolicy(basePolicyPath, [], {
+      agentName: "openclaw",
+      policyTier: "balanced",
+    });
+
+    expect(prepared.appliedPresets).toEqual(["openclaw-diagnostics-otel-local"]);
+    expect(prepared.cleanup?.()).toBe(true);
+  });
 });
