@@ -24,6 +24,10 @@ import { expect, test } from "../fixtures/e2e-test.ts";
 import { shouldRunLiveE2EScenarios } from "../fixtures/live-project-gate.ts";
 import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
 import { isTransientProviderValidationFailure } from "./network-policy-transient-provider.ts";
+import {
+  ensureDockerAvailable,
+  runRestrictedOnboardWithRetry,
+} from "./restricted-onboard-helpers.ts";
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "../../..");
 const CLI_ENTRYPOINT = path.join(REPO_ROOT, "bin", "nemoclaw.js");
@@ -851,17 +855,12 @@ RUN_NETWORK_POLICY_TEST(
       "run `npm run build:cli` before live repo CLI scenarios",
     ).toBe(true);
 
-    const docker = await host.command("docker", ["info"], {
+    await ensureDockerAvailable({
+      host,
       artifactName: "prereq-docker-info-restricted-zero-presets",
-      env: buildAvailabilityProbeEnv(),
-      timeoutMs: 30_000,
+      skip,
+      scenarioLabel: "restricted-zero-presets",
     });
-    if (docker.exitCode !== 0) {
-      if (process.env.GITHUB_ACTIONS === "true") {
-        throw new Error(`Docker is required for restricted-zero-presets live E2E: ${text(docker)}`);
-      }
-      skip("Docker is required for restricted-zero-presets live E2E");
-    }
 
     const openshellVersion = await host.command("openshell", ["--version"], {
       artifactName: "prereq-openshell-version-restricted-zero-presets",
@@ -894,53 +893,22 @@ RUN_NETWORK_POLICY_TEST(
       timeoutMs: 120_000,
     });
 
-    let onboard: ShellProbeResult | null = null;
-    for (let attempt = 1; attempt <= ONBOARD_ATTEMPTS; attempt += 1) {
-      if (attempt > 1) {
-        await runNemoclaw(host, [SUPPRESSION_SANDBOX_NAME, "destroy", "--yes"], {
-          artifactName: `pre-cleanup-nemoclaw-destroy-restricted-zero-presets-attempt-${attempt}`,
-          env: baseEnv(),
-          timeoutMs: 120_000,
-        });
-      }
-      onboard = await runNemoclaw(
-        host,
-        ["onboard", "--non-interactive", "--yes-i-accept-third-party-software"],
-        {
-          artifactName:
-            attempt === 1
-              ? "onboard-restricted-zero-presets"
-              : `onboard-restricted-zero-presets-attempt-${attempt}`,
-          env: baseEnv({
-            NVIDIA_INFERENCE_API_KEY: apiKey,
-            NEMOCLAW_SANDBOX_NAME: SUPPRESSION_SANDBOX_NAME,
-            NEMOCLAW_RECREATE_SANDBOX: "1",
-            NEMOCLAW_POLICY_TIER: "restricted",
-          }),
-          redactionValues: [apiKey],
-          timeoutMs: ONBOARD_TIMEOUT_MS,
-        },
-      );
-      if (onboard.exitCode === 0) break;
-      if (isTransientProviderValidationFailure(onboard) && attempt < ONBOARD_ATTEMPTS) {
-        await sleep(10_000 * attempt);
-        continue;
-      }
-      if (isTransientProviderValidationFailure(onboard) && process.env.GITHUB_ACTIONS === "true") {
-        await artifacts.writeJson("transient-provider-validation.skip.json", {
-          reason: "transient NVIDIA Endpoints validation failure after retries",
-          attempts: ONBOARD_ATTEMPTS,
-          sourceBoundary: "external NVIDIA Endpoints provider availability",
-          removalCondition:
-            "remove once CI endpoint validation is stable for a release cycle or covered by a hermetic provider-validation fixture",
-        });
-        skip(
-          `NVIDIA Endpoints validation hit a transient upstream/rate-limit failure after ${ONBOARD_ATTEMPTS} attempts`,
-        );
-      }
-      break;
-    }
-    expect(onboard?.exitCode, onboard ? text(onboard) : "onboard did not run").toBe(0);
+    const onboard = await runRestrictedOnboardWithRetry({
+      host,
+      artifacts,
+      skip,
+      sandboxName: SUPPRESSION_SANDBOX_NAME,
+      apiKey,
+      scenarioLabel: "restricted-zero-presets",
+      scenarioSlug: "restricted-zero-presets",
+      preCleanupArtifactPrefix: "pre-cleanup-nemoclaw-destroy-restricted-zero-presets",
+      onboardArtifactPrefix: "onboard-restricted-zero-presets",
+      onboardTimeoutMs: ONBOARD_TIMEOUT_MS,
+      preCleanupTimeoutMs: 120_000,
+      runNemoclaw,
+      baseEnv,
+    });
+    expect(onboard.exitCode, text(onboard)).toBe(0);
 
     const policyListAfterOnboard = await runNemoclaw(
       host,
