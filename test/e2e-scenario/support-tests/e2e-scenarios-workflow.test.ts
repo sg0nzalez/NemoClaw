@@ -637,6 +637,16 @@ describe("e2e-vitest-scenarios workflow boundary", () => {
     },
   );
 
+  it("keeps gateway guard recovery on the hosted-compatible CI inference route", () => {
+    const workflow = readWorkflow();
+    const jobs = workflow.jobs as Record<string, { env?: Record<string, string> }>;
+
+    expect(jobs["gateway-guard-recovery"]?.env).toMatchObject({
+      NEMOCLAW_E2E_USE_HOSTED_INFERENCE: "1",
+      NEMOCLAW_RUN_E2E_SCENARIOS: "1",
+    });
+  });
+
   it("derives the free-standing inventory from workflow job metadata", { timeout: 60_000 }, () => {
     const inventory = readFreeStandingJobsInventory();
     expect(validateFreeStandingWorkflowInventory()).toEqual([]);
