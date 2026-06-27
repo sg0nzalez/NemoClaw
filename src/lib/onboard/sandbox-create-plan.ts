@@ -8,8 +8,12 @@ import {
 import type { InitialSandboxPolicy } from "./initial-policy";
 import type { MessagingChannel } from "./messaging-state";
 import { resolveQrSelectedChannels } from "./messaging-state";
-import { resolvePolicyTierForCreateTime } from "./policy-tier-env";
 import { buildSandboxGpuCreateArgs, type SandboxGpuCreateConfig } from "./sandbox-gpu-create";
+
+function readPolicyTierEnv(): string | null {
+  const raw = process.env.NEMOCLAW_POLICY_TIER;
+  return typeof raw === "string" && raw.trim() ? raw.trim().toLowerCase() : null;
+}
 
 type MessagingTokenDef = {
   name?: string;
@@ -207,7 +211,7 @@ export function prepareSandboxCreatePlan({
   getMessagingChannelForEnvKey,
   getHermesToolGatewayProviderName,
   agentName,
-  policyTier = resolvePolicyTierForCreateTime(),
+  policyTier = readPolicyTierEnv(),
   deps = {},
 }: PrepareSandboxCreatePlanInput): SandboxCreatePlan {
   const enabledMessagingTokenDefs = filterMessagingTokenDefsByEnabledChannel(
