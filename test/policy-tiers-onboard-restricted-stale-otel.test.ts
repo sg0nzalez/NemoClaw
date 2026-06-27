@@ -101,3 +101,68 @@ describe("restricted tier reconciles stale openclaw-diagnostics-otel-local with 
     );
   });
 });
+
+describe("restricted recordedTierName plumbing through resume", () => {
+  it("resume against an originally-restricted sandbox filters openclaw-pricing from the operator's selected presets", () => {
+    const script = buildRestrictedOpenclawScript({
+      applied: [],
+      selectedPresets: ["openclaw-pricing", "npm"],
+      resumeTier: true,
+    });
+    const result = runScript(script);
+    assert.equal(result.status, 0, result.stderr);
+    const payload = JSON.parse(result.stdout.trim());
+    assert.ok(!payload.error, `unexpected error: ${payload.error}`);
+    assert.ok(
+      !payload.applied.includes("openclaw-pricing"),
+      `resume target must filter openclaw-pricing when recordedTierName='restricted'; got: ${JSON.stringify(payload.applied)}`,
+    );
+    assert.ok(
+      !payload.appliedCalls.includes("openclaw-pricing"),
+      `resume must not call applyPreset/applyPresets for openclaw-pricing on restricted recordedTierName; got: ${JSON.stringify(payload.appliedCalls)}`,
+    );
+  });
+
+  it("resume against an originally-balanced sandbox preserves operator-selected openclaw-pricing", () => {
+    const script =
+      buildPreamble({
+        tierEnv: "balanced",
+        policyMode: "suggested",
+        stubOpenshellBin: true,
+        runCaptureReturn: "Running",
+      }) +
+      String.raw`
+registry.getSandbox = () => ({ name: "test-sb", policyTier: "balanced" });
+
+const policies = require(${policiesPath});
+const appliedCalls = [];
+const removedCalls = [];
+policies.applyPreset = (_sandbox, name) => { appliedCalls.push(name); return true; };
+policies.applyPresets = (_sandbox, names) => { for (const name of names) appliedCalls.push(name); return true; };
+policies.removePreset = (_sandbox, name) => { removedCalls.push(name); return true; };
+policies.getAppliedPresets = () => [];
+
+console.log = () => {};
+
+(async () => {
+  try {
+    const applied = await setupPoliciesWithSelection("test-sb", {
+      agent: "openclaw",
+      selectedPresets: ["openclaw-pricing", "npm"],
+    });
+    process.stdout.write(JSON.stringify({ applied, appliedCalls, removedCalls }) + "\n");
+  } catch (err) {
+    process.stdout.write(JSON.stringify({ error: err.message }) + "\n");
+  }
+})();
+`;
+    const result = runScript(script);
+    assert.equal(result.status, 0, result.stderr);
+    const payload = JSON.parse(result.stdout.trim());
+    assert.ok(!payload.error, `unexpected error: ${payload.error}`);
+    assert.ok(
+      payload.applied.includes("openclaw-pricing"),
+      `resume target must keep openclaw-pricing when recordedTierName='balanced'; got: ${JSON.stringify(payload.applied)}`,
+    );
+  });
+});
