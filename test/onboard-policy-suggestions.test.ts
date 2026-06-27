@@ -30,11 +30,7 @@ const { computeSetupPresetSuggestions, filterSetupPolicyPresets, getSuggestedPol
     }) => string[];
   };
 const { suppressedAgentRequiredPresets } = require("../dist/lib/onboard/policy-selection") as {
-  suppressedAgentRequiredPresets: (
-    tierName: string,
-    agent: string | null | undefined,
-    env?: NodeJS.ProcessEnv,
-  ) => string[];
+  suppressedAgentRequiredPresets: (tierName: string, agent: string | null | undefined) => string[];
 };
 
 function setOrUnset(key: string, value: string | undefined): void {

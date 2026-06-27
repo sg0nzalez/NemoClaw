@@ -35,6 +35,7 @@ const PERMISSIVE_POLICY = path.join(
   "openclaw-sandbox-permissive.yaml",
 );
 const SANDBOX_NAME = process.env.NEMOCLAW_SANDBOX_NAME ?? `e2e-net-policy-${process.pid}`;
+const SUPPRESSION_SANDBOX_NAME = `${SANDBOX_NAME}-suppression`;
 const RUN_NETWORK_POLICY_TEST = shouldRunLiveE2EScenarios() ? test : test.skip;
 
 const TEST_TIMEOUT_MS = 65 * 60_000;
@@ -489,12 +490,13 @@ RUN_NETWORK_POLICY_TEST(
     // even though the restricted tier promises zero third-party network access.
     // Source boundary: live OpenShell `policy-list` after a successful
     // restricted onboard and before any operator mutation (`policy-add brew`).
-    // Source-fix constraint: unit/handler tests stub policy APIs, so a
-    // regression in `syncPresetSelection`, OpenShell mutation, registry
-    // handoff, or applied-preset inspection cannot be observed without a live
-    // applied-preset read here. Removal condition: replace with a dedicated
-    // `restricted-openclaw-policy-suppression` scenario that asserts the same
-    // condition under both default and `NEMOCLAW_OPENCLAW_OTEL=1` envs.
+    // This scenario enables `NEMOCLAW_WEB_SEARCH_ENABLED=1` so the later brave
+    // probe has a preset to allow, so the assertion below only proves the two
+    // OpenClaw-agent suppressed presets are absent — the literal "zero applied
+    // presets" clause from the linked issue is proved separately by the
+    // adjacent `restricted-openclaw-policy-suppression` scenario which onboards
+    // a default restricted sandbox (no optional features) and asserts the
+    // `policy-list` output has no `●`-bulleted entries.
     const policyListAfterOnboard = await runNemoclaw(host, [SANDBOX_NAME, "policy-list"], {
       artifactName: "tc-net-01-policy-list-after-onboard",
       timeoutMs: SANDBOX_EXEC_TIMEOUT_MS,
@@ -808,5 +810,153 @@ nemoclaw-start node /tmp/nemoclaw-web-fetch-e2e.mjs 'http://host.openshell.inter
       shellDeletion: "deferred to #5098 Phase 11 cleanup",
       nightlyShellWiring: "deferred to #5098 Phase 11 cleanup",
     });
+  },
+);
+
+// Invalid state: a default restricted OpenClaw onboard (no web-search, no
+// OpenClaw OTEL) used to leave `openclaw-pricing` applied, contradicting the
+// linked issue's "zero presets" acceptance clause. Source boundary: live
+// OpenShell `policy-list` after onboard and before any operator mutation.
+// Source-fix constraint: unit/handler tests stub policy APIs and the
+// brave-enabled `network-policy` scenario above probes the suppressed
+// preset names only, so neither proves the post-onboard applied set is
+// literally empty. Regression test: this scenario onboards a default
+// restricted OpenClaw sandbox and asserts `policy-list` shows no `●`
+// bullets. Removal condition: when the agent-required addition list moves
+// into per-agent declarative metadata so tier filtering happens at the
+// metadata layer (see `src/lib/onboard/policy-tier-suppression.ts`).
+//
+// Acceptance note (`NEMOCLAW_OPENCLAW_OTEL=1`): the OTEL-enabled live
+// variant is deferred to a follow-up nightly extension to keep this
+// scenario's wall-clock to a single onboard. The OTEL suppression contract
+// is covered by `test/policy-tiers-onboard.test.ts` and
+// `test/policy-tiers-onboard-restricted-stale-otel.test.ts` against the
+// real CLI through a stubbed policy API, and by the brave-enabled scenario
+// above which proves `openclaw-diagnostics-otel-local` is absent through the
+// live OpenShell `policy-list`. A regression in `requiredOpenclawOtelPolicyPresets()`
+// or the merge boundary would surface in both layers.
+RUN_NETWORK_POLICY_TEST(
+  "network-policy: default restricted OpenClaw onboard leaves policy-list with zero active presets",
+  { timeout: TEST_TIMEOUT_MS },
+  async ({ artifacts, cleanup, host, sandbox, secrets, skip }) => {
+    await artifacts.writeJson("scenario.json", {
+      id: "restricted-openclaw-policy-suppression",
+      runner: "vitest",
+      boundary: "live-sandbox-network-policy",
+      contracts: ["restricted tier applies zero presets"],
+    });
+
+    expect(
+      fs.existsSync(CLI_DIST_ENTRYPOINT),
+      "run `npm run build:cli` before live repo CLI scenarios",
+    ).toBe(true);
+
+    const docker = await host.command("docker", ["info"], {
+      artifactName: "prereq-docker-info-restricted-zero-presets",
+      env: buildAvailabilityProbeEnv(),
+      timeoutMs: 30_000,
+    });
+    if (docker.exitCode !== 0) {
+      if (process.env.GITHUB_ACTIONS === "true") {
+        throw new Error(`Docker is required for restricted-zero-presets live E2E: ${text(docker)}`);
+      }
+      skip("Docker is required for restricted-zero-presets live E2E");
+    }
+
+    const openshellVersion = await host.command("openshell", ["--version"], {
+      artifactName: "prereq-openshell-version-restricted-zero-presets",
+      env: buildAvailabilityProbeEnv(),
+      timeoutMs: 30_000,
+    });
+    expect(openshellVersion.exitCode, text(openshellVersion)).toBe(0);
+
+    const apiKey = secrets.required("NVIDIA_INFERENCE_API_KEY");
+    expect(apiKey.startsWith("nvapi-"), "NVIDIA_INFERENCE_API_KEY must start with nvapi-").toBe(
+      true,
+    );
+
+    cleanup.add(`destroy restricted-zero-presets sandbox ${SUPPRESSION_SANDBOX_NAME}`, async () => {
+      await runNemoclaw(host, [SUPPRESSION_SANDBOX_NAME, "destroy", "--yes"], {
+        artifactName: "cleanup-nemoclaw-destroy-restricted-zero-presets",
+        env: baseEnv(),
+        timeoutMs: 120_000,
+      });
+      await sandbox.openshell(["sandbox", "delete", SUPPRESSION_SANDBOX_NAME], {
+        artifactName: "cleanup-openshell-delete-restricted-zero-presets",
+        env: baseEnv(),
+        timeoutMs: 60_000,
+      });
+    });
+
+    await runNemoclaw(host, [SUPPRESSION_SANDBOX_NAME, "destroy", "--yes"], {
+      artifactName: "pre-cleanup-nemoclaw-destroy-restricted-zero-presets",
+      env: baseEnv(),
+      timeoutMs: 120_000,
+    });
+
+    let onboard: ShellProbeResult | null = null;
+    for (let attempt = 1; attempt <= ONBOARD_ATTEMPTS; attempt += 1) {
+      if (attempt > 1) {
+        await runNemoclaw(host, [SUPPRESSION_SANDBOX_NAME, "destroy", "--yes"], {
+          artifactName: `pre-cleanup-nemoclaw-destroy-restricted-zero-presets-attempt-${attempt}`,
+          env: baseEnv(),
+          timeoutMs: 120_000,
+        });
+      }
+      onboard = await runNemoclaw(
+        host,
+        ["onboard", "--non-interactive", "--yes-i-accept-third-party-software"],
+        {
+          artifactName:
+            attempt === 1
+              ? "onboard-restricted-zero-presets"
+              : `onboard-restricted-zero-presets-attempt-${attempt}`,
+          env: baseEnv({
+            NVIDIA_INFERENCE_API_KEY: apiKey,
+            NEMOCLAW_SANDBOX_NAME: SUPPRESSION_SANDBOX_NAME,
+            NEMOCLAW_RECREATE_SANDBOX: "1",
+            NEMOCLAW_POLICY_TIER: "restricted",
+          }),
+          redactionValues: [apiKey],
+          timeoutMs: ONBOARD_TIMEOUT_MS,
+        },
+      );
+      if (onboard.exitCode === 0) break;
+      if (isTransientProviderValidationFailure(onboard) && attempt < ONBOARD_ATTEMPTS) {
+        await sleep(10_000 * attempt);
+        continue;
+      }
+      if (isTransientProviderValidationFailure(onboard) && process.env.GITHUB_ACTIONS === "true") {
+        await artifacts.writeJson("transient-provider-validation.skip.json", {
+          reason: "transient NVIDIA Endpoints validation failure after retries",
+          attempts: ONBOARD_ATTEMPTS,
+          sourceBoundary: "external NVIDIA Endpoints provider availability",
+          removalCondition:
+            "remove once CI endpoint validation is stable for a release cycle or covered by a hermetic provider-validation fixture",
+        });
+        skip(
+          `NVIDIA Endpoints validation hit a transient upstream/rate-limit failure after ${ONBOARD_ATTEMPTS} attempts`,
+        );
+      }
+      break;
+    }
+    expect(onboard?.exitCode, onboard ? text(onboard) : "onboard did not run").toBe(0);
+
+    const policyListAfterOnboard = await runNemoclaw(
+      host,
+      [SUPPRESSION_SANDBOX_NAME, "policy-list"],
+      {
+        artifactName: "restricted-zero-presets-policy-list-after-onboard",
+        timeoutMs: SANDBOX_EXEC_TIMEOUT_MS,
+      },
+    );
+    expect(policyListAfterOnboard.exitCode, text(policyListAfterOnboard)).toBe(0);
+    const activeBullets = (policyListAfterOnboard.stdout.match(/^[\s]*●[\s]+(\S+)/gm) ?? []).map(
+      (line) => line.replace(/^[\s]*●[\s]+/, "").trim(),
+    );
+    expect(
+      activeBullets,
+      `restricted tier must apply zero presets; got ${JSON.stringify(activeBullets)} from:\n${text(policyListAfterOnboard)}`,
+    ).toEqual([]);
   },
 );

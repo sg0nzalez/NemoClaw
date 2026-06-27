@@ -19,16 +19,16 @@ import {
   pruneDisabledMessagingPolicyPresets,
   requiredMessagingChannelPolicyPresets,
 } from "./messaging-policy-presets";
-import {
-  isOpenclawAgent,
-  mergeRequiredOpenclawOtelPolicyPresets,
-  OPENCLAW_OTEL_LOCAL_POLICY_PRESET,
-  requiredOpenclawOtelPolicyPresets,
-} from "./openclaw-otel-policy-presets";
+import { mergeRequiredOpenclawOtelPolicyPresets } from "./openclaw-otel-policy-presets";
 import { seedInitialPolicyContext } from "./policy-context-seed";
+import {
+  agentRequiredPresetAdditions,
+  RESTRICTED_TIER_NAME,
+  suppressedAgentRequiredPresets,
+} from "./policy-tier-suppression";
 import { withPolicyApplicationTrace } from "./tracing";
 
-const RESTRICTED_TIER_NAME = "restricted";
+export { suppressedAgentRequiredPresets } from "./policy-tier-suppression";
 
 type Preset = { name: string; access?: string };
 type SupportOptions = { webSearchSupported?: boolean | null };
@@ -136,9 +136,7 @@ export function mergeRequiredSetupPolicyPresets(
   );
   const agentScoped = filterSetupPolicyPresetNamesForAgent(mergedPresets, options.agent);
   if (!options.tierName) return agentScoped;
-  const suppressed = new Set(
-    suppressedAgentRequiredPresets(options.tierName, options.agent, options.env),
-  );
+  const suppressed = new Set(suppressedAgentRequiredPresets(options.tierName, options.agent));
   if (suppressed.size === 0) return agentScoped;
   return agentScoped.filter((name) => !suppressed.has(name));
 }
@@ -151,74 +149,6 @@ export function isStaleBuiltinBravePolicyPreset(
   } = {},
 ): boolean {
   return name === "brave" && !options.webSearchConfig && !options.customPresetNames?.has(name);
-}
-
-function agentRequiredPresetAdditions(
-  agent: string | null | undefined,
-  env: NodeJS.ProcessEnv,
-): string[] {
-  if (!isOpenclawAgent(agent)) return [];
-  return ["openclaw-pricing", ...requiredOpenclawOtelPolicyPresets(agent, env)];
-}
-
-function restrictedIncompatibleAgentRequiredPresets(agent: string | null | undefined): string[] {
-  if (!isOpenclawAgent(agent)) return [];
-  return ["openclaw-pricing", OPENCLAW_OTEL_LOCAL_POLICY_PRESET];
-}
-
-/**
- * Invalid state: OpenClaw onboarding adds `openclaw-pricing` (and, when
- * `NEMOCLAW_OPENCLAW_OTEL=1` with a local endpoint, `openclaw-diagnostics-otel-local`)
- * to every sandbox as agent-required presets, but the Restricted tier
- * description promises "no third-party network access beyond inference and core
- * agent tooling". The pricing fetch reaches LiteLLM/OpenRouter and the OTEL
- * preset opens host-local OTLP egress, so on Restricted both additions
- * contradict the tier description and the linked issue's zero-applied-preset
- * acceptance. The OTEL preset is restricted-incompatible whenever it is live,
- * not only when the current process has `NEMOCLAW_OPENCLAW_OTEL` set — a
- * restricted re-onboard with OTEL disabled must still classify a previously
- * applied `openclaw-diagnostics-otel-local` as suppressed so the
- * preservation / resume paths remove it instead of leaving stale host-local
- * OTLP egress on a restricted sandbox.
- *
- * Source boundary: the agent-required additions list is hardcoded in this
- * module (and `openclaw-otel-policy-presets.ts`) rather than declared in
- * `nemoclaw-blueprint/policies/tiers.yaml`. Tier YAML can express a tier's
- * default presets but cannot express "this preset is conditionally added by
- * the active agent, except when the tier explicitly suppresses it" — so the
- * suppression must live alongside the addition. The suggestion / addition
- * gate stays env-conditioned via `agentRequiredPresetAdditions()`; the
- * suppression gate is env-independent via
- * `restrictedIncompatibleAgentRequiredPresets()` so live cleanup catches
- * presets applied by a prior process with a different env.
- *
- * Source-fix constraint: tier YAML has no schema for agent-conditional or
- * tier-conditional preset gating, and `requiredOpenclawOtelPolicyPresets()`
- * itself takes `agent` and `env` (OTEL endpoint locality) inputs that the YAML
- * cannot evaluate at parse time.
- *
- * Regression test: `test/policy-tiers-onboard.test.ts` exercises
- * `setupPoliciesWithSelection` end-to-end for restricted + OpenClaw across
- * fresh-onboard, preservation, resume, and OTEL-enabled / OTEL-disabled paths,
- * including stale-applied OTEL-local cleanup with the current env disabled;
- * `test/onboard-policy-suggestions.test.ts` covers
- * `suppressedAgentRequiredPresets` (env-independent) and
- * `computeSetupPresetSuggestions` (env-gated) directly.
- *
- * Removal condition: when the agent-required addition list moves into per-agent
- * declarative metadata (per-preset application-source records in the registry,
- * or per-agent YAML under `nemoclaw-blueprint/policies/`) so the tier filter
- * can be applied at the metadata layer, `suppressedAgentRequiredPresets()`,
- * `restrictedIncompatibleAgentRequiredPresets()`, and the `tierName` plumbing
- * through `mergeRequiredSetupPolicyPresets()` can be removed in one pass.
- */
-export function suppressedAgentRequiredPresets(
-  tierName: string,
-  agent: string | null | undefined,
-  _env: NodeJS.ProcessEnv = process.env,
-): string[] {
-  if (tierName !== RESTRICTED_TIER_NAME) return [];
-  return restrictedIncompatibleAgentRequiredPresets(agent);
 }
 
 export function computeSetupPresetSuggestions(
@@ -349,7 +279,7 @@ export function preparePolicyPresetResumeSelection(
     });
   }
   const suppressedForTier = options.tierName
-    ? new Set(suppressedAgentRequiredPresets(options.tierName, options.agent, options.env))
+    ? new Set(suppressedAgentRequiredPresets(options.tierName, options.agent))
     : null;
   const suppressedAgentRequiredPresetsLive =
     suppressedForTier !== null &&
@@ -441,6 +371,13 @@ async function setupPoliciesWithSelectionInner(
           customPresetNames,
         )
       : null;
+  // Resume reconciles against the tier originally recorded on the sandbox
+  // (recordedTierName) so stale presets from that tier are still suppressed when
+  // the resume call shape (selectedPresets !== null) skips the tier selector.
+  // Fresh onboarding below uses the newly-selected `tierName` from
+  // `selectPolicyTier()`; mixing the two would either re-add suppressed presets
+  // on a restricted resume or wrongly suppress balanced presets on a fresh
+  // balanced onboard.
   const recordedTierName = deps.getRecordedPolicyTier?.(sandboxName) ?? null;
   if (chosen !== null) {
     const knownSelectablePresets = new Set(selectablePresets.map((preset) => preset.name));
@@ -481,14 +418,14 @@ async function setupPoliciesWithSelectionInner(
       env: deps.env,
     }),
   );
-  const suppressedForTier = suppressedAgentRequiredPresets(tierName, agent, deps.env);
+  const suppressedForTier = suppressedAgentRequiredPresets(tierName, agent);
   if (suppressedForTier.length > 0) {
     deps.note(
       `  Restricted tier suppresses agent-required preset(s): ${suppressedForTier.join(", ")}. Apply later with 'nemoclaw <name> policy-add <preset>' if needed.`,
     );
   }
 
-  const suppressedNames = new Set(suppressedAgentRequiredPresets(tierName, agent, deps.env));
+  const suppressedNames = new Set(suppressedAgentRequiredPresets(tierName, agent));
 
   if (deps.isNonInteractive()) {
     const policyMode = (deps.env?.NEMOCLAW_POLICY_MODE || "suggested").trim().toLowerCase();
