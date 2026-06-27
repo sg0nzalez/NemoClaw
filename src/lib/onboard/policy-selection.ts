@@ -370,13 +370,9 @@ async function setupPoliciesWithSelectionInner(
           customPresetNames,
         )
       : null;
-  // Resume reconciles against the tier originally recorded on the sandbox
-  // (recordedTierName) so stale presets from that tier are still suppressed when
-  // the resume call shape (selectedPresets !== null) skips the tier selector.
-  // Fresh onboarding below uses the newly-selected `tierName` from
-  // `selectPolicyTier()`; mixing the two would either re-add suppressed presets
-  // on a restricted resume or wrongly suppress balanced presets on a fresh
-  // balanced onboard.
+  // Resume (selectedPresets !== null) keeps the recorded tier so stale
+  // suppressed presets from that tier still get filtered; fresh onboarding
+  // below uses the newly-selected `tierName` from `selectPolicyTier()`.
   const recordedTierName = deps.getRecordedPolicyTier?.(sandboxName) ?? null;
   if (chosen !== null) {
     const knownSelectablePresets = new Set(selectablePresets.map((preset) => preset.name));
