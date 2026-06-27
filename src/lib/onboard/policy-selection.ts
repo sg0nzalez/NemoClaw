@@ -24,7 +24,6 @@ import {
   emitSuppressedAgentRequiredPresetsNote,
   filterSuppressedAgentRequiredPresets,
   RESTRICTED_TIER_NAME,
-  suppressedAgentRequiredPresets,
 } from "./policy-tier-suppression";
 import { withPolicyApplicationTrace } from "./tracing";
 
