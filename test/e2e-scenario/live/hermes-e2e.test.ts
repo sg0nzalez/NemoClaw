@@ -99,9 +99,9 @@ function commandEnv(hostedEnv: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   return env;
 }
 
-function chatPayload(prompt: string, maxTokens = 256): string {
+function chatPayload(model: string, prompt: string, maxTokens = 256): string {
   return JSON.stringify({
-    model: CHAT_MODEL,
+    model,
     messages: [{ role: "user", content: prompt }],
     max_tokens: maxTokens,
   });
@@ -494,7 +494,11 @@ test.skipIf(!shouldRunLiveE2EScenarios())(
           }),
           {
             artifactName: `phase-5-direct-nvidia-chat-attempt-${attempt}`,
-            body: chatPayload("Reply with exactly one word: PONG", attempt === 1 ? 256 : 1024),
+            body: chatPayload(
+              hosted.model,
+              "Reply with exactly one word: PONG",
+              attempt === 1 ? 256 : 1024,
+            ),
             curlMaxTimeSeconds: 90,
             headers: ["Content-Type: application/json", `Authorization: Bearer ${apiKey}`],
             env: buildAvailabilityProbeEnv(),
@@ -523,7 +527,11 @@ test.skipIf(!shouldRunLiveE2EScenarios())(
             "-H",
             "Content-Type: application/json",
             "--data-raw",
-            chatPayload("Reply with exactly one word: PONG", attempt === 1 ? 256 : 1024),
+            chatPayload(
+              hosted.model,
+              "Reply with exactly one word: PONG",
+              attempt === 1 ? 256 : 1024,
+            ),
             "https://inference.local/v1/chat/completions",
           ],
           {
