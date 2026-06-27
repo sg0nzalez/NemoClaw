@@ -285,19 +285,13 @@ main() {
 
   if grep -q "NEMOCLAW_TUI_READY" "$plain_capture_file" && is_tui_ready_capture <"$plain_capture_file"; then
     pass "dcode TUI rendered a usable startup prompt signature"
-  elif [ "$expect_rc" -eq 0 ]; then
-    pass "expect harness observed startup and exit markers without stable prompt text"
+  elif [ "$expect_rc" -eq 0 ] && grep -q "NEMOCLAW_TUI_EXIT_CAPTURED:" "$plain_capture_file"; then
+    pass "expect harness observed startup and clean-exit markers without stable prompt text"
   else
     fail_test "dcode TUI prompt-ready marker missing from capture"
   fi
 
-  if grep -q "NEMOCLAW_TUI_EXIT_CAPTURED:" "$plain_capture_file"; then
-    assert_clean_exit_code "$plain_capture_file"
-  elif [ "$expect_rc" -eq 0 ]; then
-    pass "expect harness captured a clean TUI exit before sanitized log marker extraction"
-  else
-    assert_clean_exit_code "$plain_capture_file"
-  fi
+  assert_clean_exit_code "$plain_capture_file"
 
   if [ "$secret_detected" -eq 1 ]; then
     fail_test "secret-shaped value found in sanitized TUI capture"

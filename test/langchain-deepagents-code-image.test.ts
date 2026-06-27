@@ -474,7 +474,7 @@ describe("LangChain Deep Agents Code image contracts", () => {
     expect(tuiStartupCheck).toContain("NEMOCLAW_TUI_READY");
     expect(tuiStartupCheck).toContain("NEMOCLAW_TUI_EXIT_CAPTURED");
     expect(tuiStartupCheck).toContain(
-      "expect harness observed startup and exit markers without stable prompt text",
+      "expect harness observed startup and clean-exit markers without stable prompt text",
     );
     expect(tuiStartupCheck).toContain("DEEPAGENTS_TUI_TIMEOUT must be a positive integer");
     expect(tuiStartupCheck).toContain("strip_terminal_control_sequences");

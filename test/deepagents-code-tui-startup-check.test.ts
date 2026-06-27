@@ -113,14 +113,14 @@ describe("Deep Agents Code TUI startup check helpers", () => {
         'plain_capture_file="$(mktemp)"',
         "expect_rc=0",
         'printf "NEMOCLAW_TUI_READY\\nNEMOCLAW_TUI_EXIT_CAPTURED:130\\n" >"$plain_capture_file"',
-        'if grep -q "NEMOCLAW_TUI_READY" "$plain_capture_file" && is_tui_ready_capture <"$plain_capture_file"; then pass "dcode TUI rendered a usable startup prompt signature"; elif [ "$expect_rc" -eq 0 ]; then pass "expect harness observed startup and exit markers without stable prompt text"; else fail_test "dcode TUI prompt-ready marker missing from capture"; fi',
+        'if grep -q "NEMOCLAW_TUI_READY" "$plain_capture_file" && is_tui_ready_capture <"$plain_capture_file"; then pass "dcode TUI rendered a usable startup prompt signature"; elif [ "$expect_rc" -eq 0 ] && grep -q "NEMOCLAW_TUI_EXIT_CAPTURED:" "$plain_capture_file"; then pass "expect harness observed startup and clean-exit markers without stable prompt text"; else fail_test "dcode TUI prompt-ready marker missing from capture"; fi',
         'rm -f -- "$plain_capture_file"',
         'printf "passed=%s failed=%s" "$PASSED" "$FAILED"',
       ].join("; "),
     );
 
     expect(output).toBe(
-      "10-deepagents-code-tui-startup: OK (expect harness observed startup and exit markers without stable prompt text)\npassed=1 failed=0",
+      "10-deepagents-code-tui-startup: OK (expect harness observed startup and clean-exit markers without stable prompt text)\npassed=1 failed=0",
     );
   });
 
