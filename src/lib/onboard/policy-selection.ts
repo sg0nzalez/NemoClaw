@@ -23,6 +23,7 @@ import { mergeRequiredOpenclawOtelPolicyPresets } from "./openclaw-otel-policy-p
 import { seedInitialPolicyContext } from "./policy-context-seed";
 import {
   agentRequiredPresetAdditions,
+  filterSuppressedAgentRequiredPresets,
   RESTRICTED_TIER_NAME,
   suppressedAgentRequiredPresets,
 } from "./policy-tier-suppression";
@@ -135,10 +136,7 @@ export function mergeRequiredSetupPolicyPresets(
     },
   );
   const agentScoped = filterSetupPolicyPresetNamesForAgent(mergedPresets, options.agent);
-  if (!options.tierName) return agentScoped;
-  const suppressed = new Set(suppressedAgentRequiredPresets(options.tierName, options.agent));
-  if (suppressed.size === 0) return agentScoped;
-  return agentScoped.filter((name) => !suppressed.has(name));
+  return filterSuppressedAgentRequiredPresets(agentScoped, options.tierName, options.agent);
 }
 
 export function isStaleBuiltinBravePolicyPreset(
@@ -479,19 +477,22 @@ async function setupPoliciesWithSelectionInner(
 
     if (!isAuthoritative) {
       const chosenSet = new Set(chosen);
-      const preserved: string[] = [];
+      // `kept` is the subset of `appliedForPreservation` that actually carries
+      // forward — chosen-set duplicates, stale built-in brave, and
+      // tier-suppressed agent-required presets (e.g. restricted's
+      // openclaw-pricing / openclaw-diagnostics-otel-local) are intentionally
+      // excluded so suppression survives the preservation pass.
+      const kept: string[] = [];
       for (const name of appliedForPreservation) {
         if (chosenSet.has(name)) continue;
         if (isStaleBuiltinBrave(name)) continue;
         if (suppressedNames.has(name)) continue;
         chosen.push(name);
         chosenSet.add(name);
-        preserved.push(name);
+        kept.push(name);
       }
-      if (preserved.length > 0) {
-        deps.note(
-          `  [non-interactive] Preserving previously-applied presets: ${preserved.join(", ")}`,
-        );
+      if (kept.length > 0) {
+        deps.note(`  [non-interactive] Preserving previously-applied presets: ${kept.join(", ")}`);
       }
     }
 

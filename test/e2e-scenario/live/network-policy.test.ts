@@ -496,11 +496,13 @@ RUN_NETWORK_POLICY_TEST(
     // restricted onboard and before any operator mutation (`policy-add brew`).
     // This scenario enables `NEMOCLAW_WEB_SEARCH_ENABLED=1` so the later brave
     // probe has a preset to allow, so the assertion below only proves the two
-    // OpenClaw-agent suppressed presets are absent — the literal "zero applied
-    // presets" clause from the linked issue is proved separately by the
-    // adjacent `restricted-openclaw-policy-suppression` scenario which onboards
-    // a default restricted sandbox (no optional features) and asserts the
-    // `policy-list` output has no `●`-bulleted entries.
+    // OpenClaw-agent suppressed presets are absent. The authoritative
+    // source-of-truth for the linked issue's literal "zero applied presets"
+    // clause is the dedicated `restricted-openclaw-policy-suppression`
+    // scenario below — it onboards a default restricted sandbox (no
+    // web-search, no OpenClaw OTEL) and asserts the `policy-list` output has
+    // no `●`-bulleted entries; that scenario must remain the gate even if
+    // this scenario's assertion is ever weakened.
     const policyListAfterOnboard = await runNemoclaw(host, [SANDBOX_NAME, "policy-list"], {
       artifactName: "tc-net-01-policy-list-after-onboard",
       timeoutMs: SANDBOX_EXEC_TIMEOUT_MS,

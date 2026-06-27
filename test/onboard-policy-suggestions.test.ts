@@ -32,6 +32,14 @@ const { computeSetupPresetSuggestions, filterSetupPolicyPresets, getSuggestedPol
 const { suppressedAgentRequiredPresets } = require("../dist/lib/onboard/policy-selection") as {
   suppressedAgentRequiredPresets: (tierName: string, agent: string | null | undefined) => string[];
 };
+const { filterSuppressedAgentRequiredPresets } =
+  require("../dist/lib/onboard/policy-tier-suppression") as {
+    filterSuppressedAgentRequiredPresets: (
+      presetNames: string[],
+      tierName: string | null | undefined,
+      agent: string | null | undefined,
+    ) => string[];
+  };
 
 function setOrUnset(key: string, value: string | undefined): void {
   value === undefined ? delete process.env[key] : (process.env[key] = value);
@@ -536,6 +544,46 @@ describe("onboard policy preset suggestions", () => {
         "openclaw-pricing",
         "openclaw-diagnostics-otel-local",
       ]);
+    });
+  });
+
+  describe("filterSuppressedAgentRequiredPresets (interactive preservation safeguard)", () => {
+    it("removes openclaw-pricing and openclaw-diagnostics-otel-local from a restricted preset list", () => {
+      expect(
+        filterSuppressedAgentRequiredPresets(
+          ["npm", "openclaw-pricing", "openclaw-diagnostics-otel-local", "pypi"],
+          "restricted",
+          "openclaw",
+        ),
+      ).toEqual(["npm", "pypi"]);
+    });
+
+    it("returns the input unchanged for balanced and open tiers", () => {
+      expect(
+        filterSuppressedAgentRequiredPresets(["openclaw-pricing", "npm"], "balanced", "openclaw"),
+      ).toEqual(["openclaw-pricing", "npm"]);
+      expect(
+        filterSuppressedAgentRequiredPresets(["openclaw-pricing", "npm"], "open", "openclaw"),
+      ).toEqual(["openclaw-pricing", "npm"]);
+    });
+
+    it("returns the input unchanged when tierName is null or undefined", () => {
+      expect(
+        filterSuppressedAgentRequiredPresets(["openclaw-pricing", "npm"], null, "openclaw"),
+      ).toEqual(["openclaw-pricing", "npm"]);
+      expect(
+        filterSuppressedAgentRequiredPresets(["openclaw-pricing", "npm"], undefined, "openclaw"),
+      ).toEqual(["openclaw-pricing", "npm"]);
+    });
+
+    it("does not suppress for non-OpenClaw agents on restricted", () => {
+      expect(
+        filterSuppressedAgentRequiredPresets(
+          ["openclaw-pricing", "hermes-tool"],
+          "restricted",
+          "hermes",
+        ),
+      ).toEqual(["openclaw-pricing", "hermes-tool"]);
     });
   });
 });

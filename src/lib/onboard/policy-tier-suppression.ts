@@ -67,6 +67,16 @@ function restrictedIncompatibleAgentRequiredPresets(agent: string | null | undef
  * can be applied at the metadata layer, this module — together with the
  * `tierName` plumbing through `mergeRequiredSetupPolicyPresets()` — can be
  * removed in one pass.
+ *
+ * Operator escape hatch (defense-in-depth note): suppression is a security
+ * boundary, not a default — an operator who explicitly needs `openclaw-pricing`
+ * or `openclaw-diagnostics-otel-local` on a restricted sandbox can re-apply
+ * either preset on demand via `nemoclaw <sandbox-name> policy-add <preset>`,
+ * which the onboard notice emitted by `setupPoliciesWithSelectionInner` also
+ * surfaces inline. The env-independent suppression list specifically catches
+ * stale presets applied by a prior process with `NEMOCLAW_OPENCLAW_OTEL=1` so
+ * the next restricted reconciliation removes them even when the current
+ * process has OTEL disabled.
  */
 export function suppressedAgentRequiredPresets(
   tierName: string,
@@ -74,4 +84,15 @@ export function suppressedAgentRequiredPresets(
 ): string[] {
   if (tierName !== RESTRICTED_TIER_NAME) return [];
   return restrictedIncompatibleAgentRequiredPresets(agent);
+}
+
+export function filterSuppressedAgentRequiredPresets(
+  presetNames: string[],
+  tierName: string | null | undefined,
+  agent: string | null | undefined,
+): string[] {
+  if (!tierName) return presetNames;
+  const suppressed = new Set(suppressedAgentRequiredPresets(tierName, agent));
+  if (suppressed.size === 0) return presetNames;
+  return presetNames.filter((name) => !suppressed.has(name));
 }
