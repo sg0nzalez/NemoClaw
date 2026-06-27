@@ -38,3 +38,16 @@ export function validatePolicyTierEnvEarly(): void {
     resolvePolicyTierFromEnv();
   }
 }
+
+/**
+ * Resolve the policy tier for create-time decisions only. Returns the
+ * normalised env value when set, or null otherwise. Used by
+ * `prepareSandboxCreatePlan` so non-interactive restricted onboarding
+ * suppresses agent-required network additions before sandbox boot;
+ * interactive mode returns null and the later policy step strips any
+ * stale preset.
+ */
+export function resolvePolicyTierForCreateTime(): string | null {
+  const raw = process.env.NEMOCLAW_POLICY_TIER;
+  return typeof raw === "string" && raw.trim() ? raw.trim().toLowerCase() : null;
+}
