@@ -622,6 +622,28 @@ export function stopAll(opts: ServiceOptions = {}): void {
   info("All services stopped.");
 }
 
+/**
+ * Resolve the PID directory for host-side services without starting or stopping
+ * anything. Lets callers (e.g. the Google Chat tunnel/audience enroll gate) read
+ * cloudflared state and the tunnel URL via the same resolution `start`/`stop`/
+ * `status` use, so they all target the same tunnel.
+ */
+export function resolveServicePidDir(opts: ServiceOptions = {}): string {
+  return resolvePidDir(opts);
+}
+
+/**
+ * Stop only the host-side cloudflared tunnel, leaving the in-sandbox gateway and
+ * Ollama untouched. `stopAll` is intentionally broader (it also stops the gateway
+ * and unloads Ollama); enrollment that auto-started a tunnel needs a tunnel-only
+ * stop to clean up without tearing down other services.
+ */
+export function stopCloudflared(opts: ServiceOptions = {}): void {
+  const pidDir = resolvePidDir(opts);
+  ensurePidDir(pidDir);
+  stopService(pidDir, "cloudflared");
+}
+
 export async function startAll(opts: ServiceOptions = {}): Promise<void> {
   const pidDir = resolvePidDir(opts);
   const dashboardPort = opts.dashboardPort ?? DASHBOARD_PORT;

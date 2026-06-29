@@ -31,6 +31,7 @@ describe("built-in messaging channel metadata", () => {
       "slack",
       "whatsapp",
       "teams",
+      "googlechat",
     ]);
     expect(listAvailableMessagingChannelIds({ agent: "hermes" })).toEqual([
       "telegram",
@@ -64,7 +65,7 @@ describe("built-in messaging channel metadata", () => {
       "demo-slack-bridge",
       "demo-slack-app",
     ]);
-    expect(listMessagingChannelsWithoutCredentials()).toEqual(["whatsapp"]);
+    expect(listMessagingChannelsWithoutCredentials()).toEqual(["whatsapp", "googlechat"]);
   });
 
   it("resolves config env keys and aliases from manifest inputs", () => {
@@ -87,6 +88,11 @@ describe("built-in messaging channel metadata", () => {
       "TEAMS_ALLOWED_USERS",
       "MSTEAMS_PORT",
       "TEAMS_REQUIRE_MENTION",
+      "GOOGLECHAT_AUDIENCE_TYPE",
+      "GOOGLECHAT_AUDIENCE",
+      "GOOGLECHAT_APP_PRINCIPAL",
+      "GOOGLECHAT_WEBHOOK_PATH",
+      "GOOGLECHAT_ALLOWED_USERS",
     ]);
     expect(getMessagingConfigEnvAliases()).toEqual({
       DISCORD_SERVER_ID: ["DISCORD_SERVER_IDS"],
@@ -126,6 +132,7 @@ describe("built-in messaging channel metadata", () => {
       "slack",
       "whatsapp",
       "msteams",
+      "googlechat",
     ]);
     expect(
       Object.fromEntries(

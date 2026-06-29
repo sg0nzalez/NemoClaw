@@ -1175,6 +1175,11 @@ export async function rebuildSandbox(
     if (!ensureMessagingHostForwardAfterRebuild(sandboxName, rebuildMessagingPlan)) {
       messagingHostForwardUnverified = true;
     }
+    // Re-deliver in-process secret files (e.g. the Google Chat service account)
+    // that the rebuilt image references by path, then restart the gateway.
+    (
+      require("../../onboard/messaging-secret-file-delivery") as typeof import("../../onboard/messaging-secret-file-delivery")
+    ).deliverSandboxMessagingSecretFilesForPlan(sandboxName, rebuildMessagingPlan);
 
     console.log("");
     if (

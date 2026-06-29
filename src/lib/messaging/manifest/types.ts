@@ -43,6 +43,14 @@ export interface ChannelManifest {
   readonly policyPresets?: readonly ChannelPolicyPresetReference[];
   readonly render: readonly ChannelRenderSpec[];
   readonly hostForward?: ChannelHostForwardSpec;
+  /**
+   * Secrets that must be delivered as a FILE inside the sandbox (consumed
+   * in-process by the agent, e.g. a Google service-account JSON the channel
+   * signs JWTs with) rather than as an outbound provider placeholder. The
+   * applier uploads the secret value to `target` post-create; the value is
+   * never written into the agent config or the image.
+   */
+  readonly secretFiles?: readonly ChannelSecretFileSpec[];
   readonly runtime?: ChannelRuntimeByAgentSpec;
   readonly agentPackages?: readonly ChannelAgentPackageSpec[];
   readonly state: ChannelStateSpec;
@@ -149,6 +157,24 @@ export interface ChannelHostForwardSpec {
   readonly port: MessagingTemplateString;
   readonly label: string;
   readonly when?: MessagingTemplateString;
+}
+
+/**
+ * Declaration for a secret delivered into the sandbox as a file. Unlike a
+ * `ChannelCredentialSpec` (which becomes an outbound provider placeholder), the
+ * raw secret value is uploaded to `target` for the agent to read locally. Use
+ * only for secrets the agent must consume in-process (e.g. a private key used
+ * for local signing), never for outbound bearer tokens.
+ */
+export interface ChannelSecretFileSpec {
+  readonly id: string;
+  /** Secret input id whose captured value is delivered. */
+  readonly sourceInput: string;
+  readonly agent: MessagingAgentId;
+  /** Absolute destination path inside the sandbox. */
+  readonly target: MessagingTemplateString;
+  /** Octal file mode applied after upload (default "600"). */
+  readonly mode?: string;
 }
 
 /** Agent-runtime metadata consumed by shared runtime setup and diagnostics. */

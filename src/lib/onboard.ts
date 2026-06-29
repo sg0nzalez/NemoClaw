@@ -5278,6 +5278,15 @@ async function onboard(opts: OnboardOptions = {}): Promise<void> {
       },
     });
     completed = true;
+    // Deliver in-process secret files (e.g. the Google Chat service account) into
+    // the sandbox and restart the gateway so channels that sign locally can read them.
+    (
+      require("./onboard/messaging-secret-file-delivery") as typeof import("./onboard/messaging-secret-file-delivery")
+    ).deliverSandboxMessagingSecretFiles(
+      sandboxName,
+      liveFinalFlowContext.selectedMessagingChannels ?? [],
+      agent,
+    );
     traceCompleted = true;
   } finally {
     releaseOnboardLock();

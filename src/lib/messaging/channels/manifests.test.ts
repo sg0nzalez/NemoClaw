@@ -20,12 +20,14 @@ import {
   BUILT_IN_CHANNEL_MANIFESTS,
   createBuiltInChannelManifestRegistry,
   discordManifest,
+  googlechatManifest,
   slackManifest,
   teamsManifest,
   telegramManifest,
   wechatManifest,
   whatsappManifest,
 } from "./index";
+import { GOOGLECHAT_TUNNEL_AUDIENCE_GATE_HOOK_ID } from "./googlechat/hooks";
 import {
   SLACK_SOCKET_MODE_GATEWAY_CONFLICT_HOOK_HANDLER_ID,
   SLACK_SOCKET_MODE_GATEWAY_STATUS_HOOK_HANDLER_ID,
@@ -204,6 +206,7 @@ describe("built-in channel manifests", () => {
       "slack",
       "whatsapp",
       "teams",
+      "googlechat",
     ]);
     expect(registry.listAvailable({ agent: "hermes" }).map((manifest) => manifest.id)).toEqual([
       "telegram",
@@ -808,6 +811,109 @@ describe("built-in channel manifests", () => {
           env: "TEAMS_REQUIRE_MENTION",
         },
       ],
+    });
+  });
+
+  it("declares Google Chat as an OpenClaw-only inbound-webhook channel", () => {
+    const serviceAccount = findInput(googlechatManifest, "serviceAccount");
+    const audienceType = findInput(googlechatManifest, "audienceType");
+    const audience = findInput(googlechatManifest, "audience");
+    const appPrincipal = findInput(googlechatManifest, "appPrincipal");
+    const webhookPath = findInput(googlechatManifest, "webhookPath");
+    const allowFrom = findInput(googlechatManifest, "allowFrom");
+
+    expect(googlechatManifest.supportedAgents).toEqual(["openclaw"]);
+    expect(googlechatManifest.auth.mode).toBe("token-paste");
+    expect("hostForward" in googlechatManifest).toBe(false);
+
+    expect(serviceAccount).toMatchObject({ kind: "secret", envKey: "GOOGLECHAT_SERVICE_ACCOUNT" });
+    expect(audienceType).toMatchObject({
+      kind: "config",
+      envKey: "GOOGLECHAT_AUDIENCE_TYPE",
+      defaultValue: "app-url",
+      validValues: ["app-url", "project-number"],
+    });
+    expect(audience).toMatchObject({ kind: "config", envKey: "GOOGLECHAT_AUDIENCE" });
+    expect(appPrincipal).toMatchObject({
+      kind: "config",
+      required: false,
+      envKey: "GOOGLECHAT_APP_PRINCIPAL",
+    });
+    expect(webhookPath).toMatchObject({ kind: "config", defaultValue: "/googlechat" });
+    expect(allowFrom).toMatchObject({ kind: "config", statePath: "allowedIds.googlechat" });
+
+    // Service account is consumed locally (JWT signing), so it is delivered as a
+    // file, not an outbound provider placeholder — no credential binding.
+    expect(googlechatManifest.credentials).toEqual([]);
+    expect(googlechatManifest.secretFiles).toEqual([
+      {
+        id: "serviceAccountFile",
+        sourceInput: "serviceAccount",
+        agent: "openclaw",
+        target: "/sandbox/.openclaw/secrets/googlechat-service-account.json",
+        mode: "640",
+      },
+    ]);
+    expect(policyPresetNames(googlechatManifest)).toEqual(["googlechat"]);
+
+    const render = renderJson(googlechatManifest);
+    expect(render).toContain('"path":"channels.googlechat"');
+    expect(render).toContain('"path":"plugins.entries.googlechat"');
+    // Service account is delivered as an in-sandbox file, never inline or via an
+    // outbound placeholder (a private key cannot be signed with via outbound rewrite).
+    expect(render).toContain(
+      '"serviceAccountFile":"/sandbox/.openclaw/secrets/googlechat-service-account.json"',
+    );
+    expect(render).not.toContain("openshell:resolve:env:GOOGLECHAT_SERVICE_ACCOUNT");
+    expect(render).not.toContain("credential.googlechatServiceAccount");
+    // DM allowlist must render to OpenClaw's nested dm.policy / dm.allowFrom shape.
+    expect(render).toContain("allowedIds.googlechat.dmPolicy");
+    expect(render).toContain("allowedIds.googlechat.values");
+    expect(render).toContain("googlechatConfig.appPrincipal");
+    // OpenClaw-only: no Hermes env-lines / platform render.
+    expect(render).not.toContain("~/.hermes");
+
+    expect(findHook(googlechatManifest, "googlechat-tunnel-audience-gate")).toMatchObject({
+      phase: "enroll",
+      handler: GOOGLECHAT_TUNNEL_AUDIENCE_GATE_HOOK_ID,
+      inputs: ["audienceType", "audience", "webhookPath"],
+      outputs: [{ id: "audience", kind: "config" }],
+      onFailure: "skip-channel",
+    });
+    expect(findHook(googlechatManifest, "googlechat-service-account")).toMatchObject({
+      phase: "enroll",
+      handler: COMMON_TOKEN_PASTE_HOOK_HANDLER_ID,
+      outputs: [{ id: "serviceAccount", kind: "secret", required: true }],
+      onFailure: "skip-channel",
+    });
+    expectConfigPromptEnrollHook(googlechatManifest, ["audience", "appPrincipal", "allowFrom"]);
+
+    // The tunnel/audience gate must run before the service-account paste, so a
+    // skip-channel gate never makes the operator paste JSON first.
+    const enrollHandlers = googlechatManifest.hooks
+      .filter((hook) => hook.phase === "enroll")
+      .map((hook) => hook.handler);
+    expect(enrollHandlers).toEqual([
+      GOOGLECHAT_TUNNEL_AUDIENCE_GATE_HOOK_ID,
+      COMMON_TOKEN_PASTE_HOOK_HANDLER_ID,
+      COMMON_CONFIG_PROMPT_HOOK_HANDLER_ID,
+    ]);
+
+    expectOpenClawRuntimeVisibility(googlechatManifest, ["googlechat"], ["googlechat"]);
+    expect(JSON.stringify(googlechatManifest.runtime?.openclaw?.secretScans)).toContain(
+      "BEGIN (?:RSA )?PRIVATE KEY",
+    );
+    expect(googlechatManifest.agentPackages).toContainEqual({
+      id: "openclawPluginPackage",
+      agent: "openclaw",
+      manager: "openclaw-plugin",
+      spec: "npm:@openclaw/googlechat@{{openclaw.version}}",
+      pin: true,
+      required: true,
+    });
+    expect(googlechatManifest.state.persist).toEqual({
+      googlechatConfig: ["audienceType", "audience", "appPrincipal", "webhookPath"],
+      allowedIds: ["allowFrom"],
     });
   });
 });

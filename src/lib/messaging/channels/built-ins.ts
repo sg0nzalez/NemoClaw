@@ -4,6 +4,7 @@
 import type { ChannelManifestRegistry } from "../manifest";
 import { createChannelManifestRegistry } from "../manifest";
 import { discordManifest } from "./discord/manifest";
+import { googlechatManifest } from "./googlechat/manifest";
 import { slackManifest } from "./slack/manifest";
 import { telegramManifest } from "./telegram/manifest";
 import { teamsManifest } from "./teams/manifest";
@@ -11,6 +12,7 @@ import { wechatManifest } from "./wechat/manifest";
 import { whatsappManifest } from "./whatsapp/manifest";
 
 export { discordManifest } from "./discord/manifest";
+export { googlechatManifest } from "./googlechat/manifest";
 export { slackManifest } from "./slack/manifest";
 export { telegramManifest } from "./telegram/manifest";
 export { teamsManifest } from "./teams/manifest";
@@ -24,6 +26,7 @@ export const BUILT_IN_CHANNEL_MANIFESTS = [
   slackManifest,
   whatsappManifest,
   teamsManifest,
+  googlechatManifest,
 ] as const;
 
 export function createBuiltInChannelManifestRegistry(): ChannelManifestRegistry {
