@@ -302,6 +302,22 @@ It is a serializable declaration for one channel and one set of supported agents
 Secret inputs cannot declare `statePath` or defaults.
 Plans may carry `credentialAvailable`, `credentialHash`, and placeholders, but they must not carry raw tokens.
 
+## Manifest Cleanup Direction
+
+`ChannelManifest` is the external channel authoring contract.
+Cleanup work should make that public shape simpler while preserving the current compiled plan and applier behavior.
+
+Prefer making the input declaration the source of truth.
+
+- Put env names, aliases, prompts, validation, persistence, and rebuild hydration on `inputs` when they describe the same value.
+- Derive credential bindings from secret inputs when provider name, placeholder, and env key follow the standard channel pattern.
+- Derive state persistence and rebuild hydration from config inputs instead of repeating `statePath`, `state.persist`, and `state.rebuildHydration` in separate sections.
+- Derive routine runtime visibility and env alias data from the active agent channel name unless the channel needs an explicit override.
+- Keep advanced behavior explicit for host forwards, agent render, package installs, network policy presets, and channel-specific hooks.
+
+The registry or compiler can normalize the simpler authoring shape into the existing internal manifest and plan structure.
+That keeps existing v1 manifests accepted during migration and avoids forcing lifecycle, persistence, build-applier, or policy code to understand two behavior models.
+
 ## Manifest Skeleton
 
 Use `satisfies ChannelManifest` so TypeScript checks the manifest while preserving literal IDs and template strings.
