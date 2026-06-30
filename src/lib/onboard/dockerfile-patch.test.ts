@@ -452,20 +452,6 @@ describe("dockerfile patch helpers", () => {
         "ARG NEMOCLAW_DARWIN_VM_COMPAT=0",
       ].join("\n"),
     );
-    const consumedDockerfilePath = dockerfileWith(
-      [
-        "ARG NEMOCLAW_MODEL=old",
-        "ARG NEMOCLAW_PROVIDER_KEY=old",
-        "ARG NEMOCLAW_PRIMARY_MODEL_REF=old",
-        "ARG CHAT_UI_URL=old",
-        "ARG NEMOCLAW_INFERENCE_BASE_URL=old",
-        "ARG NEMOCLAW_INFERENCE_API=old",
-        "ARG NEMOCLAW_INFERENCE_COMPAT_B64=old",
-        "ARG NEMOCLAW_BUILD_ID=default",
-        "ENV LEGACY_BUILD_ID=${NEMOCLAW_BUILD_ID}",
-        "ARG NEMOCLAW_DARWIN_VM_COMPAT=0",
-      ].join("\n"),
-    );
 
     patchStagedDockerfile(
       unconsumedDockerfilePath,
@@ -474,20 +460,43 @@ describe("dockerfile patch helpers", () => {
       "build-cache-stable",
       "openai-api",
     );
-    patchStagedDockerfile(
-      consumedDockerfilePath,
-      "gpt-5.4",
-      "http://127.0.0.1:19999",
-      "build-cache-bust",
-      "openai-api",
-    );
 
     expect(fs.readFileSync(unconsumedDockerfilePath, "utf8")).toMatch(
       /^ARG NEMOCLAW_BUILD_ID=default$/m,
     );
-    expect(fs.readFileSync(consumedDockerfilePath, "utf8")).toMatch(
-      /^ARG NEMOCLAW_BUILD_ID=build-cache-bust$/m,
-    );
+
+    for (const [index, consumerLine] of [
+      "ENV LEGACY_BUILD_ID=${NEMOCLAW_BUILD_ID}",
+      "RUN printf '%s\\n' ${NEMOCLAW_BUILD_ID}",
+      "ARG LEGACY_LABEL=prefix-${NEMOCLAW_BUILD_ID}-suffix",
+      "LABEL legacy.build=${NEMOCLAW_BUILD_ID}",
+    ].entries()) {
+      const consumedDockerfilePath = dockerfileWith(
+        [
+          "ARG NEMOCLAW_MODEL=old",
+          "ARG NEMOCLAW_PROVIDER_KEY=old",
+          "ARG NEMOCLAW_PRIMARY_MODEL_REF=old",
+          "ARG CHAT_UI_URL=old",
+          "ARG NEMOCLAW_INFERENCE_BASE_URL=old",
+          "ARG NEMOCLAW_INFERENCE_API=old",
+          "ARG NEMOCLAW_INFERENCE_COMPAT_B64=old",
+          "ARG NEMOCLAW_BUILD_ID=default",
+          consumerLine,
+          "ARG NEMOCLAW_DARWIN_VM_COMPAT=0",
+        ].join("\n"),
+      );
+      patchStagedDockerfile(
+        consumedDockerfilePath,
+        "gpt-5.4",
+        "http://127.0.0.1:19999",
+        `build-cache-bust-${index}`,
+        "openai-api",
+      );
+
+      expect(fs.readFileSync(consumedDockerfilePath, "utf8")).toMatch(
+        new RegExp(`^ARG NEMOCLAW_BUILD_ID=build-cache-bust-${index}$`, "m"),
+      );
+    }
   });
 
   it("patches the staged Dockerfile for macOS VM rootfs ownership compatibility", () => {

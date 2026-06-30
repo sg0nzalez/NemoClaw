@@ -4,8 +4,10 @@
 //
 // Generate openclaw.json from environment variables.
 //
-// Called at Docker image build time after ARG->ENV promotion. Reads all
-// configuration from process.env, never from Dockerfile source interpolation.
+// Called at Docker image build time after Docker ARG declarations. Docker
+// exposes in-scope ARG values to RUN processes through process.env; the final
+// runtime ENV block is persisted later, after build-time config/install layers.
+// Reads configuration from process.env, never from Dockerfile source interpolation.
 //
 // Main inputs:
 //   CHAT_UI_URL, NEMOCLAW_DASHBOARD_PORT, NEMOCLAW_MODEL,
