@@ -3978,7 +3978,10 @@ if [ "$(id -u)" -ne 0 ]; then
   if [ ${#NEMOCLAW_CMD[@]} -gt 0 ]; then
     install_messaging_runtime_preloads
     verify_messaging_runtime_secret_scans
-    exec "${NEMOCLAW_CMD[@]}"
+    "${NEMOCLAW_CMD[@]}"
+    _nemoclaw_cmd_rc=$?
+    normalize_mutable_config_perms
+    exit $_nemoclaw_cmd_rc
   fi
 
   configure_messaging_channels
@@ -4144,7 +4147,10 @@ setup_auth_profile_as_sandbox
 
 # If a command was passed (e.g., "openclaw agent ..."), run it as sandbox user
 if [ ${#NEMOCLAW_CMD[@]} -gt 0 ]; then
-  exec "${STEP_DOWN_PREFIX_SANDBOX[@]}" "${NEMOCLAW_CMD[@]}"
+  "${STEP_DOWN_PREFIX_SANDBOX[@]}" "${NEMOCLAW_CMD[@]}"
+  _nemoclaw_cmd_rc=$?
+  normalize_mutable_config_perms
+  exit $_nemoclaw_cmd_rc
 fi
 
 # Gateway log: owned by gateway user, world-readable for diagnostics.
