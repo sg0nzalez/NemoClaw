@@ -46,6 +46,13 @@ const {
 const PROXY_STATE_DIR = DEFAULT_LOCAL_ADAPTER_STATE_DIR;
 const PROXY_TOKEN_PATH = path.join(PROXY_STATE_DIR, "ollama-proxy-token");
 const PROXY_PID_PATH = path.join(PROXY_STATE_DIR, "ollama-auth-proxy.pid");
+// #6014: the proxy script writes a structured exit reason here before any
+// non-zero exit and removes it on a successful listen. The host reads it
+// when the readiness loop fails so the operator gets a specific actionable
+// remediation (e.g. "backend not bound to loopback") instead of a generic
+// "proxy exited during startup" message. Path is shared with the proxy via
+// the NEMOCLAW_OLLAMA_PROXY_STATUS_FILE env in spawnOllamaAuthProxy.
+const PROXY_STATUS_PATH = path.join(PROXY_STATE_DIR, "ollama-auth-proxy.status");
 
 let ollamaProxyToken: string | null = null;
 
@@ -134,17 +141,81 @@ function isOllamaProxyProcess(pid: number | null | undefined): boolean {
 }
 
 function spawnOllamaAuthProxy(token: string): number | null {
+  // Clear any stale status file so a read after this spawn observes the new
+  // proxy's exit reason (or finds no file when the proxy starts cleanly).
+  try {
+    fs.unlinkSync(PROXY_STATUS_PATH);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+  }
   const child = spawnDetachedNodeAdapter({
     scriptPath: path.join(SCRIPTS, "ollama-auth-proxy.js"),
     env: {
       OLLAMA_PROXY_TOKEN: token,
       OLLAMA_PROXY_PORT: String(OLLAMA_PROXY_PORT),
       OLLAMA_BACKEND_PORT: String(OLLAMA_PORT),
+      NEMOCLAW_OLLAMA_PROXY_STATUS_FILE: PROXY_STATUS_PATH,
     },
     buildEnv: buildSubprocessEnv,
   });
   persistProxyPid(child.pid);
   return child.pid ?? null;
+}
+
+/**
+ * Read the structured exit status the proxy script writes to PROXY_STATUS_PATH
+ * before a non-zero exit. Returns null when the file is absent or unparseable
+ * so the caller can fall back to the generic "exited during startup" message.
+ */
+type ProxyExitStatus = { reason: string; details?: string; exitedAt?: number };
+function readProxyExitStatus(): ProxyExitStatus | null {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(PROXY_STATUS_PATH, "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed.reason === "string") {
+      return {
+        reason: parsed.reason,
+        details: typeof parsed.details === "string" ? parsed.details : undefined,
+        exitedAt: typeof parsed.exitedAt === "number" ? parsed.exitedAt : undefined,
+      };
+    }
+  } catch {
+    // unparseable — fall through to null
+  }
+  return null;
+}
+
+/**
+ * Render proxy startup-failure remediation. When the proxy script wrote a
+ * structured reason (e.g. backend-not-loopback per #6014), surface it as the
+ * primary message. Otherwise fall back to the generic owner-or-port message
+ * the caller already prints.
+ */
+function printProxyStartupReason(status: ProxyExitStatus | null): boolean {
+  if (status === null) return false;
+  if (status.reason === "backend-not-loopback") {
+    console.error("  Error: Ollama auth proxy refused to start.");
+    console.error(
+      `  Ollama is reachable on a non-loopback interface on the host (${
+        status.details || "see proxy log"
+      }), which would bypass the proxy's token check entirely.`,
+    );
+    console.error(
+      `  Remediation: bind Ollama to loopback only. On Linux, set OLLAMA_HOST=127.0.0.1:${OLLAMA_PORT} ` +
+        "in the Ollama systemd unit's [Service] section. On other platforms, set OLLAMA_HOST=127.0.0.1 " +
+        "in the launcher's environment before starting Ollama.",
+    );
+    return true;
+  }
+  console.error(`  Error: Ollama auth proxy exited during startup: ${status.reason}`);
+  if (status.details) console.error(`  Details: ${status.details}`);
+  return true;
 }
 
 function killStaleProxy(): void {
@@ -286,15 +357,23 @@ function startOllamaAuthProxy(): boolean {
       sleep(1); // alive but not yet bound — give a slow host more time
       continue;
     }
-    // The spawned proxy is gone. If it lost an EADDRINUSE race the blocker may
-    // be an IPv6 dual-stack listener, so use the broad scope to name the owner.
-    const owners = inspectForeignProxyPortOwners("any");
-    if (owners.pids.length > 0) {
-      printProxyPortConflict(owners);
+    // The spawned proxy is gone. Three failure modes, in priority order:
+    //   1. #6014 backend-bind probe failed (or any structured reason the
+    //      proxy wrote to PROXY_STATUS_PATH before exit)
+    //   2. Port conflict (EADDRINUSE race lost after pre-check)
+    //   3. Generic "exited during startup" without a structured reason
+    const status = readProxyExitStatus();
+    if (printProxyStartupReason(status)) {
+      // Already rendered above.
     } else {
-      console.error(`  Error: Ollama auth proxy exited during startup on :${OLLAMA_PROXY_PORT}.`);
-      console.error("  Containers will not be able to reach Ollama without the proxy.");
-      console.error(`  Check the proxy port owner: lsof -ti :${OLLAMA_PROXY_PORT}`);
+      const owners = inspectForeignProxyPortOwners("any");
+      if (owners.pids.length > 0) {
+        printProxyPortConflict(owners);
+      } else {
+        console.error(`  Error: Ollama auth proxy exited during startup on :${OLLAMA_PROXY_PORT}.`);
+        console.error("  Containers will not be able to reach Ollama without the proxy.");
+        console.error(`  Check the proxy port owner: lsof -ti :${OLLAMA_PROXY_PORT}`);
+      }
     }
     return false;
   }
