@@ -1309,6 +1309,112 @@ console.log = () => {};
     );
   });
 
+  it("setupPoliciesWithSelection tier-switch upgrade from recorded restricted to fresh balanced keeps balanced presets unsuppressed", () => {
+    const policiesPath = JSON.stringify(path.join(repoRoot, "src", "lib", "policy", "index.ts"));
+    const script =
+      buildPreamble({
+        tierEnv: "balanced",
+        policyMode: "suggested",
+        stubOpenshellBin: true,
+        runCaptureReturn: "Running",
+      }) +
+      String.raw`
+registry.getSandbox = () => ({ name: "test-sb", policyTier: "restricted" });
+
+const policies = require(${policiesPath});
+const appliedCalls = [];
+const removedCalls = [];
+policies.applyPreset = (_sandbox, name) => { appliedCalls.push(name); return true; };
+policies.applyPresets = (_sandbox, names) => { for (const name of names) appliedCalls.push(name); return true; };
+policies.removePreset = (_sandbox, name) => { removedCalls.push(name); return true; };
+policies.getAppliedPresets = () => [];
+
+console.log = () => {};
+
+(async () => {
+  try {
+    const applied = await setupPoliciesWithSelection("test-sb", {
+      agent: "openclaw",
+      selectedPresets: null,
+    });
+    process.stdout.write(JSON.stringify({ applied, appliedCalls, removedCalls }) + "\n");
+  } catch (err) {
+    process.stdout.write(JSON.stringify({ error: err.message }) + "\n");
+  }
+})();
+`;
+    const result = runScript(script);
+    assert.equal(result.status, 0, result.stderr);
+    const payload = JSON.parse(result.stdout.trim());
+    assert.ok(!payload.error, `unexpected error: ${payload.error}`);
+    assert.ok(
+      payload.applied.includes("npm"),
+      `tier-switch from restricted to balanced must apply balanced presets; got: ${JSON.stringify(payload.applied)}`,
+    );
+    assert.ok(
+      payload.applied.includes("openclaw-pricing"),
+      `tier-switch upgrade must not suppress openclaw-pricing on balanced; got: ${JSON.stringify(payload.applied)}`,
+    );
+    assert.ok(
+      !payload.removedCalls.includes("openclaw-pricing"),
+      `tier-switch upgrade must not remove openclaw-pricing on balanced; got: ${JSON.stringify(payload.removedCalls)}`,
+    );
+  });
+
+  it("setupPoliciesWithSelection restricted tier filters extraSelected-style preservation of previously-applied openclaw-pricing", () => {
+    // The non-interactive preservation loop in setupPoliciesWithSelectionInner
+    // mirrors the interactive `extraSelected` carry-forward: previously-applied
+    // presets are folded back into `chosen` unless tier suppression bars them.
+    // This regression covers the restricted-tier filter so a sandbox that
+    // already had openclaw-pricing live cannot reintroduce it through the
+    // preservation path.
+    const policiesPath = JSON.stringify(path.join(repoRoot, "src", "lib", "policy", "index.ts"));
+    const script =
+      buildPreamble({
+        tierEnv: "restricted",
+        policyMode: "suggested",
+        stubOpenshellBin: true,
+        runCaptureReturn: "Running",
+      }) +
+      String.raw`
+registry.getSandbox = () => ({ name: "test-sb", policyTier: "restricted" });
+
+const policies = require(${policiesPath});
+const appliedCalls = [];
+const removedCalls = [];
+policies.applyPreset = (_sandbox, name) => { appliedCalls.push(name); return true; };
+policies.applyPresets = (_sandbox, names) => { for (const name of names) appliedCalls.push(name); return true; };
+policies.removePreset = (_sandbox, name) => { removedCalls.push(name); return true; };
+policies.getAppliedPresets = () => ["openclaw-pricing"];
+
+console.log = () => {};
+
+(async () => {
+  try {
+    const applied = await setupPoliciesWithSelection("test-sb", {
+      agent: "openclaw",
+      selectedPresets: null,
+    });
+    process.stdout.write(JSON.stringify({ applied, appliedCalls, removedCalls }) + "\n");
+  } catch (err) {
+    process.stdout.write(JSON.stringify({ error: err.message }) + "\n");
+  }
+})();
+`;
+    const result = runScript(script);
+    assert.equal(result.status, 0, result.stderr);
+    const payload = JSON.parse(result.stdout.trim());
+    assert.ok(!payload.error, `unexpected error: ${payload.error}`);
+    assert.ok(
+      !payload.applied.includes("openclaw-pricing"),
+      `restricted extraSelected-style preservation must drop openclaw-pricing; got: ${JSON.stringify(payload.applied)}`,
+    );
+    assert.ok(
+      payload.removedCalls.includes("openclaw-pricing"),
+      `restricted extraSelected-style preservation must call removePreset for openclaw-pricing; got: ${JSON.stringify(payload.removedCalls)}`,
+    );
+  });
+
   it("setupPoliciesWithSelection restricted resume with NEMOCLAW_OPENCLAW_OTEL=1 excludes openclaw-diagnostics-otel-local", () => {
     const policiesPath = JSON.stringify(path.join(repoRoot, "src", "lib", "policy", "index.ts"));
     const script =

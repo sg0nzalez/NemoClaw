@@ -536,6 +536,41 @@ describe("onboard policy preset suggestions", () => {
       });
       expect(suggestions).toEqual([]);
     });
+
+    it("interactive preservation on restricted tier does not include suppressed presets in extraSelected carry-forward", () => {
+      // Mirrors the setupPoliciesWithSelectionInner interactive path: the
+      // operator's appliedForPreservation list (the live applied presets that
+      // would otherwise be carried forward) must not reintroduce the
+      // restricted-tier-suppressed presets into the interactive choice.
+      const appliedForPreservation = [
+        "npm",
+        "openclaw-pricing",
+        "openclaw-diagnostics-otel-local",
+        "pypi",
+      ];
+      const filtered = filterSuppressedAgentRequiredPresets(
+        appliedForPreservation,
+        "restricted",
+        "openclaw",
+      );
+      expect(filtered).toEqual(["npm", "pypi"]);
+      expect(filtered).not.toContain("openclaw-pricing");
+      expect(filtered).not.toContain("openclaw-diagnostics-otel-local");
+    });
+
+    it("interactive preservation tier-switch from restricted to balanced keeps previously-applied openclaw-pricing", () => {
+      // Tier upgrade path: when the operator switches the recorded restricted
+      // tier to balanced, the freshly-selected tierName is what drives the
+      // suppression filter. mergeRequiredSetupPolicyPresets receives the new
+      // tier and therefore must not re-suppress balanced presets that include
+      // openclaw-pricing.
+      const merged = mergeRequiredSetupPolicyPresets(
+        ["npm", "openclaw-pricing"],
+        { agent: "openclaw", tierName: "balanced" },
+      );
+      expect(merged).toContain("openclaw-pricing");
+      expect(merged).toContain("npm");
+    });
   });
 
   describe("suppressedAgentRequiredPresets", () => {

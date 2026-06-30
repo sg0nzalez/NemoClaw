@@ -60,4 +60,80 @@ describe("handlePoliciesState — restricted resume reconciliation", () => {
       expect.objectContaining({ selectedPresets: [] }),
     );
   });
+
+  it("forces setup reconciliation when resume-selection lookup throws on restricted tier", async () => {
+    const session = createSession({ policyPresets: [] });
+    const prepareResume = vi.fn(() => {
+      throw new Error("sandbox not ready");
+    });
+    const appliedCheck = vi.fn(() => true);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const { deps, calls, setSession } = createDeps({
+        preparePolicyPresetResumeSelection: prepareResume,
+        arePolicyPresetsApplied: appliedCheck,
+        getActiveSandbox: vi.fn(() => ({
+          messaging: { plan: makeMessagingPlan("my-assistant", []) },
+          policyTier: "restricted",
+        })),
+      });
+      setSession(session);
+
+      await handlePoliciesState({ ...baseOptions(deps), resume: true });
+
+      expect(prepareResume).toHaveBeenCalled();
+      expect(appliedCheck).not.toHaveBeenCalled();
+      expect(calls.skipped).not.toHaveBeenCalled();
+      expect(calls.recordSkip).not.toHaveBeenCalled();
+      expect(calls.setupPolicies).toHaveBeenCalledWith(
+        "my-assistant",
+        expect.objectContaining({ selectedPresets: [] }),
+      );
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("resume-selection lookup failed"),
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("forces setup reconciliation when applied-presets check throws on restricted tier", async () => {
+    const session = createSession({ policyPresets: ["dns"] });
+    const prepareResume = vi.fn(() => ({
+      policyPresets: ["dns"],
+      recordedPolicyPresetsNeedReconcile: false,
+      disabledMessagingPolicyPresetApplied: false,
+      suppressedAgentRequiredPresetsLive: false,
+    }));
+    const appliedCheck = vi.fn(() => {
+      throw new Error("policy list unavailable");
+    });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const { deps, calls, setSession } = createDeps({
+        preparePolicyPresetResumeSelection: prepareResume,
+        arePolicyPresetsApplied: appliedCheck,
+        getActiveSandbox: vi.fn(() => ({
+          messaging: { plan: makeMessagingPlan("my-assistant", []) },
+          policyTier: "restricted",
+        })),
+      });
+      setSession(session);
+
+      await handlePoliciesState({ ...baseOptions(deps), resume: true });
+
+      expect(appliedCheck).toHaveBeenCalledWith("my-assistant", ["dns"]);
+      expect(calls.skipped).not.toHaveBeenCalled();
+      expect(calls.recordSkip).not.toHaveBeenCalled();
+      expect(calls.setupPolicies).toHaveBeenCalledWith(
+        "my-assistant",
+        expect.objectContaining({ selectedPresets: ["dns"] }),
+      );
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("applied-presets check failed"),
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
 });

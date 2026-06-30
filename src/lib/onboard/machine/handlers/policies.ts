@@ -161,23 +161,57 @@ export async function handlePoliciesState<Agent, WebSearchConfig>({
     agent,
   });
 
-  const policyResumeSelection = deps.preparePolicyPresetResumeSelection(sandboxName, {
-    recordedPolicyPresets,
-    disabledChannels,
-    enabledChannels: policyMessagingChannels,
-    hermesToolGateways,
-    agent: normalizeAgentName((agent as { name?: string } | null)?.name),
-    webSearchConfig,
-    webSearchSupported,
-    tierName: activeSandbox?.policyTier ?? null,
-  });
+  const recordedTierName = activeSandbox?.policyTier ?? null;
+  // Fail-closed on resume-detection errors: if the registry / OpenShell lookup
+  // throws transiently (sandbox not ready, list unavailable), refuse to take
+  // the resume-skip branch and force setupPoliciesWithSelection to run. That
+  // path re-applies tier suppression, so restricted sandboxes cannot silently
+  // retain suppressed agent-required presets when reconciliation telemetry is
+  // unavailable.
+  let policyResumeSelection: PolicyResumeSelection;
+  try {
+    policyResumeSelection = deps.preparePolicyPresetResumeSelection(sandboxName, {
+      recordedPolicyPresets,
+      disabledChannels,
+      enabledChannels: policyMessagingChannels,
+      hermesToolGateways,
+      agent: normalizeAgentName((agent as { name?: string } | null)?.name),
+      webSearchConfig,
+      webSearchSupported,
+      tierName: recordedTierName,
+    });
+  } catch (error) {
+    console.warn(
+      `policies: resume-selection lookup failed for sandbox '${sandboxName}' (tier=${recordedTierName ?? "unknown"}); forcing reconciliation. ${error instanceof Error ? error.message : String(error)}`,
+    );
+    policyResumeSelection = {
+      policyPresets: Array.isArray(recordedPolicyPresets) ? recordedPolicyPresets : [],
+      recordedPolicyPresetsNeedReconcile: true,
+      disabledMessagingPolicyPresetApplied: false,
+      suppressedAgentRequiredPresetsLive: false,
+    };
+  }
   const recordedPolicyPresetsForSupport = policyResumeSelection.policyPresets;
-  const resumePolicies =
+  let appliedCheckResult = false;
+  if (
     resume &&
     !policyResumeSelection.recordedPolicyPresetsNeedReconcile &&
     !policyResumeSelection.disabledMessagingPolicyPresetApplied &&
-    !policyResumeSelection.suppressedAgentRequiredPresetsLive &&
-    deps.arePolicyPresetsApplied(sandboxName, recordedPolicyPresetsForSupport);
+    !policyResumeSelection.suppressedAgentRequiredPresetsLive
+  ) {
+    try {
+      appliedCheckResult = deps.arePolicyPresetsApplied(
+        sandboxName,
+        recordedPolicyPresetsForSupport,
+      );
+    } catch (error) {
+      console.warn(
+        `policies: applied-presets check failed for sandbox '${sandboxName}' (tier=${recordedTierName ?? "unknown"}); forcing reconciliation. ${error instanceof Error ? error.message : String(error)}`,
+      );
+      appliedCheckResult = false;
+    }
+  }
+  const resumePolicies = appliedCheckResult;
 
   let appliedPolicyPresets = recordedPolicyPresetsForSupport;
   let session: Session | null;
