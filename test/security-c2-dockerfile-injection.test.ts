@@ -120,35 +120,36 @@ describe("C-2 fix: env var pattern (process.env) is safe", () => {
 // 4. Gateway auth hardening — no hardcoded insecure defaults (#117)
 // ═══════════════════════════════════════════════════════════════════
 describe("Gateway auth hardening: Dockerfile must not hardcode insecure auth defaults", () => {
-  it("NEMOCLAW_DISABLE_DEVICE_AUTH is promoted to ENV before the config generator RUN layer", () => {
+  it("NEMOCLAW_DISABLE_DEVICE_AUTH is available to config generation without early ENV cache busting", () => {
     const src = fs.readFileSync(DOCKERFILE, "utf-8");
     const lines = src.split("\n");
-    let promoted = false;
-    let inEnvBlock = false;
-    for (let i = 0; i < lines.length; i++) {
+
+    let argLine = -1;
+    let generatorLine = -1;
+    let runtimeEnvLine = -1;
+    for (let i = 0; i < lines.length; i += 1) {
       const line = lines[i];
-      if (/^\s*FROM\b/.test(line)) {
-        promoted = false;
-        inEnvBlock = false;
-      }
-      if (/^\s*ENV\b/.test(line)) {
-        inEnvBlock = true;
-      }
-      if (inEnvBlock && /NEMOCLAW_DISABLE_DEVICE_AUTH[=\s]/.test(line)) {
-        promoted = true;
-      }
-      if (inEnvBlock && !/\\\s*$/.test(line)) {
-        inEnvBlock = false;
+      if (/^\s*ARG\s+NEMOCLAW_DISABLE_DEVICE_AUTH=/.test(line)) {
+        argLine = i;
       }
       if (
         /^\s*RUN\b.*node\s+--experimental-strip-types\s+\/scripts\/generate-openclaw-config\.mts\b/.test(
           line,
         )
       ) {
-        expect(promoted).toBeTruthy();
-        return;
+        generatorLine = i;
+      }
+      if (/NEMOCLAW_DISABLE_DEVICE_AUTH=\$\{NEMOCLAW_DISABLE_DEVICE_AUTH\}/.test(line)) {
+        runtimeEnvLine = i;
       }
     }
-    throw new Error("expected generate-openclaw-config RUN layer");
+
+    const hasCacheSafeConfigBoundary =
+      argLine >= 0 &&
+      generatorLine >= 0 &&
+      runtimeEnvLine >= 0 &&
+      argLine < generatorLine &&
+      generatorLine < runtimeEnvLine;
+    expect(hasCacheSafeConfigBoundary).toBeTruthy();
   });
 });
