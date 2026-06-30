@@ -67,6 +67,7 @@ function createDeps(overrides: Partial<PoliciesStateOptions<Agent, WebSearchConf
           "unsupported",
         ),
         disabledMessagingPolicyPresetApplied: false,
+        suppressedAgentRequiredPresetsLive: false,
       }),
     ),
     appliedCheck: vi.fn(() => false),
