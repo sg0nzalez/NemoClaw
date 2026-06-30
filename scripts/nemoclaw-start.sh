@@ -2499,7 +2499,10 @@ if [ "$(id -u)" -ne 0 ]; then
   lock_rc_files "$_SANDBOX_HOME" || true
 
   if [ ${#NEMOCLAW_CMD[@]} -gt 0 ]; then
-    exec "${NEMOCLAW_CMD[@]}"
+    "${NEMOCLAW_CMD[@]}"
+    _nemoclaw_cmd_rc=$?
+    normalize_mutable_config_perms
+    exit $_nemoclaw_cmd_rc
   fi
 
   configure_messaging_channels
@@ -2604,7 +2607,10 @@ gosu sandbox bash -c "$(declare -f write_auth_profile harden_auth_profiles); wri
 
 # If a command was passed (e.g., "openclaw agent ..."), run it as sandbox user
 if [ ${#NEMOCLAW_CMD[@]} -gt 0 ]; then
-  exec gosu sandbox "${NEMOCLAW_CMD[@]}"
+  gosu sandbox "${NEMOCLAW_CMD[@]}"
+  _nemoclaw_cmd_rc=$?
+  normalize_mutable_config_perms
+  exit $_nemoclaw_cmd_rc
 fi
 
 # Gateway log: owned by gateway user, world-readable for diagnostics.
