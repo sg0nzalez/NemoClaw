@@ -1,12 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
+import { describe, expect, it } from "vitest";
 
 import {
-  readYaml,
   type CompositeAction,
+  readYaml,
   type WorkflowJob,
   type WorkflowStep,
 } from "./helpers/e2e-workflow-contract";
@@ -151,6 +151,9 @@ describe("pull request and main workflow contracts", () => {
       ".github/actions/ci-installer-integration/action.yaml",
     ),
   };
+  const resolveHermesBaseAction = readYaml<CompositeAction>(
+    ".github/actions/resolve-hermes-base-image/action.yaml",
+  );
 
   it("routes only code-changing PRs through the code-check path", () => {
     const filterStep = prWorkflow.jobs.changes.steps?.find((step) => step.id === "filter");
@@ -416,6 +419,7 @@ describe("pull request and main workflow contracts", () => {
     expect(buildRuns.join("\n")).toContain("cd nemoclaw && npm install --ignore-scripts");
     expect(buildRuns).toContain("cd nemoclaw && npm run build");
     expect(buildRuns).toContain("npm run build:cli");
+    expect(buildRuns).toContain("npx vitest run --project package-contract");
     expect(buildRuns).toContain("npm run typecheck:cli");
     expect(buildRuns).toContain("cd nemoclaw && npx tsc --noEmit --incremental");
     expect(buildRuns).toContain("npx tsc -p jsconfig.json");
@@ -424,7 +428,9 @@ describe("pull request and main workflow contracts", () => {
     expect(cliShardRuns).toContain("cd nemoclaw && npm run build");
     expect(cliShardRuns).toContain("npm run build:cli");
     expect(cliShardRuns).toContain("npx tsx scripts/check-dist-sourcemaps.ts dist");
-    expect(cliShardRuns).toContain("npx vitest run --project cli");
+    expect(cliShardRuns).toContain("npx vitest run --project cli --project integration");
+    expect(cliShardRuns).toContain('--coverage.include="src/**/*.ts"');
+    expect(cliShardRuns).not.toContain('--coverage.include="dist/lib/**/*.js"');
     expect(cliShardRuns).toContain('--shard="${CLI_SHARD}/${CLI_SHARD_COUNT}"');
     expect(cliShardRuns).toContain("--reporter=github-actions");
     expect(cliShardRuns).toContain("--reporter=blob");
@@ -446,6 +452,8 @@ describe("pull request and main workflow contracts", () => {
     expect(cliMergeRuns).toContain("--reporter=json");
     expect(cliMergeRuns).toContain("--outputFile.json=coverage/cli/vitest-results.json");
     expect(cliMergeRuns).toContain("--coverage.reportsDirectory=coverage/cli");
+    expect(cliMergeRuns).toContain('--coverage.include="src/**/*.ts"');
+    expect(cliMergeRuns).not.toContain('--coverage.include="dist/lib/**/*.js"');
     expect(cliMergeRuns).toContain(
       'scripts/check-coverage-ratchet.ts coverage/cli/coverage-summary.json ci/coverage-threshold-cli.json "CLI coverage"',
     );
@@ -478,12 +486,15 @@ describe("pull request and main workflow contracts", () => {
     );
     expect(vitestConfig).toContain('name: "installer-integration"');
 
-    // E2E fixture/support tests remain part of the sharded CLI project:
-    // they live under test/e2e-scenario, while the CLI project only excludes
-    // the legacy test/e2e tree and installer-integration tests.
-    expect(cliShardRuns).toContain("npx vitest run --project cli");
-    expect(vitestConfig).toContain('name: "e2e-vitest-support"');
-    expect(vitestConfig).toContain('include: ["test/**/*.test.{js,ts}", "src/**/*.test.ts"]');
+    // Source and integration coverage are sharded together, while support,
+    // installer, package, and live projects remain disjoint explicit lanes.
+    expect(cliShardRuns).toContain("npx vitest run --project cli --project integration");
+    expect(vitestConfig).toContain('name: "cli"');
+    expect(vitestConfig).toContain('include: ["src/**/*.test.ts"]');
+    expect(vitestConfig).toContain('name: "integration"');
+    expect(vitestConfig).toContain('include: ["test/**/*.test.{js,ts}"]');
+    expect(vitestConfig).toContain('name: "e2e-support"');
+    expect(vitestConfig).toContain('name: "package-contract"');
     expect(vitestConfig).toContain('"test/e2e/**"');
     expect(vitestConfig).toContain('"test/install-express-prompt.test.ts"');
     expect(vitestConfig).toContain('"test/install-preflight.test.ts"');
@@ -661,6 +672,16 @@ describe("pull request and main workflow contracts", () => {
       expect(mainChecksRun).toContain(`require_success "${jobName}"`);
     }
     expect(mainWorkflow.jobs["sandbox-images-and-e2e"].needs).toBe("checks");
+  });
+
+  it("exports immutable GHCR digests from the Hermes base resolver", () => {
+    const runs = stepRuns(resolveHermesBaseAction).join("\n");
+
+    expect(runs).toContain("docker image inspect");
+    expect(runs).toContain("${image}@sha256:");
+    expect(runs).toContain("layout_ok");
+    expect(runs).toContain("HERMES_BASE_IMAGE=${digest_ref}");
+    expect(runs).toContain("HERMES_BASE_IMAGE=nemoclaw-hermes-base-local");
   });
 
   it("does not run npm lifecycle scripts during CI dependency installs", () => {

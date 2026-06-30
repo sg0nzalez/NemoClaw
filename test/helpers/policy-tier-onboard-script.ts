@@ -48,12 +48,12 @@ export function buildPolicyTierOnboardPreamble({
   runCaptureReturn?: string;
 } = {}): string {
   const repoRoot = policyTierOnboardScriptRepoRoot;
-  const credPath = JSON.stringify(path.join(repoRoot, "dist", "lib", "credentials", "store.js"));
-  const runnerPath = JSON.stringify(path.join(repoRoot, "dist", "lib", "runner.js"));
-  const registryPath = JSON.stringify(path.join(repoRoot, "dist", "lib", "state", "registry.js"));
-  const onboardPath = JSON.stringify(path.join(repoRoot, "dist", "lib", "onboard.js"));
+  const credPath = JSON.stringify(path.join(repoRoot, "src", "lib", "credentials", "store.ts"));
+  const runnerPath = JSON.stringify(path.join(repoRoot, "src", "lib", "runner.ts"));
+  const registryPath = JSON.stringify(path.join(repoRoot, "src", "lib", "state", "registry.ts"));
+  const onboardPath = JSON.stringify(path.join(repoRoot, "src", "lib", "onboard.ts"));
   const resolveOpenshellPath = JSON.stringify(
-    path.join(repoRoot, "dist", "lib", "adapters", "openshell", "resolve.js"),
+    path.join(repoRoot, "src", "lib", "adapters", "openshell", "resolve.ts"),
   );
 
   const openshellStub = stubOpenshellBin

@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 
 const { computeSetupPresetSuggestions, filterSetupPolicyPresets, getSuggestedPolicyPresets } =
-  require("../dist/lib/onboard") as {
+  require("../src/lib/onboard") as {
     computeSetupPresetSuggestions: (
       tierName: string,
       options: {
@@ -30,7 +30,7 @@ const { computeSetupPresetSuggestions, filterSetupPolicyPresets, getSuggestedPol
     }) => string[];
   };
 const { mergeRequiredSetupPolicyPresets, suppressedAgentRequiredPresets } =
-  require("../dist/lib/onboard/policy-selection") as {
+  require("../src/lib/onboard/policy-selection") as {
     mergeRequiredSetupPolicyPresets: (
       policyPresets: string[],
       options?: {
@@ -48,7 +48,7 @@ const { mergeRequiredSetupPolicyPresets, suppressedAgentRequiredPresets } =
     ) => string[];
   };
 const { agentRequiredPresetAdditions, filterSuppressedAgentRequiredPresets } =
-  require("../dist/lib/onboard/policy-tier-suppression") as {
+  require("../src/lib/onboard/policy-tier-suppression") as {
     agentRequiredPresetAdditions: (
       agent: string | null | undefined,
       env: NodeJS.ProcessEnv,
@@ -78,13 +78,12 @@ function withOpenclawOtelEnv<T>(value: string | undefined, body: () => T): T {
     setOrUnset(endpointKey, originalEndpoint);
   }
 }
-const { filterSetupPolicyPresetsForAgent } =
-  require("../dist/lib/onboard/agent-policy-presets") as {
-    filterSetupPolicyPresetsForAgent: <T extends { name: string }>(
-      presets: T[],
-      agent?: string | null,
-    ) => T[];
-  };
+const { filterSetupPolicyPresetsForAgent } = require("../src/lib/onboard/agent-policy-presets") as {
+  filterSetupPolicyPresetsForAgent: <T extends { name: string }>(
+    presets: T[],
+    agent?: string | null,
+  ) => T[];
+};
 
 describe("onboard policy preset suggestions", () => {
   const known = [

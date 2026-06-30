@@ -11,7 +11,7 @@ import {
   runPolicyTierOnboardScript as runScript,
 } from "./helpers/policy-tier-onboard-script";
 
-const policiesPath = JSON.stringify(path.join(repoRoot, "dist", "lib", "policy", "index.js"));
+const policiesPath = JSON.stringify(path.join(repoRoot, "src", "lib", "policy", "index.ts"));
 
 function buildRestrictedOpenclawScript({
   applied,
