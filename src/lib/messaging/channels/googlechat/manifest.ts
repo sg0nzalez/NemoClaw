@@ -152,6 +152,25 @@ export const googlechatManifest = {
         configKeys: ["googlechat"],
         logPatterns: ["googlechat"],
       },
+      // Interim sandbox-DNS workaround: the sandbox netns is DNS-less (all
+      // resolution goes through the L7 proxy), but OpenClaw's Google Chat cert
+      // verification does a LOCAL getaddrinfo first and fails with EAI_AGAIN, so
+      // the bot can never verify inbound JWTs. This boot preload answers ONLY the
+      // googleapis hosts with a public sentinel IP so the SSRF gate passes; the
+      // real connection is still made by the proxy by hostname. Remove once the
+      // upstream OpenClaw fix (trusted-env-proxy cert fetch, like web_fetch
+      // openclaw#50650) ships. See runtime/googlechat-dns-resolve.ts for details.
+      nodePreloads: [
+        {
+          module: "googlechat-dns-resolve",
+          injectInto: ["boot"],
+          optional: false,
+          installMessage:
+            "[channels] Installing Google Chat DNS resolver shim (interim sandbox DNS workaround)",
+          installedMessage:
+            "[channels] Google Chat DNS resolver shim installed (NODE_OPTIONS updated)",
+        },
+      ],
       secretScans: [
         {
           path: "/sandbox/.openclaw/openclaw.json",

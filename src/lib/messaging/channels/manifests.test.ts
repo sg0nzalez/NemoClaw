@@ -900,6 +900,12 @@ describe("built-in channel manifests", () => {
     ]);
 
     expectOpenClawRuntimeVisibility(googlechatManifest, ["googlechat"], ["googlechat"]);
+    expectOpenClawNodePreload(googlechatManifest, "googlechat-dns-resolve");
+    expect(
+      googlechatManifest.runtime?.openclaw?.nodePreloads?.find(
+        (preload) => preload.module === "googlechat-dns-resolve",
+      )?.injectInto,
+    ).toEqual(["boot"]);
     expect(JSON.stringify(googlechatManifest.runtime?.openclaw?.secretScans)).toContain(
       "BEGIN (?:RSA )?PRIVATE KEY",
     );
