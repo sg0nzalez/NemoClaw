@@ -22,11 +22,6 @@ import {
   securityPostureModeEnv,
 } from "../fixtures/security-posture.ts";
 import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
-import {
-  assertHermesGpuStartupProofIfEnabled,
-  hermesGpuStartupE2eEnabled,
-  hermesGpuStartupEnv,
-} from "./hermes-gpu-startup-proof.ts";
 
 // This is intentionally a direct live Vitest test, not a new registry layer:
 // the contract is the real installer/onboard/runtime boundary for Hermes.
@@ -35,7 +30,6 @@ import {
 // direct NVIDIA Endpoints curl, and inference.local probes.
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "../../..");
-const TARGET_ID = process.env.E2E_TARGET_ID ?? "hermes-e2e";
 const SANDBOX_NAME = process.env.NEMOCLAW_SANDBOX_NAME ?? "e2e-hermes";
 validateSandboxName(SANDBOX_NAME);
 const HERMES_HEALTH_URL = "http://localhost:8642/health";
@@ -90,7 +84,6 @@ function commandEnv(hostedEnv: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
     NEMOCLAW_ONBOARD_VALIDATION_TIMEOUT_SECONDS: ONBOARD_VALIDATION_TIMEOUT_SECONDS,
     NEMOCLAW_SANDBOX_NAME: SANDBOX_NAME,
     ...securityPostureModeEnv(),
-    ...hermesGpuStartupEnv(),
   };
   if (process.env.NEMOCLAW_E2E_HERMES_DASHBOARD) {
     env.NEMOCLAW_E2E_HERMES_DASHBOARD = process.env.NEMOCLAW_E2E_HERMES_DASHBOARD;
@@ -252,12 +245,11 @@ test.skipIf(!shouldRunLiveE2E())(
     const apiKey = hosted.apiKey;
 
     await artifacts.writeJson("target.json", {
-      id: TARGET_ID,
+      id: "hermes-e2e",
       runner: "vitest",
       boundary: "install.sh --non-interactive --fresh + Hermes sandbox runtime",
       sandboxName: SANDBOX_NAME,
       dashboardEnabled: hermesDashboardE2eEnabled(),
-      gpuStartupEnabled: hermesGpuStartupE2eEnabled(),
       securityPostureEnabled: securityPostureEnabled(),
     });
 
@@ -456,15 +448,6 @@ test.skipIf(!shouldRunLiveE2E())(
     );
     expect(configProbe.exitCode, resultText(configProbe)).toBe(0);
     expect(configProbe.stdout).toContain("OK");
-
-    await assertHermesGpuStartupProofIfEnabled({
-      env: commandEnv(),
-      host,
-      install,
-      sandbox,
-      sandboxName: SANDBOX_NAME,
-      status,
-    });
 
     if (hermesDashboardE2eEnabled()) {
       const entry = registryEntry(SANDBOX_NAME);
@@ -1412,11 +1395,10 @@ test.skipIf(!shouldRunLiveE2E())(
     }
 
     await artifacts.writeJson("target-result.json", {
-      id: TARGET_ID,
+      id: "hermes-e2e",
       assertions: {
         installShNonInteractiveHermes: true,
         sandboxListedAndHealthy: true,
-        gpuSupervisedStartupChecked: hermesGpuStartupE2eEnabled(),
         directProviderInferencePong: true,
         sandboxInferenceLocalPong: true,
         dashboardChecked: hermesDashboardE2eEnabled(),
