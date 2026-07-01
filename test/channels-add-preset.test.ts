@@ -12,6 +12,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, it } from "vitest";
+const OPENCLAW_IDS = ["telegram", "discord", "wechat", "slack", "whatsapp", "teams", "googlechat"];
 
 const repoRoot = path.join(import.meta.dirname, "..");
 const j = (p: string) =>
@@ -299,7 +300,6 @@ const ctx = module.exports;
     const result = runScript(script);
     assert.equal(result.status, 0, `script failed: ${result.stderr}\n${result.stdout}`);
     const payload = parseResultPayload(result);
-
     assert.deepEqual(payload.buildPlanCalls, [
       {
         sandboxName: "test-sb",
@@ -308,15 +308,7 @@ const ctx = module.exports;
         isInteractive: false,
         configuredChannels: ["slack"],
         disabledChannels: [],
-        supportedChannelIds: [
-          "telegram",
-          "discord",
-          "wechat",
-          "slack",
-          "whatsapp",
-          "teams",
-          "googlechat",
-        ],
+        supportedChannelIds: OPENCLAW_IDS,
       },
     ]);
   });
