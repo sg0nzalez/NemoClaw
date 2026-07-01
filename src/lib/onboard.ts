@@ -1210,6 +1210,7 @@ function stopDockerDriverGatewayProcess(): boolean {
   }
 
   const stopped = terminateDockerDriverGatewayProcess(pid);
+  if (!stopped) console.warn("  ⚠ Docker-driver gateway cleanup did not stop the process.");
   clearDockerDriverGatewayRuntimeFiles();
   return stopped;
 }
@@ -2172,11 +2173,9 @@ async function startDockerDriverGateway({
   const identityGatewayBin = runtimeIdentity?.identityGatewayBin ?? gatewayBin;
   const { verifySandboxBridgeGatewayReachableOrExit } =
     require("./onboard/gateway-sandbox-reachability") as typeof import("./onboard/gateway-sandbox-reachability");
-  // #5513: stop a gateway this run started/reused/adopted when the probe proves
-  // it unreachable, so onboarding never leaves an orphan bound to loopback.
   const sandboxBridgeProbeOptions = {
     skip: skipSandboxBridgeReachability,
-    onUnreachable: stopDockerDriverGatewayProcess,
+    onUnreachable: () => void stopDockerDriverGatewayProcess(),
   };
   if (
     await dockerDriverGatewayEnv.startPackageManagedDockerDriverGatewayWithEnvOverride({
