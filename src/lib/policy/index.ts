@@ -108,6 +108,18 @@ function parseNetworkPolicies(content: string | null | undefined): PolicyObject 
   }
 }
 
+function networkPoliciesHasAllowedIps(np: PolicyObject): boolean {
+  for (const policyVal of Object.values(np)) {
+    if (!isPolicyObject(policyVal)) continue;
+    const endpoints = (policyVal as PolicyObject).endpoints;
+    if (!Array.isArray(endpoints)) continue;
+    for (const ep of endpoints) {
+      if (isPolicyObject(ep) && Object.hasOwn(ep, "allowed_ips")) return true;
+    }
+  }
+  return false;
+}
+
 function parsePresetPolicyKeys(presetContent: string | null | undefined): string[] {
   const presetEntries = extractPresetEntries(presetContent);
   if (!presetEntries) return [];
@@ -768,6 +780,16 @@ function applyPresetContent(
     );
   }
 
+  if (options.custom) {
+    const np = parseNetworkPolicies(presetContent);
+    if (np && networkPoliciesHasAllowedIps(np)) {
+      console.error(
+        `  Preset '${presetName}' contains 'allowed_ips', which is not permitted in user-supplied presets.`,
+      );
+      return false;
+    }
+  }
+
   const presetEntries = extractPresetEntries(presetContent);
   if (!presetEntries) {
     console.error(`  Preset ${presetName} has no network_policies section.`);
@@ -1066,18 +1088,11 @@ function loadPresetFromFile(filePath: string): { presetName: string; content: st
     return null;
   }
   const np = parsed.network_policies as PolicyObject;
-  for (const [policyKey, policyVal] of Object.entries(np)) {
-    if (!isPolicyObject(policyVal)) continue;
-    const endpoints = (policyVal as PolicyObject).endpoints;
-    if (!Array.isArray(endpoints)) continue;
-    for (const ep of endpoints) {
-      if (isPolicyObject(ep) && Object.hasOwn(ep, "allowed_ips")) {
-        console.error(
-          `  Preset '${presetName}' contains 'allowed_ips' in policy '${policyKey}', which is not permitted in user-supplied presets: ${filePath}`,
-        );
-        return null;
-      }
-    }
+  if (networkPoliciesHasAllowedIps(np)) {
+    console.error(
+      `  Preset '${presetName}' contains 'allowed_ips', which is not permitted in user-supplied presets: ${filePath}`,
+    );
+    return null;
   }
   const builtin = listPresets().map((p) => p.name);
   if (builtin.includes(presetName)) {

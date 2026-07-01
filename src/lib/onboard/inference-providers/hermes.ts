@@ -34,7 +34,17 @@ export async function setupHermesProviderInference(
     try {
       parsedEndpoint = new URL(endpointUrl);
     } catch {
-      throw new Error(`Invalid inference endpoint URL: ${endpointUrl}`);
+      throw new Error(`Inference endpoint URL is not a valid URL.`);
+    }
+    if (parsedEndpoint.protocol !== "http:" && parsedEndpoint.protocol !== "https:") {
+      throw new Error(
+        `Inference endpoint URL uses an unsupported scheme. Only http and https are allowed.`,
+      );
+    }
+    if (parsedEndpoint.username || parsedEndpoint.password) {
+      throw new Error(
+        `Inference endpoint URL must not contain credentials. Remove the username and password from the URL.`,
+      );
     }
     if (isPrivateHostname(parsedEndpoint.hostname)) {
       throw new Error(

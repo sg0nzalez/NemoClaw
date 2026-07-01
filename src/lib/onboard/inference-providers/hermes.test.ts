@@ -124,7 +124,7 @@ describe("setupHermesProviderInference SSRF guard (#6072)", () => {
     ).rejects.toThrow(/private or internal/);
   });
 
-  it("throws on malformed URL", async () => {
+  it("throws on malformed URL without leaking the raw value", async () => {
     await expect(
       setupHermesProviderInference(
         {
@@ -138,7 +138,60 @@ describe("setupHermesProviderInference SSRF guard (#6072)", () => {
         },
         makeDeps() as never,
       ),
-    ).rejects.toThrow(/Invalid inference endpoint URL/);
+    ).rejects.toThrow(/valid URL/);
+  });
+
+  it("rejects unsupported scheme", async () => {
+    await expect(
+      setupHermesProviderInference(
+        {
+          sandboxName: "alpha",
+          model: "m",
+          provider: "p",
+          endpointUrl: "ftp://example.com/v1",
+          credentialEnv: null,
+          hermesAuthMethod: null,
+          hermesToolGateways: [],
+        },
+        makeDeps() as never,
+      ),
+    ).rejects.toThrow(/unsupported scheme/);
+  });
+
+  it("rejects URL with embedded credentials", async () => {
+    await expect(
+      setupHermesProviderInference(
+        {
+          sandboxName: "alpha",
+          model: "m",
+          provider: "p",
+          endpointUrl: "https://user:secret@example.com/v1",
+          credentialEnv: null,
+          hermesAuthMethod: null,
+          hermesToolGateways: [],
+        },
+        makeDeps() as never,
+      ),
+    ).rejects.toThrow(/credentials/);
+  });
+
+  it("does not call runOpenshell when endpoint is rejected", async () => {
+    const deps = makeDeps();
+    await expect(
+      setupHermesProviderInference(
+        {
+          sandboxName: "alpha",
+          model: "m",
+          provider: "p",
+          endpointUrl: "ftp://example.com/v1",
+          credentialEnv: null,
+          hermesAuthMethod: null,
+          hermesToolGateways: [],
+        },
+        deps as never,
+      ),
+    ).rejects.toThrow();
+    expect(deps.runOpenshell).not.toHaveBeenCalled();
   });
 
   it("accepts a public HTTPS endpoint", async () => {

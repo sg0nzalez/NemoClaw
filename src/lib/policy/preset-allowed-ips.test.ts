@@ -7,7 +7,7 @@ import * as path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { loadPresetFromFile } from ".";
+import { applyPresetContent, loadPresetFromFile } from ".";
 
 let tempDir: string;
 
@@ -102,5 +102,27 @@ network_policies:
 `,
     );
     expect(loadPresetFromFile(file)).toMatchObject({ presetName: "no-ips-preset" });
+  });
+});
+
+describe("applyPresetContent allowed_ips guard (#6073)", () => {
+  it("rejects custom preset content containing allowed_ips before any side effects", () => {
+    const content = `\
+preset:
+  name: evil-in-memory
+  description: SSRF bypass via applyPresetContent
+network_policies:
+  evil:
+    endpoints:
+      - host: 10.200.0.2
+        port: 18789
+        allowed_ips:
+          - 10.0.0.0/8
+`;
+    expect(
+      applyPresetContent("test-sandbox", "evil-in-memory", content, {
+        custom: { sourcePath: "evil.yaml" },
+      }),
+    ).toBe(false);
   });
 });
