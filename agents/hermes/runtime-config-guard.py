@@ -321,12 +321,9 @@ def _pid1_is_nemoclaw_start() -> bool:
             os.close(proc_pid_fd)
         if proc_root_fd >= 0:
             os.close(proc_root_fd)
-    # The Docker GPU compatibility path recreates the container with the
-    # configured child command appended to the OpenShell supervisor argv.
-    # That makes ``nemoclaw-start`` visible in PID 1's cmdline even though PID
-    # 1 remains the root OpenShell supervisor. Route that exact topology
-    # through the stricter supervisor/child proof instead of treating the
-    # child command as direct PID 1 authority.
+    # A supervisor does not gain direct-entrypoint authority merely because
+    # child-looking arguments were appended to its argv. Such a topology must
+    # satisfy the stricter supervisor/child identity proof instead.
     return (
         not _cmdline_is_openshell_supervisor(cmdline)
         and _cmdline_is_nemoclaw_start(cmdline)

@@ -412,8 +412,14 @@ function replaceEnvValue(entry: string, key: string, value: string | null | unde
 function openshellSandboxCommandEnvValue(
   command: readonly string[] | null | undefined,
 ): string | null {
-  const parts = (command || []).map((part) => String(part)).filter((part) => part.length > 0);
-  return parts.length > 0 ? parts.join(" ") : null;
+  const parts = (command || []).map((part) => String(part));
+  if (parts.length === 0) return null;
+  if (parts.some((part) => part.length === 0 || /[\s\u0085]/u.test(part))) {
+    throw new Error(
+      "OpenShell sandbox startup command tokens cannot be empty or contain whitespace.",
+    );
+  }
+  return parts.join(" ");
 }
 
 function dockerGpuHostEndpointFromOpenShellEndpoint(endpoint: string): string | null {
@@ -772,10 +778,15 @@ export function buildDockerGpuCloneRunArgs(
 
   const entrypoint = stringArray(config.Entrypoint);
   if (entrypoint.length > 0) args.push("--entrypoint", entrypoint[0]);
-  const commandArgs =
-    options.openshellSandboxCommand && options.openshellSandboxCommand.length > 0
-      ? [...options.openshellSandboxCommand]
-      : [...entrypoint.slice(1), ...stringArray(config.Cmd)];
+  // OpenShell 0.0.71's Docker driver deliberately clears Config.Cmd and passes
+  // the workload only through OPENSHELL_SANDBOX_COMMAND. Keep that contract
+  // when recreating the container: appending the same workload after the image
+  // puts `nemoclaw-start` in the supervisor's own argv. The serializer above
+  // rejects whitespace-bearing tokens because OpenShell uses split_whitespace()
+  // when reading this environment value (#6110).
+  const commandArgs = openshellSandboxCommandEnv
+    ? []
+    : [...entrypoint.slice(1), ...stringArray(config.Cmd)];
   args.push(image, ...commandArgs);
   return args;
 }
@@ -1081,22 +1092,6 @@ export function recreateOpenShellDockerSandboxWithGpu(
     const backupContainerName = buildBackupContainerName(originalName, d.now());
     context.backupContainerName = backupContainerName;
 
-    d.dockerStop(oldContainerId, {
-      ignoreError: true,
-      suppressOutput: true,
-      timeout: DOCKER_GPU_PATCH_TIMEOUT_MS,
-    });
-    const renameResult = d.dockerRename(oldContainerId, backupContainerName, {
-      ignoreError: true,
-      suppressOutput: true,
-      timeout: DOCKER_GPU_PATCH_TIMEOUT_MS,
-    });
-    if (!isZeroStatus(renameResult)) {
-      throw new Error(
-        `Could not move original sandbox container aside: ${resultText(renameResult)}`,
-      );
-    }
-
     const cloneOptions = buildDockerGpuCloneRunOptions(inspect);
     cloneOptions.openshellSandboxCommand = options.openshellSandboxCommand ?? null;
     const sandboxFallbackDns = d.detectSandboxFallbackDns();
@@ -1121,7 +1116,27 @@ export function recreateOpenShellDockerSandboxWithGpu(
         );
       }
     }
+    // Validate and build the replacement command before touching the original
+    // container. A malformed startup envelope must fail without stopping or
+    // renaming the user's working sandbox.
     const cloneArgs = buildDockerGpuCloneRunArgs(inspect, selection.mode, cloneOptions);
+
+    d.dockerStop(oldContainerId, {
+      ignoreError: true,
+      suppressOutput: true,
+      timeout: DOCKER_GPU_PATCH_TIMEOUT_MS,
+    });
+    const renameResult = d.dockerRename(oldContainerId, backupContainerName, {
+      ignoreError: true,
+      suppressOutput: true,
+      timeout: DOCKER_GPU_PATCH_TIMEOUT_MS,
+    });
+    if (!isZeroStatus(renameResult)) {
+      throw new Error(
+        `Could not move original sandbox container aside: ${resultText(renameResult)}`,
+      );
+    }
+
     const runResult = d.dockerRunDetached(cloneArgs, {
       ignoreError: true,
       suppressOutput: true,

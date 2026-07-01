@@ -59,7 +59,7 @@ export async function assertHermesGpuStartupProof({
   expect(pid1Topology.exitCode, resultText(pid1Topology)).toBe(0);
   expect(JSON.parse(pid1Topology.stdout)).toEqual({
     argv0: "/opt/openshell/bin/openshell-sandbox",
-    has_nemoclaw_start: true,
+    has_nemoclaw_start: false,
   });
 
   const startupConfig = await sandbox.execShell(

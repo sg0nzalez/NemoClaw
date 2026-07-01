@@ -290,7 +290,7 @@ describe("appendExtraPlaceholderKeysEnvArg", () => {
     return `${key}=${value}`;
   }
 
-  it("appends one whitespace-joined env arg containing only the key names, never their token values", () => {
+  it("appends one comma-joined env arg containing only the key names, never their token values", () => {
     const envArgs: string[] = [];
     appendExtraPlaceholderKeysEnvArg(
       envArgs,
@@ -298,7 +298,7 @@ describe("appendExtraPlaceholderKeysEnvArg", () => {
       formatEnvAssignment,
     );
     expect(envArgs).toEqual([
-      `${EXTRA_PLACEHOLDER_KEYS_ENV}=TELEGRAM_BOT_TOKEN_AGENT_A SLACK_BOT_TOKEN_AGENT_B`,
+      `${EXTRA_PLACEHOLDER_KEYS_ENV}=TELEGRAM_BOT_TOKEN_AGENT_A,SLACK_BOT_TOKEN_AGENT_B`,
     ]);
     // The emitted env arg holds only the key list, not the resolved token
     // value. Operators who set the credential see openshell:resolve:env:<KEY>

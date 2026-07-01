@@ -154,6 +154,8 @@ describe("docker-gpu-patch", () => {
       "env",
       "CHAT_UI_URL=http://127.0.0.1:8642",
       "NEMOCLAW_DASHBOARD_PORT=8642",
+      "HTTP_PROXY=http://proxy.example:8080",
+      "NEMOCLAW_EXTRA_PLACEHOLDER_KEYS=TELEGRAM_BOT_TOKEN_AGENT_A,SLACK_BOT_TOKEN_AGENT_B",
       "nemoclaw-start",
     ];
 
@@ -164,16 +166,13 @@ describe("docker-gpu-patch", () => {
     expect(args).toEqual(
       expect.arrayContaining([
         "--env",
-        "OPENSHELL_SANDBOX_COMMAND=env CHAT_UI_URL=http://127.0.0.1:8642 NEMOCLAW_DASHBOARD_PORT=8642 nemoclaw-start",
+        "OPENSHELL_SANDBOX_COMMAND=env CHAT_UI_URL=http://127.0.0.1:8642 NEMOCLAW_DASHBOARD_PORT=8642 HTTP_PROXY=http://proxy.example:8080 NEMOCLAW_EXTRA_PLACEHOLDER_KEYS=TELEGRAM_BOT_TOKEN_AGENT_A,SLACK_BOT_TOKEN_AGENT_B nemoclaw-start",
       ]),
     );
     expect(args).not.toEqual(
       expect.arrayContaining(["--env", "OPENSHELL_SANDBOX_COMMAND=sleep infinity"]),
     );
-    expect(args.slice(args.indexOf("openshell/sandbox:abc"))).toEqual([
-      "openshell/sandbox:abc",
-      ...sandboxCommand,
-    ]);
+    expect(args.slice(args.indexOf("openshell/sandbox:abc"))).toEqual(["openshell/sandbox:abc"]);
   });
 
   it("adds OpenShell's sandbox command env when the inspected container lacks one", () => {
@@ -590,7 +589,12 @@ describe("docker-gpu-patch", () => {
       if (args[0] === "info") return "";
       return "";
     });
-    const dockerRunDetached = vi.fn(() => ({ status: 0, stdout: "new-container-id\n" }));
+    const dockerRunDetached = vi.fn(
+      (_args: readonly string[], _opts?: Record<string, unknown>) => ({
+        status: 0,
+        stdout: "new-container-id\n",
+      }),
+    );
     const dockerRm = vi.fn((_name: string) => ({ status: 0 }));
     const runOpenshell = vi.fn(() => ({ status: 1, stderr: "phase: Provisioning" }));
 
@@ -625,17 +629,60 @@ describe("docker-gpu-patch", () => {
     expect(
       dockerRm.mock.calls.some((call) => String(call[0]).includes("nemoclaw-gpu-backup")),
     ).toBe(false);
-    expect(dockerRunDetached).toHaveBeenCalledWith(
+    const cloneArgs = dockerRunDetached.mock.calls[0]?.[0] ?? [];
+    expect(cloneArgs).toEqual(
       expect.arrayContaining([
         "--env",
         "OPENSHELL_SANDBOX_COMMAND=env CHAT_UI_URL=http://127.0.0.1:8642 nemoclaw-start",
         "openshell/sandbox:abc",
-        "env",
-        "CHAT_UI_URL=http://127.0.0.1:8642",
-        "nemoclaw-start",
       ]),
+    );
+    expect(cloneArgs.slice(cloneArgs.indexOf("openshell/sandbox:abc"))).toEqual([
+      "openshell/sandbox:abc",
+    ]);
+    expect(dockerRunDetached).toHaveBeenCalledWith(
+      cloneArgs,
       expect.objectContaining({ ignoreError: true }),
     );
+  });
+
+  it("rejects whitespace-bearing startup values before touching the original container", () => {
+    const dockerCapture = vi.fn((args: readonly string[]) =>
+      args[0] === "ps"
+        ? "old-container-id\n"
+        : args[0] === "inspect"
+          ? JSON.stringify([inspectFixture()])
+          : "",
+    );
+    const dockerStop = vi.fn(() => ({ status: 0 }));
+    const dockerRename = vi.fn(() => ({ status: 0 }));
+    const dockerRunDetached = vi.fn(() => ({ status: 0, stdout: "new-container-id\n" }));
+
+    expect(() =>
+      recreateOpenShellDockerSandboxWithGpu(
+        {
+          sandboxName: "alpha",
+          timeoutSecs: 1,
+          openshellSandboxCommand: [
+            "env",
+            "HTTP_PROXY=http://proxy.example/path with space",
+            "nemoclaw-start",
+          ],
+        },
+        {
+          dockerCapture,
+          dockerRun: vi.fn(() => ({ status: 0, stdout: "probe-id\n" })),
+          dockerRunDetached,
+          dockerRename,
+          dockerStop,
+          readDir: vi.fn(() => null),
+          readFile: vi.fn(() => null),
+        },
+      ),
+    ).toThrow("OpenShell sandbox startup command tokens cannot be empty or contain whitespace");
+    expect(dockerStop).not.toHaveBeenCalled();
+    expect(dockerRename).not.toHaveBeenCalled();
+    expect(dockerRunDetached).not.toHaveBeenCalled();
   });
 });
 
