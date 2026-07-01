@@ -8,7 +8,6 @@ import {
   type HostCliClient,
   resultText,
   type SandboxClient,
-  trustedSandboxShellScript,
   validateSandboxName,
 } from "../fixtures/clients/index.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
@@ -70,6 +69,32 @@ async function cleanupHermes(
       artifactName: `${label}-openshell-gateway-destroy`,
       env: commandEnv(),
       timeoutMs: 60_000,
+    }),
+  );
+}
+
+async function captureFailedGpuContainer(host: HostCliClient): Promise<void> {
+  const sandboxFilter = `label=openshell.ai/sandbox-name=${SANDBOX_NAME}`;
+  const script = String.raw`set -u
+ids="$(docker ps -aq --filter "$1")"
+if [ -z "$ids" ]; then
+  printf '%s\n' "no Docker container found for $1"
+  exit 0
+fi
+for id in $ids; do
+  printf '%s\n' "== container $id inspect =="
+  docker inspect --format '{{json .Name}} {{json .Config.User}} {{json .Config.Entrypoint}} {{json .Config.Cmd}} {{json .State}} {{json .HostConfig.RestartPolicy}}' "$id" 2>&1 || true
+  printf '%s\n' "== container $id top =="
+  docker top "$id" -eo user,pid,ppid,stat,args 2>&1 || true
+  printf '%s\n' "== container $id logs =="
+  docker logs --tail 300 "$id" 2>&1 || true
+done`;
+  await bestEffort(() =>
+    host.command("bash", ["-lc", script, "hermes-gpu-failure-diagnostics", sandboxFilter], {
+      artifactName: "phase-2-hermes-gpu-startup-failure-diagnostics",
+      env: buildAvailabilityProbeEnv(),
+      redactionValues: [FAKE_API_KEY],
+      timeoutMs: 30_000,
     }),
   );
 }
@@ -152,22 +177,7 @@ test.skipIf(!shouldRunLiveE2E())(
       redactionValues: [FAKE_API_KEY],
       timeoutMs: 60 * 60_000,
     });
-    await (install.exitCode === 0
-      ? Promise.resolve()
-      : bestEffort(() =>
-          sandbox.execShell(
-            SANDBOX_NAME,
-            trustedSandboxShellScript(
-              String.raw`printf '%s\n' '== pid 1 =='; tr '\0' ' ' </proc/1/cmdline 2>/dev/null || true; printf '\n%s\n' '== process tree =='; ps -eo user=,pid=,ppid=,stat=,args= 2>&1 || true; printf '%s\n' '== entrypoint log =='; tail -n 300 /tmp/nemoclaw-start.log 2>&1 || true`,
-            ),
-            {
-              artifactName: "phase-2-hermes-gpu-startup-failure-diagnostics",
-              env: commandEnv(),
-              redactionValues: [FAKE_API_KEY],
-              timeoutMs: 30_000,
-            },
-          ),
-        ));
+    if (install.exitCode !== 0) await captureFailedGpuContainer(host);
     expect(install.exitCode, resultText(install)).toBe(0);
 
     const status = await host.command("nemoclaw", [SANDBOX_NAME, "status"], {
