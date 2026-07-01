@@ -227,9 +227,7 @@ function isLoopbackLsofAddress(addr) {
   // IPv4 dotted quad, or IPv4-mapped IPv6 written as "::ffff:x.y.z.w" or
   // "[::ffff:x.y.z.w]" or a bracketed IPv6 wrapper on the same. Any of
   // these forms are loopback iff the leading IPv4 byte is 127.
-  const ipv4Match = addr.match(
-    /^\[?(?:::ffff:)?(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\]?$/i,
-  );
+  const ipv4Match = addr.match(/^\[?(?:::ffff:)?(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\]?$/i);
   if (ipv4Match !== null) return parseInt(ipv4Match[1], 10) === 127;
   // IPv6 canonical loopback.
   if (addr === "::1" || addr === "[::1]") return true;

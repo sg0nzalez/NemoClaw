@@ -7,7 +7,6 @@
 
 import type { GpuInfo } from "../local";
 
-const fs = require("fs");
 const path = require("path");
 const { spawn, spawnSync } = require("child_process");
 const { ROOT, SCRIPTS, redact, run, runCapture, shellQuote } = require("../../runner");
@@ -43,7 +42,9 @@ const {
 } = require("../local-adapter-lifecycle");
 const {
   clearStaleProxyStatus,
+  defaultProxyStatusPath,
   printProxyStartupReason,
+  PROXY_STATUS_ENV,
   readProxyExitStatus,
 } = require("./proxy-status");
 
@@ -52,13 +53,7 @@ const {
 const PROXY_STATE_DIR = DEFAULT_LOCAL_ADAPTER_STATE_DIR;
 const PROXY_TOKEN_PATH = path.join(PROXY_STATE_DIR, "ollama-proxy-token");
 const PROXY_PID_PATH = path.join(PROXY_STATE_DIR, "ollama-auth-proxy.pid");
-// #6014: the proxy script writes a structured exit reason here before any
-// non-zero exit and removes it on a successful listen. The host reads it
-// when the readiness loop fails so the operator gets a specific actionable
-// remediation (e.g. "backend not bound to loopback") instead of a generic
-// "proxy exited during startup" message. Path is shared with the proxy via
-// the NEMOCLAW_OLLAMA_PROXY_STATUS_FILE env in spawnOllamaAuthProxy.
-const PROXY_STATUS_PATH = path.join(PROXY_STATE_DIR, "ollama-auth-proxy.status");
+const PROXY_STATUS_PATH = defaultProxyStatusPath(PROXY_STATE_DIR);
 
 let ollamaProxyToken: string | null = null;
 
@@ -156,7 +151,7 @@ function spawnOllamaAuthProxy(token: string): number | null {
       OLLAMA_PROXY_TOKEN: token,
       OLLAMA_PROXY_PORT: String(OLLAMA_PROXY_PORT),
       OLLAMA_BACKEND_PORT: String(OLLAMA_PORT),
-      NEMOCLAW_OLLAMA_PROXY_STATUS_FILE: PROXY_STATUS_PATH,
+      [PROXY_STATUS_ENV]: PROXY_STATUS_PATH,
     },
     buildEnv: buildSubprocessEnv,
   });

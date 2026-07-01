@@ -1,4 +1,3 @@
-// @ts-nocheck
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -17,6 +16,7 @@
 // PID / process lifecycle logic that proxy.ts otherwise owns.
 
 const fs = require("fs");
+const path = require("path");
 const { OLLAMA_PORT } = require("../../core/ports");
 
 export type ProxyExitStatus = {
@@ -24,6 +24,22 @@ export type ProxyExitStatus = {
   details?: string;
   exitedAt?: number;
 };
+
+/**
+ * Name of the env var the host uses to hand the proxy script a path to
+ * write its structured exit status to. Kept in one place so a rename of
+ * the wire protocol only touches this file.
+ */
+export const PROXY_STATUS_ENV = "NEMOCLAW_OLLAMA_PROXY_STATUS_FILE";
+
+/**
+ * Default status-file path under an adapter state dir. Callers hand in the
+ * state dir so this module has no direct dependency on the token/PID/state
+ * layout in proxy.ts.
+ */
+export function defaultProxyStatusPath(stateDir: string): string {
+  return path.join(stateDir, "ollama-auth-proxy.status");
+}
 
 /**
  * Read the structured exit status the proxy script writes to `statusPath`
