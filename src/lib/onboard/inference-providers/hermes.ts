@@ -5,6 +5,7 @@
 // Extracted verbatim from onboard.setupInference (#767).
 
 import type { HermesAuthMethod } from "../hermes-auth";
+import { isPrivateHostname } from "../../private-networks";
 import type { HermesDeps, SetupInferenceResult } from "./types";
 
 export async function setupHermesProviderInference(
@@ -28,6 +29,19 @@ export async function setupHermesProviderInference(
     hermesAuthMethod,
     hermesToolGateways,
   } = args;
+  if (endpointUrl) {
+    let parsedEndpoint: URL;
+    try {
+      parsedEndpoint = new URL(endpointUrl);
+    } catch {
+      throw new Error(`Invalid inference endpoint URL: ${endpointUrl}`);
+    }
+    if (isPrivateHostname(parsedEndpoint.hostname)) {
+      throw new Error(
+        `Inference endpoint URL points to a private or internal address "${parsedEndpoint.hostname}". Use a public endpoint.`,
+      );
+    }
+  }
   const {
     runOpenshell,
     upsertProvider: _upsertProvider, // intentionally unused; matches inline branch
