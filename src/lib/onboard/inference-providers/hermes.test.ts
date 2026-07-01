@@ -5,22 +5,6 @@ import { describe, expect, it, vi } from "vitest";
 
 import { setupHermesProviderInference } from "./hermes";
 
-vi.mock("../../private-networks", () => ({
-  isPrivateHostname: (hostname: string) => {
-    const privateHosts = new Set(["localhost", "host.docker.internal"]);
-    const privatePatterns = [
-      /^127\./,
-      /^10\./,
-      /^192\.168\./,
-      /^172\.(1[6-9]|2\d|3[01])\./,
-      /^169\.254\./,
-    ];
-    if (privateHosts.has(hostname)) return true;
-    if (hostname.endsWith(".internal") || hostname.endsWith(".local")) return true;
-    return privatePatterns.some((re) => re.test(hostname));
-  },
-}));
-
 function makeDeps(overrides: Record<string, unknown> = {}) {
   return {
     runOpenshell: vi.fn(() => ({ status: 0, stdout: "", stderr: "" })),
