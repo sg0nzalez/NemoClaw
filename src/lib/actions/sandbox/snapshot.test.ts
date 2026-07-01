@@ -16,11 +16,24 @@ type OpenshellCaptureResult = {
 type SandboxRecord = {
   name: string;
   agent?: string | null;
+  dashboardPort?: number | null;
   gatewayName?: string | null;
   imageTag?: string | null;
   openshellDriver?: string | null;
 };
 type DcodeProbeState = "active" | "idle" | "unverifiable" | "no-runtime";
+type GatewayRestartResult =
+  | {
+      ok: true;
+      restarted: true;
+      healthPassed: true;
+      forwardRecovered: boolean;
+    }
+  | {
+      ok: false;
+      failureLayer: "health timeout" | "forward recovery failure";
+      detail: string;
+    };
 
 function dcodeProbeOutput(state: DcodeProbeState, extra = ""): string {
   return `NEMOCLAW_DCODE_PROBE=${state}\n${extra}`;
@@ -72,7 +85,11 @@ const lifecycleMock = vi.hoisted(() => {
     withTimerBoundMock: vi.fn(
       (_sandboxName: string, command: string, fn: () => unknown): unknown => {
         events.push(`lock:${command}`);
-        return fn();
+        try {
+          return fn();
+        } finally {
+          events.push(`unlock:${command}`);
+        }
       },
     ),
   };
@@ -99,12 +116,29 @@ const isGatewayHealthyMock = vi.fn(() => true);
 const listBackupsMock = vi.fn<() => Array<Record<string, unknown>>>(() => []);
 const parseLiveSandboxNamesMock = vi.fn(() => new Set(["alpha"]));
 const registerSandboxMock = vi.fn();
+const resolveCreateSandboxDashboardPortMock = vi.fn(() => ({
+  preferredPort: 18789,
+  effectivePort: 18790,
+  chatUiUrl: "http://127.0.0.1:18790",
+}));
+const restartSandboxGatewayMock = vi.fn<(sandboxName: string) => GatewayRestartResult>(() => ({
+  ok: true,
+  restarted: true,
+  healthPassed: true,
+  forwardRecovered: true,
+}));
 const restoreSandboxStateMock = vi.fn();
 const runOpenshellMock = vi.fn((args: string[]) => {
   args[0] === "sandbox" && args[1] === "delete" && lifecycleMock.events.push("delete");
   return { status: 0, output: "" };
 });
-const streamSandboxCreateMock = vi.fn(async () => ({
+const streamSandboxCreateMock = vi.fn<
+  (
+    command: string,
+    env: NodeJS.ProcessEnv,
+    options: Record<string, unknown>,
+  ) => Promise<{ status: number; output: string; forcedReady: boolean }>
+>(async () => ({
   status: 0,
   output: "",
   forcedReady: false,
@@ -136,6 +170,10 @@ vi.mock("../../domain/sandbox/destroy", () => ({
 vi.mock("../../inference/nim", () => ({
   stopNimContainer: vi.fn(),
   stopNimContainerByName: vi.fn(),
+}));
+
+vi.mock("../../onboard/dashboard-port", () => ({
+  resolveCreateSandboxDashboardPort: resolveCreateSandboxDashboardPortMock,
 }));
 
 vi.mock("../../policy", () => ({
@@ -203,6 +241,10 @@ vi.mock("./destroy", () => ({
   removeSandboxRegistryEntry: vi.fn(),
 }));
 
+vi.mock("./process-recovery", () => ({
+  restartSandboxGateway: restartSandboxGatewayMock,
+}));
+
 describe("runSandboxSnapshot", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -232,6 +274,17 @@ describe("runSandboxSnapshot", () => {
       failedFiles: [],
     });
     parseLiveSandboxNamesMock.mockReturnValue(new Set(["alpha"]));
+    resolveCreateSandboxDashboardPortMock.mockReturnValue({
+      preferredPort: 18789,
+      effectivePort: 18790,
+      chatUiUrl: "http://127.0.0.1:18790",
+    });
+    restartSandboxGatewayMock.mockReturnValue({
+      ok: true,
+      restarted: true,
+      healthPassed: true,
+      forwardRecovered: true,
+    });
   });
 
   afterEach(() => {
@@ -260,6 +313,39 @@ describe("runSandboxSnapshot", () => {
         .map(([args]) => args)
         .find((args) => args[0] === "sandbox" && args[1] === "exec") ?? [];
     return String(execArgs.at(-1) ?? "");
+  }
+
+  function configureCrossSandboxRestore(agent: "openclaw" | "hermes" = "openclaw") {
+    const source = {
+      name: "alpha",
+      agent,
+      dashboardPort: 18789,
+      imageTag: "nemoclaw-alpha:test",
+      openshellDriver: "docker",
+    };
+    getSandboxMock.mockImplementation((name) => (name === "alpha" ? source : null));
+    parseLiveSandboxNamesMock.mockReturnValue(new Set(["alpha"]));
+    captureOpenshellMock.mockImplementation((args) =>
+      openshellResponses(args, {
+        "forward list": {
+          status: 0,
+          output: "SANDBOX BIND PORT PID STATUS\nalpha 127.0.0.1 18789 123 running\n",
+        },
+        "sandbox list": { status: 0, output: "alpha Ready\nbeta Ready\n" },
+      }),
+    );
+    getLatestBackupMock.mockReturnValue({
+      timestamp: "2026-06-15T00:00:00.000Z",
+      backupPath: "/tmp/backup-alpha",
+    });
+    restoreSandboxStateMock.mockReturnValue({
+      success: true,
+      restoredDirs: ["workspace"],
+      restoredFiles: ["openclaw.json"],
+      failedDirs: [],
+      failedFiles: [],
+    });
+    return source;
   }
 
   function runProbeScriptWithProcesses(
@@ -611,6 +697,112 @@ describe("runSandboxSnapshot", () => {
     expect(output).toContain("Using latest snapshot v4 name=stable");
     expect(output).toContain("Restoring snapshot into 'alpha'");
     expect(output).toContain("Restored 1 directories, 1 files");
+    expect(restartSandboxGatewayMock).not.toHaveBeenCalled();
+  });
+
+  it("allocates a distinct OpenClaw clone port, aligns startup and registry state, and restarts after restore unlock", async () => {
+    const source = configureCrossSandboxRestore();
+    restoreSandboxStateMock.mockImplementation(() => {
+      lifecycleMock.events.push("restore-files");
+      return {
+        success: true,
+        restoredDirs: ["workspace"],
+        restoredFiles: ["openclaw.json"],
+        failedDirs: [],
+        failedFiles: [],
+      };
+    });
+    restartSandboxGatewayMock.mockImplementation((sandboxName) => {
+      lifecycleMock.events.push(`restart-gateway:${sandboxName}`);
+      return {
+        ok: true,
+        restarted: true,
+        healthPassed: true,
+        forwardRecovered: true,
+      };
+    });
+    const { runSandboxSnapshot } = await import("./snapshot");
+
+    await runSandboxSnapshot("alpha", { kind: "restore", to: "beta" });
+
+    expect(resolveCreateSandboxDashboardPortMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sandboxName: "beta",
+        persistedPort: source.dashboardPort,
+        forwardListOutput: expect.stringContaining("alpha 127.0.0.1 18789"),
+      }),
+    );
+    expect(resolveCreateSandboxDashboardPortMock.mock.results[0]?.value.effectivePort).not.toBe(
+      source.dashboardPort,
+    );
+    const createCommand = String(streamSandboxCreateMock.mock.calls[0]?.[0]);
+    expect(createCommand).toContain(
+      "'env' 'CHAT_UI_URL=http://127.0.0.1:18790' 'NEMOCLAW_DASHBOARD_PORT=18790' 'nemoclaw-start'",
+    );
+    expect(registerSandboxMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "beta",
+        dashboardPort: 18790,
+      }),
+    );
+    expect(restartSandboxGatewayMock).toHaveBeenCalledWith("beta");
+    expect(lifecycleMock.events.indexOf("restore-files")).toBeLessThan(
+      lifecycleMock.events.indexOf("unlock:restore sandbox snapshot"),
+    );
+    expect(lifecycleMock.events.indexOf("unlock:restore sandbox snapshot")).toBeLessThan(
+      lifecycleMock.events.indexOf("restart-gateway:beta"),
+    );
+  });
+
+  it("leaves the Hermes clone path unchanged", async () => {
+    configureCrossSandboxRestore("hermes");
+    const { runSandboxSnapshot } = await import("./snapshot");
+
+    await runSandboxSnapshot("alpha", { kind: "restore", to: "beta" });
+
+    expect(resolveCreateSandboxDashboardPortMock).not.toHaveBeenCalled();
+    const createCommand = String(streamSandboxCreateMock.mock.calls[0]?.[0]);
+    expect(createCommand).toContain("'--' 'nemoclaw-start'");
+    expect(createCommand).not.toContain("CHAT_UI_URL");
+    expect(restartSandboxGatewayMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      failureLayer: "health timeout" as const,
+      detail: "gateway process restarted but health did not pass before timeout",
+    },
+    {
+      failureLayer: "forward recovery failure" as const,
+      detail:
+        "gateway health passed but the primary dashboard/API host forward could not be re-established",
+    },
+  ])("fails OpenClaw clone restore at $failureLayer while retaining the clone and snapshot", async ({
+    failureLayer,
+    detail,
+  }) => {
+    configureCrossSandboxRestore();
+    restartSandboxGatewayMock.mockReturnValue({ ok: false, failureLayer, detail });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { runSandboxSnapshot } = await import("./snapshot");
+
+    await expect(
+      runSandboxSnapshot("alpha", { kind: "restore", to: "beta" }),
+    ).rejects.toMatchObject({ exitCode: 1 });
+
+    expect(registerSandboxMock).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "beta", dashboardPort: 18790 }),
+    );
+    expect(
+      runOpenshellMock.mock.calls.some(
+        ([args]) => args[0] === "sandbox" && args[1] === "delete" && args[2] === "beta",
+      ),
+    ).toBe(false);
+    const errors = consoleError.mock.calls.flat().join("\n");
+    expect(errors).toContain(`failed at layer '${failureLayer}'`);
+    expect(errors).toContain(
+      "Clone 'beta' and snapshot '/tmp/backup-alpha' were retained for diagnosis.",
+    );
   });
 
   it("keeps active-timer restore, permission repair, and policy reconciliation serialized", async () => {

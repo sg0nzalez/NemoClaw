@@ -154,19 +154,35 @@ function makeVmRestoreToEnv(
   const localBin = path.join(home, "bin");
   fs.mkdirSync(localBin, { recursive: true });
   writeSandboxRegistry(home, "alpha", {
+    dashboardPort: 18789,
     openshellDriver: "vm",
     ...entry,
   });
 
   const cloneReadyMarker = path.join(home, "clone-1-ready");
+  const clonePortMarker = path.join(home, "clone-1-port");
+  const forwardListenerReadyMarker = path.join(home, "forward-listener-ready");
+  const forwardListenerPidFile = path.join(home, "forward-listener.pid");
+  const restartMarker = path.join(home, "clone-1-restarted");
+  const listenerScript =
+    "const fs=require('node:fs');const net=require('node:net');" +
+    "net.createServer((socket)=>socket.end()).listen(Number(process.argv[1]),'127.0.0.1'," +
+    "()=>fs.writeFileSync(process.argv[2],'ready'));";
   writeExecutable(path.join(localBin, "openshell"), [
     'case "$1 $2" in',
     '  "gateway info") printf "Gateway Info\\n\\nGateway: nemoclaw\\nGateway endpoint: https://127.0.0.1:8080/\\n"; exit 0 ;;',
     '  "sandbox get") printf "{\\"name\\":\\"%s\\"}\\n" "$3"; exit 0 ;;',
     `  "sandbox list") if [ -f ${JSON.stringify(cloneReadyMarker)} ]; then printf "NAME STATUS\\nalpha Ready\\nclone-1 Ready\\n"; else printf "NAME STATUS\\nalpha Ready\\n"; fi; exit 0 ;;`,
+    `  "forward list") printf "SANDBOX BIND PORT PID STATUS\\nalpha 127.0.0.1 18789 100 running\\n"; if [ -f ${JSON.stringify(clonePortMarker)} ]; then port=$(cat ${JSON.stringify(clonePortMarker)}); printf "clone-1 127.0.0.1 %s 101 running\\n" "$port"; fi; exit 0 ;;`,
     '  "sandbox exec") printf "NEMOCLAW_DCODE_PROBE=no-runtime\\n"; exit 0 ;;',
     '  "sandbox ssh-config") printf "Host openshell-alpha\\n  HostName 127.0.0.1\\n  User sandbox\\n"; exit 0 ;;',
-    `  "sandbox create") touch ${JSON.stringify(cloneReadyMarker)}; printf "created clone-1\\n"; exit 0 ;;`,
+    '  "sandbox create") port=""; for arg do case "$arg" in NEMOCLAW_DASHBOARD_PORT=*) port="${arg#*=}" ;; esac; done',
+    `    [ -n "$port" ] || exit 1; printf "%s" "$port" > ${JSON.stringify(clonePortMarker)}`,
+    `    node -e ${JSON.stringify(listenerScript)} "$port" ${JSON.stringify(forwardListenerReadyMarker)} >/dev/null 2>&1 &`,
+    `    printf "%s" "$!" > ${JSON.stringify(forwardListenerPidFile)}`,
+    `    attempts=0; while [ ! -f ${JSON.stringify(forwardListenerReadyMarker)} ] && [ "$attempts" -lt 20 ]; do sleep 0.05; attempts=$((attempts + 1)); done`,
+    `    [ -f ${JSON.stringify(forwardListenerReadyMarker)} ] || exit 1`,
+    `    touch ${JSON.stringify(cloneReadyMarker)}; printf "created clone-1\\n"; exit 0 ;;`,
     "esac",
     'if [ "$1" = "status" ]; then exit 0; fi',
     "exit 0",
@@ -188,17 +204,38 @@ function makeVmRestoreToEnv(
   // resolveSrcPodImage falls into the kubectl-via-docker probe and this
   // marker shows up in the captured output.
   writeExecutable(path.join(localBin, "docker"), [
+    'if [ "$1" = "ps" ]; then',
+    `  if [ -f ${JSON.stringify(cloneReadyMarker)} ]; then echo "openshell-clone-1"; fi`,
+    "  exit 0",
+    "fi",
     'if [ "$1" = "exec" ]; then',
-    '  echo "kubectl-must-not-run"',
-    "  exit 1",
+    '  case "$*" in',
+    '    *kubectl*) echo "kubectl-must-not-run"; exit 1 ;;',
+    `    *"nemoclaw-gateway-control restart"*) touch ${JSON.stringify(restartMarker)}; echo "GATEWAY_PID=4242"; exit 0 ;;`,
+    '    *"nemoclaw-gateway-control probe"*) echo "GATEWAY_PID=4242"; exit 0 ;;',
+    "  esac",
+    "  exit 0",
     "fi",
     "exit 0",
   ]);
 
   return {
     HOME: home,
+    NEMOCLAW_GATEWAY_RECOVERY_SETTLE_SECONDS: "0",
     PATH: `${localBin}:${process.env.PATH ?? ""}`,
   };
+}
+
+function stopVmRestoreForward(env: Record<string, string>): void {
+  const pidFile = path.join(env.HOME, "forward-listener.pid");
+  if (!fs.existsSync(pidFile)) return;
+  const pid = Number(fs.readFileSync(pidFile, "utf8").trim());
+  if (!Number.isInteger(pid) || pid <= 0) return;
+  try {
+    process.kill(pid, "SIGTERM");
+  } catch {
+    // The fixture listener may already have exited.
+  }
 }
 
 describe("snapshot gateway guard (#2673)", () => {
@@ -230,16 +267,27 @@ describe("snapshot VM-driver gateway guard", () => {
   // imageTag, not the legacy `docker exec ... kubectl` probe.
   it("snapshot restore --to uses registered imageTag for VM-driver auto-create instead of kubectl probe", () => {
     const env = makeVmRestoreToEnv("nemoclaw-snap-vm-gw-restore-to-");
+    try {
+      const seed = runCli("alpha snapshot create --name baseline", env);
+      expect(seed.code).toBe(0);
+      expect(seed.out).toContain("Snapshot v1 name=baseline created");
 
-    const seed = runCli("alpha snapshot create --name baseline", env);
-    expect(seed.code).toBe(0);
-    expect(seed.out).toContain("Snapshot v1 name=baseline created");
+      const r = runCli("alpha snapshot restore baseline --to clone-1", env);
+      expect(r.code).toBe(0);
+      expect(r.out).not.toContain("could not resolve");
+      expect(r.out).not.toContain("kubectl-must-not-run");
+      expect(r.out).toContain("openshell/sandbox-from:fast-path-test");
+      expect(fs.existsSync(path.join(env.HOME, "clone-1-restarted"))).toBe(true);
 
-    const r = runCli("alpha snapshot restore baseline --to clone-1", env);
-    expect(r.code).toBe(0);
-    expect(r.out).not.toContain("could not resolve");
-    expect(r.out).not.toContain("kubectl-must-not-run");
-    expect(r.out).toContain("openshell/sandbox-from:fast-path-test");
+      const persisted = JSON.parse(
+        fs.readFileSync(path.join(env.HOME, ".nemoclaw", "sandboxes.json"), "utf8"),
+      );
+      expect(persisted.sandboxes["clone-1"].dashboardPort).not.toBe(
+        persisted.sandboxes.alpha.dashboardPort,
+      );
+    } finally {
+      stopVmRestoreForward(env);
+    }
   }, 15000);
 
   it("snapshot restore --to fails closed for VM-driver entries missing imageTag", () => {

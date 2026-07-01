@@ -81,6 +81,14 @@ $$nemoclaw my-assistant snapshot restore before-upgrade --to my-assistant-clone
 $$nemoclaw my-assistant snapshot restore before-upgrade --to my-assistant-clone --force --yes
 ```
 
+<AgentOnly variant="openclaw">
+
+For an OpenClaw clone, NemoClaw assigns a dashboard port that differs from the source sandbox's port.
+After restoring the snapshot, NemoClaw restarts the clone's gateway, checks its dashboard port forward, and re-establishes the forward when needed before verifying readiness.
+If that recovery fails, the command returns a nonzero status and retains the clone and snapshot for diagnosis.
+
+</AgentOnly>
+
 The force-overwrite path restores and verifies lockdown on a destination with an active shields timer, then revokes that timer before it deletes the destination.
 It clears the remaining local shields state only after deletion succeeds, before a same-name replacement is created.
 

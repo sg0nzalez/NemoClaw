@@ -15,6 +15,7 @@ import { prompt as askPrompt } from "../../credentials/store";
 import { getSandboxDeleteOutcome } from "../../domain/sandbox/destroy";
 import * as nim from "../../inference/nim";
 import { listMessagingProviderSuffixes } from "../../messaging/channels";
+import { resolveCreateSandboxDashboardPort } from "../../onboard/dashboard-port";
 import { resolveSandboxGatewayName } from "../../onboard/gateway-binding";
 import * as policies from "../../policy";
 import { ROOT, run, shellQuote, validateName } from "../../runner";
@@ -28,6 +29,7 @@ import type { SandboxEntry } from "../../state/registry";
 import * as registry from "../../state/registry";
 import * as sandboxState from "../../state/sandbox";
 import { cleanupShieldsDestroyArtifacts, removeSandboxRegistryEntry } from "./destroy";
+import { restartSandboxGateway } from "./process-recovery";
 import {
   probeGatewayRunning,
   selectSandboxGatewayIfRegistered,
@@ -200,6 +202,11 @@ function resolveSrcPodImage(
   }
 }
 
+function isOpenClawSandboxEntry(entry: SandboxEntry | { name: string }): boolean {
+  const agent = (entry as { agent?: string | null }).agent;
+  return !agent || agent === "openclaw";
+}
+
 // Auto-create a sandbox that clones the image of an existing one.
 // Used by `snapshot restore --to <dst>` when dst does not exist yet: reuses
 // the source's baked image so the user does not have to re-run onboarding.
@@ -212,6 +219,36 @@ async function autoCreateSandboxFromSource(
 ): Promise<void> {
   const basePolicy = path.join(ROOT, "nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml");
   const openshellBin = getOpenshellBinary();
+  const isOpenClawClone = isOpenClawSandboxEntry(srcEntry);
+  let cloneDashboard: ReturnType<typeof resolveCreateSandboxDashboardPort> | null = null;
+
+  if (isOpenClawClone) {
+    const forwardList = captureOpenshell(["forward", "list"], { ignoreError: true });
+    try {
+      cloneDashboard = resolveCreateSandboxDashboardPort({
+        sandboxName: dstName,
+        controlUiPort: null,
+        chatUiUrlEnv: null,
+        persistedPort: (srcEntry as { dashboardPort?: number | null }).dashboardPort ?? null,
+        agentForwardPort: null,
+        forwardListOutput: forwardList.status === 0 ? forwardList.output || "" : null,
+        warn: (message) => console.warn(message),
+      });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      console.error(`  Cannot allocate a dashboard port for clone '${dstName}': ${detail}`);
+      snapshotExit(1);
+    }
+  }
+
+  const startupCommand = cloneDashboard
+    ? [
+        "env",
+        `CHAT_UI_URL=${cloneDashboard.chatUiUrl}`,
+        `NEMOCLAW_DASHBOARD_PORT=${cloneDashboard.effectivePort}`,
+        "nemoclaw-start",
+      ]
+    : ["nemoclaw-start"];
 
   const cmdParts = [
     openshellBin,
@@ -225,7 +262,7 @@ async function autoCreateSandboxFromSource(
     basePolicy,
     "--auto-providers",
     "--",
-    "nemoclaw-start",
+    ...startupCommand,
   ].map((p) => shellQuote(p));
   const command = `${cmdParts.join(" ")} 2>&1`;
 
@@ -276,6 +313,7 @@ async function autoCreateSandboxFromSource(
     name: dstName,
     createdAt: new Date().toISOString(),
     policies: [],
+    ...(cloneDashboard === null ? {} : { dashboardPort: cloneDashboard.effectivePort }),
     // dst has its own lifecycle; don't inherit src's local NIM container
     // reference, or destroying dst would stop src's NIM.
     nimContainer: null,
@@ -648,6 +686,7 @@ async function runSnapshotRestore(
   const isCrossSandboxRestore = targetSandbox !== sandboxName;
   const targetEntry = isCrossSandboxRestore ? registry.getSandbox(targetSandbox) : null;
   const targetExists = sourceLiveNames.has(targetSandbox) || Boolean(targetEntry);
+  let restartOpenClawCloneAfterRestore = false;
 
   // #3756 P1 preflight: resolve the snapshot selector AND the source pod
   // image before any destructive action. A bad selector, missing snapshot,
@@ -724,6 +763,7 @@ async function runSnapshotRestore(
       snapshotExit(1);
     }
     const srcEntry = registry.getSandbox(sandboxName) || { name: sandboxName };
+    restartOpenClawCloneAfterRestore = isOpenClawSandboxEntry(srcEntry);
     const fromImage = resolveSrcPodImage(sandboxName, srcEntry);
     if (!fromImage) {
       console.error(
@@ -801,6 +841,19 @@ async function runSnapshotRestore(
     // Skipped for legacy snapshots that predate the `customPolicies` field.
     reconcileSnapshotCustomPolicies(targetSandbox, resolvedSnapshot);
   });
+
+  if (restartOpenClawCloneAfterRestore) {
+    const restart = restartSandboxGateway(targetSandbox);
+    if (!restart.ok) {
+      console.error(
+        `  Snapshot restored, but clone gateway recovery failed at layer '${restart.failureLayer}'.`,
+      );
+      console.error(
+        `  Clone '${targetSandbox}' and snapshot '${backupPath}' were retained for diagnosis.`,
+      );
+      snapshotExit(1);
+    }
+  }
 }
 
 export async function runSandboxSnapshot(
