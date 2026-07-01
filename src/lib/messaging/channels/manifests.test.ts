@@ -17,6 +17,7 @@ import type {
   ChannelManifest,
   ChannelRenderSpec,
 } from "../manifest";
+import { GOOGLECHAT_TUNNEL_AUDIENCE_GATE_HOOK_ID } from "./googlechat/hooks";
 import {
   BUILT_IN_CHANNEL_MANIFESTS,
   createBuiltInChannelManifestRegistry,
@@ -28,7 +29,6 @@ import {
   wechatManifest,
   whatsappManifest,
 } from "./index";
-import { GOOGLECHAT_TUNNEL_AUDIENCE_GATE_HOOK_ID } from "./googlechat/hooks";
 import {
   SLACK_SOCKET_MODE_GATEWAY_CONFLICT_HOOK_HANDLER_ID,
   SLACK_SOCKET_MODE_GATEWAY_STATUS_HOOK_HANDLER_ID,
@@ -956,10 +956,10 @@ describe("built-in channel manifests", () => {
     ]);
 
     expectOpenClawRuntimeVisibility(googlechatManifest, ["googlechat"], ["googlechat"]);
-    expectOpenClawNodePreload(googlechatManifest, "googlechat-dns-resolve");
+    expectOpenClawNodePreload(googlechatManifest, "googlechat-trusted-proxy-fetch");
     expect(
       googlechatManifest.runtime?.openclaw?.nodePreloads?.find(
-        (preload) => preload.module === "googlechat-dns-resolve",
+        (preload) => preload.module === "googlechat-trusted-proxy-fetch",
       )?.injectInto,
     ).toEqual(["boot"]);
     expectOpenClawNodePreload(googlechatManifest, "googlechat-outbound-auth");
@@ -978,10 +978,6 @@ describe("built-in channel manifests", () => {
       spec: "npm:@openclaw/googlechat@{{openclaw.version}}",
       pin: true,
       required: true,
-    });
-    expect(googlechatManifest.state.persist).toEqual({
-      googlechatConfig: ["audienceType", "audience", "appPrincipal", "webhookPath"],
-      allowedIds: ["allowFrom"],
     });
   });
 });

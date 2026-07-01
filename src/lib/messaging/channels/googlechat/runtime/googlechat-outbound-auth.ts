@@ -32,7 +32,8 @@
 //
 // INBOUND webhook JWT verification is untouched: it uses Google's PUBLIC certs
 // + appPrincipal (no SA material) and a different code path, so it is unaffected
-// by this patch (it still relies on the separate googlechat-dns-resolve shim).
+// by this patch (its cert fetch is handled by the separate
+// googlechat-trusted-proxy-fetch patch).
 //
 // ── Contract with the B-side wiring ──────────────────────────────────────────
 // The OpenShell provider's injectable credential key MUST be
@@ -92,13 +93,13 @@
   function buildBearerShortCircuitSource() {
     var canonical = "openshell:resolve:env:" + ENV_VAR;
     return (
-      "try { var __nemoGcRaw = (typeof process !== \"undefined\" && process.env) " +
+      'try { var __nemoGcRaw = (typeof process !== "undefined" && process.env) ' +
       "? process.env." +
       ENV_VAR +
-      " : void 0; if (typeof __nemoGcRaw === \"string\" && __nemoGcRaw.length > 0) { " +
-      "return __nemoGcRaw.indexOf(\"openshell:resolve:env:\") === 0 ? \"" +
+      ' : void 0; if (typeof __nemoGcRaw === "string" && __nemoGcRaw.length > 0) { ' +
+      'return __nemoGcRaw.indexOf("openshell:resolve:env:") === 0 ? "' +
       canonical +
-      "\" : __nemoGcRaw; } } catch (_e) {} /* " +
+      '" : __nemoGcRaw; } } catch (_e) {} /* ' +
       CALL_MARKER +
       " */"
     );

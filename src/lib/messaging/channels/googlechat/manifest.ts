@@ -158,13 +158,16 @@ export const googlechatManifest = {
         logPatterns: ["googlechat"],
       },
       // Interim sandbox-DNS workaround: the sandbox netns is DNS-less (all
-      // resolution goes through the L7 proxy), but OpenClaw's Google Chat cert
-      // verification does a LOCAL getaddrinfo first and fails with EAI_AGAIN, so
-      // the bot can never verify inbound JWTs. This boot preload answers ONLY the
-      // googleapis hosts with a public sentinel IP so the SSRF gate passes; the
-      // real connection is still made by the proxy by hostname. Remove once the
-      // upstream OpenClaw fix (trusted-env-proxy cert fetch, like web_fetch
-      // openclaw#50650) ships. See runtime/googlechat-dns-resolve.ts for details.
+      // resolution goes through the L7 proxy), but OpenClaw's Google Chat fetches
+      // default to STRICT SSRF mode, which does a LOCAL getaddrinfo first and
+      // fails with EAI_AGAIN. This boot preload rewrites the plugin's googleapis
+      // fetches (inbound cert verify + all outbound sends) to the guard's
+      // first-class `trusted_env_proxy` mode, so they skip the local resolve and
+      // route by hostname through the L7 proxy (which resolves + enforces policy).
+      // No sentinel IP. It replaces the older googlechat-dns-resolve.ts sentinel
+      // shim, and is exactly the upstream OpenClaw fix (trusted-env-proxy fetch,
+      // like web_fetch openclaw#50650) applied in the plugin bundle; remove once
+      // that lands upstream. See runtime/googlechat-trusted-proxy-fetch.ts.
       //
       // Second boot preload: move OUTBOUND auth off the in-sandbox SA key. By
       // default @openclaw/googlechat signs an auth JWT with the SA private key
@@ -177,13 +180,13 @@ export const googlechatManifest = {
       // runtime/googlechat-outbound-auth.ts.
       nodePreloads: [
         {
-          module: "googlechat-dns-resolve",
+          module: "googlechat-trusted-proxy-fetch",
           injectInto: ["boot"],
           optional: false,
           installMessage:
-            "[channels] Installing Google Chat DNS resolver shim (interim sandbox DNS workaround)",
+            "[channels] Installing Google Chat trusted-proxy-fetch patch (route googleapis via trusted env proxy)",
           installedMessage:
-            "[channels] Google Chat DNS resolver shim installed (NODE_OPTIONS updated)",
+            "[channels] Google Chat trusted-proxy-fetch patch installed (NODE_OPTIONS updated)",
         },
         {
           module: "googlechat-outbound-auth",
@@ -216,34 +219,6 @@ export const googlechatManifest = {
       required: true,
     },
   ],
-  state: {
-    persist: {
-      googlechatConfig: ["audienceType", "audience", "appPrincipal", "webhookPath"],
-      allowedIds: ["allowFrom"],
-    },
-    rebuildHydration: [
-      {
-        statePath: "googlechatConfig.audienceType",
-        env: "GOOGLECHAT_AUDIENCE_TYPE",
-      },
-      {
-        statePath: "googlechatConfig.audience",
-        env: "GOOGLECHAT_AUDIENCE",
-      },
-      {
-        statePath: "googlechatConfig.appPrincipal",
-        env: "GOOGLECHAT_APP_PRINCIPAL",
-      },
-      {
-        statePath: "googlechatConfig.webhookPath",
-        env: "GOOGLECHAT_WEBHOOK_PATH",
-      },
-      {
-        statePath: "allowedIds.googlechat",
-        env: "GOOGLECHAT_ALLOWED_USERS",
-      },
-    ],
-  },
   hooks: [
     {
       id: "googlechat-tunnel-audience-gate",
