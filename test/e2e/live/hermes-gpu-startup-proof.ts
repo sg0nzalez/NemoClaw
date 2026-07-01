@@ -62,6 +62,38 @@ export async function assertHermesGpuStartupProof({
     has_nemoclaw_start: false,
   });
 
+  const guardWithoutStartupOwner = await sandbox.execShell(
+    sandboxName,
+    trustedSandboxShellScript(
+      "python3 -I /usr/local/lib/nemoclaw/hermes-runtime-config-guard.py ensure-api-key --hermes-dir /sandbox/.hermes",
+    ),
+    {
+      artifactName: "phase-4-gpu-startup-guard-without-startup-owner",
+      env,
+      timeoutMs: 30_000,
+    },
+  );
+  expect(guardWithoutStartupOwner.exitCode).not.toBe(0);
+  expect(resultText(guardWithoutStartupOwner)).toContain(
+    "Hermes runtime config guard refuses mutation under a foreign PID 1",
+  );
+
+  const guardFromNonStartupChild = await sandbox.execShell(
+    sandboxName,
+    trustedSandboxShellScript(
+      "python3 -I /usr/local/lib/nemoclaw/hermes-runtime-config-guard.py ensure-api-key --hermes-dir /sandbox/.hermes --startup-owner",
+    ),
+    {
+      artifactName: "phase-4-gpu-startup-owner-from-non-startup-child",
+      env,
+      timeoutMs: 30_000,
+    },
+  );
+  expect(guardFromNonStartupChild.exitCode).not.toBe(0);
+  expect(resultText(guardFromNonStartupChild)).toContain(
+    "Hermes runtime config guard refuses mutation under a foreign PID 1",
+  );
+
   const startupConfig = await sandbox.execShell(
     sandboxName,
     trustedSandboxShellScript(

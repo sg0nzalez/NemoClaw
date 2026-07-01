@@ -783,7 +783,8 @@ export function buildDockerGpuCloneRunArgs(
   // when recreating the container: appending the same workload after the image
   // puts `nemoclaw-start` in the supervisor's own argv. The serializer above
   // rejects whitespace-bearing tokens because OpenShell uses split_whitespace()
-  // when reading this environment value (#6110).
+  // when reading this environment value (#6110). Remove this compatibility
+  // rewrite only after the Docker container-swap GPU patch itself is retired.
   const commandArgs = openshellSandboxCommandEnv
     ? []
     : [...entrypoint.slice(1), ...stringArray(config.Cmd)];
