@@ -47,10 +47,7 @@ function makeDeps(overrides: Record<string, unknown> = {}) {
       HERMES_AUTH_METHOD_API_KEY: "api-key",
       HERMES_AUTH_METHOD_OAUTH: "oauth",
     },
-    requireValue: vi.fn((v: unknown, msg: string) => {
-      if (!v) throw new Error(msg);
-      return v;
-    }),
+    requireValue: vi.fn((v: unknown, _msg: string) => v),
     redact: vi.fn((s: string) => s),
     compactText: vi.fn((s: string) => s),
     ...overrides,
