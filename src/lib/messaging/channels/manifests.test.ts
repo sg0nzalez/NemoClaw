@@ -843,25 +843,21 @@ describe("built-in channel manifests", () => {
     expect(webhookPath).toMatchObject({ kind: "config", defaultValue: "/googlechat" });
     expect(allowFrom).toMatchObject({ kind: "config", statePath: "allowedIds.googlechat" });
 
-    // Service account is consumed locally (JWT signing), so it is delivered as a
-    // file, not an outbound provider placeholder — no credential binding.
+    // Outbound auth is gateway-minted (google-service-account-jwt bridge provider)
+    // and the L7 proxy injects the bearer; the SA private key stays gateway-side and
+    // is never delivered into the sandbox — so no credential binding and no secretFiles.
     expect(googlechatManifest.credentials).toEqual([]);
-    expect(googlechatManifest.secretFiles).toEqual([
-      {
-        id: "serviceAccountFile",
-        sourceInput: "serviceAccount",
-        agent: "openclaw",
-        target: "/sandbox/.openclaw/secrets/googlechat-service-account.json",
-        mode: "640",
-      },
-    ]);
+    expect((googlechatManifest as ChannelManifest).secretFiles).toBeUndefined();
     expect(policyPresetNames(googlechatManifest)).toEqual(["googlechat"]);
 
     const render = renderJson(googlechatManifest);
     expect(render).toContain('"path":"channels.googlechat"');
     expect(render).toContain('"path":"plugins.entries.googlechat"');
-    // Service account is delivered as an in-sandbox file, never inline or via an
-    // outbound placeholder (a private key cannot be signed with via outbound rewrite).
+    // serviceAccountFile is a start-gate marker only (OpenClaw requires a
+    // serviceAccount* to start the channel); the file is never delivered (no
+    // secretFiles) and never read (the outbound-auth preload short-circuits the
+    // token producer), so the SA key never enters the sandbox. No inline JSON and
+    // no outbound SA placeholder.
     expect(render).toContain(
       '"serviceAccountFile":"/sandbox/.openclaw/secrets/googlechat-service-account.json"',
     );
@@ -905,6 +901,12 @@ describe("built-in channel manifests", () => {
     expect(
       googlechatManifest.runtime?.openclaw?.nodePreloads?.find(
         (preload) => preload.module === "googlechat-dns-resolve",
+      )?.injectInto,
+    ).toEqual(["boot"]);
+    expectOpenClawNodePreload(googlechatManifest, "googlechat-outbound-auth");
+    expect(
+      googlechatManifest.runtime?.openclaw?.nodePreloads?.find(
+        (preload) => preload.module === "googlechat-outbound-auth",
       )?.injectInto,
     ).toEqual(["boot"]);
     expect(JSON.stringify(googlechatManifest.runtime?.openclaw?.secretScans)).toContain(

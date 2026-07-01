@@ -6,6 +6,7 @@ import * as webSearch from "../inference/web-search";
 import { listMessagingCredentialMetadata } from "../messaging/channels";
 import { type ChannelDef, getChannelTokenKeys } from "../sandbox/channels";
 import * as braveProviderProfile from "./brave-provider-profile";
+import * as googlechatBridge from "./googlechat-bridge-provider";
 
 export type NamedMessagingChannel = { name: string } & ChannelDef;
 
@@ -102,6 +103,21 @@ export function prepareCreateSandboxMessaging(
       token: braveApiKey,
       providerType: braveProviderProfile.BRAVE_PROVIDER_PROFILE_ID,
     });
+  }
+
+  // Google Chat outbound-auth bridge: when the service account was captured and
+  // the channel is enabled, register a refresh-minted provider so the gateway
+  // mints the bot token (key stays gateway-side) and the L7 proxy injects it on
+  // chat.googleapis.com. The credential value is a sentinel (minted by refresh,
+  // configured post-create in onboard's upsertMessagingProviders wrapper).
+  const googlechatBridgeTokenDef = googlechatBridge.maybeGooglechatBridgeTokenDef({
+    sandboxName: input.sandboxName,
+    getCredential: input.getCredential,
+    enabledChannels: input.enabledChannels,
+    disabledChannelNames,
+  });
+  if (googlechatBridgeTokenDef) {
+    messagingTokenDefs.push(googlechatBridgeTokenDef);
   }
 
   const extraPlaceholderKeys = input.registerExtraPlaceholderProviders(

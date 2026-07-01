@@ -3,7 +3,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-import { googlechatManifest } from "../channels/built-ins";
+import type { ChannelManifest } from "../manifest";
 import {
   collectMessagingSecretFiles,
   deliverMessagingSecretFiles,
@@ -35,16 +35,36 @@ function makeDeps(overrides: Partial<SecretFileDeliveryDeps> = {}): SecretFileDe
   };
 }
 
+// Synthetic manifest exercising the generic secret-file delivery contract.
+// Google Chat itself no longer ships secretFiles (its service account is minted
+// gateway-side and the key never enters the sandbox), so the delivery path is
+// covered here with a fixture rather than a built-in manifest.
+const FIXTURE_MANIFEST = {
+  id: "googlechat",
+  inputs: [
+    { id: "serviceAccount", kind: "secret", required: true, envKey: "GOOGLECHAT_SERVICE_ACCOUNT" },
+  ],
+  secretFiles: [
+    {
+      id: "serviceAccountFile",
+      sourceInput: "serviceAccount",
+      agent: "openclaw",
+      target: SA_TARGET,
+      mode: "640",
+    },
+  ],
+} as unknown as ChannelManifest;
+
 describe("collectMessagingSecretFiles", () => {
-  it("maps the googlechat service-account file from the manifest", () => {
-    expect(collectMessagingSecretFiles([googlechatManifest], ["googlechat"], "openclaw")).toEqual([
+  it("maps a service-account file from a manifest's secretFiles", () => {
+    expect(collectMessagingSecretFiles([FIXTURE_MANIFEST], ["googlechat"], "openclaw")).toEqual([
       GOOGLECHAT_TARGET,
     ]);
   });
 
   it("skips inactive channels and non-matching agents", () => {
-    expect(collectMessagingSecretFiles([googlechatManifest], [], "openclaw")).toEqual([]);
-    expect(collectMessagingSecretFiles([googlechatManifest], ["googlechat"], "hermes")).toEqual([]);
+    expect(collectMessagingSecretFiles([FIXTURE_MANIFEST], [], "openclaw")).toEqual([]);
+    expect(collectMessagingSecretFiles([FIXTURE_MANIFEST], ["googlechat"], "hermes")).toEqual([]);
   });
 });
 

@@ -92,20 +92,18 @@ export const googlechatManifest = {
       },
     },
   ],
-  // No outbound provider/placeholder for the service account: Google Chat signs
-  // its auth JWT with the private key IN-process (local signing), so the secret
-  // must reach the agent as a real file, not an `openshell:resolve:env:` outbound
-  // rewrite (which only materializes in outbound HTTP). Delivered via secretFiles.
+  // Outbound auth is gateway-minted: the OpenShell `google-service-account-jwt`
+  // refresh provider mints the Google Chat bot token from the pasted service
+  // account, and the L7 proxy injects it as `Authorization: Bearer` on
+  // chat.googleapis.com. The service-account private key stays gateway-side and
+  // never enters the sandbox. The bridge provider + refresh are wired in
+  // src/lib/onboard/googlechat-bridge-provider.ts; the googlechat-outbound-auth
+  // runtime preload makes the plugin send the injected bearer instead of signing
+  // in-process. No credentials/secretFiles here — the pasted serviceAccount is
+  // consumed only as gateway-side refresh material, never delivered into the sandbox.
+  // (The `serviceAccountFile` in `render` below is a start-gate marker only, not a
+  // delivered file — see the comment there.)
   credentials: [],
-  secretFiles: [
-    {
-      id: "serviceAccountFile",
-      sourceInput: "serviceAccount",
-      agent: "openclaw",
-      target: "/sandbox/.openclaw/secrets/googlechat-service-account.json",
-      mode: "640",
-    },
-  ],
   policyPresets: [{ name: "googlechat", policyKeys: ["googlechat"] }],
   render: [
     {
@@ -117,6 +115,13 @@ export const googlechatManifest = {
         path: "channels.googlechat",
         value: {
           enabled: true,
+          // Configured-marker ONLY — the file is never delivered (no secretFiles)
+          // and never read. OpenClaw's channel-start gate requires a serviceAccount*
+          // (isConfigured: credentialSource !== "none") to start the webhook, but the
+          // actual token is gateway-minted and proxy-injected, and the
+          // googlechat-outbound-auth preload short-circuits the token producer before
+          // this path is read — so the SA key never enters the sandbox. (Clean fix is
+          // upstream: a non-SA "configured"/accessToken credential source in @openclaw/googlechat.)
           serviceAccountFile: "/sandbox/.openclaw/secrets/googlechat-service-account.json",
           audienceType: "{{googlechatConfig.audienceType}}",
           audience: "{{googlechatConfig.audience}}",
@@ -160,6 +165,16 @@ export const googlechatManifest = {
       // real connection is still made by the proxy by hostname. Remove once the
       // upstream OpenClaw fix (trusted-env-proxy cert fetch, like web_fetch
       // openclaw#50650) ships. See runtime/googlechat-dns-resolve.ts for details.
+      //
+      // Second boot preload: move OUTBOUND auth off the in-sandbox SA key. By
+      // default @openclaw/googlechat signs an auth JWT with the SA private key
+      // in-process, which forces the key to live in the sandbox. This preload
+      // rewrites the plugin's single token producer to return the OpenShell
+      // gateway-minted credential placeholder (GOOGLE_CHAT_ACCESS_TOKEN) so the
+      // L7 proxy injects the real bearer outbound and the key never enters the
+      // sandbox. Inert until the B-side provider is wired (falls back to the
+      // in-process mint when the env var is unset). See
+      // runtime/googlechat-outbound-auth.ts.
       nodePreloads: [
         {
           module: "googlechat-dns-resolve",
@@ -169,6 +184,15 @@ export const googlechatManifest = {
             "[channels] Installing Google Chat DNS resolver shim (interim sandbox DNS workaround)",
           installedMessage:
             "[channels] Google Chat DNS resolver shim installed (NODE_OPTIONS updated)",
+        },
+        {
+          module: "googlechat-outbound-auth",
+          injectInto: ["boot"],
+          optional: false,
+          installMessage:
+            "[channels] Installing Google Chat outbound-auth patch (gateway-minted bearer)",
+          installedMessage:
+            "[channels] Google Chat outbound-auth patch installed (NODE_OPTIONS updated)",
         },
       ],
       secretScans: [
