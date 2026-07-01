@@ -329,6 +329,7 @@ def _pid1_is_nemoclaw_start() -> bool:
     # recreate argv could otherwise append `nemoclaw-start`, impersonate direct
     # PID 1 authority, and bypass the startup identity check. Keep this
     # exclusion as defense in depth; live proof is in
+    # assertHermesGpuStartupProof() in
     # test/e2e/live/hermes-gpu-startup-proof.ts. The dual-mode authorization
     # branch can be removed only after direct-PID1 images are no longer
     # supported; this supervisor exclusion itself remains a security invariant.

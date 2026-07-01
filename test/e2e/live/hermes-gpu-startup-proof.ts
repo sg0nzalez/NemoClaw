@@ -11,6 +11,11 @@ import {
 import { expect } from "../fixtures/e2e-test.ts";
 import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
 
+export const HERMES_GPU_EXTRA_PLACEHOLDER_KEYS = [
+  "TELEGRAM_BOT_TOKEN_AGENT_A",
+  "SLACK_BOT_TOKEN_AGENT_B",
+] as const;
+
 interface HermesGpuStartupProofOptions {
   env: NodeJS.ProcessEnv;
   host: HostCliClient;
@@ -61,6 +66,34 @@ export async function assertHermesGpuStartupProof({
     argv0: "/opt/openshell/bin/openshell-sandbox",
     has_nemoclaw_start: false,
   });
+
+  const expectedExtraPlaceholderAssignment = `NEMOCLAW_EXTRA_PLACEHOLDER_KEYS=${HERMES_GPU_EXTRA_PLACEHOLDER_KEYS.join(",")}`;
+  const extraPlaceholderEnv = await sandbox.execShell(
+    sandboxName,
+    trustedSandboxShellScript(String.raw`python3 - <<'PY'
+from pathlib import Path
+
+expected = ${JSON.stringify(expectedExtraPlaceholderAssignment)}.encode("utf-8")
+for proc in Path("/proc").iterdir():
+    if not proc.name.isdigit():
+        continue
+    try:
+        entries = (proc / "environ").read_bytes().split(b"\0")
+    except OSError:
+        continue
+    if expected in entries:
+        print(expected.decode("utf-8"))
+        raise SystemExit(0)
+raise SystemExit(1)
+PY`),
+    {
+      artifactName: "phase-4-gpu-startup-extra-placeholder-env",
+      env,
+      timeoutMs: 30_000,
+    },
+  );
+  expect(extraPlaceholderEnv.exitCode, resultText(extraPlaceholderEnv)).toBe(0);
+  expect(extraPlaceholderEnv.stdout.trim()).toBe(expectedExtraPlaceholderAssignment);
 
   const guardWithoutStartupOwner = await sandbox.execShell(
     sandboxName,

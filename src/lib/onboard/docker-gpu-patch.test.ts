@@ -149,32 +149,6 @@ describe("docker-gpu-patch", () => {
     expect(args).not.toEqual(expect.arrayContaining(["--env", "NVIDIA_VISIBLE_DEVICES=void"]));
   });
 
-  it("replaces OpenShell's idle sandbox command when recreating a managed container", () => {
-    const sandboxCommand = [
-      "env",
-      "CHAT_UI_URL=http://127.0.0.1:8642",
-      "NEMOCLAW_DASHBOARD_PORT=8642",
-      "HTTP_PROXY=http://proxy.example:8080",
-      "NEMOCLAW_EXTRA_PLACEHOLDER_KEYS=TELEGRAM_BOT_TOKEN_AGENT_A,SLACK_BOT_TOKEN_AGENT_B",
-      "nemoclaw-start",
-    ];
-
-    const args = buildDockerGpuCloneRunArgs(inspectFixture(), buildDockerGpuMode("gpus"), {
-      openshellSandboxCommand: sandboxCommand,
-    });
-
-    expect(args).toEqual(
-      expect.arrayContaining([
-        "--env",
-        "OPENSHELL_SANDBOX_COMMAND=env CHAT_UI_URL=http://127.0.0.1:8642 NEMOCLAW_DASHBOARD_PORT=8642 HTTP_PROXY=http://proxy.example:8080 NEMOCLAW_EXTRA_PLACEHOLDER_KEYS=TELEGRAM_BOT_TOKEN_AGENT_A,SLACK_BOT_TOKEN_AGENT_B nemoclaw-start",
-      ]),
-    );
-    expect(args).not.toEqual(
-      expect.arrayContaining(["--env", "OPENSHELL_SANDBOX_COMMAND=sleep infinity"]),
-    );
-    expect(args.slice(args.indexOf("openshell/sandbox:abc"))).toEqual(["openshell/sandbox:abc"]);
-  });
-
   it("adds OpenShell's sandbox command env when the inspected container lacks one", () => {
     const inspect = inspectFixture();
     inspect.Config!.Env = inspect.Config!.Env!.filter(
@@ -644,45 +618,6 @@ describe("docker-gpu-patch", () => {
       cloneArgs,
       expect.objectContaining({ ignoreError: true }),
     );
-  });
-
-  it("rejects whitespace-bearing startup values before touching the original container", () => {
-    const dockerCapture = vi.fn((args: readonly string[]) =>
-      args[0] === "ps"
-        ? "old-container-id\n"
-        : args[0] === "inspect"
-          ? JSON.stringify([inspectFixture()])
-          : "",
-    );
-    const dockerStop = vi.fn(() => ({ status: 0 }));
-    const dockerRename = vi.fn(() => ({ status: 0 }));
-    const dockerRunDetached = vi.fn(() => ({ status: 0, stdout: "new-container-id\n" }));
-
-    expect(() =>
-      recreateOpenShellDockerSandboxWithGpu(
-        {
-          sandboxName: "alpha",
-          timeoutSecs: 1,
-          openshellSandboxCommand: [
-            "env",
-            "HTTP_PROXY=http://proxy.example/path with space",
-            "nemoclaw-start",
-          ],
-        },
-        {
-          dockerCapture,
-          dockerRun: vi.fn(() => ({ status: 0, stdout: "probe-id\n" })),
-          dockerRunDetached,
-          dockerRename,
-          dockerStop,
-          readDir: vi.fn(() => null),
-          readFile: vi.fn(() => null),
-        },
-      ),
-    ).toThrow("OpenShell sandbox startup command tokens cannot be empty or contain whitespace");
-    expect(dockerStop).not.toHaveBeenCalled();
-    expect(dockerRename).not.toHaveBeenCalled();
-    expect(dockerRunDetached).not.toHaveBeenCalled();
   });
 });
 

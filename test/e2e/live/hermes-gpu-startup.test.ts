@@ -13,12 +13,17 @@ import {
 import { expect, test } from "../fixtures/e2e-test.ts";
 import { startFakeOpenAiCompatibleServer } from "../fixtures/fake-openai-compatible.ts";
 import { shouldRunLiveE2E } from "../fixtures/live-project-gate.ts";
-import { assertHermesGpuStartupProof } from "./hermes-gpu-startup-proof.ts";
+import {
+  assertHermesGpuStartupProof,
+  HERMES_GPU_EXTRA_PLACEHOLDER_KEYS,
+} from "./hermes-gpu-startup-proof.ts";
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "../../..");
 const SANDBOX_NAME = process.env.NEMOCLAW_SANDBOX_NAME ?? "e2e-hermes-gpu-startup";
 const FAKE_API_KEY = "e2e-hermes-gpu-startup-key";
 const FAKE_MODEL = "test-model";
+const EXTRA_PLACEHOLDER_TOKEN_A = "e2e-hermes-gpu-extra-telegram-token";
+const EXTRA_PLACEHOLDER_TOKEN_B = "e2e-hermes-gpu-extra-slack-token";
 const LIVE_TIMEOUT_MS = 70 * 60_000;
 validateSandboxName(SANDBOX_NAME);
 
@@ -166,15 +171,18 @@ test.skipIf(!shouldRunLiveE2E())(
       NEMOCLAW_COMPAT_MODEL: FAKE_MODEL,
       NEMOCLAW_ENDPOINT_URL: fake.baseUrl,
       NEMOCLAW_MODEL: FAKE_MODEL,
+      NEMOCLAW_EXTRA_PLACEHOLDER_KEYS: HERMES_GPU_EXTRA_PLACEHOLDER_KEYS.join(" "),
       NEMOCLAW_POLICY_MODE: "suggested",
       NEMOCLAW_PREFERRED_API: "openai-completions",
       NEMOCLAW_PROVIDER: "custom",
+      [HERMES_GPU_EXTRA_PLACEHOLDER_KEYS[0]]: EXTRA_PLACEHOLDER_TOKEN_A,
+      [HERMES_GPU_EXTRA_PLACEHOLDER_KEYS[1]]: EXTRA_PLACEHOLDER_TOKEN_B,
     });
     const install = await host.command("bash", ["install.sh", "--non-interactive", "--fresh"], {
       artifactName: "phase-2-install-hermes-gpu-startup",
       cwd: REPO_ROOT,
       env,
-      redactionValues: [FAKE_API_KEY],
+      redactionValues: [FAKE_API_KEY, EXTRA_PLACEHOLDER_TOKEN_A, EXTRA_PLACEHOLDER_TOKEN_B],
       timeoutMs: 60 * 60_000,
     });
     await (install.exitCode !== 0 ? captureFailedGpuContainer(host) : Promise.resolve());
@@ -202,6 +210,7 @@ test.skipIf(!shouldRunLiveE2E())(
         gpuPatchSelected: true,
         openshellReady: true,
         sandboxCudaVerified: true,
+        extraPlaceholderCommandRoundTripValid: true,
         stableSingleContainer: true,
         startupConfigHashesValid: true,
         supervisorTopologyValid: true,

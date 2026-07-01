@@ -309,6 +309,29 @@ describe("appendExtraPlaceholderKeysEnvArg", () => {
     }
   });
 
+  it("survives the OpenShell split_whitespace command round trip", () => {
+    const envArgs: string[] = [];
+    appendExtraPlaceholderKeysEnvArg(
+      envArgs,
+      ["TELEGRAM_BOT_TOKEN_AGENT_A", "SLACK_BOT_TOKEN_AGENT_B"],
+      formatEnvAssignment,
+    );
+
+    const commandTokens = ["env", ...envArgs, "nemoclaw-start"].join(" ").split(/\s+/u);
+    const assignment = commandTokens.find((token) =>
+      token.startsWith(`${EXTRA_PLACEHOLDER_KEYS_ENV}=`),
+    );
+    expect(assignment).toBe(
+      `${EXTRA_PLACEHOLDER_KEYS_ENV}=TELEGRAM_BOT_TOKEN_AGENT_A,SLACK_BOT_TOKEN_AGENT_B`,
+    );
+
+    const rawValue = assignment?.slice(EXTRA_PLACEHOLDER_KEYS_ENV.length + 1);
+    expect(parseExtraPlaceholderKeys(rawValue, CANONICAL_ENVKEYS_FIXTURE)).toEqual({
+      keys: ["TELEGRAM_BOT_TOKEN_AGENT_A", "SLACK_BOT_TOKEN_AGENT_B"],
+      warnings: [],
+    });
+  });
+
   it("emits no env arg when the extras list is empty", () => {
     const envArgs: string[] = [];
     appendExtraPlaceholderKeysEnvArg(envArgs, [], formatEnvAssignment);
