@@ -23,8 +23,9 @@ import {
 } from "../fixtures/security-posture.ts";
 import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
 import {
-  assertHermesGpuStartupProof,
+  assertHermesGpuStartupProofIfEnabled,
   hermesGpuStartupE2eEnabled,
+  hermesGpuStartupEnv,
 } from "./hermes-gpu-startup-proof.ts";
 
 // This is intentionally a direct live Vitest test, not a new registry layer:
@@ -89,6 +90,7 @@ function commandEnv(hostedEnv: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
     NEMOCLAW_ONBOARD_VALIDATION_TIMEOUT_SECONDS: ONBOARD_VALIDATION_TIMEOUT_SECONDS,
     NEMOCLAW_SANDBOX_NAME: SANDBOX_NAME,
     ...securityPostureModeEnv(),
+    ...hermesGpuStartupEnv(),
   };
   if (process.env.NEMOCLAW_E2E_HERMES_DASHBOARD) {
     env.NEMOCLAW_E2E_HERMES_DASHBOARD = process.env.NEMOCLAW_E2E_HERMES_DASHBOARD;
@@ -105,12 +107,6 @@ function commandEnv(hostedEnv: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   if (process.env.NEMOCLAW_HERMES_DASHBOARD_INTERNAL_PORT) {
     env.NEMOCLAW_HERMES_DASHBOARD_INTERNAL_PORT =
       process.env.NEMOCLAW_HERMES_DASHBOARD_INTERNAL_PORT;
-  }
-  if (process.env.NEMOCLAW_SANDBOX_GPU) {
-    env.NEMOCLAW_SANDBOX_GPU = process.env.NEMOCLAW_SANDBOX_GPU;
-  }
-  if (process.env.NEMOCLAW_DOCKER_GPU_PATCH) {
-    env.NEMOCLAW_DOCKER_GPU_PATCH = process.env.NEMOCLAW_DOCKER_GPU_PATCH;
   }
   return env;
 }
@@ -461,16 +457,14 @@ test.skipIf(!shouldRunLiveE2E())(
     expect(configProbe.exitCode, resultText(configProbe)).toBe(0);
     expect(configProbe.stdout).toContain("OK");
 
-    if (hermesGpuStartupE2eEnabled()) {
-      await assertHermesGpuStartupProof({
-        env: commandEnv(),
-        host,
-        install,
-        sandbox,
-        sandboxName: SANDBOX_NAME,
-        status,
-      });
-    }
+    await assertHermesGpuStartupProofIfEnabled({
+      env: commandEnv(),
+      host,
+      install,
+      sandbox,
+      sandboxName: SANDBOX_NAME,
+      status,
+    });
 
     if (hermesDashboardE2eEnabled()) {
       const entry = registryEntry(SANDBOX_NAME);

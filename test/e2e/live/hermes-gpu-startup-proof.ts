@@ -24,7 +24,18 @@ export function hermesGpuStartupE2eEnabled(): boolean {
   return process.env.NEMOCLAW_SANDBOX_GPU === "1" && process.env.NEMOCLAW_DOCKER_GPU_PATCH === "1";
 }
 
-export async function assertHermesGpuStartupProof({
+export function hermesGpuStartupEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  if (process.env.NEMOCLAW_SANDBOX_GPU) {
+    env.NEMOCLAW_SANDBOX_GPU = process.env.NEMOCLAW_SANDBOX_GPU;
+  }
+  if (process.env.NEMOCLAW_DOCKER_GPU_PATCH) {
+    env.NEMOCLAW_DOCKER_GPU_PATCH = process.env.NEMOCLAW_DOCKER_GPU_PATCH;
+  }
+  return env;
+}
+
+export async function assertHermesGpuStartupProofIfEnabled({
   env,
   host,
   install,
@@ -32,6 +43,8 @@ export async function assertHermesGpuStartupProof({
   sandboxName,
   status,
 }: HermesGpuStartupProofOptions): Promise<void> {
+  if (!hermesGpuStartupE2eEnabled()) return;
+
   expect(resultText(install)).toContain(
     "Recreating OpenShell Docker sandbox container with NVIDIA GPU access",
   );
