@@ -48,12 +48,19 @@ const FIX_IPV4_NON_LOOPBACK = "0100000A";
 //   bytes 00..00 (12) + 00 00 00 01, grouped by 4 and byte-reversed inside each
 //   group: 00000000 00000000 00000000 01000000.
 const FIX_IPV6_LOOPBACK = "00000000000000000000000001000000";
-// IPv6 ::ffff:127.0.0.1 (IPv4-mapped) per-group little-endian:
-//   bytes 00..00 (10) + FF FF + 7F 00 00 01, grouped and reversed:
-//   00000000 00000000 FFFF0000 0100007F.
-const FIX_IPV6_MAPPED_LOOPBACK_1 = "00000000000000000000FFFF0100007F";
-// IPv6 ::ffff:127.0.0.9 (also loopback under 127.0.0.0/8): 0900007F suffix.
-const FIX_IPV6_MAPPED_LOOPBACK_9 = "00000000000000000000FFFF0900007F";
+// IPv6 ::ffff:127.0.0.1 (IPv4-mapped). Address bytes (network order):
+//   00 00 00 00 00 00 00 00 00 00 FF FF 7F 00 00 01
+// Grouped into four 32-bit ints, each printed %08X on native (LE) byte
+// order gives numeric values 0x00000000 0x00000000 0xFFFF0000 0x0100007F,
+// so the concatenated proc encoding is:
+const FIX_IPV6_MAPPED_LOOPBACK_1 = "0000000000000000FFFF00000100007F";
+// IPv6 ::ffff:127.0.0.9 (also loopback under 127.0.0.0/8). Last group:
+// bytes 12-15 = 7F 00 00 09 -> LE u32 = 0x0900007F.
+const FIX_IPV6_MAPPED_LOOPBACK_9 = "0000000000000000FFFF00000900007F";
+// IPv6 ::ffff:10.0.0.1 (mapped BUT non-loopback). Last group: bytes 12-15
+// = 0A 00 00 01 -> LE u32 = 0x0100000A. Exercises the negative branch of
+// the IPv4-mapped IPv6 classifier.
+const FIX_IPV6_MAPPED_NON_LOOPBACK = "0000000000000000FFFF00000100000A";
 // IPv6 wildcard (all zeros) -- NOT loopback.
 const FIX_IPV6_WILDCARD = "00000000000000000000000000000000";
 
@@ -140,6 +147,20 @@ describe("isLoopbackProcAddress bind probe (#6014)", () => {
 
   it("rejects an IPv6 wildcard (all zeros)", () => {
     expect(isLoopbackProcAddress(FIX_IPV6_WILDCARD)).toBe(false);
+  });
+
+  it("rejects IPv4-mapped IPv6 to a non-loopback IPv4 (::ffff:10.0.0.1)", () => {
+    // The classifier must not accept just any ::ffff:*/96 address; only
+    // those whose embedded IPv4 falls in 127.0.0.0/8.
+    expect(isLoopbackProcAddress(FIX_IPV6_MAPPED_NON_LOOPBACK)).toBe(false);
+  });
+
+  it("rejects malformed proc-encoded addresses of unexpected length", () => {
+    // Decoder returns null for anything that is not 8 chars (IPv4) or 32
+    // chars (IPv6); classifier must return false rather than throwing.
+    expect(isLoopbackProcAddress("7F00")).toBe(false);
+    expect(isLoopbackProcAddress("")).toBe(false);
+    expect(isLoopbackProcAddress("0100007FFF")).toBe(false);
   });
 });
 

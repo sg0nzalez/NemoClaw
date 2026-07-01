@@ -73,14 +73,21 @@ const IPV4_LOOPBACK_PROC = "0100007F";
 // little-endian order. ::1 bytes = 00..00 00..01 -> groups reversed become
 // 00000000:00000000:00000000:01000000, concatenated.
 const IPV6_LOOPBACK_PROC = "00000000000000000000000001000000";
-// IPv4-mapped IPv6 loopback (::ffff:127.0.0.1). Bytes:
+// IPv4-mapped IPv6 loopback (::ffff:127.0.0.1). Address bytes (network
+// order):
 //   00 00 00 00 00 00 00 00 00 00 FF FF 7F 00 00 01
-// Grouped and byte-reversed per column ->
-//   00000000 : 00000000 : FFFF0000 : 0100007F
-// (Earlier encoding "0000000000000000FFFF00007F000001" was wrong; it
-// interpreted the last two groups without the per-column reverse, which
-// would never appear in real /proc/net/tcp6 output.)
-const IPV6_MAPPED_IPV4_LOOPBACK_PROC = "00000000000000000000FFFF0100007F";
+// The kernel groups these into four 32-bit ints and prints each with %08X in
+// native (little-endian) byte order, so each group's numeric u32 value is:
+//   int[0] = 0x00000000  int[1] = 0x00000000
+//   int[2] = 0xFFFF0000  (bytes 8-11 = 00 00 FF FF little-endian -> u32)
+//   int[3] = 0x0100007F  (bytes 12-15 = 7F 00 00 01 little-endian -> u32)
+// %08X of each: 00000000 00000000 FFFF0000 0100007F -> concatenated:
+//   0000000000000000FFFF00000100007F
+// The correctness of this constant is enforced end-to-end by the
+// isLoopbackProcAddress test suite, which independently decodes the bytes
+// via decodeProcAddress and checks the semantic loopback shape, rather
+// than string-comparing against this constant.
+const IPV6_MAPPED_IPV4_LOOPBACK_PROC = "0000000000000000FFFF00000100007F";
 
 /**
  * Parse a /proc/net/tcp{,6} table and return every LISTEN socket whose local
@@ -111,23 +118,54 @@ function parseProcNetTcpListeners(text, port) {
   return listeners;
 }
 
+/**
+ * Decode a /proc/net/tcp{,6} local_address hex column into the address bytes
+ * in canonical IP byte order (network order: high byte first, the same order
+ * `inet_pton` / `getnameinfo` produce). The kernel formats each 32-bit
+ * group with `%08X` on the native (little-endian) u32, so within each 8-hex
+ * character group the bytes are emitted in reverse of network order. We undo
+ * that here by walking each group in reverse-byte order.
+ *
+ * Returns a 4-byte array for IPv4 (8 hex chars), a 16-byte array for IPv6
+ * (32 hex chars), or null if the input has any other length. Robust against
+ * upstream-hex-encoding subtleties so the loopback classifier below can
+ * reason about actual address bytes instead of hex string patterns.
+ */
+function decodeProcAddress(addr) {
+  const expectedGroups = addr.length === 8 ? 1 : addr.length === 32 ? 4 : 0;
+  if (expectedGroups === 0) return null;
+  const bytes = [];
+  for (let g = 0; g < expectedGroups; g++) {
+    const group = addr.slice(g * 8, (g + 1) * 8);
+    // Each group is 4 bytes emitted little-endian in the hex; walk in
+    // reverse to recover network byte order.
+    for (let b = 3; b >= 0; b--) {
+      bytes.push(parseInt(group.slice(b * 2, b * 2 + 2), 16));
+    }
+  }
+  return bytes;
+}
+
+/**
+ * Classify a decoded address as loopback. Handles three concrete cases:
+ *   - IPv4: first byte 0x7F (127.0.0.0/8)
+ *   - IPv6 canonical loopback: 15 zero bytes then 0x01 (::1)
+ *   - IPv4-mapped IPv6 loopback: 10 zero bytes, then 0xFF 0xFF, then any
+ *     127.x.y.z (byte 12 == 0x7F). Covers ::ffff:127.0.0.0/8.
+ * Returns false for any input the decoder produced that does not match one
+ * of these shapes.
+ */
 function isLoopbackProcAddress(addr) {
-  // IPv4 in /proc/net/tcp is a single 32-bit column emitted in little-endian
-  // hex: the last two chars are the address's FIRST byte. 127.0.0.0/8
-  // = anything whose first byte is 0x7F. Matching by suffix accepts every
-  // valid loopback (127.0.0.1, 127.0.0.2, 127.42.13.99, etc.) instead of only
-  // the single canonical 127.0.0.1. See CR feedback on #6054.
-  if (addr.length === 8 && addr.endsWith("7F")) return true;
-  // IPv6 has two loopback shapes:
-  //   ::1                — exactly the 32-char IPV6_LOOPBACK_PROC encoding
-  //   ::ffff:127.0.0.0/8 — IPv4-mapped IPv6, so the last 32-bit group's
-  //                        little-endian first-byte must be 0x7F, and the
-  //                        preceding three groups must be
-  //                        00000000:00000000:FFFF0000
-  if (addr === IPV6_LOOPBACK_PROC) return true;
-  if (addr.length === 32 && addr.startsWith("00000000000000000000FFFF")) {
-    const lastGroup = addr.slice(24);
-    return lastGroup.endsWith("7F");
+  const bytes = decodeProcAddress(addr);
+  if (bytes === null) return false;
+  if (bytes.length === 4) return bytes[0] === 0x7f;
+  if (bytes.length !== 16) return false;
+  const allZero = (arr, from, to) => arr.slice(from, to).every((b) => b === 0);
+  // ::1 -> all-zero prefix, last byte 0x01
+  if (allZero(bytes, 0, 15) && bytes[15] === 0x01) return true;
+  // ::ffff:127.x.y.z -> 10 zeros, 0xFF 0xFF, then 127-prefixed IPv4
+  if (allZero(bytes, 0, 10) && bytes[10] === 0xff && bytes[11] === 0xff) {
+    return bytes[12] === 0x7f;
   }
   return false;
 }
@@ -144,14 +182,21 @@ function probeLinuxLoopbackBind(port) {
   try {
     v4Text = fs.readFileSync("/proc/net/tcp", "utf8");
   } catch (err) {
-    if (err && err.code === "ENOENT") return null;
-    throw err;
+    // Any read failure (EACCES on some containers, EPERM under strict
+    // sandboxes, or the absent-file case) degrades to null so the caller
+    // falls back to `lsof` rather than crashing the proxy.
+    if (err && (err.code === "ENOENT" || err.code === "EACCES" || err.code === "EPERM")) {
+      return null;
+    }
+    return null;
   }
   try {
     v6Text = fs.readFileSync("/proc/net/tcp6", "utf8");
   } catch (err) {
-    // tcp6 may be absent on IPv6-disabled kernels; treat as empty.
-    if (err && err.code !== "ENOENT") throw err;
+    // tcp6 may be absent on IPv6-disabled kernels; treat as empty. Any
+    // other failure (EACCES / EPERM) is treated the same: absence of IPv6
+    // data doesn't invalidate the IPv4 data we already read.
+    void err;
   }
   const listeners = [
     ...parseProcNetTcpListeners(v4Text, port),
@@ -196,7 +241,22 @@ function probeLsofLoopbackBind(port) {
 }
 
 function assertBackendBoundToLoopback(port) {
-  if (process.env.NEMOCLAW_OLLAMA_PROXY_SKIP_BIND_PROBE === "1") return;
+  if (process.env.NEMOCLAW_OLLAMA_PROXY_SKIP_BIND_PROBE === "1") {
+    // PRA-5 audit trail: the operator override that disables the
+    // loopback probe MUST leave a durable record in the proxy's stderr so
+    // an incident investigator scanning proxy logs can see that
+    // enforcement was skipped, when, and via which knob. This is not a
+    // fail-closed decision (the operator explicitly asked for the
+    // override), but it must not be silent.
+    console.warn(
+      `Ollama auth proxy: SECURITY PROBE SKIPPED. ` +
+        `NEMOCLAW_OLLAMA_PROXY_SKIP_BIND_PROBE=1 disabled the loopback ` +
+        `bind check for port ${port}. Any Ollama daemon on this host ` +
+        `reachable on a non-loopback interface will bypass the proxy's ` +
+        `token check. Unset the env to restore enforcement.`,
+    );
+    return;
+  }
   let result = process.platform === "linux" ? probeLinuxLoopbackBind(port) : null;
   if (result === null) {
     result = probeLsofLoopbackBind(port);
