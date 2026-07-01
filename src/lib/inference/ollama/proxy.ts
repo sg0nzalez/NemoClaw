@@ -4,6 +4,13 @@
 //
 // Ollama auth-proxy lifecycle: token persistence, PID management,
 // proxy start/stop, model pull and validation.
+//
+// @ts-nocheck is pre-existing. Removing it surfaces ~14 implicit-any
+// parameter errors scattered through the 992-line file (sleep, model, err,
+// code, bytes, pct, line, tag, ...). Typing each callback is a separate
+// refactor tracked as a follow-up on #6014. This PR only touches the
+// status-file IPC seam and the spawn env; it does not extend the
+// @ts-nocheck-suppressed area with new implicit-any surface.
 
 import type { GpuInfo } from "../local";
 
