@@ -308,7 +308,15 @@ const ctx = module.exports;
         isInteractive: false,
         configuredChannels: ["slack"],
         disabledChannels: [],
-        supportedChannelIds: ["telegram", "discord", "wechat", "slack", "whatsapp", "teams"],
+        supportedChannelIds: [
+          "telegram",
+          "discord",
+          "wechat",
+          "slack",
+          "whatsapp",
+          "teams",
+          "googlechat",
+        ],
       },
     ]);
   });

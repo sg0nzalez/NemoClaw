@@ -118,6 +118,7 @@ describe("policies", () => {
         "claude-code",
         "discord",
         "github",
+        "googlechat",
         "huggingface",
         "jira",
         "local-inference",

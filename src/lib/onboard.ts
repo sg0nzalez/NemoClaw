@@ -163,7 +163,6 @@ const ANSI_RE = /\x1B(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\)|[@-_])/g;
 const runner: typeof import("./runner") = require("./runner");
 const { ROOT, SCRIPTS, redact, run, runCapture, runFile, validateName } = runner;
 const braveProviderProfile: typeof import("./onboard/brave-provider-profile") = require("./onboard/brave-provider-profile");
-const googlechatBridgeProvider: typeof import("./onboard/googlechat-bridge-provider") = require("./onboard/googlechat-bridge-provider");
 const { runSandboxProviderPreDeleteCleanup } =
   require("./onboard/sandbox-provider-cleanup") as typeof import("./onboard/sandbox-provider-cleanup");
 const nameValidation: typeof import("./name-validation") = require("./name-validation");
@@ -948,19 +947,7 @@ function upsertMessagingProviders(
   options: { replaceExisting?: boolean } = {},
 ) {
   braveProviderProfile.ensureBraveProviderProfile(tokenDefs, { root: ROOT, runOpenshell, redact });
-  googlechatBridgeProvider.ensureGooglechatBridgeProfile(tokenDefs, {
-    root: ROOT,
-    runOpenshell,
-    redact,
-  });
   const upserted = onboardProviders.upsertMessagingProviders(tokenDefs, runOpenshell, options);
-  // Gateway-side token minting must be configured AFTER the provider exists.
-  // Supplies the service-account material (key stays gateway-side); best-effort.
-  googlechatBridgeProvider.configureGooglechatBridgeRefresh(tokenDefs, {
-    runOpenshell,
-    redact,
-    getCredential,
-  });
   // upsertMessagingProviders process.exits on failure, so reaching this
   // point means every entry in tokenDefs that had a token was registered.
   // Mark migrated only when the registered token equals the staged legacy
@@ -5290,15 +5277,6 @@ async function onboard(opts: OnboardOptions = {}): Promise<void> {
       },
     });
     completed = true;
-    // Deliver in-process secret files (e.g. the Google Chat service account) into
-    // the sandbox and restart the gateway so channels that sign locally can read them.
-    (
-      require("./onboard/messaging-secret-file-delivery") as typeof import("./onboard/messaging-secret-file-delivery")
-    ).deliverSandboxMessagingSecretFiles(
-      sandboxName,
-      liveFinalFlowContext.selectedMessagingChannels ?? [],
-      agent,
-    );
     traceCompleted = true;
   } finally {
     releaseOnboardLock();

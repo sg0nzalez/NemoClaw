@@ -172,7 +172,12 @@ export function configureGooglechatBridgeRefresh(
     );
     return;
   }
-  if (typeof clientEmail !== "string" || !clientEmail || typeof privateKey !== "string" || !privateKey) {
+  if (
+    typeof clientEmail !== "string" ||
+    !clientEmail ||
+    typeof privateKey !== "string" ||
+    !privateKey
+  ) {
     warn(
       "\n  ✗ Google Chat bridge: service account JSON missing client_email/private_key; cannot configure gateway token minting.",
     );
@@ -206,9 +211,7 @@ export function configureGooglechatBridgeRefresh(
   const diagnostic = compactText(
     deps.redact(`${bufferOrStringToText(result.stderr)} ${bufferOrStringToText(result.stdout)}`),
   );
-  warn(
-    `\n  ✗ Google Chat bridge: failed to configure gateway token minting for '${bridge.name}'.`,
-  );
+  warn(`\n  ✗ Google Chat bridge: failed to configure gateway token minting for '${bridge.name}'.`);
   if (diagnostic) warn(`    ${diagnostic.slice(0, 500)}`);
   warn("    Outbound Google Chat replies will not authenticate until this is resolved.");
 }

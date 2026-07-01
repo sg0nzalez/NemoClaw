@@ -4,8 +4,8 @@
 //
 // Provider metadata, lookup helpers, and gateway provider CRUD.
 
-const { redact } = require("../runner");
-const { normalizeCredentialValue } = require("../credentials/store");
+const { redact, ROOT } = require("../runner");
+const { normalizeCredentialValue, getCredential } = require("../credentials/store");
 const {
   DEFAULT_CLOUD_MODEL,
   DEFAULT_HERMES_PROVIDER_MODEL,
@@ -443,6 +443,15 @@ function upsertProvider(name, type, credentialEnv, baseUrl, env, _runOpenshell, 
  * @returns {string[]} Provider names that were upserted.
  */
 function upsertMessagingProviders(tokenDefs, _runOpenshell, options = {}) {
+  const googlechatBridgeProvider = require("./googlechat-bridge-provider");
+  // Register the Google Chat bridge provider profile before creating providers
+  // (the bridge is created with --type google-chat-bridge). Self-gates when no
+  // googlechat bridge token def is present.
+  googlechatBridgeProvider.ensureGooglechatBridgeProfile(tokenDefs, {
+    root: ROOT,
+    runOpenshell: _runOpenshell,
+    redact,
+  });
   const upserted = [];
   const failures = [];
   for (const { name, envKey, token, providerType } of tokenDefs) {
@@ -469,6 +478,15 @@ function upsertMessagingProviders(tokenDefs, _runOpenshell, options = {}) {
   if (failures.length > 0) {
     throw new Error(failures.join("; "));
   }
+  // Gateway-side token minting for the Google Chat bridge is configured AFTER
+  // the provider exists (best-effort; self-gates without a bridge token def).
+  // The service-account private key is passed as refresh material and stays
+  // gateway-side — never written into the sandbox.
+  googlechatBridgeProvider.configureGooglechatBridgeRefresh(tokenDefs, {
+    runOpenshell: _runOpenshell,
+    redact,
+    getCredential,
+  });
   return upserted;
 }
 
