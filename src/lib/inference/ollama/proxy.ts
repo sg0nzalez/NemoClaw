@@ -41,6 +41,11 @@ const {
   spawnDetachedNodeAdapter,
   writeLocalAdapterSecretFile,
 } = require("../local-adapter-lifecycle");
+const {
+  clearStaleProxyStatus,
+  printProxyStartupReason,
+  readProxyExitStatus,
+} = require("./proxy-status");
 
 // ── State ────────────────────────────────────────────────────────
 
@@ -144,11 +149,7 @@ function isOllamaProxyProcess(pid: number | null | undefined): boolean {
 function spawnOllamaAuthProxy(token: string): number | null {
   // Clear any stale status file so a read after this spawn observes the new
   // proxy's exit reason (or finds no file when the proxy starts cleanly).
-  try {
-    fs.unlinkSync(PROXY_STATUS_PATH);
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
-  }
+  clearStaleProxyStatus(PROXY_STATUS_PATH);
   const child = spawnDetachedNodeAdapter({
     scriptPath: path.join(SCRIPTS, "ollama-auth-proxy.js"),
     env: {
@@ -161,62 +162,6 @@ function spawnOllamaAuthProxy(token: string): number | null {
   });
   persistProxyPid(child.pid);
   return child.pid ?? null;
-}
-
-/**
- * Read the structured exit status the proxy script writes to PROXY_STATUS_PATH
- * before a non-zero exit. Returns null when the file is absent or unparseable
- * so the caller can fall back to the generic "exited during startup" message.
- */
-type ProxyExitStatus = { reason: string; details?: string; exitedAt?: number };
-function readProxyExitStatus(): ProxyExitStatus | null {
-  let raw: string;
-  try {
-    raw = fs.readFileSync(PROXY_STATUS_PATH, "utf8");
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
-    return null;
-  }
-  try {
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed.reason === "string") {
-      return {
-        reason: parsed.reason,
-        details: typeof parsed.details === "string" ? parsed.details : undefined,
-        exitedAt: typeof parsed.exitedAt === "number" ? parsed.exitedAt : undefined,
-      };
-    }
-  } catch {
-    // unparseable — fall through to null
-  }
-  return null;
-}
-
-/**
- * Render proxy startup-failure remediation. When the proxy script wrote a
- * structured reason (e.g. backend-not-loopback per #6014), surface it as the
- * primary message. Otherwise fall back to the generic owner-or-port message
- * the caller already prints.
- */
-function printProxyStartupReason(status: ProxyExitStatus | null): boolean {
-  if (status === null) return false;
-  if (status.reason === "backend-not-loopback") {
-    console.error("  Error: Ollama auth proxy refused to start.");
-    console.error(
-      `  Ollama is reachable on a non-loopback interface on the host (${
-        status.details || "see proxy log"
-      }), which would bypass the proxy's token check entirely.`,
-    );
-    console.error(
-      `  Remediation: bind Ollama to loopback only. On Linux, set OLLAMA_HOST=127.0.0.1:${OLLAMA_PORT} ` +
-        "in the Ollama systemd unit's [Service] section. On other platforms, set OLLAMA_HOST=127.0.0.1 " +
-        "in the launcher's environment before starting Ollama.",
-    );
-    return true;
-  }
-  console.error(`  Error: Ollama auth proxy exited during startup: ${status.reason}`);
-  if (status.details) console.error(`  Details: ${status.details}`);
-  return true;
 }
 
 function killStaleProxy(): void {
@@ -363,7 +308,7 @@ function startOllamaAuthProxy(): boolean {
     //      proxy wrote to PROXY_STATUS_PATH before exit)
     //   2. Port conflict (EADDRINUSE race lost after pre-check)
     //   3. Generic "exited during startup" without a structured reason
-    const status = readProxyExitStatus();
+    const status = readProxyExitStatus(PROXY_STATUS_PATH);
     if (printProxyStartupReason(status)) {
       // Already rendered above.
     } else {

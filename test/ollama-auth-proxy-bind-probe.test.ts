@@ -2,14 +2,36 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // #6014 first PR: cover the loopback bind probe inside the Ollama auth proxy.
-// The probe is the proxy's independent guard against an Ollama daemon listening
-// on a non-loopback interface (which would bypass the proxy's token check).
+//
+// THREAT MODEL (advisor PRA-5):
+//   The proxy is the token-authenticated network gate in front of Ollama on
+//   every topology where `shouldFrontOllamaWithProxy()` returns true (native
+//   Linux + macOS + WSL native dockerd -- see local-inference-topology.ts).
+//   Ollama itself has no built-in auth. If the Ollama backend is reachable
+//   on ANY non-loopback interface on the host, an attacker on the same LAN
+//   (or a co-tenant on a shared host) can bypass the proxy entirely by
+//   connecting directly to `<host-ip>:11434`. The token check the proxy
+//   enforces on port 11435 is useless in that case.
+//
+//   The probe under test is the proxy's independent guard against this: at
+//   startup, walk /proc/net/tcp{,6} (or fall back to `lsof`) and refuse to
+//   listen if any observed LISTEN-state socket on the backend port is NOT
+//   loopback. The tests below pin every branch of that classifier so a
+//   regression cannot silently downgrade the security posture:
+//     - Correct loopback classification for IPv4 (127.0.0.0/8), IPv6 (::1),
+//       and IPv4-mapped IPv6 (::ffff:127.0.0.0/8), on BOTH the /proc-based
+//       and the lsof-based classifiers
+//     - Refusal of every non-loopback shape (wildcard, non-127 IPv4, IPv6
+//       wildcard, IPv4-mapped IPv6 to a non-127 address)
+//     - Behaviour when the listener count is zero (nothing to guard against
+//       -> ok=true) vs when the listener count is nonzero (all must be
+//       loopback)
+//     - Refusal to accept malformed input (would otherwise degrade to
+//       "unknown -> ok" which is fail-open)
 
 import net from "node:net";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-// The proxy script is plain CommonJS. Require it directly so tests can cover
-// the exported helpers without spawning the proxy as a subprocess.
 type ProbeResult = { ok: boolean; listeners: Array<{ address: string; port: number }> } | null;
 type ProxyExports = {
   parseProcNetTcpListeners: (
@@ -17,6 +39,7 @@ type ProxyExports = {
     port: number,
   ) => Array<{ address: string; port: number }>;
   isLoopbackProcAddress: (addr: string) => boolean;
+  isLoopbackLsofAddress: (addr: string) => boolean;
   probeLinuxLoopbackBind: (port: number) => ProbeResult;
   EXIT_BACKEND_NOT_LOOPBACK: number;
 };
@@ -24,6 +47,7 @@ const proxyExports = require("../scripts/ollama-auth-proxy.js") as ProxyExports;
 const {
   parseProcNetTcpListeners,
   isLoopbackProcAddress,
+  isLoopbackLsofAddress,
   probeLinuxLoopbackBind,
   EXIT_BACKEND_NOT_LOOPBACK,
 } = proxyExports;
@@ -234,6 +258,57 @@ describe("probeLinuxLoopbackBind bind probe (#6014)", () => {
       expect(probeLinuxLoopbackBind(ephemeralPort)).toBeNull();
     },
   );
+});
+
+describe("isLoopbackLsofAddress bind probe (#6014)", () => {
+  it("accepts a literal 127.0.0.1", () => {
+    expect(isLoopbackLsofAddress("127.0.0.1")).toBe(true);
+  });
+
+  it("accepts every address in 127.0.0.0/8 (127.42.13.99, 127.255.255.255)", () => {
+    expect(isLoopbackLsofAddress("127.42.13.99")).toBe(true);
+    expect(isLoopbackLsofAddress("127.255.255.255")).toBe(true);
+  });
+
+  it("accepts IPv6 loopback in both bracketed and unbracketed forms", () => {
+    expect(isLoopbackLsofAddress("::1")).toBe(true);
+    expect(isLoopbackLsofAddress("[::1]")).toBe(true);
+  });
+
+  it("accepts the literal 'localhost'", () => {
+    // Some lsof configurations resolve DNS by default; accept the token so
+    // the classifier does not spuriously refuse a genuine loopback bind.
+    expect(isLoopbackLsofAddress("localhost")).toBe(true);
+  });
+
+  it("accepts IPv4-mapped IPv6 (dotted quad form) in 127.0.0.0/8", () => {
+    expect(isLoopbackLsofAddress("::ffff:127.0.0.1")).toBe(true);
+    expect(isLoopbackLsofAddress("::ffff:127.42.13.99")).toBe(true);
+  });
+
+  it("rejects IPv4 wildcard 0.0.0.0", () => {
+    expect(isLoopbackLsofAddress("0.0.0.0")).toBe(false);
+  });
+
+  it("rejects LAN-scope IPv4 addresses", () => {
+    expect(isLoopbackLsofAddress("10.0.0.1")).toBe(false);
+    expect(isLoopbackLsofAddress("192.168.1.1")).toBe(false);
+  });
+
+  it("rejects IPv6 wildcard :: and any global IPv6", () => {
+    expect(isLoopbackLsofAddress("::")).toBe(false);
+    expect(isLoopbackLsofAddress("2001:db8::1")).toBe(false);
+  });
+
+  it("rejects IPv4-mapped IPv6 pointing at a non-loopback IPv4", () => {
+    expect(isLoopbackLsofAddress("::ffff:10.0.0.1")).toBe(false);
+  });
+
+  it("rejects the lsof wildcard token '*'", () => {
+    // lsof prints `*:11434` for a wildcard listener; the classifier must
+    // refuse it (the extractor upstream feeds us the "*" string).
+    expect(isLoopbackLsofAddress("*")).toBe(false);
+  });
 });
 
 describe("public surface bind probe (#6014)", () => {

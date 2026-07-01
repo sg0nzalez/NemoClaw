@@ -212,6 +212,40 @@ function probeLinuxLoopbackBind(port) {
  * Returns { ok, listeners } in the same shape as the Linux probe, or null
  * when lsof is unavailable so the caller can render a degraded warning.
  */
+/**
+ * Classify a human-readable IP address string (as printed by `lsof -F n`)
+ * as loopback. Handles the same three semantic cases as
+ * `isLoopbackProcAddress`, but on the cross-platform lsof-style form so the
+ * IPv4 accept range matches on both probes: any 127.x.y.z (127.0.0.0/8),
+ * ::1, and ::ffff:127.0.0.0/8. Advisor PRA-4 (Ultra) flagged the earlier
+ * exact-match against "127.0.0.1" as an incomplete classifier that would
+ * refuse legitimate loopback binds and, worse, mask a genuine non-loopback
+ * mistake as "not-loopback" on the fallback path.
+ */
+function isLoopbackLsofAddress(addr) {
+  if (addr === "localhost") return true;
+  // IPv4 dotted quad, or IPv4-mapped IPv6 written as "::ffff:x.y.z.w" or
+  // "[::ffff:x.y.z.w]" or a bracketed IPv6 wrapper on the same. Any of
+  // these forms are loopback iff the leading IPv4 byte is 127.
+  const ipv4Match = addr.match(
+    /^\[?(?:::ffff:)?(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\]?$/i,
+  );
+  if (ipv4Match !== null) return parseInt(ipv4Match[1], 10) === 127;
+  // IPv6 canonical loopback.
+  if (addr === "::1" || addr === "[::1]") return true;
+  // IPv4-mapped IPv6 in colon-hex form (rare from lsof, but be robust).
+  const mappedHex = addr.match(/^\[?::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})\]?$/i);
+  if (mappedHex !== null) {
+    // The last 32 bits of the mapped IPv6 are the IPv4 address bytes.
+    // The first hex group holds the high 16 bits (bytes 12-13), second
+    // holds the low 16 bits (bytes 14-15). For 127.0.0.0/8 the top byte
+    // (byte 12) is 0x7F, which is the high byte of the first hex group.
+    const hi = parseInt(mappedHex[1], 16);
+    return hi >>> 8 === 0x7f;
+  }
+  return false;
+}
+
 function probeLsofLoopbackBind(port) {
   let stdout;
   try {
@@ -234,9 +268,8 @@ function probeLsofLoopbackBind(port) {
     const addr = body.slice(0, sep);
     listeners.push({ address: addr, port });
   }
-  const isLoopback = (a) => a === "127.0.0.1" || a === "[::1]" || a === "::1" || a === "localhost";
   if (listeners.length === 0) return { ok: true, listeners };
-  const nonLoopback = listeners.filter((l) => !isLoopback(l.address));
+  const nonLoopback = listeners.filter((l) => !isLoopbackLsofAddress(l.address));
   return { ok: nonLoopback.length === 0, listeners, nonLoopback };
 }
 
@@ -391,8 +424,12 @@ if (require.main === module) {
 module.exports = {
   parseProcNetTcpListeners,
   isLoopbackProcAddress,
+  isLoopbackLsofAddress,
   probeLinuxLoopbackBind,
   probeLsofLoopbackBind,
+  writeExitStatus,
+  clearExitStatus,
+  decodeProcAddress,
   IPV4_LOOPBACK_PROC,
   IPV6_LOOPBACK_PROC,
   IPV6_MAPPED_IPV4_LOOPBACK_PROC,
