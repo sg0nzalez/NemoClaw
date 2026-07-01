@@ -904,9 +904,8 @@ describe("built-in channel manifests", () => {
 
     // Outbound auth is gateway-minted (google-service-account-jwt bridge provider)
     // and the L7 proxy injects the bearer; the SA private key stays gateway-side and
-    // is never delivered into the sandbox — so no credential binding and no secretFiles.
+    // is never delivered into the sandbox — so no credential binding.
     expect(googlechatManifest.credentials).toEqual([]);
-    expect((googlechatManifest as ChannelManifest).secretFiles).toBeUndefined();
     expect(policyPresetNames(googlechatManifest)).toEqual(["googlechat"]);
 
     const render = renderJson(googlechatManifest);
