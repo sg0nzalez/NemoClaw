@@ -16,7 +16,7 @@ describe("Hermes E2E workflow boundary", () => {
     const gpuJob = workflow.jobs["hermes-gpu-startup"];
     gpuJob["runs-on"] = "ubuntu-latest";
     gpuJob.if = "${{ always() }}";
-    gpuJob.env.NEMOCLAW_DOCKER_GPU_PATCH = "0";
+    gpuJob.env.NEMOCLAW_DOCKER_GPU_PATCH = "1";
     gpuJob.env.NEMOCLAW_E2E_USE_HOSTED_INFERENCE = "1";
     gpuJob.env.UNRELATED_SECRET = "${{ github.ref == 'refs/heads/main' && secrets.FOO || '' }}";
     const gpuRun = gpuJob.steps.find(
@@ -43,7 +43,7 @@ describe("Hermes E2E workflow boundary", () => {
           "hermes-e2e job must use the shared hosted-compatible model default",
           "hermes-gpu-startup job must run on the native RTX PRO 6000 GPU runner",
           "hermes-gpu-startup job must remain explicit-only behind generate-matrix",
-          "hermes-gpu-startup job must set NEMOCLAW_DOCKER_GPU_PATCH=1",
+          "hermes-gpu-startup job must set NEMOCLAW_DOCKER_GPU_PATCH=0",
           "hermes-gpu-startup job env must not expose NEMOCLAW_E2E_USE_HOSTED_INFERENCE",
           "hermes-gpu-startup job env must not consume repository secrets",
           "hermes-gpu-startup step 'Run Hermes GPU startup live Vitest test' must not expose COMPATIBLE_API_KEY",

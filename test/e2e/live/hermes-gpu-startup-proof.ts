@@ -18,6 +18,7 @@ export const HERMES_GPU_EXTRA_PLACEHOLDER_KEYS = [
 
 interface HermesGpuStartupProofOptions {
   env: NodeJS.ProcessEnv;
+  gpuRoute: "legacy-patch" | "native-openshell";
   host: HostCliClient;
   install: Pick<ShellProbeResult, "stdout" | "stderr">;
   sandbox: SandboxClient;
@@ -27,16 +28,27 @@ interface HermesGpuStartupProofOptions {
 
 export async function assertHermesGpuStartupProof({
   env,
+  gpuRoute,
   host,
   install,
   sandbox,
   sandboxName,
   status,
 }: HermesGpuStartupProofOptions): Promise<void> {
-  expect(resultText(install)).toContain(
-    "Recreating OpenShell Docker sandbox container with NVIDIA GPU access",
-  );
-  expect(resultText(install)).toContain("Docker GPU mode selected:");
+  if (gpuRoute === "legacy-patch") {
+    expect(resultText(install)).toContain(
+      "Recreating OpenShell Docker sandbox container with NVIDIA GPU access",
+    );
+    expect(resultText(install)).toContain("Docker GPU mode selected:");
+  } else {
+    expect(resultText(install)).toContain(
+      "Direct sandbox GPU enabled; allowing OpenShell GPU policy enrichment.",
+    );
+    expect(resultText(install)).not.toContain(
+      "Recreating OpenShell Docker sandbox container with NVIDIA GPU access",
+    );
+    expect(resultText(install)).not.toContain("Docker GPU mode selected:");
+  }
   expect(resultText(status)).toMatch(/Phase:\s*Ready/i);
   expect(resultText(status)).toContain("Sandbox GPU: enabled");
   expect(resultText(status)).toContain("CUDA verified");
