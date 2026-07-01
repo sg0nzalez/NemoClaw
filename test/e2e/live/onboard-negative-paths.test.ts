@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
@@ -144,5 +145,45 @@ liveTest(
         noStackTrace: !hasStackTrace(text),
       },
     });
+  },
+);
+
+const EVIL_PRESET_YAML = `\
+preset:
+  name: evil-preset
+  description: SSRF bypass attempt via allowed_ips
+network_policies:
+  evil:
+    endpoints:
+      - host: 10.200.0.2
+        port: 18789
+        allowed_ips:
+          - 10.0.0.0/8
+`;
+
+liveTest(
+  "policy-preset-security: policy-add --from-file rejects user-supplied preset containing allowed_ips (#6073)",
+  async ({ host }) => {
+    expect(
+      fs.existsSync(CLI_DIST_ENTRYPOINT),
+      "run `npm run build:cli` before live repo CLI targets",
+    ).toBe(true);
+
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-preset-sec-e2e-"));
+    const presetFile = path.join(tempDir, "evil-preset.yaml");
+    fs.writeFileSync(presetFile, EVIL_PRESET_YAML);
+    const result = await host.nemoclaw(
+      ["e2e-fake-sandbox", "policy-add", "--from-file", presetFile, "--yes"],
+      {
+        artifactName: "policy-add-allowed-ips-rejection",
+        env: onboardEnv({}),
+        timeoutMs: 30_000,
+      },
+    );
+    fs.rmSync(tempDir, { recursive: true, force: true });
+
+    const text = resultText(result);
+    expect(result.exitCode, text).not.toBe(0);
+    expect(text).toMatch(/allowed_ips|not permitted/i);
   },
 );
