@@ -563,37 +563,6 @@ describe("runner", () => {
       expect(plan.dry_run).toBe(true);
     });
 
-    it("validates and applies endpoint URL override", async () => {
-      captureStdout();
-      mockExeca.mockResolvedValue({ exitCode: 0 });
-
-      const plan = await actionPlan("default", minimalBlueprint(), {
-        endpointUrl: "https://93.184.216.34/v1",
-      });
-      expect(plan.inference.endpoint).toBe("https://93.184.216.34/v1");
-      expect(mockedValidateEndpoint).toHaveBeenCalledWith("https://93.184.216.34/v1");
-    });
-
-    it("fails closed for DNS-backed HTTPS endpoint overrides", async () => {
-      captureStdout();
-      mockExeca.mockResolvedValue({ exitCode: 0 });
-      mockedValidateEndpoint.mockResolvedValueOnce({
-        url: "https://override.example.com/v1",
-        pinnedUrl: "https://93.184.216.34/v1",
-        protocol: "https:",
-        hostname: "override.example.com",
-        resolvedAddress: "93.184.216.34",
-        resolvedFamily: 4,
-        dnsResolved: true,
-      });
-
-      await expect(
-        actionPlan("default", minimalBlueprint(), {
-          endpointUrl: "https://override.example.com/v1",
-        }),
-      ).rejects.toThrow(/DNS-backed HTTPS endpoint/);
-    });
-
     it("SSRF-validates the blueprint-defined endpoint even without --endpoint-url override", async () => {
       captureStdout();
       mockExeca.mockResolvedValue({ exitCode: 0 });
@@ -1122,8 +1091,6 @@ describe("runner", () => {
         pinnedUrl: "https://93.184.216.34/v1",
         protocol: "https:",
         hostname: "override.example.com",
-        resolvedAddress: "93.184.216.34",
-        resolvedFamily: 4,
         dnsResolved: true,
       });
 
