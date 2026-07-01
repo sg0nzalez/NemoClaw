@@ -1065,6 +1065,20 @@ function loadPresetFromFile(filePath: string): { presetName: string; content: st
     console.error(`  Preset missing network_policies section: ${filePath}`);
     return null;
   }
+  const np = parsed.network_policies as PolicyObject;
+  for (const [policyKey, policyVal] of Object.entries(np)) {
+    if (!isPolicyObject(policyVal)) continue;
+    const endpoints = (policyVal as PolicyObject).endpoints;
+    if (!Array.isArray(endpoints)) continue;
+    for (const ep of endpoints) {
+      if (isPolicyObject(ep) && "allowed_ips" in ep) {
+        console.error(
+          `  Preset '${presetName}' contains 'allowed_ips' in policy '${policyKey}', which is not permitted in user-supplied presets: ${filePath}`,
+        );
+        return null;
+      }
+    }
+  }
   const builtin = listPresets().map((p) => p.name);
   if (builtin.includes(presetName)) {
     console.error(
