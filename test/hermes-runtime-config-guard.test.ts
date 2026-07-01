@@ -835,6 +835,69 @@ with tempfile.TemporaryDirectory() as tmp:
 });
 
 describe("Hermes startup readiness lease", () => {
+  it("routes the GPU-recreated supervisor argv through the exact child proof (#6110)", () => {
+    const result = runPythonHarness(`${loadGuardModule}
+import json
+
+supervisor_with_child_command = (
+    b"/opt/openshell/bin/openshell-sandbox\\0"
+    b"env\\0CHAT_UI_URL=http://127.0.0.1:18789\\0"
+    b"NEMOCLAW_DASHBOARD_PORT=18789\\0nemoclaw-start\\0"
+)
+direct_start = b"bash\\0/usr/local/bin/nemoclaw-start\\0"
+current_cmdline = supervisor_with_child_command
+
+guard.__file__ = guard.INSTALLED_RUNTIME_CONFIG_GUARD
+guard._open_proc_root = lambda: 101
+guard._open_proc_pid = lambda _root, _pid: 102
+guard._read_proc_pid_file = lambda _fd, _name, _display: current_cmdline
+guard._startup_ready_marker_absent = lambda: True
+guard.pwd.getpwnam = lambda _name: type("User", (), {"pw_uid": 1000})()
+guard.os.close = lambda _fd: None
+
+expected_start_parent = 4242
+guard._openshell_supervised_nonroot_start_is_live = (
+    lambda root_uid, sandbox_uid, required_pid=None: (
+        root_uid == 0
+        and sandbox_uid == 1000
+        and required_pid == expected_start_parent
+    )
+)
+
+def readiness(cmdline, parent_pid, startup_owner=True):
+    global current_cmdline
+    current_cmdline = cmdline
+    guard.os.getppid = lambda: parent_pid
+    try:
+        guard._validate_action_readiness("ensure-api-key", startup_owner)
+    except guard.UnsafePathError as exc:
+        return str(exc)
+    return "allowed"
+
+proof = {
+    "gpu_supervisor_is_direct_pid1": guard._pid1_is_nemoclaw_start(),
+    "gpu_supervisor": readiness(
+        supervisor_with_child_command, expected_start_parent
+    ),
+    "wrong_child": readiness(supervisor_with_child_command, 4343),
+    "missing_startup_owner": readiness(
+        supervisor_with_child_command, expected_start_parent, False
+    ),
+    "direct_pid1": readiness(direct_start, 1),
+}
+print(json.dumps(proof))
+`);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({
+      gpu_supervisor_is_direct_pid1: false,
+      gpu_supervisor: "allowed",
+      wrong_child: "Hermes runtime config guard refuses mutation under a foreign PID 1",
+      missing_startup_owner: "Hermes runtime config guard refuses mutation under a foreign PID 1",
+      direct_pid1: "allowed",
+    });
+  });
+
   it("fails closed under foreign PID 1 only for the installed guard entrypoint", () => {
     const result = runPythonHarness(`${loadGuardModule}
 import json
