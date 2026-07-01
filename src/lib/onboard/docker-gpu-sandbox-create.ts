@@ -22,6 +22,7 @@ import {
   waitForOpenShellSupervisorReconnect,
 } from "./docker-gpu-patch";
 import { finalizeDockerGpuPatchBackup } from "./docker-gpu-patch-finalize";
+import { captureDockerGpuPreRollbackDiagnostics } from "./docker-gpu-pre-rollback-diagnostics";
 import { detectWslDockerDesktopStatus } from "./wsl-docker-desktop-gpu";
 
 let cachedDockerDesktopWslRuntime: boolean | null = null;
@@ -46,6 +47,7 @@ type RecreatePatchFn = typeof recreateOpenShellDockerSandboxWithGpu;
 type WaitSupervisorFn = typeof waitForOpenShellSupervisorReconnect;
 type FindContainerIdsFn = typeof findOpenShellDockerSandboxContainerIds;
 type FinalizeBackupFn = typeof finalizeDockerGpuPatchBackup;
+type CapturePreRollbackDiagnosticsFn = typeof captureDockerGpuPreRollbackDiagnostics;
 // Loosen the override return type from `never` to `void` so tests can pass a
 // plain `vi.fn()` mock. Production wires `printDockerGpuPatchFailureAndExit`
 // which has return type `never`; that is assignable to `void`.
@@ -80,6 +82,7 @@ type DockerGpuSandboxCreatePatchOptions = {
     recreatePatch?: RecreatePatchFn;
     waitForSupervisor?: WaitSupervisorFn;
     finalizeBackup?: FinalizeBackupFn;
+    capturePreRollbackDiagnostics?: CapturePreRollbackDiagnosticsFn;
     onPatchFailureExit?: PatchFailureExitFn;
   };
 };
@@ -133,6 +136,8 @@ export function createDockerGpuSandboxCreatePatch(
   const waitForSupervisor =
     options.overrides?.waitForSupervisor ?? waitForOpenShellSupervisorReconnect;
   const finalizeBackup = options.overrides?.finalizeBackup ?? finalizeDockerGpuPatchBackup;
+  const captureFailedClone =
+    options.overrides?.capturePreRollbackDiagnostics ?? captureDockerGpuPreRollbackDiagnostics;
   const onPatchFailureExit =
     options.overrides?.onPatchFailureExit ?? printDockerGpuPatchFailureAndExit;
 
@@ -204,6 +209,15 @@ export function createDockerGpuSandboxCreatePatch(
           sleep: options.deps.sleep,
         },
       );
+      if (!supervisorReady && result) {
+        try {
+          captureFailedClone(options.sandboxName, result, options.deps);
+        } catch (error) {
+          console.warn(
+            `  ⚠ Could not capture the failed GPU container before rollback: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
       const finalizeOutcome = result
         ? finalizeBackup({ result, supervisorReady }, options.deps)
         : null;

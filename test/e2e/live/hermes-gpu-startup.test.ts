@@ -78,9 +78,29 @@ async function cleanupHermes(
   );
 }
 
-async function captureFailedGpuContainer(host: HostCliClient): Promise<void> {
+async function captureFailedGpuContainer(
+  host: HostCliClient,
+  preRollbackDiagnosticsDir: string,
+): Promise<void> {
   const sandboxFilter = `label=openshell.ai/sandbox-name=${SANDBOX_NAME}`;
   const script = String.raw`set -u
+diagnostics_dir="$2"
+if [ -n "$diagnostics_dir" ] && [ -d "$diagnostics_dir" ]; then
+  printf '%s\n' "== pre-rollback diagnostics $diagnostics_dir =="
+  for name in summary.txt patched-container-state.json docker-inspect.json docker-network-summary.txt docker-top.txt docker-logs.txt openshell-sandbox-get.txt openshell-sandbox-list.txt openshell-logs.txt; do
+    file="$diagnostics_dir/$name"
+    if [ -f "$file" ]; then
+      printf '%s\n' "== $name =="
+      if [ "$name" = openshell-logs.txt ]; then
+        tail -n 800 "$file"
+      else
+        sed -n '1,800p' "$file"
+      fi
+    fi
+  done
+else
+  printf '%s\n' "pre-rollback diagnostics directory unavailable: $diagnostics_dir"
+fi
 ids="$(docker ps -aq --filter "$1")"
 if [ -z "$ids" ]; then
   printf '%s\n' "no Docker container found for $1"
@@ -95,12 +115,16 @@ for id in $ids; do
   docker logs --tail 300 "$id" 2>&1 || true
 done`;
   await bestEffort(() =>
-    host.command("bash", ["-lc", script, "hermes-gpu-failure-diagnostics", sandboxFilter], {
-      artifactName: "phase-2-hermes-gpu-startup-failure-diagnostics",
-      env: buildAvailabilityProbeEnv(),
-      redactionValues: [FAKE_API_KEY],
-      timeoutMs: 30_000,
-    }),
+    host.command(
+      "bash",
+      ["-lc", script, "hermes-gpu-failure-diagnostics", sandboxFilter, preRollbackDiagnosticsDir],
+      {
+        artifactName: "phase-2-hermes-gpu-startup-failure-diagnostics",
+        env: buildAvailabilityProbeEnv(),
+        redactionValues: [FAKE_API_KEY, EXTRA_PLACEHOLDER_TOKEN_A, EXTRA_PLACEHOLDER_TOKEN_B],
+        timeoutMs: 30_000,
+      },
+    ),
   );
 }
 
@@ -185,7 +209,11 @@ test.skipIf(!shouldRunLiveE2E())(
       redactionValues: [FAKE_API_KEY, EXTRA_PLACEHOLDER_TOKEN_A, EXTRA_PLACEHOLDER_TOKEN_B],
       timeoutMs: 60 * 60_000,
     });
-    await (install.exitCode !== 0 ? captureFailedGpuContainer(host) : Promise.resolve());
+    const preRollbackDiagnosticsDir =
+      resultText(install).match(/Pre-rollback diagnostics saved:\s*(\S+)/)?.[1] ?? "";
+    await (install.exitCode !== 0
+      ? captureFailedGpuContainer(host, preRollbackDiagnosticsDir)
+      : Promise.resolve());
     expect(install.exitCode, resultText(install)).toBe(0);
 
     const status = await host.command("nemoclaw", [SANDBOX_NAME, "status"], {
