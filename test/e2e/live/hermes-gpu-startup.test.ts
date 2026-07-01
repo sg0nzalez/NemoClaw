@@ -177,7 +177,7 @@ test.skipIf(!shouldRunLiveE2E())(
       redactionValues: [FAKE_API_KEY],
       timeoutMs: 60 * 60_000,
     });
-    if (install.exitCode !== 0) await captureFailedGpuContainer(host);
+    await (install.exitCode !== 0 ? captureFailedGpuContainer(host) : Promise.resolve());
     expect(install.exitCode, resultText(install)).toBe(0);
 
     const status = await host.command("nemoclaw", [SANDBOX_NAME, "status"], {
