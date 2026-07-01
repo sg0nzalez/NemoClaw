@@ -7,6 +7,7 @@
 
 import type { GpuInfo } from "../local";
 
+const fs = require("fs");
 const path = require("path");
 const { spawn, spawnSync } = require("child_process");
 const { ROOT, SCRIPTS, redact, run, runCapture, shellQuote } = require("../../runner");

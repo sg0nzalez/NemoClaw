@@ -60,14 +60,27 @@ function clearExitStatus() {
 // remediation pointing the operator at OLLAMA_HOST=127.0.0.1.
 const EXIT_BACKEND_NOT_LOOPBACK = 2;
 
-// IPv4 loopback in /proc/net/tcp encoding (little-endian hex).
+// Reference encoding for the exact `127.0.0.1` IPv4 address in
+// /proc/net/tcp: bytes 7F 00 00 01, little-endian per column ->
+// hex "0100007F". IPv4 loopback is the full 127.0.0.0/8 block though, so
+// the classifier below matches on the leading (post-reverse) byte being
+// 7F instead of an exact string match. This constant is kept as an
+// unambiguous fixture for tests and callers that want to compare against a
+// specific example rather than a range.
 const IPV4_LOOPBACK_PROC = "0100007F";
-// IPv6 loopback (::1) in /proc/net/tcp6 encoding (zero-prefixed, byte-wise
-// little-endian inside each 32-bit group). ::1 -> bytes 00..00 00..01 ->
-// 00000000:00000000:00000000:01000000. Wildcard ::ffff:127.0.0.1 mapped on
-// IPv4 also appears in tcp6 and is loopback-equivalent for our purposes.
+// IPv6 loopback (::1) in /proc/net/tcp6 encoding. The 16-byte address is
+// split into four 32-bit groups; each group's four bytes are emitted in
+// little-endian order. ::1 bytes = 00..00 00..01 -> groups reversed become
+// 00000000:00000000:00000000:01000000, concatenated.
 const IPV6_LOOPBACK_PROC = "00000000000000000000000001000000";
-const IPV6_MAPPED_IPV4_LOOPBACK_PROC = "0000000000000000FFFF00007F000001";
+// IPv4-mapped IPv6 loopback (::ffff:127.0.0.1). Bytes:
+//   00 00 00 00 00 00 00 00 00 00 FF FF 7F 00 00 01
+// Grouped and byte-reversed per column ->
+//   00000000 : 00000000 : FFFF0000 : 0100007F
+// (Earlier encoding "0000000000000000FFFF00007F000001" was wrong; it
+// interpreted the last two groups without the per-column reverse, which
+// would never appear in real /proc/net/tcp6 output.)
+const IPV6_MAPPED_IPV4_LOOPBACK_PROC = "00000000000000000000FFFF0100007F";
 
 /**
  * Parse a /proc/net/tcp{,6} table and return every LISTEN socket whose local
@@ -99,11 +112,24 @@ function parseProcNetTcpListeners(text, port) {
 }
 
 function isLoopbackProcAddress(addr) {
-  return (
-    addr === IPV4_LOOPBACK_PROC ||
-    addr === IPV6_LOOPBACK_PROC ||
-    addr === IPV6_MAPPED_IPV4_LOOPBACK_PROC
-  );
+  // IPv4 in /proc/net/tcp is a single 32-bit column emitted in little-endian
+  // hex: the last two chars are the address's FIRST byte. 127.0.0.0/8
+  // = anything whose first byte is 0x7F. Matching by suffix accepts every
+  // valid loopback (127.0.0.1, 127.0.0.2, 127.42.13.99, etc.) instead of only
+  // the single canonical 127.0.0.1. See CR feedback on #6054.
+  if (addr.length === 8 && addr.endsWith("7F")) return true;
+  // IPv6 has two loopback shapes:
+  //   ::1                — exactly the 32-char IPV6_LOOPBACK_PROC encoding
+  //   ::ffff:127.0.0.0/8 — IPv4-mapped IPv6, so the last 32-bit group's
+  //                        little-endian first-byte must be 0x7F, and the
+  //                        preceding three groups must be
+  //                        00000000:00000000:FFFF0000
+  if (addr === IPV6_LOOPBACK_PROC) return true;
+  if (addr.length === 32 && addr.startsWith("00000000000000000000FFFF")) {
+    const lastGroup = addr.slice(24);
+    return lastGroup.endsWith("7F");
+  }
+  return false;
 }
 
 /**
