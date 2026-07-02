@@ -29,6 +29,10 @@ import * as registry from "../../state/registry";
 import * as sandboxState from "../../state/sandbox";
 import { cleanupShieldsDestroyArtifacts, removeSandboxRegistryEntry } from "./destroy";
 import {
+  buildSandboxExecMarkedCommand,
+  extractSandboxExecCommandStdout,
+} from "./sandbox-exec-output";
+import {
   probeGatewayRunning,
   selectSandboxGatewayIfRegistered,
   usesGatewayMetadataProbe,
@@ -426,23 +430,32 @@ function isSnapshotCreationAllowedByDcodeActivity(sandboxName: string): boolean 
   // when dcode exposes a wrapper-owned idle/active lock or equivalent snapshot
   // quiescence signal and the backup path checks that source directly.
   const probe = captureOpenshell(
-    ["sandbox", "exec", "--name", sandboxName, "--", "sh", "-lc", DCODE_BUSY_PROBE_SCRIPT],
+    [
+      "sandbox",
+      "exec",
+      "--name",
+      sandboxName,
+      "--",
+      "sh",
+      "-lc",
+      buildSandboxExecMarkedCommand(DCODE_BUSY_PROBE_SCRIPT),
+    ],
     {
       ignoreError: true,
       includeStderr: true,
       timeout: OPENSHELL_PROBE_TIMEOUT_MS,
     },
   );
-  const probeState = parseDcodeProbeState(probe.output || "");
-  const probeSucceeded = probe.status === 0 && !probe.error && !probe.signal;
+  const probeCompleted = !probe.error && !probe.signal;
+  const commandStdout = probeCompleted ? extractSandboxExecCommandStdout(probe.output || "") : null;
+  const probeState = commandStdout === null ? null : parseDcodeProbeState(commandStdout);
   if (
-    probeSucceeded &&
-    (probeState === DCODE_PROBE_STATE.idleDcodeRuntime ||
-      probeState === DCODE_PROBE_STATE.noDcodeRuntime)
+    probeState === DCODE_PROBE_STATE.idleDcodeRuntime ||
+    probeState === DCODE_PROBE_STATE.noDcodeRuntime
   ) {
     return true;
   }
-  if (probeSucceeded && probeState === DCODE_PROBE_STATE.active) {
+  if (probeState === DCODE_PROBE_STATE.active) {
     console.error(
       "  Sandbox is actively running a dcode task. Please retry after the task completes.",
     );

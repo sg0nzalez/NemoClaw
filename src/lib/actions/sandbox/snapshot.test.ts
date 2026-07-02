@@ -6,6 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { SANDBOX_EXEC_STARTED_MARKER } from "./sandbox-exec-output";
 
 type OpenshellCaptureResult = {
   status: number | null;
@@ -23,7 +24,11 @@ type SandboxRecord = {
 type DcodeProbeState = "active" | "idle" | "unverifiable" | "no-runtime";
 
 function dcodeProbeOutput(state: DcodeProbeState, extra = ""): string {
-  return `NEMOCLAW_DCODE_PROBE=${state}\n${extra}`;
+  return `${SANDBOX_EXEC_STARTED_MARKER}\nNEMOCLAW_DCODE_PROBE=${state}\n${extra}`;
+}
+
+function framedDcodeProbeOutput(state: DcodeProbeState, framePrefix = "stdout: "): string {
+  return `${framePrefix}${SANDBOX_EXEC_STARTED_MARKER}\n${framePrefix}NEMOCLAW_DCODE_PROBE=${state}\n`;
 }
 
 function openshellResponses(
@@ -402,6 +407,82 @@ describe("runSandboxSnapshot", () => {
       name: "idle",
     });
     expect(consoleLog.mock.calls.flat().join("\n")).toContain("Snapshot v8 name=idle created");
+  });
+
+  it("allows dcode snapshot creation when OpenShell frames the probe stdout", async () => {
+    getSandboxMock.mockReturnValue(dcodeSandboxEntry);
+    mockDcodeProbeResult({ status: 0, output: framedDcodeProbeOutput("idle") });
+    const consoleLog = vi.spyOn(console, "log").mockImplementation(() => {});
+    const manifest = {
+      timestamp: "2026-06-15T00:00:00.000Z",
+      backupPath: "/tmp/backup-alpha",
+      name: "framed-idle",
+    };
+    backupSandboxStateMock.mockReturnValue({
+      success: true,
+      backedUpDirs: ["workspace"],
+      backedUpFiles: ["config.toml"],
+      failedDirs: [],
+      failedFiles: [],
+      manifest,
+    });
+    findBackupMock.mockReturnValue({
+      match: { ...manifest, snapshotVersion: 9, name: "framed-idle" },
+    });
+    const { runSandboxSnapshot } = await import("./snapshot");
+
+    await runSandboxSnapshot("alpha", { kind: "create", name: "framed-idle" });
+
+    expect(backupSandboxStateMock).toHaveBeenCalledWith("alpha", { name: "framed-idle" });
+    expect(consoleLog.mock.calls.flat().join("\n")).toContain(
+      "Snapshot v9 name=framed-idle created",
+    );
+  });
+
+  it("refuses an active dcode task when OpenShell frames the probe stdout", async () => {
+    getSandboxMock.mockReturnValue(dcodeSandboxEntry);
+    mockDcodeProbeResult({ status: 0, output: framedDcodeProbeOutput("active", "[stdout] ") });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { runSandboxSnapshot } = await import("./snapshot");
+
+    await expect(runSandboxSnapshot("alpha", { kind: "create" })).rejects.toMatchObject({
+      exitCode: 1,
+    });
+
+    expect(backupSandboxStateMock).not.toHaveBeenCalled();
+    expect(consoleError.mock.calls.flat().join("\n")).toContain(
+      "Sandbox is actively running a dcode task. Please retry after the task completes.",
+    );
+  });
+
+  it("allows an idle dcode snapshot even when the exec wrapper reports a non-zero status", async () => {
+    getSandboxMock.mockReturnValue(dcodeSandboxEntry);
+    mockDcodeProbeResult({ status: 1, output: dcodeProbeOutput("idle") });
+    const consoleLog = vi.spyOn(console, "log").mockImplementation(() => {});
+    const manifest = {
+      timestamp: "2026-06-15T00:00:00.000Z",
+      backupPath: "/tmp/backup-alpha",
+      name: "idle-nonzero",
+    };
+    backupSandboxStateMock.mockReturnValue({
+      success: true,
+      backedUpDirs: ["workspace"],
+      backedUpFiles: ["config.toml"],
+      failedDirs: [],
+      failedFiles: [],
+      manifest,
+    });
+    findBackupMock.mockReturnValue({
+      match: { ...manifest, snapshotVersion: 10, name: "idle-nonzero" },
+    });
+    const { runSandboxSnapshot } = await import("./snapshot");
+
+    await runSandboxSnapshot("alpha", { kind: "create", name: "idle-nonzero" });
+
+    expect(backupSandboxStateMock).toHaveBeenCalledWith("alpha", { name: "idle-nonzero" });
+    expect(consoleLog.mock.calls.flat().join("\n")).toContain(
+      "Snapshot v10 name=idle-nonzero created",
+    );
   });
 
   it("refuses registered dcode snapshots when raw status 1 has no idle sentinel", async () => {
