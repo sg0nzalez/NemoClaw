@@ -253,22 +253,21 @@ describe("connectSandbox flow", () => {
       gpuEnabled: false,
       policies: [],
     });
-    harness.captureOpenshellSpy.mockImplementation((args: unknown) => {
-      const argv = Array.isArray(args) ? args : [];
-      if (argv[0] === "sandbox" && argv[1] === "list") {
-        return { status: 0, output: "alpha Ready" };
-      }
-      if (argv[0] === "inference" && argv[1] === "get") {
-        return {
+    const responses = new Map([
+      ["sandbox list", { status: 0, output: "alpha Ready" }],
+      [
+        "inference get",
+        {
           status: 0,
           output:
             "Gateway inference:\n  Provider: nvidia-prod\n  Model: nvidia/nemotron-3-super-120b-a12b\n",
-        };
-      }
-      if (argv[0] === "sandbox" && argv[1] === "exec") {
-        return { status: 0, output: "OK 200" };
-      }
-      return { status: 0, output: "" };
+        },
+      ],
+      ["sandbox exec", { status: 0, output: "OK 200" }],
+    ]);
+    harness.captureOpenshellSpy.mockImplementation((args: unknown) => {
+      const argv = Array.isArray(args) ? args : [];
+      return responses.get(`${String(argv[0])} ${String(argv[1])}`) ?? { status: 0, output: "" };
     });
 
     await expect(harness.connectSandbox("alpha")).rejects.toThrow("process.exit(0)");
