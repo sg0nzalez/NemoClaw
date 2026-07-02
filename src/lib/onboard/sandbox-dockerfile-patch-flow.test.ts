@@ -4,9 +4,9 @@
 import { describe, expect, it, vi } from "vitest";
 import type { SandboxBaseImageResolutionMetadata } from "../sandbox-base-image";
 import {
-  beginBaseImageResolutionFlow,
+  captureBaseResolution,
+  createBaseImageResolutionContext,
   getBaseImageResolutionPatchOptions,
-  handoffRebuildBaseImageResolutionHint,
 } from "./base-image-resolution-flow";
 import { prepareSandboxDockerfilePatch } from "./sandbox-dockerfile-patch-flow";
 import type { SandboxGpuConfig } from "./sandbox-gpu-mode";
@@ -36,24 +36,30 @@ const resolutionMetadata: SandboxBaseImageResolutionMetadata = {
 };
 
 describe("prepareSandboxDockerfilePatch", () => {
-  it("hands rebuild metadata into the next onboard flow and lets fresh bypass it (#4680)", () => {
-    handoffRebuildBaseImageResolutionHint(resolutionMetadata);
-    beginBaseImageResolutionFlow({ fresh: false, env: {} });
-    expect(getBaseImageResolutionPatchOptions()).toMatchObject({
+  it("keeps rebuild hints isolated per flow and lets fresh bypass reuse (#4680)", () => {
+    const warmContext = createBaseImageResolutionContext({
+      fresh: false,
+      initialHint: resolutionMetadata,
+      env: {},
+    });
+    const freshContext = createBaseImageResolutionContext({
+      fresh: true,
+      initialHint: { ...resolutionMetadata, key: "other-sandbox" },
+      env: {},
+    });
+
+    captureBaseResolution(warmContext, "unused-image");
+    expect(getBaseImageResolutionPatchOptions(warmContext)).toMatchObject({
       resolutionHint: resolutionMetadata,
       forceBaseImageRefresh: false,
     });
-
-    handoffRebuildBaseImageResolutionHint(resolutionMetadata);
-    beginBaseImageResolutionFlow({ fresh: true, env: {} });
-    expect(getBaseImageResolutionPatchOptions()).toMatchObject({
-      resolutionHint: resolutionMetadata,
+    expect(getBaseImageResolutionPatchOptions(freshContext)).toMatchObject({
+      resolutionHint: { ...resolutionMetadata, key: "other-sandbox" },
       forceBaseImageRefresh: true,
     });
-    beginBaseImageResolutionFlow({ fresh: false, env: {} });
   });
 
-  it("forwards a prior resolution hint, force refresh, and completed-image metadata (#4680)", async () => {
+  it("propagates OpenClaw warm-cache metadata into the completed image labels (#4680)", async () => {
     const pullAndResolveBaseImageDigest = vi.fn(() => ({
       digest: resolutionMetadata.digest,
       ref: resolutionMetadata.ref,
@@ -76,7 +82,6 @@ describe("prepareSandboxDockerfilePatch", () => {
       hermesToolGateways: [],
       sandboxGpuConfig,
       resolutionHint: resolutionMetadata,
-      forceBaseImageRefresh: true,
       deps: {
         isLinuxDockerDriverGatewayEnabled: vi.fn(() => true),
         pullAndResolveBaseImageDigest,
@@ -89,7 +94,6 @@ describe("prepareSandboxDockerfilePatch", () => {
     expect(pullAndResolveBaseImageDigest).toHaveBeenCalledWith({
       requireOpenshellSandboxAbi: true,
       resolutionHint: resolutionMetadata,
-      forceRefresh: true,
     });
     expect(patchStagedDockerfile.mock.calls[0]?.[11]).toEqual({
       buildIdPolicy: "preserve",

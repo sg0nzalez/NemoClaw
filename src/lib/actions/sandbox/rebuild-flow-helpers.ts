@@ -163,6 +163,7 @@ export function ensureRebuildAgentBaseImage(
   const agentDef = loadAgent(rebuildAgent);
   try {
     ensureAgentBaseImage(agentDef, {
+      forceBaseImageRebuild: !options.resolutionHint,
       resolutionHint: options.resolutionHint,
       forceBaseImageRefresh: options.forceBaseImageRefresh,
     });

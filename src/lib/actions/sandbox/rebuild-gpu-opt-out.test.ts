@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
+import type { SandboxBaseImageResolutionMetadata } from "../../sandbox-base-image";
 
 import { buildRebuildRecreateOnboardOpts, rebuildShouldOptOutGpu } from "./rebuild-gpu-opt-out";
 
@@ -165,5 +166,15 @@ describe("buildRebuildRecreateOnboardOpts", () => {
     expect(opts.fromDockerfile).toBe("/sandbox/.openclaw/Dockerfile.custom");
     expect(opts.autoYes).toBe(false);
     expect(opts.noGpu).toBe(true);
+  });
+
+  it("passes the sandbox-specific base-image hint directly into recreate onboarding (#4680)", () => {
+    const hint = { key: "sandbox-a" } as SandboxBaseImageResolutionMetadata;
+    const opts = buildRebuildRecreateOnboardOpts({
+      ...baseArgs,
+      sb: null,
+      baseImageResolutionHint: hint,
+    });
+    expect(opts.baseImageResolutionHint).toBe(hint);
   });
 });

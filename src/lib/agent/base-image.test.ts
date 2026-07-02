@@ -8,6 +8,9 @@ type AgentOnboardModule = typeof import("./onboard");
 type DockerImageModule = typeof import("../adapters/docker/image");
 type DockerInspectModule = typeof import("../adapters/docker/inspect");
 type SandboxBaseImageModule = typeof import("../sandbox-base-image");
+type ResolutionMetadataModule = typeof import("../sandbox-base-image/resolution-metadata");
+type ResolutionKeyModule = typeof import("../sandbox-base-image/resolution-key");
+type ImageCompatibilityModule = typeof import("../sandbox-base-image/image-compatibility");
 
 /**
  * Build a minimal Hermes agent manifest for base-image provisioning tests.
@@ -62,6 +65,7 @@ function withMockedDocker<T>(
     dockerBuildMock: ReturnType<typeof vi.fn>;
     dockerImageInspectMock: ReturnType<typeof vi.fn>;
     resolveSandboxBaseImageMock: ReturnType<typeof vi.fn>;
+    createResolutionMetadataMock: ReturnType<typeof vi.fn>;
     root: string;
   }) => T,
 ): T {
@@ -72,10 +76,23 @@ function withMockedDocker<T>(
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const sandboxBaseImageModule = require("../sandbox-base-image") as SandboxBaseImageModule;
   // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const resolutionMetadataModule =
+    require("../sandbox-base-image/resolution-metadata") as ResolutionMetadataModule;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const resolutionKeyModule =
+    require("../sandbox-base-image/resolution-key") as ResolutionKeyModule;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const imageCompatibilityModule =
+    require("../sandbox-base-image/image-compatibility") as ImageCompatibilityModule;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const runnerModule = require("../runner") as { ROOT: string };
   const originalDockerBuild = dockerImageModule.dockerBuild;
   const originalDockerImageInspect = dockerInspectModule.dockerImageInspect;
   const originalResolveSandboxBaseImage = sandboxBaseImageModule.resolveSandboxBaseImage;
+  const originalCreateResolutionMetadata =
+    resolutionMetadataModule.createSandboxBaseImageResolutionMetadata;
+  const originalCreateResolutionKey = resolutionKeyModule.createSandboxBaseImageResolutionKey;
+  const originalGetImageGlibcVersion = imageCompatibilityModule.getImageGlibcVersion;
   const agentOnboardModulePath = require.resolve("./onboard");
   delete require.cache[agentOnboardModulePath];
 
@@ -87,11 +104,33 @@ function withMockedDocker<T>(
     source: "source-sha",
     glibcVersion: process.platform === "linux" ? "2.41" : null,
   });
+  const createResolutionMetadataMock = vi.fn().mockReturnValue({
+    schema: 1,
+    key: "resolution-key",
+    imageName: "ghcr.io/nvidia/nemoclaw/hermes-sandbox-base",
+    ref: "ghcr.io/nvidia/nemoclaw/hermes-sandbox-base:latest",
+    digest: null,
+    source: "local",
+    imageId: "sha256:local",
+    os: "linux",
+    architecture: "amd64",
+    glibcVersion: "2.41",
+    requireOpenshellSandboxAbi: process.platform === "linux",
+    minGlibcVersion: "2.39",
+  });
   dockerImageModule.dockerBuild = dockerBuildMock as DockerImageModule["dockerBuild"];
   dockerInspectModule.dockerImageInspect =
     dockerImageInspectMock as DockerInspectModule["dockerImageInspect"];
   sandboxBaseImageModule.resolveSandboxBaseImage =
     resolveSandboxBaseImageMock as SandboxBaseImageModule["resolveSandboxBaseImage"];
+  resolutionMetadataModule.createSandboxBaseImageResolutionMetadata =
+    createResolutionMetadataMock as ResolutionMetadataModule["createSandboxBaseImageResolutionMetadata"];
+  resolutionKeyModule.createSandboxBaseImageResolutionKey = vi.fn(
+    () => "resolution-key",
+  ) as ResolutionKeyModule["createSandboxBaseImageResolutionKey"];
+  imageCompatibilityModule.getImageGlibcVersion = vi.fn(
+    () => "2.41",
+  ) as ImageCompatibilityModule["getImageGlibcVersion"];
 
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -101,12 +140,17 @@ function withMockedDocker<T>(
       dockerBuildMock,
       dockerImageInspectMock,
       resolveSandboxBaseImageMock,
+      createResolutionMetadataMock,
       root: runnerModule.ROOT,
     });
   } finally {
     dockerImageModule.dockerBuild = originalDockerBuild;
     dockerInspectModule.dockerImageInspect = originalDockerImageInspect;
     sandboxBaseImageModule.resolveSandboxBaseImage = originalResolveSandboxBaseImage;
+    resolutionMetadataModule.createSandboxBaseImageResolutionMetadata =
+      originalCreateResolutionMetadata;
+    resolutionKeyModule.createSandboxBaseImageResolutionKey = originalCreateResolutionKey;
+    imageCompatibilityModule.getImageGlibcVersion = originalGetImageGlibcVersion;
     delete require.cache[agentOnboardModulePath];
   }
 }
@@ -154,6 +198,7 @@ describe("agent base image provisioning", () => {
         dockerBuildMock,
         dockerImageInspectMock,
         resolveSandboxBaseImageMock,
+        createResolutionMetadataMock,
         root,
       }) => {
         dockerImageInspectMock.mockReturnValue({ status: 0 });
@@ -163,7 +208,12 @@ describe("agent base image provisioning", () => {
         expect(result).toEqual({
           imageTag: "ghcr.io/nvidia/nemoclaw/hermes-sandbox-base:latest",
           built: true,
+          resolutionMetadata: expect.objectContaining({
+            key: "resolution-key",
+            source: "local",
+          }),
         });
+        expect(createResolutionMetadataMock).toHaveBeenCalledOnce();
         expect(resolveSandboxBaseImageMock).not.toHaveBeenCalled();
         expect(dockerImageInspectMock).not.toHaveBeenCalled();
         expect(dockerBuildMock).toHaveBeenCalledWith(

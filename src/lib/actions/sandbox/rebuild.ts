@@ -52,7 +52,6 @@ import {
   tryGetMessagingAgentId,
 } from "../../messaging";
 import { hydrateMessagingChannelConfig } from "../../messaging-channel-config";
-import { handoffRebuildBaseImageResolutionHint } from "../../onboard/base-image-resolution-flow";
 import { markLastStartedStepFailed } from "../../onboard/exit-step-failure";
 import { getStoredMessagingChannelConfig } from "../../onboard/messaging-config";
 import { mergeRebuildMessagingPolicyPresets } from "../../onboard/messaging-policy-presets";
@@ -1005,12 +1004,12 @@ export async function rebuildSandbox(
     // been deleted. The recreate path also inherits the original sandbox's
     // no-GPU intent so the inner `onboard --resume` does not enforce the
     // Docker CDI GPU preflight on hosts without an NVIDIA GPU.
-    handoffRebuildBaseImageResolutionHint(baseImageResolutionHint);
     const recreateOpts = buildRebuildRecreateOnboardOpts({
       sb,
       rebuildAgent,
       storedFromDockerfile,
       autoYes: skipConfirm || rebuildConfirmed,
+      baseImageResolutionHint,
     });
     // #5735: isolate ambient onboard-selection env only for the duration of the
     // recreate. The session was just pinned to the registry agent/provider/

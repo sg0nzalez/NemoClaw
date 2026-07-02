@@ -65,6 +65,9 @@ describe("sandbox base-image warm resolution", () => {
   });
 
   it("reuses locally proven RepoDigests metadata without inspecting candidates or pulling (#4680)", () => {
+    dockerMocks.pull.mockImplementation(() => {
+      throw new Error("network unavailable");
+    });
     const options = resolutionOptions();
     const metadata: SandboxBaseImageResolutionMetadata = {
       schema: 1,
@@ -95,5 +98,79 @@ describe("sandbox base-image warm resolution", () => {
     expect(dockerMocks.pull).not.toHaveBeenCalled();
     expect(dockerMocks.build).not.toHaveBeenCalled();
     expect(dockerMocks.capture).not.toHaveBeenCalled();
+  });
+
+  it("lets force refresh bypass a valid rebuild hint (#4680)", () => {
+    const options = resolutionOptions();
+    const metadata: SandboxBaseImageResolutionMetadata = {
+      schema: 1,
+      key: createSandboxBaseImageResolutionKey(options),
+      imageName: IMAGE_NAME,
+      ref: REF,
+      digest: DIGEST,
+      source: "version-tag",
+      imageId: IMAGE_ID,
+      os: "linux",
+      architecture: "amd64",
+      glibcVersion: null,
+      requireOpenshellSandboxAbi: false,
+      minGlibcVersion: OPENSHELL_SANDBOX_MIN_GLIBC,
+    };
+    dockerMocks.imageInspect.mockReturnValue({ status: 1 });
+    dockerMocks.pull.mockReturnValue({ status: 1 });
+
+    expect(
+      resolveSandboxBaseImage({ ...options, resolutionHint: metadata, forceRefresh: true }),
+    ).toBeNull();
+    expect(dockerMocks.imageInspect).toHaveBeenCalled();
+    expect(dockerMocks.pull).toHaveBeenCalled();
+  });
+
+  it("resolves an explicit override instead of reusing a stale default hint (#4680)", () => {
+    const options = {
+      ...resolutionOptions(),
+      envVar: "NEMOCLAW_SANDBOX_BASE_IMAGE_REF",
+      env: {
+        ...resolutionOptions().env,
+        NEMOCLAW_SANDBOX_BASE_IMAGE_REF: REF,
+      },
+    };
+    const staleHint: SandboxBaseImageResolutionMetadata = {
+      schema: 1,
+      key: "stale-default-key",
+      imageName: IMAGE_NAME,
+      ref: REF,
+      digest: DIGEST,
+      source: "latest",
+      imageId: IMAGE_ID,
+      os: "linux",
+      architecture: "amd64",
+      glibcVersion: null,
+      requireOpenshellSandboxAbi: false,
+      minGlibcVersion: OPENSHELL_SANDBOX_MIN_GLIBC,
+    };
+    dockerMocks.imageInspect.mockReturnValue({ status: 0 });
+
+    const resolved = resolveSandboxBaseImage({ ...options, resolutionHint: staleHint });
+
+    expect(resolved).toMatchObject({ ref: REF, digest: DIGEST, source: "override" });
+    expect(dockerMocks.pull).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when offline and no cached image can be validated (#4680)", () => {
+    dockerMocks.imageInspect.mockReturnValue({ status: 1 });
+    dockerMocks.pull.mockReturnValue({ status: 1 });
+
+    const resolved = resolveSandboxBaseImage({
+      ...resolutionOptions(),
+      env: {
+        ...resolutionOptions().env,
+        NEMOCLAW_SANDBOX_BASE_LOCAL_BUILD: "0",
+      },
+    });
+
+    expect(resolved).toBeNull();
+    expect(dockerMocks.pull).toHaveBeenCalled();
+    expect(dockerMocks.build).not.toHaveBeenCalled();
   });
 });

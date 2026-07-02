@@ -21,10 +21,11 @@ type CreateAgentSandbox = (
   },
 ) => StagedAgentBuild;
 
-let resolutionHint: SandboxBaseImageResolutionMetadata | null = null;
-let preResolvedMetadata: SandboxBaseImageResolutionMetadata | null = null;
-let pendingRebuildHint: SandboxBaseImageResolutionMetadata | null = null;
-let forceRefresh = false;
+export type BaseImageResolutionContext = {
+  resolutionHint: SandboxBaseImageResolutionMetadata | null;
+  preResolvedMetadata: SandboxBaseImageResolutionMetadata | null;
+  forceRefresh: boolean;
+};
 
 function envForcesRefresh(env: NodeJS.ProcessEnv): boolean {
   const value = String(env.NEMOCLAW_SANDBOX_BASE_IMAGE_REFRESH || "")
@@ -33,53 +34,48 @@ function envForcesRefresh(env: NodeJS.ProcessEnv): boolean {
   return ["1", "true", "yes", "on"].includes(value);
 }
 
-export function beginBaseImageResolutionFlow(options: {
+export function createBaseImageResolutionContext(options: {
   fresh: boolean;
+  initialHint?: SandboxBaseImageResolutionMetadata | null;
   env?: NodeJS.ProcessEnv;
-}): void {
-  resolutionHint = pendingRebuildHint;
-  pendingRebuildHint = null;
-  preResolvedMetadata = null;
-  forceRefresh = options.fresh || envForcesRefresh(options.env ?? process.env);
-}
-
-export function handoffRebuildBaseImageResolutionHint(
-  hint: SandboxBaseImageResolutionMetadata | null,
-): void {
-  pendingRebuildHint = hint;
+}): BaseImageResolutionContext {
+  return {
+    resolutionHint: options.initialHint ?? null,
+    preResolvedMetadata: null,
+    forceRefresh: options.fresh || envForcesRefresh(options.env ?? process.env),
+  };
 }
 
 export function captureBaseResolution(
-  sandboxName: string,
-): import("../state/registry").SandboxEntry | null {
-  const registry = require("../state/registry") as typeof import("../state/registry");
-  const entry = registry.getSandbox(sandboxName);
-  if (!forceRefresh && !resolutionHint && entry?.imageTag) {
-    resolutionHint = readSandboxBaseImageResolutionMetadata(entry.imageTag);
+  context: BaseImageResolutionContext,
+  sandboxImageRef: string | null | undefined,
+): void {
+  if (!context.forceRefresh && !context.resolutionHint && sandboxImageRef) {
+    context.resolutionHint = readSandboxBaseImageResolutionMetadata(sandboxImageRef);
   }
-  return entry;
 }
 
-export function createAgentSandboxWithResolution(agent: AgentDefinition): StagedAgentBuild {
-  const { createAgentSandbox } = require("../agent/onboard") as {
-    createAgentSandbox: CreateAgentSandbox;
-  };
+export function createAgentSandboxWithResolution(
+  context: BaseImageResolutionContext,
+  agent: AgentDefinition,
+  createAgentSandbox: CreateAgentSandbox,
+): StagedAgentBuild {
   const staged = createAgentSandbox(agent, {
-    resolutionHint,
-    forceBaseImageRefresh: forceRefresh,
+    resolutionHint: context.resolutionHint,
+    forceBaseImageRefresh: context.forceRefresh,
   });
-  preResolvedMetadata = staged.baseImageResolutionMetadata;
+  context.preResolvedMetadata = staged.baseImageResolutionMetadata;
   return staged;
 }
 
-export function getBaseImageResolutionPatchOptions(): {
+export function getBaseImageResolutionPatchOptions(context: BaseImageResolutionContext): {
   resolutionHint: SandboxBaseImageResolutionMetadata | null;
   preResolvedBaseImageMetadata: SandboxBaseImageResolutionMetadata | null;
   forceBaseImageRefresh: boolean;
 } {
   return {
-    resolutionHint,
-    preResolvedBaseImageMetadata: preResolvedMetadata,
-    forceBaseImageRefresh: forceRefresh,
+    resolutionHint: context.resolutionHint,
+    preResolvedBaseImageMetadata: context.preResolvedMetadata,
+    forceBaseImageRefresh: context.forceRefresh,
   };
 }

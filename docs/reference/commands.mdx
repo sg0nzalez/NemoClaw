@@ -160,6 +160,7 @@ If the recorded session conflicts with flags you pass on the recovery run, NemoC
 Use `--fresh` to discard the saved onboarding session and start the wizard from the beginning.
 This clears stale or failed session state before NemoClaw creates a new session record.
 It also bypasses locally recorded sandbox base-image resolution metadata and performs the normal pull-and-resolve flow.
+`--fresh` takes precedence over a base-image hint carried from a rebuild, so NemoClaw performs a full pull-and-resolve flow.
 The installer also accepts `--fresh` and forwards it to `$$nemoclaw onboard`, which skips automatic resume detection.
 `--resume` and `--fresh` are mutually exclusive.
 

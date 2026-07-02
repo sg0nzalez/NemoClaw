@@ -4,14 +4,7 @@
 import type { AgentDefinition } from "../agent/defs";
 import type { WebSearchConfig } from "../inference/web-search";
 import type { SandboxBaseImageResolutionMetadata } from "../sandbox-base-image";
-import { getBaseImageResolutionPatchOptions } from "./base-image-resolution-flow";
 import type { SandboxGpuConfig } from "./sandbox-gpu-mode";
-
-export {
-  beginBaseImageResolutionFlow,
-  captureBaseResolution,
-  createAgentSandboxWithResolution,
-} from "./base-image-resolution-flow";
 
 type DockerRunResult = { status: number | null };
 type PullAndResolveBaseImageDigest = typeof import("./base-image").pullAndResolveBaseImageDigest;
@@ -185,13 +178,4 @@ export async function prepareSandboxDockerfilePatch({
   );
 
   return { buildId, resolvedBaseImage: resolved };
-}
-
-export function prepareSandboxDockerfilePatchWithResolution(
-  input: PrepareSandboxDockerfilePatchInput,
-): Promise<SandboxDockerfilePatchResult> {
-  return prepareSandboxDockerfilePatch({
-    ...input,
-    ...getBaseImageResolutionPatchOptions(),
-  });
 }

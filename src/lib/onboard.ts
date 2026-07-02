@@ -42,6 +42,7 @@ const extraPlaceholderKeysModule: typeof import("./onboard/extra-placeholder-key
 const buildContextStage: typeof import("./onboard/build-context-stage") = require("./onboard/build-context-stage");
 const sandboxBuildPatchConfig: typeof import("./onboard/sandbox-build-patch-config") = require("./onboard/sandbox-build-patch-config");
 const sandboxDockerfilePatchFlow: typeof import("./onboard/sandbox-dockerfile-patch-flow") = require("./onboard/sandbox-dockerfile-patch-flow");
+const baseImageResolutionFlow: typeof import("./onboard/base-image-resolution-flow") = require("./onboard/base-image-resolution-flow");
 const sandboxMessagingPreflight: typeof import("./onboard/sandbox-messaging-preflight") = require("./onboard/sandbox-messaging-preflight");
 const sandboxCreatePlan: typeof import("./onboard/sandbox-create-plan") = require("./onboard/sandbox-create-plan");
 const sandboxCreateLaunch: typeof import("./onboard/sandbox-create-launch") = require("./onboard/sandbox-create-launch");
@@ -662,6 +663,9 @@ type OnboardOptions = {
   gpu?: boolean;
   noGpu?: boolean;
   autoYes?: boolean;
+  baseImageResolutionHint?:
+    | import("./sandbox-base-image").SandboxBaseImageResolutionMetadata
+    | null;
 };
 // Non-interactive mode: set by --non-interactive flag or env var.
 // When active, all prompts use env var overrides or sensible defaults.
@@ -2541,7 +2545,8 @@ const { getSandboxRuntimeRegistryFields, hasSandboxGpuDrift, updateReusedSandbox
 
 // ── Step 5: Sandbox ──────────────────────────────────────────────
 
-async function createSandbox(
+async function createSandboxWithBaseImageResolution(
+  baseImageResolutionContext: import("./onboard/base-image-resolution-flow").BaseImageResolutionContext,
   gpu: ReturnType<typeof nim.detectGpu>,
   model: string,
   provider: string,
@@ -2884,7 +2889,11 @@ async function createSandbox(
       note(`  Sandbox '${sandboxName}' exists but is not ready — recreating it.`);
     }
 
-    const previousEntry = sandboxDockerfilePatchFlow.captureBaseResolution(sandboxName);
+    const previousEntry = registry.getSandbox(sandboxName);
+    baseImageResolutionFlow.captureBaseResolution(
+      baseImageResolutionContext,
+      previousEntry?.imageTag,
+    );
     policyPresetCarry.applyRecreatePolicyCarryForward(sandboxName, isNonInteractive(), note);
 
     if (pendingStateRestore === null && !shouldSkipPreRecreateBackup(process.env)) {
@@ -2926,7 +2935,12 @@ async function createSandbox(
       root: ROOT,
       fromDockerfile,
       agent,
-      createAgentSandbox: sandboxDockerfilePatchFlow.createAgentSandboxWithResolution,
+      createAgentSandbox: (selectedAgent) =>
+        baseImageResolutionFlow.createAgentSandboxWithResolution(
+          baseImageResolutionContext,
+          selectedAgent,
+          agentOnboard.createAgentSandbox,
+        ),
       log: console.log,
       warn: console.warn,
       error: console.error,
@@ -3003,7 +3017,7 @@ async function createSandbox(
     configuredMessagingChannels:
       getChannelsFromPlan(plannedMessagingPlan) ?? activeMessagingChannels,
   });
-  const { buildId } = await sandboxDockerfilePatchFlow.prepareSandboxDockerfilePatchWithResolution({
+  const { buildId } = await sandboxDockerfilePatchFlow.prepareSandboxDockerfilePatch({
     agent,
     fromDockerfile,
     sandboxBaseImage: SANDBOX_BASE_IMAGE,
@@ -3018,6 +3032,7 @@ async function createSandbox(
     sandboxGpuConfig: effectiveSandboxGpuConfig,
     log: console.log,
     warn: console.warn,
+    ...baseImageResolutionFlow.getBaseImageResolutionPatchOptions(baseImageResolutionContext),
   });
   const sandboxReadyTimeoutSecs = getSandboxReadyTimeoutSecs(effectiveSandboxGpuConfig);
   const { createCommand, effectiveDashboardPort, sandboxEnv, sandboxStartupCommand } =
@@ -3258,6 +3273,18 @@ async function createSandbox(
   // #4614: arm rollback only when the sandbox was not live before (never a recreate/rebuild).
   if (!liveExists) sandboxCancelRollback.arm(sandboxName);
   return sandboxName;
+}
+
+type CreateSandboxArgs =
+  Parameters<typeof createSandboxWithBaseImageResolution> extends [unknown, ...infer Args]
+    ? Args
+    : never;
+
+async function createSandbox(...args: CreateSandboxArgs): Promise<string> {
+  return createSandboxWithBaseImageResolution(
+    baseImageResolutionFlow.createBaseImageResolutionContext({ fresh: false }),
+    ...args,
+  );
 }
 
 // ── Step 3: Inference selection ──────────────────────────────────
@@ -4680,7 +4707,10 @@ async function onboard(opts: OnboardOptions = {}): Promise<void> {
         exitProcess: (code) => process.exit(code),
       },
     );
-  sandboxDockerfilePatchFlow.beginBaseImageResolutionFlow({ fresh });
+  const baseImageResolutionContext = baseImageResolutionFlow.createBaseImageResolutionContext({
+    fresh,
+    initialHint: opts.baseImageResolutionHint,
+  });
   if (isNonInteractive()) policyTierEnv.validatePolicyTierEnvEarly();
   const noticeAccepted = await ensureUsageNoticeConsent({
     nonInteractive: isNonInteractive(),
@@ -5097,7 +5127,10 @@ async function onboard(opts: OnboardOptions = {}): Promise<void> {
             selectResourceProfileForSandbox({ isNonInteractive, note, prompt, promptOrDefault }),
           stopStaleDashboardListenersForSandbox,
           listRegistrySandboxes: registry.listSandboxes,
-          createSandbox,
+          createSandbox: createSandboxWithBaseImageResolution.bind(
+            null,
+            baseImageResolutionContext,
+          ),
           updateSandboxRegistry: (name, updates) => registry.updateSandbox(name, updates),
           getSandboxAgentRegistryFields,
           recordStepComplete,

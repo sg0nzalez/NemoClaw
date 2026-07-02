@@ -19,6 +19,10 @@ import { runSandboxConfigSync } from "../onboard/config-sync";
 import { ROOT, redact, run } from "../runner";
 import {
   buildLocalBaseTag,
+  createSandboxBaseImageResolutionKey,
+  createSandboxBaseImageResolutionMetadata,
+  getImageGlibcVersion,
+  type ResolveBaseImageOptions,
   resolveSandboxBaseImage,
   SANDBOX_BASE_TAG,
   type SandboxBaseImageResolutionMetadata,
@@ -82,6 +86,17 @@ export function ensureAgentBaseImage(
 
   const baseImageName = `ghcr.io/nvidia/nemoclaw/${agent.name}-sandbox-base`;
   const baseImageTag = `${baseImageName}:${SANDBOX_BASE_TAG}`;
+  const resolutionOptions: ResolveBaseImageOptions = {
+    imageName: baseImageName,
+    dockerfilePath: baseDockerfile,
+    localTag: buildLocalBaseTag(`nemoclaw-${agent.name}-sandbox-base-local`, ROOT),
+    envVar: `NEMOCLAW_${agent.name.toUpperCase().replace(/[^A-Z0-9]+/g, "_")}_SANDBOX_BASE_IMAGE_REF`,
+    label: `${agent.displayName} sandbox base image`,
+    requireOpenshellSandboxAbi: process.platform === "linux",
+    resolutionHint: opts.resolutionHint,
+    forceRefresh: opts.forceBaseImageRefresh,
+    rootDir: ROOT,
+  };
   const forceBaseImageRebuild = opts.forceBaseImageRebuild === true;
   if (forceBaseImageRebuild) {
     console.log(`  Rebuilding ${agent.displayName} base image...`);
@@ -96,20 +111,24 @@ export function ensureAgentBaseImage(
       throw new Error(`Failed to build ${agent.displayName} base image${detail}`);
     }
     console.log(`  \u2713 Base image built: ${baseImageTag}`);
-    return { imageTag: baseImageTag, built: true };
+    const resolutionMetadata = createSandboxBaseImageResolutionMetadata(
+      resolutionOptions,
+      createSandboxBaseImageResolutionKey(resolutionOptions),
+      {
+        ref: baseImageTag,
+        digest: null,
+        source: "local",
+        glibcVersion: process.platform === "linux" ? getImageGlibcVersion(baseImageTag) : null,
+      },
+    );
+    return {
+      imageTag: baseImageTag,
+      built: true,
+      ...(resolutionMetadata ? { resolutionMetadata } : {}),
+    };
   }
 
-  const resolved = resolveSandboxBaseImage({
-    imageName: baseImageName,
-    dockerfilePath: baseDockerfile,
-    localTag: buildLocalBaseTag(`nemoclaw-${agent.name}-sandbox-base-local`, ROOT),
-    envVar: `NEMOCLAW_${agent.name.toUpperCase().replace(/[^A-Z0-9]+/g, "_")}_SANDBOX_BASE_IMAGE_REF`,
-    label: `${agent.displayName} sandbox base image`,
-    requireOpenshellSandboxAbi: process.platform === "linux",
-    resolutionHint: opts.resolutionHint,
-    forceRefresh: opts.forceBaseImageRefresh,
-    rootDir: ROOT,
-  });
+  const resolved = resolveSandboxBaseImage(resolutionOptions);
   if (resolved && !forceBaseImageRebuild) {
     console.log(`  Using ${agent.displayName} base image: ${resolved.ref}`);
     return {

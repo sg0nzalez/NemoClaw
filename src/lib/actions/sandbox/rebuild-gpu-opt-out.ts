@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { normalizeSandboxGpuMode } from "../../onboard/sandbox-gpu-mode";
+import type { SandboxBaseImageResolutionMetadata } from "../../sandbox-base-image";
 
 export type RebuildGpuOptOutEntry = {
   sandboxGpuMode?: string | null;
@@ -35,6 +36,7 @@ export type RebuildRecreateOnboardOpts = {
   agent: string | null | undefined;
   fromDockerfile: string | null;
   autoYes: boolean;
+  baseImageResolutionHint: SandboxBaseImageResolutionMetadata | null;
   noGpu?: true;
 };
 
@@ -43,6 +45,7 @@ export function buildRebuildRecreateOnboardOpts(args: {
   rebuildAgent: string | null | undefined;
   storedFromDockerfile: string | null;
   autoYes: boolean;
+  baseImageResolutionHint?: SandboxBaseImageResolutionMetadata | null;
 }): RebuildRecreateOnboardOpts {
   return {
     resume: true,
@@ -51,6 +54,7 @@ export function buildRebuildRecreateOnboardOpts(args: {
     agent: args.rebuildAgent,
     fromDockerfile: args.storedFromDockerfile,
     autoYes: args.autoYes,
+    baseImageResolutionHint: args.baseImageResolutionHint ?? null,
     ...(rebuildShouldOptOutGpu(args.sb) ? { noGpu: true as const } : {}),
   };
 }
