@@ -10,6 +10,7 @@ import {
 } from "../fixtures/clients/index.ts";
 import { expect } from "../fixtures/e2e-test.ts";
 import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
+import { stripAnsi } from "./json-envelope.ts";
 
 export const HERMES_GPU_EXTRA_PLACEHOLDER_KEYS = [
   "TELEGRAM_BOT_TOKEN_AGENT_A",
@@ -49,7 +50,7 @@ export async function assertHermesGpuStartupProof({
     );
     expect(resultText(install)).not.toContain("Docker GPU mode selected:");
   }
-  const plainStatus = resultText(status).replace(/\x1b\[[0-9;]*m/gu, "");
+  const plainStatus = stripAnsi(resultText(status));
   expect(plainStatus).toMatch(/Phase:\s*Ready/i);
   expect(plainStatus).toContain("Sandbox GPU: enabled");
   expect(plainStatus).toContain("CUDA verified");
@@ -61,7 +62,7 @@ export async function assertHermesGpuStartupProof({
     timeoutMs: 30_000,
   });
   expect(openshellState.exitCode, resultText(openshellState)).toBe(0);
-  expect(resultText(openshellState)).toMatch(/Phase:\s*Ready/i);
+  expect(stripAnsi(resultText(openshellState))).toMatch(/Phase:\s*Ready/i);
 
   const pid1Topology = await sandbox.execShell(
     sandboxName,
