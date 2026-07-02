@@ -14,6 +14,7 @@ import {
   dockerRunDetached,
   dockerStop,
 } from "../adapters/docker";
+import { createDockerGpuDiagnosticRedactor } from "./docker-gpu-diagnostic-redaction";
 import {
   reconcileSupervisorReconnect,
   rollbackDockerGpuPatchOnRecreateFailure,
@@ -1706,6 +1707,8 @@ export function collectDockerGpuPatchDiagnostics(
     selectedMode?: DockerGpuPatchMode | null;
     snapshot?: DockerGpuPatchSandboxSnapshot | null;
     classification?: DockerGpuPatchFailureClassification | null;
+    additionalSensitiveValues?: readonly string[];
+    dockerTopOutput?: string | null;
   } = {},
   deps: DockerGpuPatchDeps = {},
 ): DockerGpuPatchDiagnostics | null {
@@ -1724,24 +1727,61 @@ export function collectDockerGpuPatchDiagnostics(
   }
 
   const context = options.context || getDockerGpuPatchFailureContext(options.error) || null;
-  const cleanupCommands = dockerGpuPatchCleanupCommands(sandboxName);
-  const errorText =
+  const redactor = createDockerGpuDiagnosticRedactor(options.additionalSensitiveValues);
+  let discoveredContainerIds: string[] = [];
+  try {
+    discoveredContainerIds = findOpenShellDockerSandboxContainerIds(sandboxName, deps);
+  } catch {
+    discoveredContainerIds = [];
+  }
+  const containerTargets = uniqueStrings([
+    ...(context
+      ? [context.oldContainerId, context.newContainerId, context.backupContainerName]
+      : []),
+    ...discoveredContainerIds,
+  ]);
+  const inspectedTargets: Array<{ target: string; entries: DockerContainerInspect[] }> = [];
+  for (const target of containerTargets) {
+    try {
+      const inspect = d.dockerCapture(["inspect", target], {
+        ignoreError: true,
+        timeout: DOCKER_GPU_PATCH_TIMEOUT_MS,
+      });
+      if (!inspect.trim()) continue;
+      const parsed = JSON.parse(inspect);
+      const entries = (Array.isArray(parsed) ? parsed : [parsed]) as DockerContainerInspect[];
+      for (const entry of entries) redactor.rememberInspect(entry);
+      inspectedTargets.push({ target, entries });
+    } catch {
+      /* best effort */
+    }
+  }
+  const writeDiagnosticText = (name: string, content: string): void => {
+    writeTextFile(dir, name, redactor.redactText(content));
+  };
+  const writeDiagnosticJson = (name: string, value: unknown): void => {
+    writeTextFile(dir, name, JSON.stringify(redactor.redactValue(value), null, 2));
+  };
+
+  const cleanupCommands = dockerGpuPatchCleanupCommands(sandboxName).map(redactor.redactText);
+  const errorText = redactor.redactText(
     options.error instanceof Error
       ? options.error.message
       : options.error
         ? String(options.error)
-        : "none";
+        : "none",
+  );
   const selectedMode = options.selectedMode || context?.selectedMode || null;
   const snapshot = options.snapshot ?? null;
   const classification = options.classification ?? null;
   const summaryLines = [
     `created_at=${now.toISOString()}`,
-    `sandbox_name=${sandboxName}`,
+    `sandbox_name=${redactor.redactText(sandboxName)}`,
     `error=${errorText}`,
-    `selected_gpu_mode=${selectedMode?.label ?? "none"}`,
-    `old_container_id=${context?.oldContainerId ?? "unknown"}`,
-    `new_container_id=${context?.newContainerId ?? "unknown"}`,
-    `backup_container_name=${context?.backupContainerName ?? "none"}`,
+    `selected_gpu_mode=${redactor.redactText(selectedMode?.label ?? "none")}`,
+    `old_container_id=${redactor.redactText(context?.oldContainerId ?? "unknown")}`,
+    `new_container_id=${redactor.redactText(context?.newContainerId ?? "unknown")}`,
+    `backup_container_name=${redactor.redactText(context?.backupContainerName ?? "none")}`,
     `rolled_back=${context?.rolledBack === true ? "yes" : context?.rolledBack === false ? "failed" : "no"}`,
     "cleanup_commands:",
     ...cleanupCommands.map((command) => `  ${command}`),
@@ -1750,26 +1790,35 @@ export function collectDockerGpuPatchDiagnostics(
     summaryLines.push("gpu_mode_attempts:");
     for (const attempt of context.modeAttempts) {
       summaryLines.push(
-        `  ${attempt.mode.label}: ${attempt.ok ? "ok" : "failed"}${attempt.error ? `: ${attempt.error}` : ""}`,
+        redactor.redactText(
+          `  ${attempt.mode.label}: ${attempt.ok ? "ok" : "failed"}${attempt.error ? `: ${attempt.error}` : ""}`,
+        ),
       );
     }
   }
   if (classification) {
-    summaryLines.push(`failure_kind=${classification.kind}`);
-    if (classification.headline) summaryLines.push(`failure_headline=${classification.headline}`);
+    summaryLines.push(`failure_kind=${redactor.redactText(classification.kind)}`);
+    if (classification.headline) {
+      summaryLines.push(`failure_headline=${redactor.redactText(classification.headline)}`);
+    }
   }
   if (snapshot) {
-    if (snapshot.sandboxPhase) summaryLines.push(`sandbox_phase=${snapshot.sandboxPhase}`);
-    if (snapshot.sandboxListLine) summaryLines.push(`sandbox_list_row=${snapshot.sandboxListLine}`);
-    summaryLines.push(...describePatchedContainerState(snapshot.patchedContainerState));
-  }
-  writeTextFile(dir, "summary.txt", summaryLines.join("\n"));
-  if (snapshot?.patchedContainerState) {
-    writeTextFile(
-      dir,
-      "patched-container-state.json",
-      JSON.stringify(snapshot.patchedContainerState, null, 2),
+    if (snapshot.sandboxPhase) {
+      summaryLines.push(`sandbox_phase=${redactor.redactText(snapshot.sandboxPhase)}`);
+    }
+    if (snapshot.sandboxListLine) {
+      summaryLines.push(`sandbox_list_row=${redactor.redactText(snapshot.sandboxListLine)}`);
+    }
+    summaryLines.push(
+      ...describePatchedContainerState(snapshot.patchedContainerState).map(redactor.redactText),
     );
+  }
+  writeDiagnosticText("summary.txt", summaryLines.join("\n"));
+  if (snapshot?.patchedContainerState) {
+    writeDiagnosticJson("patched-container-state.json", snapshot.patchedContainerState);
+  }
+  if (options.dockerTopOutput?.trim()) {
+    writeDiagnosticText("docker-top.txt", options.dockerTopOutput);
   }
 
   try {
@@ -1784,64 +1833,46 @@ export function collectDockerGpuPatchDiagnostics(
       ],
       { ignoreError: true, timeout: DOCKER_GPU_PATCH_TIMEOUT_MS },
     );
-    if (ps.trim()) writeTextFile(dir, "docker-ps.txt", ps);
+    if (ps.trim()) writeDiagnosticText("docker-ps.txt", ps);
   } catch {
     /* best effort */
   }
 
-  let discoveredContainerIds: string[] = [];
-  try {
-    discoveredContainerIds = findOpenShellDockerSandboxContainerIds(sandboxName, deps);
-  } catch {
-    discoveredContainerIds = [];
-  }
-  const containerTargets = uniqueStrings([
-    ...(context
-      ? [context.oldContainerId, context.newContainerId, context.backupContainerName]
-      : []),
-    ...discoveredContainerIds,
-  ]);
   if (containerTargets.length > 0) {
-    const inspectEntries: unknown[] = [];
+    const inspectEntries: DockerContainerInspect[] = [];
     const networkSummaries: string[] = [];
-    for (const target of containerTargets) {
-      try {
-        const inspect = d.dockerCapture(["inspect", target], {
-          ignoreError: true,
-          timeout: DOCKER_GPU_PATCH_TIMEOUT_MS,
-        });
-        if (!inspect.trim()) continue;
-        const parsed = JSON.parse(inspect);
-        const entries = Array.isArray(parsed) ? parsed : [parsed];
-        inspectEntries.push(...entries);
-        for (const [index, entry] of entries.entries()) {
-          networkSummaries.push(
+    for (const { target, entries } of inspectedTargets) {
+      const sanitizedEntries = entries.map(redactor.sanitizeInspect);
+      inspectEntries.push(...sanitizedEntries);
+      for (const [index, entry] of sanitizedEntries.entries()) {
+        networkSummaries.push(
+          redactor.redactText(
             formatDockerInspectNetworkSummary(
               entries.length === 1 ? target : `${target}[${index}]`,
               entry,
             ),
-          );
-        }
-      } catch {
-        /* best effort */
+          ),
+        );
       }
     }
     if (inspectEntries.length > 0) {
-      writeTextFile(dir, "docker-inspect.json", JSON.stringify(inspectEntries, null, 2));
+      writeDiagnosticJson("docker-inspect.json", inspectEntries);
     }
     if (networkSummaries.length > 0) {
-      writeTextFile(dir, "docker-network-summary.txt", networkSummaries.join("\n\n"));
+      writeDiagnosticText("docker-network-summary.txt", networkSummaries.join("\n\n"));
     }
     const logs = containerTargets
       .map((target) => {
         try {
-          return [`===== ${target} =====`, d.dockerLogs(target, { tail: 120 })].join("\n");
+          return redactor.redactText(
+            [`===== ${target} =====`, d.dockerLogs(target, { tail: 120 })].join("\n"),
+          );
         } catch {
-          return `===== ${target} =====\n(unavailable)`;
+          return redactor.redactText(`===== ${target} =====\n(unavailable)`);
         }
       })
       .join("\n");
-    if (logs.trim()) writeTextFile(dir, "docker-logs.txt", logs);
+    if (logs.trim()) writeDiagnosticText("docker-logs.txt", logs);
   }
 
   if (deps.runCaptureOpenshell) {
@@ -1856,7 +1887,7 @@ export function collectDockerGpuPatchDiagnostics(
           ignoreError: true,
           timeout: DOCKER_GPU_PATCH_TIMEOUT_MS,
         });
-        if (output.trim()) writeTextFile(dir, fileName, output);
+        if (output.trim()) writeDiagnosticText(fileName, output);
       } catch {
         /* best effort */
       }
