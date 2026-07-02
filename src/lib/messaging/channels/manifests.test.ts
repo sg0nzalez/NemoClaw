@@ -911,13 +911,13 @@ describe("built-in channel manifests", () => {
     const render = renderJson(googlechatManifest);
     expect(render).toContain('"path":"channels.googlechat"');
     expect(render).toContain('"path":"plugins.entries.googlechat"');
-    // serviceAccountFile is a start-gate marker only (OpenClaw requires a
-    // serviceAccount* to start the channel); the file is never delivered (no
-    // secretFiles) and never read (the outbound-auth preload short-circuits the
-    // token producer), so the SA key never enters the sandbox. No inline JSON and
-    // no outbound SA placeholder.
+    // serviceAccountFile is a synthetic start-gate sentinel (OpenClaw requires a
+    // serviceAccount* to start the channel, but accepts any non-empty string and does
+    // not read it at start); the file is never delivered and never read (the
+    // outbound-auth preload short-circuits the token producer), so the SA key never
+    // enters the sandbox. The path is deliberately non-existent, not a real location.
     expect(render).toContain(
-      '"serviceAccountFile":"/sandbox/.openclaw/secrets/googlechat-service-account.json"',
+      '"serviceAccountFile":"/nonexistent/googlechat-gateway-minted-no-service-account-file"',
     );
     expect(render).not.toContain("openshell:resolve:env:GOOGLECHAT_SERVICE_ACCOUNT");
     expect(render).not.toContain("credential.googlechatServiceAccount");

@@ -115,14 +115,16 @@ export const googlechatManifest = {
         path: "channels.googlechat",
         value: {
           enabled: true,
-          // Configured-marker ONLY — the file is never delivered (no secretFiles)
-          // and never read. OpenClaw's channel-start gate requires a serviceAccount*
-          // (isConfigured: credentialSource !== "none") to start the webhook, but the
-          // actual token is gateway-minted and proxy-injected, and the
+          // Start-gate SENTINEL — a deliberately synthetic, non-existent path, NOT a
+          // real credential location. OpenClaw's channel-start gate only requires some
+          // serviceAccount* to be set (isConfigured: credentialSource !== "none") to
+          // start the webhook; it accepts any non-empty string here and does not read
+          // the file at start. The token is gateway-minted and proxy-injected, and the
           // googlechat-outbound-auth preload short-circuits the token producer before
-          // this path is read — so the SA key never enters the sandbox. (Clean fix is
-          // upstream: a non-SA "configured"/accessToken credential source in @openclaw/googlechat.)
-          serviceAccountFile: "/sandbox/.openclaw/secrets/googlechat-service-account.json",
+          // this path could be read, so no service-account key is ever delivered into
+          // the sandbox. (Clean fix is upstream: a non-SA "configured"/accessToken
+          // credential source in @openclaw/googlechat — tracked follow-up.)
+          serviceAccountFile: "/nonexistent/googlechat-gateway-minted-no-service-account-file",
           audienceType: "{{googlechatConfig.audienceType}}",
           audience: "{{googlechatConfig.audience}}",
           appPrincipal: "{{googlechatConfig.appPrincipal}}",
