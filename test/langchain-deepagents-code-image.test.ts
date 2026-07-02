@@ -262,6 +262,12 @@ describe("LangChain Deep Agents Code image contracts", () => {
       expect(outputLines).toContain(`SOURCED_${name}=${managedNoProxy}`);
       expect(envFileLines).toContain(`export ${name}=${managedNoProxy.replaceAll(",", "\\,")}`);
     }
+    expect(
+      outputLines.filter((line) => /^(?:RUNTIME|SOURCED)_(?:NO_PROXY|no_proxy)=/.test(line)),
+    ).not.toEqual(expect.arrayContaining([expect.stringContaining("inference.local")]));
+    expect(envFileLines.filter((line) => /^export (?:NO_PROXY|no_proxy)=/.test(line))).not.toEqual(
+      expect.arrayContaining([expect.stringContaining("inference.local")]),
+    );
     const combined = `${output}\n${envFileText}`;
     expect(combined).not.toContain("corp-proxy.example");
     expect(combined).not.toContain("lower-proxy.example");
@@ -636,6 +642,7 @@ describe("LangChain Deep Agents Code image contracts", () => {
       'api_key_env[[:space:]]*=[[:space:]]*"DEEPAGENTS_CODE_OPENAI_API_KEY"',
     );
     expect(headlessCheck).toContain("classify_headless_output");
+    expect(headlessCheck).toMatch(/headless_output=.*sandbox_login_exec.*\|\| true\)"/);
     expect(headlessCheck).toContain("DEEPAGENTS_HEADLESS_TIMEOUT must be a positive integer");
     expect(headlessCheck).toContain("nvapi-");
     expect(headlessCheck).toContain("nvcf-");
@@ -705,21 +712,32 @@ describe("LangChain Deep Agents Code image contracts", () => {
   });
 
   it("accepts only the normalized login-shell proxy contract (#6191)", () => {
-    const validate = (proxyUrl: string, noProxy: string, lowerProxy = proxyUrl) =>
-      runHeadlessCheckHelper(
+    const validate = (proxyUrl: string, noProxy: string, lowerProxy = proxyUrl) => {
+      const loginHome = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-dcode-login-"));
+      fs.writeFileSync(
+        path.join(loginHome, ".profile"),
         [
-          'sandbox_login_exec() { HOME=/sandbox bash --noprofile --norc -c "$1"; }',
-          'export HTTP_PROXY="$TEST_PROXY_URL" HTTPS_PROXY="$TEST_PROXY_URL"',
-          'export http_proxy="$TEST_LOWER_PROXY_URL" https_proxy="$TEST_LOWER_PROXY_URL"',
-          'export NO_PROXY="$TEST_NO_PROXY" no_proxy="$TEST_NO_PROXY"',
-          "if sandbox_login_proxy_contract >/dev/null 2>&1; then printf pass; else printf fail; fi",
-        ].join("; "),
-        {
-          TEST_LOWER_PROXY_URL: lowerProxy,
-          TEST_NO_PROXY: noProxy,
-          TEST_PROXY_URL: proxyUrl,
-        },
+          "export HOME=/sandbox",
+          `export HTTP_PROXY=${JSON.stringify(proxyUrl)}`,
+          `export HTTPS_PROXY=${JSON.stringify(proxyUrl)}`,
+          `export http_proxy=${JSON.stringify(lowerProxy)}`,
+          `export https_proxy=${JSON.stringify(lowerProxy)}`,
+          `export NO_PROXY=${JSON.stringify(noProxy)}`,
+          `export no_proxy=${JSON.stringify(noProxy)}`,
+          "",
+        ].join("\n"),
+        "utf8",
       );
+      return runHeadlessCheckHelper(
+        [
+          "sandbox_login_exec() {",
+          '  env -u HTTP_PROXY -u HTTPS_PROXY -u NO_PROXY -u http_proxy -u https_proxy -u no_proxy HOME="$TEST_LOGIN_HOME" bash -lc "$1"',
+          "}",
+          "if sandbox_login_proxy_contract >/dev/null 2>&1; then printf pass; else printf fail; fi",
+        ].join("\n"),
+        { TEST_LOGIN_HOME: loginHome },
+      );
+    };
 
     const managedProxy = "http://10.200.0.1:3128";
     const managedNoProxy = "localhost,127.0.0.1,::1,10.200.0.1";

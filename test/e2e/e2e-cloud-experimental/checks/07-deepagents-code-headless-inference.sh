@@ -220,7 +220,7 @@ main() {
   fi
 
   # 4. The same login-shell path runs dcode and returns PONG.
-  headless_output="$(sandbox_login_exec "cd /sandbox && timeout ${HEADLESS_TIMEOUT} dcode -n 'Reply with exactly one word: PONG'; echo \"DCODE_EXIT:\$?\"")"
+  headless_output="$(sandbox_login_exec "cd /sandbox && timeout ${HEADLESS_TIMEOUT} dcode -n 'Reply with exactly one word: PONG'; echo \"DCODE_EXIT:\$?\"" || true)"
   dcode_exit="$(printf '%s' "$headless_output" | sed -n 's/.*DCODE_EXIT:\([0-9]\+\).*/\1/p' | tail -n1)"
   if classification="$(classify_headless_output "${dcode_exit:-unknown}" "$headless_output")"; then
     pass "login-shell dcode -n reached managed inference with ${classification} (exit ${dcode_exit:-unknown})"
