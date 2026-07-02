@@ -423,7 +423,8 @@ describe("hosted inference E2E config", () => {
       expect(responsesText).toContain("event: response.output_text.delta");
       expect(responsesText).toContain('data: {"delta":"RESP_OK"}');
 
-      expect(fake.requests()).toEqual(
+      const requests = fake.requests();
+      expect(requests).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ method: "GET", path: "/v1/models" }),
           expect.objectContaining({
@@ -441,7 +442,10 @@ describe("hosted inference E2E config", () => {
           expect.objectContaining({ auth: "ok", path: "/v1/responses", stream: true }),
         ]),
       );
-      expect(JSON.stringify(fake.requests())).not.toContain("FORBIDDEN_REQUEST_MARKER");
+      expect(
+        requests.reduce((total, request) => total + (request.forbiddenMarkerMatches ?? 0), 0),
+      ).toBe(1);
+      expect(JSON.stringify(requests)).not.toContain("FORBIDDEN_REQUEST_MARKER");
     } finally {
       await fake.close();
     }

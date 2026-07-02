@@ -67,10 +67,10 @@ function createFixture(): IntegrityFixture {
   return fixture;
 }
 
-function runProof(fixture: IntegrityFixture, env: NodeJS.ProcessEnv = process.env) {
+function runProof(fixture: IntegrityFixture, extraEnv: NodeJS.ProcessEnv = {}) {
   const strictMetadata = fs.statSync(fixture.strictHashPath);
   return spawnSync(
-    "bash",
+    "/bin/bash",
     [
       "-c",
       buildHermesManagedStartupIntegrityScript({
@@ -83,7 +83,15 @@ function runProof(fixture: IntegrityFixture, env: NodeJS.ProcessEnv = process.en
         strictHashGid: strictMetadata.gid,
       }),
     ],
-    { encoding: "utf-8", timeout: 5000, env },
+    {
+      encoding: "utf-8",
+      timeout: 5000,
+      env: {
+        LANG: "C",
+        LC_ALL: "C",
+        ...extraEnv,
+      },
+    },
   );
 }
 
@@ -158,7 +166,7 @@ describe("Hermes managed startup integrity proof", () => {
     fs.mkdirSync(shadowDir);
     fs.writeFileSync(path.join(shadowDir, "hashlib.py"), 'raise SystemExit("shadowed hashlib")\n');
 
-    const proof = runProof(fixture, { ...process.env, PYTHONPATH: shadowDir });
+    const proof = runProof(fixture, { PYTHONPATH: shadowDir });
     expect(proof.status, proof.stderr).toBe(0);
     expect(proof.stdout).toBe("OK\n");
   });
