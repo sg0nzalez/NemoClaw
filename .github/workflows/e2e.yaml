@@ -1600,6 +1600,7 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
+          ref: d76f1647a5f354ba04737a6a049b82bfbf6d5454
           persist-credentials: false
 
       - *dockerhub-auth
@@ -1610,9 +1611,445 @@ jobs:
       - name: Run Hermes GPU startup live Vitest test
         run: |
           set -euo pipefail
+          candidate_sha=d76f1647a5f354ba04737a6a049b82bfbf6d5454
+          sandbox_name=e2e-hermes-gpu-failed-clone
+          actual_sha="$(git rev-parse HEAD)"
+          if [ "$actual_sha" != "$candidate_sha" ]; then
+            echo "::error::Expected exact candidate $candidate_sha, got $actual_sha"
+            exit 1
+          fi
+
+          real_docker="$(type -P docker)"
+          if [ -z "$real_docker" ] || [ ! -x "$real_docker" ]; then
+            echo "::error::Docker executable not found before installing the fault shim"
+            exit 1
+          fi
+          real_docker="$(readlink -f "$real_docker")"
+          shim_dir="$RUNNER_TEMP/nemoclaw-failed-clone-shim"
+          marker="$RUNNER_TEMP/nemoclaw-failed-clone.marker"
+          guard_pid_file="$RUNNER_TEMP/nemoclaw-failed-clone.guard.pid"
+          proof_dir="$E2E_ARTIFACT_DIR/failed-clone-proof"
+          guard_log="$proof_dir/fault-guard.log"
+          rm -rf "$shim_dir"
+          rm -f "$marker" "$guard_pid_file"
+          mkdir -p "$shim_dir" "$proof_dir"
+
+          {
+            printf '%s\n' '#!/usr/bin/env bash'
+            printf 'real_docker=%q\n' "$real_docker"
+            printf 'sandbox_name=%q\n' "$sandbox_name"
+            printf 'marker=%q\n' "$marker"
+            printf 'guard_pid_file=%q\n' "$guard_pid_file"
+            printf 'guard_log=%q\n' "$guard_log"
+            cat <<'DOCKER_SHIM'
+          set -euo pipefail
+
+          target_label=false
+          gpu_clone=false
+          for arg in "$@"; do
+            case "$arg" in
+              "openshell.ai/sandbox-name=$sandbox_name") target_label=true ;;
+              --gpus | nvidia.com/gpu=* | NVIDIA_VISIBLE_DEVICES=*) gpu_clone=true ;;
+            esac
+          done
+
+          backup_name=""
+          if [ "${1:-}" = run ] && [ "${2:-}" = -d ] && $target_label && $gpu_clone && [ ! -e "$marker" ]; then
+            while IFS= read -r name; do
+              case "$name" in
+                *-nemoclaw-gpu-backup-*) backup_name="$name"; break ;;
+              esac
+            done < <(
+              "$real_docker" ps -a \
+                --filter "label=openshell.ai/sandbox-name=$sandbox_name" \
+                --format '{{.Names}}' 2>/dev/null || true
+            )
+          fi
+
+          if [ -z "$backup_name" ]; then
+            exec "$real_docker" "$@"
+          fi
+
+          set +e
+          run_output="$("$real_docker" "$@")"
+          run_status=$?
+          set -e
+          if [ "$run_status" -ne 0 ]; then
+            printf '%s\n' "$run_output"
+            exit "$run_status"
+          fi
+
+          clone_id="${run_output%%$'\n'*}"
+          if [[ ! "$clone_id" =~ ^[0-9a-f]{12,64}$ ]]; then
+            {
+              printf 'fault_injected=no\n'
+              printf 'reason=invalid_clone_id\n'
+            } >"$marker"
+            printf '%s\n' "$run_output"
+            exit 0
+          fi
+
+          "$real_docker" update --restart=no "$clone_id" >/dev/null 2>&1 || true
+          "$real_docker" kill "$clone_id" >/dev/null 2>&1 || true
+          clone_state=""
+          for _ in $(seq 1 20); do
+            clone_state="$(
+              "$real_docker" inspect \
+                --format '{{.State.Status}} {{.State.Running}} {{.State.ExitCode}}' \
+                "$clone_id" 2>/dev/null || true
+            )"
+            case "$clone_state" in
+              *' false '*) break ;;
+            esac
+            "$real_docker" update --restart=no "$clone_id" >/dev/null 2>&1 || true
+            "$real_docker" kill "$clone_id" >/dev/null 2>&1 || true
+            sleep 0.1
+          done
+          clone_restart_policy="$(
+            "$real_docker" inspect \
+              --format '{{.HostConfig.RestartPolicy.Name}}' \
+              "$clone_id" 2>/dev/null || true
+          )"
+
+          injected=no
+          case "$clone_state" in
+            *' false '*)
+              if [ "$clone_restart_policy" = no ]; then
+                injected=yes
+              fi
+              ;;
+          esac
+          {
+            printf 'fault_injected=%s\n' "$injected"
+            printf 'clone_id=%s\n' "$clone_id"
+            printf 'backup_name=%s\n' "$backup_name"
+            printf 'clone_state=%s\n' "$clone_state"
+            printf 'restart_policy=%s\n' "$clone_restart_policy"
+          } >"$marker"
+
+          nohup /bin/bash -c '
+            set -u
+            real_docker="$1"
+            clone_id="$2"
+            guard_log="$3"
+            deadline=$((SECONDS + 1200))
+            while [ "$SECONDS" -lt "$deadline" ]; do
+              if ! "$real_docker" inspect "$clone_id" >/dev/null 2>&1; then
+                printf "clone_removed=%s\n" "$clone_id" >>"$guard_log"
+                exit 0
+              fi
+              running="$("$real_docker" inspect --format "{{.State.Running}}" "$clone_id" 2>/dev/null || true)"
+              if [ "$running" = true ]; then
+                "$real_docker" update --restart=no "$clone_id" >/dev/null 2>&1 || true
+                "$real_docker" kill "$clone_id" >/dev/null 2>&1 || true
+                printf "clone_rekilled=%s\n" "$clone_id" >>"$guard_log"
+              fi
+              sleep 0.25
+            done
+            printf "guard_timeout=%s\n" "$clone_id" >>"$guard_log"
+            exit 1
+          ' failed-clone-guard "$real_docker" "$clone_id" "$guard_log" \
+            </dev/null >/dev/null 2>&1 &
+          guard_pid=$!
+          printf '%s\n' "$guard_pid" >"$guard_pid_file"
+          printf 'guard_pid=%s\n' "$guard_pid" >>"$marker"
+          printf '%s\n' "$run_output"
+          DOCKER_SHIM
+          } >"$shim_dir/docker"
+          chmod 0700 "$shim_dir/docker"
+
+          cleanup_done=0
+          cleanup_fault_resources() {
+            if [ "$cleanup_done" -eq 1 ]; then
+              return
+            fi
+            cleanup_done=1
+            set +e
+
+            if [ -s "$guard_pid_file" ]; then
+              local guard_pid guard_args
+              guard_pid="$(cat "$guard_pid_file")"
+              if [[ "$guard_pid" =~ ^[0-9]+$ ]] && kill -0 "$guard_pid" 2>/dev/null; then
+                guard_args="$(ps -p "$guard_pid" -o args= 2>/dev/null || true)"
+                if [[ "$guard_args" == *failed-clone-guard* ]]; then
+                  kill -TERM "$guard_pid" 2>/dev/null || true
+                  for _ in $(seq 1 20); do
+                    if ! kill -0 "$guard_pid" 2>/dev/null; then
+                      break
+                    fi
+                    sleep 0.1
+                  done
+                  guard_args="$(ps -p "$guard_pid" -o args= 2>/dev/null || true)"
+                  if kill -0 "$guard_pid" 2>/dev/null && [[ "$guard_args" == *failed-clone-guard* ]]; then
+                    kill -KILL "$guard_pid" 2>/dev/null || true
+                  fi
+                fi
+              fi
+            fi
+
+            while IFS= read -r container_id; do
+              if [[ "$container_id" =~ ^[0-9a-f]{12,64}$ ]]; then
+                "$real_docker" rm -f "$container_id" >/dev/null 2>&1 || true
+              fi
+            done < <(
+              "$real_docker" ps -aq \
+                --filter "label=openshell.ai/sandbox-name=$sandbox_name" 2>/dev/null || true
+            )
+          }
+          cleanup_fault_signal() {
+            local signal="$1"
+            trap - EXIT INT TERM
+            cleanup_fault_resources
+            if [ "$signal" = INT ]; then
+              exit 130
+            fi
+            exit 143
+          }
+          trap cleanup_fault_resources EXIT
+          trap 'cleanup_fault_signal INT' INT
+          trap 'cleanup_fault_signal TERM' TERM
+
+          export PATH="$shim_dir:$PATH"
+          export NEMOCLAW_DOCKER_GPU_PATCH=1
+          export NEMOCLAW_E2E_RETRIES=0
+          export NEMOCLAW_SANDBOX_NAME="$sandbox_name"
+          if [ "$(type -P docker)" != "$shim_dir/docker" ]; then
+            echo "::error::Docker fault shim is not first on PATH"
+            exit 1
+          fi
+
+          set +e
           npx vitest run --project e2e-live \
             test/e2e/live/hermes-gpu-startup.test.ts \
             --silent=false --reporter=default
+          vitest_status=$?
+          set -e
+          if [ "$vitest_status" -eq 0 ]; then
+            echo "::error::Failed-clone diagnostic unexpectedly passed its success-path assertion"
+            exit 1
+          fi
+
+          if [ -s "$guard_pid_file" ]; then
+            guard_pid="$(cat "$guard_pid_file")"
+            for _ in $(seq 1 40); do
+              if ! kill -0 "$guard_pid" 2>/dev/null; then
+                break
+              fi
+              sleep 0.25
+            done
+            if kill -0 "$guard_pid" 2>/dev/null; then
+              echo "::error::Failed-clone guard remained alive after rollback and fixture cleanup"
+              exit 1
+            fi
+          fi
+
+          node - \
+            "$candidate_sha" \
+            "$GITHUB_SHA" \
+            "$E2E_ARTIFACT_DIR" \
+            "$marker" \
+            "$vitest_status" \
+            "$sandbox_name" <<'PROOF'
+          const fs = require("node:fs");
+          const path = require("node:path");
+
+          const [candidateSha, workflowSha, artifactRootRaw, markerPath, statusRaw, sandboxName] =
+            process.argv.slice(2);
+          const artifactRoot = path.resolve(artifactRootRaw);
+          const fail = (message) => {
+            throw new Error(message);
+          };
+          const walk = (root) => {
+            const files = [];
+            for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+              const target = path.join(root, entry.name);
+              if (entry.isDirectory()) files.push(...walk(target));
+              else if (entry.isFile()) files.push(target);
+            }
+            return files;
+          };
+          const parseAssignments = (text) =>
+            new Map(
+              text
+                .split(/\r?\n/u)
+                .filter((line) => line.includes("="))
+                .map((line) => {
+                  const separator = line.indexOf("=");
+                  return [line.slice(0, separator), line.slice(separator + 1)];
+                }),
+            );
+          const requireFile = (file) => {
+            if (!fs.statSync(file, { throwIfNoEntry: false })?.isFile()) {
+              fail(`required file missing: ${file}`);
+            }
+            return file;
+          };
+          const underFailureRoot = (target) => {
+            const resolved = fs.realpathSync(target);
+            const root = fs.realpathSync(path.join(process.env.HOME, ".nemoclaw", "onboard-failures"));
+            if (!resolved.startsWith(`${root}${path.sep}`)) {
+              fail(`diagnostic path escaped onboard-failures: ${resolved}`);
+            }
+            return resolved;
+          };
+
+          if (Number(statusRaw) === 0) fail("Vitest status must be nonzero for the injected failure");
+          const marker = parseAssignments(fs.readFileSync(requireFile(markerPath), "utf8"));
+          if (marker.get("fault_injected") !== "yes") fail(`fault injection failed: ${JSON.stringify(Object.fromEntries(marker))}`);
+          const cloneId = marker.get("clone_id") ?? "";
+          const backupName = marker.get("backup_name") ?? "";
+          if (!/^[0-9a-f]{12,64}$/u.test(cloneId)) fail(`invalid injected clone ID: ${cloneId}`);
+          if (!backupName.includes("-nemoclaw-gpu-backup-")) fail(`invalid backup name: ${backupName}`);
+          if (marker.get("restart_policy") !== "no") fail("injected clone restart policy was not fail-closed");
+
+          const installResults = walk(artifactRoot).filter(
+            (file) => path.basename(file) === "phase-2-install-hermes-gpu-startup.result.json",
+          );
+          if (installResults.length !== 1) fail(`expected one install result, found ${installResults.length}`);
+          const install = JSON.parse(fs.readFileSync(installResults[0], "utf8"));
+          if (install.exitCode === 0) fail("installer unexpectedly succeeded after clone injection");
+          const installOutput = `${install.stdout ?? ""}\n${install.stderr ?? ""}`.replace(
+            /\x1b\[[0-9;]*m/gu,
+            "",
+          );
+          for (const expected of [
+            "Docker GPU mode selected:",
+            "Pre-rollback diagnostics saved:",
+            "pre-patch sandbox restored.",
+            "Diagnostics saved:",
+          ]) {
+            if (!installOutput.includes(expected)) fail(`installer output missing: ${expected}`);
+          }
+          if (!/recreat[^\n]*GPU access/iu.test(installOutput)) {
+            fail("installer output did not prove the legacy GPU recreate route");
+          }
+
+          const preMatches = [...installOutput.matchAll(/Pre-rollback diagnostics saved:\s*(\S+)/gu)];
+          const postMatches = [...installOutput.matchAll(/\bDiagnostics saved:\s*(\S+)/gu)];
+          if (preMatches.length !== 1) fail(`expected one pre-rollback bundle, found ${preMatches.length}`);
+          if (postMatches.length < 1) fail("post-rollback diagnostic bundle path missing");
+          const preDir = underFailureRoot(preMatches.at(-1)[1]);
+          const postDir = underFailureRoot(postMatches.at(-1)[1]);
+          if (preDir === postDir) fail("pre- and post-rollback bundles must be distinct");
+
+          const preSummary = parseAssignments(
+            fs.readFileSync(requireFile(path.join(preDir, "summary.txt")), "utf8"),
+          );
+          if (preSummary.get("new_container_id") !== cloneId) fail("pre-rollback bundle captured the wrong clone");
+          if (preSummary.get("backup_container_name") !== backupName) fail("pre-rollback bundle captured the wrong backup");
+          if (preSummary.get("rolled_back") !== "no") fail("pre-rollback bundle was not captured before rollback");
+          if (preSummary.get("failure_kind") !== "patched_container_failed") fail("pre-rollback failure was not classified as a failed clone");
+          const failedState = JSON.parse(
+            fs.readFileSync(requireFile(path.join(preDir, "patched-container-state.json")), "utf8"),
+          );
+          if (failedState.Running === true) fail("pre-rollback clone was still running");
+          if (!["exited", "dead"].includes(String(failedState.Status).toLowerCase())) {
+            fail(`unexpected failed-clone status: ${failedState.Status}`);
+          }
+          if (!(Number(failedState.ExitCode) > 0)) fail(`failed clone had non-failing exit: ${failedState.ExitCode}`);
+          const preInspect = JSON.parse(
+            fs.readFileSync(requireFile(path.join(preDir, "docker-inspect.json")), "utf8"),
+          );
+          if (!preInspect.some((entry) => String(entry.Id ?? "").startsWith(cloneId))) {
+            fail("pre-rollback inspect omitted the injected clone");
+          }
+          if (!preInspect.some((entry) => String(entry.Name ?? "").replace(/^\/+/, "") === backupName)) {
+            fail("pre-rollback inspect omitted the backup container");
+          }
+          requireFile(path.join(preDir, "docker-logs.txt"));
+          requireFile(path.join(preDir, "docker-ps.txt"));
+
+          const postSummaryText = fs.readFileSync(
+            requireFile(path.join(postDir, "summary.txt")),
+            "utf8",
+          );
+          const postSummary = parseAssignments(postSummaryText);
+          if (postSummary.get("rolled_back") !== "yes") fail("post-rollback bundle did not record successful rollback");
+          if (!postSummaryText.includes("pre-patch sandbox restored")) fail("post-rollback summary omitted restoration result");
+          const suffixIndex = backupName.lastIndexOf("-nemoclaw-gpu-backup-");
+          const originalName = backupName.slice(0, suffixIndex);
+          const postPs = fs
+            .readFileSync(requireFile(path.join(postDir, "docker-ps.txt")), "utf8")
+            .split(/\r?\n/u)
+            .map((line) => line.trim())
+            .filter(Boolean);
+          if (postPs.length !== 2) fail(`expected header plus one restored container, got ${postPs.length} rows`);
+          const restoredName = postPs[1].split(/\s+/u).at(-1);
+          if (restoredName !== originalName) fail(`expected restored container ${originalName}, got ${restoredName}`);
+          if (postPs[1].includes("-nemoclaw-gpu-backup-")) fail("backup container leaked after rollback");
+          const postInspect = JSON.parse(
+            fs.readFileSync(requireFile(path.join(postDir, "docker-inspect.json")), "utf8"),
+          );
+          const postNames = [
+            ...new Set(postInspect.map((entry) => String(entry.Name ?? "").replace(/^\/+/, ""))),
+          ];
+          if (postNames.length !== 1 || postNames[0] !== originalName) {
+            fail(`post-rollback inspect did not contain only ${originalName}: ${postNames.join(",")}`);
+          }
+
+          const canaries = [
+            "e2e-hermes-gpu-startup-key",
+            "e2e-hermes-gpu-extra-telegram-token",
+            "e2e-hermes-gpu-extra-slack-token",
+          ];
+          const assertNoCanaries = (roots) => {
+            for (const root of roots) {
+              for (const file of walk(root)) {
+                const contents = fs.readFileSync(file);
+                for (const canary of canaries) {
+                  if (contents.includes(Buffer.from(canary))) fail(`secret canary leaked in ${file}`);
+                }
+              }
+            }
+          };
+          const guardLog = fs.readFileSync(
+            requireFile(path.join(artifactRoot, "failed-clone-proof", "fault-guard.log")),
+            "utf8",
+          );
+          if (!guardLog.includes(`clone_removed=${cloneId}`)) {
+            fail("failed-clone guard did not observe rollback removing the injected clone");
+          }
+          if (guardLog.includes("guard_timeout=")) fail("failed-clone guard exhausted its bound");
+          assertNoCanaries([artifactRoot, preDir, postDir]);
+
+          const proofDir = path.join(artifactRoot, "failed-clone-proof");
+          fs.mkdirSync(proofDir, { recursive: true });
+          fs.cpSync(preDir, path.join(proofDir, "pre-rollback"), { recursive: true });
+          fs.cpSync(postDir, path.join(proofDir, "post-rollback"), { recursive: true });
+          fs.writeFileSync(path.join(proofDir, "install-output.txt"), installOutput, "utf8");
+          fs.writeFileSync(
+            path.join(proofDir, "proof.json"),
+            `${JSON.stringify(
+              {
+                candidateSha,
+                workflowSha,
+                sandboxName,
+                vitestStatus: Number(statusRaw),
+                cloneId,
+                backupName,
+                originalName,
+                preRollbackDir: preDir,
+                postRollbackDir: postDir,
+                assertions: {
+                  exactCandidateCheckout: true,
+                  legacyRouteSelected: true,
+                  failedCloneCapturedBeforeRollback: true,
+                  rollbackRecorded: true,
+                  oneRestoredContainer: true,
+                  noBackupContainerLeak: true,
+                  secretCanariesAbsent: true,
+                },
+              },
+              null,
+              2,
+            )}\n`,
+            "utf8",
+          );
+          assertNoCanaries([artifactRoot]);
+          PROOF
+
+          cleanup_fault_resources
+          trap - EXIT INT TERM
 
       - name: Upload Hermes GPU startup artifacts
         if: always()
