@@ -63,4 +63,46 @@ describe("Docker GPU create diagnostics fail-safety (#6110)", () => {
       ),
     );
   });
+
+  it("captures before rollback when ensureApplied performs the recreate after create exits", () => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const deps = {
+      runOpenshell: vi.fn(() => ({ status: 0 })),
+      runCaptureOpenshell: vi.fn(() => ""),
+      sleep: vi.fn(),
+      dockerCapture: vi.fn(() => ""),
+    };
+    const recreatePatch = vi.fn(() => RESULT);
+    const waitForSupervisor = vi.fn(() => false);
+    const capturePreRollbackDiagnostics = vi.fn(() => null);
+    const finalizeBackup = vi.fn(() => ({ backupRemoved: false, rolledBack: true }));
+    const onPatchFailureExit = vi.fn();
+    const patch = createDockerGpuSandboxCreatePatch({
+      enabled: true,
+      sandboxName: "alpha",
+      timeoutSecs: 60,
+      deps,
+      overrides: {
+        recreatePatch,
+        waitForSupervisor,
+        capturePreRollbackDiagnostics,
+        finalizeBackup,
+        onPatchFailureExit,
+      },
+    });
+
+    patch.ensureApplied();
+    patch.waitForSupervisorReconnectIfNeeded();
+
+    expect(recreatePatch).toHaveBeenCalledWith(
+      expect.objectContaining({ waitForSupervisor: false }),
+      deps,
+    );
+    expect(capturePreRollbackDiagnostics).toHaveBeenCalledWith("alpha", RESULT, deps);
+    expect(capturePreRollbackDiagnostics.mock.invocationCallOrder[0]).toBeLessThan(
+      finalizeBackup.mock.invocationCallOrder[0],
+    );
+    expect(finalizeBackup).toHaveBeenCalledWith({ result: RESULT, supervisorReady: false }, deps);
+    expect(onPatchFailureExit).toHaveBeenCalledTimes(1);
+  });
 });

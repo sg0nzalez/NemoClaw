@@ -12,7 +12,11 @@ import {
   verifyGpuSandboxAfterReady,
 } from "./docker-gpu-local-inference";
 
-const HOST_NETWORK_ENV = { NEMOCLAW_DOCKER_GPU_PATCH_NETWORK: "host" } as NodeJS.ProcessEnv;
+const HOST_NETWORK_ENV = {
+  NEMOCLAW_DOCKER_GPU_PATCH: "1",
+  NEMOCLAW_DOCKER_GPU_PATCH_NETWORK: "host",
+} as NodeJS.ProcessEnv;
+const LEGACY_PATCH_ENV = { NEMOCLAW_DOCKER_GPU_PATCH: "1" } as NodeJS.ProcessEnv;
 const GPU_CONFIG = { sandboxGpuEnabled: true };
 
 function gpuPatchOptions(extra: Record<string, unknown> = {}) {
@@ -20,7 +24,7 @@ function gpuPatchOptions(extra: Record<string, unknown> = {}) {
     sandboxName: "alpha",
     dockerDriverGateway: true,
     platform: "linux" as NodeJS.Platform,
-    env: {} as NodeJS.ProcessEnv,
+    env: { ...LEGACY_PATCH_ENV },
     ...extra,
   };
 }
@@ -267,7 +271,7 @@ describe("verifyGpuSandboxAfterReady", () => {
       sandboxName: "alpha",
       dockerDriverGateway: true,
       platform: "linux" as NodeJS.Platform,
-      env: {} as NodeJS.ProcessEnv,
+      env: { ...LEGACY_PATCH_ENV },
       useDockerGpuPatch: true,
       verifyDirectSandboxGpu: vi.fn(),
       selectedMode: () => null,

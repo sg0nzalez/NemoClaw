@@ -25,6 +25,7 @@ const FAKE_MODEL = "test-model";
 const EXTRA_PLACEHOLDER_TOKEN_A = "e2e-hermes-gpu-extra-telegram-token";
 const EXTRA_PLACEHOLDER_TOKEN_B = "e2e-hermes-gpu-extra-slack-token";
 const LIVE_TIMEOUT_MS = 70 * 60_000;
+const GPU_ROUTE = "native-openshell" as const;
 validateSandboxName(SANDBOX_NAME);
 
 function commandEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
@@ -36,7 +37,6 @@ function commandEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
     NEMOCLAW_NON_INTERACTIVE: "1",
     NEMOCLAW_RECREATE_SANDBOX: "1",
     NEMOCLAW_SANDBOX_GPU: "1",
-    NEMOCLAW_DOCKER_GPU_PATCH: "1",
     NEMOCLAW_SANDBOX_NAME: SANDBOX_NAME,
     NEMOCLAW_ONBOARD_VALIDATION_TIMEOUT_SECONDS: "60",
   };
@@ -129,7 +129,7 @@ done`;
 }
 
 test.skipIf(!shouldRunLiveE2E())(
-  "hermes-gpu-startup: GPU-recreated OpenShell supervision reaches stable Ready state",
+  "hermes-gpu-startup: native OpenShell GPU supervision reaches stable Ready state",
   { timeout: LIVE_TIMEOUT_MS },
   async ({ artifacts, cleanup, host, sandbox }) => {
     await artifacts.writeJson("target.json", {
@@ -138,6 +138,7 @@ test.skipIf(!shouldRunLiveE2E())(
       boundary: "install.sh --non-interactive --fresh + Hermes GPU-supervised startup",
       sandboxName: SANDBOX_NAME,
       inference: "hermetic fake OpenAI-compatible endpoint",
+      gpuRoute: GPU_ROUTE,
     });
 
     await cleanupHermes(host, sandbox, "pre-cleanup");
@@ -225,6 +226,7 @@ test.skipIf(!shouldRunLiveE2E())(
 
     await assertHermesGpuStartupProof({
       env: commandEnv(),
+      gpuRoute: GPU_ROUTE,
       host,
       install,
       sandbox,
@@ -235,7 +237,7 @@ test.skipIf(!shouldRunLiveE2E())(
     await artifacts.writeJson("target-result.json", {
       id: "hermes-gpu-startup",
       assertions: {
-        gpuPatchSelected: true,
+        nativeOpenShellGpuSelected: true,
         openshellReady: true,
         sandboxCudaVerified: true,
         extraPlaceholderCommandRoundTripValid: true,

@@ -77,11 +77,27 @@ function inspectFixture(): DockerContainerInspect {
 }
 
 describe("docker-gpu-patch", () => {
-  it("detects only the Linux Docker-driver GPU path and honors the opt-out", () => {
+  it("routes native CDI Linux directly unless the legacy patch is forced", () => {
     expect(
       shouldApplyDockerGpuPatch(
         { sandboxGpuEnabled: true },
         { env: {}, platform: "linux", dockerDriverGateway: true },
+      ),
+    ).toBe(false);
+    expect(
+      shouldApplyDockerGpuPatch(
+        { sandboxGpuEnabled: true },
+        {
+          env: { NEMOCLAW_DOCKER_GPU_PATCH: "auto" },
+          platform: "linux",
+          dockerDriverGateway: true,
+        },
+      ),
+    ).toBe(false);
+    expect(
+      shouldApplyDockerGpuPatch(
+        { sandboxGpuEnabled: true },
+        { env: { NEMOCLAW_DOCKER_GPU_PATCH: "1" }, platform: "linux", dockerDriverGateway: true },
       ),
     ).toBe(true);
     expect(
@@ -100,6 +116,21 @@ describe("docker-gpu-patch", () => {
       shouldApplyDockerGpuPatch(
         { sandboxGpuEnabled: false },
         { env: {}, platform: "linux", dockerDriverGateway: true },
+      ),
+    ).toBe(false);
+  });
+
+  it("keeps Jetson on the compatibility patch by default while honoring its opt-out", () => {
+    expect(
+      shouldApplyDockerGpuPatch(
+        { sandboxGpuEnabled: true, hostGpuPlatform: "jetson" },
+        { env: {}, platform: "linux", dockerDriverGateway: true },
+      ),
+    ).toBe(true);
+    expect(
+      shouldApplyDockerGpuPatch(
+        { sandboxGpuEnabled: true, hostGpuPlatform: "jetson" },
+        { env: { NEMOCLAW_DOCKER_GPU_PATCH: "0" }, platform: "linux", dockerDriverGateway: true },
       ),
     ).toBe(false);
   });

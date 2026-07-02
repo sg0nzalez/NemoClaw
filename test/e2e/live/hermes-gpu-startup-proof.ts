@@ -18,6 +18,7 @@ export const HERMES_GPU_EXTRA_PLACEHOLDER_KEYS = [
 
 interface HermesGpuStartupProofOptions {
   env: NodeJS.ProcessEnv;
+  gpuRoute: "legacy-patch" | "native-openshell";
   host: HostCliClient;
   install: Pick<ShellProbeResult, "stdout" | "stderr">;
   sandbox: SandboxClient;
@@ -27,20 +28,32 @@ interface HermesGpuStartupProofOptions {
 
 export async function assertHermesGpuStartupProof({
   env,
+  gpuRoute,
   host,
   install,
   sandbox,
   sandboxName,
   status,
 }: HermesGpuStartupProofOptions): Promise<void> {
-  expect(resultText(install)).toContain(
-    "Recreating OpenShell Docker sandbox container with NVIDIA GPU access",
-  );
-  expect(resultText(install)).toContain("Docker GPU mode selected:");
-  expect(resultText(status)).toMatch(/Phase:\s*Ready/i);
-  expect(resultText(status)).toContain("Sandbox GPU: enabled");
-  expect(resultText(status)).toContain("CUDA verified");
-  expect(resultText(status)).not.toMatch(/last CUDA proof failed|CUDA unverified/i);
+  if (gpuRoute === "legacy-patch") {
+    expect(resultText(install)).toContain(
+      "Recreating OpenShell Docker sandbox container with NVIDIA GPU access",
+    );
+    expect(resultText(install)).toContain("Docker GPU mode selected:");
+  } else {
+    expect(resultText(install)).toContain(
+      "Direct sandbox GPU enabled; allowing OpenShell GPU policy enrichment.",
+    );
+    expect(resultText(install)).not.toContain(
+      "Recreating OpenShell Docker sandbox container with NVIDIA GPU access",
+    );
+    expect(resultText(install)).not.toContain("Docker GPU mode selected:");
+  }
+  const plainStatus = resultText(status).replace(/\x1b\[[0-9;]*m/gu, "");
+  expect(plainStatus).toMatch(/Phase:\s*Ready/i);
+  expect(plainStatus).toContain("Sandbox GPU: enabled");
+  expect(plainStatus).toContain("CUDA verified");
+  expect(plainStatus).not.toMatch(/last CUDA proof failed|CUDA unverified/i);
 
   const openshellState = await sandbox.openshell(["sandbox", "get", sandboxName], {
     artifactName: "phase-4-openshell-sandbox-ready-gpu-startup",
@@ -167,6 +180,35 @@ PY`),
   ).toHaveLength(1);
   const [containerId = ""] = containerRows[0].split(/\s+/, 1);
   expect(containerId).not.toBe("");
+
+  const dockerCommandBoundary = await host.command(
+    "bash",
+    [
+      "-lc",
+      String.raw`docker inspect "$1" | python3 -c 'import json, sys; config=json.load(sys.stdin)[0]["Config"]; env=dict(item.split("=", 1) for item in (config.get("Env") or []) if "=" in item); command=env.get("OPENSHELL_SANDBOX_COMMAND", ""); tokens=command.split(); print(json.dumps({"cmd": config.get("Cmd"), "entrypoint": config.get("Entrypoint"), "has_openshell_sandbox_command": bool(command), "command_is_sleep_infinity": tokens == ["sleep", "infinity"], "command_ends_with_nemoclaw_start": bool(tokens) and tokens[-1] in ("nemoclaw-start", "/usr/local/bin/nemoclaw-start")}))'`,
+      "hermes-gpu-command-boundary",
+      containerId,
+    ],
+    {
+      artifactName: "phase-4-gpu-startup-docker-command-boundary",
+      env: buildAvailabilityProbeEnv(),
+      timeoutMs: 30_000,
+    },
+  );
+  expect(dockerCommandBoundary.exitCode, resultText(dockerCommandBoundary)).toBe(0);
+  const commandBoundary = JSON.parse(dockerCommandBoundary.stdout);
+  expect([null, []]).toContainEqual(commandBoundary.cmd);
+  expect(commandBoundary).toMatchObject({
+    entrypoint: ["/opt/openshell/bin/openshell-sandbox"],
+    has_openshell_sandbox_command: true,
+  });
+  if (gpuRoute === "legacy-patch") {
+    expect(commandBoundary.command_ends_with_nemoclaw_start).toBe(true);
+    expect(commandBoundary.command_is_sleep_infinity).toBe(false);
+  } else {
+    expect(commandBoundary.command_is_sleep_infinity).toBe(true);
+    expect(commandBoundary.command_ends_with_nemoclaw_start).toBe(false);
+  }
 
   const containerState = await host.command(
     "docker",

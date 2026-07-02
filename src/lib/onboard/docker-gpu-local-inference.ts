@@ -32,6 +32,7 @@ const SANDBOX_RUNTIME_INFERENCE_ENDPOINT = "https://inference.local/v1/models";
 type DockerGpuLocalInferenceConfig = {
   sandboxGpuEnabled: boolean;
   sandboxGpuDevice?: string | null;
+  hostGpuPlatform?: string | null;
   // Written back by `verifyGpuSandboxAfterReady` with the CUDA-usability proof
   // result so the registry/`status` can distinguish a configured GPU from a
   // proven-usable one (#4231).

@@ -28,7 +28,8 @@ describe("Docker GPU pre-rollback diagnostics (#6110)", () => {
   it("captures the failed clone state, process topology, and logs before rollback", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-gpu-pre-rollback-"));
-    const dockerCapture = vi.fn((args: readonly string[]) => {
+    const secretCanary = "pre-rollback-secret-canary-value";
+    const dockerCapture = vi.fn((args: readonly string[], _options?: Record<string, unknown>) => {
       if (args[0] === "ps") return "new-container-id\n";
       if (args[0] === "top" && args[1] === "new-container-id") {
         return "USER PID PPID STAT COMMAND\nsandbox 42 1 S nemoclaw-start\n";
@@ -40,7 +41,18 @@ describe("Docker GPU pre-rollback diagnostics (#6110)", () => {
         return JSON.stringify([
           {
             Id: "new-container-id",
-            Config: { Image: "openshell/sandbox:test", Env: [] },
+            Name: "/openshell-alpha",
+            Config: {
+              Image: "openshell/sandbox:test",
+              Cmd: null,
+              Env: [
+                `OPENSHELL_SANDBOX_COMMAND=env NEMOCLAW_EXTRA_PLACEHOLDER_KEYS=CUSTOM_PROVIDER_CREDENTIAL CUSTOM_PROVIDER_CREDENTIAL=${secretCanary} nemoclaw-start`,
+              ],
+              Labels: {
+                "openshell.ai/sandbox-name": "alpha",
+                "untrusted.secret": secretCanary,
+              },
+            },
             HostConfig: { NetworkMode: "openshell-docker" },
             NetworkSettings: { Networks: { "openshell-docker": {} } },
           },
@@ -51,14 +63,14 @@ describe("Docker GPU pre-rollback diagnostics (#6110)", () => {
     const runCaptureOpenshell = vi.fn((args: string[]) => {
       if (args[0] === "sandbox" && args[1] === "get") return "Phase: Error\n";
       if (args[0] === "sandbox" && args[1] === "list") return "alpha  Error\n";
-      return "gateway reconnect log\n";
+      return `gateway reconnect log ${secretCanary}\n`;
     });
 
     try {
       const diagnostics = captureDockerGpuPreRollbackDiagnostics("alpha", patchResult(), {
         dockerCapture,
         dockerLogs: vi.fn((target: string) =>
-          target === "new-container-id" ? "failed clone log\n" : "",
+          target === "new-container-id" ? `failed clone log ${secretCanary}\n` : "",
         ),
         homedir: () => tmpDir,
         now: () => new Date("2026-07-01T23:00:00Z"),
@@ -71,11 +83,32 @@ describe("Docker GPU pre-rollback diagnostics (#6110)", () => {
       ).toContain("nemoclaw-start");
       expect(
         fs.readFileSync(path.join(diagnostics?.dir ?? "", "docker-logs.txt"), "utf-8"),
-      ).toContain("failed clone log");
-      expect(dockerCapture).toHaveBeenCalledWith(
-        ["top", "new-container-id", "-eo", "user,pid,ppid,stat,args"],
-        expect.objectContaining({ ignoreError: true }),
+      ).toContain("failed clone log <REDACTED>");
+      const inspect = JSON.parse(
+        fs.readFileSync(path.join(diagnostics?.dir ?? "", "docker-inspect.json"), "utf-8"),
       );
+      expect(inspect[0]).toMatchObject({
+        Id: "new-container-id",
+        Config: {
+          Image: "openshell/sandbox:test",
+          Cmd: null,
+          Env: ["OPENSHELL_SANDBOX_COMMAND=<REDACTED>"],
+        },
+        HostConfig: { NetworkMode: "openshell-docker" },
+      });
+      const diagnosticContents = fs
+        .readdirSync(diagnostics?.dir ?? "")
+        .map((name) => fs.readFileSync(path.join(diagnostics?.dir ?? "", name), "utf-8"))
+        .join("\n");
+      expect(diagnosticContents).not.toContain(secretCanary);
+      expect(diagnosticContents).not.toContain("untrusted.secret");
+      expect(dockerCapture).toHaveBeenCalledWith(
+        ["top", "new-container-id", "-eo", "user,pid,ppid,stat,comm"],
+        expect.objectContaining({ ignoreError: true, timeout: expect.any(Number) }),
+      );
+      for (const [, options] of dockerCapture.mock.calls) {
+        expect(Number(options?.timeout)).toBeLessThanOrEqual(2_000);
+      }
       expect(console.error).toHaveBeenCalledWith(
         expect.stringContaining("Pre-rollback diagnostics saved:"),
       );

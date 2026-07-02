@@ -1972,7 +1972,16 @@ async function startGatewayWithOptions(
       exitOnFailure,
       skipSandboxBridgeReachability:
         gpuPassthrough &&
-        process.env.NEMOCLAW_DOCKER_GPU_PATCH !== "0" &&
+        dockerGpuPatch.shouldApplyDockerGpuPatch(
+          {
+            sandboxGpuEnabled: true,
+            hostGpuPlatform: _gpu?.platform ?? null,
+          },
+          {
+            dockerDriverGateway: true,
+            dockerDesktopWsl: dockerGpuSandboxCreate.isDockerDesktopWslRuntime(),
+          },
+        ) &&
         dockerGpuPatch.getDockerGpuPatchNetworkMode(process.env) === "host",
     });
   }

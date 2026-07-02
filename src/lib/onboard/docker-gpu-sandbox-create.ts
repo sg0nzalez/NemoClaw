@@ -11,7 +11,6 @@ import type {
   DockerGpuPatchResult,
 } from "./docker-gpu-patch";
 import {
-  applyDockerGpuPatchOrExit,
   findOpenShellDockerSandboxContainerIds,
   getDockerGpuSupervisorReconnectTimeoutSecs,
   printDockerGpuPatchFailureAndExit,
@@ -185,7 +184,17 @@ export function createDockerGpuSandboxCreatePatch(
 
     ensureApplied() {
       if (!options.enabled || result) return;
-      result = applyDockerGpuPatchOrExit(applyOptions, options.deps);
+      console.log("  Recreating OpenShell Docker sandbox container with NVIDIA GPU access...");
+      try {
+        result = recreatePatch({ ...applyOptions, waitForSupervisor: false }, options.deps);
+        needsSupervisorWait = true;
+        console.log(`  ✓ Docker GPU mode selected: ${result.mode.label}`);
+      } catch (error) {
+        onPatchFailureExit(options.sandboxName, error, {
+          runCaptureOpenshell: options.deps.runCaptureOpenshell,
+          dockerCapture: options.deps.dockerCapture,
+        });
+      }
     },
 
     waitForSupervisorReconnectIfNeeded() {
@@ -326,12 +335,14 @@ export function shouldUseDockerGpuPatchForCreate(
   options: {
     dockerDriverGateway: boolean;
     dockerDesktopWsl?: boolean;
+    platform?: NodeJS.Platform;
     log?: (message: string) => void;
   },
 ): boolean {
   const enabled = shouldApplyDockerGpuPatch(config, {
     dockerDriverGateway: options.dockerDriverGateway,
     dockerDesktopWsl: options.dockerDesktopWsl,
+    platform: options.platform,
     log: options.log,
   });
   if (enabled) {
@@ -350,6 +361,7 @@ export function resolveDockerGpuSandboxCreatePlan(
     dockerDriverGateway: boolean;
     dockerDesktopWsl?: boolean;
     detectDockerDesktopWsl?: () => boolean;
+    platform?: NodeJS.Platform;
   },
 ): DockerGpuSandboxCreatePlan {
   const dockerDesktopWsl =
@@ -357,6 +369,7 @@ export function resolveDockerGpuSandboxCreatePlan(
   const useDockerGpuPatch = shouldUseDockerGpuPatchForCreate(config, {
     dockerDriverGateway: options.dockerDriverGateway,
     dockerDesktopWsl,
+    platform: options.platform,
   });
   const logMessage = config.sandboxGpuEnabled
     ? useDockerGpuPatch

@@ -68,7 +68,6 @@ export function validateHermesGpuStartupWorkflowBoundary(
     E2E_JOB: "1",
     E2E_TARGET_ID: JOB_NAME,
     NEMOCLAW_AGENT: "hermes",
-    NEMOCLAW_DOCKER_GPU_PATCH: "1",
     NEMOCLAW_RUN_LIVE_E2E: "1",
     NEMOCLAW_SANDBOX_GPU: "1",
     NEMOCLAW_SANDBOX_NAME: "e2e-hermes-gpu-startup",
@@ -77,6 +76,11 @@ export function validateHermesGpuStartupWorkflowBoundary(
     if (jobEnv[name] !== expected) {
       errors.push(`${JOB_NAME} job must set ${name}=${expected}`);
     }
+  }
+  if (Object.hasOwn(jobEnv, "NEMOCLAW_DOCKER_GPU_PATCH")) {
+    errors.push(
+      `${JOB_NAME} job must leave NEMOCLAW_DOCKER_GPU_PATCH unset to exercise auto routing`,
+    );
   }
   for (const name of HOSTED_PROVIDER_ENV_NAMES) {
     if (Object.hasOwn(jobEnv, name)) {

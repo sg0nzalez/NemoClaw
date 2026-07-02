@@ -538,7 +538,7 @@ export function buildDockerGpuModeCandidates(
 }
 
 export function shouldApplyDockerGpuPatch(
-  config: { sandboxGpuEnabled: boolean },
+  config: { sandboxGpuEnabled: boolean; hostGpuPlatform?: string | null },
   options: {
     env?: NodeJS.ProcessEnv;
     platform?: NodeJS.Platform;
@@ -557,7 +557,10 @@ export function shouldApplyDockerGpuPatch(
   ) {
     return false;
   }
-  const optedOut = String(env.NEMOCLAW_DOCKER_GPU_PATCH || "").trim() === "0";
+  const control = String(env.NEMOCLAW_DOCKER_GPU_PATCH || "")
+    .trim()
+    .toLowerCase();
+  const optedOut = control === "0";
   if (optedOut && dockerDesktopWsl) {
     const log = options.log ?? ((message: string) => console.warn(message));
     log(
@@ -566,7 +569,12 @@ export function shouldApplyDockerGpuPatch(
     log("  Skip GPU passthrough entirely with --no-gpu or NEMOCLAW_SANDBOX_GPU=0.");
     return true;
   }
-  return !optedOut;
+  if (dockerDesktopWsl) return true;
+  if (config.hostGpuPlatform === "jetson") return !optedOut;
+  // OpenShell 0.0.71 natively injects CDI devices for ordinary native Linux.
+  // Keep the container-swap path as an explicit compatibility control while
+  // WSL and Jetson retain the legacy defaults they still require.
+  return control === "1";
 }
 
 export function buildDockerGpuCloneRunOptions(
@@ -1321,7 +1329,8 @@ export function printDockerGpuPatchFailureAndExit(
   }
   console.error("  Escape hatches:");
   console.error(
-    "    NEMOCLAW_DOCKER_GPU_PATCH=0  skip this Docker GPU patch (Linux native Docker only; ignored on Docker Desktop WSL where the patch is required).",
+    "    NEMOCLAW_DOCKER_GPU_PATCH=1  force the legacy Docker GPU container-swap path.",
+    "    NEMOCLAW_DOCKER_GPU_PATCH=0  use native OpenShell GPU injection (ignored on Docker Desktop WSL; Jetson also defaults to the compatibility path).",
   );
   console.error(
     "    NEMOCLAW_SANDBOX_GPU=0      skip GPU passthrough entirely (or rerun with --no-gpu).",
