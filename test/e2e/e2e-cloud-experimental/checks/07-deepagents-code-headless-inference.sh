@@ -44,34 +44,22 @@ sandbox_login_exec() {
     HOME=/sandbox bash -lc "$1" 2>&1
 }
 
-sandbox_login_proxy_contract() {
-  # This command is evaluated by the login shell inside the sandbox.
-  # shellcheck disable=SC2016
-  sandbox_login_exec '
-set -euo pipefail
-contract_fail() {
-  printf "%s\n" "NEMOCLAW_DCODE_PROXY_ENV_FAIL:$1"
-  exit 1
+sandbox_direct_dcode() {
+  openshell sandbox exec --name "$SANDBOX_NAME" --timeout "$HEADLESS_TIMEOUT" -- dcode "$@" 2>&1
 }
-[ "${HOME:-}" = /sandbox ] || contract_fail home
-proxy_url="${HTTP_PROXY:-}"
-case "$proxy_url" in
-  http://*:* ) ;;
-  *) contract_fail proxy-shape ;;
-esac
-case "$proxy_url" in
-  *"@"*) contract_fail proxy-credentials ;;
-esac
-[ "$proxy_url" = "${HTTPS_PROXY:-}" ] || contract_fail https-proxy
-[ "$proxy_url" = "${http_proxy:-}" ] || contract_fail lower-http-proxy
-[ "$proxy_url" = "${https_proxy:-}" ] || contract_fail lower-https-proxy
-proxy_host="${proxy_url#http://}"
-proxy_host="${proxy_host%:*}"
-expected_no_proxy="localhost,127.0.0.1,::1,${proxy_host}"
-[ "${NO_PROXY:-}" = "$expected_no_proxy" ] || contract_fail no-proxy
-[ "${no_proxy:-}" = "$expected_no_proxy" ] || contract_fail lower-no-proxy
-printf "%s\n" "NEMOCLAW_DCODE_PROXY_ENV_OK"
-'
+
+nemoclaw_connect_probe() {
+  "${NEMOCLAW_CLI_BIN:-nemoclaw}" "$SANDBOX_NAME" connect --probe-only 2>&1
+}
+
+sandbox_login_proxy_contract() {
+  # OpenShell rejects CR/LF in any exec argv element, so keep this remote login
+  # command on one physical line. inference.local is intentionally absent from
+  # NO_PROXY: the managed proxy, not direct DNS/hosts resolution, routes it.
+  local contract_command
+  # shellcheck disable=SC2016
+  contract_command='set -euo pipefail; contract_fail() { printf "%s\n" "NEMOCLAW_DCODE_PROXY_ENV_FAIL:$1"; exit 1; }; [ "${HOME:-}" = /sandbox ] || contract_fail home; proxy_url="${HTTP_PROXY:-}"; case "$proxy_url" in http://*:*) ;; *) contract_fail proxy-shape ;; esac; case "$proxy_url" in *"@"*) contract_fail proxy-credentials ;; esac; [ "$proxy_url" = "${HTTPS_PROXY:-}" ] || contract_fail https-proxy; [ "$proxy_url" = "${http_proxy:-}" ] || contract_fail lower-http-proxy; [ "$proxy_url" = "${https_proxy:-}" ] || contract_fail lower-https-proxy; proxy_host="${proxy_url#http://}"; proxy_host="${proxy_host%:*}"; expected_no_proxy="localhost,127.0.0.1,::1,${proxy_host}"; [ "${NO_PROXY:-}" = "$expected_no_proxy" ] || contract_fail no-proxy; [ "${no_proxy:-}" = "$expected_no_proxy" ] || contract_fail lower-no-proxy; printf "%s\n" "NEMOCLAW_DCODE_PROXY_ENV_OK"'
+  sandbox_login_exec "$contract_command"
 }
 
 sandbox_artifact_scan_command() {
@@ -228,13 +216,36 @@ main() {
     fail_test "login-shell dcode -n did not exit 0 with PONG (${classification}, exit ${dcode_exit:-unknown})"
   fi
 
-  # 5. No real secrets in managed config, runtime env files, artifacts, logs, or captured output.
+  # 5. The public direct-exec path reaches inference without shell startup files.
+  if direct_output="$(sandbox_direct_dcode -n "Reply with exactly one word: PONG")"; then
+    direct_exit=0
+  else
+    direct_exit=$?
+  fi
+  direct_headless_output="${direct_output}
+DCODE_EXIT:${direct_exit}"
+  if direct_classification="$(classify_headless_output "$direct_exit" "$direct_headless_output")"; then
+    pass "direct-exec dcode -n reached managed inference with ${direct_classification} (exit ${direct_exit})"
+  else
+    fail_test "direct-exec dcode -n did not exit 0 with PONG (${direct_classification}, exit ${direct_exit})"
+  fi
+
+  # 6. The user-facing connect readiness path accepts the same managed route.
+  if connect_output="$(nemoclaw_connect_probe)"; then
+    pass "nemoclaw connect --probe-only accepted the managed inference route"
+  else
+    fail_test "nemoclaw connect --probe-only rejected the managed inference route"
+  fi
+
+  # 7. No real secrets in managed config, runtime env files, artifacts, logs, or captured output.
   leak_scan="$(sandbox_exec "$(sandbox_artifact_scan_command)" || true)"
   combined="${config_output}
 ${leak_scan}
 ${proxy_contract_output}
 ${route_output}
-${headless_output}"
+${headless_output}
+${direct_headless_output}
+${connect_output}"
   if printf '%s' "$combined" | contains_secret; then
     fail_test "secret-shaped value found in config/env/output (redacted from log)"
   else

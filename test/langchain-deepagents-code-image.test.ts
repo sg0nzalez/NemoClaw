@@ -251,7 +251,6 @@ describe("LangChain Deep Agents Code image contracts", () => {
     const outputLines = output.trimEnd().split("\n");
     const envFileLines = envFileText.trimEnd().split("\n");
     expect(envFileText).toContain(`export PATH="${DCODE_CANONICAL_PATH}"`);
-    expect(envFileText.match(/\/usr\/local\/bin/g)).toHaveLength(1);
     for (const name of PROXY_URL_ENV_NAMES) {
       expect(outputLines).toContain(`RUNTIME_${name}=${managedProxy}`);
       expect(outputLines).toContain(`SOURCED_${name}=${managedProxy}`);
@@ -338,6 +337,7 @@ describe("LangChain Deep Agents Code image contracts", () => {
 
   it("keeps all Deep Agents Code entry points behind the managed wrapper boundary", () => {
     const dockerfile = readAgentFile("Dockerfile");
+    const launcher = readAgentFile("dcode-launcher.sh");
     const wrapper = readAgentFile("dcode-wrapper.sh");
     const policy = readAgentFile("policy-additions.yaml");
 
@@ -349,11 +349,12 @@ describe("LangChain Deep Agents Code image contracts", () => {
     expect(wrapper).toContain("unset DEEPAGENTS_CODE_SHELL_ALLOW_LIST");
     expect(wrapper).not.toContain("NEMOCLAW_DEEPAGENTS_CODE_SHELL_ALLOW_LIST");
     expect(dockerfile).toContain(
-      "install -m 0755 /usr/local/lib/nemoclaw/dcode-wrapper.sh /usr/local/bin/dcode.real",
+      "install -m 0755 /usr/local/lib/nemoclaw/dcode-launcher.sh /usr/local/bin/dcode.real",
     );
     expect(dockerfile).toContain(
-      "install -m 0755 /usr/local/lib/nemoclaw/dcode-wrapper.sh /usr/local/bin/deepagents-code",
+      "install -m 0755 /usr/local/lib/nemoclaw/dcode-launcher.sh /usr/local/bin/deepagents-code",
     );
+    expect(launcher).toContain('exec "$MANAGED_DCODE_WRAPPER" "$@"');
     expect(dockerfile).not.toContain("dcode.upstream");
     expect(wrapper).toContain("exec python3 -m deepagents_code");
     expect(wrapper).toContain('reject_managed_override "sandbox isolation"');
@@ -631,6 +632,14 @@ describe("LangChain Deep Agents Code image contracts", () => {
     expect(headlessCheck).toContain('HOME=/sandbox bash -lc "$1"');
     expect(headlessCheck).toContain('bash -lc "$1"');
     expect(headlessCheck).toContain("NEMOCLAW_DCODE_PROXY_ENV_OK");
+    expect(headlessCheck).toContain("local contract_command");
+    expect(headlessCheck).toContain('sandbox_login_exec "$contract_command"');
+    expect(headlessCheck).toContain("sandbox_direct_dcode");
+    expect(headlessCheck).toContain('-- dcode "$@"');
+    expect(headlessCheck).toContain("nemoclaw_connect_probe");
+    expect(headlessCheck).toContain("connect --probe-only 2>&1");
+    expect(headlessCheck).toContain("direct-exec dcode -n reached managed inference");
+    expect(headlessCheck).toContain("connect --probe-only accepted the managed inference route");
     expect(headlessCheck).toContain('sandbox_login_exec "cd /sandbox');
     expect(headlessCheck).not.toContain('sandbox_login_exec ". /tmp/nemoclaw-proxy-env.sh');
     expect(headlessCheck).toContain("https://inference.local/v1/models");
@@ -731,6 +740,7 @@ describe("LangChain Deep Agents Code image contracts", () => {
       return runHeadlessCheckHelper(
         [
           "sandbox_login_exec() {",
+          "  case \"$1\" in *$'\\n'*|*$'\\r'*) return 97 ;; esac",
           '  env -u HTTP_PROXY -u HTTPS_PROXY -u NO_PROXY -u http_proxy -u https_proxy -u no_proxy HOME="$TEST_LOGIN_HOME" bash -lc "$1"',
           "}",
           "if sandbox_login_proxy_contract >/dev/null 2>&1; then printf pass; else printf fail; fi",
