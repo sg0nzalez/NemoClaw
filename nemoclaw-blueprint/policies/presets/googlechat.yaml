@@ -31,7 +31,9 @@ network_policies:
           - allow: { method: PATCH, path: "/v1/spaces/**" }
           # Delete a message: DELETE /v1/spaces/{space}/messages/{id}.
           - allow: { method: DELETE, path: "/v1/spaces/**" }
-      # Public certificates used to verify inbound Chat / add-on JWT signatures.
+      # Inbound JWT verification certs (read-only, public). GET /** not pinned:
+      # google-auth-library selects the cert URL/format by version, so pinning risks
+      # breaking inbound verification on a bundle bump. GET-only, no credential rewrite.
       - host: www.googleapis.com
         port: 443
         protocol: rest
