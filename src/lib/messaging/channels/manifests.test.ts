@@ -16,12 +16,14 @@ import type {
   ChannelInputSpec,
   ChannelManifest,
   ChannelRenderSpec,
+  MessagingAgentId,
 } from "../manifest";
 import { GOOGLECHAT_TUNNEL_AUDIENCE_GATE_HOOK_ID } from "./googlechat/hooks";
 import {
   BUILT_IN_CHANNEL_MANIFESTS,
   createBuiltInChannelManifestRegistry,
   discordManifest,
+  getBuiltInRenderedConfigParser,
   googlechatManifest,
   slackManifest,
   teamsManifest,
@@ -223,6 +225,38 @@ describe("built-in channel manifests", () => {
     expect(JSON.parse(JSON.stringify(BUILT_IN_CHANNEL_MANIFESTS))).toEqual(
       BUILT_IN_CHANNEL_MANIFESTS,
     );
+  });
+
+  it("keeps rendered config parsers aligned with built-in manifests", () => {
+    expect(
+      BUILT_IN_CHANNEL_MANIFESTS.map((manifest) => [
+        manifest.id,
+        Boolean(getBuiltInRenderedConfigParser(manifest.id)),
+      ]),
+    ).toEqual(BUILT_IN_CHANNEL_MANIFESTS.map((manifest) => [manifest.id, true]));
+  });
+
+  it("keeps rendered config parser keys limited to manifest config inputs", () => {
+    const agentIds: readonly MessagingAgentId[] = ["openclaw", "hermes"];
+    const secretLikePattern = /(?:token|secret|password|client_secret|client-secret)/i;
+    expect(
+      BUILT_IN_CHANNEL_MANIFESTS.flatMap((manifest) => {
+        const configInputIds: ReadonlySet<string> = new Set(
+          manifest.inputs.filter((input) => input.kind === "config").map((input) => input.id),
+        );
+        const parser = getBuiltInRenderedConfigParser(manifest.id);
+        return agentIds.flatMap((agentId) =>
+          (parser?.listConfigVisibilityKeys({ manifest, agentId, inputs: [] }) ?? [])
+            .filter(
+              (key) =>
+                !configInputIds.has(key.inputId) ||
+                secretLikePattern.test(key.envKey ?? "") ||
+                secretLikePattern.test(key.target),
+            )
+            .map((key) => `${manifest.id}.${agentId}.${key.inputId}:${key.envKey ?? key.target}`),
+        );
+      }),
+    ).toEqual([]);
   });
 
   it("keeps input compatibility aliases out of built-in manifests", () => {
