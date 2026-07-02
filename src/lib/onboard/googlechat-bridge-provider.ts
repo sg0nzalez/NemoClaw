@@ -184,6 +184,16 @@ export function configureGooglechatBridgeRefresh(
     return;
   }
 
+  // SECURITY (host-local, tracked upstream): OpenShell `provider refresh configure`
+  // ingests refresh material only via `--material KEY=VALUE` argv — it has no stdin,
+  // file, or env-ref transport for secret material today (openshell-cli
+  // parse_key_value_pairs stores values verbatim; the JWT strategy reads private_key
+  // from the material map). So the SA private key transits this argv. Accepted risk:
+  // it never enters the sandbox (the key-out-of-sandbox boundary holds), and the
+  // exposure is transient (this one configure call) and host-local (ps //proc/<pid>/
+  // cmdline on the trusted host that already holds the key to mint tokens). Tracked
+  // upstream to add a non-argv transport (--secret-material-file/stdin); switch to it
+  // when released — runOpenshell already supports env/stdin here.
   const result = deps.runOpenshell(
     [
       "provider",
