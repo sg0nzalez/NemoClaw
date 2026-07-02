@@ -53,15 +53,14 @@ describe("sandbox base-image warm resolution", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     dockerMocks.infoFormat.mockReturnValue("linux/amd64\n");
-    dockerMocks.imageInspectFormat.mockImplementation((format: string) => {
-      if (format !== "{{json .}}") return "";
-      return JSON.stringify({
+    dockerMocks.imageInspectFormat.mockReturnValue(
+      JSON.stringify({
         Id: IMAGE_ID,
         RepoDigests: [REF],
         Os: "linux",
         Architecture: "amd64",
-      });
-    });
+      }),
+    );
   });
 
   it("reuses locally proven RepoDigests metadata without inspecting candidates or pulling (#4680)", () => {

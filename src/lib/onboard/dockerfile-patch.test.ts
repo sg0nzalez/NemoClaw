@@ -7,6 +7,10 @@ import os from "node:os";
 import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+  parseSandboxBaseImageResolutionLabels,
+  SANDBOX_BASE_RESOLUTION_LABEL,
+} from "../sandbox-base-image";
 
 import {
   encodeDockerJsonArg,
@@ -119,7 +123,11 @@ describe("dockerfile patch helpers", () => {
     const dockerfile = fs.readFileSync(dockerfilePath, "utf8");
     expect(dockerfile).toContain('LABEL com.nvidia.nemoclaw.base-resolution-key="resolution-key"');
     const encoded = dockerfile.match(/base-resolution="([^"]+)"/)?.[1];
-    expect(JSON.parse(Buffer.from(encoded!, "base64url").toString("utf8"))).toEqual(metadata);
+    expect(
+      parseSandboxBaseImageResolutionLabels({
+        [SANDBOX_BASE_RESOLUTION_LABEL]: encoded,
+      }),
+    ).toEqual(metadata);
   });
 
   it("encodes Docker JSON ARG values as base64 JSON", () => {
