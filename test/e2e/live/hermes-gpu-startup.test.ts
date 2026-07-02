@@ -25,7 +25,8 @@ const FAKE_MODEL = "test-model";
 const EXTRA_PLACEHOLDER_TOKEN_A = "e2e-hermes-gpu-extra-telegram-token";
 const EXTRA_PLACEHOLDER_TOKEN_B = "e2e-hermes-gpu-extra-slack-token";
 const LIVE_TIMEOUT_MS = 70 * 60_000;
-const GPU_ROUTE = "native-openshell" as const;
+const FORCE_LEGACY_GPU_PATCH = process.env.NEMOCLAW_DOCKER_GPU_PATCH === "1";
+const GPU_ROUTE = FORCE_LEGACY_GPU_PATCH ? "legacy-patch" : "native-openshell";
 validateSandboxName(SANDBOX_NAME);
 
 function commandEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
@@ -39,6 +40,7 @@ function commandEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
     NEMOCLAW_SANDBOX_GPU: "1",
     NEMOCLAW_SANDBOX_NAME: SANDBOX_NAME,
     NEMOCLAW_ONBOARD_VALIDATION_TIMEOUT_SECONDS: "60",
+    ...(FORCE_LEGACY_GPU_PATCH ? { NEMOCLAW_DOCKER_GPU_PATCH: "1" } : {}),
   };
 }
 
@@ -129,7 +131,7 @@ done`;
 }
 
 test.skipIf(!shouldRunLiveE2E())(
-  "hermes-gpu-startup: native OpenShell GPU supervision reaches stable Ready state",
+  "hermes-gpu-startup: selected OpenShell GPU route reaches stable Ready state",
   { timeout: LIVE_TIMEOUT_MS },
   async ({ artifacts, cleanup, host, sandbox }) => {
     await artifacts.writeJson("target.json", {
@@ -234,16 +236,33 @@ test.skipIf(!shouldRunLiveE2E())(
       status,
     });
 
+    const fakeRequests = fake.requests();
+    const inferencePosts = fakeRequests.filter(
+      (request) =>
+        request.method === "POST" &&
+        ["/v1/chat/completions", "/chat/completions", "/v1/responses", "/responses"].includes(
+          request.path,
+        ),
+    );
+    expect(
+      inferencePosts.length,
+      `expected authenticated fake inference POST, got ${JSON.stringify(fakeRequests)}`,
+    ).toBeGreaterThan(0);
+    expect(inferencePosts.filter((request) => request.auth !== "ok")).toEqual([]);
+    expect(JSON.stringify(fakeRequests)).not.toContain(EXTRA_PLACEHOLDER_TOKEN_A);
+    expect(JSON.stringify(fakeRequests)).not.toContain(EXTRA_PLACEHOLDER_TOKEN_B);
+
     await artifacts.writeJson("target-result.json", {
       id: "hermes-gpu-startup",
       assertions: {
-        nativeOpenShellGpuSelected: true,
+        selectedGpuRouteVerified: true,
         openshellReady: true,
         sandboxCudaVerified: true,
         extraPlaceholderCommandRoundTripValid: true,
         stableSingleContainer: true,
         startupConfigHashesValid: true,
         supervisorTopologyValid: true,
+        authenticatedInferenceRequestVerified: true,
       },
     });
   },
