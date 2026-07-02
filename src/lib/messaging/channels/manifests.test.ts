@@ -267,6 +267,10 @@ describe("built-in channel manifests", () => {
       "src/lib/messaging/channels/whatsapp/manifest.ts",
       "src/lib/messaging/channels/teams/manifest.ts",
       "src/lib/messaging/channels/teams/hooks/host-forward-port-conflict.ts",
+      "src/lib/messaging/channels/googlechat/manifest.ts",
+      "src/lib/messaging/channels/googlechat/hooks/index.ts",
+      "src/lib/messaging/channels/googlechat/hooks/tunnel-audience-gate.ts",
+      "src/lib/messaging/channels/googlechat/template-resolver.ts",
       "src/lib/messaging/hooks/common/config-prompt.ts",
       "src/lib/messaging/hooks/common/token-paste.ts",
     ];
