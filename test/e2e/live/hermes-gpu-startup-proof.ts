@@ -81,28 +81,65 @@ export async function assertHermesGpuStartupProof({
     has_nemoclaw_start: false,
   });
 
+  const runningContainers = await host.command(
+    "docker",
+    [
+      "ps",
+      "--filter",
+      `label=openshell.ai/sandbox-name=${sandboxName}`,
+      "--format",
+      "{{.ID}} {{.Names}}",
+    ],
+    {
+      artifactName: "phase-4-gpu-startup-running-containers",
+      env: buildAvailabilityProbeEnv(),
+      timeoutMs: 30_000,
+    },
+  );
+  expect(runningContainers.exitCode, resultText(runningContainers)).toBe(0);
+  const containerRows = runningContainers.stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  expect(
+    containerRows,
+    `expected one running container, got ${runningContainers.stdout}`,
+  ).toHaveLength(1);
+  const [containerId = ""] = containerRows[0].split(/\s+/, 1);
+  expect(containerId).not.toBe("");
+
   const expectedExtraPlaceholderAssignment = `NEMOCLAW_EXTRA_PLACEHOLDER_KEYS=${HERMES_GPU_EXTRA_PLACEHOLDER_KEYS.join(",")}`;
-  const extraPlaceholderEnv = await sandbox.execShell(
-    sandboxName,
-    trustedSandboxShellScript(String.raw`python3 - <<'PY'
+  const extraPlaceholderEnv = await host.command(
+    "docker",
+    [
+      "exec",
+      "--user",
+      "0",
+      containerId,
+      "python3",
+      "-c",
+      String.raw`import os
 from pathlib import Path
 
 expected = ${JSON.stringify(expectedExtraPlaceholderAssignment)}.encode("utf-8")
 for proc in Path("/proc").iterdir():
-    if not proc.name.isdigit():
+    if not proc.name.isdigit() or int(proc.name) == os.getpid():
         continue
     try:
+        argv = [item.decode("utf-8", "strict") for item in (proc / "cmdline").read_bytes().split(b"\0") if item]
+        if not any(Path(item).name == "nemoclaw-start" for item in argv):
+            continue
         entries = (proc / "environ").read_bytes().split(b"\0")
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         continue
     if expected in entries:
         print(expected.decode("utf-8"))
         raise SystemExit(0)
-raise SystemExit(1)
-PY`),
+raise SystemExit(1)`,
+    ],
     {
       artifactName: "phase-4-gpu-startup-extra-placeholder-env",
-      env,
+      env: buildAvailabilityProbeEnv(),
       timeoutMs: 30_000,
     },
   );
@@ -154,33 +191,6 @@ PY`),
   );
   expect(startupConfig.exitCode, resultText(startupConfig)).toBe(0);
   expect(startupConfig.stdout.trim()).toBe("OK");
-
-  const runningContainers = await host.command(
-    "docker",
-    [
-      "ps",
-      "--filter",
-      `label=openshell.ai/sandbox-name=${sandboxName}`,
-      "--format",
-      "{{.ID}} {{.Names}}",
-    ],
-    {
-      artifactName: "phase-4-gpu-startup-running-containers",
-      env: buildAvailabilityProbeEnv(),
-      timeoutMs: 30_000,
-    },
-  );
-  expect(runningContainers.exitCode, resultText(runningContainers)).toBe(0);
-  const containerRows = runningContainers.stdout
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-  expect(
-    containerRows,
-    `expected one running container, got ${runningContainers.stdout}`,
-  ).toHaveLength(1);
-  const [containerId = ""] = containerRows[0].split(/\s+/, 1);
-  expect(containerId).not.toBe("");
 
   const dockerCommandBoundary = await host.command(
     "bash",
