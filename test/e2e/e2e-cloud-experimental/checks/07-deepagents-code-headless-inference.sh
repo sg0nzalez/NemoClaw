@@ -49,7 +49,7 @@ sandbox_direct_dcode() {
 }
 
 nemoclaw_connect_probe() {
-  "${NEMOCLAW_CLI_BIN:-nemoclaw}" "$SANDBOX_NAME" connect --probe-only 2>&1
+  "${NEMOCLAW_CLI_BIN:-${REPO:-.}/bin/nemoclaw.js}" "$SANDBOX_NAME" connect --probe-only 2>&1
 }
 
 sandbox_login_proxy_contract() {
@@ -232,9 +232,11 @@ DCODE_EXIT:${direct_exit}"
 
   # 6. The user-facing connect readiness path accepts the same managed route.
   if connect_output="$(nemoclaw_connect_probe)"; then
+    connect_exit=0
     pass "nemoclaw connect --probe-only accepted the managed inference route"
   else
-    fail_test "nemoclaw connect --probe-only rejected the managed inference route"
+    connect_exit=$?
+    fail_test "nemoclaw connect --probe-only rejected the managed inference route (exit ${connect_exit})"
   fi
 
   # 7. No real secrets in managed config, runtime env files, artifacts, logs, or captured output.

@@ -637,6 +637,7 @@ describe("LangChain Deep Agents Code image contracts", () => {
     expect(headlessCheck).toContain("sandbox_direct_dcode");
     expect(headlessCheck).toContain('-- dcode "$@"');
     expect(headlessCheck).toContain("nemoclaw_connect_probe");
+    expect(headlessCheck).toContain("${NEMOCLAW_CLI_BIN:-${REPO:-.}/bin/nemoclaw.js}");
     expect(headlessCheck).toContain("connect --probe-only 2>&1");
     expect(headlessCheck).toContain("direct-exec dcode -n reached managed inference");
     expect(headlessCheck).toContain("connect --probe-only accepted the managed inference route");
