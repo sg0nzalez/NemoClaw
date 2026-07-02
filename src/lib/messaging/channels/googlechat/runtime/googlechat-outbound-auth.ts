@@ -55,6 +55,12 @@
 // Mechanism mirrors slack-channel-guard.ts (load-time source rewrite of an
 // @openclaw/* dist module via the module loader hooks).
 
+// Test seam: the self-installing IIFE below publishes its pure source-rewrite
+// helpers here so unit tests can exercise patch / shape-drift / short-circuit
+// behavior directly. Requiring this module still installs the loader hooks, but
+// that install is inert for files outside @openclaw/googlechat.
+export const outboundAuthPatchInternals = {};
+
 (function () {
   "use strict";
 
@@ -189,6 +195,10 @@
       });
     }
   }
+
+  outboundAuthPatchInternals.patchSource = patchGooglechatOutboundAuthSource;
+  outboundAuthPatchInternals.buildShortCircuit = buildBearerShortCircuitSource;
+  outboundAuthPatchInternals.isPatchError = isGooglechatOutboundAuthPatchError;
 
   try {
     installGooglechatOutboundAuthPatch();

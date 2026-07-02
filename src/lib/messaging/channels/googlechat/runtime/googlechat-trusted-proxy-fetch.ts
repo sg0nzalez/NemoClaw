@@ -52,6 +52,12 @@
 // module loader hooks). It targets the SAME dist chunk that
 // googlechat-outbound-auth already patches, so the loader-hook coverage is proven.
 
+// Test seam: the self-installing IIFE below publishes its pure source-rewrite
+// helpers here so unit tests can exercise the anchor rewrites, drift handling, and
+// idempotency directly. Requiring this module still installs the loader hooks, but
+// that install is inert for files outside @openclaw/googlechat.
+export const trustedProxyFetchPatchInternals = {};
+
 (function () {
   "use strict";
 
@@ -207,6 +213,9 @@
       });
     }
   }
+
+  trustedProxyFetchPatchInternals.patchSource = patchTrustedProxyFetchSource;
+  trustedProxyFetchPatchInternals.isPatchError = isTrustedProxyFetchPatchError;
 
   try {
     installTrustedProxyFetchPatch();
