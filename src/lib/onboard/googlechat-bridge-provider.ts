@@ -52,7 +52,22 @@ export type GooglechatBridgeRefreshDeps = {
   runOpenshell: RunOpenshell;
   redact: (input: string) => string;
   getCredential: (envKey: string) => string | null;
+  env?: NodeJS.ProcessEnv | Record<string, string | undefined>;
+  normalizeCredentialValue?: (value: unknown) => string;
   log?: (message?: string) => void;
+};
+
+// Result of gateway-refresh configuration. `ok:false` when a bridge token def is
+// present (Google Chat active) but minting could not be configured, so the caller
+// fails onboarding instead of leaving the channel silently unable to reply.
+export type GooglechatBridgeRefreshResult = { ok: boolean; reason?: string };
+
+// Credentials the service-account resolver consults, in the same order the rest
+// of onboarding uses (credential store first, then the injected env map).
+type ServiceAccountResolveDeps = {
+  getCredential: (envKey: string) => string | null;
+  env?: NodeJS.ProcessEnv | Record<string, string | undefined>;
+  normalizeCredentialValue?: (value: unknown) => string;
 };
 
 function bufferOrStringToText(value: string | Buffer | null | undefined): string {
@@ -64,6 +79,23 @@ function bufferOrStringToText(value: string | Buffer | null | undefined): string
 
 export function googlechatBridgeProfilePath(root: string): string {
   return path.join(root, "nemoclaw-blueprint", "provider-profiles", "google-chat-bridge.yaml");
+}
+
+/**
+ * Resolve the Google Chat service-account JSON with the same order the rest of
+ * onboarding uses (mirrors the Brave key resolution in messaging-prep): the
+ * credential store first, then the injected env map. Using `getCredential` alone
+ * misses setups where the value arrives through the passed-in env (e.g.
+ * non-interactive runs), which would enable the channel with no bridge provider.
+ */
+export function resolveGooglechatServiceAccount(deps: ServiceAccountResolveDeps): string | null {
+  const fromCredential = deps.getCredential(GOOGLECHAT_SERVICE_ACCOUNT_ENV);
+  if (fromCredential) return fromCredential;
+  if (deps.env && deps.normalizeCredentialValue) {
+    const fromEnv = deps.normalizeCredentialValue(deps.env[GOOGLECHAT_SERVICE_ACCOUNT_ENV]);
+    if (fromEnv) return fromEnv;
+  }
+  return null;
 }
 
 /**
@@ -80,6 +112,8 @@ export function googlechatBridgeProfilePath(root: string): string {
 export function maybeGooglechatBridgeTokenDef(input: {
   sandboxName: string;
   getCredential: (envKey: string) => string | null;
+  env?: NodeJS.ProcessEnv | Record<string, string | undefined>;
+  normalizeCredentialValue?: (value: unknown) => string;
   enabledChannels: readonly string[] | null;
   disabledChannelNames: ReadonlySet<string>;
 }): { name: string; envKey: string; token: string; providerType: string } | null {
@@ -87,7 +121,7 @@ export function maybeGooglechatBridgeTokenDef(input: {
   if (input.enabledChannels != null && !input.enabledChannels.includes(GOOGLECHAT_CHANNEL)) {
     return null;
   }
-  const serviceAccount = input.getCredential(GOOGLECHAT_SERVICE_ACCOUNT_ENV);
+  const serviceAccount = resolveGooglechatServiceAccount(input);
   if (!serviceAccount) return null;
   return {
     name: `${input.sandboxName}-googlechat-bridge`,
@@ -138,26 +172,28 @@ export function ensureGooglechatBridgeProfile(
  * is created. The service-account private key is passed as refresh material and
  * stays gateway-side — it is never written into the sandbox.
  *
- * Best-effort: a failure here means outbound replies will not authenticate
- * until fixed, but it must not abort onboarding of other channels. Inbound
+ * Fail-closed: when a bridge token def is present (Google Chat active) and
+ * minting cannot be configured, returns { ok: false } so the caller aborts
+ * onboarding rather than leaving the channel able to receive but not reply.
+ * Returns { ok: true } as a no-op when no bridge token def is present. Inbound
  * webhook verification is unaffected. The private key is never logged.
  */
 export function configureGooglechatBridgeRefresh(
   tokenDefs: readonly TokenDefShape[],
   deps: GooglechatBridgeRefreshDeps,
-): void {
+): GooglechatBridgeRefreshResult {
   const bridge = tokenDefs.find(
     ({ providerType, token }) => providerType === GOOGLECHAT_BRIDGE_PROFILE_ID && Boolean(token),
   );
-  if (!bridge) return;
+  if (!bridge) return { ok: true };
 
   const warn = deps.log ?? console.error;
-  const serviceAccount = deps.getCredential(GOOGLECHAT_SERVICE_ACCOUNT_ENV);
+  const serviceAccount = resolveGooglechatServiceAccount(deps);
   if (!serviceAccount) {
     warn(
       "\n  ✗ Google Chat bridge: service account JSON unavailable; cannot configure gateway token minting.",
     );
-    return;
+    return { ok: false, reason: "service account JSON unavailable" };
   }
 
   let clientEmail: unknown;
@@ -170,7 +206,7 @@ export function configureGooglechatBridgeRefresh(
     warn(
       "\n  ✗ Google Chat bridge: service account JSON could not be parsed; cannot configure gateway token minting.",
     );
-    return;
+    return { ok: false, reason: "service account JSON could not be parsed" };
   }
   if (
     typeof clientEmail !== "string" ||
@@ -181,7 +217,7 @@ export function configureGooglechatBridgeRefresh(
     warn(
       "\n  ✗ Google Chat bridge: service account JSON missing client_email/private_key; cannot configure gateway token minting.",
     );
-    return;
+    return { ok: false, reason: "service account JSON missing client_email/private_key" };
   }
 
   // SECURITY (host-local, tracked upstream): OpenShell `provider refresh configure`
@@ -215,7 +251,7 @@ export function configureGooglechatBridgeRefresh(
     ],
     { ignoreError: true, stdio: ["ignore", "pipe", "pipe"] },
   );
-  if (result.status === 0) return;
+  if (result.status === 0) return { ok: true };
 
   // Redact before logging — never echo the private key material.
   const diagnostic = compactText(
@@ -224,4 +260,8 @@ export function configureGooglechatBridgeRefresh(
   warn(`\n  ✗ Google Chat bridge: failed to configure gateway token minting for '${bridge.name}'.`);
   if (diagnostic) warn(`    ${diagnostic.slice(0, 500)}`);
   warn("    Outbound Google Chat replies will not authenticate until this is resolved.");
+  return {
+    ok: false,
+    reason: diagnostic || `provider refresh configure exited with status ${result.status}`,
+  };
 }

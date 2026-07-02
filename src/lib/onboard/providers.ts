@@ -482,11 +482,25 @@ function upsertMessagingProviders(tokenDefs, _runOpenshell, options = {}) {
   // the provider exists (best-effort; self-gates without a bridge token def).
   // The service-account private key is passed as refresh material and stays
   // gateway-side — never written into the sandbox.
-  googlechatBridgeProvider.configureGooglechatBridgeRefresh(tokenDefs, {
+  const refreshResult = googlechatBridgeProvider.configureGooglechatBridgeRefresh(tokenDefs, {
     runOpenshell: _runOpenshell,
     redact,
     getCredential,
+    env: process.env,
+    normalizeCredentialValue,
   });
+  // Fail-closed: an active Google Chat channel whose gateway token minting was
+  // not configured can receive webhooks but cannot authenticate outbound replies.
+  // Surface it instead of reporting a fully-configured channel (bestEffort/rollback
+  // paths report residual work by throwing; the normal path exits like a failed
+  // provider upsert above).
+  if (refreshResult && !refreshResult.ok) {
+    if (options.bestEffort) {
+      throw new Error("Failed to configure Google Chat gateway token minting.");
+    }
+    console.error("\n  ✗ Google Chat gateway token minting was not configured; aborting.");
+    process.exit(1);
+  }
   return upserted;
 }
 

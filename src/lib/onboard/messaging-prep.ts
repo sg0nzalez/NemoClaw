@@ -113,6 +113,8 @@ export function prepareCreateSandboxMessaging(
   const googlechatBridgeTokenDef = googlechatBridge.maybeGooglechatBridgeTokenDef({
     sandboxName: input.sandboxName,
     getCredential: input.getCredential,
+    env: input.env,
+    normalizeCredentialValue: input.normalizeCredentialValue,
     enabledChannels: input.enabledChannels,
     disabledChannelNames,
   });
