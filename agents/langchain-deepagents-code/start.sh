@@ -13,12 +13,60 @@ export DEEPAGENTS_CODE_AUTO_UPDATE=0
 export DEEPAGENTS_CODE_OPENAI_API_KEY="${DEEPAGENTS_CODE_OPENAI_API_KEY:-nemoclaw-managed-inference}"
 export OPENAI_BASE_URL="${OPENAI_BASE_URL:-https://inference.local/v1}"
 
-# OpenShell's sandbox-create environment may contain a host/corporate proxy and
-# a NO_PROXY seed that includes inference.local. That seed is only for
-# host-side proxy chaining. Runtime traffic must use OpenShell's managed proxy,
-# and inference.local must stay on the proxy path instead of resolving via DNS.
-PROXY_HOST="${NEMOCLAW_PROXY_HOST:-10.200.0.1}"
-PROXY_PORT="${NEMOCLAW_PROXY_PORT:-3128}"
+# Invalid state: OpenShell's sandbox-create environment contains the host proxy
+# seed, including NO_PROXY=inference.local, so dcode bypasses the managed proxy
+# and attempts direct DNS resolution that is not part of the dcode contract.
+# Source boundary: that seed remains correct for OpenShell's host-side proxy
+# chaining; this agent-owned runtime boundary is the first safe place to replace
+# it without changing OpenClaw, Hermes, or global OpenShell route provisioning.
+# Source-fix constraint: inference.local is an L7 managed-proxy route, so adding
+# sandbox DNS/hosts state or changing the shared seed would widen this fix and
+# break the host chaining contract. Direct DNS/hosts resolution is not required.
+# Regression: focused tests and the live check cover login-shell, direct dcode,
+# and connect paths when the direct DNS/hosts lookup is absent.
+# Removal condition: remove this normalization only when OpenShell guarantees
+# the managed proxy and normalized NO_PROXY for every sandbox exec/login process,
+# or when dcode no longer uses inference.local.
+readonly MANAGED_PROXY_HOST_FILE="/usr/local/share/nemoclaw/dcode-proxy-host"
+readonly MANAGED_PROXY_PORT_FILE="/usr/local/share/nemoclaw/dcode-proxy-port"
+readonly MANAGED_PROXY_OWNER_UID=0
+
+managed_proxy_file_metadata() {
+  local file="$1"
+  local metadata
+  if metadata="$(stat -c '%u:%a' "$file" 2>/dev/null)"; then
+    printf '%s' "$metadata"
+  else
+    stat -f '%u:%Lp' "$file" 2>/dev/null
+  fi
+}
+
+read_managed_proxy_value() {
+  local file="$1"
+  local name="$2"
+  local metadata
+  local value
+  if [ ! -f "$file" ] || [ -L "$file" ] || [ ! -r "$file" ]; then
+    printf 'Missing or unsafe trusted managed proxy %s file.\n' "$name" >&2
+    return 1
+  fi
+  metadata="$(managed_proxy_file_metadata "$file")" || {
+    printf 'Cannot inspect trusted managed proxy %s file.\n' "$name" >&2
+    return 1
+  }
+  if [ "$metadata" != "${MANAGED_PROXY_OWNER_UID}:444" ]; then
+    printf 'Unsafe ownership or mode on trusted managed proxy %s file.\n' "$name" >&2
+    return 1
+  fi
+  value="$(<"$file")"
+  printf '%s' "$value"
+}
+
+# Fail closed if the root-owned image contract is missing. Process-level
+# NEMOCLAW_PROXY_* values are not a trusted runtime routing source.
+PROXY_HOST="$(read_managed_proxy_value "$MANAGED_PROXY_HOST_FILE" "host")"
+PROXY_PORT="$(read_managed_proxy_value "$MANAGED_PROXY_PORT_FILE" "port")"
+unset NEMOCLAW_PROXY_HOST NEMOCLAW_PROXY_PORT
 
 is_valid_proxy_host() {
   local value="$1"

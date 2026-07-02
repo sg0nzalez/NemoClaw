@@ -55,10 +55,12 @@ nemoclaw_connect_probe() {
 sandbox_login_proxy_contract() {
   # OpenShell rejects CR/LF in any exec argv element, so keep this remote login
   # command on one physical line. inference.local is intentionally absent from
-  # NO_PROXY: the managed proxy, not direct DNS/hosts resolution, routes it.
+  # NO_PROXY: OpenShell does not need to provision inference.local DNS/hosts
+  # into the sandbox because its managed proxy owns this L7 route. Adding
+  # inference.local here would bypass that proxy and force a direct DNS lookup.
   local contract_command
   # shellcheck disable=SC2016
-  contract_command='set -euo pipefail; contract_fail() { printf "%s\n" "NEMOCLAW_DCODE_PROXY_ENV_FAIL:$1"; exit 1; }; [ "${HOME:-}" = /sandbox ] || contract_fail home; proxy_url="${HTTP_PROXY:-}"; case "$proxy_url" in http://*:*) ;; *) contract_fail proxy-shape ;; esac; case "$proxy_url" in *"@"*) contract_fail proxy-credentials ;; esac; [ "$proxy_url" = "${HTTPS_PROXY:-}" ] || contract_fail https-proxy; [ "$proxy_url" = "${http_proxy:-}" ] || contract_fail lower-http-proxy; [ "$proxy_url" = "${https_proxy:-}" ] || contract_fail lower-https-proxy; proxy_host="${proxy_url#http://}"; proxy_host="${proxy_host%:*}"; expected_no_proxy="localhost,127.0.0.1,::1,${proxy_host}"; [ "${NO_PROXY:-}" = "$expected_no_proxy" ] || contract_fail no-proxy; [ "${no_proxy:-}" = "$expected_no_proxy" ] || contract_fail lower-no-proxy; printf "%s\n" "NEMOCLAW_DCODE_PROXY_ENV_OK"'
+  contract_command='set -euo pipefail; contract_fail() { printf "%s\n" "NEMOCLAW_DCODE_PROXY_ENV_FAIL:$1"; exit 1; }; proxy_file_metadata() { stat -c "%u:%a" "$1" 2>/dev/null || stat -f "%u:%Lp" "$1" 2>/dev/null; }; [ "${HOME:-}" = /sandbox ] || contract_fail home; for file in /usr/local/share/nemoclaw/dcode-proxy-host /usr/local/share/nemoclaw/dcode-proxy-port; do [ -f "$file" ] && [ ! -L "$file" ] && [ "$(proxy_file_metadata "$file")" = "0:444" ] || contract_fail proxy-file-trust; done; proxy_url="${HTTP_PROXY:-}"; case "$proxy_url" in http://*:*) ;; *) contract_fail proxy-shape ;; esac; case "$proxy_url" in *"@"*) contract_fail proxy-credentials ;; esac; [ "$proxy_url" = "${HTTPS_PROXY:-}" ] || contract_fail https-proxy; [ "$proxy_url" = "${http_proxy:-}" ] || contract_fail lower-http-proxy; [ "$proxy_url" = "${https_proxy:-}" ] || contract_fail lower-https-proxy; proxy_host="${proxy_url#http://}"; proxy_host="${proxy_host%:*}"; expected_no_proxy="localhost,127.0.0.1,::1,${proxy_host}"; [ "${NO_PROXY:-}" = "$expected_no_proxy" ] || contract_fail no-proxy; [ "${no_proxy:-}" = "$expected_no_proxy" ] || contract_fail lower-no-proxy; printf "%s\n" "NEMOCLAW_DCODE_PROXY_ENV_OK"'
   sandbox_login_exec "$contract_command"
 }
 
@@ -189,7 +191,22 @@ main() {
     fail_test "config.toml does not use the managed placeholder API key env reference (captured config redacted from log)"
   fi
 
-  # 2. The login shell loaded the exact normalized proxy contract from .profile.
+  # 2. Record whether direct DNS/hosts is absent. When it is, the following
+  # login, direct-exec, and connect successes prove they do not depend on it;
+  # a present route is informational and is not credited as that proof.
+  dns_hosts_output="$(sandbox_exec "if ! command -v getent >/dev/null 2>&1 || ! command -v timeout >/dev/null 2>&1; then printf '%s\\n' NEMOCLAW_DCODE_DNS_PROBE_UNAVAILABLE; elif timeout 5 getent hosts inference.local >/dev/null 2>&1; then printf '%s\\n' NEMOCLAW_DCODE_DNS_PRESENT; else status=\$?; if [ \"\$status\" -eq 124 ]; then printf '%s\\n' NEMOCLAW_DCODE_DNS_PROBE_TIMEOUT; else printf '%s\\n' NEMOCLAW_DCODE_DNS_ABSENT; fi; fi")"
+  if printf '%s\n' "$dns_hosts_output" | grep -Fxq "NEMOCLAW_DCODE_DNS_ABSENT"; then
+    direct_dns_state=absent
+    pass "direct inference.local DNS/hosts is absent; exercising the proxy-only contract"
+  elif printf '%s\n' "$dns_hosts_output" | grep -Fxq "NEMOCLAW_DCODE_DNS_PRESENT"; then
+    direct_dns_state=present
+    info "direct inference.local DNS/hosts is present; proxy independence is not inferred from this observation"
+  else
+    direct_dns_state=unknown
+    fail_test "could not observe the direct inference.local DNS/hosts state"
+  fi
+
+  # 3. The login shell loaded the exact normalized proxy contract from .profile.
   proxy_contract_output="$(sandbox_login_proxy_contract || true)"
   if printf '%s\n' "$proxy_contract_output" | grep -Fxq "NEMOCLAW_DCODE_PROXY_ENV_OK"; then
     pass "login shell loaded the normalized managed proxy environment"
@@ -198,8 +215,8 @@ main() {
     fail_test "login shell did not load the normalized managed proxy environment (${proxy_contract_reason:-unknown contract mismatch})"
   fi
 
-  # 3. The managed route is reachable through the normalized login-shell proxy.
-  route_output="$(sandbox_login_exec "curl -sS -o /dev/null -w 'HTTP_CODE:%{http_code}' --max-time 30 https://inference.local/v1/models" || true)"
+  # 4. The managed route is reachable through the normalized login-shell proxy.
+  route_output="$(sandbox_login_exec "curl -sS -o /dev/null -w 'HTTP_CODE:%{http_code}' --proxy \"\${HTTPS_PROXY}\" --noproxy \"\${NO_PROXY}\" --max-time 30 https://inference.local/v1/models" || true)"
   route_code="$(printf '%s' "$route_output" | sed -n 's/.*HTTP_CODE:\([0-9][0-9][0-9]\).*/\1/p' | tail -n1)"
   if [ "$route_code" = "200" ]; then
     pass "login-shell proxy reached https://inference.local/v1/models"
@@ -207,16 +224,16 @@ main() {
     fail_test "login-shell proxy did not receive HTTP 200 from https://inference.local/v1/models (HTTP ${route_code:-000})"
   fi
 
-  # 4. The same login-shell path runs dcode and returns PONG.
+  # 5. The same login-shell path runs dcode and returns PONG.
   headless_output="$(sandbox_login_exec "cd /sandbox && timeout ${HEADLESS_TIMEOUT} dcode -n 'Reply with exactly one word: PONG'; echo \"DCODE_EXIT:\$?\"" || true)"
   dcode_exit="$(printf '%s' "$headless_output" | sed -n 's/.*DCODE_EXIT:\([0-9]\+\).*/\1/p' | tail -n1)"
   if classification="$(classify_headless_output "${dcode_exit:-unknown}" "$headless_output")"; then
-    pass "login-shell dcode -n reached managed inference with ${classification} (exit ${dcode_exit:-unknown})"
+    pass "login-shell dcode -n reached managed inference with ${classification} (exit ${dcode_exit:-unknown}; direct DNS/hosts ${direct_dns_state})"
   else
     fail_test "login-shell dcode -n did not exit 0 with PONG (${classification}, exit ${dcode_exit:-unknown})"
   fi
 
-  # 5. The public direct-exec path reaches inference without shell startup files.
+  # 6. The public direct-exec path reaches inference without shell startup files.
   if direct_output="$(sandbox_direct_dcode -n "Reply with exactly one word: PONG")"; then
     direct_exit=0
   else
@@ -225,24 +242,25 @@ main() {
   direct_headless_output="${direct_output}
 DCODE_EXIT:${direct_exit}"
   if direct_classification="$(classify_headless_output "$direct_exit" "$direct_headless_output")"; then
-    pass "direct-exec dcode -n reached managed inference with ${direct_classification} (exit ${direct_exit})"
+    pass "direct-exec dcode -n reached managed inference with ${direct_classification} (exit ${direct_exit}; direct DNS/hosts ${direct_dns_state})"
   else
     fail_test "direct-exec dcode -n did not exit 0 with PONG (${direct_classification}, exit ${direct_exit})"
   fi
 
-  # 6. The user-facing connect readiness path accepts the same managed route.
+  # 7. The user-facing connect readiness path accepts the same managed route.
   if connect_output="$(nemoclaw_connect_probe)"; then
     connect_exit=0
-    pass "nemoclaw connect --probe-only accepted the managed inference route"
+    pass "nemoclaw connect --probe-only accepted the managed inference route (direct DNS/hosts ${direct_dns_state})"
   else
     connect_exit=$?
     fail_test "nemoclaw connect --probe-only rejected the managed inference route (exit ${connect_exit})"
   fi
 
-  # 7. No real secrets in managed config, runtime env files, artifacts, logs, or captured output.
+  # 8. No real secrets in managed config, runtime env files, artifacts, logs, or captured output.
   leak_scan="$(sandbox_exec "$(sandbox_artifact_scan_command)" || true)"
   combined="${config_output}
 ${leak_scan}
+${dns_hosts_output}
 ${proxy_contract_output}
 ${route_output}
 ${headless_output}

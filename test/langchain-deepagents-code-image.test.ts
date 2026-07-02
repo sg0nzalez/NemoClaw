@@ -117,10 +117,24 @@ function makeStartScriptFixture(tempDir: string): {
 } {
   const envFile = path.join(tempDir, "proxy-env.sh");
   const scriptPath = path.join(tempDir, "start.sh");
+  const hostFile = path.join(tempDir, "trusted-proxy-host");
+  const portFile = path.join(tempDir, "trusted-proxy-port");
   const original = readAgentFile("start.sh");
   expect(original).toContain("local target=/tmp/nemoclaw-proxy-env.sh");
   expect(original).toContain('tmp="$(mktemp /tmp/nemoclaw-proxy-env.XXXXXX)"');
   const fixture = original
+    .replace(
+      'readonly MANAGED_PROXY_HOST_FILE="/usr/local/share/nemoclaw/dcode-proxy-host"',
+      `readonly MANAGED_PROXY_HOST_FILE="${hostFile}"`,
+    )
+    .replace(
+      'readonly MANAGED_PROXY_PORT_FILE="/usr/local/share/nemoclaw/dcode-proxy-port"',
+      `readonly MANAGED_PROXY_PORT_FILE="${portFile}"`,
+    )
+    .replace(
+      "readonly MANAGED_PROXY_OWNER_UID=0",
+      `readonly MANAGED_PROXY_OWNER_UID=${process.getuid?.() ?? 0}`,
+    )
     .replace("local target=/tmp/nemoclaw-proxy-env.sh", `local target="${envFile}"`)
     .replace(
       'tmp="$(mktemp /tmp/nemoclaw-proxy-env.XXXXXX)"',
@@ -130,6 +144,10 @@ function makeStartScriptFixture(tempDir: string): {
   expect(fixture).toContain(`tmp="$(mktemp "${tempDir}/nemoclaw-proxy-env.XXXXXX")"`);
   expect(fixture).not.toContain("local target=/tmp/nemoclaw-proxy-env.sh");
   expect(fixture).not.toContain('tmp="$(mktemp /tmp/nemoclaw-proxy-env.XXXXXX)"');
+  fs.writeFileSync(hostFile, "10.200.0.1\n", "utf8");
+  fs.writeFileSync(portFile, "3128\n", "utf8");
+  fs.chmodSync(hostFile, 0o444);
+  fs.chmodSync(portFile, 0o444);
   fs.writeFileSync(scriptPath, fixture, "utf8");
   fs.chmodSync(scriptPath, 0o755);
   return { envFile, scriptPath };
@@ -168,8 +186,12 @@ function runStartScriptProxyProbe(
   };
 }
 
-function runHeadlessCheckHelper(snippet: string, env: NodeJS.ProcessEnv = {}): string {
-  return execFileSync("bash", ["-c", `source "$1"; ${snippet}`, "bash", headlessCheckPath], {
+function runHeadlessCheckHelper(
+  snippet: string,
+  env: NodeJS.ProcessEnv = {},
+  sourcePath = headlessCheckPath,
+): string {
+  return execFileSync("bash", ["-c", `source "$1"; ${snippet}`, "bash", sourcePath], {
     encoding: "utf8",
     env: { ...process.env, ...env },
   });
@@ -273,66 +295,6 @@ describe("LangChain Deep Agents Code image contracts", () => {
     expect(combined).not.toContain("corp-user");
     expect(combined).not.toContain("corp-password");
     expect(combined).not.toContain("corp.internal");
-  });
-
-  it("honors managed proxy host and port overrides in commands and shell sessions (#6191)", () => {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-dcode-start-"));
-    const { envFile, scriptPath } = makeStartScriptFixture(tempDir);
-
-    const { envFileText, output } = runStartScriptProxyProbe(scriptPath, envFile, {
-      HTTP_PROXY: "http://host-user:host-password@host-proxy.example:8118",
-      NO_PROXY: "localhost,inference.local",
-      NEMOCLAW_PROXY_HOST: "managed-proxy.internal",
-      NEMOCLAW_PROXY_PORT: "65535",
-    });
-
-    const managedProxy = "http://managed-proxy.internal:65535";
-    const managedNoProxy = "localhost,127.0.0.1,::1,managed-proxy.internal";
-    const outputLines = output.trimEnd().split("\n");
-    const envFileLines = envFileText.trimEnd().split("\n");
-    for (const name of PROXY_URL_ENV_NAMES) {
-      expect(outputLines).toContain(`RUNTIME_${name}=${managedProxy}`);
-      expect(outputLines).toContain(`SOURCED_${name}=${managedProxy}`);
-      expect(envFileLines).toContain(`export ${name}=${managedProxy}`);
-    }
-    for (const name of NO_PROXY_ENV_NAMES) {
-      expect(outputLines).toContain(`RUNTIME_${name}=${managedNoProxy}`);
-      expect(outputLines).toContain(`SOURCED_${name}=${managedNoProxy}`);
-      expect(envFileLines).toContain(`export ${name}=${managedNoProxy.replaceAll(",", "\\,")}`);
-    }
-    const combined = `${output}\n${envFileText}`;
-    expect(combined).not.toContain("host-proxy.example");
-    expect(combined).not.toContain("host-user");
-    expect(combined).not.toContain("host-password");
-  });
-
-  it("rejects unsafe managed proxy overrides before persisting shell state (#6191)", () => {
-    const rejectedOverrides = [
-      { NEMOCLAW_PROXY_HOST: "corp-user:corp-password@proxy.example" },
-      { NEMOCLAW_PROXY_HOST: "proxy example" },
-      { NEMOCLAW_PROXY_HOST: "proxy.example\ninjected" },
-      { NEMOCLAW_PROXY_HOST: "proxy.example/path" },
-      { NEMOCLAW_PROXY_PORT: "not-a-port" },
-      { NEMOCLAW_PROXY_PORT: "0" },
-      { NEMOCLAW_PROXY_PORT: "65536" },
-      { NEMOCLAW_PROXY_PORT: "000001" },
-    ];
-
-    for (const overrides of rejectedOverrides) {
-      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-dcode-start-invalid-"));
-      const { envFile, scriptPath } = makeStartScriptFixture(tempDir);
-      const result = spawnSync("bash", [scriptPath, "true"], {
-        env: { PATH: process.env.PATH ?? "/usr/bin:/bin", ...overrides },
-        encoding: "utf8",
-      });
-
-      expect(result.status).not.toBe(0);
-      expect(fs.existsSync(envFile)).toBe(false);
-      const output = `${result.stdout}\n${result.stderr}`;
-      for (const value of Object.values(overrides)) {
-        expect(output).not.toContain(value);
-      }
-    }
   });
 
   it("keeps all Deep Agents Code entry points behind the managed wrapper boundary", () => {
@@ -724,6 +686,22 @@ describe("LangChain Deep Agents Code image contracts", () => {
   it("accepts only the normalized login-shell proxy contract (#6191)", () => {
     const validate = (proxyUrl: string, noProxy: string, lowerProxy = proxyUrl) => {
       const loginHome = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-dcode-login-"));
+      const hostFile = path.join(loginHome, "trusted-proxy-host");
+      const portFile = path.join(loginHome, "trusted-proxy-port");
+      const checkFixture = path.join(loginHome, "headless-check.sh");
+      fs.writeFileSync(hostFile, "10.200.0.1\n", "utf8");
+      fs.writeFileSync(portFile, "3128\n", "utf8");
+      fs.chmodSync(hostFile, 0o444);
+      fs.chmodSync(portFile, 0o444);
+      fs.writeFileSync(
+        checkFixture,
+        fs
+          .readFileSync(headlessCheckPath, "utf8")
+          .replaceAll("/usr/local/share/nemoclaw/dcode-proxy-host", hostFile)
+          .replaceAll("/usr/local/share/nemoclaw/dcode-proxy-port", portFile)
+          .replace('= "0:444"', `= "${process.getuid?.() ?? 0}:444"`),
+        "utf8",
+      );
       fs.writeFileSync(
         path.join(loginHome, ".profile"),
         [
@@ -747,6 +725,7 @@ describe("LangChain Deep Agents Code image contracts", () => {
           "if sandbox_login_proxy_contract >/dev/null 2>&1; then printf pass; else printf fail; fi",
         ].join("\n"),
         { TEST_LOGIN_HOME: loginHome },
+        checkFixture,
       );
     };
 
