@@ -965,6 +965,11 @@ describe("built-in channel manifests", () => {
     expect(render).toContain("googlechatConfig.appPrincipal");
     // OpenClaw-only: no Hermes env-lines / platform render.
     expect(render).not.toContain("~/.hermes");
+    // Disable the gateway's reactive config hot-reload: OpenClaw's ~60s post-boot
+    // provider-plugin auto-enable self-write would otherwise reload plugins, swap the
+    // HTTP route registry, and drop the Google Chat inbound webhook route (404 → silent).
+    expect(render).toContain('"path":"gateway.reload"');
+    expect(render).toContain('"mode":"off"');
 
     expect(findHook(googlechatManifest, "googlechat-tunnel-audience-gate")).toMatchObject({
       phase: "enroll",

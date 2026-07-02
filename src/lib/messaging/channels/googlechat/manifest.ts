@@ -151,6 +151,29 @@ export const googlechatManifest = {
         },
       },
     },
+    {
+      // Turn OFF OpenClaw's config hot-reload for this sandbox.
+      // Safe: the sandbox's openclaw.json is fixed at build time (sealed 0600 +
+      // integrity hash), so nothing should reload it while running.
+      // Needed: ~60s after boot, OpenClaw rewrites its OWN config (it adds default
+      // provider-plugin entries). If hot-reload is ON, OpenClaw reacts to that
+      // self-write by reloading plugins, which rebuilds its HTTP route table and
+      // drops the Google Chat inbound webhook route — so incoming messages 404 and
+      // the bot goes silent ~60s after every start.
+      // "off" tells OpenClaw to ignore config-file changes (see @openclaw
+      // config-reload.ts). NemoClaw still restarts the gateway itself when it needs
+      // to (rebuild / `nemoclaw <sandbox> gateway restart`).
+      id: "googlechat-openclaw-gateway-reload-off",
+      kind: "json-fragment",
+      agent: "openclaw",
+      target: "openclaw.json",
+      fragment: {
+        path: "gateway.reload",
+        value: {
+          mode: "off",
+        },
+      },
+    },
   ],
   runtime: {
     openclaw: {
