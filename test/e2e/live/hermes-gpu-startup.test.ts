@@ -25,7 +25,7 @@ const FAKE_MODEL = "test-model";
 const EXTRA_PLACEHOLDER_TOKEN_A = "e2e-hermes-gpu-extra-telegram-token";
 const EXTRA_PLACEHOLDER_TOKEN_B = "e2e-hermes-gpu-extra-slack-token";
 const LIVE_TIMEOUT_MS = 70 * 60_000;
-const GPU_ROUTE = "native-openshell" as const;
+const GPU_ROUTE = "legacy-patch" as const;
 validateSandboxName(SANDBOX_NAME);
 
 function commandEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
@@ -34,6 +34,7 @@ function commandEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
     ...extra,
     NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE: "1",
     NEMOCLAW_AGENT: "hermes",
+    NEMOCLAW_DOCKER_GPU_PATCH: "1",
     NEMOCLAW_NON_INTERACTIVE: "1",
     NEMOCLAW_RECREATE_SANDBOX: "1",
     NEMOCLAW_SANDBOX_GPU: "1",
@@ -129,7 +130,7 @@ done`;
 }
 
 test.skipIf(!shouldRunLiveE2E())(
-  "hermes-gpu-startup: native OpenShell GPU supervision reaches stable Ready state",
+  "hermes-gpu-startup: forced legacy GPU patch reaches stable Ready state or captures rollback",
   { timeout: LIVE_TIMEOUT_MS },
   async ({ artifacts, cleanup, host, sandbox }) => {
     await artifacts.writeJson("target.json", {
@@ -237,7 +238,7 @@ test.skipIf(!shouldRunLiveE2E())(
     await artifacts.writeJson("target-result.json", {
       id: "hermes-gpu-startup",
       assertions: {
-        nativeOpenShellGpuSelected: true,
+        legacyDockerGpuPatchSelected: true,
         openshellReady: true,
         sandboxCudaVerified: true,
         extraPlaceholderCommandRoundTripValid: true,
