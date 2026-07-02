@@ -3,7 +3,6 @@
 
 import path from "node:path";
 
-import { cleanupGatewayAfterLastSandbox } from "../../../src/lib/actions/sandbox/destroy-gateway.ts";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
 import {
   type HostCliClient,
@@ -20,6 +19,7 @@ import {
 } from "./hermes-gpu-startup-proof.ts";
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "../../..");
+const GATEWAY_CLEANUP_MODULE = path.join(REPO_ROOT, "dist/lib/actions/sandbox/destroy-gateway.js");
 const SANDBOX_NAME = process.env.NEMOCLAW_SANDBOX_NAME ?? "e2e-hermes-gpu-startup";
 const FAKE_API_KEY = "e2e-hermes-gpu-startup-key";
 const FAKE_MODEL = "test-model";
@@ -72,7 +72,24 @@ async function cleanupHermes(
       timeoutMs: 60_000,
     }),
   );
-  cleanupGatewayAfterLastSandbox("nemoclaw");
+  const runtimeCleanup = await host.command(
+    "node",
+    [
+      "-e",
+      "const { cleanupGatewayAfterLastSandbox } = require(process.argv[1]); cleanupGatewayAfterLastSandbox(process.argv[2]);",
+      GATEWAY_CLEANUP_MODULE,
+      "nemoclaw",
+    ],
+    {
+      artifactName: `${label}-gateway-runtime-cleanup`,
+      env: commandEnv(),
+      timeoutMs: 60_000,
+    },
+  );
+  expect(
+    runtimeCleanup.exitCode,
+    `owned gateway runtime cleanup failed: ${resultText(runtimeCleanup)}`,
+  ).toBe(0);
   await host.cleanupGatewayRegistration("nemoclaw", {
     artifactName: `${label}-openshell-gateway`,
     env: commandEnv(),
@@ -92,11 +109,10 @@ async function cleanupHermes(
       timeoutMs: 30_000,
     },
   );
-  if (portAvailable.exitCode !== 0) {
-    throw new Error(
-      `gateway port ${gatewayPort} remains occupied after cleanup: ${resultText(portAvailable)}`,
-    );
-  }
+  expect(
+    portAvailable.exitCode,
+    `gateway port ${gatewayPort} remains occupied after cleanup: ${resultText(portAvailable)}`,
+  ).toBe(0);
 }
 
 async function captureFailedGpuContainer(
