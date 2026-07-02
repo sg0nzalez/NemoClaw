@@ -27,8 +27,10 @@ describe("Docker GPU pre-rollback diagnostics (#6110)", () => {
 
   it("captures the failed clone state, process topology, and logs before rollback", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
+    const writeFileSpy = vi.spyOn(fs, "writeFileSync");
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-gpu-pre-rollback-"));
     const secretCanary = "pre-rollback-secret-canary-value";
+    const discoveredSecretCanary = "discovered-only-secret-canary-value";
     const inspectOutput = JSON.stringify([
       {
         Id: "new-container-id",
@@ -48,18 +50,44 @@ describe("Docker GPU pre-rollback diagnostics (#6110)", () => {
         NetworkSettings: { Networks: { "openshell-docker": {} } },
       },
     ]);
+    const discoveredInspectOutput = JSON.stringify([
+      {
+        Id: "discovered-container-id",
+        Config: {
+          Env: [
+            `OPENSHELL_SANDBOX_COMMAND=env NEMOCLAW_EXTRA_PLACEHOLDER_KEYS=DISCOVERED_CUSTOM_VALUE DISCOVERED_CUSTOM_VALUE=${discoveredSecretCanary} nemoclaw-start`,
+          ],
+        },
+      },
+    ]);
     const dockerResponses = new Map([
-      ["ps -a", "new-container-id\n"],
-      ["top new-container-id", "USER PID PPID STAT COMMAND\nsandbox 42 1 S nemoclaw-start\n"],
-      ["inspect --format", JSON.stringify({ Status: "running", Running: true, ExitCode: 0 })],
+      [
+        "ps -a --filter label=openshell.ai/managed-by=openshell --filter label=openshell.ai/sandbox-name=alpha --format {{.ID}}",
+        "new-container-id\ndiscovered-container-id\n",
+      ],
+      [
+        "ps -a --filter label=openshell.ai/managed-by=openshell --filter label=openshell.ai/sandbox-name=alpha",
+        `new-container-id ${secretCanary} ${discoveredSecretCanary}\n`,
+      ],
+      [
+        "top new-container-id -eo user,pid,ppid,stat,comm",
+        "USER PID PPID STAT COMMAND\nsandbox 42 1 S nemoclaw-start\n",
+      ],
+      [
+        "inspect --format {{json .State}} new-container-id",
+        JSON.stringify({ Status: "running", Running: true, ExitCode: 0 }),
+      ],
       ["inspect new-container-id", inspectOutput],
+      ["inspect old-container-id", "[]"],
+      ["inspect backup-container", "[]"],
+      ["inspect discovered-container-id", discoveredInspectOutput],
     ]);
     const dockerCapture = vi.fn((args: readonly string[], _options?: Record<string, unknown>) => {
-      return dockerResponses.get(`${args[0] ?? ""} ${args[1] ?? ""}`.trim()) ?? "";
+      return dockerResponses.get(args.join(" ")) ?? "";
     });
     const openshellResponses = new Map([
-      ["sandbox get", "Phase: Error\n"],
-      ["sandbox list", "alpha  Error\n"],
+      ["sandbox get", `Phase: Error\ndetail=${secretCanary} ${discoveredSecretCanary}\n`],
+      ["sandbox list", `alpha  Error  ${secretCanary} ${discoveredSecretCanary}\n`],
     ]);
     const runCaptureOpenshell = vi.fn(
       (args: string[]) =>
@@ -102,7 +130,21 @@ describe("Docker GPU pre-rollback diagnostics (#6110)", () => {
         .map((name) => fs.readFileSync(path.join(diagnostics?.dir ?? "", name), "utf-8"))
         .join("\n");
       expect(diagnosticContents).not.toContain(secretCanary);
+      expect(diagnosticContents).not.toContain(discoveredSecretCanary);
       expect(diagnosticContents).not.toContain("untrusted.secret");
+      expect(dockerCapture.mock.calls[0]?.[0]).toContain("--format");
+      expect(dockerCapture.mock.calls.slice(1, 5).map(([args]) => args)).toEqual([
+        ["inspect", "new-container-id"],
+        ["inspect", "old-container-id"],
+        ["inspect", "backup-container"],
+        ["inspect", "discovered-container-id"],
+      ]);
+      expect(dockerCapture.mock.invocationCallOrder[4]).toBeLessThan(
+        runCaptureOpenshell.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER,
+      );
+      expect(dockerCapture.mock.invocationCallOrder[4]).toBeLessThan(
+        writeFileSpy.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER,
+      );
       expect(dockerCapture).toHaveBeenCalledWith(
         ["top", "new-container-id", "-eo", "user,pid,ppid,stat,comm"],
         expect.objectContaining({ ignoreError: true, timeout: expect.any(Number) }),

@@ -20,6 +20,7 @@ import {
   captureDockerGpuPatchSandboxSnapshot,
   classifyDockerGpuPatchFailure,
   collectDockerGpuPatchDiagnostics,
+  findOpenShellDockerSandboxContainerIds,
 } from "./docker-gpu-patch";
 
 const DOCKER_GPU_PATCH_TIMEOUT_MS = 30_000;
@@ -191,6 +192,42 @@ function redactedDiagnosticsDeps(deps: PreRollbackDiagnosticsDeps): PreRollbackD
   };
 }
 
+function primeSensitiveDiagnosticValues(
+  sandboxName: string,
+  result: DockerGpuPatchResult,
+  deps: PreRollbackDiagnosticsDeps,
+): void {
+  let discoveredContainerIds: string[] = [];
+  try {
+    discoveredContainerIds = findOpenShellDockerSandboxContainerIds(sandboxName, deps);
+  } catch {
+    // Known recreate targets still provide useful redaction values when the
+    // Docker label query races with rollback or daemon recovery.
+  }
+  const targets = [
+    result.newContainerId,
+    result.oldContainerId,
+    result.backupContainerName,
+    ...discoveredContainerIds,
+  ]
+    .map((target) => String(target ?? "").trim())
+    .filter((target, index, values) => target.length > 0 && values.indexOf(target) === index);
+  for (const target of targets) {
+    try {
+      // The redacting capture wrapper parses each full inspect and remembers
+      // both conventionally sensitive values and custom placeholder values.
+      // Discard the sanitized result: this pass exists only to prime redaction
+      // before snapshot/OpenShell output can be persisted.
+      deps.dockerCapture?.(["inspect", target], {
+        ignoreError: true,
+        timeout: DOCKER_GPU_PATCH_TIMEOUT_MS,
+      });
+    } catch {
+      // Diagnostics remain best effort when a short-lived target disappears.
+    }
+  }
+}
+
 export function captureDockerGpuPreRollbackDiagnostics(
   sandboxName: string,
   result: DockerGpuPatchResult,
@@ -204,6 +241,7 @@ export function captureDockerGpuPreRollbackDiagnostics(
     selectedMode: result.mode,
   };
   const diagnosticDeps = redactedDiagnosticsDeps(deps);
+  primeSensitiveDiagnosticValues(sandboxName, result, diagnosticDeps);
   const snapshot = captureDockerGpuPatchSandboxSnapshot(
     sandboxName,
     { patchedContainerId: result.newContainerId },
