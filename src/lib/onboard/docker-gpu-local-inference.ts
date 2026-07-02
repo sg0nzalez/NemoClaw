@@ -64,7 +64,7 @@ export function shouldSkipGpuBridgeProbe(
     gpuPassthrough &&
     shouldUseDockerGpuPatchHostNetwork(
       { sandboxGpuEnabled: true, hostGpuPlatform },
-      { dockerDriverGateway: true, ...options },
+      { ...options, dockerDriverGateway: true },
     )
   );
 }

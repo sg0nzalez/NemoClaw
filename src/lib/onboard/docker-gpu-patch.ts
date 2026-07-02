@@ -1330,6 +1330,8 @@ export function printDockerGpuPatchFailureAndExit(
   console.error("  Escape hatches:");
   console.error(
     "    NEMOCLAW_DOCKER_GPU_PATCH=1  force the legacy Docker GPU container-swap path.",
+  );
+  console.error(
     "    NEMOCLAW_DOCKER_GPU_PATCH=0  use native OpenShell GPU injection (ignored on Docker Desktop WSL; Jetson also defaults to the compatibility path).",
   );
   console.error(

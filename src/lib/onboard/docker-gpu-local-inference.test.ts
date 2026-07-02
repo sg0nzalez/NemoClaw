@@ -66,9 +66,10 @@ describe("shouldUseDockerGpuPatchHostNetwork", () => {
 });
 
 describe("shouldSkipGpuBridgeProbe", () => {
-  it("skips only for an active legacy host-network patch", () => {
+  it("forces the gateway context and skips only for an active legacy host-network patch", () => {
     expect(
       shouldSkipGpuBridgeProbe(true, "linux", {
+        dockerDriverGateway: false,
         dockerDesktopWsl: false,
         env: HOST_NETWORK_ENV,
         platform: "linux",
