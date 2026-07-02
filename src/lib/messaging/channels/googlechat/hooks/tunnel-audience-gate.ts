@@ -71,6 +71,22 @@ export function createGooglechatTunnelAudienceGateHook(
 
     const env = options.env ?? process.env;
     const log = options.log ?? ((message: string) => console.log(message));
+
+    // Non-interactive mode: always skip Google Chat. Enrollment needs manual,
+    // out-of-band steps that no environment variable can satisfy — the operator
+    // must paste the webhook URL into the Google Cloud Console and confirm it,
+    // and personal/standalone accounts must trace the appPrincipal from the
+    // first live DM. Like WeChat's host-QR login there is no unattended path, so
+    // we skip rather than enroll a half-configured channel that silently 404s on
+    // inbound webhooks. A pre-supplied GOOGLECHAT_AUDIENCE does NOT bypass this —
+    // the Console/appPrincipal steps still require a human.
+    if (context.isInteractive === false) {
+      log(
+        "  Skipped googlechat (interactive setup required: Google Cloud Console endpoint URL + appPrincipal)",
+      );
+      throw new Error("Google Chat enrollment requires interactive mode.");
+    }
+
     const audienceType = readString(context.inputs?.audienceType) || "app-url";
     const webhookPath = normalizeWebhookPath(
       readString(context.inputs?.webhookPath) || readString(env.GOOGLECHAT_WEBHOOK_PATH),
@@ -85,14 +101,6 @@ export function createGooglechatTunnelAudienceGateHook(
     // Only the app-url path derives its audience from a public webhook URL. Any
     // other audienceType (e.g. project-number) is entered via the config prompt.
     if (audienceType !== "app-url") return {};
-
-    // Non-interactive (CI/E2E): never spawn a tunnel; require an explicit audience.
-    if (context.isInteractive === false) {
-      log("  Skipped googlechat (set GOOGLECHAT_AUDIENCE to use Google Chat non-interactively)");
-      throw new Error(
-        "Google Chat app-url audience requires GOOGLECHAT_AUDIENCE in non-interactive mode.",
-      );
-    }
 
     const readTunnelState = requireOption(options.readTunnelState, "readTunnelState");
     const getTunnelUrl = requireOption(options.getTunnelUrl, "getTunnelUrl");
@@ -129,9 +137,9 @@ export function createGooglechatTunnelAudienceGateHook(
     const audience = `${url.replace(/\/+$/, "")}${webhookPath}`;
     printEndpointInstructions(log, audience);
 
-    // Non-interactive app-url already returned/threw above, so this prompt path
-    // is only reached interactively. Mirrors promptYesNoOrDefault: default No,
-    // y/yes wins.
+    // Non-interactive mode already threw at the top of the hook, so this prompt
+    // path is only reached interactively. Mirrors promptYesNoOrDefault: default
+    // No, y/yes wins.
     const prompt = requireOption(options.prompt, "prompt");
     const answer = await prompt(
       "  Have you set this as the HTTP endpoint URL in Google Cloud Console? [y/N]: ",

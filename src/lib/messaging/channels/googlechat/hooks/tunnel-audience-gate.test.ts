@@ -72,9 +72,22 @@ describe("googlechat tunnel/audience gate hook", () => {
     expect(startTunnel).not.toHaveBeenCalled();
   });
 
-  it("skips (throws) in non-interactive mode without an explicit audience", async () => {
-    const hook = createGooglechatTunnelAudienceGateHook(baseOptions());
-    await expect(hook(gateContext({}, false))).rejects.toThrow(/non-interactive/);
+  it("always skips (throws) in non-interactive mode, even with an explicit audience", async () => {
+    const startTunnel = vi.fn(async () => {});
+    const stopTunnel = vi.fn();
+    const hook = createGooglechatTunnelAudienceGateHook(baseOptions({ startTunnel, stopTunnel }));
+
+    // No audience → skip.
+    await expect(hook(gateContext({}, false))).rejects.toThrow(/interactive mode/);
+    // A pre-supplied audience does NOT bypass the skip: the Google Cloud Console
+    // endpoint + appPrincipal steps still need an operator, so Google Chat is
+    // unconditionally skipped in non-interactive mode (mirrors WeChat host QR).
+    await expect(
+      hook(gateContext({ audience: "https://named.example.com/googlechat" }, false)),
+    ).rejects.toThrow(/interactive mode/);
+    // Never touches the tunnel in non-interactive mode.
+    expect(startTunnel).not.toHaveBeenCalled();
+    expect(stopTunnel).not.toHaveBeenCalled();
   });
 
   it("skips when cloudflared is not installed and never starts a tunnel", async () => {
