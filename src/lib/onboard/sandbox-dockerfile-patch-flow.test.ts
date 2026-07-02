@@ -2,6 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it, vi } from "vitest";
+import type { SandboxBaseImageResolutionMetadata } from "../sandbox-base-image";
+import {
+  beginBaseImageResolutionFlow,
+  getBaseImageResolutionPatchOptions,
+  handoffRebuildBaseImageResolutionHint,
+} from "./base-image-resolution-flow";
 import { prepareSandboxDockerfilePatch } from "./sandbox-dockerfile-patch-flow";
 import type { SandboxGpuConfig } from "./sandbox-gpu-mode";
 
@@ -14,7 +20,83 @@ const sandboxGpuConfig: SandboxGpuConfig = {
   errors: [],
 };
 
+const resolutionMetadata: SandboxBaseImageResolutionMetadata = {
+  schema: 1,
+  key: "key",
+  imageName: "ghcr.io/nvidia/nemoclaw/sandbox-base",
+  ref: "ghcr.io/nvidia/nemoclaw/sandbox-base@sha256:abc",
+  digest: "sha256:abc",
+  source: "version-tag",
+  imageId: "sha256:image",
+  os: "linux",
+  architecture: "amd64",
+  glibcVersion: "2.41",
+  requireOpenshellSandboxAbi: true,
+  minGlibcVersion: "2.39",
+};
+
 describe("prepareSandboxDockerfilePatch", () => {
+  it("hands rebuild metadata into the next onboard flow and lets fresh bypass it (#4680)", () => {
+    handoffRebuildBaseImageResolutionHint(resolutionMetadata);
+    beginBaseImageResolutionFlow({ fresh: false, env: {} });
+    expect(getBaseImageResolutionPatchOptions()).toMatchObject({
+      resolutionHint: resolutionMetadata,
+      forceBaseImageRefresh: false,
+    });
+
+    handoffRebuildBaseImageResolutionHint(resolutionMetadata);
+    beginBaseImageResolutionFlow({ fresh: true, env: {} });
+    expect(getBaseImageResolutionPatchOptions()).toMatchObject({
+      resolutionHint: resolutionMetadata,
+      forceBaseImageRefresh: true,
+    });
+    beginBaseImageResolutionFlow({ fresh: false, env: {} });
+  });
+
+  it("forwards a prior resolution hint, force refresh, and completed-image metadata (#4680)", async () => {
+    const pullAndResolveBaseImageDigest = vi.fn(() => ({
+      digest: resolutionMetadata.digest,
+      ref: resolutionMetadata.ref,
+      source: resolutionMetadata.source,
+      glibcVersion: resolutionMetadata.glibcVersion,
+      metadata: resolutionMetadata,
+    }));
+    const patchStagedDockerfile = vi.fn();
+    await prepareSandboxDockerfilePatch({
+      agent: null,
+      fromDockerfile: null,
+      sandboxBaseImage: resolutionMetadata.imageName,
+      sandboxBaseTag: "latest",
+      stagedDockerfile: "/tmp/Dockerfile",
+      model: "model-a",
+      chatUiUrl: "http://127.0.0.1:7000",
+      provider: null,
+      preferredInferenceApi: null,
+      webSearchConfig: null,
+      hermesToolGateways: [],
+      sandboxGpuConfig,
+      resolutionHint: resolutionMetadata,
+      forceBaseImageRefresh: true,
+      deps: {
+        isLinuxDockerDriverGatewayEnabled: vi.fn(() => true),
+        pullAndResolveBaseImageDigest,
+        enforceDockerGpuPatchPreserveNetwork: vi.fn(async () => false),
+        patchStagedDockerfile,
+        now: () => 1,
+      },
+    });
+
+    expect(pullAndResolveBaseImageDigest).toHaveBeenCalledWith({
+      requireOpenshellSandboxAbi: true,
+      resolutionHint: resolutionMetadata,
+      forceRefresh: true,
+    });
+    expect(patchStagedDockerfile.mock.calls[0]?.[11]).toEqual({
+      buildIdPolicy: "preserve",
+      baseImageResolutionMetadata: resolutionMetadata,
+    });
+  });
+
   it("pins a resolved base image and patches the staged Dockerfile with the build id", async () => {
     const log = vi.fn();
     const patchStagedDockerfile = vi.fn();

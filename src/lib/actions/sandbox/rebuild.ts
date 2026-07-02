@@ -52,12 +52,14 @@ import {
   tryGetMessagingAgentId,
 } from "../../messaging";
 import { hydrateMessagingChannelConfig } from "../../messaging-channel-config";
+import { handoffRebuildBaseImageResolutionHint } from "../../onboard/base-image-resolution-flow";
 import { markLastStartedStepFailed } from "../../onboard/exit-step-failure";
 import { getStoredMessagingChannelConfig } from "../../onboard/messaging-config";
 import { mergeRebuildMessagingPolicyPresets } from "../../onboard/messaging-policy-presets";
 import * as policies from "../../policy";
 import { shellQuote } from "../../runner";
 import * as sandboxVersion from "../../sandbox/version";
+import { readSandboxBaseImageResolutionMetadata } from "../../sandbox-base-image";
 import { redact } from "../../security/redact";
 import * as shields from "../../shields";
 import type { Session } from "../../state/onboard-session";
@@ -575,9 +577,9 @@ async function reapplyMessagingManifestAfterOpenClawDoctor(
 /**
  * Rebuild a live sandbox while preserving registered agent state and policies.
  *
- * Agent sandboxes force-refresh their base image before backup/delete so local
- * `Dockerfile.base` changes fail before destructive work and are applied to the
- * recreated sandbox image.
+ * Agent sandboxes validate their recorded base image before backup/delete.
+ * Changed local `Dockerfile.base` inputs invalidate the resolution key and
+ * trigger a rebuild before destructive work.
  */
 interface RebuildSandboxExecutionOptions {
   throwOnError?: boolean;
@@ -690,6 +692,11 @@ export async function rebuildSandbox(
 
   const sb = getRebuildSandboxEntryOrBail(sandboxName, bail);
   if (!sb) return;
+  const baseImageResolutionHint = readSandboxBaseImageResolutionMetadata(sb.imageTag);
+  const baseImageRefreshEnv = String(process.env.NEMOCLAW_SANDBOX_BASE_IMAGE_REFRESH || "")
+    .trim()
+    .toLowerCase();
+  const forceBaseImageRefresh = ["1", "true", "yes", "on"].includes(baseImageRefreshEnv);
 
   let recoveryManifest: sandboxState.RebuildManifest | null = null;
   if (opts.recoveryManifest) {
@@ -780,9 +787,16 @@ export async function rebuildSandbox(
     ? JSON.parse(JSON.stringify(registry.load()))
     : liveState.staleRegistrySnapshot;
 
-  // Build agent base layers before backup/delete so Dockerfile.base errors leave
-  // the existing sandbox intact. This is what applies local Hermes version edits.
-  if (!ensureRebuildAgentBaseImage(rebuildAgent, bail)) return;
+  // Validate or rebuild agent base layers before backup/delete so Dockerfile.base
+  // errors leave the existing sandbox intact. This applies local Hermes edits
+  // while keeping unchanged warm rebuilds local-only.
+  if (
+    !ensureRebuildAgentBaseImage(rebuildAgent, bail, {
+      resolutionHint: baseImageResolutionHint,
+      forceBaseImageRefresh,
+    })
+  )
+    return;
 
   // On stale-sandbox recovery the live sandbox is gone, so the normal
   // unlock→recreate→relock cycle cannot run. Track stale lock state and defer
@@ -991,6 +1005,7 @@ export async function rebuildSandbox(
     // been deleted. The recreate path also inherits the original sandbox's
     // no-GPU intent so the inner `onboard --resume` does not enforce the
     // Docker CDI GPU preflight on hosts without an NVIDIA GPU.
+    handoffRebuildBaseImageResolutionHint(baseImageResolutionHint);
     const recreateOpts = buildRebuildRecreateOnboardOpts({
       sb,
       rebuildAgent,

@@ -2884,7 +2884,7 @@ async function createSandbox(
       note(`  Sandbox '${sandboxName}' exists but is not ready — recreating it.`);
     }
 
-    const previousEntry: SandboxEntry | null = registry.getSandbox(sandboxName);
+    const previousEntry = sandboxDockerfilePatchFlow.captureBaseResolution(sandboxName);
     policyPresetCarry.applyRecreatePolicyCarryForward(sandboxName, isNonInteractive(), note);
 
     if (pendingStateRestore === null && !shouldSkipPreRecreateBackup(process.env)) {
@@ -2926,7 +2926,7 @@ async function createSandbox(
       root: ROOT,
       fromDockerfile,
       agent,
-      createAgentSandbox: agentOnboard.createAgentSandbox,
+      createAgentSandbox: sandboxDockerfilePatchFlow.createAgentSandboxWithResolution,
       log: console.log,
       warn: console.warn,
       error: console.error,
@@ -3003,7 +3003,7 @@ async function createSandbox(
     configuredMessagingChannels:
       getChannelsFromPlan(plannedMessagingPlan) ?? activeMessagingChannels,
   });
-  const { buildId } = await sandboxDockerfilePatchFlow.prepareSandboxDockerfilePatch({
+  const { buildId } = await sandboxDockerfilePatchFlow.prepareSandboxDockerfilePatchWithResolution({
     agent,
     fromDockerfile,
     sandboxBaseImage: SANDBOX_BASE_IMAGE,
@@ -4680,7 +4680,7 @@ async function onboard(opts: OnboardOptions = {}): Promise<void> {
         exitProcess: (code) => process.exit(code),
       },
     );
-  // Fail fast for NEMOCLAW_POLICY_TIER only where selectPolicyTier reads it.
+  sandboxDockerfilePatchFlow.beginBaseImageResolutionFlow({ fresh });
   if (isNonInteractive()) policyTierEnv.validatePolicyTierEnvEarly();
   const noticeAccepted = await ensureUsageNoticeConsent({
     nonInteractive: isNonInteractive(),

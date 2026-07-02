@@ -21,6 +21,7 @@ import {
   buildLocalBaseTag,
   resolveSandboxBaseImage,
   SANDBOX_BASE_TAG,
+  type SandboxBaseImageResolutionMetadata,
 } from "../sandbox-base-image";
 import { describeAgentBinaryFailure, verifyAgentBinaryAvailable } from "./binary-availability";
 import { printOptionalDashboardUi } from "./dashboard-ui";
@@ -63,10 +64,15 @@ export function resolveAgent({
  */
 export function ensureAgentBaseImage(
   agent: AgentDefinition,
-  opts: { forceBaseImageRebuild?: boolean } = {},
+  opts: {
+    forceBaseImageRebuild?: boolean;
+    resolutionHint?: SandboxBaseImageResolutionMetadata | null;
+    forceBaseImageRefresh?: boolean;
+  } = {},
 ): {
   imageTag: string | null;
   built: boolean;
+  resolutionMetadata?: SandboxBaseImageResolutionMetadata;
 } {
   const baseDockerfile = agent.dockerfileBasePath;
 
@@ -100,11 +106,17 @@ export function ensureAgentBaseImage(
     envVar: `NEMOCLAW_${agent.name.toUpperCase().replace(/[^A-Z0-9]+/g, "_")}_SANDBOX_BASE_IMAGE_REF`,
     label: `${agent.displayName} sandbox base image`,
     requireOpenshellSandboxAbi: process.platform === "linux",
+    resolutionHint: opts.resolutionHint,
+    forceRefresh: opts.forceBaseImageRefresh,
     rootDir: ROOT,
   });
   if (resolved && !forceBaseImageRebuild) {
     console.log(`  Using ${agent.displayName} base image: ${resolved.ref}`);
-    return { imageTag: resolved.ref, built: false };
+    return {
+      imageTag: resolved.ref,
+      built: false,
+      ...(resolved.metadata ? { resolutionMetadata: resolved.metadata } : {}),
+    };
   }
   if (!resolved && process.platform === "linux" && !forceBaseImageRebuild) {
     throw new Error(
@@ -141,10 +153,15 @@ export function ensureAgentBaseImage(
  */
 export function createAgentSandbox(
   agent: AgentDefinition,
-  opts: { forceBaseImageRebuild?: boolean } = {},
+  opts: {
+    forceBaseImageRebuild?: boolean;
+    resolutionHint?: SandboxBaseImageResolutionMetadata | null;
+    forceBaseImageRefresh?: boolean;
+  } = {},
 ): {
   buildCtx: string;
   stagedDockerfile: string;
+  baseImageResolutionMetadata: SandboxBaseImageResolutionMetadata | null;
 } {
   const agentDockerfile = agent.dockerfilePath;
 
@@ -152,7 +169,7 @@ export function createAgentSandbox(
     throw new Error(`${agent.displayName} is missing a sandbox Dockerfile`);
   }
 
-  const { imageTag: baseImageRef } = ensureAgentBaseImage(agent, opts);
+  const { imageTag: baseImageRef, resolutionMetadata } = ensureAgentBaseImage(agent, opts);
 
   const buildCtx = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-build-"));
   fs.cpSync(ROOT, buildCtx, {
@@ -173,7 +190,11 @@ export function createAgentSandbox(
   }
   console.log(`  Using ${agent.displayName} Dockerfile: ${agentDockerfile}`);
 
-  return { buildCtx, stagedDockerfile };
+  return {
+    buildCtx,
+    stagedDockerfile,
+    baseImageResolutionMetadata: resolutionMetadata ?? null,
+  };
 }
 
 /**

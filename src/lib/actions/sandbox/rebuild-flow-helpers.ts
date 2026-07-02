@@ -5,21 +5,22 @@ import {
   detectOpenShellStateRpcResultIssue,
   printOpenShellStateRpcIssue,
 } from "../../adapters/openshell/gateway-drift";
+import { loadAgent } from "../../agent/defs";
 import { ensureAgentBaseImage } from "../../agent/onboard";
+import { CLI_NAME } from "../../cli/branding";
 import { RD as _RD, G, R, YW } from "../../cli/terminal-style";
 import { getNamedGatewayLifecycleState } from "../../gateway-runtime-action";
+import { resolveSandboxGatewayName } from "../../onboard/gateway-binding";
 import {
   captureSandboxListWithGatewayRecovery,
   printSandboxListFailureWithRecoveryContext,
 } from "../../openshell-sandbox-list";
 import { parseLiveSandboxNames } from "../../runtime-recovery";
+import type { SandboxBaseImageResolutionMetadata } from "../../sandbox-base-image";
 import * as shields from "../../shields";
 import * as registry from "../../state/registry";
 import * as sandboxState from "../../state/sandbox";
 import * as userManagedFilesProbe from "../../state/user-managed-files-probe";
-import { loadAgent } from "../../agent/defs";
-import { CLI_NAME } from "../../cli/branding";
-import { resolveSandboxGatewayName } from "../../onboard/gateway-binding";
 import {
   getReconciledSandboxGatewayState,
   printGatewayLifecycleHint,
@@ -153,11 +154,18 @@ export function openRebuildShieldsWindowForState(
 export function ensureRebuildAgentBaseImage(
   rebuildAgent: string | null,
   bail: (msg: string, code?: number) => never,
+  options: {
+    resolutionHint?: SandboxBaseImageResolutionMetadata | null;
+    forceBaseImageRefresh?: boolean;
+  } = {},
 ): boolean {
   if (!rebuildAgent) return true;
   const agentDef = loadAgent(rebuildAgent);
   try {
-    ensureAgentBaseImage(agentDef, { forceBaseImageRebuild: true });
+    ensureAgentBaseImage(agentDef, {
+      resolutionHint: options.resolutionHint,
+      forceBaseImageRefresh: options.forceBaseImageRefresh,
+    });
     return true;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

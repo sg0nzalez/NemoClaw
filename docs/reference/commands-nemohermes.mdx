@@ -115,8 +115,18 @@ If the recorded session conflicts with flags you pass on the recovery run, NemoC
 
 Use `--fresh` to discard the saved onboarding session and start the wizard from the beginning.
 This clears stale or failed session state before NemoClaw creates a new session record.
+It also bypasses locally recorded sandbox base-image resolution metadata and performs the normal pull-and-resolve flow.
 The installer also accepts `--fresh` and forwards it to `nemohermes onboard`, which skips automatic resume detection.
 `--resume` and `--fresh` are mutually exclusive.
+
+NemoClaw records the base-image resolution on each managed sandbox image.
+During a warm recreate or rebuild, it validates the repository digest or local image identity, platform, and OpenShell ABI requirement through local Docker metadata before reusing it.
+Set `NEMOCLAW_SANDBOX_BASE_IMAGE_REFRESH=1` to bypass this reuse without changing onboarding session handling:
+
+```bash
+NEMOCLAW_SANDBOX_BASE_IMAGE_REFRESH=1 nemohermes onboard --recreate-sandbox
+NEMOCLAW_SANDBOX_BASE_IMAGE_REFRESH=1 nemohermes <sandbox-name> rebuild
+```
 
 <Warning>
 For NemoClaw-managed environments, use `nemohermes onboard` when you need to create or recreate the OpenShell gateway or sandbox.

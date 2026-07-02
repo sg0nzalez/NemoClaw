@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { spawnSync } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -10,15 +11,36 @@ import {
   dockerCapture,
   dockerImageInspect,
   dockerImageInspectFormat,
+  dockerInfoFormat,
   dockerPull,
 } from "./adapters/docker";
 import { ROOT, redact } from "./runner";
+import { addTraceEvent } from "./trace";
 
 export const OPENCLAW_SANDBOX_BASE_IMAGE = "ghcr.io/nvidia/nemoclaw/sandbox-base";
 export const SANDBOX_BASE_TAG = "latest";
 export const OPENSHELL_SANDBOX_MIN_GLIBC = "2.39";
 
-type ResolveBaseImageOptions = {
+export const SANDBOX_BASE_RESOLUTION_LABEL = "com.nvidia.nemoclaw.base-resolution";
+export const SANDBOX_BASE_RESOLUTION_KEY_LABEL = "com.nvidia.nemoclaw.base-resolution-key";
+const SANDBOX_BASE_RESOLUTION_SCHEMA = 1;
+
+export type SandboxBaseImageResolutionMetadata = {
+  schema: number;
+  key: string;
+  imageName: string;
+  ref: string;
+  digest: string | null;
+  source: SandboxBaseImageResolution["source"];
+  imageId: string;
+  os: string;
+  architecture: string;
+  glibcVersion: string | null;
+  requireOpenshellSandboxAbi: boolean;
+  minGlibcVersion: string;
+};
+
+export type ResolveBaseImageOptions = {
   imageName: string;
   dockerfilePath: string;
   localTag: string;
@@ -28,6 +50,8 @@ type ResolveBaseImageOptions = {
   minGlibcVersion?: string;
   rootDir?: string;
   env?: NodeJS.ProcessEnv;
+  resolutionHint?: SandboxBaseImageResolutionMetadata | null;
+  forceRefresh?: boolean;
 };
 
 export type SandboxBaseImageResolution = {
@@ -35,9 +59,193 @@ export type SandboxBaseImageResolution = {
   digest: string | null;
   source: "override" | "version-tag" | "source-sha" | "latest" | "local";
   glibcVersion: string | null;
+  metadata?: SandboxBaseImageResolutionMetadata;
 };
 
 const BASE_IMAGE_INPUT_PATHS = ["Dockerfile.base", "nemoclaw-blueprint/blueprint.yaml"];
+
+export type LocalImageMetadata = {
+  Id?: unknown;
+  RepoDigests?: unknown;
+  Os?: unknown;
+  Architecture?: unknown;
+  Config?: { Labels?: unknown } | null;
+};
+
+export type BaseImageResolutionValidation =
+  | { ok: true }
+  | {
+      ok: false;
+      reason:
+        | "key_mismatch"
+        | "requirements_changed"
+        | "abi_incompatible"
+        | "local_image_changed"
+        | "repo_digest_missing";
+    };
+
+export function validateSandboxBaseImageResolutionMetadata(input: {
+  metadata: SandboxBaseImageResolutionMetadata;
+  expectedKey: string;
+  imageName: string;
+  requireOpenshellSandboxAbi: boolean;
+  minGlibcVersion: string;
+  inspected: LocalImageMetadata | null;
+}): BaseImageResolutionValidation {
+  const { metadata, inspected } = input;
+  if (metadata.key !== input.expectedKey || metadata.imageName !== input.imageName) {
+    return { ok: false, reason: "key_mismatch" };
+  }
+  if (
+    metadata.requireOpenshellSandboxAbi !== input.requireOpenshellSandboxAbi ||
+    metadata.minGlibcVersion !== input.minGlibcVersion
+  ) {
+    return { ok: false, reason: "requirements_changed" };
+  }
+  if (
+    input.requireOpenshellSandboxAbi &&
+    (!metadata.glibcVersion || !versionGte(metadata.glibcVersion, input.minGlibcVersion))
+  ) {
+    return { ok: false, reason: "abi_incompatible" };
+  }
+  if (
+    !inspected ||
+    inspected.Id !== metadata.imageId ||
+    inspected.Os !== metadata.os ||
+    inspected.Architecture !== metadata.architecture
+  ) {
+    return { ok: false, reason: "local_image_changed" };
+  }
+  if (metadata.digest) {
+    const expectedRepoDigest = `${input.imageName}@${metadata.digest}`;
+    const repoDigests = Array.isArray(inspected.RepoDigests) ? inspected.RepoDigests : [];
+    if (!repoDigests.some((entry) => String(entry) === expectedRepoDigest)) {
+      return { ok: false, reason: "repo_digest_missing" };
+    }
+  }
+  return { ok: true };
+}
+
+function inspectLocalImageMetadata(imageRef: string): LocalImageMetadata | null {
+  const output = dockerImageInspectFormat("{{json .}}", imageRef, {
+    ignoreError: true,
+  });
+  if (!output) return null;
+  try {
+    const parsed = JSON.parse(output) as unknown;
+    return parsed && typeof parsed === "object" ? (parsed as LocalImageMetadata) : null;
+  } catch {
+    return null;
+  }
+}
+
+function hashBaseImageInputs(rootDir: string, dockerfilePath: string): string {
+  const hash = crypto.createHash("sha256");
+  const paths = normalizeBaseImageInputPaths(rootDir, [dockerfilePath]).sort();
+  for (const relativePath of paths) {
+    hash.update(relativePath);
+    hash.update("\0");
+    try {
+      hash.update(fs.readFileSync(path.join(rootDir, relativePath)));
+    } catch {
+      hash.update("<missing>");
+    }
+    hash.update("\0");
+  }
+  return hash.digest("hex");
+}
+
+function dockerPlatform(): string {
+  const reported = dockerInfoFormat("{{.OSType}}/{{.Architecture}}", {
+    ignoreError: true,
+    timeout: 5_000,
+  }).trim();
+  return reported && reported !== "/" ? reported : `${process.platform}/${process.arch}`;
+}
+
+export function createSandboxBaseImageResolutionKey(options: ResolveBaseImageOptions): string {
+  const env = options.env || process.env;
+  const rootDir = options.rootDir || ROOT;
+  const override = options.envVar ? String(env[options.envVar] || "").trim() : "";
+  const material = {
+    schema: SANDBOX_BASE_RESOLUTION_SCHEMA,
+    imageName: options.imageName,
+    override,
+    versionTags: getVersionedBaseImageTags(rootDir, env),
+    sourceTags: getSourceShortShaTags(rootDir, env),
+    localTag: options.localTag,
+    inputFingerprint: hashBaseImageInputs(rootDir, options.dockerfilePath),
+    platform: dockerPlatform(),
+    requireOpenshellSandboxAbi: options.requireOpenshellSandboxAbi === true,
+    minGlibcVersion: options.minGlibcVersion || OPENSHELL_SANDBOX_MIN_GLIBC,
+  };
+  return crypto.createHash("sha256").update(JSON.stringify(material)).digest("hex");
+}
+
+export function readSandboxBaseImageResolutionMetadata(
+  sandboxImageRef: string | null | undefined,
+): SandboxBaseImageResolutionMetadata | null {
+  if (!sandboxImageRef) return null;
+  const labelsOutput = dockerImageInspectFormat("{{json .Config.Labels}}", sandboxImageRef, {
+    ignoreError: true,
+  });
+  if (!labelsOutput) return null;
+  try {
+    return parseSandboxBaseImageResolutionLabels(JSON.parse(labelsOutput));
+  } catch {
+    return null;
+  }
+}
+
+export function parseSandboxBaseImageResolutionLabels(
+  labels: unknown,
+): SandboxBaseImageResolutionMetadata | null {
+  try {
+    if (!labels || typeof labels !== "object") return null;
+    const encoded = (labels as Record<string, unknown>)[SANDBOX_BASE_RESOLUTION_LABEL];
+    if (typeof encoded !== "string" || !encoded) return null;
+    const parsed = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")) as unknown;
+    if (!parsed || typeof parsed !== "object") return null;
+    const metadata = parsed as SandboxBaseImageResolutionMetadata;
+    const validSources = new Set<SandboxBaseImageResolution["source"]>([
+      "override",
+      "version-tag",
+      "source-sha",
+      "latest",
+      "local",
+    ]);
+    if (
+      metadata.schema !== SANDBOX_BASE_RESOLUTION_SCHEMA ||
+      typeof metadata.key !== "string" ||
+      typeof metadata.imageName !== "string" ||
+      typeof metadata.ref !== "string" ||
+      (metadata.digest !== null && typeof metadata.digest !== "string") ||
+      !validSources.has(metadata.source) ||
+      typeof metadata.imageId !== "string" ||
+      typeof metadata.os !== "string" ||
+      typeof metadata.architecture !== "string" ||
+      (metadata.glibcVersion !== null && typeof metadata.glibcVersion !== "string") ||
+      typeof metadata.requireOpenshellSandboxAbi !== "boolean" ||
+      typeof metadata.minGlibcVersion !== "string"
+    ) {
+      return null;
+    }
+    return metadata;
+  } catch {
+    return null;
+  }
+}
+
+export function formatSandboxBaseImageResolutionLabels(
+  metadata: SandboxBaseImageResolutionMetadata | null | undefined,
+): string {
+  if (!metadata) return "";
+  const encoded = Buffer.from(JSON.stringify(metadata), "utf8").toString("base64url");
+  return (
+    `LABEL ${SANDBOX_BASE_RESOLUTION_KEY_LABEL}=${JSON.stringify(metadata.key)} ` +
+    `${SANDBOX_BASE_RESOLUTION_LABEL}=${JSON.stringify(encoded)}`
+  );
+}
 
 function normalizeBaseImageInputPaths(rootDir: string, paths: string[] = []): string[] {
   const absoluteRootDir = path.resolve(rootDir);
@@ -331,6 +539,86 @@ function getRepoDigest(
   return { digest, ref: `${imageName}@${digest}` };
 }
 
+function createResolutionMetadata(
+  options: ResolveBaseImageOptions,
+  key: string,
+  resolution: SandboxBaseImageResolution,
+): SandboxBaseImageResolutionMetadata | null {
+  // Published images must retain repository-digest proof. A mutable tag with
+  // no RepoDigests entry remains usable for the current run, but is never
+  // recorded as a warm-resolution hint. Local fallback images use image ID
+  // plus the resolution key's input fingerprint instead.
+  if (!resolution.digest && resolution.source !== "local") return null;
+  const inspected = inspectLocalImageMetadata(resolution.ref);
+  const imageId = typeof inspected?.Id === "string" ? inspected.Id : "";
+  const osName = typeof inspected?.Os === "string" ? inspected.Os : "";
+  const architecture = typeof inspected?.Architecture === "string" ? inspected.Architecture : "";
+  if (!imageId || !osName || !architecture) return null;
+
+  if (resolution.digest) {
+    const expectedRepoDigest = `${options.imageName}@${resolution.digest}`;
+    const repoDigests = Array.isArray(inspected?.RepoDigests) ? inspected.RepoDigests : [];
+    if (!repoDigests.some((entry) => String(entry) === expectedRepoDigest)) return null;
+  }
+
+  return {
+    schema: SANDBOX_BASE_RESOLUTION_SCHEMA,
+    key,
+    imageName: options.imageName,
+    ref: resolution.ref,
+    digest: resolution.digest,
+    source: resolution.source,
+    imageId,
+    os: osName,
+    architecture,
+    glibcVersion: resolution.glibcVersion,
+    requireOpenshellSandboxAbi: options.requireOpenshellSandboxAbi === true,
+    minGlibcVersion: options.minGlibcVersion || OPENSHELL_SANDBOX_MIN_GLIBC,
+  };
+}
+
+function finalizeResolution(
+  options: ResolveBaseImageOptions,
+  key: string,
+  resolution: SandboxBaseImageResolution,
+): SandboxBaseImageResolution {
+  const metadata = createResolutionMetadata(options, key, resolution);
+  return metadata ? { ...resolution, metadata } : resolution;
+}
+
+function reuseResolutionHint(
+  options: ResolveBaseImageOptions,
+  key: string,
+): SandboxBaseImageResolution | null {
+  const hint = options.resolutionHint;
+  if (!hint) return null;
+  const validation = validateSandboxBaseImageResolutionMetadata({
+    metadata: hint,
+    expectedKey: key,
+    imageName: options.imageName,
+    requireOpenshellSandboxAbi: options.requireOpenshellSandboxAbi === true,
+    minGlibcVersion: options.minGlibcVersion || OPENSHELL_SANDBOX_MIN_GLIBC,
+    inspected: inspectLocalImageMetadata(hint.ref),
+  });
+  if (!validation.ok) {
+    addTraceEvent("nemoclaw.sandbox_base_image.cache_stale", { reason: validation.reason });
+    return null;
+  }
+
+  addTraceEvent("nemoclaw.sandbox_base_image.cache_hit", {
+    source: hint.source,
+    digest_pinned: hint.digest !== null,
+  });
+  console.log(`  Reusing locally validated ${options.label || "sandbox base image"}: ${hint.ref}`);
+  return {
+    ref: hint.ref,
+    digest: hint.digest,
+    source: hint.source,
+    glibcVersion: hint.glibcVersion,
+    metadata: hint,
+  };
+}
+
 function resolvePulledCandidate(
   imageName: string,
   imageRef: string,
@@ -341,7 +629,12 @@ function resolvePulledCandidate(
     ignoreError: true,
     suppressOutput: true,
   });
+  addTraceEvent("nemoclaw.sandbox_base_image.local_validation", {
+    source,
+    present: inspectResult.status === 0,
+  });
   if (inspectResult.status !== 0) {
+    addTraceEvent("nemoclaw.sandbox_base_image.remote_pull", { source });
     const pullResult = dockerPull(imageRef, { ignoreError: true, suppressOutput: true });
     if (pullResult.status !== 0) return null;
   }
@@ -382,6 +675,7 @@ function resolveLocalCandidate(
       ? imageMeetsMinimumGlibc(imageRef, options.minGlibcVersion || OPENSHELL_SANDBOX_MIN_GLIBC)
       : { ok: true, version: null };
     if (check.ok) {
+      addTraceEvent("nemoclaw.sandbox_base_image.local_fallback_reuse");
       return { ref: imageRef, digest: null, source: "local", glibcVersion: check.version };
     }
   }
@@ -390,6 +684,7 @@ function resolveLocalCandidate(
 
   const label = options.label || "sandbox base image";
   console.warn(`  Building ${label} locally because no compatible published base image was found.`);
+  addTraceEvent("nemoclaw.sandbox_base_image.local_fallback_build");
   console.warn("  This is a one-time step and can take several minutes.");
   // Suppress the full BuildKit log (apt-get output, layer hashes, debconf
   // warnings) on success — same approach as #3311 for the [2/8] gateway
@@ -431,44 +726,59 @@ export function resolveSandboxBaseImage(
   options: ResolveBaseImageOptions,
 ): SandboxBaseImageResolution | null {
   const env = options.env || process.env;
+  const resolutionKey = createSandboxBaseImageResolutionKey(options);
   const override = options.envVar ? String(env[options.envVar] || "").trim() : "";
+
+  if (!options.forceRefresh) {
+    const reused = reuseResolutionHint(options, resolutionKey);
+    if (reused) return reused;
+  } else {
+    addTraceEvent("nemoclaw.sandbox_base_image.force_refresh");
+  }
+  addTraceEvent("nemoclaw.sandbox_base_image.cache_miss", {
+    has_hint: options.resolutionHint != null,
+  });
+
+  const finish = (resolution: SandboxBaseImageResolution): SandboxBaseImageResolution =>
+    finalizeResolution(options, resolutionKey, resolution);
 
   if (override) {
     const resolved = resolvePulledCandidate(options.imageName, override, "override", options);
-    if (resolved) return resolved;
+    if (resolved) return finish(resolved);
     if (!options.requireOpenshellSandboxAbi) return null;
   } else {
     for (const tag of getVersionedBaseImageTags(options.rootDir || ROOT, env)) {
       const imageRef = `${options.imageName}:${tag}`;
       const resolved = resolvePulledCandidate(options.imageName, imageRef, "version-tag", options);
-      if (resolved) return resolved;
+      if (resolved) return finish(resolved);
     }
 
     for (const tag of getSourceShortShaTags(options.rootDir || ROOT, env)) {
       const imageRef = `${options.imageName}:${tag}`;
       const resolved = resolvePulledCandidate(options.imageName, imageRef, "source-sha", options);
-      if (resolved) return resolved;
+      if (resolved) return finish(resolved);
     }
 
     if (baseImageInputsChangedSinceMain(options.rootDir || ROOT, env, [options.dockerfilePath])) {
       const local = resolveLocalCandidate(options);
-      if (local) return local;
+      if (local) return finish(local);
       // The base Dockerfile changed, so fail closed instead of silently using stale :latest.
-      return {
+      return finish({
         ref: options.localTag,
         digest: null,
         source: "local",
         glibcVersion: null,
-      };
+      });
     }
 
     const latestRef = `${options.imageName}:${SANDBOX_BASE_TAG}`;
     const resolved = resolvePulledCandidate(options.imageName, latestRef, "latest", options);
-    if (resolved) return resolved;
+    if (resolved) return finish(resolved);
   }
 
   if (options.requireOpenshellSandboxAbi) {
-    return resolveLocalCandidate(options);
+    const local = resolveLocalCandidate(options);
+    return local ? finish(local) : null;
   }
   return null;
 }

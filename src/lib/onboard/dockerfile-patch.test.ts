@@ -84,6 +84,44 @@ afterEach(() => {
 });
 
 describe("dockerfile patch helpers", () => {
+  it("stamps base-resolution metadata on the completed managed image (#4680)", () => {
+    const dockerfilePath = dockerfileWith("FROM scratch\n");
+    const metadata = {
+      schema: 1,
+      key: "resolution-key",
+      imageName: "ghcr.io/nvidia/nemoclaw/sandbox-base",
+      ref: "ghcr.io/nvidia/nemoclaw/sandbox-base@sha256:abc",
+      digest: "sha256:abc",
+      source: "version-tag" as const,
+      imageId: "sha256:image",
+      os: "linux",
+      architecture: "amd64",
+      glibcVersion: "2.41",
+      requireOpenshellSandboxAbi: true,
+      minGlibcVersion: "2.39",
+    };
+
+    patchStagedDockerfile(
+      dockerfilePath,
+      "model",
+      "http://127.0.0.1:7000",
+      "build",
+      null,
+      null,
+      null,
+      null,
+      false,
+      null,
+      [],
+      { baseImageResolutionMetadata: metadata },
+    );
+
+    const dockerfile = fs.readFileSync(dockerfilePath, "utf8");
+    expect(dockerfile).toContain('LABEL com.nvidia.nemoclaw.base-resolution-key="resolution-key"');
+    const encoded = dockerfile.match(/base-resolution="([^"]+)"/)?.[1];
+    expect(JSON.parse(Buffer.from(encoded!, "base64url").toString("utf8"))).toEqual(metadata);
+  });
+
   it("encodes Docker JSON ARG values as base64 JSON", () => {
     expect(
       Buffer.from(encodeDockerJsonArg({ supportsStore: false }), "base64").toString("utf-8"),
