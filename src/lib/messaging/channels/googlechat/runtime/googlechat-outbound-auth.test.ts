@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { outboundAuthPatchInternals } from "./googlechat-outbound-auth";
 
 // The self-installing preload publishes its pure helpers here on require (above).
@@ -68,14 +68,9 @@ describe("googlechat outbound-auth patch", () => {
 
   describe("injected short-circuit runtime behavior", () => {
     const ENV = "GOOGLE_CHAT_ACCESS_TOKEN";
-    let saved: string | undefined;
 
-    beforeEach(() => {
-      saved = process.env[ENV];
-    });
     afterEach(() => {
-      if (saved === undefined) delete process.env[ENV];
-      else process.env[ENV] = saved;
+      vi.unstubAllEnvs();
     });
 
     // Build a callable from the patched producer whose original body returns a
@@ -89,17 +84,17 @@ describe("googlechat outbound-auth patch", () => {
     }
 
     it("returns the revision-less canonical placeholder when a stamped placeholder is set", () => {
-      process.env[ENV] = "openshell:resolve:env:v7_GOOGLE_CHAT_ACCESS_TOKEN";
+      vi.stubEnv(ENV, "openshell:resolve:env:v7_GOOGLE_CHAT_ACCESS_TOKEN");
       expect(buildProducer()()).toBe(CANONICAL);
     });
 
     it("returns a raw (non-placeholder) env value as-is for manual deployments", () => {
-      process.env[ENV] = "ya29.raw-access-token";
+      vi.stubEnv(ENV, "ya29.raw-access-token");
       expect(buildProducer()()).toBe("ya29.raw-access-token");
     });
 
     it("throws (never reaches the in-process body) when the env is unset", () => {
-      delete process.env[ENV];
+      vi.stubEnv(ENV, undefined);
       const producer = buildProducer();
       expect(producer).toThrow(/GOOGLE_CHAT_ACCESS_TOKEN is not set/);
     });

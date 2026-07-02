@@ -15,7 +15,7 @@ import {
 
 const SA_JSON = JSON.stringify({
   client_email: "bot@p.iam.gserviceaccount.com",
-  private_key: "-----BEGIN PRIVATE KEY-----\nMIIabc\n-----END PRIVATE KEY-----\n",
+  private_key: "fake-test-private-key-material",
 });
 const normalizeCredentialValue = (v: unknown) => String(v ?? "").trim();
 const redact = (s: string) => s;
