@@ -19,6 +19,27 @@ export OPENAI_BASE_URL="${OPENAI_BASE_URL:-https://inference.local/v1}"
 # and inference.local must stay on the proxy path instead of resolving via DNS.
 PROXY_HOST="${NEMOCLAW_PROXY_HOST:-10.200.0.1}"
 PROXY_PORT="${NEMOCLAW_PROXY_PORT:-3128}"
+
+is_valid_proxy_host() {
+  local value="$1"
+  [[ "$value" =~ ^[A-Za-z0-9._-]+$ ]]
+}
+
+is_valid_proxy_port() {
+  local value="$1"
+  [[ "$value" =~ ^[0-9]{1,5}$ ]] || return 1
+  ((10#$value >= 1 && 10#$value <= 65535))
+}
+
+if ! is_valid_proxy_host "$PROXY_HOST"; then
+  printf '%s\n' 'Invalid NEMOCLAW_PROXY_HOST for the managed runtime proxy.' >&2
+  exit 1
+fi
+if ! is_valid_proxy_port "$PROXY_PORT"; then
+  printf '%s\n' 'Invalid NEMOCLAW_PROXY_PORT for the managed runtime proxy.' >&2
+  exit 1
+fi
+
 _PROXY_URL="http://${PROXY_HOST}:${PROXY_PORT}"
 _NO_PROXY_VAL="localhost,127.0.0.1,::1,${PROXY_HOST}"
 export HTTP_PROXY="$_PROXY_URL"

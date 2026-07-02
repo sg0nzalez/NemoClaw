@@ -277,12 +277,12 @@ describe("LangChain Deep Agents Code image contracts", () => {
     const { envFileText, output } = runStartScriptProxyProbe(scriptPath, envFile, {
       HTTP_PROXY: "http://host-user:host-password@host-proxy.example:8118",
       NO_PROXY: "localhost,inference.local",
-      NEMOCLAW_PROXY_HOST: "192.168.64.1",
-      NEMOCLAW_PROXY_PORT: "8080",
+      NEMOCLAW_PROXY_HOST: "managed-proxy.internal",
+      NEMOCLAW_PROXY_PORT: "65535",
     });
 
-    const managedProxy = "http://192.168.64.1:8080";
-    const managedNoProxy = "localhost,127.0.0.1,::1,192.168.64.1";
+    const managedProxy = "http://managed-proxy.internal:65535";
+    const managedNoProxy = "localhost,127.0.0.1,::1,managed-proxy.internal";
     const outputLines = output.trimEnd().split("\n");
     const envFileLines = envFileText.trimEnd().split("\n");
     for (const name of PROXY_URL_ENV_NAMES) {
@@ -299,6 +299,35 @@ describe("LangChain Deep Agents Code image contracts", () => {
     expect(combined).not.toContain("host-proxy.example");
     expect(combined).not.toContain("host-user");
     expect(combined).not.toContain("host-password");
+  });
+
+  it("rejects unsafe managed proxy overrides before persisting shell state (#6191)", () => {
+    const rejectedOverrides = [
+      { NEMOCLAW_PROXY_HOST: "corp-user:corp-password@proxy.example" },
+      { NEMOCLAW_PROXY_HOST: "proxy example" },
+      { NEMOCLAW_PROXY_HOST: "proxy.example\ninjected" },
+      { NEMOCLAW_PROXY_HOST: "proxy.example/path" },
+      { NEMOCLAW_PROXY_PORT: "not-a-port" },
+      { NEMOCLAW_PROXY_PORT: "0" },
+      { NEMOCLAW_PROXY_PORT: "65536" },
+      { NEMOCLAW_PROXY_PORT: "000001" },
+    ];
+
+    for (const overrides of rejectedOverrides) {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-dcode-start-invalid-"));
+      const { envFile, scriptPath } = makeStartScriptFixture(tempDir);
+      const result = spawnSync("bash", [scriptPath, "true"], {
+        env: { PATH: process.env.PATH ?? "/usr/bin:/bin", ...overrides },
+        encoding: "utf8",
+      });
+
+      expect(result.status).not.toBe(0);
+      expect(fs.existsSync(envFile)).toBe(false);
+      const output = `${result.stdout}\n${result.stderr}`;
+      for (const value of Object.values(overrides)) {
+        expect(output).not.toContain(value);
+      }
+    }
   });
 
   it("keeps all Deep Agents Code entry points behind the managed wrapper boundary", () => {
@@ -591,6 +620,9 @@ describe("LangChain Deep Agents Code image contracts", () => {
     expect(headlessCheck).toContain("dcode -n 'Reply with exactly one word: PONG'");
     expect(headlessCheck).toContain("sandbox_login_exec");
     expect(headlessCheck).toContain("sandbox_login_proxy_contract");
+    expect(headlessCheck).toContain("-u HTTP_PROXY -u HTTPS_PROXY -u NO_PROXY");
+    expect(headlessCheck).toContain("-u http_proxy -u https_proxy -u no_proxy");
+    expect(headlessCheck).toContain('HOME=/sandbox bash -lc "$1"');
     expect(headlessCheck).toContain('bash -lc "$1"');
     expect(headlessCheck).toContain("NEMOCLAW_DCODE_PROXY_ENV_OK");
     expect(headlessCheck).toContain('sandbox_login_exec "cd /sandbox');
@@ -676,7 +708,7 @@ describe("LangChain Deep Agents Code image contracts", () => {
     const validate = (proxyUrl: string, noProxy: string, lowerProxy = proxyUrl) =>
       runHeadlessCheckHelper(
         [
-          'sandbox_login_exec() { bash --noprofile --norc -c "$1"; }',
+          'sandbox_login_exec() { HOME=/sandbox bash --noprofile --norc -c "$1"; }',
           'export HTTP_PROXY="$TEST_PROXY_URL" HTTPS_PROXY="$TEST_PROXY_URL"',
           'export http_proxy="$TEST_LOWER_PROXY_URL" https_proxy="$TEST_LOWER_PROXY_URL"',
           'export NO_PROXY="$TEST_NO_PROXY" no_proxy="$TEST_NO_PROXY"',

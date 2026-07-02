@@ -10,6 +10,8 @@
 # shell path must return PONG with exit 0; provider, connection, DNS, timeout, and
 # ambiguous failures are not acceptable. No real provider/proxy credentials may
 # appear in config.toml, .env, .mcp.json, /tmp/nemoclaw-proxy-env.sh, or output.
+# Direct DNS/hosts resolution is intentionally not required: OpenShell's managed
+# proxy routes inference.local when the request follows the normalized path.
 
 set -euo pipefail
 
@@ -33,7 +35,13 @@ sandbox_exec() {
 }
 
 sandbox_login_exec() {
-  openshell sandbox exec --name "$SANDBOX_NAME" -- bash -lc "$1" 2>&1
+  # OpenShell exec sessions may carry their own environment. Remove it so this
+  # probe can only recover the proxy contract through /sandbox/.profile, then
+  # pin HOME so bash selects the sandbox user's trusted login startup file.
+  openshell sandbox exec --name "$SANDBOX_NAME" -- env \
+    -u HTTP_PROXY -u HTTPS_PROXY -u NO_PROXY \
+    -u http_proxy -u https_proxy -u no_proxy \
+    HOME=/sandbox bash -lc "$1" 2>&1
 }
 
 sandbox_login_proxy_contract() {
@@ -41,22 +49,27 @@ sandbox_login_proxy_contract() {
   # shellcheck disable=SC2016
   sandbox_login_exec '
 set -euo pipefail
+contract_fail() {
+  printf "%s\n" "NEMOCLAW_DCODE_PROXY_ENV_FAIL:$1"
+  exit 1
+}
+[ "${HOME:-}" = /sandbox ] || contract_fail home
 proxy_url="${HTTP_PROXY:-}"
 case "$proxy_url" in
   http://*:* ) ;;
-  *) exit 1 ;;
+  *) contract_fail proxy-shape ;;
 esac
 case "$proxy_url" in
-  *"@"*) exit 1 ;;
+  *"@"*) contract_fail proxy-credentials ;;
 esac
-[ "$proxy_url" = "${HTTPS_PROXY:-}" ]
-[ "$proxy_url" = "${http_proxy:-}" ]
-[ "$proxy_url" = "${https_proxy:-}" ]
+[ "$proxy_url" = "${HTTPS_PROXY:-}" ] || contract_fail https-proxy
+[ "$proxy_url" = "${http_proxy:-}" ] || contract_fail lower-http-proxy
+[ "$proxy_url" = "${https_proxy:-}" ] || contract_fail lower-https-proxy
 proxy_host="${proxy_url#http://}"
 proxy_host="${proxy_host%:*}"
 expected_no_proxy="localhost,127.0.0.1,::1,${proxy_host}"
-[ "${NO_PROXY:-}" = "$expected_no_proxy" ]
-[ "${no_proxy:-}" = "$expected_no_proxy" ]
+[ "${NO_PROXY:-}" = "$expected_no_proxy" ] || contract_fail no-proxy
+[ "${no_proxy:-}" = "$expected_no_proxy" ] || contract_fail lower-no-proxy
 printf "%s\n" "NEMOCLAW_DCODE_PROXY_ENV_OK"
 '
 }
@@ -193,7 +206,8 @@ main() {
   if printf '%s\n' "$proxy_contract_output" | grep -Fxq "NEMOCLAW_DCODE_PROXY_ENV_OK"; then
     pass "login shell loaded the normalized managed proxy environment"
   else
-    fail_test "login shell did not load the normalized managed proxy environment"
+    proxy_contract_reason="$(printf '%s\n' "$proxy_contract_output" | sed -n 's/^NEMOCLAW_DCODE_PROXY_ENV_FAIL:\([a-z-]*\)$/\1/p' | tail -n1)"
+    fail_test "login shell did not load the normalized managed proxy environment (${proxy_contract_reason:-unknown contract mismatch})"
   fi
 
   # 3. The managed route is reachable through the normalized login-shell proxy.
