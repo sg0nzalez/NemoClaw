@@ -3,6 +3,7 @@
 
 import path from "node:path";
 
+import { cleanupGatewayAfterLastSandbox } from "../../../src/lib/actions/sandbox/destroy-gateway.ts";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
 import {
   type HostCliClient,
@@ -58,7 +59,7 @@ async function cleanupHermes(
   label: string,
 ): Promise<void> {
   await bestEffort(() =>
-    host.command("nemoclaw", [SANDBOX_NAME, "destroy", "--yes"], {
+    host.command("nemoclaw", [SANDBOX_NAME, "destroy", "--yes", "--cleanup-gateway"], {
       artifactName: `${label}-nemoclaw-destroy`,
       env: commandEnv(),
       timeoutMs: 120_000,
@@ -71,13 +72,31 @@ async function cleanupHermes(
       timeoutMs: 60_000,
     }),
   );
-  await bestEffort(() =>
-    sandbox.openshell(["gateway", "destroy", "-g", "nemoclaw"], {
-      artifactName: `${label}-openshell-gateway-destroy`,
+  cleanupGatewayAfterLastSandbox("nemoclaw");
+  await host.cleanupGatewayRegistration("nemoclaw", {
+    artifactName: `${label}-openshell-gateway`,
+    env: commandEnv(),
+    timeoutMs: 60_000,
+  });
+  const gatewayPort = process.env.NEMOCLAW_GATEWAY_PORT ?? "8080";
+  const portAvailable = await host.command(
+    "node",
+    [
+      "-e",
+      'const net=require("node:net"); const server=net.createServer(); server.once("error", error => { console.error(error.code || "bind failed"); process.exit(1); }); server.listen(Number(process.argv[1]), "127.0.0.1", () => server.close(error => { if (error) { console.error(error.message); process.exit(1); } console.log("available"); }));',
+      gatewayPort,
+    ],
+    {
+      artifactName: `${label}-gateway-port-available`,
       env: commandEnv(),
-      timeoutMs: 60_000,
-    }),
+      timeoutMs: 30_000,
+    },
   );
+  if (portAvailable.exitCode !== 0) {
+    throw new Error(
+      `gateway port ${gatewayPort} remains occupied after cleanup: ${resultText(portAvailable)}`,
+    );
+  }
 }
 
 async function captureFailedGpuContainer(

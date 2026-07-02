@@ -10,6 +10,7 @@ import {
 } from "../fixtures/clients/index.ts";
 import { expect } from "../fixtures/e2e-test.ts";
 import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
+import { buildHermesManagedStartupIntegrityScript } from "./hermes-gpu-startup-integrity.ts";
 import { stripAnsi } from "./json-envelope.ts";
 
 export const HERMES_GPU_EXTRA_PLACEHOLDER_KEYS = [
@@ -36,6 +37,11 @@ export async function assertHermesGpuStartupProof({
   sandboxName,
   status,
 }: HermesGpuStartupProofOptions): Promise<void> {
+  expect(resultText(install)).toContain("Starting OpenShell Docker-driver gateway...");
+  expect(resultText(install)).toContain("Docker-driver gateway is healthy");
+  expect(resultText(install)).not.toContain("Reusing healthy NemoClaw gateway.");
+  expect(resultText(install)).not.toContain("Reusing existing Docker-driver gateway");
+  expect(resultText(install)).not.toContain("[reuse] Skipping gateway (running)");
   if (gpuRoute === "legacy-patch") {
     expect(resultText(install)).toContain(
       "Recreating OpenShell Docker sandbox container with NVIDIA GPU access",
@@ -180,9 +186,7 @@ raise SystemExit(1)`,
 
   const startupConfig = await sandbox.execShell(
     sandboxName,
-    trustedSandboxShellScript(
-      String.raw`set -eu; python3 -c 'import re; from pathlib import Path; lines=Path("/sandbox/.hermes/.env").read_text(encoding="utf-8").splitlines(); matches=[line for line in lines if re.fullmatch(r"API_SERVER_KEY=[0-9a-f]{64}", line)]; raise SystemExit(0 if len(matches) == 1 else 1)'; sha256sum -c /etc/nemoclaw/hermes.config-hash --status; sha256sum -c /sandbox/.hermes/.config-hash --status; if grep -Fq 'ensure-api-key is restricted to the Hermes PID 1 startup transaction' /tmp/nemoclaw-start.log || grep -Fq 'Hermes runtime config guard refuses mutation under a foreign PID 1' /tmp/nemoclaw-start.log; then echo 'Hermes startup guard refusal found' >&2; exit 1; fi; echo OK`,
-    ),
+    trustedSandboxShellScript(buildHermesManagedStartupIntegrityScript()),
     {
       artifactName: "phase-4-gpu-startup-config-and-guard",
       env,
