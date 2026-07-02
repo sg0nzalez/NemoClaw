@@ -5,7 +5,7 @@ import { redactFull } from "../security/redact";
 import type { DockerContainerInspect } from "./docker-gpu-patch";
 
 const SENSITIVE_ENV_KEY =
-  /(?:api_?key|token|secret|password|credential|authorization|cookie|private_?key|proxy)/i;
+  /(?:api_?key|private_?key|(?:^|_)key$|token|secret|password|credential|authorization|cookie|proxy)/i;
 const EXTRA_PLACEHOLDER_KEYS_ENV = "NEMOCLAW_EXTRA_PLACEHOLDER_KEYS";
 
 function inspectEnv(inspect: DockerContainerInspect): Map<string, string> {

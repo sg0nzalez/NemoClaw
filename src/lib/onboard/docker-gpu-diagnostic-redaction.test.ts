@@ -14,7 +14,7 @@ import {
 } from "./docker-gpu-patch";
 
 describe("Docker GPU diagnostic redaction", () => {
-  it("redacts opaque custom-placeholder values from every shared collector sink", () => {
+  it("redacts opaque conventional and custom-placeholder values from every shared collector sink", () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-gpu-diagnostic-redaction-"));
     const canaries = {
       error: "opaque-a-7f31",
@@ -40,12 +40,13 @@ describe("Docker GPU diagnostic redaction", () => {
       ...placeholderEntries.map(([key, value]) => `${key}=${value}`),
       "nemoclaw-start",
     ].join(" ");
+    const suffixCanary = ["redaction", "sentinel"].join("-");
     const inspect: DockerContainerInspect = {
       Id: "new-container-id",
       Name: `/openshell-alpha-${canaries.inspect}`,
       Config: {
         Image: "openshell/sandbox:test",
-        Env: [`OPENSHELL_SANDBOX_COMMAND=${startupCommand}`],
+        Env: [`OPENSHELL_SANDBOX_COMMAND=${startupCommand}`, `SIGNING_KEY=${suffixCanary}`],
         Labels: {
           "openshell.ai/sandbox-name": "alpha",
           "untrusted.label": canaries.inspect,
@@ -125,7 +126,9 @@ describe("Docker GPU diagnostic redaction", () => {
         },
         {
           dockerCapture,
-          dockerLogs: vi.fn(() => `useful docker log context ${canaries.dockerLogs}\n`),
+          dockerLogs: vi.fn(
+            () => `useful docker log context ${canaries.dockerLogs} ${suffixCanary}\n`,
+          ),
           homedir: () => tmpDir,
           now: () => new Date("2026-07-02T00:00:00Z"),
           runCaptureOpenshell,
@@ -152,16 +155,22 @@ describe("Docker GPU diagnostic redaction", () => {
       );
       const published = `${diagnostics?.summaryLines.join("\n")}\n${Object.values(contents).join("\n")}`;
       for (const canary of Object.values(canaries)) expect(published).not.toContain(canary);
+      expect(published).not.toContain(suffixCanary);
 
       expect(contents["summary.txt"]).toContain("failure_kind=patched_container_failed");
       expect(contents["summary.txt"]).toContain("useful failure context <REDACTED>");
-      expect(contents["docker-logs.txt"]).toContain("useful docker log context <REDACTED>");
+      expect(contents["docker-logs.txt"]).toContain(
+        "useful docker log context <REDACTED> <REDACTED>",
+      );
       expect(contents["openshell-sandbox-get.txt"]).toContain("useful get context <REDACTED>");
       expect(contents["docker-network-summary.txt"]).toContain("network_mode=openshell-docker");
       const state = JSON.parse(contents["patched-container-state.json"]);
       expect(state.Error).toBe("useful state context <REDACTED>");
       const inspected = JSON.parse(contents["docker-inspect.json"]);
-      expect(inspected[0].Config.Env).toEqual(["OPENSHELL_SANDBOX_COMMAND=<REDACTED>"]);
+      expect(inspected[0].Config.Env).toEqual([
+        "OPENSHELL_SANDBOX_COMMAND=<REDACTED>",
+        "SIGNING_KEY=<REDACTED>",
+      ]);
       expect(inspected[0].Config.Labels).toEqual({ "openshell.ai/sandbox-name": "alpha" });
       expect(inspected[0].Config.Cmd).toEqual(["hidden", "<1 additional arguments omitted>"]);
 
