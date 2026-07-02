@@ -20,6 +20,13 @@ import {
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "../../..");
 const GATEWAY_CLEANUP_MODULE = path.join(REPO_ROOT, "dist/lib/actions/sandbox/destroy-gateway.js");
+// Clean runners do not have OpenShell until install.sh runs. Tool absence is
+// accepted here only because the bind probe below and the later no-reuse log
+// assertions still reject an orphaned runtime or stale registration.
+const GATEWAY_CLEANUP_SCRIPT = String.raw`
+command -v openshell >/dev/null 2>&1 || exit 0
+exec node -e 'const { cleanupGatewayAfterLastSandbox } = require(process.argv[1]); cleanupGatewayAfterLastSandbox(process.argv[2]);' "$@"
+`;
 const SANDBOX_NAME = process.env.NEMOCLAW_SANDBOX_NAME ?? "e2e-hermes-gpu-startup";
 const FAKE_API_KEY = "e2e-hermes-gpu-startup-key";
 const FAKE_MODEL = "test-model";
@@ -59,7 +66,7 @@ async function cleanupHermes(
   label: string,
 ): Promise<void> {
   await bestEffort(() =>
-    host.command("nemoclaw", [SANDBOX_NAME, "destroy", "--yes", "--cleanup-gateway"], {
+    host.nemoclaw([SANDBOX_NAME, "destroy", "--yes", "--cleanup-gateway"], {
       artifactName: `${label}-nemoclaw-destroy`,
       env: commandEnv(),
       timeoutMs: 120_000,
@@ -73,13 +80,8 @@ async function cleanupHermes(
     }),
   );
   const runtimeCleanup = await host.command(
-    "node",
-    [
-      "-e",
-      "const { cleanupGatewayAfterLastSandbox } = require(process.argv[1]); cleanupGatewayAfterLastSandbox(process.argv[2]);",
-      GATEWAY_CLEANUP_MODULE,
-      "nemoclaw",
-    ],
+    "bash",
+    ["-c", GATEWAY_CLEANUP_SCRIPT, "gateway-runtime-cleanup", GATEWAY_CLEANUP_MODULE, "nemoclaw"],
     {
       artifactName: `${label}-gateway-runtime-cleanup`,
       env: commandEnv(),
@@ -90,11 +92,15 @@ async function cleanupHermes(
     runtimeCleanup.exitCode,
     `owned gateway runtime cleanup failed: ${resultText(runtimeCleanup)}`,
   ).toBe(0);
-  await host.cleanupGatewayRegistration("nemoclaw", {
-    artifactName: `${label}-openshell-gateway`,
-    env: commandEnv(),
-    timeoutMs: 60_000,
-  });
+  await host
+    .cleanupGatewayRegistration("nemoclaw", {
+      artifactName: `${label}-openshell-gateway`,
+      env: commandEnv(),
+      timeoutMs: 60_000,
+    })
+    .catch((error: unknown) => {
+      expect(error).toMatchObject({ message: "spawn openshell ENOENT" });
+    });
   const gatewayPort = process.env.NEMOCLAW_GATEWAY_PORT ?? "8080";
   const portAvailable = await host.command(
     "node",
