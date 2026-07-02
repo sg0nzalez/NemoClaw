@@ -175,9 +175,7 @@ export const googlechatManifest = {
       // rewrites the plugin's single token producer to return the OpenShell
       // gateway-minted credential placeholder (GOOGLE_CHAT_ACCESS_TOKEN) so the
       // L7 proxy injects the real bearer outbound and the key never enters the
-      // sandbox. Inert until the B-side provider is wired (falls back to the
-      // in-process mint when the env var is unset). See
-      // runtime/googlechat-outbound-auth.ts.
+      // sandbox. See runtime/googlechat-outbound-auth.ts.
       nodePreloads: [
         {
           module: "googlechat-trusted-proxy-fetch",

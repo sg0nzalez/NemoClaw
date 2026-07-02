@@ -10,10 +10,10 @@
 // ── The story: what this changes, and why ────────────────────────────────────
 // Out of the box @openclaw/googlechat mints its own OAuth token IN-PROCESS: it
 // RS256-signs a JWT assertion with the service-account (SA) PRIVATE KEY and
-// exchanges it at oauth2.googleapis.com for an access token. That requires the
-// SA private key to live inside the sandbox (delivered today as a file), which
-// deviates from NemoClaw's security model — secrets should never sit in the
-// sandbox; the L7 egress proxy materializes them only on outbound requests.
+// exchanges it at oauth2.googleapis.com for an access token. That requires the SA
+// private key to live inside the sandbox, which deviates from NemoClaw's security
+// model — secrets should never sit in the sandbox; the L7 egress proxy
+// materializes them only on outbound requests.
 //
 // OpenShell can instead mint the Google access token GATEWAY-SIDE from the SA
 // key (ProviderCredentialRefreshStrategy google_service_account_jwt) and inject
@@ -43,8 +43,8 @@
 // alias `openshell:resolve:env:GOOGLE_CHAT_ACCESS_TOKEN` so the proxy always resolves
 // to the LATEST refreshed token — the revision-stamped form pins to the boot token,
 // which expires (~1h) and is not refreshed in a long-running process. When the env is
-// UNSET (provider not wired) the patch falls through to the original in-process mint,
-// so the channel keeps working on the legacy SA-file path — inert until the B-side lands.
+// UNSET (the bridge provider was not wired) the patch THROWS, so a misconfigured
+// active channel fails loudly at send time instead of silently.
 //
 // ── Long-term fix (remove this once it lands) ─────────────────────────────────
 // The clean fix is upstream in OpenClaw: a native pre-minted-token auth mode
@@ -88,18 +88,22 @@
   // long-running gateway process, so returning it directly makes outbound replies
   // die after the first token lifetime ("credential is expired"). The revision-less
   // alias always resolves to the LATEST refreshed token (gateway re-mints on
-  // schedule). Falls back to the raw value for non-OpenShell deployments. Built as
-  // a single line (no template-literal escaping) for a clean source rewrite.
+  // schedule); a raw (non-placeholder) env value is returned as-is for manual
+  // non-OpenShell deployments. When the env is UNSET the guard THROWS (the outbound
+  // bearer must come from the gateway credential). Built as a single line (no
+  // template-literal escaping) for a clean source rewrite.
   function buildBearerShortCircuitSource() {
     var canonical = "openshell:resolve:env:" + ENV_VAR;
     return (
-      'try { var __nemoGcRaw = (typeof process !== "undefined" && process.env) ' +
+      'var __nemoGcRaw = (typeof process !== "undefined" && process.env) ' +
       "? process.env." +
       ENV_VAR +
       ' : void 0; if (typeof __nemoGcRaw === "string" && __nemoGcRaw.length > 0) { ' +
       'return __nemoGcRaw.indexOf("openshell:resolve:env:") === 0 ? "' +
       canonical +
-      '" : __nemoGcRaw; } } catch (_e) {} /* ' +
+      '" : __nemoGcRaw; } throw new Error("nemoclaw googlechat: ' +
+      ENV_VAR +
+      ' is not set; the gateway-minted outbound bearer is unavailable"); /* ' +
       CALL_MARKER +
       " */"
     );
@@ -116,7 +120,7 @@
     if (!anchor.test(source)) {
       // The definition substring is present but not in the expected shape — the
       // bundled plugin drifted. Fail loud (named patch error) rather than silently
-      // leave outbound auth on the in-process SA path.
+      // leaving outbound auth unpatched.
       throw new Error(
         "OpenClaw Google Chat getGoogleChatAccessToken definition shape not recognized in " +
           filename +
@@ -192,12 +196,15 @@
       "[channels] [googlechat] outbound-auth patch active " +
         "(gateway-minted bearer via " +
         ENV_VAR +
-        " when wired; falls back to in-process mint otherwise)\n",
+        ")\n",
     );
   } catch (e) {
     if (isGooglechatOutboundAuthPatchError(e)) {
-      // Shape drift: surface loudly but do not crash gateway startup — the
-      // channel degrades to the legacy in-process SA mint.
+      // Shape drift: surface loudly but do not crash gateway startup. With the
+      // patch not applied the plugin's outbound auth runs unmodified and cannot use
+      // the gateway credential, so the channel breaks loudly on send rather than
+      // degrading silently. Boot/health-time fail-closed on drift is a tracked
+      // follow-up.
       process.stderr.write(
         "[channels] [googlechat] outbound-auth patch NOT applied: " + String(e && e.message) + "\n",
       );

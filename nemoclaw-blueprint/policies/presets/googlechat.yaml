@@ -3,7 +3,7 @@
 
 preset:
   name: googlechat
-  description: "Google Chat (Chat API) message send, service-account token exchange, and inbound JWT verification certs"
+  description: "Google Chat (Chat API) message send and inbound JWT verification certs; the outbound token is minted gateway-side, never in the sandbox"
 
 network_policies:
   googlechat:
@@ -31,14 +31,6 @@ network_policies:
           - allow: { method: PATCH, path: "/v1/spaces/**" }
           # Delete a message: DELETE /v1/spaces/{space}/messages/{id}.
           - allow: { method: DELETE, path: "/v1/spaces/**" }
-      # Service-account JWT -> OAuth access token exchange (google-auth-library).
-      - host: oauth2.googleapis.com
-        port: 443
-        protocol: rest
-        enforcement: enforce
-        request_body_credential_rewrite: true
-        rules:
-          - allow: { method: POST, path: "/**" }
       # Public certificates used to verify inbound Chat / add-on JWT signatures.
       - host: www.googleapis.com
         port: 443
