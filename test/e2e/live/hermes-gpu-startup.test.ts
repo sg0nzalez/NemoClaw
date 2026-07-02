@@ -175,6 +175,7 @@ test.skipIf(!shouldRunLiveE2E())(
 
     const fake = await startFakeOpenAiCompatibleServer({
       apiKey: FAKE_API_KEY,
+      forbiddenMarkers: [EXTRA_PLACEHOLDER_TOKEN_A, EXTRA_PLACEHOLDER_TOKEN_B],
       host: "0.0.0.0",
       model: FAKE_MODEL,
       publicHost: hostAddress,
@@ -249,6 +250,9 @@ test.skipIf(!shouldRunLiveE2E())(
       `expected authenticated fake inference POST, got ${JSON.stringify(fakeRequests)}`,
     ).toBeGreaterThan(0);
     expect(inferencePosts.filter((request) => request.auth !== "ok")).toEqual([]);
+    expect(inferencePosts.filter((request) => (request.forbiddenMarkerMatches ?? 0) > 0)).toEqual(
+      [],
+    );
     expect(JSON.stringify(fakeRequests)).not.toContain(EXTRA_PLACEHOLDER_TOKEN_A);
     expect(JSON.stringify(fakeRequests)).not.toContain(EXTRA_PLACEHOLDER_TOKEN_B);
 
@@ -263,6 +267,7 @@ test.skipIf(!shouldRunLiveE2E())(
         startupConfigHashesValid: true,
         supervisorTopologyValid: true,
         authenticatedInferenceRequestVerified: true,
+        placeholderTokensAbsentFromInference: true,
       },
     });
   },
