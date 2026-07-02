@@ -13,6 +13,18 @@ import {
 const DEFAULT_AUDIENCE_TYPE = "app-url";
 const DEFAULT_WEBHOOK_PATH = "/googlechat";
 
+// When appPrincipal is left blank we render this all-zeros discovery sentinel
+// instead of dropping the key. It only matters for personal/standalone (add-on)
+// accounts: on the first inbound DM, OpenClaw compares the token's real add-on
+// principal against this value, they mismatch, and it logs
+// `unexpected add-on principal: <N>` — surfacing <N>, the real appPrincipal to
+// copy. Without a seeded value the log instead says `missing add-on principal
+// binding` with no number, so "leave blank" would be a dead end. Inert for
+// Google Workspace accounts: their inbound token issuer (chat@system…) is
+// approved before appPrincipal is ever read, and all-zeros can never collide
+// with a real Google-assigned principal.
+const APP_PRINCIPAL_DISCOVERY_SENTINEL = "000000000000000000000";
+
 export const resolveGooglechatTemplateReference: BuiltInRenderTemplateResolver = (
   reference,
   context,
@@ -29,7 +41,8 @@ export const resolveGooglechatTemplateReference: BuiltInRenderTemplateResolver =
       );
     case "googlechatConfig.appPrincipal":
       return resolvedRenderTemplateReference(
-        nonEmptyString(stateValue(context, "googlechatConfig.appPrincipal")),
+        nonEmptyString(stateValue(context, "googlechatConfig.appPrincipal")) ??
+          APP_PRINCIPAL_DISCOVERY_SENTINEL,
       );
     case "googlechatConfig.webhookPath":
       return resolvedRenderTemplateReference(

@@ -25,7 +25,7 @@ describe("Google Chat template resolver", () => {
     ).toBe("/googlechat");
   });
 
-  it("passes through configured values and drops audience/appPrincipal when unset", () => {
+  it("passes through configured values; drops audience but seeds the appPrincipal sentinel when unset", () => {
     const set: SandboxMessagingInputReference[] = [
       configInput("audience", "googlechatConfig.audience", "https://x.example/googlechat"),
       configInput("appPrincipal", "googlechatConfig.appPrincipal", "103987852733692332624"),
@@ -45,14 +45,16 @@ describe("Google Chat template resolver", () => {
       resolveGooglechatTemplateReference("googlechatConfig.webhookPath", { inputs: set })?.value,
     ).toBe("/gchat");
 
-    // Unset → undefined so the render engine drops the key entirely.
+    // Unset audience → undefined so the render engine drops the key entirely.
+    // Unset appPrincipal → the all-zeros discovery sentinel (so the first DM
+    // surfaces the real value) rather than dropping the key.
     const empty: SandboxMessagingInputReference[] = [];
     expect(
       resolveGooglechatTemplateReference("googlechatConfig.audience", { inputs: empty })?.value,
     ).toBeUndefined();
     expect(
       resolveGooglechatTemplateReference("googlechatConfig.appPrincipal", { inputs: empty })?.value,
-    ).toBeUndefined();
+    ).toBe("000000000000000000000");
   });
 
   it("normalizes the DM allowlist into nested dm.policy / dm.allowFrom", () => {
