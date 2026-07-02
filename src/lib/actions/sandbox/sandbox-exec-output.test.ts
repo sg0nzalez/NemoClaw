@@ -1,0 +1,69 @@
+// SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+import { Buffer } from "node:buffer";
+import { describe, expect, it } from "vitest";
+import {
+  buildSandboxExecMarkedCommand,
+  extractSandboxExecCommandStdout,
+  SANDBOX_EXEC_STARTED_MARKER,
+} from "./sandbox-exec-output";
+
+describe("buildSandboxExecMarkedCommand", () => {
+  it("prints the sentinel before the command for ordinary scripts", () => {
+    const command = buildSandboxExecMarkedCommand("echo hi");
+    expect(command).toBe(`printf '%s\\n' '${SANDBOX_EXEC_STARTED_MARKER}'; echo hi`);
+  });
+
+  it("base64-encodes the hermes secret boundary script instead of inlining it", () => {
+    const script = "python3 validate-hermes-env-secret-boundary.py --check";
+    const command = buildSandboxExecMarkedCommand(script);
+
+    expect(command).toContain(`printf '%s\\n' '${SANDBOX_EXEC_STARTED_MARKER}'`);
+    expect(command).not.toContain(script);
+    const encoded = Buffer.from(script, "utf8").toString("base64");
+    expect(command).toContain(encoded);
+  });
+});
+
+describe("extractSandboxExecCommandStdout", () => {
+  it("returns null for empty output", () => {
+    expect(extractSandboxExecCommandStdout("")).toBeNull();
+    expect(extractSandboxExecCommandStdout("   \n  ")).toBeNull();
+  });
+
+  it("returns null when the sentinel never appears", () => {
+    expect(extractSandboxExecCommandStdout("exec failed\n")).toBeNull();
+  });
+
+  it("extracts stdout after a raw, unframed sentinel", () => {
+    const output = `${SANDBOX_EXEC_STARTED_MARKER}\nNEMOCLAW_DCODE_PROBE=idle\n`;
+    expect(extractSandboxExecCommandStdout(output)).toBe("NEMOCLAW_DCODE_PROBE=idle");
+  });
+
+  it("strips the 'stdout: ' frame prefix", () => {
+    const output = `stdout: ${SANDBOX_EXEC_STARTED_MARKER}\nstdout: NEMOCLAW_DCODE_PROBE=idle\n`;
+    expect(extractSandboxExecCommandStdout(output)).toBe("NEMOCLAW_DCODE_PROBE=idle");
+  });
+
+  it("strips the '[stdout] ' frame prefix", () => {
+    const output = `[stdout] ${SANDBOX_EXEC_STARTED_MARKER}\n[stdout] NEMOCLAW_DCODE_PROBE=active\n`;
+    expect(extractSandboxExecCommandStdout(output)).toBe("NEMOCLAW_DCODE_PROBE=active");
+  });
+
+  it("uses the last sentinel line so a preamble cannot forge the parser boundary", () => {
+    const output = [
+      SANDBOX_EXEC_STARTED_MARKER,
+      "NEMOCLAW_DCODE_PROBE=idle",
+      SANDBOX_EXEC_STARTED_MARKER,
+      "NEMOCLAW_DCODE_PROBE=active",
+    ].join("\n");
+
+    expect(extractSandboxExecCommandStdout(output)).toBe("NEMOCLAW_DCODE_PROBE=active");
+  });
+
+  it("does not match a sentinel embedded in a preamble line as a substring", () => {
+    const output = `some login banner ${SANDBOX_EXEC_STARTED_MARKER} noise\n${SANDBOX_EXEC_STARTED_MARKER}\nNEMOCLAW_DCODE_PROBE=idle\n`;
+    expect(extractSandboxExecCommandStdout(output)).toBe("NEMOCLAW_DCODE_PROBE=idle");
+  });
+});

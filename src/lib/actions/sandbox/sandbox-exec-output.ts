@@ -32,19 +32,27 @@ function parseSandboxExecStdoutFrame(line: string): { text: string; framed: bool
  * stdout frame prefixes at this transport boundary so recovery, status, and
  * Hermes boundary callers keep consuming plain command stdout.
  *
- * Security boundary: the sentinel must occupy its own stdout line after optional
- * frame-prefix stripping. A preamble that merely contains the sentinel string is
- * rejected so sandbox output cannot move the parser boundary forward. Remove
- * this compatibility shim once OpenShell exposes a stable machine-readable exec
- * output mode that preserves child stdout/stderr without human framing.
+ * Security boundary: `markedCommand` always prints the sentinel as the first
+ * thing the marked command does, so the authentic sentinel line is always the
+ * last one in the captured output. Take the LAST exact sentinel line rather
+ * than the first, so sandbox-controlled output that precedes the marked
+ * command (e.g. login-shell profile output) cannot plant a decoy sentinel and
+ * have its own forged follow-up lines misread as the real command's stdout.
+ * Remove this compatibility shim once OpenShell exposes a stable
+ * machine-readable exec output mode that preserves child stdout/stderr
+ * without human framing.
  */
 export function extractSandboxExecCommandStdout(output: string): string | null {
   const stdout = output.trim();
   if (!stdout) return null;
   const lines = stdout.split(/\r?\n/).map(parseSandboxExecStdoutFrame);
-  const exactMarkerIndex = lines.findIndex(
-    (line) => line.text.trim() === SANDBOX_EXEC_STARTED_MARKER,
-  );
+  let exactMarkerIndex = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (lines[i].text.trim() === SANDBOX_EXEC_STARTED_MARKER) {
+      exactMarkerIndex = i;
+      break;
+    }
+  }
   if (exactMarkerIndex >= 0) {
     return lines
       .slice(exactMarkerIndex + 1)
