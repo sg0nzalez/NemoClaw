@@ -13,42 +13,26 @@ export DEEPAGENTS_CODE_AUTO_UPDATE=0
 export DEEPAGENTS_CODE_OPENAI_API_KEY="${DEEPAGENTS_CODE_OPENAI_API_KEY:-nemoclaw-managed-inference}"
 export OPENAI_BASE_URL="${OPENAI_BASE_URL:-https://inference.local/v1}"
 
+# OpenShell's sandbox-create environment may contain a host/corporate proxy and
+# a NO_PROXY seed that includes inference.local. That seed is only for
+# host-side proxy chaining. Runtime traffic must use OpenShell's managed proxy,
+# and inference.local must stay on the proxy path instead of resolving via DNS.
+PROXY_HOST="${NEMOCLAW_PROXY_HOST:-10.200.0.1}"
+PROXY_PORT="${NEMOCLAW_PROXY_PORT:-3128}"
+_PROXY_URL="http://${PROXY_HOST}:${PROXY_PORT}"
+_NO_PROXY_VAL="localhost,127.0.0.1,::1,${PROXY_HOST}"
+export HTTP_PROXY="$_PROXY_URL"
+export HTTPS_PROXY="$_PROXY_URL"
+export NO_PROXY="$_NO_PROXY_VAL"
+export http_proxy="$_PROXY_URL"
+export https_proxy="$_PROXY_URL"
+export no_proxy="$_NO_PROXY_VAL"
+
 write_export_if_set() {
   local name="$1"
   local value="${!name:-}"
   [ -n "$value" ] || return 0
   printf 'export %s=%q\n' "$name" "$value"
-}
-
-is_credential_bearing_url() {
-  local value="$1"
-  case "$value" in
-    *://*@*) return 0 ;;
-    *:*@*) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
-write_proxy_export_pair() {
-  local primary="$1"
-  local secondary="$2"
-  local name
-  local value
-  local has_credentials=0
-  for name in "$primary" "$secondary"; do
-    value="${!name:-}"
-    [ -n "$value" ] || continue
-    if is_credential_bearing_url "$value"; then
-      printf 'Skipping %s in Deep Agents Code runtime env because the proxy URL contains credentials.\n' "$name" >&2
-      has_credentials=1
-    fi
-  done
-  if [ "$has_credentials" -eq 1 ]; then
-    unset "$primary" "$secondary"
-    return 0
-  fi
-  write_export_if_set "$primary"
-  write_export_if_set "$secondary"
 }
 
 prepare_runtime_env() {
@@ -64,9 +48,11 @@ prepare_runtime_env() {
     printf '%s\n' 'export DEEPAGENTS_CODE_OPENAI_API_KEY="${DEEPAGENTS_CODE_OPENAI_API_KEY:-nemoclaw-managed-inference}"'
     # shellcheck disable=SC2016
     printf '%s\n' 'export OPENAI_BASE_URL="${OPENAI_BASE_URL:-https://inference.local/v1}"'
-    write_proxy_export_pair HTTP_PROXY http_proxy
-    write_proxy_export_pair HTTPS_PROXY https_proxy
+    write_export_if_set HTTP_PROXY
+    write_export_if_set HTTPS_PROXY
     write_export_if_set NO_PROXY
+    write_export_if_set http_proxy
+    write_export_if_set https_proxy
     write_export_if_set no_proxy
     write_export_if_set SSL_CERT_FILE
     write_export_if_set REQUESTS_CA_BUNDLE

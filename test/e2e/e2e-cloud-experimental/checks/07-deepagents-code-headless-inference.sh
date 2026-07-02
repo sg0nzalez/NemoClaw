@@ -6,10 +6,10 @@
 #
 # Headless `dcode -n "<prompt>"`, run inside a built Deep Agents Code sandbox,
 # must route through the managed https://inference.local/v1 endpoint using the
-# placeholder OpenAI-compatible key NemoClaw writes into config.toml, and either
-# return a response or a deterministic, actionable provider/model error (never a
-# hang or ambiguous failure). No real provider/proxy credentials may appear in
-# config.toml, .env, .mcp.json, /tmp/nemoclaw-proxy-env.sh, or the captured output.
+# placeholder OpenAI-compatible key NemoClaw writes into config.toml. The login
+# shell path must return PONG with exit 0; provider, connection, DNS, timeout, and
+# ambiguous failures are not acceptable. No real provider/proxy credentials may
+# appear in config.toml, .env, .mcp.json, /tmp/nemoclaw-proxy-env.sh, or output.
 
 set -euo pipefail
 
@@ -30,6 +30,35 @@ pass() {
 
 sandbox_exec() {
   openshell sandbox exec --name "$SANDBOX_NAME" -- bash -c "$1" 2>&1
+}
+
+sandbox_login_exec() {
+  openshell sandbox exec --name "$SANDBOX_NAME" -- bash -lc "$1" 2>&1
+}
+
+sandbox_login_proxy_contract() {
+  # This command is evaluated by the login shell inside the sandbox.
+  # shellcheck disable=SC2016
+  sandbox_login_exec '
+set -euo pipefail
+proxy_url="${HTTP_PROXY:-}"
+case "$proxy_url" in
+  http://*:* ) ;;
+  *) exit 1 ;;
+esac
+case "$proxy_url" in
+  *"@"*) exit 1 ;;
+esac
+[ "$proxy_url" = "${HTTPS_PROXY:-}" ]
+[ "$proxy_url" = "${http_proxy:-}" ]
+[ "$proxy_url" = "${https_proxy:-}" ]
+proxy_host="${proxy_url#http://}"
+proxy_host="${proxy_host%:*}"
+expected_no_proxy="localhost,127.0.0.1,::1,${proxy_host}"
+[ "${NO_PROXY:-}" = "$expected_no_proxy" ]
+[ "${no_proxy:-}" = "$expected_no_proxy" ]
+printf "%s\n" "NEMOCLAW_DCODE_PROXY_ENV_OK"
+'
 }
 
 sandbox_artifact_scan_command() {
@@ -71,8 +100,12 @@ is_local_execution_failure() {
   grep -Eiq '(^|[[:space:]])(usage:|Traceback|SyntaxError|ImportError|ModuleNotFoundError|No module named|command not found|No such file or directory|Permission denied|invalid option)([[:space:]]|$)|DCODE_EXIT:12[67]'
 }
 
+is_inference_connection_failure() {
+  grep -Eiq 'APIConnectionError|APITimeoutError|ConnectError|ConnectTimeout|ReadTimeout|Could not resolve host|Name or service not known|Temporary failure in name resolution|getaddrinfo.*(ENOTFOUND|EAI_AGAIN|failed|error)|nodename nor servname provided|DNS (lookup|resolution) (failed|error)|connection (timed out|refused)|request timed out'
+}
+
 is_actionable_inference_error() {
-  grep -Eiq 'inference\.local|provider|model|NVIDIA|OpenAI|API key|authentication|authorization|unauthorized|forbidden|rate[ -]?limit|quota|HTTP[[:space:]]*(401|403|404|429|5[0-9]{2})|status[[:space:]]*(401|403|404|429|5[0-9]{2})'
+  grep -Eiq 'API key|authentication|authorization|unauthorized|forbidden|rate[ -]?limit|quota|HTTP[[:space:]]*(401|403|404|429|5[0-9]{2})|status[[:space:]]*(401|403|404|429|5[0-9]{2})|(inference\.local|provider|model|NVIDIA|OpenAI).*(error|failed|failure|invalid|unavailable)|(error|failed|failure|invalid|unavailable).*(inference\.local|provider|model|NVIDIA|OpenAI)'
 }
 
 classify_headless_output() {
@@ -86,6 +119,19 @@ classify_headless_output() {
     return 1
   fi
 
+  if [ "$dcode_exit" != "0" ]; then
+    if printf '%s' "$payload" | is_local_execution_failure; then
+      printf '%s\n' "local-execution-failure"
+    elif printf '%s' "$payload" | is_inference_connection_failure; then
+      printf '%s\n' "inference-connection-failure"
+    elif printf '%s' "$payload" | is_actionable_inference_error; then
+      printf '%s\n' "actionable-inference-error"
+    else
+      printf '%s\n' "nonzero-exit"
+    fi
+    return 1
+  fi
+
   if [ -z "$(printf '%s' "$payload" | tr -d '[:space:]')" ]; then
     printf '%s\n' "empty-output"
     return 1
@@ -96,13 +142,18 @@ classify_headless_output() {
     return 1
   fi
 
-  if printf '%s' "$payload" | grep -Eiq '(^|[^[:alnum:]_])PONG([^[:alnum:]_]|$)'; then
-    printf '%s\n' "pong"
-    return 0
+  if printf '%s' "$payload" | is_inference_connection_failure; then
+    printf '%s\n' "inference-connection-failure"
+    return 1
   fi
 
   if printf '%s' "$payload" | is_actionable_inference_error; then
     printf '%s\n' "actionable-inference-error"
+    return 1
+  fi
+
+  if printf '%s' "$payload" | grep -Eiq '(^|[^[:alnum:]_])PONG([^[:alnum:]_]|$)'; then
+    printf '%s\n' "pong"
     return 0
   fi
 
@@ -137,19 +188,38 @@ main() {
     fail_test "config.toml does not use the managed placeholder API key env reference (captured config redacted from log)"
   fi
 
-  # 2. Headless dcode -n returns PONG or a deterministic, actionable inference error.
-  headless_output="$(sandbox_exec "cd /sandbox && timeout ${HEADLESS_TIMEOUT} dcode -n 'Reply with exactly one word: PONG'; echo \"DCODE_EXIT:\$?\"")"
-  dcode_exit="$(printf '%s' "$headless_output" | sed -n 's/.*DCODE_EXIT:\([0-9]\+\).*/\1/p' | tail -n1)"
-  if classification="$(classify_headless_output "${dcode_exit:-unknown}" "$headless_output")"; then
-    pass "dcode -n reached managed inference with ${classification} (exit ${dcode_exit:-unknown})"
+  # 2. The login shell loaded the exact normalized proxy contract from .profile.
+  proxy_contract_output="$(sandbox_login_proxy_contract || true)"
+  if printf '%s\n' "$proxy_contract_output" | grep -Fxq "NEMOCLAW_DCODE_PROXY_ENV_OK"; then
+    pass "login shell loaded the normalized managed proxy environment"
   else
-    fail_test "dcode -n did not produce PONG or an allowlisted provider/model/inference error (${classification}, exit ${dcode_exit:-unknown})"
+    fail_test "login shell did not load the normalized managed proxy environment"
   fi
 
-  # 3. No real secrets in managed config, runtime env files, artifacts, logs, or captured output.
+  # 3. The managed route is reachable through the normalized login-shell proxy.
+  route_output="$(sandbox_login_exec "curl -sS -o /dev/null -w 'HTTP_CODE:%{http_code}' --max-time 30 https://inference.local/v1/models" || true)"
+  route_code="$(printf '%s' "$route_output" | sed -n 's/.*HTTP_CODE:\([0-9][0-9][0-9]\).*/\1/p' | tail -n1)"
+  if [ "$route_code" = "200" ]; then
+    pass "login-shell proxy reached https://inference.local/v1/models"
+  else
+    fail_test "login-shell proxy did not receive HTTP 200 from https://inference.local/v1/models (HTTP ${route_code:-000})"
+  fi
+
+  # 4. The same login-shell path runs dcode and returns PONG.
+  headless_output="$(sandbox_login_exec "cd /sandbox && timeout ${HEADLESS_TIMEOUT} dcode -n 'Reply with exactly one word: PONG'; echo \"DCODE_EXIT:\$?\"")"
+  dcode_exit="$(printf '%s' "$headless_output" | sed -n 's/.*DCODE_EXIT:\([0-9]\+\).*/\1/p' | tail -n1)"
+  if classification="$(classify_headless_output "${dcode_exit:-unknown}" "$headless_output")"; then
+    pass "login-shell dcode -n reached managed inference with ${classification} (exit ${dcode_exit:-unknown})"
+  else
+    fail_test "login-shell dcode -n did not exit 0 with PONG (${classification}, exit ${dcode_exit:-unknown})"
+  fi
+
+  # 5. No real secrets in managed config, runtime env files, artifacts, logs, or captured output.
   leak_scan="$(sandbox_exec "$(sandbox_artifact_scan_command)" || true)"
   combined="${config_output}
 ${leak_scan}
+${proxy_contract_output}
+${route_output}
 ${headless_output}"
   if printf '%s' "$combined" | contains_secret; then
     fail_test "secret-shaped value found in config/env/output (redacted from log)"
