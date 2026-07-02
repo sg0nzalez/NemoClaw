@@ -446,7 +446,7 @@ function isSnapshotCreationAllowedByDcodeActivity(sandboxName: string): boolean 
       timeout: OPENSHELL_PROBE_TIMEOUT_MS,
     },
   );
-  const probeCompleted = !probe.error && !probe.signal;
+  const probeCompleted = probe.status === 0 && !probe.error && !probe.signal;
   const commandStdout = probeCompleted ? extractSandboxExecCommandStdout(probe.output || "") : null;
   const probeState = commandStdout === null ? null : parseDcodeProbeState(commandStdout);
   if (

@@ -455,33 +455,19 @@ describe("runSandboxSnapshot", () => {
     );
   });
 
-  it("allows an idle dcode snapshot even when the exec wrapper reports a non-zero status", async () => {
+  it("refuses an idle dcode snapshot when the exec wrapper reports a non-zero status", async () => {
     getSandboxMock.mockReturnValue(dcodeSandboxEntry);
     mockDcodeProbeResult({ status: 1, output: dcodeProbeOutput("idle") });
-    const consoleLog = vi.spyOn(console, "log").mockImplementation(() => {});
-    const manifest = {
-      timestamp: "2026-06-15T00:00:00.000Z",
-      backupPath: "/tmp/backup-alpha",
-      name: "idle-nonzero",
-    };
-    backupSandboxStateMock.mockReturnValue({
-      success: true,
-      backedUpDirs: ["workspace"],
-      backedUpFiles: ["config.toml"],
-      failedDirs: [],
-      failedFiles: [],
-      manifest,
-    });
-    findBackupMock.mockReturnValue({
-      match: { ...manifest, snapshotVersion: 10, name: "idle-nonzero" },
-    });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     const { runSandboxSnapshot } = await import("./snapshot");
 
-    await runSandboxSnapshot("alpha", { kind: "create", name: "idle-nonzero" });
+    await expect(runSandboxSnapshot("alpha", { kind: "create" })).rejects.toMatchObject({
+      exitCode: 1,
+    });
 
-    expect(backupSandboxStateMock).toHaveBeenCalledWith("alpha", { name: "idle-nonzero" });
-    expect(consoleLog.mock.calls.flat().join("\n")).toContain(
-      "Snapshot v10 name=idle-nonzero created",
+    expect(backupSandboxStateMock).not.toHaveBeenCalled();
+    expect(consoleError.mock.calls.flat().join("\n")).toContain(
+      "Cannot verify whether sandbox 'alpha' is actively running a dcode task. Refusing to create snapshot.",
     );
   });
 
