@@ -271,9 +271,8 @@ describe("resolveDockerGpuSandboxCreatePlan Docker Desktop WSL handling", () => 
   });
 
   it("uses native OpenShell GPU by default and preserves the explicit legacy force", () => {
-    const originalEnv = process.env.NEMOCLAW_DOCKER_GPU_PATCH;
+    vi.stubEnv("NEMOCLAW_DOCKER_GPU_PATCH", "");
     try {
-      delete process.env.NEMOCLAW_DOCKER_GPU_PATCH;
       expect(
         resolveDockerGpuSandboxCreatePlan(
           { sandboxGpuEnabled: true },
@@ -285,7 +284,7 @@ describe("resolveDockerGpuSandboxCreatePlan Docker Desktop WSL handling", () => 
         ).useDockerGpuPatch,
       ).toBe(false);
 
-      process.env.NEMOCLAW_DOCKER_GPU_PATCH = "1";
+      vi.stubEnv("NEMOCLAW_DOCKER_GPU_PATCH", "1");
       expect(
         resolveDockerGpuSandboxCreatePlan(
           { sandboxGpuEnabled: true },
@@ -297,8 +296,7 @@ describe("resolveDockerGpuSandboxCreatePlan Docker Desktop WSL handling", () => 
         ).useDockerGpuPatch,
       ).toBe(true);
     } finally {
-      if (originalEnv === undefined) delete process.env.NEMOCLAW_DOCKER_GPU_PATCH;
-      else process.env.NEMOCLAW_DOCKER_GPU_PATCH = originalEnv;
+      vi.unstubAllEnvs();
     }
   });
 

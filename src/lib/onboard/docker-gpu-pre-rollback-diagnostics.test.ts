@@ -29,42 +29,43 @@ describe("Docker GPU pre-rollback diagnostics (#6110)", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-gpu-pre-rollback-"));
     const secretCanary = "pre-rollback-secret-canary-value";
-    const dockerCapture = vi.fn((args: readonly string[], _options?: Record<string, unknown>) => {
-      if (args[0] === "ps") return "new-container-id\n";
-      if (args[0] === "top" && args[1] === "new-container-id") {
-        return "USER PID PPID STAT COMMAND\nsandbox 42 1 S nemoclaw-start\n";
-      }
-      if (args[0] === "inspect" && args[1] === "--format") {
-        return JSON.stringify({ Status: "running", Running: true, ExitCode: 0 });
-      }
-      if (args[0] === "inspect" && args[1] === "new-container-id") {
-        return JSON.stringify([
-          {
-            Id: "new-container-id",
-            Name: "/openshell-alpha",
-            Config: {
-              Image: "openshell/sandbox:test",
-              Cmd: null,
-              Env: [
-                `OPENSHELL_SANDBOX_COMMAND=env NEMOCLAW_EXTRA_PLACEHOLDER_KEYS=CUSTOM_PROVIDER_CREDENTIAL CUSTOM_PROVIDER_CREDENTIAL=${secretCanary} nemoclaw-start`,
-              ],
-              Labels: {
-                "openshell.ai/sandbox-name": "alpha",
-                "untrusted.secret": secretCanary,
-              },
-            },
-            HostConfig: { NetworkMode: "openshell-docker" },
-            NetworkSettings: { Networks: { "openshell-docker": {} } },
+    const inspectOutput = JSON.stringify([
+      {
+        Id: "new-container-id",
+        Name: "/openshell-alpha",
+        Config: {
+          Image: "openshell/sandbox:test",
+          Cmd: null,
+          Env: [
+            `OPENSHELL_SANDBOX_COMMAND=env NEMOCLAW_EXTRA_PLACEHOLDER_KEYS=CUSTOM_PROVIDER_CREDENTIAL CUSTOM_PROVIDER_CREDENTIAL=${secretCanary} nemoclaw-start`,
+          ],
+          Labels: {
+            "openshell.ai/sandbox-name": "alpha",
+            "untrusted.secret": secretCanary,
           },
-        ]);
-      }
-      return "";
+        },
+        HostConfig: { NetworkMode: "openshell-docker" },
+        NetworkSettings: { Networks: { "openshell-docker": {} } },
+      },
+    ]);
+    const dockerResponses = new Map([
+      ["ps -a", "new-container-id\n"],
+      ["top new-container-id", "USER PID PPID STAT COMMAND\nsandbox 42 1 S nemoclaw-start\n"],
+      ["inspect --format", JSON.stringify({ Status: "running", Running: true, ExitCode: 0 })],
+      ["inspect new-container-id", inspectOutput],
+    ]);
+    const dockerCapture = vi.fn((args: readonly string[], _options?: Record<string, unknown>) => {
+      return dockerResponses.get(`${args[0] ?? ""} ${args[1] ?? ""}`.trim()) ?? "";
     });
-    const runCaptureOpenshell = vi.fn((args: string[]) => {
-      if (args[0] === "sandbox" && args[1] === "get") return "Phase: Error\n";
-      if (args[0] === "sandbox" && args[1] === "list") return "alpha  Error\n";
-      return `gateway reconnect log ${secretCanary}\n`;
-    });
+    const openshellResponses = new Map([
+      ["sandbox get", "Phase: Error\n"],
+      ["sandbox list", "alpha  Error\n"],
+    ]);
+    const runCaptureOpenshell = vi.fn(
+      (args: string[]) =>
+        openshellResponses.get(`${args[0] ?? ""} ${args[1] ?? ""}`.trim()) ??
+        `gateway reconnect log ${secretCanary}\n`,
+    );
 
     try {
       const diagnostics = captureDockerGpuPreRollbackDiagnostics("alpha", patchResult(), {
