@@ -1970,19 +1970,10 @@ async function startGatewayWithOptions(
   if (isLinuxDockerDriverGatewayEnabled()) {
     return startDockerDriverGateway({
       exitOnFailure,
-      skipSandboxBridgeReachability:
-        gpuPassthrough &&
-        dockerGpuPatch.shouldApplyDockerGpuPatch(
-          {
-            sandboxGpuEnabled: true,
-            hostGpuPlatform: _gpu?.platform ?? null,
-          },
-          {
-            dockerDriverGateway: true,
-            dockerDesktopWsl: dockerGpuSandboxCreate.isDockerDesktopWslRuntime(),
-          },
-        ) &&
-        dockerGpuPatch.getDockerGpuPatchNetworkMode(process.env) === "host",
+      skipSandboxBridgeReachability: dockerGpuLocalInference.shouldSkipGpuBridgeProbe(
+        gpuPassthrough,
+        _gpu?.platform,
+      ),
     });
   }
 

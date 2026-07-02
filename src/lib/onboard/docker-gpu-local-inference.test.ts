@@ -7,6 +7,7 @@ import {
   enforceDockerGpuPatchPreserveNetwork,
   getSandboxRuntimeInferenceEndpoint,
   printDockerGpuSandboxInferenceVerificationFailure,
+  shouldSkipGpuBridgeProbe,
   shouldUseDockerGpuPatchHostNetwork,
   verifyDockerGpuSandboxLocalInference,
   verifyGpuSandboxAfterReady,
@@ -59,6 +60,32 @@ describe("shouldUseDockerGpuPatchHostNetwork", () => {
         dockerDriverGateway: true,
         platform: "darwin",
         env: HOST_NETWORK_ENV,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("shouldSkipGpuBridgeProbe", () => {
+  it("skips only for an active legacy host-network patch", () => {
+    expect(
+      shouldSkipGpuBridgeProbe(true, "linux", {
+        dockerDesktopWsl: false,
+        env: HOST_NETWORK_ENV,
+        platform: "linux",
+      }),
+    ).toBe(true);
+    expect(
+      shouldSkipGpuBridgeProbe(true, "linux", {
+        dockerDesktopWsl: false,
+        env: { NEMOCLAW_DOCKER_GPU_PATCH_NETWORK: "host" },
+        platform: "linux",
+      }),
+    ).toBe(false);
+    expect(
+      shouldSkipGpuBridgeProbe(false, "linux", {
+        dockerDesktopWsl: false,
+        env: HOST_NETWORK_ENV,
+        platform: "linux",
       }),
     ).toBe(false);
   });

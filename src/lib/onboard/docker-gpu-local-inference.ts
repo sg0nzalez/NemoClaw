@@ -55,6 +55,20 @@ function isLocalInferenceProvider(provider: string | null | undefined): provider
   return Boolean(provider && LOCAL_INFERENCE_PROVIDERS.includes(provider));
 }
 
+export function shouldSkipGpuBridgeProbe(
+  gpuPassthrough: boolean,
+  hostGpuPlatform?: string | null,
+  options: Partial<DockerGpuLocalInferenceOptions> = {},
+): boolean {
+  return (
+    gpuPassthrough &&
+    shouldUseDockerGpuPatchHostNetwork(
+      { sandboxGpuEnabled: true, hostGpuPlatform },
+      { dockerDriverGateway: true, ...options },
+    )
+  );
+}
+
 /**
  * True on the Linux Docker-driver GPU patch path with
  * `NEMOCLAW_DOCKER_GPU_PATCH_NETWORK=host`, i.e. when the recreated sandbox was
