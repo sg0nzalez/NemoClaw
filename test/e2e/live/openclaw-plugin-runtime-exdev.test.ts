@@ -37,9 +37,22 @@ const liveTest = shouldRunLiveE2E() ? test : test.skip;
 
 const GATEWAY_CATALOG_CALL_SOURCE = String.raw`
 import { Buffer } from "node:buffer";
-import { realpathSync } from "node:fs";
+import { accessSync, constants, realpathSync } from "node:fs";
 import { createRequire } from "node:module";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+
+function findOnPath(command) {
+  for (const dir of (process.env.PATH || "").split(":")) {
+    if (!dir) continue;
+    const candidate = join(dir, command);
+    try {
+      accessSync(candidate, constants.X_OK);
+      return candidate;
+    } catch {}
+  }
+  throw new Error("Could not find " + command + " on PATH");
+}
 
 const port = process.env.OPENCLAW_GATEWAY_PORT || "18789";
 if (!/^[1-9][0-9]{0,4}$/.test(port) || Number(port) > 65535) {
@@ -48,7 +61,7 @@ if (!/^[1-9][0-9]{0,4}$/.test(port) || Number(port) > 65535) {
 const token = process.env.OPENCLAW_GATEWAY_TOKEN;
 if (!token) throw new Error("OPENCLAW_GATEWAY_TOKEN is required");
 
-const openclawBin = realpathSync(process.env.OPENCLAW_BIN);
+const openclawBin = realpathSync(findOnPath("openclaw"));
 const requireFromOpenclaw = createRequire(openclawBin);
 const runtimePath = requireFromOpenclaw.resolve("openclaw/plugin-sdk/gateway-runtime");
 const { callGatewayFromCli } = await import(pathToFileURL(runtimePath).href);
@@ -223,7 +236,6 @@ function gatewayCatalogCallScript(params: Record<string, unknown>) {
   return trustedSandboxShellScript(`set -eu
 . /tmp/nemoclaw-proxy-env.sh
 export HOME=/sandbox
-export OPENCLAW_BIN="$(command -v openclaw)"
 export NO_PROXY=127.0.0.1,localhost
 export no_proxy="$NO_PROXY"
 export NEMOCLAW_E2E_GATEWAY_PARAMS_B64='${encodedParams}'
