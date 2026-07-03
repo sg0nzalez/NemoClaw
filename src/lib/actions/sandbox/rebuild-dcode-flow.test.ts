@@ -467,6 +467,7 @@ describe("rebuildSandbox DCode flow", () => {
     expect(harness.restoreSandboxStateSpy).toHaveBeenCalledWith(
       "alpha",
       recoveryManifest.backupPath,
+      { preserveFreshOpenClawPluginInstalls: true },
     );
   });
 });
