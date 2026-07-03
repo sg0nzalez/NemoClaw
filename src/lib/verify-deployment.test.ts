@@ -3,13 +3,23 @@
 
 import { describe, expect, it } from "vitest";
 import { buildChain } from "./dashboard/contract.js";
-import { formatVerificationDiagnostics, verifyDeployment } from "./verify-deployment.js";
+import {
+  classifyOpenClawRuntimeFailure,
+  formatVerificationDiagnostics,
+  shouldDiagnoseCustomOpenClawRuntime,
+  verifyDeployment,
+} from "./verify-deployment.js";
 
 const chain = buildChain();
 
 // Tests run probes with no inter-attempt delay so the suite stays fast.
 // Production callers use the default DEFAULT_RETRY_DELAYS_MS.
 const NO_RETRY = { retryDelaysMs: [], sleep: async (_ms: number) => {} };
+
+const CUSTOM_OPENCLAW_NO_RETRY = {
+  ...NO_RETRY,
+  diagnoseCustomOpenClawRuntime: true,
+};
 
 function makeDeps(overrides: Record<string, unknown> = {}) {
   return {
@@ -25,6 +35,54 @@ function makeDeps(overrides: Record<string, unknown> = {}) {
     ...overrides,
   };
 }
+
+describe("classifyOpenClawRuntimeFailure", () => {
+  it("recognizes a normal managed runtime when startup and config artifacts exist", () => {
+    const result = classifyOpenClawRuntimeFailure("my-sandbox", () => ({
+      status: 0,
+      stdout: "nemoclaw-runtime-probe-v1 log=0 start=1 config=1",
+      stderr: "",
+    }));
+    expect(result).toEqual({
+      kind: "normal_runtime",
+      gatewayLogPresent: false,
+      startupScriptPresent: true,
+      configPresent: true,
+    });
+  });
+
+  it("recognizes the base-only image when log, startup, and config artifacts are absent (#6108)", () => {
+    const result = classifyOpenClawRuntimeFailure("my-sandbox", () => ({
+      status: 0,
+      stdout: "nemoclaw-runtime-probe-v1 log=0 start=0 config=0",
+      stderr: "",
+    }));
+    expect(result.kind).toBe("base_only_image");
+  });
+
+  it("preserves an unreachable classification when sandbox exec fails", () => {
+    const result = classifyOpenClawRuntimeFailure("my-sandbox", () => null);
+    expect(result.kind).toBe("sandbox_unreachable");
+  });
+
+  it("recognizes OpenShell-framed probe output", () => {
+    const result = classifyOpenClawRuntimeFailure("my-sandbox", () => ({
+      status: 0,
+      stdout:
+        "OpenShell sandbox exec output:\nstdout: nemoclaw-runtime-probe-v1 log=0 start=0 config=0",
+      stderr: "",
+    }));
+    expect(result.kind).toBe("base_only_image");
+  });
+});
+
+describe("shouldDiagnoseCustomOpenClawRuntime", () => {
+  it("enables the diagnostic only for a custom OpenClaw Dockerfile", () => {
+    expect(shouldDiagnoseCustomOpenClawRuntime("/tmp/Dockerfile", "openclaw")).toBe(true);
+    expect(shouldDiagnoseCustomOpenClawRuntime(null, "openclaw")).toBe(false);
+    expect(shouldDiagnoseCustomOpenClawRuntime("/tmp/Dockerfile", "hermes")).toBe(false);
+  });
+});
 
 describe("verifyDeployment", () => {
   it("reports healthy when gateway and dashboard reachable", async () => {
@@ -55,6 +113,71 @@ describe("verifyDeployment", () => {
     const gwDiag = result.diagnostics.find((d) => d.link === "gateway");
     expect(gwDiag?.status).toBe("fail");
     expect(gwDiag?.hint).toContain("openshell-gateway.log");
+  });
+
+  it("diagnoses a base-only custom OpenClaw image without suggesting another port-forward retry (#6108)", async () => {
+    const sleepCalls: number[] = [];
+    const deps = makeDeps({
+      executeSandboxCommand: (_name: string, script: string) => {
+        if (script.includes("nemoclaw-runtime-probe-v1")) {
+          return {
+            status: 0,
+            stdout: "nemoclaw-runtime-probe-v1 log=0 start=0 config=0",
+            stderr: "",
+          };
+        }
+        return { status: 0, stdout: "000", stderr: "" };
+      },
+      probeHostPort: () => 0,
+    });
+    const result = await verifyDeployment("my-sandbox", chain, deps, {
+      retryDelaysMs: [10, 20],
+      sleep: async (delayMs) => {
+        sleepCalls.push(delayMs);
+      },
+      diagnoseCustomOpenClawRuntime: true,
+    });
+    const gateway = result.diagnostics.find((diagnostic) => diagnostic.link === "gateway");
+    const dashboard = result.diagnostics.find((diagnostic) => diagnostic.link === "dashboard");
+    expect(gateway?.hint).toContain("does not contain the NemoClaw-managed OpenClaw runtime");
+    expect(gateway?.hint).toContain("onboard --from");
+    expect(gateway?.hint).toContain("sandbox-base");
+    expect(dashboard?.hint).toContain("cannot start until the custom image includes");
+    expect(dashboard?.hint).not.toContain("openshell forward start");
+    expect(sleepCalls).toEqual([10, 20]);
+  });
+
+  it("keeps generic guidance when a custom image has the normal runtime contract", async () => {
+    const deps = makeDeps({
+      executeSandboxCommand: (_name: string, script: string) => {
+        if (script.includes("nemoclaw-runtime-probe-v1")) {
+          return {
+            status: 0,
+            stdout: "nemoclaw-runtime-probe-v1 log=0 start=1 config=1",
+            stderr: "",
+          };
+        }
+        return { status: 0, stdout: "000", stderr: "" };
+      },
+      probeHostPort: () => 0,
+    });
+    const result = await verifyDeployment("my-sandbox", chain, deps, CUSTOM_OPENCLAW_NO_RETRY);
+    const gateway = result.diagnostics.find((diagnostic) => diagnostic.link === "gateway");
+    const dashboard = result.diagnostics.find((diagnostic) => diagnostic.link === "dashboard");
+    expect(gateway?.hint).toContain("nemoclaw my-sandbox logs");
+    expect(dashboard?.hint).toContain("openshell forward start");
+  });
+
+  it("keeps generic guidance when the custom sandbox is unreachable", async () => {
+    const deps = makeDeps({
+      executeSandboxCommand: () => null,
+      probeHostPort: () => 0,
+    });
+    const result = await verifyDeployment("my-sandbox", chain, deps, CUSTOM_OPENCLAW_NO_RETRY);
+    const gateway = result.diagnostics.find((diagnostic) => diagnostic.link === "gateway");
+    const dashboard = result.diagnostics.find((diagnostic) => diagnostic.link === "dashboard");
+    expect(gateway?.hint).toContain("openshell-gateway.log");
+    expect(dashboard?.hint).toContain("openshell forward start");
   });
 
   it("hint surfaces both the in-sandbox gateway log (via nemoclaw logs) and the host OpenShell log (#3563)", async () => {

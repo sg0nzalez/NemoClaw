@@ -5,19 +5,27 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
-import { trustedSandboxShellScript, validateSandboxName } from "../fixtures/clients/sandbox.ts";
+import {
+  type SandboxClient,
+  trustedSandboxShellScript,
+  validateSandboxName,
+} from "../fixtures/clients/sandbox.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
 import { shouldRunLiveE2E } from "../fixtures/live-project-gate.ts";
+import { parseJsonFromText } from "./json-envelope.ts";
 
-// the contract as a simple live test: onboard a fresh OpenClaw sandbox
-// from the repo Dockerfile, capture the sandbox filesystem layout, then run a
-// focused in-sandbox Node replacement probe that guards #3513/#3127's EXDEV
-// cross-device runtime-deps failure mode. No registry, no ledger, no shared helper.
+// Keep this contract as a focused live test: build a deterministic custom plugin
+// on top of the complete managed runtime, prove it survives restart/rebuild, then
+// run the in-sandbox Node replacement probe that guards #3513/#3127's EXDEV
+// cross-device runtime-deps failure mode. No registry or ledger is required.
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "../../..");
 const CLI_ENTRYPOINT = path.join(REPO_ROOT, "bin", "nemoclaw.js");
+const CUSTOM_DOCKERFILE = path.join(REPO_ROOT, "Dockerfile.e2e-weather-plugin");
+const SANDBOX_BASE_IMAGE_REF = "ghcr.io/nvidia/nemoclaw/sandbox-base:v0.0.71";
 const SANDBOX_NAME = process.env.NEMOCLAW_SANDBOX_NAME ?? "e2e-openclaw-plugin-exdev";
 const ONBOARD_TIMEOUT_MS = 25 * 60_000;
+const REBUILD_TIMEOUT_MS = 20 * 60_000;
 const PROBE_TIMEOUT_MS = 60_000;
 validateSandboxName(SANDBOX_NAME);
 
@@ -29,6 +37,13 @@ const liveTest = shouldRunLiveE2E() ? test : test.skip;
 
 function resultText(result: { stdout: string; stderr: string }): string {
   return [result.stdout, result.stderr].filter(Boolean).join("\n");
+}
+
+function normalizeSandboxStdoutFrames(output: string): string {
+  return output
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^\s*(?:\[stdout\]|stdout:)\s*/i, ""))
+    .join("\n");
 }
 
 function liveEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
@@ -79,6 +94,150 @@ function patchPoliciesForDevShm(): () => void {
       fs.writeFileSync(policyPath, text, "utf8");
     }
   };
+}
+
+function createCustomPluginDockerfile(): () => void {
+  const sourceDockerfile = path.join(REPO_ROOT, "Dockerfile");
+  const source = fs.readFileSync(sourceDockerfile, "utf8");
+  const baseImageAnchor = "ARG BASE_IMAGE=ghcr.io/nvidia/nemoclaw/sandbox-base:latest\n";
+  const runtimeAnchor = "FROM ${BASE_IMAGE}\n";
+  expect(
+    source.match(/^ARG BASE_IMAGE=ghcr\.io\/nvidia\/nemoclaw\/sandbox-base:latest$/gm)?.length,
+  ).toBe(1);
+  expect(source.match(/^FROM \$\{BASE_IMAGE\}$/gm)?.length, "expected one runtime stage").toBe(1);
+
+  const runtime = source
+    .replace(baseImageAnchor, `ARG BASE_IMAGE=${SANDBOX_BASE_IMAGE_REF}\n`)
+    .replace(runtimeAnchor, "FROM ${BASE_IMAGE} AS nemoclaw-runtime\n");
+  const extension = String.raw`
+
+# Build the deterministic custom-plugin fixture used by this live contract.
+FROM builder AS weather-plugin-builder
+WORKDIR /opt/weather
+COPY test/e2e/fixtures/plugins/weather/package.json test/e2e/fixtures/plugins/weather/package-lock.json test/e2e/fixtures/plugins/weather/tsconfig.json ./
+RUN npm ci --no-audit --no-fund
+COPY test/e2e/fixtures/plugins/weather/openclaw.plugin.json ./
+COPY test/e2e/fixtures/plugins/weather/src/ ./src/
+RUN npm run build \
+    && npm prune --omit=dev \
+    && sha256sum dist/index.js | cut -d ' ' -f 1 > e2e-weather-plugin.sha256
+
+# Extend the completed managed runtime so its entrypoint, health check, config
+# generation, and permissions remain the source of truth.
+FROM nemoclaw-runtime AS weather-runtime
+COPY --from=weather-plugin-builder --chown=sandbox:sandbox \
+    /opt/weather/package.json \
+    /opt/weather/package-lock.json \
+    /opt/weather/openclaw.plugin.json \
+    /sandbox/.openclaw/extensions/weather/
+COPY --from=weather-plugin-builder --chown=sandbox:sandbox \
+    /opt/weather/dist/ /sandbox/.openclaw/extensions/weather/dist/
+COPY --from=weather-plugin-builder --chown=sandbox:sandbox \
+    /opt/weather/node_modules/ /sandbox/.openclaw/extensions/weather/node_modules/
+COPY --from=weather-plugin-builder \
+    /opt/weather/e2e-weather-plugin.sha256 \
+    /usr/local/share/nemoclaw/e2e-weather-plugin.sha256
+
+USER sandbox
+RUN HOME=/sandbox openclaw config set plugins.load.paths \
+        '["/sandbox/.openclaw/extensions/weather"]' --json \
+    && HOME=/sandbox openclaw plugins registry --refresh --json > /dev/null \
+    && HOME=/sandbox openclaw plugins enable weather \
+    && HOME=/sandbox openclaw plugins inspect weather --json > /dev/null
+
+# Enabling the plugin changes openclaw.json after the managed runtime hashes it.
+# hadolint ignore=DL3002
+USER root
+RUN chown sandbox:sandbox /sandbox/.openclaw/openclaw.json \
+    && chmod 660 /sandbox/.openclaw/openclaw.json \
+    && sha256sum /sandbox/.openclaw/openclaw.json > /sandbox/.openclaw/.config-hash \
+    && chown sandbox:sandbox /sandbox/.openclaw/.config-hash \
+    && chmod 660 /sandbox/.openclaw/.config-hash
+`;
+  fs.writeFileSync(CUSTOM_DOCKERFILE, runtime.trimEnd() + extension, "utf8");
+  return () => fs.rmSync(CUSTOM_DOCKERFILE, { force: true });
+}
+
+type WeatherPluginInspect = {
+  plugin?: { id?: unknown; status?: unknown; toolNames?: unknown };
+  tools?: Array<{ names?: unknown }>;
+};
+
+type GatewayToolCatalog = {
+  groups?: Array<{ tools?: Array<{ id?: unknown }> }>;
+};
+
+type WeatherRuntimeProof = {
+  imageMarker: string;
+  inspectLoaded: boolean;
+  catalogToolIds: string[];
+};
+
+async function assertWeatherPluginRuntime(
+  sandbox: SandboxClient,
+  phase: string,
+): Promise<WeatherRuntimeProof> {
+  const imageProbe = await sandbox.execShell(
+    SANDBOX_NAME,
+    trustedSandboxShellScript(`set -eu
+test -s /tmp/gateway.log
+test -s /usr/local/share/nemoclaw/e2e-weather-plugin.sha256
+expected=$(cat /usr/local/share/nemoclaw/e2e-weather-plugin.sha256)
+actual=$(sha256sum /sandbox/.openclaw/extensions/weather/dist/index.js | cut -d ' ' -f 1)
+[ "$expected" = "$actual" ]
+printf '%s\\n' "$actual"`),
+    {
+      artifactName: `openclaw-weather-plugin-image-${phase}`,
+      env: liveEnv(),
+      timeoutMs: PROBE_TIMEOUT_MS,
+    },
+  );
+  expect(imageProbe.exitCode, resultText(imageProbe)).toBe(0);
+  const imageMarker = normalizeSandboxStdoutFrames(imageProbe.stdout).match(
+    /(?:^|\n)([a-f0-9]{64})(?:\r?\n|$)/,
+  )?.[1];
+  expect(imageMarker).toMatch(/^[a-f0-9]{64}$/);
+
+  const inspectProbe = await sandbox.execShell(
+    SANDBOX_NAME,
+    trustedSandboxShellScript("HOME=/sandbox openclaw plugins inspect weather --runtime --json"),
+    {
+      artifactName: `openclaw-weather-plugin-inspect-${phase}`,
+      env: liveEnv(),
+      timeoutMs: PROBE_TIMEOUT_MS,
+    },
+  );
+  expect(inspectProbe.exitCode, resultText(inspectProbe)).toBe(0);
+  const inspect = parseJsonFromText(
+    normalizeSandboxStdoutFrames(inspectProbe.stdout),
+  ) as WeatherPluginInspect;
+  expect(inspect.plugin?.id).toBe("weather");
+  expect(inspect.plugin?.status).toBe("loaded");
+  expect(inspect.plugin?.toolNames).toContain("get_weather");
+  expect(inspect.tools?.flatMap((tool) => (Array.isArray(tool.names) ? tool.names : []))).toContain(
+    "get_weather",
+  );
+
+  const catalogProbe = await sandbox.execShell(
+    SANDBOX_NAME,
+    trustedSandboxShellScript(
+      `. /tmp/nemoclaw-proxy-env.sh && HOME=/sandbox openclaw gateway call tools.catalog --params '{"includePlugins":true}' --json`,
+    ),
+    {
+      artifactName: `openclaw-weather-plugin-catalog-${phase}`,
+      env: liveEnv(),
+      timeoutMs: PROBE_TIMEOUT_MS,
+    },
+  );
+  expect(catalogProbe.exitCode, resultText(catalogProbe)).toBe(0);
+  const catalog = parseJsonFromText(
+    normalizeSandboxStdoutFrames(catalogProbe.stdout),
+  ) as GatewayToolCatalog;
+  const catalogToolIds = (catalog.groups ?? []).flatMap((group) =>
+    (group.tools ?? []).map((tool) => tool.id).filter((id): id is string => typeof id === "string"),
+  );
+  expect(catalogToolIds).toContain("get_weather");
+  return { imageMarker: imageMarker ?? "", inspectLoaded: true, catalogToolIds };
 }
 
 const runtimeDepsReplacementProbeSource = `set -eu
@@ -158,20 +317,23 @@ const runtimeDepsReplacementProbe = trustedSandboxShellScript(
 );
 
 liveTest(
-  "OpenClaw plugin runtime deps replacement survives cross-filesystem EXDEV layout",
-  { timeout: ONBOARD_TIMEOUT_MS + PROBE_TIMEOUT_MS + 5 * 60_000 },
+  "a custom OpenClaw plugin survives restart and rebuild without EXDEV failures (#6108)",
+  { timeout: ONBOARD_TIMEOUT_MS + REBUILD_TIMEOUT_MS + 15 * 60_000 },
   async ({ artifacts, cleanup, host, sandbox, skip }) => {
     await artifacts.writeJson("target.json", {
       id: "openclaw-plugin-runtime-exdev",
       runner: "vitest",
       boundary: "fresh-openclaw-sandbox-exec",
-      regressionTargets: ["#3513", "#3127"],
+      regressionTargets: ["#6108", "#3513", "#3127"],
       contract: [
-        "fresh OpenClaw sandbox onboards from the checkout Dockerfile",
+        "fresh OpenClaw sandbox onboards from a full managed custom-plugin Dockerfile",
+        "gateway log, runtime plugin inspection, and tools.catalog expose weather/get_weather",
+        "custom-plugin image provenance and the gateway tool survive restart and rebuild",
         "sandbox proves /dev/shm and plugin-runtime-deps are distinct devices",
         "legacy source-side staging fails with EXDEV across the same /dev/shm to plugin-runtime-deps boundary",
         "OpenClaw-style target-side plugin runtime-deps replacement completes without EXDEV",
       ],
+      sandboxBaseImageRef: SANDBOX_BASE_IMAGE_REF,
     });
 
     const docker = await host.command("docker", ["info"], {
@@ -228,6 +390,20 @@ liveTest(
 
     const restorePolicies = patchPoliciesForDevShm();
     cleanup.add("restore EXDEV policy fixture edits", restorePolicies);
+    const removeCustomDockerfile = createCustomPluginDockerfile();
+    cleanup.add("remove custom weather-plugin Dockerfile", removeCustomDockerfile);
+
+    const sandboxEnv = liveEnv({
+      COMPATIBLE_API_KEY: "nemoclaw-exdev-dummy-key",
+      NEMOCLAW_ENDPOINT_URL: "http://host.openshell.internal:65535/v1",
+      NEMOCLAW_MODEL: "nemoclaw-exdev-probe",
+      NEMOCLAW_PROVIDER_KEY: "nemoclaw-exdev-dummy-key",
+      NEMOCLAW_SANDBOX_NAME: SANDBOX_NAME,
+      NEMOCLAW_SANDBOX_BASE_IMAGE_REF: SANDBOX_BASE_IMAGE_REF,
+      NEMOCLAW_POLICY_MODE: "skip",
+      NEMOCLAW_PREFERRED_API: "openai-completions",
+      NEMOCLAW_PROVIDER: "custom",
+    });
 
     const onboard = await host.command(
       "node",
@@ -240,26 +416,42 @@ liveTest(
         "--agent",
         "openclaw",
         "--from",
-        path.join(REPO_ROOT, "Dockerfile"),
+        CUSTOM_DOCKERFILE,
       ],
       {
         artifactName: "openclaw-plugin-exdev-onboard",
-        env: liveEnv({
-          COMPATIBLE_API_KEY: "nemoclaw-exdev-dummy-key",
-          NEMOCLAW_ENDPOINT_URL: "http://host.openshell.internal:65535/v1",
-          NEMOCLAW_MODEL: "nemoclaw-exdev-probe",
-          NEMOCLAW_PROVIDER_KEY: "nemoclaw-exdev-dummy-key",
-          NEMOCLAW_SANDBOX_NAME: SANDBOX_NAME,
-          NEMOCLAW_POLICY_MODE: "skip",
-          NEMOCLAW_PREFERRED_API: "openai-completions",
-          NEMOCLAW_PROVIDER: "custom",
-        }),
+        env: sandboxEnv,
         timeoutMs: ONBOARD_TIMEOUT_MS,
       },
     );
     const onboardText = resultText(onboard);
     expect(onboard.exitCode, onboardText).toBe(0);
     expect(onboardText).toMatch(/Creating sandbox|Sandbox '.+' created/);
+    expect(onboardText).toContain("Deployment verified");
+
+    const weatherAfterOnboard = await assertWeatherPluginRuntime(sandbox, "after-onboard");
+
+    const restart = await host.command(
+      "node",
+      [CLI_ENTRYPOINT, SANDBOX_NAME, "gateway", "restart"],
+      {
+        artifactName: "openclaw-weather-plugin-gateway-restart",
+        env: sandboxEnv,
+        timeoutMs: 180_000,
+      },
+    );
+    expect(restart.exitCode, resultText(restart)).toBe(0);
+    const weatherAfterRestart = await assertWeatherPluginRuntime(sandbox, "after-restart");
+    expect(weatherAfterRestart.imageMarker).toBe(weatherAfterOnboard.imageMarker);
+
+    const rebuild = await host.command("node", [CLI_ENTRYPOINT, SANDBOX_NAME, "rebuild", "--yes"], {
+      artifactName: "openclaw-weather-plugin-rebuild",
+      env: sandboxEnv,
+      timeoutMs: REBUILD_TIMEOUT_MS,
+    });
+    expect(rebuild.exitCode, resultText(rebuild)).toBe(0);
+    const weatherAfterRebuild = await assertWeatherPluginRuntime(sandbox, "after-rebuild");
+    expect(weatherAfterRebuild.imageMarker).toBe(weatherAfterOnboard.imageMarker);
 
     const df = await sandbox.execShell(
       SANDBOX_NAME,
@@ -294,9 +486,23 @@ liveTest(
     await artifacts.writeJson("target-result.json", {
       id: "openclaw-plugin-runtime-exdev",
       onboardExitCode: onboard.exitCode,
+      restartExitCode: restart.exitCode,
+      rebuildExitCode: rebuild.exitCode,
       filesystemProbeExitCode: df.exitCode,
       runtimeDepsProbeExitCode: probe.exitCode,
       assertions: {
+        weatherAfterOnboard:
+          weatherAfterOnboard.inspectLoaded &&
+          weatherAfterOnboard.catalogToolIds.includes("get_weather"),
+        weatherAfterRestart:
+          weatherAfterRestart.inspectLoaded &&
+          weatherAfterRestart.catalogToolIds.includes("get_weather"),
+        weatherAfterRebuild:
+          weatherAfterRebuild.inspectLoaded &&
+          weatherAfterRebuild.catalogToolIds.includes("get_weather"),
+        imageMarkerStable:
+          weatherAfterOnboard.imageMarker === weatherAfterRestart.imageMarker &&
+          weatherAfterRestart.imageMarker === weatherAfterRebuild.imageMarker,
         distinctDevices: /source_device=\d+ target_device=\d+/.test(probeText),
         sourceSideExdevSelfCheck: probeText.includes(
           "source-side staging failure self-check completed",
