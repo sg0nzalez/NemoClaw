@@ -4,16 +4,6 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import {
-  buildAutoPairApprovalScript,
-  readAutoPairApprovalPolicyModule,
-} from "../../../src/lib/actions/sandbox/auto-pair-approval.ts";
-import {
-  CONNECT_AUTO_PAIR_APPROVE_TIMEOUT_S,
-  CONNECT_AUTO_PAIR_LIST_TIMEOUT_S,
-  CONNECT_AUTO_PAIR_MAX_APPROVALS,
-  CONNECT_AUTO_PAIR_TIMEOUT_MS,
-} from "../../../src/lib/actions/sandbox/connect-autopair-budget.ts";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
 import {
   type SandboxClient,
@@ -22,7 +12,6 @@ import {
 } from "../fixtures/clients/sandbox.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
 import { shouldRunLiveE2E } from "../fixtures/live-project-gate.ts";
-import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
 import { parseJsonFromText } from "./json-envelope.ts";
 
 // Keep this contract as a focused live test: build a deterministic custom plugin
@@ -44,9 +33,36 @@ const EXDEV_PATTERNS = [
   /EXDEV: cross-device link not permitted/i,
   /cross-device link not permitted/i,
 ];
-const GATEWAY_PAIRING_REQUIRED_PATTERN =
-  /scope upgrade pending|pairing required|device is not approved/i;
 const liveTest = shouldRunLiveE2E() ? test : test.skip;
+
+const GATEWAY_CATALOG_CALL_SOURCE = String.raw`
+import { Buffer } from "node:buffer";
+import { realpathSync } from "node:fs";
+import { createRequire } from "node:module";
+import { pathToFileURL } from "node:url";
+
+const port = process.env.OPENCLAW_GATEWAY_PORT || "18789";
+if (!/^[1-9][0-9]{0,4}$/.test(port) || Number(port) > 65535) {
+  throw new Error("OPENCLAW_GATEWAY_PORT must be a canonical TCP port in 1..65535");
+}
+const token = process.env.OPENCLAW_GATEWAY_TOKEN;
+if (!token) throw new Error("OPENCLAW_GATEWAY_TOKEN is required");
+
+const openclawBin = realpathSync(process.env.OPENCLAW_BIN);
+const requireFromOpenclaw = createRequire(openclawBin);
+const runtimePath = requireFromOpenclaw.resolve("openclaw/plugin-sdk/gateway-runtime");
+const { callGatewayFromCli } = await import(pathToFileURL(runtimePath).href);
+const params = JSON.parse(
+  Buffer.from(process.env.NEMOCLAW_E2E_GATEWAY_PARAMS_B64 || "e30=", "base64").toString("utf8"),
+);
+const result = await callGatewayFromCli(
+  "tools.catalog",
+  { url: "ws://127.0.0.1:" + port, token, timeout: "30000", json: true },
+  params,
+  { clientName: "gateway-client", mode: "backend", scopes: ["operator.read"], progress: false },
+);
+process.stdout.write(JSON.stringify(result) + "\n");
+`.trim();
 
 function resultText(result: { stdout: string; stderr: string }): string {
   return [result.stdout, result.stderr].filter(Boolean).join("\n");
@@ -191,9 +207,7 @@ type GatewayToolCatalog = {
 
 type GatewayToolInvocation = {
   ok?: unknown;
-  toolName?: unknown;
-  source?: unknown;
-  output?: { details?: unknown };
+  result?: { details?: unknown };
 };
 
 type WeatherRuntimeProof = {
@@ -203,56 +217,17 @@ type WeatherRuntimeProof = {
   toolInvoked: boolean;
 };
 
-function gatewayPairingApprovalScript() {
-  const policyModule = readAutoPairApprovalPolicyModule();
-  expect(
-    policyModule,
-    "OpenClaw device approval policy helper is required for the live plugin test",
-  ).toBeTruthy();
-  return trustedSandboxShellScript(
-    buildAutoPairApprovalScript(Buffer.from(policyModule ?? "", "utf8").toString("base64"), {
-      emitSummary: true,
-      budget: {
-        maxApprovals: CONNECT_AUTO_PAIR_MAX_APPROVALS,
-        listTimeoutS: CONNECT_AUTO_PAIR_LIST_TIMEOUT_S,
-        approveTimeoutS: CONNECT_AUTO_PAIR_APPROVE_TIMEOUT_S,
-      },
-    }),
-  );
-}
-
-async function approveGatewayPairingAndRetry(
-  sandbox: SandboxClient,
-  phase: string,
-  operation: "catalog" | "invoke",
-  run: (attempt: number) => Promise<ShellProbeResult>,
-): Promise<ShellProbeResult> {
-  const approval = await sandbox.execShell(SANDBOX_NAME, gatewayPairingApprovalScript(), {
-    artifactName: `openclaw-weather-plugin-${operation}-${phase}-pairing-approval`,
-    env: liveEnv(),
-    timeoutMs: CONNECT_AUTO_PAIR_TIMEOUT_MS + 5_000,
-  });
-  expect(approval.exitCode, resultText(approval)).toBe(0);
-  return run(2);
-}
-
-async function runGatewayCallWithPairingRetry(
-  sandbox: SandboxClient,
-  phase: string,
-  operation: "catalog" | "invoke",
-  script: string,
-): Promise<ShellProbeResult> {
-  const run = (attempt: number) =>
-    sandbox.execShell(SANDBOX_NAME, trustedSandboxShellScript(script), {
-      artifactName: `openclaw-weather-plugin-${operation}-${phase}-attempt-${attempt}`,
-      env: liveEnv(),
-      timeoutMs: PROBE_TIMEOUT_MS,
-    });
-
-  const result = await run(1);
-  return result.exitCode !== 0 && GATEWAY_PAIRING_REQUIRED_PATTERN.test(resultText(result))
-    ? approveGatewayPairingAndRetry(sandbox, phase, operation, run)
-    : result;
+function gatewayCatalogCallScript(params: Record<string, unknown>) {
+  const source = Buffer.from(GATEWAY_CATALOG_CALL_SOURCE, "utf8").toString("base64");
+  const encodedParams = Buffer.from(JSON.stringify(params), "utf8").toString("base64");
+  return trustedSandboxShellScript(`set -eu
+. /tmp/nemoclaw-proxy-env.sh
+export HOME=/sandbox
+export OPENCLAW_BIN="$(command -v openclaw)"
+export NO_PROXY=127.0.0.1,localhost
+export no_proxy="$NO_PROXY"
+export NEMOCLAW_E2E_GATEWAY_PARAMS_B64='${encodedParams}'
+exec node --input-type=module --eval 'await import("data:text/javascript;base64," + process.argv[1])' '${source}'`);
 }
 
 async function assertWeatherPluginRuntime(
@@ -300,15 +275,18 @@ printf '%s\\n' "$actual"`),
     "get_weather",
   );
 
-  // Use the sandbox-local gateway address so OpenClaw can synchronously pair
-  // this shared-secret CLI client. Invoke first because operator.write also
-  // satisfies the catalog's operator.read scope; the reverse order would
-  // create a separate asynchronous scope-upgrade request.
-  const invokeProbe = await runGatewayCallWithPairingRetry(
-    sandbox,
-    phase,
-    "invoke",
-    `. /tmp/nemoclaw-proxy-env.sh && OPENCLAW_GATEWAY_URL="ws://127.0.0.1:\${OPENCLAW_GATEWAY_PORT:-18789}" HOME=/sandbox openclaw gateway call tools.invoke --params '{"agentId":"main","name":"get_weather","args":{"location":"Santa Clara"}}' --json`,
+  // Exercise OpenClaw's documented HTTP tool surface with the managed bearer
+  // token supplied on stdin so the credential never enters process arguments.
+  const invokeProbe = await sandbox.execShell(
+    SANDBOX_NAME,
+    trustedSandboxShellScript(
+      `. /tmp/nemoclaw-proxy-env.sh && printf 'header = "Authorization: Bearer %s"\\n' "$OPENCLAW_GATEWAY_TOKEN" | curl --noproxy '*' --max-time 30 --silent --show-error --fail-with-body --config - -H 'Content-Type: application/json' --data '{"agentId":"main","tool":"get_weather","args":{"location":"Santa Clara"}}' "http://127.0.0.1:\${OPENCLAW_GATEWAY_PORT:-18789}/tools/invoke"`,
+    ),
+    {
+      artifactName: `openclaw-weather-plugin-invoke-${phase}`,
+      env: liveEnv(),
+      timeoutMs: PROBE_TIMEOUT_MS,
+    },
   );
   expect(invokeProbe.exitCode, resultText(invokeProbe)).toBe(0);
   const invocation = parseJsonFromText(
@@ -316,18 +294,21 @@ printf '%s\\n' "$actual"`),
   ) as GatewayToolInvocation;
   expect(invocation).toMatchObject({
     ok: true,
-    toolName: "get_weather",
-    source: "plugin",
-    output: {
+    result: {
       details: { location: "Santa Clara", condition: "clear", temperatureC: 21 },
     },
   });
 
-  const catalogProbe = await runGatewayCallWithPairingRetry(
-    sandbox,
-    phase,
-    "catalog",
-    `. /tmp/nemoclaw-proxy-env.sh && OPENCLAW_GATEWAY_URL="ws://127.0.0.1:\${OPENCLAW_GATEWAY_PORT:-18789}" HOME=/sandbox openclaw gateway call tools.catalog --params '{"agentId":"main","includePlugins":true}' --json`,
+  // Mirror NemoClaw's trusted internal read-only gateway client for the RPC
+  // catalog proof without creating a user-facing CLI device or weakening auth.
+  const catalogProbe = await sandbox.execShell(
+    SANDBOX_NAME,
+    gatewayCatalogCallScript({ agentId: "main", includePlugins: true }),
+    {
+      artifactName: `openclaw-weather-plugin-catalog-${phase}`,
+      env: liveEnv(),
+      timeoutMs: PROBE_TIMEOUT_MS,
+    },
   );
   expect(catalogProbe.exitCode, resultText(catalogProbe)).toBe(0);
   const catalog = parseJsonFromText(
