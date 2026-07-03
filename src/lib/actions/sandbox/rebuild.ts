@@ -1139,7 +1139,9 @@ export async function rebuildSandbox(
       console.log("");
       console.log("  Restoring workspace state...");
       log(`Restoring from: ${backupManifest.backupPath} into sandbox: ${sandboxName}`);
-      const restore = sandboxState.restoreSandboxState(sandboxName, backupManifest.backupPath);
+      const restore = sandboxState.restoreSandboxState(sandboxName, backupManifest.backupPath, {
+        preserveFreshOpenClawPluginInstalls: true,
+      });
       log(
         `Restore result: success=${restore.success}, restored=${restore.restoredDirs.join(",")}; files=${restore.restoredFiles.join(",")}, failed=${restore.failedDirs.join(",")}; failedFiles=${restore.failedFiles.join(",")}`,
       );

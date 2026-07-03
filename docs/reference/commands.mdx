@@ -394,7 +394,7 @@ Missing paths fail during command parsing before preflight, gateway setup, infer
 
 If deployment verification cannot reach the gateway for a custom OpenClaw image, NemoClaw checks for `/tmp/gateway.log`, `/usr/local/bin/nemoclaw-start`, and `/sandbox/.openclaw/openclaw.json`.
 When all three paths are absent, onboarding reports that the custom image lacks the managed runtime instead of treating repeated port-forward retries as the recovery path.
-For the version-matched full-runtime plugin workflow, refer to [Install OpenClaw Plugins](../deployment/install-openclaw-plugins).
+For the version-matched full-runtime plugin workflow, refer to [Install OpenClaw Plugins](../manage-sandboxes/install-openclaw-plugins).
 
 </AgentOnly>
 
@@ -1447,7 +1447,7 @@ Skill names must contain only alphanumeric characters, dots, hyphens, and unders
 <AgentOnly variant="openclaw">
 
 OpenClaw plugins are a different kind of extension.
-To install an OpenClaw plugin, refer to [Install OpenClaw Plugins](../deployment/install-openclaw-plugins).
+To install an OpenClaw plugin, refer to [Install OpenClaw Plugins](../manage-sandboxes/install-openclaw-plugins).
 For OpenClaw, the command uploads the skill to the OpenClaw state directory and mirrors it into `$HOME/.openclaw/skills/<name>` when the agent home directory differs from the state directory.
 That mirror makes skills listed by `openclaw skills list` available at session startup.
 If mirror creation fails, NemoClaw prints a warning so you can reinstall or inspect the home directory permissions.

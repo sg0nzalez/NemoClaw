@@ -599,36 +599,38 @@ process.exit(0);
     }
   });
 
-  it("preserves fresh image-managed OpenClaw extensions while restoring user extensions", () => {
+  it("preserves fresh custom image-managed OpenClaw extensions while restoring user extensions", () => {
     const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-extension-restore-"));
     const oldPath = process.env.PATH;
     const oldOpenshell = process.env.NEMOCLAW_OPENSHELL_BIN;
     try {
       const binDir = path.join(fixture, "bin");
       const openclawDir = path.join(fixture, "sandbox-root", ".openclaw");
-      const sshLog = path.join(fixture, "ssh-log.jsonl");
+      const freshRegistryPath = path.join(fixture, "fresh-installs.json");
       const extensionsDir = path.join(openclawDir, "extensions");
       fs.mkdirSync(binDir, { recursive: true });
-      fs.mkdirSync(path.join(extensionsDir, "nemoclaw"), { recursive: true });
-      fs.mkdirSync(path.join(extensionsDir, "openclaw-weixin"), { recursive: true });
+      fs.mkdirSync(path.join(extensionsDir, "weather"), { recursive: true });
       fs.mkdirSync(path.join(extensionsDir, "stale-user-extension"), { recursive: true });
-      fs.writeFileSync(path.join(extensionsDir, "nemoclaw", "marker.txt"), "fresh-nemoclaw\n");
-      fs.writeFileSync(path.join(extensionsDir, "openclaw-weixin", "marker.txt"), "fresh-weixin\n");
+      fs.writeFileSync(path.join(extensionsDir, "weather", "marker.txt"), "fresh-weather-v2\n");
       fs.writeFileSync(path.join(extensionsDir, "stale-user-extension", "marker.txt"), "stale\n");
+      fs.writeFileSync(
+        freshRegistryPath,
+        JSON.stringify({
+          version: 1,
+          installRecords: {
+            weather: { installPath: "/sandbox/.openclaw/extensions/weather" },
+          },
+        }),
+      );
 
       const manifest = writeBackup("alpha", "2026-05-19T12-00-00-000Z", {
         stateDirs: ["extensions"],
         backedUpDirs: ["extensions"],
       });
       const backupExtensionsDir = path.join(String(manifest.backupPath), "extensions");
-      fs.mkdirSync(path.join(backupExtensionsDir, "nemoclaw"), { recursive: true });
-      fs.mkdirSync(path.join(backupExtensionsDir, "openclaw-weixin"), { recursive: true });
+      fs.mkdirSync(path.join(backupExtensionsDir, "weather"), { recursive: true });
       fs.mkdirSync(path.join(backupExtensionsDir, "user-extension"), { recursive: true });
-      fs.writeFileSync(path.join(backupExtensionsDir, "nemoclaw", "marker.txt"), "old-nemoclaw\n");
-      fs.writeFileSync(
-        path.join(backupExtensionsDir, "openclaw-weixin", "marker.txt"),
-        "old-weixin\n",
-      );
+      fs.writeFileSync(path.join(backupExtensionsDir, "weather", "marker.txt"), "old-weather-v1\n");
       fs.writeFileSync(
         path.join(backupExtensionsDir, "user-extension", "marker.txt"),
         "restored\n",
@@ -642,7 +644,6 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 const cmd = process.argv[process.argv.length - 1] || "";
-fs.appendFileSync(${JSON.stringify(sshLog)}, JSON.stringify({ cmd }) + "\\n");
 function readStdin() {
   const chunks = [];
   for (;;) {
@@ -653,11 +654,12 @@ function readStdin() {
   }
   return Buffer.concat(chunks);
 }
+if (cmd.includes("plugins/installs.json") && cmd.includes("cat --")) { process.stdout.write(fs.readFileSync(${JSON.stringify(freshRegistryPath)})); process.exit(0); }
 if (cmd.includes("/sandbox/.openclaw/extensions") && cmd.includes("-exec rm -rf")) {
   const extensionsDir = ${JSON.stringify(extensionsDir)};
   fs.mkdirSync(extensionsDir, { recursive: true });
   for (const entry of fs.readdirSync(extensionsDir)) {
-    if (entry === "nemoclaw" || entry === "openclaw-weixin") continue;
+    if (entry === "weather") continue;
     fs.rmSync(path.join(extensionsDir, entry), { recursive: true, force: true });
   }
   process.exit(0);
@@ -682,31 +684,30 @@ process.exit(0);
       process.env.NEMOCLAW_OPENSHELL_BIN = openshell;
       process.env.PATH = `${binDir}:${oldPath || ""}`;
 
-      const restore = sandboxState.restoreSandboxState("alpha", String(manifest.backupPath));
+      const restore = sandboxState.restoreSandboxState("alpha", String(manifest.backupPath), {
+        preserveFreshOpenClawPluginInstalls: true,
+      });
       expect(restore.success).toBe(true);
       expect(restore.restoredDirs).toEqual(["extensions"]);
-      expect(fs.readFileSync(path.join(extensionsDir, "nemoclaw", "marker.txt"), "utf-8")).toBe(
-        "fresh-nemoclaw\n",
+      expect(fs.readFileSync(path.join(extensionsDir, "weather", "marker.txt"), "utf-8")).toBe(
+        "fresh-weather-v2\n",
       );
-      expect(
-        fs.readFileSync(path.join(extensionsDir, "openclaw-weixin", "marker.txt"), "utf-8"),
-      ).toBe("fresh-weixin\n");
       expect(fs.existsSync(path.join(extensionsDir, "stale-user-extension"))).toBe(false);
       expect(
         fs.readFileSync(path.join(extensionsDir, "user-extension", "marker.txt"), "utf-8"),
       ).toBe("restored\n");
 
-      const loggedCommands = fs
-        .readFileSync(sshLog, "utf-8")
-        .trim()
-        .split("\n")
-        .map((line) => JSON.parse(line).cmd as string);
-      const cleanupCommand = loggedCommands.find((cmd) =>
-        cmd.includes("/sandbox/.openclaw/extensions"),
+      fs.writeFileSync(
+        freshRegistryPath,
+        '{"version":1,"installRecords":{"../weather":{"installPath":"/sandbox/.openclaw/extensions/../weather"}}}',
       );
-      expect(cleanupCommand).not.toContain("rm -rf -- /sandbox/.openclaw/extensions");
-      expect(cleanupCommand).toContain("! -name 'nemoclaw'");
-      expect(cleanupCommand).toContain("! -name 'openclaw-weixin'");
+      const rejected = sandboxState.restoreSandboxState("alpha", String(manifest.backupPath), {
+        preserveFreshOpenClawPluginInstalls: true,
+      });
+      expect(rejected.success).toBe(false);
+      expect(fs.readFileSync(path.join(extensionsDir, "weather", "marker.txt"), "utf-8")).toBe(
+        "fresh-weather-v2\n",
+      );
     } finally {
       if (oldOpenshell === undefined) {
         delete process.env.NEMOCLAW_OPENSHELL_BIN;

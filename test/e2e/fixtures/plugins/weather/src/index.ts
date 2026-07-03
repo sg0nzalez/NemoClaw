@@ -1,22 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { defineToolPlugin } from "openclaw/plugin-sdk/tool-plugin";
 import { Type } from "typebox";
 
-type ToolResult = {
-  content: Array<{ type: "text"; text: string }>;
-  details: Record<string, unknown>;
-};
-
-type OpenClawPluginApi = {
-  registerTool(tool: {
-    name: string;
-    label: string;
-    description: string;
-    parameters: ReturnType<typeof Type.Object>;
-    execute(toolCallId: string, params: Record<string, unknown>): Promise<ToolResult>;
-  }): void;
-};
+import { WEATHER_FIXTURE_VERSION } from "./version.js";
 
 const WeatherParameters = Type.Object(
   {
@@ -25,26 +13,24 @@ const WeatherParameters = Type.Object(
   { additionalProperties: false },
 );
 
-const plugin = {
+export default defineToolPlugin({
   id: "weather",
   name: "NemoClaw E2E Weather",
   description: "Registers a deterministic weather tool for custom-image lifecycle tests.",
-  register(api: OpenClawPluginApi): void {
-    api.registerTool({
+  tools: (tool) => [
+    tool({
       name: "get_weather",
       label: "Get Weather",
       description: "Return deterministic weather data for a location.",
       parameters: WeatherParameters,
-      async execute(_toolCallId, params) {
-        const location = typeof params.location === "string" ? params.location : "unknown";
-        const details = { location, condition: "clear", temperatureC: 21 };
+      async execute({ location }) {
         return {
-          content: [{ type: "text", text: JSON.stringify(details) }],
-          details,
+          location,
+          condition: "clear",
+          temperatureC: 21,
+          fixtureVersion: WEATHER_FIXTURE_VERSION,
         };
       },
-    });
-  },
-};
-
-export default plugin;
+    }),
+  ],
+});

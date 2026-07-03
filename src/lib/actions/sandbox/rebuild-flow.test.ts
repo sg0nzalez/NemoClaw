@@ -489,6 +489,7 @@ describe("rebuildSandbox flow", () => {
     expect(harness.restoreSandboxStateSpy).toHaveBeenCalledWith(
       "alpha",
       "/tmp/nemoclaw-rebuild-backup",
+      { preserveFreshOpenClawPluginInstalls: true },
     );
     expect(harness.applyPresetSpy).toHaveBeenCalledWith("alpha", "npm");
     expect(harness.applyPresetSpy).toHaveBeenCalledWith("alpha", "bad");
@@ -527,6 +528,7 @@ describe("rebuildSandbox flow", () => {
     expect(harness.restoreSandboxStateSpy).toHaveBeenCalledWith(
       "alpha",
       recoveryManifest.backupPath,
+      { preserveFreshOpenClawPluginInstalls: true },
     );
   });
 

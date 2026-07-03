@@ -67,6 +67,23 @@ The example Dockerfile uses `npm ci`, so `my-plugin/` must include `package-lock
 If your plugin does not have a lockfile yet, create one in the plugin project with `npm install --package-lock-only`.
 OpenClaw `2026.5.27` also requires the plugin manifest to declare each registered tool in `contracts.tools`; for example, a weather plugin that registers `get_weather` must declare `"tools": ["get_weather"]`.
 
+Declare OpenClaw as both a runtime peer and an exact, release-matched development dependency.
+The peer range expresses runtime compatibility, while the development dependency provides the plugin SDK during the build:
+
+```json
+{
+  "devDependencies": {
+    "openclaw": "2026.5.27"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.5.17"
+  }
+}
+```
+
+With current npm versions, `npm ci` installs peer dependencies automatically.
+The build stage below therefore omits both development and peer dependencies after compilation so the staged plugin does not carry a private OpenClaw runtime.
+
 ## Extend the Full Managed Dockerfile
 
 Make two changes to the stock `Dockerfile` from the `v0.0.71` checkout.
@@ -92,10 +109,12 @@ Replace `weather` with the plugin ID from `openclaw.plugin.json` in the stage na
 FROM builder AS weather-plugin-builder
 WORKDIR /opt/my-plugin
 COPY my-plugin/package.json my-plugin/package-lock.json my-plugin/tsconfig.json ./
-RUN npm ci --no-audit --no-fund
+RUN npm ci --ignore-scripts --no-audit --no-fund
 COPY my-plugin/openclaw.plugin.json ./
 COPY my-plugin/src/ ./src/
-RUN npm run build && npm prune --omit=dev
+RUN npm run build \
+    && npm prune --omit=dev --omit=peer --ignore-scripts --no-audit --no-fund \
+    && test ! -e node_modules/openclaw
 
 # Extend the completed managed runtime.
 FROM nemoclaw-runtime AS weather-runtime
@@ -110,7 +129,10 @@ COPY --from=weather-plugin-builder --chown=sandbox:sandbox \
     /opt/my-plugin/node_modules/ /opt/weather-plugin/node_modules/
 
 USER sandbox
-RUN HOME=/sandbox openclaw plugins install /opt/weather-plugin \
+RUN test ! -e /opt/weather-plugin/node_modules/openclaw \
+    && HOME=/sandbox openclaw plugins install /opt/weather-plugin \
+    && test -L /sandbox/.openclaw/extensions/weather/node_modules/openclaw \
+    && test "$(realpath /sandbox/.openclaw/extensions/weather/node_modules/openclaw)" = /usr/local/lib/node_modules/openclaw \
     && HOME=/sandbox openclaw plugins enable weather \
     && HOME=/sandbox openclaw plugins inspect weather --json > /dev/null
 
@@ -125,7 +147,9 @@ RUN chown sandbox:sandbox /sandbox/.openclaw/openclaw.json \
 ```
 
 The final stage inherits the stock runtime entrypoint, command, gateway health check, generated configuration, and file permissions.
-The local install copies the staged plugin into OpenClaw's extensions tree, records the install, and leaves existing managed plugin load paths intact before the explicit enable and inspect steps.
+The local install copies the staged plugin into OpenClaw's extensions tree, records the install, links it to the image's OpenClaw runtime, and leaves existing managed plugin load paths intact before the explicit enable and inspect steps.
+The pre-install `test` commands fail the image build if npm retained a private `node_modules/openclaw` directory that would prevent OpenClaw from creating its runtime link.
+The post-install checks then prove that OpenClaw created the link and that it resolves to the image's global runtime.
 The last `RUN` refreshes the managed config hash after `openclaw plugins enable` updates `openclaw.json`.
 
 ## Create and Verify the Sandbox
@@ -158,9 +182,12 @@ NemoClaw's live regression also verifies that the running gateway's tool catalog
 
 Keep the source checkout and Dockerfile at the recorded path if you plan to run `nemoclaw weather-agent rebuild --yes`.
 This source-based workflow can reproduce the plugin during that rebuild, but it is not the durable managed-plugin lifecycle proposed in issue #5998.
+During rebuild, NemoClaw validates plugin install IDs and paths recorded by the freshly built image, preserves those fresh extension directories, and restores backup-only extension state around them.
+That reconciliation keeps a rebuilt plugin update instead of replacing it with the pre-rebuild copy from the state backup.
 Rerun the plugin inspection and HTTP invocation after a gateway restart or sandbox rebuild to verify that the plugin remains available.
 
-If the plugin imports runtime packages, keep those packages in `dependencies` rather than `devDependencies` so `npm prune --omit=dev` preserves them.
+If the plugin imports runtime packages, keep those packages in `dependencies` rather than `devDependencies` so the prune step preserves them.
+Keep `openclaw` in the release-matched peer and development dependency fields shown above; do not move it to `dependencies`.
 If the plugin needs configuration in `openclaw.json`, apply it before refreshing `.config-hash`.
 
 Never bake plugin credentials into the Dockerfile or `openclaw.json`.

@@ -38,9 +38,13 @@ import {
   buildOpenClawConfigRestoreInputFromSandbox,
   shouldMergeOpenClawConfigStateFile,
 } from "./openclaw-config-restore-input.js";
+import {
+  type OpenClawManagedExtensionDiscoveryResult,
+  parseFreshOpenClawPluginExtensionDirs,
+} from "./openclaw-plugin-restore.js";
 import type { CustomPolicyEntry } from "./registry.js";
-import { isSshTransportFailure } from "./ssh-transport.js";
 import * as registry from "./registry.js";
+import { isSshTransportFailure } from "./ssh-transport.js";
 import { runTarListing } from "./tar-listing.js";
 
 const HOME_DIR = path.resolve(process.env.HOME || os.homedir());
@@ -134,6 +138,15 @@ export interface RestoreResult {
   failedDirs: string[];
   restoredFiles: string[];
   failedFiles: string[];
+}
+
+export interface RestoreOptions {
+  /**
+   * The target is a just-recreated OpenClaw sandbox, so its plugin install
+   * registry came from the fresh image. Preserve those validated extension
+   * directories over the backup.
+   */
+  preserveFreshOpenClawPluginInstalls?: boolean;
 }
 
 export interface TarValidationResult {
@@ -580,7 +593,7 @@ const AUDIT_SYMLINK_WHITELIST: ReadonlyMap<string, string> = new Map([
 ]);
 
 const EXTENSION_NPM_BIN_RE = /^extensions\/[^/]+\/node_modules\/\.bin\/[^/]+$/;
-const OPENCLAW_IMAGE_MANAGED_EXTENSION_DIRS = ["nemoclaw", "openclaw-weixin"] as const;
+const OPENCLAW_BUILTIN_IMAGE_MANAGED_EXTENSION_DIRS = ["nemoclaw", "openclaw-weixin"] as const;
 
 function isAllowedExtensionNpmBinSymlink(relPath: string, linkTarget: string): boolean {
   const normalizedRelPath = relPath.split(path.sep).join("/");
@@ -686,36 +699,79 @@ function shouldPreserveOpenClawManagedExtensions(
   );
 }
 
+function discoverFreshOpenClawPluginExtensionDirs(
+  configFile: string,
+  sandboxName: string,
+  dir: string,
+): OpenClawManagedExtensionDiscoveryResult {
+  const spec: StateFileSpec = { path: "plugins/installs.json", strategy: "copy" };
+  const command = buildStateFileBackupCommand(dir, spec);
+  const result = spawnSync("ssh", [...sshArgs(configFile, sandboxName), command], {
+    stdio: ["ignore", "pipe", "pipe"],
+    timeout: 30000,
+    maxBuffer: 4 * 1024 * 1024,
+  });
+  if (result.status !== 0 || result.error || result.signal || !result.stdout) {
+    const detail =
+      (result.stderr?.toString() || "").trim() ||
+      result.error?.message ||
+      (result.signal ? `signal ${result.signal}` : `exit ${String(result.status)}`);
+    return { ok: false, error: `could not read fresh OpenClaw plugin install registry: ${detail}` };
+  }
+
+  let config: unknown;
+  try {
+    config = JSON.parse(result.stdout.toString("utf-8")) as unknown;
+  } catch (error) {
+    return {
+      ok: false,
+      error: `fresh OpenClaw plugin install registry is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+  return parseFreshOpenClawPluginExtensionDirs(config, dir);
+}
+
 function buildRestoreTarArgs(
   backupPath: string,
   localDirs: readonly string[],
-  preserveManagedExtensions: boolean,
+  managedExtensionDirs: readonly string[],
 ): string[] {
   const args = ["-cf", "-", "-C", backupPath];
-  if (preserveManagedExtensions) {
-    for (const extensionName of OPENCLAW_IMAGE_MANAGED_EXTENSION_DIRS) {
-      args.push("--exclude", `extensions/${extensionName}`);
-    }
+  for (const extensionDir of managedExtensionDirs) {
+    args.push("--exclude", `extensions/${extensionDir}`);
   }
   args.push("--", ...localDirs);
   return args;
 }
 
-function buildOpenClawExtensionsCleanupCommand(dir: string): string {
+function buildOpenClawExtensionsCleanupCommand(
+  dir: string,
+  managedExtensionDirs: readonly string[],
+  requiredExtensionDirs: ReadonlySet<string>,
+): string {
   const extensionsDir = `${dir}/extensions`;
   const quotedExtensionsDir = shellQuote(extensionsDir);
-  const validationCommands = OPENCLAW_IMAGE_MANAGED_EXTENSION_DIRS.map((extensionName) => {
-    const managedPath = `${extensionsDir}/${extensionName}`;
-    return (
-      `p=${shellQuote(managedPath)}; ` +
-      'if [ -e "$p" ] && { [ ! -d "$p" ] || [ -L "$p" ]; }; then ' +
-      'echo "refusing to preserve unsafe managed extension: $p" >&2; exit 20; fi'
-    );
-  }).join("; ");
+  const validationCommands = managedExtensionDirs
+    .map((extensionDir) => {
+      const managedPath = `${extensionsDir}/${extensionDir}`;
+      if (requiredExtensionDirs.has(extensionDir)) {
+        return (
+          `p=${shellQuote(managedPath)}; ` +
+          'if [ ! -d "$p" ] || [ -L "$p" ]; then ' +
+          'echo "refusing missing or unsafe image-managed extension: $p" >&2; exit 20; fi'
+        );
+      }
+      return (
+        `p=${shellQuote(managedPath)}; ` +
+        'if [ -e "$p" ] && { [ ! -d "$p" ] || [ -L "$p" ]; }; then ' +
+        'echo "refusing to preserve unsafe managed extension: $p" >&2; exit 20; fi'
+      );
+    })
+    .join("; ");
   const validateManagedPaths = `{ ${validationCommands}; }`;
-  const preservedNames = OPENCLAW_IMAGE_MANAGED_EXTENSION_DIRS.map(
-    (extensionName) => `! -name ${shellQuote(extensionName)}`,
-  ).join(" ");
+  const preservedNames = managedExtensionDirs
+    .map((extensionDir) => `! -name ${shellQuote(extensionDir)}`)
+    .join(" ");
 
   return [
     `mkdir -p -- ${quotedExtensionsDir}`,
@@ -727,15 +783,19 @@ function buildOpenClawExtensionsCleanupCommand(dir: string): string {
 function buildRestoreCleanupCommand(
   dir: string,
   localDirs: readonly string[],
-  preserveManagedExtensions: boolean,
+  managedExtensionDirs: readonly string[],
+  requiredExtensionDirs: ReadonlySet<string>,
 ): string {
+  const preserveManagedExtensions = managedExtensionDirs.length > 0;
   const commands: string[] = [];
   for (const dirName of localDirs) {
     if (preserveManagedExtensions && dirName === "extensions") continue;
     commands.push(`rm -rf -- ${shellQuote(`${dir}/${dirName}`)}`);
   }
   if (preserveManagedExtensions) {
-    commands.push(buildOpenClawExtensionsCleanupCommand(dir));
+    commands.push(
+      buildOpenClawExtensionsCleanupCommand(dir, managedExtensionDirs, requiredExtensionDirs),
+    );
   }
   return commands.length > 0 ? commands.join(" && ") : ":";
 }
@@ -1435,7 +1495,11 @@ export function backupSandboxState(sandboxName: string, options: BackupOptions =
 /**
  * Restore state directories into a sandbox from a prior backup.
  */
-export function restoreSandboxState(sandboxName: string, backupPath: string): RestoreResult {
+export function restoreSandboxState(
+  sandboxName: string,
+  backupPath: string,
+  options: RestoreOptions = {},
+): RestoreResult {
   _log(`restoreSandboxState: sandbox=${sandboxName}, backupPath=${backupPath}`);
   const manifest = readManifest(backupPath);
   if (!manifest) {
@@ -1499,18 +1563,43 @@ export function restoreSandboxState(sandboxName: string, backupPath: string): Re
 
   const tempSshConfig = createTempSshConfig(sshConfig, "nemoclaw-state-");
   const configFile = tempSshConfig.file;
+  let freshImageManagedExtensionDirs: string[] = [];
   try {
+    const preserveManagedExtensions = shouldPreserveOpenClawManagedExtensions(
+      manifest,
+      dir,
+      localDirs,
+    );
+    if (options.preserveFreshOpenClawPluginInstalls && preserveManagedExtensions) {
+      const discovery = discoverFreshOpenClawPluginExtensionDirs(configFile, sandboxName, dir);
+      if (!discovery.ok) {
+        _log(`FAILED: ${discovery.error}`);
+        return {
+          success: false,
+          restoredDirs,
+          failedDirs: [...localDirs],
+          restoredFiles,
+          failedFiles: localFiles.map((f) => f.path),
+        };
+      }
+      freshImageManagedExtensionDirs = discovery.extensionDirs;
+      _log(`Fresh image-managed OpenClaw extensions: [${discovery.extensionDirs.join(",")}]`);
+    }
+    const managedExtensionDirs = preserveManagedExtensions
+      ? [
+          ...new Set([
+            ...OPENCLAW_BUILTIN_IMAGE_MANAGED_EXTENSION_DIRS,
+            ...freshImageManagedExtensionDirs,
+          ]),
+        ].sort()
+      : [];
+
     if (localDirs.length > 0) {
       // Upload via tar pipe
       // NC-2227-04: Removed -h flag from restore as well — no symlink following.
-      const preserveManagedExtensions = shouldPreserveOpenClawManagedExtensions(
-        manifest,
-        dir,
-        localDirs,
-      );
       const tarResult = spawnSync(
         "tar",
-        buildRestoreTarArgs(backupPath, localDirs, preserveManagedExtensions),
+        buildRestoreTarArgs(backupPath, localDirs, managedExtensionDirs),
         {
           stdio: ["ignore", "pipe", "pipe"],
           timeout: 60000,
@@ -1533,7 +1622,12 @@ export function restoreSandboxState(sandboxName: string, backupPath: string): Re
       // image-managed extensions are preserved from the freshly built image and
       // excluded from the restore tar; only user/non-managed extension entries
       // are cleared and restored from the backup.
-      const rmCmd = buildRestoreCleanupCommand(dir, localDirs, preserveManagedExtensions);
+      const rmCmd = buildRestoreCleanupCommand(
+        dir,
+        localDirs,
+        managedExtensionDirs,
+        new Set(freshImageManagedExtensionDirs),
+      );
       _log(`Cleaning target dirs before restore: ${rmCmd}`);
       const rmResult = spawnSync("ssh", [...sshArgs(configFile, sandboxName), rmCmd], {
         stdio: ["ignore", "pipe", "pipe"],
