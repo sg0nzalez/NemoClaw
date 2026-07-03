@@ -4,6 +4,16 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import {
+  buildAutoPairApprovalScript,
+  readAutoPairApprovalPolicyModule,
+} from "../../../src/lib/actions/sandbox/auto-pair-approval.ts";
+import {
+  CONNECT_AUTO_PAIR_APPROVE_TIMEOUT_S,
+  CONNECT_AUTO_PAIR_LIST_TIMEOUT_S,
+  CONNECT_AUTO_PAIR_MAX_APPROVALS,
+  CONNECT_AUTO_PAIR_TIMEOUT_MS,
+} from "../../../src/lib/actions/sandbox/connect-autopair-budget.ts";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
 import {
   type SandboxClient,
@@ -12,6 +22,7 @@ import {
 } from "../fixtures/clients/sandbox.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
 import { shouldRunLiveE2E } from "../fixtures/live-project-gate.ts";
+import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
 import { parseJsonFromText } from "./json-envelope.ts";
 
 // Keep this contract as a focused live test: build a deterministic custom plugin
@@ -33,6 +44,8 @@ const EXDEV_PATTERNS = [
   /EXDEV: cross-device link not permitted/i,
   /cross-device link not permitted/i,
 ];
+const GATEWAY_PAIRING_REQUIRED_PATTERN =
+  /scope upgrade pending|pairing required|device is not approved/i;
 const liveTest = shouldRunLiveE2E() ? test : test.skip;
 
 function resultText(result: { stdout: string; stderr: string }): string {
@@ -190,6 +203,51 @@ type WeatherRuntimeProof = {
   toolInvoked: boolean;
 };
 
+function gatewayPairingApprovalScript() {
+  const policyModule = readAutoPairApprovalPolicyModule();
+  if (!policyModule) {
+    throw new Error("OpenClaw device approval policy helper is required for the live plugin test");
+  }
+  return trustedSandboxShellScript(
+    buildAutoPairApprovalScript(Buffer.from(policyModule, "utf8").toString("base64"), {
+      emitSummary: true,
+      budget: {
+        maxApprovals: CONNECT_AUTO_PAIR_MAX_APPROVALS,
+        listTimeoutS: CONNECT_AUTO_PAIR_LIST_TIMEOUT_S,
+        approveTimeoutS: CONNECT_AUTO_PAIR_APPROVE_TIMEOUT_S,
+      },
+    }),
+  );
+}
+
+async function runGatewayCallWithPairingRetry(
+  sandbox: SandboxClient,
+  phase: string,
+  operation: "catalog" | "invoke",
+  script: string,
+): Promise<ShellProbeResult> {
+  const run = (attempt: number) =>
+    sandbox.execShell(SANDBOX_NAME, trustedSandboxShellScript(script), {
+      artifactName: `openclaw-weather-plugin-${operation}-${phase}-attempt-${attempt}`,
+      env: liveEnv(),
+      timeoutMs: PROBE_TIMEOUT_MS,
+    });
+
+  let result = await run(1);
+  if (result.exitCode === 0 || !GATEWAY_PAIRING_REQUIRED_PATTERN.test(resultText(result))) {
+    return result;
+  }
+
+  const approval = await sandbox.execShell(SANDBOX_NAME, gatewayPairingApprovalScript(), {
+    artifactName: `openclaw-weather-plugin-${operation}-${phase}-pairing-approval`,
+    env: liveEnv(),
+    timeoutMs: CONNECT_AUTO_PAIR_TIMEOUT_MS + 5_000,
+  });
+  expect(approval.exitCode, resultText(approval)).toBe(0);
+  result = await run(2);
+  return result;
+}
+
 async function assertWeatherPluginRuntime(
   sandbox: SandboxClient,
   phase: string,
@@ -235,36 +293,15 @@ printf '%s\\n' "$actual"`),
     "get_weather",
   );
 
-  const catalogProbe = await sandbox.execShell(
-    SANDBOX_NAME,
-    trustedSandboxShellScript(
-      `. /tmp/nemoclaw-proxy-env.sh && HOME=/sandbox openclaw gateway call tools.catalog --params '{"includePlugins":true}' --json`,
-    ),
-    {
-      artifactName: `openclaw-weather-plugin-catalog-${phase}`,
-      env: liveEnv(),
-      timeoutMs: PROBE_TIMEOUT_MS,
-    },
-  );
-  expect(catalogProbe.exitCode, resultText(catalogProbe)).toBe(0);
-  const catalog = parseJsonFromText(
-    normalizeSandboxStdoutFrames(catalogProbe.stdout),
-  ) as GatewayToolCatalog;
-  const catalogToolIds = (catalog.groups ?? []).flatMap((group) =>
-    (group.tools ?? []).map((tool) => tool.id).filter((id): id is string => typeof id === "string"),
-  );
-  expect(catalogToolIds).toContain("get_weather");
-
-  const invokeProbe = await sandbox.execShell(
-    SANDBOX_NAME,
-    trustedSandboxShellScript(
-      `. /tmp/nemoclaw-proxy-env.sh && HOME=/sandbox openclaw gateway call tools.invoke --params '{"name":"get_weather","args":{"location":"Santa Clara"}}' --json`,
-    ),
-    {
-      artifactName: `openclaw-weather-plugin-invoke-${phase}`,
-      env: liveEnv(),
-      timeoutMs: PROBE_TIMEOUT_MS,
-    },
+  // Use the sandbox-local gateway address so OpenClaw can synchronously pair
+  // this shared-secret CLI client. Invoke first because operator.write also
+  // satisfies the catalog's operator.read scope; the reverse order would
+  // create a separate asynchronous scope-upgrade request.
+  const invokeProbe = await runGatewayCallWithPairingRetry(
+    sandbox,
+    phase,
+    "invoke",
+    `. /tmp/nemoclaw-proxy-env.sh && OPENCLAW_GATEWAY_URL="ws://127.0.0.1:\${OPENCLAW_GATEWAY_PORT:-18789}" HOME=/sandbox openclaw gateway call tools.invoke --params '{"agentId":"main","name":"get_weather","args":{"location":"Santa Clara"}}' --json`,
   );
   expect(invokeProbe.exitCode, resultText(invokeProbe)).toBe(0);
   const invocation = parseJsonFromText(
@@ -278,6 +315,21 @@ printf '%s\\n' "$actual"`),
       details: { location: "Santa Clara", condition: "clear", temperatureC: 21 },
     },
   });
+
+  const catalogProbe = await runGatewayCallWithPairingRetry(
+    sandbox,
+    phase,
+    "catalog",
+    `. /tmp/nemoclaw-proxy-env.sh && OPENCLAW_GATEWAY_URL="ws://127.0.0.1:\${OPENCLAW_GATEWAY_PORT:-18789}" HOME=/sandbox openclaw gateway call tools.catalog --params '{"agentId":"main","includePlugins":true}' --json`,
+  );
+  expect(catalogProbe.exitCode, resultText(catalogProbe)).toBe(0);
+  const catalog = parseJsonFromText(
+    normalizeSandboxStdoutFrames(catalogProbe.stdout),
+  ) as GatewayToolCatalog;
+  const catalogToolIds = (catalog.groups ?? []).flatMap((group) =>
+    (group.tools ?? []).map((tool) => tool.id).filter((id): id is string => typeof id === "string"),
+  );
+  expect(catalogToolIds).toContain("get_weather");
   return { imageMarker: imageMarker ?? "", inspectLoaded: true, catalogToolIds, toolInvoked: true };
 }
 

@@ -148,12 +148,14 @@ nemoclaw weather-agent status
 nemoclaw weather-agent exec -- test -s /tmp/gateway.log
 nemoclaw weather-agent exec -- env HOME=/sandbox openclaw plugins inspect weather --runtime --json
 nemoclaw weather-agent exec -- bash -lc \
-  ". /tmp/nemoclaw-proxy-env.sh && HOME=/sandbox openclaw gateway call tools.catalog --params '{\"includePlugins\":true}' --json"
+  ". /tmp/nemoclaw-proxy-env.sh && OPENCLAW_GATEWAY_URL=\"ws://127.0.0.1:\${OPENCLAW_GATEWAY_PORT:-18789}\" HOME=/sandbox openclaw gateway call tools.invoke --params '{\"agentId\":\"main\",\"name\":\"get_weather\",\"args\":{\"location\":\"Santa Clara\"}}' --json"
 nemoclaw weather-agent exec -- bash -lc \
-  ". /tmp/nemoclaw-proxy-env.sh && HOME=/sandbox openclaw gateway call tools.invoke --params '{\"name\":\"get_weather\",\"args\":{\"location\":\"Santa Clara\"}}' --json"
+  ". /tmp/nemoclaw-proxy-env.sh && OPENCLAW_GATEWAY_URL=\"ws://127.0.0.1:\${OPENCLAW_GATEWAY_PORT:-18789}\" HOME=/sandbox openclaw gateway call tools.catalog --params '{\"agentId\":\"main\",\"includePlugins\":true}' --json"
 ```
 
-The plugin inspection must report the `weather` plugin, the gateway tool catalog must contain `get_weather`, and the invocation must return the deterministic `Santa Clara` weather result.
+The plugin inspection must report the `weather` plugin, the invocation must return the deterministic `Santa Clara` weather result, and the gateway tool catalog must contain `get_weather`.
+Run the invocation before the catalog check as shown: OpenClaw's sandbox-local CLI pairing grants the required write scope on that first call, and the write scope also satisfies the catalog's read requirement.
+If the first invocation reports that pairing or a scope upgrade is pending, wait a few seconds for NemoClaw's managed approval watcher and rerun that invocation once before continuing to the catalog check.
 
 Keep the source checkout and Dockerfile at the recorded path if you plan to run `nemoclaw weather-agent rebuild --yes`.
 This source-based workflow can reproduce the plugin during that rebuild, but it is not the durable managed-plugin lifecycle proposed in issue #5998.
