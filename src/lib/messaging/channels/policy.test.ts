@@ -63,6 +63,7 @@ describe("messaging channel policy presets", () => {
     const presets = listMessagingChannelPolicyPresets();
     expect(presets.map((preset) => preset.name).sort()).toEqual([
       "discord",
+      "googlechat",
       "slack",
       "teams",
       "telegram",

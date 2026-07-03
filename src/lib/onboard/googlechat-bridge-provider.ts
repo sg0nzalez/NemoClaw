@@ -5,8 +5,9 @@ import path from "node:path";
 
 import { compactText } from "../core/url-utils";
 
-// Profile id registered with OpenShell (nemoclaw-blueprint/provider-profiles/
-// google-chat-bridge.yaml) and passed as `provider create --type`.
+// Profile id registered with OpenShell (the profile YAML is co-located with the
+// channel at src/lib/messaging/channels/googlechat/provider-profile/openclaw.yaml,
+// mirroring the per-channel policy layout) and passed as `provider create --type`.
 export const GOOGLECHAT_BRIDGE_PROFILE_ID = "google-chat-bridge";
 
 // Injectable credential key the gateway mints + the L7 proxy injects as
@@ -78,7 +79,18 @@ function bufferOrStringToText(value: string | Buffer | null | undefined): string
 }
 
 export function googlechatBridgeProfilePath(root: string): string {
-  return path.join(root, "nemoclaw-blueprint", "provider-profiles", "google-chat-bridge.yaml");
+  // Co-located with the channel (mirrors <channel>/policy/<agent>.yaml), read
+  // ROOT-relative from the source tree the same way channel policy presets are.
+  return path.join(
+    root,
+    "src",
+    "lib",
+    "messaging",
+    "channels",
+    "googlechat",
+    "provider-profile",
+    "openclaw.yaml",
+  );
 }
 
 /**
