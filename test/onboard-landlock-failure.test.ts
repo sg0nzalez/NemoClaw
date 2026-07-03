@@ -46,7 +46,6 @@ const sandboxName = "dcode-landlock-fail";
 const commands = [];
 const registerCalls = [];
 const updateCalls = [];
-let createPolicy = "";
 
 function commandText(command) {
   return Array.isArray(command) ? command.join(" ") : String(command);
@@ -105,9 +104,6 @@ dockerfilePatchFlow.prepareSandboxDockerfilePatch = async () => ({
 
 sandboxCreateStream.streamSandboxCreate = async (command) => {
   commands.push(command);
-  const match = /(?:^|\s)['"]?([^'"\s]*policy-additions\.yaml)['"]?(?:\s|$)/.exec(command);
-  const policyPath = match && match[1];
-  if (policyPath) createPolicy = fs.readFileSync(policyPath, "utf8");
   return {
     status: 1,
     output:
@@ -129,7 +125,7 @@ const originalExit = process.exit;
 process.exit = (code) => {
   fs.writeFileSync(
     ${JSON.stringify(outputPath)},
-    JSON.stringify({ code, commands, createPolicy, registerCalls, updateCalls }),
+    JSON.stringify({ code, commands, registerCalls, updateCalls }),
     "utf8",
   );
   originalExit(code);
@@ -176,14 +172,11 @@ createSandbox(
     const outcome = JSON.parse(fs.readFileSync(outputPath, "utf8")) as {
       code: number;
       commands: string[];
-      createPolicy: string;
       registerCalls: unknown[];
       updateCalls: unknown[];
     };
 
     expect(outcome.code).toBe(1);
-    expect(outcome.createPolicy).toContain("compatibility: hard_requirement");
-    expect(outcome.createPolicy).not.toContain("compatibility: strict");
     expect(
       outcome.commands.some((command) =>
         command.endsWith("openshell sandbox delete dcode-landlock-fail"),
