@@ -144,8 +144,8 @@ For a running sandbox, inspect its startup events:
 openshell logs <sandbox-name> -n 100 --source sandbox
 ```
 
-A successful ruleset reports `Landlock filesystem sandbox available`, `Applying Landlock filesystem sandbox`, and `Landlock ruleset built` events.
-When Landlock is unavailable, `best_effort` emits a high-severity finding and continues, while the same condition prevents Deep Agents Code from starting.
+OpenShell reports successful Landlock preparation with `Applying Landlock filesystem sandbox [abi:<ABI> compat:<mode> ro:<count> rw:<count>]` followed by `Landlock ruleset built [rules_applied:<count> skipped:<count>]`.
+If `best_effort` cannot prepare or enforce Landlock, OpenShell emits a high-severity finding with `Landlock filesystem sandbox unavailable: <reason>` or `Landlock restrict_self failed (best_effort): <reason>` and continues, while either failure prevents Deep Agents Code from starting.
 
 For production deployments, use kernel 5.13+ with Landlock enabled.
 The `test/e2e/e2e-cloud-experimental/checks/04-landlock-readonly.sh` and `test/e2e/e2e-cloud-experimental/checks/05-deepagents-code-landlock-readonly.sh` scripts validate enforcement at runtime.

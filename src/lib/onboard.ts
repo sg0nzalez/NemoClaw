@@ -3239,12 +3239,8 @@ async function createSandbox(
   }
 
   console.log(`  ✓ Sandbox '${sandboxName}' created`);
-
-  warnIfLandlockUnsupported({
-    compatibility: agent?.name === "langchain-deepagents-code" ? "hard_requirement" : "best_effort",
-    dockerInfoFormat,
-    runCapture,
-  });
+  const compat = agent?.name === "langchain-deepagents-code" ? "hard_requirement" : "best_effort";
+  warnIfLandlockUnsupported({ compatibility: compat, dockerInfoFormat, runCapture });
 
   // #4614: arm rollback only when the sandbox was not live before (never a recreate/rebuild).
   if (!liveExists) sandboxCancelRollback.arm(sandboxName);
