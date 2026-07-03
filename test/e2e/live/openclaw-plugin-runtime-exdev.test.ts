@@ -549,7 +549,7 @@ liveTest(
     const df = await sandbox.execShell(
       SANDBOX_NAME,
       trustedSandboxShellScript(
-        "df -PT / /tmp /dev/shm /sandbox /sandbox/.openclaw/plugin-runtime-deps",
+        "mkdir -p /sandbox/.openclaw/plugin-runtime-deps && df -PT / /tmp /dev/shm /sandbox /sandbox/.openclaw/plugin-runtime-deps",
       ),
       {
         artifactName: "openclaw-plugin-exdev-filesystem-layout",
