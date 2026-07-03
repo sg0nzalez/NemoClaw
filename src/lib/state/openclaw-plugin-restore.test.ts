@@ -55,8 +55,12 @@ describe("parseFreshOpenClawPluginExtensionDirs", () => {
       { version: 1, installRecords: installs },
       OPENCLAW_DIR,
     );
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toMatch(/unsafe|invalid/);
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: false,
+        error: expect.stringMatching(/unsafe|invalid/),
+      }),
+    );
   });
 
   it("rejects an unbounded install set before constructing restore commands", () => {
