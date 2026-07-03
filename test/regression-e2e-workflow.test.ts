@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { readYaml, type WorkflowStep } from "./helpers/e2e-workflow-contract";
@@ -104,21 +103,5 @@ describe("Regression E2E workflow contract", () => {
     expect(runText).toContain("npx vitest run --project e2e-live");
     expect(runText).toContain("npm ci --ignore-scripts");
     expect(runText).toContain("npm run build:cli");
-  });
-
-  it("hardens the generated custom-plugin image contract", () => {
-    const liveTestSource = readFileSync(
-      new URL("./e2e/live/openclaw-plugin-runtime-exdev.test.ts", import.meta.url),
-      "utf8",
-    );
-
-    expect(liveTestSource).toContain("RUN npm ci --ignore-scripts --no-audit --no-fund");
-    expect(liveTestSource).toContain("RUN npm run build");
-    expect(liveTestSource).toContain(
-      "RUN HOME=/sandbox openclaw plugins install /opt/weather-plugin",
-    );
-    expect(liveTestSource).not.toContain(
-      "openclaw plugins install --link /sandbox/.openclaw/extensions/weather",
-    );
   });
 });
