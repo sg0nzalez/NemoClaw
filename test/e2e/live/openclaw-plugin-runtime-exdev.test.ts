@@ -205,11 +205,12 @@ type WeatherRuntimeProof = {
 
 function gatewayPairingApprovalScript() {
   const policyModule = readAutoPairApprovalPolicyModule();
-  if (!policyModule) {
-    throw new Error("OpenClaw device approval policy helper is required for the live plugin test");
-  }
+  expect(
+    policyModule,
+    "OpenClaw device approval policy helper is required for the live plugin test",
+  ).toBeTruthy();
   return trustedSandboxShellScript(
-    buildAutoPairApprovalScript(Buffer.from(policyModule, "utf8").toString("base64"), {
+    buildAutoPairApprovalScript(Buffer.from(policyModule ?? "", "utf8").toString("base64"), {
       emitSummary: true,
       budget: {
         maxApprovals: CONNECT_AUTO_PAIR_MAX_APPROVALS,
@@ -218,6 +219,21 @@ function gatewayPairingApprovalScript() {
       },
     }),
   );
+}
+
+async function approveGatewayPairingAndRetry(
+  sandbox: SandboxClient,
+  phase: string,
+  operation: "catalog" | "invoke",
+  run: (attempt: number) => Promise<ShellProbeResult>,
+): Promise<ShellProbeResult> {
+  const approval = await sandbox.execShell(SANDBOX_NAME, gatewayPairingApprovalScript(), {
+    artifactName: `openclaw-weather-plugin-${operation}-${phase}-pairing-approval`,
+    env: liveEnv(),
+    timeoutMs: CONNECT_AUTO_PAIR_TIMEOUT_MS + 5_000,
+  });
+  expect(approval.exitCode, resultText(approval)).toBe(0);
+  return run(2);
 }
 
 async function runGatewayCallWithPairingRetry(
@@ -233,19 +249,10 @@ async function runGatewayCallWithPairingRetry(
       timeoutMs: PROBE_TIMEOUT_MS,
     });
 
-  let result = await run(1);
-  if (result.exitCode === 0 || !GATEWAY_PAIRING_REQUIRED_PATTERN.test(resultText(result))) {
-    return result;
-  }
-
-  const approval = await sandbox.execShell(SANDBOX_NAME, gatewayPairingApprovalScript(), {
-    artifactName: `openclaw-weather-plugin-${operation}-${phase}-pairing-approval`,
-    env: liveEnv(),
-    timeoutMs: CONNECT_AUTO_PAIR_TIMEOUT_MS + 5_000,
-  });
-  expect(approval.exitCode, resultText(approval)).toBe(0);
-  result = await run(2);
-  return result;
+  const result = await run(1);
+  return result.exitCode !== 0 && GATEWAY_PAIRING_REQUIRED_PATTERN.test(resultText(result))
+    ? approveGatewayPairingAndRetry(sandbox, phase, operation, run)
+    : result;
 }
 
 async function assertWeatherPluginRuntime(
