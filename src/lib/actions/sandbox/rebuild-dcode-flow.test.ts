@@ -184,8 +184,9 @@ describe("rebuildSandbox DCode flow", () => {
       sandboxEntry: originalEntry,
       sandboxEntryReads: [
         originalEntry, // Initial rebuild target.
-        originalEntry, // Messaging-conflict gateway selection (#5954).
-        originalEntry, // Prepared DCode target capture.
+        originalEntry, // Exact post-confirmation lock guard.
+        originalEntry, // Messaging config hydration.
+        originalEntry, // Messaging-conflict gateway lookup (#5954).
         driftedEntry, // Final pre-backup target verification.
       ],
       dcodeRouteResults: [{ ok: true }, { ok: true }],
@@ -235,10 +236,10 @@ describe("rebuildSandbox DCode flow", () => {
       sandboxEntry: originalEntry,
       sandboxEntryReads: [
         originalEntry, // Initial rebuild target.
-        originalEntry, // Messaging-conflict gateway selection (#5954).
-        originalEntry, // Prepared DCode target capture.
+        originalEntry, // Exact post-confirmation lock guard.
+        originalEntry, // Messaging config hydration.
+        originalEntry, // Messaging-conflict gateway lookup (#5954).
         originalEntry, // Final pre-backup target verification.
-        originalEntry, // Delete-edge target verification input.
         driftedEntry, // Registry reread at the destructive boundary.
       ],
       dcodeRouteResults: [{ ok: true }, { ok: true }, { ok: true }],

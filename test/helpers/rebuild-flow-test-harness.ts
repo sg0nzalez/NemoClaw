@@ -113,7 +113,7 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
   vi.spyOn(onboardSession, "acquireOnboardLock").mockReturnValue({ acquired: true });
   const markStepFailedSpy = installTerminalStepFailureMock(onboardSession, session);
   session.sandboxName = overrides.sessionSandboxName ?? session.sandboxName;
-  const sandboxEntry = {
+  const currentSandboxEntry = {
     name: "alpha",
     provider: "ollama-local",
     model: "nvidia/nemotron",
@@ -127,7 +127,8 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
     gatewayPort: 8080,
     ...(overrides.sandboxEntry ?? {}),
   };
-  vi.spyOn(registry, "getSandbox").mockReturnValue(sandboxEntry);
+  const readCurrentSandboxEntry = () => structuredClone(currentSandboxEntry);
+  vi.spyOn(registry, "getSandbox").mockImplementation(readCurrentSandboxEntry);
   vi.spyOn(registry, "getDefault").mockReturnValue(overrides.defaultSandbox ?? null);
   let registryLoadCount = 0;
   vi.spyOn(registry, "load").mockImplementation(() => {
@@ -142,14 +143,19 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
       sandboxes: {
         alpha:
           isPreDeleteRead && overrides.preDeleteSandboxEntry
-            ? overrides.preDeleteSandboxEntry
-            : sandboxEntry,
+            ? structuredClone(overrides.preDeleteSandboxEntry)
+            : readCurrentSandboxEntry(),
       },
       defaultSandbox,
     };
   });
   vi.spyOn(registry, "listSandboxes").mockReturnValue({ sandboxes: [] });
-  const registryUpdateSpy = vi.spyOn(registry, "updateSandbox").mockReturnValue(true);
+  const registryUpdateSpy = vi
+    .spyOn(registry, "updateSandbox")
+    .mockImplementation((_name, updates) => {
+      Object.assign(currentSandboxEntry, updates);
+      return true;
+    });
   const restoreSandboxEntrySpy = vi
     .spyOn(registry, "restoreSandboxEntry")
     .mockImplementation(() => undefined);
@@ -157,9 +163,17 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
     detected: false,
     sessions: [],
   });
-  vi.spyOn(sandboxVersion, "checkAgentVersion").mockReturnValue({
-    expectedVersion: "0.2.0",
-    sandboxVersion: "0.1.0",
+  vi.spyOn(sandboxVersion, "checkAgentVersion").mockImplementation(() => {
+    Object.assign(currentSandboxEntry, overrides.entryUpdatesAfterVersionCheck ?? {});
+    return (
+      overrides.versionCheck ?? {
+        expectedVersion: "0.2.0",
+        sandboxVersion: "0.1.0",
+        isStale: true,
+        verificationFailed: false,
+        detectionMethod: "registry",
+      }
+    );
   });
   vi.spyOn(rebuildShields, "openRebuildShieldsWindow").mockReturnValue(rebuildShieldsWindow);
   const relockSpy = vi

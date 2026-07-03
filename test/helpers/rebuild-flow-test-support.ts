@@ -3,6 +3,8 @@
 
 import { type MockInstance, vi } from "vitest";
 
+import type { VersionCheckResult } from "../../src/lib/sandbox/version";
+
 export type RebuildSandbox =
   typeof import("../../src/lib/actions/sandbox/rebuild")["rebuildSandbox"];
 export type RebuildFlowStep = {
@@ -24,6 +26,7 @@ export type RebuildFlowSession = Record<string, unknown> & {
   steps: Record<string, RebuildFlowStep>;
 };
 export type RebuildFlowOverrides = {
+  entryUpdatesAfterVersionCheck?: Record<string, unknown>;
   applyPreset?: (presetName: string) => boolean;
   baseImagePreflight?: {
     ok: boolean;
@@ -72,6 +75,7 @@ export type RebuildFlowOverrides = {
   ensureValidatedWebSearchCredential?: () => Promise<unknown>;
   hermesCredentialKeys?: string[] | null;
   hermesProviderExists?: boolean;
+  versionCheck?: VersionCheckResult;
   customImagePreflight?: { ok: true; imageTag: string | null } | { ok: false; detail: string };
   removeSandboxRegistryEntry?: () => void;
   clearShieldsState?: () => void;
