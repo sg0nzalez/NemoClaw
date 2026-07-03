@@ -126,7 +126,7 @@ function createCustomPluginDockerfile(): () => void {
 FROM builder AS weather-plugin-builder
 WORKDIR /opt/weather
 COPY test/e2e/fixtures/plugins/weather/package.json test/e2e/fixtures/plugins/weather/package-lock.json test/e2e/fixtures/plugins/weather/tsconfig.json ./
-RUN npm ci --no-audit --no-fund
+RUN npm ci --ignore-scripts --no-audit --no-fund
 COPY test/e2e/fixtures/plugins/weather/openclaw.plugin.json ./
 COPY test/e2e/fixtures/plugins/weather/src/ ./src/
 RUN npm run build \
@@ -140,17 +140,17 @@ COPY --from=weather-plugin-builder --chown=sandbox:sandbox \
     /opt/weather/package.json \
     /opt/weather/package-lock.json \
     /opt/weather/openclaw.plugin.json \
-    /sandbox/.openclaw/extensions/weather/
+    /opt/weather-plugin/
 COPY --from=weather-plugin-builder --chown=sandbox:sandbox \
-    /opt/weather/dist/ /sandbox/.openclaw/extensions/weather/dist/
+    /opt/weather/dist/ /opt/weather-plugin/dist/
 COPY --from=weather-plugin-builder --chown=sandbox:sandbox \
-    /opt/weather/node_modules/ /sandbox/.openclaw/extensions/weather/node_modules/
+    /opt/weather/node_modules/ /opt/weather-plugin/node_modules/
 COPY --from=weather-plugin-builder \
     /opt/weather/e2e-weather-plugin.sha256 \
     /usr/local/share/nemoclaw/e2e-weather-plugin.sha256
 
 USER sandbox
-RUN HOME=/sandbox openclaw plugins install --link /sandbox/.openclaw/extensions/weather \
+RUN HOME=/sandbox openclaw plugins install /opt/weather-plugin \
     && HOME=/sandbox openclaw plugins enable weather \
     && HOME=/sandbox openclaw plugins inspect weather --json > /dev/null
 

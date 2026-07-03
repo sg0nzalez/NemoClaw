@@ -85,7 +85,7 @@ Next, name the completed runtime stage so the plugin layer can extend it.
 ```
 
 Append the following stages to the end of the stock Dockerfile.
-Replace `weather` with the plugin ID from `openclaw.plugin.json` in the stage name, destination directory, load path, and OpenClaw plugin commands.
+Replace `weather` with the plugin ID from `openclaw.plugin.json` in the stage name, staging directory, and OpenClaw plugin commands.
 
 ```dockerfile
 # Build the plugin from its lockfile.
@@ -103,14 +103,14 @@ COPY --from=weather-plugin-builder --chown=sandbox:sandbox \
     /opt/my-plugin/package.json \
     /opt/my-plugin/package-lock.json \
     /opt/my-plugin/openclaw.plugin.json \
-    /sandbox/.openclaw/extensions/weather/
+    /opt/weather-plugin/
 COPY --from=weather-plugin-builder --chown=sandbox:sandbox \
-    /opt/my-plugin/dist/ /sandbox/.openclaw/extensions/weather/dist/
+    /opt/my-plugin/dist/ /opt/weather-plugin/dist/
 COPY --from=weather-plugin-builder --chown=sandbox:sandbox \
-    /opt/my-plugin/node_modules/ /sandbox/.openclaw/extensions/weather/node_modules/
+    /opt/my-plugin/node_modules/ /opt/weather-plugin/node_modules/
 
 USER sandbox
-RUN HOME=/sandbox openclaw plugins install --link /sandbox/.openclaw/extensions/weather \
+RUN HOME=/sandbox openclaw plugins install /opt/weather-plugin \
     && HOME=/sandbox openclaw plugins enable weather \
     && HOME=/sandbox openclaw plugins inspect weather --json > /dev/null
 
@@ -125,7 +125,7 @@ RUN chown sandbox:sandbox /sandbox/.openclaw/openclaw.json \
 ```
 
 The final stage inherits the stock runtime entrypoint, command, gateway health check, generated configuration, and file permissions.
-The linked install preserves existing managed plugin load paths, appends the copied plugin path, refreshes the plugin registry, and records the install before the explicit enable and inspect steps.
+The local install copies the staged plugin into OpenClaw's extensions tree, records the install, and leaves existing managed plugin load paths intact before the explicit enable and inspect steps.
 The last `RUN` refreshes the managed config hash after `openclaw plugins enable` updates `openclaw.json`.
 
 ## Create and Verify the Sandbox
@@ -205,6 +205,7 @@ The following mistakes commonly mix plugin installation with other NemoClaw exte
 - Do not use `nemoclaw <sandbox> skill install` for OpenClaw plugins. That command only installs `SKILL.md` agent skills.
 - Do not use `sandbox-base` as the final custom image. It is an intermediate dependency image.
 - Do not combine one NemoClaw release's Dockerfile with another release's base image.
+- Do not copy a plugin into `/sandbox/.openclaw/extensions/<id>` and then run `plugins install --link` on that same path. Stage it outside the managed extensions directory and use the local install shown above.
 - Do not move or delete the recorded source checkout before rebuilding the sandbox.
 - Do not rely on `.dockerignore` to include credential-like paths; NemoClaw excludes those from staged custom build contexts for safety.
 - Keep plugin dependencies in the build stage or plugin directory, and avoid copying unrelated host files into the sandbox image.
