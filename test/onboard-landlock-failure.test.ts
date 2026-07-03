@@ -8,6 +8,16 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+const MESSAGING_ENV_PREFIXES = ["DISCORD_", "SLACK_", "TELEGRAM_", "WHATSAPP_"] as const;
+
+function withoutMessagingCredentials(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return Object.fromEntries(
+    Object.entries(env).filter(
+      ([key]) => !MESSAGING_ENV_PREFIXES.some((prefix) => key.startsWith(prefix)),
+    ),
+  );
+}
+
 describe("DCode Landlock onboarding failure", () => {
   it("removes the failed sandbox without recording it as ready (#5795)", () => {
     const repoRoot = path.join(import.meta.dirname, "..");
@@ -146,17 +156,7 @@ createSandbox(
 
     fs.writeFileSync(scriptPath, script, "utf8");
 
-    const env = { ...process.env };
-    for (const key of Object.keys(env)) {
-      if (
-        key.startsWith("DISCORD_") ||
-        key.startsWith("SLACK_") ||
-        key.startsWith("TELEGRAM_") ||
-        key.startsWith("WHATSAPP_")
-      ) {
-        delete env[key];
-      }
-    }
+    const env = withoutMessagingCredentials(process.env);
     const result = spawnSync(process.execPath, [scriptPath], {
       cwd: repoRoot,
       encoding: "utf8",
