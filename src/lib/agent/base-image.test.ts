@@ -4,7 +4,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentDefinition } from "./defs";
 
-type AgentOnboardModule = typeof import("./onboard");
+type AgentBaseImageModule = typeof import("./base-image");
 type DockerImageModule = typeof import("../adapters/docker/image");
 type DockerInspectModule = typeof import("../adapters/docker/inspect");
 type SandboxBaseImageModule = typeof import("../sandbox-base-image");
@@ -57,11 +57,11 @@ function makeAgent(overrides: Partial<AgentDefinition> = {}): AgentDefinition {
 }
 
 /**
- * Load `agent-onboard` with Docker helpers replaced by Vitest mocks.
+ * Load the agent base-image helper with Docker dependencies replaced by Vitest mocks.
  */
 function withMockedDocker<T>(
   run: (deps: {
-    ensureAgentBaseImage: AgentOnboardModule["ensureAgentBaseImage"];
+    ensureAgentBaseImage: AgentBaseImageModule["ensureAgentBaseImage"];
     dockerBuildMock: ReturnType<typeof vi.fn>;
     dockerImageInspectMock: ReturnType<typeof vi.fn>;
     resolveSandboxBaseImageMock: ReturnType<typeof vi.fn>;
@@ -93,8 +93,8 @@ function withMockedDocker<T>(
     resolutionMetadataModule.createSandboxBaseImageResolutionMetadata;
   const originalCreateResolutionKey = resolutionKeyModule.createSandboxBaseImageResolutionKey;
   const originalGetImageGlibcVersion = imageCompatibilityModule.getImageGlibcVersion;
-  const agentOnboardModulePath = require.resolve("./onboard");
-  delete require.cache[agentOnboardModulePath];
+  const agentBaseImageModulePath = require.resolve("./base-image");
+  delete require.cache[agentBaseImageModulePath];
 
   const dockerBuildMock = vi.fn().mockReturnValue({ status: 0 });
   const dockerImageInspectMock = vi.fn();
@@ -134,9 +134,9 @@ function withMockedDocker<T>(
 
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const agentOnboardModule = require("./onboard") as AgentOnboardModule;
+    const agentBaseImageModule = require("./base-image") as AgentBaseImageModule;
     return run({
-      ensureAgentBaseImage: agentOnboardModule.ensureAgentBaseImage,
+      ensureAgentBaseImage: agentBaseImageModule.ensureAgentBaseImage,
       dockerBuildMock,
       dockerImageInspectMock,
       resolveSandboxBaseImageMock,
@@ -151,7 +151,7 @@ function withMockedDocker<T>(
       originalCreateResolutionMetadata;
     resolutionKeyModule.createSandboxBaseImageResolutionKey = originalCreateResolutionKey;
     imageCompatibilityModule.getImageGlibcVersion = originalGetImageGlibcVersion;
-    delete require.cache[agentOnboardModulePath];
+    delete require.cache[agentBaseImageModulePath];
   }
 }
 

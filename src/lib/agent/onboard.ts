@@ -9,7 +9,6 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 
-import { dockerBuild, dockerImageInspect } from "../adapters/docker";
 import { buildValidatedCurlCommandArgs } from "../adapters/http/curl-args";
 import { getAgentBranding } from "../cli/branding";
 import type { JsonObject as LooseObject } from "../core/json-types";
@@ -17,22 +16,16 @@ import { sleepSeconds } from "../core/wait";
 import { getProviderSelectionConfig } from "../inference/config";
 import { runSandboxConfigSync } from "../onboard/config-sync";
 import { ROOT, redact, run } from "../runner";
-import {
-  buildLocalBaseTag,
-  createSandboxBaseImageResolutionKey,
-  createSandboxBaseImageResolutionMetadata,
-  getImageGlibcVersion,
-  type ResolveBaseImageOptions,
-  resolveSandboxBaseImage,
-  SANDBOX_BASE_TAG,
-  type SandboxBaseImageResolutionMetadata,
-} from "../sandbox-base-image";
+import type { SandboxBaseImageResolutionMetadata } from "../sandbox-base-image";
+import { type EnsureAgentBaseImageOptions, ensureAgentBaseImage } from "./base-image";
 import { describeAgentBinaryFailure, verifyAgentBinaryAvailable } from "./binary-availability";
 import { printOptionalDashboardUi } from "./dashboard-ui";
 import { type AgentDefinition, isTerminalAgent, loadAgent, resolveAgentName } from "./defs";
 import { runAgentSmokeCommands } from "./terminal-smoke";
 import { printBearerTokenApiAccess } from "./web-auth-ui";
 
+export type { EnsureAgentBaseImageOptions, EnsureAgentBaseImageResult } from "./base-image";
+export { ensureAgentBaseImage } from "./base-image";
 export { verifyAgentBinaryAvailable } from "./binary-availability";
 
 export interface OnboardContext {
@@ -63,120 +56,12 @@ export function resolveAgent({
 }
 
 /**
- * Ensure the agent-specific sandbox base image exists locally.
- * Rebuild callers can force this so local Dockerfile.base edits are applied.
- */
-export function ensureAgentBaseImage(
-  agent: AgentDefinition,
-  opts: {
-    forceBaseImageRebuild?: boolean;
-    resolutionHint?: SandboxBaseImageResolutionMetadata | null;
-    forceBaseImageRefresh?: boolean;
-  } = {},
-): {
-  imageTag: string | null;
-  built: boolean;
-  resolutionMetadata?: SandboxBaseImageResolutionMetadata;
-} {
-  const baseDockerfile = agent.dockerfileBasePath;
-
-  if (!baseDockerfile) {
-    return { imageTag: null, built: false };
-  }
-
-  const baseImageName = `ghcr.io/nvidia/nemoclaw/${agent.name}-sandbox-base`;
-  const baseImageTag = `${baseImageName}:${SANDBOX_BASE_TAG}`;
-  const resolutionOptions: ResolveBaseImageOptions = {
-    imageName: baseImageName,
-    dockerfilePath: baseDockerfile,
-    localTag: buildLocalBaseTag(`nemoclaw-${agent.name}-sandbox-base-local`, ROOT),
-    envVar: `NEMOCLAW_${agent.name.toUpperCase().replace(/[^A-Z0-9]+/g, "_")}_SANDBOX_BASE_IMAGE_REF`,
-    label: `${agent.displayName} sandbox base image`,
-    requireOpenshellSandboxAbi: process.platform === "linux",
-    resolutionHint: opts.resolutionHint,
-    forceRefresh: opts.forceBaseImageRefresh,
-    rootDir: ROOT,
-  };
-  const forceBaseImageRebuild = opts.forceBaseImageRebuild === true;
-  if (forceBaseImageRebuild) {
-    console.log(`  Rebuilding ${agent.displayName} base image...`);
-    const buildResult = dockerBuild(baseDockerfile, baseImageTag, ROOT, {
-      ignoreError: true,
-      stdio: ["ignore", "inherit", "inherit"],
-    });
-    if (buildResult.error || buildResult.status !== 0) {
-      const detail = buildResult.error
-        ? `: ${buildResult.error.message}`
-        : ` (exit ${buildResult.status ?? "unknown"})`;
-      throw new Error(`Failed to build ${agent.displayName} base image${detail}`);
-    }
-    console.log(`  \u2713 Base image built: ${baseImageTag}`);
-    const resolutionMetadata = createSandboxBaseImageResolutionMetadata(
-      resolutionOptions,
-      createSandboxBaseImageResolutionKey(resolutionOptions),
-      {
-        ref: baseImageTag,
-        digest: null,
-        source: "local",
-        glibcVersion: process.platform === "linux" ? getImageGlibcVersion(baseImageTag) : null,
-      },
-    );
-    return {
-      imageTag: baseImageTag,
-      built: true,
-      ...(resolutionMetadata ? { resolutionMetadata } : {}),
-    };
-  }
-
-  const resolved = resolveSandboxBaseImage(resolutionOptions);
-  if (resolved && !forceBaseImageRebuild) {
-    console.log(`  Using ${agent.displayName} base image: ${resolved.ref}`);
-    return {
-      imageTag: resolved.ref,
-      built: false,
-      ...(resolved.metadata ? { resolutionMetadata: resolved.metadata } : {}),
-    };
-  }
-  if (!resolved && process.platform === "linux" && !forceBaseImageRebuild) {
-    throw new Error(
-      `No compatible ${agent.displayName} sandbox base image found for ${baseImageName}`,
-    );
-  }
-  const inspectResult = dockerImageInspect(baseImageTag, {
-    ignoreError: true,
-    suppressOutput: true,
-  });
-  if (inspectResult?.status !== 0) {
-    console.log(`  Building ${agent.displayName} base image (first time only)...`);
-    const buildResult = dockerBuild(baseDockerfile, baseImageTag, ROOT, {
-      ignoreError: true,
-      stdio: ["ignore", "inherit", "inherit"],
-    });
-    if (buildResult.error || buildResult.status !== 0) {
-      const detail = buildResult.error
-        ? `: ${buildResult.error.message}`
-        : ` (exit ${buildResult.status ?? "unknown"})`;
-      throw new Error(`Failed to build ${agent.displayName} base image${detail}`);
-    }
-    console.log(`  \u2713 Base image built: ${baseImageTag}`);
-    return { imageTag: baseImageTag, built: true };
-  }
-
-  console.log(`  Base image exists: ${baseImageTag}`);
-  return { imageTag: baseImageTag, built: false };
-}
-
-/**
  * Stage build context for an agent-specific sandbox image.
  * Builds the base image if the agent defines one and it's not cached locally.
  */
 export function createAgentSandbox(
   agent: AgentDefinition,
-  opts: {
-    forceBaseImageRebuild?: boolean;
-    resolutionHint?: SandboxBaseImageResolutionMetadata | null;
-    forceBaseImageRefresh?: boolean;
-  } = {},
+  opts: EnsureAgentBaseImageOptions = {},
 ): {
   buildCtx: string;
   stagedDockerfile: string;

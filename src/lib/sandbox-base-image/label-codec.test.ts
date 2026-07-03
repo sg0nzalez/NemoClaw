@@ -6,7 +6,11 @@ import {
   formatSandboxBaseImageResolutionLabels,
   parseSandboxBaseImageResolutionLabels,
 } from "./label-codec";
-import { SANDBOX_BASE_RESOLUTION_LABEL, type SandboxBaseImageResolutionMetadata } from "./types";
+import {
+  SANDBOX_BASE_IMAGE_RESOLUTION_SOURCES,
+  SANDBOX_BASE_RESOLUTION_LABEL,
+  type SandboxBaseImageResolutionMetadata,
+} from "./types";
 
 const metadata: SandboxBaseImageResolutionMetadata = {
   schema: 1,
@@ -59,6 +63,19 @@ describe("sandbox base-image resolution label codec", () => {
       parseSandboxBaseImageResolutionLabels({
         [SANDBOX_BASE_RESOLUTION_LABEL]: "a".repeat(20_000),
       }),
+    ).toBeNull();
+  });
+
+  it.each(
+    SANDBOX_BASE_IMAGE_RESOLUTION_SOURCES,
+  )("accepts the shared %s resolution source (#4680)", (source) => {
+    const withSource = { ...metadata, source };
+    expect(parseSandboxBaseImageResolutionLabels(encoded(withSource))).toEqual(withSource);
+  });
+
+  it("rejects a resolution source outside the shared source list (#4680)", () => {
+    expect(
+      parseSandboxBaseImageResolutionLabels(encoded({ ...metadata, source: "untrusted" })),
     ).toBeNull();
   });
 });

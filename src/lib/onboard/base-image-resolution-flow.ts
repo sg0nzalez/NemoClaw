@@ -27,7 +27,7 @@ export type BaseImageResolutionContext = {
   forceRefresh: boolean;
 };
 
-function envForcesRefresh(env: NodeJS.ProcessEnv): boolean {
+export function envForcesSandboxBaseImageRefresh(env: NodeJS.ProcessEnv): boolean {
   const value = String(env.NEMOCLAW_SANDBOX_BASE_IMAGE_REFRESH || "")
     .trim()
     .toLowerCase();
@@ -42,7 +42,7 @@ export function createBaseImageResolutionContext(options: {
   return {
     resolutionHint: options.initialHint ?? null,
     preResolvedMetadata: null,
-    forceRefresh: options.fresh || envForcesRefresh(options.env ?? process.env),
+    forceRefresh: options.fresh || envForcesSandboxBaseImageRefresh(options.env ?? process.env),
   };
 }
 

@@ -172,4 +172,103 @@ describe("sandbox base-image warm resolution", () => {
     expect(dockerMocks.pull).toHaveBeenCalled();
     expect(dockerMocks.build).not.toHaveBeenCalled();
   });
+
+  it("accepts a compatible local fallback when an ABI-required published image is incompatible (#4680)", () => {
+    const rootDir = path.join(process.cwd(), ".missing-sandbox-base-image-resolution-root");
+    const versionRef = `${IMAGE_NAME}:v1.2.3`;
+    const latestRef = `${IMAGE_NAME}:latest`;
+    const options = {
+      ...resolutionOptions(),
+      rootDir,
+      dockerfilePath: path.join(rootDir, "Dockerfile.base"),
+      env: {
+        ...resolutionOptions().env,
+        GITHUB_SHA: "",
+        NEMOCLAW_SANDBOX_BASE_VERSION_TAG: "v1.2.3",
+        NEMOCLAW_SANDBOX_BASE_LOCAL_BUILD: "0",
+      },
+      requireOpenshellSandboxAbi: true,
+    };
+    dockerMocks.imageInspect.mockReturnValue({ status: 0 });
+    dockerMocks.capture
+      .mockReturnValueOnce("ldd (GNU libc) GLIBC 2.38")
+      .mockReturnValueOnce("ldd (GNU libc) GLIBC 2.38")
+      .mockReturnValueOnce("ldd (GNU libc) GLIBC 2.39");
+
+    const resolved = resolveSandboxBaseImage(options);
+
+    expect(resolved).toMatchObject({
+      ref: options.localTag,
+      digest: null,
+      source: "local",
+      glibcVersion: "2.39",
+      metadata: {
+        ref: options.localTag,
+        source: "local",
+        glibcVersion: "2.39",
+        requireOpenshellSandboxAbi: true,
+      },
+    });
+    expect(dockerMocks.capture).toHaveBeenNthCalledWith(
+      1,
+      ["run", "--rm", "--entrypoint", "/usr/bin/ldd", versionRef, "--version"],
+      { ignoreError: true, timeout: 20_000 },
+    );
+    expect(dockerMocks.capture).toHaveBeenNthCalledWith(
+      2,
+      ["run", "--rm", "--entrypoint", "/usr/bin/ldd", latestRef, "--version"],
+      { ignoreError: true, timeout: 20_000 },
+    );
+    expect(dockerMocks.capture).toHaveBeenNthCalledWith(
+      3,
+      ["run", "--rm", "--entrypoint", "/usr/bin/ldd", options.localTag, "--version"],
+      { ignoreError: true, timeout: 20_000 },
+    );
+    expect(dockerMocks.pull).not.toHaveBeenCalled();
+    expect(dockerMocks.build).not.toHaveBeenCalled();
+  });
+
+  it("rejects an incompatible local fallback when an ABI-required published image is incompatible (#4680)", () => {
+    const rootDir = path.join(process.cwd(), ".missing-sandbox-base-image-resolution-root");
+    const versionRef = `${IMAGE_NAME}:v1.2.3`;
+    const latestRef = `${IMAGE_NAME}:latest`;
+    const options = {
+      ...resolutionOptions(),
+      rootDir,
+      dockerfilePath: path.join(rootDir, "Dockerfile.base"),
+      env: {
+        ...resolutionOptions().env,
+        GITHUB_SHA: "",
+        NEMOCLAW_SANDBOX_BASE_VERSION_TAG: "v1.2.3",
+        NEMOCLAW_SANDBOX_BASE_LOCAL_BUILD: "0",
+      },
+      requireOpenshellSandboxAbi: true,
+    };
+    dockerMocks.imageInspect.mockReturnValue({ status: 0 });
+    dockerMocks.capture
+      .mockReturnValueOnce("ldd (GNU libc) GLIBC 2.38")
+      .mockReturnValueOnce("ldd (GNU libc) GLIBC 2.38")
+      .mockReturnValueOnce("ldd (GNU libc) GLIBC 2.38");
+
+    const resolved = resolveSandboxBaseImage(options);
+
+    expect(resolved).toBeNull();
+    expect(dockerMocks.capture).toHaveBeenNthCalledWith(
+      1,
+      ["run", "--rm", "--entrypoint", "/usr/bin/ldd", versionRef, "--version"],
+      { ignoreError: true, timeout: 20_000 },
+    );
+    expect(dockerMocks.capture).toHaveBeenNthCalledWith(
+      2,
+      ["run", "--rm", "--entrypoint", "/usr/bin/ldd", latestRef, "--version"],
+      { ignoreError: true, timeout: 20_000 },
+    );
+    expect(dockerMocks.capture).toHaveBeenNthCalledWith(
+      3,
+      ["run", "--rm", "--entrypoint", "/usr/bin/ldd", options.localTag, "--version"],
+      { ignoreError: true, timeout: 20_000 },
+    );
+    expect(dockerMocks.pull).not.toHaveBeenCalled();
+    expect(dockerMocks.build).not.toHaveBeenCalled();
+  });
 });

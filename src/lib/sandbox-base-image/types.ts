@@ -7,6 +7,16 @@ export const OPENSHELL_SANDBOX_MIN_GLIBC = "2.39";
 export const SANDBOX_BASE_RESOLUTION_LABEL = "com.nvidia.nemoclaw.base-resolution";
 export const SANDBOX_BASE_RESOLUTION_KEY_LABEL = "com.nvidia.nemoclaw.base-resolution-key";
 export const SANDBOX_BASE_RESOLUTION_SCHEMA = 1;
+export const SANDBOX_BASE_IMAGE_RESOLUTION_SOURCES = [
+  "override",
+  "version-tag",
+  "source-sha",
+  "latest",
+  "local",
+] as const;
+
+export type SandboxBaseImageResolutionSource =
+  (typeof SANDBOX_BASE_IMAGE_RESOLUTION_SOURCES)[number];
 
 export type SandboxBaseImageResolutionMetadata = {
   schema: number;
@@ -14,7 +24,7 @@ export type SandboxBaseImageResolutionMetadata = {
   imageName: string;
   ref: string;
   digest: string | null;
-  source: SandboxBaseImageResolution["source"];
+  source: SandboxBaseImageResolutionSource;
   imageId: string;
   os: string;
   architecture: string;
@@ -40,7 +50,7 @@ export type ResolveBaseImageOptions = {
 export type SandboxBaseImageResolution = {
   ref: string;
   digest: string | null;
-  source: "override" | "version-tag" | "source-sha" | "latest" | "local";
+  source: SandboxBaseImageResolutionSource;
   glibcVersion: string | null;
   metadata?: SandboxBaseImageResolutionMetadata;
 };

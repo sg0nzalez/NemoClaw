@@ -1,10 +1,11 @@
-#!/usr/bin/env bash
+#!/bin/bash -p
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
 # Proxy-normalizing launcher for every managed Deep Agents Code entry point.
 
 set -euo pipefail
+unset BASH_ENV ENV
 
 readonly MANAGED_DCODE_WRAPPER="/usr/local/lib/nemoclaw/dcode-wrapper.sh"
 export HOME=/sandbox
@@ -57,7 +58,17 @@ read_managed_proxy_value() {
 PROXY_HOST="$(read_managed_proxy_value "$MANAGED_PROXY_HOST_FILE" "host")"
 PROXY_PORT="$(read_managed_proxy_value "$MANAGED_PROXY_PORT_FILE" "port")"
 unset NEMOCLAW_PROXY_HOST NEMOCLAW_PROXY_PORT
+# Generic proxy fallbacks are outside the managed dcode contract and may carry
+# host credentials even after the scheme-specific proxy values are normalized.
+unset ALL_PROXY all_proxy OPENAI_PROXY
 
+# This validator is applied only to image-baked values that onboard writes
+# into root-owned files at build time; runtime env is explicitly unset above
+# and never reaches this check. That scope is why underscores remain accepted
+# for controlled internal/container aliases such as proxy_name — public DNS
+# hostnames should still remain RFC 1123 names without underscores. Cross-
+# boundary parity tests prevent this standalone boundary from drifting from
+# start.sh or from the host-side TypeScript validator.
 is_valid_proxy_host() {
   local value="$1"
   [[ "$value" =~ ^[A-Za-z0-9._-]+$ ]]

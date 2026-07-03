@@ -3,10 +3,10 @@
 
 import { dockerImageInspectFormat } from "../adapters/docker";
 import {
+  SANDBOX_BASE_IMAGE_RESOLUTION_SOURCES,
   SANDBOX_BASE_RESOLUTION_KEY_LABEL,
   SANDBOX_BASE_RESOLUTION_LABEL,
   SANDBOX_BASE_RESOLUTION_SCHEMA,
-  type SandboxBaseImageResolution,
   type SandboxBaseImageResolutionMetadata,
 } from "./types";
 
@@ -45,20 +45,13 @@ export function parseSandboxBaseImageResolutionLabels(
     const parsed = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")) as unknown;
     if (!parsed || typeof parsed !== "object") return null;
     const metadata = parsed as SandboxBaseImageResolutionMetadata;
-    const validSources = new Set<SandboxBaseImageResolution["source"]>([
-      "override",
-      "version-tag",
-      "source-sha",
-      "latest",
-      "local",
-    ]);
     if (
       metadata.schema !== SANDBOX_BASE_RESOLUTION_SCHEMA ||
       typeof metadata.key !== "string" ||
       typeof metadata.imageName !== "string" ||
       typeof metadata.ref !== "string" ||
       (metadata.digest !== null && typeof metadata.digest !== "string") ||
-      !validSources.has(metadata.source) ||
+      !SANDBOX_BASE_IMAGE_RESOLUTION_SOURCES.includes(metadata.source) ||
       typeof metadata.imageId !== "string" ||
       typeof metadata.os !== "string" ||
       typeof metadata.architecture !== "string" ||

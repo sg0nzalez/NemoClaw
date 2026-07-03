@@ -6,8 +6,11 @@ import { OPENSHELL_SANDBOX_MIN_GLIBC } from "./types";
 
 export function parseGlibcVersion(output: string | null | undefined): string | null {
   const text = String(output || "");
+  const firstLine = text.split(/\r?\n/).find((line) => line.trim().length > 0) || "";
   const match =
-    text.match(/GLIBC\s+([0-9]+(?:\.[0-9]+)+)/i) || text.match(/\s([0-9]+\.[0-9]+)\s*$/);
+    firstLine.match(/\s([0-9]+(?:\.[0-9]+)+)\s*$/) ||
+    text.match(/GLIBC\s+([0-9]+(?:\.[0-9]+)+)/i) ||
+    text.match(/\s([0-9]+\.[0-9]+)\s*$/);
   return match ? match[1] : null;
 }
 
