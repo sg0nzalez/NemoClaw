@@ -39,6 +39,7 @@ import {
   shouldMergeOpenClawConfigStateFile,
 } from "./openclaw-config-restore-input.js";
 import {
+  isSafeOpenClawExtensionDirName,
   type OpenClawManagedExtensionDiscoveryResult,
   parseFreshOpenClawPluginExtensionDirs,
 } from "./openclaw-plugin-restore.js";
@@ -344,13 +345,11 @@ function auditExtractedSymlinks(dirPath: string, allowedRoots: string[]): string
         if (stat.isSymbolicLink()) {
           const linkTarget = readlinkSync(fullPath);
 
-          // Whitelisted npm symlinks baked into the base image at build time
-          // (see AUDIT_SYMLINK_WHITELIST). Accepting them here matches the
-          // pre-backup audit so legitimate plugin installs in extensions/
-          // can survive a rebuild without tripping the post-extraction check.
-          // Match both the source path AND the link target — a whitelisted
-          // path with a tampered target falls through to the normal
-          // containment check.
+          // Allowed npm symlinks baked into managed or custom images. The
+          // shared matcher checks both source shape and exact target so the
+          // pre-backup and post-extraction audits enforce the same contract.
+          // A recognized path with a tampered target falls through to the
+          // normal containment check.
           const relFromDir = path.relative(dirPath, fullPath).split(path.sep).join("/");
           if (isAllowedStateSymlink(relFromDir, linkTarget)) {
             continue;
@@ -593,6 +592,11 @@ const AUDIT_SYMLINK_WHITELIST: ReadonlyMap<string, string> = new Map([
 ]);
 
 const EXTENSION_NPM_BIN_RE = /^extensions\/[^/]+\/node_modules\/\.bin\/[^/]+$/;
+// `openclaw plugins install` links a declared OpenClaw peer dependency to the
+// image's global runtime. Accept that link only for a direct, validated
+// extension directory and the exact runtime path used by the stock image.
+const EXTENSION_OPENCLAW_PEER_RE = /^extensions\/([^/]+)\/node_modules\/openclaw$/;
+const OPENCLAW_GLOBAL_INSTALL = "/usr/local/lib/node_modules/openclaw";
 const OPENCLAW_BUILTIN_IMAGE_MANAGED_EXTENSION_DIRS = ["nemoclaw", "openclaw-weixin"] as const;
 
 function isAllowedExtensionNpmBinSymlink(relPath: string, linkTarget: string): boolean {
@@ -614,9 +618,16 @@ function isAllowedExtensionNpmBinSymlink(relPath: string, linkTarget: string): b
 }
 
 function isAllowedStateSymlink(relPath: string, linkTarget: string): boolean {
-  const exactTarget = AUDIT_SYMLINK_WHITELIST.get(relPath.split(path.sep).join("/"));
+  const normalizedRelPath = relPath.split(path.sep).join("/");
+  const exactTarget = AUDIT_SYMLINK_WHITELIST.get(normalizedRelPath);
   if (exactTarget !== undefined) return exactTarget === linkTarget;
-  return isAllowedExtensionNpmBinSymlink(relPath, linkTarget);
+  const peerMatch = EXTENSION_OPENCLAW_PEER_RE.exec(normalizedRelPath);
+  return (
+    (peerMatch !== null &&
+      isSafeOpenClawExtensionDirName(peerMatch[1]) &&
+      linkTarget === OPENCLAW_GLOBAL_INSTALL) ||
+    isAllowedExtensionNpmBinSymlink(normalizedRelPath, linkTarget)
+  );
 }
 
 function _log(msg: string): void {
@@ -1337,7 +1348,7 @@ export function backupSandboxState(sandboxName: string, options: BackupOptions =
           }
           if (whitelisted.length > 0) {
             _log(
-              `Pre-backup audit whitelisted ${whitelisted.length} entries (base-image npm symlinks): ${whitelisted.slice(0, 5).join("; ")}`,
+              `Pre-backup audit whitelisted ${whitelisted.length} entries (image npm symlinks): ${whitelisted.slice(0, 5).join("; ")}`,
             );
           }
           if (violations.length > 0) {

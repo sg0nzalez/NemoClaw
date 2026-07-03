@@ -19,7 +19,7 @@ function isSafeOpenClawPluginInstallId(id: string): boolean {
   return id.startsWith("@") && slash > 1 && slash === id.lastIndexOf("/") && slash < id.length - 1;
 }
 
-function isSafeOpenClawExtensionDirName(name: string): boolean {
+export function isSafeOpenClawExtensionDirName(name: string): boolean {
   return (
     name.length > 0 &&
     name.length <= 128 &&

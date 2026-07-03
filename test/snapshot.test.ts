@@ -719,7 +719,7 @@ process.exit(0);
     }
   });
 
-  it("accepts whitelisted npm symlinks under extensions/ during pre-backup audit", () => {
+  it("accepts generic OpenClaw peer links during the pre-backup audit", () => {
     const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-audit-whitelist-"));
     const oldPath = process.env.PATH;
     const oldOpenshell = process.env.NEMOCLAW_OPENSHELL_BIN;
@@ -732,7 +732,7 @@ process.exit(0);
 
       const auditLines = [
         "l\t/sandbox/.openclaw/extensions/openclaw-weixin/node_modules/.bin/qrcode-terminal\t../qrcode-terminal/bin/qrcode-terminal.js",
-        "l\t/sandbox/.openclaw/extensions/openclaw-weixin/node_modules/openclaw\t/usr/local/lib/node_modules/openclaw",
+        "l\t/sandbox/.openclaw/extensions/weather/node_modules/openclaw\t/usr/local/lib/node_modules/openclaw",
       ].join("\n");
 
       const openshell = writeFakeOpenshell(binDir);
@@ -949,11 +949,9 @@ process.exit(0);
     }
   });
 
-  it("rejects whitelisted-path symlinks with a tampered target", () => {
-    // Source path matches the whitelist, but linkTarget points to /etc/passwd
-    // instead of the expected /usr/local/lib/node_modules/openclaw. The audit
-    // must compare both fields and reject — source-only matching would let a
-    // compromised agent repoint these symlinks at arbitrary host paths.
+  it("rejects a generic OpenClaw peer link with a tampered target", () => {
+    // The generic peer path is valid, but its target must remain the exact
+    // global OpenClaw install rather than an arbitrary absolute path.
     const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-audit-target-tampered-"));
     const oldPath = process.env.PATH;
     const oldOpenshell = process.env.NEMOCLAW_OPENSHELL_BIN;
@@ -965,7 +963,7 @@ process.exit(0);
       for (const d of existingDirs) fs.mkdirSync(path.join(openclawDir, d), { recursive: true });
 
       const auditLines = [
-        "l\t/sandbox/.openclaw/extensions/openclaw-weixin/node_modules/openclaw\t/etc/passwd",
+        "l\t/sandbox/.openclaw/extensions/weather/node_modules/openclaw\t/etc/passwd",
       ].join("\n");
 
       const openshell = writeFakeOpenshell(binDir);
@@ -992,7 +990,7 @@ process.exit(0);
 
       const backup = sandboxState.backupSandboxState("alpha");
       expect(backup.success).toBe(false);
-      expect(backup.error).toMatch(/openclaw-weixin/);
+      expect(backup.error).toMatch(/weather/);
       expect(backup.error).toMatch(/\/etc\/passwd/);
     } finally {
       if (oldOpenshell === undefined) {
