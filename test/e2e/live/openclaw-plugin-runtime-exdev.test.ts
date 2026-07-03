@@ -64,13 +64,18 @@ async function ignoreCleanupError(run: () => Promise<unknown>): Promise<void> {
   }
 }
 
-function patchPoliciesForDevShm(): () => void {
+type PolicySourcePatch = {
+  restore(): void;
+  assertRestored(): void;
+};
+
+function patchPoliciesForDevShm(): PolicySourcePatch {
   // Test-only source-boundary patch: the default OpenClaw policies intentionally
   // do not grant general /dev access, but this regression needs to create a
   // source tree on tmpfs (/dev/shm) to reproduce #3127's cross-device rename
-  // layout. Keep the mutation local, restore it after the test, and remove it
-  // when OpenShell can mount a dedicated test tmpfs or update live policy before
-  // first sandbox command without broadening the checked-in production policy.
+  // layout. Keep the mutation local, restore and verify the source bytes before
+  // writing final artifacts, and remove this patch when OpenShell can mount a
+  // dedicated test tmpfs without broadening checked-in production policy.
   const originals = new Map<string, string>();
   for (const policyPath of [
     path.join(REPO_ROOT, "agents", "openclaw", "policy-permissive.yaml"),
@@ -78,6 +83,7 @@ function patchPoliciesForDevShm(): () => void {
     path.join(REPO_ROOT, "nemoclaw-blueprint", "policies", "openclaw-sandbox-permissive.yaml"),
   ]) {
     const text = fs.readFileSync(policyPath, "utf8");
+    originals.set(policyPath, text);
     const anchor = "  read_write:\n    - /tmp\n";
     expect(text, `could not find read_write /tmp anchor in ${policyPath}`).toContain(anchor);
     let additions = "";
@@ -85,14 +91,19 @@ function patchPoliciesForDevShm(): () => void {
       if (!text.includes(`    - ${entry}\n`)) additions += `    - ${entry}\n`;
     }
     if (additions) {
-      originals.set(policyPath, text);
       fs.writeFileSync(policyPath, text.replace(anchor, anchor + additions), "utf8");
     }
   }
-  return () => {
-    for (const [policyPath, text] of originals) {
-      fs.writeFileSync(policyPath, text, "utf8");
-    }
+  const restore = () => {
+    for (const [policyPath, text] of originals) fs.writeFileSync(policyPath, text, "utf8");
+  };
+  return {
+    restore,
+    assertRestored: () => {
+      for (const [policyPath, text] of originals) {
+        expect(fs.readFileSync(policyPath, "utf8"), `${policyPath} was not restored`).toBe(text);
+      }
+    },
   };
 }
 
@@ -139,9 +150,7 @@ COPY --from=weather-plugin-builder \
     /usr/local/share/nemoclaw/e2e-weather-plugin.sha256
 
 USER sandbox
-RUN HOME=/sandbox openclaw config set plugins.load.paths \
-        '["/sandbox/.openclaw/extensions/weather"]' --json \
-    && HOME=/sandbox openclaw plugins registry --refresh --json > /dev/null \
+RUN HOME=/sandbox openclaw plugins install --link /sandbox/.openclaw/extensions/weather \
     && HOME=/sandbox openclaw plugins enable weather \
     && HOME=/sandbox openclaw plugins inspect weather --json > /dev/null
 
@@ -167,10 +176,18 @@ type GatewayToolCatalog = {
   groups?: Array<{ tools?: Array<{ id?: unknown }> }>;
 };
 
+type GatewayToolInvocation = {
+  ok?: unknown;
+  toolName?: unknown;
+  source?: unknown;
+  output?: { details?: unknown };
+};
+
 type WeatherRuntimeProof = {
   imageMarker: string;
   inspectLoaded: boolean;
   catalogToolIds: string[];
+  toolInvoked: boolean;
 };
 
 async function assertWeatherPluginRuntime(
@@ -237,7 +254,31 @@ printf '%s\\n' "$actual"`),
     (group.tools ?? []).map((tool) => tool.id).filter((id): id is string => typeof id === "string"),
   );
   expect(catalogToolIds).toContain("get_weather");
-  return { imageMarker: imageMarker ?? "", inspectLoaded: true, catalogToolIds };
+
+  const invokeProbe = await sandbox.execShell(
+    SANDBOX_NAME,
+    trustedSandboxShellScript(
+      `. /tmp/nemoclaw-proxy-env.sh && HOME=/sandbox openclaw gateway call tools.invoke --params '{"name":"get_weather","args":{"location":"Santa Clara"}}' --json`,
+    ),
+    {
+      artifactName: `openclaw-weather-plugin-invoke-${phase}`,
+      env: liveEnv(),
+      timeoutMs: PROBE_TIMEOUT_MS,
+    },
+  );
+  expect(invokeProbe.exitCode, resultText(invokeProbe)).toBe(0);
+  const invocation = parseJsonFromText(
+    normalizeSandboxStdoutFrames(invokeProbe.stdout),
+  ) as GatewayToolInvocation;
+  expect(invocation).toMatchObject({
+    ok: true,
+    toolName: "get_weather",
+    source: "plugin",
+    output: {
+      details: { location: "Santa Clara", condition: "clear", temperatureC: 21 },
+    },
+  });
+  return { imageMarker: imageMarker ?? "", inspectLoaded: true, catalogToolIds, toolInvoked: true };
 }
 
 const runtimeDepsReplacementProbeSource = `set -eu
@@ -327,7 +368,7 @@ liveTest(
       regressionTargets: ["#6108", "#3513", "#3127"],
       contract: [
         "fresh OpenClaw sandbox onboards from a full managed custom-plugin Dockerfile",
-        "gateway log, runtime plugin inspection, and tools.catalog expose weather/get_weather",
+        "gateway log, runtime inspection, tools.catalog, and tools.invoke prove weather/get_weather",
         "custom-plugin image provenance and the gateway tool survive restart and rebuild",
         "sandbox proves /dev/shm and plugin-runtime-deps are distinct devices",
         "legacy source-side staging fails with EXDEV across the same /dev/shm to plugin-runtime-deps boundary",
@@ -388,8 +429,8 @@ liveTest(
       }),
     );
 
-    const restorePolicies = patchPoliciesForDevShm();
-    cleanup.add("restore EXDEV policy fixture edits", restorePolicies);
+    const policySourcePatch = patchPoliciesForDevShm();
+    cleanup.add("restore EXDEV policy fixture edits", policySourcePatch.restore);
     const removeCustomDockerfile = createCustomPluginDockerfile();
     cleanup.add("remove custom weather-plugin Dockerfile", removeCustomDockerfile);
 
@@ -483,6 +524,9 @@ liveTest(
     expect(probeText).toContain("source-side staging failure self-check completed");
     expect(probeText).toContain("runtime deps replacement completed");
 
+    policySourcePatch.restore();
+    policySourcePatch.assertRestored();
+
     await artifacts.writeJson("target-result.json", {
       id: "openclaw-plugin-runtime-exdev",
       onboardExitCode: onboard.exitCode,
@@ -493,13 +537,16 @@ liveTest(
       assertions: {
         weatherAfterOnboard:
           weatherAfterOnboard.inspectLoaded &&
-          weatherAfterOnboard.catalogToolIds.includes("get_weather"),
+          weatherAfterOnboard.catalogToolIds.includes("get_weather") &&
+          weatherAfterOnboard.toolInvoked,
         weatherAfterRestart:
           weatherAfterRestart.inspectLoaded &&
-          weatherAfterRestart.catalogToolIds.includes("get_weather"),
+          weatherAfterRestart.catalogToolIds.includes("get_weather") &&
+          weatherAfterRestart.toolInvoked,
         weatherAfterRebuild:
           weatherAfterRebuild.inspectLoaded &&
-          weatherAfterRebuild.catalogToolIds.includes("get_weather"),
+          weatherAfterRebuild.catalogToolIds.includes("get_weather") &&
+          weatherAfterRebuild.toolInvoked,
         imageMarkerStable:
           weatherAfterOnboard.imageMarker === weatherAfterRestart.imageMarker &&
           weatherAfterRestart.imageMarker === weatherAfterRebuild.imageMarker,
@@ -509,6 +556,7 @@ liveTest(
         ),
         noExdevSignature: !EXDEV_PATTERNS.some((pattern) => pattern.test(probeText)),
         successMarker: probeText.includes("runtime deps replacement completed"),
+        policySourcesRestored: true,
       },
     });
   },

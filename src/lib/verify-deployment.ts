@@ -20,7 +20,14 @@
 import { compareChannelSets, type RuntimeChannelStatus } from "./channel-runtime-status";
 import type { DashboardDeliveryChain } from "./dashboard/contract";
 import { listMessagingChannelsWithoutCredentials } from "./messaging/channels";
+import {
+  buildCustomOpenClawRuntimeFailureHints,
+  classifyOpenClawRuntimeFailure,
+  type SandboxCommandExecutor,
+} from "./onboard/custom-openclaw-runtime-diagnosis";
 import { getMessagingProviderNamesForChannel } from "./onboard/messaging-reuse";
+
+export { shouldDiagnoseCustomOpenClawRuntime } from "./onboard/custom-openclaw-runtime-diagnosis";
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -72,10 +79,7 @@ export interface VerifyDeploymentResult {
 
 export interface VerifyDeploymentDeps {
   /** Execute a command inside the sandbox via SSH. Returns null if sandbox unreachable. */
-  executeSandboxCommand: (
-    name: string,
-    script: string,
-  ) => { status: number; stdout: string; stderr: string } | null;
+  executeSandboxCommand: SandboxCommandExecutor;
 
   /** Probe an HTTP endpoint on the host. Returns the HTTP status code or 0 on failure. */
   probeHostPort: (port: number, path: string) => number;
@@ -143,88 +147,8 @@ const CREDENTIALLESS_MESSAGING_CHANNELS = new Set(listMessagingChannelsWithoutCr
 // sandbox log is the first thing to check. If the sandbox itself never
 // came up, the host-side OpenShell gateway log is the right place to
 // look — see gatewayLogCandidates() in onboard/sandbox-create-failure.ts.
-export type OpenClawRuntimeFailureKind =
-  | "normal_runtime"
-  | "base_only_image"
-  | "sandbox_unreachable"
-  | "inconclusive";
-
-export interface OpenClawRuntimeFailureDiagnosis {
-  kind: OpenClawRuntimeFailureKind;
-  gatewayLogPresent: boolean | null;
-  startupScriptPresent: boolean | null;
-  configPresent: boolean | null;
-}
-
-const OPENCLAW_RUNTIME_PROBE =
-  "printf 'nemoclaw-runtime-probe-v1 '; " +
-  "if [ -e /tmp/gateway.log ]; then printf 'log=1 '; else printf 'log=0 '; fi; " +
-  "if [ -x /usr/local/bin/nemoclaw-start ]; then printf 'start=1 '; else printf 'start=0 '; fi; " +
-  "if [ -e /sandbox/.openclaw/openclaw.json ]; then printf 'config=1\\n'; else printf 'config=0\\n'; fi";
-
-export function shouldDiagnoseCustomOpenClawRuntime(
-  fromDockerfile: string | null | undefined,
-  selectedAgentName: string | null | undefined,
-): boolean {
-  return Boolean(fromDockerfile && selectedAgentName === "openclaw");
-}
-
-/**
- * Distinguish the documented sandbox-base-only failure from an ordinary
- * gateway startup failure without reading config or log contents.
- */
-export function classifyOpenClawRuntimeFailure(
-  sandboxName: string,
-  executeSandboxCommand: VerifyDeploymentDeps["executeSandboxCommand"],
-): OpenClawRuntimeFailureDiagnosis {
-  const result = executeSandboxCommand(sandboxName, OPENCLAW_RUNTIME_PROBE);
-  if (!result) {
-    return {
-      kind: "sandbox_unreachable",
-      gatewayLogPresent: null,
-      startupScriptPresent: null,
-      configPresent: null,
-    };
-  }
-
-  const match = result.stdout.match(
-    /(?:^|\n)\s*(?:(?:\[stdout\]|stdout:)\s*)?nemoclaw-runtime-probe-v1 log=([01]) start=([01]) config=([01])(?:\r?\n|$)/i,
-  );
-  if (result.status !== 0 || !match) {
-    return {
-      kind: "inconclusive",
-      gatewayLogPresent: null,
-      startupScriptPresent: null,
-      configPresent: null,
-    };
-  }
-
-  const gatewayLogPresent = match[1] === "1";
-  const startupScriptPresent = match[2] === "1";
-  const configPresent = match[3] === "1";
-  let kind: OpenClawRuntimeFailureKind = "inconclusive";
-  if (!gatewayLogPresent && !startupScriptPresent && !configPresent) {
-    kind = "base_only_image";
-  } else if (startupScriptPresent && configPresent) {
-    kind = "normal_runtime";
-  }
-  return { kind, gatewayLogPresent, startupScriptPresent, configPresent };
-}
-
-function buildGatewayLogHint(
-  sandboxName: string,
-  runtimeDiagnosis: OpenClawRuntimeFailureDiagnosis | null,
-): string {
-  if (runtimeDiagnosis?.kind === "base_only_image") {
-    return (
-      "This custom image does not contain the NemoClaw-managed OpenClaw runtime: " +
-      "`/usr/local/bin/nemoclaw-start` and `/sandbox/.openclaw/openclaw.json` are missing, " +
-      "and `/tmp/gateway.log` was never created. `nemoclaw onboard --from` uses the supplied " +
-      "Dockerfile as the complete sandbox image; it does not layer it over the managed runtime. " +
-      "Build from the full NemoClaw Dockerfile and context for the same release instead of using " +
-      "`ghcr.io/nvidia/nemoclaw/sandbox-base` directly."
-    );
-  }
+function buildGatewayLogHint(sandboxName: string, customRuntimeHint: string | null): string {
+  if (customRuntimeHint) return customRuntimeHint;
   return (
     `The gateway probe failed after retrying. Inspect the in-sandbox gateway log with ` +
     `\`nemoclaw ${sandboxName} logs\` (the gateway writes to /tmp/gateway.log inside the sandbox when it starts). ` +
@@ -553,15 +477,23 @@ export async function verifyDeployment(
 
   // 1. Gateway reachable inside sandbox
   const gateway = await verifyGatewayInSandbox(sandboxName, chain, deps, retryDelaysMs, sleep);
+  // Diagnose only after the normal startup budget. A slow custom runtime should
+  // get the same recovery window as the stock image, and an early unreachable
+  // exec cannot safely prove that image artifacts are absent.
   const runtimeDiagnosis =
     !gateway.reachable && options.diagnoseCustomOpenClawRuntime
       ? classifyOpenClawRuntimeFailure(sandboxName, deps.executeSandboxCommand)
       : null;
+  const customRuntimeHints = runtimeDiagnosis
+    ? buildCustomOpenClawRuntimeFailureHints(runtimeDiagnosis)
+    : null;
   diagnostics.push({
     link: "gateway",
     status: gateway.reachable ? "ok" : "fail",
     detail: gateway.detail,
-    hint: gateway.reachable ? "" : buildGatewayLogHint(sandboxName, runtimeDiagnosis),
+    hint: gateway.reachable
+      ? ""
+      : buildGatewayLogHint(sandboxName, customRuntimeHints?.gateway ?? null),
   });
 
   // 2. Gateway version (cosmetic — not a health signal)
@@ -570,7 +502,7 @@ export async function verifyDeployment(
   // 3. Dashboard reachable from host (port forward)
   // A port forward cannot repair an image that has no managed gateway runtime,
   // so avoid spending a second retry budget on the dependent dashboard probe.
-  const dashboardRetryDelays = runtimeDiagnosis?.kind === "base_only_image" ? [] : retryDelaysMs;
+  const dashboardRetryDelays = customRuntimeHints ? [] : retryDelaysMs;
   const dashboard = await verifyDashboardFromHost(chain, deps, dashboardRetryDelays, sleep);
   diagnostics.push({
     link: "dashboard",
@@ -578,9 +510,8 @@ export async function verifyDeployment(
     detail: dashboard.detail,
     hint: dashboard.reachable
       ? ""
-      : runtimeDiagnosis?.kind === "base_only_image"
-        ? "The dashboard cannot start until the custom image includes the NemoClaw-managed OpenClaw runtime."
-        : `Port forward on ${chain.port} is not working. Run: openshell forward start ${chain.forwardTarget} ${sandboxName}`,
+      : (customRuntimeHints?.dashboard ??
+        `Port forward on ${chain.port} is not working. Run: openshell forward start ${chain.forwardTarget} ${sandboxName}`),
   });
 
   // 4. Inference route
