@@ -128,22 +128,27 @@ System-wide shell hooks that read `/tmp/nemoclaw-proxy-env.sh` source the runtim
 ### Landlock Kernel Requirements
 
 Landlock LSM requires Linux kernel 5.13 or later with `CONFIG_SECURITY_LANDLOCK=y`.
-The NemoClaw sandbox policy uses `compatibility: best_effort`, which means Landlock enforcement is silently skipped on kernels that do not support it.
+OpenShell also requires Landlock to be active and the sandbox runtime to permit Landlock syscalls.
+OpenClaw and Hermes policies use `compatibility: best_effort`, which continues sandbox startup when Landlock is unavailable.
+The Deep Agents Code policy uses `compatibility: hard_requirement`, so OpenShell aborts sandbox startup instead of running the agent with reduced filesystem isolation.
 
-On such kernels, protection falls back to DAC (file ownership and permissions) only.
-Files outside the writable paths would be inaccessible to the agent regardless of DAC permissions.
+When Landlock is unavailable, OpenClaw and Hermes continue without the configured Landlock path restrictions.
+Container mounts and DAC file ownership and permissions still apply.
+Deep Agents Code onboarding returns a nonzero exit and does not report the terminal runtime as ready.
+The fail-closed behavior also applies when OpenShell cannot open a configured policy path or enforce the prepared ruleset.
 
-Verify Landlock availability:
+OpenShell probes the actual sandbox runtime during startup instead of relying on a host filesystem path.
+For a running sandbox, inspect its startup events:
 
 ```bash
-ls /sys/kernel/security/landlock
+openshell logs <sandbox-name> -n 100 --source sandbox
 ```
 
-On a kernel with Landlock support, the path exists and `ls` succeeds.
-If it reports `No such file or directory`, the kernel does not expose Landlock, and the sandbox falls back to DAC-only enforcement as described above.
+A successful ruleset reports `Landlock filesystem sandbox available`, `Applying Landlock filesystem sandbox`, and `Landlock ruleset built` events.
+When Landlock is unavailable, `best_effort` emits a high-severity finding and continues, while the same condition prevents Deep Agents Code from starting.
 
 For production deployments, use kernel 5.13+ with Landlock enabled.
-The `test/e2e/e2e-cloud-experimental/checks/04-landlock-readonly.sh` script validates enforcement at runtime.
+The `test/e2e/e2e-cloud-experimental/checks/04-landlock-readonly.sh` and `test/e2e/e2e-cloud-experimental/checks/05-deepagents-code-landlock-readonly.sh` scripts validate enforcement at runtime.
 
 ## References
 

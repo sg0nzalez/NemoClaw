@@ -27,6 +27,9 @@ type PolicyEntry = {
 };
 
 type PolicyDocument = {
+  landlock?: {
+    compatibility?: string;
+  };
   network_policies?: Record<string, PolicyEntry>;
 };
 
@@ -51,6 +54,22 @@ function readPreparedPolicy(prepared: {
 }
 
 describe("initial sandbox policy real preset merge", () => {
+  it("preserves fail-closed Landlock while composing the DCode create policy (#5795)", () => {
+    const prepared = prepareInitialSandboxCreatePolicy(
+      repoPath("agents", "langchain-deepagents-code", "policy-additions.yaml"),
+      [],
+      {
+        additionalPresets: ["tavily"],
+        agentName: "langchain-deepagents-code",
+      },
+    );
+    const policy = readPreparedPolicy(prepared);
+
+    expect(prepared.appliedPresets).toEqual(["tavily"]);
+    expect(policy.landlock?.compatibility).toBe("hard_requirement");
+    expect(policy.network_policies).toHaveProperty("tavily");
+  });
+
   it("uses Hermes channel YAML when the Hermes base policy path implies the agent", () => {
     const prepared = prepareInitialSandboxCreatePolicy(
       repoPath("agents", "hermes", "policy-additions.yaml"),

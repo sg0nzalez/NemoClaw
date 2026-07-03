@@ -370,8 +370,8 @@ describe("LangChain Deep Agents Code image contracts", () => {
     expect(policy).toContain("    - /usr\n");
     expect(policy).toContain("    - /opt/venv\n");
     expect(policy).toContain("    - /etc\n");
-    expect(policy).toContain("compatibility: strict");
-    expect(policy).not.toContain("compatibility: best_effort");
+    expect(policy).toContain("compatibility: hard_requirement");
+    expect(policy).not.toMatch(/compatibility: (?:best_effort|strict)/);
     expect(policy).toContain("fail closed when Landlock cannot be applied");
     expect(policy).toContain("silently degrading");
     expect(policy).toContain("observes Python module traffic from dcode as the Python");

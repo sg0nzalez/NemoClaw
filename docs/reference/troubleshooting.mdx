@@ -1391,10 +1391,13 @@ A repeating line like the following confirms the conflict:
 
 To fix, run `$$nemoclaw <other-sandbox> destroy` on whichever sandbox should stop polling, or rerun onboarding on it with the channel disabled. Current NemoClaw warns at `$$nemoclaw onboard` time when another sandbox already has the same channel enabled, but sandboxes created before that check was added may still be in a conflict loop.
 
-### Landlock filesystem restrictions silently degraded
+### Landlock is unavailable
 
-After sandbox creation, NemoClaw checks whether the host kernel supports Landlock (Linux 5.13+).
-If the kernel is too old or you are running on macOS (where the Docker VM kernel may lack Landlock), a warning prints:
+OpenShell applies Landlock inside the sandbox runtime, whose kernel and syscall restrictions can differ from the CLI host on Docker Desktop or a remote gateway.
+Landlock requires Linux 5.13 or later, an enabled Landlock LSM, and permission to use the Landlock syscalls.
+
+OpenClaw and Hermes use `best_effort` compatibility.
+After creating one of these sandboxes, NemoClaw compares the Linux kernel version or Docker Desktop VM kernel version with 5.13 and prints a warning when it is too old:
 
 ```text
 ⚠ Landlock: Docker VM kernel <version> does not support Landlock (requires ≥5.13).
@@ -1402,8 +1405,22 @@ If the kernel is too old or you are running on macOS (where the Docker VM kernel
 ```
 
 This warning is informational and does not block sandbox creation.
-The sandbox runs without kernel-level filesystem restrictions, relying on container mount configuration instead.
-For full filesystem enforcement, run on a Linux kernel 5.13 or later (Ubuntu 22.04 LTS and later include Landlock support).
+The version check is preliminary because OpenShell's startup probe determines whether the sandbox runtime can use Landlock.
+Under `best_effort`, an unavailable Landlock runtime removes the kernel-level filesystem restrictions, while an inaccessible configured path is skipped and the remaining rules are applied.
+Container mounts and DAC permissions continue to apply.
+
+Deep Agents Code uses `hard_requirement` compatibility.
+If OpenShell detects that Landlock is unavailable, cannot open a configured policy path, or cannot enforce the prepared ruleset, sandbox startup fails and `$$nemoclaw onboard` returns a nonzero exit instead of reporting the terminal runtime as ready.
+Do not replace `hard_requirement` with `best_effort` to bypass this failure.
+
+Review the onboarding error first because a policy-path failure names the inaccessible path.
+For a running OpenClaw or Hermes sandbox, inspect the authoritative OpenShell startup events:
+
+```bash
+openshell logs <sandbox-name> -n 100 --source sandbox
+```
+
+Use a Linux kernel 5.13 or later with Landlock enabled, ensure the sandbox runtime permits Landlock syscalls, and correct any missing or inaccessible path reported by OpenShell.
 
 ### Sandbox lost after gateway restart
 

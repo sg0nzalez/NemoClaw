@@ -10,10 +10,10 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, it, expect } from "vitest";
 import Ajv, { type ValidateFunction } from "ajv/dist/2020.js";
+import { describe, expect, it } from "vitest";
 import YAML from "yaml";
 
 import { discoverTargets } from "../scripts/validate-configs";
@@ -103,6 +103,7 @@ describe("config validation target discovery", () => {
       expect.arrayContaining([
         "nemoclaw-blueprint/policies/openclaw-sandbox.yaml",
         "nemoclaw-blueprint/policies/openclaw-sandbox-permissive.yaml",
+        "agents/langchain-deepagents-code/policy-additions.yaml",
         "agents/hermes/policy-additions.yaml",
         "agents/hermes/policy-permissive.yaml",
         "agents/openclaw/policy-permissive.yaml",
@@ -278,6 +279,7 @@ describe("sandbox-policy.schema.json", () => {
   });
 
   for (const file of [
+    "agents/langchain-deepagents-code/policy-additions.yaml",
     "agents/openclaw/policy-permissive.yaml",
     "agents/hermes/policy-additions.yaml",
     "agents/hermes/policy-permissive.yaml",
@@ -297,6 +299,16 @@ describe("sandbox-policy.schema.json", () => {
 
   it("rejects policy with unknown top-level property", () => {
     const bad = { ...cloneObject(data), extra: true };
+    expect(validate(bad)).toBe(false);
+  });
+
+  it("accepts fail-closed Landlock compatibility for DCode (#5795)", () => {
+    const valid = { ...cloneObject(data), landlock: { compatibility: "hard_requirement" } };
+    expectValid(validate, valid, "hard-required Landlock policy");
+  });
+
+  it("rejects the unsupported strict Landlock compatibility value (#5795)", () => {
+    const bad = { ...cloneObject(data), landlock: { compatibility: "strict" } };
     expect(validate(bad)).toBe(false);
   });
 

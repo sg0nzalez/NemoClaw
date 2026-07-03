@@ -330,10 +330,10 @@ Landlock is a Linux Security Module that enforces filesystem access rules at the
 
 | Aspect | Detail |
 |---|---|
-| Default | `compatibility: best_effort`. The entrypoint applies Landlock rules when the kernel supports them and silently skips them on older kernels. |
+| Default | OpenClaw and Hermes use `compatibility: best_effort`, while Deep Agents Code uses `compatibility: hard_requirement` so OpenShell aborts sandbox startup when Landlock cannot be fully applied. |
 | What you can change | This is a NemoClaw default, not a user-facing knob. |
-| Risk if relaxed | On kernels without Landlock support (pre-5.13), filesystem restrictions rely solely on container mount configuration, which is less granular. |
-| Recommendation | Run on a kernel that supports Landlock (5.13+). Ubuntu 22.04 LTS and later include Landlock support. |
+| Risk if relaxed | A `best_effort` sandbox that cannot use Landlock relies on container mounts and DAC permissions, which are less granular than the configured filesystem policy. |
+| Recommendation | Run on Ubuntu 22.04 LTS or another system with Landlock enabled on a kernel that supports it, and treat a Deep Agents Code startup failure as an unsupported runtime or policy-path error instead of changing its policy to `best_effort`. |
 
 ## Process Controls
 

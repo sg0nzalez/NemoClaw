@@ -17,16 +17,23 @@ function warnIfUnsupported(kernel: string, label: string, warn: (message: string
 }
 
 export function warnIfLandlockUnsupported({
+  compatibility,
   platform = process.platform,
   dockerInfoFormat,
   runCapture,
   warn = console.warn,
 }: {
+  compatibility: "best_effort" | "hard_requirement";
   platform?: NodeJS.Platform;
   dockerInfoFormat: (format: string, options?: { ignoreError?: boolean }) => string;
   runCapture: (args: string[], options?: { ignoreError?: boolean }) => string;
   warn?: (message: string) => void;
 }): void {
+  // A successful hard_requirement startup is already authoritative proof that
+  // OpenShell applied Landlock in the sandbox runtime. A host-side version
+  // heuristic can inspect a different kernel and must not claim degradation.
+  if (compatibility === "hard_requirement") return;
+
   try {
     if (platform === "darwin") {
       const vmKernel = dockerInfoFormat("{{.KernelVersion}}", { ignoreError: true }).trim();
