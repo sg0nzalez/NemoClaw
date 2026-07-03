@@ -105,7 +105,7 @@ dockerfilePatchFlow.prepareSandboxDockerfilePatch = async () => ({
 
 sandboxCreateStream.streamSandboxCreate = async (command) => {
   commands.push(command);
-  const match = /'([^']*policy-additions\.yaml)'/.exec(command);
+  const match = /(?:^|\s)['"]?([^'"\s]*policy-additions\.yaml)['"]?(?:\s|$)/.exec(command);
   const policyPath = match && match[1];
   if (policyPath) createPolicy = fs.readFileSync(policyPath, "utf8");
   return {
