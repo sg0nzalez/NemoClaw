@@ -87,6 +87,53 @@ describe("agent base image provisioning", () => {
     });
   });
 
+  it.each([
+    { inspectStatus: 1, built: true },
+    { inspectStatus: 0, built: false },
+  ])("seeds reusable metadata for a non-Linux local fallback when built=$built (#4680)", ({
+    inspectStatus,
+    built,
+  }) => {
+    vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
+    withMockedDocker(
+      ({
+        ensureAgentBaseImage,
+        dockerBuildMock,
+        dockerImageInspectFormatMock,
+        dockerImageInspectMock,
+        resolveSandboxBaseImageMock,
+      }) => {
+        const imageTag = "ghcr.io/nvidia/nemoclaw/openclaw-sandbox-base:latest";
+        resolveSandboxBaseImageMock.mockReturnValue(null);
+        dockerImageInspectMock.mockReturnValue({ status: inspectStatus });
+
+        const result = ensureAgentBaseImage(
+          makeAgent({ name: "openclaw", displayName: "OpenClaw" }),
+        );
+
+        expect(result).toMatchObject({
+          imageTag,
+          built,
+          resolutionMetadata: {
+            imageName: "ghcr.io/nvidia/nemoclaw/openclaw-sandbox-base",
+            ref: imageTag,
+            digest: null,
+            source: "local",
+            imageId: `sha256:${"a".repeat(64)}`,
+            os: "linux",
+            architecture: "amd64",
+            glibcVersion: null,
+            requireOpenshellSandboxAbi: false,
+          },
+        });
+        expect(dockerImageInspectFormatMock).toHaveBeenCalledWith("{{json .}}", imageTag, {
+          ignoreError: true,
+        });
+        expect(dockerBuildMock).toHaveBeenCalledTimes(built ? 1 : 0);
+      },
+    );
+  });
+
   it("rebuilds an agent base image when rebuild flow forces local Dockerfile.base refresh", () => {
     withMockedDocker(
       ({

@@ -17,6 +17,8 @@ import {
 import { ROOT } from "../runner";
 import {
   buildLocalBaseTag,
+  createSandboxBaseImageResolutionKey,
+  createSandboxBaseImageResolutionMetadata,
   resolveSandboxBaseImage,
   SANDBOX_BASE_TAG,
   type SandboxBaseImageResolutionMetadata,
@@ -221,6 +223,17 @@ export function ensureAgentBaseImage(
       `No compatible ${agent.displayName} sandbox base image found for ${baseImageName}`,
     );
   }
+  const createFallbackResolutionMetadata = () =>
+    createSandboxBaseImageResolutionMetadata(
+      resolutionOptions,
+      createSandboxBaseImageResolutionKey(resolutionOptions),
+      {
+        ref: baseImageTag,
+        digest: null,
+        source: "local",
+        glibcVersion: null,
+      },
+    );
   const inspectResult = dockerImageInspect(baseImageTag, {
     ignoreError: true,
     suppressOutput: true,
@@ -238,11 +251,21 @@ export function ensureAgentBaseImage(
       throw new Error(`Failed to build ${agent.displayName} base image${detail}`);
     }
     console.log(`  \u2713 Base image built: ${baseImageTag}`);
-    return { imageTag: baseImageTag, built: true };
+    const resolutionMetadata = createFallbackResolutionMetadata();
+    return {
+      imageTag: baseImageTag,
+      built: true,
+      ...(resolutionMetadata ? { resolutionMetadata } : {}),
+    };
   }
 
   console.log(`  Base image exists: ${baseImageTag}`);
-  return { imageTag: baseImageTag, built: false };
+  const resolutionMetadata = createFallbackResolutionMetadata();
+  return {
+    imageTag: baseImageTag,
+    built: false,
+    ...(resolutionMetadata ? { resolutionMetadata } : {}),
+  };
 }
 
 /** Stage build context for an agent-specific sandbox image. */

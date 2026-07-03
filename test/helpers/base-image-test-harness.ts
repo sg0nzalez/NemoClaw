@@ -10,6 +10,7 @@ import type { AgentDefinition } from "../../src/lib/agent/defs";
 type AgentOnboardModule = typeof import("../../src/lib/agent/onboard");
 type DockerRunModule = typeof import("../../src/lib/adapters/docker/run");
 type DockerImageModule = typeof import("../../src/lib/adapters/docker/image");
+type DockerInfoModule = typeof import("../../src/lib/adapters/docker/info");
 type DockerInspectModule = typeof import("../../src/lib/adapters/docker/inspect");
 type SandboxBaseImageModule = typeof import("../../src/lib/sandbox-base-image");
 
@@ -80,6 +81,7 @@ export function withMockedDocker<T>(
 ): T {
   const dockerRunModule = requireSource("../adapters/docker/run.js") as DockerRunModule;
   const dockerImageModule = requireSource("../adapters/docker/image.js") as DockerImageModule;
+  const dockerInfoModule = requireSource("../adapters/docker/info.js") as DockerInfoModule;
   const dockerInspectModule = requireSource("../adapters/docker/inspect.js") as DockerInspectModule;
   const sandboxBaseImageModule = requireSource(
     "../sandbox-base-image.js",
@@ -89,6 +91,7 @@ export function withMockedDocker<T>(
   const originalDockerBuild = dockerImageModule.dockerBuild;
   const originalDockerRmi = dockerImageModule.dockerRmi;
   const originalDockerTag = dockerImageModule.dockerTag;
+  const originalDockerInfoFormat = dockerInfoModule.dockerInfoFormat;
   const originalDockerImageInspect = dockerInspectModule.dockerImageInspect;
   const originalDockerImageInspectFormat = dockerInspectModule.dockerImageInspectFormat;
   const originalResolveSandboxBaseImage = sandboxBaseImageModule.resolveSandboxBaseImage;
@@ -100,7 +103,18 @@ export function withMockedDocker<T>(
   const dockerRmiMock = vi.fn().mockReturnValue({ status: 0 });
   const dockerTagMock = vi.fn().mockReturnValue({ status: 0 });
   const dockerImageInspectMock = vi.fn();
-  const dockerImageInspectFormatMock = vi.fn().mockReturnValue(`sha256:${"a".repeat(64)}`);
+  const imageId = `sha256:${"a".repeat(64)}`;
+  const dockerImageInspectFormatMock = vi.fn().mockImplementation((format: string) =>
+    format === "{{json .}}"
+      ? JSON.stringify({
+          Id: imageId,
+          RepoDigests: [],
+          Os: "linux",
+          Architecture: "amd64",
+        })
+      : imageId,
+  );
+  const dockerInfoFormatMock = vi.fn().mockReturnValue("linux/amd64\n");
   const resolveSandboxBaseImageMock = vi.fn().mockImplementation((options) => {
     const override = options.env?.[options.envVar];
     return {
@@ -114,6 +128,7 @@ export function withMockedDocker<T>(
   dockerImageModule.dockerBuild = dockerBuildMock as DockerImageModule["dockerBuild"];
   dockerImageModule.dockerRmi = dockerRmiMock as DockerImageModule["dockerRmi"];
   dockerImageModule.dockerTag = dockerTagMock as DockerImageModule["dockerTag"];
+  dockerInfoModule.dockerInfoFormat = dockerInfoFormatMock as DockerInfoModule["dockerInfoFormat"];
   dockerInspectModule.dockerImageInspect =
     dockerImageInspectMock as DockerInspectModule["dockerImageInspect"];
   dockerInspectModule.dockerImageInspectFormat =
@@ -140,6 +155,7 @@ export function withMockedDocker<T>(
     dockerImageModule.dockerBuild = originalDockerBuild;
     dockerImageModule.dockerRmi = originalDockerRmi;
     dockerImageModule.dockerTag = originalDockerTag;
+    dockerInfoModule.dockerInfoFormat = originalDockerInfoFormat;
     dockerInspectModule.dockerImageInspect = originalDockerImageInspect;
     dockerInspectModule.dockerImageInspectFormat = originalDockerImageInspectFormat;
     sandboxBaseImageModule.resolveSandboxBaseImage = originalResolveSandboxBaseImage;
