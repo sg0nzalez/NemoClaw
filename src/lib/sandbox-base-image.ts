@@ -94,6 +94,18 @@ function getRepoDigest(
   return { digest, ref: `${imageName}@${digest}` };
 }
 
+function imagePassesAdditionalValidation(
+  options: ResolveBaseImageOptions,
+  imageRef: string,
+): boolean {
+  if (!options.validateImage || options.validateImage(imageRef)) return true;
+  console.warn(
+    `  Warning: ${options.label || "sandbox base image"} ${imageRef} lacks ` +
+      `${options.validationDescription || "a required runtime capability"}.`,
+  );
+  return false;
+}
+
 function resolvePulledCandidate(
   imageName: string,
   imageRef: string,
@@ -131,6 +143,8 @@ function resolvePulledCandidate(
     }
   }
 
+  if (!imagePassesAdditionalValidation(options, imageRef)) return null;
+
   const repoDigest = getRepoDigest(imageName, imageRef);
   return {
     ref: repoDigest?.ref || imageRef,
@@ -149,7 +163,7 @@ function resolveLocalCandidate(
     const check = options.requireOpenshellSandboxAbi
       ? imageMeetsMinimumGlibc(imageRef, options.minGlibcVersion || OPENSHELL_SANDBOX_MIN_GLIBC)
       : { ok: true, version: null };
-    if (check.ok) {
+    if (check.ok && imagePassesAdditionalValidation(options, imageRef)) {
       addTraceEvent("nemoclaw.sandbox_base_image.local_fallback_reuse");
       return { ref: imageRef, digest: null, source: "local", glibcVersion: check.version };
     }
@@ -194,6 +208,8 @@ function resolveLocalCandidate(
     return null;
   }
 
+  if (!imagePassesAdditionalValidation(options, imageRef)) return null;
+
   return { ref: imageRef, digest: null, source: "local", glibcVersion: check.version };
 }
 
@@ -206,7 +222,7 @@ export function resolveSandboxBaseImage(
 
   if (!options.forceRefresh) {
     const reused = reuseSandboxBaseImageResolutionHint(options, resolutionKey);
-    if (reused) return reused;
+    if (reused && imagePassesAdditionalValidation(options, reused.ref)) return reused;
   } else {
     addTraceEvent("nemoclaw.sandbox_base_image.force_refresh");
   }
@@ -220,7 +236,7 @@ export function resolveSandboxBaseImage(
   if (override) {
     const resolved = resolvePulledCandidate(options.imageName, override, "override", options);
     if (resolved) return finish(resolved);
-    if (!options.requireOpenshellSandboxAbi) return null;
+    if (!options.requireOpenshellSandboxAbi && !options.validateImage) return null;
   } else {
     for (const tag of getVersionedBaseImageTags(options.rootDir || ROOT, env)) {
       const imageRef = `${options.imageName}:${tag}`;
@@ -251,7 +267,7 @@ export function resolveSandboxBaseImage(
     if (resolved) return finish(resolved);
   }
 
-  if (options.requireOpenshellSandboxAbi) {
+  if (options.requireOpenshellSandboxAbi || options.validateImage) {
     const local = resolveLocalCandidate(options);
     return local ? finish(local) : null;
   }

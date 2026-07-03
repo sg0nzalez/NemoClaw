@@ -40,6 +40,7 @@ export type PrepareSandboxDockerfilePatchInput = {
   resolutionHint?: SandboxBaseImageResolutionMetadata | null;
   preResolvedBaseImageMetadata?: SandboxBaseImageResolutionMetadata | null;
   forceBaseImageRefresh?: boolean;
+  gatewayPort?: number;
   log?: (message: string) => void;
   warn?: (message: string) => void;
   deps?: SandboxDockerfilePatchDeps;
@@ -102,6 +103,7 @@ export async function prepareSandboxDockerfilePatch({
   resolutionHint = null,
   preResolvedBaseImageMetadata = null,
   forceBaseImageRefresh = false,
+  gatewayPort,
   log = console.log,
   warn = console.warn,
   deps = {},
@@ -144,6 +146,7 @@ export async function prepareSandboxDockerfilePatch({
     sandboxGpuConfig,
     {
       dockerDriverGateway: getDockerDriverGateway(),
+      gatewayPort,
       log,
     },
   );

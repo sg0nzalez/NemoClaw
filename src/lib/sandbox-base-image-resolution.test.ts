@@ -99,6 +99,42 @@ describe("sandbox base-image warm resolution", () => {
     expect(dockerMocks.capture).not.toHaveBeenCalled();
   });
 
+  it("revalidates an otherwise reusable hint when the caller requires a runtime capability (#4680)", () => {
+    const options = resolutionOptions();
+    const metadata: SandboxBaseImageResolutionMetadata = {
+      schema: 1,
+      key: createSandboxBaseImageResolutionKey(options),
+      imageName: IMAGE_NAME,
+      ref: REF,
+      digest: DIGEST,
+      source: "version-tag",
+      imageId: IMAGE_ID,
+      os: "linux",
+      architecture: "amd64",
+      glibcVersion: null,
+      requireOpenshellSandboxAbi: false,
+      minGlibcVersion: OPENSHELL_SANDBOX_MIN_GLIBC,
+    };
+    const validateImage = vi.fn().mockReturnValue(false);
+    dockerMocks.imageInspect.mockReturnValue({ status: 1 });
+    dockerMocks.pull.mockReturnValue({ status: 1 });
+
+    const resolved = resolveSandboxBaseImage({
+      ...options,
+      resolutionHint: metadata,
+      validateImage,
+      validationDescription: "the required runtime capability",
+      env: {
+        ...options.env,
+        NEMOCLAW_SANDBOX_BASE_LOCAL_BUILD: "0",
+      },
+    });
+
+    expect(resolved).toBeNull();
+    expect(validateImage).toHaveBeenCalledWith(REF);
+    expect(dockerMocks.imageInspect).toHaveBeenCalled();
+  });
+
   it("lets force refresh bypass a valid rebuild hint (#4680)", () => {
     const options = resolutionOptions();
     const metadata: SandboxBaseImageResolutionMetadata = {

@@ -45,6 +45,8 @@ export type ResolveBaseImageOptions = {
   env?: NodeJS.ProcessEnv;
   resolutionHint?: SandboxBaseImageResolutionMetadata | null;
   forceRefresh?: boolean;
+  validateImage?: (imageRef: string) => boolean;
+  validationDescription?: string;
 };
 
 export type SandboxBaseImageResolution = {
