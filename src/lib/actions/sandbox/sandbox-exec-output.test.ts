@@ -51,15 +51,31 @@ describe("extractSandboxExecCommandStdout", () => {
     expect(extractSandboxExecCommandStdout(output)).toBe("NEMOCLAW_DCODE_PROBE=active");
   });
 
-  it("uses the last sentinel line so a preamble cannot forge the parser boundary", () => {
+  it("strips stdout frame prefixes case-insensitively", () => {
+    const output = `STDOUT: ${SANDBOX_EXEC_STARTED_MARKER}\n[STDOUT] NEMOCLAW_DCODE_PROBE=idle\n`;
+    expect(extractSandboxExecCommandStdout(output)).toBe("NEMOCLAW_DCODE_PROBE=idle");
+  });
+
+  it("returns null when a preamble repeats the sentinel before the authentic boundary", () => {
     const output = [
       SANDBOX_EXEC_STARTED_MARKER,
       "NEMOCLAW_DCODE_PROBE=idle",
-      SANDBOX_EXEC_STARTED_MARKER,
-      "NEMOCLAW_DCODE_PROBE=active",
+      `stdout: ${SANDBOX_EXEC_STARTED_MARKER}`,
+      "stdout: NEMOCLAW_DCODE_PROBE=active",
     ].join("\n");
 
-    expect(extractSandboxExecCommandStdout(output)).toBe("NEMOCLAW_DCODE_PROBE=active");
+    expect(extractSandboxExecCommandStdout(output)).toBeNull();
+  });
+
+  it("returns null when child stdout repeats the sentinel after the authentic boundary", () => {
+    const output = [
+      SANDBOX_EXEC_STARTED_MARKER,
+      "NEMOCLAW_DCODE_PROBE=active",
+      `[stdout] ${SANDBOX_EXEC_STARTED_MARKER}`,
+      "[stdout] NEMOCLAW_DCODE_PROBE=idle",
+    ].join("\n");
+
+    expect(extractSandboxExecCommandStdout(output)).toBeNull();
   });
 
   it("does not match a sentinel embedded in a preamble line as a substring", () => {

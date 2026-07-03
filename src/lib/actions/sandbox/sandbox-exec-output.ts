@@ -32,25 +32,28 @@ function parseSandboxExecStdoutFrame(line: string): { text: string; framed: bool
  * stdout frame prefixes at this transport boundary so recovery, status, and
  * Hermes boundary callers keep consuming plain command stdout.
  *
- * Security boundary: `markedCommand` always prints the sentinel as the first
- * thing the marked command does, so the authentic sentinel line is always the
- * last one in the captured output. Take the LAST exact sentinel line rather
- * than the first, so sandbox-controlled output that precedes the marked
- * command (e.g. login-shell profile output) cannot plant a decoy sentinel and
- * have its own forged follow-up lines misread as the real command's stdout.
- * Remove this compatibility shim once OpenShell exposes a stable
- * machine-readable exec output mode that preserves child stdout/stderr
- * without human framing.
+ * Source-of-truth boundary (#6180): OpenShell owns the sandbox-exec transport,
+ * whose human-readable framing can make otherwise valid child stdout
+ * ambiguous. NemoClaw cannot change that transport here, so this shared parser
+ * normalizes its output for recovery, status, Hermes, and snapshot callers.
+ * The parser, process-recovery, and snapshot tests lock down that adaptation.
+ *
+ * Security boundary: accept exactly one exact sentinel line after optional
+ * frame-prefix stripping. A sentinel emitted before the command by a shell
+ * preamble or after it by child stdout makes the boundary ambiguous, so fail
+ * closed instead of choosing either marker. Remove this compatibility shim
+ * once supported OpenShell versions expose stable machine-readable exec output
+ * that preserves child stdout/stderr without human framing.
  */
 export function extractSandboxExecCommandStdout(output: string): string | null {
   const stdout = output.trim();
   if (!stdout) return null;
   const lines = stdout.split(/\r?\n/).map(parseSandboxExecStdoutFrame);
   let exactMarkerIndex = -1;
-  for (let i = lines.length - 1; i >= 0; i--) {
+  for (let i = 0; i < lines.length; i++) {
     if (lines[i].text.trim() === SANDBOX_EXEC_STARTED_MARKER) {
+      if (exactMarkerIndex >= 0) return null;
       exactMarkerIndex = i;
-      break;
     }
   }
   if (exactMarkerIndex >= 0) {
