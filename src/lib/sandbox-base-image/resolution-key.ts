@@ -8,19 +8,24 @@ import path from "node:path";
 import { dockerInfoFormat } from "../adapters/docker";
 import { ROOT } from "../runner";
 import {
-  getSourceShortShaTags,
-  getVersionedBaseImageTags,
-  normalizeBaseImageInputPaths,
-} from "./source-identity";
-import {
   OPENSHELL_SANDBOX_MIN_GLIBC,
   type ResolveBaseImageOptions,
   SANDBOX_BASE_RESOLUTION_SCHEMA,
 } from "./types";
 
-function hashBaseImageInputs(rootDir: string, dockerfilePath: string): string {
+export type SandboxBaseImageResolutionKeySources = {
+  getSourceShortShaTags: (rootDir: string, env: NodeJS.ProcessEnv) => string[];
+  getVersionedBaseImageTags: (rootDir: string, env: NodeJS.ProcessEnv) => string[];
+  normalizeBaseImageInputPaths: (rootDir: string, paths: string[]) => string[];
+};
+
+function hashBaseImageInputs(
+  rootDir: string,
+  dockerfilePath: string,
+  sources: SandboxBaseImageResolutionKeySources,
+): string {
   const hash = crypto.createHash("sha256");
-  const paths = normalizeBaseImageInputPaths(rootDir, [dockerfilePath]).sort();
+  const paths = sources.normalizeBaseImageInputPaths(rootDir, [dockerfilePath]).sort();
   for (const relativePath of paths) {
     hash.update(relativePath);
     hash.update("\0");
@@ -42,7 +47,10 @@ function dockerPlatform(): string {
   return reported && reported !== "/" ? reported : `${process.platform}/${process.arch}`;
 }
 
-export function createSandboxBaseImageResolutionKey(options: ResolveBaseImageOptions): string {
+export function createSandboxBaseImageResolutionKey(
+  options: ResolveBaseImageOptions,
+  sources: SandboxBaseImageResolutionKeySources,
+): string {
   const env = options.env || process.env;
   const rootDir = options.rootDir || ROOT;
   const override = options.envVar ? String(env[options.envVar] || "").trim() : "";
@@ -50,10 +58,10 @@ export function createSandboxBaseImageResolutionKey(options: ResolveBaseImageOpt
     schema: SANDBOX_BASE_RESOLUTION_SCHEMA,
     imageName: options.imageName,
     override,
-    versionTags: getVersionedBaseImageTags(rootDir, env),
-    sourceTags: getSourceShortShaTags(rootDir, env),
+    versionTags: sources.getVersionedBaseImageTags(rootDir, env),
+    sourceTags: sources.getSourceShortShaTags(rootDir, env),
     localTag: options.localTag,
-    inputFingerprint: hashBaseImageInputs(rootDir, options.dockerfilePath),
+    inputFingerprint: hashBaseImageInputs(rootDir, options.dockerfilePath, sources),
     platform: dockerPlatform(),
     requireOpenshellSandboxAbi: options.requireOpenshellSandboxAbi === true,
     minGlibcVersion: options.minGlibcVersion || OPENSHELL_SANDBOX_MIN_GLIBC,

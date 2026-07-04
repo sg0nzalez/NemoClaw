@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
-import { createSandboxBaseImageResolutionKey } from "./resolution-key";
+import { createSandboxBaseImageResolutionKey } from "../sandbox-base-image";
 
 const roots: string[] = [];
 
