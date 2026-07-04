@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { dockerImageInspectFormat } from "../adapters/docker";
+import { versionGte } from "../adapters/openshell/client";
 import { addTraceEvent } from "../trace";
-import { versionGte } from "./image-compatibility";
 import {
   type BaseImageResolutionValidation,
   type LocalImageMetadata,

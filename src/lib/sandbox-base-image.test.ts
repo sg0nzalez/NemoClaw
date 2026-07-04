@@ -12,6 +12,8 @@ import {
   formatBuildFailureDiagnostics,
   getSourceShortShaTags,
   getVersionedBaseImageTags,
+  parseGlibcVersion,
+  versionGte,
 } from "./sandbox-base-image";
 
 const tmpRoots: string[] = [];
@@ -106,6 +108,21 @@ afterAll(() => {
 });
 
 describe("sandbox base image helpers", () => {
+  it.each([
+    ["ldd (Debian GLIBC 2.41-12+deb13u2) 2.41", "2.41"],
+    ["ldd (Ubuntu GLIBC 2.39-0ubuntu8.6) 2.39", "2.39"],
+    ["\n  ldd (GNU libc) 2.17\nCopyright", "2.17"],
+    ["ldd version unavailable", null],
+  ])("parses glibc version from ldd output %j (#4680)", (output, expected) => {
+    expect(parseGlibcVersion(output)).toBe(expected);
+  });
+
+  it("compares glibc versions numerically (#4680)", () => {
+    expect(versionGte("2.41", "2.39")).toBe(true);
+    expect(versionGte("2.39", "2.39")).toBe(true);
+    expect(versionGte("2.36", "2.39")).toBe(false);
+  });
+
   it("derives source-sha tags compatible with base-image workflow metadata", () => {
     const tags = getSourceShortShaTags("/definitely/not/a/git/repo", {
       GITHUB_SHA: "1E94F2E207C5456EBC35E2BD5BB380D4430292C6",
