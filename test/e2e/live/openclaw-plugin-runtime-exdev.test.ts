@@ -27,6 +27,7 @@ const CUSTOM_PLUGIN_VERSION_SOURCE = path.join(
   "Dockerfile.e2e-weather-plugin.version.ts",
 );
 const SANDBOX_BASE_IMAGE_REF = "ghcr.io/nvidia/nemoclaw/sandbox-base:v0.0.71";
+const TOOL_DISCLOSURE_ENV_REFERENCE = "${NEMOCLAW_TOOL_DISCLOSURE}";
 const SANDBOX_NAME = process.env.NEMOCLAW_SANDBOX_NAME ?? "e2e-openclaw-plugin-exdev";
 const ONBOARD_TIMEOUT_MS = 25 * 60_000;
 const REBUILD_TIMEOUT_MS = 20 * 60_000;
@@ -193,6 +194,8 @@ RUN npm run build \
 # Extend the completed managed runtime so its entrypoint, health check, config
 # generation, and permissions remain the source of truth.
 FROM nemoclaw-runtime AS weather-runtime
+ARG NEMOCLAW_TOOL_DISCLOSURE=progressive
+ENV NEMOCLAW_TOOL_DISCLOSURE=${TOOL_DISCLOSURE_ENV_REFERENCE}
 COPY --from=weather-plugin-builder --chown=sandbox:sandbox \
     /opt/weather/package.json \
     /opt/weather/package-lock.json \

@@ -118,6 +118,8 @@ RUN npm run build \
 
 # Extend the completed managed runtime.
 FROM nemoclaw-runtime AS weather-runtime
+ARG NEMOCLAW_TOOL_DISCLOSURE=progressive
+ENV NEMOCLAW_TOOL_DISCLOSURE=${NEMOCLAW_TOOL_DISCLOSURE}
 COPY --from=weather-plugin-builder --chown=sandbox:sandbox \
     /opt/my-plugin/package.json \
     /opt/my-plugin/package-lock.json \
@@ -147,6 +149,7 @@ RUN chown sandbox:sandbox /sandbox/.openclaw/openclaw.json \
 ```
 
 The final stage inherits the stock runtime entrypoint, command, gateway health check, generated configuration, and file permissions.
+It redeclares and promotes the tool-disclosure build argument because Docker build arguments are scoped to a stage and the appended plugin stage becomes the final image stage.
 The local install copies the staged plugin into OpenClaw's extensions tree, records the install, links it to the image's OpenClaw runtime, and leaves existing managed plugin load paths intact before the explicit enable and inspect steps.
 The pre-install `test` commands fail the image build if npm retained a private `node_modules/openclaw` directory that would prevent OpenClaw from creating its runtime link.
 The post-install checks then prove that OpenClaw created the link and that it resolves to the image's global runtime.
