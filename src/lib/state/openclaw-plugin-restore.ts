@@ -4,6 +4,7 @@
 import path from "node:path";
 
 import { isRecord } from "../core/json-types.js";
+import { shellQuote } from "../core/shell-quote.js";
 
 const MAX_OPENCLAW_IMAGE_MANAGED_PLUGIN_INSTALLS = 128;
 const OPENCLAW_EXTENSION_GLOB_CHARS = ["/", "\\", "*", "?", "[", "]"] as const;
@@ -11,6 +12,34 @@ const OPENCLAW_EXTENSION_GLOB_CHARS = ["/", "\\", "*", "?", "[", "]"] as const;
 export type OpenClawManagedExtensionDiscoveryResult =
   | { ok: true; extensionDirs: string[] }
   | { ok: false; error: string };
+
+const OPENCLAW_PLUGIN_INDEX_SQLITE_PY = [
+  "import json, sqlite3, sys, urllib.parse",
+  'uri = "file:" + urllib.parse.quote(sys.argv[1], safe="/") + "?mode=ro"',
+  "conn = sqlite3.connect(uri, uri=True, timeout=30)",
+  "try:",
+  '    conn.execute("PRAGMA query_only=ON")',
+  '    conn.execute("PRAGMA busy_timeout=30000")',
+  "    row = conn.execute(\"SELECT install_records_json FROM installed_plugin_index WHERE index_key = 'installed-plugin-index'\").fetchone()",
+  "    if not row or not row[0]: raise SystemExit(12)",
+  "    records = json.loads(row[0])",
+  "    print(json.dumps({'version': 1, 'installRecords': records}, separators=(',', ':')))",
+  "finally:",
+  "    conn.close()",
+].join("\n");
+
+export function buildFreshOpenClawPluginIndexSqliteReadCommand(dir: string): string {
+  const sqlitePath = `${dir.replace(/\/+$/, "")}/state/openclaw.sqlite`;
+  const quotedSqlitePath = shellQuote(sqlitePath);
+  return [
+    `db=${quotedSqlitePath}`,
+    '[ -e "$db" ] || [ -L "$db" ] || exit 2',
+    '[ -f "$db" ] && [ ! -L "$db" ] || { echo "unsafe OpenClaw state database: $db" >&2; exit 10; }',
+    'hardlink_count="$(find "$db" -maxdepth 0 -type f -links +1 -print 2>/dev/null | wc -l | tr -d " ")"',
+    '[ "${hardlink_count:-0}" = "0" ] || { echo "hard-linked OpenClaw state database rejected: $db" >&2; exit 11; }',
+    `python3 -c ${shellQuote(OPENCLAW_PLUGIN_INDEX_SQLITE_PY)} "$db"`,
+  ].join("; ");
+}
 
 function isSafeOpenClawPluginInstallId(id: string): boolean {
   if (id.length === 0 || id.length > 256 || /[\u0000-\u001f\u007f]/.test(id)) return false;

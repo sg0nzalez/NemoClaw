@@ -100,7 +100,10 @@ beforeEach(() => {
 });
 
 describe("OpenClaw managed extension snapshot restore", () => {
-  it("preserves fresh built-in and custom image-managed OpenClaw extensions while restoring user extensions", () => {
+  it.each([
+    "sqlite",
+    "legacy",
+  ] as const)("preserves fresh built-in and custom image-managed OpenClaw extensions from the %s install index", (installIndexSource) => {
     const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-extension-restore-"));
     const oldPath = process.env.PATH;
     const oldOpenshell = process.env.NEMOCLAW_OPENSHELL_BIN;
@@ -155,6 +158,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 const cmd = process.argv[process.argv.length - 1] || "";
+const installIndexSource = ${JSON.stringify(installIndexSource)};
 fs.appendFileSync(${JSON.stringify(sshLog)}, JSON.stringify({ cmd }) + "\\n");
 function readStdin() {
   const chunks = [];
@@ -166,7 +170,14 @@ function readStdin() {
   }
   return Buffer.concat(chunks);
 }
-if (cmd.includes("plugins/installs.json") && cmd.includes("cat --")) { process.stdout.write(fs.readFileSync(${JSON.stringify(freshRegistryPath)})); process.exit(0); }
+if (cmd.includes("installed_plugin_index") && cmd.includes("state/openclaw.sqlite")) {
+  if (installIndexSource === "sqlite") process.stdout.write(fs.readFileSync(${JSON.stringify(freshRegistryPath)}));
+  process.exit(installIndexSource === "sqlite" ? 0 : 2);
+}
+if (cmd.includes("plugins/installs.json") && cmd.includes("cat --")) {
+  if (installIndexSource === "legacy") process.stdout.write(fs.readFileSync(${JSON.stringify(freshRegistryPath)}));
+  process.exit(installIndexSource === "legacy" ? 0 : 2);
+}
 if (cmd.includes("/sandbox/.openclaw/extensions") && cmd.includes("-exec rm -rf")) {
   const extensionsDir = ${JSON.stringify(extensionsDir)};
   const managedExtensions = new Set(${JSON.stringify(managedExtensions)});
@@ -221,6 +232,10 @@ process.exit(0);
         (cmd) => cmd.includes("/sandbox/.openclaw/extensions") && cmd.includes("-exec rm -rf"),
       );
       expect(cleanupCommands).toHaveLength(1);
+      expect(loggedCommands.some((cmd) => cmd.includes("installed_plugin_index"))).toBe(true);
+      expect(loggedCommands.some((cmd) => cmd.includes("plugins/installs.json"))).toBe(
+        installIndexSource === "legacy",
+      );
       const cleanupCommand = cleanupCommands[0];
       expect(cleanupCommand).not.toContain("rm -rf -- /sandbox/.openclaw/extensions");
       for (const extensionName of managedExtensions) {

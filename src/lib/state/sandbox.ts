@@ -46,6 +46,7 @@ import {
   shouldPreserveOpenClawManagedExtensions,
 } from "./openclaw-managed-extensions.js";
 import {
+  buildFreshOpenClawPluginIndexSqliteReadCommand,
   type OpenClawManagedExtensionDiscoveryResult,
   parseFreshOpenClawPluginExtensionDirs,
 } from "./openclaw-plugin-restore.js";
@@ -656,18 +657,43 @@ function existingBackupDirs(backupPath: string, dirNames: string[]): string[] {
   return existing;
 }
 
+function readFreshOpenClawPluginInstallIndex(
+  configFile: string,
+  sandboxName: string,
+  dir: string,
+): ReturnType<typeof spawnSync> {
+  // OpenClaw 2026.6.10 moved install records into its shared SQLite state.
+  // Fall back only when that database is absent so a corrupt/incomplete
+  // canonical index cannot be masked by stale legacy JSON.
+  const sqliteResult = spawnSync(
+    "ssh",
+    [...sshArgs(configFile, sandboxName), buildFreshOpenClawPluginIndexSqliteReadCommand(dir)],
+    {
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 30000,
+      maxBuffer: 4 * 1024 * 1024,
+    },
+  );
+  if (sqliteResult.status !== 2 || sqliteResult.error || sqliteResult.signal) return sqliteResult;
+
+  const legacySpec: StateFileSpec = { path: "plugins/installs.json", strategy: "copy" };
+  return spawnSync(
+    "ssh",
+    [...sshArgs(configFile, sandboxName), buildStateFileBackupCommand(dir, legacySpec)],
+    {
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 30000,
+      maxBuffer: 4 * 1024 * 1024,
+    },
+  );
+}
+
 function discoverFreshOpenClawPluginExtensionDirs(
   configFile: string,
   sandboxName: string,
   dir: string,
 ): OpenClawManagedExtensionDiscoveryResult {
-  const spec: StateFileSpec = { path: "plugins/installs.json", strategy: "copy" };
-  const command = buildStateFileBackupCommand(dir, spec);
-  const result = spawnSync("ssh", [...sshArgs(configFile, sandboxName), command], {
-    stdio: ["ignore", "pipe", "pipe"],
-    timeout: 30000,
-    maxBuffer: 4 * 1024 * 1024,
-  });
+  const result = readFreshOpenClawPluginInstallIndex(configFile, sandboxName, dir);
   if (result.status !== 0 || result.error || result.signal || !result.stdout) {
     return { ok: false, error: "could not read fresh OpenClaw plugin install registry" };
   }
