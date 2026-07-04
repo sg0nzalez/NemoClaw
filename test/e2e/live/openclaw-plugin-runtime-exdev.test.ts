@@ -8,7 +8,10 @@ import os from "node:os";
 import path from "node:path";
 
 import { resolveOpenshell } from "../../../src/lib/adapters/openshell/resolve.ts";
-import { hasRequiredOpenshellMessagingFeatures } from "../../../src/lib/onboard/openshell-feature-gate.ts";
+import {
+  hasRequiredOpenshellMessagingFeatures,
+  REQUIRED_OPENSHELL_MCP_FEATURES,
+} from "../../../src/lib/onboard/openshell-feature-gate.ts";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
 import { shellQuote } from "../fixtures/clients/command.ts";
 import type { HostCliClient } from "../fixtures/clients/host.ts";
@@ -81,6 +84,8 @@ const EXDEV_TMPFS_DRIVER_CONFIG = JSON.stringify({
     mounts: [EXDEV_TMPFS_MOUNT_CONFIG],
   },
 });
+const DELEGATED_CAPABILITY_COMMENT_PREFIX =
+  "# TEST-ONLY delegated-capability marker from validated canonical OpenShell: ";
 const STOCK_OPENCLAW_POLICY_PATHS = [
   path.join(REPO_ROOT, "agents", "openclaw", "policy-permissive.yaml"),
   path.join(REPO_ROOT, "nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml"),
@@ -186,7 +191,12 @@ function createOpenShellTmpfsWrapper(realOpenshellPath: string): OpenShellTmpfsW
 
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-exdev-openshell-wrapper-"));
   const executable = path.join(directory, "openshell");
+  const delegatedCapabilityComments = REQUIRED_OPENSHELL_MCP_FEATURES.map((marker) => {
+    assert.match(marker, /^[A-Za-z0-9_-]+$/, "delegated OpenShell capability marker must be safe");
+    return `${DELEGATED_CAPABILITY_COMMENT_PREFIX}${marker}`;
+  }).join("\n");
   const script = `#!/bin/sh
+${delegatedCapabilityComments}
 set -eu
 if [ "$#" -ge 2 ] && [ "$1" = sandbox ] && [ "$2" = create ]; then
   shift 2
@@ -295,6 +305,19 @@ test("OpenShell wrapper injects only the reviewed tmpfs config into sandbox crea
   const components = resolvePinnedOpenShellComponents(delegate);
   const wrapper = createOpenShellTmpfsWrapper(components.cli);
   try {
+    const wrapperSource = fs.readFileSync(wrapper.executable, "utf8");
+    expect(
+      wrapperSource
+        .split("\n")
+        .filter((line) => line.startsWith(DELEGATED_CAPABILITY_COMMENT_PREFIX)),
+    ).toEqual(
+      REQUIRED_OPENSHELL_MCP_FEATURES.map(
+        (marker) => `${DELEGATED_CAPABILITY_COMMENT_PREFIX}${marker}`,
+      ),
+    );
+    for (const marker of REQUIRED_OPENSHELL_MCP_FEATURES) {
+      expect(wrapperSource.split(marker)).toHaveLength(2);
+    }
     expect(components).toEqual({
       cli: fs.realpathSync(delegate),
       gateway: fs.realpathSync(gateway),
@@ -761,6 +784,14 @@ liveTest(
 
     const policySourceSnapshot = snapshotPolicySources();
     const pinnedOpenshell = await installAndResolvePinnedOpenShell(host);
+    expect(
+      hasRequiredOpenshellMessagingFeatures({
+        openshellBin: pinnedOpenshell.cli,
+        gatewayBin: pinnedOpenshell.gateway,
+        sandboxBin: pinnedOpenshell.sandbox,
+      }),
+      "canonical pinned OpenShell components must pass coherence preflight before delegation",
+    ).toBe(true);
     const openshellWrapper = createOpenShellTmpfsWrapper(pinnedOpenshell.cli);
     cleanup.add("remove EXDEV OpenShell PATH wrapper", openshellWrapper.remove);
     expect(
