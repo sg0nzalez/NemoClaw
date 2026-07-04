@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -36,13 +37,18 @@ const WEATHER_FIXTURE_PACKAGE = JSON.parse(
   openclaw?: { build?: { openclawVersion?: unknown } };
   devDependencies?: { openclaw?: unknown };
 };
-const WEATHER_OPENCLAW_VERSION = WEATHER_FIXTURE_PACKAGE.openclaw?.build?.openclawVersion;
-if (
-  typeof WEATHER_OPENCLAW_VERSION !== "string" ||
-  !/^\d+(?:\.\d+)+$/.test(WEATHER_OPENCLAW_VERSION)
-) {
-  throw new Error("weather fixture must declare a canonical OpenClaw build version");
-}
+const weatherOpenClawVersion = WEATHER_FIXTURE_PACKAGE.openclaw?.build?.openclawVersion;
+assert.equal(
+  typeof weatherOpenClawVersion,
+  "string",
+  "weather fixture must declare an OpenClaw build version",
+);
+const WEATHER_OPENCLAW_VERSION = String(weatherOpenClawVersion);
+assert.match(
+  WEATHER_OPENCLAW_VERSION,
+  /^\d+(?:\.\d+)+$/,
+  "weather fixture must declare a canonical OpenClaw build version",
+);
 // Keep the dependency layer reproducible while the current managed Dockerfile
 // upgrades its OpenClaw runtime to WEATHER_OPENCLAW_VERSION. The assertions in
 // createCustomPluginDockerfile and the in-sandbox probe make that boundary explicit.

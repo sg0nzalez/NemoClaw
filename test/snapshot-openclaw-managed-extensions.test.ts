@@ -1,11 +1,14 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+
+import { restoreEnv, restoreEnvBulk } from "./helpers/env-test-helpers";
 
 const ORIGINAL_HOME = process.env.HOME;
 const TMP_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-managed-extensions-"));
@@ -16,9 +19,11 @@ type SandboxStateModule = typeof import("../src/lib/state/sandbox.js");
 const loadedSandboxState = await import(
   pathToFileURL(path.join(REPO_ROOT, "src", "lib", "state", "sandbox.ts")).href
 );
-if (typeof loadedSandboxState.restoreSandboxState !== "function") {
-  throw new Error("Expected sandbox-state restore export to be available");
-}
+assert.equal(
+  typeof loadedSandboxState.restoreSandboxState,
+  "function",
+  "Expected sandbox-state restore export to be available",
+);
 const sandboxState = loadedSandboxState as SandboxStateModule;
 const BACKUPS_ROOT = path.join(TMP_HOME, ".nemoclaw", "rebuild-backups");
 
@@ -86,11 +91,7 @@ process.exit(0);
 }
 
 afterAll(() => {
-  if (ORIGINAL_HOME === undefined) {
-    delete process.env.HOME;
-  } else {
-    process.env.HOME = ORIGINAL_HOME;
-  }
+  restoreEnv("HOME", ORIGINAL_HOME);
   fs.rmSync(TMP_HOME, { recursive: true, force: true });
 });
 
@@ -256,12 +257,7 @@ process.exit(0);
         ),
       ).toHaveLength(1);
     } finally {
-      if (oldOpenshell === undefined) {
-        delete process.env.NEMOCLAW_OPENSHELL_BIN;
-      } else {
-        process.env.NEMOCLAW_OPENSHELL_BIN = oldOpenshell;
-      }
-      process.env.PATH = oldPath;
+      restoreEnvBulk({ NEMOCLAW_OPENSHELL_BIN: oldOpenshell, PATH: oldPath });
       fs.rmSync(fixture, { recursive: true, force: true });
     }
   });
