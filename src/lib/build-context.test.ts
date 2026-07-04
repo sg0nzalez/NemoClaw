@@ -79,6 +79,20 @@ describe("printSandboxCreateRecoveryHints", () => {
     expect(stderr()).toContain("reached the gateway");
   });
 
+  it("prints fail-closed guidance for a hard Landlock startup failure", () => {
+    printSandboxCreateRecoveryHints(
+      "Created sandbox: dcode\nLandlock path unavailable in hard_requirement mode: /app (read_only): No such file or directory",
+    );
+
+    const out = stderr();
+    expect(out).toContain("could not apply required Landlock filesystem isolation");
+    expect(out).toContain("Linux 5.19 or later (Landlock ABI v2)");
+    expect(out).toContain("enable the Landlock LSM");
+    expect(out).toContain("allow its syscalls");
+    expect(out).toContain("unavailable filesystem path");
+    expect(out).toContain("onboard --resume");
+  });
+
   // Manual / ARM64 E2E note (#3266):
   //
   // The misleading "failed to upload image tar into container" Docker 404 only
@@ -181,6 +195,40 @@ describe("printSandboxCreateRecoveryHints", () => {
     // The runtime env wrapper is represented by a placeholder, never dumped verbatim.
     expect(out).toContain("nemoclaw-start");
     expect(out).toContain("<YOUR_RUNTIME_ENV>");
+  });
+
+  it("shows the pushed image ref (not a Dockerfile path) when the BuildKit prebuild rewrote --from (#6002)", () => {
+    // After the BuildKit prebuild, createArgs carries `--from <local-image-ref>`
+    // — the Dockerfile path was rewritten away before create. On an upload-404
+    // the recovery command must still swap --from to the pushed registry ref,
+    // leaving no Dockerfile path and no stale prebuilt local ref as --from.
+    printSandboxCreateRecoveryHints(
+      [
+        "  Built image openshell/sandbox-from-nemoclaw:abcd1234",
+        "failed to upload image tar into container",
+      ].join("\n"),
+      {
+        platform: "linux",
+        arch: "x64",
+        createArgs: [
+          "--from",
+          "nemoclaw-sandbox-local:my-assistant-1234567890",
+          "--name",
+          "my-assistant",
+          "--policy",
+          "/tmp/nemoclaw-policy-xyz.yaml",
+        ],
+      },
+    );
+
+    const out = stderr();
+    // --from is the pushed registry ref derived from the build log's image tag,
+    expect(out).toContain("--from localhost:5000/openshell/sandbox-from-nemoclaw:abcd1234");
+    // never a Dockerfile path (the prebuild removed it) and never the stale
+    // prebuilt local ref left as the --from value.
+    expect(out).not.toContain("Dockerfile");
+    expect(out).not.toContain("--from nemoclaw-sandbox-local:my-assistant-1234567890");
+    expect(out).toContain("--name my-assistant");
   });
 
   it("falls back to placeholder push commands when no built image tag is in the output", () => {

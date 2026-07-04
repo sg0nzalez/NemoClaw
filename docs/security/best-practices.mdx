@@ -248,7 +248,7 @@ The container mounts system directories read-only to prevent the agent from modi
 
 | Aspect | Detail |
 |---|---|
-| Default | `/usr`, `/lib`, `/proc`, `/dev/urandom`, `/app`, `/etc`, `/var/log` are read-only. |
+| Default | System paths such as `/usr`, `/lib`, `/proc`, `/dev/urandom`, `/etc`, and `/var/log` are read-only. Agent policies can add image-specific paths such as `/app`; Deep Agents Code omits paths that its image does not provide because `hard_requirement` treats a missing path as fatal. |
 | What you can change | Add or remove paths in the `filesystem_policy.read_only` section of the policy file. |
 | Risk if relaxed | Making `/usr` or `/lib` writable lets the agent replace system binaries (such as `curl` or `node`) with trojanized versions. Making `/etc` writable lets the agent modify DNS resolution, TLS trust stores, or user accounts. |
 | Recommendation | Never make system paths writable. If the agent needs a writable location for generated files, use a subdirectory of `/sandbox`. |
@@ -347,7 +347,10 @@ Landlock is a Linux Security Module that enforces filesystem access rules at the
 | Default | OpenClaw and Hermes use `compatibility: best_effort`, while Deep Agents Code uses `compatibility: hard_requirement` so OpenShell aborts sandbox startup when Landlock cannot be fully applied. |
 | What you can change | This is a NemoClaw default, not a user-facing knob. |
 | Risk if relaxed | A `best_effort` sandbox that cannot use Landlock relies on container mounts and DAC permissions, which are less granular than the configured filesystem policy. |
-| Recommendation | Run on Ubuntu 22.04 LTS or another system with Landlock enabled on a kernel that supports it, and treat a Deep Agents Code startup failure as an unsupported runtime or policy-path error instead of changing its policy to `best_effort`. |
+| Recommendation | Run Deep Agents Code on Linux 5.19 or later with Landlock enabled and its syscalls permitted. OpenClaw and Hermes can apply the access rights available from Linux 5.13 onward in `best_effort` mode. Treat a Deep Agents Code startup failure as an unsupported runtime or policy-path error instead of changing its policy to `best_effort`. |
+
+Landlock policy is fixed when a sandbox is created.
+Rebuild existing Deep Agents Code sandboxes after upgrading NemoClaw to apply the hard-enforcement policy.
 
 ## Process Controls
 

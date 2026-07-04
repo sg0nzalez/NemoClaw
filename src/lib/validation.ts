@@ -17,6 +17,7 @@ export interface SandboxCreateFailure {
     | "image_transfer_timeout"
     | "image_transfer_reset"
     | "image_upload_container_missing"
+    | "landlock_enforcement_failed"
     | "sandbox_create_incomplete"
     | "tls_cert_mismatch"
     | "gpu_cdi_injection_failed"
@@ -134,6 +135,36 @@ export function classifySandboxCreateFailure(output = ""): SandboxCreateFailure 
     /nvidia\.com\/gpu[^\n]*(CDI device injection failed|unresolvable CDI devices?)/i.test(text)
   ) {
     return { kind: "gpu_cdi_injection_failed", uploadedToGateway };
+  }
+  // OpenShell 0.0.72 emits the explicit hard_requirement errors below when
+  // Landlock is unavailable or a path cannot be opened. It wraps raw ruleset
+  // preparation errors with "Failed to prepare sandbox:"; requiring that
+  // wrapper avoids collisions with build tools and the separate seccomp path.
+  // Best-effort warnings are excluded because they do not abort startup.
+  const explicitHardRequirementFailure =
+    /Landlock (?:path )?unavailable in hard_requirement mode:/i.test(text);
+  const bestEffortLandlockWarning =
+    /Landlock filesystem sandbox unavailable:|Landlock restrict_self failed \(best_effort\):/i.test(
+      text,
+    );
+  const wrappedHardRequirementPreparationFailure =
+    !bestEffortLandlockWarning &&
+    /Failed to prepare sandbox:[^\r\n]*(?:(?:fully|partially) incompatible access-rights|failed to (?:create a ruleset|add a rule|check file descriptor type)|access-rights not handled by the ruleset|incompatible directory-only access-rights)/i.test(
+      text,
+    );
+  const hardRequirementEnforcementFailure =
+    !bestEffortLandlockWarning &&
+    (/failed to restrict the calling thread:/i.test(text) ||
+      /failed to set no_new_privs:/.test(text));
+  if (
+    explicitHardRequirementFailure ||
+    wrappedHardRequirementPreparationFailure ||
+    hardRequirementEnforcementFailure
+  ) {
+    return {
+      kind: "landlock_enforcement_failed",
+      uploadedToGateway: uploadedToGateway || /Created sandbox:/i.test(text),
+    };
   }
   // Require BOTH the failed Docker command block containing the plugin-install
   // step AND npm-prefixed network evidence for the same plugin package. Docker

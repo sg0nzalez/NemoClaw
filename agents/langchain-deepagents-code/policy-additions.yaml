@@ -17,7 +17,6 @@ filesystem_policy:
     - /lib
     - /proc
     - /dev/urandom
-    - /app
     - /etc
     - /var/log
   read_write:
@@ -30,7 +29,8 @@ landlock:
   # Deep Agents Code is a terminal coding harness, so filesystem policy must
   # fail closed when Landlock cannot be applied. `hard_requirement` makes the
   # OpenShell sandbox startup fail instead of silently degrading if the kernel or
-  # workspace mount cannot enforce these read-only system paths.
+  # workspace mount cannot enforce these read-only system paths. Every path
+  # above must exist in the built image; hard_requirement rejects stale paths.
   compatibility: hard_requirement
 
 process:

@@ -32,6 +32,7 @@
     "test:imports:check": "tsx scripts/checks/no-test-dist-imports.ts",
     "test:projects:check": "tsx scripts/checks/vitest-project-overlap.ts",
     "test:titles:check": "tsx scripts/checks/test-title-style.ts",
+    "bench": "tsx scripts/bench/run.ts",
     "check": "npx prek run --all-files",
     "checks": "tsx scripts/checks/run.ts",
     "lint": "npx @biomejs/biome lint . && npm run checks",
@@ -108,6 +109,7 @@
     "@types/node": "^25.5.2",
     "@vitest/coverage-v8": "^4.1.0",
     "ajv": "^8.17.0",
+    "fast-check": "^4.8.0",
     "tsx": "^4.21.0",
     "typescript": "^6.0.2",
     "vitest": "^4.1.9"

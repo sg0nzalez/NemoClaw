@@ -127,10 +127,11 @@ System-wide shell hooks that read `/tmp/nemoclaw-proxy-env.sh` source the runtim
 
 ### Landlock Kernel Requirements
 
-Landlock LSM requires Linux kernel 5.13 or later with `CONFIG_SECURITY_LANDLOCK=y`.
+Landlock first appeared in Linux 5.13 and requires `CONFIG_SECURITY_LANDLOCK=y`.
 OpenShell also requires Landlock to be active and the sandbox runtime to permit Landlock syscalls.
 OpenClaw and Hermes policies use `compatibility: best_effort`, which continues sandbox startup when Landlock is unavailable.
-The Deep Agents Code policy uses `compatibility: hard_requirement`, so OpenShell aborts sandbox startup instead of running the agent with reduced filesystem isolation.
+The pinned OpenShell runtime builds an ABI v2 ruleset, which requires Linux 5.19 or later when the Deep Agents Code policy selects `compatibility: hard_requirement`.
+OpenShell therefore aborts Deep Agents Code startup instead of running the agent with reduced filesystem isolation on an older or incompatible runtime.
 
 When Landlock is unavailable, OpenClaw and Hermes continue without the configured Landlock path restrictions.
 Container mounts and DAC file ownership and permissions still apply.
@@ -147,7 +148,8 @@ openshell logs <sandbox-name> -n 100 --source sandbox
 OpenShell reports successful Landlock preparation with `Applying Landlock filesystem sandbox [abi:<ABI> compat:<mode> ro:<count> rw:<count>]` followed by `Landlock ruleset built [rules_applied:<count> skipped:<count>]`.
 If `best_effort` cannot prepare or enforce Landlock, OpenShell emits a high-severity finding with `Landlock filesystem sandbox unavailable: <reason>` or `Landlock restrict_self failed (best_effort): <reason>` and continues, while either failure prevents Deep Agents Code from starting.
 
-For production deployments, use kernel 5.13+ with Landlock enabled.
+For Deep Agents Code production deployments, use Linux 5.19 or later with Landlock enabled and its syscalls permitted.
+OpenClaw and Hermes can apply the access rights available from Linux 5.13 onward in `best_effort` mode.
 The `test/e2e/e2e-cloud-experimental/checks/04-landlock-readonly.sh` and `test/e2e/e2e-cloud-experimental/checks/05-deepagents-code-landlock-readonly.sh` scripts validate enforcement at runtime.
 
 ## References

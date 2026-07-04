@@ -190,6 +190,17 @@ export function printSandboxCreateRecoveryHints(
     console.error("  If this repeats, restart Docker or the gateway and retry.");
     return;
   }
+  if (failure.kind === "landlock_enforcement_failed") {
+    console.error("  Hint: OpenShell could not apply required Landlock filesystem isolation.");
+    console.error(
+      "        Deep Agents Code fails closed when the runtime lacks Landlock support or a",
+    );
+    console.error("        hard-required policy path is absent from the sandbox image.");
+    console.error("  Fix: use Linux 5.19 or later (Landlock ABI v2), enable the Landlock LSM,");
+    console.error("       allow its syscalls, and correct any unavailable filesystem path above.");
+    console.error(`  Recovery: ${CLI_NAME} onboard --resume`);
+    return;
+  }
   if (failure.kind === "sandbox_create_incomplete") {
     console.error("  Hint: sandbox creation started but the create stream did not finish cleanly.");
     console.error(`  Recovery: ${CLI_NAME} onboard --resume`);

@@ -1481,6 +1481,7 @@ Under `best_effort`, an unavailable Landlock runtime removes the kernel-level fi
 Container mounts and DAC permissions continue to apply.
 
 Deep Agents Code uses `hard_requirement` compatibility.
+The pinned OpenShell runtime builds a Landlock ABI v2 ruleset, so this mode requires Linux 5.19 or later in addition to an enabled LSM and permitted syscalls.
 If OpenShell detects that Landlock is unavailable, cannot open a configured policy path, or cannot enforce the prepared ruleset, sandbox startup fails and `$$nemoclaw onboard` returns a nonzero exit instead of reporting the terminal runtime as ready.
 When OpenShell creates the sandbox but it fails before reaching Ready, NemoClaw removes the failed sandbox so the next onboarding attempt can reuse the same name.
 Do not replace `hard_requirement` with `best_effort` to bypass this failure.
@@ -1492,7 +1493,8 @@ For a running OpenClaw or Hermes sandbox, inspect the authoritative OpenShell st
 openshell logs <sandbox-name> -n 100 --source sandbox
 ```
 
-Use a Linux kernel 5.13 or later with Landlock enabled, ensure the sandbox runtime permits Landlock syscalls, and correct any missing or inaccessible path reported by OpenShell.
+For Deep Agents Code, use Linux 5.19 or later with Landlock enabled, ensure the sandbox runtime permits Landlock syscalls, and correct any missing or inaccessible path reported by OpenShell.
+OpenClaw and Hermes can apply the access rights available from Linux 5.13 onward in `best_effort` mode.
 
 ### Sandbox lost after gateway restart
 

@@ -160,8 +160,10 @@ createSandbox(
         ...env,
         HOME: tempDir,
         NEMOCLAW_HOME: path.join(tempDir, ".nemoclaw"),
+        NEMOCLAW_DOCKER_GPU_PATCH: "0",
         NEMOCLAW_NON_INTERACTIVE: "1",
         NEMOCLAW_POLICY_TIER: "restricted",
+        NEMOCLAW_SANDBOX_GPU: "0",
         OPENSHELL_GATEWAY: "nemoclaw",
       },
       timeout: 20_000,
@@ -177,6 +179,10 @@ createSandbox(
     };
 
     expect(outcome.code).toBe(1);
+    expect(result.stderr).toContain(
+      "Landlock unavailable in hard_requirement mode: kernel does not support Landlock",
+    );
+    expect(result.stderr).toContain("could not apply required Landlock filesystem isolation");
     expect(
       outcome.commands.some((command) =>
         command.endsWith("openshell sandbox delete dcode-landlock-fail"),
