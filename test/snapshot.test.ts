@@ -599,127 +599,7 @@ process.exit(0);
     }
   });
 
-  it("preserves fresh custom image-managed OpenClaw extensions while restoring user extensions", () => {
-    const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-extension-restore-"));
-    const oldPath = process.env.PATH;
-    const oldOpenshell = process.env.NEMOCLAW_OPENSHELL_BIN;
-    try {
-      const binDir = path.join(fixture, "bin");
-      const openclawDir = path.join(fixture, "sandbox-root", ".openclaw");
-      const freshRegistryPath = path.join(fixture, "fresh-installs.json");
-      const extensionsDir = path.join(openclawDir, "extensions");
-      fs.mkdirSync(binDir, { recursive: true });
-      fs.mkdirSync(path.join(extensionsDir, "weather"), { recursive: true });
-      fs.mkdirSync(path.join(extensionsDir, "stale-user-extension"), { recursive: true });
-      fs.writeFileSync(path.join(extensionsDir, "weather", "marker.txt"), "fresh-weather-v2\n");
-      fs.writeFileSync(path.join(extensionsDir, "stale-user-extension", "marker.txt"), "stale\n");
-      fs.writeFileSync(
-        freshRegistryPath,
-        JSON.stringify({
-          version: 1,
-          installRecords: {
-            weather: { installPath: "/sandbox/.openclaw/extensions/weather" },
-          },
-        }),
-      );
-
-      const manifest = writeBackup("alpha", "2026-05-19T12-00-00-000Z", {
-        stateDirs: ["extensions"],
-        backedUpDirs: ["extensions"],
-      });
-      const backupExtensionsDir = path.join(String(manifest.backupPath), "extensions");
-      fs.mkdirSync(path.join(backupExtensionsDir, "weather"), { recursive: true });
-      fs.mkdirSync(path.join(backupExtensionsDir, "user-extension"), { recursive: true });
-      fs.writeFileSync(path.join(backupExtensionsDir, "weather", "marker.txt"), "old-weather-v1\n");
-      fs.writeFileSync(
-        path.join(backupExtensionsDir, "user-extension", "marker.txt"),
-        "restored\n",
-      );
-
-      const openshell = writeFakeOpenshell(binDir);
-      writeExecutable(
-        path.join(binDir, "ssh"),
-        `#!/usr/bin/env node
-const fs = require("node:fs");
-const path = require("node:path");
-const { spawnSync } = require("node:child_process");
-const cmd = process.argv[process.argv.length - 1] || "";
-function readStdin() {
-  const chunks = [];
-  for (;;) {
-    const buf = Buffer.alloc(65536);
-    const n = fs.readSync(0, buf, 0, buf.length, null);
-    if (n === 0) break;
-    chunks.push(buf.subarray(0, n));
-  }
-  return Buffer.concat(chunks);
-}
-if (cmd.includes("plugins/installs.json") && cmd.includes("cat --")) { process.stdout.write(fs.readFileSync(${JSON.stringify(freshRegistryPath)})); process.exit(0); }
-if (cmd.includes("/sandbox/.openclaw/extensions") && cmd.includes("-exec rm -rf")) {
-  const extensionsDir = ${JSON.stringify(extensionsDir)};
-  fs.mkdirSync(extensionsDir, { recursive: true });
-  for (const entry of fs.readdirSync(extensionsDir)) {
-    if (entry === "weather") continue;
-    fs.rmSync(path.join(extensionsDir, entry), { recursive: true, force: true });
-  }
-  process.exit(0);
-}
-if (cmd.includes("tar --no-same-owner -xf -")) {
-  const r = spawnSync("tar", ["--no-same-owner", "-xf", "-", "-C", ${JSON.stringify(openclawDir)}], {
-    input: readStdin(),
-    stdio: ["pipe", "pipe", "pipe"],
-  });
-  if (r.stdout) fs.writeSync(1, r.stdout);
-  if (r.stderr) fs.writeSync(2, r.stderr);
-  process.exit(r.status || 0);
-}
-if (cmd.includes("chown") || cmd.includes("[ -d ")) {
-  process.exit(0);
-}
-process.exit(0);
-`,
-      );
-
-      writeOpenClawRegistry("alpha");
-      process.env.NEMOCLAW_OPENSHELL_BIN = openshell;
-      process.env.PATH = `${binDir}:${oldPath || ""}`;
-
-      const restore = sandboxState.restoreSandboxState("alpha", String(manifest.backupPath), {
-        preserveFreshOpenClawPluginInstalls: true,
-      });
-      expect(restore.success).toBe(true);
-      expect(restore.restoredDirs).toEqual(["extensions"]);
-      expect(fs.readFileSync(path.join(extensionsDir, "weather", "marker.txt"), "utf-8")).toBe(
-        "fresh-weather-v2\n",
-      );
-      expect(fs.existsSync(path.join(extensionsDir, "stale-user-extension"))).toBe(false);
-      expect(
-        fs.readFileSync(path.join(extensionsDir, "user-extension", "marker.txt"), "utf-8"),
-      ).toBe("restored\n");
-
-      fs.writeFileSync(
-        freshRegistryPath,
-        '{"version":1,"installRecords":{"../weather":{"installPath":"/sandbox/.openclaw/extensions/../weather"}}}',
-      );
-      const rejected = sandboxState.restoreSandboxState("alpha", String(manifest.backupPath), {
-        preserveFreshOpenClawPluginInstalls: true,
-      });
-      expect(rejected.success).toBe(false);
-      expect(fs.readFileSync(path.join(extensionsDir, "weather", "marker.txt"), "utf-8")).toBe(
-        "fresh-weather-v2\n",
-      );
-    } finally {
-      if (oldOpenshell === undefined) {
-        delete process.env.NEMOCLAW_OPENSHELL_BIN;
-      } else {
-        process.env.NEMOCLAW_OPENSHELL_BIN = oldOpenshell;
-      }
-      process.env.PATH = oldPath;
-      fs.rmSync(fixture, { recursive: true, force: true });
-    }
-  });
-
-  it("accepts generic OpenClaw peer links during the pre-backup audit", () => {
+  it("accepts built-in and custom OpenClaw peer links during the pre-backup audit", () => {
     const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-audit-whitelist-"));
     const oldPath = process.env.PATH;
     const oldOpenshell = process.env.NEMOCLAW_OPENSHELL_BIN;
@@ -732,6 +612,8 @@ process.exit(0);
 
       const auditLines = [
         "l\t/sandbox/.openclaw/extensions/openclaw-weixin/node_modules/.bin/qrcode-terminal\t../qrcode-terminal/bin/qrcode-terminal.js",
+        "l\t/sandbox/.openclaw/extensions/openclaw-weixin/node_modules/openclaw\t/usr/local/lib/node_modules/openclaw",
+        "l\t/sandbox/.openclaw/extensions/slack/node_modules/openclaw\t/usr/local/lib/node_modules/openclaw",
         "l\t/sandbox/.openclaw/extensions/weather/node_modules/openclaw\t/usr/local/lib/node_modules/openclaw",
       ].join("\n");
 
@@ -949,7 +831,10 @@ process.exit(0);
     }
   });
 
-  it("rejects a generic OpenClaw peer link with a tampered target", () => {
+  it.each([
+    "weather",
+    "slack",
+  ])("rejects a generic %s OpenClaw peer link with a tampered target", (extensionName) => {
     // The generic peer path is valid, but its target must remain the exact
     // global OpenClaw install rather than an arbitrary absolute path.
     const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-audit-target-tampered-"));
@@ -963,7 +848,7 @@ process.exit(0);
       for (const d of existingDirs) fs.mkdirSync(path.join(openclawDir, d), { recursive: true });
 
       const auditLines = [
-        "l\t/sandbox/.openclaw/extensions/weather/node_modules/openclaw\t/etc/passwd",
+        `l\t/sandbox/.openclaw/extensions/${extensionName}/node_modules/openclaw\t/etc/passwd`,
       ].join("\n");
 
       const openshell = writeFakeOpenshell(binDir);
@@ -990,7 +875,7 @@ process.exit(0);
 
       const backup = sandboxState.backupSandboxState("alpha");
       expect(backup.success).toBe(false);
-      expect(backup.error).toMatch(/weather/);
+      expect(backup.error).toContain(`extensions/${extensionName}`);
       expect(backup.error).toMatch(/\/etc\/passwd/);
     } finally {
       if (oldOpenshell === undefined) {

@@ -438,19 +438,22 @@ describe("Fix: safeTarExtract blocks malicious archives and extracts safe ones",
     }
   });
 
-  it("allows a generic extension peer link to the exact global OpenClaw install", async () => {
+  it.each([
+    "weather",
+    "slack",
+  ])("allows the %s OpenClaw extension peer link with the exact global package target", async (extensionName) => {
     const { safeTarExtract } = await loadSandboxState();
     const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-audit-whitelist-extract-"));
     try {
       const targetDir = path.join(workDir, "backup");
       fs.mkdirSync(targetDir, { recursive: true });
 
-      // OpenClaw installs plugin peers as a link to the global npm install.
-      // The target escapes both the archive and /sandbox/, so only this exact
-      // direct extension peer shape and target are allowed.
+      // Archive-installed plugins symlink their OpenClaw peer dependency to
+      // the global package. The exact target escapes both the archive and
+      // /sandbox/, so it requires the narrow extension peer-link exception.
       const tar = buildTar([
         {
-          path: "extensions/weather/node_modules/openclaw",
+          path: `extensions/${extensionName}/node_modules/openclaw`,
           type: "2",
           linkTarget: "/usr/local/lib/node_modules/openclaw",
         },
@@ -464,7 +467,8 @@ describe("Fix: safeTarExtract blocks malicious archives and extracts safe ones",
   });
 
   it.each([
-    ["a tampered target", "extensions/weather/node_modules/openclaw", "/etc/passwd"],
+    ["a tampered weather target", "extensions/weather/node_modules/openclaw", "/etc/passwd"],
+    ["a tampered slack target", "extensions/slack/node_modules/openclaw", "/etc/passwd"],
     [
       "a glob basename",
       "extensions/*/node_modules/openclaw",
@@ -480,7 +484,7 @@ describe("Fix: safeTarExtract blocks malicious archives and extracts safe ones",
       "extensions/weather/node_modules/openclaw",
       "/usr/local/lib/node_modules/openclaw/",
     ],
-  ])("rejects a generic extension peer link with %s", async (_case, source, target) => {
+  ])("rejects an OpenClaw extension peer link with %s", async (_case, source, target) => {
     const { safeTarExtract } = await loadSandboxState();
     const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-audit-target-tampered-"));
     try {

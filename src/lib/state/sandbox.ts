@@ -39,7 +39,13 @@ import {
   shouldMergeOpenClawConfigStateFile,
 } from "./openclaw-config-restore-input.js";
 import {
-  isSafeOpenClawExtensionDirName,
+  buildRestoreCleanupCommand,
+  buildRestoreTarArgs,
+  isAllowedStateSymlink,
+  OPENCLAW_IMAGE_MANAGED_EXTENSION_DIRS,
+  shouldPreserveOpenClawManagedExtensions,
+} from "./openclaw-managed-extensions.js";
+import {
   type OpenClawManagedExtensionDiscoveryResult,
   parseFreshOpenClawPluginExtensionDirs,
 } from "./openclaw-plugin-restore.js";
@@ -139,6 +145,8 @@ export interface RestoreResult {
   failedDirs: string[];
   restoredFiles: string[];
   failedFiles: string[];
+  /** A safe, user-actionable explanation for a restore precondition failure. */
+  error?: string;
 }
 
 export interface RestoreOptions {
@@ -579,59 +587,6 @@ function sanitizeBackupDirectory(dirPath: string): void {
 
 const _verbose = () => process.env.NEMOCLAW_REBUILD_VERBOSE === "1";
 
-// Exact symlinks baked into OpenClaw messaging images at build time by
-// `openclaw plugins install`. Source paths are relative to the agent state-dir
-// root (e.g. for OpenClaw, /sandbox/.openclaw); targets are matched exactly
-// against the value of `readlink(source)`. Source-only matching is unsafe: a
-// compromised agent could repoint one of these to /etc/passwd and the audit
-// would still let it through.
-const AUDIT_SYMLINK_WHITELIST: ReadonlyMap<string, string> = new Map([
-  [
-    "extensions/openclaw-weixin/node_modules/.bin/qrcode-terminal",
-    "../qrcode-terminal/bin/qrcode-terminal.js",
-  ],
-  ["extensions/openclaw-weixin/node_modules/openclaw", "/usr/local/lib/node_modules/openclaw"],
-]);
-
-const EXTENSION_NPM_BIN_RE = /^extensions\/[^/]+\/node_modules\/\.bin\/[^/]+$/;
-// `openclaw plugins install` links a declared OpenClaw peer dependency to the
-// image's global runtime. Accept that link only for a direct, validated
-// extension directory and the exact runtime path used by the stock image.
-const EXTENSION_OPENCLAW_PEER_RE = /^extensions\/([^/]+)\/node_modules\/openclaw$/;
-const OPENCLAW_GLOBAL_INSTALL = "/usr/local/lib/node_modules/openclaw";
-const OPENCLAW_BUILTIN_IMAGE_MANAGED_EXTENSION_DIRS = ["nemoclaw", "openclaw-weixin"] as const;
-
-function isAllowedExtensionNpmBinSymlink(relPath: string, linkTarget: string): boolean {
-  const normalizedRelPath = relPath.split(path.sep).join("/");
-  if (!EXTENSION_NPM_BIN_RE.test(normalizedRelPath)) return false;
-  if (linkTarget.length === 0 || path.posix.isAbsolute(linkTarget)) return false;
-
-  const binDir = path.posix.dirname(normalizedRelPath);
-  const nodeModulesDir = path.posix.dirname(binDir);
-  const resolvedTarget = path.posix.normalize(path.posix.join(binDir, linkTarget));
-  const targetWithinNodeModules = path.posix.relative(nodeModulesDir, resolvedTarget);
-
-  return (
-    targetWithinNodeModules.length > 0 &&
-    !targetWithinNodeModules.startsWith("../") &&
-    !path.posix.isAbsolute(targetWithinNodeModules) &&
-    !targetWithinNodeModules.startsWith(".bin/")
-  );
-}
-
-function isAllowedStateSymlink(relPath: string, linkTarget: string): boolean {
-  const normalizedRelPath = relPath.split(path.sep).join("/");
-  const exactTarget = AUDIT_SYMLINK_WHITELIST.get(normalizedRelPath);
-  if (exactTarget !== undefined) return exactTarget === linkTarget;
-  const peerMatch = EXTENSION_OPENCLAW_PEER_RE.exec(normalizedRelPath);
-  return (
-    (peerMatch !== null &&
-      isSafeOpenClawExtensionDirName(peerMatch[1]) &&
-      linkTarget === OPENCLAW_GLOBAL_INSTALL) ||
-    isAllowedExtensionNpmBinSymlink(normalizedRelPath, linkTarget)
-  );
-}
-
 function _log(msg: string): void {
   if (_verbose()) console.error(`  [sandbox-state ${new Date().toISOString()}] ${msg}`);
 }
@@ -701,17 +656,6 @@ function existingBackupDirs(backupPath: string, dirNames: string[]): string[] {
   return existing;
 }
 
-function shouldPreserveOpenClawManagedExtensions(
-  manifest: RebuildManifest,
-  dir: string,
-  localDirs: readonly string[],
-): boolean {
-  return (
-    localDirs.includes("extensions") &&
-    (manifest.agentType === "openclaw" || dir.replace(/\/+$/, "") === "/sandbox/.openclaw")
-  );
-}
-
 function discoverFreshOpenClawPluginExtensionDirs(
   configFile: string,
   sandboxName: string,
@@ -742,75 +686,6 @@ function discoverFreshOpenClawPluginExtensionDirs(
     };
   }
   return parseFreshOpenClawPluginExtensionDirs(config, dir);
-}
-
-function buildRestoreTarArgs(
-  backupPath: string,
-  localDirs: readonly string[],
-  managedExtensionDirs: readonly string[],
-): string[] {
-  const args = ["-cf", "-", "-C", backupPath];
-  for (const extensionDir of managedExtensionDirs) {
-    args.push("--exclude", `extensions/${extensionDir}`);
-  }
-  args.push("--", ...localDirs);
-  return args;
-}
-
-function buildOpenClawExtensionsCleanupCommand(
-  dir: string,
-  managedExtensionDirs: readonly string[],
-  requiredExtensionDirs: ReadonlySet<string>,
-): string {
-  const extensionsDir = `${dir}/extensions`;
-  const quotedExtensionsDir = shellQuote(extensionsDir);
-  const validationCommands = managedExtensionDirs
-    .map((extensionDir) => {
-      const managedPath = `${extensionsDir}/${extensionDir}`;
-      if (requiredExtensionDirs.has(extensionDir)) {
-        return (
-          `p=${shellQuote(managedPath)}; ` +
-          'if [ ! -d "$p" ] || [ -L "$p" ]; then ' +
-          'echo "refusing missing or unsafe image-managed extension: $p" >&2; exit 20; fi'
-        );
-      }
-      return (
-        `p=${shellQuote(managedPath)}; ` +
-        'if [ -e "$p" ] && { [ ! -d "$p" ] || [ -L "$p" ]; }; then ' +
-        'echo "refusing to preserve unsafe managed extension: $p" >&2; exit 20; fi'
-      );
-    })
-    .join("; ");
-  const validateManagedPaths = `{ ${validationCommands}; }`;
-  const preservedNames = managedExtensionDirs
-    .map((extensionDir) => `! -name ${shellQuote(extensionDir)}`)
-    .join(" ");
-
-  return [
-    `mkdir -p -- ${quotedExtensionsDir}`,
-    validateManagedPaths,
-    `find ${quotedExtensionsDir} -mindepth 1 -maxdepth 1 ${preservedNames} -exec rm -rf -- {} +`,
-  ].join(" && ");
-}
-
-function buildRestoreCleanupCommand(
-  dir: string,
-  localDirs: readonly string[],
-  managedExtensionDirs: readonly string[],
-  requiredExtensionDirs: ReadonlySet<string>,
-): string {
-  const preserveManagedExtensions = managedExtensionDirs.length > 0;
-  const commands: string[] = [];
-  for (const dirName of localDirs) {
-    if (preserveManagedExtensions && dirName === "extensions") continue;
-    commands.push(`rm -rf -- ${shellQuote(`${dir}/${dirName}`)}`);
-  }
-  if (preserveManagedExtensions) {
-    commands.push(
-      buildOpenClawExtensionsCleanupCommand(dir, managedExtensionDirs, requiredExtensionDirs),
-    );
-  }
-  return commands.length > 0 ? commands.join(" && ") : ":";
 }
 
 function normalizeStateFileSpec(spec: AgentStateFile | StateFileSpec): StateFileSpec | null {
@@ -1593,6 +1468,7 @@ export function restoreSandboxState(
           failedDirs: [...localDirs],
           restoredFiles,
           failedFiles: localFiles.map((f) => f.path),
+          error: discovery.error,
         };
       }
       freshImageManagedExtensionDirs = discovery.extensionDirs;
@@ -1600,10 +1476,7 @@ export function restoreSandboxState(
     }
     const managedExtensionDirs = preserveManagedExtensions
       ? [
-          ...new Set([
-            ...OPENCLAW_BUILTIN_IMAGE_MANAGED_EXTENSION_DIRS,
-            ...freshImageManagedExtensionDirs,
-          ]),
+          ...new Set([...OPENCLAW_IMAGE_MANAGED_EXTENSION_DIRS, ...freshImageManagedExtensionDirs]),
         ].sort()
       : [];
 
