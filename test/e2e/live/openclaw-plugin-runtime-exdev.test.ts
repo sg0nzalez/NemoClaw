@@ -72,7 +72,9 @@ const EXDEV_TMPFS_SOURCE = `${EXDEV_TMPFS_MOUNT}/source`;
 const EXDEV_TMPFS_MOUNT_CONFIG = {
   type: "tmpfs",
   target: EXDEV_TMPFS_MOUNT,
-  options: ["rw", "nosuid", "nodev", "noexec"],
+  // tmpfs is read-write by default. Docker's MountTmpfsOptions rejects `rw`,
+  // `nosuid`, and `nodev`; `noexec` is supported by both pinned drivers.
+  options: ["noexec"],
   size_bytes: 16_777_216,
   mode: 0o1777,
 } as const;
@@ -329,6 +331,7 @@ test("OpenShell wrapper injects only the reviewed tmpfs config into sandbox crea
       NEMOCLAW_OPENSHELL_GATEWAY_BIN: components.gateway,
       NEMOCLAW_OPENSHELL_SANDBOX_BIN: components.sandbox,
     });
+    expect(EXDEV_TMPFS_MOUNT_CONFIG.options).toEqual(["noexec"]);
     expect(JSON.parse(EXDEV_TMPFS_DRIVER_CONFIG)).toEqual({
       docker: {
         mounts: [EXDEV_TMPFS_MOUNT_CONFIG],
