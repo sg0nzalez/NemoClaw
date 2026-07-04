@@ -536,6 +536,7 @@ const fatalRuntimePreflight: typeof import("./onboard/fatal-runtime-preflight") 
   require("./onboard/fatal-runtime-preflight");
 const preflightUtils: typeof import("./onboard/preflight") = require("./onboard/preflight");
 const clusterImagePatch: typeof import("./cluster-image-patch") = require("./cluster-image-patch");
+const overlayfsAutoFix: typeof import("./onboard/overlayfs-auto-fix") = require("./onboard/overlayfs-auto-fix");
 const { assessHost, checkPortAvailable, ensureSwap, getMemoryInfo } = preflightUtils;
 const {
   assertDockerBridgeAndContainerDnsHealthy,
@@ -2287,83 +2288,10 @@ function getGatewayStartEnv(): Record<string, string> {
   return gatewayEnv;
 }
 
-/** Cache the overlayfs auto-fix result per upstream image for this onboard process. */
-const overlayFixResultCache = new Map<string, string | null>();
-
-/**
- * When the host runs Docker 26+ with the new containerd-snapshotter overlayfs
- * driver, k3s inside the upstream cluster image cannot mount nested overlays
- * and crashes. Build a tiny patched image locally that selects fuse-overlayfs
- * (or `native` via NEMOCLAW_OVERLAY_SNAPSHOTTER) and return its tag so the
- * caller can route OPENSHELL_CLUSTER_IMAGE to it. Returns null on every host
- * that is not affected, when the user opts out, or when the build fails (in
- * which case we fall through to the upstream image and let the existing
- * doctor diagnostics surface the underlying error).
- */
-function applyOverlayfsAutoFix(upstreamImage: string): string | null {
-  if (process.env.NEMOCLAW_DISABLE_OVERLAY_FIX === "1") {
-    return null;
-  }
-  if (overlayFixResultCache.has(upstreamImage)) {
-    return overlayFixResultCache.get(upstreamImage) ?? null;
-  }
-  let assessment: ReturnType<typeof preflightUtils.assessHost>;
-  try {
-    assessment = preflightUtils.assessHost();
-  } catch (err) {
-    // Don't silently swallow — log a breadcrumb so a future regression in
-    // assessHost (or a Docker-daemon hang past `2>/dev/null`) doesn't make
-    // the auto-fix mysteriously stop firing without any user-visible signal.
-    const reason = err instanceof Error ? err.message : String(err);
-    console.warn(`  Skipping overlayfs auto-fix: host assessment failed (${reason}).`);
-    overlayFixResultCache.set(upstreamImage, null);
-    return null;
-  }
-  if (!assessment.hasNestedOverlayConflict) {
-    overlayFixResultCache.set(upstreamImage, null);
-    return null;
-  }
-
-  const requestedSnapshotter = (process.env.NEMOCLAW_OVERLAY_SNAPSHOTTER || "")
-    .trim()
-    .toLowerCase();
-  let snapshotter: "fuse-overlayfs" | "native" = "fuse-overlayfs";
-  if (requestedSnapshotter === "native" || requestedSnapshotter === "fuse-overlayfs") {
-    snapshotter = requestedSnapshotter;
-  } else if (requestedSnapshotter !== "") {
-    // Reject typos like 'NATIVE' or 'fuse' loudly so the user gets the image
-    // they intended, not a silent default.
-    console.warn(
-      `  NEMOCLAW_OVERLAY_SNAPSHOTTER='${requestedSnapshotter}' is not recognized. ` +
-        "Valid values are 'fuse-overlayfs' or 'native'. Falling back to 'fuse-overlayfs'.",
-    );
-  }
-
-  console.log(
-    `  Detected Docker 26+ containerd-snapshotter overlayfs (driver=${assessment.dockerStorageDriver}). ` +
-      `Routing through a locally-built ${snapshotter} cluster image to bypass nested-overlay break.`,
-  );
-  console.log(
-    "  Set NEMOCLAW_DISABLE_OVERLAY_FIX=1 to disable this auto-fix; see docs for the manual daemon.json workaround.",
-  );
-
-  try {
-    const patchedTag = clusterImagePatch.ensurePatchedClusterImage({
-      upstreamImage,
-      snapshotter,
-    });
-    overlayFixResultCache.set(upstreamImage, patchedTag);
-    return patchedTag;
-  } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err);
-    console.error(`  Patched cluster image build failed: ${reason}`);
-    console.error(
-      "  Falling back to the upstream image. The k3s server will likely fail; see docs/reference/troubleshooting.mdx.",
-    );
-    overlayFixResultCache.set(upstreamImage, null);
-    return null;
-  }
-}
+const applyOverlayfsAutoFix = overlayfsAutoFix.createOverlayfsAutoFix({
+  assessHost: preflightUtils.assessHost,
+  ensurePatchedClusterImage: clusterImagePatch.ensurePatchedClusterImage,
+});
 
 async function recoverGatewayRuntime() {
   if (isLinuxDockerDriverGatewayEnabled()) {
