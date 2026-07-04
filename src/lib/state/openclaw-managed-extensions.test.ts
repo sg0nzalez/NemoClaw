@@ -139,6 +139,9 @@ describe("OpenClaw managed extension symlink policy", () => {
         "../../../../openclaw.json",
       ),
     ).toBe(false);
+    expect(isAllowedStateSymlink("extensions/nemoclaw/node_modules/.bin/leak", "../..")).toBe(
+      false,
+    );
     expect(
       isAllowedStateSymlink("extensions/nemoclaw/node_modules/.bin/loop", "../.bin/other"),
     ).toBe(false);

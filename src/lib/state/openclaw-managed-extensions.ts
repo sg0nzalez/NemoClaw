@@ -52,6 +52,7 @@ function isAllowedExtensionNpmBinSymlink(relPath: string, linkTarget: string): b
 
   return (
     targetWithinNodeModules.length > 0 &&
+    targetWithinNodeModules !== ".." &&
     !targetWithinNodeModules.startsWith("../") &&
     !path.posix.isAbsolute(targetWithinNodeModules) &&
     !targetWithinNodeModules.startsWith(".bin/")

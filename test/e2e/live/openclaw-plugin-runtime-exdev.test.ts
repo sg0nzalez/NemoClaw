@@ -3,6 +3,7 @@
 
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
@@ -143,7 +144,13 @@ type PolicySourcePatch = {
   assertRestored(): void;
 };
 
-function patchPoliciesForDevShm(): PolicySourcePatch {
+function patchPoliciesForDevShm(
+  policyPaths: readonly string[] = [
+    path.join(REPO_ROOT, "agents", "openclaw", "policy-permissive.yaml"),
+    path.join(REPO_ROOT, "nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml"),
+    path.join(REPO_ROOT, "nemoclaw-blueprint", "policies", "openclaw-sandbox-permissive.yaml"),
+  ],
+): PolicySourcePatch {
   // Test-only source-boundary patch: the default OpenClaw policies intentionally
   // do not grant general /dev access, but this regression needs to create a
   // source tree on tmpfs (/dev/shm) to reproduce #3127's cross-device rename
@@ -151,26 +158,27 @@ function patchPoliciesForDevShm(): PolicySourcePatch {
   // writing final artifacts, and remove this patch when OpenShell can mount a
   // dedicated test tmpfs without broadening checked-in production policy.
   const originals = new Map<string, string>();
-  for (const policyPath of [
-    path.join(REPO_ROOT, "agents", "openclaw", "policy-permissive.yaml"),
-    path.join(REPO_ROOT, "nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml"),
-    path.join(REPO_ROOT, "nemoclaw-blueprint", "policies", "openclaw-sandbox-permissive.yaml"),
-  ]) {
-    const text = fs.readFileSync(policyPath, "utf8");
-    originals.set(policyPath, text);
-    const anchor = "  read_write:\n    - /tmp\n";
-    expect(text, `could not find read_write /tmp anchor in ${policyPath}`).toContain(anchor);
-    let additions = "";
-    for (const entry of ["/dev", "/dev/shm"]) {
-      if (!text.includes(`    - ${entry}\n`)) additions += `    - ${entry}\n`;
-    }
-    if (additions) {
-      fs.writeFileSync(policyPath, text.replace(anchor, anchor + additions), "utf8");
-    }
-  }
   const restore = () => {
     for (const [policyPath, text] of originals) fs.writeFileSync(policyPath, text, "utf8");
   };
+  try {
+    for (const policyPath of policyPaths) {
+      const text = fs.readFileSync(policyPath, "utf8");
+      originals.set(policyPath, text);
+      const anchor = "  read_write:\n    - /tmp\n";
+      expect(text, `could not find read_write /tmp anchor in ${policyPath}`).toContain(anchor);
+      let additions = "";
+      for (const entry of ["/dev", "/dev/shm"]) {
+        if (!text.includes(`    - ${entry}\n`)) additions += `    - ${entry}\n`;
+      }
+      if (additions) {
+        fs.writeFileSync(policyPath, text.replace(anchor, anchor + additions), "utf8");
+      }
+    }
+  } catch (error) {
+    restore();
+    throw error;
+  }
   return {
     restore,
     assertRestored: () => {
@@ -180,6 +188,26 @@ function patchPoliciesForDevShm(): PolicySourcePatch {
     },
   };
 }
+
+test("policy fixture setup restores earlier mutations when a later policy fails validation", () => {
+  const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-exdev-policy-patch-"));
+  const firstPolicy = path.join(fixture, "first.yaml");
+  const invalidPolicy = path.join(fixture, "invalid.yaml");
+  const firstOriginal = "filesystem:\n  read_write:\n    - /tmp\n";
+  const invalidOriginal = "filesystem:\n  read_write:\n    - /var/tmp\n";
+  try {
+    fs.writeFileSync(firstPolicy, firstOriginal, "utf8");
+    fs.writeFileSync(invalidPolicy, invalidOriginal, "utf8");
+
+    expect(() => patchPoliciesForDevShm([firstPolicy, invalidPolicy])).toThrow(
+      `could not find read_write /tmp anchor in ${invalidPolicy}`,
+    );
+    expect(fs.readFileSync(firstPolicy, "utf8")).toBe(firstOriginal);
+    expect(fs.readFileSync(invalidPolicy, "utf8")).toBe(invalidOriginal);
+  } finally {
+    fs.rmSync(fixture, { recursive: true, force: true });
+  }
+});
 
 function writeCustomPluginVersion(version: WeatherFixtureVersion): void {
   fs.writeFileSync(
