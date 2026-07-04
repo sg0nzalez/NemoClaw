@@ -2,11 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { resolveOpenshell } from "../../../src/lib/adapters/openshell/resolve.ts";
+import { hasRequiredOpenshellMessagingFeatures } from "../../../src/lib/onboard/openshell-feature-gate.ts";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
+import { shellQuote } from "../fixtures/clients/command.ts";
+import type { HostCliClient } from "../fixtures/clients/host.ts";
 import {
   type SandboxClient,
   trustedSandboxShellScript,
@@ -59,6 +64,28 @@ const SANDBOX_NAME = process.env.NEMOCLAW_SANDBOX_NAME ?? "e2e-openclaw-plugin-e
 const ONBOARD_TIMEOUT_MS = 25 * 60_000;
 const REBUILD_TIMEOUT_MS = 20 * 60_000;
 const PROBE_TIMEOUT_MS = 60_000;
+const EXDEV_TMPFS_MOUNT = "/tmp/nemoclaw-exdev-tmpfs";
+const EXDEV_TMPFS_SOURCE = `${EXDEV_TMPFS_MOUNT}/source`;
+const EXDEV_TMPFS_MOUNT_CONFIG = {
+  type: "tmpfs",
+  target: EXDEV_TMPFS_MOUNT,
+  options: ["rw", "nosuid", "nodev", "noexec"],
+  size_bytes: 16_777_216,
+  mode: 0o1777,
+} as const;
+const EXDEV_TMPFS_DRIVER_CONFIG = JSON.stringify({
+  docker: {
+    mounts: [EXDEV_TMPFS_MOUNT_CONFIG],
+  },
+  podman: {
+    mounts: [EXDEV_TMPFS_MOUNT_CONFIG],
+  },
+});
+const STOCK_OPENCLAW_POLICY_PATHS = [
+  path.join(REPO_ROOT, "agents", "openclaw", "policy-permissive.yaml"),
+  path.join(REPO_ROOT, "nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml"),
+  path.join(REPO_ROOT, "nemoclaw-blueprint", "policies", "openclaw-sandbox-permissive.yaml"),
+] as const;
 validateSandboxName(SANDBOX_NAME);
 
 const EXDEV_PATTERNS = [
@@ -139,74 +166,195 @@ async function ignoreCleanupError(run: () => Promise<unknown>): Promise<void> {
   }
 }
 
-type PolicySourcePatch = {
-  restore(): void;
-  assertRestored(): void;
+type OpenShellTmpfsWrapper = {
+  directory: string;
+  executable: string;
+  remove(): void;
 };
 
-function patchPoliciesForDevShm(
-  policyPaths: readonly string[] = [
-    path.join(REPO_ROOT, "agents", "openclaw", "policy-permissive.yaml"),
-    path.join(REPO_ROOT, "nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml"),
-    path.join(REPO_ROOT, "nemoclaw-blueprint", "policies", "openclaw-sandbox-permissive.yaml"),
-  ],
-): PolicySourcePatch {
-  // Test-only source-boundary patch: the default OpenClaw policies intentionally
-  // do not grant general /dev access, but this regression needs to create a
-  // source tree on tmpfs (/dev/shm) to reproduce #3127's cross-device rename
-  // layout. Keep the mutation local, restore and verify the source bytes before
-  // writing final artifacts, and remove this patch when OpenShell can mount a
-  // dedicated test tmpfs without broadening checked-in production policy.
-  const originals = new Map<string, string>();
-  const restore = () => {
-    for (const [policyPath, text] of originals) fs.writeFileSync(policyPath, text, "utf8");
-  };
-  try {
-    for (const policyPath of policyPaths) {
-      const text = fs.readFileSync(policyPath, "utf8");
-      originals.set(policyPath, text);
-      const anchor = "  read_write:\n    - /tmp\n";
-      expect(text, `could not find read_write /tmp anchor in ${policyPath}`).toContain(anchor);
-      let additions = "";
-      for (const entry of ["/dev", "/dev/shm"]) {
-        if (!text.includes(`    - ${entry}\n`)) additions += `    - ${entry}\n`;
-      }
-      if (additions) {
-        fs.writeFileSync(policyPath, text.replace(anchor, anchor + additions), "utf8");
-      }
-    }
-  } catch (error) {
-    restore();
-    throw error;
+type PinnedOpenShellComponents = {
+  cli: string;
+  gateway: string;
+  sandbox: string;
+};
+
+function createOpenShellTmpfsWrapper(realOpenshellPath: string): OpenShellTmpfsWrapper {
+  if (!path.isAbsolute(realOpenshellPath)) {
+    throw new Error("real OpenShell path must be absolute");
   }
+  fs.accessSync(realOpenshellPath, fs.constants.X_OK);
+
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-exdev-openshell-wrapper-"));
+  const executable = path.join(directory, "openshell");
+  const script = `#!/bin/sh
+set -eu
+if [ "$#" -ge 2 ] && [ "$1" = sandbox ] && [ "$2" = create ]; then
+  shift 2
+  for argument in "$@"; do
+    case "$argument" in
+      --driver-config-json|--driver-config-json=*)
+        printf '%s\n' 'refusing duplicate --driver-config-json in EXDEV test wrapper' >&2
+        exit 64
+        ;;
+    esac
+  done
+  exec ${shellQuote(realOpenshellPath)} sandbox create --driver-config-json ${shellQuote(EXDEV_TMPFS_DRIVER_CONFIG)} "$@"
+fi
+exec ${shellQuote(realOpenshellPath)} "$@"
+`;
+  fs.writeFileSync(executable, script, { encoding: "utf8", mode: 0o700 });
+
   return {
-    restore,
-    assertRestored: () => {
-      for (const [policyPath, text] of originals) {
-        expect(fs.readFileSync(policyPath, "utf8"), `${policyPath} was not restored`).toBe(text);
-      }
-    },
+    directory,
+    executable,
+    remove: () => fs.rmSync(directory, { recursive: true, force: true }),
   };
 }
 
-test("policy fixture setup restores earlier mutations when a later policy fails validation", () => {
-  const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-exdev-policy-patch-"));
-  const firstPolicy = path.join(fixture, "first.yaml");
-  const invalidPolicy = path.join(fixture, "invalid.yaml");
-  const firstOriginal = "filesystem:\n  read_write:\n    - /tmp\n";
-  const invalidOriginal = "filesystem:\n  read_write:\n    - /var/tmp\n";
-  try {
-    fs.writeFileSync(firstPolicy, firstOriginal, "utf8");
-    fs.writeFileSync(invalidPolicy, invalidOriginal, "utf8");
+function withOpenShellWrapperEnv(
+  env: NodeJS.ProcessEnv,
+  wrapper: OpenShellTmpfsWrapper,
+  components: PinnedOpenShellComponents,
+): NodeJS.ProcessEnv {
+  return {
+    ...env,
+    PATH: `${wrapper.directory}${path.delimiter}${env.PATH ?? ""}`,
+    NEMOCLAW_OPENSHELL_BIN: wrapper.executable,
+    NEMOCLAW_OPENSHELL_GATEWAY_BIN: components.gateway,
+    NEMOCLAW_OPENSHELL_SANDBOX_BIN: components.sandbox,
+  };
+}
 
-    expect(() => patchPoliciesForDevShm([firstPolicy, invalidPolicy])).toThrow(
-      `could not find read_write /tmp anchor in ${invalidPolicy}`,
+function resolvePinnedOpenShellComponents(openshellPath: string): PinnedOpenShellComponents {
+  const cli = fs.realpathSync(openshellPath);
+  fs.accessSync(cli, fs.constants.X_OK);
+  const installDirectory = path.dirname(cli);
+  const canonicalSibling = (name: string): string => {
+    const sibling = fs.realpathSync(path.join(installDirectory, name));
+    fs.accessSync(sibling, fs.constants.X_OK);
+    return sibling;
+  };
+  return {
+    cli,
+    gateway: canonicalSibling("openshell-gateway"),
+    sandbox: canonicalSibling("openshell-sandbox"),
+  };
+}
+
+async function installAndResolvePinnedOpenShell(
+  host: HostCliClient,
+): Promise<PinnedOpenShellComponents> {
+  const install = await host.command(
+    "bash",
+    [path.join(REPO_ROOT, "scripts", "install-openshell.sh")],
+    {
+      artifactName: "install-pinned-openshell-for-exdev-wrapper",
+      env: liveEnv(),
+      timeoutMs: 5 * 60_000,
+    },
+  );
+  expect(install.exitCode, resultText(install)).toBe(0);
+  const resolved = resolveOpenshell();
+  expect(resolved, "pinned OpenShell installer did not leave an executable CLI").not.toBeNull();
+  return resolvePinnedOpenShellComponents(resolved as string);
+}
+
+type PolicySourceSnapshot = ReadonlyArray<{ policyPath: string; bytes: Buffer }>;
+
+function snapshotPolicySources(): PolicySourceSnapshot {
+  return STOCK_OPENCLAW_POLICY_PATHS.map((policyPath) => ({
+    policyPath,
+    bytes: fs.readFileSync(policyPath),
+  }));
+}
+
+function assertPolicySourcesUnchanged(snapshot: PolicySourceSnapshot, phase: string): void {
+  for (const { policyPath, bytes } of snapshot) {
+    expect(fs.readFileSync(policyPath), `${policyPath} changed during ${phase}`).toEqual(bytes);
+  }
+}
+
+function runWrapper(wrapper: string, args: readonly string[]): string[] {
+  const result = spawnSync(wrapper, args, { encoding: "utf8" });
+  expect(result.status, result.stderr).toBe(0);
+  return result.stdout.trimEnd().split("\n");
+}
+
+test("OpenShell wrapper injects only the reviewed tmpfs config into sandbox create", () => {
+  const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-exdev-wrapper-contract-"));
+  const delegate = path.join(fixture, "real-openshell");
+  const gateway = path.join(fixture, "openshell-gateway");
+  const sandbox = path.join(fixture, "openshell-sandbox");
+  const executableSource = "#!/bin/sh\nprintf '%s\\n' \"$@\"\n";
+  for (const executable of [delegate, gateway, sandbox]) {
+    fs.writeFileSync(executable, executableSource, {
+      encoding: "utf8",
+      mode: 0o700,
+    });
+  }
+  const components = resolvePinnedOpenShellComponents(delegate);
+  const wrapper = createOpenShellTmpfsWrapper(components.cli);
+  try {
+    expect(components).toEqual({
+      cli: fs.realpathSync(delegate),
+      gateway: fs.realpathSync(gateway),
+      sandbox: fs.realpathSync(sandbox),
+    });
+    expect(withOpenShellWrapperEnv({ PATH: "/usr/bin" }, wrapper, components)).toMatchObject({
+      PATH: `${wrapper.directory}${path.delimiter}/usr/bin`,
+      NEMOCLAW_OPENSHELL_BIN: wrapper.executable,
+      NEMOCLAW_OPENSHELL_GATEWAY_BIN: components.gateway,
+      NEMOCLAW_OPENSHELL_SANDBOX_BIN: components.sandbox,
+    });
+    expect(JSON.parse(EXDEV_TMPFS_DRIVER_CONFIG)).toEqual({
+      docker: {
+        mounts: [EXDEV_TMPFS_MOUNT_CONFIG],
+      },
+      podman: {
+        mounts: [EXDEV_TMPFS_MOUNT_CONFIG],
+      },
+    });
+    expect(
+      runWrapper(wrapper.executable, [
+        "sandbox",
+        "create",
+        "--name",
+        "demo",
+        "--",
+        "sh",
+        "-lc",
+        "printf value",
+      ]),
+    ).toEqual([
+      "sandbox",
+      "create",
+      "--driver-config-json",
+      EXDEV_TMPFS_DRIVER_CONFIG,
+      "--name",
+      "demo",
+      "--",
+      "sh",
+      "-lc",
+      "printf value",
+    ]);
+    expect(runWrapper(wrapper.executable, ["sandbox", "delete", "demo"])).toEqual([
+      "sandbox",
+      "delete",
+      "demo",
+    ]);
+    expect(runWrapper(wrapper.executable, ["--version"])).toEqual(["--version"]);
+    const duplicateConfig = spawnSync(
+      wrapper.executable,
+      ["sandbox", "create", "--driver-config-json", "{}"],
+      { encoding: "utf8" },
     );
-    expect(fs.readFileSync(firstPolicy, "utf8")).toBe(firstOriginal);
-    expect(fs.readFileSync(invalidPolicy, "utf8")).toBe(invalidOriginal);
+    expect(duplicateConfig.status).toBe(64);
+    expect(duplicateConfig.stderr).toContain("refusing duplicate --driver-config-json");
   } finally {
+    wrapper.remove();
     fs.rmSync(fixture, { recursive: true, force: true });
   }
+  expect(fs.existsSync(wrapper.directory)).toBe(false);
 });
 
 function writeCustomPluginVersion(version: WeatherFixtureVersion): void {
@@ -436,16 +584,39 @@ printf '%s\\n' "$actual"`),
   };
 }
 
+async function assertExdevTmpfsMounted(sandbox: SandboxClient, phase: string): Promise<boolean> {
+  const result = await sandbox.execShell(
+    SANDBOX_NAME,
+    trustedSandboxShellScript(`set -eu
+awk -v target='${EXDEV_TMPFS_MOUNT}' '$5 == target { found = 1 } END { exit found ? 0 : 1 }' /proc/self/mountinfo
+mkdir -p ${EXDEV_TMPFS_SOURCE}
+test -d ${EXDEV_TMPFS_SOURCE}
+mount_device=$(stat -c '%d' ${EXDEV_TMPFS_MOUNT})
+tmp_device=$(stat -c '%d' /tmp)
+test "$mount_device" != "$tmp_device"
+printf 'tmpfs_mount=%s source=%s mount_device=%s tmp_device=%s\n' '${EXDEV_TMPFS_MOUNT}' '${EXDEV_TMPFS_SOURCE}' "$mount_device" "$tmp_device"`),
+    {
+      artifactName: `openclaw-plugin-exdev-tmpfs-${phase}`,
+      env: liveEnv(),
+      timeoutMs: PROBE_TIMEOUT_MS,
+    },
+  );
+  expect(result.exitCode, resultText(result)).toBe(0);
+  expect(resultText(result)).toContain(`tmpfs_mount=${EXDEV_TMPFS_MOUNT}`);
+  expect(resultText(result)).toContain(`source=${EXDEV_TMPFS_SOURCE}`);
+  return true;
+}
+
 const runtimeDepsReplacementProbeSource = `set -eu
 rm -rf /sandbox/.openclaw/plugin-runtime-deps/exdev-guard 2>/dev/null || true
-rm -rf /dev/shm/nemoclaw-exdev-source 2>/dev/null || true
-mkdir -p /dev/shm/nemoclaw-exdev-source /sandbox/.openclaw/plugin-runtime-deps/exdev-guard
-printf 'ok\n' >/dev/shm/nemoclaw-exdev-source/package.txt
-source_device=$(stat -c '%d' /dev/shm/nemoclaw-exdev-source)
+rm -rf ${EXDEV_TMPFS_SOURCE}
+mkdir -p ${EXDEV_TMPFS_SOURCE} /sandbox/.openclaw/plugin-runtime-deps/exdev-guard
+printf 'ok\n' >${EXDEV_TMPFS_SOURCE}/package.txt
+source_device=$(stat -c '%d' ${EXDEV_TMPFS_SOURCE})
 target_device=$(stat -c '%d' /sandbox/.openclaw/plugin-runtime-deps/exdev-guard)
 printf 'source_device=%s target_device=%s\n' "$source_device" "$target_device"
 if [ "$source_device" = "$target_device" ]; then
-  printf 'EXDEV guard did not get distinct filesystems for /dev/shm and /sandbox plugin-runtime-deps\n' >&2
+  printf 'EXDEV guard did not get distinct filesystems for ${EXDEV_TMPFS_SOURCE} and /sandbox plugin-runtime-deps\n' >&2
   exit 2
 fi
 node --input-type=module - <<'NODE'
@@ -502,9 +673,9 @@ function replaceNodeModulesDir(targetDir, sourceDir) {
 }
 assertLegacySourceSideStagingFailsWithExdev(
   '/sandbox/.openclaw/plugin-runtime-deps/exdev-guard/source-side-regression/node_modules',
-  '/dev/shm/nemoclaw-exdev-source',
+  '${EXDEV_TMPFS_SOURCE}',
 );
-replaceNodeModulesDir('/sandbox/.openclaw/plugin-runtime-deps/exdev-guard/node_modules', '/dev/shm/nemoclaw-exdev-source');
+replaceNodeModulesDir('/sandbox/.openclaw/plugin-runtime-deps/exdev-guard/node_modules', '${EXDEV_TMPFS_SOURCE}');
 console.log('runtime deps replacement completed');
 NODE`;
 
@@ -526,8 +697,10 @@ liveTest(
         "release-matched peer/dev dependencies prune private OpenClaw and link the host runtime",
         "gateway log, runtime inspection, tools.catalog, and tools.invoke prove weather/get_weather",
         "custom-plugin v1 survives restart and a rebuilt v2 replaces it without backup rollback",
-        "sandbox proves /dev/shm and plugin-runtime-deps are distinct devices",
-        "legacy source-side staging fails with EXDEV across the same /dev/shm to plugin-runtime-deps boundary",
+        `test-only driver config mounts tmpfs at ${EXDEV_TMPFS_MOUNT} without changing production policies`,
+        "stock OpenClaw policy source bytes remain unchanged through onboard and rebuild",
+        `sandbox proves ${EXDEV_TMPFS_SOURCE} and plugin-runtime-deps are distinct devices`,
+        `legacy source-side staging fails with EXDEV across the same ${EXDEV_TMPFS_SOURCE} to plugin-runtime-deps boundary`,
         "OpenClaw-style target-side plugin runtime-deps replacement completes without EXDEV",
       ],
       sandboxBaseImageRef: SANDBOX_BASE_IMAGE_REF,
@@ -586,22 +759,38 @@ liveTest(
       }),
     );
 
-    const policySourcePatch = patchPoliciesForDevShm();
-    cleanup.add("restore EXDEV policy fixture edits", policySourcePatch.restore);
+    const policySourceSnapshot = snapshotPolicySources();
+    const pinnedOpenshell = await installAndResolvePinnedOpenShell(host);
+    const openshellWrapper = createOpenShellTmpfsWrapper(pinnedOpenshell.cli);
+    cleanup.add("remove EXDEV OpenShell PATH wrapper", openshellWrapper.remove);
+    expect(
+      hasRequiredOpenshellMessagingFeatures({
+        openshellBin: openshellWrapper.executable,
+        gatewayBin: pinnedOpenshell.gateway,
+        sandboxBin: pinnedOpenshell.sandbox,
+        allowExternalGatewayBin: true,
+        allowExternalSandboxBin: true,
+      }),
+      "OpenShell wrapper and explicit pinned components must pass onboard coherence preflight",
+    ).toBe(true);
     const removeCustomDockerfile = createCustomPluginDockerfile();
     cleanup.add("remove custom weather-plugin Dockerfile", removeCustomDockerfile);
 
-    const sandboxEnv = liveEnv({
-      COMPATIBLE_API_KEY: "nemoclaw-exdev-dummy-key",
-      NEMOCLAW_ENDPOINT_URL: "http://host.openshell.internal:65535/v1",
-      NEMOCLAW_MODEL: "nemoclaw-exdev-probe",
-      NEMOCLAW_PROVIDER_KEY: "nemoclaw-exdev-dummy-key",
-      NEMOCLAW_SANDBOX_NAME: SANDBOX_NAME,
-      NEMOCLAW_SANDBOX_BASE_IMAGE_REF: SANDBOX_BASE_IMAGE_REF,
-      NEMOCLAW_POLICY_MODE: "skip",
-      NEMOCLAW_PREFERRED_API: "openai-completions",
-      NEMOCLAW_PROVIDER: "custom",
-    });
+    const sandboxEnv = withOpenShellWrapperEnv(
+      liveEnv({
+        COMPATIBLE_API_KEY: "nemoclaw-exdev-dummy-key",
+        NEMOCLAW_ENDPOINT_URL: "http://host.openshell.internal:65535/v1",
+        NEMOCLAW_MODEL: "nemoclaw-exdev-probe",
+        NEMOCLAW_PROVIDER_KEY: "nemoclaw-exdev-dummy-key",
+        NEMOCLAW_SANDBOX_NAME: SANDBOX_NAME,
+        NEMOCLAW_SANDBOX_BASE_IMAGE_REF: SANDBOX_BASE_IMAGE_REF,
+        NEMOCLAW_POLICY_MODE: "skip",
+        NEMOCLAW_PREFERRED_API: "openai-completions",
+        NEMOCLAW_PROVIDER: "custom",
+      }),
+      openshellWrapper,
+      pinnedOpenshell,
+    );
 
     const onboard = await host.command(
       "node",
@@ -626,6 +815,8 @@ liveTest(
     expect(onboard.exitCode, onboardText).toBe(0);
     expect(onboardText).toMatch(/Creating sandbox|Sandbox '.+' created/);
     expect(onboardText).toContain("Deployment verified");
+    const tmpfsMountedAfterOnboard = await assertExdevTmpfsMounted(sandbox, "after-onboard");
+    assertPolicySourcesUnchanged(policySourceSnapshot, "onboard");
 
     const weatherAfterOnboard = await assertWeatherPluginRuntime(sandbox, "after-onboard", "v1");
 
@@ -652,13 +843,15 @@ liveTest(
       timeoutMs: REBUILD_TIMEOUT_MS,
     });
     expect(rebuild.exitCode, resultText(rebuild)).toBe(0);
+    const tmpfsMountedAfterRebuild = await assertExdevTmpfsMounted(sandbox, "after-rebuild");
+    assertPolicySourcesUnchanged(policySourceSnapshot, "rebuild");
     const weatherAfterRebuild = await assertWeatherPluginRuntime(sandbox, "after-rebuild", "v2");
     expect(weatherAfterRebuild.imageMarker).not.toBe(weatherAfterOnboard.imageMarker);
 
     const df = await sandbox.execShell(
       SANDBOX_NAME,
       trustedSandboxShellScript(
-        "mkdir -p /sandbox/.openclaw/plugin-runtime-deps && df -PT / /tmp /dev/shm /sandbox /sandbox/.openclaw/plugin-runtime-deps",
+        `mkdir -p ${EXDEV_TMPFS_SOURCE} /sandbox/.openclaw/plugin-runtime-deps && df -PT / /tmp ${EXDEV_TMPFS_MOUNT} ${EXDEV_TMPFS_SOURCE} /sandbox /sandbox/.openclaw/plugin-runtime-deps`,
       ),
       {
         artifactName: "openclaw-plugin-exdev-filesystem-layout",
@@ -668,7 +861,7 @@ liveTest(
     );
     await artifacts.writeText("filesystem-layout.txt", resultText(df));
     expect(df.exitCode, resultText(df)).toBe(0);
-    expect(resultText(df)).toContain("/dev/shm");
+    expect(resultText(df)).toContain(EXDEV_TMPFS_MOUNT);
 
     const probe = await sandbox.execShell(SANDBOX_NAME, runtimeDepsReplacementProbe, {
       artifactName: "openclaw-plugin-exdev-runtime-deps-replacement",
@@ -685,9 +878,6 @@ liveTest(
     expect(probeText).toContain("source-side staging failure self-check completed");
     expect(probeText).toContain("runtime deps replacement completed");
 
-    policySourcePatch.restore();
-    policySourcePatch.assertRestored();
-
     await artifacts.writeJson("target-result.json", {
       id: "openclaw-plugin-runtime-exdev",
       onboardExitCode: onboard.exitCode,
@@ -695,6 +885,7 @@ liveTest(
       rebuildExitCode: rebuild.exitCode,
       filesystemProbeExitCode: df.exitCode,
       runtimeDepsProbeExitCode: probe.exitCode,
+      testOnlyTmpfsSource: EXDEV_TMPFS_SOURCE,
       assertions: {
         weatherAfterOnboard:
           weatherAfterOnboard.inspectLoaded &&
@@ -721,7 +912,8 @@ liveTest(
         ),
         noExdevSignature: !EXDEV_PATTERNS.some((pattern) => pattern.test(probeText)),
         successMarker: probeText.includes("runtime deps replacement completed"),
-        policySourcesRestored: true,
+        testOnlyTmpfsMounted: tmpfsMountedAfterOnboard && tmpfsMountedAfterRebuild,
+        stockPolicySourcesUnchanged: true,
       },
     });
   },
