@@ -669,23 +669,22 @@ function discoverFreshOpenClawPluginExtensionDirs(
     maxBuffer: 4 * 1024 * 1024,
   });
   if (result.status !== 0 || result.error || result.signal || !result.stdout) {
-    const detail =
-      (result.stderr?.toString() || "").trim() ||
-      result.error?.message ||
-      (result.signal ? `signal ${result.signal}` : `exit ${String(result.status)}`);
-    return { ok: false, error: `could not read fresh OpenClaw plugin install registry: ${detail}` };
+    return { ok: false, error: "could not read fresh OpenClaw plugin install registry" };
   }
 
   let config: unknown;
   try {
     config = JSON.parse(result.stdout.toString("utf-8")) as unknown;
-  } catch (error) {
+  } catch {
     return {
       ok: false,
-      error: `fresh OpenClaw plugin install registry is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+      error: "fresh OpenClaw plugin install registry is not valid JSON",
     };
   }
-  return parseFreshOpenClawPluginExtensionDirs(config, dir);
+  const parsed = parseFreshOpenClawPluginExtensionDirs(config, dir);
+  return parsed.ok
+    ? parsed
+    : { ok: false, error: "fresh OpenClaw plugin install registry failed validation" };
 }
 
 function normalizeStateFileSpec(spec: AgentStateFile | StateFileSpec): StateFileSpec | null {

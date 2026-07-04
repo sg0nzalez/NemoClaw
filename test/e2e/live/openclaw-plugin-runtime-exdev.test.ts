@@ -26,6 +26,26 @@ const CUSTOM_PLUGIN_VERSION_SOURCE = path.join(
   REPO_ROOT,
   "Dockerfile.e2e-weather-plugin.version.ts",
 );
+const WEATHER_FIXTURE_PACKAGE_PATH = path.join(
+  REPO_ROOT,
+  "test/e2e/fixtures/plugins/weather/package.json",
+);
+const WEATHER_FIXTURE_PACKAGE = JSON.parse(
+  fs.readFileSync(WEATHER_FIXTURE_PACKAGE_PATH, "utf8"),
+) as {
+  openclaw?: { build?: { openclawVersion?: unknown } };
+  devDependencies?: { openclaw?: unknown };
+};
+const WEATHER_OPENCLAW_VERSION = WEATHER_FIXTURE_PACKAGE.openclaw?.build?.openclawVersion;
+if (
+  typeof WEATHER_OPENCLAW_VERSION !== "string" ||
+  !/^\d+(?:\.\d+)+$/.test(WEATHER_OPENCLAW_VERSION)
+) {
+  throw new Error("weather fixture must declare a canonical OpenClaw build version");
+}
+// Keep the dependency layer reproducible while the current managed Dockerfile
+// upgrades its OpenClaw runtime to WEATHER_OPENCLAW_VERSION. The assertions in
+// createCustomPluginDockerfile and the in-sandbox probe make that boundary explicit.
 const SANDBOX_BASE_IMAGE_REF = "ghcr.io/nvidia/nemoclaw/sandbox-base:v0.0.71";
 const TOOL_DISCLOSURE_ENV_REFERENCE = "${NEMOCLAW_TOOL_DISCLOSURE}";
 const SANDBOX_NAME = process.env.NEMOCLAW_SANDBOX_NAME ?? "e2e-openclaw-plugin-exdev";
@@ -172,6 +192,14 @@ function createCustomPluginDockerfile(): () => void {
     source.match(/^ARG BASE_IMAGE=ghcr\.io\/nvidia\/nemoclaw\/sandbox-base:latest$/gm)?.length,
   ).toBe(1);
   expect(source.match(/^FROM \$\{BASE_IMAGE\}$/gm)?.length, "expected one runtime stage").toBe(1);
+  expect(
+    source.match(/^ARG OPENCLAW_VERSION=([0-9.]+)$/m)?.[1],
+    "weather fixture SDK must match the current managed runtime target",
+  ).toBe(WEATHER_OPENCLAW_VERSION);
+  expect(
+    WEATHER_FIXTURE_PACKAGE.devDependencies?.openclaw,
+    "weather fixture devDependency must match its declared OpenClaw build target",
+  ).toBe(WEATHER_OPENCLAW_VERSION);
 
   const runtime = source
     .replace(baseImageAnchor, `ARG BASE_IMAGE=${SANDBOX_BASE_IMAGE_REF}\n`)
@@ -278,6 +306,7 @@ async function assertWeatherPluginRuntime(
     trustedSandboxShellScript(`set -eu
 test -s /tmp/gateway.log
 test -s /usr/local/share/nemoclaw/e2e-weather-plugin.sha256
+test "$(openclaw --version 2>/dev/null | awk '{print $2}')" = "${WEATHER_OPENCLAW_VERSION}"
 test -L /sandbox/.openclaw/extensions/weather/node_modules/openclaw
 test "$(realpath /sandbox/.openclaw/extensions/weather/node_modules/openclaw)" = /usr/local/lib/node_modules/openclaw
 expected=$(cat /usr/local/share/nemoclaw/e2e-weather-plugin.sha256)
@@ -468,6 +497,7 @@ liveTest(
         "OpenClaw-style target-side plugin runtime-deps replacement completes without EXDEV",
       ],
       sandboxBaseImageRef: SANDBOX_BASE_IMAGE_REF,
+      openclawVersion: WEATHER_OPENCLAW_VERSION,
     });
 
     const docker = await host.command("docker", ["info"], {

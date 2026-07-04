@@ -228,13 +228,20 @@ process.exit(0);
 
       fs.writeFileSync(
         freshRegistryPath,
-        '{"version":1,"installRecords":{"../weather":{"installPath":"/sandbox/.openclaw/extensions/../weather"}}}',
+        JSON.stringify({
+          version: 1,
+          installRecords: {
+            "\u001b[31m../weather": {
+              installPath: "/sandbox/.openclaw/extensions/../weather",
+            },
+          },
+        }),
       );
       const rejected = sandboxState.restoreSandboxState("alpha", manifest.backupPath, {
         preserveFreshOpenClawPluginInstalls: true,
       });
       expect(rejected.success).toBe(false);
-      expect(rejected.error).toMatch(/unsafe plugin install id/);
+      expect(rejected.error).toBe("fresh OpenClaw plugin install registry failed validation");
       expect(fs.readFileSync(path.join(extensionsDir, "weather", "marker.txt"), "utf-8")).toBe(
         "fresh-weather-v2\n",
       );

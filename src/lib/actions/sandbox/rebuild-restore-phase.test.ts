@@ -14,6 +14,36 @@ describe("rebuild policy restore fidelity", () => {
     vi.restoreAllMocks();
   });
 
+  it("surfaces a fresh OpenClaw plugin registry precondition failure", () => {
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const log = vi.fn();
+    vi.spyOn(sandboxState, "restoreSandboxState").mockReturnValue({
+      success: false,
+      restoredDirs: [],
+      restoredFiles: [],
+      failedDirs: ["extensions"],
+      failedFiles: [],
+      error: "could not read fresh OpenClaw plugin install registry",
+    });
+
+    const result = runRebuildRestorePhase({
+      sandboxName: "alpha",
+      backupManifest: { backupPath: "/tmp/rebuild-backup" } as never,
+      policyPresets: [],
+      customPolicies: [],
+      log,
+    });
+
+    expect(result.restoreSucceeded).toBe(false);
+    expect(consoleError).toHaveBeenCalledWith(
+      "  Restore blocked: could not read fresh OpenClaw plugin install registry",
+    );
+    expect(log).toHaveBeenCalledWith(
+      expect.stringContaining("error=could not read fresh OpenClaw plugin install registry"),
+    );
+  });
+
   it("replays custom web-policy names from exact content instead of same-name built-ins", () => {
     vi.spyOn(console, "log").mockImplementation(() => undefined);
     vi.spyOn(console, "error").mockImplementation(() => undefined);
