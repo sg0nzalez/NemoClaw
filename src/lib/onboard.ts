@@ -2980,10 +2980,7 @@ async function createSandboxWithBaseImageResolution(
     },
     {
       discoverFreshOpenClawImagePluginInstalls: (name) =>
-        openClawPluginRestore.discoverFreshOpenClawImagePluginInstalls(name, {
-          getSshConfig: sandboxState.getSshConfig,
-          sshArgs: sandboxState.sshArgs,
-        }),
+        openClawPluginRestore.discoverFreshOpenClawImagePluginInstalls(name, sandboxState),
       restoreRecreatedSandboxState: sandboxState.restoreRecreatedSandboxState,
       getDcodeSelectionDrift: (name, selectedProvider, selectedModel, selectedApi) =>
         getDcodeSelectionDrift(name, selectedProvider, selectedModel, selectedApi, {
