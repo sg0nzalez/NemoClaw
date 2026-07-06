@@ -3,10 +3,15 @@
 
 import fs from "node:fs";
 import path from "node:path";
-
+import { runOpenshell } from "../../adapters/openshell/runtime";
 import { type AgentDefinition, loadAgent } from "../../agent/defs";
 import { CLI_DISPLAY_NAME, CLI_NAME } from "../../cli/branding";
 import { prompt as askPrompt, getCredential } from "../../credentials/store";
+import {
+  type PolicyAddOptions,
+  type PolicyRemoveOptions,
+  parsePolicyAddOptions,
+} from "../../domain/policy-channel";
 import { recoverNamedGatewayRuntime } from "../../gateway-runtime-action";
 import {
   type ChannelManifest,
@@ -27,15 +32,11 @@ import {
   toMessagingAgentId,
   tryGetMessagingAgentId,
 } from "../../messaging";
+import { findChannelConflicts } from "../../messaging/applier/conflict-detection/registry";
 import { hydrateMessagingChannelConfig } from "../../messaging-channel-config";
-import { hashCredential } from "../../security/credential-hash";
-import { getSandboxTargetGatewayName } from "./gateway-target";
-
-const { isNonInteractive } = require("../../onboard") as { isNonInteractive: () => boolean };
-const onboardProviders = require("../../onboard/providers");
-
 import { filterSetupPolicyPresetsForAgent } from "../../onboard/agent-policy-presets";
 import { getStoredMessagingChannelConfig } from "../../onboard/messaging-config";
+import { getMessagingToken } from "../../onboard/messaging-token";
 import * as policies from "../../policy";
 import { formatPolicyListPresetRow } from "../../policy/policy-list-display";
 
@@ -60,13 +61,20 @@ import {
   knownChannelNames,
   persistChannelTokens,
 } from "../../sandbox/channels";
+import { hashCredential } from "../../security/credential-hash";
 import { withSandboxMutationLock } from "../../state/mcp-lifecycle-lock";
+import * as onboardSession from "../../state/onboard-session";
 import * as registry from "../../state/registry";
 import { isDockerRuntimeDown, printDockerRuntimeDownGuidance } from "./gateway-failure-classifier";
+import { getSandboxTargetGatewayName } from "./gateway-target";
 import { ensureMessagingHostForwardAfterRebuild } from "./messaging-host-forward-lifecycle";
+import { policyChannelDependencies } from "./policy-channel-dependencies";
 import { refreshSandboxPolicyContextFile } from "./policy-context-refresh";
 import { executeSandboxCommand, executeSandboxExecCommand } from "./process-recovery";
-import { rebuildSandbox } from "./rebuild";
+
+function isNonInteractive(): boolean {
+  return process.env.NEMOCLAW_NON_INTERACTIVE === "1";
+}
 
 type ChannelMutationOptions = {
   channel?: string;
@@ -411,9 +419,6 @@ async function checkChannelAddConflict(
   }
   if (Object.keys(credentialHashes).length === 0) return true;
 
-  const { findChannelConflicts } =
-    require("../../messaging/applier") as typeof import("../../messaging/applier");
-
   let conflicts: ReturnType<typeof findChannelConflicts>;
   try {
     conflicts = findChannelConflicts(
@@ -708,7 +713,7 @@ async function promptAndRebuild(sandboxName: string, actionDesc: string): Promis
     );
     return false;
   }
-  await rebuildSandbox(sandboxName, ["--yes"]);
+  await policyChannelDependencies.rebuildSandbox(sandboxName, ["--yes"]);
   return true;
 }
 
@@ -1122,7 +1127,7 @@ async function rollbackChannelAdd(
           envKey,
           token,
         }));
-        onboardProviders.upsertMessagingProviders(priorTokenDefs, runOpenshell, {
+        policyChannelDependencies.upsertMessagingProviders(priorTokenDefs, {
           bestEffort: true,
         });
       } catch (err) {
