@@ -53,6 +53,7 @@ import {
 import type { CustomPolicyEntry } from "./registry.js";
 import * as registry from "./registry.js";
 import { isSshTransportFailure } from "./ssh-transport.js";
+import type { StateFileRestorePolicy } from "./state-file-restore-policy.js";
 import { runTarListing } from "./tar-listing.js";
 
 const HOME_DIR = path.resolve(process.env.HOME || os.homedir());
@@ -157,6 +158,11 @@ export interface RestoreOptions {
    * directories over the backup.
    */
   preserveFreshOpenClawPluginInstalls?: boolean;
+}
+
+export interface RestoreOptions {
+  /** Optional file-specific restore capability authorized by the caller. */
+  stateFileRestorePolicy?: StateFileRestorePolicy;
 }
 
 export interface TarValidationResult {
@@ -944,11 +950,9 @@ function buildStateFileRestoreInput(
   sandboxName: string,
   dir: string,
   spec: StateFileSpec,
-  backupPath: string,
+  backupContents: Buffer,
   mergeOpenClawConfig: boolean,
 ): Buffer | null {
-  const localPath = path.join(backupPath, spec.path);
-  const backupContents = readFileSync(localPath);
   if (!mergeOpenClawConfig) return backupContents;
 
   const result = buildOpenClawConfigRestoreInputFromSandbox({
@@ -966,24 +970,30 @@ function buildStateFileRestoreInput(
 function restoreStateFile(
   configFile: string,
   sandboxName: string,
+  agentType: string | null | undefined,
   dir: string,
   spec: StateFileSpec,
   backupPath: string,
   mergeOpenClawConfig = false,
+  stateFileRestorePolicy?: StateFileRestorePolicy,
 ): boolean {
   const localPath = path.join(backupPath, spec.path);
   if (!existsSync(localPath)) return true;
 
-  const command = buildStateFileRestoreCommand(dir, spec, mergeOpenClawConfig);
+  const backupContents = readFileSync(localPath);
+  const plan = stateFileRestorePolicy?.(agentType, dir, spec, backupContents);
+  const command = plan?.command ?? buildStateFileRestoreCommand(dir, spec, mergeOpenClawConfig);
   _log(`Restoring state file ${spec.path} (${spec.strategy})`);
-  const input = buildStateFileRestoreInput(
-    configFile,
-    sandboxName,
-    dir,
-    spec,
-    backupPath,
-    mergeOpenClawConfig,
-  );
+  const input =
+    plan?.input ??
+    buildStateFileRestoreInput(
+      configFile,
+      sandboxName,
+      dir,
+      spec,
+      backupContents,
+      mergeOpenClawConfig,
+    );
   if (input === null) return false;
 
   const result = spawnSync("ssh", [...sshArgs(configFile, sandboxName), command], {
@@ -1627,10 +1637,12 @@ export function restoreSandboxState(
         restoreStateFile(
           configFile,
           sandboxName,
+          manifest.agentType,
           dir,
           spec,
           backupPath,
           shouldMergeOpenClawConfigStateFile(manifest.agentType, dir, spec),
+          options.stateFileRestorePolicy,
         )
       ) {
         restoredFiles.push(spec.path);
