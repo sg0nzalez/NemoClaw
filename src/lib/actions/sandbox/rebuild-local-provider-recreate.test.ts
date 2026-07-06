@@ -214,7 +214,7 @@ describe("rebuild local-provider recreation", () => {
     expect(harness.restoreSandboxStateSpy).toHaveBeenCalledWith(
       "alpha",
       "/tmp/nemoclaw-rebuild-backup",
-      { preserveFreshOpenClawPluginInstalls: true },
+      { targetAgentType: "openclaw" },
     );
   });
 });

@@ -44,7 +44,7 @@ describe("prepared rebuild recovery", () => {
     expect(harness.restoreSandboxStateSpy).toHaveBeenCalledWith(
       "alpha",
       recoveryManifest.backupPath,
-      { preserveFreshOpenClawPluginInstalls: true },
+      { targetAgentType: "openclaw" },
     );
   });
 

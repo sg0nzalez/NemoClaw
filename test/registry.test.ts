@@ -105,6 +105,46 @@ describe("registry", () => {
     });
   });
 
+  it("round-trips absent, known-empty, populated, and cloned image-plugin provenance", () => {
+    const weatherInstall = {
+      id: "weather",
+      installPath: "/sandbox/.openclaw/extensions/weather",
+    };
+    registry.registerSandbox({ name: "legacy", agent: "openclaw" });
+    registry.registerSandbox({
+      name: "known-empty",
+      agent: "openclaw",
+      openclawImagePluginInstalls: [],
+    });
+    registry.registerSandbox({
+      name: "populated",
+      agent: "openclaw",
+      openclawImagePluginInstalls: [weatherInstall],
+    });
+    registry.registerSandbox({
+      ...registry.getSandbox("populated"),
+      name: "populated-clone",
+    });
+    registry.registerSandbox({
+      ...registry.getSandbox("known-empty"),
+      name: "known-empty-clone",
+    });
+
+    const data = JSON.parse(fs.readFileSync(regFile, "utf-8")).sandboxes;
+    expect(registry.getSandbox("legacy").openclawImagePluginInstalls).toBeUndefined();
+    expect(registry.getSandbox("known-empty").openclawImagePluginInstalls).toEqual([]);
+    expect(registry.getSandbox("known-empty-clone").openclawImagePluginInstalls).toEqual([]);
+    expect(registry.getSandbox("populated").openclawImagePluginInstalls).toEqual([weatherInstall]);
+    expect(registry.getSandbox("populated-clone").openclawImagePluginInstalls).toEqual([
+      weatherInstall,
+    ]);
+    expect(data.legacy.openclawImagePluginInstalls).toBeUndefined();
+    expect(data["known-empty"].openclawImagePluginInstalls).toEqual([]);
+    expect(data["known-empty-clone"].openclawImagePluginInstalls).toEqual([]);
+    expect(data.populated.openclawImagePluginInstalls).toEqual([weatherInstall]);
+    expect(data["populated-clone"].openclawImagePluginInstalls).toEqual([weatherInstall]);
+  });
+
   it("preserves missing tool-disclosure state on reconstructed legacy rows", () => {
     registry.registerSandbox({ name: "legacy" });
 

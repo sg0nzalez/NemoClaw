@@ -2,13 +2,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { managedDcodeConfigRestorePolicy } from "../state/dcode-config-restore-input";
-import type { RestoreOptions, RestoreResult } from "../state/sandbox";
+import type {
+  OpenClawImagePluginInstall,
+  OpenClawManagedExtensionDiscoveryResult,
+} from "../state/openclaw-plugin-restore";
+import type { RecreatedSandboxRestoreOptions, RestoreResult } from "../state/sandbox";
 import type { SelectionDrift } from "./selection-drift";
 
 export type CreatedSandboxFinalizationOptions = {
   sandboxName: string;
   restoreBackupPath: string | null;
   preUpgradeBackup: boolean;
+  targetAgentType: string;
   validateManagedDcode: boolean;
   provider: string;
   model: string;
@@ -16,10 +21,13 @@ export type CreatedSandboxFinalizationOptions = {
 };
 
 export type CreatedSandboxFinalizationDeps = {
-  restoreSandboxState(
+  discoverFreshOpenClawImagePluginInstalls(
+    sandboxName: string,
+  ): OpenClawManagedExtensionDiscoveryResult;
+  restoreRecreatedSandboxState(
     sandboxName: string,
     backupPath: string,
-    options?: RestoreOptions,
+    options: RecreatedSandboxRestoreOptions,
   ): RestoreResult;
   getDcodeSelectionDrift(
     sandboxName: string,
@@ -27,7 +35,7 @@ export type CreatedSandboxFinalizationDeps = {
     model: string,
     preferredInferenceApi: string | null,
   ): SelectionDrift;
-  register(): void;
+  register(openclawImagePluginInstalls?: readonly OpenClawImagePluginInstall[]): void;
   note(message: string): void;
   error(message: string): void;
   exitProcess(code: number): never;
@@ -38,18 +46,37 @@ export function finalizeCreatedSandbox(
   options: CreatedSandboxFinalizationOptions,
   deps: CreatedSandboxFinalizationDeps,
 ): void {
+  let freshOpenClawImagePluginInstalls: readonly OpenClawImagePluginInstall[] | undefined;
+  if (options.targetAgentType === "openclaw") {
+    const discovery = deps.discoverFreshOpenClawImagePluginInstalls(options.sandboxName);
+    if (!discovery.ok) {
+      deps.error(
+        `  OpenClaw image plugin discovery failed for sandbox '${options.sandboxName}': ${discovery.error}`,
+      );
+      deps.error("  State was not restored and registry metadata was not updated.");
+      return deps.exitProcess(1);
+    }
+    freshOpenClawImagePluginInstalls = discovery.pluginInstalls;
+  }
+
   if (options.restoreBackupPath) {
     deps.note(
       options.preUpgradeBackup
         ? "  Restoring workspace state from pre-upgrade backup..."
         : "  Restoring workspace state from pre-recreate backup...",
     );
-    const restore = deps.restoreSandboxState(
+    const restore = deps.restoreRecreatedSandboxState(
       options.sandboxName,
       options.restoreBackupPath,
-      options.validateManagedDcode
-        ? { stateFileRestorePolicy: managedDcodeConfigRestorePolicy }
-        : undefined,
+      {
+        targetAgentType: options.targetAgentType,
+        ...(freshOpenClawImagePluginInstalls !== undefined
+          ? { freshOpenClawImagePluginInstalls }
+          : {}),
+        ...(options.validateManagedDcode
+          ? { stateFileRestorePolicy: managedDcodeConfigRestorePolicy }
+          : {}),
+      },
     );
     if (restore.success) {
       deps.note(
@@ -90,5 +117,5 @@ export function finalizeCreatedSandbox(
     }
   }
 
-  deps.register();
+  deps.register(freshOpenClawImagePluginInstalls);
 }

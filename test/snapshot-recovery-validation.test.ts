@@ -81,6 +81,41 @@ describe("prepared rebuild backup recovery validation (#6114)", () => {
     });
   });
 
+  it("round-trips validated OpenClaw image-plugin provenance through recovery", () => {
+    const openclawImagePluginInstalls = [
+      { id: "weather", installPath: "/sandbox/.openclaw/extensions/weather" },
+      { id: "npm-plugin", installPath: "/sandbox/.openclaw/npm/node_modules/npm-plugin" },
+    ];
+    writeBackup("alpha", "2026-07-01T06-50-42-045Z", { openclawImagePluginInstalls });
+    const latest = sandboxState.getLatestBackup("alpha");
+
+    expect(latest?.openclawImagePluginInstalls).toEqual(openclawImagePluginInstalls);
+    expect(sandboxState.validateRebuildRecoveryManifest("alpha", "openclaw", latest!)).toEqual({
+      ok: true,
+      manifest: expect.objectContaining({ openclawImagePluginInstalls }),
+    });
+  });
+
+  it.each([
+    ["a non-array value", { weather: "/sandbox/.openclaw/extensions/weather" }],
+    [
+      "an unsafe plugin id",
+      [{ id: "../weather", installPath: "/sandbox/.openclaw/extensions/weather" }],
+    ],
+    ["a relative install path", [{ id: "weather", installPath: "extensions/weather" }]],
+    [
+      "duplicate install paths",
+      [
+        { id: "weather", installPath: "/sandbox/.openclaw/extensions/weather" },
+        { id: "weather-copy", installPath: "/sandbox/.openclaw/extensions/weather" },
+      ],
+    ],
+  ])("rejects image-plugin provenance with %s", (_case, openclawImagePluginInstalls) => {
+    writeBackup("alpha", "2026-07-01T06-50-42-046Z", { openclawImagePluginInstalls });
+
+    expect(sandboxState.getLatestBackup("alpha")).toBeNull();
+  });
+
   it("rejects a persisted manifest that disappears or becomes malformed after discovery", () => {
     const candidate = writeBackup("alpha", "2026-07-01T06-50-42-044Z", {
       agentVersion: "2026.5.27",

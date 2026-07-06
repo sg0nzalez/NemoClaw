@@ -4,7 +4,11 @@
 import { spawnSync } from "child_process";
 
 import { shellQuote } from "../runner.js";
-import { mergeOpenClawRestoredConfig } from "./openclaw-config-merge.js";
+import {
+  mergeOpenClawRestoredConfig,
+  type OpenClawConfigMergeOptions,
+} from "./openclaw-config-merge.js";
+import type { OpenClawImagePluginInstall } from "./openclaw-plugin-restore.js";
 
 export interface OpenClawConfigStateFileSpec {
   path: string;
@@ -47,6 +51,7 @@ export interface OpenClawConfigRestoreFromSandboxOptions {
   backupContents: Buffer;
   dir: string;
   log?: (message: string) => void;
+  previousImagePluginInstalls?: readonly OpenClawImagePluginInstall[];
   specPath: string;
   sshArgs: readonly string[];
 }
@@ -92,6 +97,7 @@ function readCurrentOpenClawConfig(
 export function buildOpenClawConfigRestoreInput(
   backupContents: Buffer,
   currentContents: Buffer | null,
+  options: OpenClawConfigMergeOptions = {},
 ): OpenClawConfigRestoreInputResult {
   if (!currentContents) {
     return { ok: false, error: "openclaw.json selective merge requires current rebuilt config" };
@@ -100,7 +106,7 @@ export function buildOpenClawConfigRestoreInput(
   try {
     const backedUpConfig = JSON.parse(backupContents.toString("utf-8")) as unknown;
     const currentConfig = JSON.parse(currentContents.toString("utf-8")) as unknown;
-    const merged = mergeOpenClawRestoredConfig(backedUpConfig, currentConfig);
+    const merged = mergeOpenClawRestoredConfig(backedUpConfig, currentConfig, options);
     return { ok: true, input: Buffer.from(`${JSON.stringify(merged, null, 2)}\n`) };
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
@@ -115,11 +121,13 @@ export function buildOpenClawConfigRestoreInputFromSandbox({
   backupContents,
   dir,
   log = () => {},
+  previousImagePluginInstalls,
   specPath,
   sshArgs,
 }: OpenClawConfigRestoreFromSandboxOptions): OpenClawConfigRestoreInputResult {
   return buildOpenClawConfigRestoreInput(
     backupContents,
     readCurrentOpenClawConfig(sshArgs, dir, specPath, log),
+    { previousImagePluginInstalls },
   );
 }

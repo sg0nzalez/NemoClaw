@@ -21,6 +21,7 @@ It does not waive review for production dependencies, and it must be revalidated
 
 Registry packages can later be found vulnerable or compromised, and downloaded package code still participates in fixture compilation and the test plugin runtime despite integrity verification and lifecycle-script suppression.
 The accepted residual risk is limited to this secret-free E2E lane with read-only contents permission and must be reconsidered on every fixture manifest or lockfile change.
+The release-matched `openclaw@2026.5.27` development graph currently has known advisories, but upgrading it independently would stop this fixture from testing the documented NemoClaw `v0.0.71` runtime contract.
 
 ## Compensating Controls
 
@@ -39,8 +40,9 @@ Run from `test/e2e/fixtures/plugins/weather`:
 npm audit --package-lock-only --ignore-scripts --json
 ```
 
-Revalidated on 2026-07-06: npm audit exited `0` and reported 0 info, low, moderate, high, or critical vulnerabilities across 308 total dependencies.
-The reviewed lockfile has SHA-256 `f32b55ad39698fee28a863f88739c99cebd5c7ab3970af4dd44019510a6e6572`, and every non-root package entry records both its resolved registry URL and integrity value.
+Revalidated on 2026-07-06: npm audit exited `1` and reported 9 vulnerable packages (3 moderate and 6 high; 0 info, low, or critical) across 374 total dependencies.
+The advisories are in the release-pinned OpenClaw development graph; the Docker build suppresses lifecycle scripts and prunes development and peer dependencies before copying the plugin into the runtime image.
+The reviewed lockfile has SHA-256 `1fa44d136d4bf5396f592dbf901da2c43740b38f1ebe52d23efc01ca0ba6f3da`, and every non-root package entry records both its resolved registry URL and integrity value.
 
 The audit is a point-in-time advisory check, not a substitute for the exact lockfile, lifecycle-script suppression, or secret-free workflow boundary.
 Rerun it whenever `package.json` or `package-lock.json` changes and again before merge if npm advisory state changes.

@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildFreshOpenClawPluginIndexSqliteReadCommand,
   parseFreshOpenClawPluginExtensionDirs,
+  parseOpenClawImagePluginInstalls,
 } from "./openclaw-plugin-restore";
 
 const OPENCLAW_DIR = "/sandbox/.openclaw";
@@ -108,7 +109,14 @@ describe("parseFreshOpenClawPluginExtensionDirs", () => {
         },
         OPENCLAW_DIR,
       ),
-    ).toEqual({ ok: true, extensionDirs: ["nemoclaw", "weather"] });
+    ).toEqual({
+      ok: true,
+      extensionDirs: ["nemoclaw", "weather"],
+      pluginInstalls: [
+        { id: "nemoclaw", installPath: `${OPENCLAW_DIR}/extensions/nemoclaw` },
+        { id: "weather", installPath: `${OPENCLAW_DIR}/extensions/weather` },
+      ],
+    });
   });
 
   it("ignores npm installs outside extensions and accepts scoped IDs with encoded directories", () => {
@@ -125,7 +133,16 @@ describe("parseFreshOpenClawPluginExtensionDirs", () => {
         },
         OPENCLAW_DIR,
       ),
-    ).toEqual({ ok: true, extensionDirs: ["foo+bar", "my plugin", "scope__weather"] });
+    ).toEqual({
+      ok: true,
+      extensionDirs: ["foo+bar", "my plugin", "scope__weather"],
+      pluginInstalls: expect.arrayContaining([
+        { id: "@scope/weather", installPath: `${OPENCLAW_DIR}/extensions/scope__weather` },
+        { id: "diagnostics", installPath: `${OPENCLAW_DIR}/npm/node_modules/diagnostics` },
+        { id: "foo+bar", installPath: `${OPENCLAW_DIR}/extensions/foo+bar` },
+        { id: "my plugin", installPath: `${OPENCLAW_DIR}/extensions/my plugin` },
+      ]),
+    });
   });
 
   it.each([
@@ -174,6 +191,59 @@ describe("parseFreshOpenClawPluginExtensionDirs", () => {
         { version: 1, installRecords: { weather: install(installPath) } },
         OPENCLAW_DIR,
       ),
-    ).toEqual({ ok: true, extensionDirs: [] });
+    ).toEqual({
+      ok: true,
+      extensionDirs: [],
+      pluginInstalls: [{ id: "weather", installPath }],
+    });
+  });
+});
+
+describe("parseOpenClawImagePluginInstalls", () => {
+  it("preserves known-empty provenance and validates populated records", () => {
+    expect(parseOpenClawImagePluginInstalls([], OPENCLAW_DIR)).toEqual({
+      ok: true,
+      extensionDirs: [],
+      pluginInstalls: [],
+    });
+    expect(
+      parseOpenClawImagePluginInstalls(
+        [
+          { id: "weather", installPath: `${OPENCLAW_DIR}/extensions/weather` },
+          { id: "npm-tool", installPath: `${OPENCLAW_DIR}/npm/node_modules/npm-tool` },
+        ],
+        OPENCLAW_DIR,
+      ),
+    ).toEqual({
+      ok: true,
+      extensionDirs: ["weather"],
+      pluginInstalls: [
+        { id: "npm-tool", installPath: `${OPENCLAW_DIR}/npm/node_modules/npm-tool` },
+        { id: "weather", installPath: `${OPENCLAW_DIR}/extensions/weather` },
+      ],
+    });
+  });
+
+  it.each([
+    ["unsafe ID", [{ id: "../weather", installPath: `${OPENCLAW_DIR}/extensions/weather` }]],
+    [
+      "duplicate ID",
+      [
+        { id: "weather", installPath: `${OPENCLAW_DIR}/extensions/weather` },
+        { id: "weather", installPath: `${OPENCLAW_DIR}/extensions/forecast` },
+      ],
+    ],
+    [
+      "duplicate install path",
+      [
+        { id: "weather", installPath: `${OPENCLAW_DIR}/extensions/weather` },
+        { id: "forecast", installPath: `${OPENCLAW_DIR}/extensions/weather` },
+      ],
+    ],
+    ["relative path", [{ id: "weather", installPath: "extensions/weather" }]],
+  ])("rejects %s", (_label, provenance) => {
+    expect(parseOpenClawImagePluginInstalls(provenance, OPENCLAW_DIR)).toEqual(
+      expect.objectContaining({ ok: false }),
+    );
   });
 });

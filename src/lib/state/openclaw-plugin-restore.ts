@@ -13,8 +13,13 @@ const MAX_OPENCLAW_PLUGIN_INSTALL_PATH_SEGMENTS = 64;
 const OPENCLAW_EXTENSION_GLOB_CHARS = ["/", "\\", "*", "?", "[", "]"] as const;
 
 export type OpenClawManagedExtensionDiscoveryResult =
-  | { ok: true; extensionDirs: string[] }
+  | { ok: true; extensionDirs: string[]; pluginInstalls: OpenClawImagePluginInstall[] }
   | { ok: false; error: string };
+
+export interface OpenClawImagePluginInstall {
+  readonly id: string;
+  readonly installPath: string;
+}
 
 const OPENCLAW_PLUGIN_INDEX_SQLITE_PY = [
   "import json, sqlite3, sys, urllib.parse",
@@ -62,6 +67,103 @@ export function isSafeOpenClawExtensionDirName(name: string): boolean {
   );
 }
 
+function validateOpenClawImagePluginInstall(
+  id: unknown,
+  installPath: unknown,
+): OpenClawImagePluginInstall | null {
+  if (typeof id !== "string" || !isSafeOpenClawPluginInstallId(id)) return null;
+  if (
+    typeof installPath !== "string" ||
+    installPath.length > MAX_OPENCLAW_PLUGIN_INSTALL_PATH_LENGTH ||
+    installPath.split("/").filter(Boolean).length > MAX_OPENCLAW_PLUGIN_INSTALL_PATH_SEGMENTS ||
+    !path.posix.isAbsolute(installPath) ||
+    path.posix.normalize(installPath) !== installPath
+  ) {
+    return null;
+  }
+  return { id, installPath };
+}
+
+function extensionDirForInstall(
+  install: OpenClawImagePluginInstall,
+  dir: string,
+): { ok: true; extensionDir: string | null } | { ok: false; error: string } {
+  const extensionsDir = `${dir.replace(/\/+$/, "")}/extensions`;
+  const relativeInstallPath = path.posix.relative(extensionsDir, install.installPath);
+  if (
+    relativeInstallPath.startsWith("../") ||
+    relativeInstallPath === ".." ||
+    path.posix.isAbsolute(relativeInstallPath)
+  ) {
+    return { ok: true, extensionDir: null };
+  }
+  if (
+    relativeInstallPath.length === 0 ||
+    relativeInstallPath.includes("/") ||
+    !isSafeOpenClawExtensionDirName(relativeInstallPath)
+  ) {
+    return {
+      ok: false,
+      error: `fresh OpenClaw plugin install path is invalid for ${install.id}`,
+    };
+  }
+  return { ok: true, extensionDir: relativeInstallPath };
+}
+
+function validateOpenClawImagePluginInstalls(
+  entries: readonly (readonly [string, unknown])[],
+  dir: string,
+): OpenClawManagedExtensionDiscoveryResult {
+  if (entries.length > MAX_OPENCLAW_IMAGE_MANAGED_PLUGIN_INSTALLS) {
+    return {
+      ok: false,
+      error: `fresh OpenClaw registry has too many plugin installs (${entries.length})`,
+    };
+  }
+
+  const ids = new Set<string>();
+  const installPaths = new Set<string>();
+  const extensionDirs = new Set<string>();
+  const pluginInstalls: OpenClawImagePluginInstall[] = [];
+  for (const [id, metadata] of entries) {
+    const installPath = isRecord(metadata) ? metadata.installPath : undefined;
+    const install = validateOpenClawImagePluginInstall(id, installPath);
+    if (!install) {
+      return { ok: false, error: `fresh OpenClaw plugin install metadata is invalid: ${id}` };
+    }
+    if (ids.has(install.id) || installPaths.has(install.installPath)) {
+      return { ok: false, error: `fresh OpenClaw plugin install provenance is duplicated: ${id}` };
+    }
+    const projected = extensionDirForInstall(install, dir);
+    if (!projected.ok) return projected;
+    if (projected.extensionDir && extensionDirs.has(projected.extensionDir)) {
+      return { ok: false, error: `fresh OpenClaw extension directory is duplicated: ${id}` };
+    }
+    ids.add(install.id);
+    installPaths.add(install.installPath);
+    pluginInstalls.push(install);
+    if (projected.extensionDir) extensionDirs.add(projected.extensionDir);
+  }
+  return {
+    ok: true,
+    extensionDirs: [...extensionDirs].sort(),
+    pluginInstalls: pluginInstalls.sort((a, b) => a.id.localeCompare(b.id)),
+  };
+}
+
+export function parseOpenClawImagePluginInstalls(
+  value: unknown,
+  dir: string,
+): OpenClawManagedExtensionDiscoveryResult {
+  if (!Array.isArray(value)) {
+    return { ok: false, error: "OpenClaw image plugin provenance is invalid" };
+  }
+  return validateOpenClawImagePluginInstalls(
+    value.map((entry) => [isRecord(entry) && typeof entry.id === "string" ? entry.id : "", entry]),
+    dir,
+  );
+}
+
 export function parseFreshOpenClawPluginExtensionDirs(
   registryIndex: unknown,
   dir: string,
@@ -74,57 +176,8 @@ export function parseFreshOpenClawPluginExtensionDirs(
     return { ok: false, error: "fresh OpenClaw plugin install records are invalid" };
   }
 
-  const ids = Object.keys(installs).sort();
-  if (ids.length > MAX_OPENCLAW_IMAGE_MANAGED_PLUGIN_INSTALLS) {
-    return {
-      ok: false,
-      error: `fresh OpenClaw registry has too many plugin installs (${ids.length})`,
-    };
-  }
-  const extensionsDir = `${dir.replace(/\/+$/, "")}/extensions`;
-  const extensionDirs = new Set<string>();
-  for (const id of ids) {
-    if (!isSafeOpenClawPluginInstallId(id)) {
-      return { ok: false, error: `fresh OpenClaw registry has unsafe plugin install id: ${id}` };
-    }
-    const install = installs[id];
-    if (!isRecord(install)) {
-      return { ok: false, error: `fresh OpenClaw plugin install metadata is invalid: ${id}` };
-    }
-    if (
-      typeof install.installPath !== "string" ||
-      install.installPath.length > MAX_OPENCLAW_PLUGIN_INSTALL_PATH_LENGTH ||
-      install.installPath.split("/").filter(Boolean).length >
-        MAX_OPENCLAW_PLUGIN_INSTALL_PATH_SEGMENTS ||
-      !path.posix.isAbsolute(install.installPath)
-    ) {
-      return { ok: false, error: `fresh OpenClaw plugin install path is invalid for ${id}` };
-    }
-    const normalizedInstallPath = path.posix.normalize(install.installPath);
-    if (normalizedInstallPath !== install.installPath) {
-      return { ok: false, error: `fresh OpenClaw plugin install path is invalid for ${id}` };
-    }
-
-    // npm-origin installs legitimately live under .openclaw/npm/node_modules
-    // and are not part of the backed-up extensions directory. Only direct
-    // children of extensions can be overwritten by extension restore.
-    const relativeInstallPath = path.posix.relative(extensionsDir, normalizedInstallPath);
-    if (
-      relativeInstallPath.startsWith("../") ||
-      relativeInstallPath === ".." ||
-      path.posix.isAbsolute(relativeInstallPath)
-    ) {
-      continue;
-    }
-    if (relativeInstallPath.length === 0 || relativeInstallPath.includes("/")) {
-      return { ok: false, error: `fresh OpenClaw plugin install path is invalid for ${id}` };
-    }
-
-    const extensionDir = relativeInstallPath;
-    if (!isSafeOpenClawExtensionDirName(extensionDir)) {
-      return { ok: false, error: `fresh OpenClaw extension directory is invalid for ${id}` };
-    }
-    extensionDirs.add(extensionDir);
-  }
-  return { ok: true, extensionDirs: [...extensionDirs].sort() };
+  const entries = Object.keys(installs)
+    .sort()
+    .map((id) => [id, installs[id]] as const);
+  return validateOpenClawImagePluginInstalls(entries, dir);
 }

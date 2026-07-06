@@ -2961,27 +2961,26 @@ async function createSandboxWithBaseImageResolution(
     hermesDashboardForwarding.ensureForState(finalHermesDashboardState, sandboxName, true);
   }
 
-  // Resolve registry metadata now, but publish it only after restored state is
-  // reconciled and the live agent selection is verified.
   // openshell tags images with seconds; buildId is ms. Parse actual tag from output. Fixes #2672.
   const resolvedImageTag =
     prebuild.imageRef ?? resolveSandboxImageTagFromCreateOutput(createResult.output, buildId);
 
   const sandboxRuntimeFields = getSandboxRuntimeRegistryFields(effectiveSandboxGpuConfig);
-  const inferenceSelection = sandboxRegistration.selection;
-
   finalizeCreatedSandbox(
     {
       sandboxName,
       restoreBackupPath,
       preUpgradeBackup: pendingStateRestoreBackupPath !== null,
+      targetAgentType: agent?.name ?? "openclaw",
       validateManagedDcode: isManagedDcodeAgent,
       provider,
       model,
       preferredInferenceApi,
     },
     {
-      restoreSandboxState: sandboxState.restoreSandboxState,
+      discoverFreshOpenClawImagePluginInstalls:
+        sandboxState.discoverFreshOpenClawImagePluginInstalls,
+      restoreRecreatedSandboxState: sandboxState.restoreRecreatedSandboxState,
       getDcodeSelectionDrift: (name, selectedProvider, selectedModel, selectedApi) =>
         getDcodeSelectionDrift(name, selectedProvider, selectedModel, selectedApi, {
           runCaptureOpenshell,
@@ -2989,10 +2988,10 @@ async function createSandboxWithBaseImageResolution(
       note,
       error: console.error,
       exitProcess: (code) => process.exit(code),
-      register: () =>
+      register: (openclawImagePluginInstalls) =>
         sandboxRegistration.registerCreatedSandbox({
           sandboxName,
-          inferenceSelection: inferenceSelection(
+          inferenceSelection: sandboxRegistration.selection(
             sandboxName,
             provider,
             model,
@@ -3002,6 +3001,7 @@ async function createSandboxWithBaseImageResolution(
           agent,
           agentVersionKnown: !fromDockerfile,
           imageTag: resolvedImageTag,
+          openclawImagePluginInstalls,
           appliedPolicies: initialSandboxPolicy.appliedPresets,
           toolDisclosure: effectiveToolDisclosure,
           // biome-ignore format: keep src/lib/onboard.ts net-neutral for growth guardrail.

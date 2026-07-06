@@ -18,7 +18,7 @@ describe("rebuild policy restore fidelity", () => {
     vi.spyOn(console, "log").mockImplementation(() => undefined);
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const log = vi.fn();
-    vi.spyOn(sandboxState, "restoreSandboxState").mockReturnValue({
+    vi.spyOn(sandboxState, "restoreRecreatedSandboxState").mockReturnValue({
       success: false,
       restoredDirs: [],
       restoredFiles: [],
@@ -29,7 +29,7 @@ describe("rebuild policy restore fidelity", () => {
 
     const result = runRebuildRestorePhase({
       sandboxName: "alpha",
-      backupManifest: { backupPath: "/tmp/rebuild-backup" } as never,
+      backupManifest: { agentType: "openclaw", backupPath: "/tmp/rebuild-backup" } as never,
       policyPresets: [],
       customPolicies: [],
       log,
@@ -47,13 +47,15 @@ describe("rebuild policy restore fidelity", () => {
   it("replays custom web-policy names from exact content instead of same-name built-ins", () => {
     vi.spyOn(console, "log").mockImplementation(() => undefined);
     vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const restoreSandboxState = vi.spyOn(sandboxState, "restoreSandboxState").mockReturnValue({
-      success: true,
-      restoredDirs: [],
-      restoredFiles: [],
-      failedDirs: [],
-      failedFiles: [],
-    });
+    const restoreRecreatedSandboxState = vi
+      .spyOn(sandboxState, "restoreRecreatedSandboxState")
+      .mockReturnValue({
+        success: true,
+        restoredDirs: [],
+        restoredFiles: [],
+        failedDirs: [],
+        failedFiles: [],
+      });
     const applyPreset = vi.spyOn(policies, "applyPreset").mockReturnValue(true);
     const applyPresetContent = vi.spyOn(policies, "applyPresetContent").mockReturnValue(true);
     const customPolicies = ["brave", "tavily", "nous-web"].map((name) => ({
@@ -65,6 +67,7 @@ describe("rebuild policy restore fidelity", () => {
     const result = runRebuildRestorePhase({
       sandboxName: "alpha",
       backupManifest: {
+        agentType: "openclaw",
         backupPath: "/tmp/rebuild-backup",
         customPolicies,
       } as never,
@@ -73,8 +76,8 @@ describe("rebuild policy restore fidelity", () => {
       log: vi.fn(),
     });
 
-    expect(restoreSandboxState).toHaveBeenCalledWith("alpha", "/tmp/rebuild-backup", {
-      preserveFreshOpenClawPluginInstalls: true,
+    expect(restoreRecreatedSandboxState).toHaveBeenCalledWith("alpha", "/tmp/rebuild-backup", {
+      targetAgentType: "openclaw",
     });
     expect(applyPreset).toHaveBeenCalledOnce();
     expect(applyPreset).toHaveBeenCalledWith("alpha", "npm");

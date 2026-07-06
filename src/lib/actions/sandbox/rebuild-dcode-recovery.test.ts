@@ -50,7 +50,7 @@ describe("rebuildSandbox DCode flow: recovery", () => {
     expect(harness.restoreSandboxStateSpy).toHaveBeenCalledWith(
       "alpha",
       recoveryManifest.backupPath,
-      { preserveFreshOpenClawPluginInstalls: true },
+      { targetAgentType: "langchain-deepagents-code" },
     );
   });
   it("replays captured custom policies during stale DCode recovery without a backup (#6195)", async () => {

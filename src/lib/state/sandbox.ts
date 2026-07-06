@@ -47,8 +47,10 @@ import {
 } from "./openclaw-managed-extensions.js";
 import {
   buildFreshOpenClawPluginIndexSqliteReadCommand,
+  type OpenClawImagePluginInstall,
   type OpenClawManagedExtensionDiscoveryResult,
   parseFreshOpenClawPluginExtensionDirs,
+  parseOpenClawImagePluginInstalls,
 } from "./openclaw-plugin-restore.js";
 import type { CustomPolicyEntry } from "./registry.js";
 import * as registry from "./registry.js";
@@ -77,6 +79,8 @@ export interface RebuildManifest {
   agentType: string;
   agentVersion: string | null;
   expectedVersion: string | null;
+  /** Fresh-image plugin baseline captured before user state was restored. */
+  openclawImagePluginInstalls?: OpenClawImagePluginInstall[];
   stateDirs: string[];
   /** Directories verified as safe to restore. Absent on older manifests. */
   backedUpDirs?: string[];
@@ -155,14 +159,19 @@ export interface RestoreResult {
 }
 
 export interface RestoreOptions {
-  /**
-   * The target is a just-recreated OpenClaw sandbox, so its plugin install
-   * registry came from the fresh image. Preserve those validated extension
-   * directories over the backup.
-   */
-  preserveFreshOpenClawPluginInstalls?: boolean;
   /** Optional file-specific restore capability authorized by the caller. */
   stateFileRestorePolicy?: StateFileRestorePolicy;
+}
+
+export interface RecreatedSandboxRestoreOptions extends RestoreOptions {
+  /** Agent in the newly created target image, not the backup manifest agent. */
+  targetAgentType: string;
+  /** Pre-captured baseline avoids a second remote read during onboarding finalization. */
+  freshOpenClawImagePluginInstalls?: readonly OpenClawImagePluginInstall[];
+}
+
+interface InternalRestoreOptions extends RestoreOptions {
+  freshOpenClawImagePluginInstalls?: readonly OpenClawImagePluginInstall[];
 }
 
 export interface TarValidationResult {
@@ -216,6 +225,7 @@ function isCustomPolicyEntryArray(value: unknown): value is CustomPolicyEntry[] 
 
 function isRebuildManifest(value: unknown): value is RebuildManifest {
   if (!isRecord(value) || !isStateDirArray(value.stateDirs)) return false;
+  const dir = typeof value.dir === "string" ? value.dir : value.writableDir;
   return (
     typeof value.version === "number" &&
     typeof value.sandboxName === "string" &&
@@ -224,7 +234,9 @@ function isRebuildManifest(value: unknown): value is RebuildManifest {
     (value.agentVersion === null || typeof value.agentVersion === "string") &&
     (value.expectedVersion === null || typeof value.expectedVersion === "string") &&
     (value.backedUpDirs === undefined || isBackedUpDirArray(value.backedUpDirs, value.stateDirs)) &&
-    (typeof value.dir === "string" || typeof value.writableDir === "string") &&
+    typeof dir === "string" &&
+    (value.openclawImagePluginInstalls === undefined ||
+      parseOpenClawImagePluginInstalls(value.openclawImagePluginInstalls, dir).ok) &&
     typeof value.backupPath === "string" &&
     (value.stateFiles === undefined ||
       (Array.isArray(value.stateFiles) && value.stateFiles.every(isStateFileSpec))) &&
@@ -725,6 +737,22 @@ function discoverFreshOpenClawPluginExtensionDirs(
     : { ok: false, error: "fresh OpenClaw plugin install registry failed validation" };
 }
 
+export function discoverFreshOpenClawImagePluginInstalls(
+  sandboxName: string,
+  dir = "/sandbox/.openclaw",
+): OpenClawManagedExtensionDiscoveryResult {
+  const sshConfig = getSshConfig(sandboxName);
+  if (!sshConfig) {
+    return { ok: false, error: "could not get SSH config for OpenClaw plugin discovery" };
+  }
+  const tempSshConfig = createTempSshConfig(sshConfig, "nemoclaw-plugin-discovery-");
+  try {
+    return discoverFreshOpenClawPluginExtensionDirs(tempSshConfig.file, sandboxName, dir);
+  } finally {
+    tempSshConfig.cleanup();
+  }
+}
+
 export const __test = {
   discoverFreshOpenClawPluginExtensionDirs,
 };
@@ -962,6 +990,7 @@ function buildStateFileRestoreInput(
   spec: StateFileSpec,
   backupContents: Buffer,
   mergeOpenClawConfig: boolean,
+  previousImagePluginInstalls?: readonly OpenClawImagePluginInstall[],
 ): Buffer | null {
   if (!mergeOpenClawConfig) return backupContents;
 
@@ -969,6 +998,7 @@ function buildStateFileRestoreInput(
     backupContents,
     dir,
     log: _log,
+    previousImagePluginInstalls,
     specPath: spec.path,
     sshArgs: sshArgs(configFile, sandboxName),
   });
@@ -986,6 +1016,7 @@ function restoreStateFile(
   backupPath: string,
   mergeOpenClawConfig = false,
   stateFileRestorePolicy?: StateFileRestorePolicy,
+  previousImagePluginInstalls?: readonly OpenClawImagePluginInstall[],
 ): boolean {
   const localPath = path.join(backupPath, spec.path);
   if (!existsSync(localPath)) return true;
@@ -1003,6 +1034,7 @@ function restoreStateFile(
       spec,
       backupContents,
       mergeOpenClawConfig,
+      previousImagePluginInstalls,
     );
   if (input === null) return false;
 
@@ -1044,6 +1076,22 @@ export function backupSandboxState(sandboxName: string, options: BackupOptions =
   _log(
     `backupSandboxState: agent=${agentName}, dir=${dir}, stateDirs=[${stateDirs.join(",")}], stateFiles=[${stateFiles.map((f) => f.path).join(",")}]`,
   );
+
+  let openclawImagePluginInstalls: OpenClawImagePluginInstall[] | undefined;
+  if (agentName === "openclaw" && sb?.openclawImagePluginInstalls !== undefined) {
+    const provenance = parseOpenClawImagePluginInstalls(sb.openclawImagePluginInstalls, dir);
+    if (!provenance.ok) {
+      return {
+        success: false,
+        backedUpDirs: [],
+        failedDirs: [],
+        backedUpFiles: [],
+        failedFiles: [],
+        error: "registered OpenClaw image plugin provenance is invalid",
+      };
+    }
+    openclawImagePluginInstalls = provenance.pluginInstalls;
+  }
 
   // Validate user-supplied name and check for conflicts BEFORE creating any
   // files on disk.
@@ -1109,6 +1157,7 @@ export function backupSandboxState(sandboxName: string, options: BackupOptions =
     agentType: agentName,
     agentVersion: sb?.agentVersion || null,
     expectedVersion: agent.expectedVersion,
+    ...(openclawImagePluginInstalls !== undefined ? { openclawImagePluginInstalls } : {}),
     stateDirs,
     stateFiles,
     dir,
@@ -1433,6 +1482,45 @@ export function restoreSandboxState(
   backupPath: string,
   options: RestoreOptions = {},
 ): RestoreResult {
+  return restoreSandboxStateInternal(sandboxName, backupPath, options);
+}
+
+export function restoreRecreatedSandboxState(
+  sandboxName: string,
+  backupPath: string,
+  options: RecreatedSandboxRestoreOptions,
+): RestoreResult {
+  let freshOpenClawImagePluginInstalls: readonly OpenClawImagePluginInstall[] | undefined;
+  if (options.targetAgentType === "openclaw") {
+    const discovery = options.freshOpenClawImagePluginInstalls
+      ? parseOpenClawImagePluginInstalls(
+          options.freshOpenClawImagePluginInstalls,
+          "/sandbox/.openclaw",
+        )
+      : discoverFreshOpenClawImagePluginInstalls(sandboxName);
+    if (!discovery.ok) {
+      return {
+        success: false,
+        restoredDirs: [],
+        failedDirs: ["extensions"],
+        restoredFiles: [],
+        failedFiles: [],
+        error: discovery.error,
+      };
+    }
+    freshOpenClawImagePluginInstalls = discovery.pluginInstalls;
+  }
+  return restoreSandboxStateInternal(sandboxName, backupPath, {
+    freshOpenClawImagePluginInstalls,
+    stateFileRestorePolicy: options.stateFileRestorePolicy,
+  });
+}
+
+function restoreSandboxStateInternal(
+  sandboxName: string,
+  backupPath: string,
+  options: InternalRestoreOptions,
+): RestoreResult {
   _log(`restoreSandboxState: sandbox=${sandboxName}, backupPath=${backupPath}`);
   const manifest = readManifest(backupPath);
   if (!manifest) {
@@ -1496,32 +1584,61 @@ export function restoreSandboxState(
 
   const tempSshConfig = createTempSshConfig(sshConfig, "nemoclaw-state-");
   const configFile = tempSshConfig.file;
-  let freshImageManagedExtensionDirs: string[] = [];
+  const freshOpenClawImagePluginInstalls = options.freshOpenClawImagePluginInstalls;
+  const previousOpenClawImagePluginInstalls =
+    freshOpenClawImagePluginInstalls !== undefined
+      ? manifest.openclawImagePluginInstalls
+      : undefined;
   try {
     const preserveManagedExtensions = shouldPreserveOpenClawManagedExtensions(
       manifest,
       dir,
       localDirs,
     );
-    if (options.preserveFreshOpenClawPluginInstalls && preserveManagedExtensions) {
-      const discovery = discoverFreshOpenClawPluginExtensionDirs(configFile, sandboxName, dir);
-      if (!discovery.ok) {
-        _log(`FAILED: ${discovery.error}`);
-        return {
-          success: false,
-          restoredDirs,
-          failedDirs: [...localDirs],
-          restoredFiles,
-          failedFiles: localFiles.map((f) => f.path),
-          error: discovery.error,
-        };
-      }
-      freshImageManagedExtensionDirs = discovery.extensionDirs;
-      _log(`Fresh image-managed OpenClaw extensions: [${discovery.extensionDirs.join(",")}]`);
+    const freshProjection = parseOpenClawImagePluginInstalls(
+      freshOpenClawImagePluginInstalls ?? [],
+      dir,
+    );
+    const previousProjection = parseOpenClawImagePluginInstalls(
+      previousOpenClawImagePluginInstalls ?? [],
+      dir,
+    );
+    if (!freshProjection.ok || !previousProjection.ok) {
+      let error = "OpenClaw image plugin provenance is invalid";
+      if (!freshProjection.ok) error = freshProjection.error;
+      else if (!previousProjection.ok) error = previousProjection.error;
+      return {
+        success: false,
+        restoredDirs,
+        failedDirs: [...localDirs],
+        restoredFiles,
+        failedFiles: localFiles.map((f) => f.path),
+        error,
+      };
     }
-    const managedExtensionDirs = preserveManagedExtensions
+    const freshImageManagedExtensionDirs = preserveManagedExtensions
+      ? freshProjection.extensionDirs
+      : [];
+    const previousImageManagedExtensionDirs =
+      preserveManagedExtensions && previousOpenClawImagePluginInstalls !== undefined
+        ? previousProjection.extensionDirs
+        : [];
+    if (freshOpenClawImagePluginInstalls !== undefined && preserveManagedExtensions) {
+      _log(
+        `Fresh image-managed OpenClaw extensions: [${freshImageManagedExtensionDirs.join(",")}]`,
+      );
+      _log(
+        `Previous image-managed OpenClaw extensions: [${previousImageManagedExtensionDirs.join(",")}]`,
+      );
+    }
+    const preservedManagedExtensionDirs = preserveManagedExtensions
       ? [
           ...new Set([...OPENCLAW_IMAGE_MANAGED_EXTENSION_DIRS, ...freshImageManagedExtensionDirs]),
+        ].sort()
+      : [];
+    const restoreArchiveExcludedExtensionDirs = preserveManagedExtensions
+      ? [
+          ...new Set([...preservedManagedExtensionDirs, ...previousImageManagedExtensionDirs]),
         ].sort()
       : [];
 
@@ -1530,7 +1647,7 @@ export function restoreSandboxState(
       // NC-2227-04: Removed -h flag from restore as well — no symlink following.
       const tarResult = spawnSync(
         "tar",
-        buildRestoreTarArgs(backupPath, localDirs, managedExtensionDirs),
+        buildRestoreTarArgs(backupPath, localDirs, restoreArchiveExcludedExtensionDirs),
         {
           stdio: ["ignore", "pipe", "pipe"],
           timeout: 60000,
@@ -1556,7 +1673,7 @@ export function restoreSandboxState(
       const rmCmd = buildRestoreCleanupCommand(
         dir,
         localDirs,
-        managedExtensionDirs,
+        preservedManagedExtensionDirs,
         new Set(freshImageManagedExtensionDirs),
       );
       _log(`Cleaning target dirs before restore: ${rmCmd}`);
@@ -1653,6 +1770,7 @@ export function restoreSandboxState(
           backupPath,
           shouldMergeOpenClawConfigStateFile(manifest.agentType, dir, spec),
           options.stateFileRestorePolicy,
+          previousOpenClawImagePluginInstalls,
         )
       ) {
         restoredFiles.push(spec.path);

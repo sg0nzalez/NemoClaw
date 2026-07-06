@@ -3,6 +3,7 @@
 
 import { isRecord } from "../core/json-types.js";
 import { listOpenClawManagedChannelNames } from "../messaging/channels/index.js";
+import type { OpenClawImagePluginInstall } from "./openclaw-plugin-restore.js";
 
 const MANAGED_OPENCLAW_CHANNEL_NAMES = listOpenClawManagedChannelNames();
 
@@ -109,11 +110,13 @@ function mergeOpenClawChannels(backupChannels: unknown, currentChannels: unknown
 function mergeOpenClawEntryMap(
   backupEntries: unknown,
   currentEntries: unknown,
+  previousImagePluginIds?: ReadonlySet<string>,
 ): Record<string, unknown> | undefined {
   if (!isPlainJsonObject(backupEntries) && !isPlainJsonObject(currentEntries)) return undefined;
   const merged: Record<string, unknown> = {};
   if (isPlainJsonObject(backupEntries)) {
     for (const [key, value] of Object.entries(backupEntries)) {
+      if (previousImagePluginIds?.has(key)) continue;
       // Search-provider plugins are selected by the fresh rebuild. Omitting
       // one is meaningful: provider switches and disablement must not restore
       // a stale Brave/Tavily entry from the durable snapshot.
@@ -126,6 +129,34 @@ function mergeOpenClawEntryMap(
     // placeholders, model routing, or plugin enablement for NemoClaw-managed ids.
     Object.assign(merged, cloneJson(currentEntries));
   }
+  return merged;
+}
+
+function mergeOpenClawPluginLoad(
+  backupLoad: unknown,
+  currentLoad: unknown,
+  previousImagePluginInstallPaths?: ReadonlySet<string>,
+): unknown {
+  if (!previousImagePluginInstallPaths) {
+    if (!isPlainJsonObject(backupLoad)) return cloneJson(currentLoad);
+    if (!isPlainJsonObject(currentLoad)) return cloneJson(backupLoad);
+    return mergeJsonObjects(currentLoad, backupLoad);
+  }
+  const backup = isPlainJsonObject(backupLoad) ? backupLoad : {};
+  const current = isPlainJsonObject(currentLoad) ? currentLoad : {};
+  const merged = mergeJsonObjects(current, backup);
+  const currentPaths = Array.isArray(current.paths)
+    ? current.paths.filter((entry): entry is string => typeof entry === "string")
+    : [];
+  const backupPaths = Array.isArray(backup.paths)
+    ? backup.paths.filter(
+        (entry): entry is string =>
+          typeof entry === "string" && !previousImagePluginInstallPaths.has(entry),
+      )
+    : [];
+  const paths = [...new Set([...currentPaths, ...backupPaths])];
+  if (paths.length > 0) merged.paths = paths;
+  else delete merged.paths;
   return merged;
 }
 
@@ -271,19 +302,53 @@ function mergeOpenClawModels(backupModels: unknown, currentModels: unknown): unk
   return merged;
 }
 
-function mergeOpenClawPlugins(backupPlugins: unknown, currentPlugins: unknown): unknown {
+function mergeOpenClawPlugins(
+  backupPlugins: unknown,
+  currentPlugins: unknown,
+  previousImagePluginInstalls?: readonly OpenClawImagePluginInstall[],
+): unknown {
   if (!isPlainJsonObject(backupPlugins)) return cloneJson(currentPlugins);
   const current = isPlainJsonObject(currentPlugins) ? currentPlugins : {};
+  const previousImagePluginIds = previousImagePluginInstalls
+    ? new Set(previousImagePluginInstalls.map((install) => install.id))
+    : undefined;
+  const previousImagePluginInstallPaths = previousImagePluginInstalls
+    ? new Set(previousImagePluginInstalls.map((install) => install.installPath))
+    : undefined;
 
   const merged = mergeJsonObjects(current, backupPlugins);
-  const entries = mergeOpenClawEntryMap(backupPlugins.entries, current.entries);
+  const entries = mergeOpenClawEntryMap(
+    backupPlugins.entries,
+    current.entries,
+    previousImagePluginIds,
+  );
   if (entries) merged.entries = entries;
+  const installs = mergeOpenClawEntryMap(
+    backupPlugins.installs,
+    current.installs,
+    previousImagePluginIds,
+  );
+  if (installs) merged.installs = installs;
+  if (previousImagePluginInstalls !== undefined) {
+    const load = mergeOpenClawPluginLoad(
+      backupPlugins.load,
+      current.load,
+      previousImagePluginInstallPaths,
+    );
+    if (isPlainJsonObject(load) && Object.keys(load).length === 0) delete merged.load;
+    else merged.load = load;
+  }
   return merged;
+}
+
+export interface OpenClawConfigMergeOptions {
+  previousImagePluginInstalls?: readonly OpenClawImagePluginInstall[];
 }
 
 export function mergeOpenClawRestoredConfig(
   backedUpConfig: unknown,
   currentConfig: unknown,
+  options: OpenClawConfigMergeOptions = {},
 ): unknown {
   if (!isPlainJsonObject(backedUpConfig)) return cloneJson(currentConfig ?? backedUpConfig);
   if (!isPlainJsonObject(currentConfig)) return cloneJson(backedUpConfig);
@@ -297,7 +362,11 @@ export function mergeOpenClawRestoredConfig(
 
   merged.channels = mergeOpenClawChannels(backedUpConfig.channels, currentConfig.channels);
   merged.models = mergeOpenClawModels(backedUpConfig.models, currentConfig.models);
-  merged.plugins = mergeOpenClawPlugins(backedUpConfig.plugins, currentConfig.plugins);
+  merged.plugins = mergeOpenClawPlugins(
+    backedUpConfig.plugins,
+    currentConfig.plugins,
+    options.previousImagePluginInstalls,
+  );
   merged.tools = mergeOpenClawTools(backedUpConfig.tools, currentConfig.tools);
 
   return merged;
