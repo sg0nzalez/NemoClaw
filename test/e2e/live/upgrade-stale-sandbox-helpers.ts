@@ -10,10 +10,12 @@ import type { HostCliClient } from "../fixtures/clients/host.ts";
 import { resultText } from "../fixtures/clients/index.ts";
 import { type SandboxClient, validateSandboxName } from "../fixtures/clients/sandbox.ts";
 import { expect } from "../fixtures/e2e-test.ts";
+import { REPO_ROOT } from "../fixtures/paths.ts";
 import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
 import { isTransientProviderValidationFailure } from "./network-policy-transient-provider.ts";
 
-export const REPO_ROOT = path.resolve(import.meta.dirname, "../../..");
+export { REPO_ROOT };
+
 const BLUEPRINT_RELPATH = path.join("nemoclaw-blueprint", "blueprint.yaml");
 const BLUEPRINT = path.join(REPO_ROOT, BLUEPRINT_RELPATH);
 const BASE_CONTEXT_SCRIPT_RELPATH = path.join("scripts", "lib", "sandbox-rlimits.sh");
