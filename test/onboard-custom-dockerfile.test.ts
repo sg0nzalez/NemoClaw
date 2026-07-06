@@ -10,6 +10,7 @@ import path from "node:path";
 import { describe, it } from "vitest";
 
 import { createCustomBuildContextFilter } from "../src/lib/onboard/custom-build-context.js";
+import { writeOkOpenshell } from "./helpers/onboard-openshell-fixture";
 import { testTimeoutOptions } from "./helpers/timeouts";
 
 const repoRoot = path.join(import.meta.dirname, "..");
@@ -184,9 +185,7 @@ describe("onboard custom Dockerfile", () => {
       fs.writeFileSync(path.join(customBuildDir, "credentials.json"), "{}");
 
       fs.mkdirSync(fakeBin, { recursive: true });
-      fs.writeFileSync(path.join(fakeBin, "openshell"), "#!/usr/bin/env bash\nexit 0\n", {
-        mode: 0o755,
-      });
+      writeOkOpenshell(fakeBin);
 
       const customDockerfilePath = JSON.stringify(path.join(customBuildDir, "Dockerfile"));
 
