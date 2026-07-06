@@ -233,6 +233,19 @@ function effectiveHermesToolGatewaysForWebSearch(
     : [...gateways];
 }
 
+function providerModelConfigChanged(
+  existing: SandboxEntry | null,
+  provider: string,
+  model: string,
+): boolean {
+  const existingProvider = typeof existing?.provider === "string" ? existing.provider : null;
+  const existingModel = typeof existing?.model === "string" ? existing.model : null;
+  return (
+    (existingProvider !== null && existingProvider !== provider) ||
+    (existingModel !== null && existingModel !== model)
+  );
+}
+
 type SandboxCreationDecision = Exclude<SandboxResumeDecision, { readonly kind: "reuse" }>;
 
 function mcpRegistryRemovalBlockReason(
@@ -374,15 +387,21 @@ class SandboxStateFlow<
       state.webSearchConfig as unknown as SharedWebSearchConfig | null,
       this.options.hermesToolGateways,
     );
-    const toolDisclosureSignals = resolveToolDisclosureResumeSignals(
-      state.sandboxName ? this.deps.getSandboxRegistryEntry(state.sandboxName) : null,
-      state.session,
-    );
+    const registryEntry = state.sandboxName
+      ? this.deps.getSandboxRegistryEntry(state.sandboxName)
+      : null;
+    const toolDisclosureSignals = resolveToolDisclosureResumeSignals(registryEntry, state.session);
     return decideSandboxResume({
+      fresh: this.options.fresh,
       resume: this.options.resume,
       resumeAgentChanged: this.options.resumeAgentChanged,
       sandboxStepComplete: state.session?.steps?.sandbox?.status === "complete",
       sandboxReuseState: this.deps.getSandboxReuseState(state.sandboxName),
+      providerModelConfigChanged: providerModelConfigChanged(
+        registryEntry,
+        this.options.provider,
+        this.options.model,
+      ),
       webSearchConfigChanged: state.webSearchSupportDropped || state.webSearchConfigChanged,
       sandboxGpuConfigChanged: state.sandboxName
         ? this.deps.hasSandboxGpuDrift(state.sandboxName, this.options.sandboxGpuConfig)

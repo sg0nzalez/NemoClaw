@@ -7,10 +7,12 @@ import { decideSandboxResume, type SandboxResumeSignals } from "./sandbox-resume
 
 function resumeSignals(overrides: Partial<SandboxResumeSignals> = {}): SandboxResumeSignals {
   return {
+    fresh: false,
     resume: true,
     resumeAgentChanged: false,
     sandboxStepComplete: true,
     sandboxReuseState: "ready",
+    providerModelConfigChanged: false,
     webSearchConfigChanged: false,
     sandboxGpuConfigChanged: false,
     messagingChannelConfigChanged: false,
@@ -28,6 +30,7 @@ describe("decideSandboxResume", () => {
 
   it.each([
     ["agent", { resumeAgentChanged: true }, false],
+    ["provider/model", { providerModelConfigChanged: true }, false],
     ["web search", { webSearchConfigChanged: true }, true],
     ["sandbox GPU", { sandboxGpuConfigChanged: true }, true],
     ["messaging", { messagingChannelConfigChanged: true }, true],
@@ -51,6 +54,23 @@ describe("decideSandboxResume", () => {
     expect(decideSandboxResume(resumeSignals({ toolDisclosureChanged: true }))).toMatchObject({
       kind: "recreate",
       note: expect.stringContaining("configuration changed"),
+    });
+  });
+
+  it("recreates fresh runs when an existing sandbox has provider/model drift", () => {
+    expect(
+      decideSandboxResume(
+        resumeSignals({
+          fresh: true,
+          resume: false,
+          sandboxStepComplete: false,
+          providerModelConfigChanged: true,
+        }),
+      ),
+    ).toEqual({
+      kind: "recreate",
+      note: "  [fresh] Provider/model selection changed; recreating sandbox.",
+      removeRegistryEntry: false,
     });
   });
 

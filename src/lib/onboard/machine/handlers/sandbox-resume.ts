@@ -6,10 +6,12 @@ import type { SandboxEntry } from "../../../state/registry";
 import { normalizeToolDisclosure, toolDisclosureOrDefault } from "../../../tool-disclosure";
 
 export interface SandboxResumeSignals {
+  readonly fresh: boolean;
   readonly resume: boolean;
   readonly resumeAgentChanged: boolean;
   readonly sandboxStepComplete: boolean;
   readonly sandboxReuseState: string;
+  readonly providerModelConfigChanged: boolean;
   readonly webSearchConfigChanged: boolean;
   readonly sandboxGpuConfigChanged: boolean;
   readonly messagingChannelConfigChanged: boolean;
@@ -61,6 +63,7 @@ export interface SandboxResumeDeps {
 function canReuseSandbox(signals: SandboxResumeSignals): boolean {
   return (
     !signals.resumeAgentChanged &&
+    !signals.providerModelConfigChanged &&
     !signals.webSearchConfigChanged &&
     !signals.sandboxGpuConfigChanged &&
     !signals.messagingChannelConfigChanged &&
@@ -92,9 +95,20 @@ function toolDisclosureResumeDecision(signals: SandboxResumeSignals): SandboxRes
   return null;
 }
 
-export function decideSandboxResume(signals: SandboxResumeSignals): SandboxResumeDecision {
-  if (!signals.resume || !signals.sandboxStepComplete) return { kind: "create" };
-  if (canReuseSandbox(signals)) return { kind: "reuse" };
+function providerModelDriftDecision(signals: SandboxResumeSignals): SandboxResumeDecision | null {
+  if (!signals.providerModelConfigChanged) return null;
+  return {
+    kind: "recreate",
+    note: `  [${signals.fresh ? "fresh" : signals.resume ? "resume" : "onboard"}] Provider/model selection changed; recreating sandbox.`,
+    // Keep the registry row until createSandbox captures any registry-only
+    // fidelity and runs the normal pre-recreate backup/deletion path.
+    removeRegistryEntry: false,
+  };
+}
+
+function configurationDriftResumeDecision(
+  signals: SandboxResumeSignals,
+): SandboxResumeDecision | null {
   if (signals.resumeAgentChanged) {
     return {
       kind: "recreate",
@@ -130,8 +144,16 @@ export function decideSandboxResume(signals: SandboxResumeSignals): SandboxResum
       removeRegistryEntry: true,
     };
   }
-  const toolDisclosureDecision = toolDisclosureResumeDecision(signals);
-  if (toolDisclosureDecision) return toolDisclosureDecision;
+  return toolDisclosureResumeDecision(signals);
+}
+
+export function decideSandboxResume(signals: SandboxResumeSignals): SandboxResumeDecision {
+  const providerModelDecision = providerModelDriftDecision(signals);
+  if (providerModelDecision) return providerModelDecision;
+  if (!signals.resume || !signals.sandboxStepComplete) return { kind: "create" };
+  if (canReuseSandbox(signals)) return { kind: "reuse" };
+  const driftDecision = configurationDriftResumeDecision(signals);
+  if (driftDecision) return driftDecision;
   if (signals.sandboxReuseState === "not_ready") return { kind: "repair-and-recreate" };
   return {
     kind: "recreate",

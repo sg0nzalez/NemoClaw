@@ -164,6 +164,48 @@ describe("handleSandboxState", () => {
     expect(result.session).toBe(skippedSession);
   });
 
+  it("recreates an existing ready sandbox on fresh provider/model drift", async () => {
+    const { deps, calls } = createDeps({
+      getSandboxReuseState: () => "ready",
+      getSandboxRegistryEntry: (name) => ({
+        name,
+        provider: "old-provider",
+        model: "old-model",
+        toolDisclosure: "progressive",
+      }),
+    });
+
+    await handleSandboxState({
+      ...baseOptions(deps),
+      fresh: true,
+      sandboxName: "saved",
+      provider: "new-provider",
+      model: "new-model",
+    });
+
+    expect(calls.note).toHaveBeenCalledWith(
+      "  [fresh] Provider/model selection changed; recreating sandbox.",
+    );
+    expect(calls.removeSandbox).not.toHaveBeenCalled();
+    expect(calls.createSandbox).toHaveBeenCalledWith(
+      { type: "nvidia" },
+      "new-model",
+      "new-provider",
+      "openai-completions",
+      "saved",
+      null,
+      [],
+      null,
+      null,
+      null,
+      { sandboxGpuEnabled: false, mode: "0" },
+      null,
+      [],
+      null,
+      { recreate: true, toolDisclosure: "progressive" },
+    );
+  });
+
   it("backfills absent rebuild fidelity after validated sandbox reuse", async () => {
     const session = createSession({
       sandboxName: "saved",
