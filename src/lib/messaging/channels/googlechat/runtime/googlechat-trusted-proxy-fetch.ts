@@ -8,6 +8,20 @@
 // answered the googleapis hosts with a public sentinel IP so the SSRF gate's
 // local getaddrinfo would pass; that shim has been removed.
 //
+// ── Workaround Analysis ──────────────────────────────────────────────────────
+// 1. What:  rewrites the plugin's three googleapis fetch call sites (dist bundle)
+//           to a trusted guard mode so they route by hostname through the env proxy.
+// 2. Why:   the sandbox netns is DNS-less; the plugin's fetches default to STRICT
+//           SSRF mode (local getaddrinfo), which fails EAI_AGAIN with no local DNS.
+// 3. Alts:  no config/env toggle exists to request trusted mode; the prior
+//           DNS-sentinel-IP shim was removed as hackier; upstream fix (5) unshipped.
+// 4. Risk:  version-sensitive (keys on bundle anchors) but bounded — plugin is
+//           integrity-version-pinned, anchors are unit-tested, and drift fails loud
+//           (named patch error), never a silent downgrade; Google hosts only, so no
+//           SSRF widening.
+// 5. Exit:  upstream @openclaw/googlechat requests trusted-env-proxy mode under a
+//           managed/env proxy (mirror of web_fetch openclaw#50650) — see below.
+//
 // ── The story: what this changes, and why ────────────────────────────────────
 // The sandbox netns is DNS-less BY DESIGN — all name resolution and egress go
 // through the L7 proxy (10.200.0.1:3128). OpenClaw's SSRF fetch guard
@@ -51,13 +65,6 @@
 // (load-time source rewrite of the @openclaw/googlechat dist bundle via the
 // module loader hooks). It targets the SAME dist chunk that
 // googlechat-outbound-auth already patches, so the loader-hook coverage is proven.
-//
-// ── Brittleness ──────────────────────────────────────────────────────────────
-// This keys on anchors in the plugin's dist bundle, so it is version-sensitive.
-// Bounded because the plugin is integrity-version-pinned (the bundle is frozen
-// per build): anchors are covered by unit tests, drift can only appear on a
-// deliberate version bump, and this fails loud (named patch error) rather than
-// silently mispatching — never a silent security downgrade.
 
 // Test seam: the self-installing IIFE below publishes its pure source-rewrite
 // helpers here so unit tests can exercise the anchor rewrites, drift handling, and

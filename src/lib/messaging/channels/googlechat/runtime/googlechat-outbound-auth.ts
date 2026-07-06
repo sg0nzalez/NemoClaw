@@ -7,6 +7,20 @@
 // gateway-minted token. Boot-injected into the OpenClaw gateway via
 // runtime.nodePreloads, gated to when the googlechat channel is active.
 //
+// ── Workaround Analysis ──────────────────────────────────────────────────────
+// 1. What:  rewrites the plugin's single outbound-token producer
+//           (getGoogleChatAccessToken) to return the OpenShell placeholder instead
+//           of signing a JWT in-process; the proxy swaps it for the real token.
+// 2. Why:   stock @openclaw/googlechat mints its token in-process from the SA
+//           private key, forcing the key into the sandbox — against the
+//           key-out-of-sandbox model. Gateway-side minting keeps the key out.
+// 3. Alts:  no native pre-minted-token auth mode upstream yet (5); config injection
+//           rejected — the plugin schema is .strict() with no accessToken field.
+// 4. Risk:  version-sensitive (bundle anchor) but bounded — integrity-version-pinned
+//           plugin, anchors unit-tested; drift AND unset-env both fail loud (throw),
+//           so a misconfigured channel never silently sends unauthenticated.
+// 5. Exit:  upstream native accessToken/accessTokenRef auth mode — see below.
+//
 // ── The story: what this changes, and why ────────────────────────────────────
 // Out of the box @openclaw/googlechat mints its own OAuth token IN-PROCESS: it
 // RS256-signs a JWT assertion with the service-account (SA) PRIVATE KEY and
