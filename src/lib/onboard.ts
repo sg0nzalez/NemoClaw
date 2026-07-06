@@ -257,7 +257,7 @@ const { ensureResumeProviderReady } = require("./onboard/resume-provider-shim");
 const hermesProviderAuth = require("./hermes-provider-auth");
 const onboardHermesDashboard: typeof import("./onboard/hermes-dashboard") = require("./onboard/hermes-dashboard");
 const hermesAuth: typeof import("./onboard/hermes-auth") = require("./onboard/hermes-auth");
-const { warnIfLandlockUnsupported } = require("./onboard/landlock-warning");
+const sandboxPostCreate: typeof import("./onboard/sandbox-post-create") = require("./onboard/sandbox-post-create");
 const {
   HERMES_AUTH_METHOD_API_KEY,
   HERMES_AUTH_METHOD_OAUTH,
@@ -390,6 +390,7 @@ const {
   createValidationRecoveryPromptHelpers,
 }: typeof import("./onboard/validation-recovery-prompt") = require("./onboard/validation-recovery-prompt");
 const {
+  createInferenceRouteReadinessHelpers,
   createLocalInferenceRouteApplier,
 }: typeof import("./onboard/local-inference-route") = require("./onboard/local-inference-route");
 const {
@@ -1013,20 +1014,10 @@ function upsertMessagingProviders(
 const providerExistsInGateway = (name: string) =>
   onboardProviders.providerExistsInGateway(name, runOpenshell);
 
-function verifyInferenceRoute(_provider: string, _model: string): void {
-  const output = runCaptureOpenshell(["inference", "get"], { ignoreError: true });
-  if (!output || /Gateway inference:\s*[\r\n]+\s*Not configured/i.test(output)) {
-    console.error("  OpenShell inference route was not configured.");
-    process.exit(1);
-  }
-}
-
-function isInferenceRouteReady(provider: string, model: string): boolean {
-  const live = parseGatewayInference(
-    runCaptureOpenshell(["inference", "get"], { ignoreError: true }),
-  );
-  return Boolean(live && live.provider === provider && live.model === model);
-}
+const { verifyInferenceRoute, isInferenceRouteReady } = createInferenceRouteReadinessHelpers({
+  runCaptureOpenshell,
+  parseGatewayInference,
+});
 
 const {
   reconcileSandboxForCreate,
@@ -3035,47 +3026,23 @@ async function createSandboxWithBaseImageResolution(
   });
   restoreDefaultAfterRecreate(registry.setDefault, sandboxName, sandboxWasLiveDefault); // #4614: default deferred to finalization
 
-  if (restoreBackupPath) {
-    note(
-      pendingStateRestoreBackupPath
-        ? "  Restoring workspace state from pre-upgrade backup..."
-        : "  Restoring workspace state from pre-recreate backup...",
-    );
-    const restore = sandboxState.restoreSandboxState(sandboxName, restoreBackupPath);
-    if (restore.success) {
-      note(
-        `  ✓ State restored (${restore.restoredDirs.length} directories, ${restore.restoredFiles.length} files)`,
-      );
-    } else {
-      console.error(`  Warning: partial restore. Manual recovery: ${restoreBackupPath}`);
-    }
-  }
-
-  // DNS proxy — run a forwarder in the sandbox pod so the isolated
-  // sandbox namespace can resolve hostnames (fixes #626).
-  if (sandboxRuntimeFields.openshellDriver === "kubernetes") {
-    console.log("  Setting up sandbox DNS proxy...");
-    runFile("bash", [path.join(SCRIPTS, "setup-dns-proxy.sh"), GATEWAY_NAME, sandboxName], {
-      ignoreError: true,
-    });
-  }
-
-  require("./onboard/vm-dns-monkeypatch").applyOnboardVmDnsMonkeypatch(
+  sandboxPostCreate.runSandboxPostCreateSteps({
     sandboxName,
-    sandboxRuntimeFields,
-  );
-
-  // Check that messaging providers exist in the gateway (sandbox attachment
-  // cannot be verified via CLI yet — only gateway-level existence is checked).
-  for (const p of messagingProviders) {
-    if (!providerExistsInGateway(p)) {
-      printMessagingProviderMissing(p);
-    }
-  }
-
-  console.log(`  ✓ Sandbox '${sandboxName}' created`);
-  const compat = agent?.landlockCompatibility ?? "best_effort";
-  warnIfLandlockUnsupported({ compatibility: compat, dockerInfoFormat, runCapture });
+    restoreBackupPath,
+    pendingStateRestoreBackupPath,
+    restoreSandboxState: sandboxState.restoreSandboxState,
+    note,
+    runtimeFields: sandboxRuntimeFields,
+    runFile,
+    dnsProxyScriptPath: path.join(SCRIPTS, "setup-dns-proxy.sh"),
+    gatewayName: GATEWAY_NAME,
+    messagingProviders,
+    providerExistsInGateway,
+    printMessagingProviderMissing,
+    landlockCompatibility: agent?.landlockCompatibility,
+    dockerInfoFormat,
+    runCapture,
+  });
 
   // #4614: arm rollback only when the sandbox was not live before (never a recreate/rebuild).
   if (!liveExists) sandboxCancelRollback.arm(sandboxName);

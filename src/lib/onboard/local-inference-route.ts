@@ -21,10 +21,41 @@ export interface LocalInferenceRouteDeps {
   localInferenceTimeoutSecs: number;
 }
 
+export interface InferenceRouteReadinessDeps {
+  runCaptureOpenshell(args: string[], options?: { ignoreError?: boolean }): string | null;
+  parseGatewayInference(
+    output: string | null | undefined,
+  ): { provider?: string | null; model?: string | null } | null;
+  exit?: (code?: number) => never;
+}
+
 const LOCAL_PROVIDER_LABELS: Record<string, string> = {
   "vllm-local": "Local vLLM",
   "ollama-local": "Local Ollama",
 };
+
+export function createInferenceRouteReadinessHelpers({
+  runCaptureOpenshell,
+  parseGatewayInference,
+  exit = process.exit,
+}: InferenceRouteReadinessDeps) {
+  function verifyInferenceRoute(_provider: string, _model: string): void {
+    const output = runCaptureOpenshell(["inference", "get"], { ignoreError: true });
+    if (!output || /Gateway inference:\s*[\r\n]+\s*Not configured/i.test(output)) {
+      console.error("  OpenShell inference route was not configured.");
+      exit(1);
+    }
+  }
+
+  function isInferenceRouteReady(provider: string, model: string): boolean {
+    const live = parseGatewayInference(
+      runCaptureOpenshell(["inference", "get"], { ignoreError: true }),
+    );
+    return Boolean(live && live.provider === provider && live.model === model);
+  }
+
+  return { verifyInferenceRoute, isInferenceRouteReady };
+}
 
 // Wraps `openshell inference set` for local providers (ollama-local, vllm-local)
 // with the same retry/recovery surface as the remote-provider path. Without this,
