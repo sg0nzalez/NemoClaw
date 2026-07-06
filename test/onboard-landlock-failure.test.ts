@@ -41,6 +41,7 @@ const sandboxCreateStream = require(${modulePath("src/lib/sandbox/create-stream.
 const readinessTracing = require(${modulePath("src/lib/onboard/sandbox-readiness-tracing.ts")});
 const failureDiagnostics = require(${modulePath("src/lib/onboard/sandbox-create-failure.ts")});
 const agentDefs = require(${modulePath("src/lib/agent/defs.ts")});
+const openshellResolve = require(${modulePath("src/lib/adapters/openshell/resolve.ts")});
 
 const sandboxName = "dcode-landlock-fail";
 const commands = [];
@@ -68,6 +69,7 @@ runner.runCaptureOpenshell = (args) => {
   commands.push(commandText(["openshell", ...args]));
   return "";
 };
+openshellResolve.resolveOpenshell = () => "/usr/bin/openshell";
 
 registry.getSandbox = () => null;
 registry.listExtraProviders = () => [];

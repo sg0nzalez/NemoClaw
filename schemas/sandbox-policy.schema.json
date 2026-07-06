@@ -30,7 +30,7 @@
       "properties": {
         "compatibility": {
           "type": "string",
-          "enum": ["best_effort", "hard_requirement"]
+          "enum": ["best_effort", "hard_requirement", "strict"]
         }
       }
     },

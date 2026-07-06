@@ -63,6 +63,7 @@ export interface AgentLegacyPaths {
 }
 
 export type AgentVersionScheme = "semver" | "calendar";
+export type AgentLandlockCompatibility = "best_effort" | "hard_requirement";
 
 export interface AgentDefinition {
   name: string;
@@ -75,6 +76,7 @@ export interface AgentDefinition {
   gateway_command?: string;
   runtime?: AgentRuntime;
   device_pairing?: boolean;
+  landlockCompatibility?: AgentLandlockCompatibility;
   phone_home_hosts?: string[];
   forward_ports?: number[];
   health_probe?: AgentHealthProbe;

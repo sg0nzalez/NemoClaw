@@ -13,6 +13,7 @@ version_constraint: ">=0.1.30"
 language: python
 license: MIT
 homepage: "https://docs.langchain.com/oss/python/deepagents/code/overview"
+landlockCompatibility: hard_requirement
 
 # ── Binary & process ────────────────────────────────────────────
 install_method: pip

@@ -21,6 +21,7 @@ import type {
   AgentDashboard,
   AgentDefinition,
   AgentHealthProbe,
+  AgentLandlockCompatibility,
   AgentLegacyPaths,
   AgentMcpCapability,
   AgentStateFile,
@@ -32,6 +33,7 @@ import {
   readDashboard,
   readHealthProbe,
   readInference,
+  readLandlockCompatibility,
   readMcpCapability,
   readObject,
   readPortArray,
@@ -53,6 +55,7 @@ export type {
   AgentDefinition,
   AgentHealthProbe,
   AgentInference,
+  AgentLandlockCompatibility,
   AgentLegacyPaths,
   AgentMcpAdapter,
   AgentMcpCapability,
@@ -131,6 +134,7 @@ export function loadAgent(name: string): AgentDefinition {
   const healthProbe = readHealthProbe(raw);
   const config = readObject(raw, "config");
   const inference = readInference(raw);
+  const landlockCompatibility = readLandlockCompatibility(raw) ?? "best_effort";
   const mcp = readMcpCapability(raw);
   const stateDirs = readStringArray(raw, "state_dirs");
   const stateFiles = readStateFiles(raw);
@@ -151,6 +155,7 @@ export function loadAgent(name: string): AgentDefinition {
     gateway_command: gatewayCommand,
     runtime,
     device_pairing: readBoolean(raw, "device_pairing"),
+    landlockCompatibility,
     phone_home_hosts: phoneHomeHosts,
     forward_ports: forwardPorts,
     health_probe: healthProbe,

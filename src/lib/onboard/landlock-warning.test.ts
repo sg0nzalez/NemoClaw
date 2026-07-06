@@ -38,4 +38,22 @@ describe("post-create Landlock warning", () => {
     expect(runCapture).not.toHaveBeenCalled();
     expect(warn).not.toHaveBeenCalled();
   });
+
+  it("does not probe a macOS Docker VM after hard-required startup succeeds (#5795)", () => {
+    const dockerInfoFormat = vi.fn(() => "5.4.0");
+    const runCapture = vi.fn(() => "5.4.0");
+    const warn = vi.fn();
+
+    warnIfLandlockUnsupported({
+      compatibility: "hard_requirement",
+      platform: "darwin",
+      dockerInfoFormat,
+      runCapture,
+      warn,
+    });
+
+    expect(dockerInfoFormat).not.toHaveBeenCalled();
+    expect(runCapture).not.toHaveBeenCalled();
+    expect(warn).not.toHaveBeenCalled();
+  });
 });

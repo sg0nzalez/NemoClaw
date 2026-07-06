@@ -154,6 +154,7 @@ export function classifySandboxCreateFailure(output = ""): SandboxCreateFailure 
     );
   const hardRequirementEnforcementFailure =
     !bestEffortLandlockWarning &&
+    /(?:Landlock|hard_requirement|Failed to prepare sandbox:)/i.test(text) &&
     (/failed to restrict the calling thread:/i.test(text) ||
       /failed to set no_new_privs:/.test(text));
   if (

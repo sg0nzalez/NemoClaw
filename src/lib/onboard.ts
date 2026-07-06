@@ -3094,7 +3094,7 @@ async function createSandboxWithBaseImageResolution(
   }
 
   console.log(`  ✓ Sandbox '${sandboxName}' created`);
-  const compat = agent?.name === "langchain-deepagents-code" ? "hard_requirement" : "best_effort";
+  const compat = agent?.landlockCompatibility ?? "best_effort";
   warnIfLandlockUnsupported({ compatibility: compat, dockerInfoFormat, runCapture });
 
   // #4614: arm rollback only when the sandbox was not live before (never a recreate/rebuild).

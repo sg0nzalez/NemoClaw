@@ -7,6 +7,7 @@ import type {
   AgentDashboardKind,
   AgentHealthProbe,
   AgentInference,
+  AgentLandlockCompatibility,
   AgentMcpCapability,
   AgentStateFile,
   AgentVersionScheme,
@@ -55,6 +56,17 @@ export function readVersionScheme(record: ManifestRecord): AgentVersionScheme | 
   const value = record.version_scheme;
   if (value === "semver" || value === "calendar") return value;
   return undefined;
+}
+
+export function readLandlockCompatibility(
+  record: ManifestRecord,
+): AgentLandlockCompatibility | undefined {
+  const value = record.landlockCompatibility;
+  if (value === undefined) return undefined;
+  if (value === "best_effort" || value === "hard_requirement") return value;
+  throw new Error(
+    "Agent manifest field 'landlockCompatibility' must be best_effort or hard_requirement",
+  );
 }
 
 export function readObject(record: ManifestRecord, key: string): ManifestRecord | undefined {
