@@ -34,6 +34,12 @@ describe("synthetic benchmark MCP server", () => {
     try {
       const unauthorized = await fetch(address.local_url, { method: "POST", body: "{}" });
       expect(unauthorized.status).toBe(401);
+      const staleCampaignToken = await rpc(
+        address.local_url,
+        "token-from-another-campaign",
+        "tools/list",
+      );
+      expect(staleCampaignToken.status).toBe(401);
 
       const initialized = await rpc(address.local_url, token, "initialize", {
         protocolVersion: "2025-03-26",

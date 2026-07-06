@@ -4,6 +4,8 @@
 import { type ChildProcess, spawn } from "node:child_process";
 
 const ORIGIN_PATTERN = /https:\/\/[a-z0-9-]+\.trycloudflare\.com(?=$|[\s"'\\/])/iu;
+// Deliberately omit HOME/XDG_CONFIG_HOME so cloudflared cannot load ambient
+// account credentials or configuration into this ephemeral benchmark tunnel.
 const SAFE_ENV = new Set([
   "PATH",
   "TMPDIR",

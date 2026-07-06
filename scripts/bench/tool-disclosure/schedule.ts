@@ -1,10 +1,15 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { PRIMARY_TASK_COUNT, STRESS_TASK_COUNT } from "./tasks";
+
 export const TOOL_DISCLOSURE_AGENTS = ["openclaw", "hermes", "langchain-deepagents-code"] as const;
 
 export const TOOL_DISCLOSURE_MODES = ["progressive", "direct"] as const;
 export const STATIC_CATALOG_SIZES = [16, 64, 256, 512, 2_209] as const;
+const SMALL_CONTROL_CATALOG_SIZE = STATIC_CATALOG_SIZES[1];
+const PRIMARY_CATALOG_SIZE = STATIC_CATALOG_SIZES[3];
+const LARGE_STRESS_CATALOG_SIZE = STATIC_CATALOG_SIZES[4];
 
 export type ToolDisclosureAgent = (typeof TOOL_DISCLOSURE_AGENTS)[number];
 export type ToolDisclosureMode = (typeof TOOL_DISCLOSURE_MODES)[number];
@@ -125,14 +130,14 @@ export function buildToolDisclosureSchedule(
 ): ScheduledToolDisclosureRun[] {
   assertUniqueNonEmpty(options.primaryTaskIds, "primaryTaskIds");
   assertUniqueNonEmpty(options.stressTaskIds, "stressTaskIds");
-  if (options.primaryTaskIds.length !== 24) {
+  if (options.primaryTaskIds.length !== PRIMARY_TASK_COUNT) {
     throw new Error(
-      `primaryTaskIds must contain exactly 24 tasks, got ${options.primaryTaskIds.length}`,
+      `primaryTaskIds must contain exactly ${PRIMARY_TASK_COUNT} tasks, got ${options.primaryTaskIds.length}`,
     );
   }
-  if (options.stressTaskIds.length !== 8) {
+  if (options.stressTaskIds.length !== STRESS_TASK_COUNT) {
     throw new Error(
-      `stressTaskIds must contain exactly 8 tasks, got ${options.stressTaskIds.length}`,
+      `stressTaskIds must contain exactly ${STRESS_TASK_COUNT} tasks, got ${options.stressTaskIds.length}`,
     );
   }
   if (!Number.isSafeInteger(options.seed)) throw new Error("seed must be a safe integer");
@@ -153,15 +158,43 @@ export function buildToolDisclosureSchedule(
         );
       }
       for (const taskId of options.primaryTaskIds) {
-        liveBlocks.push(makePair(campaign, "small-control", agent, 64, taskId, 1, options.seed));
+        liveBlocks.push(
+          makePair(
+            campaign,
+            "small-control",
+            agent,
+            SMALL_CONTROL_CATALOG_SIZE,
+            taskId,
+            1,
+            options.seed,
+          ),
+        );
         for (let repetition = 1; repetition <= 5; repetition += 1) {
           liveBlocks.push(
-            makePair(campaign, "primary", agent, 512, taskId, repetition, options.seed),
+            makePair(
+              campaign,
+              "primary",
+              agent,
+              PRIMARY_CATALOG_SIZE,
+              taskId,
+              repetition,
+              options.seed,
+            ),
           );
         }
       }
       for (const taskId of options.stressTaskIds) {
-        liveBlocks.push(makePair(campaign, "large-stress", agent, 2_209, taskId, 1, options.seed));
+        liveBlocks.push(
+          makePair(
+            campaign,
+            "large-stress",
+            agent,
+            LARGE_STRESS_CATALOG_SIZE,
+            taskId,
+            1,
+            options.seed,
+          ),
+        );
       }
     }
     staticBlocks.sort(

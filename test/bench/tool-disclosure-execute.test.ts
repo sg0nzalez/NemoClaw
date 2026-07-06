@@ -8,6 +8,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
+  assertSetupRetryAllowed,
   type AttemptJournalEntry,
   type CampaignAttestation,
   materializeAttemptJournal,
@@ -59,6 +60,13 @@ function attestationFixture(): {
 }
 
 describe("tool-disclosure attempt journal", () => {
+  it("retries only failures that occur before agent invocation", () => {
+    expect(() => assertSetupRetryAllowed(false, "run-before-invocation")).not.toThrow();
+    expect(() =>
+      assertSetupRetryAllowed(true, "run-after-invocation", new Error("private detail")),
+    ).toThrow(/discard this campaign/u);
+  });
+
   it("recovers one trailing partial append and deterministically materializes evidence", () => {
     const output = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-attempt-journal-"));
     try {
@@ -84,6 +92,20 @@ describe("tool-disclosure attempt journal", () => {
       expect(JSON.parse(fs.readFileSync(path.join(output, "runs.jsonl"), "utf8"))).toEqual(
         entry.run,
       );
+    } finally {
+      fs.rmSync(output, { recursive: true, force: true });
+    }
+  });
+
+  it("fails closed for a newline-terminated malformed journal record", () => {
+    const output = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-attempt-journal-"));
+    try {
+      const file = path.join(output, "attempt-journal.jsonl");
+      const malformed = '{"raw":\n';
+      fs.writeFileSync(file, malformed);
+
+      expect(() => recoverAttemptJournal(output)).toThrow(/corrupt at line 1/u);
+      expect(fs.readFileSync(file, "utf8")).toBe(malformed);
     } finally {
       fs.rmSync(output, { recursive: true, force: true });
     }

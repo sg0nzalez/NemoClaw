@@ -7,6 +7,9 @@ import path from "node:path";
 import type { SyntheticCatalog } from "./catalog";
 
 const SAFE_FIXTURE_DIR = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u;
+const SAFE_IMMUTABLE_SANDBOX_BASE =
+  /^[a-z0-9]+(?:[._-][a-z0-9]+)*(?::[0-9]{1,5})?(?:\/[a-z0-9]+(?:[._-][a-z0-9]+)*)+@sha256:[a-f0-9]{64}$/u;
+const WHITESPACE_OR_CONTROL = /[\s\u0000-\u001f\u007f]/u;
 
 export interface OpenClawFixtureOptions {
   outputDir: string;
@@ -24,6 +27,15 @@ function writeNewFile(directory: string, name: string, content: string): void {
   if (path.dirname(destination) !== directory)
     throw new Error("fixture file escaped output directory");
   fs.writeFileSync(destination, content, { encoding: "utf8", flag: "wx", mode: 0o600 });
+}
+
+/** Reject mutable or shell/Dockerfile-active image references before writing a fixture. */
+export function assertImmutableSandboxBase(image: string): void {
+  if (WHITESPACE_OR_CONTROL.test(image) || !SAFE_IMMUTABLE_SANDBOX_BASE.test(image)) {
+    throw new Error(
+      "sandbox base must be a canonical registry/repository reference with an immutable sha256 digest",
+    );
+  }
 }
 
 function pluginSource(): string {
@@ -103,6 +115,7 @@ WORKDIR /opt/nemoclaw\n`;
 
 /** Generate a self-contained custom-image context for an OpenClaw catalog size. */
 export function writeOpenClawFixture(options: OpenClawFixtureOptions): OpenClawFixtureResult {
+  assertImmutableSandboxBase(options.sandboxBase);
   const root = path.resolve(options.outputDir);
   if (fs.existsSync(root)) {
     const stat = fs.lstatSync(root);

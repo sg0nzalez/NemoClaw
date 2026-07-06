@@ -44,10 +44,25 @@ export interface AttemptJournalEntry {
   run: ToolDisclosureRun;
 }
 
+/** Permit retries only while an attempt is still wholly inside setup. */
+export function assertSetupRetryAllowed(
+  invocationAttempted: boolean,
+  runId: string,
+  cause?: unknown,
+): void {
+  if (invocationAttempted) {
+    throw new Error(
+      `run ${runId} failed after agent invocation began; discard this campaign and restart it with fresh resources`,
+      { cause },
+    );
+  }
+}
+
 export function recoverAttemptJournal(outputDir: string): AttemptJournalEntry[] {
   const file = artifactPath(outputDir, "attempt-journal.jsonl");
   if (!fs.existsSync(file)) return [];
-  const lines = fs.readFileSync(file, "utf8").split("\n");
+  const raw = fs.readFileSync(file, "utf8");
+  const lines = raw.split("\n");
   const entries: AttemptJournalEntry[] = [];
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
@@ -55,8 +70,10 @@ export function recoverAttemptJournal(outputDir: string): AttemptJournalEntry[] 
     try {
       entries.push(JSON.parse(line) as AttemptJournalEntry);
     } catch {
-      const isTrailing = lines.slice(index + 1).every((candidate) => !candidate.trim());
-      if (!isTrailing) throw new Error(`attempt journal is corrupt at line ${index + 1}`);
+      const isUnterminatedFinalAppend = index === lines.length - 1 && !raw.endsWith("\n");
+      if (!isUnterminatedFinalAppend) {
+        throw new Error(`attempt journal is corrupt at line ${index + 1}`);
+      }
       writeTextArtifact(
         outputDir,
         "attempt-journal.jsonl",
@@ -161,6 +178,7 @@ async function attestVllmContainer(options: {
     ),
   });
   if (
+    containers.length !== 1 ||
     !container ||
     container.Id !== options.config.vllm_container_id ||
     container.Image !== expected.container_digest ||
@@ -224,6 +242,7 @@ async function attestSandbox(options: {
   }>;
   const container = containers[0];
   if (
+    containers.length !== 1 ||
     !container ||
     container.Id !== instanceId ||
     container.Image !== imageDigest ||
@@ -479,6 +498,7 @@ export async function executeCampaign(options: {
         attempt <= options.manifest.protocol.retry_setup_failures;
         attempt += 1
       ) {
+        let invocationAttempted = false;
         try {
           if (run.agent === "openclaw") {
             const reset = await command(
@@ -495,16 +515,15 @@ export async function executeCampaign(options: {
           mcp?.beginRun(run.run_id);
           proxy.beginRun(run.run_id);
           const before = await readVllmTokenSnapshot(options.config.telemetry_url);
-          const invocation = await command(
-            buildAgentDriverCommand({
-              openshellBin: options.config.openshell_bin,
-              sandboxName,
-              agent: run.agent,
-              prompt: task?.prompt ?? "Without using tools, reply exactly STATIC-CAPTURE.",
-              sessionId: run.run_id,
-            }),
-            timeoutMs,
-          );
+          const driverCommand = buildAgentDriverCommand({
+            openshellBin: options.config.openshell_bin,
+            sandboxName,
+            agent: run.agent,
+            prompt: task?.prompt ?? "Without using tools, reply exactly STATIC-CAPTURE.",
+            sessionId: run.run_id,
+          });
+          invocationAttempted = true;
+          const invocation = await command(driverCommand, timeoutMs);
           if (invocation.output_truncated)
             throw new Error("agent output exceeded the evidence bound");
           const after = await readVllmTokenSnapshot(options.config.telemetry_url);
@@ -581,13 +600,14 @@ export async function executeCampaign(options: {
           appendJsonLine(options.outputDir, "attempt-journal.jsonl", entry);
           journal.push(entry);
           break;
-        } catch {
+        } catch (error) {
           try {
             proxy.endRun();
           } catch {}
           try {
             mcp?.endRun();
           } catch {}
+          assertSetupRetryAllowed(invocationAttempted, run.run_id, error);
           const setupEvidence: SanitizedRunEvidence = {
             run_id: run.run_id,
             recorder_events: [],

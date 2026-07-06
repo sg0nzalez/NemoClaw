@@ -81,19 +81,18 @@ export function assembleToolDisclosureRun(options: {
   if (options.failureOutcome) {
     outcome = options.failureOutcome;
     correctness = failedCorrectness(options.calls.length);
-  } else if (
-    options.scheduled.phase === "static-visibility" &&
-    initial &&
-    options.initialSchemaTokens > 0
-  ) {
-    outcome = "success";
-    correctness = successfulStaticCorrectness();
   } else if (options.invocation.timed_out) {
     outcome = "timeout";
     correctness = failedCorrectness(options.calls.length);
   } else if (options.invocation.exit_code !== 0 || !initial || initial.outcome !== "completed") {
     outcome = "model-error";
     correctness = failedCorrectness(options.calls.length);
+  } else if (options.scheduled.phase === "static-visibility") {
+    outcome = options.initialSchemaTokens > 0 ? "success" : "model-error";
+    correctness =
+      options.initialSchemaTokens > 0
+        ? successfulStaticCorrectness()
+        : failedCorrectness(options.calls.length);
   } else {
     const graded = gradeTaskRun(
       options.task as SyntheticBenchmarkTask,

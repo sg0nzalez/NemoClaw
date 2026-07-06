@@ -67,6 +67,7 @@ export async function runBoundedCommand(options: {
   });
 
   let timedOut = false;
+  let hardStop: NodeJS.Timeout | undefined;
   const timer = setTimeout(() => {
     timedOut = true;
     try {
@@ -75,7 +76,7 @@ export async function runBoundedCommand(options: {
     } catch {
       // Process already exited.
     }
-    const hardStop = setTimeout(() => {
+    hardStop = setTimeout(() => {
       try {
         if (child.pid && process.platform !== "win32") process.kill(-child.pid, "SIGKILL");
         else child.kill("SIGKILL");
@@ -91,7 +92,10 @@ export async function runBoundedCommand(options: {
       child.once("error", reject);
       child.once("close", (code, signal) => resolve({ code, signal }));
     },
-  ).finally(() => clearTimeout(timer));
+  ).finally(() => {
+    clearTimeout(timer);
+    if (hardStop) clearTimeout(hardStop);
+  });
   const redactions = options.redactions ?? [];
   return {
     exit_code: result.code,

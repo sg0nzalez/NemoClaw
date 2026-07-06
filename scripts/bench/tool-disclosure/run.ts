@@ -30,7 +30,7 @@ import {
   type LiveCampaignConfiguration,
   type SanitizedRunEvidence,
 } from "./execute";
-import { writeOpenClawFixture } from "./openclaw-fixture";
+import { assertImmutableSandboxBase, writeOpenClawFixture } from "./openclaw-fixture";
 import { renderToolDisclosureMarkdown } from "./report";
 import {
   buildToolDisclosureSchedule,
@@ -275,12 +275,10 @@ function prepare(options: ParsedArguments): void {
       "benchmark preparation requires a clean worktree; commit or stash changes first",
     );
   }
-  if (
-    !options.sandboxBase ||
-    (!options.allowDirty && !/@sha256:[a-f0-9]{64}$/u.test(options.sandboxBase))
-  ) {
+  if (!options.sandboxBase) {
     throw new Error("--sandbox-base is required and must end in an immutable @sha256 digest");
   }
+  assertImmutableSandboxBase(options.sandboxBase);
   const outputDir = ensureCampaignDirectory(requestedOutput, options.resume);
   const catalog = generateSyntheticCatalog({ seed: options.catalogSeed });
   const primary = generatePrimaryTaskSet(catalog);

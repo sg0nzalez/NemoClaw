@@ -153,6 +153,7 @@ If any of those controlled values changes, prepare a new benchmark ID and restar
 The agent adapters must use the generated deterministic handlers and verify expected tool names, order, argument hashes, call count, unnecessary calls, and the returned nonce.
 Direct and progressive modes must differ only in their disclosure configuration.
 Follow the retry allowance in `manifest.json` for setup failures, and do not convert task failures into setup failures.
+Once an agent invocation has begun, any incomplete or inconsistent evidence aborts the campaign instead of consuming a setup retry; discard that campaign and restart it with fresh resources.
 
 ## Summarize and verify artifacts
 
