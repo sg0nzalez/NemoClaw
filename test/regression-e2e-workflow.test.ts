@@ -20,6 +20,7 @@ type RegressionWorkflow = {
     {
       permissions?: Record<string, string>;
       steps?: WorkflowStep[];
+      "timeout-minutes"?: number;
     }
   >;
 };
@@ -86,6 +87,7 @@ describe("Regression E2E workflow contract", () => {
     const serializedJob = JSON.stringify(job);
 
     expect(job?.permissions).toEqual({ contents: "read" });
+    expect(job?.["timeout-minutes"]).toBe(130);
     expect(checkoutStep?.uses).toMatch(FULL_SHA_ACTION);
     expect(checkoutStep?.with?.["persist-credentials"]).toBe(false);
     expect(setupNodeStep?.uses).toMatch(FULL_SHA_ACTION);

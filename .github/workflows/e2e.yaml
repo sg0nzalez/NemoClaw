@@ -3671,9 +3671,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    # Cold-cache custom-image onboarding, recreation, rebuild, and EXDEV proof
-    # can exceed an hour, so this lane keeps a bounded 90-minute budget.
-    timeout-minutes: 90
+    # Three bounded 25-minute onboards plus the 20-minute rebuild and 15-minute
+    # Vitest buffer need 110 minutes; allow 20 more for setup and teardown.
+    timeout-minutes: 130
     env:
       E2E_JOB: "1"
       E2E_TARGET_ID: "openclaw-plugin-runtime-exdev"

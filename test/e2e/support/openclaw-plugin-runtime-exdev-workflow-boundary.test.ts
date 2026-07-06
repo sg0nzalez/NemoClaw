@@ -53,7 +53,7 @@ describe("OpenClaw plugin runtime EXDEV workflow boundary", () => {
     expect(job.if).toBe(SELECTOR_CONDITION);
     expect(job["runs-on"]).toBe("ubuntu-latest");
     expect(job.permissions).toEqual({ contents: "read" });
-    expect(job["timeout-minutes"]).toBe(90);
+    expect(job["timeout-minutes"]).toBe(130);
     expect(job.env).toMatchObject({
       E2E_JOB: "1",
       E2E_TARGET_ID: JOB_ID,

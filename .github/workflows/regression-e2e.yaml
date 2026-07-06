@@ -280,9 +280,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    # Cold-cache custom-image onboarding, gateway restart, rebuild, and EXDEV
-    # proof can exceed 45 minutes, so this lane keeps a bounded 75-minute budget.
-    timeout-minutes: 75
+    # Three bounded 25-minute onboards plus the 20-minute rebuild and 15-minute
+    # Vitest buffer need 110 minutes; allow 20 more for setup and teardown.
+    timeout-minutes: 130
     steps:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
