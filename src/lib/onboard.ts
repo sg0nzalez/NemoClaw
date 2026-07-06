@@ -3053,9 +3053,11 @@ async function createSandboxWithBaseImageResolution(
         ? "  Restoring workspace state from pre-upgrade backup..."
         : "  Restoring workspace state from pre-recreate backup...",
     );
-    const restore = sandboxState.restoreSandboxState(sandboxName, restoreBackupPath, {
-      skipStateFiles: createIntent?.skipRestoreStateFiles,
-    });
+    const restore = sandboxState.restoreSandboxState(
+      sandboxName,
+      restoreBackupPath,
+      createIntent?.skipRestoreStateFiles,
+    );
     if (restore.success) {
       note(
         `  ✓ State restored (${restore.restoredDirs.length} directories, ${restore.restoredFiles.length} files)`,
@@ -3065,8 +3067,6 @@ async function createSandboxWithBaseImageResolution(
     }
   }
 
-  // DNS proxy — run a forwarder in the sandbox pod so the isolated
-  // sandbox namespace can resolve hostnames (fixes #626).
   if (sandboxRuntimeFields.openshellDriver === "kubernetes") {
     console.log("  Setting up sandbox DNS proxy...");
     runFile("bash", [path.join(SCRIPTS, "setup-dns-proxy.sh"), GATEWAY_NAME, sandboxName], {
@@ -3079,8 +3079,6 @@ async function createSandboxWithBaseImageResolution(
     sandboxRuntimeFields,
   );
 
-  // Check that messaging providers exist in the gateway (sandbox attachment
-  // cannot be verified via CLI yet — only gateway-level existence is checked).
   for (const p of messagingProviders) {
     if (!providerExistsInGateway(p)) {
       printMessagingProviderMissing(p);
@@ -3091,7 +3089,6 @@ async function createSandboxWithBaseImageResolution(
 
   warnIfLandlockUnsupported({ dockerInfoFormat, runCapture });
 
-  // #4614: arm rollback only when the sandbox was not live before (never a recreate/rebuild).
   if (!liveExists) sandboxCancelRollback.arm(sandboxName);
   return sandboxName;
 }

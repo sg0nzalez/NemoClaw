@@ -142,8 +142,12 @@ export interface RestoreResult {
   failedFiles: string[];
 }
 
-export interface RestoreOptions {
-  readonly skipStateFiles?: readonly string[];
+export type RestoreOptions = { readonly skipStateFiles?: readonly string[] } | readonly string[];
+
+function isRestoreOptionsObject(
+  options: RestoreOptions,
+): options is { readonly skipStateFiles?: readonly string[] } {
+  return !Array.isArray(options);
 }
 
 export interface TarValidationResult {
@@ -1381,7 +1385,9 @@ export function restoreSandboxState(
   const restorableStateDirs = manifest.backedUpDirs ?? manifest.stateDirs;
   const localDirs = existingBackupDirs(backupPath, restorableStateDirs);
   const stateFiles = normalizeStateFileSpecs(manifest.stateFiles ?? []);
-  const skippedFiles = new Set(options.skipStateFiles ?? []);
+  const skippedFiles = new Set(
+    isRestoreOptionsObject(options) ? (options.skipStateFiles ?? []) : options,
+  );
   const localFiles = stateFiles.filter(
     (f) => !skippedFiles.has(f.path) && existsSync(path.join(backupPath, f.path)),
   );
