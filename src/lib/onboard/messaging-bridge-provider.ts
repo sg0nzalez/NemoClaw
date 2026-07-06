@@ -240,6 +240,11 @@ function bridgeProfilesForTokenDefs(
   return profiles.filter((profile) => presentProfileIds.has(profile.profileId));
 }
 
+/** Gateway-minted bridge provider name for a channel (sandbox-scoped). */
+function bridgeProviderNameFor(sandboxName: string, channelId: string): string {
+  return `${sandboxName}-${channelId}-bridge`;
+}
+
 /**
  * Build the messaging token definitions for every enabled bridge channel whose
  * source secret was captured. Mirrors how the Brave provider is pushed in
@@ -259,13 +264,34 @@ export function collectMessagingBridgeTokenDefs(
     const secret = resolveBridgeSecret(profile.sourceSecretEnv, input);
     if (!secret) continue;
     defs.push({
-      name: `${input.sandboxName}-${profile.channelId}-bridge`,
+      name: bridgeProviderNameFor(input.sandboxName, profile.channelId),
       envKey: profile.credentialKey,
       token: MESSAGING_BRIDGE_PENDING_VALUE,
       providerType: profile.profileId,
     });
   }
   return defs;
+}
+
+/**
+ * Gateway-minted bridge provider name(s) for a channel — the providers
+ * `channels remove` must tear down. A bridge-backed channel has no
+ * channelTokenKeys, so these would otherwise be left dangling (still minting and
+ * rotating a token for a removed channel). `profiles` is injectable for tests;
+ * defaults to convention discovery.
+ */
+export function bridgeProviderNamesForChannel(
+  sandboxName: string,
+  channelName: string,
+  profiles: readonly MessagingBridgeProfile[] = listMessagingBridgeProfiles(),
+): string[] {
+  return [
+    ...new Set(
+      profiles
+        .filter((profile) => profile.channelId === channelName)
+        .map((profile) => bridgeProviderNameFor(sandboxName, profile.channelId)),
+    ),
+  ];
 }
 
 /**

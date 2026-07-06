@@ -48,6 +48,7 @@ import {
   type PolicyRemoveOptions,
   parsePolicyAddOptions,
 } from "../../domain/policy-channel";
+import { bridgeProviderNamesForChannel } from "../../onboard/messaging-bridge-provider";
 import { getMessagingToken } from "../../onboard/messaging-token";
 import { shellQuote } from "../../runner";
 import {
@@ -549,7 +550,7 @@ async function applyChannelAddToGatewayAndRegistry(
   sandboxName: string,
   channelName: string,
   acquired: Record<string, string>,
-): Promise<void> {
+): Promise<boolean> {
   const tokenDefs = Object.entries(acquired).map(([envKey, token]) => ({
     name: bridgeProviderName(sandboxName, channelName, envKey),
     envKey,
@@ -569,7 +570,9 @@ async function applyChannelAddToGatewayAndRegistry(
     // upsertMessagingProviders handles create-or-update and process.exits on
     // failure, so reaching the next line means every entry is registered.
     onboardProviders.upsertMessagingProviders(tokenDefs, runOpenshell);
+    return true;
   }
+  return false;
 }
 
 // Remove a channel's bridge providers from the gateway and drop it from the
@@ -584,7 +587,18 @@ async function applyChannelRemoveToGatewayAndRegistry(
   const residual: string[] = [];
   let gatewayReachable = true;
 
-  if (channelTokenKeys.length > 0) {
+  // Providers to tear down: the per-credential providers PLUS the gateway-minted
+  // bridge provider for a bridge-backed channel (which has no channelTokenKeys, so
+  // it would otherwise be left dangling — still minting/rotating a token for a
+  // removed channel). Discovery is generic (bridge module), by convention.
+  const providerNames = [
+    ...new Set([
+      ...channelTokenKeys.map((envKey) => bridgeProviderName(sandboxName, channelName, envKey)),
+      ...bridgeProviderNamesForChannel(sandboxName, channelName),
+    ]),
+  ];
+
+  if (providerNames.length > 0) {
     const gatewayName = getSandboxTargetGatewayName(sandboxName);
     const recovery = await recoverNamedGatewayRuntime({ gatewayName });
     if (!recovery.recovered) {
@@ -610,8 +624,7 @@ async function applyChannelRemoveToGatewayAndRegistry(
   // configured for a sandbox that is no longer alive.
   const detachFailures: Array<{ name: string; output: string }> = [];
   if (gatewayReachable) {
-    for (const envKey of channelTokenKeys) {
-      const name = bridgeProviderName(sandboxName, channelName, envKey);
+    for (const name of providerNames) {
       const result = runOpenshell(["sandbox", "provider", "detach", sandboxName, name], {
         ignoreError: true,
         stdio: ["ignore", "pipe", "pipe"],
@@ -647,8 +660,7 @@ async function applyChannelRemoveToGatewayAndRegistry(
   const deleteFailures: Array<{ name: string; output: string }> = [];
   if (gatewayReachable) {
     const detachFailedSet = new Set(detachFailures.map((f) => f.name));
-    for (const envKey of channelTokenKeys) {
-      const name = bridgeProviderName(sandboxName, channelName, envKey);
+    for (const name of providerNames) {
       if (!bestEffort && detachFailedSet.has(name)) continue;
       const result = runOpenshell(["provider", "delete", name], {
         ignoreError: true,
@@ -1050,8 +1062,14 @@ async function addSandboxChannelUnlocked(
   // discard the change. Pre-fix this was safe because saveCredential()
   // wrote credentials.json; with env-only persistence, exiting before
   // the rebuild used to drop the queued token.
-  await applyChannelAddToGatewayAndRegistry(sandboxName, canonical, acquired);
-  console.log(`  ${G}✓${R} Registered ${canonical} bridge with the OpenShell gateway.`);
+  const registeredBridge = await applyChannelAddToGatewayAndRegistry(
+    sandboxName,
+    canonical,
+    acquired,
+  );
+  if (registeredBridge) {
+    console.log(`  ${G}✓${R} Registered ${canonical} bridge with the OpenShell gateway.`);
+  }
 
   if (!applyChannelPresetIfAvailable(sandboxName, canonical)) {
     await rollbackChannelAdd(sandboxName, channelDef, canonical, {

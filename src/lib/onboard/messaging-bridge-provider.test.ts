@@ -3,6 +3,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 import {
+  bridgeProviderNamesForChannel,
   collectMessagingBridgeTokenDefs,
   configureMessagingBridgeRefreshes,
   ensureMessagingBridgeProfiles,
@@ -254,5 +255,28 @@ describe("listMessagingBridgeProfiles (real registry + co-located YAML)", () => 
     expect(gc?.secretMaterialKeys).toContain("private_key");
     expect(gc?.sourceSecretEnv).toBe("GOOGLECHAT_SERVICE_ACCOUNT");
     expect(gc?.profilePath.endsWith("googlechat/provider-profile/openclaw.yaml")).toBe(true);
+  });
+});
+
+describe("bridgeProviderNamesForChannel (PRA-8: channels remove teardown)", () => {
+  it("returns the gateway-minted bridge provider for a credentials:[] channel", () => {
+    // The dangling-provider case: a bridge channel has no channelTokenKeys, so
+    // `channels remove` must still find its provider to detach + delete.
+    expect(bridgeProviderNamesForChannel("sbx", "googlechat", [GC_PROFILE])).toEqual([
+      "sbx-googlechat-bridge",
+    ]);
+  });
+
+  it("returns nothing for a channel that has no bridge profile", () => {
+    expect(bridgeProviderNamesForChannel("sbx", "telegram", [GC_PROFILE])).toEqual([]);
+  });
+
+  it("dedupes when a channel declares the same bridge for multiple agents", () => {
+    expect(
+      bridgeProviderNamesForChannel("sbx", "googlechat", [
+        GC_PROFILE,
+        { ...GC_PROFILE, agent: "hermes" },
+      ]),
+    ).toEqual(["sbx-googlechat-bridge"]);
   });
 });
