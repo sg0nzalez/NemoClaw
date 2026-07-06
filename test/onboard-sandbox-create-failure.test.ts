@@ -154,11 +154,7 @@ describe("sandbox create failure handling", () => {
       expect(messages).toContain("  The failed sandbox has been removed; retry will recreate it.");
     } finally {
       console.error = originalError;
-      if (originalHome === undefined) {
-        delete process.env.HOME;
-      } else {
-        process.env.HOME = originalHome;
-      }
+      originalHome === undefined ? delete process.env.HOME : (process.env.HOME = originalHome);
       fs.rmSync(tmp, { recursive: true, force: true });
     }
   });
