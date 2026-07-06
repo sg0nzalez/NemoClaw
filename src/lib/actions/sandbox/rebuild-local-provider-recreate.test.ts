@@ -59,6 +59,11 @@ const unusedCommonInferenceDeps = {
   verifyOnboardInferenceSmoke: vi.fn(),
   isNonInteractive: () => true,
   registry: { updateSandbox: vi.fn() },
+  error: vi.fn(),
+  log: vi.fn(),
+  exitProcess: (code: number): never => {
+    throw new Error(`EXIT_CALLED:${code}`);
+  },
 };
 
 const localProviderScenarios = [
@@ -121,6 +126,8 @@ function makeRouteApplier() {
     compactText: (value) => value.trim(),
     redact: (value) => value,
     localInferenceTimeoutSecs: 30,
+    error: unusedCommonInferenceDeps.error,
+    exitProcess: unusedCommonInferenceDeps.exitProcess,
   });
 }
 

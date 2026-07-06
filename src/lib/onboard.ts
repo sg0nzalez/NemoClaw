@@ -257,6 +257,8 @@ const { DEFAULT_CLOUD_MODEL, getProviderSelectionConfig, parseGatewayInference }
 
 const onboardProviders = require("./onboard/providers");
 const inferenceProviders: typeof import("./onboard/inference-providers") = require("./onboard/inference-providers");
+const setupInferenceFactory: typeof import("./onboard/setup-inference") =
+  require("./onboard/setup-inference");
 const { ensureResumeProviderReady } = require("./onboard/resume-provider-shim");
 const hermesProviderAuth = require("./hermes-provider-auth");
 const onboardHermesDashboard: typeof import("./onboard/hermes-dashboard") = require("./onboard/hermes-dashboard");
@@ -393,9 +395,6 @@ const {
 const {
   createValidationRecoveryPromptHelpers,
 }: typeof import("./onboard/validation-recovery-prompt") = require("./onboard/validation-recovery-prompt");
-const {
-  createLocalInferenceRouteApplier,
-}: typeof import("./onboard/local-inference-route") = require("./onboard/local-inference-route");
 const {
   createOpenshellCliHelpers,
 }: typeof import("./onboard/openshell-cli") = require("./onboard/openshell-cli");
@@ -837,6 +836,8 @@ const {
   checkHermesProviderStoreReachable,
 } = hermesAuth.createHermesAuthHelpers({
   isNonInteractive,
+  error: (message) => console.error(message),
+  exitProcess: (code) => process.exit(code),
   note,
   prompt,
   getNavigationChoice,
@@ -856,16 +857,6 @@ const { promptValidationRecovery } = createValidationRecoveryPromptHelpers({
     validateNvidiaApiKeyValue(key, credentialEnv ?? undefined),
   getTransportRecoveryMessage: (failure: any) => getTransportRecoveryMessage(failure),
   exitOnboardFromPrompt,
-});
-
-const applyLocalInferenceRoute = createLocalInferenceRouteApplier({
-  runOpenshell,
-  isNonInteractive,
-  promptValidationRecovery,
-  classifyApplyFailure,
-  compactText,
-  redact,
-  localInferenceTimeoutSecs: LOCAL_INFERENCE_TIMEOUT_SECS,
 });
 
 // Provider CRUD — thin wrappers that inject runOpenshell to avoid circular deps.
@@ -3657,6 +3648,9 @@ async function handleRemoteProviderSelection(args: RemoteProviderSelectionArgs, 
       isNonInteractive,
       promptInputModel,
       replaceNamedCredential,
+      exitProcess: (code) => process.exit(code),
+      error: (message) => console.error(message),
+      log: (message) => console.log(message),
     });
     if (bedrockSelection.action === "retry-selection") {
       console.log("  Returning to provider selection.");
@@ -4162,136 +4156,67 @@ async function setupNim(gpu: ReturnType<typeof nim.detectGpu>, sandboxName: stri
 
 // ── Step 4: Inference provider ───────────────────────────────────
 
-async function setupInference(
-  sandboxName: string | null,
-  model: string,
-  provider: string,
-  endpointUrl: string | null = null,
-  credentialEnv: string | null = null,
-  hermesAuthMethod: HermesAuthMethod | string | null = null,
-  hermesToolGateways: string[] = [],
-  options: import("./onboard/machine/handlers/provider-inference").ProviderInferenceSetupOptions = {},
-): Promise<{ ok: true; retry?: undefined } | { retry: "selection" }> {
-  step(4, 8, "Setting up inference provider");
-  runOpenshell(["gateway", "select", GATEWAY_NAME], { ignoreError: true });
-
-  const commonDeps = {
+function getSetupInferenceDeps(): SetupInferenceDeps {
+  return {
+    step,
+    getGatewayName: () => GATEWAY_NAME,
     runOpenshell,
     upsertProvider,
     verifyInferenceRoute,
     verifyOnboardInferenceSmoke,
     isNonInteractive,
-    registry,
+    updateSandbox: registry.updateSandbox,
+    hermesProviderAuth,
+    getHermesToolGatewayBroker,
+    providerExistsInGateway,
+    normalizeHermesAuthMethod,
+    resolveHermesNousApiKey,
+    checkHermesProviderStoreReachable,
+    hermesAuthMethodLabel,
+    hermesConstants: {
+      HERMES_NOUS_API_KEY_CREDENTIAL_ENV,
+      HERMES_AUTH_METHOD_API_KEY,
+      HERMES_AUTH_METHOD_OAUTH,
+    },
+    requireValue,
+    redact,
+    compactText,
+    REMOTE_PROVIDER_CONFIG,
+    hydrateCredentialEnv,
+    promptValidationRecovery,
+    classifyApplyFailure,
+    localInferenceTimeoutSecs: LOCAL_INFERENCE_TIMEOUT_SECS,
+    bedrockRuntimeOnboard,
+    validateLocalProvider,
+    getLocalProviderHealthCheck,
+    getLocalProviderBaseUrl,
+    run,
+    vllmLocalCredentialEnv: VLLM_LOCAL_CREDENTIAL_ENV,
+    getOllamaWarmupCommand,
+    shouldFrontOllamaWithProxy,
+    ensureOllamaAuthProxy,
+    isProxyHealthy,
+    getOllamaProxyToken,
+    persistAndProbeOllamaProxy,
+    localInference,
+    ollamaProxyCredentialEnv: OLLAMA_PROXY_CREDENTIAL_ENV,
+    isRoutedInferenceProvider,
+    reconcileModelRouter,
+    routedInference,
+    log: (message: string) => console.log(message),
+    error: (message: string) => console.error(message),
+    exitProcess: (code: number): never => process.exit(code),
   };
-
-  if (provider === hermesProviderAuth.HERMES_PROVIDER_NAME) {
-    return inferenceProviders.setupHermesProviderInference(
-      {
-        sandboxName,
-        model,
-        provider,
-        endpointUrl,
-        credentialEnv,
-        hermesAuthMethod,
-        hermesToolGateways,
-      },
-      {
-        ...commonDeps,
-        hermesProviderAuth,
-        getHermesToolGatewayBroker,
-        providerExistsInGateway,
-        normalizeHermesAuthMethod,
-        resolveHermesNousApiKey,
-        checkHermesProviderStoreReachable,
-        hermesAuthMethodLabel,
-        hermesConstants: {
-          HERMES_NOUS_API_KEY_CREDENTIAL_ENV,
-          HERMES_AUTH_METHOD_API_KEY,
-          HERMES_AUTH_METHOD_OAUTH,
-        },
-        requireValue,
-        redact,
-        compactText,
-      },
-    );
-  }
-
-  if (inferenceProviders.isRemoteProviderName(provider)) {
-    // biome-ignore format: keep src/lib/onboard.ts net-neutral for growth guardrail.
-    const outcome = await inferenceProviders.setupRemoteProviderInference(
-      { sandboxName, model, provider, endpointUrl, credentialEnv, reuseGatewayCredentialWithoutLocalKey: options.reuseGatewayCredentialWithoutLocalKey === true },
-      {
-        ...commonDeps,
-        REMOTE_PROVIDER_CONFIG,
-        hydrateCredentialEnv,
-        promptValidationRecovery,
-        classifyApplyFailure,
-        LOCAL_INFERENCE_TIMEOUT_SECS,
-        bedrockRuntimeOnboard,
-        redact,
-        compactText,
-      },
-    );
-    if (outcome.done) return outcome.result;
-  } else if (provider === "vllm-local") {
-    const outcome = await inferenceProviders.setupVllmLocalInference(
-      { model, provider },
-      {
-        ...commonDeps,
-        validateLocalProvider,
-        getLocalProviderHealthCheck,
-        getLocalProviderBaseUrl,
-        applyLocalInferenceRoute,
-        run,
-        VLLM_LOCAL_CREDENTIAL_ENV,
-      },
-    );
-    if (outcome.done) return outcome.result;
-  } else if (provider === "ollama-local") {
-    const outcome = await inferenceProviders.setupOllamaLocalInference(
-      { model, provider, allowToolsIncompatible: options.allowToolsIncompatible === true },
-      {
-        ...commonDeps,
-        validateLocalProvider,
-        getLocalProviderBaseUrl,
-        applyLocalInferenceRoute,
-        getOllamaWarmupCommand,
-        run,
-        shouldFrontOllamaWithProxy,
-        ensureOllamaAuthProxy,
-        isProxyHealthy,
-        getOllamaProxyToken,
-        persistAndProbeOllamaProxy,
-        localInference,
-        OLLAMA_PROXY_CREDENTIAL_ENV,
-      },
-    );
-    if (outcome.done) return outcome.result;
-  } else if (isRoutedInferenceProvider(provider)) {
-    await inferenceProviders.setupRoutedInference(
-      { model, provider, endpointUrl, credentialEnv },
-      {
-        ...commonDeps,
-        reconcileModelRouter,
-        routedInference,
-        hydrateCredentialEnv,
-      },
-    );
-  } else {
-    console.error(`  Unsupported provider configuration: ${provider}`);
-    process.exit(1);
-  }
-
-  verifyInferenceRoute(provider, model);
-  if (options.skipHostInferenceSmoke === true)
-    console.log("  Reusing existing gateway credential; skipping host inference smoke.");
-  else verifyOnboardInferenceSmoke({ provider, model, endpointUrl, credentialEnv });
-  if (sandboxName) {
-    registry.updateSandbox(sandboxName, { model, provider });
-  }
-  console.log(`  ✓ Inference route set: ${provider} / ${model}`);
-  return { ok: true };
 }
+
+export type SetupInferenceDeps = import("./onboard/setup-inference").SetupInferenceDeps;
+export type SetupInference = import("./onboard/setup-inference").SetupInference;
+
+function createSetupInference(overrides: Partial<SetupInferenceDeps> = {}): SetupInference {
+  return setupInferenceFactory.createSetupInference(getSetupInferenceDeps(), overrides);
+}
+
+const setupInference = createSetupInference();
 
 // ── Step 6: Messaging channels ───────────────────────────────────
 
@@ -5300,6 +5225,7 @@ module.exports = {
   runCaptureOpenshell,
   agentSupportsWebSearch,
   agentSupportsWebSearchProvider,
+  createSetupInference,
   setupInference,
   setupMessagingChannels,
   MESSAGING_CHANNELS,

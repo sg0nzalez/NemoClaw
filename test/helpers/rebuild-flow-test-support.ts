@@ -84,6 +84,7 @@ export type RebuildFlowOverrides = {
   hermesCredentialKeys?: string[] | null;
   hermesProviderExists?: boolean;
   versionCheck?: VersionCheckResult;
+  hydrateCredentialEnv?: (credentialEnv: string) => string | null;
   customImagePreflight?: RebuildImagePreflightResult;
   defaultSelectionRevision?: number;
   preDeleteDefaultSelectionRevision?: number;
@@ -101,6 +102,7 @@ export type RebuildFlowHarness = {
   ensureRebuildAgentBaseImageSpy: MockInstance;
   ensureTargetGatewaySpy: MockInstance;
   ensureValidatedBraveSearchCredentialSpy: MockInstance;
+  hydrateCredentialEnvSpy: MockInstance;
   logSpy: MockInstance;
   markStepFailedSpy: MockInstance;
   onboardSpy: MockInstance;

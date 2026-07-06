@@ -39,6 +39,10 @@ export async function setupRemoteProviderInference(
     verifyInferenceRoute,
     verifyOnboardInferenceSmoke,
     isNonInteractive,
+    registry,
+    exitProcess,
+    error,
+    log,
     REMOTE_PROVIDER_CONFIG,
     hydrateCredentialEnv,
     promptValidationRecovery,
@@ -54,8 +58,8 @@ export async function setupRemoteProviderInference(
       ? REMOTE_PROVIDER_CONFIG.build
       : Object.values(REMOTE_PROVIDER_CONFIG).find((entry) => entry.providerName === provider);
   if (!config) {
-    console.error(`  Unsupported provider configuration: ${provider}`);
-    process.exit(1);
+    error(`  Unsupported provider configuration: ${provider}`);
+    return exitProcess(1);
   }
   const bedrockSetup = await bedrockRuntimeOnboard.setupBedrockRuntimeInference({
     sandboxName,
@@ -68,6 +72,10 @@ export async function setupRemoteProviderInference(
     upsertProvider,
     verifyInferenceRoute,
     verifyOnboardInferenceSmoke,
+    updateSandbox: registry.updateSandbox,
+    exitProcess,
+    error,
+    log,
   });
   if (bedrockSetup.handled) return { done: true, result: bedrockSetup.result };
   while (true) {
@@ -111,9 +119,9 @@ export async function setupRemoteProviderInference(
           };
     }
     if (!providerResult.ok) {
-      console.error(`  ${providerResult.message}`);
+      error(`  ${providerResult.message}`);
       if (isNonInteractive()) {
-        process.exit(providerResult.status || 1);
+        return exitProcess(providerResult.status || 1);
       }
       const retry = await promptValidationRecovery(
         config.label,
@@ -127,7 +135,7 @@ export async function setupRemoteProviderInference(
       if (retry === "selection" || retry === "model") {
         return { done: true, result: { retry: "selection" } };
       }
-      process.exit(providerResult.status || 1);
+      return exitProcess(providerResult.status || 1);
     }
     const argsv = ["inference", "set"];
     if (config.skipVerify) {
@@ -144,9 +152,9 @@ export async function setupRemoteProviderInference(
     const message =
       compactText(redact(`${applyResult.stderr || ""} ${applyResult.stdout || ""}`)) ||
       `Failed to configure inference provider '${provider}'.`;
-    console.error(`  ${message}`);
+    error(`  ${message}`);
     if (isNonInteractive()) {
-      process.exit(applyResult.status || 1);
+      return exitProcess(applyResult.status || 1);
     }
     const retry = await promptValidationRecovery(
       config.label,
@@ -160,7 +168,7 @@ export async function setupRemoteProviderInference(
     if (retry === "selection" || retry === "model") {
       return { done: true, result: { retry: "selection" } };
     }
-    process.exit(applyResult.status || 1);
+    return exitProcess(applyResult.status || 1);
   }
   return { done: false };
 }
