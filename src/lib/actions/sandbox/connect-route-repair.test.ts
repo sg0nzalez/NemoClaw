@@ -82,6 +82,7 @@ function makeRepairDeps(
     logs: [] as string[],
     errors: [] as string[],
     legacyRepairs: [] as Array<{ sandboxName: string; quiet: boolean }>,
+    directHostRepairs: [] as string[],
     monkeypatches: [] as string[],
     reapplications: [] as string[],
     probeOptions: [] as Array<object | undefined>,
@@ -104,6 +105,10 @@ function makeRepairDeps(
     repairLegacyDnsProxy: vi.fn((sandboxName, quiet) => {
       calls.legacyRepairs.push({ sandboxName, quiet });
       return { exitCode: 0 };
+    }),
+    repairDirectContainerHosts: vi.fn((sandboxName) => {
+      calls.directHostRepairs.push(sandboxName);
+      return { ok: true, changed: true, detail: "added inference.local -> 172.17.0.1" };
     }),
     log: (message) => calls.logs.push(message),
     error: (message) => calls.errors.push(message),
@@ -192,8 +197,8 @@ describe("sandbox connect route repair unit flow", () => {
     expect(calls.reapplications).toEqual([]);
   });
 
-  it("uses inference route reapply instead of legacy DNS repair for docker sandboxes", () => {
-    const { calls, deps } = makeRepairDeps([broken(), healthy()]);
+  it("repairs docker-driver /etc/hosts before falling back to inference route reapply", () => {
+    const { calls, deps } = makeRepairDeps([broken(), broken(), healthy()]);
 
     const result = repairSandboxInferenceRouteWithDeps(
       "docker-box",
@@ -205,8 +210,36 @@ describe("sandbox connect route repair unit flow", () => {
     expect(result.healthy).toBe(true);
     expect(result.repairAttempted).toBe(true);
     expect(calls.legacyRepairs).toEqual([]);
+    expect(calls.directHostRepairs).toEqual(["docker-box"]);
     expect(calls.reapplications).toEqual(["docker-box"]);
+    expect(calls.errors).toContain(
+      "  Warning: inference.local is still unavailable after /etc/hosts repair.",
+    );
     expect(calls.logs).toContain("  inference.local route repaired.");
+  });
+
+  it("accepts docker-driver /etc/hosts repair when it restores inference.local", () => {
+    const { calls, deps } = makeRepairDeps([broken(), healthy()]);
+
+    const result = repairSandboxInferenceRouteWithDeps(
+      "docker-box",
+      sandbox({ openshellDriver: "docker" }),
+      {},
+      deps,
+    );
+
+    expect(result).toEqual({
+      healthy: true,
+      repairAttempted: true,
+      detail: "OK 200",
+    });
+    expect(calls.directHostRepairs).toEqual(["docker-box"]);
+    expect(calls.legacyRepairs).toEqual([]);
+    expect(calls.reapplications).toEqual([]);
+    expect(calls.probeOptions).toEqual([undefined, { attempts: 3, delayMs: 2000 }]);
+    expect(calls.logs).toContain(
+      "  inference.local is unavailable inside 'docker-box'. Repairing /etc/hosts...",
+    );
   });
 
   it("lets the VM monkeypatch satisfy the route before inference reapply", () => {

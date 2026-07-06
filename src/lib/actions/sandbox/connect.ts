@@ -13,6 +13,7 @@ import {
   OPENSHELL_OPERATION_TIMEOUT_MS,
   OPENSHELL_PROBE_TIMEOUT_MS,
 } from "../../adapters/openshell/timeouts";
+import { dockerSpawnSync } from "../../adapters/docker/exec";
 import * as agentRuntime from "../../agent/runtime";
 import { CLI_NAME } from "../../cli/branding";
 import { D, G, R, YW } from "../../cli/terminal-style";
@@ -30,6 +31,7 @@ import { resolveSandboxGatewayName } from "../../onboard/gateway-binding";
 import { isWsl } from "../../platform";
 import { ROOT } from "../../runner";
 import * as sandboxVersion from "../../sandbox/version";
+import { privilegedSandboxExecArgv } from "../../sandbox/privileged-exec";
 import {
   isSandboxReady,
   isTerminalSandboxPhase,
@@ -111,6 +113,10 @@ export type SandboxInferenceRouteRepairResult = {
 export type SandboxInferenceRouteRepairDeps = {
   isRepairDisabled?: () => boolean;
   probe: (sandboxName: string, options?: InferenceRouteProbeOptions) => SandboxInferenceRouteProbe;
+  repairDirectContainerHosts?: (
+    sandboxName: string,
+    sb: SandboxEntry | null,
+  ) => DirectInferenceHostsRepairResult;
   shouldApplyVmDnsMonkeypatch: (sb: SandboxEntry | null) => boolean;
   applyVmDnsMonkeypatch: (
     sandboxName: string,
@@ -138,6 +144,12 @@ export type ManagedInferenceRouteResetDeps = {
   printUnrecoverableInferenceRoute: (sandboxName: string, route: string, detail: string) => void;
   log?: (message: string) => void;
   error?: (message: string) => void;
+};
+
+type DirectInferenceHostsRepairResult = {
+  ok: boolean;
+  changed: boolean;
+  detail: string;
 };
 
 const INFERENCE_ROUTE_POST_REPAIR_PROBE_ATTEMPTS = 3;
@@ -397,6 +409,66 @@ function shouldUseLegacyDnsProxyRepair(sb: SandboxEntry | null): boolean {
   return driver !== "vm" && driver !== "docker";
 }
 
+function shouldRepairDirectInferenceHosts(sb: SandboxEntry | null): boolean {
+  return sb?.openshellDriver === "docker";
+}
+
+function repairDirectContainerInferenceHosts(
+  sandboxName: string,
+  sb: SandboxEntry | null,
+): DirectInferenceHostsRepairResult {
+  if (!shouldRepairDirectInferenceHosts(sb)) {
+    return { ok: true, changed: false, detail: "not a docker-driver sandbox" };
+  }
+
+  const script = [
+    'hostname="inference.local"',
+    "if awk -v h=\"$hostname\" '{ for (i = 2; i <= NF; i++) if ($i == h) found = 1 } END { exit found ? 0 : 1 }' /etc/hosts; then",
+    '  echo "present"',
+    "  exit 0",
+    "fi",
+    'target="$(awk \'$2 == "host.openshell.internal" { print $1; exit }\' /etc/hosts 2>/dev/null || true)"',
+    'if [ -z "$target" ] && command -v getent >/dev/null 2>&1; then',
+    "  target=\"$(getent hosts host.openshell.internal 2>/dev/null | awk 'NR == 1 { print $1; exit }')\"",
+    "fi",
+    'if [ -z "$target" ]; then',
+    "  target=\"$(ip route show default 2>/dev/null | awk 'NR == 1 { print $3; exit }')\"",
+    "fi",
+    'case "$target" in',
+    '  ""|*[!0-9A-Fa-f:.]*) echo "could not resolve a safe gateway address for inference.local" >&2; exit 1 ;;',
+    "esac",
+    'printf "\\n%s\\t%s\\n" "$target" "$hostname" >> /etc/hosts',
+    'echo "added $hostname -> $target"',
+  ].join("\n");
+
+  try {
+    const result = dockerSpawnSync(
+      privilegedSandboxExecArgv(sandboxName, ["sh", "-eu", "-c", script], false, true),
+      {
+        stdio: ["ignore", "pipe", "pipe"],
+        encoding: "utf-8",
+        timeout: OPENSHELL_OPERATION_TIMEOUT_MS,
+      },
+    );
+    const output = String(result.stdout || result.stderr || "").trim();
+    if (result.status !== 0) {
+      return {
+        ok: false,
+        changed: false,
+        detail: output || `docker exec exited with status ${String(result.status)}`,
+      };
+    }
+    return {
+      ok: true,
+      changed: /^added\b/.test(output),
+      detail: output || "present",
+    };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return { ok: false, changed: false, detail };
+  }
+}
+
 function buildInferenceSetArgs(provider: string, model: string): string[] {
   const args = ["inference", "set", "--provider", provider, "--model", model, "--no-verify"];
   if (["compatible-endpoint", "ollama-local", "vllm-local"].includes(provider)) {
@@ -439,6 +511,41 @@ export function repairSandboxInferenceRouteWithDeps(
   }
 
   if (!shouldUseLegacyDnsProxyRepair(sb)) {
+    if (shouldRepairDirectInferenceHosts(sb)) {
+      if (!quiet) {
+        log("");
+        log(`  inference.local is unavailable inside '${sandboxName}'. Repairing /etc/hosts...`);
+      }
+      const hostsRepair = deps.repairDirectContainerHosts?.(sandboxName, sb) ?? {
+        ok: true,
+        changed: false,
+        detail: "direct-container host repair unavailable",
+      };
+      const hostsProbe = hostsRepair.ok
+        ? deps.probe(sandboxName, {
+            attempts: INFERENCE_ROUTE_POST_REPAIR_PROBE_ATTEMPTS,
+            delayMs: INFERENCE_ROUTE_POST_REPAIR_PROBE_DELAY_MS,
+          })
+        : null;
+      if (hostsProbe?.healthy) {
+        if (!quiet) {
+          log("  inference.local route repaired.");
+        }
+        return {
+          healthy: true,
+          repairAttempted: true,
+          detail: hostsProbe.detail,
+        };
+      }
+      if (!quiet) {
+        if (!hostsRepair.ok) {
+          error(`  Warning: could not repair inference.local in /etc/hosts: ${hostsRepair.detail}`);
+        } else if (hostsProbe?.broken) {
+          error("  Warning: inference.local is still unavailable after /etc/hosts repair.");
+        }
+      }
+    }
+
     if (deps.shouldApplyVmDnsMonkeypatch(sb)) {
       if (!quiet) {
         log("");
@@ -566,6 +673,7 @@ function repairSandboxInferenceRouteIfNeeded(
     {
       isRepairDisabled: () => process.env.NEMOCLAW_DISABLE_INFERENCE_ROUTE_REPAIR === "1",
       probe: (name, options) => probeSandboxInferenceRoute(name, agent, options),
+      repairDirectContainerHosts: repairDirectContainerInferenceHosts,
       shouldApplyVmDnsMonkeypatch,
       applyVmDnsMonkeypatch: applyOpenShellVmDnsMonkeypatch,
       reapplyVmInferenceRoute: (name, sandbox) => reapplyVmInferenceRoute(name, sandbox, agent),
