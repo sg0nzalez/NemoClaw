@@ -273,8 +273,9 @@ describe("tool-disclosure visibility and claim gates", () => {
     const target = cells.find(
       (cell) => cell.campaign_id === "campaign-1" && cell.agent === "langchain-deepagents-code",
     );
-    if (!target) throw new Error("missing test cell");
-    target.differences.success_percentage_points.lower_95 = -5;
+    expect(target).toBeDefined();
+    const requiredTarget = target as NonNullable<typeof target>;
+    requiredTarget.differences.success_percentage_points.lower_95 = -5;
 
     const gates = evaluateClaimGates(cells, visibility, {
       agents: ["langchain-deepagents-code"],
@@ -294,8 +295,9 @@ describe("tool-disclosure visibility and claim gates", () => {
     const failingCell = cells.find(
       (cell) => cell.campaign_id === "campaign-2" && cell.agent === "openclaw",
     );
-    if (!failingCell) throw new Error("missing test cell");
-    failingCell.differences.initial_tool_schema_tokens.upper_95 = 1;
+    expect(failingCell).toBeDefined();
+    const requiredFailingCell = failingCell as NonNullable<typeof failingCell>;
+    requiredFailingCell.differences.initial_tool_schema_tokens.upper_95 = 1;
 
     const gates = evaluateClaimGates(cells, visibility, {
       agents: AGENTS,
@@ -348,11 +350,11 @@ describe("tool-disclosure visibility and claim gates", () => {
 
   it("blocks schema and latency claims when task success is not noninferior", () => {
     const runs = completeEvidence();
-    for (const run of runs) {
-      if (run.phase === "primary" && run.mode === "progressive") {
-        run.outcome = "incorrect";
-        run.correctness.task_success = false;
-      }
+    for (const run of runs.filter(
+      (candidate) => candidate.phase === "primary" && candidate.mode === "progressive",
+    )) {
+      run.outcome = "incorrect";
+      run.correctness.task_success = false;
     }
     const summary = buildToolDisclosureSummary(makeManifest(), runs);
     expect(summary.claims.join(" ")).not.toContain("reduced initial");

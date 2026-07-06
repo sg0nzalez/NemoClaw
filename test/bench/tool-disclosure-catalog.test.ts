@@ -91,9 +91,9 @@ describe("synthetic tool-disclosure catalog", () => {
     ];
     for (const tool of samples) {
       expect(tool).toBeDefined();
-      if (!tool) continue;
-      const args = buildSyntheticArguments(tool, 17);
-      expect(validateSyntheticArguments(tool, args)).toEqual([]);
+      const requiredTool = tool as NonNullable<typeof tool>;
+      const args = buildSyntheticArguments(requiredTool, 17);
+      expect(validateSyntheticArguments(requiredTool, args)).toEqual([]);
     }
     expect(Object.keys(samples[0]?.definition.function.parameters.properties ?? {})).toHaveLength(
       2,
@@ -170,12 +170,12 @@ describe("canonical fixture execution", () => {
   it("rejects malformed handler arguments before producing a result", () => {
     const tool = fullCatalog.tools.find((candidate) => candidate.complexity === "large");
     expect(tool).toBeDefined();
-    if (!tool) return;
-    const valid = buildSyntheticArguments(tool, 3);
-    expect(validateSyntheticArguments(tool, { ...valid, unexpected: true })).toContain(
+    const requiredTool = tool as NonNullable<typeof tool>;
+    const valid = buildSyntheticArguments(requiredTool, 3);
+    expect(validateSyntheticArguments(requiredTool, { ...valid, unexpected: true })).toContain(
       "arguments.unexpected is not allowed",
     );
-    expect(() => executeSyntheticTool(tool, { ...valid, limit: 0 })).toThrow(
+    expect(() => executeSyntheticTool(requiredTool, { ...valid, limit: 0 })).toThrow(
       SyntheticToolInvocationError,
     );
   });

@@ -201,8 +201,9 @@ function buildCompleteEvidenceFixture(): CompleteEvidenceFixture {
       scheduled.mode === "direct"
         ? directToolNamesBySize.get(scheduled.catalog_size)
         : progressiveToolNames;
-    if (!toolNames) throw new Error(`missing tool-name fixture for ${scheduled.catalog_size}`);
-    const recorderEvents = [recordingEvent({ run: scheduled, toolNames })];
+    expect(toolNames).toBeDefined();
+    const requiredToolNames = toolNames as NonNullable<typeof toolNames>;
+    const recorderEvents = [recordingEvent({ run: scheduled, toolNames: requiredToolNames })];
     const initialSchemaTokens = scheduled.mode === "direct" ? scheduled.catalog_size * 8 : 8;
     const promptTokens = initialSchemaTokens + 100;
     const completionTokens = 16;

@@ -79,17 +79,26 @@ describe("benchmark grading", () => {
   it("requires exact ordered calls, argument hashes, nonces, and final oracle", () => {
     const catalog = generateSyntheticCatalog({ size: 64 });
     const task = buildPrimaryTasks(catalog).find((candidate) => candidate.kind === "ordered-chain");
-    if (!task) throw new Error("chain task fixture missing");
-    const calls = task.expected_calls.map((call) => ({
+    expect(task).toBeDefined();
+    const requiredTask = task as NonNullable<typeof task>;
+    const calls = requiredTask.expected_calls.map((call) => ({
       tool_name: call.tool_name,
       arguments_sha256: sha256Hex(canonicalJson(call.arguments)),
       result_nonce: call.result_nonce,
       success: true,
     }));
-    const passing = gradeTaskRun(task, calls, task.expected_final_includes.join(" "));
+    const passing = gradeTaskRun(
+      requiredTask,
+      calls,
+      requiredTask.expected_final_includes.join(" "),
+    );
     expect(passing.outcome).toBe("success");
     expect(
-      gradeTaskRun(task, [...calls].reverse(), task.expected_final_includes.join(" ")),
+      gradeTaskRun(
+        requiredTask,
+        [...calls].reverse(),
+        requiredTask.expected_final_includes.join(" "),
+      ),
     ).toMatchObject({ outcome: "incorrect", correctness: { expected_tool_order: false } });
   });
 
@@ -97,11 +106,14 @@ describe("benchmark grading", () => {
     const task = buildPrimaryTasks(generateSyntheticCatalog({ size: 64 })).find(
       (candidate) => candidate.kind === "no-tool",
     );
-    if (!task) throw new Error("no-tool fixture missing");
-    expect(gradeTaskRun(task, [], task.expected_final_includes[0]).outcome).toBe("success");
+    expect(task).toBeDefined();
+    const requiredTask = task as NonNullable<typeof task>;
+    expect(gradeTaskRun(requiredTask, [], requiredTask.expected_final_includes[0]).outcome).toBe(
+      "success",
+    );
     expect(
       gradeTaskRun(
-        task,
+        requiredTask,
         [
           {
             tool_name: "unexpected",
@@ -110,7 +122,7 @@ describe("benchmark grading", () => {
             success: true,
           },
         ],
-        task.expected_final_includes[0],
+        requiredTask.expected_final_includes[0],
       ).outcome,
     ).toBe("incorrect");
   });
@@ -125,7 +137,8 @@ describe("benchmark grading", () => {
       seed: 1,
       campaigns: [1],
     }).find((run) => run.task_id === task.id && run.agent === "openclaw");
-    if (!scheduled) throw new Error("scheduled fixture missing");
+    expect(scheduled).toBeDefined();
+    const requiredScheduled = scheduled as NonNullable<typeof scheduled>;
     const manifest = {
       schema_version: TOOL_DISCLOSURE_SCHEMA_VERSION,
       benchmark_id: "fixture-benchmark",
@@ -142,7 +155,7 @@ describe("benchmark grading", () => {
     const expected = task.expected_calls[0];
     const record = assembleToolDisclosureRun({
       manifest,
-      scheduled,
+      scheduled: requiredScheduled,
       task,
       calls: [
         {
@@ -154,7 +167,7 @@ describe("benchmark grading", () => {
       ],
       recorderEvents: [
         {
-          run_id: scheduled.run_id,
+          run_id: requiredScheduled.run_id,
           request_sequence: 1,
           model_call_sequence: 1,
           endpoint: "chat-completions",

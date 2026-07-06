@@ -3,7 +3,7 @@
 
 import { createHash } from "node:crypto";
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
-import type { Socket } from "node:net";
+import type { AddressInfo, Socket } from "node:net";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -37,14 +37,16 @@ async function startUpstream(
     server.listen(0, "127.0.0.1", () => resolve());
   });
   const address = server.address();
-  if (!address || typeof address === "string") throw new Error("test upstream did not bind");
+  expect(address).not.toBeNull();
+  expect(typeof address).not.toBe("string");
+  const tcpAddress = address as AddressInfo;
 
   const close = async (): Promise<void> => {
     for (const socket of sockets) socket.destroy();
     await new Promise<void>((resolve) => server.close(() => resolve()));
   };
   cleanup.push(close);
-  return { baseUrl: `http://127.0.0.1:${address.port}`, close };
+  return { baseUrl: `http://127.0.0.1:${tcpAddress.port}`, close };
 }
 
 async function startProxy(
@@ -380,10 +382,8 @@ describe("tool-disclosure recording proxy", () => {
     const upstream = await startUpstream(async (request, response) => {
       await collectBody(request);
       setTimeout(() => {
-        if (!response.destroyed) {
-          response.writeHead(500, { "content-type": "text/plain" });
-          response.end("upstream-error-body-secret");
-        }
+        response.writeHead(500, { "content-type": "text/plain" });
+        response.end("upstream-error-body-secret");
       }, 200);
     });
     const { proxy, baseUrl } = await startProxy(upstream.baseUrl, {
