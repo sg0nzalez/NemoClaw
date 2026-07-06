@@ -201,6 +201,48 @@ describe("sandbox create failure handling", () => {
     }
   });
 
+  it("does not delete the requested sandbox when Landlock output names a different created sandbox", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-create-failure-other-"));
+    const messages: string[] = [];
+    const deleteCalls: string[][] = [];
+    const originalError = console.error;
+    const originalHome = process.env.HOME;
+    console.error = (message?: unknown) => {
+      messages.push(String(message ?? ""));
+    };
+    process.env.HOME = tmp;
+
+    try {
+      expect(() =>
+        handleNonzeroSandboxCreateResult({
+          createResult: {
+            status: 1,
+            output:
+              "Created sandbox: other-dcode\n" +
+              "Landlock unavailable in hard_requirement mode: not enabled in the active LSM set",
+          },
+          sandboxName: "dcode-landlock-current",
+          runOpenshell: (args) => {
+            deleteCalls.push(args);
+            return { status: 0 };
+          },
+          exit: (code) => {
+            throw new Error(`exit:${String(code)}`);
+          },
+        }),
+      ).toThrow("exit:1");
+
+      expect(deleteCalls).toEqual([]);
+      expect(messages).not.toContain(
+        "  The failed sandbox has been removed; retry will recreate it.",
+      );
+    } finally {
+      console.error = originalError;
+      originalHome === undefined ? delete process.env.HOME : (process.env.HOME = originalHome);
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it("waits for readiness after an incomplete non-Landlock create stream", () => {
     const warnings: string[] = [];
     const originalWarn = console.warn;

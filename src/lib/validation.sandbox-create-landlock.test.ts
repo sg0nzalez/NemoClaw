@@ -1,11 +1,28 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import fs from "node:fs";
+import path from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import { classifySandboxCreateFailure } from "./validation";
 
 describe("classifySandboxCreateFailure Landlock failures", () => {
+  it("classifies the pinned OpenShell 0.0.72 hard_requirement missing-path output", () => {
+    const output = fs.readFileSync(
+      path.resolve(
+        "test/fixtures/openshell-0.0.72-landlock-hard-requirement-missing-read-only-path.log",
+      ),
+      "utf8",
+    );
+
+    const result = classifySandboxCreateFailure(output);
+
+    expect(result.kind).toBe("landlock_enforcement_failed");
+    expect(result.uploadedToGateway).toBe(true);
+  });
+
   it.each([
     "Landlock unavailable in hard_requirement mode: not implemented (kernel lacks CONFIG_SECURITY_LANDLOCK)",
     'Landlock path unavailable in hard_requirement mode: /app (path does not exist): failed to open "/app": No such file or directory (os error 2)',

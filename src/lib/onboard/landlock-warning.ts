@@ -16,6 +16,13 @@ function warnIfUnsupported(kernel: string, label: string, warn: (message: string
   warn("    Sandbox filesystem restrictions will silently degrade (best_effort mode).");
 }
 
+/**
+ * Emits host/VM kernel warnings only for best-effort agents.
+ *
+ * compatibility must come from the loaded agent manifest. For hard_requirement
+ * agents, OpenShell's sandbox-runtime probe is authoritative and this helper
+ * intentionally avoids a host-kernel heuristic.
+ */
 export function warnIfLandlockUnsupported({
   compatibility,
   platform = process.platform,

@@ -64,6 +64,19 @@ export function removeFailedSandboxForRetry(
   console.error(`    openshell sandbox delete "${sandboxName}"`);
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function hasCreatedSandboxEvidence(output: string | undefined, sandboxName: string): boolean {
+  if (!output) return false;
+  const createdSandboxLine = new RegExp(
+    `^\\s*Created sandbox:\\s*${escapeRegExp(sandboxName)}\\s*$`,
+    "im",
+  );
+  return createdSandboxLine.test(stripAnsi(output));
+}
+
 export function handleNonzeroSandboxCreateResult({
   createResult,
   sandboxName,
@@ -92,7 +105,10 @@ export function handleNonzeroSandboxCreateResult({
     console.error(createResult.output);
   }
   printSandboxCreateFailureDiagnostics(sandboxName, { backupPath });
-  if (failure.kind === "landlock_enforcement_failed" && failure.uploadedToGateway) {
+  if (
+    failure.kind === "landlock_enforcement_failed" &&
+    hasCreatedSandboxEvidence(createResult.output, sandboxName)
+  ) {
     removeFailedSandboxForRetry(sandboxName, runOpenshell);
   }
   console.error("  Try:  openshell sandbox list        # check gateway state");
