@@ -6,6 +6,7 @@ import path from "node:path";
 
 import { expect, test } from "../fixtures/e2e-test.ts";
 import { HOSTED_INFERENCE_SECRET } from "../fixtures/hosted-inference.ts";
+import { CLI_DIST_ENTRYPOINT, REPO_ROOT } from "../fixtures/paths.ts";
 import {
   dcodeInvalidCredentialRebuildOptionsFromRegistryEntry,
   type LifecycleProfile,
@@ -26,8 +27,6 @@ function isLifecycleProfile(value: string | undefined): value is LifecycleProfil
   return value !== undefined && LIFECYCLE_PROFILES.has(value as LifecycleProfile);
 }
 
-const REPO_ROOT = path.resolve(import.meta.dirname, "../../..");
-const CLI_DIST_ENTRYPOINT = path.join(REPO_ROOT, "dist", "nemoclaw.js");
 const E2E_CLOUD_EXPERIMENTAL_CHECKS_DIR = path.join(
   REPO_ROOT,
   "test/e2e/e2e-cloud-experimental/checks",

@@ -8,7 +8,7 @@ import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
 import { validateSandboxName } from "../fixtures/clients/sandbox.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
 import { startFakeOpenAiCompatibleServer } from "../fixtures/fake-openai-compatible.ts";
-import { shouldRunLiveE2E } from "../fixtures/live-project-gate.ts";
+import { CLI_ENTRYPOINT, REPO_ROOT } from "../fixtures/paths.ts";
 
 // Keep this free-standing and direct: the the contract is the real CLI +
 // OpenShell/provider boundary for messaging credential reuse/rotation, not the
@@ -16,8 +16,6 @@ import { shouldRunLiveE2E } from "../fixtures/live-project-gate.ts";
 // `nemoclaw onboard` CLI with fake provider tokens, preserving the provider
 // upsert, registry credential-hash, sandbox rebuild, and reuse assertions.
 
-const REPO_ROOT = path.resolve(import.meta.dirname, "../../..");
-const CLI_ENTRYPOINT = path.join(REPO_ROOT, "bin", "nemoclaw.js");
 const REGISTRY_FILE = path.join(process.env.HOME ?? "/tmp", ".nemoclaw", "sandboxes.json");
 const SANDBOX_NAME = process.env.NEMOCLAW_SANDBOX_NAME ?? `e2e-token-rotation-${process.pid}`;
 validateSandboxName(SANDBOX_NAME);
@@ -263,9 +261,7 @@ async function destroyGatewayIfOpenshellExists(
   );
 }
 
-const liveTest = shouldRunLiveE2E() ? test : test.skip;
-
-liveTest(
+test(
   "messaging token rotation rebuilds only the changed provider and reuses unchanged credentials",
   testTimeoutOptions(PHASE_TIMEOUT_MS),
   async ({ artifacts, cleanup, host, skip }) => {
