@@ -10,6 +10,21 @@ import { describe, expect, it } from "vitest";
 
 const MESSAGING_ENV_PREFIXES = ["DISCORD_", "SLACK_", "TELEGRAM_", "WHATSAPP_"] as const;
 
+type Scenario = {
+  name: string;
+  createStatus: number;
+  createOutput: string;
+  ready: boolean;
+};
+
+type Outcome = {
+  code: number;
+  commands: string[];
+  registerCalls: unknown[];
+  updateCalls: unknown[];
+  sandboxName?: string;
+};
+
 function withoutMessagingCredentials(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return Object.fromEntries(
     Object.entries(env).filter(
@@ -18,21 +33,24 @@ function withoutMessagingCredentials(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv 
   );
 }
 
-describe("DCode Landlock onboarding failure", () => {
-  it("removes the failed sandbox without recording it as ready (#5795)", () => {
-    const repoRoot = path.join(import.meta.dirname, "..");
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-landlock-failure-"));
-    const scriptPath = path.join(tempDir, "landlock-failure-check.cjs");
-    const outputPath = path.join(tempDir, "outcome.json");
+function runScenario(scenario: Scenario): {
+  result: ReturnType<typeof spawnSync>;
+  outcome: Outcome;
+} {
+  const repoRoot = path.join(import.meta.dirname, "..");
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-landlock-flow-"));
+  const scriptPath = path.join(tempDir, "landlock-flow-check.cjs");
+  const outputPath = path.join(tempDir, "outcome.json");
 
-    const modulePath = (relativePath: string): string =>
-      JSON.stringify(path.join(repoRoot, relativePath));
+  const modulePath = (relativePath: string): string =>
+    JSON.stringify(path.join(repoRoot, relativePath));
 
-    const script = String.raw`
+  const script = String.raw`
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
+const scenario = ${JSON.stringify(scenario)};
 const runner = require(${modulePath("src/lib/runner.ts")});
 const registry = require(${modulePath("src/lib/state/registry.ts")});
 const buildContextStage = require(${modulePath("src/lib/onboard/build-context-stage.ts")});
@@ -43,10 +61,18 @@ const failureDiagnostics = require(${modulePath("src/lib/onboard/sandbox-create-
 const agentDefs = require(${modulePath("src/lib/agent/defs.ts")});
 const openshellResolve = require(${modulePath("src/lib/adapters/openshell/resolve.ts")});
 
-const sandboxName = "dcode-landlock-fail";
+const sandboxName = "dcode-landlock-flow";
 const commands = [];
 const registerCalls = [];
 const updateCalls = [];
+
+function writeOutcome(code, extra = {}) {
+  fs.writeFileSync(
+    ${JSON.stringify(outputPath)},
+    JSON.stringify({ code, commands, registerCalls, updateCalls, ...extra }),
+    "utf8",
+  );
+}
 
 function commandText(command) {
   return Array.isArray(command) ? command.join(" ") : String(command);
@@ -64,7 +90,14 @@ runner.runOpenshell = (args) => {
   commands.push(commandText(["openshell", ...args]));
   return { status: 0, stdout: "", stderr: "" };
 };
-runner.runCapture = () => "";
+runner.runCapture = (command) => {
+  commands.push(commandText(command));
+  const text = commandText(command);
+  if (text.includes("openshell sandbox get") || text.includes("openshell sandbox list")) {
+    return "";
+  }
+  return "5.15.0";
+};
 runner.runCaptureOpenshell = (args) => {
   commands.push(commandText(["openshell", ...args]));
   return "";
@@ -100,36 +133,30 @@ buildContextStage.stageCreateSandboxBuildContext = () => {
 };
 
 dockerfilePatchFlow.prepareSandboxDockerfilePatch = async () => ({
-  buildId: "landlock-failure-test",
+  buildId: "landlock-flow-test",
   resolvedBaseImage: null,
 });
 
 sandboxCreateStream.streamSandboxCreate = async (command) => {
   commands.push(command);
   return {
-    status: 1,
-    output:
-      "Created sandbox: dcode-landlock-fail\n" +
-      "Landlock unavailable in hard_requirement mode: kernel does not support Landlock",
+    status: scenario.createStatus,
+    output: scenario.createOutput,
     sawProgress: true,
   };
 };
 
 readinessTracing.waitForCreatedSandboxReadyWithTrace = () => ({
-  ready: false,
-  reason: "terminal_failure_phase",
-  failurePhase: "Failed",
+  ready: scenario.ready,
+  reason: scenario.ready ? "ready" : "terminal_failure_phase",
+  failurePhase: scenario.ready ? null : "Failed",
 });
 readinessTracing.printReadinessFailure = () => undefined;
 failureDiagnostics.collectSandboxCreateFailureDiagnostics = () => null;
 
 const originalExit = process.exit;
 process.exit = (code) => {
-  fs.writeFileSync(
-    ${JSON.stringify(outputPath)},
-    JSON.stringify({ code, commands, registerCalls, updateCalls }),
-    "utf8",
-  );
+  writeOutcome(code);
   originalExit(code);
 };
 
@@ -146,51 +173,91 @@ createSandbox(
   [],
   null,
   agent,
-).catch((error) => {
+).then((name) => {
+  writeOutcome(0, { sandboxName: name });
+}).catch((error) => {
   console.error(error);
   process.exit(1);
 });
 `;
 
-    fs.writeFileSync(scriptPath, script, "utf8");
+  fs.writeFileSync(scriptPath, script, "utf8");
 
-    const env = withoutMessagingCredentials(process.env);
-    const result = spawnSync(process.execPath, [scriptPath], {
-      cwd: repoRoot,
-      encoding: "utf8",
-      env: {
-        ...env,
-        HOME: tempDir,
-        NEMOCLAW_HOME: path.join(tempDir, ".nemoclaw"),
-        NEMOCLAW_DOCKER_GPU_PATCH: "0",
-        NEMOCLAW_NON_INTERACTIVE: "1",
-        NEMOCLAW_POLICY_TIER: "restricted",
-        NEMOCLAW_SANDBOX_GPU: "0",
-        OPENSHELL_GATEWAY: "nemoclaw",
-      },
-      timeout: 20_000,
-    });
+  const env = withoutMessagingCredentials(process.env);
+  const result = spawnSync(process.execPath, [scriptPath], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: {
+      ...env,
+      HOME: tempDir,
+      NEMOCLAW_HOME: path.join(tempDir, ".nemoclaw"),
+      NEMOCLAW_DOCKER_GPU_PATCH: "0",
+      NEMOCLAW_NON_INTERACTIVE: "1",
+      NEMOCLAW_POLICY_TIER: "restricted",
+      NEMOCLAW_SANDBOX_GPU: "0",
+      OPENSHELL_GATEWAY: "nemoclaw",
+    },
+    timeout: 20_000,
+  });
+
+  expect(fs.existsSync(outputPath), result.stderr).toBe(true);
+  return {
+    result,
+    outcome: JSON.parse(fs.readFileSync(outputPath, "utf8")) as Outcome,
+  };
+}
+
+describe("DCode Landlock onboarding flow", () => {
+  it.each([
+    {
+      name: "kernel unsupported",
+      createStatus: 1,
+      createOutput:
+        "Created sandbox: dcode-landlock-flow\n" +
+        "Landlock unavailable in hard_requirement mode: kernel does not support Landlock",
+      ready: false,
+    },
+    {
+      name: "policy path unavailable",
+      createStatus: 1,
+      createOutput:
+        "Created sandbox: dcode-landlock-flow\n" +
+        "Landlock path unavailable in hard_requirement mode: /app (read_only): No such file or directory",
+      ready: false,
+    },
+  ])("removes the failed sandbox without recording it as ready when $name (#5795)", (scenario) => {
+    const { result, outcome } = runScenario(scenario);
 
     expect(result.status, result.stderr).toBe(1);
-    expect(fs.existsSync(outputPath), result.stderr).toBe(true);
-    const outcome = JSON.parse(fs.readFileSync(outputPath, "utf8")) as {
-      code: number;
-      commands: string[];
-      registerCalls: unknown[];
-      updateCalls: unknown[];
-    };
-
     expect(outcome.code).toBe(1);
-    expect(result.stderr).toContain(
-      "Landlock unavailable in hard_requirement mode: kernel does not support Landlock",
-    );
+    expect(result.stderr).toContain(scenario.createOutput.split("\n").at(-1));
     expect(result.stderr).toContain("could not apply required Landlock filesystem isolation");
     expect(
       outcome.commands.some((command) =>
-        command.endsWith("openshell sandbox delete dcode-landlock-fail"),
+        command.endsWith("openshell sandbox delete dcode-landlock-flow"),
       ),
     ).toBe(true);
     expect(outcome.registerCalls).toEqual([]);
     expect(outcome.updateCalls).toEqual([]);
+  });
+
+  it("registers a hard-required DCode sandbox after OpenShell reports Ready", () => {
+    const { result, outcome } = runScenario({
+      name: "success",
+      createStatus: 0,
+      createOutput: "Created sandbox: dcode-landlock-flow",
+      ready: true,
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(outcome.code).toBe(0);
+    expect(outcome.sandboxName).toBe("dcode-landlock-flow");
+    expect(outcome.registerCalls).toHaveLength(1);
+    expect(outcome.updateCalls).toEqual([]);
+    expect(
+      outcome.commands.some((command) =>
+        command.endsWith("openshell sandbox delete dcode-landlock-flow"),
+      ),
+    ).toBe(false);
   });
 });

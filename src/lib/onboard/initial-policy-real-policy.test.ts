@@ -27,6 +27,10 @@ type PolicyEntry = {
 };
 
 type PolicyDocument = {
+  filesystem_policy?: {
+    read_only?: string[];
+    read_write?: string[];
+  };
   landlock?: {
     compatibility?: string;
   };
@@ -67,6 +71,21 @@ describe("initial sandbox policy real preset merge", () => {
 
     expect(prepared.appliedPresets).toEqual(["tavily"]);
     expect(policy.landlock?.compatibility).toBe("hard_requirement");
+    expect(policy.filesystem_policy?.read_only).toEqual([
+      "/usr",
+      "/opt/venv",
+      "/lib",
+      "/proc",
+      "/dev/urandom",
+      "/etc",
+      "/var/log",
+    ]);
+    expect(policy.filesystem_policy?.read_write).toEqual([
+      "/sandbox",
+      "/sandbox/.deepagents",
+      "/tmp",
+      "/dev/null",
+    ]);
     expect(policy.network_policies).toHaveProperty("tavily");
   });
 

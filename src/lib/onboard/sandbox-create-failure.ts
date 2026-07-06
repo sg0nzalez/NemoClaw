@@ -5,6 +5,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { printSandboxCreateRecoveryHints } from "../build-context";
+import { classifySandboxCreateFailure } from "../validation";
+
 const ANSI_RE = /\x1B(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\)|[@-_])/g;
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 const MAX_RELEVANT_LOG_LINES = 120;
@@ -34,6 +37,20 @@ type SandboxDeleteRunner = (
   options?: { ignoreError?: boolean },
 ) => { status: number | null };
 
+export type SandboxCreateResult = {
+  status: number;
+  output?: string;
+};
+
+export type SandboxCreateFailureHandlerOptions = {
+  createResult: SandboxCreateResult;
+  sandboxName: string;
+  backupPath?: string | null;
+  createArgs?: readonly string[];
+  runOpenshell: SandboxDeleteRunner;
+  exit?: (code?: number) => never;
+};
+
 export function removeFailedSandboxForRetry(
   sandboxName: string,
   runOpenshell: SandboxDeleteRunner,
@@ -45,6 +62,42 @@ export function removeFailedSandboxForRetry(
   }
   console.error("  Could not remove the failed sandbox. Manual cleanup:");
   console.error(`    openshell sandbox delete "${sandboxName}"`);
+}
+
+export function handleNonzeroSandboxCreateResult({
+  createResult,
+  sandboxName,
+  backupPath,
+  createArgs,
+  runOpenshell,
+  exit = process.exit,
+}: SandboxCreateFailureHandlerOptions): "wait_for_ready" {
+  const failure = classifySandboxCreateFailure(createResult.output);
+  if (failure.kind === "sandbox_create_incomplete") {
+    // The sandbox was created in the gateway but the create stream exited with
+    // a non-zero code (for example SSH 255). Let the caller keep the existing
+    // ready-wait gate; the sandbox may still reach Ready on its own.
+    console.warn("");
+    console.warn(
+      `  Create stream exited with code ${createResult.status} after sandbox was created.`,
+    );
+    console.warn("  Checking whether the sandbox reaches Ready state...");
+    return "wait_for_ready";
+  }
+
+  console.error("");
+  console.error(`  Sandbox creation failed (exit ${createResult.status}).`);
+  if (createResult.output) {
+    console.error("");
+    console.error(createResult.output);
+  }
+  printSandboxCreateFailureDiagnostics(sandboxName, { backupPath });
+  if (failure.kind === "landlock_enforcement_failed" && failure.uploadedToGateway) {
+    removeFailedSandboxForRetry(sandboxName, runOpenshell);
+  }
+  console.error("  Try:  openshell sandbox list        # check gateway state");
+  printSandboxCreateRecoveryHints(createResult.output, { createArgs });
+  exit(createResult.status || 1);
 }
 
 function stripAnsi(value: string): string {

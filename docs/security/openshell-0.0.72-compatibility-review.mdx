@@ -59,6 +59,14 @@ These version-specific pins are removed only when NemoClaw drops `0.0.72` suppor
 The development channel is compatibility evidence only.
 Use it in trusted test environments, never as the stable shipping configuration.
 
+### Landlock Hard Requirement
+
+- `invalidState`: LangChain Deep Agents Code reaches Ready with `landlock.compatibility: hard_requirement` after OpenShell cannot apply Landlock, or NemoClaw treats a best-effort host-kernel warning as proof of sandbox-runtime enforcement.
+- `sourceBoundary`: OpenShell owns the sandbox-runtime Landlock probe, ABI selection, filesystem rule application, and hard-required create failure. NemoClaw owns the DCode manifest declaration, policy composition, failure-text classification, failed-sandbox cleanup, and the Ready-before-registry gate.
+- `whyNotSourceFix`: NemoClaw cannot enforce Landlock from the host CLI because Docker Desktop, remote gateways, and container runtimes can expose a different sandbox kernel from the host kernel. NemoClaw must rely on OpenShell's runtime probe for hard-required enforcement until OpenShell exposes structured Landlock status or error codes.
+- `regressionTest`: `src/lib/agent/defs.test.ts` pins the DCode manifest declaration, `src/lib/onboard/initial-policy-real-policy.test.ts` pins composed DCode policy preservation, `src/lib/validation.sandbox-create-landlock.test.ts` pins the classified OpenShell hard-required message shapes, and `test/onboard-landlock-failure.test.ts` verifies failed create cleanup, no Ready registry write, policy-path failure handling, and successful Ready registration.
+- `removalCondition`: Re-review this boundary at every OpenShell version bump that changes Landlock startup logs, policy schema, or sandbox-create semantics. Replace text classification with structured OpenShell status or error codes when OpenShell ships them and the corresponding runtime contract test passes.
+
 ## Round-Trippable Policy Boundary
 
 OpenShell `0.0.72` reserves the `_provider_*` network-policy namespace for provider composition.
