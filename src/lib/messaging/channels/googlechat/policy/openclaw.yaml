@@ -31,9 +31,10 @@ network_policies:
           - allow: { method: PATCH, path: "/v1/spaces/**" }
           # Delete a message: DELETE /v1/spaces/{space}/messages/{id}.
           - allow: { method: DELETE, path: "/v1/spaces/**" }
-      # Inbound JWT verification certs (read-only, public). GET /** not pinned:
-      # google-auth-library selects the cert URL/format by version, so pinning risks
-      # breaking inbound verification on a bundle bump. GET-only, no credential rewrite.
+      # Inbound JWT verification certs: public keys, GET-only, no credential
+      # rewrite. Broad GET /** (not pinned) because google-auth-library owns the
+      # cert paths and switches URL/format by version — pinning risks breaking
+      # inbound verification on a plugin bump. Matches other presets' /**.
       - host: www.googleapis.com
         port: 443
         protocol: rest
