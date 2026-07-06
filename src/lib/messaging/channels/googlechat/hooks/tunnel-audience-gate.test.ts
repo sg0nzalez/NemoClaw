@@ -126,26 +126,6 @@ describe("googlechat tunnel/audience gate hook", () => {
     expect(stopTunnel).not.toHaveBeenCalled();
   });
 
-  it("honors a custom webhook path when deriving the audience", async () => {
-    let running = false;
-    const hook = createGooglechatTunnelAudienceGateHook(
-      baseOptions({
-        readTunnelState: () => ({ running }),
-        startTunnel: async () => {
-          running = true;
-        },
-        getTunnelUrl: () => "https://abc.trycloudflare.com",
-        prompt: async () => "y",
-      }),
-    );
-
-    const result = await hook(gateContext({ webhookPath: "/gchat" }));
-
-    expect(result).toEqual({
-      outputs: { audience: { kind: "config", value: "https://abc.trycloudflare.com/gchat" } },
-    });
-  });
-
   it("stops a self-started tunnel when the operator declines", async () => {
     let running = false;
     const stopTunnel = vi.fn();

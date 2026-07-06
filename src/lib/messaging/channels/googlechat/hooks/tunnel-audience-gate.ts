@@ -33,14 +33,6 @@ function readString(value: MessagingSerializableValue | undefined): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function normalizeWebhookPath(raw: string): string {
-  const trimmed = raw.trim();
-  if (!trimmed || /\s/.test(trimmed)) return DEFAULT_WEBHOOK_PATH;
-  const withLeadingSlash = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
-  const withoutTrailingSlash = withLeadingSlash.replace(/\/+$/, "");
-  return withoutTrailingSlash || DEFAULT_WEBHOOK_PATH;
-}
-
 function isAffirmative(value: string): boolean {
   const normalized = value.trim().toLowerCase();
   return normalized === "y" || normalized === "yes";
@@ -88,9 +80,6 @@ export function createGooglechatTunnelAudienceGateHook(
     }
 
     const audienceType = readString(context.inputs?.audienceType) || "app-url";
-    const webhookPath = normalizeWebhookPath(
-      readString(context.inputs?.webhookPath) || readString(env.GOOGLECHAT_WEBHOOK_PATH),
-    );
 
     // An audience supplied up front (env, prior paste, or a named tunnel) wins;
     // never touch the cloudflared tunnel in that case. Also covers project-number.
@@ -134,7 +123,7 @@ export function createGooglechatTunnelAudienceGateHook(
       throw new Error("No public tunnel URL is available for the Google Chat webhook.");
     }
 
-    const audience = `${url.replace(/\/+$/, "")}${webhookPath}`;
+    const audience = `${url.replace(/\/+$/, "")}${DEFAULT_WEBHOOK_PATH}`;
     printEndpointInstructions(log, audience);
 
     // Non-interactive mode already threw at the top of the hook, so this prompt

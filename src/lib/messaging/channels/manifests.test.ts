@@ -917,7 +917,6 @@ describe("built-in channel manifests", () => {
     const audienceType = findInput(googlechatManifest, "audienceType");
     const audience = findInput(googlechatManifest, "audience");
     const appPrincipal = findInput(googlechatManifest, "appPrincipal");
-    const webhookPath = findInput(googlechatManifest, "webhookPath");
     const allowFrom = findInput(googlechatManifest, "allowFrom");
 
     expect(googlechatManifest.supportedAgents).toEqual(["openclaw"]);
@@ -937,7 +936,6 @@ describe("built-in channel manifests", () => {
       required: false,
       envKey: "GOOGLECHAT_APP_PRINCIPAL",
     });
-    expect(webhookPath).toMatchObject({ kind: "config", defaultValue: "/googlechat" });
     expect(allowFrom).toMatchObject({ kind: "config", statePath: "allowedIds.googlechat" });
 
     // Outbound auth is gateway-minted (google-service-account-jwt bridge provider)
@@ -974,7 +972,7 @@ describe("built-in channel manifests", () => {
     expect(findHook(googlechatManifest, "googlechat-tunnel-audience-gate")).toMatchObject({
       phase: "enroll",
       handler: GOOGLECHAT_TUNNEL_AUDIENCE_GATE_HOOK_ID,
-      inputs: ["audienceType", "audience", "webhookPath"],
+      inputs: ["audienceType", "audience"],
       outputs: [{ id: "audience", kind: "config" }],
       onFailure: "skip-channel",
     });

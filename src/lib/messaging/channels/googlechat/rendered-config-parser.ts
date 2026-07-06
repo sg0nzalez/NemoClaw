@@ -26,11 +26,6 @@ export const googlechatRenderedConfigParser: RenderedChannelConfigParser = {
         "googlechat",
         "appPrincipal",
       ]),
-      structuredConfigKey("webhookPath", "openclaw.json", [
-        "channels",
-        "googlechat",
-        "webhookPath",
-      ]),
       structuredConfigKey("allowFrom", "openclaw.json", [
         "channels",
         "googlechat",

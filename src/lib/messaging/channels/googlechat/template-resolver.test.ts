@@ -15,14 +15,11 @@ function configInput(
 }
 
 describe("Google Chat template resolver", () => {
-  it("defaults audienceType and webhookPath when unset", () => {
+  it("defaults audienceType when unset", () => {
     const inputs: SandboxMessagingInputReference[] = [];
     expect(
       resolveGooglechatTemplateReference("googlechatConfig.audienceType", { inputs })?.value,
     ).toBe("app-url");
-    expect(
-      resolveGooglechatTemplateReference("googlechatConfig.webhookPath", { inputs })?.value,
-    ).toBe("/googlechat");
   });
 
   it("passes through configured values; drops audience but seeds the appPrincipal sentinel when unset", () => {
@@ -30,7 +27,6 @@ describe("Google Chat template resolver", () => {
       configInput("audience", "googlechatConfig.audience", "https://x.example/googlechat"),
       configInput("appPrincipal", "googlechatConfig.appPrincipal", "103987852733692332624"),
       configInput("audienceType", "googlechatConfig.audienceType", "project-number"),
-      configInput("webhookPath", "googlechatConfig.webhookPath", "/gchat"),
     ];
     expect(
       resolveGooglechatTemplateReference("googlechatConfig.audience", { inputs: set })?.value,
@@ -41,9 +37,6 @@ describe("Google Chat template resolver", () => {
     expect(
       resolveGooglechatTemplateReference("googlechatConfig.audienceType", { inputs: set })?.value,
     ).toBe("project-number");
-    expect(
-      resolveGooglechatTemplateReference("googlechatConfig.webhookPath", { inputs: set })?.value,
-    ).toBe("/gchat");
 
     // Unset audience → undefined so the render engine drops the key entirely.
     // Unset appPrincipal → the all-zeros discovery sentinel (so the first DM

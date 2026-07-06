@@ -34,7 +34,6 @@ describe("messaging channel config", () => {
       "GOOGLECHAT_AUDIENCE_TYPE",
       "GOOGLECHAT_AUDIENCE",
       "GOOGLECHAT_APP_PRINCIPAL",
-      "GOOGLECHAT_WEBHOOK_PATH",
       "GOOGLECHAT_ALLOWED_USERS",
     ]);
   });

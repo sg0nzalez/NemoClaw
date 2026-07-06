@@ -91,14 +91,6 @@ export const googlechatManifest = {
       },
     },
     {
-      id: "webhookPath",
-      kind: "config",
-      required: false,
-      envKey: "GOOGLECHAT_WEBHOOK_PATH",
-      statePath: "googlechatConfig.webhookPath",
-      defaultValue: "/googlechat",
-    },
-    {
       id: "allowFrom",
       kind: "config",
       required: false,
@@ -147,7 +139,7 @@ export const googlechatManifest = {
           audienceType: "{{googlechatConfig.audienceType}}",
           audience: "{{googlechatConfig.audience}}",
           appPrincipal: "{{googlechatConfig.appPrincipal}}",
-          webhookPath: "{{googlechatConfig.webhookPath}}",
+          webhookPath: "/googlechat",
           healthMonitor: {
             enabled: false,
           },
@@ -266,7 +258,7 @@ export const googlechatManifest = {
       id: "googlechat-tunnel-audience-gate",
       phase: "enroll",
       handler: "googlechat.tunnelAudienceGate",
-      inputs: ["audienceType", "audience", "webhookPath"],
+      inputs: ["audienceType", "audience"],
       outputs: [
         {
           id: "audience",

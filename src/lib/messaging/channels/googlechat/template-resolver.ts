@@ -11,7 +11,6 @@ import {
 } from "../template-resolver-utils";
 
 const DEFAULT_AUDIENCE_TYPE = "app-url";
-const DEFAULT_WEBHOOK_PATH = "/googlechat";
 
 // When appPrincipal is left blank we render this all-zeros discovery sentinel
 // instead of dropping the key. It only matters for personal/standalone (add-on)
@@ -43,10 +42,6 @@ export const resolveGooglechatTemplateReference: BuiltInRenderTemplateResolver =
       return resolvedRenderTemplateReference(
         nonEmptyString(stateValue(context, "googlechatConfig.appPrincipal")) ??
           APP_PRINCIPAL_DISCOVERY_SENTINEL,
-      );
-    case "googlechatConfig.webhookPath":
-      return resolvedRenderTemplateReference(
-        nonEmptyString(stateValue(context, "googlechatConfig.webhookPath")) ?? DEFAULT_WEBHOOK_PATH,
       );
     default:
       break;
