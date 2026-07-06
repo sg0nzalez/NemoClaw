@@ -377,6 +377,35 @@ describe("sandbox base-image warm resolution", () => {
     expect(dockerMocks.build).not.toHaveBeenCalled();
   });
 
+  it("skips non-pinned automatic remote candidates when the caller requires the pinned ref", () => {
+    const sourceShaRef = `${IMAGE_NAME}:12345678`;
+    dockerMocks.imageInspect.mockImplementation((ref: string) => ({
+      status: ref === sourceShaRef || ref === "nemoclaw-sandbox-base-local:test" ? 0 : 1,
+    }));
+    dockerMocks.pull.mockReturnValue({ status: 1 });
+
+    const resolved = resolveSandboxBaseImage({
+      ...resolutionOptions(),
+      pinnedRemoteRef: REF,
+      preferPinnedRemoteRef: true,
+      requirePinnedRemoteRef: true,
+    });
+
+    expect(resolved).toMatchObject({
+      ref: "nemoclaw-sandbox-base-local:test",
+      source: "local",
+    });
+    expect(dockerMocks.imageInspect).toHaveBeenCalledWith(REF, {
+      ignoreError: true,
+      suppressOutput: true,
+    });
+    expect(dockerMocks.imageInspect).toHaveBeenCalledWith(sourceShaRef, {
+      ignoreError: true,
+      suppressOutput: true,
+    });
+    expect(dockerMocks.build).not.toHaveBeenCalled();
+  });
+
   it("rebuilds changed inputs before using a Dockerfile-pinned baseline (#4680)", () => {
     sourceMocks.inputsChanged.mockReturnValue(true);
     dockerMocks.imageInspect.mockReturnValue({ status: 1 });
