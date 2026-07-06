@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { type MockInstance, vi } from "vitest";
+import type { RebuildImagePreflightResult } from "../../src/lib/actions/sandbox/rebuild-custom-image-preflight";
+import type { RebuildRecreateOnboardOpts } from "../../src/lib/actions/sandbox/rebuild-gpu-opt-out";
+import type { SandboxRemovalReceipt } from "../../src/lib/state/registry";
 
 export type RebuildSandbox =
   typeof import("../../src/lib/actions/sandbox/rebuild")["rebuildSandbox"];
@@ -31,7 +34,11 @@ export type RebuildFlowOverrides = {
     overrideEnvVar: string | null;
   };
   executeSandboxCommand?: () => { status: number; stdout: string; stderr: string } | null;
-  onboard?: (session: RebuildFlowSession) => Promise<void> | void;
+  onboard?: (
+    session: RebuildFlowSession,
+    options: RebuildRecreateOnboardOpts,
+  ) => Promise<void> | void;
+  beforeBackup?: () => void;
   repairMutableConfigPerms?: () =>
     | { applied: false; skipReason: "agent" | "locked" | "unreadable"; reason: string }
     | { applied: true; verified: boolean; errors: string[] };
@@ -73,8 +80,12 @@ export type RebuildFlowOverrides = {
   ensureValidatedWebSearchCredential?: () => Promise<unknown>;
   hermesCredentialKeys?: string[] | null;
   hermesProviderExists?: boolean;
-  customImagePreflight?: { ok: true; imageTag: string | null } | { ok: false; detail: string };
-  removeSandboxRegistryEntry?: () => void;
+  hydrateCredentialEnv?: (credentialEnv: string) => string | null;
+  customImagePreflight?: RebuildImagePreflightResult;
+  defaultSelectionRevision?: number;
+  preDeleteDefaultSelectionRevision?: number;
+  removalReceipt?: SandboxRemovalReceipt | null;
+  removeSandboxRegistryEntryWithReceipt?: () => SandboxRemovalReceipt | null | void;
   clearShieldsState?: () => void;
 };
 export type RebuildFlowHarness = {
@@ -87,10 +98,18 @@ export type RebuildFlowHarness = {
   ensureRebuildAgentBaseImageSpy: MockInstance;
   ensureTargetGatewaySpy: MockInstance;
   ensureValidatedBraveSearchCredentialSpy: MockInstance;
+  hydrateCredentialEnvSpy: MockInstance;
   logSpy: MockInstance;
   markStepFailedSpy: MockInstance;
   onboardSpy: MockInstance;
   registryUpdateSpy: MockInstance;
+  setDefaultSpy: MockInstance;
+  setDefault: (name: string) => boolean;
+  registerSandboxEntry: (name: string) => void;
+  getDefaultSelectionState: () => {
+    defaultSandbox: string | null;
+    defaultSelectionRevision: number;
+  };
   releaseOnboardLockSpy: MockInstance;
   relockSpy: MockInstance;
   restoreSandboxStateSpy: MockInstance;
@@ -99,8 +118,9 @@ export type RebuildFlowHarness = {
   prepareMcpBridgesForAbsentSandboxRebuildSpy: MockInstance;
   prepareMcpBridgesForRebuildSpy: MockInstance;
   reattachMcpProvidersAfterRebuildAbortSpy: MockInstance;
-  removeSandboxRegistryEntrySpy: MockInstance;
+  removeSandboxRegistryEntryWithReceiptSpy: MockInstance;
   restoreSandboxEntrySpy: MockInstance;
+  restoreSandboxEntryIfMissingSpy: MockInstance;
   restoreMcpBridgesAfterRebuildSpy: MockInstance;
   warnUnpreservedUserManagedFilesSpy: MockInstance;
   session: RebuildFlowSession;

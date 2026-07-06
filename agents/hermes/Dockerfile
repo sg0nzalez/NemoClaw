@@ -6,7 +6,7 @@
 # Layers PR-specific code (plugin, config, startup script) on top of the
 # pre-built Hermes base image. Mirrors the OpenClaw Dockerfile structure.
 
-ARG BASE_IMAGE=ghcr.io/nvidia/nemoclaw/hermes-sandbox-base@sha256:83e72e6c43c2fbd9ad06049dc210e999d567dbb2cdcec86bdfa504066bac9628
+ARG BASE_IMAGE=ghcr.io/nvidia/nemoclaw/hermes-sandbox-base@sha256:d6ce792eb302a73fc7e32e6ade18dcf21aaa425bcecdde8999e90b437fb6186a
 
 # hadolint ignore=DL3006
 FROM ${BASE_IMAGE}
@@ -104,9 +104,11 @@ RUN chmod -R a+rX /opt/nemoclaw-hermes-plugin/
 COPY agents/hermes/generate-config.ts /opt/nemoclaw-hermes-config/generate-config.ts
 COPY agents/hermes/config/ /opt/nemoclaw-hermes-config/config/
 COPY agents/hermes/host/managed-tool-gateway-matrix.json /opt/nemoclaw-hermes-config/managed-tool-gateway-matrix.json
+COPY src/lib/tool-disclosure.ts /src/lib/tool-disclosure.ts
 COPY src/lib/messaging/ /src/lib/messaging/
 RUN find /opt/nemoclaw-hermes-config -type d -exec chmod 755 {} + \
     && find /opt/nemoclaw-hermes-config -type f -exec chmod 444 {} + \
+    && chmod 444 /src/lib/tool-disclosure.ts \
     && chmod -R a+rX /src/lib/messaging
 
 # Copy blueprint (shared infrastructure)
@@ -126,6 +128,7 @@ COPY scripts/managed-gateway-control.py /usr/local/lib/nemoclaw/managed-gateway-
 COPY agents/hermes/validate-env-secret-boundary.py /usr/local/lib/nemoclaw/validate-hermes-env-secret-boundary.py
 COPY agents/hermes/seed-dashboard-config.py /usr/local/lib/nemoclaw/seed-hermes-dashboard-config.py
 COPY agents/hermes/runtime-config-guard.py /usr/local/lib/nemoclaw/hermes-runtime-config-guard.py
+COPY agents/hermes/build-mcp-digest.py /usr/local/lib/nemoclaw/build-hermes-mcp-digest.py
 COPY agents/hermes/mcp-config-transaction.py /usr/local/lib/nemoclaw/hermes-mcp-config-transaction.py
 COPY src/lib/actions/sandbox/openshell-child-visible-credentials.v0.0.72.json /usr/local/lib/nemoclaw/openshell-child-visible-credentials.v0.0.72.json
 COPY scripts/state-dir-guard.py /usr/local/lib/nemoclaw/state-dir-guard.py
@@ -136,10 +139,10 @@ COPY nemoclaw-blueprint/scripts/*.js /usr/local/lib/nemoclaw/preloads/
 # minimum supported Hermes sandbox base tag guarantees those artifacts and
 # test/sandbox-rlimit-hooks.test.ts covers that base.
 RUN chmod 755 /usr/local/bin/nemoclaw-start /usr/local/lib/nemoclaw/sandbox-init.sh /usr/local/lib/nemoclaw/validate-hermes-env-secret-boundary.py /usr/local/lib/nemoclaw/seed-hermes-dashboard-config.py /usr/local/lib/nemoclaw/hermes-runtime-config-guard.py /usr/local/lib/nemoclaw/hermes-mcp-config-transaction.py \
-    && chown root:root /usr/local/bin/nemoclaw-gateway-control /usr/local/lib/nemoclaw/gateway-supervisor.sh /usr/local/lib/nemoclaw/state-dir-guard.py /usr/local/lib/nemoclaw/managed-gateway-control.py /usr/local/lib/nemoclaw/openshell-child-visible-credentials.v0.0.72.json \
+    && chown root:root /usr/local/bin/nemoclaw-gateway-control /usr/local/lib/nemoclaw/gateway-supervisor.sh /usr/local/lib/nemoclaw/state-dir-guard.py /usr/local/lib/nemoclaw/managed-gateway-control.py /usr/local/lib/nemoclaw/build-hermes-mcp-digest.py /usr/local/lib/nemoclaw/openshell-child-visible-credentials.v0.0.72.json \
     && chmod 700 /usr/local/bin/nemoclaw-gateway-control \
     && chmod 500 /usr/local/lib/nemoclaw/state-dir-guard.py /usr/local/lib/nemoclaw/managed-gateway-control.py \
-    && chmod 444 /usr/local/lib/nemoclaw/gateway-supervisor.sh \
+    && chmod 444 /usr/local/lib/nemoclaw/gateway-supervisor.sh /usr/local/lib/nemoclaw/build-hermes-mcp-digest.py \
     && chmod 444 /usr/local/lib/nemoclaw/openshell-child-visible-credentials.v0.0.72.json \
     && if [ -d /usr/local/lib/nemoclaw/preloads ]; then \
         chown -R 0:0 /usr/local/lib/nemoclaw/preloads \
@@ -219,6 +222,7 @@ ARG NEMOCLAW_PROVIDER_KEY=custom
 ARG NEMOCLAW_UPSTREAM_PROVIDER=custom
 ARG NEMOCLAW_INFERENCE_BASE_URL=https://inference.local/v1
 ARG NEMOCLAW_INFERENCE_API=openai-completions
+ARG NEMOCLAW_TOOL_DISCLOSURE=progressive
 # CHAT_UI_URL is a legacy name shared with the OpenClaw build arg. For
 # Hermes this URL points at the browser dashboard. The OpenAI-compatible
 # API remains exposed separately on port 8642.
@@ -237,6 +241,7 @@ ENV NEMOCLAW_MODEL=${NEMOCLAW_MODEL} \
     NEMOCLAW_UPSTREAM_PROVIDER=${NEMOCLAW_UPSTREAM_PROVIDER} \
     NEMOCLAW_INFERENCE_BASE_URL=${NEMOCLAW_INFERENCE_BASE_URL} \
     NEMOCLAW_INFERENCE_API=${NEMOCLAW_INFERENCE_API} \
+    NEMOCLAW_TOOL_DISCLOSURE=${NEMOCLAW_TOOL_DISCLOSURE} \
     CHAT_UI_URL=${CHAT_UI_URL} \
     NEMOCLAW_MESSAGING_PLAN_B64=${NEMOCLAW_MESSAGING_PLAN_B64} \
     NEMOCLAW_WEB_SEARCH_ENABLED=${NEMOCLAW_WEB_SEARCH_ENABLED} \
@@ -479,16 +484,21 @@ RUN set -eu; \
     && chown sandbox:sandbox /sandbox/.hermes/.hermes_history \
     && chmod 660 /sandbox/.hermes/.hermes_history
 
-# Pin config hash at build time for integrity verification at startup.
+# Pin config hash at build time for integrity verification at startup. Invoke
+# the installed runtime guard's `_canonical_mcp_servers_digest` directly so
+# image sealing and runtime verification cannot drift onto different JSON
+# canonicalization contracts.
 RUN mkdir -p /etc/nemoclaw \
     && sha256sum /sandbox/.hermes/config.yaml /sandbox/.hermes/.env \
     > /etc/nemoclaw/hermes.config-hash \
+    && mcp_digest="$(/opt/hermes/.venv/bin/python -I /usr/local/lib/nemoclaw/build-hermes-mcp-digest.py --guard /usr/local/lib/nemoclaw/hermes-runtime-config-guard.py --config /sandbox/.hermes/config.yaml)" \
+    && printf '# nemoclaw-hermes-mcp-state-v1 intended=%s applied=%s\n' "$mcp_digest" "$mcp_digest" \
+    >> /etc/nemoclaw/hermes.config-hash \
     && chown root:root /etc/nemoclaw/hermes.config-hash \
     && chmod 444 /etc/nemoclaw/hermes.config-hash
 
 # Backward-compatible marker for host-side shields logic on older sandboxes.
-RUN sha256sum /sandbox/.hermes/config.yaml /sandbox/.hermes/.env \
-    > /sandbox/.hermes/.config-hash \
+RUN cp /etc/nemoclaw/hermes.config-hash /sandbox/.hermes/.config-hash \
     && chmod 640 /sandbox/.hermes/.config-hash \
     && chown sandbox:sandbox /sandbox/.hermes/.config-hash
 

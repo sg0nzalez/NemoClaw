@@ -12,6 +12,26 @@ import {
 export function registerRebuildFlowLifecycleTests(): void {
   describe("rebuildSandbox flow: lifecycle", () => {
     installRebuildFlowTestHooks();
+
+    it("rejects a multi-agent sandbox before backup, onboard, or deletion", async () => {
+      const harness = createRebuildFlowHarness({
+        sandboxEntry: { agents: [{ name: "openclaw" }, { name: "hermes" }] },
+      });
+
+      await expect(
+        harness.rebuildSandbox("alpha", ["--yes"], { throwOnError: true }),
+      ).rejects.toThrow("Multi-agent sandbox rebuild is not yet supported");
+
+      expect(harness.backupSandboxStateSpy).not.toHaveBeenCalled();
+      expect(harness.onboardSpy).not.toHaveBeenCalled();
+      expect(harness.removeSandboxRegistryEntryWithReceiptSpy).not.toHaveBeenCalled();
+      expect(
+        harness.runOpenshellSpy.mock.calls.some(
+          ([args]) => Array.isArray(args) && args.join(" ") === "sandbox delete alpha",
+        ),
+      ).toBe(false);
+    });
+
     it("backs up, recreates, restores, reapplies policy, and relocks on a successful OpenClaw rebuild", async () => {
       const mcpEntry = {
         server: "github",
@@ -79,7 +99,7 @@ export function registerRebuildFlowLifecycleTests(): void {
         "/tmp/nemoclaw-rebuild-backup",
       );
       expect(harness.restoreMcpBridgesAfterRebuildSpy).toHaveBeenCalledWith("alpha", [mcpEntry]);
-      expect(harness.removeSandboxRegistryEntrySpy).not.toHaveBeenCalled();
+      expect(harness.removeSandboxRegistryEntryWithReceiptSpy).not.toHaveBeenCalled();
       expect(harness.errorSpy.mock.calls.map((call) => String(call[0])).join("\n")).toContain(
         "Preserving MCP-bearing registry entry across sandbox recreation",
       );
@@ -103,9 +123,44 @@ export function registerRebuildFlowLifecycleTests(): void {
       );
     });
 
+    it("changes tool disclosure through the MCP-preserving rebuild transaction", async () => {
+      const mcpEntry = {
+        server: "github",
+        providerName: "nemoclaw-mcp-alpha-github",
+      };
+      const harness = createRebuildFlowHarness({
+        sandboxEntry: {
+          toolDisclosure: "progressive",
+          mcp: { bridges: { github: mcpEntry } },
+        },
+        mcpPreparation: {
+          entries: [mcpEntry],
+          detachedProviderEntries: [mcpEntry],
+          scrubbedAdapterEntries: [mcpEntry],
+        },
+      });
+
+      await expect(
+        harness.rebuildSandbox(
+          "alpha",
+          { yes: true, toolDisclosure: "direct" },
+          { throwOnError: true },
+        ),
+      ).resolves.toBeUndefined();
+
+      expect(harness.onboardSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ toolDisclosure: "direct" }),
+      );
+      expect(harness.session.toolDisclosure).toBe("direct");
+      expect(harness.restoreMcpBridgesAfterRebuildSpy).toHaveBeenCalledWith("alpha", [mcpEntry]);
+      for (const [, update] of harness.registryUpdateSpy.mock.calls) {
+        expect(update).not.toHaveProperty("toolDisclosure");
+      }
+    });
+
     it("relocks as absent when registry cleanup throws after confirmed delete", async () => {
       const harness = createRebuildFlowHarness({
-        removeSandboxRegistryEntry: () => {
+        removeSandboxRegistryEntryWithReceipt: () => {
           throw new Error("registry cleanup after delete failed");
         },
       });

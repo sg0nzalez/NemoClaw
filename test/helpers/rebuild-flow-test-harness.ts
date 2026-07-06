@@ -1,9 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import fs from "node:fs";
 import { createRequire } from "node:module";
+import os from "node:os";
+import path from "node:path";
 import { afterEach, beforeEach, vi } from "vitest";
 import { makePreparedRecoveryManifest } from "../../src/lib/actions/sandbox/rebuild-flow-test-fixtures";
+import type { RebuildRecreateOnboardOpts } from "../../src/lib/actions/sandbox/rebuild-gpu-opt-out";
 import {
   createRebuildFlowSession,
   installTerminalStepFailureMock,
@@ -20,6 +24,40 @@ const requireDist = createRequire(
 const rebuildModulePath = "./rebuild.js";
 requireDist(rebuildModulePath);
 delete require.cache[requireDist.resolve(rebuildModulePath)];
+const harnessTempDirs: string[] = [];
+
+// Cache stable dependency modules outside each test's timeout. The rebuild
+// entry itself is still reloaded after these modules receive fresh spies.
+const gatewayDrift = requireDist("../../adapters/openshell/gateway-drift.js");
+const openshellRuntime = requireDist("../../adapters/openshell/runtime.js");
+const dockerInspect = requireDist("../../adapters/docker/inspect.js");
+const sandboxList = requireDist("../../openshell-sandbox-list.js");
+const resolve = requireDist("../../adapters/openshell/resolve.js");
+const agentDefs = requireDist("../../agent/defs.js");
+const agentRuntime = requireDist("../../agent/runtime.js");
+const { rebuildOnboardDependencies } = requireDist("./rebuild-onboard-dependencies.js");
+const onboardCredentialEnv = requireDist("../../onboard/credential-env.js");
+const hermesProviderAuth = requireDist("../../hermes-provider-auth.js");
+const onboardSession = requireDist("../../state/onboard-session.js");
+const registry = requireDist("../../state/registry.js");
+const sandboxState = requireDist("../../state/sandbox.js");
+const sandboxSession = requireDist("../../state/sandbox-session.js");
+const sandboxVersion = requireDist("../../sandbox/version.js");
+const destroy = requireDist("./destroy.js");
+const gatewayState = requireDist("./gateway-state.js");
+const rebuildFlowHelpers = requireDist("./rebuild-flow-helpers.js");
+const rebuildCustomImagePreflight = requireDist("./rebuild-custom-image-preflight.js");
+const rebuildPreparedImageContext = requireDist("./rebuild-prepared-image-context.js");
+const buildContextFingerprint = requireDist("../../adapters/fs/build-context-fingerprint.js");
+const rebuildUsageNotice = requireDist("./rebuild-usage-notice.js");
+const rebuildShields = requireDist("./rebuild-shields.js");
+const nim = requireDist("../../inference/nim.js");
+const policies = requireDist("../../policy/index.js");
+const processRecovery = requireDist("./process-recovery.js");
+const messagingHostForwardLifecycle = requireDist("./messaging-host-forward-lifecycle.js");
+const mcpBridge = requireDist("./mcp-bridge.js");
+const messaging = requireDist("../../messaging/index.js");
+const shields = requireDist("../../shields/index.js");
 
 export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): RebuildFlowHarness {
   delete require.cache[requireDist.resolve(rebuildModulePath)];
@@ -27,34 +65,6 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
   const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
   const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
   const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-
-  const gatewayDrift = requireDist("../../adapters/openshell/gateway-drift.js");
-  const openshellRuntime = requireDist("../../adapters/openshell/runtime.js");
-  const dockerInspect = requireDist("../../adapters/docker/inspect.js");
-  const sandboxList = requireDist("../../openshell-sandbox-list.js");
-  const resolve = requireDist("../../adapters/openshell/resolve.js");
-  const agentDefs = requireDist("../../agent/defs.js");
-  const agentRuntime = requireDist("../../agent/runtime.js");
-  const onboardMod = requireDist("../../onboard.js");
-  const hermesProviderAuth = requireDist("../../hermes-provider-auth.js");
-  const onboardSession = requireDist("../../state/onboard-session.js");
-  const registry = requireDist("../../state/registry.js");
-  const sandboxState = requireDist("../../state/sandbox.js");
-  const sandboxSession = requireDist("../../state/sandbox-session.js");
-  const sandboxVersion = requireDist("../../sandbox/version.js");
-  const destroy = requireDist("./destroy.js");
-  const gatewayState = requireDist("./gateway-state.js");
-  const rebuildFlowHelpers = requireDist("./rebuild-flow-helpers.js");
-  const rebuildCustomImagePreflight = requireDist("./rebuild-custom-image-preflight.js");
-  const rebuildUsageNotice = requireDist("./rebuild-usage-notice.js");
-  const rebuildShields = requireDist("./rebuild-shields.js");
-  const nim = requireDist("../../inference/nim.js");
-  const policies = requireDist("../../policy/index.js");
-  const processRecovery = requireDist("./process-recovery.js");
-  const messagingHostForwardLifecycle = requireDist("./messaging-host-forward-lifecycle.js");
-  const mcpBridge = requireDist("./mcp-bridge.js");
-  const messaging = requireDist("../../messaging/index.js");
-  const shields = requireDist("../../shields/index.js");
 
   const session = createRebuildFlowSession(onboardSession.MACHINE_SNAPSHOT_VERSION);
   const rebuildShieldsWindow = { relocked: false, wasLocked: false };
@@ -81,16 +91,46 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
     .mockReturnValue(
       overrides.baseImagePreflight ?? { ok: true, imageRef: null, overrideEnvVar: null },
     );
-  if (overrides.sandboxBaseImageLabelsOutput !== undefined) {
-    vi.spyOn(dockerInspect, "dockerImageInspectFormat").mockImplementation(
-      () => overrides.sandboxBaseImageLabelsOutput,
-    );
-  }
+  vi.spyOn(dockerInspect, "dockerImageInspectFormat").mockReturnValue(
+    overrides.sandboxBaseImageLabelsOutput ?? "",
+  );
   const ensureTargetGatewaySpy = vi
     .spyOn(rebuildFlowHelpers, "ensureRebuildTargetGatewaySelected")
     .mockResolvedValue(true);
+  const preparedBuildCtx = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-rebuild-flow-image-"));
+  harnessTempDirs.push(preparedBuildCtx);
+  const preparedDockerfile = path.join(preparedBuildCtx, "Dockerfile");
+  fs.writeFileSync(preparedDockerfile, "FROM scratch\n");
+  const rebuildAgent =
+    typeof overrides.sandboxEntry?.agent === "string" ? overrides.sandboxEntry.agent : null;
+  const fromDockerfile =
+    typeof overrides.sandboxEntry?.fromDockerfile === "string"
+      ? path.resolve(overrides.sandboxEntry.fromDockerfile)
+      : null;
+  const defaultImagePreflight = {
+    ok: true as const,
+    imageTag: "nemoclaw-rebuild-preflight:test",
+    prepared: {
+      buildCtx: preparedBuildCtx,
+      stagedDockerfile: preparedDockerfile,
+      cleanupBuildCtx: () => {
+        fs.rmSync(preparedBuildCtx, { recursive: true, force: true });
+        return true;
+      },
+      buildId: "rebuild-flow-prepared",
+      contextFingerprint: buildContextFingerprint.fingerprintBuildContext(preparedBuildCtx),
+      verifyBuildCtx: rebuildPreparedImageContext.createBuildContextVerifier(
+        preparedBuildCtx,
+        buildContextFingerprint.fingerprintBuildContext(preparedBuildCtx),
+      ),
+      rebuildTarget: {
+        agentName: rebuildAgent && rebuildAgent !== "openclaw" ? rebuildAgent : null,
+        fromDockerfile,
+      },
+    },
+  };
   vi.spyOn(rebuildCustomImagePreflight, "preflightRebuildImage").mockResolvedValue(
-    overrides.customImagePreflight ?? { ok: true, imageTag: null },
+    overrides.customImagePreflight ?? defaultImagePreflight,
   );
   vi.spyOn(rebuildUsageNotice, "ensureRebuildUsageNoticeAccepted").mockResolvedValue(true);
   const warnUnpreservedUserManagedFilesSpy = vi
@@ -100,6 +140,24 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
   vi.spyOn(agentDefs, "loadAgent").mockReturnValue(agentDef);
   vi.spyOn(agentRuntime, "getSessionAgent").mockReturnValue({ name: "openclaw" });
   vi.spyOn(agentRuntime, "getAgentDisplayName").mockReturnValue("OpenClaw");
+  const defaultHydrateCredentialEnv =
+    onboardCredentialEnv.hydrateCredentialEnv.bind(onboardCredentialEnv);
+  const hydrateCredentialEnvSpy = vi
+    .spyOn(rebuildOnboardDependencies, "hydrateCredentialEnv")
+    .mockImplementation((...args: unknown[]) => {
+      const credentialEnv = String(args[0] ?? "");
+      return overrides.hydrateCredentialEnv
+        ? overrides.hydrateCredentialEnv(credentialEnv)
+        : defaultHydrateCredentialEnv(credentialEnv);
+    });
+  vi.spyOn(onboardCredentialEnv, "hydrateCredentialEnv").mockImplementation(
+    (...args: unknown[]) => {
+      const credentialEnv = String(args[0] ?? "");
+      return overrides.hydrateCredentialEnv
+        ? overrides.hydrateCredentialEnv(credentialEnv)
+        : defaultHydrateCredentialEnv(credentialEnv);
+    },
+  );
   vi.spyOn(hermesProviderAuth, "inspectHermesProviderBinding").mockReturnValue({
     exists: overrides.hermesProviderExists ?? true,
     credentialKeys:
@@ -136,31 +194,86 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
     ...(overrides.sandboxEntry ?? {}),
   };
   vi.spyOn(registry, "getSandbox").mockReturnValue(sandboxEntry);
-  vi.spyOn(registry, "getDefault").mockReturnValue(overrides.defaultSandbox ?? null);
+  const initialDefaultSandbox = overrides.defaultSandbox ?? null;
+  const preDeleteDefaultSandbox =
+    overrides.preDeleteDefaultSandbox !== undefined
+      ? overrides.preDeleteDefaultSandbox
+      : initialDefaultSandbox;
+  const initialDefaultSelectionRevision = overrides.defaultSelectionRevision ?? 10;
+  const preDeleteDefaultSelectionRevision =
+    overrides.preDeleteDefaultSelectionRevision ?? initialDefaultSelectionRevision;
+  const preDeleteSandboxEntry = overrides.preDeleteSandboxEntry ?? sandboxEntry;
+  let currentDefaultSandbox = initialDefaultSandbox;
+  let currentDefaultSelectionRevision = initialDefaultSelectionRevision;
+  const currentRegistryEntryNames = new Set([String(sandboxEntry.name)]);
+  if (initialDefaultSandbox) currentRegistryEntryNames.add(initialDefaultSandbox);
+  if (preDeleteDefaultSandbox) currentRegistryEntryNames.add(preDeleteDefaultSandbox);
+  vi.spyOn(registry, "getDefault").mockImplementation(() => currentDefaultSandbox);
+  const setDefaultSpy = vi
+    .spyOn(registry, "setDefault")
+    .mockImplementation((...args: unknown[]) => {
+      currentDefaultSandbox = String(args[0]);
+      currentDefaultSelectionRevision++;
+      return true;
+    });
   let registryLoadCount = 0;
   vi.spyOn(registry, "load").mockImplementation(() => {
     const isPreDeleteRead = registryLoadCount > 0;
     registryLoadCount++;
-    const defaultSandbox = isPreDeleteRead
-      ? overrides.preDeleteDefaultSandbox !== undefined
-        ? overrides.preDeleteDefaultSandbox
-        : (overrides.defaultSandbox ?? null)
-      : (overrides.defaultSandbox ?? null);
+    const defaultSandbox = isPreDeleteRead ? preDeleteDefaultSandbox : initialDefaultSandbox;
+    const defaultSelectionRevision = isPreDeleteRead
+      ? preDeleteDefaultSelectionRevision
+      : initialDefaultSelectionRevision;
+    const selectedEntry = isPreDeleteRead ? preDeleteSandboxEntry : sandboxEntry;
     return {
       sandboxes: {
-        alpha:
-          isPreDeleteRead && overrides.preDeleteSandboxEntry
-            ? overrides.preDeleteSandboxEntry
-            : sandboxEntry,
+        alpha: selectedEntry,
+        ...(defaultSandbox && defaultSandbox !== "alpha"
+          ? { [defaultSandbox]: { name: defaultSandbox } }
+          : {}),
       },
       defaultSandbox,
+      defaultSelectionRevision,
     };
   });
   vi.spyOn(registry, "listSandboxes").mockReturnValue({ sandboxes: [] });
   const registryUpdateSpy = vi.spyOn(registry, "updateSandbox").mockReturnValue(true);
   const restoreSandboxEntrySpy = vi
     .spyOn(registry, "restoreSandboxEntry")
-    .mockImplementation(() => undefined);
+    .mockImplementation((...args: unknown[]) => {
+      currentRegistryEntryNames.add(String((args[0] as { name: string }).name));
+      const options = (args[1] ?? {}) as Record<string, unknown>;
+      const transition = options.defaultTransition as
+        | { from: string | null; to: string; expectedRevision: number }
+        | undefined;
+      if (
+        transition &&
+        currentDefaultSandbox === transition.from &&
+        currentDefaultSelectionRevision === transition.expectedRevision
+      ) {
+        currentDefaultSandbox = transition.to;
+        currentDefaultSelectionRevision++;
+      }
+    });
+  const restoreSandboxEntryIfMissingSpy = vi
+    .spyOn(registry, "restoreSandboxEntryIfMissing")
+    .mockImplementation((...args: unknown[]) => {
+      const receipt = args[0] as Record<string, unknown>;
+      const entryName = String((receipt.entry as { name: string }).name);
+      if (currentRegistryEntryNames.has(entryName)) return false;
+      currentRegistryEntryNames.add(entryName);
+      const shouldReclaimDefault =
+        receipt.wasDefault === true &&
+        currentDefaultSandbox === receipt.fallbackDefault &&
+        currentDefaultSelectionRevision === receipt.postRemovalDefaultSelectionRevision;
+      const currentDefaultIsValid =
+        currentDefaultSandbox !== null && currentRegistryEntryNames.has(currentDefaultSandbox);
+      if (shouldReclaimDefault || !currentDefaultIsValid) {
+        currentDefaultSandbox = entryName;
+        currentDefaultSelectionRevision++;
+      }
+      return true;
+    });
   vi.spyOn(sandboxSession, "getActiveSandboxSessions").mockReturnValue({
     detected: false,
     sessions: [],
@@ -177,18 +290,23 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
       window.relocked = true;
       return true;
     });
-  const backupSandboxStateSpy = vi.spyOn(sandboxState, "backupSandboxState").mockReturnValue({
-    success: true,
-    backedUpDirs: ["workspace"],
-    backedUpFiles: ["user.md"],
-    failedDirs: [],
-    failedFiles: [],
-    manifest: {
-      backupPath: "/tmp/nemoclaw-rebuild-backup",
-      timestamp: "2026-06-01T00:00:00.000Z",
-      policyPresets: overrides.backupPolicyPresets ?? ["npm", "bad", "throw"],
-    },
-  });
+  const backupSandboxStateSpy = vi
+    .spyOn(sandboxState, "backupSandboxState")
+    .mockImplementation(() => {
+      overrides.beforeBackup?.();
+      return {
+        success: true,
+        backedUpDirs: ["workspace"],
+        backedUpFiles: ["user.md"],
+        failedDirs: [],
+        failedFiles: [],
+        manifest: {
+          backupPath: "/tmp/nemoclaw-rebuild-backup",
+          timestamp: "2026-06-01T00:00:00.000Z",
+          policyPresets: overrides.backupPolicyPresets ?? ["npm", "bad", "throw"],
+        },
+      };
+    });
   vi.spyOn(sandboxState, "validateRebuildRecoveryManifest").mockImplementation(
     (...args: unknown[]) => {
       const manifest = args[2] as Record<string, unknown>;
@@ -220,17 +338,49 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
       const argv = Array.isArray(args) ? args.map(String) : [];
       return overrides.runOpenshell ? overrides.runOpenshell(argv) : { status: 0, output: "" };
     });
-  const removeSandboxRegistryEntrySpy = vi
-    .spyOn(destroy, "removeSandboxRegistryEntry")
-    .mockImplementation(overrides.removeSandboxRegistryEntry ?? (() => undefined));
+  const defaultRemovalReceipt = {
+    entry: preDeleteSandboxEntry,
+    wasDefault: preDeleteDefaultSandbox === "alpha",
+    fallbackDefault:
+      preDeleteDefaultSandbox && preDeleteDefaultSandbox !== "alpha"
+        ? preDeleteDefaultSandbox
+        : null,
+    postRemovalDefaultSelectionRevision:
+      preDeleteDefaultSelectionRevision + (preDeleteDefaultSandbox === "alpha" ? 1 : 0),
+  };
+  const removeSandboxRegistryEntryWithReceiptSpy = vi
+    .spyOn(destroy, "removeSandboxRegistryEntryWithReceipt")
+    .mockImplementation(() => {
+      const overridden = overrides.removeSandboxRegistryEntryWithReceipt?.();
+      const receipt =
+        overridden !== undefined
+          ? overridden
+          : overrides.removalReceipt === undefined
+            ? defaultRemovalReceipt
+            : overrides.removalReceipt;
+      if (receipt) {
+        currentRegistryEntryNames.delete(String(receipt.entry.name));
+        if (receipt.fallbackDefault) currentRegistryEntryNames.add(receipt.fallbackDefault);
+        currentDefaultSandbox = receipt.wasDefault
+          ? receipt.fallbackDefault
+          : currentDefaultSandbox;
+        currentDefaultSelectionRevision = receipt.postRemovalDefaultSelectionRevision;
+      }
+      return receipt;
+    });
   vi.spyOn(nim, "stopNimContainer").mockImplementation(() => undefined);
   vi.spyOn(nim, "stopNimContainerByName").mockImplementation(() => undefined);
-  const onboardSpy = vi.spyOn(onboardMod, "onboard").mockImplementation(async () => {
-    await overrides.onboard?.(session);
-  });
-  vi.spyOn(onboardMod, "preflightAuthoritativeRebuildTarget").mockResolvedValue(undefined);
+  const onboardSpy = vi
+    .spyOn(rebuildOnboardDependencies, "onboard")
+    .mockImplementation(async (...args: unknown[]) => {
+      const options = args[0] as RebuildRecreateOnboardOpts;
+      await overrides.onboard?.(session, options);
+    });
+  vi.spyOn(rebuildOnboardDependencies, "preflightAuthoritativeRebuildTarget").mockResolvedValue(
+    undefined,
+  );
   const ensureValidatedBraveSearchCredentialSpy = vi
-    .spyOn(onboardMod, "ensureValidatedWebSearchCredential")
+    .spyOn(rebuildOnboardDependencies, "ensureValidatedWebSearchCredential")
     .mockImplementation(
       overrides.ensureValidatedWebSearchCredential ??
         overrides.ensureValidatedBraveSearchCredential ??
@@ -300,10 +450,24 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
     ensureRebuildAgentBaseImageSpy,
     ensureTargetGatewaySpy,
     ensureValidatedBraveSearchCredentialSpy,
+    hydrateCredentialEnvSpy,
     logSpy,
     markStepFailedSpy,
     onboardSpy,
     registryUpdateSpy,
+    setDefaultSpy,
+    setDefault: (name: string) => registry.setDefault(name),
+    registerSandboxEntry: (name: string) => {
+      currentRegistryEntryNames.add(name);
+      if (currentDefaultSandbox === null) {
+        currentDefaultSandbox = name;
+        currentDefaultSelectionRevision++;
+      }
+    },
+    getDefaultSelectionState: () => ({
+      defaultSandbox: currentDefaultSandbox,
+      defaultSelectionRevision: currentDefaultSelectionRevision,
+    }),
     releaseOnboardLockSpy,
     relockSpy,
     restoreSandboxStateSpy,
@@ -312,8 +476,9 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
     prepareMcpBridgesForAbsentSandboxRebuildSpy,
     prepareMcpBridgesForRebuildSpy,
     reattachMcpProvidersAfterRebuildAbortSpy,
-    removeSandboxRegistryEntrySpy,
+    removeSandboxRegistryEntryWithReceiptSpy,
     restoreSandboxEntrySpy,
+    restoreSandboxEntryIfMissingSpy,
     restoreMcpBridgesAfterRebuildSpy,
     warnUnpreservedUserManagedFilesSpy,
     session,
@@ -327,6 +492,9 @@ export function installRebuildFlowTestHooks(): void {
   afterEach(() => {
     vi.restoreAllMocks();
     delete require.cache[requireDist.resolve(rebuildModulePath)];
+    for (const dir of harnessTempDirs.splice(0)) {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
     if (originalSandboxName === undefined) {
       delete process.env.NEMOCLAW_SANDBOX_NAME;
     } else {

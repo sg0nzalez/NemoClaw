@@ -7,8 +7,9 @@
 // `upgrade-sandboxes --auto`) must never steer `onboard --resume` away from the
 // target sandbox's recorded agent/provider/model/credential. These are the env
 // vars that onboard's resume path reads to pick the agent, provider, model,
-// endpoint, and credential — isolating them during the recreate forces the
-// pinned session + gateway-registered provider to win.
+// endpoint, credential, preferred inference API, and endpoint reasoning mode —
+// isolating them during the recreate forces the pinned session +
+// gateway-registered provider to win.
 //
 // SOURCE-OF-TRUTH NOTE (#5735, PRA-4): the real source boundary is
 // `onboard --resume`, which still reads these from the global `process.env`:
@@ -28,6 +29,7 @@
 //                           → src/lib/onboard/policy-tier-env.ts / policy selection
 //   - NEMOCLAW_SANDBOX_GPU / NEMOCLAW_SANDBOX_GPU_DEVICE
 //                           → src/lib/onboard/sandbox-gpu-mode.ts
+//   - NEMOCLAW_TOOL_DISCLOSURE → src/lib/tool-disclosure.ts
 // This list MUST stay in sync with those reads; a contract test in
 // rebuild-env-isolation.test.ts pins the exact set so adding a new
 // onboard-selection env var forces a conscious update here.
@@ -54,6 +56,7 @@ export const AMBIENT_RECREATE_ENV_VARS = [
   "NEMOCLAW_POLICY_PRESETS",
   "NEMOCLAW_SANDBOX_GPU",
   "NEMOCLAW_SANDBOX_GPU_DEVICE",
+  "NEMOCLAW_TOOL_DISCLOSURE",
 ] as const;
 
 /**

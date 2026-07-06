@@ -13,12 +13,15 @@ import {
 import type { SandboxMessagingPlan } from "../../../messaging/manifest";
 import type { HermesAuthMethod, Session, SessionUpdates } from "../../../state/onboard-session";
 import type { SandboxEntry } from "../../../state/registry";
+import { toolDisclosureOrDefault } from "../../../tool-disclosure";
 import { withSandboxPhaseTrace } from "../../tracing";
+import type { SandboxCreateIntent } from "../../types";
 import { branchTo, type OnboardStateTransitionResult } from "../result";
 import { reconcileReusedSandboxMessaging, reconcileSandboxMessaging } from "./sandbox-messaging";
 import {
   applySandboxResumeDecision,
   decideSandboxResume,
+  resolveToolDisclosureResumeSignals,
   type SandboxResumeDecision,
 } from "./sandbox-resume";
 
@@ -39,6 +42,8 @@ export interface SandboxStateOptions<
   sandboxName: string | null;
   model: string;
   provider: string;
+  endpointUrl: string | null;
+  credentialEnv: string | null;
   nimContainer: string | null;
   webSearchConfig: WebSearchConfig | null;
   selectedMessagingChannels: string[];
@@ -130,6 +135,7 @@ export interface SandboxStateOptions<
       resourceProfile: ResourceProfile | null,
       hermesToolGateways: string[],
       hermesAuthMethod: HermesAuthMethod | null,
+      createIntent: SandboxCreateIntent,
     ): Promise<string>;
     updateSandboxRegistry(sandboxName: string, updates: Record<string, unknown>): void;
     getSandboxAgentRegistryFields(
@@ -368,6 +374,10 @@ class SandboxStateFlow<
       state.webSearchConfig as unknown as SharedWebSearchConfig | null,
       this.options.hermesToolGateways,
     );
+    const toolDisclosureSignals = resolveToolDisclosureResumeSignals(
+      state.sandboxName ? this.deps.getSandboxRegistryEntry(state.sandboxName) : null,
+      state.session,
+    );
     return decideSandboxResume({
       resume: this.options.resume,
       resumeAgentChanged: this.options.resumeAgentChanged,
@@ -385,6 +395,7 @@ class SandboxStateFlow<
         recordedToolGateways,
         effectiveToolGateways,
       ),
+      ...toolDisclosureSignals,
     });
   }
 
@@ -470,6 +481,7 @@ class SandboxStateFlow<
     state: SandboxStepState<WebSearchConfig>,
     requestedSandboxName: string,
     messagingPlan: SandboxMessagingPlan | null,
+    decision: SandboxCreationDecision,
   ): Promise<SandboxStepState<WebSearchConfig>> {
     const effectiveHermesToolGateways = effectiveHermesToolGatewaysForWebSearch(
       this.options.agent as { name?: string } | null,
@@ -504,15 +516,22 @@ class SandboxStateFlow<
           resourceProfile,
           effectiveHermesToolGateways,
           this.options.hermesAuthMethod,
+          {
+            recreate: decision.kind !== "create",
+            toolDisclosure: toolDisclosureOrDefault(state.session?.toolDisclosure),
+          },
         ),
     );
     // createSandbox() owns the build fingerprint. In particular, reusing an
     // image must not stamp it with the current version and hide build drift.
     const { nemoclawVersion: _builtFingerprint, ...agentRegistryFields } =
       this.deps.getSandboxAgentRegistryFields(this.options.agent, !this.options.fromDockerfile);
+    // Preserve the validated route and credential env-var name, never a credential value.
     this.deps.updateSandboxRegistry(sandboxName, {
       model: this.options.model,
       provider: this.options.provider,
+      endpointUrl: this.options.endpointUrl,
+      credentialEnv: this.options.credentialEnv,
       nimContainer: this.options.nimContainer,
       preferredInferenceApi: this.options.preferredInferenceApi,
       ...agentRegistryFields,
@@ -587,6 +606,7 @@ class SandboxStateFlow<
       },
       requestedSandboxName,
       messaging.plan,
+      decision,
     );
   }
 

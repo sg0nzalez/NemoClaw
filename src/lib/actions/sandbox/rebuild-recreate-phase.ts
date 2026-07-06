@@ -27,6 +27,8 @@ import {
   printMcpRebuildRetryCommand,
   restoreMcpRegistryForRebuildRetry,
 } from "./rebuild-mcp-phase";
+import { rebuildOnboardDependencies } from "./rebuild-onboard-dependencies";
+import type { RebuildRegistryRollback } from "./rebuild-registry-rollback";
 import type { RebuildResumeConfig } from "./rebuild-resume-config";
 import { printRebuildShieldsRecovery, type RebuildShieldsWindow } from "./rebuild-shields";
 
@@ -48,7 +50,7 @@ export interface RebuildRecreatePhaseInput {
   credentialEnv: string | null;
   baseImagePreflight: RebuildAgentBaseImagePreflight;
   recoveryRecreate: boolean;
-  recoveryRegistrySnapshot: ReturnType<typeof registry.load> | null;
+  registryRollback: RebuildRegistryRollback;
   backupManifest: RebuildBackupManifest;
   mcpEntries: McpRebuildPreparation["entries"];
   rebuildShieldsWindow: RebuildShieldsWindow;
@@ -82,7 +84,7 @@ export async function runRebuildRecreatePhase(input: RebuildRecreatePhaseInput):
     credentialEnv: rebuildCredentialEnv,
     baseImagePreflight: rebuildBaseImagePreflight,
     recoveryRecreate,
-    recoveryRegistrySnapshot,
+    registryRollback,
     backupManifest,
     mcpEntries: rebuildMcpEntries,
     rebuildShieldsWindow,
@@ -107,6 +109,7 @@ export async function runRebuildRecreatePhase(input: RebuildRecreatePhaseInput):
         mode: "non-interactive",
         hermesAuthMethod: rebuildDurableConfig.hermesAuthMethod,
         webSearchConfig: rebuildDurableConfig.webSearchConfig,
+        toolDisclosure: rebuildDurableConfig.toolDisclosure,
         telegramConfig: sessionMatchesSandbox ? sessionBefore?.telegramConfig : null,
         wechatConfig: sessionMatchesSandbox ? sessionBefore?.wechatConfig : null,
         migratedLegacyValueHashes: sessionMatchesSandbox
@@ -145,6 +148,7 @@ export async function runRebuildRecreatePhase(input: RebuildRecreatePhaseInput):
     s.preferredInferenceApi = resumeConfig.preferredInferenceApi;
     s.compatibleEndpointReasoning = resumeConfig.compatibleEndpointReasoning;
     s.endpointUrl = resumeConfig.endpointUrl;
+    s.toolDisclosure = rebuildDurableConfig.toolDisclosure;
     return s;
   });
   const sessionAfter = onboardSession.loadSession();
@@ -160,9 +164,6 @@ export async function runRebuildRecreatePhase(input: RebuildRecreatePhaseInput):
 
   // Intercept process.exit so a failed inner onboard can preserve the backup
   // and durable retry state instead of terminating the outer transaction.
-  const { onboard } = require("../../onboard") as {
-    onboard: (options: RebuildRecreateOnboardOpts) => Promise<void>;
-  };
   let onboardFailed = false;
   let onboardExitCode = 1;
   const savedExit = process.exit;
@@ -180,7 +181,7 @@ export async function runRebuildRecreatePhase(input: RebuildRecreatePhaseInput):
   const restoreRebuildBaseImageOverride =
     pinRebuildAgentBaseImageForRecreate(rebuildBaseImagePreflight);
   try {
-    await onboard(recreateOptions);
+    await rebuildOnboardDependencies.onboard(recreateOptions);
     log("onboard() returned successfully");
   } catch (error) {
     onboardFailed = true;
@@ -203,18 +204,7 @@ export async function runRebuildRecreatePhase(input: RebuildRecreatePhaseInput):
       /* best effort */
     }
 
-    const snapshotEntry = recoveryRegistrySnapshot?.sandboxes?.[sandboxName];
-    if (recoveryRecreate && snapshotEntry) {
-      try {
-        registry.restoreSandboxEntry(snapshotEntry, {
-          reclaimDefault:
-            recoveryRegistrySnapshot?.defaultSandbox === sandboxName ? sandboxName : null,
-        });
-        log("Recovery recreate failed: restored preserved registry entry for retry");
-      } catch (error) {
-        log(`Failed to restore registry entry after recovery recreate failure: ${String(error)}`);
-      }
-    }
+    registryRollback.restoreForRetry();
     restoreMcpRegistryForRebuildRetry(recoveryRecreate, rebuildMcpEntries, sb, log);
 
     console.error("");
@@ -230,7 +220,11 @@ export async function runRebuildRecreatePhase(input: RebuildRecreatePhaseInput):
     console.error("");
     console.error("  To recover manually:");
     console.error("    1. Fix the issue above (missing credential, Docker problem, etc.)");
-    printMcpRebuildRetryCommand(sandboxName, rebuildMcpEntries);
+    printMcpRebuildRetryCommand(
+      sandboxName,
+      rebuildMcpEntries,
+      rebuildDurableConfig.toolDisclosure,
+    );
     if (backupManifest) {
       console.error("    3. Then restore your workspace state:");
       console.error(

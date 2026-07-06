@@ -14,12 +14,18 @@ import { runRebuildDestroyPhase } from "./rebuild-destroy-phase";
 import { REBUILD_HERMES_DASHBOARD_ENV_KEYS } from "./rebuild-durable-config";
 import { stageMessagingManifestPlanForRebuild } from "./rebuild-messaging-phase";
 import { runRebuildPostRestorePhase } from "./rebuild-post-restore-phase";
+import { printRebuildPreflightFailure } from "./rebuild-preflight-error";
 import { runRebuildPreflightPhase } from "./rebuild-preflight-phase";
+import {
+  disposePreparedBuildContext,
+  verifyPreparedBuildContext,
+} from "./rebuild-prepared-image-context";
 import {
   type RebuildSandboxExecutionOptions,
   revalidatePreparedRecoveryBeforeDelete,
 } from "./rebuild-prepared-recovery";
 import { runRebuildRecreatePhase } from "./rebuild-recreate-phase";
+import { createRebuildRegistryRollback } from "./rebuild-registry-rollback";
 import { runRebuildRestorePhase } from "./rebuild-restore-phase";
 import { runRebuildShieldsPhase } from "./rebuild-shields-phase";
 
@@ -79,6 +85,7 @@ async function rebuildSandboxUnlocked(
     liveState,
     recoveryManifest: validatedRecoveryManifest,
     dcodePreflight,
+    preparedImage,
     releaseOnboardLock,
     log,
     bail,
@@ -94,12 +101,22 @@ async function rebuildSandboxUnlocked(
     fromDockerfile,
   } = targetConfig;
   const { staleRecovery } = liveState;
+  const preservedCustomPolicies = (sandboxEntry.customPolicies ?? []).map((entry) => ({
+    ...entry,
+  }));
   let recoveryManifest = validatedRecoveryManifest;
   const preparedBackupRecovery = recoveryManifest !== null;
   const recoveryRecreate = staleRecovery || preparedBackupRecovery;
   let recoveryRegistrySnapshot = preparedBackupRecovery
     ? JSON.parse(JSON.stringify(registry.load()))
     : liveState.staleRegistrySnapshot;
+  const registryRollback = createRebuildRegistryRollback({
+    sandboxName,
+    preparedBackupRecovery,
+    staleRecovery,
+    getRecoveryRegistrySnapshot: () => recoveryRegistrySnapshot,
+    log,
+  });
   try {
     const shieldsPhase = runRebuildShieldsPhase(
       sandboxName,
@@ -139,12 +156,26 @@ async function rebuildSandboxUnlocked(
       });
       if (!backup) return;
 
+      // The post-delete create must consume the exact context that passed the
+      // image preflight. Revalidate at the last safe point so mutation of the
+      // retained copy cannot cross the destructive boundary.
+      if (preparedImage && !verifyPreparedBuildContext(preparedImage)) {
+        printRebuildPreflightFailure(
+          "the retained replacement image context changed after preflight.",
+          "Retry the rebuild so the replacement inputs can be staged again.",
+          "Replacement sandbox image context changed before delete",
+          bail,
+        );
+        return;
+      }
+
       // DCode's retained replacement and live inference route must still match at
       // the last safe point. This check intentionally precedes MCP adapter scrub,
       // provider detach, NIM stop, and sandbox deletion in the destroy phase.
       if (
         !(await dcodePreflight.revalidateBeforeDelete(
           resumeConfig,
+          durableConfig.toolDisclosure,
           recoveryRecreate,
           recreateOptions.targetGatewayPort,
         ))
@@ -160,11 +191,19 @@ async function rebuildSandboxUnlocked(
         log,
         bail,
         relockShieldsIfNeeded,
+        validateAfterMcpPreparation: () =>
+          dcodePreflight.checkAtDeleteEdge(
+            resumeConfig,
+            durableConfig.toolDisclosure,
+            recoveryRecreate,
+            recreateOptions.targetGatewayPort,
+          ),
         onDeleted: () => {
           sandboxStillExists = false;
         },
       });
       if (!mcpPreparation) return;
+      registryRollback.recordRemoval(mcpPreparation.removalReceipt);
 
       const restoreDcodeGpuPatchNetwork = dcodePreflight.applyDockerGpuPatchNetwork();
       let recreated: boolean;
@@ -187,7 +226,7 @@ async function rebuildSandboxUnlocked(
           credentialEnv,
           baseImagePreflight,
           recoveryRecreate,
-          recoveryRegistrySnapshot,
+          registryRollback,
           backupManifest: backup.backupManifest,
           mcpEntries: mcpPreparation.entries,
           rebuildShieldsWindow,
@@ -207,11 +246,15 @@ async function rebuildSandboxUnlocked(
         sandboxName,
         backupManifest: backup.backupManifest,
         policyPresets: backup.policyPresets,
+        customPolicies:
+          backup.backupManifest?.customPolicies?.map((entry) => ({ ...entry })) ??
+          preservedCustomPolicies,
         log,
       });
       await runRebuildPostRestorePhase({
         sandboxName,
         sandboxEntry,
+        preservedCustomPolicies,
         messagingPlan,
         backupManifest: backup.backupManifest,
         mcpEntries: mcpPreparation.entries,
@@ -232,6 +275,9 @@ async function rebuildSandboxUnlocked(
     }
   } finally {
     dcodePreflight.cleanup();
+    if (preparedImage && !disposePreparedBuildContext(preparedImage)) {
+      console.warn("  Warning: temporary rebuild image inputs could not be fully removed.");
+    }
     process.removeListener("exit", releaseOnboardLock);
     releaseOnboardLock();
   }

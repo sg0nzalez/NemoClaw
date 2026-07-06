@@ -15,6 +15,7 @@ import {
   dockerTag,
 } from "../adapters/docker";
 import { ROOT } from "../runner";
+import { SANDBOX_BUILD_CONTEXT_PREFIX } from "../sandbox/build-context";
 import {
   buildLocalBaseTag,
   createSandboxBaseImageResolutionKey,
@@ -144,6 +145,7 @@ function createAgentBaseImageResolutionOptions(
 ): ResolveBaseImageOptions {
   const imageName = `ghcr.io/nvidia/nemoclaw/${agent.name}-sandbox-base`;
   const validateImage = agent.name === "hermes" ? hermesBaseImageSupportsMcp : undefined;
+  const pinnedRemoteRef = getHermesPinnedRemoteBaseRef(agent) ?? undefined;
   return {
     imageName,
     dockerfilePath,
@@ -154,7 +156,8 @@ function createAgentBaseImageResolutionOptions(
     resolutionHint: options.resolutionHint,
     forceRefresh: options.forceBaseImageRefresh,
     rootDir: ROOT,
-    pinnedRemoteRef: getHermesPinnedRemoteBaseRef(agent) ?? undefined,
+    pinnedRemoteRef,
+    preferPinnedRemoteRef: agent.name === "hermes" && pinnedRemoteRef !== undefined,
     validateImage,
     validationDescription:
       agent.name === "hermes" ? "the required MCP Streamable HTTP runtime" : undefined,
@@ -324,7 +327,7 @@ export function createAgentSandbox(
   }
 
   const { imageTag: baseImageRef, resolutionMetadata } = ensureAgentBaseImage(agent, options);
-  const buildCtx = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-build-"));
+  const buildCtx = fs.mkdtempSync(path.join(os.tmpdir(), SANDBOX_BUILD_CONTEXT_PREFIX));
   fs.cpSync(ROOT, buildCtx, {
     recursive: true,
     filter: (src) => {

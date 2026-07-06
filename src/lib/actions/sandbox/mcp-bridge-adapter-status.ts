@@ -2,11 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { McpBridgeEntry } from "../../state/registry";
+import {
+  DEEPAGENTS_MANAGED_PROJECTION_READ_HELPERS,
+  DEEPAGENTS_STRICT_JSON_HELPERS,
+} from "./mcp-bridge-adapter-deepagents-projection";
 
-// The pinned Deep Agents Code release auto-discovers this as the user-level MCP config.
-// `/sandbox/.mcp.json` is project-level and is intentionally rejected by
-// headless `dcode -n` unless project MCP has been separately trusted.
-export const DEEPAGENTS_MCP_CONFIG_PATH = "/sandbox/.deepagents/.mcp.json";
+// NemoClaw owns this dedicated projection. Deep Agents Code's user/project
+// `.mcp.json` discovery is disabled in the managed image so user-authored MCP
+// state can never be layered over the validated registry projection.
+export const DEEPAGENTS_MCP_CONFIG_PATH = "/sandbox/.deepagents/.nemoclaw-mcp.json";
 const DEFAULT_AUTH_HEADER = "Authorization";
 const DEFAULT_AUTH_SCHEME = "Bearer";
 
@@ -64,7 +68,7 @@ export function mcporterHeaderMatcherSource(): string {
   return `const mcporterHeadersMatchExpected = ${mcporterHeadersMatchExpected.toString()};`;
 }
 
-function hermesManagedServerConfig(entry: McpBridgeEntry): Record<string, unknown> {
+export function hermesManagedServerConfig(entry: McpBridgeEntry): Record<string, unknown> {
   const headers = entryHeaders(entry);
   return {
     url: entry.url,
@@ -74,6 +78,25 @@ function hermesManagedServerConfig(entry: McpBridgeEntry): Record<string, unknow
     tools: { resources: true, prompts: true },
     ...(Object.keys(headers).length > 0 ? { headers } : {}),
   };
+}
+
+export interface HermesMcpIntentPayload {
+  present: Record<string, Record<string, unknown>>;
+  absent: string[];
+}
+
+/** Render the host registry into the credential-safe shape persisted by Hermes. */
+export function buildHermesMcpIntentPayload(
+  entries: readonly McpBridgeEntry[],
+  managedServerNames: readonly string[],
+): HermesMcpIntentPayload {
+  const sortedEntries = [...entries].sort((left, right) => left.server.localeCompare(right.server));
+  const present = Object.fromEntries(
+    sortedEntries.map((entry) => [entry.server, hermesManagedServerConfig(entry)]),
+  );
+  const presentNames = new Set(Object.keys(present));
+  const absent = [...new Set(managedServerNames)].filter((name) => !presentNames.has(name)).sort();
+  return { present, absent };
 }
 
 export function deepAgentsManagedServerConfig(entry: McpBridgeEntry): Record<string, unknown> {
@@ -111,12 +134,14 @@ export function buildDeepAgentsMcpStatusCommand(entry: McpBridgeEntry): string {
     expected: deepAgentsManagedServerConfig(entry),
   };
   return [
-    "python3 - <<'PY'",
-    "import json, pathlib",
+    "/opt/venv/bin/python3 -I - <<'PY'",
+    "import json, os, pathlib, stat",
     `payload = json.loads(${pythonJsonLiteral(payload)})`,
     `config_path = pathlib.Path(${JSON.stringify(DEEPAGENTS_MCP_CONFIG_PATH)})`,
+    ...DEEPAGENTS_STRICT_JSON_HELPERS,
+    ...DEEPAGENTS_MANAGED_PROJECTION_READ_HELPERS,
     "try:",
-    "    data = json.loads(config_path.read_text(encoding='utf-8') or '{}')",
+    "    data = read_managed_projection(config_path)[0]",
     "except Exception:",
     "    data = {}",
     "servers = data.get('mcpServers') if isinstance(data, dict) else None",
