@@ -35,22 +35,11 @@ import {
 import { findChannelConflicts } from "../../messaging/applier/conflict-detection/registry";
 import { hydrateMessagingChannelConfig } from "../../messaging-channel-config";
 import { filterSetupPolicyPresetsForAgent } from "../../onboard/agent-policy-presets";
+import { bridgeProviderNamesForChannel } from "../../onboard/messaging-bridge-provider";
 import { getStoredMessagingChannelConfig } from "../../onboard/messaging-config";
 import { getMessagingToken } from "../../onboard/messaging-token";
 import * as policies from "../../policy";
 import { formatPolicyListPresetRow } from "../../policy/policy-list-display";
-
-const onboardSession =
-  require("../../state/onboard-session") as typeof import("../../state/onboard-session");
-
-import { runOpenshell } from "../../adapters/openshell/runtime";
-import {
-  type PolicyAddOptions,
-  type PolicyRemoveOptions,
-  parsePolicyAddOptions,
-} from "../../domain/policy-channel";
-import { bridgeProviderNamesForChannel } from "../../onboard/messaging-bridge-provider";
-import { getMessagingToken } from "../../onboard/messaging-token";
 import { shellQuote } from "../../runner";
 import {
   type ChannelDef,
@@ -574,7 +563,7 @@ async function applyChannelAddToGatewayAndRegistry(
     }
     // upsertMessagingProviders handles create-or-update and process.exits on
     // failure, so reaching the next line means every entry is registered.
-    onboardProviders.upsertMessagingProviders(tokenDefs, runOpenshell);
+    policyChannelDependencies.upsertMessagingProviders(tokenDefs);
     return true;
   }
   return false;
