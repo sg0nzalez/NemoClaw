@@ -68,8 +68,16 @@ function buildManifest(
     schema_version: TOOL_DISCLOSURE_SCHEMA_VERSION,
     benchmark_id: "tool-disclosure-complete-evidence-fixture",
     created_at: "2026-07-06T12:00:00.000Z",
-    sut: { git_sha: "1".repeat(40), git_ref: "fixture-sut", worktree_clean: true },
-    harness: { git_sha: "2".repeat(40), git_ref: "fixture-harness", worktree_clean: true },
+    sut: {
+      git_sha: "1".repeat(40),
+      git_ref: "fixture-sut",
+      worktree_clean: true,
+    },
+    harness: {
+      git_sha: "2".repeat(40),
+      git_ref: "fixture-harness",
+      worktree_clean: true,
+    },
     campaigns: [
       {
         campaign_id: "campaign-1",
@@ -103,11 +111,12 @@ function buildManifest(
       cpu_model: "fixture-cpu",
       cpu_count: 1,
       ram_gib: 1,
-      gpu_model: "fixture-gpu",
-      gpu_architecture: "fixture-architecture",
-      gpu_count: 1,
-      gpu_driver_version: "fixture-driver",
-      cuda_version: "fixture-cuda",
+      accelerator_type: "fixture-accelerator-type",
+      accelerator_model: "fixture-accelerator",
+      accelerator_architecture: "fixture-architecture",
+      accelerator_count: 1,
+      accelerator_driver_version: "fixture-driver",
+      accelerator_runtime: "fixture-runtime",
       power_state: "fixture-power-state",
       openshell_version: "fixture-openshell",
       agent_versions: {
@@ -236,7 +245,15 @@ function buildCompleteEvidenceFixture(): CompleteEvidenceFixture {
     );
   }
 
-  return { catalog, manifest, primaryTasks, rawEvidence, runs, schedule, stressTasks };
+  return {
+    catalog,
+    manifest,
+    primaryTasks,
+    rawEvidence,
+    runs,
+    schedule,
+    stressTasks,
+  };
 }
 
 describe("tool-disclosure complete-evidence validation", () => {
@@ -256,6 +273,43 @@ describe("tool-disclosure complete-evidence validation", () => {
     const mutableInferenceImage = structuredClone(fixture.manifest);
     mutableInferenceImage.inference.container_digest = "fixture:latest";
     expect(() => validateFrozenManifest(mutableInferenceImage)).toThrow(/claim-grade/u);
+  });
+
+  it("accepts CPU-only hardware and requires explicit not-applicable accelerator metadata", () => {
+    const cpuOnly = structuredClone(fixture.manifest);
+    cpuOnly.environment.accelerator_type = "none";
+    cpuOnly.environment.accelerator_model = "not-applicable";
+    cpuOnly.environment.accelerator_architecture = "not-applicable";
+    cpuOnly.environment.accelerator_count = 0;
+    cpuOnly.environment.accelerator_driver_version = "not-applicable";
+    cpuOnly.environment.accelerator_runtime = "not-applicable";
+    expect(() => validateFrozenManifest(cpuOnly)).not.toThrow();
+
+    const incompleteCpuOnly = structuredClone(cpuOnly);
+    incompleteCpuOnly.environment.accelerator_runtime = "";
+    expect(() => validateFrozenManifest(incompleteCpuOnly)).toThrow(/claim-grade/u);
+
+    const contradictoryCpuOnly = structuredClone(cpuOnly);
+    contradictoryCpuOnly.environment.accelerator_model = "fixture-accelerator";
+    expect(() => validateFrozenManifest(contradictoryCpuOnly)).toThrow(/inconsistent/u);
+  });
+
+  it("accepts arbitrary accelerator metadata and rejects not-applicable positive counts", () => {
+    const arbitraryAccelerator = structuredClone(fixture.manifest);
+    arbitraryAccelerator.environment.accelerator_type = "tpu";
+    arbitraryAccelerator.environment.accelerator_model = "fixture-tpu";
+    arbitraryAccelerator.environment.accelerator_architecture = "fixture-tpu-architecture";
+    arbitraryAccelerator.environment.accelerator_count = 4;
+    arbitraryAccelerator.environment.accelerator_driver_version = "fixture-tpu-driver";
+    arbitraryAccelerator.environment.accelerator_runtime = "fixture-tpu-runtime";
+    expect(() => validateFrozenManifest(arbitraryAccelerator)).not.toThrow();
+
+    arbitraryAccelerator.environment.accelerator_runtime = "not-applicable";
+    expect(() => validateFrozenManifest(arbitraryAccelerator)).toThrow(/inconsistent/u);
+
+    arbitraryAccelerator.environment.accelerator_runtime = "fixture-tpu-runtime";
+    arbitraryAccelerator.environment.accelerator_type = "not-applicable";
+    expect(() => validateFrozenManifest(arbitraryAccelerator)).toThrow(/inconsistent/u);
   });
 
   it("accepts the exact 1,884-run frozen matrix and rejects reordered or tampered evidence", {

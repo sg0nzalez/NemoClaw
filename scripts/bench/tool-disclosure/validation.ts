@@ -17,6 +17,8 @@ import {
   DEFAULT_BOOTSTRAP_SAMPLES,
   DEFAULT_BOOTSTRAP_SEED,
   DEFAULT_NONINFERIORITY_MARGIN_PP,
+  NO_ACCELERATOR_TYPE,
+  NOT_APPLICABLE,
 } from "./types";
 
 function sameJson(left: unknown, right: unknown): boolean {
@@ -28,10 +30,11 @@ export function validateFrozenManifest(manifest: ToolDisclosureManifest): void {
     manifest.environment.operating_system,
     manifest.environment.architecture,
     manifest.environment.cpu_model,
-    manifest.environment.gpu_model,
-    manifest.environment.gpu_architecture,
-    manifest.environment.gpu_driver_version,
-    manifest.environment.cuda_version,
+    manifest.environment.accelerator_type,
+    manifest.environment.accelerator_model,
+    manifest.environment.accelerator_architecture,
+    manifest.environment.accelerator_driver_version,
+    manifest.environment.accelerator_runtime,
     manifest.environment.power_state,
     manifest.environment.openshell_version,
     ...TOOL_DISCLOSURE_AGENTS.map((agent) => manifest.environment.agent_versions[agent]),
@@ -58,8 +61,8 @@ export function validateFrozenManifest(manifest: ToolDisclosureManifest): void {
     manifest.environment.cpu_count <= 0 ||
     !Number.isFinite(manifest.environment.ram_gib) ||
     manifest.environment.ram_gib <= 0 ||
-    !Number.isSafeInteger(manifest.environment.gpu_count) ||
-    manifest.environment.gpu_count <= 0 ||
+    !Number.isSafeInteger(manifest.environment.accelerator_count) ||
+    manifest.environment.accelerator_count < 0 ||
     !/^sha256:[a-f0-9]{64}$/u.test(manifest.inference.container_digest) ||
     manifest.inference.api !== "chat-completions" ||
     manifest.inference.public_vllm_flags.some(
@@ -67,9 +70,26 @@ export function validateFrozenManifest(manifest: ToolDisclosureManifest): void {
     ) ||
     new Set(manifest.inference.public_vllm_flags).size !==
       manifest.inference.public_vllm_flags.length ||
-    JSON.stringify(manifest).includes("RECORD_ON_DGX")
+    JSON.stringify(manifest).includes("RECORD_BEFORE_EXECUTION")
   ) {
     throw new Error("manifest is missing immutable claim-grade environment metadata");
+  }
+  const acceleratorMetadata = [
+    manifest.environment.accelerator_model,
+    manifest.environment.accelerator_architecture,
+    manifest.environment.accelerator_driver_version,
+    manifest.environment.accelerator_runtime,
+  ];
+  if (
+    (manifest.environment.accelerator_count === 0 &&
+      (manifest.environment.accelerator_type !== NO_ACCELERATOR_TYPE ||
+        acceleratorMetadata.some((value) => value !== NOT_APPLICABLE))) ||
+    (manifest.environment.accelerator_count > 0 &&
+      (manifest.environment.accelerator_type === NO_ACCELERATOR_TYPE ||
+        manifest.environment.accelerator_type === NOT_APPLICABLE ||
+        acceleratorMetadata.some((value) => value === NOT_APPLICABLE)))
+  ) {
+    throw new Error("manifest accelerator metadata is inconsistent with accelerator count");
   }
   if (
     !sameJson(manifest.protocol.agents, TOOL_DISCLOSURE_AGENTS) ||
@@ -268,7 +288,10 @@ export function validateCompleteEvidence(options: {
     throw new Error("schedule.json does not match the deterministic frozen schedule");
   }
   const allTasks = [...primaryTasks.tasks, ...stressTasks.tasks];
-  const expectedProtocolTasks = allTasks.map((task) => ({ task_id: task.id, kind: task.kind }));
+  const expectedProtocolTasks = allTasks.map((task) => ({
+    task_id: task.id,
+    kind: task.kind,
+  }));
   if (!sameJson(manifest.protocol.tasks, expectedProtocolTasks)) {
     throw new Error("manifest tasks do not match the frozen task artifacts");
   }

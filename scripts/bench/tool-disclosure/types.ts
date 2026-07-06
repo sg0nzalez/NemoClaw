@@ -14,6 +14,8 @@ export const TOOL_DISCLOSURE_SCHEMA_VERSION = "nemoclaw.tool_disclosure_bench.v1
 export const DEFAULT_BOOTSTRAP_SAMPLES = 10_000;
 export const DEFAULT_BOOTSTRAP_SEED = 0x4e_56_44_41;
 export const DEFAULT_NONINFERIORITY_MARGIN_PP = -5;
+export const NO_ACCELERATOR_TYPE = "none" as const;
+export const NOT_APPLICABLE = "not-applicable" as const;
 
 export type ToolDisclosureSchemaVersion = typeof TOOL_DISCLOSURE_SCHEMA_VERSION;
 export type ToolDisclosureAgent = "langchain-deepagents-code" | "hermes" | "openclaw";
@@ -48,11 +50,13 @@ export interface BenchmarkEnvironment {
   cpu_model: string;
   cpu_count: number;
   ram_gib: number;
-  gpu_model: string;
-  gpu_architecture: string;
-  gpu_count: number;
-  gpu_driver_version: string;
-  cuda_version: string;
+  /** Generic accelerator metadata. Use count 0, type "none", and explicit not-applicable values for CPU-only runs. */
+  accelerator_type: string;
+  accelerator_model: string;
+  accelerator_architecture: string;
+  accelerator_count: number;
+  accelerator_driver_version: string;
+  accelerator_runtime: string;
   power_state: string;
   openshell_version: string;
   agent_versions: Record<ToolDisclosureAgent, string>;

@@ -29,10 +29,14 @@ const TASK_IDS = Array.from({ length: 24 }, (_, index) => `task-${index + 1}`);
 function makeManifest(overrides: Partial<ToolDisclosureManifest> = {}): ToolDisclosureManifest {
   return {
     schema_version: TOOL_DISCLOSURE_SCHEMA_VERSION,
-    benchmark_id: "tool-disclosure-public-proof",
+    benchmark_id: "tool-disclosure-example",
     created_at: "2026-07-06T12:00:00.000Z",
     sut: { git_sha: "3a05b54e", git_ref: "v0.0.74", worktree_clean: true },
-    harness: { git_sha: "1234abcd", git_ref: "benchmark-harness", worktree_clean: true },
+    harness: {
+      git_sha: "1234abcd",
+      git_ref: "benchmark-harness",
+      worktree_clean: true,
+    },
     campaigns: [
       {
         campaign_id: "campaign-1",
@@ -52,7 +56,10 @@ function makeManifest(overrides: Partial<ToolDisclosureManifest> = {}): ToolDisc
       modes: ["direct", "progressive"],
       catalog_sizes: [512],
       primary_catalog_size: 512,
-      tasks: TASK_IDS.map((taskId) => ({ task_id: taskId, kind: "single-tool" as const })),
+      tasks: TASK_IDS.map((taskId) => ({
+        task_id: taskId,
+        kind: "single-tool" as const,
+      })),
       repetitions: { "small-control": 1, primary: 1, "large-stress": 1 },
       execution_seed: 7,
       bootstrap_samples: 500,
@@ -63,14 +70,15 @@ function makeManifest(overrides: Partial<ToolDisclosureManifest> = {}): ToolDisc
     environment: {
       operating_system: "Ubuntu 24.04",
       architecture: "x86_64",
-      cpu_model: "DGX Station CPU",
+      cpu_model: "Example CPU",
       cpu_count: 20,
       ram_gib: 128,
-      gpu_model: "NVIDIA DGX Station GPU",
-      gpu_architecture: "Blackwell",
-      gpu_count: 1,
-      gpu_driver_version: "999.1",
-      cuda_version: "13.0",
+      accelerator_type: "example-accelerator",
+      accelerator_model: "Example Accelerator",
+      accelerator_architecture: "example-architecture",
+      accelerator_count: 1,
+      accelerator_driver_version: "999.1",
+      accelerator_runtime: "example-runtime-1.0",
       power_state: "maximum-performance",
       openshell_version: "0.1.0",
       agent_versions: {
@@ -83,7 +91,7 @@ function makeManifest(overrides: Partial<ToolDisclosureManifest> = {}): ToolDisc
       api: "chat-completions",
       model_id: "deepseek-ai/DeepSeek-V4-Flash",
       model_revision: "revision-1",
-      container_image: "nvcr.io/nvidia/vllm:26.05.post1-py3",
+      container_image: "registry.example/vllm:1.0.0",
       container_digest: "sha256:container",
       vllm_version: "0.1.0",
       tool_call_parser: "deepseek_v3",
@@ -124,7 +132,7 @@ function makeRun(options: RunOptions = {}): ToolDisclosureRun {
   runSequence += 1;
   return {
     schema_version: TOOL_DISCLOSURE_SCHEMA_VERSION,
-    benchmark_id: "tool-disclosure-public-proof",
+    benchmark_id: "tool-disclosure-example",
     campaign_id: options.campaign ?? "campaign-1",
     run_id: `run-${runSequence}`,
     phase,
@@ -239,10 +247,30 @@ describe("tool-disclosure paired statistics", () => {
 
   it("averages repetitions within a task before resampling task pairs", () => {
     const runs = [
-      makeRun({ mode: "direct", taskId: "task-a", repetition: 1, success: true }),
-      makeRun({ mode: "direct", taskId: "task-a", repetition: 2, success: false }),
-      makeRun({ mode: "progressive", taskId: "task-a", repetition: 1, success: true }),
-      makeRun({ mode: "progressive", taskId: "task-a", repetition: 2, success: true }),
+      makeRun({
+        mode: "direct",
+        taskId: "task-a",
+        repetition: 1,
+        success: true,
+      }),
+      makeRun({
+        mode: "direct",
+        taskId: "task-a",
+        repetition: 2,
+        success: false,
+      }),
+      makeRun({
+        mode: "progressive",
+        taskId: "task-a",
+        repetition: 1,
+        success: true,
+      }),
+      makeRun({
+        mode: "progressive",
+        taskId: "task-a",
+        repetition: 2,
+        success: true,
+      }),
       makeRun({ mode: "direct", taskId: "task-b", success: true }),
       makeRun({ mode: "progressive", taskId: "task-b", success: true }),
     ];
@@ -258,9 +286,21 @@ describe("tool-disclosure paired statistics", () => {
 describe("tool-disclosure visibility and claim gates", () => {
   it("rejects nondeterministic static visibility instead of rounding it", () => {
     const runs = [
-      makeRun({ phase: "static-visibility", mode: "direct", schemaTokens: 1_000 }),
-      makeRun({ phase: "static-visibility", mode: "direct", schemaTokens: 1_001 }),
-      makeRun({ phase: "static-visibility", mode: "progressive", schemaTokens: 10 }),
+      makeRun({
+        phase: "static-visibility",
+        mode: "direct",
+        schemaTokens: 1_000,
+      }),
+      makeRun({
+        phase: "static-visibility",
+        mode: "direct",
+        schemaTokens: 1_001,
+      }),
+      makeRun({
+        phase: "static-visibility",
+        mode: "progressive",
+        schemaTokens: 10,
+      }),
     ];
 
     expect(() => summarizeStaticVisibility(runs)).toThrow("nondeterministic");
@@ -387,8 +427,29 @@ describe("tool-disclosure Markdown report", () => {
     expect(markdown).toContain("at least 99%");
     expect(markdown).toContain("initial serialized tool-schema tokens");
     expect(markdown).toContain("not an authorization boundary");
+    expect(markdown).toContain("| Accelerator | 1 × example-accelerator: Example Accelerator |");
+    expect(markdown).toContain("| Accelerator driver / runtime | 999.1 / example-runtime-1.0 |");
     expect(markdown).toContain("summary.json");
     expect(markdown).not.toContain("RAW-PROMPT-SECRET");
+  });
+
+  it("renders CPU-only hardware without implying an accelerator", () => {
+    const manifest = makeManifest();
+    manifest.environment.accelerator_type = "none";
+    manifest.environment.accelerator_model = "not-applicable";
+    manifest.environment.accelerator_architecture = "not-applicable";
+    manifest.environment.accelerator_count = 0;
+    manifest.environment.accelerator_driver_version = "not-applicable";
+    manifest.environment.accelerator_runtime = "not-applicable";
+    const summary = buildToolDisclosureSummary(manifest, completeEvidence(), {
+      generatedAt: "2026-07-06T13:00:00.000Z",
+    });
+
+    const markdown = renderToolDisclosureMarkdown(manifest, summary);
+
+    expect(markdown).toContain("| Accelerator | none |");
+    expect(markdown).toContain("| Accelerator architecture | not-applicable |");
+    expect(markdown).not.toContain("GPU");
   });
 
   it("rejects artifact paths so host locations cannot enter the report", () => {

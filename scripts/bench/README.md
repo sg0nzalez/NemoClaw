@@ -126,6 +126,12 @@ visibility for OpenClaw, Hermes, and LangChain Deep Agents Code against one
 deterministic synthetic catalog and task corpus.
 It is a claim-validation harness, not an extension of the advisory value
 benchmark above.
+In principle, it can run on any hardware with a compatible host environment
+that supports the recorded model, Node.js and a POSIX-compatible shell, an
+OpenAI-compatible vLLM endpoint with `/metrics` and `/tokenize`, Docker-backed
+OpenShell sandboxes, `cloudflared` with outbound network access, and the three
+agent runtimes. Results apply to the recorded hardware and configuration;
+evaluating another hardware configuration requires a separate complete run.
 
 Prepare a new evidence directory with the frozen catalog, task sets, schedule,
 manifest template, and generated OpenClaw fixtures:
@@ -169,5 +175,5 @@ It derives public claim text mechanically and leaves claims blocked unless the
 required confidence-interval gate passes for every agent in both campaigns.
 
 See the [progressive tool-disclosure benchmark protocol](../../docs/inference/progressive-tool-disclosure-benchmark.mdx)
-for the DGX Station workflow, recorder topology, artifact rules, claim gates,
-and limitations.
+for the hardware-neutral workflow, recorder topology, artifact rules, claim
+gates, and limitations.

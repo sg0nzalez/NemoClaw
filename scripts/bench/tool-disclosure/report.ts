@@ -59,10 +59,14 @@ export function renderToolDisclosureMarkdown(
     "",
     "| Field | Recorded value |",
     "| --- | --- |",
-    `| GPU | ${cell(`${manifest.environment.gpu_count} × ${manifest.environment.gpu_model}`)} |`,
-    `| GPU architecture | ${cell(manifest.environment.gpu_architecture)} |`,
-    `| Driver / CUDA | ${cell(
-      `${manifest.environment.gpu_driver_version} / ${manifest.environment.cuda_version}`,
+    `| Accelerator | ${cell(
+      manifest.environment.accelerator_count === 0
+        ? "none"
+        : `${manifest.environment.accelerator_count} × ${manifest.environment.accelerator_type}: ${manifest.environment.accelerator_model}`,
+    )} |`,
+    `| Accelerator architecture | ${cell(manifest.environment.accelerator_architecture)} |`,
+    `| Accelerator driver / runtime | ${cell(
+      `${manifest.environment.accelerator_driver_version} / ${manifest.environment.accelerator_runtime}`,
     )} |`,
     `| CPU / RAM | ${cell(
       `${manifest.environment.cpu_count} × ${manifest.environment.cpu_model}; ${formatNumber(
@@ -87,7 +91,7 @@ export function renderToolDisclosureMarkdown(
         .map((agent) => `${agent}=${manifest.environment.agent_versions[agent]}`)
         .join(", "),
     )} |`,
-    `| Power state | ${cell(manifest.environment.power_state)} |`,
+    `| Power / performance state | ${cell(manifest.environment.power_state)} |`,
     "",
     "## Exact initial schema visibility",
     "",

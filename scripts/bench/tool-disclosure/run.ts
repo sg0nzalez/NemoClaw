@@ -159,7 +159,10 @@ function parseArguments(args: readonly string[]): ParsedArguments {
 }
 
 function gitOutput(args: readonly string[]): string {
-  return execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  return execFileSync("git", args, {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  }).trim();
 }
 
 function revision(ref: string, worktreeClean: boolean): ToolDisclosureManifest["sut"] {
@@ -209,7 +212,10 @@ function manifestTemplate(options: {
       modes: TOOL_DISCLOSURE_MODES,
       catalog_sizes: STATIC_CATALOG_SIZES,
       primary_catalog_size: 512,
-      tasks: options.tasks.map((task) => ({ task_id: task.id, kind: task.kind })),
+      tasks: options.tasks.map((task) => ({
+        task_id: task.id,
+        kind: task.kind,
+      })),
       repetitions: { "small-control": 1, primary: 5, "large-stress": 1 },
       execution_seed: options.executionSeed,
       bootstrap_samples: DEFAULT_BOOTSTRAP_SAMPLES,
@@ -218,40 +224,44 @@ function manifestTemplate(options: {
       retry_setup_failures: 1,
     },
     environment: {
-      operating_system: "RECORD_ON_DGX",
-      architecture: "RECORD_ON_DGX",
-      cpu_model: "RECORD_ON_DGX",
+      operating_system: "RECORD_BEFORE_EXECUTION",
+      architecture: "RECORD_BEFORE_EXECUTION",
+      cpu_model: "RECORD_BEFORE_EXECUTION",
       cpu_count: 0,
       ram_gib: 0,
-      gpu_model: "RECORD_ON_DGX",
-      gpu_architecture: "RECORD_ON_DGX",
-      gpu_count: 0,
-      gpu_driver_version: "RECORD_ON_DGX",
-      cuda_version: "RECORD_ON_DGX",
-      power_state: "RECORD_ON_DGX",
-      openshell_version: "RECORD_ON_DGX",
+      accelerator_type: "RECORD_BEFORE_EXECUTION",
+      accelerator_model: "RECORD_BEFORE_EXECUTION",
+      accelerator_architecture: "RECORD_BEFORE_EXECUTION",
+      accelerator_count: 0,
+      accelerator_driver_version: "RECORD_BEFORE_EXECUTION",
+      accelerator_runtime: "RECORD_BEFORE_EXECUTION",
+      power_state: "RECORD_BEFORE_EXECUTION",
+      openshell_version: "RECORD_BEFORE_EXECUTION",
       agent_versions: {
-        openclaw: "RECORD_ON_DGX",
-        hermes: "RECORD_ON_DGX",
-        "langchain-deepagents-code": "RECORD_ON_DGX",
+        openclaw: "RECORD_BEFORE_EXECUTION",
+        hermes: "RECORD_BEFORE_EXECUTION",
+        "langchain-deepagents-code": "RECORD_BEFORE_EXECUTION",
       },
       sandbox_image_digests: Object.fromEntries(
         TOOL_DISCLOSURE_AGENTS.flatMap((agent) =>
           TOOL_DISCLOSURE_MODES.flatMap((mode) =>
-            STATIC_CATALOG_SIZES.map((size) => [`${agent}:${mode}:${size}`, "RECORD_ON_DGX"]),
+            STATIC_CATALOG_SIZES.map((size) => [
+              `${agent}:${mode}:${size}`,
+              "RECORD_BEFORE_EXECUTION",
+            ]),
           ),
         ),
       ),
     },
     inference: {
       api: "chat-completions",
-      model_id: "RECORD_ON_DGX",
-      model_revision: "RECORD_ON_DGX",
-      container_image: "RECORD_ON_DGX",
-      container_digest: "RECORD_ON_DGX",
-      vllm_version: "RECORD_ON_DGX",
-      tool_call_parser: "RECORD_ON_DGX",
-      reasoning_parser: "RECORD_ON_DGX",
+      model_id: "RECORD_BEFORE_EXECUTION",
+      model_revision: "RECORD_BEFORE_EXECUTION",
+      container_image: "RECORD_BEFORE_EXECUTION",
+      container_digest: "RECORD_BEFORE_EXECUTION",
+      vllm_version: "RECORD_BEFORE_EXECUTION",
+      tool_call_parser: "RECORD_BEFORE_EXECUTION",
+      reasoning_parser: "RECORD_BEFORE_EXECUTION",
       temperature: 0,
       concurrency: 1,
       prefix_caching_enabled: false,
@@ -388,7 +398,7 @@ function prepare(options: ParsedArguments): void {
   );
   writeChecksumManifest(outputDir, PREPARED_FILES);
   process.stdout.write(
-    `Prepared ${schedule.length} runs in ${outputDir}. Copy manifest.template.json to manifest.json and replace every RECORD_ON_DGX value before execution.\n`,
+    `Prepared ${schedule.length} runs in ${outputDir}. Copy manifest.template.json to manifest.json and replace every RECORD_BEFORE_EXECUTION value before execution.\n`,
   );
 }
 
@@ -422,8 +432,8 @@ function evidenceArtifact(
 
 function assertManifestCompleted(manifest: ToolDisclosureManifest): void {
   const serialized = JSON.stringify(manifest);
-  if (serialized.includes("RECORD_ON_DGX")) {
-    throw new Error("manifest.json still contains RECORD_ON_DGX placeholders");
+  if (serialized.includes("RECORD_BEFORE_EXECUTION")) {
+    throw new Error("manifest.json still contains RECORD_BEFORE_EXECUTION placeholders");
   }
 }
 
@@ -619,7 +629,9 @@ function summarize(options: ParsedArguments): void {
   writeTextArtifact(
     outputDir,
     "report.md",
-    renderToolDisclosureMarkdown(manifest, summary, { artifacts: reportInputs }),
+    renderToolDisclosureMarkdown(manifest, summary, {
+      artifacts: reportInputs,
+    }),
   );
   const artifacts = [...reportInputs, evidenceArtifact(outputDir, "report.md", "report")];
   const bundle: EvidenceBundle = {
