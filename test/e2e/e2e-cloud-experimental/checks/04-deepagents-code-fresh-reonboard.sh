@@ -24,6 +24,11 @@ fail() {
   exit 1
 }
 
+skip() {
+  printf '%s: SKIP: %s\n' "$PREFIX" "$1"
+  exit 0
+}
+
 pass() {
   printf '%s: OK (%s)\n' "$PREFIX" "$1"
 }
@@ -136,6 +141,9 @@ PY
 }
 
 [ -n "$SANDBOX_NAME" ] || fail "sandbox name is required"
+if ! sandbox_exec "test -d /sandbox/.deepagents && command -v dcode >/dev/null 2>&1" >/dev/null; then
+  skip "sandbox '${SANDBOX_NAME}' is not a Deep Agents Code sandbox"
+fi
 [ -n "${COMPATIBLE_API_KEY:-}" ] || fail "COMPATIBLE_API_KEY is required"
 [ -x "$CLI" ] || fail "NemoClaw CLI is not executable at $CLI"
 

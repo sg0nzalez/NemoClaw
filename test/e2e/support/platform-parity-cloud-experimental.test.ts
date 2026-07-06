@@ -3,6 +3,7 @@
 
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -32,6 +33,36 @@ function shellResult(exitCode: number, stdout: string, stderr = ""): ShellProbeR
 }
 
 describe("P0-E cloud-experimental parity guardrails", () => {
+  it("skips the destructive fresh re-onboard check outside a Deep Agents sandbox", () => {
+    const binDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-fake-openshell-"));
+    try {
+      fs.writeFileSync(path.join(binDir, "openshell"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+      const result = spawnSync(
+        "bash",
+        [
+          path.join(
+            process.cwd(),
+            "test/e2e/e2e-cloud-experimental/checks/04-deepagents-code-fresh-reonboard.sh",
+          ),
+        ],
+        {
+          encoding: "utf8",
+          env: {
+            PATH: `${binDir}:${process.env.PATH ?? "/usr/bin:/bin"}`,
+            SANDBOX_NAME: "openclaw-sandbox",
+          },
+        },
+      );
+
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toContain(
+        "SKIP: sandbox 'openclaw-sandbox' is not a Deep Agents Code sandbox",
+      );
+    } finally {
+      fs.rmSync(binDir, { force: true, recursive: true });
+    }
+  });
+
   it("fails required Deep Agents cloud-experimental checks when scripts print SKIP", () => {
     expect(() =>
       assertRequiredCloudExperimentalResult(
