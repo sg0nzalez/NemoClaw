@@ -8,7 +8,10 @@ import {
   mergeOpenClawRestoredConfig,
   type OpenClawConfigMergeOptions,
 } from "./openclaw-config-merge.js";
-import type { OpenClawImagePluginInstall } from "./openclaw-plugin-restore.js";
+import {
+  hasCompleteOpenClawImagePluginProvenance,
+  type OpenClawImagePluginInstall,
+} from "./openclaw-plugin-restore.js";
 
 export interface OpenClawConfigStateFileSpec {
   path: string;
@@ -50,6 +53,7 @@ export type OpenClawConfigRestoreInputResult =
 export interface OpenClawConfigRestoreFromSandboxOptions {
   backupContents: Buffer;
   dir: string;
+  freshImagePluginInstalls?: readonly OpenClawImagePluginInstall[];
   log?: (message: string) => void;
   previousImagePluginInstalls?: readonly OpenClawImagePluginInstall[];
   specPath: string;
@@ -120,14 +124,33 @@ export function buildOpenClawConfigRestoreInput(
 export function buildOpenClawConfigRestoreInputFromSandbox({
   backupContents,
   dir,
+  freshImagePluginInstalls,
   log = () => {},
   previousImagePluginInstalls,
   specPath,
   sshArgs,
 }: OpenClawConfigRestoreFromSandboxOptions): OpenClawConfigRestoreInputResult {
+  if ((previousImagePluginInstalls === undefined) !== (freshImagePluginInstalls === undefined)) {
+    return {
+      ok: false,
+      error: "Complete previous and fresh OpenClaw image plugin provenance is required",
+    };
+  }
+  if (
+    freshImagePluginInstalls !== undefined &&
+    !hasCompleteOpenClawImagePluginProvenance(freshImagePluginInstalls, dir)
+  ) {
+    return { ok: false, error: "Fresh OpenClaw image plugin provenance is incomplete" };
+  }
+  if (
+    previousImagePluginInstalls !== undefined &&
+    !hasCompleteOpenClawImagePluginProvenance(previousImagePluginInstalls, dir)
+  ) {
+    return { ok: false, error: "OpenClaw image plugin provenance is incomplete" };
+  }
   return buildOpenClawConfigRestoreInput(
     backupContents,
     readCurrentOpenClawConfig(sshArgs, dir, specPath, log),
-    { previousImagePluginInstalls },
+    { freshImagePluginInstalls, previousImagePluginInstalls },
   );
 }

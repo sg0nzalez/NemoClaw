@@ -45,6 +45,7 @@ import {
 } from "./openclaw-managed-extensions.js";
 import {
   discoverFreshOpenClawImagePluginInstalls,
+  hasCompleteOpenClawImagePluginProvenance,
   type OpenClawImagePluginInstall,
   parseOpenClawImagePluginInstalls,
   planOpenClawPluginRestore,
@@ -59,6 +60,8 @@ const HOME_DIR = path.resolve(process.env.HOME || os.homedir());
 const REBUILD_BACKUPS_DIR = path.join(HOME_DIR, ".nemoclaw", "rebuild-backups");
 
 const MANIFEST_VERSION = 1;
+export const OPENCLAW_IMAGE_PLUGIN_PROVENANCE_RESTORE_ERROR =
+  "custom-image OpenClaw plugin provenance is missing or invalid";
 
 function parseJson<T>(text: string): T {
   return JSON.parse(text);
@@ -75,6 +78,8 @@ export interface RebuildManifest {
   expectedVersion: string | null;
   /** Fresh-image plugin baseline captured before user state was restored. */
   openclawImagePluginInstalls?: OpenClawImagePluginInstall[];
+  /** The plugin baseline is authoritative and must be reconciled during recreation. */
+  reconcileOpenClawImagePluginProvenance?: boolean;
   stateDirs: string[];
   /** Directories verified as safe to restore. Absent on older manifests. */
   backedUpDirs?: string[];
@@ -217,6 +222,31 @@ function isCustomPolicyEntryArray(value: unknown): value is CustomPolicyEntry[] 
   );
 }
 
+function cloneOpenClawImagePluginInstalls(
+  installs: readonly OpenClawImagePluginInstall[],
+): OpenClawImagePluginInstall[] {
+  return installs.map((install) => ({
+    ...install,
+    ...(install.loadPaths !== undefined ? { loadPaths: [...install.loadPaths] } : {}),
+  }));
+}
+
+export function hasAuthoritativeOpenClawImagePluginProvenance(value: {
+  agentType?: unknown;
+  dir?: unknown;
+  writableDir?: unknown;
+  openclawImagePluginInstalls?: unknown;
+  reconcileOpenClawImagePluginProvenance?: unknown;
+}): boolean {
+  const dir = typeof value.dir === "string" ? value.dir : value.writableDir;
+  return (
+    value.agentType === "openclaw" &&
+    typeof dir === "string" &&
+    value.reconcileOpenClawImagePluginProvenance === true &&
+    hasCompleteOpenClawImagePluginProvenance(value.openclawImagePluginInstalls, dir)
+  );
+}
+
 function isRebuildManifest(value: unknown): value is RebuildManifest {
   if (!isRecord(value) || !isStateDirArray(value.stateDirs)) return false;
   const dir = typeof value.dir === "string" ? value.dir : value.writableDir;
@@ -231,6 +261,10 @@ function isRebuildManifest(value: unknown): value is RebuildManifest {
     typeof dir === "string" &&
     (value.openclawImagePluginInstalls === undefined ||
       parseOpenClawImagePluginInstalls(value.openclawImagePluginInstalls, dir).ok) &&
+    (value.reconcileOpenClawImagePluginProvenance === undefined ||
+      typeof value.reconcileOpenClawImagePluginProvenance === "boolean") &&
+    (value.reconcileOpenClawImagePluginProvenance !== true ||
+      hasAuthoritativeOpenClawImagePluginProvenance(value)) &&
     typeof value.backupPath === "string" &&
     (value.stateFiles === undefined ||
       (Array.isArray(value.stateFiles) && value.stateFiles.every(isStateFileSpec))) &&
@@ -902,6 +936,7 @@ function buildStateFileRestoreInput(
   spec: StateFileSpec,
   backupContents: Buffer,
   mergeOpenClawConfig: boolean,
+  freshImagePluginInstalls?: readonly OpenClawImagePluginInstall[],
   previousImagePluginInstalls?: readonly OpenClawImagePluginInstall[],
 ): Buffer | null {
   if (!mergeOpenClawConfig) return backupContents;
@@ -909,6 +944,7 @@ function buildStateFileRestoreInput(
   const result = buildOpenClawConfigRestoreInputFromSandbox({
     backupContents,
     dir,
+    freshImagePluginInstalls,
     log: _log,
     previousImagePluginInstalls,
     specPath: spec.path,
@@ -928,6 +964,7 @@ function restoreStateFile(
   backupPath: string,
   mergeOpenClawConfig = false,
   stateFileRestorePolicy?: StateFileRestorePolicy,
+  freshImagePluginInstalls?: readonly OpenClawImagePluginInstall[],
   previousImagePluginInstalls?: readonly OpenClawImagePluginInstall[],
 ): boolean {
   const localPath = path.join(backupPath, spec.path);
@@ -946,6 +983,7 @@ function restoreStateFile(
       spec,
       backupContents,
       mergeOpenClawConfig,
+      freshImagePluginInstalls,
       previousImagePluginInstalls,
     );
   if (input === null) return false;
@@ -989,9 +1027,14 @@ export function backupSandboxState(sandboxName: string, options: BackupOptions =
     `backupSandboxState: agent=${agentName}, dir=${dir}, stateDirs=[${stateDirs.join(",")}], stateFiles=[${stateFiles.map((f) => f.path).join(",")}]`,
   );
 
+  const reconcileOpenClawImagePluginProvenance =
+    agentName === "openclaw" && Boolean(sb?.fromDockerfile);
   let openclawImagePluginInstalls: OpenClawImagePluginInstall[] | undefined;
-  if (agentName === "openclaw" && sb?.openclawImagePluginInstalls !== undefined) {
-    const provenance = parseOpenClawImagePluginInstalls(sb.openclawImagePluginInstalls, dir);
+  if (
+    agentName === "openclaw" &&
+    (reconcileOpenClawImagePluginProvenance || sb?.openclawImagePluginInstalls !== undefined)
+  ) {
+    const provenance = parseOpenClawImagePluginInstalls(sb?.openclawImagePluginInstalls, dir);
     if (!provenance.ok) {
       return {
         success: false,
@@ -999,10 +1042,10 @@ export function backupSandboxState(sandboxName: string, options: BackupOptions =
         failedDirs: [],
         backedUpFiles: [],
         failedFiles: [],
-        error: "registered OpenClaw image plugin provenance is invalid",
+        error: "registered OpenClaw image plugin provenance is missing or invalid",
       };
     }
-    openclawImagePluginInstalls = provenance.pluginInstalls;
+    openclawImagePluginInstalls = cloneOpenClawImagePluginInstalls(provenance.pluginInstalls);
   }
 
   // Validate user-supplied name and check for conflicts BEFORE creating any
@@ -1070,6 +1113,9 @@ export function backupSandboxState(sandboxName: string, options: BackupOptions =
     agentVersion: sb?.agentVersion || null,
     expectedVersion: agent.expectedVersion,
     ...(openclawImagePluginInstalls !== undefined ? { openclawImagePluginInstalls } : {}),
+    ...(reconcileOpenClawImagePluginProvenance
+      ? { reconcileOpenClawImagePluginProvenance: true }
+      : {}),
     stateDirs,
     stateFiles,
     dir,
@@ -1437,12 +1483,16 @@ function restoreSandboxStateInternal(
   const manifest = readManifest(backupPath);
   if (!manifest) {
     _log("FAILED: Could not read rebuild-manifest.json");
+    const provenanceError = hasInvalidMarkedOpenClawPluginProvenance(backupPath)
+      ? OPENCLAW_IMAGE_PLUGIN_PROVENANCE_RESTORE_ERROR
+      : undefined;
     return {
       success: false,
       restoredDirs: [],
       failedDirs: ["manifest"],
       restoredFiles: [],
       failedFiles: [],
+      ...(provenanceError ? { error: provenanceError } : {}),
     };
   }
 
@@ -1516,7 +1566,10 @@ function restoreSandboxStateInternal(
         failedDirs: [...localDirs],
         restoredFiles,
         failedFiles: localFiles.map((f) => f.path),
-        error: pluginRestorePlan.error,
+        error:
+          manifest.reconcileOpenClawImagePluginProvenance === true
+            ? OPENCLAW_IMAGE_PLUGIN_PROVENANCE_RESTORE_ERROR
+            : pluginRestorePlan.error,
       };
     }
     if (
@@ -1659,6 +1712,7 @@ function restoreSandboxStateInternal(
           backupPath,
           shouldMergeOpenClawConfigStateFile(manifest.agentType, dir, spec),
           options.stateFileRestorePolicy,
+          freshOpenClawImagePluginInstalls,
           previousOpenClawImagePluginInstalls,
         )
       ) {
@@ -1692,11 +1746,28 @@ function writeManifest(backupPath: string, manifest: RebuildManifest): void {
   chmodSync(manifestPath, 0o600);
 }
 
-function readManifest(backupPath: string): RebuildManifest | null {
+function readManifestPayload(backupPath: string): unknown | null {
   const manifestPath = path.join(backupPath, "rebuild-manifest.json");
   if (!existsSync(manifestPath)) return null;
   try {
-    const parsed = parseJson<unknown>(readFileSync(manifestPath, "utf-8"));
+    return parseJson<unknown>(readFileSync(manifestPath, "utf-8"));
+  } catch {
+    return null;
+  }
+}
+
+function hasInvalidMarkedOpenClawPluginProvenance(backupPath: string): boolean {
+  const parsed = readManifestPayload(backupPath);
+  return (
+    isRecord(parsed) &&
+    parsed.reconcileOpenClawImagePluginProvenance === true &&
+    !hasAuthoritativeOpenClawImagePluginProvenance(parsed)
+  );
+}
+
+function readManifest(backupPath: string): RebuildManifest | null {
+  try {
+    const parsed = readManifestPayload(backupPath);
     if (!isRebuildManifest(parsed)) return null;
     const manifest = parsed as RebuildManifest & { dir?: string; writableDir?: string };
     const dir = manifest.dir ?? manifest.writableDir;

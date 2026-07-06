@@ -34,7 +34,11 @@ function writeExecutable(filePath: string, source: string): void {
 function writeBackup(
   sandboxName: string,
   dirName: string,
-  openclawImagePluginInstalls?: Array<{ id: string; installPath: string }>,
+  openclawImagePluginInstalls?: Array<{
+    id: string;
+    installPath: string;
+    loadPaths: string[];
+  }>,
 ): { backupPath: string } {
   const backupPath = path.join(BACKUPS_ROOT, sandboxName, dirName);
   fs.mkdirSync(backupPath, { recursive: true });
@@ -147,10 +151,15 @@ describe("OpenClaw managed extension snapshot restore", () => {
         freshRegistryPath,
         JSON.stringify({
           version: 1,
+          loadPaths: [],
           installRecords: Object.fromEntries(
             freshImagePlugins.map((id) => [
               id,
-              { installPath: `/sandbox/.openclaw/extensions/${id}` },
+              {
+                source: "path",
+                sourcePath: `/sandbox/.openclaw/extensions/${id}`,
+                installPath: `/sandbox/.openclaw/extensions/${id}`,
+              },
             ]),
           ),
         }),
@@ -160,6 +169,7 @@ describe("OpenClaw managed extension snapshot restore", () => {
         {
           id: previousPlugin,
           installPath: `/sandbox/.openclaw/extensions/${previousPlugin}`,
+          loadPaths: [],
         },
       ]);
       const backupExtensionsDir = path.join(manifest.backupPath, "extensions");
@@ -199,7 +209,7 @@ if (cmd.includes("installed_plugin_index") && cmd.includes("state/openclaw.sqlit
   if (installIndexSource === "sqlite") process.stdout.write(fs.readFileSync(${JSON.stringify(freshRegistryPath)}));
   process.exit(installIndexSource === "sqlite" ? 0 : 2);
 }
-if (cmd.includes("plugins/installs.json") && cmd.includes("cat --")) {
+if (cmd.includes("plugins/installs.json") && cmd.includes("python3 -c")) {
   if (installIndexSource === "legacy") process.stdout.write(fs.readFileSync(${JSON.stringify(freshRegistryPath)}));
   process.exit(installIndexSource === "legacy" ? 0 : 2);
 }
@@ -272,8 +282,11 @@ process.exit(0);
         freshRegistryPath,
         JSON.stringify({
           version: 1,
+          loadPaths: [],
           installRecords: {
             "\u001b[31m../weather": {
+              source: "path",
+              sourcePath: "/sandbox/.openclaw/extensions/../weather",
               installPath: "/sandbox/.openclaw/extensions/../weather",
             },
           },

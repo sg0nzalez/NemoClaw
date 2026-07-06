@@ -109,6 +109,7 @@ describe("registry", () => {
     const weatherInstall = {
       id: "weather",
       installPath: "/sandbox/.openclaw/extensions/weather",
+      loadPaths: [],
     };
     registry.registerSandbox({ name: "legacy", agent: "openclaw" });
     registry.registerSandbox({

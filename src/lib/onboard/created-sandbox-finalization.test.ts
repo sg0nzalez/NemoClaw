@@ -402,6 +402,7 @@ describe("created OpenClaw sandbox finalization", () => {
     {
       id: "weather",
       installPath: "/sandbox/.openclaw/extensions/weather",
+      loadPaths: [],
     },
   ];
 
@@ -531,5 +532,63 @@ describe("created OpenClaw sandbox finalization", () => {
     expect(error).toHaveBeenCalledWith(
       "  State was not restored and registry metadata was not updated.",
     );
+    expect(error).toHaveBeenCalledWith('    openshell sandbox delete "openclaw"');
+    expect(error).toHaveBeenCalledWith(
+      "  Then rerun the original `nemoclaw onboard --from <Dockerfile>` command.",
+    );
+    expect(error).toHaveBeenCalledWith("  Manual recovery: /tmp/openclaw-backup");
+  });
+
+  it("does not register after a marked backup provenance mismatch", () => {
+    const register = vi.fn();
+    const error = vi.fn();
+
+    expect(() =>
+      finalizeCreatedSandbox(
+        {
+          sandboxName: "openclaw",
+          restoreBackupPath: "/tmp/openclaw-backup",
+          preUpgradeBackup: false,
+          targetAgentType: "openclaw",
+          validateManagedDcode: false,
+          provider: "compatible-endpoint",
+          model: "demo",
+          preferredInferenceApi: "openai-completions",
+        },
+        {
+          discoverFreshOpenClawImagePluginInstalls: () => ({
+            ok: true,
+            extensionDirs: ["weather"],
+            pluginInstalls,
+          }),
+          restoreRecreatedSandboxState: () => ({
+            success: false,
+            restoredDirs: [],
+            failedDirs: ["manifest"],
+            restoredFiles: [],
+            failedFiles: [],
+            error: sandboxState.OPENCLAW_IMAGE_PLUGIN_PROVENANCE_RESTORE_ERROR,
+          }),
+          getDcodeSelectionDrift: vi.fn(),
+          register,
+          note: vi.fn(),
+          error,
+          exitProcess: (code): never => {
+            throw new Error(`exit ${code}`);
+          },
+        },
+      ),
+    ).toThrow("exit 1");
+
+    expect(register).not.toHaveBeenCalled();
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("future rebuild would be unsafe"));
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining(sandboxState.OPENCLAW_IMAGE_PLUGIN_PROVENANCE_RESTORE_ERROR),
+    );
+    expect(error).toHaveBeenCalledWith('    openshell sandbox delete "openclaw"');
+    expect(error).toHaveBeenCalledWith(
+      "  Then rerun the original `nemoclaw onboard --from <Dockerfile>` command.",
+    );
+    expect(error).toHaveBeenCalledWith("  Manual recovery: /tmp/openclaw-backup");
   });
 });

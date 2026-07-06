@@ -117,6 +117,7 @@ export function buildCreatedSandboxRegistryEntry(
       ? {
           openclawImagePluginInstalls: input.openclawImagePluginInstalls.map((install) => ({
             ...install,
+            ...(install.loadPaths !== undefined ? { loadPaths: [...install.loadPaths] } : {}),
           })),
         }
       : {}),

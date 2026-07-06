@@ -27,7 +27,11 @@ describe("buildCreatedSandboxRegistryEntry", () => {
       plan: { sandboxName: "demo" },
     };
     const openclawImagePluginInstalls = [
-      { id: "weather", installPath: "/sandbox/.openclaw/extensions/weather" },
+      {
+        id: "weather",
+        installPath: "/sandbox/.openclaw/extensions/weather",
+        loadPaths: ["/opt/weather-plugin"],
+      },
     ];
 
     const entry = buildCreatedSandboxRegistryEntry({
@@ -92,6 +96,9 @@ describe("buildCreatedSandboxRegistryEntry", () => {
     expect(entry.nemoclawVersion).toBeTruthy();
     expect(entry.openclawImagePluginInstalls).not.toBe(openclawImagePluginInstalls);
     expect(entry.openclawImagePluginInstalls?.[0]).not.toBe(openclawImagePluginInstalls[0]);
+    expect(entry.openclawImagePluginInstalls?.[0]?.loadPaths).not.toBe(
+      openclawImagePluginInstalls[0]?.loadPaths,
+    );
     expect(entry.messaging).toBe(plannedMessagingState);
     const rawEntry = entry as unknown as Record<string, unknown>;
     expect(rawEntry.messagingChannels).toBeUndefined();

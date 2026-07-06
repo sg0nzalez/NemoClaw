@@ -13,6 +13,7 @@ import {
 } from "./openclaw-managed-extensions.js";
 
 const MAX_OPENCLAW_IMAGE_MANAGED_PLUGIN_INSTALLS = 128;
+const MAX_OPENCLAW_CONFIGURED_PLUGIN_LOAD_PATHS = 512;
 // The parser accepts at most 128 records with 4 KiB install paths, leaving
 // ample room for IDs and metadata while bounding sandbox-controlled output.
 const OPENCLAW_PLUGIN_INSTALL_REGISTRY_MAX_BYTES = 1024 * 1024;
@@ -20,6 +21,17 @@ const OPENCLAW_PLUGIN_INSTALL_REGISTRY_MAX_BYTES = 1024 * 1024;
 const MAX_OPENCLAW_PLUGIN_INSTALL_PATH_LENGTH = 4096;
 const MAX_OPENCLAW_PLUGIN_INSTALL_PATH_SEGMENTS = 64;
 const OPENCLAW_EXTENSION_GLOB_CHARS = ["/", "\\", "*", "?", "[", "]"] as const;
+const OPENCLAW_PLUGIN_INSTALL_SOURCES = new Set([
+  "archive",
+  "clawhub",
+  "git",
+  "marketplace",
+  "npm",
+  "path",
+]);
+const OPENCLAW_PLUGIN_ID_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._+~-]*$/;
+const FORBIDDEN_OPENCLAW_PLUGIN_IDS = new Set(["__proto__", "constructor", "prototype"]);
+const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/;
 
 export type OpenClawManagedExtensionDiscoveryResult =
   | { ok: true; extensionDirs: string[]; pluginInstalls: OpenClawImagePluginInstall[] }
@@ -28,7 +40,13 @@ export type OpenClawManagedExtensionDiscoveryResult =
 export interface OpenClawImagePluginInstall {
   readonly id: string;
   readonly installPath: string;
+  /** Exact configured load paths owned by this image install; durable validation requires it. */
+  readonly loadPaths?: readonly string[];
 }
+
+export type CompleteOpenClawImagePluginInstall = Omit<OpenClawImagePluginInstall, "loadPaths"> & {
+  readonly loadPaths: readonly string[];
+};
 
 export interface OpenClawPluginDiscoveryDeps {
   getSshConfig(sandboxName: string): string | null;
@@ -56,34 +74,61 @@ const OPENCLAW_PLUGIN_INDEX_SQLITE_PY = [
   "    row = conn.execute(\"SELECT install_records_json FROM installed_plugin_index WHERE index_key = 'installed-plugin-index'\").fetchone()",
   "    if not row or not row[0]: raise SystemExit(12)",
   "    records = json.loads(row[0])",
-  "    print(json.dumps({'version': 1, 'installRecords': records}, separators=(',', ':')))",
+  "    with open(sys.argv[2], 'r', encoding='utf-8') as config_file: config = json.load(config_file)",
+  "    plugins = config.get('plugins') if isinstance(config, dict) else None",
+  "    load = plugins.get('load') if isinstance(plugins, dict) else None",
+  "    load_paths = load.get('paths', []) if isinstance(load, dict) else []",
+  "    print(json.dumps({'version': 1, 'installRecords': records, 'loadPaths': load_paths}, separators=(',', ':')))",
   "finally:",
   "    conn.close()",
 ].join("\n");
 
+const OPENCLAW_PLUGIN_INDEX_LEGACY_PY = [
+  "import json, sys",
+  "with open(sys.argv[1], 'r', encoding='utf-8') as index_file: index = json.load(index_file)",
+  "with open(sys.argv[2], 'r', encoding='utf-8') as config_file: config = json.load(config_file)",
+  "plugins = config.get('plugins') if isinstance(config, dict) else None",
+  "load = plugins.get('load') if isinstance(plugins, dict) else None",
+  "load_paths = load.get('paths', []) if isinstance(load, dict) else []",
+  "if not isinstance(index, dict): raise SystemExit(12)",
+  "index['loadPaths'] = load_paths",
+  "print(json.dumps(index, separators=(',', ':')))",
+].join("\n");
+
+function buildSafeRegularFileReadGuard(variable: string, missingStatus: number): string[] {
+  return [
+    `[ -e "$${variable}" ] || [ -L "$${variable}" ] || exit ${missingStatus}`,
+    `[ -f "$${variable}" ] && [ ! -L "$${variable}" ] || { echo "unsafe state file: $${variable}" >&2; exit 10; }`,
+    `${variable}_hardlinks="$(find "$${variable}" -maxdepth 0 -type f -links +1 -print 2>/dev/null | wc -l | tr -d " ")"`,
+    `[ "\${${variable}_hardlinks:-0}" = "0" ] || { echo "hard-linked state file rejected: $${variable}" >&2; exit 11; }`,
+  ];
+}
+
 export function buildFreshOpenClawPluginIndexSqliteReadCommand(dir: string): string {
   const sqlitePath = `${dir.replace(/\/+$/, "")}/state/openclaw.sqlite`;
+  const configPath = `${dir.replace(/\/+$/, "")}/openclaw.json`;
   const quotedSqlitePath = shellQuote(sqlitePath);
+  const quotedConfigPath = shellQuote(configPath);
   return [
     `db=${quotedSqlitePath}`,
-    '[ -e "$db" ] || [ -L "$db" ] || exit 2',
-    '[ -f "$db" ] && [ ! -L "$db" ] || { echo "unsafe OpenClaw state database: $db" >&2; exit 10; }',
-    'hardlink_count="$(find "$db" -maxdepth 0 -type f -links +1 -print 2>/dev/null | wc -l | tr -d " ")"',
-    '[ "${hardlink_count:-0}" = "0" ] || { echo "hard-linked OpenClaw state database rejected: $db" >&2; exit 11; }',
-    `python3 -c ${shellQuote(OPENCLAW_PLUGIN_INDEX_SQLITE_PY)} "$db"`,
+    `cfg=${quotedConfigPath}`,
+    ...buildSafeRegularFileReadGuard("db", 2),
+    ...buildSafeRegularFileReadGuard("cfg", 12),
+    `python3 -c ${shellQuote(OPENCLAW_PLUGIN_INDEX_SQLITE_PY)} "$db" "$cfg"`,
   ].join("; ");
 }
 
 function buildLegacyOpenClawPluginIndexReadCommand(dir: string): string {
   const installIndexPath = `${dir.replace(/\/+$/, "")}/plugins/installs.json`;
+  const configPath = `${dir.replace(/\/+$/, "")}/openclaw.json`;
   const quotedInstallIndexPath = shellQuote(installIndexPath);
+  const quotedConfigPath = shellQuote(configPath);
   return [
     `src=${quotedInstallIndexPath}`,
-    '[ ! -e "$src" ] && exit 2',
-    '[ -f "$src" ] && [ ! -L "$src" ] || { echo "unsafe state file: $src" >&2; exit 10; }',
-    'hardlink_count="$(find "$src" -maxdepth 0 -type f -links +1 -print 2>/dev/null | wc -l | tr -d " ")"',
-    '[ "${hardlink_count:-0}" = "0" ] || { echo "hard-linked state file rejected: $src" >&2; exit 11; }',
-    'cat -- "$src"',
+    `cfg=${quotedConfigPath}`,
+    ...buildSafeRegularFileReadGuard("src", 2),
+    ...buildSafeRegularFileReadGuard("cfg", 12),
+    `python3 -c ${shellQuote(OPENCLAW_PLUGIN_INDEX_LEGACY_PY)} "$src" "$cfg"`,
   ].join("; ");
 }
 
@@ -168,10 +213,18 @@ export function discoverFreshOpenClawImagePluginInstalls(
 }
 
 function isSafeOpenClawPluginInstallId(id: string): boolean {
-  if (id.length === 0 || id.length > 256 || /[\u0000-\u001f\u007f]/.test(id)) return false;
+  if (id.length === 0 || id.length > 256 || FORBIDDEN_OPENCLAW_PLUGIN_IDS.has(id)) return false;
   const slash = id.indexOf("/");
-  if (slash === -1) return true;
-  return id.startsWith("@") && slash > 1 && slash === id.lastIndexOf("/") && slash < id.length - 1;
+  if (slash === -1) return OPENCLAW_PLUGIN_ID_SEGMENT.test(id);
+  return (
+    id.startsWith("@") &&
+    slash > 1 &&
+    slash === id.lastIndexOf("/") &&
+    slash < id.length - 1 &&
+    !FORBIDDEN_OPENCLAW_PLUGIN_IDS.has(id.slice(slash + 1)) &&
+    OPENCLAW_PLUGIN_ID_SEGMENT.test(id.slice(1, slash)) &&
+    OPENCLAW_PLUGIN_ID_SEGMENT.test(id.slice(slash + 1))
+  );
 }
 
 export function isSafeOpenClawExtensionDirName(name: string): boolean {
@@ -185,21 +238,42 @@ export function isSafeOpenClawExtensionDirName(name: string): boolean {
   );
 }
 
-function validateOpenClawImagePluginInstall(
+function validateCanonicalAbsolutePath(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= MAX_OPENCLAW_PLUGIN_INSTALL_PATH_LENGTH &&
+    !CONTROL_CHARACTERS.test(value) &&
+    value.split("/").filter(Boolean).length <= MAX_OPENCLAW_PLUGIN_INSTALL_PATH_SEGMENTS &&
+    path.posix.isAbsolute(value) &&
+    path.posix.normalize(value) === value
+  );
+}
+
+function validateConfiguredLoadPath(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= MAX_OPENCLAW_PLUGIN_INSTALL_PATH_LENGTH &&
+    !CONTROL_CHARACTERS.test(value)
+  );
+}
+
+function validateDurableOpenClawImagePluginInstall(
   id: unknown,
   installPath: unknown,
-): OpenClawImagePluginInstall | null {
+  loadPaths: unknown,
+): CompleteOpenClawImagePluginInstall | null {
   if (typeof id !== "string" || !isSafeOpenClawPluginInstallId(id)) return null;
+  if (!validateCanonicalAbsolutePath(installPath)) return null;
   if (
-    typeof installPath !== "string" ||
-    installPath.length > MAX_OPENCLAW_PLUGIN_INSTALL_PATH_LENGTH ||
-    installPath.split("/").filter(Boolean).length > MAX_OPENCLAW_PLUGIN_INSTALL_PATH_SEGMENTS ||
-    !path.posix.isAbsolute(installPath) ||
-    path.posix.normalize(installPath) !== installPath
-  ) {
+    !Array.isArray(loadPaths) ||
+    loadPaths.length > 1 ||
+    !loadPaths.every(validateCanonicalAbsolutePath) ||
+    new Set(loadPaths).size !== loadPaths.length
+  )
     return null;
-  }
-  return { id, installPath };
+  return { id, installPath, loadPaths: [...loadPaths] };
 }
 
 function extensionDirForInstall(
@@ -229,7 +303,7 @@ function extensionDirForInstall(
 }
 
 function validateOpenClawImagePluginInstalls(
-  entries: readonly (readonly [string, unknown])[],
+  entries: readonly (readonly [string, unknown, unknown])[],
   dir: string,
 ): OpenClawManagedExtensionDiscoveryResult {
   if (entries.length > MAX_OPENCLAW_IMAGE_MANAGED_PLUGIN_INSTALLS) {
@@ -241,15 +315,19 @@ function validateOpenClawImagePluginInstalls(
 
   const ids = new Set<string>();
   const installPaths = new Set<string>();
+  const loadPaths = new Set<string>();
   const extensionDirs = new Set<string>();
   const pluginInstalls: OpenClawImagePluginInstall[] = [];
-  for (const [id, metadata] of entries) {
-    const installPath = isRecord(metadata) ? metadata.installPath : undefined;
-    const install = validateOpenClawImagePluginInstall(id, installPath);
+  for (const [id, installPath, durableLoadPaths] of entries) {
+    const install = validateDurableOpenClawImagePluginInstall(id, installPath, durableLoadPaths);
     if (!install) {
       return { ok: false, error: `fresh OpenClaw plugin install metadata is invalid: ${id}` };
     }
-    if (ids.has(install.id) || installPaths.has(install.installPath)) {
+    if (
+      ids.has(install.id) ||
+      installPaths.has(install.installPath) ||
+      install.loadPaths?.some((loadPath) => loadPaths.has(loadPath))
+    ) {
       return { ok: false, error: `fresh OpenClaw plugin install provenance is duplicated: ${id}` };
     }
     const projected = extensionDirForInstall(install, dir);
@@ -259,6 +337,7 @@ function validateOpenClawImagePluginInstalls(
     }
     ids.add(install.id);
     installPaths.add(install.installPath);
+    for (const loadPath of install.loadPaths ?? []) loadPaths.add(loadPath);
     pluginInstalls.push(install);
     if (projected.extensionDir) extensionDirs.add(projected.extensionDir);
   }
@@ -277,9 +356,21 @@ export function parseOpenClawImagePluginInstalls(
     return { ok: false, error: "OpenClaw image plugin provenance is invalid" };
   }
   return validateOpenClawImagePluginInstalls(
-    value.map((entry) => [isRecord(entry) && typeof entry.id === "string" ? entry.id : "", entry]),
+    value.map((entry) => [
+      isRecord(entry) && typeof entry.id === "string" ? entry.id : "",
+      isRecord(entry) ? entry.installPath : undefined,
+      isRecord(entry) ? entry.loadPaths : undefined,
+    ]),
     dir,
   );
+}
+
+/** True only for explicit, fully validated provenance; an explicit empty array is complete. */
+export function hasCompleteOpenClawImagePluginProvenance(
+  value: unknown,
+  dir: string,
+): value is readonly CompleteOpenClawImagePluginInstall[] {
+  return Array.isArray(value) && parseOpenClawImagePluginInstalls(value, dir).ok;
 }
 
 export function parseFreshOpenClawPluginExtensionDirs(
@@ -294,9 +385,38 @@ export function parseFreshOpenClawPluginExtensionDirs(
     return { ok: false, error: "fresh OpenClaw plugin install records are invalid" };
   }
 
+  const configuredLoadPaths = registryIndex.loadPaths;
+  if (
+    !Array.isArray(configuredLoadPaths) ||
+    configuredLoadPaths.length > MAX_OPENCLAW_CONFIGURED_PLUGIN_LOAD_PATHS ||
+    !configuredLoadPaths.every(validateConfiguredLoadPath)
+  ) {
+    return { ok: false, error: "fresh OpenClaw configured plugin load paths are invalid" };
+  }
+  const configuredLoadPathSet = new Set(configuredLoadPaths);
+
   const entries = Object.keys(installs)
     .sort()
-    .map((id) => [id, installs[id]] as const);
+    .map((id) => {
+      const metadata = installs[id];
+      if (!isRecord(metadata) || !OPENCLAW_PLUGIN_INSTALL_SOURCES.has(String(metadata.source))) {
+        return [id, undefined, undefined] as const;
+      }
+      if (
+        metadata.sourcePath !== undefined &&
+        !validateCanonicalAbsolutePath(metadata.sourcePath)
+      ) {
+        return [id, undefined, undefined] as const;
+      }
+      if (metadata.source === "path" && !validateCanonicalAbsolutePath(metadata.sourcePath)) {
+        return [id, undefined, undefined] as const;
+      }
+      const loadPaths =
+        metadata.source === "path" && configuredLoadPathSet.has(String(metadata.sourcePath))
+          ? [String(metadata.sourcePath)]
+          : [];
+      return [id, metadata.installPath, loadPaths] as const;
+    });
   return validateOpenClawImagePluginInstalls(entries, dir);
 }
 

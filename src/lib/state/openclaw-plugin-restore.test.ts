@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest";
 import { OPENCLAW_IMAGE_MANAGED_EXTENSION_DIRS } from "./openclaw-managed-extensions";
 import {
   buildFreshOpenClawPluginIndexSqliteReadCommand,
+  hasCompleteOpenClawImagePluginProvenance,
   parseFreshOpenClawPluginExtensionDirs,
   parseOpenClawImagePluginInstalls,
   planOpenClawPluginRestore,
@@ -19,7 +20,18 @@ import {
 const OPENCLAW_DIR = "/sandbox/.openclaw";
 
 function install(installPath: string): Record<string, unknown> {
-  return { source: "path", installPath };
+  return { source: "npm", installPath };
+}
+
+function pathInstall(installPath: string, sourcePath: string): Record<string, unknown> {
+  return { source: "path", sourcePath, installPath };
+}
+
+function writeOpenClawConfig(root: string, loadPaths: string[] = []): void {
+  fs.writeFileSync(
+    path.join(root, "openclaw.json"),
+    JSON.stringify({ plugins: { load: { paths: loadPaths } } }),
+  );
 }
 
 const CREATE_PLUGIN_INDEX_SQLITE_PY = [
@@ -44,13 +56,14 @@ describe("buildFreshOpenClawPluginIndexSqliteReadCommand", () => {
       const dbPath = path.join(root, "state", "openclaw.sqlite");
       const records = { weather: install(`${OPENCLAW_DIR}/extensions/weather`) };
       createPluginIndexDatabase(dbPath, records);
+      writeOpenClawConfig(root);
 
       const stdout = execFileSync(
         "bash",
         ["-c", buildFreshOpenClawPluginIndexSqliteReadCommand(root)],
         { encoding: "utf8" },
       );
-      expect(JSON.parse(stdout)).toEqual({ version: 1, installRecords: records });
+      expect(JSON.parse(stdout)).toEqual({ version: 1, installRecords: records, loadPaths: [] });
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
@@ -60,6 +73,7 @@ describe("buildFreshOpenClawPluginIndexSqliteReadCommand", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-plugin-index-"));
     try {
       createPluginIndexDatabase(path.join(root, "state", "openclaw.sqlite"), null);
+      writeOpenClawConfig(root);
       expect(() =>
         execFileSync("bash", ["-c", buildFreshOpenClawPluginIndexSqliteReadCommand(root)]),
       ).toThrow();
@@ -96,6 +110,21 @@ describe("buildFreshOpenClawPluginIndexSqliteReadCommand", () => {
       fs.rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it("rejects a symlinked OpenClaw config used for load-path ownership", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-plugin-index-"));
+    try {
+      createPluginIndexDatabase(path.join(root, "state", "openclaw.sqlite"), {});
+      fs.symlinkSync(path.join(root, "missing-openclaw.json"), path.join(root, "openclaw.json"));
+      const result = spawnSync("bash", [
+        "-c",
+        buildFreshOpenClawPluginIndexSqliteReadCommand(root),
+      ]);
+      expect(result.status).toBe(10);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("parseFreshOpenClawPluginExtensionDirs", () => {
@@ -108,6 +137,7 @@ describe("parseFreshOpenClawPluginExtensionDirs", () => {
             weather: install(`${OPENCLAW_DIR}/extensions/weather`),
             nemoclaw: install(`${OPENCLAW_DIR}/extensions/nemoclaw`),
           },
+          loadPaths: [],
         },
         OPENCLAW_DIR,
       ),
@@ -115,8 +145,8 @@ describe("parseFreshOpenClawPluginExtensionDirs", () => {
       ok: true,
       extensionDirs: ["nemoclaw", "weather"],
       pluginInstalls: [
-        { id: "nemoclaw", installPath: `${OPENCLAW_DIR}/extensions/nemoclaw` },
-        { id: "weather", installPath: `${OPENCLAW_DIR}/extensions/weather` },
+        { id: "nemoclaw", installPath: `${OPENCLAW_DIR}/extensions/nemoclaw`, loadPaths: [] },
+        { id: "weather", installPath: `${OPENCLAW_DIR}/extensions/weather`, loadPaths: [] },
       ],
     });
   });
@@ -130,25 +160,36 @@ describe("parseFreshOpenClawPluginExtensionDirs", () => {
             "@scope/weather": install(`${OPENCLAW_DIR}/extensions/scope__weather`),
             diagnostics: install(`${OPENCLAW_DIR}/npm/node_modules/diagnostics`),
             "foo+bar": install(`${OPENCLAW_DIR}/extensions/foo+bar`),
-            "my plugin": install(`${OPENCLAW_DIR}/extensions/my plugin`),
           },
+          loadPaths: [],
         },
         OPENCLAW_DIR,
       ),
     ).toEqual({
       ok: true,
-      extensionDirs: ["foo+bar", "my plugin", "scope__weather"],
+      extensionDirs: ["foo+bar", "scope__weather"],
       pluginInstalls: expect.arrayContaining([
-        { id: "@scope/weather", installPath: `${OPENCLAW_DIR}/extensions/scope__weather` },
-        { id: "diagnostics", installPath: `${OPENCLAW_DIR}/npm/node_modules/diagnostics` },
-        { id: "foo+bar", installPath: `${OPENCLAW_DIR}/extensions/foo+bar` },
-        { id: "my plugin", installPath: `${OPENCLAW_DIR}/extensions/my plugin` },
+        {
+          id: "@scope/weather",
+          installPath: `${OPENCLAW_DIR}/extensions/scope__weather`,
+          loadPaths: [],
+        },
+        {
+          id: "diagnostics",
+          installPath: `${OPENCLAW_DIR}/npm/node_modules/diagnostics`,
+          loadPaths: [],
+        },
+        { id: "foo+bar", installPath: `${OPENCLAW_DIR}/extensions/foo+bar`, loadPaths: [] },
       ]),
     });
   });
 
   it.each([
     ["a traversal ID", { "../weather": install(`${OPENCLAW_DIR}/extensions/../weather`) }],
+    [
+      "an ID containing whitespace",
+      { "my plugin": install(`${OPENCLAW_DIR}/extensions/my-plugin`) },
+    ],
     ["a nested install path", { weather: install(`${OPENCLAW_DIR}/extensions/nested/weather`) }],
     ["a noncanonical install path", { weather: install(`${OPENCLAW_DIR}/extensions/../weather`) }],
     ["an oversized install path", { weather: install(`/${"a".repeat(4096)}`) }],
@@ -160,7 +201,7 @@ describe("parseFreshOpenClawPluginExtensionDirs", () => {
     ["non-object metadata", { weather: "invalid" }],
   ])("rejects %s", (_label, installs) => {
     const result = parseFreshOpenClawPluginExtensionDirs(
-      { version: 1, installRecords: installs },
+      { version: 1, installRecords: installs, loadPaths: [] },
       OPENCLAW_DIR,
     );
     expect(result).toEqual(
@@ -179,7 +220,10 @@ describe("parseFreshOpenClawPluginExtensionDirs", () => {
       }),
     );
     expect(
-      parseFreshOpenClawPluginExtensionDirs({ version: 1, installRecords: installs }, OPENCLAW_DIR),
+      parseFreshOpenClawPluginExtensionDirs(
+        { version: 1, installRecords: installs, loadPaths: [] },
+        OPENCLAW_DIR,
+      ),
     ).toEqual({
       ok: false,
       error: "fresh OpenClaw registry has too many plugin installs (129)",
@@ -190,14 +234,70 @@ describe("parseFreshOpenClawPluginExtensionDirs", () => {
     const installPath = `/${Array.from({ length: 64 }, () => "a").join("/")}`;
     expect(
       parseFreshOpenClawPluginExtensionDirs(
-        { version: 1, installRecords: { weather: install(installPath) } },
+        { version: 1, installRecords: { weather: install(installPath) }, loadPaths: [] },
         OPENCLAW_DIR,
       ),
     ).toEqual({
       ok: true,
       extensionDirs: [],
-      pluginInstalls: [{ id: "weather", installPath }],
+      pluginInstalls: [{ id: "weather", installPath, loadPaths: [] }],
     });
+  });
+
+  it("captures only configured load paths owned by linked path installs", () => {
+    const linkedPath = "/opt/weather-linked";
+    expect(
+      parseFreshOpenClawPluginExtensionDirs(
+        {
+          version: 1,
+          installRecords: {
+            linked: pathInstall(linkedPath, linkedPath),
+            copied: pathInstall(`${OPENCLAW_DIR}/extensions/copied`, "/opt/copied"),
+          },
+          loadPaths: [linkedPath, linkedPath, "./user-owned", "~/user-owned"],
+        },
+        OPENCLAW_DIR,
+      ),
+    ).toEqual({
+      ok: true,
+      extensionDirs: ["copied"],
+      pluginInstalls: [
+        { id: "copied", installPath: `${OPENCLAW_DIR}/extensions/copied`, loadPaths: [] },
+        { id: "linked", installPath: linkedPath, loadPaths: [linkedPath] },
+      ],
+    });
+  });
+
+  it.each([
+    ["missing load paths", { version: 1, installRecords: {} }],
+    [
+      "control character in configured load path",
+      { version: 1, installRecords: {}, loadPaths: ["~/plug\u0000in"] },
+    ],
+    [
+      "unsupported install source",
+      {
+        version: 1,
+        installRecords: {
+          weather: { source: "unknown", installPath: `${OPENCLAW_DIR}/extensions/weather` },
+        },
+        loadPaths: [],
+      },
+    ],
+    [
+      "relative path-install source",
+      {
+        version: 1,
+        installRecords: {
+          weather: pathInstall(`${OPENCLAW_DIR}/extensions/weather`, "relative/weather"),
+        },
+        loadPaths: [],
+      },
+    ],
+  ])("rejects %s", (_label, index) => {
+    expect(parseFreshOpenClawPluginExtensionDirs(index, OPENCLAW_DIR)).toEqual(
+      expect.objectContaining({ ok: false }),
+    );
   });
 });
 
@@ -211,8 +311,12 @@ describe("parseOpenClawImagePluginInstalls", () => {
     expect(
       parseOpenClawImagePluginInstalls(
         [
-          { id: "weather", installPath: `${OPENCLAW_DIR}/extensions/weather` },
-          { id: "npm-tool", installPath: `${OPENCLAW_DIR}/npm/node_modules/npm-tool` },
+          { id: "weather", installPath: `${OPENCLAW_DIR}/extensions/weather`, loadPaths: [] },
+          {
+            id: "npm-tool",
+            installPath: `${OPENCLAW_DIR}/npm/node_modules/npm-tool`,
+            loadPaths: [],
+          },
         ],
         OPENCLAW_DIR,
       ),
@@ -220,33 +324,71 @@ describe("parseOpenClawImagePluginInstalls", () => {
       ok: true,
       extensionDirs: ["weather"],
       pluginInstalls: [
-        { id: "npm-tool", installPath: `${OPENCLAW_DIR}/npm/node_modules/npm-tool` },
-        { id: "weather", installPath: `${OPENCLAW_DIR}/extensions/weather` },
+        {
+          id: "npm-tool",
+          installPath: `${OPENCLAW_DIR}/npm/node_modules/npm-tool`,
+          loadPaths: [],
+        },
+        { id: "weather", installPath: `${OPENCLAW_DIR}/extensions/weather`, loadPaths: [] },
       ],
     });
   });
 
   it.each([
-    ["unsafe ID", [{ id: "../weather", installPath: `${OPENCLAW_DIR}/extensions/weather` }]],
+    [
+      "unsafe ID",
+      [{ id: "../weather", installPath: `${OPENCLAW_DIR}/extensions/weather`, loadPaths: [] }],
+    ],
+    [
+      "prototype-pollution ID",
+      [{ id: "__proto__", installPath: `${OPENCLAW_DIR}/extensions/weather`, loadPaths: [] }],
+    ],
+    [
+      "constructor prototype-pollution ID",
+      [{ id: "constructor", installPath: `${OPENCLAW_DIR}/extensions/weather`, loadPaths: [] }],
+    ],
+    [
+      "prototype key ID",
+      [{ id: "prototype", installPath: `${OPENCLAW_DIR}/extensions/weather`, loadPaths: [] }],
+    ],
+    [
+      "control character in path",
+      [{ id: "weather", installPath: `${OPENCLAW_DIR}/extensions/weath\u0000er`, loadPaths: [] }],
+    ],
+    [
+      "missing explicit load paths",
+      [{ id: "weather", installPath: `${OPENCLAW_DIR}/extensions/weather` }],
+    ],
     [
       "duplicate ID",
       [
-        { id: "weather", installPath: `${OPENCLAW_DIR}/extensions/weather` },
-        { id: "weather", installPath: `${OPENCLAW_DIR}/extensions/forecast` },
+        { id: "weather", installPath: `${OPENCLAW_DIR}/extensions/weather`, loadPaths: [] },
+        { id: "weather", installPath: `${OPENCLAW_DIR}/extensions/forecast`, loadPaths: [] },
       ],
     ],
     [
       "duplicate install path",
       [
-        { id: "weather", installPath: `${OPENCLAW_DIR}/extensions/weather` },
-        { id: "forecast", installPath: `${OPENCLAW_DIR}/extensions/weather` },
+        { id: "weather", installPath: `${OPENCLAW_DIR}/extensions/weather`, loadPaths: [] },
+        { id: "forecast", installPath: `${OPENCLAW_DIR}/extensions/weather`, loadPaths: [] },
       ],
     ],
-    ["relative path", [{ id: "weather", installPath: "extensions/weather" }]],
+    ["relative path", [{ id: "weather", installPath: "extensions/weather", loadPaths: [] }]],
   ])("rejects %s", (_label, provenance) => {
     expect(parseOpenClawImagePluginInstalls(provenance, OPENCLAW_DIR)).toEqual(
       expect.objectContaining({ ok: false }),
     );
+  });
+
+  it("distinguishes complete empty provenance from missing legacy provenance", () => {
+    expect(hasCompleteOpenClawImagePluginProvenance([], OPENCLAW_DIR)).toBe(true);
+    expect(hasCompleteOpenClawImagePluginProvenance(undefined, OPENCLAW_DIR)).toBe(false);
+    expect(
+      hasCompleteOpenClawImagePluginProvenance(
+        [{ id: "weather", installPath: `${OPENCLAW_DIR}/extensions/weather` }],
+        OPENCLAW_DIR,
+      ),
+    ).toBe(false);
   });
 });
 
@@ -257,10 +399,10 @@ describe("planOpenClawPluginRestore", () => {
       dir: OPENCLAW_DIR,
       localDirs: ["extensions"],
       freshImagePluginInstalls: [
-        { id: "weather", installPath: `${OPENCLAW_DIR}/extensions/weather` },
+        { id: "weather", installPath: `${OPENCLAW_DIR}/extensions/weather`, loadPaths: [] },
       ],
       previousImagePluginInstalls: [
-        { id: "forecast", installPath: `${OPENCLAW_DIR}/extensions/forecast` },
+        { id: "forecast", installPath: `${OPENCLAW_DIR}/extensions/forecast`, loadPaths: [] },
       ],
     });
 
@@ -284,7 +426,7 @@ describe("planOpenClawPluginRestore", () => {
         dir: OPENCLAW_DIR,
         localDirs: ["workspace"],
         freshImagePluginInstalls: [
-          { id: "weather", installPath: `${OPENCLAW_DIR}/extensions/weather` },
+          { id: "weather", installPath: `${OPENCLAW_DIR}/extensions/weather`, loadPaths: [] },
         ],
       }),
     ).toEqual({
@@ -304,7 +446,9 @@ describe("planOpenClawPluginRestore", () => {
         dir: OPENCLAW_DIR,
         localDirs: ["extensions"],
         freshImagePluginInstalls: [],
-        previousImagePluginInstalls: [{ id: "weather", installPath: "extensions/weather" }],
+        previousImagePluginInstalls: [
+          { id: "weather", installPath: "extensions/weather", loadPaths: [] },
+        ],
       }),
     ).toEqual(expect.objectContaining({ ok: false }));
   });

@@ -26,6 +26,13 @@ function failPreparedRecoveryPreDelete(
   return bail(errorMessage);
 }
 
+function registryEntryWithoutOpenClawPluginProvenance(
+  entry: RebuildSandboxEntry,
+): Omit<RebuildSandboxEntry, "openclawImagePluginInstalls"> {
+  const { openclawImagePluginInstalls: _provenance, ...rest } = entry;
+  return rest;
+}
+
 export function validatePreparedRecoveryManifest(
   sandboxName: string,
   sandboxEntry: RebuildSandboxEntry,
@@ -45,7 +52,10 @@ export function validatePreparedRecoveryManifest(
     bail(`Invalid recovery manifest: ${validation.reason}`);
     return null;
   }
-  if (!sandboxState.hasPositiveManagedImageEvidence(sandboxEntry)) {
+  if (
+    !sandboxState.hasAuthoritativeOpenClawImagePluginProvenance(validation.manifest) &&
+    !sandboxState.hasPositiveManagedImageEvidence(sandboxEntry)
+  ) {
     console.error("");
     console.error(
       `  ${_RD}Recovery preflight failed:${R} registry has no NemoClaw-managed image fingerprint.`,
@@ -81,7 +91,15 @@ export function revalidatePreparedRecoveryBeforeDelete(
       bail,
     );
   }
-  if (!isDeepStrictEqual(currentEntry, initialEntry)) {
+  const authoritativePluginProvenance =
+    sandboxState.hasAuthoritativeOpenClawImagePluginProvenance(candidate);
+  const registryConfigurationMatches = authoritativePluginProvenance
+    ? isDeepStrictEqual(
+        registryEntryWithoutOpenClawPluginProvenance(currentEntry),
+        registryEntryWithoutOpenClawPluginProvenance(initialEntry),
+      )
+    : isDeepStrictEqual(currentEntry, initialEntry);
+  if (!registryConfigurationMatches) {
     return failPreparedRecoveryPreDelete(
       "registered sandbox configuration changed during preflight",
       "Recovery registry configuration changed during preflight.",
@@ -114,7 +132,10 @@ export function revalidatePreparedRecoveryBeforeDelete(
       bail,
     );
   }
-  if (!sandboxState.hasPositiveManagedImageEvidence(currentEntry)) {
+  if (
+    !sandboxState.hasAuthoritativeOpenClawImagePluginProvenance(validation.manifest) &&
+    !sandboxState.hasPositiveManagedImageEvidence(currentEntry)
+  ) {
     return failPreparedRecoveryPreDelete(
       "registry no longer has a NemoClaw-managed image fingerprint",
       "Recovery registry entry has no NemoClaw-managed image fingerprint.",

@@ -2395,10 +2395,14 @@ async function createSandboxWithBaseImageResolution(
   let pendingStateRestore: BackupResult | null = null;
   let pendingStateRestoreBackupPath: string | null = null;
   let notReadyRecreateInProgress = false;
+  const requireOpenClawImagePluginProvenance =
+    Boolean(fromDockerfile) && getRequestedSandboxAgentName(agent) === "openclaw";
 
   pendingStateRestoreBackupPath = notReadyRecreate.selectPreUpgradeBackupForCreate({
     liveExists,
     hasExistingRegistryEntry: existingEntry !== null,
+    existingSandboxEntry: existingEntry,
+    requireOpenClawImagePluginProvenance,
     sandboxName,
     note,
   });
@@ -2548,7 +2552,12 @@ async function createSandboxWithBaseImageResolution(
           }
         } else {
           notReadyRecreateInProgress = true;
-          const outcome = notReadyRecreate.resolveNotReadyOutcome(sandboxName, note);
+          const outcome = notReadyRecreate.resolveNotReadyOutcome(
+            sandboxName,
+            note,
+            existingEntry,
+            requireOpenClawImagePluginProvenance,
+          );
           if (outcome.kind === "blocked") {
             for (const hint of outcome.hints) console.error(hint);
             process.exit(1);
@@ -2607,7 +2616,11 @@ async function createSandboxWithBaseImageResolution(
       console.log(`  Messaging credential(s) rotated: ${rotatedNames}`);
       console.log("  Rebuilding sandbox to propagate new credentials to the L7 proxy...");
       if (!shouldSkipPreRecreateBackup(process.env)) {
-        const result = backupSandboxBeforeRecreate({ sandboxName });
+        const result = backupSandboxBeforeRecreate({
+          sandboxName,
+          sandboxEntry: existingEntry,
+          requireOpenClawImagePluginProvenance,
+        });
         if (!result.ok) {
           console.error(
             "  Set NEMOCLAW_RECREATE_WITHOUT_BACKUP=1 to recreate without preserving state.",
@@ -2669,7 +2682,11 @@ async function createSandboxWithBaseImageResolution(
       !shouldSkipPreRecreateBackup(process.env)
     ) {
       note("  Backing up workspace state before recreating sandbox...");
-      const result = backupSandboxBeforeRecreate({ sandboxName });
+      const result = backupSandboxBeforeRecreate({
+        sandboxName,
+        sandboxEntry: existingEntry,
+        requireOpenClawImagePluginProvenance,
+      });
       if (!result.ok) {
         console.error(
           "  Set NEMOCLAW_RECREATE_WITHOUT_BACKUP=1 to recreate without preserving state.",

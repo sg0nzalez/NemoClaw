@@ -79,7 +79,11 @@ beforeEach(() => {
 function writeExecutable(filePath: string, source: string): void {
   fs.writeFileSync(filePath, source, { mode: 0o755 });
 }
-function writeAgentRegistry(sandboxName: string, agent: string | null): void {
+function writeAgentRegistry(
+  sandboxName: string,
+  agent: string | null,
+  overrides: Record<string, unknown> = {},
+): void {
   fs.mkdirSync(path.join(TMP_HOME, ".nemoclaw"), { recursive: true });
   fs.writeFileSync(
     path.join(TMP_HOME, ".nemoclaw", "sandboxes.json"),
@@ -93,14 +97,15 @@ function writeAgentRegistry(sandboxName: string, agent: string | null): void {
           gpuEnabled: false,
           policies: [],
           agent,
+          ...overrides,
         },
       },
     }),
   );
 }
 
-function writeOpenClawRegistry(sandboxName: string): void {
-  writeAgentRegistry(sandboxName, null);
+function writeOpenClawRegistry(sandboxName: string, overrides: Record<string, unknown> = {}): void {
+  writeAgentRegistry(sandboxName, null, overrides);
 }
 function writeFakeOpenshell(binDir: string): string {
   const openshell = path.join(binDir, "openshell");
@@ -435,6 +440,19 @@ describe("parseRestoreArgs", () => {
 });
 
 describe("sandbox directory backup semantics", () => {
+  it("rejects a custom OpenClaw backup with missing image-plugin provenance (#6108)", () => {
+    writeOpenClawRegistry("custom-openclaw", {
+      fromDockerfile: "/tmp/Dockerfile.custom",
+    });
+
+    const backup = sandboxState.backupSandboxState("custom-openclaw");
+
+    expect(backup.success).toBe(false);
+    expect(backup.manifest).toBeUndefined();
+    expect(backup.error).toBe("registered OpenClaw image plugin provenance is missing or invalid");
+    expect(fs.existsSync(path.join(BACKUPS_ROOT, "custom-openclaw"))).toBe(false);
+  });
+
   it("treats empty state directories as backed up when tar exits cleanly", () => {
     const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-empty-dirs-"));
     const oldPath = process.env.PATH;
@@ -479,7 +497,10 @@ process.exit(0);
 `,
       );
 
-      writeOpenClawRegistry("alpha");
+      writeOpenClawRegistry("alpha", {
+        fromDockerfile: "/tmp/Dockerfile.custom",
+        openclawImagePluginInstalls: [],
+      });
       process.env.NEMOCLAW_OPENSHELL_BIN = openshell;
       process.env.PATH = `${binDir}${path.delimiter}${oldPath || ""}`;
 
@@ -488,6 +509,8 @@ process.exit(0);
       expect(backup.failedDirs).toEqual([]);
       expect(backup.backedUpDirs).toEqual(existingDirs);
       expect(backup.manifest?.backedUpDirs).toEqual(existingDirs);
+      expect(backup.manifest?.reconcileOpenClawImagePluginProvenance).toBe(true);
+      expect(backup.manifest?.openclawImagePluginInstalls).toEqual([]);
     } finally {
       if (oldOpenshell === undefined) {
         delete process.env.NEMOCLAW_OPENSHELL_BIN;

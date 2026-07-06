@@ -6,7 +6,11 @@ import type {
   OpenClawImagePluginInstall,
   OpenClawManagedExtensionDiscoveryResult,
 } from "../state/openclaw-plugin-restore";
-import type { RecreatedSandboxRestoreOptions, RestoreResult } from "../state/sandbox";
+import {
+  OPENCLAW_IMAGE_PLUGIN_PROVENANCE_RESTORE_ERROR,
+  type RecreatedSandboxRestoreOptions,
+  type RestoreResult,
+} from "../state/sandbox";
 import type { SelectionDrift } from "./selection-drift";
 
 export type CreatedSandboxFinalizationOptions = {
@@ -54,6 +58,10 @@ export function finalizeCreatedSandbox(
         `  OpenClaw image plugin discovery failed for sandbox '${options.sandboxName}': ${discovery.error}`,
       );
       deps.error("  State was not restored and registry metadata was not updated.");
+      deps.error("  Remove the unregistered sandbox before retrying:");
+      deps.error(`    openshell sandbox delete ${JSON.stringify(options.sandboxName)}`);
+      deps.error("  Then rerun the original `nemoclaw onboard --from <Dockerfile>` command.");
+      if (options.restoreBackupPath) deps.error(`  Manual recovery: ${options.restoreBackupPath}`);
       return deps.exitProcess(1);
     }
     freshOpenClawImagePluginInstalls = discovery.pluginInstalls;
@@ -83,6 +91,19 @@ export function finalizeCreatedSandbox(
         `  ✓ State restored (${restore.restoredDirs.length} directories, ${restore.restoredFiles.length} files)`,
       );
     } else {
+      if (restore.error === OPENCLAW_IMAGE_PLUGIN_PROVENANCE_RESTORE_ERROR) {
+        deps.error(
+          `  OpenClaw image plugin provenance validation failed for sandbox '${options.sandboxName}': ${restore.error}`,
+        );
+        deps.error(
+          "  The sandbox still exists, but registry metadata was not updated because a future rebuild would be unsafe.",
+        );
+        deps.error("  Remove the unregistered sandbox before retrying:");
+        deps.error(`    openshell sandbox delete ${JSON.stringify(options.sandboxName)}`);
+        deps.error("  Then rerun the original `nemoclaw onboard --from <Dockerfile>` command.");
+        deps.error(`  Manual recovery: ${options.restoreBackupPath}`);
+        return deps.exitProcess(1);
+      }
       // Source-of-truth review:
       // - Invalid state: a fresh sandbox exists after an external workspace copy fails.
       // - Boundary: restore.success owns copy completeness; live validation owns route integrity.
