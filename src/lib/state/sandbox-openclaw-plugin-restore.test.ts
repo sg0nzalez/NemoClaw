@@ -10,7 +10,7 @@ vi.mock("child_process", async (importOriginal) => {
   return { ...actual, spawnSync: vi.fn() };
 });
 
-import { __test } from "./sandbox";
+import { discoverFreshOpenClawPluginExtensionDirs } from "./openclaw-plugin-restore";
 
 const OPENCLAW_DIR = "/sandbox/.openclaw";
 const MAX_PLUGIN_REGISTRY_BYTES = 1024 * 1024;
@@ -32,7 +32,11 @@ function spawnResult(
 }
 
 function discover() {
-  return __test.discoverFreshOpenClawPluginExtensionDirs(
+  return discoverFreshOpenClawPluginExtensionDirs(
+    {
+      getSshConfig: () => "unused",
+      sshArgs: (configFile, sandboxName) => ["-F", configFile, `openshell-${sandboxName}`],
+    },
     "/tmp/ssh-config",
     "sandbox-one",
     OPENCLAW_DIR,
@@ -59,7 +63,7 @@ describe("fresh OpenClaw plugin registry reads", () => {
     expect(parseSpy).not.toHaveBeenCalled();
     expect(spawnSync).toHaveBeenCalledOnce();
     expect(vi.mocked(spawnSync).mock.calls[0]?.[2]).toEqual(
-      expect.objectContaining({ maxBuffer: MAX_PLUGIN_REGISTRY_BYTES }),
+      expect.objectContaining({ maxBuffer: MAX_PLUGIN_REGISTRY_BYTES, timeout: 30000 }),
     );
   });
 
@@ -94,7 +98,9 @@ describe("fresh OpenClaw plugin registry reads", () => {
     expect(parseSpy).not.toHaveBeenCalled();
     expect(spawnSync).toHaveBeenCalledTimes(2);
     for (const call of vi.mocked(spawnSync).mock.calls) {
-      expect(call[2]).toEqual(expect.objectContaining({ maxBuffer: MAX_PLUGIN_REGISTRY_BYTES }));
+      expect(call[2]).toEqual(
+        expect.objectContaining({ maxBuffer: MAX_PLUGIN_REGISTRY_BYTES, timeout: 30000 }),
+      );
     }
   });
 

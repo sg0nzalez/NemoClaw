@@ -12,6 +12,7 @@ import {
   buildFreshOpenClawPluginIndexSqliteReadCommand,
   parseFreshOpenClawPluginExtensionDirs,
   parseOpenClawImagePluginInstalls,
+  planOpenClawPluginRestore,
 } from "./openclaw-plugin-restore";
 
 const OPENCLAW_DIR = "/sandbox/.openclaw";
@@ -245,5 +246,64 @@ describe("parseOpenClawImagePluginInstalls", () => {
     expect(parseOpenClawImagePluginInstalls(provenance, OPENCLAW_DIR)).toEqual(
       expect.objectContaining({ ok: false }),
     );
+  });
+});
+
+describe("planOpenClawPluginRestore", () => {
+  it("preserves fresh plugins while excluding removed previous plugins from the archive", () => {
+    const result = planOpenClawPluginRestore({
+      agentType: "openclaw",
+      dir: OPENCLAW_DIR,
+      localDirs: ["extensions"],
+      freshImagePluginInstalls: [
+        { id: "weather", installPath: `${OPENCLAW_DIR}/extensions/weather` },
+      ],
+      previousImagePluginInstalls: [
+        { id: "forecast", installPath: `${OPENCLAW_DIR}/extensions/forecast` },
+      ],
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error);
+    expect(result.freshExtensionDirs).toEqual(["weather"]);
+    expect(result.previousExtensionDirs).toEqual(["forecast"]);
+    expect(result.preservedExtensionDirs).toEqual(expect.arrayContaining(["nemoclaw", "weather"]));
+    expect(result.preservedExtensionDirs).not.toContain("forecast");
+    expect(result.archiveExcludedExtensionDirs).toEqual(
+      expect.arrayContaining(["forecast", "nemoclaw", "weather"]),
+    );
+    expect(result.requiredFreshExtensionDirs).toEqual(["weather"]);
+  });
+
+  it("returns an empty extension plan when the backup does not contain extensions", () => {
+    expect(
+      planOpenClawPluginRestore({
+        agentType: "openclaw",
+        dir: OPENCLAW_DIR,
+        localDirs: ["workspace"],
+        freshImagePluginInstalls: [
+          { id: "weather", installPath: `${OPENCLAW_DIR}/extensions/weather` },
+        ],
+      }),
+    ).toEqual({
+      ok: true,
+      freshExtensionDirs: [],
+      previousExtensionDirs: [],
+      preservedExtensionDirs: [],
+      archiveExcludedExtensionDirs: [],
+      requiredFreshExtensionDirs: [],
+    });
+  });
+
+  it("fails closed on invalid previous plugin provenance", () => {
+    expect(
+      planOpenClawPluginRestore({
+        agentType: "openclaw",
+        dir: OPENCLAW_DIR,
+        localDirs: ["extensions"],
+        freshImagePluginInstalls: [],
+        previousImagePluginInstalls: [{ id: "weather", installPath: "extensions/weather" }],
+      }),
+    ).toEqual(expect.objectContaining({ ok: false }));
   });
 });

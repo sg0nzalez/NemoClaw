@@ -42,15 +42,12 @@ import {
   buildRestoreCleanupCommand,
   buildRestoreTarArgs,
   isAllowedStateSymlink,
-  OPENCLAW_IMAGE_MANAGED_EXTENSION_DIRS,
-  shouldPreserveOpenClawManagedExtensions,
 } from "./openclaw-managed-extensions.js";
 import {
-  buildFreshOpenClawPluginIndexSqliteReadCommand,
+  discoverFreshOpenClawImagePluginInstalls,
   type OpenClawImagePluginInstall,
-  type OpenClawManagedExtensionDiscoveryResult,
-  parseFreshOpenClawPluginExtensionDirs,
   parseOpenClawImagePluginInstalls,
+  planOpenClawPluginRestore,
 } from "./openclaw-plugin-restore.js";
 import type { CustomPolicyEntry } from "./registry.js";
 import * as registry from "./registry.js";
@@ -62,9 +59,6 @@ const HOME_DIR = path.resolve(process.env.HOME || os.homedir());
 const REBUILD_BACKUPS_DIR = path.join(HOME_DIR, ".nemoclaw", "rebuild-backups");
 
 const MANIFEST_VERSION = 1;
-// The parser accepts at most 128 records with 4 KiB install paths, leaving
-// ample room for IDs and metadata while bounding sandbox-controlled output.
-const OPENCLAW_PLUGIN_INSTALL_REGISTRY_MAX_BYTES = 1024 * 1024;
 
 function parseJson<T>(text: string): T {
   return JSON.parse(text);
@@ -674,88 +668,6 @@ function existingBackupDirs(backupPath: string, dirNames: string[]): string[] {
   }
   return existing;
 }
-
-function readFreshOpenClawPluginInstallIndex(
-  configFile: string,
-  sandboxName: string,
-  dir: string,
-): ReturnType<typeof spawnSync> {
-  // OpenClaw 2026.6.10 moved install records into its shared SQLite state.
-  // Fall back only when that database is absent so a corrupt/incomplete
-  // canonical index cannot be masked by stale legacy JSON.
-  const sqliteResult = spawnSync(
-    "ssh",
-    [...sshArgs(configFile, sandboxName), buildFreshOpenClawPluginIndexSqliteReadCommand(dir)],
-    {
-      stdio: ["ignore", "pipe", "pipe"],
-      timeout: 30000,
-      maxBuffer: OPENCLAW_PLUGIN_INSTALL_REGISTRY_MAX_BYTES,
-    },
-  );
-  if (sqliteResult.status !== 2 || sqliteResult.error || sqliteResult.signal) return sqliteResult;
-
-  const legacySpec: StateFileSpec = { path: "plugins/installs.json", strategy: "copy" };
-  return spawnSync(
-    "ssh",
-    [...sshArgs(configFile, sandboxName), buildStateFileBackupCommand(dir, legacySpec)],
-    {
-      stdio: ["ignore", "pipe", "pipe"],
-      timeout: 30000,
-      maxBuffer: OPENCLAW_PLUGIN_INSTALL_REGISTRY_MAX_BYTES,
-    },
-  );
-}
-
-function discoverFreshOpenClawPluginExtensionDirs(
-  configFile: string,
-  sandboxName: string,
-  dir: string,
-): OpenClawManagedExtensionDiscoveryResult {
-  const result = readFreshOpenClawPluginInstallIndex(configFile, sandboxName, dir);
-  if (
-    result.stdout &&
-    Buffer.byteLength(result.stdout) > OPENCLAW_PLUGIN_INSTALL_REGISTRY_MAX_BYTES
-  ) {
-    return { ok: false, error: "fresh OpenClaw plugin install registry response too large" };
-  }
-  if (result.status !== 0 || result.error || result.signal || !result.stdout) {
-    return { ok: false, error: "could not read fresh OpenClaw plugin install registry" };
-  }
-
-  let config: unknown;
-  try {
-    config = JSON.parse(result.stdout.toString("utf-8")) as unknown;
-  } catch {
-    return {
-      ok: false,
-      error: "fresh OpenClaw plugin install registry is not valid JSON",
-    };
-  }
-  const parsed = parseFreshOpenClawPluginExtensionDirs(config, dir);
-  return parsed.ok
-    ? parsed
-    : { ok: false, error: "fresh OpenClaw plugin install registry failed validation" };
-}
-
-export function discoverFreshOpenClawImagePluginInstalls(
-  sandboxName: string,
-  dir = "/sandbox/.openclaw",
-): OpenClawManagedExtensionDiscoveryResult {
-  const sshConfig = getSshConfig(sandboxName);
-  if (!sshConfig) {
-    return { ok: false, error: "could not get SSH config for OpenClaw plugin discovery" };
-  }
-  const tempSshConfig = createTempSshConfig(sshConfig, "nemoclaw-plugin-discovery-");
-  try {
-    return discoverFreshOpenClawPluginExtensionDirs(tempSshConfig.file, sandboxName, dir);
-  } finally {
-    tempSshConfig.cleanup();
-  }
-}
-
-export const __test = {
-  discoverFreshOpenClawPluginExtensionDirs,
-};
 
 function normalizeStateFileSpec(spec: AgentStateFile | StateFileSpec): StateFileSpec | null {
   const normalized = normalizeStateFilePath(spec.path);
@@ -1497,7 +1409,7 @@ export function restoreRecreatedSandboxState(
           options.freshOpenClawImagePluginInstalls,
           "/sandbox/.openclaw",
         )
-      : discoverFreshOpenClawImagePluginInstalls(sandboxName);
+      : discoverFreshOpenClawImagePluginInstalls(sandboxName, { getSshConfig, sshArgs });
     if (!discovery.ok) {
       return {
         success: false,
@@ -1590,64 +1502,41 @@ function restoreSandboxStateInternal(
       ? manifest.openclawImagePluginInstalls
       : undefined;
   try {
-    const preserveManagedExtensions = shouldPreserveOpenClawManagedExtensions(
-      manifest,
+    const pluginRestorePlan = planOpenClawPluginRestore({
+      agentType: manifest.agentType,
       dir,
       localDirs,
-    );
-    const freshProjection = parseOpenClawImagePluginInstalls(
-      freshOpenClawImagePluginInstalls ?? [],
-      dir,
-    );
-    const previousProjection = parseOpenClawImagePluginInstalls(
-      previousOpenClawImagePluginInstalls ?? [],
-      dir,
-    );
-    if (!freshProjection.ok || !previousProjection.ok) {
-      let error = "OpenClaw image plugin provenance is invalid";
-      if (!freshProjection.ok) error = freshProjection.error;
-      else if (!previousProjection.ok) error = previousProjection.error;
+      freshImagePluginInstalls: freshOpenClawImagePluginInstalls,
+      previousImagePluginInstalls: previousOpenClawImagePluginInstalls,
+    });
+    if (!pluginRestorePlan.ok) {
       return {
         success: false,
         restoredDirs,
         failedDirs: [...localDirs],
         restoredFiles,
         failedFiles: localFiles.map((f) => f.path),
-        error,
+        error: pluginRestorePlan.error,
       };
     }
-    const freshImageManagedExtensionDirs = preserveManagedExtensions
-      ? freshProjection.extensionDirs
-      : [];
-    const previousImageManagedExtensionDirs =
-      preserveManagedExtensions && previousOpenClawImagePluginInstalls !== undefined
-        ? previousProjection.extensionDirs
-        : [];
-    if (freshOpenClawImagePluginInstalls !== undefined && preserveManagedExtensions) {
+    if (
+      freshOpenClawImagePluginInstalls !== undefined &&
+      pluginRestorePlan.preservedExtensionDirs.length > 0
+    ) {
       _log(
-        `Fresh image-managed OpenClaw extensions: [${freshImageManagedExtensionDirs.join(",")}]`,
+        `Fresh image-managed OpenClaw extensions: [${pluginRestorePlan.freshExtensionDirs.join(",")}]`,
       );
       _log(
-        `Previous image-managed OpenClaw extensions: [${previousImageManagedExtensionDirs.join(",")}]`,
+        `Previous image-managed OpenClaw extensions: [${pluginRestorePlan.previousExtensionDirs.join(",")}]`,
       );
     }
-    const preservedManagedExtensionDirs = preserveManagedExtensions
-      ? [
-          ...new Set([...OPENCLAW_IMAGE_MANAGED_EXTENSION_DIRS, ...freshImageManagedExtensionDirs]),
-        ].sort()
-      : [];
-    const restoreArchiveExcludedExtensionDirs = preserveManagedExtensions
-      ? [
-          ...new Set([...preservedManagedExtensionDirs, ...previousImageManagedExtensionDirs]),
-        ].sort()
-      : [];
 
     if (localDirs.length > 0) {
       // Upload via tar pipe
       // NC-2227-04: Removed -h flag from restore as well — no symlink following.
       const tarResult = spawnSync(
         "tar",
-        buildRestoreTarArgs(backupPath, localDirs, restoreArchiveExcludedExtensionDirs),
+        buildRestoreTarArgs(backupPath, localDirs, pluginRestorePlan.archiveExcludedExtensionDirs),
         {
           stdio: ["ignore", "pipe", "pipe"],
           timeout: 60000,
@@ -1673,8 +1562,8 @@ function restoreSandboxStateInternal(
       const rmCmd = buildRestoreCleanupCommand(
         dir,
         localDirs,
-        preservedManagedExtensionDirs,
-        new Set(freshImageManagedExtensionDirs),
+        pluginRestorePlan.preservedExtensionDirs,
+        new Set(pluginRestorePlan.requiredFreshExtensionDirs),
       );
       _log(`Cleaning target dirs before restore: ${rmCmd}`);
       const rmResult = spawnSync("ssh", [...sshArgs(configFile, sandboxName), rmCmd], {

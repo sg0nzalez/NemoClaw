@@ -540,6 +540,7 @@ const agentDefs = require("./agent/defs");
 
 const gatewayState: typeof import("./state/gateway") = require("./state/gateway");
 const notReadyRecreate: typeof import("./onboard/not-ready-recreate") = require("./onboard/not-ready-recreate");
+const openClawPluginRestore: typeof import("./state/openclaw-plugin-restore") = require("./state/openclaw-plugin-restore");
 const sandboxState: typeof import("./state/sandbox") = require("./state/sandbox");
 const validation: typeof import("./validation") = require("./validation");
 const urlUtils: typeof import("./core/url-utils") = require("./core/url-utils");
@@ -2978,8 +2979,11 @@ async function createSandboxWithBaseImageResolution(
       preferredInferenceApi,
     },
     {
-      discoverFreshOpenClawImagePluginInstalls:
-        sandboxState.discoverFreshOpenClawImagePluginInstalls,
+      discoverFreshOpenClawImagePluginInstalls: (name) =>
+        openClawPluginRestore.discoverFreshOpenClawImagePluginInstalls(name, {
+          getSshConfig: sandboxState.getSshConfig,
+          sshArgs: sandboxState.sshArgs,
+        }),
       restoreRecreatedSandboxState: sandboxState.restoreRecreatedSandboxState,
       getDcodeSelectionDrift: (name, selectedProvider, selectedModel, selectedApi) =>
         getDcodeSelectionDrift(name, selectedProvider, selectedModel, selectedApi, {
