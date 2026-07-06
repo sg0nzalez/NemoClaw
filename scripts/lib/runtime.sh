@@ -136,22 +136,30 @@ detect_container_runtime_from_docker() {
 
 container_can_reach_host_loopback() {
   local runtime="${1:-}"
+  if ! is_wsl_runtime; then
+    return 1
+  fi
+
   if [ -z "$runtime" ]; then
     runtime="$(detect_container_runtime_from_docker)"
   fi
 
-  is_wsl_runtime && [ "$runtime" = "docker-desktop" ]
+  [ "$runtime" = "docker-desktop" ]
 }
 
 get_ollama_container_port() {
   local ollama_port="${NEMOCLAW_OLLAMA_PORT:-11434}"
   local ollama_proxy_port="${NEMOCLAW_OLLAMA_PROXY_PORT:-11435}"
-  _validate_port NEMOCLAW_OLLAMA_PORT "$ollama_port" || return 1
-  _validate_port NEMOCLAW_OLLAMA_PROXY_PORT "$ollama_proxy_port" || return 1
 
   if container_can_reach_host_loopback; then
+    _validate_port NEMOCLAW_OLLAMA_PORT "$ollama_port" || return 1
     printf '%s\n' "$ollama_port"
   else
+    _validate_port NEMOCLAW_OLLAMA_PROXY_PORT "$ollama_proxy_port" || return 1
+    if [ "$ollama_port" = "$ollama_proxy_port" ]; then
+      printf 'Invalid NEMOCLAW_OLLAMA_PROXY_PORT=%s (must differ from NEMOCLAW_OLLAMA_PORT on non-WSL hosts)\n' "$ollama_proxy_port" >&2
+      return 1
+    fi
     printf '%s\n' "$ollama_proxy_port"
   fi
 }
@@ -300,7 +308,11 @@ get_local_provider_base_url() {
   _validate_port NEMOCLAW_VLLM_PORT "$vllm_port" || return 1
   case "$provider" in
     vllm-local) printf 'http://host.openshell.internal:%s/v1\n' "$vllm_port" ;;
-    ollama-local) printf 'http://host.openshell.internal:%s/v1\n' "$(get_ollama_container_port)" ;;
+    ollama-local)
+      local ollama_container_port
+      ollama_container_port="$(get_ollama_container_port)" || return 1
+      printf 'http://host.openshell.internal:%s/v1\n' "$ollama_container_port"
+      ;;
     *) return 1 ;;
   esac
 }
@@ -309,15 +321,15 @@ check_local_provider_health() {
   local provider="${1:-}"
 
   local vllm_port="${NEMOCLAW_VLLM_PORT:-8000}"
-  local ollama_port="${NEMOCLAW_OLLAMA_PORT:-11434}"
-  _validate_port NEMOCLAW_VLLM_PORT "$vllm_port" || return 1
-  _validate_port NEMOCLAW_OLLAMA_PORT "$ollama_port" || return 1
   case "$provider" in
     vllm-local)
+      _validate_port NEMOCLAW_VLLM_PORT "$vllm_port" || return 1
       curl -sf "http://localhost:${vllm_port}/v1/models" >/dev/null 2>&1
       ;;
     ollama-local)
-      curl -sf "http://localhost:${ollama_port}/api/tags" >/dev/null 2>&1
+      local ollama_container_port
+      ollama_container_port="$(get_ollama_container_port)" || return 1
+      curl -sf "http://localhost:${ollama_container_port}/api/tags" >/dev/null 2>&1
       ;;
     *)
       return 1
