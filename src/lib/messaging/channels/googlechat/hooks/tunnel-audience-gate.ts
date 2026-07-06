@@ -76,7 +76,9 @@ export function createGooglechatTunnelAudienceGateHook(
       log(
         "  Skipped googlechat (interactive setup required: Google Cloud Console endpoint URL + appPrincipal)",
       );
-      throw new Error("Google Chat enrollment requires interactive mode.");
+      throw new Error(
+        "Skipping Google Chat: interactive enrollment required (Cloud Console endpoint URL + appPrincipal cannot be supplied non-interactively).",
+      );
     }
 
     const audienceType = readString(context.inputs?.audienceType) || "app-url";
