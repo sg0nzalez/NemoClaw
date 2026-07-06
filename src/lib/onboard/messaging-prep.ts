@@ -19,6 +19,7 @@ export interface MessagingTokenDef {
 
 export interface CreateSandboxMessagingPrepInput {
   sandboxName: string;
+  agentName?: string | null;
   channels: readonly NamedMessagingChannel[];
   enabledChannels: readonly string[] | null;
   disabledChannels: readonly string[];
@@ -45,7 +46,7 @@ export interface CreateSandboxMessagingPrepResult {
   hasMessagingTokens: boolean;
   reusableMessagingProviders: string[];
   reusableMessagingChannels: string[];
-  missingBraveApiKey: boolean;
+  missingWebSearchCredentialEnv: string | null;
 }
 
 export function prepareCreateSandboxMessaging(
@@ -76,15 +77,16 @@ export function prepareCreateSandboxMessaging(
     .filter(({ envKey }) => !enabledEnvKeys || enabledEnvKeys.has(envKey))
     .filter(({ envKey }) => !disabledEnvKeys.has(envKey));
 
-  const braveWebSearchEnabled = braveProviderProfile.shouldEnableBraveWebSearch(
-    input.webSearchConfig,
-  );
-  const braveApiKey = braveWebSearchEnabled
-    ? input.getCredential(webSearch.BRAVE_API_KEY_ENV) ||
-      input.normalizeCredentialValue(input.env[webSearch.BRAVE_API_KEY_ENV])
+  const webSearchEnabled = braveProviderProfile.shouldEnableWebSearch(input.webSearchConfig);
+  const webSearchProvider = webSearch.webSearchProviderForConfig(input.webSearchConfig);
+  const webSearchCredentialEnv = webSearch.webSearchEnvFor(webSearchProvider);
+  const webSearchApiKey = webSearchEnabled
+    ? input.getCredential(webSearchCredentialEnv) ||
+      input.normalizeCredentialValue(input.env[webSearchCredentialEnv])
     : null;
-  const missingBraveApiKey = braveWebSearchEnabled && !braveApiKey;
-  if (missingBraveApiKey) {
+  const missingWebSearchCredentialEnv =
+    webSearchEnabled && !webSearchApiKey ? webSearchCredentialEnv : null;
+  if (missingWebSearchCredentialEnv) {
     return {
       disabledChannelNames,
       messagingTokenDefs,
@@ -92,16 +94,20 @@ export function prepareCreateSandboxMessaging(
       hasMessagingTokens: messagingTokenDefs.some(({ token }) => !!token),
       reusableMessagingProviders: [],
       reusableMessagingChannels: [],
-      missingBraveApiKey,
+      missingWebSearchCredentialEnv,
     };
   }
 
-  if (braveWebSearchEnabled) {
+  if (webSearchEnabled) {
+    const providerType =
+      webSearchProvider === "tavily" && input.agentName?.trim().toLowerCase() === "hermes"
+        ? braveProviderProfile.HERMES_TAVILY_PROVIDER_PROFILE_ID
+        : webSearchProvider;
     messagingTokenDefs.push({
-      name: `${input.sandboxName}-brave-search`,
-      envKey: webSearch.BRAVE_API_KEY_ENV,
-      token: braveApiKey,
-      providerType: braveProviderProfile.BRAVE_PROVIDER_PROFILE_ID,
+      name: `${input.sandboxName}-${webSearchProvider}-search`,
+      envKey: webSearchCredentialEnv,
+      token: webSearchApiKey,
+      providerType,
     });
   }
 
@@ -150,6 +156,6 @@ export function prepareCreateSandboxMessaging(
     hasMessagingTokens,
     reusableMessagingProviders,
     reusableMessagingChannels,
-    missingBraveApiKey,
+    missingWebSearchCredentialEnv,
   };
 }

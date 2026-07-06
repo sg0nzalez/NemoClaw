@@ -72,7 +72,8 @@ function createDeps(
   return {
     calls,
     deps: {
-      normalizeHermesAuthMethod: (value: string | null | undefined) => value ?? null,
+      normalizeHermesAuthMethod: (value: string | null | undefined) =>
+        value === "oauth" || value === "api_key" ? value : null,
       setupNim: calls.setupNim,
       setupInference: calls.setupInference,
       startRecordedStep: calls.startStep,
@@ -296,6 +297,41 @@ describe("handleProviderInferenceState", () => {
     expect(calls.setupInference).toHaveBeenCalled();
   });
 
+  it("uses a preflighted authoritative rebuild selection despite an incomplete old step marker", async () => {
+    const session = createSession({
+      provider: "compatible-endpoint",
+      model: "mock/mcp-bridge",
+      endpointUrl: "https://compatible.example.test/v1",
+      credentialEnv: "COMPATIBLE_API_KEY",
+      preferredInferenceApi: "openai-completions",
+    });
+    const { deps, calls } = createDeps({ isInferenceRouteReady: vi.fn(() => true) });
+
+    const result = await handleProviderInferenceState({
+      ...baseOptions(deps, session),
+      resume: true,
+      authoritativeResumeConfig: true,
+      sandboxName: "mcp-rebuild",
+    });
+
+    expect(calls.setupNim).not.toHaveBeenCalled();
+    expect(calls.recoverProvider).toHaveBeenCalledWith("compatible-endpoint", "COMPATIBLE_API_KEY");
+    expect(calls.complete).toHaveBeenCalledWith(
+      "provider_selection",
+      expect.objectContaining({
+        provider: "compatible-endpoint",
+        model: "mock/mcp-bridge",
+        endpointUrl: "https://compatible.example.test/v1",
+      }),
+    );
+    expect(result).toMatchObject({
+      provider: "compatible-endpoint",
+      model: "mock/mcp-bridge",
+      endpointUrl: "https://compatible.example.test/v1",
+      preferredInferenceApi: "openai-completions",
+    });
+  });
+
   it("clears non-NVIDIA provider credentials when inference setup fails", async () => {
     const setupNim = vi.fn(async () => ({
       ...baseSelection,
@@ -457,7 +493,7 @@ describe("handleProviderInferenceState", () => {
     );
   });
 
-  it("refreshes compatible-endpoint route on OpenClaw messaging resume", async () => {
+  it("refreshes compatible-endpoint route directly when the host credential is available", async () => {
     const session = createSession({
       provider: "compatible-endpoint",
       model: "nvidia/nemotron",
@@ -466,7 +502,7 @@ describe("handleProviderInferenceState", () => {
     });
     session.steps.provider_selection.status = "complete";
     const { deps, calls } = createDeps({
-      hydrateCredentialEnv: vi.fn(() => null),
+      hydrateCredentialEnv: vi.fn(() => "host-key"),
       isInferenceRouteReady: vi.fn(() => true),
     });
 
@@ -490,14 +526,14 @@ describe("handleProviderInferenceState", () => {
       "COMPATIBLE_API_KEY",
       null,
       [],
-      { allowToolsIncompatible: false, skipHostInferenceSmoke: true },
+      { allowToolsIncompatible: false },
     );
     expect(calls.log).toHaveBeenCalledWith(
-      "  [resume] Refreshing compatible-endpoint inference route with the stored gateway credential.",
+      "  [resume] Refreshing compatible-endpoint inference route for messaging.",
     );
   });
 
-  it("refreshes compatible-endpoint route when messaging is only recorded in the session plan", async () => {
+  it("revalidates recovered identity before reusing a gateway credential on messaging resume", async () => {
     const session = createSession({
       provider: "compatible-endpoint",
       model: "nvidia/nemotron",
@@ -531,7 +567,18 @@ describe("handleProviderInferenceState", () => {
       },
     });
     session.steps.provider_selection.status = "complete";
+    const setupNim = vi.fn(async () => ({
+      ...baseSelection,
+      model: "nvidia/nemotron",
+      provider: "compatible-endpoint",
+      endpointUrl: "https://integrate.api.nvidia.com/v1",
+      credentialEnv: "COMPATIBLE_API_KEY",
+      preferredInferenceApi: "openai-completions",
+      skipHostInferenceSmoke: true,
+      reuseGatewayCredentialWithoutLocalKey: true,
+    }));
     const { deps, calls } = createDeps({
+      setupNim,
       hydrateCredentialEnv: vi.fn(() => null),
       isInferenceRouteReady: vi.fn(() => true),
     });
@@ -542,6 +589,7 @@ describe("handleProviderInferenceState", () => {
       sandboxName: "my-assistant",
     });
 
+    expect(setupNim).toHaveBeenCalledOnce();
     expect(calls.setupInference).toHaveBeenCalledWith(
       "my-assistant",
       "nvidia/nemotron",
@@ -550,7 +598,14 @@ describe("handleProviderInferenceState", () => {
       "COMPATIBLE_API_KEY",
       null,
       [],
-      { allowToolsIncompatible: false, skipHostInferenceSmoke: true },
+      {
+        allowToolsIncompatible: false,
+        skipHostInferenceSmoke: true,
+        reuseGatewayCredentialWithoutLocalKey: true,
+      },
+    );
+    expect(calls.log).toHaveBeenCalledWith(
+      "  [resume] Revalidating recovered compatible-endpoint identity before reusing its gateway credential.",
     );
   });
 

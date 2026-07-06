@@ -7,6 +7,53 @@ import { runInferenceSet } from "./inference-set";
 import { baseSession, createDeps } from "./inference-set.test-support";
 
 describe("runInferenceSet compatible providers", () => {
+  it("reuses durable endpoint metadata for same-provider model switches", async () => {
+    const config: ConfigObject = {
+      agents: { defaults: { model: { primary: "inference/nvidia/model-a" } } },
+      models: { providers: { inference: { api: "openai-completions", models: [] } } },
+    };
+    const deps = createDeps({
+      config,
+      entry: {
+        name: "alpha",
+        agent: "openclaw",
+        provider: "compatible-endpoint",
+        model: "nvidia/model-a",
+        endpointUrl: "https://inference-api.nvidia.com/v1",
+        credentialEnv: "COMPATIBLE_API_KEY",
+        preferredInferenceApi: "openai-completions",
+      },
+      session: baseSession({
+        provider: "compatible-endpoint",
+        model: "nvidia/model-a",
+        endpointUrl: "https://inference-api.nvidia.com/v1",
+        credentialEnv: "COMPATIBLE_API_KEY",
+        preferredInferenceApi: "openai-completions",
+      }),
+    });
+
+    await runInferenceSet(
+      {
+        provider: "compatible-endpoint",
+        model: "nvidia/model-b",
+        noVerify: true,
+      },
+      deps,
+    );
+
+    expect(deps.calls.rewriteConfigUrlsWithDnsPinning).not.toHaveBeenCalled();
+    expect(deps.calls.updateSandbox.mock.calls.at(-1)).toEqual([
+      "alpha",
+      expect.objectContaining({
+        provider: "compatible-endpoint",
+        model: "nvidia/model-b",
+        endpointUrl: "https://inference-api.nvidia.com/v1",
+        credentialEnv: "COMPATIBLE_API_KEY",
+        preferredInferenceApi: "openai-completions",
+      }),
+    ]);
+  });
+
   it("rejects custom-compatible provider switches without trusted endpoint metadata", async () => {
     const deps = createDeps({
       config: { agents: { defaults: { model: { primary: "inference/nvidia/model-a" } } } },
@@ -33,6 +80,63 @@ describe("runInferenceSet compatible providers", () => {
 
     expect(deps.calls.captureOpenshell).not.toHaveBeenCalled();
     expect(deps.calls.updateSandbox).not.toHaveBeenCalled();
+  });
+
+  it("reuses registered compatible endpoint metadata when only the model changes", async () => {
+    const config: ConfigObject = {
+      agents: { defaults: { model: { primary: "inference/nvidia/model-a" } } },
+      models: { providers: { inference: { api: "openai-completions", models: [] } } },
+    };
+    const deps = createDeps({
+      config,
+      entry: {
+        name: "alpha",
+        agent: "openclaw",
+        provider: "compatible-endpoint",
+        model: "nvidia/model-a",
+        endpointUrl: "https://inference-api.nvidia.com/v1",
+        credentialEnv: "COMPATIBLE_API_KEY",
+        preferredInferenceApi: "openai-completions",
+      },
+      session: baseSession({
+        provider: "compatible-endpoint",
+        model: "nvidia/model-a",
+        endpointUrl: "https://inference-api.nvidia.com/v1",
+        credentialEnv: "COMPATIBLE_API_KEY",
+        preferredInferenceApi: "openai-completions",
+      }),
+      rewriteConfigUrlsWithDnsPinning: async () => {
+        throw new Error("registered compatible endpoint metadata should not be revalidated");
+      },
+    });
+
+    await runInferenceSet(
+      {
+        provider: "compatible-endpoint",
+        model: "nvidia/nvidia/nemotron-3-super-v3",
+        noVerify: true,
+      },
+      deps,
+    );
+
+    expect(deps.calls.rewriteConfigUrlsWithDnsPinning).not.toHaveBeenCalled();
+    expect(deps.calls.updateSandbox.mock.calls.at(-1)).toEqual([
+      "alpha",
+      expect.objectContaining({
+        provider: "compatible-endpoint",
+        model: "nvidia/nvidia/nemotron-3-super-v3",
+        endpointUrl: "https://inference-api.nvidia.com/v1",
+        credentialEnv: "COMPATIBLE_API_KEY",
+        preferredInferenceApi: "openai-completions",
+      }),
+    ]);
+    expect(deps.getSession()).toMatchObject({
+      provider: "compatible-endpoint",
+      model: "nvidia/nvidia/nemotron-3-super-v3",
+      endpointUrl: "https://inference-api.nvidia.com/v1",
+      credentialEnv: "COMPATIBLE_API_KEY",
+      preferredInferenceApi: "openai-completions",
+    });
   });
 
   it("rejects Anthropic Messages metadata for OpenAI-compatible endpoint switches", async () => {
