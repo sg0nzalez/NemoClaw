@@ -39,6 +39,24 @@ describe("modelNameForOpenAiProvider (#6325)", () => {
   it("trims surrounding whitespace but does not otherwise mutate the value", () => {
     expect(modelNameForOpenAiProvider("  qwen2.5:7b  ")).toBe("qwen2.5:7b");
   });
+
+  it("strips an already-`openai:`-qualified provider label (existing regression)", () => {
+    // Pre-existing contract: some callers pre-prefix the model id with the
+    // deepagents provider label. Without a strip the emitted default would
+    // become `openai:openai:gpt-oss-120b`, which the deepagents CLI rejects.
+    expect(modelNameForOpenAiProvider("openai:gpt-oss-120b")).toBe("gpt-oss-120b");
+  });
+
+  it("only strips the exact `openai:` prefix — a colonized model that starts with a different label is unchanged", () => {
+    // Guard against a hypothetical future regression where a naive
+    // `indexOf(":")` re-appears: `qwen2.5:7b` starts with `qwen2.5`, not
+    // `openai`, so nothing may be stripped.
+    expect(modelNameForOpenAiProvider("qwen2.5:7b")).toBe("qwen2.5:7b");
+    // Ditto for other legitimate colon-carrying ids.
+    expect(modelNameForOpenAiProvider("anthropic:claude-3-sonnet")).toBe(
+      "anthropic:claude-3-sonnet",
+    );
+  });
 });
 
 describe("buildConfig for deepagents (#6325)", () => {

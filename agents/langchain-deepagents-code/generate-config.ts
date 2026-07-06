@@ -91,19 +91,33 @@ function tomlArray(values: readonly string[]): string {
  * Return the model identifier NemoClaw should write into the deepagents
  * config.toml as the value NemoClaw prepends `openai:` to.
  *
- * Historical behaviour stripped a leading "<provider>:" prefix on the
- * theory that `NEMOCLAW_MODEL` might be delivered in `openai:foo` shape.
- * In practice NemoClaw always passes the bare model id: see
- * `src/lib/onboard/providers.ts::getNonInteractiveModel`, and the
- * `NEMOCLAW_MODEL` build-arg validator whose regex explicitly allows `:`
- * inside legal model ids. The old strip silently ate the leading segment
- * of Ollama tags such as `qwen2.5:7b` — the `:` there is Ollama's
- * `name:tag` separator, not a provider prefix — producing `openai:7b` in
- * place of `openai:qwen2.5:7b` (#6325). Pass the model through verbatim;
- * the `openai:` prefix is prepended by `buildConfig`.
+ * Two contradictory shapes reach `NEMOCLAW_MODEL` at build time:
+ *   1. A bare model id — this is what NemoClaw sets non-interactively via
+ *      `src/lib/onboard/providers.ts::getNonInteractiveModel`. The bare id
+ *      may legally contain `:` — the `NEMOCLAW_MODEL` build-arg validator's
+ *      regex explicitly allows `:`, precisely because Ollama tags carry a
+ *      `<name>:<tag>` separator (e.g. `qwen2.5:7b`, `llama3.1:8b-instruct-q4_0`).
+ *   2. An `openai:<model>` provider-qualified id — some callers pre-prefix
+ *      the identifier with the deepagents provider label; without a strip
+ *      the emitted default would become `openai:openai:<model>` (a double
+ *      prefix that the deepagents CLI rejects). See the existing regression
+ *      test `test/langchain-deepagents-code-config.test.ts::does not
+ *      double-prefix provider-qualified model names`.
+ *
+ * The previous implementation split on the FIRST `:` and returned the
+ * suffix, which handled (2) but silently ate the leading segment of any
+ * (1) that carried a colon — producing `openai:7b` in place of
+ * `openai:qwen2.5:7b` (#6325).
+ *
+ * Strip ONLY the exact `openai:` provider label — the sole provider we
+ * emit under `[models.providers.openai]`. Any other colon in the model id
+ * is part of the model tag itself (Ollama's `name:tag` separator, HF-style
+ * `org/name:tag` variant qualifiers, etc.) and MUST pass through.
  */
 export function modelNameForOpenAiProvider(model: string): string {
-  return model.trim();
+  const trimmed = model.trim();
+  const PROVIDER_PREFIX = "openai:";
+  return trimmed.startsWith(PROVIDER_PREFIX) ? trimmed.slice(PROVIDER_PREFIX.length) : trimmed;
 }
 
 export function buildConfig(settings: Settings): string {
