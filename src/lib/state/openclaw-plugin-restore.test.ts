@@ -8,6 +8,7 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { OPENCLAW_IMAGE_MANAGED_EXTENSION_DIRS } from "./openclaw-managed-extensions";
 import {
   buildFreshOpenClawPluginIndexSqliteReadCommand,
   parseFreshOpenClawPluginExtensionDirs,
@@ -263,16 +264,17 @@ describe("planOpenClawPluginRestore", () => {
       ],
     });
 
-    expect(result.ok).toBe(true);
-    if (!result.ok) throw new Error(result.error);
-    expect(result.freshExtensionDirs).toEqual(["weather"]);
-    expect(result.previousExtensionDirs).toEqual(["forecast"]);
-    expect(result.preservedExtensionDirs).toEqual(expect.arrayContaining(["nemoclaw", "weather"]));
-    expect(result.preservedExtensionDirs).not.toContain("forecast");
-    expect(result.archiveExcludedExtensionDirs).toEqual(
-      expect.arrayContaining(["forecast", "nemoclaw", "weather"]),
-    );
-    expect(result.requiredFreshExtensionDirs).toEqual(["weather"]);
+    const preservedExtensionDirs = [
+      ...new Set([...OPENCLAW_IMAGE_MANAGED_EXTENSION_DIRS, "weather"]),
+    ].sort();
+    expect(result).toEqual({
+      ok: true,
+      freshExtensionDirs: ["weather"],
+      previousExtensionDirs: ["forecast"],
+      preservedExtensionDirs,
+      archiveExcludedExtensionDirs: [...preservedExtensionDirs, "forecast"].sort(),
+      requiredFreshExtensionDirs: ["weather"],
+    });
   });
 
   it("returns an empty extension plan when the backup does not contain extensions", () => {
