@@ -312,6 +312,51 @@ describe("tool-disclosure complete-evidence validation", () => {
     expect(() => validateFrozenManifest(arbitraryAccelerator)).toThrow(/inconsistent/u);
   });
 
+  it("rejects secret-like names and values in the public manifest", () => {
+    for (const marker of ["api_key", "token", "secret", "password", "authorization"]) {
+      const secretName = structuredClone(fixture.manifest) as ToolDisclosureManifest &
+        Record<string, unknown>;
+      secretName[marker] = "opaque-value";
+      expect(() => validateFrozenManifest(secretName)).toThrow(/secret-like/u);
+
+      const secretValue = structuredClone(fixture.manifest);
+      secretValue.environment.cpu_model = `${marker}=opaque-value`;
+      expect(() => validateFrozenManifest(secretValue)).toThrow(/secret-like/u);
+    }
+  });
+
+  it("rejects URL-looking values and absolute host paths in the public manifest", () => {
+    const endpoint = structuredClone(fixture.manifest);
+    endpoint.inference.model_revision = "https://example.invalid/private-revision";
+    expect(() => validateFrozenManifest(endpoint)).toThrow(/URL-looking/u);
+
+    const posixPath = structuredClone(fixture.manifest);
+    posixPath.environment.cpu_model = "/home/user/private-model";
+    expect(() => validateFrozenManifest(posixPath)).toThrow(/absolute host path/u);
+
+    const windowsPath = structuredClone(fixture.manifest);
+    windowsPath.environment.cpu_model = "C:\\Users\\user\\private-model";
+    expect(() => validateFrozenManifest(windowsPath)).toThrow(/absolute host path/u);
+  });
+
+  it("rejects private routing flags and accepts reviewed public vLLM flags", () => {
+    for (const flag of [
+      "--api-key=secret",
+      "--host=http://127.0.0.1:8000",
+      "--mount=/home/user/model",
+      "--port=8000",
+      "--enable-prefix-caching --host=0.0.0.0",
+    ]) {
+      const unsafe = structuredClone(fixture.manifest);
+      unsafe.inference.public_vllm_flags = [flag];
+      expect(() => validateFrozenManifest(unsafe)).toThrow(/private routing flag/u);
+    }
+
+    const reviewed = structuredClone(fixture.manifest);
+    reviewed.inference.public_vllm_flags = ["--enable-prefix-caching", "--max-model-len=8192"];
+    expect(() => validateFrozenManifest(reviewed)).not.toThrow();
+  });
+
   it("accepts the exact 1,884-run frozen matrix and rejects reordered or tampered evidence", {
     timeout: 30_000,
   }, () => {

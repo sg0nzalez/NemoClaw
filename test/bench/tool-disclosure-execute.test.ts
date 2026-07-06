@@ -8,12 +8,13 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
-  assertSetupRetryAllowed,
   type AttemptJournalEntry,
+  assertSetupRetryAllowed,
   type CampaignAttestation,
   classifyInvocationFailure,
   materializeAttemptJournal,
   nextSetupAttempt,
+  readAttestedVllmConfiguration,
   recoverAttemptJournal,
   selectInspectedContainer,
 } from "../../scripts/bench/tool-disclosure/execute";
@@ -121,6 +122,64 @@ describe("tool-disclosure attempt journal", () => {
     expect(selectInspectedContainer([expected], expected.Id)).toEqual(expected);
     expect(selectInspectedContainer([other, expected], expected.Id)).toBeUndefined();
     expect(selectInspectedContainer([expected, other], expected.Id)).toBeUndefined();
+  });
+
+  it("attests vLLM arguments only from the intended process configuration", () => {
+    const expected: ToolDisclosureManifest["inference"] = {
+      api: "chat-completions",
+      model_id: "example/model",
+      model_revision: "revision-1",
+      container_image: "registry.example/vllm:1.0.0",
+      container_digest: `sha256:${"a".repeat(64)}`,
+      vllm_version: "1.0.0",
+      tool_call_parser: "tool-parser",
+      reasoning_parser: "reasoning-parser",
+      temperature: 0,
+      concurrency: 1,
+      prefix_caching_enabled: false,
+      public_vllm_flags: ["--enable-auto-tool-choice", "--max-model-len 8192"],
+    };
+    const command =
+      "vllm serve example/model --revision revision-1 " +
+      "--tool-call-parser tool-parser --reasoning-parser reasoning-parser " +
+      "--enable-auto-tool-choice --max-model-len 8192";
+    expect(
+      readAttestedVllmConfiguration(
+        {
+          Config: {
+            Entrypoint: ["/bin/bash"],
+            Cmd: ["-lc", command],
+            Env: ["VLLM_USE_V1=1", "UNRELATED=ignored"],
+          },
+        },
+        expected,
+      ),
+    ).toEqual({
+      cmd: ["-lc", command],
+      entrypoint: ["/bin/bash"],
+      env: ["VLLM_USE_V1=1"],
+    });
+
+    const decoy = [
+      expected.model_id,
+      expected.model_revision,
+      expected.tool_call_parser,
+      expected.reasoning_parser,
+      ...expected.public_vllm_flags,
+    ].join(" ");
+    expect(
+      readAttestedVllmConfiguration(
+        {
+          Config: {
+            Entrypoint: ["vllm"],
+            Cmd: ["serve", "different/model"],
+            Env: [`UNRELATED=${decoy}`],
+            Labels: { unrelated: decoy },
+          },
+        },
+        expected,
+      ),
+    ).toBeUndefined();
   });
 
   it("recovers one trailing partial append and deterministically materializes evidence", () => {

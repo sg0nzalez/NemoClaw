@@ -755,11 +755,19 @@ export class ToolDisclosureRecordingProxy {
         {
           method: incomingRequest.method,
           headers: forwardedRequestHeaders(incomingRequest.headers, body.length),
-          // Native request does not follow redirects. A 3xx is passed to the
-          // benchmark client with its body and Location semantics intact.
         },
         (upstreamResponse) => {
           statusCode = upstreamResponse.statusCode ?? 502;
+          if (statusCode >= 300 && statusCode < 400) {
+            upstreamResponse.resume();
+            fixedResponse(response, 502, "upstream redirect rejected");
+            finish({
+              statusCode: 502,
+              outcome: "request-rejected",
+              errorReason: "proxy-failure",
+            });
+            return;
+          }
           if (!response.headersSent && !response.destroyed) {
             response.writeHead(statusCode, forwardedResponseHeaders(upstreamResponse.headers));
           }

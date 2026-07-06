@@ -452,6 +452,16 @@ describe("tool-disclosure Markdown report", () => {
     expect(markdown).not.toContain("GPU");
   });
 
+  it("rejects unsafe public manifest values before rendering the report", () => {
+    const manifest = makeManifest();
+    const summary = buildToolDisclosureSummary(manifest, completeEvidence(), {
+      generatedAt: "2026-07-06T13:00:00.000Z",
+    });
+    manifest.inference.public_vllm_flags = ["--host=http://127.0.0.1:8000"];
+
+    expect(() => renderToolDisclosureMarkdown(manifest, summary)).toThrow(/private routing flag/u);
+  });
+
   it("rejects artifact paths so host locations cannot enter the report", () => {
     const manifest = makeManifest();
     const summary = buildToolDisclosureSummary(manifest, completeEvidence(), {

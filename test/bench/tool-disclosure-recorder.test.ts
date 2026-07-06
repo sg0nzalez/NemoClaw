@@ -350,12 +350,12 @@ describe("tool-disclosure recording proxy", () => {
     expect(received).toHaveLength(1);
   });
 
-  it("passes redirects through without following them or recording their bodies", async () => {
+  it("rejects upstream redirects without relaying Location or body secrets", async () => {
     let hits = 0;
     const upstream = await startUpstream((_request, response) => {
       hits += 1;
       response.writeHead(307, {
-        location: "/v1/redirect-target?token=location-secret",
+        location: "https://example.invalid/v1?token=location-secret",
         "content-type": "text/plain",
       });
       response.end("redirect-response-secret");
@@ -365,18 +365,21 @@ describe("tool-disclosure recording proxy", () => {
     proxy.beginRun();
     const response = await fetch(`${baseUrl}/v1/chat/completions`, {
       method: "POST",
-      redirect: "manual",
       headers: { "content-type": "application/json" },
       body: '{"messages":[{"content":"request-secret"}]}',
     });
-    expect(response.status).toBe(307);
-    expect(response.headers.get("location")).toContain("location-secret");
-    expect(await response.text()).toBe("redirect-response-secret");
+    expect(response.status).toBe(502);
+    expect(response.headers.get("location")).toBeNull();
+    expect(await response.json()).toEqual({ error: "upstream redirect rejected" });
     expect(hits).toBe(1);
 
     const [event] = proxy.endRun();
-    expect(event.status_code).toBe(307);
-    expect(event.outcome).toBe("completed");
+    expect(event).toMatchObject({
+      status_code: 502,
+      first_byte_monotonic_ms: null,
+      outcome: "request-rejected",
+      error_reason: "proxy-failure",
+    });
     expect(JSON.stringify(event)).not.toMatch(
       /location-secret|redirect-response-secret|request-secret/,
     );

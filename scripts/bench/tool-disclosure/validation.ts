@@ -25,7 +25,76 @@ function sameJson(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
+const SECRET_LIKE_COMPONENT =
+  /(?:^|[^a-z0-9])(?:api[-_ ]?keys?|tokens?|secrets?|passwords?|authorizations?)(?:$|[^a-z0-9])/iu;
+const SECRET_LIKE_VALUE = /\b(?:bearer\s+\S+|(?:github_pat|ghp|gho|nvapi|sk)-[a-z0-9_-]{8,})\b/iu;
+const URL_LIKE_VALUE = /\b[a-z][a-z0-9+.-]*:\/\/\S*/iu;
+const ABSOLUTE_HOST_PATH =
+  /(?:^|[=\s"'(:,])(?:\/[a-z0-9._~-][^\s,;]*|[a-z]:[\\/][^\s,;]*|\\\\[^\\\s]+\\[^\s,;]*)/iu;
+const PRIVATE_ROUTING_FLAGS = new Set([
+  "--admin-key",
+  "--api-key",
+  "--base-url",
+  "--endpoint",
+  "--host",
+  "--mount",
+  "--port",
+  "--root-path",
+  "--socket",
+  "--ssl-ca-certs",
+  "--ssl-certfile",
+  "--ssl-keyfile",
+  "--uds",
+  "--unix-socket",
+  "--url",
+]);
+
+function normalizedSecurityText(value: string): string {
+  return value.replace(/([a-z0-9])([A-Z])/gu, "$1_$2");
+}
+
+function validatePublicManifestValue(value: unknown): void {
+  if (typeof value === "string") {
+    const normalized = normalizedSecurityText(value);
+    if (SECRET_LIKE_COMPONENT.test(normalized) || SECRET_LIKE_VALUE.test(value)) {
+      throw new Error("public manifest contains a secret-like field name or value");
+    }
+    if (URL_LIKE_VALUE.test(value)) {
+      throw new Error("public manifest contains a URL-looking value");
+    }
+    if (value.trim() === "/" || ABSOLUTE_HOST_PATH.test(value)) {
+      throw new Error("public manifest contains an absolute host path");
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) validatePublicManifestValue(item);
+    return;
+  }
+  if (!value || typeof value !== "object") return;
+  for (const [name, item] of Object.entries(value)) {
+    if (SECRET_LIKE_COMPONENT.test(normalizedSecurityText(name))) {
+      throw new Error("public manifest contains a secret-like field name or value");
+    }
+    validatePublicManifestValue(item);
+  }
+}
+
+/** Fail closed on obvious private material before a manifest can enter public artifacts. */
+export function validatePublicManifestFields(manifest: ToolDisclosureManifest): void {
+  for (const flag of manifest.inference.public_vllm_flags) {
+    for (const token of flag.trim().split(/\s+/u)) {
+      const name = token.match(/^--[a-z0-9][a-z0-9-]*/iu)?.[0].toLowerCase();
+      if (name && PRIVATE_ROUTING_FLAGS.has(name)) {
+        throw new Error("public_vllm_flags contains a private routing flag");
+      }
+    }
+  }
+  validatePublicManifestValue(manifest);
+}
+
 export function validateFrozenManifest(manifest: ToolDisclosureManifest): void {
+  validatePublicManifestFields(manifest);
   const requiredEnvironmentText = [
     manifest.environment.operating_system,
     manifest.environment.architecture,

@@ -25,7 +25,7 @@ import {
   readVllmTokenSnapshot,
   tokenDelta,
 } from "./telemetry";
-import type { ToolDisclosureManifest, ToolDisclosureRun } from "./types";
+import type { InferenceConfiguration, ToolDisclosureManifest, ToolDisclosureRun } from "./types";
 
 export interface SanitizedRunEvidence {
   run_id: string;
@@ -170,6 +170,199 @@ export function selectInspectedContainer<T extends { Id?: string }>(
   );
 }
 
+const PUBLIC_VLLM_ENV_NAMES = new Set([
+  "VLLM_ATTENTION_BACKEND",
+  "VLLM_USE_V1",
+  "VLLM_WORKER_MULTIPROC_METHOD",
+]);
+const SHELL_EXECUTABLE_NAMES = new Set(["ash", "bash", "dash", "ksh", "sh", "zsh"]);
+const SHELL_CONTROL_TOKENS = new Set(["&", "&&", ";", "|", "||"]);
+
+interface InspectedVllmContainer {
+  Id?: string;
+  Image?: string;
+  Config?: {
+    Cmd?: unknown;
+    Entrypoint?: unknown;
+    Env?: unknown;
+    Labels?: unknown;
+  };
+}
+
+export interface AttestedVllmConfiguration {
+  cmd: readonly string[];
+  entrypoint: readonly string[];
+  env: readonly string[];
+}
+
+function inspectedStringArray(value: unknown): string[] | undefined {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) return undefined;
+  return value;
+}
+
+/** Tokenize the literal shell command used by Docker's `sh -c` form without expanding it. */
+function tokenizeShellCommand(command: string): string[] | undefined {
+  const tokens: string[] = [];
+  let word = "";
+  let wordStarted = false;
+  let quote: "single" | "double" | undefined;
+  const pushWord = (): void => {
+    if (!wordStarted) return;
+    tokens.push(word);
+    word = "";
+    wordStarted = false;
+  };
+
+  for (let index = 0; index < command.length; index += 1) {
+    const character = command[index];
+    if (quote === "single") {
+      if (character === "'") quote = undefined;
+      else word += character;
+      continue;
+    }
+    if (quote === "double") {
+      if (character === '"') {
+        quote = undefined;
+      } else if (character === "\\") {
+        index += 1;
+        if (index >= command.length) return undefined;
+        word += command[index];
+      } else {
+        word += character;
+      }
+      continue;
+    }
+    if (/\s/u.test(character)) {
+      pushWord();
+      if (character === "\n") tokens.push(";");
+    } else if (character === "'" || character === '"') {
+      quote = character === "'" ? "single" : "double";
+      wordStarted = true;
+    } else if (character === "\\") {
+      index += 1;
+      if (index >= command.length) return undefined;
+      word += command[index];
+      wordStarted = true;
+    } else if (character === ";" || character === "&" || character === "|") {
+      pushWord();
+      const doubled = command[index + 1] === character;
+      tokens.push(doubled ? `${character}${character}` : character);
+      if (doubled) index += 1;
+    } else {
+      word += character;
+      wordStarted = true;
+    }
+  }
+  if (quote) return undefined;
+  pushWord();
+  return tokens;
+}
+
+function inspectedProcessTokens(
+  entrypoint: readonly string[],
+  cmd: readonly string[],
+): string[] | undefined {
+  const argv = [...entrypoint, ...cmd];
+  const shellIndex = argv.findIndex((value) =>
+    SHELL_EXECUTABLE_NAMES.has(value.split("/").pop() ?? ""),
+  );
+  if (shellIndex < 0) return argv;
+  const shellOption = argv[shellIndex + 1];
+  if (!shellOption?.startsWith("-") || !shellOption.slice(1).includes("c")) return argv;
+  const commandIndex = shellIndex + 2;
+  const shellTokens = tokenizeShellCommand(argv[commandIndex] ?? "");
+  if (!shellTokens) return undefined;
+  return [...argv.slice(0, commandIndex), ...shellTokens, ...argv.slice(commandIndex + 1)];
+}
+
+function optionMatches(args: readonly string[], name: string, value: string): boolean {
+  return args.some(
+    (argument, index) =>
+      argument === `${name}=${value}` || (argument === name && args[index + 1] === value),
+  );
+}
+
+function containsSequence(values: readonly string[], expected: readonly string[]): boolean {
+  if (expected.length === 0) return false;
+  return values.some((_, index) =>
+    expected.every((value, offset) => values[index + offset] === value),
+  );
+}
+
+function vllmInvocation(
+  tokens: readonly string[],
+): { kind: "serve" | "api-server"; args: readonly string[] } | undefined {
+  const candidates: { kind: "serve" | "api-server"; start: number }[] = [];
+  for (let index = 0; index < tokens.length; index += 1) {
+    const executable = tokens[index].split("/").pop() ?? "";
+    if (executable === "vllm" && tokens[index + 1] === "serve") {
+      candidates.push({ kind: "serve", start: index + 2 });
+    }
+    if (
+      /^python(?:\d+(?:\.\d+)*)?$/u.test(executable) &&
+      tokens[index + 1] === "-m" &&
+      tokens[index + 2] === "vllm.entrypoints.openai.api_server"
+    ) {
+      candidates.push({ kind: "api-server", start: index + 3 });
+    }
+  }
+  if (candidates.length !== 1) return undefined;
+  const candidate = candidates[0];
+  const boundary = tokens.findIndex(
+    (token, index) => index >= candidate.start && SHELL_CONTROL_TOKENS.has(token),
+  );
+  return {
+    kind: candidate.kind,
+    args: tokens.slice(candidate.start, boundary < 0 ? undefined : boundary),
+  };
+}
+
+/** Extract only a structurally verified process configuration from Docker inspect. */
+export function readAttestedVllmConfiguration(
+  container: InspectedVllmContainer,
+  expected: InferenceConfiguration,
+): AttestedVllmConfiguration | undefined {
+  const cmd = inspectedStringArray(container.Config?.Cmd);
+  const entrypoint = inspectedStringArray(container.Config?.Entrypoint);
+  const rawEnv = inspectedStringArray(container.Config?.Env);
+  if (!cmd || !entrypoint || !rawEnv) return undefined;
+  const tokens = inspectedProcessTokens(entrypoint, cmd);
+  if (!tokens) return undefined;
+  const invocation = vllmInvocation(tokens);
+  if (!invocation) return undefined;
+  const modelMatches =
+    (invocation.kind === "serve" && invocation.args[0] === expected.model_id) ||
+    optionMatches(invocation.args, "--model", expected.model_id);
+  const publicFlagsMatch = expected.public_vllm_flags.every((flag) => {
+    const flagTokens = tokenizeShellCommand(flag);
+    return (
+      flagTokens !== undefined &&
+      flagTokens.every((token) => !SHELL_CONTROL_TOKENS.has(token)) &&
+      containsSequence(invocation.args, flagTokens)
+    );
+  });
+  if (
+    !modelMatches ||
+    !optionMatches(invocation.args, "--revision", expected.model_revision) ||
+    !optionMatches(invocation.args, "--tool-call-parser", expected.tool_call_parser) ||
+    !optionMatches(invocation.args, "--reasoning-parser", expected.reasoning_parser) ||
+    !publicFlagsMatch
+  ) {
+    return undefined;
+  }
+
+  const publicEnv = rawEnv
+    .filter((entry) => PUBLIC_VLLM_ENV_NAMES.has(entry.slice(0, entry.indexOf("="))))
+    .sort();
+  if (
+    new Set(publicEnv.map((entry) => entry.slice(0, entry.indexOf("=")))).size !== publicEnv.length
+  ) {
+    return undefined;
+  }
+  return { cmd, entrypoint, env: publicEnv };
+}
+
 async function attestVllmContainer(options: {
   config: LiveCampaignConfiguration;
   manifest: ToolDisclosureManifest;
@@ -187,40 +380,18 @@ async function attestVllmContainer(options: {
   if (result.exit_code !== 0 || result.timed_out || result.output_truncated) {
     throw new Error("vLLM container inspection failed");
   }
-  const container = selectInspectedContainer<{
-    Id?: string;
-    Image?: string;
-    Config?: { Cmd?: string[]; Entrypoint?: string[]; Env?: string[] };
-  }>(JSON.parse(result.stdout) as unknown, options.config.vllm_container_id);
+  const container = selectInspectedContainer<InspectedVllmContainer>(
+    JSON.parse(result.stdout) as unknown,
+    options.config.vllm_container_id,
+  );
   const expected = options.manifest.inference;
-  const publicConfig = JSON.stringify({
-    cmd: container?.Config?.Cmd ?? [],
-    entrypoint: container?.Config?.Entrypoint ?? [],
-    env: (container?.Config?.Env ?? []).filter((value) =>
-      [
-        expected.model_id,
-        expected.model_revision,
-        expected.tool_call_parser,
-        expected.reasoning_parser,
-      ].some((needle) => value.includes(needle)),
-    ),
-  });
-  if (
-    !container ||
-    container.Image !== expected.container_digest ||
-    ![
-      expected.model_id,
-      expected.model_revision,
-      expected.tool_call_parser,
-      expected.reasoning_parser,
-      ...expected.public_vllm_flags,
-    ].every((value) => result.stdout.includes(value))
-  ) {
+  const publicConfig = container ? readAttestedVllmConfiguration(container, expected) : undefined;
+  if (!container || container.Image !== expected.container_digest || !publicConfig) {
     throw new Error("live vLLM container does not match the frozen manifest");
   }
   return {
     inference_container_id_sha256: sha256(container.Id),
-    inference_config_sha256: sha256(publicConfig),
+    inference_config_sha256: sha256(JSON.stringify(publicConfig)),
     inference_image_digest: container.Image,
   };
 }

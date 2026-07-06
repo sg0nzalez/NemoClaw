@@ -9,6 +9,7 @@ import {
   type ToolDisclosureManifest,
   type ToolDisclosureSummary,
 } from "./types";
+import { validatePublicManifestFields } from "./validation";
 
 export { buildConservativeClaims } from "./statistics";
 
@@ -202,6 +203,7 @@ function validateInputs(
   summary: ToolDisclosureSummary,
   artifacts: readonly EvidenceArtifact[],
 ): void {
+  validatePublicManifestFields(manifest);
   if (
     manifest.schema_version !== TOOL_DISCLOSURE_SCHEMA_VERSION ||
     summary.schema_version !== TOOL_DISCLOSURE_SCHEMA_VERSION
