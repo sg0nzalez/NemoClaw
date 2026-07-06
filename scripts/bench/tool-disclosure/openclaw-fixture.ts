@@ -113,9 +113,20 @@ RUN mkdir -p /sandbox/.openclaw/extensions \\\n && cp -a /opt/nemoclaw-tool-disc
 WORKDIR /opt/nemoclaw\n`;
 }
 
+/** Guard the renderer boundary so the validated base and emitted ARG cannot diverge. */
+export function assertDockerfileSandboxBase(content: string, expected: string): void {
+  assertImmutableSandboxBase(expected);
+  const [argument, from] = content.split("\n", 2);
+  if (argument !== `ARG SANDBOX_BASE=${expected}` || from !== "FROM ${SANDBOX_BASE}") {
+    throw new Error("generated Dockerfile sandbox base does not match");
+  }
+}
+
 /** Generate a self-contained custom-image context for an OpenClaw catalog size. */
 export function writeOpenClawFixture(options: OpenClawFixtureOptions): OpenClawFixtureResult {
   assertImmutableSandboxBase(options.sandboxBase);
+  const renderedDockerfile = dockerfile(options.sandboxBase);
+  assertDockerfileSandboxBase(renderedDockerfile, options.sandboxBase);
   const root = path.resolve(options.outputDir);
   if (fs.existsSync(root)) {
     const stat = fs.lstatSync(root);
@@ -166,7 +177,7 @@ export function writeOpenClawFixture(options: OpenClawFixtureOptions): OpenClawF
       2,
     )}\n`,
   );
-  writeNewFile(root, "Dockerfile", dockerfile(options.sandboxBase));
+  writeNewFile(root, "Dockerfile", renderedDockerfile);
   writeNewFile(root, ".dockerignore", "*\n!Dockerfile\n!plugin\n!plugin/**\n");
 
   return {

@@ -13,7 +13,9 @@ import {
   type CampaignAttestation,
   classifyInvocationFailure,
   materializeAttemptJournal,
+  nextSetupAttempt,
   recoverAttemptJournal,
+  selectInspectedContainer,
 } from "../../scripts/bench/tool-disclosure/execute";
 import { validateCampaignAttestations } from "../../scripts/bench/tool-disclosure/run";
 import {
@@ -87,6 +89,38 @@ describe("tool-disclosure attempt journal", () => {
     expect(() =>
       assertSetupRetryAllowed(true, "run-after-invocation", new Error("private detail")),
     ).toThrow(/discard this campaign/u);
+  });
+
+  it("preserves exhausted setup attempts and refuses another resume", () => {
+    const output = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-attempt-journal-"));
+    try {
+      const entry = {
+        raw: { run_id: "run-exhausted", failure_outcome: "setup-error" },
+        run: { run_id: "run-exhausted", outcome: "setup-error" },
+      } as unknown as AttemptJournalEntry;
+      const attempts = [entry, structuredClone(entry)];
+      const serialized = `${attempts.map((attempt) => JSON.stringify(attempt)).join("\n")}\n`;
+      const file = path.join(output, "attempt-journal.jsonl");
+      fs.writeFileSync(file, serialized);
+
+      expect(nextSetupAttempt([entry], "run-exhausted", 1)).toBe(1);
+      const recovered = recoverAttemptJournal(output);
+      expect(recovered).toEqual(attempts);
+      expect(() => nextSetupAttempt(recovered, "run-exhausted", 1)).toThrow(
+        /exhausted setup retries/u,
+      );
+      expect(fs.readFileSync(file, "utf8")).toBe(serialized);
+    } finally {
+      fs.rmSync(output, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects ambiguous Docker inspect output regardless of order", () => {
+    const expected = { Id: "expected", Image: "sha256:expected" };
+    const other = { Id: "other", Image: "sha256:other" };
+    expect(selectInspectedContainer([expected], expected.Id)).toEqual(expected);
+    expect(selectInspectedContainer([other, expected], expected.Id)).toBeUndefined();
+    expect(selectInspectedContainer([expected, other], expected.Id)).toBeUndefined();
   });
 
   it("recovers one trailing partial append and deterministically materializes evidence", () => {

@@ -34,12 +34,6 @@ describe("synthetic benchmark MCP server", () => {
     try {
       const unauthorized = await fetch(address.local_url, { method: "POST", body: "{}" });
       expect(unauthorized.status).toBe(401);
-      const staleCampaignToken = await rpc(
-        address.local_url,
-        "token-from-another-campaign",
-        "tools/list",
-      );
-      expect(staleCampaignToken.status).toBe(401);
 
       const initialized = await rpc(address.local_url, token, "initialize", {
         protocolVersion: "2025-03-26",
@@ -72,6 +66,20 @@ describe("synthetic benchmark MCP server", () => {
       });
       expect(JSON.stringify(events)).not.toContain(token);
       expect(JSON.stringify(events)).not.toContain(JSON.stringify(args));
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it("rejects a bearer token reused from another campaign", async () => {
+    const server = new SyntheticMcpServer(
+      generateSyntheticCatalog({ size: 16, seed: "mcp-token-rotation-test" }),
+      "current-campaign-token",
+    );
+    const address = await server.start();
+    try {
+      const response = await rpc(address.local_url, "previous-campaign-token", "tools/list");
+      expect(response.status).toBe(401);
     } finally {
       await server.stop();
     }

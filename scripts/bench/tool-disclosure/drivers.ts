@@ -52,11 +52,12 @@ function shellScriptFor(agent: ToolDisclosureAgent, prompt: string, sessionId: s
     "set -a",
     "[ ! -f /sandbox/.hermes/.env ] || . /sandbox/.hermes/.env",
     "set +a",
-    `payload=$(printf '%s' '${payload}' | base64 -d)`,
+    `payload='${payload}'`,
     'if [ -n "${API_SERVER_KEY:-}" ]; then',
-    '  exec curl -fsS --max-time 600 http://127.0.0.1:8642/v1/chat/completions -H \'Content-Type: application/json\' -H "Authorization: Bearer ${API_SERVER_KEY}" --data-binary "$payload"',
+    "  printf '%s' \"$payload\" | base64 -d | curl -fsS --max-time 600 http://127.0.0.1:8642/v1/chat/completions -H 'Content-Type: application/json' -H \"Authorization: Bearer ${API_SERVER_KEY}\" --data-binary @-",
+    "  exit $?",
     "fi",
-    "exec curl -fsS --max-time 600 http://127.0.0.1:8642/v1/chat/completions -H 'Content-Type: application/json' --data-binary \"$payload\"",
+    "printf '%s' \"$payload\" | base64 -d | curl -fsS --max-time 600 http://127.0.0.1:8642/v1/chat/completions -H 'Content-Type: application/json' --data-binary @-",
   ].join("\n");
 }
 

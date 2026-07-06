@@ -58,6 +58,22 @@ export function assertSetupRetryAllowed(
   }
 }
 
+/** Continue setup retries across process restarts without resetting the allowance. */
+export function nextSetupAttempt(
+  entries: readonly AttemptJournalEntry[],
+  runId: string,
+  retrySetupFailures: number,
+): number {
+  if (!Number.isSafeInteger(retrySetupFailures) || retrySetupFailures < 0) {
+    throw new Error("retry_setup_failures must be a non-negative integer");
+  }
+  const used = entries.filter(
+    (entry) => entry.run.run_id === runId && entry.run.outcome === "setup-error",
+  ).length;
+  if (used > retrySetupFailures) throw new Error(`run ${runId} exhausted setup retries`);
+  return used;
+}
+
 export function recoverAttemptJournal(outputDir: string): AttemptJournalEntry[] {
   const file = artifactPath(outputDir, "attempt-journal.jsonl");
   if (!fs.existsSync(file)) return [];
@@ -141,6 +157,19 @@ function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
+/** Accept only the single inspect result whose immutable ID was requested. */
+export function selectInspectedContainer<T extends { Id?: string }>(
+  value: unknown,
+  expectedId: string,
+): (T & { Id: string }) | undefined {
+  if (!Array.isArray(value) || value.length !== 1) return undefined;
+  return (
+    (value as Array<(T & { Id: string }) | null>).find(
+      (candidate) => candidate?.Id === expectedId,
+    ) ?? undefined
+  );
+}
+
 async function attestVllmContainer(options: {
   config: LiveCampaignConfiguration;
   manifest: ToolDisclosureManifest;
@@ -158,12 +187,11 @@ async function attestVllmContainer(options: {
   if (result.exit_code !== 0 || result.timed_out || result.output_truncated) {
     throw new Error("vLLM container inspection failed");
   }
-  const containers = JSON.parse(result.stdout) as Array<{
+  const container = selectInspectedContainer<{
     Id?: string;
     Image?: string;
     Config?: { Cmd?: string[]; Entrypoint?: string[]; Env?: string[] };
-  }>;
-  const container = containers[0];
+  }>(JSON.parse(result.stdout) as unknown, options.config.vllm_container_id);
   const expected = options.manifest.inference;
   const publicConfig = JSON.stringify({
     cmd: container?.Config?.Cmd ?? [],
@@ -178,9 +206,7 @@ async function attestVllmContainer(options: {
     ),
   });
   if (
-    containers.length !== 1 ||
     !container ||
-    container.Id !== options.config.vllm_container_id ||
     container.Image !== expected.container_digest ||
     ![
       expected.model_id,
@@ -235,16 +261,13 @@ async function attestSandbox(options: {
   if (inspected.exit_code !== 0 || inspected.timed_out || inspected.output_truncated) {
     throw new Error(`container inspection failed for ${options.cell}`);
   }
-  const containers = JSON.parse(inspected.stdout) as Array<{
+  const container = selectInspectedContainer<{
     Id?: string;
     Image?: string;
     Config?: { Env?: string[] };
-  }>;
-  const container = containers[0];
+  }>(JSON.parse(inspected.stdout) as unknown, instanceId);
   if (
-    containers.length !== 1 ||
     !container ||
-    container.Id !== instanceId ||
     container.Image !== imageDigest ||
     !container.Config?.Env?.includes(`NEMOCLAW_TOOL_DISCLOSURE=${mode}`)
   ) {
@@ -509,8 +532,13 @@ export async function executeCampaign(options: {
       const task = run.task_id ? tasks.get(run.task_id) : undefined;
       const sandboxName = options.config.sandbox_names[sandboxKey(run)];
       const mcp = run.agent === "openclaw" ? undefined : servers.get(run.catalog_size);
+      const firstAttempt = nextSetupAttempt(
+        journal,
+        run.run_id,
+        options.manifest.protocol.retry_setup_failures,
+      );
       for (
-        let attempt = 0;
+        let attempt = firstAttempt;
         attempt <= options.manifest.protocol.retry_setup_failures;
         attempt += 1
       ) {

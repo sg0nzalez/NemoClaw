@@ -2,10 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { type ChildProcess, spawn } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
-const ORIGIN_PATTERN = /https:\/\/[a-z0-9-]+\.trycloudflare\.com(?=$|[\s"'\\/])/iu;
-// Deliberately omit HOME/XDG_CONFIG_HOME so cloudflared cannot load ambient
-// account credentials or configuration into this ephemeral benchmark tunnel.
+const ORIGIN_PATTERN = /https:\/\/[a-z0-9-]+\.trycloudflare\.com(?=$|[\s"'\\/])/giu;
+// Ambient HOME/XDG_CONFIG_HOME are not allowlisted; the child receives an
+// isolated replacement so it cannot load operator credentials or configuration.
 const SAFE_ENV = new Set([
   "PATH",
   "TMPDIR",
@@ -29,7 +32,7 @@ export interface QuickTunnel {
 }
 
 export function parseQuickTunnelOrigin(text: string): string | null {
-  return text.match(ORIGIN_PATTERN)?.[0] ?? null;
+  return [...text.matchAll(ORIGIN_PATTERN)].at(-1)?.[0] ?? null;
 }
 
 export function buildQuickTunnelArgs(port: number): string[] {
@@ -38,6 +41,7 @@ export function buildQuickTunnelArgs(port: number): string[] {
   }
   return [
     "tunnel",
+    "--config=",
     "--no-autoupdate",
     "--protocol",
     "http2",
@@ -48,14 +52,18 @@ export function buildQuickTunnelArgs(port: number): string[] {
   ];
 }
 
-function subprocessEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+export function buildQuickTunnelEnvironment(
+  env: NodeJS.ProcessEnv,
+  isolatedHome: string,
+): NodeJS.ProcessEnv {
+  if (!path.isAbsolute(isolatedHome)) throw new Error("quick-tunnel home must be absolute");
   const selected: NodeJS.ProcessEnv = {};
   for (const [name, value] of Object.entries(env)) {
     if (value !== undefined && (SAFE_ENV.has(name) || name.startsWith("LC_"))) {
       selected[name] = value;
     }
   }
-  return selected;
+  return { ...selected, HOME: isolatedHome, XDG_CONFIG_HOME: isolatedHome };
 }
 
 function stopChild(child: ChildProcess): Promise<void> {
@@ -103,11 +111,20 @@ export async function startQuickTunnel(options: {
   fetchImpl?: typeof fetch;
   env?: NodeJS.ProcessEnv;
 }): Promise<QuickTunnel> {
-  const child = spawn(options.binary ?? "cloudflared", buildQuickTunnelArgs(options.port), {
-    detached: false,
-    env: subprocessEnv(options.env ?? process.env),
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  const args = buildQuickTunnelArgs(options.port);
+  const isolatedHome = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-cloudflared-"));
+  const removeIsolatedHome = (): void => fs.rmSync(isolatedHome, { recursive: true, force: true });
+  let child: ChildProcess;
+  try {
+    child = spawn(options.binary ?? "cloudflared", args, {
+      detached: false,
+      env: buildQuickTunnelEnvironment(options.env ?? process.env, isolatedHome),
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch (error) {
+    removeIsolatedHome();
+    throw error;
+  }
   const timeoutMs = options.timeoutMs ?? 45_000;
   const fetchImpl = options.fetchImpl ?? fetch;
   let origin: string | null = null;
@@ -115,7 +132,7 @@ export async function startQuickTunnel(options: {
   let spawnError: Error | undefined;
   const inspect = (chunk: Buffer | string): void => {
     const candidate = `${carry}${chunk.toString()}`;
-    origin ??= parseQuickTunnelOrigin(candidate);
+    origin = parseQuickTunnelOrigin(candidate) ?? origin;
     carry = candidate.slice(-512);
   };
   child.stdout?.on("data", inspect);
@@ -133,12 +150,22 @@ export async function startQuickTunnel(options: {
       return {
         origin: published,
         mcpUrl: `${published}/mcp`,
-        close: () => stopChild(child),
+        close: async () => {
+          try {
+            await stopChild(child);
+          } finally {
+            removeIsolatedHome();
+          }
+        },
       };
     }
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
-  await stopChild(child);
+  try {
+    await stopChild(child);
+  } finally {
+    removeIsolatedHome();
+  }
   if (spawnError) throw new Error(`cloudflared quick tunnel failed to start (${spawnError.name})`);
   throw new Error("cloudflared quick tunnel did not become ready before the timeout");
 }

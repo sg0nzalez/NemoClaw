@@ -16,7 +16,10 @@ import {
   sha256Hex,
 } from "../../scripts/bench/tool-disclosure/catalog";
 import { gradeTaskRun } from "../../scripts/bench/tool-disclosure/grading";
-import { writeOpenClawFixture } from "../../scripts/bench/tool-disclosure/openclaw-fixture";
+import {
+  assertDockerfileSandboxBase,
+  writeOpenClawFixture,
+} from "../../scripts/bench/tool-disclosure/openclaw-fixture";
 import { buildToolDisclosureSchedule } from "../../scripts/bench/tool-disclosure/schedule";
 import { buildPrimaryTasks } from "../../scripts/bench/tool-disclosure/tasks";
 import {
@@ -92,6 +95,23 @@ describe("OpenClaw benchmark fixture", () => {
       }),
     ).toThrow(/canonical registry\/repository reference/u);
     expect(fs.existsSync(output)).toBe(false);
+  });
+
+  it("rejects a generated Dockerfile base mismatch", () => {
+    const expected = `registry.example/base@sha256:${"1".repeat(64)}`;
+    const substituted = `registry.example/base@sha256:${"2".repeat(64)}`;
+    expect(() =>
+      assertDockerfileSandboxBase(
+        `ARG SANDBOX_BASE=${substituted}\nFROM \${SANDBOX_BASE}\n`,
+        expected,
+      ),
+    ).toThrow(/does not match/u);
+    expect(() =>
+      assertDockerfileSandboxBase(
+        `ARG SANDBOX_BASE=${expected}\nFROM registry.example/other@sha256:${"3".repeat(64)}\n`,
+        expected,
+      ),
+    ).toThrow(/does not match/u);
   });
 });
 

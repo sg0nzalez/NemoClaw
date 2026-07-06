@@ -65,6 +65,19 @@ describe("tool-disclosure agent drivers", () => {
     }
   });
 
+  it("streams the decoded Hermes payload directly to curl", () => {
+    const command = buildAgentDriverCommand({
+      agent: "hermes",
+      sandboxName: "bench-hermes-stream",
+      prompt: "Return BENCH_OK_123",
+      sessionId: "bench-session-hermes-stream",
+    });
+    const script = command.args.at(-1) ?? "";
+    expect(script).toContain("base64 -d | curl");
+    expect(script).toContain("--data-binary @-");
+    expect(script).not.toContain("payload=$(printf");
+  });
+
   it("extracts assistant replies without accepting tool-result fields", () => {
     expect(
       extractFinalAssistantOutput(

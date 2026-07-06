@@ -99,6 +99,24 @@ describe("tool-disclosure recording proxy", () => {
     ).toThrow("plaintext upstreamBaseUrl is allowed only on loopback");
   });
 
+  it("canonicalizes the IPv6 loopback and rejects mapped or non-loopback variants", () => {
+    expect(() =>
+      createToolDisclosureRecordingProxy({
+        upstreamBaseUrl: "http://[0:0:0:0:0:0:0:1]:8000/v1",
+      }),
+    ).not.toThrow();
+    expect(() =>
+      createToolDisclosureRecordingProxy({
+        upstreamBaseUrl: "http://[::ffff:127.0.0.1]:8000/v1",
+      }),
+    ).toThrow("plaintext upstreamBaseUrl is allowed only on loopback");
+    expect(() =>
+      createToolDisclosureRecordingProxy({
+        upstreamBaseUrl: "http://[::2]:8000/v1",
+      }),
+    ).toThrow("plaintext upstreamBaseUrl is allowed only on loopback");
+  });
+
   it("accepts bounded public scheduled run IDs and rejects unsafe IDs", () => {
     const proxy = createToolDisclosureRecordingProxy({
       upstreamBaseUrl: "https://inference.example/v1",

@@ -130,6 +130,8 @@ Do not publish this file because it can contain local routing and sandbox identi
 Execution verifies the live vLLM container ID, Docker image ID, model and revision, parser names, public flags, and process start time.
 It also verifies each live sandbox status against its expected agent, disclosure mode, immutable image ID, and instance ID.
 Only hashes of private container identities and reviewed public configuration enter the evidence bundle.
+Each campaign generates a new MCP bearer token and shares it only among that campaign's five short-lived catalog servers; the token is never written to the public evidence artifacts.
+The quick-tunnel process disables config-file discovery and receives an isolated temporary `HOME` and `XDG_CONFIG_HOME`, removed when the tunnel closes, so it cannot load the operator's ambient Cloudflare account configuration or credentials.
 This attestation path expects vLLM and the DGX Station's OpenShell sandboxes to use the Docker driver so `docker inspect` can verify the live state.
 
 ```bash

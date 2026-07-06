@@ -182,6 +182,8 @@ function parseUpstreamBaseUrl(value: string): URL {
     throw new Error("upstreamBaseUrl must use HTTP or HTTPS");
   }
   const hostname = url.hostname.replace(/^\[/u, "").replace(/\]$/u, "").toLowerCase();
+  // URL canonicalizes equivalent IPv6 spellings to ::1. Keep the plaintext
+  // allowlist exact; IPv4-mapped and scoped IPv6 forms are intentionally rejected.
   const loopback =
     hostname === "localhost" ||
     hostname === "::1" ||
