@@ -111,8 +111,8 @@ For OpenClaw, `inference set` syncs the provider API family and primary model re
 For Hermes, `inference set` writes `model.api_mode: anthropic_messages` for Anthropic Messages routes, `model.api_mode: codex_responses` for OpenAI Responses routes, and removes `api_mode` for OpenAI-style chat-completions routes.
 Hermes also keeps `model.api_key` on the OpenShell proxy placeholder so dashboard and API sessions continue to authenticate through the gateway after a route change.
 
-Amazon Bedrock Runtime routes created through `compatible-anthropic-endpoint` are the exception.
-When you switch within the same Bedrock Runtime compatible provider, NemoClaw keeps the route OpenAI-compatible and does not set Hermes to Anthropic Messages mode.
+Hermes only uses Anthropic Messages mode for routes that NemoClaw resolves as true Anthropic Messages providers, such as `anthropic-prod`.
+For `compatible-anthropic-endpoint`, NemoClaw keeps the Hermes route OpenAI-compatible through the managed `/v1` proxy and does not set Hermes to Anthropic Messages mode.
 
 #### Switching from Responses API to Chat Completions
 
