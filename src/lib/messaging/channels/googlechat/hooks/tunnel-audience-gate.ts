@@ -10,6 +10,8 @@ import type { MessagingSerializableValue } from "../../../manifest";
 
 export const GOOGLECHAT_TUNNEL_AUDIENCE_GATE_HOOK_ID = "googlechat.tunnelAudienceGate";
 
+// The tunnel audience path; must match the webhookPath rendered in manifest.ts
+// (the plugin's inbound route) or Google posts to a path the gateway doesn't serve.
 const DEFAULT_WEBHOOK_PATH = "/googlechat";
 
 /** Coarse cloudflared running-state used to decide whether we must start one. */
