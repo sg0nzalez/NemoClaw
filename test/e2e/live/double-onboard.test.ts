@@ -483,9 +483,8 @@ liveTest(
       await cleanupDoubleOnboardState(host, sandbox);
     });
 
-    await artifacts.writeJson("target.json", {
+    await artifacts.target.declare({
       id: "double-onboard",
-      runner: "vitest",
       boundary: "direct-cli-openshell-lifecycle",
       contract: [
         "first onboard creates a sandbox and NemoClaw gateway",
@@ -750,7 +749,7 @@ liveTest(
       "registry still contains test entries",
     ).toBe(false);
 
-    await artifacts.writeJson("target-result.json", {
+    await artifacts.target.complete({
       id: "double-onboard",
       fakeOpenAiRequests: fake.requests(),
       assertions: {

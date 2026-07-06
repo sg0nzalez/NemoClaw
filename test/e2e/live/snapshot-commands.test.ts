@@ -114,9 +114,8 @@ test.skipIf(!shouldRunLiveE2E())(
   { timeout: LIVE_TIMEOUT_MS },
   async ({ artifacts, cleanup, host, sandbox, secrets, skip }) => {
     const apiKey = secrets.required("NVIDIA_INFERENCE_API_KEY");
-    await artifacts.writeJson("target.json", {
+    await artifacts.target.declare({
       id: "snapshot-commands",
-      runner: "vitest",
       boundary: "install.sh + nemoclaw snapshot commands + openshell sandbox exec",
       sandboxName: SANDBOX_NAME,
       backupDir: BACKUP_DIR,
@@ -340,7 +339,7 @@ test.skipIf(!shouldRunLiveE2E())(
     expect(resultText(help)).toContain("snapshot list");
     expect(resultText(help)).toContain("snapshot restore");
 
-    await artifacts.writeJson("target-result.json", {
+    await artifacts.target.complete({
       id: "snapshot-commands",
       status: "passed",
       firstSnapshotTimestamp: timestamp,

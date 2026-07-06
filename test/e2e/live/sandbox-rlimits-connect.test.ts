@@ -58,7 +58,7 @@ runConnectRlimitTest(
   async ({ artifacts, cleanup, host, secrets }) => {
     const apiKey = secrets.required("NVIDIA_API_KEY");
     const redactionValues = secrets.redactionValues([apiKey]);
-    await artifacts.writeJson("target.json", {
+    await artifacts.target.declare({
       id: "sandbox-rlimits-connect",
       issue: 2173,
       optIn: "NEMOCLAW_RUN_LIVE_E2E=1 NEMOCLAW_E2E_CONNECT_RLIMITS=1",

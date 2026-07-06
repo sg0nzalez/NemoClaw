@@ -244,9 +244,8 @@ runtimeOverridesTest(
     const cleanupImage = process.env.NEMOCLAW_TEST_IMAGE === undefined;
 
     try {
-      await artifacts.writeJson("target.json", {
+      await artifacts.target.declare({
         id: "runtime-overrides",
-        runner: "vitest",
         boundary: "docker-image-entrypoint",
         image,
         contract: [
@@ -261,7 +260,7 @@ runtimeOverridesTest(
       const docker = dockerAvailable();
       dockerLog.push(formatLog("docker info", docker));
       if (docker.status !== 0) {
-        await artifacts.writeJson("target-result.json", {
+        await artifacts.target.complete({
           id: "runtime-overrides",
           status: "skipped",
           reason: DOCKER_REQUIRED_MESSAGE,
@@ -385,7 +384,7 @@ runtimeOverridesTest(
       expect(primaryModel(rejected)).toBe(baselineModel);
       expect(firstProviderModel(rejected).contextWindow).toBe(baselineContextWindow);
 
-      await artifacts.writeJson("target-result.json", {
+      await artifacts.target.complete({
         id: "runtime-overrides",
         status: "passed",
         image,

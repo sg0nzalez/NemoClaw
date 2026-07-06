@@ -604,9 +604,8 @@ liveTest(
   async ({ artifacts, cleanup, environment, host, sandbox, secrets, skip }) => {
     const hosted = requireHostedInferenceConfig(secrets);
 
-    await artifacts.writeJson("target.json", {
+    await artifacts.target.declare({
       id: "sandbox-operations",
-      runner: "vitest",
       boundary: "repo-cli-docker-openshell-sandbox",
       contracts: [
         "TC-SBX-01 list shows onboarded sandbox",
@@ -669,7 +668,7 @@ liveTest(
 
     const gatewayRecovery = await assertGatewayRecovery(host, SANDBOX_A);
 
-    await artifacts.writeJson("target-result.json", {
+    await artifacts.target.complete({
       id: "sandbox-operations",
       status: "passed",
       gatewayRecovery,

@@ -139,9 +139,8 @@ runSkillAgentTest(
     const hosted = requireHostedInferenceConfig(secrets);
     const apiKey = hosted.apiKey;
 
-    await artifacts.writeJson("target.json", {
+    await artifacts.target.declare({
       id: "skill-agent",
-      runner: "vitest",
       boundary: "direct-cli-onboard-sandbox-skill-and-agent-turn",
       contract: [
         "Docker is available before onboarding",
@@ -227,7 +226,7 @@ runSkillAgentTest(
     );
     const onboardText = resultText(onboard);
     if (onboard.exitCode !== 0 && isExternalProviderValidationFailure(onboardText)) {
-      await artifacts.writeJson("target-result.json", {
+      await artifacts.target.complete({
         id: "skill-agent",
         status: "skipped",
         reason: "external-provider-validation-unavailable-before-sandbox-skill-check",
@@ -293,7 +292,7 @@ runSkillAgentTest(
     if (!agentOk) {
       const fixturePresent = await verifySkillFixturePresent(sandbox, SANDBOX_NAME);
       if (shouldSkipExternalAgentVerificationFailure(lastAgentOutput, fixturePresent)) {
-        await artifacts.writeJson("target-result.json", {
+        await artifacts.target.complete({
           id: "skill-agent",
           status: "skipped",
           reason: "external-agent-verification-flake-after-fixture-present",
@@ -310,7 +309,7 @@ runSkillAgentTest(
       `Agent did not return ${VERIFY_PHRASE}; last exit ${lastExitCode}\n${lastAgentOutput.slice(-12_000)}`,
     ).toBe(true);
 
-    await artifacts.writeJson("target-result.json", {
+    await artifacts.target.complete({
       id: "skill-agent",
       status: "passed",
       assertions: {

@@ -299,9 +299,8 @@ liveTest(
       await fakeOpenAI.close();
     });
 
-    await artifacts.writeJson("target.json", {
+    await artifacts.target.declare({
       id: "token-rotation",
-      runner: "vitest",
       boundary: "direct-cli-onboard-openshell",
       workflow: {
         workflow: "e2e.yaml",
@@ -493,7 +492,7 @@ liveTest(
     expect(afterSlackSameText).toContain(`Sandbox '${SANDBOX_NAME}' exists and is ready`);
     expect(afterSlackSameText).toContain("reusing it");
 
-    await artifacts.writeJson("target-result.json", {
+    await artifacts.target.complete({
       id: "token-rotation",
       sandboxName: SANDBOX_NAME,
       assertions: {

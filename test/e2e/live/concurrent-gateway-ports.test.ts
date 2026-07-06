@@ -297,9 +297,8 @@ liveTest(
     const fake = await startFakeOpenAiCompatibleServer({
       port: Number(process.env.NEMOCLAW_E2E_FAKE_PORT ?? 0),
     });
-    await artifacts.writeJson("target.json", {
+    await artifacts.target.declare({
       id: "concurrent-gateway-ports",
-      runner: "vitest",
       boundary: "direct-cli-docker-openshell-multiple-gateways-dashboard-forwards",
       contract: [
         "sandbox A onboards on the default NemoClaw gateway and dashboard port",
@@ -401,7 +400,7 @@ liveTest(
     expect(["Ready", "Running"]).toContain(phaseAAfterDestroyB);
     await expectPortListening(host, GATEWAY_PORT_A, "phase-4-gateway-port-a-still-listening");
 
-    await artifacts.writeJson("target-result.json", {
+    await artifacts.target.complete({
       id: "concurrent-gateway-ports",
       assertions: {
         sandboxAOnboarded: onboardA.exitCode === 0,

@@ -1217,7 +1217,7 @@ liveTest(
   { timeout: LIVE_TIMEOUT_MS },
   async ({ artifacts, cleanup: cleanupRegistry, host, sandbox, secrets, skip }) => {
     const apiKey = secrets.required("NVIDIA_INFERENCE_API_KEY");
-    await artifacts.writeJson("target.json", {
+    await artifacts.target.declare({
       id: "issue-4462-scope-upgrade-approval",
       sandboxName: SANDBOX_NAME,
       contracts: [
@@ -1476,7 +1476,7 @@ liveTest(
     expect(adminConnectOutput).toContain("ISSUE_5324_ADMIN_APPROVAL_OK");
 
     await cleanup(host, sandbox);
-    await artifacts.writeJson("target-result.json", {
+    await artifacts.target.complete({
       id: "issue-4462-scope-upgrade-approval",
       status: "passed",
     });

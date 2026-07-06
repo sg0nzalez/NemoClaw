@@ -6,6 +6,74 @@ import path from "node:path";
 
 import { redactString } from "./redaction.ts";
 
+export type TargetContract = string | readonly string[];
+
+export type TargetMetadata<Extension extends object = Record<string, unknown>> = {
+  id: string;
+  contract?: TargetContract;
+  contracts?: readonly string[];
+} & Extension;
+
+export type TargetResult<Extension extends object = Record<string, unknown>> = {
+  id: string;
+  status?: string;
+} & Extension;
+
+type TargetEvidenceKind = "metadata" | "result";
+
+function normalizeTargetEvidence(
+  kind: TargetEvidenceKind,
+  value: TargetMetadata | TargetResult,
+): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError(`target ${kind} must be an object`);
+  }
+  if (typeof value.id !== "string" || value.id.trim() === "") {
+    throw new TypeError(`target ${kind} id must be a non-empty string`);
+  }
+  if (
+    kind === "result" &&
+    "status" in value &&
+    (typeof value.status !== "string" || value.status.trim() === "")
+  ) {
+    throw new TypeError("target result status must be a non-empty string");
+  }
+
+  const record = { ...value } as Record<string, unknown>;
+  const singular = record.contract;
+  const plural = record.contracts;
+  if (singular !== undefined && plural !== undefined) {
+    throw new TypeError("target metadata must use either contract or contracts, not both");
+  }
+  const contracts = singular ?? plural;
+  if (contracts !== undefined) {
+    const normalized = typeof contracts === "string" ? [contracts] : contracts;
+    if (!Array.isArray(normalized) || normalized.some((contract) => typeof contract !== "string")) {
+      throw new TypeError("target contracts must be a string or an array of strings");
+    }
+    record.contracts = normalized;
+  }
+  delete record.contract;
+  if (kind === "result") record.status ??= "passed";
+  record.runner = "vitest";
+  return record;
+}
+
+export class TargetEvidenceWriter {
+  constructor(private readonly artifacts: ArtifactSink) {}
+
+  async declare<Extension extends object>(metadata: TargetMetadata<Extension>): Promise<string> {
+    return this.artifacts.writeJson("target.json", normalizeTargetEvidence("metadata", metadata));
+  }
+
+  async complete<Extension extends object>(result: TargetResult<Extension>): Promise<string> {
+    return this.artifacts.writeJson(
+      "target-result.json",
+      normalizeTargetEvidence("result", result),
+    );
+  }
+}
+
 /**
  * The publication boundary for live E2E evidence.
  *
@@ -15,10 +83,12 @@ import { redactString } from "./redaction.ts";
  */
 export class ArtifactSink {
   readonly rootDir: string;
+  readonly target: TargetEvidenceWriter;
   private readonly redactionValues = new Set<string>();
 
   constructor(rootDir: string, redactionValues: Iterable<string> = []) {
     this.rootDir = path.resolve(rootDir);
+    this.target = new TargetEvidenceWriter(this);
     this.addRedactionValues(redactionValues);
   }
 
