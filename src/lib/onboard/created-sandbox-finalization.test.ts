@@ -406,6 +406,38 @@ describe("created OpenClaw sandbox finalization", () => {
     },
   ];
 
+  it("skips image-plugin discovery for a managed OpenClaw image", () => {
+    const discoverFreshOpenClawImagePluginInstalls = vi.fn();
+    const register = vi.fn();
+
+    finalizeCreatedSandbox(
+      {
+        sandboxName: "openclaw",
+        restoreBackupPath: null,
+        preUpgradeBackup: false,
+        targetAgentType: "openclaw",
+        validateManagedDcode: false,
+        provider: "compatible-endpoint",
+        model: "demo",
+        preferredInferenceApi: "openai-completions",
+      },
+      {
+        discoverFreshOpenClawImagePluginInstalls,
+        restoreRecreatedSandboxState: vi.fn(),
+        getDcodeSelectionDrift: vi.fn(),
+        register,
+        note: vi.fn(),
+        error: vi.fn(),
+        exitProcess: (code) => {
+          throw new Error(`unexpected exit ${code}`);
+        },
+      },
+    );
+
+    expect(discoverFreshOpenClawImagePluginInstalls).not.toHaveBeenCalled();
+    expect(register).toHaveBeenCalledWith(undefined);
+  });
+
   it("captures and registers a fresh image plugin baseline without a restore", () => {
     const order: string[] = [];
     const restoreRecreatedSandboxState = vi.fn();
@@ -417,6 +449,7 @@ describe("created OpenClaw sandbox finalization", () => {
         restoreBackupPath: null,
         preUpgradeBackup: false,
         targetAgentType: "openclaw",
+        discoverOpenClawImagePluginInstalls: true,
         validateManagedDcode: false,
         provider: "compatible-endpoint",
         model: "demo",
@@ -463,6 +496,7 @@ describe("created OpenClaw sandbox finalization", () => {
         restoreBackupPath: "/tmp/openclaw-backup",
         preUpgradeBackup: false,
         targetAgentType: "openclaw",
+        discoverOpenClawImagePluginInstalls: true,
         validateManagedDcode: false,
         provider: "compatible-endpoint",
         model: "demo",
@@ -504,6 +538,7 @@ describe("created OpenClaw sandbox finalization", () => {
           restoreBackupPath: "/tmp/openclaw-backup",
           preUpgradeBackup: false,
           targetAgentType: "openclaw",
+          discoverOpenClawImagePluginInstalls: true,
           validateManagedDcode: false,
           provider: "compatible-endpoint",
           model: "demo",
@@ -550,6 +585,7 @@ describe("created OpenClaw sandbox finalization", () => {
           restoreBackupPath: "/tmp/openclaw-backup",
           preUpgradeBackup: false,
           targetAgentType: "openclaw",
+          discoverOpenClawImagePluginInstalls: true,
           validateManagedDcode: false,
           provider: "compatible-endpoint",
           model: "demo",

@@ -539,7 +539,6 @@ const agentOnboard = require("./agent/onboard");
 const agentDefs = require("./agent/defs");
 
 const gatewayState: typeof import("./state/gateway") = require("./state/gateway");
-const notReadyRecreate: typeof import("./onboard/not-ready-recreate") = require("./onboard/not-ready-recreate");
 const openClawPluginRestore: typeof import("./state/openclaw-plugin-restore") = require("./state/openclaw-plugin-restore");
 const sandboxState: typeof import("./state/sandbox") = require("./state/sandbox");
 const validation: typeof import("./validation") = require("./validation");
@@ -597,16 +596,14 @@ import {
   printMessagingProviderMissing,
   printSwapCreationFailed,
 } from "./onboard/preflight-messages";
-import {
-  backupSandboxBeforeRecreate,
-  shouldSkipPreRecreateBackup,
-} from "./onboard/sandbox-backup-on-recreate";
+import { shouldSkipPreRecreateBackup } from "./onboard/sandbox-backup-on-recreate";
 import {
   getResumeSandboxGpuOverrides,
   resolveSandboxGpuConfig,
   type SandboxGpuConfig,
   type SandboxGpuFlag,
 } from "./onboard/sandbox-gpu-mode";
+import { createSandboxRecreateProtection } from "./onboard/sandbox-recreate-protection";
 import type { SelectionDrift } from "./onboard/selection-drift";
 import { formatOnboardConfigSummary, formatSandboxBuildEstimateNote } from "./onboard/summary";
 import type {
@@ -2393,19 +2390,16 @@ async function createSandboxWithBaseImageResolution(
   const sandboxWasLiveDefault = liveExists && wasSandboxDefault(registry.getDefault(), sandboxName);
 
   let pendingStateRestore: BackupResult | null = null;
-  let pendingStateRestoreBackupPath: string | null = null;
   let notReadyRecreateInProgress = false;
-  const requireOpenClawImagePluginProvenance =
+  const customOpenClawImage =
     Boolean(fromDockerfile) && getRequestedSandboxAgentName(agent) === "openclaw";
-
-  pendingStateRestoreBackupPath = notReadyRecreate.selectPreUpgradeBackupForCreate({
-    liveExists,
-    hasExistingRegistryEntry: existingEntry !== null,
-    existingSandboxEntry: existingEntry,
-    requireOpenClawImagePluginProvenance,
+  const recreateProtection = createSandboxRecreateProtection({
     sandboxName,
+    sandboxEntry: existingEntry,
+    customOpenClawImage,
     note,
   });
+  let pendingStateRestoreBackupPath = recreateProtection.selectPreUpgradeBackup(liveExists);
 
   if (liveExists) {
     const existingSandboxState = getSandboxReuseState(sandboxName);
@@ -2552,12 +2546,7 @@ async function createSandboxWithBaseImageResolution(
           }
         } else {
           notReadyRecreateInProgress = true;
-          const outcome = notReadyRecreate.resolveNotReadyOutcome(
-            sandboxName,
-            note,
-            existingEntry,
-            requireOpenClawImagePluginProvenance,
-          );
+          const outcome = recreateProtection.resolveNotReadyOutcome();
           if (outcome.kind === "blocked") {
             for (const hint of outcome.hints) console.error(hint);
             process.exit(1);
@@ -2616,11 +2605,7 @@ async function createSandboxWithBaseImageResolution(
       console.log(`  Messaging credential(s) rotated: ${rotatedNames}`);
       console.log("  Rebuilding sandbox to propagate new credentials to the L7 proxy...");
       if (!shouldSkipPreRecreateBackup(process.env)) {
-        const result = backupSandboxBeforeRecreate({
-          sandboxName,
-          sandboxEntry: existingEntry,
-          requireOpenClawImagePluginProvenance,
-        });
+        const result = recreateProtection.backup();
         if (!result.ok) {
           console.error(
             "  Set NEMOCLAW_RECREATE_WITHOUT_BACKUP=1 to recreate without preserving state.",
@@ -2682,11 +2667,7 @@ async function createSandboxWithBaseImageResolution(
       !shouldSkipPreRecreateBackup(process.env)
     ) {
       note("  Backing up workspace state before recreating sandbox...");
-      const result = backupSandboxBeforeRecreate({
-        sandboxName,
-        sandboxEntry: existingEntry,
-        requireOpenClawImagePluginProvenance,
-      });
+      const result = recreateProtection.backup();
       if (!result.ok) {
         console.error(
           "  Set NEMOCLAW_RECREATE_WITHOUT_BACKUP=1 to recreate without preserving state.",
@@ -2990,6 +2971,7 @@ async function createSandboxWithBaseImageResolution(
       restoreBackupPath,
       preUpgradeBackup: pendingStateRestoreBackupPath !== null,
       targetAgentType: agent?.name ?? "openclaw",
+      discoverOpenClawImagePluginInstalls: customOpenClawImage,
       validateManagedDcode: isManagedDcodeAgent,
       provider,
       model,

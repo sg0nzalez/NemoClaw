@@ -2863,7 +2863,7 @@ const { createSandbox } = require(${onboardPath});
     const restoreEvent = events[restoreIndex];
     assert.equal(restoreEvent?.backupPath, "/tmp/fake-backup-path", "restore must use backup path");
     assert.equal(restoreEvent?.options?.targetAgentType, "openclaw");
-    assert.deepEqual(restoreEvent?.options?.freshOpenClawImagePluginInstalls, []);
+    assert.equal(restoreEvent?.options?.freshOpenClawImagePluginInstalls, undefined);
   });
 
   it("recreate-sandbox with NEMOCLAW_RECREATE_WITHOUT_BACKUP=1 skips backup", {

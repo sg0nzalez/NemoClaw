@@ -18,6 +18,7 @@ export type CreatedSandboxFinalizationOptions = {
   restoreBackupPath: string | null;
   preUpgradeBackup: boolean;
   targetAgentType: string;
+  discoverOpenClawImagePluginInstalls?: boolean;
   validateManagedDcode: boolean;
   provider: string;
   model: string;
@@ -51,7 +52,7 @@ export function finalizeCreatedSandbox(
   deps: CreatedSandboxFinalizationDeps,
 ): void {
   let freshOpenClawImagePluginInstalls: readonly OpenClawImagePluginInstall[] | undefined;
-  if (options.targetAgentType === "openclaw") {
+  if (options.discoverOpenClawImagePluginInstalls === true) {
     const discovery = deps.discoverFreshOpenClawImagePluginInstalls(options.sandboxName);
     if (!discovery.ok) {
       deps.error(
