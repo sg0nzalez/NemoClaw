@@ -93,7 +93,8 @@ describe("config set CLI dispatch", () => {
         settled = true;
       });
 
-      await vi.waitFor(() => expect(configSet).toHaveBeenCalledTimes(1));
+      // Cold oclif command discovery can exceed waitFor's 1s default on shared CI runners.
+      await vi.waitFor(() => expect(configSet).toHaveBeenCalledTimes(1), { timeout: 5_000 });
       expect(configSet).toHaveBeenCalledTimes(1);
       expect(configSet).toHaveBeenCalledWith("test-sandbox", {
         key: "inference.endpoints",
@@ -125,5 +126,5 @@ describe("config set CLI dispatch", () => {
       if (priorRunner) requireCache[runnerPath] = priorRunner;
       else delete requireCache[runnerPath];
     }
-  });
+  }, 10_000);
 });
