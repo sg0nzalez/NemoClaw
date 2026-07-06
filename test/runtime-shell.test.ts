@@ -13,14 +13,15 @@ function runShell(
   script: string,
   env: Record<string, string | undefined> = {},
 ): SpawnSyncReturns<string> {
+  const providedEnv = Object.fromEntries(
+    Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined),
+  );
   const cleanEnv: Record<string, string> = {
     HOME: process.env.HOME ?? os.tmpdir(),
     PATH: process.env.PATH ?? "/usr/bin:/bin",
     TMPDIR: os.tmpdir(),
+    ...providedEnv,
   };
-  for (const [key, value] of Object.entries(env)) {
-    if (value !== undefined) cleanEnv[key] = value;
-  }
 
   return spawnSync("bash", ["--noprofile", "--norc", "-c", script], {
     cwd: path.join(import.meta.dirname, ".."),
