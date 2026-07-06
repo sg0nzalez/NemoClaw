@@ -560,9 +560,8 @@ liveTest(
     );
     await cleanupSandbox(host, sandbox, sandboxName);
 
-    await artifacts.writeJson("target.json", {
+    await artifacts.target.declare({
       id: "inference-routing-invalid-api-key",
-      runner: "vitest",
       contract: [
         "invalid NVIDIA key exits non-zero",
         "output contains credential classification",
@@ -602,9 +601,8 @@ liveTest(
     );
     await cleanupSandbox(host, sandbox, sandboxName);
 
-    await artifacts.writeJson("target.json", {
+    await artifacts.target.declare({
       id: "inference-routing-unreachable-endpoint",
-      runner: "vitest",
       contract: [
         "unreachable custom endpoint exits non-zero",
         "output contains transport classification",
@@ -674,9 +672,8 @@ liveTest(
         "",
       ].join("\n"),
     );
-    await artifacts.writeJson("target.json", {
+    await artifacts.target.declare({
       id: "https-dns-backed-endpoint-fail-closed",
-      runner: "vitest",
       issue: 4684,
       contract: [
         "DNS-backed HTTPS endpoint validation fails closed before handing config to OpenShell",
@@ -743,9 +740,8 @@ liveTest(
     );
     await cleanupSandbox(host, sandbox, sandboxName);
 
-    await artifacts.writeJson("target.json", {
+    await artifacts.target.declare({
       id: "inference-routing-credential-isolation",
-      runner: "vitest",
       contract: [
         "real NVIDIA_INFERENCE_API_KEY does not appear in sandbox environment",
         "real NVIDIA_INFERENCE_API_KEY does not appear in sandbox process list when ps is available",
@@ -925,9 +921,8 @@ liveTest(
     );
     await cleanupSandbox(host, sandbox, sandboxName);
 
-    await artifacts.writeJson("target.json", {
+    await artifacts.target.declare({
       id: "inference-routing-openai",
-      runner: "vitest",
       contract: ["OpenAI provider onboards", "sandbox inference.local routes chat to OpenAI"],
       model,
     });
@@ -973,9 +968,8 @@ liveTest(
     );
     await cleanupSandbox(host, sandbox, sandboxName);
 
-    await artifacts.writeJson("target.json", {
+    await artifacts.target.declare({
       id: "inference-routing-anthropic",
-      runner: "vitest",
       contract: [
         "Anthropic provider onboards",
         "sandbox inference.local routes Messages API to Anthropic",
@@ -1026,9 +1020,8 @@ liveTest(
     );
     await cleanupSandbox(host, sandbox, sandboxName);
 
-    await artifacts.writeJson("target.json", {
+    await artifacts.target.declare({
       id: "inference-routing-compatible-endpoint",
-      runner: "vitest",
       contract: [
         "custom OpenAI-compatible endpoint onboards",
         "sandbox inference.local routes chat to compatible endpoint",

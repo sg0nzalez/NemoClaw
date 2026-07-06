@@ -222,9 +222,8 @@ runLaunchableSmokeTest(
   async ({ artifacts, cleanup, host, sandbox, secrets, skip }) => {
     validateSandboxName(SANDBOX_NAME);
 
-    await artifacts.writeJson("target.json", {
+    await artifacts.target.declare({
       id: "launchable-smoke",
-      runner: "vitest",
       boundary: "ubuntu-launchable-install-flow",
       refs: ["#2599", "#5098"],
       phases: [

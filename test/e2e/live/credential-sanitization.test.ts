@@ -297,9 +297,8 @@ runCredentialSanitizationTest(
       "run `npm run build:cli` before live repo CLI targets",
     ).toBe(true);
 
-    await artifacts.writeJson("target.json", {
+    await artifacts.target.declare({
       id: "credential-sanitization",
-      runner: "vitest",
       boundary: "install-sh-onboard-and-sandbox-exec",
       sandboxName: SANDBOX_NAME,
       contracts: [

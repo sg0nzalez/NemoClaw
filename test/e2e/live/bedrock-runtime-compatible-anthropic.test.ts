@@ -1149,7 +1149,7 @@ async function skipPreContractEndpointValidationRateLimit(options: {
     redactedStdoutTail: evidenceTail(options.onboarding.redactedStdout),
     redactedStderrTail: evidenceTail(options.onboarding.redactedStderr),
   });
-  await options.artifacts.writeJson("target-result.json", {
+  await options.artifacts.target.complete({
     id: "bedrock-runtime-compatible-anthropic",
     status: "skipped",
     reason: BEDROCK_PRE_CONTRACT_ENDPOINT_VALIDATION_SKIP_REASON,
@@ -1253,9 +1253,8 @@ RUN_BEDROCK_TEST(
       }
     });
 
-    await artifacts.writeJson("target.json", {
+    await artifacts.target.declare({
       id: "bedrock-runtime-compatible-anthropic",
-      runner: "vitest",
       refs: ["#3767", "#5098"],
       agent: AGENT,
       sandboxName: SANDBOX_NAME,
@@ -1364,7 +1363,7 @@ RUN_BEDROCK_TEST(
       redact: (text, extraValues) => secrets.redact(text, extraValues),
     });
 
-    await artifacts.writeJson("target-result.json", {
+    await artifacts.target.complete({
       id: "bedrock-runtime-compatible-anthropic",
       agent: AGENT,
       assertions: {

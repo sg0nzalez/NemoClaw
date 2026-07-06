@@ -112,7 +112,7 @@ liveTest(
   "onboard repair resumes missing sandbox and rejects conflicting resume inputs",
   { timeout: LIVE_TIMEOUT_MS },
   async ({ artifacts, cleanup: cleanupRegistry, host, sandbox, skip }) => {
-    await artifacts.writeJson("target.json", {
+    await artifacts.target.declare({
       id: "onboard-repair",
       sandboxName: SANDBOX_NAME,
       otherSandboxName: OTHER_SANDBOX_NAME,
@@ -228,6 +228,6 @@ liveTest(
 
     await cleanup(host, sandbox);
     expect(fs.existsSync(SESSION_FILE)).toBe(false);
-    await artifacts.writeJson("target-result.json", { id: "onboard-repair", status: "passed" });
+    await artifacts.target.complete({ id: "onboard-repair", status: "passed" });
   },
 );

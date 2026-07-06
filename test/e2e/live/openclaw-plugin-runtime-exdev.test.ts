@@ -161,9 +161,8 @@ liveTest(
   "OpenClaw plugin runtime deps replacement survives cross-filesystem EXDEV layout",
   { timeout: ONBOARD_TIMEOUT_MS + PROBE_TIMEOUT_MS + 5 * 60_000 },
   async ({ artifacts, cleanup, host, sandbox, skip }) => {
-    await artifacts.writeJson("target.json", {
+    await artifacts.target.declare({
       id: "openclaw-plugin-runtime-exdev",
-      runner: "vitest",
       boundary: "fresh-openclaw-sandbox-exec",
       regressionTargets: ["#3513", "#3127"],
       contract: [
@@ -291,7 +290,7 @@ liveTest(
     expect(probeText).toContain("source-side staging failure self-check completed");
     expect(probeText).toContain("runtime deps replacement completed");
 
-    await artifacts.writeJson("target-result.json", {
+    await artifacts.target.complete({
       id: "openclaw-plugin-runtime-exdev",
       onboardExitCode: onboard.exitCode,
       filesystemProbeExitCode: df.exitCode,

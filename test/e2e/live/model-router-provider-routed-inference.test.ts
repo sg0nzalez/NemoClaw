@@ -98,9 +98,8 @@ test.skipIf(!shouldRunLiveE2E())(
 
     const apiKey = requireModelRouterPublicKey(secrets);
 
-    await artifacts.writeJson("target.json", {
+    await artifacts.target.declare({
       id: "model-router-provider-routed-inference",
-      runner: "vitest",
       boundary: "direct-cli-onboard-and-sandbox-exec",
       contract: [
         "Docker is available before onboarding",
@@ -209,7 +208,7 @@ test.skipIf(!shouldRunLiveE2E())(
       `Model Router inference.local did not return a routed completion; expected #3255 main-equivalent failure: ${lastCompletion.slice(0, 500)}`,
     ).toBe("ok");
 
-    await artifacts.writeJson("target-result.json", {
+    await artifacts.target.complete({
       id: "model-router-provider-routed-inference",
       assertions: {
         dockerRunning: docker.exitCode === 0,

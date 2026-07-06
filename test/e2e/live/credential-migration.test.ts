@@ -181,9 +181,8 @@ runCredentialMigrationTest(
       fs.rmSync(home, { recursive: true, force: true });
     });
 
-    await artifacts.writeJson("target.json", {
+    await artifacts.target.declare({
       id: "credential-migration",
-      runner: "vitest",
       boundary: "real-onboard-openshell-gateway",
       sandboxName: SANDBOX_NAME,
       contracts: [
@@ -294,7 +293,7 @@ runCredentialMigrationTest(
     expect(fs.existsSync(victimFile), "symlink target must remain present").toBe(true);
     expect(fs.readFileSync(victimFile, "utf-8")).toBe(victimPayload);
 
-    await artifacts.writeJson("target-result.json", {
+    await artifacts.target.complete({
       id: "credential-migration",
       sandboxName: SANDBOX_NAME,
       model: hostedInference.model || CREDENTIAL_MIGRATION_MODEL,

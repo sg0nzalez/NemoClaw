@@ -160,9 +160,8 @@ runIssue4434LiveTest(
     const hosted = requireHostedInferenceConfig(secrets);
     const apiKey = hosted.apiKey;
 
-    await artifacts.writeJson("target.json", {
+    await artifacts.target.declare({
       id: "issue-4434-tui-unreachable-inference",
-      runner: "vitest",
       boundary: [
         "real cloud OpenClaw sandbox",
         "host DOCKER-USER iptables DROP rules",
@@ -517,7 +516,7 @@ runIssue4434LiveTest(
     fs.writeFileSync(captureFile, redactedRawCapture, "utf8");
     const analysis = analyzeIssue4434TuiCapture(redactedRawCapture);
     await artifacts.writeText("openclaw-tui-capture.plain.log", analysis.plain);
-    await artifacts.writeJson("target-result.json", {
+    await artifacts.target.complete({
       id: "issue-4434-tui-unreachable-inference",
       expectExitCode: tui.exitCode,
       visibleError: analysis.visibleError,
