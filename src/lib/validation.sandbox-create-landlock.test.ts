@@ -9,11 +9,11 @@ describe("classifySandboxCreateFailure Landlock failures", () => {
   it.each([
     "Landlock unavailable in hard_requirement mode: not implemented (kernel lacks CONFIG_SECURITY_LANDLOCK)",
     'Landlock path unavailable in hard_requirement mode: /app (path does not exist): failed to open "/app": No such file or directory (os error 2)',
-    "Failed to prepare sandbox: partially incompatible access-rights: Refer",
-    "Failed to prepare sandbox: failed to create a ruleset: Operation not permitted (os error 1)",
-    "Failed to prepare sandbox: failed to add a rule: Invalid argument (os error 22)",
-    "Failed to prepare sandbox: failed to set no_new_privs: Operation not permitted (os error 1)",
-    "Failed to prepare sandbox: failed to restrict the calling thread: Operation not permitted (os error 1)",
+    "Landlock filesystem sandbox unavailable (hard_requirement, will fail): ABI v1 below required ABI v2\nFailed to prepare sandbox: partially incompatible access-rights: Refer",
+    "Landlock filesystem sandbox unavailable (hard_requirement, will fail): ABI v1 below required ABI v2\nFailed to prepare sandbox: failed to create a ruleset: Operation not permitted (os error 1)",
+    "Landlock filesystem sandbox unavailable (hard_requirement, will fail): ABI v1 below required ABI v2\nFailed to prepare sandbox: failed to add a rule: Invalid argument (os error 22)",
+    "Landlock filesystem sandbox unavailable (hard_requirement, will fail): ABI v1 below required ABI v2\nFailed to prepare sandbox: failed to set no_new_privs: Operation not permitted (os error 1)",
+    "Landlock filesystem sandbox unavailable (hard_requirement, will fail): ABI v1 below required ABI v2\nFailed to prepare sandbox: failed to restrict the calling thread: Operation not permitted (os error 1)",
   ])("detects a hard-required Landlock enforcement failure: %s", (message) => {
     const result = classifySandboxCreateFailure(`Created sandbox: test\n${message}`);
 
@@ -44,6 +44,8 @@ describe("classifySandboxCreateFailure Landlock failures", () => {
     "failed to create a ruleset: unrelated build tool failure",
     "failed to add a rule: unrelated policy engine failure",
     "Failed to prepare supervisor identity isolation: failed to create a ruleset",
+    "Failed to prepare sandbox: failed to create a ruleset: unrelated build tool error",
+    "Failed to prepare sandbox: failed to set no_new_privs: Operation not permitted",
   ])("does not classify a non-Landlock sandbox-create error as Landlock: %s", (message) => {
     expect(classifySandboxCreateFailure(`Created sandbox: test\n${message}`).kind).toBe(
       "sandbox_create_incomplete",

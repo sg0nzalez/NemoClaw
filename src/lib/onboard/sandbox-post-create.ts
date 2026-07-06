@@ -26,7 +26,7 @@ export type SandboxPostCreateOptions = {
   messagingProviders: string[];
   providerExistsInGateway: (name: string) => boolean;
   printMessagingProviderMissing: (name: string) => void;
-  landlockCompatibility?: AgentLandlockCompatibility;
+  landlockCompatibility: AgentLandlockCompatibility;
   dockerInfoFormat: (format: string, options?: { ignoreError?: boolean }) => string;
   runCapture: (args: string[], options?: { ignoreError?: boolean }) => string;
   log?: (message: string) => void;
@@ -46,7 +46,7 @@ export function runSandboxPostCreateSteps({
   messagingProviders,
   providerExistsInGateway,
   printMessagingProviderMissing,
-  landlockCompatibility = "best_effort",
+  landlockCompatibility,
   dockerInfoFormat,
   runCapture,
   log = console.log,

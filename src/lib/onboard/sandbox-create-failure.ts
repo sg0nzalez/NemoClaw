@@ -92,7 +92,7 @@ export function handleNonzeroSandboxCreateResult({
     console.error(createResult.output);
   }
   printSandboxCreateFailureDiagnostics(sandboxName, { backupPath });
-  if (failure.kind === "landlock_enforcement_failed") {
+  if (failure.kind === "landlock_enforcement_failed" && failure.uploadedToGateway) {
     removeFailedSandboxForRetry(sandboxName, runOpenshell);
   }
   console.error("  Try:  openshell sandbox list        # check gateway state");

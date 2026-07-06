@@ -120,7 +120,7 @@ describe("sandbox create failure diagnostics", () => {
 });
 
 describe("sandbox create failure handling", () => {
-  it("attempts retry cleanup for hard-required Landlock failures before gateway upload", () => {
+  it("does not delete an existing sandbox when hard-required Landlock fails before gateway upload", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-create-failure-handle-"));
     const messages: string[] = [];
     const deleteCalls: string[][] = [];
@@ -150,7 +150,49 @@ describe("sandbox create failure handling", () => {
         }),
       ).toThrow("exit:1");
 
-      expect(deleteCalls).toEqual([["sandbox", "delete", "dcode-landlock-precreate"]]);
+      expect(deleteCalls).toEqual([]);
+      expect(messages).not.toContain(
+        "  The failed sandbox has been removed; retry will recreate it.",
+      );
+    } finally {
+      console.error = originalError;
+      originalHome === undefined ? delete process.env.HOME : (process.env.HOME = originalHome);
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("removes a failed sandbox when hard-required Landlock output proves gateway creation", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-create-failure-created-"));
+    const messages: string[] = [];
+    const deleteCalls: string[][] = [];
+    const originalError = console.error;
+    const originalHome = process.env.HOME;
+    console.error = (message?: unknown) => {
+      messages.push(String(message ?? ""));
+    };
+    process.env.HOME = tmp;
+
+    try {
+      expect(() =>
+        handleNonzeroSandboxCreateResult({
+          createResult: {
+            status: 1,
+            output:
+              "Created sandbox: dcode-landlock-created\n" +
+              "Landlock unavailable in hard_requirement mode: not enabled in the active LSM set",
+          },
+          sandboxName: "dcode-landlock-created",
+          runOpenshell: (args) => {
+            deleteCalls.push(args);
+            return { status: 0 };
+          },
+          exit: (code) => {
+            throw new Error(`exit:${String(code)}`);
+          },
+        }),
+      ).toThrow("exit:1");
+
+      expect(deleteCalls).toEqual([["sandbox", "delete", "dcode-landlock-created"]]);
       expect(messages).toContain("  The failed sandbox has been removed; retry will recreate it.");
     } finally {
       console.error = originalError;

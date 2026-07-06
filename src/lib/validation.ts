@@ -137,24 +137,27 @@ export function classifySandboxCreateFailure(output = ""): SandboxCreateFailure 
     return { kind: "gpu_cdi_injection_failed", uploadedToGateway };
   }
   // OpenShell 0.0.72 emits the explicit hard_requirement errors below when
-  // Landlock is unavailable or a path cannot be opened. It wraps raw ruleset
-  // preparation errors with "Failed to prepare sandbox:"; requiring that
-  // wrapper avoids collisions with build tools and the separate seccomp path.
+  // Landlock is unavailable or a path cannot be opened. It can also wrap raw
+  // Landlock preparation errors with "Failed to prepare sandbox:"; require a
+  // Landlock/hard_requirement marker elsewhere in the output so unrelated
+  // ruleset, seccomp, or no_new_privs failures stay on the generic path.
   // Best-effort warnings are excluded because they do not abort startup.
   const explicitHardRequirementFailure =
     /Landlock (?:path )?unavailable in hard_requirement mode:/i.test(text);
+  const hardRequiredLandlockContext = /(?:Landlock|hard_requirement)/i.test(text);
   const bestEffortLandlockWarning =
     /Landlock filesystem sandbox unavailable:|Landlock restrict_self failed \(best_effort\):/i.test(
       text,
     );
   const wrappedHardRequirementPreparationFailure =
     !bestEffortLandlockWarning &&
+    hardRequiredLandlockContext &&
     /Failed to prepare sandbox:[^\r\n]*(?:(?:fully|partially) incompatible access-rights|failed to (?:create a ruleset|add a rule|check file descriptor type)|access-rights not handled by the ruleset|incompatible directory-only access-rights)/i.test(
       text,
     );
   const hardRequirementEnforcementFailure =
     !bestEffortLandlockWarning &&
-    /(?:Landlock|hard_requirement|Failed to prepare sandbox:)/i.test(text) &&
+    hardRequiredLandlockContext &&
     (/failed to restrict the calling thread:/i.test(text) ||
       /failed to set no_new_privs:/.test(text));
   if (

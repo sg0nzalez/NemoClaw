@@ -8,6 +8,9 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+// This subprocess test exercises the full onboard FSM wiring with the real
+// failure classifier, registry gate, and readiness tracing. Focused helper
+// tests cover cleanup decisions so this file can stay at the lifecycle level.
 const MESSAGING_ENV_PREFIXES = ["DISCORD_", "SLACK_", "TELEGRAM_", "WHATSAPP_"] as const;
 
 type Scenario = {

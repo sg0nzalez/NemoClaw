@@ -3040,7 +3040,7 @@ async function createSandboxWithBaseImageResolution(
     messagingProviders,
     providerExistsInGateway,
     printMessagingProviderMissing,
-    landlockCompatibility: agent?.landlockCompatibility,
+    landlockCompatibility: agent?.landlockCompatibility ?? "best_effort",
     dockerInfoFormat,
     runCapture,
   });
