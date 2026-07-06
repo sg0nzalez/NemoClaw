@@ -338,9 +338,11 @@ check_local_provider_health() {
       curl -sf "http://localhost:${vllm_port}/v1/models" >/dev/null 2>&1
       ;;
     ollama-local)
-      local ollama_container_port
-      ollama_container_port="$(get_ollama_container_port)" || return 1
-      curl -sf "http://localhost:${ollama_container_port}/api/tags" >/dev/null 2>&1
+      # Health checks validate the host daemon. The sandbox-facing provider URL
+      # can still use the auth proxy on non-WSL hosts.
+      local ollama_port="${NEMOCLAW_OLLAMA_PORT:-11434}"
+      _validate_port NEMOCLAW_OLLAMA_PORT "$ollama_port" || return 1
+      curl -sf "http://127.0.0.1:${ollama_port}/api/tags" >/dev/null 2>&1
       ;;
     *)
       return 1
