@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -16,25 +17,19 @@ const REVIEW_PATH = path.join(
   "e2e-weather-plugin-fixture-dependency-review.md",
 );
 
-function collectFixtureLockfiles(dir: string): string[] {
-  const lockfiles: string[] = [];
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (entry.name === "node_modules") continue;
-    const entryPath = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      lockfiles.push(...collectFixtureLockfiles(entryPath));
-    } else if (entry.name === "package-lock.json") {
-      lockfiles.push(path.relative(REPO_ROOT, entryPath).split(path.sep).join("/"));
-    }
-  }
-  return lockfiles.sort();
-}
-
 describe("E2E fixture dependency review", () => {
   const review = fs.readFileSync(REVIEW_PATH, "utf8");
 
   it("records every committed fixture lockfile in the checked-in review", () => {
-    const lockfiles = collectFixtureLockfiles(FIXTURES_ROOT);
+    const lockfiles = execFileSync(
+      "git",
+      ["ls-files", "--", "test/e2e/fixtures/**/package-lock.json"],
+      { cwd: REPO_ROOT, encoding: "utf8" },
+    )
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .sort();
     expect(lockfiles.length).toBeGreaterThan(0);
     for (const lockfile of lockfiles) {
       expect(review, lockfile).toContain(`- \`${lockfile}\``);
@@ -78,8 +73,9 @@ describe("E2E fixture dependency review", () => {
     const lockfile = JSON.parse(lockfileText) as {
       packages?: Record<string, { resolved?: unknown; integrity?: unknown }>;
     };
-    for (const [packagePath, entry] of Object.entries(lockfile.packages ?? {})) {
-      if (packagePath.length === 0) continue;
+    for (const [packagePath, entry] of Object.entries(lockfile.packages ?? {}).filter(
+      ([packagePath]) => packagePath.length > 0,
+    )) {
       expect(entry.resolved, packagePath).toEqual(expect.any(String));
       expect(entry.integrity, packagePath).toEqual(expect.any(String));
     }
