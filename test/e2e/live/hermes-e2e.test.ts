@@ -7,7 +7,7 @@ import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
-import { shellQuote } from "../fixtures/clients/command.ts";
+import { resultText, shellQuote } from "../fixtures/clients/command.ts";
 import { trustedProviderEndpoint } from "../fixtures/clients/provider.ts";
 import { trustedSandboxShellScript, validateSandboxName } from "../fixtures/clients/sandbox.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
@@ -55,10 +55,6 @@ interface OpenAiChoiceLike {
 
 interface OpenAiChatLike {
   choices?: OpenAiChoiceLike[];
-}
-
-function resultText(result: Pick<ShellProbeResult, "stdout" | "stderr">): string {
-  return [result.stdout, result.stderr].filter(Boolean).join("\n");
 }
 
 function truthyEnv(value: string | undefined): boolean {

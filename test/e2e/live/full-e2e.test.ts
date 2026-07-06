@@ -4,10 +4,10 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-
 import { containsInteger42Answer } from "../../helpers/e2e-answer-assertions.ts";
 import type { ArtifactSink } from "../fixtures/artifacts.ts";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
+import { resultText } from "../fixtures/clients/command.ts";
 import { type HostCliClient } from "../fixtures/clients/host.ts";
 import {
   type SandboxClient,
@@ -62,10 +62,6 @@ function env(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
     ...securityPostureModeEnv(),
     ...extra,
   };
-}
-
-function resultText(result: Pick<ShellProbeResult, "stdout" | "stderr">): string {
-  return [result.stdout, result.stderr].filter(Boolean).join("\n");
 }
 
 async function repoNemoclaw(
