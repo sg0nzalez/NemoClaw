@@ -67,7 +67,7 @@ export function classifyOpenClawRuntimeFailure(
   }
 
   const match = result.stdout.match(
-    /(?:^|\n)\s*(?:(?:\[stdout\]|stdout:)\s*)?nemoclaw-runtime-probe-v1 log=([01]) start=([01]) config=([01])(?:\r?\n|$)/i,
+    /(?:^|\n)[ ]*(?:(?:\[stdout\]|stdout:)[ ]*)?nemoclaw-runtime-probe-v1 log=([01]) start=([01]) config=([01])(?:\r?\n|$)/,
   );
   if (result.status !== 0 || !match) {
     return {

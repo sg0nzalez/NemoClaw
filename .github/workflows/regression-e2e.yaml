@@ -207,7 +207,6 @@ jobs:
             /tmp/nemoclaw-e2e-openshell-version-pin-downloads.log
           if-no-files-found: ignore
 
-
   # ── Gateway drift preflight E2E ─────────────────────────────
   # Coverage guard for #3399 / #3423. A stale OpenShell gateway image can
   # make sandbox-state RPCs fail with protobuf invalid-wire decode errors.
@@ -281,6 +280,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    # Cold-cache custom-image onboarding, gateway restart, rebuild, and EXDEV
+    # proof can exceed 45 minutes, so this lane keeps a bounded 75-minute budget.
     timeout-minutes: 75
     steps:
       - name: Checkout

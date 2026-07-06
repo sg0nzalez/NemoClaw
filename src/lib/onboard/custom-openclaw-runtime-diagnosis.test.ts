@@ -66,6 +66,16 @@ describe("classifyOpenClawRuntimeFailure", () => {
       { status: 1, stdout: "nemoclaw-runtime-probe-v1 log=0 start=0 config=0", stderr: "" },
     ],
     ["malformed output", probeResult("not a runtime probe frame")],
+    [
+      "ANSI-prefixed output",
+      probeResult("\u001b[31mnemoclaw-runtime-probe-v1 log=0 start=0 config=0"),
+    ],
+    ["tab-prefixed output", probeResult("\tnemoclaw-runtime-probe-v1 log=0 start=0 config=0")],
+    [
+      "form-feed-prefixed output",
+      probeResult("\fnemoclaw-runtime-probe-v1 log=0 start=0 config=0"),
+    ],
+    ["case-altered marker", probeResult("NEMOCLAW-runtime-probe-v1 log=0 start=0 config=0")],
   ])("keeps a %s inconclusive", (_name, probe) => {
     const result = classifyOpenClawRuntimeFailure("my-sandbox", () => probe);
     expect(result).toEqual({

@@ -60,6 +60,9 @@ const HOME_DIR = path.resolve(process.env.HOME || os.homedir());
 const REBUILD_BACKUPS_DIR = path.join(HOME_DIR, ".nemoclaw", "rebuild-backups");
 
 const MANIFEST_VERSION = 1;
+// The parser accepts at most 128 records with 4 KiB install paths, leaving
+// ample room for IDs and metadata while bounding sandbox-controlled output.
+const OPENCLAW_PLUGIN_INSTALL_REGISTRY_MAX_BYTES = 1024 * 1024;
 
 function parseJson<T>(text: string): T {
   return JSON.parse(text);
@@ -674,7 +677,7 @@ function readFreshOpenClawPluginInstallIndex(
     {
       stdio: ["ignore", "pipe", "pipe"],
       timeout: 30000,
-      maxBuffer: 4 * 1024 * 1024,
+      maxBuffer: OPENCLAW_PLUGIN_INSTALL_REGISTRY_MAX_BYTES,
     },
   );
   if (sqliteResult.status !== 2 || sqliteResult.error || sqliteResult.signal) return sqliteResult;
@@ -686,7 +689,7 @@ function readFreshOpenClawPluginInstallIndex(
     {
       stdio: ["ignore", "pipe", "pipe"],
       timeout: 30000,
-      maxBuffer: 4 * 1024 * 1024,
+      maxBuffer: OPENCLAW_PLUGIN_INSTALL_REGISTRY_MAX_BYTES,
     },
   );
 }
@@ -697,6 +700,12 @@ function discoverFreshOpenClawPluginExtensionDirs(
   dir: string,
 ): OpenClawManagedExtensionDiscoveryResult {
   const result = readFreshOpenClawPluginInstallIndex(configFile, sandboxName, dir);
+  if (
+    result.stdout &&
+    Buffer.byteLength(result.stdout) > OPENCLAW_PLUGIN_INSTALL_REGISTRY_MAX_BYTES
+  ) {
+    return { ok: false, error: "fresh OpenClaw plugin install registry response too large" };
+  }
   if (result.status !== 0 || result.error || result.signal || !result.stdout) {
     return { ok: false, error: "could not read fresh OpenClaw plugin install registry" };
   }
@@ -715,6 +724,10 @@ function discoverFreshOpenClawPluginExtensionDirs(
     ? parsed
     : { ok: false, error: "fresh OpenClaw plugin install registry failed validation" };
 }
+
+export const __test = {
+  discoverFreshOpenClawPluginExtensionDirs,
+};
 
 function normalizeStateFileSpec(spec: AgentStateFile | StateFileSpec): StateFileSpec | null {
   const normalized = normalizeStateFilePath(spec.path);

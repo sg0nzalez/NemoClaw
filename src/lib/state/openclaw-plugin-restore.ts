@@ -7,6 +7,9 @@ import { isRecord } from "../core/json-types.js";
 import { shellQuote } from "../core/shell-quote.js";
 
 const MAX_OPENCLAW_IMAGE_MANAGED_PLUGIN_INSTALLS = 128;
+// Bound sandbox-controlled registry strings before path normalization.
+const MAX_OPENCLAW_PLUGIN_INSTALL_PATH_LENGTH = 4096;
+const MAX_OPENCLAW_PLUGIN_INSTALL_PATH_SEGMENTS = 64;
 const OPENCLAW_EXTENSION_GLOB_CHARS = ["/", "\\", "*", "?", "[", "]"] as const;
 
 export type OpenClawManagedExtensionDiscoveryResult =
@@ -88,7 +91,13 @@ export function parseFreshOpenClawPluginExtensionDirs(
     if (!isRecord(install)) {
       return { ok: false, error: `fresh OpenClaw plugin install metadata is invalid: ${id}` };
     }
-    if (typeof install.installPath !== "string" || !path.posix.isAbsolute(install.installPath)) {
+    if (
+      typeof install.installPath !== "string" ||
+      install.installPath.length > MAX_OPENCLAW_PLUGIN_INSTALL_PATH_LENGTH ||
+      install.installPath.split("/").filter(Boolean).length >
+        MAX_OPENCLAW_PLUGIN_INSTALL_PATH_SEGMENTS ||
+      !path.posix.isAbsolute(install.installPath)
+    ) {
       return { ok: false, error: `fresh OpenClaw plugin install path is invalid for ${id}` };
     }
     const normalizedInstallPath = path.posix.normalize(install.installPath);

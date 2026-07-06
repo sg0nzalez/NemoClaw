@@ -11,6 +11,14 @@ content:
 skill:
   priority: 20
 ---
+
+<Warning>
+This is a source-based workaround until the managed plugin lifecycle in [issue #5998](https://github.com/NVIDIA/NemoClaw/issues/5998) is available.
+It requires a source checkout and base image that exactly match your installed NemoClaw CLI.
+The example below targets NemoClaw `v0.0.71` and its pinned OpenClaw `2026.5.27` runtime.
+For another release, replace every `v0.0.71` occurrence and use the OpenClaw version pinned by that release wherever this example uses `2026.5.27`.
+</Warning>
+
 OpenClaw plugins extend the OpenClaw runtime with hooks, services, tools, or provider integrations.
 They are different from NemoClaw-managed agent skills:
 
@@ -18,7 +26,7 @@ They are different from NemoClaw-managed agent skills:
 - **Skills** are `SKILL.md` directories that teach an agent how to perform a task.
 - **Policy presets** are network-egress rules that control what sandboxed code can reach.
 
-Until NemoClaw provides a managed plugin lifecycle, bake the plugin into a version-matched full NemoClaw runtime image.
+Until NemoClaw provides that managed lifecycle, bake the plugin into a version-matched full NemoClaw runtime image.
 
 ## Understand the Custom Image Contract
 

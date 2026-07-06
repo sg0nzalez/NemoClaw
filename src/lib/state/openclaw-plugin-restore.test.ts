@@ -132,6 +132,11 @@ describe("parseFreshOpenClawPluginExtensionDirs", () => {
     ["a traversal ID", { "../weather": install(`${OPENCLAW_DIR}/extensions/../weather`) }],
     ["a nested install path", { weather: install(`${OPENCLAW_DIR}/extensions/nested/weather`) }],
     ["a noncanonical install path", { weather: install(`${OPENCLAW_DIR}/extensions/../weather`) }],
+    ["an oversized install path", { weather: install(`/${"a".repeat(4096)}`) }],
+    [
+      "an excessively deep install path",
+      { weather: install(`/${Array.from({ length: 65 }, () => "a").join("/")}`) },
+    ],
     ["a glob extension directory", { weather: install(`${OPENCLAW_DIR}/extensions/*`) }],
     ["non-object metadata", { weather: "invalid" }],
   ])("rejects %s", (_label, installs) => {
@@ -160,5 +165,15 @@ describe("parseFreshOpenClawPluginExtensionDirs", () => {
       ok: false,
       error: "fresh OpenClaw registry has too many plugin installs (129)",
     });
+  });
+
+  it("accepts the 64-component install-path boundary", () => {
+    const installPath = `/${Array.from({ length: 64 }, () => "a").join("/")}`;
+    expect(
+      parseFreshOpenClawPluginExtensionDirs(
+        { version: 1, installRecords: { weather: install(installPath) } },
+        OPENCLAW_DIR,
+      ),
+    ).toEqual({ ok: true, extensionDirs: [] });
   });
 });
