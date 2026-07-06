@@ -8,9 +8,10 @@
 
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
-type Settings = {
+export type Settings = {
   model: string;
   baseUrl: string;
   providerKey: string;
@@ -86,16 +87,26 @@ function tomlArray(values: readonly string[]): string {
   return `[${values.map(tomlString).join(", ")}]`;
 }
 
-function modelNameForOpenAiProvider(model: string): string {
-  const trimmed = model.trim();
-  const providerSeparator = trimmed.indexOf(":");
-  if (providerSeparator > 0) {
-    return trimmed.slice(providerSeparator + 1);
-  }
-  return trimmed;
+/**
+ * Return the model identifier NemoClaw should write into the deepagents
+ * config.toml as the value NemoClaw prepends `openai:` to.
+ *
+ * Historical behaviour stripped a leading "<provider>:" prefix on the
+ * theory that `NEMOCLAW_MODEL` might be delivered in `openai:foo` shape.
+ * In practice NemoClaw always passes the bare model id: see
+ * `src/lib/onboard/providers.ts::getNonInteractiveModel`, and the
+ * `NEMOCLAW_MODEL` build-arg validator whose regex explicitly allows `:`
+ * inside legal model ids. The old strip silently ate the leading segment
+ * of Ollama tags such as `qwen2.5:7b` — the `:` there is Ollama's
+ * `name:tag` separator, not a provider prefix — producing `openai:7b` in
+ * place of `openai:qwen2.5:7b` (#6325). Pass the model through verbatim;
+ * the `openai:` prefix is prepended by `buildConfig`.
+ */
+export function modelNameForOpenAiProvider(model: string): string {
+  return model.trim();
 }
 
-function buildConfig(settings: Settings): string {
+export function buildConfig(settings: Settings): string {
   const model = modelNameForOpenAiProvider(settings.model);
   const defaultModel = `openai:${model}`;
   return [
@@ -123,7 +134,7 @@ function buildConfig(settings: Settings): string {
   ].join("\n");
 }
 
-function main(): void {
+export function main(): void {
   const settings = readSettings(process.env);
   const configDir = join(homedir(), ".deepagents");
   mkdirSync(join(configDir, ".state"), { recursive: true, mode: 0o770 });
@@ -138,4 +149,8 @@ function main(): void {
   );
 }
 
-main();
+function isMainModule(): boolean {
+  return process.argv[1] ? import.meta.url === pathToFileURL(resolve(process.argv[1])).href : false;
+}
+
+if (isMainModule()) main();
