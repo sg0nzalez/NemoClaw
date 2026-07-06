@@ -158,9 +158,6 @@ export interface RestoreOptions {
    * directories over the backup.
    */
   preserveFreshOpenClawPluginInstalls?: boolean;
-}
-
-export interface RestoreOptions {
   /** Optional file-specific restore capability authorized by the caller. */
   stateFileRestorePolicy?: StateFileRestorePolicy;
 }
