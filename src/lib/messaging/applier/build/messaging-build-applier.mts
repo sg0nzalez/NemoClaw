@@ -16,6 +16,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { discordManifest } from "../../channels/discord/manifest.ts";
+import { googlechatManifest } from "../../channels/googlechat/manifest.ts";
 import { slackManifest } from "../../channels/slack/manifest.ts";
 import { teamsManifest } from "../../channels/teams/manifest.ts";
 import { telegramManifest } from "../../channels/telegram/manifest.ts";
@@ -149,6 +150,7 @@ const TRUSTED_CHANNEL_MANIFESTS: readonly ChannelManifest[] = [
   slackManifest,
   whatsappManifest,
   teamsManifest,
+  googlechatManifest,
 ] as const;
 
 function isPinnedHermesUvPackageSpec(spec: string): boolean {

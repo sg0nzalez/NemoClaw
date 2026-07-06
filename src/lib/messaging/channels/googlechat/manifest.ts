@@ -250,6 +250,13 @@ export const googlechatManifest = {
       manager: "openclaw-plugin",
       spec: "npm:@openclaw/googlechat@{{openclaw.version}}",
       pin: true,
+      integrityByVersion: {
+        "2026.6.10":
+          "sha512-3ay7CEcNs2BKj4Y3IkqLIp2B+8RXRmWDFFGPkWk3qSjHRl3rsROpBFUDBbJI+33SzNsAubWum7mOo08by5i7LQ==",
+      },
+      tarballUrlByVersion: {
+        "2026.6.10": "https://registry.npmjs.org/@openclaw/googlechat/-/googlechat-2026.6.10.tgz",
+      },
       required: true,
     },
   ],

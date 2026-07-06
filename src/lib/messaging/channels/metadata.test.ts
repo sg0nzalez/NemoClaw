@@ -141,6 +141,7 @@ describe("built-in messaging channel metadata", () => {
       "slack",
       "whatsapp",
       "msteams",
+      "googlechat",
     ]);
     expect(
       Object.fromEntries(
@@ -228,6 +229,11 @@ describe("built-in messaging channel metadata", () => {
         packageKey: "teams/openclawPluginPackage",
         committedIntegrity:
           "sha512-GjHnCPvjbnI0C7mEFcdT2uKDH4/WwOe2dZBfQiWxBtkE76m6TNG0J9dJjD4mc8/pk8rXSO0cWw+KV9jzWtF9VA==",
+      },
+      {
+        packageKey: "googlechat/openclawPluginPackage",
+        committedIntegrity:
+          "sha512-3ay7CEcNs2BKj4Y3IkqLIp2B+8RXRmWDFFGPkWk3qSjHRl3rsROpBFUDBbJI+33SzNsAubWum7mOo08by5i7LQ==",
       },
     ]);
   });

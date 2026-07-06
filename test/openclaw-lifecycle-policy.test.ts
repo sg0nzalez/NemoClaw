@@ -107,6 +107,7 @@ describe("reviewed npm lifecycle policy", () => {
         "@openclaw/brave-plugin@2026.6.10",
         "@openclaw/diagnostics-otel@2026.6.10",
         "@openclaw/discord@2026.6.10",
+        "@openclaw/googlechat@2026.6.10",
         "@openclaw/msteams@2026.6.10",
         "@openclaw/slack@2026.6.10",
         "@openclaw/whatsapp@2026.6.10",

@@ -653,7 +653,7 @@ export function stopCloudflared(opts: ServiceOptions = {}): void {
   stopService(pidDir, "cloudflared");
 }
 
- /**
+/**
  * Sandbox name for tunnel-origin registration: same option/env precedence as
  * the other service commands, gated on the safe-name rules, but without the
  * registry default-sandbox fallback (registration is skipped rather than
