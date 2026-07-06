@@ -20,6 +20,9 @@ export function createDefaultGooglechatTunnelGateOptions(): GooglechatTunnelAudi
         execSync("command -v cloudflared", { stdio: ["ignore", "ignore", "ignore"] });
         return true;
       } catch {
+        // Not found or unprobeable — `command -v` exits non-zero (execSync
+        // throws) when cloudflared is absent; either way, treat as absent and
+        // let the gate prompt the user to install it.
         return false;
       }
     },
