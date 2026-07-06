@@ -492,7 +492,7 @@ When all three paths are absent, the CLI reports that the image lacks the NemoCl
 This failure commonly occurs when the custom Dockerfile starts from `ghcr.io/nvidia/nemoclaw/sandbox-base` alone because that image is an intermediate dependency image.
 
 Rebuild the custom image from the full stock Dockerfile and source context for the same NemoClaw release.
-For the version-pinned plugin workflow, refer to [Install OpenClaw Plugins](../manage-sandboxes/install-openclaw-plugins).
+For the version-pinned plugin workflow, refer to [Install OpenClaw Plugins](../deployment/install-openclaw-plugins).
 
 If the sandbox is unreachable or the managed runtime paths are present, NemoClaw retains the existing generic gateway-log and host OpenShell-log guidance because the base-only failure is not proven.
 
