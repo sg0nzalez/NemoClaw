@@ -158,6 +158,7 @@ function createAgentBaseImageResolutionOptions(
     rootDir: ROOT,
     pinnedRemoteRef,
     preferPinnedRemoteRef: agent.name === "hermes" && pinnedRemoteRef !== undefined,
+    requirePinnedRemoteRef: agent.name === "hermes" && pinnedRemoteRef !== undefined,
     validateImage,
     validationDescription:
       agent.name === "hermes" ? "the required MCP Streamable HTTP runtime" : undefined,

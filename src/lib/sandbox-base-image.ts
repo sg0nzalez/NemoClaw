@@ -141,8 +141,21 @@ function resolvePulledCandidate(
   }
 
   const repoDigest = getRepoDigest(imageName, imageRef);
+  const resolvedRef = repoDigest?.ref || imageRef;
+  if (
+    options.requirePinnedRemoteRef === true &&
+    source !== "override" &&
+    source !== "pinned" &&
+    resolvedRef !== options.pinnedRemoteRef
+  ) {
+    addTraceEvent("nemoclaw.sandbox_base_image.remote_candidate_rejected", {
+      source,
+      reason: "not_pinned_remote_ref",
+    });
+    return null;
+  }
   return {
-    ref: repoDigest?.ref || imageRef,
+    ref: resolvedRef,
     digest: repoDigest?.digest || null,
     source,
     glibcVersion,
@@ -302,7 +315,11 @@ export function resolveSandboxBaseImage(
     if (resolved) return finish(resolved);
   }
 
-  if (options.requireOpenshellSandboxAbi || options.validateImage) {
+  if (
+    options.requireOpenshellSandboxAbi ||
+    options.validateImage ||
+    options.requirePinnedRemoteRef
+  ) {
     const local = resolveLocalCandidate(options);
     return local ? finish(local) : null;
   }

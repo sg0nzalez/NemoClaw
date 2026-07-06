@@ -63,6 +63,7 @@ describe("agent base image provisioning", () => {
         expect.objectContaining({
           pinnedRemoteRef: trackedRef?.[1],
           preferPinnedRemoteRef: true,
+          requirePinnedRemoteRef: true,
         }),
       );
 
