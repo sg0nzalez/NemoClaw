@@ -192,20 +192,35 @@ describe("shell runtime helpers", () => {
 
   it("returns the raw Ollama port only for WSL Docker Desktop loopback routing (#3136)", () => {
     const binDir = createFakeDockerInfo("Docker Desktop");
-    const result = runShell(
-      `uname() { printf '5.15.90.1-microsoft-standard-WSL2\\n'; }
-       source "${RUNTIME_SH}"
-       get_local_provider_base_url ollama-local`,
-      { PATH: `${binDir}:/usr/bin:/bin` },
-    );
-    expect(result.status).toBe(0);
-    expect(result.stdout.trim()).toBe("http://host.openshell.internal:11434/v1");
-    fs.rmSync(binDir, { recursive: true, force: true });
+    try {
+      const result = runShell(
+        `uname() {
+           case "$1" in
+             -s) printf 'Linux\\n' ;;
+             -r) printf '5.15.90.1-microsoft-standard-WSL2\\n' ;;
+             *) printf 'Linux\\n' ;;
+           esac
+         }
+         source "${RUNTIME_SH}"
+         get_local_provider_base_url ollama-local`,
+        { PATH: `${binDir}:/usr/bin:/bin` },
+      );
+      expect(result.status).toBe(0);
+      expect(result.stdout.trim()).toBe("http://host.openshell.internal:11434/v1");
+    } finally {
+      fs.rmSync(binDir, { recursive: true, force: true });
+    }
   });
 
-  it("detects WSL from WSL_DISTRO_NAME (#3136)", () => {
+  it("detects WSL from WSL_DISTRO_NAME on Linux (#3136)", () => {
     const result = runShell(
-      `uname() { printf '23.0.0-darwin\\n'; }
+      `uname() {
+         case "$1" in
+           -s) printf 'Linux\\n' ;;
+           -r) printf '6.1.0\\n' ;;
+           *) printf 'Linux\\n' ;;
+         esac
+       }
        source "${RUNTIME_SH}"
        is_wsl_runtime`,
       { WSL_DISTRO_NAME: "Ubuntu" },
@@ -213,14 +228,46 @@ describe("shell runtime helpers", () => {
     expect(result.status).toBe(0);
   });
 
-  it("detects WSL from WSL_INTEROP (#3136)", () => {
+  it("detects WSL from WSL_INTEROP on Linux (#3136)", () => {
     const result = runShell(
-      `uname() { printf '23.0.0-darwin\\n'; }
+      `uname() {
+         case "$1" in
+           -s) printf 'Linux\\n' ;;
+           -r) printf '6.1.0\\n' ;;
+           *) printf 'Linux\\n' ;;
+         esac
+       }
        source "${RUNTIME_SH}"
        is_wsl_runtime`,
       { WSL_INTEROP: "/run/WSL/123_interop" },
     );
     expect(result.status).toBe(0);
+  });
+
+  it("ignores WSL env on non-Linux hosts and keeps ollama-local on the proxy route (#3136)", () => {
+    const binDir = createFakeDockerInfo("Docker Desktop");
+    try {
+      const result = runShell(
+        `uname() {
+           case "$1" in
+             -s) printf 'Darwin\\n' ;;
+             -r) printf '23.0.0-darwin\\n' ;;
+             *) printf 'Darwin\\n' ;;
+           esac
+         }
+         source "${RUNTIME_SH}"
+         get_local_provider_base_url ollama-local`,
+        {
+          PATH: `${binDir}:/usr/bin:/bin`,
+          WSL_DISTRO_NAME: "Ubuntu",
+          WSL_INTEROP: "/run/WSL/123_interop",
+        },
+      );
+      expect(result.status).toBe(0);
+      expect(result.stdout.trim()).toBe("http://host.openshell.internal:11435/v1");
+    } finally {
+      fs.rmSync(binDir, { recursive: true, force: true });
+    }
   });
 
   it("honors the configured Ollama proxy port for sandbox-facing URLs (#3136)", () => {
@@ -252,16 +299,25 @@ describe("shell runtime helpers", () => {
 
   it("rejects an invalid Ollama raw port on the WSL Docker Desktop path (#3136)", () => {
     const binDir = createFakeDockerInfo("Docker Desktop");
-    const result = runShell(
-      `uname() { printf '5.15.90.1-microsoft-standard-WSL2\\n'; }
-       source "${RUNTIME_SH}"
-       get_local_provider_base_url ollama-local`,
-      { NEMOCLAW_OLLAMA_PORT: "bad", PATH: `${binDir}:/usr/bin:/bin` },
-    );
-    expect(result.status).not.toBe(0);
-    expect(result.stdout).toBe("");
-    expect(result.stderr).toContain("Invalid NEMOCLAW_OLLAMA_PORT=bad");
-    fs.rmSync(binDir, { recursive: true, force: true });
+    try {
+      const result = runShell(
+        `uname() {
+           case "$1" in
+             -s) printf 'Linux\\n' ;;
+             -r) printf '5.15.90.1-microsoft-standard-WSL2\\n' ;;
+             *) printf 'Linux\\n' ;;
+           esac
+         }
+         source "${RUNTIME_SH}"
+         get_local_provider_base_url ollama-local`,
+        { NEMOCLAW_OLLAMA_PORT: "bad", PATH: `${binDir}:/usr/bin:/bin` },
+      );
+      expect(result.status).not.toBe(0);
+      expect(result.stdout).toBe("");
+      expect(result.stderr).toContain("Invalid NEMOCLAW_OLLAMA_PORT=bad");
+    } finally {
+      fs.rmSync(binDir, { recursive: true, force: true });
+    }
   });
 
   it("falls back to the Ollama proxy when Docker runtime detection is unavailable (#3136)", () => {
@@ -306,15 +362,24 @@ describe("shell runtime helpers", () => {
 
   it("keeps non-WSL Docker Desktop on the managed proxy route (#3136)", () => {
     const binDir = createFakeDockerInfo("Docker Desktop");
-    const result = runShell(
-      `uname() { printf '23.0.0-darwin\\n'; }
-       source "${RUNTIME_SH}"
-       get_local_provider_base_url ollama-local`,
-      { PATH: `${binDir}:/usr/bin:/bin` },
-    );
-    expect(result.status).toBe(0);
-    expect(result.stdout.trim()).toBe("http://host.openshell.internal:11435/v1");
-    fs.rmSync(binDir, { recursive: true, force: true });
+    try {
+      const result = runShell(
+        `uname() {
+           case "$1" in
+             -s) printf 'Darwin\\n' ;;
+             -r) printf '23.0.0-darwin\\n' ;;
+             *) printf 'Darwin\\n' ;;
+           esac
+         }
+         source "${RUNTIME_SH}"
+         get_local_provider_base_url ollama-local`,
+        { PATH: `${binDir}:/usr/bin:/bin` },
+      );
+      expect(result.status).toBe(0);
+      expect(result.stdout.trim()).toBe("http://host.openshell.internal:11435/v1");
+    } finally {
+      fs.rmSync(binDir, { recursive: true, force: true });
+    }
   });
 
   it("rejects unknown local providers", () => {

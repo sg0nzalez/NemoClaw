@@ -119,6 +119,12 @@ is_wsl_runtime() {
   # Remove this local workaround after OpenShell exposes one uniform
   # sandbox-to-host local-service route for WSL and non-WSL runtimes. Review by
   # 2026-12-31.
+  local system_name
+  system_name="$(uname -s 2>/dev/null || true)"
+  if [ "$system_name" != "Linux" ]; then
+    return 1
+  fi
+
   if [ -n "${WSL_DISTRO_NAME:-}" ] || [ -n "${WSL_INTEROP:-}" ]; then
     return 0
   fi
@@ -166,6 +172,8 @@ get_ollama_container_port() {
     _validate_port NEMOCLAW_OLLAMA_PORT "$ollama_port" || return 1
     printf '%s\n' "$ollama_port"
   else
+    # The WSL Docker Desktop loopback path does not use the proxy listener, so
+    # the raw/proxy equality check is only required when both listeners coexist.
     _validate_port NEMOCLAW_OLLAMA_PROXY_PORT "$ollama_proxy_port" || return 1
     if [ "$ollama_port" = "$ollama_proxy_port" ]; then
       printf 'Invalid NEMOCLAW_OLLAMA_PROXY_PORT=%s (must differ from NEMOCLAW_OLLAMA_PORT on non-WSL hosts)\n' "$ollama_proxy_port" >&2

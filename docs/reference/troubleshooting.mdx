@@ -1738,6 +1738,10 @@ This managed route is the supported NemoClaw fix for local Ollama. It does not
 make manually created OpenShell providers or direct sandbox curls that use
 `host.docker.internal:11434` portable; those literal routes remain outside the
 managed `ollama-local` path and can still fail inside k3s.
+On WSL with Docker Desktop, NemoClaw detects the loopback-capable runtime and
+can use the raw `11434` route because Docker Desktop bridges the WSL host
+loopback back into containers. Other runtimes keep the auth-proxy route by
+default.
 If you need a different host service exposed to the sandbox, route it through
 the OpenShell gateway rather than relying on `host.docker.internal`.
 Refer to issue [#3136](https://github.com/NVIDIA/NemoClaw/issues/3136).
