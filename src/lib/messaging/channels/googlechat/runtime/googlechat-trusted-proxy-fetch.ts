@@ -78,7 +78,15 @@ export const trustedProxyFetchPatchInternals = {};
 
   function isOpenClawGooglechatFile(filename) {
     var normalized = String(filename || "").replace(/\\/g, "/");
-    return normalized.indexOf("/@openclaw/googlechat/") !== -1 && normalized.endsWith(".js");
+    if (!normalized.endsWith(".js")) return false;
+    // The plugin loads either from a package path (/@openclaw/googlechat/) or, when
+    // installed as an external extension (openclaw plugins install), flat from
+    // ~/.openclaw/extensions/googlechat/dist/. Match both; the BUNDLE_MARKER gate in
+    // patchTrustedProxyFetchSource still confines the rewrite to the google-auth chunk.
+    return (
+      normalized.indexOf("/@openclaw/googlechat/") !== -1 ||
+      normalized.indexOf("/extensions/googlechat/") !== -1
+    );
   }
 
   // Site A — createGoogleAuthFetch: the guarded fetch passes an env-proxy
@@ -216,6 +224,7 @@ export const trustedProxyFetchPatchInternals = {};
 
   trustedProxyFetchPatchInternals.patchSource = patchTrustedProxyFetchSource;
   trustedProxyFetchPatchInternals.isPatchError = isTrustedProxyFetchPatchError;
+  trustedProxyFetchPatchInternals.isOpenClawGooglechatFile = isOpenClawGooglechatFile;
 
   try {
     installTrustedProxyFetchPatch();

@@ -4,9 +4,10 @@
 import { describe, expect, it } from "vitest";
 import { trustedProxyFetchPatchInternals } from "./googlechat-trusted-proxy-fetch";
 
-const { patchSource, isPatchError } = trustedProxyFetchPatchInternals as {
+const { patchSource, isPatchError, isOpenClawGooglechatFile } = trustedProxyFetchPatchInternals as {
   patchSource: (source: string, filename: string) => string;
   isPatchError: (reason: unknown) => boolean;
+  isOpenClawGooglechatFile: (filename: string) => boolean;
 };
 
 const FILE = "/x/node_modules/@openclaw/googlechat/dist/api-XXXX.js";
@@ -37,6 +38,24 @@ const BUNDLE = [
 ].join("\n");
 
 describe("googlechat trusted-proxy-fetch patch", () => {
+  it("matches the external-extension install path, not only the package path", () => {
+    // Bundled/package load path (pre-2026.6.10).
+    expect(
+      isOpenClawGooglechatFile("/x/node_modules/@openclaw/googlechat/dist/channel.adapters-A.js"),
+    ).toBe(true);
+    // External-extension install path (openclaw plugins install → 2026.6.10 sandbox).
+    expect(
+      isOpenClawGooglechatFile(
+        "/sandbox/.openclaw/extensions/googlechat/dist/channel.adapters-DqnXEL1u.js",
+      ),
+    ).toBe(true);
+    // Other channels and non-.js files stay untouched.
+    expect(isOpenClawGooglechatFile("/sandbox/.openclaw/extensions/slack/dist/index.js")).toBe(
+      false,
+    );
+    expect(isOpenClawGooglechatFile("/x/extensions/googlechat/dist/index.ts")).toBe(false);
+  });
+
   it("rewrites all three googleapis fetch sites when the bundle matches", () => {
     const patched = patchSource(BUNDLE, FILE);
     expect(patched).not.toBe(BUNDLE);

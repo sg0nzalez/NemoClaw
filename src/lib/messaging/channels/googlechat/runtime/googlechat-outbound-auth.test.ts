@@ -5,11 +5,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { outboundAuthPatchInternals } from "./googlechat-outbound-auth";
 
 // The self-installing preload publishes its pure helpers here on require (above).
-const { patchSource, buildShortCircuit, isPatchError } = outboundAuthPatchInternals as {
-  patchSource: (source: string, filename: string) => string;
-  buildShortCircuit: () => string;
-  isPatchError: (reason: unknown) => boolean;
-};
+const { patchSource, buildShortCircuit, isPatchError, isOpenClawGooglechatFile } =
+  outboundAuthPatchInternals as {
+    patchSource: (source: string, filename: string) => string;
+    buildShortCircuit: () => string;
+    isPatchError: (reason: unknown) => boolean;
+    isOpenClawGooglechatFile: (filename: string) => boolean;
+  };
 
 const FILE = "/x/node_modules/@openclaw/googlechat/dist/auth.js";
 const CALL_MARKER = "nemoclaw: googlechat outbound bearer via gateway-minted credential";
@@ -22,6 +24,22 @@ const PLUGIN_SRC =
   "}";
 
 describe("googlechat outbound-auth patch", () => {
+  it("matches the external-extension install path, not only the package path", () => {
+    // Bundled/package load path (pre-2026.6.10).
+    expect(isOpenClawGooglechatFile("/x/node_modules/@openclaw/googlechat/dist/auth.js")).toBe(
+      true,
+    );
+    // External-extension install path (openclaw plugins install → 2026.6.10 sandbox).
+    expect(isOpenClawGooglechatFile("/sandbox/.openclaw/extensions/googlechat/dist/auth.js")).toBe(
+      true,
+    );
+    // Other channels and non-.js files stay untouched.
+    expect(isOpenClawGooglechatFile("/sandbox/.openclaw/extensions/slack/dist/index.js")).toBe(
+      false,
+    );
+    expect(isOpenClawGooglechatFile("/x/extensions/googlechat/dist/index.ts")).toBe(false);
+  });
+
   it("rewrites the token producer when the anchor matches", () => {
     const patched = patchSource(PLUGIN_SRC, FILE);
     expect(patched).not.toBe(PLUGIN_SRC);

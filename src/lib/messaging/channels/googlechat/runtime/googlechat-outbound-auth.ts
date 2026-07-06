@@ -82,7 +82,15 @@ export const outboundAuthPatchInternals = {};
 
   function isOpenClawGooglechatFile(filename) {
     var normalized = String(filename || "").replace(/\\/g, "/");
-    return normalized.indexOf("/@openclaw/googlechat/") !== -1 && normalized.endsWith(".js");
+    if (!normalized.endsWith(".js")) return false;
+    // The plugin loads either from a package path (/@openclaw/googlechat/) or, when
+    // installed as an external extension (openclaw plugins install), flat from
+    // ~/.openclaw/extensions/googlechat/dist/. Match both; the getGoogleChatAccessToken
+    // shape gate below still confines the rewrite to the auth chunk.
+    return (
+      normalized.indexOf("/@openclaw/googlechat/") !== -1 ||
+      normalized.indexOf("/extensions/googlechat/") !== -1
+    );
   }
 
   // The guard injected at the top of getGoogleChatAccessToken's body. When the
@@ -199,6 +207,7 @@ export const outboundAuthPatchInternals = {};
   outboundAuthPatchInternals.patchSource = patchGooglechatOutboundAuthSource;
   outboundAuthPatchInternals.buildShortCircuit = buildBearerShortCircuitSource;
   outboundAuthPatchInternals.isPatchError = isGooglechatOutboundAuthPatchError;
+  outboundAuthPatchInternals.isOpenClawGooglechatFile = isOpenClawGooglechatFile;
 
   try {
     installGooglechatOutboundAuthPatch();
