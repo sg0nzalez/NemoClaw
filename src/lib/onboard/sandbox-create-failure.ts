@@ -97,7 +97,7 @@ export function handleNonzeroSandboxCreateResult({
   }
   console.error("  Try:  openshell sandbox list        # check gateway state");
   printSandboxCreateRecoveryHints(createResult.output, { createArgs });
-  exit(createResult.status || 1);
+  return exit(createResult.status || 1);
 }
 
 function stripAnsi(value: string): string {
