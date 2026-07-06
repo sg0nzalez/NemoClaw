@@ -11,6 +11,7 @@ function createDeps(overrides: Partial<GatewayRecoveryDeps> = {}): GatewayRecove
     getGatewayStartEnv: () => ({ OPENSHELL_DRIVERS: "docker" }),
     runCaptureOpenshell: vi.fn(() => "Disconnected"),
     runOpenshell: vi.fn(() => ({ status: 0 })),
+    sleepSeconds: vi.fn(),
     startGatewayWithOptions: vi.fn(
       async () => undefined,
     ) as GatewayRecoveryDeps["startGatewayWithOptions"],
@@ -43,7 +44,7 @@ describe("gateway recovery", () => {
     const deps = createDeps();
 
     await expect(startGatewayForRecovery({ gatewayName: "nemoclaw-8090" }, deps)).rejects.toThrow(
-      "Gateway 'nemoclaw-8090' failed to start",
+      "Gateway 'nemoclaw-8090' did not become ready",
     );
 
     expect(deps.startGatewayWithOptions).not.toHaveBeenCalled();
@@ -70,7 +71,7 @@ describe("gateway recovery", () => {
     const deps = createDeps();
 
     await expect(startGatewayForRecovery({ gatewayPort: 8091 }, deps)).rejects.toThrow(
-      "Gateway 'nemoclaw-8091' failed to start",
+      "Gateway 'nemoclaw-8091' did not become ready",
     );
 
     expect(deps.runOpenshell).toHaveBeenNthCalledWith(
@@ -83,6 +84,21 @@ describe("gateway recovery", () => {
         }),
       }),
     );
+  });
+
+  it("uses the configured recovery deadline budget without sleeping after the final probe", async () => {
+    vi.stubEnv("NEMOCLAW_HEALTH_POLL_COUNT", "3");
+    vi.stubEnv("NEMOCLAW_HEALTH_POLL_INTERVAL", "2");
+    const deps = createDeps();
+
+    await expect(startGatewayForRecovery({ gatewayPort: 8091 }, deps)).rejects.toThrow(
+      "configured 6s recovery wait budget (3 attempt(s), 2s interval)",
+    );
+
+    expect(deps.runCaptureOpenshell).toHaveBeenCalledTimes(9);
+    expect(deps.sleepSeconds).toHaveBeenCalledTimes(2);
+    expect(deps.sleepSeconds).toHaveBeenNthCalledWith(1, 2);
+    expect(deps.sleepSeconds).toHaveBeenNthCalledWith(2, 2);
   });
 
   it("rejects non-canonical gateway recovery names before invoking OpenShell", async () => {

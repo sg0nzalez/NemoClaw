@@ -14,18 +14,18 @@ import {
   GATEWAY_PORT,
   OLLAMA_PORT,
   OLLAMA_PROXY_PORT,
-  validateGatewayPort,
   VLLM_PORT,
+  validateGatewayPort,
 } from "../core/ports";
-import { sleepSeconds } from "../core/wait";
+import { sleepSeconds, waitUntilAsync } from "../core/wait";
 import { shouldPatchCoredns } from "../platform";
 import { run, SCRIPTS } from "../runner";
 import { isGatewayHealthy } from "../state/gateway";
+import { isLinuxDockerDriverGatewayEnabled } from "./docker-driver-platform";
 import { envInt } from "./env";
 import { resolveGatewayName, resolveGatewayPortFromName } from "./gateway-binding";
 import { isGatewayHttpReady } from "./gateway-http-readiness";
 import { getContainerRuntime } from "./local-inference-topology";
-import { isLinuxDockerDriverGatewayEnabled } from "./docker-driver-platform";
 
 export type StartGatewayForRecoveryOptions = {
   gatewayName?: string;
@@ -53,6 +53,7 @@ export type GatewayRecoveryDeps = {
   runOpenshell(args: string[], opts?: RunOpenshellOptions): GatewayStartResult;
   startGatewayWithOptions(gpu: never, options: { exitOnFailure: false }): Promise<void>;
   isLinuxDockerDriverGatewayEnabled?(): boolean;
+  sleepSeconds?(seconds: number): void;
 };
 
 function isValidGatewayRecoveryPort(port: number | null | undefined): port is number {
@@ -134,6 +135,21 @@ function getGatewayHealthWaitConfig(_startStatus = 0, containerState = "") {
   };
 }
 
+function getGatewayRecoveryWaitBudgetMs(pollCount: number, pollIntervalSeconds: number): number {
+  const normalizedCount = Number.isFinite(pollCount) ? Math.max(0, pollCount) : 0;
+  const normalizedIntervalSeconds = Number.isFinite(pollIntervalSeconds)
+    ? Math.max(0, pollIntervalSeconds)
+    : 0;
+  return Math.max(1, normalizedCount * normalizedIntervalSeconds * 1000);
+}
+
+function formatGatewayRecoveryWaitBudget(budgetMs: number): string {
+  if (!Number.isFinite(budgetMs) || budgetMs <= 0) return "0s";
+  if (budgetMs < 1000) return `${Math.ceil(budgetMs)}ms`;
+  const seconds = budgetMs / 1000;
+  return Number.isInteger(seconds) ? `${seconds}s` : `${seconds.toFixed(1)}s`;
+}
+
 async function startTargetGatewayForRecovery(
   { gatewayName, gatewayPort }: { gatewayName: string; gatewayPort: number },
   deps: GatewayRecoveryDeps,
@@ -160,30 +176,49 @@ async function startTargetGatewayForRecovery(
     ? recoveryWait.interval
     : envInt("NEMOCLAW_HEALTH_POLL_INTERVAL", 2);
   const targetGatewayUrl = `${getGatewayHttpEndpoint(gatewayPort)}/`;
-  for (let i = 0; i < recoveryPollCount; i++) {
-    const status = deps.runCaptureOpenshell(["status"], { ignoreError: true });
-    const namedInfo = deps.runCaptureOpenshell(["gateway", "info", "-g", gatewayName], {
-      ignoreError: true,
-    });
-    const currentInfo = deps.runCaptureOpenshell(["gateway", "info"], { ignoreError: true });
-    if (
-      status.includes("Connected") &&
-      isGatewayHealthy(status, namedInfo, currentInfo, gatewayName) &&
-      (await isGatewayHttpReady(undefined, targetGatewayUrl))
-    ) {
-      process.env.OPENSHELL_GATEWAY = gatewayName;
-      const runtime = getContainerRuntime();
-      if (shouldPatchCoredns(runtime)) {
-        run(["bash", path.join(SCRIPTS, "fix-coredns.sh"), gatewayName], {
+  const waitBudgetMs = getGatewayRecoveryWaitBudgetMs(recoveryPollCount, recoveryPollInterval);
+  const sleeper = deps.sleepSeconds ?? sleepSeconds;
+  const healthy =
+    recoveryPollCount > 0 &&
+    (await waitUntilAsync(
+      async () => {
+        const status = deps.runCaptureOpenshell(["status"], { ignoreError: true });
+        const namedInfo = deps.runCaptureOpenshell(["gateway", "info", "-g", gatewayName], {
           ignoreError: true,
         });
-      }
-      return;
+        const currentInfo = deps.runCaptureOpenshell(["gateway", "info"], { ignoreError: true });
+        return (
+          status.includes("Connected") &&
+          isGatewayHealthy(status, namedInfo, currentInfo, gatewayName) &&
+          (await isGatewayHttpReady(undefined, targetGatewayUrl))
+        );
+      },
+      {
+        deadlineMs: Date.now() + waitBudgetMs,
+        initialIntervalMs: Math.max(0, recoveryPollInterval * 1000),
+        maxIntervalMs: Math.max(0, recoveryPollInterval * 1000),
+        backoffFactor: 1,
+        maxAttempts: recoveryPollCount,
+        sleep: (ms) => sleeper(ms / 1000),
+      },
+    ));
+
+  if (healthy) {
+    process.env.OPENSHELL_GATEWAY = gatewayName;
+    const runtime = getContainerRuntime();
+    if (shouldPatchCoredns(runtime)) {
+      run(["bash", path.join(SCRIPTS, "fix-coredns.sh"), gatewayName], {
+        ignoreError: true,
+      });
     }
-    if (i < recoveryPollCount - 1) sleepSeconds(recoveryPollInterval);
+    return;
   }
 
-  throw new Error(`Gateway '${gatewayName}' failed to start`);
+  throw new Error(
+    `Gateway '${gatewayName}' did not become ready after the configured ${formatGatewayRecoveryWaitBudget(
+      waitBudgetMs,
+    )} recovery wait budget (${recoveryPollCount} attempt(s), ${recoveryPollInterval}s interval)`,
+  );
 }
 
 export async function startGatewayForRecovery(
