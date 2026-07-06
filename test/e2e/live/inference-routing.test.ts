@@ -8,6 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import type { ArtifactSink } from "../fixtures/artifacts.ts";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
+import { resultText } from "../fixtures/clients/command.ts";
 import type { HostCliClient } from "../fixtures/clients/host.ts";
 import type { SandboxClient } from "../fixtures/clients/sandbox.ts";
 import { trustedSandboxShellScript, validateSandboxName } from "../fixtures/clients/sandbox.ts";
@@ -75,10 +76,6 @@ interface RawRunOptions {
   readonly env?: NodeJS.ProcessEnv;
   readonly redactionValues?: readonly string[];
   readonly timeoutMs?: number;
-}
-
-function resultText(result: { stdout: string; stderr: string }): string {
-  return [result.stdout, result.stderr].filter(Boolean).join("\n");
 }
 
 function redactedResultText(

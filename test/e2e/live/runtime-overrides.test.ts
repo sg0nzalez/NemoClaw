@@ -65,7 +65,7 @@ function run(command: string, args: string[]): CommandResult {
   );
 }
 
-function resultText(result: CommandResult): string {
+function spawnResultText(result: CommandResult): string {
   return [
     `status=${result.status}`,
     result.error ? `error=${result.error.message}` : "",
@@ -77,7 +77,7 @@ function resultText(result: CommandResult): string {
 }
 
 function formatLog(label: string, result: CommandResult): string {
-  return [`## ${label}`, resultText(result)].join("\n");
+  return [`## ${label}`, spawnResultText(result)].join("\n");
 }
 
 function firstProvider(config: OpenClawConfig): ProviderConfig {
@@ -176,7 +176,7 @@ function captureConfig(
   }
 
   throw new Error(
-    `${label} config capture failed after 3 attempts\n${lastError?.message ?? ""}\n${lastResult ? resultText(lastResult) : ""}`,
+    `${label} config capture failed after 3 attempts\n${lastError?.message ?? ""}\n${lastResult ? spawnResultText(lastResult) : ""}`,
   );
 }
 
@@ -195,7 +195,7 @@ function runConfigHashCheck(
     env,
     'cd /sandbox/.openclaw && if sha256sum -c .config-hash --status; then printf "OK\\n" >&3; else printf "FAIL\\n" >&3; fi; sleep 0.1',
   );
-  expect(result.status, resultText(result)).toBe(0);
+  expect(result.status, spawnResultText(result)).toBe(0);
   return result.stdout.trim();
 }
 
@@ -232,7 +232,7 @@ function buildImage(dockerLog: string[], image: string): void {
     REPO_ROOT,
   ]);
   dockerLog.push(formatLog(`build ${image}`, build));
-  expect(build.status, resultText(build)).toBe(0);
+  expect(build.status, spawnResultText(build)).toBe(0);
 }
 
 runtimeOverridesTest(
@@ -267,7 +267,7 @@ runtimeOverridesTest(
           reason: DOCKER_REQUIRED_MESSAGE,
         });
         if (process.env.GITHUB_ACTIONS === "true") {
-          throw new Error(`${DOCKER_REQUIRED_MESSAGE}\n${resultText(docker)}`);
+          throw new Error(`${DOCKER_REQUIRED_MESSAGE}\n${spawnResultText(docker)}`);
         }
         skip(DOCKER_REQUIRED_MESSAGE);
       }

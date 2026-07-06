@@ -5,6 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { shellQuote } from "../../../src/lib/core/shell-quote";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
+import { resultText } from "../fixtures/clients/command.ts";
 import {
   type SandboxClient,
   trustedSandboxShellScript,
@@ -55,10 +56,6 @@ const RETRY_SLEEP_MS =
   Number.parseInt(process.env.E2E_SKILL_AGENT_RETRY_SLEEP_SEC ?? "15", 10) * 1_000;
 
 process.env.NEMOCLAW_CLI_BIN ??= CLI_ENTRYPOINT;
-
-function resultText(result: { stdout: string; stderr: string }): string {
-  return [result.stdout, result.stderr].filter(Boolean).join("\n");
-}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));

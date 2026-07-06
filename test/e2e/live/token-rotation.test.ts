@@ -5,6 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { testTimeoutOptions } from "../../helpers/timeouts";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
+import { resultText } from "../fixtures/clients/command.ts";
 import { validateSandboxName } from "../fixtures/clients/sandbox.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
 import { startFakeOpenAiCompatibleServer } from "../fixtures/fake-openai-compatible.ts";
@@ -59,10 +60,6 @@ type RegistrySandboxEntry = {
     };
   };
 };
-
-function resultText(result: { stdout: string; stderr: string }): string {
-  return [result.stdout, result.stderr].filter(Boolean).join("\n");
-}
 
 function stripAnsi(value: string): string {
   return value.replace(/\u001B\[[0-?]*[ -/]*[@-~]/g, "");

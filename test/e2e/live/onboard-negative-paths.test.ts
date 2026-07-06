@@ -3,8 +3,8 @@
 
 import fs from "node:fs";
 import path from "node:path";
-
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
+import { resultText } from "../fixtures/clients/command.ts";
 import type { HostCliClient } from "../fixtures/clients/host.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
 
@@ -21,10 +21,6 @@ const STACK_TRACE_PATTERNS = [/(^|\s)(TypeError|ReferenceError|SyntaxError):/m, 
 process.env.NEMOCLAW_CLI_BIN ??= path.join(REPO_ROOT, "bin", "nemoclaw.js");
 
 const liveTest = process.env.NEMOCLAW_RUN_LIVE_E2E === "1" ? test : test.skip;
-
-function resultText(result: { stdout: string; stderr: string }): string {
-  return [result.stdout, result.stderr].filter(Boolean).join("\n");
-}
 
 function hasStackTrace(text: string): boolean {
   return STACK_TRACE_PATTERNS.some((pattern) => pattern.test(text));

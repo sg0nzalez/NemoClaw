@@ -13,8 +13,8 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
+import { resultText } from "../fixtures/clients/command.ts";
 import type { HostCliClient } from "../fixtures/clients/host.ts";
 import {
   type SandboxClient,
@@ -45,10 +45,6 @@ const TIMER_POLL_TIMEOUT_MS = 75_000;
 const TIMER_POLL_INTERVAL_MS = 5_000;
 
 validateSandboxName(SANDBOX_NAME);
-
-function resultText(result: Pick<ShellProbeResult, "stdout" | "stderr">): string {
-  return [result.stdout, result.stderr].filter(Boolean).join("\n");
-}
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
