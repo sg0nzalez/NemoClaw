@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   collectSandboxCreateFailureDiagnostics,
+  handleNonzeroSandboxCreateResult,
   printSandboxCreateFailureDiagnostics,
 } from "../src/lib/onboard/sandbox-create-failure.js";
 
@@ -115,5 +116,79 @@ describe("sandbox create failure diagnostics", () => {
     expect(fs.readFileSync(path.join(diagnostics!.dir, "summary.txt"), "utf-8")).toContain(
       "gateway_tail=",
     );
+  });
+});
+
+describe("sandbox create failure handling", () => {
+  it("attempts retry cleanup for hard-required Landlock failures before gateway upload", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-create-failure-handle-"));
+    const messages: string[] = [];
+    const deleteCalls: string[][] = [];
+    const originalError = console.error;
+    const originalHome = process.env.HOME;
+    console.error = (message?: unknown) => {
+      messages.push(String(message ?? ""));
+    };
+    process.env.HOME = tmp;
+
+    try {
+      expect(() =>
+        handleNonzeroSandboxCreateResult({
+          createResult: {
+            status: 1,
+            output:
+              "Landlock unavailable in hard_requirement mode: not enabled in the active LSM set",
+          },
+          sandboxName: "dcode-landlock-precreate",
+          runOpenshell: (args) => {
+            deleteCalls.push(args);
+            return { status: 0 };
+          },
+          exit: (code) => {
+            throw new Error(`exit:${String(code)}`);
+          },
+        }),
+      ).toThrow("exit:1");
+
+      expect(deleteCalls).toEqual([["sandbox", "delete", "dcode-landlock-precreate"]]);
+      expect(messages).toContain("  The failed sandbox has been removed; retry will recreate it.");
+    } finally {
+      console.error = originalError;
+      if (originalHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = originalHome;
+      }
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("waits for readiness after an incomplete non-Landlock create stream", () => {
+    const warnings: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (message?: unknown) => {
+      warnings.push(String(message ?? ""));
+    };
+
+    try {
+      const action = handleNonzeroSandboxCreateResult({
+        createResult: {
+          status: 255,
+          output: "Created sandbox: dcode-stream\nssh: connection closed",
+        },
+        sandboxName: "dcode-stream",
+        runOpenshell: () => {
+          throw new Error("delete should not run for incomplete create streams");
+        },
+        exit: (code) => {
+          throw new Error(`unexpected exit:${String(code)}`);
+        },
+      });
+
+      expect(action).toBe("wait_for_ready");
+      expect(warnings).toContain("  Checking whether the sandbox reaches Ready state...");
+    } finally {
+      console.warn = originalWarn;
+    }
   });
 });

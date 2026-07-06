@@ -421,6 +421,7 @@ describe("LangChain Deep Agents Code image contracts", () => {
   });
 
   it("keeps optional service egress out of the default policy and requires Landlock", () => {
+    const dockerfile = readAgentFile("Dockerfile");
     const policy = readAgentFile("policy-additions.yaml");
 
     expect(policy).not.toContain("api.tavily.com");
@@ -435,6 +436,8 @@ describe("LangChain Deep Agents Code image contracts", () => {
     const parsedPolicy = YAML.parse(policy) as {
       filesystem_policy?: { read_only?: unknown };
     };
+    expect(dockerfile).toContain("WORKDIR /sandbox");
+    expect(dockerfile).not.toMatch(/\b(?:WORKDIR|RUN|COPY|ADD|ENV)\b[^\n]*\/app\b/);
     expect(parsedPolicy.filesystem_policy?.read_only).toEqual([
       "/usr",
       "/opt/venv",
