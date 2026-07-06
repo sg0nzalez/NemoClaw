@@ -141,6 +141,22 @@ describe("agent definitions", () => {
     expect(loadAgent("hermes").landlockCompatibility).toBe("best_effort");
   });
 
+  it("rejects legacy strict Landlock compatibility in manifests", () => {
+    const agentName = `invalid-landlock-compatibility-${String(Date.now())}`;
+    writeTempAgentManifest(
+      agentName,
+      [
+        `name: ${agentName}`,
+        "display_name: Broken Landlock Compatibility",
+        "landlockCompatibility: strict",
+      ].join("\n"),
+    );
+
+    expect(() => loadAgent(agentName)).toThrow(
+      /landlockCompatibility.*best_effort or hard_requirement/,
+    );
+  });
+
   it("orders OpenClaw first in interactive choices", () => {
     const choices = getAgentChoices();
     expect(choices[0]?.name).toBe("openclaw");

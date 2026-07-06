@@ -486,9 +486,9 @@ describe("sandbox-policy.schema.json", () => {
     expectValid(validate, valid, "hard-required Landlock policy");
   });
 
-  it("accepts the legacy strict Landlock compatibility value for existing policies (#5795)", () => {
+  it("rejects the legacy strict Landlock compatibility value (#5795)", () => {
     const legacy = { ...cloneObject(data), landlock: { compatibility: "strict" } };
-    expectValid(validate, legacy, "legacy strict Landlock policy");
+    expect(validate(legacy)).toBe(false);
   });
 
   it("rejects sandbox-policy endpoint with protocol rest but no rules", () => {
