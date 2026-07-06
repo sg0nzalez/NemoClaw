@@ -78,13 +78,13 @@ describe("googlechat tunnel/audience gate hook", () => {
     const hook = createGooglechatTunnelAudienceGateHook(baseOptions({ startTunnel, stopTunnel }));
 
     // No audience → skip.
-    await expect(hook(gateContext({}, false))).rejects.toThrow(/interactive mode/);
+    await expect(hook(gateContext({}, false))).rejects.toThrow(/interactive enrollment required/);
     // A pre-supplied audience does NOT bypass the skip: the Google Cloud Console
     // endpoint + appPrincipal steps still need an operator, so Google Chat is
     // unconditionally skipped in non-interactive mode (mirrors WeChat host QR).
     await expect(
       hook(gateContext({ audience: "https://named.example.com/googlechat" }, false)),
-    ).rejects.toThrow(/interactive mode/);
+    ).rejects.toThrow(/interactive enrollment required/);
     // Never touches the tunnel in non-interactive mode.
     expect(startTunnel).not.toHaveBeenCalled();
     expect(stopTunnel).not.toHaveBeenCalled();
