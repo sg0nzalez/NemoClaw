@@ -6,7 +6,7 @@ import * as webSearch from "../inference/web-search";
 import { listMessagingCredentialMetadata } from "../messaging/channels";
 import { type ChannelDef, getChannelTokenKeys } from "../sandbox/channels";
 import * as braveProviderProfile from "./brave-provider-profile";
-import * as googlechatBridge from "./googlechat-bridge-provider";
+import { collectMessagingBridgeTokenDefs } from "./messaging-bridge-provider";
 
 export type NamedMessagingChannel = { name: string } & ChannelDef;
 
@@ -105,22 +105,22 @@ export function prepareCreateSandboxMessaging(
     });
   }
 
-  // Google Chat outbound-auth bridge: when the service account was captured and
-  // the channel is enabled, register a refresh-minted provider so the gateway
-  // mints the bot token (key stays gateway-side) and the L7 proxy injects it on
-  // chat.googleapis.com. The credential value is a sentinel (minted by refresh,
-  // configured post-create in onboard's upsertMessagingProviders wrapper).
-  const googlechatBridgeTokenDef = googlechatBridge.maybeGooglechatBridgeTokenDef({
-    sandboxName: input.sandboxName,
-    getCredential: input.getCredential,
-    env: input.env,
-    normalizeCredentialValue: input.normalizeCredentialValue,
-    enabledChannels: input.enabledChannels,
-    disabledChannelNames,
-  });
-  if (googlechatBridgeTokenDef) {
-    messagingTokenDefs.push(googlechatBridgeTokenDef);
-  }
+  // Messaging bridge providers: any channel that mints its outbound token
+  // gateway-side (declared by a co-located provider-profile YAML) registers a
+  // refresh-minted provider so the gateway mints the token (secret stays
+  // gateway-side) and the L7 proxy injects it. The credential value is a sentinel
+  // (minted by refresh, configured post-create in onboard's
+  // upsertMessagingProviders wrapper). Today only Google Chat uses this.
+  messagingTokenDefs.push(
+    ...collectMessagingBridgeTokenDefs({
+      sandboxName: input.sandboxName,
+      getCredential: input.getCredential,
+      env: input.env,
+      normalizeCredentialValue: input.normalizeCredentialValue,
+      enabledChannels: input.enabledChannels,
+      disabledChannelNames,
+    }),
+  );
 
   const extraPlaceholderKeys = input.registerExtraPlaceholderProviders(
     input.sandboxName,

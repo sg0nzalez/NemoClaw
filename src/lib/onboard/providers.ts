@@ -443,11 +443,34 @@ function upsertProvider(name, type, credentialEnv, baseUrl, env, _runOpenshell, 
  * @returns {string[]} Provider names that were upserted.
  */
 function upsertMessagingProviders(tokenDefs, _runOpenshell, options = {}) {
-  const googlechatBridgeProvider = require("./googlechat-bridge-provider");
-  // Register the Google Chat bridge provider profile before creating providers
-  // (the bridge is created with --type google-chat-bridge). Self-gates when no
-  // googlechat bridge token def is present.
-  googlechatBridgeProvider.ensureGooglechatBridgeProfile(tokenDefs, {
+  // Provider creation order. Every token def is created uniformly in the loop
+  // (bearers as --type generic, bridges as --type <profileId>). Minted-token
+  // bridges (e.g. Google Chat) need two extra steps bracketing the loop, ordered
+  // around `provider create`:
+  //
+  //   ensureMessagingBridgeProfiles      <- BEFORE the loop
+  //      provider profile import            (profile must exist before create)
+  //          |
+  //     +----v-------------------------------------------------+
+  //     |  for (tokenDef of tokenDefs)   <- THE LOOP           |
+  //     |     upsertProvider(name, providerType || "generic")  |  every provider
+  //     |       . slack       -> --type generic                |  here, incl.
+  //     |       . googlechat  -> --type google-chat-bridge     |  the bridge
+  //     +----+-------------------------------------------------+
+  //          |
+  //   configureMessagingBridgeRefreshes  <- AFTER the loop
+  //      provider refresh configure         (provider must exist first)
+  //
+  // Bridges create with a sentinel token; refresh then wires minting, which
+  // overwrites it with the real token.
+  const messagingBridgeProvider = require("./messaging-bridge-provider");
+  // Register any messaging bridge provider profiles before creating providers
+  // (a bridge is created with --type <profileId>). Generic: self-gates when no
+  // bridge token def is present. A channel counts as a bridge channel by the
+  // PRESENCE of a co-located provider-profile file
+  // (channels/<channel>/provider-profile/<agent>.yaml) — not a flag inside it;
+  // the YAML's fields are read only after that file is found.
+  messagingBridgeProvider.ensureMessagingBridgeProfiles(tokenDefs, {
     root: ROOT,
     runOpenshell: _runOpenshell,
     redact,
@@ -478,27 +501,29 @@ function upsertMessagingProviders(tokenDefs, _runOpenshell, options = {}) {
   if (failures.length > 0) {
     throw new Error(failures.join("; "));
   }
-  // Gateway-side token minting for the Google Chat bridge is configured AFTER
-  // the provider exists (best-effort; self-gates without a bridge token def).
-  // The service-account private key is passed as refresh material and stays
+  // Gateway-side token minting for messaging bridge providers is configured AFTER
+  // the providers exist (best-effort; self-gates without a bridge token def). The
+  // secret material is passed as gateway-side refresh material and stays
   // gateway-side — never written into the sandbox.
-  const refreshResult = googlechatBridgeProvider.configureGooglechatBridgeRefresh(tokenDefs, {
+  const refreshResult = messagingBridgeProvider.configureMessagingBridgeRefreshes(tokenDefs, {
     runOpenshell: _runOpenshell,
     redact,
     getCredential,
     env: process.env,
     normalizeCredentialValue,
   });
-  // Fail-closed: an active Google Chat channel whose gateway token minting was
-  // not configured can receive webhooks but cannot authenticate outbound replies.
+  // Fail-closed: an active bridge channel whose gateway token minting was not
+  // configured can receive webhooks but cannot authenticate outbound replies.
   // Surface it instead of reporting a fully-configured channel (bestEffort/rollback
   // paths report residual work by throwing; the normal path exits like a failed
   // provider upsert above).
   if (refreshResult && !refreshResult.ok) {
     if (options.bestEffort) {
-      throw new Error("Failed to configure Google Chat gateway token minting.");
+      throw new Error("Failed to configure gateway token minting for a messaging bridge.");
     }
-    console.error("\n  ✗ Google Chat gateway token minting was not configured; aborting.");
+    console.error(
+      "\n  ✗ Gateway token minting for a messaging bridge was not configured; aborting.",
+    );
     process.exit(1);
   }
   return upserted;
