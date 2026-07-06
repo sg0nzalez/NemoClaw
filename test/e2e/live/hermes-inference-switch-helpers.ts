@@ -23,6 +23,7 @@ import {
   inferenceSetAttemptCount,
   runInferenceSetWithRetry,
 } from "../fixtures/inference-switch-retry.ts";
+import { REPO_ROOT } from "../fixtures/paths.ts";
 import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
 import { stripAnsi } from "./json-envelope.ts";
 import { isTransientProviderValidationFailure } from "./network-policy-transient-provider.ts";
@@ -31,7 +32,8 @@ import {
   PUBLIC_NVIDIA_SWITCH_PROVIDER,
 } from "./public-nvidia-switch-provider.ts";
 
-export const REPO_ROOT = path.resolve(import.meta.dirname, "../../..");
+export { REPO_ROOT };
+
 export const CLI = path.join(REPO_ROOT, "bin", "nemoclaw.js");
 export const SANDBOX_NAME = process.env.NEMOCLAW_SANDBOX_NAME ?? "e2e-hermes-inference-switch";
 validateSandboxName(SANDBOX_NAME);
