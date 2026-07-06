@@ -227,11 +227,12 @@ describe("DCode Landlock onboarding flow", () => {
     },
   ])("removes the failed sandbox without recording it as ready when $name (#5795)", (scenario) => {
     const { result, outcome } = runScenario(scenario);
+    const stderr = String(result.stderr);
 
-    expect(result.status, result.stderr).toBe(1);
+    expect(result.status, stderr).toBe(1);
     expect(outcome.code).toBe(1);
-    expect(result.stderr).toContain(scenario.createOutput.split("\n").at(-1));
-    expect(result.stderr).toContain("could not apply required Landlock filesystem isolation");
+    expect(stderr).toContain(scenario.createOutput.split("\n").at(-1));
+    expect(stderr).toContain("could not apply required Landlock filesystem isolation");
     expect(
       outcome.commands.some((command) =>
         command.endsWith("openshell sandbox delete dcode-landlock-flow"),
@@ -248,8 +249,9 @@ describe("DCode Landlock onboarding flow", () => {
       createOutput: "Created sandbox: dcode-landlock-flow",
       ready: true,
     });
+    const stderr = String(result.stderr);
 
-    expect(result.status, result.stderr).toBe(0);
+    expect(result.status, stderr).toBe(0);
     expect(outcome.code).toBe(0);
     expect(outcome.sandboxName).toBe("dcode-landlock-flow");
     expect(outcome.registerCalls).toHaveLength(1);
