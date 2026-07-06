@@ -78,25 +78,40 @@ describe("tool-disclosure recording proxy", () => {
   it("fails closed for non-loopback listeners and credential-bearing upstream URLs", () => {
     expect(() =>
       createToolDisclosureRecordingProxy({
-        upstreamBaseUrl: "https://inference.example/v1",
+        upstreamBaseUrl: "https://localhost:8000/v1",
         listenHost: "0.0.0.0",
       }),
     ).toThrow("must be exactly 127.0.0.1");
     expect(() =>
       createToolDisclosureRecordingProxy({
-        upstreamBaseUrl: "https://user:password@inference.example/v1",
+        upstreamBaseUrl: "https://user:password@localhost:8000/v1",
       }),
     ).toThrow("must not contain credentials");
     expect(() =>
       createToolDisclosureRecordingProxy({
-        upstreamBaseUrl: "https://inference.example/v1?api_key=private-key",
+        upstreamBaseUrl: "https://localhost:8000/v1?api_key=private-key",
       }),
     ).toThrow("must not contain a query or fragment");
     expect(() =>
       createToolDisclosureRecordingProxy({
         upstreamBaseUrl: "http://inference.example/v1",
       }),
-    ).toThrow("plaintext upstreamBaseUrl is allowed only on loopback");
+    ).toThrow("upstreamBaseUrl is allowed only on loopback");
+  });
+
+  it("rejects non-loopback HTTPS recorder upstreams for the local benchmark", () => {
+    expect(() =>
+      createToolDisclosureRecordingProxy({
+        upstreamBaseUrl: "https://inference.example/v1",
+      }),
+    ).toThrow("upstreamBaseUrl is allowed only on loopback");
+    for (const upstreamBaseUrl of [
+      "http://localhost:8000/v1",
+      "https://127.0.0.1:8000/v1",
+      "https://[::1]:8000/v1",
+    ]) {
+      expect(() => createToolDisclosureRecordingProxy({ upstreamBaseUrl })).not.toThrow();
+    }
   });
 
   it("canonicalizes the IPv6 loopback and rejects mapped or non-loopback variants", () => {
@@ -109,17 +124,17 @@ describe("tool-disclosure recording proxy", () => {
       createToolDisclosureRecordingProxy({
         upstreamBaseUrl: "http://[::ffff:127.0.0.1]:8000/v1",
       }),
-    ).toThrow("plaintext upstreamBaseUrl is allowed only on loopback");
+    ).toThrow("upstreamBaseUrl is allowed only on loopback");
     expect(() =>
       createToolDisclosureRecordingProxy({
         upstreamBaseUrl: "http://[::2]:8000/v1",
       }),
-    ).toThrow("plaintext upstreamBaseUrl is allowed only on loopback");
+    ).toThrow("upstreamBaseUrl is allowed only on loopback");
   });
 
   it("accepts bounded public scheduled run IDs and rejects unsafe IDs", () => {
     const proxy = createToolDisclosureRecordingProxy({
-      upstreamBaseUrl: "https://inference.example/v1",
+      upstreamBaseUrl: "https://localhost:8000/v1",
     });
     const scheduledId = "c1--primary--openclaw--progressive--n512--single-01--r1";
     expect(proxy.beginRun(scheduledId)).toBe(scheduledId);

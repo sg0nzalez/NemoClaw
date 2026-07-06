@@ -188,8 +188,8 @@ function parseUpstreamBaseUrl(value: string): URL {
     hostname === "localhost" ||
     hostname === "::1" ||
     (isIP(hostname) === 4 && hostname.startsWith("127."));
-  if (url.protocol === "http:" && !loopback) {
-    throw new Error("plaintext upstreamBaseUrl is allowed only on loopback");
+  if (!loopback) {
+    throw new Error("upstreamBaseUrl is allowed only on loopback");
   }
   if (url.username || url.password) {
     throw new Error("upstreamBaseUrl must not contain credentials");

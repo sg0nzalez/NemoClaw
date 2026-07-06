@@ -39,8 +39,8 @@ export function validatedTelemetryUrl(raw: string, endpoint: string): URL {
   if (url.username || url.password) {
     throw new Error("vLLM telemetry URL must not contain credentials");
   }
-  if (url.protocol === "http:" && !isLoopback(url.hostname)) {
-    throw new Error("plaintext vLLM telemetry is allowed only on loopback");
+  if (!isLoopback(url.hostname)) {
+    throw new Error("vLLM telemetry is allowed only on loopback");
   }
   url.username = "";
   url.password = "";
