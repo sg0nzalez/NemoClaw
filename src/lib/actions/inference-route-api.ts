@@ -109,6 +109,9 @@ export function resolveRuntimeInferenceApi(options: {
 }): InferenceApi | null {
   const { agentName, config, currentProvider, provider, sandboxName, session } = options;
   if (provider === "anthropic-prod") return "anthropic-messages";
+  if (agentName === "hermes" && provider === "compatible-anthropic-endpoint") {
+    return "openai-completions";
+  }
 
   const sameProvider = currentProvider === provider;
   const sessionApi = sameProvider ? sessionRouteApi(session, sandboxName, provider) : null;

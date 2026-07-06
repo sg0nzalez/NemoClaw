@@ -192,9 +192,29 @@ describe("resolveRuntimeInferenceApi", () => {
     expect(
       resolve(
         { model: { api_mode: "anthropic_messages" } },
-        { agentName: "hermes", session: null },
+        {
+          agentName: "hermes",
+          currentProvider: "anthropic-prod",
+          provider: "anthropic-prod",
+          session: null,
+        },
       ),
     ).toBe("anthropic-messages");
+  });
+
+  it("keeps Hermes compatible Anthropic endpoint switches off Anthropic SSE streaming (#6289)", () => {
+    expect(
+      resolve(
+        { model: { api_mode: "anthropic_messages" } },
+        {
+          agentName: "hermes",
+          session: session({
+            agent: "hermes",
+            preferredInferenceApi: "anthropic-messages",
+          }),
+        },
+      ),
+    ).toBe("openai-completions");
   });
 });
 

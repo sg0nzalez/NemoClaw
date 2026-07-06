@@ -104,7 +104,7 @@ describe("runInferenceSet Hermes routing", () => {
     });
   });
 
-  it("syncs Hermes compatible Anthropic switches to Anthropic Messages when changing provider families", async () => {
+  it("keeps Hermes compatible Anthropic switches on the managed OpenAI-compatible route (#6289)", async () => {
     const config: ConfigObject = {
       model: {
         default: "openai/gpt-5.4-mini",
@@ -146,9 +146,8 @@ describe("runInferenceSet Hermes routing", () => {
     expect(config.model).toEqual({
       default: "claude-sonnet-proxy",
       provider: "custom",
-      base_url: "https://inference.local",
+      base_url: "https://inference.local/v1",
       api_key: HERMES_PROXY_API_KEY_PLACEHOLDER,
-      api_mode: "anthropic_messages",
     });
     // The upstream annotation must track the selected provider together with
     // the API-family field, so the two cannot drift apart on later switches.
@@ -163,17 +162,17 @@ describe("runInferenceSet Hermes routing", () => {
         model: "claude-sonnet-proxy",
         endpointUrl: "https://anthropic-compatible.example/v1",
         credentialEnv: "COMPATIBLE_ANTHROPIC_API_KEY",
-        preferredInferenceApi: "anthropic-messages",
+        preferredInferenceApi: "openai-completions",
       }),
     ]);
     expect(deps.getSession()).toMatchObject({
       provider: "compatible-anthropic-endpoint",
       model: "claude-sonnet-proxy",
-      preferredInferenceApi: "anthropic-messages",
+      preferredInferenceApi: "openai-completions",
     });
     expect(result).toMatchObject({
-      providerKey: "anthropic",
-      primaryModelRef: "anthropic/claude-sonnet-proxy",
+      providerKey: "inference",
+      primaryModelRef: "inference/claude-sonnet-proxy",
     });
   });
 
