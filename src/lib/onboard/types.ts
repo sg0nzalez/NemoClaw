@@ -56,6 +56,7 @@ export type ModelValidationResult = ModelValidationSuccess | ModelValidationFail
 export interface SandboxCreateIntent {
   readonly recreate: boolean;
   readonly toolDisclosure: import("../tool-disclosure").ToolDisclosure;
+  readonly skipRestoreStateFiles?: readonly string[];
 }
 
 export type OnboardOptions = {

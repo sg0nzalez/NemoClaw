@@ -71,6 +71,7 @@ describe("decideSandboxResume", () => {
       kind: "recreate",
       note: "  [fresh] Provider/model selection changed; recreating sandbox.",
       removeRegistryEntry: false,
+      skipRestoreStateFiles: ["config.toml"],
     });
   });
 

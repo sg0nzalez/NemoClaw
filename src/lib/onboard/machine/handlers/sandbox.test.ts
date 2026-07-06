@@ -202,7 +202,7 @@ describe("handleSandboxState", () => {
       null,
       [],
       null,
-      { recreate: true, toolDisclosure: "progressive" },
+      { recreate: true, toolDisclosure: "progressive", skipRestoreStateFiles: ["config.toml"] },
     );
   });
 
@@ -217,6 +217,8 @@ describe("handleSandboxState", () => {
       getSandboxReuseState: () => "ready",
       getSandboxRegistryEntry: (name) => ({
         name,
+        provider: "provider",
+        model: "model",
         nemoclawVersion: "0.1.0",
         toolDisclosure: "progressive",
       }),
@@ -446,6 +448,8 @@ describe("handleSandboxState", () => {
       agentSupportsWebSearchProvider: () => true,
       getSandboxRegistryEntry: (name: string) => ({
         name,
+        provider: "provider",
+        model: "model",
         mcp: {
           bridges: {
             search: {

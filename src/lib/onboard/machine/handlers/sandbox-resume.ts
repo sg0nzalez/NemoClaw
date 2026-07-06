@@ -43,6 +43,7 @@ export type SandboxResumeDecision =
       readonly kind: "recreate";
       readonly note: string;
       readonly removeRegistryEntry: boolean;
+      readonly skipRestoreStateFiles?: readonly string[];
     }
   | { readonly kind: "repair-and-recreate" };
 
@@ -63,7 +64,6 @@ export interface SandboxResumeDeps {
 function canReuseSandbox(signals: SandboxResumeSignals): boolean {
   return (
     !signals.resumeAgentChanged &&
-    !signals.providerModelConfigChanged &&
     !signals.webSearchConfigChanged &&
     !signals.sandboxGpuConfigChanged &&
     !signals.messagingChannelConfigChanged &&
@@ -103,6 +103,9 @@ function providerModelDriftDecision(signals: SandboxResumeSignals): SandboxResum
     // Keep the registry row until createSandbox captures any registry-only
     // fidelity and runs the normal pre-recreate backup/deletion path.
     removeRegistryEntry: false,
+    // Provider/model recreation must preserve user state, but not generated
+    // agent inference config from the pre-recreate sandbox.
+    skipRestoreStateFiles: ["config.toml"],
   };
 }
 

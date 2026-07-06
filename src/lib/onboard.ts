@@ -3053,7 +3053,9 @@ async function createSandboxWithBaseImageResolution(
         ? "  Restoring workspace state from pre-upgrade backup..."
         : "  Restoring workspace state from pre-recreate backup...",
     );
-    const restore = sandboxState.restoreSandboxState(sandboxName, restoreBackupPath);
+    const restore = sandboxState.restoreSandboxState(sandboxName, restoreBackupPath, {
+      skipStateFiles: createIntent?.skipRestoreStateFiles,
+    });
     if (restore.success) {
       note(
         `  ✓ State restored (${restore.restoredDirs.length} directories, ${restore.restoredFiles.length} files)`,

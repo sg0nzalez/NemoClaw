@@ -143,6 +143,8 @@ export function createDeps(
       getSandboxHermesToolGateways: () => [],
       getSandboxRegistryEntry: (name: string) => ({
         name,
+        provider: "provider",
+        model: "model",
         webSearchEnabled: false,
         toolDisclosure: "progressive" as const,
         fromDockerfile: null,

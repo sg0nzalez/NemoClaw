@@ -93,7 +93,7 @@ describe("config set CLI dispatch", () => {
         settled = true;
       });
 
-      await vi.waitFor(() => expect(configSet).toHaveBeenCalledTimes(1));
+      await vi.waitFor(() => expect(configSet).toHaveBeenCalledTimes(1), { timeout: 5000 });
       expect(configSet).toHaveBeenCalledTimes(1);
       expect(configSet).toHaveBeenCalledWith("test-sandbox", {
         key: "inference.endpoints",

@@ -17,6 +17,7 @@ import { toolDisclosureOrDefault } from "../../../tool-disclosure";
 import { withSandboxPhaseTrace } from "../../tracing";
 import type { SandboxCreateIntent } from "../../types";
 import { branchTo, type OnboardStateTransitionResult } from "../result";
+import { providerModelConfigChanged } from "./sandbox-drift";
 import { reconcileReusedSandboxMessaging, reconcileSandboxMessaging } from "./sandbox-messaging";
 import {
   applySandboxResumeDecision,
@@ -231,19 +232,6 @@ function effectiveHermesToolGatewaysForWebSearch(
   return isHermes && tavilySelected
     ? gateways.filter((gateway) => gateway !== "nous-web")
     : [...gateways];
-}
-
-function providerModelConfigChanged(
-  existing: SandboxEntry | null,
-  provider: string,
-  model: string,
-): boolean {
-  const existingProvider = typeof existing?.provider === "string" ? existing.provider : null;
-  const existingModel = typeof existing?.model === "string" ? existing.model : null;
-  return (
-    (existingProvider !== null && existingProvider !== provider) ||
-    (existingModel !== null && existingModel !== model)
-  );
 }
 
 type SandboxCreationDecision = Exclude<SandboxResumeDecision, { readonly kind: "reuse" }>;
@@ -538,6 +526,8 @@ class SandboxStateFlow<
           {
             recreate: decision.kind !== "create",
             toolDisclosure: toolDisclosureOrDefault(state.session?.toolDisclosure),
+            skipRestoreStateFiles:
+              decision.kind === "recreate" ? decision.skipRestoreStateFiles : undefined,
           },
         ),
     );

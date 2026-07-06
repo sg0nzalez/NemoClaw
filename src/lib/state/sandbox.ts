@@ -142,6 +142,10 @@ export interface RestoreResult {
   failedFiles: string[];
 }
 
+export interface RestoreOptions {
+  readonly skipStateFiles?: readonly string[];
+}
+
 export interface TarValidationResult {
   safe: boolean;
   entries: string[];
@@ -1337,7 +1341,11 @@ export function backupSandboxState(sandboxName: string, options: BackupOptions =
 /**
  * Restore state directories into a sandbox from a prior backup.
  */
-export function restoreSandboxState(sandboxName: string, backupPath: string): RestoreResult {
+export function restoreSandboxState(
+  sandboxName: string,
+  backupPath: string,
+  options: RestoreOptions = {},
+): RestoreResult {
   _log(`restoreSandboxState: sandbox=${sandboxName}, backupPath=${backupPath}`);
   const manifest = readManifest(backupPath);
   if (!manifest) {
@@ -1373,7 +1381,10 @@ export function restoreSandboxState(sandboxName: string, backupPath: string): Re
   const restorableStateDirs = manifest.backedUpDirs ?? manifest.stateDirs;
   const localDirs = existingBackupDirs(backupPath, restorableStateDirs);
   const stateFiles = normalizeStateFileSpecs(manifest.stateFiles ?? []);
-  const localFiles = stateFiles.filter((f) => existsSync(path.join(backupPath, f.path)));
+  const skippedFiles = new Set(options.skipStateFiles ?? []);
+  const localFiles = stateFiles.filter(
+    (f) => !skippedFiles.has(f.path) && existsSync(path.join(backupPath, f.path)),
+  );
   _log(
     `Local backup dirs: [${localDirs.join(",")}] (${localDirs.length}/${manifest.stateDirs.length})`,
   );
