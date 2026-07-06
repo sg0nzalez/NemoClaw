@@ -151,10 +151,30 @@ describe("shell runtime helpers", () => {
     expect(result.stdout.trim()).toBe("http://host.openshell.internal:8000/v1");
   });
 
-  it("returns the ollama-local base URL", () => {
+  it("returns the ollama-local proxy base URL for native Docker-style hosts", () => {
     const result = runShell(`source "${RUNTIME_SH}"; get_local_provider_base_url ollama-local`);
     expect(result.status).toBe(0);
+    expect(result.stdout.trim()).toBe("http://host.openshell.internal:11435/v1");
+  });
+
+  it("returns the raw Ollama port only for WSL Docker Desktop loopback routing", () => {
+    const result = runShell(
+      `uname() { printf 'Linux\\n'; }
+       source "${RUNTIME_SH}"
+       is_wsl_runtime() { return 0; }
+       detect_container_runtime_from_docker() { printf 'docker-desktop\\n'; }
+       get_local_provider_base_url ollama-local`,
+    );
+    expect(result.status).toBe(0);
     expect(result.stdout.trim()).toBe("http://host.openshell.internal:11434/v1");
+  });
+
+  it("honors the configured Ollama proxy port for sandbox-facing URLs", () => {
+    const result = runShell(`source "${RUNTIME_SH}"; get_local_provider_base_url ollama-local`, {
+      NEMOCLAW_OLLAMA_PROXY_PORT: "12435",
+    });
+    expect(result.status).toBe(0);
+    expect(result.stdout.trim()).toBe("http://host.openshell.internal:12435/v1");
   });
 
   it("rejects unknown local providers", () => {

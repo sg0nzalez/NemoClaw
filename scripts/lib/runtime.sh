@@ -112,6 +112,50 @@ infer_container_runtime_from_info() {
   fi
 }
 
+is_wsl_runtime() {
+  if [ -n "${WSL_DISTRO_NAME:-}" ] || [ -n "${WSL_INTEROP:-}" ]; then
+    return 0
+  fi
+
+  local release="${1:-}"
+  if [ -z "$release" ]; then
+    release="$(uname -r 2>/dev/null || true)"
+  fi
+  local normalized
+  normalized="$(printf '%s' "$release" | tr '[:upper:]' '[:lower:]')"
+  [[ "$normalized" == *microsoft* ]]
+}
+
+detect_container_runtime_from_docker() {
+  local info=""
+  if command -v docker >/dev/null 2>&1; then
+    info="$(docker info --format '{{.OperatingSystem}} {{range .Labels}}{{.}} {{end}}' 2>/dev/null || true)"
+  fi
+  infer_container_runtime_from_info "$info"
+}
+
+container_can_reach_host_loopback() {
+  local runtime="${1:-}"
+  if [ -z "$runtime" ]; then
+    runtime="$(detect_container_runtime_from_docker)"
+  fi
+
+  is_wsl_runtime && [ "$runtime" = "docker-desktop" ]
+}
+
+get_ollama_container_port() {
+  local ollama_port="${NEMOCLAW_OLLAMA_PORT:-11434}"
+  local ollama_proxy_port="${NEMOCLAW_OLLAMA_PROXY_PORT:-11435}"
+  _validate_port NEMOCLAW_OLLAMA_PORT "$ollama_port" || return 1
+  _validate_port NEMOCLAW_OLLAMA_PROXY_PORT "$ollama_proxy_port" || return 1
+
+  if container_can_reach_host_loopback; then
+    printf '%s\n' "$ollama_port"
+  else
+    printf '%s\n' "$ollama_proxy_port"
+  fi
+}
+
 find_podman_socket() {
   local home_dir="${1:-${HOME:-/tmp}}"
   local socket_path
@@ -253,12 +297,10 @@ get_local_provider_base_url() {
   local provider="${1:-}"
 
   local vllm_port="${NEMOCLAW_VLLM_PORT:-8000}"
-  local ollama_port="${NEMOCLAW_OLLAMA_PORT:-11434}"
   _validate_port NEMOCLAW_VLLM_PORT "$vllm_port" || return 1
-  _validate_port NEMOCLAW_OLLAMA_PORT "$ollama_port" || return 1
   case "$provider" in
     vllm-local) printf 'http://host.openshell.internal:%s/v1\n' "$vllm_port" ;;
-    ollama-local) printf 'http://host.openshell.internal:%s/v1\n' "$ollama_port" ;;
+    ollama-local) printf 'http://host.openshell.internal:%s/v1\n' "$(get_ollama_container_port)" ;;
     *) return 1 ;;
   esac
 }
