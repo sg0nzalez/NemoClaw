@@ -113,6 +113,12 @@ infer_container_runtime_from_info() {
 }
 
 is_wsl_runtime() {
+  # Keep this shell-side WSL check aligned with src/lib/platform.ts:isWsl().
+  # Source boundary (#3136): this script runs before OpenShell network policy is
+  # applied, so it must choose the provider URL that later enters the sandbox.
+  # Remove this local workaround after OpenShell exposes one uniform
+  # sandbox-to-host local-service route for WSL and non-WSL runtimes. Review by
+  # 2026-12-31.
   if [ -n "${WSL_DISTRO_NAME:-}" ] || [ -n "${WSL_INTEROP:-}" ]; then
     return 0
   fi
@@ -127,6 +133,8 @@ is_wsl_runtime() {
 }
 
 detect_container_runtime_from_docker() {
+  # Best effort only: missing/unhealthy Docker maps to unknown, and callers then
+  # fail safe to the token-gated Ollama auth proxy instead of raw host loopback.
   local info=""
   if command -v docker >/dev/null 2>&1; then
     info="$(docker info --format '{{.OperatingSystem}} {{range .Labels}}{{.}} {{end}}' 2>/dev/null || true)"
@@ -135,6 +143,9 @@ detect_container_runtime_from_docker() {
 }
 
 container_can_reach_host_loopback() {
+  # Only WSL + Docker Desktop is allowed to use raw host loopback. Every other
+  # runtime, including macOS Docker Desktop, Colima, Podman, and native Docker,
+  # defaults to the auth proxy as the security fail-safe.
   local runtime="${1:-}"
   if ! is_wsl_runtime; then
     return 1

@@ -30,6 +30,23 @@ function runShell(
   });
 }
 
+function createFakeDockerInfo(info: string): string {
+  const binDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-runtime-bin-"));
+  const escapedInfo = info.replace(/'/g, "'\\''");
+  const dockerPath = path.join(binDir, "docker");
+  fs.writeFileSync(
+    dockerPath,
+    `#!/usr/bin/env bash
+case "$1" in
+  info) printf '%s\\n' '${escapedInfo}' ;;
+  *) exit 1 ;;
+esac
+`,
+  );
+  fs.chmodSync(dockerPath, 0o755);
+  return binDir;
+}
+
 describe("shell runtime helpers", () => {
   it("respects an existing DOCKER_HOST", () => {
     const result = runShell(`source "${RUNTIME_SH}"; detect_docker_host`, {
@@ -174,17 +191,16 @@ describe("shell runtime helpers", () => {
   });
 
   it("returns the raw Ollama port only for WSL Docker Desktop loopback routing (#3136)", () => {
+    const binDir = createFakeDockerInfo("Docker Desktop");
     const result = runShell(
       `uname() { printf '5.15.90.1-microsoft-standard-WSL2\\n'; }
-       docker() {
-         [ "$1" = "info" ] || return 1
-         printf 'Docker Desktop\\n'
-       }
        source "${RUNTIME_SH}"
        get_local_provider_base_url ollama-local`,
+      { PATH: `${binDir}:/usr/bin:/bin` },
     );
     expect(result.status).toBe(0);
     expect(result.stdout.trim()).toBe("http://host.openshell.internal:11434/v1");
+    fs.rmSync(binDir, { recursive: true, force: true });
   });
 
   it("honors the configured Ollama proxy port for sandbox-facing URLs (#3136)", () => {
@@ -205,19 +221,28 @@ describe("shell runtime helpers", () => {
   });
 
   it("rejects an invalid Ollama raw port on the WSL Docker Desktop path (#3136)", () => {
+    const binDir = createFakeDockerInfo("Docker Desktop");
     const result = runShell(
       `uname() { printf '5.15.90.1-microsoft-standard-WSL2\\n'; }
-       docker() {
-         [ "$1" = "info" ] || return 1
-         printf 'Docker Desktop\\n'
-       }
        source "${RUNTIME_SH}"
        get_local_provider_base_url ollama-local`,
-      { NEMOCLAW_OLLAMA_PORT: "bad" },
+      { NEMOCLAW_OLLAMA_PORT: "bad", PATH: `${binDir}:/usr/bin:/bin` },
     );
     expect(result.status).not.toBe(0);
     expect(result.stdout).toBe("");
     expect(result.stderr).toContain("Invalid NEMOCLAW_OLLAMA_PORT=bad");
+    fs.rmSync(binDir, { recursive: true, force: true });
+  });
+
+  it("falls back to the Ollama proxy when Docker runtime detection is unavailable (#3136)", () => {
+    const result = runShell(
+      `source "${RUNTIME_SH}"
+       detect_container_runtime_from_docker
+       get_local_provider_base_url ollama-local`,
+      { PATH: "/usr/bin:/bin" },
+    );
+    expect(result.status).toBe(0);
+    expect(result.stdout.trim()).toBe("unknown\nhttp://host.openshell.internal:11435/v1");
   });
 
   it("rejects equal Ollama raw and proxy ports on non-WSL hosts (#3136)", () => {
