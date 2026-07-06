@@ -445,33 +445,26 @@ function upsertProvider(name, type, credentialEnv, baseUrl, env, _runOpenshell, 
  * @returns {string[]} Provider names that were upserted.
  */
 function upsertMessagingProviders(tokenDefs, _runOpenshell, options = {}) {
-  // Provider creation order. Every token def is created uniformly in the loop
-  // (bearers as --type generic, bridges as --type <profileId>). Minted-token
-  // bridges (e.g. Google Chat) need two extra steps bracketing the loop, ordered
-  // around `provider create`:
+  // Provider creation order. Bridges (e.g. Google Chat) need two steps bracketing
+  // the uniform create loop, ordered around `provider create`:
   //
-  //   ensureMessagingBridgeProfiles      <- BEFORE the loop
-  //      provider profile import            (profile must exist before create)
+  //   ensureMessagingBridgeProfiles      <- BEFORE loop: import the profile
+  //      provider profile import            (must exist before `provider create`)
   //          |
   //     +----v-------------------------------------------------+
   //     |  for (tokenDef of tokenDefs)   <- THE LOOP           |
-  //     |     upsertProvider(name, providerType || "generic")  |  every provider
-  //     |       . slack       -> --type generic                |  here, incl.
-  //     |       . googlechat  -> --type google-chat-bridge     |  the bridge
+  //     |     upsertProvider(name, providerType || "generic")  |  bridge created
+  //     |       . slack       -> --type generic                |  with a sentinel
+  //     |       . googlechat  -> --type google-chat-bridge     |  token
   //     +----+-------------------------------------------------+
   //          |
-  //   configureMessagingBridgeRefreshes  <- AFTER the loop
-  //      provider refresh configure         (provider must exist first)
+  //   configureMessagingBridgeRefreshes  <- AFTER loop: refresh mints the real
+  //      provider refresh configure         token, overwriting the sentinel
   //
-  // Bridges create with a sentinel token; refresh then wires minting, which
-  // overwrites it with the real token.
+  // A channel is a bridge by the PRESENCE of a co-located
+  // channels/<channel>/provider-profile/<agent>.yaml (not a flag inside it); both
+  // bracket steps self-gate when no bridge token def is present.
   const messagingBridgeProvider = require("./messaging-bridge-provider");
-  // Register any messaging bridge provider profiles before creating providers
-  // (a bridge is created with --type <profileId>). Generic: self-gates when no
-  // bridge token def is present. A channel counts as a bridge channel by the
-  // PRESENCE of a co-located provider-profile file
-  // (channels/<channel>/provider-profile/<agent>.yaml) — not a flag inside it;
-  // the YAML's fields are read only after that file is found.
   messagingBridgeProvider.ensureMessagingBridgeProfiles(tokenDefs, {
     root: ROOT,
     runOpenshell: _runOpenshell,
@@ -503,10 +496,9 @@ function upsertMessagingProviders(tokenDefs, _runOpenshell, options = {}) {
   if (failures.length > 0) {
     throw new Error(failures.join("; "));
   }
-  // Gateway-side token minting for messaging bridge providers is configured AFTER
-  // the providers exist (best-effort; self-gates without a bridge token def). The
-  // secret material is passed as gateway-side refresh material and stays
-  // gateway-side — never written into the sandbox.
+  // Gateway-side token minting is configured AFTER the providers exist (best-effort,
+  // self-gates without a bridge token def). Secret material stays gateway-side —
+  // never written into the sandbox.
   const refreshResult = messagingBridgeProvider.configureMessagingBridgeRefreshes(tokenDefs, {
     runOpenshell: _runOpenshell,
     redact,
