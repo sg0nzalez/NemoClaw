@@ -390,9 +390,9 @@ type CustomPluginBuildContext = {
   pluginDirPath: string;
 };
 
-function reserveCustomPluginBuildContext(): CustomPluginBuildContext {
+function createCustomPluginBuildContext(): CustomPluginBuildContext {
   const nonce = randomUUID();
-  const sourceParentDir = path.join(os.tmpdir(), `nemoclaw-v0.0.71-weather-${nonce}`);
+  const sourceParentDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-v0.0.71-weather-"));
   const sourceRoot = path.join(sourceParentDir, "NemoClaw");
   return {
     sourceParentDir,
@@ -404,13 +404,18 @@ function reserveCustomPluginBuildContext(): CustomPluginBuildContext {
 }
 
 test("custom plugin build paths are collision-safe and outside the checkout", () => {
-  const first = reserveCustomPluginBuildContext();
-  const second = reserveCustomPluginBuildContext();
-  expect(first.sourceParentDir).not.toBe(second.sourceParentDir);
-  expect(first.sourceParentDir.startsWith(`${REPO_ROOT}${path.sep}`)).toBe(false);
-  expect(second.sourceParentDir.startsWith(`${REPO_ROOT}${path.sep}`)).toBe(false);
-  expect(fs.existsSync(first.sourceParentDir)).toBe(false);
-  expect(fs.existsSync(second.sourceParentDir)).toBe(false);
+  const first = createCustomPluginBuildContext();
+  const second = createCustomPluginBuildContext();
+  try {
+    expect(first.sourceParentDir).not.toBe(second.sourceParentDir);
+    expect(first.sourceParentDir.startsWith(`${REPO_ROOT}${path.sep}`)).toBe(false);
+    expect(second.sourceParentDir.startsWith(`${REPO_ROOT}${path.sep}`)).toBe(false);
+    expect(fs.statSync(first.sourceParentDir).isDirectory()).toBe(true);
+    expect(fs.statSync(second.sourceParentDir).isDirectory()).toBe(true);
+  } finally {
+    fs.rmSync(first.sourceParentDir, { recursive: true, force: true });
+    fs.rmSync(second.sourceParentDir, { recursive: true, force: true });
+  }
 });
 
 function copyFixtureFileExclusive(source: string, target: string): void {
@@ -905,12 +910,10 @@ liveTest(
       }),
       "OpenShell wrapper and explicit pinned components must pass onboard coherence preflight",
     ).toBe(true);
-    const customPluginContext = reserveCustomPluginBuildContext();
-    let removeCustomPluginContext = () => {};
-    cleanup.add("remove v0.0.71 custom-plugin source worktree", () => removeCustomPluginContext());
-    fs.mkdirSync(customPluginContext.sourceParentDir);
-    removeCustomPluginContext = () =>
-      fs.rmSync(customPluginContext.sourceParentDir, { recursive: true, force: true });
+    const customPluginContext = createCustomPluginBuildContext();
+    cleanup.add("remove v0.0.71 custom-plugin source worktree", () =>
+      fs.rmSync(customPluginContext.sourceParentDir, { recursive: true, force: true }),
+    );
     const cloneRelease = await host.command(
       "git",
       [
