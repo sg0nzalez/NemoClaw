@@ -24,11 +24,6 @@ fail() {
   exit 1
 }
 
-skip() {
-  printf '%s: SKIP: %s\n' "$PREFIX" "$1"
-  exit 0
-}
-
 pass() {
   printf '%s: OK (%s)\n' "$PREFIX" "$1"
 }
@@ -141,9 +136,15 @@ PY
 }
 
 [ -n "$SANDBOX_NAME" ] || fail "sandbox name is required"
+
+# The generic cloud-onboard target runs every shared check against its OpenClaw
+# sandbox. Typed DCode targets reject this SKIP through their required-check
+# wrapper, so this guard only prevents cross-agent execution in the shared run.
 if ! sandbox_exec "test -d /sandbox/.deepagents && command -v dcode >/dev/null 2>&1" >/dev/null; then
-  skip "sandbox '${SANDBOX_NAME}' is not a Deep Agents Code sandbox"
+  printf '%s: SKIP: sandbox %q is not a Deep Agents Code sandbox\n' "$PREFIX" "$SANDBOX_NAME"
+  exit 0
 fi
+
 [ -n "${COMPATIBLE_API_KEY:-}" ] || fail "COMPATIBLE_API_KEY is required"
 [ -x "$CLI" ] || fail "NemoClaw CLI is not executable at $CLI"
 
