@@ -258,7 +258,7 @@ async function installAndResolvePinnedOpenShell(
   host: HostCliClient,
   installScriptPath: string,
   artifactLabel: string,
-  expectedVersion?: string,
+  expectedVersion: string,
 ): Promise<PinnedOpenShellComponents> {
   const install = await host.command("bash", [installScriptPath], {
     artifactName: `install-${artifactLabel}-openshell-for-exdev-wrapper`,
@@ -275,11 +275,9 @@ async function installAndResolvePinnedOpenShell(
     timeoutMs: 30_000,
   });
   expect(version.exitCode, resultText(version)).toBe(0);
-  if (expectedVersion) {
-    expect(resultText(version)).toMatch(
-      new RegExp(`\\b${expectedVersion.replaceAll(".", "\\.")}\\b`),
-    );
-  }
+  expect(resultText(version)).toMatch(
+    new RegExp(`\\b${expectedVersion.replaceAll(".", "\\.")}\\b`),
+  );
   return components;
 }
 
