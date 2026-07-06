@@ -118,3 +118,56 @@ compared without exposing sandbox names or credentials.
 
 The harness exits non-zero when a selected metric errors, a supplied trace is
 invalid, or required prerequisites (endpoint, model, API key) are missing.
+
+## Progressive tool-disclosure benchmark
+
+The progressive tool-disclosure benchmark compares direct and progressive tool
+visibility for OpenClaw, Hermes, and LangChain Deep Agents Code against one
+deterministic synthetic catalog and task corpus.
+It is a claim-validation harness, not an extension of the advisory value
+benchmark above.
+
+Prepare a new evidence directory with the frozen catalog, task sets, schedule,
+manifest template, and generated OpenClaw fixtures:
+
+```bash
+npm run bench:tool-disclosure -- prepare \
+  --output-dir <campaign-output> \
+  --sandbox-base ghcr.io/nvidia/nemoclaw/sandbox-base@sha256:<64-hex-digest>
+```
+
+Run the emitted schedule as two fresh campaigns on the same recorded hardware
+and inference configuration.
+Each campaign requires a fresh vLLM process and fresh sandboxes.
+Populate `manifest.json` from `manifest.template.json`, and append the public-safe
+run records to `runs.jsonl`.
+
+Drive each prepared campaign with a private configuration that identifies the
+fresh vLLM container and maps the frozen agent/mode/catalog cells to fresh
+sandbox names, container names, and instance IDs:
+
+```bash
+npm run bench:tool-disclosure -- execute \
+  --output-dir <campaign-output> --config <private-campaign-config.json>
+```
+
+Execution uses a recoverable `attempt-journal.jsonl`, verifies the live vLLM
+image/configuration and Docker-backed sandbox identities, writes only hashed
+private identities to the attestation artifact, materializes content-free
+`raw-events.jsonl`, and derives `runs.jsonl`; the summarizer rejects records that
+cannot be reproduced from the journal and raw evidence.
+
+Summarize the completed evidence set:
+
+```bash
+npm run bench:tool-disclosure -- summarize --output-dir <campaign-output>
+```
+
+The summarizer writes `summary.json`, `report.md`, `evidence.json`, and
+`SHA256SUMS`.
+It derives public claim text mechanically and leaves claims blocked unless the
+required confidence-interval gate passes for every agent in both campaigns.
+
+See the [progressive tool-disclosure benchmark protocol](../../docs/inference/progressive-tool-disclosure-benchmark.mdx)
+for the DGX Station workflow, recorder topology, artifact rules, claim gates,
+and limitations.

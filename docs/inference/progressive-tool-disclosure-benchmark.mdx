@@ -1,0 +1,216 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+title: "Validate Progressive Tool Disclosure"
+sidebar-title: "Progressive Tool Disclosure Benchmark"
+description: "Run the reproducible two-campaign benchmark that validates progressive tool-disclosure claims across NemoClaw agent surfaces."
+description-agent: "Explains how to prepare, run, and summarize the progressive tool-disclosure benchmark on a DGX Station. Use when validating tool-schema token, task-success, or latency claims for OpenClaw, Hermes, and LangChain Deep Agents Code."
+keywords: "progressive tool disclosure benchmark, DGX Station benchmark, tool schema tokens, MCP benchmark"
+position: 5
+---
+
+This protocol compares direct tool exposure with progressive disclosure for OpenClaw, Hermes, and LangChain Deep Agents Code.
+It produces checksummed evidence and only emits claim text that clears the configured statistical gates.
+
+<Note>
+The repository does not include measured results.
+Run both campaigns and retain their evidence before you make a performance or quality claim.
+</Note>
+
+## Understand the frozen protocol
+
+The preparation command generates one deterministic catalog, task corpus, and paired execution schedule.
+Use the generated files without adding, removing, or reordering runs.
+
+| Phase | Catalog tools | Tasks and repetitions per agent and mode | Purpose |
+| --- | ---: | --- | --- |
+| `static-visibility` | `16`, `64`, `256`, `512`, and `2209` | One exact capture at each size. | Measure the initial serialized tool-schema bytes, tokens, and visible tool count. |
+| `small-control` | `64` | `24` tasks, one repetition. | Check behavior before context pressure becomes large. |
+| `primary` | `512` | `24` tasks, five repetitions. | Supply the paired observations used by the public claim gates. |
+| `large-stress` | `2209` | `8` tasks, one repetition. | Exercise the largest generated catalog without widening the primary claim. |
+
+The schedule contains `942` runs in each campaign and `1884` runs in total.
+It keeps each progressive and direct pair adjacent while deterministically balancing which mode runs first.
+The primary task set includes single-tool, ordered-chain, near-match, and no-tool cases.
+
+## Prepare the evidence directory
+
+Run preparation from a clean NemoClaw checkout at the exact system-under-test revision.
+The sandbox base must use an immutable OCI digest; mutable tags such as `latest` are rejected.
+Place the evidence directory outside the Git worktree so generated artifacts cannot change the recorded cleanliness state.
+
+```bash
+npm run bench:tool-disclosure -- prepare \
+  --output-dir <campaign-output> \
+  --sandbox-base ghcr.io/nvidia/nemoclaw/sandbox-base@sha256:<64-hex-digest>
+```
+
+Preparation writes these inputs:
+
+- `catalog.json` contains the deterministic synthetic tool catalog.
+- `primary-tasks.json` and `stress-tasks.json` contain the frozen task definitions.
+- `schedule.json` contains both campaigns in execution order.
+- `manifest.template.json` contains the public evidence schema fields that you must complete.
+- The generated OpenClaw fixture directories contain native tool plugins for the scheduled catalog sizes.
+
+Copy `manifest.template.json` to `manifest.json` and replace every placeholder before the first run.
+
+```bash
+cp <campaign-output>/manifest.template.json <campaign-output>/manifest.json
+```
+
+Record the full NemoClaw system-under-test and harness commit SHAs, exact model ID and revision, vLLM image digest and version, public serving flags, parser names, OpenShell version, agent versions, GPU and CPU description, driver and CUDA versions, RAM, and the observed power state.
+Keep credentials, endpoint URLs, hostnames, usernames, reservation identifiers, and local paths out of the manifest.
+
+<Warning>
+The benchmark commands do not reserve Colossus infrastructure, start vLLM, or create sandboxes.
+Prepare those resources first; the `execute` command starts the loopback recorder and synthetic MCP fixtures, drives the frozen schedule, and writes sanitized raw evidence plus derived run records.
+</Warning>
+
+## Reserve and preflight a DGX Station
+
+Use the current internal Colossus runbook to reserve a DGX Station and obtain host access.
+Colossus pools, commands, and access routes are site-specific, so this public protocol does not prescribe an internal identifier or command spelling.
+
+The following lines are placeholders, not runnable commands:
+
+```text
+<site-specific Colossus reservation command> <dgx-station-pool> <campaign-window>
+<site-specific Colossus host access command> <reservation-id>
+```
+
+On the reserved station, run the public preflight commands before starting inference.
+
+```bash
+nvidia-smi
+nvidia-smi -q
+docker version
+openshell --version
+nemoclaw --version
+git rev-parse HEAD
+```
+
+Confirm that the station has the expected GPU count and model, enough free GPU memory for the frozen model, the required container image by digest, and no competing GPU workload.
+Set and record the intended power state before each campaign.
+Do not publish raw Colossus output or raw preflight logs because they can contain internal host or reservation identifiers.
+
+## Route inference through the recorder
+
+Run one vLLM server and one benchmark recording proxy on the DGX Station.
+Configure the NemoClaw managed inference route so every model request from every benchmark sandbox passes through the proxy before reaching vLLM.
+
+```text
+OpenClaw, Hermes, and LangChain Deep Agents Code sandboxes
+                         |
+             NemoClaw managed inference route
+                         |
+      recording proxy on 127.0.0.1, forwarding /v1/*
+                         |
+                       vLLM
+                  /metrics and /tokenize
+```
+
+The recorder must bind to `127.0.0.1` and must not be exposed on a station or corporate network interface.
+It forwards OpenAI-compatible `/v1` requests without following redirects and records content-free request metadata, including the canonical tool-schema byte count, schema hash, visible tool count, tool names, status, monotonic timing, and run sequence.
+It does not retain prompts, messages, headers, request bodies, response bodies, model identifiers, endpoints, or errors from upstream bodies.
+
+Use vLLM `/tokenize` to count initial serialized tool-schema tokens with the exact served model tokenizer.
+Read prompt and generation token counters from vLLM `/metrics` immediately before and after each scheduled run.
+Keep benchmark concurrency at `1` so those process-level counter deltas remain attributable to one run.
+Use temperature `0`, the manifest's frozen parser configuration, and the same public vLLM flags in both modes and both campaigns.
+
+## Run two fresh campaigns
+
+Treat the two campaigns as independent executions of the same prepared schedule.
+Do not reuse an inference process, sandbox, model session, or recorder event stream across campaigns.
+
+Copy `execute-config.template.json` outside the evidence directory and fill in the campaign number, loopback vLLM and telemetry URLs, tokenizer model, fixed recorder port, live `vllm_container_name` and `vllm_container_id`, binary overrides when needed, plus `sandbox_names`, `sandbox_container_names`, and live `sandbox_instance_ids` mappings keyed as `<agent>:<mode>:<catalog-size>`.
+The sandboxes' managed inference route must already target that recorder port.
+Do not publish this file because it can contain local routing and sandbox identifiers.
+Execution verifies the live vLLM container ID, Docker image ID, model and revision, parser names, public flags, and process start time.
+It also verifies each live sandbox status against its expected agent, disclosure mode, immutable image ID, and instance ID.
+Only hashes of private container identities and reviewed public configuration enter the evidence bundle.
+This attestation path expects vLLM and the DGX Station's OpenShell sandboxes to use the Docker driver so `docker inspect` can verify the live state.
+
+```bash
+npm run bench:tool-disclosure -- execute \
+  --output-dir <campaign-output> \
+  --config <private-campaign-1-config.json>
+```
+
+For campaign 1:
+
+1. Start a fresh vLLM process from the recorded image digest and flags.
+2. Start a fresh loopback recorder and reset its event stream.
+3. Create fresh OpenClaw, Hermes, and LangChain Deep Agents Code sandboxes for the scheduled modes and fixtures.
+4. Run `execute` for campaign 1. It appends each attempt atomically to `attempt-journal.jsonl`, records hashed live identities in `campaign-attestations.json`, and materializes content-free `raw-events.jsonl` plus one derived `nemoclaw.tool_disclosure_bench.v1` row per entry in `runs.jsonl`.
+5. Stop vLLM, stop the recorder, and destroy the campaign sandboxes.
+
+For campaign 2, repeat the same five steps with another fresh vLLM process, recorder event stream, and sandbox set.
+Use the same station class, system-under-test and harness revisions, model revision, image digest, parser configuration, and task artifacts.
+If any of those controlled values changes, prepare a new benchmark ID and restart both campaigns.
+
+The agent adapters must use the generated deterministic handlers and verify expected tool names, order, argument hashes, call count, unnecessary calls, and the returned nonce.
+Direct and progressive modes must differ only in their disclosure configuration.
+Follow the retry allowance in `manifest.json` for setup failures, and do not convert task failures into setup failures.
+
+## Summarize and verify artifacts
+
+After all scheduled records are present, run the summarizer in the same evidence directory.
+
+```bash
+npm run bench:tool-disclosure -- summarize --output-dir <campaign-output>
+```
+
+The command consumes `manifest.json` and `runs.jsonl` and writes:
+
+- `summary.json` with paired aggregates, confidence intervals, and claim-gate decisions.
+- `raw-events.jsonl` with content-free measurements from which every run record is re-derived.
+- `attempt-journal.jsonl` as the crash-recoverable source for raw and derived run rows.
+- `campaign-attestations.json` with vLLM process start times, hashed inference identities and configuration, and hashed live sandbox identities.
+- `report.md` with environment metadata, measurements, gate status, and mechanically generated claim text.
+- `evidence.json` with the public artifact inventory and SHA-256 values.
+- `SHA256SUMS` with the checksum manifest.
+
+Verify the bundle on the DGX Station before you move it.
+
+```bash
+cd <campaign-output>
+sha256sum -c SHA256SUMS
+```
+
+Treat every output as untrusted until you review it for credentials, endpoint URLs, hostnames, usernames, reservation identifiers, local paths, raw prompts, tool arguments, and response text.
+Do not hand-edit `summary.json` or the validated claims in `report.md`.
+If a correction changes an input or run record, regenerate the summary and checksums.
+
+## Apply the claim gates
+
+The summarizer uses a deterministic paired bootstrap with `10,000` samples.
+It averages repetitions within each task first, then resamples whole progressive and direct task pairs, so the task is the statistical unit.
+
+The report can emit each claim only when its gate passes for OpenClaw, Hermes, and LangChain Deep Agents Code in both campaigns at the `512`-tool primary size.
+
+| Claim | Required gate in every campaign and agent cell |
+| --- | --- |
+| Initial serialized tool-schema tokens improved. | The paired progressive-minus-direct token difference has a `95%` confidence-interval upper bound below `0`, and the exact static capture has a positive token reduction. |
+| Task success is noninferior. | The paired progressive-minus-direct success difference has a `95%` confidence-interval lower bound of at least `-5` percentage points. |
+| End-to-end latency improved. | The paired progressive-minus-direct latency difference has a `95%` confidence-interval upper bound below `0`. |
+
+Repeated static captures must agree exactly on visible tool count, serialized bytes, and tokenizer tokens.
+The summarizer excludes setup failures, but scores timeouts, incorrect tool behavior, model errors, and context overflows as task failures.
+A blocked gate remains visible in `report.md`, and the report does not emit the corresponding cross-agent claim.
+
+## Interpret the scope
+
+The benchmark supports claims about the recorded commits, agents, model and serving configuration, DGX Station class, deterministic synthetic catalog, and task corpus.
+It does not establish a universal result for other models, hardware, tool distributions, prompts, concurrency levels, or production workloads.
+
+Progressive disclosure is a context optimization, not an authorization boundary.
+The OpenClaw fixture measures its native catalog path and does not establish that mcporter-managed MCP schemas are compacted.
+The `2209`-tool stress phase supplies boundary evidence but does not widen claims beyond the `512`-tool primary phase.
+Two fresh campaigns on one station class demonstrate repeatability, not cross-hardware generality.
+
+## Related topics
+
+- [Model Capability Audit](model-capability-audit) explains the evidence fields for model and agent compatibility claims.
+- [Tool-Calling Reliability](tool-calling-reliability) separates tool-use behavior from endpoint connectivity failures.
