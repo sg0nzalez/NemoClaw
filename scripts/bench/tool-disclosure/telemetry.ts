@@ -42,6 +42,7 @@ export function validatedTelemetryUrl(raw: string, endpoint: string): URL {
   if (!isLoopback(url.hostname)) {
     throw new Error("vLLM telemetry is allowed only on loopback");
   }
+  if (url.hostname.toLowerCase() === "localhost") url.hostname = "127.0.0.1";
   url.username = "";
   url.password = "";
   url.search = "";

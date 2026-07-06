@@ -132,6 +132,29 @@ describe("tool-disclosure recording proxy", () => {
     ).toThrow("upstreamBaseUrl is allowed only on loopback");
   });
 
+  it("normalizes localhost to literal IPv4 before connecting upstream", async () => {
+    let observedHost = "";
+    let observedPath = "";
+    const upstream = await startUpstream((request, response) => {
+      observedHost = request.headers.host ?? "";
+      observedPath = request.url ?? "";
+      response.end("{}");
+    });
+    const upstreamUrl = new URL(upstream.baseUrl);
+    upstreamUrl.hostname = "localhost";
+    upstreamUrl.pathname = "/proxy/v1";
+    const { proxy, baseUrl } = await startProxy(upstreamUrl.toString());
+
+    proxy.beginRun("localhost-normalization");
+    const response = await fetch(`${baseUrl}/v1/models`);
+    await response.arrayBuffer();
+    proxy.endRun();
+
+    expect(response.status).toBe(200);
+    expect(observedHost).toBe(`127.0.0.1:${upstreamUrl.port}`);
+    expect(observedPath).toBe("/proxy/v1/models");
+  });
+
   it("accepts bounded public scheduled run IDs and rejects unsafe IDs", () => {
     const proxy = createToolDisclosureRecordingProxy({
       upstreamBaseUrl: "https://localhost:8000/v1",

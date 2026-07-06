@@ -199,6 +199,10 @@ function parseUpstreamBaseUrl(value: string): URL {
   if (url.search || url.hash) {
     throw new Error("upstreamBaseUrl must not contain a query or fragment");
   }
+  // Do not delegate the accepted localhost alias to ambient DNS resolution.
+  if (hostname === "localhost") {
+    url.hostname = LOOPBACK_HOST;
+  }
   return url;
 }
 
