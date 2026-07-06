@@ -306,6 +306,22 @@ function isContextOverflow(stdout: string, stderr: string): boolean {
   );
 }
 
+export function classifyInvocationFailure(options: {
+  phase: ScheduledToolDisclosureRun["phase"];
+  exitCode: number | null;
+  timedOut: boolean;
+  stdout: string;
+  stderr: string;
+}): "context-overflow" | undefined {
+  return options.phase !== "static-visibility" &&
+    !options.timedOut &&
+    options.exitCode !== null &&
+    options.exitCode !== 0 &&
+    isContextOverflow(options.stdout, options.stderr)
+    ? "context-overflow"
+    : undefined;
+}
+
 async function command(built: ReturnType<typeof buildAgentDriverCommand>, timeoutMs: number) {
   return await runBoundedCommand({
     command: built.command,
@@ -555,12 +571,13 @@ export async function executeCampaign(options: {
           const tokens = tokenDelta(before, after);
           if (!tokens.available) throw new Error("vLLM token counters were unavailable or reset");
           const finalOutput = extractFinalAssistantOutput(run.agent, invocation.stdout);
-          const classifiedFailure =
-            run.phase !== "static-visibility" &&
-            invocation.exit_code !== 0 &&
-            isContextOverflow(invocation.stdout, invocation.stderr)
-              ? ("context-overflow" as const)
-              : undefined;
+          const classifiedFailure = classifyInvocationFailure({
+            phase: run.phase,
+            exitCode: invocation.exit_code,
+            timedOut: invocation.timed_out,
+            stdout: invocation.stdout,
+            stderr: invocation.stderr,
+          });
           const rawEvidence: SanitizedRunEvidence = {
             run_id: run.run_id,
             recorder_events: recorderEvents,

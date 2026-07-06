@@ -11,6 +11,7 @@ import {
   assertSetupRetryAllowed,
   type AttemptJournalEntry,
   type CampaignAttestation,
+  classifyInvocationFailure,
   materializeAttemptJournal,
   recoverAttemptJournal,
 } from "../../scripts/bench/tool-disclosure/execute";
@@ -60,6 +61,27 @@ function attestationFixture(): {
 }
 
 describe("tool-disclosure attempt journal", () => {
+  it("gives timeout precedence over context-overflow text", () => {
+    expect(
+      classifyInvocationFailure({
+        phase: "primary",
+        exitCode: null,
+        timedOut: true,
+        stdout: "",
+        stderr: "maximum context length exceeded",
+      }),
+    ).toBeUndefined();
+    expect(
+      classifyInvocationFailure({
+        phase: "primary",
+        exitCode: 1,
+        timedOut: false,
+        stdout: "",
+        stderr: "maximum context length exceeded",
+      }),
+    ).toBe("context-overflow");
+  });
+
   it("retries only failures that occur before agent invocation", () => {
     expect(() => assertSetupRetryAllowed(false, "run-before-invocation")).not.toThrow();
     expect(() =>

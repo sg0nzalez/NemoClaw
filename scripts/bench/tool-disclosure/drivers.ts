@@ -30,14 +30,14 @@ function shellScriptFor(agent: ToolDisclosureAgent, prompt: string, sessionId: s
       "set -eu",
       `prompt=$(printf '%s' '${encodedPrompt}' | base64 -d)`,
       `exec openclaw agent --agent main --json --thinking off --session-id '${sessionId}' -m "$prompt"`,
-    ].join("; ");
+    ].join("\n");
   }
   if (agent === "langchain-deepagents-code") {
     return [
       "set -eu",
       `prompt=$(printf '%s' '${encodedPrompt}' | base64 -d)`,
       'exec nemoclaw-start dcode -n "$prompt"',
-    ].join("; ");
+    ].join("\n");
   }
   const payload = base64(
     JSON.stringify({
@@ -57,7 +57,7 @@ function shellScriptFor(agent: ToolDisclosureAgent, prompt: string, sessionId: s
     '  exec curl -fsS --max-time 600 http://127.0.0.1:8642/v1/chat/completions -H \'Content-Type: application/json\' -H "Authorization: Bearer ${API_SERVER_KEY}" --data-binary "$payload"',
     "fi",
     "exec curl -fsS --max-time 600 http://127.0.0.1:8642/v1/chat/completions -H 'Content-Type: application/json' --data-binary \"$payload\"",
-  ].join("; ");
+  ].join("\n");
 }
 
 export function buildAgentDriverCommand(options: {

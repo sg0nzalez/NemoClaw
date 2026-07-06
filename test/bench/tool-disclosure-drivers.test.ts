@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { spawnSync } from "node:child_process";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -45,6 +47,22 @@ describe("tool-disclosure agent drivers", () => {
         sessionId: "one",
       }),
     ).toThrow("sandboxName contains unsupported characters");
+  });
+
+  it.skipIf(process.platform === "win32")("emits POSIX-valid driver scripts", () => {
+    for (const agent of ["openclaw", "hermes", "langchain-deepagents-code"] as const) {
+      const command = buildAgentDriverCommand({
+        agent,
+        sandboxName: "bench-syntax",
+        prompt: "Return BENCH_OK_123",
+        sessionId: "bench-session-syntax",
+      });
+      const syntax = spawnSync("sh", ["-n"], {
+        encoding: "utf8",
+        input: command.args.at(-1),
+      });
+      expect(syntax.status, syntax.stderr).toBe(0);
+    }
   });
 
   it("extracts assistant replies without accepting tool-result fields", () => {
