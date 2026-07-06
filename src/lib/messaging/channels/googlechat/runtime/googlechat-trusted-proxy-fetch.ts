@@ -51,6 +51,13 @@
 // (load-time source rewrite of the @openclaw/googlechat dist bundle via the
 // module loader hooks). It targets the SAME dist chunk that
 // googlechat-outbound-auth already patches, so the loader-hook coverage is proven.
+//
+// ── Brittleness ──────────────────────────────────────────────────────────────
+// This keys on anchors in the plugin's dist bundle, so it is version-sensitive.
+// Bounded because the plugin is integrity-version-pinned (the bundle is frozen
+// per build): anchors are covered by unit tests, drift can only appear on a
+// deliberate version bump, and this fails loud (named patch error) rather than
+// silently mispatching — never a silent security downgrade.
 
 // Test seam: the self-installing IIFE below publishes its pure source-rewrite
 // helpers here so unit tests can exercise the anchor rewrites, drift handling, and
