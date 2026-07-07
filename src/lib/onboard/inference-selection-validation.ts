@@ -252,7 +252,7 @@ export function createInferenceSelectionValidationHelpers(
     // for duplicate/missing/out-of-order events (#6289).
     const probe =
       intendedApi === "openai-completions"
-        ? runOpenAiLikeProbe(
+        ? await runOpenAiLikeProbe(
             getCompatibleAnthropicOpenAiSurfaceBaseUrl(endpointUrl),
             model,
             apiKey,

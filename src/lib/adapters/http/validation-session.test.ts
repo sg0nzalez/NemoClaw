@@ -83,6 +83,78 @@ describe("provider validation session", () => {
     expect(lookup).toHaveBeenCalledTimes(1);
   });
 
+  it("falls back when DNS pre-resolution exceeds its deadline", async () => {
+    const lookup = vi.fn(() => new Promise<Array<{ address: string; family: number }>>(() => {}));
+
+    await expect(
+      createValidationSession("https://provider.example.test/v1", {
+        env: {},
+        lookup,
+        dnsTimeoutMs: 10,
+      }),
+    ).resolves.toBeNull();
+    expect(lookup).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back before DNS pre-resolution when a proxy applies", async () => {
+    const lookup = vi.fn();
+
+    await expect(
+      createValidationSession("https://provider.example.test/v1", {
+        env: { HTTPS_PROXY: "http://proxy.example.test:8080" },
+        lookup,
+      }),
+    ).resolves.toBeNull();
+    expect(lookup).not.toHaveBeenCalled();
+  });
+
+  it("enforces a total deadline while a response trickles data", async () => {
+    const server = http.createServer((request, response) => {
+      request.resume();
+      response.writeHead(200, { "content-type": "application/json" });
+      const timer = setInterval(() => response.write(" "), 5);
+      response.on("close", () => clearInterval(timer));
+    });
+    const port = await listen(server);
+    const session = await createValidationSession(`http://provider.example.test:${port}/v1`, {
+      env: {},
+      lookup: async () => [{ address: "127.0.0.1", family: 4 }],
+    });
+
+    await expect(
+      session!.request({
+        url: `http://provider.example.test:${port}/v1/responses`,
+        body: "{}",
+        timeoutMs: 30,
+      }),
+    ).resolves.toMatchObject({ ok: false, curlStatus: 28 });
+    session!.close();
+  });
+
+  it("rejects a response larger than 8 MiB", async () => {
+    const server = http.createServer((request, response) => {
+      request.resume();
+      response.end(Buffer.alloc(8 * 1024 * 1024 + 1));
+    });
+    const port = await listen(server);
+    const session = await createValidationSession(`http://provider.example.test:${port}/v1`, {
+      env: {},
+      lookup: async () => [{ address: "127.0.0.1", family: 4 }],
+    });
+
+    await expect(
+      session!.request({
+        url: `http://provider.example.test:${port}/v1/responses`,
+        body: "{}",
+        timeoutMs: 1_000,
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      stderr: "validation response exceeded 8 MiB",
+    });
+    session!.close();
+  });
+
   it("reconnects without another DNS lookup when the server closes keepalive", async () => {
     let connections = 0;
     const server = http.createServer((request, response) => {
@@ -139,6 +211,18 @@ describe("provider validation session", () => {
         HTTPS_PROXY: "http://proxy.example.test:8080",
       }),
     ).toBe("proxy_configured");
+    expect(
+      getValidationSessionIneligibility("https://provider.example.test/v1", {
+        HTTPS_PROXY: "http://proxy.example.test:8080",
+        NO_PROXY: "provider.example.test",
+      }),
+    ).toBeNull();
+    expect(
+      getValidationSessionIneligibility("https://api.provider.example.test/v1", {
+        HTTPS_PROXY: "http://proxy.example.test:8080",
+        NO_PROXY: ".provider.example.test",
+      }),
+    ).toBeNull();
     expect(
       getValidationSessionIneligibility("https://provider.example.test/v1", {
         CURL_CA_BUNDLE: "/tmp/corporate-ca.pem",

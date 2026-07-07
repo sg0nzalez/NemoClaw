@@ -30,6 +30,7 @@ export interface ValidationSessionOptions {
   env?: NodeJS.ProcessEnv;
   lookup?: ValidationDnsLookup;
   onSocket?: (socket: net.Socket) => void;
+  dnsTimeoutMs?: number;
 }
 
 const PROXY_ENV_NAMES = [
@@ -43,9 +44,50 @@ const PROXY_ENV_NAMES = [
 
 const CURL_TLS_ENV_NAMES = ["CURL_CA_BUNDLE", "SSL_CERT_FILE", "SSL_CERT_DIR"] as const;
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
+const DEFAULT_DNS_LOOKUP_TIMEOUT_MS = 5_000;
 
 function configured(env: NodeJS.ProcessEnv, names: readonly string[]): boolean {
   return names.some((name) => Boolean(env[name]?.trim()));
+}
+
+function isNoProxyEndpoint(endpoint: URL, env: NodeJS.ProcessEnv): boolean {
+  const raw = env.NO_PROXY ?? env.no_proxy ?? "";
+  const hostname = endpoint.hostname.toLowerCase();
+  const port = endpoint.port || (endpoint.protocol === "https:" ? "443" : "80");
+  return raw
+    .split(",")
+    .map((entry) => entry.trim().toLowerCase())
+    .filter(Boolean)
+    .some((entry) => {
+      if (entry === "*") return true;
+      const lastColon = entry.lastIndexOf(":");
+      const includesPort = lastColon > 0 && /^\d+$/.test(entry.slice(lastColon + 1));
+      const candidateHost = includesPort ? entry.slice(0, lastColon) : entry;
+      const candidatePort = includesPort ? entry.slice(lastColon + 1) : null;
+      if (candidatePort !== null && candidatePort !== port) return false;
+      if (candidateHost.startsWith(".")) {
+        return hostname === candidateHost.slice(1) || hostname.endsWith(candidateHost);
+      }
+      return hostname === candidateHost;
+    });
+}
+
+function withTimeout<T>(operation: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(Object.assign(new Error(message), { code: "ETIMEDOUT" }));
+    }, timeoutMs);
+    operation.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
 }
 
 export function getValidationSessionIneligibility(
@@ -69,7 +111,9 @@ export function getValidationSessionIneligibility(
   if (parsed.hostname === "host.docker.internal") return "docker_internal_endpoint";
   // Node's built-in agents do not implement forward-proxy tunnelling. Keep curl
   // authoritative whenever proxy routing may be part of endpoint reachability.
-  if (configured(env, PROXY_ENV_NAMES)) return "proxy_configured";
+  if (configured(env, PROXY_ENV_NAMES) && !isNoProxyEndpoint(parsed, env)) {
+    return "proxy_configured";
+  }
   // NODE_EXTRA_CA_CERTS is consumed by Node itself at process startup. Curl-only
   // CA overrides are not, so those requests remain on the compatibility path.
   if (configured(env, CURL_TLS_ENV_NAMES)) return "curl_tls_configured";
@@ -97,7 +141,15 @@ function buildLookup(addresses: Array<{ address: string; family: number }>): net
     const eligible = requestedFamily
       ? addresses.filter((entry) => entry.family === requestedFamily)
       : addresses;
-    const selected = eligible.length > 0 ? eligible : addresses;
+    if (requestedFamily && eligible.length === 0) {
+      callback(
+        Object.assign(new Error(`no resolved IPv${requestedFamily} address is available`), {
+          code: "ENOTFOUND",
+        }),
+      );
+      return;
+    }
+    const selected = eligible;
     if (options?.all) {
       callback(null, selected);
       return;
@@ -125,7 +177,12 @@ export async function createValidationSession(
     addresses = await withTraceSpan(
       "nemoclaw.inference.validation_dns_lookup",
       { "server.address": endpoint.hostname },
-      () => lookup(endpoint.hostname, { all: true, verbatim: true }),
+      () =>
+        withTimeout(
+          lookup(endpoint.hostname, { all: true, verbatim: true }),
+          options.dnsTimeoutMs ?? DEFAULT_DNS_LOOKUP_TIMEOUT_MS,
+          "validation DNS lookup timed out",
+        ),
     );
   } catch (error) {
     addTraceEvent("validation_transport_fallback", {
@@ -183,9 +240,12 @@ export async function createValidationSession(
             let status = 0;
             const chunks: Buffer[] = [];
             let receivedBytes = 0;
+            let overallTimer: NodeJS.Timeout | undefined;
+            let terminalError: NodeJS.ErrnoException | undefined;
             const finish = (result: CurlProbeResult) => {
               if (settled) return;
               settled = true;
+              if (overallTimer) clearTimeout(overallTimer);
               resolve(result);
             };
             const requestImpl = target.protocol === "https:" ? https.request : http.request;
@@ -220,11 +280,10 @@ export async function createValidationSession(
                   const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
                   receivedBytes += buffer.length;
                   if (receivedBytes > MAX_RESPONSE_BYTES) {
-                    request.destroy(
-                      Object.assign(new Error("validation response exceeded 8 MiB"), {
-                        code: "EFBIG",
-                      }),
-                    );
+                    terminalError = Object.assign(new Error("validation response exceeded 8 MiB"), {
+                      code: "EFBIG",
+                    });
+                    request.destroy(terminalError);
                     return;
                   }
                   chunks.push(buffer);
@@ -241,11 +300,13 @@ export async function createValidationSession(
                     message: ok ? `HTTP ${status}` : summarizeProbeFailure(body, status, 0, ""),
                   });
                 });
-                response.on("aborted", () => {
+                response.on("close", () => {
+                  if (response.complete || settled) return;
                   failResponse(
-                    Object.assign(new Error("validation response was aborted"), {
-                      code: "ECONNRESET",
-                    }),
+                    terminalError ??
+                      Object.assign(new Error("validation response closed early"), {
+                        code: "ECONNRESET",
+                      }),
                   );
                 });
                 response.on("error", failResponse);
@@ -260,11 +321,12 @@ export async function createValidationSession(
                 addTraceEvent("validation_socket_reused", { reused: true });
               }
             });
-            request.setTimeout(input.timeoutMs, () => {
-              request.destroy(
-                Object.assign(new Error("validation request timed out"), { code: "ETIMEDOUT" }),
-              );
-            });
+            overallTimer = setTimeout(() => {
+              terminalError = Object.assign(new Error("validation request timed out"), {
+                code: "ETIMEDOUT",
+              });
+              request.destroy(terminalError);
+            }, input.timeoutMs);
             request.on("error", (rawError: NodeJS.ErrnoException) => {
               const body = Buffer.concat(chunks).toString("utf8");
               const curlStatus = curlStatusForError(rawError);

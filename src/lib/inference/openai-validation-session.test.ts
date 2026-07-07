@@ -206,6 +206,26 @@ describe("OpenAI validation keepalive sequence", () => {
     expect(lookup).not.toHaveBeenCalled();
   });
 
+  it("keeps DeepSeek V4 Pro on its specialized legacy streaming probe", async () => {
+    const legacyProbe: OpenAiValidationSessionDeps["legacyProbe"] = vi.fn(() => ({
+      ok: true,
+      api: "openai-completions",
+    }));
+    const harness = deps(legacyProbe);
+
+    const result = await probeOpenAiLikeEndpointWithValidationSession(
+      "https://provider.example.test/v1",
+      "deepseek-ai/deepseek-v4-pro",
+      "test-key",
+      {},
+      harness,
+    );
+
+    expect(result).toMatchObject({ ok: true, api: "openai-completions" });
+    expect(legacyProbe).toHaveBeenCalledTimes(1);
+    expect(harness.sessionOptions.lookup).not.toHaveBeenCalled();
+  });
+
   it("keeps query-parameter authentication out of request headers", async () => {
     let observedUrl = "";
     let observedAuthorization: string | undefined;
