@@ -9,14 +9,19 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
+  BREV_CLOUDFLARED_DEB_SHA256,
+  BREV_CLOUDFLARED_VERSION,
   BREV_MESSAGING_COMPAT_TIMEOUT_MS,
   BREV_MESSAGING_PROVIDER_TIMEOUT_MS,
   BREV_REMOTE_WRAPPER_GRACE_MS,
   BREV_SECURITY_SUITE_TIMEOUT_MS,
+  BREV_TOOL_DISCLOSURE_PERFORMANCE_SMOKE_SUITE,
+  BREV_TOOL_DISCLOSURE_PERFORMANCE_SMOKE_TIMEOUT_MS,
   BREV_WORKFLOW_OWNERSHIP_ENV,
   brevSuiteHarnessSandboxName,
   brevSuiteNeedsHarnessSandbox,
   brevWorkflowOwnsInstance,
+  buildBrevCloudflaredInstallCommands,
   buildBrevRemoteVitestCommand,
 } from "../tools/e2e/brev-remote-vitest.mts";
 
@@ -98,6 +103,7 @@ describe("Brev remote Vitest command", () => {
     expect(BREV_SECURITY_SUITE_TIMEOUT_MS).toBe(20 * 60_000);
     expect(BREV_MESSAGING_PROVIDER_TIMEOUT_MS).toBe(70 * 60_000);
     expect(BREV_MESSAGING_COMPAT_TIMEOUT_MS).toBe(40 * 60_000);
+    expect(BREV_TOOL_DISCLOSURE_PERFORMANCE_SMOKE_TIMEOUT_MS).toBe(55 * 60_000);
     expect(BREV_REMOTE_WRAPPER_GRACE_MS).toBe(120_000);
   });
 
@@ -114,9 +120,25 @@ describe("Brev remote Vitest command", () => {
     expect(brevSuiteNeedsHarnessSandbox("gpu")).toBe(false);
     expect(brevSuiteNeedsHarnessSandbox("messaging-compatible-endpoint")).toBe(false);
     expect(brevSuiteNeedsHarnessSandbox("messaging-providers")).toBe(false);
+    expect(brevSuiteNeedsHarnessSandbox(BREV_TOOL_DISCLOSURE_PERFORMANCE_SMOKE_SUITE)).toBe(false);
     expect(brevSuiteHarnessSandboxName("all")).toBeUndefined();
     expect(brevSuiteHarnessSandboxName("messaging-compatible-endpoint")).toBeUndefined();
     expect(brevSuiteHarnessSandboxName("messaging-providers")).toBeUndefined();
+    expect(
+      brevSuiteHarnessSandboxName(BREV_TOOL_DISCLOSURE_PERFORMANCE_SMOKE_SUITE),
+    ).toBeUndefined();
+  });
+
+  it("installs the smoke tunnel prerequisite from an immutable reviewed package", () => {
+    const command = buildBrevCloudflaredInstallCommands().join("\n");
+
+    expect(command).toContain(BREV_CLOUDFLARED_VERSION);
+    expect(command).toContain(BREV_CLOUDFLARED_DEB_SHA256);
+    expect(command).toContain("sha256sum -c -");
+    expect(command).toContain("dpkg-deb -f");
+    expect(command).toContain("sudo dpkg -i");
+    expect(command).not.toContain("apt-get install");
+    expect(command).not.toContain("pkg.cloudflare.com");
   });
 
   it("preserves harness onboarding for single-target suites", () => {

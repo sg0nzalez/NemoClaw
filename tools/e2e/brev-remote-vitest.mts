@@ -8,8 +8,15 @@ export type BrevVitestProject = "cli" | "e2e-live";
 export const BREV_SECURITY_SUITE_TIMEOUT_MS = 20 * 60_000;
 export const BREV_MESSAGING_PROVIDER_TIMEOUT_MS = 70 * 60_000;
 export const BREV_MESSAGING_COMPAT_TIMEOUT_MS = 40 * 60_000;
+export const BREV_TOOL_DISCLOSURE_PERFORMANCE_SMOKE_TIMEOUT_MS = 55 * 60_000;
 export const BREV_REMOTE_WRAPPER_GRACE_MS = 120_000;
 export const BREV_WORKFLOW_OWNERSHIP_ENV = "NEMOCLAW_BREV_WORKFLOW_OWNS_INSTANCE";
+export const BREV_TOOL_DISCLOSURE_PERFORMANCE_SMOKE_SUITE = "tool-disclosure-performance-smoke";
+export const BREV_TOOL_DISCLOSURE_PERFORMANCE_SMOKE_ARTIFACT_DIR =
+  "/tmp/nemoclaw-tool-disclosure-performance-smoke-artifacts";
+export const BREV_CLOUDFLARED_VERSION = "2026.6.1";
+export const BREV_CLOUDFLARED_DEB_SHA256 =
+  "ccd02ec216c62bfa573395d8f72cb2e91e95cbdf8726a8acc06b3e2d9aa31526";
 
 const BREV_SUITES_WITHOUT_HARNESS_SANDBOX = new Set([
   "all",
@@ -17,6 +24,7 @@ const BREV_SUITES_WITHOUT_HARNESS_SANDBOX = new Set([
   "gpu",
   "messaging-compatible-endpoint",
   "messaging-providers",
+  BREV_TOOL_DISCLOSURE_PERFORMANCE_SMOKE_SUITE,
 ]);
 
 export function brevSuiteNeedsHarnessSandbox(testSuite: string): boolean {
@@ -53,4 +61,18 @@ export function buildBrevRemoteVitestCommand(project: BrevVitestProject, target:
     "test -x ./node_modules/.bin/vitest",
     `NEMOCLAW_RUN_LIVE_E2E=1 ${vitestCommand}`,
   ].join(" && ");
+}
+
+export function buildBrevCloudflaredInstallCommands(): string[] {
+  return [
+    "set -euo pipefail",
+    `cloudflared_deb=/tmp/cloudflared-${BREV_CLOUDFLARED_VERSION}-linux-amd64.deb`,
+    `curl -fL https://github.com/cloudflare/cloudflared/releases/download/${BREV_CLOUDFLARED_VERSION}/cloudflared-linux-amd64.deb -o \"$cloudflared_deb\"`,
+    `printf '%s  %s\\n' ${BREV_CLOUDFLARED_DEB_SHA256} \"$cloudflared_deb\" | sha256sum -c -`,
+    `test \"$(dpkg-deb -f \"$cloudflared_deb\" Package)\" = cloudflared`,
+    `test \"$(dpkg-deb -f \"$cloudflared_deb\" Version)\" = ${BREV_CLOUDFLARED_VERSION}`,
+    `test \"$(dpkg-deb -f \"$cloudflared_deb\" Architecture)\" = amd64`,
+    `sudo dpkg -i \"$cloudflared_deb\"`,
+    `cloudflared --version | grep -F 'cloudflared version ${BREV_CLOUDFLARED_VERSION}'`,
+  ];
 }

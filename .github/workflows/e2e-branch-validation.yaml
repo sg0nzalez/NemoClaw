@@ -46,6 +46,9 @@ name: E2E / Branch Validation
 #                              OpenAI-compatible endpoint. Creates its own sandbox
 #                              (e2e-msg-compat) on a separate fresh instance.
 #   dashboard-remote-bind    — Verifies opt-in remote dashboard forwards bind 0.0.0.0.
+#   tool-disclosure-performance-smoke — Runs the claim-ineligible hosted-inference
+#                              performance smoke on an ephemeral Brev CPU VM and
+#                              retains its sanitized evidence. (~60 min)
 #   gpu                      — Provisions a Brev GPU VM and runs the Ollama GPU E2E
 #                              sandbox proof suite from source. (~45 min)
 #   all                      — Runs credential-sanitization + telegram-injection, each with
@@ -73,6 +76,7 @@ on:
           - messaging-providers
           - messaging-compatible-endpoint
           - dashboard-remote-bind
+          - tool-disclosure-performance-smoke
           - gpu
           - all
       use_launchable:
@@ -188,7 +192,7 @@ jobs:
           TEST_SUITE: ${{ inputs.test_suite }}
         run: |
           case "$TEST_SUITE" in
-            full|credential-sanitization|telegram-injection|messaging-providers|messaging-compatible-endpoint|dashboard-remote-bind|gpu|all) ;;
+            full|credential-sanitization|telegram-injection|messaging-providers|messaging-compatible-endpoint|dashboard-remote-bind|tool-disclosure-performance-smoke|gpu|all) ;;
             *)
               echo "::error::test_suite is not one of the supported Brev E2E suites"
               exit 1
@@ -213,7 +217,7 @@ jobs:
       - name: Checkout target branch
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
-          ref: ${{ env.RESOLVED_BRANCH || inputs.branch || 'main' }}
+          ref: ${{ env.RESOLVED_BRANCH || inputs.branch || github.ref }}
           persist-credentials: false
 
       - id: tested-ref
@@ -285,6 +289,46 @@ jobs:
           NEMOCLAW_GPU_E2E_MODEL: ${{ vars.NEMOCLAW_GPU_E2E_MODEL || 'qwen2.5:7b' }}
           KEEP_ALIVE: ${{ inputs.keep_alive }}
         run: npx vitest run --project e2e-branch-validation --silent=false --reporter=default
+
+      - name: Collect Brev tool-disclosure performance smoke artifacts
+        if: always() && inputs.test_suite == 'tool-disclosure-performance-smoke'
+        env:
+          INSTANCE: ${{ env.BREV_E2E_INSTANCE_NAME }}
+        run: |
+          set -euo pipefail
+          artifact_dir="brev-tool-disclosure-performance-smoke-artifacts"
+          remote_dir="/tmp/nemoclaw-tool-disclosure-performance-smoke-artifacts"
+          mkdir -p "$artifact_dir"
+          brev refresh >/dev/null
+          ssh -o StrictHostKeyChecking=no -o LogLevel=ERROR \
+              -o ConnectTimeout=10 "$INSTANCE" \
+              "test -d '$remote_dir' && tar -C '$remote_dir' -czf - ." \
+            | tar -C "$artifact_dir" -xzf -
+          test -f "$artifact_dir/tool-disclosure-hosted-inference-performance-smoke-completes-one-frozen-task-in-both-modes/tool-disclosure-performance-smoke.json"
+
+      - name: Scan Brev tool-disclosure performance smoke artifacts
+        if: always() && inputs.test_suite == 'tool-disclosure-performance-smoke'
+        env:
+          NVIDIA_INFERENCE_API_KEY: ${{ secrets.NVIDIA_INFERENCE_API_KEY }}
+        run: |
+          set -euo pipefail
+          artifact_dir="brev-tool-disclosure-performance-smoke-artifacts"
+          test -d "$artifact_dir"
+          if [ -n "${NVIDIA_INFERENCE_API_KEY:-}" ] && \
+             grep -R -I -l -F -- "$NVIDIA_INFERENCE_API_KEY" "$artifact_dir" >/dev/null; then
+            echo "::error::Brev performance smoke artifacts contain an unredacted inference credential"
+            exit 1
+          fi
+
+      - name: Upload Brev tool-disclosure performance smoke artifacts
+        if: always() && inputs.test_suite == 'tool-disclosure-performance-smoke'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-brev-tool-disclosure-performance-smoke-${{ github.run_attempt }}
+          path: brev-tool-disclosure-performance-smoke-artifacts/
+          if-no-files-found: error
+          include-hidden-files: false
+          retention-days: 14
 
       # Collect debugging artifacts from the Brev VM on failure before the
       # instance gets torn down. Captures the onboard log, sandbox list,

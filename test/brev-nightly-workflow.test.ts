@@ -96,6 +96,7 @@ describe("Brev nightly workflow contract", () => {
       "pull-requests": "read",
     });
     expect(checkout?.with?.["persist-credentials"]).toBe(false);
+    expect(checkout?.with?.ref).toBe("${{ env.RESOLVED_BRANCH || inputs.branch || github.ref }}");
     expect(resolveBranch?.env?.PR_NUMBER).toBe("${{ inputs.pr_number }}");
     expect(resolveBranch?.run).not.toContain("gh pr view ${{");
     expect(validation?.outputs?.tested_sha).toBe("${{ steps.tested-ref.outputs.sha }}");
@@ -129,11 +130,40 @@ describe("Brev nightly workflow contract", () => {
 
     expect(validation?.env?.TEST_SUITE).toBe("${{ inputs.test_suite }}");
     expect(validation?.run).toContain(
-      "full|credential-sanitization|telegram-injection|messaging-providers|messaging-compatible-endpoint|dashboard-remote-bind|gpu|all",
+      "full|credential-sanitization|telegram-injection|messaging-providers|messaging-compatible-endpoint|dashboard-remote-bind|tool-disclosure-performance-smoke|gpu|all",
     );
     expect(validation?.run).toContain("exit 1");
     expect(steps.indexOf(validation as NonNullable<typeof validation>)).toBeLessThan(
       steps.indexOf(checkout as NonNullable<typeof checkout>),
+    );
+  });
+
+  it("collects and scans Brev performance smoke evidence before deleting the VM", () => {
+    const steps = branchValidation.jobs?.["e2e-branch-validation"]?.steps ?? [];
+    const collect = steps.find(
+      (step) => step.name === "Collect Brev tool-disclosure performance smoke artifacts",
+    );
+    const scan = steps.find(
+      (step) => step.name === "Scan Brev tool-disclosure performance smoke artifacts",
+    );
+    const upload = steps.find(
+      (step) => step.name === "Upload Brev tool-disclosure performance smoke artifacts",
+    );
+    const cleanup = steps.find((step) => step.name === "Delete Brev instance");
+
+    expect(collect?.if).toContain("tool-disclosure-performance-smoke");
+    expect(collect?.run).toContain("/tmp/nemoclaw-tool-disclosure-performance-smoke-artifacts");
+    expect(collect?.run).toContain("tar -C");
+    expect(scan?.env?.NVIDIA_INFERENCE_API_KEY).toBe("${{ secrets.NVIDIA_INFERENCE_API_KEY }}");
+    expect(scan?.run).toContain("grep -R -I -l -F");
+    expect(upload?.uses).toBe("actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a");
+    expect(upload?.with).toMatchObject({
+      name: "e2e-brev-tool-disclosure-performance-smoke-${{ github.run_attempt }}",
+      "if-no-files-found": "error",
+      "retention-days": 14,
+    });
+    expect(steps.indexOf(cleanup as NonNullable<typeof cleanup>)).toBeGreaterThan(
+      steps.indexOf(upload as NonNullable<typeof upload>),
     );
   });
 

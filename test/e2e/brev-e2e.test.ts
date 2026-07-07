@@ -28,7 +28,8 @@
  * Optional env vars:
  *   TEST_SUITE             — which test to run: full (default), deploy-cli, gpu,
  *                             credential-sanitization, telegram-injection, messaging-providers,
- *                             messaging-compatible-endpoint, dashboard-remote-bind, all
+ *                             messaging-compatible-endpoint, dashboard-remote-bind,
+ *                             tool-disclosure-performance-smoke, all
  *   BREV_MIN_VCPU          — Minimum vCPUs for CPU instance (default: 4)
  *   BREV_MIN_RAM           — Minimum RAM in GB for CPU instance (default: 16)
  *   BREV_PROVIDER          — Cloud provider filter for brev search (default: gcp for CPU, any for GPU)
@@ -58,9 +59,13 @@ import {
   BREV_MESSAGING_PROVIDER_TIMEOUT_MS,
   BREV_REMOTE_WRAPPER_GRACE_MS,
   BREV_SECURITY_SUITE_TIMEOUT_MS,
+  BREV_TOOL_DISCLOSURE_PERFORMANCE_SMOKE_ARTIFACT_DIR,
+  BREV_TOOL_DISCLOSURE_PERFORMANCE_SMOKE_SUITE,
+  BREV_TOOL_DISCLOSURE_PERFORMANCE_SMOKE_TIMEOUT_MS,
   brevSuiteHarnessSandboxName,
   brevSuiteNeedsHarnessSandbox,
   brevWorkflowOwnsInstance,
+  buildBrevCloudflaredInstallCommands,
   buildBrevRemoteVitestCommand,
 } from "../../tools/e2e/brev-remote-vitest.mts";
 
@@ -76,6 +81,8 @@ const TEST_SUITE = process.env.TEST_SUITE || "full";
 const REPO_DIR = path.resolve(import.meta.dirname, "../..");
 const CLI_PATH = path.join(REPO_DIR, "bin", "nemoclaw.js");
 const GPU_TEST_SUITE = TEST_SUITE === "gpu";
+const TOOL_DISCLOSURE_PERFORMANCE_SMOKE_SUITE =
+  TEST_SUITE === BREV_TOOL_DISCLOSURE_PERFORMANCE_SMOKE_SUITE;
 const BREV_PROVIDER = process.env.BREV_PROVIDER || (GPU_TEST_SUITE ? "" : "gcp");
 const BREV_CREATE_TIMEOUT_SECONDS = parseInt(
   process.env.BREV_CREATE_TIMEOUT_SECONDS || (GPU_TEST_SUITE ? "1200" : "180"),
@@ -287,6 +294,19 @@ function sshEnv(
     // Pin a small model so Brev's cheaper GPU shapes do not fail before
     // sandbox creation while auto-loading a very large default Ollama model.
     envParts.push(`export NEMOCLAW_MODEL='${shellEscape(gpuE2eModel)}'`);
+  }
+  if (TOOL_DISCLOSURE_PERFORMANCE_SMOKE_SUITE) {
+    const testedSha = execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: REPO_DIR,
+      encoding: "utf8",
+    }).trim();
+    if (!/^[a-f0-9]{40}$/u.test(testedSha)) {
+      throw new Error("Brev performance smoke requires an exact local git SHA");
+    }
+    envParts.push(
+      `export E2E_ARTIFACT_DIR='${shellEscape(BREV_TOOL_DISCLOSURE_PERFORMANCE_SMOKE_ARTIFACT_DIR)}'`,
+      `export GITHUB_SHA='${testedSha}'`,
+    );
   }
   // Forward optional messaging tokens for the messaging-providers test
   for (const key of [
@@ -766,6 +786,15 @@ function prepareGpuDockerRuntime(elapsed: () => string): void {
   console.log(`[${elapsed()}] NVIDIA Docker runtime ready`);
 }
 
+function prepareToolDisclosurePerformanceSmoke(elapsed: () => string): void {
+  console.log(`[${elapsed()}] Installing verified cloudflared prerequisite...`);
+  ssh(buildBrevCloudflaredInstallCommands().join(" && "), {
+    timeout: 180_000,
+    stream: true,
+  });
+  console.log(`[${elapsed()}] Verified cloudflared prerequisite ready`);
+}
+
 /**
  * Bootstrap the launchable environment on the remote VM:
  * rsync branch code, install deps, build plugin, and npm link the CLI.
@@ -1125,6 +1154,10 @@ describe.runIf(hasRequiredVars && hasAuthenticatedBrev)("Brev E2E", () => {
       const result = bootstrapLaunchable(elapsed);
       remoteDir = result.remoteDir;
 
+      if (TOOL_DISCLOSURE_PERFORMANCE_SMOKE_SUITE) {
+        prepareToolDisclosurePerformanceSmoke(elapsed);
+      }
+
       if (result.needsOnboard) {
         pollForSandboxReady(elapsed);
         writeManualRegistry(elapsed);
@@ -1186,6 +1219,19 @@ describe.runIf(hasRequiredVars && hasAuthenticatedBrev)("Brev E2E", () => {
       expectVitestPassed(output);
     },
     1_800_000,
+  );
+
+  it.runIf(TOOL_DISCLOSURE_PERFORMANCE_SMOKE_SUITE)(
+    "tool-disclosure performance smoke passes on Brev CPU VM",
+    () => {
+      const output = runRemoteVitest(
+        "e2e-live",
+        "test/e2e/live/tool-disclosure-performance-smoke.test.ts",
+        BREV_TOOL_DISCLOSURE_PERFORMANCE_SMOKE_TIMEOUT_MS,
+      );
+      expectVitestPassed(output);
+    },
+    BREV_TOOL_DISCLOSURE_PERFORMANCE_SMOKE_TIMEOUT_MS + BREV_REMOTE_WRAPPER_GRACE_MS,
   );
 
   it.runIf(TEST_SUITE === "credential-sanitization" || TEST_SUITE === "all")(
