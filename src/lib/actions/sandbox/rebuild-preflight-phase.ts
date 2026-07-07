@@ -145,6 +145,7 @@ export async function runRebuildPreflightPhase(
         // succeeded, matching the previous `skipConfirm || confirmed` contract.
         autoYes: true,
         requestedToolDisclosure,
+        preparedBackupRecovery: recoveryManifest !== null,
         log,
         bail,
       });
