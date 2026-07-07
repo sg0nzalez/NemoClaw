@@ -20,8 +20,11 @@ const LOCAL_PATH_DECLARATION =
 function typescriptFiles(root: string): string[] {
   return fs.readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
     const target = path.join(root, entry.name);
-    if (entry.isDirectory()) return typescriptFiles(target);
-    return entry.isFile() && entry.name.endsWith(".ts") ? [target] : [];
+    return entry.isDirectory()
+      ? typescriptFiles(target)
+      : entry.isFile() && entry.name.endsWith(".ts")
+        ? [target]
+        : [];
   });
 }
 
