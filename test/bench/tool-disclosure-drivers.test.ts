@@ -98,4 +98,32 @@ describe("tool-disclosure agent drivers", () => {
       ),
     ).toBe("FINAL_NONCE");
   });
+
+  it("extracts the Deep Agents final block before trailing task status", () => {
+    const output = [
+      "Running task non-interactively...",
+      "App: v0.1.30 | Agent: agent (default) | Model: example/model | Thread: thread-1",
+      "Starting LangGraph server...",
+      "✓ Loaded 1 MCP tool",
+      "✓ Server ready",
+      "🔧 Calling tool: search_tools (trace: TOOL_ONLY_NONCE)",
+      "🔧 Calling tool: benchmark_echo",
+      "Operation complete.",
+      "FINAL_NONCE",
+      "",
+      "✓ Task completed",
+      "",
+      "Agent active  1.3s",
+    ].join("\n");
+
+    expect(extractFinalAssistantOutput("langchain-deepagents-code", output)).toBe(
+      "Operation complete.\nFINAL_NONCE",
+    );
+    expect(
+      extractFinalAssistantOutput(
+        "langchain-deepagents-code",
+        "✓ Server ready\n🔧 Calling tool: benchmark_echo (result: TOOL_ONLY_NONCE)\n✓ Task completed\nAgent active  1.3s",
+      ),
+    ).toBe("");
+  });
 });

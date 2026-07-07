@@ -17,6 +17,10 @@ The repository does not include measured results.
 Run both campaigns and retain their evidence before you make a performance or quality claim.
 </Note>
 
+The explicit-only `tool-disclosure-smoke` E2E job is a smaller operational check for ordinary GitHub-hosted runners.
+It runs one frozen task in progressive and direct modes with fresh Deep Agents sandboxes and hosted inference.
+Its output validates live wiring only: it is not a complete campaign, cannot be summarized by this protocol, and does not support benchmark claims.
+
 ## Understand the frozen protocol
 
 The preparation command generates one deterministic catalog, task corpus, and paired execution schedule.

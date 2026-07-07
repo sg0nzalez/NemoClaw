@@ -115,6 +115,41 @@ function record(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
+function stripTerminalControls(value: string): string {
+  return value.replace(/\u001b\[[0-?]*[ -/]*[@-~]/gu, "");
+}
+
+/**
+ * Deep Agents Code prints the final assistant block immediately before its
+ * `Task completed` marker, followed by an `Agent active` timing line. Tool
+ * trace lines precede that block. Select only the delimited assistant block so
+ * neither a tool trace nor a trailing status line can satisfy an oracle.
+ */
+function extractDeepAgentsFinalAssistantOutput(raw: string): string {
+  const lines = stripTerminalControls(raw).split(/\r?\n/u);
+  let completed = -1;
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    if (/^(?:[✓✔]\s*)?Task completed\b/iu.test(lines[index].trim())) {
+      completed = index;
+      break;
+    }
+  }
+  if (completed < 0) return "";
+
+  let boundary = -1;
+  for (let index = 0; index < completed; index += 1) {
+    const line = lines[index].trim();
+    if (/^(?:🔧\s*)?Calling tool:/u.test(line) || /^(?:[✓✔]\s*)?Server ready\s*$/iu.test(line)) {
+      boundary = index;
+    }
+  }
+  if (boundary < 0) return "";
+  return lines
+    .slice(boundary + 1, completed)
+    .join("\n")
+    .trim();
+}
+
 /** Extract only the user-visible final assistant field, never raw tool traces. */
 export function extractFinalAssistantOutput(agent: ToolDisclosureAgent, raw: string): string {
   if (agent === "hermes") {
@@ -140,13 +175,7 @@ export function extractFinalAssistantOutput(agent: ToolDisclosureAgent, raw: str
     }
     return parts.join("\n");
   }
-  return (
-    raw
-      .split(/\r?\n/u)
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .at(-1) ?? ""
-  );
+  return extractDeepAgentsFinalAssistantOutput(raw);
 }
 
 export function buildOpenClawCallLogCommand(options: {
