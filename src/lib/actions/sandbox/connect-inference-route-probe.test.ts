@@ -10,7 +10,7 @@ import {
 } from "./connect-inference-route-probe";
 
 const INFERENCE_ROUTE_PROBE_SCRIPT = [
-  "HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 3 --max-time 8 https://inference.local/v1/models 2>/dev/null) || HTTP_CODE=000",
+  "HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' --cacert /etc/openshell-tls/ca-bundle.pem --connect-timeout 3 --max-time 8 https://inference.local/v1/models 2>/dev/null) || HTTP_CODE=000",
   'case "$HTTP_CODE" in [2-4][0-9][0-9]) printf \'OK %s\' "$HTTP_CODE" ;; *) printf \'BROKEN %s\' "$HTTP_CODE" ;; esac',
 ].join("; ");
 
@@ -68,11 +68,12 @@ describe("sandbox connect inference route probe argv", () => {
     ]);
   });
 
-  it("discards the response without a persistent sandbox temp file (#6192)", () => {
+  it("verifies the route with OpenShell's CA and discards the response (#6192)", () => {
     const args = buildSandboxInferenceRouteProbeArgs("alpha", { name: "openclaw" });
     const script = args.at(-1) ?? "";
 
     expect(script).toContain("curl -s -o /dev/null");
+    expect(script).toContain("--cacert /etc/openshell-tls/ca-bundle.pem");
     expect(script).not.toContain("curl -sk");
     expect(script).not.toContain("--insecure");
     expect(script).not.toContain("/tmp/");

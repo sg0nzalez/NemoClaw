@@ -17,8 +17,13 @@ type InferenceRouteProbeCommandResult = {
   output?: string | null;
 };
 
+// The OpenShell version pinned by blueprint.yaml writes a combined bundle of
+// system roots and its sandbox CA at this reserved path. Pass it explicitly so
+// probe trust does not depend on agent-specific shell environment persistence.
+const OPENSHELL_CA_BUNDLE_PATH = "/etc/openshell-tls/ca-bundle.pem";
+
 const INFERENCE_ROUTE_PROBE_SCRIPT = [
-  "HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 3 --max-time 8 https://inference.local/v1/models 2>/dev/null) || HTTP_CODE=000",
+  `HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' --cacert ${OPENSHELL_CA_BUNDLE_PATH} --connect-timeout 3 --max-time 8 https://inference.local/v1/models 2>/dev/null) || HTTP_CODE=000`,
   'case "$HTTP_CODE" in [2-4][0-9][0-9]) printf \'OK %s\' "$HTTP_CODE" ;; *) printf \'BROKEN %s\' "$HTTP_CODE" ;; esac',
 ].join("; ");
 
