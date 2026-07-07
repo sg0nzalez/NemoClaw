@@ -29,7 +29,6 @@ import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
 import { resultText, sandboxAccessEnv } from "../fixtures/clients/index.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
 import { requireHostedInferenceConfig } from "../fixtures/hosted-inference.ts";
-import { shouldRunLiveE2E } from "../fixtures/live-project-gate.ts";
 
 const AGENT = "langchain-deepagents-code" as const;
 const CATALOG_SIZE = 64;
@@ -75,7 +74,7 @@ function gitSha(): string {
       })();
 }
 
-test.skipIf(!shouldRunLiveE2E())(
+test(
   "tool disclosure hosted-inference performance smoke completes one frozen task in both modes",
   { timeout: TEST_TIMEOUT_MS },
   async ({ artifacts, cleanup, host, sandbox, secrets }) => {
