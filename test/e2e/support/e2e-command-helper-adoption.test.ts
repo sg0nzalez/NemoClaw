@@ -11,11 +11,18 @@ const LOCAL_COMMAND_HELPER =
   /^(?:export\s+)?(?:function\s+(?:resultText|expectExitZero)\s*\(|const\s+(?:resultText|expectExitZero)\s*=)/m;
 
 function typescriptFiles(root: string): string[] {
-  return fs.readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
+  const files: string[] = [];
+
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
     const target = path.join(root, entry.name);
-    if (entry.isDirectory()) return typescriptFiles(target);
-    return entry.isFile() && entry.name.endsWith(".ts") ? [target] : [];
-  });
+    const nestedFiles = entry.isDirectory() ? typescriptFiles(target) : [];
+    files.push(...nestedFiles);
+
+    const currentFile = entry.isFile() && entry.name.endsWith(".ts") ? [target] : [];
+    files.push(...currentFile);
+  }
+
+  return files;
 }
 
 describe("E2E command helper adoption", () => {
