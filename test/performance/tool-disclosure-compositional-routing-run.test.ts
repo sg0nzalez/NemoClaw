@@ -32,9 +32,9 @@ describe("compositional routing acceptance runner", () => {
           choices: [
             {
               message: {
-                content: JSON.stringify(
-                  matchedFixture.expected_steps.map((expected) => expected.capability),
-                ),
+                content: JSON.stringify({
+                  subtasks: matchedFixture.expected_steps.map((expected) => expected.capability),
+                }),
               },
             },
           ],
@@ -52,6 +52,8 @@ describe("compositional routing acceptance runner", () => {
         revision: "immutable-test-revision",
         api_key_env: "ROUTING_TEST_API_KEY",
         allow_remote: true,
+        reasoning_control: "enable_thinking_false",
+        json_object_response: true,
       },
       embedding: { kind: "portable", dimensions: 1_024 },
     });
@@ -62,6 +64,8 @@ describe("compositional routing acceptance runner", () => {
       configuration: {
         decomposer_model: "test-decomposer",
         decomposer_revision: "immutable-test-revision",
+        decomposer_reasoning_control: "enable_thinking_false",
+        decomposer_output_mode: "json-object",
         embedding_kind: "portable",
         embedding_model: "portable-lexical-hashing",
         embedding_revision: "builtin-v1",
@@ -122,7 +126,9 @@ describe("compositional routing acceptance runner", () => {
         const content =
           matchedFixture.id === "route-no-tool-01"
             ? "not-json"
-            : JSON.stringify(matchedFixture.expected_steps.map((expected) => expected.capability));
+            : JSON.stringify({
+                subtasks: matchedFixture.expected_steps.map((expected) => expected.capability),
+              });
         return new Response(JSON.stringify({ choices: [{ message: { content } }] }), {
           status: 200,
           headers: { "content-type": "application/json" },

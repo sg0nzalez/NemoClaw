@@ -37,6 +37,10 @@ interface OpenAIAdapterOptions {
 
 export interface OpenAIChatDecomposerOptions extends OpenAIAdapterOptions {
   maxOutputTokens?: number;
+  /** Endpoint-specific chat-template switch for concise output. */
+  reasoningControl?: "enable_thinking_false" | "thinking_false";
+  /** Request the OpenAI-compatible JSON-object response mode. */
+  jsonObjectResponse?: boolean;
 }
 
 export interface OpenAITextEmbedderOptions extends OpenAIAdapterOptions {
@@ -152,9 +156,12 @@ function decompositionMessages(
   query: string,
   pass: DecompositionPass,
   hints: readonly string[],
+  jsonObjectResponse: boolean,
 ): Array<{ role: "system" | "user"; content: string }> {
   const system = [
-    "Return only a JSON array of strings.",
+    jsonObjectResponse
+      ? 'Return only a JSON object with one field named "subtasks", whose value is an array of strings.'
+      : "Return only a JSON array of strings.",
     "Split the request into a short ordered list of concrete actions.",
     "Each action must be solvable with one external capability.",
     "Return an empty array when the request needs no external capability.",
@@ -205,6 +212,16 @@ function parseDecompositionResponse(value: unknown): unknown {
 export function createOpenAIChatTaskDecomposer(
   options: OpenAIChatDecomposerOptions,
 ): TaskDecomposer {
+  if (
+    options.reasoningControl !== undefined &&
+    options.reasoningControl !== "enable_thinking_false" &&
+    options.reasoningControl !== "thinking_false"
+  ) {
+    throw new TypeError("reasoningControl is not supported");
+  }
+  if (options.jsonObjectResponse !== undefined && typeof options.jsonObjectResponse !== "boolean") {
+    throw new TypeError("jsonObjectResponse must be boolean");
+  }
   const target = endpoint(options.baseUrl, "chat/completions", options.allowRemote === true);
   const model = boundedText(options.model, "decomposition model");
   const timeoutMs = positiveInteger(options.timeoutMs ?? DEFAULT_TIMEOUT_MS, "timeoutMs");
@@ -223,10 +240,21 @@ export function createOpenAIChatTaskDecomposer(
           headers: requestHeaders(options.apiKey),
           body: JSON.stringify({
             model,
-            messages: decompositionMessages(query, request.pass, request.tool_hints),
+            messages: decompositionMessages(
+              query,
+              request.pass,
+              request.tool_hints,
+              options.jsonObjectResponse === true,
+            ),
             temperature: 0,
             max_tokens: maxOutputTokens,
             stream: false,
+            ...(options.reasoningControl === "enable_thinking_false"
+              ? { chat_template_kwargs: { enable_thinking: false } }
+              : options.reasoningControl === "thinking_false"
+                ? { chat_template_kwargs: { thinking: false } }
+                : {}),
+            ...(options.jsonObjectResponse ? { response_format: { type: "json_object" } } : {}),
           }),
           signal: boundedSignal(timeoutMs, request.signal),
         });

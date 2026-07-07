@@ -34,6 +34,8 @@ export interface CompositionalRoutingRemoteModelConfig {
   revision: string;
   api_key_env?: string;
   allow_remote?: boolean;
+  reasoning_control?: "enable_thinking_false" | "thinking_false";
+  json_object_response?: boolean;
 }
 
 export interface CompositionalRoutingAcceptanceConfig {
@@ -51,6 +53,8 @@ export interface CompositionalRoutingAcceptanceOutput {
   configuration: {
     decomposer_model: string;
     decomposer_revision: string;
+    decomposer_reasoning_control: "enable_thinking_false" | "thinking_false" | "endpoint-default";
+    decomposer_output_mode: "json-object" | "prompt-only";
     embedding_kind: "portable" | "openai";
     embedding_model: string;
     embedding_revision: string;
@@ -214,9 +218,11 @@ export async function runCompositionalRoutingAcceptance(
   }
   const usage: ModelUsageEvent[] = [];
   const decomposerRevision = publicIdentity(config.decomposer.revision, "decomposer revision");
-  const decomposer = createOpenAIChatTaskDecomposer(
-    remoteOptions(config.decomposer, timeoutMs, usage),
-  );
+  const decomposer = createOpenAIChatTaskDecomposer({
+    ...remoteOptions(config.decomposer, timeoutMs, usage),
+    reasoningControl: config.decomposer.reasoning_control,
+    jsonObjectResponse: config.decomposer.json_object_response,
+  });
   const embeddingKind = config.embedding.kind;
   const embeddingModel =
     embeddingKind === "portable"
@@ -265,6 +271,9 @@ export async function runCompositionalRoutingAcceptance(
     configuration: {
       decomposer_model: publicIdentity(config.decomposer.model, "decomposer model"),
       decomposer_revision: decomposerRevision,
+      decomposer_reasoning_control: config.decomposer.reasoning_control ?? "endpoint-default",
+      decomposer_output_mode:
+        config.decomposer.json_object_response === true ? "json-object" : "prompt-only",
       embedding_kind: embeddingKind,
       embedding_model: embeddingModel,
       embedding_revision: embeddingRevision,

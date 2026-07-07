@@ -25,7 +25,7 @@ describe("independent compositional tool model adapters", () => {
         headers: new Headers(init?.headers),
         body: JSON.parse(String(init?.body)) as Record<string, unknown>,
       });
-      const content = JSON.stringify(responses[calls.length - 1]);
+      const content = JSON.stringify({ subtasks: responses[calls.length - 1] });
       return new Response(
         JSON.stringify({
           choices: [{ message: { content: `\`\`\`json\n${content}\n\`\`\`` } }],
@@ -41,6 +41,8 @@ describe("independent compositional tool model adapters", () => {
       model: "test-model",
       allowRemote: true,
       apiKey: "private-api-key",
+      reasoningControl: "enable_thinking_false",
+      jsonObjectResponse: true,
       onUsage: (event) => usage.push(event),
     });
 
@@ -67,6 +69,8 @@ describe("independent compositional tool model adapters", () => {
       temperature: 0,
       max_tokens: 256,
       stream: false,
+      chat_template_kwargs: { enable_thinking: false },
+      response_format: { type: "json_object" },
     });
     expect(JSON.stringify(calls[1].body)).toContain("route_fetch");
     expect(usage).toHaveLength(2);
@@ -159,5 +163,12 @@ describe("independent compositional tool model adapters", () => {
         allowRemote: true,
       }),
     ).toThrow("must use HTTPS");
+    expect(() =>
+      createOpenAIChatTaskDecomposer({
+        baseUrl: "http://127.0.0.1:8000/v1",
+        model: "test-model",
+        reasoningControl: "invalid" as "thinking_false",
+      }),
+    ).toThrow("reasoningControl is not supported");
   });
 });

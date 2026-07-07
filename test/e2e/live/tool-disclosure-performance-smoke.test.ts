@@ -84,6 +84,8 @@ test.skipIf(!shouldRunLiveE2E())(
           revision: process.env.NEMOCLAW_MODEL_REVISION?.trim() || "unreported",
           api_key_env: routingCredentialEnv,
           allow_remote: true,
+          reasoning_control: "enable_thinking_false",
+          json_object_response: true,
         },
         embedding: { kind: "portable" },
       });
@@ -268,6 +270,8 @@ test.skipIf(!shouldRunLiveE2E())(
         model: hosted.model,
         apiKey: hosted.apiKey,
         allowRemote: true,
+        reasoningControl: "enable_thinking_false",
+        jsonObjectResponse: true,
       }),
       embedder: new PortableHashingTextEmbedder(),
       isRoutableTool: (name) => routedToolNames.has(name),
