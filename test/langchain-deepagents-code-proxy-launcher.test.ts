@@ -31,15 +31,20 @@ function readAgentFile(name: string): string {
 function writeManagedProxyFiles(
   tempDir: string,
   managedProxy: { host: string; port: string },
+  toolDisclosure: "progressive" | "direct" = "progressive",
 ): void {
   const hostFile = path.join(tempDir, "trusted-proxy-host");
   const portFile = path.join(tempDir, "trusted-proxy-port");
+  const toolDisclosureFile = path.join(tempDir, "trusted-tool-disclosure");
   fs.rmSync(hostFile, { force: true });
   fs.rmSync(portFile, { force: true });
+  fs.rmSync(toolDisclosureFile, { force: true });
   fs.writeFileSync(hostFile, `${managedProxy.host}\n`);
   fs.writeFileSync(portFile, `${managedProxy.port}\n`);
+  fs.writeFileSync(toolDisclosureFile, `${toolDisclosure}\n`);
   fs.chmodSync(hostFile, 0o444);
   fs.chmodSync(portFile, 0o444);
+  fs.chmodSync(toolDisclosureFile, 0o444);
 }
 
 function replaceManagedProxyFileConstants(source: string, tempDir: string): string {
@@ -53,6 +58,10 @@ function replaceManagedProxyFileConstants(source: string, tempDir: string): stri
       `readonly MANAGED_PROXY_PORT_FILE="${path.join(tempDir, "trusted-proxy-port")}"`,
     )
     .replace(
+      'readonly MANAGED_TOOL_DISCLOSURE_FILE="/usr/local/share/nemoclaw/dcode-tool-disclosure"',
+      `readonly MANAGED_TOOL_DISCLOSURE_FILE="${path.join(tempDir, "trusted-tool-disclosure")}"`,
+    )
+    .replace(
       "readonly MANAGED_PROXY_OWNER_UID=0",
       `readonly MANAGED_PROXY_OWNER_UID=${TEST_OWNER_UID}`,
     );
@@ -61,12 +70,13 @@ function replaceManagedProxyFileConstants(source: string, tempDir: string): stri
 function makeLauncherProxyProbeFixture(
   tempDir: string,
   managedProxy: { host: string; port: string } = DEFAULT_MANAGED_PROXY,
+  toolDisclosure: "progressive" | "direct" = "progressive",
 ): string {
   const launcherPath = path.join(tempDir, "dcode-launcher.sh");
   const probePath = path.join(tempDir, "managed-dcode-probe.sh");
   const probe = [
     "#!/bin/bash -p",
-    "for name in HTTP_PROXY HTTPS_PROXY NO_PROXY http_proxy https_proxy no_proxy ALL_PROXY all_proxy OPENAI_PROXY NEMOCLAW_PROXY_HOST NEMOCLAW_PROXY_PORT; do",
+    "for name in HTTP_PROXY HTTPS_PROXY NO_PROXY http_proxy https_proxy no_proxy ALL_PROXY all_proxy OPENAI_PROXY NEMOCLAW_PROXY_HOST NEMOCLAW_PROXY_PORT NEMOCLAW_TOOL_DISCLOSURE; do",
     '  printf \'LAUNCHER_%s=%s\\n\' "$name" "${!name-__unset__}"',
     "done",
     "",
@@ -80,7 +90,7 @@ function makeLauncherProxyProbeFixture(
   );
   fs.writeFileSync(probePath, probe, "utf8");
   fs.writeFileSync(launcherPath, fixture, "utf8");
-  writeManagedProxyFiles(tempDir, managedProxy);
+  writeManagedProxyFiles(tempDir, managedProxy, toolDisclosure);
   fs.chmodSync(probePath, 0o755);
   fs.chmodSync(launcherPath, 0o755);
   return launcherPath;
@@ -89,6 +99,7 @@ function makeLauncherProxyProbeFixture(
 function makeStartProxyProbeFixture(
   tempDir: string,
   managedProxy: { host: string; port: string } = DEFAULT_MANAGED_PROXY,
+  toolDisclosure: "progressive" | "direct" = "progressive",
 ): { envFile: string; scriptPath: string } {
   const envFile = path.join(tempDir, "proxy-env.sh");
   const scriptPath = path.join(tempDir, "start.sh");
@@ -99,7 +110,7 @@ function makeStartProxyProbeFixture(
       `tmp="$(mktemp "${tempDir}/nemoclaw-proxy-env.XXXXXX")"`,
     );
   fs.writeFileSync(scriptPath, fixture, "utf8");
-  writeManagedProxyFiles(tempDir, managedProxy);
+  writeManagedProxyFiles(tempDir, managedProxy, toolDisclosure);
   fs.chmodSync(scriptPath, 0o755);
   return { envFile, scriptPath };
 }
@@ -198,33 +209,35 @@ describe("Deep Agents Code direct-exec proxy launcher", () => {
     expect(output).not.toContain("all-password");
   });
 
-  it("persists the image-selected tool-disclosure mode for login-shell exec paths", () => {
+  it("restores the image-selected tool-disclosure mode on raw OpenShell exec paths", () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-dcode-disclosure-"));
-    const { envFile, scriptPath } = makeStartProxyProbeFixture(tempDir);
-    const startResult = spawnSync("bash", [scriptPath, "/usr/bin/true"], {
-      env: {
-        PATH: process.env.PATH ?? "/usr/bin:/bin",
-        NEMOCLAW_TOOL_DISCLOSURE: "direct",
-      },
-      encoding: "utf8",
-    });
-    expect(startResult.status, startResult.stderr).toBe(0);
-    const envFileText = fs.readFileSync(envFile, "utf8");
-    expect(envFileText).toContain("export NEMOCLAW_TOOL_DISCLOSURE=direct");
-
-    const sourced = spawnSync(
+    const launcherPath = makeLauncherProxyProbeFixture(tempDir, DEFAULT_MANAGED_PROXY, "direct");
+    const { envFile, scriptPath } = makeStartProxyProbeFixture(
+      tempDir,
+      DEFAULT_MANAGED_PROXY,
+      "direct",
+    );
+    const untrustedEnv = { NEMOCLAW_TOOL_DISCLOSURE: "progressive" };
+    const launcherResult = runLauncher(launcherPath, ["-n", "PONG"], untrustedEnv);
+    const startResult = spawnSync(
       "bash",
-      ["-c", '. "$1"; printf "%s" "$NEMOCLAW_TOOL_DISCLOSURE"', "bash", envFile],
+      [
+        scriptPath,
+        "bash",
+        "-c",
+        'printf "START_TOOL_DISCLOSURE=%s\\n" "$NEMOCLAW_TOOL_DISCLOSURE"',
+      ],
       {
-        env: {
-          PATH: process.env.PATH ?? "/usr/bin:/bin",
-          NEMOCLAW_TOOL_DISCLOSURE: "progressive",
-        },
+        env: { PATH: process.env.PATH ?? "/usr/bin:/bin", ...untrustedEnv },
         encoding: "utf8",
       },
     );
-    expect(sourced.status, sourced.stderr).toBe(0);
-    expect(sourced.stdout).toBe("direct");
+
+    expect(launcherResult.status, launcherResult.stderr).toBe(0);
+    expect(startResult.status, startResult.stderr).toBe(0);
+    expect(launcherResult.stdout).toContain("LAUNCHER_NEMOCLAW_TOOL_DISCLOSURE=direct");
+    expect(startResult.stdout).toContain("START_TOOL_DISCLOSURE=direct");
+    expect(fs.readFileSync(envFile, "utf8")).toContain("export NEMOCLAW_TOOL_DISCLOSURE=direct");
   });
 
   it("pins validated proxy overrides into direct dcode execution paths (#6191)", () => {
@@ -237,6 +250,11 @@ describe("Deep Agents Code direct-exec proxy launcher", () => {
     expect(dockerfile).toContain("printf '%s\\n' \"$NEMOCLAW_PROXY_PORT\"");
     expect(dockerfile).toContain("chmod 0444 /usr/local/share/nemoclaw/dcode-proxy-host");
     expect(dockerfile).toContain("chown root:root /usr/local/share/nemoclaw/dcode-proxy-host");
+    expect(dockerfile).toContain(
+      "printf '%s\\n' \"$NEMOCLAW_TOOL_DISCLOSURE\" > /usr/local/share/nemoclaw/dcode-tool-disclosure",
+    );
+    expect(dockerfile).toMatch(/chmod 0444 .*dcode-tool-disclosure/u);
+    expect(dockerfile).toMatch(/chown root:root .*dcode-tool-disclosure/u);
     expect(dockerfile).not.toContain("    NEMOCLAW_PROXY_HOST=${NEMOCLAW_PROXY_HOST}");
     expect(dockerfile).not.toContain("    NEMOCLAW_PROXY_PORT=${NEMOCLAW_PROXY_PORT}");
     expect(launcher).toContain('readonly MANAGED_PROXY_HOST_FILE="/usr/local/share/nemoclaw');
@@ -352,6 +370,34 @@ describe("Deep Agents Code direct-exec proxy launcher", () => {
     expect(`${launcherResult.stderr}\n${startResult.stderr}`).toContain(
       "Unsafe ownership or mode on trusted managed proxy host file",
     );
+  });
+
+  it("fails closed on missing or invalid image-baked tool-disclosure state", () => {
+    for (const invalidValue of [null, "unexpected"] as const) {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-dcode-disclosure-invalid-"));
+      const launcherPath = makeLauncherProxyProbeFixture(tempDir);
+      const { scriptPath } = makeStartProxyProbeFixture(tempDir);
+      const modeFile = path.join(tempDir, "trusted-tool-disclosure");
+      fs.rmSync(modeFile);
+      if (invalidValue !== null) {
+        fs.writeFileSync(modeFile, `${invalidValue}\n`, { mode: 0o444 });
+      }
+
+      const env = { NEMOCLAW_TOOL_DISCLOSURE: "direct" };
+      const launcherResult = runLauncher(launcherPath, ["-n", "PONG"], env);
+      const startResult = spawnSync("bash", [scriptPath, "true"], {
+        env: { PATH: process.env.PATH ?? "/usr/bin:/bin", ...env },
+        encoding: "utf8",
+      });
+
+      expect(launcherResult.status).not.toBe(0);
+      expect(startResult.status).not.toBe(0);
+      const combined = `${launcherResult.stdout}\n${launcherResult.stderr}\n${startResult.stdout}\n${startResult.stderr}`;
+      expect(combined).toMatch(
+        /trusted managed tool-disclosure mode file|Invalid image-baked tool-disclosure mode/,
+      );
+      expect(combined).not.toContain("LAUNCHER_NEMOCLAW_TOOL_DISCLOSURE=direct");
+    }
   });
 
   it("keeps dcode shell proxy validators aligned with onboard validation (#6191)", () => {

@@ -20,6 +20,7 @@ export PATH="/usr/local/bin:/opt/venv/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sb
 # dcode no longer uses inference.local.
 readonly MANAGED_PROXY_HOST_FILE="/usr/local/share/nemoclaw/dcode-proxy-host"
 readonly MANAGED_PROXY_PORT_FILE="/usr/local/share/nemoclaw/dcode-proxy-port"
+readonly MANAGED_TOOL_DISCLOSURE_FILE="/usr/local/share/nemoclaw/dcode-tool-disclosure"
 readonly MANAGED_PROXY_OWNER_UID=0
 
 managed_proxy_file_metadata() {
@@ -32,21 +33,21 @@ managed_proxy_file_metadata() {
   fi
 }
 
-read_managed_proxy_value() {
+read_managed_image_value() {
   local file="$1"
   local name="$2"
   local metadata
   local value
   if [ ! -f "$file" ] || [ -L "$file" ] || [ ! -r "$file" ]; then
-    printf 'Missing or unsafe trusted managed proxy %s file.\n' "$name" >&2
+    printf 'Missing or unsafe trusted managed %s file.\n' "$name" >&2
     return 1
   fi
   metadata="$(managed_proxy_file_metadata "$file")" || {
-    printf 'Cannot inspect trusted managed proxy %s file.\n' "$name" >&2
+    printf 'Cannot inspect trusted managed %s file.\n' "$name" >&2
     return 1
   }
   if [ "$metadata" != "${MANAGED_PROXY_OWNER_UID}:444" ]; then
-    printf 'Unsafe ownership or mode on trusted managed proxy %s file.\n' "$name" >&2
+    printf 'Unsafe ownership or mode on trusted managed %s file.\n' "$name" >&2
     return 1
   fi
   value="$(<"$file")"
@@ -55,8 +56,9 @@ read_managed_proxy_value() {
 
 # Onboard validates the build args and the Dockerfile stores them in root-owned
 # files. Runtime env is untrusted and cannot override those image-baked values.
-PROXY_HOST="$(read_managed_proxy_value "$MANAGED_PROXY_HOST_FILE" "host")"
-PROXY_PORT="$(read_managed_proxy_value "$MANAGED_PROXY_PORT_FILE" "port")"
+PROXY_HOST="$(read_managed_image_value "$MANAGED_PROXY_HOST_FILE" "proxy host")"
+PROXY_PORT="$(read_managed_image_value "$MANAGED_PROXY_PORT_FILE" "proxy port")"
+TOOL_DISCLOSURE="$(read_managed_image_value "$MANAGED_TOOL_DISCLOSURE_FILE" "tool-disclosure mode")"
 unset NEMOCLAW_PROXY_HOST NEMOCLAW_PROXY_PORT
 # Generic proxy fallbacks are outside the managed dcode contract and may carry
 # host credentials even after the scheme-specific proxy values are normalized.
@@ -88,6 +90,14 @@ if ! is_valid_proxy_port "$PROXY_PORT"; then
   printf '%s\n' 'Invalid NEMOCLAW_PROXY_PORT for the managed runtime proxy.' >&2
   exit 1
 fi
+case "$TOOL_DISCLOSURE" in
+  progressive | direct) ;;
+  *)
+    printf '%s\n' 'Invalid image-baked tool-disclosure mode for the managed runtime.' >&2
+    exit 1
+    ;;
+esac
+export NEMOCLAW_TOOL_DISCLOSURE="$TOOL_DISCLOSURE"
 
 _PROXY_URL="http://${PROXY_HOST}:${PROXY_PORT}"
 _NO_PROXY_VAL="localhost,127.0.0.1,::1,${PROXY_HOST}"

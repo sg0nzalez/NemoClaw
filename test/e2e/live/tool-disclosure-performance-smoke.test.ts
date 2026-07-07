@@ -137,7 +137,12 @@ test.skipIf(!shouldRunLiveE2E())(
 
       const attestation = await sandbox.exec(
         name,
-        ["sh", "-lc", `test "$NEMOCLAW_TOOL_DISCLOSURE" = ${JSON.stringify(mode)}`],
+        [
+          "nemoclaw-start",
+          "sh",
+          "-c",
+          `test "$NEMOCLAW_TOOL_DISCLOSURE" = ${JSON.stringify(mode)}`,
+        ],
         {
           artifactName: `attest-tool-disclosure-${mode}`,
           env: sandboxAccessEnv(),

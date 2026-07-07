@@ -22,6 +22,7 @@ export function makeStartScriptFixture(tempDir: string): {
   const scriptPath = path.join(tempDir, "start.sh");
   const hostFile = path.join(tempDir, "trusted-proxy-host");
   const portFile = path.join(tempDir, "trusted-proxy-port");
+  const toolDisclosureFile = path.join(tempDir, "trusted-tool-disclosure");
   const original = fs.readFileSync(START_SCRIPT, "utf8");
   assert.ok(original.includes("local target=/tmp/nemoclaw-proxy-env.sh"));
   assert.ok(original.includes('tmp="$(mktemp /tmp/nemoclaw-proxy-env.XXXXXX)"'));
@@ -33,6 +34,10 @@ export function makeStartScriptFixture(tempDir: string): {
     .replace(
       'readonly MANAGED_PROXY_PORT_FILE="/usr/local/share/nemoclaw/dcode-proxy-port"',
       `readonly MANAGED_PROXY_PORT_FILE="${portFile}"`,
+    )
+    .replace(
+      'readonly MANAGED_TOOL_DISCLOSURE_FILE="/usr/local/share/nemoclaw/dcode-tool-disclosure"',
+      `readonly MANAGED_TOOL_DISCLOSURE_FILE="${toolDisclosureFile}"`,
     )
     .replace(
       "readonly MANAGED_PROXY_OWNER_UID=0",
@@ -49,8 +54,10 @@ export function makeStartScriptFixture(tempDir: string): {
   assert.ok(!fixture.includes('tmp="$(mktemp /tmp/nemoclaw-proxy-env.XXXXXX)"'));
   fs.writeFileSync(hostFile, "10.200.0.1\n", "utf8");
   fs.writeFileSync(portFile, "3128\n", "utf8");
+  fs.writeFileSync(toolDisclosureFile, "progressive\n", "utf8");
   fs.chmodSync(hostFile, 0o444);
   fs.chmodSync(portFile, 0o444);
+  fs.chmodSync(toolDisclosureFile, 0o444);
   fs.writeFileSync(scriptPath, fixture, "utf8");
   fs.chmodSync(scriptPath, 0o755);
   return { envFile, scriptPath };

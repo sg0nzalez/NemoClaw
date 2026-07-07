@@ -24,6 +24,7 @@ function makeStartFixture(): string {
   const scriptPath = path.join(tempDir, "start.sh");
   const hostFile = path.join(tempDir, "trusted-proxy-host");
   const portFile = path.join(tempDir, "trusted-proxy-port");
+  const toolDisclosureFile = path.join(tempDir, "trusted-tool-disclosure");
   const fixture = fs
     .readFileSync(START_SCRIPT, "utf8")
     .replace(
@@ -35,13 +36,19 @@ function makeStartFixture(): string {
       `readonly MANAGED_PROXY_PORT_FILE="${portFile}"`,
     )
     .replace(
+      'readonly MANAGED_TOOL_DISCLOSURE_FILE="/usr/local/share/nemoclaw/dcode-tool-disclosure"',
+      `readonly MANAGED_TOOL_DISCLOSURE_FILE="${toolDisclosureFile}"`,
+    )
+    .replace(
       "readonly MANAGED_PROXY_OWNER_UID=0",
       `readonly MANAGED_PROXY_OWNER_UID=${process.getuid?.() ?? 0}`,
     );
   fs.writeFileSync(hostFile, "10.200.0.1\n");
   fs.writeFileSync(portFile, "3128\n");
+  fs.writeFileSync(toolDisclosureFile, "progressive\n");
   fs.chmodSync(hostFile, 0o444);
   fs.chmodSync(portFile, 0o444);
+  fs.chmodSync(toolDisclosureFile, 0o444);
   fs.writeFileSync(scriptPath, fixture);
   fs.chmodSync(scriptPath, 0o755);
   tempDirs.push(tempDir);

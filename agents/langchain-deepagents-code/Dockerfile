@@ -59,14 +59,16 @@ RUN case "$NEMOCLAW_TOOL_DISCLOSURE" in \
     esac
 
 # The launcher and startup script read these root-owned files instead of
-# trusting process-level environment overrides for inference routing. Invoking
-# each launcher validates the build args before the image can complete.
+# trusting process-level environment overrides for inference routing or tool
+# disclosure. Invoking each launcher validates the build args before the image
+# can complete.
 RUN install -d -m 0755 /usr/local/share/nemoclaw \
     && printf '%s\n' "$NEMOCLAW_PROXY_HOST" > /usr/local/share/nemoclaw/dcode-proxy-host \
     && printf '%s\n' "$NEMOCLAW_PROXY_PORT" > /usr/local/share/nemoclaw/dcode-proxy-port \
+    && printf '%s\n' "$NEMOCLAW_TOOL_DISCLOSURE" > /usr/local/share/nemoclaw/dcode-tool-disclosure \
     && printf '%s\n' "$NEMOCLAW_INFERENCE_BASE_URL" > /usr/local/share/nemoclaw/dcode-inference-base-url \
-    && chown root:root /usr/local/share/nemoclaw/dcode-proxy-host /usr/local/share/nemoclaw/dcode-proxy-port /usr/local/share/nemoclaw/dcode-inference-base-url \
-    && chmod 0444 /usr/local/share/nemoclaw/dcode-proxy-host /usr/local/share/nemoclaw/dcode-proxy-port /usr/local/share/nemoclaw/dcode-inference-base-url \
+    && chown root:root /usr/local/share/nemoclaw/dcode-proxy-host /usr/local/share/nemoclaw/dcode-proxy-port /usr/local/share/nemoclaw/dcode-tool-disclosure /usr/local/share/nemoclaw/dcode-inference-base-url \
+    && chmod 0444 /usr/local/share/nemoclaw/dcode-proxy-host /usr/local/share/nemoclaw/dcode-proxy-port /usr/local/share/nemoclaw/dcode-tool-disclosure /usr/local/share/nemoclaw/dcode-inference-base-url \
     && /usr/local/bin/dcode --version \
     && /usr/local/bin/dcode.real --version \
     && /usr/local/bin/deepagents-code --version
