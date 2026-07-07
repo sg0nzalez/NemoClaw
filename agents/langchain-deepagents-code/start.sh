@@ -165,6 +165,7 @@ prepare_runtime_env() {
     # LangSmith values are intentionally excluded because any inherited variable
     # can be misconfigured with a token and this shared file is readable.
     write_export_if_set NEMOCLAW_SANDBOX_NAME
+    write_export_if_set NEMOCLAW_TOOL_DISCLOSURE
   } >"$tmp"
   # Dcode intentionally runs as the non-root sandbox user, unlike the
   # root-supervised OpenClaw/Hermes startup path. This atomic, sandbox-user-owned

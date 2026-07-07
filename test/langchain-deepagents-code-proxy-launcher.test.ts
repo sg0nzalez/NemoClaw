@@ -198,6 +198,35 @@ describe("Deep Agents Code direct-exec proxy launcher", () => {
     expect(output).not.toContain("all-password");
   });
 
+  it("persists the image-selected tool-disclosure mode for login-shell exec paths", () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-dcode-disclosure-"));
+    const { envFile, scriptPath } = makeStartProxyProbeFixture(tempDir);
+    const startResult = spawnSync("bash", [scriptPath, "/usr/bin/true"], {
+      env: {
+        PATH: process.env.PATH ?? "/usr/bin:/bin",
+        NEMOCLAW_TOOL_DISCLOSURE: "direct",
+      },
+      encoding: "utf8",
+    });
+    expect(startResult.status, startResult.stderr).toBe(0);
+    const envFileText = fs.readFileSync(envFile, "utf8");
+    expect(envFileText).toContain("export NEMOCLAW_TOOL_DISCLOSURE=direct");
+
+    const sourced = spawnSync(
+      "bash",
+      ["-c", '. "$1"; printf "%s" "$NEMOCLAW_TOOL_DISCLOSURE"', "bash", envFile],
+      {
+        env: {
+          PATH: process.env.PATH ?? "/usr/bin:/bin",
+          NEMOCLAW_TOOL_DISCLOSURE: "progressive",
+        },
+        encoding: "utf8",
+      },
+    );
+    expect(sourced.status, sourced.stderr).toBe(0);
+    expect(sourced.stdout).toBe("direct");
+  });
+
   it("pins validated proxy overrides into direct dcode execution paths (#6191)", () => {
     const dockerfile = readAgentFile("Dockerfile");
     const launcher = readAgentFile("dcode-launcher.sh");
