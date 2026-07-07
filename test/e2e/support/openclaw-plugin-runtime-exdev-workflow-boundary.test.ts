@@ -13,6 +13,8 @@ import { readWorkflow } from "../../helpers/e2e-workflow-contract";
 
 const JOB_ID = "openclaw-plugin-runtime-exdev";
 const CHECKOUT_ACTION = "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10";
+const RELEASE_BUILDER_IMAGE =
+  "node:22-trixie-slim@sha256:2d9f5c76c8f4dd36e8f253bee5d828a83a6c09f36188f0b0414325232e0b175d";
 const SELECTOR_CONDITION =
   "${{ (github.event_name != 'workflow_dispatch' || (inputs.jobs == '' && inputs.targets == '')) || contains(format(',{0},', inputs.jobs), ',openclaw-plugin-runtime-exdev,') || contains(format(',{0},', inputs.targets), ',openclaw-plugin-runtime-exdev,') }}";
 
@@ -69,29 +71,47 @@ describe("OpenClaw plugin runtime EXDEV workflow boundary", () => {
     expect(job.env).not.toHaveProperty("NVIDIA_INFERENCE_API_KEY");
 
     const steps = job.steps ?? [];
-    expect(steps).toHaveLength(6);
+    expect(steps).toHaveLength(8);
     expect(steps[0]).toEqual({
       uses: CHECKOUT_ACTION,
       with: { "persist-credentials": false },
     });
     expect(steps[1]?.name).toBe("Authenticate to Docker Hub");
     expect(steps[2]).toEqual({
+      name: "Pre-pull release-matched Docker Hub builder image",
+      shell: "bash",
+      run: `set -euo pipefail\ndocker pull ${RELEASE_BUILDER_IMAGE}\n`,
+    });
+    expect(steps[3]).toEqual({
+      name: "Remove Docker auth before release-pinned fixture",
+      if: "always()",
+      shell: "bash",
+      run: "set -euo pipefail\n" + "bash .github/scripts/docker-auth-cleanup.sh\n",
+    });
+    expect(steps[4]).toEqual({
       name: "Prepare E2E workspace",
       uses: PREPARE_E2E_ACTION,
     });
-    expect(steps[3]?.name).toBe(
+    expect(steps[5]?.name).toBe(
       "Run OpenClaw custom-plugin lifecycle and runtime-deps EXDEV live test",
     );
-    expect(steps[3]?.run).toContain("npx vitest run --project e2e-live");
-    expect(steps[3]?.run).toContain("test/e2e/live/openclaw-plugin-runtime-exdev.test.ts");
-    expect(steps[3]).not.toHaveProperty("env");
-    expect(JSON.stringify(steps[3])).not.toContain("secrets.");
-    expect(steps[4]).toEqual({
+    expect(steps[5]?.run).toContain('test -n "${DOCKER_CONFIG:-}"');
+    expect(steps[5]?.run).toContain('test ! -e "${DOCKER_CONFIG}"');
+    expect(steps[5]?.run).toContain('test -z "${DOCKERHUB_USERNAME:-}"');
+    expect(steps[5]?.run).toContain('test -z "${DOCKERHUB_TOKEN:-}"');
+    expect(steps[5]?.run).toContain(
+      "env -u DOCKER_CONFIG -u DOCKERHUB_USERNAME -u DOCKERHUB_TOKEN",
+    );
+    expect(steps[5]?.run).toContain("npx vitest run --project e2e-live");
+    expect(steps[5]?.run).toContain("test/e2e/live/openclaw-plugin-runtime-exdev.test.ts");
+    expect(steps[5]).not.toHaveProperty("env");
+    expect(JSON.stringify(steps[5])).not.toContain("secrets.");
+    expect(steps[6]).toEqual({
       name: "Upload OpenClaw plugin runtime-deps EXDEV artifacts",
       if: "always()",
       uses: UPLOAD_E2E_ARTIFACTS_ACTION,
     });
-    expect(steps[5]).toEqual({
+    expect(steps[7]).toEqual({
       name: "Clean up Docker auth",
       if: "always()",
       shell: "bash",

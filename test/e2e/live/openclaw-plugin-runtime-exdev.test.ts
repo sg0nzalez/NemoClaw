@@ -1022,26 +1022,10 @@ liveTest(
       "v0-0-71",
       NEMOCLAW_RELEASE_OPENSHELL_VERSION,
     );
-    expect(
-      hasRequiredOpenshellMessagingFeatures({
-        openshellBin: taggedPinnedOpenshell.cli,
-        gatewayBin: taggedPinnedOpenshell.gateway,
-        sandboxBin: taggedPinnedOpenshell.sandbox,
-      }),
-      "v0.0.71 OpenShell components must pass coherence preflight before delegation",
-    ).toBe(true);
+    // OpenShell 0.0.71 predates the current 0.0.72 MCP capability marker.
+    // The tagged CLI's own onboarding preflight below owns this compatibility check.
     const taggedOpenShellWrapper = createOpenShellTmpfsWrapper(taggedPinnedOpenshell.cli);
     cleanup.add("remove v0.0.71 EXDEV OpenShell PATH wrapper", taggedOpenShellWrapper.remove);
-    expect(
-      hasRequiredOpenshellMessagingFeatures({
-        openshellBin: taggedOpenShellWrapper.executable,
-        gatewayBin: taggedPinnedOpenshell.gateway,
-        sandboxBin: taggedPinnedOpenshell.sandbox,
-        allowExternalGatewayBin: true,
-        allowExternalSandboxBin: true,
-      }),
-      "v0.0.71 OpenShell wrapper and components must pass onboard coherence preflight",
-    ).toBe(true);
 
     const deploymentEnv = liveEnv({
       COMPATIBLE_API_KEY: "nemoclaw-exdev-dummy-key",
