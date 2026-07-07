@@ -10,7 +10,7 @@ import {
 } from "./connect-inference-route-probe";
 
 const INFERENCE_ROUTE_PROBE_SCRIPT = [
-  "HTTP_CODE=$(curl -sk -o /dev/null -w '%{http_code}' --connect-timeout 3 --max-time 8 https://inference.local/v1/models 2>/dev/null) || HTTP_CODE=000",
+  "HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 3 --max-time 8 https://inference.local/v1/models 2>/dev/null) || HTTP_CODE=000",
   'case "$HTTP_CODE" in [1-4][0-9][0-9]) printf \'OK %s\' "$HTTP_CODE" ;; *) printf \'BROKEN %s\' "$HTTP_CODE" ;; esac',
 ].join("; ");
 
@@ -72,7 +72,9 @@ describe("sandbox connect inference route probe argv", () => {
     const args = buildSandboxInferenceRouteProbeArgs("alpha", { name: "openclaw" });
     const script = args.at(-1) ?? "";
 
-    expect(script).toContain("-o /dev/null");
+    expect(script).toContain("curl -s -o /dev/null");
+    expect(script).not.toContain("curl -sk");
+    expect(script).not.toContain("--insecure");
     expect(script).not.toContain("/tmp/");
     expect(script).not.toContain("head -c");
   });

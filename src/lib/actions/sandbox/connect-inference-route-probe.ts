@@ -18,7 +18,7 @@ type InferenceRouteProbeCommandResult = {
 };
 
 const INFERENCE_ROUTE_PROBE_SCRIPT = [
-  "HTTP_CODE=$(curl -sk -o /dev/null -w '%{http_code}' --connect-timeout 3 --max-time 8 https://inference.local/v1/models 2>/dev/null) || HTTP_CODE=000",
+  "HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 3 --max-time 8 https://inference.local/v1/models 2>/dev/null) || HTTP_CODE=000",
   'case "$HTTP_CODE" in [1-4][0-9][0-9]) printf \'OK %s\' "$HTTP_CODE" ;; *) printf \'BROKEN %s\' "$HTTP_CODE" ;; esac',
 ].join("; ");
 
