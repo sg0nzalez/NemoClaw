@@ -5,7 +5,7 @@ import path from "node:path";
 
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
 import type { HostCliClient } from "../fixtures/clients/host.ts";
-import { CLI_ENTRYPOINT, REPO_ROOT } from "../fixtures/paths.ts";
+import { CLI_ENTRYPOINT } from "../fixtures/paths.ts";
 
 export function commandEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   return {

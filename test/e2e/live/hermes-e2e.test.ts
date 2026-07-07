@@ -542,7 +542,7 @@ test("hermes-e2e: install.sh onboards Hermes and proves health plus live inferen
   expect(beforeRestartProcess.exitCode, resultText(beforeRestartProcess)).toBe(0);
   const beforeGateway = parseGatewayProcess(beforeRestartProcess.stdout);
   const rootSupervisorTopology = beforeGateway.owner === "gateway";
-  let recoveredGateway = beforeGateway;
+  let recoveredGateway: ReturnType<typeof parseGatewayProcess>;
 
   const pid1IdentityScript = trustedSandboxShellScript(
     String.raw`python3 -c 'from pathlib import Path; text=Path("/proc/1/stat").read_text(); tail=text.rsplit(")", 1)[1].split(); cmd=Path("/proc/1/cmdline").read_bytes().replace(b"\0", b" ").decode(); print("1 " + tail[19] + " " + cmd)'`,
