@@ -19,7 +19,7 @@ import {
   validateSandboxName,
 } from "../fixtures/clients/sandbox.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
-import { CLI_ENTRYPOINT, REPO_ROOT } from "../fixtures/paths.ts";
+import { CLI_DIST_ENTRYPOINT, CLI_ENTRYPOINT, REPO_ROOT } from "../fixtures/paths.ts";
 import { redactString } from "../fixtures/redaction.ts";
 import {
   projectRawOutputForArtifact,
@@ -40,7 +40,7 @@ import {
 
 const require = createRequire(import.meta.url);
 
-const DIST_ENTRYPOINT = path.join(REPO_ROOT, "dist", "nemoclaw.js");
+const DIST_ENTRYPOINT = CLI_DIST_ENTRYPOINT;
 const BEDROCK_HOSTNAME = "bedrock-runtime.us-east-1.amazonaws.com";
 const BEDROCK_MOCK_PORT = Number(process.env.NEMOCLAW_BEDROCK_RUNTIME_MOCK_PORT ?? "18147");
 const BEDROCK_ADAPTER_PORT = 11436;

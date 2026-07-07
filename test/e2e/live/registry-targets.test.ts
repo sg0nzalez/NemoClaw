@@ -6,7 +6,7 @@ import path from "node:path";
 
 import { expect, test } from "../fixtures/e2e-test.ts";
 import { HOSTED_INFERENCE_SECRET } from "../fixtures/hosted-inference.ts";
-import { CLI_DIST_ENTRYPOINT, REPO_ROOT } from "../fixtures/paths.ts";
+import { CLI_DIST_ENTRYPOINT, CLI_ENTRYPOINT, REPO_ROOT } from "../fixtures/paths.ts";
 import {
   dcodeInvalidCredentialRebuildOptionsFromRegistryEntry,
   type LifecycleProfile,
@@ -31,7 +31,7 @@ const E2E_CLOUD_EXPERIMENTAL_CHECKS_DIR = path.join(
   REPO_ROOT,
   "test/e2e/e2e-cloud-experimental/checks",
 );
-process.env.NEMOCLAW_CLI_BIN ??= path.join(REPO_ROOT, "bin", "nemoclaw.js");
+process.env.NEMOCLAW_CLI_BIN ??= CLI_ENTRYPOINT;
 
 // The workflow filters by exact target id via `-t "^${TARGET_ID}$"`.
 // When that env is set, surface the structured `[not wired]` reason for the
