@@ -29,7 +29,7 @@ const CATALOG_SIZE = 64;
 const TASK_ID = "primary-single-01";
 const MODES = ["progressive", "direct"] as const satisfies readonly ToolDisclosureMode[];
 const MCP_SERVER_NAME = "performance-test";
-const MCP_TOKEN_ENV = "NEMOCLAW_PERFORMANCE_TEST_MCP_BEARER";
+const MCP_TOKEN_ENV = "TOOL_DISCLOSURE_PERFORMANCE_TEST_MCP_TOKEN";
 const TEST_TIMEOUT_MS = 50 * 60_000;
 
 function sandboxName(mode: ToolDisclosureMode): string {

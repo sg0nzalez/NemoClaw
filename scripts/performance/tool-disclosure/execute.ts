@@ -641,7 +641,7 @@ export async function executeCampaign(options: {
     existing.filter((run) => run.outcome !== "setup-error").map((run) => run.run_id),
   );
   const token = randomBytes(32).toString("hex");
-  const tokenEnv = "NEMOCLAW_PERFORMANCE_TEST_MCP_BEARER";
+  const tokenEnv = "TOOL_DISCLOSURE_PERFORMANCE_TEST_MCP_TOKEN";
   const proxy = createToolDisclosureRecordingProxy({
     upstreamBaseUrl: options.config.upstream_vllm_url,
     port: options.config.recorder_port,
