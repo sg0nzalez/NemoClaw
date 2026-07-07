@@ -24,14 +24,10 @@ describe("Hermes sandbox connect light terminal environment", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
-    if (originalStdoutIsTty === undefined) {
-      Object.defineProperty(process.stdout, "isTTY", { configurable: true, value: undefined });
-    } else {
-      Object.defineProperty(process.stdout, "isTTY", {
-        configurable: true,
-        value: originalStdoutIsTty,
-      });
-    }
+    Object.defineProperty(process.stdout, "isTTY", {
+      configurable: true,
+      value: originalStdoutIsTty,
+    });
     delete process.env.NEMOCLAW_TEST_NO_SLEEP;
     delete require.cache[requireDist.resolve(connectModulePath)];
   });
