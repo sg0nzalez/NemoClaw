@@ -7,7 +7,7 @@ import path from "node:path";
 
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
-import { REPO_ROOT } from "../fixtures/paths.ts";
+import { CLI_ENTRYPOINT, REPO_ROOT } from "../fixtures/paths.ts";
 
 // keeps the old docs E2E phases, but runs them directly through Vitest instead
 // of a former shell wrapper: CLI/docs parity, then local-only Markdown links.
@@ -26,7 +26,7 @@ async function writeNemoclawPathShim(binDir: string): Promise<string> {
   writeExecutable(
     shim,
     `#!/usr/bin/env bash
-exec node ${JSON.stringify(path.join(REPO_ROOT, "bin", "nemoclaw.js"))} "$@"
+exec node ${JSON.stringify(CLI_ENTRYPOINT)} "$@"
 `,
   );
   return shim;

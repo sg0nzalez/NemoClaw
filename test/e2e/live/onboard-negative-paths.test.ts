@@ -7,7 +7,7 @@ import path from "node:path";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
 import type { HostCliClient } from "../fixtures/clients/host.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
-import { CLI_DIST_ENTRYPOINT, REPO_ROOT } from "../fixtures/paths.ts";
+import { CLI_DIST_ENTRYPOINT, CLI_ENTRYPOINT, REPO_ROOT } from "../fixtures/paths.ts";
 
 // Focused Vitest replacement coverage for the first contract from
 // behavior under test is the real CLI/non-interactive onboard boundary, not the
@@ -17,7 +17,7 @@ const SESSION_FILE = path.join(process.env.HOME ?? "/tmp", ".nemoclaw", "onboard
 const INVALID_NVIDIA_INFERENCE_API_KEY = "not-a-nvidia-key";
 const STACK_TRACE_PATTERNS = [/(^|\s)(TypeError|ReferenceError|SyntaxError):/m, /^\s+at /m];
 
-process.env.NEMOCLAW_CLI_BIN ??= path.join(REPO_ROOT, "bin", "nemoclaw.js");
+process.env.NEMOCLAW_CLI_BIN ??= CLI_ENTRYPOINT;
 
 function resultText(result: { stdout: string; stderr: string }): string {
   return [result.stdout, result.stderr].filter(Boolean).join("\n");

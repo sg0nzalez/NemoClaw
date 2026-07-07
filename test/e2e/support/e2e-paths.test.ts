@@ -16,6 +16,8 @@ import {
 
 const LOCAL_PATH_DECLARATION =
   /^(?:export\s+)?const\s+(?:REPO_ROOT|CLI_ENTRYPOINT|CLI_DIST_ENTRYPOINT)\s*=/m;
+const LOCAL_CLI_ENTRYPOINT_DERIVATION =
+  /path\.join\(\s*REPO_ROOT\s*,\s*["'](?:bin|dist)["']\s*,\s*["']nemoclaw\.js["']\s*\)/;
 
 function typescriptFiles(root: string): string[] {
   return fs.readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
@@ -42,7 +44,10 @@ describe("E2E repository paths", () => {
 
   it("keeps live targets on the canonical path exports", () => {
     const violations = typescriptFiles(LIVE_E2E_ROOT)
-      .filter((file) => LOCAL_PATH_DECLARATION.test(fs.readFileSync(file, "utf8")))
+      .filter((file) => {
+        const source = fs.readFileSync(file, "utf8");
+        return LOCAL_PATH_DECLARATION.test(source) || LOCAL_CLI_ENTRYPOINT_DERIVATION.test(source);
+      })
       .map((file) => path.relative(LIVE_E2E_ROOT, file));
 
     expect(violations).toEqual([]);

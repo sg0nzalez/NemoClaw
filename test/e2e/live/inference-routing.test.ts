@@ -12,14 +12,14 @@ import type { HostCliClient } from "../fixtures/clients/host.ts";
 import type { SandboxClient } from "../fixtures/clients/sandbox.ts";
 import { trustedSandboxShellScript, validateSandboxName } from "../fixtures/clients/sandbox.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
-import { CLI_ENTRYPOINT, REPO_ROOT } from "../fixtures/paths.ts";
+import { CLI_DIST_ENTRYPOINT, CLI_ENTRYPOINT, REPO_ROOT } from "../fixtures/paths.ts";
 import { redactString } from "../fixtures/redaction.ts";
 
 // live conversion: direct CLI/onboard subprocesses plus OpenShell sandbox
 // probes, with local helpers only where raw in-memory output is required to
 // prove credential non-exposure before redacted artifacts are written.
 
-const DIST_ENTRYPOINT = path.join(REPO_ROOT, "dist", "nemoclaw.js");
+const DIST_ENTRYPOINT = CLI_DIST_ENTRYPOINT;
 const NEMOCLAW_STATE_DIR = path.join(os.homedir(), ".nemoclaw");
 const ONBOARD_SESSION_FILE = path.join(NEMOCLAW_STATE_DIR, "onboard-session.json");
 const ONBOARD_LOCK_FILE = path.join(NEMOCLAW_STATE_DIR, "onboard.lock");
