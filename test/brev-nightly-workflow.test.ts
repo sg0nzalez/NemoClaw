@@ -153,6 +153,7 @@ describe("Brev nightly workflow contract", () => {
       (step) => step.name === "Upload Brev tool-disclosure performance smoke artifacts",
     );
     const cleanup = steps.find((step) => step.name === "Delete Brev instance");
+    const run = steps.find((step) => step.name === "Run ephemeral Brev E2E");
 
     expect(prerequisite?.if).toContain("tool-disclosure-performance-smoke");
     expect(prerequisite?.env).toEqual({
@@ -161,6 +162,12 @@ describe("Brev nightly workflow contract", () => {
     });
     expect(prerequisite?.run).toContain("sha256sum -c -");
     expect(prerequisite?.run).toContain("dpkg-deb -f");
+    expect(run?.env).toMatchObject({
+      BREV_MIN_VCPU: "${{ inputs.test_suite == 'tool-disclosure-performance-smoke' && '8' || '' }}",
+      BREV_MIN_RAM: "${{ inputs.test_suite == 'tool-disclosure-performance-smoke' && '32' || '' }}",
+      BREV_MIN_DISK:
+        "${{ inputs.test_suite == 'tool-disclosure-performance-smoke' && '100' || '' }}",
+    });
     expect(collect?.if).toContain("tool-disclosure-performance-smoke");
     expect(collect?.env?.TEST_OUTCOME).toBe("${{ steps.brev-test.outcome }}");
     expect(collect?.run).toContain("/tmp/nemoclaw-tool-disclosure-performance-smoke-artifacts");

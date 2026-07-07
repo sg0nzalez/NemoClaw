@@ -55,7 +55,8 @@ name: E2E / Branch Validation
 #                              its own sandbox lifecycle (NOT the independent full journey).
 #
 # Required secrets: BREV_API_KEY + BREV_ORG_ID (or legacy BREV_API_TOKEN), NVIDIA_INFERENCE_API_KEY
-# Instance cost: Brev CPU credits (~$0.10/run for 4x16 instance)
+# Instance cost: Brev CPU credits; most suites use 4x16, while the performance
+# smoke requests 8 vCPU, 32 GB RAM, and 100 GB disk.
 
 on:
   workflow_dispatch:
@@ -302,6 +303,9 @@ jobs:
           INSTANCE_NAME: ${{ env.BREV_E2E_INSTANCE_NAME }}
           TEST_SUITE: ${{ inputs.test_suite }}
           USE_LAUNCHABLE: ${{ inputs.use_launchable && '1' || '0' }}
+          BREV_MIN_VCPU: ${{ inputs.test_suite == 'tool-disclosure-performance-smoke' && '8' || '' }}
+          BREV_MIN_RAM: ${{ inputs.test_suite == 'tool-disclosure-performance-smoke' && '32' || '' }}
+          BREV_MIN_DISK: ${{ inputs.test_suite == 'tool-disclosure-performance-smoke' && '100' || '' }}
           BREV_PROVIDER: ${{ inputs.brev_provider || vars.BREV_PROVIDER || '' }}
           BREV_GPU_TYPE: ${{ inputs.brev_gpu_type || vars.BREV_GPU_TYPE || '' }}
           BREV_GPU_NAME: ${{ inputs.brev_gpu_name || vars.BREV_GPU_NAME || '' }}
@@ -388,6 +392,11 @@ jobs:
                timeout 15s openshell sandbox list  > /tmp/nc-debug/sandbox-list.txt 2>&1
                timeout 15s openshell gateway status > /tmp/nc-debug/gateway-status.txt 2>&1
                timeout 15s docker ps -a             > /tmp/nc-debug/docker-ps.txt 2>&1
+               free -h                              > /tmp/nc-debug/memory.txt 2>&1
+               df -h                                > /tmp/nc-debug/disk.txt 2>&1
+               timeout 15s sudo systemctl status docker --no-pager > /tmp/nc-debug/docker-service.txt 2>&1
+               timeout 15s sudo journalctl -u docker --since "15 minutes ago" --no-pager > /tmp/nc-debug/docker-journal.txt 2>&1
+               timeout 15s sudo dmesg | tail -200   > /tmp/nc-debug/kernel-tail.txt 2>&1
                timeout 30s tar -C /tmp -czf /tmp/nc-debug.tar.gz nc-debug
               ' || true
           scp -o StrictHostKeyChecking=no -o LogLevel=ERROR \

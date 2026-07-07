@@ -3,6 +3,7 @@
 
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import os from "node:os";
 import {
   DEFAULT_SYNTHETIC_PERFORMANCE_TEST_CATALOG_SEED,
   generateCatalogPrefix,
@@ -572,6 +573,14 @@ test("tool disclosure hosted-inference performance smoke completes one frozen ta
       model_id: hosted.model,
     },
     mcp_transport: mcpTransport.kind,
+    host: {
+      platform: process.platform,
+      release: os.release(),
+      architecture: process.arch,
+      cpu_model: os.cpus()[0]?.model ?? "unreported",
+      logical_cpu_count: os.cpus().length,
+      total_memory_bytes: os.totalmem(),
+    },
     results,
     limitations: [
       "This performance smoke test verifies live wiring and task completion; it is not the complete two-campaign performance test.",
