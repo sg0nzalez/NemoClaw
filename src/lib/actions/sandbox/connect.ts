@@ -17,6 +17,7 @@ import * as agentRuntime from "../../agent/runtime";
 import { CLI_NAME } from "../../cli/branding";
 import { D, G, R, YW } from "../../cli/terminal-style";
 import { spawnExitCode } from "../../core/process-exit";
+import { buildSandboxConnectEnv } from "../../domain/sandbox/connect-env";
 import { getNamedGatewayLifecycleState } from "../../gateway-runtime-action";
 import {
   parseGatewayInference,
@@ -149,45 +150,6 @@ const SANDBOX_CONNECT_FLAGS = new Set([
   "--help",
   "-h",
 ]);
-
-const TRUE_VALUES = new Set(["1", "true", "yes", "on"]);
-const FALSE_VALUES = new Set(["0", "false", "no", "off"]);
-
-function hasExplicitBoolean(value: string | undefined): boolean {
-  const normalized = String(value ?? "")
-    .trim()
-    .toLowerCase();
-  return TRUE_VALUES.has(normalized) || FALSE_VALUES.has(normalized);
-}
-
-function hostTerminalLooksLight(env: NodeJS.ProcessEnv): boolean {
-  const colorfgbg = String(env.COLORFGBG ?? "").trim();
-  if (colorfgbg) {
-    const lastField = colorfgbg.split(";").at(-1) ?? "";
-    if (/^\d+$/.test(lastField)) {
-      const bg = Number(lastField);
-      if (bg === 7 || bg === 15) return true;
-      if (bg >= 0 && bg < 16) return false;
-    }
-  }
-  return String(env.TERM_PROGRAM ?? "").trim() === "Apple_Terminal";
-}
-
-export function buildSandboxConnectEnv(
-  agent: { name?: string } | null | undefined,
-  env: NodeJS.ProcessEnv = process.env,
-): NodeJS.ProcessEnv {
-  const nextEnv = { ...env };
-  if (
-    agent?.name === "hermes" &&
-    !hasExplicitBoolean(nextEnv.HERMES_TUI_LIGHT) &&
-    !String(nextEnv.HERMES_TUI_THEME ?? "").trim() &&
-    hostTerminalLooksLight(nextEnv)
-  ) {
-    nextEnv.HERMES_TUI_LIGHT = "1";
-  }
-  return nextEnv;
-}
 
 export function isSandboxConnectFlag(arg: string | undefined): boolean {
   return typeof arg === "string" && SANDBOX_CONNECT_FLAGS.has(arg);

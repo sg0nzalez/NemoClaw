@@ -71,37 +71,6 @@ describe("connectSandbox flow", () => {
     expect(exitSpy).toHaveBeenCalledWith(0);
   });
 
-  it("marks Hermes connect sessions as light-mode when launched from light macOS Terminal.app", async () => {
-    vi.stubEnv("TERM_PROGRAM", "Apple_Terminal");
-    vi.stubEnv("COLORFGBG", "0;15");
-    vi.stubEnv("HERMES_TUI_LIGHT", "");
-    const harness = createConnectHarness({
-      agentName: "hermes",
-      sessionAgent: {
-        name: "hermes",
-        runtime: { kind: "terminal", interactive_command: "hermes" },
-      },
-    });
-
-    await expect(harness.connectSandbox("alpha")).rejects.toThrow("process.exit(0)");
-
-    const connectCall = harness.spawnSyncSpy.mock.calls.find(
-      ([command, args]) =>
-        command === "openshell" &&
-        Array.isArray(args) &&
-        args.join(" ") === "sandbox connect alpha",
-    );
-    expect(connectCall?.[2]).toEqual(
-      expect.objectContaining({
-        env: expect.objectContaining({
-          COLORFGBG: "0;15",
-          HERMES_TUI_LIGHT: "1",
-          TERM_PROGRAM: "Apple_Terminal",
-        }),
-      }),
-    );
-  });
-
   it("restores the terminal and prints reconnect guidance when SSH disconnects", async () => {
     const setRawModeSpy = vi.fn();
     Object.defineProperty(process.stdin, "isTTY", { configurable: true, value: true });
