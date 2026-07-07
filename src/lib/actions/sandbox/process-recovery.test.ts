@@ -150,7 +150,7 @@ describe("probeSandboxInferenceGatewayHealth gateway-chain subprobe (#3265)", ()
     expect(result).toBeNull();
   });
 
-  it("uses the DCode login-shell route argv for status and doctor (#6192)", async () => {
+  it("captures the DCode route CA before its login-shell environment (#6192)", async () => {
     const captureOpenshellImpl = vi.fn(makeCapture("OK 200"));
 
     await probeSandboxInferenceGatewayHealth("deep-code", {
@@ -165,10 +165,11 @@ describe("probeSandboxInferenceGatewayHealth gateway-chain subprobe (#3265)", ()
         "--name",
         "deep-code",
         "--",
-        "env",
-        "HOME=/sandbox",
-        "bash",
-        "-lc",
+        "sh",
+        "-c",
+        expect.stringContaining('bash -lc "$1" "$CA_BUNDLE"'),
+        "nemoclaw-ca-capture",
+        expect.stringMatching(/^CA_BUNDLE="\$0";/),
       ]),
       expect.objectContaining({ ignoreError: true }),
     );

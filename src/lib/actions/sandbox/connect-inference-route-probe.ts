@@ -17,14 +17,24 @@ type InferenceRouteProbeCommandResult = {
   output?: string | null;
 };
 
-// The OpenShell version pinned by blueprint.yaml writes a combined bundle of
-// system roots and its sandbox CA at this reserved path. Pass it explicitly so
-// probe trust does not depend on agent-specific shell environment persistence.
-const OPENSHELL_CA_BUNDLE_PATH = "/etc/openshell-tls/ca-bundle.pem";
-
-const INFERENCE_ROUTE_PROBE_SCRIPT = [
-  `HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' --cacert ${OPENSHELL_CA_BUNDLE_PATH} --connect-timeout 3 --max-time 8 https://inference.local/v1/models 2>/dev/null) || HTTP_CODE=000`,
+// OpenShell injects the per-sandbox trust bundle into each exec process. Pass
+// that exact path explicitly because curl backend support for the CA env names
+// is not uniform across agent images.
+const INFERENCE_ROUTE_CA_FROM_ENV = 'CA_BUNDLE="${CURL_CA_BUNDLE:-${SSL_CERT_FILE:-}}"';
+const INFERENCE_ROUTE_CA_VALIDATION =
+  '[ -n "$CA_BUNDLE" ] && [ -f "$CA_BUNDLE" ] && [ -r "$CA_BUNDLE" ] || { printf \'BROKEN 000\'; exit 0; }';
+const INFERENCE_ROUTE_PROBE_CORE_SCRIPT = [
+  "HTTP_CODE=$(/usr/bin/curl -s -o /dev/null -w '%{http_code}' --cacert \"$CA_BUNDLE\" --connect-timeout 3 --max-time 8 https://inference.local/v1/models 2>/dev/null) || HTTP_CODE=000",
   'case "$HTTP_CODE" in [2-4][0-9][0-9]) printf \'OK %s\' "$HTTP_CODE" ;; *) printf \'BROKEN %s\' "$HTTP_CODE" ;; esac',
+].join("; ");
+const INFERENCE_ROUTE_PROBE_SCRIPT = [
+  INFERENCE_ROUTE_CA_FROM_ENV,
+  INFERENCE_ROUTE_CA_VALIDATION,
+  INFERENCE_ROUTE_PROBE_CORE_SCRIPT,
+].join("; ");
+const INFERENCE_ROUTE_PROBE_FROM_ARG0_SCRIPT = [
+  'CA_BUNDLE="$0"',
+  INFERENCE_ROUTE_PROBE_CORE_SCRIPT,
 ].join("; ");
 
 const PROXY_ENV_KEYS = [
@@ -38,6 +48,12 @@ const PROXY_ENV_KEYS = [
   "all_proxy",
 ] as const;
 
+const DCODE_INFERENCE_ROUTE_PROBE_WRAPPER = [
+  INFERENCE_ROUTE_CA_FROM_ENV,
+  INFERENCE_ROUTE_CA_VALIDATION,
+  `exec env ${PROXY_ENV_KEYS.map((key) => `-u ${key}`).join(" ")} HOME=/sandbox bash -lc "$1" "$CA_BUNDLE"`,
+].join("; ");
+
 /** Keep route-failure vocabulary aligned across status, doctor, and connect. */
 export function classifyInferenceRouteFailureLabel(httpStatus: number): InferenceRouteFailureLabel {
   return httpStatus >= 500 && httpStatus < 600 ? "unhealthy" : "unreachable";
@@ -50,16 +66,15 @@ export function buildSandboxInferenceRouteProbeArgs(
   const command =
     agent?.name === "langchain-deepagents-code"
       ? [
-          // Clear the inherited sandbox-create proxy seed before bash starts.
-          // The login shell then sources /sandbox/.profile, whose single source
-          // of truth is /tmp/nemoclaw-proxy-env.sh; this TypeScript boundary
-          // intentionally does not reconstruct NO_PROXY independently.
-          "env",
-          ...PROXY_ENV_KEYS.flatMap((key) => ["-u", key]),
-          "HOME=/sandbox",
-          "bash",
-          "-lc",
-          INFERENCE_ROUTE_PROBE_SCRIPT,
+          // Capture OpenShell's trusted CA before the login shell sources the
+          // DCode runtime environment. The login shell still reconstructs the
+          // proxy contract from /tmp/nemoclaw-proxy-env.sh after inherited
+          // proxy variables are cleared.
+          "sh",
+          "-c",
+          DCODE_INFERENCE_ROUTE_PROBE_WRAPPER,
+          "nemoclaw-ca-capture",
+          INFERENCE_ROUTE_PROBE_FROM_ARG0_SCRIPT,
         ]
       : ["sh", "-c", INFERENCE_ROUTE_PROBE_SCRIPT];
 

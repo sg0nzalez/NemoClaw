@@ -9,9 +9,26 @@ import {
   parseSandboxInferenceRouteProbeResult,
 } from "./connect-inference-route-probe";
 
-const INFERENCE_ROUTE_PROBE_SCRIPT = [
-  "HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' --cacert /etc/openshell-tls/ca-bundle.pem --connect-timeout 3 --max-time 8 https://inference.local/v1/models 2>/dev/null) || HTTP_CODE=000",
+const INFERENCE_ROUTE_CA_FROM_ENV = 'CA_BUNDLE="${CURL_CA_BUNDLE:-${SSL_CERT_FILE:-}}"';
+const INFERENCE_ROUTE_CA_VALIDATION =
+  '[ -n "$CA_BUNDLE" ] && [ -f "$CA_BUNDLE" ] && [ -r "$CA_BUNDLE" ] || { printf \'BROKEN 000\'; exit 0; }';
+const INFERENCE_ROUTE_PROBE_CORE_SCRIPT = [
+  "HTTP_CODE=$(/usr/bin/curl -s -o /dev/null -w '%{http_code}' --cacert \"$CA_BUNDLE\" --connect-timeout 3 --max-time 8 https://inference.local/v1/models 2>/dev/null) || HTTP_CODE=000",
   'case "$HTTP_CODE" in [2-4][0-9][0-9]) printf \'OK %s\' "$HTTP_CODE" ;; *) printf \'BROKEN %s\' "$HTTP_CODE" ;; esac',
+].join("; ");
+const INFERENCE_ROUTE_PROBE_SCRIPT = [
+  INFERENCE_ROUTE_CA_FROM_ENV,
+  INFERENCE_ROUTE_CA_VALIDATION,
+  INFERENCE_ROUTE_PROBE_CORE_SCRIPT,
+].join("; ");
+const INFERENCE_ROUTE_PROBE_FROM_ARG0_SCRIPT = [
+  'CA_BUNDLE="$0"',
+  INFERENCE_ROUTE_PROBE_CORE_SCRIPT,
+].join("; ");
+const DCODE_INFERENCE_ROUTE_PROBE_WRAPPER = [
+  INFERENCE_ROUTE_CA_FROM_ENV,
+  INFERENCE_ROUTE_CA_VALIDATION,
+  'exec env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy -u NO_PROXY -u no_proxy -u ALL_PROXY -u all_proxy HOME=/sandbox bash -lc "$1" "$CA_BUNDLE"',
 ].join("; ");
 
 describe("sandbox connect inference route probe argv", () => {
@@ -26,28 +43,14 @@ describe("sandbox connect inference route probe argv", () => {
       "--name",
       "deep-code",
       "--",
-      "env",
-      "-u",
-      "HTTP_PROXY",
-      "-u",
-      "HTTPS_PROXY",
-      "-u",
-      "http_proxy",
-      "-u",
-      "https_proxy",
-      "-u",
-      "NO_PROXY",
-      "-u",
-      "no_proxy",
-      "-u",
-      "ALL_PROXY",
-      "-u",
-      "all_proxy",
-      "HOME=/sandbox",
-      "bash",
-      "-lc",
-      INFERENCE_ROUTE_PROBE_SCRIPT,
+      "sh",
+      "-c",
+      DCODE_INFERENCE_ROUTE_PROBE_WRAPPER,
+      "nemoclaw-ca-capture",
+      INFERENCE_ROUTE_PROBE_FROM_ARG0_SCRIPT,
     ]);
+    expect(args.at(-3)).toContain('bash -lc "$1" "$CA_BUNDLE"');
+    expect(args.at(-1)).toContain('CA_BUNDLE="$0"');
     expect(args.every((arg) => !/[\r\n]/.test(arg))).toBe(true);
   });
 
@@ -72,8 +75,11 @@ describe("sandbox connect inference route probe argv", () => {
     const args = buildSandboxInferenceRouteProbeArgs("alpha", { name: "openclaw" });
     const script = args.at(-1) ?? "";
 
-    expect(script).toContain("curl -s -o /dev/null");
-    expect(script).toContain("--cacert /etc/openshell-tls/ca-bundle.pem");
+    expect(script).toContain("/usr/bin/curl -s -o /dev/null");
+    expect(script).toContain('CA_BUNDLE="${CURL_CA_BUNDLE:-${SSL_CERT_FILE:-}}"');
+    expect(script).toContain('--cacert "$CA_BUNDLE"');
+    expect(script).toContain("printf 'BROKEN 000'");
+    expect(script).not.toContain("/etc/openshell-tls");
     expect(script).not.toContain("curl -sk");
     expect(script).not.toContain("--insecure");
     expect(script).not.toContain("/tmp/");
