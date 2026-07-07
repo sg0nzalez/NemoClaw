@@ -77,7 +77,7 @@ describe("target evidence", () => {
   it("keeps live target evidence behind the typed API", () => {
     const violations = liveTypescriptFiles()
       .filter((file) =>
-        /\.writeJson\(["']target(?:-result)?\.json["']/.test(fs.readFileSync(file, "utf8")),
+        /\.writeJson\(\s*[`'"]target(?:-result)?\.json[`'"]/.test(fs.readFileSync(file, "utf8")),
       )
       .map((file) => path.basename(file));
 
