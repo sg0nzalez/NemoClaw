@@ -13,6 +13,8 @@ export interface RebuildSandboxExecutionOptions {
   throwOnError?: boolean;
   /** Internal installer recovery input; never exposed as a CLI option. */
   recoveryManifest?: sandboxState.RebuildManifest;
+  /** Per-row capability granted only after explicit legacy managed-image confirmation. */
+  allowLegacyManagedImageRecovery?: boolean;
 }
 
 function failPreparedRecoveryPreDelete(
@@ -33,10 +35,22 @@ function registryEntryWithoutOpenClawPluginProvenance(
   return rest;
 }
 
+function isPreparedRecoveryImageAllowed(
+  manifest: sandboxState.RebuildManifest,
+  entry: RebuildSandboxEntry,
+  allowLegacyManagedImageRecovery: boolean,
+): boolean {
+  return (
+    sandboxState.hasAuthoritativeOpenClawImagePluginProvenance(manifest) ||
+    sandboxState.isManagedImageRecoveryAllowed(entry, allowLegacyManagedImageRecovery)
+  );
+}
+
 export function validatePreparedRecoveryManifest(
   sandboxName: string,
   sandboxEntry: RebuildSandboxEntry,
   candidate: sandboxState.RebuildManifest | undefined,
+  allowLegacyManagedImageRecovery: boolean,
   bail: RebuildBail,
 ): sandboxState.RebuildManifest | null {
   if (!candidate) return null;
@@ -53,8 +67,11 @@ export function validatePreparedRecoveryManifest(
     return null;
   }
   if (
-    !sandboxState.hasAuthoritativeOpenClawImagePluginProvenance(validation.manifest) &&
-    !sandboxState.hasPositiveManagedImageEvidence(sandboxEntry)
+    !isPreparedRecoveryImageAllowed(
+      validation.manifest,
+      sandboxEntry,
+      allowLegacyManagedImageRecovery,
+    )
   ) {
     console.error("");
     console.error(
@@ -73,6 +90,7 @@ export function revalidatePreparedRecoveryBeforeDelete(
   initialEntry: RebuildSandboxEntry,
   candidate: sandboxState.RebuildManifest | null,
   registrySnapshot: registry.SandboxRegistry | null,
+  allowLegacyManagedImageRecovery: boolean,
   bail: RebuildBail,
 ): {
   manifest: sandboxState.RebuildManifest | null;
@@ -80,9 +98,7 @@ export function revalidatePreparedRecoveryBeforeDelete(
 } {
   if (!candidate) return { manifest: null, registrySnapshot };
 
-  const refreshedRegistrySnapshot = JSON.parse(
-    JSON.stringify(registry.load()),
-  ) as registry.SandboxRegistry;
+  const refreshedRegistrySnapshot = registry.load();
   const currentEntry = refreshedRegistrySnapshot.sandboxes[sandboxName];
   if (!currentEntry) {
     return failPreparedRecoveryPreDelete(
@@ -133,8 +149,11 @@ export function revalidatePreparedRecoveryBeforeDelete(
     );
   }
   if (
-    !sandboxState.hasAuthoritativeOpenClawImagePluginProvenance(validation.manifest) &&
-    !sandboxState.hasPositiveManagedImageEvidence(currentEntry)
+    !isPreparedRecoveryImageAllowed(
+      validation.manifest,
+      currentEntry,
+      allowLegacyManagedImageRecovery,
+    )
   ) {
     return failPreparedRecoveryPreDelete(
       "registry no longer has a NemoClaw-managed image fingerprint",
