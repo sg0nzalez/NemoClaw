@@ -484,11 +484,30 @@ function beginHermesConfigShields(
   mode: "locked" | "mutable",
   rollbackMode: "locked" | "mutable",
 ): { token: string; originalLocked: boolean; rollbackLocked: boolean } {
+  // A freshly built, OpenShell-managed (non-root) Hermes sandbox mints a
+  // per-sandbox API bearer token into .env at startup, but the non-root
+  // startup cannot advance the root-owned strict config-hash anchor to match.
+  // The first mutable transition (shields down) runs as root inside the
+  // sandbox and reconciles that exact append; pass the config digest we
+  // observe now so the guard can prove config.yaml itself did not change while
+  // it reconciles the .env API-key line. The guard treats this as advisory:
+  // when it is absent or the drift is anything but that single minted key, the
+  // strict verification still fails closed.
+  const extraArgs = ["--hash-file", HERMES_CONFIG_HASH];
+  if (mode === "mutable") {
+    const rawConfigHash = privilegedSandboxExecCapture(sandboxName, [
+      "sha256sum",
+      target.configPath,
+    ]);
+    const configSha = parseSha256Output(rawConfigHash);
+    if (configSha) {
+      extraArgs.push("--expected-config-sha256", configSha);
+    }
+  }
   const output = privilegedSandboxExecCapture(
     sandboxName,
     hermesShieldsGuardArgs("begin-shields-transition", target, [
-      "--hash-file",
-      HERMES_CONFIG_HASH,
+      ...extraArgs,
       "--shields-mode",
       mode,
       "--rollback-shields-mode",

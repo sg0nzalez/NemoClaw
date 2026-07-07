@@ -2653,7 +2653,19 @@ def seal_restart(
         try:
             _verify_strict_hash(hermes_dir, hash_file)
         except StrictHashMismatchError:
-            if purpose != "config-write" or expected_config_sha256 is None:
+            # The one legitimate strict-hash drift on a managed non-root sandbox
+            # is the per-sandbox API bearer token the OpenShell-launched startup
+            # minted into .env, which that non-root process could not append to
+            # the root-owned strict anchor. The first root-privileged config
+            # transaction reconciles it. `shields-mutable` (shields down) is the
+            # first such transaction on a fresh sandbox, so it must be able to
+            # reconcile exactly like `config-write`; the reconciliation itself is
+            # gated to the mutable, never-locked posture and refuses every other
+            # config or env difference.
+            if (
+                purpose not in ("config-write", "shields-mutable")
+                or expected_config_sha256 is None
+            ):
                 raise
             _reconcile_nonroot_startup_api_key_hash(
                 hermes_dir,
@@ -3413,6 +3425,7 @@ def begin_shields_transition(
     state_file: str,
     mode: str,
     rollback_mode: str = "",
+    expected_config_sha256: str | None = None,
 ) -> tuple[str, bool]:
     if mode not in ("locked", "mutable"):
         raise UnsafePathError(f"refusing unsupported Hermes shields transition: {mode}")
@@ -3442,7 +3455,11 @@ def begin_shields_transition(
         )
 
     original_locked = seal_restart(
-        hermes_dir, hash_file, state_file, purpose="shields-mutable"
+        hermes_dir,
+        hash_file,
+        state_file,
+        purpose="shields-mutable",
+        expected_config_sha256=expected_config_sha256,
     )
     try:
         state_data = _load_restart_state(state_file)
@@ -4775,12 +4792,24 @@ def main() -> int:
                 raise UnsafePathError(
                     "begin-shields-transition requires --hash-file, --state-file, and --shields-mode"
                 )
+            # Optional: lets the mutable transition reconcile the one non-root
+            # startup API-key append into the root-owned strict anchor (see
+            # seal_restart). The arg defaults to "" (absent); normalize that to
+            # None so a stale strict anchor still fails closed exactly as before.
+            begin_expected_config_sha256 = args.expected_config_sha256 or None
+            if begin_expected_config_sha256 is not None and not re.fullmatch(
+                r"[0-9a-f]{64}", begin_expected_config_sha256
+            ):
+                raise UnsafePathError(
+                    "begin-shields-transition --expected-config-sha256 must be a 64-char hex digest"
+                )
             lock_token, original_locked = begin_shields_transition(
                 args.hermes_dir,
                 args.hash_file,
                 args.state_file,
                 args.shields_mode,
                 args.rollback_shields_mode,
+                begin_expected_config_sha256,
             )
             print(f"lock_token={lock_token} original_locked={int(original_locked)}")
         elif args.action == "apply-shields-transition":

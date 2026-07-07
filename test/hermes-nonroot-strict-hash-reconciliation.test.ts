@@ -117,6 +117,51 @@ raise SystemExit(module.main())
   );
 }
 
+function beginShieldsArgs(fixture: ReconciliationFixture, expectedDigest?: string): string[] {
+  const args = [
+    "begin-shields-transition",
+    "--hermes-dir",
+    fixture.hermesDir,
+    "--hash-file",
+    fixture.hashPath,
+    "--state-file",
+    fixture.statePath,
+    "--shields-mode",
+    "mutable",
+    "--rollback-shields-mode",
+    "mutable",
+  ];
+  if (expectedDigest !== undefined) {
+    args.push("--expected-config-sha256", expectedDigest);
+  }
+  return args;
+}
+
+function runManagedNonrootBegin(fixture: ReconciliationFixture, expectedDigest?: string) {
+  const wrapper = String.raw`
+import importlib.util
+import os
+import sys
+
+source = sys.argv[1]
+spec = importlib.util.spec_from_file_location("nemoclaw_runtime_config_guard_begin", source)
+if spec is None or spec.loader is None:
+    raise SystemExit("could not load runtime guard fixture")
+module = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = module
+spec.loader.exec_module(module)
+module._managed_nonroot_reconciliation_is_allowed = lambda: True
+module._sandbox_identity = lambda: (os.geteuid(), os.getegid())
+sys.argv = [source, *sys.argv[2:]]
+raise SystemExit(module.main())
+`;
+  return spawnSync(
+    "python3",
+    ["-c", wrapper, RUNTIME_CONFIG_GUARD, ...beginShieldsArgs(fixture, expectedDigest)],
+    { encoding: "utf-8", timeout: 5000 },
+  );
+}
+
 function refreshCompatOnly(fixture: ReconciliationFixture): void {
   fs.writeFileSync(fixture.compatHashPath, hashInputs(fixture));
 }
@@ -486,6 +531,71 @@ print(json.dumps([private_live, canonical_mutable, foreign_private, unexpected_m
         expect(result.status).not.toBe(0);
         expect(result.stderr).toContain("config changed after the host read");
         assertCleanRefusal(fixture, strictBefore);
+      } finally {
+        fs.rmSync(fixture.root, { recursive: true, force: true });
+      }
+    });
+
+    // #6381 — the mutable transition (shields down) is the first root-privileged
+    // config transaction on a freshly built OpenShell-managed Hermes sandbox, so
+    // it must reconcile the startup API-key append into the strict anchor exactly
+    // like write-config. These lock in the new wiring; the reconciliation's own
+    // refusals are already covered by the write-config cases above.
+    it("reconciles the startup API key on the first shields-down and completes the transition (#6381)", () => {
+      const fixture = createFixture(0o700);
+      const generatedKey = "a".repeat(64);
+      fs.appendFileSync(fixture.envPath, `API_SERVER_KEY=${generatedKey}\n`);
+      refreshCompatOnly(fixture);
+      try {
+        // Reproduces the reported state: startup refreshed only the in-tree
+        // compat anchor, leaving the root-owned strict anchor stale.
+        expect(strictHashIsValid(fixture)).toBe(false);
+        const result = runManagedNonrootBegin(fixture, expectedConfigDigest(fixture));
+        expect(result.status, result.stderr).toBe(0);
+        expect(result.stdout).toMatch(/^lock_token=[0-9a-f]{64} original_locked=0$/mu);
+        // Strict anchor advanced to the frozen current inputs and now verifies.
+        expect(strictHashIsValid(fixture)).toBe(true);
+        expect(fs.readFileSync(fixture.hashPath, "utf-8")).toBe(
+          fs.readFileSync(fixture.compatHashPath, "utf-8"),
+        );
+      } finally {
+        fs.rmSync(fixture.root, { recursive: true, force: true });
+      }
+    });
+
+    it("still fails closed on a stale strict anchor when no config digest is supplied (#6381)", () => {
+      const fixture = createFixture(0o700);
+      fs.appendFileSync(fixture.envPath, `API_SERVER_KEY=${"9".repeat(64)}\n`);
+      refreshCompatOnly(fixture);
+      const strictBefore = fs.readFileSync(fixture.hashPath, "utf-8");
+      try {
+        // No --expected-config-sha256: reconciliation is not opted into, so the
+        // stale strict anchor must refuse exactly as it did before the fix.
+        const result = runManagedNonrootBegin(fixture);
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain("strict hash verification failed for Hermes restart seal");
+        expect(fs.readFileSync(fixture.hashPath, "utf-8")).toBe(strictBefore);
+      } finally {
+        fs.rmSync(fixture.root, { recursive: true, force: true });
+      }
+    });
+
+    it("refuses config drift on the shields-down reconciliation path (#6381)", () => {
+      const fixture = createFixture(0o700);
+      const driftedConfig = "model:\n  default: attacker-model\n";
+      fs.writeFileSync(fixture.configPath, driftedConfig);
+      fs.appendFileSync(fixture.envPath, `API_SERVER_KEY=${"a".repeat(64)}\n`);
+      refreshCompatOnly(fixture);
+      const strictBefore = fs.readFileSync(fixture.hashPath, "utf-8");
+      try {
+        const result = runManagedNonrootBegin(
+          fixture,
+          createHash("sha256").update(driftedConfig).digest("hex"),
+        );
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain("refusing config drift");
+        // Strict anchor is never advanced when the drift is anything but the key.
+        expect(fs.readFileSync(fixture.hashPath, "utf-8")).toBe(strictBefore);
       } finally {
         fs.rmSync(fixture.root, { recursive: true, force: true });
       }
