@@ -55,9 +55,8 @@ test("device auth health probes treat 401 as live instead of offline (#2342)", {
     model: INFERENCE_MODEL,
   };
 
-  await artifacts.writeJson("target.json", {
+  await artifacts.target.declare({
     id: "device-auth-health",
-    runner: "vitest",
     boundary: "install.sh + OpenShell sandbox exec + NemoClaw status + host curl",
     sandboxName: SANDBOX_NAME,
     dashboardPort: DASHBOARD_PORT,

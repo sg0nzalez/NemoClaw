@@ -12,8 +12,8 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
+import { resultText } from "../fixtures/clients/command.ts";
 import { validateSandboxName } from "../fixtures/clients/sandbox.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
 import { testHomeEnvironment } from "../fixtures/environment-profiles.ts";
@@ -34,10 +34,6 @@ type RawCommandResult = {
   stderr: string;
   error?: Error;
 };
-
-function resultText(result: Pick<ShellProbeResult, "stdout" | "stderr">): string {
-  return [result.stdout, result.stderr].filter(Boolean).join("\n");
-}
 
 function rawResultText(result: Pick<RawCommandResult, "stdout" | "stderr">): string {
   return [result.stdout, result.stderr].filter(Boolean).join("\n");
@@ -126,9 +122,8 @@ test("diagnostics CLI creates sanitized archives and validates sandbox/credentia
 
   const hosted = requireHostedInferenceConfig(secrets);
   const apiKey = hosted.apiKey;
-  await artifacts.writeJson("target.json", {
+  await artifacts.target.declare({
     id: "diagnostics",
-    runner: "vitest",
     boundary: "debug-archive-install-sh-docker-openshell-sandbox-exec-credentials",
     sandboxName: SANDBOX_NAME,
     contracts: [
@@ -395,7 +390,7 @@ test("diagnostics CLI creates sanitized archives and validates sandbox/credentia
     });
   }
 
-  await artifacts.writeJson("target-result.json", {
+  await artifacts.target.complete({
     id: "diagnostics",
     sandboxName: SANDBOX_NAME,
     model: hosted.model,

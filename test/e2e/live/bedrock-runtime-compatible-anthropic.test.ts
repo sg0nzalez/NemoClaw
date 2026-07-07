@@ -11,7 +11,11 @@ import os from "node:os";
 import path from "node:path";
 import type { ArtifactSink } from "../fixtures/artifacts.ts";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
-import { shellQuote } from "../fixtures/clients/command.ts";
+import {
+  assertExitZero as expectExitZero,
+  resultText,
+  shellQuote,
+} from "../fixtures/clients/command.ts";
 import type { HostCliClient } from "../fixtures/clients/host.ts";
 import {
   type SandboxClient,
@@ -96,10 +100,6 @@ interface MockBedrockRuntime {
   close(): Promise<void>;
 }
 
-function resultText(result: CommandText): string {
-  return [result.stdout, result.stderr].filter(Boolean).join("\n");
-}
-
 function redactedResultText(
   result: Pick<RawRunResult, "redactedStdout" | "redactedStderr">,
 ): string {
@@ -108,10 +108,6 @@ function redactedResultText(
 
 function evidenceTail(text: string): string {
   return text.slice(-4_000);
-}
-
-function expectExitZero(result: CommandText & { exitCode: number | null }, label: string): void {
-  expect(result.exitCode, `${label} failed:\n${resultText(result)}`).toBe(0);
 }
 
 function isMissingSandboxCleanupOutput(text: string): boolean {
@@ -1138,7 +1134,7 @@ async function skipPreContractEndpointValidationRateLimit(options: {
     redactedStdoutTail: evidenceTail(options.onboarding.redactedStdout),
     redactedStderrTail: evidenceTail(options.onboarding.redactedStderr),
   });
-  await options.artifacts.writeJson("target-result.json", {
+  await options.artifacts.target.complete({
     id: "bedrock-runtime-compatible-anthropic",
     status: "skipped",
     reason: BEDROCK_PRE_CONTRACT_ENDPOINT_VALIDATION_SKIP_REASON,
@@ -1241,9 +1237,8 @@ test("bedrock runtime compatible Anthropic endpoint routes through managed infer
     }
   });
 
-  await artifacts.writeJson("target.json", {
+  await artifacts.target.declare({
     id: "bedrock-runtime-compatible-anthropic",
-    runner: "vitest",
     refs: ["#3767", "#5098"],
     agent: AGENT,
     sandboxName: SANDBOX_NAME,
@@ -1352,7 +1347,7 @@ test("bedrock runtime compatible Anthropic endpoint routes through managed infer
     redact: (text, extraValues) => secrets.redact(text, extraValues),
   });
 
-  await artifacts.writeJson("target-result.json", {
+  await artifacts.target.complete({
     id: "bedrock-runtime-compatible-anthropic",
     agent: AGENT,
     assertions: {

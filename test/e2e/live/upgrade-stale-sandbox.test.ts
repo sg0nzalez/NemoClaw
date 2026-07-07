@@ -36,9 +36,8 @@ test("upgrade-sandboxes detects and rebuilds stale OpenClaw sandboxes (#1904)", 
 }, async ({ artifacts, cleanup, host, sandbox, secrets, skip }) => {
   const hosted = requireHostedInferenceConfig(secrets);
 
-  await artifacts.writeJson("target.json", {
+  await artifacts.target.declare({
     id: "upgrade-stale-sandbox",
-    runner: "vitest",
     boundary: "install.sh + Docker old base image + OpenShell sandbox create + NemoClaw rebuild",
     sandboxName: SANDBOX_NAME,
     oldOpenClawVersion: OLD_OPENCLAW_VERSION,

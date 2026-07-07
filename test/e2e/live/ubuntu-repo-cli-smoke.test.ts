@@ -8,9 +8,8 @@ import { expect, test } from "../fixtures/e2e-test.ts";
 import { CLI_DIST_ENTRYPOINT, REPO_ROOT } from "../fixtures/paths.ts";
 
 test("ubuntu repo cli smoke", async ({ artifacts, host }) => {
-  await artifacts.writeJson("target.json", {
+  await artifacts.target.declare({
     id: "ubuntu-repo-cli-smoke",
-    runner: "vitest",
     boundary: "repo-local-cli",
   });
 

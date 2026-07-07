@@ -92,7 +92,7 @@ function assertSmallContextCompactionPolicy(configText: string): void {
 test("GPU Ollama onboard enables CUDA, auth proxy, and sandbox inference", {
   timeout: TIMEOUT_MS,
 }, async ({ artifacts, cleanup, host, sandbox, skip }) => {
-  await artifacts.writeJson("target.json", {
+  await artifacts.target.declare({
     id: "gpu-e2e",
     boundary:
       "GPU host + install.sh Ollama provider + OpenShell sandbox + auth proxy + inference.local",

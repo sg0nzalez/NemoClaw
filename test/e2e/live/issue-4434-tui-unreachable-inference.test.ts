@@ -3,9 +3,9 @@
 
 import fs from "node:fs";
 import path from "node:path";
-
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
 import { isGatewayManagedCompatibleInference } from "../fixtures/ci-compatible-inference.ts";
+import { resultText } from "../fixtures/clients/command.ts";
 import { trustedSandboxShellScript, validateSandboxName } from "../fixtures/clients/sandbox.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
 import { startFakeOpenAiCompatibleServer } from "../fixtures/fake-openai-compatible.ts";
@@ -62,10 +62,6 @@ const runIssue4434LiveTest =
     : test.skip;
 
 type CommandResultText = { stdout: string; stderr: string };
-
-function resultText(result: CommandResultText): string {
-  return [result.stdout, result.stderr].filter(Boolean).join("\n");
-}
 
 function shellSingleQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
@@ -159,9 +155,8 @@ runIssue4434LiveTest(
     const hosted = requireHostedInferenceConfig(secrets);
     const apiKey = hosted.apiKey;
 
-    await artifacts.writeJson("target.json", {
+    await artifacts.target.declare({
       id: "issue-4434-tui-unreachable-inference",
-      runner: "vitest",
       boundary: [
         "real cloud OpenClaw sandbox",
         "host DOCKER-USER iptables DROP rules",
@@ -516,7 +511,7 @@ runIssue4434LiveTest(
     fs.writeFileSync(captureFile, redactedRawCapture, "utf8");
     const analysis = analyzeIssue4434TuiCapture(redactedRawCapture);
     await artifacts.writeText("openclaw-tui-capture.plain.log", analysis.plain);
-    await artifacts.writeJson("target-result.json", {
+    await artifacts.target.complete({
       id: "issue-4434-tui-unreachable-inference",
       expectExitCode: tui.exitCode,
       visibleError: analysis.visibleError,

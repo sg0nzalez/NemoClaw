@@ -748,9 +748,8 @@ test("hermes sandbox secret boundary keeps raw secrets out of images and startup
   let removeManagedImage = false;
   let removeBaseImage = false;
 
-  await artifacts.writeJson("target.json", {
+  await artifacts.target.declare({
     id: "hermes-sandbox-secret-boundary",
-    runner: "vitest",
     boundary: "docker-hermes-image-and-startup",
     image,
     baseImage,
@@ -844,7 +843,7 @@ test("hermes sandbox secret boundary keeps raw secrets out of images and startup
     RAW_REFRESH_TOKEN,
   );
 
-  await artifacts.writeJson("target-result.json", {
+  await artifacts.target.complete({
     id: "hermes-sandbox-secret-boundary",
     image,
     managedImage,

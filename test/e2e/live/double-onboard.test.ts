@@ -5,6 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
+import { resultText } from "../fixtures/clients/command.ts";
 import type { HostCliClient } from "../fixtures/clients/host.ts";
 import type { SandboxClient } from "../fixtures/clients/sandbox.ts";
 import { validateSandboxName } from "../fixtures/clients/sandbox.ts";
@@ -39,10 +40,6 @@ validateSandboxName(ALT_GATEWAY_NAME);
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function resultText(result: { stdout: string; stderr: string }): string {
-  return [result.stdout, result.stderr].filter(Boolean).join("\n");
 }
 
 function commandEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
@@ -472,9 +469,8 @@ test("double-onboard: reuses gateway, preserves sibling sandbox, and recovers st
     await cleanupDoubleOnboardState(host, sandbox);
   });
 
-  await artifacts.writeJson("target.json", {
+  await artifacts.target.declare({
     id: "double-onboard",
-    runner: "vitest",
     boundary: "direct-cli-openshell-lifecycle",
     contract: [
       "first onboard creates a sandbox and NemoClaw gateway",
@@ -737,7 +733,7 @@ test("double-onboard: reuses gateway, preserves sibling sandbox, and recovers st
     "registry still contains test entries",
   ).toBe(false);
 
-  await artifacts.writeJson("target-result.json", {
+  await artifacts.target.complete({
     id: "double-onboard",
     fakeOpenAiRequests: fake.requests(),
     assertions: {

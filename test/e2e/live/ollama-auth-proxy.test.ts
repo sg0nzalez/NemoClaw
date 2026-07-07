@@ -164,9 +164,8 @@ function readTokenFileChecked(tokenFile: string): { mode: string; token: string 
 test("Ollama auth proxy enforces tokens, proxies inference, persists tokens, and recovers", {
   timeout: LIVE_TIMEOUT_MS,
 }, async ({ artifacts, cleanup, host }) => {
-  await artifacts.writeJson("target.json", {
+  await artifacts.target.declare({
     id: "ollama-auth-proxy",
-    runner: "vitest",
     boundary: "real host Ollama + real Node auth proxy + curl + optional Docker reachability",
     ollamaPort: OLLAMA_PORT,
     proxyPort: PROXY_PORT,

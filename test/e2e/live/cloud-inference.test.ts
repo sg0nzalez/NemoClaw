@@ -14,6 +14,7 @@ import os from "node:os";
 import path from "node:path";
 import type { ArtifactSink } from "../fixtures/artifacts.ts";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
+import { resultText } from "../fixtures/clients/command.ts";
 import type { HostCliClient } from "../fixtures/clients/host.ts";
 import { type SandboxClient, validateSandboxName } from "../fixtures/clients/sandbox.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
@@ -70,10 +71,6 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function resultText(result: Pick<ShellProbeResult, "stdout" | "stderr">): string {
-  return [result.stdout, result.stderr].filter(Boolean).join("\n");
-}
-
 async function writePreContractExternalProviderSkip(
   artifacts: ArtifactSink,
   install: ShellProbeResult,
@@ -81,7 +78,7 @@ async function writePreContractExternalProviderSkip(
 ): Promise<void> {
   const evidence = buildPreContractExternalProviderSkipEvidence(install, classification);
   await artifacts.writeJson("transient-provider-validation.skip.json", evidence);
-  await artifacts.writeJson("target-result.json", evidence);
+  await artifacts.target.complete(evidence);
 }
 
 function testEnv(home: string, extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
@@ -231,9 +228,8 @@ test(
       `missing sandbox skill validator: ${SANDBOX_SKILL_VALIDATOR}`,
     ).toBe(true);
 
-    await artifacts.writeJson("target.json", {
+    await artifacts.target.declare({
       id: "cloud-inference",
-      runner: "vitest",
       boundary: "install-sh-onboard-sandbox-inference-local-skill-filesystem",
       contracts: [
         "Docker is running before install/onboard",
@@ -327,7 +323,7 @@ test(
         : "unknown";
     expect(sandboxSkillStatus, resultText(sandboxSkills)).not.toBe("unknown");
 
-    await artifacts.writeJson("target-result.json", {
+    await artifacts.target.complete({
       id: "cloud-inference",
       status: "passed",
       assertions: {

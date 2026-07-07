@@ -12,8 +12,8 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
+import { resultText } from "../fixtures/clients/command.ts";
 import type { HostCliClient } from "../fixtures/clients/host.ts";
 import { type SandboxClient, validateSandboxName } from "../fixtures/clients/sandbox.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
@@ -33,9 +33,6 @@ const MARKER_FILE = "/sandbox/.openclaw/workspace/snapshot-marker.txt";
 const SECOND_MARKER = "/sandbox/.openclaw/workspace/snapshot-marker-2.txt";
 const LIVE_TIMEOUT_MS = 30 * 60_000;
 const INSTALL_ATTEMPTS = process.env.CI === "true" || process.env.GITHUB_ACTIONS === "true" ? 3 : 1;
-function resultText(result: Pick<ShellProbeResult, "stdout" | "stderr">): string {
-  return [result.stdout, result.stderr].filter(Boolean).join("\n");
-}
 
 function commandEnv(apiKey?: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
@@ -112,9 +109,8 @@ test("snapshot commands preserve create/list/latest restore/targeted restore/no-
   timeout: LIVE_TIMEOUT_MS,
 }, async ({ artifacts, cleanup, host, sandbox, secrets, skip }) => {
   const apiKey = secrets.required("NVIDIA_INFERENCE_API_KEY");
-  await artifacts.writeJson("target.json", {
+  await artifacts.target.declare({
     id: "snapshot-commands",
-    runner: "vitest",
     boundary: "install.sh + nemoclaw snapshot commands + openshell sandbox exec",
     sandboxName: SANDBOX_NAME,
     backupDir: BACKUP_DIR,
@@ -332,7 +328,7 @@ test("snapshot commands preserve create/list/latest restore/targeted restore/no-
   expect(resultText(help)).toContain("snapshot list");
   expect(resultText(help)).toContain("snapshot restore");
 
-  await artifacts.writeJson("target-result.json", {
+  await artifacts.target.complete({
     id: "snapshot-commands",
     status: "passed",
     firstSnapshotTimestamp: timestamp,

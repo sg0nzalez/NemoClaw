@@ -38,7 +38,7 @@ test("OpenClaw and Hermes complete real hosted inference turns within the latenc
 }, async ({ artifacts, cleanup, host, sandbox, secrets }) => {
   const apiKey = secrets.required("NVIDIA_INFERENCE_API_KEY");
   const results: Record<string, unknown> = { model: MODEL, maxTurnSeconds: MAX_TURN_SECONDS };
-  await artifacts.writeJson("target.json", {
+  await artifacts.target.declare({
     id: "agent-turn-latency",
     boundary: "two real sandboxes + hosted inference + OpenClaw agent turn + Hermes API turn",
     openclawSandbox: OPENCLAW_SANDBOX,

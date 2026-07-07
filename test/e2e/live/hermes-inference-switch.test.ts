@@ -80,7 +80,7 @@ async function expectCompatibleAnthropicOpenAiProvider(
 test("Hermes inference set updates route/config and preserves live runtime", {
   timeout: TIMEOUT_MS,
 }, async ({ artifacts, cleanup, host, sandbox, secrets }) => {
-  await artifacts.writeJson("target.json", {
+  await artifacts.target.declare({
     id: "hermes-inference-switch",
     boundary:
       "install.sh + Hermes sandbox + inference set + in-sandbox health/chat + hermes -z probes",

@@ -419,9 +419,8 @@ test("hermes root-entrypoint smoke preserves runtime layout and legacy pid migra
   const baseImage = `nemoclaw-hermes-sandbox-base-local:root-entrypoint-${runId}`;
   const containers: string[] = [];
 
-  await artifacts.writeJson("target.json", {
+  await artifacts.target.declare({
     id: "hermes-root-entrypoint-smoke",
-    runner: "vitest",
     boundary: "docker-root-entrypoint",
     image,
     prebuiltImage: Boolean(process.env.NEMOCLAW_HERMES_TEST_IMAGE),
@@ -462,7 +461,7 @@ test("hermes root-entrypoint smoke preserves runtime layout and legacy pid migra
     throw error;
   }
 
-  await artifacts.writeJson("target-result.json", {
+  await artifacts.target.complete({
     id: "hermes-root-entrypoint-smoke",
     image,
     assertions: {

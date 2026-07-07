@@ -210,9 +210,8 @@ test("cron preflight reaches managed inference.local provider without EAI_AGAIN"
   const hosted = requireHostedInferenceConfig(secrets, process.env, { model: MODEL });
   const apiKey = hosted.apiKey;
 
-  await artifacts.writeJson("target.json", {
+  await artifacts.target.declare({
     id: "cron-preflight-inference-local",
-    runner: "vitest",
     boundary: "install.sh + in-sandbox OpenClaw cron preflight runtime helper",
     sandboxName: SANDBOX_NAME,
     model: MODEL,

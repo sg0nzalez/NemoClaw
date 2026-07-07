@@ -229,7 +229,7 @@ test("state-backup-restore: backup-workspace.sh restores workspace files and mem
   } catch (error) {
     const text = errorText(error);
     if (isNvidiaEndpointValidationUnavailable(text)) {
-      await artifacts.writeJson("target-result.json", {
+      await artifacts.target.complete({
         id: "state-backup-restore",
         status: "skipped",
         reason: "external-provider-validation-unavailable-before-state-backup-contract",
@@ -338,7 +338,7 @@ test("state-backup-restore: backup-workspace.sh restores workspace files and mem
   } catch (error) {
     const text = errorText(error);
     if (isNvidiaEndpointValidationUnavailable(text)) {
-      await artifacts.writeJson("target-result.json", {
+      await artifacts.target.complete({
         id: "state-backup-restore",
         status: "skipped",
         reason: "external-provider-validation-unavailable-during-reonboard",

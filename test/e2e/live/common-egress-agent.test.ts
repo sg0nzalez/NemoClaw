@@ -569,7 +569,7 @@ describe.sequential("common-egress agent live targets", () => {
       const hosted = await assertPrerequisites(host, secrets, skip);
       const apiKey = hosted.apiKey;
       const braveApiKey = secrets.required("BRAVE_API_KEY");
-      await artifacts.writeJson("target.json", {
+      await artifacts.target.declare({
         id: "common-egress-agent",
         case: "openclaw-balanced-weather",
         sandboxName: OPENCLAW_BALANCED_SANDBOX,
@@ -682,7 +682,7 @@ After it returns, reply with only WEATHER_AGENT_OK. Do not fetch any other URL.`
       );
       expect(weatherProof.exitCode, text(weatherProof)).toBe(0);
       expect(weatherProof.stdout.trim()).toMatch(/^[a-f0-9]{64}\s+/);
-      await artifacts.writeJson("target-result.json", {
+      await artifacts.target.complete({
         id: "common-egress-agent",
         case: "openclaw-balanced-weather",
         status: "passed",
@@ -696,7 +696,7 @@ After it returns, reply with only WEATHER_AGENT_OK. Do not fetch any other URL.`
     async ({ artifacts, cleanup, host, sandbox, secrets, skip }) => {
       const hosted = await assertPrerequisites(host, secrets, skip);
       const apiKey = hosted.apiKey;
-      await artifacts.writeJson("target.json", {
+      await artifacts.target.declare({
         id: "common-egress-agent",
         case: "openclaw-open-public-reference",
         sandboxName: OPENCLAW_OPEN_SANDBOX,
@@ -728,7 +728,7 @@ After it returns, reply with only WEATHER_AGENT_OK. Do not fetch any other URL.`
 https://www.wikidata.org/w/api.php?action=wbgetentities&ids=Q30&props=labels&languages=en&format=json
 After web_fetch returns, reply exactly REFERENCE_AGENT_OK if the fetched response says entity Q30 has the English label United States. Do not fetch any other URL.`,
       });
-      await artifacts.writeJson("target-result.json", {
+      await artifacts.target.complete({
         id: "common-egress-agent",
         case: "openclaw-open-public-reference",
         status: "passed",
@@ -742,7 +742,7 @@ After web_fetch returns, reply exactly REFERENCE_AGENT_OK if the fetched respons
     async ({ artifacts, cleanup, host, sandbox, secrets, skip }) => {
       const hosted = await assertPrerequisites(host, secrets, skip);
       const apiKey = hosted.apiKey;
-      await artifacts.writeJson("target.json", {
+      await artifacts.target.declare({
         id: "common-egress-agent",
         case: "hermes-open-public-reference",
         sandboxName: HERMES_SANDBOX,
@@ -778,7 +778,7 @@ After web_fetch returns, reply exactly REFERENCE_AGENT_OK if the fetched respons
         prompt: buildHermesReferencePrompt(),
         sandboxName: HERMES_SANDBOX,
       });
-      await artifacts.writeJson("target-result.json", {
+      await artifacts.target.complete({
         id: "common-egress-agent",
         case: "hermes-open-public-reference",
         status: "passed",

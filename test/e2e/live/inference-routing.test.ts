@@ -8,6 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import type { ArtifactSink } from "../fixtures/artifacts.ts";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
+import { resultText } from "../fixtures/clients/command.ts";
 import type { HostCliClient } from "../fixtures/clients/host.ts";
 import type { SandboxClient } from "../fixtures/clients/sandbox.ts";
 import { trustedSandboxShellScript, validateSandboxName } from "../fixtures/clients/sandbox.ts";
@@ -72,10 +73,6 @@ interface RawRunOptions {
   readonly env?: NodeJS.ProcessEnv;
   readonly redactionValues?: readonly string[];
   readonly timeoutMs?: number;
-}
-
-function resultText(result: { stdout: string; stderr: string }): string {
-  return [result.stdout, result.stderr].filter(Boolean).join("\n");
 }
 
 function redactedResultText(
@@ -556,9 +553,8 @@ test("TC-INF-06 invalid API key fails with credential classification and cleanup
   );
   await cleanupSandbox(host, sandbox, sandboxName);
 
-  await artifacts.writeJson("target.json", {
+  await artifacts.target.declare({
     id: "inference-routing-invalid-api-key",
-    runner: "vitest",
     contract: [
       "invalid NVIDIA key exits non-zero",
       "output contains credential classification",
@@ -596,9 +592,8 @@ test("TC-INF-07 unreachable endpoint fails with transport classification and cle
   );
   await cleanupSandbox(host, sandbox, sandboxName);
 
-  await artifacts.writeJson("target.json", {
+  await artifacts.target.declare({
     id: "inference-routing-unreachable-endpoint",
-    runner: "vitest",
     contract: [
       "unreachable custom endpoint exits non-zero",
       "output contains transport classification",
@@ -666,9 +661,8 @@ test("TC-INF-10 DNS-backed HTTPS blueprint endpoint fails closed before OpenShel
       "",
     ].join("\n"),
   );
-  await artifacts.writeJson("target.json", {
+  await artifacts.target.declare({
     id: "https-dns-backed-endpoint-fail-closed",
-    runner: "vitest",
     issue: 4684,
     contract: [
       "DNS-backed HTTPS endpoint validation fails closed before handing config to OpenShell",
@@ -730,9 +724,8 @@ test("TC-INF-05 real NVIDIA key is isolated from sandbox env, process list, and 
   );
   await cleanupSandbox(host, sandbox, sandboxName);
 
-  await artifacts.writeJson("target.json", {
+  await artifacts.target.declare({
     id: "inference-routing-credential-isolation",
-    runner: "vitest",
     contract: [
       "real NVIDIA_INFERENCE_API_KEY does not appear in sandbox environment",
       "real NVIDIA_INFERENCE_API_KEY does not appear in sandbox process list when ps is available",
@@ -910,9 +903,8 @@ test("TC-INF-02 OpenAI provider responds through inference.local", {
   );
   await cleanupSandbox(host, sandbox, sandboxName);
 
-  await artifacts.writeJson("target.json", {
+  await artifacts.target.declare({
     id: "inference-routing-openai",
-    runner: "vitest",
     contract: ["OpenAI provider onboards", "sandbox inference.local routes chat to OpenAI"],
     model,
   });
@@ -956,9 +948,8 @@ test("TC-INF-03 Anthropic provider responds through inference.local", {
   );
   await cleanupSandbox(host, sandbox, sandboxName);
 
-  await artifacts.writeJson("target.json", {
+  await artifacts.target.declare({
     id: "inference-routing-anthropic",
-    runner: "vitest",
     contract: [
       "Anthropic provider onboards",
       "sandbox inference.local routes Messages API to Anthropic",
@@ -1006,9 +997,8 @@ test("TC-INF-09 custom OpenAI-compatible endpoint responds through inference.loc
   );
   await cleanupSandbox(host, sandbox, sandboxName);
 
-  await artifacts.writeJson("target.json", {
+  await artifacts.target.declare({
     id: "inference-routing-compatible-endpoint",
-    runner: "vitest",
     contract: [
       "custom OpenAI-compatible endpoint onboards",
       "sandbox inference.local routes chat to compatible endpoint",

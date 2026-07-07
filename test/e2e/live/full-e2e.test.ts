@@ -4,10 +4,10 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-
 import { containsInteger42Answer } from "../../helpers/e2e-answer-assertions.ts";
 import type { ArtifactSink } from "../fixtures/artifacts.ts";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
+import { resultText } from "../fixtures/clients/command.ts";
 import { type HostCliClient } from "../fixtures/clients/host.ts";
 import {
   type SandboxClient,
@@ -59,10 +59,6 @@ function env(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
     ...securityPostureModeEnv(),
     ...extra,
   };
-}
-
-function resultText(result: Pick<ShellProbeResult, "stdout" | "stderr">): string {
-  return [result.stdout, result.stderr].filter(Boolean).join("\n");
 }
 
 async function repoNemoclaw(
@@ -225,7 +221,7 @@ test("full e2e: install, onboard, inference, cli operations, and cleanup", {
 }, async ({ artifacts, cleanup: cleanupRegistry, host, sandbox, secrets, skip }) => {
   const hosted = requireHostedInferenceConfig(secrets);
   const redactionValues = [hosted.apiKey];
-  await artifacts.writeJson("target.json", {
+  await artifacts.target.declare({
     id: "full-e2e",
     sandboxName: SANDBOX_NAME,
     endpointUrl: hosted.endpointUrl,
@@ -378,7 +374,7 @@ test("full e2e: install, onboard, inference, cli operations, and cleanup", {
   const registryText = fs.existsSync(registry) ? fs.readFileSync(registry, "utf8") : "";
   expect(registryText).not.toContain(SANDBOX_NAME);
 
-  await artifacts.writeJson("target-result.json", {
+  await artifacts.target.complete({
     id: "full-e2e",
     securityPosture,
     status: "passed",

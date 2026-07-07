@@ -12,6 +12,7 @@
 import fs from "node:fs";
 
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
+import { resultText } from "../fixtures/clients/command.ts";
 import type { HostCliClient } from "../fixtures/clients/host.ts";
 import type { SandboxClient } from "../fixtures/clients/sandbox.ts";
 import { validateSandboxName } from "../fixtures/clients/sandbox.ts";
@@ -36,10 +37,6 @@ validateSandboxName(SANDBOX_B);
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function resultText(result: { stdout: string; stderr: string }): string {
-  return [result.stdout, result.stderr].filter(Boolean).join("\n");
 }
 
 function commandEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
@@ -285,9 +282,8 @@ test("concurrent gateway ports: onboards two sandboxes on isolated gateways and 
   const fake = await startFakeOpenAiCompatibleServer({
     port: Number(process.env.NEMOCLAW_E2E_FAKE_PORT ?? 0),
   });
-  await artifacts.writeJson("target.json", {
+  await artifacts.target.declare({
     id: "concurrent-gateway-ports",
-    runner: "vitest",
     boundary: "direct-cli-docker-openshell-multiple-gateways-dashboard-forwards",
     contract: [
       "sandbox A onboards on the default NemoClaw gateway and dashboard port",
@@ -384,7 +380,7 @@ test("concurrent gateway ports: onboards two sandboxes on isolated gateways and 
   expect(["Ready", "Running"]).toContain(phaseAAfterDestroyB);
   await expectPortListening(host, GATEWAY_PORT_A, "phase-4-gateway-port-a-still-listening");
 
-  await artifacts.writeJson("target-result.json", {
+  await artifacts.target.complete({
     id: "concurrent-gateway-ports",
     assertions: {
       sandboxAOnboarded: onboardA.exitCode === 0,

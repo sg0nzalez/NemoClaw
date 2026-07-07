@@ -1,10 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import path from "node:path";
-
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
-import { shellQuote } from "../fixtures/clients/command.ts";
+import {
+  assertExitZero as expectExitZero,
+  resultText,
+  shellQuote,
+} from "../fixtures/clients/command.ts";
 import type { HostCliClient } from "../fixtures/clients/host.ts";
 import {
   type SandboxClient,
@@ -17,7 +19,7 @@ import { CLI_ENTRYPOINT, REPO_ROOT } from "../fixtures/paths.ts";
 import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
 import { isNvidiaEndpointRateLimitFailure } from "./messaging-providers-helpers.ts";
 
-export { REPO_ROOT };
+export { expectExitZero, REPO_ROOT, resultText };
 
 export const CLI = process.env.NEMOCLAW_CLI_BIN ?? CLI_ENTRYPOINT;
 
@@ -28,10 +30,6 @@ export type AgentKind = "openclaw" | "hermes";
 
 export function stripAnsi(value: string): string {
   return value.replace(/\u001b\[[0-9;]*m/g, "");
-}
-
-export function resultText(result: Pick<ShellProbeResult, "stdout" | "stderr">): string {
-  return [result.stdout, result.stderr].filter(Boolean).join("\n");
 }
 
 export { shellQuote };
@@ -72,10 +70,6 @@ export async function bestEffort(run: () => Promise<unknown>): Promise<void> {
   } catch {
     // Cleanup and diagnostics must not hide primary test failures.
   }
-}
-
-export function expectExitZero(result: ShellProbeResult, label: string): void {
-  expect(result.exitCode, `${label}\n${resultText(result)}`).toBe(0);
 }
 
 export async function precleanSandbox(

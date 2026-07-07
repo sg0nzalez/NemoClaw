@@ -395,9 +395,8 @@ test(
       onboarding: "cloud-openclaw",
     });
 
-    await artifacts.writeJson("target.json", {
+    await artifacts.target.declare({
       id: "channels-add-remove",
-      runner: "vitest",
       sandboxName: SANDBOX_NAME,
       contract: [
         "onboard creates an OpenClaw sandbox with no Telegram channel",

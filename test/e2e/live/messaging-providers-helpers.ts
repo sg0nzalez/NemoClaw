@@ -8,7 +8,7 @@ import path from "node:path";
 
 import type { ArtifactSink } from "../fixtures/artifacts.ts";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
-import { shellQuote } from "../fixtures/clients/command.ts";
+import { assertExitZero as expectExitZero, shellQuote } from "../fixtures/clients/command.ts";
 import type { HostCliClient } from "../fixtures/clients/host.ts";
 import {
   type SandboxClient,
@@ -20,7 +20,7 @@ import { CLI_ENTRYPOINT, REPO_ROOT } from "../fixtures/paths.ts";
 import { buildProcessTokenProbe } from "../fixtures/process-token-probe.ts";
 import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
 
-export { CLI_ENTRYPOINT, REPO_ROOT };
+export { CLI_ENTRYPOINT, expectExitZero, REPO_ROOT };
 
 export const BASE_POLICY = path.join(
   REPO_ROOT,
@@ -401,10 +401,6 @@ export function buildSandboxShellInvocation(script: string): string[] {
     );
   }
   return invocation;
-}
-
-export function expectExitZero(result: ShellProbeResult, label: string): void {
-  expect(result.exitCode, `${label}\n${outputText(result)}`).toBe(0);
 }
 
 export function check(condition: boolean, message: string): void {

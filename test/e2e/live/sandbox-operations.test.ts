@@ -11,9 +11,13 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-
 import { containsInteger42Answer } from "../../helpers/e2e-answer-assertions.ts";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
+import {
+  assertExitZero as expectExitZero,
+  outputContainsSandbox,
+  resultText,
+} from "../fixtures/clients/command.ts";
 import type { HostCliClient } from "../fixtures/clients/host.ts";
 import { type SandboxClient, trustedSandboxShellScript } from "../fixtures/clients/sandbox.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
@@ -30,21 +34,7 @@ const SANDBOX_B = "e2e-sbx-b";
 const REGISTRY_FILE = path.join(process.env.HOME ?? os.homedir(), ".nemoclaw", "sandboxes.json");
 const GATEWAY_CONTAINER = "openshell-cluster-nemoclaw";
 
-type ProcessResult = { exitCode: number | null; stdout: string; stderr: string };
 type CleanupRegistry = { add(name: string, run: () => Promise<void> | void): void };
-
-function resultText(result: ProcessResult): string {
-  return [result.stdout, result.stderr].filter(Boolean).join("\n");
-}
-
-function outputContainsSandbox(result: ProcessResult, sandboxName: string): boolean {
-  const escaped = sandboxName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`(^|\\s)${escaped}(\\s|$)`, "m").test(resultText(result));
-}
-
-function expectExitZero(result: ProcessResult, label: string): void {
-  expect(result.exitCode, `${label}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`).toBe(0);
-}
 
 async function onboardSandbox(
   host: HostCliClient,
@@ -603,9 +593,8 @@ test(
   async ({ artifacts, cleanup, docker, environment, host, sandbox, secrets }) => {
     const hosted = requireHostedInferenceConfig(secrets);
 
-    await artifacts.writeJson("target.json", {
+    await artifacts.target.declare({
       id: "sandbox-operations",
-      runner: "vitest",
       boundary: "repo-cli-docker-openshell-sandbox",
       contracts: [
         "TC-SBX-01 list shows onboarded sandbox",
@@ -658,7 +647,7 @@ test(
 
     const gatewayRecovery = await assertGatewayRecovery(host, SANDBOX_A);
 
-    await artifacts.writeJson("target-result.json", {
+    await artifacts.target.complete({
       id: "sandbox-operations",
       status: "passed",
       gatewayRecovery,

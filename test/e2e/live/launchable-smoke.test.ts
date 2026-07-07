@@ -5,10 +5,10 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-
 import { containsInteger42Answer } from "../../helpers/e2e-answer-assertions.ts";
 import type { ArtifactSink } from "../fixtures/artifacts.ts";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
+import { assertExitZero as expectExitZero } from "../fixtures/clients/command.ts";
 import type { HostCliClient } from "../fixtures/clients/host.ts";
 import { validateSandboxName } from "../fixtures/clients/sandbox.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
@@ -78,10 +78,6 @@ async function runBash(
     redactionValues: options.redactionValues,
     timeoutMs: options.timeoutMs,
   });
-}
-
-function expectExitZero(result: ShellProbeResult, label: string): void {
-  expect(result.exitCode, `${label}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`).toBe(0);
 }
 
 function parseChatContent(raw: string): string {
@@ -218,9 +214,8 @@ test("launchable smoke: bootstrap, onboard, sandbox health, live inference, clea
 }, async ({ artifacts, cleanup, host, sandbox, secrets, skip }) => {
   validateSandboxName(SANDBOX_NAME);
 
-  await artifacts.writeJson("target.json", {
+  await artifacts.target.declare({
     id: "launchable-smoke",
-    runner: "vitest",
     boundary: "ubuntu-launchable-install-flow",
     refs: ["#2599", "#5098"],
     phases: [

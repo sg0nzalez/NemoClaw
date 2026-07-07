@@ -38,7 +38,7 @@ test("Kimi-compatible endpoint config enables plugin wiring and managed inferenc
   maybeRegisterKimiMockCleanup(cleanup, fake);
   cleanup.add("destroy Kimi sandbox", () => cleanupKimi(host, sandbox));
 
-  await artifacts.writeJson("target.json", {
+  await artifacts.target.declare({
     id: "kimi-inference-compat",
     boundary: kimiBoundary(mode),
     inferenceClassification: "public-nvidia required with mock/hermetic fallback",
