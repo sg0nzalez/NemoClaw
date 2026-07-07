@@ -729,11 +729,8 @@ startGateway(null).catch(() => {});
     assert.deepEqual(evidence.argvContainingSecret, []);
     assert.deepEqual(evidence.secretBearingCommands, ["provider update"]);
     assert.equal(evidence.providerCommand.env.NVIDIA_INFERENCE_API_KEY, credentialValue);
-    assert.equal(
-      evidence.unscopedCommandKinds.join(","),
-      "gateway select,provider get,inference set",
-    );
-    assert.deepEqual(evidence.unscopedCredentialValues, [null, null, null]);
+    assert.deepEqual(evidence.unscopedCommandKinds, []);
+    assert.deepEqual(evidence.unscopedCredentialValues, []);
     assert.deepEqual(evidence.unscopedCommandsContainingSecret, []);
     assert.deepEqual(evidence.setupCredentialValues, [credentialValue, credentialValue]);
     assert.equal(evidence.parentCredentialUnchanged, true);
@@ -747,7 +744,7 @@ startGateway(null).catch(() => {});
       async () => {
         const harness = createDirectSetupInferenceHarness({
           runOpenshell: (args) =>
-            args.join(" ") === "provider get hermes-provider"
+            args.join(" ") === "provider get -g nemoclaw hermes-provider"
               ? { status: 0, stdout: "Provider: hermes-provider", stderr: "" }
               : undefined,
           overrides: { isNonInteractive: () => true },
@@ -763,11 +760,14 @@ startGateway(null).catch(() => {});
         );
 
         const commands = harness.commands;
-        assert.equal(commands.length, 4);
-        assert.match(commands[0].command, /gateway select nemoclaw/);
-        assert.match(commands[1].command, /provider list/);
-        assert.match(commands[2].command, /provider get hermes-provider/);
-        assert.match(commands[3].command, /inference set --no-verify --provider hermes-provider/);
+        assert.equal(commands.length, 3);
+        assert.equal(commands[0].command, "provider list -g nemoclaw");
+        assert.equal(commands[1].command, "provider get -g nemoclaw hermes-provider");
+        assert.match(
+          commands[2].command,
+          /inference set -g nemoclaw --no-verify --provider hermes-provider/,
+        );
+        assert.ok(!commands.some((entry) => entry.command.startsWith("gateway select")));
         assert.ok(!commands.some((entry) => /provider (create|update)/.test(entry.command)));
         assert.ok(!commands.some((entry) => entry.env?.NOUS_API_KEY || entry.env?.OPENAI_API_KEY));
         assert.ok(
@@ -791,7 +791,7 @@ startGateway(null).catch(() => {});
       const setupBedrockRuntimeInference = bedrockRuntimeOnboard.setupBedrockRuntimeInference;
       const harness = createDirectSetupInferenceHarness({
         runOpenshell: (args) =>
-          args.join(" ") === "provider get compatible-anthropic-endpoint"
+          args.join(" ") === "provider get -g nemoclaw compatible-anthropic-endpoint"
             ? { status: 1, stdout: "", stderr: "" }
             : undefined,
         overrides: {
@@ -858,12 +858,10 @@ startGateway(null).catch(() => {});
       );
       assert.match(
         commands.at(-1)?.command || "",
-        /inference set --no-verify --provider compatible-anthropic-endpoint --model anthropic\.claude-3-5-sonnet-20240620-v1:0/,
+        /inference set -g nemoclaw --no-verify --provider compatible-anthropic-endpoint --model anthropic\.claude-3-5-sonnet-20240620-v1:0/,
       );
-      expect(updateSandbox).toHaveBeenCalledWith("test-box", {
-        model: "anthropic.claude-3-5-sonnet-20240620-v1:0",
-        provider: "compatible-anthropic-endpoint",
-      });
+      // biome-ignore format: keep the complete route reservation assertion within this legacy file's enforced budget.
+      expect(updateSandbox).toHaveBeenCalledWith("test-box", { model: "anthropic.claude-3-5-sonnet-20240620-v1:0", provider: "compatible-anthropic-endpoint", endpointUrl: "https://bedrock-runtime.us-east-1.amazonaws.com", credentialEnv: "COMPATIBLE_ANTHROPIC_API_KEY", preferredInferenceApi: null, gatewayName: "nemoclaw" });
     });
   });
   it("resolves a sandbox name before reconciling Hermes Provider on resume", {
@@ -968,7 +966,7 @@ registry.getSandbox = (name) =>
         policies: ["nous-web"],
       }
     : null;
-registry.updateSandbox = (name, updates) => {
+registry.reserveSandboxInferenceRoute = (name, updates) => {
   registryUpdates.push({ name, updates });
   return true;
 };
@@ -1084,7 +1082,7 @@ const { onboard } = require(${onboardPath});
     );
     assert.ok(
       payload.commands.some((entry) =>
-        /inference set --no-verify --provider hermes-provider/.test(entry.command),
+        /inference set -g nemoclaw --no-verify --provider hermes-provider/.test(entry.command),
       ),
       "resume should reach openshell inference set",
     );
@@ -1114,7 +1112,7 @@ const { onboard } = require(${onboardPath});
       async () => {
         const harness = createDirectSetupInferenceHarness({
           runOpenshell: (args) =>
-            args.join(" ") === "provider get hermes-provider"
+            args.join(" ") === "provider get -g nemoclaw hermes-provider"
               ? { status: 0, stdout: "Provider: hermes-provider", stderr: "" }
               : undefined,
           overrides: { isNonInteractive: () => true },
@@ -1130,7 +1128,7 @@ const { onboard } = require(${onboardPath});
         );
 
         const update = harness.commands.find((entry) =>
-          /provider update hermes-provider/.test(entry.command),
+          /provider update -g nemoclaw hermes-provider/.test(entry.command),
         );
         assert.ok(update);
         assert.match(update.command, /--credential NOUS_API_KEY/);
@@ -1141,7 +1139,7 @@ const { onboard } = require(${onboardPath});
         );
         assert.match(
           harness.commands.at(-1)?.command || "",
-          /inference set --no-verify --provider hermes-provider/,
+          /inference set -g nemoclaw --no-verify --provider hermes-provider/,
         );
       },
     );
@@ -1190,19 +1188,7 @@ const { onboard } = require(${onboardPath});
   });
   it("recovers the Ollama auth proxy on WSL when the sandbox needs proxy fronting", async () => {
     const proxyCalls: string[] = [];
-    let harness: ReturnType<typeof createDirectSetupInferenceHarness>;
-    const applyLocalInferenceRoute = createLocalInferenceRouteApplier({
-      runOpenshell: (args, options) => harness.runOpenshell(args, options),
-      isNonInteractive: () => false,
-      promptValidationRecovery: async () => "selection",
-      classifyApplyFailure: () => ({}) as never,
-      compactText: (value) => value.trim(),
-      redact: (value) => value,
-      localInferenceTimeoutSecs: 120,
-      error: vi.fn(),
-      exitProcess: () => assert.fail("unexpected exit"),
-    });
-    harness = createDirectSetupInferenceHarness({
+    const harness = createDirectSetupInferenceHarness({
       runOpenshell: (args) =>
         args.slice(0, 2).join(" ") === "provider get"
           ? { status: 1, stdout: "", stderr: "" }
@@ -1223,7 +1209,7 @@ const { onboard } = require(${onboardPath});
         persistAndProbeOllamaProxy: async (token: string) => {
           proxyCalls.push(`persist:${token}`);
         },
-        applyLocalInferenceRoute,
+        applyLocalInferenceRoute: undefined,
       },
     });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -1243,7 +1229,7 @@ const { onboard } = require(${onboardPath});
     assert.doesNotMatch(providerCommand.command, /proxy-token/);
     assert.ok(
       harness.commands.some((entry) =>
-        entry.command.includes("inference set --no-verify --provider ollama-local"),
+        entry.command.includes("inference set -g nemoclaw --no-verify --provider ollama-local"),
       ),
       "expected ollama-local inference route to be selected",
     );
@@ -1294,7 +1280,7 @@ const { onboard } = require(${onboardPath});
       warn.mockRestore();
     }
     const setCmd = harness.commands.find((entry) =>
-      entry.command.includes("inference set --no-verify --provider ollama-local"),
+      entry.command.includes("inference set -g nemoclaw --no-verify --provider ollama-local"),
     );
     assert.ok(setCmd, "expected ollama-local inference set command to be issued");
     assert.equal(
@@ -1339,7 +1325,7 @@ const { onboard } = require(${onboardPath});
     );
 
     const setCmd = harness.commands.find((entry) =>
-      entry.command.includes("inference set --no-verify --provider vllm-local"),
+      entry.command.includes("inference set -g nemoclaw --no-verify --provider vllm-local"),
     );
     assert.ok(setCmd, "expected vllm-local inference set command to be issued");
     assert.equal(
@@ -1363,7 +1349,7 @@ const { onboard } = require(${onboardPath});
     fs.writeFileSync(
       fakeOpenshell,
       `#!/usr/bin/env bash
-if [ "$1" = "inference" ] && [ "$2" = "get" ]; then
+if [ "$1" = "inference" ] && [ "$2" = "get" ] && [ "$3" = "-g" ] && [ "$4" = "team-gateway" ]; then
   cat <<'EOF'
 Gateway inference:
 
@@ -1384,9 +1370,9 @@ exit 1
       `
 const { isInferenceRouteReady } = require(${onboardPath});
 console.log(JSON.stringify({
-  same: isInferenceRouteReady("nvidia-prod", "nvidia/nemotron-3-super-120b-a12b"),
-  otherModel: isInferenceRouteReady("nvidia-prod", "nvidia/other-model"),
-  otherProvider: isInferenceRouteReady("openai-api", "nvidia/nemotron-3-super-120b-a12b"),
+  same: isInferenceRouteReady("team-gateway", "nvidia-prod", "nvidia/nemotron-3-super-120b-a12b"),
+  otherModel: isInferenceRouteReady("team-gateway", "nvidia-prod", "nvidia/other-model"),
+  otherProvider: isInferenceRouteReady("team-gateway", "openai-api", "nvidia/nemotron-3-super-120b-a12b"),
 }));
 `,
     );
@@ -1540,13 +1526,14 @@ console.log(JSON.stringify({
       );
 
       const commands = harness.commands;
-      assert.equal(commands.length, 4);
-      assert.match(commands[0].command, /gateway select nemoclaw/);
-      assert.match(commands[1].command, /provider get/);
-      assert.match(commands[2].command, /--type anthropic/);
-      assert.match(commands[2].command, /--credential ANTHROPIC_API_KEY/);
-      assert.doesNotMatch(commands[2].command, /sk-ant-TEST-NOT-A-REAL-VALUE/);
-      assert.match(commands[3].command, /--provider anthropic-prod/);
+      assert.equal(commands.length, 3);
+      assert.match(commands[0].command, /^provider get -g nemoclaw /);
+      assert.match(commands[1].command, /^provider create -g nemoclaw /);
+      assert.match(commands[1].command, /--type anthropic/);
+      assert.match(commands[1].command, /--credential ANTHROPIC_API_KEY/);
+      assert.doesNotMatch(commands[1].command, /sk-ant-TEST-NOT-A-REAL-VALUE/);
+      assert.match(commands[2].command, /^inference set -g nemoclaw /);
+      assert.match(commands[2].command, /--provider anthropic-prod/);
     });
   });
   it("updates OpenAI-compatible providers without passing an unsupported --type flag", async () => {
@@ -1567,12 +1554,11 @@ console.log(JSON.stringify({
       );
 
       const commands = harness.commands;
-      assert.equal(commands.length, 4);
-      assert.match(commands[0].command, /gateway select nemoclaw/);
-      assert.match(commands[1].command, /provider get/);
-      assert.match(commands[2].command, /provider update openai-api/);
-      assert.doesNotMatch(commands[2].command, /--type/);
-      assert.match(commands[3].command, /inference set --no-verify/);
+      assert.equal(commands.length, 3);
+      assert.match(commands[0].command, /^provider get -g nemoclaw /);
+      assert.match(commands[1].command, /^provider update -g nemoclaw openai-api/);
+      assert.doesNotMatch(commands[1].command, /--type/);
+      assert.match(commands[2].command, /^inference set -g nemoclaw --no-verify/);
     });
   });
   it("re-prompts for credentials when openshell inference set fails with authorization errors", async () => {
@@ -1696,7 +1682,7 @@ console.log(JSON.stringify({
           "legacy credentials.json must survive the staging-only hydrate path",
         );
         const providerUpdate = harness.commands.find((entry) =>
-          entry.command.includes("provider update openai-api"),
+          entry.command.includes("provider update -g nemoclaw openai-api"),
         );
         assert.ok(providerUpdate, "expected provider update command");
         assert.equal(providerUpdate.env?.OPENAI_API_KEY, "sk-TEST-NOT-A-REAL-STORED-KEY");
@@ -3907,8 +3893,8 @@ const { createSandbox } = require(${onboardPath});
         "OPENAI_API_KEY",
       );
 
-      // gateway select + provider get + provider update + inference set
-      assert.equal(harness.commands.length, 4);
+      // provider get + provider update + inference set
+      assert.equal(harness.commands.length, 3);
     });
   });
   it("accepts gateway inference output that omits the Route line", async () => {
@@ -3942,8 +3928,8 @@ const { createSandbox } = require(${onboardPath});
         "OPENAI_API_KEY",
       );
 
-      // gateway select + provider get + provider update + inference set
-      assert.equal(harness.commands.length, 4);
+      // provider get + provider update + inference set
+      assert.equal(harness.commands.length, 3);
     });
   });
   it("uses the sandbox-base registry in pullAndResolveBaseImageDigest (#1904)", () => {

@@ -532,9 +532,9 @@ registry.registerSandbox({
 runner.run = (command, opts = {}) => {
   const normalized = _n(command);
   commands.push({ command: normalized, env: opts.env || null });
-  if (normalized.includes("provider get my-assistant-discord-bridge")) return { status: 0 };
-  if (normalized.includes("provider get my-assistant-slack-bridge")) return { status: 0 };
-  if (normalized.includes("provider get my-assistant-slack-app")) return { status: 0 };
+  if (normalized.includes("provider get -g nemoclaw my-assistant-discord-bridge")) return { status: 0 };
+  if (normalized.includes("provider get -g nemoclaw my-assistant-slack-bridge")) return { status: 0 };
+  if (normalized.includes("provider get -g nemoclaw my-assistant-slack-app")) return { status: 0 };
   if (normalized.includes("provider get")) return { status: 1 };
   return { status: 0 };
 };
@@ -694,7 +694,7 @@ registry.registerSandbox({
 runner.run = (command, opts = {}) => {
   const normalized = _n(command);
   commands.push({ command: normalized, env: opts.env || null });
-  if (normalized.includes("provider get my-assistant-telegram-bridge")) return { status: 0 };
+  if (normalized.includes("provider get -g nemoclaw my-assistant-telegram-bridge")) return { status: 0 };
   if (normalized.includes("provider get")) return { status: 1 };
   return { status: 0 };
 };
