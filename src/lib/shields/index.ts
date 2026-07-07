@@ -2015,9 +2015,20 @@ function lockAgentConfigUnderMutationLock(
       chattrSucceeded = applyHermesConfigShields(sandboxName, target, transaction.token);
     }
 
+    // For the sealed Hermes transaction the parent (`/sandbox`) posture —
+    // `1775 root:sandbox` — is deliberately the last persistent change and is
+    // applied by finishHermesConfigShields, which runs after this check (the
+    // guard uses root parent ownership as its crash-consistency orphan marker
+    // until finish). Verifying parent protection now would therefore always see
+    // the frozen `755 root:root` posture and falsely report
+    // "parent dir mode=755 (expected 1775)" on a fresh sandbox, so defer that
+    // dimension to a post-finish re-verify. Everything else (locked files,
+    // config dir, chattr) is already established by apply and is checked here.
+    const deferParentProtectionToFinish = transaction != null;
     const { issues } = verifyShieldsLockState(sandboxName, target, {
       verifyChattr: chattrSucceeded,
-      verifyParentProtection: target.agentName === "hermes" || openClawProtocol,
+      verifyParentProtection:
+        !deferParentProtectionToFinish && (target.agentName === "hermes" || openClawProtocol),
       exec: (cmd: string[]) => privilegedSandboxExecCapture(sandboxName, cmd),
       assertLegacyLayout: assertNoLegacyStateLayout,
     });
@@ -2026,6 +2037,17 @@ function lockAgentConfigUnderMutationLock(
     const fileHashes = captureSealHashes(sandboxName, filesToLock);
     if (transaction) {
       finishHermesConfigShields(sandboxName, target, transaction.token);
+      // finish committed the lock and released the transaction; it can no longer
+      // be aborted, so clear it before the post-finish re-verify keeps a
+      // verification failure from re-entering the transaction rollback path.
+      transaction = null;
+      const { issues: parentIssues } = verifyShieldsLockState(sandboxName, target, {
+        verifyChattr: chattrSucceeded,
+        verifyParentProtection: true,
+        exec: (cmd: string[]) => privilegedSandboxExecCapture(sandboxName, cmd),
+        assertLegacyLayout: assertNoLegacyStateLayout,
+      });
+      if (parentIssues.length > 0) throw new Error(`Config not locked: ${parentIssues.join(", ")}`);
     }
     return { chattrApplied: chattrSucceeded, fileHashes };
   } catch (error) {
