@@ -17,7 +17,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
-import { shellQuote } from "../fixtures/clients/command.ts";
+import { resultText, shellQuote } from "../fixtures/clients/command.ts";
 import type { HostCliClient } from "../fixtures/clients/host.ts";
 import {
   type SandboxClient,
@@ -144,10 +144,6 @@ function expectMockBaselineAuthentication(
   baseline
     ? expect(baseline.requests()).toContainEqual(expectedRequest)
     : expect(baseline).toBeUndefined();
-}
-
-function resultText(result: Pick<ShellProbeResult, "stdout" | "stderr">): string {
-  return [result.stdout, result.stderr].filter(Boolean).join("\n");
 }
 
 function stripAnsi(value: string): string {

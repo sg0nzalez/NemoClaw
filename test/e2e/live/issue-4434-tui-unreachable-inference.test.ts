@@ -3,9 +3,9 @@
 
 import fs from "node:fs";
 import path from "node:path";
-
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
 import { isGatewayManagedCompatibleInference } from "../fixtures/ci-compatible-inference.ts";
+import { resultText } from "../fixtures/clients/command.ts";
 import { trustedSandboxShellScript, validateSandboxName } from "../fixtures/clients/sandbox.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
 import { startFakeOpenAiCompatibleServer } from "../fixtures/fake-openai-compatible.ts";
@@ -63,10 +63,6 @@ const runIssue4434LiveTest =
     : test.skip;
 
 type CommandResultText = { stdout: string; stderr: string };
-
-function resultText(result: CommandResultText): string {
-  return [result.stdout, result.stderr].filter(Boolean).join("\n");
-}
 
 function shellSingleQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;

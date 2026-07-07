@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
+import { resultText } from "../fixtures/clients/command.ts";
 import { validateSandboxName } from "../fixtures/clients/sandbox.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
 import { shouldRunLiveE2E } from "../fixtures/live-project-gate.ts";
@@ -13,10 +14,6 @@ const runConnectRlimitTest =
   shouldRunLiveE2E() && process.env.NEMOCLAW_E2E_CONNECT_RLIMITS === "1" ? test : test.skip;
 
 validateSandboxName(SANDBOX_NAME);
-
-function resultText(result: Pick<ShellProbeResult, "stdout" | "stderr">): string {
-  return [result.stdout, result.stderr].filter(Boolean).join("\n");
-}
 
 function numericProbe(text: string, key: string): number {
   const match = text.match(new RegExp(`${key}=(\\d+)`));

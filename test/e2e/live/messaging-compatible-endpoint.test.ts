@@ -13,6 +13,7 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
+import { resultText } from "../fixtures/clients/command.ts";
 
 import type { HostCliClient } from "../fixtures/clients/host.ts";
 import { type SandboxClient, validateSandboxName } from "../fixtures/clients/sandbox.ts";
@@ -85,10 +86,6 @@ interface CompatibleMock {
 }
 
 type ProcessResult = { exitCode?: number | null; stdout: string; stderr: string };
-
-function resultText(result: ProcessResult): string {
-  return [result.stdout, result.stderr].filter(Boolean).join("\n");
-}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));

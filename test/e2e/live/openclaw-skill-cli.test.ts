@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
-import { shellQuote } from "../fixtures/clients/command.ts";
+import { resultText, shellQuote } from "../fixtures/clients/command.ts";
 import type { HostCliClient } from "../fixtures/clients/host.ts";
 import {
   type SandboxClient,
@@ -36,10 +36,6 @@ const SANDBOX_EXEC_TIMEOUT_MS = 120_000;
 validateSandboxName(SANDBOX_NAME);
 
 const runOpenClawSkillCliTest = shouldRunLiveE2E() ? test : test.skip;
-
-function resultText(result: Pick<ShellProbeResult, "stdout" | "stderr">): string {
-  return [result.stdout, result.stderr].filter(Boolean).join("\n");
-}
 
 function isEndpointRateLimited(text: string): boolean {
   return /HTTP 429|rate limit|too many requests/i.test(text);
