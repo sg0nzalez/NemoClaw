@@ -490,6 +490,7 @@ describe("Deep Agents 0.1.30 progressive-disclosure build patch", () => {
     expect(
       firstBytes[fixture.agentPath].match(/NemoClaw-managed progressive tool disclosure\./g),
     ).toHaveLength(1);
+    // Retain onboarding in the full-package snapshot to prove it stays untouched and idempotent.
     expect(firstBytes[path.join(fixture.packageDir, "onboarding.py")]).not.toContain(
       HARDENING_MARKER,
     );

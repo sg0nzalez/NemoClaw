@@ -98,44 +98,60 @@ proc send {args} {
     set ::fake_closed 1
   }
 }
+proc exp_continue {} {
+  return -code continue
+}
 proc expect {branches} {
-  if {[llength $::fake_events] == 0} {
-    error "fake Expect event queue exhausted"
+  while {1} {
+    if {[llength $::fake_events] == 0} {
+      error "fake Expect event queue exhausted"
+    }
+    set event [lindex $::fake_events 0]
+    set ::fake_events [lrange $::fake_events 1 end]
+    switch -- $event {
+      namePrompt {
+        set branch_index [lsearch -exact $branches {$name_prompt_pattern}]
+        set ::expect_out(0,string) "What should Deep Agents call you"
+      }
+      firstRun {
+        set branch_index [lsearch -exact $branches {$first_run_pattern}]
+        set ::expect_out(0,string) "Choose a Recommended Model"
+      }
+      ready {
+        set branch_index [lsearch -exact $branches {$ready_pattern}]
+        set ::expect_out(0,string) "What would you like to build?"
+      }
+      exit {
+        set branch_index [lsearch -glob $branches {NEMOCLAW_TUI_EXIT:*}]
+        set ::expect_out(0,string) "NEMOCLAW_TUI_EXIT:0"
+        set ::expect_out(1,string) "0"
+      }
+      timeout {
+        set branch_index [lsearch -exact $branches timeout]
+      }
+      eof {
+        set branch_index [lsearch -exact $branches eof]
+      }
+      default {
+        error "unsupported fake Expect event: $event"
+      }
+    }
+    if {$branch_index < 0} {
+      error "fake Expect event $event has no matching branch"
+    }
+    set branch_result ""
+    set branch_options {}
+    set branch_code [catch {
+      uplevel 1 [lindex $branches [expr {$branch_index + 1}]]
+    } branch_result branch_options]
+    if {$branch_code == 0} {
+      return $branch_result
+    }
+    if {$branch_code == 4} {
+      continue
+    }
+    return -options $branch_options $branch_result
   }
-  set event [lindex $::fake_events 0]
-  set ::fake_events [lrange $::fake_events 1 end]
-  switch -- $event {
-    namePrompt {
-      set branch_index [lsearch -exact $branches {$name_prompt_pattern}]
-      set ::expect_out(0,string) "What should Deep Agents call you"
-    }
-    firstRun {
-      set branch_index [lsearch -exact $branches {$first_run_pattern}]
-      set ::expect_out(0,string) "Choose a Recommended Model"
-    }
-    ready {
-      set branch_index [lsearch -exact $branches {$ready_pattern}]
-      set ::expect_out(0,string) "What would you like to build?"
-    }
-    exit {
-      set branch_index [lsearch -glob $branches {NEMOCLAW_TUI_EXIT:*}]
-      set ::expect_out(0,string) "NEMOCLAW_TUI_EXIT:0"
-      set ::expect_out(1,string) "0"
-    }
-    timeout {
-      set branch_index [lsearch -exact $branches timeout]
-    }
-    eof {
-      set branch_index [lsearch -exact $branches eof]
-    }
-    default {
-      error "unsupported fake Expect event: $event"
-    }
-  }
-  if {$branch_index < 0} {
-    error "fake Expect event $event has no matching branch"
-  }
-  uplevel 1 [lindex $branches [expr {$branch_index + 1}]]
 }
 proc exit {{code 0}} {
   set trace_file [open $::env(NEMOCLAW_TUI_TRACE) w]
@@ -280,6 +296,17 @@ describe("Deep Agents Code TUI startup check helpers", () => {
     expect(markerText).toContain("NEMOCLAW_TUI_NAME_PROMPT");
     expect(markerText).toContain("NEMOCLAW_TUI_READY");
     expect(markerText).not.toContain("NEMOCLAW_TUI_UNEXPECTED_FIRST_RUN");
+  });
+
+  itWithTclsh("still rejects the model picker when it appears after the name prompt", () => {
+    const { markerText, result, traceText } = runTuiExpectStateMachine(["namePrompt", "firstRun"]);
+
+    expect(result.status, result.stderr).toBe(24);
+    expect(traceText).toBe("0d,03");
+    expect(markerText).toContain("NEMOCLAW_TUI_NAME_PROMPT");
+    expect(markerText).toContain("Choose a Recommended Model");
+    expect(markerText).toContain("NEMOCLAW_TUI_UNEXPECTED_FIRST_RUN");
+    expect(markerText).not.toContain("NEMOCLAW_TUI_READY");
   });
 
   itWithTclsh("captures a clean exit when dcode closes after the first Ctrl-C (tclsh)", () => {
