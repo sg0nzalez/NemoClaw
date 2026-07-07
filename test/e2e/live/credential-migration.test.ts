@@ -9,6 +9,7 @@ import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
 import type { HostCliClient } from "../fixtures/clients/host.ts";
 import { validateSandboxName } from "../fixtures/clients/sandbox.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
+import { testHomeEnvironment } from "../fixtures/environment-profiles.ts";
 import { requireHostedInferenceConfig } from "../fixtures/hosted-inference.ts";
 import { shouldRunLiveE2E } from "../fixtures/live-project-gate.ts";
 
@@ -40,15 +41,7 @@ function resultText(result: { stdout: string; stderr: string }): string {
 }
 
 function testEnv(home: string, extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
-  const base = buildAvailabilityProbeEnv();
-  return {
-    ...base,
-    HOME: home,
-    PATH: [path.join(home, ".local", "bin"), base.PATH].filter(Boolean).join(":"),
-    NEMOCLAW_NON_INTERACTIVE: "1",
-    NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE: "1",
-    ...extra,
-  };
+  return testHomeEnvironment(home, extra);
 }
 
 async function bestEffort(run: () => Promise<unknown>): Promise<void> {
@@ -181,9 +174,8 @@ runCredentialMigrationTest(
       fs.rmSync(home, { recursive: true, force: true });
     });
 
-    await artifacts.writeJson("target.json", {
+    await artifacts.target.declare({
       id: "credential-migration",
-      runner: "vitest",
       boundary: "real-onboard-openshell-gateway",
       sandboxName: SANDBOX_NAME,
       contracts: [
@@ -294,7 +286,7 @@ runCredentialMigrationTest(
     expect(fs.existsSync(victimFile), "symlink target must remain present").toBe(true);
     expect(fs.readFileSync(victimFile, "utf-8")).toBe(victimPayload);
 
-    await artifacts.writeJson("target-result.json", {
+    await artifacts.target.complete({
       id: "credential-migration",
       sandboxName: SANDBOX_NAME,
       model: hostedInference.model || CREDENTIAL_MIGRATION_MODEL,

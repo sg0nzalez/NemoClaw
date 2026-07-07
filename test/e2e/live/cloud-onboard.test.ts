@@ -84,7 +84,7 @@ liveTest(
     const installCwd = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-public-install-"));
     const redactionValues = [hosted.apiKey];
 
-    await artifacts.writeJson("target.json", {
+    await artifacts.target.declare({
       id: "cloud-onboard",
       sandboxName: SANDBOX_NAME,
       installUrl,
@@ -176,6 +176,6 @@ liveTest(
     }
 
     await cleanup(host, sandbox, { label: "final-cleanup", verify: true });
-    await artifacts.writeJson("target-result.json", { id: "cloud-onboard", status: "passed" });
+    await artifacts.target.complete({ id: "cloud-onboard", status: "passed" });
   },
 );

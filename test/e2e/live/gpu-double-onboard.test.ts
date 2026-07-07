@@ -151,7 +151,7 @@ liveTest(
   "gpu double onboard keeps Ollama auth proxy token consistent after re-onboard",
   { timeout: LIVE_TIMEOUT_MS },
   async ({ artifacts, cleanup: cleanupRegistry, host, sandbox, skip }) => {
-    await artifacts.writeJson("target.json", {
+    await artifacts.target.declare({
       id: "gpu-double-onboard",
       sandboxName: SANDBOX_NAME,
       proxyPort: PROXY_PORT,
@@ -287,7 +287,7 @@ liveTest(
     const registryFile = path.join(os.homedir(), ".nemoclaw", "sandboxes.json");
     const registryText = fs.existsSync(registryFile) ? fs.readFileSync(registryFile, "utf8") : "";
     expect(registryText).not.toContain(SANDBOX_NAME);
-    await artifacts.writeJson("target-result.json", {
+    await artifacts.target.complete({
       id: "gpu-double-onboard",
       status: "passed",
     });

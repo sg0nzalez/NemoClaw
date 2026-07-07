@@ -229,7 +229,7 @@ liveTest(
   async ({ artifacts, cleanup: cleanupRegistry, host, sandbox, secrets, skip }) => {
     const hosted = requireHostedInferenceConfig(secrets);
     const redactionValues = [hosted.apiKey];
-    await artifacts.writeJson("target.json", {
+    await artifacts.target.declare({
       id: "full-e2e",
       sandboxName: SANDBOX_NAME,
       endpointUrl: hosted.endpointUrl,
@@ -384,7 +384,7 @@ liveTest(
     const registryText = fs.existsSync(registry) ? fs.readFileSync(registry, "utf8") : "";
     expect(registryText).not.toContain(SANDBOX_NAME);
 
-    await artifacts.writeJson("target-result.json", {
+    await artifacts.target.complete({
       id: "full-e2e",
       securityPosture,
       status: "passed",

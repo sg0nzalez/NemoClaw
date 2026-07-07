@@ -17,6 +17,7 @@ import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
 import type { HostCliClient } from "../fixtures/clients/host.ts";
 import { type SandboxClient, validateSandboxName } from "../fixtures/clients/sandbox.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
+import { testHomeEnvironment } from "../fixtures/environment-profiles.ts";
 import { requireHostedInferenceConfig } from "../fixtures/hosted-inference.ts";
 import { shouldRunLiveE2E } from "../fixtures/live-project-gate.ts";
 import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
@@ -82,22 +83,11 @@ async function writePreContractExternalProviderSkip(
 ): Promise<void> {
   const evidence = buildPreContractExternalProviderSkipEvidence(install, classification);
   await artifacts.writeJson("transient-provider-validation.skip.json", evidence);
-  await artifacts.writeJson("target-result.json", evidence);
+  await artifacts.target.complete(evidence);
 }
 
 function testEnv(home: string, extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
-  const base = buildAvailabilityProbeEnv();
-  return {
-    ...base,
-    HOME: home,
-    PATH: [path.join(home, ".local", "bin"), path.join(home, ".npm-global", "bin"), base.PATH]
-      .filter(Boolean)
-      .join(":"),
-    NEMOCLAW_NON_INTERACTIVE: "1",
-    NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE: "1",
-    OPENSHELL_GATEWAY: "nemoclaw",
-    ...extra,
-  };
+  return testHomeEnvironment(home, extra, { ...process.env, OPENSHELL_GATEWAY: "nemoclaw" });
 }
 
 async function bestEffort(run: () => Promise<unknown>): Promise<void> {
@@ -243,9 +233,8 @@ test.skipIf(!shouldRunLiveE2E())(
       `missing sandbox skill validator: ${SANDBOX_SKILL_VALIDATOR}`,
     ).toBe(true);
 
-    await artifacts.writeJson("target.json", {
+    await artifacts.target.declare({
       id: "cloud-inference",
-      runner: "vitest",
       boundary: "install-sh-onboard-sandbox-inference-local-skill-filesystem",
       contracts: [
         "Docker is running before install/onboard",
@@ -339,7 +328,7 @@ test.skipIf(!shouldRunLiveE2E())(
         : "unknown";
     expect(sandboxSkillStatus, resultText(sandboxSkills)).not.toBe("unknown");
 
-    await artifacts.writeJson("target-result.json", {
+    await artifacts.target.complete({
       id: "cloud-inference",
       status: "passed",
       assertions: {

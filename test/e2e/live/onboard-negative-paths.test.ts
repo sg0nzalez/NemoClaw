@@ -101,9 +101,8 @@ liveTest(
     });
     await cleanupInvalidKeyState(host, sandboxName);
 
-    await artifacts.writeJson("target.json", {
+    await artifacts.target.declare({
       id: "onboard-invalid-nvidia-key",
-      runner: "vitest",
       boundary: "direct-cli-onboard",
       contract: [
         "invalid NVIDIA key exits non-zero",
@@ -134,7 +133,7 @@ liveTest(
     expect(text).toContain("Must start with nvapi-");
     expect(hasStackTrace(text), text).toBe(false);
 
-    await artifacts.writeJson("target-result.json", {
+    await artifacts.target.complete({
       id: "onboard-invalid-nvidia-key",
       exitCode: result.exitCode,
       assertions: {

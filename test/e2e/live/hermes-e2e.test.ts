@@ -244,9 +244,8 @@ test.skipIf(!shouldRunLiveE2E())(
     const hosted = requireHostedInferenceConfig(secrets);
     const apiKey = hosted.apiKey;
 
-    await artifacts.writeJson("target.json", {
+    await artifacts.target.declare({
       id: "hermes-e2e",
-      runner: "vitest",
       boundary: "install.sh --non-interactive --fresh + Hermes sandbox runtime",
       sandboxName: SANDBOX_NAME,
       dashboardEnabled: hermesDashboardE2eEnabled(),
@@ -1394,7 +1393,7 @@ test.skipIf(!shouldRunLiveE2E())(
       ).toBeUndefined();
     }
 
-    await artifacts.writeJson("target-result.json", {
+    await artifacts.target.complete({
       id: "hermes-e2e",
       assertions: {
         installShNonInteractiveHermes: true,
