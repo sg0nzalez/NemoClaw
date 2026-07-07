@@ -41,7 +41,9 @@ const legacySuccess = (): CurlProbeResult => ({
   message: "legacy",
 });
 
-function deps(legacyProbe: OpenAiValidationSessionDeps["legacyProbe"] = vi.fn(legacySuccess)) {
+function deps(
+  legacyProbe: OpenAiValidationSessionDeps["legacyProbe"] = vi.fn(legacySuccess),
+): OpenAiValidationSessionDeps {
   return {
     legacyProbe,
     hasResponsesToolCall: (body: string) => body.includes('"type":"function_call"'),
@@ -53,6 +55,7 @@ function deps(legacyProbe: OpenAiValidationSessionDeps["legacyProbe"] = vi.fn(le
     sessionOptions: {
       env: {},
       lookup: vi.fn(async () => [{ address: "127.0.0.1", family: 4 }]),
+      allowPrivateAddressesForTesting: true,
     },
   };
 }
@@ -91,7 +94,7 @@ describe("OpenAI validation keepalive sequence", () => {
       label: "Chat Completions API",
     });
     expect(harness.legacyProbe).not.toHaveBeenCalled();
-    expect(harness.sessionOptions.lookup).toHaveBeenCalledTimes(1);
+    expect(harness.sessionOptions!.lookup).toHaveBeenCalledTimes(1);
     expect(connections).toBe(1);
     expect(paths).toEqual(["/v1/responses", "/v1/chat/completions"]);
   });
@@ -223,7 +226,7 @@ describe("OpenAI validation keepalive sequence", () => {
 
     expect(result).toMatchObject({ ok: true, api: "openai-completions" });
     expect(legacyProbe).toHaveBeenCalledTimes(1);
-    expect(harness.sessionOptions.lookup).not.toHaveBeenCalled();
+    expect(harness.sessionOptions!.lookup).not.toHaveBeenCalled();
   });
 
   it("keeps query-parameter authentication out of request headers", async () => {

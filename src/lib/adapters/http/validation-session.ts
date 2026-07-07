@@ -5,6 +5,7 @@ import dns from "node:dns/promises";
 import http from "node:http";
 import https from "node:https";
 import net from "node:net";
+import { isPrivateHostname, isPrivateIp } from "../../private-networks";
 import { addTraceEvent, withTraceSpan } from "../../trace";
 import type { CurlProbeResult } from "./probe";
 import { summarizeProbeFailure } from "./probe";
@@ -31,6 +32,8 @@ export interface ValidationSessionOptions {
   lookup?: ValidationDnsLookup;
   onSocket?: (socket: net.Socket) => void;
   dnsTimeoutMs?: number;
+  /** @internal Allows local HTTP servers in transport unit tests. */
+  allowPrivateAddressesForTesting?: boolean;
 }
 
 const PROXY_ENV_NAMES = [
@@ -104,11 +107,13 @@ export function getValidationSessionIneligibility(
   if (parsed.username || parsed.password) return "embedded_credentials";
   if (parsed.search || parsed.hash) return "endpoint_query_or_fragment";
   if (net.isIP(parsed.hostname)) return "ip_literal";
-  if (parsed.hostname === "localhost" || parsed.hostname.endsWith(".localhost")) {
+  const hostname = parsed.hostname.replace(/\.$/, "").toLowerCase();
+  if (hostname === "localhost" || hostname.endsWith(".localhost")) {
     return "local_endpoint";
   }
-  if (parsed.hostname === "host.openshell.internal") return "sandbox_internal_endpoint";
-  if (parsed.hostname === "host.docker.internal") return "docker_internal_endpoint";
+  if (hostname === "host.openshell.internal") return "sandbox_internal_endpoint";
+  if (hostname === "host.docker.internal") return "docker_internal_endpoint";
+  if (isPrivateHostname(parsed.hostname)) return "private_endpoint";
   // Node's built-in agents do not implement forward-proxy tunnelling. Keep curl
   // authoritative whenever proxy routing may be part of endpoint reachability.
   if (configured(env, PROXY_ENV_NAMES) && !isNoProxyEndpoint(parsed, env)) {
@@ -194,6 +199,13 @@ export async function createValidationSession(
   }
   if (addresses.length === 0) {
     addTraceEvent("validation_transport_fallback", { reason: "dns_lookup_empty" });
+    return null;
+  }
+  if (
+    !options.allowPrivateAddressesForTesting &&
+    addresses.some(({ address }) => isPrivateIp(address))
+  ) {
+    addTraceEvent("validation_transport_fallback", { reason: "private_dns_address" });
     return null;
   }
 

@@ -198,9 +198,9 @@ async function requestWithHttpRetry(
 }
 
 function shouldUseLegacyForModel(model: string): boolean {
-  // DeepSeek V4 Pro uses a streaming Chat Completions probe with special
-  // timeout-continuation behavior. Keep that uncommon path on its established
-  // curl implementation until the streaming semantics are shared.
+  // Source of truth: onboard-probes.ts owns DeepSeek V4 Pro's streaming
+  // timeout-continuation behavior. Keep this model on that established curl
+  // path until those streaming semantics move into a shared typed helper.
   return model.toLowerCase() === "deepseek-ai/deepseek-v4-pro";
 }
 
@@ -256,6 +256,9 @@ export async function probeOpenAiLikeEndpointWithValidationSession(
           if (streamResult.curlStatus !== 0 && streamResult.curlStatus !== 28) {
             return nativeFailureFallback("native_streaming_failure");
           }
+          // Match onboard-probes.ts: a successful Responses payload without
+          // response.output_text.delta falls through to Chat Completions. This
+          // duplicate can be removed once both transports share event parsing.
           if (!events.has("response.output_text.delta")) {
             console.log(
               "  ℹ Responses API streaming response is missing required event: response.output_text.delta",

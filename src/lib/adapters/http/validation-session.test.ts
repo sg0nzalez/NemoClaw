@@ -48,6 +48,7 @@ describe("provider validation session", () => {
       env: {},
       lookup,
       onSocket: (socket) => sockets.push(socket),
+      allowPrivateAddressesForTesting: true,
     });
 
     expect(session).not.toBeNull();
@@ -96,6 +97,18 @@ describe("provider validation session", () => {
     expect(lookup).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    "127.0.0.1",
+    "10.0.0.1",
+  ])("falls back when DNS resolves to private address %s", async (address) => {
+    await expect(
+      createValidationSession("https://provider.example.test/v1", {
+        env: {},
+        lookup: async () => [{ address, family: 4 }],
+      }),
+    ).resolves.toBeNull();
+  });
+
   it("falls back before DNS pre-resolution when a proxy applies", async () => {
     const lookup = vi.fn();
 
@@ -119,6 +132,7 @@ describe("provider validation session", () => {
     const session = await createValidationSession(`http://provider.example.test:${port}/v1`, {
       env: {},
       lookup: async () => [{ address: "127.0.0.1", family: 4 }],
+      allowPrivateAddressesForTesting: true,
     });
 
     await expect(
@@ -140,6 +154,7 @@ describe("provider validation session", () => {
     const session = await createValidationSession(`http://provider.example.test:${port}/v1`, {
       env: {},
       lookup: async () => [{ address: "127.0.0.1", family: 4 }],
+      allowPrivateAddressesForTesting: true,
     });
 
     await expect(
@@ -170,6 +185,7 @@ describe("provider validation session", () => {
     const session = await createValidationSession(`http://provider.example.test:${port}/v1`, {
       env: {},
       lookup,
+      allowPrivateAddressesForTesting: true,
     });
 
     for (const path of ["responses", "chat/completions"]) {
@@ -193,6 +209,7 @@ describe("provider validation session", () => {
     const session = await createValidationSession(`http://provider.example.test:${port}/v1`, {
       env: {},
       lookup: async () => [{ address: "127.0.0.1", family: 4 }],
+      allowPrivateAddressesForTesting: true,
     });
 
     await expect(
@@ -232,10 +249,16 @@ describe("provider validation session", () => {
     expect(getValidationSessionIneligibility("http://localhost:8000/v1", {})).toBe(
       "local_endpoint",
     );
+    expect(getValidationSessionIneligibility("http://localhost.:8000/v1", {})).toBe(
+      "local_endpoint",
+    );
     expect(getValidationSessionIneligibility("http://host.openshell.internal/v1", {})).toBe(
       "sandbox_internal_endpoint",
     );
     expect(getValidationSessionIneligibility("http://host.docker.internal/v1", {})).toBe(
+      "docker_internal_endpoint",
+    );
+    expect(getValidationSessionIneligibility("http://host.docker.internal./v1", {})).toBe(
       "docker_internal_endpoint",
     );
   });
