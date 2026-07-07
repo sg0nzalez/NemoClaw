@@ -203,10 +203,12 @@ export async function preflightAuthoritativeOnboardRuntime(
   resumeConfig: RebuildResumeConfig,
   recreateOptions: RebuildRecreateOnboardOpts,
   bail: RebuildBail,
+  options: { deferInferenceRouteUntilOnboard?: true } = {},
 ): Promise<boolean> {
   try {
     await rebuildOnboardDependencies.preflightAuthoritativeRebuildTarget({
       ...recreateOptions,
+      ...options,
       model: resumeConfig.model,
       provider: resumeConfig.provider,
       sandboxName,
