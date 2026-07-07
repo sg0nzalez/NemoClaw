@@ -40,20 +40,25 @@ function normalizeTargetEvidence(
   }
 
   const record = { ...value } as Record<string, unknown>;
-  const singular = record.contract;
-  const plural = record.contracts;
-  if (singular !== undefined && plural !== undefined) {
-    throw new TypeError("target metadata must use either contract or contracts, not both");
-  }
-  const contracts = singular ?? plural;
-  if (contracts !== undefined) {
-    const normalized = typeof contracts === "string" ? [contracts] : contracts;
-    if (!Array.isArray(normalized) || normalized.some((contract) => typeof contract !== "string")) {
-      throw new TypeError("target contracts must be a string or an array of strings");
+  if (kind === "metadata") {
+    const singular = record.contract;
+    const plural = record.contracts;
+    if (singular !== undefined && plural !== undefined) {
+      throw new TypeError("target metadata must use either contract or contracts, not both");
     }
-    record.contracts = normalized;
+    const contracts = singular ?? plural;
+    if (contracts !== undefined) {
+      const normalized = typeof contracts === "string" ? [contracts] : contracts;
+      if (
+        !Array.isArray(normalized) ||
+        normalized.some((contract) => typeof contract !== "string")
+      ) {
+        throw new TypeError("target contracts must be a string or an array of strings");
+      }
+      record.contracts = normalized;
+    }
+    delete record.contract;
   }
-  delete record.contract;
   if (kind === "result") record.status ??= "passed";
   record.runner = "vitest";
   return record;

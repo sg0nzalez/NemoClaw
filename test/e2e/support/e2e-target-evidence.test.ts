@@ -32,6 +32,7 @@ describe("target evidence", () => {
       await artifacts.target.complete({
         id: "typed-target",
         assertionCount: 2,
+        contract: "result extension field",
       });
 
       expect(JSON.parse(fs.readFileSync(path.join(root, "target.json"), "utf8"))).toEqual({
@@ -44,6 +45,7 @@ describe("target evidence", () => {
         id: "typed-target",
         status: "passed",
         assertionCount: 2,
+        contract: "result extension field",
         runner: "vitest",
       });
     } finally {
