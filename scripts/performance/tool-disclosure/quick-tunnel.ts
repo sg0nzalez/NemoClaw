@@ -90,6 +90,22 @@ function stopChild(child: ChildProcess): Promise<void> {
   });
 }
 
+function readLogTail(file: string, maxBytes = 8_192): string {
+  let descriptor: number | undefined;
+  try {
+    descriptor = fs.openSync(file, "r");
+    const size = fs.fstatSync(descriptor).size;
+    const length = Math.min(size, maxBytes);
+    const buffer = Buffer.alloc(length);
+    fs.readSync(descriptor, buffer, 0, length, Math.max(0, size - length));
+    return buffer.toString("utf8");
+  } catch {
+    return "";
+  } finally {
+    if (descriptor !== undefined) fs.closeSync(descriptor);
+  }
+}
+
 async function probe(origin: string, fetchImpl: typeof fetch): Promise<boolean> {
   try {
     const response = await fetchImpl(`${origin}/mcp`, {
@@ -113,36 +129,34 @@ export async function startQuickTunnel(options: {
 }): Promise<QuickTunnel> {
   const args = buildQuickTunnelArgs(options.port);
   const isolatedHome = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-cloudflared-"));
+  const logFile = path.join(isolatedHome, "cloudflared.log");
   const removeIsolatedHome = (): void => fs.rmSync(isolatedHome, { recursive: true, force: true });
   let child: ChildProcess;
+  let logDescriptor: number | undefined;
   try {
+    logDescriptor = fs.openSync(logFile, "a");
     child = spawn(options.binary ?? "cloudflared", args, {
       detached: false,
       env: buildQuickTunnelEnvironment(options.env ?? process.env, isolatedHome),
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["ignore", logDescriptor, logDescriptor],
     });
   } catch (error) {
+    if (logDescriptor !== undefined) fs.closeSync(logDescriptor);
     removeIsolatedHome();
     throw error;
   }
+  if (logDescriptor !== undefined) fs.closeSync(logDescriptor);
   const timeoutMs = options.timeoutMs ?? 45_000;
   const fetchImpl = options.fetchImpl ?? fetch;
   let origin: string | null = null;
-  let carry = "";
   let spawnError: Error | undefined;
-  const inspect = (chunk: Buffer | string): void => {
-    const candidate = `${carry}${chunk.toString()}`;
-    origin = parseQuickTunnelOrigin(candidate) ?? origin;
-    carry = candidate.slice(-512);
-  };
-  child.stdout?.on("data", inspect);
-  child.stderr?.on("data", inspect);
   child.once("error", (error) => {
     spawnError = error;
   });
 
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
+    origin = parseQuickTunnelOrigin(readLogTail(logFile)) ?? origin;
     if (spawnError) break;
     if (child.exitCode !== null || child.signalCode !== null) break;
     if (origin && (await probe(origin, fetchImpl))) {

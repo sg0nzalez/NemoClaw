@@ -50,9 +50,25 @@
  *   TELEGRAM_CHAT_ID_E2E     — Telegram chat ID for optional sendMessage test
  */
 
-import { execFileSync, execSync, type StdioOptions, spawnSync } from "node:child_process";
+import {
+  type ChildProcess,
+  execFileSync,
+  execSync,
+  type StdioOptions,
+  spawn,
+  spawnSync,
+} from "node:child_process";
+import net from "node:net";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import {
+  type QuickTunnel,
+  startQuickTunnel,
+} from "../../scripts/performance/tool-disclosure/quick-tunnel";
+import {
+  PERFORMANCE_SMOKE_MCP_PORT_ENV,
+  PERFORMANCE_SMOKE_MCP_URL_ENV,
+} from "../../scripts/performance/tool-disclosure/smoke-mcp-transport";
 import { shellQuote } from "../../src/lib/core/shell-quote";
 import {
   BREV_MESSAGING_COMPAT_TIMEOUT_MS,
@@ -60,13 +76,15 @@ import {
   BREV_REMOTE_WRAPPER_GRACE_MS,
   BREV_SECURITY_SUITE_TIMEOUT_MS,
   BREV_TOOL_DISCLOSURE_PERFORMANCE_SMOKE_ARTIFACT_DIR,
+  BREV_TOOL_DISCLOSURE_PERFORMANCE_SMOKE_MCP_PORT,
   BREV_TOOL_DISCLOSURE_PERFORMANCE_SMOKE_SUITE,
   BREV_TOOL_DISCLOSURE_PERFORMANCE_SMOKE_TIMEOUT_MS,
   brevSuiteHarnessSandboxName,
   brevSuiteNeedsHarnessSandbox,
   brevWorkflowOwnsInstance,
-  buildBrevCloudflaredInstallCommands,
+  buildBrevMcpSshForwardArgs,
   buildBrevRemoteVitestCommand,
+  buildBrevSshForwardEnvironment,
 } from "../../tools/e2e/brev-remote-vitest.mts";
 
 // Instance configuration
@@ -124,9 +142,15 @@ const SETUP_SCRIPT_PATH = path.join(REPO_DIR, "scripts", "brev-launchable-ci-cpu
 // Sentinel file written by brev-launchable-ci-cpu.sh when setup is complete.
 // More reliable than grepping log files.
 const LAUNCHABLE_SENTINEL = "/var/run/nemoclaw-launchable-ready";
+const PERFORMANCE_SMOKE_MCP_PLACEHOLDER_PID_FILE =
+  "/tmp/nemoclaw-tool-disclosure-performance-mcp-placeholder.pid";
+const PERFORMANCE_SMOKE_MCP_PLACEHOLDER_LOG_FILE =
+  "/tmp/nemoclaw-tool-disclosure-performance-mcp-placeholder.log";
 
 let remoteDir = "";
 let instanceCreated = false;
+let performanceSmokeMcpForward: ChildProcess | undefined;
+let performanceSmokeMcpTunnel: QuickTunnel | undefined;
 
 const STREAM_STDIO: StdioOptions = ["inherit", "inherit", "inherit"];
 const CAPTURE_STDIO: StdioOptions = ["pipe", "pipe", "pipe"];
@@ -296,6 +320,9 @@ function sshEnv(
     envParts.push(`export NEMOCLAW_MODEL='${shellEscape(gpuE2eModel)}'`);
   }
   if (TOOL_DISCLOSURE_PERFORMANCE_SMOKE_SUITE) {
+    if (!performanceSmokeMcpTunnel) {
+      throw new Error("Brev performance smoke MCP tunnel is not ready");
+    }
     const testedSha = execFileSync("git", ["rev-parse", "HEAD"], {
       cwd: REPO_DIR,
       encoding: "utf8",
@@ -306,6 +333,8 @@ function sshEnv(
     envParts.push(
       `export E2E_ARTIFACT_DIR='${shellEscape(BREV_TOOL_DISCLOSURE_PERFORMANCE_SMOKE_ARTIFACT_DIR)}'`,
       `export GITHUB_SHA='${testedSha}'`,
+      `export ${PERFORMANCE_SMOKE_MCP_PORT_ENV}='${BREV_TOOL_DISCLOSURE_PERFORMANCE_SMOKE_MCP_PORT}'`,
+      `export ${PERFORMANCE_SMOKE_MCP_URL_ENV}='${shellEscape(performanceSmokeMcpTunnel.mcpUrl)}'`,
     );
   }
   // Forward optional messaging tokens for the messaging-providers test
@@ -786,13 +815,127 @@ function prepareGpuDockerRuntime(elapsed: () => string): void {
   console.log(`[${elapsed()}] NVIDIA Docker runtime ready`);
 }
 
-function prepareToolDisclosurePerformanceSmoke(elapsed: () => string): void {
-  console.log(`[${elapsed()}] Installing verified cloudflared prerequisite...`);
-  ssh(buildBrevCloudflaredInstallCommands().join(" && "), {
-    timeout: 180_000,
-    stream: true,
+function performanceSmokePlaceholderSource(): string {
+  return [
+    "from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer",
+    "class Handler(BaseHTTPRequestHandler):",
+    "    def do_HEAD(self):",
+    "        self.send_response(405)",
+    "        self.end_headers()",
+    "    def do_GET(self):",
+    "        self.send_response(405)",
+    "        self.end_headers()",
+    "    def log_message(self, format, *args):",
+    "        pass",
+    `ThreadingHTTPServer((\"127.0.0.1\", ${BREV_TOOL_DISCLOSURE_PERFORMANCE_SMOKE_MCP_PORT}), Handler).serve_forever()`,
+  ].join("\n");
+}
+
+function startPerformanceSmokeMcpPlaceholder(): void {
+  ssh(
+    [
+      "set -euo pipefail",
+      `rm -f ${PERFORMANCE_SMOKE_MCP_PLACEHOLDER_PID_FILE} ${PERFORMANCE_SMOKE_MCP_PLACEHOLDER_LOG_FILE}`,
+      `nohup python3 -c ${shellQuote(performanceSmokePlaceholderSource())} </dev/null >${PERFORMANCE_SMOKE_MCP_PLACEHOLDER_LOG_FILE} 2>&1 &`,
+      "placeholder_pid=$!",
+      `printf '%s\\n' \"$placeholder_pid\" >${PERFORMANCE_SMOKE_MCP_PLACEHOLDER_PID_FILE}`,
+      "sleep 1",
+      'kill -0 "$placeholder_pid"',
+    ].join("\n"),
+    { timeout: 15_000 },
+  );
+}
+
+function stopPerformanceSmokeMcpPlaceholder(): void {
+  ssh(
+    [
+      "set +e",
+      `if test -s ${PERFORMANCE_SMOKE_MCP_PLACEHOLDER_PID_FILE}; then`,
+      `placeholder_pid=\"$(cat ${PERFORMANCE_SMOKE_MCP_PLACEHOLDER_PID_FILE})\"`,
+      'kill "$placeholder_pid" 2>/dev/null',
+      "for attempt in 1 2 3 4 5; do",
+      'if ! kill -0 "$placeholder_pid" 2>/dev/null; then break; fi',
+      "sleep 1",
+      "done",
+      'kill -9 "$placeholder_pid" 2>/dev/null',
+      "fi",
+      `rm -f ${PERFORMANCE_SMOKE_MCP_PLACEHOLDER_PID_FILE}`,
+    ].join("\n"),
+    { timeout: 15_000 },
+  );
+}
+
+function reserveLoopbackPort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        server.close();
+        reject(new Error("failed to reserve a loopback port for the Brev MCP forward"));
+        return;
+      }
+      const port = address.port;
+      server.close((error) => (error ? reject(error) : resolve(port)));
+    });
   });
-  console.log(`[${elapsed()}] Verified cloudflared prerequisite ready`);
+}
+
+function canConnectLoopback(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = net.createConnection({ host: "127.0.0.1", port });
+    const finish = (connected: boolean): void => {
+      socket.removeAllListeners();
+      socket.destroy();
+      resolve(connected);
+    };
+    socket.setTimeout(500);
+    socket.once("connect", () => finish(true));
+    socket.once("error", () => finish(false));
+    socket.once("timeout", () => finish(false));
+  });
+}
+
+async function stopManagedChild(child: ChildProcess | undefined): Promise<void> {
+  if (!child || child.exitCode !== null || child.signalCode !== null) return;
+  const closed = new Promise<void>((resolve) => child.once("close", () => resolve()));
+  child.kill("SIGTERM");
+  await Promise.race([closed, new Promise((resolve) => setTimeout(resolve, 5_000))]);
+  if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+}
+
+async function startPerformanceSmokeSshForward(localPort: number): Promise<ChildProcess> {
+  const child = spawn("ssh", buildBrevMcpSshForwardArgs(requireInstanceName(), localPort), {
+    env: buildBrevSshForwardEnvironment(process.env),
+    stdio: ["ignore", "ignore", "inherit"],
+  });
+  const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null || child.signalCode !== null) {
+      throw new Error("Brev MCP SSH forward exited before readiness");
+    }
+    if (await canConnectLoopback(localPort)) return child;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  await stopManagedChild(child);
+  throw new Error("Brev MCP SSH forward did not become ready");
+}
+
+async function prepareToolDisclosurePerformanceSmoke(elapsed: () => string): Promise<void> {
+  console.log(`[${elapsed()}] Preparing runner-relayed MCP tunnel...`);
+  startPerformanceSmokeMcpPlaceholder();
+  const localPort = await reserveLoopbackPort();
+  try {
+    performanceSmokeMcpForward = await startPerformanceSmokeSshForward(localPort);
+    performanceSmokeMcpTunnel = await startQuickTunnel({ port: localPort, timeoutMs: 90_000 });
+  } catch (error) {
+    await stopManagedChild(performanceSmokeMcpForward);
+    performanceSmokeMcpForward = undefined;
+    stopPerformanceSmokeMcpPlaceholder();
+    throw error;
+  }
+  console.log(`[${elapsed()}] Runner-relayed MCP tunnel ready`);
 }
 
 /**
@@ -1123,7 +1266,7 @@ describe("Brev GPU runtime setup", () => {
 });
 
 describe.runIf(hasRequiredVars && hasAuthenticatedBrev)("Brev E2E", () => {
-  beforeAll(() => {
+  beforeAll(async () => {
     const bootstrapStart = Date.now();
     const elapsed = () => `${Math.round((Date.now() - bootstrapStart) / 1000)}s`;
 
@@ -1155,7 +1298,7 @@ describe.runIf(hasRequiredVars && hasAuthenticatedBrev)("Brev E2E", () => {
       remoteDir = result.remoteDir;
 
       if (TOOL_DISCLOSURE_PERFORMANCE_SMOKE_SUITE) {
-        prepareToolDisclosurePerformanceSmoke(elapsed);
+        await prepareToolDisclosurePerformanceSmoke(elapsed);
       }
 
       if (result.needsOnboard) {
@@ -1182,7 +1325,16 @@ describe.runIf(hasRequiredVars && hasAuthenticatedBrev)("Brev E2E", () => {
     console.log(`[${elapsed()}] beforeAll complete — total bootstrap time: ${elapsed()}`);
   }, 2_700_000); // 45 min
 
-  afterAll(() => {
+  afterAll(async () => {
+    if (performanceSmokeMcpTunnel) {
+      await performanceSmokeMcpTunnel.close();
+      performanceSmokeMcpTunnel = undefined;
+    }
+    await stopManagedChild(performanceSmokeMcpForward);
+    performanceSmokeMcpForward = undefined;
+    if (instanceCreated && TOOL_DISCLOSURE_PERFORMANCE_SMOKE_SUITE) {
+      stopPerformanceSmokeMcpPlaceholder();
+    }
     if (!instanceCreated) return;
     const keepAlive = process.env.KEEP_ALIVE === "true";
     const workflowOwnsInstance = brevWorkflowOwnsInstance();
@@ -1224,6 +1376,7 @@ describe.runIf(hasRequiredVars && hasAuthenticatedBrev)("Brev E2E", () => {
   it.runIf(TOOL_DISCLOSURE_PERFORMANCE_SMOKE_SUITE)(
     "tool-disclosure performance smoke passes on Brev CPU VM",
     () => {
+      stopPerformanceSmokeMcpPlaceholder();
       const output = runRemoteVitest(
         "e2e-live",
         "test/e2e/live/tool-disclosure-performance-smoke.test.ts",

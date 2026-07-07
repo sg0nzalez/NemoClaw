@@ -1,12 +1,16 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
   buildQuickTunnelArgs,
   buildQuickTunnelEnvironment,
   parseQuickTunnelOrigin,
+  startQuickTunnel,
 } from "../../scripts/performance/tool-disclosure/quick-tunnel";
 
 describe("tool-disclosure quick tunnel", () => {
@@ -59,5 +63,39 @@ describe("tool-disclosure quick tunnel", () => {
       "info",
     ]);
     expect(() => buildQuickTunnelArgs(0)).toThrow("between 1 and 65535");
+  });
+
+  it("discovers a tunnel origin from the bounded child log and closes the child", async () => {
+    const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-quick-tunnel-test-"));
+    const binary = path.join(fixture, "fake-cloudflared");
+    fs.writeFileSync(
+      binary,
+      [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+        "printf '%s\\n' 'INF Requesting new quick Tunnel https://log-backed-123.trycloudflare.com' >&2",
+        "trap 'exit 0' TERM INT",
+        "while :; do sleep 1; done",
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+
+    try {
+      const tunnel = await startQuickTunnel({
+        port: 31_337,
+        binary,
+        env: { PATH: process.env.PATH },
+        fetchImpl: (async (input) => {
+          expect(String(input)).toBe("https://log-backed-123.trycloudflare.com/mcp");
+          return new Response(null, { status: 405 });
+        }) as typeof fetch,
+        timeoutMs: 5_000,
+      });
+      expect(tunnel.mcpUrl).toBe("https://log-backed-123.trycloudflare.com/mcp");
+      await tunnel.close();
+    } finally {
+      fs.rmSync(fixture, { recursive: true, force: true });
+    }
   });
 });

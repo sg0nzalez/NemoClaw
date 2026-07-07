@@ -140,6 +140,9 @@ describe("Brev nightly workflow contract", () => {
 
   it("collects and scans Brev performance smoke evidence before deleting the VM", () => {
     const steps = branchValidation.jobs?.["e2e-branch-validation"]?.steps ?? [];
+    const prerequisite = steps.find(
+      (step) => step.name === "Install and verify Brev performance smoke tunnel prerequisite",
+    );
     const collect = steps.find(
       (step) => step.name === "Collect Brev tool-disclosure performance smoke artifacts",
     );
@@ -151,6 +154,13 @@ describe("Brev nightly workflow contract", () => {
     );
     const cleanup = steps.find((step) => step.name === "Delete Brev instance");
 
+    expect(prerequisite?.if).toContain("tool-disclosure-performance-smoke");
+    expect(prerequisite?.env).toEqual({
+      CLOUDFLARED_VERSION: "2026.6.1",
+      CLOUDFLARED_DEB_SHA256: "ccd02ec216c62bfa573395d8f72cb2e91e95cbdf8726a8acc06b3e2d9aa31526",
+    });
+    expect(prerequisite?.run).toContain("sha256sum -c -");
+    expect(prerequisite?.run).toContain("dpkg-deb -f");
     expect(collect?.if).toContain("tool-disclosure-performance-smoke");
     expect(collect?.run).toContain("/tmp/nemoclaw-tool-disclosure-performance-smoke-artifacts");
     expect(collect?.run).toContain("tar -C");

@@ -14,9 +14,7 @@ export const BREV_WORKFLOW_OWNERSHIP_ENV = "NEMOCLAW_BREV_WORKFLOW_OWNS_INSTANCE
 export const BREV_TOOL_DISCLOSURE_PERFORMANCE_SMOKE_SUITE = "tool-disclosure-performance-smoke";
 export const BREV_TOOL_DISCLOSURE_PERFORMANCE_SMOKE_ARTIFACT_DIR =
   "/tmp/nemoclaw-tool-disclosure-performance-smoke-artifacts";
-export const BREV_CLOUDFLARED_VERSION = "2026.6.1";
-export const BREV_CLOUDFLARED_DEB_SHA256 =
-  "ccd02ec216c62bfa573395d8f72cb2e91e95cbdf8726a8acc06b3e2d9aa31526";
+export const BREV_TOOL_DISCLOSURE_PERFORMANCE_SMOKE_MCP_PORT = 43_117;
 
 const BREV_SUITES_WITHOUT_HARNESS_SANDBOX = new Set([
   "all",
@@ -37,6 +35,47 @@ export function brevSuiteHarnessSandboxName(testSuite: string): string | undefin
 
 export function brevWorkflowOwnsInstance(env: NodeJS.ProcessEnv = process.env): boolean {
   return env[BREV_WORKFLOW_OWNERSHIP_ENV] === "1";
+}
+
+export function buildBrevSshForwardEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const selected: NodeJS.ProcessEnv = {};
+  for (const name of ["PATH", "HOME", "USER", "LOGNAME", "LANG"]) {
+    if (env[name] !== undefined) selected[name] = env[name];
+  }
+  for (const [name, value] of Object.entries(env)) {
+    if (name.startsWith("LC_") && value !== undefined) selected[name] = value;
+  }
+  return selected;
+}
+
+export function buildBrevMcpSshForwardArgs(instanceName: string, localPort: number): string[] {
+  if (!instanceName) throw new Error("Brev MCP SSH forward requires an instance name");
+  if (!Number.isInteger(localPort) || localPort < 1_024 || localPort > 65_535) {
+    throw new Error("Brev MCP SSH forward local port must be between 1024 and 65535");
+  }
+  return [
+    "-N",
+    "-T",
+    "-o",
+    "BatchMode=yes",
+    "-o",
+    "ForwardAgent=no",
+    "-o",
+    "StrictHostKeyChecking=no",
+    "-o",
+    "LogLevel=ERROR",
+    "-o",
+    "ExitOnForwardFailure=yes",
+    "-o",
+    "ConnectTimeout=15",
+    "-o",
+    "ServerAliveInterval=15",
+    "-o",
+    "ServerAliveCountMax=4",
+    "-L",
+    `127.0.0.1:${localPort}:127.0.0.1:${BREV_TOOL_DISCLOSURE_PERFORMANCE_SMOKE_MCP_PORT}`,
+    instanceName,
+  ];
 }
 
 export function buildBrevRemoteVitestCommand(project: BrevVitestProject, target: string): string {
@@ -61,18 +100,4 @@ export function buildBrevRemoteVitestCommand(project: BrevVitestProject, target:
     "test -x ./node_modules/.bin/vitest",
     `NEMOCLAW_RUN_LIVE_E2E=1 ${vitestCommand}`,
   ].join(" && ");
-}
-
-export function buildBrevCloudflaredInstallCommands(): string[] {
-  return [
-    "set -euo pipefail",
-    `cloudflared_deb=/tmp/cloudflared-${BREV_CLOUDFLARED_VERSION}-linux-amd64.deb`,
-    `curl -fL https://github.com/cloudflare/cloudflared/releases/download/${BREV_CLOUDFLARED_VERSION}/cloudflared-linux-amd64.deb -o \"$cloudflared_deb\"`,
-    `printf '%s  %s\\n' ${BREV_CLOUDFLARED_DEB_SHA256} \"$cloudflared_deb\" | sha256sum -c -`,
-    `test \"$(dpkg-deb -f \"$cloudflared_deb\" Package)\" = cloudflared`,
-    `test \"$(dpkg-deb -f \"$cloudflared_deb\" Version)\" = ${BREV_CLOUDFLARED_VERSION}`,
-    `test \"$(dpkg-deb -f \"$cloudflared_deb\" Architecture)\" = amd64`,
-    `sudo dpkg -i \"$cloudflared_deb\"`,
-    `cloudflared --version | grep -F 'cloudflared version ${BREV_CLOUDFLARED_VERSION}'`,
-  ];
 }

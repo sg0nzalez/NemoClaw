@@ -23,6 +23,10 @@ import { SyntheticMcpServer } from "../../../scripts/performance/tool-disclosure
 import { startQuickTunnel } from "../../../scripts/performance/tool-disclosure/quick-tunnel";
 import { createToolDisclosureRecordingProxy } from "../../../scripts/performance/tool-disclosure/recorder";
 import type { ToolDisclosureMode } from "../../../scripts/performance/tool-disclosure/schedule";
+import {
+  resolvePerformanceSmokeMcpTransport,
+  waitForPerformanceSmokeMcpEndpoint,
+} from "../../../scripts/performance/tool-disclosure/smoke-mcp-transport";
 import { generatePrimaryTaskSet } from "../../../scripts/performance/tool-disclosure/tasks";
 import { LOCAL_INFERENCE_TIMEOUT_SECS } from "../../../src/lib/onboard/env";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
@@ -120,6 +124,7 @@ test("tool disclosure hosted-inference performance smoke completes one frozen ta
   });
   const catalogPrefix = generateCatalogPrefix(catalog, CATALOG_SIZE);
   const primaryTasks = generatePrimaryTaskSet(catalog);
+  const mcpTransport = resolvePerformanceSmokeMcpTransport();
   const task = primaryTasks.tasks.find((candidate) => candidate.id === TASK_ID);
   expect(task, `frozen task ${TASK_ID} is missing`).toBeDefined();
   const frozenTask = task as NonNullable<typeof task>;
@@ -138,13 +143,27 @@ test("tool disclosure hosted-inference performance smoke completes one frozen ta
     catalog_size: CATALOG_SIZE,
     task_id: TASK_ID,
     model_id: hosted.model,
+    mcp_transport: mcpTransport.kind,
   });
 
   const mcp = new SyntheticMcpServer(catalogPrefix, bearerToken);
-  const mcpAddress = await mcp.start();
+  const mcpAddress = await mcp.start(
+    mcpTransport.kind === "external-ssh-forward" ? mcpTransport.listenPort : 0,
+  );
   cleanup.add("stop tool-disclosure performance synthetic MCP server", () => mcp.stop());
-  const tunnel = await startQuickTunnel({ port: mcpAddress.port });
-  cleanup.add("stop tool-disclosure performance MCP quick tunnel", () => tunnel.close());
+  const localTunnel =
+    mcpTransport.kind === "local-quick-tunnel"
+      ? await startQuickTunnel({ port: mcpAddress.port })
+      : undefined;
+  if (localTunnel) {
+    cleanup.add("stop tool-disclosure performance MCP quick tunnel", () => localTunnel.close());
+  }
+  const mcpUrl =
+    mcpTransport.kind === "external-ssh-forward" ? mcpTransport.mcpUrl : localTunnel?.mcpUrl;
+  expect(mcpUrl, "performance smoke MCP URL was not established").toBeDefined();
+  const configuredMcpUrl = mcpUrl as string;
+  artifacts.addRedactionValues([configuredMcpUrl]);
+  await waitForPerformanceSmokeMcpEndpoint(configuredMcpUrl);
 
   for (const mode of MODES) {
     const name = sandboxName(mode);
@@ -208,14 +227,14 @@ test("tool disclosure hosted-inference performance smoke completes one frozen ta
         "add",
         MCP_SERVER_NAME,
         "--url",
-        tunnel.mcpUrl,
+        configuredMcpUrl,
         "--env",
         MCP_TOKEN_ENV,
       ],
       {
         artifactName: `add-tool-disclosure-mcp-${mode}`,
         env: hostEnv({ [MCP_TOKEN_ENV]: bearerToken }),
-        redactionValues: [bearerToken],
+        redactionValues: [bearerToken, configuredMcpUrl],
         timeoutMs: 5 * 60_000,
       },
     );
@@ -552,12 +571,18 @@ test("tool disclosure hosted-inference performance smoke completes one frozen ta
       api: "openai-compatible",
       model_id: hosted.model,
     },
+    mcp_transport: mcpTransport.kind,
     results,
     limitations: [
       "This performance smoke test verifies live wiring and task completion; it is not the complete two-campaign performance test.",
       "One observation per mode is insufficient for performance or quality claims.",
       "The fixed progressive-then-direct order makes elapsed times informational and subject to cold-cache and ordering effects.",
       "The performance smoke test does not collect vLLM tokenizer, token-counter, or request-recorder evidence.",
+      ...(mcpTransport.kind === "external-ssh-forward"
+        ? [
+            "The MCP HTTPS endpoint is relayed through the CI runner over an authenticated SSH connection to the host-local synthetic server.",
+          ]
+        : []),
     ],
   });
 

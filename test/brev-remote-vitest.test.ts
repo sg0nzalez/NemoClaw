@@ -9,20 +9,20 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
-  BREV_CLOUDFLARED_DEB_SHA256,
-  BREV_CLOUDFLARED_VERSION,
   BREV_MESSAGING_COMPAT_TIMEOUT_MS,
   BREV_MESSAGING_PROVIDER_TIMEOUT_MS,
   BREV_REMOTE_WRAPPER_GRACE_MS,
   BREV_SECURITY_SUITE_TIMEOUT_MS,
+  BREV_TOOL_DISCLOSURE_PERFORMANCE_SMOKE_MCP_PORT,
   BREV_TOOL_DISCLOSURE_PERFORMANCE_SMOKE_SUITE,
   BREV_TOOL_DISCLOSURE_PERFORMANCE_SMOKE_TIMEOUT_MS,
   BREV_WORKFLOW_OWNERSHIP_ENV,
   brevSuiteHarnessSandboxName,
   brevSuiteNeedsHarnessSandbox,
   brevWorkflowOwnsInstance,
-  buildBrevCloudflaredInstallCommands,
+  buildBrevMcpSshForwardArgs,
   buildBrevRemoteVitestCommand,
+  buildBrevSshForwardEnvironment,
 } from "../tools/e2e/brev-remote-vitest.mts";
 
 const TARGET = "test/e2e/live/credential-sanitization.test.ts";
@@ -104,6 +104,7 @@ describe("Brev remote Vitest command", () => {
     expect(BREV_MESSAGING_PROVIDER_TIMEOUT_MS).toBe(70 * 60_000);
     expect(BREV_MESSAGING_COMPAT_TIMEOUT_MS).toBe(40 * 60_000);
     expect(BREV_TOOL_DISCLOSURE_PERFORMANCE_SMOKE_TIMEOUT_MS).toBe(55 * 60_000);
+    expect(BREV_TOOL_DISCLOSURE_PERFORMANCE_SMOKE_MCP_PORT).toBeGreaterThanOrEqual(1_024);
     expect(BREV_REMOTE_WRAPPER_GRACE_MS).toBe(120_000);
   });
 
@@ -112,6 +113,46 @@ describe("Brev remote Vitest command", () => {
     expect(brevWorkflowOwnsInstance({ NEMOCLAW_BREV_WORKFLOW_OWNS_INSTANCE: "1" })).toBe(true);
     expect(brevWorkflowOwnsInstance({ NEMOCLAW_BREV_WORKFLOW_OWNS_INSTANCE: "0" })).toBe(false);
     expect(brevWorkflowOwnsInstance({})).toBe(false);
+  });
+
+  it("keeps inference and workflow credentials out of the MCP SSH forward", () => {
+    expect(
+      buildBrevSshForwardEnvironment({
+        PATH: "/usr/bin",
+        HOME: "/home/runner",
+        LC_ALL: "C.UTF-8",
+        SSH_AUTH_SOCK: "/tmp/agent.sock",
+        NVIDIA_INFERENCE_API_KEY: "secret-inference-key",
+        GITHUB_TOKEN: "secret-workflow-token",
+      }),
+    ).toEqual({
+      PATH: "/usr/bin",
+      HOME: "/home/runner",
+      LC_ALL: "C.UTF-8",
+    });
+    expect(buildBrevMcpSshForwardArgs("e2e-performance-smoke", 45_123)).toEqual([
+      "-N",
+      "-T",
+      "-o",
+      "BatchMode=yes",
+      "-o",
+      "ForwardAgent=no",
+      "-o",
+      "StrictHostKeyChecking=no",
+      "-o",
+      "LogLevel=ERROR",
+      "-o",
+      "ExitOnForwardFailure=yes",
+      "-o",
+      "ConnectTimeout=15",
+      "-o",
+      "ServerAliveInterval=15",
+      "-o",
+      "ServerAliveCountMax=4",
+      "-L",
+      "127.0.0.1:45123:127.0.0.1:43117",
+      "e2e-performance-smoke",
+    ]);
   });
 
   it("does not seed shared harness state for suites that own their sandbox lifecycle", () => {
@@ -127,18 +168,6 @@ describe("Brev remote Vitest command", () => {
     expect(
       brevSuiteHarnessSandboxName(BREV_TOOL_DISCLOSURE_PERFORMANCE_SMOKE_SUITE),
     ).toBeUndefined();
-  });
-
-  it("installs the smoke tunnel prerequisite from an immutable reviewed package", () => {
-    const command = buildBrevCloudflaredInstallCommands().join("\n");
-
-    expect(command).toContain(BREV_CLOUDFLARED_VERSION);
-    expect(command).toContain(BREV_CLOUDFLARED_DEB_SHA256);
-    expect(command).toContain("sha256sum -c -");
-    expect(command).toContain("dpkg-deb -f");
-    expect(command).toContain("sudo dpkg -i");
-    expect(command).not.toContain("apt-get install");
-    expect(command).not.toContain("pkg.cloudflare.com");
   });
 
   it("preserves harness onboarding for single-target suites", () => {
