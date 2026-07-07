@@ -24,6 +24,10 @@ import {
   type SyntheticCatalog,
 } from "./catalog";
 import {
+  type CompositionalRoutingAcceptanceConfig,
+  runCompositionalRoutingAcceptance,
+} from "./compositional-tool-routing-run";
+import {
   type AttemptJournalEntry,
   type CampaignAttestation,
   executeCampaign,
@@ -58,7 +62,7 @@ import {
 import { validateCompleteEvidence, validateFrozenManifest } from "./validation";
 
 interface ParsedArguments {
-  command: "prepare" | "execute" | "summarize" | "help";
+  command: "prepare" | "execute" | "summarize" | "route-acceptance" | "help";
   outputDir?: string;
   sutRef: string;
   catalogSeed: string;
@@ -90,6 +94,7 @@ function usage(): string {
 Usage:\n\
   npm run performance:tool-disclosure -- prepare --output-dir <directory> [options]\n\
   npm run performance:tool-disclosure -- execute --output-dir <directory> --config <file>\n\
+  npm run performance:tool-disclosure -- route-acceptance --output-dir <directory> --config <file>\n\
   npm run performance:tool-disclosure -- summarize --output-dir <directory> [options]\n\n\
 Prepare options:\n\
   --sut-ref <git-ref>          SUT revision to resolve (default: HEAD)\n\
@@ -112,7 +117,12 @@ function requiredValue(args: readonly string[], index: number, flag: string): st
 function parseArguments(args: readonly string[]): ParsedArguments {
   const first = args[0];
   const command =
-    first === "prepare" || first === "execute" || first === "summarize" ? first : "help";
+    first === "prepare" ||
+    first === "execute" ||
+    first === "summarize" ||
+    first === "route-acceptance"
+      ? first
+      : "help";
   if (first && command === "help" && first !== "help" && first !== "--help" && first !== "-h") {
     throw new Error(`unknown command: ${first}`);
   }
@@ -153,8 +163,9 @@ function parseArguments(args: readonly string[]): ParsedArguments {
     } else throw new Error(`unknown option: ${flag}`);
   }
   if (parsed.command !== "help" && !parsed.outputDir) throw new Error("--output-dir is required");
-  if (parsed.command === "execute" && !parsed.configPath)
-    throw new Error("execute requires --config");
+  if (["execute", "route-acceptance"].includes(parsed.command) && !parsed.configPath) {
+    throw new Error(`${parsed.command} requires --config`);
+  }
   return parsed;
 }
 
@@ -705,6 +716,27 @@ async function execute(options: ParsedArguments): Promise<void> {
   });
 }
 
+async function routeAcceptance(options: ParsedArguments): Promise<void> {
+  const outputDir = ensureCampaignDirectory(
+    path.resolve(options.outputDir as string),
+    options.resume,
+  );
+  const config = readJson<CompositionalRoutingAcceptanceConfig>(
+    path.resolve(options.configPath as string),
+  );
+  const output = await runCompositionalRoutingAcceptance(config);
+  const artifactName = "compositional-routing-acceptance.json";
+  writeJsonArtifact(outputDir, artifactName, output);
+  scanArtifactsForForbiddenValues(outputDir, [artifactName], options.forbiddenValues);
+  writeChecksumManifest(outputDir, [artifactName]);
+  process.stdout.write(
+    `Compositional routing acceptance ${output.acceptance_passed ? "passed" : "failed"}.\n`,
+  );
+  if (!output.acceptance_passed) {
+    throw new Error("compositional routing acceptance gates did not pass");
+  }
+}
+
 export async function main(args = process.argv.slice(2)): Promise<void> {
   const options = parseArguments(args);
   if (options.command === "help") {
@@ -713,6 +745,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   }
   if (options.command === "prepare") prepare(options);
   else if (options.command === "execute") await execute(options);
+  else if (options.command === "route-acceptance") await routeAcceptance(options);
   else summarize(options);
 }
 

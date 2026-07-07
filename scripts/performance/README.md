@@ -57,6 +57,41 @@ The summarizer writes `summary.json`, `report.md`, `evidence.json`, and
 blocked unless the required confidence-interval gate passes for every agent in
 both campaigns.
 
+The same package includes a test-scoped independent compositional tool routing
+experiment. It runs two-pass atomic decomposition, normalized exact
+inner-product retrieval, and a bounded tool-hint refinement. Integration tests
+exercise its request-transform contract through the recorder while leaving the
+caller-owned executor registry unchanged. The transform is not enabled in the
+frozen direct/progressive campaign. Run its deterministic CPU acceptance suite
+with:
+
+```bash
+npx vitest run --project integration \
+  test/performance/tool-disclosure-compositional-*.test.ts \
+  test/performance/tool-disclosure-recorder.test.ts
+```
+
+Those tests prove routing mechanics and strict route-quality gates with frozen
+decomposition inputs. They do not establish a model-level decomposition
+improvement. The full protocol explains the separate paired initial/refined
+evidence required for that result.
+
+The explicit live smoke also runs a separate routed replay after its frozen
+direct/progressive cells. That replay must preserve task correctness and the
+expected tool call while reducing model-visible schemas without fallback. It
+does not alter either frozen cell and remains claim-ineligible.
+
+Run the route-only corpus with a real decomposer using:
+
+```bash
+npm run performance:tool-disclosure -- route-acceptance \
+  --output-dir <empty-output-directory> \
+  --config <private-routing-config.json>
+```
+
+The protocol documents the private config, semantic and portable embedding
+options, public-safe output, remote-content boundary, and strict exit gates.
+
 See the [progressive tool-disclosure performance-test protocol](../../docs/inference/progressive-tool-disclosure-performance-test.mdx)
 for the hardware-neutral workflow, recorder topology, artifact rules, claim
 gates, and limitations.

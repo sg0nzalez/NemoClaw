@@ -92,6 +92,8 @@ export interface ToolDisclosureRecordingEvent {
 
 export interface RecordingProxyOptions {
   upstreamBaseUrl: string;
+  /** Explicitly allow a credential-free non-loopback HTTPS upstream. */
+  allowRemoteHttpsUpstream?: boolean;
   /** Must be exactly 127.0.0.1. Exposed so unsafe configuration fails closed. */
   listenHost?: string;
   /** Zero selects an ephemeral port. */
@@ -99,7 +101,29 @@ export interface RecordingProxyOptions {
   maxRequestBodyBytes?: number;
   requestTimeoutMs?: number;
   requiredTemperature?: number;
+  requestTransform?: RecordingProxyRequestTransform;
 }
+
+/**
+ * Private request content supplied only to an opt-in transform invocation.
+ *
+ * The body is a defensive copy and is never retained by the proxy. Transform
+ * implementations must likewise avoid logging or retaining it. Public evidence
+ * continues to contain only the content-free metrics derived after transformation.
+ */
+export interface RecordingProxyTransformInput {
+  readonly runId: string | null;
+  readonly endpoint: RecorderEndpoint;
+  readonly method: RecorderMethod;
+  readonly modelCallSequence: number | null;
+  readonly body: Buffer;
+  readonly signal: AbortSignal;
+}
+
+/** Return the complete request body to forward upstream. */
+export type RecordingProxyRequestTransform = (
+  input: RecordingProxyTransformInput,
+) => Buffer | Promise<Buffer>;
 
 export interface RecordingProxyAddress {
   host: typeof LOOPBACK_HOST;
@@ -148,8 +172,10 @@ interface ActiveRun {
 
 interface ForwardContext {
   bodyComplete: boolean;
+  transformComplete: boolean;
   cancelled: boolean;
   timedOut: boolean;
+  abortController: AbortController;
   upstreamRequest: http.ClientRequest | null;
 }
 
@@ -171,7 +197,7 @@ function validatePositiveInteger(value: number, label: string): void {
   }
 }
 
-function parseUpstreamBaseUrl(value: string): URL {
+function parseUpstreamBaseUrl(value: string, allowRemoteHttpsUpstream: boolean): URL {
   let url: URL;
   try {
     url = new URL(value);
@@ -188,8 +214,11 @@ function parseUpstreamBaseUrl(value: string): URL {
     hostname === "localhost" ||
     hostname === "::1" ||
     (isIP(hostname) === 4 && hostname.startsWith("127."));
-  if (!loopback) {
+  if (!loopback && !allowRemoteHttpsUpstream) {
     throw new Error("upstreamBaseUrl is allowed only on loopback");
+  }
+  if (!loopback && url.protocol !== "https:") {
+    throw new Error("a remote recording upstream must use HTTPS");
   }
   if (url.username || url.password) {
     throw new Error("upstreamBaseUrl must not contain credentials");
@@ -385,6 +414,7 @@ export class ToolDisclosureRecordingProxy {
   private readonly maxRequestBodyBytes: number;
   private readonly requestTimeoutMs: number;
   private readonly requiredTemperature: number | undefined;
+  private readonly requestTransform: RecordingProxyRequestTransform | undefined;
   private readonly clock: () => number;
   private readonly sockets = new Set<Socket>();
   private readonly events: ToolDisclosureRecordingEvent[] = [];
@@ -406,12 +436,16 @@ export class ToolDisclosureRecordingProxy {
     validatePositiveInteger(maxRequestBodyBytes, "maxRequestBodyBytes");
     validatePositiveInteger(requestTimeoutMs, "requestTimeoutMs");
 
-    this.upstream = parseUpstreamBaseUrl(options.upstreamBaseUrl);
+    this.upstream = parseUpstreamBaseUrl(
+      options.upstreamBaseUrl,
+      options.allowRemoteHttpsUpstream === true,
+    );
     this.listenHost = listenHost;
     this.configuredPort = port;
     this.maxRequestBodyBytes = maxRequestBodyBytes;
     this.requestTimeoutMs = requestTimeoutMs;
     this.requiredTemperature = options.requiredTemperature;
+    this.requestTransform = options.requestTransform;
     this.clock = () => performance.now();
   }
 
@@ -609,6 +643,30 @@ export class ToolDisclosureRecordingProxy {
     return target;
   }
 
+  private async transformRequestBody(
+    body: Buffer,
+    pending: PendingRecording | null,
+    endpoint: RecorderEndpoint,
+    method: RecorderMethod,
+    signal: AbortSignal,
+  ): Promise<Buffer> {
+    if (!this.requestTransform) return body;
+    const transformed = await this.requestTransform({
+      runId: pending?.runId ?? null,
+      endpoint,
+      method,
+      modelCallSequence: pending?.modelCallSequence ?? null,
+      body: Buffer.from(body),
+      signal,
+    });
+    if (!Buffer.isBuffer(transformed)) {
+      throw new TypeError("recording proxy request transform must return a Buffer");
+    }
+    // Detach forwarding from any reference retained by the transform so later
+    // mutation cannot alter the bytes inspected, recorded, or sent upstream.
+    return Buffer.from(transformed);
+  }
+
   private async handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
     let incoming: URL;
     try {
@@ -627,10 +685,16 @@ export class ToolDisclosureRecordingProxy {
     const pending = this.reserveRecording(endpoint, method);
     const context: ForwardContext = {
       bodyComplete: false,
+      transformComplete: false,
       cancelled: false,
       timedOut: false,
+      abortController: new AbortController(),
       upstreamRequest: null,
     };
+    request.once("aborted", () => context.abortController.abort());
+    response.once("close", () => {
+      if (!response.writableEnded) context.abortController.abort();
+    });
 
     const declaredLength = Number(request.headers["content-length"]);
     if (Number.isFinite(declaredLength) && declaredLength > this.maxRequestBodyBytes) {
@@ -647,20 +711,22 @@ export class ToolDisclosureRecordingProxy {
     const timer = setTimeout(() => {
       context.cancelled = true;
       context.timedOut = true;
+      context.abortController.abort();
       if (context.upstreamRequest) {
         context.upstreamRequest.destroy();
         return;
       }
-      const statusCode = context.bodyComplete ? 504 : 408;
+      const waitingForUpstream = context.bodyComplete && context.transformComplete;
+      const statusCode = waitingForUpstream ? 504 : 408;
       fixedResponse(
         response,
         statusCode,
-        context.bodyComplete ? "upstream timeout" : "request timeout",
+        waitingForUpstream ? "upstream timeout" : "request timeout",
       );
       this.finalizeRecording(pending, {
         statusCode,
-        outcome: context.bodyComplete ? "upstream-timeout" : "request-rejected",
-        errorReason: context.bodyComplete ? "upstream-timeout" : "request-timeout",
+        outcome: waitingForUpstream ? "upstream-timeout" : "request-rejected",
+        errorReason: waitingForUpstream ? "upstream-timeout" : "request-timeout",
       });
       request.destroy();
     }, this.requestTimeoutMs);
@@ -688,13 +754,31 @@ export class ToolDisclosureRecordingProxy {
         return;
       }
 
-      let forwardedBody = bodyResult.body;
-      if (pending) pending.metrics = inspectTools(forwardedBody);
+      let forwardedBody = await this.transformRequestBody(
+        bodyResult.body,
+        pending,
+        endpoint,
+        method,
+        context.abortController.signal,
+      );
+      context.transformComplete = true;
+      if (context.cancelled) return;
+      if (forwardedBody.length > this.maxRequestBodyBytes) {
+        fixedResponse(response, 413, "request body too large");
+        this.finalizeRecording(pending, {
+          statusCode: 413,
+          outcome: "request-rejected",
+          errorReason: "request-body-too-large",
+        });
+        return;
+      }
+      let forwardedMetrics = inspectTools(forwardedBody);
+      if (pending) pending.metrics = forwardedMetrics;
       if (
         pending?.modelCallSequence != null &&
         this.requiredTemperature !== undefined &&
-        pending.metrics.temperature !== null &&
-        pending.metrics.temperature !== this.requiredTemperature
+        forwardedMetrics.temperature !== null &&
+        forwardedMetrics.temperature !== this.requiredTemperature
       ) {
         fixedResponse(response, 400, "performance test temperature mismatch");
         this.finalizeRecording(pending, {
@@ -707,11 +791,22 @@ export class ToolDisclosureRecordingProxy {
       if (
         pending?.modelCallSequence != null &&
         this.requiredTemperature !== undefined &&
-        pending.metrics.temperature === null
+        forwardedMetrics.temperature === null
       ) {
         const payload = JSON.parse(forwardedBody.toString("utf8")) as Record<string, unknown>;
         payload.temperature = this.requiredTemperature;
         forwardedBody = Buffer.from(JSON.stringify(payload), "utf8");
+        if (forwardedBody.length > this.maxRequestBodyBytes) {
+          fixedResponse(response, 413, "request body too large");
+          this.finalizeRecording(pending, {
+            statusCode: 413,
+            outcome: "request-rejected",
+            errorReason: "request-body-too-large",
+          });
+          return;
+        }
+        forwardedMetrics = inspectTools(forwardedBody);
+        if (pending) pending.metrics = forwardedMetrics;
       }
       await this.forwardRequest(
         request,

@@ -10,12 +10,19 @@ import {
   generateSyntheticCatalog,
 } from "../../../scripts/performance/tool-disclosure/catalog";
 import {
+  createOpenAIChatTaskDecomposer,
+  PortableHashingTextEmbedder,
+} from "../../../scripts/performance/tool-disclosure/compositional-tool-routing-adapters";
+import { runCompositionalRoutingAcceptance } from "../../../scripts/performance/tool-disclosure/compositional-tool-routing-run";
+import { CompositionalToolRoutingTransform } from "../../../scripts/performance/tool-disclosure/compositional-tool-routing-transform";
+import {
   buildAgentDriverCommand,
   extractFinalAssistantOutput,
 } from "../../../scripts/performance/tool-disclosure/drivers";
 import { gradeTaskRun } from "../../../scripts/performance/tool-disclosure/grading";
 import { SyntheticMcpServer } from "../../../scripts/performance/tool-disclosure/mcp-server";
 import { startQuickTunnel } from "../../../scripts/performance/tool-disclosure/quick-tunnel";
+import { createToolDisclosureRecordingProxy } from "../../../scripts/performance/tool-disclosure/recorder";
 import type { ToolDisclosureMode } from "../../../scripts/performance/tool-disclosure/schedule";
 import { generatePrimaryTaskSet } from "../../../scripts/performance/tool-disclosure/tasks";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
@@ -63,6 +70,28 @@ test.skipIf(!shouldRunLiveE2E())(
     const hosted = requireHostedInferenceConfig(secrets);
     const bearerToken = randomBytes(32).toString("hex");
     artifacts.addRedactionValues([hosted.apiKey, bearerToken]);
+
+    const routingCredentialEnv = "NEMOCLAW_COMPOSITIONAL_ROUTING_SMOKE_API_KEY";
+    const previousRoutingCredential = process.env[routingCredentialEnv];
+    process.env[routingCredentialEnv] = hosted.apiKey;
+    let routingAcceptance: Awaited<ReturnType<typeof runCompositionalRoutingAcceptance>>;
+    try {
+      routingAcceptance = await runCompositionalRoutingAcceptance({
+        decomposer: {
+          base_url: hosted.endpointUrl,
+          model: hosted.model,
+          revision: process.env.NEMOCLAW_MODEL_REVISION?.trim() || "unreported",
+          api_key_env: routingCredentialEnv,
+          allow_remote: true,
+        },
+        embedding: { kind: "portable" },
+      });
+    } finally {
+      if (previousRoutingCredential === undefined) delete process.env[routingCredentialEnv];
+      else process.env[routingCredentialEnv] = previousRoutingCredential;
+    }
+    await artifacts.writeJson("compositional-routing-acceptance.json", routingAcceptance);
+    expect(routingAcceptance.acceptance_passed).toBe(true);
 
     const catalog = generateSyntheticCatalog({
       seed: DEFAULT_SYNTHETIC_PERFORMANCE_TEST_CATALOG_SEED,
@@ -219,6 +248,165 @@ test.skipIf(!shouldRunLiveE2E())(
         correctness: graded.correctness,
       });
     }
+
+    const routedRunId = `performance-smoke-${AGENT}-compositional-${TASK_ID}`;
+    const routedToolNames = new Set(
+      catalogPrefix.tools.map((tool) => `${MCP_SERVER_NAME}_${tool.definition.function.name}`),
+    );
+    const expectedRoutedToolName = `${MCP_SERVER_NAME}_${task.expected_calls[0]?.tool_name ?? ""}`;
+    if (!routedToolNames.has(expectedRoutedToolName)) {
+      throw new Error("the routed replay target is not present in the reviewed catalog");
+    }
+    const routedTransform = new CompositionalToolRoutingTransform({
+      decomposer: createOpenAIChatTaskDecomposer({
+        baseUrl: hosted.endpointUrl,
+        model: hosted.model,
+        apiKey: hosted.apiKey,
+        allowRemote: true,
+      }),
+      embedder: new PortableHashingTextEmbedder(),
+      isRoutableTool: (name) => routedToolNames.has(name),
+      requireRouting: true,
+    });
+    const routedProxy = createToolDisclosureRecordingProxy({
+      upstreamBaseUrl: hosted.endpointUrl,
+      allowRemoteHttpsUpstream: true,
+      requestTransform: routedTransform.requestTransform,
+    });
+    const routedProxyAddress = await routedProxy.start();
+    cleanup.add("stop compositional routing recording proxy", () => routedProxy.stop());
+
+    const configureInferenceRoute = async (baseUrl: string, artifactSuffix: string) => {
+      const update = await host.command(
+        "openshell",
+        [
+          "provider",
+          "update",
+          hosted.providerName,
+          "--credential",
+          hosted.credentialEnv,
+          "--config",
+          `OPENAI_BASE_URL=${baseUrl}`,
+        ],
+        {
+          artifactName: `compositional-routing-provider-${artifactSuffix}`,
+          env: hostEnv(hosted.env),
+          redactionValues: [hosted.apiKey],
+          timeoutMs: 2 * 60_000,
+        },
+      );
+      expect(update.exitCode, resultText(update)).toBe(0);
+      const select = await host.command(
+        "openshell",
+        [
+          "inference",
+          "set",
+          "--no-verify",
+          "--provider",
+          hosted.providerName,
+          "--model",
+          hosted.model,
+        ],
+        {
+          artifactName: `compositional-routing-select-${artifactSuffix}`,
+          env: hostEnv(hosted.env),
+          redactionValues: [hosted.apiKey],
+          timeoutMs: 2 * 60_000,
+        },
+      );
+      expect(select.exitCode, resultText(select)).toBe(0);
+    };
+
+    let routedReplay: Record<string, unknown> | undefined;
+    let routeMutationAttempted = false;
+    try {
+      routeMutationAttempted = true;
+      await configureInferenceRoute(`${routedProxyAddress.base_url}/v1`, "enable");
+      const driver = buildAgentDriverCommand({
+        openshellBin: process.env.OPENSHELL_BIN,
+        sandboxName: sandboxName("direct"),
+        agent: AGENT,
+        prompt: task.prompt,
+        sessionId: routedRunId,
+      });
+      mcp.beginRun(routedRunId);
+      routedProxy.beginRun(routedRunId);
+      const startedAt = process.hrtime.bigint();
+      let invocation;
+      let calls;
+      let recorderEvents;
+      try {
+        invocation = await host.command(driver.command, driver.args, {
+          artifactName: "invoke-tool-disclosure-compositional",
+          env: hostEnv(),
+          redactionValues: [...driver.redactions, hosted.apiKey, bearerToken],
+          timeoutMs: 10 * 60_000,
+        });
+      } finally {
+        calls = mcp.endRun();
+        recorderEvents = routedProxy.endRun();
+      }
+      const elapsedMs = Number((process.hrtime.bigint() - startedAt) / 1_000_000n);
+      const routeEvidence = await routedTransform.consumeEvidence(routedRunId);
+      const finalOutput = extractFinalAssistantOutput(AGENT, invocation.stdout);
+      const graded = gradeTaskRun(task, calls, finalOutput);
+      const outcome = invocation.timedOut
+        ? "timeout"
+        : invocation.exitCode === 0
+          ? graded.outcome
+          : "model-error";
+      routedReplay = {
+        schema_version: "nemoclaw.compositional_tool_routing_agent_smoke.v1",
+        generated_at: new Date().toISOString(),
+        claim_eligible: false,
+        run_id: routedRunId,
+        outcome,
+        invocation: {
+          exit_code: invocation.exitCode,
+          timed_out: invocation.timedOut,
+          elapsed_ms: elapsedMs,
+        },
+        synthetic_call_count: calls.length,
+        correctness: graded.correctness,
+        expected_routed_tool_name: expectedRoutedToolName,
+        route_evidence: routeEvidence,
+        recorder_events: recorderEvents,
+        limitations: [
+          "This single routed replay is an end-to-end wiring check, not a performance or quality claim.",
+          "The portable lexical embedder is used only for an ordinary-runner smoke path.",
+          "The routed replay is separate from the frozen direct/progressive comparison.",
+        ],
+      };
+    } finally {
+      if (routeMutationAttempted) {
+        await configureInferenceRoute(hosted.endpointUrl, "restore");
+      }
+    }
+
+    await artifacts.writeJson("compositional-routing-agent-smoke.json", routedReplay);
+    expect(routedReplay).toBeDefined();
+    const replay = routedReplay as {
+      outcome: string;
+      correctness: { task_success: boolean };
+      synthetic_call_count: number;
+      route_evidence: Awaited<ReturnType<typeof routedTransform.consumeEvidence>>;
+      recorder_events: Array<{
+        model_call_sequence: number | null;
+        visible_tool_count: number;
+      }>;
+    };
+    expect(replay.outcome).toBe("success");
+    expect(replay.correctness.task_success).toBe(true);
+    expect(replay.synthetic_call_count).toBe(1);
+    expect(replay.route_evidence.length).toBeGreaterThan(0);
+    const [firstRoute] = replay.route_evidence;
+    expect(firstRoute.routing.fallback).toBeNull();
+    expect(firstRoute.transform_bypass).toBeNull();
+    expect(firstRoute.routable_tool_count).toBe(CATALOG_SIZE);
+    expect(firstRoute.forwarded_tool_count).toBeLessThan(firstRoute.source_tool_count);
+    expect(firstRoute.routing.selected_tool_names).toContain(expectedRoutedToolName);
+    const firstModelEvent = replay.recorder_events.find((event) => event.model_call_sequence === 1);
+    expect(firstModelEvent?.visible_tool_count).toBe(firstRoute.forwarded_tool_count);
 
     await artifacts.writeJson("tool-disclosure-performance-smoke.json", {
       schema_version: "nemoclaw.tool_disclosure_performance_smoke.v1",

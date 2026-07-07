@@ -18,8 +18,86 @@ Run both campaigns and retain their evidence before you make a performance or qu
 </Note>
 
 The explicit-only `tool-disclosure-performance-smoke` E2E job is a smaller operational check for ordinary GitHub-hosted runners.
-It runs one frozen task in progressive and direct modes with fresh Deep Agents sandboxes and hosted inference.
+It runs the route-only acceptance corpus, one frozen task in progressive and direct modes with fresh Deep Agents sandboxes, and a separate routed replay of that task through the request transformer.
 Its output validates live wiring only: it is not a complete campaign, cannot be summarized by this protocol, and does not support performance claims.
+
+## Exercise the compositional routing experiment
+
+The performance-test package also contains a test-scoped, independently implemented compositional tool router.
+It is an experimental reference path, not a new NemoClaw runtime mode.
+Enabling it in tests does not change the meaning of the existing `direct` or `progressive` modes.
+
+The implementation performs these steps:
+
+1. Ask an injected decomposer for an ordered list of atomic actions.
+2. L2-normalize tool and action embeddings, then perform deterministic exact inner-product retrieval.
+3. Merge the first-pass candidates into at most `12` tool-name hints.
+4. Ask the decomposer to refine the action boundaries with those hints.
+5. Retrieve the top `10` candidates per refined action, select a bounded ordered tool set, and filter only the schemas forwarded in a copied model request.
+
+The tested request-transform contract leaves the caller-owned executor and policy registry unchanged.
+Its integration tests verify that only the copied model request is filtered and that the recording proxy measures the transformed schemas.
+This transform is not installed in the frozen direct/progressive campaign.
+Malformed decomposition, embedding, or routing results fail open to the original unfiltered request, and the route records counts, safe tool names, fallback class, and timings without retaining prompts or subtask text.
+
+The model adapters support an OpenAI-compatible chat decomposer and an OpenAI-compatible semantic embeddings endpoint.
+Record the exact embedding model and revision for any measured run.
+The dependency-free hashing adapter is only for deterministic tests and portable smoke checks; it is lexical and is not a substitute for a recorded semantic retrieval model.
+
+Run the deterministic routing acceptance suite on an ordinary CPU runner:
+
+```bash
+npx vitest run --project integration \
+  test/performance/tool-disclosure-compositional-*.test.ts \
+  test/performance/tool-disclosure-recorder.test.ts
+```
+
+Run the same route-only acceptance corpus with a real OpenAI-compatible decomposer by creating a private configuration file:
+
+```json
+{
+  "decomposer": {
+    "base_url": "https://models.example/v1",
+    "model": "recorded-decomposer-model",
+    "revision": "immutable-model-revision",
+    "api_key_env": "MODEL_API_KEY",
+    "allow_remote": true
+  },
+  "embedding": {
+    "kind": "portable",
+    "dimensions": 1024
+  }
+}
+```
+
+Then run:
+
+```bash
+npm run performance:tool-disclosure -- route-acceptance \
+  --output-dir <empty-output-directory> \
+  --config <private-routing-config.json>
+```
+
+The command writes `compositional-routing-acceptance.json` and `SHA256SUMS`, exits nonzero when a strict gate fails, and never writes endpoint URLs, credentials, prompts, or decomposed subtask text.
+The portable embedding mode is a CPU smoke path and is always claim-ineligible.
+For a semantic retrieval run, set `embedding.kind` to `openai` and provide its `base_url`, `model`, immutable `revision`, optional `api_key_env`, and remote opt-in.
+Remote opt-in sends the acceptance prompts and synthetic tool metadata to the configured HTTPS services; HTTP is accepted only on loopback.
+
+The route-only corpus contains `20` distinct tools and eight implicit requests spanning zero through five required capabilities.
+Its strict gates require every route to complete without fallback, exact decomposition count, decomposition within one step, exact tool recall at `1` and `10`, ordered-chain forwarding, forwarded-schema count, and no-tool behavior.
+Passthrough is evaluated as forwarding all `20` schemas, so a failed-open no-tool route cannot be scored as a successful empty route.
+The deterministic suite holds decomposition fixed, so passing it proves the router, retriever, transformer, evidence, and fallback contracts; it does not prove that tool hints improve a real model's decomposition.
+
+For a model-level evaluation, record a paired initial-versus-one-refinement run on the same implicit corpus and report decomposition and embedding usage separately alongside decomposition accuracy, decomposition within one step, exact recall at `1` and `10`, ordered-chain selection, selected-schema count, tokens, and latency.
+Then use the existing agent performance test below for execution success, arguments, ordering, schema tokens, and end-to-end latency.
+Treat latency as a measurement rather than an acceptance gate because the refinement adds a second decomposition call.
+
+This experiment routes callable tool schemas in its own synthetic corpus.
+It does not implement or claim a dependency-graph planner or compatibility composer.
+The route-only command does not execute an agent or a tool; use the full performance procedure below to validate task execution and end-to-end behavior.
+It also does not install the router into the frozen direct/progressive campaign.
+The opt-in smoke job exercises the transform in one separate, claim-ineligible agent replay and requires successful task execution, the expected tool call, no routing fallback, and fewer model-visible schemas.
+A broader agent-level routing comparison must use a separate initial/refined schedule in which both agent cells expose the same complete catalog before the request transformer runs.
 
 ## Understand the frozen protocol
 

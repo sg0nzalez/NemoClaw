@@ -7,8 +7,10 @@ import type { AddressInfo, Socket } from "node:net";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { canonicalJson, type JsonValue } from "../../scripts/performance/tool-disclosure/catalog";
 import {
   createToolDisclosureRecordingProxy,
+  type RecordingProxyRequestTransform,
   type ToolDisclosureRecordingProxy,
 } from "../../scripts/performance/tool-disclosure/recorder";
 
@@ -55,6 +57,7 @@ async function startProxy(
     maxRequestBodyBytes?: number;
     requestTimeoutMs?: number;
     requiredTemperature?: number;
+    requestTransform?: RecordingProxyRequestTransform;
   } = {},
 ): Promise<{ proxy: ToolDisclosureRecordingProxy; baseUrl: string }> {
   const proxy = createToolDisclosureRecordingProxy({ upstreamBaseUrl, ...options });
@@ -112,6 +115,21 @@ describe("tool-disclosure recording proxy", () => {
     ]) {
       expect(() => createToolDisclosureRecordingProxy({ upstreamBaseUrl })).not.toThrow();
     }
+  });
+
+  it("requires an explicit opt-in and HTTPS for a remote recording upstream", () => {
+    expect(() =>
+      createToolDisclosureRecordingProxy({
+        upstreamBaseUrl: "https://inference.example/v1",
+        allowRemoteHttpsUpstream: true,
+      }),
+    ).not.toThrow();
+    expect(() =>
+      createToolDisclosureRecordingProxy({
+        upstreamBaseUrl: "http://inference.example/v1",
+        allowRemoteHttpsUpstream: true,
+      }),
+    ).toThrow("a remote recording upstream must use HTTPS");
   });
 
   it("canonicalizes the IPv6 loopback and rejects mapped or non-loopback variants", () => {
@@ -295,6 +313,220 @@ describe("tool-disclosure recording proxy", () => {
     expect(proxy.getEvents()).toEqual([]);
   });
 
+  it("applies an async request transform before forwarding and records transformed tools", async () => {
+    let receivedBody = "";
+    const upstream = await startUpstream((request, response) => {
+      void collectBody(request).then((body) => {
+        receivedBody = body;
+        response.end("{}");
+      });
+    });
+    const observedContexts: Array<{
+      runId: string | null;
+      endpoint: string;
+      method: string;
+      modelCallSequence: number | null;
+      body: string;
+    }> = [];
+    const requestTransform: RecordingProxyRequestTransform = async (input) => {
+      observedContexts.push({
+        runId: input.runId,
+        endpoint: input.endpoint,
+        method: input.method,
+        modelCallSequence: input.modelCallSequence,
+        body: input.body.toString("utf8"),
+      });
+      const payload = JSON.parse(input.body.toString("utf8")) as Record<string, unknown>;
+      const tools = payload.tools as unknown[];
+      payload.tools = [tools[1]];
+      await Promise.resolve();
+      return Buffer.from(JSON.stringify(payload), "utf8");
+    };
+    const { proxy, baseUrl } = await startProxy(upstream.baseUrl, { requestTransform });
+    const requestBody = JSON.stringify({
+      model: "private-model",
+      messages: [{ role: "user", content: "private-prompt" }],
+      tools: [
+        {
+          type: "function",
+          function: { name: "first_tool", description: "first-private", parameters: {} },
+        },
+        {
+          type: "function",
+          function: { name: "second_tool", description: "second-private", parameters: {} },
+        },
+      ],
+    });
+
+    const runId = proxy.beginRun("transform-run");
+    const response = await fetch(`${baseUrl}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: requestBody,
+    });
+    expect(response.status).toBe(200);
+    await response.arrayBuffer();
+
+    const [event] = proxy.endRun();
+    const expectedPayload = JSON.parse(requestBody) as Record<string, unknown>;
+    expectedPayload.tools = [(expectedPayload.tools as unknown[])[1]];
+    const expectedBody = JSON.stringify(expectedPayload);
+    const canonicalTools = canonicalJson(expectedPayload.tools as JsonValue);
+    expect(receivedBody).toBe(expectedBody);
+    expect(observedContexts).toEqual([
+      {
+        runId,
+        endpoint: "chat-completions",
+        method: "POST",
+        modelCallSequence: 1,
+        body: requestBody,
+      },
+    ]);
+    expect(event).toMatchObject({
+      visible_tool_count: 1,
+      tool_names: ["second_tool"],
+      canonical_tools_json_bytes: Buffer.byteLength(canonicalTools),
+      tools_sha256: createHash("sha256").update(canonicalTools).digest("hex"),
+      status_code: 200,
+      outcome: "completed",
+    });
+    expect(proxy.consumeToolSchemaSnapshots(runId)).toEqual([
+      {
+        run_id: runId,
+        model_call_sequence: 1,
+        canonical_tools_json: canonicalTools,
+      },
+    ]);
+    expect(JSON.stringify(event)).not.toMatch(
+      /private-model|private-prompt|first-private|second-private/,
+    );
+  });
+
+  it("forwards request bytes unchanged when no transform is configured", async () => {
+    let receivedBody = Buffer.alloc(0);
+    let receivedLength = "";
+    const upstream = await startUpstream((request, response) => {
+      receivedLength = String(request.headers["content-length"] ?? "");
+      const chunks: Buffer[] = [];
+      request.on("data", (chunk: Buffer) => chunks.push(chunk));
+      request.once("end", () => {
+        receivedBody = Buffer.concat(chunks);
+        response.end("{}");
+      });
+    });
+    const { proxy, baseUrl } = await startProxy(upstream.baseUrl);
+    const exactBody = Buffer.from(
+      '{\n  "messages" : [{"content":"byte-private"}],\n  "tools" : []\n}\n',
+      "utf8",
+    );
+
+    proxy.beginRun("no-transform-bytes");
+    const response = await fetch(`${baseUrl}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: exactBody,
+    });
+    await response.arrayBuffer();
+    proxy.endRun();
+
+    expect(response.status).toBe(200);
+    expect(receivedBody.equals(exactBody)).toBe(true);
+    expect(receivedLength).toBe(String(exactBody.length));
+  });
+
+  it("rejects transform failures with a fixed content-free proxy error", async () => {
+    let hits = 0;
+    const upstream = await startUpstream((_request, response) => {
+      hits += 1;
+      response.end("unexpected");
+    });
+    const { proxy, baseUrl } = await startProxy(upstream.baseUrl, {
+      requestTransform: async ({ body }) => {
+        expect(body.toString("utf8")).toContain("transform-input-private");
+        throw new Error("transform-error-private");
+      },
+    });
+
+    const runId = proxy.beginRun("transform-error");
+    const response = await fetch(`${baseUrl}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: '{"messages":[{"content":"transform-input-private"}]}',
+    });
+    expect(response.status).toBe(502);
+    expect(await response.json()).toEqual({ error: "recording proxy failure" });
+    expect(hits).toBe(0);
+
+    const [event] = proxy.endRun();
+    expect(event).toMatchObject({
+      visible_tool_count: 0,
+      status_code: 502,
+      outcome: "request-rejected",
+      error_reason: "proxy-failure",
+    });
+    expect(proxy.consumeToolSchemaSnapshots(runId)).toEqual([]);
+    expect(JSON.stringify(event)).not.toMatch(/transform-input-private|transform-error-private/);
+  });
+
+  it("rejects a transformed body that exceeds the request size bound", async () => {
+    let hits = 0;
+    const upstream = await startUpstream((_request, response) => {
+      hits += 1;
+      response.end("unexpected");
+    });
+    const { proxy, baseUrl } = await startProxy(upstream.baseUrl, {
+      maxRequestBodyBytes: 32,
+      requestTransform: () => Buffer.alloc(33, "x"),
+    });
+
+    proxy.beginRun("transform-too-large");
+    const response = await fetch(`${baseUrl}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    expect(response.status).toBe(413);
+    expect(await response.json()).toEqual({ error: "request body too large" });
+    expect(hits).toBe(0);
+    expect(proxy.endRun()[0]).toMatchObject({
+      visible_tool_count: 0,
+      status_code: 413,
+      outcome: "request-rejected",
+      error_reason: "request-body-too-large",
+    });
+  });
+
+  it("enforces the frozen temperature after transformation", async () => {
+    let hits = 0;
+    const upstream = await startUpstream((_request, response) => {
+      hits += 1;
+      response.end("unexpected");
+    });
+    const { proxy, baseUrl } = await startProxy(upstream.baseUrl, {
+      requiredTemperature: 0,
+      requestTransform: ({ body }) => {
+        const payload = JSON.parse(body.toString("utf8")) as Record<string, unknown>;
+        payload.temperature = 0.5;
+        return Buffer.from(JSON.stringify(payload), "utf8");
+      },
+    });
+
+    proxy.beginRun("transform-temperature");
+    const response = await fetch(`${baseUrl}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: '{"messages":[],"tools":[]}',
+    });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "performance test temperature mismatch" });
+    expect(hits).toBe(0);
+    expect(proxy.endRun()[0]).toMatchObject({
+      status_code: 400,
+      outcome: "request-rejected",
+      error_reason: "proxy-failure",
+    });
+  });
+
   it("streams SSE bytes unchanged and records monotonic first-byte timing", async () => {
     const chunks = [
       'data: {"choices":[{"delta":{"content":"A"}}]}\n\n',
@@ -470,6 +702,46 @@ describe("tool-disclosure recording proxy", () => {
     expect(JSON.stringify(event)).not.toMatch(
       /timeout-authorization-secret|timeout-prompt-secret|upstream-error-body-secret/,
     );
+  });
+
+  it("aborts a stalled request transform before an upstream call begins", async () => {
+    let upstreamHits = 0;
+    let transformAborted = false;
+    const upstream = await startUpstream((_request, response) => {
+      upstreamHits += 1;
+      response.end("unexpected");
+    });
+    const { proxy, baseUrl } = await startProxy(upstream.baseUrl, {
+      requestTimeoutMs: 30,
+      requestTransform: ({ signal }) =>
+        new Promise<Buffer>((_resolve, reject) => {
+          signal.addEventListener(
+            "abort",
+            () => {
+              transformAborted = true;
+              reject(new DOMException("aborted", "AbortError"));
+            },
+            { once: true },
+          );
+        }),
+    });
+
+    proxy.beginRun("transform-timeout");
+    const response = await fetch(`${baseUrl}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: '{"messages":[],"tools":[]}',
+    });
+
+    expect(response.status).toBe(408);
+    expect(await response.json()).toEqual({ error: "request timeout" });
+    expect(transformAborted).toBe(true);
+    expect(upstreamHits).toBe(0);
+    expect(proxy.endRun()[0]).toMatchObject({
+      status_code: 408,
+      outcome: "request-rejected",
+      error_reason: "request-timeout",
+    });
   });
 
   it("bounds an SSE response that stalls after its first byte", async () => {
