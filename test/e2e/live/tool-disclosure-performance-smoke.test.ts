@@ -57,10 +57,11 @@ function gitSha(): string {
     execFileSync("git", ["rev-parse", "HEAD"], {
       encoding: "utf8",
     }).trim();
-  if (!/^[a-f0-9]{40}$/u.test(sha)) {
-    throw new Error("tool-disclosure performance smoke requires a git SHA");
-  }
-  return sha;
+  return /^[a-f0-9]{40}$/u.test(sha)
+    ? sha
+    : (() => {
+        throw new Error("tool-disclosure performance smoke requires a git SHA");
+      })();
 }
 
 test.skipIf(!shouldRunLiveE2E())(
@@ -87,8 +88,9 @@ test.skipIf(!shouldRunLiveE2E())(
         embedding: { kind: "portable" },
       });
     } finally {
-      if (previousRoutingCredential === undefined) delete process.env[routingCredentialEnv];
-      else process.env[routingCredentialEnv] = previousRoutingCredential;
+      previousRoutingCredential === undefined
+        ? delete process.env[routingCredentialEnv]
+        : (process.env[routingCredentialEnv] = previousRoutingCredential);
     }
     await artifacts.writeJson("compositional-routing-acceptance.json", routingAcceptance);
     expect(routingAcceptance.acceptance_passed).toBe(true);
@@ -99,10 +101,12 @@ test.skipIf(!shouldRunLiveE2E())(
     const catalogPrefix = generateCatalogPrefix(catalog, CATALOG_SIZE);
     const primaryTasks = generatePrimaryTaskSet(catalog);
     const task = primaryTasks.tasks.find((candidate) => candidate.id === TASK_ID);
-    if (!task) throw new Error(`frozen task ${TASK_ID} is missing`);
-    if (task.min_catalog_size > catalogPrefix.size) {
-      throw new Error(`frozen task ${TASK_ID} does not fit the performance smoke catalog`);
-    }
+    expect(task, `frozen task ${TASK_ID} is missing`).toBeDefined();
+    const frozenTask = task as NonNullable<typeof task>;
+    expect(
+      frozenTask.min_catalog_size,
+      `frozen task ${TASK_ID} does not fit the performance smoke catalog`,
+    ).toBeLessThanOrEqual(catalogPrefix.size);
 
     await artifacts.writeJson("scenario.json", {
       id: "tool-disclosure-performance-smoke",
@@ -210,7 +214,7 @@ test.skipIf(!shouldRunLiveE2E())(
         openshellBin: process.env.OPENSHELL_BIN,
         sandboxName: sandboxName(mode),
         agent: AGENT,
-        prompt: task.prompt,
+        prompt: frozenTask.prompt,
         sessionId: runId,
       });
       mcp.beginRun(runId);
@@ -229,7 +233,7 @@ test.skipIf(!shouldRunLiveE2E())(
       }
       const elapsedMs = Number((process.hrtime.bigint() - startedAt) / 1_000_000n);
       const finalOutput = extractFinalAssistantOutput(AGENT, invocation.stdout);
-      const graded = gradeTaskRun(task, calls, finalOutput);
+      const graded = gradeTaskRun(frozenTask, calls, finalOutput);
       const outcome = invocation.timedOut
         ? "timeout"
         : invocation.exitCode === 0
@@ -253,10 +257,11 @@ test.skipIf(!shouldRunLiveE2E())(
     const routedToolNames = new Set(
       catalogPrefix.tools.map((tool) => `${MCP_SERVER_NAME}_${tool.definition.function.name}`),
     );
-    const expectedRoutedToolName = `${MCP_SERVER_NAME}_${task.expected_calls[0]?.tool_name ?? ""}`;
-    if (!routedToolNames.has(expectedRoutedToolName)) {
-      throw new Error("the routed replay target is not present in the reviewed catalog");
-    }
+    const expectedRoutedToolName = `${MCP_SERVER_NAME}_${frozenTask.expected_calls[0]?.tool_name ?? ""}`;
+    expect(
+      routedToolNames.has(expectedRoutedToolName),
+      "the routed replay target is not present in the reviewed catalog",
+    ).toBe(true);
     const routedTransform = new CompositionalToolRoutingTransform({
       decomposer: createOpenAIChatTaskDecomposer({
         baseUrl: hosted.endpointUrl,
@@ -318,15 +323,13 @@ test.skipIf(!shouldRunLiveE2E())(
     };
 
     let routedReplay: Record<string, unknown> | undefined;
-    let routeMutationAttempted = false;
     try {
-      routeMutationAttempted = true;
       await configureInferenceRoute(`${routedProxyAddress.base_url}/v1`, "enable");
       const driver = buildAgentDriverCommand({
         openshellBin: process.env.OPENSHELL_BIN,
         sandboxName: sandboxName("direct"),
         agent: AGENT,
-        prompt: task.prompt,
+        prompt: frozenTask.prompt,
         sessionId: routedRunId,
       });
       mcp.beginRun(routedRunId);
@@ -349,7 +352,7 @@ test.skipIf(!shouldRunLiveE2E())(
       const elapsedMs = Number((process.hrtime.bigint() - startedAt) / 1_000_000n);
       const routeEvidence = await routedTransform.consumeEvidence(routedRunId);
       const finalOutput = extractFinalAssistantOutput(AGENT, invocation.stdout);
-      const graded = gradeTaskRun(task, calls, finalOutput);
+      const graded = gradeTaskRun(frozenTask, calls, finalOutput);
       const outcome = invocation.timedOut
         ? "timeout"
         : invocation.exitCode === 0
@@ -378,9 +381,7 @@ test.skipIf(!shouldRunLiveE2E())(
         ],
       };
     } finally {
-      if (routeMutationAttempted) {
-        await configureInferenceRoute(hosted.endpointUrl, "restore");
-      }
+      await configureInferenceRoute(hosted.endpointUrl, "restore");
     }
 
     await artifacts.writeJson("compositional-routing-agent-smoke.json", routedReplay);
@@ -419,8 +420,8 @@ test.skipIf(!shouldRunLiveE2E())(
         catalog_seed: catalog.seed,
         catalog_size: CATALOG_SIZE,
         catalog_tools_sha256: catalogPrefix.tools_sha256,
-        task_id: task.id,
-        task_kind: task.kind,
+        task_id: frozenTask.id,
+        task_kind: frozenTask.kind,
         task_set_sha256: primaryTasks.tasks_sha256,
         repetitions_per_mode: 1,
         observed_runs: results.length,

@@ -15,9 +15,11 @@ import { createToolDisclosureRecordingProxy } from "../../scripts/performance/to
 
 function vectorFor(text: string): number[] {
   const normalized = text.toLowerCase();
-  if (normalized.includes("calendar")) return [1, 0, 0];
-  if (normalized.includes("email")) return [0, 1, 0];
-  return [0, 0, 1];
+  return normalized.includes("calendar")
+    ? [1, 0, 0]
+    : normalized.includes("email")
+      ? [0, 1, 0]
+      : [0, 0, 1];
 }
 
 const embedder: TextEmbedder = {
@@ -318,11 +320,12 @@ describe("independent compositional tool request transform", () => {
       decomposer: {
         decompose: async (request) => {
           decompositionSignals.push(request.signal);
-          if (request.pass === "refined") return ["list calendar events"];
-          markInitialStarted?.();
-          return new Promise<string[]>((resolve) => {
-            releaseInitial = resolve;
-          });
+          return request.pass === "refined"
+            ? ["list calendar events"]
+            : (markInitialStarted?.(),
+              new Promise<string[]>((resolve) => {
+                releaseInitial = resolve;
+              }));
         },
       },
       embedder: {

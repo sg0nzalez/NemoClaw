@@ -25,14 +25,15 @@ describe("compositional routing acceptance runner", () => {
       const fixture = COMPOSITIONAL_ROUTING_ACCEPTANCE_CASES.find((candidate) =>
         user.includes(candidate.prompt),
       );
-      if (!fixture) return new Response("missing fixture", { status: 400 });
+      expect(fixture).toBeDefined();
+      const matchedFixture = fixture as NonNullable<typeof fixture>;
       return new Response(
         JSON.stringify({
           choices: [
             {
               message: {
                 content: JSON.stringify(
-                  fixture.expected_steps.map((expected) => expected.capability),
+                  matchedFixture.expected_steps.map((expected) => expected.capability),
                 ),
               },
             },
@@ -116,11 +117,12 @@ describe("compositional routing acceptance runner", () => {
         const fixture = COMPOSITIONAL_ROUTING_ACCEPTANCE_CASES.find((candidate) =>
           user.includes(candidate.prompt),
         );
-        if (!fixture) return new Response("missing fixture", { status: 400 });
+        expect(fixture).toBeDefined();
+        const matchedFixture = fixture as NonNullable<typeof fixture>;
         const content =
-          fixture.id === "route-no-tool-01"
+          matchedFixture.id === "route-no-tool-01"
             ? "not-json"
-            : JSON.stringify(fixture.expected_steps.map((expected) => expected.capability));
+            : JSON.stringify(matchedFixture.expected_steps.map((expected) => expected.capability));
         return new Response(JSON.stringify({ choices: [{ message: { content } }] }), {
           status: 200,
           headers: { "content-type": "application/json" },

@@ -379,9 +379,9 @@ describe("Deep Agents Code direct-exec proxy launcher", () => {
       const { scriptPath } = makeStartProxyProbeFixture(tempDir);
       const modeFile = path.join(tempDir, "trusted-tool-disclosure");
       fs.rmSync(modeFile);
-      if (invalidValue !== null) {
-        fs.writeFileSync(modeFile, `${invalidValue}\n`, { mode: 0o444 });
-      }
+      invalidValue === null
+        ? undefined
+        : fs.writeFileSync(modeFile, `${invalidValue}\n`, { mode: 0o444 });
 
       const env = { NEMOCLAW_TOOL_DISCLOSURE: "direct" };
       const launcherResult = runLauncher(launcherPath, ["-n", "PONG"], env);

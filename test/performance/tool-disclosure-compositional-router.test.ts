@@ -46,10 +46,13 @@ class KeywordEmbedder implements TextEmbedder {
     this.calls.push([...texts]);
     return texts.map((text) => {
       const normalized = text.toLowerCase();
-      if (/calendar|appointment|event/u.test(normalized)) return [3, 0, 0, 0];
-      if (/email|notify|message/u.test(normalized)) return [0, 4, 0, 0];
-      if (/weather|forecast/u.test(normalized)) return [0, 0, 5, 0];
-      return [0, 0, 0, 2];
+      return /calendar|appointment|event/u.test(normalized)
+        ? [3, 0, 0, 0]
+        : /email|notify|message/u.test(normalized)
+          ? [0, 4, 0, 0]
+          : /weather|forecast/u.test(normalized)
+            ? [0, 0, 5, 0]
+            : [0, 0, 0, 2];
     });
   }
 }
