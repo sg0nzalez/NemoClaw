@@ -17,7 +17,7 @@ describe("tool-disclosure agent drivers", () => {
     "hermes",
     "langchain-deepagents-code",
   ] as const)("builds a bounded sandbox command for %s", (agent) => {
-    const prompt = "Use the weather converter and return PERFORMANCE_TEST_OK_123";
+    const prompt = "Use the weather converter,\nthen return PERFORMANCE_TEST_OK_123";
     const command = buildAgentDriverCommand({
       agent,
       sandboxName: "performance-test-openclaw-progressive-512",
@@ -33,6 +33,7 @@ describe("tool-disclosure agent drivers", () => {
       "--",
     ]);
     expect(command.args.join(" ")).not.toContain(prompt);
+    expect(command.args.every((argument) => !/[\r\n]/u.test(argument))).toBe(true);
     expect(command.redactions).toContain(prompt);
   });
 

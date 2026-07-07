@@ -31,14 +31,14 @@ function shellScriptFor(agent: ToolDisclosureAgent, prompt: string, sessionId: s
       "set -eu",
       `prompt=$(printf '%s' '${encodedPrompt}' | base64 -d)`,
       `exec openclaw agent --agent main --json --thinking off --session-id '${sessionId}' -m "$prompt"`,
-    ].join("\n");
+    ].join("; ");
   }
   if (agent === "langchain-deepagents-code") {
     return [
       "set -eu",
       `prompt=$(printf '%s' '${encodedPrompt}' | base64 -d)`,
       'exec nemoclaw-start dcode -n "$prompt"',
-    ].join("\n");
+    ].join("; ");
   }
   const payload = base64(
     JSON.stringify({
@@ -54,12 +54,8 @@ function shellScriptFor(agent: ToolDisclosureAgent, prompt: string, sessionId: s
     "[ ! -f /sandbox/.hermes/.env ] || . /sandbox/.hermes/.env",
     "set +a",
     `payload='${payload}'`,
-    'if [ -n "${API_SERVER_KEY:-}" ]; then',
-    "  printf '%s' \"$payload\" | base64 -d | curl -fsS --max-time 600 http://127.0.0.1:8642/v1/chat/completions -H 'Content-Type: application/json' -H \"Authorization: Bearer ${API_SERVER_KEY}\" --data-binary @-",
-    "  exit $?",
-    "fi",
-    "printf '%s' \"$payload\" | base64 -d | curl -fsS --max-time 600 http://127.0.0.1:8642/v1/chat/completions -H 'Content-Type: application/json' --data-binary @-",
-  ].join("\n");
+    "if [ -n \"${API_SERVER_KEY:-}\" ]; then printf '%s' \"$payload\" | base64 -d | curl -fsS --max-time 600 http://127.0.0.1:8642/v1/chat/completions -H 'Content-Type: application/json' -H \"Authorization: Bearer ${API_SERVER_KEY}\" --data-binary @-; else printf '%s' \"$payload\" | base64 -d | curl -fsS --max-time 600 http://127.0.0.1:8642/v1/chat/completions -H 'Content-Type: application/json' --data-binary @-; fi",
+  ].join("; ");
 }
 
 export function buildAgentDriverCommand(options: {
@@ -73,6 +69,9 @@ export function buildAgentDriverCommand(options: {
   validateIdentifier(options.sessionId, "sessionId");
   if (!options.prompt.trim()) throw new Error("performance test task prompt must not be empty");
   const script = shellScriptFor(options.agent, options.prompt, options.sessionId);
+  if (/[\r\n]/u.test(script)) {
+    throw new Error("performance test agent driver must be a single-line shell command");
+  }
   return {
     command: options.openshellBin ?? "openshell",
     args: ["sandbox", "exec", "-n", options.sandboxName, "--", "sh", "-lc", script],
