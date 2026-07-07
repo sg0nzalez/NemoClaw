@@ -13,7 +13,11 @@ import os from "node:os";
 import path from "node:path";
 import { containsInteger42Answer } from "../../helpers/e2e-answer-assertions.ts";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
-import { assertExitZero as expectExitZero, resultText } from "../fixtures/clients/command.ts";
+import {
+  assertExitZero as expectExitZero,
+  outputContainsSandbox,
+  resultText,
+} from "../fixtures/clients/command.ts";
 import type { HostCliClient } from "../fixtures/clients/host.ts";
 import { type SandboxClient, trustedSandboxShellScript } from "../fixtures/clients/sandbox.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
@@ -31,13 +35,7 @@ const REGISTRY_FILE = path.join(process.env.HOME ?? os.homedir(), ".nemoclaw", "
 const GATEWAY_CONTAINER = "openshell-cluster-nemoclaw";
 const liveTest = process.env.NEMOCLAW_RUN_LIVE_E2E === "1" ? test : test.skip;
 
-type ProcessResult = { exitCode: number | null; stdout: string; stderr: string };
 type CleanupRegistry = { add(name: string, run: () => Promise<void> | void): void };
-
-function outputContainsSandbox(result: ProcessResult, sandboxName: string): boolean {
-  const escaped = sandboxName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`(^|\\s)${escaped}(\\s|$)`, "m").test(resultText(result));
-}
 
 async function onboardSandbox(
   host: HostCliClient,

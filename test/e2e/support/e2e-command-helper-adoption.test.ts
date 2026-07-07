@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 
 const LIVE_ROOT = path.resolve(import.meta.dirname, "../live");
 const LOCAL_COMMAND_HELPER =
-  /^(?:export\s+)?(?:function\s+(?:resultText|expectExitZero)\s*\(|const\s+(?:resultText|expectExitZero)\s*=)/m;
+  /^\s*(?:export\s+)?(?:async\s+)?(?:function\s*\*?\s+(?:resultText|expectExitZero)\s*\(|(?:const|let|var)\s+(?:resultText|expectExitZero)\b\s*(?::[^=]+)?=)/m;
 
 function typescriptFiles(root: string): string[] {
   const files: string[] = [];
