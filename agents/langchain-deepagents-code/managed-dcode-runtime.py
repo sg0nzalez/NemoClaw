@@ -52,7 +52,13 @@ _MCP_DESCRIPTOR_PREFIX = "/proc/self/fd/"
 _MCP_CHILD_BINDING_ENV = "NEMOCLAW_DCODE_MCP_BINDING"
 _MCP_SEALED_KIND = "sealed-memfd"
 _MCP_ANONYMOUS_KIND = "anonymous-otmpfile"
-_MCP_ANONYMOUS_DIRECTORY = Path("/tmp")
+_MCP_ANONYMOUS_DIRECTORIES = (Path("/tmp"), Path("/dev/shm"))
+_MCP_ANONYMOUS_DIRECTORY_FALLBACK_ERRNOS = {
+    errno.EINVAL,
+    errno.ENOENT,
+    errno.ENOSYS,
+    errno.EOPNOTSUPP,
+}
 _MCP_FALLBACK_ERRNOS = {
     errno.EACCES,
     errno.EINVAL,
@@ -699,13 +705,29 @@ def _sealed_managed_mcp_snapshot(payload: bytes) -> int:
         raise
 
 
+def _open_anonymous_managed_mcp_writer(flags: int) -> int:
+    for index, directory in enumerate(_MCP_ANONYMOUS_DIRECTORIES):
+        try:
+            return os.open(directory, flags, 0o600)
+        except OSError as exc:
+            is_last = index == len(_MCP_ANONYMOUS_DIRECTORIES) - 1
+            if (
+                is_last
+                or exc.errno not in _MCP_ANONYMOUS_DIRECTORY_FALLBACK_ERRNOS
+            ):
+                raise
+    raise RuntimeError(
+        "managed MCP config requires anonymous O_TMPFILE support"
+    )
+
+
 def _anonymous_managed_mcp_snapshot(payload: bytes) -> int:
     writer: int | None = None
     reader: int | None = None
     complete = False
     try:
         flags = os.O_TMPFILE | os.O_EXCL | os.O_RDWR | os.O_CLOEXEC
-        writer = os.open(_MCP_ANONYMOUS_DIRECTORY, flags, 0o600)
+        writer = _open_anonymous_managed_mcp_writer(flags)
         remaining = memoryview(payload)
         while remaining:
             written = os.write(writer, remaining)

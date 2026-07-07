@@ -136,10 +136,21 @@ assert payload is not None
 def blocked_memfd(*_args, **_kwargs):
     raise PermissionError(errno.EPERM, "blocked by seccomp")
 
+real_open = managed.os.open
+anonymous_attempts = []
+
+def force_tmpfile_to_shm(path, flags, *args, **kwargs):
+    if flags & os.O_TMPFILE:
+        anonymous_attempts.append(str(path))
+        if str(path) == "/tmp":
+            raise OSError(errno.EOPNOTSUPP, "O_TMPFILE unavailable")
+    return real_open(path, flags, *args, **kwargs)
+
 with tempfile.TemporaryDirectory() as tempdir:
     managed._MCP_CONFIG_FILE = Path(tempdir) / ".nemoclaw-mcp.json"
     managed._read_managed_mcp_config = lambda: raw
     managed.os.memfd_create = blocked_memfd
+    managed.os.open = force_tmpfile_to_shm
     snapshot_path = managed.managed_mcp_config_path()
     assert snapshot_path is not None
     descriptor = int(snapshot_path.removeprefix("/proc/self/fd/"))
@@ -220,6 +231,8 @@ print(child.managed_mcp_config_bytes(sys.argv[2]).decode(), end="")
     else:
         raise AssertionError("same-size anonymous descriptor overwrite was accepted")
     os.close(descriptor)
+managed.os.open = real_open
+assert anonymous_attempts == ["/tmp", "/dev/shm", "/tmp", "/dev/shm"]
 print("anonymous-fallback-ok")
 `);
 
@@ -331,5 +344,82 @@ print("fallback-fail-closed-ok")
 
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout.trim()).toBe("fallback-fail-closed-ok");
+  });
+
+  it("tries the bounded anonymous tmpfs fallback only for unsupported filesystems", () => {
+    const result = runManagedHelper(String.raw`
+import errno
+import importlib.util
+import os
+import sys
+from pathlib import Path
+
+spec = importlib.util.spec_from_file_location("_nemoclaw_managed", sys.argv[1])
+managed = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(managed)
+
+managed._MCP_ANONYMOUS_DIRECTORIES = (Path("/tmp"), Path("/dev/shm"))
+real_open = managed.os.open
+
+for fallback_errno in managed._MCP_ANONYMOUS_DIRECTORY_FALLBACK_ERRNOS:
+    attempts = []
+
+    def filesystem_fallback(path, flags, *args, **kwargs):
+        attempts.append(str(path))
+        if str(path) == "/tmp":
+            raise OSError(fallback_errno, "anonymous file unavailable")
+        return 123
+
+    managed.os.open = filesystem_fallback
+    try:
+        writer = managed._open_anonymous_managed_mcp_writer(12345)
+        assert writer == 123
+        assert attempts == ["/tmp", "/dev/shm"]
+    finally:
+        managed.os.open = real_open
+
+for terminal_errno in (errno.EACCES, errno.EPERM, errno.ENOSPC, errno.EMFILE):
+    attempts = []
+
+    def terminal_error(path, flags, *args, **kwargs):
+        attempts.append(str(path))
+        raise OSError(terminal_errno, "terminal anonymous-file error")
+
+    managed.os.open = terminal_error
+    try:
+        try:
+            managed._open_anonymous_managed_mcp_writer(12345)
+        except OSError as exc:
+            assert exc.errno == terminal_errno
+        else:
+            raise AssertionError("terminal error triggered a directory fallback")
+        assert attempts == ["/tmp"]
+    finally:
+        managed.os.open = real_open
+
+attempts = []
+
+def second_directory_error(path, flags, *args, **kwargs):
+    attempts.append(str(path))
+    if str(path) == "/tmp":
+        raise OSError(errno.EOPNOTSUPP, "O_TMPFILE unavailable")
+    raise OSError(errno.ENOSPC, "tmpfs full")
+
+managed.os.open = second_directory_error
+try:
+    try:
+        managed._open_anonymous_managed_mcp_writer(12345)
+    except OSError as exc:
+        assert exc.errno == errno.ENOSPC
+    else:
+        raise AssertionError("final directory error was masked")
+    assert attempts == ["/tmp", "/dev/shm"]
+finally:
+    managed.os.open = real_open
+print("anonymous-directory-fallback-ok")
+`);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout.trim()).toBe("anonymous-directory-fallback-ok");
   });
 });
