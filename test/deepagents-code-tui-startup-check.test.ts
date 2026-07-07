@@ -53,12 +53,13 @@ function secretFixture(...parts: string[]): string {
   return parts.join("");
 }
 
-type TuiExpectEvent = "eof" | "exit" | "firstRun" | "ready" | "timeout";
+type TuiExpectEvent = "eof" | "exit" | "firstRun" | "namePrompt" | "ready" | "timeout";
 
 const tclEventLiterals: Record<TuiExpectEvent, string> = {
   eof: "{eof}",
   exit: "{exit}",
   firstRun: "{firstRun}",
+  namePrompt: "{namePrompt}",
   ready: "{ready}",
   timeout: "{timeout}",
 };
@@ -104,6 +105,10 @@ proc expect {branches} {
   set event [lindex $::fake_events 0]
   set ::fake_events [lrange $::fake_events 1 end]
   switch -- $event {
+    namePrompt {
+      set branch_index [lsearch -exact $branches {$name_prompt_pattern}]
+      set ::expect_out(0,string) "What should Deep Agents call you"
+    }
     firstRun {
       set branch_index [lsearch -exact $branches {$first_run_pattern}]
       set ::expect_out(0,string) "Choose a Recommended Model"
@@ -146,8 +151,9 @@ proc exit {{code 0}} {
       NEMOCLAW_TUI_CAPTURE: capture,
       NEMOCLAW_TUI_CLOSE_AFTER_FIRST_CTRL_C: options.closeAfterFirstCtrlC ? "1" : "0",
       NEMOCLAW_TUI_MARKERS: markers,
-      NEMOCLAW_TUI_FIRST_RUN_PATTERN:
-        "(your name \\(optional\\)|what should deep agents call you|choose a recommended model)",
+      NEMOCLAW_TUI_FIRST_RUN_PATTERN: "(choose a recommended model)",
+      NEMOCLAW_TUI_NAME_PROMPT_PATTERN:
+        "(your name \\(optional\\)|what should deep agents call you)",
       NEMOCLAW_TUI_READY_PATTERN:
         "(what would you like|enter (your )?(task|message|prompt)|how can i help)",
       NEMOCLAW_TUI_SANDBOX_NAME: "fake-deepagents",
@@ -222,18 +228,34 @@ describe("Deep Agents Code TUI startup check helpers", () => {
     expect(readiness("How can I help with the codebase today?")).toBe("ready");
   });
 
-  it("matches the pinned first-run screens that managed DCode must suppress (#6410)", () => {
+  it("matches the pinned first-run model picker that managed DCode must suppress (#6410)", () => {
     const isFirstRun = (capture: string) =>
       runTuiStartupCheckHelper(
         'if printf "%s" "$CAPTURE" | grep -Eiq "$TUI_FIRST_RUN_PATTERN"; then printf first-run; else printf other; fi',
         { CAPTURE: capture },
       );
 
-    expect(isFirstRun("Your name (optional)")).toBe("first-run");
-    expect(isFirstRun("What should Deep Agents call you?")).toBe("first-run");
     expect(isFirstRun("Choose a Recommended Model")).toBe("first-run");
+    expect(isFirstRun("Your name (optional)")).toBe("other");
+    expect(isFirstRun("What should Deep Agents call you?")).toBe("other");
     expect(isFirstRun("Your project name")).toBe("other");
     expect(isFirstRun("What would you like to build?")).toBe("other");
+  });
+
+  it("matches the name prompt pattern that managed DCode allows on first run", () => {
+    const isNamePrompt = (capture: string) =>
+      runTuiStartupCheckHelper(
+        'if printf "%s" "$CAPTURE" | grep -Eiq "$TUI_NAME_PROMPT_PATTERN"; then printf name-prompt; else printf other; fi',
+        {
+          CAPTURE: capture,
+          TUI_NAME_PROMPT_PATTERN: "(your name \\(optional\\)|what should deep agents call you)",
+        },
+      );
+
+    expect(isNamePrompt("Your name (optional)")).toBe("name-prompt");
+    expect(isNamePrompt("What should Deep Agents call you?")).toBe("name-prompt");
+    expect(isNamePrompt("Choose a Recommended Model")).toBe("other");
+    expect(isNamePrompt("What would you like to build?")).toBe("other");
   });
 
   itWithTclsh("fails before readiness when a first-run model picker appears (#6410)", () => {
@@ -244,6 +266,20 @@ describe("Deep Agents Code TUI startup check helpers", () => {
     expect(markerText).toContain("Choose a Recommended Model");
     expect(markerText).toContain("NEMOCLAW_TUI_UNEXPECTED_FIRST_RUN");
     expect(markerText).not.toContain("NEMOCLAW_TUI_READY");
+  });
+
+  itWithTclsh("allows the first-run name prompt and proceeds to ready state", () => {
+    const { markerText, result, traceText } = runTuiExpectStateMachine(
+      ["namePrompt", "ready", "exit"],
+      { closeAfterFirstCtrlC: true },
+    );
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(traceText).toBe("0d,03");
+    expect(markerText).toContain("What should Deep Agents call you");
+    expect(markerText).toContain("NEMOCLAW_TUI_NAME_PROMPT");
+    expect(markerText).toContain("NEMOCLAW_TUI_READY");
+    expect(markerText).not.toContain("NEMOCLAW_TUI_UNEXPECTED_FIRST_RUN");
   });
 
   itWithTclsh("captures a clean exit when dcode closes after the first Ctrl-C (tclsh)", () => {
