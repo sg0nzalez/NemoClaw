@@ -38,6 +38,11 @@ const MODES = ["progressive", "direct"] as const satisfies readonly ToolDisclosu
 const MCP_SERVER_NAME = "performance-test";
 const MCP_TOKEN_ENV = "TOOL_DISCLOSURE_PERFORMANCE_TEST_MCP_TOKEN";
 const TEST_TIMEOUT_MS = 50 * 60_000;
+const ROUTING_DECOMPOSER_MAX_ATTEMPTS = 2;
+const ROUTING_DECOMPOSER_REQUEST_TIMEOUT_MS = 120_000;
+const ROUTE_ONLY_RUN_TIMEOUT_MS = 900_000;
+const ROUTED_PROXY_REQUEST_TIMEOUT_MS = 720_000;
+const ROUTED_AGENT_INVOCATION_TIMEOUT_MS = 900_000;
 
 function sandboxName(mode: ToolDisclosureMode): string {
   return `e2e-tool-disclosure-performance-${mode}`;
@@ -86,10 +91,11 @@ test.skipIf(!shouldRunLiveE2E())(
           allow_remote: true,
           reasoning_control: "enable_thinking_false",
           json_object_response: true,
-          max_attempts: 2,
+          max_attempts: ROUTING_DECOMPOSER_MAX_ATTEMPTS,
         },
         embedding: { kind: "portable" },
-        timeout_ms: 180_000,
+        timeout_ms: ROUTING_DECOMPOSER_REQUEST_TIMEOUT_MS,
+        run_timeout_ms: ROUTE_ONLY_RUN_TIMEOUT_MS,
       });
     } finally {
       previousRoutingCredential === undefined
@@ -274,8 +280,8 @@ test.skipIf(!shouldRunLiveE2E())(
         allowRemote: true,
         reasoningControl: "enable_thinking_false",
         jsonObjectResponse: true,
-        maxAttempts: 2,
-        timeoutMs: 180_000,
+        maxAttempts: ROUTING_DECOMPOSER_MAX_ATTEMPTS,
+        timeoutMs: ROUTING_DECOMPOSER_REQUEST_TIMEOUT_MS,
       }),
       embedder: new PortableHashingTextEmbedder(),
       isRoutableTool: (name) => routedToolNames.has(name),
@@ -284,6 +290,7 @@ test.skipIf(!shouldRunLiveE2E())(
     const routedProxy = createToolDisclosureRecordingProxy({
       upstreamBaseUrl: hosted.endpointUrl,
       allowRemoteHttpsUpstream: true,
+      requestTimeoutMs: ROUTED_PROXY_REQUEST_TIMEOUT_MS,
       requestTransform: routedTransform.requestTransform,
     });
     const routedProxyAddress = await routedProxy.start();
@@ -351,7 +358,7 @@ test.skipIf(!shouldRunLiveE2E())(
           artifactName: "invoke-tool-disclosure-compositional",
           env: hostEnv(),
           redactionValues: [...driver.redactions, hosted.apiKey, bearerToken],
-          timeoutMs: 10 * 60_000,
+          timeoutMs: ROUTED_AGENT_INVOCATION_TIMEOUT_MS,
         });
       } finally {
         calls = mcp.endRun();
@@ -383,8 +390,11 @@ test.skipIf(!shouldRunLiveE2E())(
         routing_configuration: {
           reasoning_control: "enable_thinking_false",
           output_mode: "json-object",
-          max_attempts: 2,
-          timeout_ms: 180_000,
+          max_attempts: ROUTING_DECOMPOSER_MAX_ATTEMPTS,
+          timeout_ms: ROUTING_DECOMPOSER_REQUEST_TIMEOUT_MS,
+          route_only_run_timeout_ms: ROUTE_ONLY_RUN_TIMEOUT_MS,
+          proxy_request_timeout_ms: ROUTED_PROXY_REQUEST_TIMEOUT_MS,
+          agent_invocation_timeout_ms: ROUTED_AGENT_INVOCATION_TIMEOUT_MS,
           embedding: "portable-lexical-hashing",
         },
         route_evidence: routeEvidence,

@@ -71,6 +71,7 @@ export type RoutingFallbackReason =
   | "refinement-failed"
   | "refinement-malformed"
   | "refinement-no-tool-disagreement"
+  | "run-deadline-exceeded"
   | "selection-limit-exceeded";
 
 export interface CompositionalRoutingTimings {

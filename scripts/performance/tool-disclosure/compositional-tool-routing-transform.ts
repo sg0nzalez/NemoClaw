@@ -35,6 +35,13 @@ interface CachedRoute {
   evidence: CompositionalTransformEvidence;
 }
 
+interface CachedRouteWork {
+  promise: Promise<CachedRoute>;
+  controller: AbortController;
+  waiterCount: number;
+  settled: boolean;
+}
+
 export interface CompositionalTransformEvidence {
   run_id: string;
   source_tool_count: number;
@@ -168,7 +175,7 @@ export class CompositionalToolRoutingTransform {
   readonly requestTransform: RecordingProxyRequestTransform;
 
   private readonly isRoutableTool: (name: string) => boolean;
-  private readonly routes = new Map<string, Promise<CachedRoute>>();
+  private readonly routes = new Map<string, CachedRouteWork>();
   private readonly routeKeysByRun = new Map<string, Set<string>>();
   private readonly indexes = new Map<string, Promise<DenseToolIndex>>();
 
@@ -186,11 +193,11 @@ export class CompositionalToolRoutingTransform {
     this.routeKeysByRun.delete(runId);
     const evidence: CompositionalTransformEvidence[] = [];
     for (const key of keys) {
-      const pending = this.routes.get(key);
+      const work = this.routes.get(key);
       this.routes.delete(key);
-      if (!pending) continue;
+      if (!work) continue;
       try {
-        evidence.push(cloneEvidence((await pending).evidence));
+        evidence.push(cloneEvidence((await work.promise).evidence));
       } catch {
         // Aborted/failed routes do not retain partial evidence.
       }
@@ -203,6 +210,13 @@ export class CompositionalToolRoutingTransform {
       throw new Error(`required compositional routing bypassed: ${reason}`);
     }
     return body;
+  }
+
+  private evictRoute(runId: string, routeKey: string, work: CachedRouteWork): void {
+    if (this.routes.get(routeKey) === work) this.routes.delete(routeKey);
+    const runKeys = this.routeKeysByRun.get(runId);
+    runKeys?.delete(routeKey);
+    if (runKeys?.size === 0) this.routeKeysByRun.delete(runId);
   }
 
   private preparedIndex(
@@ -270,22 +284,25 @@ export class CompositionalToolRoutingTransform {
     const query = extractChatQuery(payload);
     if (!query) return this.bypass(input.body, "request has no user query");
     const routeKey = `${runId}:${queryFingerprint(query)}:${fingerprint}`;
-    let pending = this.routes.get(routeKey);
-    const cacheHit = pending !== undefined;
+    let work = this.routes.get(routeKey);
+    const cacheHit = work !== undefined;
 
-    if (!pending) {
+    if (!work) {
       const catalog: ToolRoutingCatalogEntry<unknown>[] = routable.map((tool) => ({
         name: tool.name,
         description: tool.description,
         definition: tool.definition,
       }));
       const prepared = this.preparedIndex(fingerprint, catalog);
-      pending = (async (): Promise<CachedRoute> => {
+      const controller = new AbortController();
+      const routingSignal = this.options.signal
+        ? AbortSignal.any([this.options.signal, controller.signal])
+        : controller.signal;
+      const promise = (async (): Promise<CachedRoute> => {
         const result = await routeCompositionalTools(query, catalog, {
           ...this.options,
           preparedIndex: prepared.promise,
-          // Requests cancel only their own wait; shared work stays usable.
-          signal: undefined,
+          signal: routingSignal,
         });
         const selected =
           result.disposition === "passthrough"
@@ -315,17 +332,34 @@ export class CompositionalToolRoutingTransform {
           },
         };
       })();
-      this.routes.set(routeKey, pending);
+      work = { promise, controller, waiterCount: 0, settled: false };
+      this.routes.set(routeKey, work);
       const runKeys = this.routeKeysByRun.get(runId) ?? new Set<string>();
       runKeys.add(routeKey);
       this.routeKeysByRun.set(runId, runKeys);
-      void pending.catch(() => {
-        if (this.routes.get(routeKey) === pending) this.routes.delete(routeKey);
-        this.routeKeysByRun.get(runId)?.delete(routeKey);
-      });
+      const createdWork = work;
+      void promise.then(
+        () => {
+          createdWork.settled = true;
+        },
+        () => {
+          createdWork.settled = true;
+          this.evictRoute(runId, routeKey, createdWork);
+        },
+      );
     }
 
-    const cached = await awaitWithAbort(pending, input.signal);
+    work.waiterCount += 1;
+    let cached: CachedRoute;
+    try {
+      cached = await awaitWithAbort(work.promise, input.signal);
+    } finally {
+      work.waiterCount -= 1;
+      if (work.waiterCount === 0 && !work.settled) {
+        work.controller.abort();
+        this.evictRoute(runId, routeKey, work);
+      }
+    }
     if (cacheHit) cached.evidence.cache_hits += 1;
 
     if (cached.evidence.routing.fallback !== null) {

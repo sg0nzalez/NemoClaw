@@ -57,6 +57,7 @@ describe("compositional routing acceptance runner", () => {
         max_attempts: 2,
       },
       embedding: { kind: "portable", dimensions: 1_024 },
+      run_timeout_ms: 900_000,
     });
 
     expect(output).toMatchObject({
@@ -69,6 +70,7 @@ describe("compositional routing acceptance runner", () => {
         decomposer_output_mode: "json-object",
         decomposer_max_attempts: 2,
         request_timeout_ms: 120_000,
+        run_timeout_ms: 900_000,
         embedding_kind: "portable",
         embedding_model: "portable-lexical-hashing",
         embedding_revision: "builtin-v1",
@@ -87,10 +89,16 @@ describe("compositional routing acceptance runner", () => {
         },
         embedding: { requests: 0, failed_requests: 0 },
       },
+      execution: {
+        status: "completed",
+        completed_case_count: 8,
+        total_case_count: 8,
+      },
       acceptance_passed: true,
     });
     expect(output.cases).toHaveLength(8);
     expect(output.cases.every((entry) => entry.shared_initial_decomposition)).toBe(true);
+    expect(output.cases.every((entry) => entry.evaluation_status === "completed")).toBe(true);
     const noTool = output.cases.find((entry) => entry.case_id === "route-no-tool-01");
     expect(noTool?.refined).toMatchObject({
       disposition: "routed",
@@ -163,5 +171,101 @@ describe("compositional routing acceptance runner", () => {
       evidence: { fallback: "initial-decomposition-failed" },
     });
     expect(noTool?.refined.forwarded_tool_names).toHaveLength(20);
+  });
+
+  it("rejects request and overall timeouts outside their supported bounds", async () => {
+    const baseConfig = {
+      decomposer: {
+        base_url: "https://models.example.test/v1",
+        model: "test-decomposer",
+        revision: "immutable-test-revision",
+        allow_remote: true,
+      },
+      embedding: { kind: "portable" as const },
+    };
+
+    await expect(
+      runCompositionalRoutingAcceptance({ ...baseConfig, timeout_ms: 300_001 }),
+    ).rejects.toThrow("timeout_ms must be a positive safe integer no greater than 300000");
+    await expect(
+      runCompositionalRoutingAcceptance({ ...baseConfig, run_timeout_ms: 2_700_001 }),
+    ).rejects.toThrow("run_timeout_ms must be a positive safe integer no greater than 2700000");
+  });
+
+  it("uses the overall deadline to stop outstanding decomposition work", async () => {
+    const fetchMock = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const signal = init?.signal as AbortSignal;
+      signal.throwIfAborted();
+      return new Promise<Response>((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), {
+          once: true,
+        });
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const output = await runCompositionalRoutingAcceptance({
+      decomposer: {
+        base_url: "https://models.example.test/v1",
+        model: "test-decomposer",
+        revision: "immutable-test-revision",
+        allow_remote: true,
+        max_attempts: 3,
+      },
+      embedding: { kind: "portable" },
+      run_timeout_ms: 10,
+    });
+
+    expect(output.acceptance_passed).toBe(false);
+    expect(output.configuration.run_timeout_ms).toBe(10);
+    expect(output.execution).toEqual({
+      status: "timed-out",
+      completed_case_count: 0,
+      total_case_count: 8,
+    });
+    expect(output.comparison.refined.route_failure_case_count).toBe(8);
+    expect(output.comparison.reasons).toContain("run deadline exceeded after 0 of 8 cases");
+    expect(
+      output.cases.every(
+        (entry) =>
+          entry.evaluation_status === "run-deadline-exceeded" &&
+          entry.initial.evidence.fallback === "run-deadline-exceeded" &&
+          entry.refined.evidence.fallback === "run-deadline-exceeded",
+      ),
+    ).toBe(true);
+    expect(output.usage.decomposition).toMatchObject({ requests: 1, failed_requests: 1 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("cannot pass after the monotonic run deadline when timer callbacks are delayed", async () => {
+    let monotonicNow = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => {
+      monotonicNow += 2;
+      return monotonicNow;
+    });
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ choices: [{ message: { content: '{"subtasks":[]}' } }] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const output = await runCompositionalRoutingAcceptance({
+      decomposer: {
+        base_url: "https://models.example.test/v1",
+        model: "test-decomposer",
+        revision: "immutable-test-revision",
+        allow_remote: true,
+      },
+      embedding: { kind: "portable" },
+      run_timeout_ms: 1,
+    });
+
+    expect(output.acceptance_passed).toBe(false);
+    expect(output.execution.status).toBe("timed-out");
+    expect(output.comparison.reasons).toContain("run deadline exceeded after 0 of 8 cases");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

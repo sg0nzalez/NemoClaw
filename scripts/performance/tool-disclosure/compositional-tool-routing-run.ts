@@ -22,11 +22,14 @@ import {
 import {
   createOpenAIChatTaskDecomposer,
   createOpenAITextEmbedder,
+  MAX_COMPOSITIONAL_MODEL_TIMEOUT_MS,
   type ModelUsageEvent,
   PortableHashingTextEmbedder,
 } from "./compositional-tool-routing-adapters";
 
 const SAFE_ENV_NAME = /^[A-Z][A-Z0-9_]{0,127}$/u;
+const DEFAULT_RUN_TIMEOUT_MS = 15 * 60_000;
+const MAX_RUN_TIMEOUT_MS = 45 * 60_000;
 
 export interface CompositionalRoutingRemoteModelConfig {
   base_url: string;
@@ -45,6 +48,7 @@ export interface CompositionalRoutingAcceptanceConfig {
     | { kind: "portable"; dimensions?: number }
     | ({ kind: "openai" } & CompositionalRoutingRemoteModelConfig);
   timeout_ms?: number;
+  run_timeout_ms?: number;
 }
 
 export interface CompositionalRoutingAcceptanceOutput {
@@ -58,6 +62,7 @@ export interface CompositionalRoutingAcceptanceOutput {
     decomposer_output_mode: "json-object" | "prompt-only";
     decomposer_max_attempts: number;
     request_timeout_ms: number;
+    run_timeout_ms: number;
     embedding_kind: "portable" | "openai";
     embedding_model: string;
     embedding_revision: string;
@@ -92,11 +97,17 @@ export interface CompositionalRoutingAcceptanceOutput {
     index_build_time_ms: number;
     end_to_end_time_ms: number;
   };
+  execution: {
+    status: "completed" | "timed-out";
+    completed_case_count: number;
+    total_case_count: number;
+  };
   comparison: CompositionalRoutingComparison;
   cases: readonly {
     case_id: string;
     expected_step_count: number;
-    shared_initial_decomposition: true;
+    evaluation_status: "completed" | "run-deadline-exceeded";
+    shared_initial_decomposition: boolean;
     initial: {
       disposition: CompositionalRoutingResult["disposition"];
       forwarded_tool_names: readonly string[];
@@ -186,6 +197,35 @@ function observation(result: CompositionalRoutingResult) {
   };
 }
 
+function runDeadlineResult(): CompositionalRoutingResult {
+  return {
+    disposition: "passthrough",
+    selected_tool_names: [],
+    evidence: {
+      initial_subtask_count: 0,
+      refined_subtask_count: 0,
+      decomposition_passes: 0,
+      hint_count: 0,
+      hint_tool_names: [],
+      initial_candidate_counts: [],
+      initial_candidate_tool_names: [],
+      final_candidate_counts: [],
+      final_candidate_tool_names: [],
+      selected_tool_count: 0,
+      selected_tool_names: [],
+      fallback: "run-deadline-exceeded",
+      timings: {
+        initial_decomposition_ms: 0,
+        catalog_embedding_ms: 0,
+        initial_retrieval_ms: 0,
+        refinement_ms: 0,
+        final_retrieval_ms: 0,
+        total_ms: 0,
+      },
+    },
+  };
+}
+
 function sumUsage(
   events: readonly ModelUsageEvent[],
   key: "prompt_tokens" | "completion_tokens" | "total_tokens",
@@ -219,8 +259,24 @@ export async function runCompositionalRoutingAcceptance(
   config: CompositionalRoutingAcceptanceConfig,
 ): Promise<CompositionalRoutingAcceptanceOutput> {
   const timeoutMs = config.timeout_ms ?? 120_000;
-  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
-    throw new TypeError("timeout_ms must be a positive safe integer");
+  if (
+    !Number.isSafeInteger(timeoutMs) ||
+    timeoutMs <= 0 ||
+    timeoutMs > MAX_COMPOSITIONAL_MODEL_TIMEOUT_MS
+  ) {
+    throw new TypeError(
+      `timeout_ms must be a positive safe integer no greater than ${MAX_COMPOSITIONAL_MODEL_TIMEOUT_MS}`,
+    );
+  }
+  const runTimeoutMs = config.run_timeout_ms ?? DEFAULT_RUN_TIMEOUT_MS;
+  if (
+    !Number.isSafeInteger(runTimeoutMs) ||
+    runTimeoutMs <= 0 ||
+    runTimeoutMs > MAX_RUN_TIMEOUT_MS
+  ) {
+    throw new TypeError(
+      `run_timeout_ms must be a positive safe integer no greater than ${MAX_RUN_TIMEOUT_MS}`,
+    );
   }
   const usage: ModelUsageEvent[] = [];
   const decomposerRevision = publicIdentity(config.decomposer.revision, "decomposer revision");
@@ -246,32 +302,77 @@ export async function runCompositionalRoutingAcceptance(
       : createOpenAITextEmbedder(remoteOptions(config.embedding, timeoutMs, usage));
 
   const startedAt = performance.now();
+  const deadlineAt = startedAt + runTimeoutMs;
+  const runSignal = AbortSignal.timeout(runTimeoutMs);
+  const deadlineReached = () => runSignal.aborted || performance.now() >= deadlineAt;
   const indexStartedAt = performance.now();
-  const preparedIndex = await buildDenseToolIndex(COMPOSITIONAL_ROUTING_ACCEPTANCE_TOOLS, embedder);
+  let preparedIndex: Awaited<ReturnType<typeof buildDenseToolIndex>> | null = null;
+  let indexError: unknown;
+  let indexFailed = false;
+  try {
+    preparedIndex = await buildDenseToolIndex(
+      COMPOSITIONAL_ROUTING_ACCEPTANCE_TOOLS,
+      embedder,
+      runSignal,
+    );
+  } catch (error) {
+    indexFailed = true;
+    indexError = error;
+  }
   const indexBuildTimeMs = performance.now() - indexStartedAt;
+  let runTimedOut = deadlineReached();
+  if (indexFailed && !runTimedOut) throw indexError;
   const initialPredictions: CompositionalRoutingCasePrediction[] = [];
   const refinedPredictions: CompositionalRoutingCasePrediction[] = [];
   const cases: CompositionalRoutingAcceptanceOutput["cases"][number][] = [];
+  let completedCaseCount = 0;
   for (const fixture of COMPOSITIONAL_ROUTING_ACCEPTANCE_CASES) {
-    const pair = await routeCompositionalToolsPaired(
-      fixture.prompt,
-      COMPOSITIONAL_ROUTING_ACCEPTANCE_TOOLS,
-      { decomposer, embedder, preparedIndex },
-    );
+    runTimedOut ||= deadlineReached();
+    const attemptedPair =
+      runTimedOut || preparedIndex === null
+        ? null
+        : await routeCompositionalToolsPaired(
+            fixture.prompt,
+            COMPOSITIONAL_ROUTING_ACCEPTANCE_TOOLS,
+            { decomposer, embedder, preparedIndex, signal: runSignal },
+          );
+    runTimedOut ||= deadlineReached();
+    const pair =
+      runTimedOut || attemptedPair === null
+        ? {
+            initial: runDeadlineResult(),
+            refined: runDeadlineResult(),
+            shared_initial_decomposition: false as const,
+          }
+        : attemptedPair;
+    if (!runTimedOut) completedCaseCount += 1;
     initialPredictions.push(prediction(fixture.id, pair.initial));
     refinedPredictions.push(prediction(fixture.id, pair.refined));
     cases.push({
       case_id: fixture.id,
       expected_step_count: fixture.expected_steps.length,
-      shared_initial_decomposition: true,
+      evaluation_status: runTimedOut ? "run-deadline-exceeded" : "completed",
+      shared_initial_decomposition: pair.shared_initial_decomposition,
       initial: observation(pair.initial),
       refined: observation(pair.refined),
     });
   }
-  const comparison = compareCompositionalRoutingVariants(
+  runTimedOut ||= deadlineReached();
+  const evaluatedComparison = compareCompositionalRoutingVariants(
     { variant: "initial", cases: initialPredictions },
     { variant: "refined", cases: refinedPredictions },
   );
+  runTimedOut ||= deadlineReached();
+  const comparison: CompositionalRoutingComparison = runTimedOut
+    ? {
+        ...evaluatedComparison,
+        passed: false,
+        reasons: [
+          ...evaluatedComparison.reasons,
+          `run deadline exceeded after ${completedCaseCount} of ${COMPOSITIONAL_ROUTING_ACCEPTANCE_CASES.length} cases`,
+        ],
+      }
+    : evaluatedComparison;
   return {
     schema_version: "nemoclaw.compositional_tool_routing_acceptance.v1",
     generated_at: new Date().toISOString(),
@@ -284,6 +385,7 @@ export async function runCompositionalRoutingAcceptance(
         config.decomposer.json_object_response === true ? "json-object" : "prompt-only",
       decomposer_max_attempts: decomposerMaxAttempts,
       request_timeout_ms: timeoutMs,
+      run_timeout_ms: runTimeoutMs,
       embedding_kind: embeddingKind,
       embedding_model: embeddingModel,
       embedding_revision: embeddingRevision,
@@ -311,9 +413,14 @@ export async function runCompositionalRoutingAcceptance(
       index_build_time_ms: indexBuildTimeMs,
       end_to_end_time_ms: performance.now() - startedAt,
     },
+    execution: {
+      status: runTimedOut ? "timed-out" : "completed",
+      completed_case_count: completedCaseCount,
+      total_case_count: COMPOSITIONAL_ROUTING_ACCEPTANCE_CASES.length,
+    },
     comparison,
     cases,
-    acceptance_passed: comparison.passed,
+    acceptance_passed: !runTimedOut && comparison.passed,
     limitations: [
       "This route-only acceptance run does not execute an agent or a tool.",
       "The eight-case corpus is software acceptance coverage, not a universal quality result.",

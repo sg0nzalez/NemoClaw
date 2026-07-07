@@ -6,6 +6,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createOpenAIChatTaskDecomposer,
   createOpenAITextEmbedder,
+  MAX_COMPOSITIONAL_DECOMPOSER_ATTEMPTS,
+  MAX_COMPOSITIONAL_DECOMPOSITION_BUDGET_MS,
+  MAX_COMPOSITIONAL_MODEL_TIMEOUT_MS,
   type ModelUsageEvent,
   PortableHashingTextEmbedder,
 } from "../../scripts/performance/tool-disclosure/compositional-tool-routing-adapters";
@@ -133,6 +136,178 @@ describe("independent compositional tool model adapters", () => {
       { attempt: 1, outcome: "failed" },
       { attempt: 2, outcome: "completed" },
     ]);
+  });
+
+  it("retries a schema-invalid success response and aggregates usage from both attempts", async () => {
+    const responses = [
+      {
+        content: '{"subtasks":"not-an-array"}',
+        usage: { prompt_tokens: 7, completion_tokens: 3, total_tokens: 10 },
+      },
+      {
+        content: '{"subtasks":["retry succeeded"]}',
+        usage: { prompt_tokens: 8, completion_tokens: 4, total_tokens: 12 },
+      },
+    ];
+    const fetchMock = vi.fn(async () => {
+      const response = responses[fetchMock.mock.calls.length - 1];
+      return new Response(
+        JSON.stringify({
+          choices: [{ message: { content: response.content } }],
+          usage: response.usage,
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const usage: ModelUsageEvent[] = [];
+    const decomposer = createOpenAIChatTaskDecomposer({
+      baseUrl: "https://models.example.test",
+      model: "test-model",
+      allowRemote: true,
+      maxAttempts: 2,
+      onUsage: (event) => usage.push(event),
+    });
+
+    await expect(
+      decomposer.decompose({ pass: "initial", query: "request", tool_hints: [] }),
+    ).resolves.toEqual(["retry succeeded"]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(usage).toMatchObject([
+      {
+        attempt: 1,
+        outcome: "failed",
+        prompt_tokens: 7,
+        completion_tokens: 3,
+        total_tokens: 10,
+      },
+      {
+        attempt: 2,
+        outcome: "completed",
+        prompt_tokens: 8,
+        completion_tokens: 4,
+        total_tokens: 12,
+      },
+    ]);
+    expect(
+      usage.reduce(
+        (totals, event) => ({
+          prompt_tokens: totals.prompt_tokens + (event.prompt_tokens ?? 0),
+          completion_tokens: totals.completion_tokens + (event.completion_tokens ?? 0),
+          total_tokens: totals.total_tokens + (event.total_tokens ?? 0),
+        }),
+        { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+      ),
+    ).toEqual({ prompt_tokens: 15, completion_tokens: 7, total_tokens: 22 });
+  });
+
+  it("stops after the exact configured retry count is exhausted", async () => {
+    const fetchMock = vi.fn(async () => new Response("temporary failure", { status: 503 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const usage: ModelUsageEvent[] = [];
+    const decomposer = createOpenAIChatTaskDecomposer({
+      baseUrl: "https://models.example.test",
+      model: "test-model",
+      allowRemote: true,
+      maxAttempts: 3,
+      onUsage: (event) => usage.push(event),
+    });
+
+    await expect(
+      decomposer.decompose({ pass: "initial", query: "request", tool_hints: [] }),
+    ).rejects.toThrow("decomposition request failed");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(usage).toMatchObject([
+      { attempt: 1, outcome: "failed" },
+      { attempt: 2, outcome: "failed" },
+      { attempt: 3, outcome: "failed" },
+    ]);
+  });
+
+  it("does not retry a non-retryable authentication response", async () => {
+    const fetchMock = vi.fn(async () => new Response("unauthorized", { status: 401 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const usage: ModelUsageEvent[] = [];
+    const decomposer = createOpenAIChatTaskDecomposer({
+      baseUrl: "https://models.example.test",
+      model: "test-model",
+      allowRemote: true,
+      maxAttempts: 3,
+      onUsage: (event) => usage.push(event),
+    });
+
+    await expect(
+      decomposer.decompose({ pass: "initial", query: "request", tool_hints: [] }),
+    ).rejects.toThrow("decomposition request failed");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(usage).toMatchObject([{ attempt: 1, outcome: "failed" }]);
+  });
+
+  it("does not retry after its parent signal aborts", async () => {
+    const controller = new AbortController();
+    const fetchMock = vi.fn(async () => {
+      controller.abort();
+      throw new DOMException("aborted", "AbortError");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const usage: ModelUsageEvent[] = [];
+    const decomposer = createOpenAIChatTaskDecomposer({
+      baseUrl: "https://models.example.test",
+      model: "test-model",
+      allowRemote: true,
+      maxAttempts: 3,
+      onUsage: (event) => usage.push(event),
+    });
+
+    await expect(
+      decomposer.decompose({
+        pass: "initial",
+        query: "request",
+        tool_hints: [],
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow("decomposition request failed");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(usage).toMatchObject([{ attempt: 1, outcome: "failed" }]);
+  });
+
+  it("enforces attempt, request-timeout, and total decomposition budget ceilings", () => {
+    const baseOptions = {
+      baseUrl: "https://models.example.test",
+      model: "test-model",
+      allowRemote: true,
+    } as const;
+
+    expect(() =>
+      createOpenAIChatTaskDecomposer({
+        ...baseOptions,
+        maxAttempts: MAX_COMPOSITIONAL_DECOMPOSER_ATTEMPTS + 1,
+      }),
+    ).toThrow(`maxAttempts must not exceed ${MAX_COMPOSITIONAL_DECOMPOSER_ATTEMPTS}`);
+    expect(() =>
+      createOpenAIChatTaskDecomposer({
+        ...baseOptions,
+        timeoutMs: MAX_COMPOSITIONAL_MODEL_TIMEOUT_MS + 1,
+      }),
+    ).toThrow(`timeoutMs must not exceed ${MAX_COMPOSITIONAL_MODEL_TIMEOUT_MS}`);
+    expect(() =>
+      createOpenAITextEmbedder({
+        ...baseOptions,
+        timeoutMs: MAX_COMPOSITIONAL_MODEL_TIMEOUT_MS + 1,
+      }),
+    ).toThrow(`timeoutMs must not exceed ${MAX_COMPOSITIONAL_MODEL_TIMEOUT_MS}`);
+    expect(() =>
+      createOpenAIChatTaskDecomposer({
+        ...baseOptions,
+        maxAttempts: MAX_COMPOSITIONAL_DECOMPOSER_ATTEMPTS,
+        timeoutMs:
+          Math.floor(
+            MAX_COMPOSITIONAL_DECOMPOSITION_BUDGET_MS / MAX_COMPOSITIONAL_DECOMPOSER_ATTEMPTS,
+          ) + 1,
+      }),
+    ).toThrow(
+      `timeoutMs * maxAttempts must not exceed ${MAX_COMPOSITIONAL_DECOMPOSITION_BUDGET_MS}`,
+    );
   });
 
   it("batches embeddings and restores provider results to input order", async () => {

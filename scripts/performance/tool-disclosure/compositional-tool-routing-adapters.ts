@@ -3,7 +3,13 @@
 
 import { performance } from "node:perf_hooks";
 
-import type { DecompositionPass, TaskDecomposer, TextEmbedder } from "./compositional-tool-router";
+import {
+  COMPOSITIONAL_ROUTER_MAX_SUBTASK_CHARS,
+  COMPOSITIONAL_ROUTER_MAX_SUBTASKS,
+  type DecompositionPass,
+  type TaskDecomposer,
+  type TextEmbedder,
+} from "./compositional-tool-router";
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 const DEFAULT_MAX_OUTPUT_TOKENS = 256;
@@ -11,6 +17,9 @@ const DEFAULT_EMBEDDING_BATCH_SIZE = 128;
 const DEFAULT_HASH_DIMENSIONS = 1_024;
 const MAX_TEXT_CHARS = 32_768;
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
+export const MAX_COMPOSITIONAL_DECOMPOSER_ATTEMPTS = 3;
+export const MAX_COMPOSITIONAL_MODEL_TIMEOUT_MS = 300_000;
+export const MAX_COMPOSITIONAL_DECOMPOSITION_BUDGET_MS = 600_000;
 
 interface JsonRecord {
   [key: string]: unknown;
@@ -59,6 +68,18 @@ function positiveInteger(value: number, label: string): number {
     throw new TypeError(`${label} must be a positive safe integer`);
   }
   return value;
+}
+
+function boundedPositiveInteger(value: number, label: string, maximum: number): number {
+  const validated = positiveInteger(value, label);
+  if (validated > maximum) throw new RangeError(`${label} must not exceed ${maximum}`);
+  return validated;
+}
+
+class ModelHttpStatusError extends Error {
+  constructor(readonly status: number) {
+    super("model request failed");
+  }
 }
 
 function endpoint(
@@ -193,7 +214,7 @@ function jsonPayloadText(value: string): string {
   return trimmed.slice(firstNewline + 1, lastFence).trim();
 }
 
-function parseDecompositionResponse(value: unknown): unknown {
+function parseDecompositionResponse(value: unknown): string[] {
   if (!isRecord(value) || !Array.isArray(value.choices)) {
     throw new Error("decomposition response has an unsupported shape");
   }
@@ -208,7 +229,26 @@ function parseDecompositionResponse(value: unknown): unknown {
   } catch {
     throw new Error("decomposition response contains invalid JSON");
   }
-  return isRecord(parsed) && Array.isArray(parsed.subtasks) ? parsed.subtasks : parsed;
+  const subtasks = isRecord(parsed) && Array.isArray(parsed.subtasks) ? parsed.subtasks : parsed;
+  if (!Array.isArray(subtasks) || subtasks.length > COMPOSITIONAL_ROUTER_MAX_SUBTASKS) {
+    throw new Error("decomposition response has an invalid subtask array");
+  }
+  return subtasks.map((item) => {
+    if (typeof item !== "string") {
+      throw new Error("decomposition response has a non-string subtask");
+    }
+    const normalized = item.trim();
+    if (!normalized || normalized.length > COMPOSITIONAL_ROUTER_MAX_SUBTASK_CHARS) {
+      throw new Error("decomposition response has an invalid subtask");
+    }
+    return normalized;
+  });
+}
+
+function retryableDecompositionError(error: unknown, parent: AbortSignal | undefined): boolean {
+  if (parent?.aborted) return false;
+  if (!(error instanceof ModelHttpStatusError)) return true;
+  return error.status === 408 || error.status === 429 || error.status >= 500;
 }
 
 /** Build the two-pass decomposer using any OpenAI-compatible chat endpoint. */
@@ -227,12 +267,25 @@ export function createOpenAIChatTaskDecomposer(
   }
   const target = endpoint(options.baseUrl, "chat/completions", options.allowRemote === true);
   const model = boundedText(options.model, "decomposition model");
-  const timeoutMs = positiveInteger(options.timeoutMs ?? DEFAULT_TIMEOUT_MS, "timeoutMs");
+  const timeoutMs = boundedPositiveInteger(
+    options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    "timeoutMs",
+    MAX_COMPOSITIONAL_MODEL_TIMEOUT_MS,
+  );
   const maxOutputTokens = positiveInteger(
     options.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
     "maxOutputTokens",
   );
-  const maxAttempts = positiveInteger(options.maxAttempts ?? 1, "maxAttempts");
+  const maxAttempts = boundedPositiveInteger(
+    options.maxAttempts ?? 1,
+    "maxAttempts",
+    MAX_COMPOSITIONAL_DECOMPOSER_ATTEMPTS,
+  );
+  if (timeoutMs * maxAttempts > MAX_COMPOSITIONAL_DECOMPOSITION_BUDGET_MS) {
+    throw new RangeError(
+      `timeoutMs * maxAttempts must not exceed ${MAX_COMPOSITIONAL_DECOMPOSITION_BUDGET_MS}`,
+    );
+  }
   return {
     decompose: async (request) => {
       const query = boundedText(request.query, "decomposition query");
@@ -264,13 +317,13 @@ export function createOpenAIChatTaskDecomposer(
             }),
             signal: boundedSignal(timeoutMs, request.signal),
           });
-          if (!response.ok) throw new Error("decomposition request failed");
+          if (!response.ok) throw new ModelHttpStatusError(response.status);
           body = await readBoundedJson(response);
           const parsed = parseDecompositionResponse(body);
           outcome = "completed";
           return parsed;
-        } catch {
-          if (request.signal?.aborted || attempt === maxAttempts) {
+        } catch (error) {
+          if (!retryableDecompositionError(error, request.signal) || attempt === maxAttempts) {
             throw new Error("decomposition request failed");
           }
         } finally {
@@ -319,7 +372,11 @@ function parseEmbeddingResponse(value: unknown, expected: number): number[][] {
 export function createOpenAITextEmbedder(options: OpenAITextEmbedderOptions): TextEmbedder {
   const target = endpoint(options.baseUrl, "embeddings", options.allowRemote === true);
   const model = boundedText(options.model, "embedding model");
-  const timeoutMs = positiveInteger(options.timeoutMs ?? DEFAULT_TIMEOUT_MS, "timeoutMs");
+  const timeoutMs = boundedPositiveInteger(
+    options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    "timeoutMs",
+    MAX_COMPOSITIONAL_MODEL_TIMEOUT_MS,
+  );
   const batchSize = positiveInteger(options.batchSize ?? DEFAULT_EMBEDDING_BATCH_SIZE, "batchSize");
   return {
     embed: async (texts, signal) => {

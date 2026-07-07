@@ -355,10 +355,65 @@ describe("independent compositional tool request transform", () => {
     releaseInitial?.(["list calendar events"]);
 
     expect(names(await second)).toEqual(["core_shell", "route_calendar_list"]);
-    expect(decompositionSignals).toEqual([undefined, undefined]);
-    expect(embeddingSignals.every((signal) => signal === undefined)).toBe(true);
+    const [routeSignal] = decompositionSignals;
+    expect(routeSignal).toBeDefined();
+    expect(decompositionSignals.every((signal) => signal === routeSignal)).toBe(true);
+    expect(routeSignal?.aborted).toBe(false);
+    expect(embeddingSignals[0]).toBeUndefined();
+    expect(embeddingSignals.slice(1).every((signal) => signal === routeSignal)).toBe(true);
     expect(await transform.consumeEvidence("route-test-run")).toMatchObject([
       { cache_hits: 1, routing: { fallback: null } },
+    ]);
+  });
+
+  it("cancels unfinished route work after its last waiter aborts and starts fresh work", async () => {
+    let initialCalls = 0;
+    let firstRouteSignal: AbortSignal | undefined;
+    let markFirstStarted: (() => void) | undefined;
+    const firstStarted = new Promise<void>((resolve) => {
+      markFirstStarted = resolve;
+    });
+    const transform = new CompositionalToolRoutingTransform({
+      decomposer: {
+        decompose: async (request) => {
+          initialCalls += request.pass === "initial" ? 1 : 0;
+          const holdFirst = request.pass === "initial" && initialCalls === 1;
+          return holdFirst
+            ? ((firstRouteSignal = request.signal),
+              markFirstStarted?.(),
+              new Promise<string[]>((_resolve, reject) => {
+                request.signal?.addEventListener(
+                  "abort",
+                  () => reject(new DOMException("routing aborted", "AbortError")),
+                  { once: true },
+                );
+              }))
+            : ["list calendar events"];
+        },
+      },
+      embedder,
+      isRoutableTool: (name) => name.startsWith("route_"),
+    });
+    const body = requestBody("List today's calendar events.");
+    const controller = new AbortController();
+    const first = transform.requestTransform({
+      ...input(body),
+      signal: controller.signal,
+    });
+    await firstStarted;
+    const firstRejection = expect(first).rejects.toMatchObject({ name: "AbortError" });
+
+    controller.abort();
+    await firstRejection;
+
+    expect(firstRouteSignal?.aborted).toBe(true);
+    expect(await transform.consumeEvidence("route-test-run")).toEqual([]);
+
+    const fresh = await transform.requestTransform(input(body, 2));
+    expect(names(fresh)).toEqual(["core_shell", "route_calendar_list"]);
+    expect(initialCalls).toBe(2);
+    expect(await transform.consumeEvidence("route-test-run")).toMatchObject([
+      { cache_hits: 0, routing: { fallback: null } },
     ]);
   });
 
