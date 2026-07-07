@@ -341,9 +341,15 @@ export class CompositionalToolRoutingTransform {
       cached.evidence.forwarded_tool_count = tools.length;
       return this.bypass(input.body, "named tool choice conflicts with routed catalog");
     }
-    payload.tools = tools
-      .filter((tool) => !tool.routable || cached.selectedNames.has(tool.name))
-      .map((tool) => tool.definition);
+    const forwardedTools = tools.filter(
+      (tool) => !tool.routable || cached.selectedNames.has(tool.name),
+    );
+    if (payload.tool_choice === "required" && forwardedTools.length === 0) {
+      cached.evidence.transform_bypass = "tool-choice-conflict";
+      cached.evidence.forwarded_tool_count = tools.length;
+      return this.bypass(input.body, "required tool choice has no routed tools");
+    }
+    payload.tools = forwardedTools.map((tool) => tool.definition);
     return Buffer.from(JSON.stringify(payload), "utf8");
   }
 }

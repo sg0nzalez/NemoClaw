@@ -404,4 +404,45 @@ describe("independent compositional tool request transform", () => {
       { transform_bypass: "tool-choice-conflict", forwarded_tool_count: 4 },
     ]);
   });
+
+  it("preserves a required-tool request when routing would expose no tools", async () => {
+    const transform = new CompositionalToolRoutingTransform({
+      decomposer: { decompose: async () => [] },
+      embedder,
+      isRoutableTool: (name) => name.startsWith("route_"),
+    });
+    const payload = JSON.parse(requestBody().toString("utf8")) as { tools: unknown[] } & Record<
+      string,
+      unknown
+    >;
+    payload.tools = payload.tools.slice(1);
+    payload.tool_choice = "required";
+    const body = Buffer.from(JSON.stringify(payload), "utf8");
+
+    expect((await transform.requestTransform(input(body))).equals(body)).toBe(true);
+    expect(await transform.consumeEvidence("route-test-run")).toMatchObject([
+      { transform_bypass: "tool-choice-conflict", forwarded_tool_count: 3 },
+    ]);
+  });
+
+  it("rejects an empty required-tool route in strict mode", async () => {
+    const transform = new CompositionalToolRoutingTransform({
+      decomposer: { decompose: async () => [] },
+      embedder,
+      isRoutableTool: (name) => name.startsWith("route_"),
+      requireRouting: true,
+    });
+    const payload = JSON.parse(requestBody().toString("utf8")) as { tools: unknown[] } & Record<
+      string,
+      unknown
+    >;
+    payload.tools = payload.tools.slice(1);
+    payload.tool_choice = "required";
+
+    await expect(
+      transform.requestTransform(input(Buffer.from(JSON.stringify(payload), "utf8"))),
+    ).rejects.toThrow(
+      "required compositional routing bypassed: required tool choice has no routed tools",
+    );
+  });
 });
