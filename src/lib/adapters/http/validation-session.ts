@@ -146,6 +146,7 @@ function buildLookup(addresses: Array<{ address: string; family: number }>): net
         Object.assign(new Error(`no resolved IPv${requestedFamily} address is available`), {
           code: "ENOTFOUND",
         }),
+        [],
       );
       return;
     }
