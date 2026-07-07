@@ -17,10 +17,15 @@ import {
 import { basename, join } from "node:path";
 import { dockerSpawnSync } from "../adapters/docker";
 import { resolveOpenshell } from "../adapters/openshell/resolve";
+import {
+  OPENSHELL_OPERATION_TIMEOUT_MS,
+  OPENSHELL_PROBE_TIMEOUT_MS,
+} from "../adapters/openshell/timeouts";
 import { renderBox } from "../cli/banner";
 import { AGENT_PRODUCT_NAME, CLI_DISPLAY_NAME, CLI_NAME } from "../cli/branding";
 import { isRecord } from "../core/json-types";
 import { DASHBOARD_PORT } from "../core/ports";
+import { getOccupiedPorts } from "../onboard/dashboard-port";
 import { buildSubprocessEnv } from "../subprocess-env";
 import { registerTunnelOrigin } from "./allowed-origins";
 import * as gatewayStop from "./gateway-stop";
@@ -459,7 +464,7 @@ export function showStatus(opts: ServiceOptions = {}): void {
  * post-stop process scan is empty.
  */
 export function stopSandboxChannels(sandboxName: string): void {
-  info(`Stopping in-sandbox OpenClaw gateway (sandbox: ${sandboxName})...`);
+  info(`Stopping in-sandbox ${AGENT_PRODUCT_NAME} gateway (sandbox: ${sandboxName})...`);
 
   const privilegedResult = stopSandboxChannelsViaKubectl(sandboxName);
   if (reportStopResult(privilegedResult)) return;
@@ -587,6 +592,39 @@ function reportStopResult(result: StopAttemptResult | null): boolean {
   return true;
 }
 
+function stopSandboxForwards(sandboxName: string): void {
+  const openshell = resolveOpenshell();
+  if (!openshell) {
+    warn("openshell not found — cannot release managed host forwards.");
+    return;
+  }
+
+  const listResult = spawnSync(openshell, ["forward", "list"], {
+    encoding: "utf-8",
+    stdio: ["ignore", "pipe", "pipe"],
+    timeout: OPENSHELL_PROBE_TIMEOUT_MS,
+  });
+  if (listResult.status !== 0) {
+    warn("Could not list OpenShell forwards — managed host forwards may still be running.");
+    return;
+  }
+
+  const output = listResult.stdout ?? "";
+  const ports = [...getOccupiedPorts(output).entries()]
+    .filter(([, owner]) => owner === sandboxName)
+    .map(([port]) => port);
+  for (const port of ports) {
+    spawnSync(openshell, ["forward", "stop", port, sandboxName], {
+      encoding: "utf-8",
+      stdio: "ignore",
+      timeout: OPENSHELL_OPERATION_TIMEOUT_MS,
+    });
+  }
+  if (ports.length > 0) {
+    info(`Released ${String(ports.length)} managed host forward(s) for sandbox ${sandboxName}.`);
+  }
+}
+
 export function stopAll(opts: ServiceOptions = {}): void {
   // Stop the in-sandbox OpenClaw gateway (and its messaging channels).
   const rawSandboxName =
@@ -625,6 +663,9 @@ export function stopAll(opts: ServiceOptions = {}): void {
   stopService(pidDir, "cloudflared");
 
   if (opts.releaseGatewayPort) {
+    if (sandboxName) {
+      stopSandboxForwards(sandboxName);
+    }
     gatewayStop.releaseGatewayPortForStop(sandboxName, { info, warn });
   }
 

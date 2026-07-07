@@ -242,6 +242,49 @@ describe("stopAll with sandbox channels", () => {
     logSpy.mockRestore();
   });
 
+  it("releases managed host forwards for the selected sandbox on deprecated full stop", () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    spawnSyncSpy
+      .mockReturnValueOnce({ status: 1, stdout: "" })
+      .mockReturnValueOnce({ status: 1 })
+      .mockReturnValueOnce({
+        status: 0,
+        stdout: [
+          "SANDBOX   BIND        PORT   PID    STATUS",
+          "test-sb   127.0.0.1   8642   1234   running",
+          "other-sb  127.0.0.1   18789  1235   running",
+          "test-sb   127.0.0.1   18790  1236   active",
+        ].join("\n"),
+      })
+      .mockReturnValue({ status: 0 });
+
+    stopAll({ pidDir, sandboxName: "test-sb", releaseGatewayPort: true });
+
+    expect(spawnSyncSpy).toHaveBeenCalledWith(
+      "/usr/local/bin/openshell",
+      ["forward", "list"],
+      expect.objectContaining({ timeout: 15_000 }),
+    );
+    expect(spawnSyncSpy).toHaveBeenCalledWith(
+      "/usr/local/bin/openshell",
+      ["forward", "stop", "8642", "test-sb"],
+      expect.objectContaining({ timeout: 30_000 }),
+    );
+    expect(spawnSyncSpy).toHaveBeenCalledWith(
+      "/usr/local/bin/openshell",
+      ["forward", "stop", "18790", "test-sb"],
+      expect.objectContaining({ timeout: 30_000 }),
+    );
+    expect(spawnSyncSpy).not.toHaveBeenCalledWith(
+      "/usr/local/bin/openshell",
+      ["forward", "stop", "18789", "test-sb"],
+      expect.any(Object),
+    );
+    const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+    expect(output).toContain("Released 2 managed host forward(s) for sandbox test-sb");
+    logSpy.mockRestore();
+  });
+
   it("warns when no sandbox name is available", () => {
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     const savedNemoclaw = process.env.NEMOCLAW_SANDBOX;
