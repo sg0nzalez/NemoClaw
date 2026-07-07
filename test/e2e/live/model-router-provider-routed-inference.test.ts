@@ -6,7 +6,7 @@ import path from "node:path";
 
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
-import { CLI_ENTRYPOINT, REPO_ROOT } from "../fixtures/paths.ts";
+import { CLI_ENTRYPOINT } from "../fixtures/paths.ts";
 import {
   buildProviderRoutedEnv,
   requireModelRouterPublicKey,
