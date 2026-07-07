@@ -122,8 +122,9 @@ hermes
 If the request fails, check these items.
 
 1. Run `$$nemoclaw <name> status` to confirm the active provider and endpoint.
-   For local Ollama and local vLLM, check the `Inference` line first.
-   If it shows `unreachable`, restart the local backend before retrying from inside the sandbox.
+   Check the main `Inference` line first.
+   If it shows `unhealthy`, `unreachable`, or `not probed`, inspect the labeled upstream, local-backend, and auth-proxy diagnostics to identify the failing hop.
+   Restart a local backend only when its own diagnostic fails.
 2. Run `$$nemoclaw <name> logs --follow` to view error messages from the blueprint runner.
 3. Verify that the host can reach the inference endpoint.
 4. If the agent reports a context-overflow or token-limit error, clear the conversation with `/reset` (or start a fresh one with `/new`) in the TUI before retrying.

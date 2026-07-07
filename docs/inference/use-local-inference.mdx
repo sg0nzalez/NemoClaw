@@ -160,7 +160,7 @@ OpenShell's L7 proxy injects the token at egress, so the agent inside the sandbo
 
 All proxy endpoints require the Bearer token, including `GET /api/tags`.
 Host-side proxy liveness diagnostics treat an HTTP response such as `401` as proof that the proxy answered.
-The authoritative `status` and `doctor` route probe runs from inside the sandbox and reports HTTP `100` through `499` as `healthy`, HTTP `500` through `599` as `unhealthy`, and `000`, a transport failure, or an unavailable probe as `unreachable` or `not probed`.
+The authoritative `status` and `doctor` route probe runs from inside the sandbox and reports HTTP `200` through `499` as `healthy`, HTTP `500` through `599` as `unhealthy`, and an interim `100` through `199`, `000`, a transport failure, or an unavailable probe as `unreachable` or `not probed`.
 
 If Ollama is already running on a non-loopback address when you start onboard, the wizard restarts it on `127.0.0.1:11434`.
 The proxy becomes the only network path to the model server.

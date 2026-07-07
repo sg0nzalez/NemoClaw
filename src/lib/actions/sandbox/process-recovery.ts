@@ -402,8 +402,9 @@ export async function isSandboxGatewayRunningForStatus(
 /**
  * Probe the full inference chain by curling `https://inference.local/v1/models`
  * from inside the sandbox via the same agent-aware argv and parser as connect.
- * HTTP 1xx–4xx means the route answered, 5xx is unhealthy, and 000 or an
- * unavailable probe is broken. This is the authoritative path used by agents.
+ * HTTP 2xx–4xx means the route answered, 5xx is unhealthy, and an interim 1xx,
+ * 000, or unavailable probe is broken. This is the authoritative path used by
+ * agents. A null result means the probe was unavailable; callers fail closed.
  *
  * The OpenShell capture and agent lookup are injectable for tests.
  */

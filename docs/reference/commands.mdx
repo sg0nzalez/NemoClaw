@@ -941,9 +941,9 @@ The main `Inference` line reports one of these states:
 
 | State | Meaning |
 |-------|---------|
-| `healthy` | The route returned an HTTP status from `100` through `499`. Authentication responses such as `401` and `403` confirm route reachability. |
+| `healthy` | The route returned an HTTP status from `200` through `499`. Authentication responses such as `401` and `403` confirm route reachability. |
 | `unhealthy` | The route returned an HTTP status from `500` through `599`. |
-| `unreachable` | The route had a transport failure, returned no HTTP status (`000`), or returned an invalid status outside `100` through `599`. |
+| `unreachable` | The route had a transport failure, returned no final HTTP status (`000` or an interim `100` through `199`), or returned an invalid status outside `100` through `599`. |
 | `not probed` | NemoClaw could not run the authoritative route probe from a reachable sandbox. |
 | `not verified` | NemoClaw could not verify the sandbox or gateway state, so it skips inference probing. |
 
@@ -1045,8 +1045,8 @@ Run a focused health check for one sandbox and the host services it depends on.
 The command checks the local CLI build, Docker daemon, OpenShell CLI, NemoClaw gateway container, gateway port mapping, live sandbox state, inference route, provider reachability, messaging channel conflicts, Ollama reachability, and the cloudflared tunnel state.
 
 For inference health, `doctor` treats the probe to `https://inference.local/v1/models` from inside the sandbox as authoritative.
-HTTP responses from `100` through `499`, including `401` and `403`, pass this check.
-HTTP `500` through `599`, transport failures with status `000`, invalid status values, and an unavailable authoritative probe fail the check.
+HTTP responses from `200` through `499`, including `401` and `403`, pass this check.
+HTTP `500` through `599`, interim `100` through `199`, transport failures with status `000`, invalid status values, and an unavailable authoritative probe fail the check.
 Direct provider and upstream probes are diagnostics only, so their failure does not fail `doctor` when the authoritative in-sandbox route is healthy.
 
 Warnings do not make the command fail.

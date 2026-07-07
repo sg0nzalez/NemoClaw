@@ -11,7 +11,7 @@ import {
 
 const INFERENCE_ROUTE_PROBE_SCRIPT = [
   "HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 3 --max-time 8 https://inference.local/v1/models 2>/dev/null) || HTTP_CODE=000",
-  'case "$HTTP_CODE" in [1-4][0-9][0-9]) printf \'OK %s\' "$HTTP_CODE" ;; *) printf \'BROKEN %s\' "$HTTP_CODE" ;; esac',
+  'case "$HTTP_CODE" in [2-4][0-9][0-9]) printf \'OK %s\' "$HTTP_CODE" ;; *) printf \'BROKEN %s\' "$HTTP_CODE" ;; esac',
 ].join("; ");
 
 describe("sandbox connect inference route probe argv", () => {
@@ -83,6 +83,8 @@ describe("sandbox connect inference route probe argv", () => {
 describe("sandbox inference route probe result", () => {
   it.each([
     [0, "unreachable"],
+    [100, "unreachable"],
+    [199, "unreachable"],
     [499, "unreachable"],
     [500, "unhealthy"],
     [599, "unhealthy"],
@@ -91,12 +93,7 @@ describe("sandbox inference route probe result", () => {
     expect(classifyInferenceRouteFailureLabel(httpStatus)).toBe(expected);
   });
 
-  it.each([
-    "100",
-    "200",
-    "401",
-    "499",
-  ])("accepts HTTP %s as a reachable route (#6192)", (httpStatus) => {
+  it.each(["200", "401", "499"])("accepts HTTP %s as a reachable route (#6192)", (httpStatus) => {
     expect(
       parseSandboxInferenceRouteProbeResult({ status: 0, output: `OK ${httpStatus}` }),
     ).toMatchObject({ healthy: true, broken: false, httpStatus: Number(httpStatus) });
@@ -104,6 +101,8 @@ describe("sandbox inference route probe result", () => {
 
   it.each([
     "000",
+    "100",
+    "199",
     "500",
     "503",
     "599",
@@ -125,6 +124,14 @@ describe("sandbox inference route probe result", () => {
       healthy: false,
       broken: true,
       httpStatus: 503,
+    });
+  });
+
+  it("fails closed when malformed output claims an interim status is OK (#6192)", () => {
+    expect(parseSandboxInferenceRouteProbeResult({ status: 0, output: "OK 100" })).toMatchObject({
+      healthy: false,
+      broken: true,
+      httpStatus: 100,
     });
   });
 

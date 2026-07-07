@@ -19,7 +19,7 @@ type InferenceRouteProbeCommandResult = {
 
 const INFERENCE_ROUTE_PROBE_SCRIPT = [
   "HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 3 --max-time 8 https://inference.local/v1/models 2>/dev/null) || HTTP_CODE=000",
-  'case "$HTTP_CODE" in [1-4][0-9][0-9]) printf \'OK %s\' "$HTTP_CODE" ;; *) printf \'BROKEN %s\' "$HTTP_CODE" ;; esac',
+  'case "$HTTP_CODE" in [2-4][0-9][0-9]) printf \'OK %s\' "$HTTP_CODE" ;; *) printf \'BROKEN %s\' "$HTTP_CODE" ;; esac',
 ].join("; ");
 
 const PROXY_ENV_KEYS = [
@@ -71,7 +71,7 @@ export function parseSandboxInferenceRouteProbeResult(
   const detail = rawDetail.replace(/^(?:\[stdout\]|stdout:)\s*/i, "");
   const match = /^(OK|BROKEN)\s+([0-9]{3})\b/.exec(detail);
   const httpStatus = match ? Number.parseInt(match[2], 10) : 0;
-  const isReachableHttpStatus = httpStatus >= 100 && httpStatus < 500;
+  const isReachableHttpStatus = httpStatus >= 200 && httpStatus < 500;
   const healthy = result.status === 0 && match?.[1] === "OK" && isReachableHttpStatus;
   const broken = Boolean(match) && (match?.[1] === "BROKEN" || !isReachableHttpStatus);
   return {
