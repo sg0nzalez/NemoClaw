@@ -91,13 +91,14 @@ describe("confirmRecoveredSandboxGatewayManaged scope", () => {
 });
 
 describe("probeSandboxInferenceGatewayHealth gateway-chain subprobe (#3265)", () => {
-  const makeExec =
-    (stdout: string, status = 0) =>
-    async () => ({ status, stdout, stderr: "" });
+  const makeCapture =
+    (output: string, status = 0) =>
+    async () =>
+      ({ status, output }) as never;
 
-  it("reports healthy on any HTTP response (including 401) because the routing chain is up", async () => {
+  it("reports healthy when the shared route probe receives HTTP 200", async () => {
     const result = await probeSandboxInferenceGatewayHealth("my-sandbox", {
-      execImpl: makeExec("200"),
+      captureOpenshellImpl: makeCapture("OK 200"),
     });
     expect(result?.ok).toBe(true);
     expect(result?.httpStatus).toBe(200);
@@ -108,15 +109,24 @@ describe("probeSandboxInferenceGatewayHealth gateway-chain subprobe (#3265)", ()
 
   it("treats 401 as routing-OK (auth wall reached means the chain works)", async () => {
     const result = await probeSandboxInferenceGatewayHealth("my-sandbox", {
-      execImpl: makeExec("401"),
+      captureOpenshellImpl: makeCapture("OK 401"),
     });
     expect(result?.ok).toBe(true);
     expect(result?.httpStatus).toBe(401);
   });
 
+  it("treats HTTP 503 as an unhealthy authoritative route (#6192)", async () => {
+    const result = await probeSandboxInferenceGatewayHealth("my-sandbox", {
+      captureOpenshellImpl: makeCapture("BROKEN 503 service unavailable"),
+    });
+    expect(result?.ok).toBe(false);
+    expect(result?.httpStatus).toBe(503);
+    expect(result?.detail).toContain("reachable but unhealthy");
+  });
+
   it("reports unreachable when curl returns 000 (DNS or connection refused)", async () => {
     const result = await probeSandboxInferenceGatewayHealth("my-sandbox", {
-      execImpl: makeExec("000"),
+      captureOpenshellImpl: makeCapture("BROKEN 000"),
     });
     expect(result?.ok).toBe(false);
     expect(result?.httpStatus).toBe(0);
@@ -124,18 +134,44 @@ describe("probeSandboxInferenceGatewayHealth gateway-chain subprobe (#3265)", ()
     expect(result?.detail).toContain("https://inference.local/v1/models");
   });
 
-  it("returns null when the sandbox exec itself fails (probe unavailable, omit the line)", async () => {
+  it("returns null when the sandbox exec itself is unavailable (#6192)", async () => {
     const result = await probeSandboxInferenceGatewayHealth("my-sandbox", {
-      execImpl: async () => null,
+      captureOpenshellImpl: makeCapture("transport unavailable", 1),
     });
     expect(result).toBeNull();
   });
 
-  it("returns null when exec returns a non-zero status (sandbox unreachable or stopped)", async () => {
+  it("returns null when the route probe throws before producing a result (#6192)", async () => {
     const result = await probeSandboxInferenceGatewayHealth("my-sandbox", {
-      execImpl: makeExec("000", 127),
+      captureOpenshellImpl: async () => {
+        throw new Error("openshell unavailable");
+      },
     });
     expect(result).toBeNull();
+  });
+
+  it("uses the DCode login-shell route argv for status and doctor (#6192)", async () => {
+    const captureOpenshellImpl = vi.fn(makeCapture("OK 200"));
+
+    await probeSandboxInferenceGatewayHealth("deep-code", {
+      captureOpenshellImpl,
+      getSessionAgentImpl: () => ({ name: "langchain-deepagents-code" }) as never,
+    });
+
+    expect(captureOpenshellImpl).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        "sandbox",
+        "exec",
+        "--name",
+        "deep-code",
+        "--",
+        "env",
+        "HOME=/sandbox",
+        "bash",
+        "-lc",
+      ]),
+      expect.objectContaining({ ignoreError: true }),
+    );
   });
 });
 

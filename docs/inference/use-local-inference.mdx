@@ -159,8 +159,8 @@ NemoClaw configures the sandbox provider to use proxy port `11435` with the gene
 OpenShell's L7 proxy injects the token at egress, so the agent inside the sandbox never sees the token directly.
 
 All proxy endpoints require the Bearer token, including `GET /api/tags`.
-Internal health and reachability checks that run through the proxy treat any HTTP response, including `401`, as proof the proxy is alive.
-They fail only when nothing answers at all.
+Host-side proxy liveness diagnostics treat an HTTP response such as `401` as proof that the proxy answered.
+The authoritative `status` and `doctor` route probe runs from inside the sandbox and treats HTTP `100` through `499` as reachable, HTTP `500` through `599` as unhealthy, and `000` or an unavailable probe as broken.
 
 If Ollama is already running on a non-loopback address when you start onboard, the wizard restarts it on `127.0.0.1:11434`.
 The proxy becomes the only network path to the model server.
@@ -275,8 +275,9 @@ $$nemoclaw <name> status
 ```
 
 The output shows the provider label (for example, "Local vLLM" or "Other OpenAI-compatible endpoint") and the active model.
-For Local Ollama, status also checks the authenticated proxy when a proxy token is available.
-If `Inference` is healthy but `Inference (auth proxy)` is not, rerun onboarding to repair the proxy path that sandbox requests use.
+The main `Inference` line checks `inference.local` from inside the sandbox, which is the path agent requests use.
+For Local Ollama, status can also print an `Inference (auth proxy)` host-side diagnostic when a proxy token is available.
+If that diagnostic fails, rerun onboarding to recreate the proxy token and restart the proxy, even if the authoritative route is still responding.
 
 ## Switch Models at Runtime
 

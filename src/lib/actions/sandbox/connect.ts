@@ -58,6 +58,7 @@ import {
 import {
   buildSandboxInferenceRouteProbeArgs,
   type InferenceRouteProbeAgent,
+  parseSandboxInferenceRouteProbeResult,
 } from "./connect-inference-route-probe";
 import { preflightVllmModelEnvOrExit } from "./connect-vllm-preflight";
 import { isDockerRuntimeDown, printDockerRuntimeDownGuidance } from "./gateway-failure-classifier";
@@ -366,11 +367,11 @@ function probeSandboxInferenceRoute(
       ignoreError: true,
       timeout: OPENSHELL_INFERENCE_ROUTE_PROBE_TIMEOUT_MS,
     });
-    const detail = probe.output.trim();
+    const parsed = parseSandboxInferenceRouteProbeResult(probe);
     lastProbe = {
-      healthy: probe.status === 0 && /^OK\s+[0-9]{3}\b/.test(detail),
-      broken: /^BROKEN\s+[0-9]{3}\b/.test(detail),
-      detail: detail || `openshell sandbox exec exited with status ${String(probe.status)}`,
+      healthy: parsed.healthy,
+      broken: parsed.broken,
+      detail: parsed.detail,
     };
     if (lastProbe.healthy || attempt === boundedAttempts) return lastProbe;
     sleepSync(delayMs);
@@ -435,7 +436,7 @@ export function repairSandboxInferenceRouteWithDeps(
     return { healthy: true, repairAttempted: false, detail: initialProbe.detail };
   }
   if (!initialProbe.broken) {
-    return { healthy: true, repairAttempted: false, detail: initialProbe.detail };
+    return { healthy: false, repairAttempted: false, detail: initialProbe.detail };
   }
 
   if (!shouldUseLegacyDnsProxyRepair(sb)) {
@@ -497,13 +498,6 @@ export function repairSandboxInferenceRouteWithDeps(
         detail: "missing sandbox provider or model",
       };
     }
-    if (!finalProbe.healthy && !finalProbe.broken) {
-      return {
-        healthy: true,
-        repairAttempted: true,
-        detail: finalProbe.detail,
-      };
-    }
     return {
       healthy: finalProbe.healthy,
       repairAttempted: true,
@@ -538,13 +532,6 @@ export function repairSandboxInferenceRouteWithDeps(
     } else if (repairedProbe.broken) {
       error("  Warning: inference.local is still unavailable after DNS proxy repair.");
     }
-  }
-  if (!repairedProbe.healthy && !repairedProbe.broken) {
-    return {
-      healthy: true,
-      repairAttempted: true,
-      detail: repairedProbe.detail,
-    };
   }
   return {
     healthy: repairedProbe.healthy,

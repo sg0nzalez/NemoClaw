@@ -49,18 +49,23 @@ import { probeSandboxInferenceGatewayHealth } from "./process-recovery";
 
 export type { DoctorCheck, DoctorReport } from "./doctor-report";
 
-function pushInferenceHealthCheck(checks: DoctorCheck[], probe: ProviderHealthStatus): void {
-  const label = probe.probeLabel ? `Provider health (${probe.probeLabel})` : "Provider health";
-  if (!probe.probed) {
-    checks.push({ group: "Inference", label, status: "info", detail: probe.detail });
-    return;
-  }
+function pushInferenceHealthCheck(
+  checks: DoctorCheck[],
+  probe: ProviderHealthStatus,
+  options: { authoritative?: boolean; label?: string } = {},
+): void {
+  const authoritative = options.authoritative !== false;
+  const label =
+    options.label ??
+    (probe.probeLabel ? `Provider health (${probe.probeLabel})` : "Provider health");
+  const passed = probe.probed && probe.ok;
+  const failed = authoritative && !probe.ok && (probe.probed || Boolean(probe.failureLabel));
   checks.push({
     group: "Inference",
     label,
-    status: probe.ok ? "ok" : "fail",
-    detail: probe.ok ? `${probe.endpoint} reachable` : probe.detail,
-    hint: probe.ok ? undefined : "check network access or provider credentials",
+    status: passed ? "ok" : failed ? "fail" : "info",
+    detail: passed ? `${probe.endpoint} reachable` : probe.detail,
+    hint: failed ? "check sandbox reachability and the inference route" : undefined,
   });
 }
 
@@ -326,31 +331,43 @@ function inferenceRouteCheck(sandboxName: string, route: InferenceRoute): Doctor
   };
 }
 
-function isLocalInferenceProvider(provider: string): boolean {
-  return provider === "ollama-local" || provider === "vllm-local";
-}
-
 function skippedInferenceGatewayProbe(): ProviderHealthStatus {
   return {
     ok: false,
     probed: false,
     providerLabel: "Inference gateway chain",
-    endpoint: "",
+    endpoint: "https://inference.local/v1/models",
     detail: "skipped because the sandbox is not reachable through its named gateway",
     probeLabel: "gateway",
   };
 }
 
+function unavailableInferenceGatewayProbe(): ProviderHealthStatus {
+  const endpoint = "https://inference.local/v1/models";
+  return {
+    ok: false,
+    probed: false,
+    providerLabel: "Inference gateway chain",
+    endpoint,
+    detail: `Could not probe ${endpoint} from inside the reachable sandbox.`,
+    probeLabel: "gateway",
+    failureLabel: "unreachable",
+  };
+}
+
 async function collectInferenceSubprobes(
   sandboxName: string,
-  provider: string,
   sandboxReachable: boolean,
   existing: ProviderHealthStatus[],
 ): Promise<ProviderHealthStatus[]> {
-  if (!isLocalInferenceProvider(provider)) return existing;
   if (!sandboxReachable) return [...existing, skippedInferenceGatewayProbe()];
-  const gateway = await probeSandboxInferenceGatewayHealth(sandboxName);
-  if (!gateway) return existing;
+  let gateway: Awaited<ReturnType<typeof probeSandboxInferenceGatewayHealth>> = null;
+  try {
+    gateway = await probeSandboxInferenceGatewayHealth(sandboxName);
+  } catch {
+    gateway = null;
+  }
+  if (!gateway) return [...existing, unavailableInferenceGatewayProbe()];
   return [
     ...existing,
     {
@@ -360,9 +377,44 @@ async function collectInferenceSubprobes(
       endpoint: gateway.endpoint,
       detail: gateway.detail,
       probeLabel: "gateway",
-      ...(gateway.ok ? {} : { failureLabel: "unreachable" as const }),
+      ...(gateway.ok
+        ? {}
+        : {
+            failureLabel: (gateway.httpStatus >= 500 && gateway.httpStatus < 600
+              ? "unhealthy"
+              : "unreachable") as "unhealthy" | "unreachable",
+          }),
     },
   ];
+}
+
+function unavailableProviderHealthDiagnostic(detail: string): ProviderHealthStatus {
+  return {
+    ok: false,
+    probed: false,
+    providerLabel: "Upstream provider",
+    endpoint: "",
+    detail,
+    probeLabel: "upstream",
+  };
+}
+
+function collectProviderHealthDiagnostics(provider: string): ProviderHealthStatus[] {
+  if (provider === "unknown") {
+    return [unavailableProviderHealthDiagnostic("provider route is unknown")];
+  }
+  try {
+    const health = probeProviderHealth(provider);
+    if (!health) {
+      return [
+        unavailableProviderHealthDiagnostic(`no direct health probe registered for ${provider}`),
+      ];
+    }
+    const { subprobes = [], ...primary } = health;
+    return [{ ...primary, probeLabel: primary.probeLabel ?? "upstream" }, ...subprobes];
+  } catch {
+    return [unavailableProviderHealthDiagnostic("direct provider health probe could not run")];
+  }
 }
 
 async function collectInferenceChecks(
@@ -371,26 +423,13 @@ async function collectInferenceChecks(
   sandboxReachable: boolean,
 ): Promise<DoctorCheck[]> {
   const checks = [inferenceRouteCheck(sandboxName, route)];
-  if (route.provider === "unknown") return checks;
-  const health = probeProviderHealth(route.provider);
-  if (!health) {
-    checks.push({
-      group: "Inference",
-      label: "Provider health",
-      status: "info",
-      detail: `no health probe registered for ${route.provider}`,
-    });
-    return checks;
+  const gatewayProbes = await collectInferenceSubprobes(sandboxName, sandboxReachable, []);
+  for (const gatewayProbe of gatewayProbes) {
+    pushInferenceHealthCheck(checks, gatewayProbe, { label: "Inference route (gateway)" });
   }
-
-  const subprobes = await collectInferenceSubprobes(
-    sandboxName,
-    route.provider,
-    sandboxReachable,
-    health.subprobes ?? [],
-  );
-  pushInferenceHealthCheck(checks, health);
-  for (const subprobe of subprobes) pushInferenceHealthCheck(checks, subprobe);
+  for (const diagnostic of collectProviderHealthDiagnostics(route.provider)) {
+    pushInferenceHealthCheck(checks, diagnostic, { authoritative: false });
+  }
   return checks;
 }
 

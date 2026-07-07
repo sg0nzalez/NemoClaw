@@ -10,7 +10,10 @@ import {
   getOpenshellBinary,
   isCommandTimeout,
 } from "../../adapters/openshell/runtime";
-import { OPENSHELL_PROBE_TIMEOUT_MS } from "../../adapters/openshell/timeouts";
+import {
+  OPENSHELL_INFERENCE_ROUTE_PROBE_TIMEOUT_MS,
+  OPENSHELL_PROBE_TIMEOUT_MS,
+} from "../../adapters/openshell/timeouts";
 import * as agentRuntime from "../../agent/runtime";
 import { G, R } from "../../cli/terminal-style";
 import { sleepSeconds, waitUntil } from "../../core/wait";
@@ -23,6 +26,10 @@ import { createTempSshConfig } from "../../sandbox/temp-ssh-config";
 import { withTimerBoundShieldsMutationLock } from "../../shields/timer-bound-lock";
 import * as registry from "../../state/registry";
 import { buildSubprocessEnv } from "../../subprocess-env";
+import {
+  buildSandboxInferenceRouteProbeArgs,
+  parseSandboxInferenceRouteProbeResult,
+} from "./connect-inference-route-probe";
 import {
   ensureHermesDashboardPortForwardIfEnabled,
   ensureSandboxPortForward,
@@ -393,17 +400,17 @@ export async function isSandboxGatewayRunningForStatus(
 
 /**
  * Probe the full inference chain by curling `https://inference.local/v1/models`
- * from inside the sandbox via `openshell sandbox exec`. This is the path agent
- * traffic actually takes (openclaw gateway → auth proxy → backend). Any HTTP
- * response (including 401) means routing works; 000 / no response means DNS,
- * proxy, or gateway is broken. The optional 3rd line in #3265.
+ * from inside the sandbox via the same agent-aware argv and parser as connect.
+ * HTTP 1xx–4xx means the route answered, 5xx is unhealthy, and 000 or an
+ * unavailable probe is broken. This is the authoritative path used by agents.
  *
- * Injectable via `execImpl` for tests.
+ * The OpenShell capture and agent lookup are injectable for tests.
  */
 export async function probeSandboxInferenceGatewayHealth(
   sandboxName: string,
   options: {
-    execImpl?: (sandboxName: string, command: string) => Promise<SandboxCommandResult | null>;
+    captureOpenshellImpl?: typeof captureOpenshellForStatus;
+    getSessionAgentImpl?: typeof agentRuntime.getSessionAgent;
   } = {},
 ): Promise<{
   ok: boolean;
@@ -412,12 +419,25 @@ export async function probeSandboxInferenceGatewayHealth(
   detail: string;
 } | null> {
   const endpoint = "https://inference.local/v1/models";
-  const command = `HTTP_CODE=$(curl -so /dev/null -w '%{http_code}' --max-time 5 ${shellQuote(endpoint)} 2>/dev/null || echo 000); echo "$HTTP_CODE"`;
-  const exec = options.execImpl ?? executeSandboxExecCommandForStatus;
-  const result = await exec(sandboxName, command);
-  if (!result || result.status !== 0) return null;
-  const status = Number.parseInt(result.stdout.trim(), 10) || 0;
-  if (status > 0) {
+  const capture = options.captureOpenshellImpl ?? captureOpenshellForStatus;
+  const getSessionAgent = options.getSessionAgentImpl ?? agentRuntime.getSessionAgent;
+  let result: Awaited<ReturnType<typeof captureOpenshellForStatus>>;
+  try {
+    result = await capture(
+      buildSandboxInferenceRouteProbeArgs(sandboxName, getSessionAgent(sandboxName)),
+      {
+        ignoreError: true,
+        timeout: OPENSHELL_INFERENCE_ROUTE_PROBE_TIMEOUT_MS,
+      },
+    );
+  } catch {
+    return null;
+  }
+  if (isCommandTimeout(result) || result.error) return null;
+  const parsed = parseSandboxInferenceRouteProbeResult(result);
+  if (!parsed.healthy && !parsed.broken) return null;
+  const status = parsed.httpStatus;
+  if (parsed.healthy) {
     return {
       ok: true,
       endpoint,
@@ -425,13 +445,24 @@ export async function probeSandboxInferenceGatewayHealth(
       detail: `Inference gateway responded HTTP ${status} on ${endpoint} (full chain reachable).`,
     };
   }
+  if (status >= 500 && status < 600) {
+    return {
+      ok: false,
+      endpoint,
+      httpStatus: status,
+      detail: `Inference gateway returned HTTP ${status} on ${endpoint}; the route is reachable but unhealthy.`,
+    };
+  }
   return {
     ok: false,
     endpoint,
-    httpStatus: 0,
+    httpStatus: status,
     detail:
-      `Inference gateway unreachable on ${endpoint} from inside the sandbox. ` +
-      `DNS may have failed or the openclaw gateway / auth proxy is not running.`,
+      status === 0
+        ? `Inference gateway unreachable on ${endpoint} from inside the sandbox. ` +
+          `DNS may have failed or the agent gateway / auth proxy is not running.`
+        : `Inference gateway returned an invalid HTTP status (${status}) on ${endpoint}; ` +
+          `check the in-sandbox proxy and gateway.`,
   };
 }
 

@@ -98,6 +98,11 @@ function printInferenceStatus(context: SandboxStatusTextContext): void {
   }
 }
 
+function inferenceHealthExitCode(inferenceHealth: ProviderHealthStatus | null): number | null {
+  if (!inferenceHealth) return null;
+  return inferenceHealth.probed && inferenceHealth.ok ? null : 1;
+}
+
 function getSandboxGpuDisplay(sandbox: SandboxEntry): {
   enabled: boolean;
   hostGpu: string;
@@ -243,16 +248,17 @@ export function printSandboxDetails(context: SandboxStatusTextContext): SandboxS
   console.log(`    Model:    ${currentModel}`);
   console.log(`    Provider: ${currentProvider}`);
   printInferenceStatus(context);
+  const inferenceExitCode = inferenceHealthExitCode(context.inferenceHealth);
   printSandboxGpuStatus(sb);
   console.log(
     `    OpenShell: ${sb.openshellVersion || "unknown"} (${sb.openshellDriver || "unknown"})`,
   );
   console.log(`    Policies: ${(sb.policies || []).join(", ") || "none"}`);
-  const exitCode = printAgentHarness(context);
+  const agentExitCode = printAgentHarness(context);
   printActiveSessions(sandboxName);
   printShieldsPosture(sandboxName);
   printAgentVersion(context, sb);
-  return { exitCode };
+  return { exitCode: inferenceExitCode ?? agentExitCode };
 }
 
 async function printGatewayProcessStatus(context: SandboxStatusTextContext): Promise<void> {

@@ -11,7 +11,16 @@ type RunSandboxDoctor = typeof import("./doctor")["runSandboxDoctor"];
 const requireDist = createRequire(import.meta.url);
 const doctorModulePath = "./doctor.js";
 
-function createDoctorHarness(): {
+function createDoctorHarness(
+  overrides: {
+    provider?: string;
+    gatewayChainOk?: boolean;
+    gatewayChainUnavailable?: boolean;
+    gatewayChainThrows?: boolean;
+    gatewayHttpStatus?: number;
+    providerHealthUnavailable?: boolean;
+  } = {},
+): {
   buildToolScopeChecksSpy: MockInstance;
   captureOpenShellSpy: MockInstance;
   captureHostCommandSpy: MockInstance;
@@ -29,6 +38,8 @@ function createDoctorHarness(): {
   resolveOpenShellSpy: MockInstance;
   runSandboxDoctor: RunSandboxDoctor;
 } {
+  const provider = overrides.provider ?? "ollama-local";
+  const gatewayChainOk = overrides.gatewayChainOk ?? false;
   delete require.cache[requireDist.resolve(doctorModulePath)];
 
   const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
@@ -56,7 +67,7 @@ function createDoctorHarness(): {
     name: "alpha",
     agent: "openclaw",
     model: "registry-model",
-    provider: "ollama-local",
+    provider,
     openshellDriver: "docker",
     gatewayName: "nemoclaw-19080",
     gatewayPort: 19080,
@@ -95,7 +106,7 @@ function createDoctorHarness(): {
         return { status: 0, output: "alpha Ready" };
       }
       if (argv[0] === "inference" && argv[1] === "get") {
-        return { status: 0, output: "Provider: ollama-local\nModel: live-model\n" };
+        return { status: 0, output: `Provider: ${provider}\nModel: live-model\n` };
       }
       return { status: 0, output: "" };
     });
@@ -108,20 +119,37 @@ function createDoctorHarness(): {
       }
       return { status: 0, stdout: "", stderr: "" };
     });
-  const healthProbeSpy = vi.spyOn(health, "probeProviderHealth").mockReturnValue({
-    ok: true,
-    probed: true,
-    providerLabel: "Ollama",
-    endpoint: "http://127.0.0.1:11434/v1/chat/completions",
-    detail: "healthy",
-  });
+  const healthProbeSpy = vi.spyOn(health, "probeProviderHealth").mockReturnValue(
+    overrides.providerHealthUnavailable
+      ? null
+      : {
+          ok: true,
+          probed: true,
+          providerLabel: "Ollama",
+          endpoint: "http://127.0.0.1:11434/v1/chat/completions",
+          detail: "healthy",
+        },
+  );
+  const gatewayHttpStatus = overrides.gatewayHttpStatus ?? (gatewayChainOk ? 200 : 0);
+  const gatewayResult = overrides.gatewayChainUnavailable
+    ? null
+    : {
+        ok: gatewayChainOk,
+        endpoint: "https://inference.local/v1/models",
+        httpStatus: gatewayHttpStatus,
+        detail: gatewayChainOk
+          ? `Inference gateway responded HTTP ${gatewayHttpStatus} on https://inference.local/v1/models (full chain reachable).`
+          : gatewayHttpStatus >= 500 && gatewayHttpStatus < 600
+            ? `Inference gateway returned HTTP ${gatewayHttpStatus} on https://inference.local/v1/models; the route is reachable but unhealthy.`
+            : "Inference gateway unreachable on https://inference.local/v1/models from inside the sandbox.",
+      };
   const probeSandboxInferenceGatewayHealthSpy = vi
     .spyOn(processRecovery, "probeSandboxInferenceGatewayHealth")
-    .mockResolvedValue({
-      ok: false,
-      endpoint: "http://127.0.0.1:19000/v1/chat/completions",
-      detail: "gateway refused connection",
-    });
+    .mockImplementation(
+      overrides.gatewayChainThrows
+        ? async () => Promise.reject(new Error("openshell unavailable"))
+        : async () => gatewayResult,
+    );
   const loadAgentSpy = vi.spyOn(agentDefs, "loadAgent").mockReturnValue({
     name: "openclaw",
     configPaths: { dir: "/sandbox/.openclaw", configFile: "openclaw.json", format: "json" },
@@ -231,10 +259,14 @@ describe("runSandboxDoctor flow", () => {
           expect.objectContaining({ group: "Host", label: "Docker daemon", status: "ok" }),
           expect.objectContaining({ group: "Gateway", label: "OpenShell status", status: "ok" }),
           expect.objectContaining({ group: "Sandbox", label: "Live sandbox", status: "ok" }),
-          expect.objectContaining({ group: "Inference", label: "Provider health", status: "ok" }),
           expect.objectContaining({
             group: "Inference",
-            label: "Provider health (gateway)",
+            label: "Provider health (upstream)",
+            status: "ok",
+          }),
+          expect.objectContaining({
+            group: "Inference",
+            label: "Inference route (gateway)",
             status: "fail",
           }),
           expect.objectContaining({ group: "Messaging", label: "Channels", status: "info" }),
@@ -250,6 +282,154 @@ describe("runSandboxDoctor flow", () => {
       expect(harness.logSpy).not.toHaveBeenCalled();
     },
   );
+
+  it("makes inference.local authoritative for cloud-provider doctor checks (#6192)", async () => {
+    const harness = createDoctorHarness({ provider: "nvidia-prod", gatewayChainOk: false });
+
+    const report = await harness.runSandboxDoctor("alpha", ["--json"], { quietJson: true });
+
+    expect(report?.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          group: "Inference",
+          label: "Provider health (upstream)",
+          status: "ok",
+        }),
+        expect.objectContaining({
+          group: "Inference",
+          label: "Inference route (gateway)",
+          status: "fail",
+        }),
+      ]),
+    );
+    expect(report?.status).toBe("fail");
+  });
+
+  it("keeps failed upstream health diagnostic when inference.local works (#6192)", async () => {
+    const harness = createDoctorHarness({ provider: "nvidia-prod", gatewayChainOk: true });
+    harness.healthProbeSpy.mockReturnValue({
+      ok: false,
+      probed: true,
+      providerLabel: "NVIDIA Endpoints",
+      endpoint: "https://integrate.api.nvidia.com/v1/models",
+      detail: "host-side upstream probe failed",
+      failureLabel: "unreachable",
+    });
+
+    const report = await harness.runSandboxDoctor("alpha", ["--json"], { quietJson: true });
+    const inferenceChecks = report?.checks.filter((check) => check.group === "Inference") ?? [];
+
+    expect(inferenceChecks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ label: "Provider health (upstream)", status: "info" }),
+        expect.objectContaining({ label: "Inference route (gateway)", status: "ok" }),
+      ]),
+    );
+    expect(inferenceChecks).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ status: "fail" })]),
+    );
+    expect(report?.status).not.toBe("fail");
+  });
+
+  it("keeps inference.local authoritative when the upstream diagnostic throws (#6192)", async () => {
+    const harness = createDoctorHarness({ provider: "nvidia-prod", gatewayChainOk: true });
+    harness.healthProbeSpy.mockImplementation(() => {
+      throw new Error("upstream probe crashed");
+    });
+
+    const report = await harness.runSandboxDoctor("alpha", ["--json"], { quietJson: true });
+    const inferenceChecks = report?.checks.filter((check) => check.group === "Inference") ?? [];
+
+    expect(inferenceChecks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ label: "Inference route (gateway)", status: "ok" }),
+        expect.objectContaining({
+          label: "Provider health (upstream)",
+          status: "info",
+          detail: "direct provider health probe could not run",
+        }),
+      ]),
+    );
+    expect(inferenceChecks).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ status: "fail" })]),
+    );
+    expect(report?.status).not.toBe("fail");
+  });
+
+  it.each([
+    "nvidia-router",
+    "hermes-provider",
+  ])("probes inference.local for %s without a direct health check (#6192)", async (provider) => {
+    const harness = createDoctorHarness({
+      provider,
+      providerHealthUnavailable: true,
+      gatewayChainOk: false,
+    });
+
+    const report = await harness.runSandboxDoctor("alpha", ["--json"], { quietJson: true });
+
+    expect(harness.probeSandboxInferenceGatewayHealthSpy).toHaveBeenCalledWith("alpha");
+    expect(report?.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          group: "Inference",
+          label: "Provider health (upstream)",
+          status: "info",
+        }),
+        expect.objectContaining({
+          group: "Inference",
+          label: "Inference route (gateway)",
+          status: "fail",
+        }),
+      ]),
+    );
+    expect(report?.status).toBe("fail");
+  });
+
+  it("fails doctor when inference.local returns HTTP 503 (#6192)", async () => {
+    const harness = createDoctorHarness({
+      provider: "nvidia-prod",
+      gatewayChainOk: false,
+      gatewayHttpStatus: 503,
+    });
+
+    const report = await harness.runSandboxDoctor("alpha", ["--json"], { quietJson: true });
+
+    expect(report?.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: "Inference route (gateway)",
+          status: "fail",
+          detail: expect.stringContaining("503"),
+        }),
+      ]),
+    );
+    expect(report?.status).toBe("fail");
+  });
+
+  it.each([
+    false,
+    true,
+  ])("fails doctor when the inference.local probe is unavailable (throws=%s) (#6192)", async (gatewayChainThrows) => {
+    const harness = createDoctorHarness({
+      provider: "nvidia-prod",
+      gatewayChainUnavailable: !gatewayChainThrows,
+      gatewayChainThrows,
+    });
+
+    const report = await harness.runSandboxDoctor("alpha", ["--json"], { quietJson: true });
+
+    expect(report?.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: "Inference route (gateway)",
+          status: "fail",
+          detail: expect.stringContaining("Could not probe"),
+        }),
+      ]),
+    );
+    expect(report?.status).toBe("fail");
+  });
 
   it("rejects mutating --fix when JSON output was requested", async () => {
     const harness = createDoctorHarness();
@@ -296,7 +476,7 @@ describe("runSandboxDoctor flow", () => {
       expect.arrayContaining([
         expect.objectContaining({
           group: "Inference",
-          label: "Provider health (gateway)",
+          label: "Inference route (gateway)",
           status: "info",
           detail: "skipped because the sandbox is not reachable through its named gateway",
         }),
@@ -428,7 +608,7 @@ describe("runSandboxDoctor flow", () => {
     expect(report?.checks).toContainEqual(
       expect.objectContaining({
         group: "Inference",
-        label: "Provider health (gateway)",
+        label: "Inference route (gateway)",
       }),
     );
   });

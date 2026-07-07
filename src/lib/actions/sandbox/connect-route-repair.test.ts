@@ -128,20 +128,32 @@ describe("sandbox connect route repair unit flow", () => {
     expect(calls.probeOptions).toEqual([]);
   });
 
-  it("does not repair healthy or inconclusive initial probes", () => {
-    for (const firstProbe of [healthy(), inconclusive()]) {
-      const { calls, deps } = makeRepairDeps([firstProbe]);
+  it("does not repair a healthy initial probe", () => {
+    const { calls, deps } = makeRepairDeps([healthy()]);
 
-      const result = repairSandboxInferenceRouteWithDeps("demo", sandbox(), {}, deps);
+    const result = repairSandboxInferenceRouteWithDeps("demo", sandbox(), {}, deps);
 
-      expect(result).toEqual({
-        healthy: true,
-        repairAttempted: false,
-        detail: firstProbe.detail,
-      });
-      expect(calls.legacyRepairs).toEqual([]);
-      expect(calls.reapplications).toEqual([]);
-    }
+    expect(result).toEqual({
+      healthy: true,
+      repairAttempted: false,
+      detail: "OK 200",
+    });
+    expect(calls.legacyRepairs).toEqual([]);
+    expect(calls.reapplications).toEqual([]);
+  });
+
+  it("fails closed without repair when the initial probe is inconclusive (#6192)", () => {
+    const { calls, deps } = makeRepairDeps([inconclusive()]);
+
+    const result = repairSandboxInferenceRouteWithDeps("demo", sandbox(), {}, deps);
+
+    expect(result).toEqual({
+      healthy: false,
+      repairAttempted: false,
+      detail: "openshell sandbox exec exited with status 7",
+    });
+    expect(calls.legacyRepairs).toEqual([]);
+    expect(calls.reapplications).toEqual([]);
   });
 
   it("repairs legacy kubernetes routes through the DNS proxy path", () => {
@@ -280,6 +292,42 @@ describe("sandbox connect route repair unit flow", () => {
     expect(calls.errors).toContain(
       "  Warning: inference.local is still unavailable through the OpenShell vm gateway path.",
     );
+  });
+
+  it("fails closed when non-legacy route reapply remains inconclusive (#6192)", () => {
+    const { calls, deps } = makeRepairDeps([broken(), inconclusive()]);
+
+    const result = repairSandboxInferenceRouteWithDeps(
+      "vm-box",
+      sandbox({ openshellDriver: "vm" }),
+      {},
+      deps,
+    );
+
+    expect(result).toEqual({
+      healthy: false,
+      repairAttempted: true,
+      detail: "openshell sandbox exec exited with status 7",
+    });
+    expect(calls.reapplications).toEqual(["vm-box"]);
+  });
+
+  it("fails closed when a legacy repair probe remains inconclusive (#6192)", () => {
+    const { calls, deps } = makeRepairDeps([broken(), inconclusive()]);
+
+    const result = repairSandboxInferenceRouteWithDeps(
+      "legacy-box",
+      sandbox({ openshellDriver: "kubernetes" }),
+      {},
+      deps,
+    );
+
+    expect(result).toEqual({
+      healthy: false,
+      repairAttempted: true,
+      detail: "openshell sandbox exec exited with status 7",
+    });
+    expect(calls.legacyRepairs).toEqual([{ sandboxName: "legacy-box", quiet: false }]);
   });
 });
 

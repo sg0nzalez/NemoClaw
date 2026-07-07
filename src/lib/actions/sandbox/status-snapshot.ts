@@ -34,6 +34,7 @@ type ProbeProviderHealth = (
   provider: string,
   options?: ProviderHealthProbeOptions,
 ) => ProviderHealthStatus | null;
+type ProbeSandboxInferenceGatewayHealth = typeof probeSandboxInferenceGatewayHealth;
 
 export function getSandboxStatusInferenceHealth(
   gatewayPresent: boolean,
@@ -68,6 +69,45 @@ export function maybeGetSandboxStatusInferenceHealth(
     currentModel,
     probeProviderHealthImpl,
   );
+}
+
+function providerHealthDiagnostics(
+  providerHealth: ProviderHealthStatus | null,
+): ProviderHealthStatus[] {
+  if (!providerHealth) return [];
+  const { subprobes = [], ...primary } = providerHealth;
+  const labeledPrimary = primary.probeLabel ? primary : { ...primary, probeLabel: "upstream" };
+  return [labeledPrimary, ...subprobes];
+}
+
+function buildSandboxInferenceRouteHealth(
+  gateway: Awaited<ReturnType<ProbeSandboxInferenceGatewayHealth>>,
+  providerHealth: ProviderHealthStatus | null,
+): ProviderHealthStatus {
+  const endpoint = gateway?.endpoint ?? "https://inference.local/v1/models";
+  const diagnostics = providerHealthDiagnostics(providerHealth);
+  const routeHealth: ProviderHealthStatus = gateway
+    ? {
+        ok: gateway.ok,
+        probed: true,
+        providerLabel: "Inference route",
+        endpoint,
+        detail: gateway.detail,
+        ...(gateway.ok
+          ? {}
+          : {
+              failureLabel:
+                gateway.httpStatus >= 500 && gateway.httpStatus < 600 ? "unhealthy" : "unreachable",
+            }),
+      }
+    : {
+        ok: false,
+        probed: false,
+        providerLabel: "Inference route",
+        endpoint,
+        detail: `Could not probe ${endpoint} from inside the sandbox.`,
+      };
+  return diagnostics.length > 0 ? { ...routeHealth, subprobes: diagnostics } : routeHealth;
 }
 
 export interface SandboxStatusReport {
@@ -153,7 +193,9 @@ type ProbeTerminalRuntimeHealth = (sandboxName: string) => TerminalRuntimeOomPro
 
 interface CollectSandboxStatusSnapshotDeps {
   getSandbox?: typeof registry.getSandbox;
+  captureOpenshellForStatusImpl?: typeof captureOpenshellForStatus;
   probeProviderHealthImpl?: ProbeProviderHealth;
+  probeSandboxInferenceGatewayHealthImpl?: ProbeSandboxInferenceGatewayHealth;
   probeTerminalRuntimeHealth?: ProbeTerminalRuntimeHealth;
   reconcile?: ReconcileSandboxGatewayState;
 }
@@ -186,7 +228,10 @@ export async function collectSandboxStatusSnapshot(
   let liveResult: Awaited<ReturnType<typeof captureOpenshellForStatus>> | null = null;
   if (lookup.state === "present") {
     try {
-      liveResult = await captureOpenshellForStatus(["inference", "get"]);
+      liveResult = await (opts.deps?.captureOpenshellForStatusImpl ?? captureOpenshellForStatus)([
+        "inference",
+        "get",
+      ]);
     } catch {
       liveResult = null;
     }
@@ -213,31 +258,39 @@ export async function collectSandboxStatusSnapshot(
   // `getSandboxStatusInferenceHealth` would still issue the remote-provider
   // reachability request even though the caller would overwrite the returned
   // value to null afterwards.
-  const inferenceHealth = maybeGetSandboxStatusInferenceHealth(
-    opts.suppressInferenceProbe === true,
-    lookup.state === "present",
-    currentProvider,
-    currentModel,
-    opts.deps?.probeProviderHealthImpl,
-  );
-  if (
-    inferenceHealth &&
-    lookup.state === "present" &&
-    (currentProvider === "ollama-local" || currentProvider === "vllm-local")
-  ) {
-    const gatewayChain = await probeSandboxInferenceGatewayHealth(sandboxName);
-    if (gatewayChain) {
-      const gatewaySubprobe: ProviderHealthStatus = {
-        ok: gatewayChain.ok,
-        probed: true,
-        providerLabel: "Inference gateway chain",
-        endpoint: gatewayChain.endpoint,
-        detail: gatewayChain.detail,
-        probeLabel: "gateway",
-        ...(gatewayChain.ok ? {} : { failureLabel: "unreachable" as const }),
-      };
-      inferenceHealth.subprobes = [...(inferenceHealth.subprobes ?? []), gatewaySubprobe];
+  let providerHealth: ProviderHealthStatus | null = null;
+  try {
+    providerHealth = maybeGetSandboxStatusInferenceHealth(
+      opts.suppressInferenceProbe === true,
+      lookup.state === "present",
+      currentProvider,
+      currentModel,
+      opts.deps?.probeProviderHealthImpl,
+    );
+  } catch {
+    providerHealth = {
+      ok: false,
+      probed: false,
+      providerLabel: "Upstream provider",
+      endpoint: "",
+      detail: "Direct provider health probe could not run.",
+      probeLabel: "upstream",
+    };
+  }
+  let inferenceHealth = providerHealth;
+  // `inference.local` is authoritative because it is the route the agent uses.
+  // Probe it independently of direct/upstream provider diagnostics, including
+  // providers without a registered host-side health probe (#6192).
+  if (opts.suppressInferenceProbe !== true && lookup.state === "present") {
+    let gatewayChain: Awaited<ReturnType<ProbeSandboxInferenceGatewayHealth>> = null;
+    try {
+      gatewayChain = await (
+        opts.deps?.probeSandboxInferenceGatewayHealthImpl ?? probeSandboxInferenceGatewayHealth
+      )(sandboxName);
+    } catch {
+      gatewayChain = null;
     }
+    inferenceHealth = buildSandboxInferenceRouteHealth(gatewayChain, providerHealth);
   }
   const statusAgent = resolveSandboxStatusAgent(sb?.agent || "openclaw");
   const terminalRuntimeHealth =
