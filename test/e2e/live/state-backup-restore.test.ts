@@ -139,7 +139,7 @@ test("state-backup-restore: backup-workspace.sh restores workspace files and mem
   stateValidation,
 }) => {
   assertTestOwnedSandboxName();
-  const apiKey = secrets.required("NVIDIA_INFERENCE_API_KEY");
+  secrets.required("NVIDIA_INFERENCE_API_KEY");
   expect(fs.existsSync(path.join(REPO_ROOT, "scripts", "backup-workspace.sh"))).toBe(true);
 
   const dockerInfo = await host.command("docker", ["info"], {
