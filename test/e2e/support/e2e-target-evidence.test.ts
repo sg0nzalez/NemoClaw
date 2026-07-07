@@ -28,6 +28,7 @@ describe("target evidence", () => {
         id: "typed-target",
         contract: ["first contract", "second contract"],
         detail: `contains ${secret}`,
+        extensionField: "metadata extension field",
       });
       await artifacts.target.complete({
         id: "typed-target",
@@ -38,6 +39,7 @@ describe("target evidence", () => {
       expect(JSON.parse(fs.readFileSync(path.join(root, "target.json"), "utf8"))).toEqual({
         id: "typed-target",
         detail: "contains [REDACTED]",
+        extensionField: "metadata extension field",
         contracts: ["first contract", "second contract"],
         runner: "vitest",
       });
@@ -59,7 +61,11 @@ describe("target evidence", () => {
       const target = new ArtifactSink(root).target;
 
       await expect(target.declare({ id: "" })).rejects.toThrow(/id must be a non-empty string/);
+      await expect(target.declare({ id: "   " })).rejects.toThrow(/id must be a non-empty string/);
       await expect(target.complete({ id: "typed-target", status: "" })).rejects.toThrow(
+        /status must be a non-empty string/,
+      );
+      await expect(target.complete({ id: "typed-target", status: "   " })).rejects.toThrow(
         /status must be a non-empty string/,
       );
       await expect(
@@ -69,6 +75,18 @@ describe("target evidence", () => {
           contracts: ["plural"],
         }),
       ).rejects.toThrow(/either contract or contracts/);
+      await expect(
+        target.declare({
+          id: "typed-target",
+          contract: 42,
+        } as never),
+      ).rejects.toThrow(/contracts must be a string or an array of strings/);
+      await expect(
+        target.declare({
+          id: "typed-target",
+          contracts: ["valid", 42],
+        } as never),
+      ).rejects.toThrow(/contracts must be a string or an array of strings/);
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }

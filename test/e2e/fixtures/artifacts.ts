@@ -16,6 +16,11 @@ export type TargetMetadata<Extension extends object = Record<string, unknown>> =
 
 export type TargetResult<Extension extends object = Record<string, unknown>> = {
   id: string;
+  /**
+   * Optional for the normal success path: reaching `complete()` after the live
+   * assertions have passed records `passed`. Skipped or non-success evidence
+   * must set an explicit status at the call site.
+   */
   status?: string;
 } & Extension;
 
