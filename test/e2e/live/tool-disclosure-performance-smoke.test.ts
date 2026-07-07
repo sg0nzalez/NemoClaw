@@ -53,17 +53,16 @@ const ROUTED_PROXY_REQUEST_TIMEOUT_MS = 720_000;
 const ROUTED_GATEWAY_REQUEST_TIMEOUT_MS = 840_000;
 const ROUTED_AGENT_INVOCATION_TIMEOUT_MS = 900_000;
 const RESTORED_GATEWAY_REQUEST_TIMEOUT_MS = LOCAL_INFERENCE_TIMEOUT_SECS * 1_000;
-const MANAGED_MCP_SNAPSHOT_PROBE = `import os
-from deepagents_code import _nemoclaw_managed as managed
-
-payload = b"managed-mcp-snapshot-probe\\n"
-descriptor, binding = managed._managed_mcp_snapshot(payload)
-try:
-    assert binding["kind"] in {managed._MCP_SEALED_KIND, managed._MCP_ANONYMOUS_KIND}
-    assert managed._read_bound_managed_mcp_descriptor(descriptor, binding) == payload
-finally:
-    os.close(descriptor)
-print("managed-mcp-snapshot-ok:" + binding["kind"])`;
+const MANAGED_MCP_SNAPSHOT_PROBE = [
+  "import os",
+  "from deepagents_code import _nemoclaw_managed as managed",
+  'payload = b"managed-mcp-snapshot-probe\\n"',
+  "descriptor, binding = managed._managed_mcp_snapshot(payload)",
+  'assert binding["kind"] in {managed._MCP_SEALED_KIND, managed._MCP_ANONYMOUS_KIND}',
+  "assert managed._read_bound_managed_mcp_descriptor(descriptor, binding) == payload",
+  "os.close(descriptor)",
+  'print("managed-mcp-snapshot-ok:" + binding["kind"])',
+].join("; ");
 
 function sandboxName(mode: ToolDisclosureMode): string {
   return `e2e-tool-disclosure-performance-${mode}`;
