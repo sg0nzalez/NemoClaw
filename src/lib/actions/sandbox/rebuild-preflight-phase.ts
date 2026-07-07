@@ -37,6 +37,7 @@ import {
   expectedRebuildEntryAfterVersionCheck,
   getRebuildSandboxEntryOrBail,
   isSingleAgentRebuildSupported,
+  runRebuildGatewayIntentPreflight,
 } from "./rebuild-preflight-guards";
 import { prepareRebuildTargetPreflights } from "./rebuild-preflight-target-phase";
 import { disposePreparedBuildContext } from "./rebuild-prepared-image-context";
@@ -97,19 +98,13 @@ export async function runRebuildPreflightPhase(
 
   const rebuildAgent = sandboxEntry.agent || null;
   const agentName = getRebuildAgentDisplayName(sandboxName);
-  if (
-    !isDcodeRebuildAgent(rebuildAgent) &&
-    !checkRebuildGatewaySchemaPreflight(sandboxName, sandboxEntry, bail)
-  ) {
-    return null;
-  }
-  const versionCheck = await confirmRebuildIntent(
-    sandboxName,
-    agentName,
-    skipConfirm,
-    activeSessionCount,
-    bail,
-  );
+  const versionCheck = await runRebuildGatewayIntentPreflight({
+    checkGatewaySchema: () =>
+      isDcodeRebuildAgent(rebuildAgent) ||
+      checkRebuildGatewaySchemaPreflight(sandboxName, sandboxEntry, bail),
+    confirmIntent: () =>
+      confirmRebuildIntent(sandboxName, agentName, skipConfirm, activeSessionCount, bail),
+  });
   if (!versionCheck) return null;
   const expectedSandboxEntry = expectedRebuildEntryAfterVersionCheck(
     sandboxEntry,
