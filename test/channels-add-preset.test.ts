@@ -332,7 +332,15 @@ describe("channels add applies a matching policy preset (#3437)", () => {
       isInteractive: false,
       configuredChannels: ["slack"],
       disabledChannels: [],
-      supportedChannelIds: ["telegram", "discord", "wechat", "slack", "whatsapp", "teams", "googlechat"],
+      supportedChannelIds: [
+        "telegram",
+        "discord",
+        "wechat",
+        "slack",
+        "whatsapp",
+        "teams",
+        "googlechat",
+      ],
       credentialAvailability: expect.any(Object),
     });
   });
