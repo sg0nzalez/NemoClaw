@@ -63,12 +63,14 @@ Run the same route-only acceptance corpus with a real OpenAI-compatible decompos
     "api_key_env": "MODEL_API_KEY",
     "allow_remote": true,
     "reasoning_control": "enable_thinking_false",
-    "json_object_response": true
+    "json_object_response": true,
+    "max_attempts": 2
   },
   "embedding": {
     "kind": "portable",
     "dimensions": 1024
-  }
+  },
+  "timeout_ms": 180000
 }
 ```
 
@@ -84,6 +86,7 @@ The command writes `compositional-routing-acceptance.json` and `SHA256SUMS`, exi
 Set `reasoning_control` only when the endpoint supports the matching chat-template extension: `enable_thinking_false` sends `chat_template_kwargs.enable_thinking=false`, while `thinking_false` sends `chat_template_kwargs.thinking=false`.
 Set `json_object_response` only when the endpoint supports OpenAI-compatible JSON-object response mode.
 Both choices are recorded in the artifact; omit them to use endpoint defaults and prompt-only JSON formatting.
+`max_attempts` is a bounded per-decomposition retry count, and `timeout_ms` applies to each remote request; both are recorded, and every attempt contributes to reported usage and latency.
 The portable embedding mode is a CPU smoke path and is always claim-ineligible.
 For a semantic retrieval run, set `embedding.kind` to `openai` and provide its `base_url`, `model`, immutable `revision`, optional `api_key_env`, and remote opt-in.
 Remote opt-in sends the acceptance prompts and synthetic tool metadata to the configured HTTPS services; HTTP is accepted only on loopback.

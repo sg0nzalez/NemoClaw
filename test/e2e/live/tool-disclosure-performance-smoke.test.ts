@@ -86,8 +86,10 @@ test.skipIf(!shouldRunLiveE2E())(
           allow_remote: true,
           reasoning_control: "enable_thinking_false",
           json_object_response: true,
+          max_attempts: 2,
         },
         embedding: { kind: "portable" },
+        timeout_ms: 180_000,
       });
     } finally {
       previousRoutingCredential === undefined
@@ -272,6 +274,8 @@ test.skipIf(!shouldRunLiveE2E())(
         allowRemote: true,
         reasoningControl: "enable_thinking_false",
         jsonObjectResponse: true,
+        maxAttempts: 2,
+        timeoutMs: 180_000,
       }),
       embedder: new PortableHashingTextEmbedder(),
       isRoutableTool: (name) => routedToolNames.has(name),
@@ -376,6 +380,13 @@ test.skipIf(!shouldRunLiveE2E())(
         synthetic_call_count: calls.length,
         correctness: graded.correctness,
         expected_routed_tool_name: expectedRoutedToolName,
+        routing_configuration: {
+          reasoning_control: "enable_thinking_false",
+          output_mode: "json-object",
+          max_attempts: 2,
+          timeout_ms: 180_000,
+          embedding: "portable-lexical-hashing",
+        },
         route_evidence: routeEvidence,
         recorder_events: recorderEvents,
         limitations: [

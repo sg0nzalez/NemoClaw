@@ -19,6 +19,8 @@ interface JsonRecord {
 export interface ModelUsageEvent {
   operation: "decomposition" | "embedding";
   pass?: DecompositionPass;
+  attempt?: number;
+  outcome?: "completed" | "failed";
   prompt_tokens?: number;
   completion_tokens?: number;
   total_tokens?: number;
@@ -37,6 +39,7 @@ interface OpenAIAdapterOptions {
 
 export interface OpenAIChatDecomposerOptions extends OpenAIAdapterOptions {
   maxOutputTokens?: number;
+  maxAttempts?: number;
   /** Endpoint-specific chat-template switch for concise output. */
   reasoningControl?: "enable_thinking_false" | "thinking_false";
   /** Request the OpenAI-compatible JSON-object response mode. */
@@ -229,50 +232,61 @@ export function createOpenAIChatTaskDecomposer(
     options.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
     "maxOutputTokens",
   );
+  const maxAttempts = positiveInteger(options.maxAttempts ?? 1, "maxAttempts");
   return {
     decompose: async (request) => {
       const query = boundedText(request.query, "decomposition query");
-      const startedAt = performance.now();
-      let body: unknown;
-      try {
-        const response = await fetch(target, {
-          method: "POST",
-          headers: requestHeaders(options.apiKey),
-          body: JSON.stringify({
-            model,
-            messages: decompositionMessages(
-              query,
-              request.pass,
-              request.tool_hints,
-              options.jsonObjectResponse === true,
-            ),
-            temperature: 0,
-            max_tokens: maxOutputTokens,
-            stream: false,
-            ...(options.reasoningControl === "enable_thinking_false"
-              ? { chat_template_kwargs: { enable_thinking: false } }
-              : options.reasoningControl === "thinking_false"
-                ? { chat_template_kwargs: { thinking: false } }
-                : {}),
-            ...(options.jsonObjectResponse ? { response_format: { type: "json_object" } } : {}),
-          }),
-          signal: boundedSignal(timeoutMs, request.signal),
-        });
-        if (!response.ok) throw new Error("decomposition request failed");
-        body = await readBoundedJson(response);
-      } catch {
-        throw new Error("decomposition request failed");
-      } finally {
-        // Never include prompts, endpoints, model IDs, keys, or response text.
-        const usage = isRecord(body) ? usageFrom(body.usage) : {};
-        reportUsage(options.onUsage, {
-          operation: "decomposition",
-          pass: request.pass,
-          ...usage,
-          duration_ms: performance.now() - startedAt,
-        });
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        const startedAt = performance.now();
+        let body: unknown;
+        let outcome: ModelUsageEvent["outcome"] = "failed";
+        try {
+          const response = await fetch(target, {
+            method: "POST",
+            headers: requestHeaders(options.apiKey),
+            body: JSON.stringify({
+              model,
+              messages: decompositionMessages(
+                query,
+                request.pass,
+                request.tool_hints,
+                options.jsonObjectResponse === true,
+              ),
+              temperature: 0,
+              max_tokens: maxOutputTokens,
+              stream: false,
+              ...(options.reasoningControl === "enable_thinking_false"
+                ? { chat_template_kwargs: { enable_thinking: false } }
+                : options.reasoningControl === "thinking_false"
+                  ? { chat_template_kwargs: { thinking: false } }
+                  : {}),
+              ...(options.jsonObjectResponse ? { response_format: { type: "json_object" } } : {}),
+            }),
+            signal: boundedSignal(timeoutMs, request.signal),
+          });
+          if (!response.ok) throw new Error("decomposition request failed");
+          body = await readBoundedJson(response);
+          const parsed = parseDecompositionResponse(body);
+          outcome = "completed";
+          return parsed;
+        } catch {
+          if (request.signal?.aborted || attempt === maxAttempts) {
+            throw new Error("decomposition request failed");
+          }
+        } finally {
+          // Never include prompts, endpoints, model IDs, keys, or response text.
+          const usage = isRecord(body) ? usageFrom(body.usage) : {};
+          reportUsage(options.onUsage, {
+            operation: "decomposition",
+            pass: request.pass,
+            attempt,
+            outcome,
+            ...usage,
+            duration_ms: performance.now() - startedAt,
+          });
+        }
       }
-      return parseDecompositionResponse(body);
+      throw new Error("decomposition request failed");
     },
   };
 }
@@ -316,6 +330,7 @@ export function createOpenAITextEmbedder(options: OpenAITextEmbedderOptions): Te
           .map((text) => boundedText(text, "embedding input"));
         const startedAt = performance.now();
         let body: unknown;
+        let outcome: ModelUsageEvent["outcome"] = "failed";
         try {
           const response = await fetch(target, {
             method: "POST",
@@ -326,12 +341,14 @@ export function createOpenAITextEmbedder(options: OpenAITextEmbedderOptions): Te
           if (!response.ok) throw new Error("embedding request failed");
           body = await readBoundedJson(response);
           output.push(...parseEmbeddingResponse(body, input.length));
+          outcome = "completed";
         } catch {
           throw new Error("embedding request failed");
         } finally {
           const usage = isRecord(body) ? usageFrom(body.usage) : {};
           reportUsage(options.onUsage, {
             operation: "embedding",
+            outcome,
             ...usage,
             duration_ms: performance.now() - startedAt,
           });

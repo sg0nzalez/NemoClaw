@@ -100,6 +100,41 @@ describe("independent compositional tool model adapters", () => {
     ).rejects.toThrow("decomposition request failed");
   });
 
+  it("retries decomposition within the configured bound and records every attempt", async () => {
+    let attempts = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        attempts += 1;
+        return attempts === 1
+          ? new Response("temporary failure", { status: 503 })
+          : new Response(
+              JSON.stringify({
+                choices: [{ message: { content: '{"subtasks":["retry succeeded"]}' } }],
+              }),
+              { status: 200, headers: { "content-type": "application/json" } },
+            );
+      }),
+    );
+    const usage: ModelUsageEvent[] = [];
+    const decomposer = createOpenAIChatTaskDecomposer({
+      baseUrl: "https://models.example.test",
+      model: "test-model",
+      allowRemote: true,
+      maxAttempts: 2,
+      onUsage: (event) => usage.push(event),
+    });
+
+    await expect(
+      decomposer.decompose({ pass: "initial", query: "request", tool_hints: [] }),
+    ).resolves.toEqual(["retry succeeded"]);
+    expect(attempts).toBe(2);
+    expect(usage).toMatchObject([
+      { attempt: 1, outcome: "failed" },
+      { attempt: 2, outcome: "completed" },
+    ]);
+  });
+
   it("batches embeddings and restores provider results to input order", async () => {
     const observedInputs: string[][] = [];
     vi.stubGlobal(

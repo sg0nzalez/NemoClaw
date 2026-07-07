@@ -36,6 +36,7 @@ export interface CompositionalRoutingRemoteModelConfig {
   allow_remote?: boolean;
   reasoning_control?: "enable_thinking_false" | "thinking_false";
   json_object_response?: boolean;
+  max_attempts?: number;
 }
 
 export interface CompositionalRoutingAcceptanceConfig {
@@ -55,6 +56,8 @@ export interface CompositionalRoutingAcceptanceOutput {
     decomposer_revision: string;
     decomposer_reasoning_control: "enable_thinking_false" | "thinking_false" | "endpoint-default";
     decomposer_output_mode: "json-object" | "prompt-only";
+    decomposer_max_attempts: number;
+    request_timeout_ms: number;
     embedding_kind: "portable" | "openai";
     embedding_model: string;
     embedding_revision: string;
@@ -72,6 +75,7 @@ export interface CompositionalRoutingAcceptanceOutput {
   usage: {
     decomposition: {
       requests: number;
+      failed_requests: number;
       prompt_tokens?: number;
       completion_tokens?: number;
       total_tokens?: number;
@@ -79,6 +83,7 @@ export interface CompositionalRoutingAcceptanceOutput {
     };
     embedding: {
       requests: number;
+      failed_requests: number;
       prompt_tokens?: number;
       completion_tokens?: number;
       total_tokens?: number;
@@ -201,6 +206,7 @@ function operationUsage(
   const totalTokens = sumUsage(selected, "total_tokens");
   return {
     requests: selected.length,
+    failed_requests: selected.filter((event) => event.outcome === "failed").length,
     ...(promptTokens === undefined ? {} : { prompt_tokens: promptTokens }),
     ...(completionTokens === undefined ? {} : { completion_tokens: completionTokens }),
     ...(totalTokens === undefined ? {} : { total_tokens: totalTokens }),
@@ -218,10 +224,12 @@ export async function runCompositionalRoutingAcceptance(
   }
   const usage: ModelUsageEvent[] = [];
   const decomposerRevision = publicIdentity(config.decomposer.revision, "decomposer revision");
+  const decomposerMaxAttempts = config.decomposer.max_attempts ?? 1;
   const decomposer = createOpenAIChatTaskDecomposer({
     ...remoteOptions(config.decomposer, timeoutMs, usage),
     reasoningControl: config.decomposer.reasoning_control,
     jsonObjectResponse: config.decomposer.json_object_response,
+    maxAttempts: decomposerMaxAttempts,
   });
   const embeddingKind = config.embedding.kind;
   const embeddingModel =
@@ -274,6 +282,8 @@ export async function runCompositionalRoutingAcceptance(
       decomposer_reasoning_control: config.decomposer.reasoning_control ?? "endpoint-default",
       decomposer_output_mode:
         config.decomposer.json_object_response === true ? "json-object" : "prompt-only",
+      decomposer_max_attempts: decomposerMaxAttempts,
+      request_timeout_ms: timeoutMs,
       embedding_kind: embeddingKind,
       embedding_model: embeddingModel,
       embedding_revision: embeddingRevision,

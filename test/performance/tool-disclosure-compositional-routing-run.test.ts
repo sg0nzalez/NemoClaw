@@ -54,6 +54,7 @@ describe("compositional routing acceptance runner", () => {
         allow_remote: true,
         reasoning_control: "enable_thinking_false",
         json_object_response: true,
+        max_attempts: 2,
       },
       embedding: { kind: "portable", dimensions: 1_024 },
     });
@@ -66,6 +67,8 @@ describe("compositional routing acceptance runner", () => {
         decomposer_revision: "immutable-test-revision",
         decomposer_reasoning_control: "enable_thinking_false",
         decomposer_output_mode: "json-object",
+        decomposer_max_attempts: 2,
+        request_timeout_ms: 120_000,
         embedding_kind: "portable",
         embedding_model: "portable-lexical-hashing",
         embedding_revision: "builtin-v1",
@@ -77,11 +80,12 @@ describe("compositional routing acceptance runner", () => {
       usage: {
         decomposition: {
           requests: 15,
+          failed_requests: 0,
           prompt_tokens: 150,
           completion_tokens: 30,
           total_tokens: 180,
         },
-        embedding: { requests: 0 },
+        embedding: { requests: 0, failed_requests: 0 },
       },
       acceptance_passed: true,
     });
