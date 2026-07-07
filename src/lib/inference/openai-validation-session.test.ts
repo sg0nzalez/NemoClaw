@@ -27,8 +27,9 @@ async function listen(server: http.Server): Promise<number> {
   servers.push(server);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
-  if (!address || typeof address === "string") throw new Error("test server did not bind TCP");
-  return address.port;
+  expect(address).toBeTruthy();
+  expect(typeof address).toBe("object");
+  return (address as import("node:net").AddressInfo).port;
 }
 
 const legacySuccess = (): CurlProbeResult => ({
@@ -102,16 +103,15 @@ describe("OpenAI validation keepalive sequence", () => {
     const server = http.createServer((request, response) => {
       paths.push(request.url ?? "");
       request.resume();
-      if (request.url?.endsWith("/responses")) {
-        responsesCalls += 1;
-        response.end(
-          responsesCalls === 1
+      const isResponses = request.url?.endsWith("/responses") === true;
+      responsesCalls += Number(isResponses);
+      response.end(
+        isResponses
+          ? responsesCalls === 1
             ? '{"output":[{"type":"function_call"}]}'
-            : "event: response.completed\ndata: {}\n\n",
-        );
-        return;
-      }
-      response.end('{"choices":[{"message":{"content":"OK"}}]}');
+            : "event: response.completed\ndata: {}\n\n"
+          : '{"choices":[{"message":{"content":"OK"}}]}',
+      );
     });
     server.on("connection", () => {
       connections += 1;

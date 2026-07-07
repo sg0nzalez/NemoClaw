@@ -23,8 +23,9 @@ async function listen(server: http.Server): Promise<number> {
   servers.push(server);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
-  if (!address || typeof address === "string") throw new Error("test server did not bind TCP");
-  return address.port;
+  expect(address).toBeTruthy();
+  expect(typeof address).toBe("object");
+  return (address as import("node:net").AddressInfo).port;
 }
 
 describe("provider validation session", () => {
