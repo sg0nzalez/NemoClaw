@@ -10,7 +10,7 @@ import { describe, expect, it } from "vitest";
 import { LIVE_E2E_ROOT, REPO_ROOT } from "../fixtures/paths.ts";
 
 const REDUNDANT_LIVE_GATE =
-  /shouldRunLiveE2E\s*\(|process\.env\.NEMOCLAW_RUN_LIVE_E2E\s*===\s*["']1["']/;
+  /shouldRunLiveE2E\s*\(|process\.env\.NEMOCLAW_RUN_LIVE_E2E\s*===\s*["']1["']|from\s*["'][^"']*\/live-project-gate\.ts["']/;
 
 const SPECIAL_LIVE_TARGET_GATES = [
   {
