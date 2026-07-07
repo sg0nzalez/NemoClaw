@@ -53,6 +53,17 @@ const ROUTED_PROXY_REQUEST_TIMEOUT_MS = 720_000;
 const ROUTED_GATEWAY_REQUEST_TIMEOUT_MS = 840_000;
 const ROUTED_AGENT_INVOCATION_TIMEOUT_MS = 900_000;
 const RESTORED_GATEWAY_REQUEST_TIMEOUT_MS = LOCAL_INFERENCE_TIMEOUT_SECS * 1_000;
+const MANAGED_MCP_SNAPSHOT_PROBE = `import os
+from deepagents_code import _nemoclaw_managed as managed
+
+payload = b"managed-mcp-snapshot-probe\\n"
+descriptor, binding = managed._managed_mcp_snapshot(payload)
+try:
+    assert binding["kind"] in {managed._MCP_SEALED_KIND, managed._MCP_ANONYMOUS_KIND}
+    assert managed._read_bound_managed_mcp_descriptor(descriptor, binding) == payload
+finally:
+    os.close(descriptor)
+print("managed-mcp-snapshot-ok:" + binding["kind"])`;
 
 function sandboxName(mode: ToolDisclosureMode): string {
   return `e2e-tool-disclosure-performance-${mode}`;
@@ -240,6 +251,21 @@ test("tool disclosure hosted-inference performance smoke completes one frozen ta
       },
     );
     expect(add.exitCode, resultText(add)).toBe(0);
+
+    const snapshotProbe = await sandbox.exec(
+      sandboxName(mode),
+      ["nemoclaw-start", "/opt/venv/bin/python3", "-I", "-c", MANAGED_MCP_SNAPSHOT_PROBE],
+      {
+        artifactName: `managed-mcp-snapshot-${mode}`,
+        env: sandboxAccessEnv(),
+        timeoutMs: 30_000,
+      },
+    );
+    expect(snapshotProbe.exitCode, resultText(snapshotProbe)).toBe(0);
+    expect([
+      "managed-mcp-snapshot-ok:sealed-memfd",
+      "managed-mcp-snapshot-ok:anonymous-otmpfile",
+    ]).toContain(snapshotProbe.stdout.trim());
   }
 
   const results = [];

@@ -24,6 +24,10 @@ filesystem_policy:
     - /sandbox
     - /sandbox/.deepagents
     - /tmp
+    # OpenShell blocks memfd_create; managed MCP config uses an unlinked,
+    # read-only O_TMPFILE snapshot on this sandbox-local tmpfs when /tmp's
+    # backing filesystem does not support anonymous files.
+    - /dev/shm
     - /dev/null
 
 landlock:

@@ -422,12 +422,15 @@ describe("LangChain Deep Agents Code image contracts", () => {
 
   it("keeps optional service egress out of the default policy and requires Landlock", () => {
     const policy = readAgentFile("policy-additions.yaml");
+    const managedRuntime = readAgentFile("managed-dcode-runtime.py");
 
     expect(policy).not.toContain("api.tavily.com");
     expect(policy).not.toContain("api.smith.langchain.com");
     expect(policy).toContain("    - /usr\n");
     expect(policy).toContain("    - /opt/venv\n");
     expect(policy).toContain("    - /etc\n");
+    expect(policy).toContain("    - /dev/shm\n");
+    expect(managedRuntime).toContain('(Path("/tmp"), Path("/dev/shm"))');
     expect(policy).toContain("compatibility: strict");
     expect(policy).not.toContain("compatibility: best_effort");
     expect(policy).toContain("fail closed when Landlock cannot be applied");
