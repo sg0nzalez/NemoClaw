@@ -13,7 +13,7 @@ import {
   type FakeOpenAiCompatibleServer,
   startFakeOpenAiCompatibleServer,
 } from "../fixtures/fake-openai-compatible.ts";
-import { CLI_ENTRYPOINT, REPO_ROOT } from "../fixtures/paths.ts";
+import { CLI_ENTRYPOINT } from "../fixtures/paths.ts";
 
 // Disruption-recovery contract — regression for #446.
 //
