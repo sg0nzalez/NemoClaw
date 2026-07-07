@@ -37,8 +37,9 @@ const OPENCLAW_RUNTIME_PROBE =
  * earlier would require reliable static analysis of arbitrary multi-stage
  * Dockerfiles or a new build-time image contract. The focused classifier tests
  * prevent false positives, and the live custom-plugin E2E proves the supported
- * full-runtime path. Remove this runtime fallback when #5998 supplies the
- * managed plugin lifecycle or a build-time contract validator replaces it.
+ * full-runtime path.
+ * REMOVE-WHEN: #5998 supplies the managed plugin lifecycle, or a build-time
+ * image contract validator replaces this runtime fallback.
  */
 
 export function shouldDiagnoseCustomOpenClawRuntime(
