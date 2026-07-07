@@ -200,6 +200,20 @@ const { EventEmitter } = require("node:events");
 const fs = require("node:fs");
 const path = require("node:path");
 
+const originalSpawnSync = childProcess.spawnSync;
+childProcess.spawnSync = (command, args, options) => {
+  const normalized = _n([command, ...(Array.isArray(args) ? args : [])]);
+  if (command === "ssh" && normalized.includes("installed_plugin_index")) {
+    return {
+      status: 0,
+      signal: null,
+      stdout: Buffer.from(JSON.stringify({ version: 1, installRecords: {}, loadPaths: [] })),
+      stderr: Buffer.alloc(0),
+    };
+  }
+  return originalSpawnSync(command, args, options);
+};
+
 const commands = [];
 let hasExtraFileAtSpawn = false;
 let stagedIgnoredFilesAtSpawn = null;
