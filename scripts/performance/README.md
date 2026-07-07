@@ -79,7 +79,11 @@ evidence required for that result.
 The explicit live smoke also runs a separate routed replay after its frozen
 direct/progressive cells. That replay must preserve task correctness and the
 expected tool call while reducing model-visible schemas without fallback. It
-does not alter either frozen cell and remains claim-ineligible.
+does not alter either frozen cell and remains claim-ineligible. On an ordinary
+GitHub runner, its recorder uses an authenticated, host-local private Docker
+bridge inside the trusted runner boundary. Its ephemeral ingress credential is
+replaced before upstream forwarding; full campaigns retain the protocol's
+local recorder topology.
 
 Run the route-only corpus with a real decomposer using:
 

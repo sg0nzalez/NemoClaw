@@ -3,7 +3,6 @@
 
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-
 import {
   DEFAULT_SYNTHETIC_PERFORMANCE_TEST_CATALOG_SEED,
   generateCatalogPrefix,
@@ -25,6 +24,7 @@ import { startQuickTunnel } from "../../../scripts/performance/tool-disclosure/q
 import { createToolDisclosureRecordingProxy } from "../../../scripts/performance/tool-disclosure/recorder";
 import type { ToolDisclosureMode } from "../../../scripts/performance/tool-disclosure/schedule";
 import { generatePrimaryTaskSet } from "../../../scripts/performance/tool-disclosure/tasks";
+import { LOCAL_INFERENCE_TIMEOUT_SECS } from "../../../src/lib/onboard/env";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
 import { resultText, sandboxAccessEnv } from "../fixtures/clients/index.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
@@ -37,12 +37,18 @@ const TASK_ID = "primary-single-01";
 const MODES = ["progressive", "direct"] as const satisfies readonly ToolDisclosureMode[];
 const MCP_SERVER_NAME = "performance-test";
 const MCP_TOKEN_ENV = "TOOL_DISCLOSURE_PERFORMANCE_TEST_MCP_TOKEN";
+const OPENSHELL_DOCKER_NETWORK =
+  process.env.OPENSHELL_DOCKER_NETWORK_NAME?.trim() || "openshell-docker";
+const PRIVATE_BRIDGE_PROBE_IMAGE =
+  "busybox@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662";
 const TEST_TIMEOUT_MS = 50 * 60_000;
 const ROUTING_DECOMPOSER_MAX_ATTEMPTS = 2;
 const ROUTING_DECOMPOSER_REQUEST_TIMEOUT_MS = 120_000;
 const ROUTE_ONLY_RUN_TIMEOUT_MS = 900_000;
 const ROUTED_PROXY_REQUEST_TIMEOUT_MS = 720_000;
+const ROUTED_GATEWAY_REQUEST_TIMEOUT_MS = 840_000;
 const ROUTED_AGENT_INVOCATION_TIMEOUT_MS = 900_000;
+const RESTORED_GATEWAY_REQUEST_TIMEOUT_MS = LOCAL_INFERENCE_TIMEOUT_SECS * 1_000;
 
 function sandboxName(mode: ToolDisclosureMode): string {
   return `e2e-tool-disclosure-performance-${mode}`;
@@ -75,7 +81,13 @@ test.skipIf(!shouldRunLiveE2E())(
   async ({ artifacts, cleanup, host, sandbox, secrets }) => {
     const hosted = requireHostedInferenceConfig(secrets);
     const bearerToken = randomBytes(32).toString("hex");
-    artifacts.addRedactionValues([hosted.apiKey, bearerToken]);
+    const routingIngressToken = randomBytes(32).toString("hex");
+    artifacts.addRedactionValues([
+      hosted.apiKey,
+      hosted.endpointUrl,
+      bearerToken,
+      routingIngressToken,
+    ]);
 
     const routingCredentialEnv = "NEMOCLAW_COMPOSITIONAL_ROUTING_SMOKE_API_KEY";
     const previousRoutingCredential = process.env[routingCredentialEnv];
@@ -287,16 +299,75 @@ test.skipIf(!shouldRunLiveE2E())(
       isRoutableTool: (name) => routedToolNames.has(name),
       requireRouting: true,
     });
+    const networkInspect = await host.command(
+      "docker",
+      ["network", "inspect", "--format", "{{json .IPAM.Config}}", OPENSHELL_DOCKER_NETWORK],
+      {
+        artifactName: "compositional-routing-private-network",
+        env: hostEnv(),
+        timeoutMs: 30_000,
+      },
+    );
+    expect(networkInspect.exitCode, resultText(networkInspect)).toBe(0);
+    const networkIpam = JSON.parse(networkInspect.stdout) as Array<{
+      Gateway?: unknown;
+    }>;
+    const privateListenHost = networkIpam
+      .map((entry) => entry.Gateway)
+      .find((gateway): gateway is string => typeof gateway === "string" && gateway.includes("."));
+    expect(privateListenHost, "OpenShell Docker network has no IPv4 gateway").toBeDefined();
+    const recorderListenHost = privateListenHost as string;
     const routedProxy = createToolDisclosureRecordingProxy({
       upstreamBaseUrl: hosted.endpointUrl,
       allowRemoteHttpsUpstream: true,
+      listenHost: recorderListenHost,
+      allowAuthenticatedPrivateIpv4Listener: true,
+      requiredAuthorization: `Bearer ${routingIngressToken}`,
+      upstreamAuthorization: `Bearer ${hosted.apiKey}`,
       requestTimeoutMs: ROUTED_PROXY_REQUEST_TIMEOUT_MS,
       requestTransform: routedTransform.requestTransform,
     });
     const routedProxyAddress = await routedProxy.start();
     cleanup.add("stop compositional routing recording proxy", () => routedProxy.stop());
+    expect(routedProxyAddress.host).toBe(recorderListenHost);
+    expect(routedProxyAddress.port).toBeGreaterThanOrEqual(1_024);
 
-    const configureInferenceRoute = async (baseUrl: string, artifactSuffix: string) => {
+    const bridgeProbe = await host.command(
+      "docker",
+      [
+        "run",
+        "--rm",
+        "--pull=missing",
+        "--network",
+        OPENSHELL_DOCKER_NETWORK,
+        PRIVATE_BRIDGE_PROBE_IMAGE,
+        "nc",
+        "-zw5",
+        recorderListenHost,
+        String(routedProxyAddress.port),
+      ],
+      {
+        artifactName: "compositional-routing-private-reachability",
+        env: hostEnv(),
+        redactionValues: [routedProxyAddress.base_url],
+        timeoutMs: 30_000,
+      },
+    );
+    expect(
+      bridgeProbe.exitCode,
+      `OpenShell Docker network cannot reach the authenticated routing bridge: ${resultText(bridgeProbe)}`,
+    ).toBe(0);
+
+    const configureInferenceRoute = async (
+      baseUrl: string,
+      artifactSuffix: string,
+      credential: string,
+      timeoutMs: number,
+    ) => {
+      artifacts.addRedactionValues([baseUrl, credential]);
+      const providerEnv = hostEnv({
+        [hosted.credentialEnv]: credential,
+      });
       const update = await host.command(
         "openshell",
         [
@@ -310,8 +381,8 @@ test.skipIf(!shouldRunLiveE2E())(
         ],
         {
           artifactName: `compositional-routing-provider-${artifactSuffix}`,
-          env: hostEnv(hosted.env),
-          redactionValues: [hosted.apiKey],
+          env: providerEnv,
+          redactionValues: [hosted.apiKey, routingIngressToken, baseUrl, credential],
           timeoutMs: 2 * 60_000,
         },
       );
@@ -326,20 +397,41 @@ test.skipIf(!shouldRunLiveE2E())(
           hosted.providerName,
           "--model",
           hosted.model,
+          "--timeout",
+          String(timeoutMs / 1_000),
         ],
         {
           artifactName: `compositional-routing-select-${artifactSuffix}`,
-          env: hostEnv(hosted.env),
-          redactionValues: [hosted.apiKey],
+          env: providerEnv,
+          redactionValues: [hosted.apiKey, routingIngressToken, baseUrl, credential],
           timeoutMs: 2 * 60_000,
         },
       );
       expect(select.exitCode, resultText(select)).toBe(0);
     };
 
+    let providerRestore: Promise<void> | undefined;
+    const restoreInferenceRoute = (): Promise<void> =>
+      providerRestore ??
+      (providerRestore = configureInferenceRoute(
+        hosted.endpointUrl,
+        "restore",
+        hosted.apiKey,
+        RESTORED_GATEWAY_REQUEST_TIMEOUT_MS,
+      ).catch((error: unknown) => {
+        providerRestore = undefined;
+        throw error;
+      }));
+    cleanup.add("restore hosted inference route", restoreInferenceRoute);
+
     let routedReplay: Record<string, unknown> | undefined;
     try {
-      await configureInferenceRoute(`${routedProxyAddress.base_url}/v1`, "enable");
+      await configureInferenceRoute(
+        `${routedProxyAddress.base_url}/v1`,
+        "enable",
+        routingIngressToken,
+        ROUTED_GATEWAY_REQUEST_TIMEOUT_MS,
+      );
       const driver = buildAgentDriverCommand({
         openshellBin: process.env.OPENSHELL_BIN,
         sandboxName: sandboxName("direct"),
@@ -357,7 +449,13 @@ test.skipIf(!shouldRunLiveE2E())(
         invocation = await host.command(driver.command, driver.args, {
           artifactName: "invoke-tool-disclosure-compositional",
           env: hostEnv(),
-          redactionValues: [...driver.redactions, hosted.apiKey, bearerToken],
+          redactionValues: [
+            ...driver.redactions,
+            hosted.apiKey,
+            bearerToken,
+            routingIngressToken,
+            routedProxyAddress.base_url,
+          ],
           timeoutMs: ROUTED_AGENT_INVOCATION_TIMEOUT_MS,
         });
       } finally {
@@ -394,7 +492,10 @@ test.skipIf(!shouldRunLiveE2E())(
           timeout_ms: ROUTING_DECOMPOSER_REQUEST_TIMEOUT_MS,
           route_only_run_timeout_ms: ROUTE_ONLY_RUN_TIMEOUT_MS,
           proxy_request_timeout_ms: ROUTED_PROXY_REQUEST_TIMEOUT_MS,
+          gateway_request_timeout_ms: ROUTED_GATEWAY_REQUEST_TIMEOUT_MS,
           agent_invocation_timeout_ms: ROUTED_AGENT_INVOCATION_TIMEOUT_MS,
+          baseline_gateway_request_timeout_ms: RESTORED_GATEWAY_REQUEST_TIMEOUT_MS,
+          gateway_transport: "authenticated-private-host-bridge",
           embedding: "portable-lexical-hashing",
         },
         route_evidence: routeEvidence,
@@ -402,11 +503,14 @@ test.skipIf(!shouldRunLiveE2E())(
         limitations: [
           "This single routed replay is an end-to-end wiring check, not a performance or quality claim.",
           "The portable lexical embedder is used only for an ordinary-runner smoke path.",
+          "The replay uses an authenticated private runner bridge and replaces its ephemeral ingress credential before the hosted request.",
+          "The bridge uses host-local HTTP inside the trusted runner and Docker-network boundary.",
+          "Proxy and gateway timeouts apply per request; the routed agent invocation has its own overall bound.",
           "The routed replay is separate from the frozen direct/progressive comparison.",
         ],
       };
     } finally {
-      await configureInferenceRoute(hosted.endpointUrl, "restore");
+      await restoreInferenceRoute();
     }
 
     await artifacts.writeJson("compositional-routing-agent-smoke.json", routedReplay);

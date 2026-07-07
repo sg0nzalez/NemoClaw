@@ -54,13 +54,20 @@ async function startUpstream(
 async function startProxy(
   upstreamBaseUrl: string,
   options: {
+    listenHost?: string;
+    allowAuthenticatedPrivateIpv4Listener?: boolean;
+    requiredAuthorization?: string;
+    upstreamAuthorization?: string;
     maxRequestBodyBytes?: number;
     requestTimeoutMs?: number;
     requiredTemperature?: number;
     requestTransform?: RecordingProxyRequestTransform;
   } = {},
 ): Promise<{ proxy: ToolDisclosureRecordingProxy; baseUrl: string }> {
-  const proxy = createToolDisclosureRecordingProxy({ upstreamBaseUrl, ...options });
+  const proxy = createToolDisclosureRecordingProxy({
+    upstreamBaseUrl,
+    ...options,
+  });
   const address = await proxy.start();
   cleanup.push(() => proxy.stop());
   expect(address.host).toBe("127.0.0.1");
@@ -100,6 +107,87 @@ describe("tool-disclosure recording proxy", () => {
         upstreamBaseUrl: "http://inference.example/v1",
       }),
     ).toThrow("upstreamBaseUrl is allowed only on loopback");
+    expect(() =>
+      createToolDisclosureRecordingProxy({
+        upstreamBaseUrl: "https://inference.example/v1",
+        allowRemoteHttpsUpstream: true,
+        listenHost: "172.18.0.1",
+        allowAuthenticatedPrivateIpv4Listener: true,
+      }),
+    ).toThrow("authenticated private IPv4 listener");
+    expect(() =>
+      createToolDisclosureRecordingProxy({
+        upstreamBaseUrl: "https://inference.example/v1",
+        allowRemoteHttpsUpstream: true,
+        listenHost: "203.0.113.10",
+        allowAuthenticatedPrivateIpv4Listener: true,
+        requiredAuthorization: "Bearer ingress-token",
+        upstreamAuthorization: "Bearer upstream-token",
+      }),
+    ).toThrow("must be exactly 127.0.0.1");
+    expect(() =>
+      createToolDisclosureRecordingProxy({
+        upstreamBaseUrl: "https://inference.example/v1",
+        allowRemoteHttpsUpstream: true,
+        listenHost: "172.18.0.1",
+        allowAuthenticatedPrivateIpv4Listener: true,
+        requiredAuthorization: "Bearer ingress-token",
+        upstreamAuthorization: "Bearer upstream-token",
+      }),
+    ).not.toThrow();
+  });
+
+  it("requires paired, bounded bearer headers for authenticated private listeners", () => {
+    const privateListener = {
+      upstreamBaseUrl: "https://inference.example/v1",
+      allowRemoteHttpsUpstream: true,
+      listenHost: "172.18.0.1",
+      allowAuthenticatedPrivateIpv4Listener: true,
+    } as const;
+    expect(() =>
+      createToolDisclosureRecordingProxy({
+        ...privateListener,
+        requiredAuthorization: "Bearer ingress-token",
+      }),
+    ).toThrow("requires both headers");
+    expect(() =>
+      createToolDisclosureRecordingProxy({
+        ...privateListener,
+        upstreamAuthorization: "Bearer upstream-token",
+      }),
+    ).toThrow("requires both headers");
+    for (const malformed of [
+      "Basic token",
+      "Bearer ",
+      "Bearer token with spaces",
+      `Bearer ${"x".repeat(4_097)}`,
+    ]) {
+      expect(() =>
+        createToolDisclosureRecordingProxy({
+          ...privateListener,
+          requiredAuthorization: malformed,
+          upstreamAuthorization: "Bearer upstream-token",
+        }),
+      ).toThrow("bounded Bearer authorization header");
+    }
+  });
+
+  it("accepts only RFC1918 address ranges for authenticated private listeners", () => {
+    const options = {
+      upstreamBaseUrl: "https://inference.example/v1",
+      allowRemoteHttpsUpstream: true,
+      allowAuthenticatedPrivateIpv4Listener: true,
+      requiredAuthorization: "Bearer ingress-token",
+      upstreamAuthorization: "Bearer upstream-token",
+    } as const;
+    for (const listenHost of ["10.0.0.1", "172.16.0.1", "172.31.255.254", "192.168.1.1"]) {
+      expect(() => createToolDisclosureRecordingProxy({ ...options, listenHost })).not.toThrow();
+    }
+    for (const listenHost of ["172.15.255.254", "172.32.0.1", "192.167.1.1", "192.169.1.1"]) {
+      expect(() => createToolDisclosureRecordingProxy({ ...options, listenHost })).toThrow(
+        "must be exactly 127.0.0.1",
+      );
+    }
   });
 
   it("rejects non-loopback HTTPS recorder upstreams for the local performance test", () => {
@@ -186,7 +274,11 @@ describe("tool-disclosure recording proxy", () => {
   });
 
   it("forwards requests while retaining only canonical tool metadata", async () => {
-    const received: Array<{ url: string; authorization: string; body: string }> = [];
+    const received: Array<{
+      url: string;
+      authorization: string;
+      body: string;
+    }> = [];
     const upstream = await startUpstream((request, response) => {
       void collectBody(request).then((body) => {
         received.push({
@@ -313,6 +405,72 @@ describe("tool-disclosure recording proxy", () => {
     expect(proxy.getEvents()).toEqual([]);
   });
 
+  it("authenticates before recording or transformation and replaces the upstream credential", async () => {
+    const upstreamAuthorizations: string[] = [];
+    const upstream = await startUpstream((request, response) => {
+      upstreamAuthorizations.push(String(request.headers.authorization ?? ""));
+      response.end("{}");
+    });
+    let transformCalls = 0;
+    const ingressAuthorization = "Bearer private-ingress-token";
+    const upstreamAuthorization = "Bearer private-upstream-token";
+    const { proxy, baseUrl } = await startProxy(upstream.baseUrl, {
+      requiredAuthorization: ingressAuthorization,
+      upstreamAuthorization,
+      requestTransform: ({ body }) => {
+        transformCalls += 1;
+        return body;
+      },
+    });
+
+    proxy.beginRun("authorization-translation");
+    const missing = await fetch(`${baseUrl}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: '{"messages":[],"tools":[]}',
+    });
+    expect(missing.status).toBe(401);
+    expect(await missing.json()).toEqual({ error: "unauthorized" });
+    const rejected = await fetch(`${baseUrl}/v1/chat/completions`, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer private-ingress-tokeN",
+        "content-type": "application/json",
+      },
+      body: '{"messages":[],"tools":[]}',
+    });
+    expect(rejected.status).toBe(401);
+    expect(await rejected.json()).toEqual({ error: "unauthorized" });
+    expect(transformCalls).toBe(0);
+    expect(upstreamAuthorizations).toEqual([]);
+
+    const acceptedBody = '{"messages":[],"tools":[]}';
+    const acceptedStatus = await new Promise<number>((resolve, reject) => {
+      const request = http.request(`${baseUrl}/v1/chat/completions`, {
+        method: "POST",
+        headers: {
+          authorization: ingressAuthorization,
+          connection: "authorization",
+          "content-length": Buffer.byteLength(acceptedBody),
+          "content-type": "application/json",
+        },
+      });
+      request.once("response", (response) => {
+        response.resume();
+        response.once("end", () => resolve(response.statusCode ?? 0));
+      });
+      request.once("error", reject);
+      request.end(acceptedBody);
+    });
+    expect(acceptedStatus).toBe(200);
+
+    const events = proxy.endRun();
+    expect(transformCalls).toBe(1);
+    expect(upstreamAuthorizations).toEqual([upstreamAuthorization]);
+    expect(events).toHaveLength(1);
+    expect(JSON.stringify(events)).not.toMatch(/private-ingress-token|private-upstream-token/);
+  });
+
   it("applies an async request transform before forwarding and records transformed tools", async () => {
     let receivedBody = "";
     const upstream = await startUpstream((request, response) => {
@@ -342,18 +500,28 @@ describe("tool-disclosure recording proxy", () => {
       await Promise.resolve();
       return Buffer.from(JSON.stringify(payload), "utf8");
     };
-    const { proxy, baseUrl } = await startProxy(upstream.baseUrl, { requestTransform });
+    const { proxy, baseUrl } = await startProxy(upstream.baseUrl, {
+      requestTransform,
+    });
     const requestBody = JSON.stringify({
       model: "private-model",
       messages: [{ role: "user", content: "private-prompt" }],
       tools: [
         {
           type: "function",
-          function: { name: "first_tool", description: "first-private", parameters: {} },
+          function: {
+            name: "first_tool",
+            description: "first-private",
+            parameters: {},
+          },
         },
         {
           type: "function",
-          function: { name: "second_tool", description: "second-private", parameters: {} },
+          function: {
+            name: "second_tool",
+            description: "second-private",
+            parameters: {},
+          },
         },
       ],
     });
@@ -518,7 +686,9 @@ describe("tool-disclosure recording proxy", () => {
       body: '{"messages":[],"tools":[]}',
     });
     expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ error: "performance test temperature mismatch" });
+    expect(await response.json()).toEqual({
+      error: "performance test temperature mismatch",
+    });
     expect(hits).toBe(0);
     expect(proxy.endRun()[0]).toMatchObject({
       status_code: 400,
@@ -584,7 +754,9 @@ describe("tool-disclosure recording proxy", () => {
         response.end("{}");
       });
     });
-    const { proxy, baseUrl } = await startProxy(upstream.baseUrl, { requiredTemperature: 0 });
+    const { proxy, baseUrl } = await startProxy(upstream.baseUrl, {
+      requiredTemperature: 0,
+    });
     proxy.beginRun("temperature-missing");
     await fetch(`${baseUrl}/v1/chat/completions`, {
       method: "POST",
@@ -625,7 +797,9 @@ describe("tool-disclosure recording proxy", () => {
     });
     expect(response.status).toBe(502);
     expect(response.headers.get("location")).toBeNull();
-    expect(await response.json()).toEqual({ error: "upstream redirect rejected" });
+    expect(await response.json()).toEqual({
+      error: "upstream redirect rejected",
+    });
     expect(hits).toBe(1);
 
     const [event] = proxy.endRun();

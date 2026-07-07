@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import http, {
   type IncomingHttpHeaders,
   type IncomingMessage,
@@ -92,10 +92,15 @@ export interface ToolDisclosureRecordingEvent {
 
 export interface RecordingProxyOptions {
   upstreamBaseUrl: string;
-  /** Explicitly allow a credential-free non-loopback HTTPS upstream. */
+  /** Explicitly allow a fixed non-loopback HTTPS upstream without URL-embedded credentials. */
   allowRemoteHttpsUpstream?: boolean;
-  /** Must be exactly 127.0.0.1. Exposed so unsafe configuration fails closed. */
+  /** Defaults to loopback. A private IPv4 bridge requires explicit opt-in and auth translation. */
   listenHost?: string;
+  allowAuthenticatedPrivateIpv4Listener?: boolean;
+  /** Runtime-only exact bearer header checked before request reading, recording, or transformation. */
+  requiredAuthorization?: string;
+  /** Runtime-only bearer header that replaces the accepted ingress credential upstream. */
+  upstreamAuthorization?: string;
   /** Zero selects an ephemeral port. */
   port?: number;
   maxRequestBodyBytes?: number;
@@ -126,7 +131,7 @@ export type RecordingProxyRequestTransform = (
 ) => Buffer | Promise<Buffer>;
 
 export interface RecordingProxyAddress {
-  host: typeof LOOPBACK_HOST;
+  host: string;
   port: number;
   base_url: string;
 }
@@ -195,6 +200,32 @@ function validatePositiveInteger(value: number, label: string): void {
   if (!Number.isSafeInteger(value) || value <= 0) {
     throw new Error(`${label} must be a positive integer`);
   }
+}
+
+function isPrivateIpv4(value: string): boolean {
+  if (isIP(value) !== 4) return false;
+  const [first, second] = value.split(".").map(Number);
+  return (
+    first === 10 ||
+    (first === 172 && second >= 16 && second <= 31) ||
+    (first === 192 && second === 168)
+  );
+}
+
+function authorizationHeader(value: string | undefined, label: string): string | undefined {
+  if (value === undefined) return undefined;
+  const token = value.startsWith("Bearer ") ? value.slice("Bearer ".length) : "";
+  if (!token || token.length > 4_096 || /\s/u.test(token)) {
+    throw new Error(`${label} must be a bounded Bearer authorization header`);
+  }
+  return value;
+}
+
+function authorizationMatches(value: string | undefined, expected: string): boolean {
+  if (value === undefined) return false;
+  const actualDigest = createHash("sha256").update(value).digest();
+  const expectedDigest = createHash("sha256").update(expected).digest();
+  return timingSafeEqual(actualDigest, expectedDigest);
 }
 
 function parseUpstreamBaseUrl(value: string, allowRemoteHttpsUpstream: boolean): URL {
@@ -323,6 +354,7 @@ function connectionHeaderNames(headers: IncomingHttpHeaders): Set<string> {
 function forwardedRequestHeaders(
   headers: IncomingHttpHeaders,
   bodyLength: number,
+  authorization: string | undefined,
 ): OutgoingHttpHeaders {
   const result: OutgoingHttpHeaders = {};
   const connectionNames = connectionHeaderNames(headers);
@@ -340,6 +372,7 @@ function forwardedRequestHeaders(
     result[name] = value;
   }
   result["content-length"] = String(bodyLength);
+  if (authorization !== undefined) result.authorization = authorization;
   return result;
 }
 
@@ -404,17 +437,21 @@ function readBoundedBody(request: IncomingMessage, maxBytes: number): Promise<Bo
 }
 
 /**
- * Loopback-only OpenAI-compatible recording proxy for performance test measurements.
- * The proxy never logs and keeps only content-free events in memory.
+ * OpenAI-compatible recording proxy for performance test measurements.
+ * The default listener is loopback-only. An authenticated RFC1918 listener is an explicit,
+ * caller-owned exception for an inspected private bridge. The proxy never logs and keeps only
+ * content-free events in memory.
  */
 export class ToolDisclosureRecordingProxy {
   private readonly upstream: URL;
-  private readonly listenHost: typeof LOOPBACK_HOST;
+  private readonly listenHost: string;
   private readonly configuredPort: number;
   private readonly maxRequestBodyBytes: number;
   private readonly requestTimeoutMs: number;
   private readonly requiredTemperature: number | undefined;
   private readonly requestTransform: RecordingProxyRequestTransform | undefined;
+  private readonly requiredAuthorization: string | undefined;
+  private readonly upstreamAuthorization: string | undefined;
   private readonly clock: () => number;
   private readonly sockets = new Set<Socket>();
   private readonly events: ToolDisclosureRecordingEvent[] = [];
@@ -424,8 +461,28 @@ export class ToolDisclosureRecordingProxy {
 
   constructor(options: RecordingProxyOptions) {
     const listenHost = options.listenHost ?? LOOPBACK_HOST;
-    if (listenHost !== LOOPBACK_HOST) {
-      throw new Error(`recording proxy listenHost must be exactly ${LOOPBACK_HOST}`);
+    const requiredAuthorization = authorizationHeader(
+      options.requiredAuthorization,
+      "requiredAuthorization",
+    );
+    const upstreamAuthorization = authorizationHeader(
+      options.upstreamAuthorization,
+      "upstreamAuthorization",
+    );
+    if ((requiredAuthorization === undefined) !== (upstreamAuthorization === undefined)) {
+      throw new Error("recording proxy authorization translation requires both headers");
+    }
+    if (
+      listenHost !== LOOPBACK_HOST &&
+      !(
+        options.allowAuthenticatedPrivateIpv4Listener === true &&
+        isPrivateIpv4(listenHost) &&
+        requiredAuthorization !== undefined
+      )
+    ) {
+      throw new Error(
+        `recording proxy listenHost must be exactly ${LOOPBACK_HOST} unless an authenticated private IPv4 listener is explicitly enabled`,
+      );
     }
     const port = options.port ?? 0;
     if (!Number.isSafeInteger(port) || port < 0 || port > 65_535) {
@@ -446,6 +503,8 @@ export class ToolDisclosureRecordingProxy {
     this.requestTimeoutMs = requestTimeoutMs;
     this.requiredTemperature = options.requiredTemperature;
     this.requestTransform = options.requestTransform;
+    this.requiredAuthorization = requiredAuthorization;
+    this.upstreamAuthorization = upstreamAuthorization;
     this.clock = () => performance.now();
   }
 
@@ -483,14 +542,14 @@ export class ToolDisclosureRecordingProxy {
     this.server = server;
 
     const address = server.address();
-    if (!address || typeof address === "string" || address.address !== LOOPBACK_HOST) {
+    if (!address || typeof address === "string" || address.address !== this.listenHost) {
       await this.stop();
-      throw new Error("recording proxy failed to bind the required loopback address");
+      throw new Error("recording proxy failed to bind the required listener address");
     }
     return {
-      host: LOOPBACK_HOST,
+      host: this.listenHost,
       port: address.port,
-      base_url: `http://${LOOPBACK_HOST}:${address.port}`,
+      base_url: `http://${this.listenHost}:${address.port}`,
     };
   }
 
@@ -679,6 +738,14 @@ export class ToolDisclosureRecordingProxy {
       fixedResponse(response, 404, "not found");
       return;
     }
+    if (
+      this.requiredAuthorization !== undefined &&
+      !authorizationMatches(request.headers.authorization, this.requiredAuthorization)
+    ) {
+      request.resume();
+      fixedResponse(response, 401, "unauthorized");
+      return;
+    }
 
     const endpoint = classifyEndpoint(incoming.pathname);
     const method = classifyMethod(request.method);
@@ -853,7 +920,11 @@ export class ToolDisclosureRecordingProxy {
         target,
         {
           method: incomingRequest.method,
-          headers: forwardedRequestHeaders(incomingRequest.headers, body.length),
+          headers: forwardedRequestHeaders(
+            incomingRequest.headers,
+            body.length,
+            this.upstreamAuthorization,
+          ),
         },
         (upstreamResponse) => {
           statusCode = upstreamResponse.statusCode ?? 502;

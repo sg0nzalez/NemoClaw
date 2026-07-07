@@ -19,6 +19,7 @@ Run both campaigns and retain their evidence before you make a performance or qu
 
 The explicit-only `tool-disclosure-performance-smoke` E2E job is a smaller operational check for ordinary GitHub-hosted runners.
 It runs the route-only acceptance corpus, one frozen task in progressive and direct modes with fresh Deep Agents sandboxes, and a separate routed replay of that task through the request transformer.
+The routed replay keeps its recorder on a host-local private Docker bridge within the trusted runner boundary, rejects requests before transformation unless they carry a fresh ephemeral credential, and replaces that credential with the hosted provider credential only on the runner side.
 Its output validates live wiring only: it is not a complete campaign, cannot be summarized by this protocol, and does not support performance claims.
 
 ## Exercise the compositional routing experiment
@@ -111,6 +112,7 @@ It does not implement or claim a dependency-graph planner or compatibility compo
 The route-only command does not execute an agent or a tool; use the full performance procedure below to validate task execution and end-to-end behavior.
 It also does not install the router into the frozen direct/progressive campaign.
 The opt-in smoke job exercises the transform in one separate, claim-ineligible agent replay and requires successful task execution, the expected tool call, no routing fallback, and fewer model-visible schemas.
+That ordinary-runner bridge is test-only; the complete two-campaign procedure keeps the recorder on its documented local host boundary and does not route measurements through the smoke bridge.
 A broader agent-level routing comparison must use a separate initial/refined schedule in which both agent cells expose the same complete catalog before the request transformer runs.
 
 ## Understand the frozen protocol
