@@ -162,14 +162,16 @@ describe("Brev nightly workflow contract", () => {
     expect(prerequisite?.run).toContain("sha256sum -c -");
     expect(prerequisite?.run).toContain("dpkg-deb -f");
     expect(collect?.if).toContain("tool-disclosure-performance-smoke");
+    expect(collect?.env?.TEST_OUTCOME).toBe("${{ steps.brev-test.outcome }}");
     expect(collect?.run).toContain("/tmp/nemoclaw-tool-disclosure-performance-smoke-artifacts");
     expect(collect?.run).toContain("tar -C");
+    expect(collect?.run).toContain('if [ "$TEST_OUTCOME" = "success" ]');
     expect(scan?.env?.NVIDIA_INFERENCE_API_KEY).toBe("${{ secrets.NVIDIA_INFERENCE_API_KEY }}");
     expect(scan?.run).toContain("grep -R -I -l -F");
     expect(upload?.uses).toBe("actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a");
     expect(upload?.with).toMatchObject({
       name: "e2e-brev-tool-disclosure-performance-smoke-${{ github.run_attempt }}",
-      "if-no-files-found": "error",
+      "if-no-files-found": "ignore",
       "retention-days": 14,
     });
     expect(steps.indexOf(cleanup as NonNullable<typeof cleanup>)).toBeGreaterThan(

@@ -63,6 +63,7 @@ describe("tool-disclosure quick tunnel", () => {
       "info",
     ]);
     expect(() => buildQuickTunnelArgs(0)).toThrow("between 1 and 65535");
+    expect(buildQuickTunnelArgs(31337, "auto")).toContain("auto");
   });
 
   it("discovers a tunnel origin from the bounded child log and closes the child", async () => {

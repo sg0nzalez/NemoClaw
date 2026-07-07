@@ -928,7 +928,11 @@ async function prepareToolDisclosurePerformanceSmoke(elapsed: () => string): Pro
   const localPort = await reserveLoopbackPort();
   try {
     performanceSmokeMcpForward = await startPerformanceSmokeSshForward(localPort);
-    performanceSmokeMcpTunnel = await startQuickTunnel({ port: localPort, timeoutMs: 90_000 });
+    performanceSmokeMcpTunnel = await startQuickTunnel({
+      port: localPort,
+      protocol: "auto",
+      timeoutMs: 90_000,
+    });
   } catch (error) {
     await stopManagedChild(performanceSmokeMcpForward);
     performanceSmokeMcpForward = undefined;

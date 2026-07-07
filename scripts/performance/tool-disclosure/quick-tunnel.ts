@@ -31,11 +31,16 @@ export interface QuickTunnel {
   close(): Promise<void>;
 }
 
+export type QuickTunnelProtocol = "auto" | "http2" | "quic";
+
 export function parseQuickTunnelOrigin(text: string): string | null {
   return [...text.matchAll(ORIGIN_PATTERN)].at(-1)?.[0] ?? null;
 }
 
-export function buildQuickTunnelArgs(port: number): string[] {
+export function buildQuickTunnelArgs(
+  port: number,
+  protocol: QuickTunnelProtocol = "http2",
+): string[] {
   if (!Number.isInteger(port) || port < 1 || port > 65_535) {
     throw new Error("quick-tunnel origin port must be between 1 and 65535");
   }
@@ -44,7 +49,7 @@ export function buildQuickTunnelArgs(port: number): string[] {
     "--config=",
     "--no-autoupdate",
     "--protocol",
-    "http2",
+    protocol,
     "--url",
     `http://127.0.0.1:${port}`,
     "--loglevel",
@@ -106,7 +111,7 @@ function readLogTail(file: string, maxBytes = 8_192): string {
   }
 }
 
-async function probe(origin: string, fetchImpl: typeof fetch): Promise<boolean> {
+async function probe(origin: string, fetchImpl: typeof fetch): Promise<number | null> {
   try {
     const response = await fetchImpl(`${origin}/mcp`, {
       method: "HEAD",
@@ -114,10 +119,18 @@ async function probe(origin: string, fetchImpl: typeof fetch): Promise<boolean> 
       signal: AbortSignal.timeout(5_000),
     });
     await response.body?.cancel();
-    return response.status === 405;
+    return response.status;
   } catch {
-    return false;
+    return null;
   }
+}
+
+function sanitizedLogDiagnostic(file: string): string {
+  return readLogTail(file, 2_048)
+    .replace(ORIGIN_PATTERN, "https://redacted.trycloudflare.com")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .slice(-1_500);
 }
 
 export async function startQuickTunnel(options: {
@@ -126,8 +139,9 @@ export async function startQuickTunnel(options: {
   timeoutMs?: number;
   fetchImpl?: typeof fetch;
   env?: NodeJS.ProcessEnv;
+  protocol?: QuickTunnelProtocol;
 }): Promise<QuickTunnel> {
-  const args = buildQuickTunnelArgs(options.port);
+  const args = buildQuickTunnelArgs(options.port, options.protocol);
   const isolatedHome = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-cloudflared-"));
   const logFile = path.join(isolatedHome, "cloudflared.log");
   const removeIsolatedHome = (): void => fs.rmSync(isolatedHome, { recursive: true, force: true });
@@ -149,6 +163,7 @@ export async function startQuickTunnel(options: {
   const timeoutMs = options.timeoutMs ?? 45_000;
   const fetchImpl = options.fetchImpl ?? fetch;
   let origin: string | null = null;
+  let lastProbeStatus: number | null | undefined;
   let spawnError: Error | undefined;
   child.once("error", (error) => {
     spawnError = error;
@@ -159,7 +174,8 @@ export async function startQuickTunnel(options: {
     origin = parseQuickTunnelOrigin(readLogTail(logFile)) ?? origin;
     if (spawnError) break;
     if (child.exitCode !== null || child.signalCode !== null) break;
-    if (origin && (await probe(origin, fetchImpl))) {
+    if (origin) lastProbeStatus = await probe(origin, fetchImpl);
+    if (origin && lastProbeStatus === 405) {
       const published = origin;
       return {
         origin: published,
@@ -175,11 +191,26 @@ export async function startQuickTunnel(options: {
     }
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
+  const diagnostic = sanitizedLogDiagnostic(logFile);
+  const childState =
+    child.exitCode !== null
+      ? `exit-${child.exitCode}`
+      : child.signalCode !== null
+        ? `signal-${child.signalCode}`
+        : "running";
   try {
     await stopChild(child);
   } finally {
     removeIsolatedHome();
   }
   if (spawnError) throw new Error(`cloudflared quick tunnel failed to start (${spawnError.name})`);
-  throw new Error("cloudflared quick tunnel did not become ready before the timeout");
+  throw new Error(
+    [
+      "cloudflared quick tunnel did not become ready before the timeout",
+      `origin_published=${origin !== null}`,
+      `last_probe_status=${lastProbeStatus === undefined ? "not-attempted" : (lastProbeStatus ?? "fetch-error")}`,
+      `child_state=${childState}`,
+      diagnostic ? `log=${diagnostic}` : "log=empty",
+    ].join("; "),
+  );
 }

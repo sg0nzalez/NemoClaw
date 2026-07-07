@@ -291,7 +291,8 @@ jobs:
           sudo dpkg -i "${cloudflared_deb}"
           cloudflared --version | grep -F "cloudflared version ${CLOUDFLARED_VERSION}"
 
-      - name: Run ephemeral Brev E2E
+      - id: brev-test
+        name: Run ephemeral Brev E2E
         env:
           NEMOCLAW_RUN_BRANCH_VALIDATION_E2E: "1"
           NEMOCLAW_BREV_WORKFLOW_OWNS_INSTANCE: "1"
@@ -314,17 +315,34 @@ jobs:
         if: always() && inputs.test_suite == 'tool-disclosure-performance-smoke'
         env:
           INSTANCE: ${{ env.BREV_E2E_INSTANCE_NAME }}
+          TEST_OUTCOME: ${{ steps.brev-test.outcome }}
         run: |
           set -euo pipefail
           artifact_dir="brev-tool-disclosure-performance-smoke-artifacts"
           remote_dir="/tmp/nemoclaw-tool-disclosure-performance-smoke-artifacts"
+          archive="${RUNNER_TEMP}/brev-tool-disclosure-performance-smoke-artifacts.tar.gz"
           mkdir -p "$artifact_dir"
           brev refresh >/dev/null
-          ssh -o StrictHostKeyChecking=no -o LogLevel=ERROR \
-              -o ConnectTimeout=10 "$INSTANCE" \
-              "test -d '$remote_dir' && tar -C '$remote_dir' -czf - ." \
-            | tar -C "$artifact_dir" -xzf -
-          test -f "$artifact_dir/tool-disclosure-hosted-inference-performance-smoke-completes-one-frozen-task-in-both-modes/tool-disclosure-performance-smoke.json"
+          if ! ssh -o StrictHostKeyChecking=no -o LogLevel=ERROR \
+               -o ConnectTimeout=10 "$INSTANCE" \
+               "test -d '$remote_dir' && tar -C '$remote_dir' -czf - ." \
+               >"$archive"; then
+            if [ "$TEST_OUTCOME" = "success" ]; then
+              echo "::error::Successful Brev performance smoke did not produce an artifact archive"
+              exit 1
+            fi
+            echo "::warning::Failed Brev performance smoke produced no artifact archive"
+            exit 0
+          fi
+          tar -C "$artifact_dir" -xzf "$archive"
+          result="$artifact_dir/tool-disclosure-hosted-inference-performance-smoke-completes-one-frozen-task-in-both-modes/tool-disclosure-performance-smoke.json"
+          if [ ! -f "$result" ]; then
+            if [ "$TEST_OUTCOME" = "success" ]; then
+              echo "::error::Successful Brev performance smoke artifact is missing its result JSON"
+              exit 1
+            fi
+            echo "::warning::Failed Brev performance smoke has only partial artifacts"
+          fi
 
       - name: Scan Brev tool-disclosure performance smoke artifacts
         if: always() && inputs.test_suite == 'tool-disclosure-performance-smoke'
@@ -346,7 +364,7 @@ jobs:
         with:
           name: e2e-brev-tool-disclosure-performance-smoke-${{ github.run_attempt }}
           path: brev-tool-disclosure-performance-smoke-artifacts/
-          if-no-files-found: error
+          if-no-files-found: ignore
           include-hidden-files: false
           retention-days: 14
 
