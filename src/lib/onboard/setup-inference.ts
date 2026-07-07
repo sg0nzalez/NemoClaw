@@ -255,7 +255,7 @@ export function createSetupInference(
     deps.verifyInferenceRoute(provider, model);
     if (options.skipHostInferenceSmoke === true)
       deps.log("  Reusing existing gateway credential; skipping host inference smoke.");
-    else deps.verifyOnboardInferenceSmoke({ provider, model, endpointUrl, credentialEnv });
+    else await deps.verifyOnboardInferenceSmoke({ provider, model, endpointUrl, credentialEnv });
     if (sandboxName) {
       deps.updateSandbox(sandboxName, { model, provider });
     }

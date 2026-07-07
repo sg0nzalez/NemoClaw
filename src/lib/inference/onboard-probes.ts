@@ -41,6 +41,7 @@ const {
   runChatCompletionsRetryLoop,
 } = require("./probe-retry");
 const { probeAnthropicEndpoint } = require("./probe-anthropic");
+const { probeOpenAiLikeEndpointWithValidationSession } = require("./openai-validation-session");
 
 const {
   getCurlTimingArgs,
@@ -859,6 +860,30 @@ function probeOpenAiLikeEndpoint(endpointUrl, model, apiKey, options = {}) {
   }
 }
 
+async function probeOpenAiLikeEndpointOptimized(endpointUrl, model, apiKey, options = {}) {
+  const normalizedKey = apiKey ? normalizeCredentialValue(apiKey) : "";
+  return probeOpenAiLikeEndpointWithValidationSession(endpointUrl, model, normalizedKey, options, {
+    legacyProbe: probeOpenAiLikeEndpoint,
+    hasResponsesToolCall,
+    hasChatCompletionsToolCall,
+    hasChatCompletionsToolCallLeak,
+    getChatPayload: getChatCompletionsProbePayload,
+    getResponsesTimeoutMs: (probeOptions) => {
+      const platformOptions =
+        typeof probeOptions.isWsl === "boolean" ? { isWsl: probeOptions.isWsl } : undefined;
+      return getCurlMaxTimeSeconds(getValidationProbeCurlArgs(platformOptions)) * 1000;
+    },
+    getChatTimeoutMs: (probeModel, probeOptions) => {
+      const platformOptions =
+        typeof probeOptions.isWsl === "boolean" ? { isWsl: probeOptions.isWsl } : undefined;
+      return (
+        getCurlMaxTimeSeconds(getChatCompletionsProbeTimingArgs(probeModel, platformOptions)) * 1000
+      );
+    },
+    sessionOptions: options.validationSessionOptions,
+  });
+}
+
 // ── Anthropic probe ──────────────────────────────────────────────
 
 module.exports = {
@@ -878,6 +903,7 @@ module.exports = {
   probeResponsesToolCalling,
   probeChatCompletionsToolCalling,
   probeOpenAiLikeEndpoint,
+  probeOpenAiLikeEndpointOptimized,
   probeAnthropicEndpoint,
   RETRIABLE_HTTP_PROBE_STATUSES,
 };
@@ -907,7 +933,7 @@ export function shouldSmokeOpenAiLikeOnboardRoute(
   );
 }
 
-export function verifyOnboardInferenceSmoke(options: any) {
+export async function verifyOnboardInferenceSmoke(options: any) {
   if (
     !options.forceOpenAiLike &&
     !shouldSmokeOpenAiLikeOnboardRoute(options.provider, options.credentialEnv)
@@ -921,7 +947,7 @@ export function verifyOnboardInferenceSmoke(options: any) {
   const apiKey = credentialEnv
     ? resolveProviderCredential(credentialEnv) || getCredential(credentialEnv) || ""
     : "";
-  const probe = probeOpenAiLikeEndpoint(endpointUrl, options.model, apiKey, {
+  const probe = await probeOpenAiLikeEndpointOptimized(endpointUrl, options.model, apiKey, {
     authMode: getProbeAuthMode(options.provider),
     skipResponsesProbe: true,
   });
