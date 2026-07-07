@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 
@@ -19,7 +20,9 @@ export type TargetResult<Extension extends object = Record<string, unknown>> = {
   /**
    * Optional for the normal success path: reaching `complete()` after the live
    * assertions have passed records `passed`. Skipped or non-success evidence
-   * must set an explicit status at the call site.
+   * must set an explicit status at the call site. Omit the key to use the
+   * default; an explicit `undefined` value is rejected like any other invalid
+   * status payload.
    */
   status?: string;
 } & Extension;
@@ -97,7 +100,9 @@ export class ArtifactSink {
   private readonly redactionValues = new Set<string>();
 
   constructor(rootDir: string, redactionValues: Iterable<string> = []) {
-    this.rootDir = path.resolve(rootDir);
+    const resolvedRoot = path.resolve(rootDir);
+    fsSync.mkdirSync(resolvedRoot, { recursive: true });
+    this.rootDir = fsSync.realpathSync(resolvedRoot);
     this.target = new TargetEvidenceWriter(this);
     this.addRedactionValues(redactionValues);
   }

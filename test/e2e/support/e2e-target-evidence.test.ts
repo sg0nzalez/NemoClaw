@@ -69,6 +69,9 @@ describe("target evidence", () => {
         /status must be a non-empty string/,
       );
       await expect(
+        target.complete({ id: "typed-target", status: undefined } as never),
+      ).rejects.toThrow(/status must be a non-empty string/);
+      await expect(
         target.declare({
           id: "typed-target",
           contract: "singular",
@@ -92,7 +95,29 @@ describe("target evidence", () => {
     }
   });
 
+  it("contains symlinked artifact roots before writing", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-target-evidence-symlink-"));
+    try {
+      const realRoot = path.join(root, "real-root");
+      const linkRoot = path.join(root, "link-root");
+      fs.mkdirSync(realRoot);
+      fs.symlinkSync(realRoot, linkRoot, "dir");
+
+      const artifacts = new ArtifactSink(linkRoot);
+      const targetPath = await artifacts.writeJson("target.json", { ok: true });
+
+      expect(targetPath).toBe(fs.realpathSync(path.join(realRoot, "target.json")));
+      expect(JSON.parse(fs.readFileSync(path.join(realRoot, "target.json"), "utf8"))).toEqual({
+        ok: true,
+      });
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("keeps live target evidence behind the typed API", () => {
+    // This static guard intentionally catches literal legacy target filenames;
+    // dynamic target filename construction should not be introduced in live tests.
     const violations = liveTypescriptFiles()
       .filter((file) =>
         /\.writeJson\(\s*[`'"]target(?:-result)?\.json[`'"]/.test(fs.readFileSync(file, "utf8")),
