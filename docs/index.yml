@@ -66,9 +66,9 @@ navigation:
               - page: "Model Capability Audit"
                 path: _build/agent-variants/inference/model-capability-audit.openclaw.generated.mdx
                 slug: model-capability-audit
-              - page: "Progressive Tool Disclosure Benchmark"
-                path: _build/agent-variants/inference/progressive-tool-disclosure-benchmark.openclaw.generated.mdx
-                slug: progressive-tool-disclosure-benchmark
+              - page: "Progressive Tool Disclosure Performance Test"
+                path: _build/agent-variants/inference/progressive-tool-disclosure-performance-test.openclaw.generated.mdx
+                slug: progressive-tool-disclosure-performance-test
               - page: "Switch Inference Providers"
                 path: _build/agent-variants/inference/switch-inference-providers.openclaw.generated.mdx
                 slug: switch-inference-providers
@@ -252,9 +252,9 @@ navigation:
               - page: "Model Capability Audit"
                 path: _build/agent-variants/inference/model-capability-audit.hermes.generated.mdx
                 slug: model-capability-audit
-              - page: "Progressive Tool Disclosure Benchmark"
-                path: _build/agent-variants/inference/progressive-tool-disclosure-benchmark.hermes.generated.mdx
-                slug: progressive-tool-disclosure-benchmark
+              - page: "Progressive Tool Disclosure Performance Test"
+                path: _build/agent-variants/inference/progressive-tool-disclosure-performance-test.hermes.generated.mdx
+                slug: progressive-tool-disclosure-performance-test
               - page: "Switch Inference Providers"
                 path: _build/agent-variants/inference/switch-inference-providers.hermes.generated.mdx
                 slug: switch-inference-providers
