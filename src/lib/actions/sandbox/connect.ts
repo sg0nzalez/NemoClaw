@@ -1093,7 +1093,7 @@ export async function connectSandbox(
   const result = spawnSync(getOpenshellBinary(), ["sandbox", "connect", sandboxName], {
     stdio: "inherit",
     cwd: ROOT,
-    env: buildSandboxConnectEnv(agent),
+    env: buildSandboxConnectEnv(agent, process.env),
   });
   exitWithConnectSpawnResult(sandboxName, result);
 }

@@ -23,7 +23,7 @@ function hostTerminalLooksLight(env: NodeJS.ProcessEnv): boolean {
 
 export function buildSandboxConnectEnv(
   agent: { name?: string } | null | undefined,
-  env: NodeJS.ProcessEnv = process.env,
+  env: NodeJS.ProcessEnv,
 ): NodeJS.ProcessEnv {
   const nextEnv = { ...env };
   if (
