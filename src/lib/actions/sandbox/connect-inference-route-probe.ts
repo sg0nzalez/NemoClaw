@@ -10,6 +10,8 @@ export type ParsedInferenceRouteProbe = {
   detail: string;
 };
 
+export type InferenceRouteFailureLabel = "unhealthy" | "unreachable";
+
 type InferenceRouteProbeCommandResult = {
   status?: number | null;
   output?: string | null;
@@ -30,6 +32,11 @@ const PROXY_ENV_KEYS = [
   "ALL_PROXY",
   "all_proxy",
 ] as const;
+
+/** Keep route-failure vocabulary aligned across status, doctor, and connect. */
+export function classifyInferenceRouteFailureLabel(httpStatus: number): InferenceRouteFailureLabel {
+  return httpStatus >= 500 && httpStatus < 600 ? "unhealthy" : "unreachable";
+}
 
 export function buildSandboxInferenceRouteProbeArgs(
   sandboxName: string,

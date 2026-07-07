@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildSandboxInferenceRouteProbeArgs,
+  classifyInferenceRouteFailureLabel,
   parseSandboxInferenceRouteProbeResult,
 } from "./connect-inference-route-probe";
 
@@ -78,6 +79,16 @@ describe("sandbox connect inference route probe argv", () => {
 });
 
 describe("sandbox inference route probe result", () => {
+  it.each([
+    [0, "unreachable"],
+    [499, "unreachable"],
+    [500, "unhealthy"],
+    [599, "unhealthy"],
+    [600, "unreachable"],
+  ] as const)("classifies HTTP %i route failures as %s (#6192)", (httpStatus, expected) => {
+    expect(classifyInferenceRouteFailureLabel(httpStatus)).toBe(expected);
+  });
+
   it.each([
     "100",
     "200",

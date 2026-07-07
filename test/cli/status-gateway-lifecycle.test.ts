@@ -99,7 +99,7 @@ describe("CLI status gateway lifecycle process contracts", () => {
         "fi",
         'if [ "$1" = "sandbox" ] && [ "$2" = "exec" ] && [ "$3" = "--name" ] && [ "$4" = "alpha" ]; then',
         '  case "$*" in',
-        "    *nemoclaw-inference-route-probe*) echo 'OK 200' ;;",
+        "    *inference.local/v1/models*) echo 'OK 200' ;;",
         "    *) echo '__NEMOCLAW_SANDBOX_EXEC_STARTED__'; echo 'RUNNING' ;;",
         "  esac",
         "  exit 0",

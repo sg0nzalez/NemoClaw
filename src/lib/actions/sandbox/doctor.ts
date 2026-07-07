@@ -25,6 +25,7 @@ import * as shields from "../../shields";
 import type { SandboxEntry } from "../../state/registry";
 import * as registry from "../../state/registry";
 import { runSandboxAutoPairApprovalPass, wrapSandboxShellScript } from "./auto-pair-approval";
+import { classifyInferenceRouteFailureLabel } from "./connect-inference-route-probe";
 import { buildConfigPermsCheck } from "./doctor-config-perms";
 import { captureHostCommand } from "./doctor-host-command";
 import { collectMessagingDoctorChecks } from "./doctor-messaging";
@@ -380,9 +381,7 @@ async function collectInferenceSubprobes(
       ...(gateway.ok
         ? {}
         : {
-            failureLabel: (gateway.httpStatus >= 500 && gateway.httpStatus < 600
-              ? "unhealthy"
-              : "unreachable") as "unhealthy" | "unreachable",
+            failureLabel: classifyInferenceRouteFailureLabel(gateway.httpStatus),
           }),
     },
   ];

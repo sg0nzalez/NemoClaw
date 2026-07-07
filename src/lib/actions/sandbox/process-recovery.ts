@@ -28,6 +28,7 @@ import * as registry from "../../state/registry";
 import { buildSubprocessEnv } from "../../subprocess-env";
 import {
   buildSandboxInferenceRouteProbeArgs,
+  classifyInferenceRouteFailureLabel,
   parseSandboxInferenceRouteProbeResult,
 } from "./connect-inference-route-probe";
 import {
@@ -445,7 +446,7 @@ export async function probeSandboxInferenceGatewayHealth(
       detail: `Inference gateway responded HTTP ${status} on ${endpoint} (full chain reachable).`,
     };
   }
-  if (status >= 500 && status < 600) {
+  if (classifyInferenceRouteFailureLabel(status) === "unhealthy") {
     return {
       ok: false,
       endpoint,

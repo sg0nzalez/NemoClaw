@@ -217,7 +217,7 @@ describe("CLI sandbox status text output", () => {
         "fi",
         'if [ "$1" = "sandbox" ] && [ "$2" = "exec" ]; then',
         '  case "$*" in',
-        "    *nemoclaw-inference-route-probe*) echo 'OK 200' ;;",
+        "    *inference.local/v1/models*) echo 'OK 200' ;;",
         "    *) echo 'oom_kill=1'; echo 'source=/sys/fs/cgroup/memory.events' ;;",
         "  esac",
         "  exit 0",

@@ -16,6 +16,7 @@ import {
 } from "../../inference/health";
 import { parseSandboxPhase } from "../../state/gateway";
 import * as registry from "../../state/registry";
+import { classifyInferenceRouteFailureLabel } from "./connect-inference-route-probe";
 import { getSandboxDockerRuntime } from "./docker-health";
 import type { SandboxGatewayState } from "./gateway-state";
 import { getReconciledSandboxGatewayState, getSandboxGatewayStateForStatus } from "./gateway-state";
@@ -80,6 +81,11 @@ function providerHealthDiagnostics(
   return [labeledPrimary, ...subprobes];
 }
 
+/** True when the authoritative inference route must make status exit nonzero. */
+export function isInferenceHealthFailing(inferenceHealth: ProviderHealthStatus | null): boolean {
+  return Boolean(inferenceHealth && (!inferenceHealth.probed || !inferenceHealth.ok));
+}
+
 function buildSandboxInferenceRouteHealth(
   gateway: Awaited<ReturnType<ProbeSandboxInferenceGatewayHealth>>,
   providerHealth: ProviderHealthStatus | null,
@@ -96,8 +102,7 @@ function buildSandboxInferenceRouteHealth(
         ...(gateway.ok
           ? {}
           : {
-              failureLabel:
-                gateway.httpStatus >= 500 && gateway.httpStatus < 600 ? "unhealthy" : "unreachable",
+              failureLabel: classifyInferenceRouteFailureLabel(gateway.httpStatus),
             }),
       }
     : {

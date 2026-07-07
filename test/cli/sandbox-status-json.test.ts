@@ -248,6 +248,26 @@ describe("CLI sandbox status JSON output", testTimeoutOptions(20_000), () => {
     ]);
   });
 
+  it("sandbox status --json treats an inference.local HTTP 401 as healthy (#6192)", () => {
+    const { home, localBin, sandboxName } = createInferenceRouteStatusSetup({
+      routeOutput: "OK 401",
+    });
+
+    const result = runWithEnv(`${sandboxName} status --json`, {
+      HOME: home,
+      PATH: `${localBin}:${process.env.PATH || ""}`,
+    });
+
+    expect(result.code).toBe(0);
+    const parsed = JSON.parse(result.out);
+    expect(parsed.inferenceHealth).toMatchObject({
+      ok: true,
+      probed: true,
+      endpoint: "https://inference.local/v1/models",
+    });
+    expect(parsed.inferenceHealth).not.toHaveProperty("failureLabel");
+  });
+
   it("sandbox status --json defaults openshell driver/version to 'unknown' strings", () => {
     const home = fs.mkdtempSync(
       path.join(os.tmpdir(), "nemoclaw-cli-sandbox-status-json-unknown-"),

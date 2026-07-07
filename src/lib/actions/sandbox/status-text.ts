@@ -17,7 +17,11 @@ import {
 import type { SandboxDockerRuntime } from "./docker-health";
 import type { SandboxGatewayState } from "./gateway-state";
 import { isSandboxGatewayRunningForStatus } from "./process-recovery";
-import type { SandboxStatusAgentInfo, SandboxStatusSnapshot } from "./status-snapshot";
+import {
+  isInferenceHealthFailing,
+  type SandboxStatusAgentInfo,
+  type SandboxStatusSnapshot,
+} from "./status-snapshot";
 
 export interface SandboxStatusTextContext
   extends Pick<
@@ -99,8 +103,7 @@ function printInferenceStatus(context: SandboxStatusTextContext): void {
 }
 
 function inferenceHealthExitCode(inferenceHealth: ProviderHealthStatus | null): number | null {
-  if (!inferenceHealth) return null;
-  return inferenceHealth.probed && inferenceHealth.ok ? null : 1;
+  return isInferenceHealthFailing(inferenceHealth) ? 1 : null;
 }
 
 function getSandboxGpuDisplay(sandbox: SandboxEntry): {
