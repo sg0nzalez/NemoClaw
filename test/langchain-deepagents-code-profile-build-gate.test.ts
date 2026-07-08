@@ -10,11 +10,31 @@ import { describe, expect, it } from "vitest";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const checkPath = path.join(repoRoot, "scripts", "check-dcode-profile-import-gate.sh");
+const reviewedDockerfiles = [
+  "agents/langchain-deepagents-code/Dockerfile.base",
+  "test/Dockerfile.dcode-profile-missing-dependencies",
+  "agents/langchain-deepagents-code/Dockerfile",
+] as const;
 
-function runGateWithFakeDocker(mode: "expected-failure-with-marker" | "early-failure" | "success") {
+function runGateWithFakeDocker(
+  mode: "expected-failure-with-marker" | "early-failure" | "success",
+  extraArgDockerfile?: (typeof reviewedDockerfiles)[number],
+) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "dcode-profile-import-gate-"));
+  const fixtureRoot = path.join(tmp, "repo");
+  const fixtureCheckPath = path.join(fixtureRoot, "scripts", path.basename(checkPath));
   const dockerPath = path.join(tmp, "docker");
   const callLog = path.join(tmp, "docker.log");
+  fs.mkdirSync(path.dirname(fixtureCheckPath), { recursive: true });
+  fs.copyFileSync(checkPath, fixtureCheckPath);
+  for (const dockerfile of reviewedDockerfiles) {
+    const fixturePath = path.join(fixtureRoot, dockerfile);
+    fs.mkdirSync(path.dirname(fixturePath), { recursive: true });
+    fs.copyFileSync(path.join(repoRoot, dockerfile), fixturePath);
+  }
+  if (extraArgDockerfile) {
+    fs.appendFileSync(path.join(fixtureRoot, extraArgDockerfile), "\nARG UNREVIEWED_SECRET\n");
+  }
   fs.writeFileSync(
     dockerPath,
     `#!/usr/bin/env bash
@@ -41,8 +61,8 @@ exit 0
   );
   fs.chmodSync(dockerPath, 0o755);
   try {
-    const result = spawnSync("bash", [checkPath], {
-      cwd: repoRoot,
+    const result = spawnSync("bash", [fixtureCheckPath], {
+      cwd: fixtureRoot,
       encoding: "utf8",
       env: {
         ...process.env,
@@ -51,13 +71,21 @@ exit 0
         PATH: `${tmp}${path.delimiter}${process.env.PATH ?? "/usr/bin:/bin"}`,
       },
     });
-    return { ...result, calls: fs.readFileSync(callLog, "utf8") };
+    return { ...result, calls: fs.existsSync(callLog) ? fs.readFileSync(callLog, "utf8") : "" };
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 }
 
 describe("LangChain Deep Agents Code profile build gate", () => {
+  it.each(reviewedDockerfiles)("rejects an unreviewed ARG in %s", (dockerfile) => {
+    const result = runGateWithFakeDocker("expected-failure-with-marker", dockerfile);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(`unreviewed ARG UNREVIEWED_SECRET in ${dockerfile}`);
+    expect(result.calls).not.toContain("--file");
+  });
+
   it("accepts only the expected production-build failure at the runtime marker", () => {
     const result = runGateWithFakeDocker("expected-failure-with-marker");
 

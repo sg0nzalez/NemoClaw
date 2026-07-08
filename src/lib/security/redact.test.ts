@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { redact, redactForLog, redactUrl } from "./redact.js";
+import { redact, redactForLog, redactSensitiveText, redactUrl } from "./redact.js";
 
 describe("URL redaction", () => {
   it.each([
@@ -93,6 +93,16 @@ describe("URL redaction", () => {
 });
 
 describe("redactForLog", () => {
+  it("redacts pass aliases in structured keys and canonical text assignments", () => {
+    const payload = "opaqueCredentialPayloadZ1234567890";
+
+    expect(redactForLog({ pass: payload, passwd: payload })).toEqual({
+      pass: "<REDACTED>",
+      passwd: "<REDACTED>",
+    });
+    expect(redactSensitiveText(`CUSTOM_PASS=${payload}`)).toBe("CUSTOM_PASS=<REDACTED>");
+  });
+
   it("redacts sensitive object keys recursively while preserving safe fields", () => {
     const result = redactForLog({
       provider: "openai",

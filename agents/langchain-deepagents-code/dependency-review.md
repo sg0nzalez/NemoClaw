@@ -90,7 +90,9 @@ the validator then binds the installed module to its distribution and rechecks
 the module hash. A DCode-only CI regression builds the current, hash-locked
 `Dockerfile.base` instead of consuming a mutable registry tag, strips both
 upstream distributions, and proves the production build stops at that import
-gate before the later dependency-consistency check.
+gate before the later dependency-consistency check. The targeted E2E job invokes
+`scripts/check-dcode-profile-import-gate.sh` with real Docker before live tests;
+the fake-Docker unit suite separately pins its diagnostic failure branches.
 
 The reviewed native-profile and bootstrap files stay byte-for-byte unchanged.
 Focused fixtures cover the reviewed version/hash, missing-source,

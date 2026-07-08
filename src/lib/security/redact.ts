@@ -19,7 +19,12 @@ import type { StdioOptions } from "node:child_process";
  */
 
 import { listMessagingCredentialMetadata } from "../messaging/channels";
-import { SECRET_BLOCK_PATTERNS, SECRET_PATTERNS, TOKEN_PREFIX_PATTERNS } from "./secret-patterns";
+import {
+  CONTEXT_PATTERNS,
+  SECRET_BLOCK_PATTERNS,
+  SECRET_PATTERNS,
+  TOKEN_PREFIX_PATTERNS,
+} from "./secret-patterns";
 
 const SENSITIVE_ENV_ASSIGNMENT_KEYS = [
   "NVIDIA_INFERENCE_API_KEY",
@@ -216,7 +221,7 @@ export function redactSensitiveText(value: unknown): string | null {
   let result = value
     .replace(SENSITIVE_ENV_ASSIGNMENT_PATTERN, "$1=<REDACTED>")
     .replace(/Bearer\s+\S+/gi, "Bearer <REDACTED>");
-  for (const pattern of [...TOKEN_PREFIX_PATTERNS, ...SECRET_BLOCK_PATTERNS]) {
+  for (const pattern of [...CONTEXT_PATTERNS, ...TOKEN_PREFIX_PATTERNS, ...SECRET_BLOCK_PATTERNS]) {
     pattern.lastIndex = 0;
     result = result.replace(pattern, "<REDACTED>");
   }
@@ -245,7 +250,9 @@ export function redactUrl(value: unknown): string | null {
 }
 
 function isSensitiveKey(key: string): boolean {
-  return /(?:api[_-]?key|token|secret|password|credential|authorization|bearer)/i.test(key);
+  return /(?:api[_-]?key|token|secret|password|passwd|pass|credential|authorization|bearer)/i.test(
+    key,
+  );
 }
 
 export function redactForLog(value: unknown, seen: WeakSet<object> = new WeakSet()): unknown {

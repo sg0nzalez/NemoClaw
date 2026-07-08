@@ -68,6 +68,8 @@ function replaceHashDefinitions(
   source: string,
   replacements: readonly (readonly [name: string, currentHash: string, fixtureHash: string])[],
 ): string {
+  // This test-only parser deliberately fails on source-shape drift or duplicate
+  // definitions; replace it with an AST transform if the two-constant scope grows.
   return replacements.reduce((current, [name, currentHash, fixtureHash]) => {
     const definition = new RegExp(`(${name}\\s*=\\s*\\(\\s*)(["'])${currentHash}\\2(\\s*\\))`, "g");
     assert.equal(current.match(definition)?.length, 1, `expected exactly one ${name} definition`);
@@ -385,6 +387,24 @@ afterEach(() => {
 });
 
 describe("LangChain Deep Agents Code managed Nemotron profile plugin (#6424)", () => {
+  it("rewrites one exact hash definition across reviewed formatting variants", () => {
+    const original = "a".repeat(64);
+    const replacement = "b".repeat(64);
+    const source = `EXPECTED_ONE = (\n  "${original}"\n)\nEXPECTED_TWO=( '${original}' )\n`;
+    const result = replaceHashDefinitions(source, [
+      ["EXPECTED_ONE", original, replacement],
+      ["EXPECTED_TWO", original, replacement],
+    ]);
+
+    expect(result).not.toContain(original);
+    expect(result.match(new RegExp(replacement, "g"))).toHaveLength(2);
+    expect(() =>
+      replaceHashDefinitions(`${source}EXPECTED_ONE = ("${original}")\n`, [
+        ["EXPECTED_ONE", original, replacement],
+      ]),
+    ).toThrow(/expected exactly one EXPECTED_ONE definition/);
+  });
+
   it("declares the supported Deep Agents harness-profile entry point", () => {
     const project = fs.readFileSync(pluginProjectPath, "utf8");
 
