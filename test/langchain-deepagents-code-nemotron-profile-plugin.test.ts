@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
@@ -63,16 +64,15 @@ function sha256(value: string | Buffer): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
-function replaceHashDefinition(
+function replaceHashDefinitions(
   source: string,
-  name: string,
-  currentHash: string,
-  fixtureHash: string,
+  replacements: readonly (readonly [name: string, currentHash: string, fixtureHash: string])[],
 ): string {
-  const current = `${name} = (\n    "${currentHash}"\n)`;
-  const replacement = `${name} = (\n    "${fixtureHash}"\n)`;
-  expect(source.split(current), `expected exactly one ${name} definition`).toHaveLength(2);
-  return source.replace(current, replacement);
+  return replacements.reduce((current, [name, currentHash, fixtureHash]) => {
+    const definition = `${name} = (\n    "${currentHash}"\n)`;
+    assert.equal(current.split(definition).length, 2, `expected exactly one ${name} definition`);
+    return current.replace(definition, `${name} = (\n    "${fixtureHash}"\n)`);
+  }, source);
 }
 
 function writeFixtureFile(root: string, relativePath: string, content: string): string {
@@ -147,17 +147,10 @@ function prepareFixturePlugin(
 ): string {
   const pluginRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-profile-plugin-source-"));
   tempRoots.push(pluginRoot);
-  const source = replaceHashDefinition(
-    replaceHashDefinition(
-      fs.readFileSync(pluginSourcePath, "utf8"),
-      "EXPECTED_NATIVE_PROFILE_SHA256",
-      NATIVE_PROFILE_SHA256,
-      sha256(nativeSource),
-    ),
-    "EXPECTED_BOOTSTRAP_SHA256",
-    UNMODIFIED_BOOTSTRAP_SHA256,
-    sha256(bootstrapSource),
-  );
+  const source = replaceHashDefinitions(fs.readFileSync(pluginSourcePath, "utf8"), [
+    ["EXPECTED_NATIVE_PROFILE_SHA256", NATIVE_PROFILE_SHA256, sha256(nativeSource)],
+    ["EXPECTED_BOOTSTRAP_SHA256", UNMODIFIED_BOOTSTRAP_SHA256, sha256(bootstrapSource)],
+  ]);
   return writeFixtureFile(pluginRoot, "nemoclaw_deepagents_profile/__init__.py", source);
 }
 
@@ -230,8 +223,14 @@ function buildAndInstallPluginWheel(version: string): string {
   const versionedProject = project
     .replace('version = "0.1.0"', `version = "${version}"`)
     .replace('license = "Apache-2.0"', 'license = { text = "Apache-2.0" }');
-  expect(versionedProject).toContain(`version = "${version}"`);
-  expect(versionedProject).toContain('license = { text = "Apache-2.0" }');
+  assert.ok(
+    versionedProject.includes(`version = "${version}"`),
+    "fixture version was not replaced",
+  );
+  assert.ok(
+    versionedProject.includes('license = { text = "Apache-2.0" }'),
+    "fixture license was not replaced",
+  );
   fs.writeFileSync(projectPath, versionedProject, "utf8");
   const pipEnv = {
     ...process.env,
