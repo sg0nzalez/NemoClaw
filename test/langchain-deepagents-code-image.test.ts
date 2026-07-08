@@ -1475,7 +1475,6 @@ describe("LangChain Deep Agents Code image contracts", () => {
       ],
       { encoding: "utf8" },
     );
-
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("OPENAI-API-KEY");
     expect(result.stderr).not.toContain(fakeSecret);
