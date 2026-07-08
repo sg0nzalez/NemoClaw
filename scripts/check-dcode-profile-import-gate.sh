@@ -26,6 +26,8 @@ cd "${repo_root}"
 
 # Plain progress is required to prove the exact import failure, so fail before
 # building if any reviewed Dockerfile introduces an unreviewed ARG name.
+# Security boundary: this exact allowlist covers every reviewed ARG; none are
+# secret-bearing, and the builds below pass only public BASE_IMAGE references.
 for dockerfile in \
   agents/langchain-deepagents-code/Dockerfile.base \
   test/Dockerfile.dcode-profile-missing-dependencies \
