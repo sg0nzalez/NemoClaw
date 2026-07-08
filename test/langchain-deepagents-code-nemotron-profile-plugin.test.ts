@@ -316,14 +316,18 @@ describe("LangChain Deep Agents Code managed Nemotron profile plugin (#6424)", (
     expectOfficialSourcesUnchanged(fixture, nativeSource, bootstrapSource);
   });
 
-  it.each(["missing", "linked"] as const)("rejects a %s official source file", (mode) => {
+  it.each([
+    ["missing", (sourcePath: string) => fs.rmSync(sourcePath)],
+    [
+      "linked",
+      (sourcePath: string) => {
+        fs.rmSync(sourcePath);
+        fs.symlinkSync("/dev/null", sourcePath);
+      },
+    ],
+  ] as const)("rejects a %s official source file", (_mode, replaceSource) => {
     const fixture = makePluginFixture();
-    if (mode === "missing") {
-      fs.rmSync(fixture.nativeProfilePath);
-    } else {
-      fs.rmSync(fixture.nativeProfilePath);
-      fs.symlinkSync("/dev/null", fixture.nativeProfilePath);
-    }
+    replaceSource(fixture.nativeProfilePath);
 
     const result = runPlugin(fixture);
 
