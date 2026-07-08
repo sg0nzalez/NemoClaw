@@ -713,6 +713,9 @@ describe("LangChain Deep Agents Code image contracts", () => {
       '-- dcode "$@"',
       "sandbox_dcode_wrapper_contract",
       "NEMOCLAW_DCODE_WRAPPER_CHAIN_OK",
+      "NEMOCLAW_DCODE_EMPTY_EXIT",
+      "login-shell dcode rejects an empty non-interactive prompt with exit 2",
+      "direct-exec dcode rejects an empty non-interactive prompt with exit 2",
       "nemoclaw_connect_probe",
       "${NEMOCLAW_CLI_BIN:-${REPO:-.}/bin/nemoclaw.js}",
       "connect --probe-only 2>&1",
@@ -1458,7 +1461,6 @@ describe("LangChain Deep Agents Code image contracts", () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-dcode-rawenv-"));
     const { wrapperPath, ranMarker } = makeWrapperFixture(tempDir);
     const fakeSecret = "sk-TEST-FAKE-DO-NOT-USE-0000000000000000000000";
-
     const result = spawnSync(
       "env",
       [
@@ -1472,7 +1474,6 @@ describe("LangChain Deep Agents Code image contracts", () => {
       ],
       { encoding: "utf8" },
     );
-
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("OPENAI-API-KEY");
     expect(result.stderr).not.toContain(fakeSecret);
