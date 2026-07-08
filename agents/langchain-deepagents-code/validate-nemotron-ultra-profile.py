@@ -4,7 +4,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib.metadata
+import importlib.util
+import json
 import tempfile
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -24,6 +27,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_openai import ChatOpenAI
 
 EXPECTED_VERSIONS = {
+    "nemoclaw-deepagents-profile": "0.1.0",
     "deepagents-code": "0.1.34",
     "deepagents": "0.7.0a6",
     "langchain": "1.3.11",
@@ -31,6 +35,16 @@ EXPECTED_VERSIONS = {
     "langgraph": "1.2.6",
     "langchain-openai": "1.3.3",
 }
+EXPECTED_PROFILE_ENTRY_POINT = (
+    "nemoclaw-managed-aliases",
+    "nemoclaw_deepagents_profile:register",
+)
+EXPECTED_NATIVE_PROFILE_SHA256 = (
+    "c8e8dd2b0182334b54be4f46ff0c7b45fbb95dc13bd9a92c249eb47a14fa13d7"
+)
+EXPECTED_BOOTSTRAP_SHA256 = (
+    "005a91e7fc4ca6b21220673dd9d02d6686bf63e1e4f1102d124b01f96886efcf"
+)
 MANAGED_MODEL_IDS = (
     "nvidia/nemotron-3-ultra-550b-a55b",
     "nvidia/nvidia/nemotron-3-ultra",
@@ -50,6 +64,7 @@ EXPECTED_MIDDLEWARE = (
     "FinalAnswerGuardMiddleware",
 )
 DISPATCH_COMMAND = "printf NEMOCLAW_DISPATCH_OK"
+DENIED_DISPATCH_COMMAND = "uname -a"
 
 
 def require(condition: bool, message: str) -> None:
@@ -58,14 +73,80 @@ def require(condition: bool, message: str) -> None:
         raise RuntimeError(message)
 
 
+def deepagents_root() -> Path:
+    spec = importlib.util.find_spec("deepagents")
+    require(
+        spec is not None and spec.submodule_search_locations is not None,
+        "could not locate the installed deepagents package",
+    )
+    roots = tuple(Path(entry) for entry in spec.submodule_search_locations)
+    require(
+        len(roots) == 1, f"expected one deepagents package root, found {len(roots)}"
+    )
+    root = roots[0]
+    require(
+        not root.is_symlink() and root.is_dir(),
+        f"deepagents package root is not a trusted directory: {root}",
+    )
+    return root
+
+
+def validate_official_sources() -> None:
+    root = deepagents_root()
+    for relative_path, label, expected_hash in (
+        (
+            Path("profiles/harness/_nvidia_nemotron_3_ultra.py"),
+            "native Nemotron profile source",
+            EXPECTED_NATIVE_PROFILE_SHA256,
+        ),
+        (
+            Path("profiles/_builtin_profiles.py"),
+            "built-in profile bootstrap",
+            EXPECTED_BOOTSTRAP_SHA256,
+        ),
+    ):
+        path = root / relative_path
+        require(
+            not path.is_symlink() and path.is_file(),
+            f"{label} is not a trusted regular file: {path}",
+        )
+        source = path.read_bytes()
+        require(
+            hashlib.sha256(source).hexdigest() == expected_hash,
+            f"{label} does not match the reviewed official wheel",
+        )
+        compile(source, str(path), "exec")
+
+
+def validate_profile_entry_point() -> None:
+    name, value = EXPECTED_PROFILE_ENTRY_POINT
+    matches = [
+        entry_point
+        for entry_point in importlib.metadata.entry_points(
+            group="deepagents.harness_profiles"
+        )
+        if entry_point.name == name
+    ]
+    require(len(matches) == 1, f"expected exactly one {name!r} profile entry point")
+    entry_point = matches[0]
+    require(
+        entry_point.value == value,
+        f"profile entry point target is {entry_point.value!r}, expected {value!r}",
+    )
+    distribution = entry_point.dist
+    require(distribution is not None, "profile entry point has no source distribution")
+    require(
+        distribution.metadata["Name"] == "nemoclaw-deepagents-profile",
+        "profile entry point comes from an unexpected distribution",
+    )
+
+
 class ScriptedManagedModel(FakeMessagesListChatModel):
     """Expose the managed ChatOpenAI identity while returning fixed messages."""
 
     model_name: str = MANAGED_MODEL_IDS[0]
 
-    def bind_tools(
-        self, tools: Any, **kwargs: Any
-    ) -> ScriptedManagedModel:
+    def bind_tools(self, tools: Any, **kwargs: Any) -> ScriptedManagedModel:
         del tools, kwargs
         return self
 
@@ -81,9 +162,7 @@ class RecordingManagedShell(LocalShellBackend):
         super().__init__(root_dir=root_dir, virtual_mode=False)
         self.dispatched_commands: list[tuple[str, int | None]] = []
 
-    def execute(
-        self, command: str, *, timeout: int | None = None
-    ) -> ExecuteResponse:
+    def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
         if "__DETECT_CONTEXT_EOF__" not in command:
             self.dispatched_commands.append((command, timeout))
         return ExecuteResponse(
@@ -167,7 +246,7 @@ def validate_parser_tool_visibility() -> None:
 
 def dispatch_execute_once(
     first_response: AIMessage,
-) -> tuple[tuple[str, int | None], tuple[str, str | None]]:
+) -> tuple[tuple[tuple[str, int | None], ...], tuple[str, str | None]]:
     """Run one model-produced execute call through DCode's managed allow-list."""
     with tempfile.TemporaryDirectory(prefix="nemoclaw-profile-dispatch-") as tmp:
         backend = RecordingManagedShell(Path(tmp))
@@ -202,28 +281,19 @@ def dispatch_execute_once(
         if isinstance(message, ToolMessage) and message.name == "execute"
     ]
     require(
-        len(backend.dispatched_commands) == 1,
-        "execute validation did not dispatch exactly one shell command",
-    )
-    require(
         len(execute_results) == 1,
         "execute validation did not produce exactly one tool result",
     )
     tool_result = execute_results[0]
     require(isinstance(tool_result.content, str), "execute result content is not text")
-    return backend.dispatched_commands[0], (tool_result.content, tool_result.status)
+    return tuple(backend.dispatched_commands), (tool_result.content, tool_result.status)
 
 
-def validate_parser_dispatch_parity() -> None:
-    """Prove repaired and native execute calls share the managed dispatcher."""
+def validate_dispatch_case(
+    command: str,
+) -> tuple[tuple[tuple[str, int | None], ...], tuple[str, str | None]]:
     repaired = dispatch_execute_once(
-        AIMessage(
-            content=(
-                '{"tool":"bash","cmd":"'
-                f"{DISPATCH_COMMAND}"
-                '"}'
-            )
-        )
+        AIMessage(content=json.dumps({"tool": "bash", "cmd": command}))
     )
     native = dispatch_execute_once(
         AIMessage(
@@ -231,7 +301,7 @@ def validate_parser_dispatch_parity() -> None:
             tool_calls=[
                 {
                     "name": "execute",
-                    "args": {"command": DISPATCH_COMMAND},
+                    "args": {"command": command},
                     "id": "native-execute",
                     "type": "tool_call",
                 }
@@ -239,11 +309,25 @@ def validate_parser_dispatch_parity() -> None:
         )
     )
     require(repaired == native, "repaired and native execute dispatch results differ")
+    return repaired
+
+
+def validate_parser_dispatch_parity() -> None:
+    """Prove repaired and native execute calls share the managed dispatcher."""
+    allowed = validate_dispatch_case(DISPATCH_COMMAND)
     require(
-        repaired[0] == (DISPATCH_COMMAND, None),
+        allowed[0] == ((DISPATCH_COMMAND, None),),
         "execute dispatch arguments do not match the managed command",
     )
-    require(repaired[1][1] == "success", "managed execute dispatch was not successful")
+    require(allowed[1][1] == "success", "managed execute dispatch was not successful")
+
+    denied = validate_dispatch_case(DENIED_DISPATCH_COMMAND)
+    require(denied[0] == (), "denied execute command reached the shell backend")
+    require(denied[1][1] == "error", "denied execute command did not return an error")
+    require(
+        "Shell command rejected" in denied[1][0],
+        "denied execute command did not preserve the managed rejection result",
+    )
 
 
 def main() -> None:
@@ -254,6 +338,8 @@ def main() -> None:
             f"expected {distribution}=={expected}, found {actual}",
         )
 
+    validate_profile_entry_point()
+    validate_official_sources()
     managed_models = [validate_profile(model_id) for model_id in MANAGED_MODEL_IDS]
     validate_parser_tool_visibility()
     validate_parser_dispatch_parity()
@@ -272,6 +358,7 @@ def main() -> None:
         middleware_names(unrelated) == (),
         "unrelated OpenAI model received Ultra middleware",
     )
+    validate_official_sources()
     print("Nemotron 3 Ultra managed harness profile validation passed.")
 
 

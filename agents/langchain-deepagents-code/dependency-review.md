@@ -22,32 +22,42 @@ NemoClaw no longer vendors or overlays that source.
 
 - Native profile SHA-256: `c8e8dd2b0182334b54be4f46ff0c7b45fbb95dc13bd9a92c249eb47a14fa13d7`
 - Unmodified built-in bootstrap SHA-256: `005a91e7fc4ca6b21220673dd9d02d6686bf63e1e4f1102d124b01f96886efcf`
-- Managed-alias bootstrap SHA-256: `9d9e817143b330fd45345fcfa8276ea6fe5d6bc5a396f0438b0899a450e4744b`
+- First-party adapter: `nemoclaw-deepagents-profile==0.1.0`
 
-The build patch verifies those official artifacts, then registers the native
-profile under the two `openai:` model keys used by NemoClaw's managed
-OpenAI-compatible `ChatOpenAI` route. It is atomic, idempotent, and fails closed
-on version, source, bootstrap, or partial-state drift. The image build applies
-the patch and runs the complete profile and dispatch validator against the
-installed hash-locked wheels, while focused fixtures cover failure states.
-This build-time site-packages mutation is the deliberate managed-image adapter;
-the released package is never changed at runtime. The deleted source-backport
-license path, `LICENSE.langchain-deepagents`, is not staged into the image, and
-the image regression tests enforce that absence.
+The managed image installs the first-party `nemoclaw-deepagents-profile`
+package without consulting an index. Its `deepagents.harness_profiles` entry
+point runs after built-in profiles are registered, reads the reviewed canonical
+profile through one exact-version/hash-gated private registry lookup, and uses
+Deep Agents' public registration API to map it to the two exact `openai:` model
+keys used by NemoClaw's managed OpenAI-compatible `ChatOpenAI` route. The
+released SDK has no public profile getter or alias API. The adapter does not add
+a provider-wide OpenAI profile.
+
+The adapter verifies the exact DCode and Deep Agents versions plus the official
+native-profile and bootstrap source hashes. Registration is atomic, idempotent,
+and rejects missing canonical, partial, or conflicting alias state. The image
+validator runs under isolated Python, verifies the installed entry-point
+metadata, checks both upstream files before and after profile loading, resolves
+the complete native middleware for both aliases, compiles a graph, proves
+parser/native dispatch parity, and confirms an unrelated OpenAI model receives
+no Ultra behavior.
+
+The reviewed native-profile and bootstrap files stay byte-for-byte unchanged.
+Focused fixtures cover the reviewed version/hash, missing-source,
+missing-canonical, partial/conflicting, rollback, and idempotence states. The
+deleted source-backport license path, `LICENSE.langchain-deepagents`, is not
+staged into the image, and image regression tests enforce that absence.
 
 Deep Agents Code `0.1.34` is the released consumer; prerelease risk is limited
 to its exact `deepagents==0.7.0a6` SDK pin. That risk is accepted because the
 consumer and SDK are hash locked, the dependency audit is clean, and all source,
-version, middleware, graph, and dispatch checks fail closed.
+version, middleware, graph, and dispatch contracts are enforced by the isolated
+image-build validator. That validator is the fail-closed gate because Deep
+Agents deliberately isolates and logs third-party plugin callback failures.
 
-The exact version and source-hash gates are also the executable lifecycle
-tracker for the alias bridge: any dependency change stops the image build with
-an explicit instruction to check for native managed-alias support, and requires
-this review to be updated. The admin-maintainer override for this
-source-of-truth decision records that the review is satisfied on the ancestor
-containing this policy
-([PR review](https://github.com/NVIDIA/NemoClaw/pull/6416#pullrequestreview-4649633900)).
-That approval accepts this mandatory dependency-review gate as sufficient
-removal accountability, so no standalone removal issue is used. When Deep
-Agents natively recognizes both managed keys, the dependency review removes the
-bridge instead of updating its versions or hashes.
+The exact version and source-hash gates remain the executable lifecycle check
+for the alias adapter: any dependency change stops the image build and requires
+this review to revalidate the managed adapter. Remove it instead of refreshing
+its hashes only if a future reviewed dependency already provides both exact
+mappings; no external contribution is required. Issue #6424 records the
+NemoClaw-owned replacement of the previous installed-bootstrap mutation.

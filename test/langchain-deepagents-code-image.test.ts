@@ -331,7 +331,7 @@ describe("LangChain Deep Agents Code image contracts", () => {
       "managed-dcode-runtime.py",
       "nemoclaw_observability.py",
       "patch-managed-deepagents-code.py",
-      "patch-nemotron-ultra-profile.py",
+      "profile-plugin",
       "validate-nemotron-ultra-profile.py",
       "DEEPAGENTS_CODE_LANGSMITH_TRACING=false",
       "LANGSMITH_TRACING=false",
@@ -355,14 +355,19 @@ describe("LangChain Deep Agents Code image contracts", () => {
       "rm -f /opt/nemoclaw-deepagents-code/validate-progressive-tool-disclosure.py",
     );
     expect(dockerfile).toContain(
-      "python3 /opt/nemoclaw-deepagents-code/patch-nemotron-ultra-profile.py",
+      "COPY agents/langchain-deepagents-code/profile-plugin /opt/nemoclaw-deepagents-profile-plugin",
     );
     expect(dockerfile).toContain(
-      "python3 /opt/nemoclaw-deepagents-code/validate-nemotron-ultra-profile.py",
+      "/opt/venv/bin/pip3 install --no-index --no-cache-dir --no-deps --no-build-isolation /opt/nemoclaw-deepagents-profile-plugin",
+    );
+    expect(dockerfile).toContain("/opt/venv/bin/pip3 check");
+    expect(dockerfile).toContain(
+      "/opt/venv/bin/python3 -I /opt/nemoclaw-deepagents-code/validate-nemotron-ultra-profile.py",
     );
     expect(dockerfile).toContain(
       "rm -f /opt/nemoclaw-deepagents-code/validate-nemotron-ultra-profile.py",
     );
+    expect(dockerfile).not.toContain("patch-nemotron-ultra-profile.py");
     expect(dockerfile).not.toContain("nemotron-ultra-harness-profile.py");
     expect(dockerfile).not.toContain("LICENSE.langchain-deepagents");
     expect(dockerfile).not.toContain("langchain-deepagents-MIT.txt");

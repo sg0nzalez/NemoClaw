@@ -302,7 +302,15 @@ describe("P0-E cloud-experimental parity guardrails", () => {
     expect(profileCheck).toContain('"nvidia/nvidia/nemotron-3-ultra"');
     expect(profileCheck).toContain('"deepagents-code": "0.1.34"');
     expect(profileCheck).toContain('"deepagents": "0.7.0a6"');
+    expect(profileCheck).toContain('"nemoclaw-deepagents-profile": "0.1.0"');
+    expect(profileCheck).toContain('group="deepagents.harness_profiles"');
+    expect(profileCheck).toContain('entry_point.name == "nemoclaw-managed-aliases"');
+    expect(profileCheck).toContain('"nemoclaw_deepagents_profile:register"');
     expect(profileCheck).toContain("_nvidia_nemotron_3_ultra.__file__");
+    expect(profileCheck).toContain("_builtin_profiles.__file__");
+    expect(profileCheck).toContain(
+      '"005a91e7fc4ca6b21220673dd9d02d6686bf63e1e4f1102d124b01f96886efcf"',
+    );
     expect(profileCheck).toContain('description_overrides["read_file"]');
     expect(profileCheck).toContain("middleware_names(profile) == EXPECTED_MIDDLEWARE");
     expect(profileCheck).toContain('make_model("gpt-4.1-mini")');
