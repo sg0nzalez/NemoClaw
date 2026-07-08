@@ -224,6 +224,29 @@ describe("printDockerBridgeContainerStartFailure", () => {
     expect(blob).toContain("Docker Desktop > Settings > Resources > WSL integration");
     expect(blob).toContain("enable integration for this distro");
   });
+
+  it("routes Podman-backed Docker user-namespace failures to the Podman runtime choice", () => {
+    const messages: string[] = [];
+    const errSpy = vi.spyOn(console, "error").mockImplementation((arg?: unknown) => {
+      messages.push(String(arg ?? ""));
+    });
+    printDockerBridgeContainerStartFailure({
+      ok: false,
+      reason: "podman_userns_subid_missing",
+      details:
+        'potentially insufficient UIDs or GIDs available in user namespace: Check /etc/subuid and /etc/subgid if configured locally and run "podman system migrate"',
+      timedOut: false,
+      exitCode: 125,
+      signal: null,
+    });
+    errSpy.mockRestore();
+
+    const blob = messages.join("\n");
+    expect(blob).toContain("backed by Podman/rootless user namespaces");
+    expect(blob).toContain("Choose Podman");
+    expect(blob).toContain("NEMOCLAW_GATEWAY_RUNTIME=podman");
+    expect(blob).toContain("real Docker daemon");
+  });
 });
 
 describe("printContainerDnsResolutionFailedRemediation (#6149)", () => {

@@ -1367,6 +1367,7 @@ type ProbeFailureReason =
   | "resolution_failed"
   | "servers_unreachable"
   | "image_pull_failed"
+  | "podman_userns_subid_missing"
   | "veth_unsupported"
   | "docker_daemon_unreachable"
   | "error";
@@ -1418,6 +1419,7 @@ export interface DockerBridgeContainerStartProbeResult {
     | "timeout"
     | "killed"
     | "image_pull_failed"
+    | "podman_userns_subid_missing"
     | "veth_unsupported"
     | "docker_daemon_unreachable"
     | "error"
@@ -1463,7 +1465,7 @@ const PROBE_IMAGE_PULL_TIMEOUT_MS = 60_000;
 export interface EnsureProbeImageCachedResult {
   ok: boolean;
   alreadyCached?: boolean;
-  reason?: "pull_failed" | "pull_timeout" | "inspect_unavailable";
+  reason?: "pull_failed" | "pull_timeout" | "inspect_unavailable" | "podman_userns_subid_missing";
   details?: string;
 }
 
@@ -1540,6 +1542,13 @@ export function ensureProbeImageCached(
     return {
       ok: false,
       reason: "inspect_unavailable",
+      details: outputTail(combined),
+    };
+  }
+  if (isPodmanUserNamespaceSubidFailure(combined)) {
+    return {
+      ok: false,
+      reason: "podman_userns_subid_missing",
       details: outputTail(combined),
     };
   }
@@ -1743,6 +1752,16 @@ function isVethUnsupported(output: string): boolean {
   );
 }
 
+function isPodmanUserNamespaceSubidFailure(output: string): boolean {
+  const text = String(output || "");
+  return (
+    /insufficient UIDs or GIDs available in user namespace/i.test(text) ||
+    /Check \/etc\/subuid and \/etc\/subgid/i.test(text) ||
+    /podman system migrate/i.test(text) ||
+    (/user namespace/i.test(text) && /lchown .* invalid argument/i.test(text))
+  );
+}
+
 /**
  * Random subdomain of the RFC 6761 reserved .invalid TLD. Every compliant
  * resolver returns NXDOMAIN immediately for any .invalid name, so the
@@ -1867,6 +1886,13 @@ export function probeContainerDns(opts: ProbeContainerDnsOpts = {}): DnsProbeRes
           ok: false,
           reason: "docker_daemon_unreachable",
           details: cached.details ?? "docker image inspect did not complete",
+        };
+      }
+      if (cached.reason === "podman_userns_subid_missing") {
+        return {
+          ok: false,
+          reason: "podman_userns_subid_missing",
+          details: cached.details ?? "Docker-compatible Podman pull failed",
         };
       }
       return {
@@ -2279,6 +2305,13 @@ export function probeDockerBridgeContainerStart(
           details: cached.details ?? "docker image inspect did not complete",
         };
       }
+      if (cached.reason === "podman_userns_subid_missing") {
+        return {
+          ok: false,
+          reason: "podman_userns_subid_missing",
+          details: cached.details ?? "Docker-compatible Podman pull failed",
+        };
+      }
       return {
         ok: false,
         reason: "image_pull_failed",
@@ -2325,6 +2358,17 @@ export function probeDockerBridgeContainerStart(
     return {
       ok: false,
       reason: "veth_unsupported",
+      details: outputTail(output),
+      timedOut: false,
+      exitCode: execution.exitCode,
+      signal: execution.signal,
+    };
+  }
+
+  if (isPodmanUserNamespaceSubidFailure(output)) {
+    return {
+      ok: false,
+      reason: "podman_userns_subid_missing",
       details: outputTail(output),
       timedOut: false,
       exitCode: execution.exitCode,

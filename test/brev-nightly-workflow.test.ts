@@ -129,7 +129,7 @@ describe("Brev nightly workflow contract", () => {
 
     expect(validation?.env?.TEST_SUITE).toBe("${{ inputs.test_suite }}");
     expect(validation?.run).toContain(
-      "full|credential-sanitization|telegram-injection|messaging-providers|messaging-compatible-endpoint|dashboard-remote-bind|gpu|all",
+      "full|credential-sanitization|telegram-injection|messaging-providers|messaging-compatible-endpoint|dashboard-remote-bind|podman-gateway-runtime|gpu|all",
     );
     expect(validation?.run).toContain("exit 1");
     expect(steps.indexOf(validation as NonNullable<typeof validation>)).toBeLessThan(

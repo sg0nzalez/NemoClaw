@@ -1005,6 +1005,21 @@ describe("probeContainerDns", () => {
     expect(result.reason).toBe("image_pull_failed");
   });
 
+  it("flags Podman user-namespace subuid failures distinctly from registry pull failures", () => {
+    const result = probeContainerDns({
+      ensureImageCachedOverride: {
+        ok: false,
+        reason: "podman_userns_subid_missing",
+        details:
+          'processing tar file(potentially insufficient UIDs or GIDs available in user namespace (requested 65534:65534 for /home): Check /etc/subuid and /etc/subgid if configured locally and run "podman system migrate": lchown /home: invalid argument)',
+      },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe("podman_userns_subid_missing");
+    expect(result.details).toContain("subuid");
+  });
+
   it("returns ok on NXDOMAIN — resolver reachable, name does not resolve (#3630)", () => {
     // The default probe queries a random `.invalid` subdomain (RFC 6761),
     // which any compliant resolver answers with NXDOMAIN. NXDOMAIN proves
@@ -1521,6 +1536,21 @@ describe("probeDockerBridgeContainerStart", () => {
     expect(result.details).toContain("timed out");
   });
 
+  it("reports Podman user-namespace subuid failures as fatal runtime mismatch", () => {
+    const result = probeDockerBridgeContainerStart({
+      ensureImageCachedOverride: {
+        ok: false,
+        reason: "podman_userns_subid_missing",
+        details:
+          'potentially insufficient UIDs or GIDs available in user namespace: Check /etc/subuid and /etc/subgid if configured locally and run "podman system migrate"',
+      },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe("podman_userns_subid_missing");
+    expect(result.details).toContain("podman system migrate");
+  });
+
   it("skips real-docker pre-pull when runProbeImpl is injected (hermetic test isolation)", () => {
     let probeCalled = false;
     const result = probeDockerBridgeContainerStart({
@@ -1649,6 +1679,53 @@ describe("ensureProbeImageCached", () => {
     });
     expect(result.ok).toBe(false);
     expect(result.reason).toBe("inspect_unavailable");
+  });
+
+  it("classifies Podman storage subuid errors separately from ordinary pull failures", () => {
+    const result = ensureProbeImageCached("busybox:latest", {
+      inspectProbeImpl: () => ({
+        stdout: "",
+        stderr: "Error: No such image",
+        exitCode: 1,
+        signal: null,
+        timedOut: false,
+      }),
+      pullProbeImpl: () => ({
+        stdout: "",
+        stderr:
+          'writing blob: processing tar file(potentially insufficient UIDs or GIDs available in user namespace (requested 65534:65534 for /home): Check /etc/subuid and /etc/subgid if configured locally and run "podman system migrate": lchown /home: invalid argument): exit status 1',
+        exitCode: 1,
+        signal: null,
+        timedOut: false,
+      }),
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe("podman_userns_subid_missing");
+    expect(result.details).toContain("subgid");
+  });
+
+  it("keeps plain Docker lchown extraction errors as ordinary pull failures", () => {
+    const result = ensureProbeImageCached("busybox:latest", {
+      inspectProbeImpl: () => ({
+        stdout: "",
+        stderr: "Error: No such image",
+        exitCode: 1,
+        signal: null,
+        timedOut: false,
+      }),
+      pullProbeImpl: () => ({
+        stdout: "",
+        stderr: "processing tar file: lchown /home: invalid argument",
+        exitCode: 1,
+        signal: null,
+        timedOut: false,
+      }),
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe("pull_failed");
+    expect(result.details).toContain("lchown /home");
   });
 
   it("classifies a pull timeout as pull_timeout (inconclusive, not docker outage)", () => {

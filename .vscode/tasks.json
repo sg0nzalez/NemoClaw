@@ -1,0 +1,39 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build: cli",
+      "type": "npm",
+      "script": "build:cli",
+      "path": ".",
+      "group": "build",
+      "problemMatcher": "$tsc"
+    },
+    {
+      "label": "build: plugin",
+      "type": "npm",
+      "script": "build",
+      "path": "nemoclaw",
+      "group": "build",
+      "problemMatcher": "$tsc"
+    },
+    {
+      "label": "build: debug targets",
+      "dependsOrder": "sequence",
+      "dependsOn": ["build: cli", "build: plugin"],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "watch: plugin",
+      "type": "npm",
+      "script": "dev",
+      "path": "nemoclaw",
+      "isBackground": true,
+      "problemMatcher": "$tsc-watch"
+    }
+  ]
+}

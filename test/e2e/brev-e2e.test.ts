@@ -28,7 +28,8 @@
  * Optional env vars:
  *   TEST_SUITE             — which test to run: full (default), deploy-cli, gpu,
  *                             credential-sanitization, telegram-injection, messaging-providers,
- *                             messaging-compatible-endpoint, dashboard-remote-bind, all
+ *                             messaging-compatible-endpoint, dashboard-remote-bind,
+ *                             podman-gateway-runtime, all
  *   BREV_MIN_VCPU          — Minimum vCPUs for CPU instance (default: 4)
  *   BREV_MIN_RAM           — Minimum RAM in GB for CPU instance (default: 16)
  *   BREV_PROVIDER          — Cloud provider filter for brev search (default: gcp for CPU, any for GPU)
@@ -100,6 +101,7 @@ const BREV_SSH_READY_TIMEOUT_MS =
 const OPENSHELL_GATEWAY_PORT = 8080;
 const OLLAMA_AUTH_PROXY_PORT = 11435;
 const DOCKER_DEFAULT_BRIDGE_POOL_CIDR = "172.16.0.0/12";
+const BREV_PODMAN_GATEWAY_TIMEOUT_MS = 75 * 60_000;
 
 function requireInstanceName(): string {
   if (!INSTANCE_NAME) {
@@ -766,6 +768,32 @@ function prepareGpuDockerRuntime(elapsed: () => string): void {
   console.log(`[${elapsed()}] NVIDIA Docker runtime ready`);
 }
 
+function podmanRuntimeSetupCommands(): string[] {
+  return [
+    `set -euo pipefail`,
+    `sudo apt-get update -qq`,
+    `sudo apt-get install -y -qq podman uidmap slirp4netns fuse-overlayfs dbus-user-session >/dev/null`,
+    `user_name="$(id -un)"`,
+    `if ! grep -q "^${"$"}{user_name}:" /etc/subuid 2>/dev/null; then sudo usermod --add-subuids 100000-165535 --add-subgids 100000-165535 "${"$"}{user_name}"; fi`,
+    `export XDG_RUNTIME_DIR="${"$"}{XDG_RUNTIME_DIR:-/run/user/$(id -u)}"`,
+    `sudo mkdir -p "${"$"}{XDG_RUNTIME_DIR}"`,
+    `sudo chown "$(id -u):$(id -g)" "${"$"}{XDG_RUNTIME_DIR}"`,
+    `chmod 700 "${"$"}{XDG_RUNTIME_DIR}"`,
+    `mkdir -p "${"$"}{XDG_RUNTIME_DIR}/podman"`,
+    `podman system migrate >/dev/null 2>&1 || true`,
+    `if [ ! -S "${"$"}{XDG_RUNTIME_DIR}/podman/podman.sock" ]; then nohup podman system service --time=0 "unix://${"$"}{XDG_RUNTIME_DIR}/podman/podman.sock" >/tmp/nemoclaw-podman-service.log 2>&1 & fi`,
+    `for i in $(seq 1 30); do if [ -S "${"$"}{XDG_RUNTIME_DIR}/podman/podman.sock" ] && podman --url "unix://${"$"}{XDG_RUNTIME_DIR}/podman/podman.sock" info >/dev/null 2>&1; then break; fi; sleep 1; done`,
+    `test -S "${"$"}{XDG_RUNTIME_DIR}/podman/podman.sock"`,
+    `podman --url "unix://${"$"}{XDG_RUNTIME_DIR}/podman/podman.sock" info --format '{{.Host.Security.Rootless}} {{.Host.CgroupVersion}}' | grep -E '^true v?2$'`,
+  ];
+}
+
+function preparePodmanRuntime(elapsed: () => string): void {
+  console.log(`[${elapsed()}] Preparing rootless Podman runtime on Brev CPU instance...`);
+  ssh(podmanRuntimeSetupCommands().join(" && "), { timeout: 900_000, stream: true });
+  console.log(`[${elapsed()}] Rootless Podman runtime ready`);
+}
+
 /**
  * Bootstrap the launchable environment on the remote VM:
  * rsync branch code, install deps, build plugin, and npm link the CLI.
@@ -1093,6 +1121,16 @@ describe("Brev GPU runtime setup", () => {
   });
 });
 
+describe("Brev Podman runtime setup", () => {
+  it("starts a rootless Podman API socket for the Podman gateway suite", () => {
+    const setup = podmanRuntimeSetupCommands().join("\n");
+
+    expect(setup).toContain("podman system service --time=0");
+    expect(setup).toContain("/podman/podman.sock");
+    expect(setup).toContain("{{.Host.Security.Rootless}} {{.Host.CgroupVersion}}");
+  });
+});
+
 describe.runIf(hasRequiredVars && hasAuthenticatedBrev)("Brev E2E", () => {
   beforeAll(() => {
     const bootstrapStart = Date.now();
@@ -1120,6 +1158,9 @@ describe.runIf(hasRequiredVars && hasAuthenticatedBrev)("Brev E2E", () => {
 
       if (GPU_TEST_SUITE) {
         prepareGpuDockerRuntime(elapsed);
+      }
+      if (TEST_SUITE === "podman-gateway-runtime") {
+        preparePodmanRuntime(elapsed);
       }
 
       const result = bootstrapLaunchable(elapsed);
@@ -1280,5 +1321,21 @@ describe.runIf(hasRequiredVars && hasAuthenticatedBrev)("Brev E2E", () => {
       expect(output).not.toMatch(/FAIL|Failed/i);
     },
     300_000,
+  );
+
+  it.runIf(TEST_SUITE === "podman-gateway-runtime")(
+    "Podman gateway runtime suite passes on remote VM",
+    () => {
+      const output = runRemoteCommand(
+        [
+          `export OPENSHELL_PODMAN_SOCKET="/run/user/$(id -u)/podman/podman.sock"`,
+          `export NEMOCLAW_E2E_REQUIRE_PODMAN=1`,
+          buildBrevRemoteVitestCommand("e2e-live", "test/e2e/live/podman-gateway-runtime.test.ts"),
+        ].join(" && "),
+        BREV_PODMAN_GATEWAY_TIMEOUT_MS,
+      );
+      expectVitestPassed(output);
+    },
+    BREV_PODMAN_GATEWAY_TIMEOUT_MS + BREV_REMOTE_WRAPPER_GRACE_MS,
   );
 });

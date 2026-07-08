@@ -407,8 +407,11 @@ If onboarding reports that Docker is missing or unreachable, fix Docker first an
 $$nemoclaw onboard
 ```
 
-Podman is not a tested runtime.
-If onboarding or sandbox lifecycle fails, switch to a tested runtime (Docker Desktop, Colima, or Docker Engine) and rerun onboarding.
+Podman is available only through the experimental rootless gateway-runtime POC.
+Set `NEMOCLAW_GATEWAY_RUNTIME=podman` and use rootless Podman with cgroups v2, subordinate UID/GID ranges, and an active Podman API socket.
+When authorized interactively or with `--yes`, onboarding can install Podman, start the user socket, and add subordinate UID/GID ranges for the current user.
+Cgroups v2 remains a manual host/reboot prerequisite.
+Docker remains the default runtime; rootful Podman and non-Podman container runtimes are not supported.
 
 ### Cluster fails with `overlayfs snapshotter cannot be enabled` on Docker 26+
 
@@ -2312,9 +2315,49 @@ For first-time Hermes setup, refer to [Quickstart with Hermes](../get-started/qu
 
 ## Podman
 
-Podman is not a tested runtime.
-OpenShell officially documents Docker-based runtimes only.
-If you encounter issues with Podman, switch to a tested runtime (Docker Engine, Docker Desktop, or Colima) and rerun onboarding.
+Podman support is experimental and opt-in.
+It is intended for rootless Linux hosts where operators want NemoClaw to start OpenShell's native Podman compute driver instead of the default Docker gateway runtime.
+Interactive onboarding asks for the gateway runtime before preflight; choose Podman there, or set `NEMOCLAW_GATEWAY_RUNTIME=podman` for scripted runs.
+
+```bash
+NEMOCLAW_GATEWAY_RUNTIME=podman NEMOCLAW_SANDBOX_GPU=0 $$nemoclaw onboard --no-gpu --yes
+```
+
+The Podman POC requires:
+
+- rootless Podman
+- cgroups v2
+- subordinate UID/GID ranges in `/etc/subuid` and `/etc/subgid` that do not include the current user's UID/GID and do not overlap another owner
+- a reachable Podman API socket, or `OPENSHELL_PODMAN_SOCKET` pointing to one
+
+When the package, user socket, or subordinate UID/GID ranges are missing, onboarding prints the planned commands and asks before applying them.
+`--yes` authorizes those setup commands for scripted POC runs.
+For the socket check, "reachable" means the exact socket OpenShell will use accepts Podman REST API requests:
+
+```bash
+socket="${OPENSHELL_PODMAN_SOCKET:-${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/podman/podman.sock}"
+podman --url "unix://${socket#unix://}" info
+```
+
+If the socket file exists but the gateway log shows `podman.sock: Connection refused`, restart the user socket and verify it before rerunning onboarding:
+
+```bash
+systemctl --user restart podman.socket
+socket="${OPENSHELL_PODMAN_SOCKET:-${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/podman/podman.sock}"
+podman --url "unix://${socket#unix://}" info
+```
+
+For subordinate ID repair, onboarding backs up `/etc/subuid` and `/etc/subgid`, replaces the current user's entries with a non-overlapping range, then runs `podman system migrate`.
+This avoids `usermod` failures on hosts where the current user already owns active processes.
+If cgroups v2 is missing, enable unified cgroups v2 for the host, reboot, verify `stat -fc %T /sys/fs/cgroup` prints `cgroup2fs`, then rerun onboarding.
+If `podman info` reports `the specified mapping ... includes the user UID`, delete that invalid current-user range, add a non-overlapping range, then run `podman system migrate`.
+If you choose Docker but the preflight reports `podman system migrate`, `/etc/subuid`, or `/etc/subgid`, your Docker-compatible endpoint is backed by Podman/rootless user namespaces.
+Rerun onboarding and choose Podman, or switch the Docker CLI/socket back to Docker Engine, Docker Desktop, or Colima.
+If Podman preflight says `podman info` failed with `chmod /run/user/<uid>/libpod: read-only file system`, fix the current user's writable runtime directory or rerun from a normal login shell where `XDG_RUNTIME_DIR` points to writable user-owned storage.
+If sandbox creation fails with `short-name "nemoclaw-sandbox-local:..." did not resolve to an alias`, rebuild the NemoClaw CLI and rerun onboarding; the Podman path must build generated sandbox images into the Podman image store as `localhost/nemoclaw-sandbox-local:...` and start the gateway with `image_pull_policy = "never"`.
+
+Sandbox GPU passthrough is not enabled for this POC.
+Rootful Podman and other container runtimes remain unsupported.
 
 <AgentOnly variant="openclaw">
 

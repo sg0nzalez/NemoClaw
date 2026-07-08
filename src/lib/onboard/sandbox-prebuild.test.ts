@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SANDBOX_BUILD_CONTEXT_PREFIX } from "../sandbox/build-context";
 import {
+  containerBuildSubprocessEnv,
   dockerBuildSubprocessEnv,
   prebuildSandboxImageIfEligible,
   resolveSandboxPrebuildEnabled,
@@ -84,6 +85,26 @@ describe("sandbox BuildKit prebuild", () => {
     }
   });
 
+  it("drops Docker endpoint state for Podman builds", () => {
+    vi.stubEnv("PATH", "/usr/bin");
+    vi.stubEnv("HOME", "/home/user");
+    vi.stubEnv("XDG_RUNTIME_DIR", "/run/user/1000");
+    vi.stubEnv("DOCKER_HOST", "unix:///var/run/docker.sock");
+    vi.stubEnv("DOCKER_CONFIG", "/home/user/.docker-ci");
+    vi.stubEnv("OPENSHELL_PODMAN_SOCKET", "/run/user/1000/podman/podman.sock");
+
+    const env = containerBuildSubprocessEnv("podman");
+
+    expect(env).toMatchObject({
+      PATH: "/usr/bin",
+      HOME: "/home/user",
+      XDG_RUNTIME_DIR: "/run/user/1000",
+    });
+    expect(env.DOCKER_HOST).toBeUndefined();
+    expect(env.DOCKER_CONFIG).toBeUndefined();
+    expect(env.OPENSHELL_PODMAN_SOCKET).toBeUndefined();
+  });
+
   it("never enables a local-image handoff for a remote gateway", () => {
     expect(resolveSandboxPrebuildEnabled({}, false)).toBe(false);
     expect(resolveSandboxPrebuildEnabled({ NEMOCLAW_SANDBOX_PREBUILD: "1" }, false)).toBe(false);
@@ -101,6 +122,9 @@ describe("sandbox BuildKit prebuild", () => {
   it("derives a build-unique local image tag", () => {
     const imageRef = sandboxLocalImageRef("My Bot/2!", BUILD_ID);
     expect(imageRef).toBe("nemoclaw-sandbox-local:my-bot-2--1234567890");
+    expect(sandboxLocalImageRef("My Bot/2!", BUILD_ID, "podman")).toBe(
+      "localhost/nemoclaw-sandbox-local:my-bot-2--1234567890",
+    );
     expect(sandboxLocalImageRef("My Bot/2!", "next-build")).not.toBe(imageRef);
     expect(sandboxLocalImageRef("a".repeat(128), "next-build")).not.toBe(
       sandboxLocalImageRef("a".repeat(128), "other-build"),
@@ -343,6 +367,47 @@ describe("sandbox BuildKit prebuild", () => {
     expect(result).toEqual({
       createArgs: ["--from", "nemoclaw-sandbox-local:alpha-1234567890", "--name", "alpha"],
       imageRef: "nemoclaw-sandbox-local:alpha-1234567890",
+    });
+  });
+
+  it("uses Podman build and a fully qualified local image on the Podman runtime", async () => {
+    const { buildCtx, createArgs, dockerfile } = createBuildContext();
+    const buildImage = vi.fn(async () => 0);
+    const result = await prebuildSandboxImageIfEligible({
+      buildCtx,
+      buildId: BUILD_ID,
+      origin: "generated",
+      createArgs,
+      sandboxName: "alpha",
+      dockerDriverGateway: true,
+      runtime: "podman",
+      env: {},
+      buildImage,
+      log: () => {},
+    });
+
+    expect(buildImage).toHaveBeenCalledWith(
+      [
+        "build",
+        "-t",
+        "localhost/nemoclaw-sandbox-local:alpha-1234567890",
+        "-f",
+        dockerfile,
+        buildCtx,
+      ],
+      expect.objectContaining({
+        env: expect.not.objectContaining({ DOCKER_BUILDKIT: "1" }),
+        stdio: "inherit",
+      }),
+    );
+    expect(result).toEqual({
+      createArgs: [
+        "--from",
+        "localhost/nemoclaw-sandbox-local:alpha-1234567890",
+        "--name",
+        "alpha",
+      ],
+      imageRef: "localhost/nemoclaw-sandbox-local:alpha-1234567890",
     });
   });
 

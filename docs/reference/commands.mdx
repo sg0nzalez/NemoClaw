@@ -553,8 +553,16 @@ For Hermes, the backed-up paths come from `agents/hermes/manifest.yaml`, includi
 
 </AgentOnly>
 
-Before creating the gateway, the wizard runs preflight checks.
-It verifies that Docker is reachable, warns on untested runtimes such as Podman, and prints host remediation guidance when prerequisites are missing.
+Before creating the gateway, the wizard asks interactive users which gateway runtime to use, then runs preflight checks for that runtime.
+Docker is the default gateway runtime.
+Set `NEMOCLAW_GATEWAY_RUNTIME` to skip the prompt in scripted runs.
+By default it verifies that Docker is reachable and prints host remediation guidance when prerequisites are missing.
+When `NEMOCLAW_GATEWAY_RUNTIME=podman` is set, it instead verifies the experimental rootless Podman gateway-runtime prerequisites.
+On the Podman path, onboarding can remediate missing safe prerequisites after authorization.
+If the Podman package, user `podman.socket`, or subordinate UID/GID ranges are missing, interactive onboarding prints the planned commands and asks before running them.
+If the socket file exists but does not accept requests, onboarding restarts `podman.socket` and asks you to verify `podman --url unix://$OPENSHELL_PODMAN_SOCKET info`.
+Passing `--yes` authorizes the same setup commands for scripted POC runs.
+Cgroups v2 is still a manual host and reboot prerequisite.
 The preflight also enforces the OpenShell version range declared in the blueprint (`min_openshell_version` and `max_openshell_version`).
 If the installed OpenShell version falls outside this range, onboarding exits with an actionable error and a link to compatible releases.
 For fresh OpenShell installs, NemoClaw queries published OpenShell releases and asks the installer to use a release that fits the blueprint range.
@@ -3190,6 +3198,8 @@ Set them before running `$$nemoclaw onboard`.
 | `NEMOCLAW_NON_INTERACTIVE_SUDO_MODE` | `prompt` or empty/unset | When set to `prompt`, allows non-interactive onboarding to use prompt-capable `sudo` for host setup steps that require elevation, which can ask for a password. Empty/unset is the default and uses `sudo -n`, which fails instead of asking for a password. Any other value is rejected. |
 | `NEMOCLAW_NO_EXPRESS` | `1` to enable | Installer-only. Skips the DGX Spark, DGX Station, and Windows WSL express install prompt and continues with the normal interactive onboarding flow. |
 | `NEMOCLAW_EXPERIMENTAL` | `1` to enable | Surfaces experimental providers and flows in onboarding. |
+| `NEMOCLAW_GATEWAY_RUNTIME` | `docker` (default) or `podman` | Selects the OpenShell gateway runtime during onboarding and skips the interactive runtime prompt. `podman` enables the experimental rootless Linux Podman POC and requires rootless Podman, cgroups v2, subordinate UID/GID ranges, and a reachable Podman API socket. Onboarding can apply the package install, user socket, and subordinate ID setup when authorized; cgroups v2 remains a manual host/reboot prerequisite. Pair it with `--no-gpu` or `NEMOCLAW_SANDBOX_GPU=0` because sandbox GPU passthrough is not supported for the POC. |
+| `OPENSHELL_PODMAN_SOCKET` | Podman API socket path, optionally with `unix://` prefix | Overrides Podman API socket auto-discovery when `NEMOCLAW_GATEWAY_RUNTIME=podman` is set. |
 | `NEMOCLAW_IGNORE_RUNTIME_RESOURCES` | `1` to enable | Suppresses the under-provisioned runtime warning during preflight. Use only when you know the sandbox host meets the minimums. |
 | `NEMOCLAW_DISABLE_OVERLAY_FIX` | `1` to enable | Skips the Docker overlay-fix step during sandbox build. For environments where the fix is incompatible. |
 | `NEMOCLAW_OVERLAY_SNAPSHOTTER` | snapshotter name | Selects the containerd overlay snapshotter for sandbox builds. Empty (default) preserves containerd's choice. |

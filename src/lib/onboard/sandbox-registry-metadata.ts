@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { AgentDefinition } from "../agent/defs";
+import type { NemoClawGatewayRuntime } from "./gateway-runtime-selection";
 import type { SandboxEntry } from "../state/registry";
 import * as registry from "../state/registry";
 import { getSandboxAgentRegistryFields } from "./sandbox-agent";
@@ -9,6 +10,7 @@ import type { SandboxGpuConfig } from "./sandbox-gpu-mode";
 
 export interface SandboxRegistryMetadataDeps {
   isLinuxDockerDriverGatewayEnabled(): boolean;
+  resolveGatewayRuntime?(): NemoClawGatewayRuntime;
   getInstalledOpenshellVersion(versionOutput?: string | null): string | null;
   runCaptureOpenshell(args: string[], opts?: Record<string, unknown>): string | null;
 }
@@ -59,6 +61,7 @@ export function createSandboxRegistryMetadataHelpers(
     // including on macOS arm64 (#3454). Recording "vm" for darwin here makes later
     // setup misclassify the sandbox and run VM-only DNS monkeypatch / warning paths
     // (#3728).
+    const gatewayRuntime = deps.resolveGatewayRuntime?.();
     return {
       gpuEnabled: config.sandboxGpuEnabled,
       hostGpuDetected: config.hostGpuDetected,
@@ -68,7 +71,12 @@ export function createSandboxRegistryMetadataHelpers(
       // Only persist a proof when this run produced one; omit on reuse/update
       // paths so a prior proof result is preserved rather than nulled out.
       ...(config.sandboxGpuProof ? { sandboxGpuProof: config.sandboxGpuProof } : {}),
-      openshellDriver: deps.isLinuxDockerDriverGatewayEnabled() ? "docker" : "kubernetes",
+      openshellDriver:
+        gatewayRuntime === "podman"
+          ? "podman"
+          : deps.isLinuxDockerDriverGatewayEnabled()
+            ? "docker"
+            : "kubernetes",
       openshellVersion: deps.getInstalledOpenshellVersion(
         deps.runCaptureOpenshell(["--version"], { ignoreError: true }),
       ),

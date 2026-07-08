@@ -17,6 +17,7 @@ const BREV_SUITES_WITHOUT_HARNESS_SANDBOX = new Set([
   "gpu",
   "messaging-compatible-endpoint",
   "messaging-providers",
+  "podman-gateway-runtime",
 ]);
 
 export function brevSuiteNeedsHarnessSandbox(testSuite: string): boolean {

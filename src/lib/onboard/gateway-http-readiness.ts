@@ -206,6 +206,7 @@ function isDockerDriverGatewayHttpReadyImpl(
       });
       stream.on("error", () => settle(false));
       stream.on("end", () => settle(isHealthyResponse()));
+      stream.on("close", () => settle(isHealthyResponse()));
       // Empty protobuf message: one uncompressed gRPC frame with zero payload bytes.
       stream.end(Buffer.alloc(5));
     } catch {

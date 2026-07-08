@@ -1,0 +1,98 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "NemoClaw CLI: status",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/bin/nemoclaw.js",
+      "args": ["status"],
+      "cwd": "${workspaceFolder}",
+      "runtimeExecutable": "node",
+      "console": "integratedTerminal",
+      "preLaunchTask": "build: cli",
+      "skipFiles": ["<node_internals>/**"],
+      "outFiles": ["${workspaceFolder}/dist/**/*.js"],
+      "sourceMaps": true
+    },
+    {
+      "name": "NemoClaw CLI: custom args",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/bin/nemoclaw.js",
+      "args": ["debug", "--quick"],
+      "cwd": "${workspaceFolder}",
+      "runtimeExecutable": "node",
+      "console": "integratedTerminal",
+      "preLaunchTask": "build: cli",
+      "skipFiles": ["<node_internals>/**"],
+      "outFiles": ["${workspaceFolder}/dist/**/*.js"],
+      "sourceMaps": true
+    },
+    {
+      "name": "NemoClaw CLI: inspect-brk status",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/bin/nemoclaw.js",
+      "args": ["status"],
+      "cwd": "${workspaceFolder}",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["--inspect-brk=9229"],
+      "console": "integratedTerminal",
+      "preLaunchTask": "build: cli",
+      "skipFiles": ["<node_internals>/**"],
+      "outFiles": ["${workspaceFolder}/dist/**/*.js"],
+      "sourceMaps": true
+    },
+    {
+      "name": "Attach: localhost 9229",
+      "type": "node",
+      "request": "attach",
+      "address": "localhost",
+      "port": 9229,
+      "cwd": "${workspaceFolder}",
+      "restart": false,
+      "skipFiles": ["<node_internals>/**"],
+      "outFiles": [
+        "${workspaceFolder}/dist/**/*.js",
+        "${workspaceFolder}/nemoclaw/dist/**/*.js"
+      ],
+      "sourceMaps": true
+    },
+    {
+      "name": "Attach: pick Node process",
+      "type": "node",
+      "request": "attach",
+      "processId": "${command:PickProcess}",
+      "cwd": "${workspaceFolder}",
+      "skipFiles": ["<node_internals>/**"],
+      "outFiles": [
+        "${workspaceFolder}/dist/**/*.js",
+        "${workspaceFolder}/nemoclaw/dist/**/*.js"
+      ],
+      "sourceMaps": true
+    },
+    {
+      "name": "Vitest: current root test",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/node_modules/vitest/vitest.mjs",
+      "args": ["run", "${file}"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"],
+      "sourceMaps": true
+    },
+    {
+      "name": "Vitest: current plugin test",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/nemoclaw/node_modules/vitest/vitest.mjs",
+      "args": ["run", "--config", "vitest.config.ts", "${file}"],
+      "cwd": "${workspaceFolder}/nemoclaw",
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"],
+      "sourceMaps": true
+    }
+  ]
+}

@@ -43,6 +43,25 @@ find_docker_desktop_socket() {
   return 1
 }
 
+find_native_docker_socket() {
+  local socket_path
+
+  if [ "$(uname -s)" != "Linux" ]; then
+    return 1
+  fi
+
+  for socket_path in \
+    "/run/docker.sock" \
+    "/var/run/docker.sock"; do
+    if socket_exists "$socket_path"; then
+      printf '%s\n' "$socket_path"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
 detect_docker_host() {
   if [ -n "${DOCKER_HOST:-}" ]; then
     printf '%s\n' "$DOCKER_HOST"
@@ -53,6 +72,11 @@ detect_docker_host() {
   local socket_path
 
   if socket_path="$(find_colima_docker_socket "$home_dir")"; then
+    printf 'unix://%s\n' "$socket_path"
+    return 0
+  fi
+
+  if socket_path="$(find_native_docker_socket)"; then
     printf 'unix://%s\n' "$socket_path"
     return 0
   fi

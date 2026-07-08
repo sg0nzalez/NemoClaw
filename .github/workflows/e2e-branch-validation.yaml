@@ -46,6 +46,9 @@ name: E2E / Branch Validation
 #                              OpenAI-compatible endpoint. Creates its own sandbox
 #                              (e2e-msg-compat) on a separate fresh instance.
 #   dashboard-remote-bind    — Verifies opt-in remote dashboard forwards bind 0.0.0.0.
+#   podman-gateway-runtime   — Installs rootless Podman on a fresh CPU VM and
+#                              verifies NemoClaw onboard through OpenShell's
+#                              native Podman compute driver. (~75 min)
 #   gpu                      — Provisions a Brev GPU VM and runs the Ollama GPU E2E
 #                              sandbox proof suite from source. (~45 min)
 #   all                      — Runs credential-sanitization + telegram-injection, each with
@@ -73,6 +76,7 @@ on:
           - messaging-providers
           - messaging-compatible-endpoint
           - dashboard-remote-bind
+          - podman-gateway-runtime
           - gpu
           - all
       use_launchable:
@@ -188,7 +192,7 @@ jobs:
           TEST_SUITE: ${{ inputs.test_suite }}
         run: |
           case "$TEST_SUITE" in
-            full|credential-sanitization|telegram-injection|messaging-providers|messaging-compatible-endpoint|dashboard-remote-bind|gpu|all) ;;
+            full|credential-sanitization|telegram-injection|messaging-providers|messaging-compatible-endpoint|dashboard-remote-bind|podman-gateway-runtime|gpu|all) ;;
             *)
               echo "::error::test_suite is not one of the supported Brev E2E suites"
               exit 1

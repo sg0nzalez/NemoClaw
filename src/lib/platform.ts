@@ -146,9 +146,9 @@ function getDockerSocketCandidates(opts: PlatformLookupOptions = {}): string[] {
 
   if (platform === "linux") {
     return [
-      ...getPodmanSocketCandidates({ home, platform, uid: opts.uid }),
       "/run/docker.sock",
       "/var/run/docker.sock",
+      ...getPodmanSocketCandidates({ home, platform, uid: opts.uid }),
     ];
   }
 

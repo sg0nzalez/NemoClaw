@@ -73,6 +73,9 @@ const dockerGpuSandboxCreate: typeof import("./onboard/docker-gpu-sandbox-create
 const dockerDriverGatewayLaunch: typeof import("./onboard/docker-driver-gateway-launch") = require("./onboard/docker-driver-gateway-launch");
 const dockerDriverGatewayRuntime: typeof import("./onboard/docker-driver-gateway-runtime") = require("./onboard/docker-driver-gateway-runtime");
 const dockerDriverGatewayCutover: typeof import("./onboard/docker-driver-gateway-cutover") = require("./onboard/docker-driver-gateway-cutover");
+const gatewayRuntimeSelection: typeof import("./onboard/gateway-runtime-selection") = require("./onboard/gateway-runtime-selection");
+const podmanDriverGatewayRuntime: typeof import("./onboard/podman-driver-gateway-runtime") = require("./onboard/podman-driver-gateway-runtime");
+const podmanRuntimePreflight: typeof import("./onboard/podman-runtime-preflight") = require("./onboard/podman-runtime-preflight");
 const { reapHostGatewayBeforeLaunchOrFail, reapDuplicateHostGatewaysExceptOrFail } =
   require("./onboard/docker-driver-gateway-prelaunch") as typeof import("./onboard/docker-driver-gateway-prelaunch");
 const {
@@ -520,6 +523,8 @@ const { reportDockerDriverGatewayStartFailure } =
   require("./onboard/docker-driver-gateway-failure") as typeof import("./onboard/docker-driver-gateway-failure");
 const { createFinalGatewayStartFailureHandler, reportLegacyGatewayStartResultFailure } =
   require("./onboard/gateway-start-failure") as typeof import("./onboard/gateway-start-failure");
+const { reportPodmanDriverGatewayStartFailure } =
+  require("./onboard/podman-driver-gateway-failure") as typeof import("./onboard/podman-driver-gateway-failure");
 const dockerDriverGatewayEnv: typeof import("./onboard/docker-driver-gateway-env") =
   require("./onboard/docker-driver-gateway-env");
 const dockerDriverGatewayRuntimeMarker: typeof import("./onboard/docker-driver-gateway-runtime-marker") =
@@ -657,6 +662,26 @@ const {
   supportedOpenshellFallbackVersion: SUPPORTED_OPENSHELL_FALLBACK_VERSION,
 });
 
+const {
+  clearPodmanDriverGatewayRuntimeFiles,
+  getPodmanDriverGatewayEnv,
+  getPodmanDriverGatewayPid,
+  getPodmanDriverGatewayRuntimeDrift,
+  getPodmanDriverGatewayStateDir,
+  isPodmanDriverGatewayProcess,
+  isPodmanDriverGatewayProcessAlive,
+  rememberPodmanDriverGatewayPid,
+} = podmanDriverGatewayRuntime.createPodmanDriverGatewayRuntimeHelpers({
+  gatewayPort: () => GATEWAY_PORT,
+  getCachedOpenshellBinary: () => OPENSHELL_BIN,
+  getBlueprintMaxOpenshellVersion,
+  getInstalledOpenshellVersion,
+  isOpenshellDevVersion,
+  runCapture,
+  shouldUseOpenshellDevChannel,
+  supportedOpenshellFallbackVersion: SUPPORTED_OPENSHELL_FALLBACK_VERSION,
+});
+
 import type { JsonObject as LooseObject } from "./core/json-types";
 import type { PreparedSandboxBuildContext } from "./onboard/build-context-stage";
 
@@ -688,6 +713,10 @@ function isRecreateSandbox(requested = false): boolean {
 
 function isAutoYes(): boolean {
   return AUTO_YES || process.env.NEMOCLAW_YES === "1";
+}
+
+function isPodmanGatewayRuntimeSelected(): boolean {
+  return gatewayRuntimeSelection.resolveNemoClawGatewayRuntime() === "podman";
 }
 
 function note(message: string): void {
@@ -1224,6 +1253,28 @@ function stopDockerDriverGatewayProcess(): boolean {
   return stopped;
 }
 
+function stopPodmanDriverGatewayProcess(): boolean {
+  const pid = getPodmanDriverGatewayPid();
+  if (pid === null || !isPidAlive(pid)) {
+    clearPodmanDriverGatewayRuntimeFiles();
+    return false;
+  }
+  if (!isPodmanDriverGatewayProcess(pid, resolveOpenShellGatewayBinary())) {
+    clearPodmanDriverGatewayRuntimeFiles();
+    return false;
+  }
+
+  const stopped = terminateDockerDriverGatewayProcess(pid);
+  clearPodmanDriverGatewayRuntimeFiles();
+  return stopped;
+}
+
+function stopSelectedDriverGatewayProcess(): boolean {
+  return isPodmanGatewayRuntimeSelected()
+    ? stopPodmanDriverGatewayProcess()
+    : stopDockerDriverGatewayProcess();
+}
+
 function stopLegacyGatewayClusterContainer(): boolean {
   const containerName = getGatewayClusterContainerName(GATEWAY_NAME);
   const inspectResult = dockerInspect(["--type", "container", containerName], {
@@ -1251,6 +1302,7 @@ function stopLegacyGatewayClusterContainer(): boolean {
 function retireLegacyGatewayForDockerDriverUpgrade(): void {
   runOpenshell(["forward", "stop", String(getOnboardDashboardPort())], { ignoreError: true });
   stopDockerDriverGatewayProcess();
+  if (isPodmanGatewayRuntimeSelected()) stopPodmanDriverGatewayProcess();
   const stoppedLegacyContainer = stopLegacyGatewayClusterContainer();
   removeDockerDriverGatewayRegistration();
   if (stoppedLegacyContainer) {
@@ -1267,6 +1319,9 @@ async function refreshDockerDriverGatewayReuseState(
 ): Promise<GatewayReuseState> {
   if (!isLinuxDockerDriverGatewayEnabled() || gatewayReuseState !== "healthy") {
     return gatewayReuseState;
+  }
+  if (isPodmanGatewayRuntimeSelected()) {
+    return refreshPodmanDriverGatewayReuseState(gatewayReuseState);
   }
   const gatewayBin = resolveOpenShellGatewayBinary();
   const baseDesiredEnv = getDockerDriverGatewayEnv(
@@ -1321,6 +1376,45 @@ async function refreshDockerDriverGatewayReuseState(
   return "stale";
 }
 
+async function refreshPodmanDriverGatewayReuseState(
+  gatewayReuseState: GatewayReuseState,
+): Promise<GatewayReuseState> {
+  if (!isLinuxDockerDriverGatewayEnabled() || gatewayReuseState !== "healthy") {
+    return gatewayReuseState;
+  }
+  const gatewayBin = resolveOpenShellGatewayBinary();
+  const desiredEnv = getPodmanDriverGatewayEnv(
+    runCaptureOpenshell(["--version"], { ignoreError: true }),
+  );
+  const pid = getPodmanDriverGatewayPid();
+  if (pid !== null && isPodmanDriverGatewayProcessAlive()) {
+    const drift = getPodmanDriverGatewayRuntimeDrift(pid, desiredEnv, gatewayBin);
+    if (drift) {
+      console.log(`  Existing OpenShell Podman gateway is stale (${drift.reason}); restarting...`);
+      return "stale";
+    }
+    if (registerDockerDriverGatewayEndpoint() && (await isPodmanDriverGatewayReady())) {
+      return "healthy";
+    }
+  }
+
+  const portCheck = await checkGatewayPortAvailable();
+  if (!portCheck.ok && portCheck.pid && isPodmanDriverGatewayProcess(portCheck.pid, gatewayBin)) {
+    const drift = getPodmanDriverGatewayRuntimeDrift(portCheck.pid, desiredEnv, gatewayBin);
+    if (drift) {
+      console.log(`  Existing OpenShell Podman gateway is stale (${drift.reason}); restarting...`);
+      return "stale";
+    }
+    rememberPodmanDriverGatewayPid(portCheck.pid);
+    if (registerDockerDriverGatewayEndpoint() && (await isPodmanDriverGatewayReady())) {
+      return "healthy";
+    }
+  }
+
+  if (!portCheck.ok && !portCheck.pid) return "healthy";
+  return "stale";
+}
+
 function destroyGateway(
   clearRegistry: () => void = registry.clearAll,
   isDockerDriverGatewayEnabledForDestroy: () => boolean = isLinuxDockerDriverGatewayEnabled,
@@ -1333,7 +1427,7 @@ function destroyGateway(
     isDockerDriverGatewayEnabled: isDockerDriverGatewayEnabledForDestroy,
     removeDockerDriverGatewayRegistration,
     runOpenshell,
-    stopDockerDriverGatewayProcess,
+    stopDockerDriverGatewayProcess: stopSelectedDriverGatewayProcess,
   });
 }
 
@@ -1449,6 +1543,19 @@ function registerDockerDriverGatewayEndpoint(): boolean {
   return ok;
 }
 
+function isRegisteredGatewayHealthyViaOpenShellCli(): boolean {
+  return isGatewayHealthy(
+    runCaptureOpenshell(["status"], { ignoreError: true }),
+    runCaptureOpenshell(["gateway", "info", "-g", GATEWAY_NAME], { ignoreError: true }),
+    runCaptureOpenshell(["gateway", "info"], { ignoreError: true }),
+  );
+}
+
+async function isPodmanDriverGatewayReady(): Promise<boolean> {
+  if (isRegisteredGatewayHealthyViaOpenShellCli()) return true;
+  return (await isGatewayTcpReady()) && (await isDockerDriverGatewayHttpReady());
+}
+
 function attachGatewayMetadataIfNeeded({
   forceRefresh = false,
 }: {
@@ -1498,6 +1605,14 @@ async function preflight(
   preflightOpts: PreflightOptions = {},
 ): Promise<ReturnType<typeof nim.detectGpu>> {
   step(1, 8, "Preflight checks");
+
+  if (isPodmanGatewayRuntimeSelected()) {
+    await podmanRuntimePreflight.ensurePodmanRuntimePrerequisitesForOnboard({
+      autoYes: isAutoYes(),
+      nonInteractive: isNonInteractive(),
+      confirm: (question, defaultIsYes) => promptYesNoOrDefault(question, null, defaultIsYes),
+    });
+  }
 
   const { gpu, host, sandboxGpuConfig } = fatalRuntimePreflight.runFatalOnboardRuntimePreflight(
     preflightOpts,
@@ -1637,6 +1752,31 @@ async function preflight(
         if (portCheck.ok) continue;
       }
       if (port === GATEWAY_PORT) {
+        if (isPodmanGatewayRuntimeSelected() && portCheck.pid) {
+          const gatewayBin = resolveOpenShellGatewayBinary();
+          if (isPodmanDriverGatewayProcess(portCheck.pid, gatewayBin)) {
+            rememberPodmanDriverGatewayPid(portCheck.pid);
+            console.log(
+              `  ✓ Port ${port} already owned by NemoClaw OpenShell Podman gateway (${label})`,
+            );
+            continue;
+          }
+        }
+        if (!isPodmanGatewayRuntimeSelected() && portCheck.pid) {
+          const trackedPodmanPid = getPodmanDriverGatewayPid();
+          const gatewayBin = resolveOpenShellGatewayBinary();
+          if (
+            trackedPodmanPid === portCheck.pid &&
+            isPodmanDriverGatewayProcess(portCheck.pid, gatewayBin)
+          ) {
+            console.log(
+              `  Existing OpenShell Podman gateway is using port ${port}; stopping it before Docker gateway startup...`,
+            );
+            stopPodmanDriverGatewayProcess();
+            portCheck = await checkPortAvailable(port, portCheckOptions);
+            if (portCheck.ok) continue;
+          }
+        }
         const dockerGatewayPid = getDockerDriverGatewayPortListenerPid(portCheck);
         if (dockerGatewayPid !== null) {
           rememberDockerDriverGatewayPid(dockerGatewayPid);
@@ -1785,6 +1925,9 @@ async function startGatewayWithOptions(
   step(2, 8, "Starting OpenShell gateway");
 
   if (isLinuxDockerDriverGatewayEnabled()) {
+    if (isPodmanGatewayRuntimeSelected()) {
+      return startPodmanDriverGateway({ exitOnFailure, gpuPassthrough });
+    }
     return startDockerDriverGateway({
       exitOnFailure,
       skipSandboxBridgeReachability: dockerGpuLocalInference.shouldSkipGpuBridgeProbe(
@@ -2167,6 +2310,122 @@ async function startDockerDriverGateway({
   throw new Error("Docker-driver gateway failed to start");
 }
 
+async function startPodmanDriverGateway({
+  exitOnFailure = true,
+  gpuPassthrough = false,
+}: {
+  exitOnFailure?: boolean;
+  gpuPassthrough?: boolean;
+} = {}): Promise<void> {
+  if (gpuPassthrough) {
+    const detail =
+      "Podman gateway runtime POC does not yet support sandbox GPU passthrough. Re-run with --no-gpu or NEMOCLAW_SANDBOX_GPU=0.";
+    console.error(`  ${detail}`);
+    if (exitOnFailure) process.exit(1);
+    throw new Error(detail);
+  }
+
+  const gatewayBin = resolveOpenShellGatewayBinary();
+  if (!gatewayBin) {
+    console.error("  OpenShell Podman gateway binary not found.");
+    console.error(
+      `  Install OpenShell v${SUPPORTED_OPENSHELL_FALLBACK_VERSION}, or set NEMOCLAW_OPENSHELL_GATEWAY_BIN.`,
+    );
+    if (exitOnFailure) process.exit(1);
+    throw new Error("OpenShell gateway binary not found");
+  }
+
+  const openshellVersionOutput = runCaptureOpenshell(["--version"], { ignoreError: true });
+  const gatewayEnv = getPodmanDriverGatewayEnv(openshellVersionOutput);
+  process.env.OPENSHELL_LOCAL_TLS_DIR = gatewayEnv.OPENSHELL_LOCAL_TLS_DIR;
+  process.env.OPENSHELL_PODMAN_SOCKET = gatewayEnv.OPENSHELL_PODMAN_SOCKET;
+  const podmanRuntime = podmanRuntimePreflight.assertPodmanRuntimeAvailable(undefined, (code) => {
+    if (exitOnFailure) process.exit(code);
+    throw new Error(`Podman gateway runtime preflight failed with exit ${code}`);
+  });
+  const stateDir = getPodmanDriverGatewayStateDir();
+  const launch = podmanDriverGatewayRuntime.buildPodmanDriverGatewayLaunch({
+    gatewayBin,
+    gatewayEnv,
+    stateDir,
+    ensureLocalTlsBundle: true,
+  });
+
+  const existingPid = getPodmanDriverGatewayPid();
+  if (existingPid !== null && isPodmanDriverGatewayProcessAlive()) {
+    const drift = getPodmanDriverGatewayRuntimeDrift(existingPid, gatewayEnv, gatewayBin);
+    if (!drift && registerDockerDriverGatewayEndpoint() && (await isPodmanDriverGatewayReady())) {
+      console.log("  ✓ Reusing existing Podman-driver gateway");
+      return;
+    }
+    if (drift) {
+      console.log(`  Existing OpenShell Podman gateway is stale (${drift.reason}); restarting...`);
+    }
+    stopPodmanDriverGatewayProcess();
+  }
+
+  const portCheck = await checkGatewayPortAvailable();
+  if (!portCheck.ok) {
+    const ownerPid = portCheck.pid ?? null;
+    if (ownerPid !== null && isPodmanDriverGatewayProcess(ownerPid, gatewayBin)) {
+      const drift = getPodmanDriverGatewayRuntimeDrift(ownerPid, gatewayEnv, gatewayBin);
+      if (!drift && registerDockerDriverGatewayEndpoint() && (await isPodmanDriverGatewayReady())) {
+        rememberPodmanDriverGatewayPid(ownerPid);
+        console.log(`  ✓ Reusing existing Podman-driver gateway process (PID ${ownerPid})`);
+        return;
+      }
+      terminateDockerDriverGatewayProcess(ownerPid);
+      clearPodmanDriverGatewayRuntimeFiles();
+    } else {
+      const detail =
+        `Refusing to start OpenShell Podman gateway: port ${GATEWAY_PORT} is already in use` +
+        (portCheck.process ? ` by ${portCheck.process}` : "") +
+        ". Stop the owning process before retrying.";
+      console.error(`  ${detail}`);
+      if (exitOnFailure) process.exit(1);
+      throw new Error(detail);
+    }
+  }
+
+  fs.mkdirSync(stateDir, { recursive: true, mode: 0o700 });
+  const logPath = path.join(stateDir, "openshell-gateway.log");
+  const logFd = dockerDriverGatewayLaunch.openDockerDriverGatewayLog(logPath, { exitOnFailure });
+  console.log("  Starting OpenShell Podman-driver gateway...");
+  console.log(`  Gateway log: ${logPath}`);
+  const { spawn } = require("child_process") as typeof import("node:child_process");
+  const child = podmanDriverGatewayRuntime.spawnPodmanDriverGateway(spawn, launch, logFd);
+  const childExit = trackChildExit(child);
+  child.unref();
+  const childPid = child.pid ?? 0;
+  if (childPid <= 0) {
+    throw new Error("OpenShell Podman gateway process did not return a pid");
+  }
+  rememberPodmanDriverGatewayPid(childPid);
+
+  const pollCount = envInt("NEMOCLAW_HEALTH_POLL_COUNT", 30);
+  const pollInterval = envInt("NEMOCLAW_HEALTH_POLL_INTERVAL", 2);
+  for (let i = 0; i < pollCount; i += 1) {
+    if (childExit.exited || !isPidAlive(childPid)) {
+      break;
+    }
+    if (!registerDockerDriverGatewayEndpoint()) {
+      if (i < pollCount - 1) sleepSeconds(pollInterval);
+      continue;
+    }
+    if ((await isPodmanDriverGatewayReady()) && !childExit.exited && isPidAlive(childPid)) {
+      console.log("  ✓ Podman-driver gateway is healthy");
+      return;
+    }
+    if (i < pollCount - 1) sleepSeconds(pollInterval);
+  }
+
+  reportPodmanDriverGatewayStartFailure(logPath, childExit, {
+    exitOnFailure,
+    socketPath: podmanRuntime.socketPath,
+  });
+  throw new Error("Podman-driver gateway failed to start");
+}
+
 async function startGateway(
   _gpu: ReturnType<typeof nim.detectGpu>,
   { gpuPassthrough = false }: { gpuPassthrough?: boolean } = {},
@@ -2209,7 +2468,11 @@ const applyOverlayfsAutoFix = overlayfsAutoFix.createOverlayfsAutoFix({
 async function recoverGatewayRuntime() {
   if (isLinuxDockerDriverGatewayEnabled()) {
     try {
-      await startDockerDriverGateway({ exitOnFailure: false });
+      if (isPodmanGatewayRuntimeSelected()) {
+        await startPodmanDriverGateway({ exitOnFailure: false });
+      } else {
+        await startDockerDriverGateway({ exitOnFailure: false });
+      }
       return true;
     } catch {
       return false;
@@ -2279,6 +2542,7 @@ async function recoverGatewayRuntime() {
 const { getSandboxRuntimeRegistryFields, hasSandboxGpuDrift, updateReusedSandboxMetadata } =
   sandboxRegistryMetadata.createSandboxRegistryMetadataHelpers({
     isLinuxDockerDriverGatewayEnabled,
+    resolveGatewayRuntime: gatewayRuntimeSelection.resolveNemoClawGatewayRuntime,
     getInstalledOpenshellVersion,
     runCaptureOpenshell,
   });
@@ -2735,7 +2999,10 @@ async function createSandboxWithBaseImageResolution(
     "openclaw-sandbox.yaml",
   );
   const basePolicyPath = (agent && agentOnboard.getAgentPolicyPath(agent)) || defaultPolicyPath;
-  const dockerDriverGateway = isLinuxDockerDriverGatewayEnabled();
+  const selectedGatewayRuntime = gatewayRuntimeSelection.resolveNemoClawGatewayRuntime();
+  const dockerDriverGateway =
+    selectedGatewayRuntime === "docker" && isLinuxDockerDriverGatewayEnabled();
+  const localDriverGateway = dockerDriverGateway || selectedGatewayRuntime === "podman";
   const {
     activeMessagingChannels,
     initialSandboxPolicy,
@@ -2826,7 +3093,13 @@ async function createSandboxWithBaseImageResolution(
       hermesDashboardState,
       manageDashboard,
       openshellShellCommand,
-      prebuild: { buildCtx, buildId, dockerDriverGateway, origin },
+      prebuild: {
+        buildCtx,
+        buildId,
+        dockerDriverGateway: localDriverGateway,
+        runtime: selectedGatewayRuntime,
+        origin,
+      },
     });
   const dockerGpuCreatePatch = dockerGpuSandboxCreate.createDockerGpuSandboxCreatePatch({
     enabled: useDockerGpuPatch,
@@ -4266,6 +4539,14 @@ async function runOnboard(opts: OnboardOptions = {}): Promise<void> {
       resume,
       canPrompt: !cannotPrompt,
     });
+    const selectedGatewayRuntime = await gatewayRuntimeSelection.selectNemoClawGatewayRuntime({
+      canPrompt: !cannotPrompt,
+      isNonInteractive,
+      note,
+      prompt,
+      selectFromNumberedMenu: selectFromNumberedMenuOrExit,
+    });
+    process.env.NEMOCLAW_GATEWAY_RUNTIME = selectedGatewayRuntime;
     const selectedAgentTransition = await runtimeControlFlow.applySelectedAgentTransition({
       resume,
       session,
@@ -4347,7 +4628,13 @@ async function runOnboard(opts: OnboardOptions = {}): Promise<void> {
         assessHost,
         assertCdiNvidiaGpuSpecPresent: preflightUtils.assertCdiNvidiaGpuSpecPresent,
         rejectUnsupportedContainerRuntime: fatalRuntimePreflight.rejectUnsupportedContainerRuntime,
-        assertDockerBridgeAndContainerDnsHealthy,
+        assertDockerBridgeAndContainerDnsHealthy: (host) => {
+          if (isPodmanGatewayRuntimeSelected()) {
+            console.log("  ✓ Docker bridge/DNS preflight skipped for Podman gateway runtime");
+            return;
+          }
+          assertDockerBridgeAndContainerDnsHealthy(host);
+        },
         resolveSandboxGpuConfig,
         validateSandboxGpuPreflight,
         skippedStepMessage,

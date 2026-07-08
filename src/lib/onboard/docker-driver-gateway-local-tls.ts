@@ -9,7 +9,11 @@ import path from "node:path";
 // See docs/security/openshell-0.0.72-compatibility-review.mdx for the source-of-truth review.
 export const DOCKER_DRIVER_GATEWAY_LOCAL_TLS_DIR_NAME = "tls";
 
-const REQUIRED_SERVER_DNS_SANS = ["host.openshell.internal", "localhost"];
+const REQUIRED_SERVER_DNS_SANS = [
+  "host.openshell.internal",
+  "host.containers.internal",
+  "localhost",
+];
 const REQUIRED_SERVER_IP_SANS = ["127.0.0.1"];
 const CERTIFICATE_VALIDITY_CLOCK_SKEW_MS = 5 * 60 * 1000;
 
@@ -201,6 +205,8 @@ export function ensureDockerDriverGatewayLocalTlsBundle({
       bundle.localTlsDir,
       "--server-san",
       "host.openshell.internal",
+      "--server-san",
+      "host.containers.internal",
       "--server-san",
       "localhost",
       "--server-san",

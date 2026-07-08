@@ -216,9 +216,9 @@
 
   "out_of_scope": [
     {
-      "name": "Podman / other container runtimes",
+      "name": "Rootful Podman / other container runtimes",
       "status": "unsupported",
-      "notes": "Onboard surfaces an explicit unsupported-runtime error for Podman (`src/lib/onboard/fatal-runtime-preflight.ts` prints the rejection; `src/lib/onboard/preflight.ts` flags the unsupported runtime upstream). Only Docker Engine, Docker Desktop, and Colima are supported. See issue #420 (closed)."
+      "notes": "The Podman path is limited to the explicit rootless gateway-runtime POC (`NEMOCLAW_GATEWAY_RUNTIME=podman`). Rootful Podman, containerd, CRI-O, and other local runtimes are unsupported. Docker Engine, Docker Desktop, and Colima remain the tested default paths."
     },
     {
       "name": "Intel Mac (macOS x86_64)",
@@ -315,6 +315,11 @@
       "name": "Local CLI onboard",
       "status": "tested",
       "notes": "Run `$$nemoclaw onboard` on a tested platform with Docker available locally. Primary path."
+    },
+    {
+      "name": "Rootless Podman gateway runtime",
+      "status": "experimental",
+      "notes": "Linux-only opt-in POC. Set `NEMOCLAW_GATEWAY_RUNTIME=podman` and run with rootless Podman, cgroups v2, subordinate UID/GID ranges, and a reachable Podman API socket. Onboarding can apply the package install, user socket, and subordinate ID setup when authorized; cgroups v2 remains a manual host/reboot prerequisite. Docker remains the default runtime. Sandbox GPU passthrough is not part of the Podman POC; use `--no-gpu` or `NEMOCLAW_SANDBOX_GPU=0`."
     },
     {
       "name": "Remote GPU with Brev CLI",

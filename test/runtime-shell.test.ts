@@ -62,6 +62,22 @@ describe("shell runtime helpers", () => {
     fs.rmSync(home, { recursive: true, force: true });
   });
 
+  it("prefers native Linux Docker over a Podman compatibility socket", () => {
+    const podmanSocket = "/run/user/1000/podman/podman.sock";
+    const dockerSocket = "/var/run/docker.sock";
+
+    const result = runShell(
+      `uname() { printf 'Linux\\n'; }; id() { printf '1000\\n'; }; source "${RUNTIME_SH}"; detect_docker_host`,
+      {
+        DOCKER_HOST: "",
+        NEMOCLAW_TEST_SOCKET_PATHS: `${podmanSocket}:${dockerSocket}`,
+      },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout.trim()).toBe(`unix://${dockerSocket}`);
+  });
+
   it("classifies a Docker Desktop DOCKER_HOST correctly", () => {
     const result = runShell(
       `source "${RUNTIME_SH}"; docker_host_runtime "unix:///Users/test/.docker/run/docker.sock"`,

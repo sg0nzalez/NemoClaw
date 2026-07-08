@@ -71,14 +71,14 @@ describe("platform helpers", () => {
       ]);
     });
 
-    it("returns Linux candidates (Podman > native Docker)", () => {
+    it("returns Linux candidates (native Docker > Podman fallback)", () => {
       expect(
         getDockerSocketCandidates({ platform: "linux", home: "/tmp/test-home", uid: 1000 }),
       ).toEqual([
-        "/run/user/1000/podman/podman.sock",
-        "/run/podman/podman.sock",
         "/run/docker.sock",
         "/var/run/docker.sock",
+        "/run/user/1000/podman/podman.sock",
+        "/run/podman/podman.sock",
       ]);
     });
   });
@@ -147,6 +147,27 @@ describe("platform helpers", () => {
           existsSync: () => false,
         }),
       ).toBe(null);
+    });
+
+    it("prefers native Linux Docker over a Podman compatibility socket", () => {
+      const podmanSocket = "/run/user/1000/podman/podman.sock";
+      const dockerSocket = "/var/run/docker.sock";
+      const sockets = new Set([podmanSocket, dockerSocket]);
+      const existsSync = (candidate: string) => sockets.has(candidate);
+
+      expect(
+        detectDockerHost({
+          env: {},
+          platform: "linux",
+          home: "/tmp/test-home",
+          uid: 1000,
+          existsSync,
+        }),
+      ).toEqual({
+        dockerHost: `unix://${dockerSocket}`,
+        source: "socket",
+        socketPath: dockerSocket,
+      });
     });
   });
 

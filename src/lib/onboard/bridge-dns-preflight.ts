@@ -117,6 +117,18 @@ export function printDockerBridgeContainerStartFailure(
       "  Restart the Docker daemon (`sudo systemctl restart docker`, or restart Docker Desktop/Colima)",
     );
     console.error(`  and re-run \`${cliName()} onboard\`.`);
+  } else if (result.reason === "podman_userns_subid_missing") {
+    console.error(
+      "  The selected Docker runtime appears to be backed by Podman/rootless user namespaces.",
+    );
+    console.error(
+      "  The Docker gateway runtime requires Docker Engine, Docker Desktop, or Colima.",
+    );
+    console.error(
+      "  Choose Podman in the gateway runtime prompt, or set NEMOCLAW_GATEWAY_RUNTIME=podman,",
+    );
+    console.error("  so onboarding can apply the Podman subordinate UID/GID setup.");
+    console.error("  To use Docker instead, switch your docker CLI/socket to a real Docker daemon.");
   } else if (result.reason === "image_pull_failed") {
     console.error("  Docker could not pull the busybox test image needed for the preflight probe.");
     console.error("  Ensure the Docker daemon can reach its registry, then retry onboarding.");
@@ -159,7 +171,8 @@ export function assertDockerBridgeAndContainerDnsHealthy(
     bridgeStart.reason === "veth_unsupported" ||
     bridgeStart.reason === "timeout" ||
     bridgeStart.reason === "killed" ||
-    bridgeStart.reason === "docker_daemon_unreachable"
+    bridgeStart.reason === "docker_daemon_unreachable" ||
+    bridgeStart.reason === "podman_userns_subid_missing"
   ) {
     printDockerBridgeContainerStartFailure(bridgeStart, host);
     exitProcess(1);
@@ -239,6 +252,20 @@ export function assertDockerBridgeAndContainerDnsHealthy(
       {
         ok: false,
         reason: "docker_daemon_unreachable",
+        details: dns.details,
+        timedOut: dns.timedOut,
+        exitCode: dns.exitCode,
+        signal: dns.signal,
+      },
+      host,
+    );
+    exitProcess(1);
+  }
+  if (dns.reason === "podman_userns_subid_missing") {
+    printDockerBridgeContainerStartFailure(
+      {
+        ok: false,
+        reason: "podman_userns_subid_missing",
         details: dns.details,
         timedOut: dns.timedOut,
         exitCode: dns.exitCode,

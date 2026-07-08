@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -15,7 +16,8 @@ import { buildSubprocessEnv } from "../subprocess-env";
 
 const TRUTHY_FLAG_VALUES = new Set(["1", "true", "yes", "on"]);
 const FALSY_FLAG_VALUES = new Set(["0", "false", "no", "off"]);
-const LOCAL_IMAGE_REPO = LOCAL_SANDBOX_IMAGE_REPO;
+const DOCKER_LOCAL_IMAGE_REPO = LOCAL_SANDBOX_IMAGE_REPO;
+const PODMAN_LOCAL_IMAGE_REPO = "localhost/nemoclaw-sandbox-local";
 const DOCKER_ENV_NAMES = [
   "DOCKER_API_VERSION",
   "DOCKER_CERT_PATH",
@@ -24,6 +26,8 @@ const DOCKER_ENV_NAMES = [
   "DOCKER_TLS_VERIFY",
 ] as const;
 
+export type SandboxPrebuildRuntime = "docker" | "podman";
+
 export interface SandboxPrebuildInput {
   buildCtx: string;
   buildId: string;
@@ -31,6 +35,7 @@ export interface SandboxPrebuildInput {
   sandboxName: string;
   dockerDriverGateway: boolean;
   origin: SandboxBuildContextOrigin;
+  runtime?: SandboxPrebuildRuntime;
   env?: NodeJS.ProcessEnv;
   buildImage?: (
     args: readonly string[],
@@ -89,10 +94,20 @@ function resolveTrustedStagedBuildContext(buildCtx: string): TrustedStagedBuildC
 
 /** Restrict the host Docker build to environment values used by Docker itself. */
 export function dockerBuildSubprocessEnv(): Record<string, string> {
+  return containerBuildSubprocessEnv("docker");
+}
+
+export function containerBuildSubprocessEnv(
+  runtime: SandboxPrebuildRuntime,
+): Record<string, string> {
   const env = buildSubprocessEnv();
-  for (const key of DOCKER_ENV_NAMES) {
-    const value = process.env[key];
-    if (value !== undefined) env[key] = value;
+  if (runtime === "docker") {
+    for (const key of DOCKER_ENV_NAMES) {
+      const value = process.env[key];
+      if (value !== undefined) env[key] = value;
+    }
+  } else {
+    delete env.DOCKER_HOST;
   }
   for (const key of Object.keys(env)) {
     if (
@@ -107,6 +122,16 @@ export function dockerBuildSubprocessEnv(): Record<string, string> {
     }
   }
   return env;
+}
+
+function containerBuildArgs(
+  runtime: SandboxPrebuildRuntime,
+  imageRef: string,
+  dockerfile: string,
+  buildCtx: string,
+): string[] {
+  const progressArgs = runtime === "docker" ? ["--progress=plain"] : [];
+  return ["build", ...progressArgs, "-t", imageRef, "-f", dockerfile, buildCtx];
 }
 
 export function resolveSandboxPrebuildEnabled(
@@ -125,7 +150,11 @@ export function resolveSandboxPrebuildEnabled(
   return !env.VITEST && env.NODE_ENV !== "test";
 }
 
-export function sandboxLocalImageRef(sandboxName: string, buildId: string): string {
+export function sandboxLocalImageRef(
+  sandboxName: string,
+  buildId: string,
+  runtime: SandboxPrebuildRuntime = "docker",
+): string {
   const sanitize = (value: string) =>
     value
       .toLowerCase()
@@ -133,7 +162,8 @@ export function sandboxLocalImageRef(sandboxName: string, buildId: string): stri
       .replace(/^[-.]+/, "");
   const buildPart = sanitize(buildId).slice(-32) || "build";
   const namePart = sanitize(sandboxName).slice(0, 127 - buildPart.length) || "sandbox";
-  return `${LOCAL_IMAGE_REPO}:${namePart}-${buildPart}`;
+  const repo = runtime === "podman" ? PODMAN_LOCAL_IMAGE_REPO : DOCKER_LOCAL_IMAGE_REPO;
+  return `${repo}:${namePart}-${buildPart}`;
 }
 
 /**
@@ -149,6 +179,7 @@ export async function prebuildSandboxImageIfEligible(
   const createArgs = [...input.createArgs];
   const env = input.env ?? process.env;
   const log = input.log ?? console.log;
+  const runtime = input.runtime ?? "docker";
   if (!resolveSandboxPrebuildEnabled(env, input.dockerDriverGateway)) {
     return { createArgs, imageRef: null };
   }
@@ -184,31 +215,33 @@ export async function prebuildSandboxImageIfEligible(
     return { createArgs, imageRef: null };
   }
 
-  const imageRef = sandboxLocalImageRef(input.sandboxName, input.buildId);
+  const imageRef = sandboxLocalImageRef(input.sandboxName, input.buildId, runtime);
   const buildImage =
     input.buildImage ??
     ((args, options) =>
       new Promise<number | null>((resolve, reject) => {
-        const child = dockerSpawn(args, { ...options, shell: false });
+        const child =
+          runtime === "docker"
+            ? dockerSpawn(args, { ...options, shell: false })
+            : spawn("podman", [...args], { ...options, shell: false });
         child.once("error", reject);
         child.once("close", resolve);
       }));
-  log("  Building sandbox image with BuildKit (skips the slower in-gateway builder)...");
+  log(
+    runtime === "podman"
+      ? "  Building sandbox image with Podman (skips the incompatible Docker image store)..."
+      : "  Building sandbox image with BuildKit (skips the slower in-gateway builder)...",
+  );
 
   let status: number | null;
   try {
     status = await buildImage(
-      [
-        "build",
-        "--progress=plain",
-        "-t",
-        imageRef,
-        "-f",
-        trustedContext.dockerfile,
-        trustedContext.buildCtx,
-      ],
+      containerBuildArgs(runtime, imageRef, trustedContext.dockerfile, trustedContext.buildCtx),
       {
-        env: { ...dockerBuildSubprocessEnv(), DOCKER_BUILDKIT: "1" },
+        env:
+          runtime === "docker"
+            ? { ...containerBuildSubprocessEnv(runtime), DOCKER_BUILDKIT: "1" }
+            : containerBuildSubprocessEnv(runtime),
         stdio: "inherit",
       },
     );

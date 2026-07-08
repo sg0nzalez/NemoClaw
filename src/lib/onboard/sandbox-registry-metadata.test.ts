@@ -29,13 +29,17 @@ function restorePlatform(): void {
 /**
  * Loads the compiled metadata helpers after each test has configured process state.
  */
-async function makeHelpers(opts: { dockerDriverEnabled: boolean }) {
+async function makeHelpers(opts: {
+  dockerDriverEnabled: boolean;
+  gatewayRuntime?: "docker" | "podman";
+}) {
   // Import the compiled module: sandbox-registry-metadata.ts pulls in state/registry,
   // which transitively requires the JS-only `./platform` helper that vitest cannot
   // resolve from TS source. Same pattern as `vm-dns-monkeypatch.test.ts`.
   const metadata = await import("./sandbox-registry-metadata");
   return metadata.createSandboxRegistryMetadataHelpers({
     isLinuxDockerDriverGatewayEnabled: () => opts.dockerDriverEnabled,
+    resolveGatewayRuntime: () => opts.gatewayRuntime ?? "docker",
     getInstalledOpenshellVersion: () => "0.0.42",
     runCaptureOpenshell: () => null,
   });
@@ -148,6 +152,15 @@ describe("getSandboxRuntimeRegistryFields openshellDriver", () => {
     const fields = helpers.getSandboxRuntimeRegistryFields(GPU_OFF);
 
     expect(fields.openshellDriver).toBe("docker");
+  });
+
+  it("records Podman when the Podman gateway runtime is selected", async () => {
+    setPlatform("linux");
+    const helpers = await makeHelpers({ dockerDriverEnabled: true, gatewayRuntime: "podman" });
+
+    const fields = helpers.getSandboxRuntimeRegistryFields(GPU_OFF);
+
+    expect(fields.openshellDriver).toBe("podman");
   });
 
   it("records Kubernetes for legacy Linux sandboxes when the Docker-driver gateway is disabled", async () => {
