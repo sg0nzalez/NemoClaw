@@ -7,6 +7,7 @@
     "src/lib/onboard/preflight.test.ts": 1904,
     "test/generate-openclaw-config.test.ts": 1941,
     "test/install-preflight.test.ts": 3934,
+    "test/langchain-deepagents-code-image.test.ts": 1501,
     "test/nemoclaw-start.test.ts": 4826,
     "test/onboard-messaging.test.ts": 2049,
     "test/onboard-selection.test.ts": 4774,
