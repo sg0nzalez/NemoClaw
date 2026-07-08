@@ -189,10 +189,7 @@ describe("sandbox status inference.local route health (#6192)", () => {
     ]);
   });
 
-  it.each([
-    false,
-    true,
-  ])("fails closed when the in-sandbox route probe is unavailable (throws=%s) (#6192)", async (routeProbeThrows) => {
+  it("fails closed when the in-sandbox route probe returns no trusted result (#6192)", async () => {
     const deps = snapshotDeps({
       providerHealth: {
         ok: true,
@@ -202,7 +199,6 @@ describe("sandbox status inference.local route health (#6192)", () => {
         detail: "upstream reachable",
       },
       routeHealth: null,
-      routeProbeThrows,
     });
 
     const snapshot = await collectSandboxStatusSnapshot("alpha", { deps });
@@ -212,15 +208,34 @@ describe("sandbox status inference.local route health (#6192)", () => {
       probed: false,
       endpoint: "https://inference.local/v1/models",
     });
-    if (routeProbeThrows) {
-      expect(deps.reportInferenceProbeError).toHaveBeenCalledWith(
-        expect.stringContaining("openshell unavailable"),
-      );
-      expect(deps.reportInferenceProbeError).not.toHaveBeenCalledWith(
-        expect.stringContaining("super-secret"),
-      );
-    } else {
-      expect(deps.reportInferenceProbeError).not.toHaveBeenCalled();
-    }
+    expect(deps.reportInferenceProbeError).not.toHaveBeenCalled();
+  });
+
+  it("fails closed and redacts a thrown in-sandbox route probe error (#6192)", async () => {
+    const deps = snapshotDeps({
+      providerHealth: {
+        ok: true,
+        probed: true,
+        providerLabel: "NVIDIA Endpoints",
+        endpoint: "https://integrate.api.nvidia.com/v1/models",
+        detail: "upstream reachable",
+      },
+      routeHealth: null,
+      routeProbeThrows: true,
+    });
+
+    const snapshot = await collectSandboxStatusSnapshot("alpha", { deps });
+
+    expect(snapshot.inferenceHealth).toMatchObject({
+      ok: false,
+      probed: false,
+      endpoint: "https://inference.local/v1/models",
+    });
+    expect(deps.reportInferenceProbeError).toHaveBeenCalledWith(
+      expect.stringContaining("openshell unavailable"),
+    );
+    expect(deps.reportInferenceProbeError).not.toHaveBeenCalledWith(
+      expect.stringContaining("super-secret"),
+    );
   });
 });
