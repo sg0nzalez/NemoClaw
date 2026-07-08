@@ -1,0 +1,101 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+title: "Candidate Surface Stability and Security"
+sidebar-title: "Candidate Surface Stability and Security"
+description: "Classifies candidate NemoClaw extension surfaces by stability, security boundary, and readiness gates before any public SDK commitment."
+description-agent: "Use this reference when evaluating future NemoClaw extension surfaces, public-SDK readiness, and issue classification for versioning, compatibility, migration, isolation, provenance, secrets, policy, rollback, docs, and support gates."
+keywords: ["nemoclaw extension surfaces", "nemoclaw sdk readiness", "nemoclaw stability matrix", "nemoclaw security matrix"]
+content:
+  type: "reference"
+---
+
+This reference classifies candidate NemoClaw extension surfaces by stability, security boundary, and readiness gates.
+Use it to decide whether a proposed seam can stay internal, ship as a narrow managed feature, or begin the evidence-gathering path toward a future public SDK.
+
+NemoClaw does not offer a public `NemoClaw plugin SDK` today.
+The phrase is reserved until every readiness gate on this page is satisfied and a later decision explicitly publishes a supported SDK surface.
+Current work can define internal seams or managed packages without creating a package, registry, command, or compatibility commitment for arbitrary third-party code.
+
+## Stability and Security Levels
+
+Each candidate surface carries one stability level and one execution class.
+The stability level describes the commitment NemoClaw makes today.
+The execution class describes where logic runs and which trust controls apply.
+
+| Level | Meaning |
+|---|---|
+| Internal | Maintainers can change the surface at any time. No public compatibility promise exists. |
+| Managed feature | NemoClaw exposes a constrained user workflow, but users do not supply arbitrary NemoClaw-executed code. |
+| Candidate public seam | The surface may become public after it has multiple built-in consumers and passes every readiness gate. |
+| Public SDK | Not offered today. Requires an explicit later decision, published contracts, versioning, compatibility tests, support ownership, and security controls. |
+
+| Execution class | Meaning |
+|---|---|
+| Data-only | Users or maintainers provide declarative data, such as manifests, policy presets, configuration, or metadata. |
+| Managed executable | NemoClaw installs or launches a known component under a controlled contract and sandbox boundary. |
+| Arbitrary executable | Third-party code runs through a NemoClaw-defined extension point. This is not allowed for public use today. |
+
+## Candidate Surface Matrix
+
+The following matrix keeps current capabilities separate from possible future SDK surfaces.
+It covers versioning, compatibility, migration, isolation, provenance, secrets, policy, rollback, documentation, and support through the readiness category columns and the detailed gates below.
+
+| Candidate surface | Stability level today | Execution class | Versioning and compatibility posture | Migration and rollback posture | Isolation and secret posture | Provenance, policy, docs, and support posture | Public-SDK readiness gate |
+|---|---|---|---|---|---|---|---|
+| Built-in agent lifecycle integration | Internal | Managed executable | Agent integration files and generated config can change with the NemoClaw release. No external contract is promised. | Rebuild, snapshot, backup, and restore flows must preserve supported state before this becomes public. | Runs inside the selected OpenShell sandbox. Provider credentials stay on the host and route through `inference.local`. | Maintainers own code review, policy presets, and user docs for built-in agents. | At least two substantially different built-in consumers must exercise the same seam with compatibility tests before stabilization. |
+| Agent-scoped compatibility manifests | Managed feature | Data-only | Manifest schemas can evolve with the repo unless a versioned schema and compatibility test lane are published. | Schema migrations must be reversible or have documented upgrade and downgrade handling before public use. | Manifests must not carry secrets. They declare compatibility data consumed by host-side setup. | Maintainers review provenance and docs. Policy effects must be explicit and testable. | Publish schema versions, fixtures, validation errors, deprecation rules, and ownership before accepting third-party manifests. |
+| Network policy presets | Managed feature | Data-only | Preset YAML format is repo-owned and versioned with NemoClaw, not a public SDK contract. | Preset removal or rename needs migration guidance and rollback to a deny-by-default baseline. | Presets widen sandbox egress only through OpenShell policy enforcement. They must not include credentials. | Presets require endpoint provenance, policy rationale, docs, and support owner. | Add schema validation, compatibility tests, review criteria, and safe removal semantics before external preset contribution becomes supported. |
+| Messaging channel manifests | Managed feature | Data-only with managed runtime effects | Channel manifests describe supported agents and setup metadata, but public compatibility is not promised until the manifest contract is versioned. | Channel removal must leave credentials, policies, and agent config in a known state. | Credentials remain host-managed or gateway-managed. Runtime access remains policy-gated. | Docs must distinguish NemoClaw channel setup from agent-native plugins and packages. | Require multi-agent fixture coverage, migration tests, credential redaction tests, and named support ownership. |
+| Managed agent package CLI | Managed feature candidate | Managed executable | A narrow CLI can install known packages without implying arbitrary NemoClaw extension compatibility. | Install, rebuild, reconcile, remove, and recovery paths need deterministic tests before promotion. | Package behavior runs in the sandbox or agent-owned runtime boundary, not with host credentials. | Package source, signatures or checksums, policy additions, docs, and support boundaries must be recorded. | Keep scope constrained until versioned package metadata, provenance, policy review, rollback, and support gates pass. |
+| OpenClaw, Hermes, and Deep Agents Code native plugins or packages | External agent-native surface | Managed executable or agent-defined executable | Compatibility is owned by the agent runtime, not by NemoClaw, unless NemoClaw wraps a specific managed workflow. | Migration and rollback follow agent-native semantics unless NemoClaw adds a managed lifecycle command. | Execution occurs inside the agent or sandbox boundary. NemoClaw must not imply host-trusted execution. | Docs and CLI naming must identify the owning agent runtime and avoid calling these a NemoClaw plugin SDK. | A future NemoClaw SDK decision must not depend on agent-native plugin compatibility unless NemoClaw defines and tests a separate contract. |
+| Arbitrary third-party NemoClaw executable extension | Reserved | Arbitrary executable | No public compatibility, versioning, or registry commitment exists. | No supported migration or rollback contract exists. | Not allowed as a public surface today. It would require sandbox isolation, least privilege, and fail-closed recovery. | Would require signed provenance, policy review, no secret exposure, docs, support owner, and abuse handling. | Blocked until every readiness gate passes and a later decision explicitly allows this execution class. |
+
+## Public-SDK Readiness Gates
+
+A candidate public seam cannot move beyond candidate status until every category below has concrete evidence.
+These gates define what would be required without committing NemoClaw to publish an SDK.
+
+| Category | Gate for any future public SDK |
+|---|---|
+| Versioning | Publish a semantic versioning policy for the schema or API, including what counts as breaking, feature, and patch changes. |
+| Compatibility | Maintain compatibility fixtures for supported versions and run them in CI for every affected change. |
+| Migration | Provide tested upgrade, downgrade, and deprecation behavior, including clear errors for unsupported versions. |
+| Isolation | Define where extension logic runs, which privileges it has, and how failures are contained without breaking sandbox lifecycle operations. |
+| Provenance | Require reviewable source, signed artifacts or checksums where artifacts are installed, and a maintainer-owned trust decision before execution. |
+| Secrets | Prohibit secrets in manifests and packages, keep provider credentials outside the sandbox, and test redaction for logs, errors, and generated config. |
+| Policy | Make every egress or filesystem policy contribution explicit, deny-by-default, reviewable, and reversible. |
+| Rollback | Test install, reconcile, remove, rebuild, backup, restore, and failure recovery paths for every supported agent and surface version. |
+| Documentation | Publish user docs, contributor docs, support boundaries, naming rules, troubleshooting steps, and examples that do not imply unsupported SDK breadth. |
+| Support | Name the owning team or maintainers, support window, security response path, issue labels, and escalation criteria. |
+
+A future public SDK also needs at least two substantially different built-in consumers using the same seam before stabilization.
+Those consumers must exercise the same versioning, migration, isolation, policy, rollback, documentation, and support contracts that external users would receive.
+
+## Issue Classification
+
+This classification separates evidence available in this checkout from inference used to map each issue to the matrix.
+Issue text, repository files, and docs remain non-authoritative until maintainers make the final decision.
+
+| Issue | Classification | Evidence | Inference and boundary |
+|---|---|---|---|
+| [#5998](https://github.com/NVIDIA/NemoClaw/issues/5998) | Managed agent package CLI candidate | Issue #6229 asks whether #5998 can ship a narrow managed-package CLI without implying arbitrary third-party NemoClaw code execution, and says #5998 owns scoped internal work. | Treat as a managed feature candidate, not a public SDK. It should use the managed agent package CLI row and must not open arbitrary NemoClaw executable extension support. |
+| [#6097](https://github.com/NVIDIA/NemoClaw/issues/6097) | Scoped internal or agent-native plugin work | Issue #6229 says plugin terminology is reserved for agent-native plugins or scoped internal work already owned by #5998 and #6097. No local docs in this checkout add a broader #6097 contract. | Keep ownership with the scoped internal or agent-native surface. Do not use #6097 as evidence that a public NemoClaw plugin SDK exists. |
+| [#3915](https://github.com/NVIDIA/NemoClaw/issues/3915) | Observability and policy-adjacent managed feature | `docs/reference/enterprise-readiness.mdx` tracks broader observability adapter and forwarding work under #3915, while stating that current Deep Agents Code traces require an operator-managed backend and are not managed SIEM integration. Tests also reference #3915 for observability policy preset and custom preset ownership behavior. | Classify against network policy presets, secrets, support, and managed feature gates. Do not infer a public SDK because current evidence is observability and policy behavior, not a general extension seam. |
+| [#6201](https://github.com/NVIDIA/NemoClaw/issues/6201) | Unclassified candidate pending issue evidence | Issue #6229 requires classification of #6201, but this checkout has no docs or source references to #6201 beyond the parent issue list. | Keep out of overlapping ownership until the issue body or maintainer context identifies its surface. Apply this matrix once evidence identifies whether it is data-only, managed executable, or reserved arbitrary executable work. |
+| [#6207](https://github.com/NVIDIA/NemoClaw/issues/6207) | Unclassified candidate pending issue evidence | Issue #6229 requires classification of #6207, but this checkout has no docs or source references to #6207 beyond the parent issue list. | Keep out of overlapping ownership until the issue body or maintainer context identifies its surface. Apply this matrix once evidence identifies whether it is data-only, managed executable, or reserved arbitrary executable work. |
+
+## Naming Guidance
+
+Use NemoClaw terminology for NemoClaw-owned lifecycle and managed-package operations.
+Use OpenClaw, Hermes, or Deep Agents Code terminology for agent-native plugins and packages.
+Do not describe a managed package, policy preset, channel manifest, or compatibility manifest as a `NemoClaw plugin SDK`.
+
+CLI and docs should name the owner of each operation in the command, title, or surrounding prose.
+For example, a NemoClaw-managed package command should say it installs a NemoClaw-managed agent package, while OpenClaw plugin installation docs should say OpenClaw owns that plugin model.
+
+## Decision Boundary
+
+This page defines readiness gates only.
+It does not implement a user-facing SDK or command, accept arbitrary external modules, publish packages, define a registry, or commit NemoClaw to compatibility for any candidate surface.
+Any cross-link from architecture or taxonomy references should wait for the sibling architecture decision to land and should point here only after maintainers approve the terminology alignment.
