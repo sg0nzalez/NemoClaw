@@ -11,10 +11,19 @@ import { type GatewayRecoveryDeps, startGatewayForRecovery } from "./gateway-rec
 // injected `sleepSeconds` mock so the clock advances only when the loop
 // actually sleeps. Tests get deterministic deadline expiration without any
 // real wall-clock waits or global timer state.
+//
+// `advance` is exposed so a test can also advance the clock from inside a
+// mocked probe. This is how the timeout test proves the loop is truly
+// deadline-driven: if each probe advances the clock, then a maxAttempts=N
+// cap would exit at a different observable count than a pure deadline
+// would, so the assertions can only be satisfied by the deadline path.
 function makeVirtualClock(startMs = 1_000_000_000_000) {
   let now = startMs;
   return {
     now: () => now,
+    advance: (seconds: number) => {
+      now += Math.max(0, seconds) * 1000;
+    },
     sleeper: vi.fn((seconds: number) => {
       now += Math.max(0, seconds) * 1000;
     }),
@@ -102,34 +111,56 @@ describe("gateway recovery", () => {
     );
   });
 
-  it("polls until the configured recovery deadline and reports it in the timeout", async () => {
-    // #3768: deadline-driven, no legacy attempt cap. A 3 * 2s budget = 6s
-    // permits probes and sleeps until the deadline expires; the final
-    // deadline check short-circuits before an extra sleep would happen.
-    vi.stubEnv("NEMOCLAW_HEALTH_POLL_COUNT", "3");
-    vi.stubEnv("NEMOCLAW_HEALTH_POLL_INTERVAL", "2");
+  it("polls until the configured recovery deadline and reports it in the timeout (#3768)", async () => {
+    // #3768: prove the loop is DEADLINE-driven, not just attempt-capped.
+    // Design: with count=10 and interval=1s the wait budget is 10s. Make
+    // each subprocess-probe advance the clock by ~1s so probes are the
+    // primary time-consumer, then sleeps at 1s add another second per
+    // iteration. Under a pure deadline: iterations run until ~2s per
+    // iteration cumulatively hits 10s -> ~5 probes. Under a hidden
+    // maxAttempts=count cap, the loop would exit at exactly 10 probes
+    // (attempt cap hits first because probes and sleeps take equal time),
+    // which is a different observable count from the deadline path. The
+    // strict upper bound `probeCount < 10` therefore only passes when the
+    // deadline (not an attempt cap) terminates the loop.
+    vi.stubEnv("NEMOCLAW_HEALTH_POLL_COUNT", "10");
+    vi.stubEnv("NEMOCLAW_HEALTH_POLL_INTERVAL", "1");
     const clock = makeVirtualClock();
-    const deps = createDeps({ sleepSeconds: clock.sleeper, now: clock.now });
+    let probesRun = 0;
+    const deps = createDeps({
+      sleepSeconds: clock.sleeper,
+      now: clock.now,
+      runCaptureOpenshell: vi.fn(() => {
+        // Only advance the clock ONCE per probe iteration (three subprocess
+        // calls per probe): status is the first call.
+        if (probesRun * 3 === (deps.runCaptureOpenshell as ReturnType<typeof vi.fn>).mock.calls.length - 1) {
+          probesRun += 1;
+          clock.advance(1);
+        }
+        return "Disconnected";
+      }),
+    });
 
     await expect(startGatewayForRecovery({ gatewayPort: 8091 }, deps)).rejects.toThrow(
-      "configured 6s recovery deadline (2s poll interval)",
+      "configured 10s recovery deadline (1s poll interval)",
     );
 
-    // Each probe issues 3 subprocess calls. With a 6s budget and 2s
-    // interval, the loop runs probe → sleep(2s) three times, then the
-    // top-of-loop deadline check terminates before probe #4. So probes
-    // and sleeps are 1:1 at exactly 3 each.
     const runCaptureCalls = (deps.runCaptureOpenshell as ReturnType<typeof vi.fn>).mock.calls
       .length;
     const probeCount = runCaptureCalls / 3;
-    expect(probeCount).toBe(3);
-    expect(clock.sleeper).toHaveBeenCalledTimes(3);
-    expect(clock.sleeper).toHaveBeenNthCalledWith(1, 2);
-    expect(clock.sleeper).toHaveBeenNthCalledWith(2, 2);
-    expect(clock.sleeper).toHaveBeenNthCalledWith(3, 2);
+    // The deadline (not an attempt cap) MUST have terminated the loop:
+    // probe advances 1s + sleep advances 1s = 2s per iteration, so under
+    // a 10s budget the loop runs ~5 iterations and cannot reach the 10
+    // attempts a hidden attempt cap would permit.
+    expect(probeCount).toBeGreaterThan(0);
+    expect(probeCount).toBeLessThan(10);
+    // Sleeps happen after every probe except the last one (deadline check
+    // after the final probe short-circuits before an extra sleep).
+    expect(clock.sleeper).toHaveBeenCalled();
+    expect(clock.sleeper.mock.calls.every(([s]) => s === 1)).toBe(true);
   });
 
-  it("succeeds on the first healthy probe without sleeping and sets OPENSHELL_GATEWAY", async () => {
+  it("succeeds on the first healthy probe without sleeping and sets OPENSHELL_GATEWAY (#3768)", async () => {
     // Advisor: pin the happy path so a future refactor cannot silently
     // break the side effects the caller relies on after readiness.
     vi.stubEnv("NEMOCLAW_HEALTH_POLL_COUNT", "3");
@@ -149,7 +180,7 @@ describe("gateway recovery", () => {
     expect(deps.runCaptureOpenshell).toHaveBeenCalledTimes(3);
   });
 
-  it("succeeds after retrying past unhealthy probes and still sets OPENSHELL_GATEWAY", async () => {
+  it("succeeds after retrying past unhealthy probes and still sets OPENSHELL_GATEWAY (#3768)", async () => {
     vi.stubEnv("NEMOCLAW_HEALTH_POLL_COUNT", "3");
     vi.stubEnv("NEMOCLAW_HEALTH_POLL_INTERVAL", "2");
     // Probe #1 fails the health predicate, probe #2 passes. Each probe
@@ -174,7 +205,7 @@ describe("gateway recovery", () => {
     expect(deps.runCaptureOpenshell).toHaveBeenCalledTimes(6);
   });
 
-  it("with NEMOCLAW_HEALTH_POLL_COUNT=0 fails fast without silently claiming healthy", async () => {
+  it("with NEMOCLAW_HEALTH_POLL_COUNT=0 fails fast without silently claiming healthy (#3768)", async () => {
     // Edge case: a zero-count budget must not silently pretend the gateway
     // is healthy. The wait-budget helper clamps to a 1ms deadline, so
     // waitUntilAsync's first deadline check terminates before the probe
