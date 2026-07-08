@@ -126,17 +126,20 @@ describe("gateway recovery", () => {
     vi.stubEnv("NEMOCLAW_HEALTH_POLL_COUNT", "10");
     vi.stubEnv("NEMOCLAW_HEALTH_POLL_INTERVAL", "1");
     const clock = makeVirtualClock();
-    let probesRun = 0;
+    // Only advance the clock ONCE per probe iteration (three subprocess
+    // calls per probe): status is the first call, gateway-info-g the
+    // second, gateway-info the third. Use a modulo counter so the test
+    // body stays linear (per repo growth guardrail on if statements in
+    // changed test files).
+    let mockCallIndex = 0;
+    const advanceOnStatusCall = (index: number) =>
+      index % 3 === 0 ? clock.advance(1) : undefined;
     const deps = createDeps({
       sleepSeconds: clock.sleeper,
       now: clock.now,
       runCaptureOpenshell: vi.fn(() => {
-        // Only advance the clock ONCE per probe iteration (three subprocess
-        // calls per probe): status is the first call.
-        if (probesRun * 3 === (deps.runCaptureOpenshell as ReturnType<typeof vi.fn>).mock.calls.length - 1) {
-          probesRun += 1;
-          clock.advance(1);
-        }
+        advanceOnStatusCall(mockCallIndex);
+        mockCallIndex += 1;
         return "Disconnected";
       }),
     });
