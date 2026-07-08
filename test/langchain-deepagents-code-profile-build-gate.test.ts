@@ -79,9 +79,10 @@ describe("LangChain Deep Agents Code profile build gate", () => {
       "BASE_IMAGE",
     ]);
     const script = fs.readFileSync(checkPath, "utf8");
-    expect(script.indexOf("plain-progress build refuses unreviewed ARG")).toBeLessThan(
-      script.indexOf("docker build"),
-    );
+    const argGuard = "plain-progress build refuses unreviewed ARG";
+    expect(script).toContain(argGuard);
+    expect(script).toContain("docker build");
+    expect(script.indexOf(argGuard)).toBeLessThan(script.indexOf("docker build"));
   });
 
   it("rejects a production build that unexpectedly succeeds", () => {
