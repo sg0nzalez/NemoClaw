@@ -201,8 +201,16 @@ function buildAndInstallPluginWheel(version: string): string {
   fs.mkdirSync(wheelDir);
   const projectPath = path.join(projectRoot, "pyproject.toml");
   const project = fs.readFileSync(projectPath, "utf8");
-  const versionedProject = project.replace('version = "0.1.0"', `version = "${version}"`);
+  // The GitHub runner's system setuptools predates PEP 639 string licenses.
+  // Spell the same license as its equivalent PEP 621 table so this offline,
+  // no-isolation wheel build remains portable without changing package code,
+  // entry-point metadata, or the version gate under test.
+  const versionedProject = project
+    .replace('version = "0.1.0"', `version = "${version}"`)
+    .replace('license = "Apache-2.0"', 'license = { text = "Apache-2.0" }');
   expect(versionedProject).not.toBe(project);
+  expect(versionedProject).toContain(`version = "${version}"`);
+  expect(versionedProject).toContain('license = { text = "Apache-2.0" }');
   fs.writeFileSync(projectPath, versionedProject, "utf8");
   const pipEnv = {
     ...process.env,
