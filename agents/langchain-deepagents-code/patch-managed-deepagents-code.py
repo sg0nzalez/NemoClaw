@@ -4,17 +4,20 @@
 
 # Source-of-truth review for this pinned third-party patch boundary:
 # invalidState: upstream entrypoints can independently enable credential stores,
-# ambient MCP discovery, update/install flows, first-run model selection, or
-# child-process config paths that bypass NemoClaw's managed inference, policy,
-# and integrity-bound MCP boundaries.
-# sourceBoundary: deepagents-code owns those Python entrypoints; NemoClaw owns the
-# sandbox image posture and therefore validates every patched symbol before build.
+# ambient MCP discovery, update/install flows, first-run model selection,
+# optional LangGraph CLI analytics, or child-process config paths that bypass
+# NemoClaw's managed inference, policy, and integrity-bound MCP boundaries.
+# sourceBoundary: deepagents-code owns those Python entrypoints and child env;
+# langgraph-cli owns the analytics opt-out; NemoClaw owns the sandbox image
+# posture and therefore validates every patched symbol before build.
 # whyNotSourceFix: upstream 0.1.34 has no single managed-runtime hook that can
 # enforce these constraints across CLI, UI, headless, server, and restart paths.
 # regressionTest: the exact version plus AST symbol/method gates fail the image
-# build on drift, and direct-module tests execute the patched start/restart paths.
+# build on drift, while hostile analytics values exercise patched entrypoints and
+# the server start/restart override paths.
 # removalCondition: replace these sites only when a pinned upstream release offers
-# equivalent discovery-free, credential-free, update-disabled managed MCP hooks.
+# equivalent discovery-free, credential-free, update-disabled, analytics-disabled
+# managed hooks before every LangGraph process starts.
 
 from __future__ import annotations
 
@@ -40,6 +43,7 @@ os.environ["HOME"] = "/sandbox"
 os.environ["DEEPAGENTS_CODE_AUTO_UPDATE"] = "0"
 os.environ["DEEPAGENTS_CODE_NO_UPDATE_CHECK"] = "1"
 os.environ["LANGGRAPH_NO_VERSION_CHECK"] = "true"
+os.environ["LANGGRAPH_CLI_NO_ANALYTICS"] = "1"
 os.environ["OTEL_ENABLED"] = "false"
 os.environ["DEEPAGENTS_CODE_LANGSMITH_TRACING"] = "false"
 os.environ["DEEPAGENTS_CODE_LANGSMITH_TRACING_V2"] = "false"
@@ -64,6 +68,7 @@ MAIN_PATCH = '''    # NemoClaw-managed Deep Agents Code hardening v2.
     os.environ["DEEPAGENTS_CODE_AUTO_UPDATE"] = "0"
     os.environ["DEEPAGENTS_CODE_NO_UPDATE_CHECK"] = "1"
     os.environ["LANGGRAPH_NO_VERSION_CHECK"] = "true"
+    os.environ["LANGGRAPH_CLI_NO_ANALYTICS"] = "1"
     os.environ["OTEL_ENABLED"] = "false"
     os.environ["DEEPAGENTS_CODE_LANGSMITH_TRACING"] = "false"
     os.environ["DEEPAGENTS_CODE_LANGSMITH_TRACING_V2"] = "false"
@@ -677,9 +682,10 @@ _nemoclaw_original_build_server_env = _build_server_env
 
 
 def _build_server_env() -> dict[str, str]:
-    """Keep the LangGraph API subprocess from starting a PyPI update thread."""
+    """Keep the LangGraph subprocess from starting update or analytics threads."""
     env = _nemoclaw_original_build_server_env()
     env["LANGGRAPH_NO_VERSION_CHECK"] = "true"
+    env["LANGGRAPH_CLI_NO_ANALYTICS"] = "1"
     env["OTEL_ENABLED"] = "false"
     for name in (
         "OPENAI_PROXY",
@@ -781,6 +787,21 @@ SERVER_ENV_OVERRIDES_MARKER = '''        env.update(self._persistent_env_overrid
 
 SERVER_ENV_OVERRIDES_PATCH = '''        env.update(self._persistent_env_overrides)
         env.update(self._env_overrides)
+
+        # Reassert the managed child-process posture after both override
+        # layers so restarts cannot re-enable update checks, optional
+        # analytics, or unmanaged telemetry export.
+        env["LANGGRAPH_NO_VERSION_CHECK"] = "true"
+        env["LANGGRAPH_CLI_NO_ANALYTICS"] = "1"
+        env["OTEL_ENABLED"] = "false"
+        for name in (
+            "OPENAI_PROXY",
+            "OTEL_EXPORTER_OTLP_ENDPOINT",
+            "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+            "OTEL_EXPORTER_OTLP_HEADERS",
+            "OTEL_EXPORTER_OTLP_TRACES_HEADERS",
+        ):
+            env.pop(name, None)
 
         # Revalidate and bind the exact managed MCP snapshot before creating
         # any launch artifacts. Initial start and restart share this path.
@@ -1134,10 +1155,23 @@ def main() -> None:
     marker_states = {PATCH_MARKER in text for text in texts.values()}
     helper_path = root / "_nemoclaw_managed.py"
     if marker_states == {True}:
-        if not helper_path.is_file() or PATCH_MARKER not in helper_path.read_text(
-            encoding="utf-8"
+        helper_source = (
+            helper_path.read_text(encoding="utf-8")
+            if helper_path.is_file() and not helper_path.is_symlink()
+            else ""
+        )
+        analytics_guard = 'os.environ["LANGGRAPH_CLI_NO_ANALYTICS"] = "1"'
+        if (
+            PATCH_MARKER not in helper_source
+            or sum(
+                line.strip() == analytics_guard
+                for line in helper_source.splitlines()
+            )
+            != 1
         ):
-            raise RuntimeError("Managed package patch is partial: helper is missing")
+            raise RuntimeError(
+                "Managed package patch is partial: helper is missing or stale"
+            )
         if not module_destination_path.is_file():
             raise RuntimeError("Managed package patch is partial: middleware is missing")
         if not observability_destination_path.is_file():
@@ -1153,14 +1187,22 @@ def main() -> None:
                     f"Managed package {boundary} patch is partial in {paths['agent']}"
                 )
         for name, patch in (
+            ("entrypoint", ENTRYPOINT_PATCH),
+            ("main", MAIN_PATCH),
             ("agent", AGENT_PATCH),
             ("status", STATUS_PATCH),
             ("welcome", WELCOME_PATCH),
+            ("server", SERVER_PATCH),
         ):
             if texts[name].count(patch.lstrip()) != 1:
                 raise RuntimeError(
                     f"Managed package {name} patch is incomplete in {paths[name]}"
                 )
+        if texts["server"].count(SERVER_ENV_OVERRIDES_PATCH.lstrip()) != 1:
+            raise RuntimeError(
+                "Managed package server override patch is incomplete in "
+                f"{paths['server']}"
+            )
         return
     if marker_states != {False} or helper_path.exists():
         raise RuntimeError("Managed package patch is partial; refusing mixed source state")
