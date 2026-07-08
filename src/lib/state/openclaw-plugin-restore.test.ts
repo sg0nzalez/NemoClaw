@@ -419,6 +419,38 @@ describe("planOpenClawPluginRestore", () => {
     });
   });
 
+  it("treats a same-ID fresh plugin as an upgrade and excludes the previous image directory", () => {
+    const result = planOpenClawPluginRestore({
+      agentType: "openclaw",
+      dir: OPENCLAW_DIR,
+      localDirs: ["extensions"],
+      freshImagePluginInstalls: [
+        {
+          id: "weather",
+          installPath: `${OPENCLAW_DIR}/extensions/weather-v2`,
+          loadPaths: [],
+        },
+      ],
+      previousImagePluginInstalls: [
+        {
+          id: "weather",
+          installPath: `${OPENCLAW_DIR}/extensions/weather-v1`,
+          loadPaths: [],
+        },
+      ],
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: true,
+        freshExtensionDirs: ["weather-v2"],
+        previousExtensionDirs: ["weather-v1"],
+        requiredFreshExtensionDirs: ["weather-v2"],
+        archiveExcludedExtensionDirs: expect.arrayContaining(["weather-v1", "weather-v2"]),
+      }),
+    );
+  });
+
   it("returns an empty extension plan when the backup does not contain extensions", () => {
     expect(
       planOpenClawPluginRestore({

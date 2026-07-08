@@ -443,6 +443,11 @@ export function planOpenClawPluginRestore(options: {
   );
   if (!previousProjection.ok) return previousProjection;
 
+  // The same ID in both projections is an image-owned plugin upgrade, not a
+  // provenance collision. Fresh ownership wins during config merge; retaining
+  // the previous projection here only excludes its old directory from the
+  // user backup so stale image code cannot be restored over the fresh install.
+
   const preserveManagedExtensions = shouldPreserveOpenClawManagedExtensions(
     { agentType: options.agentType },
     options.dir,
