@@ -110,8 +110,24 @@ assert provider["enabled"] is True
 assert provider["params"] == {"use_responses_api": False}
 
 
+class ProfileOnlyChatOpenAI(ChatOpenAI):
+    """Fail closed if local profile resolution ever attempts inference."""
+
+    def _generate(self, *args, **kwargs):
+        raise AssertionError("profile contract attempted synchronous inference")
+
+    async def _agenerate(self, *args, **kwargs):
+        raise AssertionError("profile contract attempted asynchronous inference")
+
+    def _stream(self, *args, **kwargs):
+        raise AssertionError("profile contract attempted synchronous streaming")
+
+    async def _astream(self, *args, **kwargs):
+        raise AssertionError("profile contract attempted asynchronous streaming")
+
+
 def make_model(model_id):
-    return ChatOpenAI(
+    return ProfileOnlyChatOpenAI(
         model=model_id,
         api_key="nemoclaw-managed-placeholder",
         base_url=provider["base_url"],

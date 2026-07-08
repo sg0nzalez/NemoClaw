@@ -1,10 +1,10 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# This fixture starts from the published DCode base but removes both reviewed
-# upstream distributions. The tiny dcode stub lets the production Dockerfile's
-# executable-path preflight complete so the build must reach its isolated
-# Python import gate.
+# This fixture starts from the repository-built DCode base but removes both
+# reviewed upstream distributions. The tiny dcode stub lets the production
+# Dockerfile's executable-path preflight complete so the build must reach its
+# isolated Python import gate.
 ARG BASE_IMAGE
 
 # hadolint ignore=DL3006

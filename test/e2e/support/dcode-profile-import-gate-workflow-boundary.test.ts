@@ -18,6 +18,7 @@ type WorkflowStep = {
   if?: string;
   name?: string;
   run?: string;
+  shell?: string;
 };
 
 type Workflow = {
@@ -88,5 +89,24 @@ describe("DCode missing-dependency profile import gate workflow boundary", () =>
     });
 
     expect(errors).toContain("live DCode profile import gate must run before live E2E tests");
+  });
+
+  it("rejects moving the import gate before workspace prep", () => {
+    const errors = validateMutation((workflow) => {
+      const steps = workflow.jobs.live.steps;
+      const gate = liveGateStep(workflow);
+      steps.splice(steps.indexOf(gate), 1);
+      steps.unshift(gate);
+    });
+
+    expect(errors).toContain("live DCode profile import gate must run after workspace prep");
+  });
+
+  it("rejects running the import gate with a non-bash shell", () => {
+    const errors = validateMutation((workflow) => {
+      liveGateStep(workflow).shell = "sh";
+    });
+
+    expect(errors).toContain("live DCode profile import gate must use bash");
   });
 });

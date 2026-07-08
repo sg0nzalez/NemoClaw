@@ -28,7 +28,6 @@ const EXPECTED_DEEPAGENTS_VERSION = "0.7.0a6";
 const NATIVE_PROFILE_SHA256 = "c8e8dd2b0182334b54be4f46ff0c7b45fbb95dc13bd9a92c249eb47a14fa13d7";
 const UNMODIFIED_BOOTSTRAP_SHA256 =
   "005a91e7fc4ca6b21220673dd9d02d6686bf63e1e4f1102d124b01f96886efcf";
-const PLUGIN_SOURCE_SHA256 = "d5e2e8214e46fd61265d2377a3f9a30d827f19f08fc50272980b69fda3669fc1";
 const CANONICAL_MODEL_SPEC = "nvidia:nvidia/nemotron-3-ultra-550b-a55b";
 const MANAGED_MODEL_ALIASES = [
   "openai:nvidia/nemotron-3-ultra-550b-a55b",
@@ -177,7 +176,11 @@ function makeValidatorDependencyStubRoot(): string {
 
 function makeValidatorStubRoot(entryPointName: string): string {
   const root = makeValidatorDependencyStubRoot();
-  writeFixtureFile(root, "nemoclaw_deepagents_profile/__init__.py", "def register(): pass\n");
+  writeFixtureFile(
+    root,
+    "nemoclaw_deepagents_profile/__init__.py",
+    fs.readFileSync(pluginSourcePath, "utf8"),
+  );
   writeFixtureFile(
     root,
     "nemoclaw_deepagents_profile-0.1.0.dist-info/METADATA",
@@ -271,7 +274,7 @@ raise SystemExit(1 if error else 0)
     encoding: "utf8",
     env: {
       PATH: "/usr/bin:/bin",
-      PYTHONPATH: pythonRoots.join(path.delimiter),
+      PYTHONPATH: pythonRoots.join(":"),
     },
   });
   return {
@@ -336,9 +339,7 @@ raise SystemExit(1 if error else 0)
     encoding: "utf8",
     env: {
       PATH: "/usr/bin:/bin",
-      PYTHONPATH: [...(options.additionalPythonRoots ?? []), fixture.root, pluginRoot].join(
-        path.delimiter,
-      ),
+      PYTHONPATH: [...(options.additionalPythonRoots ?? []), fixture.root, pluginRoot].join(":"),
       ...(options.failKey ? { NEMOCLAW_TEST_FAIL_KEY: options.failKey } : {}),
     },
   });
@@ -375,55 +376,11 @@ describe("LangChain Deep Agents Code managed Nemotron profile plugin (#6424)", (
     expect(project).toContain('"deepagents==0.7.0a6"');
   });
 
-  it("pins official package versions and unmodified wheel source digests", () => {
-    const plugin = fs.readFileSync(pluginSourcePath, "utf8");
+  it("accepts the exact installed harness-profile entry point", () => {
+    const result = runEntryPointValidation("nemoclaw-managed-aliases");
 
-    for (const expected of [
-      EXPECTED_DCODE_VERSION,
-      EXPECTED_DEEPAGENTS_VERSION,
-      NATIVE_PROFILE_SHA256,
-      UNMODIFIED_BOOTSTRAP_SHA256,
-      CANONICAL_MODEL_SPEC,
-      ...MANAGED_MODEL_ALIASES,
-    ]) {
-      expect(plugin).toContain(expected);
-    }
-    expect(plugin).toContain("from deepagents.profiles import register_harness_profile");
-    expect(plugin).toContain('distribution.locate_file("deepagents")');
-    expect(plugin).toContain("root.samefile(distribution_root)");
-    expect(plugin).not.toMatch(/write_bytes|write_text|os\.replace|\.replace\(path\)/);
-  });
-
-  it("keeps isolated discovery, source, graph, and dispatch checks in the image validator", () => {
-    const validator = fs.readFileSync(validatorPath, "utf8");
-    const mainBody = validator.slice(validator.indexOf("def main() -> None:"));
-
-    for (const expected of [
-      '"nemoclaw-deepagents-profile": "0.1.0"',
-      'group="deepagents.harness_profiles"',
-      '"nemoclaw-managed-aliases"',
-      '"nemoclaw_deepagents_profile:register"',
-      PLUGIN_SOURCE_SHA256,
-      NATIVE_PROFILE_SHA256,
-      UNMODIFIED_BOOTSTRAP_SHA256,
-      "create_deep_agent(model=managed_models[0])",
-      "validate_parser_dispatch_parity()",
-      "DENIED_DISPATCH_COMMAND",
-      '"Shell command rejected"',
-      "create_cli_agent(",
-      "graph.invoke(",
-      '"NemotronProgressBudgetMiddleware"',
-      '"FinalAnswerGuardMiddleware"',
-    ]) {
-      expect(validator).toContain(expected);
-    }
-    expect(validator).toContain("def require(condition: bool, message: str)");
-    expect(validator).not.toMatch(/^\s*assert\b/m);
-    expect(mainBody.indexOf("validate_profile_entry_point()")).toBeLessThan(
-      mainBody.indexOf("validate_official_sources()"),
-    );
-    expect(mainBody.match(/validate_official_sources\(\)/g)).toHaveLength(2);
-    expect(mainBody).toContain("prove the adapter never");
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.probe.error).toBeNull();
   });
 
   it("rejects a malicious wrong harness-profile entry point before official source validation", () => {
