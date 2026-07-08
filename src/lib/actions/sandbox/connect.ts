@@ -803,6 +803,7 @@ function ensureSandboxInferenceRouteUnlocked(
         sandboxName,
         `${sanitizeRouteValueForDisplay(inference.provider)}/${sanitizeRouteValueForDisplay(inference.model)}`,
         detail,
+        { repairAttempted: false },
       );
     }
     return { sandbox: sb, routeHealthy: false };
