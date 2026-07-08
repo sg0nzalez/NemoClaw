@@ -764,6 +764,11 @@ When the live OpenShell gateway inference route differs from the route recorded 
 It realigns the route only when those registry entries are compatible with the requested provider and model.
 If another sandbox records a conflicting route, `connect` exits non-zero without changing the gateway and names the affected sandboxes.
 Use `$$nemoclaw inference set --provider <provider> --model <model>` to make an intentional compatible route change.
+Before it opens SSH, `connect` probes `https://inference.local/v1/models` from inside the sandbox with the selected agent's trusted CA and proxy context.
+HTTP `200` through `499` confirms that the route is reachable.
+When the probe returns a recognized broken result, `connect` attempts DNS or route repair and verifies the route again.
+When the initial probe cannot return a trusted result, `connect` fails closed before health-driven repair and before opening SSH.
+It prints a bounded, redacted last-probe detail and points you to `$$nemoclaw <name> doctor`.
 If the sandbox is registered locally but missing from a healthy gateway, `connect` preserves the registry entry and points you to `rebuild --yes`, `onboard`, or `destroy` instead of deleting the metadata needed for recovery.
 
 After a host reboot, the OpenShell gateway rotates its SSH host keys.

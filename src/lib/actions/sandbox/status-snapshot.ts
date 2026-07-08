@@ -14,13 +14,14 @@ import {
   type ProviderHealthStatus,
   probeProviderHealth,
 } from "../../inference/health";
+import { redact } from "../../security/redact";
 import { parseSandboxPhase } from "../../state/gateway";
 import * as registry from "../../state/registry";
 import { classifyInferenceRouteFailureLabel } from "./connect-inference-route-probe";
 import { getSandboxDockerRuntime } from "./docker-health";
 import type { SandboxGatewayState } from "./gateway-state";
 import { getReconciledSandboxGatewayState, getSandboxGatewayStateForStatus } from "./gateway-state";
-import { probeSandboxInferenceGatewayHealth } from "./process-recovery";
+import { probeSandboxInferenceGatewayHealth } from "./inference-route-health";
 import {
   getSandboxStatusPreflight,
   type SandboxStatusFailureLayer,
@@ -201,8 +202,20 @@ interface CollectSandboxStatusSnapshotDeps {
   captureOpenshellForStatusImpl?: typeof captureOpenshellForStatus;
   probeProviderHealthImpl?: ProbeProviderHealth;
   probeSandboxInferenceGatewayHealthImpl?: ProbeSandboxInferenceGatewayHealth;
+  reportInferenceProbeError?: (message: string) => void;
   probeTerminalRuntimeHealth?: ProbeTerminalRuntimeHealth;
   reconcile?: ReconcileSandboxGatewayState;
+}
+
+function reportInferenceProbeError(error: unknown, writer: (message: string) => void): void {
+  const raw = error instanceof Error && error.message ? error.message : String(error);
+  const detail = redact(raw)
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  writer(
+    `  Warning: the authoritative inference.local probe could not run: ${detail.slice(0, 240) || "unknown error"}`,
+  );
 }
 
 export async function collectSandboxStatusSnapshot(
@@ -292,7 +305,10 @@ export async function collectSandboxStatusSnapshot(
       gatewayChain = await (
         opts.deps?.probeSandboxInferenceGatewayHealthImpl ?? probeSandboxInferenceGatewayHealth
       )(sandboxName);
-    } catch {
+    } catch (error) {
+      // This is a permanent fail-closed runtime boundary, but unexpected
+      // OpenShell/transport exceptions must remain observable for diagnosis.
+      reportInferenceProbeError(error, opts.deps?.reportInferenceProbeError ?? console.error);
       gatewayChain = null;
     }
     inferenceHealth = buildSandboxInferenceRouteHealth(gatewayChain, providerHealth);

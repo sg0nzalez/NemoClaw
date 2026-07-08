@@ -248,9 +248,11 @@ describe("CLI sandbox status JSON output", testTimeoutOptions(20_000), () => {
     ]);
   });
 
-  it("sandbox status --json treats an inference.local HTTP 401 as healthy (#6192)", () => {
+  it.each([
+    401, 403,
+  ])("sandbox status --json treats an inference.local HTTP %s as healthy (#6192)", (httpStatus) => {
     const { home, localBin, sandboxName } = createInferenceRouteStatusSetup({
-      routeOutput: "OK 401",
+      routeOutput: `OK ${httpStatus}`,
     });
 
     const result = runWithEnv(`${sandboxName} status --json`, {

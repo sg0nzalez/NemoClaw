@@ -15,7 +15,6 @@ import {
   recoverNamedGatewayRuntime,
 } from "../../gateway-runtime-action";
 import { parseGatewayInference } from "../../inference/config";
-import { type ProviderHealthStatus, probeProviderHealth } from "../../inference/health";
 import { resolveGatewayName, resolveSandboxGatewayName } from "../../onboard/gateway-binding";
 import { executeSandboxCommandForVerification } from "../../onboard/sandbox-verification-exec";
 import { ROOT } from "../../runner";
@@ -25,9 +24,9 @@ import * as shields from "../../shields";
 import type { SandboxEntry } from "../../state/registry";
 import * as registry from "../../state/registry";
 import { runSandboxAutoPairApprovalPass, wrapSandboxShellScript } from "./auto-pair-approval";
-import { classifyInferenceRouteFailureLabel } from "./connect-inference-route-probe";
 import { buildConfigPermsCheck } from "./doctor-config-perms";
 import { captureHostCommand } from "./doctor-host-command";
+import { collectInferenceChecks, type DoctorInferenceRoute } from "./doctor-inference";
 import { collectMessagingDoctorChecks } from "./doctor-messaging";
 import {
   buildDoctorReport,
@@ -46,29 +45,8 @@ import {
   shouldInspectLegacyGatewayContainer,
 } from "./doctor-system-checks";
 import { buildToolScopeChecks } from "./doctor-tool-scope";
-import { probeSandboxInferenceGatewayHealth } from "./process-recovery";
 
 export type { DoctorCheck, DoctorReport } from "./doctor-report";
-
-function pushInferenceHealthCheck(
-  checks: DoctorCheck[],
-  probe: ProviderHealthStatus,
-  options: { authoritative?: boolean; label?: string } = {},
-): void {
-  const authoritative = options.authoritative !== false;
-  const label =
-    options.label ??
-    (probe.probeLabel ? `Provider health (${probe.probeLabel})` : "Provider health");
-  const passed = probe.probed && probe.ok;
-  const failed = authoritative && !probe.ok && (probe.probed || Boolean(probe.failureLabel));
-  checks.push({
-    group: "Inference",
-    label,
-    status: passed ? "ok" : failed ? "fail" : "info",
-    detail: passed ? `${probe.endpoint} reachable` : probe.detail,
-    hint: failed ? "check sandbox reachability and the inference route" : undefined,
-  });
-}
 
 type RunSandboxDoctorOptions = {
   quietJson?: boolean;
@@ -87,11 +65,6 @@ type GatewayProbe = {
 type SandboxProbe = {
   checks: DoctorCheck[];
   reachable: boolean;
-};
-
-type InferenceRoute = {
-  model: string;
-  provider: string;
 };
 
 function parseDoctorIntent(sandboxName: string, args: string[]): DoctorIntent | null {
@@ -303,7 +276,7 @@ function resolveInferenceRoute(
   sb: SandboxEntry | null | undefined,
   openshellBin: ReturnType<typeof resolveOpenshell>,
   openshellConnected: boolean,
-): InferenceRoute {
+): DoctorInferenceRoute {
   const live =
     openshellBin && openshellConnected
       ? parseGatewayInference(
@@ -317,119 +290,6 @@ function resolveInferenceRoute(
     model: live?.model || sb?.model || "unknown",
     provider: live?.provider || sb?.provider || "unknown",
   };
-}
-
-function inferenceRouteCheck(sandboxName: string, route: InferenceRoute): DoctorCheck {
-  const known = route.provider !== "unknown" || route.model !== "unknown";
-  return {
-    group: "Inference",
-    label: "Route",
-    status: known ? "ok" : "warn",
-    detail: `${route.provider} / ${route.model}`,
-    hint: known
-      ? undefined
-      : `run \`${CLI_NAME} ${sandboxName} status\` after the gateway is healthy`,
-  };
-}
-
-function skippedInferenceGatewayProbe(): ProviderHealthStatus {
-  return {
-    ok: false,
-    probed: false,
-    providerLabel: "Inference gateway chain",
-    endpoint: "https://inference.local/v1/models",
-    detail: "skipped because the sandbox is not reachable through its named gateway",
-    probeLabel: "gateway",
-  };
-}
-
-function unavailableInferenceGatewayProbe(): ProviderHealthStatus {
-  const endpoint = "https://inference.local/v1/models";
-  return {
-    ok: false,
-    probed: false,
-    providerLabel: "Inference gateway chain",
-    endpoint,
-    detail: `Could not probe ${endpoint} from inside the reachable sandbox.`,
-    probeLabel: "gateway",
-    failureLabel: "unreachable",
-  };
-}
-
-async function collectInferenceSubprobes(
-  sandboxName: string,
-  sandboxReachable: boolean,
-  existing: ProviderHealthStatus[],
-): Promise<ProviderHealthStatus[]> {
-  if (!sandboxReachable) return [...existing, skippedInferenceGatewayProbe()];
-  let gateway: Awaited<ReturnType<typeof probeSandboxInferenceGatewayHealth>> = null;
-  try {
-    gateway = await probeSandboxInferenceGatewayHealth(sandboxName);
-  } catch {
-    gateway = null;
-  }
-  if (!gateway) return [...existing, unavailableInferenceGatewayProbe()];
-  return [
-    ...existing,
-    {
-      ok: gateway.ok,
-      probed: true,
-      providerLabel: "Inference gateway chain",
-      endpoint: gateway.endpoint,
-      detail: gateway.detail,
-      probeLabel: "gateway",
-      ...(gateway.ok
-        ? {}
-        : {
-            failureLabel: classifyInferenceRouteFailureLabel(gateway.httpStatus),
-          }),
-    },
-  ];
-}
-
-function unavailableProviderHealthDiagnostic(detail: string): ProviderHealthStatus {
-  return {
-    ok: false,
-    probed: false,
-    providerLabel: "Upstream provider",
-    endpoint: "",
-    detail,
-    probeLabel: "upstream",
-  };
-}
-
-function collectProviderHealthDiagnostics(provider: string): ProviderHealthStatus[] {
-  if (provider === "unknown") {
-    return [unavailableProviderHealthDiagnostic("provider route is unknown")];
-  }
-  try {
-    const health = probeProviderHealth(provider);
-    if (!health) {
-      return [
-        unavailableProviderHealthDiagnostic(`no direct health probe registered for ${provider}`),
-      ];
-    }
-    const { subprobes = [], ...primary } = health;
-    return [{ ...primary, probeLabel: primary.probeLabel ?? "upstream" }, ...subprobes];
-  } catch {
-    return [unavailableProviderHealthDiagnostic("direct provider health probe could not run")];
-  }
-}
-
-async function collectInferenceChecks(
-  sandboxName: string,
-  route: InferenceRoute,
-  sandboxReachable: boolean,
-): Promise<DoctorCheck[]> {
-  const checks = [inferenceRouteCheck(sandboxName, route)];
-  const gatewayProbes = await collectInferenceSubprobes(sandboxName, sandboxReachable, []);
-  for (const gatewayProbe of gatewayProbes) {
-    pushInferenceHealthCheck(checks, gatewayProbe, { label: "Inference route (gateway)" });
-  }
-  for (const diagnostic of collectProviderHealthDiagnostics(route.provider)) {
-    pushInferenceHealthCheck(checks, diagnostic, { authoritative: false });
-  }
-  return checks;
 }
 
 function agentVersionDoctorCheck(sandboxName: string): DoctorCheck {

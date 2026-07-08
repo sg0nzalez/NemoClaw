@@ -290,6 +290,35 @@ describe("connectSandbox flow", () => {
     );
   });
 
+  it("fails closed with actionable diagnostics when the initial route probe is inconclusive (#6192)", async () => {
+    const longProbeDetail = `route probe unavailable NVIDIA_API_KEY=super-secret ${"x".repeat(400)}`;
+    const harness = createConnectHarness({
+      registryEntry: {
+        provider: "nvidia-prod",
+        model: "nvidia/nemotron-3-super-120b-a12b",
+      },
+      inferenceGetOutput: "Provider: nvidia-prod\nModel: nvidia/nemotron-3-super-120b-a12b\n",
+      inferenceProbeResponses: [longProbeDetail],
+    });
+
+    await expect(harness.connectSandbox("alpha")).rejects.toThrow("process.exit(1)");
+
+    expect(harness.applyVmDnsMonkeypatchSpy).not.toHaveBeenCalled();
+    expect(harness.runSetupDnsProxySpy).not.toHaveBeenCalled();
+    expect(harness.spawnSyncSpy).not.toHaveBeenCalledWith(
+      "openshell",
+      ["sandbox", "connect", "alpha"],
+      expect.any(Object),
+    );
+    const errorOutput = harness.errorSpy.mock.calls.flat().join("\n");
+    expect(errorOutput).toContain("did not return a trusted result");
+    expect(errorOutput).toContain("Last probe: route probe unavailable");
+    expect(errorOutput).toContain("Run:  nemoclaw alpha doctor");
+    expect(errorOutput).not.toContain("super-secret");
+    expect(errorOutput).not.toContain("x".repeat(241));
+    expect(exitSpy).toHaveBeenCalledWith(1);
+  });
+
   it("stops before opening SSH when the sandbox list reports a terminal failure phase", async () => {
     const harness = createConnectHarness({ listOutput: "alpha Error" });
 

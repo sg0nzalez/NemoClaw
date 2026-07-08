@@ -286,6 +286,15 @@ export function writeHealthyDockerStub(localBin: string): void {
   );
 }
 
+export function healthyInferenceRouteStubLines(): string[] {
+  return [
+    'if [ "$1" = "sandbox" ] && [ "$2" = "exec" ]; then',
+    "  echo 'OK 200'",
+    "  exit 0",
+    "fi",
+  ];
+}
+
 export const FAKE_OPENCLAW_LOG_LINE = "openclaw gateway log: policy checker ready";
 export const FAKE_OPENSHELL_LOG_LINE = "openshell audit log: DENIED example.com:443";
 
