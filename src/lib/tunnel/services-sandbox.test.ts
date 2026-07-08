@@ -239,7 +239,7 @@ describe("stopSandboxChannels", () => {
     expect(args[1]).toBe("exec");
     expect(args[2]).toBe("--name");
     expect(args[3]).toBe("my-sandbox");
-    expect(args).not.toContain(expect.stringContaining("find_gateway_pids"));
+    expect(args.some((arg) => arg.includes("find_gateway_pids"))).toBe(false);
     logSpy.mockRestore();
   });
 
