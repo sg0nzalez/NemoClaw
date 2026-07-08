@@ -142,15 +142,15 @@ describe("Hermes base-image resolver integration", () => {
     const initial = createAgentSandbox(makeAgent());
     createdBuildContexts.push(initial.buildCtx);
     const hint = initial.baseImageResolutionMetadata;
-    if (!hint) throw new Error("expected pinned resolution metadata");
+    expect(hint).not.toBeNull();
 
     dockerMocks.imageInspect.mockImplementation((ref: string) => {
-      if (ref === trackedRef) throw new Error("pinned candidate should not be re-resolved");
+      expect(ref).not.toBe(trackedRef);
       return { status: ref === platformRef ? 0 : 1 };
     });
 
     const reused = createAgentSandbox(makeAgent(), {
-      resolutionHint: hint,
+      resolutionHint: hint ?? undefined,
     });
     createdBuildContexts.push(reused.buildCtx);
 

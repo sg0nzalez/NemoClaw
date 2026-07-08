@@ -15,16 +15,13 @@ describe("agent base image provisioning", () => {
 
   it("probes resolved Hermes bases for the pinned version and native MCP runtime", () => {
     withMockedDocker(({ ensureAgentBaseImage, dockerCaptureMock, resolveSandboxBaseImageMock }) => {
-      dockerCaptureMock.mockImplementation((args: string[]) => {
-        const entrypoint = args[3];
-        if (entrypoint === "/usr/local/bin/hermes") {
-          return "Hermes Agent v0.18.0 (2026.7.1)";
-        }
-        if (entrypoint === "/opt/hermes/.venv/bin/python") {
-          return "nemoclaw-hermes-mcp-runtime-ok";
-        }
-        return "";
-      });
+      const compatibleOutputByEntrypoint = new Map([
+        ["/usr/local/bin/hermes", "Hermes Agent v0.18.0 (2026.7.1)"],
+        ["/opt/hermes/.venv/bin/python", "nemoclaw-hermes-mcp-runtime-ok"],
+      ]);
+      dockerCaptureMock.mockImplementation(
+        (args: string[]) => compatibleOutputByEntrypoint.get(args[3]) ?? "",
+      );
       ensureAgentBaseImage(makeAgent());
       const options = resolveSandboxBaseImageMock.mock.calls[0]?.[0] as {
         validateImage?: (imageRef: string) => boolean;
@@ -60,12 +57,9 @@ describe("agent base image provisioning", () => {
       );
 
       dockerCaptureMock.mockClear();
-      dockerCaptureMock.mockImplementation((args: string[]) => {
-        if (args[3] === "/usr/local/bin/hermes") {
-          return "Hermes Agent v0.18.0 (2026.7.1)";
-        }
-        return args[3] === "/opt/hermes/.venv/bin/python" ? "nemoclaw-hermes-mcp-runtime-ok" : "";
-      });
+      dockerCaptureMock.mockImplementation(
+        (args: string[]) => compatibleOutputByEntrypoint.get(args[3]) ?? "",
+      );
       expect(
         options.validateImage?.(
           `ghcr.io/nvidia/nemoclaw/hermes-sandbox-base@sha256:${"a".repeat(64)}`,
