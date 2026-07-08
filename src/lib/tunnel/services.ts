@@ -453,8 +453,26 @@ export function showStatus(opts: ServiceOptions = {}): void {
 /**
  * Stop the OpenClaw gateway (and its messaging channels) inside the sandbox.
  *
- * OpenClaw keeps the hardened PID/start-time/owner/marker-gated matcher from
- * #4951. Non-OpenClaw gateway agents are supervised by their sandbox runtime;
+ * Uses the OpenShell gateway container's kubectl as the privileged path so it
+ * can signal the gateway process even when the sandbox SSH/exec user is
+ * `sandbox` and the gateway process runs as the separate `gateway` user. The
+ * fallback `openshell sandbox exec` path uses the same verified script for
+ * older/non-root deployments where the exec user can signal the gateway.
+ *
+ * The in-sandbox script intentionally does not rely on a bare `pkill -f`
+ * result: `pkill -f openclaw[- ]gateway` can match the transient shell/pkill
+ * command line and report success while the real gateway process survives.
+ * Instead, it gathers concrete PIDs from `ps`, excludes its own process tree,
+ * sends TERM/KILL as needed, and only reports success after a post-stop process
+ * scan is empty.
+ *
+ * The matcher must also recognize the bare `openclaw` process name that
+ * OpenClaw reports after rewriting `process.title`, but that broad argv form is
+ * accepted only when it matches the recorded gateway PID plus local gateway
+ * marker. This keeps `tunnel stop` from killing unrelated bare OpenClaw
+ * processes while still finding the rewritten gateway (#4951).
+ *
+ * Non-OpenClaw gateway agents are supervised by their sandbox runtime;
  * signaling only the child can make it respawn while this command is still
  * cleaning up host forwards. Leave those supervised children alone and let
  * full stop tear down the host gateway when this is its final sandbox.
