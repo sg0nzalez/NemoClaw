@@ -1,9 +1,25 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { type GatewayRecoveryDeps, startGatewayForRecovery } from "./gateway-recovery";
+
+// #3768: with the loop now purely deadline-driven, `waitUntilAsync` needs a
+// clock reader. Rather than using vi.useFakeTimers (which globally patches
+// timers and can hang async code), pair a captured virtual clock with the
+// injected `sleepSeconds` mock so the clock advances only when the loop
+// actually sleeps. Tests get deterministic deadline expiration without any
+// real wall-clock waits or global timer state.
+function makeVirtualClock(startMs = 1_000_000_000_000) {
+  let now = startMs;
+  return {
+    now: () => now,
+    sleeper: vi.fn((seconds: number) => {
+      now += Math.max(0, seconds) * 1000;
+    }),
+  };
+}
 
 function createDeps(overrides: Partial<GatewayRecoveryDeps> = {}): GatewayRecoveryDeps {
   return {
@@ -86,19 +102,31 @@ describe("gateway recovery", () => {
     );
   });
 
-  it("uses the configured recovery deadline budget without sleeping after the final probe", async () => {
+  it("polls until the configured recovery deadline and reports it in the timeout", async () => {
+    // #3768: deadline-driven, no legacy attempt cap. A 3 * 2s budget = 6s
+    // permits probes and sleeps until the deadline expires; the final
+    // deadline check short-circuits before an extra sleep would happen.
     vi.stubEnv("NEMOCLAW_HEALTH_POLL_COUNT", "3");
     vi.stubEnv("NEMOCLAW_HEALTH_POLL_INTERVAL", "2");
-    const deps = createDeps();
+    const clock = makeVirtualClock();
+    const deps = createDeps({ sleepSeconds: clock.sleeper, now: clock.now });
 
     await expect(startGatewayForRecovery({ gatewayPort: 8091 }, deps)).rejects.toThrow(
-      "3 recovery attempt(s) at 2s interval (max wait 6s)",
+      "configured 6s recovery deadline (2s poll interval)",
     );
 
-    expect(deps.runCaptureOpenshell).toHaveBeenCalledTimes(9);
-    expect(deps.sleepSeconds).toHaveBeenCalledTimes(2);
-    expect(deps.sleepSeconds).toHaveBeenNthCalledWith(1, 2);
-    expect(deps.sleepSeconds).toHaveBeenNthCalledWith(2, 2);
+    // Each probe issues 3 subprocess calls. With a 6s budget and 2s
+    // interval, the loop runs probe → sleep(2s) three times, then the
+    // top-of-loop deadline check terminates before probe #4. So probes
+    // and sleeps are 1:1 at exactly 3 each.
+    const runCaptureCalls = (deps.runCaptureOpenshell as ReturnType<typeof vi.fn>).mock.calls
+      .length;
+    const probeCount = runCaptureCalls / 3;
+    expect(probeCount).toBe(3);
+    expect(clock.sleeper).toHaveBeenCalledTimes(3);
+    expect(clock.sleeper).toHaveBeenNthCalledWith(1, 2);
+    expect(clock.sleeper).toHaveBeenNthCalledWith(2, 2);
+    expect(clock.sleeper).toHaveBeenNthCalledWith(3, 2);
   });
 
   it("succeeds on the first healthy probe without sleeping and sets OPENSHELL_GATEWAY", async () => {
@@ -146,19 +174,20 @@ describe("gateway recovery", () => {
     expect(deps.runCaptureOpenshell).toHaveBeenCalledTimes(6);
   });
 
-  it("with NEMOCLAW_HEALTH_POLL_COUNT=0 fails fast without invoking the probe", async () => {
-    // Advisor edge-case: a zero attempt count must not silently pretend
-    // the gateway is healthy and must not run any subprocess probes.
+  it("with NEMOCLAW_HEALTH_POLL_COUNT=0 fails fast without silently claiming healthy", async () => {
+    // Edge case: a zero-count budget must not silently pretend the gateway
+    // is healthy. The wait-budget helper clamps to a 1ms deadline, so
+    // waitUntilAsync's first deadline check terminates before the probe
+    // callback runs. Function throws with a deadline message instead of
+    // returning success.
     vi.stubEnv("NEMOCLAW_HEALTH_POLL_COUNT", "0");
     vi.stubEnv("NEMOCLAW_HEALTH_POLL_INTERVAL", "2");
-    const deps = createDeps();
+    const deps = createDeps({ sleepSeconds: vi.fn() });
 
     await expect(startGatewayForRecovery({ gatewayPort: 8091 }, deps)).rejects.toThrow(
-      "0 recovery attempt(s) at 2s interval",
+      /did not become ready within the configured .* recovery deadline/,
     );
 
-    // First iteration's attempt-cap check terminates before the probe
-    // callback runs, so no status/gateway-info calls are made.
     expect(deps.runCaptureOpenshell).not.toHaveBeenCalled();
     expect(deps.sleepSeconds).not.toHaveBeenCalled();
   });

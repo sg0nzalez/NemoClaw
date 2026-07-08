@@ -59,6 +59,11 @@ export type GatewayRecoveryDeps = {
   // to the production implementations.
   isGatewayHealthy?: typeof isGatewayHealthy;
   isGatewayHttpReady?: typeof isGatewayHttpReady;
+  // Injected clock reader for deadline-driven tests. Defaults to Date.now.
+  // A test can pair a virtual sleeper (that advances a captured value) with
+  // this reader to drive deterministic deadline expiration without real
+  // wall-clock waits or global fake-timer state.
+  now?(): number;
 };
 
 function isValidGatewayRecoveryPort(port: number | null | undefined): port is number {
@@ -185,6 +190,7 @@ async function startTargetGatewayForRecovery(
   const sleeper = deps.sleepSeconds ?? sleepSeconds;
   const gatewayHealthyImpl = deps.isGatewayHealthy ?? isGatewayHealthy;
   const gatewayHttpReadyImpl = deps.isGatewayHttpReady ?? isGatewayHttpReady;
+  const nowImpl = deps.now ?? Date.now;
   const healthy =
     recoveryPollCount > 0 &&
     (await waitUntilAsync(
@@ -201,11 +207,19 @@ async function startTargetGatewayForRecovery(
         );
       },
       {
-        deadlineMs: Date.now() + waitBudgetMs,
+        // #3768 wants a SINGLE clear deadline budget rather than the legacy
+        // fixed attempt cap. Do NOT pass `maxAttempts` here: with maxAttempts
+        // set, a fast-failing probe sequence would exit after `count`
+        // attempts even though the deadline still permits more polling, and
+        // the operator would see a timeout that under-reports the wait the
+        // system was willing to spend. Let waitUntilAsync run until the
+        // deadline; the interval and probe cost naturally bound the total
+        // attempt count.
+        deadlineMs: nowImpl() + waitBudgetMs,
         initialIntervalMs: Math.max(0, recoveryPollInterval * 1000),
         maxIntervalMs: Math.max(0, recoveryPollInterval * 1000),
         backoffFactor: 1,
-        maxAttempts: recoveryPollCount,
+        now: nowImpl,
         // waitUntilAsync passes durations in milliseconds to `sleep`, while
         // the injected sleeper (sleepSeconds) expects a second-granular
         // number. Adapt at this boundary only.
@@ -224,15 +238,13 @@ async function startTargetGatewayForRecovery(
     return;
   }
 
-  // The wait is attempt-capped (waitUntilAsync exits at maxAttempts) with a
-  // fixed inter-attempt interval and a hard upper time bound. Describe both
-  // dimensions honestly so the operator does not read the message as a
-  // pure deadline promise: the loop can terminate earlier via the attempt
-  // cap when probes fail quickly, and cannot exceed the upper bound.
+  // Pure deadline-based semantics per #3768: report the actual budget the
+  // loop was allowed to spend. Include the interval only as diagnostic
+  // context so an operator scanning the message understands the poll cadence.
   throw new Error(
-    `Gateway '${gatewayName}' did not become ready after ${recoveryPollCount} recovery attempt(s) at ${recoveryPollInterval}s interval (max wait ${formatGatewayRecoveryWaitBudget(
+    `Gateway '${gatewayName}' did not become ready within the configured ${formatGatewayRecoveryWaitBudget(
       waitBudgetMs,
-    )})`,
+    )} recovery deadline (${recoveryPollInterval}s poll interval)`,
   );
 }
 
