@@ -31,6 +31,13 @@ NemoClaw no longer vendors or overlays that source.
   `deepagents==0.7.0a6` entries covered by the lockfile audit command above; no
   additional third-party distribution is introduced.
 
+### Test-only legacy license fixture limitation
+
+> **Removal condition:** Delete the test-only legacy license-table conversion in
+> `test/langchain-deepagents-code-nemotron-profile-plugin.test.ts` as soon as the
+> runner's system setuptools accepts PEP 639 license strings. Production never
+> uses this conversion.
+
 The adapter metadata intentionally uses the PEP 639 SPDX expression
 `license = "Apache-2.0"`, supported by its pinned production build backend.
 The real-wheel test substitutes the equivalent legacy table only for its
@@ -47,6 +54,15 @@ reviewed source and project-metadata hashes, then builds it offline with
 published distribution for a registry audit to resolve. If that packaging
 boundary ever changes, the publishing workflow must build and audit the wheel
 before upload; index publication is not permitted without that release gate.
+
+The adapter project remains recoverable from the image's `COPY` layer after the
+later `RUN` removes its duplicate build tree; a failed build may likewise retain
+that layer in the trusted local cache. This is accepted because the project
+contains only non-secret, first-party Apache-2.0 source and metadata, and the
+installed Python module necessarily ships the same source in `site-packages`.
+A multi-stage build or secret mount would not make the shipped module
+confidential. Revisit this boundary if an adapter build input becomes
+secret-bearing or non-public.
 
 Before local build and installation, the managed image verifies both copied
 adapter build inputs against the module and project-metadata hashes recorded

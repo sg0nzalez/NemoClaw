@@ -24,10 +24,13 @@ trap cleanup EXIT
 
 cd "${repo_root}"
 
-# Plain progress is required to prove the exact import failure, so fail before
-# building if any reviewed Dockerfile introduces an unreviewed ARG name.
-# Security boundary: this exact allowlist covers every reviewed ARG; none are
-# secret-bearing, and the builds below pass only public BASE_IMAGE references.
+# --progress=plain is required to prove the exact import failure marker. The
+# primary security boundary is the exact ARG-name allowlist below, which covers
+# agents/langchain-deepagents-code/Dockerfile.base,
+# test/Dockerfile.dcode-profile-missing-dependencies, and
+# agents/langchain-deepagents-code/Dockerfile. Those three reviewed Dockerfiles
+# contain no secret-bearing ARGs. Only BASE_IMAGE is passed via --build-arg,
+# always as a public, non-secret image reference.
 for dockerfile in \
   agents/langchain-deepagents-code/Dockerfile.base \
   test/Dockerfile.dcode-profile-missing-dependencies \
