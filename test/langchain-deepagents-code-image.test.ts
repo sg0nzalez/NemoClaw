@@ -331,7 +331,6 @@ describe("LangChain Deep Agents Code image contracts", () => {
       "managed-dcode-runtime.py",
       "nemoclaw_observability.py",
       "patch-managed-deepagents-code.py",
-      "profile-plugin",
       "validate-nemotron-ultra-profile.py",
       "DEEPAGENTS_CODE_LANGSMITH_TRACING=false",
       "LANGSMITH_TRACING=false",

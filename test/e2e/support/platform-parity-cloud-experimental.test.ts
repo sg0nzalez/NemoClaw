@@ -269,7 +269,7 @@ describe("P0-E cloud-experimental parity guardrails", () => {
     expect(result.stdout).toContain("NO_NEWLINE_IN_COMMAND");
   });
 
-  it("registers executable Deep Agents cloud-experimental checks", () => {
+  it("registers executable Deep Agents cloud-experimental checks in execution order", () => {
     expect(DEEPAGENTS_CLOUD_EXPERIMENTAL_CHECKS).toEqual([
       "test/e2e/e2e-cloud-experimental/checks/03-deepagents-code-nemotron-ultra-profile.sh",
       "test/e2e/e2e-cloud-experimental/checks/04-deepagents-code-fresh-reonboard.sh",
@@ -286,13 +286,6 @@ describe("P0-E cloud-experimental parity guardrails", () => {
       const mode = fs.statSync(path.join(process.cwd(), scriptPath)).mode;
       expect(mode & 0o111, `${scriptPath} must be executable`).not.toBe(0);
     }
-  });
-
-  it("orders the stock Nemotron Ultra profile check before destructive re-onboarding", () => {
-    expect(DEEPAGENTS_CLOUD_EXPERIMENTAL_CHECKS.slice(0, 2)).toEqual([
-      "test/e2e/e2e-cloud-experimental/checks/03-deepagents-code-nemotron-ultra-profile.sh",
-      "test/e2e/e2e-cloud-experimental/checks/04-deepagents-code-fresh-reonboard.sh",
-    ]);
   });
 
   it("gives the destructive fresh re-onboard check its onboarding budget", () => {

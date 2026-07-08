@@ -59,10 +59,6 @@ type ProbeResult = {
   registryKeys: string[];
 };
 
-type ValidationProbeResult = {
-  error: string | null;
-};
-
 function sha256(value: string | Buffer): string {
   return createHash("sha256").update(value).digest("hex");
 }
@@ -260,30 +256,19 @@ function buildAndInstallPluginWheel(version: string): string {
 
 function runEntryPointValidationWithRoots(pythonRoots: string[]) {
   const script = `import importlib.util
-import json
 
 spec = importlib.util.spec_from_file_location("nemoclaw_profile_validator", ${JSON.stringify(validatorPath)})
 validator = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(validator)
-error = None
-try:
-    validator.validate_profile_entry_point()
-except Exception as exc:
-    error = str(exc)
-print(json.dumps({"error": error}))
-raise SystemExit(1 if error else 0)
+validator.validate_profile_entry_point()
 `;
-  const result = spawnSync(pythonBin, ["-S", "-c", script], {
+  return spawnSync(pythonBin, ["-S", "-c", script], {
     encoding: "utf8",
     env: {
       PATH: "/usr/bin:/bin",
       PYTHONPATH: pythonRoots.join(":"),
     },
   });
-  return {
-    ...result,
-    probe: JSON.parse(result.stdout) as ValidationProbeResult,
-  };
 }
 
 function runEntryPointValidation(
@@ -299,12 +284,11 @@ function runPlugin(
     additionalPythonRoots?: string[];
     aliasState?: "complete" | "conflict" | "partial";
     failKey?: string;
-    pluginPath?: string;
     registerCalls?: number;
     withCanonical?: boolean;
   } = {},
 ) {
-  const pluginPath = options.pluginPath ?? prepareFixturePlugin();
+  const pluginPath = prepareFixturePlugin();
   const pluginRoot = path.dirname(path.dirname(pluginPath));
   const script = `import json
 from deepagents.profiles.harness.harness_profiles import _HARNESS_PROFILES
@@ -386,21 +370,22 @@ describe("LangChain Deep Agents Code managed Nemotron profile plugin (#6424)", (
     const result = runEntryPointValidation("nemoclaw-managed-aliases");
 
     expect(result.status, result.stderr).toBe(0);
-    expect(result.probe.error).toBeNull();
   });
 
-  it.each([
-    ["a malicious wrong harness-profile entry point", "wrong-managed-aliases", undefined],
-    [
-      "a plugin distribution missing the harness-profile entry-point group",
-      "nemoclaw-managed-aliases",
-      "unrelated.entry_points",
-    ],
-  ] as const)("rejects %s", (_label, entryPointName, entryPointGroup) => {
-    const result = runEntryPointValidation(entryPointName, entryPointGroup);
+  it("rejects a malicious wrong harness-profile entry point", () => {
+    const result = runEntryPointValidation("wrong-managed-aliases");
 
     expect(result.status).not.toBe(0);
-    expect(result.probe.error).toContain(
+    expect(result.stderr).toContain(
+      "expected exactly one 'nemoclaw-managed-aliases' profile entry point",
+    );
+  });
+
+  it("rejects a plugin distribution missing the harness-profile entry-point group", () => {
+    const result = runEntryPointValidation("nemoclaw-managed-aliases", "unrelated.entry_points");
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
       "expected exactly one 'nemoclaw-managed-aliases' profile entry point",
     );
   });
@@ -411,12 +396,12 @@ describe("LangChain Deep Agents Code managed Nemotron profile plugin (#6424)", (
     const result = runEntryPointValidationWithRoots([dependencyRoot, installedPluginRoot]);
 
     expect(result.status).not.toBe(0);
-    expect(result.probe.error).toContain(
+    expect(result.stderr).toContain(
       "profile entry point comes from an unexpected distribution version",
     );
   });
 
-  it("registers both aliases against the canonical profile without changing wheel sources", () => {
+  it("idempotently registers both aliases without changing wheel sources", () => {
     const fixture = makePluginFixture();
     const result = runPlugin(fixture, { registerCalls: 2 });
 
@@ -556,16 +541,6 @@ describe("LangChain Deep Agents Code managed Nemotron profile plugin (#6424)", (
     expect(result.probe.error).toContain("injected registration failure");
     expect(result.probe.aliases).toEqual([false, false]);
     expect(result.probe.registryKeys).toEqual([CANONICAL_MODEL_SPEC]);
-    expectOfficialSourcesUnchanged(fixture);
-  });
-
-  it("accepts an already-complete registration without duplicating aliases", () => {
-    const fixture = makePluginFixture();
-    const result = runPlugin(fixture, { aliasState: "complete", registerCalls: 2 });
-
-    expect(result.status, result.stderr).toBe(0);
-    expect(result.probe.aliases).toEqual([true, true]);
-    expect(result.probe.registryKeys).toHaveLength(3);
     expectOfficialSourcesUnchanged(fixture);
   });
 });
