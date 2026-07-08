@@ -1,0 +1,80 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+title: "Lifecycle and Agent Plugin Taxonomy"
+sidebar-title: "Lifecycle and Agent Plugin Taxonomy"
+description: "Defines NemoClaw extensibility terminology for lifecycle contributions, managed agent packages, agent-native plugins, and the reserved future NemoClaw plugin SDK name."
+description-agent: "Defines the terminology boundary between NemoClaw lifecycle contributions, managed agent packages, agent-native plugins, and a reserved future NemoClaw plugin SDK. Use when classifying extension proposals, issue scope, plugin wording, or SDK readiness claims."
+keywords: ["nemoclaw extensibility taxonomy", "nemoclaw plugin sdk", "lifecycle contribution", "agent-native plugin", "managed agent package"]
+content:
+  type: "reference"
+---
+
+This decision record defines terminology for current NemoClaw extension discussions.
+It does not introduce a public SDK, package registry, extension command, marketplace, or compatibility promise.
+
+## Decision
+
+NemoClaw reserves `NemoClaw plugin SDK` for a possible future public extension interface.
+NemoClaw does not offer that SDK today, and no public compatibility commitment exists for any proposed NemoClaw extension seam.
+
+Use the following names for current work:
+
+| Term | Meaning | Compatibility boundary |
+|---|---|---|
+| Lifecycle contribution | A repo-owned change that participates in NemoClaw onboarding, rebuild, reconcile, removal, recovery, policy, credential attachment, or blueprint application. | Internal NemoClaw implementation detail unless a later ADR promotes a stable contract. |
+| Managed agent package | A package, tool, wrapper, provider, or integration that NemoClaw installs, configures, or attaches for a selected agent runtime. | Managed by NemoClaw for the documented agent path only. It is not an arbitrary NemoClaw extension API. |
+| Agent-native plugin | Executable code loaded by OpenClaw, Hermes, Deep Agents Code, or another supported agent through that agent's own plugin or package mechanism. | Owned by the agent runtime. NemoClaw can document a sandbox-safe install path, but it does not own the plugin API. |
+| Reserved future NemoClaw plugin SDK | A future, intentionally unimplemented public contract for NemoClaw extension code if the project later accepts the readiness bar. | Reserved name only. There is no SDK, semantic version promise, registry, CLI contract, or support commitment today. |
+
+`plugin` in user-facing docs should refer to agent-native plugins unless the text explicitly names the reserved future `NemoClaw plugin SDK` as unavailable.
+For NemoClaw-owned seams that are not stabilized, use `lifecycle contribution` or a more specific term such as `policy preset`, `agent manifest`, `model-specific setup manifest`, or `managed package`.
+
+## Architecture Reference Relationship
+
+The [architecture reference](../reference/architecture) summarizes this taxonomy in the NemoClaw agent integration layer.
+That reference maps lifecycle contributions to repository-reviewed onboarding, generated config, policy, reconciliation, removal, migration, backup, and recovery behavior.
+It maps managed agent packages to NemoClaw-installed artifacts for a known compatible agent, and it maps agent-native plugins to code loaded by OpenClaw, Hermes, Deep Agents Code, or another agent under that agent's own extension model.
+This ADR is the terminology source for those statements and intentionally does not add readiness-matrix content.
+
+## Execution and Trust Boundary
+
+Lifecycle contributions can be data-only, configuration-only, or repo-owned executable code that NemoClaw ships and tests as part of the managed stack.
+They do not authorize third-party code to run in the NemoClaw host CLI or OpenShell control path.
+
+Managed agent packages can install or configure code for an agent runtime, but they run under the selected sandbox profile and documented OpenShell policy boundary.
+They must keep provider and integration credentials in the OpenShell credential path and pass placeholders or generated config into the sandbox.
+
+Agent-native plugins can execute third-party code only where the agent runtime loads them.
+Under NemoClaw, that code runs in the sandbox, not in the host CLI, and it must use reviewed Dockerfile, package, policy, and credential-handling paths.
+The operator owns provenance checks such as source review, lockfiles, pinned versions, digests, signatures, and build-context hygiene unless NemoClaw provides a specific managed package path.
+
+The reserved future `NemoClaw plugin SDK` would need an explicit trust model before it could run third-party code.
+That future decision would need to define host versus sandbox execution, signing or provenance requirements, policy contribution rules, secret boundaries, rollback behavior, and compatibility tests.
+No such public contract exists today.
+
+## Issue Classification
+
+The following issue classifications use terminology only.
+They do not transfer ownership between issues and do not make readiness or support commitments.
+
+| Issue | Terminology classification | Scope boundary |
+|---|---|---|
+| #5998 | Managed agent package and narrow lifecycle contribution. | May add a NemoClaw-managed package workflow for one documented agent path. It does not imply arbitrary third-party NemoClaw code execution, a public SDK, package-registry compatibility, or ownership of agent-native plugin APIs. |
+| #6097 | Reserved internal implementation or agent-native plugin work, depending on the concrete surface. | May use plugin wording only for scoped internal work already accepted for that issue or for code loaded through an agent runtime's own extension model. It remains separate from the reserved future `NemoClaw plugin SDK` unless a later ADR promotes a stable NemoClaw contract. |
+| #3915 | Lifecycle contribution for observability export and policy integration. | Covers NemoClaw-managed telemetry wiring, collector policy, and documentation boundaries. It does not own managed package workflows, agent-native plugin APIs, or a general NemoClaw extension API. |
+| #6201 | Agent-native OpenClaw voice-call plugin and NVIDIA voice-provider contract work. | Owns OpenClaw-side provider contracts, official `voice-call` plugin integration, gateway and event APIs, and provider registration. NemoClaw managed installation remains in #5998, and this issue is not a NemoClaw public SDK seam. |
+| #6207 | OpenShell sandbox networking and policy-contract validation. | Owns validation of sandbox-to-host traffic, WebSocket relay behavior, ingress, proxy, and injected-environment contracts for VoiceClaw. No new OpenShell feature blocks the #5998 managed-plugin MVP unless validation finds a regression, and this issue does not define a NemoClaw public SDK seam. |
+
+## Naming Guidance
+
+Use `install OpenClaw plugin` or `install Hermes plugin` only when the user installs code through that agent's own plugin mechanism.
+Use `managed package`, `managed provider`, `managed tool`, `policy preset`, or `lifecycle contribution` for NemoClaw-owned installation and orchestration paths.
+Do not name a CLI command, manifest, package, or doc page `NemoClaw plugin` unless it is part of a later accepted SDK decision.
+
+## Non-Commitments
+
+This ADR makes no SDK, package registry, marketplace, semantic versioning, migration, or CLI compatibility commitment.
+It does not implement a user-facing SDK or command.
+It does not change the support boundary for OpenClaw, Hermes, or Deep Agents Code plugin APIs.
+It does not add a readiness matrix.

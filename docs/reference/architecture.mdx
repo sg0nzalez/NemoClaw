@@ -147,6 +147,12 @@ For the DGX Spark-specific variant of this topology (cgroup v2, aarch64, unified
 NemoClaw integrates with each supported agent through a runtime layer that adapts the agent to OpenShell-managed providers, policies, and sandbox state.
 The concrete files differ by agent because each runtime has its own plugin system, config format, state layout, and startup command.
 
+NemoClaw uses [ADR 006229](../adr/006229-lifecycle-agent-plugin-taxonomy) to distinguish lifecycle contributions, managed agent packages, agent-native plugins, and the reserved future NemoClaw plugin SDK.
+In short, lifecycle contributions are repository-reviewed NemoClaw changes to onboarding, generated config, policy, reconciliation, removal, migration, backup, or recovery behavior.
+Managed agent packages are NemoClaw-installed artifacts for a known compatible agent.
+Agent-native plugins are loaded by OpenClaw, Hermes, Deep Agents Code, or another agent under that agent's own extension model.
+No public NemoClaw plugin SDK, package registry, user-loadable extension point, or compatibility commitment exists today.
+
 | Agent | Integration files | Runtime behavior |
 |---|---|---|
 <AgentOnly variant="openclaw">
@@ -181,6 +187,23 @@ The Deep Agents integration follows the generic agent-manifest path for terminal
 The manifest declares the `dcode` binary, smoke checks, config directory, state directories, and OpenAI-compatible inference route.
 The build-time config generator turns NemoClaw onboarding choices into `config.toml`, and the managed launchers enforce the supported credential, MCP, tracing, and sandbox boundaries before `dcode` starts.
 </AgentOnly>
+
+## Extension Terminology
+
+NemoClaw uses specific terminology for extension discussions so users do not confuse NemoClaw-managed operations with agent-native plugin systems.
+A lifecycle contribution is a repo-owned change that participates in onboarding, rebuild, reconcile, removal, recovery, policy, credential attachment, or blueprint application.
+A managed agent package is a package, wrapper, provider, or integration that NemoClaw installs, configures, or attaches for a documented agent path.
+An agent-native plugin is executable code loaded by OpenClaw, Hermes, Deep Agents Code, or another supported agent through that agent's own plugin or package mechanism.
+The term `NemoClaw plugin SDK` is reserved for a possible future public extension interface.
+NemoClaw does not offer that SDK today and makes no public SDK, registry, CLI, semantic-versioning, migration, or compatibility commitment for proposed extension seams.
+
+Current issue terminology follows that boundary.
+Issue #5998 is a narrow managed agent package and lifecycle contribution, not arbitrary third-party NemoClaw code execution.
+Issue #6097 remains scoped to internal or agent-native plugin work unless a later decision promotes a stable NemoClaw contract.
+Issue #3915 is a lifecycle contribution for observability export and policy integration.
+Issue #6201 is agent-native OpenClaw voice-call plugin and NVIDIA voice-provider contract work, while NemoClaw managed installation remains in #5998.
+Issue #6207 is OpenShell sandbox networking and policy-contract validation, with no new OpenShell feature blocking the #5998 managed-plugin MVP unless validation finds a regression.
+Neither issue creates a NemoClaw public SDK seam or compatibility commitment.
 
 ## NemoClaw Blueprint
 
