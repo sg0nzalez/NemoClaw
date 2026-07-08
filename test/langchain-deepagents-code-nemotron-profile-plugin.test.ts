@@ -347,12 +347,15 @@ function expectOfficialSourcesUnchanged(
   expect(fs.readFileSync(fixture.bootstrapPath, "utf8")).toBe(bootstrapSource);
 }
 
-function replaceProfileSource(mode: "missing" | "linked", sourcePath: string): void {
-  fs.rmSync(sourcePath);
-  if (mode === "linked") {
+const replaceProfileSource = {
+  missing(sourcePath: string): void {
+    fs.rmSync(sourcePath);
+  },
+  linked(sourcePath: string): void {
+    fs.rmSync(sourcePath);
     fs.symlinkSync("/dev/null", sourcePath);
-  }
-}
+  },
+};
 
 afterEach(() => {
   for (const root of tempRoots.splice(0)) {
@@ -487,7 +490,7 @@ describe("LangChain Deep Agents Code managed Nemotron profile plugin (#6424)", (
     ["linked", "bootstrap", "bootstrapPath"],
   ] as const)("rejects a %s %s source file", (mode, _label, sourceKey) => {
     const fixture = makePluginFixture();
-    replaceProfileSource(mode, fixture[sourceKey]);
+    replaceProfileSource[mode](fixture[sourceKey]);
 
     const result = runPlugin(fixture);
 
