@@ -164,8 +164,10 @@ get_ollama_container_port() {
   local ollama_port="${NEMOCLAW_OLLAMA_PORT:-11434}"
   local ollama_proxy_port="${NEMOCLAW_OLLAMA_PROXY_PORT:-11435}"
 
+  # Both routes ultimately depend on the host Ollama daemon: the WSL path
+  # reaches it directly, while the managed proxy forwards to this raw port.
+  _validate_port NEMOCLAW_OLLAMA_PORT "$ollama_port" || return 1
   if container_can_reach_host_loopback; then
-    _validate_port NEMOCLAW_OLLAMA_PORT "$ollama_port" || return 1
     printf '%s\n' "$ollama_port"
   else
     # The WSL Docker Desktop loopback path does not use the proxy listener, so
