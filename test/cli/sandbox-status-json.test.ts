@@ -15,6 +15,7 @@ import {
 } from "./helpers";
 
 function createInferenceRouteStatusSetup(options: {
+  executeRouteCommand?: boolean;
   routeOutput: string;
   routeExit?: number;
   upstreamHttpStatus?: string;
@@ -67,8 +68,16 @@ function createInferenceRouteStatusSetup(options: {
       "  exit 0",
       "fi",
       'if [ "$1" = "sandbox" ] && [ "$2" = "exec" ]; then',
-      `  printf '%s\\n' ${JSON.stringify(options.routeOutput)}`,
-      `  exit ${String(options.routeExit ?? 0)}`,
+      ...(options.executeRouteCommand
+        ? [
+            '  while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do shift; done',
+            '  [ "$#" -gt 0 ] && shift',
+            '  exec "$@"',
+          ]
+        : [
+            `  printf '%s\\n' ${JSON.stringify(options.routeOutput)}`,
+            `  exit ${String(options.routeExit ?? 0)}`,
+          ]),
       "fi",
       'if [ "$1" = "inference" ] && [ "$2" = "get" ]; then',
       "  echo 'Provider: nvidia-prod'",
@@ -197,6 +206,12 @@ describe("CLI sandbox status JSON output", testTimeoutOptions(20_000), () => {
       expectedProbed: true,
     },
     {
+      name: "HTTP 199 interim response",
+      routeOutput: "BROKEN 199",
+      expectedFailure: "unreachable",
+      expectedProbed: true,
+    },
+    {
       name: "unavailable probe",
       routeOutput: "",
       routeExit: 1,
@@ -268,6 +283,29 @@ describe("CLI sandbox status JSON output", testTimeoutOptions(20_000), () => {
       endpoint: "https://inference.local/v1/models",
     });
     expect(parsed.inferenceHealth).not.toHaveProperty("failureLabel");
+  });
+
+  it("sandbox status --json fails closed when the injected CA bundle is missing (#6192)", () => {
+    const { home, localBin, sandboxName } = createInferenceRouteStatusSetup({
+      executeRouteCommand: true,
+      routeOutput: "",
+    });
+
+    const result = runWithEnv(`${sandboxName} status --json`, {
+      CURL_CA_BUNDLE: path.join(home, "missing-openshell-ca.pem"),
+      HOME: home,
+      PATH: `${localBin}:${process.env.PATH || ""}`,
+      SSL_CERT_FILE: "",
+    });
+
+    expect(result.code).toBe(1);
+    const parsed = JSON.parse(result.out);
+    expect(parsed.inferenceHealth).toMatchObject({
+      ok: false,
+      probed: true,
+      endpoint: "https://inference.local/v1/models",
+      failureLabel: "unreachable",
+    });
   });
 
   it("sandbox status --json defaults openshell driver/version to 'unknown' strings", () => {

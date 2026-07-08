@@ -23,7 +23,7 @@ export type SandboxInferenceRouteHealth = {
  *
  * Returns null when OpenShell exec, DNS, TLS, proxy setup, or the response
  * framing cannot produce a trusted route result. Callers must treat null as
- * probe unavailable, never as a healthy route.
+ * probe unavailable, never as a healthy or definitively broken route.
  */
 export async function probeSandboxInferenceGatewayHealth(
   sandboxName: string,

@@ -51,6 +51,8 @@ const PROXY_ENV_KEYS = [
 const DCODE_INFERENCE_ROUTE_PROBE_WRAPPER = [
   INFERENCE_ROUTE_CA_FROM_ENV,
   INFERENCE_ROUTE_CA_VALIDATION,
+  // bash -lc receives CA_BUNDLE as argv[0], so the inner script reads the
+  // exact OpenShell-injected CA path from $0 after the login shell loads.
   `exec env ${PROXY_ENV_KEYS.map((key) => `-u ${key}`).join(" ")} HOME=/sandbox bash -lc "$1" "$CA_BUNDLE"`,
 ].join("; ");
 
