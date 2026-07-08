@@ -6,7 +6,10 @@ import * as webSearch from "../inference/web-search";
 import { listMessagingCredentialMetadata } from "../messaging/channels";
 import { type ChannelDef, getChannelTokenKeys } from "../sandbox/channels";
 import * as braveProviderProfile from "./brave-provider-profile";
-import { collectMessagingBridgeTokenDefs } from "./messaging-bridge-provider";
+import {
+  bridgeProviderNamesForChannel,
+  collectMessagingBridgeTokenDefs,
+} from "./messaging-bridge-provider";
 
 export type NamedMessagingChannel = { name: string } & ChannelDef;
 
@@ -145,6 +148,24 @@ export function prepareCreateSandboxMessaging(
       reusableMessagingProviders.push(name);
       if (!reusableMessagingChannels.includes(channel)) {
         reusableMessagingChannels.push(channel);
+      }
+    }
+  }
+
+  // Bridge channels have no token def at all when their env-only secret is
+  // gone (fresh process), so the envKey loop above misses them. The gateway
+  // still holds the refresh material — reuse the provider by name instead.
+  if (input.enabledChannels != null) {
+    for (const channel of input.enabledChannels) {
+      if (disabledChannelNames.has(channel)) continue;
+      for (const name of bridgeProviderNamesForChannel(input.sandboxName, channel)) {
+        if (messagingTokenDefs.some((def) => def.name === name && def.token)) continue;
+        if (reusableMessagingProviders.includes(name)) continue;
+        if (!input.providerExistsInGateway(name)) continue;
+        reusableMessagingProviders.push(name);
+        if (!reusableMessagingChannels.includes(channel)) {
+          reusableMessagingChannels.push(channel);
+        }
       }
     }
   }

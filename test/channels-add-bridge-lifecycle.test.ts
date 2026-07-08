@@ -1,0 +1,213 @@
+// SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Bridge-provider lifecycle on the DIRECT `channels add` path (#6120): a
+// bridge-backed channel (googlechat) declares no manifest credentials, so the
+// add path must (1) create + refresh-configure the gateway bridge provider
+// itself, (2) fail loudly when the pasted secret is missing, and (3) tear the
+// just-created provider back down when gateway registration fails midway.
+
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
+import { addSandboxChannel } from "../src/lib/actions/sandbox/policy-channel";
+import { policyChannelDependencies } from "../src/lib/actions/sandbox/policy-channel-dependencies";
+import * as processRecovery from "../src/lib/actions/sandbox/process-recovery";
+import * as runtime from "../src/lib/adapters/openshell/runtime";
+import * as store from "../src/lib/credentials/store";
+import * as gatewayRuntime from "../src/lib/gateway-runtime-action";
+import { MESSAGING_BRIDGE_PENDING_VALUE } from "../src/lib/onboard/messaging-bridge-provider";
+import * as policies from "../src/lib/policy";
+import * as onboardSession from "../src/lib/state/onboard-session";
+import type { SandboxEntry } from "../src/lib/state/registry";
+import * as registry from "../src/lib/state/registry";
+
+class ExitError extends Error {
+  constructor(public readonly code: number | undefined) {
+    super(`process.exit(${code})`);
+  }
+}
+
+const SA_JSON = JSON.stringify({
+  client_email: "bot@p.iam.gserviceaccount.com",
+  private_key: "fake-test-private-key-material",
+});
+
+const GOOGLECHAT_ENV = {
+  GOOGLECHAT_SERVICE_ACCOUNT: SA_JSON,
+  GOOGLECHAT_AUDIENCE: "https://bot.example.com/googlechat",
+  GOOGLECHAT_APP_PRINCIPAL: "123456789012345678901",
+};
+
+// Why this mock exists: the real googlechat tunnel/audience gate needs a human
+// operator (Google Cloud Console steps), so on a non-interactive test run it
+// throws and the whole channel is skipped — the add path under test would
+// never execute.
+//
+// What it does: keep the module intact except the gate's registration, whose
+// handler is replaced with one that succeeds immediately — as if the operator
+// had already finished enrollment. Everything else in the add path runs real.
+type GateModule =
+  typeof import("../src/lib/messaging/channels/googlechat/hooks/tunnel-audience-gate");
+
+vi.mock(
+  "../src/lib/messaging/channels/googlechat/hooks/tunnel-audience-gate",
+  async (importOriginal) => {
+    const actual = await importOriginal<GateModule>();
+    return {
+      ...actual,
+      createGooglechatTunnelAudienceGateHookRegistration: () => ({
+        id: actual.GOOGLECHAT_TUNNEL_AUDIENCE_GATE_HOOK_ID,
+        handler: async () => ({}),
+      }),
+    };
+  },
+);
+
+const originalProcessEnv = { ...process.env };
+
+let errorSpy: MockInstance;
+let logSpy: MockInstance;
+let exitSpy: MockInstance;
+let providerSpy: MockInstance;
+let runOpenshellSpy: MockInstance;
+let testHome: string;
+
+function printedText(): string {
+  return [...logSpy.mock.calls, ...errorSpy.mock.calls]
+    .map((call) => call.map(String).join(" "))
+    .join("\n");
+}
+
+function openshellCalls(): string[][] {
+  return runOpenshellSpy.mock.calls.map((call) => call[0] as string[]);
+}
+
+beforeEach(() => {
+  testHome = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-add-bridge-"));
+  process.env.HOME = testHome;
+  process.env.NEMOCLAW_NON_INTERACTIVE = "1";
+  Object.assign(process.env, GOOGLECHAT_ENV);
+
+  logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+  errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+  exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
+    throw new ExitError(code);
+  }) as never);
+
+  const entry = { name: "test-sb", agent: "openclaw" } as SandboxEntry;
+  vi.spyOn(registry, "getSandbox").mockImplementation(() => entry);
+  vi.spyOn(registry, "listSandboxes").mockImplementation(() => ({
+    sandboxes: [entry],
+    defaultSandbox: "test-sb",
+  }));
+  vi.spyOn(registry, "updateSandbox").mockReturnValue(true);
+
+  vi.spyOn(policies, "loadPresetForSandbox").mockReturnValue(
+    "network_policies:\n  stub:\n    egress:\n      - host: example.com\n",
+  );
+  vi.spyOn(policies, "applyPreset").mockReturnValue(true);
+  vi.spyOn(policies, "getAppliedPresets").mockReturnValue([]);
+
+  vi.spyOn(store, "getCredential").mockImplementation((key) => process.env[key] || null);
+  vi.spyOn(store, "saveCredential").mockImplementation(() => undefined);
+  vi.spyOn(store, "prompt").mockResolvedValue("y");
+
+  const session = {
+    sandboxName: "test-sb",
+    policyPresets: [],
+  } as unknown as onboardSession.Session;
+  vi.spyOn(onboardSession, "loadSession").mockReturnValue(session);
+  vi.spyOn(onboardSession, "updateSession").mockImplementation(() => session);
+
+  providerSpy = vi
+    .spyOn(policyChannelDependencies, "upsertMessagingProviders")
+    .mockImplementation(() => []);
+  vi.spyOn(policyChannelDependencies, "rebuildSandbox").mockImplementation(async () => undefined);
+
+  runOpenshellSpy = vi.spyOn(runtime, "runOpenshell").mockImplementation(() => ({
+    pid: 0,
+    output: [null, "", ""],
+    stdout: "",
+    stderr: "",
+    status: 0,
+    signal: null,
+  }));
+
+  const healthyGatewayState = {
+    state: "healthy_named",
+    status: "",
+    gatewayInfo: "",
+    activeGateway: "nemoclaw",
+  } as const;
+  vi.spyOn(gatewayRuntime, "recoverNamedGatewayRuntime").mockResolvedValue({
+    recovered: true,
+    before: healthyGatewayState,
+    after: healthyGatewayState,
+    attempted: false,
+  });
+
+  vi.spyOn(processRecovery, "executeSandboxExecCommand").mockReturnValue({
+    status: 0,
+    stdout: "",
+    stderr: "",
+  });
+  vi.spyOn(processRecovery, "executeSandboxCommand").mockReturnValue(null);
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  fs.rmSync(testHome, { recursive: true, force: true });
+  for (const key of Object.keys(process.env)) delete process.env[key];
+  Object.assign(process.env, originalProcessEnv);
+});
+
+describe("channels add owns the bridge-provider lifecycle (#6120)", () => {
+  it("creates and refresh-configures the gateway bridge provider on the direct add path", async () => {
+    await addSandboxChannel("test-sb", { channel: "googlechat" });
+
+    expect(providerSpy).toHaveBeenCalledWith(
+      [
+        {
+          name: "test-sb-googlechat-bridge",
+          envKey: "GOOGLE_CHAT_ACCESS_TOKEN",
+          token: MESSAGING_BRIDGE_PENDING_VALUE,
+          providerType: "google-chat-bridge",
+        },
+      ],
+      { bestEffort: true },
+    );
+    expect(printedText()).toContain("Registered googlechat bridge");
+  });
+
+  it("fails loudly at add time when the bridge secret is not resolvable", async () => {
+    delete process.env.GOOGLECHAT_SERVICE_ACCOUNT;
+
+    await expect(addSandboxChannel("test-sb", { channel: "googlechat" })).rejects.toMatchObject({
+      code: 1,
+    });
+
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(providerSpy).not.toHaveBeenCalled();
+    expect(printedText()).toContain("GOOGLECHAT_SERVICE_ACCOUNT");
+  });
+
+  it("tears the just-created bridge provider back down when gateway registration fails", async () => {
+    providerSpy.mockImplementation(() => {
+      throw new Error("simulated gateway failure");
+    });
+
+    await expect(addSandboxChannel("test-sb", { channel: "googlechat" })).rejects.toMatchObject({
+      code: 1,
+    });
+
+    expect(printedText()).toContain("Failed to register 'googlechat' providers");
+    expect(openshellCalls()).toEqual(
+      expect.arrayContaining([
+        ["sandbox", "provider", "detach", "test-sb", "test-sb-googlechat-bridge"],
+        ["provider", "delete", "test-sb-googlechat-bridge"],
+      ]),
+    );
+  });
+});

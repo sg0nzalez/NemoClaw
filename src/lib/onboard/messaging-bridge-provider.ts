@@ -295,6 +295,23 @@ export function bridgeProviderNamesForChannel(
 }
 
 /**
+ * Source-secret env var(s) a channel's bridge profile(s) require — for naming
+ * the missing env var in enable-time error messages.
+ */
+export function bridgeSecretEnvsForChannel(
+  channelName: string,
+  profiles: readonly MessagingBridgeProfile[] = listMessagingBridgeProfiles(),
+): string[] {
+  return [
+    ...new Set(
+      profiles
+        .filter((profile) => profile.channelId === channelName)
+        .map((profile) => profile.sourceSecretEnv),
+    ),
+  ];
+}
+
+/**
  * Register each active bridge provider profile with OpenShell before providers
  * are created (they are created with `--type <profileId>`). Idempotent: tolerates
  * OpenShell reporting the custom profile already exists. Self-gates when no bridge

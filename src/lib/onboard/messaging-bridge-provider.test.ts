@@ -4,6 +4,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   bridgeProviderNamesForChannel,
+  bridgeSecretEnvsForChannel,
   collectMessagingBridgeTokenDefs,
   configureMessagingBridgeRefreshes,
   ensureMessagingBridgeProfiles,
@@ -278,5 +279,23 @@ describe("bridgeProviderNamesForChannel (PRA-8: channels remove teardown)", () =
         { ...GC_PROFILE, agent: "hermes" },
       ]),
     ).toEqual(["sbx-googlechat-bridge"]);
+  });
+});
+
+describe("bridgeSecretEnvsForChannel", () => {
+  it("names the source-secret env var so enable-time callers can fail loudly", () => {
+    expect(bridgeSecretEnvsForChannel("googlechat", [GC_PROFILE])).toEqual([
+      "GOOGLECHAT_SERVICE_ACCOUNT",
+    ]);
+  });
+
+  it("returns nothing for a channel without a bridge profile", () => {
+    expect(bridgeSecretEnvsForChannel("telegram", [GC_PROFILE])).toEqual([]);
+  });
+
+  it("dedupes across per-agent profiles sharing one secret env", () => {
+    expect(
+      bridgeSecretEnvsForChannel("googlechat", [GC_PROFILE, { ...GC_PROFILE, agent: "hermes" }]),
+    ).toEqual(["GOOGLECHAT_SERVICE_ACCOUNT"]);
   });
 });
