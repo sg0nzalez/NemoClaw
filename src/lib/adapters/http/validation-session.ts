@@ -30,6 +30,8 @@ export type ValidationDnsLookup = (
 export interface ValidationSessionOptions {
   env?: NodeJS.ProcessEnv;
   lookup?: ValidationDnsLookup;
+  /** Addresses approved by the custom-endpoint SSRF preflight. */
+  pinnedAddresses?: readonly string[];
   onSocket?: (socket: net.Socket) => void;
   dnsTimeoutMs?: number;
   /** @internal Allows local HTTP servers in transport unit tests. */
@@ -179,23 +181,31 @@ export async function createValidationSession(
   const endpoint = new URL(endpointUrl);
   const lookup = options.lookup ?? (dns.lookup as ValidationDnsLookup);
   let addresses: Array<{ address: string; family: number }>;
-  try {
-    addresses = await withTraceSpan(
-      "nemoclaw.inference.validation_dns_lookup",
-      { "server.address": endpoint.hostname },
-      () =>
-        withTimeout(
-          lookup(endpoint.hostname, { all: true, verbatim: true }),
-          options.dnsTimeoutMs ?? DEFAULT_DNS_LOOKUP_TIMEOUT_MS,
-          "validation DNS lookup timed out",
-        ),
-    );
-  } catch (error) {
-    addTraceEvent("validation_transport_fallback", {
-      reason: "dns_lookup_failed",
-      error_code: (error as NodeJS.ErrnoException).code ?? "unknown",
-    });
-    return null;
+  if (options.pinnedAddresses && options.pinnedAddresses.length > 0) {
+    addresses = options.pinnedAddresses.map((address) => ({ address, family: net.isIP(address) }));
+    if (addresses.some(({ family }) => family === 0)) {
+      addTraceEvent("validation_transport_fallback", { reason: "invalid_pinned_address" });
+      return null;
+    }
+  } else {
+    try {
+      addresses = await withTraceSpan(
+        "nemoclaw.inference.validation_dns_lookup",
+        { "server.address": endpoint.hostname },
+        () =>
+          withTimeout(
+            lookup(endpoint.hostname, { all: true, verbatim: true }),
+            options.dnsTimeoutMs ?? DEFAULT_DNS_LOOKUP_TIMEOUT_MS,
+            "validation DNS lookup timed out",
+          ),
+      );
+    } catch (error) {
+      addTraceEvent("validation_transport_fallback", {
+        reason: "dns_lookup_failed",
+        error_code: (error as NodeJS.ErrnoException).code ?? "unknown",
+      });
+      return null;
+    }
   }
   if (addresses.length === 0) {
     addTraceEvent("validation_transport_fallback", { reason: "dns_lookup_empty" });

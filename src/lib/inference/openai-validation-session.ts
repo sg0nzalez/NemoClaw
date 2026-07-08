@@ -18,6 +18,7 @@ export interface OpenAiValidationOptions {
   skipResponsesProbe?: boolean;
   probeStreaming?: boolean;
   isWsl?: boolean;
+  pinnedAddresses?: readonly string[];
   validationSessionOptions?: ValidationSessionOptions;
 }
 
@@ -215,8 +216,18 @@ export async function probeOpenAiLikeEndpointWithValidationSession(
     addTraceEvent("validation_transport_fallback", { reason: "special_streaming_model" });
     return deps.legacyProbe(endpointUrl, model, apiKey, options);
   }
+  // Custom-endpoint SSRF preflight pins approved addresses through curl's
+  // reviewed --resolve boundary. Keep that security path authoritative until
+  // native address pinning has equivalent end-to-end rebinding coverage.
+  if (options.pinnedAddresses && options.pinnedAddresses.length > 0) {
+    addTraceEvent("validation_transport_fallback", { reason: "preflight_address_pinning" });
+    return deps.legacyProbe(endpointUrl, model, apiKey, options);
+  }
 
-  const session = await createValidationSession(endpointUrl, deps.sessionOptions);
+  const session = await createValidationSession(endpointUrl, {
+    ...deps.sessionOptions,
+    pinnedAddresses: options.pinnedAddresses ?? deps.sessionOptions?.pinnedAddresses,
+  });
   if (!session) return deps.legacyProbe(endpointUrl, model, apiKey, options);
 
   const baseUrl = endpointUrl.replace(/\/+$/, "");

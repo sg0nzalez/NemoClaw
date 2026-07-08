@@ -73,6 +73,31 @@ describe("provider validation session", () => {
     expect(requests).toEqual(["/v1/responses", "/v1/chat/completions"]);
   });
 
+  it("uses preflight-pinned addresses without another DNS lookup", async () => {
+    const server = http.createServer((request, response) => {
+      request.resume();
+      response.end('{"ok":true}');
+    });
+    const port = await listen(server);
+    const lookup = vi.fn();
+    const session = await createValidationSession(`http://provider.example.test:${port}/v1`, {
+      env: {},
+      lookup,
+      pinnedAddresses: ["127.0.0.1"],
+      allowPrivateAddressesForTesting: true,
+    });
+
+    await expect(
+      session!.request({
+        url: `http://provider.example.test:${port}/v1/responses`,
+        body: "{}",
+        timeoutMs: 1_000,
+      }),
+    ).resolves.toMatchObject({ ok: true });
+    expect(lookup).not.toHaveBeenCalled();
+    session!.close();
+  });
+
   it("falls back when pre-resolution fails", async () => {
     const lookup = vi.fn(async () => {
       throw Object.assign(new Error("temporary DNS failure"), { code: "EAI_AGAIN" });
