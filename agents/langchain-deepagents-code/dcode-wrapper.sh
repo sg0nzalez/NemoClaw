@@ -100,7 +100,7 @@ has_context_secret_shape() {
   upper="$(printf '%s' "$1" | tr '[:lower:]' '[:upper:]')"
   # The outer class accepts '=', ':', or whitespace; [:space:] is the nested
   # POSIX character class understood by Bash's [[ string =~ regex ]] operator.
-  [[ "$upper" =~ (_KEY|API_KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL)[=:[:space:]][\'\"]?[A-Z0-9_.+/=-]{10,} ]]
+  [[ "$upper" =~ (_KEY|API_KEY|SECRET|TOKEN|PASSWORD|PASS|CREDENTIAL)[=:[:space:]][\'\"]?[A-Z0-9_.+/=-]{10,} ]]
 }
 
 has_bearer_secret_shape() {

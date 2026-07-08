@@ -75,7 +75,7 @@ describe("Deep Agents Code secret-pattern parity", () => {
       ],
       context: [
         "(?<=Bearer\\s+)[A-Za-z0-9_.+/=-]{10,}::gi",
-        "(?<=(?:_KEY|API_KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL)[=: ]['\"]?)[A-Za-z0-9_.+/=-]{10,}::gi",
+        "(?<=(?:_KEY|API_KEY|SECRET|TOKEN|PASSWORD|PASS|CREDENTIAL)[=: ]['\"]?)[A-Za-z0-9_.+/=-]{10,}::gi",
       ],
       block: [
         "-----BEGIN (?:[A-Z0-9]+ )?PRIVATE KEY-----[\\s\\S]*?-----END (?:[A-Z0-9]+ )?PRIVATE KEY-----::g",

@@ -68,12 +68,10 @@ function replaceHashDefinitions(
   source: string,
   replacements: readonly (readonly [name: string, currentHash: string, fixtureHash: string])[],
 ): string {
-  // Exact definitions are deliberate: harmless formatting drift still requires
-  // reviewing the first-party source before this fixture can substitute hashes.
   return replacements.reduce((current, [name, currentHash, fixtureHash]) => {
-    const definition = `${name} = (\n    "${currentHash}"\n)`;
-    assert.equal(current.split(definition).length, 2, `expected exactly one ${name} definition`);
-    return current.replace(definition, `${name} = (\n    "${fixtureHash}"\n)`);
+    const definition = new RegExp(`(${name}\\s*=\\s*\\(\\s*)(["'])${currentHash}\\2(\\s*\\))`, "g");
+    assert.equal(current.match(definition)?.length, 1, `expected exactly one ${name} definition`);
+    return current.replace(definition, `$1$2${fixtureHash}$2$3`);
   }, source);
 }
 
@@ -218,11 +216,12 @@ function buildAndInstallPluginWheel(version: string): string {
   fs.mkdirSync(wheelDir);
   const projectPath = path.join(projectRoot, "pyproject.toml");
   const project = fs.readFileSync(projectPath, "utf8");
-  // The GitHub runner's system setuptools predates PEP 639 string licenses;
-  // production uses the pinned backend and keeps the standards-current string.
-  // Spell the same license as its equivalent PEP 621 table so this offline,
-  // no-isolation wheel build remains portable without changing package code,
-  // entry-point metadata, or the version gate under test.
+  // invalidState: the runner's system setuptools predates PEP 639 strings.
+  // sourceBoundary: this portable wheel exists only to test wrong-version
+  // entry-point binding; production builds the unchanged project metadata.
+  // whyNotSourceFix: the PEP 639 string is the standards-current source form.
+  // regressionTest: the production validator requires License-Expression.
+  // removalCondition: remove this conversion when runner setuptools supports it.
   const versionedProject = project
     .replace('version = "0.1.0"', `version = "${version}"`)
     .replace('license = "Apache-2.0"', 'license = { text = "Apache-2.0" }');

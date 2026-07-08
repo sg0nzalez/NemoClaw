@@ -165,6 +165,12 @@ export const CANONICAL_SECRET_POSITIVE_VECTORS: readonly CanonicalSecretPositive
     patternIndex: 1,
   },
   {
+    label: "pass_context",
+    value: "CUSTOM_PASS=opaqueCredentialPayloadZ1234567890",
+    patternGroup: "context",
+    patternIndex: 1,
+  },
+  {
     label: "private_key_block",
     value: "-----BEGIN TEST PRIVATE KEY-----\nopaque-test-body\n-----END TEST PRIVATE KEY-----",
     patternGroup: "block",

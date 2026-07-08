@@ -127,6 +127,25 @@ describe("LangChain Deep Agents Code image credential boundary", () => {
     }
   });
 
+  it("accepts the mounted OpenShell TLS key path only from runtime provenance", () => {
+    const name = "OPENSHELL_TLS_KEY";
+    const value = "/etc/openshell/tls/client/tls.key";
+    const runtimeDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-dcode-tls-runtime-"));
+    const runtimeFixture = makeWrapperFixture(runtimeDir);
+    const runtimeResult = runWrapper(runtimeFixture.wrapperPath, ["-n", "hi"], { [name]: value });
+    expect(runtimeResult.status, runtimeResult.stderr).toBe(0);
+    expect(fs.existsSync(runtimeFixture.ranMarker)).toBe(true);
+
+    const dotenvDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-dcode-tls-dotenv-"));
+    const dotenvFixture = makeWrapperFixture(dotenvDir);
+    fs.writeFileSync(dotenvFixture.envFile, `${name}=${value}\n`, "utf8");
+    const dotenvResult = runWrapper(dotenvFixture.wrapperPath, ["-n", "hi"], {});
+    expect(dotenvResult.status).not.toBe(0);
+    expect(dotenvResult.stderr).toContain(name);
+    expect(dotenvResult.stderr).not.toContain(value);
+    expect(fs.existsSync(dotenvFixture.ranMarker)).toBe(false);
+  });
+
   it("allows nemoclaw-managed messaging tokens whose values are intentionally credential-shaped", () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-dcode-wrapper-"));
     const { wrapperPath, ranMarker } = makeWrapperFixture(tempDir);

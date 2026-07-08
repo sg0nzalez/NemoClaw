@@ -51,7 +51,7 @@ export const TOKEN_PREFIX_PATTERNS: RegExp[] = [
 /** Context-anchored patterns (require a prefix like KEY=, Bearer, etc.). */
 export const CONTEXT_PATTERNS: RegExp[] = [
   /(?<=Bearer\s+)[A-Za-z0-9_.+/=-]{10,}/gi,
-  /(?<=(?:_KEY|API_KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL)[=: ]['"]?)[A-Za-z0-9_.+/=-]{10,}/gi,
+  /(?<=(?:_KEY|API_KEY|SECRET|TOKEN|PASSWORD|PASS|CREDENTIAL)[=: ]['"]?)[A-Za-z0-9_.+/=-]{10,}/gi,
 ];
 
 /** Multi-line or JSON-escaped secret blocks that do not have a token prefix. */

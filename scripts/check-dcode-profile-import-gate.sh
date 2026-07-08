@@ -25,17 +25,16 @@ trap cleanup EXIT
 cd "${repo_root}"
 
 # Plain progress is required to prove the exact import failure, so fail before
-# building if any reviewed Dockerfile introduces a secret-shaped ARG name.
-# NEMOCLAW_PROVIDER_KEY is a non-secret routing label with a public default.
+# building if any reviewed Dockerfile introduces an unreviewed ARG name.
 for dockerfile in \
   agents/langchain-deepagents-code/Dockerfile.base \
   test/Dockerfile.dcode-profile-missing-dependencies \
   agents/langchain-deepagents-code/Dockerfile; do
   while IFS= read -r arg_name; do
     case "${arg_name}" in
-      NEMOCLAW_PROVIDER_KEY) continue ;;
-      *KEY* | *SECRET* | *TOKEN* | *PASSWORD* | *PASS* | *CREDENTIAL*)
-        echo "ERROR: plain-progress build refuses secret-shaped ARG ${arg_name} in ${dockerfile}" >&2
+      BASE_IMAGE | NEMOCLAW_MODEL | NEMOCLAW_PROVIDER_KEY | NEMOCLAW_UPSTREAM_PROVIDER | NEMOCLAW_INFERENCE_BASE_URL | NEMOCLAW_INFERENCE_API | NEMOCLAW_TOOL_DISCLOSURE | NEMOCLAW_BUILD_ID | NEMOCLAW_DARWIN_VM_COMPAT | NEMOCLAW_PROXY_HOST | NEMOCLAW_PROXY_PORT) ;;
+      *)
+        echo "ERROR: plain-progress build refuses unreviewed ARG ${arg_name} in ${dockerfile}" >&2
         exit 1
         ;;
     esac

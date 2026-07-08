@@ -172,7 +172,7 @@ _ANCHORED_SECRET_PATTERNS = (
         re.IGNORECASE,
     ),
     re.compile(
-        r"((?:_KEY|API_KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL)[=: ]['\"]?)"
+        r"((?:_KEY|API_KEY|SECRET|TOKEN|PASSWORD|PASS|CREDENTIAL)[=: ]['\"]?)"
         r"[A-Za-z0-9_.+/=-]{10,}",
         re.IGNORECASE,
     ),
@@ -200,7 +200,7 @@ _TRUNCATED_SECRET_PATTERNS = tuple(
         (
             r"(?:Bearer[\t\n\v\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029"
             r"\u202f\u205f\u3000\ufeff]+|"
-            r"(?:_KEY|API_KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL)[=: ]['\"]?)"
+            r"(?:_KEY|API_KEY|SECRET|TOKEN|PASSWORD|PASS|CREDENTIAL)[=: ]['\"]?)"
             r"[A-Za-z0-9_.+/=-]*\Z",
             re.IGNORECASE,
         ),
