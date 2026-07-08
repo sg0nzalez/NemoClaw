@@ -199,9 +199,16 @@ async function requestWithHttpRetry(
 }
 
 function shouldUseLegacyForModel(model: string): boolean {
-  // Source of truth: onboard-probes.ts owns DeepSeek V4 Pro's streaming
-  // timeout-continuation behavior. Keep this model on that established curl
-  // path until those streaming semantics move into a shared typed helper.
+  // Invalid state: the native session does not reproduce DeepSeek V4 Pro's
+  // accepted late-first-token timeout result. The source of truth remains the
+  // specialized streaming Chat Completions path in onboard-probes.ts, which
+  // owns its payload, extended timeout, warning, and validated:false result.
+  // Trying native first would add a long duplicate request before curl fallback
+  // and could turn that accepted warning into a validation failure. The
+  // "keeps DeepSeek V4 Pro on its specialized legacy streaming probe" test
+  // locks direct legacy dispatch without native DNS. Remove this exception once
+  // both transports share the streaming timeout-continuation helper and return
+  // the same validation result.
   return model.toLowerCase() === "deepseek-ai/deepseek-v4-pro";
 }
 
