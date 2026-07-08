@@ -11,6 +11,7 @@ import * as agentForwardStop from "./agent-forward-stop";
 import type { ReleaseGatewayPortResult } from "./gateway-port-release";
 import type { GatewayStopDeps } from "./gateway-stop";
 import * as gatewayStop from "./gateway-stop";
+import * as sandboxGatewayStop from "./sandbox-gateway-stop";
 import { stopAll } from "./services";
 
 vi.mock("../adapters/docker", () => ({
@@ -184,15 +185,28 @@ describe("stopAll gateway-stop wiring", () => {
     vi.restoreAllMocks();
   });
 
-  it("passes the resolved sandbox and service reporters to the focused stop module", () => {
+  it("orders supervised-agent full stop as sandbox guard, forwards, then gateway release", () => {
     const pidDir = mkdtempSync(join(tmpdir(), "nemoclaw-gateway-stop-wiring-"));
     vi.stubEnv("PATH", "");
+    const order: string[] = [];
+    const stopSandboxGateway = vi
+      .spyOn(sandboxGatewayStop, "stopSandboxChannels")
+      .mockImplementation((_sandboxName, deps) => {
+        order.push("sandbox-guard");
+        deps?.info?.(
+          "Hermes Agent gateway is managed by the sandbox; leaving it running while host forwards stop.",
+        );
+      });
     const releaseForStop = vi
       .spyOn(gatewayStop, "releaseGatewayPortForStop")
-      .mockImplementation(() => {});
+      .mockImplementation(() => {
+        order.push("gateway-release");
+      });
     const stopAgentForwards = vi
       .spyOn(agentForwardStop, "stopAgentForwardPortsForStop")
-      .mockImplementation(() => {});
+      .mockImplementation(() => {
+        order.push("host-forwards");
+      });
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
     try {
@@ -201,19 +215,22 @@ describe("stopAll gateway-stop wiring", () => {
       rmSync(pidDir, { recursive: true, force: true });
     }
 
-    expect(stopAgentForwards).toHaveBeenCalledTimes(1);
+    expect(stopSandboxGateway).toHaveBeenCalledWith("alpha", {
+      info: expect.any(Function),
+      warn: expect.any(Function),
+    });
     expect(stopAgentForwards).toHaveBeenCalledWith("alpha", {
       info: expect.any(Function),
       warn: expect.any(Function),
     });
-    expect(releaseForStop).toHaveBeenCalledTimes(1);
     expect(releaseForStop).toHaveBeenCalledWith("alpha", {
       info: expect.any(Function),
       warn: expect.any(Function),
     });
-    expect(logSpy.mock.calls.map((call) => String(call[0] ?? "")).join("\n")).toContain(
-      "All services stopped",
-    );
+    expect(order).toEqual(["sandbox-guard", "host-forwards", "gateway-release"]);
+    const output = logSpy.mock.calls.map((call) => String(call[0] ?? "")).join("\n");
+    expect(output).toContain("Hermes Agent gateway is managed by the sandbox");
+    expect(output).toContain("All services stopped");
   });
 
   it("preserves the shared gateway for canonical tunnel-only stop", () => {
@@ -225,6 +242,7 @@ describe("stopAll gateway-stop wiring", () => {
     const stopAgentForwards = vi
       .spyOn(agentForwardStop, "stopAgentForwardPortsForStop")
       .mockImplementation(() => {});
+    vi.spyOn(sandboxGatewayStop, "stopSandboxChannels").mockImplementation(() => {});
 
     try {
       stopAll({ pidDir, sandboxName: "alpha" });

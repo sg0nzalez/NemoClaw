@@ -6,603 +6,130 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// ---------------------------------------------------------------------------
-// We test stopSandboxChannels / stopAll by temporarily replacing the
-// compiled resolve-openshell module's export and spying on spawnSync.
-// This avoids vi.mock() hoisting issues with CommonJS require chains.
-// ---------------------------------------------------------------------------
+import * as sandboxGatewayStop from "./sandbox-gateway-stop";
+import { stopAll } from "./services";
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const resolveOpenshellModule = require("../adapters/openshell/resolve");
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const agentRuntimeModule = require("../agent/runtime") as typeof import("../agent/runtime");
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const registryModule = require("../state/registry") as typeof import("../state/registry");
+const SANDBOX_ENV_NAMES = ["NEMOCLAW_SANDBOX", "NEMOCLAW_SANDBOX_NAME", "SANDBOX_NAME"] as const;
 
-const { stopAll, stopSandboxChannels } = require("./services") as typeof import("./services");
-
-// ---------------------------------------------------------------------------
-// stopSandboxChannels
-// ---------------------------------------------------------------------------
-
-describe("stopSandboxChannels", () => {
-  let spawnSyncSpy: ReturnType<typeof vi.spyOn>;
-  let originalResolve: typeof resolveOpenshellModule.resolveOpenshell;
-  let originalGetSessionAgent: typeof agentRuntimeModule.getSessionAgent;
-  let originalGetSandbox: typeof registryModule.getSandbox;
-
-  beforeEach(() => {
-    originalResolve = resolveOpenshellModule.resolveOpenshell;
-    originalGetSessionAgent = agentRuntimeModule.getSessionAgent;
-    originalGetSandbox = registryModule.getSandbox;
-    resolveOpenshellModule.resolveOpenshell = vi.fn(() => "/usr/local/bin/openshell");
-    agentRuntimeModule.getSessionAgent = vi.fn(() => null);
-    registryModule.getSandbox = vi.fn(() => null);
-    // Spy on child_process.spawnSync used by the compiled dist module.
-    // The dist code does `require("node:child_process").spawnSync`, so
-    // we spy on the same module that the compiled code loaded.
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const cp = require("node:child_process");
-    spawnSyncSpy = vi.spyOn(cp, "spawnSync").mockReturnValue({ status: 0 });
-  });
-
-  afterEach(() => {
-    resolveOpenshellModule.resolveOpenshell = originalResolve;
-    agentRuntimeModule.getSessionAgent = originalGetSessionAgent;
-    registryModule.getSandbox = originalGetSandbox;
-    spawnSyncSpy.mockRestore();
-  });
-
-  it("uses kubectl via the OpenShell gateway container for privileged shutdown", () => {
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    spawnSyncSpy
-      .mockReturnValueOnce({ status: 0, stdout: "pod/my-sandbox-0\n" })
-      .mockReturnValueOnce({ status: 0 });
-
-    stopSandboxChannels("my-sandbox");
-
-    expect(spawnSyncSpy).toHaveBeenNthCalledWith(
-      1,
-      "docker",
-      [
-        "exec",
-        "openshell-cluster-nemoclaw",
-        "kubectl",
-        "get",
-        "pods",
-        "-n",
-        "openshell",
-        "-o",
-        "name",
-      ],
-      expect.objectContaining({ timeout: 10000 }),
-    );
-    expect(spawnSyncSpy).toHaveBeenNthCalledWith(
-      2,
-      "docker",
-      [
-        "exec",
-        "openshell-cluster-nemoclaw",
-        "kubectl",
-        "exec",
-        "-n",
-        "openshell",
-        "-c",
-        "agent",
-        "pod/my-sandbox-0",
-        "--",
-        "sh",
-        "-lc",
-        expect.any(String),
-      ],
-      expect.objectContaining({ timeout: 20000 }),
-    );
-    const args = spawnSyncSpy.mock.calls[1][1] as string[];
-    const script = args[args.length - 1];
-    expect(script).toContain("ps -eo user=,pid=,args=");
-    expect(script).toContain("openclaw-gateway");
-    expect(script).toContain("kill -TERM $pids");
-    expect(script).toContain("kill -KILL $remaining");
-    const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
-    expect(output).toContain("OpenClaw gateway stopped inside sandbox");
-    logSpy.mockRestore();
-  });
-
-  it("falls back to openshell sandbox exec when the gateway container is unavailable", () => {
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    spawnSyncSpy.mockReturnValueOnce({ status: 1, stdout: "" }).mockReturnValueOnce({ status: 0 });
-
-    stopSandboxChannels("my-sandbox");
-
-    expect(spawnSyncSpy).toHaveBeenNthCalledWith(
-      2,
-      "/usr/local/bin/openshell",
-      ["sandbox", "exec", "--name", "my-sandbox", "--gateway", "nemoclaw", "--", "sh", "-s"],
-      expect.objectContaining({
-        input: expect.stringContaining("find_gateway_pids"),
-        timeout: 20000,
-      }),
-    );
-    const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
-    expect(output).toContain("OpenClaw gateway stopped inside sandbox");
-    logSpy.mockRestore();
-  });
-
-  it("uses the generated sandbox pod name for privileged shutdown", () => {
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    spawnSyncSpy
-      .mockReturnValueOnce({ status: 0, stdout: "pod/app-abc\n" })
-      .mockReturnValueOnce({ status: 0 });
-
-    stopSandboxChannels("app");
-
-    const args = spawnSyncSpy.mock.calls[1][1] as string[];
-    expect(args).toContain("pod/app-abc");
-    logSpy.mockRestore();
-  });
-
-  it("does not select overlapping sandbox pod names for privileged shutdown", () => {
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    spawnSyncSpy
-      .mockReturnValueOnce({
-        status: 0,
-        stdout: "pod/prod-app-abc\npod/app-abc\n",
-      })
-      .mockReturnValueOnce({ status: 0 });
-
-    stopSandboxChannels("app");
-
-    const args = spawnSyncSpy.mock.calls[1][1] as string[];
-    expect(args).toContain("pod/app-abc");
-    expect(args).not.toContain("pod/prod-app-abc");
-    logSpy.mockRestore();
-  });
-
-  it("falls back when no exact generated sandbox pod name is available", () => {
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    spawnSyncSpy
-      .mockReturnValueOnce({
-        status: 0,
-        stdout: "pod/prod-app-abc\npod/app-copy-abc\n",
-      })
-      .mockReturnValueOnce({ status: 0 });
-
-    stopSandboxChannels("app");
-
-    expect(spawnSyncSpy).toHaveBeenNthCalledWith(
-      2,
-      "/usr/local/bin/openshell",
-      ["sandbox", "exec", "--name", "app", "--gateway", "nemoclaw", "--", "sh", "-s"],
-      expect.objectContaining({ input: expect.any(String), timeout: 20000 }),
-    );
-    logSpy.mockRestore();
-  });
-
-  it("treats stop script exit 1 (no process matched) as already stopped", () => {
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    spawnSyncSpy
-      .mockReturnValueOnce({ status: 0, stdout: "pod/my-sandbox-0\n" })
-      .mockReturnValueOnce({ status: 1 });
-
-    stopSandboxChannels("my-sandbox");
-
-    const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
-    expect(output).toContain("OpenClaw gateway was not running inside sandbox");
-    logSpy.mockRestore();
-  });
-
-  it("does not transiently kill a supervisor-managed Hermes gateway (#6392)", () => {
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    agentRuntimeModule.getSessionAgent = vi.fn(
-      () =>
-        ({
-          name: "hermes",
-          displayName: "Hermes Agent",
-          gateway_command: "hermes gateway run",
-          forward_ports: [18789, 8642],
-        }) as unknown as ReturnType<typeof agentRuntimeModule.getSessionAgent>,
-    );
-    stopSandboxChannels("my-sandbox");
-
-    expect(spawnSyncSpy).not.toHaveBeenCalled();
-    const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
-    expect(output).toContain("Hermes Agent gateway is managed by the sandbox");
-    expect(output).toContain("leaving it running while host forwards stop");
-    logSpy.mockRestore();
-  });
-
-  it("does not treat a terminal agent command as a gateway process", () => {
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    agentRuntimeModule.getSessionAgent = vi.fn(
-      () =>
-        ({
-          name: "langchain-deepagents-code",
-          displayName: "LangChain Deep Agents Code",
-          runtime: {
-            kind: "terminal",
-            interactive_command: "dcode",
-            headless_command: "dcode -n",
-          },
-        }) as unknown as ReturnType<typeof agentRuntimeModule.getSessionAgent>,
-    );
-
-    stopSandboxChannels("dcode-sandbox");
-
-    expect(spawnSyncSpy).not.toHaveBeenCalled();
-    expect(logSpy.mock.calls.map((c) => c[0]).join("\n")).toContain(
-      "LangChain Deep Agents Code has no gateway runtime",
-    );
-    logSpy.mockRestore();
-  });
-
-  it("warns when privileged shutdown reports the gateway may still be running", () => {
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    spawnSyncSpy
-      .mockReturnValueOnce({ status: 0, stdout: "pod/my-sandbox-0\n" })
-      .mockReturnValueOnce({ status: 2, stderr: "205" });
-
-    stopSandboxChannels("my-sandbox");
-
-    const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
-    expect(output).toContain("Could not stop OpenClaw gateway inside sandbox");
-    expect(output).toContain("gateway may still be running");
-    expect(output).toContain("205");
-    logSpy.mockRestore();
-  });
-
-  it("warns when spawn returns null status (timeout)", () => {
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    spawnSyncSpy
-      .mockReturnValueOnce({ status: 0, stdout: "pod/my-sandbox-0\n" })
-      .mockReturnValueOnce({ status: null });
-
-    stopSandboxChannels("my-sandbox");
-
-    const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
-    expect(output).toContain("Could not stop OpenClaw gateway inside sandbox");
-    logSpy.mockRestore();
-  });
-
-  it("warns when privileged shutdown is unavailable and openshell is not found", () => {
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    resolveOpenshellModule.resolveOpenshell = vi.fn(() => null);
-    spawnSyncSpy.mockReturnValueOnce({ status: 1, stdout: "" });
-
-    stopSandboxChannels("my-sandbox");
-
-    expect(spawnSyncSpy).toHaveBeenCalledTimes(1);
-    const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
-    expect(output).toContain("openshell not found");
-    logSpy.mockRestore();
-  });
-
-  it("uses --name flag for fallback sandbox selection (not positional)", () => {
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    spawnSyncSpy.mockReturnValueOnce({ status: 1, stdout: "" }).mockReturnValueOnce({ status: 0 });
-
-    stopSandboxChannels("my-sandbox");
-
-    const args = spawnSyncSpy.mock.calls[1][1] as string[];
-    expect(args[1]).toBe("exec");
-    expect(args[2]).toBe("--name");
-    expect(args[3]).toBe("my-sandbox");
-    expect(args.some((arg) => arg.includes("find_gateway_pids"))).toBe(false);
-    logSpy.mockRestore();
-  });
-
-  it("routes shutdown through the sandbox's persisted non-default gateway", () => {
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    registryModule.getSandbox = vi.fn(
-      () =>
-        ({
-          name: "my-sandbox",
-          gatewayName: "nemoclaw-18080",
-          gatewayPort: 18080,
-        }) as ReturnType<typeof registryModule.getSandbox>,
-    );
-    spawnSyncSpy.mockReturnValueOnce({ status: 1, stdout: "" }).mockReturnValueOnce({ status: 0 });
-
-    stopSandboxChannels("my-sandbox");
-
-    expect(spawnSyncSpy).toHaveBeenNthCalledWith(
-      1,
-      "docker",
-      expect.arrayContaining(["exec", "openshell-cluster-nemoclaw-18080", "kubectl"]),
-      expect.any(Object),
-    );
-    expect(spawnSyncSpy).toHaveBeenNthCalledWith(
-      2,
-      "/usr/local/bin/openshell",
-      expect.arrayContaining(["--gateway", "nemoclaw-18080"]),
-      expect.any(Object),
-    );
-    logSpy.mockRestore();
-  });
-
-  it("targets both launcher and re-exec'd gateway process forms", () => {
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    spawnSyncSpy
-      .mockReturnValueOnce({ status: 0, stdout: "pod/my-sandbox-0\n" })
-      .mockReturnValueOnce({ status: 0 });
-
-    stopSandboxChannels("my-sandbox");
-
-    const args = spawnSyncSpy.mock.calls[1][1] as string[];
-    const script = args[args.length - 1];
-    // Must match all three gateway argv forms: the launcher
-    // ("openclaw gateway run"), the re-exec'd binary ("openclaw-gateway"),
-    // and the post-startup form where OpenClaw rewrites argv to a bare
-    // "openclaw" via process.title (#4951).
-    expect(script).toContain("openclaw-gateway");
-    expect(script).toContain("openclaw[[:space:]]+gateway");
-    expect(script).toContain("openclaw[[:space:]]*$");
-    logSpy.mockRestore();
-  });
-
-  it("rejects malformed sandbox names before spawning docker or openshell", () => {
-    expect(() => stopSandboxChannels("../escape")).toThrow("Invalid sandbox name");
-    expect(spawnSyncSpy).not.toHaveBeenCalled();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// stopAll — sandbox channel integration
-// ---------------------------------------------------------------------------
+function restoreSandboxEnv(saved: Record<(typeof SANDBOX_ENV_NAMES)[number], string | undefined>) {
+  for (const name of SANDBOX_ENV_NAMES) {
+    const value = saved[name];
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+  }
+}
 
 describe("stopAll with sandbox channels", () => {
   let pidDir: string;
-  let spawnSyncSpy: ReturnType<typeof vi.spyOn>;
-  let originalResolve: typeof resolveOpenshellModule.resolveOpenshell;
-  let originalGetSessionAgent: typeof agentRuntimeModule.getSessionAgent;
-  let originalGetSandbox: typeof registryModule.getSandbox;
+  let stopSandboxChannels: ReturnType<typeof vi.spyOn>;
+  let savedEnv: Record<(typeof SANDBOX_ENV_NAMES)[number], string | undefined>;
 
   beforeEach(() => {
     pidDir = mkdtempSync(join(tmpdir(), "nemoclaw-svc-sandbox-test-"));
-    originalResolve = resolveOpenshellModule.resolveOpenshell;
-    originalGetSessionAgent = agentRuntimeModule.getSessionAgent;
-    originalGetSandbox = registryModule.getSandbox;
-    resolveOpenshellModule.resolveOpenshell = vi.fn(() => "/usr/local/bin/openshell");
-    agentRuntimeModule.getSessionAgent = vi.fn(() => null);
-    registryModule.getSandbox = vi.fn(() => null);
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const cp = require("node:child_process");
-    spawnSyncSpy = vi.spyOn(cp, "spawnSync").mockReturnValue({ status: 0 });
+    savedEnv = Object.fromEntries(
+      SANDBOX_ENV_NAMES.map((name) => [name, process.env[name]]),
+    ) as typeof savedEnv;
+    for (const name of SANDBOX_ENV_NAMES) delete process.env[name];
+    stopSandboxChannels = vi
+      .spyOn(sandboxGatewayStop, "stopSandboxChannels")
+      .mockImplementation(() => {});
   });
 
   afterEach(() => {
     rmSync(pidDir, { recursive: true, force: true });
-    resolveOpenshellModule.resolveOpenshell = originalResolve;
-    agentRuntimeModule.getSessionAgent = originalGetSessionAgent;
-    registryModule.getSandbox = originalGetSandbox;
-    spawnSyncSpy.mockRestore();
+    restoreSandboxEnv(savedEnv);
+    vi.restoreAllMocks();
   });
 
   it("stops in-sandbox channels when sandboxName is provided", () => {
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    spawnSyncSpy
-      .mockReturnValueOnce({ status: 0, stdout: "pod/test-sb-0\n" })
-      .mockReturnValueOnce({ status: 0 });
 
     stopAll({ pidDir, sandboxName: "test-sb" });
 
-    expect(spawnSyncSpy).toHaveBeenCalledWith(
-      "docker",
-      expect.arrayContaining(["kubectl", "exec", "-n", "openshell", "-c", "agent"]),
-      expect.any(Object),
-    );
-    const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
-    expect(output).toContain("OpenClaw gateway stopped");
-    expect(output).toContain("All services stopped");
-    logSpy.mockRestore();
+    expect(stopSandboxChannels).toHaveBeenCalledWith("test-sb", {
+      info: expect.any(Function),
+      warn: expect.any(Function),
+    });
+    expect(logSpy.mock.calls.map((call) => call[0]).join("\n")).toContain("All services stopped");
   });
 
   it("warns when no sandbox name is available", () => {
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    const savedNemoclaw = process.env.NEMOCLAW_SANDBOX;
-    const savedNemoclawName = process.env.NEMOCLAW_SANDBOX_NAME;
-    const savedSandbox = process.env.SANDBOX_NAME;
-    delete process.env.NEMOCLAW_SANDBOX;
-    delete process.env.NEMOCLAW_SANDBOX_NAME;
-    delete process.env.SANDBOX_NAME;
 
-    try {
-      stopAll({ pidDir });
-    } finally {
-      if (savedNemoclaw !== undefined) process.env.NEMOCLAW_SANDBOX = savedNemoclaw;
-      if (savedNemoclawName !== undefined) process.env.NEMOCLAW_SANDBOX_NAME = savedNemoclawName;
-      if (savedSandbox !== undefined) process.env.SANDBOX_NAME = savedSandbox;
-    }
+    stopAll({ pidDir });
 
-    const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+    expect(stopSandboxChannels).not.toHaveBeenCalled();
+    const output = logSpy.mock.calls.map((call) => call[0]).join("\n");
     expect(output).toContain("No sandbox name available");
     expect(output).toContain("All services stopped");
-    logSpy.mockRestore();
   });
 
-  it("still stops cloudflared even when sandbox exec fails", () => {
+  it("still stops cloudflared when in-sandbox shutdown cannot stop a process", () => {
     writeFileSync(join(pidDir, "cloudflared.pid"), "999999999");
-    spawnSyncSpy.mockReturnValue({ status: 255 });
 
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     stopAll({ pidDir, sandboxName: "test-sb" });
-    logSpy.mockRestore();
 
-    // cloudflared PID file should be cleaned up regardless
+    expect(stopSandboxChannels).toHaveBeenCalledTimes(1);
     expect(existsSync(join(pidDir, "cloudflared.pid"))).toBe(false);
   });
 
   it("reads sandbox name from NEMOCLAW_SANDBOX env when not in opts", () => {
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    const saved = process.env.NEMOCLAW_SANDBOX;
     process.env.NEMOCLAW_SANDBOX = "env-sandbox";
 
-    try {
-      stopAll({ pidDir });
-    } finally {
-      if (saved !== undefined) {
-        process.env.NEMOCLAW_SANDBOX = saved;
-      } else {
-        delete process.env.NEMOCLAW_SANDBOX;
-      }
-    }
+    stopAll({ pidDir });
 
-    expect(spawnSyncSpy).toHaveBeenCalledWith(
-      "/usr/local/bin/openshell",
-      expect.arrayContaining(["env-sandbox"]),
-      expect.any(Object),
-    );
-    logSpy.mockRestore();
+    expect(stopSandboxChannels).toHaveBeenCalledWith("env-sandbox", expect.any(Object));
   });
 
   it("reads sandbox name from NEMOCLAW_SANDBOX_NAME when NEMOCLAW_SANDBOX is unset", () => {
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    const savedNemoclaw = process.env.NEMOCLAW_SANDBOX;
-    const savedNemoclawName = process.env.NEMOCLAW_SANDBOX_NAME;
-    delete process.env.NEMOCLAW_SANDBOX;
     process.env.NEMOCLAW_SANDBOX_NAME = "named-sandbox";
 
-    try {
-      stopAll({ pidDir });
-    } finally {
-      if (savedNemoclaw !== undefined) {
-        process.env.NEMOCLAW_SANDBOX = savedNemoclaw;
-      } else {
-        delete process.env.NEMOCLAW_SANDBOX;
-      }
-      if (savedNemoclawName !== undefined) {
-        process.env.NEMOCLAW_SANDBOX_NAME = savedNemoclawName;
-      } else {
-        delete process.env.NEMOCLAW_SANDBOX_NAME;
-      }
-    }
+    stopAll({ pidDir });
 
-    expect(spawnSyncSpy).toHaveBeenCalledWith(
-      "/usr/local/bin/openshell",
-      expect.arrayContaining(["named-sandbox"]),
-      expect.any(Object),
-    );
-    logSpy.mockRestore();
+    expect(stopSandboxChannels).toHaveBeenCalledWith("named-sandbox", expect.any(Object));
   });
 
-  it("prefers NEMOCLAW_SANDBOX_NAME over NEMOCLAW_SANDBOX (consistent with resolveDefaultSandboxName)", () => {
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    const savedNemoclaw = process.env.NEMOCLAW_SANDBOX;
-    const savedNemoclawName = process.env.NEMOCLAW_SANDBOX_NAME;
-    const savedSandbox = process.env.SANDBOX_NAME;
+  it("prefers NEMOCLAW_SANDBOX_NAME over NEMOCLAW_SANDBOX", () => {
     process.env.NEMOCLAW_SANDBOX_NAME = "name-sandbox";
     process.env.NEMOCLAW_SANDBOX = "other-sandbox";
-    delete process.env.SANDBOX_NAME;
 
-    try {
-      stopAll({ pidDir });
-    } finally {
-      if (savedNemoclaw !== undefined) process.env.NEMOCLAW_SANDBOX = savedNemoclaw;
-      else delete process.env.NEMOCLAW_SANDBOX;
-      if (savedNemoclawName !== undefined) process.env.NEMOCLAW_SANDBOX_NAME = savedNemoclawName;
-      else delete process.env.NEMOCLAW_SANDBOX_NAME;
-      if (savedSandbox !== undefined) process.env.SANDBOX_NAME = savedSandbox;
-      else delete process.env.SANDBOX_NAME;
-    }
+    stopAll({ pidDir });
 
-    expect(spawnSyncSpy).toHaveBeenCalledWith(
-      "/usr/local/bin/openshell",
-      expect.arrayContaining(["name-sandbox"]),
-      expect.any(Object),
-    );
-    logSpy.mockRestore();
+    expect(stopSandboxChannels).toHaveBeenCalledWith("name-sandbox", expect.any(Object));
   });
 
-  it("uses the effective env-selected sandbox for sandbox cleanup with explicit host pidDir", () => {
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    const savedNemoclaw = process.env.NEMOCLAW_SANDBOX;
-    const savedNemoclawName = process.env.NEMOCLAW_SANDBOX_NAME;
-    const savedSandbox = process.env.SANDBOX_NAME;
+  it("uses the effective env-selected sandbox with an explicit host pidDir", () => {
     const pidRoot = mkdtempSync(join(tmpdir(), "nemoclaw-services-pid-root-"));
     const effectivePidDir = join(pidRoot, "nemoclaw-services-name-sandbox");
     const lowerPriorityPidDir = join(pidRoot, "nemoclaw-services-other-sandbox");
-    rmSync(effectivePidDir, { recursive: true, force: true });
-    rmSync(lowerPriorityPidDir, { recursive: true, force: true });
     mkdirSync(effectivePidDir, { recursive: true, mode: 0o700 });
     mkdirSync(lowerPriorityPidDir, { recursive: true, mode: 0o700 });
     writeFileSync(join(effectivePidDir, "cloudflared.pid"), "999999999");
     writeFileSync(join(lowerPriorityPidDir, "cloudflared.pid"), "999999999");
     process.env.NEMOCLAW_SANDBOX_NAME = "name-sandbox";
     process.env.NEMOCLAW_SANDBOX = "other-sandbox";
-    delete process.env.SANDBOX_NAME;
 
     try {
       stopAll({ pidDir: effectivePidDir });
 
-      expect(spawnSyncSpy).toHaveBeenCalledWith(
-        "/usr/local/bin/openshell",
-        expect.arrayContaining(["name-sandbox"]),
-        expect.any(Object),
-      );
+      expect(stopSandboxChannels).toHaveBeenCalledWith("name-sandbox", expect.any(Object));
       expect(existsSync(join(effectivePidDir, "cloudflared.pid"))).toBe(false);
       expect(existsSync(join(lowerPriorityPidDir, "cloudflared.pid"))).toBe(true);
     } finally {
-      if (savedNemoclaw !== undefined) process.env.NEMOCLAW_SANDBOX = savedNemoclaw;
-      else delete process.env.NEMOCLAW_SANDBOX;
-      if (savedNemoclawName !== undefined) process.env.NEMOCLAW_SANDBOX_NAME = savedNemoclawName;
-      else delete process.env.NEMOCLAW_SANDBOX_NAME;
-      if (savedSandbox !== undefined) process.env.SANDBOX_NAME = savedSandbox;
-      else delete process.env.SANDBOX_NAME;
       rmSync(pidRoot, { recursive: true, force: true });
-      logSpy.mockRestore();
     }
   });
 
-  it("rejects malformed env var sandbox names before calling stopSandboxChannels", () => {
+  it.each([
+    "bad name",
+    "../../etc/passwd",
+  ])("rejects malformed env sandbox name %j before in-sandbox shutdown", (invalidName) => {
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    const savedNemoclaw = process.env.NEMOCLAW_SANDBOX;
-    const savedNemoclawName = process.env.NEMOCLAW_SANDBOX_NAME;
-    const savedSandbox = process.env.SANDBOX_NAME;
-    delete process.env.NEMOCLAW_SANDBOX;
-    process.env.NEMOCLAW_SANDBOX_NAME = "bad name";
-    delete process.env.SANDBOX_NAME;
+    process.env.NEMOCLAW_SANDBOX_NAME = invalidName;
 
-    try {
-      stopAll({ pidDir });
-    } finally {
-      if (savedNemoclaw !== undefined) process.env.NEMOCLAW_SANDBOX = savedNemoclaw;
-      else delete process.env.NEMOCLAW_SANDBOX;
-      if (savedNemoclawName !== undefined) process.env.NEMOCLAW_SANDBOX_NAME = savedNemoclawName;
-      else delete process.env.NEMOCLAW_SANDBOX_NAME;
-      if (savedSandbox !== undefined) process.env.SANDBOX_NAME = savedSandbox;
-      else delete process.env.SANDBOX_NAME;
-    }
+    stopAll({ pidDir });
 
-    // Should NOT have called openshell sandbox exec with the bad name
-    expect(spawnSyncSpy).not.toHaveBeenCalled();
-    const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
-    expect(output).toContain("Invalid sandbox name");
-    expect(output).toContain("All services stopped");
-    logSpy.mockRestore();
-  });
-
-  it("rejects path-traversal sandbox names from env vars", () => {
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    const savedNemoclaw = process.env.NEMOCLAW_SANDBOX;
-    const savedNemoclawName = process.env.NEMOCLAW_SANDBOX_NAME;
-    const savedSandbox = process.env.SANDBOX_NAME;
-    delete process.env.NEMOCLAW_SANDBOX;
-    process.env.NEMOCLAW_SANDBOX_NAME = "../../etc/passwd";
-    delete process.env.SANDBOX_NAME;
-
-    try {
-      stopAll({ pidDir });
-    } finally {
-      if (savedNemoclaw !== undefined) process.env.NEMOCLAW_SANDBOX = savedNemoclaw;
-      else delete process.env.NEMOCLAW_SANDBOX;
-      if (savedNemoclawName !== undefined) process.env.NEMOCLAW_SANDBOX_NAME = savedNemoclawName;
-      else delete process.env.NEMOCLAW_SANDBOX_NAME;
-      if (savedSandbox !== undefined) process.env.SANDBOX_NAME = savedSandbox;
-      else delete process.env.SANDBOX_NAME;
-    }
-
-    expect(spawnSyncSpy).not.toHaveBeenCalled();
-    const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
-    expect(output).toContain("Invalid sandbox name");
-    logSpy.mockRestore();
+    expect(stopSandboxChannels).not.toHaveBeenCalled();
+    expect(logSpy.mock.calls.map((call) => call[0]).join("\n")).toContain("Invalid sandbox name");
   });
 });

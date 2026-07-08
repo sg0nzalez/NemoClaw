@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { execFileSync, execSync, spawn, spawnSync } from "node:child_process";
+import { execFileSync, execSync, spawn } from "node:child_process";
 import {
   chmodSync,
   closeSync,
@@ -15,23 +15,18 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, join } from "node:path";
-import { dockerSpawnSync } from "../adapters/docker";
-import { getGatewayClusterContainerName } from "../adapters/openshell/gateway-drift";
-import { resolveOpenshell } from "../adapters/openshell/resolve";
-import * as agentRuntime from "../agent/runtime";
 import { renderBox } from "../cli/banner";
 import { AGENT_PRODUCT_NAME, CLI_DISPLAY_NAME, CLI_NAME } from "../cli/branding";
 import { isRecord } from "../core/json-types";
 import { DASHBOARD_PORT } from "../core/ports";
-import { resolveSandboxGatewayName } from "../onboard/gateway-binding";
-import * as registry from "../state/registry";
 import { buildSubprocessEnv } from "../subprocess-env";
 import * as agentForwardStop from "./agent-forward-stop";
 import { registerTunnelOrigin } from "./allowed-origins";
 import * as gatewayStop from "./gateway-stop";
-import { GATEWAY_STOP_SCRIPT } from "./gateway-stop-script";
+import * as sandboxGatewayStop from "./sandbox-gateway-stop";
 
 export { GATEWAY_STOP_SCRIPT } from "./gateway-stop-script";
+export { stopSandboxChannels } from "./sandbox-gateway-stop";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -450,148 +445,6 @@ export function showStatus(opts: ServiceOptions = {}): void {
   }
 }
 
-/**
- * Stop the OpenClaw gateway (and its messaging channels) inside the sandbox.
- *
- * OpenClaw keeps the hardened PID/start-time/owner/marker-gated matcher from
- * #4951. Non-OpenClaw gateway agents are supervised by their sandbox runtime;
- * signaling only the child can make it respawn while this command is still
- * cleaning up host forwards. Leave those supervised children alone and let
- * full stop tear down the host gateway when this is its final sandbox.
- */
-export function stopSandboxChannels(sandboxName: string): void {
-  const validatedSandboxName = validateSandboxName(sandboxName);
-  const agent = agentRuntime.getSessionAgent(validatedSandboxName);
-  const agentDisplayName = agentRuntime.getAgentDisplayName(agent);
-  if (!agentRuntime.hasGatewayRuntime(agent)) {
-    info(`${agentDisplayName} has no gateway runtime; skipping in-sandbox gateway stop.`);
-    return;
-  }
-  if (agent) {
-    info(
-      `${agentDisplayName} gateway is managed by the sandbox; ` +
-        "leaving it running while host forwards stop.",
-    );
-    return;
-  }
-
-  let gatewayName: string;
-  try {
-    gatewayName = resolveSandboxGatewayName(registry.getSandbox(validatedSandboxName));
-  } catch (error) {
-    warn(
-      `Could not resolve the OpenShell gateway for sandbox '${validatedSandboxName}': ` +
-        `${(error as Error).message ?? String(error)}. Skipping in-sandbox gateway stop.`,
-    );
-    return;
-  }
-
-  const gatewayLabel = `${agentDisplayName} gateway`;
-  info(`Stopping in-sandbox ${gatewayLabel} (sandbox: ${validatedSandboxName})...`);
-
-  const privilegedResult = stopSandboxChannelsViaKubectl(
-    validatedSandboxName,
-    gatewayName,
-    GATEWAY_STOP_SCRIPT,
-  );
-  if (reportStopResult(privilegedResult, gatewayLabel)) return;
-
-  const openshell = resolveOpenshell();
-  if (!openshell) {
-    warn(`openshell not found — cannot stop ${gatewayLabel} inside sandbox.`);
-    return;
-  }
-
-  const fallbackResult = spawnSync(
-    openshell,
-    ["sandbox", "exec", "--name", validatedSandboxName, "--gateway", gatewayName, "--", "sh", "-s"],
-    {
-      encoding: "utf-8",
-      input: GATEWAY_STOP_SCRIPT,
-      stdio: ["pipe", "pipe", "pipe"],
-      timeout: 20000,
-    },
-  );
-  reportStopResult(fallbackResult, gatewayLabel);
-}
-
-type StopAttemptResult = ReturnType<typeof spawnSync>;
-
-function isSandboxPodName(line: string, sandboxName: string): boolean {
-  if (!line.startsWith("pod/")) return false;
-  const podName = line.slice("pod/".length);
-  if (podName === sandboxName) return true;
-  const prefix = `${sandboxName}-`;
-  if (!podName.startsWith(prefix)) return false;
-  const generatedSuffix = podName.slice(prefix.length);
-  return /^[a-z0-9]+$/.test(generatedSuffix);
-}
-
-function stopSandboxChannelsViaKubectl(
-  sandboxName: string,
-  gatewayName: string,
-  gatewayStopScript: string,
-): StopAttemptResult | null {
-  const gatewayContainer = getGatewayClusterContainerName(gatewayName);
-  const podsResult = dockerSpawnSync(
-    ["exec", gatewayContainer, "kubectl", "get", "pods", "-n", "openshell", "-o", "name"],
-    { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"], timeout: 10000 },
-  );
-  if (podsResult.status !== 0 || !podsResult.stdout) return null;
-
-  const podOutput =
-    typeof podsResult.stdout === "string" ? podsResult.stdout : podsResult.stdout.toString();
-  const pod = podOutput
-    .split(/\r?\n/)
-    .map((line: string) => line.trim())
-    .find((line: string) => isSandboxPodName(line, sandboxName));
-  if (!pod) return null;
-
-  return dockerSpawnSync(
-    [
-      "exec",
-      gatewayContainer,
-      "kubectl",
-      "exec",
-      "-n",
-      "openshell",
-      "-c",
-      "agent",
-      pod,
-      "--",
-      "sh",
-      "-lc",
-      gatewayStopScript,
-    ],
-    { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"], timeout: 20000 },
-  );
-}
-
-function reportStopResult(result: StopAttemptResult | null, gatewayLabel: string): boolean {
-  if (!result) return false;
-
-  if (result.status === 0) {
-    info(`${gatewayLabel} stopped inside sandbox.`);
-    return true;
-  }
-  if (result.status === 1) {
-    info(`${gatewayLabel} was not running inside sandbox.`);
-    return true;
-  }
-
-  const details = [result.stderr, result.stdout]
-    .map((text) => (typeof text === "string" ? text : text?.toString()))
-    .filter((text): text is string => Boolean(text?.trim()))
-    .map((text) => text.trim())
-    .join(" ");
-  warn(
-    `Could not stop ${gatewayLabel} inside sandbox (exit ${String(result.status ?? "unknown")}).` +
-      " The sandbox may be unreachable or the gateway may still be running." +
-      (details ? ` Details: ${details}` : ""),
-  );
-  return true;
-}
-
 export function stopAll(opts: ServiceOptions = {}): void {
   // Resolve the target sandbox once and reuse it for in-sandbox and host-side cleanup.
   const rawSandboxName =
@@ -611,7 +464,7 @@ export function stopAll(opts: ServiceOptions = {}): void {
   ensurePidDir(pidDir);
 
   if (sandboxName) {
-    stopSandboxChannels(sandboxName);
+    sandboxGatewayStop.stopSandboxChannels(sandboxName, { info, warn });
   } else if (rawSandboxName) {
     warn(`Invalid sandbox name: ${JSON.stringify(rawSandboxName)} — skipping in-sandbox stop.`);
   } else {

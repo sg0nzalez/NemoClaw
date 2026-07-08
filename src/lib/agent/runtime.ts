@@ -13,6 +13,8 @@ import * as registry from "../state/registry";
 import { type AgentDefinition, isTerminalAgent, loadAgent } from "./defs";
 import { getTerminalCommand } from "./gateway-restart-scripts";
 
+type RegisteredAgentSource = { agent?: string | null } | null | undefined;
+
 export {
   type AgentRecoveryScript,
   buildRecoveryScript,
@@ -31,16 +33,22 @@ export function getSessionAgent(sandboxName?: string): AgentDefinition | null {
   try {
     if (sandboxName) {
       const sb = registry.getSandbox(sandboxName);
-      if (sb?.agent && sb.agent !== "openclaw") {
-        return loadAgent(sb.agent);
-      }
-      if (sb?.agent === "openclaw" || (sb && !sb.agent)) {
-        return null;
-      }
+      if (sb) return getRegisteredAgent(sb);
     }
     const session = onboardSession.loadSession();
     const name = session?.agent || "openclaw";
     if (name === "openclaw") return null;
+    return loadAgent(name);
+  } catch {
+    return null;
+  }
+}
+
+/** Resolve only the agent persisted on the supplied sandbox registry row. */
+export function getRegisteredAgent(source: RegisteredAgentSource): AgentDefinition | null {
+  const name = source?.agent;
+  if (!name || name === "openclaw") return null;
+  try {
     return loadAgent(name);
   } catch {
     return null;

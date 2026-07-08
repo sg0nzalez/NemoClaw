@@ -58,6 +58,7 @@ function confirmForwardPortReleased(port: number): boolean {
 
 function getAgentForwardPorts(agent: AgentWithForwards, dashboardPort: unknown): number[] {
   const ports = new Set<number>();
+  // The gateway establishes dashboardPort at runtime even when it is not manifest-declared.
   const candidates = [
     ...(Array.isArray(agent.forward_ports) ? agent.forward_ports : []),
     dashboardPort,
