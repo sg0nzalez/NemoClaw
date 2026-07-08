@@ -19,7 +19,10 @@ from deepagents.backends.protocol import ExecuteResponse
 from deepagents.profiles.harness._nvidia_nemotron_3_ultra import (
     NemotronTextToolCallParser,
 )
-from deepagents.profiles.harness.harness_profiles import _harness_profile_for_model
+from deepagents.profiles.harness.harness_profiles import (
+    HarnessProfile,
+    _harness_profile_for_model,
+)
 from deepagents_code.agent import create_cli_agent
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
@@ -180,8 +183,8 @@ def make_model(model_id: str) -> ChatOpenAI:
     )
 
 
-def middleware_names(profile: object) -> tuple[str, ...]:
-    middleware = getattr(profile, "extra_middleware")
+def middleware_names(profile: HarnessProfile) -> tuple[str, ...]:
+    middleware = profile.extra_middleware
     if callable(middleware):
         factory = cast(Callable[[], Sequence[AgentMiddleware]], middleware)
         middleware = factory()
