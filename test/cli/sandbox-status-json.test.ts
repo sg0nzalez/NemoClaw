@@ -302,10 +302,10 @@ describe("CLI sandbox status JSON output", testTimeoutOptions(20_000), () => {
     const parsed = JSON.parse(result.out);
     expect(parsed.inferenceHealth).toMatchObject({
       ok: false,
-      probed: true,
+      probed: false,
       endpoint: "https://inference.local/v1/models",
-      failureLabel: "unreachable",
     });
+    expect(parsed.inferenceHealth).not.toHaveProperty("failureLabel");
   });
 
   it("sandbox status --json defaults openshell driver/version to 'unknown' strings", () => {

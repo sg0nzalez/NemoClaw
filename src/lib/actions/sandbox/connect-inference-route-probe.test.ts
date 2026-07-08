@@ -50,7 +50,7 @@ describe("sandbox connect inference route probe argv", () => {
     expect(script).toContain("/usr/bin/curl -s -o /dev/null");
     expect(script).toContain('CA_BUNDLE="${CURL_CA_BUNDLE:-${SSL_CERT_FILE:-}}"');
     expect(script).toContain('--cacert "$CA_BUNDLE"');
-    expect(script).toContain("printf 'BROKEN 000'");
+    expect(script).toContain("printf 'UNAVAILABLE OpenShell CA bundle missing or unreadable'");
     expect(script).not.toContain("/etc/openshell-tls");
     expect(script).not.toContain("curl -sk");
     expect(script).not.toContain("--insecure");
@@ -58,7 +58,7 @@ describe("sandbox connect inference route probe argv", () => {
     expect(script).not.toContain("head -c");
   });
 
-  it("fails closed before curl when the injected CA bundle is missing (#6192)", () => {
+  it("reports unavailable before curl when the injected CA bundle is missing (#6192)", () => {
     const result = spawnSync("sh", ["-c", INFERENCE_ROUTE_PROBE_SCRIPT], {
       encoding: "utf8",
       env: {
@@ -68,8 +68,11 @@ describe("sandbox connect inference route probe argv", () => {
       },
     });
 
-    expect(result.status).toBe(0);
-    expect(result.stdout).toBe("BROKEN 000");
+    expect(result.status).toBe(1);
+    expect(result.stdout).toBe("UNAVAILABLE OpenShell CA bundle missing or unreadable");
+    expect(
+      parseSandboxInferenceRouteProbeResult({ status: result.status, output: result.stdout }),
+    ).toMatchObject({ healthy: false, broken: false, httpStatus: 0 });
   });
 });
 

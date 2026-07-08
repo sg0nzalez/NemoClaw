@@ -21,8 +21,11 @@ type InferenceRouteProbeCommandResult = {
 // that exact path explicitly because curl backend support for the CA env names
 // is not uniform across agent images.
 const INFERENCE_ROUTE_CA_FROM_ENV = 'CA_BUNDLE="${CURL_CA_BUNDLE:-${SSL_CERT_FILE:-}}"';
+// A missing OpenShell-managed CA means the probe boundary is unavailable, not
+// that inference.local is known broken. Keep the marker outside the trusted
+// OK/BROKEN grammar so connect cannot authorize repair from this evidence.
 const INFERENCE_ROUTE_CA_VALIDATION =
-  '[ -n "$CA_BUNDLE" ] && [ -f "$CA_BUNDLE" ] && [ -r "$CA_BUNDLE" ] || { printf \'BROKEN 000\'; exit 0; }';
+  '[ -n "$CA_BUNDLE" ] && [ -f "$CA_BUNDLE" ] && [ -r "$CA_BUNDLE" ] || { printf \'UNAVAILABLE OpenShell CA bundle missing or unreadable\'; exit 1; }';
 const INFERENCE_ROUTE_PROBE_CORE_SCRIPT = [
   "HTTP_CODE=$(/usr/bin/curl -s -o /dev/null -w '%{http_code}' --cacert \"$CA_BUNDLE\" --connect-timeout 3 --max-time 8 https://inference.local/v1/models 2>/dev/null) || HTTP_CODE=000",
   'case "$HTTP_CODE" in [2-4][0-9][0-9]) printf \'OK %s\' "$HTTP_CODE" ;; *) printf \'BROKEN %s\' "$HTTP_CODE" ;; esac',

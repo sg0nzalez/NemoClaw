@@ -396,6 +396,42 @@ describe("connectSandbox flow", () => {
     expect(exitSpy).toHaveBeenCalledWith(1);
   });
 
+  it("fails closed without repair when the OpenShell CA boundary is unavailable (#6192)", async () => {
+    const harness = createConnectHarness({
+      registryEntry: {
+        provider: "nvidia-prod",
+        model: "nvidia/nemotron-3-super-120b-a12b",
+      },
+    });
+    harness.captureOpenshellSpy
+      .mockReturnValueOnce({ status: 0, output: "alpha Ready" })
+      .mockReturnValueOnce({
+        status: 0,
+        output:
+          "Gateway inference:\n  Provider: nvidia-prod\n  Model: nvidia/nemotron-3-super-120b-a12b\n",
+      })
+      .mockReturnValueOnce({
+        status: 0,
+        output: "UNAVAILABLE OpenShell CA bundle missing or unreadable",
+      });
+
+    await expect(harness.connectSandbox("alpha")).rejects.toThrow("process.exit(1)");
+
+    expect(harness.applyVmDnsMonkeypatchSpy).not.toHaveBeenCalled();
+    expect(harness.runSetupDnsProxySpy).not.toHaveBeenCalled();
+    expect(harness.runOpenshellSpy).not.toHaveBeenCalled();
+    expect(harness.spawnSyncSpy).not.toHaveBeenCalledWith(
+      "openshell",
+      ["sandbox", "connect", "alpha"],
+      expect.any(Object),
+    );
+    const errorOutput = harness.errorSpy.mock.calls.flat().join("\n");
+    expect(errorOutput).toContain("did not return a trusted result");
+    expect(errorOutput).toContain("OpenShell CA bundle missing or unreadable");
+    expect(errorOutput).not.toContain("after DNS and route repair");
+    expect(exitSpy).toHaveBeenCalledWith(1);
+  });
+
   it("stops before opening SSH when the sandbox list reports a terminal failure phase", async () => {
     const harness = createConnectHarness({ listOutput: "alpha Error" });
 
