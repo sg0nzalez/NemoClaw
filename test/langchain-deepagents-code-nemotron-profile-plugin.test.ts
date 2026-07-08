@@ -63,6 +63,20 @@ function sha256(value: string | Buffer): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
+function replaceHashDefinition(
+  source: string,
+  name: string,
+  currentHash: string,
+  fixtureHash: string,
+): string {
+  const current = `${name} = (\n    "${currentHash}"\n)`;
+  const replacement = `${name} = (\n    "${fixtureHash}"\n)`;
+  if (source.split(current).length !== 2) {
+    throw new Error(`expected exactly one ${name} definition in the profile plugin`);
+  }
+  return source.replace(current, replacement);
+}
+
 function writeFixtureFile(root: string, relativePath: string, content: string): string {
   const target = path.join(root, relativePath);
   fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -135,10 +149,17 @@ function prepareFixturePlugin(
 ): string {
   const pluginRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-profile-plugin-source-"));
   tempRoots.push(pluginRoot);
-  const source = fs
-    .readFileSync(pluginSourcePath, "utf8")
-    .replaceAll(NATIVE_PROFILE_SHA256, sha256(nativeSource))
-    .replaceAll(UNMODIFIED_BOOTSTRAP_SHA256, sha256(bootstrapSource));
+  const source = replaceHashDefinition(
+    replaceHashDefinition(
+      fs.readFileSync(pluginSourcePath, "utf8"),
+      "EXPECTED_NATIVE_PROFILE_SHA256",
+      NATIVE_PROFILE_SHA256,
+      sha256(nativeSource),
+    ),
+    "EXPECTED_BOOTSTRAP_SHA256",
+    UNMODIFIED_BOOTSTRAP_SHA256,
+    sha256(bootstrapSource),
+  );
   return writeFixtureFile(pluginRoot, "nemoclaw_deepagents_profile/__init__.py", source);
 }
 
@@ -203,7 +224,8 @@ function buildAndInstallPluginWheel(version: string): string {
   fs.mkdirSync(wheelDir);
   const projectPath = path.join(projectRoot, "pyproject.toml");
   const project = fs.readFileSync(projectPath, "utf8");
-  // The GitHub runner's system setuptools predates PEP 639 string licenses.
+  // The GitHub runner's system setuptools predates PEP 639 string licenses;
+  // production uses the pinned backend and keeps the standards-current string.
   // Spell the same license as its equivalent PEP 621 table so this offline,
   // no-isolation wheel build remains portable without changing package code,
   // entry-point metadata, or the version gate under test.

@@ -83,6 +83,7 @@ def _deepagents_root() -> Path:
             "deepagents distribution root is not a trusted directory: "
             f"{distribution_root}"
         )
+    # Bind the import to its reviewed distribution so sys.path shadows fail closed.
     try:
         matches_distribution = root.samefile(distribution_root)
     except OSError as exc:

@@ -23,12 +23,17 @@ NemoClaw no longer vendors or overlays that source.
 - Native profile SHA-256: `c8e8dd2b0182334b54be4f46ff0c7b45fbb95dc13bd9a92c249eb47a14fa13d7`
 - Unmodified built-in bootstrap SHA-256: `005a91e7fc4ca6b21220673dd9d02d6686bf63e1e4f1102d124b01f96886efcf`
 - First-party adapter: `nemoclaw-deepagents-profile==0.1.0`
-- Adapter module SHA-256: `d5e2e8214e46fd61265d2377a3f9a30d827f19f08fc50272980b69fda3669fc1`
+- Adapter module SHA-256: `75ff7e7a5142cad4305126ccb1b8fc756306e82d4c559ddbc624012fb54ebfc4`
 - Adapter project metadata SHA-256: `7ba7b77bd6f889cc861eddbe3e38fc1f4433a85b7bc2a9b516e19a19a37a7686`
 - Adapter dependency audit result: `No known vulnerabilities found`. Its only
   requirements are the exact `deepagents-code==0.1.34` and
   `deepagents==0.7.0a6` entries covered by the lockfile audit command above; no
   additional third-party distribution is introduced.
+
+The adapter metadata intentionally uses the PEP 639 SPDX expression
+`license = "Apache-2.0"`, supported by its pinned production build backend.
+The real-wheel test substitutes the equivalent legacy table only for its
+offline, no-isolation build with the runner's older system setuptools.
 
 The adapter is a private, first-party build-context package: NemoClaw does not
 publish it to a registry or resolve it from an index. The image verifies its
