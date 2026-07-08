@@ -94,12 +94,14 @@ describe("registry", () => {
       name: "alpha",
       webSearchEnabled: true,
       toolDisclosure: "direct",
+      observabilityEnabled: true,
       fromDockerfile: "/tmp/Dockerfile.custom",
       hermesAuthMethod: "oauth",
     });
     expect(registry.getSandbox("alpha")).toMatchObject({
       webSearchEnabled: true,
       toolDisclosure: "direct",
+      observabilityEnabled: true,
       fromDockerfile: "/tmp/Dockerfile.custom",
       hermesAuthMethod: "oauth",
     });
@@ -144,6 +146,11 @@ describe("registry", () => {
     expect(data["known-empty-clone"].openclawImagePluginInstalls).toEqual([]);
     expect(data.populated.openclawImagePluginInstalls).toEqual([weatherInstall]);
     expect(data["populated-clone"].openclawImagePluginInstalls).toEqual([weatherInstall]);
+  });
+
+  it("does not invent observability intent for legacy registry rows", () => {
+    registry.registerSandbox({ name: "legacy" });
+    expect(registry.getSandbox("legacy").observabilityEnabled).toBeUndefined();
   });
 
   it("preserves missing tool-disclosure state on reconstructed legacy rows", () => {
