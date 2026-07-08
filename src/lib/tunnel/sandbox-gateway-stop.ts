@@ -57,7 +57,16 @@ export function stopSandboxChannels(sandboxName: string, deps: SandboxGatewaySto
   const info = deps.info ?? defaultInfo;
   const warn = deps.warn ?? defaultWarn;
   const validatedSandboxName = validateSandboxName(sandboxName);
-  const sandbox = (deps.getSandbox ?? registry.getSandbox)(validatedSandboxName);
+  let sandbox: ReturnType<typeof registry.getSandbox>;
+  try {
+    sandbox = (deps.getSandbox ?? registry.getSandbox)(validatedSandboxName);
+  } catch (error) {
+    warn(
+      `Could not read the sandbox registry for '${validatedSandboxName}': ` +
+        `${(error as Error).message ?? String(error)}. Skipping in-sandbox gateway stop.`,
+    );
+    return;
+  }
   const agent = (deps.getRegisteredAgent ?? agentRuntime.getRegisteredAgent)(sandbox);
 
   if (sandbox?.agent && sandbox.agent !== "openclaw" && !agent) {

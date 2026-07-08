@@ -203,6 +203,22 @@ describe("stopSandboxChannels", () => {
     expect(h.info.mock.calls.map((call) => call[0]).join("\n")).not.toContain("Hermes Agent");
   });
 
+  it("fails closed when the sandbox registry cannot be read", () => {
+    const h = harness();
+    h.getSandbox.mockImplementation(() => {
+      throw new Error("invalid registry data");
+    });
+
+    expect(() => stopSandboxChannels("my-sandbox", h.deps)).not.toThrow();
+
+    expect(h.getRegisteredAgent).not.toHaveBeenCalled();
+    expect(h.runDocker).not.toHaveBeenCalled();
+    expect(h.runProcess).not.toHaveBeenCalled();
+    expect(h.warn).toHaveBeenCalledWith(
+      expect.stringContaining("Could not read the sandbox registry for 'my-sandbox'"),
+    );
+  });
+
   it("fails closed when the persisted gateway binding is invalid", () => {
     const h = harness();
     h.getSandbox.mockReturnValue(sandbox({ agent: "openclaw", gatewayPort: 0 }));
