@@ -156,13 +156,11 @@ describe("connectSandbox route lifecycle", () => {
         provider: "nvidia-prod",
       },
     });
-    harness.captureOpenshellSpy.mockImplementation((args: unknown) => {
-      const argv = Array.isArray(args) ? args : [];
-      if (argv[0] === "inference" && argv[1] === "get") {
+    harness.captureOpenshellSpy
+      .mockReturnValueOnce({ status: 0, output: "alpha Ready" })
+      .mockImplementationOnce(() => {
         throw new Error("gateway inference read failed");
-      }
-      return { status: 0, output: argv[1] === "list" ? "alpha Ready" : "" };
-    });
+      });
 
     await expect(harness.connectSandbox("alpha")).rejects.toThrow("process.exit(1)");
 
@@ -172,6 +170,10 @@ describe("connectSandbox route lifecycle", () => {
     expect(errorOutput).toContain("route is not known healthy");
     expect(errorOutput).not.toContain("after DNS and route repair");
     expect(errorOutput).not.toContain("route is known to be broken");
+    expect(harness.captureOpenshellSpy).toHaveBeenCalledWith(
+      ["inference", "get", "-g", "nemoclaw"],
+      expect.objectContaining({ ignoreError: true }),
+    );
     expect(harness.runOpenshellSpy).not.toHaveBeenCalled();
     expect(exitSpy).toHaveBeenCalledWith(1);
   });
