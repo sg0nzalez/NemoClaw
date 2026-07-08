@@ -116,6 +116,12 @@ describe("sandbox inference route probe result", () => {
     ).toMatchObject({ healthy: false, broken: false, httpStatus: 0 });
   });
 
+  it("does not trust broken output from a failed exec boundary (#6192)", () => {
+    expect(
+      parseSandboxInferenceRouteProbeResult({ status: 1, output: "BROKEN 000" }),
+    ).toMatchObject({ healthy: false, broken: false, httpStatus: 0 });
+  });
+
   it("fails closed when malformed output claims an unhealthy status is OK (#6192)", () => {
     expect(parseSandboxInferenceRouteProbeResult({ status: 0, output: "OK 503" })).toMatchObject({
       healthy: false,

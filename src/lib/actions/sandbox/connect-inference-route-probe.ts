@@ -98,8 +98,10 @@ export function parseSandboxInferenceRouteProbeResult(
   const match = /^(OK|BROKEN)\s+([0-9]{3})\b/.exec(detail);
   const httpStatus = match ? Number.parseInt(match[2], 10) : 0;
   const isReachableHttpStatus = httpStatus >= 200 && httpStatus < 500;
-  const healthy = result.status === 0 && match?.[1] === "OK" && isReachableHttpStatus;
-  const broken = Boolean(match) && (match?.[1] === "BROKEN" || !isReachableHttpStatus);
+  const commandSucceeded = result.status === 0;
+  const healthy = commandSucceeded && match?.[1] === "OK" && isReachableHttpStatus;
+  const broken =
+    commandSucceeded && Boolean(match) && (match?.[1] === "BROKEN" || !isReachableHttpStatus);
   return {
     healthy,
     broken,
