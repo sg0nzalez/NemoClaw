@@ -108,8 +108,10 @@ export function getValidationSessionIneligibility(
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return "unsupported_protocol";
   if (parsed.username || parsed.password) return "embedded_credentials";
   if (parsed.search || parsed.hash) return "endpoint_query_or_fragment";
-  if (net.isIP(parsed.hostname)) return "ip_literal";
   const hostname = parsed.hostname.replace(/\.$/, "").toLowerCase();
+  const literalHostname =
+    hostname.startsWith("[") && hostname.endsWith("]") ? hostname.slice(1, -1) : hostname;
+  if (net.isIP(literalHostname)) return "ip_literal";
   if (hostname === "localhost" || hostname.endsWith(".localhost")) {
     return "local_endpoint";
   }
@@ -142,7 +144,9 @@ function curlStatusForError(error: NodeJS.ErrnoException): number {
   return 1;
 }
 
-function buildLookup(addresses: Array<{ address: string; family: number }>): net.LookupFunction {
+export function buildLookup(
+  addresses: Array<{ address: string; family: number }>,
+): net.LookupFunction {
   return (_hostname, options, callback) => {
     const requestedFamily = typeof options === "object" ? options.family : undefined;
     const eligible = requestedFamily

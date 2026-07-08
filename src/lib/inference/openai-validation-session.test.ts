@@ -184,6 +184,61 @@ describe("OpenAI validation keepalive sequence", () => {
     expect(legacyProbe).toHaveBeenCalledTimes(1);
   });
 
+  it("replays through curl when DNS pre-resolution exceeds its deadline", async () => {
+    const legacyProbe: OpenAiValidationSessionDeps["legacyProbe"] = vi.fn(() => ({
+      ok: false,
+      message: "curl DNS diagnostic",
+    }));
+    const lookup = vi.fn(() => new Promise<Array<{ address: string; family: number }>>(() => {}));
+    const harness = deps(legacyProbe);
+    harness.sessionOptions = { env: {}, lookup, dnsTimeoutMs: 10 };
+
+    const result = await probeOpenAiLikeEndpointWithValidationSession(
+      "https://provider.example.test/v1",
+      "test-model",
+      "test-key",
+      {},
+      harness,
+    );
+
+    expect(result).toEqual({ ok: false, message: "curl DNS diagnostic" });
+    expect(lookup).toHaveBeenCalledTimes(1);
+    expect(legacyProbe).toHaveBeenCalledTimes(1);
+  });
+
+  it("replays through curl after a connection reset during Responses streaming", async () => {
+    const handleRequest = vi
+      .fn()
+      .mockImplementationOnce((_request, response) => {
+        response.end('{"output":[{"type":"message"}]}');
+      })
+      .mockImplementationOnce((request) => {
+        request.socket.destroy();
+      });
+    const server = http.createServer((request, response) => {
+      request.resume();
+      handleRequest(request, response);
+    });
+    const port = await listen(server);
+    const legacyProbe: OpenAiValidationSessionDeps["legacyProbe"] = vi.fn(() => ({
+      ok: false,
+      message: "curl streaming diagnostic",
+    }));
+    const harness = deps(legacyProbe);
+
+    const result = await probeOpenAiLikeEndpointWithValidationSession(
+      `http://provider.example.test:${port}/v1`,
+      "test-model",
+      "test-key",
+      { probeStreaming: true },
+      harness,
+    );
+
+    expect(result).toEqual({ ok: false, message: "curl streaming diagnostic" });
+    expect(handleRequest).toHaveBeenCalledTimes(2);
+    expect(legacyProbe).toHaveBeenCalledTimes(1);
+  });
+
   it("uses curl without DNS pre-resolution when a proxy is configured", async () => {
     const legacyProbe: OpenAiValidationSessionDeps["legacyProbe"] = vi.fn(() => ({
       ok: true,

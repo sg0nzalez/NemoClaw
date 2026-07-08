@@ -3,7 +3,11 @@
 
 import http from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createValidationSession, getValidationSessionIneligibility } from "./validation-session";
+import {
+  buildLookup,
+  createValidationSession,
+  getValidationSessionIneligibility,
+} from "./validation-session";
 
 const servers: http.Server[] = [];
 
@@ -96,6 +100,17 @@ describe("provider validation session", () => {
     ).resolves.toMatchObject({ ok: true });
     expect(lookup).not.toHaveBeenCalled();
     session!.close();
+  });
+
+  it("returns ENOTFOUND when IPv6 is requested from IPv4-only pinned addresses", async () => {
+    const lookup = buildLookup([{ address: "93.184.216.34", family: 4 }]);
+    const result = new Promise((resolve, reject) => {
+      lookup("provider.example.test", { all: true, family: 6 }, (error, addresses) =>
+        error ? reject(error) : resolve(addresses),
+      );
+    });
+
+    await expect(result).rejects.toMatchObject({ code: "ENOTFOUND" });
   });
 
   it("falls back when pre-resolution fails", async () => {
@@ -271,6 +286,7 @@ describe("provider validation session", () => {
       }),
     ).toBe("curl_tls_configured");
     expect(getValidationSessionIneligibility("https://127.0.0.1/v1", {})).toBe("ip_literal");
+    expect(getValidationSessionIneligibility("https://[::1]/v1", {})).toBe("ip_literal");
     expect(getValidationSessionIneligibility("http://localhost:8000/v1", {})).toBe(
       "local_endpoint",
     );
