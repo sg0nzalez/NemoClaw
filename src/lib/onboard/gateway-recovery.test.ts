@@ -132,8 +132,7 @@ describe("gateway recovery", () => {
     // body stays linear (per repo growth guardrail on if statements in
     // changed test files).
     let mockCallIndex = 0;
-    const advanceOnStatusCall = (index: number) =>
-      index % 3 === 0 ? clock.advance(1) : undefined;
+    const advanceOnStatusCall = (index: number) => (index % 3 === 0 ? clock.advance(1) : undefined);
     const deps = createDeps({
       sleepSeconds: clock.sleeper,
       now: clock.now,
