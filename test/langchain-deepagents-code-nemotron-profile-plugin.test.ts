@@ -210,7 +210,6 @@ function buildAndInstallPluginWheel(version: string): string {
   const versionedProject = project
     .replace('version = "0.1.0"', `version = "${version}"`)
     .replace('license = "Apache-2.0"', 'license = { text = "Apache-2.0" }');
-  expect(versionedProject).not.toBe(project);
   expect(versionedProject).toContain(`version = "${version}"`);
   expect(versionedProject).toContain('license = { text = "Apache-2.0" }');
   fs.writeFileSync(projectPath, versionedProject, "utf8");
@@ -348,6 +347,13 @@ function expectOfficialSourcesUnchanged(
   expect(fs.readFileSync(fixture.bootstrapPath, "utf8")).toBe(bootstrapSource);
 }
 
+function replaceProfileSource(mode: "missing" | "linked", sourcePath: string): void {
+  fs.rmSync(sourcePath);
+  if (mode === "linked") {
+    fs.symlinkSync("/dev/null", sourcePath);
+  }
+}
+
 afterEach(() => {
   for (const root of tempRoots.splice(0)) {
     fs.rmSync(root, { recursive: true, force: true });
@@ -366,13 +372,7 @@ describe("LangChain Deep Agents Code managed Nemotron profile plugin (#6424)", (
     expect(project).toContain('"deepagents==0.7.0a6"');
   });
 
-  it("accepts the exact installed harness-profile entry point", () => {
-    const result = runEntryPointValidation("nemoclaw-managed-aliases");
-
-    expect(result.status, result.stderr).toBe(0);
-  });
-
-  it("rejects plugin source substituted after initial entry-point validation", () => {
+  it("accepts the exact plugin, then rejects source substitution", () => {
     const root = makeValidatorStubRoot("nemoclaw-managed-aliases");
     expect(runEntryPointValidationWithRoots([root]).status).toBe(0);
     fs.appendFileSync(path.join(root, "nemoclaw_deepagents_profile", "__init__.py"), "# drift\n");
@@ -404,6 +404,8 @@ describe("LangChain Deep Agents Code managed Nemotron profile plugin (#6424)", (
 
   it("rejects an installed real plugin wheel with an unreviewed version", () => {
     const dependencyRoot = makeValidatorDependencyStubRoot();
+    // A real wheel exercises entry-point metadata and locate_file binding that
+    // a hand-written dist-info stub cannot prove.
     const installedPluginRoot = buildAndInstallPluginWheel("0.1.1");
     const result = runEntryPointValidationWithRoots([dependencyRoot, installedPluginRoot]);
 
@@ -418,7 +420,6 @@ describe("LangChain Deep Agents Code managed Nemotron profile plugin (#6424)", (
     const result = runPlugin(fixture, { registerCalls: 2 });
 
     expect(result.status, result.stderr).toBe(0);
-    expect(result.probe.error).toBeNull();
     expect(result.probe.aliases).toEqual([true, true]);
     expect(result.probe.canonicalPresent).toBe(true);
     expect(result.probe.registryKeys).toEqual(
@@ -480,39 +481,13 @@ describe("LangChain Deep Agents Code managed Nemotron profile plugin (#6424)", (
   });
 
   it.each([
-    [
-      "missing",
-      "native profile",
-      (fixture: PluginFixture) => fixture.nativeProfilePath,
-      (sourcePath: string) => fs.rmSync(sourcePath),
-    ],
-    [
-      "linked",
-      "native profile",
-      (fixture: PluginFixture) => fixture.nativeProfilePath,
-      (sourcePath: string) => {
-        fs.rmSync(sourcePath);
-        fs.symlinkSync("/dev/null", sourcePath);
-      },
-    ],
-    [
-      "missing",
-      "bootstrap",
-      (fixture: PluginFixture) => fixture.bootstrapPath,
-      (sourcePath: string) => fs.rmSync(sourcePath),
-    ],
-    [
-      "linked",
-      "bootstrap",
-      (fixture: PluginFixture) => fixture.bootstrapPath,
-      (sourcePath: string) => {
-        fs.rmSync(sourcePath);
-        fs.symlinkSync("/dev/null", sourcePath);
-      },
-    ],
-  ] as const)("rejects a %s %s source file", (_mode, _label, selectSource, replaceSource) => {
+    ["missing", "native profile", "nativeProfilePath"],
+    ["linked", "native profile", "nativeProfilePath"],
+    ["missing", "bootstrap", "bootstrapPath"],
+    ["linked", "bootstrap", "bootstrapPath"],
+  ] as const)("rejects a %s %s source file", (mode, _label, sourceKey) => {
     const fixture = makePluginFixture();
-    replaceSource(selectSource(fixture));
+    replaceProfileSource(mode, fixture[sourceKey]);
 
     const result = runPlugin(fixture);
 

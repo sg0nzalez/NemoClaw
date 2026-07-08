@@ -398,9 +398,9 @@ def main() -> None:
         middleware_names(unrelated) == (),
         "unrelated OpenAI model received Ultra middleware",
     )
-    # Re-bind and re-hash the plugin plus both official files after profile
-    # resolution, graph construction, and dispatch checks. This closes the
-    # install/import-to-validation window and proves no reviewed source changed.
+    # Final source re-verification matches Dockerfile's import-gate marker:
+    # re-bind and re-hash the plugin plus both official files after graph and
+    # dispatch checks to close the install/import-to-validation window.
     validate_profile_entry_point()
     validate_official_sources()
     print("Nemotron 3 Ultra managed harness profile validation passed.")

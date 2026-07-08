@@ -50,7 +50,7 @@ describe("DCode missing-dependency profile import gate workflow boundary", () =>
   it("rejects replacing the reviewed gate with a mutable registry base", () => {
     const errors = validateMutation((workflow) => {
       liveGateStep(workflow).run =
-        "docker build --build-arg BASE_IMAGE=ghcr.io/nvidia/nemoclaw/langchain-deepagents-code-sandbox-base:latest .";
+        "docker pull ghcr.io/nvidia/nemoclaw/langchain-deepagents-code-sandbox-base:latest && docker tag ghcr.io/nvidia/nemoclaw/langchain-deepagents-code-sandbox-base:latest nemoclaw-dcode-profile-source-base:mutable";
     });
 
     expect(errors).toContain(

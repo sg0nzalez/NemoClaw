@@ -26,6 +26,8 @@ cd "${repo_root}"
 
 # Build the reviewed repository base directly so this trusted negative gate has
 # no mutable registry input. Docker layers remain reusable by the live target.
+# Plain progress and the captured production log are safe: these Dockerfiles
+# have no secret mounts/build arguments, and no build gets secret-bearing input.
 docker build \
   --progress=plain \
   --file agents/langchain-deepagents-code/Dockerfile.base \

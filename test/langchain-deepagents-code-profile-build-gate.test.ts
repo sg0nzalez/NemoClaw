@@ -11,16 +11,7 @@ import { describe, expect, it } from "vitest";
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const checkPath = path.join(repoRoot, "scripts", "check-dcode-profile-import-gate.sh");
 
-type GateResult = {
-  calls: string;
-  status: number | null;
-  stderr: string;
-  stdout: string;
-};
-
-function runGateWithFakeDocker(
-  mode: "expected-failure-with-marker" | "early-failure" | "success",
-): GateResult {
+function runGateWithFakeDocker(mode: "expected-failure-with-marker" | "early-failure" | "success") {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "dcode-profile-import-gate-"));
   const dockerPath = path.join(tmp, "docker");
   const callLog = path.join(tmp, "docker.log");
@@ -60,12 +51,7 @@ exit 0
         PATH: `${tmp}${path.delimiter}${process.env.PATH ?? "/usr/bin:/bin"}`,
       },
     });
-    return {
-      calls: fs.readFileSync(callLog, "utf8"),
-      status: result.status,
-      stderr: result.stderr,
-      stdout: result.stdout,
-    };
+    return { ...result, calls: fs.readFileSync(callLog, "utf8") };
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
