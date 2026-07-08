@@ -147,7 +147,7 @@ function prepareFixturePlugin(
   return writeFixtureFile(pluginRoot, "nemoclaw_deepagents_profile/__init__.py", source);
 }
 
-function makeValidatorStubRoot(entryPointName: string): string {
+function makeValidatorStubRoot(entryPointName: string, pluginVersion = "0.1.0"): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-profile-validator-stubs-"));
   tempRoots.push(root);
   const stubs = {
@@ -169,9 +169,8 @@ function makeValidatorStubRoot(entryPointName: string): string {
       "class AIMessage: pass\nclass HumanMessage: pass\nclass ToolMessage: pass\n",
     "langchain_openai/__init__.py": "class ChatOpenAI: pass\n",
     "nemoclaw_deepagents_profile/__init__.py": "def register(): pass\n",
-    "nemoclaw_deepagents_profile-0.1.0.dist-info/METADATA":
-      "Metadata-Version: 2.1\nName: nemoclaw-deepagents-profile\nVersion: 0.1.0\n",
-    "nemoclaw_deepagents_profile-0.1.0.dist-info/entry_points.txt": `[deepagents.harness_profiles]\n${entryPointName} = nemoclaw_deepagents_profile:register\n`,
+    [`nemoclaw_deepagents_profile-${pluginVersion}.dist-info/METADATA`]: `Metadata-Version: 2.1\nName: nemoclaw-deepagents-profile\nVersion: ${pluginVersion}\n`,
+    [`nemoclaw_deepagents_profile-${pluginVersion}.dist-info/entry_points.txt`]: `[deepagents.harness_profiles]\n${entryPointName} = nemoclaw_deepagents_profile:register\n`,
   };
   for (const [relativePath, content] of Object.entries(stubs)) {
     writeFixtureFile(root, relativePath, content);
@@ -179,8 +178,8 @@ function makeValidatorStubRoot(entryPointName: string): string {
   return root;
 }
 
-function runEntryPointValidation(entryPointName: string) {
-  const stubRoot = makeValidatorStubRoot(entryPointName);
+function runEntryPointValidation(entryPointName: string, pluginVersion = "0.1.0") {
+  const stubRoot = makeValidatorStubRoot(entryPointName, pluginVersion);
   const script = `import importlib.util
 import json
 
@@ -356,6 +355,15 @@ describe("LangChain Deep Agents Code managed Nemotron profile plugin (#6424)", (
     expect(result.status).not.toBe(0);
     expect(result.probe.error).toContain(
       "expected exactly one 'nemoclaw-managed-aliases' profile entry point",
+    );
+  });
+
+  it("rejects profile entry points from an unreviewed plugin version", () => {
+    const result = runEntryPointValidation("nemoclaw-managed-aliases", "0.1.1");
+
+    expect(result.status).not.toBe(0);
+    expect(result.probe.error).toContain(
+      "profile entry point comes from an unexpected distribution version",
     );
   });
 

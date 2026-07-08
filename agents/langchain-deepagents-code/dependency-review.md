@@ -30,8 +30,10 @@ NemoClaw no longer vendors or overlays that source.
   `deepagents==0.7.0a6` entries covered by the lockfile audit command above; no
   additional third-party distribution is introduced.
 
-The managed image installs the first-party `nemoclaw-deepagents-profile`
-package without consulting an index. Its `deepagents.harness_profiles` entry
+Before local build and installation, the managed image verifies both copied
+adapter build inputs against the module and project-metadata hashes recorded
+above. It then installs the first-party `nemoclaw-deepagents-profile` package
+without consulting an index. Its `deepagents.harness_profiles` entry
 point runs after built-in profiles are registered, reads the reviewed canonical
 profile through one exact-version/hash-gated private registry lookup, and uses
 Deep Agents' public registration API to map it to the two exact `openai:` model
@@ -48,8 +50,12 @@ verifies the installed entry-point metadata and adapter source hash before the
 upstream source checks, checks both upstream files again after profile loading,
 resolves the complete native middleware for both aliases, compiles a graph,
 proves parser/native dispatch parity, and confirms an unrelated OpenAI model
-receives no Ultra behavior. The Docker build separately imports DCode, Deep
-Agents, and the adapter under isolated Python immediately after installation.
+receives no Ultra behavior. The Docker build separately imports the adapter,
+Deep Agents, and DCode under isolated Python immediately after installation;
+the validator then binds the installed module to its distribution and rechecks
+the module hash. A DCode-only CI regression strips both upstream distributions
+from the published base image and proves the production build stops at that
+import gate before the later dependency-consistency check.
 
 The reviewed native-profile and bootstrap files stay byte-for-byte unchanged.
 Focused fixtures cover the reviewed version/hash, missing-source,

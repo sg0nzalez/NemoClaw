@@ -10,6 +10,8 @@ ARG BASE_IMAGE
 # hadolint ignore=DL3006
 FROM ${BASE_IMAGE}
 
+USER root
+
 RUN set -eu; \
     dcode_path="$(command -v dcode 2>/dev/null || true)"; \
     if [ "$dcode_path" != "/usr/local/bin/dcode" ]; then \
@@ -38,12 +40,14 @@ COPY nemoclaw-blueprint/ /opt/nemoclaw-blueprint/
 # managed-runtime patch independently hardens DCode entrypoints and installs the
 # reviewed Relay observability boundary. Build validation keeps both exact and
 # fail closed in one layer.
+# hadolint ignore=DL4006
 RUN chmod 444 /opt/nemoclaw-deepagents-code/generate-config.ts /opt/nemoclaw-deepagents-code/managed-dcode-runtime.py /opt/nemoclaw-deepagents-code/patch-managed-deepagents-code.py /opt/nemoclaw-deepagents-code/validate-nemotron-ultra-profile.py /opt/nemoclaw-deepagents-code/progressive_tool_disclosure.py /opt/nemoclaw-deepagents-code/nemoclaw_observability.py /opt/nemoclaw-deepagents-code/validate-progressive-tool-disclosure.py /opt/nemoclaw-deepagents-code/validate-observability.py \
     && chmod 755 /usr/local/bin/nemoclaw-start /usr/local/lib/nemoclaw/dcode-wrapper.sh /usr/local/lib/nemoclaw/dcode-launcher.sh \
     && chmod -R a+rX /opt/nemoclaw-blueprint \
+    && printf '%s  %s\n' 'd5e2e8214e46fd61265d2377a3f9a30d827f19f08fc50272980b69fda3669fc1' '/opt/nemoclaw-deepagents-profile-plugin/src/nemoclaw_deepagents_profile/__init__.py' '7ba7b77bd6f889cc861eddbe3e38fc1f4433a85b7bc2a9b516e19a19a37a7686' '/opt/nemoclaw-deepagents-profile-plugin/pyproject.toml' | sha256sum -c - \
     && /opt/venv/bin/pip3 install --no-index --no-cache-dir --no-deps --no-build-isolation /opt/nemoclaw-deepagents-profile-plugin \
+    && /opt/venv/bin/python3 -I -c 'import nemoclaw_deepagents_profile; print("NEMOCLAW_DCODE_PROFILE_" + "IMPORT_GATE", flush=True); import deepagents; import deepagents_code' \
     && /opt/venv/bin/pip3 check \
-    && /opt/venv/bin/python3 -I -c 'import deepagents; import deepagents_code; import nemoclaw_deepagents_profile' \
     && rm -rf /opt/nemoclaw-deepagents-profile-plugin \
     && python3 /opt/nemoclaw-deepagents-code/patch-managed-deepagents-code.py \
     && install -d -m 0700 /tmp/nemoclaw-progressive-validation \

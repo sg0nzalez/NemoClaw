@@ -362,9 +362,6 @@ describe("LangChain Deep Agents Code image contracts", () => {
     );
     expect(dockerfile).toContain("/opt/venv/bin/pip3 check");
     expect(dockerfile).toContain(
-      "/opt/venv/bin/python3 -I -c 'import deepagents; import deepagents_code; import nemoclaw_deepagents_profile'",
-    );
-    expect(dockerfile).toContain(
       "/opt/venv/bin/python3 -I /opt/nemoclaw-deepagents-code/validate-nemotron-ultra-profile.py",
     );
     expect(dockerfile).toContain(
