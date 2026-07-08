@@ -202,9 +202,7 @@ function buildAndInstallPluginWheel(version: string): string {
   const projectPath = path.join(projectRoot, "pyproject.toml");
   const project = fs.readFileSync(projectPath, "utf8");
   const versionedProject = project.replace('version = "0.1.0"', `version = "${version}"`);
-  if (versionedProject === project) {
-    throw new Error("profile plugin project version anchor is missing");
-  }
+  expect(versionedProject).not.toBe(project);
   fs.writeFileSync(projectPath, versionedProject, "utf8");
   const pipEnv = {
     ...process.env,
