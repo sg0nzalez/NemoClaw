@@ -3612,7 +3612,13 @@ export function validateE2eWorkflowBoundary(workflowPath = DEFAULT_E2E_WORKFLOW_
     steps,
     "Verify DCode profile import gate rejects missing base dependencies",
   );
-  const dcodeProfileImportGateEnv = asRecord(dcodeProfileImportGate?.env);
+  if (
+    Object.hasOwn(asRecord(dcodeProfileImportGate?.env), "NEMOCLAW_DCODE_PROFILE_GATE_BASE_IMAGE")
+  ) {
+    errors.push(
+      "live DCode profile import gate must build the reviewed repository base without an override",
+    );
+  }
   if (
     dcodeProfileImportGate?.["if"] !==
     "${{ matrix.id == 'ubuntu-repo-cloud-langchain-deepagents-code' }}"
@@ -3621,12 +3627,6 @@ export function validateE2eWorkflowBoundary(workflowPath = DEFAULT_E2E_WORKFLOW_
   }
   if (dcodeProfileImportGate?.shell !== "bash") {
     errors.push("live DCode profile import gate must use bash");
-  }
-  if (
-    dcodeProfileImportGateEnv.NEMOCLAW_DCODE_PROFILE_GATE_BASE_IMAGE !==
-    "ghcr.io/nvidia/nemoclaw/langchain-deepagents-code-sandbox-base:latest"
-  ) {
-    errors.push("live DCode profile import gate must strip the published DCode base image");
   }
   if (
     stringValue(dcodeProfileImportGate?.run).trim() !==

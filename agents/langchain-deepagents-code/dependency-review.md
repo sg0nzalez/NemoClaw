@@ -53,9 +53,10 @@ proves parser/native dispatch parity, and confirms an unrelated OpenAI model
 receives no Ultra behavior. The Docker build separately imports the adapter,
 Deep Agents, and DCode under isolated Python immediately after installation;
 the validator then binds the installed module to its distribution and rechecks
-the module hash. A DCode-only CI regression strips both upstream distributions
-from the published base image and proves the production build stops at that
-import gate before the later dependency-consistency check.
+the module hash. A DCode-only CI regression builds the current, hash-locked
+`Dockerfile.base` instead of consuming a mutable registry tag, strips both
+upstream distributions, and proves the production build stops at that import
+gate before the later dependency-consistency check.
 
 The reviewed native-profile and bootstrap files stay byte-for-byte unchanged.
 Focused fixtures cover the reviewed version/hash, missing-source,

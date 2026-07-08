@@ -115,8 +115,10 @@ describe("LangChain Deep Agents Code profile build gate", () => {
     expect(result.stdout).toContain(
       "DCode profile import gate rejected a base missing deepagents and deepagents-code",
     );
+    expect(result.calls).toContain("--file agents/langchain-deepagents-code/Dockerfile.base");
     expect(result.calls).toContain("--file test/Dockerfile.dcode-profile-missing-dependencies");
     expect(result.calls).toContain("--file agents/langchain-deepagents-code/Dockerfile");
+    expect(result.calls).not.toContain(":latest");
   });
 
   it("rejects a production build that unexpectedly succeeds", () => {

@@ -6,25 +6,36 @@ set -euo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly repo_root
-readonly base_image="${NEMOCLAW_DCODE_PROFILE_GATE_BASE_IMAGE:-ghcr.io/nvidia/nemoclaw/langchain-deepagents-code-sandbox-base:latest}"
 readonly image_suffix="${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-0}-$$"
+readonly source_base_image="nemoclaw-dcode-profile-source-base:${image_suffix}"
 readonly stripped_image="nemoclaw-dcode-profile-missing-dependencies:${image_suffix}"
 readonly failed_image="nemoclaw-dcode-profile-import-gate-failure:${image_suffix}"
 build_log="$(mktemp "${TMPDIR:-/tmp}/nemoclaw-dcode-profile-import-gate.XXXXXX.log")"
 readonly build_log
 
 cleanup() {
-  docker image rm --force "${failed_image}" "${stripped_image}" >/dev/null 2>&1 || true
+  docker image rm --force \
+    "${failed_image}" \
+    "${stripped_image}" \
+    "${source_base_image}" >/dev/null 2>&1 || true
   rm -f "${build_log}"
 }
 trap cleanup EXIT
 
 cd "${repo_root}"
 
+# Build the reviewed repository base directly so this trusted negative gate has
+# no mutable registry input. Docker layers remain reusable by the live target.
+docker build \
+  --progress=plain \
+  --file agents/langchain-deepagents-code/Dockerfile.base \
+  --tag "${source_base_image}" \
+  .
+
 docker build \
   --progress=plain \
   --file test/Dockerfile.dcode-profile-missing-dependencies \
-  --build-arg "BASE_IMAGE=${base_image}" \
+  --build-arg "BASE_IMAGE=${source_base_image}" \
   --tag "${stripped_image}" \
   .
 

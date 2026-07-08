@@ -66,6 +66,19 @@ describe("DCode missing-dependency profile import gate workflow boundary", () =>
     );
   });
 
+  it("rejects a mutable registry base override", () => {
+    const errors = validateMutation((workflow) => {
+      liveGateStep(workflow).env = {
+        NEMOCLAW_DCODE_PROFILE_GATE_BASE_IMAGE:
+          "ghcr.io/nvidia/nemoclaw/langchain-deepagents-code-sandbox-base:latest",
+      };
+    });
+
+    expect(errors).toContain(
+      "live DCode profile import gate must build the reviewed repository base without an override",
+    );
+  });
+
   it("rejects moving the import gate after live inference", () => {
     const errors = validateMutation((workflow) => {
       const steps = workflow.jobs.live.steps;

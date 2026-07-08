@@ -147,7 +147,7 @@ function prepareFixturePlugin(
   return writeFixtureFile(pluginRoot, "nemoclaw_deepagents_profile/__init__.py", source);
 }
 
-function makeValidatorStubRoot(entryPointName: string, pluginVersion = "0.1.0"): string {
+function makeValidatorDependencyStubRoot(): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-profile-validator-stubs-"));
   tempRoots.push(root);
   const stubs = {
@@ -168,9 +168,6 @@ function makeValidatorStubRoot(entryPointName: string, pluginVersion = "0.1.0"):
     "langchain_core/messages.py":
       "class AIMessage: pass\nclass HumanMessage: pass\nclass ToolMessage: pass\n",
     "langchain_openai/__init__.py": "class ChatOpenAI: pass\n",
-    "nemoclaw_deepagents_profile/__init__.py": "def register(): pass\n",
-    [`nemoclaw_deepagents_profile-${pluginVersion}.dist-info/METADATA`]: `Metadata-Version: 2.1\nName: nemoclaw-deepagents-profile\nVersion: ${pluginVersion}\n`,
-    [`nemoclaw_deepagents_profile-${pluginVersion}.dist-info/entry_points.txt`]: `[deepagents.harness_profiles]\n${entryPointName} = nemoclaw_deepagents_profile:register\n`,
   };
   for (const [relativePath, content] of Object.entries(stubs)) {
     writeFixtureFile(root, relativePath, content);
@@ -178,8 +175,78 @@ function makeValidatorStubRoot(entryPointName: string, pluginVersion = "0.1.0"):
   return root;
 }
 
-function runEntryPointValidation(entryPointName: string, pluginVersion = "0.1.0") {
-  const stubRoot = makeValidatorStubRoot(entryPointName, pluginVersion);
+function makeValidatorStubRoot(entryPointName: string): string {
+  const root = makeValidatorDependencyStubRoot();
+  writeFixtureFile(root, "nemoclaw_deepagents_profile/__init__.py", "def register(): pass\n");
+  writeFixtureFile(
+    root,
+    "nemoclaw_deepagents_profile-0.1.0.dist-info/METADATA",
+    "Metadata-Version: 2.1\nName: nemoclaw-deepagents-profile\nVersion: 0.1.0\n",
+  );
+  writeFixtureFile(
+    root,
+    "nemoclaw_deepagents_profile-0.1.0.dist-info/entry_points.txt",
+    `[deepagents.harness_profiles]\n${entryPointName} = nemoclaw_deepagents_profile:register\n`,
+  );
+  return root;
+}
+
+function buildAndInstallPluginWheel(version: string): string {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-profile-wheel-"));
+  tempRoots.push(root);
+  const projectRoot = path.join(root, "project");
+  const wheelDir = path.join(root, "wheel");
+  const installRoot = path.join(root, "installed");
+  fs.cpSync(pluginProjectDir, projectRoot, { recursive: true });
+  fs.mkdirSync(wheelDir);
+  const projectPath = path.join(projectRoot, "pyproject.toml");
+  const project = fs.readFileSync(projectPath, "utf8");
+  const versionedProject = project.replace('version = "0.1.0"', `version = "${version}"`);
+  if (versionedProject === project) {
+    throw new Error("profile plugin project version anchor is missing");
+  }
+  fs.writeFileSync(projectPath, versionedProject, "utf8");
+  const pipEnv = {
+    ...process.env,
+    PIP_DISABLE_PIP_VERSION_CHECK: "1",
+    PIP_NO_INPUT: "1",
+  };
+  execFileSync(
+    pythonBin,
+    [
+      "-m",
+      "pip",
+      "wheel",
+      "--no-cache-dir",
+      "--no-deps",
+      "--no-index",
+      "--no-build-isolation",
+      "--wheel-dir",
+      wheelDir,
+      projectRoot,
+    ],
+    { env: pipEnv, stdio: "pipe" },
+  );
+  const wheelPath = path.join(wheelDir, `nemoclaw_deepagents_profile-${version}-py3-none-any.whl`);
+  execFileSync(
+    pythonBin,
+    [
+      "-m",
+      "pip",
+      "install",
+      "--no-cache-dir",
+      "--no-deps",
+      "--no-index",
+      "--target",
+      installRoot,
+      wheelPath,
+    ],
+    { env: pipEnv, stdio: "pipe" },
+  );
+  return installRoot;
+}
+
+function runEntryPointValidationWithRoots(pythonRoots: string[]) {
   const script = `import importlib.util
 import json
 
@@ -198,13 +265,17 @@ raise SystemExit(1 if error else 0)
     encoding: "utf8",
     env: {
       PATH: "/usr/bin:/bin",
-      PYTHONPATH: stubRoot,
+      PYTHONPATH: pythonRoots.join(path.delimiter),
     },
   });
   return {
     ...result,
     probe: JSON.parse(result.stdout) as ValidationProbeResult,
   };
+}
+
+function runEntryPointValidation(entryPointName: string) {
+  return runEntryPointValidationWithRoots([makeValidatorStubRoot(entryPointName)]);
 }
 
 function runPlugin(
@@ -358,8 +429,10 @@ describe("LangChain Deep Agents Code managed Nemotron profile plugin (#6424)", (
     );
   });
 
-  it("rejects profile entry points from an unreviewed plugin version", () => {
-    const result = runEntryPointValidation("nemoclaw-managed-aliases", "0.1.1");
+  it("rejects an installed real plugin wheel with an unreviewed version", () => {
+    const dependencyRoot = makeValidatorDependencyStubRoot();
+    const installedPluginRoot = buildAndInstallPluginWheel("0.1.1");
+    const result = runEntryPointValidationWithRoots([dependencyRoot, installedPluginRoot]);
 
     expect(result.status).not.toBe(0);
     expect(result.probe.error).toContain(
