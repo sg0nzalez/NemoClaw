@@ -174,7 +174,10 @@ function makeValidatorDependencyStubRoot(): string {
   return root;
 }
 
-function makeValidatorStubRoot(entryPointName: string): string {
+function makeValidatorStubRoot(
+  entryPointName: string,
+  entryPointGroup = "deepagents.harness_profiles",
+): string {
   const root = makeValidatorDependencyStubRoot();
   writeFixtureFile(
     root,
@@ -189,7 +192,7 @@ function makeValidatorStubRoot(entryPointName: string): string {
   writeFixtureFile(
     root,
     "nemoclaw_deepagents_profile-0.1.0.dist-info/entry_points.txt",
-    `[deepagents.harness_profiles]\n${entryPointName} = nemoclaw_deepagents_profile:register\n`,
+    `[${entryPointGroup}]\n${entryPointName} = nemoclaw_deepagents_profile:register\n`,
   );
   return root;
 }
@@ -283,8 +286,11 @@ raise SystemExit(1 if error else 0)
   };
 }
 
-function runEntryPointValidation(entryPointName: string) {
-  return runEntryPointValidationWithRoots([makeValidatorStubRoot(entryPointName)]);
+function runEntryPointValidation(
+  entryPointName: string,
+  entryPointGroup = "deepagents.harness_profiles",
+) {
+  return runEntryPointValidationWithRoots([makeValidatorStubRoot(entryPointName, entryPointGroup)]);
 }
 
 function runPlugin(
@@ -383,8 +389,15 @@ describe("LangChain Deep Agents Code managed Nemotron profile plugin (#6424)", (
     expect(result.probe.error).toBeNull();
   });
 
-  it("rejects a malicious wrong harness-profile entry point before official source validation", () => {
-    const result = runEntryPointValidation("wrong-managed-aliases");
+  it.each([
+    ["a malicious wrong harness-profile entry point", "wrong-managed-aliases", undefined],
+    [
+      "a plugin distribution missing the harness-profile entry-point group",
+      "nemoclaw-managed-aliases",
+      "unrelated.entry_points",
+    ],
+  ] as const)("rejects %s", (_label, entryPointName, entryPointGroup) => {
+    const result = runEntryPointValidation(entryPointName, entryPointGroup);
 
     expect(result.status).not.toBe(0);
     expect(result.probe.error).toContain(

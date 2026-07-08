@@ -30,6 +30,14 @@ NemoClaw no longer vendors or overlays that source.
   `deepagents==0.7.0a6` entries covered by the lockfile audit command above; no
   additional third-party distribution is introduced.
 
+The adapter is a private, first-party build-context package: NemoClaw does not
+publish it to a registry or resolve it from an index. The image verifies its
+reviewed source and project-metadata hashes, then builds it offline with
+`--no-index --no-deps --no-build-isolation`. There is therefore no separate
+published distribution for a registry audit to resolve. If that packaging
+boundary ever changes, the publishing workflow must build and audit the wheel
+before upload; index publication is not permitted without that release gate.
+
 Before local build and installation, the managed image verifies both copied
 adapter build inputs against the module and project-metadata hashes recorded
 above. It then installs the first-party `nemoclaw-deepagents-profile` package
