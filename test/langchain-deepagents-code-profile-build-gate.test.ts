@@ -18,7 +18,7 @@ const reviewedDockerfiles = [
 
 function runGateWithFakeDocker(
   mode: "expected-failure-with-marker" | "early-failure" | "success",
-  extraArgDockerfile?: (typeof reviewedDockerfiles)[number],
+  mutateFixture: (fixtureRoot: string) => void = () => undefined,
 ) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "dcode-profile-import-gate-"));
   const fixtureRoot = path.join(tmp, "repo");
@@ -32,9 +32,7 @@ function runGateWithFakeDocker(
     fs.mkdirSync(path.dirname(fixturePath), { recursive: true });
     fs.copyFileSync(path.join(repoRoot, dockerfile), fixturePath);
   }
-  if (extraArgDockerfile) {
-    fs.appendFileSync(path.join(fixtureRoot, extraArgDockerfile), "\nARG UNREVIEWED_SECRET\n");
-  }
+  mutateFixture(fixtureRoot);
   fs.writeFileSync(
     dockerPath,
     `#!/usr/bin/env bash
@@ -79,7 +77,9 @@ exit 0
 
 describe("LangChain Deep Agents Code profile build gate", () => {
   it.each(reviewedDockerfiles)("rejects an unreviewed ARG in %s", (dockerfile) => {
-    const result = runGateWithFakeDocker("expected-failure-with-marker", dockerfile);
+    const result = runGateWithFakeDocker("expected-failure-with-marker", (fixtureRoot) =>
+      fs.appendFileSync(path.join(fixtureRoot, dockerfile), "\nARG UNREVIEWED_SECRET\n"),
+    );
 
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain(`unreviewed ARG UNREVIEWED_SECRET in ${dockerfile}`);
