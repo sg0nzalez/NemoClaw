@@ -23,6 +23,12 @@ NemoClaw no longer vendors or overlays that source.
 - Native profile SHA-256: `c8e8dd2b0182334b54be4f46ff0c7b45fbb95dc13bd9a92c249eb47a14fa13d7`
 - Unmodified built-in bootstrap SHA-256: `005a91e7fc4ca6b21220673dd9d02d6686bf63e1e4f1102d124b01f96886efcf`
 - First-party adapter: `nemoclaw-deepagents-profile==0.1.0`
+- Adapter module SHA-256: `d5e2e8214e46fd61265d2377a3f9a30d827f19f08fc50272980b69fda3669fc1`
+- Adapter project metadata SHA-256: `7ba7b77bd6f889cc861eddbe3e38fc1f4433a85b7bc2a9b516e19a19a37a7686`
+- Adapter dependency audit result: `No known vulnerabilities found`. Its only
+  requirements are the exact `deepagents-code==0.1.34` and
+  `deepagents==0.7.0a6` entries covered by the lockfile audit command above; no
+  additional third-party distribution is introduced.
 
 The managed image installs the first-party `nemoclaw-deepagents-profile`
 package without consulting an index. Its `deepagents.harness_profiles` entry
@@ -34,13 +40,16 @@ released SDK has no public profile getter or alias API. The adapter does not add
 a provider-wide OpenAI profile.
 
 The adapter verifies the exact DCode and Deep Agents versions plus the official
-native-profile and bootstrap source hashes. Registration is atomic, idempotent,
-and rejects missing canonical, partial, or conflicting alias state. The image
-validator runs under isolated Python, verifies the installed entry-point
-metadata, checks both upstream files before and after profile loading, resolves
-the complete native middleware for both aliases, compiles a graph, proves
-parser/native dispatch parity, and confirms an unrelated OpenAI model receives
-no Ultra behavior.
+native-profile and bootstrap source hashes. It also binds the imported Deep
+Agents package to the distribution that supplied the reviewed version.
+Registration is atomic, idempotent, and rejects missing canonical, partial, or
+conflicting alias state. The image validator runs under isolated Python,
+verifies the installed entry-point metadata and adapter source hash before the
+upstream source checks, checks both upstream files again after profile loading,
+resolves the complete native middleware for both aliases, compiles a graph,
+proves parser/native dispatch parity, and confirms an unrelated OpenAI model
+receives no Ultra behavior. The Docker build separately imports DCode, Deep
+Agents, and the adapter under isolated Python immediately after installation.
 
 The reviewed native-profile and bootstrap files stay byte-for-byte unchanged.
 Focused fixtures cover the reviewed version/hash, missing-source,

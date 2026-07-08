@@ -25,6 +25,7 @@ const EXPECTED_DEEPAGENTS_VERSION = "0.7.0a6";
 const NATIVE_PROFILE_SHA256 = "c8e8dd2b0182334b54be4f46ff0c7b45fbb95dc13bd9a92c249eb47a14fa13d7";
 const UNMODIFIED_BOOTSTRAP_SHA256 =
   "005a91e7fc4ca6b21220673dd9d02d6686bf63e1e4f1102d124b01f96886efcf";
+const PLUGIN_SOURCE_SHA256 = "d5e2e8214e46fd61265d2377a3f9a30d827f19f08fc50272980b69fda3669fc1";
 const CANONICAL_MODEL_SPEC = "nvidia:nvidia/nemotron-3-ultra-550b-a55b";
 const MANAGED_MODEL_ALIASES = [
   "openai:nvidia/nemotron-3-ultra-550b-a55b",
@@ -54,6 +55,10 @@ type ProbeResult = {
   canonicalPresent: boolean;
   error: string | null;
   registryKeys: string[];
+};
+
+type ValidationProbeResult = {
+  error: string | null;
 };
 
 function sha256(value: string | Buffer): string {
@@ -139,9 +144,71 @@ function prepareFixturePlugin(
   return writeFixtureFile(pluginRoot, "nemoclaw_deepagents_profile/__init__.py", source);
 }
 
+function makeValidatorStubRoot(entryPointName: string): string {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-profile-validator-stubs-"));
+  tempRoots.push(root);
+  const stubs = {
+    "deepagents/__init__.py": "def create_deep_agent(*args, **kwargs): return object()\n",
+    "deepagents/backends/__init__.py":
+      "class LocalShellBackend:\n    def __init__(self, *args, **kwargs): pass\n",
+    "deepagents/backends/protocol.py": "class ExecuteResponse: pass\n",
+    "deepagents/profiles/__init__.py": "",
+    "deepagents/profiles/harness/__init__.py": "",
+    "deepagents/profiles/harness/_nvidia_nemotron_3_ultra.py":
+      "class NemotronTextToolCallParser: pass\n",
+    "deepagents/profiles/harness/harness_profiles.py":
+      "class HarnessProfile: pass\ndef _harness_profile_for_model(*args, **kwargs): return HarnessProfile()\n",
+    "deepagents_code/__init__.py": "",
+    "deepagents_code/agent.py": "def create_cli_agent(*args, **kwargs): return None\n",
+    "langchain/agents/middleware/types.py": "class AgentMiddleware: pass\n",
+    "langchain_core/language_models/fake_chat_models.py": "class FakeMessagesListChatModel: pass\n",
+    "langchain_core/messages.py":
+      "class AIMessage: pass\nclass HumanMessage: pass\nclass ToolMessage: pass\n",
+    "langchain_openai/__init__.py": "class ChatOpenAI: pass\n",
+    "nemoclaw_deepagents_profile/__init__.py": "def register(): pass\n",
+    "nemoclaw_deepagents_profile-0.1.0.dist-info/METADATA":
+      "Metadata-Version: 2.1\nName: nemoclaw-deepagents-profile\nVersion: 0.1.0\n",
+    "nemoclaw_deepagents_profile-0.1.0.dist-info/entry_points.txt": `[deepagents.harness_profiles]\n${entryPointName} = nemoclaw_deepagents_profile:register\n`,
+  };
+  for (const [relativePath, content] of Object.entries(stubs)) {
+    writeFixtureFile(root, relativePath, content);
+  }
+  return root;
+}
+
+function runEntryPointValidation(entryPointName: string) {
+  const stubRoot = makeValidatorStubRoot(entryPointName);
+  const script = `import importlib.util
+import json
+
+spec = importlib.util.spec_from_file_location("nemoclaw_profile_validator", ${JSON.stringify(validatorPath)})
+validator = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(validator)
+error = None
+try:
+    validator.validate_profile_entry_point()
+except Exception as exc:
+    error = str(exc)
+print(json.dumps({"error": error}))
+raise SystemExit(1 if error else 0)
+`;
+  const result = spawnSync("python3", ["-S", "-c", script], {
+    encoding: "utf8",
+    env: {
+      PATH: "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
+      PYTHONPATH: stubRoot,
+    },
+  });
+  return {
+    ...result,
+    probe: JSON.parse(result.stdout) as ValidationProbeResult,
+  };
+}
+
 function runPlugin(
   fixture: PluginFixture,
   options: {
+    additionalPythonRoots?: string[];
     aliasState?: "complete" | "conflict" | "partial";
     failKey?: string;
     pluginPath?: string;
@@ -189,8 +256,10 @@ raise SystemExit(1 if error else 0)
   const result = spawnSync("python3", ["-c", script], {
     encoding: "utf8",
     env: {
-      PATH: process.env.PATH,
-      PYTHONPATH: `${fixture.root}${path.delimiter}${pluginRoot}`,
+      PATH: "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
+      PYTHONPATH: [...(options.additionalPythonRoots ?? []), fixture.root, pluginRoot].join(
+        path.delimiter,
+      ),
       ...(options.failKey ? { NEMOCLAW_TEST_FAIL_KEY: options.failKey } : {}),
     },
   });
@@ -241,17 +310,21 @@ describe("LangChain Deep Agents Code managed Nemotron profile plugin (#6424)", (
       expect(plugin).toContain(expected);
     }
     expect(plugin).toContain("from deepagents.profiles import register_harness_profile");
+    expect(plugin).toContain('distribution.locate_file("deepagents")');
+    expect(plugin).toContain("root.samefile(distribution_root)");
     expect(plugin).not.toMatch(/write_bytes|write_text|os\.replace|\.replace\(path\)/);
   });
 
   it("keeps isolated discovery, source, graph, and dispatch checks in the image validator", () => {
     const validator = fs.readFileSync(validatorPath, "utf8");
+    const mainBody = validator.slice(validator.indexOf("def main() -> None:"));
 
     for (const expected of [
       '"nemoclaw-deepagents-profile": "0.1.0"',
       'group="deepagents.harness_profiles"',
       '"nemoclaw-managed-aliases"',
       '"nemoclaw_deepagents_profile:register"',
+      PLUGIN_SOURCE_SHA256,
       NATIVE_PROFILE_SHA256,
       UNMODIFIED_BOOTSTRAP_SHA256,
       "create_deep_agent(model=managed_models[0])",
@@ -267,6 +340,20 @@ describe("LangChain Deep Agents Code managed Nemotron profile plugin (#6424)", (
     }
     expect(validator).toContain("def require(condition: bool, message: str)");
     expect(validator).not.toMatch(/^\s*assert\b/m);
+    expect(mainBody.indexOf("validate_profile_entry_point()")).toBeLessThan(
+      mainBody.indexOf("validate_official_sources()"),
+    );
+    expect(mainBody.match(/validate_official_sources\(\)/g)).toHaveLength(2);
+    expect(mainBody).toContain("prove the adapter never");
+  });
+
+  it("rejects a mismatched installed harness-profile entry point before source validation", () => {
+    const result = runEntryPointValidation("wrong-managed-aliases");
+
+    expect(result.status).not.toBe(0);
+    expect(result.probe.error).toContain(
+      "expected exactly one 'nemoclaw-managed-aliases' profile entry point",
+    );
   });
 
   it("registers both aliases against the canonical profile without changing wheel sources", () => {
@@ -292,6 +379,25 @@ describe("LangChain Deep Agents Code managed Nemotron profile plugin (#6424)", (
 
     expect(result.status).not.toBe(0);
     expect(result.probe.error).toContain(message);
+    expect(result.probe.aliases).toEqual([false, false]);
+    expectOfficialSourcesUnchanged(fixture);
+  });
+
+  it("rejects an imported Deep Agents package outside its reviewed distribution", () => {
+    const fixture = makePluginFixture();
+    const shadowRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-shadow-deepagents-"));
+    tempRoots.push(shadowRoot);
+    writeFixtureFile(
+      shadowRoot,
+      "deepagents/__init__.py",
+      "from pkgutil import extend_path\n__path__ = extend_path(__path__, __name__)\n",
+    );
+    const result = runPlugin(fixture, { additionalPythonRoots: [shadowRoot] });
+
+    expect(result.status).not.toBe(0);
+    expect(result.probe.error).toContain(
+      "imported deepagents package does not match the reviewed distribution",
+    );
     expect(result.probe.aliases).toEqual([false, false]);
     expectOfficialSourcesUnchanged(fixture);
   });

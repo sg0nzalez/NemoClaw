@@ -42,6 +42,9 @@ EXPECTED_PROFILE_ENTRY_POINT = (
     "nemoclaw-managed-aliases",
     "nemoclaw_deepagents_profile:register",
 )
+EXPECTED_PLUGIN_SOURCE_SHA256 = (
+    "d5e2e8214e46fd61265d2377a3f9a30d827f19f08fc50272980b69fda3669fc1"
+)
 EXPECTED_NATIVE_PROFILE_SHA256 = (
     "c8e8dd2b0182334b54be4f46ff0c7b45fbb95dc13bd9a92c249eb47a14fa13d7"
 )
@@ -142,6 +145,37 @@ def validate_profile_entry_point() -> None:
         distribution.metadata["Name"] == "nemoclaw-deepagents-profile",
         "profile entry point comes from an unexpected distribution",
     )
+    require(
+        distribution.version == EXPECTED_VERSIONS["nemoclaw-deepagents-profile"],
+        "profile entry point comes from an unexpected distribution version",
+    )
+    module_spec = importlib.util.find_spec("nemoclaw_deepagents_profile")
+    require(
+        module_spec is not None and module_spec.origin is not None,
+        "could not locate the installed profile plugin",
+    )
+    module_path = Path(module_spec.origin)
+    distribution_path = Path(
+        distribution.locate_file("nemoclaw_deepagents_profile/__init__.py")
+    )
+    for path, label in (
+        (module_path, "imported profile plugin"),
+        (distribution_path, "distributed profile plugin"),
+    ):
+        require(
+            not path.is_symlink() and path.is_file(),
+            f"{label} is not a trusted regular file: {path}",
+        )
+    require(
+        module_path.samefile(distribution_path),
+        "imported profile plugin does not match its reviewed distribution",
+    )
+    source = module_path.read_bytes()
+    require(
+        hashlib.sha256(source).hexdigest() == EXPECTED_PLUGIN_SOURCE_SHA256,
+        "profile plugin source does not match the reviewed first-party package",
+    )
+    compile(source, str(module_path), "exec")
 
 
 class ScriptedManagedModel(FakeMessagesListChatModel):
@@ -361,6 +395,9 @@ def main() -> None:
         middleware_names(unrelated) == (),
         "unrelated OpenAI model received Ultra middleware",
     )
+    # Re-read both official files after plugin discovery, profile resolution,
+    # graph construction, and dispatch checks to prove the adapter never
+    # mutates either reviewed wheel source during validation.
     validate_official_sources()
     print("Nemotron 3 Ultra managed harness profile validation passed.")
 

@@ -362,6 +362,9 @@ describe("LangChain Deep Agents Code image contracts", () => {
     );
     expect(dockerfile).toContain("/opt/venv/bin/pip3 check");
     expect(dockerfile).toContain(
+      "/opt/venv/bin/python3 -I -c 'import deepagents; import deepagents_code; import nemoclaw_deepagents_profile'",
+    );
+    expect(dockerfile).toContain(
       "/opt/venv/bin/python3 -I /opt/nemoclaw-deepagents-code/validate-nemotron-ultra-profile.py",
     );
     expect(dockerfile).toContain(
@@ -831,6 +834,9 @@ describe("LangChain Deep Agents Code image contracts", () => {
       "uv tool run --python 3.13 pip-audit -r agents/langchain-deepagents-code/requirements.lock --progress-spinner off --disable-pip",
     );
     expect(review).toContain("No known vulnerabilities found");
+    expect(review).toContain("d5e2e8214e46fd61265d2377a3f9a30d827f19f08fc50272980b69fda3669fc1");
+    expect(review).toContain("7ba7b77bd6f889cc861eddbe3e38fc1f4433a85b7bc2a9b516e19a19a37a7686");
+    expect(review).toContain("Adapter dependency audit result: `No known vulnerabilities found`");
     expect(review).toContain("Deep Agents Code `0.1.34` pins `deepagents==0.7.0a6`");
     expect(review).toContain("NemoClaw no longer vendors or overlays that source");
   });

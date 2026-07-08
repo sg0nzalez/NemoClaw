@@ -62,6 +62,12 @@ def _require_version(distribution: str, expected: str) -> None:
 
 
 def _deepagents_root() -> Path:
+    _require_version("deepagents", EXPECTED_DEEPAGENTS_VERSION)
+    try:
+        distribution = importlib.metadata.distribution("deepagents")
+    except importlib.metadata.PackageNotFoundError as exc:
+        raise _fail("required distribution 'deepagents' is not installed") from exc
+
     spec = importlib.util.find_spec("deepagents")
     if spec is None or spec.submodule_search_locations is None:
         raise _fail("could not locate the installed deepagents package")
@@ -71,6 +77,20 @@ def _deepagents_root() -> Path:
     root = roots[0]
     if root.is_symlink() or not root.is_dir():
         raise _fail(f"deepagents package root is not a trusted directory: {root}")
+    distribution_root = Path(distribution.locate_file("deepagents"))
+    if distribution_root.is_symlink() or not distribution_root.is_dir():
+        raise _fail(
+            "deepagents distribution root is not a trusted directory: "
+            f"{distribution_root}"
+        )
+    try:
+        matches_distribution = root.samefile(distribution_root)
+    except OSError as exc:
+        raise _fail("could not verify the imported deepagents package root") from exc
+    if not matches_distribution:
+        raise _fail(
+            "imported deepagents package does not match the reviewed distribution"
+        )
     return root
 
 
@@ -115,7 +135,6 @@ def _register_aliases(
 def register() -> None:
     """Register NemoClaw model aliases through Deep Agents' plugin hook."""
     _require_version("deepagents-code", EXPECTED_DCODE_VERSION)
-    _require_version("deepagents", EXPECTED_DEEPAGENTS_VERSION)
 
     package_root = _deepagents_root()
     _require_source(
