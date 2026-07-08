@@ -54,6 +54,11 @@ export type GatewayRecoveryDeps = {
   startGatewayWithOptions(gpu: never, options: { exitOnFailure: false }): Promise<void>;
   isLinuxDockerDriverGatewayEnabled?(): boolean;
   sleepSeconds?(seconds: number): void;
+  // Injected so caller-level tests can exercise the success + retry-success
+  // paths at unit-test speed without standing up a real gateway. Defaults
+  // to the production implementations.
+  isGatewayHealthy?: typeof isGatewayHealthy;
+  isGatewayHttpReady?: typeof isGatewayHttpReady;
 };
 
 function isValidGatewayRecoveryPort(port: number | null | undefined): port is number {
@@ -178,6 +183,8 @@ async function startTargetGatewayForRecovery(
   const targetGatewayUrl = `${getGatewayHttpEndpoint(gatewayPort)}/`;
   const waitBudgetMs = getGatewayRecoveryWaitBudgetMs(recoveryPollCount, recoveryPollInterval);
   const sleeper = deps.sleepSeconds ?? sleepSeconds;
+  const gatewayHealthyImpl = deps.isGatewayHealthy ?? isGatewayHealthy;
+  const gatewayHttpReadyImpl = deps.isGatewayHttpReady ?? isGatewayHttpReady;
   const healthy =
     recoveryPollCount > 0 &&
     (await waitUntilAsync(
@@ -189,8 +196,8 @@ async function startTargetGatewayForRecovery(
         const currentInfo = deps.runCaptureOpenshell(["gateway", "info"], { ignoreError: true });
         return (
           status.includes("Connected") &&
-          isGatewayHealthy(status, namedInfo, currentInfo, gatewayName) &&
-          (await isGatewayHttpReady(undefined, targetGatewayUrl))
+          gatewayHealthyImpl(status, namedInfo, currentInfo, gatewayName) &&
+          (await gatewayHttpReadyImpl(undefined, targetGatewayUrl))
         );
       },
       {
@@ -199,6 +206,9 @@ async function startTargetGatewayForRecovery(
         maxIntervalMs: Math.max(0, recoveryPollInterval * 1000),
         backoffFactor: 1,
         maxAttempts: recoveryPollCount,
+        // waitUntilAsync passes durations in milliseconds to `sleep`, while
+        // the injected sleeper (sleepSeconds) expects a second-granular
+        // number. Adapt at this boundary only.
         sleep: (ms) => sleeper(ms / 1000),
       },
     ));
@@ -214,10 +224,15 @@ async function startTargetGatewayForRecovery(
     return;
   }
 
+  // The wait is attempt-capped (waitUntilAsync exits at maxAttempts) with a
+  // fixed inter-attempt interval and a hard upper time bound. Describe both
+  // dimensions honestly so the operator does not read the message as a
+  // pure deadline promise: the loop can terminate earlier via the attempt
+  // cap when probes fail quickly, and cannot exceed the upper bound.
   throw new Error(
-    `Gateway '${gatewayName}' did not become ready after the configured ${formatGatewayRecoveryWaitBudget(
+    `Gateway '${gatewayName}' did not become ready after ${recoveryPollCount} recovery attempt(s) at ${recoveryPollInterval}s interval (max wait ${formatGatewayRecoveryWaitBudget(
       waitBudgetMs,
-    )} recovery wait budget (${recoveryPollCount} attempt(s), ${recoveryPollInterval}s interval)`,
+    )})`,
   );
 }
 

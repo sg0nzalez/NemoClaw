@@ -92,13 +92,75 @@ describe("gateway recovery", () => {
     const deps = createDeps();
 
     await expect(startGatewayForRecovery({ gatewayPort: 8091 }, deps)).rejects.toThrow(
-      "configured 6s recovery wait budget (3 attempt(s), 2s interval)",
+      "3 recovery attempt(s) at 2s interval (max wait 6s)",
     );
 
     expect(deps.runCaptureOpenshell).toHaveBeenCalledTimes(9);
     expect(deps.sleepSeconds).toHaveBeenCalledTimes(2);
     expect(deps.sleepSeconds).toHaveBeenNthCalledWith(1, 2);
     expect(deps.sleepSeconds).toHaveBeenNthCalledWith(2, 2);
+  });
+
+  it("succeeds on the first healthy probe without sleeping and sets OPENSHELL_GATEWAY", async () => {
+    // Advisor: pin the happy path so a future refactor cannot silently
+    // break the side effects the caller relies on after readiness.
+    vi.stubEnv("NEMOCLAW_HEALTH_POLL_COUNT", "3");
+    vi.stubEnv("NEMOCLAW_HEALTH_POLL_INTERVAL", "2");
+    const deps = createDeps({
+      runCaptureOpenshell: vi.fn(() => "Connected"),
+      isGatewayHealthy: () => true,
+      isGatewayHttpReady: async () => true,
+    });
+
+    await startGatewayForRecovery({ gatewayPort: 8091 }, deps);
+
+    expect(process.env.OPENSHELL_GATEWAY).toBe("nemoclaw-8091");
+    expect(deps.sleepSeconds).not.toHaveBeenCalled();
+    // First iteration only: 3 subprocess calls (status + gateway info -g +
+    // gateway info); loop returns before the next iteration would start.
+    expect(deps.runCaptureOpenshell).toHaveBeenCalledTimes(3);
+  });
+
+  it("succeeds after retrying past unhealthy probes and still sets OPENSHELL_GATEWAY", async () => {
+    vi.stubEnv("NEMOCLAW_HEALTH_POLL_COUNT", "3");
+    vi.stubEnv("NEMOCLAW_HEALTH_POLL_INTERVAL", "2");
+    // Probe #1 fails the health predicate, probe #2 passes. Each probe
+    // reads status + gateway info -g + gateway info (3 calls).
+    let healthCalls = 0;
+    const deps = createDeps({
+      runCaptureOpenshell: vi.fn(() => "Connected"),
+      isGatewayHealthy: () => {
+        healthCalls++;
+        return healthCalls > 1;
+      },
+      isGatewayHttpReady: async () => true,
+    });
+
+    await startGatewayForRecovery({ gatewayPort: 8091 }, deps);
+
+    expect(process.env.OPENSHELL_GATEWAY).toBe("nemoclaw-8091");
+    // Exactly one inter-attempt sleep between the unhealthy first probe
+    // and the healthy second probe.
+    expect(deps.sleepSeconds).toHaveBeenCalledTimes(1);
+    expect(deps.sleepSeconds).toHaveBeenNthCalledWith(1, 2);
+    expect(deps.runCaptureOpenshell).toHaveBeenCalledTimes(6);
+  });
+
+  it("with NEMOCLAW_HEALTH_POLL_COUNT=0 fails fast without invoking the probe", async () => {
+    // Advisor edge-case: a zero attempt count must not silently pretend
+    // the gateway is healthy and must not run any subprocess probes.
+    vi.stubEnv("NEMOCLAW_HEALTH_POLL_COUNT", "0");
+    vi.stubEnv("NEMOCLAW_HEALTH_POLL_INTERVAL", "2");
+    const deps = createDeps();
+
+    await expect(startGatewayForRecovery({ gatewayPort: 8091 }, deps)).rejects.toThrow(
+      "0 recovery attempt(s) at 2s interval",
+    );
+
+    // First iteration's attempt-cap check terminates before the probe
+    // callback runs, so no status/gateway-info calls are made.
+    expect(deps.runCaptureOpenshell).not.toHaveBeenCalled();
+    expect(deps.sleepSeconds).not.toHaveBeenCalled();
   });
 
   it("rejects non-canonical gateway recovery names before invoking OpenShell", async () => {
