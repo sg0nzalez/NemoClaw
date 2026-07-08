@@ -71,9 +71,7 @@ function replaceHashDefinition(
 ): string {
   const current = `${name} = (\n    "${currentHash}"\n)`;
   const replacement = `${name} = (\n    "${fixtureHash}"\n)`;
-  if (source.split(current).length !== 2) {
-    throw new Error(`expected exactly one ${name} definition in the profile plugin`);
-  }
+  expect(source.split(current), `expected exactly one ${name} definition`).toHaveLength(2);
   return source.replace(current, replacement);
 }
 
