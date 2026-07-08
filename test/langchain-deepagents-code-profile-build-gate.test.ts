@@ -74,6 +74,14 @@ describe("LangChain Deep Agents Code profile build gate", () => {
     expect(result.calls).toContain("--file test/Dockerfile.dcode-profile-missing-dependencies");
     expect(result.calls).toContain("--file agents/langchain-deepagents-code/Dockerfile");
     expect(result.calls).not.toContain(":latest");
+    expect([...result.calls.matchAll(/--build-arg ([^ =]+)=/g)].map((match) => match[1])).toEqual([
+      "BASE_IMAGE",
+      "BASE_IMAGE",
+    ]);
+    const script = fs.readFileSync(checkPath, "utf8");
+    expect(script.indexOf("plain-progress build refuses secret-shaped ARG")).toBeLessThan(
+      script.indexOf("docker build"),
+    );
   });
 
   it("rejects a production build that unexpectedly succeeds", () => {

@@ -68,6 +68,8 @@ function replaceHashDefinitions(
   source: string,
   replacements: readonly (readonly [name: string, currentHash: string, fixtureHash: string])[],
 ): string {
+  // Exact definitions are deliberate: harmless formatting drift still requires
+  // reviewing the first-party source before this fixture can substitute hashes.
   return replacements.reduce((current, [name, currentHash, fixtureHash]) => {
     const definition = `${name} = (\n    "${currentHash}"\n)`;
     assert.equal(current.split(definition).length, 2, `expected exactly one ${name} definition`);
@@ -185,6 +187,7 @@ function makeValidatorDependencyStubRoot(): string {
 function makeValidatorStubRoot(
   entryPointName: string,
   entryPointGroup = "deepagents.harness_profiles",
+  licenseExpression = "Apache-2.0",
 ): string {
   const root = makeValidatorDependencyStubRoot();
   writeFixtureFile(
@@ -195,7 +198,7 @@ function makeValidatorStubRoot(
   writeFixtureFile(
     root,
     "nemoclaw_deepagents_profile-0.1.0.dist-info/METADATA",
-    "Metadata-Version: 2.1\nName: nemoclaw-deepagents-profile\nVersion: 0.1.0\n",
+    `Metadata-Version: 2.4\nName: nemoclaw-deepagents-profile\nVersion: 0.1.0\nLicense-Expression: ${licenseExpression}\n`,
   );
   writeFixtureFile(
     root,
@@ -388,6 +391,8 @@ describe("LangChain Deep Agents Code managed Nemotron profile plugin (#6424)", (
 
     expect(project).toContain('name = "nemoclaw-deepagents-profile"');
     expect(project).toContain('version = "0.1.0"');
+    expect(project).toContain('requires = ["setuptools==82.0.1"]');
+    expect(project).toContain('license = "Apache-2.0"');
     expect(project).toContain('[project.entry-points."deepagents.harness_profiles"]');
     expect(project).toContain('nemoclaw-managed-aliases = "nemoclaw_deepagents_profile:register"');
     expect(project).toContain('"deepagents-code==0.1.34"');
@@ -412,6 +417,20 @@ describe("LangChain Deep Agents Code managed Nemotron profile plugin (#6424)", (
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain(
       "expected exactly one 'nemoclaw-managed-aliases' profile entry point",
+    );
+  });
+
+  it("rejects unreviewed profile plugin license metadata", () => {
+    const root = makeValidatorStubRoot(
+      "nemoclaw-managed-aliases",
+      "deepagents.harness_profiles",
+      "MIT",
+    );
+    const result = runEntryPointValidationWithRoots([root]);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      "profile plugin license metadata does not match the reviewed package",
     );
   });
 

@@ -43,6 +43,7 @@ EXPECTED_PROFILE_ENTRY_POINT = (
     "nemoclaw-managed-aliases",
     "nemoclaw_deepagents_profile:register",
 )
+EXPECTED_PLUGIN_LICENSE_EXPRESSION = "Apache-2.0"
 EXPECTED_PLUGIN_SOURCE_SHA256 = (
     "75ff7e7a5142cad4305126ccb1b8fc756306e82d4c559ddbc624012fb54ebfc4"
 )
@@ -149,6 +150,11 @@ def validate_profile_entry_point() -> None:
     require(
         distribution.version == EXPECTED_VERSIONS["nemoclaw-deepagents-profile"],
         "profile entry point comes from an unexpected distribution version",
+    )
+    require(
+        distribution.metadata.get("License-Expression")
+        == EXPECTED_PLUGIN_LICENSE_EXPRESSION,
+        "profile plugin license metadata does not match the reviewed package",
     )
     module_spec = importlib.util.find_spec("nemoclaw_deepagents_profile")
     require(

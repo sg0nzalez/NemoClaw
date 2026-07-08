@@ -119,23 +119,11 @@ has_bearer_secret_shape() {
 
 has_private_key_block_shape() {
   local value="$1"
+  local required_separator="${2-}"
   local begin_marker="-----BEGIN "
   local end_marker="-----END "
   case "$value" in
-    *"$begin_marker"*"PRIVATE KEY-----"*"$end_marker"*"PRIVATE KEY-----"*)
-      return 0
-      ;;
-  esac
-  return 1
-}
-
-has_multiline_private_key_block_shape() {
-  local value="$1"
-  local begin_marker="-----BEGIN "
-  local end_marker="-----END "
-  local newline=$'\n'
-  case "$value" in
-    *"$begin_marker"*"PRIVATE KEY-----"*"$newline"*"$end_marker"*"PRIVATE KEY-----"*)
+    *"$begin_marker"*"PRIVATE KEY-----"*"$required_separator"*"$end_marker"*"PRIVATE KEY-----"*)
       return 0
       ;;
   esac
@@ -418,7 +406,7 @@ assert_no_secret_env_file() {
   # Scan the whole file before line parsing so raw multiline blocks cannot put
   # their begin and end markers on different physical dotenv lines.
   env_file_content="$(<"$env_file")"
-  if has_multiline_private_key_block_shape "$env_file_content"; then
+  if has_private_key_block_shape "$env_file_content" $'\n'; then
     refuse_secret_env "$env_file" "private-key block"
   fi
   while IFS= read -r line || [ -n "$line" ]; do

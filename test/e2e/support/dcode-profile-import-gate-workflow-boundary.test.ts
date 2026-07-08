@@ -12,6 +12,7 @@ import { validateE2eWorkflowBoundary } from "../../../tools/e2e/workflow-boundar
 
 const WORKFLOW_PATH = path.join(process.cwd(), ".github/workflows/e2e.yaml");
 const GATE_STEP_NAME = "Verify DCode profile import gate rejects missing base dependencies";
+const CLEANUP_STEP_NAME = "Clean up Docker auth";
 
 type WorkflowStep = {
   env?: Record<string, string>;
@@ -101,6 +102,17 @@ describe("DCode missing-dependency profile import gate workflow boundary", () =>
     });
 
     expect(errors).toContain("live DCode profile import gate must run after workspace prep");
+  });
+
+  it("rejects moving Docker auth cleanup before the import gate", () => {
+    const errors = validateMutation((workflow) => {
+      const steps = workflow.jobs.live.steps;
+      const cleanup = steps.find((step) => step.name === CLEANUP_STEP_NAME)!;
+      steps.splice(steps.indexOf(cleanup), 1);
+      steps.splice(steps.indexOf(liveGateStep(workflow)), 0, cleanup);
+    });
+
+    expect(errors).toContain("live Docker Hub cleanup must be the final job step");
   });
 
   it("rejects running the import gate with a non-bash shell", () => {

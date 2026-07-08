@@ -25,6 +25,7 @@ NemoClaw no longer vendors or overlays that source.
 - First-party adapter: `nemoclaw-deepagents-profile==0.1.0`
 - Adapter module SHA-256: `75ff7e7a5142cad4305126ccb1b8fc756306e82d4c559ddbc624012fb54ebfc4`
 - Adapter project metadata SHA-256: `7ba7b77bd6f889cc861eddbe3e38fc1f4433a85b7bc2a9b516e19a19a37a7686`
+- Adapter wheel license expression: `Apache-2.0`
 - Adapter dependency audit result: `No known vulnerabilities found`. Its only
   requirements are the exact `deepagents-code==0.1.34` and
   `deepagents==0.7.0a6` entries covered by the lockfile audit command above; no
@@ -33,7 +34,11 @@ NemoClaw no longer vendors or overlays that source.
 The adapter metadata intentionally uses the PEP 639 SPDX expression
 `license = "Apache-2.0"`, supported by its pinned production build backend.
 The real-wheel test substitutes the equivalent legacy table only for its
-offline, no-isolation build with the runner's older system setuptools.
+offline, no-isolation wrong-version fixture with the runner's older system
+setuptools; this is a known fixture limitation, not production metadata. The
+production image builds the unchanged project with lock-pinned
+`setuptools==82.0.1`, and its isolated validator fails closed unless the
+installed wheel exposes `License-Expression: Apache-2.0`.
 
 The adapter is a private, first-party build-context package: NemoClaw does not
 publish it to a registry or resolve it from an index. The image verifies its

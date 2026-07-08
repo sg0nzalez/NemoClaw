@@ -605,8 +605,8 @@ describe("LangChain Deep Agents Code image credential boundary", () => {
     expect(fs.existsSync(ranMarker)).toBe(false);
   });
 
-  it("rejects exact canonical credential names KEY/TOKEN/SECRET/PASSWORD/CREDENTIAL with opaque payloads", () => {
-    const cases: string[] = ["KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "API_KEY"];
+  it("rejects the wrapper credential-name policy with opaque payloads", () => {
+    const cases = "KEY TOKEN SECRET PASSWORD PASS CREDENTIAL API_KEY CUSTOM_PASS".split(" ");
     const opaque = "opaqueCredentialPayloadZ1234567890";
     for (const name of cases) {
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), `nemoclaw-dcode-exactctx-${name}-`));

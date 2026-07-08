@@ -24,10 +24,28 @@ trap cleanup EXIT
 
 cd "${repo_root}"
 
+# Plain progress is required to prove the exact import failure, so fail before
+# building if any reviewed Dockerfile introduces a secret-shaped ARG name.
+# NEMOCLAW_PROVIDER_KEY is a non-secret routing label with a public default.
+for dockerfile in \
+  agents/langchain-deepagents-code/Dockerfile.base \
+  test/Dockerfile.dcode-profile-missing-dependencies \
+  agents/langchain-deepagents-code/Dockerfile; do
+  while IFS= read -r arg_name; do
+    case "${arg_name}" in
+      NEMOCLAW_PROVIDER_KEY) continue ;;
+      *KEY* | *SECRET* | *TOKEN* | *PASSWORD* | *PASS* | *CREDENTIAL*)
+        echo "ERROR: plain-progress build refuses secret-shaped ARG ${arg_name} in ${dockerfile}" >&2
+        exit 1
+        ;;
+    esac
+  done < <(sed -nE 's/^[[:space:]]*ARG[[:space:]]+([A-Za-z_][A-Za-z0-9_]*)(=.*)?$/\1/p' "${dockerfile}")
+done
+
 # Build the reviewed repository base directly so this trusted negative gate has
 # no mutable registry input. Docker layers remain reusable by the live target.
-# Plain progress and the captured production log are safe: these Dockerfiles
-# have no secret mounts/build arguments, and no build gets secret-bearing input.
+# Plain progress and the captured production log are safe after the ARG-name
+# gate above; no build gets secret-bearing input.
 docker build \
   --progress=plain \
   --file agents/langchain-deepagents-code/Dockerfile.base \
