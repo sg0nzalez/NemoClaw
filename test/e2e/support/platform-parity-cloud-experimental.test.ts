@@ -295,6 +295,16 @@ describe("P0-E cloud-experimental parity guardrails", () => {
     ]);
   });
 
+  it("keeps the Nemotron profile E2E check local-only without model invocation", () => {
+    const profileCheck = fs.readFileSync(
+      path.join(process.cwd(), DEEPAGENTS_CLOUD_EXPERIMENTAL_CHECKS[0]),
+      "utf8",
+    );
+
+    expect(profileCheck).toContain("/opt/venv/bin/python3 -I -");
+    expect(profileCheck).not.toMatch(/\.(?:invoke|ainvoke|stream|astream)\(/);
+  });
+
   it("gives the destructive fresh re-onboard check its onboarding budget", () => {
     expect(
       cloudExperimentalCheckTimeoutMs(

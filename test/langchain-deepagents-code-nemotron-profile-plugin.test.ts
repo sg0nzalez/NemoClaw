@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -19,6 +19,9 @@ const pluginSourcePath = path.join(
 );
 const pluginProjectPath = path.join(pluginProjectDir, "pyproject.toml");
 const validatorPath = path.join(agentDir, "validate-nemotron-ultra-profile.py");
+const pythonBin = execFileSync("python3", ["-c", "import sys; print(sys.executable)"], {
+  encoding: "utf8",
+}).trim();
 
 const EXPECTED_DCODE_VERSION = "0.1.34";
 const EXPECTED_DEEPAGENTS_VERSION = "0.7.0a6";
@@ -192,10 +195,10 @@ except Exception as exc:
 print(json.dumps({"error": error}))
 raise SystemExit(1 if error else 0)
 `;
-  const result = spawnSync("python3", ["-S", "-c", script], {
+  const result = spawnSync(pythonBin, ["-S", "-c", script], {
     encoding: "utf8",
     env: {
-      PATH: "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
+      PATH: "/usr/bin:/bin",
       PYTHONPATH: stubRoot,
     },
   });
@@ -253,10 +256,10 @@ print(json.dumps({
 }))
 raise SystemExit(1 if error else 0)
 `;
-  const result = spawnSync("python3", ["-c", script], {
+  const result = spawnSync(pythonBin, ["-c", script], {
     encoding: "utf8",
     env: {
-      PATH: "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
+      PATH: "/usr/bin:/bin",
       PYTHONPATH: [...(options.additionalPythonRoots ?? []), fixture.root, pluginRoot].join(
         path.delimiter,
       ),
@@ -347,7 +350,7 @@ describe("LangChain Deep Agents Code managed Nemotron profile plugin (#6424)", (
     expect(mainBody).toContain("prove the adapter never");
   });
 
-  it("rejects a mismatched installed harness-profile entry point before source validation", () => {
+  it("rejects a malicious wrong harness-profile entry point before official source validation", () => {
     const result = runEntryPointValidation("wrong-managed-aliases");
 
     expect(result.status).not.toBe(0);
@@ -383,7 +386,7 @@ describe("LangChain Deep Agents Code managed Nemotron profile plugin (#6424)", (
     expectOfficialSourcesUnchanged(fixture);
   });
 
-  it("rejects an imported Deep Agents package outside its reviewed distribution", () => {
+  it("rejects a prepended shadow Deep Agents package before reading official sources", () => {
     const fixture = makePluginFixture();
     const shadowRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-shadow-deepagents-"));
     tempRoots.push(shadowRoot);
@@ -423,24 +426,45 @@ describe("LangChain Deep Agents Code managed Nemotron profile plugin (#6424)", (
   });
 
   it.each([
-    ["missing", (sourcePath: string) => fs.rmSync(sourcePath)],
+    [
+      "missing",
+      "native profile",
+      (fixture: PluginFixture) => fixture.nativeProfilePath,
+      (sourcePath: string) => fs.rmSync(sourcePath),
+    ],
     [
       "linked",
+      "native profile",
+      (fixture: PluginFixture) => fixture.nativeProfilePath,
       (sourcePath: string) => {
         fs.rmSync(sourcePath);
         fs.symlinkSync("/dev/null", sourcePath);
       },
     ],
-  ] as const)("rejects a %s official source file", (_mode, replaceSource) => {
+    [
+      "missing",
+      "bootstrap",
+      (fixture: PluginFixture) => fixture.bootstrapPath,
+      (sourcePath: string) => fs.rmSync(sourcePath),
+    ],
+    [
+      "linked",
+      "bootstrap",
+      (fixture: PluginFixture) => fixture.bootstrapPath,
+      (sourcePath: string) => {
+        fs.rmSync(sourcePath);
+        fs.symlinkSync("/dev/null", sourcePath);
+      },
+    ],
+  ] as const)("rejects a %s %s source file", (_mode, _label, selectSource, replaceSource) => {
     const fixture = makePluginFixture();
-    replaceSource(fixture.nativeProfilePath);
+    replaceSource(selectSource(fixture));
 
     const result = runPlugin(fixture);
 
     expect(result.status).not.toBe(0);
     expect(result.probe.error).toMatch(/not a trusted regular file/i);
     expect(result.probe.aliases).toEqual([false, false]);
-    expect(fs.readFileSync(fixture.bootstrapPath, "utf8")).toBe(BOOTSTRAP_SOURCE);
   });
 
   it("rejects a missing canonical profile without creating aliases", () => {
