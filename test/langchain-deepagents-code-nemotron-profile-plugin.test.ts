@@ -372,6 +372,18 @@ describe("LangChain Deep Agents Code managed Nemotron profile plugin (#6424)", (
     expect(result.status, result.stderr).toBe(0);
   });
 
+  it("rejects plugin source substituted after initial entry-point validation", () => {
+    const root = makeValidatorStubRoot("nemoclaw-managed-aliases");
+    expect(runEntryPointValidationWithRoots([root]).status).toBe(0);
+    fs.appendFileSync(path.join(root, "nemoclaw_deepagents_profile", "__init__.py"), "# drift\n");
+
+    const result = runEntryPointValidationWithRoots([root]);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      "profile plugin source does not match the reviewed first-party package",
+    );
+  });
+
   it("rejects a malicious wrong harness-profile entry point", () => {
     const result = runEntryPointValidation("wrong-managed-aliases");
 
@@ -386,7 +398,7 @@ describe("LangChain Deep Agents Code managed Nemotron profile plugin (#6424)", (
 
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain(
-      "expected exactly one 'nemoclaw-managed-aliases' profile entry point",
+      "profile entry point group 'deepagents.harness_profiles' was not found",
     );
   });
 

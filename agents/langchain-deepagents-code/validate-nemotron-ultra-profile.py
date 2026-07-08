@@ -39,6 +39,7 @@ EXPECTED_VERSIONS = {
     "langchain-openai": "1.3.3",
 }
 EXPECTED_PROFILE_ENTRY_POINT = (
+    "deepagents.harness_profiles",
     "nemoclaw-managed-aliases",
     "nemoclaw_deepagents_profile:register",
 )
@@ -125,12 +126,12 @@ def validate_official_sources() -> None:
 
 
 def validate_profile_entry_point() -> None:
-    name, value = EXPECTED_PROFILE_ENTRY_POINT
+    group, name, value = EXPECTED_PROFILE_ENTRY_POINT
+    group_entries = tuple(importlib.metadata.entry_points().select(group=group))
+    require(group_entries, f"profile entry point group {group!r} was not found")
     matches = [
         entry_point
-        for entry_point in importlib.metadata.entry_points(
-            group="deepagents.harness_profiles"
-        )
+        for entry_point in group_entries
         if entry_point.name == name
     ]
     require(len(matches) == 1, f"expected exactly one {name!r} profile entry point")
@@ -158,6 +159,8 @@ def validate_profile_entry_point() -> None:
     distribution_path = Path(
         distribution.locate_file("nemoclaw_deepagents_profile/__init__.py")
     )
+    # Plugin registration separately binds the imported Deep Agents package to
+    # its distribution; this check binds the plugin module to its distribution.
     for path, label in (
         (module_path, "imported profile plugin"),
         (distribution_path, "distributed profile plugin"),
@@ -395,9 +398,10 @@ def main() -> None:
         middleware_names(unrelated) == (),
         "unrelated OpenAI model received Ultra middleware",
     )
-    # Re-read both official files after plugin discovery, profile resolution,
-    # graph construction, and dispatch checks to prove the adapter never
-    # mutates either reviewed wheel source during validation.
+    # Re-bind and re-hash the plugin plus both official files after profile
+    # resolution, graph construction, and dispatch checks. This closes the
+    # install/import-to-validation window and proves no reviewed source changed.
+    validate_profile_entry_point()
     validate_official_sources()
     print("Nemotron 3 Ultra managed harness profile validation passed.")
 

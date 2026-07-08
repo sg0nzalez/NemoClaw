@@ -40,6 +40,11 @@ COPY nemoclaw-blueprint/ /opt/nemoclaw-blueprint/
 # managed-runtime patch independently hardens DCode entrypoints and installs the
 # reviewed Relay observability boundary. Build validation keeps both exact and
 # fail closed in one layer.
+# invalidState: a no-deps plugin install can precede missing base dependencies.
+# sourceBoundary: Dockerfile.base owns dependencies; this layer only proves them.
+# whyNotSourceFix: dependency completeness is a NemoClaw image-build contract.
+# regressionTest: the stripped-base gate must reach this marker, then fail import.
+# removalCondition: remove when installation validates dependencies atomically.
 # hadolint ignore=DL4006
 RUN chmod 444 /opt/nemoclaw-deepagents-code/generate-config.ts /opt/nemoclaw-deepagents-code/managed-dcode-runtime.py /opt/nemoclaw-deepagents-code/patch-managed-deepagents-code.py /opt/nemoclaw-deepagents-code/validate-nemotron-ultra-profile.py /opt/nemoclaw-deepagents-code/progressive_tool_disclosure.py /opt/nemoclaw-deepagents-code/nemoclaw_observability.py /opt/nemoclaw-deepagents-code/validate-progressive-tool-disclosure.py /opt/nemoclaw-deepagents-code/validate-observability.py \
     && chmod 755 /usr/local/bin/nemoclaw-start /usr/local/lib/nemoclaw/dcode-wrapper.sh /usr/local/lib/nemoclaw/dcode-launcher.sh \

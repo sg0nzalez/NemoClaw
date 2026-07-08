@@ -47,9 +47,10 @@ function liveGateStep(workflow: Workflow): WorkflowStep {
 }
 
 describe("DCode missing-dependency profile import gate workflow boundary", () => {
-  it("rejects replacing the reviewed negative-build script", () => {
+  it("rejects replacing the reviewed gate with a mutable registry base", () => {
     const errors = validateMutation((workflow) => {
-      liveGateStep(workflow).run = "echo bypassed";
+      liveGateStep(workflow).run =
+        "docker build --build-arg BASE_IMAGE=ghcr.io/nvidia/nemoclaw/langchain-deepagents-code-sandbox-base:latest .";
     });
 
     expect(errors).toContain(

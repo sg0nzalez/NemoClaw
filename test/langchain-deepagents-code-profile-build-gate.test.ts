@@ -18,7 +18,9 @@ type GateResult = {
   stdout: string;
 };
 
-function runGateWithFakeDocker(mode: "expected-failure" | "early-failure" | "success"): GateResult {
+function runGateWithFakeDocker(
+  mode: "expected-failure-with-marker" | "early-failure" | "success",
+): GateResult {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "dcode-profile-import-gate-"));
   const dockerPath = path.join(tmp, "docker");
   const callLog = path.join(tmp, "docker.log");
@@ -30,7 +32,7 @@ printf '%s\\n' "$*" >> "\${FAKE_DOCKER_LOG:?}"
 case " $* " in
   *" --file agents/langchain-deepagents-code/Dockerfile "*)
     case "\${FAKE_DOCKER_MODE:?}" in
-      expected-failure)
+      expected-failure-with-marker)
         printf '%s\\n' NEMOCLAW_DCODE_PROFILE_IMPORT_GATE "ModuleNotFoundError: No module named 'deepagents'"
         exit 1
         ;;
@@ -71,9 +73,14 @@ exit 0
 
 describe("LangChain Deep Agents Code profile build gate", () => {
   it("accepts only the expected production-build failure at the runtime marker", () => {
-    const result = runGateWithFakeDocker("expected-failure");
+    const result = runGateWithFakeDocker("expected-failure-with-marker");
 
     expect(result.status, result.stderr).toBe(0);
+    const markerIndex = result.stdout.indexOf("NEMOCLAW_DCODE_PROFILE_IMPORT_GATE");
+    expect(markerIndex).toBeGreaterThanOrEqual(0);
+    expect(
+      result.stdout.indexOf("ModuleNotFoundError: No module named 'deepagents'"),
+    ).toBeGreaterThan(markerIndex);
     expect(result.stdout).toContain(
       "DCode profile import gate rejected a base missing deepagents and deepagents-code",
     );
