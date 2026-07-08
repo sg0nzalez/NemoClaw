@@ -106,6 +106,8 @@ const CREDENTIAL_FIELDS = new Set([
   "token",
   "secret",
   "password",
+  "pass",
+  "passwd",
   "resolvedKey",
 ]);
 
@@ -123,12 +125,12 @@ const CREDENTIAL_FIELD_PATTERN =
  * server's `env: { GITHUB_TOKEN, BRAVE_API_KEY, TOKEN }` block. These are not
  * camelCase, so the suffix pattern above misses them. Matches an all-uppercase
  * name that is, or ends in, a secret word (`TOKEN`, `KEY`, `SECRET`,
- * `PASSWORD`, `PASSPHRASE`, `CREDENTIAL`, optionally pluralized) — covering both
+ * `PASSWORD`, `PASSWD`, `PASS`, `PASSPHRASE`, `CREDENTIAL`, optionally pluralized) — covering both
  * the prefixed (`GITHUB_TOKEN`) and bare (`TOKEN`) forms — while leaving benign
  * env vars like `NODE_ENV`, `LOG_LEVEL`, or `PATH` untouched.
  */
 const ENV_SECRET_FIELD_PATTERN =
-  /^(?:[A-Z0-9]+_)*(?:TOKEN|KEY|SECRET|PASSWORD|PASSPHRASE|CREDENTIAL)S?$/;
+  /^(?:[A-Z0-9]+_)*(?:TOKEN|KEY|SECRET|PASSWORD|PASSWD|PASS|PASSPHRASE|CREDENTIAL)S?$/;
 
 /**
  * Well-known HTTP auth header names (matched case-insensitively) whose entire

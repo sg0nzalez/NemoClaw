@@ -176,11 +176,15 @@ export function writeRedactedResult(
 
 const FULL_REDACT_PATTERNS: [RegExp, string][] = [
   [
-    /(NVIDIA_INFERENCE_API_KEY|NVIDIA_API_KEY|API_KEY|TOKEN|SECRET|PASSWORD|PASS|CREDENTIAL|_KEY)=\S+/gi,
+    /(NVIDIA_INFERENCE_API_KEY|NVIDIA_API_KEY|API_KEY|TOKEN|SECRET|CREDENTIAL|_KEY)=\S+/gi,
     "$1=<REDACTED>",
   ],
   [
-    /((?:"|')?(?:api[_-]?key|token|secret|password|pass|credential)(?:"|')?\s*[:=]\s*(?:"|')?)[^"',}\s]+((?:"|')?)/gi,
+    /((?:"|')?(?:api[_-]?key|token|secret|credential)(?:"|')?\s*[:=]\s*(?:"|')?)[^"',}\s]+((?:"|')?)/gi,
+    "$1<REDACTED>$2",
+  ],
+  [
+    /((?:^|[^A-Za-z0-9])(?:"|')?(?:password|passwd|pass)(?:"|')?\s*[:=]\s*(?:"|')?)[^"',}\s]+((?:"|')?)/gi,
     "$1<REDACTED>$2",
   ],
   ...TOKEN_PREFIX_PATTERNS.map((p): [RegExp, string] => [
@@ -250,8 +254,10 @@ export function redactUrl(value: unknown): string | null {
 }
 
 function isSensitiveKey(key: string): boolean {
-  return /(?:api[_-]?key|token|secret|password|passwd|pass|credential|authorization|bearer)/i.test(
-    key,
+  return (
+    /(?:api[_-]?key|token|secret|password|credential|authorization|bearer)/i.test(key) ||
+    /(?:^|[_-])pass(?:wd)?(?:$|[_-])/i.test(key) ||
+    /[a-z]Pass(?:wd)?(?:$|[A-Z])/.test(key)
   );
 }
 

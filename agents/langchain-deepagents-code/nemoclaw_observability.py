@@ -172,8 +172,13 @@ _ANCHORED_SECRET_PATTERNS = (
         re.IGNORECASE,
     ),
     re.compile(
-        r"((?:_KEY|API_KEY|SECRET|TOKEN|PASSWORD|PASS|CREDENTIAL)[=: ]['\"]?)"
+        r"((?:_KEY|API_KEY|SECRET|TOKEN|CREDENTIAL)[=: ]['\"]?)"
         r"[A-Za-z0-9_.+/=-]{10,}",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"((?:^|[^A-Za-z0-9])(?:PASSWORD|PASSWD|PASS)[=: ]['\"]?)"
+        r"[^\s'\"]{10,}",
         re.IGNORECASE,
     ),
 )
@@ -200,8 +205,13 @@ _TRUNCATED_SECRET_PATTERNS = tuple(
         (
             r"(?:Bearer[\t\n\v\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029"
             r"\u202f\u205f\u3000\ufeff]+|"
-            r"(?:_KEY|API_KEY|SECRET|TOKEN|PASSWORD|PASS|CREDENTIAL)[=: ]['\"]?)"
+            r"(?:_KEY|API_KEY|SECRET|TOKEN|CREDENTIAL)[=: ]['\"]?)"
             r"[A-Za-z0-9_.+/=-]*\Z",
+            re.IGNORECASE,
+        ),
+        (
+            r"(?:^|[^A-Za-z0-9])(?:PASSWORD|PASSWD|PASS)[=: ]['\"]?"
+            r"[^\s'\"]*\Z",
             re.IGNORECASE,
         ),
     )
@@ -276,6 +286,7 @@ def _redact_capture_key(key: Any) -> bool:
                 "credential",
                 "credentials",
                 "header",
+                "pass",
                 "password",
                 "passwd",
                 "secret",

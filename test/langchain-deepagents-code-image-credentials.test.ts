@@ -625,7 +625,10 @@ describe("LangChain Deep Agents Code image credential boundary", () => {
   });
 
   it("rejects the wrapper credential-name policy with opaque payloads", () => {
-    const cases = "KEY TOKEN SECRET PASSWORD PASS CREDENTIAL API_KEY CUSTOM_PASS".split(" ");
+    const cases =
+      "KEY TOKEN SECRET PASSWORD PASSWD PASS CREDENTIAL API_KEY CUSTOM_PASSWD CUSTOM_PASS".split(
+        " ",
+      );
     const opaque = "opaqueCredentialPayloadZ1234567890";
     for (const name of cases) {
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), `nemoclaw-dcode-exactctx-${name}-`));
@@ -636,6 +639,18 @@ describe("LangChain Deep Agents Code image credential boundary", () => {
       expect(result.stderr).not.toContain(opaque);
       expect(fs.existsSync(ranMarker)).toBe(false);
     }
+  });
+
+  it("allows benign runtime names containing pass as a substring", () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-dcode-pass-near-miss-"));
+    const { wrapperPath, ranMarker } = makeWrapperFixture(tempDir);
+    const result = runWrapper(wrapperPath, ["-n", "hi"], {
+      BYPASS: "allowedValue123",
+      COMPASS: "opaqueNonSecretPayload123",
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(fs.existsSync(ranMarker)).toBe(true);
   });
 
   it.each([

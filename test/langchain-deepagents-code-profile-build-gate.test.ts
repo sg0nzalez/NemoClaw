@@ -15,6 +15,23 @@ const reviewedDockerfiles = [
   "test/Dockerfile.dcode-profile-missing-dependencies",
   "agents/langchain-deepagents-code/Dockerfile",
 ] as const;
+const unreviewedArgCases = [
+  ...reviewedDockerfiles.map((dockerfile) => ({
+    declaration: "ARG UNREVIEWED_SECRET",
+    dockerfile,
+    label: "uppercase directive",
+  })),
+  ...reviewedDockerfiles.map((dockerfile) => ({
+    declaration: "arg UNREVIEWED_SECRET",
+    dockerfile,
+    label: "lowercase directive",
+  })),
+  {
+    declaration: "ArG \\\n  UNREVIEWED_SECRET",
+    dockerfile: reviewedDockerfiles[2],
+    label: "mixed-case continued directive",
+  },
+] as const;
 
 function runGateWithFakeDocker(
   mode: "expected-failure-with-marker" | "early-failure" | "success",
@@ -76,13 +93,15 @@ exit 0
 }
 
 describe("LangChain Deep Agents Code profile build gate", () => {
-  it.each(reviewedDockerfiles)("rejects an unreviewed ARG in %s", (dockerfile) => {
+  it.each(
+    unreviewedArgCases,
+  )("rejects an unreviewed ARG with $label in $dockerfile", (testCase) => {
     const result = runGateWithFakeDocker("expected-failure-with-marker", (fixtureRoot) =>
-      fs.appendFileSync(path.join(fixtureRoot, dockerfile), "\nARG UNREVIEWED_SECRET\n"),
+      fs.appendFileSync(path.join(fixtureRoot, testCase.dockerfile), `\n${testCase.declaration}\n`),
     );
 
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain(`unreviewed ARG UNREVIEWED_SECRET in ${dockerfile}`);
+    expect(result.stderr).toContain(`unreviewed ARG UNREVIEWED_SECRET in ${testCase.dockerfile}`);
     expect(result.calls).not.toContain("--file");
   });
 

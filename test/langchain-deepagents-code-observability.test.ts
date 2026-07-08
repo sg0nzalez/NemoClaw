@@ -82,6 +82,7 @@ describe("managed Deep Agents Code observability", () => {
         header: "<redacted>",
         nested: { checkpoint_id: "<redacted>", command: "allowed" },
         opaque: { _omitted_type: "opaque" },
+        pass: "<redacted>",
         passwd: "<redacted>",
         privateKey: "<redacted>",
         token: "<redacted>",

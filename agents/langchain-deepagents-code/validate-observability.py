@@ -580,6 +580,21 @@ def _assert_secret_value_redaction(observability: ModuleType) -> None:
             "opaqueCredentialPayloadZ1234567890",
         ),
         (
+            "case-insensitive passwd assignment",
+            "Custom_Passwd=opaqueCredentialPayloadZ1234567890",
+            "opaqueCredentialPayloadZ1234567890",
+        ),
+        (
+            "password-leading punctuation",
+            "Custom_Pass=!OpaquePassword123",
+            "!OpaquePassword123",
+        ),
+        (
+            "password-tail punctuation",
+            "Custom_Pass=abcdefghij!tail-secret",
+            "tail-secret",
+        ),
+        (
             "private key block",
             private_key_probe,
             "opaque-private-key-material",
@@ -595,6 +610,8 @@ def _assert_secret_value_redaction(observability: ModuleType) -> None:
     benign_values = (
         "sk-too-short",
         "Bearer short",
+        "COMPASS=opaqueNonSecretPayload123",
+        "BYPASS=allowedValue123",
         "-----BEGIN PUBLIC KEY-----\nnot-private\n-----END PUBLIC KEY-----",
     )
     for value in benign_values:

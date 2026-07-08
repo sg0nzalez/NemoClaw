@@ -25,7 +25,7 @@ _INFERENCE_BASE_URL_FILE = Path(
 )
 _MANAGED_FILE_OWNER_UID = 0
 _CREDENTIAL_NAME = re.compile(
-    r"(?:^|_)(?:API_KEY|KEY|TOKEN|SECRET|PASSWORD|PASS|CREDENTIAL)$",
+    r"(?:^|_)(?:API_KEY|KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASS|CREDENTIAL)$",
     re.IGNORECASE,
 )
 _CREDENTIAL_ENV_NAMES = {
@@ -110,7 +110,7 @@ _MANAGED_MCP_READY = False
 # Regression gate: test/langchain-deepagents-code-secret-pattern-parity.test.ts
 # fingerprints all canonical groups and runs one shared positive corpus through
 # both those groups and _contains_secret_shape; the Bash wrapper consumes the
-# same corpus in test/langchain-deepagents-code-image.test.ts.
+# same corpus in test/langchain-deepagents-code-image-credentials.test.ts.
 # Removal condition: delete this mirror only when the managed runtime can consume
 # the canonical patterns directly or upstream rejects these shapes before boot.
 _SECRET_PATTERNS = tuple(
@@ -130,7 +130,8 @@ _SECRET_PATTERNS = tuple(
             r"Bearer[\t\n\v\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]+[A-Za-z0-9_.+/=-]{10,}",
             re.IGNORECASE,
         ),
-        (None, r"(?:_KEY|API_KEY|SECRET|TOKEN|PASSWORD|PASS|CREDENTIAL)[=:\s]['\"]?[A-Za-z0-9_.+/=-]{10,}", re.IGNORECASE),
+        (None, r"(?:_KEY|API_KEY|SECRET|TOKEN|CREDENTIAL)[=:\s]['\"]?[A-Za-z0-9_.+/=-]{10,}", re.IGNORECASE),
+        (None, r"(?:^|[^A-Za-z0-9])(?:PASSWORD|PASSWD|PASS)[=:\s]['\"]?[^\s'\"]{10,}", re.IGNORECASE),
         (None, r"lsv2_(?:pt|sk)_[A-Za-z0-9]{10,}(?:_[A-Za-z0-9]+)*", 0),
         (None, r"-----BEGIN [^-\r\n]*PRIVATE KEY-----[\s\S]*-----END [^-\r\n]*PRIVATE KEY-----", 0),
     )

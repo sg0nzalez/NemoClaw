@@ -68,7 +68,8 @@ contains_secret() {
       if (
         /$token_pattern/ ||
         /Bearer\s+$context_value_pattern/i ||
-        /(?:_KEY|API_KEY|SECRET|TOKEN|PASSWORD|PASS|CREDENTIAL)[=: ]["'\''"]?$context_value_pattern/i
+        /(?:_KEY|API_KEY|SECRET|TOKEN|CREDENTIAL)[=: ]["'\''"]?$context_value_pattern/i ||
+        /(?:^|[^A-Za-z0-9])(?:PASSWORD|PASSWD|PASS)[=: ]["'\''"]?[^\s"'\''"]{10,}/i
       ) {
         $found = 1;
       }
@@ -86,7 +87,8 @@ redact_secrets() {
       }
       s/$token_pattern/[REDACTED_SECRET]/g;
       s/(Bearer\s+)$context_value_pattern/${1}[REDACTED_SECRET]/gi;
-      s/((?:_KEY|API_KEY|SECRET|TOKEN|PASSWORD|PASS|CREDENTIAL)[=: ]["'\''"]?)$context_value_pattern/${1}[REDACTED_SECRET]/gi;
+      s/((?:_KEY|API_KEY|SECRET|TOKEN|CREDENTIAL)[=: ]["'\''"]?)$context_value_pattern/${1}[REDACTED_SECRET]/gi;
+      s/((?:^|[^A-Za-z0-9])(?:PASSWORD|PASSWD|PASS)[=: ]["'\''"]?)[^\s"'\''"]{10,}/${1}[REDACTED_SECRET]/gim;
     '
 }
 

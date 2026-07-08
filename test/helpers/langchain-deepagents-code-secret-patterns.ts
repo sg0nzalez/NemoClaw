@@ -168,7 +168,25 @@ export const CANONICAL_SECRET_POSITIVE_VECTORS: readonly CanonicalSecretPositive
     label: "pass_context",
     value: "CUSTOM_PASS=opaqueCredentialPayloadZ1234567890",
     patternGroup: "context",
-    patternIndex: 1,
+    patternIndex: 2,
+  },
+  {
+    label: "passwd_context",
+    value: "CUSTOM_PASSWD=opaqueCredentialPayloadZ1234567890",
+    patternGroup: "context",
+    patternIndex: 2,
+  },
+  {
+    label: "pass_punctuation_leading",
+    value: "CUSTOM_PASS=!OpaquePassword123",
+    patternGroup: "context",
+    patternIndex: 2,
+  },
+  {
+    label: "pass_punctuation_tail",
+    value: "CUSTOM_PASS=abcdefghij!tail-secret",
+    patternGroup: "context",
+    patternIndex: 2,
   },
   {
     label: "private_key_block",

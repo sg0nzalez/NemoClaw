@@ -75,7 +75,8 @@ describe("Deep Agents Code secret-pattern parity", () => {
       ],
       context: [
         "(?<=Bearer\\s+)[A-Za-z0-9_.+/=-]{10,}::gi",
-        "(?<=(?:_KEY|API_KEY|SECRET|TOKEN|PASSWORD|PASS|CREDENTIAL)[=: ]['\"]?)[A-Za-z0-9_.+/=-]{10,}::gi",
+        "(?<=(?:_KEY|API_KEY|SECRET|TOKEN|CREDENTIAL)[=: ]['\"]?)[A-Za-z0-9_.+/=-]{10,}::gi",
+        "(?<=(?:^|[^A-Za-z0-9])(?:PASSWORD|PASSWD|PASS)[=: ]['\"]?)[^\\s'\"]{10,}::gi",
       ],
       block: [
         "-----BEGIN (?:[A-Z0-9]+ )?PRIVATE KEY-----[\\s\\S]*?-----END (?:[A-Z0-9]+ )?PRIVATE KEY-----::g",
@@ -175,6 +176,8 @@ json.dump([observability._scrub_secret_values(value) for value in values], sys.s
     const values = [
       "sk-too-short",
       "Bearer short",
+      "COMPASS=opaqueNonSecretPayload123",
+      "BYPASS=allowedValue123",
       "-----BEGIN PUBLIC KEY-----\\nnot-private\\n-----END PUBLIC KEY-----",
     ];
     const output = execFileSync("python3", ["-I", "-c", probe, observabilityPath], {

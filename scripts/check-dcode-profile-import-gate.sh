@@ -43,7 +43,22 @@ for dockerfile in \
         exit 1
         ;;
     esac
-  done < <(sed -nE 's/^[[:space:]]*ARG[[:space:]]+([A-Za-z_][A-Za-z0-9_]*)(=.*)?$/\1/p' "${dockerfile}")
+  done < <(
+    awk '
+      toupper($1) == "ARG" {
+        name = $2
+        while (name == "\\") {
+          if ((getline) <= 0) {
+            print "<unterminated-ARG>"
+            next
+          }
+          name = $1
+        }
+        sub(/=.*/, "", name)
+        print name
+      }
+    ' "${dockerfile}"
+  )
 done
 
 # Build the reviewed repository base directly so this trusted negative gate has

@@ -66,7 +66,7 @@ run_dcode() {
 #       raw or escaped bodies before mutable metadata can reach status output.
 #     * Name-context rejection fires case-insensitively when the variable name
 #       ends in a credential keyword (_KEY, _TOKEN, _SECRET, _PASSWORD,
-#       _CREDENTIAL, _PASS) and the value is at least 10 chars (mirroring
+#       _PASSWD, _PASS, _CREDENTIAL) and the value is at least 10 chars (mirroring
 #       CONTEXT_PATTERNS minimum length).
 #     * Managed messaging values (SLACK_BOT_TOKEN, SLACK_APP_TOKEN,
 #       TELEGRAM_BOT_TOKEN, DISCORD_BOT_TOKEN) are allowed only when the value
@@ -84,7 +84,7 @@ run_dcode() {
 # - Regression: test/langchain-deepagents-code-secret-pattern-parity.test.ts
 #   pins the canonical TOKEN_PREFIX_PATTERNS, CONTEXT_PATTERNS, and
 #   SECRET_BLOCK_PATTERNS fingerprints (source + flags), while
-#   test/langchain-deepagents-code-image.test.ts feeds the shared positive
+#   test/langchain-deepagents-code-image-credentials.test.ts feeds the shared positive
 #   corpus through this wrapper. Any canonical change trips the parity gate and
 #   forces this matcher (and its samples) to update.
 #   The live no-network acceptance clause is covered by
@@ -100,7 +100,8 @@ has_context_secret_shape() {
   upper="$(printf '%s' "$1" | tr '[:lower:]' '[:upper:]')"
   # The outer class accepts '=', ':', or whitespace; [:space:] is the nested
   # POSIX character class understood by Bash's [[ string =~ regex ]] operator.
-  [[ "$upper" =~ (_KEY|API_KEY|SECRET|TOKEN|PASSWORD|PASS|CREDENTIAL)[=:[:space:]][\'\"]?[A-Z0-9_.+/=-]{10,} ]]
+  [[ "$upper" =~ (_KEY|API_KEY|SECRET|TOKEN|CREDENTIAL)[=:[:space:]][\'\"]?[A-Z0-9_.+/=-]{10,} ]] \
+    || [[ "$upper" =~ (^|[^A-Z0-9])(PASSWORD|PASSWD|PASS)[=:[:space:]][\'\"]?[^[:space:]\'\"]{10,} ]]
 }
 
 has_bearer_secret_shape() {
@@ -272,7 +273,7 @@ has_credential_name_context() {
   local upper
   upper="$(printf '%s' "$1" | tr '[:lower:]' '[:upper:]')"
   case "$upper" in
-    KEY | API_KEY | TOKEN | SECRET | PASSWORD | PASS | CREDENTIAL)
+    KEY | API_KEY | TOKEN | SECRET | PASSWORD | PASSWD | PASS | CREDENTIAL)
       return 0
       ;;
     LANGSMITH_RUNS_ENDPOINTS | LANGCHAIN_RUNS_ENDPOINTS)
@@ -281,7 +282,7 @@ has_credential_name_context() {
     OTEL_EXPORTER_OTLP_ENDPOINT | OTEL_EXPORTER_OTLP_TRACES_ENDPOINT | OTEL_EXPORTER_OTLP_HEADERS | OTEL_EXPORTER_OTLP_TRACES_HEADERS)
       return 0
       ;;
-    *_API_KEY | *_KEY | *_TOKEN | *_SECRET | *_PASSWORD | *_PASS | *_CREDENTIAL)
+    *_API_KEY | *_KEY | *_TOKEN | *_SECRET | *_PASSWORD | *_PASSWD | *_PASS | *_CREDENTIAL)
       return 0
       ;;
   esac

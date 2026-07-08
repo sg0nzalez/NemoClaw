@@ -44,10 +44,14 @@ describe("isCredentialField", () => {
     expect(isCredentialField("BRAVE_API_KEY")).toBe(true);
     expect(isCredentialField("OPENAI_API_KEY")).toBe(true);
     expect(isCredentialField("DB_PASSWORD")).toBe(true);
+    expect(isCredentialField("DB_PASSWD")).toBe(true);
+    expect(isCredentialField("DB_PASS")).toBe(true);
     expect(isCredentialField("SLACK_APP_TOKEN")).toBe(true);
     // Bare uppercase secret words must also be scrubbed.
     expect(isCredentialField("TOKEN")).toBe(true);
     expect(isCredentialField("PASSWORD")).toBe(true);
+    expect(isCredentialField("PASSWD")).toBe(true);
+    expect(isCredentialField("PASS")).toBe(true);
     expect(isCredentialField("SECRET")).toBe(true);
     expect(isCredentialField("CREDENTIALS")).toBe(true);
   });

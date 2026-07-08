@@ -1060,6 +1060,7 @@ def _privacy_scenario(path: Path) -> dict[str, Any]:
             "nested": {"checkpoint_id": SECRET, "command": "allowed"},
             "opaque": _HostileCaptureObject(),
             "oversized": "x" * 9000,
+            "pass": SECRET,
             "passwd": SECRET,
             "privateKey": SECRET,
             "token": SECRET,

@@ -73,7 +73,8 @@ export const TOKEN_PREFIX_PATTERNS: RegExp[] = [
 
 export const CONTEXT_PATTERNS: RegExp[] = [
   /(?<=Bearer\s+)[A-Za-z0-9_.+/=-]{10,}/gi,
-  /(?<=(?:_KEY|API_KEY|SECRET|TOKEN|PASSWORD|PASS|CREDENTIAL)[=: ]['"]?)[A-Za-z0-9_.+/=-]{10,}/gi,
+  /(?<=(?:_KEY|API_KEY|SECRET|TOKEN|CREDENTIAL)[=: ]['"]?)[A-Za-z0-9_.+/=-]{10,}/gi,
+  /(?<=(?:^|[^A-Za-z0-9])(?:PASSWORD|PASSWD|PASS)[=: ]['"]?)[^\s'"]{10,}/gi,
 ];
 
 export const SECRET_BLOCK_PATTERNS: RegExp[] = [
@@ -157,7 +158,7 @@ const FIXTURE_ENV_PREFIXES: readonly string[] = ["E2E_", "NEMOCLAW_LOG_"];
 // non-secret values via the secretEnv channel and keeps the
 // "fixture-allowlist vs declared-secret" distinction honest.
 const SECRET_ENV_KEY_SHAPE =
-  /^[A-Z][A-Z0-9_]*(?:API[_]?KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|PASSPHRASE|PRIVATE[_]?KEY|ACCESS[_]?KEY)$/;
+  /^[A-Z][A-Z0-9_]*(?:API[_]?KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASS|CREDENTIAL|PASSPHRASE|PRIVATE[_]?KEY|ACCESS[_]?KEY)$/;
 
 export function isValidSecretEnvKey(key: string): boolean {
   return SECRET_ENV_KEY_SHAPE.test(key);
@@ -216,7 +217,7 @@ export function buildChildEnv(
     if (!isValidSecretEnvKey(key)) {
       throw new Error(
         `secretEnv entry '${key}' does not match the secret-key shape ` +
-          `(must end with API_KEY, TOKEN, SECRET, PASSWORD, CREDENTIAL, ` +
+          `(must end with API_KEY, TOKEN, SECRET, PASSWORD, PASSWD, PASS, CREDENTIAL, ` +
           `PASSPHRASE, PRIVATE_KEY, or ACCESS_KEY). Refusing to allowlist.`,
       );
     }
