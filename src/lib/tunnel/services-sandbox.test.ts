@@ -16,6 +16,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const resolveOpenshellModule = require("../adapters/openshell/resolve");
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const agentRuntimeModule = require("../agent/runtime") as typeof import("../agent/runtime");
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const registryModule = require("../state/registry") as typeof import("../state/registry");
 
 const { stopAll, stopSandboxChannels } = require("./services") as typeof import("./services");
 
@@ -27,12 +29,15 @@ describe("stopSandboxChannels", () => {
   let spawnSyncSpy: ReturnType<typeof vi.spyOn>;
   let originalResolve: typeof resolveOpenshellModule.resolveOpenshell;
   let originalGetSessionAgent: typeof agentRuntimeModule.getSessionAgent;
+  let originalGetSandbox: typeof registryModule.getSandbox;
 
   beforeEach(() => {
     originalResolve = resolveOpenshellModule.resolveOpenshell;
     originalGetSessionAgent = agentRuntimeModule.getSessionAgent;
+    originalGetSandbox = registryModule.getSandbox;
     resolveOpenshellModule.resolveOpenshell = vi.fn(() => "/usr/local/bin/openshell");
     agentRuntimeModule.getSessionAgent = vi.fn(() => null);
+    registryModule.getSandbox = vi.fn(() => null);
     // Spy on child_process.spawnSync used by the compiled dist module.
     // The dist code does `require("node:child_process").spawnSync`, so
     // we spy on the same module that the compiled code loaded.
@@ -44,6 +49,7 @@ describe("stopSandboxChannels", () => {
   afterEach(() => {
     resolveOpenshellModule.resolveOpenshell = originalResolve;
     agentRuntimeModule.getSessionAgent = originalGetSessionAgent;
+    registryModule.getSandbox = originalGetSandbox;
     spawnSyncSpy.mockRestore();
   });
 
@@ -93,7 +99,7 @@ describe("stopSandboxChannels", () => {
     );
     const args = spawnSyncSpy.mock.calls[1][1] as string[];
     const script = args[args.length - 1];
-    expect(script).toContain("ps -eo pid=,args=");
+    expect(script).toContain("ps -eo user=,pid=,args=");
     expect(script).toContain("openclaw-gateway");
     expect(script).toContain("kill -TERM $pids");
     expect(script).toContain("kill -KILL $remaining");
@@ -111,7 +117,7 @@ describe("stopSandboxChannels", () => {
     expect(spawnSyncSpy).toHaveBeenNthCalledWith(
       2,
       "/usr/local/bin/openshell",
-      ["sandbox", "exec", "--name", "my-sandbox", "--", "sh", "-s"],
+      ["sandbox", "exec", "--name", "my-sandbox", "--gateway", "nemoclaw", "--", "sh", "-s"],
       expect.objectContaining({
         input: expect.stringContaining("find_gateway_pids"),
         timeout: 20000,
@@ -119,6 +125,56 @@ describe("stopSandboxChannels", () => {
     );
     const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
     expect(output).toContain("OpenClaw gateway stopped inside sandbox");
+    logSpy.mockRestore();
+  });
+
+  it("uses the generated sandbox pod name for privileged shutdown", () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    spawnSyncSpy
+      .mockReturnValueOnce({ status: 0, stdout: "pod/app-abc\n" })
+      .mockReturnValueOnce({ status: 0 });
+
+    stopSandboxChannels("app");
+
+    const args = spawnSyncSpy.mock.calls[1][1] as string[];
+    expect(args).toContain("pod/app-abc");
+    logSpy.mockRestore();
+  });
+
+  it("does not select overlapping sandbox pod names for privileged shutdown", () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    spawnSyncSpy
+      .mockReturnValueOnce({
+        status: 0,
+        stdout: "pod/prod-app-abc\npod/app-abc\n",
+      })
+      .mockReturnValueOnce({ status: 0 });
+
+    stopSandboxChannels("app");
+
+    const args = spawnSyncSpy.mock.calls[1][1] as string[];
+    expect(args).toContain("pod/app-abc");
+    expect(args).not.toContain("pod/prod-app-abc");
+    logSpy.mockRestore();
+  });
+
+  it("falls back when no exact generated sandbox pod name is available", () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    spawnSyncSpy
+      .mockReturnValueOnce({
+        status: 0,
+        stdout: "pod/prod-app-abc\npod/app-copy-abc\n",
+      })
+      .mockReturnValueOnce({ status: 0 });
+
+    stopSandboxChannels("app");
+
+    expect(spawnSyncSpy).toHaveBeenNthCalledWith(
+      2,
+      "/usr/local/bin/openshell",
+      ["sandbox", "exec", "--name", "app", "--gateway", "nemoclaw", "--", "sh", "-s"],
+      expect.objectContaining({ input: expect.any(String), timeout: 20000 }),
+    );
     logSpy.mockRestore();
   });
 
@@ -135,7 +191,7 @@ describe("stopSandboxChannels", () => {
     logSpy.mockRestore();
   });
 
-  it("uses the active agent gateway command for Hermes shutdown", () => {
+  it("does not transiently kill a supervisor-managed Hermes gateway (#6392)", () => {
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     agentRuntimeModule.getSessionAgent = vi.fn(
       () =>
@@ -146,23 +202,12 @@ describe("stopSandboxChannels", () => {
           forward_ports: [18789, 8642],
         }) as unknown as ReturnType<typeof agentRuntimeModule.getSessionAgent>,
     );
-    spawnSyncSpy
-      .mockReturnValueOnce({ status: 0, stdout: "pod/my-sandbox-0\n" })
-      .mockReturnValueOnce({ status: 1 });
-
     stopSandboxChannels("my-sandbox");
 
-    const args = spawnSyncSpy.mock.calls[1][1] as string[];
-    const script = args[args.length - 1];
-    expect(script).toContain("[h]ermes[[:space:]]+gateway[[:space:]]+run");
-    expect(script).toContain("[h]ermes\\.real[[:space:]]+gateway[[:space:]]+run");
-    expect(script).not.toContain("openclaw-gateway");
-    expect(script).not.toContain("openclaw[[:space:]]+gateway");
-    expect(script).toContain('cmd ~ ENVIRON["p0"]');
-    expect(script).not.toContain("-v p0=");
+    expect(spawnSyncSpy).not.toHaveBeenCalled();
     const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
-    expect(output).toContain("Hermes Agent gateway was not running inside sandbox");
-    expect(output).not.toContain("OpenClaw gateway was not running inside sandbox");
+    expect(output).toContain("Hermes Agent gateway is managed by the sandbox");
+    expect(output).toContain("leaving it running while host forwards stop");
     logSpy.mockRestore();
   });
 
@@ -199,7 +244,7 @@ describe("stopSandboxChannels", () => {
     stopSandboxChannels("my-sandbox");
 
     const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
-    expect(output).toContain("Could not stop in-sandbox gateway");
+    expect(output).toContain("Could not stop OpenClaw gateway inside sandbox");
     expect(output).toContain("gateway may still be running");
     expect(output).toContain("205");
     logSpy.mockRestore();
@@ -214,7 +259,7 @@ describe("stopSandboxChannels", () => {
     stopSandboxChannels("my-sandbox");
 
     const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
-    expect(output).toContain("Could not stop in-sandbox gateway");
+    expect(output).toContain("Could not stop OpenClaw gateway inside sandbox");
     logSpy.mockRestore();
   });
 
@@ -245,6 +290,35 @@ describe("stopSandboxChannels", () => {
     logSpy.mockRestore();
   });
 
+  it("routes shutdown through the sandbox's persisted non-default gateway", () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    registryModule.getSandbox = vi.fn(
+      () =>
+        ({
+          name: "my-sandbox",
+          gatewayName: "nemoclaw-18080",
+          gatewayPort: 18080,
+        }) as ReturnType<typeof registryModule.getSandbox>,
+    );
+    spawnSyncSpy.mockReturnValueOnce({ status: 1, stdout: "" }).mockReturnValueOnce({ status: 0 });
+
+    stopSandboxChannels("my-sandbox");
+
+    expect(spawnSyncSpy).toHaveBeenNthCalledWith(
+      1,
+      "docker",
+      expect.arrayContaining(["exec", "openshell-cluster-nemoclaw-18080", "kubectl"]),
+      expect.any(Object),
+    );
+    expect(spawnSyncSpy).toHaveBeenNthCalledWith(
+      2,
+      "/usr/local/bin/openshell",
+      expect.arrayContaining(["--gateway", "nemoclaw-18080"]),
+      expect.any(Object),
+    );
+    logSpy.mockRestore();
+  });
+
   it("targets both launcher and re-exec'd gateway process forms", () => {
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     spawnSyncSpy
@@ -255,12 +329,19 @@ describe("stopSandboxChannels", () => {
 
     const args = spawnSyncSpy.mock.calls[1][1] as string[];
     const script = args[args.length - 1];
-    // Must match both the launcher form ("openclaw gateway run") and the
-    // re-exec'd binary ("openclaw-gateway"). The gateway re-execs after
-    // startup, dropping "run" from argv entirely.
+    // Must match all three gateway argv forms: the launcher
+    // ("openclaw gateway run"), the re-exec'd binary ("openclaw-gateway"),
+    // and the post-startup form where OpenClaw rewrites argv to a bare
+    // "openclaw" via process.title (#4951).
     expect(script).toContain("openclaw-gateway");
     expect(script).toContain("openclaw[[:space:]]+gateway");
+    expect(script).toContain("openclaw[[:space:]]*$");
     logSpy.mockRestore();
+  });
+
+  it("rejects malformed sandbox names before spawning docker or openshell", () => {
+    expect(() => stopSandboxChannels("../escape")).toThrow("Invalid sandbox name");
+    expect(spawnSyncSpy).not.toHaveBeenCalled();
   });
 });
 
@@ -272,11 +353,17 @@ describe("stopAll with sandbox channels", () => {
   let pidDir: string;
   let spawnSyncSpy: ReturnType<typeof vi.spyOn>;
   let originalResolve: typeof resolveOpenshellModule.resolveOpenshell;
+  let originalGetSessionAgent: typeof agentRuntimeModule.getSessionAgent;
+  let originalGetSandbox: typeof registryModule.getSandbox;
 
   beforeEach(() => {
     pidDir = mkdtempSync(join(tmpdir(), "nemoclaw-svc-sandbox-test-"));
     originalResolve = resolveOpenshellModule.resolveOpenshell;
+    originalGetSessionAgent = agentRuntimeModule.getSessionAgent;
+    originalGetSandbox = registryModule.getSandbox;
     resolveOpenshellModule.resolveOpenshell = vi.fn(() => "/usr/local/bin/openshell");
+    agentRuntimeModule.getSessionAgent = vi.fn(() => null);
+    registryModule.getSandbox = vi.fn(() => null);
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const cp = require("node:child_process");
     spawnSyncSpy = vi.spyOn(cp, "spawnSync").mockReturnValue({ status: 0 });
@@ -285,6 +372,8 @@ describe("stopAll with sandbox channels", () => {
   afterEach(() => {
     rmSync(pidDir, { recursive: true, force: true });
     resolveOpenshellModule.resolveOpenshell = originalResolve;
+    agentRuntimeModule.getSessionAgent = originalGetSessionAgent;
+    registryModule.getSandbox = originalGetSandbox;
     spawnSyncSpy.mockRestore();
   });
 

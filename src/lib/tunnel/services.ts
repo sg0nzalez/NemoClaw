@@ -16,17 +16,22 @@ import {
 } from "node:fs";
 import { basename, join } from "node:path";
 import { dockerSpawnSync } from "../adapters/docker";
+import { getGatewayClusterContainerName } from "../adapters/openshell/gateway-drift";
 import { resolveOpenshell } from "../adapters/openshell/resolve";
 import * as agentRuntime from "../agent/runtime";
 import { renderBox } from "../cli/banner";
 import { AGENT_PRODUCT_NAME, CLI_DISPLAY_NAME, CLI_NAME } from "../cli/branding";
 import { isRecord } from "../core/json-types";
 import { DASHBOARD_PORT } from "../core/ports";
-import { shellQuote } from "../core/shell-quote";
+import { resolveSandboxGatewayName } from "../onboard/gateway-binding";
+import * as registry from "../state/registry";
 import { buildSubprocessEnv } from "../subprocess-env";
 import * as agentForwardStop from "./agent-forward-stop";
 import { registerTunnelOrigin } from "./allowed-origins";
 import * as gatewayStop from "./gateway-stop";
+import { GATEWAY_STOP_SCRIPT } from "./gateway-stop-script";
+
+export { GATEWAY_STOP_SCRIPT } from "./gateway-stop-script";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -446,46 +451,63 @@ export function showStatus(opts: ServiceOptions = {}): void {
 }
 
 /**
- * Stop the active agent gateway (and its messaging channels) inside the sandbox.
+ * Stop the OpenClaw gateway (and its messaging channels) inside the sandbox.
  *
- * Prefer kubectl via the OpenShell gateway container so we can signal gateway
- * processes owned by the `gateway` user; fall back to `openshell sandbox exec`
- * for older deployments.
- *
- * The script scans concrete PIDs and verifies they are gone instead of relying
- * on `pkill -f`, which can match its own transient command line.
+ * OpenClaw keeps the hardened PID/start-time/owner/marker-gated matcher from
+ * #4951. Non-OpenClaw gateway agents are supervised by their sandbox runtime;
+ * signaling only the child can make it respawn while this command is still
+ * cleaning up host forwards. Leave those supervised children alone and let
+ * full stop tear down the host gateway when this is its final sandbox.
  */
 export function stopSandboxChannels(sandboxName: string): void {
-  const agent = agentRuntime.getSessionAgent(sandboxName);
+  const validatedSandboxName = validateSandboxName(sandboxName);
+  const agent = agentRuntime.getSessionAgent(validatedSandboxName);
   const agentDisplayName = agentRuntime.getAgentDisplayName(agent);
   if (!agentRuntime.hasGatewayRuntime(agent)) {
     info(`${agentDisplayName} has no gateway runtime; skipping in-sandbox gateway stop.`);
     return;
   }
-
-  const gatewayLabel = `${agentDisplayName} gateway`;
-  const gatewayStopScript = buildGatewayStopScript(agent);
-  if (!gatewayStopScript) {
-    warn(`${gatewayLabel} command is not configured; skipping in-sandbox gateway stop.`);
+  if (agent) {
+    info(
+      `${agentDisplayName} gateway is managed by the sandbox; ` +
+        "leaving it running while host forwards stop.",
+    );
     return;
   }
-  info(`Stopping in-sandbox ${gatewayLabel} (sandbox: ${sandboxName})...`);
 
-  const privilegedResult = stopSandboxChannelsViaKubectl(sandboxName, gatewayStopScript);
+  let gatewayName: string;
+  try {
+    gatewayName = resolveSandboxGatewayName(registry.getSandbox(validatedSandboxName));
+  } catch (error) {
+    warn(
+      `Could not resolve the OpenShell gateway for sandbox '${validatedSandboxName}': ` +
+        `${(error as Error).message ?? String(error)}. Skipping in-sandbox gateway stop.`,
+    );
+    return;
+  }
+
+  const gatewayLabel = `${agentDisplayName} gateway`;
+  info(`Stopping in-sandbox ${gatewayLabel} (sandbox: ${validatedSandboxName})...`);
+
+  const privilegedResult = stopSandboxChannelsViaKubectl(
+    validatedSandboxName,
+    gatewayName,
+    GATEWAY_STOP_SCRIPT,
+  );
   if (reportStopResult(privilegedResult, gatewayLabel)) return;
 
   const openshell = resolveOpenshell();
   if (!openshell) {
-    warn("openshell not found — cannot stop in-sandbox messaging channels.");
+    warn(`openshell not found — cannot stop ${gatewayLabel} inside sandbox.`);
     return;
   }
 
   const fallbackResult = spawnSync(
     openshell,
-    ["sandbox", "exec", "--name", sandboxName, "--", "sh", "-s"],
+    ["sandbox", "exec", "--name", validatedSandboxName, "--gateway", gatewayName, "--", "sh", "-s"],
     {
       encoding: "utf-8",
-      input: gatewayStopScript,
+      input: GATEWAY_STOP_SCRIPT,
       stdio: ["pipe", "pipe", "pipe"],
       timeout: 20000,
     },
@@ -493,123 +515,26 @@ export function stopSandboxChannels(sandboxName: string): void {
   reportStopResult(fallbackResult, gatewayLabel);
 }
 
-const GATEWAY_CLUSTER_CONTAINER = "openshell-cluster-nemoclaw";
-type SessionAgent = ReturnType<typeof agentRuntime.getSessionAgent>;
-
-function escapeEre(value: string): string {
-  return value.replace(/[.[\]{}()*+?^$|\\]/g, "\\$&");
-}
-
-function escapeCharClass(value: string): string {
-  return value
-    .replace(/\\/g, "\\\\")
-    .replace(/\]/g, "\\]")
-    .replace(/-/g, "\\-")
-    .replace(/\^/g, "\\^");
-}
-
-function selfSafeCommandPattern(command: string): string | null {
-  const parts = command.trim().split(/\s+/).filter(Boolean);
-  const executable = parts[0];
-  if (!executable) return null;
-
-  const executableName = basename(executable);
-  const first = executableName[0];
-  if (!first) return null;
-
-  const safeExecutable = `[${escapeCharClass(first)}]${escapeEre(executableName.slice(1))}`;
-  const args = parts.slice(1).map((part) => escapeEre(part));
-  return `(^|[[:space:]/])${[safeExecutable, ...args].join("[[:space:]]+")}([[:space:]]|$)`;
-}
-
-function getGatewayStopPatterns(agent: SessionAgent): string[] {
-  // OpenClaw is represented as a null session agent for backward compatibility.
-  const patterns = !agent
-    ? [
-        "(^|[[:space:]/])openclaw-gateway([[:space:]]|$)",
-        "(^|[[:space:]/])openclaw[[:space:]]+gateway([[:space:]]|$)",
-      ]
-    : [];
-  const gatewayCommand = agent?.gateway_command?.trim() ?? (!agent ? "openclaw gateway run" : "");
-  const commandPattern = selfSafeCommandPattern(gatewayCommand);
-  if (commandPattern) {
-    patterns.push(commandPattern);
-  }
-
-  if (/\bhermes\b/.test(gatewayCommand)) {
-    const hermesReexecPattern = selfSafeCommandPattern("hermes.real gateway run");
-    if (hermesReexecPattern) {
-      patterns.push(hermesReexecPattern);
-    }
-  }
-
-  return [...new Set(patterns)];
-}
-
-function buildGatewayStopScript(agent: SessionAgent): string | null {
-  const patterns = getGatewayStopPatterns(agent);
-  if (patterns.length === 0) return null;
-  const awkPatternEnv = patterns
-    .map((pattern, index) => ` p${String(index)}=${shellQuote(pattern)}`)
-    .join("");
-  const awkCondition = patterns
-    .map((_, index) => `cmd ~ ENVIRON["p${String(index)}"]`)
-    .join(" || ");
-
-  return String.raw`
-set -eu
-self="$$"
-parent="$PPID"
-find_gateway_pids() {
-  ps -eo pid=,args= 2>/dev/null |${awkPatternEnv} awk -v self="$self" -v parent="$parent" '
-    $1 ~ /^[0-9]+$/ && $1 != self && $1 != parent {
-      cmd = $0
-      sub(/^[[:space:]]*[0-9]+[[:space:]]+/, "", cmd)
-      if (${awkCondition}) {
-        seen[$1] = 1
-      }
-    }
-    END { for (pid in seen) print pid }
-  '
-}
-
-pids="$(find_gateway_pids)"
-if [ -z "$pids" ]; then
-  exit 1
-fi
-
-# Ask the gateway to shut down cleanly so its signal handler can stop channel
-# pollers and other children.
-kill -TERM $pids 2>/dev/null || true
-
-for _ in 1 2 3 4 5 6 7 8 9 10; do
-  remaining="$(find_gateway_pids)"
-  [ -z "$remaining" ] && exit 0
-  sleep 0.2
-done
-
-# If the process ignored SIGTERM, stop it anyway.  The caller must not report
-# success until the verification below observes that the gateway is gone.
-kill -KILL $remaining 2>/dev/null || true
-for _ in 1 2 3 4 5; do
-  remaining="$(find_gateway_pids)"
-  [ -z "$remaining" ] && exit 0
-  sleep 0.2
-done
-
-printf '%s\n' "$remaining" >&2
-exit 2
-`;
-}
-
 type StopAttemptResult = ReturnType<typeof spawnSync>;
+
+function isSandboxPodName(line: string, sandboxName: string): boolean {
+  if (!line.startsWith("pod/")) return false;
+  const podName = line.slice("pod/".length);
+  if (podName === sandboxName) return true;
+  const prefix = `${sandboxName}-`;
+  if (!podName.startsWith(prefix)) return false;
+  const generatedSuffix = podName.slice(prefix.length);
+  return /^[a-z0-9]+$/.test(generatedSuffix);
+}
 
 function stopSandboxChannelsViaKubectl(
   sandboxName: string,
+  gatewayName: string,
   gatewayStopScript: string,
 ): StopAttemptResult | null {
+  const gatewayContainer = getGatewayClusterContainerName(gatewayName);
   const podsResult = dockerSpawnSync(
-    ["exec", GATEWAY_CLUSTER_CONTAINER, "kubectl", "get", "pods", "-n", "openshell", "-o", "name"],
+    ["exec", gatewayContainer, "kubectl", "get", "pods", "-n", "openshell", "-o", "name"],
     { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"], timeout: 10000 },
   );
   if (podsResult.status !== 0 || !podsResult.stdout) return null;
@@ -619,13 +544,13 @@ function stopSandboxChannelsViaKubectl(
   const pod = podOutput
     .split(/\r?\n/)
     .map((line: string) => line.trim())
-    .find((line: string) => line.startsWith("pod/") && line.includes(sandboxName));
+    .find((line: string) => isSandboxPodName(line, sandboxName));
   if (!pod) return null;
 
   return dockerSpawnSync(
     [
       "exec",
-      GATEWAY_CLUSTER_CONTAINER,
+      gatewayContainer,
       "kubectl",
       "exec",
       "-n",
@@ -660,7 +585,7 @@ function reportStopResult(result: StopAttemptResult | null, gatewayLabel: string
     .map((text) => text.trim())
     .join(" ");
   warn(
-    `Could not stop in-sandbox gateway (exit ${String(result.status ?? "unknown")}).` +
+    `Could not stop ${gatewayLabel} inside sandbox (exit ${String(result.status ?? "unknown")}).` +
       " The sandbox may be unreachable or the gateway may still be running." +
       (details ? ` Details: ${details}` : ""),
   );

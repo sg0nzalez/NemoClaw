@@ -4,13 +4,17 @@
 import { spawnSync } from "node:child_process";
 
 import { resolveOpenshell } from "../adapters/openshell/resolve";
+import { OPENSHELL_OPERATION_TIMEOUT_MS } from "../adapters/openshell/timeouts";
 import * as agentRuntime from "../agent/runtime";
+import { waitUntil } from "../core/wait";
 import {
   bestEffortForwardStopForSandbox,
   type ForwardListRunner,
   type ForwardStopRunner,
 } from "../onboard/forward-cleanup";
+import { resolveSandboxGatewayName } from "../onboard/gateway-binding";
 import * as registry from "../state/registry";
+import { defaultProbePortFree } from "./gateway-port-confirmation";
 
 type Reporter = (message: string) => void;
 
@@ -21,6 +25,8 @@ type AgentWithForwards = {
 
 type SandboxWithDashboardPort = {
   dashboardPort?: unknown;
+  gatewayName?: string | null;
+  gatewayPort?: number | null;
 };
 
 type StopAgentForwardPortsDeps = {
@@ -30,9 +36,25 @@ type StopAgentForwardPortsDeps = {
   resolveOpenshell?: () => string | null;
   runOpenshell?: ForwardStopRunner;
   runCaptureOpenshell?: ForwardListRunner;
+  confirmPortReleased?: (port: number) => boolean;
   info?: Reporter;
   warn?: Reporter;
 };
+
+const FORWARD_RELEASE_TIMEOUT_MS = 5000;
+const FORWARD_RELEASE_POLL_MS = 250;
+
+function confirmForwardPortReleased(port: number): boolean {
+  const now = Date.now;
+  return waitUntil(() => defaultProbePortFree(port), {
+    deadlineMs: now() + FORWARD_RELEASE_TIMEOUT_MS,
+    maxAttempts: 20,
+    initialIntervalMs: FORWARD_RELEASE_POLL_MS,
+    maxIntervalMs: FORWARD_RELEASE_POLL_MS,
+    backoffFactor: 1,
+    now,
+  });
+}
 
 function getAgentForwardPorts(agent: AgentWithForwards, dashboardPort: unknown): number[] {
   const ports = new Set<number>();
@@ -59,6 +81,7 @@ function makeRunOpenshell(openshell: string): ForwardStopRunner {
     const result = spawnSync(openshell, args, {
       encoding: "utf-8",
       stdio: opts.suppressOutput ? "ignore" : "inherit",
+      timeout: OPENSHELL_OPERATION_TIMEOUT_MS,
     });
     if (!opts.ignoreError && result.status !== 0) {
       throw new Error(`openshell ${args.join(" ")} failed`);
@@ -91,17 +114,35 @@ export function stopAgentForwardPortsForStop(
   const agent = getSessionAgent(sandboxName);
   if (!agent) return;
 
-  const getSandbox = deps.getSandbox ?? registry.getSandbox;
-  const ports = getAgentForwardPorts(agent, getSandbox(sandboxName)?.dashboardPort);
-  if (ports.length === 0) return;
-
+  const warn = deps.warn ?? (() => {});
+  const info = deps.info ?? (() => {});
   const displayName = deps.getAgentDisplayName
     ? deps.getAgentDisplayName(agent)
     : agentRuntime.getAgentDisplayName(
         agent as Parameters<typeof agentRuntime.getAgentDisplayName>[0],
       );
-  const warn = deps.warn ?? (() => {});
-  const info = deps.info ?? (() => {});
+  const getSandbox = deps.getSandbox ?? registry.getSandbox;
+  const sandbox = getSandbox(sandboxName);
+  if (!sandbox) {
+    warn(
+      `Could not resolve sandbox '${sandboxName}' - cannot safely stop ${displayName} host port forwards.`,
+    );
+    return;
+  }
+  let gatewayName: string;
+  try {
+    gatewayName = resolveSandboxGatewayName(sandbox);
+  } catch (error) {
+    warn(
+      `Could not resolve the OpenShell gateway for sandbox '${sandboxName}': ` +
+        `${(error as Error).message ?? String(error)}. ` +
+        `Skipping ${displayName} host port forward cleanup.`,
+    );
+    return;
+  }
+
+  const ports = getAgentForwardPorts(agent, sandbox.dashboardPort);
+  if (ports.length === 0) return;
 
   const openshell = (deps.resolveOpenshell ?? resolveOpenshell)();
   if (!openshell) {
@@ -111,27 +152,43 @@ export function stopAgentForwardPortsForStop(
 
   const runOpenshell = deps.runOpenshell ?? makeRunOpenshell(openshell);
   const runCaptureOpenshell = deps.runCaptureOpenshell ?? makeRunCaptureOpenshell(openshell);
+  const scopedRunOpenshell: ForwardStopRunner = (args, opts) =>
+    runOpenshell([...args, "--gateway", gatewayName], opts);
+  const scopedRunCaptureOpenshell: ForwardListRunner = (args, opts) =>
+    runCaptureOpenshell([...args, "--gateway", gatewayName], opts);
+  const confirmPortReleased = deps.confirmPortReleased ?? confirmForwardPortReleased;
 
   for (const port of ports) {
     const result = bestEffortForwardStopForSandbox(
-      runOpenshell,
-      runCaptureOpenshell,
+      scopedRunOpenshell,
+      scopedRunCaptureOpenshell,
       port,
       sandboxName,
     );
-    if (result === "stopped") {
-      info(
-        `Stopped ${displayName} host port forward ${String(port)} for sandbox '${sandboxName}'.`,
-      );
-    } else if (result === "owned-other") {
+    if (result === "owned-other") {
       warn(
         `Keeping ${displayName} host port forward ${String(port)}; it belongs to another sandbox.`,
       );
-    } else if (result === "list-failed") {
+      continue;
+    }
+    if (result === "list-failed") {
       warn(
         `Could not enumerate OpenShell forwards; skipping ${displayName} host port forward ${String(
           port,
         )} cleanup.`,
+      );
+      continue;
+    }
+
+    if (!confirmPortReleased(port)) {
+      warn(
+        `Could not confirm ${displayName} host port forward ${String(port)} was released ` +
+          `within ${String(FORWARD_RELEASE_TIMEOUT_MS / 1000)} seconds; ` +
+          "the listener may still be running.",
+      );
+    } else if (result === "stopped") {
+      info(
+        `Stopped ${displayName} host port forward ${String(port)} for sandbox '${sandboxName}'.`,
       );
     }
   }
