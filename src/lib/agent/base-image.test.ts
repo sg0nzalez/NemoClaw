@@ -71,7 +71,7 @@ describe("agent base image provisioning", () => {
             forceRefresh: true,
             rootDir: root,
             validateImage: expect.any(Function),
-            validationDescription: "the required MCP Streamable HTTP runtime",
+            validationDescription: "Hermes 0.18.0 with the required MCP Streamable HTTP runtime",
           }),
         );
         expect(dockerImageInspectMock).not.toHaveBeenCalled();
@@ -123,7 +123,7 @@ describe("agent base image provisioning", () => {
               NEMOCLAW_SANDBOX_BASE_LOCAL_BUILD: "0",
             }),
             validateImage: expect.any(Function),
-            validationDescription: "the required MCP Streamable HTTP runtime",
+            validationDescription: "Hermes 0.18.0 with the required MCP Streamable HTTP runtime",
           }),
         );
         expect(dockerImageInspectMock).not.toHaveBeenCalled();

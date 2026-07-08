@@ -1249,6 +1249,9 @@ describe("pull request and main workflow contracts", () => {
     expect(runs).toContain("docker image inspect");
     expect(runs).toContain("${image}@sha256:");
     expect(runs).toContain("mcp_client_imports_ok");
+    expect(runs).toContain("expected_hermes_version");
+    expect(runs).toContain("hermes_version");
+    expect(runs).toContain("HERMES_SEMVER");
     expect(runs).toContain("Build-time package/import guard only");
     expect(runs).toContain("_MCP_HTTP_AVAILABLE");
     expect(runs).toContain("layout_ok");
@@ -1290,6 +1293,10 @@ describe("pull request and main workflow contracts", () => {
           "    process.exit(0);",
           "  }",
           '  if (entrypoint === "sh") process.exit(0);',
+          '  if (entrypoint === "/usr/local/bin/hermes") {',
+          '    process.stdout.write("Hermes Agent v0.18.0 (2026.7.1)\\n");',
+          "    process.exit(0);",
+          "  }",
           '  if (entrypoint === "/opt/hermes/.venv/bin/python") {',
           "    process.exit(image === process.env.REMOTE_DIGEST ? 42 : 0);",
           "  }",

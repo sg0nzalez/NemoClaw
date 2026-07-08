@@ -532,6 +532,19 @@ describe("built-in channel manifests", () => {
       "SLACK_ALLOWED_USERS={{allowedIds.slack.csv}}",
       "SLACK_ALLOWED_CHANNELS={{slackConfig.allowedChannels.csv}}",
     ]);
+    expect(findRender(slackManifest, "slack-hermes-platform")).toEqual({
+      id: "slack-hermes-platform",
+      kind: "json-fragment",
+      agent: "hermes",
+      target: "~/.hermes/config.yaml",
+      fragment: {
+        path: "platforms.slack",
+        value: {
+          enabled: true,
+          extra: { rich_blocks: true },
+        },
+      },
+    });
     expect(renderJson(slackManifest)).toContain('"path":"channels.slack"');
     expect(renderJson(slackManifest)).toContain('"accounts"');
     expect(renderJson(slackManifest)).toContain("allowedIds.slack.channels");

@@ -13,29 +13,71 @@ describe("agent base image provisioning", () => {
     vi.restoreAllMocks();
   });
 
-  it("probes resolved Hermes bases for the native MCP Streamable HTTP runtime", () => {
+  it("probes resolved Hermes bases for the pinned version and native MCP runtime", () => {
     withMockedDocker(({ ensureAgentBaseImage, dockerCaptureMock, resolveSandboxBaseImageMock }) => {
+      dockerCaptureMock.mockImplementation((args: string[]) => {
+        const entrypoint = args[3];
+        if (entrypoint === "/usr/local/bin/hermes") {
+          return "Hermes Agent v0.18.0 (2026.7.1)";
+        }
+        if (entrypoint === "/opt/hermes/.venv/bin/python") {
+          return "nemoclaw-hermes-mcp-runtime-ok";
+        }
+        return "";
+      });
       ensureAgentBaseImage(makeAgent());
       const options = resolveSandboxBaseImageMock.mock.calls[0]?.[0] as {
         validateImage?: (imageRef: string) => boolean;
       };
 
-      expect(options.validateImage?.("hermes-base:test")).toBe(true);
+      const compatibleLocalRef = "nemoclaw-hermes-sandbox-base-local:test";
+      expect(options.validateImage?.(compatibleLocalRef)).toBe(true);
+      expect(dockerCaptureMock).toHaveBeenCalledWith(
+        ["run", "--rm", "--entrypoint", "/usr/local/bin/hermes", compatibleLocalRef, "--version"],
+        { ignoreError: true, timeout: 20_000 },
+      );
       expect(dockerCaptureMock).toHaveBeenCalledWith(
         [
           "run",
           "--rm",
           "--entrypoint",
           "/opt/hermes/.venv/bin/python",
-          "hermes-base:test",
+          compatibleLocalRef,
           "-c",
           expect.stringContaining("_MCP_HTTP_AVAILABLE"),
         ],
         { ignoreError: true, timeout: 20_000 },
       );
 
-      dockerCaptureMock.mockReturnValue("");
-      expect(options.validateImage?.("hermes-base:stale")).toBe(false);
+      dockerCaptureMock.mockImplementation((args: string[]) =>
+        args[3] === "/usr/local/bin/hermes" ? "Hermes Agent v0.17.0 (2026.6.19)" : "",
+      );
+      const staleLocalRef = "nemoclaw-hermes-sandbox-base-local:stale";
+      expect(options.validateImage?.(staleLocalRef)).toBe(false);
+      expect(dockerCaptureMock).not.toHaveBeenCalledWith(
+        expect.arrayContaining([staleLocalRef, "/opt/hermes/.venv/bin/python"]),
+        expect.anything(),
+      );
+
+      dockerCaptureMock.mockClear();
+      dockerCaptureMock.mockImplementation((args: string[]) => {
+        if (args[3] === "/usr/local/bin/hermes") {
+          return "Hermes Agent v0.18.0 (2026.7.1)";
+        }
+        return args[3] === "/opt/hermes/.venv/bin/python" ? "nemoclaw-hermes-mcp-runtime-ok" : "";
+      });
+      expect(
+        options.validateImage?.(
+          `ghcr.io/nvidia/nemoclaw/hermes-sandbox-base@sha256:${"a".repeat(64)}`,
+        ),
+      ).toBe(true);
+      expect(dockerCaptureMock).toHaveBeenCalled();
+
+      dockerCaptureMock.mockClear();
+      expect(options.validateImage?.("ghcr.io/nvidia/nemoclaw/hermes-sandbox-base:latest")).toBe(
+        false,
+      );
+      expect(dockerCaptureMock).not.toHaveBeenCalled();
     });
   });
 
@@ -162,22 +204,14 @@ describe("agent base image provisioning", () => {
         expect(() => ensureAgentBaseImage(makeAgent())).toThrow(
           "Hermes final image does not accept base image ref",
         );
-        expect(resolveSandboxBaseImageMock).toHaveBeenCalledWith(
-          expect.objectContaining({
-            localTag: "localhost:5000/custom/hermes:latest",
-            env: expect.objectContaining({
-              [envVar]: "localhost:5000/custom/hermes:latest",
-              NEMOCLAW_SANDBOX_BASE_LOCAL_BUILD: "0",
-            }),
-          }),
-        );
+        expect(resolveSandboxBaseImageMock).not.toHaveBeenCalled();
       });
     } finally {
       prior === undefined ? delete process.env[envVar] : (process.env[envVar] = prior);
     }
   });
 
-  it("fails closed when no MCP-capable Hermes base image can be resolved", () => {
+  it("fails closed when no version-matched, MCP-capable Hermes base image can be resolved", () => {
     withMockedDocker(
       ({
         ensureAgentBaseImage,

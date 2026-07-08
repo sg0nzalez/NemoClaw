@@ -312,6 +312,11 @@ else:
         errors.append("platforms.slack missing or not a mapping")
     elif slack.get("enabled") is not True:
         errors.append(f"platforms.slack.enabled is not true ({slack!r})")
+    elif (
+        not isinstance(slack.get("extra"), dict)
+        or slack["extra"].get("rich_blocks") is not True
+    ):
+        errors.append(f"platforms.slack.extra.rich_blocks is not true ({slack!r})")
 if "SLACK_BOT_TOKEN" in config_text or "SLACK_APP_TOKEN" in config_text:
     errors.append("config.yaml contains Slack token env keys")
 if errors:

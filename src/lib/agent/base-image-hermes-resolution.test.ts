@@ -83,6 +83,7 @@ describe("Hermes base-image resolver integration", () => {
     ]);
     const captureByEntrypoint = new Map([
       ["/opt/hermes/.venv/bin/python", "nemoclaw-hermes-mcp-runtime-ok"],
+      ["/usr/local/bin/hermes", "Hermes Agent v0.18.0 (2026.7.1)"],
       ["/usr/bin/ldd", "ldd (GNU libc) 2.41"],
     ]);
 
@@ -135,5 +136,24 @@ describe("Hermes base-image resolver integration", () => {
     expect(() => createAgentSandbox(makeAgent())).toThrow(
       `Hermes final image does not accept base image ref '${platformRef}'`,
     );
+  });
+
+  it("reuses a validated pinned platform-digest resolution hint", () => {
+    const initial = createAgentSandbox(makeAgent());
+    createdBuildContexts.push(initial.buildCtx);
+    const hint = initial.baseImageResolutionMetadata;
+    if (!hint) throw new Error("expected pinned resolution metadata");
+
+    dockerMocks.imageInspect.mockImplementation((ref: string) => {
+      if (ref === trackedRef) throw new Error("pinned candidate should not be re-resolved");
+      return { status: ref === platformRef ? 0 : 1 };
+    });
+
+    const reused = createAgentSandbox(makeAgent(), {
+      resolutionHint: hint,
+    });
+    createdBuildContexts.push(reused.buildCtx);
+
+    expect(reused.baseImageResolutionMetadata).toEqual(hint);
   });
 });

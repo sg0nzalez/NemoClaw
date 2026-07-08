@@ -14,6 +14,7 @@ import {
   dockerRmi,
   dockerTag,
 } from "../adapters/docker";
+import { parseVersionFromText } from "../adapters/openshell/client";
 import { ROOT } from "../runner";
 import { SANDBOX_BUILD_CONTEXT_PREFIX } from "../sandbox/build-context";
 import {
@@ -157,13 +158,35 @@ export function hermesBaseImageSupportsMcp(imageRef: string): boolean {
   return output.trim() === HERMES_MCP_RUNTIME_PROBE_OK;
 }
 
+/**
+ * Require a resolved Hermes base to match the manifest pin as well as the
+ * optional-runtime contract. A reviewed remote digest can remain valid as an
+ * image artifact after Dockerfile.base advances, so capability probes alone
+ * are not enough to keep a stale Hermes runtime out of a new final image.
+ */
+function hermesBaseImageIsCompatible(imageRef: string, expectedVersion: string | null): boolean {
+  if (!expectedVersion) return false;
+  const versionOutput = dockerCapture(
+    ["run", "--rm", "--entrypoint", "/usr/local/bin/hermes", imageRef, "--version"],
+    { ignoreError: true, timeout: 20_000 },
+  );
+  if (parseVersionFromText(versionOutput, "hermes --version") !== expectedVersion) return false;
+  return hermesBaseImageSupportsMcp(imageRef);
+}
+
 function createAgentBaseImageResolutionOptions(
   agent: AgentDefinition,
   dockerfilePath: string,
   options: EnsureAgentBaseImageOptions,
 ): ResolveBaseImageOptions {
   const imageName = `ghcr.io/nvidia/nemoclaw/${agent.name}-sandbox-base`;
-  const validateImage = agent.name === "hermes" ? hermesBaseImageSupportsMcp : undefined;
+  const validateImage =
+    agent.name === "hermes"
+      ? (imageRef: string) =>
+          (HERMES_OFFICIAL_BASE_DIGEST_REF.test(imageRef) ||
+            hermesFinalDockerfileAcceptsBase(agent, imageRef)) &&
+          hermesBaseImageIsCompatible(imageRef, agent.expectedVersion)
+      : undefined;
   const pinnedRemoteRef = getHermesPinnedRemoteBaseRef(agent) ?? undefined;
   return {
     imageName,
@@ -179,7 +202,9 @@ function createAgentBaseImageResolutionOptions(
     preferPinnedRemoteRef: agent.name === "hermes" && pinnedRemoteRef !== undefined,
     validateImage,
     validationDescription:
-      agent.name === "hermes" ? "the required MCP Streamable HTTP runtime" : undefined,
+      agent.name === "hermes"
+        ? `Hermes ${agent.expectedVersion ?? "<missing>"} with the required MCP Streamable HTTP runtime`
+        : undefined,
   };
 }
 
@@ -278,6 +303,11 @@ export function ensureAgentBaseImage(
   }
 
   const explicitOverride = process.env[overrideEnvVar]?.trim();
+  if (explicitOverride && !hermesFinalDockerfileAcceptsBase(agent, explicitOverride)) {
+    throw new Error(
+      `Hermes final image does not accept base image ref '${explicitOverride}'; use the tracked official digest or a repository-built local base`,
+    );
+  }
   const resolved = explicitOverride
     ? resolveExactImage(explicitOverride)
     : resolveSandboxBaseImage(resolutionOptions);

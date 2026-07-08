@@ -48,7 +48,7 @@ export function makeAgent(overrides: Partial<AgentDefinition> = {}): AgentDefini
     stateFiles: [],
     userManagedFiles: [],
     versionCommand: "hermes --version",
-    expectedVersion: "2026.4.30",
+    expectedVersion: "0.18.0",
     hasDevicePairing: false,
     phoneHomeHosts: [],
     dockerfileBasePath: "/test/root/agents/hermes/Dockerfile.base",
