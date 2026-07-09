@@ -112,6 +112,76 @@ infer_container_runtime_from_info() {
   fi
 }
 
+is_wsl_runtime() {
+  # Keep this shell-side WSL check aligned with src/lib/platform.ts:isWsl().
+  # Source boundary (#3136): this script runs before OpenShell network policy is
+  # applied, so it must choose the provider URL that later enters the sandbox.
+  # Remove this local workaround after OpenShell exposes one uniform
+  # sandbox-to-host local-service route for WSL and non-WSL runtimes. Review by
+  # 2026-12-31.
+  local system_name
+  system_name="$(uname -s 2>/dev/null || true)"
+  if [ "$system_name" != "Linux" ]; then
+    return 1
+  fi
+
+  if [ -n "${WSL_DISTRO_NAME:-}" ] || [ -n "${WSL_INTEROP:-}" ]; then
+    return 0
+  fi
+
+  local release proc_version
+  release="$(uname -r 2>/dev/null || true)"
+  proc_version="$(cat /proc/version 2>/dev/null || true)"
+  local normalized
+  normalized="$(printf '%s\n%s' "$release" "$proc_version" | tr '[:upper:]' '[:lower:]')"
+  [[ "$normalized" == *microsoft* ]]
+}
+
+detect_container_runtime_from_docker() {
+  # Best effort only: missing/unhealthy Docker maps to unknown, and callers then
+  # fail safe to the token-gated Ollama auth proxy instead of raw host loopback.
+  local info=""
+  if command -v docker >/dev/null 2>&1; then
+    info="$(docker info --format '{{.OperatingSystem}} {{range .Labels}}{{.}} {{end}}' 2>/dev/null || true)"
+  fi
+  infer_container_runtime_from_info "$info"
+}
+
+container_can_reach_host_loopback() {
+  # Only WSL + Docker Desktop is allowed to use raw host loopback. Every other
+  # runtime, including macOS Docker Desktop, Colima, Podman, and native Docker,
+  # defaults to the auth proxy as the security fail-safe.
+  if ! is_wsl_runtime; then
+    return 1
+  fi
+
+  local runtime
+  runtime="$(detect_container_runtime_from_docker)"
+
+  [ "$runtime" = "docker-desktop" ]
+}
+
+get_ollama_container_port() {
+  local ollama_port="${NEMOCLAW_OLLAMA_PORT:-11434}"
+  local ollama_proxy_port="${NEMOCLAW_OLLAMA_PROXY_PORT:-11435}"
+
+  # Both routes ultimately depend on the host Ollama daemon: the WSL path
+  # reaches it directly, while the managed proxy forwards to this raw port.
+  _validate_port NEMOCLAW_OLLAMA_PORT "$ollama_port" || return 1
+  if container_can_reach_host_loopback; then
+    printf '%s\n' "$ollama_port"
+  else
+    # The WSL Docker Desktop loopback path does not use the proxy listener, so
+    # the raw/proxy equality check is only required when both listeners coexist.
+    _validate_port NEMOCLAW_OLLAMA_PROXY_PORT "$ollama_proxy_port" || return 1
+    if [ "$ollama_port" = "$ollama_proxy_port" ]; then
+      printf 'Invalid NEMOCLAW_OLLAMA_PROXY_PORT=%s (must differ from NEMOCLAW_OLLAMA_PORT on non-WSL hosts)\n' "$ollama_proxy_port" >&2
+      return 1
+    fi
+    printf '%s\n' "$ollama_proxy_port"
+  fi
+}
+
 find_podman_socket() {
   local home_dir="${1:-${HOME:-/tmp}}"
   local socket_path
@@ -253,12 +323,14 @@ get_local_provider_base_url() {
   local provider="${1:-}"
 
   local vllm_port="${NEMOCLAW_VLLM_PORT:-8000}"
-  local ollama_port="${NEMOCLAW_OLLAMA_PORT:-11434}"
   _validate_port NEMOCLAW_VLLM_PORT "$vllm_port" || return 1
-  _validate_port NEMOCLAW_OLLAMA_PORT "$ollama_port" || return 1
   case "$provider" in
     vllm-local) printf 'http://host.openshell.internal:%s/v1\n' "$vllm_port" ;;
-    ollama-local) printf 'http://host.openshell.internal:%s/v1\n' "$ollama_port" ;;
+    ollama-local)
+      local ollama_container_port
+      ollama_container_port="$(get_ollama_container_port)" || return 1
+      printf 'http://host.openshell.internal:%s/v1\n' "$ollama_container_port"
+      ;;
     *) return 1 ;;
   esac
 }
@@ -267,15 +339,17 @@ check_local_provider_health() {
   local provider="${1:-}"
 
   local vllm_port="${NEMOCLAW_VLLM_PORT:-8000}"
-  local ollama_port="${NEMOCLAW_OLLAMA_PORT:-11434}"
-  _validate_port NEMOCLAW_VLLM_PORT "$vllm_port" || return 1
-  _validate_port NEMOCLAW_OLLAMA_PORT "$ollama_port" || return 1
   case "$provider" in
     vllm-local)
+      _validate_port NEMOCLAW_VLLM_PORT "$vllm_port" || return 1
       curl -sf "http://localhost:${vllm_port}/v1/models" >/dev/null 2>&1
       ;;
     ollama-local)
-      curl -sf "http://localhost:${ollama_port}/api/tags" >/dev/null 2>&1
+      # Health checks validate the host daemon. The sandbox-facing provider URL
+      # can still use the auth proxy on non-WSL hosts.
+      local ollama_port="${NEMOCLAW_OLLAMA_PORT:-11434}"
+      _validate_port NEMOCLAW_OLLAMA_PORT "$ollama_port" || return 1
+      curl -sf "http://127.0.0.1:${ollama_port}/api/tags" >/dev/null 2>&1
       ;;
     *)
       return 1
