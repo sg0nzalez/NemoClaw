@@ -12,6 +12,12 @@ const require = createRequire(import.meta.url);
 const ts = require("typescript") as typeof TypeScript;
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const inferenceOptionsPath = path.join(repoRoot, "docs", "inference", "inference-options.mdx");
+const selfHostedInferenceSetupPath = path.join(
+  repoRoot,
+  "docs",
+  "inference",
+  "local-compatible-inference-setup.mdx",
+);
 const inferenceConfigPath = path.join(repoRoot, "src", "lib", "inference", "config.ts");
 const modelPromptsPath = path.join(repoRoot, "src", "lib", "inference", "model-prompts.ts");
 
@@ -147,5 +153,28 @@ describe("inference options model task-fit docs (#4755)", () => {
     expect(nvidiaRow).toBeDefined();
     expect(nvidiaRow).not.toMatch(matcher as RegExp);
     expect(hermesRow).toContain(id);
+  });
+});
+
+describe("inference setup navigation", () => {
+  it("routes caveated vLLM and NIM setup to the self-hosted server guide", () => {
+    const markdown = fs.readFileSync(inferenceOptionsPath, "utf8");
+    const start = markdown.indexOf("## Caveated Local Options");
+    const end = markdown.indexOf("## Validation", start);
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    const section = markdown.slice(start, end);
+
+    expect(section).toContain(
+      "[Set Up Self-Hosted Inference Servers](local-compatible-inference-setup)",
+    );
+    expect(section).toContain("[Use Ollama for Local Inference](use-local-inference)");
+  });
+
+  it("uses a loopback-only bind for the raw model server example", () => {
+    const markdown = fs.readFileSync(selfHostedInferenceSetupPath, "utf8");
+
+    expect(markdown).toContain("--host 127.0.0.1");
+    expect(markdown).not.toContain("--host 0.0.0.0");
   });
 });
