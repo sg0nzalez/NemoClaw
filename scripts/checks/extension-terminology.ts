@@ -3,6 +3,7 @@
 
 import {
   closeSync,
+  constants,
   existsSync,
   fstatSync,
   lstatSync,
@@ -173,7 +174,7 @@ function isRootList(options: ScanOptions | readonly string[]): options is readon
 }
 
 function readCheckedDocumentationFile(absolutePath: string): string | null {
-  const descriptor = openSync(absolutePath, "r");
+  const descriptor = openSync(absolutePath, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const size = fstatSync(descriptor).size;
     if (size > MAX_DOCUMENTATION_FILE_BYTES) return null;
