@@ -34,6 +34,8 @@ If that appears as text in the assistant reply, OpenClaw cannot dispatch the too
 Ollama can work well for lightweight local chat and some simple tool surfaces.
 For OpenClaw-style agent loops with multiple tools, long instructions, or multi-turn dispatch, use a server that exposes OpenAI-compatible `/v1/chat/completions` with a tool-call parser.
 vLLM is the common local choice.
+Refer to [Set Up vLLM](local-compatible-inference-setup/set-up-vllm) for the parser-aware vLLM server setup flow.
+Refer to [Other Self Hosted Servers](local-compatible-inference-setup/set-up-other-self-hosted-servers) when another compatible server provides structured tool calls.
 
 ## Symptom
 
@@ -105,6 +107,7 @@ These routes therefore keep direct structured tool calling until search, describ
 ## Recommended Fix
 
 For persistent NemoClaw use, start vLLM with auto tool choice and the parser that matches your model family, then rerun onboarding and select **Local vLLM [experimental]** or **Other OpenAI-compatible endpoint**.
+Refer to [Set Up vLLM](local-compatible-inference-setup/set-up-vllm) for the full vLLM setup flow.
 
 ### Configure vLLM
 
@@ -208,9 +211,14 @@ Look for these signs:
 - `nemoclaw <name> status` reports the local vLLM or compatible endpoint as the active provider.
 
 If JSON still appears as text, confirm that you started vLLM with both `--enable-auto-tool-choice` and the correct `--tool-call-parser` value for your model.
+Refer to [Verify Self Hosted Inference](local-compatible-inference-setup/verify-self-hosted-inference) when the server does not become ready or the validation budget is too short.
 
 ## Next Steps
 
-- [Set Up Self-Hosted Inference Servers](local-compatible-inference-setup)
+- [Set Up Self-Hosted Inference Servers](local-compatible-inference-setup) for an overview of local options other than Ollama.
+- [Set Up vLLM](local-compatible-inference-setup/set-up-vllm) for parser-aware vLLM server setup.
+- [Set Up NVIDIA NIM](local-compatible-inference-setup/set-up-nvidia-nim) for the experimental managed NIM path.
+- [Other Self Hosted Servers](local-compatible-inference-setup/set-up-other-self-hosted-servers) for another compatible server.
+- [Verify Self Hosted Inference](local-compatible-inference-setup/verify-self-hosted-inference) for post-onboarding checks and timeout configuration.
 - [Inference Options](inference-options)
 - [Switch Inference Models](switch-inference-providers)

@@ -1,0 +1,72 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+title: "Verify Self Hosted Inference"
+sidebar-title: "Verify Self Hosted Inference"
+description: "Verify self-hosted inference routes and configure local inference timeouts."
+description-agent: "Shows how to verify self-hosted inference from the sandbox and configure validation and sandbox readiness timeouts."
+keywords: ["nemoclaw local inference verification", "nemoclaw inference timeout", "nemoclaw vllm route"]
+content:
+  type: "task"
+---
+import { AgentOnly } from "../_components/AgentGuide";
+
+Use this page after you configure a self-hosted inference provider.
+It covers sandbox route verification and timeout configuration.
+
+## Verify the Local vLLM Sandbox Route
+
+For a local vLLM server on a Linux Docker-driver GPU sandbox, NemoClaw keeps inference on the OpenShell bridge route.
+After the sandbox becomes ready, it verifies `https://inference.local/v1/models` from inside the sandbox runtime.
+Only a 2xx response succeeds because this path includes the proxy authentication rewrite that the agent uses.
+If the runtime route fails, onboarding reports the endpoint and recovery steps before the first agent prompt.
+
+The same post-ready check also applies to local Ollama.
+NIM and other compatible endpoints receive their onboarding endpoint validation, but not this post-ready sandbox route check.
+
+## Verify the Configuration
+
+After onboarding completes, confirm the active provider and model.
+
+```bash
+$$nemoclaw <name> status
+```
+
+The output shows the provider label, such as **Local vLLM** or **Other OpenAI-compatible endpoint**, and the active model.
+The `Inference` row checks `inference.local` from inside the sandbox, which is the path agent requests use.
+
+## Timeout Configuration
+
+Local inference requests use a default timeout of 180 seconds.
+Large prompts on hardware such as DGX Spark can exceed shorter timeouts, so NemoClaw sets a higher default for Ollama, vLLM, NIM, and compatible-endpoint setup.
+
+To override the timeout, set the `NEMOCLAW_LOCAL_INFERENCE_TIMEOUT` environment variable before onboarding:
+
+```bash
+export NEMOCLAW_LOCAL_INFERENCE_TIMEOUT=300
+$$nemoclaw onboard
+```
+
+The value is in seconds.
+NemoClaw bakes this setting into the sandbox at build time.
+Changing it after onboarding requires re-running `$$nemoclaw onboard`.
+
+### Increase the Sandbox Readiness Budget
+
+`NEMOCLAW_LOCAL_INFERENCE_TIMEOUT` only governs the inference-server validation probe.
+During local Ollama setup, NemoClaw treats host-side curl process timeouts as retryable probe failures and retries with a larger timeout before it reports a validation failure.
+NemoClaw also retries Docker runtime detection with a longer `docker info` timeout before it chooses the local inference route.
+
+The post-create readiness wait (image build, gateway upload, in-sandbox boot) has its own budget, `NEMOCLAW_SANDBOX_READY_TIMEOUT`, also defaulting to 180 seconds.
+On hosts where the sandbox image takes minutes to build or upload, raise both settings together.
+Examples include large quantized models, DGX Station first runs, and remote VMs over a slow link.
+
+```bash
+export NEMOCLAW_LOCAL_INFERENCE_TIMEOUT=300
+export NEMOCLAW_SANDBOX_READY_TIMEOUT=600
+$$nemoclaw onboard
+```
+
+<AgentOnly variant="openclaw,hermes">
+If onboard ends with `Sandbox '<name>' was created but did not become ready within 180s`, refer to [Troubleshooting](../../reference/troubleshooting#sandbox-onboard-times-out-with-did-not-become-ready-within-ns).
+</AgentOnly>

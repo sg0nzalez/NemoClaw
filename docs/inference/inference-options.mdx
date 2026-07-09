@@ -108,7 +108,7 @@ NemoClaw neither displays nor accepts an unsafe `NEMOCLAW_MODEL` value as the ma
 | NVIDIA Endpoints | Routes to models hosted on [build.nvidia.com](https://build.nvidia.com). You can also enter any model ID from the catalog. Set `NVIDIA_INFERENCE_API_KEY`. | Nemotron 3 Ultra 550B, Nemotron 3 Super 120B, Minimax M3 |
 | OpenRouter | Routes OpenClaw, Hermes, and Deep Agents Code through OpenRouter's OpenAI-compatible Chat Completions endpoint. Set `OPENROUTER_API_KEY`; valid keys begin with `sk-or-`. NemoClaw validates manual model entries with OpenRouter and keeps the sandbox on `https://inference.local/v1`. | OpenRouter featured catalog models, or any OpenRouter model ID you enter manually. |
 | OpenAI | Routes to the OpenAI API. Set `OPENAI_API_KEY`. | `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.4-nano`, `gpt-5.4-pro-2026-03-05` |
-| Other OpenAI-compatible endpoint | Routes to any server that implements `/v1/chat/completions`. NemoClaw uses `/v1/chat/completions` at runtime by default; set `NEMOCLAW_PREFERRED_API=openai-responses` to allow `/v1/responses` for proxies that implement it, such as some llama.cpp builds. The wizard prompts for a base URL and model name. Behavior on OpenAI-compatible proxies, gateways, and self-hosted implementations such as LocalAI or llama.cpp may vary. When you enable Telegram messaging, onboarding also runs a bounded sandbox-side smoke check through `https://inference.local/v1/chat/completions`. Set `COMPATIBLE_API_KEY`. | You provide the model name. |
+| Other OpenAI-compatible endpoint | Routes to any server that implements `/v1/chat/completions`. NemoClaw uses `/v1/chat/completions` at runtime by default; set `NEMOCLAW_PREFERRED_API=openai-responses` to allow `/v1/responses` for proxies that implement it, such as some llama.cpp builds. The wizard prompts for a base URL and model name. Behavior on OpenAI-compatible proxies, gateways, and self-hosted implementations such as LocalAI or llama.cpp may vary. When you enable Telegram messaging, onboarding also runs a bounded sandbox-side smoke check through `https://inference.local/v1/chat/completions`. Set `COMPATIBLE_API_KEY`. Refer to [Other Self Hosted Servers](local-compatible-inference-setup/set-up-other-self-hosted-servers) for the server setup flow. | You provide the model name. |
 | Anthropic | Routes to the Anthropic Messages API. Set `ANTHROPIC_API_KEY`. | `claude-sonnet-4-6`, `claude-haiku-4-5`, `claude-opus-4-6` |
 | Other Anthropic-compatible endpoint | Routes agents that support Anthropic Messages, including OpenClaw, to `/v1/messages`. For Hermes and agents that only support OpenAI-compatible inference, NemoClaw instead requires `/v1/chat/completions`, which is the surface it validates and uses at runtime. The adapter is validated against AWS Bedrock (refer to the status table above); behavior on other Anthropic-compatible proxies and gateways may vary. The wizard prompts for a base URL and model name. Set `COMPATIBLE_ANTHROPIC_API_KEY`. | You provide the model name. |
 | Google Gemini | Routes to Google's OpenAI-compatible chat-completions endpoint. NemoClaw skips the Responses-API probe because Gemini does not support `/v1/responses`. Set `GEMINI_API_KEY`. | `gemini-3.1-pro-preview`, `gemini-3.1-flash-lite-preview`, `gemini-3-flash-preview`, `gemini-2.5-pro`, `gemini-2.5-flash`, `gemini-2.5-flash-lite` |
@@ -172,10 +172,10 @@ NVIDIA Nemotron models expose OpenAI-compatible APIs across every supported depl
 | Nemotron Host | Onboard Wizard Option | Why |
 |---|---|---|
 | `build.nvidia.com` (NVIDIA-hosted) | **Option 1: NVIDIA Endpoints** | NemoClaw sets the base URL to `https://integrate.api.nvidia.com/v1` for you and validates the model against the build catalog. |
-| Self-hosted NIM container | **Other OpenAI-compatible endpoint** | NIM exposes an OpenAI-compatible `/v1/chat/completions` route. Point the base URL at your NIM service and enter the Nemotron model ID. |
-| Enterprise NVIDIA AI Enterprise gateway | **Other OpenAI-compatible endpoint** | Enterprise gateways front Nemotron with the same OpenAI-compatible contract. Use the gateway's base URL and your enterprise token. |
-| vLLM, SGLang, or TRT-LLM serving Nemotron weights | **Other OpenAI-compatible endpoint** | Each runtime exposes Nemotron through `/v1/chat/completions`. Use the runtime's base URL and the model ID it reports. |
-| Local NIM started by the wizard | **Local NVIDIA NIM** (experimental) | Requires `NEMOCLAW_EXPERIMENTAL=1` and a NIM-capable GPU. NemoClaw pulls and manages the container for you. |
+| Self-hosted NIM container | **Other OpenAI-compatible endpoint** | NIM exposes an OpenAI-compatible `/v1/chat/completions` route. Point the base URL at your NIM service and enter the Nemotron model ID. Refer to [Set Up NVIDIA NIM](local-compatible-inference-setup/set-up-nvidia-nim) for a self-hosted NIM server. |
+| Enterprise NVIDIA AI Enterprise gateway | **Other OpenAI-compatible endpoint** | Enterprise gateways front Nemotron with the same OpenAI-compatible contract. Use the gateway's base URL and your enterprise token. Refer to [Other Self Hosted Servers](local-compatible-inference-setup/set-up-other-self-hosted-servers) for compatible endpoints. |
+| vLLM, SGLang, or TRT-LLM serving Nemotron weights | **Other OpenAI-compatible endpoint** | Each runtime exposes Nemotron through `/v1/chat/completions`. Use the runtime's base URL and the model ID it reports. Refer to [Set Up vLLM](local-compatible-inference-setup/set-up-vllm) for vLLM or [Other Self Hosted Servers](local-compatible-inference-setup/set-up-other-self-hosted-servers) for another compatible server. |
+| Local NIM started by the wizard | **Local NVIDIA NIM** (experimental) | Requires `NEMOCLAW_EXPERIMENTAL=1` and a NIM-capable GPU. NemoClaw pulls and manages the container for you. Refer to [Set Up NVIDIA NIM](local-compatible-inference-setup/set-up-nvidia-nim). |
 
 For Other OpenAI-compatible endpoint, the API key environment variable is `COMPATIBLE_API_KEY`.
 Set it to whatever credential your endpoint expects, or any non-empty placeholder if your endpoint does not require auth.
@@ -268,12 +268,14 @@ An already-running vLLM server appears directly in the onboarding selection list
 
 | Option | Condition | Notes |
 |--------|-----------|-------|
-| Local NVIDIA NIM | NIM-capable GPU detected | Pulls and manages a NIM container. |
-| Local vLLM | vLLM running on `localhost:8000`, or a supported DGX Spark, DGX Station, or Linux NVIDIA GPU profile | Auto-detects the loaded model when vLLM is already running. Can install or start a managed vLLM container by default on DGX Spark/Station and after opt-in on generic Linux NVIDIA GPU hosts. |
+| Local NVIDIA NIM | NIM-capable GPU detected | Pulls and manages a NIM container. Refer to [Set Up NVIDIA NIM](local-compatible-inference-setup/set-up-nvidia-nim). |
+| Local vLLM | vLLM running on `localhost:8000`, or a supported DGX Spark, DGX Station, or Linux NVIDIA GPU profile | Auto-detects the loaded model when vLLM is already running. Can install or start a managed vLLM container by default on DGX Spark/Station and after opt-in on generic Linux NVIDIA GPU hosts. Refer to [Set Up vLLM](local-compatible-inference-setup/set-up-vllm). |
 
 <AgentOnly variant="openclaw,hermes">
-For Ollama setup, refer to [Use Ollama for Local Inference](use-local-inference).
-For vLLM or NVIDIA NIM setup, refer to [Set Up Self-Hosted Inference Servers](local-compatible-inference-setup).
+For Ollama setup, refer to [Use Ollama for Local Inference](local-compatible-inference-setup/use-local-inference).
+For an overview of self-hosted options, refer to [Set Up Self-Hosted Inference Servers](local-compatible-inference-setup).
+For vLLM setup, refer to [Set Up vLLM](local-compatible-inference-setup/set-up-vllm).
+For NVIDIA NIM setup, refer to [Set Up NVIDIA NIM](local-compatible-inference-setup/set-up-nvidia-nim).
 </AgentOnly>
 
 ## Validation
@@ -306,13 +308,21 @@ If you change providers or models for an existing Deep Agents sandbox, run `nemo
 
 ## Set Up Self-Hosted Inference Servers
 
-For custom endpoints, vLLM, NVIDIA NIM, and inference timeout configuration, refer to [Set Up Self-Hosted Inference Servers](local-compatible-inference-setup).
+Use [Set Up Self-Hosted Inference Servers](local-compatible-inference-setup) for an overview of self-hosted inference options other than Ollama.
+
+- [Set Up vLLM](local-compatible-inference-setup/set-up-vllm) for an existing or NemoClaw-managed vLLM server.
+- [Set Up NVIDIA NIM](local-compatible-inference-setup/set-up-nvidia-nim) for the experimental managed NIM path.
+- [Other Self Hosted Servers](local-compatible-inference-setup/set-up-other-self-hosted-servers) for a compatible endpoint, including a raw GGUF model server.
+- [Verify Self Hosted Inference](local-compatible-inference-setup/verify-self-hosted-inference) after onboarding or when a local server takes longer to become ready.
 
 ## Next Steps
 
 <AgentOnly variant="openclaw,hermes">
-- [Use Ollama for Local Inference](use-local-inference) for the Ollama installation, routing, and model-selection workflow.
-- [Set Up Self-Hosted Inference Servers](local-compatible-inference-setup) for vLLM, NIM, and compatible-endpoint setup.
+- [Use Ollama for Local Inference](local-compatible-inference-setup/use-local-inference) for the Ollama installation, routing, and model-selection workflow.
+- [Set Up vLLM](local-compatible-inference-setup/set-up-vllm) for local vLLM setup.
+- [Set Up NVIDIA NIM](local-compatible-inference-setup/set-up-nvidia-nim) for local NVIDIA NIM setup.
+- [Other Self Hosted Servers](local-compatible-inference-setup/set-up-other-self-hosted-servers) for a compatible endpoint.
+- [Verify Self Hosted Inference](local-compatible-inference-setup/verify-self-hosted-inference) for post-onboarding checks and timeout configuration.
 </AgentOnly>
 <AgentOnly variant="openclaw">
 - [Tool-Calling Reliability](tool-calling-reliability) for deciding when Ollama is enough and when vLLM with a parser is safer.

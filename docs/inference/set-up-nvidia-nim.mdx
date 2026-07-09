@@ -1,0 +1,61 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+title: "Set Up NVIDIA NIM"
+sidebar-title: "Set Up NVIDIA NIM"
+description: "Run a local NVIDIA NIM container with NemoClaw."
+description-agent: "Shows how to start a local NVIDIA NIM container, authenticate with NGC, and configure non-interactive setup."
+keywords: ["nemoclaw nim", "nemoclaw nvidia nim", "nemoclaw local inference"]
+content:
+  type: "task"
+---
+NemoClaw can pull, start, and manage a NIM container on hosts with a NIM-capable NVIDIA GPU.
+
+<Warning>
+On Linux arm64 DGX Spark and DGX Station hosts, some NIM images may not publish a `linux/arm64` manifest.
+NemoClaw prints an advisory warning and still attempts the selected image.
+If the registry reports that no matching platform manifest exists, select NVIDIA Endpoints, managed vLLM, or another provider with an image for the host architecture.
+</Warning>
+
+Set the experimental flag and run onboard.
+
+```bash
+NEMOCLAW_EXPERIMENTAL=1 $$nemoclaw onboard
+```
+
+Select **Local NVIDIA NIM [experimental]** from the provider list.
+NemoClaw filters available models by GPU VRAM, pulls the NIM container image, starts it, and waits for it to become healthy before continuing.
+On hosts with mixed NVIDIA GPU models, the preflight summary shows each detected GPU model and the total VRAM so you can confirm which device class the model selection used.
+
+On Docker 29.x or containerd image-store hosts, NemoClaw resolves the host-platform manifest digest before pulling multi-architecture NIM images when the registry exposes an index.
+It pulls `repo@digest` and retags the local image so NGC attestation metadata on other architectures does not block the selected platform.
+If the registry does not expose a matching index, NemoClaw falls back to the tag pull.
+
+## Authenticate with NGC
+
+NVIDIA hosts NIM container images on `nvcr.io`, and `docker pull` requires NGC registry authentication.
+If Docker is not already logged in to `nvcr.io`, onboard prompts for an [NGC API key](https://org.ngc.nvidia.com/setup/api-key) and runs `docker login nvcr.io` over `--password-stdin` so the key is never written to disk or shell history.
+The prompt masks the key during input and retries one time on a bad key before failing.
+
+In non-interactive mode, onboard exits with login instructions if Docker is not already authenticated.
+Run `docker login nvcr.io` yourself, then re-run `$$nemoclaw onboard --non-interactive`.
+If `NGC_API_KEY` or `NVIDIA_INFERENCE_API_KEY` is already exported, NemoClaw passes it into the managed NIM container through the process environment instead of command-line arguments.
+
+If the NIM container exits before the health endpoint becomes ready, onboarding stops early and prints the last container log lines.
+After NIM becomes healthy, NemoClaw reads `/v1/models` and uses the served model id for validation when it differs from the catalog name.
+Unsafe served ids are rejected instead of being written into the sandbox config.
+
+<Note>
+NIM uses vLLM internally.
+The same `chat/completions` API path restriction applies.
+</Note>
+
+## Non Interactive Setup
+
+```bash
+NEMOCLAW_EXPERIMENTAL=1 \
+  NEMOCLAW_PROVIDER=nim \
+  $$nemoclaw onboard --non-interactive
+```
+
+To select a specific model, set `NEMOCLAW_MODEL`.
