@@ -30,7 +30,8 @@ const CHECK_RUNNER_CONTRACT_WARNING =
   "extension-terminology: repository terminology scan only runs through the repository check runner";
 const temporaryRoots: string[] = [];
 const runsAsRoot = typeof process.getuid === "function" && process.getuid() === 0;
-const originalCheckRunner = process.env.NEMOCLAW_CHECK_RUNNER;
+const originalCheckRunner = process.env.REPOSITORY_CHECK_RUNNER;
+const originalCheckScript = process.env.REPOSITORY_CHECK_SCRIPT;
 
 function createTemporaryRoot(prefix: string): string {
   mkdirSync(TEMP_ROOT, { recursive: true });
@@ -51,13 +52,17 @@ function writeNewFile(filePath: string, content: string): void {
 }
 
 beforeEach(() => {
-  process.env.NEMOCLAW_CHECK_RUNNER = "extension-terminology";
+  process.env.REPOSITORY_CHECK_RUNNER = "extension-terminology";
+  process.env.REPOSITORY_CHECK_SCRIPT = "scripts/checks/extension-terminology.ts";
 });
 
 afterEach(() => {
   originalCheckRunner === undefined
-    ? Reflect.deleteProperty(process.env, "NEMOCLAW_CHECK_RUNNER")
-    : (process.env.NEMOCLAW_CHECK_RUNNER = originalCheckRunner);
+    ? Reflect.deleteProperty(process.env, "REPOSITORY_CHECK_RUNNER")
+    : (process.env.REPOSITORY_CHECK_RUNNER = originalCheckRunner);
+  originalCheckScript === undefined
+    ? Reflect.deleteProperty(process.env, "REPOSITORY_CHECK_SCRIPT")
+    : (process.env.REPOSITORY_CHECK_SCRIPT = originalCheckScript);
   for (const root of temporaryRoots.splice(0)) {
     rmSync(root, { force: true, recursive: true });
   }
@@ -297,7 +302,8 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
   it("blocks repository scans outside the check-runner contract before filesystem access", () => {
     const warnings: { file: string; message: string }[] = [];
     const root = path.join(REPO_ROOT, "test", ".tmp", `missing-${randomUUID()}`);
-    Reflect.deleteProperty(process.env, "NEMOCLAW_CHECK_RUNNER");
+    Reflect.deleteProperty(process.env, "REPOSITORY_CHECK_RUNNER");
+    Reflect.deleteProperty(process.env, "REPOSITORY_CHECK_SCRIPT");
 
     expect(() =>
       findRepositoryExtensionTerminologyViolations({
@@ -311,7 +317,8 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
 
   it("exits non-zero without a false pass outside the check-runner contract", () => {
     const env = { ...process.env };
-    Reflect.deleteProperty(env, "NEMOCLAW_CHECK_RUNNER");
+    Reflect.deleteProperty(env, "REPOSITORY_CHECK_RUNNER");
+    Reflect.deleteProperty(env, "REPOSITORY_CHECK_SCRIPT");
 
     const result = spawnSync(
       process.platform === "win32" ? "tsx.cmd" : "tsx",
@@ -339,7 +346,11 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
       {
         cwd: REPO_ROOT,
         encoding: "utf8",
-        env: { ...process.env, NEMOCLAW_CHECK_RUNNER: "extension-terminology" },
+        env: {
+          ...process.env,
+          REPOSITORY_CHECK_RUNNER: "extension-terminology",
+          REPOSITORY_CHECK_SCRIPT: "scripts/checks/extension-terminology.ts",
+        },
       },
     );
 
@@ -362,7 +373,11 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
       {
         cwd: REPO_ROOT,
         encoding: "utf8",
-        env: { ...process.env, NEMOCLAW_CHECK_RUNNER: "extension-terminology" },
+        env: {
+          ...process.env,
+          REPOSITORY_CHECK_RUNNER: "extension-terminology",
+          REPOSITORY_CHECK_SCRIPT: "scripts/checks/extension-terminology.ts",
+        },
       },
     );
 
@@ -608,7 +623,10 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
     expect(extensionCheck).toEqual({
       args: ["scripts/checks/extension-terminology.ts"],
       command: process.platform === "win32" ? "tsx.cmd" : "tsx",
-      env: { NEMOCLAW_CHECK_RUNNER: "extension-terminology" },
+      env: {
+        REPOSITORY_CHECK_RUNNER: "extension-terminology",
+        REPOSITORY_CHECK_SCRIPT: "scripts/checks/extension-terminology.ts",
+      },
       name: "extension-terminology",
     });
   });

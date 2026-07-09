@@ -51,8 +51,10 @@ type ScanOptions = {
   readonly onWarning?: (warning: ScanWarning) => void;
 };
 
-const CHECK_RUNNER_ENV = "NEMOCLAW_CHECK_RUNNER";
+const CHECK_RUNNER_ENV = "REPOSITORY_CHECK_RUNNER";
+const CHECK_RUNNER_SCRIPT_ENV = "REPOSITORY_CHECK_SCRIPT";
 const CHECK_RUNNER_VALUE = "extension-terminology";
+const CHECK_RUNNER_SCRIPT_VALUE = "scripts/checks/extension-terminology.ts";
 const CHECK_RUNNER_CONTRACT_WARNING =
   "extension-terminology: repository terminology scan only runs through the repository check runner";
 
@@ -351,7 +353,12 @@ export function findExtensionTerminologyViolations(
  * @internal Accidental direct-run guard for the repository check-runner contract.
  */
 function assertCheckRunnerContract(onWarning: ((warning: ScanWarning) => void) | undefined): void {
-  if (process.env[CHECK_RUNNER_ENV] === CHECK_RUNNER_VALUE) return;
+  if (
+    process.env[CHECK_RUNNER_ENV] === CHECK_RUNNER_VALUE &&
+    process.env[CHECK_RUNNER_SCRIPT_ENV] === CHECK_RUNNER_SCRIPT_VALUE
+  ) {
+    return;
+  }
   warnRoot(onWarning, "<environment>", CHECK_RUNNER_CONTRACT_WARNING);
   throw new Error(CHECK_RUNNER_CONTRACT_WARNING);
 }
