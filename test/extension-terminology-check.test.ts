@@ -422,7 +422,10 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
     temporaryRoots.push(root);
     const warnings: { file: string; message: string }[] = [];
     const largeFile = path.join(root, "large.md");
-    writeNewFile(largeFile, `${"x".repeat(1_000_001)} Use the public NemoClaw extension SDK today.`);
+    writeNewFile(
+      largeFile,
+      `${"x".repeat(1_000_001)} Use the public NemoClaw extension SDK today.`,
+    );
 
     expect(
       scanRepositoryExtensionTerminology({
