@@ -486,6 +486,12 @@ describe("starter prompt docs CTA", () => {
     expect(prompt).toContain("#!/usr/bin/env node");
     expect(prompt).toContain("<absolute-node> --experimental-strip-types");
     expect(prompt).toContain("invoke the launcher through that absolute interpreter");
+    expect(prompt).toContain(
+      "Prefer invoking each child tool by absolute executable path instead of `PATH` lookup",
+    );
+    expect(prompt).toContain(
+      "Every added directory must be an absolute, trusted system or managed-toolchain directory that is not writable by the user, coding agent, project, or workspace",
+    );
     expect(prompt).toContain("Never silently inherit the ambient `PATH`");
     expect(prompt).toContain("Never reuse an old form tab or one-time URL");
     expect(prompt).toContain("Credential submission accepted locally");
