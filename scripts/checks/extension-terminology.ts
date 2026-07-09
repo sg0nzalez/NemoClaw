@@ -24,6 +24,7 @@ type WalkOptions = {
   readonly root: string;
   readonly directory: string;
   readonly onWarning?: (warning: ScanWarning) => void;
+  readonly visited?: Set<string>;
 };
 
 type ScanWarning = {
@@ -37,7 +38,6 @@ type ScanOptions = {
 };
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const SCAN_ROOT = "docs";
 const DOCUMENTATION_FILE_PATTERN = /\.(?:md|mdx)$/i;
 const SKIP_DIRS = new Set([".git", ".venv", "coverage", "dist", "node_modules"]);
 const EXTENSION_SURFACE_PATTERN =
@@ -86,9 +86,23 @@ const RULES: readonly TerminologyRule[] = [
     scope: "extension-surface-commitment",
   },
 ];
-/** Custom non-word boundaries keep hyphenated allowlist terms like non-committed intact. */
-const ALLOWED_CONTEXT_PATTERN =
-  /(?:^|[^\w])(?:reserved|not\s+(?:offered|available|committed|guaranteed|promised|stable|supported)|unavailable|non[-\s]?committed|no\s+(?:current|public|stable|supported|shipping)|does\s+not\s+(?:offer|commit|guarantee|promise|provide)|not\s+yet|unmet\s+gates?|before\s+(?:SDK\s+)?stabili[sz]ation)(?:$|[^\w])/i;
+const ALLOWED_BOUNDARY = "(?:^|[^\\w])";
+const ALLOWED_TAIL_BOUNDARY = "(?=$|[^\\w])";
+const ALLOWED_CONTEXT_TERMS = [
+  "reserved",
+  "not\\s+(?:offered|available|committed|guaranteed|promised|stable|supported)",
+  "unavailable",
+  "non[-\\s\\u2010-\\u2015]?committed",
+  "no\\s+(?:current|public|stable|supported|shipping)",
+  "does\\s+not\\s+(?:offer|commit|guarantee|promise|provide)",
+  "not\\s+yet",
+  "unmet\\s+gates?",
+  "before\\s+(?:SDK\\s+)?stabili[sz]ation",
+] as const;
+const ALLOWED_CONTEXT_PATTERN = new RegExp(
+  `${ALLOWED_BOUNDARY}(?:${ALLOWED_CONTEXT_TERMS.join("|")})${ALLOWED_TAIL_BOUNDARY}`,
+  "i",
+);
 
 function isSkipped(absolutePath: string): boolean {
   const segments = path.relative(REPO_ROOT, absolutePath).split(path.sep);
@@ -115,7 +129,21 @@ function isWithinDirectory(parent: string, child: string): boolean {
 
 function* walkDocumentationFiles(options: WalkOptions): Generator<string> {
   const { directory, onWarning, root } = options;
+  const visited = options.visited ?? new Set<string>();
   if (!existsSync(directory) || isSkipped(directory)) return;
+
+  let directoryRealPath: string;
+  try {
+    directoryRealPath = realpathSync(directory);
+  } catch (error) {
+    warnFile(onWarning, directory, error);
+    return;
+  }
+  if (visited.has(directoryRealPath)) {
+    warnFile(onWarning, directory, "circular symbolic link target was already scanned");
+    return;
+  }
+  visited.add(directoryRealPath);
 
   let entries: string[];
   try {
@@ -148,7 +176,7 @@ function* walkDocumentationFiles(options: WalkOptions): Generator<string> {
       continue;
     }
     if (stats.isDirectory()) {
-      yield* walkDocumentationFiles({ directory: absolutePath, onWarning, root });
+      yield* walkDocumentationFiles({ directory: absolutePath, onWarning, root, visited });
     } else if (stats.isFile() && DOCUMENTATION_FILE_PATTERN.test(entry)) {
       yield absolutePath;
     }
@@ -193,12 +221,7 @@ function clauseContext(context: string, index: number, matchLength: number): str
 
 function isAllowedContext(context: string, index: number, matchLength: number): boolean {
   const clause = clauseContext(context, index, matchLength);
-  return (
-    ALLOWED_CONTEXT_PATTERN.test(clause) ||
-    /\b(?:candidate|proposed|future)\b[^\n.?!,;]{0,80}\b(?:reserved|unavailable|not\s+(?:offered|available|committed|guaranteed|promised|stable|supported)|non[-\s]?committed|unmet\s+gates?|before\s+(?:SDK\s+)?stabili[sz]ation)\b/i.test(
-      clause,
-    )
-  );
+  return ALLOWED_CONTEXT_PATTERN.test(clause);
 }
 
 function isExtensionSurfaceCommitment(context: string): boolean {
@@ -242,7 +265,7 @@ export function findRepositoryExtensionTerminologyViolations(
 ): readonly ExtensionTerminologyViolation[] {
   const scanOptions: ScanOptions = Array.isArray(options) ? { roots: options } : options;
   const violations: ExtensionTerminologyViolation[] = [];
-  for (const root of scanOptions.roots ?? [SCAN_ROOT]) {
+  for (const root of scanOptions.roots ?? ["docs"]) {
     const absoluteRoot = path.resolve(REPO_ROOT, root);
     for (const absolutePath of walkDocumentationFiles({
       directory: absoluteRoot,
