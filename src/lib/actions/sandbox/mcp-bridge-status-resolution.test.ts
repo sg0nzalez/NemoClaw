@@ -7,11 +7,14 @@ import os from "node:os";
 import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
+import { execTimeout, testTimeoutOptions } from "../../../../test/helpers/timeouts";
 
 const sourceRequireHook = path.resolve("test/helpers/onboard-script-mocks.cjs");
 const sourceNodeOptions = [process.env.NODE_OPTIONS, `--require=${sourceRequireHook}`]
   .filter(Boolean)
   .join(" ");
+const HARNESS_PROCESS_TIMEOUT_MS = execTimeout(15_000);
+const HARNESS_TEST_OPTIONS = testTimeoutOptions(20_000);
 const tempHomes = new Set<string>();
 
 function createTempHome(prefix: string): string {
@@ -141,12 +144,13 @@ ${body}
     cwd: process.cwd(),
     encoding: "utf8",
     env: { ...process.env, HOME: home, NODE_OPTIONS: sourceNodeOptions },
+    timeout: HARNESS_PROCESS_TIMEOUT_MS,
   });
-  expect(result.status, `harness failed: ${result.stderr}`).toBe(0);
+  expect(result.status, `harness failed: ${result.error?.message ?? result.stderr}`).toBe(0);
   return { status: result.status, stdout: result.stdout };
 }
 
-describe("MCP status wire-level credential-resolution probe", () => {
+describe("MCP status wire-level credential-resolution probe", HARNESS_TEST_OPTIONS, () => {
   it("probes by default for a single named server and surfaces the wire failure (#6379)", () => {
     const home = createTempHome("nemoclaw-mcp-resolution-single-");
     const { stdout } = runHarness(
@@ -366,7 +370,7 @@ describe("MCP status wire-level credential-resolution probe", () => {
   });
 });
 
-describe("MCP add post-add credential-resolution probe", () => {
+describe("MCP add post-add credential-resolution probe", HARNESS_TEST_OPTIONS, () => {
   it("warns loudly on an identical-rejection probe without failing the committed add (#6379)", () => {
     const home = createTempHome("nemoclaw-mcp-resolution-add-");
     const { stdout } = runHarness(
