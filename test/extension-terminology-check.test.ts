@@ -292,11 +292,12 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
     ]);
   });
 
-  it("warns when repository scans run outside trusted CI", () => {
+  it("warns and skips repository scans outside trusted CI", () => {
     const root = createTemporaryRoot("nemoclaw-extension-terminology-ci-warning-");
     temporaryRoots.push(root);
     const warnings: { file: string; message: string }[] = [];
     delete process.env.CI;
+    writeNewFile(path.join(root, "violation.md"), "Use the public NemoClaw extension SDK today.");
 
     expect(
       findRepositoryExtensionTerminologyViolations({
@@ -304,7 +305,7 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
         roots: [root],
       }),
     ).toEqual([]);
-    expect(warnings).toContainEqual({ file: "<environment>", message: TRUSTED_CI_WARNING });
+    expect(warnings).toEqual([{ file: "<environment>", message: TRUSTED_CI_WARNING }]);
   });
 
   it("scans configured markdown and mdx documentation roots", () => {

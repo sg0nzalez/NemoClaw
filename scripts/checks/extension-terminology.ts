@@ -347,6 +347,7 @@ export function findRepositoryExtensionTerminologyViolations(
   const scanOptions: ScanOptions = isRootList(options) ? { roots: options } : options;
   if (process.env.CI !== "true") {
     warnRoot(scanOptions.onWarning, "<environment>", TRUSTED_CI_WARNING);
+    return [];
   }
   const violations: ExtensionTerminologyViolation[] = [];
   for (const root of scanOptions.roots ?? ["docs"]) {
