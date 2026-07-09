@@ -55,12 +55,12 @@ const RULES: readonly TerminologyRule[] = [
   {
     term: "NemoClaw compatibility commitment",
     pattern:
-      /\bNemoClaw\b[^\n.?!]{0,120}\bcompatibility\b[^\n.?!]{0,80}\b(?:commitment|promise|guarantee|contract)\b/i,
+      /\bNemoClaw\b(?=[^\n.?!]{0,180}\b(?:extension|plugins?|packages?|lifecycle contributions?|public seams?|registr(?:y|ies))\b)(?![^\n.?!]{0,180}\bCLI\b)[^\n.?!]{0,120}\bcompatibility\b[^\n.?!]{0,80}\b(?:commitment|promise|guarantee|contract)\b/i,
     detail: "do not present a current compatibility commitment for extension surfaces",
   },
 ];
 const ALLOWED_CONTEXT_PATTERN =
-  /\b(?:reserved|future|not\s+(?:offered|available|committed|guaranteed|promised|stable|supported)|unavailable|non[-\s]?committed|no\s+(?:current|public|stable|supported|shipping)|does\s+not\s+(?:offer|commit|guarantee|promise|provide)|not\s+yet|unmet\s+gates?|candidate|proposed|before\s+(?:SDK\s+)?stabili[sz]ation)\b/i;
+  /(?:^|\s|[^\w-])(?:reserved|future|not\s+(?:offered|available|committed|guaranteed|promised|stable|supported)|unavailable|non[-\s]?committed|no\s+(?:current|public|stable|supported|shipping)|does\s+not\s+(?:offer|commit|guarantee|promise|provide)|not\s+yet|unmet\s+gates?|candidate|proposed|before\s+(?:SDK\s+)?stabili[sz]ation)(?:$|\s|[^\w-])/i;
 
 function isSkipped(absolutePath: string): boolean {
   const segments = path.relative(REPO_ROOT, absolutePath).split(path.sep);
@@ -116,13 +116,6 @@ export function findExtensionTerminologyViolations(
       const index = match.index ?? 0;
       const context = sentenceContext(source, index, match[0].length);
       if (ALLOWED_CONTEXT_PATTERN.test(context)) continue;
-      if (rule.term === "NemoClaw compatibility commitment" && /\bCLI\b/i.test(context)) continue;
-      if (
-        rule.term === "NemoClaw compatibility commitment" &&
-        !/\b(?:extension|plugins?|packages?|lifecycle contributions?|public seams?|registr(?:y|ies))\b/i.test(context)
-      ) {
-        continue;
-      }
       violations.push({
         file,
         line: lineForIndex(source, index),
