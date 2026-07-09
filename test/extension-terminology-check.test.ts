@@ -8,6 +8,7 @@ import {
   closeSync,
   existsSync,
   mkdirSync,
+  mkdtempSync,
   openSync,
   rmSync,
   symlinkSync,
@@ -32,15 +33,11 @@ const originalCi = process.env.CI;
 
 function createTemporaryRoot(prefix: string): string {
   mkdirSync(TEMP_ROOT, { recursive: true });
-  const temporaryRoot = path.join(TEMP_ROOT, `${prefix}${randomUUID()}`);
-  mkdirSync(temporaryRoot, { mode: 0o700 });
-  return temporaryRoot;
+  return mkdtempSync(path.join(TEMP_ROOT, prefix));
 }
 
 function createExternalTemporaryRoot(prefix: string): string {
-  const temporaryRoot = path.join(path.dirname(REPO_ROOT), `${prefix}${randomUUID()}`);
-  mkdirSync(temporaryRoot, { mode: 0o700 });
-  return temporaryRoot;
+  return mkdtempSync(path.join(path.dirname(REPO_ROOT), prefix));
 }
 
 function writeNewFile(filePath: string, content: string): void {
