@@ -2749,7 +2749,7 @@ async function createSandboxWithBaseImageResolution(
     messagingTokenDefs,
     reusableMessagingChannels,
     reusableMessagingProviders,
-    extraProviders: reconcileRegisteredExtraProviders({ runOpenshell }),
+    extraProviders: reconcileRegisteredExtraProviders({ runOpenshell, gatewayName: GATEWAY_NAME }),
     hermesToolGateways,
     sandboxGpuConfig: effectiveSandboxGpuConfig,
     dockerDriverGateway,

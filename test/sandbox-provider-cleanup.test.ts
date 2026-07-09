@@ -528,28 +528,39 @@ describe("reconcileRegisteredExtraProviders", () => {
     expect(forget).not.toHaveBeenCalled();
   });
 
-  it("keeps recorded providers that the gateway lists", () => {
+  it("keeps recorded providers that the gateway confirms via a scoped 'provider get'", () => {
     const responses = new Map([
-      ["provider list --names", { status: 0, stdout: "nvidia-prod\ntavily-search\n" }],
+      ["provider get -g nemoclaw tavily-search", { status: 0, stdout: "name: tavily-search\n" }],
     ]);
-    const { runOpenshell } = buildRunOpenshell(responses);
+    const { runOpenshell, calls } = buildRunOpenshell(responses, { status: 1 });
     const forget = vi.fn();
     const warn = vi.fn();
 
     const result = reconcileRegisteredExtraProviders({
       runOpenshell,
+      gatewayName: "nemoclaw",
       listExtraProviders: () => ["tavily-search"],
       forgetExtraProvider: forget,
       warn,
     });
 
     expect(result).toEqual(["tavily-search"]);
+    expect(calls).toEqual([["provider", "get", "-g", "nemoclaw", "tavily-search"]]);
     expect(forget).not.toHaveBeenCalled();
     expect(warn).not.toHaveBeenCalled();
   });
 
-  it("skips, warns about, and forgets a recorded provider missing from the gateway (#6501)", () => {
-    const responses = new Map([["provider list --names", { status: 0, stdout: "nvidia-prod\n" }]]);
+  it("skips, warns about, and forgets a recorded provider the gateway reports not found (#6501)", () => {
+    const responses = new Map<string, RunResult>([
+      [
+        "provider get brave-search",
+        { status: 1, stderr: "Error: provider 'brave-search' not found\n" },
+      ],
+      [
+        "provider get tavily-search",
+        { status: 1, stderr: 'rpc error: NotFound: provider "tavily-search"\n' },
+      ],
+    ]);
     const { runOpenshell } = buildRunOpenshell(responses);
     const forget = vi.fn();
     const warn = vi.fn();
@@ -569,9 +580,9 @@ describe("reconcileRegisteredExtraProviders", () => {
     expect(messages[1]).toContain("nemoclaw credentials add");
   });
 
-  it("returns the recorded set unchanged when the gateway list is unreadable", () => {
-    const responses = new Map([
-      ["provider list --names", { status: 1, stderr: "gateway not running" }],
+  it("keeps the recorded set unchanged when the probe fails without a not-found diagnostic", () => {
+    const responses = new Map<string, RunResult>([
+      ["provider get tavily-search", { status: 1, stderr: "gateway not running" }],
     ]);
     const { runOpenshell } = buildRunOpenshell(responses);
     const forget = vi.fn();
@@ -589,11 +600,12 @@ describe("reconcileRegisteredExtraProviders", () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
-  it("matches gateway names verbatim, including bridge-suffixed and Buffer output", () => {
-    const responses = new Map([
+  it("prunes on a Buffer not-found diagnostic while keeping confirmed bridge providers", () => {
+    const responses = new Map<string, RunResult>([
+      ["provider get my-slack-bridge", { status: 0 }],
       [
-        "provider list --names",
-        { status: 0, stdout: Buffer.from("  my-slack-bridge \ntavily-search\n") },
+        "provider get tavily-search",
+        { status: 1, stdout: Buffer.from("provider 'tavily-search' not found\n") },
       ],
     ]);
     const { runOpenshell } = buildRunOpenshell(responses);
@@ -605,7 +617,7 @@ describe("reconcileRegisteredExtraProviders", () => {
       forgetExtraProvider: forget,
     });
 
-    expect(result).toEqual(["my-slack-bridge", "tavily-search"]);
-    expect(forget).not.toHaveBeenCalled();
+    expect(result).toEqual(["my-slack-bridge"]);
+    expect(forget.mock.calls.map((c) => c[0])).toEqual(["tavily-search"]);
   });
 });
