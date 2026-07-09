@@ -13,6 +13,19 @@ import { AgentOnly } from "../_components/AgentGuide";
 
 Use this page when you operate an inference server other than Ollama.
 It covers compatible endpoints, vLLM, NVIDIA NIM, and the related timeout settings.
+The agent inside the sandbox connects through `inference.local`, not directly to your self-hosted server.
+OpenShell intercepts inference traffic and forwards it to the endpoint you configure.
+
+## Prerequisites
+
+<AgentOnly variant="openclaw">
+- Install NemoClaw first. Refer to the [Quickstart](../get-started/quickstart) if needed.
+</AgentOnly>
+<AgentOnly variant="hermes">
+- Install NemoClaw first. Refer to [Quickstart with Hermes](../get-started/quickstart) if needed.
+</AgentOnly>
+
+Start a local model server, or use a supported vLLM or NIM setup that the onboard wizard can install or start.
 
 ## OpenAI-Compatible Server
 
@@ -22,6 +35,10 @@ During onboarding, it probes `/v1/responses` first and falls back to `/v1/chat/c
 
 Set `NEMOCLAW_PREFERRED_API=openai-responses` to use `/v1/responses` at runtime after successful validation.
 Set `NEMOCLAW_PREFERRED_API=openai-completions` to skip the Responses probe and validate Chat Completions only.
+
+<AgentOnly variant="openclaw">
+The Chat Completions default avoids local backends that accept Responses requests but drop system prompts or tool definitions.
+</AgentOnly>
 
 Start your model server.
 The examples below use vLLM, but any OpenAI-compatible server works.
@@ -40,6 +57,7 @@ $$nemoclaw onboard
 When the wizard asks you to choose an inference provider, select **Other OpenAI-compatible endpoint**.
 Enter the base URL of your local server, for example `http://localhost:8000/v1` on the default Docker-driver topology.
 For a containerized OpenShell gateway that cannot reach host `localhost`, use the host-gateway URL for your setup, commonly `http://host.openshell.internal:8000/v1`.
+Port `8000` is included in NemoClaw's `local-inference` policy preset.
 This is a sandbox-internal alias, so host-side endpoint probing is skipped during onboarding.
 Use a routable endpoint when you need onboarding to verify the API, tool-calling, and streaming paths.
 Otherwise, confirm the runtime after onboarding with `$$nemoclaw <name> status` and a short agent request.
@@ -98,7 +116,6 @@ Enable it only when the endpoint supports the capabilities your agent needs.
 NEMOCLAW_PROVIDER=custom \
   NEMOCLAW_ENDPOINT_URL=http://localhost:8000/v1 \
   NEMOCLAW_MODEL=meta-llama/Llama-3.1-8B-Instruct \
-  NEMOCLAW_REASONING=true \
   COMPATIBLE_API_KEY=dummy \
   $$nemoclaw onboard --non-interactive
 ```
@@ -207,6 +224,7 @@ If vLLM never becomes ready, NemoClaw prints a short tail of the vLLM container 
 
 The first run can take 10 to 30 minutes.
 Later runs reuse the cached image and model weights.
+If the host reboots and the `nemoclaw-vllm` container is stopped, NemoClaw restarts it during recovery without requiring a fresh onboarding run.
 
 Managed vLLM uses these profiles:
 
@@ -347,6 +365,17 @@ If the runtime route fails, onboarding reports the endpoint and recovery steps b
 
 The same post-ready check also applies to local Ollama.
 NIM and other compatible endpoints receive their onboarding endpoint validation, but not this post-ready sandbox route check.
+
+## Verify the Configuration
+
+After onboarding completes, confirm the active provider and model.
+
+```bash
+$$nemoclaw <name> status
+```
+
+The output shows the provider label, such as **Local vLLM** or **Other OpenAI-compatible endpoint**, and the active model.
+The `Inference` row checks `inference.local` from inside the sandbox, which is the path agent requests use.
 
 ## Timeout Configuration
 

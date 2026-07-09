@@ -255,4 +255,29 @@ describe("inference setup navigation", () => {
       "Use a routable endpoint when you need onboarding to verify the API, tool-calling, and streaming paths.",
     );
   });
+
+  it("retains shared self-hosted setup and verification guidance after the Ollama split", () => {
+    const markdown = fs.readFileSync(selfHostedInferenceSetupPath, "utf8");
+    const nonInteractiveStart = markdown.indexOf("### Non-Interactive Setup");
+    const nonInteractiveEnd = markdown.indexOf("### Selecting the API Path", nonInteractiveStart);
+    expect(nonInteractiveStart).toBeGreaterThanOrEqual(0);
+    expect(nonInteractiveEnd).toBeGreaterThan(nonInteractiveStart);
+    const nonInteractiveSection = markdown.slice(nonInteractiveStart, nonInteractiveEnd);
+
+    expect(markdown).toContain("The agent inside the sandbox connects through `inference.local`");
+    expect(markdown).toContain(
+      "The Chat Completions default avoids local backends that accept Responses requests but drop system prompts or tool definitions.",
+    );
+    expect(markdown).toContain(
+      "Port `8000` is included in NemoClaw's `local-inference` policy preset.",
+    );
+    expect(markdown).toContain(
+      "NemoClaw restarts it during recovery without requiring a fresh onboarding run.",
+    );
+    expect(markdown).toContain("## Verify the Configuration");
+    expect(markdown).toContain(
+      "The `Inference` row checks `inference.local` from inside the sandbox",
+    );
+    expect(nonInteractiveSection).not.toMatch(/^\s+NEMOCLAW_REASONING=true \\/m);
+  });
 });
