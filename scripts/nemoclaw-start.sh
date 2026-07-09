@@ -3443,9 +3443,11 @@ openclaw() {
           if [ "$_login_help" != "1" ] && [ "$_login_channel" = "whatsapp" ]; then
             # Keep an explicit override coupled to its own opt-in. The private
             # veth URL may inherit only NemoClaw's matching private-WS marker.
+            _nemoclaw_whatsapp_gateway_url_from_override=0
             if [ -n "${OPENCLAW_GATEWAY_URL:-}" ]; then
               _nemoclaw_whatsapp_gateway_url="$OPENCLAW_GATEWAY_URL"
               _nemoclaw_whatsapp_insecure_ws="${OPENCLAW_ALLOW_INSECURE_PRIVATE_WS:-}"
+              _nemoclaw_whatsapp_gateway_url_from_override=1
             else
               _nemoclaw_whatsapp_gateway_url="${NEMOCLAW_OPENCLAW_GATEWAY_URL:-}"
               _nemoclaw_whatsapp_insecure_ws="${NEMOCLAW_OPENCLAW_ALLOW_INSECURE_PRIVATE_WS:-}"
@@ -3482,16 +3484,29 @@ openclaw() {
             # injecting them again here covers non-connect shells. Runtime
             # preload modules are idempotent, so a double --require is harmless.
             _nemoclaw_connect_node_options="$(_nemoclaw_messaging_connect_node_options)"
-            if [ -n "$_nemoclaw_connect_node_options" ]; then
-              OPENCLAW_GATEWAY_URL="$_nemoclaw_whatsapp_gateway_url" \
-                OPENCLAW_ALLOW_INSECURE_PRIVATE_WS="$_nemoclaw_whatsapp_insecure_ws" \
-                NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }$_nemoclaw_connect_node_options" \
-                command openclaw "$@"
-            else
-              OPENCLAW_GATEWAY_URL="$_nemoclaw_whatsapp_gateway_url" \
-                OPENCLAW_ALLOW_INSECURE_PRIVATE_WS="$_nemoclaw_whatsapp_insecure_ws" \
-                command openclaw "$@"
-            fi
+            # A caller-selected gateway URL is outside NemoClaw's generated
+            # private dial-back target, so it must not receive the ambient
+            # gateway token from a connect shell.
+            _nemoclaw_whatsapp_login_errexit=0
+            case $- in *e*) _nemoclaw_whatsapp_login_errexit=1 ;; esac
+            set +e
+            (
+              if [ "$_nemoclaw_whatsapp_gateway_url_from_override" = "1" ] &&
+                ! builtin unset OPENCLAW_GATEWAY_TOKEN 2>/dev/null; then
+                echo "Error: WhatsApp pairing cannot start — custom gateway URL cannot receive the ambient gateway token." >&2
+                exit 1
+              fi
+              if [ -n "$_nemoclaw_connect_node_options" ]; then
+                OPENCLAW_GATEWAY_URL="$_nemoclaw_whatsapp_gateway_url" \
+                  OPENCLAW_ALLOW_INSECURE_PRIVATE_WS="$_nemoclaw_whatsapp_insecure_ws" \
+                  NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }$_nemoclaw_connect_node_options" \
+                  command openclaw "$@"
+              else
+                OPENCLAW_GATEWAY_URL="$_nemoclaw_whatsapp_gateway_url" \
+                  OPENCLAW_ALLOW_INSECURE_PRIVATE_WS="$_nemoclaw_whatsapp_insecure_ws" \
+                  command openclaw "$@"
+              fi
+            )
             _whatsapp_login_exit=$?
             if [ "$_whatsapp_login_exit" -ne 0 ]; then
               echo "" >&2
@@ -3501,6 +3516,7 @@ openclaw() {
               echo "[whatsapp] Re-run 'openclaw channels login --channel whatsapp' to retry. If it keeps" >&2
               echo "closing, exit the sandbox and run 'nemoclaw <sandbox> channels status --channel whatsapp'." >&2
             fi
+            [ "$_nemoclaw_whatsapp_login_errexit" = "1" ] && set -e
             return $_whatsapp_login_exit
           fi
           ;;

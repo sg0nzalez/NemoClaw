@@ -324,6 +324,65 @@ describe("gateway websocket url host derivation", () => {
     }
   });
 
+  it("withholds the gateway token from caller-selected WhatsApp login gateways (#6291)", () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-whatsapp-custom-gw-"));
+    try {
+      const runtimeEnv = writeRuntimeShellEnv(tmpDir);
+      const fakeBin = path.join(tmpDir, "bin");
+      const callLog = path.join(tmpDir, "openclaw-call.log");
+      fs.mkdirSync(fakeBin);
+      fs.writeFileSync(
+        path.join(fakeBin, "openclaw"),
+        `#!/usr/bin/env bash
+{
+  printf 'ARGS=%s\n' "$*"
+  printf 'URL=%s\n' "\${OPENCLAW_GATEWAY_URL-unset}"
+  printf 'INSECURE=%s\n' "\${OPENCLAW_ALLOW_INSECURE_PRIVATE_WS-unset}"
+  printf 'TOKEN=%s\n' "\${OPENCLAW_GATEWAY_TOKEN-unset}"
+} > ${JSON.stringify(callLog)}
+exit 23
+`,
+        { mode: 0o755 },
+      );
+
+      const result = spawnSync(
+        "bash",
+        [
+          "--noprofile",
+          "--norc",
+          "-c",
+          [
+            "set -euo pipefail",
+            `. ${JSON.stringify(runtimeEnv)}`,
+            "OPENCLAW_GATEWAY_URL=wss://gateway.example.test:443",
+            "OPENCLAW_ALLOW_INSECURE_PRIVATE_WS=explicit-marker",
+            "openclaw channels login --channel whatsapp",
+          ].join("\n"),
+        ],
+        {
+          encoding: "utf-8",
+          timeout: 5000,
+          env: {
+            ...process.env,
+            PATH: `${fakeBin}:${process.env.PATH ?? ""}`,
+            NODE_OPTIONS: "",
+          },
+        },
+      );
+
+      expect(result.status, result.stderr || result.stdout).toBe(23);
+      expect(result.stderr).toContain("Pairing exited with code 23 before it completed");
+      const call = fs.readFileSync(callLog, "utf-8");
+      expect(call).toContain("ARGS=channels login --channel whatsapp");
+      expect(call).toContain("URL=wss://gateway.example.test:443");
+      expect(call).toContain("INSECURE=explicit-marker");
+      expect(call).toContain("TOKEN=unset");
+      expect(call).not.toContain("test-gateway-token");
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
   it("omits the break-glass from the runtime shell env when unset", () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-gwenv-"));
     try {
