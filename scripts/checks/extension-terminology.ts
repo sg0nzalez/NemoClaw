@@ -51,12 +51,10 @@ type ScanOptions = {
   readonly onWarning?: (warning: ScanWarning) => void;
 };
 
-const CHECK_RUNNER_ENV = "REPOSITORY_CHECK_RUNNER";
-const CHECK_RUNNER_SCRIPT_ENV = "REPOSITORY_CHECK_SCRIPT";
-const CHECK_RUNNER_VALUE = "extension-terminology";
-const CHECK_RUNNER_SCRIPT_VALUE = "scripts/checks/extension-terminology.ts";
 const CHECK_RUNNER_CONTRACT_WARNING =
   "extension-terminology: repository terminology scan only runs through the repository check runner";
+const CHECK_RUNNER_NAME = "extension-terminology";
+const CHECK_RUNNER_SCRIPT = "scripts/checks/extension-terminology.ts";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const DOCUMENTATION_FILE_PATTERN = /\.(?:md|mdx)$/i;
@@ -354,8 +352,8 @@ export function findExtensionTerminologyViolations(
  */
 function assertCheckRunnerContract(onWarning: ((warning: ScanWarning) => void) | undefined): void {
   if (
-    process.env[CHECK_RUNNER_ENV] === CHECK_RUNNER_VALUE &&
-    process.env[CHECK_RUNNER_SCRIPT_ENV] === CHECK_RUNNER_SCRIPT_VALUE
+    process.env.REPOSITORY_CHECK_RUNNER === CHECK_RUNNER_NAME &&
+    process.env.REPOSITORY_CHECK_SCRIPT === CHECK_RUNNER_SCRIPT
   ) {
     return;
   }

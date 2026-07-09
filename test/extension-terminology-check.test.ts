@@ -30,8 +30,6 @@ const CHECK_RUNNER_CONTRACT_WARNING =
   "extension-terminology: repository terminology scan only runs through the repository check runner";
 const temporaryRoots: string[] = [];
 const runsAsRoot = typeof process.getuid === "function" && process.getuid() === 0;
-const originalCheckRunner = process.env.REPOSITORY_CHECK_RUNNER;
-const originalCheckScript = process.env.REPOSITORY_CHECK_SCRIPT;
 
 function createTemporaryRoot(prefix: string): string {
   mkdirSync(TEMP_ROOT, { recursive: true });
@@ -57,12 +55,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  originalCheckRunner === undefined
-    ? Reflect.deleteProperty(process.env, "REPOSITORY_CHECK_RUNNER")
-    : (process.env.REPOSITORY_CHECK_RUNNER = originalCheckRunner);
-  originalCheckScript === undefined
-    ? Reflect.deleteProperty(process.env, "REPOSITORY_CHECK_SCRIPT")
-    : (process.env.REPOSITORY_CHECK_SCRIPT = originalCheckScript);
+  Reflect.deleteProperty(process.env, "REPOSITORY_CHECK_RUNNER");
+  Reflect.deleteProperty(process.env, "REPOSITORY_CHECK_SCRIPT");
   for (const root of temporaryRoots.splice(0)) {
     rmSync(root, { force: true, recursive: true });
   }
