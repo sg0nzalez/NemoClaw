@@ -8,13 +8,14 @@ import {
   detachSandboxProviders,
   emitProviderDetachResidualHint,
   parseAttachedSandboxes,
+  reconcileRegisteredExtraProviders,
   recoverAttachedProvider,
   runSandboxProviderPreDeleteCleanup,
   SANDBOX_PROVIDER_SUFFIXES,
 } from "../src/lib/onboard/sandbox-provider-cleanup.js";
 
 type Argv = string[];
-type RunResult = { status: number | null; stderr?: string; stdout?: string };
+type RunResult = { status: number | null; stderr?: string; stdout?: string | Buffer };
 
 function buildRunOpenshell(
   responses: Map<string, RunResult>,
@@ -508,5 +509,103 @@ describe("emitProviderDetachResidualHint", () => {
     expect(lines[0]).toContain("alpha-brave-search");
     expect(lines[1]).toContain("openshell sandbox provider detach alpha <name>");
     expect(lines[1]).toContain("openshell provider delete <name>");
+  });
+});
+
+describe("reconcileRegisteredExtraProviders", () => {
+  it("returns the empty set without querying the gateway when nothing is recorded", () => {
+    const { runOpenshell, calls } = buildRunOpenshell(new Map());
+    const forget = vi.fn();
+
+    const result = reconcileRegisteredExtraProviders({
+      runOpenshell,
+      listExtraProviders: () => [],
+      forgetExtraProvider: forget,
+    });
+
+    expect(result).toEqual([]);
+    expect(calls).toEqual([]);
+    expect(forget).not.toHaveBeenCalled();
+  });
+
+  it("keeps recorded providers that the gateway lists", () => {
+    const responses = new Map([
+      ["provider list --names", { status: 0, stdout: "nvidia-prod\ntavily-search\n" }],
+    ]);
+    const { runOpenshell } = buildRunOpenshell(responses);
+    const forget = vi.fn();
+    const warn = vi.fn();
+
+    const result = reconcileRegisteredExtraProviders({
+      runOpenshell,
+      listExtraProviders: () => ["tavily-search"],
+      forgetExtraProvider: forget,
+      warn,
+    });
+
+    expect(result).toEqual(["tavily-search"]);
+    expect(forget).not.toHaveBeenCalled();
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("skips, warns about, and forgets a recorded provider missing from the gateway (#6501)", () => {
+    const responses = new Map([["provider list --names", { status: 0, stdout: "nvidia-prod\n" }]]);
+    const { runOpenshell } = buildRunOpenshell(responses);
+    const forget = vi.fn();
+    const warn = vi.fn();
+
+    const result = reconcileRegisteredExtraProviders({
+      runOpenshell,
+      listExtraProviders: () => ["brave-search", "tavily-search"],
+      forgetExtraProvider: forget,
+      warn,
+    });
+
+    expect(result).toEqual([]);
+    expect(forget.mock.calls.map((c) => c[0])).toEqual(["brave-search", "tavily-search"]);
+    const messages = warn.mock.calls.map((c) => c[0] as string);
+    expect(messages[0]).toContain("'brave-search'");
+    expect(messages[1]).toContain("'tavily-search'");
+    expect(messages[1]).toContain("nemoclaw credentials add");
+  });
+
+  it("returns the recorded set unchanged when the gateway list is unreadable", () => {
+    const responses = new Map([
+      ["provider list --names", { status: 1, stderr: "gateway not running" }],
+    ]);
+    const { runOpenshell } = buildRunOpenshell(responses);
+    const forget = vi.fn();
+    const warn = vi.fn();
+
+    const result = reconcileRegisteredExtraProviders({
+      runOpenshell,
+      listExtraProviders: () => ["tavily-search"],
+      forgetExtraProvider: forget,
+      warn,
+    });
+
+    expect(result).toEqual(["tavily-search"]);
+    expect(forget).not.toHaveBeenCalled();
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("matches gateway names verbatim, including bridge-suffixed and Buffer output", () => {
+    const responses = new Map([
+      [
+        "provider list --names",
+        { status: 0, stdout: Buffer.from("  my-slack-bridge \ntavily-search\n") },
+      ],
+    ]);
+    const { runOpenshell } = buildRunOpenshell(responses);
+    const forget = vi.fn();
+
+    const result = reconcileRegisteredExtraProviders({
+      runOpenshell,
+      listExtraProviders: () => ["my-slack-bridge", "tavily-search"],
+      forgetExtraProvider: forget,
+    });
+
+    expect(result).toEqual(["my-slack-bridge", "tavily-search"]);
+    expect(forget).not.toHaveBeenCalled();
   });
 });

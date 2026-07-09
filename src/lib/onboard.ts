@@ -163,7 +163,7 @@ const pRetry = require("p-retry");
 const runner: typeof import("./runner") = require("./runner");
 const { ROOT, SCRIPTS, redact, run, runCapture, runCaptureEx, runFile, validateName } = runner;
 const braveProviderProfile: typeof import("./onboard/brave-provider-profile") = require("./onboard/brave-provider-profile");
-const { runSandboxProviderPreDeleteCleanup } =
+const { reconcileRegisteredExtraProviders, runSandboxProviderPreDeleteCleanup } =
   require("./onboard/sandbox-provider-cleanup") as typeof import("./onboard/sandbox-provider-cleanup");
 const nameValidation: typeof import("./name-validation") = require("./name-validation");
 const { getNameValidationGuidance } = nameValidation;
@@ -2749,7 +2749,7 @@ async function createSandboxWithBaseImageResolution(
     messagingTokenDefs,
     reusableMessagingChannels,
     reusableMessagingProviders,
-    extraProviders: registry.listExtraProviders(),
+    extraProviders: reconcileRegisteredExtraProviders({ runOpenshell }),
     hermesToolGateways,
     sandboxGpuConfig: effectiveSandboxGpuConfig,
     dockerDriverGateway,
