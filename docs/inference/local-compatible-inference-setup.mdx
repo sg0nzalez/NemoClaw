@@ -1,18 +1,18 @@
 ---
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-title: "Set Up Local and Compatible Inference"
-sidebar-title: "Local and Compatible Setup"
-description: "Configure custom compatible endpoints, local vLLM, NVIDIA NIM, and inference timeouts."
-description-agent: "Configures custom compatible endpoints, local vLLM, NVIDIA NIM, and inference timeouts for local inference-server and compatible-provider setup."
-keywords: ["nemoclaw local inference", "nemoclaw compatible endpoint", "nemoclaw vllm", "nemoclaw nim"]
+title: "Set Up Self-Hosted Inference Servers"
+sidebar-title: "Self-Hosted Servers"
+description: "Connect NemoClaw to a self-hosted compatible server, vLLM, or NVIDIA NIM."
+description-agent: "Shows how to configure self-hosted compatible servers, vLLM, NVIDIA NIM, and their inference timeouts."
+keywords: ["nemoclaw self-hosted inference", "nemoclaw compatible endpoint", "nemoclaw vllm", "nemoclaw nim"]
 content:
   type: "task"
 ---
 import { AgentOnly } from "../_components/AgentGuide";
 
-The sections below collect the detailed setup prompts and environment variables for local and compatible inference providers.
-Use them when the quickstart or local inference guide points you here for exact command shapes.
+Use this page when you operate an inference server other than Ollama.
+It covers compatible endpoints, vLLM, NVIDIA NIM, and the related timeout settings.
 
 ## OpenAI-Compatible Server
 
@@ -42,6 +42,28 @@ If you are on the legacy containerized OpenShell gateway path and the gateway ca
 
 For GGUF models, start a compatible server such as `llama-server` yourself and enter the model id that server reports from `/v1/models`.
 The Ollama local path selects Ollama model tags; it does not accept a raw `.gguf` file path directly.
+
+### Serve a Raw Model File
+
+Use this path when you already have a local server for a raw model file, such as a GGUF model served by `llama-server`.
+Start llama.cpp on the host:
+
+```bash
+llama-server \
+  -m /models/NVIDIA-Nemotron3-Nano-4B-Q4_K_M.gguf \
+  --host 0.0.0.0 \
+  --port 8000 \
+  -c 16384 \
+  -ngl 999 \
+  --parallel 1 \
+  --chat-template chatml
+```
+
+Select **Other OpenAI-compatible endpoint** during onboarding.
+Enter the server base URL, such as `http://localhost:8000/v1`, and the model id reported by `/v1/models`.
+For the legacy containerized OpenShell gateway path, use the reachable host-service URL for your setup, commonly `http://host.openshell.internal:8000/v1`.
+
+After onboarding, run `$$nemoclaw <name> status` and check the `Inference` row before starting long agent work.
 
 The wizard prompts for an API key.
 If your server does not require authentication, enter any non-empty string (for example, `dummy`).
@@ -308,6 +330,13 @@ NEMOCLAW_EXPERIMENTAL=1 \
 ```
 
 To select a specific model, set `NEMOCLAW_MODEL`.
+
+## Verify the Sandbox Route
+
+On Linux Docker-driver GPU sandboxes, NemoClaw keeps self-hosted inference on the OpenShell bridge route.
+After the sandbox becomes ready, it verifies `https://inference.local/v1/models` from inside the sandbox runtime.
+Only a 2xx response succeeds because this path includes the proxy authentication rewrite that the agent uses.
+If the runtime route fails, onboarding reports the endpoint and recovery steps before the first agent prompt.
 
 ## Timeout Configuration
 

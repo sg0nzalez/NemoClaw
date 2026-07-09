@@ -303,14 +303,15 @@ Deep Agents runtime validation also checks that generated `config.toml` points a
 If you change providers or models for an existing Deep Agents sandbox, run `nemo-deepagents onboard --fresh --name <sandbox-name> --recreate-sandbox` so NemoClaw rewrites the config and route together.
 </AgentOnly>
 
-## Configure Local and Compatible Providers
+## Set Up Self-Hosted Inference Servers
 
-For custom endpoints, vLLM, NVIDIA NIM, and inference timeout configuration, refer to [Set Up Local and Compatible Inference](local-compatible-inference-setup).
+For custom endpoints, vLLM, NVIDIA NIM, and inference timeout configuration, refer to [Set Up Self-Hosted Inference Servers](local-compatible-inference-setup).
 
 ## Next Steps
 
 <AgentOnly variant="openclaw,hermes">
-- [Use a Local Inference Server](use-local-inference) for Ollama, vLLM, NIM, and compatible-endpoint setup details.
+- [Use Ollama for Local Inference](use-local-inference) for the Ollama installation, routing, and model-selection workflow.
+- [Set Up Self-Hosted Inference Servers](local-compatible-inference-setup) for vLLM, NIM, and compatible-endpoint setup.
 </AgentOnly>
 <AgentOnly variant="openclaw">
 - [Tool-Calling Reliability](tool-calling-reliability) for deciding when Ollama is enough and when vLLM with a parser is safer.
