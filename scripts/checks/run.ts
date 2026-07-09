@@ -7,7 +7,7 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-type CheckCommand = {
+export type CheckCommand = {
   name: string;
   command: string;
   args: string[];
