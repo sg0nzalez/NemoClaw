@@ -238,6 +238,12 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
     expect(findExtensionTerminologyViolations(source, "docs/example.mdx")).toEqual([]);
   });
 
+  it("handles repeated allowed-context terms without excessive regex work", () => {
+    const source = Array.from({ length: 2_000 }, () => "The NemoClaw plugin SDK is not offered.").join("\n");
+
+    expect(findExtensionTerminologyViolations(source, "docs/example.mdx")).toEqual([]);
+  });
+
   it("keeps compatibility commitment scoped to extension surfaces", () => {
     expect(
       findExtensionTerminologyViolations(
@@ -291,18 +297,29 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
     ]);
   });
 
-  it.each([".cache", ".next", ".parcel-cache", ".turbo", ".vercel", "build", "out", "target"])(
-    "ignores generated documentation under %s",
-    (directoryName) => {
-      const root = createTemporaryRoot("nemoclaw-extension-terminology-skip-dir-");
-      temporaryRoots.push(root);
-      const skipped = path.join(root, directoryName);
-      mkdirSync(skipped, { recursive: true });
-      writeNewFile(path.join(skipped, "violation.md"), "Use the public NemoClaw extension SDK today.");
+  it.each([
+    ".cache",
+    ".eslintcache",
+    ".next",
+    ".parcel-cache",
+    ".rspack",
+    ".stylelintcache",
+    ".swc",
+    ".turbo",
+    ".vercel",
+    ".webpack",
+    "build",
+    "out",
+    "target",
+  ])("ignores generated documentation under %s", (directoryName) => {
+    const root = createTemporaryRoot("nemoclaw-extension-terminology-skip-dir-");
+    temporaryRoots.push(root);
+    const skipped = path.join(root, directoryName);
+    mkdirSync(skipped, { recursive: true });
+    writeNewFile(path.join(skipped, "violation.md"), "Use the public NemoClaw extension SDK today.");
 
-      expect(findRepositoryExtensionTerminologyViolations([root])).toEqual([]);
-    },
-  );
+    expect(findRepositoryExtensionTerminologyViolations([root])).toEqual([]);
+  });
 
   it("warns and skips oversized documentation files", () => {
     const root = createTemporaryRoot("nemoclaw-extension-terminology-large-file-");

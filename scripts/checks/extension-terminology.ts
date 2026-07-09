@@ -42,12 +42,17 @@ const DOCUMENTATION_FILE_PATTERN = /\.(?:md|mdx)$/i;
 const MAX_DOCUMENTATION_FILE_BYTES = 1_000_000;
 const SKIP_DIRS = new Set([
   ".cache",
+  ".eslintcache",
   ".git",
   ".next",
   ".parcel-cache",
+  ".rspack",
+  ".stylelintcache",
+  ".swc",
   ".turbo",
   ".venv",
   ".vercel",
+  ".webpack",
   "build",
   "coverage",
   "dist",
@@ -305,6 +310,9 @@ export function findExtensionTerminologyViolations(
   return violations;
 }
 
+/**
+ * @internal CI-only documentation linter for trusted repository check runs.
+ */
 export function findRepositoryExtensionTerminologyViolations(
   options: ScanOptions | readonly string[] = {},
 ): readonly ExtensionTerminologyViolation[] {
