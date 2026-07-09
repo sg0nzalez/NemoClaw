@@ -45,36 +45,36 @@ const EXTENSION_SURFACE_PATTERN =
 const RULES: readonly TerminologyRule[] = [
   {
     term: "NemoClaw plugin SDK",
-    pattern: /\b(?:public\s+)?NemoClaw\s+(?:(?:plugin|extension)\s+)?SDK\b/i,
+    pattern: /\b(?:public\s+)?NemoClaw\s+(?:(?:plugin|extension)\s+)?SDK\b/gi,
     detail: "describe any NemoClaw SDK as reserved, future, unavailable, or non-committed",
   },
   {
     term: "NemoClaw plugin registry",
-    pattern: /\bNemoClaw\s+(?:plugin|extension|package)\s+registr(?:y|ies)\b/i,
+    pattern: /\bNemoClaw\s+(?:plugin|extension|package)\s+registr(?:y|ies)\b/gi,
     detail: "do not present a current public NemoClaw plugin, extension, or package registry",
   },
   {
     term: "NemoClaw CLI compatibility contract",
     pattern:
-      /\bNemoClaw\b[^\n.?!]{0,80}\bCLI\b[^\n.?!]{0,80}\b(?:compatibility\s+contract|stable\s+contract|compatibility\s+guarantee|compatibility\s+promise)\b/i,
+      /\bNemoClaw\b[^\n.?!]{0,80}\bCLI\b[^\n.?!]{0,80}\b(?:compatibility\s+contract|stable\s+contract|compatibility\s+guarantee|compatibility\s+promise)\b/gi,
     detail: "do not present a current CLI compatibility contract for extension surfaces",
   },
   {
     term: "NemoClaw semantic-versioning promise",
     pattern:
-      /\bNemoClaw\b[^\n.?!]{0,120}\b(?:semantic[-\s]+versioning|semver|SemVer)\b[^\n.?!]{0,80}\b(?:promise|guarantee|commitment|contract|stable|stability)\b/i,
+      /\bNemoClaw\b[^\n.?!]{0,120}\b(?:semantic[-\s]+versioning|semver|SemVer)\b[^\n.?!]{0,80}\b(?:promise|guarantee|commitment|contract|stable|stability)\b/gi,
     detail: "do not present a current semantic-versioning promise for extension surfaces",
   },
   {
     term: "NemoClaw migration guarantee",
     pattern:
-      /\bNemoClaw\b[^\n.?!]{0,120}\bmigration\b[^\n.?!]{0,80}\b(?:guarantee|promise|commitment|contract|stable|compatibility)\b/i,
+      /\bNemoClaw\b[^\n.?!]{0,120}\bmigration\b[^\n.?!]{0,80}\b(?:guarantee|promise|commitment|contract|stable|compatibility)\b/gi,
     detail: "do not present a current migration guarantee for extension surfaces",
   },
   {
     term: "NemoClaw compatibility commitment",
     pattern:
-      /\bNemoClaw\b[^\n.?!]{0,120}\bcompatibility\b[^\n.?!]{0,80}\b(?:commitment|promise|guarantee|contract)\b/i,
+      /\bNemoClaw\b[^\n.?!]{0,120}\bcompatibility\b[^\n.?!]{0,80}\b(?:commitment|promise|guarantee|contract)\b/gi,
     detail: "do not present a current compatibility commitment for extension surfaces",
     /**
      * Invalid state: docs making false current compatibility commitments for extension surfaces.
@@ -86,23 +86,17 @@ const RULES: readonly TerminologyRule[] = [
     scope: "extension-surface-commitment",
   },
 ];
-const ALLOWED_BOUNDARY = "(?:^|[^\\w])";
-const ALLOWED_TAIL_BOUNDARY = "(?=$|[^\\w])";
-const ALLOWED_CONTEXT_TERMS = [
-  "reserved",
-  "not\\s+(?:offered|available|committed|guaranteed|promised|stable|supported)",
-  "unavailable",
-  "non[-\\s\\u2010-\\u2015]?committed",
-  "no\\s+(?:current|public|stable|supported|shipping)",
-  "does\\s+not\\s+(?:offer|commit|guarantee|promise|provide)",
-  "not\\s+yet",
-  "unmet\\s+gates?",
-  "before\\s+(?:SDK\\s+)?stabili[sz]ation",
+const ALLOWED_CONTEXT_PATTERNS = [
+  /\breserved\b/i,
+  /\bnot\s+(?:offered|available|committed|guaranteed|promised|stable|supported)\b/i,
+  /\bunavailable\b/i,
+  /\bnon[-\s\u2010-\u2015]?committed\b/i,
+  /\bno\s+(?:current|public|stable|supported|shipping)\b/i,
+  /\bdoes\s+not\s+(?:offer|commit|guarantee|promise|provide)\b/i,
+  /\bnot\s+yet\b/i,
+  /\bunmet\s+gates?\b/i,
+  /\bbefore\s+(?:SDK\s+)?stabili[sz]ation\b/i,
 ] as const;
-const ALLOWED_CONTEXT_PATTERN = new RegExp(
-  `${ALLOWED_BOUNDARY}(?:${ALLOWED_CONTEXT_TERMS.join("|")})${ALLOWED_TAIL_BOUNDARY}`,
-  "i",
-);
 const CURRENT_PRODUCT_PROMISE_PATTERN =
   /\b(?:accepts?|accepting|(?:available|shipping)\s+(?:now|today)|(?:provides?|offers?|publishes?|makes?)\b[^\n,;]{0,80}\b(?:commitment|contract|guarantee|promise|stability|stable|supported))\b/i;
 
@@ -225,7 +219,10 @@ function clauseContext(context: string, index: number, matchLength: number): str
 
 function isAllowedContext(context: string, index: number, matchLength: number): boolean {
   const clause = clauseContext(context, index, matchLength);
-  return ALLOWED_CONTEXT_PATTERN.test(clause) && !CURRENT_PRODUCT_PROMISE_PATTERN.test(clause);
+  return (
+    ALLOWED_CONTEXT_PATTERNS.some((allowedContext) => allowedContext.test(clause)) &&
+    !CURRENT_PRODUCT_PROMISE_PATTERN.test(clause)
+  );
 }
 
 function isExtensionSurfaceCommitment(context: string): boolean {
@@ -243,8 +240,7 @@ export function findExtensionTerminologyViolations(
   const violations: ExtensionTerminologyViolation[] = [];
 
   for (const rule of RULES) {
-    const pattern = new RegExp(rule.pattern.source, `${rule.pattern.flags.replace("g", "")}g`);
-    for (const match of source.matchAll(pattern)) {
+    for (const match of source.matchAll(rule.pattern)) {
       const index = match.index ?? 0;
       const context = sentenceContext(source, index, match[0].length);
       const contextIndex = index - context.start;

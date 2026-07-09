@@ -13,7 +13,7 @@ export type CheckCommand = {
   readonly args: readonly string[];
 };
 
-type CheckRunner = (check: CheckCommand) => { readonly status: number | null };
+export type CheckRunner = (check: CheckCommand) => { readonly status: number | null };
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const TSX = process.platform === "win32" ? "tsx.cmd" : "tsx";
