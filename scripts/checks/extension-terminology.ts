@@ -152,6 +152,10 @@ function isWithinDirectory(parent: string, child: string): boolean {
   return relativePath === "" || (!relativePath.startsWith("..") && !path.isAbsolute(relativePath));
 }
 
+function isRootList(options: ScanOptions | readonly string[]): options is readonly string[] {
+  return Array.isArray(options);
+}
+
 function* walkDocumentationFiles(options: WalkOptions): Generator<string> {
   const { directory, onWarning, root } = options;
   const visited = options.visited ?? new Set<string>();
@@ -304,7 +308,7 @@ export function findExtensionTerminologyViolations(
 export function findRepositoryExtensionTerminologyViolations(
   options: ScanOptions | readonly string[] = {},
 ): readonly ExtensionTerminologyViolation[] {
-  const scanOptions: ScanOptions = Array.isArray(options) ? { roots: options } : options;
+  const scanOptions: ScanOptions = isRootList(options) ? { roots: options } : options;
   const violations: ExtensionTerminologyViolation[] = [];
   for (const root of scanOptions.roots ?? ["docs"]) {
     const absoluteRoot = path.resolve(REPO_ROOT, root);
