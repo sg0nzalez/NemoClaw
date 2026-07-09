@@ -18,6 +18,12 @@ const selfHostedInferenceSetupPath = path.join(
   "inference",
   "local-compatible-inference-setup.mdx",
 );
+const toolCallingReliabilityPath = path.join(
+  repoRoot,
+  "docs",
+  "inference",
+  "tool-calling-reliability.mdx",
+);
 const inferenceConfigPath = path.join(repoRoot, "src", "lib", "inference", "config.ts");
 const modelPromptsPath = path.join(repoRoot, "src", "lib", "inference", "model-prompts.ts");
 
@@ -176,5 +182,16 @@ describe("inference setup navigation", () => {
 
     expect(markdown).toContain("--host 127.0.0.1");
     expect(markdown).not.toContain("--host 0.0.0.0");
+  });
+
+  it("routes vLLM tool-calling remediation to the self-hosted server guide", () => {
+    const markdown = fs.readFileSync(toolCallingReliabilityPath, "utf8");
+    const start = markdown.indexOf("## Next Steps");
+    expect(start).toBeGreaterThanOrEqual(0);
+    const section = markdown.slice(start);
+
+    expect(section).toContain(
+      "[Set Up Self-Hosted Inference Servers](local-compatible-inference-setup)",
+    );
   });
 });
