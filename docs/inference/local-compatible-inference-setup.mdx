@@ -84,6 +84,8 @@ llama-server \
 Select **Other OpenAI-compatible endpoint** during onboarding.
 Enter the server base URL, such as `http://localhost:8000/v1`, and the model id reported by `/v1/models`.
 For a containerized OpenShell gateway, use the reachable host-service URL for your setup, commonly `http://host.openshell.internal:8000/v1`.
+Host-side endpoint probing is skipped during onboarding for this sandbox-internal alias.
+Use a routable endpoint when you need onboarding to verify the API, tool-calling, and streaming paths.
 
 After onboarding, run `$$nemoclaw <name> status` and check the `Inference` row before starting long agent work.
 
@@ -237,7 +239,7 @@ If vLLM never becomes ready, NemoClaw prints a short tail of the vLLM container 
 
 The first run can take 10 to 30 minutes.
 Later runs reuse the cached image and model weights.
-If the host reboots and the `nemoclaw-vllm` container is stopped, NemoClaw restarts it during recovery without requiring a fresh onboarding run.
+The managed container uses Docker's `--restart unless-stopped` policy, so Docker restarts it after a host or Docker daemon restart unless an operator explicitly stopped it.
 
 Managed vLLM uses these profiles:
 

@@ -85,11 +85,26 @@ Start the sandbox, confirm that `docker ps` shows the matching `openshell.ai/san
 
 Create `/tmp/openclaw.updated.json` with the OpenClaw sub-agent config.
 For the Omni example, the demo provides `vlm-demo/vlm-subagent/openclaw-patch.py`.
-Set `VLM_DEMO_DIR` to the local `vlm-demo` directory from the demo assets, then run the patch helper:
+The wrapper reads the key without echoing it and keeps the value out of the child process's operating-system argument list.
+Set `VLM_DEMO_DIR` to the local `vlm-demo` directory from the demo assets, then run the patch helper.
 
 ```bash
 export VLM_DEMO_DIR=/path/to/nemoclaw-demos/vlm-demo
-python3 "$VLM_DEMO_DIR/vlm-subagent/openclaw-patch.py" "$NVIDIA_API_KEY" < /tmp/openclaw.json > /tmp/openclaw.updated.json
+(
+  read -rsp "NVIDIA API key: " NVIDIA_API_KEY
+  printf '\n'
+  export NVIDIA_API_KEY
+  python3 -c '
+import os
+import runpy
+import sys
+
+helper = sys.argv[1]
+sys.argv = [helper, os.environ["NVIDIA_API_KEY"]]
+runpy.run_path(helper, run_name="__main__")
+' "$VLM_DEMO_DIR/vlm-subagent/openclaw-patch.py" \
+    < /tmp/openclaw.json > /tmp/openclaw.updated.json
+)
 ```
 
 The helper reads `/tmp/openclaw.json` from standard input.

@@ -34,6 +34,7 @@ const toolCallingReliabilityPath = path.join(
   "inference",
   "tool-calling-reliability.mdx",
 );
+const subAgentSetupPath = path.join(repoRoot, "docs", "inference", "set-up-sub-agent.mdx");
 const inferenceConfigPath = path.join(repoRoot, "src", "lib", "inference", "config.ts");
 const modelPromptsPath = path.join(repoRoot, "src", "lib", "inference", "model-prompts.ts");
 
@@ -246,6 +247,7 @@ describe("inference setup navigation", () => {
 
   it("explains the host-side validation limit of the containerized gateway alias", () => {
     const markdown = fs.readFileSync(selfHostedInferenceSetupPath, "utf8");
+    const hostGatewayAlias = "`http://host.openshell.internal:8000/v1`";
     const result = probeOpenAiLikeEndpoint(
       "http://host.openshell.internal:8000/v1",
       "test-model",
@@ -261,6 +263,30 @@ describe("inference setup navigation", () => {
     expect(markdown).toContain(
       "Use a routable endpoint when you need onboarding to verify the API, tool-calling, and streaming paths.",
     );
+    const textAfterEachAlias = markdown.split(hostGatewayAlias).slice(1);
+    expect(textAfterEachAlias).toHaveLength(2);
+    for (const followingText of textAfterEachAlias) {
+      expect(followingText.slice(0, 450)).toMatch(
+        /host-side endpoint probing is skipped during onboarding/i,
+      );
+    }
+  });
+
+  it("keeps provider credentials out of documented helper argv", () => {
+    const markdown = fs.readFileSync(subAgentSetupPath, "utf8");
+
+    for (const secretName of [
+      "NVIDIA_API_KEY",
+      "NGC_API_KEY",
+      "HF_TOKEN",
+      "HUGGING_FACE_HUB_TOKEN",
+    ]) {
+      const positionalSecret = new RegExp(
+        String.raw`\b(?:python3?|node|bash|sh)\b[^\n]*\$(?:\{)?${secretName}(?:\})?`,
+      );
+      expect(markdown).not.toMatch(positionalSecret);
+    }
+    expect(markdown).toContain('os.environ["NVIDIA_API_KEY"]');
   });
 
   it("retains shared self-hosted setup and verification guidance after the Ollama split", () => {
@@ -284,7 +310,7 @@ describe("inference setup navigation", () => {
       "Port `8000` is included in NemoClaw's `local-inference` policy preset.",
     );
     expect(markdown).toContain(
-      "NemoClaw restarts it during recovery without requiring a fresh onboarding run.",
+      "The managed container uses Docker's `--restart unless-stopped` policy, so Docker restarts it after a host or Docker daemon restart unless an operator explicitly stopped it.",
     );
     expect(markdown).toContain("## Verify the Configuration");
     expect(markdown).toContain(
