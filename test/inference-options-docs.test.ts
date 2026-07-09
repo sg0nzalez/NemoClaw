@@ -272,6 +272,11 @@ describe("inference setup navigation", () => {
     const nonInteractiveSection = markdown.slice(nonInteractiveStart, nonInteractiveEnd);
 
     expect(markdown).toContain("The agent inside the sandbox connects through `inference.local`");
+    expect(markdown).toContain("NEMOCLAW_MODEL=NVIDIA-Nemotron3-Nano-4B-Q4_K_M.gguf");
+    expect(markdown).toContain(
+      "NemoClaw uses that value for the configured context window unless you set `NEMOCLAW_CONTEXT_WINDOW` yourself.",
+    );
+    expect(markdown).not.toContain("baked into `openclaw.json`");
     expect(markdown).toContain(
       "The Chat Completions default avoids local backends that accept Responses requests but drop system prompts or tool definitions.",
     );

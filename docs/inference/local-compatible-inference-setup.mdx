@@ -90,6 +90,19 @@ After onboarding, run `$$nemoclaw <name> status` and check the `Inference` row b
 The wizard prompts for an API key.
 If your server does not require authentication, enter any non-empty string (for example, `dummy`).
 
+### Use a Raw Model in Non-Interactive Setup
+
+Use the model id returned by `/v1/models`, not the raw file path.
+For example, the `llama-server` command above commonly reports `NVIDIA-Nemotron3-Nano-4B-Q4_K_M.gguf`:
+
+```bash
+NEMOCLAW_PROVIDER=custom \
+  NEMOCLAW_ENDPOINT_URL=http://localhost:8000/v1 \
+  NEMOCLAW_MODEL=NVIDIA-Nemotron3-Nano-4B-Q4_K_M.gguf \
+  COMPATIBLE_API_KEY=dummy \
+  $$nemoclaw onboard --non-interactive
+```
+
 ### Validate the Endpoint
 
 NemoClaw validates the endpoint by sending a test inference request before continuing.
@@ -207,7 +220,7 @@ On supported Linux hosts with NVIDIA GPUs, the onboard wizard can also install o
 
 For an already-running vLLM server, run `$$nemoclaw onboard` and select **Local vLLM [experimental]** from the provider list.
 If vLLM is already running, NemoClaw detects the running model and validates the endpoint.
-When vLLM exposes runtime metadata such as `max_model_len`, NemoClaw uses that value for the `contextWindow` baked into `openclaw.json` unless you set `NEMOCLAW_CONTEXT_WINDOW` yourself.
+When vLLM exposes runtime metadata such as `max_model_len`, NemoClaw uses that value for the configured context window unless you set `NEMOCLAW_CONTEXT_WINDOW` yourself.
 
 ### Install or Start Managed vLLM
 
