@@ -39,7 +39,10 @@ $$nemoclaw onboard
 
 When the wizard asks you to choose an inference provider, select **Other OpenAI-compatible endpoint**.
 Enter the base URL of your local server, for example `http://localhost:8000/v1` on the default Docker-driver topology.
-If you are on the legacy containerized OpenShell gateway path and the gateway cannot reach host `localhost`, use the host-gateway URL for your setup, commonly `http://host.openshell.internal:8000/v1`.
+For a containerized OpenShell gateway that cannot reach host `localhost`, use the host-gateway URL for your setup, commonly `http://host.openshell.internal:8000/v1`.
+This is a sandbox-internal alias, so host-side endpoint probing is skipped during onboarding.
+Use a routable endpoint when you need onboarding to verify the API, tool-calling, and streaming paths.
+Otherwise, confirm the runtime after onboarding with `$$nemoclaw <name> status` and a short agent request.
 
 For GGUF models, start a compatible server such as `llama-server` yourself and enter the model id that server reports from `/v1/models`.
 The Ollama local path selects Ollama model tags; it does not accept a raw `.gguf` file path directly.
@@ -62,7 +65,7 @@ llama-server \
 
 Select **Other OpenAI-compatible endpoint** during onboarding.
 Enter the server base URL, such as `http://localhost:8000/v1`, and the model id reported by `/v1/models`.
-For the legacy containerized OpenShell gateway path, use the reachable host-service URL for your setup, commonly `http://host.openshell.internal:8000/v1`.
+For a containerized OpenShell gateway, use the reachable host-service URL for your setup, commonly `http://host.openshell.internal:8000/v1`.
 
 After onboarding, run `$$nemoclaw <name> status` and check the `Inference` row before starting long agent work.
 

@@ -32,6 +32,7 @@ const inferenceSelectionValidationPath = path.join(
   "inference-selection-validation.ts",
 );
 const providersPath = path.join(repoRoot, "src", "lib", "onboard", "providers.ts");
+const onboardProbesPath = path.join(repoRoot, "src", "lib", "inference", "onboard-probes.ts");
 const inferenceConfigPath = path.join(repoRoot, "src", "lib", "inference", "config.ts");
 const modelPromptsPath = path.join(repoRoot, "src", "lib", "inference", "model-prompts.ts");
 
@@ -237,6 +238,21 @@ describe("inference setup navigation", () => {
     expect(section).toContain("The same post-ready check also applies to local Ollama.");
     expect(section).toContain(
       "NIM and other compatible endpoints receive their onboarding endpoint validation, but not this post-ready sandbox route check.",
+    );
+  });
+
+  it("explains the host-side validation limit of the containerized gateway alias", () => {
+    const markdown = fs.readFileSync(selfHostedInferenceSetupPath, "utf8");
+    const probesSource = fs.readFileSync(onboardProbesPath, "utf8");
+
+    expect(probesSource).toContain("if (isSandboxInternalUrl(endpointUrl))");
+    expect(probesSource).toContain("validation skipped");
+    expect(markdown).toContain("`http://host.openshell.internal:8000/v1`");
+    expect(markdown).toContain(
+      "This is a sandbox-internal alias, so host-side endpoint probing is skipped during onboarding.",
+    );
+    expect(markdown).toContain(
+      "Use a routable endpoint when you need onboarding to verify the API, tool-calling, and streaming paths.",
     );
   });
 });
