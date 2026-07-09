@@ -7,14 +7,15 @@ import os from "node:os";
 import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
-import { execTimeout, testTimeoutOptions } from "../../../../test/helpers/timeouts";
+import { execTimeout, testTimeout } from "../../../../test/helpers/timeouts";
 
 const sourceRequireHook = path.resolve("test/helpers/onboard-script-mocks.cjs");
 const sourceNodeOptions = [process.env.NODE_OPTIONS, `--require=${sourceRequireHook}`]
   .filter(Boolean)
   .join(" ");
 const HARNESS_PROCESS_TIMEOUT_MS = execTimeout(15_000);
-const HARNESS_TEST_OPTIONS = testTimeoutOptions(20_000);
+const HARNESS_TEST_TIMEOUT_MS = Math.max(testTimeout(20_000), HARNESS_PROCESS_TIMEOUT_MS + 5_000);
+const HARNESS_TEST_OPTIONS = { timeout: HARNESS_TEST_TIMEOUT_MS };
 const tempHomes = new Set<string>();
 
 function createTempHome(prefix: string): string {
