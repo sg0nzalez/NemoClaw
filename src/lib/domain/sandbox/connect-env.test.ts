@@ -3,10 +3,15 @@
 
 import { describe, expect, it } from "vitest";
 
-import { buildSandboxConnectEnv } from "./connect-env";
+import {
+  buildHermesLightSkinConfig,
+  buildSandboxConnectEnv,
+  NEMOCLAW_HERMES_LIGHT_SKIN_NAME,
+  shouldPrepareHermesLightSkin,
+} from "./connect-env";
 
 describe("sandbox connect environment helpers", () => {
-  it("marks Hermes connect sessions as light when COLORFGBG reports a light background (#6380)", () => {
+  it("keeps the connect environment unchanged; Hermes light skin is prepared in sandbox config (#6380)", () => {
     expect(
       buildSandboxConnectEnv(
         { name: "hermes" },
@@ -15,51 +20,77 @@ describe("sandbox connect environment helpers", () => {
     ).toEqual(
       expect.objectContaining({
         COLORFGBG: "0;15",
-        HERMES_TUI_LIGHT: "1",
         TERM_PROGRAM: "Apple_Terminal",
       }),
     );
   });
 
-  it("does not force Hermes light mode when COLORFGBG reports a dark background (#6380)", () => {
+  it("plans the NemoClaw Hermes light skin only for light terminals without user theme or skin (#6380)", () => {
     expect(
-      buildSandboxConnectEnv(
+      shouldPrepareHermesLightSkin(
         { name: "hermes" },
-        { COLORFGBG: "0;0", TERM_PROGRAM: "Apple_Terminal" },
+        { COLORFGBG: "0;15", TERM_PROGRAM: "Apple_Terminal" },
+        "model: test\n",
       ),
-    ).not.toHaveProperty("HERMES_TUI_LIGHT");
+    ).toBe(true);
   });
 
-  it("preserves explicit Hermes light-mode overrides (#6380)", () => {
-    for (const value of ["0", "false", "no", "off"]) {
+  it("does not plan the NemoClaw Hermes light skin when the terminal is dark (#6380)", () => {
+    expect(
+      shouldPrepareHermesLightSkin(
+        { name: "hermes" },
+        { COLORFGBG: "0;0", TERM_PROGRAM: "Apple_Terminal" },
+        "model: test\n",
+      ),
+    ).toBe(false);
+  });
+
+  it("does not plan the NemoClaw Hermes light skin when the user set Hermes theme env (#6380)", () => {
+    for (const env of [{ HERMES_TUI_LIGHT: "0" }, { HERMES_TUI_THEME: "dark" }]) {
       expect(
-        buildSandboxConnectEnv({ name: "hermes" }, { COLORFGBG: "0;15", HERMES_TUI_LIGHT: value })
-          .HERMES_TUI_LIGHT,
-      ).toBe(value);
+        shouldPrepareHermesLightSkin({ name: "hermes" }, { COLORFGBG: "0;15", ...env }, ""),
+      ).toBe(false);
     }
   });
 
-  it("preserves explicit Hermes theme overrides (#6380)", () => {
+  it("does not plan the NemoClaw Hermes light skin when config already has display.skin (#6380)", () => {
     expect(
-      buildSandboxConnectEnv({ name: "hermes" }, { COLORFGBG: "0;15", HERMES_TUI_THEME: "dark" }),
-    ).not.toHaveProperty("HERMES_TUI_LIGHT");
+      shouldPrepareHermesLightSkin(
+        { name: "hermes" },
+        { COLORFGBG: "0;15" },
+        "display:\n  skin: solarized-light\n",
+      ),
+    ).toBe(false);
   });
 
-  it("does not set Hermes light mode for non-Hermes agents (#6380)", () => {
-    expect(buildSandboxConnectEnv({ name: "openclaw" }, { COLORFGBG: "0;15" })).not.toHaveProperty(
-      "HERMES_TUI_LIGHT",
-    );
+  it("does not plan the NemoClaw Hermes light skin for non-Hermes agents (#6380)", () => {
+    expect(
+      shouldPrepareHermesLightSkin({ name: "openclaw" }, { COLORFGBG: "0;15" }, "model: test\n"),
+    ).toBe(false);
   });
 
   it("does not infer light mode from Apple Terminal without usable COLORFGBG (#6380)", () => {
     expect(
-      buildSandboxConnectEnv({ name: "hermes" }, { TERM_PROGRAM: "Apple_Terminal" }),
-    ).not.toHaveProperty("HERMES_TUI_LIGHT");
+      shouldPrepareHermesLightSkin({ name: "hermes" }, { TERM_PROGRAM: "Apple_Terminal" }, ""),
+    ).toBe(false);
     expect(
-      buildSandboxConnectEnv(
+      shouldPrepareHermesLightSkin(
         { name: "hermes" },
         { COLORFGBG: "not-a-color", TERM_PROGRAM: "Apple_Terminal" },
+        "",
       ),
-    ).not.toHaveProperty("HERMES_TUI_LIGHT");
+    ).toBe(false);
+  });
+
+  it("adds display.skin to Hermes config without changing existing fields (#6380)", () => {
+    expect(buildHermesLightSkinConfig("model: test\n")).toBe(
+      `model: test\ndisplay:\n  skin: ${NEMOCLAW_HERMES_LIGHT_SKIN_NAME}\n`,
+    );
+  });
+
+  it("does not rewrite Hermes config when display.skin is already explicit (#6380)", () => {
+    expect(
+      buildHermesLightSkinConfig("display:\n  skin: solarized-light\nmodel: test\n"),
+    ).toBeNull();
   });
 });
