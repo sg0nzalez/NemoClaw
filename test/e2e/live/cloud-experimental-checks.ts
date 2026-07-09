@@ -77,6 +77,10 @@ export function buildCloudExperimentalCommandEnv(
   };
 }
 
+export function cloudExperimentalApiKeyForCheck(scriptPath: string, apiKey: string): string {
+  return scriptPath === DEEPAGENTS_FRESH_REONBOARD_CHECK ? "" : apiKey;
+}
+
 export function assertRequiredCloudExperimentalResult(
   scriptPath: string,
   result: ShellProbeResult,
@@ -137,11 +141,12 @@ export async function runE2eCloudExperimentalChecks(
     checkScripts.length > 0 ? assertDeepAgentsRuntimeObserved(sandboxName, context) : undefined,
   );
   for (const scriptPath of checkScripts) {
+    const scriptApiKey = cloudExperimentalApiKeyForCheck(scriptPath, apiKey);
     const result = await context.host.command("bash", [path.join(REPO_ROOT, scriptPath)], {
       artifactName: `cloud-experimental-${path.basename(scriptPath, ".sh")}`,
       cwd: REPO_ROOT,
-      env: buildCloudExperimentalCommandEnv(sandboxName, apiKey),
-      redactionValues: [apiKey],
+      env: buildCloudExperimentalCommandEnv(sandboxName, scriptApiKey),
+      redactionValues: scriptApiKey ? [scriptApiKey] : [],
       timeoutMs: cloudExperimentalCheckTimeoutMs(scriptPath),
     });
     assertRequiredCloudExperimentalResult(scriptPath, result);

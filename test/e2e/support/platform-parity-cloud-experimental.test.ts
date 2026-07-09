@@ -15,11 +15,15 @@ vi.mock("../../../src/lib/actions/sandbox/exec", () => ({
 
 import SandboxExecCommand from "../../../src/commands/sandbox/exec.ts";
 import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
-import { DEEPAGENTS_CLOUD_EXPERIMENTAL_CHECKS } from "../live/cloud-experimental-check-list.ts";
+import {
+  DEEPAGENTS_CLOUD_EXPERIMENTAL_CHECKS,
+  DEEPAGENTS_FRESH_REONBOARD_CHECK,
+} from "../live/cloud-experimental-check-list.ts";
 import {
   assertRequiredCloudExperimentalResult,
   buildCloudExperimentalChecksEvidence,
   buildCloudExperimentalCommandEnv,
+  cloudExperimentalApiKeyForCheck,
   cloudExperimentalCheckTimeoutMs,
 } from "../live/cloud-experimental-checks.ts";
 
@@ -27,10 +31,12 @@ const dcodeTavilyCheck = path.join(
   process.cwd(),
   "test/e2e/e2e-cloud-experimental/checks/09-deepagents-code-tavily-opt-in.sh",
 );
-const dcodeFreshReonboardCheck = path.join(
-  process.cwd(),
-  "test/e2e/e2e-cloud-experimental/checks/04-deepagents-code-fresh-reonboard.sh",
-);
+const dcodeFreshReonboardCheck = path.join(process.cwd(), DEEPAGENTS_FRESH_REONBOARD_CHECK);
+const freshReonboardTimeoutMs = 30_000;
+
+function writeExecutable(filePath: string, lines: string[]): void {
+  fs.writeFileSync(filePath, `${lines.join("\n")}\n`, { mode: 0o755 });
+}
 
 function shellResult(exitCode: number, stdout: string, stderr = ""): ShellProbeResult {
   return {
@@ -81,6 +87,167 @@ describe("P0-E cloud-experimental parity guardrails", () => {
     expect(script).toContain("config is baked into the sandbox image at build time");
     expect(script).toContain("re-onboard with the new selection");
   });
+
+  it(
+    "runs fresh re-onboard against a fake endpoint without hosted inference secrets (#5747)",
+    () => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-fresh-reonboard-"));
+      try {
+        const binDir = path.join(tmp, "bin");
+        const homeDir = path.join(tmp, "home");
+        fs.mkdirSync(binDir);
+        fs.mkdirSync(homeDir);
+        const marker = path.join(tmp, "reonboard-done");
+        const openshell = path.join(binDir, "openshell");
+        const cli = path.join(binDir, "nemoclaw");
+
+        writeExecutable(openshell, [
+          "#!/usr/bin/env bash",
+          "set -euo pipefail",
+          'if [ "$1" = "sandbox" ] && [ "$2" = "exec" ]; then',
+          "  shift 2",
+          '  [ "$1" = "--name" ] || { echo "missing --name" >&2; exit 2; }',
+          "  shift 2",
+          '  [ "$1" = "--" ] || { echo "missing command boundary" >&2; exit 2; }',
+          "  shift",
+          '  if [ "$1" = "bash" ] && [ "$2" = "-c" ]; then',
+          '    case "$3" in',
+          '      *"test -d /sandbox/.deepagents"*) exit 0 ;;',
+          '      *"sha256sum /sandbox/.deepagents/config.toml"*)',
+          "        printf '%s\\n' 0000000000000000000000000000000000000000000000000000000000000000",
+          "        exit 0",
+          "        ;;",
+          "      *)",
+          '        if [ -f "$FAKE_REONBOARD_DONE" ]; then',
+          '          printf "%s\\n" "NEMOCLAW_DCODE_FRESH_CONFIG_VERIFIED"',
+          "        else",
+          '          printf "%s\\n" "NEMOCLAW_DCODE_STALE_CONFIG_SEEDED"',
+          "        fi",
+          "        exit 0",
+          "        ;;",
+          "    esac",
+          "  fi",
+          '  if [ "$1" = "/usr/local/bin/dcode" ] && [ "$2" = "identity" ]; then',
+          '    if [ -f "$FAKE_REONBOARD_DONE" ]; then',
+          '      model="openai/openai/gpt-5.5"',
+          "    else",
+          '      model="nvidia/nvidia/nemotron-3-ultra"',
+          "    fi",
+          '    printf "Route: inference\\nProvider: compatible-endpoint\\nModel: openai:%s\\nEndpoint: https://inference.local/v1\\n" "$model"',
+          "    exit 0",
+          "  fi",
+          "fi",
+          'if [ "$1" = "sandbox" ] && [ "$2" = "list" ]; then',
+          '  printf "%s\\n" "deepagents-sandbox Ready"',
+          "  exit 0",
+          "fi",
+          'printf "unexpected openshell args: %s\\n" "$*" >&2',
+          "exit 2",
+        ]);
+
+        writeExecutable(cli, [
+          "#!/usr/bin/env bash",
+          "set -euo pipefail",
+          "fail() { printf 'fake nemoclaw: %s\\n' \"$1\" >&2; exit 2; }",
+          'if [ "$1" = "onboard" ]; then',
+          '  if printenv NVIDIA_INFERENCE_API_KEY >/dev/null; then fail "NVIDIA_INFERENCE_API_KEY leaked"; fi',
+          '  if [ "$(printenv NEMOCLAW_E2E_USE_HOSTED_INFERENCE 2>/dev/null || true)" = "1" ]; then fail "hosted inference flag leaked"; fi',
+          '  [ "$(printenv COMPATIBLE_API_KEY)" = "e2e-compatible-key" ] || fail "missing fake compatible key"',
+          '  [ "$(printenv NEMOCLAW_PROVIDER)" = "custom" ] || fail "missing custom provider"',
+          '  [ "$(printenv NEMOCLAW_MODEL)" = "openai/openai/gpt-5.5" ] || fail "wrong target model"',
+          '  case "$(printenv NEMOCLAW_ENDPOINT_URL)" in',
+          "    http://127.0.0.1:*/v1) ;;",
+          '    *) fail "unexpected compatible endpoint" ;;',
+          "  esac",
+          "  node --input-type=module <<'NODE'",
+          'const response = await fetch(process.env.NEMOCLAW_ENDPOINT_URL + "/chat/completions", {',
+          '  method: "POST",',
+          "  headers: {",
+          '    "content-type": "application/json",',
+          '    authorization: "Bearer " + process.env.COMPATIBLE_API_KEY',
+          "  },",
+          "  body: JSON.stringify({",
+          "    model: process.env.NEMOCLAW_MODEL,",
+          '    messages: [{ role: "user", content: "ping" }]',
+          "  })",
+          "});",
+          "if (!response.ok) {",
+          "  console.error(await response.text());",
+          "  process.exit(1);",
+          "}",
+          "NODE",
+          '  mkdir -p "$HOME/.nemoclaw"',
+          '  printf \'%s\\n\' \'{"sandboxes":{"deepagents-sandbox":{"agent":"langchain-deepagents-code","model":"openai/openai/gpt-5.5","provider":"compatible-endpoint","credentialEnv":"COMPATIBLE_API_KEY"}}}\' > "$HOME/.nemoclaw/sandboxes.json"',
+          '  touch "$FAKE_REONBOARD_DONE"',
+          '  printf "%s\\n" "Backing up workspace state before recreating sandbox..."',
+          '  printf "%s\\n" "Restoring workspace state from pre-recreate backup..."',
+          "  exit 0",
+          "fi",
+          'if [ "$1" = "deepagents-sandbox" ] && [ "$2" = "config" ] && [ "$3" = "get" ]; then',
+          '  if [ -f "$FAKE_REONBOARD_DONE" ]; then',
+          '    model="openai/openai/gpt-5.5"',
+          "  else",
+          '    model="nvidia/nvidia/nemotron-3-ultra"',
+          "  fi",
+          '  if [ "$#" -eq 3 ]; then',
+          '    MODEL="$model" node -e \'console.log(JSON.stringify({models:{default:"openai:" + process.env.MODEL},headers:{authorization:"[STRIPPED_BY_MIGRATION]"}}))\'',
+          '  elif [ "$4" = "--key" ] && [ "$5" = "models.default" ]; then',
+          '    printf \'"openai:%s"\\n\' "$model"',
+          '  elif [ "$4" = "--format" ] && [ "$5" = "yaml" ]; then',
+          '    printf \'models:\\n  default: openai:%s\\nheaders:\\n  authorization: "[STRIPPED_BY_MIGRATION]"\\n\' "$model"',
+          "  else",
+          '    fail "unexpected config get args"',
+          "  fi",
+          "  exit 0",
+          "fi",
+          'if [ "$1" = "deepagents-sandbox" ] && [ "$2" = "config" ] && [ "$3" = "set" ]; then',
+          '  printf "%s\\n" "config is baked into the sandbox image at build time" >&2',
+          '  printf "%s\\n" "re-onboard with the new selection using --fresh" >&2',
+          "  exit 1",
+          "fi",
+          'if [ "$1" = "deepagents-sandbox" ] && [ "$2" = "status" ] && [ "$3" = "--json" ]; then',
+          '  printf \'%s\\n\' \'{"name":"deepagents-sandbox","model":"openai/openai/gpt-5.5","provider":"compatible-endpoint"}\'',
+          "  exit 0",
+          "fi",
+          'printf "unexpected nemoclaw args: %s\\n" "$*" >&2',
+          "exit 2",
+        ]);
+
+        const result = spawnSync("bash", [dcodeFreshReonboardCheck], {
+          encoding: "utf8",
+          timeout: freshReonboardTimeoutMs,
+          env: {
+            COMPATIBLE_API_KEY: "hosted-compatible-secret-should-not-be-used",
+            FAKE_OPENAI_PUBLIC_HOST: "127.0.0.1",
+            FAKE_REONBOARD_DONE: marker,
+            HOME: homeDir,
+            NEMOCLAW_CLI_BIN: cli,
+            NEMOCLAW_E2E_USE_HOSTED_INFERENCE: "1",
+            NEMOCLAW_ENDPOINT_URL: "https://inference-api.nvidia.com/v1",
+            NVIDIA_INFERENCE_API_KEY: "hosted-nvidia-secret-should-not-be-used",
+            PATH: binDir + ":" + (process.env.PATH ?? "/usr/bin:/bin"),
+            REPO: process.cwd(),
+            SANDBOX_NAME: "deepagents-sandbox",
+          },
+        });
+
+        expect(result.status, result.stdout + "\n" + result.stderr).toBe(0);
+        expect(result.stdout).toContain(
+          "04-deepagents-code-fresh-reonboard: OK (started hermetic compatible inference for re-onboard)",
+        );
+        expect(result.stdout).toContain("04-deepagents-code-fresh-reonboard: 12 passed, 0 failed");
+        expect(result.stdout + result.stderr).not.toContain(
+          "hosted-nvidia-secret-should-not-be-used",
+        );
+        expect(result.stdout + result.stderr).not.toContain(
+          "hosted-compatible-secret-should-not-be-used",
+        );
+      } finally {
+        fs.rmSync(tmp, { force: true, recursive: true });
+      }
+    },
+    freshReonboardTimeoutMs,
+  );
 
   it("preserves the repeated env-unset pairs from the failed observability invocation", async () => {
     await SandboxExecCommand.run(
@@ -477,6 +644,18 @@ describe("P0-E cloud-experimental parity guardrails", () => {
         "test/e2e/e2e-cloud-experimental/checks/12-deepagents-code-thread-auto-approval.sh",
       ),
     ).toBe(35 * 60_000);
+  });
+
+  it("withholds the hosted inference key from the hermetic re-onboard check (#5747)", () => {
+    expect(cloudExperimentalApiKeyForCheck(DEEPAGENTS_FRESH_REONBOARD_CHECK, "secret-key")).toBe(
+      "",
+    );
+    expect(
+      cloudExperimentalApiKeyForCheck(
+        "test/e2e/e2e-cloud-experimental/checks/07-deepagents-code-headless-inference.sh",
+        "secret-key",
+      ),
+    ).toBe("secret-key");
   });
 
   it("documents Deep Agents check scripts in generated launch/QA evidence", () => {

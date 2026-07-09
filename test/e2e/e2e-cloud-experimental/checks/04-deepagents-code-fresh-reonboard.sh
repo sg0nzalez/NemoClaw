@@ -17,8 +17,18 @@ CLI="${NEMOCLAW_CLI_BIN:-${REPO}/bin/nemoclaw.js}"
 PREFIX="04-deepagents-code-fresh-reonboard"
 PRIMARY_TARGET_MODEL="openai/openai/gpt-5.5"
 FALLBACK_TARGET_MODEL="nvidia/nvidia/nemotron-3-ultra"
-HOSTED_ENDPOINT="${NEMOCLAW_ENDPOINT_URL:-https://inference-api.nvidia.com/v1}"
 CREDENTIAL_CANARY="nemoclaw-dcode-config-get-canary"
+
+# shellcheck source=test/e2e/lib/hermetic-compatible-inference.sh
+. "$REPO/test/e2e/lib/hermetic-compatible-inference.sh"
+
+cleanup() {
+  local status=$?
+  nemoclaw_e2e_stop_hermetic_compatible_inference
+  return "$status"
+}
+
+trap cleanup EXIT
 
 fail() {
   printf '%s: FAIL: %s\n' "$PREFIX" "$1" >&2
@@ -150,7 +160,6 @@ if ! sandbox_exec "test -d /sandbox/.deepagents && command -v dcode >/dev/null 2
   exit 0
 fi
 
-[ -n "${COMPATIBLE_API_KEY:-}" ] || fail "COMPATIBLE_API_KEY is required"
 [ -x "$CLI" ] || fail "NemoClaw CLI is not executable at $CLI"
 
 if ! identity_before="$(dcode_identity)"; then
@@ -172,6 +181,12 @@ else
 fi
 [ "$model_a" != "$model_b" ] || fail "model A and model B must differ"
 pass "initial live identity reports model A"
+
+export NEMOCLAW_E2E_COMPATIBLE_MODEL="$model_b"
+if ! nemoclaw_e2e_start_hermetic_compatible_inference; then
+  fail "could not start hermetic compatible inference"
+fi
+pass "started hermetic compatible inference for re-onboard"
 
 seed_source="$(seed_config_source | encode_source)"
 seed_command="printf '%s' ${seed_source@Q} | base64 -d | /opt/venv/bin/python3 -I - ${model_a@Q} ${CREDENTIAL_CANARY@Q}"
@@ -224,8 +239,7 @@ if ! reonboard_output="$(
     NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE=1 \
     NEMOCLAW_AGENT=langchain-deepagents-code \
     NEMOCLAW_COMPAT_MODEL="$model_b" \
-    NEMOCLAW_E2E_USE_HOSTED_INFERENCE=1 \
-    NEMOCLAW_ENDPOINT_URL="$HOSTED_ENDPOINT" \
+    NEMOCLAW_ENDPOINT_URL="$NEMOCLAW_ENDPOINT_URL" \
     NEMOCLAW_MODEL="$model_b" \
     NEMOCLAW_NON_INTERACTIVE=1 \
     NEMOCLAW_PREFERRED_API=openai-completions \
@@ -239,6 +253,7 @@ if ! reonboard_output="$(
 fi
 printf '%s\n' "$reonboard_output" | grep -Fq "Backing up workspace state before recreating sandbox..." || fail "re-onboard did not take the pre-recreate backup path"
 printf '%s\n' "$reonboard_output" | grep -Fq "Restoring workspace state from pre-recreate backup..." || fail "re-onboard did not take the restore path"
+nemoclaw_e2e_assert_hermetic_compatible_inference_used || fail "re-onboard did not use the hermetic compatible endpoint"
 pass "same-name --fresh re-onboard crossed backup and restore boundaries"
 
 sandbox_list="$(openshell sandbox list 2>&1)" || fail "could not list sandbox after re-onboard"
@@ -284,4 +299,4 @@ verify_output="$(sandbox_exec "$verify_command")" || fail "live DCode config doe
 printf '%s\n' "$verify_output" | grep -Fq "NEMOCLAW_DCODE_FRESH_CONFIG_VERIFIED" || fail "fresh config verification marker is missing"
 pass "config keeps model B and only the allowlisted preferences"
 
-printf '%s: 11 passed, 0 failed\n' "$PREFIX"
+printf '%s: 12 passed, 0 failed\n' "$PREFIX"
