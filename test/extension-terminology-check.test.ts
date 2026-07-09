@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,6 +10,7 @@ import {
   findExtensionTerminologyViolations,
   findRepositoryExtensionTerminologyViolations,
 } from "../scripts/checks/extension-terminology";
+import { CHECKS } from "../scripts/checks/run";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const temporaryRoots: string[] = [];
@@ -23,7 +24,6 @@ afterEach(() => {
 describe("extension terminology guard", () => {
   it.each([
     "reserved",
-    "future",
     "not offered",
     "not available",
     "not committed",
@@ -46,23 +46,19 @@ describe("extension terminology guard", () => {
     "does not provide",
     "not yet",
     "unmet gates",
-    "candidate",
-    "proposed",
+    "candidate and reserved",
+    "proposed and unavailable",
+    "future and not offered",
     "before SDK stabilization",
     "-reserved-",
     "pre-reserved-post",
     "-non-committed-",
     "pre-non-committed-post",
-    "(candidate)",
-    "pre-candidate-post",
     "(reserved)",
     "reserved;",
     "reserved:",
     "reserved,",
-    "candidate.",
-    "candidate:",
     "non-committed:",
-    "proposed;",
   ])("allows %s SDK wording", (allowedContext) => {
     const source = `The NemoClaw plugin SDK is ${allowedContext} for extension authors.`;
 
@@ -122,6 +118,15 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
     ]);
   });
 
+  it.each([
+    ["The candidate public NemoClaw SDK is available today.", "NemoClaw plugin SDK"],
+    ["The proposed NemoClaw plugin registry accepts modules today.", "NemoClaw plugin registry"],
+  ])("flags broad qualifier wording that still presents a current product promise", (source, term) => {
+    expect(findExtensionTerminologyViolations(source, "docs/example.mdx")).toMatchObject([
+      { line: 1, term },
+    ]);
+  });
+
   it("flags a later current SDK promise after an earlier identical reserved term", () => {
     const source =
       "The NemoClaw plugin SDK is reserved, but the public NemoClaw plugin SDK is available today.";
@@ -172,7 +177,7 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
   });
 
   it("scans configured markdown and mdx documentation roots", () => {
-    const root = path.join(tmpdir(), `nemoclaw-extension-terminology-${process.pid}-${Date.now()}`);
+    const root = mkdtempSync(path.join(tmpdir(), "nemoclaw-extension-terminology-"));
     temporaryRoots.push(root);
     mkdirSync(path.join(root, "nested"), { recursive: true });
     writeFileSync(path.join(root, "allowed.mdx"), "The NemoClaw plugin SDK is reserved.");
@@ -192,7 +197,7 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
   });
 
   it("warns and continues after filesystem scan errors", () => {
-    const root = path.join(tmpdir(), `nemoclaw-extension-terminology-errors-${process.pid}-${Date.now()}`);
+    const root = mkdtempSync(path.join(tmpdir(), "nemoclaw-extension-terminology-errors-"));
     temporaryRoots.push(root);
     const warnings: { file: string; message: string }[] = [];
     mkdirSync(root, { recursive: true });
@@ -211,9 +216,20 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
     ]);
   });
 
+  it("registers the extension terminology guard in the local checks runner", () => {
+    expect(CHECKS).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          args: ["scripts/checks/extension-terminology.ts"],
+          name: "extension-terminology",
+        }),
+      ]),
+    );
+  });
+
   it("does not follow symlinks outside scanned documentation roots", () => {
-    const root = path.join(tmpdir(), `nemoclaw-extension-terminology-symlink-${process.pid}-${Date.now()}`);
-    const outside = path.join(tmpdir(), `nemoclaw-extension-terminology-outside-${process.pid}-${Date.now()}`);
+    const root = mkdtempSync(path.join(tmpdir(), "nemoclaw-extension-terminology-symlink-"));
+    const outside = mkdtempSync(path.join(tmpdir(), "nemoclaw-extension-terminology-outside-"));
     temporaryRoots.push(root, outside);
     const warnings: { file: string; message: string }[] = [];
     mkdirSync(root, { recursive: true });

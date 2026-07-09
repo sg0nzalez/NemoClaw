@@ -88,7 +88,7 @@ const RULES: readonly TerminologyRule[] = [
 ];
 /** Custom non-word boundaries keep hyphenated allowlist terms like non-committed intact. */
 const ALLOWED_CONTEXT_PATTERN =
-  /(?:^|[^\w])(?:reserved|future|not\s+(?:offered|available|committed|guaranteed|promised|stable|supported)|unavailable|non[-\s]?committed|no\s+(?:current|public|stable|supported|shipping)|does\s+not\s+(?:offer|commit|guarantee|promise|provide)|not\s+yet|unmet\s+gates?|candidate|proposed|before\s+(?:SDK\s+)?stabili[sz]ation)(?:$|[^\w])/i;
+  /(?:^|[^\w])(?:reserved|not\s+(?:offered|available|committed|guaranteed|promised|stable|supported)|unavailable|non[-\s]?committed|no\s+(?:current|public|stable|supported|shipping)|does\s+not\s+(?:offer|commit|guarantee|promise|provide)|not\s+yet|unmet\s+gates?|before\s+(?:SDK\s+)?stabili[sz]ation)(?:$|[^\w])/i;
 
 function isSkipped(absolutePath: string): boolean {
   const segments = path.relative(REPO_ROOT, absolutePath).split(path.sep);
@@ -192,7 +192,13 @@ function clauseContext(context: string, index: number, matchLength: number): str
 }
 
 function isAllowedContext(context: string, index: number, matchLength: number): boolean {
-  return ALLOWED_CONTEXT_PATTERN.test(clauseContext(context, index, matchLength));
+  const clause = clauseContext(context, index, matchLength);
+  return (
+    ALLOWED_CONTEXT_PATTERN.test(clause) ||
+    /\b(?:candidate|proposed|future)\b[^\n.?!,;]{0,80}\b(?:reserved|unavailable|not\s+(?:offered|available|committed|guaranteed|promised|stable|supported)|non[-\s]?committed|unmet\s+gates?|before\s+(?:SDK\s+)?stabili[sz]ation)\b/i.test(
+      clause,
+    )
+  );
 }
 
 function isExtensionSurfaceCommitment(context: string): boolean {
