@@ -54,6 +54,9 @@ navigation:
               - page: "Inference Options"
                 path: _build/agent-variants/inference/inference-options.openclaw.generated.mdx
                 slug: inference-options
+              - page: "Set Up Local and Compatible Inference"
+                path: _build/agent-variants/inference/local-compatible-inference-setup.openclaw.generated.mdx
+                slug: local-compatible-inference-setup
               - page: "Use Local Inference"
                 path: _build/agent-variants/inference/use-local-inference.openclaw.generated.mdx
                 slug: use-local-inference
@@ -243,6 +246,9 @@ navigation:
               - page: "Inference Options"
                 path: _build/agent-variants/inference/inference-options.deepagents.generated.mdx
                 slug: inference-options
+              - page: "Set Up Local and Compatible Inference"
+                path: _build/agent-variants/inference/local-compatible-inference-setup.deepagents.generated.mdx
+                slug: local-compatible-inference-setup
               - page: "Model Capability Audit"
                 path: _build/agent-variants/inference/model-capability-audit.deepagents.generated.mdx
                 slug: model-capability-audit
@@ -363,6 +369,9 @@ navigation:
               - page: "Inference Options"
                 path: _build/agent-variants/inference/inference-options.hermes.generated.mdx
                 slug: inference-options
+              - page: "Set Up Local and Compatible Inference"
+                path: _build/agent-variants/inference/local-compatible-inference-setup.hermes.generated.mdx
+                slug: local-compatible-inference-setup
               - page: "Use Local Inference"
                 path: _build/agent-variants/inference/use-local-inference.hermes.generated.mdx
                 slug: use-local-inference
