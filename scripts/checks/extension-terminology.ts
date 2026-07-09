@@ -97,8 +97,14 @@ const ALLOWED_CONTEXT_PATTERNS = [
   /\bunmet\s+gates?\b/i,
   /\bbefore\s+(?:SDK\s+)?stabili[sz]ation\b/i,
 ] as const;
-const CURRENT_PRODUCT_PROMISE_PATTERN =
-  /\b(?:accepts?|accepting|(?:available|shipping)\s+(?:now|today)|(?:provides?|offers?|publishes?|makes?)\b[^\n,;]{0,80}\b(?:commitment|contract|guarantee|promise|stability|stable|supported))\b/i;
+const CURRENT_PRODUCT_PROMISE_PATTERNS = [
+  /\baccepts?|accepting\b/i,
+  /\b(?:available|shipping)\s+(?:now|today)\b/i,
+  /\b(?:is|are|remains?|becomes?|as)\s+(?:available|supported|stable|public)\b/i,
+  /\b(?:and|or)\s+(?:available|supported|stable|public)\b/i,
+  /\b(?<!not\s)(?<!no\s)(?:available|supported|stable|public)\s+(?:for|to)\b/i,
+  /\b(?:provides?|offers?|publishes?|makes?)\b[^\n,;]{0,80}\b(?:commitment|contract|guarantee|promise|stability|stable|supported)\b/i,
+] as const;
 
 function isSkipped(absolutePath: string): boolean {
   const segments = path.relative(REPO_ROOT, absolutePath).split(path.sep);
@@ -217,16 +223,25 @@ function clauseContext(context: string, index: number, matchLength: number): str
   return context.slice(start + 1, end);
 }
 
+function hasCurrentProductPromise(context: string): boolean {
+  return CURRENT_PRODUCT_PROMISE_PATTERNS.some((pattern) => pattern.test(context));
+}
+
 function isAllowedContext(context: string, index: number, matchLength: number): boolean {
   const clause = clauseContext(context, index, matchLength);
   return (
     ALLOWED_CONTEXT_PATTERNS.some((allowedContext) => allowedContext.test(clause)) &&
-    !CURRENT_PRODUCT_PROMISE_PATTERN.test(clause)
+    !hasCurrentProductPromise(clause)
   );
 }
 
-function isExtensionSurfaceCommitment(context: string): boolean {
-  return EXTENSION_SURFACE_PATTERN.test(context) && !/\bCLI\b/i.test(context);
+function isExtensionSurfaceCommitment(context: string, index: number, matchLength: number): boolean {
+  const clause = clauseContext(context, index, matchLength);
+  if (/\bCLI\b[^,;]{0,40}\bcompatibility\s+contract\b/i.test(clause)) return false;
+  return (
+    EXTENSION_SURFACE_PATTERN.test(clause) ||
+    (EXTENSION_SURFACE_PATTERN.test(context) && !/\bCLI\b/i.test(clause))
+  );
 }
 
 function lineForIndex(source: string, index: number): number {
@@ -244,7 +259,10 @@ export function findExtensionTerminologyViolations(
       const index = match.index ?? 0;
       const context = sentenceContext(source, index, match[0].length);
       const contextIndex = index - context.start;
-      if (rule.scope === "extension-surface-commitment" && !isExtensionSurfaceCommitment(context.text)) {
+      if (
+        rule.scope === "extension-surface-commitment" &&
+        !isExtensionSurfaceCommitment(context.text, contextIndex, match[0].length)
+      ) {
         continue;
       }
       if (isAllowedContext(context.text, contextIndex, match[0].length)) continue;

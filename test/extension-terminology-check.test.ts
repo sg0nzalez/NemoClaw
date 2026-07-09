@@ -152,6 +152,13 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
 
   it.each([
     ["The NemoClaw plugin SDK is reserved and available today.", "NemoClaw plugin SDK"],
+    [
+      "The NemoClaw plugin SDK is reserved and available for extension authors.",
+      "NemoClaw plugin SDK",
+    ],
+    ["The NemoClaw plugin SDK is reserved and supported.", "NemoClaw plugin SDK"],
+    ["The NemoClaw plugin SDK is reserved and stable.", "NemoClaw plugin SDK"],
+    ["The NemoClaw plugin SDK is reserved and public.", "NemoClaw plugin SDK"],
     ["The NemoClaw plugin registry is not offered but accepts modules today.", "NemoClaw plugin registry"],
     [
       "NemoClaw does not promise SemVer stability but provides a semantic-versioning guarantee for lifecycle contributions today.",
@@ -242,6 +249,12 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
         "docs/example.mdx",
       ),
     ).toEqual([]);
+    expect(
+      findExtensionTerminologyViolations(
+        "NemoClaw provides a compatibility commitment for CLI tools and extension packages.",
+        "docs/example.mdx",
+      ),
+    ).toMatchObject([{ line: 1, term: "NemoClaw compatibility commitment" }]);
     const extensionViolations = findExtensionTerminologyViolations(
       "NemoClaw provides a compatibility commitment for extension packages.",
       "docs/example.mdx",
