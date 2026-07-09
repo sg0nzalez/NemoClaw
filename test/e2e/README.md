@@ -92,6 +92,17 @@ scheduled/manual scorecard, including scorecard Slack reporting.
 Controller or evidence-verification errors close an already-created check as
 neutral so incomplete evidence cannot appear successful.
 
+For pull requests, `.github/workflows/pr-e2e-risk-gate.yaml` waits for the
+exact-head `CI / Pull Request` run to finish while the E2E Advisor runs in
+parallel. A green CI result and matching Advisor artifact produce the union of
+the deterministic risk floor and Advisor-required jobs. The coordinator
+dispatches at most three jobs concurrently through `e2e.yaml` and reports one
+`E2E / Required Live` check on the PR head. A new commit immediately cancels
+older PR-correlated live runs; exact-head checks in both the coordinator and
+child workflow reject stale results. Secret-bearing execution is automatic
+only for branches in `NVIDIA/NemoClaw`. Fork PRs receive a non-green approval
+boundary instead of exposing repository credentials to fork code.
+
 ## Onboard performance budget
 
 The scheduled/manual scorecard evaluates the trusted `cloud-onboard` timing

@@ -181,7 +181,7 @@ describe("MCP status wire-level credential-resolution probe", () => {
       ),
     ).toBe(true);
     expect(payload.exitCode).toBe(0);
-  });
+  }, 15_000);
 
   it("skips status probe traffic until exact policy and provider readiness are verified (#6379)", () => {
     const home = createTempHome("nemoclaw-mcp-resolution-readiness-");

@@ -318,7 +318,53 @@ describe("post-merge E2E risk gate", () => {
     }
   });
 
-  it("rejects changed controller state before classifying downloaded evidence", async () => {
+  it.each([
+    {
+      label: "shadow",
+      requireSuccess: false,
+      conclusion: "neutral",
+    },
+    {
+      label: "required PR",
+      requireSuccess: true,
+      conclusion: "failure",
+    },
+  ])("rejects changed controller state as $label", async ({ requireSuccess, conclusion }) => {
+    const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-risk-state-"));
+    const statePath = path.join(workDir, "e2e-risk-gate-state.json");
+    const originalState = `${JSON.stringify(state())}\n`;
+    const changedState = `${JSON.stringify({ ...state(), requiresManualExpansion: true })}\n`;
+    vi.stubEnv("GITHUB_TOKEN", "token");
+    vi.stubEnv("GITHUB_REPOSITORY", "NVIDIA/NemoClaw");
+    fs.writeFileSync(statePath, changedState, { mode: 0o600 });
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue({ ok: true, text: async () => "{}" } as Response);
+
+    try {
+      const operation = finishRiskGate({
+        statePath,
+        stateHash: sha256(originalState),
+        evidencePath: path.join(workDir, "evidence"),
+        checkRunId: 17,
+        childRunId: 23,
+        requireSuccess,
+      });
+      await expect(operation).rejects.toThrow(/controller state changed after E2E dispatch/u);
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(String(fetchMock.mock.calls[0]?.[0])).toContain("check-runs/17");
+      expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
+        status: "completed",
+        conclusion,
+        output: { title: "Risk-selected E2E evidence could not be verified" },
+      });
+    } finally {
+      fs.rmSync(workDir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns after a required PR evidence failure is recorded", async () => {
     const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-risk-state-"));
     const statePath = path.join(workDir, "e2e-risk-gate-state.json");
     const originalState = `${JSON.stringify(state())}\n`;
@@ -338,14 +384,15 @@ describe("post-merge E2E risk gate", () => {
           evidencePath: path.join(workDir, "evidence"),
           checkRunId: 17,
           childRunId: 23,
+          requireSuccess: true,
+          returnAfterRecordedFailure: true,
         }),
-      ).rejects.toThrow(/controller state changed after E2E dispatch/u);
+      ).resolves.toBeUndefined();
 
       expect(fetchMock).toHaveBeenCalledTimes(1);
-      expect(String(fetchMock.mock.calls[0]?.[0])).toContain("check-runs/17");
       expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
         status: "completed",
-        conclusion: "neutral",
+        conclusion: "failure",
         output: { title: "Risk-selected E2E evidence could not be verified" },
       });
     } finally {

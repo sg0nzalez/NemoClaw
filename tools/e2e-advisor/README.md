@@ -74,6 +74,37 @@ requires manual expansion reports neutral. If no runtime risk family matches,
 it reports success without dispatching E2E. This is post-merge shadow evidence,
 not a required pre-merge check.
 
+## Required-live PR coordinator
+
+`.github/workflows/pr-e2e-risk-gate.yaml` publishes one stable
+`E2E / Required Live` check for every exact PR head. Normal PR CI and the E2E
+Advisor run in parallel. After normal CI succeeds, the coordinator validates
+the Advisor artifact against the same head SHA and changed-file set, unions its
+supported job selectors with the deterministic risk-plan floor, and dispatches
+at most three live jobs. No live job runs after failed normal CI. Unsupported
+selectors, an expanded plan, missing or ambiguous evidence, stale revisions,
+and controller failures fail closed as a non-green check.
+
+Every new PR commit immediately cancels older coordinator and child runs. The
+child workflow checks out and revalidates the exact approved SHA,
+and the controller accepts only the returned child run ID plus evidence bound to
+the expected SHA, plan digest, correlation ID, job, and matrix shard. The model
+can add coverage but cannot remove the deterministic floor.
+
+Fork Advisor planning remains automatic and secret-free. Secret-bearing live
+execution of fork code is never dispatched: a protected-environment approval
+cannot prevent fork code from reading repository-level E2E secrets. When a fork
+needs live coverage, a maintainer must review the revision and promote it to a
+trusted upstream branch; the normal exact-head CI and coordinator flow then
+applies to that upstream revision.
+
+Rollout is intentionally two-step: observe the check in non-required mode, then
+add the exact `E2E / Required Live` name to the `main` ruleset and enable strict
+up-to-date required checks. Keep the
+post-merge shadow check enabled as defense in depth and review its failures
+before cutting a release tag. Repository settings are enforcement controls and
+cannot be activated by this pull request alone.
+
 ## Required secret
 
 Configure this repository secret for E2E recommendations:

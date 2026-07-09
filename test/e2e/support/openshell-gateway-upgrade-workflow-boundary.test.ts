@@ -6,6 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { readYaml, type Workflow } from "../../helpers/e2e-workflow-contract.ts";
 import {
   evaluateE2eWorkflowDispatchSelectors,
   readFreeStandingJobsInventory,
@@ -50,6 +51,24 @@ describe("OpenShell gateway upgrade workflow boundary", () => {
     expect(inventory.targetToJob.get("openshell-gateway-upgrade")).toBe(
       "openshell-gateway-upgrade",
     );
+  });
+
+  it("reclaims deterministic hosted-runner space before building both upgrade images", () => {
+    const workflow = readYaml<Workflow>(".github/workflows/e2e.yaml");
+    const steps = workflow.jobs["openshell-gateway-upgrade"]?.steps ?? [];
+    const reclaimIndex = steps.findIndex(
+      (step) => step.name === "Reclaim runner disk for dual-version upgrade images",
+    );
+    const testIndex = steps.findIndex(
+      (step) => step.name === "Run OpenShell gateway upgrade live Vitest test",
+    );
+
+    expect(reclaimIndex).toBeGreaterThan(0);
+    expect(reclaimIndex).toBeLessThan(testIndex);
+    expect(steps[reclaimIndex]?.run).toContain(
+      "sudo rm -rf -- /usr/local/lib/android /usr/share/dotnet /opt/ghc",
+    );
+    expect(steps[reclaimIndex]?.run).toContain("docker system prune --all --force");
   });
 
   it("freshens only the retryable old fixture install", () => {
