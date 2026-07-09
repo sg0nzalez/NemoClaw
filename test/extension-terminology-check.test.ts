@@ -22,6 +22,7 @@ import {
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const TEMP_ROOT = path.join(REPO_ROOT, "test", ".tmp");
 const temporaryRoots: string[] = [];
+const runsAsRoot = typeof process.getuid === "function" && process.getuid() === 0;
 
 function createTemporaryRoot(prefix: string): string {
   mkdirSync(TEMP_ROOT, { recursive: true });
@@ -268,7 +269,7 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
     ]);
   });
 
-  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+  it.skipIf(process.platform === "win32" || runsAsRoot)(
     "warns and continues after permission errors",
     () => {
       const root = createTemporaryRoot("nemoclaw-extension-terminology-permission-");
