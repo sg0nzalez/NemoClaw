@@ -26,7 +26,7 @@ const SKIP_DIRS = new Set([".git", ".venv", "coverage", "dist", "node_modules"])
 const RULES: readonly TerminologyRule[] = [
   {
     term: "NemoClaw plugin SDK",
-    pattern: /\b(?:public\s+)?NemoClaw\s+(?:plugin\s+)?SDK\b/i,
+    pattern: /\b(?:public\s+)?NemoClaw\s+(?:(?:plugin|extension)\s+)?SDK\b/i,
     detail: "describe any NemoClaw SDK as reserved, future, unavailable, or non-committed",
   },
   {

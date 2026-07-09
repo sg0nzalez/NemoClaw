@@ -1,8 +1,23 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it } from "vitest";
-import { findExtensionTerminologyViolations } from "../scripts/checks/extension-terminology";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { CHECKS } from "../scripts/checks/run";
+import {
+  findExtensionTerminologyViolations,
+  findRepositoryExtensionTerminologyViolations,
+} from "../scripts/checks/extension-terminology";
+
+const temporaryRoots: string[] = [];
+
+afterEach(() => {
+  for (const root of temporaryRoots.splice(0)) {
+    rmSync(root, { force: true, recursive: true });
+  }
+});
 
 describe("extension terminology guard", () => {
   it.each([
@@ -47,9 +62,10 @@ NemoClaw does not guarantee a migration guarantee for candidate lifecycle contri
     expect(findExtensionTerminologyViolations(source, "docs/example.mdx")).toEqual([]);
   });
 
-  it("flags wording that presents a current public SDK", () => {
-    const source = "Use the public NemoClaw plugin SDK to build a third-party lifecycle extension.";
-
+  it.each([
+    "Use the public NemoClaw plugin SDK to build a third-party lifecycle extension.",
+    "Use the public NemoClaw extension SDK to build a third-party lifecycle extension.",
+  ])("flags wording that presents a current public SDK", (source) => {
     expect(findExtensionTerminologyViolations(source, "docs/example.mdx")).toMatchObject([
       {
         file: "docs/example.mdx",
@@ -94,5 +110,36 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
         "docs/example.mdx",
       ),
     ).toMatchObject([{ term: "NemoClaw compatibility commitment" }]);
+  });
+
+  it("scans configured markdown and mdx documentation roots", () => {
+    const root = path.join(tmpdir(), `nemoclaw-extension-terminology-${process.pid}-${Date.now()}`);
+    temporaryRoots.push(root);
+    mkdirSync(path.join(root, "nested"), { recursive: true });
+    writeFileSync(path.join(root, "allowed.mdx"), "The NemoClaw plugin SDK is reserved.");
+    writeFileSync(
+      path.join(root, "nested", "violation.md"),
+      "Use the public NemoClaw extension SDK today.",
+    );
+    writeFileSync(path.join(root, "ignored.txt"), "The NemoClaw plugin registry accepts modules.");
+
+    expect(findRepositoryExtensionTerminologyViolations([root])).toMatchObject([
+      {
+        file: path.relative(path.resolve(import.meta.dirname, ".."), path.join(root, "nested", "violation.md")),
+        line: 1,
+        term: "NemoClaw plugin SDK",
+      },
+    ]);
+  });
+
+  it("registers the extension terminology check with the local check runner", () => {
+    expect(CHECKS).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          args: ["scripts/checks/extension-terminology.ts"],
+          name: "extension-terminology",
+        }),
+      ]),
+    );
   });
 });
