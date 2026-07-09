@@ -96,6 +96,14 @@ runner.runOpenshell = (args) => {
 runner.runCapture = (command) => {
   commands.push(commandText(command));
   const text = commandText(command);
+  if (text.endsWith("sandbox exec -n dcode-landlock-flow -- dcode identity")) {
+    return [
+      "Route:    inference",
+      "Provider: nvidia-prod",
+      "Model:    openai:nvidia/nemotron-3-super-120b-a12b",
+      "Endpoint: https://inference.local/v1",
+    ].join("\n");
+  }
   if (text.includes("openshell sandbox get") || text.includes("openshell sandbox list")) {
     return "";
   }
