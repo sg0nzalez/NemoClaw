@@ -148,9 +148,10 @@ network_policies:
       "alpha",
       "--",
       "sh",
-      "-lc",
+      "-c",
       expect.stringContaining("command -v nvidia-smi"),
     ]);
+    expect(commands.map((entry) => entry.args)).not.toContainEqual(expect.arrayContaining(["-lc"]));
     expect(commands[1].args.join(" ")).toContain("/proc/self/comm");
     expect(commands[1].args.join(" ")).not.toContain("ls /proc/self/task");
     expect(commands[2].args.join(" ")).toContain("cuInit(0)");

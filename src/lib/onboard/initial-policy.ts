@@ -105,23 +105,36 @@ export type DirectSandboxGpuProofCommand = {
 export function buildDirectSandboxGpuProofCommands(
   sandboxName: string,
 ): DirectSandboxGpuProofCommand[] {
+  // Keep these probes off login-shell startup files. They validate low-level
+  // GPU visibility, and profile hooks may source NemoClaw gateway auth state
+  // before nvidia-smi or cuInit can run.
+  const execProof = (script: string): string[] => [
+    "sandbox",
+    "exec",
+    "-n",
+    sandboxName,
+    "--",
+    "sh",
+    "-c",
+    script,
+  ];
   return [
     {
       id: "nvidia-smi",
       label: "nvidia-smi when available",
-      args: ["sandbox", "exec", "-n", sandboxName, "--", "sh", "-lc", NVIDIA_SMI_OPTIONAL_PROBE],
+      args: execProof(NVIDIA_SMI_OPTIONAL_PROBE),
     },
     {
       id: "proc-comm-write",
       label: "/proc/<pid>/task/<tid>/comm write",
       optional: true,
-      args: ["sandbox", "exec", "-n", sandboxName, "--", "sh", "-lc", PROC_COMM_WRITE_PROBE],
+      args: execProof(PROC_COMM_WRITE_PROBE),
     },
     {
       id: "cuda-init",
       label: "cuInit(0) via libcuda.so.1",
       optional: true,
-      args: ["sandbox", "exec", "-n", sandboxName, "--", "sh", "-lc", CUDA_INIT_PROBE],
+      args: execProof(CUDA_INIT_PROBE),
     },
   ];
 }
