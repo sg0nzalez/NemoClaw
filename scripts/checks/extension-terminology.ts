@@ -100,6 +100,22 @@ function sentenceContext(source: string, index: number, matchLength: number): st
   return source.slice(start + 1, end);
 }
 
+function clauseContext(context: string, matchText: string): string {
+  const index = context.indexOf(matchText);
+  if (index < 0) return context;
+  const start = Math.max(context.lastIndexOf(",", index - 1), context.lastIndexOf(";", index - 1));
+  const after = index + matchText.length;
+  const ends = [context.indexOf(",", after), context.indexOf(";", after)].filter(
+    (position) => position >= 0,
+  );
+  const end = ends.length === 0 ? context.length : Math.min(...ends);
+  return context.slice(start + 1, end);
+}
+
+function isAllowedContext(context: string, matchText: string): boolean {
+  return ALLOWED_CONTEXT_PATTERN.test(clauseContext(context, matchText));
+}
+
 function lineForIndex(source: string, index: number): number {
   return source.slice(0, index).split("\n").length;
 }
@@ -115,7 +131,7 @@ export function findExtensionTerminologyViolations(
     for (const match of source.matchAll(pattern)) {
       const index = match.index ?? 0;
       const context = sentenceContext(source, index, match[0].length);
-      if (ALLOWED_CONTEXT_PATTERN.test(context)) continue;
+      if (isAllowedContext(context, match[0])) continue;
       violations.push({
         file,
         line: lineForIndex(source, index),
