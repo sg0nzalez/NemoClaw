@@ -164,10 +164,16 @@ function sentenceContext(
     end: (delimiter.index ?? 0) + delimiter[0].length,
     start: delimiter.index ?? 0,
   }));
-  const startDelimiter = delimiters.findLast((delimiter) => delimiter.start < index);
+  let start = 0;
+  for (let delimiterIndex = delimiters.length - 1; delimiterIndex >= 0; delimiterIndex -= 1) {
+    const delimiter = delimiters[delimiterIndex];
+    if (delimiter !== undefined && delimiter.start < index) {
+      start = delimiter.end;
+      break;
+    }
+  }
   const after = index + matchLength;
   const endDelimiter = delimiters.find((delimiter) => delimiter.start >= after);
-  const start = startDelimiter === undefined ? 0 : startDelimiter.end;
   const end = endDelimiter === undefined ? source.length : endDelimiter.start;
   return { start, text: source.slice(start, end) };
 }
