@@ -219,7 +219,7 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
     ]);
   });
 
-  it("handles repeated allowed-context terms without excessive regex work", () => {
+  it("flags current product promises after repeated allowed-context terms", () => {
     const source = `The NemoClaw plugin SDK is ${"not ".repeat(10_000)}available today.`;
 
     expect(findExtensionTerminologyViolations(source, "docs/example.mdx")).toEqual([
@@ -291,7 +291,7 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
     ]);
   });
 
-  it.each([".next", ".turbo", ".vercel", "build", "out"])(
+  it.each([".cache", ".next", ".parcel-cache", ".turbo", ".vercel", "build", "out", "target"])(
     "ignores generated documentation under %s",
     (directoryName) => {
       const root = createTemporaryRoot("nemoclaw-extension-terminology-skip-dir-");
@@ -303,6 +303,45 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
       expect(findRepositoryExtensionTerminologyViolations([root])).toEqual([]);
     },
   );
+
+  it("warns and skips oversized documentation files", () => {
+    const root = createTemporaryRoot("nemoclaw-extension-terminology-large-file-");
+    temporaryRoots.push(root);
+    const warnings: { file: string; message: string }[] = [];
+    const largeFile = path.join(root, "large.md");
+    writeNewFile(largeFile, `${"x".repeat(1_000_001)} Use the public NemoClaw extension SDK today.`);
+
+    expect(
+      findRepositoryExtensionTerminologyViolations({
+        onWarning: (warning) => warnings.push(warning),
+        roots: [root],
+      }),
+    ).toEqual([]);
+    expect(warnings).toEqual([
+      expect.objectContaining({
+        file: path.relative(REPO_ROOT, largeFile),
+        message: "documentation file is too large for terminology scan",
+      }),
+    ]);
+  });
+
+  it("warns and skips scan roots outside the repository", () => {
+    const warnings: { file: string; message: string }[] = [];
+    const escapedRoot = path.dirname(REPO_ROOT);
+
+    expect(
+      findRepositoryExtensionTerminologyViolations({
+        onWarning: (warning) => warnings.push(warning),
+        roots: [escapedRoot],
+      }),
+    ).toEqual([]);
+    expect(warnings).toEqual([
+      {
+        file: escapedRoot,
+        message: "scan root escapes repository root",
+      },
+    ]);
+  });
 
   it("warns and continues after filesystem scan errors", () => {
     const root = createTemporaryRoot("nemoclaw-extension-terminology-errors-");

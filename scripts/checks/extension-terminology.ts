@@ -39,9 +39,12 @@ type ScanOptions = {
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const DOCUMENTATION_FILE_PATTERN = /\.(?:md|mdx)$/i;
+const MAX_DOCUMENTATION_FILE_BYTES = 1_000_000;
 const SKIP_DIRS = new Set([
+  ".cache",
   ".git",
   ".next",
+  ".parcel-cache",
   ".turbo",
   ".venv",
   ".vercel",
@@ -50,6 +53,7 @@ const SKIP_DIRS = new Set([
   "dist",
   "node_modules",
   "out",
+  "target",
 ]);
 const EXTENSION_SURFACE_PATTERN =
   /\b(?:extension|plugins?|packages?|lifecycle contributions?|public seams?|registr(?:y|ies))\b/i;
@@ -133,6 +137,14 @@ function warnFile(
 ): void {
   const message = error instanceof Error ? error.message : String(error);
   onWarning?.({ file: relativeFile(absolutePath), message });
+}
+
+function warnRoot(
+  onWarning: ((warning: ScanWarning) => void) | undefined,
+  root: string,
+  message: string,
+): void {
+  onWarning?.({ file: root, message });
 }
 
 function isWithinDirectory(parent: string, child: string): boolean {
@@ -296,6 +308,10 @@ export function findRepositoryExtensionTerminologyViolations(
   const violations: ExtensionTerminologyViolation[] = [];
   for (const root of scanOptions.roots ?? ["docs"]) {
     const absoluteRoot = path.resolve(REPO_ROOT, root);
+    if (!isWithinDirectory(REPO_ROOT, absoluteRoot)) {
+      warnRoot(scanOptions.onWarning, root, "scan root escapes repository root");
+      continue;
+    }
     for (const absolutePath of walkDocumentationFiles({
       directory: absoluteRoot,
       onWarning: scanOptions.onWarning,
@@ -303,6 +319,11 @@ export function findRepositoryExtensionTerminologyViolations(
     })) {
       const file = relativeFile(absolutePath);
       try {
+        const size = lstatSync(absolutePath).size;
+        if (size > MAX_DOCUMENTATION_FILE_BYTES) {
+          warnFile(scanOptions.onWarning, absolutePath, "documentation file is too large for terminology scan");
+          continue;
+        }
         violations.push(...findExtensionTerminologyViolations(readFileSync(absolutePath, "utf8"), file));
       } catch (error) {
         warnFile(scanOptions.onWarning, absolutePath, error);
