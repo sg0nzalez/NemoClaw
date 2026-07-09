@@ -103,6 +103,8 @@ const ALLOWED_CONTEXT_PATTERN = new RegExp(
   `${ALLOWED_BOUNDARY}(?:${ALLOWED_CONTEXT_TERMS.join("|")})${ALLOWED_TAIL_BOUNDARY}`,
   "i",
 );
+const CURRENT_PRODUCT_PROMISE_PATTERN =
+  /\b(?:accepts?|accepting|(?:available|shipping)\s+(?:now|today)|(?:provides?|offers?|publishes?|makes?)\b[^\n,;]{0,80}\b(?:commitment|contract|guarantee|promise|stability|stable|supported))\b/i;
 
 function isSkipped(absolutePath: string): boolean {
   const segments = path.relative(REPO_ROOT, absolutePath).split(path.sep);
@@ -223,7 +225,7 @@ function clauseContext(context: string, index: number, matchLength: number): str
 
 function isAllowedContext(context: string, index: number, matchLength: number): boolean {
   const clause = clauseContext(context, index, matchLength);
-  return ALLOWED_CONTEXT_PATTERN.test(clause);
+  return ALLOWED_CONTEXT_PATTERN.test(clause) && !CURRENT_PRODUCT_PROMISE_PATTERN.test(clause);
 }
 
 function isExtensionSurfaceCommitment(context: string): boolean {

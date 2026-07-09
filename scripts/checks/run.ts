@@ -7,11 +7,13 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-type CheckCommand = {
-  name: string;
-  command: string;
-  args: string[];
+export type CheckCommand = {
+  readonly name: string;
+  readonly command: string;
+  readonly args: readonly string[];
 };
+
+type CheckRunner = (check: CheckCommand) => { readonly status: number | null };
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const TSX = process.platform === "win32" ? "tsx.cmd" : "tsx";
@@ -78,17 +80,29 @@ const CHECKS: readonly CheckCommand[] = [
   },
 ];
 
-function main(): void {
-  for (const check of CHECKS) {
-    const result = spawnSync(check.command, check.args, {
+export function listChecks(): readonly CheckCommand[] {
+  return CHECKS.map((check) => ({ ...check, args: [...check.args] }));
+}
+
+export function runChecks(
+  runner: CheckRunner = (check) =>
+    spawnSync(check.command, [...check.args], {
       cwd: REPO_ROOT,
       stdio: "inherit",
-    });
+    }),
+): number {
+  for (const check of CHECKS) {
+    const result = runner(check);
     if (result.status !== 0) {
       console.error(`Check failed: ${check.name}`);
-      process.exit(result.status ?? 1);
+      return result.status ?? 1;
     }
   }
+  return 0;
+}
+
+function main(): void {
+  process.exitCode = runChecks();
 }
 
 const invokedPath = process.argv[1];

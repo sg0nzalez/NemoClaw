@@ -13,11 +13,12 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   findExtensionTerminologyViolations,
   findRepositoryExtensionTerminologyViolations,
 } from "../scripts/checks/extension-terminology";
+import { listChecks, runChecks } from "../scripts/checks/run";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const TEMP_ROOT = path.join(REPO_ROOT, "test", ".tmp");
@@ -149,6 +150,19 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
     ]);
   });
 
+  it.each([
+    ["The NemoClaw plugin SDK is reserved and available today.", "NemoClaw plugin SDK"],
+    ["The NemoClaw plugin registry is not offered but accepts modules today.", "NemoClaw plugin registry"],
+    [
+      "NemoClaw does not promise SemVer stability but provides a semantic-versioning guarantee for lifecycle contributions today.",
+      "NemoClaw semantic-versioning promise",
+    ],
+  ])("flags same-clause reserved wording with current promises", (source, term) => {
+    expect(findExtensionTerminologyViolations(source, "docs/example.mdx")).toMatchObject([
+      { line: 1, term },
+    ]);
+  });
+
   it("flags current SDK wording when allowed words describe another surface", () => {
     const source = "Unlike the reserved OpenClaw plugin SDK, the public NemoClaw extension SDK is available today.";
 
@@ -192,6 +206,19 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
         file: "docs/example.mdx",
         line: 1,
         term: "NemoClaw compatibility commitment",
+      },
+    ]);
+  });
+
+  it("handles repeated allowed-context terms without excessive regex work", () => {
+    const source = `The NemoClaw plugin SDK is ${"not ".repeat(10_000)}available today.`;
+
+    expect(findExtensionTerminologyViolations(source, "docs/example.mdx")).toEqual([
+      {
+        detail: "describe any NemoClaw SDK as reserved, future, unavailable, or non-committed",
+        file: "docs/example.mdx",
+        line: 1,
+        term: "NemoClaw plugin SDK",
       },
     ]);
   });
@@ -326,6 +353,40 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
     expect(warnings).toEqual([
       expect.objectContaining({ file: path.relative(REPO_ROOT, path.join(nested, "loop")) }),
     ]);
+  });
+
+  it("registers extension terminology without import-time execution", () => {
+    const extensionCheck = listChecks().find((check) => check.name === "extension-terminology");
+
+    expect(extensionCheck).toEqual({
+      args: ["scripts/checks/extension-terminology.ts"],
+      command: process.platform === "win32" ? "tsx.cmd" : "tsx",
+      name: "extension-terminology",
+    });
+  });
+
+  it("runs checks through an injectable runner", () => {
+    const runner = vi.fn(() => ({ status: 0 }));
+
+    expect(runChecks(runner)).toBe(0);
+    expect(runner).toHaveBeenCalledTimes(listChecks().length);
+    expect(runner).toHaveBeenCalledWith(
+      expect.objectContaining({
+        args: ["scripts/checks/extension-terminology.ts"],
+        name: "extension-terminology",
+      }),
+    );
+  });
+
+  it("stops check execution after the first injected failure", () => {
+    const runner = vi.fn((check: { readonly name: string }) => ({
+      status: check.name === "extension-terminology" ? 7 : 0,
+    }));
+
+    expect(runChecks(runner)).toBe(7);
+    expect(runner).toHaveBeenCalledTimes(
+      listChecks().findIndex((check) => check.name === "extension-terminology") + 1,
+    );
   });
 
   it("does not follow symlinks outside scanned documentation roots", () => {
