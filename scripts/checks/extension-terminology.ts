@@ -86,7 +86,11 @@ function* walkDocumentationFiles(directory: string): Generator<string> {
   }
 }
 
-function sentenceContext(source: string, index: number, matchLength: number): string {
+function sentenceContext(
+  source: string,
+  index: number,
+  matchLength: number,
+): { readonly text: string; readonly start: number } {
   const start = Math.max(
     source.lastIndexOf("\n", index - 1),
     source.lastIndexOf(".", index - 1),
@@ -101,14 +105,12 @@ function sentenceContext(source: string, index: number, matchLength: number): st
     source.indexOf("?", after),
   ].filter((position) => position >= 0);
   const end = ends.length === 0 ? source.length : Math.min(...ends);
-  return source.slice(start + 1, end);
+  return { start: start + 1, text: source.slice(start + 1, end) };
 }
 
-function clauseContext(context: string, matchText: string): string {
-  const index = context.indexOf(matchText);
-  if (index < 0) return context;
+function clauseContext(context: string, index: number, matchLength: number): string {
   const start = Math.max(context.lastIndexOf(",", index - 1), context.lastIndexOf(";", index - 1));
-  const after = index + matchText.length;
+  const after = index + matchLength;
   const ends = [context.indexOf(",", after), context.indexOf(";", after)].filter(
     (position) => position >= 0,
   );
@@ -116,8 +118,8 @@ function clauseContext(context: string, matchText: string): string {
   return context.slice(start + 1, end);
 }
 
-function isAllowedContext(context: string, matchText: string): boolean {
-  return ALLOWED_CONTEXT_PATTERN.test(clauseContext(context, matchText));
+function isAllowedContext(context: string, index: number, matchLength: number): boolean {
+  return ALLOWED_CONTEXT_PATTERN.test(clauseContext(context, index, matchLength));
 }
 
 function lineForIndex(source: string, index: number): number {
@@ -135,8 +137,9 @@ export function findExtensionTerminologyViolations(
     for (const match of source.matchAll(pattern)) {
       const index = match.index ?? 0;
       const context = sentenceContext(source, index, match[0].length);
-      if (rule.include !== undefined && !rule.include(context)) continue;
-      if (isAllowedContext(context, match[0])) continue;
+      const contextIndex = index - context.start;
+      if (rule.include !== undefined && !rule.include(context.text)) continue;
+      if (isAllowedContext(context.text, contextIndex, match[0].length)) continue;
       violations.push({
         file,
         line: lineForIndex(source, index),

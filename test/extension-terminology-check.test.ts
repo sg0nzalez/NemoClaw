@@ -110,6 +110,15 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
     ]);
   });
 
+  it("flags a later current SDK promise after an earlier identical reserved term", () => {
+    const source =
+      "The NemoClaw plugin SDK is reserved, but the public NemoClaw plugin SDK is available today.";
+
+    expect(findExtensionTerminologyViolations(source, "docs/example.mdx")).toMatchObject([
+      { line: 1, term: "NemoClaw plugin SDK" },
+    ]);
+  });
+
   it("keeps compatibility commitment scoped to extension surfaces", () => {
     expect(
       findExtensionTerminologyViolations(
@@ -151,7 +160,7 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
 
     expect(findRepositoryExtensionTerminologyViolations([root])).toMatchObject([
       {
-        file: path.relative(path.resolve(import.meta.dirname, ".."), path.join(root, "nested", "violation.md")),
+        file: path.relative(process.cwd(), path.join(root, "nested", "violation.md")),
         line: 1,
         term: "NemoClaw plugin SDK",
       },
