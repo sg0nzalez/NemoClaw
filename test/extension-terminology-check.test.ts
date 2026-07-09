@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  chmodSync,
   closeSync,
   mkdirSync,
   mkdtempSync,
@@ -79,7 +80,31 @@ describe("extension terminology guard", () => {
     "reserved;",
     "reserved:",
     "reserved,",
+    "reserved.",
+    "not offered.",
+    "not available.",
+    "not committed.",
+    "not guaranteed.",
+    "not promised.",
+    "not stable.",
+    "not supported.",
+    "unavailable.",
     "non-committed:",
+    "non-committed.",
+    "non–committed.",
+    "no current.",
+    "no public.",
+    "no stable.",
+    "no supported.",
+    "no shipping.",
+    "does not offer.",
+    "does not commit.",
+    "does not guarantee.",
+    "does not promise.",
+    "does not provide.",
+    "not yet.",
+    "unmet gates.",
+    "before SDK stabilization.",
   ])("allows %s SDK wording", (allowedContext) => {
     const source = `The NemoClaw plugin SDK is ${allowedContext} for extension authors.`;
 
@@ -170,6 +195,12 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
     ]);
   });
 
+  it("handles long lines without excessive regex work", () => {
+    const source = `The NemoClaw plugin SDK is reserved. ${"x".repeat(50_000)}`;
+
+    expect(findExtensionTerminologyViolations(source, "docs/example.mdx")).toEqual([]);
+  });
+
   it("keeps compatibility commitment scoped to extension surfaces", () => {
     expect(
       findExtensionTerminologyViolations(
@@ -234,6 +265,65 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
     ).toMatchObject([{ file: path.relative(REPO_ROOT, path.join(root, "violation.md")) }]);
     expect(warnings).toEqual([
       expect.objectContaining({ file: path.relative(REPO_ROOT, nonDirectoryRoot) }),
+    ]);
+  });
+
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "warns and continues after permission errors",
+    () => {
+      const root = createTemporaryRoot("nemoclaw-extension-terminology-permission-");
+      temporaryRoots.push(root);
+      const warnings: { file: string; message: string }[] = [];
+      const restricted = path.join(root, "restricted");
+      mkdirSync(restricted, { recursive: true });
+      chmodSync(restricted, 0o000);
+
+      expect(
+        findRepositoryExtensionTerminologyViolations({
+          onWarning: (warning) => warnings.push(warning),
+          roots: [root],
+        }),
+      ).toEqual([]);
+      chmodSync(restricted, 0o700);
+      expect(warnings).toEqual([
+        expect.objectContaining({ file: path.relative(REPO_ROOT, restricted) }),
+      ]);
+    },
+  );
+
+  it("warns and continues after broken symlinks", () => {
+    const root = createTemporaryRoot("nemoclaw-extension-terminology-broken-symlink-");
+    temporaryRoots.push(root);
+    const warnings: { file: string; message: string }[] = [];
+    mkdirSync(root, { recursive: true });
+    const broken = path.join(root, "missing.md");
+    symlinkSync(path.join(root, "does-not-exist.md"), broken, "file");
+
+    expect(
+      findRepositoryExtensionTerminologyViolations({
+        onWarning: (warning) => warnings.push(warning),
+        roots: [root],
+      }),
+    ).toEqual([]);
+    expect(warnings).toEqual([expect.objectContaining({ file: path.relative(REPO_ROOT, broken) })]);
+  });
+
+  it("warns and continues after circular symlinks", () => {
+    const root = createTemporaryRoot("nemoclaw-extension-terminology-circular-symlink-");
+    temporaryRoots.push(root);
+    const warnings: { file: string; message: string }[] = [];
+    const nested = path.join(root, "nested");
+    mkdirSync(nested, { recursive: true });
+    symlinkSync(root, path.join(nested, "loop"), "dir");
+
+    expect(
+      findRepositoryExtensionTerminologyViolations({
+        onWarning: (warning) => warnings.push(warning),
+        roots: [root],
+      }),
+    ).toEqual([]);
+    expect(warnings).toEqual([
+      expect.objectContaining({ file: path.relative(REPO_ROOT, path.join(nested, "loop")) }),
     ]);
   });
 

@@ -169,6 +169,8 @@ function* walkDocumentationFiles(options: WalkOptions): Generator<string> {
         const resolvedPath = realpathSync(absolutePath);
         if (!isWithinDirectory(root, resolvedPath)) {
           warnFile(onWarning, absolutePath, "symbolic link target is outside the scan root");
+        } else if (visited.has(resolvedPath)) {
+          warnFile(onWarning, absolutePath, "circular symbolic link target was already scanned");
         }
       } catch (error) {
         warnFile(onWarning, absolutePath, error);
