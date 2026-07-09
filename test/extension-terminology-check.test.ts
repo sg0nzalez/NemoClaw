@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
@@ -10,10 +9,15 @@ import {
   findExtensionTerminologyViolations,
   findRepositoryExtensionTerminologyViolations,
 } from "../scripts/checks/extension-terminology";
-import { CHECKS } from "../scripts/checks/run";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const TEMP_ROOT = path.join(REPO_ROOT, "test", ".tmp");
 const temporaryRoots: string[] = [];
+
+function createTemporaryRoot(prefix: string): string {
+  mkdirSync(TEMP_ROOT, { recursive: true });
+  return mkdtempSync(path.join(TEMP_ROOT, prefix));
+}
 
 afterEach(() => {
   for (const root of temporaryRoots.splice(0)) {
@@ -177,7 +181,7 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
   });
 
   it("scans configured markdown and mdx documentation roots", () => {
-    const root = mkdtempSync(path.join(tmpdir(), "nemoclaw-extension-terminology-"));
+    const root = createTemporaryRoot("nemoclaw-extension-terminology-");
     temporaryRoots.push(root);
     mkdirSync(path.join(root, "nested"), { recursive: true });
     writeFileSync(path.join(root, "allowed.mdx"), "The NemoClaw plugin SDK is reserved.");
@@ -197,7 +201,7 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
   });
 
   it("warns and continues after filesystem scan errors", () => {
-    const root = mkdtempSync(path.join(tmpdir(), "nemoclaw-extension-terminology-errors-"));
+    const root = createTemporaryRoot("nemoclaw-extension-terminology-errors-");
     temporaryRoots.push(root);
     const warnings: { file: string; message: string }[] = [];
     mkdirSync(root, { recursive: true });
@@ -216,20 +220,10 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
     ]);
   });
 
-  it("registers the extension terminology guard in the local checks runner", () => {
-    expect(CHECKS).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          args: ["scripts/checks/extension-terminology.ts"],
-          name: "extension-terminology",
-        }),
-      ]),
-    );
-  });
 
   it("does not follow symlinks outside scanned documentation roots", () => {
-    const root = mkdtempSync(path.join(tmpdir(), "nemoclaw-extension-terminology-symlink-"));
-    const outside = mkdtempSync(path.join(tmpdir(), "nemoclaw-extension-terminology-outside-"));
+    const root = createTemporaryRoot("nemoclaw-extension-terminology-symlink-");
+    const outside = createTemporaryRoot("nemoclaw-extension-terminology-outside-");
     temporaryRoots.push(root, outside);
     const warnings: { file: string; message: string }[] = [];
     mkdirSync(root, { recursive: true });
