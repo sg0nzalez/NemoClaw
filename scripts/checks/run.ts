@@ -82,7 +82,6 @@ function main(): void {
   for (const check of CHECKS) {
     const result = spawnSync(check.command, check.args, {
       cwd: REPO_ROOT,
-      encoding: "utf-8",
       stdio: "inherit",
     });
     if (result.status !== 0) {
