@@ -1,8 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { randomUUID } from "node:crypto";
-import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
@@ -16,9 +15,8 @@ const TEMP_ROOT = path.join(REPO_ROOT, "test", ".tmp");
 const temporaryRoots: string[] = [];
 
 function createTemporaryRoot(prefix: string): string {
-  const root = path.join(TEMP_ROOT, `${prefix}${randomUUID()}`);
-  mkdirSync(root, { recursive: true });
-  return root;
+  mkdirSync(TEMP_ROOT, { recursive: true });
+  return mkdtempSync(path.join(TEMP_ROOT, prefix));
 }
 
 afterEach(() => {
