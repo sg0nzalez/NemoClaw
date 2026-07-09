@@ -34,6 +34,12 @@ function createTemporaryRoot(prefix: string): string {
   return temporaryRoot;
 }
 
+function createExternalTemporaryRoot(prefix: string): string {
+  const temporaryRoot = path.join(path.dirname(REPO_ROOT), `${prefix}${randomUUID()}`);
+  mkdirSync(temporaryRoot, { mode: 0o700 });
+  return temporaryRoot;
+}
+
 function writeNewFile(filePath: string, content: string): void {
   const descriptor = openSync(filePath, "wx", 0o600);
   try {
@@ -384,6 +390,29 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
       {
         file: escapedRoot,
         message: "scan root escapes repository root",
+      },
+    ]);
+  });
+
+  it("warns and skips scan roots whose realpath escapes the repository", () => {
+    const root = createTemporaryRoot("nemoclaw-extension-terminology-root-symlink-");
+    const outside = createExternalTemporaryRoot("nemoclaw-extension-terminology-outside-root-");
+    temporaryRoots.push(root, outside);
+    const warnings: { file: string; message: string }[] = [];
+    writeNewFile(path.join(outside, "violation.md"), "Use the public NemoClaw extension SDK today.");
+    const symlinkRoot = path.join(root, "docs");
+    symlinkSync(outside, symlinkRoot, "dir");
+
+    expect(
+      findRepositoryExtensionTerminologyViolations({
+        onWarning: (warning) => warnings.push(warning),
+        roots: [symlinkRoot],
+      }),
+    ).toEqual([]);
+    expect(warnings).toEqual([
+      {
+        file: symlinkRoot,
+        message: "scan root realpath escapes repository root",
       },
     ]);
   });

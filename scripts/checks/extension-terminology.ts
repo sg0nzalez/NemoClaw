@@ -2,7 +2,16 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  fstatSync,
+  lstatSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+} from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -161,6 +170,17 @@ function isWithinDirectory(parent: string, child: string): boolean {
 
 function isRootList(options: ScanOptions | readonly string[]): options is readonly string[] {
   return Array.isArray(options);
+}
+
+function readCheckedDocumentationFile(absolutePath: string): string | null {
+  const descriptor = openSync(absolutePath, "r");
+  try {
+    const size = fstatSync(descriptor).size;
+    if (size > MAX_DOCUMENTATION_FILE_BYTES) return null;
+    return readFileSync(descriptor, "utf8");
+  } finally {
+    closeSync(descriptor);
+  }
 }
 
 function* walkDocumentationFiles(options: WalkOptions): Generator<string> {
@@ -335,19 +355,30 @@ export function findRepositoryExtensionTerminologyViolations(
       warnRoot(scanOptions.onWarning, root, "scan root escapes repository root");
       continue;
     }
+    let realRoot: string;
+    try {
+      realRoot = realpathSync(absoluteRoot);
+    } catch (error) {
+      warnRoot(scanOptions.onWarning, root, error instanceof Error ? error.message : String(error));
+      continue;
+    }
+    if (!isWithinDirectory(REPO_ROOT, realRoot)) {
+      warnRoot(scanOptions.onWarning, root, "scan root realpath escapes repository root");
+      continue;
+    }
     for (const absolutePath of walkDocumentationFiles({
       directory: absoluteRoot,
       onWarning: scanOptions.onWarning,
-      root: absoluteRoot,
+      root: realRoot,
     })) {
       const file = relativeFile(absolutePath);
       try {
-        const size = lstatSync(absolutePath).size;
-        if (size > MAX_DOCUMENTATION_FILE_BYTES) {
+        const source = readCheckedDocumentationFile(absolutePath);
+        if (source === null) {
           warnFile(scanOptions.onWarning, absolutePath, "documentation file is too large for terminology scan");
           continue;
         }
-        violations.push(...findExtensionTerminologyViolations(readFileSync(absolutePath, "utf8"), file));
+        violations.push(...findExtensionTerminologyViolations(source, file));
       } catch (error) {
         warnFile(scanOptions.onWarning, absolutePath, error);
       }
