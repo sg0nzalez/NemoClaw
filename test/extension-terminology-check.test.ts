@@ -54,11 +54,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  if (originalCi === undefined) {
-    delete process.env.CI;
-  } else {
-    process.env.CI = originalCi;
-  }
+  originalCi === undefined ? Reflect.deleteProperty(process.env, "CI") : (process.env.CI = originalCi);
   for (const root of temporaryRoots.splice(0)) {
     rmSync(root, { force: true, recursive: true });
   }
