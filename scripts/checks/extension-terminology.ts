@@ -46,7 +46,8 @@ type ScanOptions = {
   readonly onWarning?: (warning: ScanWarning) => void;
 };
 
-const TRUSTED_CI_WARNING = "extension-terminology: repository terminology scan only runs in trusted CI check runs";
+const TRUSTED_CI_WARNING =
+  "extension-terminology: repository terminology scan only runs in trusted CI check runs";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const DOCUMENTATION_FILE_PATTERN = /\.(?:md|mdx)$/i;

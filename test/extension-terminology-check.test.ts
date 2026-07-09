@@ -6,8 +6,8 @@ import { randomUUID } from "node:crypto";
 import {
   chmodSync,
   closeSync,
-  mkdirSync,
   existsSync,
+  mkdirSync,
   openSync,
   rmSync,
   symlinkSync,
@@ -24,7 +24,8 @@ import { listChecks, runChecks } from "../scripts/checks/run";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const TEMP_ROOT = path.join(REPO_ROOT, "test", ".tmp");
-const TRUSTED_CI_WARNING = "extension-terminology: repository terminology scan only runs in trusted CI check runs";
+const TRUSTED_CI_WARNING =
+  "extension-terminology: repository terminology scan only runs in trusted CI check runs";
 const temporaryRoots: string[] = [];
 const runsAsRoot = typeof process.getuid === "function" && process.getuid() === 0;
 const originalCi = process.env.CI;
