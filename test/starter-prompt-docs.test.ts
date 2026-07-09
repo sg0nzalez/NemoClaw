@@ -8,6 +8,8 @@ import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 import { describe, expect, it } from "vitest";
 
+import { extractStarterPrompt } from "../scripts/checks/local-credential-helper-pin";
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "..");
@@ -468,6 +470,26 @@ describe("starter prompt docs CTA", () => {
     }
     expect(formSource).not.toContain("localStorage");
     expect(formSource).not.toContain("sessionStorage");
+  });
+
+  it("keeps credential capture usable with buffered terminals and env-shebang launchers", () => {
+    const promptSource = fs.readFileSync(starterPromptSource, "utf8");
+    const prompt = extractStarterPrompt(promptSource, starterPromptSource);
+
+    expect(prompt).toContain(
+      "Do not wait for the helper process to exit before presenting the URL",
+    );
+    expect(prompt).toContain("buffers output from long-running commands");
+    expect(prompt).toContain("mode `0600` on macOS or Linux");
+    expect(prompt).toContain("Read only the first matching one-time URL");
+    expect(prompt).toContain("inspect the approved executable's first line");
+    expect(prompt).toContain("#!/usr/bin/env node");
+    expect(prompt).toContain("<absolute-node> --experimental-strip-types");
+    expect(prompt).toContain("invoke the launcher through that absolute interpreter");
+    expect(prompt).toContain("Never silently inherit the ambient `PATH`");
+    expect(prompt).toContain("Never reuse an old form tab or one-time URL");
+    expect(prompt).toContain("Credential submission accepted locally");
+    expect(prompt).toContain("does not prove that the approved command succeeded");
   });
 
   it("rejects missing, ambiguous, and unsafe credential schemas (#5048)", async () => {
