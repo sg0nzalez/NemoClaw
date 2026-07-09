@@ -17,12 +17,15 @@ type TerminologyRule = {
   readonly term: string;
   readonly pattern: RegExp;
   readonly detail: string;
+  readonly include?: (context: string) => boolean;
 };
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const DEFAULT_SCAN_ROOTS = Object.freeze(["docs"]);
 const DOCUMENTATION_FILE_PATTERN = /\.(?:md|mdx)$/i;
 const SKIP_DIRS = new Set([".git", ".venv", "coverage", "dist", "node_modules"]);
+const EXTENSION_SURFACE_PATTERN =
+  /\b(?:extension|plugins?|packages?|lifecycle contributions?|public seams?|registr(?:y|ies))\b/i;
 const RULES: readonly TerminologyRule[] = [
   {
     term: "NemoClaw plugin SDK",
@@ -55,12 +58,13 @@ const RULES: readonly TerminologyRule[] = [
   {
     term: "NemoClaw compatibility commitment",
     pattern:
-      /\bNemoClaw\b(?=[^\n.?!]{0,180}\b(?:extension|plugins?|packages?|lifecycle contributions?|public seams?|registr(?:y|ies))\b)(?![^\n.?!]{0,180}\bCLI\b)[^\n.?!]{0,120}\bcompatibility\b[^\n.?!]{0,80}\b(?:commitment|promise|guarantee|contract)\b/i,
+      /\bNemoClaw\b[^\n.?!]{0,120}\bcompatibility\b[^\n.?!]{0,80}\b(?:commitment|promise|guarantee|contract)\b/i,
     detail: "do not present a current compatibility commitment for extension surfaces",
+    include: (context) => EXTENSION_SURFACE_PATTERN.test(context) && !/\bCLI\b/i.test(context),
   },
 ];
 const ALLOWED_CONTEXT_PATTERN =
-  /(?:^|\s|[^\w-])(?:reserved|future|not\s+(?:offered|available|committed|guaranteed|promised|stable|supported)|unavailable|non[-\s]?committed|no\s+(?:current|public|stable|supported|shipping)|does\s+not\s+(?:offer|commit|guarantee|promise|provide)|not\s+yet|unmet\s+gates?|candidate|proposed|before\s+(?:SDK\s+)?stabili[sz]ation)(?:$|\s|[^\w-])/i;
+  /(?:^|[^\w])(?:reserved|future|not\s+(?:offered|available|committed|guaranteed|promised|stable|supported)|unavailable|non[-\s]?committed|no\s+(?:current|public|stable|supported|shipping)|does\s+not\s+(?:offer|commit|guarantee|promise|provide)|not\s+yet|unmet\s+gates?|candidate|proposed|before\s+(?:SDK\s+)?stabili[sz]ation)(?:$|[^\w])/i;
 
 function isSkipped(absolutePath: string): boolean {
   const segments = path.relative(REPO_ROOT, absolutePath).split(path.sep);
@@ -131,6 +135,7 @@ export function findExtensionTerminologyViolations(
     for (const match of source.matchAll(pattern)) {
       const index = match.index ?? 0;
       const context = sentenceContext(source, index, match[0].length);
+      if (rule.include !== undefined && !rule.include(context)) continue;
       if (isAllowedContext(context, match[0])) continue;
       violations.push({
         file,

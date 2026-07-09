@@ -48,6 +48,9 @@ describe("extension terminology guard", () => {
     "candidate",
     "proposed",
     "before SDK stabilization",
+    "-reserved-",
+    "-non-committed-",
+    "(candidate)",
   ])("allows %s SDK wording", (allowedContext) => {
     const source = `The NemoClaw plugin SDK is ${allowedContext} for extension authors.`;
 
@@ -120,12 +123,19 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
         "docs/example.mdx",
       ),
     ).toEqual([]);
-    expect(
-      findExtensionTerminologyViolations(
-        "NemoClaw provides a compatibility commitment for extension packages.",
-        "docs/example.mdx",
-      ),
-    ).toMatchObject([{ term: "NemoClaw compatibility commitment" }]);
+    const extensionViolations = findExtensionTerminologyViolations(
+      "NemoClaw provides a compatibility commitment for extension packages.",
+      "docs/example.mdx",
+    );
+    expect(extensionViolations).toHaveLength(1);
+    expect(extensionViolations).toMatchObject([
+      {
+        detail: "do not present a current compatibility commitment for extension surfaces",
+        file: "docs/example.mdx",
+        line: 1,
+        term: "NemoClaw compatibility commitment",
+      },
+    ]);
   });
 
   it("scans configured markdown and mdx documentation roots", () => {
