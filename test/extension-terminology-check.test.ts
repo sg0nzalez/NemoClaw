@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { closeSync, mkdirSync, mkdtempSync, openSync, rmSync, symlinkSync, writeSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
@@ -17,6 +17,15 @@ const temporaryRoots: string[] = [];
 function createTemporaryRoot(prefix: string): string {
   mkdirSync(TEMP_ROOT, { recursive: true });
   return mkdtempSync(path.join(TEMP_ROOT, prefix));
+}
+
+function writeNewFile(filePath: string, content: string): void {
+  const descriptor = openSync(filePath, "wx", 0o600);
+  try {
+    writeSync(descriptor, content);
+  } finally {
+    closeSync(descriptor);
+  }
 }
 
 afterEach(() => {
@@ -184,12 +193,12 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
     const root = createTemporaryRoot("nemoclaw-extension-terminology-");
     temporaryRoots.push(root);
     mkdirSync(path.join(root, "nested"), { recursive: true });
-    writeFileSync(path.join(root, "allowed.mdx"), "The NemoClaw plugin SDK is reserved.");
-    writeFileSync(
+    writeNewFile(path.join(root, "allowed.mdx"), "The NemoClaw plugin SDK is reserved.");
+    writeNewFile(
       path.join(root, "nested", "violation.md"),
       "Use the public NemoClaw extension SDK today.",
     );
-    writeFileSync(path.join(root, "ignored.txt"), "The NemoClaw plugin registry accepts modules.");
+    writeNewFile(path.join(root, "ignored.txt"), "The NemoClaw plugin registry accepts modules.");
 
     expect(findRepositoryExtensionTerminologyViolations([root])).toMatchObject([
       {
@@ -206,8 +215,8 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
     const warnings: { file: string; message: string }[] = [];
     mkdirSync(root, { recursive: true });
     const nonDirectoryRoot = path.join(root, "not-a-directory.txt");
-    writeFileSync(path.join(root, "violation.md"), "Use the public NemoClaw extension SDK today.");
-    writeFileSync(nonDirectoryRoot, "Use the public NemoClaw extension SDK today.");
+    writeNewFile(path.join(root, "violation.md"), "Use the public NemoClaw extension SDK today.");
+    writeNewFile(nonDirectoryRoot, "Use the public NemoClaw extension SDK today.");
 
     expect(
       findRepositoryExtensionTerminologyViolations({
@@ -228,7 +237,7 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
     const warnings: { file: string; message: string }[] = [];
     mkdirSync(root, { recursive: true });
     mkdirSync(outside, { recursive: true });
-    writeFileSync(path.join(outside, "violation.md"), "Use the public NemoClaw extension SDK today.");
+    writeNewFile(path.join(outside, "violation.md"), "Use the public NemoClaw extension SDK today.");
     symlinkSync(outside, path.join(root, "outside"), "dir");
     symlinkSync(path.join(outside, "violation.md"), path.join(root, "outside.md"), "file");
 
