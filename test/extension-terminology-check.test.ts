@@ -1,9 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { CHECKS } from "../scripts/checks/run";
 import {
@@ -11,6 +12,7 @@ import {
   findRepositoryExtensionTerminologyViolations,
 } from "../scripts/checks/extension-terminology";
 
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const temporaryRoots: string[] = [];
 
 afterEach(() => {
@@ -49,8 +51,11 @@ describe("extension terminology guard", () => {
     "proposed",
     "before SDK stabilization",
     "-reserved-",
+    "pre-reserved-post",
     "-non-committed-",
+    "pre-non-committed-post",
     "(candidate)",
+    "pre-candidate-post",
   ])("allows %s SDK wording", (allowedContext) => {
     const source = `The NemoClaw plugin SDK is ${allowedContext} for extension authors.`;
 
@@ -119,6 +124,19 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
     ]);
   });
 
+  it.each(["...", "?!", "!?"])("handles %s before compatibility context", (delimiter) => {
+    const source = `Reserved extension terminology${delimiter} NemoClaw provides a compatibility commitment for extension packages.`;
+
+    expect(findExtensionTerminologyViolations(source, "docs/example.mdx")).toEqual([
+      {
+        detail: "do not present a current compatibility commitment for extension surfaces",
+        file: "docs/example.mdx",
+        line: 1,
+        term: "NemoClaw compatibility commitment",
+      },
+    ]);
+  });
+
   it("keeps compatibility commitment scoped to extension surfaces", () => {
     expect(
       findExtensionTerminologyViolations(
@@ -159,11 +177,43 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
 
     expect(findRepositoryExtensionTerminologyViolations([root])).toMatchObject([
       {
-        file: path.relative(process.cwd(), path.join(root, "nested", "violation.md")),
+        file: path.relative(REPO_ROOT, path.join(root, "nested", "violation.md")),
         line: 1,
         term: "NemoClaw plugin SDK",
       },
     ]);
+  });
+
+  it("warns and continues after filesystem scan errors", () => {
+    const root = path.join(tmpdir(), `nemoclaw-extension-terminology-errors-${process.pid}-${Date.now()}`);
+    temporaryRoots.push(root);
+    const warnings: { file: string; message: string }[] = [];
+    mkdirSync(root, { recursive: true });
+    const nonDirectoryRoot = path.join(root, "not-a-directory.txt");
+    writeFileSync(path.join(root, "violation.md"), "Use the public NemoClaw extension SDK today.");
+    writeFileSync(nonDirectoryRoot, "Use the public NemoClaw extension SDK today.");
+
+    expect(
+      findRepositoryExtensionTerminologyViolations({
+        onWarning: (warning) => warnings.push(warning),
+        roots: [root, nonDirectoryRoot],
+      }),
+    ).toMatchObject([{ file: path.relative(REPO_ROOT, path.join(root, "violation.md")) }]);
+    expect(warnings).toEqual([
+      expect.objectContaining({ file: path.relative(REPO_ROOT, nonDirectoryRoot) }),
+    ]);
+  });
+
+  it("does not follow symlinks outside scanned documentation roots", () => {
+    const root = path.join(tmpdir(), `nemoclaw-extension-terminology-symlink-${process.pid}-${Date.now()}`);
+    const outside = path.join(tmpdir(), `nemoclaw-extension-terminology-outside-${process.pid}-${Date.now()}`);
+    temporaryRoots.push(root, outside);
+    mkdirSync(root, { recursive: true });
+    mkdirSync(outside, { recursive: true });
+    writeFileSync(path.join(outside, "violation.md"), "Use the public NemoClaw extension SDK today.");
+    symlinkSync(outside, path.join(root, "outside"), "dir");
+
+    expect(findRepositoryExtensionTerminologyViolations([root])).toEqual([]);
   });
 
   it("registers the extension terminology check with the local check runner", () => {

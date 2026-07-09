@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -18,6 +18,16 @@ type TerminologyRule = {
   readonly pattern: RegExp;
   readonly detail: string;
   readonly include?: (context: string) => boolean;
+};
+
+type ScanWarning = {
+  readonly file: string;
+  readonly message: string;
+};
+
+type ScanOptions = {
+  readonly roots?: readonly string[];
+  readonly onWarning?: (warning: ScanWarning) => void;
 };
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -71,15 +81,41 @@ function isSkipped(absolutePath: string): boolean {
   return segments.some((segment) => SKIP_DIRS.has(segment));
 }
 
-function* walkDocumentationFiles(directory: string): Generator<string> {
+function relativeFile(absolutePath: string): string {
+  return path.relative(REPO_ROOT, absolutePath).split(path.sep).join("/");
+}
+
+function warnFile(onWarning: ((warning: ScanWarning) => void) | undefined, absolutePath: string, error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error);
+  onWarning?.({ file: relativeFile(absolutePath), message });
+}
+
+function* walkDocumentationFiles(
+  directory: string,
+  onWarning?: (warning: ScanWarning) => void,
+): Generator<string> {
   if (!existsSync(directory) || isSkipped(directory)) return;
 
-  for (const entry of readdirSync(directory)) {
+  let entries: string[];
+  try {
+    entries = readdirSync(directory);
+  } catch (error) {
+    warnFile(onWarning, directory, error);
+    return;
+  }
+
+  for (const entry of entries) {
     const absolutePath = path.join(directory, entry);
     if (isSkipped(absolutePath)) continue;
-    const stats = statSync(absolutePath);
+    let stats: ReturnType<typeof lstatSync>;
+    try {
+      stats = lstatSync(absolutePath);
+    } catch (error) {
+      warnFile(onWarning, absolutePath, error);
+      continue;
+    }
     if (stats.isDirectory()) {
-      yield* walkDocumentationFiles(absolutePath);
+      yield* walkDocumentationFiles(absolutePath, onWarning);
     } else if (stats.isFile() && DOCUMENTATION_FILE_PATTERN.test(entry)) {
       yield absolutePath;
     }
@@ -91,20 +127,18 @@ function sentenceContext(
   index: number,
   matchLength: number,
 ): { readonly text: string; readonly start: number } {
-  const start = Math.max(
-    source.lastIndexOf("\n", index - 1),
-    source.lastIndexOf(".", index - 1),
-    source.lastIndexOf("!", index - 1),
-    source.lastIndexOf("?", index - 1),
-  );
+  const delimiterPattern = /\n|\.\.\.|[!?][!?]?|\./g;
+  let start = -1;
+  for (const delimiter of source.matchAll(delimiterPattern)) {
+    const delimiterStart = delimiter.index ?? 0;
+    if (delimiterStart >= index) break;
+    start = delimiterStart + delimiter[0].length - 1;
+  }
+
   const after = index + matchLength;
-  const ends = [
-    source.indexOf("\n", after),
-    source.indexOf(".", after),
-    source.indexOf("!", after),
-    source.indexOf("?", after),
-  ].filter((position) => position >= 0);
-  const end = ends.length === 0 ? source.length : Math.min(...ends);
+  delimiterPattern.lastIndex = after;
+  const nextDelimiter = delimiterPattern.exec(source);
+  const end = nextDelimiter === null ? source.length : nextDelimiter.index;
   return { start: start + 1, text: source.slice(start + 1, end) };
 }
 
@@ -156,21 +190,28 @@ export function findExtensionTerminologyViolations(
 }
 
 export function findRepositoryExtensionTerminologyViolations(
-  roots: readonly string[] = DEFAULT_SCAN_ROOTS,
+  options: ScanOptions | readonly string[] = {},
 ): readonly ExtensionTerminologyViolation[] {
+  const scanOptions: ScanOptions = Array.isArray(options) ? { roots: options } : options;
   const violations: ExtensionTerminologyViolation[] = [];
-  for (const root of roots) {
+  for (const root of scanOptions.roots ?? DEFAULT_SCAN_ROOTS) {
     const absoluteRoot = path.resolve(REPO_ROOT, root);
-    for (const absolutePath of walkDocumentationFiles(absoluteRoot)) {
-      const file = path.relative(REPO_ROOT, absolutePath).split(path.sep).join("/");
-      violations.push(...findExtensionTerminologyViolations(readFileSync(absolutePath, "utf8"), file));
+    for (const absolutePath of walkDocumentationFiles(absoluteRoot, scanOptions.onWarning)) {
+      const file = relativeFile(absolutePath);
+      try {
+        violations.push(...findExtensionTerminologyViolations(readFileSync(absolutePath, "utf8"), file));
+      } catch (error) {
+        warnFile(scanOptions.onWarning, absolutePath, error);
+      }
     }
   }
   return violations;
 }
 
 function main(): void {
-  const violations = findRepositoryExtensionTerminologyViolations();
+  const violations = findRepositoryExtensionTerminologyViolations({
+    onWarning: (warning) => console.warn(`${warning.file}: ${warning.message}`),
+  });
   if (violations.length === 0) {
     console.log("Extension terminology check passed.");
     return;
