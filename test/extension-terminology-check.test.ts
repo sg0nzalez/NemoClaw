@@ -20,13 +20,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   findExtensionTerminologyViolations,
   findRepositoryExtensionTerminologyViolations,
+  scanRepositoryExtensionTerminology,
 } from "../scripts/checks/extension-terminology";
 import { listChecks, runChecks } from "../scripts/checks/run";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const TEMP_ROOT = path.join(REPO_ROOT, "test", ".tmp");
-const TRUSTED_CI_WARNING =
-  "extension-terminology: repository terminology scan only runs in trusted CI check runs";
+const CHECK_RUNNER_CONTRACT_WARNING =
+  "extension-terminology: repository terminology scan only runs through the repository check runner";
 const temporaryRoots: string[] = [];
 const runsAsRoot = typeof process.getuid === "function" && process.getuid() === 0;
 const originalCi = process.env.CI;
@@ -304,8 +305,8 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
         onWarning: (warning) => warnings.push(warning),
         roots: [root],
       }),
-    ).toThrow(TRUSTED_CI_WARNING);
-    expect(warnings).toEqual([{ file: "<environment>", message: TRUSTED_CI_WARNING }]);
+    ).toThrow(CHECK_RUNNER_CONTRACT_WARNING);
+    expect(warnings).toEqual([{ file: "<environment>", message: CHECK_RUNNER_CONTRACT_WARNING }]);
     expect(existsSync(root)).toBe(false);
   });
 
@@ -324,7 +325,50 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
     );
 
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain(TRUSTED_CI_WARNING);
+    expect(result.stderr).toContain(CHECK_RUNNER_CONTRACT_WARNING);
+    expect(result.stdout).not.toContain("Extension terminology check passed.");
+  });
+
+  it("registered command path exits non-zero for prohibited docs wording", () => {
+    const root = createTemporaryRoot("docs-nemoclaw-extension-terminology-violation-");
+    temporaryRoots.push(root);
+    writeNewFile(path.join(root, "violation.md"), "Use the public NemoClaw extension SDK today.");
+
+    const result = spawnSync(
+      process.platform === "win32" ? "tsx.cmd" : "tsx",
+      ["scripts/checks/extension-terminology.ts", root],
+      {
+        cwd: REPO_ROOT,
+        encoding: "utf8",
+        env: { ...process.env, CI: "true" },
+      },
+    );
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("NemoClaw plugin SDK");
+    expect(result.stdout).not.toContain("Extension terminology check passed.");
+  });
+
+  it("CLI exits non-zero when configured docs cannot be scanned", () => {
+    const root = createTemporaryRoot("docs-nemoclaw-extension-terminology-large-file-");
+    temporaryRoots.push(root);
+    writeNewFile(
+      path.join(root, "large.md"),
+      `${"x".repeat(1_000_001)} Use the public NemoClaw extension SDK today.`,
+    );
+
+    const result = spawnSync(
+      process.platform === "win32" ? "tsx.cmd" : "tsx",
+      ["scripts/checks/extension-terminology.ts", root],
+      {
+        cwd: REPO_ROOT,
+        encoding: "utf8",
+        env: { ...process.env, CI: "true" },
+      },
+    );
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("could not scan 1 configured documentation path");
     expect(result.stdout).not.toContain("Extension terminology check passed.");
   });
 
@@ -372,7 +416,7 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
     expect(findRepositoryExtensionTerminologyViolations([root])).toEqual([]);
   });
 
-  it("warns and skips oversized documentation files", () => {
+  it("reports oversized documentation files as scan warnings", () => {
     const root = createTemporaryRoot("nemoclaw-extension-terminology-large-file-");
     temporaryRoots.push(root);
     const warnings: { file: string; message: string }[] = [];
@@ -380,11 +424,19 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
     writeNewFile(largeFile, `${"x".repeat(1_000_001)} Use the public NemoClaw extension SDK today.`);
 
     expect(
-      findRepositoryExtensionTerminologyViolations({
+      scanRepositoryExtensionTerminology({
         onWarning: (warning) => warnings.push(warning),
         roots: [root],
       }),
-    ).toEqual([]);
+    ).toEqual({
+      violations: [],
+      warnings: [
+        expect.objectContaining({
+          file: path.relative(REPO_ROOT, largeFile),
+          message: "documentation file is too large for terminology scan",
+        }),
+      ],
+    });
     expect(warnings).toEqual([
       expect.objectContaining({
         file: path.relative(REPO_ROOT, largeFile),

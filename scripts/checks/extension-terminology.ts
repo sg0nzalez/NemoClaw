@@ -41,13 +41,18 @@ type ScanWarning = {
   readonly message: string;
 };
 
+type RepositoryScanResult = {
+  readonly violations: readonly ExtensionTerminologyViolation[];
+  readonly warnings: readonly ScanWarning[];
+};
+
 type ScanOptions = {
   readonly roots?: readonly string[];
   readonly onWarning?: (warning: ScanWarning) => void;
 };
 
-const TRUSTED_CI_WARNING =
-  "extension-terminology: repository terminology scan only runs in trusted CI check runs";
+const CHECK_RUNNER_CONTRACT_WARNING =
+  "extension-terminology: repository terminology scan only runs through the repository check runner";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const DOCUMENTATION_FILE_PATTERN = /\.(?:md|mdx)$/i;
@@ -341,78 +346,98 @@ export function findExtensionTerminologyViolations(
 }
 
 /**
- * @internal CI-only documentation linter for trusted repository check runs.
+ * @internal Accidental direct-run guard for the repository check-runner contract.
  */
-function assertTrustedCi(onWarning: ((warning: ScanWarning) => void) | undefined): void {
+function assertCheckRunnerContract(onWarning: ((warning: ScanWarning) => void) | undefined): void {
   if (process.env.CI === "true") return;
-  warnRoot(onWarning, "<environment>", TRUSTED_CI_WARNING);
-  throw new Error(TRUSTED_CI_WARNING);
+  warnRoot(onWarning, "<environment>", CHECK_RUNNER_CONTRACT_WARNING);
+  throw new Error(CHECK_RUNNER_CONTRACT_WARNING);
 }
 
-export function findRepositoryExtensionTerminologyViolations(
+export function scanRepositoryExtensionTerminology(
   options: ScanOptions | readonly string[] = {},
-): readonly ExtensionTerminologyViolation[] {
+): RepositoryScanResult {
   const scanOptions: ScanOptions = isRootList(options) ? { roots: options } : options;
-  assertTrustedCi(scanOptions.onWarning);
+  const warnings: ScanWarning[] = [];
+  const onWarning = (warning: ScanWarning): void => {
+    warnings.push(warning);
+    scanOptions.onWarning?.(warning);
+  };
+  assertCheckRunnerContract(onWarning);
   const violations: ExtensionTerminologyViolation[] = [];
   for (const root of scanOptions.roots ?? ["docs"]) {
     const absoluteRoot = path.resolve(REPO_ROOT, root);
     if (!isWithinDirectory(REPO_ROOT, absoluteRoot)) {
-      warnRoot(scanOptions.onWarning, root, "scan root escapes repository root");
+      warnRoot(onWarning, root, "scan root escapes repository root");
       continue;
     }
     let realRoot: string;
     try {
       realRoot = realpathSync(absoluteRoot);
     } catch (error) {
-      warnRoot(scanOptions.onWarning, root, error instanceof Error ? error.message : String(error));
+      warnRoot(onWarning, root, error instanceof Error ? error.message : String(error));
       continue;
     }
     if (!isWithinDirectory(REPO_ROOT, realRoot)) {
-      warnRoot(scanOptions.onWarning, root, "scan root realpath escapes repository root");
+      warnRoot(onWarning, root, "scan root realpath escapes repository root");
       continue;
     }
     for (const absolutePath of walkDocumentationFiles({
       directory: absoluteRoot,
-      onWarning: scanOptions.onWarning,
+      onWarning,
       root: realRoot,
     })) {
       const file = relativeFile(absolutePath);
       try {
         const source = readCheckedDocumentationFile(absolutePath);
         if (source === null) {
-          warnFile(scanOptions.onWarning, absolutePath, "documentation file is too large for terminology scan");
+          warnFile(onWarning, absolutePath, "documentation file is too large for terminology scan");
           continue;
         }
         violations.push(...findExtensionTerminologyViolations(source, file));
       } catch (error) {
-        warnFile(scanOptions.onWarning, absolutePath, error);
+        warnFile(onWarning, absolutePath, error);
       }
     }
   }
-  return violations;
+  return { violations, warnings };
+}
+
+export function findRepositoryExtensionTerminologyViolations(
+  options: ScanOptions | readonly string[] = {},
+): readonly ExtensionTerminologyViolation[] {
+  return scanRepositoryExtensionTerminology(options).violations;
 }
 
 function main(): void {
-  let violations: readonly ExtensionTerminologyViolation[];
+  let result: RepositoryScanResult;
   try {
-    violations = findRepositoryExtensionTerminologyViolations({
+    const roots = process.argv.slice(2);
+    result = scanRepositoryExtensionTerminology({
       onWarning: (warning) => console.warn(`${warning.file}: ${warning.message}`),
+      roots: roots.length === 0 ? undefined : roots,
     });
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
     return;
   }
-  if (violations.length === 0) {
+  if (result.warnings.length > 0) {
+    console.error(
+      `Extension terminology check could not scan ${result.warnings.length} configured documentation path(s).`,
+    );
+    process.exitCode = 1;
+    return;
+  }
+  if (result.violations.length === 0) {
     console.log("Extension terminology check passed.");
     return;
   }
 
-  for (const violation of violations) {
+  for (const violation of result.violations) {
     console.error(`${violation.file}:${violation.line} [${violation.term}] ${violation.detail}`);
   }
-  console.error(`Found ${violations.length} extension terminology violation(s).`);
+  console.error(`Found ${result.violations.length} extension terminology violation(s).`);
   process.exitCode = 1;
 }
 
