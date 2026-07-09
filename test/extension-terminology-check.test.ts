@@ -189,7 +189,8 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
   });
 
   it("flags current SDK wording when allowed words describe another surface", () => {
-    const source = "Unlike the reserved OpenClaw plugin SDK, the public NemoClaw extension SDK is available today.";
+    const source =
+      "Unlike the reserved OpenClaw plugin SDK, the public NemoClaw extension SDK is available today.";
 
     expect(findExtensionTerminologyViolations(source, "docs/example.mdx")).toMatchObject([
       { line: 1, term: "NemoClaw plugin SDK" },
