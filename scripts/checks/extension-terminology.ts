@@ -37,6 +37,8 @@ type ScanOptions = {
   readonly onWarning?: (warning: ScanWarning) => void;
 };
 
+const TRUSTED_CI_WARNING = "repository terminology scan is intended for trusted CI check runs";
+
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const DOCUMENTATION_FILE_PATTERN = /\.(?:md|mdx)$/i;
 const MAX_DOCUMENTATION_FILE_BYTES = 1_000_000;
@@ -199,7 +201,13 @@ function* walkDocumentationFiles(options: WalkOptions): Generator<string> {
     }
     if (stats.isSymbolicLink()) {
       try {
-        // This CI-only documentation linter tolerates the lstat/realpath TOCTOU window.
+        /**
+         * Invalid state: symlink races could change targets between lstat and realpath.
+         * Source boundary: trusted repository documentation check runs.
+         * Source fix constraint: fd-based no-follow traversal is not portable in Node here.
+         * Regression test: "does not follow symlinks outside scanned documentation roots".
+         * Removal condition: replace before reusing this scanner for untrusted repositories.
+         */
         const resolvedPath = realpathSync(absolutePath);
         if (!isWithinDirectory(root, resolvedPath)) {
           warnFile(onWarning, absolutePath, "symbolic link target is outside the scan root");
@@ -317,6 +325,9 @@ export function findRepositoryExtensionTerminologyViolations(
   options: ScanOptions | readonly string[] = {},
 ): readonly ExtensionTerminologyViolation[] {
   const scanOptions: ScanOptions = isRootList(options) ? { roots: options } : options;
+  if (process.env.CI !== "true") {
+    warnRoot(scanOptions.onWarning, "<environment>", TRUSTED_CI_WARNING);
+  }
   const violations: ExtensionTerminologyViolation[] = [];
   for (const root of scanOptions.roots ?? ["docs"]) {
     const absoluteRoot = path.resolve(REPO_ROOT, root);

@@ -13,7 +13,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   findExtensionTerminologyViolations,
   findRepositoryExtensionTerminologyViolations,
@@ -22,8 +22,10 @@ import { listChecks, runChecks } from "../scripts/checks/run";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const TEMP_ROOT = path.join(REPO_ROOT, "test", ".tmp");
+const TRUSTED_CI_WARNING = "repository terminology scan is intended for trusted CI check runs";
 const temporaryRoots: string[] = [];
 const runsAsRoot = typeof process.getuid === "function" && process.getuid() === 0;
+const originalCi = process.env.CI;
 
 function createTemporaryRoot(prefix: string): string {
   mkdirSync(TEMP_ROOT, { recursive: true });
@@ -41,7 +43,16 @@ function writeNewFile(filePath: string, content: string): void {
   }
 }
 
+beforeEach(() => {
+  process.env.CI = "true";
+});
+
 afterEach(() => {
+  if (originalCi === undefined) {
+    delete process.env.CI;
+  } else {
+    process.env.CI = originalCi;
+  }
   for (const root of temporaryRoots.splice(0)) {
     rmSync(root, { force: true, recursive: true });
   }
@@ -240,8 +251,10 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
 
   it("handles repeated allowed-context terms without excessive regex work", () => {
     const source = Array.from({ length: 2_000 }, () => "The NemoClaw plugin SDK is not offered.").join("\n");
+    const started = performance.now();
 
     expect(findExtensionTerminologyViolations(source, "docs/example.mdx")).toEqual([]);
+    expect(performance.now() - started).toBeLessThan(100);
   });
 
   it("keeps compatibility commitment scoped to extension surfaces", () => {
@@ -275,6 +288,21 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
         term: "NemoClaw compatibility commitment",
       },
     ]);
+  });
+
+  it("warns when repository scans run outside trusted CI", () => {
+    const root = createTemporaryRoot("nemoclaw-extension-terminology-ci-warning-");
+    temporaryRoots.push(root);
+    const warnings: { file: string; message: string }[] = [];
+    delete process.env.CI;
+
+    expect(
+      findRepositoryExtensionTerminologyViolations({
+        onWarning: (warning) => warnings.push(warning),
+        roots: [root],
+      }),
+    ).toEqual([]);
+    expect(warnings).toContainEqual({ file: "<environment>", message: TRUSTED_CI_WARNING });
   });
 
   it("scans configured markdown and mdx documentation roots", () => {
