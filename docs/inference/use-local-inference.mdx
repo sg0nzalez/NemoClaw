@@ -23,10 +23,10 @@ OpenShell intercepts inference traffic and forwards it to the local endpoint you
 ## Prerequisites
 
 <AgentOnly variant="openclaw">
-- NemoClaw installed. Refer to the [Quickstart](../get-started/quickstart) if you have not installed NemoClaw yet.
+- NemoClaw installed. Refer to the [Quickstart](../../get-started/quickstart) if you have not installed NemoClaw yet.
 </AgentOnly>
 <AgentOnly variant="hermes">
-- NemoClaw installed. Refer to [Quickstart with Hermes](../get-started/quickstart) if you have not installed NemoClaw yet.
+- NemoClaw installed. Refer to [Quickstart with Hermes](../../get-started/quickstart) if you have not installed NemoClaw yet.
 </AgentOnly>
 - Ollama running on the host, or a host where the NemoClaw onboard wizard can install or start Ollama.
 
@@ -132,7 +132,8 @@ Selecting one of those actions in the unsupported native Docker topology exits e
 <Warning>
 Ollama is convenient for local chat, but some model/template combinations can return tool calls as plain text under realistic agent load.
 If the TUI shows raw JSON such as `{"name":"memory_search","arguments":{...}}` instead of running a tool, switch to vLLM with `--enable-auto-tool-choice` and the correct `--tool-call-parser`.
-Refer to [Tool-Calling Reliability](tool-calling-reliability).
+Refer to [Set Up vLLM](set-up-vllm) for the server setup flow.
+Refer to [Tool Calling Reliability](../tool-calling-reliability) to diagnose tool-call output.
 </Warning>
 </AgentOnly>
 
@@ -259,24 +260,32 @@ If that diagnostic fails, rerun onboarding to recreate the proxy token and resta
 ## Switch Models at Runtime
 
 Change the Ollama model without re-running onboard.
-Refer to [Switch Inference Models](switch-inference-providers) for the full procedure.
+Refer to [Switch Inference Models](../switch-inference-providers) for the full procedure.
 
 ## Next Steps
 
 <AgentOnly variant="openclaw">
 
-- [Inference Options](inference-options) for the full list of providers available during onboarding.
-- [Set Up Self-Hosted Inference Servers](local-compatible-inference-setup) for vLLM, NIM, and compatible endpoints.
-- [Tool-Calling Reliability](tool-calling-reliability) for diagnosing raw JSON tool-call output with local models.
-- [Switch Inference Models](switch-inference-providers) for runtime model switching.
-- [Quickstart](../get-started/quickstart) for first-time installation.
+- [Inference Options](../inference-options) for the full list of providers available during onboarding.
+- [Set Up Self Hosted Inference Servers](.) for an overview of self-hosted options other than Ollama.
+- [Set Up vLLM](set-up-vllm) for local vLLM setup.
+- [Set Up NVIDIA NIM](set-up-nvidia-nim) for local NVIDIA NIM setup.
+- [Other Self Hosted Servers](set-up-other-self-hosted-servers) for a compatible endpoint.
+- [Verify Self Hosted Inference](verify-self-hosted-inference) for post-onboarding checks and timeout configuration.
+- [Tool Calling Reliability](../tool-calling-reliability) for diagnosing raw JSON tool-call output with local models.
+- [Switch Inference Models](../switch-inference-providers) for runtime model switching.
+- [Quickstart](../../get-started/quickstart) for first-time installation.
 
 </AgentOnly>
 <AgentOnly variant="hermes">
 
-- [Inference Options](inference-options) for the full list of providers available during onboarding.
-- [Set Up Self-Hosted Inference Servers](local-compatible-inference-setup) for vLLM, NIM, and compatible endpoints.
-- [Switch Inference Models](switch-inference-providers) for runtime model switching.
-- [Quickstart with Hermes](../get-started/quickstart) for first-time installation.
+- [Inference Options](../inference-options) for the full list of providers available during onboarding.
+- [Set Up Self Hosted Inference Servers](.) for an overview of self-hosted options other than Ollama.
+- [Set Up vLLM](set-up-vllm) for local vLLM setup.
+- [Set Up NVIDIA NIM](set-up-nvidia-nim) for local NVIDIA NIM setup.
+- [Other Self Hosted Servers](set-up-other-self-hosted-servers) for a compatible endpoint.
+- [Verify Self Hosted Inference](verify-self-hosted-inference) for post-onboarding checks and timeout configuration.
+- [Switch Inference Models](../switch-inference-providers) for runtime model switching.
+- [Quickstart with Hermes](../../get-started/quickstart) for first-time installation.
 
 </AgentOnly>

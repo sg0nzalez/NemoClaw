@@ -54,25 +54,41 @@ navigation:
               - page: "Inference Options"
                 path: _build/agent-variants/inference/inference-options.openclaw.generated.mdx
                 slug: inference-options
-              - page: "Use Ollama for Local Inference"
-                path: _build/agent-variants/inference/use-local-inference.openclaw.generated.mdx
-                slug: use-local-inference
-              - page: "Set Up Self-Hosted Inference Servers"
+              - section: "Local And Self Hosted Inference"
                 path: _build/agent-variants/inference/local-compatible-inference-setup.openclaw.generated.mdx
                 slug: local-compatible-inference-setup
-              - page: "Tool-Calling Reliability"
+                contents:
+                  - page: "Ollama"
+                    path: _build/agent-variants/inference/use-local-inference.openclaw.generated.mdx
+                    slug: use-local-inference
+                  - page: "Set Up vLLM"
+                    path: _build/agent-variants/inference/set-up-vllm.openclaw.generated.mdx
+                    slug: set-up-vllm
+                  - page: "Set Up NVIDIA NIM"
+                    path: _build/agent-variants/inference/set-up-nvidia-nim.openclaw.generated.mdx
+                    slug: set-up-nvidia-nim
+                  - page: "Other Self Hosted Servers"
+                    path: _build/agent-variants/inference/set-up-other-self-hosted-servers.openclaw.generated.mdx
+                    slug: set-up-other-self-hosted-servers
+                  - page: "Verify Self Hosted Inference"
+                    path: _build/agent-variants/inference/verify-self-hosted-inference.openclaw.generated.mdx
+                    slug: verify-self-hosted-inference
+              - page: "Tool Calling Reliability"
                 path: inference/tool-calling-reliability.mdx
                 slug: tool-calling-reliability
               - page: "Model Capability Audit"
                 path: _build/agent-variants/inference/model-capability-audit.openclaw.generated.mdx
                 slug: model-capability-audit
-              - page: "Switch Inference Providers"
+              - page: "Switch Inference Models"
                 path: _build/agent-variants/inference/switch-inference-providers.openclaw.generated.mdx
                 slug: switch-inference-providers
-              - page: "Set Up Task-Specific Sub-Agents"
+              - page: "Inference Provider Commands"
+                path: _build/agent-variants/inference/inference-provider-commands.openclaw.generated.mdx
+                slug: inference-provider-commands
+              - page: "Set Up Task Specific Sub Agents"
                 path: inference/set-up-sub-agent.mdx
                 slug: set-up-sub-agent
-              - page: "Declarative Multi-Agent Manifest"
+              - page: "Declarative Multi Agent Manifest"
                 path: inference/declarative-agents-manifest.mdx
                 slug: declarative-agents-manifest
           - section: "Manage Sandboxes"
@@ -246,15 +262,31 @@ navigation:
               - page: "Inference Options"
                 path: _build/agent-variants/inference/inference-options.deepagents.generated.mdx
                 slug: inference-options
-              - page: "Set Up Self-Hosted Inference Servers"
+              - section: "Local And Self Hosted Inference"
                 path: _build/agent-variants/inference/local-compatible-inference-setup.deepagents.generated.mdx
                 slug: local-compatible-inference-setup
+                contents:
+                  - page: "Set Up vLLM"
+                    path: _build/agent-variants/inference/set-up-vllm.deepagents.generated.mdx
+                    slug: set-up-vllm
+                  - page: "Set Up NVIDIA NIM"
+                    path: _build/agent-variants/inference/set-up-nvidia-nim.deepagents.generated.mdx
+                    slug: set-up-nvidia-nim
+                  - page: "Other Self Hosted Servers"
+                    path: _build/agent-variants/inference/set-up-other-self-hosted-servers.deepagents.generated.mdx
+                    slug: set-up-other-self-hosted-servers
+                  - page: "Verify Self Hosted Inference"
+                    path: _build/agent-variants/inference/verify-self-hosted-inference.deepagents.generated.mdx
+                    slug: verify-self-hosted-inference
               - page: "Model Capability Audit"
                 path: _build/agent-variants/inference/model-capability-audit.deepagents.generated.mdx
                 slug: model-capability-audit
-              - page: "Switch Inference Providers"
+              - page: "Switch Inference Models"
                 path: _build/agent-variants/inference/switch-inference-providers.deepagents.generated.mdx
                 slug: switch-inference-providers
+              - page: "Inference Provider Commands"
+                path: _build/agent-variants/inference/inference-provider-commands.deepagents.generated.mdx
+                slug: inference-provider-commands
           - section: "Manage Sandboxes"
             slug: manage-sandboxes
             collapsed: open-by-default
@@ -369,18 +401,34 @@ navigation:
               - page: "Inference Options"
                 path: _build/agent-variants/inference/inference-options.hermes.generated.mdx
                 slug: inference-options
-              - page: "Use Ollama for Local Inference"
-                path: _build/agent-variants/inference/use-local-inference.hermes.generated.mdx
-                slug: use-local-inference
-              - page: "Set Up Self-Hosted Inference Servers"
+              - section: "Local And Self Hosted Inference"
                 path: _build/agent-variants/inference/local-compatible-inference-setup.hermes.generated.mdx
                 slug: local-compatible-inference-setup
+                contents:
+                  - page: "Ollama"
+                    path: _build/agent-variants/inference/use-local-inference.hermes.generated.mdx
+                    slug: use-local-inference
+                  - page: "Set Up vLLM"
+                    path: _build/agent-variants/inference/set-up-vllm.hermes.generated.mdx
+                    slug: set-up-vllm
+                  - page: "Set Up NVIDIA NIM"
+                    path: _build/agent-variants/inference/set-up-nvidia-nim.hermes.generated.mdx
+                    slug: set-up-nvidia-nim
+                  - page: "Other Self Hosted Servers"
+                    path: _build/agent-variants/inference/set-up-other-self-hosted-servers.hermes.generated.mdx
+                    slug: set-up-other-self-hosted-servers
+                  - page: "Verify Self Hosted Inference"
+                    path: _build/agent-variants/inference/verify-self-hosted-inference.hermes.generated.mdx
+                    slug: verify-self-hosted-inference
               - page: "Model Capability Audit"
                 path: _build/agent-variants/inference/model-capability-audit.hermes.generated.mdx
                 slug: model-capability-audit
-              - page: "Switch Inference Providers"
+              - page: "Switch Inference Models"
                 path: _build/agent-variants/inference/switch-inference-providers.hermes.generated.mdx
                 slug: switch-inference-providers
+              - page: "Inference Provider Commands"
+                path: _build/agent-variants/inference/inference-provider-commands.hermes.generated.mdx
+                slug: inference-provider-commands
           - section: "Manage Sandboxes"
             slug: manage-sandboxes
             collapsed: open-by-default

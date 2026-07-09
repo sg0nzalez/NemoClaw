@@ -28,6 +28,19 @@ const selfHostedInferenceSetupPath = path.join(
   "inference",
   "local-compatible-inference-setup.mdx",
 );
+const vllmSetupPath = path.join(repoRoot, "docs", "inference", "set-up-vllm.mdx");
+const otherSelfHostedServersPath = path.join(
+  repoRoot,
+  "docs",
+  "inference",
+  "set-up-other-self-hosted-servers.mdx",
+);
+const selfHostedInferenceVerificationPath = path.join(
+  repoRoot,
+  "docs",
+  "inference",
+  "verify-self-hosted-inference.mdx",
+);
 const toolCallingReliabilityPath = path.join(
   repoRoot,
   "docs",
@@ -173,7 +186,7 @@ describe("inference options model task-fit docs (#4755)", () => {
 });
 
 describe("inference setup navigation", () => {
-  it("routes caveated vLLM and NIM setup to the self-hosted server guide", () => {
+  it("routes caveated local providers to their focused setup pages", () => {
     const markdown = fs.readFileSync(inferenceOptionsPath, "utf8");
     const start = markdown.indexOf("## Caveated Local Options");
     const end = markdown.indexOf("## Validation", start);
@@ -181,20 +194,23 @@ describe("inference setup navigation", () => {
     expect(end).toBeGreaterThan(start);
     const section = markdown.slice(start, end);
 
+    expect(section).toContain("[Set Up vLLM](local-compatible-inference-setup/set-up-vllm)");
     expect(section).toContain(
-      "[Set Up Self-Hosted Inference Servers](local-compatible-inference-setup)",
+      "[Set Up NVIDIA NIM](local-compatible-inference-setup/set-up-nvidia-nim)",
     );
-    expect(section).toContain("[Use Ollama for Local Inference](use-local-inference)");
+    expect(section).toContain(
+      "[Use Ollama for Local Inference](local-compatible-inference-setup/use-local-inference)",
+    );
   });
 
   it("uses a loopback-only bind for the raw model server example", () => {
-    const markdown = fs.readFileSync(selfHostedInferenceSetupPath, "utf8");
+    const markdown = fs.readFileSync(otherSelfHostedServersPath, "utf8");
 
     expect(markdown).toContain("--host 127.0.0.1");
     expect(markdown).not.toContain("--host 0.0.0.0");
   });
 
-  it("routes vLLM tool-calling remediation to the self-hosted server guide", () => {
+  it("routes vLLM tool-calling remediation to the focused setup page", () => {
     const markdown = fs.readFileSync(toolCallingReliabilityPath, "utf8");
     const start = markdown.indexOf("## Next Steps");
     expect(start).toBeGreaterThanOrEqual(0);
@@ -203,10 +219,11 @@ describe("inference setup navigation", () => {
     expect(section).toContain(
       "[Set Up Self-Hosted Inference Servers](local-compatible-inference-setup)",
     );
+    expect(section).toContain("[Set Up vLLM](local-compatible-inference-setup/set-up-vllm)");
   });
 
   it("documents compatible-endpoint probing separately from runtime API selection", () => {
-    const markdown = fs.readFileSync(selfHostedInferenceSetupPath, "utf8");
+    const markdown = fs.readFileSync(otherSelfHostedServersPath, "utf8");
 
     expect(shouldForceCompletionsApi("openai-completions")).toBe(true);
     expect(shouldForceCompletionsApi("openai-responses")).toBe(false);
@@ -222,12 +239,7 @@ describe("inference setup navigation", () => {
   });
 
   it("scopes post-ready sandbox route verification to local inference providers", () => {
-    const markdown = fs.readFileSync(selfHostedInferenceSetupPath, "utf8");
-    const start = markdown.indexOf("## Verify the Local vLLM Sandbox Route");
-    const end = markdown.indexOf("## Timeout Configuration", start);
-    expect(start).toBeGreaterThanOrEqual(0);
-    expect(end).toBeGreaterThan(start);
-    const section = markdown.slice(start, end);
+    const markdown = fs.readFileSync(selfHostedInferenceVerificationPath, "utf8");
 
     expect(getSandboxRuntimeInferenceEndpoint("ollama-local")).toBe(
       "https://inference.local/v1/models",
@@ -237,15 +249,15 @@ describe("inference setup navigation", () => {
     );
     expect(getSandboxRuntimeInferenceEndpoint("nvidia-nim")).toBeNull();
     expect(getSandboxRuntimeInferenceEndpoint("compatible-endpoint")).toBeNull();
-    expect(section).toContain("For a local vLLM server on a Linux Docker-driver GPU sandbox");
-    expect(section).toContain("The same post-ready check also applies to local Ollama.");
-    expect(section).toContain(
+    expect(markdown).toContain("For a local vLLM server on a Linux Docker-driver GPU sandbox");
+    expect(markdown).toContain("The same post-ready check also applies to local Ollama.");
+    expect(markdown).toContain(
       "NIM and other compatible endpoints receive their onboarding endpoint validation, but not this post-ready sandbox route check.",
     );
   });
 
   it("explains the host-side validation limit of the containerized gateway alias", () => {
-    const markdown = fs.readFileSync(selfHostedInferenceSetupPath, "utf8");
+    const markdown = fs.readFileSync(otherSelfHostedServersPath, "utf8");
     const result = probeOpenAiLikeEndpoint(
       "http://host.openshell.internal:8000/v1",
       "test-model",
@@ -263,33 +275,30 @@ describe("inference setup navigation", () => {
     );
   });
 
-  it("retains shared self-hosted setup and verification guidance after the Ollama split", () => {
-    const markdown = fs.readFileSync(selfHostedInferenceSetupPath, "utf8");
-    const nonInteractiveStart = markdown.indexOf("### Non-Interactive Setup");
-    const nonInteractiveEnd = markdown.indexOf("### Selecting the API Path", nonInteractiveStart);
-    expect(nonInteractiveStart).toBeGreaterThanOrEqual(0);
-    expect(nonInteractiveEnd).toBeGreaterThan(nonInteractiveStart);
-    const nonInteractiveSection = markdown.slice(nonInteractiveStart, nonInteractiveEnd);
+  it("retains self-hosted setup and verification guidance after the page split", () => {
+    const overview = fs.readFileSync(selfHostedInferenceSetupPath, "utf8");
+    const otherSelfHostedServers = fs.readFileSync(otherSelfHostedServersPath, "utf8");
+    const vllm = fs.readFileSync(vllmSetupPath, "utf8");
+    const verification = fs.readFileSync(selfHostedInferenceVerificationPath, "utf8");
 
-    expect(markdown).toContain("The agent inside the sandbox connects through `inference.local`");
-    expect(markdown).toContain("NEMOCLAW_MODEL=NVIDIA-Nemotron3-Nano-4B-Q4_K_M.gguf");
-    expect(markdown).toContain(
+    expect(overview).toContain("The agent inside the sandbox connects through `inference.local`");
+    expect(otherSelfHostedServers).toContain("NEMOCLAW_MODEL=NVIDIA-Nemotron3-Nano-4B-Q4_K_M.gguf");
+    expect(vllm).toContain(
       "NemoClaw uses that value for the configured context window unless you set `NEMOCLAW_CONTEXT_WINDOW` yourself.",
     );
-    expect(markdown).not.toContain("baked into `openclaw.json`");
-    expect(markdown).toContain(
+    expect(vllm).not.toContain("baked into `openclaw.json`");
+    expect(otherSelfHostedServers).toContain(
       "The Chat Completions default avoids local backends that accept Responses requests but drop system prompts or tool definitions.",
     );
-    expect(markdown).toContain(
+    expect(otherSelfHostedServers).toContain(
       "Port `8000` is included in NemoClaw's `local-inference` policy preset.",
     );
-    expect(markdown).toContain(
+    expect(vllm).toContain(
       "NemoClaw restarts it during recovery without requiring a fresh onboarding run.",
     );
-    expect(markdown).toContain("## Verify the Configuration");
-    expect(markdown).toContain(
+    expect(verification).toContain("## Verify the Configuration");
+    expect(verification).toContain(
       "The `Inference` row checks `inference.local` from inside the sandbox",
     );
-    expect(nonInteractiveSection).not.toMatch(/^\s+NEMOCLAW_REASONING=true \\/m);
   });
 });
