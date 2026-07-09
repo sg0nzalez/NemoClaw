@@ -73,7 +73,7 @@ const CHECKS: readonly CheckCommand[] = [
     name: "extension-terminology",
     command: TSX,
     args: ["scripts/checks/extension-terminology.ts"],
-    env: { CI: "true" },
+    env: { NEMOCLAW_CHECK_RUNNER: "extension-terminology" },
   },
   {
     name: "no-unit-blocks-in-live-e2e",

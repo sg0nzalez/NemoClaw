@@ -36,12 +36,12 @@ type WalkOptions = {
   readonly visited?: Set<string>;
 };
 
-type ScanWarning = {
+export type ScanWarning = {
   readonly file: string;
   readonly message: string;
 };
 
-type RepositoryScanResult = {
+export type RepositoryScanResult = {
   readonly violations: readonly ExtensionTerminologyViolation[];
   readonly warnings: readonly ScanWarning[];
 };
@@ -51,6 +51,8 @@ type ScanOptions = {
   readonly onWarning?: (warning: ScanWarning) => void;
 };
 
+const CHECK_RUNNER_ENV = "NEMOCLAW_CHECK_RUNNER";
+const CHECK_RUNNER_VALUE = "extension-terminology";
 const CHECK_RUNNER_CONTRACT_WARNING =
   "extension-terminology: repository terminology scan only runs through the repository check runner";
 
@@ -349,7 +351,7 @@ export function findExtensionTerminologyViolations(
  * @internal Accidental direct-run guard for the repository check-runner contract.
  */
 function assertCheckRunnerContract(onWarning: ((warning: ScanWarning) => void) | undefined): void {
-  if (process.env.CI === "true") return;
+  if (process.env[CHECK_RUNNER_ENV] === CHECK_RUNNER_VALUE) return;
   warnRoot(onWarning, "<environment>", CHECK_RUNNER_CONTRACT_WARNING);
   throw new Error(CHECK_RUNNER_CONTRACT_WARNING);
 }
@@ -406,7 +408,13 @@ export function scanRepositoryExtensionTerminology(
 export function findRepositoryExtensionTerminologyViolations(
   options: ScanOptions | readonly string[] = {},
 ): readonly ExtensionTerminologyViolation[] {
-  return scanRepositoryExtensionTerminology(options).violations;
+  const result = scanRepositoryExtensionTerminology(options);
+  if (result.warnings.length > 0) {
+    throw new Error(
+      `Extension terminology check could not scan ${result.warnings.length} configured documentation path(s).`,
+    );
+  }
+  return result.violations;
 }
 
 function main(): void {

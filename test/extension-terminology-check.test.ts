@@ -30,7 +30,7 @@ const CHECK_RUNNER_CONTRACT_WARNING =
   "extension-terminology: repository terminology scan only runs through the repository check runner";
 const temporaryRoots: string[] = [];
 const runsAsRoot = typeof process.getuid === "function" && process.getuid() === 0;
-const originalCi = process.env.CI;
+const originalCheckRunner = process.env.NEMOCLAW_CHECK_RUNNER;
 
 function createTemporaryRoot(prefix: string): string {
   mkdirSync(TEMP_ROOT, { recursive: true });
@@ -51,13 +51,13 @@ function writeNewFile(filePath: string, content: string): void {
 }
 
 beforeEach(() => {
-  process.env.CI = "true";
+  process.env.NEMOCLAW_CHECK_RUNNER = "extension-terminology";
 });
 
 afterEach(() => {
-  originalCi === undefined
-    ? Reflect.deleteProperty(process.env, "CI")
-    : (process.env.CI = originalCi);
+  originalCheckRunner === undefined
+    ? Reflect.deleteProperty(process.env, "NEMOCLAW_CHECK_RUNNER")
+    : (process.env.NEMOCLAW_CHECK_RUNNER = originalCheckRunner);
   for (const root of temporaryRoots.splice(0)) {
     rmSync(root, { force: true, recursive: true });
   }
@@ -296,10 +296,10 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
     ]);
   });
 
-  it("blocks repository scans outside trusted CI before filesystem access", () => {
+  it("blocks repository scans outside the check-runner contract before filesystem access", () => {
     const warnings: { file: string; message: string }[] = [];
     const root = path.join(REPO_ROOT, "test", ".tmp", `missing-${randomUUID()}`);
-    delete process.env.CI;
+    Reflect.deleteProperty(process.env, "NEMOCLAW_CHECK_RUNNER");
 
     expect(() =>
       findRepositoryExtensionTerminologyViolations({
@@ -311,9 +311,9 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
     expect(existsSync(root)).toBe(false);
   });
 
-  it("exits non-zero without a false pass outside trusted CI", () => {
+  it("exits non-zero without a false pass outside the check-runner contract", () => {
     const env = { ...process.env };
-    Reflect.deleteProperty(env, "CI");
+    Reflect.deleteProperty(env, "NEMOCLAW_CHECK_RUNNER");
 
     const result = spawnSync(
       process.platform === "win32" ? "tsx.cmd" : "tsx",
@@ -341,7 +341,7 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
       {
         cwd: REPO_ROOT,
         encoding: "utf8",
-        env: { ...process.env, CI: "true" },
+        env: { ...process.env, NEMOCLAW_CHECK_RUNNER: "extension-terminology" },
       },
     );
 
@@ -364,7 +364,7 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
       {
         cwd: REPO_ROOT,
         encoding: "utf8",
-        env: { ...process.env, CI: "true" },
+        env: { ...process.env, NEMOCLAW_CHECK_RUNNER: "extension-terminology" },
       },
     );
 
@@ -438,6 +438,9 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
         }),
       ],
     });
+    expect(() => findRepositoryExtensionTerminologyViolations([root])).toThrow(
+      "Extension terminology check could not scan 1 configured documentation path(s).",
+    );
     expect(warnings).toEqual([
       expect.objectContaining({
         file: path.relative(REPO_ROOT, largeFile),
@@ -451,11 +454,19 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
     const escapedRoot = path.dirname(REPO_ROOT);
 
     expect(
-      findRepositoryExtensionTerminologyViolations({
+      scanRepositoryExtensionTerminology({
         onWarning: (warning) => warnings.push(warning),
         roots: [escapedRoot],
       }),
-    ).toEqual([]);
+    ).toEqual({
+      violations: [],
+      warnings: [
+        {
+          file: escapedRoot,
+          message: "scan root escapes repository root",
+        },
+      ],
+    });
     expect(warnings).toEqual([
       {
         file: escapedRoot,
@@ -474,11 +485,19 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
     symlinkSync(outside, symlinkRoot, "dir");
 
     expect(
-      findRepositoryExtensionTerminologyViolations({
+      scanRepositoryExtensionTerminology({
         onWarning: (warning) => warnings.push(warning),
         roots: [symlinkRoot],
       }),
-    ).toEqual([]);
+    ).toEqual({
+      violations: [],
+      warnings: [
+        {
+          file: symlinkRoot,
+          message: "scan root realpath escapes repository root",
+        },
+      ],
+    });
     expect(warnings).toEqual([
       {
         file: symlinkRoot,
@@ -496,12 +515,17 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
     writeNewFile(path.join(root, "violation.md"), "Use the public NemoClaw extension SDK today.");
     writeNewFile(nonDirectoryRoot, "Use the public NemoClaw extension SDK today.");
 
-    expect(
-      findRepositoryExtensionTerminologyViolations({
-        onWarning: (warning) => warnings.push(warning),
-        roots: [root, nonDirectoryRoot],
-      }),
-    ).toMatchObject([{ file: path.relative(REPO_ROOT, path.join(root, "violation.md")) }]);
+    const result = scanRepositoryExtensionTerminology({
+      onWarning: (warning) => warnings.push(warning),
+      roots: [root, nonDirectoryRoot],
+    });
+
+    expect(result.violations).toMatchObject([
+      { file: path.relative(REPO_ROOT, path.join(root, "violation.md")) },
+    ]);
+    expect(result.warnings).toEqual([
+      expect.objectContaining({ file: path.relative(REPO_ROOT, nonDirectoryRoot) }),
+    ]);
     expect(warnings).toEqual([
       expect.objectContaining({ file: path.relative(REPO_ROOT, nonDirectoryRoot) }),
     ]);
@@ -518,11 +542,14 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
       chmodSync(restricted, 0o000);
 
       expect(
-        findRepositoryExtensionTerminologyViolations({
+        scanRepositoryExtensionTerminology({
           onWarning: (warning) => warnings.push(warning),
           roots: [root],
         }),
-      ).toEqual([]);
+      ).toEqual({
+        violations: [],
+        warnings: [expect.objectContaining({ file: path.relative(REPO_ROOT, restricted) })],
+      });
       chmodSync(restricted, 0o700);
       expect(warnings).toEqual([
         expect.objectContaining({ file: path.relative(REPO_ROOT, restricted) }),
@@ -539,11 +566,14 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
     symlinkSync(path.join(root, "does-not-exist.md"), broken, "file");
 
     expect(
-      findRepositoryExtensionTerminologyViolations({
+      scanRepositoryExtensionTerminology({
         onWarning: (warning) => warnings.push(warning),
         roots: [root],
       }),
-    ).toEqual([]);
+    ).toEqual({
+      violations: [],
+      warnings: [expect.objectContaining({ file: path.relative(REPO_ROOT, broken) })],
+    });
     expect(warnings).toEqual([expect.objectContaining({ file: path.relative(REPO_ROOT, broken) })]);
   });
 
@@ -556,11 +586,16 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
     symlinkSync(root, path.join(nested, "loop"), "dir");
 
     expect(
-      findRepositoryExtensionTerminologyViolations({
+      scanRepositoryExtensionTerminology({
         onWarning: (warning) => warnings.push(warning),
         roots: [root],
       }),
-    ).toEqual([]);
+    ).toEqual({
+      violations: [],
+      warnings: [
+        expect.objectContaining({ file: path.relative(REPO_ROOT, path.join(nested, "loop")) }),
+      ],
+    });
     expect(warnings).toEqual([
       expect.objectContaining({ file: path.relative(REPO_ROOT, path.join(nested, "loop")) }),
     ]);
@@ -572,7 +607,7 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
     expect(extensionCheck).toEqual({
       args: ["scripts/checks/extension-terminology.ts"],
       command: process.platform === "win32" ? "tsx.cmd" : "tsx",
-      env: { CI: "true" },
+      env: { NEMOCLAW_CHECK_RUNNER: "extension-terminology" },
       name: "extension-terminology",
     });
   });
@@ -613,15 +648,20 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
     symlinkSync(path.join(outside, "violation.md"), path.join(root, "outside.md"), "file");
 
     expect(
-      findRepositoryExtensionTerminologyViolations({
+      scanRepositoryExtensionTerminology({
         onWarning: (warning) => warnings.push(warning),
         roots: [root],
       }),
-    ).toEqual([]);
+    ).toEqual({
+      violations: [],
+      warnings: [
+        expect.objectContaining({ file: path.relative(REPO_ROOT, path.join(root, "outside")) }),
+        expect.objectContaining({ file: path.relative(REPO_ROOT, path.join(root, "outside.md")) }),
+      ],
+    });
     expect(warnings).toEqual([
       expect.objectContaining({ file: path.relative(REPO_ROOT, path.join(root, "outside")) }),
       expect.objectContaining({ file: path.relative(REPO_ROOT, path.join(root, "outside.md")) }),
     ]);
   });
-
 });
