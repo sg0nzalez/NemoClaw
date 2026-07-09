@@ -94,7 +94,7 @@ describe("agent variant docs", () => {
     expect(rendered).toContain("![Diagram](../../../manage-sandboxes/images/diagram.png)");
   });
 
-  it("renders strict Landlock troubleshooting for Deep Agents only", () => {
+  it("renders hard-requirement Landlock troubleshooting for Deep Agents only", () => {
     const troubleshooting = readFileSync(
       new URL("../docs/reference/troubleshooting.mdx", import.meta.url),
       "utf8",
@@ -107,9 +107,9 @@ describe("agent variant docs", () => {
     });
 
     expect(deepAgents).toContain("### Landlock filesystem policy blocks sandbox startup");
-    expect(deepAgents).toContain("Deep Agents uses strict Landlock compatibility.");
+    expect(deepAgents).toContain("Deep Agents Code uses `hard_requirement` compatibility.");
     expect(deepAgents).toContain(
-      "OpenShell refuses to start the sandbox instead of silently degrading.",
+      "sandbox startup fails and `nemo-deepagents onboard` returns a nonzero exit",
     );
     expect(deepAgents).not.toContain("### Landlock filesystem restrictions silently degraded");
     expect(deepAgents).not.toContain("best_effort mode");
