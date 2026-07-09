@@ -109,7 +109,10 @@ function sentenceContext(
 }
 
 function clauseContext(context: string, index: number, matchLength: number): string {
-  const start = Math.max(context.lastIndexOf(",", index - 1), context.lastIndexOf(";", index - 1));
+  const start = Math.max(
+    context.lastIndexOf(",", index - 1),
+    context.lastIndexOf(";", index - 1),
+  );
   const after = index + matchLength;
   const ends = [context.indexOf(",", after), context.indexOf(";", after)].filter(
     (position) => position >= 0,

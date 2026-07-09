@@ -136,8 +136,7 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
       "NemoClaw provides a compatibility commitment for extension packages.",
       "docs/example.mdx",
     );
-    expect(extensionViolations).toHaveLength(1);
-    expect(extensionViolations).toMatchObject([
+    expect(extensionViolations).toEqual([
       {
         detail: "do not present a current compatibility commitment for extension surfaces",
         file: "docs/example.mdx",
