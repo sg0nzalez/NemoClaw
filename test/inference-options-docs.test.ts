@@ -31,6 +31,7 @@ const inferenceSelectionValidationPath = path.join(
   "onboard",
   "inference-selection-validation.ts",
 );
+const providersPath = path.join(repoRoot, "src", "lib", "onboard", "providers.ts");
 const inferenceConfigPath = path.join(repoRoot, "src", "lib", "inference", "config.ts");
 const modelPromptsPath = path.join(repoRoot, "src", "lib", "inference", "model-prompts.ts");
 
@@ -217,6 +218,25 @@ describe("inference setup navigation", () => {
     );
     expect(markdown).toContain(
       "Set `NEMOCLAW_PREFERRED_API=openai-completions` to skip the Responses probe and validate Chat Completions only.",
+    );
+  });
+
+  it("scopes post-ready sandbox route verification to local inference providers", () => {
+    const markdown = fs.readFileSync(selfHostedInferenceSetupPath, "utf8");
+    const providersSource = fs.readFileSync(providersPath, "utf8");
+    const start = markdown.indexOf("## Verify the Local vLLM Sandbox Route");
+    const end = markdown.indexOf("## Timeout Configuration", start);
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    const section = markdown.slice(start, end);
+
+    expect(providersSource).toContain(
+      'const LOCAL_INFERENCE_PROVIDERS = ["ollama-local", "vllm-local"]',
+    );
+    expect(section).toContain("For a local vLLM server on a Linux Docker-driver GPU sandbox");
+    expect(section).toContain("The same post-ready check also applies to local Ollama.");
+    expect(section).toContain(
+      "NIM and other compatible endpoints receive their onboarding endpoint validation, but not this post-ready sandbox route check.",
     );
   });
 });

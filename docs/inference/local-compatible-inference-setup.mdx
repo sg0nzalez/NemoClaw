@@ -335,12 +335,15 @@ NEMOCLAW_EXPERIMENTAL=1 \
 
 To select a specific model, set `NEMOCLAW_MODEL`.
 
-## Verify the Sandbox Route
+## Verify the Local vLLM Sandbox Route
 
-On Linux Docker-driver GPU sandboxes, NemoClaw keeps self-hosted inference on the OpenShell bridge route.
+For a local vLLM server on a Linux Docker-driver GPU sandbox, NemoClaw keeps inference on the OpenShell bridge route.
 After the sandbox becomes ready, it verifies `https://inference.local/v1/models` from inside the sandbox runtime.
 Only a 2xx response succeeds because this path includes the proxy authentication rewrite that the agent uses.
 If the runtime route fails, onboarding reports the endpoint and recovery steps before the first agent prompt.
+
+The same post-ready check also applies to local Ollama.
+NIM and other compatible endpoints receive their onboarding endpoint validation, but not this post-ready sandbox route check.
 
 ## Timeout Configuration
 
