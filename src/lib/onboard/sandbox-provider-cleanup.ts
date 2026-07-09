@@ -3,7 +3,11 @@
 
 import { listMessagingProviderSuffixes } from "../messaging/channels";
 import { NAME_MAX_LENGTH, NAME_VALID_PATTERN } from "../name-validation";
-import { assertNoOpenShellGatewayEndpointOverride } from "../openshell-gateway-endpoint-guard";
+
+export {
+  type ReconcileExtraProvidersDeps,
+  reconcileRegisteredExtraProviders,
+} from "./extra-provider-reconciliation";
 
 export type SandboxProviderRunOpenshell = (
   args: string[],
@@ -57,15 +61,6 @@ export const SANDBOX_PROVIDER_SUFFIXES = [
 ] as readonly string[];
 
 export type SandboxProviderSuffix = string;
-
-/**
- * Diagnostic shapes for "the probed provider does not exist": both the CLI's
- * `provider 'X' not found` and the gRPC-style `NotFound: provider "X"`
- * orderings. Anchored to the word "provider" on the same line so missing-
- * sandbox or missing-gateway errors never count as a provider-not-found.
- */
-const PROVIDER_NOT_FOUND_RE =
-  /provider[^\n]{0,200}?(?:\bNotFound\b|\bnot\s+found\b)|(?:\bNotFound\b|\bnot\s+found\b)(?::|\s)[^\n]{0,200}?\bprovider\b/i;
 
 const TOLERATED_DETACH_OUTPUT_RE =
   /\bNotAttached\b|\bnot\s+attached\b|provider[^\n]{0,200}?(?:\bNotFound\b|\bnot\s+found\b)/i;
@@ -344,76 +339,4 @@ export function emitProviderDetachResidualHint(
   emit(
     `  Run 'openshell sandbox provider detach ${sandboxName} <name>' then 'openshell provider delete <name>' for each before the next onboard.`,
   );
-}
-
-export type ReconcileExtraProvidersDeps = {
-  runOpenshell?: SandboxProviderRunOpenshell;
-  /**
-   * Scope existence probes to this gateway (`provider get -g <name>`),
-   * mirroring the gateway-scoped runner the other onboarding provider
-   * probes use. When set, the same endpoint-override guard applies.
-   */
-  gatewayName?: string;
-  listExtraProviders?: () => string[];
-  forgetExtraProvider?: (name: string) => boolean;
-  warn?: (message: string) => void;
-};
-
-function defaultListExtraProviders(): string[] {
-  const { listExtraProviders } = require("../state/registry") as {
-    listExtraProviders: () => string[];
-  };
-  return listExtraProviders();
-}
-
-function defaultForgetExtraProvider(name: string): boolean {
-  const { removeExtraProvider } = require("../state/registry") as {
-    removeExtraProvider: (name: string) => boolean;
-  };
-  return removeExtraProvider(name);
-}
-
-/**
- * Resolve the registry-recorded extra providers that sandbox creation may
- * attach, dropping records the gateway no longer knows about (#6501).
- *
- * The host registry (`credentials add` → `addExtraProvider`) and the
- * gateway's provider table can drift: deleting a provider gateway-side —
- * or pointing the CLI at a rebuilt gateway — leaves a dangling local
- * record, and passing that name to `sandbox create --provider` fails every
- * subsequent onboard with "provider not found", even when the user
- * declined the feature that once created it. Each recorded name is probed
- * with `provider get` (the same existence check `upsertProvider` uses); a
- * record is pruned only when the gateway explicitly answers "provider …
- * not found". Any other failure — gateway down, timeout, unexpected
- * diagnostic — keeps the record (fail-open) so a real outage still
- * surfaces through the sandbox-create diagnostics instead of silently
- * dropping a healthy provider.
- */
-export function reconcileRegisteredExtraProviders(
-  deps: ReconcileExtraProvidersDeps = {},
-): string[] {
-  const recorded = (deps.listExtraProviders ?? defaultListExtraProviders)();
-  if (recorded.length === 0) return recorded;
-  if (deps.gatewayName) assertNoOpenShellGatewayEndpointOverride();
-  const gatewayArgs = deps.gatewayName ? ["-g", deps.gatewayName] : [];
-  const runOpenshell = deps.runOpenshell ?? defaultRunOpenshell;
-  const warn = deps.warn ?? ((message: string) => console.warn(message));
-  const forget = deps.forgetExtraProvider ?? defaultForgetExtraProvider;
-  return recorded.filter((name) => {
-    const result = runOpenshell(["provider", "get", ...gatewayArgs, name], {
-      ignoreError: true,
-      stdio: ["ignore", "pipe", "pipe"],
-      suppressOutput: true,
-    });
-    if (result.status === 0) return true;
-    const output = `${bufferOrStringToText(result.stdout)}${bufferOrStringToText(result.stderr)}`;
-    if (!PROVIDER_NOT_FOUND_RE.test(output)) return true;
-    warn(
-      `  Skipping recorded provider '${name}': not registered with the OpenShell gateway. ` +
-        `Removing the stale local record; recreate it with 'nemoclaw credentials add' if needed.`,
-    );
-    forget(name);
-    return false;
-  });
 }
