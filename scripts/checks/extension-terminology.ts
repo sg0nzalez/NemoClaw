@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -18,6 +18,12 @@ type TerminologyRule = {
   readonly pattern: RegExp;
   readonly detail: string;
   readonly include?: (context: string) => boolean;
+};
+
+type WalkOptions = {
+  readonly root: string;
+  readonly directory: string;
+  readonly onWarning?: (warning: ScanWarning) => void;
 };
 
 type ScanWarning = {
@@ -70,6 +76,13 @@ const RULES: readonly TerminologyRule[] = [
     pattern:
       /\bNemoClaw\b[^\n.?!]{0,120}\bcompatibility\b[^\n.?!]{0,80}\b(?:commitment|promise|guarantee|contract)\b/i,
     detail: "do not present a current compatibility commitment for extension surfaces",
+    /**
+     * Invalid state: docs making false current compatibility commitments for extension surfaces.
+     * Source boundary: human-authored docs under docs/.
+     * Source fix constraint: this linter is the drift-prevention fix.
+     * Regression test: "keeps compatibility commitment scoped to extension surfaces".
+     * Removal condition: decompose into source-specific rules or schema-generated docs.
+     */
     include: (context) => EXTENSION_SURFACE_PATTERN.test(context) && !/\bCLI\b/i.test(context),
   },
 ];
@@ -85,15 +98,22 @@ function relativeFile(absolutePath: string): string {
   return path.relative(REPO_ROOT, absolutePath).split(path.sep).join("/");
 }
 
-function warnFile(onWarning: ((warning: ScanWarning) => void) | undefined, absolutePath: string, error: unknown): void {
+function warnFile(
+  onWarning: ((warning: ScanWarning) => void) | undefined,
+  absolutePath: string,
+  error: unknown,
+): void {
   const message = error instanceof Error ? error.message : String(error);
   onWarning?.({ file: relativeFile(absolutePath), message });
 }
 
-function* walkDocumentationFiles(
-  directory: string,
-  onWarning?: (warning: ScanWarning) => void,
-): Generator<string> {
+function isWithinDirectory(parent: string, child: string): boolean {
+  const relativePath = path.relative(parent, child);
+  return relativePath === "" || (!relativePath.startsWith("..") && !path.isAbsolute(relativePath));
+}
+
+function* walkDocumentationFiles(options: WalkOptions): Generator<string> {
+  const { directory, onWarning, root } = options;
   if (!existsSync(directory) || isSkipped(directory)) return;
 
   let entries: string[];
@@ -114,8 +134,19 @@ function* walkDocumentationFiles(
       warnFile(onWarning, absolutePath, error);
       continue;
     }
+    if (stats.isSymbolicLink()) {
+      try {
+        const resolvedPath = realpathSync(absolutePath);
+        if (!isWithinDirectory(root, resolvedPath)) {
+          warnFile(onWarning, absolutePath, "symbolic link target is outside the scan root");
+        }
+      } catch (error) {
+        warnFile(onWarning, absolutePath, error);
+      }
+      continue;
+    }
     if (stats.isDirectory()) {
-      yield* walkDocumentationFiles(absolutePath, onWarning);
+      yield* walkDocumentationFiles({ directory: absolutePath, onWarning, root });
     } else if (stats.isFile() && DOCUMENTATION_FILE_PATTERN.test(entry)) {
       yield absolutePath;
     }
@@ -196,7 +227,11 @@ export function findRepositoryExtensionTerminologyViolations(
   const violations: ExtensionTerminologyViolation[] = [];
   for (const root of scanOptions.roots ?? [SCAN_ROOT]) {
     const absoluteRoot = path.resolve(REPO_ROOT, root);
-    for (const absolutePath of walkDocumentationFiles(absoluteRoot, scanOptions.onWarning)) {
+    for (const absolutePath of walkDocumentationFiles({
+      directory: absoluteRoot,
+      onWarning: scanOptions.onWarning,
+      root: absoluteRoot,
+    })) {
       const file = relativeFile(absolutePath);
       try {
         violations.push(...findExtensionTerminologyViolations(readFileSync(absolutePath, "utf8"), file));

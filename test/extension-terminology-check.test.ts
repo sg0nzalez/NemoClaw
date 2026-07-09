@@ -58,7 +58,12 @@ describe("extension terminology guard", () => {
     "pre-candidate-post",
     "(reserved)",
     "reserved;",
+    "reserved:",
+    "reserved,",
     "candidate.",
+    "candidate:",
+    "non-committed:",
+    "proposed;",
   ])("allows %s SDK wording", (allowedContext) => {
     const source = `The NemoClaw plugin SDK is ${allowedContext} for extension authors.`;
 
@@ -211,12 +216,23 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
     const root = path.join(tmpdir(), `nemoclaw-extension-terminology-symlink-${process.pid}-${Date.now()}`);
     const outside = path.join(tmpdir(), `nemoclaw-extension-terminology-outside-${process.pid}-${Date.now()}`);
     temporaryRoots.push(root, outside);
+    const warnings: { file: string; message: string }[] = [];
     mkdirSync(root, { recursive: true });
     mkdirSync(outside, { recursive: true });
     writeFileSync(path.join(outside, "violation.md"), "Use the public NemoClaw extension SDK today.");
     symlinkSync(outside, path.join(root, "outside"), "dir");
+    symlinkSync(path.join(outside, "violation.md"), path.join(root, "outside.md"), "file");
 
-    expect(findRepositoryExtensionTerminologyViolations([root])).toEqual([]);
+    expect(
+      findRepositoryExtensionTerminologyViolations({
+        onWarning: (warning) => warnings.push(warning),
+        roots: [root],
+      }),
+    ).toEqual([]);
+    expect(warnings).toEqual([
+      expect.objectContaining({ file: path.relative(REPO_ROOT, path.join(root, "outside")) }),
+      expect.objectContaining({ file: path.relative(REPO_ROOT, path.join(root, "outside.md")) }),
+    ]);
   });
 
   it("registers the extension terminology check with the local check runner", () => {
