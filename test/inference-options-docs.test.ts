@@ -7,9 +7,19 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type * as TypeScript from "typescript";
 import { describe, expect, it } from "vitest";
+import { shouldForceCompletionsApi } from "../src/lib/validation.js";
+import { getSandboxRuntimeInferenceEndpoint } from "../src/lib/onboard/docker-gpu-local-inference.js";
 
 const require = createRequire(import.meta.url);
 const ts = require("typescript") as typeof TypeScript;
+const { probeOpenAiLikeEndpoint } = require("../src/lib/inference/onboard-probes") as {
+  probeOpenAiLikeEndpoint: (
+    endpointUrl: string,
+    model: string,
+    apiKey: string,
+    options?: { requireChatCompletionsToolCalling?: boolean },
+  ) => { api: string | null; label: string | null; note?: string; ok: boolean };
+};
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const inferenceOptionsPath = path.join(repoRoot, "docs", "inference", "inference-options.mdx");
 const selfHostedInferenceSetupPath = path.join(
@@ -24,15 +34,6 @@ const toolCallingReliabilityPath = path.join(
   "inference",
   "tool-calling-reliability.mdx",
 );
-const inferenceSelectionValidationPath = path.join(
-  repoRoot,
-  "src",
-  "lib",
-  "onboard",
-  "inference-selection-validation.ts",
-);
-const providersPath = path.join(repoRoot, "src", "lib", "onboard", "providers.ts");
-const onboardProbesPath = path.join(repoRoot, "src", "lib", "inference", "onboard-probes.ts");
 const inferenceConfigPath = path.join(repoRoot, "src", "lib", "inference", "config.ts");
 const modelPromptsPath = path.join(repoRoot, "src", "lib", "inference", "model-prompts.ts");
 
@@ -206,11 +207,9 @@ describe("inference setup navigation", () => {
 
   it("documents compatible-endpoint probing separately from runtime API selection", () => {
     const markdown = fs.readFileSync(selfHostedInferenceSetupPath, "utf8");
-    const validationSource = fs.readFileSync(inferenceSelectionValidationPath, "utf8");
 
-    expect(validationSource).toContain(
-      "reasoningEnabled || shouldForceCompletionsApi(process.env.NEMOCLAW_PREFERRED_API)",
-    );
+    expect(shouldForceCompletionsApi("openai-completions")).toBe(true);
+    expect(shouldForceCompletionsApi("openai-responses")).toBe(false);
     expect(markdown).toContain(
       "the wizard probes `/v1/responses` first with tool-calling and streaming checks, then falls back to `/v1/chat/completions`.",
     );
@@ -224,16 +223,20 @@ describe("inference setup navigation", () => {
 
   it("scopes post-ready sandbox route verification to local inference providers", () => {
     const markdown = fs.readFileSync(selfHostedInferenceSetupPath, "utf8");
-    const providersSource = fs.readFileSync(providersPath, "utf8");
     const start = markdown.indexOf("## Verify the Local vLLM Sandbox Route");
     const end = markdown.indexOf("## Timeout Configuration", start);
     expect(start).toBeGreaterThanOrEqual(0);
     expect(end).toBeGreaterThan(start);
     const section = markdown.slice(start, end);
 
-    expect(providersSource).toContain(
-      'const LOCAL_INFERENCE_PROVIDERS = ["ollama-local", "vllm-local"]',
+    expect(getSandboxRuntimeInferenceEndpoint("ollama-local")).toBe(
+      "https://inference.local/v1/models",
     );
+    expect(getSandboxRuntimeInferenceEndpoint("vllm-local")).toBe(
+      "https://inference.local/v1/models",
+    );
+    expect(getSandboxRuntimeInferenceEndpoint("nvidia-nim")).toBeNull();
+    expect(getSandboxRuntimeInferenceEndpoint("compatible-endpoint")).toBeNull();
     expect(section).toContain("For a local vLLM server on a Linux Docker-driver GPU sandbox");
     expect(section).toContain("The same post-ready check also applies to local Ollama.");
     expect(section).toContain(
@@ -243,10 +246,14 @@ describe("inference setup navigation", () => {
 
   it("explains the host-side validation limit of the containerized gateway alias", () => {
     const markdown = fs.readFileSync(selfHostedInferenceSetupPath, "utf8");
-    const probesSource = fs.readFileSync(onboardProbesPath, "utf8");
+    const result = probeOpenAiLikeEndpoint(
+      "http://host.openshell.internal:8000/v1",
+      "test-model",
+      "test-key",
+    );
 
-    expect(probesSource).toContain("if (isSandboxInternalUrl(endpointUrl))");
-    expect(probesSource).toContain("validation skipped");
+    expect(result).toMatchObject({ api: null, label: null, ok: true });
+    expect(result.note).toContain("validation skipped");
     expect(markdown).toContain("`http://host.openshell.internal:8000/v1`");
     expect(markdown).toContain(
       "This is a sandbox-internal alias, so host-side endpoint probing is skipped during onboarding.",
