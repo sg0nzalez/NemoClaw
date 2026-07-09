@@ -98,6 +98,7 @@ describe("P0-E cloud-experimental parity guardrails", () => {
         fs.mkdirSync(binDir);
         fs.mkdirSync(homeDir);
         const marker = path.join(tmp, "reonboard-done");
+        const requestsFile = path.join(tmp, "requests.jsonl");
         const openshell = path.join(binDir, "openshell");
         const cli = path.join(binDir, "nemoclaw");
 
@@ -160,16 +161,10 @@ describe("P0-E cloud-experimental parity guardrails", () => {
           '    *) fail "unexpected compatible endpoint" ;;',
           "  esac",
           "  node --input-type=module <<'NODE'",
-          'const response = await fetch(process.env.NEMOCLAW_ENDPOINT_URL + "/chat/completions", {',
-          '  method: "POST",',
+          'const response = await fetch(process.env.NEMOCLAW_ENDPOINT_URL + "/models", {',
           "  headers: {",
-          '    "content-type": "application/json",',
           '    authorization: "Bearer " + process.env.COMPATIBLE_API_KEY',
           "  },",
-          "  body: JSON.stringify({",
-          "    model: process.env.NEMOCLAW_MODEL,",
-          '    messages: [{ role: "user", content: "ping" }]',
-          "  })",
           "});",
           "if (!response.ok) {",
           "  console.error(await response.text());",
@@ -219,6 +214,7 @@ describe("P0-E cloud-experimental parity guardrails", () => {
           env: {
             COMPATIBLE_API_KEY: "hosted-compatible-secret-should-not-be-used",
             FAKE_OPENAI_PUBLIC_HOST: "127.0.0.1",
+            FAKE_OPENAI_REQUESTS_FILE: requestsFile,
             FAKE_REONBOARD_DONE: marker,
             HOME: homeDir,
             NEMOCLAW_CLI_BIN: cli,
@@ -242,6 +238,29 @@ describe("P0-E cloud-experimental parity guardrails", () => {
         expect(result.stdout + result.stderr).not.toContain(
           "hosted-compatible-secret-should-not-be-used",
         );
+        const endpointRequests = fs
+          .readFileSync(requestsFile, "utf8")
+          .trim()
+          .split("\n")
+          .map(
+            (line) =>
+              JSON.parse(line) as {
+                auth?: string;
+                authorizationSent?: boolean;
+                method: string;
+                path: string;
+              },
+          );
+        expect(
+          endpointRequests.some(
+            (request) =>
+              request.method === "GET" &&
+              request.path === "/v1/models" &&
+              request.authorizationSent === true &&
+              request.auth === "ok",
+          ),
+        ).toBe(true);
+        expect(endpointRequests.some((request) => request.method === "POST")).toBe(false);
       } finally {
         fs.rmSync(tmp, { force: true, recursive: true });
       }

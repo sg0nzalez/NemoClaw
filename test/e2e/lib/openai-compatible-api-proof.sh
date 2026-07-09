@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 start_fake_openai_compatible_api() {
-  local script_dir server_script port_file ready_host public_host
+  local script_dir server_script port_file ready_host public_host readiness_status
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
   server_script="${script_dir}/fake-openai-compatible-api.mts"
   port_file="${FAKE_OPENAI_PORT_FILE:-$(mktemp)}"
@@ -32,7 +32,10 @@ start_fake_openai_compatible_api() {
   for _ in $(seq 1 "${FAKE_OPENAI_READY_ATTEMPTS:-30}"); do
     if [ -s "$port_file" ]; then
       FAKE_OPENAI_PORT="$(cat "$port_file")"
-      if curl -sf "http://${ready_host}:${FAKE_OPENAI_PORT}/v1/models" >/dev/null 2>&1; then
+      readiness_status="$(curl -sS -o /dev/null -w '%{http_code}' "http://${ready_host}:${FAKE_OPENAI_PORT}/v1/models" 2>/dev/null || true)"
+      # A 401 still proves the server is listening when the fixture deliberately
+      # requires credentials on /v1/models.
+      if [ "$readiness_status" = "200" ] || [ "$readiness_status" = "401" ]; then
         public_host="${FAKE_OPENAI_PUBLIC_HOST:-$FAKE_OPENAI_HOST}"
         if [ "$public_host" = "0.0.0.0" ]; then
           public_host="127.0.0.1"

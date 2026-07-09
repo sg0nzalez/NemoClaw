@@ -253,7 +253,7 @@ if ! reonboard_output="$(
 fi
 printf '%s\n' "$reonboard_output" | grep -Fq "Backing up workspace state before recreating sandbox..." || fail "re-onboard did not take the pre-recreate backup path"
 printf '%s\n' "$reonboard_output" | grep -Fq "Restoring workspace state from pre-recreate backup..." || fail "re-onboard did not take the restore path"
-nemoclaw_e2e_assert_hermetic_compatible_inference_used || fail "re-onboard did not use the hermetic compatible endpoint"
+nemoclaw_e2e_assert_hermetic_compatible_endpoint_consulted || fail "re-onboard did not consult the hermetic compatible endpoint"
 pass "same-name --fresh re-onboard crossed backup and restore boundaries"
 
 sandbox_list="$(openshell sandbox list 2>&1)" || fail "could not list sandbox after re-onboard"

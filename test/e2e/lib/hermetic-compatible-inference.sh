@@ -24,6 +24,7 @@ nemoclaw_e2e_start_hermetic_compatible_inference() {
   export FAKE_OPENAI_API_KEY="$fake_key"
   export FAKE_OPENAI_REQUIRE_AUTH=1
   export NEMOCLAW_FAKE_OPENAI_REQUESTS_FILE="$FAKE_OPENAI_REQUESTS_FILE"
+  export NEMOCLAW_FAKE_OPENAI_REQUIRE_AUTH_MODELS=1
 
   if ! start_fake_openai_compatible_api; then
     return 1
@@ -40,6 +41,29 @@ nemoclaw_e2e_start_hermetic_compatible_inference() {
 
 nemoclaw_e2e_stop_hermetic_compatible_inference() {
   stop_fake_openai_compatible_api
+}
+
+nemoclaw_e2e_assert_hermetic_compatible_endpoint_consulted() {
+  node - "${FAKE_OPENAI_REQUESTS_FILE:-}" <<'NODE'
+const fs = require("fs");
+const requestsFile = process.argv[2];
+if (!requestsFile || !fs.existsSync(requestsFile)) {
+  throw new Error(`request log missing: ${requestsFile || "<unset>"}`);
+}
+const entries = fs.readFileSync(requestsFile, "utf8")
+  .split(/\n+/)
+  .filter(Boolean)
+  .map((line) => JSON.parse(line));
+const consultations = entries.filter((entry) =>
+  entry.method === "GET" &&
+  ["/v1/models", "/models"].includes(entry.path) &&
+  entry.authorizationSent === true &&
+  entry.auth === "ok"
+);
+if (consultations.length === 0) {
+  throw new Error(`expected an authenticated fake endpoint models consultation, got ${JSON.stringify(entries)}`);
+}
+NODE
 }
 
 nemoclaw_e2e_assert_hermetic_compatible_inference_used() {
