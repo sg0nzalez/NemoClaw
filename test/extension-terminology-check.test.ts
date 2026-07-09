@@ -229,7 +229,6 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
     ]);
   });
 
-
   it("does not follow symlinks outside scanned documentation roots", () => {
     const root = createTemporaryRoot("nemoclaw-extension-terminology-symlink-");
     const outside = createTemporaryRoot("nemoclaw-extension-terminology-outside-");
