@@ -31,7 +31,7 @@ type ScanOptions = {
 };
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const DEFAULT_SCAN_ROOTS = Object.freeze(["docs"]);
+const SCAN_ROOT = "docs";
 const DOCUMENTATION_FILE_PATTERN = /\.(?:md|mdx)$/i;
 const SKIP_DIRS = new Set([".git", ".venv", "coverage", "dist", "node_modules"]);
 const EXTENSION_SURFACE_PATTERN =
@@ -194,7 +194,7 @@ export function findRepositoryExtensionTerminologyViolations(
 ): readonly ExtensionTerminologyViolation[] {
   const scanOptions: ScanOptions = Array.isArray(options) ? { roots: options } : options;
   const violations: ExtensionTerminologyViolation[] = [];
-  for (const root of scanOptions.roots ?? DEFAULT_SCAN_ROOTS) {
+  for (const root of scanOptions.roots ?? [SCAN_ROOT]) {
     const absoluteRoot = path.resolve(REPO_ROOT, root);
     for (const absolutePath of walkDocumentationFiles(absoluteRoot, scanOptions.onWarning)) {
       const file = relativeFile(absolutePath);

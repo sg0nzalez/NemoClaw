@@ -56,6 +56,9 @@ describe("extension terminology guard", () => {
     "pre-non-committed-post",
     "(candidate)",
     "pre-candidate-post",
+    "(reserved)",
+    "reserved;",
+    "candidate.",
   ])("allows %s SDK wording", (allowedContext) => {
     const source = `The NemoClaw plugin SDK is ${allowedContext} for extension authors.`;
 
