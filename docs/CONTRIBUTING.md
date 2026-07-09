@@ -148,6 +148,7 @@ It gives contributors a quick terminology check without replacing the extension 
 - Use `agent-native plugin` only for plugins owned by OpenClaw, Hermes, Deep Agents Code, or another agent runtime.
 - Treat `NemoClaw plugin SDK` as a reserved future public SDK concept, not a current product surface.
 - Do not describe managed packages, policy presets, channel manifests, or compatibility manifests as a current NemoClaw plugin SDK.
+- State that NemoClaw does not currently run arbitrary third-party code through a public plugin SDK; managed agent packages must stay reviewed and installed through trusted built-in paths.
 - Keep the ownership boundaries separate: #5998 covers the VoiceClaw managed-package and messaging-channel integration path, #6097 covers internal messaging channel organization, #3915 covers future observability extension work, #6201 covers OpenClaw voice-call plugin and provider work, and #6207 covers OpenShell sandbox and networking contracts.
 - Do not combine those issue scopes or reclassify one boundary as another.
 - Do not promise SDK, registry, CLI, semantic-versioning, migration, or compatibility commitments unless a separate accepted decision and implementation already provide them.
