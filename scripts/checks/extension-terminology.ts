@@ -176,8 +176,9 @@ function isRootList(options: ScanOptions | readonly string[]): options is readon
 function readCheckedDocumentationFile(absolutePath: string): string | null {
   const descriptor = openSync(absolutePath, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
-    const size = fstatSync(descriptor).size;
-    if (size > MAX_DOCUMENTATION_FILE_BYTES) return null;
+    const stats = fstatSync(descriptor);
+    if (!stats.isFile()) throw new Error("documentation path is not a regular file");
+    if (stats.size > MAX_DOCUMENTATION_FILE_BYTES) return null;
     return readFileSync(descriptor, "utf8");
   } finally {
     closeSync(descriptor);
