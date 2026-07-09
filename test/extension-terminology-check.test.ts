@@ -1,11 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
   chmodSync,
   closeSync,
   mkdirSync,
+  existsSync,
   openSync,
   rmSync,
   symlinkSync,
@@ -22,7 +24,7 @@ import { listChecks, runChecks } from "../scripts/checks/run";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const TEMP_ROOT = path.join(REPO_ROOT, "test", ".tmp");
-const TRUSTED_CI_WARNING = "repository terminology scan is intended for trusted CI check runs";
+const TRUSTED_CI_WARNING = "extension-terminology: repository terminology scan only runs in trusted CI check runs";
 const temporaryRoots: string[] = [];
 const runsAsRoot = typeof process.getuid === "function" && process.getuid() === 0;
 const originalCi = process.env.CI;
@@ -292,20 +294,38 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
     ]);
   });
 
-  it("warns and skips repository scans outside trusted CI", () => {
-    const root = createTemporaryRoot("nemoclaw-extension-terminology-ci-warning-");
-    temporaryRoots.push(root);
+  it("blocks repository scans outside trusted CI before filesystem access", () => {
     const warnings: { file: string; message: string }[] = [];
+    const root = path.join(REPO_ROOT, "test", ".tmp", `missing-${randomUUID()}`);
     delete process.env.CI;
-    writeNewFile(path.join(root, "violation.md"), "Use the public NemoClaw extension SDK today.");
 
-    expect(
+    expect(() =>
       findRepositoryExtensionTerminologyViolations({
         onWarning: (warning) => warnings.push(warning),
         roots: [root],
       }),
-    ).toEqual([]);
+    ).toThrow(TRUSTED_CI_WARNING);
     expect(warnings).toEqual([{ file: "<environment>", message: TRUSTED_CI_WARNING }]);
+    expect(existsSync(root)).toBe(false);
+  });
+
+  it("exits non-zero without a false pass outside trusted CI", () => {
+    const env = { ...process.env };
+    Reflect.deleteProperty(env, "CI");
+
+    const result = spawnSync(
+      process.platform === "win32" ? "tsx.cmd" : "tsx",
+      ["scripts/checks/extension-terminology.ts"],
+      {
+        cwd: REPO_ROOT,
+        encoding: "utf8",
+        env,
+      },
+    );
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(TRUSTED_CI_WARNING);
+    expect(result.stdout).not.toContain("Extension terminology check passed.");
   });
 
   it("scans configured markdown and mdx documentation roots", () => {
@@ -499,6 +519,7 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
     expect(extensionCheck).toEqual({
       args: ["scripts/checks/extension-terminology.ts"],
       command: process.platform === "win32" ? "tsx.cmd" : "tsx",
+      env: { CI: "true" },
       name: "extension-terminology",
     });
   });

@@ -11,6 +11,7 @@ export type CheckCommand = {
   readonly name: string;
   readonly command: string;
   readonly args: readonly string[];
+  readonly env?: Readonly<Record<string, string>>;
 };
 
 export type CheckRunner = (check: CheckCommand) => { readonly status: number | null };
@@ -72,6 +73,7 @@ const CHECKS: readonly CheckCommand[] = [
     name: "extension-terminology",
     command: TSX,
     args: ["scripts/checks/extension-terminology.ts"],
+    env: { CI: "true" },
   },
   {
     name: "no-unit-blocks-in-live-e2e",
@@ -81,13 +83,18 @@ const CHECKS: readonly CheckCommand[] = [
 ];
 
 export function listChecks(): readonly CheckCommand[] {
-  return CHECKS.map((check) => ({ ...check, args: [...check.args] }));
+  return CHECKS.map((check) => ({
+    ...check,
+    args: [...check.args],
+    env: check.env === undefined ? undefined : { ...check.env },
+  }));
 }
 
 export function runChecks(
   runner: CheckRunner = (check) =>
     spawnSync(check.command, [...check.args], {
       cwd: REPO_ROOT,
+      env: check.env === undefined ? process.env : { ...process.env, ...check.env },
       stdio: "inherit",
     }),
 ): number {

@@ -46,7 +46,7 @@ type ScanOptions = {
   readonly onWarning?: (warning: ScanWarning) => void;
 };
 
-const TRUSTED_CI_WARNING = "repository terminology scan is intended for trusted CI check runs";
+const TRUSTED_CI_WARNING = "extension-terminology: repository terminology scan only runs in trusted CI check runs";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const DOCUMENTATION_FILE_PATTERN = /\.(?:md|mdx)$/i;
@@ -341,14 +341,17 @@ export function findExtensionTerminologyViolations(
 /**
  * @internal CI-only documentation linter for trusted repository check runs.
  */
+function assertTrustedCi(onWarning: ((warning: ScanWarning) => void) | undefined): void {
+  if (process.env.CI === "true") return;
+  warnRoot(onWarning, "<environment>", TRUSTED_CI_WARNING);
+  throw new Error(TRUSTED_CI_WARNING);
+}
+
 export function findRepositoryExtensionTerminologyViolations(
   options: ScanOptions | readonly string[] = {},
 ): readonly ExtensionTerminologyViolation[] {
   const scanOptions: ScanOptions = isRootList(options) ? { roots: options } : options;
-  if (process.env.CI !== "true") {
-    warnRoot(scanOptions.onWarning, "<environment>", TRUSTED_CI_WARNING);
-    return [];
-  }
+  assertTrustedCi(scanOptions.onWarning);
   const violations: ExtensionTerminologyViolation[] = [];
   for (const root of scanOptions.roots ?? ["docs"]) {
     const absoluteRoot = path.resolve(REPO_ROOT, root);
@@ -389,9 +392,16 @@ export function findRepositoryExtensionTerminologyViolations(
 }
 
 function main(): void {
-  const violations = findRepositoryExtensionTerminologyViolations({
-    onWarning: (warning) => console.warn(`${warning.file}: ${warning.message}`),
-  });
+  let violations: readonly ExtensionTerminologyViolation[];
+  try {
+    violations = findRepositoryExtensionTerminologyViolations({
+      onWarning: (warning) => console.warn(`${warning.file}: ${warning.message}`),
+    });
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+    return;
+  }
   if (violations.length === 0) {
     console.log("Extension terminology check passed.");
     return;
