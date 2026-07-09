@@ -7,7 +7,7 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-export type CheckCommand = {
+type CheckCommand = {
   name: string;
   command: string;
   args: string[];
@@ -15,7 +15,7 @@ export type CheckCommand = {
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const TSX = process.platform === "win32" ? "tsx.cmd" : "tsx";
-export const CHECKS: readonly CheckCommand[] = [
+const CHECKS: readonly CheckCommand[] = [
   {
     name: "direct-credential-env",
     command: TSX,

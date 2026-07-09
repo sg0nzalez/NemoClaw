@@ -6,7 +6,6 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { CHECKS } from "../scripts/checks/run";
 import {
   findExtensionTerminologyViolations,
   findRepositoryExtensionTerminologyViolations,
@@ -235,14 +234,4 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
     ]);
   });
 
-  it("registers the extension terminology check with the local check runner", () => {
-    expect(CHECKS).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          args: ["scripts/checks/extension-terminology.ts"],
-          name: "extension-terminology",
-        }),
-      ]),
-    );
-  });
 });

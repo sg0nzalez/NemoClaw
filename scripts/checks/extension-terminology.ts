@@ -17,7 +17,7 @@ type TerminologyRule = {
   readonly term: string;
   readonly pattern: RegExp;
   readonly detail: string;
-  readonly include?: (context: string) => boolean;
+  readonly scope?: "extension-surface-commitment";
 };
 
 type WalkOptions = {
@@ -81,11 +81,12 @@ const RULES: readonly TerminologyRule[] = [
      * Source boundary: human-authored docs under docs/.
      * Source fix constraint: this linter is the drift-prevention fix.
      * Regression test: "keeps compatibility commitment scoped to extension surfaces".
-     * Removal condition: decompose into source-specific rules or schema-generated docs.
+     * Removal condition: replace with source-specific rules or schema-generated docs.
      */
-    include: (context) => EXTENSION_SURFACE_PATTERN.test(context) && !/\bCLI\b/i.test(context),
+    scope: "extension-surface-commitment",
   },
 ];
+/** Custom non-word boundaries keep hyphenated allowlist terms like non-committed intact. */
 const ALLOWED_CONTEXT_PATTERN =
   /(?:^|[^\w])(?:reserved|future|not\s+(?:offered|available|committed|guaranteed|promised|stable|supported)|unavailable|non[-\s]?committed|no\s+(?:current|public|stable|supported|shipping)|does\s+not\s+(?:offer|commit|guarantee|promise|provide)|not\s+yet|unmet\s+gates?|candidate|proposed|before\s+(?:SDK\s+)?stabili[sz]ation)(?:$|[^\w])/i;
 
@@ -136,6 +137,7 @@ function* walkDocumentationFiles(options: WalkOptions): Generator<string> {
     }
     if (stats.isSymbolicLink()) {
       try {
+        // This CI-only documentation linter tolerates the lstat/realpath TOCTOU window.
         const resolvedPath = realpathSync(absolutePath);
         if (!isWithinDirectory(root, resolvedPath)) {
           warnFile(onWarning, absolutePath, "symbolic link target is outside the scan root");
@@ -158,19 +160,16 @@ function sentenceContext(
   index: number,
   matchLength: number,
 ): { readonly text: string; readonly start: number } {
-  const delimiterPattern = /\n|\.\.\.|[!?][!?]?|\./g;
-  let start = -1;
-  for (const delimiter of source.matchAll(delimiterPattern)) {
-    const delimiterStart = delimiter.index ?? 0;
-    if (delimiterStart >= index) break;
-    start = delimiterStart + delimiter[0].length - 1;
-  }
-
+  const delimiters = [...source.matchAll(/\n|\.\.\.|[!?][!?]?|\./g)].map((delimiter) => ({
+    end: (delimiter.index ?? 0) + delimiter[0].length,
+    start: delimiter.index ?? 0,
+  }));
+  const startDelimiter = delimiters.findLast((delimiter) => delimiter.start < index);
   const after = index + matchLength;
-  delimiterPattern.lastIndex = after;
-  const nextDelimiter = delimiterPattern.exec(source);
-  const end = nextDelimiter === null ? source.length : nextDelimiter.index;
-  return { start: start + 1, text: source.slice(start + 1, end) };
+  const endDelimiter = delimiters.find((delimiter) => delimiter.start >= after);
+  const start = startDelimiter === undefined ? 0 : startDelimiter.end;
+  const end = endDelimiter === undefined ? source.length : endDelimiter.start;
+  return { start, text: source.slice(start, end) };
 }
 
 function clauseContext(context: string, index: number, matchLength: number): string {
@@ -190,6 +189,10 @@ function isAllowedContext(context: string, index: number, matchLength: number): 
   return ALLOWED_CONTEXT_PATTERN.test(clauseContext(context, index, matchLength));
 }
 
+function isExtensionSurfaceCommitment(context: string): boolean {
+  return EXTENSION_SURFACE_PATTERN.test(context) && !/\bCLI\b/i.test(context);
+}
+
 function lineForIndex(source: string, index: number): number {
   return source.slice(0, index).split("\n").length;
 }
@@ -206,7 +209,9 @@ export function findExtensionTerminologyViolations(
       const index = match.index ?? 0;
       const context = sentenceContext(source, index, match[0].length);
       const contextIndex = index - context.start;
-      if (rule.include !== undefined && !rule.include(context.text)) continue;
+      if (rule.scope === "extension-surface-commitment" && !isExtensionSurfaceCommitment(context.text)) {
+        continue;
+      }
       if (isAllowedContext(context.text, contextIndex, match[0].length)) continue;
       violations.push({
         file,
