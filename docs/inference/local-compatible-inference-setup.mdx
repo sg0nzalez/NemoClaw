@@ -17,10 +17,11 @@ It covers compatible endpoints, vLLM, NVIDIA NIM, and the related timeout settin
 ## OpenAI-Compatible Server
 
 This option works with any server that implements `/v1/chat/completions`, including vLLM, TensorRT-LLM, llama.cpp, LocalAI, and others.
-For compatible endpoints, NemoClaw uses `/v1/chat/completions` by default.
+For compatible endpoints, NemoClaw uses `/v1/chat/completions` at runtime by default.
+During onboarding, it probes `/v1/responses` first and falls back to `/v1/chat/completions` when the Responses API lacks required tool-calling or streaming support.
 
-This avoids a class of failures where local backends accept `/v1/responses` requests but silently drop the system prompt and tool definitions.
-To opt in to `/v1/responses`, set `NEMOCLAW_PREFERRED_API=openai-responses` before running onboard.
+Set `NEMOCLAW_PREFERRED_API=openai-responses` to use `/v1/responses` at runtime after successful validation.
+Set `NEMOCLAW_PREFERRED_API=openai-completions` to skip the Responses probe and validate Chat Completions only.
 
 Start your model server.
 The examples below use vLLM, but any OpenAI-compatible server works.
@@ -71,9 +72,10 @@ If your server does not require authentication, enter any non-empty string (for 
 ### Validate the Endpoint
 
 NemoClaw validates the endpoint by sending a test inference request before continuing.
-The wizard probes `/v1/chat/completions` by default for the compatible-endpoint provider.
+By default, the wizard probes `/v1/responses` first with tool-calling and streaming checks, then falls back to `/v1/chat/completions`.
 
-If you set `NEMOCLAW_PREFERRED_API=openai-responses`, NemoClaw probes `/v1/responses` instead and only selects it when the response includes the streaming events OpenClaw requires.
+Unless you explicitly set `NEMOCLAW_PREFERRED_API=openai-responses`, the runtime still uses `/v1/chat/completions`.
+With that setting, NemoClaw selects `/v1/responses` only when the response includes the streaming events OpenClaw requires.
 If a reasoning model returns only reasoning content before producing a final answer, NemoClaw retries the smoke request with a larger response budget.
 
 Route, configuration, and authentication failures still fail immediately.
@@ -108,17 +110,19 @@ NEMOCLAW_PROVIDER=custom \
 
 ### Selecting the API Path
 
-For the compatible-endpoint provider, `/v1/chat/completions` is the default.
-NemoClaw tests streaming events during onboarding and uses chat completions without probing the Responses API.
+For the compatible-endpoint provider, `/v1/chat/completions` is the runtime default.
+During onboarding, NemoClaw probes `/v1/responses` first with tool-calling and streaming checks, then falls back to `/v1/chat/completions`.
+A successful Responses probe does not change the runtime selection unless you explicitly set `NEMOCLAW_PREFERRED_API=openai-responses`.
 
-To opt in to `/v1/responses`, set `NEMOCLAW_PREFERRED_API` before running onboard:
+To use `/v1/responses` at runtime, set `NEMOCLAW_PREFERRED_API` before running onboard:
 
 ```bash
 NEMOCLAW_PREFERRED_API=openai-responses $$nemoclaw onboard
 ```
 
-The wizard then probes `/v1/responses` and only selects it when streaming support is complete.
+The wizard selects `/v1/responses` only when streaming support is complete.
 If the probe fails, the wizard falls back to `/v1/chat/completions` automatically.
+To skip the Responses probe and validate Chat Completions only, set `NEMOCLAW_PREFERRED_API=openai-completions`.
 You can use this variable in both interactive and non-interactive mode.
 
 <AgentOnly variant="deepagents">
@@ -128,7 +132,7 @@ Deep Agents sandboxes keep `use_responses_api = false` in `/sandbox/.deepagents/
 
 | Variable | Values | Default |
 |---|---|---|
-| `NEMOCLAW_PREFERRED_API` | `openai-completions`, `openai-responses` | `openai-completions` for compatible endpoints |
+| `NEMOCLAW_PREFERRED_API` | `openai-completions`, `openai-responses` | Unset (runtime uses Chat Completions) |
 
 If you already onboarded and the sandbox is failing at runtime, re-run `$$nemoclaw onboard` to re-probe the endpoint and bake the correct API path into the image.
 Refer to [Switch Inference Models](switch-inference-providers) for more information.

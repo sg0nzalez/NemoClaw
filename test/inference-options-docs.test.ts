@@ -24,6 +24,13 @@ const toolCallingReliabilityPath = path.join(
   "inference",
   "tool-calling-reliability.mdx",
 );
+const inferenceSelectionValidationPath = path.join(
+  repoRoot,
+  "src",
+  "lib",
+  "onboard",
+  "inference-selection-validation.ts",
+);
 const inferenceConfigPath = path.join(repoRoot, "src", "lib", "inference", "config.ts");
 const modelPromptsPath = path.join(repoRoot, "src", "lib", "inference", "model-prompts.ts");
 
@@ -192,6 +199,24 @@ describe("inference setup navigation", () => {
 
     expect(section).toContain(
       "[Set Up Self-Hosted Inference Servers](local-compatible-inference-setup)",
+    );
+  });
+
+  it("documents compatible-endpoint probing separately from runtime API selection", () => {
+    const markdown = fs.readFileSync(selfHostedInferenceSetupPath, "utf8");
+    const validationSource = fs.readFileSync(inferenceSelectionValidationPath, "utf8");
+
+    expect(validationSource).toContain(
+      "reasoningEnabled || shouldForceCompletionsApi(process.env.NEMOCLAW_PREFERRED_API)",
+    );
+    expect(markdown).toContain(
+      "the wizard probes `/v1/responses` first with tool-calling and streaming checks, then falls back to `/v1/chat/completions`.",
+    );
+    expect(markdown).toContain(
+      "Unless you explicitly set `NEMOCLAW_PREFERRED_API=openai-responses`, the runtime still uses `/v1/chat/completions`.",
+    );
+    expect(markdown).toContain(
+      "Set `NEMOCLAW_PREFERRED_API=openai-completions` to skip the Responses probe and validate Chat Completions only.",
     );
   });
 });
