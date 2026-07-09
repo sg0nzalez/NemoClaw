@@ -22,6 +22,7 @@ const { probeOpenAiLikeEndpoint } = require("../src/lib/inference/onboard-probes
 };
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const inferenceOptionsPath = path.join(repoRoot, "docs", "inference", "inference-options.mdx");
+const releaseNotesPath = path.join(repoRoot, "docs", "about", "release-notes.mdx");
 const selfHostedInferenceSetupPath = path.join(
   repoRoot,
   "docs",
@@ -174,6 +175,26 @@ describe("inference options model task-fit docs (#4755)", () => {
 });
 
 describe("inference setup navigation", () => {
+  it("routes the latest local and compatible inference release note to both setup guides (#6590)", () => {
+    const markdown = fs.readFileSync(releaseNotesPath, "utf8");
+    const releaseStart = markdown.indexOf("## v0.0.79");
+    const releaseEnd = markdown.indexOf("## v0.0.78", releaseStart);
+    expect(releaseStart).toBeGreaterThanOrEqual(0);
+    expect(releaseEnd).toBeGreaterThan(releaseStart);
+    const release = markdown.slice(releaseStart, releaseEnd);
+    const bulletStart = release.indexOf("- Local and compatible inference setup");
+    const bulletEnd = release.indexOf("\n- ", bulletStart + 1);
+    expect(bulletStart).toBeGreaterThanOrEqual(0);
+    expect(bulletEnd).toBeGreaterThan(bulletStart);
+    const bullet = release.slice(bulletStart, bulletEnd);
+
+    expect(bullet).toContain("[Use Ollama for Local Inference](../inference/use-local-inference)");
+    expect(bullet).toContain(
+      "[Set Up Self-Hosted Inference Servers](../inference/local-compatible-inference-setup)",
+    );
+    expect(bullet).not.toContain("[Use a Local Inference Server]");
+  });
+
   it("routes caveated vLLM and NIM setup to the self-hosted server guide", () => {
     const markdown = fs.readFileSync(inferenceOptionsPath, "utf8");
     const start = markdown.indexOf("## Caveated Local Options");

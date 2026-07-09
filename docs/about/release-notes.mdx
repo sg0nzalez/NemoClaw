@@ -26,7 +26,7 @@ The release also refreshes quickstarts and variant rendering so OpenClaw, Hermes
   For more information, refer to [NemoClaw Inference Options](../inference/inference-options), [Switch Inference Providers](../inference/switch-inference-providers), and [Platform Support and Launch Claims](../reference/platform-support).
 - Local and compatible inference setup is more resilient.
   Managed vLLM starts with argv-safe Docker arguments, DGX Spark uses the Qwen3.6 `qwen3_coder` tool parser, OpenClaw bounds managed inference compaction, and onboarding uses calibrated provider-validation and gateway-readiness deadlines to avoid hanging or failing too early on slower hosts.
-  For more information, refer to [NemoClaw Inference Options](../inference/inference-options), [Use a Local Inference Server](../inference/use-local-inference), and [Troubleshooting](../reference/troubleshooting).
+  For more information, refer to [NemoClaw Inference Options](../inference/inference-options), [Use Ollama for Local Inference](../inference/use-local-inference), [Set Up Self-Hosted Inference Servers](../inference/local-compatible-inference-setup), and [Troubleshooting](../reference/troubleshooting).
 - CLI and installer diagnostics are easier to act on.
   The new `$$nemoclaw completion` command generates Bash, Zsh, and Fish completions, structured logging now supports `--debug` and `NEMOCLAW_LOG_LEVEL`, `status` warns when the live gateway route drifts from the recorded sandbox route, and gateway teardown now recommends and runs `openshell gateway remove` consistently across platforms.
   Installer and uninstall flows also report preserved orphaned sandboxes more honestly, and DGX Spark express installs use the expected `my-assistant` sandbox name.
