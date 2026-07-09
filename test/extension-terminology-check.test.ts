@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { randomUUID } from "node:crypto";
 import {
   chmodSync,
   closeSync,
   mkdirSync,
-  mkdtempSync,
   openSync,
   rmSync,
   symlinkSync,
@@ -27,7 +27,9 @@ const runsAsRoot = typeof process.getuid === "function" && process.getuid() === 
 
 function createTemporaryRoot(prefix: string): string {
   mkdirSync(TEMP_ROOT, { recursive: true });
-  return mkdtempSync(path.join(TEMP_ROOT, prefix));
+  const temporaryRoot = path.join(TEMP_ROOT, `${prefix}${randomUUID()}`);
+  mkdirSync(temporaryRoot, { mode: 0o700 });
+  return temporaryRoot;
 }
 
 function writeNewFile(filePath: string, content: string): void {
@@ -288,6 +290,19 @@ NemoClaw publishes a compatibility commitment for external plugins.`;
       },
     ]);
   });
+
+  it.each([".next", ".turbo", ".vercel", "build", "out"])(
+    "ignores generated documentation under %s",
+    (directoryName) => {
+      const root = createTemporaryRoot("nemoclaw-extension-terminology-skip-dir-");
+      temporaryRoots.push(root);
+      const skipped = path.join(root, directoryName);
+      mkdirSync(skipped, { recursive: true });
+      writeNewFile(path.join(skipped, "violation.md"), "Use the public NemoClaw extension SDK today.");
+
+      expect(findRepositoryExtensionTerminologyViolations([root])).toEqual([]);
+    },
+  );
 
   it("warns and continues after filesystem scan errors", () => {
     const root = createTemporaryRoot("nemoclaw-extension-terminology-errors-");

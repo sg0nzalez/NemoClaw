@@ -39,7 +39,18 @@ type ScanOptions = {
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const DOCUMENTATION_FILE_PATTERN = /\.(?:md|mdx)$/i;
-const SKIP_DIRS = new Set([".git", ".venv", "coverage", "dist", "node_modules"]);
+const SKIP_DIRS = new Set([
+  ".git",
+  ".next",
+  ".turbo",
+  ".venv",
+  ".vercel",
+  "build",
+  "coverage",
+  "dist",
+  "node_modules",
+  "out",
+]);
 const EXTENSION_SURFACE_PATTERN =
   /\b(?:extension|plugins?|packages?|lifecycle contributions?|public seams?|registr(?:y|ies))\b/i;
 const RULES: readonly TerminologyRule[] = [
@@ -192,21 +203,21 @@ function sentenceContext(
   index: number,
   matchLength: number,
 ): { readonly text: string; readonly start: number } {
-  const delimiters = [...source.matchAll(/\n|\.\.\.|[!?][!?]?|\./g)].map((delimiter) => ({
-    end: (delimiter.index ?? 0) + delimiter[0].length,
-    start: delimiter.index ?? 0,
-  }));
   let start = 0;
-  for (let delimiterIndex = delimiters.length - 1; delimiterIndex >= 0; delimiterIndex -= 1) {
-    const delimiter = delimiters[delimiterIndex];
-    if (delimiter !== undefined && delimiter.start < index) {
-      start = delimiter.end;
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    if (source[cursor] === "\n" || source[cursor] === "." || source[cursor] === "!" || source[cursor] === "?") {
+      start = cursor + 1;
       break;
     }
   }
-  const after = index + matchLength;
-  const endDelimiter = delimiters.find((delimiter) => delimiter.start >= after);
-  const end = endDelimiter === undefined ? source.length : endDelimiter.start;
+
+  let end = source.length;
+  for (let cursor = index + matchLength; cursor < source.length; cursor += 1) {
+    if (source[cursor] === "\n" || source[cursor] === "." || source[cursor] === "!" || source[cursor] === "?") {
+      end = cursor;
+      break;
+    }
+  }
   return { start, text: source.slice(start, end) };
 }
 
