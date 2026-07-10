@@ -4890,6 +4890,13 @@ wait_for_openclaw_gateway_internal() {
   return 1
 }
 
+arm_openclaw_gateway_supervisor_cleanup() {
+  # Bash does not run an EXIT trap when an untrapped SIGTERM/SIGINT terminates
+  # the shell, so both traps must be live before the marker is written.
+  trap cleanup_openclaw_on_signal SIGTERM SIGINT
+  trap clear_in_container_gateway_marker EXIT
+}
+
 launch_openclaw_gateway() {
   # Drop the gateway marker whenever this supervisor exits -- clean gateway
   # exit (`exit 0` below), a forwarded signal (cleanup_openclaw_on_signal ends
@@ -4900,7 +4907,7 @@ launch_openclaw_gateway() {
   # leave the marker behind. The marker is re-dropped at each launch
   # (mark_in_container_gateway), so the respawn loop -- which never exits the
   # script -- keeps it in place.
-  trap clear_in_container_gateway_marker EXIT
+  arm_openclaw_gateway_supervisor_cleanup
   mark_in_container_gateway
   nohup "${STEP_DOWN_PREFIX_GATEWAY[@]}" sh -c \
     'umask 0007; exec "$@" >>/tmp/gateway.log 2>&1' sh \
@@ -4920,6 +4927,16 @@ launch_openclaw_gateway() {
   # shellcheck disable=SC2034  # read by cleanup_on_signal from sandbox-init.sh
   SANDBOX_WAIT_PID="$GATEWAY_PID"
   echo "[gateway] openclaw gateway launched as 'gateway' user (pid $GATEWAY_PID)" >&2
+}
+
+launch_openclaw_gateway_non_root() {
+  arm_openclaw_gateway_supervisor_cleanup
+  mark_in_container_gateway
+  nohup "$OPENCLAW" gateway run --port "${_DASHBOARD_PORT}" >/tmp/gateway.log 2>&1 &
+  GATEWAY_PID=$!
+  capture_openclaw_pid_start_identity "$GATEWAY_PID" GATEWAY_PID_START_IDENTITY || exit 1
+  record_gateway_pid "$GATEWAY_PID" "$GATEWAY_PID_START_IDENTITY"
+  echo "[gateway] openclaw gateway launched (pid $GATEWAY_PID)" >&2
 }
 
 openclaw_supervised_aux_pid_is_live() {
@@ -5520,17 +5537,7 @@ if [ "$(id -u)" -ne 0 ]; then
   # to healthy — see the mark_in_container_gateway comment near the top of this
   # file for the #4710 rationale (why the marker is tied to the launch site
   # rather than an env-var conditional at startup).
-  # Arm signal and marker cleanup before marking. Bash does not run an EXIT
-  # trap when an untrapped SIGTERM/SIGINT terminates the shell, so both traps
-  # must precede the first marker write.
-  trap cleanup_openclaw_on_signal SIGTERM SIGINT
-  trap clear_in_container_gateway_marker EXIT
-  mark_in_container_gateway
-  nohup "$OPENCLAW" gateway run --port "${_DASHBOARD_PORT}" >/tmp/gateway.log 2>&1 &
-  GATEWAY_PID=$!
-  capture_openclaw_pid_start_identity "$GATEWAY_PID" GATEWAY_PID_START_IDENTITY || exit 1
-  record_gateway_pid "$GATEWAY_PID" "$GATEWAY_PID_START_IDENTITY"
-  echo "[gateway] openclaw gateway launched (pid $GATEWAY_PID)" >&2
+  launch_openclaw_gateway_non_root
   # Diagnostic: mirror gateway log to PID 1's stderr — see root-mode block
   # below for rationale (NVIDIA/NemoClaw#2484).
   { tail -n +1 -F /tmp/gateway.log 2>/dev/null | sed -u 's/^/[gateway-log:] /' >&2; } &
@@ -5752,9 +5759,7 @@ validate_nemoclaw_tmp_permissions
 # Marking, privilege step-down, log redirection, and PID recording are kept in
 # one reusable launch primitive so PID 1 owns initial start, crash respawn, and
 # host-requested restart identically.
-# Arm signal cleanup before the launch primitive writes the marker. The
-# primitive itself arms the EXIT cleanup before marking.
-trap cleanup_openclaw_on_signal SIGTERM SIGINT
+# The launch primitive arms signal and EXIT cleanup before writing the marker.
 launch_openclaw_gateway
 
 # Diagnostic: mirror gateway log to PID 1's stderr so its content surfaces in

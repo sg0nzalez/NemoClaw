@@ -105,6 +105,7 @@ function watchdogFunctions(gatewayLog: string): string {
 function rootGatewayLifecycleFunctions(src: string, gatewayLog: string): string {
   return [
     pidIdentityFunctions(src),
+    extractShellFunction(src, "arm_openclaw_gateway_supervisor_cleanup"),
     extractShellFunction(src, "launch_openclaw_gateway").replaceAll("/tmp/gateway.log", gatewayLog),
     extractShellFunction(src, "openclaw_supervised_aux_pid_is_live"),
     extractShellFunction(src, "stop_openclaw_supervised_gateway"),
@@ -1010,12 +1011,8 @@ describe("healthcheck marker (#4503, #4710)", () => {
   });
 });
 
-// Behavioral wiring coverage: run the real launch block of each entrypoint
-// mode with the real marker/pidfile/watchdog helpers and assert their
-// runtime effects. This replaces source-text assertions (banned by
-// ci/source-shape-test-budget.json) and locks the #4748 regression
-// behaviorally: OPENSHELL_DRIVERS is exported during the run and must have
-// no influence on whether the marker is dropped.
+// Run both real launch paths with their marker, pidfile, and watchdog helpers.
+// This behaviorally covers the driver-env marker regression (#4748).
 describe("gateway launch wiring (#4710)", () => {
   it("exits PID 1 without signaling when gateway identity capture fails", () => {
     const src = fs.readFileSync(START_SCRIPT, "utf-8");
@@ -1037,10 +1034,12 @@ describe("gateway launch wiring (#4710)", () => {
           "GATEWAY_PID=0",
           "GATEWAY_PID_START_IDENTITY=",
           "mark_in_container_gateway() { :; }",
+          "clear_in_container_gateway_marker() { :; }\ncleanup_openclaw_on_signal() { :; }",
           "capture_openclaw_pid_start_identity() { return 1; }",
           'clear_gateway_pid_record() { printf "clear\\n" >>"$EVENT_LOG"; }',
           'kill() { printf "unexpected-kill:%s\\n" "$*" >>"$EVENT_LOG"; }',
           'wait() { printf "unexpected-wait:%s\\n" "$*" >>"$EVENT_LOG"; }',
+          extractShellFunction(src, "arm_openclaw_gateway_supervisor_cleanup"),
           launch,
           "launch_openclaw_gateway",
         ].join("\n"),
@@ -1078,6 +1077,10 @@ describe("gateway launch wiring (#4710)", () => {
       safeTmpHelpers(src),
       gatewayMarkerFunction(src, "mark_in_container_gateway", markerPath),
       gatewayMarkerFunction(src, "clear_in_container_gateway_marker", markerPath),
+      extractShellFunction(src, "launch_openclaw_gateway_non_root").replaceAll(
+        "/tmp/gateway.log",
+        gatewayLog,
+      ),
       extractShellFunction(src, "record_gateway_pid"),
       extractShellFunction(src, "gateway_pid_is_openclaw_gateway"),
       extractShellFunction(src, "gateway_watchdog_positive_int_ok"),
@@ -1368,9 +1371,8 @@ describe("respawn loop pidfile refresh (#4710)", () => {
   });
 });
 
-// Launch-path signal handling and child-PID tracking for both entrypoint
-// modes. Moved from test/nemoclaw-start.test.ts so the legacy file stays
-// under its ratcheted size budget; this file owns gateway-launch coverage.
+// Launch-path signal handling and child-PID tracking for both entrypoint modes.
+// This file owns gateway launch coverage to keep the legacy test within budget.
 describe("nemoclaw-start gateway launch signal handling", () => {
   const src = fs.readFileSync(START_SCRIPT, "utf-8");
 
@@ -1416,12 +1418,14 @@ describe("nemoclaw-start gateway launch signal handling", () => {
         safeTmpHelpers(src),
         gatewayMarkerFunction(src, "mark_in_container_gateway", markerPath),
         gatewayMarkerFunction(src, "clear_in_container_gateway_marker", markerPath),
-        // #4710: the launch block also records the gateway PID for the
-        // serving watchdog and starts the watchdog alongside the other
-        // background services. Stub both — watchdog behavior has its own
-        // suite in test/nemoclaw-start-gateway-health.test.ts.
+        // Stub PID recording and the serving watchdog; each has focused tests
+        // elsewhere in this suite (#4710).
         "record_gateway_pid() { :; }",
         'start_gateway_serving_watchdog() { sleep 30 & GATEWAY_WATCHDOG_PID=$!; capture_openclaw_pid_start_identity "$GATEWAY_WATCHDOG_PID" GATEWAY_WATCHDOG_PID_START_IDENTITY; }',
+        extractShellFunction(src, "launch_openclaw_gateway_non_root").replaceAll(
+          "/tmp/gateway.log",
+          gatewayLog,
+        ),
         rootGatewayLifecycleFunctions(src, gatewayLog),
         "STEP_DOWN_PREFIX_SANDBOX=(gosu sandbox)",
         "STEP_DOWN_PREFIX_GATEWAY=(gosu gateway)",
@@ -1452,7 +1456,7 @@ describe("nemoclaw-start gateway launch signal handling", () => {
 
   it("registers child PIDs, redirects gateway output, and traps signals in non-root mode", () => {
     const { result, openclaw, gateway } = runLaunchBlock("non-root");
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr).toBe(0);
     expect(openclaw).toContain("gateway run --port 19000");
     expect(openclaw).toContain("marker=present");
     expect(openclaw).not.toContain("marker=absent");
