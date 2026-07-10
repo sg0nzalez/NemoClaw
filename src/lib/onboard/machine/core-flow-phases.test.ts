@@ -91,6 +91,7 @@ function createPhases(
         requiredEndpointUrl: null,
         requiredInferenceApi: null,
       }),
+      hasRegisteredSandbox: () => false,
       withGatewayRouteMutationLock: async <T>(
         _gatewayName: string,
         operation: () => Promise<T> | T,

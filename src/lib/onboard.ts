@@ -4420,14 +4420,11 @@ async function runOnboard(opts: OnboardOptions = {}): Promise<void> {
     // biome-ignore format: keep src/lib/onboard.ts net-neutral for growth guardrail.
     const coreFlowContext: InitialOnboardFlowContext = { ...initialContext, session, sandboxName, selectedMessagingChannels, gpu, sandboxGpuConfig, gpuPassthrough };
     // biome-ignore format: keep src/lib/onboard.ts net-neutral for growth guardrail.
-    const allowRecordedProviderRecovery = providerRecovery.shouldRecoverRecordedProvider({ fresh, resume, sandboxName, hasRegisteredSandbox: Boolean(sandboxName && registry.getSandbox(sandboxName)), sessionSandboxName: session?.sandboxName ?? null });
-    // biome-ignore format: keep src/lib/onboard.ts net-neutral for growth guardrail.
     const runCoreGatewayOpenshell = setupInferenceFactory.createGatewayScopedOpenshellRunner(runOpenshell, GATEWAY_NAME);
     const [providerInferencePhase, sandboxPhase] =
       createCoreOnboardFlowPhases<InitialOnboardFlowContext>({
         gatewayName: GATEWAY_NAME,
         forceProviderSelection: forceProviderSelectionForAgentChange,
-        allowRecordedProviderRecovery,
         ...authoritativeRebuildTarget.rebuildProviderFlowOptions(opts, coreFlowContext),
         env: process.env,
         constants: {
@@ -4438,6 +4435,7 @@ async function runOnboard(opts: OnboardOptions = {}): Promise<void> {
         providerDeps: {
           checkGatewayRouteCompatibility,
           preflightGatewayRouteDiscovery,
+          hasRegisteredSandbox: (name) => Boolean(registry.getSandbox(name)),
           withGatewayRouteMutationLock: gatewayRouteMutationLock.withGatewayRouteMutationLock,
           normalizeHermesAuthMethod,
           setupNim: (g, s, a, recover, gateway, assertRouteCompatible, canProbeRoute) =>

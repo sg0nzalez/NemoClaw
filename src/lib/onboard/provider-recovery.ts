@@ -76,6 +76,7 @@ export function shouldRecoverRecordedProvider(input: {
   return (
     !input.fresh &&
     (input.resume ||
+      !input.sandboxName ||
       Boolean(
         input.sandboxName &&
           (input.hasRegisteredSandbox || input.sessionSandboxName === input.sandboxName),

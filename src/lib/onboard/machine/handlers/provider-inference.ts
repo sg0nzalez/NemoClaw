@@ -10,6 +10,7 @@ import type {
 } from "../../../inference/gateway-route-compatibility";
 import type { WebSearchConfig } from "../../../inference/web-search";
 import type { HermesAuthMethod, Session, SessionUpdates } from "../../../state/onboard-session";
+import { shouldRecoverRecordedProvider } from "../../provider-recovery";
 import { withInferenceTrace, withProviderSelectionTrace } from "../../tracing";
 import { advanceTo, type OnboardStateTransitionResult, retryTo } from "../result";
 import {
@@ -61,7 +62,6 @@ export interface ProviderInferenceStateOptions<Gpu, Agent, Host> {
   sandboxName: string | null;
   agent: Agent;
   forceProviderSelection?: boolean;
-  allowRecordedProviderRecovery?: boolean;
   /** Force setup for a provider that authoritative rebuild preflight observed missing. */
   forceInferenceSetup?: boolean;
   /** Trust the rebuild-preflighted session selection even if its old step marker is incomplete. */
@@ -88,6 +88,7 @@ export interface ProviderInferenceStateOptions<Gpu, Agent, Host> {
   deps: {
     checkGatewayRouteCompatibility: CurrentGatewayRouteCompatibilityCheck;
     preflightGatewayRouteDiscovery: CurrentGatewayRouteDiscoveryPreflight;
+    hasRegisteredSandbox(sandboxName: string): boolean;
     withGatewayRouteMutationLock<T>(
       gatewayName: string,
       operation: () => Promise<T> | T,
@@ -282,7 +283,6 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
   sandboxName,
   agent,
   forceProviderSelection: initialForceProviderSelection = false,
-  allowRecordedProviderRecovery,
   forceInferenceSetup: initialForceInferenceSetup = false,
   authoritativeResumeConfig = false,
   initial,
@@ -321,7 +321,13 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
   let reuseGatewayCredentialWithoutLocalKey = false;
   let endpointPinnedAddresses: string[] | undefined;
   const effectiveResume = resume && !fresh;
-  const recoverRecordedProvider = allowRecordedProviderRecovery ?? !fresh;
+  const recoverRecordedProvider = shouldRecoverRecordedProvider({
+    fresh,
+    resume,
+    sandboxName,
+    hasRegisteredSandbox: Boolean(sandboxName && deps.hasRegisteredSandbox(sandboxName)),
+    sessionSandboxName: session?.sandboxName ?? null,
+  });
   const stateResults: OnboardStateTransitionResult[] = [];
   const retryStateResults: OnboardStateTransitionResult[] = [];
 

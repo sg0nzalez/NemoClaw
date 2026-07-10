@@ -320,7 +320,6 @@ describe("handleProviderInferenceState", () => {
       ...baseOptions(deps),
       fresh: false,
       sandboxName: "dc-after",
-      allowRecordedProviderRecovery: false,
     });
 
     expect(calls.setupNim).toHaveBeenCalledWith(
