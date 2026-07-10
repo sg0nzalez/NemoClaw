@@ -133,8 +133,10 @@ export function createProviderRecoveryHelpers(deps: ProviderRecoveryDeps): Provi
 
   function readRecordedProvider(sandboxName: string | null | undefined): string | null {
     if (!sandboxName) return null;
+    let hasRecordedSandboxIdentity = false;
     try {
       const entry = registry.getSandbox(sandboxName);
+      hasRecordedSandboxIdentity = Boolean(entry);
       if (entry && typeof entry.provider === "string" && entry.provider) {
         return entry.provider;
       }
@@ -143,17 +145,20 @@ export function createProviderRecoveryHelpers(deps: ProviderRecoveryDeps): Provi
     }
     try {
       const session = onboardSession.loadSession();
-      if (
-        session &&
-        session.sandboxName === sandboxName &&
-        typeof session.provider === "string" &&
-        session.provider
-      ) {
-        return session.provider;
+      if (session && session.sandboxName === sandboxName) {
+        hasRecordedSandboxIdentity = true;
+        if (typeof session.provider === "string" && session.provider) {
+          return session.provider;
+        }
       }
     } catch {
       // fall through to live gateway
     }
+    // An empty registry does not prove that the gateway's residual route
+    // belongs to this requested sandbox name. Require a matching registry or
+    // session identity before using that route as rebuild recovery state;
+    // otherwise a brand-new sandbox inherits the previous sandbox's model.
+    if (!hasRecordedSandboxIdentity) return null;
     const live = readLiveInference(sandboxName);
     if (live && typeof live.provider === "string" && live.provider) {
       return live.provider;
@@ -189,8 +194,10 @@ export function createProviderRecoveryHelpers(deps: ProviderRecoveryDeps): Provi
 
   function readRecordedModel(sandboxName: string | null | undefined): string | null {
     if (!sandboxName) return null;
+    let hasRecordedSandboxIdentity = false;
     try {
       const entry = registry.getSandbox(sandboxName);
+      hasRecordedSandboxIdentity = Boolean(entry);
       if (entry && typeof entry.model === "string" && entry.model) {
         return entry.model;
       }
@@ -199,17 +206,16 @@ export function createProviderRecoveryHelpers(deps: ProviderRecoveryDeps): Provi
     }
     try {
       const session = onboardSession.loadSession();
-      if (
-        session &&
-        session.sandboxName === sandboxName &&
-        typeof session.model === "string" &&
-        session.model
-      ) {
-        return session.model;
+      if (session && session.sandboxName === sandboxName) {
+        hasRecordedSandboxIdentity = true;
+        if (typeof session.model === "string" && session.model) {
+          return session.model;
+        }
       }
     } catch {
       // fall through to live gateway
     }
+    if (!hasRecordedSandboxIdentity) return null;
     const live = readLiveInference(sandboxName);
     if (live && typeof live.model === "string" && live.model) {
       return live.model;
