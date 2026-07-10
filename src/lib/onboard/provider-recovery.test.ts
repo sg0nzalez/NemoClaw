@@ -136,6 +136,12 @@ describe("sandbox recovery authority", () => {
       expected: "unauthorized",
     },
     {
+      label: "orphaned pending reservation without an active session",
+      entry: pending(),
+      sessionId: null,
+      expected: "unauthorized",
+    },
+    {
       label: "another session's pending reservation",
       entry: pending("session-other"),
       sessionId: "session-current",
