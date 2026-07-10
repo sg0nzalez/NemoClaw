@@ -313,6 +313,27 @@ describe("handleProviderInferenceState", () => {
     );
   });
 
+  it("disables recorded provider recovery for a brand-new sandbox identity (#6630)", async () => {
+    const { deps, calls } = createDeps();
+
+    await handleProviderInferenceState({
+      ...baseOptions(deps),
+      fresh: false,
+      sandboxName: "dc-after",
+      allowRecordedProviderRecovery: false,
+    });
+
+    expect(calls.setupNim).toHaveBeenCalledWith(
+      { type: "nvidia" },
+      "dc-after",
+      null,
+      false,
+      "nemoclaw",
+      expect.any(Function),
+      expect.any(Function),
+    );
+  });
+
   it("does not use resume shortcuts when fresh is also set", async () => {
     const session = createSession({ provider: "ollama-local", model: "llama3.1" });
     session.steps.provider_selection.status = "complete";

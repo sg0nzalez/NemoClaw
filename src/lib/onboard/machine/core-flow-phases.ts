@@ -28,6 +28,7 @@ export interface CoreOnboardFlowPhaseOptions<
 > {
   gatewayName: string;
   forceProviderSelection: boolean;
+  allowRecordedProviderRecovery?: boolean;
   forceInferenceSetup?: boolean;
   authoritativeResumeConfig?: boolean;
   env: NodeJS.ProcessEnv;
@@ -69,6 +70,7 @@ export function createCoreOnboardFlowPhases<
       sandboxName: context.sandboxName,
       agent: context.agent,
       forceProviderSelection: options.forceProviderSelection,
+      allowRecordedProviderRecovery: options.allowRecordedProviderRecovery,
       forceInferenceSetup: options.forceInferenceSetup,
       authoritativeResumeConfig: options.authoritativeResumeConfig,
       initial: {

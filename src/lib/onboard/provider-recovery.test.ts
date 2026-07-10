@@ -5,7 +5,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import * as onboardSession from "../state/onboard-session";
 import * as registry from "../state/registry";
-import { createProviderRecoveryHelpers, validateLiveGatewayInference } from "./provider-recovery";
+import {
+  createProviderRecoveryHelpers,
+  shouldRecoverRecordedProvider,
+  validateLiveGatewayInference,
+} from "./provider-recovery";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -33,6 +37,61 @@ describe("validateLiveGatewayInference", () => {
   });
 });
 
+describe("shouldRecoverRecordedProvider", () => {
+  it.each([
+    {
+      label: "rejects gateway recovery for a brand-new sandbox",
+      fresh: false,
+      resume: false,
+      hasRegisteredSandbox: false,
+      sessionSandboxName: null,
+      expected: false,
+    },
+    {
+      label: "allows gateway recovery while resuming",
+      fresh: false,
+      resume: true,
+      hasRegisteredSandbox: false,
+      sessionSandboxName: null,
+      expected: true,
+    },
+    {
+      label: "allows gateway recovery for a registered sandbox",
+      fresh: false,
+      resume: false,
+      hasRegisteredSandbox: true,
+      sessionSandboxName: null,
+      expected: true,
+    },
+    {
+      label: "allows gateway recovery for a matching session",
+      fresh: false,
+      resume: false,
+      hasRegisteredSandbox: false,
+      sessionSandboxName: "dc-after",
+      expected: true,
+    },
+    {
+      label: "rejects gateway recovery when fresh overrides existing identity",
+      fresh: true,
+      resume: true,
+      hasRegisteredSandbox: true,
+      sessionSandboxName: "dc-after",
+      expected: false,
+    },
+  ])("$label", ({ fresh, resume, hasRegisteredSandbox, sessionSandboxName, expected }) => {
+    expect(
+      shouldRecoverRecordedProvider({
+        fresh,
+        resume,
+        sandboxName: "dc-after",
+        hasRegisteredSandbox,
+        sessionSandboxName,
+      }),
+    ).toBe(expected);
+  });
+});
+
 describe("provider recovery persisted routing state", () => {
   function helpers() {
     return createProviderRecoveryHelpers({
@@ -48,58 +107,6 @@ describe("provider recovery persisted routing state", () => {
     });
 
     expect(helpers().readLiveInference("alpha")).toBeNull();
-  });
-
-  it("does not recover a stale live route for a brand-new sandbox name (#6630)", () => {
-    vi.spyOn(registry, "getSandbox").mockReturnValue(null);
-    vi.spyOn(registry, "listSandboxes").mockReturnValue({
-      defaultSandbox: null,
-      sandboxes: [],
-    });
-    vi.spyOn(onboardSession, "loadSession").mockReturnValue(
-      onboardSession.createSession({
-        sandboxName: null,
-        provider: "nvidia-prod",
-        model: "nvidia/nemotron-3-super-120b-a12b",
-      }),
-    );
-    const parseGatewayInference = vi.fn(() => ({
-      provider: "nvidia-prod",
-      model: "nvidia/nemotron-3-super-120b-a12b",
-    }));
-    const runCaptureOpenshell = vi.fn(() => "Gateway inference:");
-    const recovery = createProviderRecoveryHelpers({
-      parseGatewayInference,
-      runCaptureOpenshell,
-    });
-
-    expect(recovery.readRecordedProvider("dc-after")).toBeNull();
-    expect(recovery.readRecordedModel("dc-after")).toBeNull();
-    expect(runCaptureOpenshell).not.toHaveBeenCalled();
-    expect(parseGatewayInference).not.toHaveBeenCalled();
-  });
-
-  it("recovers a live route when a matching session proves the sandbox identity", () => {
-    vi.spyOn(registry, "getSandbox").mockReturnValue(null);
-    vi.spyOn(registry, "listSandboxes").mockReturnValue({
-      defaultSandbox: null,
-      sandboxes: [],
-    });
-    vi.spyOn(onboardSession, "loadSession").mockReturnValue(
-      onboardSession.createSession({ sandboxName: "rebuild-box" }),
-    );
-    const runCaptureOpenshell = vi.fn(() => "Gateway inference:");
-    const recovery = createProviderRecoveryHelpers({
-      parseGatewayInference: () => ({
-        provider: "nvidia-prod",
-        model: "nvidia/nemotron-3-super-120b-a12b",
-      }),
-      runCaptureOpenshell,
-    });
-
-    expect(recovery.readRecordedProvider("rebuild-box")).toBe("nvidia-prod");
-    expect(recovery.readRecordedModel("rebuild-box")).toBe("nvidia/nemotron-3-super-120b-a12b");
-    expect(runCaptureOpenshell).toHaveBeenCalledTimes(2);
   });
 
   it("prefers the selected sandbox registry endpoint over session state", () => {

@@ -61,6 +61,7 @@ export interface ProviderInferenceStateOptions<Gpu, Agent, Host> {
   sandboxName: string | null;
   agent: Agent;
   forceProviderSelection?: boolean;
+  allowRecordedProviderRecovery?: boolean;
   /** Force setup for a provider that authoritative rebuild preflight observed missing. */
   forceInferenceSetup?: boolean;
   /** Trust the rebuild-preflighted session selection even if its old step marker is incomplete. */
@@ -281,6 +282,7 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
   sandboxName,
   agent,
   forceProviderSelection: initialForceProviderSelection = false,
+  allowRecordedProviderRecovery,
   forceInferenceSetup: initialForceInferenceSetup = false,
   authoritativeResumeConfig = false,
   initial,
@@ -319,6 +321,7 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
   let reuseGatewayCredentialWithoutLocalKey = false;
   let endpointPinnedAddresses: string[] | undefined;
   const effectiveResume = resume && !fresh;
+  const recoverRecordedProvider = allowRecordedProviderRecovery ?? !fresh;
   const stateResults: OnboardStateTransitionResult[] = [];
   const retryStateResults: OnboardStateTransitionResult[] = [];
 
@@ -447,7 +450,7 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
             gpu,
             sandboxName,
             agent,
-            !fresh,
+            recoverRecordedProvider,
             gatewayName,
             (route) => guardProviderInferenceRouteSelection(deps, gatewayName, sandboxName, route),
             (provider) =>
