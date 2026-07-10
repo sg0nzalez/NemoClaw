@@ -445,6 +445,48 @@ describe("nemoclaw-start in-container gateway healthcheck marker (#4503, #4710)"
     }
   });
 
+  it("drops the marker when the supervisor exits through errexit (#4952)", () => {
+    const src = fs.readFileSync(START_SCRIPT, "utf-8");
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-gw-errexit-"));
+    const markerPath = path.join(tmpDir, "nemoclaw-gateway-local");
+    const markFn = extractShellFunctionFromSource(src, "mark_in_container_gateway").replaceAll(
+      "/tmp/nemoclaw-gateway-local",
+      markerPath,
+    );
+    const clearFn = extractShellFunctionFromSource(
+      src,
+      "clear_in_container_gateway_marker",
+    ).replaceAll("/tmp/nemoclaw-gateway-local", markerPath);
+    const armCleanup = extractShellFunctionFromSource(
+      src,
+      "arm_openclaw_gateway_supervisor_cleanup",
+    );
+
+    try {
+      const script = [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+        safeTmpHelpers(src),
+        markFn,
+        clearFn,
+        armCleanup,
+        "cleanup_openclaw_on_signal() { :; }",
+        "arm_openclaw_gateway_supervisor_cleanup",
+        "mark_in_container_gateway",
+        `[ -e ${JSON.stringify(markerPath)} ] && echo MARKER_PRESENT_BEFORE_ERREXIT`,
+        "false",
+        "echo UNREACHABLE",
+      ].join("\n");
+      const result = spawnSync("bash", ["-c", script], { encoding: "utf-8", timeout: 5000 });
+      expect(result.status, result.stderr).toBe(1);
+      expect(result.stdout).toContain("MARKER_PRESENT_BEFORE_ERREXIT");
+      expect(result.stdout).not.toContain("UNREACHABLE");
+      expect(fs.existsSync(markerPath)).toBe(false);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
   // Signal path: cleanup_openclaw_on_signal delegates to cleanup_on_signal
   // (shared from sandbox-init.sh), which ends in `exit`, so the EXIT trap fires
   // for SIGTERM/SIGINT teardown too. The marker must be cleared on a forwarded
