@@ -35,6 +35,8 @@ export interface ProviderInferenceSetupOptions {
   preferredInferenceApi?: string | null;
   /** Public addresses approved for custom endpoint host probes. */
   endpointPinnedAddresses?: readonly string[];
+  /** Onboard session that owns the route reservation this setup creates. */
+  reservationSessionId?: string;
 }
 
 export interface ProviderSelectionResult {
@@ -174,6 +176,7 @@ export interface ProviderInferenceStateOptions<Gpu, Agent, Host> {
         credentialEnv: string | null;
         preferredInferenceApi: string | null;
         gatewayName: string;
+        reservationSessionId?: string;
       },
     ): boolean;
     registryUpdateSandbox(sandboxName: string, updates: { nimContainer?: string | null }): void;
@@ -563,6 +566,7 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
               : {}),
             ...(preferredInferenceApi ? { preferredInferenceApi } : {}),
             ...(endpointPinnedAddresses ? { endpointPinnedAddresses } : {}),
+            reservationSessionId: session?.sessionId,
           };
           await deps.startRecordedStep("inference", { provider, model });
           inferenceResult = await withInferenceTrace(
@@ -646,6 +650,7 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
                   credentialEnv,
                   preferredInferenceApi,
                   gatewayName,
+                  reservationSessionId: session?.sessionId,
                 })
               : null;
           return { reupserted, reserved };
@@ -680,6 +685,7 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
             credentialEnv,
             preferredInferenceApi,
             gatewayName,
+            reservationSessionId: session?.sessionId,
           });
         });
         if (!reserved) {
@@ -748,6 +754,7 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
         ...(reuseGatewayCredentialWithoutLocalKey ? { reuseGatewayCredentialWithoutLocalKey } : {}),
         ...(preferredInferenceApi ? { preferredInferenceApi } : {}),
         ...(endpointPinnedAddresses ? { endpointPinnedAddresses } : {}),
+        reservationSessionId: session?.sessionId,
       };
       await deps.startRecordedStep("inference", { provider, model });
       inferenceResult = await withInferenceTrace(
