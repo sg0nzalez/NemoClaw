@@ -8,7 +8,6 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 
 import { deleteSnapshotDirectory, snapshotDeletionSupported } from "./snapshot-delete-helper.js";
 
-const SNAPSHOTS_DIR = join(homedir(), ".nemoclaw", "snapshots");
 const SNAPSHOT_DIR_NAME_RE = /^\d{8}T\d{6}Z$/;
 
 export { snapshotDeletionSupported };
@@ -19,6 +18,11 @@ export interface BlueprintSnapshotManifest {
   file_count: number;
   contents: string[];
   path: string;
+}
+
+export interface SnapshotManagementOptions {
+  snapshotsDir?: string;
+  deleteDirectory?: typeof deleteSnapshotDirectory;
 }
 
 type SnapshotManifestJson = {
@@ -38,8 +42,12 @@ function readStringArray(value: SnapshotManifestJson["contents"]): string[] {
     : [];
 }
 
-function snapshotNameFromPath(snapshotPath: string): string | null {
-  const relToSnapshots = relative(resolve(SNAPSHOTS_DIR), resolve(snapshotPath));
+function snapshotsDirectory(options: SnapshotManagementOptions): string {
+  return options.snapshotsDir ?? join(homedir(), ".nemoclaw", "snapshots");
+}
+
+function snapshotNameFromPath(snapshotPath: string, snapshotsDir: string): string | null {
+  const relToSnapshots = relative(resolve(snapshotsDir), resolve(snapshotPath));
   if (relToSnapshots === "" || relToSnapshots.startsWith("..") || isAbsolute(relToSnapshots)) {
     return null;
   }
@@ -50,16 +58,26 @@ function snapshotNameFromPath(snapshotPath: string): string | null {
   return parts[0] ?? null;
 }
 
-export function deleteSnapshot(snapshotPath: string): boolean {
-  const snapshotName = snapshotNameFromPath(snapshotPath);
+export function deleteSnapshot(
+  snapshotPath: string,
+  options: SnapshotManagementOptions = {},
+): boolean {
+  const snapshotsDir = snapshotsDirectory(options);
+  const snapshotName = snapshotNameFromPath(snapshotPath, snapshotsDir);
   // Deletion deliberately does not reuse snapshot.ts's point-in-time
   // rejectSymlinksOnPath check. The helper freshly opens the root, target, and
   // every descendant fd-relative with O_NOFOLLOW so path swaps also fail closed.
-  return snapshotName !== null && deleteSnapshotDirectory(SNAPSHOTS_DIR, snapshotName);
+  return (
+    snapshotName !== null &&
+    (options.deleteDirectory ?? deleteSnapshotDirectory)(snapshotsDir, snapshotName)
+  );
 }
 
-export function isSnapshotPathInsideSnapshotsDir(snapshotPath: string): boolean {
-  return snapshotNameFromPath(snapshotPath) !== null;
+export function isSnapshotPathInsideSnapshotsDir(
+  snapshotPath: string,
+  options: SnapshotManagementOptions = {},
+): boolean {
+  return snapshotNameFromPath(snapshotPath, snapshotsDirectory(options)) !== null;
 }
 
 function readSnapshotManifest(
@@ -84,7 +102,10 @@ function readSnapshotManifest(
   }
 }
 
-export function pruneSnapshots(keep: number): {
+export function pruneSnapshots(
+  keep: number,
+  options: SnapshotManagementOptions = {},
+): {
   deleted: string[];
   kept: string[];
   failed: string[];
@@ -92,7 +113,7 @@ export function pruneSnapshots(keep: number): {
   if (!Number.isInteger(keep) || keep < 0) {
     throw new Error("--keep must be a non-negative integer");
   }
-  const snapshots = listSnapshots();
+  const snapshots = listSnapshots(options);
   if (snapshots.length <= keep) {
     return { deleted: [], kept: snapshots.map((snapshot) => snapshot.path), failed: [] };
   }
@@ -102,7 +123,7 @@ export function pruneSnapshots(keep: number): {
   const deleted: string[] = [];
   const failed: string[] = [];
   for (const snapshot of toDelete) {
-    if (deleteSnapshot(snapshot.path)) {
+    if (deleteSnapshot(snapshot.path, options)) {
       deleted.push(snapshot.path);
     } else {
       failed.push(snapshot.path);
@@ -112,10 +133,13 @@ export function pruneSnapshots(keep: number): {
   return { deleted, kept: toKeep.map((snapshot) => snapshot.path), failed };
 }
 
-export function listSnapshots(): BlueprintSnapshotManifest[] {
+export function listSnapshots(
+  options: SnapshotManagementOptions = {},
+): BlueprintSnapshotManifest[] {
+  const snapshotsDir = snapshotsDirectory(options);
   let entries: Dirent[];
   try {
-    entries = readdirSync(SNAPSHOTS_DIR, { withFileTypes: true });
+    entries = readdirSync(snapshotsDir, { withFileTypes: true });
   } catch {
     return [];
   }
@@ -125,7 +149,7 @@ export function listSnapshots(): BlueprintSnapshotManifest[] {
     if (!entry.isDirectory() || !SNAPSHOT_DIR_NAME_RE.test(entry.name)) {
       continue;
     }
-    const snapDir = join(SNAPSHOTS_DIR, entry.name);
+    const snapDir = join(snapshotsDir, entry.name);
     const manifest = readSnapshotManifest(snapDir, entry.name);
     if (manifest !== null) {
       snapshots.push(manifest);

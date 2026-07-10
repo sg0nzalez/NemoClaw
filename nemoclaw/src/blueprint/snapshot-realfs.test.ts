@@ -8,6 +8,9 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { deleteSnapshotDirectory } from "./snapshot-delete-helper.js";
+import { deleteSnapshot, pruneSnapshots } from "./snapshot.js";
+
 const tempRoots: string[] = [];
 const REAL_TMP = fs.realpathSync(os.tmpdir());
 
@@ -15,18 +18,8 @@ function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
 
-async function loadSnapshotModule(home: string): Promise<typeof import("./snapshot.js")> {
-  vi.resetModules();
-  vi.doMock("node:os", () => ({
-    homedir: () => home,
-  }));
-  return import("./snapshot.js");
-}
-
 afterEach(() => {
-  vi.doUnmock("node:os");
   vi.unstubAllEnvs();
-  vi.resetModules();
   for (const root of tempRoots.splice(0)) {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -61,9 +54,8 @@ describe("snapshot real filesystem safety", () => {
 
       const snapshotsDir = path.join(home, ".nemoclaw", "snapshots");
       const snapshotDir = writeSnapshot(snapshotsDir, "20990101T000000Z");
-      const { deleteSnapshot } = await loadSnapshotModule(home);
 
-      expect(deleteSnapshot(snapshotDir)).toBe(true);
+      expect(deleteSnapshot(snapshotDir, { snapshotsDir })).toBe(true);
       expect(fs.existsSync(snapshotDir)).toBe(false);
     },
   );
@@ -75,9 +67,8 @@ describe("snapshot real filesystem safety", () => {
     const snapshotsDir = path.join(home, ".nemoclaw", "snapshots");
     const older = writeSnapshot(snapshotsDir, "20990101T000000Z");
     const newer = writeSnapshot(snapshotsDir, "20990201T000000Z");
-    const { pruneSnapshots } = await loadSnapshotModule(home);
 
-    const result = pruneSnapshots(1);
+    const result = pruneSnapshots(1, { snapshotsDir });
 
     expect(result.deleted).toEqual([older]);
     expect(result.kept).toEqual([newer]);
@@ -100,9 +91,7 @@ describe("snapshot real filesystem safety", () => {
       fs.writeFileSync(outsideFile, "outside target must survive");
       fs.symlinkSync(outside, symlinkedSnapshot, "dir");
 
-      const { deleteSnapshot } = await loadSnapshotModule(home);
-
-      expect(deleteSnapshot(symlinkedSnapshot)).toBe(false);
+      expect(deleteSnapshot(symlinkedSnapshot, { snapshotsDir })).toBe(false);
       expect(fs.readFileSync(outsideFile, "utf8")).toBe("outside target must survive");
       expect(fs.lstatSync(symlinkedSnapshot).isSymbolicLink()).toBe(true);
     },
@@ -122,9 +111,11 @@ describe("snapshot real filesystem safety", () => {
       fs.writeFileSync(outsideFile, "outside target must survive");
       fs.symlinkSync(outside, symlinkedSnapshot, "dir");
 
-      const { pruneSnapshots } = await loadSnapshotModule(home);
-
-      expect(pruneSnapshots(1)).toEqual({ deleted: [], kept: [newer], failed: [] });
+      expect(pruneSnapshots(1, { snapshotsDir })).toEqual({
+        deleted: [],
+        kept: [newer],
+        failed: [],
+      });
       expect(fs.readFileSync(outsideFile, "utf8")).toBe("outside target must survive");
       expect(fs.lstatSync(symlinkedSnapshot).isSymbolicLink()).toBe(true);
     },
@@ -186,11 +177,14 @@ describe("snapshot real filesystem safety", () => {
 
       vi.stubEnv("NEMOCLAW_SNAPSHOT_TEST_SECRET", sentinelSecret);
       vi.stubEnv("PYTHONPATH", attackDir);
-      vi.stubEnv("PATH", `${wrapperBin}${path.delimiter}${process.env.PATH ?? ""}`);
 
-      const { deleteSnapshot } = await loadSnapshotModule(home);
-
-      expect(deleteSnapshot(snapshotDir)).toBe(true);
+      expect(
+        deleteSnapshot(snapshotDir, {
+          snapshotsDir,
+          deleteDirectory: (root, name) =>
+            deleteSnapshotDirectory(root, name, { pythonExecutable: pythonWrapper }),
+        }),
+      ).toBe(true);
       expect(fs.existsSync(snapshotDir)).toBe(false);
       expect(fs.existsSync(startupMarker)).toBe(false);
       expect(fs.readFileSync(envProbe, "utf-8").trim().split("\n")).toEqual([

@@ -112,15 +112,24 @@ export function snapshotDeletionSupported(platform: NodeJS.Platform = process.pl
   return platform !== "win32";
 }
 
-export function deleteSnapshotDirectory(snapshotsDir: string, snapshotName: string): boolean {
+export interface SnapshotDeleteHelperOptions {
+  platform?: NodeJS.Platform;
+  pythonExecutable?: string;
+}
+
+export function deleteSnapshotDirectory(
+  snapshotsDir: string,
+  snapshotName: string,
+  options: SnapshotDeleteHelperOptions = {},
+): boolean {
   // The dir_fd/O_NOFOLLOW deletion primitive is POSIX-only. WSL uses the
   // Linux path; native Windows fails closed until it has an equivalent.
-  if (!snapshotDeletionSupported()) {
+  if (!snapshotDeletionSupported(options.platform)) {
     return false;
   }
 
   const result = spawnSync(
-    "python3",
+    options.pythonExecutable ?? "python3",
     ["-I", "-c", SNAPSHOT_DELETE_HELPER, snapshotsDir, snapshotName],
     {
       encoding: "utf-8",

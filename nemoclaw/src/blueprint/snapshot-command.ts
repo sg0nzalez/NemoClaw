@@ -8,6 +8,11 @@ import {
   pruneSnapshots,
   snapshotDeletionSupported,
 } from "./snapshot-management.js";
+import type { SnapshotManagementOptions } from "./snapshot-management.js";
+
+export interface SnapshotCommandOptions extends SnapshotManagementOptions {
+  platform?: NodeJS.Platform;
+}
 
 type SnapshotsAction = "list" | "prune" | "delete";
 
@@ -40,13 +45,13 @@ function snapshotsUsage(): string {
   );
 }
 
-function requireSnapshotDeletionSupport(): void {
-  if (!snapshotDeletionSupported()) {
+function requireSnapshotDeletionSupport(platform?: NodeJS.Platform): void {
+  if (!snapshotDeletionSupported(platform)) {
     throw new Error("Snapshot deletion is not supported on native Windows; use WSL.");
   }
 }
 
-export function actionSnapshots(argv: string[]): void {
+export function actionSnapshots(argv: string[], options: SnapshotCommandOptions = {}): void {
   const subcommand = argv.at(0);
 
   if (!subcommand || subcommand === "--help" || subcommand === "-h") {
@@ -60,7 +65,7 @@ export function actionSnapshots(argv: string[]): void {
 
   switch (subcommand) {
     case "list": {
-      const snapshots = listSnapshots();
+      const snapshots = listSnapshots(options);
       if (snapshots.length === 0) {
         log("No snapshots found.");
         return;
@@ -92,9 +97,9 @@ export function actionSnapshots(argv: string[]): void {
         }
       }
       if (keep < 0) throw new Error("--keep is required for prune");
-      requireSnapshotDeletionSupport();
+      requireSnapshotDeletionSupport(options.platform);
 
-      const { deleted, kept, failed } = pruneSnapshots(keep);
+      const { deleted, kept, failed } = pruneSnapshots(keep, options);
       if (deleted.length === 0 && failed.length === 0) {
         log(`Nothing to prune. ${kept.length} snapshot(s) kept (--keep=${String(keep)}).`);
         return;
@@ -121,12 +126,12 @@ export function actionSnapshots(argv: string[]): void {
         }
       }
       if (!snapshotPath) throw new Error("--path is required for delete");
-      if (!isSnapshotPathInsideSnapshotsDir(snapshotPath)) {
+      if (!isSnapshotPathInsideSnapshotsDir(snapshotPath, options)) {
         throw new Error("Snapshot path must be inside the snapshots directory");
       }
-      requireSnapshotDeletionSupport();
+      requireSnapshotDeletionSupport(options.platform);
 
-      if (deleteSnapshot(snapshotPath)) {
+      if (deleteSnapshot(snapshotPath, options)) {
         log(`Deleted snapshot: ${snapshotOutput(snapshotPath)}`);
       } else {
         throw new Error(`Failed to delete snapshot: ${snapshotOutput(snapshotPath)}`);

@@ -7,17 +7,14 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { main } from "./runner.js";
+import { actionSnapshots } from "./snapshot-command.js";
+
 const tempRoots: string[] = [];
 const REAL_TMP = fs.realpathSync(os.tmpdir());
 const stdoutChunks: string[] = [];
 let home = "";
 let snapshotsDir = "";
-
-async function loadCommand(): Promise<typeof import("./snapshot-command.js")> {
-  vi.resetModules();
-  vi.doMock("node:os", () => ({ homedir: () => home }));
-  return import("./snapshot-command.js");
-}
 
 function writeSnapshot(timestamp: string, source = home): string {
   const snapshotDir = path.join(snapshotsDir, timestamp);
@@ -42,10 +39,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  vi.doUnmock("node:os");
-  vi.unstubAllEnvs();
   vi.restoreAllMocks();
-  vi.resetModules();
   for (const root of tempRoots.splice(0)) {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -59,34 +53,27 @@ describe("snapshot command", () => {
   it.each([{ argv: [] }, { argv: ["--help"] }, { argv: ["-h"] }])("shows usage for $argv", async ({
     argv,
   }) => {
-    const { actionSnapshots } = await loadCommand();
-
-    actionSnapshots(argv);
+    actionSnapshots(argv, { snapshotsDir });
 
     expect(stdoutText()).toContain("Usage: snapshots <list|prune|delete>");
   });
 
   it("rejects an unknown subcommand", async () => {
-    const { actionSnapshots } = await loadCommand();
-
-    expect(() => actionSnapshots(["bogus"])).toThrow("Unknown snapshots subcommand");
+    expect(() => actionSnapshots(["bogus"], { snapshotsDir })).toThrow(
+      "Unknown snapshots subcommand",
+    );
   });
 
   it("lists no snapshots through the runner route", async () => {
-    vi.resetModules();
-    vi.doMock("node:os", () => ({ homedir: () => home }));
-    const { main } = await import("./runner.js");
-
-    await main(["snapshots", "list"]);
+    await main(["snapshots", "list"], { snapshotCommand: { snapshotsDir } });
 
     expect(stdoutText()).toContain("No snapshots found.");
   });
 
   it("lists snapshots while stripping control characters from mutable fields", async () => {
     writeSnapshot("20990101T000000Z", `${home}\u001b[31m/evil`);
-    const { actionSnapshots } = await loadCommand();
 
-    actionSnapshots(["list"]);
+    actionSnapshots(["list"], { snapshotsDir });
 
     expect(stdoutText()).toContain("20990101T000000Z");
     expect(stdoutText()).not.toContain("\u001b");
@@ -96,19 +83,18 @@ describe("snapshot command", () => {
   it("prunes old snapshots and reports partial failures as errors", async () => {
     const older = writeSnapshot("20990101T000000Z");
     writeSnapshot("20990201T000000Z");
-    vi.stubEnv("PATH", "");
-    const { actionSnapshots } = await loadCommand();
 
-    expect(() => actionSnapshots(["prune", "--keep", "1"])).toThrow(
-      "Failed to prune 1 snapshot(s)",
-    );
+    expect(() =>
+      actionSnapshots(["prune", "--keep", "1"], {
+        snapshotsDir,
+        deleteDirectory: () => false,
+      }),
+    ).toThrow("Failed to prune 1 snapshot(s)");
     expect(stdoutText()).toContain(`Failed:  ${older}`);
   });
 
   it.each(["3abc", "1.5", "9".repeat(400)])("rejects invalid --keep value %s", async (keep) => {
-    const { actionSnapshots } = await loadCommand();
-
-    expect(() => actionSnapshots(["prune", "--keep", keep])).toThrow(
+    expect(() => actionSnapshots(["prune", "--keep", keep], { snapshotsDir })).toThrow(
       "--keep must be a non-negative integer",
     );
   });
@@ -117,18 +103,14 @@ describe("snapshot command", () => {
     { argv: ["prune"] },
     { argv: ["delete"] },
   ])("rejects missing arguments for $argv", async ({ argv }) => {
-    const { actionSnapshots } = await loadCommand();
-
-    expect(() => actionSnapshots(argv)).toThrow();
+    expect(() => actionSnapshots(argv, { snapshotsDir })).toThrow();
   });
 
   it("rejects delete paths outside the snapshots root", async () => {
-    const { actionSnapshots } = await loadCommand();
-
-    expect(() => actionSnapshots(["delete", "--path", "/tmp/unauthorized"])).toThrow(
-      "Snapshot path must be inside the snapshots directory",
-    );
-    expect(() => actionSnapshots(["delete", "--path", snapshotsDir])).toThrow(
+    expect(() =>
+      actionSnapshots(["delete", "--path", "/tmp/unauthorized"], { snapshotsDir }),
+    ).toThrow("Snapshot path must be inside the snapshots directory");
+    expect(() => actionSnapshots(["delete", "--path", snapshotsDir], { snapshotsDir })).toThrow(
       "Snapshot path must be inside the snapshots directory",
     );
   });
@@ -136,10 +118,9 @@ describe("snapshot command", () => {
   it("deletes a snapshot and treats an absent child as already deleted", async () => {
     const snapshot = writeSnapshot("20990101T000000Z");
     const absent = path.join(snapshotsDir, "20990201T000000Z");
-    const { actionSnapshots } = await loadCommand();
 
-    actionSnapshots(["delete", "--path", snapshot]);
-    actionSnapshots(["delete", "--path", absent]);
+    actionSnapshots(["delete", "--path", snapshot], { snapshotsDir });
+    actionSnapshots(["delete", "--path", absent], { snapshotsDir });
 
     expect(fs.existsSync(snapshot)).toBe(false);
     expect(stdoutText()).toContain(`Deleted snapshot: ${snapshot}`);
@@ -148,14 +129,12 @@ describe("snapshot command", () => {
 
   it("surfaces the native Windows deletion limitation", async () => {
     const snapshot = writeSnapshot("20990101T000000Z");
-    vi.spyOn(process, "platform", "get").mockReturnValue("win32");
-    const { actionSnapshots } = await loadCommand();
 
-    expect(() => actionSnapshots(["delete", "--path", snapshot])).toThrow(
-      "Snapshot deletion is not supported on native Windows; use WSL.",
-    );
-    expect(() => actionSnapshots(["prune", "--keep", "0"])).toThrow(
-      "Snapshot deletion is not supported on native Windows; use WSL.",
-    );
+    expect(() =>
+      actionSnapshots(["delete", "--path", snapshot], { snapshotsDir, platform: "win32" }),
+    ).toThrow("Snapshot deletion is not supported on native Windows; use WSL.");
+    expect(() =>
+      actionSnapshots(["prune", "--keep", "0"], { snapshotsDir, platform: "win32" }),
+    ).toThrow("Snapshot deletion is not supported on native Windows; use WSL.");
   });
 });

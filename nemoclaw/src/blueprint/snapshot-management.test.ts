@@ -5,16 +5,17 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+
+import {
+  deleteSnapshot,
+  isSnapshotPathInsideSnapshotsDir,
+  listSnapshots,
+  pruneSnapshots,
+} from "./snapshot-management.js";
 
 const tempRoots: string[] = [];
 const REAL_TMP = fs.realpathSync(os.tmpdir());
-
-async function loadManagement(home: string): Promise<typeof import("./snapshot-management.js")> {
-  vi.resetModules();
-  vi.doMock("node:os", () => ({ homedir: () => home }));
-  return import("./snapshot-management.js");
-}
 
 function writeSnapshot(
   snapshotsDir: string,
@@ -43,10 +44,6 @@ function temporaryHome(): { home: string; snapshotsDir: string } {
 }
 
 afterEach(() => {
-  vi.doUnmock("node:os");
-  vi.unstubAllEnvs();
-  vi.restoreAllMocks();
-  vi.resetModules();
   for (const root of tempRoots.splice(0)) {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -54,100 +51,105 @@ afterEach(() => {
 
 describe("snapshot retention management", () => {
   it("lists strict snapshot identities newest first", async () => {
-    const { home, snapshotsDir } = temporaryHome();
+    const { snapshotsDir } = temporaryHome();
     const older = writeSnapshot(snapshotsDir, "20990101T000000Z");
     const newer = writeSnapshot(snapshotsDir, "20990201T000000Z");
-    const { listSnapshots } = await loadManagement(home);
 
-    expect(listSnapshots()).toEqual([
+    expect(listSnapshots({ snapshotsDir })).toEqual([
       expect.objectContaining({ timestamp: "20990201T000000Z", path: newer }),
       expect.objectContaining({ timestamp: "20990101T000000Z", path: older }),
     ]);
   });
 
   it("ignores mutable manifest timestamps that disagree with directory identity", async () => {
-    const { home, snapshotsDir } = temporaryHome();
+    const { snapshotsDir } = temporaryHome();
     const mismatched = writeSnapshot(snapshotsDir, "20990101T000000Z", {
       manifestTimestamp: "20990301T000000Z",
     });
     const trusted = writeSnapshot(snapshotsDir, "20990201T000000Z");
-    const { listSnapshots, pruneSnapshots } = await loadManagement(home);
 
-    expect(listSnapshots().map((snapshot) => snapshot.path)).toEqual([trusted]);
-    expect(pruneSnapshots(1)).toEqual({ deleted: [], kept: [trusted], failed: [] });
+    expect(listSnapshots({ snapshotsDir }).map((snapshot) => snapshot.path)).toEqual([trusted]);
+    expect(pruneSnapshots(1, { snapshotsDir })).toEqual({
+      deleted: [],
+      kept: [trusted],
+      failed: [],
+    });
     expect(fs.existsSync(mismatched)).toBe(true);
   });
 
   it("skips malformed directories, manifests, and non-directory entries", async () => {
-    const { home, snapshotsDir } = temporaryHome();
+    const { snapshotsDir } = temporaryHome();
     writeSnapshot(snapshotsDir, "not-a-snapshot");
     const corrupt = path.join(snapshotsDir, "20990101T000000Z");
     fs.mkdirSync(corrupt, { recursive: true });
     fs.writeFileSync(path.join(corrupt, "snapshot.json"), "not json");
     fs.writeFileSync(path.join(snapshotsDir, "20990201T000000Z"), "not a directory");
-    const { listSnapshots } = await loadManagement(home);
 
-    expect(listSnapshots()).toEqual([]);
+    expect(listSnapshots({ snapshotsDir })).toEqual([]);
   });
 
   it("constrains deletion to a strict direct-child snapshot path", async () => {
-    const { home, snapshotsDir } = temporaryHome();
+    const { snapshotsDir } = temporaryHome();
     fs.mkdirSync(snapshotsDir, { recursive: true });
-    const { deleteSnapshot, isSnapshotPathInsideSnapshotsDir } = await loadManagement(home);
 
-    expect(deleteSnapshot("/tmp/unauthorized")).toBe(false);
-    expect(deleteSnapshot(snapshotsDir)).toBe(false);
-    expect(deleteSnapshot(path.join(snapshotsDir, "not-a-snapshot"))).toBe(false);
-    expect(isSnapshotPathInsideSnapshotsDir(snapshotsDir)).toBe(false);
+    expect(deleteSnapshot("/tmp/unauthorized", { snapshotsDir })).toBe(false);
+    expect(deleteSnapshot(snapshotsDir, { snapshotsDir })).toBe(false);
+    expect(deleteSnapshot(path.join(snapshotsDir, "not-a-snapshot"), { snapshotsDir })).toBe(false);
+    expect(isSnapshotPathInsideSnapshotsDir(snapshotsDir, { snapshotsDir })).toBe(false);
   });
 
   it("treats a missing child under a verified snapshots root as already deleted", async () => {
-    const { home, snapshotsDir } = temporaryHome();
+    const { snapshotsDir } = temporaryHome();
     fs.mkdirSync(snapshotsDir, { recursive: true });
-    const { deleteSnapshot } = await loadManagement(home);
 
-    expect(deleteSnapshot(path.join(snapshotsDir, "20990101T000000Z"))).toBe(true);
+    expect(deleteSnapshot(path.join(snapshotsDir, "20990101T000000Z"), { snapshotsDir })).toBe(
+      true,
+    );
   });
 
   it("fails closed when the isolated deletion helper cannot launch", async () => {
-    const { home, snapshotsDir } = temporaryHome();
+    const { snapshotsDir } = temporaryHome();
     const snapshot = writeSnapshot(snapshotsDir, "20990101T000000Z");
-    vi.stubEnv("PATH", "");
-    const { deleteSnapshot } = await loadManagement(home);
 
-    expect(deleteSnapshot(snapshot)).toBe(false);
+    expect(deleteSnapshot(snapshot, { snapshotsDir, deleteDirectory: () => false })).toBe(false);
     expect(fs.existsSync(snapshot)).toBe(true);
   });
 
   it("keeps the newest snapshots and deletes the rest", async () => {
-    const { home, snapshotsDir } = temporaryHome();
+    const { snapshotsDir } = temporaryHome();
     const oldest = writeSnapshot(snapshotsDir, "20990101T000000Z");
     const middle = writeSnapshot(snapshotsDir, "20990201T000000Z");
     const newest = writeSnapshot(snapshotsDir, "20990301T000000Z");
-    const { pruneSnapshots } = await loadManagement(home);
 
-    expect(pruneSnapshots(2)).toEqual({ deleted: [oldest], kept: [newest, middle], failed: [] });
+    expect(pruneSnapshots(2, { snapshotsDir })).toEqual({
+      deleted: [oldest],
+      kept: [newest, middle],
+      failed: [],
+    });
     expect(fs.existsSync(oldest)).toBe(false);
     expect(fs.existsSync(middle)).toBe(true);
     expect(fs.existsSync(newest)).toBe(true);
   });
 
   it("reports real helper failures while preserving the requested keep set", async () => {
-    const { home, snapshotsDir } = temporaryHome();
+    const { snapshotsDir } = temporaryHome();
     const older = writeSnapshot(snapshotsDir, "20990101T000000Z");
     const newer = writeSnapshot(snapshotsDir, "20990201T000000Z");
-    vi.stubEnv("PATH", "");
-    const { pruneSnapshots } = await loadManagement(home);
 
-    expect(pruneSnapshots(1)).toEqual({ deleted: [], kept: [newer], failed: [older] });
+    expect(pruneSnapshots(1, { snapshotsDir, deleteDirectory: () => false })).toEqual({
+      deleted: [],
+      kept: [newer],
+      failed: [older],
+    });
     expect(fs.existsSync(older)).toBe(true);
     expect(fs.existsSync(newer)).toBe(true);
   });
 
   it.each([-1, 1.5, Number.NaN])("rejects invalid keep value %s", async (keep) => {
-    const { home } = temporaryHome();
-    const { pruneSnapshots } = await loadManagement(home);
+    const { snapshotsDir } = temporaryHome();
 
-    expect(() => pruneSnapshots(keep)).toThrow("--keep must be a non-negative integer");
+    expect(() => pruneSnapshots(keep, { snapshotsDir })).toThrow(
+      "--keep must be a non-negative integer",
+    );
   });
 });
