@@ -10,12 +10,9 @@ import type {
 } from "../../../inference/gateway-route-compatibility";
 import type { WebSearchConfig } from "../../../inference/web-search";
 import type { HermesAuthMethod, Session, SessionUpdates } from "../../../state/onboard-session";
-import {
-  type SandboxRecoveryAuthority,
-  shouldRecoverRecordedProvider,
-} from "../../provider-recovery";
 import { withInferenceTrace, withProviderSelectionTrace } from "../../tracing";
 import { advanceTo, type OnboardStateTransitionResult, retryTo } from "../result";
+import { createRecovery, type RecoveryAuthority } from "./provider-inference-recovery";
 import {
   assertProviderInferenceRouteCompatible,
   guardProviderInferenceRouteSelection,
@@ -99,7 +96,7 @@ export interface ProviderInferenceStateOptions<Gpu, Agent, Host> {
     getSandboxRecoveryAuthority(
       sandboxName: string,
       sessionId: string | null | undefined,
-    ): SandboxRecoveryAuthority;
+    ): RecoveryAuthority;
     withGatewayRouteMutationLock<T>(
       gatewayName: string,
       operation: () => Promise<T> | T,
@@ -347,7 +344,7 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
     clearAutoDetectedCompatibleContextWindow(process.env);
     let forceInferenceSetup = initialForceInferenceSetup;
     let recoveredRecordedProvider = false;
-    const providerRecoverySessionId = session?.sessionId ?? null;
+    const providerRecovery = createRecovery(fresh, sandboxName, session, deps);
     const resumeProviderSelection =
       !forceProviderSelection &&
       effectiveResume &&
@@ -456,15 +453,7 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
       }
     } else {
       await deps.startRecordedStep("provider_selection");
-      const recoverRecordedProvider = shouldRecoverRecordedProvider({
-        fresh,
-        sandboxName,
-        sandboxRecoveryAuthority: sandboxName
-          ? deps.getSandboxRecoveryAuthority(sandboxName, providerRecoverySessionId)
-          : "missing",
-        sessionSandboxName:
-          session?.steps?.sandbox?.status === "complete" ? (session.sandboxName ?? null) : null,
-      });
+      const recoverRecordedProvider = providerRecovery.shouldRecover();
       const selection = await withProviderSelectionTrace(
         sandboxName,
         (agent as { name?: string } | null)?.name,
@@ -488,7 +477,7 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
                   credentialEnv: null,
                 },
               }).ok,
-            providerRecoverySessionId,
+            providerRecovery.sessionId,
           ),
       );
       model = selection.model;
@@ -770,18 +759,11 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
         ...(reuseGatewayCredentialWithoutLocalKey ? { reuseGatewayCredentialWithoutLocalKey } : {}),
         ...(preferredInferenceApi ? { preferredInferenceApi } : {}),
         ...(endpointPinnedAddresses ? { endpointPinnedAddresses } : {}),
-        reservationSessionId: recoveredRecordedProvider
-          ? (providerRecoverySessionId ?? undefined)
-          : session?.sessionId,
-        ...(recoveredRecordedProvider
-          ? {
-              isRecordedProviderRecoveryAuthorized: () =>
-                deps.getSandboxRecoveryAuthority(
-                  confirmedSandboxName,
-                  providerRecoverySessionId,
-                ) !== "unauthorized",
-            }
-          : {}),
+        ...providerRecovery.setupOptions(
+          recoveredRecordedProvider,
+          confirmedSandboxName,
+          session?.sessionId,
+        ),
       };
       await deps.startRecordedStep("inference", { provider, model });
       inferenceResult = await withInferenceTrace(
