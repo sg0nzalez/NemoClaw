@@ -305,7 +305,6 @@ describe("nemoclaw-start in-container gateway healthcheck marker (#4503, #4710)"
       src,
       "clear_in_container_gateway_marker",
     ).replaceAll("/tmp/nemoclaw-gateway-local", markerPath);
-    const exitTrapRegistrations = gatewayMarkerExitTrapRegistrations(src);
 
     try {
       const script = [
