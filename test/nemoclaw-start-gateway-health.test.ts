@@ -47,6 +47,10 @@ function extractShellFunction(src: string, name: string): string {
   return `${name}() {${body.slice(0, closing?.index ?? 0)}\n}`;
 }
 
+function gatewayMarkerFunction(src: string, name: string, markerPath: string): string {
+  return extractShellFunction(src, name).replaceAll("/tmp/nemoclaw-gateway-local", markerPath);
+}
+
 function extractGatewayLogAppendFunction(src: string, gatewayLog: string): string {
   const functionSource = extractShellFunction(src, "append_openclaw_gateway_log_line");
   const marker = '  local log_file="/tmp/gateway.log"';
@@ -1074,10 +1078,8 @@ describe("gateway launch wiring (#4710)", () => {
 
     const realFunctions = [
       safeTmpHelpers(src),
-      extractShellFunction(src, "mark_in_container_gateway").replaceAll(
-        "/tmp/nemoclaw-gateway-local",
-        markerPath,
-      ),
+      gatewayMarkerFunction(src, "mark_in_container_gateway", markerPath),
+      gatewayMarkerFunction(src, "clear_in_container_gateway_marker", markerPath),
       extractShellFunction(src, "record_gateway_pid"),
       extractShellFunction(src, "gateway_pid_is_openclaw_gateway"),
       extractShellFunction(src, "gateway_watchdog_positive_int_ok"),
@@ -1132,12 +1134,12 @@ describe("gateway launch wiring (#4710)", () => {
   it.each([
     "non-root",
     "root",
-  ] as const)("%s launch drops the marker, records the gateway PID, and starts the tracked watchdog", (kind) => {
+  ] as const)("%s launch clears the marker on supervisor exit after recording the gateway PID", (kind) => {
     const run = runLaunchWiring(kind);
     expect(run.result.status, `script failed: ${run.result.stderr}`).toBe(0);
-    // Marker dropped by the launch site, even with OPENSHELL_DRIVERS=docker
-    // exported — env hints must not gate it (#4748 was a no-op for this).
-    expect(run.markerExists).toBe(true);
+    // The supervisor EXIT trap clears the in-container marker when this fixture
+    // exits, returning healthchecks to the marker-absent branch (#4952).
+    expect(run.markerExists).toBe(false);
     // The watchdog reads the gateway PID from the pidfile each cycle.
     expect(run.gatewayPid).toBeDefined();
     expect(run.pidFileContent?.split(" ")[0]).toBe(run.gatewayPid);
@@ -1417,10 +1419,8 @@ describe("nemoclaw-start gateway launch signal handling", () => {
         "start_plugin_registry_refresh() { :; }",
         "cleanup_on_signal() { :; }",
         safeTmpHelpers(src),
-        extractShellFunction(src, "mark_in_container_gateway").replaceAll(
-          "/tmp/nemoclaw-gateway-local",
-          markerPath,
-        ),
+        gatewayMarkerFunction(src, "mark_in_container_gateway", markerPath),
+        gatewayMarkerFunction(src, "clear_in_container_gateway_marker", markerPath),
         // #4710: the launch block also records the gateway PID for the
         // serving watchdog and starts the watchdog alongside the other
         // background services. Stub both — watchdog behavior has its own
