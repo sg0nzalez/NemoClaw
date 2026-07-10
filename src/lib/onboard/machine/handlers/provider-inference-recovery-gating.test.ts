@@ -154,17 +154,20 @@ describe("provider inference recovery gating", () => {
     expect(getAuthority).toHaveBeenCalledWith("dc-after", session.sessionId);
   });
 
-  it("forces route setup and rechecks ownership after recorded selection (#6630)", async () => {
+  it.each([
+    "unauthorized",
+    "missing",
+  ] as const)("forces route setup and rejects %s ownership after recorded selection (#6630)", async (revokedAuthority) => {
     const session = createSession();
     session.sandboxName = "dc-after";
     session.steps.sandbox.status = "complete";
     const persistedAfterSelection = createSession({ sessionId: "session-after-selection" });
-    let authority: "authorized" | "unauthorized" = "authorized";
+    let authority: "authorized" | "unauthorized" | "missing" = "authorized";
     const getAuthority = vi.fn((_name: string, sessionId: string | null | undefined) =>
       sessionId === session.sessionId ? authority : "unauthorized",
     );
     const setupNim = vi.fn(async () => {
-      authority = "unauthorized";
+      authority = revokedAuthority;
       return {
         model: "nvidia/test",
         provider: "nvidia-prod",

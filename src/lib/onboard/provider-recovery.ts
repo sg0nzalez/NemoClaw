@@ -177,6 +177,26 @@ export function createProviderRecoveryHelpers(deps: ProviderRecoveryDeps): Provi
     return null;
   }
 
+  function loadMatchingRecoverySession(
+    sandboxName: string,
+    recoverySessionId: string | null | undefined,
+  ): {
+    session: ReturnType<typeof onboardSession.loadSession>;
+    allowLiveFallback: boolean;
+  } {
+    const session = onboardSession.loadSession();
+    const matchingSandboxSession = session?.sandboxName === sandboxName ? session : null;
+    if (recoverySessionId == null) {
+      return { session: matchingSandboxSession, allowLiveFallback: true };
+    }
+    const matchingRecoverySession =
+      matchingSandboxSession?.sessionId === recoverySessionId ? matchingSandboxSession : null;
+    return {
+      session: matchingRecoverySession,
+      allowLiveFallback: matchingRecoverySession !== null,
+    };
+  }
+
   function readLiveInference(
     sandboxName: string | null | undefined,
   ): { provider: string | null; model: string | null } | null {
@@ -214,16 +234,16 @@ export function createProviderRecoveryHelpers(deps: ProviderRecoveryDeps): Provi
       return refuseRecoveryAfterRegistryError(sandboxName, error);
     }
     try {
-      const session = onboardSession.loadSession();
-      if (
-        session &&
-        session.sandboxName === sandboxName &&
-        typeof session.provider === "string" &&
-        session.provider
-      ) {
+      const { session, allowLiveFallback } = loadMatchingRecoverySession(
+        sandboxName,
+        recoverySessionId,
+      );
+      if (session && typeof session.provider === "string" && session.provider) {
         return session.provider;
       }
+      if (!allowLiveFallback) return null;
     } catch {
+      if (recoverySessionId != null) return null;
       // fall through to live gateway
     }
     const live = readLiveInference(sandboxName);
@@ -249,13 +269,8 @@ export function createProviderRecoveryHelpers(deps: ProviderRecoveryDeps): Provi
       return refuseRecoveryAfterRegistryError(sandboxName, error);
     }
     try {
-      const session = onboardSession.loadSession();
-      if (
-        session &&
-        session.sandboxName === sandboxName &&
-        typeof session.nimContainer === "string" &&
-        session.nimContainer
-      ) {
+      const { session } = loadMatchingRecoverySession(sandboxName, recoverySessionId);
+      if (session && typeof session.nimContainer === "string" && session.nimContainer) {
         return session.nimContainer;
       }
     } catch {
@@ -277,16 +292,16 @@ export function createProviderRecoveryHelpers(deps: ProviderRecoveryDeps): Provi
       return refuseRecoveryAfterRegistryError(sandboxName, error);
     }
     try {
-      const session = onboardSession.loadSession();
-      if (
-        session &&
-        session.sandboxName === sandboxName &&
-        typeof session.model === "string" &&
-        session.model
-      ) {
+      const { session, allowLiveFallback } = loadMatchingRecoverySession(
+        sandboxName,
+        recoverySessionId,
+      );
+      if (session && typeof session.model === "string" && session.model) {
         return session.model;
       }
+      if (!allowLiveFallback) return null;
     } catch {
+      if (recoverySessionId != null) return null;
       // fall through to live gateway
     }
     const live = readLiveInference(sandboxName);
@@ -312,13 +327,8 @@ export function createProviderRecoveryHelpers(deps: ProviderRecoveryDeps): Provi
       return refuseRecoveryAfterRegistryError(sandboxName, error);
     }
     try {
-      const session = onboardSession.loadSession();
-      if (
-        session &&
-        session.sandboxName === sandboxName &&
-        typeof session.endpointUrl === "string" &&
-        session.endpointUrl
-      ) {
+      const { session } = loadMatchingRecoverySession(sandboxName, recoverySessionId);
+      if (session && typeof session.endpointUrl === "string" && session.endpointUrl) {
         return session.endpointUrl;
       }
     } catch {
@@ -342,10 +352,8 @@ export function createProviderRecoveryHelpers(deps: ProviderRecoveryDeps): Provi
       return refuseRecoveryAfterRegistryError(sandboxName, error);
     }
     try {
-      const session = onboardSession.loadSession();
-      return session?.sandboxName === sandboxName
-        ? completeRecordedInferenceRoute(session, "session")
-        : null;
+      const { session } = loadMatchingRecoverySession(sandboxName, recoverySessionId);
+      return session ? completeRecordedInferenceRoute(session, "session") : null;
     } catch {
       return null;
     }

@@ -222,31 +222,90 @@ describe("provider recovery persisted routing state", () => {
         preferredInferenceApi: "openai-completions",
       })
       .mockReturnValueOnce(null);
-    vi.spyOn(onboardSession, "loadSession").mockReturnValue(
-      onboardSession.createSession({
-        sandboxName: "alpha",
-        provider: "compatible-endpoint",
-        model: "model-b",
-        endpointUrl: "https://session.example/v1",
-        preferredInferenceApi: "openai-responses",
-      }),
-    );
+    const session = onboardSession.createSession({
+      sandboxName: "alpha",
+      provider: "compatible-endpoint",
+      model: "model-b",
+      endpointUrl: "https://session.example/v1",
+      preferredInferenceApi: "openai-responses",
+    });
+    vi.spyOn(onboardSession, "loadSession").mockReturnValue(session);
     const recovery = helpers();
 
-    expect(recovery.readRecordedInferenceRoute("alpha")).toEqual({
+    expect(recovery.readRecordedInferenceRoute("alpha", session.sessionId)).toEqual({
       provider: "compatible-endpoint",
       model: "model-a",
       endpointUrl: "https://registry.example/v1",
       preferredInferenceApi: "openai-completions",
       source: "registry",
     });
-    expect(recovery.readRecordedInferenceRoute("alpha")).toEqual({
+    expect(recovery.readRecordedInferenceRoute("alpha", session.sessionId)).toEqual({
       provider: "compatible-endpoint",
       model: "model-b",
       endpointUrl: "https://session.example/v1",
       preferredInferenceApi: "openai-responses",
       source: "session",
     });
+  });
+
+  it("requires the caller session identity for every session-backed reader (#6630)", () => {
+    vi.spyOn(registry, "getSandbox").mockReturnValue(null);
+    vi.spyOn(registry, "listSandboxes").mockReturnValue({
+      defaultSandbox: null,
+      sandboxes: [],
+    });
+    vi.spyOn(onboardSession, "loadSession").mockReturnValue(
+      onboardSession.createSession({
+        sessionId: "session-recorded",
+        sandboxName: "alpha",
+        provider: "compatible-endpoint",
+        model: "model-b",
+        endpointUrl: "https://session.example/v1",
+        preferredInferenceApi: "openai-responses",
+        nimContainer: "registry.example/nim:latest",
+      }),
+    );
+    const recovery = helpers();
+
+    expect(recovery.readRecordedProvider("alpha")).toBe("compatible-endpoint");
+    expect(recovery.readRecordedProvider("alpha", "session-other")).toBeNull();
+    expect(recovery.readRecordedModel("alpha", "session-other")).toBeNull();
+    expect(recovery.readRecordedEndpointUrl("alpha", "session-other")).toBeNull();
+    expect(recovery.readRecordedNimContainer("alpha", "session-other")).toBeNull();
+    expect(recovery.readRecordedInferenceRoute("alpha", "session-other")).toBeNull();
+
+    expect(recovery.readRecordedProvider("alpha", "session-recorded")).toBe("compatible-endpoint");
+    expect(recovery.readRecordedModel("alpha", "session-recorded")).toBe("model-b");
+    expect(recovery.readRecordedEndpointUrl("alpha", "session-recorded")).toBe(
+      "https://session.example/v1",
+    );
+    expect(recovery.readRecordedNimContainer("alpha", "session-recorded")).toBe(
+      "registry.example/nim:latest",
+    );
+    expect(recovery.readRecordedInferenceRoute("alpha", "session-recorded")).toMatchObject({
+      model: "model-b",
+      source: "session",
+    });
+  });
+
+  it("does not use live gateway state when the caller session identity is unavailable (#6630)", () => {
+    vi.spyOn(registry, "getSandbox").mockReturnValue(null);
+    vi.spyOn(registry, "listSandboxes").mockReturnValue({
+      defaultSandbox: null,
+      sandboxes: [],
+    });
+    vi.spyOn(onboardSession, "loadSession").mockReturnValue(null);
+    const recovery = createProviderRecoveryHelpers({
+      parseGatewayInference: () => ({ provider: "nvidia-prod", model: "nvidia/test-model" }),
+      runCaptureOpenshell: () => "Gateway inference:",
+    });
+
+    expect(recovery.readLiveInference("alpha")).toEqual({
+      provider: "nvidia-prod",
+      model: "nvidia/test-model",
+    });
+    expect(recovery.readRecordedProvider("alpha", "session-current")).toBeNull();
+    expect(recovery.readRecordedModel("alpha", "session-current")).toBeNull();
   });
 
   it.each([

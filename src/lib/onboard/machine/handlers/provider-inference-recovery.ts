@@ -36,24 +36,36 @@ export function createRecovery(
   ): ProviderRecoverySetupOptions;
 } {
   const sessionId = session?.sessionId ?? null;
+  const completedSessionSandboxName =
+    session?.steps?.sandbox?.status === "complete" ? (session.sandboxName ?? null) : null;
+  let selectionAuthority: SandboxRecoveryAuthority | null = null;
   return {
     sessionId,
-    shouldRecover: () =>
-      shouldRecoverRecordedProvider({
+    shouldRecover: () => {
+      selectionAuthority = sandboxName
+        ? deps.getSandboxRecoveryAuthority(sandboxName, sessionId)
+        : "missing";
+      return shouldRecoverRecordedProvider({
         fresh,
         sandboxName,
-        sandboxRecoveryAuthority: sandboxName
-          ? deps.getSandboxRecoveryAuthority(sandboxName, sessionId)
-          : "missing",
-        sessionSandboxName:
-          session?.steps?.sandbox?.status === "complete" ? (session.sandboxName ?? null) : null,
-      }),
+        sandboxRecoveryAuthority: selectionAuthority,
+        sessionSandboxName: completedSessionSandboxName,
+      });
+    },
     setupOptions(recoveredRecordedProvider, selectedSandboxName, currentSessionId) {
       if (!recoveredRecordedProvider) return { reservationSessionId: currentSessionId };
       return {
         reservationSessionId: sessionId ?? undefined,
-        isRecordedProviderRecoveryAuthorized: () =>
-          deps.getSandboxRecoveryAuthority(selectedSandboxName, sessionId) !== "unauthorized",
+        isRecordedProviderRecoveryAuthorized: () => {
+          const currentAuthority = deps.getSandboxRecoveryAuthority(selectedSandboxName, sessionId);
+          if (currentAuthority === "authorized") return true;
+          return (
+            currentAuthority === "missing" &&
+            selectionAuthority === "missing" &&
+            sandboxName === selectedSandboxName &&
+            completedSessionSandboxName === selectedSandboxName
+          );
+        },
       };
     },
   };
