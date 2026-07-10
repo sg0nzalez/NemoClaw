@@ -8,6 +8,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const tempRoots: string[] = [];
+const REAL_TMP = fs.realpathSync(os.tmpdir());
 
 async function loadSnapshotModule(home: string): Promise<typeof import("./snapshot.js")> {
   vi.resetModules();
@@ -26,11 +27,64 @@ afterEach(() => {
 });
 
 describe("snapshot real filesystem safety", () => {
+  function writeSnapshot(snapshotsDir: string, timestamp: string): string {
+    const snapshotDir = path.join(snapshotsDir, timestamp);
+    fs.mkdirSync(path.join(snapshotDir, "openclaw"), { recursive: true });
+    fs.writeFileSync(path.join(snapshotDir, "openclaw", "config.json"), "{}\n");
+    fs.writeFileSync(
+      path.join(snapshotDir, "snapshot.json"),
+      JSON.stringify(
+        {
+          timestamp,
+          source: path.join(os.tmpdir(), "openclaw-source"),
+          file_count: 1,
+          contents: ["config.json"],
+        },
+        null,
+        2,
+      ),
+    );
+    return snapshotDir;
+  }
+
+  it.skipIf(process.platform === "win32")(
+    "deletes a normal direct-child timestamp snapshot",
+    async () => {
+      const home = fs.mkdtempSync(path.join(REAL_TMP, "nemoclaw-snapshot-home-"));
+      tempRoots.push(home);
+
+      const snapshotsDir = path.join(home, ".nemoclaw", "snapshots");
+      const snapshotDir = writeSnapshot(snapshotsDir, "20990101T000000Z");
+      const { deleteSnapshot } = await loadSnapshotModule(home);
+
+      expect(deleteSnapshot(snapshotDir)).toBe(true);
+      expect(fs.existsSync(snapshotDir)).toBe(false);
+    },
+  );
+
+  it.skipIf(process.platform === "win32")("prunes older direct-child snapshots", async () => {
+    const home = fs.mkdtempSync(path.join(REAL_TMP, "nemoclaw-snapshot-home-"));
+    tempRoots.push(home);
+
+    const snapshotsDir = path.join(home, ".nemoclaw", "snapshots");
+    const older = writeSnapshot(snapshotsDir, "20990101T000000Z");
+    const newer = writeSnapshot(snapshotsDir, "20990201T000000Z");
+    const { pruneSnapshots } = await loadSnapshotModule(home);
+
+    const result = pruneSnapshots(1);
+
+    expect(result.deleted).toEqual([older]);
+    expect(result.kept).toEqual([newer]);
+    expect(result.failed).toEqual([]);
+    expect(fs.existsSync(older)).toBe(false);
+    expect(fs.existsSync(newer)).toBe(true);
+  });
+
   it.skipIf(process.platform === "win32")(
     "rejects a symlinked snapshot delete path without touching the outside target",
     async () => {
-      const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-snapshot-home-"));
-      const outside = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-snapshot-outside-"));
+      const home = fs.mkdtempSync(path.join(REAL_TMP, "nemoclaw-snapshot-home-"));
+      const outside = fs.mkdtempSync(path.join(REAL_TMP, "nemoclaw-snapshot-outside-"));
       tempRoots.push(home, outside);
 
       const snapshotsDir = path.join(home, ".nemoclaw", "snapshots");

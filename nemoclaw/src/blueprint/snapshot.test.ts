@@ -15,7 +15,7 @@ interface FsEntry {
 
 const store = new Map<string, FsEntry>();
 const rmFailures = new Set<string>();
-let snapshotsFdRealpath = "";
+let snapshotDeleteHelperFails = false;
 
 function addFile(p: string, content: string): void {
   store.set(p, { type: "file", content });
@@ -31,20 +31,9 @@ function addSymlink(p: string, target: string): void {
 
 const FAKE_HOME = "/fakehome";
 const MOCK_SNAPSHOTS_DIR = `${FAKE_HOME}/.nemoclaw/snapshots`;
-const MOCK_SNAPSHOTS_FD = 7654;
-const MOCK_SNAPSHOTS_FD_PREFIXES = [
-  `/proc/self/fd/${String(MOCK_SNAPSHOTS_FD)}/`,
-  `/dev/fd/${String(MOCK_SNAPSHOTS_FD)}/`,
-];
 
 function mapMockPath(p: string): string {
-  const prefix = MOCK_SNAPSHOTS_FD_PREFIXES.find((candidate) => p.startsWith(candidate));
-  return prefix ? `${MOCK_SNAPSHOTS_DIR}/${p.slice(prefix.length)}` : p;
-}
-
-function mapMockRealpath(p: string): string {
-  const fdRoot = MOCK_SNAPSHOTS_FD_PREFIXES.find((prefix) => p === prefix.slice(0, -1));
-  return fdRoot ? snapshotsFdRealpath : mapMockPath(p);
+  return p;
 }
 
 function throwFsError(code: string, message: string): never {
@@ -84,7 +73,6 @@ vi.mock("node:fs", async (importOriginal) => {
       }
       return entry.target ?? "";
     },
-    realpathSync: (p: string) => mapMockRealpath(p),
     mkdirSync: vi.fn((p: string) => {
       p = mapMockPath(p);
       addDir(p);
@@ -159,20 +147,36 @@ vi.mock("node:fs", async (importOriginal) => {
       }
       return [...childTypes.keys()].sort();
     },
-    openSync: vi.fn((p: string) => {
-      p = mapMockPath(p);
-      const hasChildren = [...store.keys()].some((key) => key.startsWith(`${p}/`));
-      const entry = store.get(p) ?? (hasChildren ? { type: "dir" } : undefined);
-      entry === undefined &&
-        throwFsError("ENOENT", `ENOENT: no such file or directory, open '${p}'`);
-      entry.type === "symlink" &&
-        throwFsError("ELOOP", `ELOOP: too many symbolic links, open '${p}'`);
-      entry.type !== "dir" && throwFsError("ENOTDIR", `ENOTDIR: not a directory, open '${p}'`);
-      return MOCK_SNAPSHOTS_FD;
-    }),
-    closeSync: vi.fn(),
   };
 });
+
+vi.mock("node:child_process", () => ({
+  spawnSync: vi.fn((_command: string, args: string[]) => {
+    const failed = { status: 1, stderr: "" };
+    const passed = { status: 0, stderr: "" };
+    const snapshotName = args[3];
+    const snapshotsDir = args[2];
+    const invalidRequest =
+      snapshotDeleteHelperFails ||
+      snapshotsDir !== MOCK_SNAPSHOTS_DIR ||
+      typeof snapshotName !== "string" ||
+      snapshotName.includes("/");
+    const target = `${MOCK_SNAPSHOTS_DIR}/${snapshotName}`;
+    const targetEntry = store.get(target);
+    const hasChildren = [...store.keys()].some((key) => key.startsWith(`${target}/`));
+    const targetMissing = targetEntry === undefined && !hasChildren;
+    const unsafeTarget =
+      targetEntry?.type === "symlink" ||
+      (targetEntry !== undefined && targetEntry.type !== "dir") ||
+      rmFailures.has(target);
+    const shouldDelete = !invalidRequest && !targetMissing && !unsafeTarget;
+    const result = invalidRequest || unsafeTarget ? failed : passed;
+    [...store.keys()]
+      .filter((key) => shouldDelete && (key === target || key.startsWith(`${target}/`)))
+      .forEach((key) => store.delete(key));
+    return result;
+  }),
+}));
 
 const mockExeca = vi.fn();
 vi.mock("execa", () => ({ execa: (...args: unknown[]) => mockExeca(...args) }));
@@ -200,7 +204,7 @@ describe("snapshot", () => {
   beforeEach(() => {
     store.clear();
     rmFailures.clear();
-    snapshotsFdRealpath = MOCK_SNAPSHOTS_DIR;
+    snapshotDeleteHelperFails = false;
     vi.clearAllMocks();
   });
 
@@ -596,11 +600,11 @@ describe("snapshot", () => {
       expect(deleteSnapshot(`${SNAPSHOTS_DIR}/evil`)).toBe(false);
     });
 
-    it("fails closed when the opened snapshots directory resolves outside the store", () => {
+    it("fails closed when the anchored delete helper fails", () => {
       const snap = `${SNAPSHOTS_DIR}/20260101T000000Z`;
       addDir(snap);
       addFile(`${snap}/snapshot.json`, "{}");
-      snapshotsFdRealpath = "/attacker/snapshots";
+      snapshotDeleteHelperFails = true;
 
       expect(deleteSnapshot(snap)).toBe(false);
       expect(store.has(snap)).toBe(true);
@@ -804,7 +808,7 @@ describe("snapshot", () => {
     beforeEach(() => {
       store.clear();
       rmFailures.clear();
-      snapshotsFdRealpath = MOCK_SNAPSHOTS_DIR;
+      snapshotDeleteHelperFails = false;
       stdoutChunks.length = 0;
       vi.clearAllMocks();
       captureStdout();

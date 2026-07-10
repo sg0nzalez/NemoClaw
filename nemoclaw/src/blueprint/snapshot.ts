@@ -11,19 +11,16 @@
  *   - Rollback: restore host config from snapshot
  */
 
+import { spawnSync } from "node:child_process";
 import type { Dirent } from "node:fs";
 import {
-  closeSync,
-  constants,
   cpSync,
   existsSync,
   lstatSync,
   mkdirSync,
-  openSync,
   readdirSync,
   readFileSync,
   readlinkSync,
-  realpathSync,
   renameSync,
   rmSync,
   writeFileSync,
@@ -39,7 +36,106 @@ const NEMOCLAW_DIR = join(HOME, ".nemoclaw");
 const SNAPSHOTS_DIR = join(NEMOCLAW_DIR, "snapshots");
 const SANDBOX_NAME_RE = /^[a-z]([a-z0-9-]*[a-z0-9])?$/;
 const SNAPSHOT_DIR_NAME_RE = /^\d{8}T\d{6}Z$/;
-const STABLE_FD_ROOT = process.platform === "linux" ? "/proc/self/fd" : "/dev/fd";
+
+const SNAPSHOT_DELETE_HELPER = String.raw`
+import os
+import stat
+import sys
+
+O_DIRECTORY = getattr(os, "O_DIRECTORY", 0)
+O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+O_CLOEXEC = getattr(os, "O_CLOEXEC", 0)
+DIR_FLAGS = os.O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC
+
+
+def fail() -> None:
+    sys.exit(1)
+
+
+def open_absolute_dir_no_follow(path: str) -> int:
+    absolute = os.path.abspath(path)
+    parts = [part for part in absolute.split(os.sep) if part]
+    fd = os.open(os.sep, DIR_FLAGS)
+    try:
+        for part in parts:
+            next_fd = os.open(part, DIR_FLAGS, dir_fd=fd)
+            os.close(fd)
+            fd = next_fd
+        return fd
+    except Exception:
+        os.close(fd)
+        raise
+
+
+def remove_tree_at(parent_fd: int, name: str) -> bool:
+    try:
+        child_fd = os.open(name, DIR_FLAGS, dir_fd=parent_fd)
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+
+    try:
+        try:
+            entries = list(os.scandir(child_fd))
+        except TypeError:
+            return False
+        for entry in entries:
+            entry_name = entry.name
+            if entry_name in ("", ".", "..") or os.sep in entry_name:
+                return False
+            try:
+                entry_stat = os.lstat(entry_name, dir_fd=child_fd)
+            except FileNotFoundError:
+                continue
+            if stat.S_ISDIR(entry_stat.st_mode):
+                if not remove_tree_at(child_fd, entry_name):
+                    return False
+            else:
+                try:
+                    os.unlink(entry_name, dir_fd=child_fd)
+                except FileNotFoundError:
+                    continue
+                except OSError:
+                    return False
+    finally:
+        os.close(child_fd)
+
+    try:
+        os.rmdir(name, dir_fd=parent_fd)
+        return True
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+
+
+def main() -> None:
+    if len(sys.argv) != 3:
+        fail()
+    snapshots_dir = sys.argv[1]
+    snapshot_name = sys.argv[2]
+    if (
+        not snapshot_name
+        or snapshot_name in (".", "..")
+        or os.sep in snapshot_name
+        or (os.altsep is not None and os.altsep in snapshot_name)
+    ):
+        fail()
+
+    root_fd = open_absolute_dir_no_follow(snapshots_dir)
+    try:
+        sys.exit(0 if remove_tree_at(root_fd, snapshot_name) else 1)
+    finally:
+        os.close(root_fd)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception:
+        fail()
+`;
 
 function compactTimestamp(): string {
   return new Date()
@@ -334,63 +430,21 @@ function snapshotNameFromPath(snapshotPath: string): string | null {
   return parts[0] ?? null;
 }
 
-function openSnapshotsDirNoFollow(): number {
-  return openSync(SNAPSHOTS_DIR, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
-}
-
-function stableSnapshotChildPath(fd: number, snapshotName: string): string {
-  return join(stableSnapshotsDirPath(fd), snapshotName);
-}
-
-function stableSnapshotsDirPath(fd: number): string {
-  return join(STABLE_FD_ROOT, String(fd));
-}
-
-function openedSnapshotsDirMatches(fd: number): boolean {
-  return realpathSync(stableSnapshotsDirPath(fd)) === resolve(SNAPSHOTS_DIR);
-}
-
 export function deleteSnapshot(snapshotPath: string): boolean {
   const snapshotName = snapshotNameFromPath(snapshotPath);
   if (snapshotName === null) {
     return false;
   }
-
-  let fd: number | null = null;
-  try {
-    fd = openSnapshotsDirNoFollow();
-    if (!openedSnapshotsDirMatches(fd)) {
-      return false;
-    }
-    const stablePath = stableSnapshotChildPath(fd, snapshotName);
-    rejectSymlinksOnPath(stablePath, { stopAt: stableSnapshotsDirPath(fd) });
-    try {
-      if (lstatSync(stablePath).isSymbolicLink()) {
-        return false;
-      }
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        return true;
-      }
-      throw error;
-    }
-    rmSync(stablePath, { recursive: true, force: true });
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return true;
-    }
+  if (process.platform === "win32") {
     return false;
-  } finally {
-    if (fd !== null) {
-      try {
-        closeSync(fd);
-      } catch {
-        // Preserve the boolean delete contract; close failures do not mean the
-        // requested snapshot survived.
-      }
-    }
   }
+
+  const result = spawnSync("python3", ["-c", SNAPSHOT_DELETE_HELPER, SNAPSHOTS_DIR, snapshotName], {
+    encoding: "utf-8",
+    maxBuffer: 1024 * 1024,
+    timeout: 30_000,
+  });
+  return result.status === 0;
 }
 
 export function isSnapshotPathInsideSnapshotsDir(snapshotPath: string): boolean {
