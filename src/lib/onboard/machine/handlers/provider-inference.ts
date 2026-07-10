@@ -10,7 +10,10 @@ import type {
 } from "../../../inference/gateway-route-compatibility";
 import type { WebSearchConfig } from "../../../inference/web-search";
 import type { HermesAuthMethod, Session, SessionUpdates } from "../../../state/onboard-session";
-import { shouldRecoverRecordedProvider } from "../../provider-recovery";
+import {
+  type SandboxRecoveryAuthority,
+  shouldRecoverRecordedProvider,
+} from "../../provider-recovery";
 import { withInferenceTrace, withProviderSelectionTrace } from "../../tracing";
 import { advanceTo, type OnboardStateTransitionResult, retryTo } from "../result";
 import {
@@ -90,10 +93,10 @@ export interface ProviderInferenceStateOptions<Gpu, Agent, Host> {
   deps: {
     checkGatewayRouteCompatibility: CurrentGatewayRouteCompatibilityCheck;
     preflightGatewayRouteDiscovery: CurrentGatewayRouteDiscoveryPreflight;
-    hasRecoverableSandboxIdentity(
+    getSandboxRecoveryAuthority(
       sandboxName: string,
       sessionId: string | null | undefined,
-    ): boolean;
+    ): SandboxRecoveryAuthority;
     withGatewayRouteMutationLock<T>(
       gatewayName: string,
       operation: () => Promise<T> | T,
@@ -450,9 +453,9 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
       const recoverRecordedProvider = shouldRecoverRecordedProvider({
         fresh,
         sandboxName,
-        hasRecoverableSandboxIdentity: Boolean(
-          sandboxName && deps.hasRecoverableSandboxIdentity(sandboxName, session?.sessionId),
-        ),
+        sandboxRecoveryAuthority: sandboxName
+          ? deps.getSandboxRecoveryAuthority(sandboxName, session?.sessionId)
+          : "missing",
         sessionSandboxName:
           session?.steps?.sandbox?.status === "complete" ? (session.sandboxName ?? null) : null,
       });

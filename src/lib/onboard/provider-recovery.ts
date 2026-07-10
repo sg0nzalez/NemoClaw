@@ -66,38 +66,57 @@ const MAX_LIVE_PROVIDER_LENGTH = 128;
 const MAX_LIVE_MODEL_LENGTH = 512;
 const SAFE_LIVE_PROVIDER = /^[A-Za-z0-9._:-]+$/;
 
-export function isRecoverableSandboxIdentity(
+export type SandboxRecoveryAuthority = "missing" | "authorized" | "unauthorized";
+
+export function classifySandboxRecoveryAuthority(
   entry: registry.SandboxEntry | null,
   sessionId: string | null | undefined,
-): boolean {
-  return Boolean(
-    entry &&
-      (entry.pendingRouteReservation !== true ||
-        registry.isPendingReservationForSession(entry, sessionId)),
-  );
+): SandboxRecoveryAuthority {
+  if (!entry) return "missing";
+  if (entry.pendingRouteReservation !== true) return "authorized";
+  return registry.isPendingReservationForSession(entry, sessionId) ? "authorized" : "unauthorized";
 }
 
-export function hasRecoverableSandboxIdentity(
+export function getSandboxRecoveryAuthority(
   sandboxName: string,
   sessionId: string | null | undefined,
-): boolean {
-  return isRecoverableSandboxIdentity(registry.getSandbox(sandboxName), sessionId);
+): SandboxRecoveryAuthority {
+  return classifySandboxRecoveryAuthority(registry.getSandbox(sandboxName), sessionId);
 }
 
 export function shouldRecoverRecordedProvider(input: {
   fresh: boolean;
   sandboxName: string | null;
-  hasRecoverableSandboxIdentity: boolean;
+  sandboxRecoveryAuthority: SandboxRecoveryAuthority;
   sessionSandboxName: string | null;
 }): boolean {
   return (
     !input.fresh &&
     (!input.sandboxName ||
-      Boolean(
-        input.sandboxName &&
-          (input.hasRecoverableSandboxIdentity || input.sessionSandboxName === input.sandboxName),
-      ))
+      input.sandboxRecoveryAuthority === "authorized" ||
+      (input.sandboxRecoveryAuthority === "missing" &&
+        input.sessionSandboxName === input.sandboxName))
   );
+}
+
+function currentSessionId(): string | null {
+  try {
+    return onboardSession.loadSession()?.sessionId ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function readRegistryRecoveryState(sandboxName: string): {
+  authority: SandboxRecoveryAuthority;
+  entry: registry.SandboxEntry | null;
+} {
+  const entry = registry.getSandbox(sandboxName);
+  const authority = classifySandboxRecoveryAuthority(
+    entry,
+    entry?.pendingRouteReservation === true ? currentSessionId() : null,
+  );
+  return { authority, entry };
 }
 
 export function validateLiveGatewayInference(
@@ -168,7 +187,8 @@ export function createProviderRecoveryHelpers(deps: ProviderRecoveryDeps): Provi
   function readRecordedProvider(sandboxName: string | null | undefined): string | null {
     if (!sandboxName) return null;
     try {
-      const entry = registry.getSandbox(sandboxName);
+      const { authority, entry } = readRegistryRecoveryState(sandboxName);
+      if (authority === "unauthorized") return null;
       if (entry && typeof entry.provider === "string" && entry.provider) {
         return entry.provider;
       }
@@ -198,7 +218,8 @@ export function createProviderRecoveryHelpers(deps: ProviderRecoveryDeps): Provi
   function readRecordedNimContainer(sandboxName: string | null | undefined): string | null {
     if (!sandboxName) return null;
     try {
-      const entry = registry.getSandbox(sandboxName);
+      const { authority, entry } = readRegistryRecoveryState(sandboxName);
+      if (authority === "unauthorized") return null;
       if (entry && typeof entry.nimContainer === "string" && entry.nimContainer) {
         return entry.nimContainer;
       }
@@ -224,7 +245,8 @@ export function createProviderRecoveryHelpers(deps: ProviderRecoveryDeps): Provi
   function readRecordedModel(sandboxName: string | null | undefined): string | null {
     if (!sandboxName) return null;
     try {
-      const entry = registry.getSandbox(sandboxName);
+      const { authority, entry } = readRegistryRecoveryState(sandboxName);
+      if (authority === "unauthorized") return null;
       if (entry && typeof entry.model === "string" && entry.model) {
         return entry.model;
       }
@@ -254,7 +276,8 @@ export function createProviderRecoveryHelpers(deps: ProviderRecoveryDeps): Provi
   function readRecordedEndpointUrl(sandboxName: string | null | undefined): string | null {
     if (!sandboxName) return null;
     try {
-      const entry = registry.getSandbox(sandboxName);
+      const { authority, entry } = readRegistryRecoveryState(sandboxName);
+      if (authority === "unauthorized") return null;
       if (entry && typeof entry.endpointUrl === "string" && entry.endpointUrl) {
         return entry.endpointUrl;
       }
@@ -282,7 +305,8 @@ export function createProviderRecoveryHelpers(deps: ProviderRecoveryDeps): Provi
   ): RecordedInferenceRoute | null {
     if (!sandboxName) return null;
     try {
-      const entry = registry.getSandbox(sandboxName);
+      const { authority, entry } = readRegistryRecoveryState(sandboxName);
+      if (authority === "unauthorized") return null;
       // A present registry row is authoritative. If it is incomplete, fail
       // closed instead of filling its gaps from an older onboard session.
       if (entry) return completeRecordedInferenceRoute(entry, "registry");

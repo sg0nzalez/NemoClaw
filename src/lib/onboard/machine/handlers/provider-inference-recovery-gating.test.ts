@@ -8,7 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createSession } from "../../../state/onboard-session";
 import type { SandboxEntry } from "../../../state/registry";
-import { isRecoverableSandboxIdentity } from "../../provider-recovery";
+import { classifySandboxRecoveryAuthority } from "../../provider-recovery";
 import { handleProviderInferenceState } from "./provider-inference";
 import { baseOptions, createDeps } from "./provider-inference.test-support";
 
@@ -58,8 +58,10 @@ describe("provider inference recovery gating", () => {
   });
 
   it("allows recovery for a registered sandbox", async () => {
-    const hasIdentity = vi.fn((name: string) => name === "dc-after");
-    const { deps, calls } = createDeps({ hasRecoverableSandboxIdentity: hasIdentity });
+    const getAuthority = vi.fn((name: string) =>
+      name === "dc-after" ? ("authorized" as const) : ("missing" as const),
+    );
+    const { deps, calls } = createDeps({ getSandboxRecoveryAuthority: getAuthority });
 
     await handleProviderInferenceState({
       ...baseOptions(deps),
@@ -75,26 +77,27 @@ describe("provider inference recovery gating", () => {
       expect.any(Function),
       expect.any(Function),
     );
-    expect(hasIdentity).toHaveBeenCalledWith("dc-after", expect.any(String));
+    expect(getAuthority).toHaveBeenCalledWith("dc-after", expect.any(String));
   });
 
   it.each([
     { label: "orphaned", reservationSessionId: undefined },
     { label: "owned by another session", reservationSessionId: "session-other" },
-  ])("rejects an $label pending reservation during resume (#6630)", async ({
+  ])("rejects an $label pending reservation despite a completed session (#6630)", async ({
     reservationSessionId,
   }) => {
     const session = createSession();
     session.sandboxName = "dc-after";
+    session.steps.sandbox.status = "complete";
     const entry: SandboxEntry = {
       name: "dc-after",
       pendingRouteReservation: true,
       ...(reservationSessionId ? { reservationSessionId } : {}),
     };
-    const hasIdentity = vi.fn((_name: string, sessionId: string | null | undefined) =>
-      isRecoverableSandboxIdentity(entry, sessionId),
+    const getAuthority = vi.fn((_name: string, sessionId: string | null | undefined) =>
+      classifySandboxRecoveryAuthority(entry, sessionId),
     );
-    const { deps, calls } = createDeps({ hasRecoverableSandboxIdentity: hasIdentity });
+    const { deps, calls } = createDeps({ getSandboxRecoveryAuthority: getAuthority });
 
     await handleProviderInferenceState({
       ...baseOptions(deps, session),
@@ -111,21 +114,22 @@ describe("provider inference recovery gating", () => {
       expect.any(Function),
       expect.any(Function),
     );
-    expect(hasIdentity).toHaveBeenCalledWith("dc-after", session.sessionId);
+    expect(getAuthority).toHaveBeenCalledWith("dc-after", session.sessionId);
   });
 
   it("allows recovery for the current session's pending reservation (#6630)", async () => {
     const session = createSession();
     session.sandboxName = "dc-after";
+    session.steps.sandbox.status = "complete";
     const entry: SandboxEntry = {
       name: "dc-after",
       pendingRouteReservation: true,
       reservationSessionId: session.sessionId,
     };
-    const hasIdentity = vi.fn((_name: string, sessionId: string | null | undefined) =>
-      isRecoverableSandboxIdentity(entry, sessionId),
+    const getAuthority = vi.fn((_name: string, sessionId: string | null | undefined) =>
+      classifySandboxRecoveryAuthority(entry, sessionId),
     );
-    const { deps, calls } = createDeps({ hasRecoverableSandboxIdentity: hasIdentity });
+    const { deps, calls } = createDeps({ getSandboxRecoveryAuthority: getAuthority });
 
     await handleProviderInferenceState({
       ...baseOptions(deps, session),
@@ -142,7 +146,7 @@ describe("provider inference recovery gating", () => {
       expect.any(Function),
       expect.any(Function),
     );
-    expect(hasIdentity).toHaveBeenCalledWith("dc-after", session.sessionId);
+    expect(getAuthority).toHaveBeenCalledWith("dc-after", session.sessionId);
   });
 
   it("composes persisted route reservation ownership with resume recovery (#6626, #6630)", async () => {
@@ -173,6 +177,11 @@ describe("provider inference recovery gating", () => {
           reservationSessionId: "session-other",
           expectedRecovery: false,
         },
+        {
+          sandboxName: "ownerless-reservation",
+          reservationSessionId: undefined,
+          expectedRecovery: false,
+        },
       ]) {
         registry.reserveSandboxInferenceRoute(sandboxName, {
           ...route,
@@ -180,13 +189,14 @@ describe("provider inference recovery gating", () => {
         });
         expect(registry.getSandbox(sandboxName)).toMatchObject({
           pendingRouteReservation: true,
-          reservationSessionId,
+          ...(reservationSessionId ? { reservationSessionId } : {}),
         });
 
         const session = createSession({ sessionId });
         session.sandboxName = sandboxName;
+        session.steps.sandbox.status = "complete";
         const { deps, calls } = createDeps({
-          hasRecoverableSandboxIdentity: recovery.hasRecoverableSandboxIdentity,
+          getSandboxRecoveryAuthority: recovery.getSandboxRecoveryAuthority,
         });
 
         await handleProviderInferenceState({

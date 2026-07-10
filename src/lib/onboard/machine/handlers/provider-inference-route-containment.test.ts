@@ -73,7 +73,7 @@ function createDeps() {
   const deps: Options["deps"] = {
     checkGatewayRouteCompatibility: calls.checkGatewayRouteCompatibility,
     preflightGatewayRouteDiscovery: calls.preflightGatewayRouteDiscovery,
-    hasRecoverableSandboxIdentity: () => false,
+    getSandboxRecoveryAuthority: (): "missing" => "missing",
     withGatewayRouteMutationLock: async (_gatewayName, operation) => await operation(),
     normalizeHermesAuthMethod: () => null,
     setupNim: calls.setupNim,

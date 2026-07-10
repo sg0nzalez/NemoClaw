@@ -91,7 +91,7 @@ function createPhases(
         requiredEndpointUrl: null,
         requiredInferenceApi: null,
       }),
-      hasRecoverableSandboxIdentity: () => false,
+      getSandboxRecoveryAuthority: (): "missing" => "missing",
       withGatewayRouteMutationLock: async <T>(
         _gatewayName: string,
         operation: () => Promise<T> | T,

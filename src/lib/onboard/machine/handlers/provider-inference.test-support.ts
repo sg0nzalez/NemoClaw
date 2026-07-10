@@ -93,7 +93,7 @@ export function createDeps(
     deps: {
       checkGatewayRouteCompatibility: calls.checkGatewayRouteCompatibility,
       preflightGatewayRouteDiscovery: calls.preflightGatewayRouteDiscovery,
-      hasRecoverableSandboxIdentity: () => false,
+      getSandboxRecoveryAuthority: (): "missing" => "missing",
       withGatewayRouteMutationLock: async <T>(
         _gatewayName: string,
         operation: () => Promise<T> | T,

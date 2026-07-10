@@ -6,9 +6,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as onboardSession from "../state/onboard-session";
 import * as registry from "../state/registry";
 import {
+  classifySandboxRecoveryAuthority,
   createProviderRecoveryHelpers,
-  hasRecoverableSandboxIdentity,
-  isRecoverableSandboxIdentity,
+  getSandboxRecoveryAuthority,
   shouldRecoverRecordedProvider,
   validateLiveGatewayInference,
 } from "./provider-recovery";
@@ -45,7 +45,7 @@ describe("shouldRecoverRecordedProvider", () => {
       label: "rejects gateway recovery for a brand-new sandbox",
       fresh: false,
       sandboxName: "dc-after",
-      hasRecoverableSandboxIdentity: false,
+      sandboxRecoveryAuthority: "missing",
       sessionSandboxName: null,
       expected: false,
     },
@@ -53,7 +53,7 @@ describe("shouldRecoverRecordedProvider", () => {
       label: "allows gateway recovery before an interactive sandbox name is selected",
       fresh: false,
       sandboxName: null,
-      hasRecoverableSandboxIdentity: false,
+      sandboxRecoveryAuthority: "missing",
       sessionSandboxName: null,
       expected: true,
     },
@@ -61,23 +61,31 @@ describe("shouldRecoverRecordedProvider", () => {
       label: "allows gateway recovery for a registered sandbox",
       fresh: false,
       sandboxName: "dc-after",
-      hasRecoverableSandboxIdentity: true,
+      sandboxRecoveryAuthority: "authorized",
       sessionSandboxName: null,
       expected: true,
     },
     {
-      label: "allows gateway recovery for a matching session",
+      label: "allows gateway recovery for a matching session when the registry row is missing",
       fresh: false,
       sandboxName: "dc-after",
-      hasRecoverableSandboxIdentity: false,
+      sandboxRecoveryAuthority: "missing",
       sessionSandboxName: "dc-after",
       expected: true,
+    },
+    {
+      label: "rejects a matching session when the present registry row is unauthorized",
+      fresh: false,
+      sandboxName: "dc-after",
+      sandboxRecoveryAuthority: "unauthorized",
+      sessionSandboxName: "dc-after",
+      expected: false,
     },
     {
       label: "rejects gateway recovery for a different session sandbox",
       fresh: false,
       sandboxName: "dc-after",
-      hasRecoverableSandboxIdentity: false,
+      sandboxRecoveryAuthority: "missing",
       sessionSandboxName: "dc-before",
       expected: false,
     },
@@ -85,14 +93,14 @@ describe("shouldRecoverRecordedProvider", () => {
       label: "rejects gateway recovery when fresh overrides existing identity",
       fresh: true,
       sandboxName: "dc-after",
-      hasRecoverableSandboxIdentity: true,
+      sandboxRecoveryAuthority: "authorized",
       sessionSandboxName: "dc-after",
       expected: false,
     },
-  ])("$label", ({
+  ] as const)("$label", ({
     fresh,
     sandboxName,
-    hasRecoverableSandboxIdentity,
+    sandboxRecoveryAuthority,
     sessionSandboxName,
     expected,
   }) => {
@@ -100,14 +108,14 @@ describe("shouldRecoverRecordedProvider", () => {
       shouldRecoverRecordedProvider({
         fresh,
         sandboxName,
-        hasRecoverableSandboxIdentity,
+        sandboxRecoveryAuthority,
         sessionSandboxName,
       }),
     ).toBe(expected);
   });
 });
 
-describe("recoverable sandbox identity", () => {
+describe("sandbox recovery authority", () => {
   const pending = (reservationSessionId?: string): registry.SandboxEntry => ({
     name: "dc-after",
     pendingRouteReservation: true,
@@ -115,39 +123,44 @@ describe("recoverable sandbox identity", () => {
   });
 
   it.each([
-    { label: "missing registry row", entry: null, sessionId: "session-current", expected: false },
+    {
+      label: "missing registry row",
+      entry: null,
+      sessionId: "session-current",
+      expected: "missing",
+    },
     {
       label: "orphaned pending reservation",
       entry: pending(),
       sessionId: "session-current",
-      expected: false,
+      expected: "unauthorized",
     },
     {
       label: "another session's pending reservation",
       entry: pending("session-other"),
       sessionId: "session-current",
-      expected: false,
+      expected: "unauthorized",
     },
     {
       label: "the current session's pending reservation",
       entry: pending("session-current"),
       sessionId: "session-current",
-      expected: true,
+      expected: "authorized",
     },
     {
       label: "fully registered sandbox",
       entry: { name: "dc-after" },
       sessionId: null,
-      expected: true,
+      expected: "authorized",
     },
   ])("classifies $label (#6630)", ({ entry, sessionId, expected }) => {
-    expect(isRecoverableSandboxIdentity(entry, sessionId)).toBe(expected);
+    expect(classifySandboxRecoveryAuthority(entry, sessionId)).toBe(expected);
   });
 
   it("loads the named registry row before applying session ownership (#6630)", () => {
     vi.spyOn(registry, "getSandbox").mockReturnValue(pending("session-current"));
 
-    expect(hasRecoverableSandboxIdentity("dc-after", "session-current")).toBe(true);
+    expect(getSandboxRecoveryAuthority("dc-after", "session-current")).toBe("authorized");
     expect(registry.getSandbox).toHaveBeenCalledWith("dc-after");
   });
 
@@ -155,7 +168,7 @@ describe("recoverable sandbox identity", () => {
     vi.spyOn(registry, "getSandbox").mockReturnValue(null);
     const isOwned = vi.spyOn(registry, "isPendingReservationForSession");
 
-    expect(hasRecoverableSandboxIdentity("missing-sandbox", "session-current")).toBe(false);
+    expect(getSandboxRecoveryAuthority("missing-sandbox", "session-current")).toBe("missing");
     expect(registry.getSandbox).toHaveBeenCalledWith("missing-sandbox");
     expect(isOwned).not.toHaveBeenCalled();
   });
@@ -227,6 +240,65 @@ describe("provider recovery persisted routing state", () => {
       endpointUrl: "https://session.example/v1",
       preferredInferenceApi: "openai-responses",
       source: "session",
+    });
+  });
+
+  it.each([
+    { label: "ownerless", reservationSessionId: undefined },
+    { label: "foreign-owned", reservationSessionId: "session-other" },
+  ])("rejects every $label pending route reader before session fallback", ({
+    reservationSessionId,
+  }) => {
+    vi.spyOn(registry, "getSandbox").mockReturnValue({
+      name: "alpha",
+      pendingRouteReservation: true,
+      ...(reservationSessionId ? { reservationSessionId } : {}),
+      provider: "compatible-endpoint",
+      model: "registry-model",
+      endpointUrl: "https://registry.example/v1",
+      preferredInferenceApi: "openai-completions",
+      nimContainer: "registry-container",
+    });
+    vi.spyOn(onboardSession, "loadSession").mockReturnValue(
+      onboardSession.createSession({
+        sessionId: "session-current",
+        sandboxName: "alpha",
+        provider: "compatible-endpoint",
+        model: "session-model",
+        endpointUrl: "https://session.example/v1",
+        preferredInferenceApi: "openai-responses",
+        nimContainer: "session-container",
+      }),
+    );
+    const recovery = helpers();
+
+    expect(recovery.readRecordedProvider("alpha")).toBeNull();
+    expect(recovery.readRecordedModel("alpha")).toBeNull();
+    expect(recovery.readRecordedEndpointUrl("alpha")).toBeNull();
+    expect(recovery.readRecordedNimContainer("alpha")).toBeNull();
+    expect(recovery.readRecordedInferenceRoute("alpha")).toBeNull();
+  });
+
+  it("allows the current session to read its pending route", () => {
+    vi.spyOn(registry, "getSandbox").mockReturnValue({
+      name: "alpha",
+      pendingRouteReservation: true,
+      reservationSessionId: "session-current",
+      provider: "compatible-endpoint",
+      model: "registry-model",
+      endpointUrl: "https://registry.example/v1",
+      preferredInferenceApi: "openai-completions",
+    });
+    vi.spyOn(onboardSession, "loadSession").mockReturnValue(
+      onboardSession.createSession({ sessionId: "session-current", sandboxName: "alpha" }),
+    );
+
+    expect(helpers().readRecordedInferenceRoute("alpha")).toEqual({
+      provider: "compatible-endpoint",
+      model: "registry-model",
+      endpointUrl: "https://registry.example/v1",
+      preferredInferenceApi: "openai-completions",
+      source: "registry",
     });
   });
 
