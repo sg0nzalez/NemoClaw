@@ -55,17 +55,17 @@ function compactTimestamp(): string {
  *
  * Mirrors the pattern from src/lib/config-io.ts (PR #2290).
  */
-function rejectSymlinksOnPath(targetPath: string): void {
-  const resolvedHome = resolve(HOME);
+function rejectSymlinksOnPath(targetPath: string, options: { stopAt?: string } = {}): void {
+  const resolvedBoundary = resolve(options.stopAt ?? HOME);
   const resolved = resolve(targetPath);
 
-  const relToHome = relative(resolvedHome, resolved);
-  if (relToHome === "" || relToHome.startsWith("..") || isAbsolute(relToHome)) {
+  const relToBoundary = relative(resolvedBoundary, resolved);
+  if (relToBoundary === "" || relToBoundary.startsWith("..") || isAbsolute(relToBoundary)) {
     return;
   }
 
   let current = resolved;
-  while (current !== resolvedHome && current !== dirname(current)) {
+  while (current !== resolvedBoundary && current !== dirname(current)) {
     try {
       const stat = lstatSync(current);
       if (stat.isSymbolicLink()) {
@@ -339,11 +339,15 @@ function openSnapshotsDirNoFollow(): number {
 }
 
 function stableSnapshotChildPath(fd: number, snapshotName: string): string {
-  return join(STABLE_FD_ROOT, String(fd), snapshotName);
+  return join(stableSnapshotsDirPath(fd), snapshotName);
+}
+
+function stableSnapshotsDirPath(fd: number): string {
+  return join(STABLE_FD_ROOT, String(fd));
 }
 
 function openedSnapshotsDirMatches(fd: number): boolean {
-  return realpathSync(join(STABLE_FD_ROOT, String(fd))) === resolve(SNAPSHOTS_DIR);
+  return realpathSync(stableSnapshotsDirPath(fd)) === resolve(SNAPSHOTS_DIR);
 }
 
 export function deleteSnapshot(snapshotPath: string): boolean {
@@ -359,6 +363,7 @@ export function deleteSnapshot(snapshotPath: string): boolean {
       return false;
     }
     const stablePath = stableSnapshotChildPath(fd, snapshotName);
+    rejectSymlinksOnPath(stablePath, { stopAt: stableSnapshotsDirPath(fd) });
     try {
       if (lstatSync(stablePath).isSymbolicLink()) {
         return false;
