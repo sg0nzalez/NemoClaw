@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createSession } from "../../../state/onboard-session";
 import { handleProviderInferenceState } from "./provider-inference";
@@ -53,7 +53,8 @@ describe("provider inference recovery gating", () => {
   });
 
   it("allows recovery for a registered sandbox", async () => {
-    const { deps, calls } = createDeps({ hasRegisteredSandbox: () => true });
+    const hasRegisteredSandbox = vi.fn((name: string) => name === "dc-after");
+    const { deps, calls } = createDeps({ hasRegisteredSandbox });
 
     await handleProviderInferenceState({
       ...baseOptions(deps),
@@ -69,6 +70,7 @@ describe("provider inference recovery gating", () => {
       expect.any(Function),
       expect.any(Function),
     );
+    expect(hasRegisteredSandbox).toHaveBeenCalledWith("dc-after");
   });
 
   it("allows recovery for a matching completed session sandbox", async () => {
