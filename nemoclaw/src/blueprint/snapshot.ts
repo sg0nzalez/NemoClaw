@@ -11,15 +11,12 @@
  *   - Rollback: restore host config from snapshot
  */
 
-import { spawnSync } from "node:child_process";
-import type { Dirent } from "node:fs";
 import {
   cpSync,
   existsSync,
   lstatSync,
   mkdirSync,
   readdirSync,
-  readFileSync,
   readlinkSync,
   renameSync,
   rmSync,
@@ -30,114 +27,11 @@ import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 import { execa } from "execa";
 
-import { buildSubprocessEnv } from "../lib/subprocess-env.js";
-
 const HOME = homedir();
 const OPENCLAW_DIR = join(HOME, ".openclaw");
 const NEMOCLAW_DIR = join(HOME, ".nemoclaw");
 const SNAPSHOTS_DIR = join(NEMOCLAW_DIR, "snapshots");
 const SANDBOX_NAME_RE = /^[a-z]([a-z0-9-]*[a-z0-9])?$/;
-const SNAPSHOT_DIR_NAME_RE = /^\d{8}T\d{6}Z$/;
-
-const SNAPSHOT_DELETE_HELPER = String.raw`
-import os
-import stat
-import sys
-
-O_DIRECTORY = getattr(os, "O_DIRECTORY", 0)
-O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
-O_CLOEXEC = getattr(os, "O_CLOEXEC", 0)
-DIR_FLAGS = os.O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC
-
-
-def fail() -> None:
-    sys.exit(1)
-
-
-def open_absolute_dir_no_follow(path: str) -> int:
-    absolute = os.path.abspath(path)
-    parts = [part for part in absolute.split(os.sep) if part]
-    fd = os.open(os.sep, DIR_FLAGS)
-    try:
-        for part in parts:
-            next_fd = os.open(part, DIR_FLAGS, dir_fd=fd)
-            os.close(fd)
-            fd = next_fd
-        return fd
-    except Exception:
-        os.close(fd)
-        raise
-
-
-def remove_tree_at(parent_fd: int, name: str) -> bool:
-    try:
-        child_fd = os.open(name, DIR_FLAGS, dir_fd=parent_fd)
-    except FileNotFoundError:
-        return True
-    except OSError:
-        return False
-
-    try:
-        try:
-            entries = list(os.scandir(child_fd))
-        except TypeError:
-            return False
-        for entry in entries:
-            entry_name = entry.name
-            if entry_name in ("", ".", "..") or os.sep in entry_name:
-                return False
-            try:
-                entry_stat = os.lstat(entry_name, dir_fd=child_fd)
-            except FileNotFoundError:
-                continue
-            if stat.S_ISDIR(entry_stat.st_mode):
-                if not remove_tree_at(child_fd, entry_name):
-                    return False
-            else:
-                try:
-                    os.unlink(entry_name, dir_fd=child_fd)
-                except FileNotFoundError:
-                    continue
-                except OSError:
-                    return False
-    finally:
-        os.close(child_fd)
-
-    try:
-        os.rmdir(name, dir_fd=parent_fd)
-        return True
-    except FileNotFoundError:
-        return True
-    except OSError:
-        return False
-
-
-def main() -> None:
-    if len(sys.argv) != 3:
-        fail()
-    snapshots_dir = sys.argv[1]
-    snapshot_name = sys.argv[2]
-    if (
-        not snapshot_name
-        or snapshot_name in (".", "..")
-        or os.sep in snapshot_name
-        or (os.altsep is not None and os.altsep in snapshot_name)
-    ):
-        fail()
-
-    root_fd = open_absolute_dir_no_follow(snapshots_dir)
-    try:
-        sys.exit(0 if remove_tree_at(root_fd, snapshot_name) else 1)
-    finally:
-        os.close(root_fd)
-
-
-if __name__ == "__main__":
-    try:
-        main()
-    except Exception:
-        fail()
-`;
 
 function compactTimestamp(): string {
   return new Date()
@@ -153,17 +47,17 @@ function compactTimestamp(): string {
  *
  * Mirrors the pattern from src/lib/config-io.ts (PR #2290).
  */
-function rejectSymlinksOnPath(targetPath: string, options: { stopAt?: string } = {}): void {
-  const resolvedBoundary = resolve(options.stopAt ?? HOME);
+function rejectSymlinksOnPath(targetPath: string): void {
+  const resolvedHome = resolve(HOME);
   const resolved = resolve(targetPath);
 
-  const relToBoundary = relative(resolvedBoundary, resolved);
-  if (relToBoundary === "" || relToBoundary.startsWith("..") || isAbsolute(relToBoundary)) {
+  const relToHome = relative(resolvedHome, resolved);
+  if (relToHome === "" || relToHome.startsWith("..") || isAbsolute(relToHome)) {
     return;
   }
 
   let current = resolved;
-  while (current !== resolvedBoundary && current !== dirname(current)) {
+  while (current !== resolvedHome && current !== dirname(current)) {
     try {
       const stat = lstatSync(current);
       if (stat.isSymbolicLink()) {
@@ -394,142 +288,10 @@ export function rollbackFromSnapshot(snapshotDir: string): boolean {
   }
 }
 
-// Named BlueprintSnapshotManifest to avoid collision with migration-state.ts SnapshotManifest
-export interface BlueprintSnapshotManifest {
-  timestamp: string;
-  source: string;
-  file_count: number;
-  contents: string[];
-  path: string;
-}
-
-type SnapshotManifestJson = {
-  timestamp?: string;
-  source?: string;
-  file_count?: number;
-  contents?: Array<string | null>;
-};
-
-function isSnapshotManifestJson(value: object | null): value is SnapshotManifestJson {
-  return value !== null && !Array.isArray(value);
-}
-
-function readStringArray(value: SnapshotManifestJson["contents"]): string[] {
-  return Array.isArray(value)
-    ? value.filter((entry): entry is string => typeof entry === "string")
-    : [];
-}
-
-function snapshotNameFromPath(snapshotPath: string): string | null {
-  const relToSnapshots = relative(resolve(SNAPSHOTS_DIR), resolve(snapshotPath));
-  if (relToSnapshots === "" || relToSnapshots.startsWith("..") || isAbsolute(relToSnapshots)) {
-    return null;
-  }
-  const parts = relToSnapshots.split(/[\\/]+/);
-  if (parts.length !== 1 || !SNAPSHOT_DIR_NAME_RE.test(parts[0] ?? "")) {
-    return null;
-  }
-  return parts[0] ?? null;
-}
-
-export function deleteSnapshot(snapshotPath: string): boolean {
-  const snapshotName = snapshotNameFromPath(snapshotPath);
-  if (snapshotName === null) {
-    return false;
-  }
-  if (process.platform === "win32") {
-    // The dir_fd/O_NOFOLLOW deletion primitive is POSIX-only. WSL uses the
-    // Linux path; native Windows fails closed until it has an equivalent.
-    return false;
-  }
-
-  const result = spawnSync(
-    "python3",
-    ["-I", "-c", SNAPSHOT_DELETE_HELPER, SNAPSHOTS_DIR, snapshotName],
-    {
-      encoding: "utf-8",
-      env: buildSubprocessEnv(),
-      maxBuffer: 1024 * 1024,
-      timeout: 30_000,
-    },
-  );
-  return result.status === 0;
-}
-
-export function isSnapshotPathInsideSnapshotsDir(snapshotPath: string): boolean {
-  return snapshotNameFromPath(snapshotPath) !== null;
-}
-
-function readSnapshotManifest(
-  snapDir: string,
-  snapshotName: string,
-): BlueprintSnapshotManifest | null {
-  try {
-    const parsed: unknown = JSON.parse(readFileSync(join(snapDir, "snapshot.json"), "utf-8"));
-    const raw = typeof parsed === "object" && parsed !== null ? parsed : null;
-    if (!isSnapshotManifestJson(raw) || raw.timestamp !== snapshotName) {
-      return null;
-    }
-    return {
-      timestamp: snapshotName,
-      source: typeof raw.source === "string" ? raw.source : "",
-      file_count: typeof raw.file_count === "number" ? raw.file_count : 0,
-      contents: readStringArray(raw.contents),
-      path: snapDir,
-    };
-  } catch {
-    return null;
-  }
-}
-
-export function pruneSnapshots(keep: number): {
-  deleted: string[];
-  kept: string[];
-  failed: string[];
-} {
-  if (!Number.isInteger(keep) || keep < 0) {
-    return { deleted: [], kept: [], failed: [] };
-  }
-  const snapshots = listSnapshots();
-  if (snapshots.length <= keep) {
-    return { deleted: [], kept: snapshots.map((s) => s.path), failed: [] };
-  }
-
-  const toDelete = snapshots.slice(keep);
-  const toKeep = snapshots.slice(0, keep);
-
-  const deleted: string[] = [];
-  const failed: string[] = [];
-  for (const snap of toDelete) {
-    if (deleteSnapshot(snap.path)) {
-      deleted.push(snap.path);
-    } else {
-      failed.push(snap.path);
-    }
-  }
-
-  return { deleted, kept: toKeep.map((s) => s.path), failed };
-}
-
-export function listSnapshots(): BlueprintSnapshotManifest[] {
-  let entries: Dirent[];
-  try {
-    entries = readdirSync(SNAPSHOTS_DIR, { withFileTypes: true });
-  } catch {
-    return [];
-  }
-
-  const snapshots: BlueprintSnapshotManifest[] = [];
-  for (const entry of entries) {
-    if (!entry.isDirectory() || !SNAPSHOT_DIR_NAME_RE.test(entry.name)) {
-      continue;
-    }
-    const snapDir = join(SNAPSHOTS_DIR, entry.name);
-    const manifest = readSnapshotManifest(snapDir, entry.name);
-    if (manifest !== null) {
-      snapshots.push(manifest);
-    }
-  }
-
-  return snapshots.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-}
+export {
+  deleteSnapshot,
+  isSnapshotPathInsideSnapshotsDir,
+  listSnapshots,
+  pruneSnapshots,
+} from "./snapshot-management.js";
+export type { BlueprintSnapshotManifest } from "./snapshot-management.js";

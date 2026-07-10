@@ -109,6 +109,28 @@ describe("snapshot real filesystem safety", () => {
   );
 
   it.skipIf(process.platform === "win32")(
+    "ignores symlinked snapshot entries during prune without touching the outside target",
+    async () => {
+      const home = fs.mkdtempSync(path.join(REAL_TMP, "nemoclaw-snapshot-home-"));
+      const outside = fs.mkdtempSync(path.join(REAL_TMP, "nemoclaw-snapshot-outside-"));
+      tempRoots.push(home, outside);
+
+      const snapshotsDir = path.join(home, ".nemoclaw", "snapshots");
+      const newer = writeSnapshot(snapshotsDir, "20990201T000000Z");
+      const outsideFile = path.join(outside, "keep.txt");
+      const symlinkedSnapshot = path.join(snapshotsDir, "20990101T000000Z");
+      fs.writeFileSync(outsideFile, "outside target must survive");
+      fs.symlinkSync(outside, symlinkedSnapshot, "dir");
+
+      const { pruneSnapshots } = await loadSnapshotModule(home);
+
+      expect(pruneSnapshots(1)).toEqual({ deleted: [], kept: [newer], failed: [] });
+      expect(fs.readFileSync(outsideFile, "utf8")).toBe("outside target must survive");
+      expect(fs.lstatSync(symlinkedSnapshot).isSymbolicLink()).toBe(true);
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
     "isolates the deletion helper from Python startup hooks and ambient secrets",
     async () => {
       const home = fs.mkdtempSync(path.join(REAL_TMP, "nemoclaw-snapshot-home-"));
