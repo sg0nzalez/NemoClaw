@@ -115,6 +115,18 @@ function rootGatewayLifecycleFunctions(src: string, gatewayLog: string): string 
   ].join("\n");
 }
 
+function gatewayLaunchBlock(src: string, kind: "non-root" | "root", gatewayLog: string): string {
+  const startMarker =
+    kind === "non-root"
+      ? "# Start gateway in background, auto-pair, then wait"
+      : "# Start the gateway as the 'gateway' user.";
+  const start = src.indexOf(startMarker);
+  const end = src.indexOf('SANDBOX_WAIT_PID="$GATEWAY_PID"', start);
+  expect(start, `Expected ${kind} gateway launch block in scripts/nemoclaw-start.sh`).not.toBe(-1);
+  expect(end, `Expected ${kind} gateway launch block in scripts/nemoclaw-start.sh`).not.toBe(-1);
+  return src.slice(start, src.indexOf("\n", end)).replaceAll("/tmp/gateway.log", gatewayLog);
+}
+
 // Drive the watchdog end-to-end against a real background process standing in
 // for the gateway. `curlPlan` is the sequence of curl exit codes the stubbed
 // probe returns, one per watchdog cycle; the last entry repeats forever.
@@ -1042,20 +1054,6 @@ describe("gateway launch wiring (#4710)", () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  function launchBlock(src: string, kind: "non-root" | "root"): string {
-    const startMarker =
-      kind === "non-root"
-        ? "# Start gateway in background, auto-pair, then wait"
-        : "# Start the gateway as the 'gateway' user.";
-    const start = src.indexOf(startMarker);
-    const trap = src.indexOf("trap cleanup_openclaw_on_signal SIGTERM SIGINT", start);
-    expect(start, `Expected ${kind} gateway launch block in scripts/nemoclaw-start.sh`).not.toBe(
-      -1,
-    );
-    expect(trap, `Expected ${kind} gateway launch block in scripts/nemoclaw-start.sh`).not.toBe(-1);
-    return src.slice(start, src.indexOf("\n", trap));
-  }
-
   function runLaunchWiring(kind: "non-root" | "root") {
     const src = fs.readFileSync(START_SCRIPT, "utf-8");
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `nemoclaw-launch-wiring-${kind}-`));
@@ -1108,7 +1106,8 @@ describe("gateway launch wiring (#4710)", () => {
         "STEP_DOWN_PREFIX_SANDBOX=(gosu sandbox)",
         "STEP_DOWN_PREFIX_GATEWAY=(gosu gateway)",
         realFunctions,
-        launchBlock(src, kind).replaceAll("/tmp/gateway.log", gatewayLog),
+        gatewayLaunchBlock(src, kind, gatewayLog),
+        `if [ -f ${JSON.stringify(markerPath)} ]; then printf "MARKER_PRESENT=1\\n"; fi`,
         `for _ in $(command seq 1 100); do [ -s ${JSON.stringify(openclawLog)} ] && break; command sleep 0.1; done`,
         'printf "GATEWAY_PID=%s\\n" "$GATEWAY_PID"',
         'printf "WATCHDOG_PID=%s\\n" "${GATEWAY_WATCHDOG_PID:-}"',
@@ -1126,9 +1125,19 @@ describe("gateway launch wiring (#4710)", () => {
     const watchdogPid = stdout.match(/^WATCHDOG_PID=(\d+)$/m)?.[1];
     const childPids = (stdout.match(/^CHILD_PIDS=(.+)$/m)?.[1] ?? "").split(/\s+/);
     const pidFileContent = readFileIfPresent(pidFile)?.trim() ?? null;
+    const markerPresent = stdout.includes("MARKER_PRESENT=1");
     const markerExists = readFileIfPresent(markerPath) !== null;
     fs.rmSync(tmpDir, { recursive: true, force: true });
-    return { result, stdout, gatewayPid, watchdogPid, childPids, pidFileContent, markerExists };
+    return {
+      result,
+      stdout,
+      gatewayPid,
+      watchdogPid,
+      childPids,
+      pidFileContent,
+      markerPresent,
+      markerExists,
+    };
   }
 
   it.each([
@@ -1137,6 +1146,7 @@ describe("gateway launch wiring (#4710)", () => {
   ] as const)("%s launch clears the marker on supervisor exit after recording the gateway PID", (kind) => {
     const run = runLaunchWiring(kind);
     expect(run.result.status, `script failed: ${run.result.stderr}`).toBe(0);
+    expect(run.markerPresent).toBe(true);
     // The supervisor EXIT trap clears the in-container marker when this fixture
     // exits, returning healthchecks to the marker-absent branch (#4952).
     expect(run.markerExists).toBe(false);
@@ -1364,21 +1374,6 @@ describe("respawn loop pidfile refresh (#4710)", () => {
 describe("nemoclaw-start gateway launch signal handling", () => {
   const src = fs.readFileSync(START_SCRIPT, "utf-8");
 
-  function launchBlock(kind: "non-root" | "root", gatewayLog: string): string {
-    const startMarker =
-      kind === "non-root"
-        ? "# Start gateway in background, auto-pair, then wait"
-        : "# Start the gateway as the 'gateway' user.";
-    const start = src.indexOf(startMarker);
-    const trap = src.indexOf("trap cleanup_openclaw_on_signal SIGTERM SIGINT", start);
-    expect(start, `Expected ${kind} gateway launch block in scripts/nemoclaw-start.sh`).not.toBe(
-      -1,
-    );
-    expect(trap, `Expected ${kind} gateway launch block in scripts/nemoclaw-start.sh`).not.toBe(-1);
-    const lineEnd = src.indexOf("\n", trap);
-    return src.slice(start, lineEnd).replaceAll("/tmp/gateway.log", gatewayLog);
-  }
-
   function runLaunchBlock(kind: "non-root" | "root") {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `nemoclaw-launch-${kind}-`));
     const fakeBin = path.join(tmpDir, "bin");
@@ -1430,7 +1425,7 @@ describe("nemoclaw-start gateway launch signal handling", () => {
         rootGatewayLifecycleFunctions(src, gatewayLog),
         "STEP_DOWN_PREFIX_SANDBOX=(gosu sandbox)",
         "STEP_DOWN_PREFIX_GATEWAY=(gosu gateway)",
-        launchBlock(kind, gatewayLog),
+        gatewayLaunchBlock(src, kind, gatewayLog),
         kind === "root"
           ? `for _ in ${waitForLaunchLogIterations}; do [ -s ${JSON.stringify(gosuLog)} ] && [ -s ${JSON.stringify(openclawLog)} ] && break; sleep 0.1; done`
           : `for _ in ${waitForLaunchLogIterations}; do [ -s ${JSON.stringify(openclawLog)} ] && break; sleep 0.1; done`,

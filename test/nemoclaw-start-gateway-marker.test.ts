@@ -76,6 +76,17 @@ function nonRootInitialGatewayLaunchSnippet(src: string): string {
   );
 }
 
+function rootInitialGatewayLaunchSnippet(src: string): string {
+  return (
+    src.match(
+      /# Start the gateway as the 'gateway' user\.[\s\S]*?^launch_openclaw_gateway$/mu,
+    )?.[0] ??
+    (() => {
+      throw new Error("Expected root initial gateway launch block in scripts/nemoclaw-start.sh");
+    })()
+  );
+}
+
 describe("nemoclaw-start in-container gateway healthcheck marker (#4503, #4710)", () => {
   // #4503/#4710: the Docker HEALTHCHECK reports healthy on curl-exit-7 only
   // when the /tmp/nemoclaw-gateway-local marker is ABSENT (gateway delivered
@@ -401,6 +412,48 @@ describe("nemoclaw-start in-container gateway healthcheck marker (#4503, #4710)"
         timeout: 5000,
       });
       expect(result.status).toBe(1);
+      expect(fs.existsSync(markerPath)).toBe(false);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    { label: "non-root", signal: "TERM", exitCode: 143 },
+    { label: "non-root", signal: "INT", exitCode: 130 },
+    { label: "root", signal: "TERM", exitCode: 143 },
+    { label: "root", signal: "INT", exitCode: 130 },
+  ])("arms $signal cleanup before the $label marker write (#4952)", ({
+    label,
+    signal,
+    exitCode,
+  }) => {
+    const src = fs.readFileSync(START_SCRIPT, "utf-8");
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-gw-early-signal-"));
+    const markerPath = path.join(tmpDir, "nemoclaw-gateway-local");
+    const clearFn = extractShellFunctionFromSource(
+      src,
+      "clear_in_container_gateway_marker",
+    ).replaceAll("/tmp/nemoclaw-gateway-local", markerPath);
+    const launch =
+      label === "root"
+        ? [
+            extractShellFunctionFromSource(src, "launch_openclaw_gateway"),
+            rootInitialGatewayLaunchSnippet(src),
+          ].join("\n")
+        : nonRootInitialGatewayLaunchSnippet(src);
+
+    try {
+      const script = [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+        clearFn,
+        `cleanup_openclaw_on_signal() { exit ${exitCode}; }`,
+        `mark_in_container_gateway() { : > ${JSON.stringify(markerPath)}; kill -${signal} $$; }`,
+        launch,
+      ].join("\n");
+      const result = spawnSync("bash", ["-c", script], { encoding: "utf-8", timeout: 5000 });
+      expect(result.status, result.stderr).toBe(exitCode);
       expect(fs.existsSync(markerPath)).toBe(false);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });

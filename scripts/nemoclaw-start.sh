@@ -3964,7 +3964,9 @@ GUARDENVEOF
 # cleanup_on_signal is provided by sandbox-init.sh. It reads
 # SANDBOX_CHILD_PIDS (array of all PIDs) and SANDBOX_WAIT_PID (the
 # primary process whose exit status is returned).
-# Each code path below sets these before registering the trap.
+# Each code path arms the trap before launching the gateway. These values are
+# populated as children start; cleanup refreshes and validates them before
+# signaling anything.
 
 # Keep per-user rc files out of runtime proxy wiring. Older images and prior
 # entrypoint versions wrote a two-line shim into .bashrc/.profile; remove that
@@ -5417,8 +5419,10 @@ if [ "$(id -u)" -ne 0 ]; then
   # to healthy — see the mark_in_container_gateway comment near the top of this
   # file for the #4710 rationale (why the marker is tied to the launch site
   # rather than an env-var conditional at startup).
-  # Arm marker cleanup before marking so early launch failures cannot leave the
-  # healthcheck trusting a stale pidfile in a surviving docker-driver container.
+  # Arm signal and marker cleanup before marking. Bash does not run an EXIT
+  # trap when an untrapped SIGTERM/SIGINT terminates the shell, so both traps
+  # must precede the first marker write.
+  trap cleanup_openclaw_on_signal SIGTERM SIGINT
   trap clear_in_container_gateway_marker EXIT
   mark_in_container_gateway
   nohup "$OPENCLAW" gateway run --port "${_DASHBOARD_PORT}" >/tmp/gateway.log 2>&1 &
@@ -5443,7 +5447,6 @@ if [ "$(id -u)" -ne 0 ]; then
   refresh_openclaw_supervised_child_pids
   # shellcheck disable=SC2034  # read by cleanup_on_signal from sandbox-init.sh
   SANDBOX_WAIT_PID="$GATEWAY_PID"
-  trap cleanup_openclaw_on_signal SIGTERM SIGINT
   print_dashboard_urls
 
   # Auto-respawn gateway on unexpected death (NVIDIA/NemoClaw#2757). Without
@@ -5648,6 +5651,9 @@ validate_nemoclaw_tmp_permissions
 # Marking, privilege step-down, log redirection, and PID recording are kept in
 # one reusable launch primitive so PID 1 owns initial start, crash respawn, and
 # host-requested restart identically.
+# Arm signal cleanup before the launch primitive writes the marker. The
+# primitive itself arms the EXIT cleanup before marking.
+trap cleanup_openclaw_on_signal SIGTERM SIGINT
 launch_openclaw_gateway
 
 # Diagnostic: mirror gateway log to PID 1's stderr so its content surfaces in
@@ -5697,7 +5703,6 @@ start_gateway_serving_watchdog
 refresh_openclaw_supervised_child_pids
 # shellcheck disable=SC2034  # read by cleanup_on_signal from sandbox-init.sh
 SANDBOX_WAIT_PID="$GATEWAY_PID"
-trap cleanup_openclaw_on_signal SIGTERM SIGINT
 if ! gateway_control_init; then
   echo "[gateway-control] privileged gateway control unavailable" >&2
 fi
