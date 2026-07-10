@@ -51,4 +51,45 @@ describe("provider inference recovery gating", () => {
       expect.any(Function),
     );
   });
+
+  it("allows recovery for a registered sandbox", async () => {
+    const { deps, calls } = createDeps({ hasRegisteredSandbox: () => true });
+
+    await handleProviderInferenceState({
+      ...baseOptions(deps),
+      sandboxName: "dc-after",
+    });
+
+    expect(calls.setupNim).toHaveBeenCalledWith(
+      { type: "nvidia" },
+      "dc-after",
+      null,
+      true,
+      "nemoclaw",
+      expect.any(Function),
+      expect.any(Function),
+    );
+  });
+
+  it("allows recovery for a matching completed session sandbox", async () => {
+    const session = createSession();
+    session.sandboxName = "dc-after";
+    session.steps.sandbox.status = "complete";
+    const { deps, calls } = createDeps();
+
+    await handleProviderInferenceState({
+      ...baseOptions(deps, session),
+      sandboxName: "dc-after",
+    });
+
+    expect(calls.setupNim).toHaveBeenCalledWith(
+      { type: "nvidia" },
+      "dc-after",
+      null,
+      true,
+      "nemoclaw",
+      expect.any(Function),
+      expect.any(Function),
+    );
+  });
 });

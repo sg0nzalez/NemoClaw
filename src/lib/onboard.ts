@@ -4416,9 +4416,15 @@ async function runOnboard(opts: OnboardOptions = {}): Promise<void> {
       console.error("  Start a fresh onboard with --name <sandbox> to choose a different name.");
       process.exit(1);
     }
-
-    // biome-ignore format: keep src/lib/onboard.ts net-neutral for growth guardrail.
-    const coreFlowContext: InitialOnboardFlowContext = { ...initialContext, session, sandboxName, selectedMessagingChannels, gpu, sandboxGpuConfig, gpuPassthrough };
+    const coreFlowContext: InitialOnboardFlowContext = {
+      ...initialContext,
+      session,
+      sandboxName,
+      selectedMessagingChannels,
+      gpu,
+      sandboxGpuConfig,
+      gpuPassthrough,
+    };
     // biome-ignore format: keep src/lib/onboard.ts net-neutral for growth guardrail.
     const runCoreGatewayOpenshell = setupInferenceFactory.createGatewayScopedOpenshellRunner(runOpenshell, GATEWAY_NAME);
     const [providerInferencePhase, sandboxPhase] =
