@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createSession } from "../../../state/onboard-session";
 import type { SandboxEntry } from "../../../state/registry";
-import { hasRecoverableSandboxIdentity } from "../../provider-recovery";
+import { isRecoverableSandboxIdentity } from "../../provider-recovery";
 import { handleProviderInferenceState } from "./provider-inference";
 import { baseOptions, createDeps } from "./provider-inference.test-support";
 
@@ -89,7 +89,7 @@ describe("provider inference recovery gating", () => {
       ...(reservationSessionId ? { reservationSessionId } : {}),
     };
     const hasIdentity = vi.fn((_name: string, sessionId: string | null | undefined) =>
-      hasRecoverableSandboxIdentity(entry, sessionId),
+      isRecoverableSandboxIdentity(entry, sessionId),
     );
     const { deps, calls } = createDeps({ hasRecoverableSandboxIdentity: hasIdentity });
 
@@ -120,7 +120,7 @@ describe("provider inference recovery gating", () => {
       reservationSessionId: session.sessionId,
     };
     const hasIdentity = vi.fn((_name: string, sessionId: string | null | undefined) =>
-      hasRecoverableSandboxIdentity(entry, sessionId),
+      isRecoverableSandboxIdentity(entry, sessionId),
     );
     const { deps, calls } = createDeps({ hasRecoverableSandboxIdentity: hasIdentity });
 

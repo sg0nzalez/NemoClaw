@@ -66,7 +66,7 @@ const MAX_LIVE_PROVIDER_LENGTH = 128;
 const MAX_LIVE_MODEL_LENGTH = 512;
 const SAFE_LIVE_PROVIDER = /^[A-Za-z0-9._:-]+$/;
 
-export function hasRecoverableSandboxIdentity(
+export function isRecoverableSandboxIdentity(
   entry: registry.SandboxEntry | null,
   sessionId: string | null | undefined,
 ): boolean {
@@ -75,6 +75,13 @@ export function hasRecoverableSandboxIdentity(
       (entry.pendingRouteReservation !== true ||
         registry.isPendingReservationForSession(entry, sessionId)),
   );
+}
+
+export function hasRecoverableSandboxIdentity(
+  sandboxName: string,
+  sessionId: string | null | undefined,
+): boolean {
+  return isRecoverableSandboxIdentity(registry.getSandbox(sandboxName), sessionId);
 }
 
 export function shouldRecoverRecordedProvider(input: {

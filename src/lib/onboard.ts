@@ -4441,8 +4441,7 @@ async function runOnboard(opts: OnboardOptions = {}): Promise<void> {
         providerDeps: {
           checkGatewayRouteCompatibility,
           preflightGatewayRouteDiscovery,
-          hasRecoverableSandboxIdentity: (name, sessionId) =>
-            providerRecovery.hasRecoverableSandboxIdentity(registry.getSandbox(name), sessionId),
+          hasRecoverableSandboxIdentity: providerRecovery.hasRecoverableSandboxIdentity,
           withGatewayRouteMutationLock: gatewayRouteMutationLock.withGatewayRouteMutationLock,
           normalizeHermesAuthMethod,
           setupNim: (g, s, a, recover, gateway, assertRouteCompatible, canProbeRoute) =>

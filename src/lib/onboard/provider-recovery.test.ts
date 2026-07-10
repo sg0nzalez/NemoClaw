@@ -8,6 +8,7 @@ import * as registry from "../state/registry";
 import {
   createProviderRecoveryHelpers,
   hasRecoverableSandboxIdentity,
+  isRecoverableSandboxIdentity,
   shouldRecoverRecordedProvider,
   validateLiveGatewayInference,
 } from "./provider-recovery";
@@ -106,7 +107,7 @@ describe("shouldRecoverRecordedProvider", () => {
   });
 });
 
-describe("hasRecoverableSandboxIdentity", () => {
+describe("recoverable sandbox identity", () => {
   const pending = (reservationSessionId?: string): registry.SandboxEntry => ({
     name: "dc-after",
     pendingRouteReservation: true,
@@ -140,7 +141,14 @@ describe("hasRecoverableSandboxIdentity", () => {
       expected: true,
     },
   ])("classifies $label (#6630)", ({ entry, sessionId, expected }) => {
-    expect(hasRecoverableSandboxIdentity(entry, sessionId)).toBe(expected);
+    expect(isRecoverableSandboxIdentity(entry, sessionId)).toBe(expected);
+  });
+
+  it("loads the named registry row before applying session ownership (#6630)", () => {
+    vi.spyOn(registry, "getSandbox").mockReturnValue(pending("session-current"));
+
+    expect(hasRecoverableSandboxIdentity("dc-after", "session-current")).toBe(true);
+    expect(registry.getSandbox).toHaveBeenCalledWith("dc-after");
   });
 });
 
