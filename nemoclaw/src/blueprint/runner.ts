@@ -1053,7 +1053,11 @@ export function actionSnapshots(argv: string[]): void {
           if (!/^(?:0|[1-9]\d*)$/.test(val)) {
             throw new Error("--keep must be a non-negative integer");
           }
-          keep = Number.parseInt(val, 10);
+          const parsedKeep = Number.parseInt(val, 10);
+          if (!Number.isSafeInteger(parsedKeep)) {
+            throw new Error("--keep must be a non-negative integer");
+          }
+          keep = parsedKeep;
         }
       }
       if (keep < 0) throw new Error("--keep is required for prune");

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -9,6 +10,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const tempRoots: string[] = [];
 const REAL_TMP = fs.realpathSync(os.tmpdir());
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", `'"'"'`)}'`;
+}
 
 async function loadSnapshotModule(home: string): Promise<typeof import("./snapshot.js")> {
   vi.resetModules();
@@ -20,6 +25,7 @@ async function loadSnapshotModule(home: string): Promise<typeof import("./snapsh
 
 afterEach(() => {
   vi.doUnmock("node:os");
+  vi.unstubAllEnvs();
   vi.resetModules();
   for (const root of tempRoots.splice(0)) {
     fs.rmSync(root, { recursive: true, force: true });
@@ -99,6 +105,77 @@ describe("snapshot real filesystem safety", () => {
       expect(deleteSnapshot(symlinkedSnapshot)).toBe(false);
       expect(fs.readFileSync(outsideFile, "utf8")).toBe("outside target must survive");
       expect(fs.lstatSync(symlinkedSnapshot).isSymbolicLink()).toBe(true);
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "isolates the deletion helper from Python startup hooks and ambient secrets",
+    async () => {
+      const home = fs.mkdtempSync(path.join(REAL_TMP, "nemoclaw-snapshot-home-"));
+      const attackDir = fs.mkdtempSync(path.join(REAL_TMP, "nemoclaw-python-attack-"));
+      tempRoots.push(home, attackDir);
+
+      const snapshotsDir = path.join(home, ".nemoclaw", "snapshots");
+      const snapshotDir = writeSnapshot(snapshotsDir, "20990101T000000Z");
+      const startupMarker = path.join(attackDir, "sitecustomize-loaded");
+      const envProbe = path.join(attackDir, "helper-env");
+      const sentinelSecret = "snapshot-secret-must-not-reach-python";
+      fs.writeFileSync(
+        path.join(attackDir, "sitecustomize.py"),
+        [
+          "import os",
+          "from pathlib import Path",
+          `Path(${JSON.stringify(startupMarker)}).write_text(os.environ.get("NEMOCLAW_SNAPSHOT_TEST_SECRET", "missing"))`,
+        ].join("\n"),
+      );
+
+      const pythonPath = spawnSync(
+        "python3",
+        ["-I", "-c", "import os, sys; print(os.path.realpath(sys.executable))"],
+        { encoding: "utf-8" },
+      );
+      expect(pythonPath.status, pythonPath.stderr).toBe(0);
+      const realPython = pythonPath.stdout.trim();
+
+      const vulnerable = spawnSync(realPython, ["-c", "pass"], {
+        encoding: "utf-8",
+        env: {
+          ...process.env,
+          NEMOCLAW_SNAPSHOT_TEST_SECRET: sentinelSecret,
+          PYTHONPATH: attackDir,
+        },
+      });
+      expect(vulnerable.status, vulnerable.stderr).toBe(0);
+      expect(fs.readFileSync(startupMarker, "utf-8")).toBe(sentinelSecret);
+      fs.rmSync(startupMarker);
+
+      const wrapperBin = path.join(attackDir, "bin");
+      const pythonWrapper = path.join(wrapperBin, "python3");
+      fs.mkdirSync(wrapperBin);
+      fs.writeFileSync(
+        pythonWrapper,
+        [
+          "#!/bin/sh",
+          `printf '%s\\n%s\\n%s\\n' "\${PYTHONPATH-__unset__}" "\${NEMOCLAW_SNAPSHOT_TEST_SECRET-__unset__}" "\${1-__unset__}" > ${shellQuote(envProbe)}`,
+          `exec ${shellQuote(realPython)} "$@"`,
+        ].join("\n"),
+        { mode: 0o755 },
+      );
+
+      vi.stubEnv("NEMOCLAW_SNAPSHOT_TEST_SECRET", sentinelSecret);
+      vi.stubEnv("PYTHONPATH", attackDir);
+      vi.stubEnv("PATH", `${wrapperBin}${path.delimiter}${process.env.PATH ?? ""}`);
+
+      const { deleteSnapshot } = await loadSnapshotModule(home);
+
+      expect(deleteSnapshot(snapshotDir)).toBe(true);
+      expect(fs.existsSync(snapshotDir)).toBe(false);
+      expect(fs.existsSync(startupMarker)).toBe(false);
+      expect(fs.readFileSync(envProbe, "utf-8").trim().split("\n")).toEqual([
+        "__unset__",
+        "__unset__",
+        "-I",
+      ]);
     },
   );
 });

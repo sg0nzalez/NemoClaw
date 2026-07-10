@@ -30,6 +30,8 @@ import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 import { execa } from "execa";
 
+import { buildSubprocessEnv } from "../lib/subprocess-env.js";
+
 const HOME = homedir();
 const OPENCLAW_DIR = join(HOME, ".openclaw");
 const NEMOCLAW_DIR = join(HOME, ".nemoclaw");
@@ -436,14 +438,21 @@ export function deleteSnapshot(snapshotPath: string): boolean {
     return false;
   }
   if (process.platform === "win32") {
+    // The dir_fd/O_NOFOLLOW deletion primitive is POSIX-only. WSL uses the
+    // Linux path; native Windows fails closed until it has an equivalent.
     return false;
   }
 
-  const result = spawnSync("python3", ["-c", SNAPSHOT_DELETE_HELPER, SNAPSHOTS_DIR, snapshotName], {
-    encoding: "utf-8",
-    maxBuffer: 1024 * 1024,
-    timeout: 30_000,
-  });
+  const result = spawnSync(
+    "python3",
+    ["-I", "-c", SNAPSHOT_DELETE_HELPER, SNAPSHOTS_DIR, snapshotName],
+    {
+      encoding: "utf-8",
+      env: buildSubprocessEnv(),
+      maxBuffer: 1024 * 1024,
+      timeout: 30_000,
+    },
+  );
   return result.status === 0;
 }
 

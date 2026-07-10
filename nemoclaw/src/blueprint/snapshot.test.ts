@@ -154,10 +154,12 @@ vi.mock("node:child_process", () => ({
   spawnSync: vi.fn((_command: string, args: string[]) => {
     const failed = { status: 1, stderr: "" };
     const passed = { status: 0, stderr: "" };
-    const snapshotName = args[3];
-    const snapshotsDir = args[2];
+    const snapshotName = args[4];
+    const snapshotsDir = args[3];
     const invalidRequest =
       snapshotDeleteHelperFails ||
+      args[0] !== "-I" ||
+      args[1] !== "-c" ||
       snapshotsDir !== MOCK_SNAPSHOTS_DIR ||
       typeof snapshotName !== "string" ||
       snapshotName.includes("/");
@@ -900,11 +902,8 @@ describe("snapshot", () => {
       expect(() => actionSnapshots(argv)).toThrow();
     });
 
-    it("prune rejects --keep with non-numeric suffix", () => {
-      expect(() => actionSnapshots(["prune", "--keep", "3abc"])).toThrow(
-        "--keep must be a non-negative integer",
-      );
-      expect(() => actionSnapshots(["prune", "--keep", "1.5"])).toThrow(
+    it.each(["3abc", "1.5", "9".repeat(400)])("prune rejects invalid --keep value %s", (keep) => {
+      expect(() => actionSnapshots(["prune", "--keep", keep])).toThrow(
         "--keep must be a non-negative integer",
       );
     });
