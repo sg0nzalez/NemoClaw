@@ -302,6 +302,7 @@ describe("core onboard flow phases", () => {
       "nemoclaw",
       expect.any(Function),
       expect.any(Function),
+      expect.any(String),
     );
   });
 

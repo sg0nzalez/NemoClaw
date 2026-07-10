@@ -40,6 +40,7 @@ describe("handleProviderInferenceState", () => {
       "nemoclaw",
       expect.any(Function),
       expect.any(Function),
+      session.sessionId,
     );
     expect(calls.promptName).toHaveBeenCalledWith(null);
     expect(calls.log).toHaveBeenCalledWith("summary:nvidia-prod/nvidia/test/my-assistant");
@@ -325,6 +326,7 @@ describe("handleProviderInferenceState", () => {
       "nemoclaw",
       expect.any(Function),
       expect.any(Function),
+      session.sessionId,
     );
     expect(calls.setupInference).toHaveBeenCalled();
   });
@@ -1128,6 +1130,7 @@ describe("handleProviderInferenceState", () => {
       "nemoclaw",
       expect.any(Function),
       expect.any(Function),
+      expect.any(String),
     );
     expect(setupNim).toHaveBeenNthCalledWith(
       2,
@@ -1138,6 +1141,7 @@ describe("handleProviderInferenceState", () => {
       "nemoclaw",
       expect.any(Function),
       expect.any(Function),
+      expect.any(String),
     );
     expect(setupInference).toHaveBeenCalledTimes(2);
     expect(result.model).toBe("good");

@@ -278,11 +278,11 @@ describe("provider recovery persisted routing state", () => {
     );
     const recovery = helpers();
 
-    expect(recovery.readRecordedProvider("alpha")).toBeNull();
-    expect(recovery.readRecordedModel("alpha")).toBeNull();
-    expect(recovery.readRecordedEndpointUrl("alpha")).toBeNull();
-    expect(recovery.readRecordedNimContainer("alpha")).toBeNull();
-    expect(recovery.readRecordedInferenceRoute("alpha")).toBeNull();
+    expect(recovery.readRecordedProvider("alpha", "session-current")).toBeNull();
+    expect(recovery.readRecordedModel("alpha", "session-current")).toBeNull();
+    expect(recovery.readRecordedEndpointUrl("alpha", "session-current")).toBeNull();
+    expect(recovery.readRecordedNimContainer("alpha", "session-current")).toBeNull();
+    expect(recovery.readRecordedInferenceRoute("alpha", "session-current")).toBeNull();
   });
 
   it("allows the current session to read its pending route", () => {
@@ -299,13 +299,65 @@ describe("provider recovery persisted routing state", () => {
       onboardSession.createSession({ sessionId: "session-current", sandboxName: "alpha" }),
     );
 
-    expect(helpers().readRecordedInferenceRoute("alpha")).toEqual({
+    expect(helpers().readRecordedInferenceRoute("alpha", "session-current")).toEqual({
       provider: "compatible-endpoint",
       model: "registry-model",
       endpointUrl: "https://registry.example/v1",
       preferredInferenceApi: "openai-completions",
       source: "registry",
     });
+  });
+
+  it("uses the caller session identity instead of ambient on-disk session state", () => {
+    vi.spyOn(registry, "getSandbox").mockReturnValue({
+      name: "alpha",
+      pendingRouteReservation: true,
+      reservationSessionId: "session-caller",
+      provider: "compatible-endpoint",
+      model: "registry-model",
+      endpointUrl: "https://registry.example/v1",
+      preferredInferenceApi: "openai-completions",
+    });
+    const loadSession = vi
+      .spyOn(onboardSession, "loadSession")
+      .mockReturnValue(
+        onboardSession.createSession({ sessionId: "session-ambient", sandboxName: "alpha" }),
+      );
+    const recovery = helpers();
+
+    expect(recovery.readRecordedInferenceRoute("alpha", "session-caller")).toMatchObject({
+      model: "registry-model",
+      source: "registry",
+    });
+    expect(recovery.readRecordedInferenceRoute("alpha", "session-ambient")).toBeNull();
+    expect(loadSession).not.toHaveBeenCalled();
+  });
+
+  it("fails closed and warns when registry ownership cannot be read", () => {
+    const failure = new Error("registry unreadable");
+    vi.spyOn(registry, "getSandbox").mockImplementation(() => {
+      throw failure;
+    });
+    const loadSession = vi.spyOn(onboardSession, "loadSession").mockReturnValue(
+      onboardSession.createSession({
+        sandboxName: "alpha",
+        provider: "compatible-endpoint",
+        model: "stale-session-model",
+      }),
+    );
+    const warn = vi.fn();
+    const recovery = createProviderRecoveryHelpers({
+      parseGatewayInference: () => ({ provider: "compatible-endpoint", model: "live-model" }),
+      runCaptureOpenshell: () => "Gateway inference:",
+      warn,
+    });
+
+    expect(recovery.readRecordedProvider("alpha", "session-current")).toBeNull();
+    expect(recovery.readRecordedModel("alpha", "session-current")).toBeNull();
+    expect(recovery.readRecordedEndpointUrl("alpha", "session-current")).toBeNull();
+    expect(loadSession).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledTimes(3);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("refusing recovery"));
   });
 
   it("rejects a partial current registry route instead of mixing in stale session fields", () => {

@@ -44,6 +44,7 @@ export interface SetupNimRemoteSelectionArgs {
   recoveredModel: string | null;
   sandboxName: string | null;
   intendedInferenceApi: string | null;
+  recoverySessionId: string | null | undefined;
 }
 
 export type SetupNim = (
@@ -55,6 +56,7 @@ export type SetupNim = (
   gatewayName?: string | null,
   assertRouteCompatible?: (route: ProviderInferenceProbeRoute) => GatewayRouteDiscoveryConstraints,
   canProbeRoute?: (provider: string) => boolean,
+  recoverySessionId?: string | null,
 ) => Promise<ProviderSelectionResult>;
 
 export interface SetupNimFlowDeps {
@@ -77,9 +79,18 @@ export interface SetupNimFlowDeps {
   }): InferenceProviderHostState;
   getAgentInferenceProviderOptions(agent: AgentDefinition | null | undefined): string[];
   loadRoutedProfile(): { router?: { enabled?: boolean } } | null | undefined;
-  readRecordedProvider(sandboxName: string | null | undefined): string | null;
-  readRecordedNimContainer(sandboxName: string | null | undefined): string | null;
-  readRecordedModel(sandboxName: string | null | undefined): string | null;
+  readRecordedProvider(
+    sandboxName: string | null | undefined,
+    recoverySessionId?: string | null,
+  ): string | null;
+  readRecordedNimContainer(
+    sandboxName: string | null | undefined,
+    recoverySessionId?: string | null,
+  ): string | null;
+  readRecordedModel(
+    sandboxName: string | null | undefined,
+    recoverySessionId?: string | null,
+  ): string | null;
   rejectWindowsHostOllama(
     requirement: InferenceProviderHostState["windowsHostOllamaDockerRequirement"],
     providerKey: string,
@@ -238,6 +249,7 @@ function prepareProviderDiscovery(options: {
   rebuildRegistryInferenceRoute: RebuildRouteHandoff | null;
   assertRouteCompatible?: (route: ProviderInferenceProbeRoute) => GatewayRouteDiscoveryConstraints;
   canProbeRoute?: (provider: string) => boolean;
+  recoverySessionId: string | null | undefined;
 }): {
   requestedProvider: string | null;
   requestedModel: string | null;
@@ -252,6 +264,7 @@ function prepareProviderDiscovery(options: {
     rebuildRegistryInferenceRoute,
     assertRouteCompatible,
     canProbeRoute,
+    recoverySessionId,
   } = options;
   const nonInteractive = deps.isNonInteractive();
   const requestedProvider = deps.getNonInteractiveProvider();
@@ -265,7 +278,8 @@ function prepareProviderDiscovery(options: {
       : null;
   const recoveredProbeProvider =
     nonInteractive && !requestedProvider && recoverProvider
-      ? (recoveredRegistryRoute?.provider ?? deps.readRecordedProvider(sandboxName))
+      ? (recoveredRegistryRoute?.provider ??
+        deps.readRecordedProvider(sandboxName, recoverySessionId))
       : null;
   const recoveredProbeKey = providerNameToOptionKey(
     deps.remoteProviderConfig,
@@ -273,7 +287,7 @@ function prepareProviderDiscovery(options: {
     {
       hasNimContainer:
         recoveredProbeProvider === "vllm-local" &&
-        Boolean(deps.readRecordedNimContainer(sandboxName)),
+        Boolean(deps.readRecordedNimContainer(sandboxName, recoverySessionId)),
     },
   );
   const providerIntentKey =
@@ -283,7 +297,9 @@ function prepareProviderDiscovery(options: {
   if (guardedProvider && assertRouteCompatible) {
     const recoveredModel =
       recoveredRegistryRoute?.model ??
-      (!requestedProvider && recoverProvider ? deps.readRecordedModel(sandboxName) : null);
+      (!requestedProvider && recoverProvider
+        ? deps.readRecordedModel(sandboxName, recoverySessionId)
+        : null);
     assertRouteCompatible({
       provider: guardedProvider,
       model: requestedModel || recoveredModel,
@@ -322,6 +338,7 @@ export function createSetupNim(
       route: ProviderInferenceProbeRoute,
     ) => GatewayRouteDiscoveryConstraints,
     canProbeRoute?: (provider: string) => boolean,
+    recoverySessionId?: string | null,
   ): Promise<ProviderSelectionResult> {
     deps.step(3, 8, "Configuring inference provider");
 
@@ -392,6 +409,7 @@ export function createSetupNim(
         rebuildRegistryInferenceRoute,
         assertRouteCompatible,
         canProbeRoute,
+        recoverySessionId,
       });
     const providerHostState = deps.detectInferenceProviderHostState({
       gpu,
@@ -452,10 +470,11 @@ export function createSetupNim(
       );
     }
 
+    let recoveredFromSandbox = false;
     if (options.length > 1) {
       selectionLoop: while (true) {
         let selected: ProviderMenuChoice | undefined;
-        let recoveredFromSandbox = false;
+        recoveredFromSandbox = false;
         let recoveredModel: string | null = null;
         let preparedVllmState: SetupNimSelectionState | null = null;
         hermesAuthMethod = null;
@@ -471,11 +490,16 @@ export function createSetupNim(
             windowsHostOllamaSupported: windowsHostOllamaDockerRequirement.supported,
             hermesProviderAvailable,
             readRecordedProvider: recoverProvider
-              ? (name) => recoveredRegistryRoute?.provider ?? deps.readRecordedProvider(name)
+              ? (name) =>
+                  recoveredRegistryRoute?.provider ??
+                  deps.readRecordedProvider(name, recoverySessionId)
               : () => null,
-            readRecordedNimContainer: recoverProvider ? deps.readRecordedNimContainer : () => null,
+            readRecordedNimContainer: recoverProvider
+              ? (name) => deps.readRecordedNimContainer(name, recoverySessionId)
+              : () => null,
             readRecordedModel: recoverProvider
-              ? (name) => recoveredRegistryRoute?.model ?? deps.readRecordedModel(name)
+              ? (name) =>
+                  recoveredRegistryRoute?.model ?? deps.readRecordedModel(name, recoverySessionId)
               : () => null,
           });
           if (providerSelection.kind === "failure") {
@@ -522,6 +546,7 @@ export function createSetupNim(
               recoveredModel,
               sandboxName,
               gatewayName,
+              recoverySessionId,
               intendedInferenceApi: resolveValidationInferenceApi(
                 selected.key,
                 deps.remoteProviderConfig[selected.key].providerName,
@@ -718,6 +743,7 @@ export function createSetupNim(
       allowToolsIncompatible,
       skipHostInferenceSmoke: reuseGatewayCredential,
       reuseGatewayCredentialWithoutLocalKey: reuseGatewayCredential,
+      ...(recoveredFromSandbox ? { recoveredFromSandbox: true } : {}),
       ...(endpointPinnedAddresses ? { endpointPinnedAddresses } : {}),
     };
   };

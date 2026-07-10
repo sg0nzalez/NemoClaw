@@ -33,6 +33,7 @@ describe("provider inference recovery gating", () => {
       "nemoclaw",
       expect.any(Function),
       expect.any(Function),
+      expect.any(String),
     );
   });
 
@@ -54,6 +55,7 @@ describe("provider inference recovery gating", () => {
       "nemoclaw",
       expect.any(Function),
       expect.any(Function),
+      session.sessionId,
     );
   });
 
@@ -76,6 +78,7 @@ describe("provider inference recovery gating", () => {
       "nemoclaw",
       expect.any(Function),
       expect.any(Function),
+      expect.any(String),
     );
     expect(getAuthority).toHaveBeenCalledWith("dc-after", expect.any(String));
   });
@@ -113,6 +116,7 @@ describe("provider inference recovery gating", () => {
       "nemoclaw",
       expect.any(Function),
       expect.any(Function),
+      session.sessionId,
     );
     expect(getAuthority).toHaveBeenCalledWith("dc-after", session.sessionId);
   });
@@ -145,8 +149,70 @@ describe("provider inference recovery gating", () => {
       "nemoclaw",
       expect.any(Function),
       expect.any(Function),
+      session.sessionId,
     );
     expect(getAuthority).toHaveBeenCalledWith("dc-after", session.sessionId);
+  });
+
+  it("forces route setup and rechecks ownership after recorded selection (#6630)", async () => {
+    const session = createSession();
+    session.sandboxName = "dc-after";
+    session.steps.sandbox.status = "complete";
+    const persistedAfterSelection = createSession({ sessionId: "session-after-selection" });
+    let authority: "authorized" | "unauthorized" = "authorized";
+    const getAuthority = vi.fn((_name: string, sessionId: string | null | undefined) =>
+      sessionId === session.sessionId ? authority : "unauthorized",
+    );
+    const setupNim = vi.fn(async () => {
+      authority = "unauthorized";
+      return {
+        model: "nvidia/test",
+        provider: "nvidia-prod",
+        endpointUrl: "https://integrate.api.nvidia.com/v1",
+        credentialEnv: "NVIDIA_INFERENCE_API_KEY",
+        hermesAuthMethod: null,
+        hermesToolGateways: [],
+        preferredInferenceApi: "openai-responses",
+        compatibleEndpointReasoning: null,
+        nimContainer: null,
+        recoveredFromSandbox: true,
+      };
+    });
+    let setupInferenceCalls = 0;
+    const { deps } = createDeps({
+      getSandboxRecoveryAuthority: getAuthority,
+      setupNim,
+      setupInference: async (...args) => {
+        setupInferenceCalls += 1;
+        const options = args[7];
+        expect(options?.reservationSessionId).toBe(session.sessionId);
+        expect(options?.isRecordedProviderRecoveryAuthorized).toBeTypeOf("function");
+        expect(options?.isRecordedProviderRecoveryAuthorized?.()).toBe(false);
+        return { ok: true as const };
+      },
+      recordStepComplete: async () => persistedAfterSelection,
+      isInferenceRouteReady: () => true,
+    });
+
+    await handleProviderInferenceState({
+      ...baseOptions(deps, session),
+      resume: true,
+      sandboxName: "dc-after",
+    });
+
+    expect(setupNim).toHaveBeenCalledWith(
+      { type: "nvidia" },
+      "dc-after",
+      null,
+      true,
+      "nemoclaw",
+      expect.any(Function),
+      expect.any(Function),
+      session.sessionId,
+    );
+    expect(getAuthority).toHaveBeenNthCalledWith(1, "dc-after", session.sessionId);
+    expect(getAuthority).toHaveBeenLastCalledWith("dc-after", session.sessionId);
+    expect(setupInferenceCalls).toBe(1);
   });
 
   it("composes persisted route reservation ownership with resume recovery (#6626, #6630)", async () => {
@@ -213,6 +279,7 @@ describe("provider inference recovery gating", () => {
           "nemoclaw",
           expect.any(Function),
           expect.any(Function),
+          sessionId,
         );
       }
     } finally {
@@ -241,6 +308,7 @@ describe("provider inference recovery gating", () => {
       "nemoclaw",
       expect.any(Function),
       expect.any(Function),
+      session.sessionId,
     );
   });
 });

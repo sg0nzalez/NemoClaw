@@ -527,9 +527,9 @@ describe("createSetupNim", () => {
     const result = await setupNim(null, "existing-sandbox");
 
     expect(prompt).not.toHaveBeenCalled();
-    expect(readRecordedProvider).toHaveBeenCalledWith("existing-sandbox");
-    expect(readRecordedNimContainer).toHaveBeenCalledWith("existing-sandbox");
-    expect(readRecordedModel).toHaveBeenCalledWith("existing-sandbox");
+    expect(readRecordedProvider).toHaveBeenCalledWith("existing-sandbox", undefined);
+    expect(readRecordedNimContainer).toHaveBeenCalledWith("existing-sandbox", undefined);
+    expect(readRecordedModel).toHaveBeenCalledWith("existing-sandbox", undefined);
     expect(note).toHaveBeenCalledWith(
       "  [non-interactive] Provider: openai (recovered from sandbox 'existing-sandbox')",
     );
