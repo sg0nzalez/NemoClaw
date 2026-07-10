@@ -321,13 +321,6 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
   let reuseGatewayCredentialWithoutLocalKey = false;
   let endpointPinnedAddresses: string[] | undefined;
   const effectiveResume = resume && !fresh;
-  const recoverRecordedProvider = shouldRecoverRecordedProvider({
-    fresh,
-    resume,
-    sandboxName,
-    hasRegisteredSandbox: Boolean(sandboxName && deps.hasRegisteredSandbox(sandboxName)),
-    sessionSandboxName: session?.sandboxName ?? null,
-  });
   const stateResults: OnboardStateTransitionResult[] = [];
   const retryStateResults: OnboardStateTransitionResult[] = [];
 
@@ -448,6 +441,14 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
       }
     } else {
       await deps.startRecordedStep("provider_selection");
+      const recoverRecordedProvider = shouldRecoverRecordedProvider({
+        fresh,
+        resume,
+        sandboxName,
+        hasRegisteredSandbox: Boolean(sandboxName && deps.hasRegisteredSandbox(sandboxName)),
+        sessionSandboxName:
+          session?.steps?.sandbox?.status === "complete" ? (session.sandboxName ?? null) : null,
+      });
       const selection = await withProviderSelectionTrace(
         sandboxName,
         (agent as { name?: string } | null)?.name,

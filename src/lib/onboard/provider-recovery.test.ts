@@ -85,6 +85,15 @@ describe("shouldRecoverRecordedProvider", () => {
       expected: true,
     },
     {
+      label: "rejects gateway recovery when an incomplete session identity is not supplied",
+      fresh: false,
+      resume: false,
+      sandboxName: "dc-after",
+      hasRegisteredSandbox: false,
+      sessionSandboxName: null,
+      expected: false,
+    },
+    {
       label: "rejects gateway recovery when fresh overrides existing identity",
       fresh: true,
       resume: true,

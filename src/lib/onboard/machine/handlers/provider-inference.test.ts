@@ -293,46 +293,6 @@ describe("handleProviderInferenceState", () => {
     });
   });
 
-  it("disables recorded provider recovery during fresh provider selection", async () => {
-    const { deps, calls } = createDeps();
-
-    await handleProviderInferenceState({
-      ...baseOptions(deps),
-      fresh: true,
-      sandboxName: "dcode-station",
-    });
-
-    expect(calls.setupNim).toHaveBeenCalledWith(
-      { type: "nvidia" },
-      "dcode-station",
-      null,
-      false,
-      "nemoclaw",
-      expect.any(Function),
-      expect.any(Function),
-    );
-  });
-
-  it("disables recorded provider recovery for a brand-new sandbox identity (#6630)", async () => {
-    const { deps, calls } = createDeps();
-
-    await handleProviderInferenceState({
-      ...baseOptions(deps),
-      fresh: false,
-      sandboxName: "dc-after",
-    });
-
-    expect(calls.setupNim).toHaveBeenCalledWith(
-      { type: "nvidia" },
-      "dc-after",
-      null,
-      false,
-      "nemoclaw",
-      expect.any(Function),
-      expect.any(Function),
-    );
-  });
-
   it("does not use resume shortcuts when fresh is also set", async () => {
     const session = createSession({ provider: "ollama-local", model: "llama3.1" });
     session.steps.provider_selection.status = "complete";
@@ -1121,6 +1081,9 @@ describe("handleProviderInferenceState", () => {
     const result = await handleProviderInferenceState(baseOptions(deps));
 
     expect(setupNim).toHaveBeenCalledTimes(2);
+    expect(setupNim.mock.calls[0]?.[3]).toBe(true);
+    expect(setupNim.mock.calls[1]?.[1]).toBe("my-assistant");
+    expect(setupNim.mock.calls[1]?.[3]).toBe(false);
     expect(setupInference).toHaveBeenCalledTimes(2);
     expect(result.model).toBe("good");
     expect(calls.startStep).toHaveBeenCalledWith("provider_selection");
