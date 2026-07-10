@@ -279,6 +279,11 @@ function log(msg: string): void {
   process.stdout.write(msg + "\n");
 }
 
+function snapshotOutput(value: string): string {
+  const stripped = value.replace(/[\u0000-\u001F\u007F-\u009F]/g, "?");
+  return stripped.length > 500 ? `${stripped.slice(0, 500)}...` : stripped;
+}
+
 function progress(pct: number, label: string): void {
   process.stdout.write(`PROGRESS:${String(pct)}:${label}\n`);
 }
@@ -1045,9 +1050,9 @@ export function actionSnapshots(argv: string[]): void {
       }
       log(`Found ${snapshots.length} snapshot(s):\n`);
       for (const snap of snapshots) {
-        log(`  ${snap.timestamp}`);
-        log(`    Path:       ${snap.path}`);
-        log(`    Source:     ${snap.source}`);
+        log(`  ${snapshotOutput(snap.timestamp)}`);
+        log(`    Path:       ${snapshotOutput(snap.path)}`);
+        log(`    Source:     ${snapshotOutput(snap.source)}`);
         log(`    Files:      ${snap.file_count}`);
         log("");
       }
@@ -1075,13 +1080,14 @@ export function actionSnapshots(argv: string[]): void {
       if (deleted.length > 0) {
         log(`Pruned ${deleted.length} snapshot(s), kept ${kept.length}:\n`);
         for (const path of deleted) {
-          log(`  Deleted: ${path}`);
+          log(`  Deleted: ${snapshotOutput(path)}`);
         }
       }
       if (failed.length > 0) {
         for (const path of failed) {
-          log(`  Failed:  ${path}`);
+          log(`  Failed:  ${snapshotOutput(path)}`);
         }
+        throw new Error(`Failed to prune ${failed.length} snapshot(s)`);
       }
       break;
     }
@@ -1098,9 +1104,9 @@ export function actionSnapshots(argv: string[]): void {
       }
 
       if (deleteSnapshot(snapshotPath)) {
-        log(`Deleted snapshot: ${snapshotPath}`);
+        log(`Deleted snapshot: ${snapshotOutput(snapshotPath)}`);
       } else {
-        throw new Error(`Failed to delete snapshot: ${snapshotPath}`);
+        throw new Error(`Failed to delete snapshot: ${snapshotOutput(snapshotPath)}`);
       }
       break;
     }

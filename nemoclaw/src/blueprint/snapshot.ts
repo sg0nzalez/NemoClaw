@@ -13,13 +13,17 @@
 
 import type { Dirent } from "node:fs";
 import {
+  closeSync,
+  constants,
   cpSync,
   existsSync,
   lstatSync,
   mkdirSync,
+  openSync,
   readdirSync,
   readFileSync,
   readlinkSync,
+  realpathSync,
   renameSync,
   rmSync,
   writeFileSync,
@@ -34,6 +38,8 @@ const OPENCLAW_DIR = join(HOME, ".openclaw");
 const NEMOCLAW_DIR = join(HOME, ".nemoclaw");
 const SNAPSHOTS_DIR = join(NEMOCLAW_DIR, "snapshots");
 const SANDBOX_NAME_RE = /^[a-z]([a-z0-9-]*[a-z0-9])?$/;
+const SNAPSHOT_DIR_NAME_RE = /^\d{8}T\d{6}Z$/;
+const STABLE_FD_ROOT = process.platform === "linux" ? "/proc/self/fd" : "/dev/fd";
 
 function compactTimestamp(): string {
   return new Date()
@@ -316,22 +322,96 @@ function readStringArray(value: SnapshotManifestJson["contents"]): string[] {
     : [];
 }
 
+function snapshotNameFromPath(snapshotPath: string): string | null {
+  const relToSnapshots = relative(resolve(SNAPSHOTS_DIR), resolve(snapshotPath));
+  if (relToSnapshots === "" || relToSnapshots.startsWith("..") || isAbsolute(relToSnapshots)) {
+    return null;
+  }
+  const parts = relToSnapshots.split(/[\\/]+/);
+  if (parts.length !== 1 || !SNAPSHOT_DIR_NAME_RE.test(parts[0] ?? "")) {
+    return null;
+  }
+  return parts[0] ?? null;
+}
+
+function openSnapshotsDirNoFollow(): number {
+  return openSync(SNAPSHOTS_DIR, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+}
+
+function stableSnapshotChildPath(fd: number, snapshotName: string): string {
+  return join(STABLE_FD_ROOT, String(fd), snapshotName);
+}
+
+function openedSnapshotsDirMatches(fd: number): boolean {
+  return realpathSync(join(STABLE_FD_ROOT, String(fd))) === resolve(SNAPSHOTS_DIR);
+}
+
 export function deleteSnapshot(snapshotPath: string): boolean {
+  const snapshotName = snapshotNameFromPath(snapshotPath);
+  if (snapshotName === null) {
+    return false;
+  }
+
+  let fd: number | null = null;
   try {
-    if (!isSnapshotPathInsideSnapshotsDir(snapshotPath)) {
+    fd = openSnapshotsDirNoFollow();
+    if (!openedSnapshotsDirMatches(fd)) {
       return false;
     }
-    rejectSymlinksOnPath(snapshotPath);
-    rmSync(snapshotPath, { recursive: true, force: true });
+    const stablePath = stableSnapshotChildPath(fd, snapshotName);
+    try {
+      if (lstatSync(stablePath).isSymbolicLink()) {
+        return false;
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return true;
+      }
+      throw error;
+    }
+    rmSync(stablePath, { recursive: true, force: true });
     return true;
-  } catch {
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return true;
+    }
     return false;
+  } finally {
+    if (fd !== null) {
+      try {
+        closeSync(fd);
+      } catch {
+        // Preserve the boolean delete contract; close failures do not mean the
+        // requested snapshot survived.
+      }
+    }
   }
 }
 
 export function isSnapshotPathInsideSnapshotsDir(snapshotPath: string): boolean {
-  const relToSnapshots = relative(resolve(SNAPSHOTS_DIR), resolve(snapshotPath));
-  return relToSnapshots !== "" && !relToSnapshots.startsWith("..") && !isAbsolute(relToSnapshots);
+  return snapshotNameFromPath(snapshotPath) !== null;
+}
+
+function readSnapshotManifest(
+  snapDir: string,
+  snapshotName: string,
+): BlueprintSnapshotManifest | null {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(join(snapDir, "snapshot.json"), "utf-8"));
+    const raw = typeof parsed === "object" && parsed !== null ? parsed : null;
+    if (!isSnapshotManifestJson(raw) || raw.timestamp !== snapshotName) {
+      return null;
+    }
+    return {
+      timestamp: snapshotName,
+      source: typeof raw.source === "string" ? raw.source : "",
+      file_count: typeof raw.file_count === "number" ? raw.file_count : 0,
+      contents: readStringArray(raw.contents),
+      path: snapDir,
+    };
+  } catch {
+    return null;
+  }
 }
 
 export function pruneSnapshots(keep: number): {
@@ -373,21 +453,13 @@ export function listSnapshots(): BlueprintSnapshotManifest[] {
 
   const snapshots: BlueprintSnapshotManifest[] = [];
   for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
+    if (!entry.isDirectory() || !SNAPSHOT_DIR_NAME_RE.test(entry.name)) {
+      continue;
+    }
     const snapDir = join(SNAPSHOTS_DIR, entry.name);
-    try {
-      const parsed: unknown = JSON.parse(readFileSync(join(snapDir, "snapshot.json"), "utf-8"));
-      const raw = typeof parsed === "object" && parsed !== null ? parsed : null;
-      if (!isSnapshotManifestJson(raw) || typeof raw.timestamp !== "string") continue;
-      snapshots.push({
-        timestamp: raw.timestamp,
-        source: typeof raw.source === "string" ? raw.source : "",
-        file_count: typeof raw.file_count === "number" ? raw.file_count : 0,
-        contents: readStringArray(raw.contents),
-        path: snapDir,
-      });
-    } catch {
-      // Skip snapshots with missing or unreadable manifests
+    const manifest = readSnapshotManifest(snapDir, entry.name);
+    if (manifest !== null) {
+      snapshots.push(manifest);
     }
   }
 
