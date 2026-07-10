@@ -150,6 +150,15 @@ describe("recoverable sandbox identity", () => {
     expect(hasRecoverableSandboxIdentity("dc-after", "session-current")).toBe(true);
     expect(registry.getSandbox).toHaveBeenCalledWith("dc-after");
   });
+
+  it("short-circuits ownership checks when the named registry row is missing (#6630)", () => {
+    vi.spyOn(registry, "getSandbox").mockReturnValue(null);
+    const isOwned = vi.spyOn(registry, "isPendingReservationForSession");
+
+    expect(hasRecoverableSandboxIdentity("missing-sandbox", "session-current")).toBe(false);
+    expect(registry.getSandbox).toHaveBeenCalledWith("missing-sandbox");
+    expect(isOwned).not.toHaveBeenCalled();
+  });
 });
 
 describe("provider recovery persisted routing state", () => {

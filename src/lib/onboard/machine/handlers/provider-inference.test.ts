@@ -1119,9 +1119,26 @@ describe("handleProviderInferenceState", () => {
     const result = await handleProviderInferenceState(baseOptions(deps));
 
     expect(setupNim).toHaveBeenCalledTimes(2);
-    expect(setupNim.mock.calls[0]?.[3]).toBe(true);
-    expect(setupNim.mock.calls[1]?.[1]).toBe("my-assistant");
-    expect(setupNim.mock.calls[1]?.[3]).toBe(false);
+    expect(setupNim).toHaveBeenNthCalledWith(
+      1,
+      { type: "nvidia" },
+      null,
+      null,
+      true,
+      "nemoclaw",
+      expect.any(Function),
+      expect.any(Function),
+    );
+    expect(setupNim).toHaveBeenNthCalledWith(
+      2,
+      { type: "nvidia" },
+      "my-assistant",
+      null,
+      false,
+      "nemoclaw",
+      expect.any(Function),
+      expect.any(Function),
+    );
     expect(setupInference).toHaveBeenCalledTimes(2);
     expect(result.model).toBe("good");
     expect(calls.startStep).toHaveBeenCalledWith("provider_selection");

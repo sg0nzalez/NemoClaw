@@ -1,6 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import { createSession } from "../../../state/onboard-session";
@@ -140,6 +143,73 @@ describe("provider inference recovery gating", () => {
       expect.any(Function),
     );
     expect(hasIdentity).toHaveBeenCalledWith("dc-after", session.sessionId);
+  });
+
+  it("composes persisted route reservation ownership with resume recovery (#6626, #6630)", async () => {
+    const home = await fs.mkdtemp(path.join(os.tmpdir(), "nemoclaw-recovery-reservation-"));
+    vi.stubEnv("HOME", home);
+    vi.resetModules();
+    try {
+      const registry = await import("../../../state/registry");
+      const recovery = await import("../../provider-recovery");
+      const sessionId = "session-current";
+      const route = {
+        provider: "compatible-endpoint",
+        model: "model-a",
+        endpointUrl: "https://api.example.test/v1",
+        credentialEnv: "CUSTOM_API_KEY",
+        preferredInferenceApi: "openai-responses",
+        gatewayName: "nemoclaw",
+      };
+
+      for (const { sandboxName, reservationSessionId, expectedRecovery } of [
+        {
+          sandboxName: "owned-reservation",
+          reservationSessionId: sessionId,
+          expectedRecovery: true,
+        },
+        {
+          sandboxName: "foreign-reservation",
+          reservationSessionId: "session-other",
+          expectedRecovery: false,
+        },
+      ]) {
+        registry.reserveSandboxInferenceRoute(sandboxName, {
+          ...route,
+          reservationSessionId,
+        });
+        expect(registry.getSandbox(sandboxName)).toMatchObject({
+          pendingRouteReservation: true,
+          reservationSessionId,
+        });
+
+        const session = createSession({ sessionId });
+        session.sandboxName = sandboxName;
+        const { deps, calls } = createDeps({
+          hasRecoverableSandboxIdentity: recovery.hasRecoverableSandboxIdentity,
+        });
+
+        await handleProviderInferenceState({
+          ...baseOptions(deps, session),
+          resume: true,
+          sandboxName,
+        });
+
+        expect(calls.setupNim).toHaveBeenCalledWith(
+          { type: "nvidia" },
+          sandboxName,
+          null,
+          expectedRecovery,
+          "nemoclaw",
+          expect.any(Function),
+          expect.any(Function),
+        );
+      }
+    } finally {
+      vi.unstubAllEnvs();
+      vi.resetModules();
+      await fs.rm(home, { recursive: true, force: true });
+    }
   });
 
   it("allows recovery for a matching completed session sandbox", async () => {
