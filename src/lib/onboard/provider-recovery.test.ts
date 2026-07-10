@@ -7,6 +7,7 @@ import * as onboardSession from "../state/onboard-session";
 import * as registry from "../state/registry";
 import {
   createProviderRecoveryHelpers,
+  hasRecoverableSandboxIdentity,
   shouldRecoverRecordedProvider,
   validateLiveGatewayInference,
 } from "./provider-recovery";
@@ -42,83 +43,104 @@ describe("shouldRecoverRecordedProvider", () => {
     {
       label: "rejects gateway recovery for a brand-new sandbox",
       fresh: false,
-      resume: false,
       sandboxName: "dc-after",
-      hasRegisteredSandbox: false,
+      hasRecoverableSandboxIdentity: false,
       sessionSandboxName: null,
       expected: false,
     },
     {
       label: "allows gateway recovery before an interactive sandbox name is selected",
       fresh: false,
-      resume: false,
       sandboxName: null,
-      hasRegisteredSandbox: false,
-      sessionSandboxName: null,
-      expected: true,
-    },
-    {
-      label: "allows gateway recovery while resuming",
-      fresh: false,
-      resume: true,
-      sandboxName: "dc-after",
-      hasRegisteredSandbox: false,
+      hasRecoverableSandboxIdentity: false,
       sessionSandboxName: null,
       expected: true,
     },
     {
       label: "allows gateway recovery for a registered sandbox",
       fresh: false,
-      resume: false,
       sandboxName: "dc-after",
-      hasRegisteredSandbox: true,
+      hasRecoverableSandboxIdentity: true,
       sessionSandboxName: null,
       expected: true,
     },
     {
       label: "allows gateway recovery for a matching session",
       fresh: false,
-      resume: false,
       sandboxName: "dc-after",
-      hasRegisteredSandbox: false,
+      hasRecoverableSandboxIdentity: false,
       sessionSandboxName: "dc-after",
       expected: true,
     },
     {
       label: "rejects gateway recovery for a different session sandbox",
       fresh: false,
-      resume: false,
       sandboxName: "dc-after",
-      hasRegisteredSandbox: false,
+      hasRecoverableSandboxIdentity: false,
       sessionSandboxName: "dc-before",
       expected: false,
     },
     {
       label: "rejects gateway recovery when fresh overrides existing identity",
       fresh: true,
-      resume: true,
       sandboxName: "dc-after",
-      hasRegisteredSandbox: true,
+      hasRecoverableSandboxIdentity: true,
       sessionSandboxName: "dc-after",
       expected: false,
     },
   ])("$label", ({
     fresh,
-    resume,
     sandboxName,
-    hasRegisteredSandbox,
+    hasRecoverableSandboxIdentity,
     sessionSandboxName,
     expected,
   }) => {
     expect(
       shouldRecoverRecordedProvider({
         fresh,
-        resume,
         sandboxName,
-        hasRegisteredSandbox,
+        hasRecoverableSandboxIdentity,
         sessionSandboxName,
       }),
     ).toBe(expected);
+  });
+});
+
+describe("hasRecoverableSandboxIdentity", () => {
+  const pending = (reservationSessionId?: string): registry.SandboxEntry => ({
+    name: "dc-after",
+    pendingRouteReservation: true,
+    ...(reservationSessionId ? { reservationSessionId } : {}),
+  });
+
+  it.each([
+    { label: "missing registry row", entry: null, sessionId: "session-current", expected: false },
+    {
+      label: "orphaned pending reservation",
+      entry: pending(),
+      sessionId: "session-current",
+      expected: false,
+    },
+    {
+      label: "another session's pending reservation",
+      entry: pending("session-other"),
+      sessionId: "session-current",
+      expected: false,
+    },
+    {
+      label: "the current session's pending reservation",
+      entry: pending("session-current"),
+      sessionId: "session-current",
+      expected: true,
+    },
+    {
+      label: "fully registered sandbox",
+      entry: { name: "dc-after" },
+      sessionId: null,
+      expected: true,
+    },
+  ])("classifies $label (#6630)", ({ entry, sessionId, expected }) => {
+    expect(hasRecoverableSandboxIdentity(entry, sessionId)).toBe(expected);
   });
 });
 

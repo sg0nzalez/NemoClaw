@@ -90,7 +90,10 @@ export interface ProviderInferenceStateOptions<Gpu, Agent, Host> {
   deps: {
     checkGatewayRouteCompatibility: CurrentGatewayRouteCompatibilityCheck;
     preflightGatewayRouteDiscovery: CurrentGatewayRouteDiscoveryPreflight;
-    hasRegisteredSandbox(sandboxName: string): boolean;
+    hasRecoverableSandboxIdentity(
+      sandboxName: string,
+      sessionId: string | null | undefined,
+    ): boolean;
     withGatewayRouteMutationLock<T>(
       gatewayName: string,
       operation: () => Promise<T> | T,
@@ -446,9 +449,10 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
       await deps.startRecordedStep("provider_selection");
       const recoverRecordedProvider = shouldRecoverRecordedProvider({
         fresh,
-        resume,
         sandboxName,
-        hasRegisteredSandbox: Boolean(sandboxName && deps.hasRegisteredSandbox(sandboxName)),
+        hasRecoverableSandboxIdentity: Boolean(
+          sandboxName && deps.hasRecoverableSandboxIdentity(sandboxName, session?.sessionId),
+        ),
         sessionSandboxName:
           session?.steps?.sandbox?.status === "complete" ? (session.sandboxName ?? null) : null,
       });

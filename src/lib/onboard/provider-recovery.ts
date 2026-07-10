@@ -66,20 +66,29 @@ const MAX_LIVE_PROVIDER_LENGTH = 128;
 const MAX_LIVE_MODEL_LENGTH = 512;
 const SAFE_LIVE_PROVIDER = /^[A-Za-z0-9._:-]+$/;
 
+export function hasRecoverableSandboxIdentity(
+  entry: registry.SandboxEntry | null,
+  sessionId: string | null | undefined,
+): boolean {
+  return Boolean(
+    entry &&
+      (entry.pendingRouteReservation !== true ||
+        registry.isPendingReservationForSession(entry, sessionId)),
+  );
+}
+
 export function shouldRecoverRecordedProvider(input: {
   fresh: boolean;
-  resume: boolean;
   sandboxName: string | null;
-  hasRegisteredSandbox: boolean;
+  hasRecoverableSandboxIdentity: boolean;
   sessionSandboxName: string | null;
 }): boolean {
   return (
     !input.fresh &&
-    (input.resume ||
-      !input.sandboxName ||
+    (!input.sandboxName ||
       Boolean(
         input.sandboxName &&
-          (input.hasRegisteredSandbox || input.sessionSandboxName === input.sandboxName),
+          (input.hasRecoverableSandboxIdentity || input.sessionSandboxName === input.sandboxName),
       ))
   );
 }
