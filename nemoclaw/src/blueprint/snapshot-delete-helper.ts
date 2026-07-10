@@ -5,6 +5,9 @@ import { spawnSync } from "node:child_process";
 
 import { buildSubprocessEnv } from "../lib/subprocess-env.js";
 
+// Keep this helper inline because the plugin package publishes compiled dist
+// files only. It is passed as immutable source to isolated Python rather than
+// loaded from a mutable host-side script path.
 const SNAPSHOT_DELETE_HELPER = String.raw`
 import os
 import stat

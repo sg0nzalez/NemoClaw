@@ -52,6 +52,9 @@ function snapshotNameFromPath(snapshotPath: string): string | null {
 
 export function deleteSnapshot(snapshotPath: string): boolean {
   const snapshotName = snapshotNameFromPath(snapshotPath);
+  // Deletion deliberately does not reuse snapshot.ts's point-in-time
+  // rejectSymlinksOnPath check. The helper freshly opens the root, target, and
+  // every descendant fd-relative with O_NOFOLLOW so path swaps also fail closed.
   return snapshotName !== null && deleteSnapshotDirectory(SNAPSHOTS_DIR, snapshotName);
 }
 
