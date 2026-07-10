@@ -316,6 +316,53 @@ function readStringArray(value: SnapshotManifestJson["contents"]): string[] {
     : [];
 }
 
+export function deleteSnapshot(snapshotPath: string): boolean {
+  try {
+    if (!isSnapshotPathInsideSnapshotsDir(snapshotPath)) {
+      return false;
+    }
+    rejectSymlinksOnPath(snapshotPath);
+    rmSync(snapshotPath, { recursive: true, force: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function isSnapshotPathInsideSnapshotsDir(snapshotPath: string): boolean {
+  const relToSnapshots = relative(resolve(SNAPSHOTS_DIR), resolve(snapshotPath));
+  return relToSnapshots !== "" && !relToSnapshots.startsWith("..") && !isAbsolute(relToSnapshots);
+}
+
+export function pruneSnapshots(keep: number): {
+  deleted: string[];
+  kept: string[];
+  failed: string[];
+} {
+  if (!Number.isInteger(keep) || keep < 0) {
+    return { deleted: [], kept: [], failed: [] };
+  }
+  const snapshots = listSnapshots();
+  if (snapshots.length <= keep) {
+    return { deleted: [], kept: snapshots.map((s) => s.path), failed: [] };
+  }
+
+  const toDelete = snapshots.slice(keep);
+  const toKeep = snapshots.slice(0, keep);
+
+  const deleted: string[] = [];
+  const failed: string[] = [];
+  for (const snap of toDelete) {
+    if (deleteSnapshot(snap.path)) {
+      deleted.push(snap.path);
+    } else {
+      failed.push(snap.path);
+    }
+  }
+
+  return { deleted, kept: toKeep.map((s) => s.path), failed };
+}
+
 export function listSnapshots(): BlueprintSnapshotManifest[] {
   let entries: Dirent[];
   try {

@@ -21,6 +21,12 @@ import { execa } from "execa";
 import YAML from "yaml";
 
 import { DASHBOARD_PORT } from "../lib/ports.js";
+import {
+  deleteSnapshot,
+  isSnapshotPathInsideSnapshotsDir,
+  listSnapshots,
+  pruneSnapshots,
+} from "./snapshot.js";
 import { buildSubprocessEnv } from "../lib/subprocess-env.js";
 import * as importedOpenShellPolicyBoundary from "../shared/openshell-policy-boundary.cjs";
 import { safeEndpointUrlForDownstream, validateEndpointUrl } from "./ssrf.js";
@@ -35,6 +41,7 @@ const { parseOpenShellPolicy, withoutProviderComposedPolicies } =
   sourceOrGeneratedOpenShellPolicyBoundary.default ?? sourceOrGeneratedOpenShellPolicyBoundary;
 
 type Action = "plan" | "apply" | "status" | "rollback";
+type SnapshotsAction = "list" | "prune" | "delete";
 
 type RollbackPlanSource = { sandbox_name?: unknown };
 type UnknownRecord = { [key: string]: unknown };
@@ -74,6 +81,10 @@ const ENDPOINT_TLS_MODES = new Set(["terminate", "passthrough", "skip"]);
 
 function isAction(value: string | undefined): value is Action {
   return value === "plan" || value === "apply" || value === "status" || value === "rollback";
+}
+
+function isSnapshotsAction(value: string | undefined): value is SnapshotsAction {
+  return value === "list" || value === "prune" || value === "delete";
 }
 
 function isObjectLike(value: unknown): value is UnknownRecord {
@@ -943,8 +954,12 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
   }
 
   if (!action) {
+    if (rawAction === "snapshots") {
+      await actionSnapshots(argv.slice(1));
+      return;
+    }
     throw new Error(
-      `Unknown action '${rawAction ?? "(missing)"}'. Use: plan, apply, status, rollback`,
+      `Unknown action '${rawAction ?? "(missing)"}'. Use: plan, apply, status, rollback, snapshots`,
     );
   }
 
@@ -988,5 +1003,106 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
       }
       await actionRollback(runId);
       break;
+  }
+}
+
+// ── Snapshot Management ─────────────────────────────────────────
+
+function snapshotsUsage(): string {
+  return (
+    "Usage: snapshots <list|prune|delete> [options]\n" +
+    "\n" +
+    "Subcommands:\n" +
+    "  list                         List all snapshots\n" +
+    "  prune --keep <N>             Keep N most recent snapshots, delete the rest\n" +
+    "  delete --path <path>         Delete a specific snapshot by path\n" +
+    "\n" +
+    "Examples:\n" +
+    "  snapshots list\n" +
+    "  snapshots prune --keep 3\n" +
+    "  snapshots delete --path ~/.nemoclaw/snapshots/20260101T000000Z\n"
+  );
+}
+
+export function actionSnapshots(argv: string[]): void {
+  const sub = argv.at(0);
+
+  if (!sub || sub === "--help" || sub === "-h") {
+    log(snapshotsUsage());
+    return;
+  }
+
+  if (!isSnapshotsAction(sub)) {
+    throw new Error(`Unknown snapshots subcommand '${sub}'. Use: list, prune, delete`);
+  }
+
+  switch (sub) {
+    case "list": {
+      const snapshots = listSnapshots();
+      if (snapshots.length === 0) {
+        log("No snapshots found.");
+        return;
+      }
+      log(`Found ${snapshots.length} snapshot(s):\n`);
+      for (const snap of snapshots) {
+        log(`  ${snap.timestamp}`);
+        log(`    Path:       ${snap.path}`);
+        log(`    Source:     ${snap.source}`);
+        log(`    Files:      ${snap.file_count}`);
+        log("");
+      }
+      break;
+    }
+    case "prune": {
+      let keep = -1;
+      for (let i = 1; i < argv.length; i++) {
+        if (argv[i] === "--keep") {
+          const val = argv[++i];
+          if (val === undefined) throw new Error("--keep requires a numeric value");
+          if (!/^(?:0|[1-9]\d*)$/.test(val)) {
+            throw new Error("--keep must be a non-negative integer");
+          }
+          keep = Number.parseInt(val, 10);
+        }
+      }
+      if (keep < 0) throw new Error("--keep is required for prune");
+
+      const { deleted, kept, failed } = pruneSnapshots(keep);
+      if (deleted.length === 0 && failed.length === 0) {
+        log(`Nothing to prune. ${kept.length} snapshot(s) kept (--keep=${String(keep)}).`);
+        return;
+      }
+      if (deleted.length > 0) {
+        log(`Pruned ${deleted.length} snapshot(s), kept ${kept.length}:\n`);
+        for (const path of deleted) {
+          log(`  Deleted: ${path}`);
+        }
+      }
+      if (failed.length > 0) {
+        for (const path of failed) {
+          log(`  Failed:  ${path}`);
+        }
+      }
+      break;
+    }
+    case "delete": {
+      let snapshotPath: string | undefined;
+      for (let i = 1; i < argv.length; i++) {
+        if (argv[i] === "--path") {
+          snapshotPath = argv[++i];
+        }
+      }
+      if (!snapshotPath) throw new Error("--path is required for delete");
+      if (!isSnapshotPathInsideSnapshotsDir(snapshotPath)) {
+        throw new Error("Snapshot path must be inside the snapshots directory");
+      }
+
+      if (deleteSnapshot(snapshotPath)) {
+        log(`Deleted snapshot: ${snapshotPath}`);
+      } else {
+        throw new Error(`Failed to delete snapshot: ${snapshotPath}`);
+      }
+      break;
+    }
   }
 }

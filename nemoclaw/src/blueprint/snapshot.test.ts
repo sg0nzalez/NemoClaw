@@ -137,7 +137,12 @@ const {
   rollbackFromSnapshot,
   listSnapshots,
   moveSync,
+  deleteSnapshot,
+  isSnapshotPathInsideSnapshotsDir,
+  pruneSnapshots,
 } = await import("./snapshot.js");
+
+const { actionSnapshots } = await import("./runner.js");
 
 const OPENCLAW_DIR = `${FAKE_HOME}/.openclaw`;
 const SNAPSHOTS_DIR = `${FAKE_HOME}/.nemoclaw/snapshots`;
@@ -481,6 +486,284 @@ describe("snapshot", () => {
       addFile(`${SNAPSHOTS_DIR}/stray-file.txt`, "oops");
 
       expect(listSnapshots()).toEqual([]);
+    });
+  });
+
+  describe("deleteSnapshot", () => {
+    it("removes a snapshot directory", () => {
+      addDir(`${SNAPSHOTS_DIR}/20260101T000000Z`);
+      addFile(`${SNAPSHOTS_DIR}/20260101T000000Z/snapshot.json`, "{}");
+
+      expect(deleteSnapshot(`${SNAPSHOTS_DIR}/20260101T000000Z`)).toBe(true);
+      expect(store.has(`${SNAPSHOTS_DIR}/20260101T000000Z`)).toBe(false);
+    });
+
+    it("returns false when path is a symlink", () => {
+      addSymlink(`${SNAPSHOTS_DIR}/evil`, "/attacker");
+
+      expect(deleteSnapshot(`${SNAPSHOTS_DIR}/evil`)).toBe(false);
+    });
+
+    it("returns true for non-existent path", () => {
+      expect(deleteSnapshot(`${SNAPSHOTS_DIR}/nonexistent`)).toBe(true);
+    });
+
+    it("rejects path outside SNAPSHOTS_DIR", () => {
+      expect(deleteSnapshot("/tmp/unauthorized")).toBe(false);
+      expect(deleteSnapshot("/etc")).toBe(false);
+    });
+
+    it("rejects the snapshots root path", () => {
+      addDir(SNAPSHOTS_DIR);
+
+      expect(isSnapshotPathInsideSnapshotsDir(SNAPSHOTS_DIR)).toBe(false);
+      expect(deleteSnapshot(SNAPSHOTS_DIR)).toBe(false);
+      expect(store.has(SNAPSHOTS_DIR)).toBe(true);
+    });
+  });
+
+  describe("pruneSnapshots", () => {
+    it("keeps N snapshots and deletes the rest", () => {
+      addDir(`${SNAPSHOTS_DIR}/20260101T000000Z`);
+      addFile(
+        `${SNAPSHOTS_DIR}/20260101T000000Z/snapshot.json`,
+        JSON.stringify({
+          timestamp: "20260101T000000Z",
+          source: OPENCLAW_DIR,
+          file_count: 1,
+          contents: [],
+        }),
+      );
+      addDir(`${SNAPSHOTS_DIR}/20260201T000000Z`);
+      addFile(
+        `${SNAPSHOTS_DIR}/20260201T000000Z/snapshot.json`,
+        JSON.stringify({
+          timestamp: "20260201T000000Z",
+          source: OPENCLAW_DIR,
+          file_count: 1,
+          contents: [],
+        }),
+      );
+      addDir(`${SNAPSHOTS_DIR}/20260301T000000Z`);
+      addFile(
+        `${SNAPSHOTS_DIR}/20260301T000000Z/snapshot.json`,
+        JSON.stringify({
+          timestamp: "20260301T000000Z",
+          source: OPENCLAW_DIR,
+          file_count: 1,
+          contents: [],
+        }),
+      );
+
+      const result = pruneSnapshots(2);
+
+      expect(result.kept).toHaveLength(2);
+      expect(result.deleted).toHaveLength(1);
+      expect(result.failed).toHaveLength(0);
+      expect(result.kept[0]).toContain("20260301T000000Z");
+      expect(result.kept[1]).toContain("20260201T000000Z");
+      expect(result.deleted[0]).toContain("20260101T000000Z");
+      // Verify the deleted snapshot is actually removed from the store
+      expect(store.has(`${SNAPSHOTS_DIR}/20260101T000000Z`)).toBe(false);
+      expect(store.has(`${SNAPSHOTS_DIR}/20260201T000000Z`)).toBe(true);
+      expect(store.has(`${SNAPSHOTS_DIR}/20260301T000000Z`)).toBe(true);
+    });
+
+    it("returns empty deleted when keep >= snapshot count", () => {
+      addDir(`${SNAPSHOTS_DIR}/20260101T000000Z`);
+      addFile(
+        `${SNAPSHOTS_DIR}/20260101T000000Z/snapshot.json`,
+        JSON.stringify({
+          timestamp: "20260101T000000Z",
+          source: OPENCLAW_DIR,
+          file_count: 1,
+          contents: [],
+        }),
+      );
+
+      const result = pruneSnapshots(5);
+
+      expect(result.deleted).toHaveLength(0);
+      expect(result.failed).toHaveLength(0);
+      expect(result.kept).toHaveLength(1);
+    });
+
+    it("handles no snapshots gracefully", () => {
+      const result = pruneSnapshots(3);
+
+      expect(result.deleted).toHaveLength(0);
+      expect(result.failed).toHaveLength(0);
+      expect(result.kept).toHaveLength(0);
+    });
+
+    it("returns empty arrays for negative keep", () => {
+      addDir(`${SNAPSHOTS_DIR}/20260101T000000Z`);
+      addFile(
+        `${SNAPSHOTS_DIR}/20260101T000000Z/snapshot.json`,
+        JSON.stringify({
+          timestamp: "20260101T000000Z",
+          source: OPENCLAW_DIR,
+          file_count: 1,
+          contents: [],
+        }),
+      );
+
+      const result = pruneSnapshots(-1);
+
+      expect(result.deleted).toHaveLength(0);
+      expect(result.failed).toHaveLength(0);
+      expect(result.kept).toHaveLength(0);
+    });
+
+    it("reports failures when deleteSnapshot returns false", () => {
+      addDir(`${SNAPSHOTS_DIR}/20260101T000000Z`);
+      addFile(
+        `${SNAPSHOTS_DIR}/20260101T000000Z/snapshot.json`,
+        JSON.stringify({
+          timestamp: "20260101T000000Z",
+          source: OPENCLAW_DIR,
+          file_count: 2,
+          contents: [],
+        }),
+      );
+      addDir(`${SNAPSHOTS_DIR}/20260201T000000Z`);
+      addFile(
+        `${SNAPSHOTS_DIR}/20260201T000000Z/snapshot.json`,
+        JSON.stringify({
+          timestamp: "20260201T000000Z",
+          source: OPENCLAW_DIR,
+          file_count: 2,
+          contents: [],
+        }),
+      );
+      // Make the older snapshot a symlink so deleteSnapshot rejects it
+      addSymlink(`${SNAPSHOTS_DIR}/20260101T000000Z`, "/attacker");
+
+      const result = pruneSnapshots(1);
+
+      expect(result.deleted).toHaveLength(0);
+      expect(result.failed).toHaveLength(1);
+      expect(result.kept).toHaveLength(1);
+      expect(result.failed[0]).toContain("20260101T000000Z");
+      expect(result.kept[0]).toContain("20260201T000000Z");
+    });
+  });
+
+  describe("actionSnapshots (CLI dispatch)", () => {
+    const stdoutChunks: string[] = [];
+
+    function captureStdout(): void {
+      vi.spyOn(process.stdout, "write").mockImplementation((chunk: string | Uint8Array) => {
+        stdoutChunks.push(String(chunk));
+        return true;
+      });
+    }
+
+    function stdoutText(): string {
+      return stdoutChunks.join("");
+    }
+
+    beforeEach(() => {
+      store.clear();
+      stdoutChunks.length = 0;
+      vi.clearAllMocks();
+      captureStdout();
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it.each([["--help"], ["-h"], []])("shows usage for %j", (...argv) => {
+      actionSnapshots(argv);
+      expect(stdoutText()).toContain("Usage: snapshots <list|prune|delete>");
+    });
+
+    it("throws on unknown subcommand", () => {
+      expect(() => actionSnapshots(["bogus"])).toThrow(/Unknown snapshots subcommand/);
+    });
+
+    it("lists snapshots when none exist", () => {
+      actionSnapshots(["list"]);
+      expect(stdoutText()).toContain("No snapshots found.");
+    });
+
+    it("lists existing snapshots", () => {
+      const snapDir = `${FAKE_HOME}/.nemoclaw/snapshots/20260101T000000Z`;
+      addDir(snapDir);
+      addFile(
+        snapDir + "/snapshot.json",
+        JSON.stringify({
+          timestamp: "20260101T000000Z",
+          source: FAKE_HOME,
+          file_count: 1,
+          contents: [],
+        }),
+      );
+      actionSnapshots(["list"]);
+      expect(stdoutText()).toContain("20260101T000000Z");
+    });
+
+    it("prune --keep N deletes oldest", () => {
+      [1, 2, 3].forEach((n) => {
+        const ts = `2026010${n}T000000Z`;
+        addDir(`${FAKE_HOME}/.nemoclaw/snapshots/${ts}`);
+        addFile(
+          `${FAKE_HOME}/.nemoclaw/snapshots/${ts}/snapshot.json`,
+          JSON.stringify({ timestamp: ts, source: FAKE_HOME, file_count: 1, contents: [] }),
+        );
+      });
+      actionSnapshots(["prune", "--keep", "2"]);
+      expect(stdoutText()).toContain("Pruned 1 snapshot(s), kept 2");
+    });
+
+    it.each([["prune"], ["delete"]])("%s throws without required arg", (...argv) => {
+      expect(() => actionSnapshots(argv)).toThrow();
+    });
+
+    it("prune rejects --keep with non-numeric suffix", () => {
+      expect(() => actionSnapshots(["prune", "--keep", "3abc"])).toThrow(
+        "--keep must be a non-negative integer",
+      );
+      expect(() => actionSnapshots(["prune", "--keep", "1.5"])).toThrow(
+        "--keep must be a non-negative integer",
+      );
+    });
+
+    it("delete rejects path outside SNAPSHOTS_DIR", () => {
+      expect(() => actionSnapshots(["delete", "--path", "/tmp/unauthorized"])).toThrow(
+        "Snapshot path must be inside the snapshots directory",
+      );
+    });
+
+    it("delete rejects the snapshots root path", () => {
+      addDir(SNAPSHOTS_DIR);
+
+      expect(() => actionSnapshots(["delete", "--path", SNAPSHOTS_DIR])).toThrow(
+        "Snapshot path must be inside the snapshots directory",
+      );
+      expect(store.has(SNAPSHOTS_DIR)).toBe(true);
+    });
+
+    it("delete removes a snapshot by path", () => {
+      const sd = `${FAKE_HOME}/.nemoclaw/snapshots/20260101T000000Z`;
+      addDir(sd);
+      addFile(
+        sd + "/snapshot.json",
+        JSON.stringify({
+          timestamp: "20260101T000000Z",
+          source: FAKE_HOME,
+          file_count: 1,
+          contents: [],
+        }),
+      );
+      actionSnapshots(["delete", "--path", sd]);
+      expect(stdoutText()).toContain(`Deleted snapshot: ${sd}`);
+    });
+
+    it("delete succeeds on non-existent path", () => {
+      actionSnapshots(["delete", "--path", `${FAKE_HOME}/.nemoclaw/snapshots/nonexistent`]);
+      expect(stdoutText()).toContain("Deleted snapshot:");
     });
   });
 });
