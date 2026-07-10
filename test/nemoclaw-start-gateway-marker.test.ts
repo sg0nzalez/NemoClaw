@@ -63,6 +63,19 @@ function gatewayMarkerExitTrapRegistrations(src: string): string {
       })();
 }
 
+function nonRootInitialGatewayLaunchSnippet(src: string): string {
+  return (
+    src.match(
+      /# Start gateway in background, auto-pair, then wait\.[\s\S]*?echo "\[gateway\] openclaw gateway launched \(pid \$GATEWAY_PID\)" >&2/u,
+    )?.[0] ??
+    (() => {
+      throw new Error(
+        "Expected non-root initial gateway launch block in scripts/nemoclaw-start.sh",
+      );
+    })()
+  );
+}
+
 describe("nemoclaw-start in-container gateway healthcheck marker (#4503, #4710)", () => {
   // #4503/#4710: the Docker HEALTHCHECK reports healthy on curl-exit-7 only
   // when the /tmp/nemoclaw-gateway-local marker is ABSENT (gateway delivered
@@ -319,6 +332,82 @@ describe("nemoclaw-start in-container gateway healthcheck marker (#4503, #4710)"
     }
   });
 
+  it.each([
+    {
+      label: "root launch helper",
+      script: (src: string, markerPath: string) =>
+        [
+          "#!/usr/bin/env bash",
+          "set -euo pipefail",
+          safeTmpHelpers(src),
+          extractShellFunctionFromSource(src, "mark_in_container_gateway").replaceAll(
+            "/tmp/nemoclaw-gateway-local",
+            markerPath,
+          ),
+          extractShellFunctionFromSource(src, "clear_in_container_gateway_marker").replaceAll(
+            "/tmp/nemoclaw-gateway-local",
+            markerPath,
+          ),
+          extractShellFunctionFromSource(src, "launch_openclaw_gateway").replaceAll(
+            "/tmp/nemoclaw-gateway-local",
+            markerPath,
+          ),
+          "STEP_DOWN_PREFIX_GATEWAY=(env)",
+          "OPENCLAW=/bin/true",
+          "_DASHBOARD_PORT=18789",
+          "GATEWAY_PID=0",
+          "GATEWAY_PID_START_IDENTITY=",
+          "GATEWAY_PID_FILE=",
+          "capture_openclaw_pid_start_identity() { return 1; }",
+          "record_gateway_pid() { :; }",
+          "clear_gateway_pid_record() { :; }",
+          "launch_openclaw_gateway",
+        ].join("\n"),
+    },
+    {
+      label: "non-root launch block",
+      script: (src: string, markerPath: string) =>
+        [
+          "#!/usr/bin/env bash",
+          "set -euo pipefail",
+          safeTmpHelpers(src),
+          extractShellFunctionFromSource(src, "mark_in_container_gateway").replaceAll(
+            "/tmp/nemoclaw-gateway-local",
+            markerPath,
+          ),
+          extractShellFunctionFromSource(src, "clear_in_container_gateway_marker").replaceAll(
+            "/tmp/nemoclaw-gateway-local",
+            markerPath,
+          ),
+          "OPENCLAW=/bin/true",
+          "_DASHBOARD_PORT=18789",
+          "GATEWAY_PID=0",
+          "GATEWAY_PID_START_IDENTITY=",
+          "capture_openclaw_pid_start_identity() { return 1; }",
+          "record_gateway_pid() { :; }",
+          nonRootInitialGatewayLaunchSnippet(src).replaceAll(
+            "/tmp/nemoclaw-gateway-local",
+            markerPath,
+          ),
+        ].join("\n"),
+    },
+  ])("clears the marker when $label exits before recording PID identity (#4952)", ({ script }) => {
+    const src = fs.readFileSync(START_SCRIPT, "utf-8");
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-gw-early-exit-"));
+    const markerPath = path.join(tmpDir, "nemoclaw-gateway-local");
+
+    try {
+      const result = spawnSync("bash", ["-c", script(src, markerPath)], {
+        encoding: "utf-8",
+        timeout: 5000,
+      });
+      expect(result.status).toBe(1);
+      expect(fs.existsSync(markerPath)).toBe(false);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
   // Exercises the real exit-trap wiring, not just the helper: registers the
   // same `trap clear_in_container_gateway_marker EXIT` the supervisor installs,
   // drops the marker via mark_in_container_gateway, then lets the shell reach a
@@ -347,9 +436,9 @@ describe("nemoclaw-start in-container gateway healthcheck marker (#4503, #4710)"
         markFn,
         clearFn,
         "mark_in_container_gateway",
-        // Mirror the supervisors: arm the production EXIT traps after marking,
-        // then exit. The extracted registrations require both launch paths to
-        // wire marker cleanup.
+        // Mirror the supervisors: arm the production EXIT traps and exit. The
+        // extracted registrations require both launch paths to wire marker
+        // cleanup.
         exitTrapRegistrations,
         `[ -e ${JSON.stringify(markerPath)} ] && echo MARKER_PRESENT_BEFORE_EXIT`,
         "exit 0",

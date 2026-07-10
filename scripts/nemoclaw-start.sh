@@ -4788,6 +4788,16 @@ wait_for_openclaw_gateway_internal() {
 }
 
 launch_openclaw_gateway() {
+  # Drop the gateway marker whenever this supervisor exits -- clean gateway
+  # exit (`exit 0` below), a forwarded signal (cleanup_openclaw_on_signal ends
+  # in `cleanup_on_signal` -> `exit`), or errexit. This is the #4952 fix: on
+  # docker-driver sandboxes this script is not PID 1, so it can exit while the
+  # container lives on; a surviving marker would leave the HEALTHCHECK trusting
+  # a stale pidfile. Arm this before marking so early launch failures cannot
+  # leave the marker behind. The marker is re-dropped at each launch
+  # (mark_in_container_gateway), so the respawn loop -- which never exits the
+  # script -- keeps it in place.
+  trap clear_in_container_gateway_marker EXIT
   mark_in_container_gateway
   nohup "${STEP_DOWN_PREFIX_GATEWAY[@]}" sh -c \
     'umask 0007; exec "$@" >>/tmp/gateway.log 2>&1' sh \
@@ -5407,6 +5417,9 @@ if [ "$(id -u)" -ne 0 ]; then
   # to healthy — see the mark_in_container_gateway comment near the top of this
   # file for the #4710 rationale (why the marker is tied to the launch site
   # rather than an env-var conditional at startup).
+  # Arm marker cleanup before marking so early launch failures cannot leave the
+  # healthcheck trusting a stale pidfile in a surviving docker-driver container.
+  trap clear_in_container_gateway_marker EXIT
   mark_in_container_gateway
   nohup "$OPENCLAW" gateway run --port "${_DASHBOARD_PORT}" >/tmp/gateway.log 2>&1 &
   GATEWAY_PID=$!
@@ -5431,15 +5444,6 @@ if [ "$(id -u)" -ne 0 ]; then
   # shellcheck disable=SC2034  # read by cleanup_on_signal from sandbox-init.sh
   SANDBOX_WAIT_PID="$GATEWAY_PID"
   trap cleanup_openclaw_on_signal SIGTERM SIGINT
-  # Drop the gateway marker whenever this supervisor exits -- clean gateway
-  # exit (`exit 0` below), a forwarded signal (cleanup_openclaw_on_signal ends
-  # in `cleanup_on_signal` -> `exit`), or errexit. This is the #4952 fix: on
-  # docker-driver sandboxes this script is not PID 1, so it can exit while the
-  # container lives on; a surviving marker would leave the HEALTHCHECK trusting
-  # a stale pidfile. The marker is re-dropped at each launch
-  # (mark_in_container_gateway), so the respawn loop -- which never exits the
-  # script -- keeps it in place.
-  trap clear_in_container_gateway_marker EXIT
   print_dashboard_urls
 
   # Auto-respawn gateway on unexpected death (NVIDIA/NemoClaw#2757). Without
@@ -5694,15 +5698,6 @@ refresh_openclaw_supervised_child_pids
 # shellcheck disable=SC2034  # read by cleanup_on_signal from sandbox-init.sh
 SANDBOX_WAIT_PID="$GATEWAY_PID"
 trap cleanup_openclaw_on_signal SIGTERM SIGINT
-# Drop the gateway marker whenever this supervisor exits -- clean gateway exit
-# (`exit 0` below), a forwarded signal (cleanup_openclaw_on_signal ends in
-# `cleanup_on_signal` -> `exit`), or errexit. This is the #4952 fix: on
-# docker-driver sandboxes this script is not PID 1, so it can exit while the
-# container lives on; a surviving marker would leave the HEALTHCHECK trusting a
-# stale pidfile. The marker is re-dropped at each launch
-# (mark_in_container_gateway), so the respawn loop -- which never exits the
-# script -- keeps it in place.
-trap clear_in_container_gateway_marker EXIT
 if ! gateway_control_init; then
   echo "[gateway-control] privileged gateway control unavailable" >&2
 fi
