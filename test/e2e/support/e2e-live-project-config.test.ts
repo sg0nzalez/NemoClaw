@@ -127,8 +127,8 @@ describe("gated E2E Vitest projects", () => {
   });
 
   it("cleans and rebuilds the CLI before aggregate live E2E execution (#6692)", () => {
-    const npmCli = process.env.npm_execpath;
-    if (!npmCli) throw new Error("npm_execpath is required to exercise the npm script");
+    const npmCli = process.env.npm_execpath ?? "";
+    expect(npmCli).not.toBe("");
 
     const fixtureRoot = mkdtempSync(join(tmpdir(), "nemoclaw-live-e2e-script-"));
     const fakeBin = join(fixtureRoot, "bin");
