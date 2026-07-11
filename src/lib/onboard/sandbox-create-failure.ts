@@ -51,6 +51,13 @@ export type SandboxCreateFailureHandlerOptions = {
   exit?: (code?: number) => never;
 };
 
+export type LandlockCreateFailureCleanupOptions = {
+  failureKind: string;
+  createOutput?: string;
+  sandboxName: string;
+  runOpenshell: SandboxDeleteRunner;
+};
+
 export function removeFailedSandboxForRetry(
   sandboxName: string,
   runOpenshell: SandboxDeleteRunner,
@@ -75,6 +82,20 @@ function hasCreatedSandboxEvidence(output: string | undefined, sandboxName: stri
     "im",
   );
   return createdSandboxLine.test(stripAnsi(output));
+}
+
+export function cleanupLandlockSandboxAfterCreateFailure({
+  failureKind,
+  createOutput,
+  sandboxName,
+  runOpenshell,
+}: LandlockCreateFailureCleanupOptions): void {
+  if (
+    failureKind === "landlock_enforcement_failed" &&
+    hasCreatedSandboxEvidence(createOutput, sandboxName)
+  ) {
+    removeFailedSandboxForRetry(sandboxName, runOpenshell);
+  }
 }
 
 export function handleNonzeroSandboxCreateResult({
@@ -105,12 +126,12 @@ export function handleNonzeroSandboxCreateResult({
     console.error(createResult.output);
   }
   printSandboxCreateFailureDiagnostics(sandboxName, { backupPath });
-  if (
-    failure.kind === "landlock_enforcement_failed" &&
-    hasCreatedSandboxEvidence(createResult.output, sandboxName)
-  ) {
-    removeFailedSandboxForRetry(sandboxName, runOpenshell);
-  }
+  cleanupLandlockSandboxAfterCreateFailure({
+    failureKind: failure.kind,
+    createOutput: createResult.output,
+    sandboxName,
+    runOpenshell,
+  });
   console.error("  Try:  openshell sandbox list        # check gateway state");
   printSandboxCreateRecoveryHints(createResult.output, { createArgs });
   return exit(createResult.status || 1);

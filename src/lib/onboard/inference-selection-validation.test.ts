@@ -80,6 +80,7 @@ describe("inference selection validation", () => {
         "reasoning-model",
         "test-key",
         {
+          calibrateTimeouts: true,
           requireResponsesToolCalling: false,
           skipResponsesProbe: true,
           probeStreaming: false,
@@ -273,7 +274,7 @@ describe("inference selection validation", () => {
         },
       ],
     }));
-    const probeOpenAiLikeEndpoint = vi.fn(() => ({
+    const probeOpenAiLikeEndpoint = vi.fn(async () => ({
       ok: true,
       api: "openai-completions",
       label: "Chat Completions API",
@@ -308,7 +309,11 @@ describe("inference selection validation", () => {
         "https://compatible.example/v1",
         "nvidia/nemotron-3-super-v3",
         "test-key",
-        { skipResponsesProbe: true, pinnedAddresses: ["93.184.216.34"] },
+        {
+          calibrateTimeouts: true,
+          skipResponsesProbe: true,
+          pinnedAddresses: ["93.184.216.34"],
+        },
       );
       expect(probeAnthropicEndpoint).not.toHaveBeenCalled();
     } finally {

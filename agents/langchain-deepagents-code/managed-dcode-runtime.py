@@ -54,11 +54,27 @@ _CREDENTIAL_CAMEL_NAME = re.compile(
 _CREDENTIAL_ENV_NAMES = {
     "LANGSMITH_RUNS_ENDPOINTS",
     "LANGCHAIN_RUNS_ENDPOINTS",
-    "OTEL_EXPORTER_OTLP_ENDPOINT",
-    "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
     "OTEL_EXPORTER_OTLP_HEADERS",
     "OTEL_EXPORTER_OTLP_TRACES_HEADERS",
 }
+# OTLP endpoint variables carry the collector URL, not a credential. The
+# documented `--observability` flow sets one (e.g.
+# http://host.openshell.internal:4318), so a clean bare http(s) URL is allowed;
+# a value with userinfo or a structured key-bearing blob is still refused. The
+# `_HEADERS` variants stay in _CREDENTIAL_ENV_NAMES because they carry auth
+# material. Mirrors dcode-wrapper.sh is_otlp_endpoint_name (#6466).
+_OTLP_ENDPOINT_ENV_NAMES = {
+    "OTEL_EXPORTER_OTLP_ENDPOINT",
+    "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+}
+# The only OTLP collector a managed sandbox can reach: the observability egress
+# preset opens exactly this host. Restricting to it (exact match) refuses every
+# other host, userinfo, query, fragment, percent-encoding, control character,
+# non-ASCII byte, and malformed host/port by construction, and keeps trivial
+# parity with the Bash wrapper's is_safe_otlp_endpoint_url (#6538 review).
+_OTLP_MANAGED_ENDPOINT_HOST = "host.openshell.internal"
+_OTLP_ENDPOINT_PORT = re.compile(r"[1-9][0-9]{0,4}")
+_OTLP_ENDPOINT_PATH = re.compile(r"/[A-Za-z0-9._/-]*")
 # Python's \s also includes control separators that ECMAScript excludes, so
 # spell out the canonical whitespace set for cross-runtime parity.
 _ECMASCRIPT_NON_WHITESPACE_SECRET_CHAR = (
@@ -73,10 +89,13 @@ _FETCH_URL_TRUSTED_PROXY_ENV = (
 _MANAGED_FETCH_CA_BUNDLE_FILE = Path(
     "/etc/openshell-tls/ca-bundle.pem"
 )
-_MANAGED_ADAPTER_PROVIDER = "openai"
+# Keep this managed adapter allow-list in sync with generate-config.ts and the
+# patch-managed-deepagents-code.py provider guards injected into Deep Agents Code.
+_MANAGED_ADAPTER_PROVIDERS = frozenset({"openai", "openrouter"})
 _NVIDIA_DISPLAY_PROVIDER_ALIASES = frozenset(
     {"nvidia", "nvidia-prod", "nvidia-nim", "nvidia-router"}
 )
+_OPENROUTER_DISPLAY_PROVIDER_ALIASES = frozenset({"openrouter", "openrouter-api"})
 _DISPLAY_PROVIDER_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 # Match the launchers' root-owned, image-baked proxy validator. Its deliberate
 # RFC 1123 deviation permits underscores only for controlled internal/container
@@ -232,6 +251,36 @@ def _is_managed_value(name: str, value: str) -> bool:
     return False
 
 
+def _is_safe_otlp_endpoint_url(value: str) -> bool:
+    """Accept ONLY http(s)://host.openshell.internal[:port][/path].
+
+    The managed sandbox's observability egress reaches only that host, so an
+    exact-host allowlist refuses every other host, userinfo, query, fragment,
+    percent-encoding, control character, non-ASCII byte, malformed host/port,
+    and oversized input by construction. Mirrors the Bash wrapper's
+    is_safe_otlp_endpoint_url byte-for-byte (#6538 review). The optional path may
+    contain dot segments; that is intentional and safe because the path reaches
+    only the exact managed collector host and cannot traverse to another origin.
+    """
+    if len(value) > 2048:
+        return False
+    for scheme in ("http://", "https://"):
+        if value.startswith(scheme):
+            rest = value[len(scheme) :]
+            break
+    else:
+        return False
+    authority, sep, path = rest.partition("/")
+    if sep and not _OTLP_ENDPOINT_PATH.fullmatch("/" + path):
+        return False
+    host, colon, port = authority.partition(":")
+    if host != _OTLP_MANAGED_ENDPOINT_HOST:
+        return False
+    if colon and not (_OTLP_ENDPOINT_PORT.fullmatch(port) and int(port) <= 65535):
+        return False
+    return True
+
+
 def _assert_safe_environment() -> None:
     for name, value in os.environ.items():
         if _OPENSHELL_ENV_PLACEHOLDER_PREFIX in value:
@@ -251,6 +300,15 @@ def _assert_safe_environment() -> None:
             )
         ) or (
             bool(value) and name.upper() in _CREDENTIAL_ENV_NAMES
+        ):
+            raise RuntimeError(
+                f"runtime environment variable {name} contains a credential; "
+                "use NemoClaw credential handling"
+            )
+        if (
+            name.upper() in _OTLP_ENDPOINT_ENV_NAMES
+            and value
+            and not _is_safe_otlp_endpoint_url(value)
         ):
             raise RuntimeError(
                 f"runtime environment variable {name} contains a credential; "
@@ -1246,15 +1304,14 @@ def managed_auto_approval_enabled() -> bool:
 def managed_display_provider(adapter_provider: object) -> str:
     """Return the provider label to show for the managed inference adapter.
 
-    Managed inference always routes through the OpenAI-compatible adapter, so
-    Deep Agents Code reports the wire provider (`openai`) in the status bar and
-    the model-identity system prompt. Substitute the onboard-selected upstream
-    provider so those surfaces match the launch page. Only the managed
-    ``openai`` adapter is relabeled; every other adapter is returned unchanged.
-    NVIDIA route aliases share the canonical ``nvidia`` display family.
+    Managed inference normally routes through the OpenAI-compatible adapter, and
+    OpenRouter routes through Deep Agents Code's native OpenRouter adapter while
+    still targeting the managed ``inference.local`` gateway. Substitute the
+    onboard-selected upstream provider so status surfaces match the launch page.
+    NVIDIA and OpenRouter aliases share canonical display families.
     """
     adapter = adapter_provider if isinstance(adapter_provider, str) else ""
-    if adapter != _MANAGED_ADAPTER_PROVIDER:
+    if adapter not in _MANAGED_ADAPTER_PROVIDERS:
         return adapter
 
     upstream = os.environ.get(_UPSTREAM_PROVIDER_ENV, "")
@@ -1262,6 +1319,8 @@ def managed_display_provider(adapter_provider: object) -> str:
         return adapter
     if upstream in _NVIDIA_DISPLAY_PROVIDER_ALIASES:
         return "nvidia"
+    if upstream in _OPENROUTER_DISPLAY_PROVIDER_ALIASES:
+        return "openrouter"
     return upstream
 
 

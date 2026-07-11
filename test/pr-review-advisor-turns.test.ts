@@ -46,7 +46,6 @@ function metadata(
       previousAdvisorReview: null,
       workflowSignals: [],
       localizedPatchSignals: [],
-      monolithDeltas: [],
       driftEvidence: [],
       github: null,
     },
@@ -75,12 +74,12 @@ describe("PR review advisor turn trace", () => {
       schema: schema(),
     });
     const riskBytes = turns
-      .flatMap((turn) => turn.syntheticToolResults ?? [])
+      .flatMap((turn) => turn.contextToolResults ?? [])
       .filter((result) => result.contentType === "json" && result.content.includes('"riskPlan"'))
       .reduce((total, result) => total + Buffer.byteLength(result.content, "utf8"), 0);
     const exactMetadata = turns
       .at(-1)
-      ?.syntheticToolResults?.find(
+      ?.contextToolResults?.find(
         (result) => result.toolName === "pr_review_exact_metadata",
       )?.content;
 
@@ -96,11 +95,11 @@ describe("PR review advisor turn trace", () => {
     const tmp = fs.mkdtempSync(path.join(ROOT, ".tmp-pr-advisor-prompts-"));
     const promptDir = path.join(tmp, "prompts");
     const turns = [
-      { name: "first-stage", prompt: "first", syntheticToolResults: [] },
+      { name: "first-stage", prompt: "first", contextToolResults: [] },
       {
         name: "final-stage",
         prompt: "final",
-        syntheticToolResults: [
+        contextToolResults: [
           { toolName: "final_context", content: "{}", contentType: "json" as const },
         ],
       },
@@ -111,12 +110,10 @@ describe("PR review advisor turn trace", () => {
         "00-system.md",
         "01-first-stage.md",
         "02-final-stage.md",
-        "02-final-stage.synthetic-tool-results",
+        "02-final-stage.tool-results",
       ]);
       expect(
-        fs.existsSync(
-          path.join(promptDir, "02-final-stage.synthetic-tool-results", "01-final_context.md"),
-        ),
+        fs.existsSync(path.join(promptDir, "02-final-stage.tool-results", "01-final_context.md")),
       ).toBe(true);
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });

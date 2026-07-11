@@ -4,7 +4,7 @@
 import { getCredential } from "../credentials/store";
 import { getCompatibleAnthropicOpenAiSurfaceBaseUrl } from "../inference/config";
 
-const { probeAnthropicEndpoint, probeOpenAiLikeEndpoint } =
+const { probeAnthropicEndpoint, probeOpenAiLikeEndpointOptimized } =
   require("../inference/onboard-probes") as {
     probeAnthropicEndpoint(
       endpointUrl: string,
@@ -12,13 +12,20 @@ const { probeAnthropicEndpoint, probeOpenAiLikeEndpoint } =
       apiKey: string | null | undefined,
       options?: { probeStreaming?: boolean; pinnedAddresses?: readonly string[] },
     ): any;
-    probeOpenAiLikeEndpoint(
+    probeOpenAiLikeEndpointOptimized(
       endpointUrl: string,
       model: string,
       apiKey: string | null | undefined,
       options?: Record<string, unknown>,
-    ): any;
+    ): Promise<any>;
   };
+
+type OpenAiLikeProbe = (
+  endpointUrl: string,
+  model: string,
+  apiKey: string | null | undefined,
+  options?: Record<string, unknown>,
+) => any | Promise<any>;
 
 import {
   assertEndpointResolvesPublic,
@@ -44,7 +51,7 @@ export interface InferenceSelectionValidationDeps {
   agentProductName(): string;
   getCredential?: typeof getCredential;
   probeAnthropicEndpoint?: typeof probeAnthropicEndpoint;
-  probeOpenAiLikeEndpoint?: typeof probeOpenAiLikeEndpoint;
+  probeOpenAiLikeEndpoint?: OpenAiLikeProbe;
   /** Injectable DNS resolver for the custom-endpoint SSRF preflight (tests). */
   resolveEndpointHost?: EndpointDnsLookupFn;
   promptValidationRecovery(
@@ -65,6 +72,7 @@ export interface InferenceSelectionValidationHelpers {
     helpUrl?: string | null,
     options?: {
       authMode?: "bearer" | "query-param";
+      extraHeaders?: readonly string[];
       requireResponsesToolCalling?: boolean;
       requireChatCompletionsToolCalling?: boolean;
       skipResponsesProbe?: boolean;
@@ -104,7 +112,7 @@ export function createInferenceSelectionValidationHelpers(
 ): InferenceSelectionValidationHelpers {
   const resolveCredential = deps.getCredential ?? getCredential;
   const runAnthropicProbe = deps.probeAnthropicEndpoint ?? probeAnthropicEndpoint;
-  const runOpenAiLikeProbe = deps.probeOpenAiLikeEndpoint ?? probeOpenAiLikeEndpoint;
+  const runOpenAiLikeProbe = deps.probeOpenAiLikeEndpoint ?? probeOpenAiLikeEndpointOptimized;
 
   function exitNonInteractiveValidationFailure(): never {
     process.exitCode = 1;
@@ -182,6 +190,7 @@ export function createInferenceSelectionValidationHelpers(
     helpUrl: string | null = null,
     options: {
       authMode?: "bearer" | "query-param";
+      extraHeaders?: readonly string[];
       requireResponsesToolCalling?: boolean;
       requireChatCompletionsToolCalling?: boolean;
       skipResponsesProbe?: boolean;
@@ -190,7 +199,10 @@ export function createInferenceSelectionValidationHelpers(
     } = {},
   ): Promise<EndpointValidationResult> {
     const apiKey = credentialEnv ? resolveCredential(credentialEnv) : "";
-    const probe = runOpenAiLikeProbe(endpointUrl, model, apiKey, options);
+    const probe = await runOpenAiLikeProbe(endpointUrl, model, apiKey, {
+      ...options,
+      calibrateTimeouts: true,
+    });
     if (!probe.ok) {
       printValidationFailure(label, probe);
       if (deps.isNonInteractive()) {
@@ -265,7 +277,8 @@ export function createInferenceSelectionValidationHelpers(
     const apiKey = resolveCredential(credentialEnv);
     const reasoningEnabled = normalizeReasoningFlag(process.env.NEMOCLAW_REASONING) === "true";
     // Reasoning-only compatible endpoints often reject Responses, tool-call, and streaming probes.
-    const probe = runOpenAiLikeProbe(endpointUrl, model, apiKey, {
+    const probe = await runOpenAiLikeProbe(endpointUrl, model, apiKey, {
+      calibrateTimeouts: true,
       requireResponsesToolCalling: !reasoningEnabled,
       skipResponsesProbe:
         reasoningEnabled || shouldForceCompletionsApi(process.env.NEMOCLAW_PREFERRED_API),
@@ -326,11 +339,11 @@ export function createInferenceSelectionValidationHelpers(
     // for duplicate/missing/out-of-order events (#6289).
     const probe =
       intendedApi === "openai-completions"
-        ? runOpenAiLikeProbe(
+        ? await runOpenAiLikeProbe(
             getCompatibleAnthropicOpenAiSurfaceBaseUrl(endpointUrl),
             model,
             apiKey,
-            { skipResponsesProbe: true, pinnedAddresses },
+            { calibrateTimeouts: true, skipResponsesProbe: true, pinnedAddresses },
           )
         : runAnthropicProbe(endpointUrl, model, apiKey, {
             // Reasoning-only compatible endpoints often reject streaming probes,

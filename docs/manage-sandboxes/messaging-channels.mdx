@@ -101,6 +101,11 @@ When both Slack allowlists are set, NemoClaw requires the mention to come from o
 Channel messages still require an explicit bot mention.
 When a Slack channel `@mention` is denied by these allowlists, NemoClaw sends a denial notice back to the sender instead of dropping the message silently.
 During sandbox startup, NemoClaw normalizes OpenShell credential placeholders into the environment shape expected by the Slack runtime, so post-rebuild Slack starts use the gateway-managed tokens instead of literal placeholder strings.
+<AgentOnly variant="hermes">
+NemoClaw enables rich Slack rendering for Hermes.
+Final responses can use Slack Block Kit, including native table blocks for Markdown tables.
+This uses the existing Slack credentials and does not require additional scopes or reinstalling the Slack app.
+</AgentOnly>
 Slack Socket Mode allows one active connection per app-level token.
 If another sandbox on the same gateway already uses the same Slack app token, onboarding and `channels add slack` warn before continuing in interactive mode and abort in non-interactive mode.
 Use `--force` only when you intentionally want to move the Slack Socket Mode session to the new sandbox.
@@ -148,8 +153,10 @@ openclaw channels login --channel whatsapp  # OpenClaw sandboxes
 hermes whatsapp                             # Hermes sandboxes
 ```
 
+<AgentOnly variant="openclaw">
 For OpenClaw sandboxes, NemoClaw validates the gateway URL before pairing and renders the WhatsApp QR code in a compact terminal form so it fits in smaller terminal windows.
-If pairing exits with a gateway close such as `1008`, rerun the login command one time and then check `nemoclaw <sandbox> channels status --channel whatsapp` so you can diagnose the gateway/session path separately from QR rendering.
+If pairing exits with a gateway close such as `1008`, rerun the login command one time and then check `$$nemoclaw <sandbox> channels status --channel whatsapp` so you can diagnose the gateway/session path separately from QR rendering.
+</AgentOnly>
 
 The sandbox generates and stores session credentials inside durable agent state (`whatsapp` for OpenClaw, `platforms/whatsapp` for Hermes), so they survive rebuilds without re-pairing.
 This is the runtime tradeoff of enabling WhatsApp without a host bridge: a paired sandbox can use that WhatsApp account until you unpair it or clear the durable state.
