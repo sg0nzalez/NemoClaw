@@ -118,7 +118,6 @@ const {
   finalizeCreatedSandbox,
 }: typeof import("./onboard/created-sandbox-finalization") = require("./onboard/created-sandbox-finalization");
 const {
-  reportSandboxCreateFailure,
   reportSandboxReadinessFailure,
 }: typeof import("./onboard/created-sandbox-failure") = require("./onboard/created-sandbox-failure");
 const {
@@ -2852,31 +2851,13 @@ async function createSandboxWithBaseImageResolution(
     pendingStateRestore?.manifest?.backupPath ?? pendingStateRestoreBackupPath;
 
   if (createResult.status !== 0) {
-    reportSandboxCreateFailure(
-      {
-        sandboxName,
-        createStatus: createResult.status,
-        createOutput: createResult.output,
-        restoreBackupPath,
-        createArgs: prebuild.createArgs,
-      },
-      {
-        classifyCreateFailure: classifySandboxCreateFailure,
-        printCreateFailureDiagnostics: (name, options) =>
-          sandboxCreateFailureDiagnostics.printSandboxCreateFailureDiagnostics(name, options),
-        cleanupFailedCreate: (failureKind, createOutput) =>
-          sandboxCreateFailureDiagnostics.cleanupLandlockSandboxAfterCreateFailure({
-            failureKind,
-            createOutput,
-            sandboxName,
-            runOpenshell,
-          }),
-        printRecoveryHints: printSandboxCreateRecoveryHints,
-        warn: (message) => console.warn(message),
-        error: (message) => console.error(message),
-        exitProcess: (code) => process.exit(code),
-      },
-    );
+    sandboxCreateFailureDiagnostics.handleNonzeroSandboxCreateResult({
+      createResult,
+      sandboxName,
+      runOpenshell,
+      createArgs: prebuild.createArgs,
+      backupPath: restoreBackupPath,
+    });
   }
 
   dockerGpuCreatePatch.ensureApplied();

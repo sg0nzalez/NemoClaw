@@ -7,6 +7,7 @@ import path from "node:path";
 
 import { printSandboxCreateRecoveryHints } from "../build-context";
 import { classifySandboxCreateFailure } from "../validation";
+import { reportSandboxCreateFailure } from "./created-sandbox-failure";
 
 const ANSI_RE = /\x1B(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\)|[@-_])/g;
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
@@ -106,35 +107,32 @@ export function handleNonzeroSandboxCreateResult({
   runOpenshell,
   exit = process.exit,
 }: SandboxCreateFailureHandlerOptions): "wait_for_ready" {
-  const failure = classifySandboxCreateFailure(createResult.output);
-  if (failure.kind === "sandbox_create_incomplete") {
-    // The sandbox was created in the gateway but the create stream exited with
-    // a non-zero code (for example SSH 255). Let the caller keep the existing
-    // ready-wait gate; the sandbox may still reach Ready on its own.
-    console.warn("");
-    console.warn(
-      `  Create stream exited with code ${createResult.status} after sandbox was created.`,
-    );
-    console.warn("  Checking whether the sandbox reaches Ready state...");
-    return "wait_for_ready";
-  }
-
-  console.error("");
-  console.error(`  Sandbox creation failed (exit ${createResult.status}).`);
-  if (createResult.output) {
-    console.error("");
-    console.error(createResult.output);
-  }
-  printSandboxCreateFailureDiagnostics(sandboxName, { backupPath });
-  cleanupLandlockSandboxAfterCreateFailure({
-    failureKind: failure.kind,
-    createOutput: createResult.output,
-    sandboxName,
-    runOpenshell,
-  });
-  console.error("  Try:  openshell sandbox list        # check gateway state");
-  printSandboxCreateRecoveryHints(createResult.output, { createArgs });
-  return exit(createResult.status || 1);
+  reportSandboxCreateFailure(
+    {
+      sandboxName,
+      createStatus: createResult.status,
+      createOutput: createResult.output ?? "",
+      restoreBackupPath: backupPath ?? null,
+      createArgs: createArgs ?? [],
+    },
+    {
+      classifyCreateFailure: classifySandboxCreateFailure,
+      printCreateFailureDiagnostics: (name, options) =>
+        printSandboxCreateFailureDiagnostics(name, options),
+      cleanupFailedCreate: (failureKind, createOutput) =>
+        cleanupLandlockSandboxAfterCreateFailure({
+          failureKind,
+          createOutput,
+          sandboxName,
+          runOpenshell,
+        }),
+      printRecoveryHints: printSandboxCreateRecoveryHints,
+      warn: (message) => console.warn(message),
+      error: (message) => console.error(message),
+      exitProcess: (code) => exit(code),
+    },
+  );
+  return "wait_for_ready";
 }
 
 function stripAnsi(value: string): string {
