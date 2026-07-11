@@ -75,6 +75,7 @@ describe("Deep Agents Code base-image publication", () => {
     const dockerfiles = publishers.map(({ dockerfile }) => dockerfile);
     const curlVersions = dockerfiles.map((dockerfile) => pinnedAptVersion(dockerfile, "curl"));
 
+    expect(curlVersions).toEqual(expect.arrayContaining(["8.14.1-2+deb13u4"]));
     expect(new Set(curlVersions)).toEqual(new Set([curlVersions[0]]));
   });
 
