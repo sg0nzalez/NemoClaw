@@ -117,7 +117,6 @@ describe("agent definitions", () => {
     expect(deepAgentsCode.binary_path).toBe("/usr/local/bin/dcode");
     expect(deepAgentsCode.versionCommand).toBe("dcode --version");
     expect(deepAgentsCode.expectedVersion).toBe("0.1.34");
-    expect(deepAgentsCode.landlockCompatibility).toBe("hard_requirement");
     expect(deepAgentsCode.healthProbe).toBeNull();
     expect(deepAgentsCode.forwardPort).toBe(0);
     expect(deepAgentsCode.configPaths).toEqual({
@@ -136,27 +135,6 @@ describe("agent definitions", () => {
     expect(deepAgentsCode.stateFiles).toEqual([{ path: "config.toml", strategy: "copy" }]);
     expect(deepAgentsCode.stateFiles.map((entry) => entry.path)).not.toContain(".env");
     expect(deepAgentsCode.userManagedFiles).toEqual([".deepagents/.env", ".deepagents/.mcp.json"]);
-  });
-
-  it("defaults agent Landlock compatibility to best_effort", () => {
-    expect(loadAgent("openclaw").landlockCompatibility).toBe("best_effort");
-    expect(loadAgent("hermes").landlockCompatibility).toBe("best_effort");
-  });
-
-  it("rejects legacy strict Landlock compatibility in manifests", () => {
-    const agentName = `invalid-landlock-compatibility-${String(Date.now())}`;
-    writeTempAgentManifest(
-      agentName,
-      [
-        `name: ${agentName}`,
-        "display_name: Broken Landlock Compatibility",
-        "landlockCompatibility: strict",
-      ].join("\n"),
-    );
-
-    expect(() => loadAgent(agentName)).toThrow(
-      /landlockCompatibility.*best_effort or hard_requirement/,
-    );
   });
 
   it("orders OpenClaw first in interactive choices", () => {

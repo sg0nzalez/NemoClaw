@@ -1202,7 +1202,8 @@ nemo-deepagents <name> rebuild
 ```
 
 If startup reports that Landlock enforcement is unavailable, the Deep Agents sandbox fails closed instead of running with reduced filesystem enforcement.
-Deep Agents uses `compatibility: strict` for its managed filesystem policy, so kernels older than 5.13 or VM-backed Docker runtimes without Landlock support can block sandbox creation.
+Deep Agents uses `compatibility: hard_requirement` for its managed filesystem policy.
+The pinned OpenShell runtime builds a Landlock ABI v2 ruleset, so Linux kernels older than 5.19 or VM-backed Docker runtimes without Landlock support can block sandbox creation.
 Move the sandbox to a Linux kernel and container runtime that support Landlock, then rerun onboarding or rebuild the sandbox.
 
 </AgentOnly>

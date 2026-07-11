@@ -414,10 +414,10 @@ Rebuild existing Deep Agents Code sandboxes after upgrading NemoClaw to apply th
 
 | Aspect | Detail |
 |---|---|
-| Default | `compatibility: strict`. Deep Agents sandbox startup fails closed when OpenShell cannot enforce the managed filesystem policy. |
+| Default | `compatibility: hard_requirement`. Deep Agents sandbox startup fails closed when OpenShell cannot enforce the managed filesystem policy. |
 | What you can change | This is a NemoClaw Deep Agents invariant, not a user-facing knob. |
 | Risk if relaxed | Silent Landlock degradation would leave the terminal coding harness with weaker filesystem isolation while still reporting a successful sandbox. |
-| Recommendation | Run Deep Agents on a kernel and runtime that support Landlock enforcement. Rebuild or move hosts if startup reports an enforcement failure. |
+| Recommendation | Run Deep Agents on Linux 5.19 or later with Landlock enabled and its syscalls permitted. Rebuild or move hosts if startup reports an enforcement failure. |
 
 </AgentOnly>
 
