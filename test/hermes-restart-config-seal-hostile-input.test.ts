@@ -66,7 +66,8 @@ describe.skipIf(process.platform === "win32")("Hermes mutable restart input seal
       fs.ftruncateSync(externalFd, 0);
       fs.writeSync(externalFd, "attacker rewrite\n", 0, "utf8");
       fs.fsyncSync(externalFd);
-      // lgtm[js/file-system-race] Reopening the replaced test-owned path is the assertion.
+      // Reopening the replaced test-owned path is the assertion.
+      // codeql[js/file-system-race]
       expect(fs.readFileSync(fixture.configPath, "utf-8")).toBe(fixture.trustedConfig);
 
       fs.chmodSync(fixture.hermesDir, 0o755);

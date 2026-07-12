@@ -97,8 +97,6 @@ const {
 const createDirectSetupInferenceHarness =
   createDirectSetupInferenceHarnessFactory(createSetupInference);
 
-const repoRoot = path.join(import.meta.dirname, "..");
-
 describe("onboard helpers", () => {
   it("adds host proxy variables to sandbox startup env args", () => {
     const envArgs = ["CHAT_UI_URL=http://127.0.0.1:18789"];

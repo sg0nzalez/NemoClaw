@@ -172,7 +172,8 @@ describe.skipIf(process.platform === "win32")("Hermes mutable restart input seal
       fs.writeSync(mutableFd, Buffer.from("PWNED!"), 0, 6, 0);
       fs.fsyncSync(mutableFd);
 
-      // lgtm[js/file-system-race] Reopening the replaced test-owned path is the assertion.
+      // Reopening the replaced test-owned path is the assertion.
+      // codeql[js/file-system-race]
       expect(fs.readFileSync(fixture.configPath, "utf-8")).toBe(fixture.trustedConfig);
       expect(mode(fixture.sandboxDir)).toBe(0o1775);
       expect(mode(fixture.hermesDir)).toBe(0o755);
@@ -264,7 +265,8 @@ describe.skipIf(process.platform === "win32")("Hermes mutable restart input seal
       expect(sealed.status).not.toBe(0);
       expect(sealed.stderr).toContain("compat hash verification failed");
       expect(strictHashIsValid(fixture)).toBe(true);
-      // lgtm[js/file-system-race] Reopening the replaced test-owned path is the assertion.
+      // Reopening the replaced test-owned path is the assertion.
+      // codeql[js/file-system-race]
       expect(fs.readFileSync(fixture.compatHashPath, "utf-8")).not.toBe(
         fs.readFileSync(fixture.hashPath, "utf-8"),
       );
