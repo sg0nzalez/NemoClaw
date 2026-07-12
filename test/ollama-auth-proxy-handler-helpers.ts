@@ -6,6 +6,7 @@
 // request driver all branch, so they live here to keep the test body linear.
 
 import { type ChildProcess, spawn } from "node:child_process";
+import { once } from "node:events";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
@@ -143,6 +144,15 @@ export async function terminate(child: ChildProcess | undefined): Promise<void> 
   const owner = proxyOwners.get(child) ?? ownChildProcess(child);
   await owner.terminate();
   proxyOwners.delete(child);
+}
+
+export async function forceKill(child: ChildProcess | undefined): Promise<void> {
+  if (!child) return;
+  const hasExited = child.exitCode !== null || child.signalCode !== null;
+  if (hasExited && child.stdio.every((stream) => stream === null || stream?.destroyed)) return;
+  const closed = once(child, "close");
+  if (!hasExited) child.kill("SIGKILL");
+  await closed;
 }
 
 export interface ProxyResponse {

@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ChildProcess } from "node:child_process";
-import { once } from "node:events";
 import type { AddressInfo } from "node:net";
 import net from "node:net";
 
@@ -18,7 +17,7 @@ vi.mock("./helpers/child-process-lifecycle.ts", () => ({
   ownChildProcess: ownerMocks.ownChildProcess,
 }));
 
-import { freePort, startProxy, terminate } from "./ollama-auth-proxy-handler-helpers.ts";
+import { forceKill, freePort, startProxy, terminate } from "./ollama-auth-proxy-handler-helpers.ts";
 
 const TOKEN = "unit-test-secret-token";
 
@@ -48,12 +47,7 @@ it("preserves the readiness failure and allows cleanup to be retried", async ({
   const readinessPort = (readinessRejector.address() as AddressInfo).port;
   const proxyPort = await freePort();
   let spawned: ChildProcess | undefined;
-  onTestFinished(async () => {
-    if (!spawned || spawned.stdio.every((stream) => stream?.destroyed !== false)) return;
-    const closed = once(spawned, "close");
-    if (spawned.exitCode === null && spawned.signalCode === null) spawned.kill("SIGKILL");
-    await closed;
-  });
+  onTestFinished(() => forceKill(spawned));
 
   await expect(
     startProxy(proxyPort, 1, TOKEN, {
