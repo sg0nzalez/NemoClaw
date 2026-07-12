@@ -185,12 +185,18 @@ print(json.dumps({"ok": True}))
     expect(JSON.parse(result.stdout)).toEqual({ ok: true });
   });
 
-  it("shares the host credential-name boundary while preserving exact cleanup", () => {
-    // One representative from each production category: OpenShell raw child
-    // value, OpenShell rewritten child value, exact process control, and
-    // process-control prefix. The exhaustive manifest-driven matrix lives at
-    // the shared TypeScript validator boundary.
-    const blockedNames = ["GCP_PROJECT_ID", "GCE_METADATA_HOST", "PATH", "NEMOCLAW_MCP_TOKEN"];
+  it("shares the host credential-name boundary while preserving exact cleanup (#6379)", () => {
+    // Representatives cover OpenShell raw and rewritten child values, exact process control,
+    // process-control prefix, and revisioned placeholder namespace. The
+    // exhaustive manifest-driven matrix lives at the shared TypeScript
+    // validator boundary.
+    const blockedNames = [
+      "GCP_PROJECT_ID",
+      "GCE_METADATA_HOST",
+      "PATH",
+      "NEMOCLAW_MCP_TOKEN",
+      "v10_GITHUB_TOKEN",
+    ];
     const result = runPython(
       `
 import importlib.util, json, sys

@@ -88,6 +88,8 @@ The child-visible compatibility list is pinned to OpenShell `v0.0.72` commit `8c
 Choose a dedicated name such as `MY_SERVICE_MCP_TOKEN`.
 NemoClaw also rejects host subprocess control names such as `PATH`, proxy/TLS variables, and `OPENSHELL_*`, `GRPC_*`, `LC_*`, or `XDG_*` keys so the selected credential cannot be inherited by unrelated OpenShell commands.
 Loader, shell, language, and agent runtime controls such as `LD_PRELOAD`, `BASH_ENV`, `NODE_OPTIONS`, `PYTHONHOME`, `NEMOCLAW_*`, and `OPENCLAW_*` are rejected as well because OpenShell attaches provider keys to fresh sandbox execs; use a dedicated service name such as `MY_SERVICE_MCP_TOKEN`.
+OpenShell reserves credential names matching `v[0-9]+_[A-Za-z0-9_]+` for revisioned placeholders.
+NemoClaw rejects names such as `v10_GITHUB_TOKEN` because OpenShell skips them instead of attaching a credential resolver.
 
 NemoClaw requires exactly one `--env` bearer credential per server.
 Every endpoint must use HTTPS.
@@ -323,6 +325,8 @@ For an identical HTTP 401 or 403, a confirmed-valid credential settles it: the O
 An identical HTTP 400 stays inconclusive even with a valid credential, because the endpoint may reject the probe's `initialize` request itself; compare `mcp status` for the same server on a known-good host — if that host verifies, suspect this host's placeholder rewrite.
 That is a host-side OpenShell defect rather than a NemoClaw registration problem: verify the OpenShell installation on the host (tracked upstream as OpenShell issue 2161).
 A `credential resolution: unknown` verdict with an endpoint or policy detail means the probe could not reach a judgment; fix the reported endpoint or policy condition and rerun `mcp status <server>`.
+A detail containing `CONNECT 503` means OpenShell failed closed before TLS setup because gateway TLS termination or credential rewriting was unavailable.
+Inspect the OpenShell gateway's ephemeral CA initialization and provider environment, repair the reported condition, and rerun `mcp status <server>`.
 
 If `restart` reports a missing provider and the original credential is not registered in OpenShell, export the same variable name used during `add` and retry.
 
