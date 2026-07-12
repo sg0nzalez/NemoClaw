@@ -25,7 +25,7 @@ describe("CLI debug command", () => {
   });
 
   it(
-    "debug --quick exits 0 and produces diagnostic output",
+    "exits with status 0 and produces diagnostic output for debug --quick",
     testTimeoutOptions(30_000),
     ({ resources }) => {
       const r = runWithEnv(
