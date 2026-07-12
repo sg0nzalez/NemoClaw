@@ -1,0 +1,72 @@
+// SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+import type { ChildProcess } from "node:child_process";
+import { once } from "node:events";
+import type { AddressInfo } from "node:net";
+import net from "node:net";
+
+import { expect, vi } from "vitest";
+
+import { test as it } from "./helpers/owned-test-resources";
+
+const ownerMocks = vi.hoisted(() => ({
+  ownChildProcess: vi.fn(),
+}));
+
+vi.mock("./helpers/child-process-lifecycle.ts", () => ({
+  ownChildProcess: ownerMocks.ownChildProcess,
+}));
+
+import { freePort, startProxy, terminate } from "./ollama-auth-proxy-handler-helpers.ts";
+
+const TOKEN = "unit-test-secret-token";
+
+it("preserves the readiness failure and allows cleanup to be retried", async ({
+  onTestFinished,
+  resources,
+}) => {
+  const failedTermination = vi.fn().mockRejectedValue(new Error("cleanup failed"));
+  const retryTermination = vi.fn().mockResolvedValue(undefined);
+  ownerMocks.ownChildProcess
+    .mockImplementationOnce((child: ChildProcess) => ({
+      child,
+      closed: Promise.resolve(),
+      terminate: failedTermination,
+    }))
+    .mockImplementationOnce((child: ChildProcess) => ({
+      child,
+      closed: Promise.resolve(),
+      terminate: retryTermination,
+    }));
+
+  const readinessRejector = resources.ownServer(net.createServer((socket) => socket.destroy()));
+  await new Promise<void>((resolve, reject) => {
+    readinessRejector.once("error", reject);
+    readinessRejector.listen(0, "127.0.0.1", resolve);
+  });
+  const readinessPort = (readinessRejector.address() as AddressInfo).port;
+  const proxyPort = await freePort();
+  let spawned: ChildProcess | undefined;
+  onTestFinished(async () => {
+    if (!spawned || spawned.stdio.every((stream) => stream?.destroyed !== false)) return;
+    const closed = once(spawned, "close");
+    if (spawned.exitCode === null && spawned.signalCode === null) spawned.kill("SIGKILL");
+    await closed;
+  });
+
+  await expect(
+    startProxy(proxyPort, 1, TOKEN, {
+      onSpawn: (child) => {
+        spawned = child;
+      },
+      readinessPort,
+      readinessTimeoutMs: 100,
+    }),
+  ).rejects.toThrow("proxy did not start in time");
+
+  await expect(terminate(spawned)).resolves.toBeUndefined();
+  expect(failedTermination).toHaveBeenCalledOnce();
+  expect(retryTermination).toHaveBeenCalledOnce();
+  expect(ownerMocks.ownChildProcess).toHaveBeenCalledTimes(2);
+});

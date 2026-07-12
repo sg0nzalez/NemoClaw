@@ -127,8 +127,13 @@ export async function startProxy(
     });
     return child;
   } catch (error) {
-    await owner.terminate();
-    proxyOwners.delete(child);
+    try {
+      await owner.terminate();
+    } catch {
+      // Cleanup failure must not replace the proxy startup failure.
+    } finally {
+      proxyOwners.delete(child);
+    }
     throw error;
   }
 }
