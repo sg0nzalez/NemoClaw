@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import fs from "node:fs";
 import { createRequire } from "node:module";
 
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
@@ -180,6 +181,8 @@ function createDoctorHarness(): {
     ]);
 
   logSpy.mockClear();
+  const runSandboxDoctor = requireDist(doctorModulePath).runSandboxDoctor;
+  vi.spyOn(fs, "existsSync").mockReturnValueOnce(true);
 
   return {
     buildToolScopeChecksSpy,
@@ -197,7 +200,7 @@ function createDoctorHarness(): {
     recoverNamedGatewayRuntimeSpy,
     repairMutableConfigPermsSpy,
     resolveOpenShellSpy,
-    runSandboxDoctor: requireDist(doctorModulePath).runSandboxDoctor,
+    runSandboxDoctor,
   };
 }
 
