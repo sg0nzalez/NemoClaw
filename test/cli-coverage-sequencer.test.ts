@@ -86,8 +86,8 @@ describe("CLI coverage duration-aware sharding", () => {
 
   it("wires the measured hints into the Vitest sequencer", async () => {
     const specifications = [
-      testSpecification("test/nemoclaw-start.test.ts", "nemoclaw-start"),
-      testSpecification("test/release-latest-tag.test.ts", "release-latest-tag"),
+      testSpecification("test/local-credential-helper-fields.test.ts", "local-credentials"),
+      testSpecification("test/hermes-restart-config-seal-write-lock.test.ts", "hermes-config"),
       ...Array.from({ length: 8 }, (_, index) =>
         testSpecification(`test/regular-${index}.test.ts`, `regular-${index}`),
       ),
@@ -103,7 +103,7 @@ describe("CLI coverage duration-aware sharding", () => {
     expect([...first, ...second].map((specification) => specification.taskId).sort()).toEqual(
       specifications.map((specification) => specification.taskId).sort(),
     );
-    expect(owners.get("nemoclaw-start")).not.toBe(owners.get("release-latest-tag"));
+    expect(owners.get("local-credentials")).not.toBe(owners.get("hermes-config"));
   });
 
   it("validates the checked-in timing hints and provides a conservative fallback", () => {
