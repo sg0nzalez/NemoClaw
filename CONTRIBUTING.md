@@ -222,6 +222,18 @@ npx vitest run --project e2e-support
 This project is fast and does not run live targets. Live E2E remains opt-in through
 `npm run test:live-e2e` or the applicable GitHub Actions workflow.
 
+### Test State Isolation
+
+The `cli`, `integration`, `installer-integration`, `package-contract`, `plugin`, and `e2e-support`
+projects clear mock call history, restore `vi.spyOn` descriptors, and undo `vi.stubEnv` and
+`vi.stubGlobal` before each test.
+Create those spies and stubs in `beforeEach` or the test body. A documented import-time stub may
+remain at module scope when the imported module must capture it during evaluation.
+These projects do not enable `mockReset`, and Vitest does not track direct `process.env` or global
+assignments, so reset mock implementations and restore raw mutations in the test that owns them.
+Live E2E projects do not enable this automatic cleanup because their stateful targets require
+explicit, validated teardown.
+
 ### Test Titles as Behavioral Documentation
 
 Write `describe` and `it` titles so the Vitest tree reads as behavioral documentation. Start test

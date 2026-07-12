@@ -17,6 +17,10 @@ type PluginVitestProjectOptions = {
     alias: Array<{ find: RegExp; replacement: string }>;
     env: Record<string, string>;
     environment: "node";
+    clearMocks: true;
+    restoreMocks: true;
+    unstubEnvs: true;
+    unstubGlobals: true;
     setupFiles: string[];
     include: string[];
   };
@@ -39,6 +43,10 @@ const pluginVitestProjectOptions = {
       NEMOCLAW_DISABLE_GATEWAY_DRIFT_PREFLIGHT: "1",
     },
     environment: "node",
+    clearMocks: true,
+    restoreMocks: true,
+    unstubEnvs: true,
+    unstubGlobals: true,
     setupFiles: ["test/helpers/normalize-fixture-umask.ts"],
     include: ["nemoclaw/src/**/*.test.ts"],
   },
