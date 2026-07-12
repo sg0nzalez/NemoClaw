@@ -201,6 +201,10 @@ These are the primary npm scripts for day-to-day development:
 | `npm test` | Build package artifacts and run every non-live Vitest project for broad changes |
 | `npm run test:spec` | Run every non-live test with hierarchical behavior-oriented output |
 | `npm run test:fast` | Clean `dist/` and run source CLI, plugin, and E2E-support tests |
+| `npm run test:changed` | Run tests affected by staged, unstaged, or untracked changes in the CLI, plugin, and E2E-support projects |
+| `npm run test:watch` | Watch the CLI, plugin, and E2E-support projects and rerun affected tests |
+| `npm run test:shuffle` | Shuffle test order in the focused source projects without collecting coverage |
+| `npm run test:diagnose:leaks` | Report async-resource leaks and diagnose a Vitest process that hangs during shutdown |
 | `npm run test:integration` | Clean-build the CLI and run root integration and installer tests |
 | `npm run test:package` | Clean-build CLI/plugin artifacts and run compiled-package contracts |
 | `npm run test:live-e2e` | Opt into live E2E scenarios (mutates real external state) |
@@ -221,6 +225,33 @@ npx vitest run --project e2e-support
 
 This project is fast and does not run live targets. Live E2E remains opt-in through
 `npm run test:live-e2e` or the applicable GitHub Actions workflow.
+
+### Focused Vitest Feedback
+
+Use `npm run test:changed` for the staged, unstaged, and untracked changes in the current checkout,
+or keep `npm run test:watch` running while editing. Both commands select only the source-backed
+`cli`, `plugin`, and `e2e-support` projects. Watch mode also maps the repository's current opaque
+YAML, Python, shell, generated, and workflow inputs to the concrete contract tests that read or
+execute them outside Vitest's import graph. Add a narrow mapping in
+`test/helpers/vitest-watch-triggers.ts` when a new opaque input needs the same treatment.
+
+Use `npm run test:shuffle` to expose order dependencies in those focused projects. The command
+shuffles tests within files and leaves coverage disabled. Vitest prints the chosen seed at the
+start of the run. Replay that order by appending the printed value:
+
+```bash
+npm run test:shuffle -- --sequence.seed=6692
+```
+
+Use `npm run test:diagnose:leaks` when a test file leaves an async resource active or Vitest hangs
+during shutdown. It enables Vitest's async-leak detector and hanging-process reporter while
+keeping coverage disabled. This is a diagnostic command: inspect its leak output even when all
+assertions pass, because reported async leaks do not independently change a successful test exit
+code.
+
+Vitest chooses the environment-appropriate reporter for ordinary local runs. In CI, console logs
+from passing tests stay hidden while logs attached to failures are replayed; GitHub Actions still
+receives test annotations.
 
 ### Test State Isolation
 
