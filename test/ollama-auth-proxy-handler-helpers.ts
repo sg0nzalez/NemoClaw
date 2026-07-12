@@ -10,18 +10,27 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
 
+import { type ChildProcessOwner, ownChildProcess } from "./helpers/child-process-lifecycle.ts";
+
 export const PROXY_SCRIPT = path.resolve(
   import.meta.dirname,
   "..",
   "scripts",
   "ollama-auth-proxy.js",
 );
+const proxyOwners = new WeakMap<ChildProcess, ChildProcessOwner>();
 
 export interface BackendCapture {
   method: string;
   url: string;
   headers: http.IncomingHttpHeaders;
 }
+
+export type StartProxyOptions = {
+  onSpawn?: (child: ChildProcess) => void;
+  readinessPort?: number;
+  readinessTimeoutMs?: number;
+};
 
 /** Start a loopback stub backend that records the request it received. */
 export function startBackend(): Promise<{
@@ -67,6 +76,7 @@ export async function startProxy(
   proxyPort: number,
   backendPort: number,
   token: string,
+  options: StartProxyOptions = {},
 ): Promise<ChildProcess> {
   const child = spawn(process.execPath, [PROXY_SCRIPT], {
     env: {
@@ -77,51 +87,57 @@ export async function startProxy(
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
-  await new Promise<void>((resolve, reject) => {
-    let settled = false;
-    const timer = setTimeout(() => {
-      settled = true;
-      reject(new Error("proxy did not start in time"));
-    }, 5_000);
-    const tryConnect = (): void => {
-      if (settled) return;
-      const req = http.request(
-        { host: "127.0.0.1", port: proxyPort, path: "/", method: "GET" },
-        (res) => {
-          res.resume();
-          settled = true;
-          clearTimeout(timer);
-          resolve();
-        },
-      );
-      req.on("error", () => {
-        if (!settled) setTimeout(tryConnect, 100);
+  const owner = ownChildProcess(child, { forceTimeoutMs: 2_000, gracefulTimeoutMs: 2_000 });
+  proxyOwners.set(child, owner);
+  try {
+    options.onSpawn?.(child);
+    await new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        settled = true;
+        reject(new Error("proxy did not start in time"));
+      }, options.readinessTimeoutMs ?? 5_000);
+      const tryConnect = (): void => {
+        if (settled) return;
+        const req = http.request(
+          {
+            host: "127.0.0.1",
+            port: options.readinessPort ?? proxyPort,
+            path: "/",
+            method: "GET",
+          },
+          (res) => {
+            res.resume();
+            settled = true;
+            clearTimeout(timer);
+            resolve();
+          },
+        );
+        req.on("error", () => {
+          if (!settled) setTimeout(tryConnect, 100);
+        });
+        req.end();
+      };
+      child.once("exit", (code) => {
+        settled = true;
+        clearTimeout(timer);
+        reject(new Error(`proxy exited early with code ${code}`));
       });
-      req.end();
-    };
-    child.once("exit", (code) => {
-      settled = true;
-      clearTimeout(timer);
-      reject(new Error(`proxy exited early with code ${code}`));
+      tryConnect();
     });
-    tryConnect();
-  });
-  return child;
+    return child;
+  } catch (error) {
+    await owner.terminate();
+    proxyOwners.delete(child);
+    throw error;
+  }
 }
 
 export async function terminate(child: ChildProcess | undefined): Promise<void> {
-  if (!child || child.killed || child.exitCode !== null) return;
-  child.kill("SIGTERM");
-  await new Promise<void>((resolve) => {
-    const timer = setTimeout(() => {
-      if (!child.killed && child.exitCode === null) child.kill("SIGKILL");
-      resolve();
-    }, 2_000);
-    child.once("exit", () => {
-      clearTimeout(timer);
-      resolve();
-    });
-  });
+  if (!child) return;
+  const owner = proxyOwners.get(child) ?? ownChildProcess(child);
+  await owner.terminate();
+  proxyOwners.delete(child);
 }
 
 export interface ProxyResponse {
