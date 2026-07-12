@@ -15,6 +15,7 @@ import { CliCoverageSequencer } from "./test/helpers/cli-coverage-sequencer";
 import { resolveIntegrationProjectScheduling } from "./test/helpers/integration-project-scheduling";
 import { sourceLoaderNodeOptions } from "./test/helpers/source-loader-options";
 import { testTimeout } from "./test/helpers/timeouts";
+import { vitestStateIsolation } from "./test/helpers/vitest-state-isolation";
 
 const isGithubActions = process.env.GITHUB_ACTIONS === "true";
 const isCi = isGithubActions || process.env.CI === "true" || process.env.CI === "1";
@@ -74,6 +75,7 @@ export default defineConfig({
       {
         ...typedSourceTransform,
         test: {
+          ...vitestStateIsolation,
           name: "cli",
           alias: canonicalOpenShellPolicyAlias,
           env: controlledNonLiveEnv,
@@ -86,6 +88,7 @@ export default defineConfig({
       {
         ...typedSourceTransform,
         test: {
+          ...vitestStateIsolation,
           name: "integration",
           alias: canonicalOpenShellPolicyAlias,
           // Source-backed process fixtures can exceed the unit-test budget
@@ -124,6 +127,7 @@ export default defineConfig({
       {
         ...typedSourceTransform,
         test: {
+          ...vitestStateIsolation,
           name: "installer-integration",
           alias: canonicalOpenShellPolicyAlias,
           env: controlledNonLiveEnv,
@@ -142,6 +146,7 @@ export default defineConfig({
       {
         ...typedSourceTransform,
         test: {
+          ...vitestStateIsolation,
           name: "package-contract",
           alias: canonicalOpenShellPolicyAlias,
           env: controlledNonLiveEnv,
@@ -153,6 +158,7 @@ export default defineConfig({
       {
         ...typedSourceTransform,
         test: {
+          ...vitestStateIsolation,
           // Fast tests for the E2E fixture/support layer. Vitest remains the
           // only harness; this project does not define a separate runner.
           name: "e2e-support",

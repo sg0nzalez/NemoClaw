@@ -94,6 +94,7 @@ When writing tests:
 - Plugin tests use TypeScript and are co-located with their source files
 - Import CLI source from ordinary tests. Put genuine compiled-artifact assertions under `test/package-contract/`.
 - Keep project globs disjoint; `npm run test:projects:check` derives membership from Vitest and rejects overlap.
+- Deterministic projects clear mock calls, restore `vi.spyOn`, and undo `vi.stubEnv` and `vi.stubGlobal` before each test. Create those spies and stubs in `beforeEach` or the test body unless a documented import-time stub must run before module evaluation. Restore direct environment or global mutations yourself, and reset mock implementations explicitly when needed. Live E2E and automatic `mockReset` are intentionally excluded.
 - Write behavior-oriented titles, put local issue references in a final `(#1234)` suffix, and use `npm run test:spec` for the hierarchical specification view.
 - Mock external dependencies; don't call real NVIDIA APIs in unit tests
 - E2E tests run on ephemeral Brev cloud instances
