@@ -270,7 +270,7 @@ function transportDetail(curlExit: number, stderr: string): string | undefined {
     return "OpenShell denied the probe connection (CONNECT 403); check the generated MCP policy";
   }
   if (curlExit === 56 && /CONNECT tunnel failed,\s*response 503/i.test(stderr)) {
-    return "OpenShell denied the probe before TLS setup (CONNECT 503); check gateway TLS termination and credential-rewrite readiness";
+    return "OpenShell denied the probe before TLS setup (CONNECT 503); check gateway ephemeral CA initialization and TLS termination readiness";
   }
   if (curlExit === 28) return `probe timed out after ${PROBE_CURL_MAX_TIME_SECONDS}s`;
   return undefined;
