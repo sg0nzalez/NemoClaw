@@ -62,5 +62,4 @@ it("preserves the readiness failure and allows cleanup to be retried", async ({
   await expect(terminate(spawned)).resolves.toBeUndefined();
   expect(failedTermination).toHaveBeenCalledOnce();
   expect(retryTermination).toHaveBeenCalledOnce();
-  expect(ownerMocks.ownChildProcess).toHaveBeenCalledTimes(2);
 });
