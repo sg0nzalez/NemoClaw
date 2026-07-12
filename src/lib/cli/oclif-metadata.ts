@@ -4,6 +4,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { CLI_DISPLAY_NAME } from "./branding";
 import type { PublicCommandDisplayEntry } from "./command-display";
 
 const GENERATED_METADATA_FILE = "oclif-command-metadata.generated.json";
@@ -61,13 +62,25 @@ function* walkSourceCommandFiles(dir: string, prefix = ""): Generator<string> {
 }
 
 // Source tests need routing metadata before command modules can load. Read only
-// literal statics so discovery cannot execute a command or re-enter this registry.
+// recognized literal/branding statics so discovery cannot execute a command or
+// re-enter this registry.
 function staticJsonString(source: string, property: "summary"): string | undefined {
   const match = source.match(
     new RegExp(`\\bstatic\\s+(?:readonly\\s+)?${property}\\s*=\\s*("(?:\\\\.|[^"\\\\])*")\\s*;`),
   );
   if (!match?.[1]) return undefined;
   return JSON.parse(match[1]) as string;
+}
+
+function staticSummary(source: string): string | undefined {
+  const literalSummary = staticJsonString(source, "summary");
+  if (literalSummary !== undefined) return literalSummary;
+
+  const brandedTemplate = source.match(
+    /\bstatic\s+(?:readonly\s+)?summary\s*=\s*`([^`$\\]*)\$\{CLI_DISPLAY_NAME\}([^`$\\]*)`\s*;/,
+  );
+  if (!brandedTemplate) return undefined;
+  return `${brandedTemplate[1]}${CLI_DISPLAY_NAME}${brandedTemplate[2]}`;
 }
 
 function staticBoolean(source: string, property: "hidden" | "strict"): boolean | undefined {
@@ -90,7 +103,7 @@ function loadSourceOclifMetadata(commandRoot: string): Record<string, OclifComma
     const source = fs.readFileSync(path.join(commandRoot, relativeFile), "utf-8");
     const commandId = commandIdFromSourceFile(relativeFile);
     const commandMetadata: OclifCommandMetadata = { id: commandId };
-    const summary = staticJsonString(source, "summary");
+    const summary = staticSummary(source);
     const hidden = staticBoolean(source, "hidden");
     const strict = staticBoolean(source, "strict");
     if (summary !== undefined) commandMetadata.summary = summary;

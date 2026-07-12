@@ -5,6 +5,7 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { CLI_DISPLAY_NAME } from "./branding";
 import {
   getRegisteredOclifCommandMetadata,
   getRegisteredOclifCommandSummary,
@@ -44,6 +45,12 @@ describe("source oclif metadata lookup", () => {
 
   it("looks up source summaries and rejects unknown command IDs", () => {
     expect(getRegisteredOclifCommandSummary("sandbox:logs")).toBe("Stream sandbox logs");
+    expect(getRegisteredOclifCommandSummary("update")).toBe(
+      `Run the maintained ${CLI_DISPLAY_NAME} installer update flow`,
+    );
+    expect(getRegisteredOclifCommandSummary("internal:uninstall:run-plan")).toBe(
+      `${CLI_DISPLAY_NAME} Uninstaller`,
+    );
     expect(getRegisteredOclifCommandMetadata("missing:nope")).toBeNull();
   });
 });

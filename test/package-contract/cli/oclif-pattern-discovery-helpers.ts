@@ -7,31 +7,34 @@ type OclifCommandClass = {
   flags?: Record<string, unknown>;
 };
 
-function extendsNemoClawCommand(commandClass: unknown): boolean {
+export function extendsNemoClawCommand(
+  commandClass: unknown,
+  nemoClawCommandBase: unknown,
+): boolean {
   if (typeof commandClass !== "function") return false;
-  let current = Object.getPrototypeOf(commandClass) as { name?: string } | null;
+  let current = Object.getPrototypeOf(commandClass) as object | null;
   while (current) {
-    if (current.name === "NemoClawCommand") return true;
-    current = Object.getPrototypeOf(current) as { name?: string } | null;
+    if (current === nemoClawCommandBase) return true;
+    current = Object.getPrototypeOf(current) as object | null;
   }
   return false;
 }
 
-function commandOwnsHelpFlag(commandClass: unknown): boolean {
+export function commandOwnsHelpFlag(commandClass: unknown): boolean {
   return (
     typeof commandClass === "function" &&
-    Object.hasOwn(commandClass as OclifCommandClass, "flags") &&
     Object.hasOwn((commandClass as OclifCommandClass).flags ?? {}, "help")
   );
 }
 
 export async function findCommandsOutsideNemoClawBase(
   commands: readonly Command.Loadable[],
+  nemoClawCommandBase: unknown,
 ): Promise<string[]> {
   const nonConforming: string[] = [];
   for (const command of commands) {
     const commandClass = await command.load();
-    if (!extendsNemoClawCommand(commandClass)) nonConforming.push(command.id);
+    if (!extendsNemoClawCommand(commandClass, nemoClawCommandBase)) nonConforming.push(command.id);
   }
   return nonConforming;
 }
