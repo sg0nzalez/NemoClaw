@@ -14,10 +14,11 @@
 // beyond loopback; every server and child process has an awaited cleanup owner.
 
 import { type ChildProcess, spawn } from "node:child_process";
-import { once } from "node:events";
+import { EventEmitter, once } from "node:events";
+import http from "node:http";
 import type { AddressInfo } from "node:net";
 import net from "node:net";
-import { afterEach, beforeEach, describe, expect } from "vitest";
+import { afterEach, beforeEach, describe, expect, vi } from "vitest";
 
 import { test as it } from "./helpers/owned-test-resources";
 
@@ -27,6 +28,7 @@ import {
   startBackend,
   startProxy,
   terminate,
+  waitForProxyReadiness,
 } from "./ollama-auth-proxy-handler-helpers.ts";
 
 const TOKEN = "unit-test-secret-token";
@@ -146,6 +148,41 @@ describe("ollama-auth-proxy process ownership", () => {
     expect(spawned).toBeDefined();
     expect(spawned?.signalCode).toBe("SIGTERM");
     expect(spawned?.stdout?.destroyed).toBe(true);
+  });
+
+  it("destroys a stalled readiness request and removes child listeners", async ({
+    onTestFinished,
+  }) => {
+    const child = new EventEmitter() as unknown as ChildProcess;
+    const destroy = vi.fn();
+    const end = vi.fn();
+    const request = Object.assign(new EventEmitter(), {
+      destroy,
+      end,
+    }) as unknown as http.ClientRequest;
+    const requestSpy = vi.spyOn(http, "request").mockReturnValue(request);
+    onTestFinished(() => requestSpy.mockRestore());
+
+    await expect(waitForProxyReadiness(child, 1, { readinessTimeoutMs: 10 })).rejects.toThrow(
+      "proxy did not start in time",
+    );
+
+    expect(end).toHaveBeenCalledOnce();
+    expect(destroy).toHaveBeenCalledOnce();
+    expect(child.listenerCount("error")).toBe(0);
+    expect(child.listenerCount("exit")).toBe(0);
+  });
+
+  it("rejects a child spawn error and removes readiness listeners", async () => {
+    const child = new EventEmitter() as unknown as ChildProcess;
+    const spawnError = Object.assign(new Error("spawn EACCES"), { code: "EACCES" });
+    const readiness = waitForProxyReadiness(child, 1, { readinessTimeoutMs: 1_000 });
+
+    child.emit("error", spawnError);
+
+    await expect(readiness).rejects.toBe(spawnError);
+    expect(child.listenerCount("error")).toBe(0);
+    expect(child.listenerCount("exit")).toBe(0);
   });
 
   it("escalates a SIGTERM-ignoring child and awaits close", async ({ onTestFinished }) => {

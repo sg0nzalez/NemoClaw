@@ -5,7 +5,7 @@ import type { ChildProcess } from "node:child_process";
 import type { AddressInfo } from "node:net";
 import net from "node:net";
 
-import { expect, vi } from "vitest";
+import { beforeEach, expect, vi } from "vitest";
 
 import { test as it } from "./helpers/owned-test-resources";
 
@@ -20,6 +20,10 @@ vi.mock("./helpers/child-process-lifecycle.ts", () => ({
 import { forceKill, freePort, startProxy, terminate } from "./ollama-auth-proxy-handler-helpers.ts";
 
 const TOKEN = "unit-test-secret-token";
+
+beforeEach(() => {
+  ownerMocks.ownChildProcess.mockReset();
+});
 
 it("preserves the readiness failure and allows cleanup to be retried", async ({
   onTestFinished,
@@ -62,5 +66,32 @@ it("preserves the readiness failure and allows cleanup to be retried", async ({
   await expect(terminate(spawned)).resolves.toBeUndefined();
   expect(failedTermination).toHaveBeenCalledOnce();
   expect(retryTermination).toHaveBeenCalledOnce();
-  expect(ownerMocks.ownChildProcess).toHaveBeenCalledTimes(2);
+});
+
+it("removes a failed termination owner so cleanup can be retried", async ({ onTestFinished }) => {
+  const failedTermination = vi.fn().mockRejectedValue(new Error("cleanup failed"));
+  const retryTermination = vi.fn().mockResolvedValue(undefined);
+  ownerMocks.ownChildProcess
+    .mockImplementationOnce((child: ChildProcess) => ({
+      child,
+      closed: Promise.resolve(),
+      terminate: failedTermination,
+    }))
+    .mockImplementationOnce((child: ChildProcess) => ({
+      child,
+      closed: Promise.resolve(),
+      terminate: retryTermination,
+    }));
+  let spawned: ChildProcess | undefined;
+  onTestFinished(() => forceKill(spawned));
+  const proxy = await startProxy(await freePort(), 1, TOKEN, {
+    onSpawn: (child) => {
+      spawned = child;
+    },
+  });
+
+  await expect(terminate(proxy)).rejects.toThrow("cleanup failed");
+  await expect(terminate(proxy)).resolves.toBeUndefined();
+  expect(failedTermination).toHaveBeenCalledOnce();
+  expect(retryTermination).toHaveBeenCalledOnce();
 });
