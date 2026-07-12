@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import {
   createRestartFixture,
   mode,
+  readTextFileSnapshot,
   runShieldsTransactionAction,
   shieldsTransactionToken,
 } from "./helpers/hermes-restart-config-seal-fixture";
@@ -66,9 +67,7 @@ describe.skipIf(process.platform === "win32")("Hermes mutable restart input seal
       fs.ftruncateSync(externalFd, 0);
       fs.writeSync(externalFd, "attacker rewrite\n", 0, "utf8");
       fs.fsyncSync(externalFd);
-      // Reopening the replaced test-owned path is the assertion.
-      // codeql[js/file-system-race]
-      expect(fs.readFileSync(fixture.configPath, "utf-8")).toBe(fixture.trustedConfig);
+      expect(readTextFileSnapshot(fixture.configPath)).toBe(fixture.trustedConfig);
 
       fs.chmodSync(fixture.hermesDir, 0o755);
       expect(

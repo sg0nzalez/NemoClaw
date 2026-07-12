@@ -11,6 +11,7 @@ import {
   createRestartFixture,
   mode,
   overwriteThroughOldFd,
+  readTextFileSnapshot,
   runGuard,
   runShieldsTransactionAction,
   runShieldsTransition,
@@ -172,9 +173,7 @@ describe.skipIf(process.platform === "win32")("Hermes mutable restart input seal
       fs.writeSync(mutableFd, Buffer.from("PWNED!"), 0, 6, 0);
       fs.fsyncSync(mutableFd);
 
-      // Reopening the replaced test-owned path is the assertion.
-      // codeql[js/file-system-race]
-      expect(fs.readFileSync(fixture.configPath, "utf-8")).toBe(fixture.trustedConfig);
+      expect(readTextFileSnapshot(fixture.configPath)).toBe(fixture.trustedConfig);
       expect(mode(fixture.sandboxDir)).toBe(0o1775);
       expect(mode(fixture.hermesDir)).toBe(0o755);
       expect(mode(fixture.configPath)).toBe(0o444);
@@ -265,10 +264,8 @@ describe.skipIf(process.platform === "win32")("Hermes mutable restart input seal
       expect(sealed.status).not.toBe(0);
       expect(sealed.stderr).toContain("compat hash verification failed");
       expect(strictHashIsValid(fixture)).toBe(true);
-      // Reopening the replaced test-owned path is the assertion.
-      // codeql[js/file-system-race]
-      expect(fs.readFileSync(fixture.compatHashPath, "utf-8")).not.toBe(
-        fs.readFileSync(fixture.hashPath, "utf-8"),
+      expect(readTextFileSnapshot(fixture.compatHashPath)).not.toBe(
+        readTextFileSnapshot(fixture.hashPath),
       );
       expect(mode(fixture.sandboxDir)).toBe(0o770);
       expect(mode(fixture.hermesDir)).toBe(0o3770);

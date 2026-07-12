@@ -34,6 +34,19 @@ export function mode(pathname: string): number {
   return fs.statSync(pathname).mode & 0o7777;
 }
 
+export function readFileSnapshot(pathname: string): Buffer {
+  const fd = fs.openSync(pathname, "r");
+  try {
+    return fs.readFileSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+export function readTextFileSnapshot(pathname: string): string {
+  return readFileSnapshot(pathname).toString("utf8");
+}
+
 export function hashInputs(configPath: string, envPath: string): string {
   const result = spawnSync("sha256sum", [configPath, envPath], {
     encoding: "utf-8",
