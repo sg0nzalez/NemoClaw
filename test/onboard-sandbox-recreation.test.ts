@@ -9,11 +9,7 @@ import path from "node:path";
 
 import { describe, it } from "vitest";
 import { writeOkOpenshell } from "./helpers/onboard-openshell-fixture";
-import {
-  type CommandEntry,
-  onboardScriptMocksPath,
-  repoRoot,
-} from "./helpers/onboard-split-context";
+import { type CommandEntry, onboardScriptMocksPath } from "./helpers/onboard-split-context";
 
 describe("onboard helpers", () => {
   it("non-interactive exits with error when existing sandbox is not ready", {

@@ -21,10 +21,10 @@ import {
 describe.skipIf(process.platform === "win32")("Hermes mutable restart input seal", () => {
   it("revokes pre-open writable fds while preserving trusted path bytes and strict hashes", () => {
     const fixture = createRestartFixture();
-    const configBefore = fs.statSync(fixture.configPath);
-    const envBefore = fs.statSync(fixture.envPath);
     const configFd = fs.openSync(fixture.configPath, "r+");
     const envFd = fs.openSync(fixture.envPath, "r+");
+    const configBefore = fs.fstatSync(configFd);
+    const envBefore = fs.fstatSync(envFd);
 
     try {
       const sealed = runGuard("seal-restart", fixture);
@@ -48,7 +48,9 @@ describe.skipIf(process.platform === "win32")("Hermes mutable restart input seal
       overwriteThroughOldFd(configFd, configBefore.size, "X");
       overwriteThroughOldFd(envFd, envBefore.size, "Y");
 
+      // lgtm[js/file-system-race] Reopening the replaced test-owned path is the assertion.
       expect(fs.readFileSync(fixture.configPath, "utf-8")).toBe(fixture.trustedConfig);
+      // lgtm[js/file-system-race] Reopening the replaced test-owned path is the assertion.
       expect(fs.readFileSync(fixture.envPath, "utf-8")).toBe(fixture.trustedEnv);
       expect(strictHashIsValid(fixture)).toBe(true);
       expect(fs.statSync(fixture.configPath).ino).toBe(configSealed.ino);
@@ -65,7 +67,9 @@ describe.skipIf(process.platform === "win32")("Hermes mutable restart input seal
       expect(fs.statSync(fixture.envPath).uid).toBe(envBefore.uid);
       expect(fs.statSync(fixture.envPath).gid).toBe(envBefore.gid);
       expect(fs.existsSync(fixture.statePath)).toBe(false);
+      // lgtm[js/file-system-race] Reopening the replaced test-owned path is the assertion.
       expect(fs.readFileSync(fixture.configPath, "utf-8")).toBe(fixture.trustedConfig);
+      // lgtm[js/file-system-race] Reopening the replaced test-owned path is the assertion.
       expect(fs.readFileSync(fixture.envPath, "utf-8")).toBe(fixture.trustedEnv);
       expect(strictHashIsValid(fixture)).toBe(true);
     } finally {
@@ -77,12 +81,12 @@ describe.skipIf(process.platform === "win32")("Hermes mutable restart input seal
 
   it("revokes pre-open descriptors across shields lock and restores the mutable contract", () => {
     const fixture = createRestartFixture();
-    const configBefore = fs.statSync(fixture.configPath);
-    const envBefore = fs.statSync(fixture.envPath);
-    const compatBefore = fs.statSync(fixture.compatHashPath);
     const configFd = fs.openSync(fixture.configPath, "r+");
     const envFd = fs.openSync(fixture.envPath, "r+");
     const compatFd = fs.openSync(fixture.compatHashPath, "r+");
+    const configBefore = fs.fstatSync(configFd);
+    const envBefore = fs.fstatSync(envFd);
+    const compatBefore = fs.fstatSync(compatFd);
 
     try {
       const locked = runShieldsTransition(fixture, "locked");
@@ -99,7 +103,9 @@ describe.skipIf(process.platform === "win32")("Hermes mutable restart input seal
       overwriteThroughOldFd(configFd, configBefore.size, "X");
       overwriteThroughOldFd(envFd, envBefore.size, "Y");
       overwriteThroughOldFd(compatFd, compatBefore.size, "Z");
+      // lgtm[js/file-system-race] Reopening the replaced test-owned path is the assertion.
       expect(fs.readFileSync(fixture.configPath, "utf-8")).toBe(fixture.trustedConfig);
+      // lgtm[js/file-system-race] Reopening the replaced test-owned path is the assertion.
       expect(fs.readFileSync(fixture.envPath, "utf-8")).toBe(fixture.trustedEnv);
       expect(strictHashIsValid(fixture)).toBe(true);
 
@@ -342,8 +348,10 @@ describe.skipIf(process.platform === "win32")("Hermes mutable restart input seal
       expect(lockedToken).not.toBe(mutableToken);
       expect(fs.statSync(fixture.configPath).ino).not.toBe(beforeTakeoverInode);
       expect(mode(fixture.hermesDir)).toBe(0o500);
+      // lgtm[js/file-system-race] Reopening the replaced test-owned path is the assertion.
       const sealedBytes = fs.readFileSync(fixture.configPath);
       overwriteThroughOldFd(staleFd, sealedBytes.length, "X");
+      // lgtm[js/file-system-race] Reopening the replaced test-owned path is the assertion.
       expect(fs.readFileSync(fixture.configPath)).toEqual(sealedBytes);
 
       fs.chmodSync(fixture.hermesDir, 0o755);

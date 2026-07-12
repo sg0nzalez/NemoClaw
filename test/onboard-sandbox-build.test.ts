@@ -8,13 +8,11 @@ import os from "node:os";
 import path from "node:path";
 
 import { describe, it } from "vitest";
-import { stageOptimizedSandboxBuildContext } from "../src/lib/sandbox/build-context.js";
 import { writeOkOpenshell } from "./helpers/onboard-openshell-fixture";
 import {
   type CommandEntry,
   onboardScriptMocksPath,
   parseStdoutJson,
-  repoRoot,
   stripMessagingEnv,
 } from "./helpers/onboard-split-context";
 

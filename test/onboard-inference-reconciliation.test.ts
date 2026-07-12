@@ -16,7 +16,6 @@ import {
   type CommandEntry,
   createDirectSetupInferenceHarness,
   parseStdoutJson,
-  repoRoot,
   stripMessagingEnv,
 } from "./helpers/onboard-split-context";
 import {

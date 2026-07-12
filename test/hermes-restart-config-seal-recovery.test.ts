@@ -156,8 +156,8 @@ describe.skipIf(process.platform === "win32")("Hermes mutable restart input seal
         token,
       });
       expect(applied.status, applied.stderr).toBe(0);
-      const appliedInode = fs.statSync(fixture.configPath).ino;
       mutableFd = fs.openSync(fixture.configPath, "r+");
+      const appliedInode = fs.fstatSync(mutableFd).ino;
 
       const prepared = runShieldsTransactionAction(fixture, "prepare-shields-abort", {
         token,
@@ -172,6 +172,7 @@ describe.skipIf(process.platform === "win32")("Hermes mutable restart input seal
       fs.writeSync(mutableFd, Buffer.from("PWNED!"), 0, 6, 0);
       fs.fsyncSync(mutableFd);
 
+      // lgtm[js/file-system-race] Reopening the replaced test-owned path is the assertion.
       expect(fs.readFileSync(fixture.configPath, "utf-8")).toBe(fixture.trustedConfig);
       expect(mode(fixture.sandboxDir)).toBe(0o1775);
       expect(mode(fixture.hermesDir)).toBe(0o755);
@@ -223,9 +224,16 @@ describe.skipIf(process.platform === "win32")("Hermes mutable restart input seal
 
   it("fails closed without replacing or locking paths when the strict hash is stale", () => {
     const fixture = createRestartFixture();
-    const configBefore = fs.statSync(fixture.configPath);
+    const configFd = fs.openSync(fixture.configPath, "r+");
+    const configBefore = fs.fstatSync(configFd);
     const envBefore = fs.statSync(fixture.envPath);
-    fs.writeFileSync(fixture.configPath, "model:\n  default: attacker-model\n");
+    try {
+      fs.ftruncateSync(configFd, 0);
+      fs.writeSync(configFd, "model:\n  default: attacker-model\n", 0, "utf8");
+      fs.fsyncSync(configFd);
+    } finally {
+      fs.closeSync(configFd);
+    }
 
     try {
       const sealed = runGuard("seal-restart", fixture);
@@ -246,8 +254,8 @@ describe.skipIf(process.platform === "win32")("Hermes mutable restart input seal
 
   it("does not bless a compat hash changed through a pre-open descriptor", () => {
     const fixture = createRestartFixture();
-    const compatBefore = fs.statSync(fixture.compatHashPath);
     const compatFd = fs.openSync(fixture.compatHashPath, "r+");
+    const compatBefore = fs.fstatSync(compatFd);
 
     try {
       overwriteThroughOldFd(compatFd, compatBefore.size, "Z");
@@ -256,6 +264,7 @@ describe.skipIf(process.platform === "win32")("Hermes mutable restart input seal
       expect(sealed.status).not.toBe(0);
       expect(sealed.stderr).toContain("compat hash verification failed");
       expect(strictHashIsValid(fixture)).toBe(true);
+      // lgtm[js/file-system-race] Reopening the replaced test-owned path is the assertion.
       expect(fs.readFileSync(fixture.compatHashPath, "utf-8")).not.toBe(
         fs.readFileSync(fixture.hashPath, "utf-8"),
       );

@@ -76,8 +76,9 @@ describe.skipIf(process.platform === "win32")("Hermes mutable restart input seal
         { encoding: "utf-8", input: updatedConfig, timeout: 45_000 },
       );
       expect(updated.status, updated.stderr).toBe(0);
-      expect(fs.statSync(fixture.configPath).size).toBe(boundarySize);
-      expect(createHash("sha256").update(fs.readFileSync(fixture.configPath)).digest("hex")).toBe(
+      const updatedBytes = fs.readFileSync(fixture.configPath);
+      expect(updatedBytes).toHaveLength(boundarySize);
+      expect(createHash("sha256").update(updatedBytes).digest("hex")).toBe(
         createHash("sha256").update(updatedConfig).digest("hex"),
       );
       expect(strictHashIsValid(fixture)).toBe(true);

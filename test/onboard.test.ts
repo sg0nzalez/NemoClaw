@@ -6,7 +6,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { appendHostProxyEnvArgs } from "../src/lib/onboard/host-proxy-env.js";
 import {
   isValidInferenceInputsOverride,
@@ -14,13 +14,11 @@ import {
   shouldPromptForInferenceInputCapability,
 } from "../src/lib/onboard/inference-input-capability.js";
 import { createInferenceRouteHelpers } from "../src/lib/onboard/inference-route.js";
-import { createLocalInferenceRouteApplier } from "../src/lib/onboard/local-inference-route.js";
 import type { SetupInference, SetupInferenceDeps } from "../src/lib/onboard/setup-inference.js";
 import { stageOptimizedSandboxBuildContext } from "../src/lib/sandbox/build-context.js";
 import { writeOkOpenshell } from "./helpers/onboard-openshell-fixture";
 import { testTimeoutOptions } from "./helpers/timeouts";
 import {
-  createDirectCommandRouter,
   createDirectSetupInferenceHarnessFactory,
   runProductionSetupInferenceCredentialBoundary,
   withProcessEnv,
@@ -66,16 +64,6 @@ function parseStdoutJson<T>(stdout: string): T {
   return JSON.parse(line);
 }
 
-function stripMessagingEnv(source: NodeJS.ProcessEnv): Record<string, string | undefined> {
-  const env = { ...source } as Record<string, string | undefined>;
-  for (const key of Object.keys(env)) {
-    if (key.startsWith("DISCORD_") || key.startsWith("TELEGRAM_")) {
-      delete env[key];
-    }
-  }
-  return env;
-}
-
 type OnboardTestInternalsCandidate = Partial<OnboardTestInternals> | null;
 
 function isOnboardTestInternals(
@@ -106,15 +94,10 @@ const {
   SANDBOX_BASE_IMAGE,
 } = onboardTestInternals;
 
-const bedrockRuntimeOnboard =
-  require("../src/lib/onboard/bedrock-runtime") as typeof import("../src/lib/onboard/bedrock-runtime.js");
 const createDirectSetupInferenceHarness =
   createDirectSetupInferenceHarnessFactory(createSetupInference);
 
 const repoRoot = path.join(import.meta.dirname, "..");
-const onboardScriptMocksPath = JSON.stringify(
-  path.join(repoRoot, "test", "helpers", "onboard-script-mocks.cjs"),
-);
 
 describe("onboard helpers", () => {
   it("adds host proxy variables to sandbox startup env args", () => {

@@ -49,7 +49,8 @@ describe.skipIf(process.platform === "win32")("Hermes mutable restart input seal
     fs.unlinkSync(fixture.configPath);
     fs.writeFileSync(external, fixture.trustedConfig, { mode: 0o666 });
     fs.linkSync(external, fixture.configPath);
-    const linkedInode = fs.statSync(external).ino;
+    const externalFd = fs.openSync(external, "r+");
+    const linkedInode = fs.fstatSync(externalFd).ino;
     try {
       const begun = runShieldsTransactionAction(fixture, "begin-shields-transition", {
         mode: "locked",
@@ -62,7 +63,10 @@ describe.skipIf(process.platform === "win32")("Hermes mutable restart input seal
       expect(
         JSON.parse(fs.readFileSync(fixture.statePath, "utf-8")).shields_transition.unavailable,
       ).toBe(false);
-      fs.writeFileSync(external, "attacker rewrite\n");
+      fs.ftruncateSync(externalFd, 0);
+      fs.writeSync(externalFd, "attacker rewrite\n", 0, "utf8");
+      fs.fsyncSync(externalFd);
+      // lgtm[js/file-system-race] Reopening the replaced test-owned path is the assertion.
       expect(fs.readFileSync(fixture.configPath, "utf-8")).toBe(fixture.trustedConfig);
 
       fs.chmodSync(fixture.hermesDir, 0o755);
@@ -73,6 +77,7 @@ describe.skipIf(process.platform === "win32")("Hermes mutable restart input seal
         runShieldsTransactionAction(fixture, "finish-shields-transition", { token }).status,
       ).toBe(0);
     } finally {
+      fs.closeSync(externalFd);
       fs.rmSync(fixture.root, { recursive: true, force: true });
     }
   });
