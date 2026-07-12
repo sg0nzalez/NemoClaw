@@ -591,6 +591,25 @@ describe("fast-project transitive import boundary", () => {
     );
   });
 
+  it("reports compiled loads inside generated scripts reached through fast helpers (#6692)", () => {
+    withImportGraphFixture(
+      {
+        "entry.test.ts": 'import "./helper.js";\n',
+        "helper.ts": 'export const script = String.raw`require("../../dist/lib/embedded.js");`;\n',
+      },
+      (root) => {
+        expect(findFastProjectTransitiveViolations([path.join(root, "entry.test.ts")])).toEqual([
+          {
+            chain: [fixtureRepoPath(root, "entry.test.ts"), fixtureRepoPath(root, "helper.ts")],
+            detail: 'imports compiled CLI internals from "../../dist/lib/embedded.js"',
+            file: fixtureRepoPath(root, "helper.ts"),
+            line: 1,
+          },
+        ]);
+      },
+    );
+  });
+
   it("ignores external packages whose own layout contains dist/lib (#6692)", () => {
     withImportGraphFixture(
       {

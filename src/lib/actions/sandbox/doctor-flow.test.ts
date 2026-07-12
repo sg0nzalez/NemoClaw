@@ -3,6 +3,7 @@
 
 import fs from "node:fs";
 import { createRequire } from "node:module";
+import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import { testTimeoutOptions } from "../../../../test/helpers/timeouts";
@@ -182,7 +183,13 @@ function createDoctorHarness(): {
 
   logSpy.mockClear();
   const runSandboxDoctor = requireDist(doctorModulePath).runSandboxDoctor;
-  vi.spyOn(fs, "existsSync").mockReturnValueOnce(true);
+  const existsSync = fs.existsSync.bind(fs);
+  const cliBuildPath = [process.cwd(), "dist", "nemoclaw.js"].join(path.sep);
+  vi.spyOn(fs, "existsSync").mockImplementation((candidate) =>
+    typeof candidate === "string" && path.resolve(candidate) === cliBuildPath
+      ? true
+      : existsSync(candidate),
+  );
 
   return {
     buildToolScopeChecksSpy,

@@ -4,30 +4,14 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { Config as OclifConfig } from "@oclif/core";
+import { type Command, Config as OclifConfig } from "@oclif/core";
 import { describe, expect, it } from "vitest";
 
-type OclifCommandClass = {
-  flags?: Record<string, unknown>;
-};
-
-function extendsNemoClawCommand(commandClass: unknown): boolean {
-  if (typeof commandClass !== "function") return false;
-  let current = Object.getPrototypeOf(commandClass) as { name?: string } | null;
-  while (current) {
-    if (current.name === "NemoClawCommand") return true;
-    current = Object.getPrototypeOf(current) as { name?: string } | null;
-  }
-  return false;
-}
-
-function commandOwnsHelpFlag(commandClass: unknown): boolean {
-  return (
-    typeof commandClass === "function" &&
-    Object.hasOwn(commandClass as OclifCommandClass, "flags") &&
-    Object.hasOwn((commandClass as OclifCommandClass).flags ?? {}, "help")
-  );
-}
+import {
+  findCommandsOutsideNemoClawBase,
+  findCommandsOwningHelpFlag,
+  findMissingPublicCommandStatics,
+} from "./oclif-pattern-discovery-helpers";
 
 describe("oclif pattern command discovery", () => {
   it("discovers representative command ids from oclif's pattern config", async () => {
@@ -52,44 +36,29 @@ describe("oclif pattern command discovery", () => {
 
   it("keeps discovered commands on the shared NemoClaw oclif base", async () => {
     const config = await OclifConfig.load(process.cwd());
-    const nonConforming: string[] = [];
-
-    for (const command of config.commands) {
-      const commandClass = await command.load();
-      if (!extendsNemoClawCommand(commandClass)) nonConforming.push(command.id);
-    }
-
-    expect(nonConforming).toEqual([]);
+    expect(await findCommandsOutsideNemoClawBase(config.commands)).toEqual([]);
   });
 
   it("keeps the help flag centralized on the shared base command", async () => {
     const config = await OclifConfig.load(process.cwd());
-    const duplicatedHelpFlags: string[] = [];
-
-    for (const command of config.commands) {
-      const commandClass = await command.load();
-      if (commandOwnsHelpFlag(commandClass)) duplicatedHelpFlags.push(command.id);
-    }
-
-    expect(duplicatedHelpFlags).toEqual([]);
+    expect(await findCommandsOwningHelpFlag(config.commands)).toEqual([]);
   });
 
   it("keeps public discovered commands documented in oclif statics", async () => {
     const config = await OclifConfig.load(process.cwd());
-    const publicCommands = config.commands.filter((command) => command.hidden !== true);
-    const missing: string[] = [];
+    expect(findMissingPublicCommandStatics(config.commands)).toEqual([]);
+  });
 
-    for (const command of publicCommands) {
-      if (!command.summary) missing.push(`${command.id}: summary`);
-      if (!command.description) missing.push(`${command.id}: description`);
-      if (!Array.isArray(command.usage) || command.usage.length === 0) {
-        missing.push(`${command.id}: usage`);
-      }
-      if (!Array.isArray(command.examples) || command.examples.length === 0) {
-        missing.push(`${command.id}: examples`);
-      }
-    }
+  it("accepts Oclif's string form for command usage", () => {
+    const command = {
+      description: "Describe the command",
+      examples: ["<%= config.bin %> example"],
+      hidden: false,
+      id: "example",
+      summary: "Summarize the command",
+      usage: "example",
+    } as Command.Loadable;
 
-    expect(missing).toEqual([]);
+    expect(findMissingPublicCommandStatics([command])).toEqual([]);
   });
 });

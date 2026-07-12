@@ -317,7 +317,8 @@ function analyzeSource(file: string, source: string): SourceAnalysis {
     scannedFile: ts.SourceFile,
     lineOffset = 0,
     scanTemplates = true,
-    recordModuleGraph = true,
+    recordReferences = true,
+    recordModuleLoads = true,
   ): void {
     function createScope(parent: LexicalScope | null, kind: ScopeKind): LexicalScope {
       return { bindings: new Map(), kind, parent };
@@ -628,11 +629,11 @@ function analyzeSource(file: string, source: string): SourceAnalysis {
     }
 
     function addModuleLoad(node: ts.Node, detail: string): void {
-      if (recordModuleGraph) moduleLoadViolations.push(createViolation(node, detail));
+      if (recordModuleLoads) moduleLoadViolations.push(createViolation(node, detail));
     }
 
     function checkSpecifier(node: ts.Node, specifier: string): void {
-      if (recordModuleGraph) {
+      if (recordReferences) {
         const position = scannedFile.getLineAndCharacterOfPosition(node.getStart(scannedFile));
         references.push({ file, line: position.line + lineOffset + 1, specifier });
       }
@@ -714,7 +715,10 @@ function analyzeSource(file: string, source: string): SourceAnalysis {
         const templateLine = scannedFile.getLineAndCharacterOfPosition(
           node.template.getStart(scannedFile),
         ).line;
-        scan(embeddedSource, lineOffset + templateLine, false, false);
+        // Generated script references resolve in the spawned program's runtime
+        // context, not relative to this source module. Still record forbidden
+        // compiled loads from the embedded program itself.
+        scan(embeddedSource, lineOffset + templateLine, false, false, true);
       }
       ts.forEachChild(node, (child) => {
         let childScope = scope;
