@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/NVIDIA/NemoClaw/schemas/onboard-config.schema.json",
   "title": "NemoClaw onboard performance budget config",
-  "description": "Advisory warm-system cloud onboard timing budget consumed by the nightly scorecard.",
+  "description": "Advisory warm-system cloud onboard timing budget and full-E2E cold-path phase budget.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -37,6 +37,33 @@
     },
     "phaseRegressionWarning": {
       "$ref": "#/$defs/threshold"
+    },
+    "fullE2eColdPath": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["totalBudgetMs", "postOnboardBudgetMs", "phaseBudgetsMs"],
+      "properties": {
+        "totalBudgetMs": {
+          "type": "number",
+          "minimum": 0
+        },
+        "postOnboardBudgetMs": {
+          "type": "number",
+          "minimum": 0
+        },
+        "phaseBudgetsMs": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["nemoclaw.onboard.phase.sandbox"],
+          "properties": {
+            "nemoclaw.onboard.phase.preflight": { "$ref": "#/$defs/milliseconds" },
+            "nemoclaw.onboard.phase.gateway": { "$ref": "#/$defs/milliseconds" },
+            "nemoclaw.onboard.phase.provider_selection": { "$ref": "#/$defs/milliseconds" },
+            "nemoclaw.onboard.phase.inference": { "$ref": "#/$defs/milliseconds" },
+            "nemoclaw.onboard.phase.sandbox": { "$ref": "#/$defs/milliseconds" }
+          }
+        }
+      }
     }
   },
   "$defs": {
@@ -54,6 +81,10 @@
           "minimum": 0
         }
       }
+    },
+    "milliseconds": {
+      "type": "number",
+      "minimum": 0
     }
   }
 }

@@ -2,10 +2,26 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { maximumOutputSilenceMs, readOnboardTraceWindow } from "../fixtures/onboard-performance.ts";
+import {
+  evaluateColdOnboardPerformance,
+  maximumOutputSilenceMs,
+  readColdOnboardPerformanceBudget,
+  readOnboardTraceWindow,
+} from "../fixtures/onboard-performance.ts";
 import { extractOpenClawAgentPayloadText } from "../live/agent-turn-latency-helpers.ts";
 
-function traceArtifact(overrides: Partial<Record<string, unknown>> = {}): Record<string, unknown> {
+const PHASE_SPANS: Array<Record<string, unknown>> = [
+  { name: "nemoclaw.onboard.phase.preflight", duration_ms: 250 },
+  { name: "nemoclaw.onboard.phase.gateway", duration_ms: 500 },
+  { name: "nemoclaw.onboard.phase.provider_selection", duration_ms: 750 },
+  { name: "nemoclaw.onboard.phase.inference", duration_ms: 1_000 },
+  { name: "nemoclaw.onboard.phase.sandbox", duration_ms: 1_250 },
+];
+
+function traceArtifact(
+  overrides: Partial<Record<string, unknown>> = {},
+  phaseSpans = PHASE_SPANS,
+): Record<string, unknown> {
   return {
     resource_spans: [
       {
@@ -20,6 +36,7 @@ function traceArtifact(overrides: Partial<Record<string, unknown>> = {}): Record
                 status: { code: "OK" },
                 ...overrides,
               },
+              ...phaseSpans,
             ],
           },
         ],
@@ -33,6 +50,13 @@ describe("onboard performance evidence", () => {
     expect(readOnboardTraceWindow(traceArtifact())).toEqual({
       durationMs: 3_750,
       finishedAtMs: 4_750,
+      phaseDurationsMs: {
+        "nemoclaw.onboard.phase.preflight": 250,
+        "nemoclaw.onboard.phase.gateway": 500,
+        "nemoclaw.onboard.phase.provider_selection": 750,
+        "nemoclaw.onboard.phase.inference": 1_000,
+        "nemoclaw.onboard.phase.sandbox": 1_250,
+      },
       startedAtMs: 1_000,
     });
   });
@@ -44,6 +68,67 @@ describe("onboard performance evidence", () => {
     ["reversed timestamps", { end_time_unix_nano: "999999999" }],
   ])("rejects a %s trace", (_label, overrides) => {
     expect(() => readOnboardTraceWindow(traceArtifact(overrides))).toThrow();
+  });
+
+  it("requires every stable onboarding phase exactly once", () => {
+    expect(() => readOnboardTraceWindow(traceArtifact({}, PHASE_SPANS.slice(0, -1)))).toThrow(
+      "phase.sandbox",
+    );
+
+    const duplicatePhase = traceArtifact({}, [
+      ...PHASE_SPANS,
+      { name: "nemoclaw.onboard.phase.sandbox", duration_ms: 1 },
+    ]);
+    expect(() => readOnboardTraceWindow(duplicatePhase)).toThrow("exactly one");
+  });
+
+  it("evaluates total, response, and configured trace-phase budgets separately", () => {
+    const trace = readOnboardTraceWindow(traceArtifact());
+    const budget = readColdOnboardPerformanceBudget({
+      fullE2eColdPath: {
+        totalBudgetMs: 5_000,
+        postOnboardBudgetMs: 1_000,
+        phaseBudgetsMs: { "nemoclaw.onboard.phase.sandbox": 1_500 },
+      },
+    });
+
+    expect(evaluateColdOnboardPerformance(trace, 4_750, budget)).toEqual({
+      passed: true,
+      postOnboardMs: 1_000,
+      violations: [],
+    });
+    expect(evaluateColdOnboardPerformance(trace, 5_250, budget)).toEqual({
+      passed: false,
+      postOnboardMs: 1_500,
+      violations: ["total 6s exceeds 5s", "post-onboard first response 2s exceeds 1s"],
+    });
+
+    trace.phaseDurationsMs["nemoclaw.onboard.phase.sandbox"] = 1_501;
+    expect(evaluateColdOnboardPerformance(trace, 4_750, budget).violations).toEqual([
+      "nemoclaw.onboard.phase.sandbox 2s exceeds 2s",
+    ]);
+  });
+
+  it("rejects malformed cold-path budget configuration", () => {
+    expect(() => readColdOnboardPerformanceBudget({})).toThrow("fullE2eColdPath");
+    expect(() =>
+      readColdOnboardPerformanceBudget({
+        fullE2eColdPath: {
+          totalBudgetMs: 1_000,
+          postOnboardBudgetMs: 1_001,
+          phaseBudgetsMs: {},
+        },
+      }),
+    ).toThrow("fullE2eColdPath");
+    expect(() =>
+      readColdOnboardPerformanceBudget({
+        fullE2eColdPath: {
+          totalBudgetMs: 1_000,
+          postOnboardBudgetMs: 1_000,
+          phaseBudgetsMs: {},
+        },
+      }),
+    ).toThrow("fullE2eColdPath");
   });
 
   it("measures the largest in-window gap after ordering and filtering output events", () => {

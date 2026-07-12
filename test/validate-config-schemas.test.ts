@@ -304,6 +304,41 @@ describe("onboard-config.schema.json", () => {
     };
     expect(validate(bad)).toBe(false);
   });
+
+  it("accepts only known full-E2E cold-path phase budgets", () => {
+    expectValid(
+      validate,
+      {
+        ...validOnboardConfig,
+        fullE2eColdPath: {
+          totalBudgetMs: 205_000,
+          postOnboardBudgetMs: 20_000,
+          phaseBudgetsMs: { "nemoclaw.onboard.phase.sandbox": 185_000 },
+        },
+      },
+      "full E2E cold-path phase budget",
+    );
+    expect(
+      validate({
+        ...validOnboardConfig,
+        fullE2eColdPath: {
+          totalBudgetMs: 205_000,
+          postOnboardBudgetMs: 20_000,
+          phaseBudgetsMs: { "nemoclaw.onboard.phase.typo": 185_000 },
+        },
+      }),
+    ).toBe(false);
+    expect(
+      validate({
+        ...validOnboardConfig,
+        fullE2eColdPath: {
+          totalBudgetMs: 205_000,
+          postOnboardBudgetMs: 20_000,
+          phaseBudgetsMs: {},
+        },
+      }),
+    ).toBe(false);
+  });
 });
 
 // ── Blueprint ────────────────────────────────────────────────────────────────

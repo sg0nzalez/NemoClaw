@@ -17,8 +17,10 @@ import {
 import { expect, test } from "../fixtures/e2e-test.ts";
 import { requireHostedInferenceConfig } from "../fixtures/hosted-inference.ts";
 import {
+  evaluateColdOnboardPerformance,
   maximumOutputSilenceMs,
   type OnboardTraceWindow,
+  readColdOnboardPerformanceBudget,
   readOnboardTraceWindow,
 } from "../fixtures/onboard-performance.ts";
 import { CLI_ENTRYPOINT, REPO_ROOT } from "../fixtures/paths.ts";
@@ -33,15 +35,6 @@ import { extractOpenClawAgentPayloadText } from "./agent-turn-latency-helpers.ts
 const SANDBOX_NAME = process.env.NEMOCLAW_SANDBOX_NAME ?? "e2e-full";
 const LIVE_TIMEOUT_MS = 50 * 60_000;
 const FIRST_TURN_TIMEOUT_MS = 240_000;
-// Cold-path acceptance budget for install + BuildKit image build + gateway
-// health + first hosted agent turn (#6002, #6265). The dominant term is the
-// cold BuildKit image build, which swings run-to-run with Docker Hub pull
-// speed and hosted-runner I/O. Observed post-#6265 onboard phase alone ranged
-// 163s (pass) to 173s (fail) on identical `main` commits — a ~10s swing — so
-// the original 180s cap left only ~7s of headroom and tipped over on slow
-// builds. Raised to 205s to absorb build-phase variance while still catching
-// gross onboard regressions (first hosted turn itself is only ~5-8s).
-const ONBOARD_BUDGET_SECS = 205;
 const MAX_SILENCE_SECS = 60;
 const EXPECTED_FIRST_REPLY = "NEMOCLAW_E2E_READY_6002";
 const MEASURE_COLD_ONBOARD = process.env.E2E_TARGET_ID === "full-e2e";
@@ -146,6 +139,21 @@ function createColdOnboardCapture(): ColdOnboardCapture | null {
     : null;
 }
 
+function readFullE2eColdPathBudget() {
+  try {
+    return readColdOnboardPerformanceBudget(
+      JSON.parse(
+        fs.readFileSync(path.join(REPO_ROOT, "ci", "onboard-performance-budget.json"), "utf8"),
+      ) as unknown,
+    );
+  } catch (error) {
+    throw new Error(
+      `Full E2E cold-path performance budget is invalid: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
+}
+
 async function assertColdOnboardPerformance(input: {
   apiKey: string;
   artifacts: ArtifactSink;
@@ -183,19 +191,35 @@ async function assertColdOnboardPerformance(input: {
   );
   const totalMs = Date.now() - traceWindow.startedAtMs;
   const totalSecs = Math.ceil(totalMs / 1_000);
+  const budget = readFullE2eColdPathBudget();
+  const performance = evaluateColdOnboardPerformance(traceWindow, totalMs, budget);
   const turnText = resultText(turn);
   const assistantReply = extractOpenClawAgentPayloadText(turnText).trim();
   const compactAssistantReply = assistantReply.replace(/\s+/gu, "");
   const responseChars = assistantReply.length;
 
   await input.artifacts.writeJson("onboard-progress-budget.json", {
+    schemaVersion: "nemoclaw.full_e2e_cold_performance.v1",
     sandbox: SANDBOX_NAME,
     installExitCode: input.install.exitCode,
     firstTurnExitCode: turn.exitCode,
+    phaseMeasurements: {
+      onboardMs: traceWindow.durationMs,
+      postOnboardFirstResponseMs: performance.postOnboardMs,
+      tracePhasesMs: traceWindow.phaseDurationsMs,
+    },
     onboardSecs: Math.ceil(traceWindow.durationMs / 1_000),
     totalMs,
     totalSecs,
-    budgetSecs: ONBOARD_BUDGET_SECS,
+    budget: {
+      totalMs: budget.totalBudgetMs,
+      postOnboardMs: budget.postOnboardBudgetMs,
+      phaseBudgetsMs: budget.phaseBudgetsMs,
+    },
+    performance: {
+      passed: performance.passed,
+      violations: performance.violations,
+    },
     heartbeatCount,
     maxSilenceSecs,
     maxSilenceBudgetSecs: MAX_SILENCE_SECS,
@@ -219,9 +243,9 @@ async function assertColdOnboardPerformance(input: {
     `expected the sentinel first agent reply, got: ${turnText}`,
   ).toContain(EXPECTED_FIRST_REPLY);
   expect(
-    totalMs,
-    `[1/8]-to-first-response took ${totalSecs}s, over the ${ONBOARD_BUDGET_SECS}s budget`,
-  ).toBeLessThanOrEqual(ONBOARD_BUDGET_SECS * 1_000);
+    performance.passed,
+    `[1/8]-to-first-response took ${totalSecs}s; ${performance.violations.join("; ")}`,
+  ).toBe(true);
 }
 
 test("full e2e: install, onboard, inference, cli operations, and cleanup", {
