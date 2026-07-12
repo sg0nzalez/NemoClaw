@@ -864,6 +864,7 @@ jobs:
           "$OPENSHELL_BIN" --version
           npx vitest run --project e2e-live \
             test/e2e/live/mcp-bridge.test.ts \
+            -t '^mcp-bridge-deepagents$' \
             --silent=false --reporter=default --reporter=test/e2e/risk-signal-reporter.ts
 
       - id: mcp_artifact_secret_scan
