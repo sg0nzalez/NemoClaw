@@ -28,6 +28,7 @@ export {
 
 const VALID_SERVER_RE = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
 const VALID_ENV_RE = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
+const OPENSHELL_REVISIONED_CREDENTIAL_NAME_RE = /^v[0-9]+_[A-Za-z0-9_]+$/;
 const VALID_SANDBOX_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 const OPENSHELL_VERSION_OUTPUT_RE =
   /^openshell\s+([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)$/;
@@ -178,6 +179,12 @@ export function validateMcpServerName(name: string): void {
 
 export function validateMcpCredentialEnvName(name: string): void {
   validatePersistedMcpCredentialEnvName(name);
+  if (OPENSHELL_REVISIONED_CREDENTIAL_NAME_RE.test(name)) {
+    throw new McpBridgeError(
+      `MCP credential environment name '${name}' is reserved for OpenShell credential revisions and would be skipped instead of attached. Use a dedicated secret name such as MY_SERVICE_MCP_TOKEN.`,
+      2,
+    );
+  }
   if (isSubprocessEnvNameAllowed(name)) {
     throw new McpBridgeError(
       `MCP credential environment name '${name}' is reserved for host subprocess control and could be forwarded outside the provider mutation. Use a dedicated secret name such as MY_SERVICE_MCP_TOKEN.`,

@@ -57,6 +57,7 @@ SERVER_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
 ENV_PLACEHOLDER_RE = re.compile(
     r"^Bearer openshell:resolve:env:([A-Za-z_][A-Za-z0-9_]{0,127})$"
 )
+OPENSHELL_REVISIONED_CREDENTIAL_NAME_RE = re.compile(r"^v[0-9]+_[A-Za-z0-9_]+$")
 BOUNDARY_MANIFEST_NAME = "openshell-child-visible-credentials.v0.0.72.json"
 ANSI_ESCAPE_RE = re.compile(
     r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\)|[@-_])"
@@ -174,7 +175,8 @@ _RUNTIME_CONTROL_PREFIXES = _manifest_strings(
 
 def _credential_name_is_reserved(name: str) -> bool:
     return (
-        name in _RAW_CHILD_VALUE_KEYS
+        OPENSHELL_REVISIONED_CREDENTIAL_NAME_RE.fullmatch(name) is not None
+        or name in _RAW_CHILD_VALUE_KEYS
         or name in _REWRITTEN_CHILD_VALUE_KEYS
         or name in _RUNTIME_CONTROL_KEYS
         or any(name.startswith(prefix) for prefix in _RUNTIME_CONTROL_PREFIXES)

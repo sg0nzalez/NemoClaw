@@ -39,6 +39,28 @@ describe("MCP CLI input validation", () => {
     ).toThrow(/process arguments and shell history/);
   });
 
+  it("rejects OpenShell revisioned placeholder names as MCP credentials (#6379)", () => {
+    for (const name of ["v1_TOKEN", "v999999_very_unlikely", "v0_1"]) {
+      expect(() =>
+        parseMcpAddArgs(["github", "--url", "https://mcp.example.test/mcp", "--env", name]),
+      ).toThrow(/reserved for OpenShell credential revisions/);
+      expect(() => resolveCredentialEnv([{ name, value: "host-only-secret" }])).toThrow(
+        /would be skipped instead of attached/,
+      );
+      expect(() =>
+        buildMcpBridgeProviderArgs("create", "provider", [{ name }], {
+          [name]: "host-only-secret",
+        }),
+      ).toThrow(/reserved for OpenShell credential revisions/);
+    }
+
+    for (const name of ["v_TOKEN", "v10_", "versioned_token", "V10_TOKEN"]) {
+      expect(() =>
+        parseMcpAddArgs(["github", "--url", "https://mcp.example.test/mcp", "--env", name]),
+      ).not.toThrow();
+    }
+  });
+
   // source-shape-contract: compatibility -- Pinned OpenShell child-visible keys must drive credential rejection through every MCP boundary
   it("rejects OpenShell child-environment compatibility keys as MCP credentials", () => {
     for (const name of childVisibleCredentialManifest.rawChildValueKeys) {
