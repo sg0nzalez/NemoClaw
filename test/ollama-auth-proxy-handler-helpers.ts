@@ -172,8 +172,11 @@ export async function startProxy(
 export async function terminate(child: ChildProcess | undefined): Promise<void> {
   if (!child) return;
   const owner = proxyOwners.get(child) ?? ownChildProcess(child);
-  await owner.terminate();
-  proxyOwners.delete(child);
+  try {
+    await owner.terminate();
+  } finally {
+    proxyOwners.delete(child);
+  }
 }
 
 export async function forceKill(child: ChildProcess | undefined): Promise<void> {
