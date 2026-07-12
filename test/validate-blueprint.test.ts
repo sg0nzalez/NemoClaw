@@ -2,10 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Validate blueprint.yaml profile declarations and base sandbox policy.
- *
- * Catches configuration regressions (missing profiles, empty fields,
- * missing policy sections) before merge.
+ * Protect security and routing semantics declared by the shipping blueprint,
+ * provider profiles, and policy files. Structural validation belongs to
+ * scripts/validate-configs.ts.
  */
 
 import { readFileSync } from "node:fs";
@@ -54,24 +53,10 @@ const OPENCLAW_PERMISSIVE_POLICY_PATH = new URL(
   "../agents/openclaw/policy-permissive.yaml",
   import.meta.url,
 );
-const REQUIRED_PROFILE_FIELDS: ReadonlyArray<keyof BlueprintProfile> = [
-  "provider_type",
-  "endpoint",
-];
-
-type BlueprintProfile = {
-  provider_type?: string;
-  endpoint?: string;
-  dynamic_endpoint?: boolean;
-};
-
 type Blueprint = {
-  version?: string;
   digest?: string;
-  profiles?: string[];
   components?: {
     sandbox?: { image?: string | null };
-    inference?: { profiles?: Record<string, BlueprintProfile> };
   };
 };
 
@@ -145,23 +130,8 @@ function loadYaml<T>(path: URL): T {
 }
 
 const bp = loadYaml<Blueprint>(BLUEPRINT_PATH);
-const declared = Array.isArray(bp.profiles) ? bp.profiles : [];
-const defined = bp.components?.inference?.profiles;
 
 describe("blueprint.yaml", () => {
-  it("parses as a YAML mapping", () => {
-    expect(bp).toEqual(expect.objectContaining({}));
-  });
-
-  it("has a non-empty top-level profiles list", () => {
-    expect(declared.length).toBeGreaterThan(0);
-  });
-
-  it("has a non-empty components.inference.profiles mapping", () => {
-    expect(defined).toBeDefined();
-    expect(Object.keys(defined ?? {}).length).toBeGreaterThan(0);
-  });
-
   it("pins the sandbox image by digest instead of a mutable tag (#1438)", () => {
     // The blueprint MUST NOT pull a sandbox image by a mutable tag like
     // ":latest" — a registry compromise or accidental force-push could
@@ -202,33 +172,6 @@ describe("blueprint.yaml", () => {
     // the other, this assertion catches it before merge.
     expect(topLevelDigest).toBe(imageDigest);
   });
-
-  for (const name of declared) {
-    describe(`profile '${name}'`, () => {
-      it("has a definition", () => {
-        expect(defined).toBeDefined();
-        expect(name in (defined ?? {})).toBe(true);
-      });
-
-      for (const field of REQUIRED_PROFILE_FIELDS) {
-        it(`has non-empty '${field}'`, () => {
-          const cfg = defined?.[name];
-          if (!cfg) return; // covered by "has a definition"
-          if (field === "endpoint" && cfg.dynamic_endpoint === true) {
-            expect(field in cfg).toBe(true);
-          } else {
-            expect(cfg[field]).toBeTruthy();
-          }
-        });
-      }
-    });
-  }
-
-  for (const name of Object.keys(defined ?? {})) {
-    it(`defined profile '${name}' is declared in top-level list`, () => {
-      expect(declared).toContain(name);
-    });
-  }
 });
 
 describe("Model Router pool config", () => {
@@ -257,18 +200,6 @@ describe("Model Router pool config", () => {
 
 describe("base sandbox policy", () => {
   const policy = loadYaml<SandboxPolicy>(BASE_POLICY_PATH);
-
-  it("parses as a YAML mapping", () => {
-    expect(policy).toEqual(expect.objectContaining({}));
-  });
-
-  it("has 'version'", () => {
-    expect("version" in policy).toBe(true);
-  });
-
-  it("has 'network_policies'", () => {
-    expect("network_policies" in policy).toBe(true);
-  });
 
   it("no endpoint rule uses wildcard method", () => {
     const np = policy.network_policies ?? {};
@@ -648,10 +579,6 @@ describe("permissive sandbox policy", () => {
   const policy = loadYaml<SandboxPolicy>(PERMISSIVE_POLICY_PATH);
   const agentPolicy = loadYaml<SandboxPolicy>(OPENCLAW_PERMISSIVE_POLICY_PATH);
 
-  it("parses and declares network_policies", () => {
-    expect(policy.network_policies).toBeDefined();
-  });
-
   it("allows inference.local:443 in the managed_inference block (#2513)", () => {
     const np = policy.network_policies ?? {};
     expect(np.managed_inference).toBeDefined();
@@ -740,22 +667,10 @@ describe("Hermes sandbox policy", () => {
 });
 
 describe("github preset", () => {
-  // The fix for #1583 was *only* meaningful if the github preset
-  // actually exists and is loadable — otherwise users have no way to
-  // opt in. Verify the preset file is present and well-formed.
   const PRESET_PATH = new URL(
     "../nemoclaw-blueprint/policies/presets/github.yaml",
     import.meta.url,
   );
-
-  it("parses the existing github preset file (#1583)", () => {
-    const parsed = loadYaml<PolicyPreset>(PRESET_PATH);
-    expect(parsed).toEqual(expect.objectContaining({}));
-    const meta = parsed.preset;
-    expect(meta?.name).toBe("github");
-    const np = parsed.network_policies;
-    expect(np && "github" in np).toBe(true);
-  });
 
   it("only advertises the installed git binary in the github preset (#2179)", () => {
     const parsed = loadYaml<PolicyPreset>(PRESET_PATH);
