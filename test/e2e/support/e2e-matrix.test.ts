@@ -25,10 +25,8 @@ function runEmitLiveMatrix(args: string[] = []) {
 
 function requireUnsupportedTarget() {
   const unsupported = listTargets().find((entry) => !liveTargetSupport(entry).supported);
-  if (!unsupported) {
-    throw new Error("expected at least one unsupported live E2E target");
-  }
-  return unsupported;
+  expect(unsupported, "expected at least one unsupported live E2E target").toBeDefined();
+  return unsupported!;
 }
 
 describe("live E2E target matrix", () => {
@@ -95,14 +93,15 @@ describe("live E2E target matrix", () => {
     expect(new Set(matrix.map((entry) => entry.id)).size).toBe(matrix.length);
     for (const entry of matrix) {
       const registered = supportedTargets.find((target) => target.id === entry.id);
-      if (!registered) {
-        throw new Error(`matrix entry '${entry.id}' does not resolve to a supported target`);
-      }
+      expect(
+        registered,
+        `matrix entry '${entry.id}' must resolve to a supported target`,
+      ).toBeDefined();
       expect(entry).toMatchObject({
-        runner: resolveRunnerForTarget(registered).runner,
+        runner: resolveRunnerForTarget(registered!).runner,
         supported: true,
         supportReasons: [],
-        pendingRuntimeSuites: registered.suiteIds ?? [],
+        pendingRuntimeSuites: registered!.suiteIds ?? [],
       });
     }
   });
