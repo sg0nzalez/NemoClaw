@@ -200,13 +200,13 @@ async function assertColdOnboardPerformance(input: {
   );
   const firstTurnCompletedAtMs = Date.now();
   const firstTurnCommandMs = firstTurnCompletedAtMs - firstTurnStartedAtMs;
-  const performance = evaluateColdOnboardPerformance(
+  const performanceEvaluation = evaluateColdOnboardPerformance(
     traceWindow,
     firstTurnCompletedAtMs,
     input.budget,
   );
   const rootStartToFirstTurnCompletionSecs = Math.ceil(
-    performance.rootStartToFirstTurnCompletionMs / 1_000,
+    performanceEvaluation.rootStartToFirstTurnCompletionMs / 1_000,
   );
   const turnText = resultText(turn);
   const assistantReply = extractOpenClawAgentPayloadText(turnText).trim();
@@ -220,18 +220,18 @@ async function assertColdOnboardPerformance(input: {
     firstTurnExitCode: turn.exitCode,
     phaseMeasurements: {
       onboardRootMs: traceWindow.durationMs,
-      rootStartToFirstTurnCompletionMs: performance.rootStartToFirstTurnCompletionMs,
+      rootStartToFirstTurnCompletionMs: performanceEvaluation.rootStartToFirstTurnCompletionMs,
       rootEndToInstallCompletionMs,
       firstTurnCommandMs,
-      rootEndToFirstTurnCompletionMs: performance.rootEndToFirstTurnCompletionMs,
+      rootEndToFirstTurnCompletionMs: performanceEvaluation.rootEndToFirstTurnCompletionMs,
       tracePhasesMs: traceWindow.phaseDurationsMs,
     },
     onboardSecs: Math.ceil(traceWindow.durationMs / 1_000),
     rootStartToFirstTurnCompletionSecs,
     budget: input.budget,
     performance: {
-      passed: performance.passed,
-      violations: performance.violations,
+      passed: performanceEvaluation.passed,
+      violations: performanceEvaluation.violations,
     },
     heartbeatCount,
     maxSilenceSecs,
@@ -256,8 +256,8 @@ async function assertColdOnboardPerformance(input: {
     `expected the sentinel first agent reply, got: ${turnText}`,
   ).toContain(EXPECTED_FIRST_REPLY);
   expect(
-    performance.passed,
-    `onboard-root-start-to-first-turn-completion took ${rootStartToFirstTurnCompletionSecs}s; ${performance.violations.join("; ")}`,
+    performanceEvaluation.passed,
+    `onboard-root-start-to-first-turn-completion took ${rootStartToFirstTurnCompletionSecs}s; ${performanceEvaluation.violations.join("; ")}`,
   ).toBe(true);
 }
 

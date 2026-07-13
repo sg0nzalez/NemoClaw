@@ -17,6 +17,7 @@
     {
       "runId": 29285379553,
       "runUrl": "https://github.com/NVIDIA/NemoClaw/actions/runs/29285379553",
+      "headSha": "4544d07c8bfd500c3b64a74380ef5cd0e62089f5",
       "conclusion": "success",
       "installExitCode": 0,
       "firstTurnExitCode": 0,
@@ -43,6 +44,7 @@
     {
       "runId": 29285384233,
       "runUrl": "https://github.com/NVIDIA/NemoClaw/actions/runs/29285384233",
+      "headSha": "4544d07c8bfd500c3b64a74380ef5cd0e62089f5",
       "conclusion": "success",
       "installExitCode": 0,
       "firstTurnExitCode": 0,
@@ -69,6 +71,7 @@
     {
       "runId": 29285387079,
       "runUrl": "https://github.com/NVIDIA/NemoClaw/actions/runs/29285387079",
+      "headSha": "4544d07c8bfd500c3b64a74380ef5cd0e62089f5",
       "conclusion": "success",
       "installExitCode": 0,
       "firstTurnExitCode": 0,
@@ -95,6 +98,7 @@
     {
       "runId": 29285389469,
       "runUrl": "https://github.com/NVIDIA/NemoClaw/actions/runs/29285389469",
+      "headSha": "4544d07c8bfd500c3b64a74380ef5cd0e62089f5",
       "conclusion": "success",
       "installExitCode": 0,
       "firstTurnExitCode": 0,
@@ -121,6 +125,7 @@
     {
       "runId": 29285391845,
       "runUrl": "https://github.com/NVIDIA/NemoClaw/actions/runs/29285391845",
+      "headSha": "4544d07c8bfd500c3b64a74380ef5cd0e62089f5",
       "conclusion": "success",
       "installExitCode": 0,
       "firstTurnExitCode": 0,

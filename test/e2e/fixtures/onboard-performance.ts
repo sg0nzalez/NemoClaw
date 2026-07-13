@@ -177,6 +177,7 @@ export function readOnboardTraceWindow(artifact: unknown): OnboardTraceWindow {
       }
       for (const span of spans) {
         const record = span as Record<string, unknown>;
+        if (record.trace_id !== summaryTraceId) continue;
         if (record?.name === ONBOARD_ROOT_SPAN) roots.push(record);
         if (typeof record?.name === "string" && ONBOARD_PHASE_NAME_SET.has(record.name)) {
           const phaseName = record.name as OnboardPhaseName;

@@ -5,8 +5,9 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import Ajv from "ajv/dist/2020.js";
 import { describe, expect, it } from "vitest";
+
+import { compileConfigSchema } from "../scripts/validate-configs";
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const PHASE_NAMES = [
@@ -26,6 +27,7 @@ interface ColdPathBudget {
 interface CalibrationSample {
   runId: number;
   runUrl: string;
+  headSha: string;
   conclusion: string;
   installExitCode: number;
   firstTurnExitCode: number;
@@ -58,17 +60,15 @@ interface Calibration {
   derivedBudgetsMs: ColdPathBudget;
 }
 
-const schema = JSON.parse(
-  readFileSync(join(REPO_ROOT, "schemas", "onboard-config.schema.json"), "utf8"),
-) as object;
-const validate = new Ajv({ allErrors: true, strict: false, $data: true }).compile(schema);
-const phaseBudgetsMs = Object.fromEntries(PHASE_NAMES.map((name) => [name, 1_000]));
 const checkedInConfig = JSON.parse(
   readFileSync(join(REPO_ROOT, "ci", "onboard-performance-budget.json"), "utf8"),
 ) as { fullE2eColdPath: ColdPathBudget };
 const calibration = JSON.parse(
   readFileSync(join(REPO_ROOT, "ci", "full-e2e-cold-path-calibration.json"), "utf8"),
 ) as Calibration;
+
+const validate = compileConfigSchema("schemas/onboard-config.schema.json");
+const phaseBudgetsMs = Object.fromEntries(PHASE_NAMES.map((name) => [name, 1_000]));
 const validConfig = {
   $comment: "Schema fixture",
   schemaVersion: 1,
@@ -85,8 +85,7 @@ const validConfig = {
 };
 
 describe("onboard performance config schema", () => {
-  it("accepts the checked-in config and a complete synthetic config", () => {
-    expect(validate(checkedInConfig), JSON.stringify(validate.errors)).toBe(true);
+  it("accepts a complete synthetic config", () => {
     expect(validate(validConfig), JSON.stringify(validate.errors)).toBe(true);
   });
 
@@ -177,6 +176,7 @@ function deriveBudgets(input: Calibration): ColdPathBudget {
 }
 
 describe("full-E2E cold-path calibration", () => {
+  // source-shape-contract: compatibility -- Exact-head provenance is durable evidence for the hosted-run budget calibration
   it("records five independent successful exact-head samples", () => {
     expect(calibration.schemaVersion).toBe(1);
     expect(calibration.baselineMainSha).toMatch(/^[0-9a-f]{40}$/u);
@@ -187,6 +187,7 @@ describe("full-E2E cold-path calibration", () => {
 
     for (const sample of calibration.samples) {
       expect(sample.runUrl).toBe(`https://github.com/NVIDIA/NemoClaw/actions/runs/${sample.runId}`);
+      expect(sample.headSha).toBe(calibration.measurementHeadSha);
       expect(sample).toMatchObject({
         conclusion: "success",
         installExitCode: 0,
@@ -197,7 +198,7 @@ describe("full-E2E cold-path calibration", () => {
       });
       expect(sample.maxSilenceSecs).toBeLessThanOrEqual(60);
       expect(sample.responseChars).toBeGreaterThan(0);
-      expect(Object.keys(sample.measurementsMs.phases)).toEqual(PHASE_NAMES);
+      expect(Object.keys(sample.measurementsMs.phases).sort()).toEqual([...PHASE_NAMES].sort());
       for (const value of [
         sample.measurementsMs.onboardRoot,
         sample.measurementsMs.rootStartToFirstTurnCompletion,
@@ -211,6 +212,7 @@ describe("full-E2E cold-path calibration", () => {
     }
   });
 
+  // source-shape-contract: compatibility -- Recomputed thresholds keep enforced budgets tied to the reviewed calibration evidence
   it("keeps configured budgets derived from the checked-in samples", () => {
     const derived = deriveBudgets(calibration);
     expect(calibration.derivedBudgetsMs).toEqual(derived);

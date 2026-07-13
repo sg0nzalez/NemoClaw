@@ -117,7 +117,7 @@ describe("onboard performance evidence", () => {
       "ends before it starts",
     ],
     ["inconsistent duration", { duration_ms: 4_999 }, {}, "does not match its timestamps"],
-    ["foreign summary", {}, { trace_id: FOREIGN_TRACE_ID }, "does not belong"],
+    ["foreign summary", {}, { trace_id: FOREIGN_TRACE_ID }, "exactly one onboard root"],
   ])("rejects a %s trace", (_label, rootOverrides, summaryOverrides, message) => {
     expect(() =>
       readOnboardTraceWindow(traceArtifact(rootOverrides, PHASE_SPANS, summaryOverrides)),
@@ -139,7 +139,7 @@ describe("onboard performance evidence", () => {
   });
 
   it.each([
-    ["foreign trace", 0, { trace_id: FOREIGN_TRACE_ID }, "does not belong"],
+    ["foreign trace", 0, { trace_id: FOREIGN_TRACE_ID }, "phase.preflight"],
     ["wrong parent", 1, { parent_span_id: "0000000000000099" }, "not a child"],
     ["failed status", 2, { status: { code: "ERROR" } }, "status is missing or not OK"],
     ["malformed span id", 3, { span_id: "short" }, "span_id"],
@@ -157,6 +157,23 @@ describe("onboard performance evidence", () => {
     expect(() =>
       readOnboardTraceWindow(traceArtifact({}, replacePhase(index as number, overrides))),
     ).toThrow(message);
+  });
+
+  it("ignores duplicate root and phase names from a different trace", () => {
+    const foreignRoot = {
+      trace_id: FOREIGN_TRACE_ID,
+      span_id: "0000000000000098",
+      name: "nemoclaw.onboard",
+    };
+    const foreignPhase = {
+      ...PHASE_SPANS[0],
+      trace_id: FOREIGN_TRACE_ID,
+      span_id: "0000000000000099",
+    };
+
+    expect(
+      readOnboardTraceWindow(traceArtifact({}, [...PHASE_SPANS, foreignRoot, foreignPhase])),
+    ).toEqual(readOnboardTraceWindow(traceArtifact()));
   });
 
   it("rejects duplicate IDs and overlapping or reordered phases", () => {
