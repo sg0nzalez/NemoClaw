@@ -186,6 +186,16 @@ describe("onboard custom Dockerfile", () => {
 
       fs.mkdirSync(fakeBin, { recursive: true });
       writeOkOpenshell(fakeBin);
+      const gatewayDir = path.join(tmpDir, ".config", "openshell", "gateways", "nemoclaw");
+      fs.mkdirSync(gatewayDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(gatewayDir, "metadata.json"),
+        JSON.stringify({
+          name: "nemoclaw",
+          gateway_endpoint: "https://gateway.example.test",
+          auth_mode: "cloudflare_jwt",
+        }),
+      );
 
       const customDockerfilePath = JSON.stringify(path.join(customBuildDir, "Dockerfile"));
 
@@ -203,7 +213,7 @@ const path = require("node:path");
 const originalSpawnSync = childProcess.spawnSync;
 childProcess.spawnSync = (command, args, options) => {
   const normalized = _n([command, ...(Array.isArray(args) ? args : [])]);
-  if (command === "ssh" && normalized.includes("installed_plugin_index")) {
+  if (String(command).endsWith("openshell") && normalized.includes("sandbox exec") && normalized.includes("installed_plugin_index")) {
     return {
       status: 0,
       signal: null,
