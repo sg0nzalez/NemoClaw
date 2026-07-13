@@ -1,7 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -27,6 +29,42 @@ type Workflow = {
 };
 
 const repoRoot = path.join(import.meta.dirname, "..");
+const auditScript = path.join(
+  repoRoot,
+  ".github",
+  "actions",
+  "ci-wechat-runtime-audit",
+  "audit.sh",
+);
+
+function runAuditValidation(
+  mutate: (fixture: { readonly targetRoot: string; readonly runtimeDir: string }) => void,
+) {
+  const targetRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-wechat-audit-test-"));
+  const runtimeDir = path.join(targetRoot, "agents", "openclaw", "wechat-runtime");
+  fs.mkdirSync(runtimeDir, { recursive: true });
+  for (const filename of ["package.json", "package-lock.json"]) {
+    fs.copyFileSync(
+      path.join(repoRoot, "agents", "openclaw", "wechat-runtime", filename),
+      path.join(runtimeDir, filename),
+    );
+  }
+
+  try {
+    mutate({ targetRoot, runtimeDir });
+    return spawnSync("bash", [auditScript], {
+      cwd: targetRoot,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        NEMOCLAW_WECHAT_AUDIT_REPORT_DIR: "artifacts/wechat-runtime-audit",
+        NEMOCLAW_WECHAT_AUDIT_TARGET_ROOT: targetRoot,
+      },
+    });
+  } finally {
+    fs.rmSync(targetRoot, { force: true, recursive: true });
+  }
+}
 
 function requiredStep(job: WorkflowJob, name: string): WorkflowStep {
   const step = job.steps?.find((candidate) => candidate.name === name);
@@ -101,10 +139,7 @@ describe("WeChat runtime audit and install-cache gates (#5896)", () => {
   });
 
   it("audits the installed graph and exercises the exact archive through a copied cache", () => {
-    const script = fs.readFileSync(
-      path.join(repoRoot, ".github", "actions", "ci-wechat-runtime-audit", "audit.sh"),
-      "utf8",
-    );
+    const script = fs.readFileSync(auditScript, "utf8");
     for (const fragment of [
       'npm --prefix "$runtime_dir" ci',
       "--ignore-scripts",
@@ -122,6 +157,10 @@ describe("WeChat runtime audit and install-cache gates (#5896)", () => {
       'EXPECTED_INTEGRITY="$wechat_integrity"',
       "WeChat runtime package.json must contain exactly the reviewed plugin dependency",
       "WeChat runtime plugin lock entry must carry sha512 integrity",
+      'npm_registry="https://registry.npmjs.org/"',
+      '--userconfig "$trusted_npmrc"',
+      '--registry "$npm_registry"',
+      "requireRegistryUrl(record.resolved, location)",
     ]) {
       expect(script).toContain(fragment);
     }
@@ -131,8 +170,38 @@ describe("WeChat runtime audit and install-cache gates (#5896)", () => {
       "utf8",
     );
     expect(action).toContain('node-version: "22.19.0"');
-    expect(action).toContain("npm@10.9.4 --ignore-scripts --no-audit --no-fund");
+    expect(action).toContain('cd "$RUNNER_TEMP"');
+    expect(action).toContain("npm install --global npm@10.9.4");
+    expect(action).toContain("--userconfig /dev/null");
+    expect(action).toContain("--registry https://registry.npmjs.org/");
     expect(action).toContain('run: bash "$GITHUB_ACTION_PATH/audit.sh"');
+  });
+
+  it("rejects a target-controlled npm registry override", () => {
+    const result = runAuditValidation(({ runtimeDir }) => {
+      fs.writeFileSync(
+        path.join(runtimeDir, ".npmrc"),
+        "registry=https://registry.example.test/\n",
+      );
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("refuses target-controlled npm config");
+  });
+
+  it("rejects an off-origin transitive package archive", () => {
+    const result = runAuditValidation(({ runtimeDir }) => {
+      const lockPath = path.join(runtimeDir, "package-lock.json");
+      const lock = JSON.parse(fs.readFileSync(lockPath, "utf8"));
+      lock.packages["node_modules/qrcode-terminal"].resolved =
+        "https://registry.example.test/qrcode-terminal-0.12.0.tgz";
+      fs.writeFileSync(lockPath, `${JSON.stringify(lock, null, 2)}\n`);
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      "locked package must resolve from the reviewed npm registry origin: node_modules/qrcode-terminal",
+    );
   });
 
   it("keeps the image cache trusted and deletes the sandbox-writable copy", () => {
