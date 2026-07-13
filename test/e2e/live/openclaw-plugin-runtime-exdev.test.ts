@@ -638,7 +638,6 @@ type WeatherRuntimeProof = {
 };
 
 function gatewayCatalogCallScript(params: Record<string, unknown>) {
-  const source = Buffer.from(GATEWAY_CATALOG_CALL_SOURCE, "utf8").toString("base64");
   const encodedParams = Buffer.from(JSON.stringify(params), "utf8").toString("base64");
   return trustedSandboxShellScript(`set -eu
 . /tmp/nemoclaw-proxy-env.sh
@@ -646,7 +645,9 @@ export HOME=/sandbox
 export NO_PROXY=127.0.0.1,localhost
 export no_proxy="$NO_PROXY"
 export NEMOCLAW_E2E_GATEWAY_PARAMS_B64='${encodedParams}'
-exec node --input-type=module --eval 'await import("data:text/javascript;base64," + process.argv[1])' '${source}'`);
+exec node --input-type=module <<'NEMOCLAW_GATEWAY_CATALOG_PROBE'
+${GATEWAY_CATALOG_CALL_SOURCE}
+NEMOCLAW_GATEWAY_CATALOG_PROBE`);
 }
 
 async function assertWeatherPluginRuntime(
@@ -885,9 +886,7 @@ replaceNodeModulesDir('/sandbox/.openclaw/plugin-runtime-deps/exdev-guard/node_m
 console.log('runtime deps replacement completed');
 NODE`;
 
-const runtimeDepsReplacementProbe = trustedSandboxShellScript(
-  `printf '%s' '${Buffer.from(runtimeDepsReplacementProbeSource).toString("base64")}' | base64 -d > /tmp/nemoclaw-exdev-guard.sh && sh /tmp/nemoclaw-exdev-guard.sh`,
-);
+const runtimeDepsReplacementProbe = trustedSandboxShellScript(runtimeDepsReplacementProbeSource);
 
 test("a custom OpenClaw plugin survives restart, recreation, and rebuild without EXDEV failures (#6108)", {
   timeout: ONBOARD_TIMEOUT_MS * 3 + REBUILD_TIMEOUT_MS + 15 * 60_000,

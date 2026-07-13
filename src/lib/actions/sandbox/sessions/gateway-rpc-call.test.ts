@@ -91,8 +91,7 @@ describe("callOpenclawGateway", () => {
       "-lc",
       expect.stringContaining("set -e"),
       "nemoclaw-sessions-admin-rpc",
-      expect.stringContaining("data:text/javascript;base64"),
-      expect.any(String),
+      GATEWAY_ADMIN_RPC_SCRIPT,
       "sessions.reset",
       Buffer.from('{"key":"agent:main:main","reason":"reset"}', "utf8").toString("base64"),
     ]);
@@ -105,7 +104,7 @@ describe("callOpenclawGateway", () => {
     expect(shell).toContain('[ -L "$proxy_env" ]');
     expect(shell).toContain("expected root:444");
     expect(shell).toContain('. "$proxy_env"');
-    const script = Buffer.from(String(command?.[10] ?? ""), "base64").toString("utf8");
+    const script = String(command?.[9] ?? "");
     expect(script).toContain("callGatewayFromCli");
     expect(script).toContain("requireCanonicalGatewayPort");
     expect(script).toContain("url: `ws://127.0.0.1:${port}`");
@@ -141,7 +140,7 @@ describe("callOpenclawGateway", () => {
     expect(result.payload).toMatchObject({ ok: true, key: "agent:main:main" });
   });
 
-  it("sends the gateway shell byte-exactly as one multiline OpenShell argument", () => {
+  it("sends the gateway shell and module source byte-exactly as multiline OpenShell arguments", () => {
     captureMock.mockReturnValue(captureResult(0, '{"ok":true,"key":"agent:main:main"}'));
 
     callOpenclawGateway({
@@ -154,9 +153,10 @@ describe("callOpenclawGateway", () => {
     expect(command.every((arg) => typeof arg === "string")).toBe(true);
     expect(command[7]).toBe(buildGatewayAdminRpcShell());
     expect(command[7]).toContain("\n");
-    expect(command.filter((_, index) => index !== 7).every((arg) => !/[\n\r]/.test(arg))).toBe(
-      true,
-    );
+    expect(command[9]).toBe(GATEWAY_ADMIN_RPC_SCRIPT);
+    expect(
+      command.filter((_, index) => index !== 7 && index !== 9).every((arg) => !/[\n\r]/.test(arg)),
+    ).toBe(true);
   });
 
   it("validates the sourced proxy env file before invoking sessions admin RPC", () => {
@@ -192,7 +192,6 @@ describe("callOpenclawGateway", () => {
           shell,
           "test-shell",
           "throw new Error('node should not run')",
-          "unused",
           "sessions.reset",
           "e30=",
         ],

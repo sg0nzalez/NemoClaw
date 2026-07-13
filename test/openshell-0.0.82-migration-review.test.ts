@@ -154,4 +154,81 @@ describe("OpenShell 0.0.82 migration review", () => {
     expect(review).not.toContain("did not add a true connection-level test");
     expect(review).toContain("Inclusion of `40194f93` alone cannot close");
   });
+
+  it("does not reintroduce newline-only code transports at migrated consumers", () => {
+    expect(review).toContain("The newline migration was audited beyond the public `exec` guard");
+    expect(review).toContain("32 KiB per-argument ceiling");
+    expect(review).toContain("owned secret-boundary exception");
+
+    const migratedConsumers = [
+      ["test/e2e/live/brave-search-helpers.ts", ["singleLineShell", "base64 -d"]],
+      ["test/e2e/live/network-policy.test.ts", ["shellEvalArg", "nemoclaw-web-fetch-e2e.mjs"]],
+      ["test/e2e/live/bedrock-runtime-compatible-anthropic.test.ts", ["base64 -d | sh"]],
+      ["test/e2e/live/kimi-inference-compat-helpers.ts", ["base64 -d", 'toString("base64")']],
+      ["test/e2e/live/rebuild-openclaw.test.ts", ["b64decode", 'toString("base64")']],
+      [
+        "test/e2e/live/messaging-compatible-endpoint.test.ts",
+        ["nodeEvalArg", 'toString("base64")'],
+      ],
+      ["test/e2e/live/cron-preflight-inference-local.test.ts", ["probeShell", "base64 -d"]],
+      ["test/e2e/live/openclaw-inference-switch.test.ts", ["singleLineSandboxShellScript"]],
+      ["test/e2e/live/openclaw-skill-cli.test.ts", ["singleLineSandboxScript"]],
+      ["test/e2e/live/phase6-messaging-helpers.ts", ["sandboxEncodedSh", "base64(script)"]],
+      [
+        "test/e2e/live/gateway-guard-recovery.test.ts",
+        ["SUPERVISOR_TOPOLOGY_COMMAND", "b64decode"],
+      ],
+      [
+        "test/e2e/live/openclaw-plugin-runtime-exdev.test.ts",
+        ["data:text/javascript;base64", "nemoclaw-exdev-guard.sh"],
+      ],
+      [
+        "test/e2e/live/mcp-bridge.test.ts",
+        ["mcpCallScriptB64", "nemoclaw-mcp-provider-rewrite-proof.cjs"],
+      ],
+      [
+        "src/lib/actions/sandbox/sessions/gateway-rpc.ts",
+        ["GATEWAY_ADMIN_RPC_LOADER", "GATEWAY_ADMIN_RPC_SCRIPT_B64"],
+      ],
+      [
+        "test/e2e/e2e-cloud-experimental/checks/03-deepagents-code-nemotron-ultra-profile.sh",
+        ["encode_source", "base64 -d"],
+      ],
+      [
+        "test/e2e/e2e-cloud-experimental/checks/04-deepagents-code-fresh-reonboard.sh",
+        ["encode_source", "base64 -d"],
+      ],
+      ["test/e2e/e2e-cloud-experimental/checks/06-deepagents-code-python-egress.sh", ["base64 -d"]],
+      ["test/e2e/e2e-cloud-experimental/checks/09-deepagents-code-tavily-opt-in.sh", ["base64 -d"]],
+      [
+        "test/e2e/e2e-cloud-experimental/checks/11-deepagents-code-observability.sh",
+        ["b64decode", "base64 | tr -d"],
+      ],
+    ] as const;
+
+    for (const [relativePath, forbidden] of migratedConsumers) {
+      const source = fs.readFileSync(path.join(repoRoot, relativePath), "utf8");
+      for (const obsoleteTransport of forbidden) {
+        expect(source, `${relativePath} still contains ${obsoleteTransport}`).not.toContain(
+          obsoleteTransport,
+        );
+      }
+    }
+
+    const phase6 = fs.readFileSync(
+      path.join(repoRoot, "test/e2e/live/phase6-messaging-helpers.ts"),
+      "utf8",
+    );
+    expect(phase6).toContain('["sh", "-c", script, "nemoclaw-e2e-script", ...args]');
+
+    const pythonEgress = fs.readFileSync(
+      path.join(
+        repoRoot,
+        "test/e2e/e2e-cloud-experimental/checks/06-deepagents-code-python-egress.sh",
+      ),
+      "utf8",
+    );
+    expect(pythonEgress).toContain('"$python_bin" -c "$source" "$url"');
+    expect(pythonEgress).toContain("NATIVE_MULTILINE_ARGV");
+  });
 });

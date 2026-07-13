@@ -991,10 +991,9 @@ req.on("error", (error) => {
   strictDenied && console.log(JSON.stringify({ status: 403, error: error.message }));
   process.exit(expectation === "deny" || strictDenied ? 0 : 1);
 });
-req.end(body);
+  req.end(body);
 `;
   await artifacts.writeText("mcp-provider-rewrite-proof.cjs", mcpCallScript);
-  const mcpCallScriptB64 = Buffer.from(mcpCallScript, "utf8").toString("base64");
   const runNodeMcpProbe = async (
     targetUrl: string,
     method: string,
@@ -1007,8 +1006,9 @@ req.end(body);
       trustedSandboxShellScript(
         [
           "set -eu",
-          `printf '%s' ${JSON.stringify(mcpCallScriptB64)} | base64 -d > /tmp/nemoclaw-mcp-provider-rewrite-proof.cjs`,
-          `nemoclaw-start node /tmp/nemoclaw-mcp-provider-rewrite-proof.cjs ${JSON.stringify(targetUrl)} ${JSON.stringify(method)} ${expectation} ${JSON.stringify(credentialKey)}`,
+          `nemoclaw-start node - ${shellQuote(targetUrl)} ${shellQuote(method)} ${shellQuote(expectation)} ${shellQuote(credentialKey)} <<'NEMOCLAW_MCP_PROVIDER_REWRITE_PROBE'`,
+          mcpCallScript,
+          "NEMOCLAW_MCP_PROVIDER_REWRITE_PROBE",
         ].join("\n"),
       ),
       {

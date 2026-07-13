@@ -620,11 +620,9 @@ describe("LangChain Deep Agents Code image contracts", () => {
       "python_probe_source",
       'DCODE_MANAGED_EXEC="/usr/local/lib/nemoclaw/dcode-managed-exec"',
       'local -a command_prefix=("${@:3}")',
-      "printf -v remote_cmd '%q '",
-      "base64 | tr -d",
-      "base64 -d",
-      'remote_cmd+="-c',
-      "${url@Q}",
+      "sandbox_exec_argv",
+      'source="$(python_probe_source)"',
+      '"$python_bin" -c "$source" "$url"',
       'expect_reached "arbitrary Python" "GitHub" "https://api.github.com/"',
       'expect_reached "arbitrary Python" "PyPI" "https://pypi.org/"',
       '"direct managed-exec Python"',
@@ -642,6 +640,7 @@ describe("LangChain Deep Agents Code image contracts", () => {
     ]) {
       expect(pythonEgressCheck).toContain(expected);
     }
+    expect(pythonEgressCheck).not.toContain("base64 -d");
     for (const expected of [
       "Case: Deep Agents Code dcode secret boundary",
       "env OPENAI_API_KEY=",
@@ -734,8 +733,8 @@ describe("LangChain Deep Agents Code image contracts", () => {
       "policy-add tavily --yes",
       /urllib\.request\.Request[\s\S]*method='POST'/,
       "python_probe_source",
-      "base64 | tr -d",
-      "${python_bin@Q} -c",
+      "sandbox_exec_argv",
+      '"$python_bin" -c "$source" "$url"',
       "NEMOCLAW_E2E_TAVILY_SELF_TEST",
       "/opt/venv/",
       "managed Deep Agents Code python can reach Tavily",
@@ -746,6 +745,7 @@ describe("LangChain Deep Agents Code image contracts", () => {
     ]) {
       expect(tavilyOptInCheck).toMatch(expected);
     }
+    expect(tavilyOptInCheck).not.toContain("base64 -d");
     expect(cloudExperimentalChecksForOnboarding("cloud-langchain-deepagents-code")).toEqual([
       "test/e2e/e2e-cloud-experimental/checks/03-deepagents-code-nemotron-ultra-profile.sh",
       "test/e2e/e2e-cloud-experimental/checks/04-deepagents-code-fresh-reonboard.sh",

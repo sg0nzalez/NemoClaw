@@ -250,7 +250,7 @@ describe("P0-E cloud-experimental parity guardrails", () => {
     );
   });
 
-  it("keeps Deep Agents Python egress probes as atomic shell expressions", () => {
+  it("passes Deep Agents Python egress probes as native multiline argv", () => {
     const result = spawnSync(
       "bash",
       [
@@ -271,13 +271,10 @@ describe("P0-E cloud-experimental parity guardrails", () => {
     expect(result.status).toBe(0);
     const commands = result.stdout.trim().split("\n");
     expect(commands).toHaveLength(2);
-    expect(commands[0]).toMatch(/^ATOMIC_COMMAND:python3 -c /);
-    expect(commands[1]).toMatch(
-      /^ATOMIC_COMMAND:\/usr\/local\/lib\/nemoclaw\/dcode-managed-exec \/opt\/venv\/bin\/python3 -c /,
-    );
+    expect(commands).toEqual(["NATIVE_MULTILINE_ARGV", "NATIVE_MULTILINE_ARGV"]);
   });
 
-  it("keeps the Deep Agents fetch_url probe as one atomic shell expression", () => {
+  it("passes the Deep Agents fetch_url probe as native multiline argv", () => {
     const result = spawnSync(
       "bash",
       [
@@ -296,7 +293,7 @@ describe("P0-E cloud-experimental parity guardrails", () => {
     );
 
     expect(result.status).toBe(0);
-    expect(result.stdout.trim()).toBe("ATOMIC_FETCH_COMMAND");
+    expect(result.stdout.trim()).toBe("NATIVE_MULTILINE_ARGV");
   });
 
   it.each([
@@ -366,7 +363,7 @@ describe("P0-E cloud-experimental parity guardrails", () => {
     expect(result.stdout).toContain("ATOMIC_COMMAND");
   });
 
-  it("keeps the Deep Agents Tavily probe as one atomic shell expression", () => {
+  it("passes the Deep Agents Tavily probe as native multiline argv", () => {
     const result = spawnSync("bash", [dcodeTavilyCheck], {
       encoding: "utf8",
       env: {
@@ -376,7 +373,7 @@ describe("P0-E cloud-experimental parity guardrails", () => {
     });
 
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain("ATOMIC_COMMAND");
+    expect(result.stdout).toContain("NATIVE_MULTILINE_ARGV");
   });
 
   it.each([

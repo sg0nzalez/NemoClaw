@@ -77,14 +77,6 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function shellEvalArg(script: string): string {
-  if (script.length === 0) {
-    return "";
-  }
-  const encoded = Buffer.from(script, "utf8").toString("base64");
-  return `printf %s ${encoded} | base64 -d | sh`;
-}
-
 async function runNemoclaw(
   host: HostCliClient,
   args: string[],
@@ -103,7 +95,7 @@ async function sandboxBash(
   script: string,
   options: { artifactName: string; timeoutMs?: number } = { artifactName: "sandbox-bash" },
 ): Promise<ShellProbeResult> {
-  return sandbox.execShell(SANDBOX_NAME, trustedSandboxShellScript(shellEvalArg(script)), {
+  return sandbox.execShell(SANDBOX_NAME, trustedSandboxShellScript(script), {
     artifactName: options.artifactName,
     env: baseEnv(),
     timeoutMs: options.timeoutMs ?? SANDBOX_EXEC_TIMEOUT_MS,
@@ -1003,11 +995,11 @@ printf '\n'
       /STATUS_403|ERROR_|denied|policy|forbidden|not allowed|not permitted/i,
     );
 
-    const webFetchScriptB64 = Buffer.from(buildWebFetchProbeScript(), "utf8").toString("base64");
     const webFetch = await sandboxBash(
       sandbox,
-      `printf '%s' '${webFetchScriptB64}' | base64 -d > /tmp/nemoclaw-web-fetch-e2e.mjs
-nemoclaw-start node /tmp/nemoclaw-web-fetch-e2e.mjs 'http://host.openshell.internal:${approvedServer.port}/' 'http://host.openshell.internal:${deniedServer.port}/' '${marker}' '${denyMarker}'`,
+      `nemoclaw-start node --input-type=module - 'http://host.openshell.internal:${approvedServer.port}/' 'http://host.openshell.internal:${deniedServer.port}/' '${marker}' '${denyMarker}' <<'NEMOCLAW_WEB_FETCH_PROBE'
+${buildWebFetchProbeScript()}
+NEMOCLAW_WEB_FETCH_PROBE`,
       { artifactName: "tc-net-10-openclaw-web-fetch", timeoutMs: SANDBOX_EXEC_TIMEOUT_MS },
     );
     const webFetchText = text(webFetch);

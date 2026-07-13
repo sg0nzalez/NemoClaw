@@ -24,6 +24,7 @@ import type {
   ShellProbeRunOptions,
   TrustedShellCommand,
 } from "../fixtures/shell-probe.ts";
+import { sandboxShWithArgs } from "../live/phase6-messaging-helpers.ts";
 
 interface RunnerCall {
   command: string;
@@ -573,6 +574,37 @@ describe("E2E fixture clients", () => {
     expect(payload).toBe(script);
     expect(payload).not.toContain("base64");
     expect(payload).not.toContain("eval");
+  });
+
+  it("phase-six shell helpers preserve multiline source and positional arguments", async () => {
+    const runner = new FakeRunner();
+    const sandbox = new SandboxClient(runner, { openshellPath: "openshell" });
+    const script = "set -eu\nprintf '%s\\n' \"$1\"";
+    const argument = "line one\r\nline two";
+
+    await sandboxShWithArgs(sandbox, "assistant", script, [argument], {
+      artifactName: "phase-six-native-argv",
+      redactionValues: ["sensitive-marker"],
+      timeoutMs: 321,
+    });
+
+    expect(runner.calls[0]?.args).toEqual([
+      "sandbox",
+      "exec",
+      "-n",
+      "assistant",
+      "--",
+      "sh",
+      "-c",
+      script,
+      "nemoclaw-e2e-script",
+      argument,
+    ]);
+    expect(runner.calls[0]?.options).toMatchObject({
+      artifactName: "phase-six-native-argv",
+      redactionValues: ["sensitive-marker"],
+      timeoutMs: 321,
+    });
   });
 
   it("sandbox client requires trusted non-empty shell scripts", () => {

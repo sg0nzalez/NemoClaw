@@ -297,6 +297,23 @@ Commits: `5f38b7c4`, `ccdac9ce`, `caaa5165`, `8c0ecac8`, `233d207e`,
 - Native Kubernetes sidecar/PVC/Helm changes, OpenShift documentation, and the TUI
   warning destination are not consumed by NemoClaw's Docker integration.
 
+The newline migration was audited beyond the public `exec` guard. Production
+gateway RPC now sends its reviewed module source directly, and the live E2E
+clients pass trusted shell, Python, Node, heredoc, and positional-argument bytes
+directly through OpenShell. The sweep removed newline-only base64/eval/temp-file
+transports from endpoint smoke, network policy, MCP, messaging, pairing, rebuild,
+recovery, plugin, inference-switch, and Deep Agents checks. Focused tests pin LF,
+CRLF, heredoc, and positional-argument preservation at the raw OpenShell argv
+boundary.
+
+Remaining base64 use is independently classified: hostile or secret canaries are
+kept inert; rendered file payloads and executable lifecycle fixtures are
+deliberately materialized; gateway parameters remain data rather than code; and
+oversized messaging-provider and scope-upgrade probes retain bounded chunks
+because OpenShell still has a 32 KiB per-argument ceiling. The Hermes validator
+wrapper remains the owned secret-boundary exception. None of those retained uses
+exists merely to avoid a newline in an OpenShell command argument.
+
 ## Downstream concern ledger
 
 | ID | Severity | Downstream consumer and failure mode | Required disposition | Current state |
