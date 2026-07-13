@@ -259,9 +259,11 @@ Commits: `5f38b7c4`, `ccdac9ce`, `caaa5165`, `8c0ecac8`, `233d207e`,
 
 - `40194f93` closes two placeholder leak paths: missing resolver state now rejects
   reserved credential markers, and missing TLS-termination state returns a
-  pre-200 CONNECT 503 rather than creating a raw tunnel. The upstream PR explicitly
-  did not add a true connection-level test for the second branch. NemoClaw keeps
-  its wire-level status probe and requires the physical #6379 tool-call proof.
+  pre-200 CONNECT 503 rather than creating a raw tunnel. Upstream covers the 503
+  with a loopback first-byte test and a full `handle_tcp_connection` test. Those
+  tests do not reproduce the affected Docker 27 DGX Spark resolver/CA startup or
+  complete a credential-bearing MCP lifecycle, so NemoClaw keeps its wire-level
+  status probe and still requires the physical #6379 tool-call proof.
 - `bb72d012` permits newline and carriage-return bytes in exec command arguments
   while retaining strict NUL and non-command-field validation. NemoClaw's active
   public guard and internal base64 workarounds must be removed or reclassified,

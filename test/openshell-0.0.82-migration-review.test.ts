@@ -150,6 +150,8 @@ describe("OpenShell 0.0.82 migration review", () => {
     expect(manifest.openshellVersion).toBe("0.0.72");
     expect(review).toContain("remains pinned to `0.0.72`");
     expect(review).toContain("physical Docker 27 DGX Spark");
+    expect(review).toContain("loopback first-byte test");
+    expect(review).not.toContain("did not add a true connection-level test");
     expect(review).toContain("Inclusion of `40194f93` alone cannot close");
   });
 });
