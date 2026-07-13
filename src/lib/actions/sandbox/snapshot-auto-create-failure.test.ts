@@ -80,6 +80,7 @@ vi.mock("../../shields", () => ({
 }));
 vi.mock("../../shields/timer-bound-lock", () => ({
   withTimerBoundShieldsMutationLock: vi.fn((_sandbox, _command, fn) => fn()),
+  withTimerBoundShieldsMutationLockAsync: vi.fn((_sandbox, _command, fn) => fn()),
 }));
 vi.mock("../../shields/timer-control", () => ({ readTimerMarker: vi.fn(() => null) }));
 vi.mock("../../state/gateway", () => ({
