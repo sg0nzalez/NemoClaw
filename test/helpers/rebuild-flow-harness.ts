@@ -614,7 +614,7 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
     .mockResolvedValue(undefined);
   const warnUnpreservedUserManagedFilesSpy = vi
     .spyOn(rebuildFlowHelpers, "warnUnpreservedUserManagedFiles")
-    .mockImplementation(() => undefined);
+    .mockResolvedValue(undefined);
 
   errorSpy.mockClear();
   logSpy.mockClear();

@@ -331,13 +331,13 @@ export function backupSandboxStateForRebuild(
  * that transaction; if the file still exists at this point it contains
  * additional user-owned content that the state backup intentionally excludes.
  */
-export function warnUnpreservedUserManagedFiles(
+export async function warnUnpreservedUserManagedFiles(
   sandboxName: string,
   log: (msg: string) => void,
-): void {
+): Promise<void> {
   let probe: userManagedFilesProbe.UserManagedFilesProbe;
   try {
-    probe = userManagedFilesProbe.probeUserManagedFiles(sandboxName);
+    probe = await userManagedFilesProbe.probeUserManagedFiles(sandboxName);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     log(`User-managed file probe errored: ${message}`);

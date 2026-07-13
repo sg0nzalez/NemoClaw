@@ -311,7 +311,7 @@ describe("warnUnpreservedUserManagedFiles", () => {
     errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
     backupSpy = vi.spyOn(sandboxState, "backupSandboxState").mockReturnValue(makeBackupResult());
-    probeSpy = vi.spyOn(userManagedFilesProbe, "probeUserManagedFiles").mockReturnValue({
+    probeSpy = vi.spyOn(userManagedFilesProbe, "probeUserManagedFiles").mockResolvedValue({
       declared: [],
       existing: [],
     });
@@ -321,13 +321,13 @@ describe("warnUnpreservedUserManagedFiles", () => {
     vi.restoreAllMocks();
   });
 
-  it("warns directly before a rebuild replaces user-managed MCP files", () => {
-    probeSpy.mockReturnValue({
+  it("warns directly before a rebuild replaces user-managed MCP files", async () => {
+    probeSpy.mockResolvedValue({
       declared: [".env", ".mcp.json"],
       existing: [".env", ".mcp.json"],
     });
 
-    warnUnpreservedUserManagedFiles("alpha", () => undefined);
+    await warnUnpreservedUserManagedFiles("alpha", () => undefined);
 
     expect(probeSpy).toHaveBeenCalledOnce();
     expect(probeSpy).toHaveBeenCalledWith("alpha");
@@ -342,23 +342,23 @@ describe("warnUnpreservedUserManagedFiles", () => {
     );
   });
 
-  it("emits no warning when probe returns no existing user-managed files", () => {
-    probeSpy.mockReturnValue({
+  it("emits no warning when probe returns no existing user-managed files", async () => {
+    probeSpy.mockResolvedValue({
       declared: [".env", ".mcp.json"],
       existing: [],
     });
 
-    warnUnpreservedUserManagedFiles("alpha", () => undefined);
+    await warnUnpreservedUserManagedFiles("alpha", () => undefined);
 
     expect(probeSpy).toHaveBeenCalledOnce();
     const warnLines = warnSpy.mock.calls.map((args: unknown[]) => String(args[0]));
     expect(warnLines.some((line: string) => line.includes("will not be preserved"))).toBe(false);
   });
 
-  it("emits no warning when agent declares no user-managed files", () => {
-    probeSpy.mockReturnValue({ declared: [], existing: [] });
+  it("emits no warning when agent declares no user-managed files", async () => {
+    probeSpy.mockResolvedValue({ declared: [], existing: [] });
 
-    warnUnpreservedUserManagedFiles("alpha", () => undefined);
+    await warnUnpreservedUserManagedFiles("alpha", () => undefined);
 
     expect(probeSpy).toHaveBeenCalledOnce();
     const warnLines = warnSpy.mock.calls.map((args: unknown[]) => String(args[0]));
@@ -395,12 +395,12 @@ describe("warnUnpreservedUserManagedFiles", () => {
     expect(probeSpy).not.toHaveBeenCalled();
   });
 
-  it("surfaces a user-visible warning when the post-scrub probe errors", () => {
-    probeSpy.mockImplementation(() => {
-      throw new Error("ssh boom");
-    });
+  it("surfaces a user-visible warning when the post-scrub probe errors", async () => {
+    probeSpy.mockRejectedValue(new Error("gRPC boom"));
 
-    expect(() => warnUnpreservedUserManagedFiles("alpha", () => undefined)).not.toThrow();
+    await expect(
+      warnUnpreservedUserManagedFiles("alpha", () => undefined),
+    ).resolves.toBeUndefined();
 
     const warnLines = warnSpy.mock.calls.map((args: unknown[]) => String(args[0]));
     expect(

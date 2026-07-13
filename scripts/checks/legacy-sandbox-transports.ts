@@ -61,8 +61,6 @@ const REVIEWED_SITE_TUPLES = [
   ["src/lib/state/sandbox.ts", "ssh-command", 8],
   ["src/lib/state/sandbox.ts", "ssh-temp-config", 2],
   ["src/lib/state/state-file-restore.ts", "ssh-command", 1],
-  ["src/lib/state/user-managed-files-probe.ts", "ssh-command", 1],
-  ["src/lib/state/user-managed-files-probe.ts", "ssh-temp-config", 1],
   ["src/lib/tunnel/sandbox-gateway-stop.ts", "docker-exec-command", 2],
 ] as const satisfies readonly ReviewedSiteTuple[];
 

@@ -137,7 +137,7 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
   vi.spyOn(rebuildUsageNotice, "ensureRebuildUsageNoticeAccepted").mockResolvedValue(true);
   const warnUnpreservedUserManagedFilesSpy = vi
     .spyOn(rebuildFlowHelpers, "warnUnpreservedUserManagedFiles")
-    .mockImplementation(() => undefined);
+    .mockResolvedValue(undefined);
   vi.spyOn(resolve, "resolveOpenshell").mockReturnValue(null);
   vi.spyOn(agentDefs, "loadAgent").mockReturnValue(agentDef);
   vi.spyOn(agentRuntime, "getSessionAgent").mockReturnValue({ name: "openclaw" });

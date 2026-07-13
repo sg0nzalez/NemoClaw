@@ -71,8 +71,8 @@ export async function runRebuildDestroyPhase(
       // MCP preparation removes only adapter entries whose exact ownership
       // fingerprints match the registry. Probe afterward so a Deep Agents
       // user `.mcp.json` is not confused with the separate managed projection.
-      // This can block on SSH, so it must finish before the final DCode check.
-      if (!staleRecovery) warnUnpreservedUserManagedFiles(sandboxName, log);
+      // Finish the read-only probe before the final DCode check.
+      if (!staleRecovery) await warnUnpreservedUserManagedFiles(sandboxName, log);
       if (validateAfterMcpPreparation) {
         let validation: RebuildDeleteValidationResult;
         try {
