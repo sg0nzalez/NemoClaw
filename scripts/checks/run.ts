@@ -42,6 +42,11 @@ const CHECKS: readonly CheckCommand[] = [
     args: ["scripts/checks/legacy-sandbox-transports.ts"],
   },
   {
+    name: "openshell-grpc-proto-pin",
+    command: TSX,
+    args: ["scripts/checks/openshell-grpc-proto-pin.ts"],
+  },
+  {
     name: "dependency-pins",
     command: TSX,
     args: ["scripts/checks/dependency-pins.ts"],
