@@ -326,13 +326,16 @@ describe("messaging-build-applier.mts: agent-install", () => {
     );
   });
 
-  it("writes a reduced runtime plan artifact for entrypoint startup", () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-runtime-plan-artifact-"));
+  it.each([
+    "openclaw",
+    "hermes",
+  ] as const)("writes a reduced %s runtime plan artifact for entrypoint startup (#5896)", (agent) => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), `nemoclaw-${agent}-runtime-plan-artifact-`));
     const artifactPath = path.join(tmp, "runtime", "messaging-runtime-plan.json");
     const plan = {
       schemaVersion: 1,
       sandboxName: "test-sandbox",
-      agent: "openclaw",
+      agent,
       workflow: "rebuild",
       channels: [
         {
@@ -357,8 +360,8 @@ describe("messaging-build-applier.mts: agent-install", () => {
       agentRender: [
         {
           channelId: "telegram",
-          agent: "openclaw",
-          target: "openclaw.json",
+          agent,
+          target: agent === "openclaw" ? "openclaw.json" : "config.yaml",
           kind: "json-fragment",
           path: "channels.telegram",
           value: { token: "do-not-persist-render-value" },
@@ -393,14 +396,7 @@ describe("messaging-build-applier.mts: agent-install", () => {
     try {
       const result = spawnSync(
         "node",
-        [
-          "--experimental-strip-types",
-          SCRIPT_PATH,
-          "--agent",
-          "openclaw",
-          "--phase",
-          "runtime-setup",
-        ],
+        ["--experimental-strip-types", SCRIPT_PATH, "--agent", agent, "--phase", "runtime-setup"],
         {
           encoding: "utf-8",
           stdio: ["pipe", "pipe", "pipe"],
@@ -418,7 +414,7 @@ describe("messaging-build-applier.mts: agent-install", () => {
       expect(artifact).toMatchObject({
         schemaVersion: 1,
         sandboxName: "test-sandbox",
-        agent: "openclaw",
+        agent,
         workflow: "rebuild",
         channels: [
           { channelId: "telegram", active: true, disabled: false },
