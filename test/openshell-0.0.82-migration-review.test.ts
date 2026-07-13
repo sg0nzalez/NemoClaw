@@ -231,4 +231,31 @@ describe("OpenShell 0.0.82 migration review", () => {
     expect(pythonEgress).toContain('"$python_bin" -c "$source" "$url"');
     expect(pythonEgress).toContain("NATIVE_MULTILINE_ARGV");
   });
+
+  it("treats OpenShell TLS identity as supervisor-only in every managed agent", () => {
+    const hermesBoundary = fs.readFileSync(
+      path.join(repoRoot, "agents", "hermes", "validate-env-secret-boundary.py"),
+      "utf8",
+    );
+    const dcodeWrapper = fs.readFileSync(
+      path.join(repoRoot, "agents", "langchain-deepagents-code", "dcode-wrapper.sh"),
+      "utf8",
+    );
+    const dcodeRuntime = fs.readFileSync(
+      path.join(repoRoot, "agents", "langchain-deepagents-code", "managed-dcode-runtime.py"),
+      "utf8",
+    );
+    const boundaries = [hermesBoundary, dcodeWrapper, dcodeRuntime];
+
+    for (const name of ["OPENSHELL_TLS_CA", "OPENSHELL_TLS_CERT", "OPENSHELL_TLS_KEY"]) {
+      expect(
+        boundaries.every((source) => source.includes(name)),
+        name,
+      ).toBe(true);
+    }
+    expect(hermesBoundary).not.toContain("RUNTIME_ALLOWED_PLATFORM_PATH_VALUES");
+    expect(dcodeWrapper).not.toContain("is_allowed_openshell_runtime_value");
+    expect(dcodeRuntime).not.toContain("/etc/openshell/tls/client/tls.key");
+    expect(review).toContain("Hermes and Deep Agents now reject all three variables");
+  });
 });

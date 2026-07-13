@@ -205,7 +205,7 @@ PY
 # file has to also rewrite the Dockerfile-committed hash, which reviewers gate).
 # Regenerate with `sha256sum agents/hermes/{hermes-wrapper.py,validate-env-secret-boundary.py,finalize-tirith-marker.py}`.
 ARG NEMOCLAW_HERMES_WRAPPER_SHA256=ec8b0e4d6254175929d5a02240acd6af25e94774a30b36ba5c6f5a69c32fb9d7
-ARG NEMOCLAW_HERMES_VALIDATOR_SHA256=970d7ff03bc409ff1d5ca46bfdbd2a42ac28a32a810ccc147a508301bff38496
+ARG NEMOCLAW_HERMES_VALIDATOR_SHA256=d7371a84099b204346e0bfecfacb0086fdab690e5fadcf5e12417b6038927d19
 ARG NEMOCLAW_HERMES_TIRITH_FINALIZER_SHA256=a1e6b1c53ab297569abb87c29d15c294d729e46005bfd022136b4c447a791819
 # hadolint ignore=DL4006
 RUN printf '%s  %s\n' \
