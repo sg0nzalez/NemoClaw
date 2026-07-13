@@ -3,8 +3,11 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-import type { GrpcOpenShellSandboxControl } from "./grpc-sandbox-control";
 import { OpenShellGrpcEdgeTunnelRequiredError } from "./grpc-gateway-config";
+import {
+  type GrpcOpenShellSandboxControl,
+  OpenShellGrpcPreDispatchError,
+} from "./grpc-sandbox-control";
 import type { OpenShellSandboxControl, SandboxExecResult } from "./sandbox-control";
 import {
   execSandboxReadOnlyWithGrpcFallback,
@@ -14,10 +17,9 @@ import { OPENSHELL_OPERATION_TIMEOUT_MS } from "./timeouts";
 
 function dependencies(grpcResult: SandboxExecResult | Error, cliResult?: SandboxExecResult) {
   const close = vi.fn();
-  const grpcExec = vi.fn(async () => {
-    if (grpcResult instanceof Error) throw grpcResult;
-    return grpcResult;
-  });
+  const grpcExec = vi.fn(() =>
+    grpcResult instanceof Error ? Promise.reject(grpcResult) : Promise.resolve(grpcResult),
+  );
   const grpc: GrpcOpenShellSandboxControl = { close, exec: grpcExec };
   const cliExec = vi.fn(async () => cliResult ?? { status: 0, stdout: "cli", stderr: "" });
   const cli: OpenShellSandboxControl = { exec: cliExec };
@@ -60,11 +62,16 @@ describe("read-only OpenShell sandbox control routing", () => {
     expect(test.cliExec).not.toHaveBeenCalled();
   });
 
-  it("retries a gRPC transport failure through the CLI without forwarding its deadline", async () => {
+  it("retries a pre-dispatch gRPC lookup failure without forwarding its deadline", async () => {
     const grpcError = new Error("UNAVAILABLE");
     const cliResult = { status: 0, stdout: "cli", stderr: "" };
     const test = dependencies(
-      { status: null, stdout: "partial", stderr: "", error: grpcError },
+      {
+        status: null,
+        stdout: "",
+        stderr: "",
+        error: new OpenShellGrpcPreDispatchError(grpcError),
+      },
       cliResult,
     );
 
@@ -73,8 +80,20 @@ describe("read-only OpenShell sandbox control routing", () => {
     ).resolves.toEqual(cliResult);
 
     expect(test.cliExec).toHaveBeenCalledWith(request);
-    expect(test.debug).toHaveBeenCalledWith(expect.stringContaining("gRPC read failed"), grpcError);
+    expect(test.debug).toHaveBeenCalledWith(expect.stringContaining("before dispatch"), grpcError);
     expect(test.close).toHaveBeenCalledOnce();
+  });
+
+  it("does not replay a post-dispatch gRPC stream failure", async () => {
+    const grpcError = new Error("stream reset");
+    const result = { status: null, stdout: "partial", stderr: "", error: grpcError };
+    const test = dependencies(result);
+
+    await expect(
+      execSandboxReadOnlyWithGrpcFallback("nemoclaw", request, test.deps),
+    ).resolves.toEqual(result);
+
+    expect(test.cliExec).not.toHaveBeenCalled();
   });
 
   it("uses the CLI when gateway configuration cannot create a gRPC client", async () => {
