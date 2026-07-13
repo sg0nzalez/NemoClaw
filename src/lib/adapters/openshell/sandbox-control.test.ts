@@ -22,11 +22,12 @@ describe("CLI OpenShell sandbox control", () => {
       sandboxName: "alpha",
       command: ["openclaw", "sessions", "list", "--json"],
       maxOutputBytes: 4096,
+      timeoutMs: 30_000,
     });
 
     expect(capture).toHaveBeenCalledWith(
       ["sandbox", "exec", "--name", "alpha", "--", "openclaw", "sessions", "list", "--json"],
-      { ignoreError: true, includeStreams: true, maxBuffer: 4096 },
+      { ignoreError: true, includeStreams: true, maxBuffer: 4096, timeout: 30_000 },
     );
     expect(result).toEqual({
       status: 0,
