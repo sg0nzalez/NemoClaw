@@ -4460,7 +4460,7 @@ async function runOnboard(opts: OnboardOptions = {}): Promise<void> {
         requestedObservabilityEnabled: runtimeControlRequests.requestedObservabilityEnabled,
         requestedDcodeAutoApprovalMode: runtimeControlRequests.requestedDcodeAutoApprovalMode,
         authoritativePolicyTier:
-          opts.authoritativeResumeConfig === true ? (opts.policyTier ?? null) : null,
+          opts.authoritativeResumeConfig === true ? (opts.policyTier ?? null) : undefined,
         recreateSandbox: isRecreateSandbox,
         controlUiPort: _preflightDashboardPort,
         rootDir: ROOT,
@@ -4571,7 +4571,7 @@ async function runOnboard(opts: OnboardOptions = {}): Promise<void> {
     >({
       branchState: agent ? "agent_setup" : "openclaw",
       authoritativePolicyTier:
-        opts.authoritativeResumeConfig === true ? (opts.policyTier ?? null) : null,
+        opts.authoritativeResumeConfig === true ? (opts.policyTier ?? null) : undefined,
       agentSetupDeps: {
         handleAgentSetup: agentOnboard.handleAgentSetup,
         agentSetupContext: () => ({
