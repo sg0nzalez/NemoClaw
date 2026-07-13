@@ -3,20 +3,22 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-import type { CaptureOpenshellBinaryResult, CaptureOpenshellResult } from "./client";
+import type { CaptureOpenshellBinaryResult } from "./client";
 import { createCliOpenShellSandboxControl } from "./sandbox-control";
 
 describe("CLI OpenShell sandbox control", () => {
   it("maps a typed exec request to the existing CLI contract", async () => {
-    const capture = vi.fn(
-      (): CaptureOpenshellResult => ({
+    const captureBinary = vi.fn(
+      (): CaptureOpenshellBinaryResult => ({
         status: 0,
-        output: "hello",
-        stdout: "hello\n",
-        stderr: "warning\n",
+        stdout: Buffer.from("hello\n"),
+        stderr: Buffer.from("warning\n"),
       }),
     );
-    const control = createCliOpenShellSandboxControl(capture);
+    const control = createCliOpenShellSandboxControl({
+      resolveBinary: () => "/usr/bin/openshell",
+      captureBinary,
+    });
 
     const result = await control.exec({
       sandboxName: "alpha",
@@ -26,11 +28,10 @@ describe("CLI OpenShell sandbox control", () => {
       timeoutMs: 30_000,
     });
 
-    expect(capture).toHaveBeenCalledWith(
+    expect(captureBinary).toHaveBeenCalledWith(
+      "/usr/bin/openshell",
       ["sandbox", "exec", "--name", "alpha", "--", "openclaw", "sessions", "list", "--json"],
       {
-        ignoreError: true,
-        includeStreams: true,
         input: Buffer.from("request body"),
         maxBuffer: 4096,
         timeout: 30_000,
@@ -45,15 +46,19 @@ describe("CLI OpenShell sandbox control", () => {
 
   it("preserves transport failures without throwing", async () => {
     const error = Object.assign(new Error("spawnSync openshell ENOBUFS"), { code: "ENOBUFS" });
-    const capture = vi.fn(
-      (): CaptureOpenshellResult => ({
+    const captureBinary = vi.fn(
+      (): CaptureOpenshellBinaryResult => ({
         status: null,
-        output: "partial",
+        stdout: Buffer.from("partial"),
+        stderr: Buffer.alloc(0),
         error,
         signal: "SIGTERM",
       }),
     );
-    const control = createCliOpenShellSandboxControl(capture);
+    const control = createCliOpenShellSandboxControl({
+      resolveBinary: () => "/usr/bin/openshell",
+      captureBinary,
+    });
 
     await expect(control.exec({ sandboxName: "alpha", command: ["true"] })).resolves.toEqual({
       status: null,
@@ -73,7 +78,7 @@ describe("CLI OpenShell sandbox control", () => {
         stderr: Buffer.from("warning"),
       }),
     );
-    const control = createCliOpenShellSandboxControl(vi.fn(), {
+    const control = createCliOpenShellSandboxControl({
       resolveBinary: () => "/usr/bin/openshell",
       captureBinary,
     });
