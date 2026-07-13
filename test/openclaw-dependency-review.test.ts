@@ -224,14 +224,18 @@ describe("OpenClaw 2026.6.10 dependency review contract", () => {
     expect(review).toContain("Issue #4434 full live acceptance");
     expect(review).toContain("code-backed for the reviewed `openclaw@2026.6.10` artifact");
     expect(review).toContain("src/lib/messaging/channels/manifests.test.ts");
-    expect(review).toContain("npm audit result in this note is a manual snapshot");
+    expect(review).toContain(
+      "full OpenClaw and plugin audit result in this note remains a manual snapshot",
+    );
     expect(review).toContain("Advisory audit revalidated: 2026-07-03");
     expect(review).toContain("0` critical vulnerabilities across `763` total dependencies");
     expect(review).toContain("Node `v22.22.2`");
     expect(review).toContain("engine requirement of `>=22.19.0`");
     expect(review).toContain(
-      "CI job for `npm install --package-lock-only --ignore-scripts && npm audit --omit=dev --json`",
+      "Current pull-request and main-branch CI separately require the `wechat-runtime-audit` job",
     );
+    expect(review).toContain("Node `22.19.0` and npm `10.9.4`");
+    expect(review).toContain("fails on any low-or-higher production advisory");
     expect(review).toContain("Transitive Dependency Graph Rationale");
     expect(review).toContain(
       "The OpenClaw 2026.6.10 bump does not newly introduce an unfrozen OpenClaw transitive graph",
@@ -252,13 +256,11 @@ describe("OpenClaw 2026.6.10 dependency review contract", () => {
     expect(review).toContain("`@openclaw/msteams@2026.6.10`");
     expect(review).toContain("`@zed-industries/codex-acp@0.11.1` has no declared npm dependencies");
     expect(review).toContain(
-      "the existing non-OpenClaw Tencent WeChat plugin, `@tencent-weixin/openclaw-weixin@2.4.3`",
+      "only reviewed messaging plugin without a package-internal shrinkwrap was the existing non-OpenClaw Tencent WeChat plugin",
     );
-    expect(review).toContain("not introduced by the OpenClaw version change");
-    expect(review).toContain("third-party messaging plugins without package-internal shrinkwraps");
-    expect(review).toContain(
-      "The transitive npm graph warning is dispositioned by package evidence",
-    );
+    expect(review).toContain("Current NemoClaw builds close that residual");
+    expect(review).toContain("copies it into a disposable writable cache");
+    expect(review).toContain("Current NemoClaw closes the WeChat residual");
     expect(review).toContain("stale nonterminal rebuild-resume repair");
     expect(review).toContain("tracked against #4533");
     expect(review).toContain("src/lib/actions/sandbox/rebuild-resume-session.test.ts");
@@ -364,7 +366,7 @@ check_contains "$(cat Dockerfile)" "stat -c '%u:%g:%a'" "runtime provenance meta
 check_contains "$(cat Dockerfile)" '0:0:444' "runtime provenance exact metadata"
 check_contains "$(cat Dockerfile)" 'rm -rf "$OPENCLAW_PROVENANCE_PATH"' "runtime provenance consumption"
 
-optional_plugin_block="$(sed -n '/# Install non-messaging OpenClaw plugins that need to match the runtime./,/^RUN OPENCLAW_VERSION=/p' Dockerfile)"
+optional_plugin_block="$(sed -n '/# Install non-messaging OpenClaw plugins that need to match the runtime./,/# The reviewed cache stays root-owned and immutable to the sandbox user./p' Dockerfile)"
 check_contains "$optional_plugin_block" 'npm view "$plugin_spec" dist.integrity' "optional plugin registry integrity"
 check_contains "$optional_plugin_block" 'npm view "$plugin_spec" dist.tarball' "optional plugin registry tarball"
 check_contains "$optional_plugin_block" 'npm pack "$expected_tarball" --pack-destination "$NEMOCLAW_OPENCLAW_PLUGIN_PACK_DIR" --json' "optional plugin pack"
@@ -394,7 +396,7 @@ check_contains "$optional_plugin_block" 'rm -rf "$NEMOCLAW_OPENCLAW_PLUGIN_PACK_
 		grep -Fq 'COPY scripts/patch-openclaw-device-self-approval.ts /usr/local/lib/nemoclaw/patch-openclaw-device-self-approval.ts' Dockerfile
 		grep -Fq 'node --experimental-strip-types /usr/local/lib/nemoclaw/patch-openclaw-device-self-approval.ts \\' Dockerfile
 
-	phase_count="$(grep -Ec '^RUN OPENCLAW_VERSION="[$][{]OPENCLAW_VERSION[}]" node --experimental-strip-types /src/lib/messaging/applier/build/messaging-build-applier\\.mts --agent openclaw --phase (runtime-setup|agent-install|post-agent-install)$' Dockerfile)"
+	phase_count="$(grep -Ec -- '--phase (runtime-setup|agent-install|post-agent-install)' Dockerfile)"
 test "$phase_count" -eq 3
 grep -Fq -- '--phase runtime-setup' Dockerfile
 grep -Fq -- '--phase agent-install' Dockerfile

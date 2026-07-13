@@ -993,6 +993,7 @@ describe("pull request and main workflow contracts", () => {
       INSTALLER_INTEGRATION_RESULT: "success",
       PLUGIN_TESTS_RESULT: "success",
       STATIC_RESULT: "success",
+      WECHAT_RUNTIME_AUDIT_RESULT: "success",
     };
     const successfulMain = {
       BUILD_TYPECHECK_RESULT: "success",
@@ -1003,6 +1004,7 @@ describe("pull request and main workflow contracts", () => {
       PLUGIN_TESTS_RESULT: "success",
       REAL_OPENCLAW_DIST_HARNESS_RESULT: "success",
       STATIC_RESULT: "success",
+      WECHAT_RUNTIME_AUDIT_RESULT: "success",
     };
 
     const codeSuccess = runWorkflowShellStep(prGate, successfulCode);
@@ -1021,6 +1023,7 @@ describe("pull request and main workflow contracts", () => {
       INSTALLER_INTEGRATION_RESULT: "skipped",
       PLUGIN_TESTS_RESULT: "skipped",
       STATIC_RESULT: "skipped",
+      WECHAT_RUNTIME_AUDIT_RESULT: "skipped",
     });
     const mainSuccess = runWorkflowShellStep(mainGate, successfulMain);
     const mainFailure = runWorkflowShellStep(mainGate, {
