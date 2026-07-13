@@ -157,6 +157,16 @@ function makeVmRestoreToEnv(
     openshellDriver: "vm",
     ...entry,
   });
+  const gatewayDir = path.join(home, ".config", "openshell", "gateways", "nemoclaw");
+  fs.mkdirSync(gatewayDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(gatewayDir, "metadata.json"),
+    JSON.stringify({
+      name: "nemoclaw",
+      gateway_endpoint: "https://gateway.example.test",
+      auth_mode: "cloudflare_jwt",
+    }),
+  );
 
   const cloneReadyMarker = path.join(home, "clone-1-ready");
   writeExecutable(path.join(localBin, "openshell"), [
@@ -164,23 +174,10 @@ function makeVmRestoreToEnv(
     '  "gateway info") printf "Gateway Info\\n\\nGateway: nemoclaw\\nGateway endpoint: https://127.0.0.1:8080/\\n"; exit 0 ;;',
     '  "sandbox get") printf "{\\"name\\":\\"%s\\"}\\n" "$3"; exit 0 ;;',
     `  "sandbox list") if [ -f ${JSON.stringify(cloneReadyMarker)} ]; then printf "NAME STATUS\\nalpha Ready\\nclone-1 Ready\\n"; else printf "NAME STATUS\\nalpha Ready\\n"; fi; exit 0 ;;`,
-    '  "sandbox exec") case "$*" in *NEMOCLAW_DCODE_PROBE*) printf "NEMOCLAW_DCODE_PROBE=no-runtime\\n" ;; *openclaw.json*) printf "{\\"gateway\\":{\\"auth\\":{\\"token\\":\\"fresh\\"}}}" ;; esac; exit 0 ;;',
-    '  "sandbox ssh-config") printf "Host openshell-alpha\\n  HostName 127.0.0.1\\n  User sandbox\\n"; exit 0 ;;',
+    '  "sandbox exec") case "$*" in *NEMOCLAW_DCODE_PROBE*) printf "NEMOCLAW_DCODE_PROBE=no-runtime\\n" ;; *installed_plugin_index*) printf "{\\"version\\":1,\\"installRecords\\":{},\\"loadPaths\\":[]}" ;; *openclaw.json*) printf "{\\"gateway\\":{\\"auth\\":{\\"token\\":\\"fresh\\"}}}" ;; esac; exit 0 ;;',
     `  "sandbox create") touch ${JSON.stringify(cloneReadyMarker)}; printf "created clone-1\\n"; exit 0 ;;`,
     "esac",
     'if [ "$1" = "status" ]; then exit 0; fi',
-    "exit 0",
-  ]);
-
-  const remoteOpenClawJson = path.join(home, "remote-openclaw.json");
-  fs.writeFileSync(remoteOpenClawJson, JSON.stringify({ gateway: { auth: { token: "fresh" } } }));
-  writeExecutable(path.join(localBin, "ssh"), [
-    `REMOTE_OPENCLAW_JSON=${JSON.stringify(remoteOpenClawJson)}`,
-    'cmd=""; for arg do cmd="$arg"; done',
-    'if printf "%s" "$cmd" | grep -q "openclaw.json"; then',
-    '  if printf "%s" "$cmd" | grep -q "cat --"; then cat "$REMOTE_OPENCLAW_JSON"; exit 0; fi',
-    '  if printf "%s" "$cmd" | grep -q ".nemoclaw-restore"; then cat > "$REMOTE_OPENCLAW_JSON"; exit 0; fi',
-    "fi",
     "exit 0",
   ]);
 
