@@ -205,6 +205,7 @@ export type ChannelAgentPackageManager = "openclaw-plugin" | "hermes-uv-pip";
 
 export interface ChannelAgentPackageRuntimeLockSpec {
   readonly cachePath: string;
+  readonly installCacheEnvKey: string;
   readonly lockFile: string;
   readonly projectsRoot: string;
   readonly verifierPath: string;

@@ -455,6 +455,11 @@
       "file": "test/vitest-watch-triggers.test.ts",
       "test": "registers the focused mappings at the root configuration boundary (#6692)",
       "category": "compatibility"
+    },
+    {
+      "file": "test/wechat-runtime-audit-workflow.test.ts",
+      "test": "makes the audit a required %s workflow job",
+      "category": "security"
     }
   ]
 }

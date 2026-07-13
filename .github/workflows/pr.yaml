@@ -192,6 +192,37 @@ jobs:
         shell: bash
         run: CI=true npx vitest run --project installer-integration
 
+  wechat-runtime-audit:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Setup production-compatible Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: "22.19.0"
+
+      - name: Pin production npm
+        run: npm install --global npm@10.9.4 --ignore-scripts --no-audit --no-fund
+
+      - name: Audit locked WeChat runtime graph
+        run: bash scripts/checks/audit-wechat-runtime.sh artifacts/wechat-runtime-audit
+
+      - name: Upload WeChat runtime audit evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: wechat-runtime-audit-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/wechat-runtime-audit
+          if-no-files-found: error
+          retention-days: 14
+
   cli-test-shards:
     needs: changes
     if: needs.changes.outputs.code == 'true'
@@ -366,6 +397,7 @@ jobs:
       - static-checks
       - build-typecheck
       - installer-integration
+      - wechat-runtime-audit
       - cli-tests
       - plugin-tests
       - e2e-support
@@ -382,6 +414,7 @@ jobs:
           STATIC_RESULT: ${{ needs['static-checks'].result }}
           BUILD_TYPECHECK_RESULT: ${{ needs['build-typecheck'].result }}
           INSTALLER_INTEGRATION_RESULT: ${{ needs['installer-integration'].result }}
+          WECHAT_RUNTIME_AUDIT_RESULT: ${{ needs['wechat-runtime-audit'].result }}
           CLI_TESTS_RESULT: ${{ needs['cli-tests'].result }}
           PLUGIN_TESTS_RESULT: ${{ needs['plugin-tests'].result }}
           E2E_SUPPORT_RESULT: ${{ needs['e2e-support'].result }}
@@ -417,6 +450,7 @@ jobs:
             require_success "static-checks" "$STATIC_RESULT"
             require_success "build-typecheck" "$BUILD_TYPECHECK_RESULT"
             require_success "installer-integration" "$INSTALLER_INTEGRATION_RESULT"
+            require_success "wechat-runtime-audit" "$WECHAT_RUNTIME_AUDIT_RESULT"
             require_success "cli-tests" "$CLI_TESTS_RESULT"
             require_success "plugin-tests" "$PLUGIN_TESTS_RESULT"
             require_success "e2e-support" "$E2E_SUPPORT_RESULT"
@@ -426,6 +460,7 @@ jobs:
             allow_success_or_skipped "static-checks" "$STATIC_RESULT"
             allow_success_or_skipped "build-typecheck" "$BUILD_TYPECHECK_RESULT"
             allow_success_or_skipped "installer-integration" "$INSTALLER_INTEGRATION_RESULT"
+            allow_success_or_skipped "wechat-runtime-audit" "$WECHAT_RUNTIME_AUDIT_RESULT"
             allow_success_or_skipped "cli-tests" "$CLI_TESTS_RESULT"
             allow_success_or_skipped "plugin-tests" "$PLUGIN_TESTS_RESULT"
             allow_success_or_skipped "e2e-support" "$E2E_SUPPORT_RESULT"

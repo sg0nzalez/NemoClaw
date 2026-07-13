@@ -156,7 +156,9 @@ RUN npm ci --prefix /usr/local/lib/nemoclaw/wechat-runtime \
     && npm cache add zod@4.4.3 \
         --cache /usr/local/share/nemoclaw/wechat-npm-cache \
     && rm -rf /usr/local/lib/nemoclaw/wechat-runtime/node_modules \
-    && chmod -R a+rX /usr/local/lib/nemoclaw/wechat-runtime \
+    && chown -R root:root /usr/local/lib/nemoclaw/wechat-runtime \
+        /usr/local/share/nemoclaw/wechat-npm-cache \
+    && chmod -R a+rX,go-w /usr/local/lib/nemoclaw/wechat-runtime \
         /usr/local/share/nemoclaw/wechat-npm-cache
 COPY scripts/patch-openclaw-tool-catalog.js /usr/local/lib/nemoclaw/patch-openclaw-tool-catalog.js
 COPY scripts/patch-openclaw-chat-send.js /usr/local/lib/nemoclaw/patch-openclaw-chat-send.js
@@ -1131,8 +1133,27 @@ RUN set -eu; \
     fi; \
     rm -rf "$NEMOCLAW_OPENCLAW_PLUGIN_PACK_DIR"
 
+# The reviewed cache stays root-owned and immutable to the sandbox user. npm
+# still needs a writable _cacache/tmp while OpenClaw packs the verified archive,
+# so materialize a sandbox-owned throwaway copy for this RUN and remove it before
+# committing the layer. Never point npm directly at the trusted source cache.
 # hadolint ignore=DL3059,DL4006
-RUN OPENCLAW_VERSION="${OPENCLAW_VERSION}" node --experimental-strip-types /src/lib/messaging/applier/build/messaging-build-applier.mts --agent openclaw --phase agent-install
+RUN set -eu; \
+    trusted_cache=/usr/local/share/nemoclaw/wechat-npm-cache; \
+    unsafe_cache_entry="$(find -L "$trusted_cache" \( ! -user root -o -perm /022 \) -print -quit)"; \
+    test -z "$unsafe_cache_entry"; \
+    install_cache="$(mktemp -d /tmp/nemoclaw-wechat-npm-cache.XXXXXX)"; \
+    trap 'rm -rf "$install_cache"' EXIT; \
+    cp -R "$trusted_cache"/. "$install_cache"/; \
+    chmod -R u+rwX,go-w "$install_cache"; \
+    NEMOCLAW_WECHAT_NPM_INSTALL_CACHE="$install_cache" \
+        OPENCLAW_VERSION="${OPENCLAW_VERSION}" \
+        node --experimental-strip-types /src/lib/messaging/applier/build/messaging-build-applier.mts --agent openclaw --phase agent-install; \
+    rm -rf "$install_cache"; \
+    trap - EXIT; \
+    test ! -e "$install_cache"; \
+    unsafe_cache_entry="$(find -L "$trusted_cache" \( ! -user root -o -perm /022 \) -print -quit)"; \
+    test -z "$unsafe_cache_entry"
 
 # Lock down npm for the next RUN: the local OpenClaw plugin install must
 # resolve from /opt/nemoclaw and the staged plugin-runtime-deps tree without

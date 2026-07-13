@@ -139,6 +139,7 @@ export const wechatManifest = {
         "https://registry.npmjs.org/@tencent-weixin/openclaw-weixin/-/openclaw-weixin-2.4.3.tgz",
       runtimeLock: {
         cachePath: "/usr/local/share/nemoclaw/wechat-npm-cache",
+        installCacheEnvKey: "NEMOCLAW_WECHAT_NPM_INSTALL_CACHE",
         lockFile: "/usr/local/lib/nemoclaw/wechat-runtime/package-lock.json",
         projectsRoot: "/sandbox/.openclaw/npm/projects",
         verifierPath: "/usr/local/lib/nemoclaw/verify-wechat-runtime-lock.mts",

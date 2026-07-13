@@ -4,12 +4,17 @@
 
 import { spawnSync } from "node:child_process";
 import {
+  accessSync,
   chmodSync,
+  constants,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -695,13 +700,16 @@ export function installOpenClawMessagingPlugins(plan: MessagingBuildPlan | null,
       // on OpenClaw >= 2026.6.10 and crash-loops channel plugins that use
       // keyed state (e.g. WhatsApp). npm-pack installs always record the
       // exact resolved version, so `--pin` is not needed.
+      const installCache = install.runtimeLock
+        ? requireWritableRuntimeInstallCache(install.runtimeLock, env)
+        : undefined;
       const installEnv = {
         ...env,
         NPM_CONFIG_IGNORE_SCRIPTS: "true",
         npm_config_ignore_scripts: "true",
         ...(install.runtimeLock
           ? {
-              NPM_CONFIG_CACHE: install.runtimeLock.cachePath,
+              NPM_CONFIG_CACHE: installCache,
               NPM_CONFIG_OFFLINE: String(install.runtimeLock.offline),
               NPM_CONFIG_LEGACY_PEER_DEPS: String(install.runtimeLock.legacyPeerDeps),
             }
@@ -724,6 +732,47 @@ export function installOpenClawMessagingPlugins(plan: MessagingBuildPlan | null,
       rmSync(packed.rootDir, { recursive: true, force: true });
     }
   }
+}
+
+function requireWritableRuntimeInstallCache(
+  runtimeLock: ChannelAgentPackageRuntimeLockSpec,
+  env: Env,
+): string {
+  const configured = sanitizeOptionalString(env[runtimeLock.installCacheEnvKey]);
+  if (!configured) {
+    throw new MessagingBuildApplierError(
+      `${runtimeLock.installCacheEnvKey} must name the sandbox-writable temporary npm cache prepared from ${runtimeLock.cachePath}`,
+    );
+  }
+  if (!isAbsolute(configured)) {
+    throw new MessagingBuildApplierError(
+      `${runtimeLock.installCacheEnvKey} must be an absolute path`,
+    );
+  }
+
+  let installCache: string;
+  try {
+    if (lstatSync(configured).isSymbolicLink()) {
+      throw new Error("symbolic links are not allowed");
+    }
+    installCache = realpathSync(configured);
+    if (!statSync(installCache).isDirectory()) {
+      throw new Error("path is not a directory");
+    }
+    accessSync(installCache, constants.R_OK | constants.W_OK | constants.X_OK);
+  } catch (error) {
+    throw new MessagingBuildApplierError(
+      `${runtimeLock.installCacheEnvKey} must be a writable, searchable directory: ${formatError(error)}`,
+    );
+  }
+
+  const trustedCache = resolve(runtimeLock.cachePath);
+  if (installCache === trustedCache || installCache.startsWith(`${trustedCache}${sep}`)) {
+    throw new MessagingBuildApplierError(
+      `${runtimeLock.installCacheEnvKey} must not make the trusted npm cache writable`,
+    );
+  }
+  return installCache;
 }
 
 export function runOpenClawMessagingDoctor(plan: MessagingBuildPlan | null, env: Env): void {

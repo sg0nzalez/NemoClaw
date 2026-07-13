@@ -848,6 +848,7 @@ describe("messaging-build-applier.mts: agent-install", () => {
             OPENCLAW_WHATSAPP_2026_6_10_INTEGRITY,
             OPENCLAW_MSTEAMS_2026_6_10_INTEGRITY,
             TENCENT_WEIXIN_2_4_3_INTEGRITY,
+            NEMOCLAW_WECHAT_NPM_INSTALL_CACHE: tmp,
             OPENCLAW_VERSION: "2026.6.10",
             NEMOCLAW_MESSAGING_CHANNELS_B64: channelsB64([
               "telegram",
