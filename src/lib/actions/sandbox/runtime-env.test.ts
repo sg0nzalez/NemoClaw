@@ -30,6 +30,7 @@ describe("wrapExecCommandWithRuntimeEnv", () => {
   it("executes LF, CRLF, quote, and heredoc argv byte-exactly", () => {
     const payloads = [
       "line one\nline two",
+      "line one\rline two",
       "line one\r\nline two",
       `single ' and double " quotes`,
       "cat <<'EOF'\nline one\nline 'two'\nEOF",

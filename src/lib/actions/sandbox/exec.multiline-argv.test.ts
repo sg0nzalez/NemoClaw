@@ -37,6 +37,10 @@ describe("execSandbox multi-line argv", () => {
       command: ["python3", "-c", "print('one')\nprint('two')"],
     },
     {
+      label: "CR",
+      command: ["python3", "-c", "one\rtwo"],
+    },
+    {
       label: "CRLF",
       command: ["python3", "-c", "print('one')\r\nprint('two')"],
     },
