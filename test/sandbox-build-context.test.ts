@@ -14,6 +14,10 @@ import {
 } from "../src/lib/sandbox/build-context";
 
 describe("sandbox build context staging", () => {
+  function runtimeManifestFixture(runtimeName: string, fileName: string) {
+    return `${JSON.stringify({ runtimeName, fileName })}\n`;
+  }
+
   function writeBuildContextFixture(sourceRoot: string) {
     const blueprintManifestDir = path.join(
       sourceRoot,
@@ -31,10 +35,14 @@ describe("sandbox build context staging", () => {
 
     writeFixture("Dockerfile");
     writeFixture("tsconfig.runtime-preloads.json", "{}\n");
-    writeFixture(path.join("agents", "openclaw", "mcporter-runtime", "package.json"), "{}\n");
-    writeFixture(path.join("agents", "openclaw", "mcporter-runtime", "package-lock.json"), "{}\n");
-    writeFixture(path.join("agents", "openclaw", "wechat-runtime", "package.json"), "{}\n");
-    writeFixture(path.join("agents", "openclaw", "wechat-runtime", "package-lock.json"), "{}\n");
+    for (const runtimeName of ["mcporter-runtime", "wechat-runtime"]) {
+      for (const fileName of ["package.json", "package-lock.json"]) {
+        writeFixture(
+          path.join("agents", "openclaw", runtimeName, fileName),
+          runtimeManifestFixture(runtimeName, fileName),
+        );
+      }
+    }
     for (const fileName of [
       "package.json",
       "package-lock.json",
@@ -153,10 +161,18 @@ describe("sandbox build context staging", () => {
     expect((fs.statSync(stagedPlugin).mode & 0o777).toString(8)).toBe("644");
   }
 
-  function expectStagedOpenClawRuntimeGraphs(buildCtx: string) {
+  function expectStagedOpenClawRuntimeGraphs(buildCtx: string, sourceRoot: string) {
     for (const runtimeName of ["mcporter-runtime", "wechat-runtime"]) {
       const runtimeDir = path.join(buildCtx, "agents", "openclaw", runtimeName);
       expect(fs.readdirSync(runtimeDir).sort()).toEqual(["package-lock.json", "package.json"]);
+      for (const fileName of ["package.json", "package-lock.json"]) {
+        expect(fs.readFileSync(path.join(runtimeDir, fileName), "utf8")).toBe(
+          fs.readFileSync(
+            path.join(sourceRoot, "agents", "openclaw", runtimeName, fileName),
+            "utf8",
+          ),
+        );
+      }
       expect((fs.statSync(path.join(runtimeDir, "package.json")).mode & 0o777).toString(8)).toBe(
         "644",
       );
@@ -210,7 +226,7 @@ describe("sandbox build context staging", () => {
       writeBuildContextFixture(sourceRoot);
       const { buildCtx } = stageOptimizedSandboxBuildContext(sourceRoot, tmpDir);
       expectStagedBlueprintModes(buildCtx);
-      expectStagedOpenClawRuntimeGraphs(buildCtx);
+      expectStagedOpenClawRuntimeGraphs(buildCtx, sourceRoot);
       expectStagedToolDisclosureContract(buildCtx);
     } finally {
       fs.rmSync(sourceRoot, { recursive: true, force: true });
@@ -240,7 +256,7 @@ describe("sandbox build context staging", () => {
       writeBuildContextFixture(sourceRoot);
       const { buildCtx } = stageLegacySandboxBuildContext(sourceRoot, tmpDir);
       expectStagedBlueprintModes(buildCtx);
-      expectStagedOpenClawRuntimeGraphs(buildCtx);
+      expectStagedOpenClawRuntimeGraphs(buildCtx, sourceRoot);
       expectStagedToolDisclosureContract(buildCtx);
     } finally {
       fs.rmSync(sourceRoot, { recursive: true, force: true });
@@ -272,7 +288,7 @@ describe("sandbox build context staging", () => {
       const { buildCtx, stagedDockerfile } = stageOptimizedSandboxBuildContext(repoRoot, tmpDir);
       expectDockerfileScriptCopiesExist(buildCtx, stagedDockerfile);
       expect(fs.existsSync(path.join(buildCtx, "tsconfig.runtime-preloads.json"))).toBe(true);
-      expectStagedOpenClawRuntimeGraphs(buildCtx);
+      expectStagedOpenClawRuntimeGraphs(buildCtx, repoRoot);
       expect(fs.existsSync(path.join(buildCtx, "nemoclaw-blueprint", ".venv"))).toBe(false);
       expect(fs.existsSync(path.join(buildCtx, "nemoclaw-blueprint", "blueprint.yaml"))).toBe(true);
       expect(
