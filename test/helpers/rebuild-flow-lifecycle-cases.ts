@@ -134,7 +134,7 @@ export function registerRebuildFlowLifecycleTests(): void {
           expectedVersion: "0.2.0",
           isStale: false,
           verificationFailed: false,
-          detectionMethod: "ssh-exec",
+          detectionMethod: "sandbox-exec",
         },
       });
 
@@ -158,7 +158,7 @@ export function registerRebuildFlowLifecycleTests(): void {
           expectedVersion: "0.2.0",
           isStale: false,
           verificationFailed: false,
-          detectionMethod: "ssh-exec",
+          detectionMethod: "sandbox-exec",
         },
       });
 
@@ -182,7 +182,7 @@ export function registerRebuildFlowLifecycleTests(): void {
           expectedVersion: "0.2.0",
           isStale: false,
           verificationFailed: false,
-          detectionMethod: "ssh-exec",
+          detectionMethod: "sandbox-exec",
         },
       });
 

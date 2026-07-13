@@ -183,12 +183,12 @@ export function createStatusFlowHarness(options: StatusFlowHarnessOptions = {}):
     container: null,
   });
   vi.spyOn(nim, "shouldShowNimLine").mockReturnValue(true);
-  const checkAgentVersionSpy = vi.spyOn(sandboxVersion, "checkAgentVersion").mockReturnValue(
+  const checkAgentVersionSpy = vi.spyOn(sandboxVersion, "checkAgentVersion").mockResolvedValue(
     options.versionCheck ?? {
       sandboxVersion: "0.1.0",
       expectedVersion: "0.2.0",
       isStale: true,
-      detectionMethod: "runtime",
+      detectionMethod: "sandbox-exec",
     },
   );
   vi.spyOn(shields, "getShieldsPosture").mockReturnValue(

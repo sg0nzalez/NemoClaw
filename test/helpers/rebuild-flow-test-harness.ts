@@ -293,7 +293,7 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
     detected: false,
     sessions: [],
   });
-  vi.spyOn(sandboxVersion, "checkAgentVersion").mockImplementation(() => {
+  vi.spyOn(sandboxVersion, "checkAgentVersion").mockImplementation(async () => {
     Object.assign(currentSandboxEntry, overrides.entryUpdatesAfterVersionCheck ?? {});
     return (
       overrides.versionCheck ?? {

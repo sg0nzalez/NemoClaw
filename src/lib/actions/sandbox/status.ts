@@ -111,7 +111,7 @@ export async function showSandboxStatus(sandboxName: string): Promise<void> {
     terminalRuntimeHealth,
     statusAgent,
   };
-  const textOutcome = printSandboxDetails(textContext);
+  const textOutcome = await printSandboxDetails(textContext);
   if (textOutcome.exitCode && (!process.exitCode || process.exitCode === 0)) {
     process.exitCode = textOutcome.exitCode;
   }

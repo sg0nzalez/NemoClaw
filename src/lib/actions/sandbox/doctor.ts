@@ -292,9 +292,9 @@ function resolveInferenceRoute(
   };
 }
 
-function agentVersionDoctorCheck(sandboxName: string): DoctorCheck {
+async function agentVersionDoctorCheck(sandboxName: string): Promise<DoctorCheck> {
   try {
-    const version = sandboxVersion.checkAgentVersion(sandboxName);
+    const version = await sandboxVersion.checkAgentVersion(sandboxName);
     const agentName = agentRuntime.getAgentDisplayName(agentRuntime.getSessionAgent(sandboxName));
     if (version.isStale) {
       return {
@@ -352,14 +352,14 @@ function shieldsDoctorCheck(sandboxName: string): DoctorCheck {
   };
 }
 
-function collectRegisteredSandboxChecks(
+async function collectRegisteredSandboxChecks(
   sandboxName: string,
   sb: SandboxEntry | null | undefined,
   wantsFix: boolean,
   sandboxReachable: boolean,
-): DoctorCheck[] {
+): Promise<DoctorCheck[]> {
   if (!sb) return [];
-  const checks = [agentVersionDoctorCheck(sandboxName), shieldsDoctorCheck(sandboxName)];
+  const checks = [await agentVersionDoctorCheck(sandboxName), shieldsDoctorCheck(sandboxName)];
   const permsCheck = buildConfigPermsCheck(sandboxName, wantsFix, {
     inspect: shields.inspectMutableConfigPerms,
     repair: shields.repairMutableConfigPerms,
@@ -402,7 +402,7 @@ async function collectDoctorChecks(
     ...gateway.checks,
     ...sandbox.checks,
     ...(await collectInferenceChecks(sandboxName, route, sandbox.reachable)),
-    ...collectRegisteredSandboxChecks(sandboxName, sb, intent.wantsFix, sandbox.reachable),
+    ...(await collectRegisteredSandboxChecks(sandboxName, sb, intent.wantsFix, sandbox.reachable)),
     ...collectToolScopeChecks(sandboxName, sb, sandbox.reachable, intent.wantsFix),
     ollamaDoctorCheck(route.provider),
     cloudflaredDoctorCheck(sandboxName),

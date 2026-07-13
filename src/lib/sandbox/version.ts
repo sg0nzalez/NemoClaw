@@ -5,20 +5,14 @@
 //
 // Compares the agent version running inside a sandbox against the version
 // this NemoClaw release was built for. Two code paths:
-//   Fast: registry lookup (no SSH, used when agentVersion is already cached)
-//   Slow: SSH exec into sandbox, run version_command, cache result in registry
+//   Fast: registry lookup (used when agentVersion is already cached)
+//   Slow: sandbox exec, run version_command, cache result in registry
 
-import { spawnSync } from "child_process";
-
-import {
-  captureSandboxSshConfigCommand,
-  parseVersionFromText,
-} from "../adapters/openshell/client.js";
-import { resolveOpenshell } from "../adapters/openshell/resolve.js";
-import { OPENSHELL_PROBE_TIMEOUT_MS } from "../adapters/openshell/timeouts.js";
+import { parseVersionFromText } from "../adapters/openshell/client.js";
+import { execSandboxReadOnlyWithGrpcFallback } from "../adapters/openshell/sandbox-control-routing.js";
 import { loadAgent } from "../agent/defs.js";
+import { resolveSandboxGatewayName } from "../onboard/gateway-binding.js";
 import * as registry from "../state/registry.js";
-import { createTempSshConfig } from "./temp-ssh-config.js";
 import { evaluateStaleness } from "./version-scheme.js";
 
 export interface VersionCheckResult {
@@ -40,7 +34,7 @@ export interface VersionCheckResult {
   verificationFailed: boolean;
   /**
    * How the staleness verdict was reached.
-   * - `"registry"` / `"ssh-exec"`: `isStale` is authoritative for this sandbox
+   * - `"registry"` / `"sandbox-exec"`: `isStale` is authoritative for this sandbox
    *   as long as `verificationFailed` is `false`.
    * - `"unavailable"`: no staleness check was attempted (missing expected
    *   version, or the caller opted out of probing).
@@ -48,7 +42,7 @@ export interface VersionCheckResult {
    *   inspected — callers should treat this as "unable to verify", not
    *   "verified current".
    */
-  detectionMethod: "registry" | "ssh-exec" | "unavailable" | "unknown";
+  detectionMethod: "registry" | "sandbox-exec" | "unavailable" | "unknown";
   /**
    * `true` when the runtime and expected versions use different schemes
    * (semver vs calendar). In that case `isStale` is forced to `true` so the
@@ -80,48 +74,24 @@ function resolveAgentForSandbox(sandboxName: string): ReturnType<typeof loadAgen
 }
 
 /**
- * Probe the live agent version inside a sandbox via SSH.
+ * Probe the live agent version through OpenShell's sandbox exec API.
  * Returns the parsed version string or null on failure.
  */
-export function probeAgentVersion(sandboxName: string): string | null {
+export async function probeAgentVersion(sandboxName: string): Promise<string | null> {
   const agent = resolveAgentForSandbox(sandboxName);
-
-  const openshellBinary = resolveOpenshell();
-  if (!openshellBinary) return null;
-
-  const sshConfigResult = captureSandboxSshConfigCommand(openshellBinary, sandboxName, {
-    ignoreError: true,
-    timeout: OPENSHELL_PROBE_TIMEOUT_MS,
-  });
-  if (sshConfigResult.status !== 0) return null;
-  if (!sshConfigResult.output.trim()) return null;
-
-  const tmpSshConfig = createTempSshConfig(sshConfigResult.output, "nemoclaw-ver-");
   try {
-    const result = spawnSync(
-      "ssh",
-      [
-        "-F",
-        tmpSshConfig.file,
-        "-o",
-        "StrictHostKeyChecking=no",
-        "-o",
-        "UserKnownHostsFile=/dev/null",
-        "-o",
-        "ConnectTimeout=5",
-        "-o",
-        "LogLevel=ERROR",
-        `openshell-${sandboxName}`,
-        agent.versionCommand,
-      ],
-      { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"], timeout: 15000 },
+    const result = await execSandboxReadOnlyWithGrpcFallback(
+      resolveSandboxGatewayName(registry.getSandbox(sandboxName)),
+      {
+        sandboxName,
+        command: ["sh", "-c", agent.versionCommand],
+        timeoutMs: 15_000,
+      },
     );
-    if (result.status !== 0) return null;
+    if (result.status !== 0 || result.error) return null;
     return parseVersionFromText(result.stdout, agent.versionCommand);
   } catch {
     return null;
-  } finally {
-    tmpSshConfig.cleanup();
   }
 }
 
@@ -129,12 +99,12 @@ export function probeAgentVersion(sandboxName: string): string | null {
  * Check whether a sandbox is running an outdated agent version.
  *
  * Fast path: compare registry.agentVersion against manifest expected_version.
- * Slow path: SSH into sandbox, run version_command, cache result in registry.
+ * Slow path: run version_command through sandbox exec and cache the result.
  */
-export function checkAgentVersion(
+export async function checkAgentVersion(
   sandboxName: string,
   opts?: VersionCheckOptions,
-): VersionCheckResult {
+): Promise<VersionCheckResult> {
   const agent = resolveAgentForSandbox(sandboxName);
   const expectedVersion = agent.expectedVersion;
 
@@ -186,8 +156,8 @@ export function checkAgentVersion(
     };
   }
 
-  // Slow path: SSH exec into sandbox
-  const probed = probeAgentVersion(sandboxName);
+  // Slow path: sandbox exec
+  const probed = await probeAgentVersion(sandboxName);
   if (probed && sb) {
     // Cache for future fast-path lookups
     registry.updateSandbox(sandboxName, { agentVersion: probed });
@@ -215,7 +185,7 @@ export function checkAgentVersion(
     expectedVersion,
     isStale: verdict.isStale,
     verificationFailed: false,
-    detectionMethod: "ssh-exec",
+    detectionMethod: "sandbox-exec",
     schemeMismatch: verdict.schemeMismatch,
   };
 }

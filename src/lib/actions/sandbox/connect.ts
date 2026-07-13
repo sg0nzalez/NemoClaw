@@ -974,7 +974,7 @@ export async function connectSandbox(
 
   // Version staleness check — warn but don't block
   try {
-    const versionCheck = sandboxVersion.checkAgentVersion(sandboxName);
+    const versionCheck = await sandboxVersion.checkAgentVersion(sandboxName);
     if (versionCheck.isStale) {
       for (const line of sandboxVersion.formatStalenessWarning(sandboxName, versionCheck)) {
         console.error(line);

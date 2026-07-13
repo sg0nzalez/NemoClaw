@@ -40,7 +40,7 @@ export interface RebuildPostRestorePhaseInput {
   recoveryRecreate: boolean;
   preparedBackupRecovery: boolean;
   staleSandboxWasLocked: boolean;
-  versionCheck: ReturnType<typeof sandboxVersion.checkAgentVersion>;
+  versionCheck: Awaited<ReturnType<typeof sandboxVersion.checkAgentVersion>>;
   relockShieldsIfNeeded: (sandboxStillExists: boolean) => boolean;
   log: RebuildLog;
   bail: RebuildBail;
