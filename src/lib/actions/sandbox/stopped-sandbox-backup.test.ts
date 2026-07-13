@@ -146,7 +146,7 @@ describe("backupStartedSandboxState", () => {
   const unreachable = { ...ok, success: false, unreachable: true };
   const denied = { ...ok, success: false };
 
-  it("retries while the just-started container's SSH endpoint is unreachable (#6500)", async () => {
+  it("retries while the just-started container's exec endpoint is unreachable (#6500)", async () => {
     const backup = vi
       .fn()
       .mockReturnValueOnce(unreachable)

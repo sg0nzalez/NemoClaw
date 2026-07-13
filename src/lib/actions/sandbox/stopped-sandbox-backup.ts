@@ -104,7 +104,7 @@ export function returnSandboxContainerToStopped(
 }
 
 interface BackupRetryDeps {
-  backup: (name: string) => sandboxState.BackupResult;
+  backup: (name: string) => Promise<sandboxState.BackupResult>;
   sleep: (ms: number) => Promise<void>;
   attempts: number;
   delayMs: number;
@@ -118,7 +118,7 @@ const defaultBackupRetryDeps: BackupRetryDeps = {
 };
 
 /**
- * Back up a sandbox whose container was just started. The container's SSH
+ * Back up a sandbox whose container was just started. Its sandbox exec
  * endpoint can take a few seconds to answer after `docker start`, so retry
  * while — and only while — the result is a transport-level `unreachable`
  * failure. Every other outcome (success, permission failure, precondition)
@@ -129,14 +129,14 @@ export async function backupStartedSandboxState(
   depsOverride: Partial<BackupRetryDeps> = {},
 ): Promise<sandboxState.BackupResult> {
   const deps: BackupRetryDeps = { ...defaultBackupRetryDeps, ...depsOverride };
-  let result = deps.backup(sandboxName);
+  let result = await deps.backup(sandboxName);
   for (
     let attempt = 1;
     attempt < deps.attempts && !result.success && result.unreachable;
     attempt++
   ) {
     await deps.sleep(deps.delayMs);
-    result = deps.backup(sandboxName);
+    result = await deps.backup(sandboxName);
   }
   return result;
 }

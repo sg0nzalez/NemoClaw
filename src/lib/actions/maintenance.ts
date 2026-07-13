@@ -84,7 +84,7 @@ export async function backupAll(): Promise<void> {
     try {
       result = startedForBackup
         ? await backupStartedSandboxState(sb.name)
-        : sandboxState.backupSandboxState(sb.name);
+        : await sandboxState.backupSandboxState(sb.name);
     } catch (err: unknown) {
       // Source-of-truth review (#5734 / #5819):
       //
@@ -153,7 +153,7 @@ export async function backupAll(): Promise<void> {
       if (result.unreachable) {
         if (skipUnreachable) {
           console.log(
-            `  ${YW}⚠${R} Skipped '${sb.name}' (running but SSH-unreachable; NEMOCLAW_SKIP_UNREACHABLE_SANDBOX_BACKUP=1 set). Any uncommitted state since the last successful backup will be lost.`,
+            `  ${YW}⚠${R} Skipped '${sb.name}' (sandbox exec unreachable; NEMOCLAW_SKIP_UNREACHABLE_SANDBOX_BACKUP=1 set). Any uncommitted state since the last successful backup will be lost.`,
           );
           skipped++;
           continue;
@@ -177,7 +177,7 @@ export async function backupAll(): Promise<void> {
     if (unreachableRunning > 0) {
       console.error("");
       console.error(
-        `  ${unreachableRunning} running sandbox(es) could not be backed up because their in-sandbox SSH endpoint did not answer.`,
+        `  ${unreachableRunning} running sandbox(es) could not be backed up because their OpenShell sandbox exec endpoint did not answer.`,
       );
       if (requireAll) {
         console.error(

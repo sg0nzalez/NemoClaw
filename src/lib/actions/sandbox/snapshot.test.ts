@@ -199,6 +199,7 @@ vi.mock("../../shields", () => ({
 
 vi.mock("../../shields/timer-bound-lock", () => ({
   withTimerBoundShieldsMutationLock: lifecycleMock.withTimerBoundMock,
+  withTimerBoundShieldsMutationLockAsync: lifecycleMock.withTimerBoundMock,
 }));
 
 vi.mock("../../shields/timer-control", () => ({

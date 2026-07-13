@@ -27,6 +27,7 @@ import { spawnSync } from "child_process";
 
 import { captureSandboxSshConfigCommand } from "../adapters/openshell/client.js";
 import { resolveOpenshell } from "../adapters/openshell/resolve.js";
+import { execSandboxReadOnlyWithGrpcFallback } from "../adapters/openshell/sandbox-control-routing.js";
 import { OPENSHELL_PROBE_TIMEOUT_MS } from "../adapters/openshell/timeouts.js";
 import type { AgentStateFile } from "../agent/defs.js";
 import { loadAgent } from "../agent/defs.js";
@@ -36,6 +37,7 @@ import {
   classifyFailedDirsFromTarStderr,
 } from "../domain/backup-failure.js";
 import { shellQuote } from "../runner.js";
+import { resolveSandboxGatewayName } from "../onboard/gateway-binding.js";
 import { createTempSshConfig } from "../sandbox/temp-ssh-config.js";
 import { isSensitiveFile, sanitizeConfigFile } from "../security/credential-filter.js";
 import {
@@ -52,7 +54,6 @@ import {
 } from "./openclaw-plugin-restore.js";
 import type { CustomPolicyEntry } from "./registry.js";
 import * as registry from "./registry.js";
-import { isSshTransportFailure } from "./ssh-transport.js";
 import { restoreStateFile } from "./state-file-restore.js";
 import { runTarListing } from "./tar-listing.js";
 
@@ -147,9 +148,8 @@ export interface BackupResult {
   error?: string;
   backedUpFiles: string[];
   failedFiles: string[];
-  // Set when a failure stems from an SSH transport failure against a running
-  // sandbox (see isSshTransportFailure), as opposed to an audit rejection or
-  // a partial tar read error.
+  // Set when a failure stems from a sandbox exec transport failure against a
+  // running sandbox, as opposed to an audit rejection or partial tar read.
   unreachable?: boolean;
 }
 
@@ -790,37 +790,46 @@ type StateFileBackupOutcome = "backed_up" | "missing" | "failed";
 
 interface StateFileBackupResult {
   outcome: StateFileBackupOutcome;
-  // Set on "failed" when the SSH probe itself failed at the transport level
-  // (exit 255, signal-killed, spawn error). The caller (backupSandboxState)
-  // propagates this into BackupResult.unreachable so that
+  // Set on "failed" when sandbox exec itself failed at the transport level.
+  // The caller propagates this into BackupResult.unreachable so that
   // NEMOCLAW_SKIP_UNREACHABLE_SANDBOX_BACKUP=1 activates for state-file
   // failures too, not only the initial dir probe. See #6188.
   unreachable: boolean;
 }
 
-function backupStateFile(
-  configFile: string,
+function isSandboxExecTransportFailure(result: {
+  status: number | null;
+  error?: Error;
+  signal?: NodeJS.Signals | null;
+}): boolean {
+  return Boolean(result.error || result.signal || result.status === null);
+}
+
+async function backupStateFile(
+  gatewayName: string,
   sandboxName: string,
   dir: string,
   spec: StateFileSpec,
   backupPath: string,
-): StateFileBackupResult {
+): Promise<StateFileBackupResult> {
   const command = buildStateFileBackupCommand(dir, spec);
   _log(`Backing up state file ${spec.path} (${spec.strategy})`);
-  const result = spawnSync("ssh", [...sshArgs(configFile, sandboxName), command], {
-    stdio: ["ignore", "pipe", "pipe"],
-    timeout: 120000,
-    maxBuffer: 256 * 1024 * 1024,
+  const result = await execSandboxReadOnlyWithGrpcFallback(gatewayName, {
+    sandboxName,
+    command: ["sh", "-c", command],
+    timeoutMs: 120_000,
+    maxOutputBytes: 256 * 1024 * 1024,
+    stdoutEncoding: "buffer",
   });
 
   if (result.status === 2) return { outcome: "missing", unreachable: false };
-  if (result.status !== 0 || result.error || result.signal || !result.stdout) {
+  if (result.status !== 0 || result.error || result.signal) {
     const detail =
-      (result.stderr?.toString() || "").trim() ||
+      result.stderr.trim() ||
       result.error?.message ||
       (result.signal ? `signal ${result.signal}` : `exit ${String(result.status)}`);
     _log(`FAILED: state file backup ${spec.path}: ${detail.substring(0, 200)}`);
-    return { outcome: "failed", unreachable: isSshTransportFailure(result) };
+    return { outcome: "failed", unreachable: isSandboxExecTransportFailure(result) };
   }
 
   const localPath = path.join(backupPath, spec.path);
@@ -828,7 +837,11 @@ function backupStateFile(
   rejectSymlinksOnPath(parent);
   mkdirSync(parent, { recursive: true, mode: 0o700 });
   rejectSymlinksOnPath(localPath);
-  writeFileSync(localPath, result.stdout);
+  if (!result.stdoutBytes) {
+    _log(`FAILED: state file backup ${spec.path}: binary stdout was not preserved`);
+    return { outcome: "failed", unreachable: false };
+  }
+  writeFileSync(localPath, result.stdoutBytes);
   chmodSync(localPath, 0o600);
   return { outcome: "backed_up", unreachable: false };
 }
@@ -841,12 +854,12 @@ function backupStateFile(
  */
 
 export { buildStateFileRestoreCommand } from "./state-file-restore.js";
-// isSshTransportFailure lives in ./ssh-transport now. Re-exported here for
-// backwards compatibility with callers that used to import it from this
-// module. Prefer importing directly from ./ssh-transport in new code.
-export { isSshTransportFailure };
+export { isSshTransportFailure } from "./ssh-transport.js";
 
-export function backupSandboxState(sandboxName: string, options: BackupOptions = {}): BackupResult {
+export async function backupSandboxState(
+  sandboxName: string,
+  options: BackupOptions = {},
+): Promise<BackupResult> {
   const sb = registry.getSandbox(sandboxName);
   const agentName = sb?.agent || "openclaw";
   const agent = loadAgent(agentName);
@@ -969,15 +982,12 @@ export function backupSandboxState(sandboxName: string, options: BackupOptions =
     return { success: true, manifest, backedUpDirs, failedDirs, backedUpFiles, failedFiles };
   }
 
-  // SSH+tar single-roundtrip download
-  _log("Getting SSH config via openshell sandbox ssh-config");
-  const sshConfig = getSshConfig(sandboxName);
-  if (!sshConfig) {
-    _log("FAILED: Could not get SSH config");
-    // For a sandbox the registry reported as running, an unreachable
-    // `openshell sandbox ssh-config` lookup is a transport-level failure —
-    // treat it the same as the initial dir probe and propagate `unreachable`
-    // so NEMOCLAW_SKIP_UNREACHABLE_SANDBOX_BACKUP=1 can activate. (#6188)
+  let gatewayName: string;
+  try {
+    gatewayName = resolveSandboxGatewayName(sb);
+  } catch (cause) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    _log(`FAILED: Could not resolve sandbox gateway: ${detail}`);
     return {
       success: false,
       manifest,
@@ -985,250 +995,231 @@ export function backupSandboxState(sandboxName: string, options: BackupOptions =
       failedDirs: [...stateDirs],
       backedUpFiles,
       failedFiles: stateFiles.map((f) => f.path),
-      unreachable: true,
+      error: detail,
     };
   }
-  _log(`SSH config obtained (${sshConfig.length} bytes)`);
 
-  const tempSshConfig = createTempSshConfig(sshConfig, "nemoclaw-state-");
-  const configFile = tempSshConfig.file;
-  try {
-    if (stateDirs.length > 0) {
-      // Build tar command that only includes existing directories.
-      // First, check which declared state dirs actually exist in the sandbox,
-      // then additionally discover per-agent `workspace-*` directories produced
-      // by multi-agent OpenClaw deployments (see issue #1260) so they get
-      // snapshotted alongside the manifest-declared dirs. `awk '!seen[$0]++'`
-      // dedupes while preserving order.
-      const existCheckCmd = stateDirs
-        .map((d) => `[ -d ${shellQuote(`${dir}/${d}`)} ] && printf '%s\\n' ${shellQuote(d)}`)
+  if (stateDirs.length > 0) {
+    // Build tar command that only includes existing directories.
+    // First, check which declared state dirs actually exist in the sandbox,
+    // then additionally discover per-agent `workspace-*` directories produced
+    // by multi-agent OpenClaw deployments (see issue #1260) so they get
+    // snapshotted alongside the manifest-declared dirs. `awk '!seen[$0]++'`
+    // dedupes while preserving order.
+    const existCheckCmd = stateDirs
+      .map((d) => `[ -d ${shellQuote(`${dir}/${d}`)} ] && printf '%s\\n' ${shellQuote(d)}`)
+      .join("; ");
+    const workspaceGlobCmd = `for d in ${shellQuote(dir)}/workspace-*/; do [ -d "$d" ] && basename "$d"; done 2>/dev/null`;
+    const fullCheckCmd = `{ ${existCheckCmd}; ${workspaceGlobCmd}; } 2>/dev/null | awk '!seen[$0]++'`;
+    _log(`Checking existing dirs via OpenShell: ${fullCheckCmd.substring(0, 100)}...`);
+    const existResult = await execSandboxReadOnlyWithGrpcFallback(gatewayName, {
+      sandboxName,
+      command: ["sh", "-c", fullCheckCmd],
+      timeoutMs: 30_000,
+    });
+    _log(
+      `Dir check: exit=${existResult.status}, stdout=${existResult.stdout.trim().substring(0, 200)}, stderr=${existResult.stderr.trim().substring(0, 200)}`,
+    );
+    const existingDirs = existResult.stdout.trim().split("\n").filter(Boolean);
+    _log(
+      `Existing dirs in sandbox: [${existingDirs.join(",")}] (${existingDirs.length}/${stateDirs.length})`,
+    );
+
+    if (existResult.status !== 0) {
+      _log(
+        `FAILED: sandbox dir check exited ${existResult.status} — cannot determine which dirs exist`,
+      );
+      return {
+        success: false,
+        unreachable: isSandboxExecTransportFailure(existResult),
+        manifest,
+        backedUpDirs,
+        failedDirs: [...stateDirs],
+        backedUpFiles,
+        failedFiles: stateFiles.map((f) => f.path),
+      };
+    }
+
+    if (existingDirs.length === 0) {
+      _log("No state dirs found in sandbox (all empty)");
+    } else {
+      // NC-2227-04: Pre-backup audit — reject symlinks, hardlinks, and special
+      // files inside state dirs. A compromised agent could plant a symlink like
+      // workspace/copy -> ../openclaw.json to exfiltrate config via backup.
+      //
+      // The printf format emits "<type>\t<absPath>\t<linkTarget>" — %l is
+      // empty for non-symlinks but always present, so the field count is
+      // stable. Tab separator assumes state-dir paths don't contain tabs,
+      // matching the wider convention in this file.
+      // Per-dir `find` invocations are joined with `;` (not `&&`) and each
+      // is tolerant of its own exit code via `|| true`. The base image bakes
+      // a few state subdirs as root-owned (e.g. `extensions/<plugin>`,
+      // `agents/<id>`) and `find` walking those from the sandbox exec
+      // session exits 1 on permission denied. The audit's real signal is
+      // stdout (the printf-emitted symlink/hardlink/special-file rows);
+      // letting one perm-denied subdir abort the whole chain blocks legitimate
+      // rebuilds.
+      const auditCmd = existingDirs
+        .map(
+          (d) =>
+            `{ find ${shellQuote(`${dir}/${d}`)} \\( -type l -o \\( -type f -a -links +1 \\) -o \\( ! -type f -a ! -type d \\) \\) -printf "%y\\t%p\\t%l\\n" 2>/dev/null || true; }`,
+        )
         .join("; ");
-      const workspaceGlobCmd = `for d in ${shellQuote(dir)}/workspace-*/; do [ -d "$d" ] && basename "$d"; done 2>/dev/null`;
-      const fullCheckCmd = `{ ${existCheckCmd}; ${workspaceGlobCmd}; } 2>/dev/null | awk '!seen[$0]++'`;
-      _log(`Checking existing dirs via SSH: ${fullCheckCmd.substring(0, 100)}...`);
-      const existResult = spawnSync("ssh", [...sshArgs(configFile, sandboxName), fullCheckCmd], {
-        encoding: "utf-8",
-        stdio: ["ignore", "pipe", "pipe"],
-        timeout: 30000,
+      _log(`Pre-backup audit: checking for symlinks, hard links, and special files`);
+      const auditResult = await execSandboxReadOnlyWithGrpcFallback(gatewayName, {
+        sandboxName,
+        command: ["sh", "-c", auditCmd],
+        timeoutMs: 30_000,
       });
-      _log(
-        `Dir check: exit=${existResult.status}, stdout=${(existResult.stdout || "").trim().substring(0, 200)}, stderr=${(existResult.stderr || "").trim().substring(0, 200)}`,
-      );
-      const existingDirs = (existResult.stdout || "")
-        .trim()
-        .split("\n")
-        .filter((d) => d.length > 0);
-      _log(
-        `Existing dirs in sandbox: [${existingDirs.join(",")}] (${existingDirs.length}/${stateDirs.length})`,
-      );
-
-      if (existResult.status !== 0) {
-        _log(
-          `FAILED: SSH dir check exited ${existResult.status} — cannot determine which dirs exist`,
-        );
+      if (auditResult.status !== 0) {
+        const stderr = auditResult.stderr.trim();
+        const detail = stderr || auditResult.error?.message || `exit ${String(auditResult.status)}`;
+        _log(`FAILED: Pre-backup audit command failed — ${detail}`);
         return {
           success: false,
-          unreachable: isSshTransportFailure(existResult),
+          unreachable: isSandboxExecTransportFailure(auditResult),
           manifest,
           backedUpDirs,
-          failedDirs: [...stateDirs],
+          failedDirs: [...existingDirs],
           backedUpFiles,
           failedFiles: stateFiles.map((f) => f.path),
+          error: `Pre-backup audit failed: ${detail}`,
         };
       }
-
-      if (existingDirs.length === 0) {
-        _log("No state dirs found in sandbox (all empty)");
-      } else {
-        // NC-2227-04: Pre-backup audit — reject symlinks, hardlinks, and special
-        // files inside state dirs. A compromised agent could plant a symlink like
-        // workspace/copy -> ../openclaw.json to exfiltrate config via backup.
-        //
-        // The printf format emits "<type>\t<absPath>\t<linkTarget>" — %l is
-        // empty for non-symlinks but always present, so the field count is
-        // stable. Tab separator assumes state-dir paths don't contain tabs,
-        // matching the wider convention in this file.
-        // Per-dir `find` invocations are joined with `;` (not `&&`) and each
-        // is tolerant of its own exit code via `|| true`. The base image bakes
-        // a few state subdirs as root-owned (e.g. `extensions/<plugin>`,
-        // `agents/<id>`) and `find` walking those from the sandbox-user SSH
-        // session exits 1 on permission denied. The audit's real signal is
-        // stdout (the printf-emitted symlink/hardlink/special-file rows);
-        // letting one perm-denied subdir abort the whole chain blocks legitimate
-        // rebuilds.
-        const auditCmd = existingDirs
-          .map(
-            (d) =>
-              `{ find ${shellQuote(`${dir}/${d}`)} \\( -type l -o \\( -type f -a -links +1 \\) -o \\( ! -type f -a ! -type d \\) \\) -printf "%y\\t%p\\t%l\\n" 2>/dev/null || true; }`,
-          )
-          .join("; ");
-        _log(`Pre-backup audit: checking for symlinks, hard links, and special files`);
-        const auditResult = spawnSync("ssh", [...sshArgs(configFile, sandboxName), auditCmd], {
-          encoding: "utf-8",
-          stdio: ["ignore", "pipe", "pipe"],
-          timeout: 30000,
-        });
-        if (auditResult.status !== 0) {
-          const stderr = (auditResult.stderr || "").trim();
-          const detail =
-            stderr || auditResult.error?.message || `exit ${String(auditResult.status)}`;
-          _log(`FAILED: Pre-backup audit command failed — ${detail}`);
+      const auditOutput = auditResult.stdout.trim();
+      if (auditOutput.length > 0) {
+        const allEntries = auditOutput.split("\n").filter((l) => l.length > 0);
+        const whitelisted: string[] = [];
+        const violations: string[] = [];
+        const dirPrefix = `${dir}/`;
+        for (const entry of allEntries) {
+          // find -printf "%y\t%p\t%l\n" → "<type>\t<absPath>\t<linkTarget>"
+          // (linkTarget is empty for non-symlinks).
+          const parts = entry.split("\t");
+          const type = parts[0] || "";
+          const absPath = parts[1] || entry;
+          const linkTarget = parts[2] || "";
+          const relPath = absPath.startsWith(dirPrefix) ? absPath.slice(dirPrefix.length) : absPath;
+          if (type === "l" && isAllowedStateSymlink(relPath, linkTarget)) {
+            whitelisted.push(entry);
+          } else {
+            violations.push(entry);
+          }
+        }
+        if (whitelisted.length > 0) {
+          _log(
+            `Pre-backup audit whitelisted ${whitelisted.length} entries (image npm symlinks): ${whitelisted.slice(0, 5).join("; ")}`,
+          );
+        }
+        if (violations.length > 0) {
+          // Non-whitelisted symlinks / hard links / special files — reject
+          _log(
+            `SECURITY: Pre-backup audit found ${violations.length} unsafe entries: ${violations.slice(0, 5).join("; ")}`,
+          );
           return {
             success: false,
-            unreachable: isSshTransportFailure(auditResult),
             manifest,
             backedUpDirs,
             failedDirs: [...existingDirs],
             backedUpFiles,
             failedFiles: stateFiles.map((f) => f.path),
-            error: `Pre-backup audit failed: ${detail}`,
+            error: `Pre-backup audit rejected: symlinks, hard links, or special files found in state dirs: ${violations.slice(0, 3).join("; ")}`,
           };
         }
-        const auditOutput = (auditResult.stdout || "").trim();
-        if (auditOutput.length > 0) {
-          const allEntries = auditOutput.split("\n").filter((l) => l.length > 0);
-          const whitelisted: string[] = [];
-          const violations: string[] = [];
-          const dirPrefix = `${dir}/`;
-          for (const entry of allEntries) {
-            // find -printf "%y\t%p\t%l\n" → "<type>\t<absPath>\t<linkTarget>"
-            // (linkTarget is empty for non-symlinks).
-            const parts = entry.split("\t");
-            const type = parts[0] || "";
-            const absPath = parts[1] || entry;
-            const linkTarget = parts[2] || "";
-            const relPath = absPath.startsWith(dirPrefix)
-              ? absPath.slice(dirPrefix.length)
-              : absPath;
-            if (type === "l" && isAllowedStateSymlink(relPath, linkTarget)) {
-              whitelisted.push(entry);
-            } else {
-              violations.push(entry);
-            }
-          }
-          if (whitelisted.length > 0) {
-            _log(
-              `Pre-backup audit whitelisted ${whitelisted.length} entries (image npm symlinks): ${whitelisted.slice(0, 5).join("; ")}`,
-            );
-          }
-          if (violations.length > 0) {
-            // Non-whitelisted symlinks / hard links / special files — reject
-            _log(
-              `SECURITY: Pre-backup audit found ${violations.length} unsafe entries: ${violations.slice(0, 5).join("; ")}`,
-            );
-            return {
-              success: false,
-              manifest,
-              backedUpDirs,
-              failedDirs: [...existingDirs],
-              backedUpFiles,
-              failedFiles: stateFiles.map((f) => f.path),
-              error: `Pre-backup audit rejected: symlinks, hard links, or special files found in state dirs: ${violations.slice(0, 3).join("; ")}`,
-            };
-          }
-        }
-        _log("Pre-backup audit passed — no unsafe symlinks, hard links, or special files found");
+      }
+      _log("Pre-backup audit passed — no unsafe symlinks, hard links, or special files found");
 
-        // Download via SSH+tar
-        // NC-2227-04: Removed -h flag (was following symlinks). State dirs are
-        // now agent-writable and co-located with config — a compromised agent
-        // could create symlinks to exfiltrate config contents via backup.
-        const tarCmd = `tar -cf - -C ${shellQuote(dir)} -- ${existingDirs.map(shellQuote).join(" ")}`;
-        _log(`Downloading via SSH+tar: ${tarCmd}`);
-        const result = spawnSync("ssh", [...sshArgs(configFile, sandboxName), tarCmd], {
-          stdio: ["ignore", "pipe", "pipe"],
-          timeout: 120000,
-          maxBuffer: 256 * 1024 * 1024,
-        });
+      // Download through OpenShell's binary-safe sandbox exec stream.
+      // NC-2227-04: Removed -h flag (was following symlinks). State dirs are
+      // now agent-writable and co-located with config — a compromised agent
+      // could create symlinks to exfiltrate config contents via backup.
+      const tarCmd = `tar -cf - -C ${shellQuote(dir)} -- ${existingDirs.map(shellQuote).join(" ")}`;
+      _log(`Downloading via OpenShell+tar: ${tarCmd}`);
+      const result = await execSandboxReadOnlyWithGrpcFallback(gatewayName, {
+        sandboxName,
+        command: ["sh", "-c", tarCmd],
+        timeoutMs: 120_000,
+        maxOutputBytes: 256 * 1024 * 1024,
+        stdoutEncoding: "buffer",
+      });
+      _log(
+        `OpenShell+tar download: exit=${result.status}, stdout=${result.stdoutBytes ? result.stdoutBytes.length + " bytes" : "null"}, stderr=${result.stderr.substring(0, 200)}`,
+      );
+      if (isSandboxExecTransportFailure(result)) unreachable = true;
+
+      // GNU tar exit codes: 0 = success, 1 = files changed during archive,
+      // 2 = errors (e.g. permission denied) but archive still written to stdout.
+      // Accept exit 0, 1, or 2 when stdout has data — extract what tar produced
+      // and determine per-dir success from tar's reported read errors.
+      const tarExitedWithData =
+        Boolean(result.stdoutBytes?.length) &&
+        (result.status === 0 || result.status === 1 || result.status === 2);
+
+      if (result.status !== 0 && result.stdoutBytes && result.stdoutBytes.length > 0) {
         _log(
-          `SSH+tar download: exit=${result.status}, stdout=${result.stdout ? result.stdout.length + " bytes" : "null"}, stderr=${(result.stderr?.toString() || "").substring(0, 200)}`,
+          `tar exited ${result.status} but produced ${result.stdoutBytes.length} bytes — attempting partial extraction`,
         );
-        if (isSshTransportFailure(result)) unreachable = true;
+      }
 
-        // GNU tar exit codes: 0 = success, 1 = files changed during archive,
-        // 2 = errors (e.g. permission denied) but archive still written to stdout.
-        // Accept exit 0, 1, or 2 when stdout has data — extract what tar produced
-        // and determine per-dir success from tar's reported read errors.
-        const tarExitedWithData =
-          result.stdout &&
-          result.stdout.length > 0 &&
-          (result.status === 0 || result.status === 1 || result.status === 2);
-
-        if (result.status !== 0 && result.stdout && result.stdout.length > 0) {
-          _log(
-            `tar exited ${result.status} but produced ${result.stdout.length} bytes — attempting partial extraction`,
-          );
-        }
-
-        if (tarExitedWithData) {
-          // SECURITY: Validate tar entries, extract safely, audit symlinks
-          const extractResult = safeTarExtract(result.stdout, backupPath);
-          if (extractResult.success) {
-            const extractedDirs = new Set(existingBackupDirs(backupPath, existingDirs));
-            if (result.status === 0) {
-              for (const d of existingDirs) {
-                if (extractedDirs.has(d)) {
-                  backedUpDirs.push(d);
-                } else {
-                  _log(`Dir ${d} missing from clean tar extraction — marking failed`);
-                  failedDirs.push(d);
-                  failedDirReasons[d] = BACKUP_FAILURE_ABSENT_AFTER_EXTRACTION;
-                }
-              }
-            } else {
-              const tarFailedDirs = classifyFailedDirsFromTarStderr(
-                result.stderr?.toString() || "",
-                existingDirs,
-              );
-              if (tarFailedDirs.size === 0) {
-                _log(
-                  `tar exited ${result.status} without attributable failed dirs — marking all dirs failed`,
-                );
-                failedDirs.push(...existingDirs);
+      if (tarExitedWithData && result.stdoutBytes) {
+        // SECURITY: Validate tar entries, extract safely, audit symlinks
+        const extractResult = safeTarExtract(result.stdoutBytes, backupPath);
+        if (extractResult.success) {
+          const extractedDirs = new Set(existingBackupDirs(backupPath, existingDirs));
+          if (result.status === 0) {
+            for (const d of existingDirs) {
+              if (extractedDirs.has(d)) {
+                backedUpDirs.push(d);
               } else {
-                for (const d of existingDirs) {
-                  const tarFailureReason = tarFailedDirs.get(d);
-                  if (tarFailureReason !== undefined) {
-                    _log(`Dir ${d} had tar read errors (${tarFailureReason}) — marking failed`);
-                    failedDirs.push(d);
-                    failedDirReasons[d] = tarFailureReason;
-                  } else if (!extractedDirs.has(d)) {
-                    _log(`Dir ${d} missing from partial tar extraction — marking failed`);
-                    failedDirs.push(d);
-                    failedDirReasons[d] = BACKUP_FAILURE_ABSENT_AFTER_EXTRACTION;
-                  } else {
-                    backedUpDirs.push(d);
-                  }
-                }
+                _log(`Dir ${d} missing from clean tar extraction — marking failed`);
+                failedDirs.push(d);
+                failedDirReasons[d] = BACKUP_FAILURE_ABSENT_AFTER_EXTRACTION;
               }
             }
           } else {
-            _log(`SECURITY: tar extraction blocked: ${extractResult.error}`);
-            failedDirs.push(...existingDirs);
+            const tarFailedDirs = classifyFailedDirsFromTarStderr(result.stderr, existingDirs);
+            if (tarFailedDirs.size === 0) {
+              _log(
+                `tar exited ${result.status} without attributable failed dirs — marking all dirs failed`,
+              );
+              failedDirs.push(...existingDirs);
+            } else {
+              for (const d of existingDirs) {
+                const tarFailureReason = tarFailedDirs.get(d);
+                if (tarFailureReason !== undefined) {
+                  _log(`Dir ${d} had tar read errors (${tarFailureReason}) — marking failed`);
+                  failedDirs.push(d);
+                  failedDirReasons[d] = tarFailureReason;
+                } else if (!extractedDirs.has(d)) {
+                  _log(`Dir ${d} missing from partial tar extraction — marking failed`);
+                  failedDirs.push(d);
+                  failedDirReasons[d] = BACKUP_FAILURE_ABSENT_AFTER_EXTRACTION;
+                } else {
+                  backedUpDirs.push(d);
+                }
+              }
+            }
           }
         } else {
+          _log(`SECURITY: tar extraction blocked: ${extractResult.error}`);
           failedDirs.push(...existingDirs);
         }
+      } else {
+        failedDirs.push(...existingDirs);
       }
     }
+  }
 
-    for (const spec of stateFiles) {
-      const result = backupStateFile(configFile, sandboxName, dir, spec, backupPath);
-      if (result.outcome === "backed_up") {
-        backedUpFiles.push(spec.path);
-      } else if (result.outcome === "failed") {
-        failedFiles.push(spec.path);
-        // Any transport-level failure at the state-file phase must promote to
-        // the sandbox-level unreachable flag so the skip flag can activate
-        // for state-file failures — not only the initial dir probe. (#6188)
-        if (result.unreachable) unreachable = true;
-      }
-    }
-  } finally {
-    try {
-      tempSshConfig.cleanup();
-    } catch {
-      /* ignore */
+  for (const spec of stateFiles) {
+    const result = await backupStateFile(gatewayName, sandboxName, dir, spec, backupPath);
+    if (result.outcome === "backed_up") {
+      backedUpFiles.push(spec.path);
+    } else if (result.outcome === "failed") {
+      failedFiles.push(spec.path);
+      // Any transport-level failure at the state-file phase must promote to
+      // the sandbox-level unreachable flag so the skip flag can activate
+      // for state-file failures — not only the initial dir probe. (#6188)
+      if (result.unreachable) unreachable = true;
     }
   }
 

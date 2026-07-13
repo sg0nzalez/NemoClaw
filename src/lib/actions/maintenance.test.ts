@@ -494,7 +494,7 @@ describe("backupAll", () => {
   });
 
   it("re-throws non-orphan-manifest errors so the installer aborts the upgrade", async () => {
-    // Real failures (disk full, SSH timeout, permission denied, programming
+    // Real failures (disk full, exec timeout, permission denied, programming
     // bugs) must propagate. Counting them as 'skipped' and returning exit 0
     // would let the installer march forward with a corrupt or absent backup
     // and silently lose state on restore.
@@ -562,7 +562,7 @@ describe("backupAll", () => {
     await expect(backupAll()).rejects.toThrow(/binary/);
   });
 
-  it("skips a running but SSH-unreachable sandbox when NEMOCLAW_SKIP_UNREACHABLE_SANDBOX_BACKUP=1", async () => {
+  it("skips a running sandbox with unreachable exec when the waiver is enabled", async () => {
     mocks.listSandboxes.mockReturnValue({
       sandboxes: [{ name: "sb-bad" }, { name: "sb-good" }],
       defaultSandbox: null,
@@ -664,6 +664,7 @@ describe("backupAll", () => {
     await expect(backupAll()).rejects.toThrow("exit:1");
 
     const errorOutput = errorSpy.mock.calls.map((c) => c[0]).join("\n");
+    expect(errorOutput).toContain("OpenShell sandbox exec endpoint");
     expect(errorOutput.includes("NEMOCLAW_SKIP_UNREACHABLE_SANDBOX_BACKUP=1")).toBe(
       expectSkipGuidance,
     );
