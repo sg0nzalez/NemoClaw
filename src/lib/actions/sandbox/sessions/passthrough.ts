@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { captureOpenshell } from "../../../adapters/openshell/runtime";
+import { openShellSandboxControl } from "../../../adapters/openshell/sandbox-control";
 import { CLI_NAME } from "../../../cli/branding";
 import * as registry from "../../../state/registry";
-import { buildOpenshellExecArgs, computeExitCode, execSandbox } from "../exec";
+import { computeExitCode, execSandbox } from "../exec";
 import { ensureLiveSandboxOrExit } from "../gateway-state";
 import { isWarmupSessionId, WARMUP_SESSION_ID_PREFIX } from "../warmup-session";
 import { balancedJsonCandidates, parseSessionIndex } from "./session-index";
@@ -132,12 +132,12 @@ function writeWithTrailingNewline(stream: NodeJS.WriteStream, value: string | un
   stream.write(value.endsWith("\n") ? value : `${value}\n`);
 }
 
-function capturedStdout(result: { output: string; stdout?: string }): string {
-  return typeof result.stdout === "string" ? result.stdout.trim() : result.output;
+function capturedStdout(result: { stdout: string }): string {
+  return result.stdout.trim();
 }
 
-function capturedStderr(result: { stderr?: string }): string {
-  return typeof result.stderr === "string" ? result.stderr.trim() : "";
+function capturedStderr(result: { stderr: string }): string {
+  return result.stderr.trim();
 }
 
 function printJsonParseFailure(): void {
@@ -230,10 +230,10 @@ export async function runSessionsPassthrough(
   else if (inSandboxBinary === "hermes") command.push("list");
   for (const arg of extraArgs) command.push(arg);
   if (isFilterableListPassthrough(verb) && inSandboxBinary === "openclaw") {
-    const result = captureOpenshell(buildOpenshellExecArgs(sandboxName, command), {
-      ignoreError: true,
-      includeStreams: true,
-      maxBuffer: SESSIONS_LIST_CAPTURE_MAX_BUFFER_BYTES,
+    const result = await openShellSandboxControl.exec({
+      sandboxName,
+      command,
+      maxOutputBytes: SESSIONS_LIST_CAPTURE_MAX_BUFFER_BYTES,
     });
     const { code, errorMessage } = computeExitCode(result);
     const capturedOutput = capturedStdout(result);

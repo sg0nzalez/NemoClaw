@@ -37,6 +37,11 @@ const CHECKS: readonly CheckCommand[] = [
     args: ["scripts/checks/hermes-light-skin-boundary.ts"],
   },
   {
+    name: "legacy-sandbox-transports",
+    command: TSX,
+    args: ["scripts/checks/legacy-sandbox-transports.ts"],
+  },
+  {
     name: "dependency-pins",
     command: TSX,
     args: ["scripts/checks/dependency-pins.ts"],
