@@ -448,7 +448,8 @@ describe("PR review advisor workflow boundary", () => {
     const binDir = path.join(tmp, "bin");
     const callLog = path.join(tmp, "calls.log");
     fs.mkdirSync(binDir);
-    for (const name of ["npm", "rm", "ln"]) writeFakeCommand(binDir, name);
+    fs.mkdirSync(path.join(tmp, "advisor"));
+    writeFakeCommand(binDir, "npm");
     fs.writeFileSync(
       path.join(binDir, "dpkg-query"),
       `#!/bin/bash
@@ -508,10 +509,9 @@ printf 'sudo %s\\n' "$*" >> "$CALL_LOG"
       expect(fs.readFileSync(callLog, "utf8")).toContain("dpkg-query -W -f=${Version} ripgrep");
       expect(fs.readFileSync(callLog, "utf8")).toContain("fdfind --version");
       expect(fs.readFileSync(callLog, "utf8")).toContain("rg --version");
-      expect(fs.readFileSync(callLog, "utf8")).toContain("--ignore-scripts");
-      expect(fs.readFileSync(callLog, "utf8")).toContain("typebox@test-typebox-version");
-      expect(fs.readFileSync(callLog, "utf8")).toContain("vitest@test-vitest-version");
-      expect(fs.readFileSync(callLog, "utf8")).toContain("yaml@test-yaml-version");
+      expect(fs.readFileSync(callLog, "utf8")).toContain(
+        "npm ci --ignore-scripts --no-audit --no-fund",
+      );
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
@@ -672,6 +672,42 @@ process.exitCode = valid ? 0 : 1;`,
         "review job env.PR_REVIEW_ADVISOR_LOAD_PREVIOUS_REVIEW must be false",
       ]),
     );
+  });
+
+  it("rejects decoy lockfile-install text outside the npm invocation", () => {
+    const errors = validateMutation((source) =>
+      source.replace(
+        "npm ci --ignore-scripts --no-audit --no-fund",
+        "npm install --ignore-scripts\n            printf '%s\\n' 'npm ci --ignore-scripts --no-audit --no-fund' >/dev/null",
+      ),
+    );
+
+    expect(errors).toContain(
+      "step 'Install Pi SDK' must use the canonical lockfile-only npm ci command",
+    );
+  });
+
+  it("rejects drift in the trusted advisor runtime package lock", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "pr-review-advisor-lock-"));
+    const lockPath = path.join(tmp, "package-lock.json");
+    fs.writeFileSync(lockPath, JSON.stringify({ packages: {} }));
+    try {
+      expect(
+        validatePrReviewAdvisorWorkflowBoundary(
+          path.join(ROOT, ".github", "workflows", "pr-review-advisor.yaml"),
+          lockPath,
+        ),
+      ).toEqual(
+        expect.arrayContaining([
+          "advisor package lock must pin @earendil-works/pi-coding-agent@0.80.6",
+          "advisor package lock must pin typebox@1.1.38",
+          "advisor package lock must pin yaml@2.8.3",
+          "advisor package lock must pin vitest@4.1.9",
+        ]),
+      );
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   });
 
   it("reports workflow parse failures through boundary errors", () => {
