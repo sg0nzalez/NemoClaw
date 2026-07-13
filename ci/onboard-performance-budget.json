@@ -13,9 +13,13 @@
     "minPercent": 30
   },
   "fullE2eColdPath": {
-    "totalBudgetMs": 205000,
-    "postOnboardBudgetMs": 20000,
+    "rootStartToFirstTurnCompletionBudgetMs": 205000,
+    "rootEndToFirstTurnCompletionBudgetMs": 20000,
     "phaseBudgetsMs": {
+      "nemoclaw.onboard.phase.preflight": 30000,
+      "nemoclaw.onboard.phase.gateway": 30000,
+      "nemoclaw.onboard.phase.provider_selection": 30000,
+      "nemoclaw.onboard.phase.inference": 30000,
       "nemoclaw.onboard.phase.sandbox": 180000
     }
   }

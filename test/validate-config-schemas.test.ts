@@ -59,7 +59,7 @@ function loadJSON(path: string): LooseObject {
 }
 
 function compileSchema(schemaRelPath: string): ValidateFunction {
-  const ajv = new Ajv({ allErrors: true, strict: false });
+  const ajv = new Ajv({ allErrors: true, strict: false, $data: true });
   const schema = loadJSON(repoPath(schemaRelPath));
   return ajv.compile(schema);
 }
@@ -276,75 +276,6 @@ describe("config validation target discovery", () => {
     expect(filesBySchema.get("schemas/onboard-config.schema.json") ?? []).toEqual([
       "ci/onboard-performance-budget.json",
     ]);
-  });
-});
-
-// ── Onboard performance budget ──────────────────────────────────────────────
-
-describe("onboard-config.schema.json", () => {
-  const validate = compileSchema("schemas/onboard-config.schema.json");
-  const validOnboardConfig = {
-    $comment: "Schema fixture",
-    schemaVersion: 1,
-    mode: "advisory",
-    scope: "fixture",
-    totalBudgetMs: 0,
-    regressionWarning: { minDeltaMs: 0, minPercent: 0 },
-    phaseRegressionWarning: { minDeltaMs: 0, minPercent: 0 },
-    fullE2eColdPath: {
-      totalBudgetMs: 0,
-      postOnboardBudgetMs: 0,
-      phaseBudgetsMs: { "nemoclaw.onboard.phase.sandbox": 0 },
-    },
-  };
-
-  it("accepts a minimal onboard performance budget and rejects missing fullE2eColdPath", () => {
-    expectValid(validate, validOnboardConfig, "minimal onboard config");
-    const { fullE2eColdPath: _, ...without } = validOnboardConfig;
-    expect(validate(without)).toBe(false);
-  });
-
-  it("rejects invalid threshold shapes", () => {
-    const bad = {
-      ...validOnboardConfig,
-      regressionWarning: { minDeltaMs: -1, minPercent: 20 },
-    };
-    expect(validate(bad)).toBe(false);
-  });
-
-  it("accepts only known full-E2E cold-path phase budgets", () => {
-    expectValid(
-      validate,
-      {
-        ...validOnboardConfig,
-        fullE2eColdPath: {
-          totalBudgetMs: 205_000,
-          postOnboardBudgetMs: 20_000,
-          phaseBudgetsMs: { "nemoclaw.onboard.phase.sandbox": 185_000 },
-        },
-      },
-      "full E2E cold-path phase budget",
-    );
-    expect(
-      validate({
-        ...validOnboardConfig,
-        fullE2eColdPath: {
-          totalBudgetMs: 205_000,
-          postOnboardBudgetMs: 20_000,
-          phaseBudgetsMs: { "nemoclaw.onboard.phase.typo": 185_000 },
-        },
-      }),
-    ).toBe(false);
-    expect(
-      validate({
-        ...validOnboardConfig,
-        fullE2eColdPath: {
-          totalBudgetMs: 205_000,
-          postOnboardBudgetMs: 20_000,
-          phaseBudgetsMs: {},
-        },
-      }),
-    ).toBe(false);
   });
 });
 

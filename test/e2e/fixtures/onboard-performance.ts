@@ -6,6 +6,9 @@ import type { ShellProbeOutputEvent } from "./shell-probe.ts";
 const ONBOARD_SCOPE = "nemoclaw.onboard";
 const ONBOARD_ROOT_SPAN = "nemoclaw.onboard";
 const NANOSECONDS_PER_MILLISECOND = 1_000_000n;
+const DURATION_TOLERANCE_MS = 0.001;
+const TRACE_ID_PATTERN = /^[0-9a-f]{32}$/u;
+const SPAN_ID_PATTERN = /^[0-9a-f]{16}$/u;
 export const ONBOARD_PHASE_NAMES = [
   "nemoclaw.onboard.phase.preflight",
   "nemoclaw.onboard.phase.gateway",
@@ -17,7 +20,11 @@ export const ONBOARD_PHASE_NAMES = [
 export type OnboardPhaseName = (typeof ONBOARD_PHASE_NAMES)[number];
 
 const ONBOARD_PHASE_NAME_SET = new Set<string>(ONBOARD_PHASE_NAMES);
-const SANDBOX_PHASE_NAME = "nemoclaw.onboard.phase.sandbox" as const;
+const COLD_ONBOARD_BUDGET_KEYS = new Set([
+  "rootStartToFirstTurnCompletionBudgetMs",
+  "rootEndToFirstTurnCompletionBudgetMs",
+  "phaseBudgetsMs",
+]);
 
 export interface OnboardTraceWindow {
   durationMs: number;
@@ -27,33 +34,75 @@ export interface OnboardTraceWindow {
 }
 
 export interface ColdOnboardPerformanceBudget {
-  phaseBudgetsMs: Partial<Record<OnboardPhaseName, number>>;
-  postOnboardBudgetMs: number;
-  totalBudgetMs: number;
+  phaseBudgetsMs: Record<OnboardPhaseName, number>;
+  rootEndToFirstTurnCompletionBudgetMs: number;
+  rootStartToFirstTurnCompletionBudgetMs: number;
 }
 
 export interface ColdOnboardPerformanceEvaluation {
   passed: boolean;
-  postOnboardMs: number;
+  rootEndToFirstTurnCompletionMs: number;
+  rootStartToFirstTurnCompletionMs: number;
   violations: string[];
+}
+
+interface ParsedSpan {
+  durationMs: number;
+  endNs: bigint;
+  record: Record<string, unknown>;
+  spanId: string;
+  startNs: bigint;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" ? (value as Record<string, unknown>) : null;
 }
 
-function unixNanoseconds(value: unknown, field: string): bigint {
+function unixNanoseconds(value: unknown, spanLabel: string, field: string): bigint {
   if (typeof value !== "string" || !/^\d+$/u.test(value)) {
-    throw new Error(`onboard root span has an invalid ${field}`);
+    throw new Error(`${spanLabel} span has an invalid ${field}`);
   }
   return BigInt(value);
 }
 
-function durationMilliseconds(value: unknown, phaseName: string): number {
+function durationMilliseconds(value: unknown, spanLabel: string): number {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
-    throw new Error(`onboard phase ${phaseName} has an invalid duration`);
+    throw new Error(`${spanLabel} span has an invalid duration`);
   }
   return value;
+}
+
+function identifier(value: unknown, pattern: RegExp, field: string): string {
+  if (typeof value !== "string" || !pattern.test(value)) {
+    throw new Error(`trace artifact has an invalid ${field}`);
+  }
+  return value;
+}
+
+function parseSpan(
+  record: Record<string, unknown>,
+  spanLabel: string,
+  expectedTraceId: string,
+): ParsedSpan {
+  const traceId = identifier(record.trace_id, TRACE_ID_PATTERN, `${spanLabel} trace_id`);
+  if (traceId !== expectedTraceId) {
+    throw new Error(`${spanLabel} span does not belong to the onboard trace`);
+  }
+  const spanId = identifier(record.span_id, SPAN_ID_PATTERN, `${spanLabel} span_id`);
+  if (asRecord(record.status)?.code !== "OK") {
+    throw new Error(`${spanLabel} span status is missing or not OK`);
+  }
+  const startNs = unixNanoseconds(record.start_time_unix_nano, spanLabel, "start time");
+  const endNs = unixNanoseconds(record.end_time_unix_nano, spanLabel, "end time");
+  if (endNs < startNs) {
+    throw new Error(`${spanLabel} span ends before it starts`);
+  }
+  const durationMs = durationMilliseconds(record.duration_ms, spanLabel);
+  const timestampDurationMs = Number(endNs - startNs) / Number(NANOSECONDS_PER_MILLISECOND);
+  if (Math.abs(timestampDurationMs - durationMs) > DURATION_TOLERANCE_MS) {
+    throw new Error(`${spanLabel} span duration does not match its timestamps`);
+  }
+  return { durationMs, endNs, record, spanId, startNs };
 }
 
 function nonNegativeMilliseconds(value: unknown): number | null {
@@ -62,29 +111,36 @@ function nonNegativeMilliseconds(value: unknown): number | null {
 
 function asColdOnboardBudget(value: unknown): ColdOnboardPerformanceBudget | null {
   const record = asRecord(value);
-  if (!record) return null;
-  const totalBudgetMs = nonNegativeMilliseconds(record.totalBudgetMs);
-  const postOnboardBudgetMs = nonNegativeMilliseconds(record.postOnboardBudgetMs);
+  if (!record || Object.keys(record).some((key) => !COLD_ONBOARD_BUDGET_KEYS.has(key))) return null;
+  const rootStartToFirstTurnCompletionBudgetMs = nonNegativeMilliseconds(
+    record.rootStartToFirstTurnCompletionBudgetMs,
+  );
+  const rootEndToFirstTurnCompletionBudgetMs = nonNegativeMilliseconds(
+    record.rootEndToFirstTurnCompletionBudgetMs,
+  );
   const phaseBudgets = asRecord(record.phaseBudgetsMs);
   if (
-    totalBudgetMs === null ||
-    postOnboardBudgetMs === null ||
-    postOnboardBudgetMs > totalBudgetMs ||
+    rootStartToFirstTurnCompletionBudgetMs === null ||
+    rootEndToFirstTurnCompletionBudgetMs === null ||
+    rootEndToFirstTurnCompletionBudgetMs > rootStartToFirstTurnCompletionBudgetMs ||
     !phaseBudgets
   ) {
     return null;
   }
 
-  const phaseBudgetsMs: Partial<Record<OnboardPhaseName, number>> = {};
-  for (const [name, budgetMs] of Object.entries(phaseBudgets)) {
-    if (!ONBOARD_PHASE_NAME_SET.has(name)) return null;
-    const validatedBudgetMs = nonNegativeMilliseconds(budgetMs);
+  if (Object.keys(phaseBudgets).some((name) => !ONBOARD_PHASE_NAME_SET.has(name))) return null;
+  const phaseBudgetsMs = {} as Record<OnboardPhaseName, number>;
+  for (const name of ONBOARD_PHASE_NAMES) {
+    const validatedBudgetMs = nonNegativeMilliseconds(phaseBudgets[name]);
     if (validatedBudgetMs === null) return null;
-    phaseBudgetsMs[name as OnboardPhaseName] = validatedBudgetMs;
+    phaseBudgetsMs[name] = validatedBudgetMs;
   }
-  if (phaseBudgetsMs[SANDBOX_PHASE_NAME] === undefined) return null;
 
-  return { totalBudgetMs, postOnboardBudgetMs, phaseBudgetsMs };
+  return {
+    rootStartToFirstTurnCompletionBudgetMs,
+    rootEndToFirstTurnCompletionBudgetMs,
+    phaseBudgetsMs,
+  };
 }
 
 export function readColdOnboardPerformanceBudget(value: unknown): ColdOnboardPerformanceBudget {
@@ -96,13 +152,19 @@ export function readColdOnboardPerformanceBudget(value: unknown): ColdOnboardPer
 }
 
 export function readOnboardTraceWindow(artifact: unknown): OnboardTraceWindow {
-  const resourceSpans = asRecord(artifact)?.resource_spans;
+  const artifactRecord = asRecord(artifact);
+  const summaryTraceId = identifier(
+    asRecord(artifactRecord?.summary)?.trace_id,
+    TRACE_ID_PATTERN,
+    "summary trace_id",
+  );
+  const resourceSpans = artifactRecord?.resource_spans;
   if (!Array.isArray(resourceSpans)) {
     throw new Error("trace artifact is missing resource_spans");
   }
 
   const roots: Record<string, unknown>[] = [];
-  const phases = new Map<OnboardPhaseName, number>();
+  const phases = new Map<OnboardPhaseName, Record<string, unknown>>();
   for (const resourceSpan of resourceSpans) {
     const scopeSpans = asRecord(resourceSpan)?.scope_spans;
     if (!Array.isArray(scopeSpans)) continue;
@@ -110,16 +172,18 @@ export function readOnboardTraceWindow(artifact: unknown): OnboardTraceWindow {
       const scopeSpanRecord = asRecord(scopeSpan);
       if (asRecord(scopeSpanRecord?.scope)?.name !== ONBOARD_SCOPE) continue;
       const spans = scopeSpanRecord?.spans;
-      if (!Array.isArray(spans)) continue;
+      if (!Array.isArray(spans) || spans.some((span) => asRecord(span) === null)) {
+        throw new Error("onboard trace scope contains malformed spans");
+      }
       for (const span of spans) {
-        const record = asRecord(span);
+        const record = span as Record<string, unknown>;
         if (record?.name === ONBOARD_ROOT_SPAN) roots.push(record);
         if (typeof record?.name === "string" && ONBOARD_PHASE_NAME_SET.has(record.name)) {
           const phaseName = record.name as OnboardPhaseName;
           if (phases.has(phaseName)) {
             throw new Error(`trace artifact must contain exactly one ${phaseName} span`);
           }
-          phases.set(phaseName, durationMilliseconds(record.duration_ms, phaseName));
+          phases.set(phaseName, record);
         }
       }
     }
@@ -128,51 +192,71 @@ export function readOnboardTraceWindow(artifact: unknown): OnboardTraceWindow {
   if (roots.length !== 1) {
     throw new Error("trace artifact must contain exactly one onboard root span");
   }
-  const root = roots[0];
-  if (asRecord(root.status)?.code !== "OK") {
-    throw new Error("onboard root span status is missing or not OK");
-  }
-
-  const startedAtNs = unixNanoseconds(root.start_time_unix_nano, "start time");
-  const finishedAtNs = unixNanoseconds(root.end_time_unix_nano, "end time");
-  if (finishedAtNs < startedAtNs) {
-    throw new Error("onboard root span ends before it starts");
+  const root = parseSpan(roots[0], "onboard root", summaryTraceId);
+  if (root.record.parent_span_id !== undefined) {
+    throw new Error("onboard root span must not have a parent");
   }
 
   const phaseDurationsMs = {} as Record<OnboardPhaseName, number>;
+  const spanIds = new Set([root.spanId]);
+  let previousPhaseEndNs = root.startNs;
   for (const phaseName of ONBOARD_PHASE_NAMES) {
-    const durationMs = phases.get(phaseName);
-    if (durationMs === undefined) {
+    const record = phases.get(phaseName);
+    if (!record) {
       throw new Error(`trace artifact is missing ${phaseName} span`);
     }
-    phaseDurationsMs[phaseName] = durationMs;
+    const phase = parseSpan(record, `onboard phase ${phaseName}`, summaryTraceId);
+    if (spanIds.has(phase.spanId)) {
+      throw new Error(`trace artifact contains duplicate span_id ${phase.spanId}`);
+    }
+    spanIds.add(phase.spanId);
+    if (phase.record.parent_span_id !== root.spanId) {
+      throw new Error(`${phaseName} span is not a child of the onboard root`);
+    }
+    if (phase.startNs < root.startNs || phase.endNs > root.endNs) {
+      throw new Error(`${phaseName} span is outside the onboard root window`);
+    }
+    if (phase.startNs < previousPhaseEndNs) {
+      throw new Error(`${phaseName} span overlaps or precedes the prior onboard phase`);
+    }
+    previousPhaseEndNs = phase.endNs;
+    phaseDurationsMs[phaseName] = phase.durationMs;
   }
 
   return {
-    durationMs: Number((finishedAtNs - startedAtNs) / NANOSECONDS_PER_MILLISECOND),
-    finishedAtMs: Number(finishedAtNs / NANOSECONDS_PER_MILLISECOND),
+    durationMs: root.durationMs,
+    finishedAtMs: Number(root.endNs / NANOSECONDS_PER_MILLISECOND),
     phaseDurationsMs,
-    startedAtMs: Number(startedAtNs / NANOSECONDS_PER_MILLISECOND),
+    startedAtMs: Number(root.startNs / NANOSECONDS_PER_MILLISECOND),
   };
 }
 
 export function evaluateColdOnboardPerformance(
-  trace: Pick<OnboardTraceWindow, "durationMs" | "phaseDurationsMs">,
-  totalMs: number,
+  trace: Pick<OnboardTraceWindow, "finishedAtMs" | "phaseDurationsMs" | "startedAtMs">,
+  firstTurnCompletedAtMs: number,
   budget: ColdOnboardPerformanceBudget,
 ): ColdOnboardPerformanceEvaluation {
-  if (!Number.isFinite(totalMs) || totalMs < trace.durationMs) {
-    throw new Error("cold onboard total duration is invalid");
+  if (
+    !Number.isFinite(firstTurnCompletedAtMs) ||
+    !Number.isFinite(trace.startedAtMs) ||
+    !Number.isFinite(trace.finishedAtMs) ||
+    trace.finishedAtMs < trace.startedAtMs ||
+    firstTurnCompletedAtMs < trace.finishedAtMs
+  ) {
+    throw new Error("cold onboard timing boundaries are invalid");
   }
 
-  const postOnboardMs = totalMs - trace.durationMs;
+  const rootStartToFirstTurnCompletionMs = firstTurnCompletedAtMs - trace.startedAtMs;
+  const rootEndToFirstTurnCompletionMs = firstTurnCompletedAtMs - trace.finishedAtMs;
   const violations: string[] = [];
-  if (totalMs > budget.totalBudgetMs) {
-    violations.push(`total ${totalMs}ms exceeds ${budget.totalBudgetMs}ms`);
-  }
-  if (postOnboardMs > budget.postOnboardBudgetMs) {
+  if (rootStartToFirstTurnCompletionMs > budget.rootStartToFirstTurnCompletionBudgetMs) {
     violations.push(
-      `post-onboard first response ${postOnboardMs}ms exceeds ${budget.postOnboardBudgetMs}ms`,
+      `root-start-to-first-turn-completion ${rootStartToFirstTurnCompletionMs}ms exceeds ${budget.rootStartToFirstTurnCompletionBudgetMs}ms`,
+    );
+  }
+  if (rootEndToFirstTurnCompletionMs > budget.rootEndToFirstTurnCompletionBudgetMs) {
+    violations.push(
+      `root-end-to-first-turn-completion ${rootEndToFirstTurnCompletionMs}ms exceeds ${budget.rootEndToFirstTurnCompletionBudgetMs}ms`,
     );
   }
   for (const phaseName of ONBOARD_PHASE_NAMES) {
@@ -183,7 +267,12 @@ export function evaluateColdOnboardPerformance(
     }
   }
 
-  return { passed: violations.length === 0, postOnboardMs, violations };
+  return {
+    passed: violations.length === 0,
+    rootStartToFirstTurnCompletionMs,
+    rootEndToFirstTurnCompletionMs,
+    violations,
+  };
 }
 
 export function maximumOutputSilenceMs(

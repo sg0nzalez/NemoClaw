@@ -1,12 +1,16 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
-
-import { createSession, type Session } from "../../../state/onboard-session";
-import type { GatewayContainerState } from "../../gateway-container-running";
 import type { GatewayReuseState } from "../../../state/gateway";
-import { handleGatewayState, type GatewayStateOptions } from "./gateway";
+import { createSession, type Session } from "../../../state/onboard-session";
+import { flushTrace, resetTraceForTests, TRACE_FILE_ENV, type TraceArtifact } from "../../../trace";
+import type { GatewayContainerState } from "../../gateway-container-running";
+import { ONBOARD_TRACE_PHASE_NAMES } from "../../tracing";
+import { type GatewayStateOptions, handleGatewayState } from "./gateway";
 
 type Gpu = { type: string } | null;
 
@@ -117,6 +121,34 @@ describe("handleGatewayState", () => {
     expect(calls.note).toHaveBeenCalledWith("  Reusing healthy NemoClaw gateway.");
     expect(calls.startGateway).not.toHaveBeenCalled();
     expect(calls.complete).toHaveBeenCalledWith("gateway");
+  });
+
+  it("emits one successful gateway phase when reusing a healthy gateway", async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-gateway-trace-"));
+    const traceFile = path.join(directory, "trace.json");
+    process.env[TRACE_FILE_ENV] = traceFile;
+    resetTraceForTests();
+
+    try {
+      const { deps } = createDeps();
+
+      await handleGatewayState(baseOptions(deps, "healthy"));
+      flushTrace();
+
+      const artifact = JSON.parse(fs.readFileSync(traceFile, "utf8")) as TraceArtifact;
+      const gatewaySpans = artifact.resource_spans[0].scope_spans[0].spans.filter(
+        (span) => span.name === ONBOARD_TRACE_PHASE_NAMES.gateway,
+      );
+      expect(gatewaySpans).toHaveLength(1);
+      expect(gatewaySpans[0]).toMatchObject({
+        status: { code: "OK" },
+        attributes: { reuse_state: "healthy", gpu_passthrough: true },
+      });
+    } finally {
+      delete process.env[TRACE_FILE_ENV];
+      resetTraceForTests();
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it("reuses healthy gateways on resume only when the gateway step was complete", async () => {

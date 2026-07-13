@@ -300,7 +300,7 @@ function main(): void {
     targets = discoverTargets();
   }
 
-  const ajv = new Ajv({ allErrors: true, strict: false });
+  const ajv = new Ajv({ allErrors: true, strict: false, $data: true });
   let totalErrors = 0;
   let totalFiles = 0;
 

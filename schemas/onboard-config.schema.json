@@ -42,21 +42,35 @@
     "fullE2eColdPath": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["totalBudgetMs", "postOnboardBudgetMs", "phaseBudgetsMs"],
+      "required": [
+        "rootStartToFirstTurnCompletionBudgetMs",
+        "rootEndToFirstTurnCompletionBudgetMs",
+        "phaseBudgetsMs"
+      ],
       "properties": {
-        "totalBudgetMs": {
-          "type": "number",
-          "minimum": 0
-        },
-        "postOnboardBudgetMs": {
+        "rootStartToFirstTurnCompletionBudgetMs": {
           "type": "number",
           "minimum": 0,
-          "description": "Must be ≤ totalBudgetMs; enforced at runtime by readColdOnboardPerformanceBudget"
+          "description": "Maximum time from the nemoclaw.onboard root start until the first agent-turn command completes."
+        },
+        "rootEndToFirstTurnCompletionBudgetMs": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": {
+            "$data": "1/rootStartToFirstTurnCompletionBudgetMs"
+          },
+          "description": "Maximum time from the nemoclaw.onboard root end until the first agent-turn command completes."
         },
         "phaseBudgetsMs": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["nemoclaw.onboard.phase.sandbox"],
+          "required": [
+            "nemoclaw.onboard.phase.preflight",
+            "nemoclaw.onboard.phase.gateway",
+            "nemoclaw.onboard.phase.provider_selection",
+            "nemoclaw.onboard.phase.inference",
+            "nemoclaw.onboard.phase.sandbox"
+          ],
           "properties": {
             "nemoclaw.onboard.phase.preflight": { "$ref": "#/$defs/milliseconds" },
             "nemoclaw.onboard.phase.gateway": { "$ref": "#/$defs/milliseconds" },
