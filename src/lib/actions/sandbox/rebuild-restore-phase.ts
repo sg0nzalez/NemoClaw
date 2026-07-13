@@ -175,7 +175,9 @@ function reconcileFinalManagedObservability(
  * Boundary coverage: rebuild-flow.test.ts exercises full/partial state restore,
  * stale recovery, successful presets, and incomplete preset recovery reporting.
  */
-export function runRebuildRestorePhase(input: RebuildRestorePhaseInput): RebuildRestorePhaseResult {
+export async function runRebuildRestorePhase(
+  input: RebuildRestorePhaseInput,
+): Promise<RebuildRestorePhaseResult> {
   const {
     sandboxName,
     targetAgentType,
@@ -191,7 +193,7 @@ export function runRebuildRestorePhase(input: RebuildRestorePhaseInput): Rebuild
     console.log("");
     console.log("  Restoring workspace state...");
     log(`Restoring from: ${backupManifest.backupPath} into sandbox: ${sandboxName}`);
-    const restore = sandboxState.restoreRecreatedSandboxState(
+    const restore = await sandboxState.restoreRecreatedSandboxState(
       sandboxName,
       backupManifest.backupPath,
       {

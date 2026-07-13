@@ -515,7 +515,7 @@ async function runSnapshotCreate(
 
 function repairRestoredOpenClawConfigPerms(
   targetSandbox: string,
-  result: ReturnType<typeof sandboxState.restoreSandboxState>,
+  result: Awaited<ReturnType<typeof sandboxState.restoreSandboxState>>,
 ): void {
   if (!result.restoredFiles.includes("openclaw.json")) return;
   try {
@@ -942,51 +942,55 @@ async function runSnapshotRestoreUnlocked(
       );
     });
   }
-  withTimerBoundShieldsMutationLock(targetSandbox, "restore sandbox snapshot", () => {
-    // Serialize filesystem restore, mutable-permission repair, and policy
-    // reconciliation under the active timer generation. Normal auto-restore
-    // waits; the absolute deadline may preempt this process and reclaim the
-    // token, preventing policy/config mutation after lockdown resumes.
-    if (targetSandbox !== sandboxName) {
-      console.log(`  Restoring snapshot from '${sandboxName}' into '${targetSandbox}'...`);
-    } else {
-      console.log(`  Restoring snapshot into '${sandboxName}'...`);
-    }
-    const result = sandboxState.restoreSandboxState(targetSandbox, backupPath);
-    if (result.success) {
-      console.log(
-        `  ${G}\u2713${R} Restored ${result.restoredDirs.length} directories, ${result.restoredFiles.length} files`,
-      );
-    } else {
-      console.error(`  Restore failed.`);
-      if (result.restoredDirs.length > 0) {
-        console.error(`  Partial: ${result.restoredDirs.join(", ")}`);
+  await withTimerBoundShieldsMutationLockAsync(
+    targetSandbox,
+    "restore sandbox snapshot",
+    async () => {
+      // Serialize filesystem restore, mutable-permission repair, and policy
+      // reconciliation under the active timer generation. Normal auto-restore
+      // waits; the absolute deadline may preempt this process and reclaim the
+      // token, preventing policy/config mutation after lockdown resumes.
+      if (targetSandbox !== sandboxName) {
+        console.log(`  Restoring snapshot from '${sandboxName}' into '${targetSandbox}'...`);
+      } else {
+        console.log(`  Restoring snapshot into '${sandboxName}'...`);
       }
-      if (result.failedDirs.length > 0) {
-        console.error(`  Failed: ${result.failedDirs.join(", ")}`);
+      const result = await sandboxState.restoreSandboxState(targetSandbox, backupPath);
+      if (result.success) {
+        console.log(
+          `  ${G}\u2713${R} Restored ${result.restoredDirs.length} directories, ${result.restoredFiles.length} files`,
+        );
+      } else {
+        console.error(`  Restore failed.`);
+        if (result.restoredDirs.length > 0) {
+          console.error(`  Partial: ${result.restoredDirs.join(", ")}`);
+        }
+        if (result.failedDirs.length > 0) {
+          console.error(`  Failed: ${result.failedDirs.join(", ")}`);
+        }
+        if (result.failedFiles.length > 0) {
+          console.error(`  Failed files: ${result.failedFiles.join(", ")}`);
+        }
+        snapshotExit(1);
       }
-      if (result.failedFiles.length > 0) {
-        console.error(`  Failed files: ${result.failedFiles.join(", ")}`);
-      }
-      snapshotExit(1);
-    }
-    // Post-restore security-state reconciliation is best-effort by design: the
-    // filesystem restore succeeded and old snapshots may target hosts where policy
-    // providers or mutable-config repair are temporarily unavailable. Surface every
-    // failure as a warning, but keep the restore result tied to state restoration.
-    // #5027/#4538: openclaw.json restores via the generic copy strategy, which
-    // lands it at 0640. Repair the mutable config contract when needed.
-    repairRestoredOpenClawConfigPerms(targetSandbox, result);
-    // Reconcile custom policy presets (applied via --from-file/--from-dir).
-    // Skipped for legacy snapshots that predate the `customPolicies` field.
-    reconcileSnapshotCustomPolicies(targetSandbox, resolvedSnapshot);
-    // Reconcile built-in presets after custom content so same-name custom
-    // policies are never transiently substituted with a built-in. The current
-    // target observability bit and tier override historical built-in OTLP state.
-    // Legacy snapshots skip unrelated generic presets but still reconcile the
-    // managed observability binding from current target state.
-    reconcileSnapshotPolicyPresets(targetSandbox, resolvedSnapshot);
-  });
+      // Post-restore security-state reconciliation is best-effort by design: the
+      // filesystem restore succeeded and old snapshots may target hosts where policy
+      // providers or mutable-config repair are temporarily unavailable. Surface every
+      // failure as a warning, but keep the restore result tied to state restoration.
+      // #5027/#4538: openclaw.json restores via the generic copy strategy, which
+      // lands it at 0640. Repair the mutable config contract when needed.
+      repairRestoredOpenClawConfigPerms(targetSandbox, result);
+      // Reconcile custom policy presets (applied via --from-file/--from-dir).
+      // Skipped for legacy snapshots that predate the `customPolicies` field.
+      reconcileSnapshotCustomPolicies(targetSandbox, resolvedSnapshot);
+      // Reconcile built-in presets after custom content so same-name custom
+      // policies are never transiently substituted with a built-in. The current
+      // target observability bit and tier override historical built-in OTLP state.
+      // Legacy snapshots skip unrelated generic presets but still reconcile the
+      // managed observability binding from current target state.
+      reconcileSnapshotPolicyPresets(targetSandbox, resolvedSnapshot);
+    },
+  );
 }
 
 export async function runSandboxSnapshot(

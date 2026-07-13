@@ -1,49 +1,40 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { spawnSync } from "child_process";
-
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("child_process", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("child_process")>();
-  return { ...actual, spawnSync: vi.fn() };
-});
+import { execSandboxReadOnlyWithGrpcFallback } from "../adapters/openshell/sandbox-control-routing";
+
+vi.mock("../adapters/openshell/sandbox-control-routing", () => ({
+  execSandboxReadOnlyWithGrpcFallback: vi.fn(),
+}));
 
 import { discoverFreshOpenClawPluginExtensionDirs } from "./openclaw-plugin-restore";
 
 const OPENCLAW_DIR = "/sandbox/.openclaw";
 const MAX_PLUGIN_REGISTRY_BYTES = 1024 * 1024;
 
-function spawnResult(
+function sandboxExecResult(
   status: number | null,
-  stdout: Buffer,
+  stdout: string,
   options: { error?: Error; signal?: NodeJS.Signals | null } = {},
-): ReturnType<typeof spawnSync> {
+): Awaited<ReturnType<typeof execSandboxReadOnlyWithGrpcFallback>> {
   return {
-    error: options.error,
     status,
-    signal: options.signal ?? null,
-    output: [null, stdout, Buffer.alloc(0)],
-    pid: 1234,
     stdout,
-    stderr: Buffer.alloc(0),
-  } as ReturnType<typeof spawnSync>;
+    stderr: "",
+    ...(options.error ? { error: options.error } : {}),
+    ...(options.signal ? { signal: options.signal } : {}),
+  };
 }
 
 function discover() {
-  return discoverFreshOpenClawPluginExtensionDirs(
-    {
-      getSshConfig: () => "unused",
-      sshArgs: (configFile, sandboxName) => ["-F", configFile, `openshell-${sandboxName}`],
-    },
-    "/tmp/ssh-config",
-    "sandbox-one",
-    OPENCLAW_DIR,
-  );
+  return discoverFreshOpenClawPluginExtensionDirs("gateway-one", "sandbox-one", OPENCLAW_DIR);
 }
 
 describe("fresh OpenClaw plugin registry reads", () => {
+  const execMock = vi.mocked(execSandboxReadOnlyWithGrpcFallback);
+
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -52,65 +43,71 @@ describe("fresh OpenClaw plugin registry reads", () => {
     vi.restoreAllMocks();
   });
 
-  it("rejects an oversized SQLite registry response before JSON.parse", () => {
+  it("rejects an oversized SQLite registry response before JSON.parse", async () => {
     const parseSpy = vi.spyOn(JSON, "parse");
-    vi.mocked(spawnSync).mockReturnValue(spawnResult(0, Buffer.alloc(5 * 1024 * 1024, " ")));
+    execMock.mockResolvedValue(sandboxExecResult(0, " ".repeat(5 * 1024 * 1024)));
 
-    expect(discover()).toEqual({
+    await expect(discover()).resolves.toEqual({
       ok: false,
       error: "fresh OpenClaw plugin install registry response too large",
     });
     expect(parseSpy).not.toHaveBeenCalled();
-    expect(spawnSync).toHaveBeenCalledOnce();
-    expect(vi.mocked(spawnSync).mock.calls[0]?.[2]).toEqual(
-      expect.objectContaining({ maxBuffer: MAX_PLUGIN_REGISTRY_BYTES, timeout: 30000 }),
+    expect(execMock).toHaveBeenCalledOnce();
+    expect(execMock.mock.calls[0]?.[1]).toEqual(
+      expect.objectContaining({
+        maxOutputBytes: MAX_PLUGIN_REGISTRY_BYTES,
+        timeoutMs: 30_000,
+      }),
     );
   });
 
-  it("classifies a real maxBuffer ENOBUFS result before parsing truncated output", () => {
+  it("classifies a bounded-output transport failure before parsing truncated output", async () => {
     const parseSpy = vi.spyOn(JSON, "parse");
-    const error = Object.assign(new Error("spawnSync ssh ENOBUFS"), { code: "ENOBUFS" });
-    vi.mocked(spawnSync).mockReturnValue(
-      spawnResult(null, Buffer.alloc(MAX_PLUGIN_REGISTRY_BYTES + 8192, " "), {
+    const error = new Error("sandbox exec output limit exceeded");
+    execMock.mockResolvedValue(
+      sandboxExecResult(null, " ".repeat(MAX_PLUGIN_REGISTRY_BYTES + 8192), {
         error,
         signal: "SIGTERM",
       }),
     );
 
-    expect(discover()).toEqual({
+    await expect(discover()).resolves.toEqual({
       ok: false,
       error: "fresh OpenClaw plugin install registry response too large",
     });
     expect(parseSpy).not.toHaveBeenCalled();
-    expect(spawnSync).toHaveBeenCalledOnce();
+    expect(execMock).toHaveBeenCalledOnce();
   });
 
-  it("rejects an oversized legacy registry response after the status-2 fallback", () => {
+  it("rejects an oversized legacy registry response after the status-2 fallback", async () => {
     const parseSpy = vi.spyOn(JSON, "parse");
-    vi.mocked(spawnSync)
-      .mockReturnValueOnce(spawnResult(2, Buffer.alloc(0)))
-      .mockReturnValueOnce(spawnResult(0, Buffer.alloc(5 * 1024 * 1024, " ")));
+    execMock
+      .mockResolvedValueOnce(sandboxExecResult(2, ""))
+      .mockResolvedValueOnce(sandboxExecResult(0, " ".repeat(5 * 1024 * 1024)));
 
-    expect(discover()).toEqual({
+    await expect(discover()).resolves.toEqual({
       ok: false,
       error: "fresh OpenClaw plugin install registry response too large",
     });
     expect(parseSpy).not.toHaveBeenCalled();
-    expect(spawnSync).toHaveBeenCalledTimes(2);
-    for (const call of vi.mocked(spawnSync).mock.calls) {
-      expect(call[2]).toEqual(
-        expect.objectContaining({ maxBuffer: MAX_PLUGIN_REGISTRY_BYTES, timeout: 30000 }),
+    expect(execMock).toHaveBeenCalledTimes(2);
+    for (const call of execMock.mock.calls) {
+      expect(call[1]).toEqual(
+        expect.objectContaining({
+          maxOutputBytes: MAX_PLUGIN_REGISTRY_BYTES,
+          timeoutMs: 30_000,
+        }),
       );
     }
   });
 
-  it.each([10, 11])("does not use the legacy fallback for SQLite status %i", (status) => {
-    vi.mocked(spawnSync).mockReturnValue(spawnResult(status, Buffer.alloc(0)));
+  it.each([10, 11])("does not use the legacy fallback for SQLite status %i", async (status) => {
+    execMock.mockResolvedValue(sandboxExecResult(status, ""));
 
-    expect(discover()).toEqual({
+    await expect(discover()).resolves.toEqual({
       ok: false,
       error: "could not read fresh OpenClaw plugin install registry",
     });
-    expect(spawnSync).toHaveBeenCalledOnce();
+    expect(execMock).toHaveBeenCalledOnce();
   });
 });

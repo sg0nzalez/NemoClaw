@@ -2,11 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import path from "node:path";
-import { spawnSync } from "child_process";
 
+import { execSandboxReadOnlyWithGrpcFallback } from "../adapters/openshell/sandbox-control-routing.js";
 import { isObjectRecord } from "../core/json-types.js";
 import { shellQuote } from "../core/shell-quote.js";
-import { createTempSshConfig } from "../sandbox/temp-ssh-config.js";
 import {
   OPENCLAW_IMAGE_MANAGED_EXTENSION_DIRS,
   shouldPreserveOpenClawManagedExtensions,
@@ -47,11 +46,6 @@ export interface OpenClawImagePluginInstall {
 export type CompleteOpenClawImagePluginInstall = Omit<OpenClawImagePluginInstall, "loadPaths"> & {
   readonly loadPaths: readonly string[];
 };
-
-export interface OpenClawPluginDiscoveryDeps {
-  getSshConfig(sandboxName: string): string | null;
-  sshArgs(configFile: string, sandboxName: string): string[];
-}
 
 export type OpenClawPluginRestorePlanResult =
   | {
@@ -132,48 +126,37 @@ function buildLegacyOpenClawPluginIndexReadCommand(dir: string): string {
   ].join("; ");
 }
 
-function readFreshOpenClawPluginInstallIndex(
-  deps: OpenClawPluginDiscoveryDeps,
-  configFile: string,
+async function readFreshOpenClawPluginInstallIndex(
+  gatewayName: string,
   sandboxName: string,
   dir: string,
-): ReturnType<typeof spawnSync> {
+): Promise<Awaited<ReturnType<typeof execSandboxReadOnlyWithGrpcFallback>>> {
   // OpenClaw 2026.6.10 moved install records into its shared SQLite state.
   // Fall back only when that database is absent so a corrupt/incomplete
   // canonical index cannot be masked by stale legacy JSON.
-  const sqliteResult = spawnSync(
-    "ssh",
-    [...deps.sshArgs(configFile, sandboxName), buildFreshOpenClawPluginIndexSqliteReadCommand(dir)],
-    {
-      stdio: ["ignore", "pipe", "pipe"],
-      timeout: 30000,
-      maxBuffer: OPENCLAW_PLUGIN_INSTALL_REGISTRY_MAX_BYTES,
-    },
-  );
+  const sqliteResult = await execSandboxReadOnlyWithGrpcFallback(gatewayName, {
+    sandboxName,
+    command: ["sh", "-c", buildFreshOpenClawPluginIndexSqliteReadCommand(dir)],
+    timeoutMs: 30_000,
+    maxOutputBytes: OPENCLAW_PLUGIN_INSTALL_REGISTRY_MAX_BYTES,
+  });
   if (sqliteResult.status !== 2 || sqliteResult.error || sqliteResult.signal) return sqliteResult;
 
-  return spawnSync(
-    "ssh",
-    [...deps.sshArgs(configFile, sandboxName), buildLegacyOpenClawPluginIndexReadCommand(dir)],
-    {
-      stdio: ["ignore", "pipe", "pipe"],
-      timeout: 30000,
-      maxBuffer: OPENCLAW_PLUGIN_INSTALL_REGISTRY_MAX_BYTES,
-    },
-  );
+  return execSandboxReadOnlyWithGrpcFallback(gatewayName, {
+    sandboxName,
+    command: ["sh", "-c", buildLegacyOpenClawPluginIndexReadCommand(dir)],
+    timeoutMs: 30_000,
+    maxOutputBytes: OPENCLAW_PLUGIN_INSTALL_REGISTRY_MAX_BYTES,
+  });
 }
 
-export function discoverFreshOpenClawPluginExtensionDirs(
-  deps: OpenClawPluginDiscoveryDeps,
-  configFile: string,
+export async function discoverFreshOpenClawPluginExtensionDirs(
+  gatewayName: string,
   sandboxName: string,
   dir: string,
-): OpenClawManagedExtensionDiscoveryResult {
-  const result = readFreshOpenClawPluginInstallIndex(deps, configFile, sandboxName, dir);
-  if (
-    result.stdout &&
-    Buffer.byteLength(result.stdout) > OPENCLAW_PLUGIN_INSTALL_REGISTRY_MAX_BYTES
-  ) {
+): Promise<OpenClawManagedExtensionDiscoveryResult> {
+  const result = await readFreshOpenClawPluginInstallIndex(gatewayName, sandboxName, dir);
+  if (Buffer.byteLength(result.stdout) > OPENCLAW_PLUGIN_INSTALL_REGISTRY_MAX_BYTES) {
     return { ok: false, error: "fresh OpenClaw plugin install registry response too large" };
   }
   if (result.status !== 0 || result.error || result.signal || !result.stdout) {
@@ -182,7 +165,7 @@ export function discoverFreshOpenClawPluginExtensionDirs(
 
   let config: unknown;
   try {
-    config = JSON.parse(result.stdout.toString("utf-8")) as unknown;
+    config = JSON.parse(result.stdout) as unknown;
   } catch {
     return {
       ok: false,
@@ -195,21 +178,12 @@ export function discoverFreshOpenClawPluginExtensionDirs(
     : { ok: false, error: "fresh OpenClaw plugin install registry failed validation" };
 }
 
-export function discoverFreshOpenClawImagePluginInstalls(
+export async function discoverFreshOpenClawImagePluginInstalls(
   sandboxName: string,
-  deps: OpenClawPluginDiscoveryDeps,
+  gatewayName: string,
   dir = "/sandbox/.openclaw",
-): OpenClawManagedExtensionDiscoveryResult {
-  const sshConfig = deps.getSshConfig(sandboxName);
-  if (!sshConfig) {
-    return { ok: false, error: "could not get SSH config for OpenClaw plugin discovery" };
-  }
-  const tempSshConfig = createTempSshConfig(sshConfig, "nemoclaw-plugin-discovery-");
-  try {
-    return discoverFreshOpenClawPluginExtensionDirs(deps, tempSshConfig.file, sandboxName, dir);
-  } finally {
-    tempSshConfig.cleanup();
-  }
+): Promise<OpenClawManagedExtensionDiscoveryResult> {
+  return discoverFreshOpenClawPluginExtensionDirs(gatewayName, sandboxName, dir);
 }
 
 function isSafeOpenClawPluginInstallId(id: string): boolean {

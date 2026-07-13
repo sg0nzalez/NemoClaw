@@ -297,7 +297,7 @@ async function rebuildSandboxUnlocked(
         durableConfig.webSearchConfig,
       );
 
-      const restored = runRebuildRestorePhase({
+      const restored = await runRebuildRestorePhase({
         sandboxName,
         targetAgentType: rebuildAgent || "openclaw",
         targetImageIsCustom: Boolean(fromDockerfile),

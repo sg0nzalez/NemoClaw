@@ -5,7 +5,45 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("../adapters/openshell/sandbox-control-routing", async () => {
+  const { spawnSync } = await import("node:child_process");
+  const exec = async (request: {
+    command: readonly string[];
+    stdin?: string | Buffer;
+    maxOutputBytes?: number;
+    timeoutMs?: number;
+    stdoutEncoding?: "utf8" | "buffer";
+  }) => {
+    const binary = request.stdoutEncoding === "buffer";
+    const result = spawnSync("ssh", [String(request.command.at(-1) ?? "")], {
+      input: request.stdin,
+      maxBuffer: request.maxOutputBytes,
+      timeout: request.timeoutMs,
+      encoding: binary ? undefined : "utf8",
+    });
+    return {
+      status: result.status,
+      stdout: binary ? "" : String(result.stdout ?? ""),
+      ...(binary ? { stdoutBytes: Buffer.from(result.stdout ?? "") } : {}),
+      stderr: String(result.stderr ?? ""),
+      ...(result.error ? { error: result.error } : {}),
+      ...(result.signal ? { signal: result.signal } : {}),
+    };
+  };
+  return {
+    execSandboxReadOnlyWithGrpcFallback: async (
+      _gateway: string,
+      request: Parameters<typeof exec>[0],
+    ) => exec(request),
+    selectOpenShellSandboxControlForMutation: () => ({
+      control: { exec },
+      transport: "grpc",
+      close: () => {},
+    }),
+  };
+});
 
 import { restoreEnvBulk } from "../../../test/helpers/env-test-helpers.js";
 import type { OpenClawImagePluginInstall } from "./openclaw-plugin-restore.js";
@@ -27,20 +65,20 @@ function extensionDir(install: OpenClawImagePluginInstall): string | null {
   return install.installPath.startsWith(prefix) ? install.installPath.slice(prefix.length) : null;
 }
 
-function runRestoreScenario(options: {
+async function runRestoreScenario(options: {
   backupConfig: Record<string, unknown>;
   backupExtensionDirs: string[];
   freshConfig: Record<string, unknown>;
   freshPluginInstalls: OpenClawImagePluginInstall[];
   previousPluginInstalls?: OpenClawImagePluginInstall[];
-}): {
+}): Promise<{
   cleanupCommand: string | undefined;
   freshMarkers: Record<string, string>;
-  restore: ReturnType<typeof restoreRecreatedSandboxState>;
+  restore: Awaited<ReturnType<typeof restoreRecreatedSandboxState>>;
   restoredConfig: Record<string, any>;
   staleUserExtensionExists: boolean;
   userExtensionMarker: string;
-} {
+}> {
   const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-recreated-restore-"));
   const previousOpenshellBin = process.env.NEMOCLAW_OPENSHELL_BIN;
   const previousPath = process.env.PATH;
@@ -157,7 +195,7 @@ process.exit(1);
 
     process.env.NEMOCLAW_OPENSHELL_BIN = openshell;
     process.env.PATH = `${binDir}:${previousPath ?? ""}`;
-    const restore = restoreRecreatedSandboxState("alpha", backupPath, {
+    const restore = await restoreRecreatedSandboxState("alpha", backupPath, {
       targetAgentType: "openclaw",
       freshOpenClawImagePluginInstalls: options.freshPluginInstalls,
     });
@@ -189,7 +227,7 @@ process.exit(1);
   }
 }
 
-function expectSuccessfulRestore(result: ReturnType<typeof runRestoreScenario>): void {
+function expectSuccessfulRestore(result: Awaited<ReturnType<typeof runRestoreScenario>>): void {
   expect(result.restore).toEqual({
     success: true,
     restoredDirs: ["extensions"],
@@ -205,11 +243,11 @@ describe("recreated OpenClaw state restore", () => {
   it.each([
     { provenance: "missing legacy", previousPluginInstalls: undefined },
     { provenance: "known-empty", previousPluginInstalls: [] },
-  ])("restores config and extensions with $provenance previous provenance", ({
+  ])("restores config and extensions with $provenance previous provenance", async ({
     previousPluginInstalls,
   }) => {
     const weather = imageInstall("weather", "weather");
-    const result = runRestoreScenario({
+    const result = await runRestoreScenario({
       previousPluginInstalls,
       freshPluginInstalls: [weather],
       backupExtensionDirs: ["weather"],
@@ -242,11 +280,11 @@ describe("recreated OpenClaw state restore", () => {
     expect(result.cleanupCommand).toContain("! -name 'weather'");
   });
 
-  it("reconciles populated previous and fresh image-plugin provenance during config restore", () => {
+  it("reconciles populated previous and fresh image-plugin provenance during config restore", async () => {
     const previousWeather = imageInstall("weather", "weather-v1");
     const freshWeather = imageInstall("weather", "weather-v2");
     const userPluginPath = `${OPENCLAW_DIR}/extensions/user-plugin`;
-    const result = runRestoreScenario({
+    const result = await runRestoreScenario({
       previousPluginInstalls: [previousWeather],
       freshPluginInstalls: [freshWeather],
       backupExtensionDirs: ["weather-v1"],

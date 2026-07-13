@@ -28,12 +28,12 @@ export type CreatedSandboxFinalizationOptions = {
 export type CreatedSandboxFinalizationDeps = {
   discoverFreshOpenClawImagePluginInstalls(
     sandboxName: string,
-  ): OpenClawManagedExtensionDiscoveryResult;
+  ): Promise<OpenClawManagedExtensionDiscoveryResult>;
   restoreRecreatedSandboxState(
     sandboxName: string,
     backupPath: string,
     options: RecreatedSandboxRestoreOptions,
-  ): RestoreResult;
+  ): Promise<RestoreResult>;
   getDcodeSelectionDrift(
     sandboxName: string,
     provider: string,
@@ -47,13 +47,13 @@ export type CreatedSandboxFinalizationDeps = {
 };
 
 /** Restore state and validate the live managed DCode route before registry publication. */
-export function finalizeCreatedSandbox(
+export async function finalizeCreatedSandbox(
   options: CreatedSandboxFinalizationOptions,
   deps: CreatedSandboxFinalizationDeps,
-): void {
+): Promise<void> {
   let freshOpenClawImagePluginInstalls: readonly OpenClawImagePluginInstall[] | undefined;
   if (options.discoverOpenClawImagePluginInstalls === true) {
-    const discovery = deps.discoverFreshOpenClawImagePluginInstalls(options.sandboxName);
+    const discovery = await deps.discoverFreshOpenClawImagePluginInstalls(options.sandboxName);
     if (!discovery.ok) {
       deps.error(
         `  OpenClaw image plugin discovery failed for sandbox '${options.sandboxName}': ${discovery.error}`,
@@ -74,7 +74,7 @@ export function finalizeCreatedSandbox(
         ? "  Restoring workspace state from pre-upgrade backup..."
         : "  Restoring workspace state from pre-recreate backup...",
     );
-    const restore = deps.restoreRecreatedSandboxState(
+    const restore = await deps.restoreRecreatedSandboxState(
       options.sandboxName,
       options.restoreBackupPath,
       {

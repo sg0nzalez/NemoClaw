@@ -1,8 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { spawnSync } from "child_process";
-
+import type { OpenShellSandboxControl } from "../adapters/openshell/sandbox-control.js";
 import { shellQuote } from "../runner.js";
 import {
   mergeOpenClawRestoredConfig,
@@ -23,8 +22,9 @@ export interface OpenClawConfigRestoreFromSandboxOptions {
   freshImagePluginInstalls?: readonly OpenClawImagePluginInstall[];
   log?: (message: string) => void;
   previousImagePluginInstalls?: readonly OpenClawImagePluginInstall[];
+  sandboxControl: OpenShellSandboxControl;
+  sandboxName: string;
   specPath: string;
-  sshArgs: readonly string[];
 }
 
 function openClawConfigRemotePath(dir: string, specPath: string): string {
@@ -42,22 +42,27 @@ export function buildOpenClawConfigReadCommand(dir: string, specPath: string): s
   ].join("; ");
 }
 
-function readCurrentOpenClawConfig(
-  sshArgs: readonly string[],
+async function readCurrentOpenClawConfig(
+  sandboxControl: OpenShellSandboxControl,
+  sandboxName: string,
   dir: string,
   specPath: string,
   log: (message: string) => void,
-): Buffer | null {
+): Promise<Buffer | null> {
   const command = buildOpenClawConfigReadCommand(dir, specPath);
-  const result = spawnSync("ssh", [...sshArgs, command], {
-    stdio: ["ignore", "pipe", "pipe"],
-    timeout: 120000,
-    maxBuffer: 256 * 1024 * 1024,
+  const result = await sandboxControl.exec({
+    sandboxName,
+    command: ["sh", "-c", command],
+    timeoutMs: 120_000,
+    maxOutputBytes: 256 * 1024 * 1024,
+    stdoutEncoding: "buffer",
   });
-  if (result.status === 0 && !result.error && !result.signal) return result.stdout;
+  if (result.status === 0 && !result.error && !result.signal && result.stdoutBytes) {
+    return result.stdoutBytes;
+  }
   if (result.status !== 2) {
     const detail =
-      (result.stderr?.toString() || "").trim() ||
+      result.stderr.trim() ||
       result.error?.message ||
       (result.signal ? `signal ${result.signal}` : `exit ${String(result.status)}`);
     log(`WARNING: state file current read ${specPath} failed: ${detail.substring(0, 200)}`);
@@ -88,15 +93,16 @@ export function buildOpenClawConfigRestoreInput(
   }
 }
 
-export function buildOpenClawConfigRestoreInputFromSandbox({
+export async function buildOpenClawConfigRestoreInputFromSandbox({
   backupContents,
   dir,
   freshImagePluginInstalls,
   log = () => {},
   previousImagePluginInstalls,
+  sandboxControl,
+  sandboxName,
   specPath,
-  sshArgs,
-}: OpenClawConfigRestoreFromSandboxOptions): OpenClawConfigRestoreInputResult {
+}: OpenClawConfigRestoreFromSandboxOptions): Promise<OpenClawConfigRestoreInputResult> {
   if ((previousImagePluginInstalls === undefined) !== (freshImagePluginInstalls === undefined)) {
     return {
       ok: false,
@@ -117,7 +123,7 @@ export function buildOpenClawConfigRestoreInputFromSandbox({
   }
   return buildOpenClawConfigRestoreInput(
     backupContents,
-    readCurrentOpenClawConfig(sshArgs, dir, specPath, log),
+    await readCurrentOpenClawConfig(sandboxControl, sandboxName, dir, specPath, log),
     { freshImagePluginInstalls, previousImagePluginInstalls },
   );
 }

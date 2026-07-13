@@ -12,17 +12,14 @@ import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../src/lib/adapters/openshell/sandbox-control-routing.js", () => ({
-  execSandboxReadOnlyWithGrpcFallback: async (
-    _gatewayName: string,
-    request: {
-      command: readonly string[];
-      stdin?: string | Buffer;
-      maxOutputBytes?: number;
-      timeoutMs?: number;
-      stdoutEncoding?: "utf8" | "buffer";
-    },
-  ) => {
+vi.mock("../src/lib/adapters/openshell/sandbox-control-routing.js", () => {
+  const exec = async (request: {
+    command: readonly string[];
+    stdin?: string | Buffer;
+    maxOutputBytes?: number;
+    timeoutMs?: number;
+    stdoutEncoding?: "utf8" | "buffer";
+  }) => {
     const result = spawnSync("ssh", [String(request.command.at(-1) ?? "")], {
       input: request.stdin,
       maxBuffer: request.maxOutputBytes,
@@ -38,8 +35,19 @@ vi.mock("../src/lib/adapters/openshell/sandbox-control-routing.js", () => ({
       ...(result.error ? { error: result.error } : {}),
       ...(result.signal ? { signal: result.signal } : {}),
     };
-  },
-}));
+  };
+  return {
+    execSandboxReadOnlyWithGrpcFallback: async (
+      _gatewayName: string,
+      request: Parameters<typeof exec>[0],
+    ) => exec(request),
+    selectOpenShellSandboxControlForMutation: () => ({
+      control: { exec },
+      transport: "grpc",
+      close: () => {},
+    }),
+  };
+});
 
 // Override HOME BEFORE importing sandbox-state — it reads process.env.HOME
 // at module-load time to compute REBUILD_BACKUPS_DIR. Captured original is
@@ -298,7 +306,7 @@ describe("listBackups computes virtual versions", () => {
     });
     expect(sandboxState.listBackups("test-sandbox")).toEqual([]);
   });
-  it("does not restore backed-up directory entries that are plain files", () => {
+  it("does not restore backed-up directory entries that are plain files", async () => {
     const manifest = writeBackup("test-sandbox", "2026-04-21T14-00-00-000Z", {
       stateDirs: ["workspace"],
       backedUpDirs: ["workspace"],
@@ -306,7 +314,10 @@ describe("listBackups computes virtual versions", () => {
     writeAgentRegistry("test-sandbox", "openclaw");
     fs.writeFileSync(path.join(String(manifest.backupPath), "workspace"), "not a directory");
 
-    const restore = sandboxState.restoreSandboxState("test-sandbox", String(manifest.backupPath));
+    const restore = await sandboxState.restoreSandboxState(
+      "test-sandbox",
+      String(manifest.backupPath),
+    );
 
     expect(restore).toEqual({
       success: true,
@@ -631,7 +642,7 @@ process.exit(0);
       expect(backup.manifest?.backedUpDirs).toEqual(["extensions"]);
       expect(fs.existsSync(path.join(backup.manifest!.backupPath, "agents"))).toBe(true);
 
-      const restore = sandboxState.restoreSandboxState("alpha", backup.manifest!.backupPath);
+      const restore = await sandboxState.restoreSandboxState("alpha", backup.manifest!.backupPath);
       expect(restore.success).toBe(true);
       expect(restore.restoredDirs).toEqual(["extensions"]);
 
@@ -1286,7 +1297,10 @@ process.exit(0);
 
       // #5753 is "lost after rebuild" (backup + recreate + restore): restore
       // must list agent/skills among the dirs it brings back into the sandbox.
-      const restore = sandboxState.restoreSandboxState("deepagents", backup.manifest!.backupPath);
+      const restore = await sandboxState.restoreSandboxState(
+        "deepagents",
+        backup.manifest!.backupPath,
+      );
       expect(restore.success).toBe(true);
       expect(restore.restoredDirs).toEqual(
         expect.arrayContaining([".state", "skills", "agent/skills"]),
@@ -1432,7 +1446,7 @@ process.exit(0);
       fs.writeFileSync(path.join(hermesDir, "SOUL.md"), "changed soul\n");
       fs.writeFileSync(path.join(hermesDir, ".hermes_history"), "changed history\n");
       fs.writeFileSync(path.join(runtimeDir, "state.db"), "changed db\n");
-      const restore = sandboxState.restoreSandboxState("hermes", backup.manifest!.backupPath);
+      const restore = await sandboxState.restoreSandboxState("hermes", backup.manifest!.backupPath);
       expect(restore.success).toBe(true);
       expect(restore.restoredFiles).toEqual(["SOUL.md", ".hermes_history", "runtime/state.db"]);
       expect(fs.readFileSync(path.join(hermesDir, "SOUL.md"), "utf-8")).toBe("original soul\n");

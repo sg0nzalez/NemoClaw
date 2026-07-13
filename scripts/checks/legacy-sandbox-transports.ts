@@ -49,13 +49,6 @@ const REVIEWED_SITE_TUPLES = [
   ["src/lib/share-command.ts", "sshfs-command", 1],
   ["src/lib/shields/index.ts", "privileged-sandbox-exec", 4],
   ["src/lib/shields/mutable-config-repair.ts", "privileged-sandbox-exec", 2],
-  ["src/lib/state/openclaw-config-restore-input.ts", "ssh-command", 1],
-  ["src/lib/state/openclaw-plugin-restore.ts", "ssh-command", 2],
-  ["src/lib/state/openclaw-plugin-restore.ts", "ssh-temp-config", 1],
-  ["src/lib/state/sandbox.ts", "openshell-ssh-config", 1],
-  ["src/lib/state/sandbox.ts", "ssh-command", 4],
-  ["src/lib/state/sandbox.ts", "ssh-temp-config", 1],
-  ["src/lib/state/state-file-restore.ts", "ssh-command", 1],
   ["src/lib/tunnel/sandbox-gateway-stop.ts", "docker-exec-command", 2],
 ] as const satisfies readonly ReviewedSiteTuple[];
 

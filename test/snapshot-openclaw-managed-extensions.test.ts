@@ -6,7 +6,45 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("../src/lib/adapters/openshell/sandbox-control-routing.js", async () => {
+  const { spawnSync } = await import("node:child_process");
+  const exec = async (request: {
+    command: readonly string[];
+    stdin?: string | Buffer;
+    maxOutputBytes?: number;
+    timeoutMs?: number;
+    stdoutEncoding?: "utf8" | "buffer";
+  }) => {
+    const binary = request.stdoutEncoding === "buffer";
+    const result = spawnSync("ssh", [String(request.command.at(-1) ?? "")], {
+      input: request.stdin,
+      maxBuffer: request.maxOutputBytes,
+      timeout: request.timeoutMs,
+      encoding: binary ? undefined : "utf8",
+    });
+    return {
+      status: result.status,
+      stdout: binary ? "" : String(result.stdout ?? ""),
+      ...(binary ? { stdoutBytes: Buffer.from(result.stdout ?? "") } : {}),
+      stderr: String(result.stderr ?? ""),
+      ...(result.error ? { error: result.error } : {}),
+      ...(result.signal ? { signal: result.signal } : {}),
+    };
+  };
+  return {
+    execSandboxReadOnlyWithGrpcFallback: async (
+      _gatewayName: string,
+      request: Parameters<typeof exec>[0],
+    ) => exec(request),
+    selectOpenShellSandboxControlForMutation: () => ({
+      control: { exec },
+      transport: "grpc",
+      close: () => {},
+    }),
+  };
+});
 
 import { restoreEnv, restoreEnvBulk } from "./helpers/env-test-helpers";
 
@@ -120,7 +158,7 @@ describe("OpenClaw managed extension snapshot restore", () => {
 
   it.each(
     installIndexCases,
-  )("preserves fresh extensions and handles image-plugin $name from the $installIndexSource install index", ({
+  )("preserves fresh extensions and handles image-plugin $name from the $installIndexSource install index", async ({
     installIndexSource,
     previousPlugin,
     freshPlugin,
@@ -241,9 +279,13 @@ process.exit(0);
       process.env.NEMOCLAW_OPENSHELL_BIN = openshell;
       process.env.PATH = `${binDir}:${oldPath || ""}`;
 
-      const restore = sandboxState.restoreRecreatedSandboxState("alpha", manifest.backupPath, {
-        targetAgentType: "openclaw",
-      });
+      const restore = await sandboxState.restoreRecreatedSandboxState(
+        "alpha",
+        manifest.backupPath,
+        {
+          targetAgentType: "openclaw",
+        },
+      );
       expect(restore.success).toBe(true);
       expect(restore.restoredDirs).toEqual(["extensions"]);
       for (const extensionName of managedExtensions) {
@@ -292,9 +334,13 @@ process.exit(0);
           },
         }),
       );
-      const rejected = sandboxState.restoreRecreatedSandboxState("alpha", manifest.backupPath, {
-        targetAgentType: "openclaw",
-      });
+      const rejected = await sandboxState.restoreRecreatedSandboxState(
+        "alpha",
+        manifest.backupPath,
+        {
+          targetAgentType: "openclaw",
+        },
+      );
       expect(rejected.success).toBe(false);
       expect(rejected.error).toBe("fresh OpenClaw plugin install registry failed validation");
       expect(fs.existsSync(path.join(extensionsDir, previousPlugin))).toBe(

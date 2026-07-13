@@ -8,6 +8,44 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("../adapters/openshell/sandbox-control-routing", async () => {
+  const { spawnSync } = await import("node:child_process");
+  const exec = async (request: {
+    command: readonly string[];
+    stdin?: string | Buffer;
+    maxOutputBytes?: number;
+    timeoutMs?: number;
+    stdoutEncoding?: "utf8" | "buffer";
+  }) => {
+    const binary = request.stdoutEncoding === "buffer";
+    const result = spawnSync("ssh", [String(request.command.at(-1) ?? "")], {
+      input: request.stdin,
+      maxBuffer: request.maxOutputBytes,
+      timeout: request.timeoutMs,
+      encoding: binary ? undefined : "utf8",
+    });
+    return {
+      status: result.status,
+      stdout: binary ? "" : String(result.stdout ?? ""),
+      ...(binary ? { stdoutBytes: Buffer.from(result.stdout ?? "") } : {}),
+      stderr: String(result.stderr ?? ""),
+      ...(result.error ? { error: result.error } : {}),
+      ...(result.signal ? { signal: result.signal } : {}),
+    };
+  };
+  return {
+    execSandboxReadOnlyWithGrpcFallback: async (
+      _gateway: string,
+      request: Parameters<typeof exec>[0],
+    ) => exec(request),
+    selectOpenShellSandboxControlForMutation: () => ({
+      control: { exec },
+      transport: "grpc",
+      close: () => {},
+    }),
+  };
+});
+
 import * as sandboxState from "../state/sandbox";
 import { finalizeCreatedSandbox } from "./created-sandbox-finalization";
 import { getDcodeSelectionDrift } from "./dcode-selection-drift";
@@ -182,12 +220,12 @@ function identityFromConfig(config: string): string {
 }
 
 describe("created DCode sandbox finalization", () => {
-  it("merges stale backup preferences before live validation and registry publication (#6311)", () => {
+  it("merges stale backup preferences before live validation and registry publication (#6311)", async () => {
     const fixture = makeRestoreFixture();
     const order: string[] = [];
     const registeredConfigs: string[] = [];
     try {
-      finalizeCreatedSandbox(
+      await finalizeCreatedSandbox(
         {
           sandboxName: "dcode",
           restoreBackupPath: fixture.backupPath,
@@ -199,12 +237,12 @@ describe("created DCode sandbox finalization", () => {
           preferredInferenceApi: null,
         },
         {
-          discoverFreshOpenClawImagePluginInstalls: () => ({
+          discoverFreshOpenClawImagePluginInstalls: async () => ({
             ok: true,
             extensionDirs: [],
             pluginInstalls: [],
           }),
-          restoreRecreatedSandboxState: (name, backup, options) => {
+          restoreRecreatedSandboxState: async (name, backup, options) => {
             order.push("restore");
             expect(options.allowCustomImageWholeStateFileRestore).toBeUndefined();
             return sandboxState.restoreRecreatedSandboxState(name, backup, options);
@@ -239,10 +277,10 @@ describe("created DCode sandbox finalization", () => {
     }
   });
 
-  it("does not publish registry metadata when live validation fails (#6311)", () => {
+  it("does not publish registry metadata when live validation fails (#6311)", async () => {
     const register = vi.fn();
     const error = vi.fn();
-    expect(() =>
+    await expect(
       finalizeCreatedSandbox(
         {
           sandboxName: "dcode",
@@ -273,7 +311,7 @@ describe("created DCode sandbox finalization", () => {
           },
         },
       ),
-    ).toThrow("exit 1");
+    ).rejects.toThrow("exit 1");
     expect(register).not.toHaveBeenCalled();
     expect(error).toHaveBeenCalledWith(expect.stringContaining("sandbox still exists"));
     expect(error).toHaveBeenCalledWith(expect.stringContaining("rebuild is unsafe"));
@@ -281,12 +319,12 @@ describe("created DCode sandbox finalization", () => {
     expect(error).toHaveBeenCalledWith(expect.stringContaining("nemoclaw onboard"));
   });
 
-  it("warns but verifies and registers after a partial workspace restore (#6311)", () => {
+  it("warns but verifies and registers after a partial workspace restore (#6311)", async () => {
     const fixture = makeRestoreFixture();
     const registeredConfigs: string[] = [];
     const error = vi.fn();
     try {
-      finalizeCreatedSandbox(
+      await finalizeCreatedSandbox(
         {
           sandboxName: "dcode",
           restoreBackupPath: fixture.backupPath,
@@ -299,8 +337,8 @@ describe("created DCode sandbox finalization", () => {
         },
         {
           discoverFreshOpenClawImagePluginInstalls: vi.fn(),
-          restoreRecreatedSandboxState: (name, backup, options) => {
-            const restored = sandboxState.restoreRecreatedSandboxState(name, backup, options);
+          restoreRecreatedSandboxState: async (name, backup, options) => {
+            const restored = await sandboxState.restoreRecreatedSandboxState(name, backup, options);
             return { ...restored, success: false, failedDirs: ["skills"] };
           },
           getDcodeSelectionDrift: (name, provider, model, api) =>
@@ -332,11 +370,11 @@ describe("created DCode sandbox finalization", () => {
     }
   });
 
-  it("keeps custom-image restores outside the managed config merge (#6311)", () => {
+  it("keeps custom-image restores outside the managed config merge (#6311)", async () => {
     const fixture = makeRestoreFixture();
     const registeredConfigs: string[] = [];
     try {
-      finalizeCreatedSandbox(
+      await finalizeCreatedSandbox(
         {
           sandboxName: "custom-dcode",
           restoreBackupPath: fixture.backupPath,
@@ -350,7 +388,7 @@ describe("created DCode sandbox finalization", () => {
         },
         {
           discoverFreshOpenClawImagePluginInstalls: vi.fn(),
-          restoreRecreatedSandboxState: (name, backup, options) => {
+          restoreRecreatedSandboxState: async (name, backup, options) => {
             expect(options.allowCustomImageWholeStateFileRestore).toBe(true);
             return sandboxState.restoreRecreatedSandboxState(name, backup, options);
           },
@@ -384,11 +422,11 @@ describe("created OpenClaw sandbox finalization", () => {
     },
   ];
 
-  it("skips image-plugin discovery for a managed OpenClaw image", () => {
+  it("skips image-plugin discovery for a managed OpenClaw image", async () => {
     const discoverFreshOpenClawImagePluginInstalls = vi.fn();
     const register = vi.fn();
 
-    finalizeCreatedSandbox(
+    await finalizeCreatedSandbox(
       {
         sandboxName: "openclaw",
         restoreBackupPath: null,
@@ -416,12 +454,12 @@ describe("created OpenClaw sandbox finalization", () => {
     expect(register).toHaveBeenCalledWith(undefined);
   });
 
-  it("captures and registers a fresh image plugin baseline without a restore", () => {
+  it("captures and registers a fresh image plugin baseline without a restore", async () => {
     const order: string[] = [];
     const restoreRecreatedSandboxState = vi.fn();
     const register = vi.fn(() => order.push("register"));
 
-    finalizeCreatedSandbox(
+    await finalizeCreatedSandbox(
       {
         sandboxName: "openclaw",
         restoreBackupPath: null,
@@ -434,7 +472,7 @@ describe("created OpenClaw sandbox finalization", () => {
         preferredInferenceApi: "openai-completions",
       },
       {
-        discoverFreshOpenClawImagePluginInstalls: () => {
+        discoverFreshOpenClawImagePluginInstalls: async () => {
           order.push("discover");
           return { ok: true, extensionDirs: ["weather"], pluginInstalls };
         },
@@ -454,10 +492,10 @@ describe("created OpenClaw sandbox finalization", () => {
     expect(register).toHaveBeenCalledWith(pluginInstalls);
   });
 
-  it("preserves the fresh image plugin baseline across recreation before registration", () => {
+  it("preserves the fresh image plugin baseline across recreation before registration", async () => {
     const order: string[] = [];
     const register = vi.fn(() => order.push("register"));
-    const restoreRecreatedSandboxState = vi.fn(() => {
+    const restoreRecreatedSandboxState = vi.fn(async () => {
       order.push("restore");
       return {
         success: true,
@@ -468,7 +506,7 @@ describe("created OpenClaw sandbox finalization", () => {
       };
     });
 
-    finalizeCreatedSandbox(
+    await finalizeCreatedSandbox(
       {
         sandboxName: "openclaw",
         restoreBackupPath: "/tmp/openclaw-backup",
@@ -481,7 +519,7 @@ describe("created OpenClaw sandbox finalization", () => {
         preferredInferenceApi: "openai-completions",
       },
       {
-        discoverFreshOpenClawImagePluginInstalls: () => {
+        discoverFreshOpenClawImagePluginInstalls: async () => {
           order.push("discover");
           return { ok: true, extensionDirs: ["weather"], pluginInstalls };
         },
@@ -504,12 +542,12 @@ describe("created OpenClaw sandbox finalization", () => {
     expect(register).toHaveBeenCalledWith(pluginInstalls);
   });
 
-  it("fails closed before restore and registration when provenance discovery fails", () => {
+  it("fails closed before restore and registration when provenance discovery fails", async () => {
     const restoreRecreatedSandboxState = vi.fn();
     const register = vi.fn();
     const error = vi.fn();
 
-    expect(() =>
+    await expect(
       finalizeCreatedSandbox(
         {
           sandboxName: "openclaw",
@@ -523,7 +561,7 @@ describe("created OpenClaw sandbox finalization", () => {
           preferredInferenceApi: "openai-completions",
         },
         {
-          discoverFreshOpenClawImagePluginInstalls: () => ({
+          discoverFreshOpenClawImagePluginInstalls: async () => ({
             ok: false,
             error: "registry unreadable",
           }),
@@ -537,7 +575,7 @@ describe("created OpenClaw sandbox finalization", () => {
           },
         },
       ),
-    ).toThrow("exit 1");
+    ).rejects.toThrow("exit 1");
 
     expect(restoreRecreatedSandboxState).not.toHaveBeenCalled();
     expect(register).not.toHaveBeenCalled();
@@ -552,11 +590,11 @@ describe("created OpenClaw sandbox finalization", () => {
     expect(error).toHaveBeenCalledWith("  Manual recovery: /tmp/openclaw-backup");
   });
 
-  it("does not register after a marked backup provenance mismatch", () => {
+  it("does not register after a marked backup provenance mismatch", async () => {
     const register = vi.fn();
     const error = vi.fn();
 
-    expect(() =>
+    await expect(
       finalizeCreatedSandbox(
         {
           sandboxName: "openclaw",
@@ -570,12 +608,12 @@ describe("created OpenClaw sandbox finalization", () => {
           preferredInferenceApi: "openai-completions",
         },
         {
-          discoverFreshOpenClawImagePluginInstalls: () => ({
+          discoverFreshOpenClawImagePluginInstalls: async () => ({
             ok: true,
             extensionDirs: ["weather"],
             pluginInstalls,
           }),
-          restoreRecreatedSandboxState: () => ({
+          restoreRecreatedSandboxState: async () => ({
             success: false,
             restoredDirs: [],
             failedDirs: ["manifest"],
@@ -592,7 +630,7 @@ describe("created OpenClaw sandbox finalization", () => {
           },
         },
       ),
-    ).toThrow("exit 1");
+    ).rejects.toThrow("exit 1");
 
     expect(register).not.toHaveBeenCalled();
     expect(error).toHaveBeenCalledWith(expect.stringContaining("future rebuild would be unsafe"));

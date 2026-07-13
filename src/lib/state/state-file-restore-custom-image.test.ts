@@ -7,22 +7,16 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { OpenShellSandboxControl } from "../adapters/openshell/sandbox-control";
 import type { StateFileKeyAllowlistRestoreOwnership } from "../agent/defs";
 import { restoreStateFile } from "./state-file-restore";
 
-type SpawnSyncCall = (
-  command: string,
-  args: readonly string[],
-  options: { input?: Buffer },
-) => { status: number; error?: Error; signal: NodeJS.Signals | null; stderr: Buffer };
-
-const spawnSyncMock = vi.hoisted(() =>
-  vi.fn<SpawnSyncCall>(() => ({ status: 0, signal: null, stderr: Buffer.alloc(0) })),
-);
-
-vi.mock("node:child_process", () => ({
-  spawnSync: spawnSyncMock,
+const execMock = vi.fn<OpenShellSandboxControl["exec"]>(async () => ({
+  status: 0,
+  stdout: "",
+  stderr: "",
 }));
+const sandboxControl = { exec: execMock };
 
 const fixtures: string[] = [];
 const ownership: StateFileKeyAllowlistRestoreOwnership = {
@@ -49,11 +43,12 @@ afterEach(() => {
 });
 
 describe("custom-image state-file restore capability (#6334)", () => {
-  it("restores the complete backup without invoking the managed key allowlist", () => {
+  it("restores the complete backup without invoking the managed key allowlist", async () => {
     const { backupPath, backupContents } = createBackupFixture();
 
-    const restored = restoreStateFile(
-      ["-F", "/tmp/ssh-config", "openshell-alpha"],
+    const restored = await restoreStateFile(
+      sandboxControl,
+      "alpha",
       "/sandbox/.deepagents",
       { path: "config.toml", strategy: "copy" },
       backupPath,
@@ -63,20 +58,20 @@ describe("custom-image state-file restore capability (#6334)", () => {
     );
 
     expect(restored).toBe(true);
-    const [binary, args, options] = spawnSyncMock.mock.calls[0] ?? [];
-    expect(binary).toBe("ssh");
-    const command = String(args?.at(-1));
+    const request = execMock.mock.calls[0]?.[0];
+    const command = String(request?.command.at(-1));
     expect(command).toContain(".nemoclaw-restore.XXXXXX");
     expect(command).not.toContain("/opt/venv/bin/python3");
     expect(command).not.toContain("show_scrollbar");
-    expect(options?.input).toEqual(backupContents);
+    expect(request?.stdin).toEqual(backupContents);
   });
 
-  it("requires the capability before bypassing the managed key allowlist", () => {
+  it("requires the capability before bypassing the managed key allowlist", async () => {
     const { backupPath, backupContents } = createBackupFixture();
 
-    const restored = restoreStateFile(
-      ["-F", "/tmp/ssh-config", "openshell-alpha"],
+    const restored = await restoreStateFile(
+      sandboxControl,
+      "alpha",
       "/sandbox/.deepagents",
       { path: "config.toml", strategy: "copy" },
       backupPath,
@@ -86,13 +81,12 @@ describe("custom-image state-file restore capability (#6334)", () => {
     );
 
     expect(restored).toBe(true);
-    const [binary, args, options] = spawnSyncMock.mock.calls[0] ?? [];
-    expect(binary).toBe("ssh");
-    const command = String(args?.at(-1));
+    const request = execMock.mock.calls[0]?.[0];
+    const command = String(request?.command.at(-1));
     expect(command).toContain("/opt/venv/bin/python3 -I -c");
     expect(command).toContain("show_scrollbar");
     expect(command).toContain("require_fresh_tables");
     expect(command).not.toContain(".nemoclaw-restore.XXXXXX");
-    expect(options?.input).toEqual(backupContents);
+    expect(request?.stdin).toEqual(backupContents);
   });
 });

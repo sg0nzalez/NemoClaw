@@ -2884,7 +2884,7 @@ async function createSandboxWithBaseImageResolution(
     buildContext.extractBuiltImageRef(`${firstCreateOutput}\n${createResult.output}`) ??
     resolveSandboxImageTagFromCreateOutput(`${firstCreateOutput}\n${createResult.output}`, buildId);
   const sandboxRuntimeFields = getSandboxRuntimeRegistryFields(effectiveSandboxGpuConfig);
-  finalizeCreatedSandbox(
+  await finalizeCreatedSandbox(
     {
       sandboxName,
       restoreBackupPath,
@@ -2899,8 +2899,12 @@ async function createSandboxWithBaseImageResolution(
     },
     {
       // biome-ignore format: keep src/lib/onboard.ts net-neutral for growth guardrail.
-      discoverFreshOpenClawImagePluginInstalls: (name) => openClawPluginRestore.discoverFreshOpenClawImagePluginInstalls(name, sandboxState, agent?.configPaths.dir),
-      restoreRecreatedSandboxState: sandboxState.restoreRecreatedSandboxState,
+      discoverFreshOpenClawImagePluginInstalls: (name) => openClawPluginRestore.discoverFreshOpenClawImagePluginInstalls(name, GATEWAY_NAME, agent?.configPaths.dir),
+      restoreRecreatedSandboxState: (name, backupPath, options) =>
+        sandboxState.restoreRecreatedSandboxState(name, backupPath, {
+          ...options,
+          gatewayName: GATEWAY_NAME,
+        }),
       getDcodeSelectionDrift: (name, selectedProvider, selectedModel, selectedApi) =>
         getDcodeSelectionDrift(name, selectedProvider, selectedModel, selectedApi, {
           runCaptureOpenshell,

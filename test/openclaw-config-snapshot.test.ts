@@ -8,17 +8,14 @@ import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { afterAll, describe, expect, it, vi } from "vitest";
 
-vi.mock("../src/lib/adapters/openshell/sandbox-control-routing.js", () => ({
-  execSandboxReadOnlyWithGrpcFallback: async (
-    _gatewayName: string,
-    request: {
-      command: readonly string[];
-      stdin?: string | Buffer;
-      maxOutputBytes?: number;
-      timeoutMs?: number;
-      stdoutEncoding?: "utf8" | "buffer";
-    },
-  ) => {
+vi.mock("../src/lib/adapters/openshell/sandbox-control-routing.js", () => {
+  const exec = async (request: {
+    command: readonly string[];
+    stdin?: string | Buffer;
+    maxOutputBytes?: number;
+    timeoutMs?: number;
+    stdoutEncoding?: "utf8" | "buffer";
+  }) => {
     const result = spawnSync("ssh", [String(request.command.at(-1) ?? "")], {
       input: request.stdin,
       maxBuffer: request.maxOutputBytes,
@@ -34,8 +31,19 @@ vi.mock("../src/lib/adapters/openshell/sandbox-control-routing.js", () => ({
       ...(result.error ? { error: result.error } : {}),
       ...(result.signal ? { signal: result.signal } : {}),
     };
-  },
-}));
+  };
+  return {
+    execSandboxReadOnlyWithGrpcFallback: async (
+      _gatewayName: string,
+      request: Parameters<typeof exec>[0],
+    ) => exec(request),
+    selectOpenShellSandboxControlForMutation: () => ({
+      control: { exec },
+      transport: "grpc",
+      close: () => {},
+    }),
+  };
+});
 
 // sandbox-state computes its backup root from HOME at module load time.
 const ORIGINAL_HOME = process.env.HOME;
@@ -240,7 +248,7 @@ describe("OpenClaw durable config file (#5027)", () => {
           2,
         ),
       );
-      const restore = sandboxState.restoreSandboxState("alpha", backup.manifest!.backupPath);
+      const restore = await sandboxState.restoreSandboxState("alpha", backup.manifest!.backupPath);
       expect(restore.success).toBe(true);
       expect(restore.restoredFiles).toEqual(["openclaw.json"]);
 
@@ -375,7 +383,7 @@ describe("OpenClaw durable config file (#5027)", () => {
         ),
       );
 
-      const restore = sandboxState.restoreSandboxState("alpha", backup.manifest!.backupPath);
+      const restore = await sandboxState.restoreSandboxState("alpha", backup.manifest!.backupPath);
       expect(restore.success).toBe(true);
 
       const after = JSON.parse(fs.readFileSync(path.join(openclawDir, "openclaw.json"), "utf-8"));

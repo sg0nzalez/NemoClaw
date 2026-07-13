@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
+import type { OpenShellSandboxControl } from "../adapters/openshell/sandbox-control.js";
 import type { StateFileRestoreOwnership } from "../agent/defs.js";
 import { shellQuote } from "../runner.js";
 import { buildOpenClawConfigRestoreInputFromSandbox } from "./openclaw-config-restore-input.js";
@@ -100,8 +100,9 @@ export function buildStateFileRestoreCommand(
   return steps.join("; ");
 }
 
-export function restoreStateFile(
-  sshArgs: readonly string[],
+export async function restoreStateFile(
+  sandboxControl: OpenShellSandboxControl,
+  sandboxName: string,
   dir: string,
   spec: StateFileRestoreSpec,
   backupPath: string,
@@ -110,7 +111,7 @@ export function restoreStateFile(
   log: (message: string) => void,
   freshImagePluginInstalls?: readonly OpenClawImagePluginInstall[],
   previousImagePluginInstalls?: readonly OpenClawImagePluginInstall[],
-): boolean {
+): Promise<boolean> {
   const localPath = path.join(backupPath, spec.path);
   if (!existsSync(localPath)) return true;
 
@@ -121,14 +122,15 @@ export function restoreStateFile(
   let input: Buffer | null;
   if (ownership?.merge === "openclaw-config") {
     command = buildStateFileRestoreCommand(dir, spec, true);
-    const result = buildOpenClawConfigRestoreInputFromSandbox({
+    const result = await buildOpenClawConfigRestoreInputFromSandbox({
       backupContents,
       dir,
       freshImagePluginInstalls,
       log,
       previousImagePluginInstalls,
+      sandboxControl,
+      sandboxName,
       specPath: spec.path,
-      sshArgs,
     });
     if (result.ok) {
       input = result.input;
@@ -147,16 +149,17 @@ export function restoreStateFile(
   }
   if (input === null) return false;
 
-  const result = spawnSync("ssh", [...sshArgs, command], {
-    input,
-    stdio: ["pipe", "pipe", "pipe"],
-    timeout: 120000,
+  const result = await sandboxControl.exec({
+    sandboxName,
+    command: ["sh", "-c", command],
+    stdin: input,
+    timeoutMs: 120_000,
   });
 
   if (result.status === 0 && !result.error && !result.signal) return true;
 
   const detail =
-    (result.stderr?.toString() || "").trim() ||
+    result.stderr.trim() ||
     result.error?.message ||
     (result.signal ? `signal ${result.signal}` : `exit ${String(result.status)}`);
   log(`FAILED: state file restore ${spec.path}: ${detail.substring(0, 200)}`);

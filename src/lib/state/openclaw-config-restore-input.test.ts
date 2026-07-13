@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   buildOpenClawConfigRestoreInput,
@@ -96,8 +96,8 @@ describe("buildOpenClawConfigRestoreInput", () => {
 });
 
 describe("buildOpenClawConfigRestoreInputFromSandbox", () => {
-  it("identifies incomplete previous image provenance before reading live state (#6108)", () => {
-    const result = buildOpenClawConfigRestoreInputFromSandbox({
+  it("identifies incomplete previous image provenance before reading live state (#6108)", async () => {
+    const result = await buildOpenClawConfigRestoreInputFromSandbox({
       backupContents: bufferJson({ plugins: { entries: {} } }),
       dir: "/sandbox/.openclaw",
       freshImagePluginInstalls: [],
@@ -107,8 +107,9 @@ describe("buildOpenClawConfigRestoreInputFromSandbox", () => {
           installPath: "/sandbox/.openclaw/extensions/weather",
         },
       ],
+      sandboxControl: { exec: vi.fn() },
+      sandboxName: "alpha",
       specPath: "openclaw.json",
-      sshArgs: [],
     });
 
     expect(result).toEqual({
