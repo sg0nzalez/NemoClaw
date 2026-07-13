@@ -8,7 +8,6 @@ import { stripAnsi } from "../../adapters/openshell/client";
 import {
   captureOpenshell,
   captureOpenshellForStatus,
-  captureSandboxSshConfig,
   getOpenshellBinary,
   isCommandTimeout,
 } from "../../adapters/openshell/runtime";
@@ -21,7 +20,6 @@ import {
   isDirectSandboxFallbackUnavailableError,
   privilegedSandboxExecArgv,
 } from "../../sandbox/privileged-exec";
-import { createTempSshConfig } from "../../sandbox/temp-ssh-config";
 import { withTimerBoundShieldsMutationLock } from "../../shields/timer-bound-lock";
 import * as registry from "../../state/registry";
 import { buildSubprocessEnv } from "../../subprocess-env";
@@ -113,56 +111,14 @@ function getSandboxHealthProbeUrl(sandboxName: string): string {
   return `http://127.0.0.1:${resolveSandboxDashboardPort(sandboxName)}/health`;
 }
 
-/**
- * Run a command inside the sandbox via SSH and return { status, stdout, stderr }.
- * Returns null if SSH config cannot be obtained.
- */
+/** Run a command inside the sandbox through the supported OpenShell exec API. */
 export function executeSandboxCommand(
   sandboxName: string,
   command: string,
 ): SandboxCommandResult | null {
-  const sshConfigResult = captureSandboxSshConfig(sandboxName, {
-    ignoreError: true,
-    timeout: OPENSHELL_PROBE_TIMEOUT_MS,
+  return executeSandboxExecCommand(sandboxName, command, DEFAULT_SANDBOX_EXEC_TIMEOUT_MS, {
+    allowLocalDockerFallback: false,
   });
-  if (sshConfigResult.status !== 0) return null;
-  if (!sshConfigResult.output.trim()) return null;
-
-  const tmpSshConfig = createTempSshConfig(sshConfigResult.output, "nemoclaw-ssh-");
-  try {
-    const result = spawnSync(
-      "ssh",
-      [
-        "-F",
-        tmpSshConfig.file,
-        "-o",
-        "StrictHostKeyChecking=no",
-        "-o",
-        "UserKnownHostsFile=/dev/null",
-        "-o",
-        "ConnectTimeout=5",
-        "-o",
-        "LogLevel=ERROR",
-        `openshell-${sandboxName}`,
-        command,
-      ],
-      {
-        encoding: "utf-8",
-        env: buildSubprocessEnv(),
-        stdio: ["ignore", "pipe", "pipe"],
-        timeout: 15000,
-      },
-    );
-    return {
-      status: result.status ?? 1,
-      stdout: (result.stdout || "").trim(),
-      stderr: (result.stderr || "").trim(),
-    };
-  } catch {
-    return null;
-  } finally {
-    tmpSshConfig.cleanup();
-  }
 }
 
 function parseSandboxCommandResult(
@@ -339,18 +295,7 @@ function isSandboxGatewayRunning(sandboxName: string): boolean | null {
   if (agent && !agentRuntime.hasGatewayRuntime(agent)) return null;
   const probeUrl = getSandboxHealthProbeUrl(sandboxName);
   const command = `HTTP_CODE=$(curl -so /dev/null -w '%{http_code}' --max-time 3 ${shellQuote(probeUrl)} 2>/dev/null || echo 000); case "$HTTP_CODE" in 200|401) echo RUNNING ;; *) echo STOPPED ;; esac`;
-  const execProbe = parseSandboxGatewayProbe(executeSandboxExecCommand(sandboxName, command));
-  if (execProbe !== null) return execProbe;
-
-  // Built-in OpenClaw and Hermes lifecycle control is host-mediated through
-  // the controller for the live topology. If the trusted sandbox-exec path is
-  // unavailable or times out, do not silently cross back into the sandbox over
-  // SSH just to classify the gateway and then make a privileged recovery
-  // decision. Legacy custom gateway agents are the sole compatibility case:
-  // their recovery contract is explicitly SSH-owned until manifests can
-  // declare a trusted runtime user/supervisor.
-  if (!agent || agent.name === "openclaw" || agent.name === "hermes") return null;
-  return parseSandboxGatewayProbe(executeSandboxCommand(sandboxName, command));
+  return parseSandboxGatewayProbe(executeSandboxExecCommand(sandboxName, command));
 }
 
 function hasGatewayRecoveryMarker(result: SandboxCommandResult | null): boolean {
@@ -458,7 +403,7 @@ function recoverSandboxProcesses(
     quiet || printGatewayRestartFailure(sandboxName, "unsupported agent", detail);
     return null;
   }
-  const recoveredSsh = (result: SandboxCommandResult | null): SandboxProcessRecovery | null =>
+  const recoveredCustom = (result: SandboxCommandResult | null): SandboxProcessRecovery | null =>
     result && result.status === 0 && hasGatewayRecoveryMarker(result) ? { kind: "custom" } : null;
   const recoverManagedGateway = (): SandboxProcessRecovery | null => {
     const maxAttempts = 3;
@@ -525,9 +470,9 @@ function recoverSandboxProcesses(
   if (agentRuntime.isTerminalAgentRecoveryScript(agentScript)) return null;
   if (agentScript) {
     // Non-Hermes custom manifests do not yet declare a supported host-side
-    // runtime user. Recover them over SSH so the launch inherits the sandbox
-    // login user instead of creating root-owned agent state under /sandbox.
-    return recoveredSsh(executeSandboxCommand(sandboxName, agentScript));
+    // runtime user. Recover them through OpenShell sandbox exec so the launch
+    // inherits the sandbox user instead of creating root-owned agent state.
+    return recoveredCustom(executeSandboxCommand(sandboxName, agentScript));
   }
 
   return null;

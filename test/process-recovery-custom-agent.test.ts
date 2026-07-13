@@ -32,57 +32,29 @@ type SpawnMockResult = {
   stderr: string;
 };
 
-function openshellExecResult(rawArgs: unknown, recovered: boolean): SpawnMockResult {
-  const shellCommand = getSandboxExecShellCommand(rawArgs);
-  const status = shellCommand.includes("HTTP_CODE=$(curl")
-    ? recovered
-      ? "RUNNING"
-      : "STOPPED"
-    : "";
-  return {
-    status: 0,
-    stdout: `__NEMOCLAW_SANDBOX_EXEC_STARTED__\n${status}\n`,
-    stderr: "",
-  };
-}
-
-function sshExecResult(
+function openshellExecResult(
   rawArgs: unknown,
-  sshCommands: string[],
-  currentRecovered: boolean,
-  setRecovered: (value: boolean) => void,
-): SpawnMockResult {
-  const sshCommand = getSandboxExecShellCommand(rawArgs);
-  const isHealthProbe = sshCommand.includes("HTTP_CODE=$(curl");
-  const launchRecovered = sshCommand.includes('"$AGENT_BIN" gateway run --port 19000');
-  const nextRecovered = isHealthProbe ? currentRecovered : launchRecovered;
-  sshCommands.push(sshCommand);
-  setRecovered(nextRecovered);
-  return {
-    status: 0,
-    stdout: isHealthProbe
-      ? currentRecovered
-        ? "RUNNING"
-        : "STOPPED"
-      : launchRecovered
-        ? "GATEWAY_PID=5150"
-        : "",
-    stderr: "",
-  };
-}
-
-function spawnResultForCommand(
-  command: unknown,
-  rawArgs: unknown,
-  sshCommands: string[],
+  execCommands: string[],
   recovered: boolean,
   setRecovered: (value: boolean) => void,
 ): SpawnMockResult {
-  return String(command).endsWith("openshell")
-    ? openshellExecResult(rawArgs, recovered)
-    : command === "ssh"
-      ? sshExecResult(rawArgs, sshCommands, recovered, setRecovered)
-      : { status: 1, stdout: "", stderr: "" };
+  const shellCommand = getSandboxExecShellCommand(rawArgs);
+  const isHealthProbe = shellCommand.includes("HTTP_CODE=$(curl");
+  const launchRecovered = shellCommand.includes('"$AGENT_BIN" gateway run --port 19000');
+  if (launchRecovered) setRecovered(true);
+  execCommands.push(shellCommand);
+  const output = isHealthProbe
+    ? recovered
+      ? "RUNNING"
+      : "STOPPED"
+    : launchRecovered
+      ? "GATEWAY_PID=5150"
+      : "";
+  return {
+    status: 0,
+    stdout: `__NEMOCLAW_SANDBOX_EXEC_STARTED__\n${output}\n`,
+    stderr: "",
+  };
 }
 
 function withFakeOpenshellBinary<T>(fn: () => T): T {
@@ -100,28 +72,17 @@ function withFakeOpenshellBinary<T>(fn: () => T): T {
 }
 
 describe("checkAndRecoverSandboxProcesses custom agent recovery", () => {
-  it("retains SSH health-probe compatibility for an explicitly loaded custom gateway agent", () => {
-    const openshellRuntime = requireSource("../src/lib/adapters/openshell/runtime.ts");
+  it("does not replay a custom health probe when OpenShell exec is unavailable", () => {
     const agentRuntime = requireSource("../src/lib/agent/runtime.ts");
     const registry = requireSource("../src/lib/state/registry.ts");
-    const forwardHealth = requireSource("../src/lib/actions/sandbox/forward-health.ts");
     const childProcess = requireSource("node:child_process");
-    const sshCommands: string[] = [];
+    const execCommands: string[] = [];
 
-    vi.spyOn(openshellRuntime, "captureSandboxSshConfig").mockReturnValue({
-      status: 0,
-      output: "Host openshell-custom-box\n  HostName 127.0.0.1\n",
-    } as never);
     vi.spyOn(childProcess, "spawnSync").mockImplementation((command: unknown, rawArgs: unknown) => {
-      const sshCommand = getSandboxExecShellCommand(rawArgs);
-      sshCommands.push(...(command === "ssh" ? [sshCommand] : []));
-      return (
-        String(command).endsWith("openshell")
-          ? { status: 1, stdout: "", stderr: "sandbox exec unavailable" }
-          : command === "ssh"
-            ? { status: 0, stdout: "RUNNING\n", stderr: "" }
-            : { status: 1, stdout: "", stderr: "" }
-      ) as never;
+      if (String(command).endsWith("openshell")) {
+        execCommands.push(getSandboxExecShellCommand(rawArgs));
+      }
+      return { status: 1, stdout: "", stderr: "sandbox exec unavailable" } as never;
     });
     vi.spyOn(agentRuntime, "getSessionAgent").mockReturnValue({
       name: "custom-agent",
@@ -136,27 +97,21 @@ describe("checkAndRecoverSandboxProcesses custom agent recovery", () => {
       agent: "custom-agent",
       dashboardPort: 19000,
     });
-    vi.spyOn(forwardHealth, "isLocalForwardReachable").mockReturnValue(true);
-    vi.spyOn(openshellRuntime, "captureOpenshell").mockReturnValue({
-      status: 0,
-      output: `SANDBOX  BIND  PORT  PID  STATUS
-custom-box  127.0.0.1  19000  12345  running`,
-    });
 
     expect(
       withFakeOpenshellBinary(() => checkAndRecoverSandboxProcesses("custom-box", { quiet: true })),
     ).toEqual({
-      checked: true,
-      wasRunning: true,
+      checked: false,
+      wasRunning: null,
       recovered: false,
       forwardRecovered: false,
     });
-    expect(sshCommands).toHaveLength(1);
-    expect(sshCommands[0]).toContain("HTTP_CODE=$(curl");
-    expect(sshCommands[0]).not.toContain("gateway run");
+    expect(execCommands).toHaveLength(1);
+    expect(execCommands[0]).toContain("HTTP_CODE=$(curl");
+    expect(execCommands[0]).not.toContain("gateway run");
   });
 
-  it("recovers a stopped custom gateway agent over SSH fallback", () => {
+  it("recovers a stopped custom gateway agent through OpenShell exec", () => {
     const openshellRuntime = requireSource("../src/lib/adapters/openshell/runtime.ts");
     const agentRuntime = requireSource("../src/lib/agent/runtime.ts");
     const registry = requireSource("../src/lib/state/registry.ts");
@@ -164,7 +119,7 @@ custom-box  127.0.0.1  19000  12345  running`,
     const childProcess = requireSource("node:child_process");
     const runningForward = `SANDBOX  BIND  PORT  PID  STATUS
 custom-box  127.0.0.1  19000  12345  running`;
-    const sshCommands: string[] = [];
+    const execCommands: string[] = [];
     const previousWaitSeconds = process.env.NEMOCLAW_GATEWAY_RECOVERY_WAIT_SECONDS;
     const previousPollInterval = process.env.NEMOCLAW_GATEWAY_RECOVERY_POLL_INTERVAL_SECONDS;
     const previousSettleSeconds = process.env.NEMOCLAW_GATEWAY_RECOVERY_SETTLE_SECONDS;
@@ -176,10 +131,6 @@ custom-box  127.0.0.1  19000  12345  running`;
     process.env.NEMOCLAW_GATEWAY_RECOVERY_SETTLE_SECONDS = "0";
 
     try {
-      vi.spyOn(openshellRuntime, "captureSandboxSshConfig").mockReturnValue({
-        status: 0,
-        output: "Host openshell-custom-box\n  HostName 127.0.0.1\n",
-      } as never);
       vi.spyOn(childProcess, "spawnSync").mockImplementation(
         (command: unknown, rawArgs: unknown) => {
           healthProbeCalls += Number(
@@ -189,12 +140,10 @@ custom-box  127.0.0.1  19000  12345  running`;
           const setRecovered = (value: boolean): void => {
             recovered = value;
           };
-          return spawnResultForCommand(
-            command,
-            rawArgs,
-            sshCommands,
-            recovered,
-            setRecovered,
+          return (
+            String(command).endsWith("openshell")
+              ? openshellExecResult(rawArgs, execCommands, recovered, setRecovered)
+              : { status: 1, stdout: "", stderr: "" }
           ) as never;
         },
       );
@@ -228,7 +177,7 @@ custom-box  127.0.0.1  19000  12345  running`;
         recovered: true,
         forwardRecovered: true,
       });
-      expect(sshCommands.some((command) => command.includes('"$AGENT_BIN" gateway run'))).toBe(
+      expect(execCommands.some((command) => command.includes('"$AGENT_BIN" gateway run'))).toBe(
         true,
       );
       expect(healthProbeCalls).toBe(2);
