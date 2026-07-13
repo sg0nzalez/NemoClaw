@@ -35,8 +35,6 @@ const REVIEWED_SITE_TUPLES = [
   ["src/lib/actions/dns/index.ts", "docker-exec-command", 4],
   ["src/lib/actions/sandbox/host-aliases.ts", "docker-exec-command", 1],
   ["src/lib/actions/sandbox/process-recovery.ts", "privileged-sandbox-exec", 2],
-  ["src/lib/adapters/docker/container.ts", "docker-exec-command", 1],
-  ["src/lib/onboard.ts", "docker-exec-builder", 1],
   ["src/lib/resources-cmd.ts", "docker-exec-command", 1],
   ["src/lib/sandbox/config.ts", "privileged-sandbox-exec", 2],
   ["src/lib/share-command-deps.ts", "openshell-ssh-config", 1],
@@ -50,7 +48,6 @@ export const REVIEWED_LEGACY_SANDBOX_TRANSPORT_SITES: readonly LegacySandboxTran
 
 const HELPER_KINDS = new Map<string, LegacySandboxTransportKind>([
   ["createTempSshConfig", "ssh-temp-config"],
-  ["dockerExecArgv", "docker-exec-builder"],
   ["privilegedSandboxExecArgv", "privileged-sandbox-exec"],
 ]);
 

@@ -41,13 +41,11 @@ describe("legacy sandbox transport inventory", () => {
         'captureOpenshell(["sandbox", "ssh-config", "alpha"]);',
         'createTempSshConfig(config, "prefix-");',
         'privilegedSandboxExecArgv("alpha", ["true"]);',
-        'dockerExecArgv("openshell-cluster-nemoclaw", ["true"]);',
         'dockerSpawnSync(["exec", "openshell-cluster-nemoclaw", "true"]);',
       ].join("\n"),
     });
 
     expect(discoverLegacySandboxTransportSites(root)).toEqual([
-      { relativePath: "src/transport.ts", kind: "docker-exec-builder", calls: 1 },
       { relativePath: "src/transport.ts", kind: "docker-exec-command", calls: 1 },
       { relativePath: "src/transport.ts", kind: "openshell-ssh-config", calls: 1 },
       { relativePath: "src/transport.ts", kind: "privileged-sandbox-exec", calls: 1 },

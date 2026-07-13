@@ -7,13 +7,11 @@ type RunCaptureOpenshell = (args: string[], opts?: { ignoreError?: boolean }) =>
 
 export interface GatewayHealthWaitOptions {
   attachGatewayMetadataIfNeeded: (options?: { forceRefresh?: boolean }) => void;
-  gatewayClusterHealthcheckPassed: () => boolean;
   gatewayName: string;
   healthPollCount: number;
   healthPollIntervalSeconds: number;
   isGatewayHealthy: (status: string, namedInfo: string, currentInfo: string) => boolean;
   isGatewayHttpReady: (signal?: AbortSignal) => Promise<boolean>;
-  repairGatewayBootstrapSecrets: () => { repaired: boolean };
   runCaptureOpenshell: RunCaptureOpenshell;
   sleepSeconds: (seconds: number) => void;
   now?: () => number;
@@ -118,13 +116,11 @@ function startAbortableGatewayHttpProbe(
 
 export async function waitForGatewayHealth({
   attachGatewayMetadataIfNeeded,
-  gatewayClusterHealthcheckPassed,
   gatewayName,
   healthPollCount,
   healthPollIntervalSeconds,
   isGatewayHealthy,
   isGatewayHttpReady,
-  repairGatewayBootstrapSecrets,
   runCaptureOpenshell,
   sleepSeconds,
   now = Date.now,
@@ -138,12 +134,7 @@ export async function waitForGatewayHealth({
   return (
     waitOptions !== null &&
     (await waitUntilAsync(async () => {
-      const repairResult = repairGatewayBootstrapSecrets();
-      if (repairResult.repaired) {
-        attachGatewayMetadataIfNeeded({ forceRefresh: true });
-      } else if (gatewayClusterHealthcheckPassed()) {
-        attachGatewayMetadataIfNeeded();
-      }
+      attachGatewayMetadataIfNeeded();
       const httpProbe = startAbortableGatewayHttpProbe(isGatewayHttpReady);
       runCaptureOpenshell(["gateway", "select", gatewayName], { ignoreError: true });
       const status = runCaptureOpenshell(["status"], { ignoreError: true });

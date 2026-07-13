@@ -72,7 +72,3 @@ export function dockerPort(
 ): string {
   return dockerCapture(["port", containerName, String(containerPort)], opts);
 }
-
-export function dockerExecArgv(containerName: string, cmd: readonly string[]): string[] {
-  return ["docker", "exec", containerName, ...cmd];
-}
