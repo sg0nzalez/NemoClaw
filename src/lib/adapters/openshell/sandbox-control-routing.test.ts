@@ -10,10 +10,9 @@ import { OPENSHELL_OPERATION_TIMEOUT_MS } from "./timeouts";
 
 function dependencies(grpcResult: SandboxExecResult | Error, cliResult?: SandboxExecResult) {
   const close = vi.fn();
-  const grpcExec = vi.fn(async () => {
-    if (grpcResult instanceof Error) throw grpcResult;
-    return grpcResult;
-  });
+  const grpcExec = vi.fn(() =>
+    grpcResult instanceof Error ? Promise.reject(grpcResult) : Promise.resolve(grpcResult),
+  );
   const grpc: GrpcOpenShellSandboxControl = { close, exec: grpcExec };
   const cliExec = vi.fn(async () => cliResult ?? { status: 0, stdout: "cli", stderr: "" });
   const cli: OpenShellSandboxControl = { exec: cliExec };
