@@ -691,7 +691,25 @@ export function openClawDoctorEnvOverrides(
 
 export function installOpenClawMessagingPlugins(plan: MessagingBuildPlan | null, env: Env): void {
   for (const install of collectOpenClawMessagingPluginInstalls(plan, env)) {
-    const packed = packVerifiedOpenClawPluginArchive(install, env);
+    const installCache = install.runtimeLock
+      ? requireWritableRuntimeInstallCache(install.runtimeLock, env)
+      : undefined;
+    const installEnv = {
+      ...env,
+      NPM_CONFIG_IGNORE_SCRIPTS: "true",
+      npm_config_ignore_scripts: "true",
+      ...(install.runtimeLock
+        ? {
+            NPM_CONFIG_CACHE: installCache,
+            NPM_CONFIG_OFFLINE: String(install.runtimeLock.offline),
+            NPM_CONFIG_LEGACY_PEER_DEPS: String(install.runtimeLock.legacyPeerDeps),
+          }
+        : {}),
+    };
+    // Resolve registry metadata and pack the reviewed archive through the same
+    // disposable cache used by OpenClaw. Selecting it after packing can leave
+    // fetched bytes in HOME/.npm in an earlier image layer.
+    const packed = packVerifiedOpenClawPluginArchive(install, installEnv);
     try {
       // Install through the `npm-pack:` spec so OpenClaw records npm
       // provenance (source, resolved name/version, integrity) for the
@@ -700,21 +718,6 @@ export function installOpenClawMessagingPlugins(plan: MessagingBuildPlan | null,
       // on OpenClaw >= 2026.6.10 and crash-loops channel plugins that use
       // keyed state (e.g. WhatsApp). npm-pack installs always record the
       // exact resolved version, so `--pin` is not needed.
-      const installCache = install.runtimeLock
-        ? requireWritableRuntimeInstallCache(install.runtimeLock, env)
-        : undefined;
-      const installEnv = {
-        ...env,
-        NPM_CONFIG_IGNORE_SCRIPTS: "true",
-        npm_config_ignore_scripts: "true",
-        ...(install.runtimeLock
-          ? {
-              NPM_CONFIG_CACHE: installCache,
-              NPM_CONFIG_OFFLINE: String(install.runtimeLock.offline),
-              NPM_CONFIG_LEGACY_PEER_DEPS: String(install.runtimeLock.legacyPeerDeps),
-            }
-          : {}),
-      };
       runCommand(["openclaw", "plugins", "install", `npm-pack:${packed.archivePath}`], installEnv);
       if (install.runtimeLock) {
         const openClawVersion = sanitizeOptionalString(env.OPENCLAW_VERSION);

@@ -23,7 +23,7 @@ function executable(file: string, contents: string): void {
 }
 
 describe("locked WeChat plugin installation (#5896)", () => {
-  it("installs from the reviewed archive using only the dedicated offline graph", () => {
+  it("routes archive retrieval and install through the disposable offline cache", () => {
     const runtimeLock = wechatManifest.agentPackages.find(
       (pkg) => pkg.agent === "openclaw",
     )?.runtimeLock;
@@ -38,12 +38,17 @@ describe("locked WeChat plugin installation (#5896)", () => {
     });
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-wechat-install-"));
     const installCache = path.join(tmp, "wechat-install-cache");
+    const home = path.join(tmp, "home");
     const trace = path.join(tmp, "trace");
     fs.mkdirSync(installCache);
+    fs.mkdirSync(home);
     executable(
       path.join(tmp, "npm"),
       `#!/bin/sh
 set -eu
+printf 'npm|%s|%s|cache=%s|offline=%s\n' "$1" "\${2:-}" "$NPM_CONFIG_CACHE" "$NPM_CONFIG_OFFLINE" >> "$TRACE"
+mkdir -p "$NPM_CONFIG_CACHE/_cacache/tmp"
+printf '%s\n' "$1" >> "$NPM_CONFIG_CACHE/_cacache/tmp/nemoclaw-retrieval-probe"
 if [ "$1" = view ] && [ "$3" = dist.integrity ]; then printf '%s\n' "$WECHAT_INTEGRITY"; exit 0; fi
 if [ "$1" = view ] && [ "$3" = dist.tarball ]; then printf '%s\n' "$WECHAT_TARBALL"; exit 0; fi
 if [ "$1" = pack ]; then
@@ -91,6 +96,7 @@ printf 'verify|%s|%s|openclaw=%s|offline=%s|cache=%s\n' "$3" "$4" "$5" "$NPM_CON
     };
     const env = {
       PATH: `${tmp}:${process.env.PATH ?? "/usr/bin:/bin"}`,
+      HOME: home,
       TRACE: trace,
       WECHAT_INTEGRITY,
       WECHAT_TARBALL,
@@ -104,11 +110,24 @@ printf 'verify|%s|%s|openclaw=%s|offline=%s|cache=%s\n' "$3" "$4" "$5" "$NPM_CON
       expect(applyMessagingBuildPhase(serialized, "agent-install", env)).toEqual([]);
       const calls = fs.readFileSync(trace, "utf8");
       expect(calls).toContain("install|npm-pack:");
+      expect(calls).toContain(
+        `npm|view|@tencent-weixin/openclaw-weixin@2.4.3|cache=${fs.realpathSync(installCache)}|offline=true`,
+      );
+      expect(calls).toContain(
+        `npm|pack|@tencent-weixin/openclaw-weixin@2.4.3|cache=${fs.realpathSync(installCache)}|offline=true`,
+      );
       expect(calls).toContain(`offline=true|peer=true|cache=${fs.realpathSync(installCache)}`);
       expect(calls).toContain(
         "verify|/usr/local/lib/nemoclaw/wechat-runtime/package-lock.json|/sandbox/.openclaw/npm/projects|openclaw=2026.6.10|offline=true",
       );
       expect(calls).not.toContain("cache=/usr/local/share/nemoclaw/wechat-npm-cache");
+      expect(fs.existsSync(path.join(home, ".npm"))).toBe(false);
+      expect(
+        fs.readFileSync(
+          path.join(installCache, "_cacache", "tmp", "nemoclaw-retrieval-probe"),
+          "utf8",
+        ),
+      ).toBe("view\nview\npack\n");
       expect(
         fs.readFileSync(
           path.join(installCache, "_cacache", "tmp", "nemoclaw-install-probe"),
