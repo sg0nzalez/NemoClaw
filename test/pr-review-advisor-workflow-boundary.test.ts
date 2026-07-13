@@ -16,7 +16,9 @@ const HEAD_SHA = "b".repeat(40);
 const BASE_SHA = "a".repeat(40);
 
 type Workflow = {
-  jobs?: Record<string, { steps?: Array<{ name?: string; run?: string }> }>;
+  on?: { pull_request_target?: { types?: string[] } };
+  concurrency?: { group?: string; "cancel-in-progress"?: boolean };
+  jobs?: Record<string, { if?: string; steps?: Array<{ name?: string; run?: string }> }>;
 };
 
 function workflowSource(): string {
@@ -229,6 +231,7 @@ describe("PR review advisor workflow boundary", () => {
   // source-shape-contract: security -- Exactly one advisor lane may write PR comments and neither privilege domain may gain other GitHub capabilities
   it("requires one advisor lane to publish the PR comment", () => {
     const source = fs.readFileSync(WORKFLOW_PATH, "utf8");
+    const workflow = YAML.parse(source) as Workflow;
     const noPrimary = validateMutation((workflow) =>
       workflow.replace("publish_comment: true", "publish_comment: false"),
     );
@@ -249,6 +252,15 @@ describe("PR review advisor workflow boundary", () => {
     );
 
     expect(source).toContain("publish_comment: true");
+    expect(workflow.on?.pull_request_target?.types).toContain("edited");
+    expect(workflow.concurrency?.group).toContain(
+      "github.event_name != 'pull_request_target' || github.event.action != 'edited' || github.event.changes.base != null",
+    );
+    expect(workflow.concurrency?.["cancel-in-progress"]).toBe(true);
+    for (const jobName of ["review", "publish"]) {
+      expect(workflow.jobs?.[jobName]?.if, jobName).toContain("github.event.action != 'edited'");
+      expect(workflow.jobs?.[jobName]?.if, jobName).toContain("github.event.changes.base != null");
+    }
     expect(noPrimary).toContain("advisor matrix must identify exactly one primary artifact lane");
     expect(twoPrimaries).toContain(
       "advisor matrix must identify exactly one primary artifact lane",
@@ -436,7 +448,8 @@ describe("PR review advisor workflow boundary", () => {
     const binDir = path.join(tmp, "bin");
     const callLog = path.join(tmp, "calls.log");
     fs.mkdirSync(binDir);
-    for (const name of ["npm", "rm", "ln"]) writeFakeCommand(binDir, name);
+    fs.mkdirSync(path.join(tmp, "advisor"));
+    writeFakeCommand(binDir, "npm");
     fs.writeFileSync(
       path.join(binDir, "dpkg-query"),
       `#!/bin/bash
@@ -451,7 +464,7 @@ esac
     );
     fs.writeFileSync(
       path.join(binDir, "fdfind"),
-      "#!/bin/bash\nprintf 'fdfind %s\\n' \"$*\" >> \"$CALL_LOG\"\nprintf 'fd 9.0.0\\n'\n",
+      "#!/bin/bash\nprintf 'fdfind %s\\n' \"$*\" >> \"$CALL_LOG\"\nprintf 'fdfind 9.0.0\\n'\n",
       { mode: 0o755 },
     );
     fs.writeFileSync(
@@ -483,6 +496,8 @@ printf 'sudo %s\\n' "$*" >> "$CALL_LOG"
             RIPGREP_VERSION: "14.1.0-1",
             RUNNER_TEMP: path.join(tmp, "runner"),
             TYPEBOX_VERSION: "test-typebox-version",
+            VITEST_VERSION: "test-vitest-version",
+            YAML_VERSION: "test-yaml-version",
           },
         },
       );
@@ -494,8 +509,9 @@ printf 'sudo %s\\n' "$*" >> "$CALL_LOG"
       expect(fs.readFileSync(callLog, "utf8")).toContain("dpkg-query -W -f=${Version} ripgrep");
       expect(fs.readFileSync(callLog, "utf8")).toContain("fdfind --version");
       expect(fs.readFileSync(callLog, "utf8")).toContain("rg --version");
-      expect(fs.readFileSync(callLog, "utf8")).toContain("--ignore-scripts");
-      expect(fs.readFileSync(callLog, "utf8")).toContain("typebox@test-typebox-version");
+      expect(fs.readFileSync(callLog, "utf8")).toContain(
+        "npm ci --ignore-scripts --no-audit --no-fund",
+      );
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
@@ -636,10 +652,12 @@ process.exitCode = valid ? 0 : 1;`,
     );
   });
 
-  it("keeps mutable review history disabled and the find dependency pinned", () => {
+  it("keeps mutable review history disabled and runtime dependencies pinned", () => {
     const errors = validateMutation((source) =>
       source
         .replace('      FD_FIND_VERSION: "9.0.0-1"', '      FD_FIND_VERSION: "latest"')
+        .replace('      VITEST_VERSION: "4.1.9"', '      VITEST_VERSION: "latest"')
+        .replace('      YAML_VERSION: "2.8.3"', '      YAML_VERSION: "latest"')
         .replace(
           '      PR_REVIEW_ADVISOR_LOAD_PREVIOUS_REVIEW: "false"',
           "      PR_REVIEW_ADVISOR_LOAD_PREVIOUS_REVIEW: ${{ matrix.advisor.publish_comment }}",
@@ -649,9 +667,47 @@ process.exitCode = valid ? 0 : 1;`,
     expect(errors).toEqual(
       expect.arrayContaining([
         "review job env.FD_FIND_VERSION must be 9.0.0-1",
+        "review job env.VITEST_VERSION must be 4.1.9",
+        "review job env.YAML_VERSION must be 2.8.3",
         "review job env.PR_REVIEW_ADVISOR_LOAD_PREVIOUS_REVIEW must be false",
       ]),
     );
+  });
+
+  it("rejects decoy lockfile-install text outside the npm invocation", () => {
+    const errors = validateMutation((source) =>
+      source.replace(
+        "npm ci --ignore-scripts --no-audit --no-fund",
+        "npm install --ignore-scripts\n            printf '%s\\n' 'npm ci --ignore-scripts --no-audit --no-fund' >/dev/null",
+      ),
+    );
+
+    expect(errors).toContain(
+      "step 'Install Pi SDK' must use the canonical lockfile-only npm ci command",
+    );
+  });
+
+  it("rejects drift in the trusted advisor runtime package lock", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "pr-review-advisor-lock-"));
+    const lockPath = path.join(tmp, "package-lock.json");
+    fs.writeFileSync(lockPath, JSON.stringify({ packages: {} }));
+    try {
+      expect(
+        validatePrReviewAdvisorWorkflowBoundary(
+          path.join(ROOT, ".github", "workflows", "pr-review-advisor.yaml"),
+          lockPath,
+        ),
+      ).toEqual(
+        expect.arrayContaining([
+          "advisor package lock must pin @earendil-works/pi-coding-agent@0.80.6",
+          "advisor package lock must pin typebox@1.1.38",
+          "advisor package lock must pin yaml@2.8.3",
+          "advisor package lock must pin vitest@4.1.9",
+        ]),
+      );
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   });
 
   it("reports workflow parse failures through boundary errors", () => {
