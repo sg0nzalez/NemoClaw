@@ -27,6 +27,29 @@ describe("wrapExecCommandWithRuntimeEnv", () => {
     expect(wrapped[5]).not.toMatch(/[\r\n]/);
   });
 
+  it("executes LF, CRLF, quote, and heredoc argv byte-exactly", () => {
+    const payloads = [
+      "line one\nline two",
+      "line one\r\nline two",
+      `single ' and double " quotes`,
+      "cat <<'EOF'\nline one\nline 'two'\nEOF",
+    ];
+    const wrapped = wrapExecCommandWithRuntimeEnv([
+      process.execPath,
+      "-e",
+      "process.stdout.write(JSON.stringify(process.argv.slice(1)))",
+      ...payloads,
+    ]);
+
+    const result = spawnSync(wrapped[0], wrapped.slice(1), {
+      encoding: "utf-8",
+      env: { ...process.env },
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual(payloads);
+  });
+
   it("removes OPENCLAW_GATEWAY_TOKEN from the executed command environment (#6291)", () => {
     const wrapped = wrapExecCommandWithRuntimeEnv([
       "/bin/sh",
