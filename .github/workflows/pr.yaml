@@ -231,7 +231,7 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: HOYALIM/NemoClaw
-          ref: 485b3c61c993188ab546cf07bfb1e85fe6e3bd89
+          ref: e5285cd3fe90d99024bc10e494bc637092fd92c3
           path: .trusted-wechat-audit-bootstrap
           persist-credentials: false
           sparse-checkout: |
