@@ -286,7 +286,7 @@ describe("pull request and main workflow contracts", () => {
     expect(installerHashWorkflow.on?.pull_request?.paths).toBeUndefined();
     expect(installerHashWorkflow.permissions).toEqual({ contents: "read" });
     expect(parserRuntimeSetup.uses).toBe(trustedSetupNodeAction);
-    expect(parserRuntimeSetup.with?.["node-version"]).toBe("22.16.0");
+    expect(parserRuntimeSetup.with?.["node-version"]).toBe("22.19.0");
     expect(prCheckout.with?.repository).toBe(
       "${{ github.event.pull_request.head.repo.full_name }}",
     );
@@ -992,6 +992,7 @@ describe("pull request and main workflow contracts", () => {
       E2E_SUPPORT_RESULT: "success",
       INSTALLER_INTEGRATION_RESULT: "success",
       PLUGIN_TESTS_RESULT: "success",
+      REVIEWED_NPM_AUDIT_RESULT: "success",
       STATIC_RESULT: "success",
     };
     const successfulMain = {
@@ -1001,6 +1002,7 @@ describe("pull request and main workflow contracts", () => {
       E2E_SUPPORT_RESULT: "success",
       INSTALLER_INTEGRATION_RESULT: "success",
       PLUGIN_TESTS_RESULT: "success",
+      REVIEWED_NPM_AUDIT_RESULT: "success",
       REAL_OPENCLAW_DIST_HARNESS_RESULT: "success",
       STATIC_RESULT: "success",
     };
@@ -1020,6 +1022,7 @@ describe("pull request and main workflow contracts", () => {
       E2E_SUPPORT_RESULT: "skipped",
       INSTALLER_INTEGRATION_RESULT: "skipped",
       PLUGIN_TESTS_RESULT: "skipped",
+      REVIEWED_NPM_AUDIT_RESULT: "skipped",
       STATIC_RESULT: "skipped",
     });
     const mainSuccess = runWorkflowShellStep(mainGate, successfulMain);
