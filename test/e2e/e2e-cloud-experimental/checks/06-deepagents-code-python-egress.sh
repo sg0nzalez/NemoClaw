@@ -233,11 +233,11 @@ if [ "${NEMOCLAW_E2E_PYTHON_EGRESS_SELF_TEST:-}" = "probe-command-shape" ]; then
   sandbox_exec() {
     case "$1" in
       *$'\n'*)
-        printf '%s\n' "NEWLINE_IN_COMMAND"
+        printf '%s\n' "MULTILINE_COMMAND"
         return 1
         ;;
       *)
-        printf 'SINGLE_LINE_COMMAND:%s\n' "$1"
+        printf 'ATOMIC_COMMAND:%s\n' "$1"
         return 0
         ;;
     esac
@@ -251,11 +251,11 @@ if [ "${NEMOCLAW_E2E_PYTHON_EGRESS_SELF_TEST:-}" = "fetch-probe-command-shape" ]
   sandbox_exec() {
     case "$1" in
       *$'\n'*)
-        printf '%s\n' "NEWLINE_IN_COMMAND"
+        printf '%s\n' "MULTILINE_COMMAND"
         return 1
         ;;
       *)
-        printf '%s\n' "NO_NEWLINE_IN_FETCH_COMMAND"
+        printf '%s\n' "ATOMIC_FETCH_COMMAND"
         return 0
         ;;
     esac

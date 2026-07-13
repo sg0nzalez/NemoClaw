@@ -27,7 +27,7 @@ describe("wrapExecCommandWithRuntimeEnv", () => {
     expect(wrapped[5]).not.toMatch(/[\r\n]/);
   });
 
-  it("executes LF, CRLF, quote, and heredoc argv byte-exactly", () => {
+  it("executes LF, CR, CRLF, quote, and heredoc argv byte-exactly", () => {
     const payloads = [
       "line one\nline two",
       "line one\rline two",

@@ -177,11 +177,11 @@ if [ "${NEMOCLAW_E2E_TAVILY_SELF_TEST:-}" = "probe-command-shape" ]; then
   sandbox_exec() {
     case "$1" in
       *$'\n'*)
-        printf '%s\n' "NEWLINE_IN_COMMAND"
+        printf '%s\n' "MULTILINE_COMMAND"
         return 1
         ;;
       *)
-        printf '%s\n' "NO_NEWLINE_IN_COMMAND"
+        printf '%s\n' "ATOMIC_COMMAND"
         return 0
         ;;
     esac

@@ -35,7 +35,7 @@ sandbox_exec() {
 }
 
 dcode_secret_probe_runtime_env() {
-  # Keep this probe single-line: OpenShell rejects newline-bearing exec arguments.
+  # Keep secret injection, output capture, cleanup, and status reporting atomic.
   local remote_cmd
   remote_cmd="tmp=\$(mktemp /tmp/dcode-secret-boundary.XXXXXX); env OPENAI_API_KEY=${FAKE_SECRET@Q} dcode -n 'Reply with the single word PING' >\"\$tmp\" 2>&1; status=\$?; cat \"\$tmp\"; rm -f \"\$tmp\"; printf 'DCODE_EXIT:%s\\n' \"\$status\"; exit 0"
   sandbox_exec "$remote_cmd"
@@ -181,11 +181,11 @@ if [ "${NEMOCLAW_E2E_SECRET_BOUNDARY_SELF_TEST:-}" = "probe-command-shape" ]; th
   sandbox_exec() {
     case "$1" in
       *$'\n'*)
-        printf '%s\n' "NEWLINE_IN_COMMAND"
+        printf '%s\n' "MULTILINE_COMMAND"
         return 1
         ;;
       *)
-        printf '%s\n' "NO_NEWLINE_IN_COMMAND"
+        printf '%s\n' "ATOMIC_COMMAND"
         return 0
         ;;
     esac
