@@ -11,6 +11,7 @@ type PackageRecord = {
   version?: string;
   integrity?: string;
   dependencies?: Record<string, string>;
+  peerDependencies?: Record<string, string>;
 };
 
 type PackageLock = {
@@ -29,14 +30,14 @@ function readJson(file: string): unknown {
   }
 }
 
-function packageVersion(file: string): string {
+function packageMetadata(file: string): PackageRecord {
   const parsed = readJson(file);
-  const version =
-    parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>).version : undefined;
+  const record = parsed && typeof parsed === "object" ? (parsed as PackageRecord) : {};
+  const version = record.version;
   if (typeof version !== "string") {
     throw new Error(`package metadata has no version: ${file}`);
   }
-  return version;
+  return record;
 }
 
 export function expectedWechatGraph(lock: PackageLock): ReadonlyMap<string, PackageRecord> {
@@ -76,10 +77,46 @@ function normalizedRecord(record: PackageRecord): PackageRecord {
         left.localeCompare(right),
       ),
     ),
+    peerDependencies: Object.fromEntries(
+      Object.entries(record.peerDependencies ?? {}).sort(([left], [right]) =>
+        left.localeCompare(right),
+      ),
+    ),
   };
 }
 
-export function verifyWechatRuntimeLock(lockFile: string, projectsRoot: string): void {
+function numericVersion(value: string, label: string): readonly number[] {
+  if (!/^\d+(?:\.\d+)*$/.test(value)) {
+    throw new Error(`${label} must be a numeric dotted version: ${value}`);
+  }
+  return value.split(".").map(Number);
+}
+
+export function verifyOpenClawPeerCompatibility(runtimeVersion: string, peerRange: string): void {
+  const minimumMatch = peerRange.match(/^>=(\d+(?:\.\d+)*)$/);
+  if (!minimumMatch?.[1]) {
+    throw new Error(`unsupported WeChat OpenClaw peer range: ${peerRange}`);
+  }
+  const runtime = numericVersion(runtimeVersion, "OpenClaw runtime version");
+  const minimum = numericVersion(minimumMatch[1], "WeChat OpenClaw peer minimum");
+  const width = Math.max(runtime.length, minimum.length);
+  for (let index = 0; index < width; index += 1) {
+    const runtimePart = runtime[index] ?? 0;
+    const minimumPart = minimum[index] ?? 0;
+    if (runtimePart > minimumPart) return;
+    if (runtimePart < minimumPart) {
+      throw new Error(
+        `OpenClaw ${runtimeVersion} does not satisfy WeChat peer dependency ${peerRange}`,
+      );
+    }
+  }
+}
+
+export function verifyWechatRuntimeLock(
+  lockFile: string,
+  projectsRoot: string,
+  openClawVersion: string,
+): void {
   const expected = expectedWechatGraph(readJson(lockFile) as PackageLock);
   const installedLockFile = findInstalledLock(projectsRoot);
   const installedRoot = path.dirname(installedLockFile);
@@ -97,21 +134,31 @@ export function verifyWechatRuntimeLock(lockFile: string, projectsRoot: string):
       throw new Error(`${location} metadata does not match the reviewed lock`);
     }
     const packageName = location.slice("node_modules/".length);
-    const installedVersion = packageVersion(path.join(installedRoot, location, "package.json"));
-    if (installedVersion !== expectedRecord.version) {
+    const installedMetadata = packageMetadata(
+      path.join(installedRoot, location, "package.json"),
+    );
+    if (installedMetadata.version !== expectedRecord.version) {
       throw new Error(
-        `installed ${packageName}@${installedVersion} does not match locked ${expectedRecord.version}`,
+        `installed ${packageName}@${installedMetadata.version} does not match locked ${expectedRecord.version}`,
       );
+    }
+    if (location === WECHAT_LOCATION) {
+      const expectedPeerRange = expectedRecord.peerDependencies?.openclaw;
+      const installedPeerRange = installedMetadata.peerDependencies?.openclaw;
+      if (!expectedPeerRange || installedPeerRange !== expectedPeerRange) {
+        throw new Error("installed WeChat OpenClaw peer range does not match the reviewed lock");
+      }
+      verifyOpenClawPeerCompatibility(openClawVersion, expectedPeerRange);
     }
   }
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const [, , lockFile, projectsRoot] = process.argv;
-  if (!lockFile || !projectsRoot) {
+  const [, , lockFile, projectsRoot, openClawVersion] = process.argv;
+  if (!lockFile || !projectsRoot || !openClawVersion) {
     throw new Error(
-      "usage: verify-wechat-runtime-lock.mts <package-lock.json> <npm-projects-root>",
+      "usage: verify-wechat-runtime-lock.mts <package-lock.json> <npm-projects-root> <openclaw-version>",
     );
   }
-  verifyWechatRuntimeLock(lockFile, projectsRoot);
+  verifyWechatRuntimeLock(lockFile, projectsRoot, openClawVersion);
 }

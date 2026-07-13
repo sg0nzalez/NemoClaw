@@ -463,7 +463,7 @@
     },
     {
       "file": "test/wechat-runtime-audit-workflow.test.ts",
-      "test": "makes the audit a required %s workflow job",
+      "test": "makes the trusted audit required in PR and main workflows",
       "category": "security"
     }
   ]

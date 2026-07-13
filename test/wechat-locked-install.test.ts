@@ -65,7 +65,7 @@ printf 'install|%s|offline=%s|peer=%s|cache=%s\n' "$3" "$NPM_CONFIG_OFFLINE" "$N
     executable(
       path.join(tmp, "node"),
       `#!/bin/sh
-printf 'verify|%s|%s|offline=%s|cache=%s\n' "$3" "$4" "$NPM_CONFIG_OFFLINE" "$NPM_CONFIG_CACHE" >> "$TRACE"
+printf 'verify|%s|%s|openclaw=%s|offline=%s|cache=%s\n' "$3" "$4" "$5" "$NPM_CONFIG_OFFLINE" "$NPM_CONFIG_CACHE" >> "$TRACE"
 `,
     );
 
@@ -94,6 +94,7 @@ printf 'verify|%s|%s|offline=%s|cache=%s\n' "$3" "$4" "$NPM_CONFIG_OFFLINE" "$NP
       TRACE: trace,
       WECHAT_INTEGRITY,
       WECHAT_TARBALL,
+      OPENCLAW_VERSION: "2026.6.10",
       NEMOCLAW_WECHAT_NPM_INSTALL_CACHE: installCache,
       NEMOCLAW_MESSAGING_PLAN_B64: Buffer.from(JSON.stringify(plan)).toString("base64"),
     };
@@ -105,7 +106,7 @@ printf 'verify|%s|%s|offline=%s|cache=%s\n' "$3" "$4" "$NPM_CONFIG_OFFLINE" "$NP
       expect(calls).toContain("install|npm-pack:");
       expect(calls).toContain(`offline=true|peer=true|cache=${fs.realpathSync(installCache)}`);
       expect(calls).toContain(
-        "verify|/usr/local/lib/nemoclaw/wechat-runtime/package-lock.json|/sandbox/.openclaw/npm/projects|offline=true",
+        "verify|/usr/local/lib/nemoclaw/wechat-runtime/package-lock.json|/sandbox/.openclaw/npm/projects|openclaw=2026.6.10|offline=true",
       );
       expect(calls).not.toContain("cache=/usr/local/share/nemoclaw/wechat-npm-cache");
       expect(

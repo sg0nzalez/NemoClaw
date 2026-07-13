@@ -717,6 +717,12 @@ export function installOpenClawMessagingPlugins(plan: MessagingBuildPlan | null,
       };
       runCommand(["openclaw", "plugins", "install", `npm-pack:${packed.archivePath}`], installEnv);
       if (install.runtimeLock) {
+        const openClawVersion = sanitizeOptionalString(env.OPENCLAW_VERSION);
+        if (!openClawVersion) {
+          throw new MessagingBuildApplierError(
+            "OPENCLAW_VERSION is required to verify the WeChat plugin peer dependency",
+          );
+        }
         runCommand(
           [
             "node",
@@ -724,6 +730,7 @@ export function installOpenClawMessagingPlugins(plan: MessagingBuildPlan | null,
             install.runtimeLock.verifierPath,
             install.runtimeLock.lockFile,
             install.runtimeLock.projectsRoot,
+            openClawVersion,
           ],
           installEnv,
         );

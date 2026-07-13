@@ -66,16 +66,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Setup production-compatible Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
-        with:
-          node-version: "22.19.0"
-
-      - name: Pin production npm
-        run: npm install --global npm@10.9.4 --ignore-scripts --no-audit --no-fund
-
       - name: Audit locked WeChat runtime graph
-        run: bash scripts/checks/audit-wechat-runtime.sh artifacts/wechat-runtime-audit
+        uses: ./.github/actions/ci-wechat-runtime-audit
+        with:
+          target-root: ${{ github.workspace }}
+          report-dir: artifacts/wechat-runtime-audit
 
       - name: Upload WeChat runtime audit evidence
         if: ${{ always() }}

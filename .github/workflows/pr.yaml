@@ -203,16 +203,61 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Setup production-compatible Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+      - name: Checkout trusted WeChat runtime audit
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
-          node-version: "22.19.0"
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: .trusted-wechat-audit
+          persist-credentials: false
+          sparse-checkout: |
+            .github/actions/ci-wechat-runtime-audit
+          sparse-checkout-cone-mode: false
 
-      - name: Pin production npm
-        run: npm install --global npm@10.9.4 --ignore-scripts --no-audit --no-fund
+      - name: Detect trusted WeChat runtime audit
+        id: trusted-wechat-audit
+        shell: bash
+        run: |
+          if [ -f .trusted-wechat-audit/.github/actions/ci-wechat-runtime-audit/action.yaml ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # One-time bootstrap for this PR only. The action is pinned to a signed,
+      # immutable commit that contains only the reviewed audit implementation.
+      # Every later PR must resolve the action from its base SHA above.
+      - name: Checkout pinned bootstrap WeChat runtime audit
+        if: ${{ steps.trusted-wechat-audit.outputs.available != 'true' && github.event.pull_request.number == 6739 && github.event.pull_request.head.repo.full_name == 'HOYALIM/NemoClaw' }}
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          repository: HOYALIM/NemoClaw
+          ref: 485b3c61c993188ab546cf07bfb1e85fe6e3bd89
+          path: .trusted-wechat-audit-bootstrap
+          persist-credentials: false
+          sparse-checkout: |
+            .github/actions/ci-wechat-runtime-audit
+          sparse-checkout-cone-mode: false
+
+      - name: Reject unavailable trusted WeChat runtime audit
+        if: ${{ steps.trusted-wechat-audit.outputs.available != 'true' && (github.event.pull_request.number != 6739 || github.event.pull_request.head.repo.full_name != 'HOYALIM/NemoClaw') }}
+        shell: bash
+        run: |
+          echo "::error::Trusted base SHA does not contain ci-wechat-runtime-audit"
+          exit 1
 
       - name: Audit locked WeChat runtime graph
-        run: bash scripts/checks/audit-wechat-runtime.sh artifacts/wechat-runtime-audit
+        if: ${{ steps.trusted-wechat-audit.outputs.available == 'true' }}
+        uses: ./.trusted-wechat-audit/.github/actions/ci-wechat-runtime-audit
+        with:
+          target-root: ${{ github.workspace }}
+          report-dir: artifacts/wechat-runtime-audit
+
+      - name: Audit locked WeChat runtime graph (pinned bootstrap)
+        if: ${{ steps.trusted-wechat-audit.outputs.available != 'true' && github.event.pull_request.number == 6739 && github.event.pull_request.head.repo.full_name == 'HOYALIM/NemoClaw' }}
+        uses: ./.trusted-wechat-audit-bootstrap/.github/actions/ci-wechat-runtime-audit
+        with:
+          target-root: ${{ github.workspace }}
+          report-dir: artifacts/wechat-runtime-audit
 
       - name: Upload WeChat runtime audit evidence
         if: ${{ always() }}
