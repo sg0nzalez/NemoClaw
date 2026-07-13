@@ -43,7 +43,6 @@ const REVIEWED_SITE_TUPLES = [
   ["src/lib/share-command.ts", "sshfs-command", 1],
   ["src/lib/shields/index.ts", "privileged-sandbox-exec", 4],
   ["src/lib/shields/mutable-config-repair.ts", "privileged-sandbox-exec", 2],
-  ["src/lib/tunnel/sandbox-gateway-stop.ts", "docker-exec-command", 2],
 ] as const satisfies readonly ReviewedSiteTuple[];
 
 export const REVIEWED_LEGACY_SANDBOX_TRANSPORT_SITES: readonly LegacySandboxTransportSite[] =
