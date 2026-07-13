@@ -101,9 +101,11 @@ async function captureTraceArtifact(run: () => Promise<void>): Promise<TraceArti
     flushTrace();
     return JSON.parse(fs.readFileSync(traceFile, "utf8")) as TraceArtifact;
   } finally {
-    previousTraceFile === undefined
-      ? Reflect.deleteProperty(process.env, TRACE_FILE_ENV)
-      : Reflect.set(process.env, TRACE_FILE_ENV, previousTraceFile);
+    if (previousTraceFile === undefined) {
+      Reflect.deleteProperty(process.env, TRACE_FILE_ENV);
+    } else {
+      Reflect.set(process.env, TRACE_FILE_ENV, previousTraceFile);
+    }
     resetTraceForTests();
     fs.rmSync(directory, { recursive: true, force: true });
   }

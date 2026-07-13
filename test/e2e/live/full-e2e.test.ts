@@ -17,8 +17,11 @@ import {
 import { expect, test } from "../fixtures/e2e-test.ts";
 import { requireHostedInferenceConfig } from "../fixtures/hosted-inference.ts";
 import {
+  type ColdOnboardCleanupProof,
   type ColdOnboardPerformanceBudget,
+  cleanupColdOnboardState,
   evaluateColdOnboardPerformance,
+  evaluateColdOnboardState,
   maximumOutputSilenceMs,
   type OnboardTraceWindow,
   readColdOnboardPerformanceBudget,
@@ -77,24 +80,38 @@ async function repoNemoclaw(
   });
 }
 
-async function cleanup(host: HostCliClient, sandbox: SandboxClient): Promise<void> {
-  await repoNemoclaw(host, [SANDBOX_NAME, "destroy", "--yes"], "cleanup-nemoclaw-destroy").catch(
-    () => undefined,
-  );
-  await sandbox
-    .openshell(["sandbox", "delete", SANDBOX_NAME], {
-      artifactName: "cleanup-openshell-sandbox-delete",
-      env: env(),
-      timeoutMs: 60_000,
-    })
-    .catch(() => undefined);
-  await sandbox
-    .openshell(["gateway", "destroy", "-g", "nemoclaw"], {
-      artifactName: "cleanup-openshell-gateway-destroy",
-      env: env(),
-      timeoutMs: 60_000,
-    })
-    .catch(() => undefined);
+async function cleanupFullE2eState(
+  host: HostCliClient,
+  sandbox: SandboxClient,
+  redactionValues: readonly string[],
+  artifactPrefix: string,
+): Promise<ColdOnboardCleanupProof> {
+  return await cleanupColdOnboardState({
+    gatewayName: "nemoclaw",
+    host,
+    options: {
+      gatewayRegistration: {
+        artifactName: `${artifactPrefix}-openshell-gateway-registration`,
+        env: env(),
+        redactionValues: [...redactionValues],
+        timeoutMs: 60_000,
+      },
+      hostSandbox: {
+        artifactName: `${artifactPrefix}-nemoclaw-sandbox`,
+        env: env(),
+        redactionValues: [...redactionValues],
+        timeoutMs: 120_000,
+      },
+      openshellSandbox: {
+        artifactName: `${artifactPrefix}-openshell-sandbox`,
+        env: env(),
+        redactionValues: [...redactionValues],
+        timeoutMs: 60_000,
+      },
+    },
+    sandbox,
+    sandboxName: SANDBOX_NAME,
+  });
 }
 
 function chatRequest(model: string): string {
@@ -159,6 +176,7 @@ async function assertColdOnboardPerformance(input: {
   apiKey: string;
   artifacts: ArtifactSink;
   budget: ColdOnboardPerformanceBudget;
+  cleanupProof: ColdOnboardCleanupProof;
   install: ShellProbeResult;
   installCompletedAtMs: number;
   outputEvents: readonly ShellProbeOutputEvent[];
@@ -173,6 +191,7 @@ async function assertColdOnboardPerformance(input: {
   ).toBeGreaterThanOrEqual(traceWindow.finishedAtMs);
   const ansiSgr = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
   const plain = resultText(input.install).replace(ansiSgr, "");
+  const coldStateProof = evaluateColdOnboardState(traceWindow, plain, input.cleanupProof);
   const heartbeatCount = (plain.match(/Still working on /g) ?? []).length;
   const buildKitFallback = /Local BuildKit build [^\n]*using the gateway builder instead\./u.test(
     plain,
@@ -214,7 +233,8 @@ async function assertColdOnboardPerformance(input: {
   const responseChars = assistantReply.length;
 
   await input.artifacts.writeJson("onboard-progress-budget.json", {
-    schemaVersion: "nemoclaw.full_e2e_cold_performance.v2",
+    schemaVersion: "nemoclaw.full_e2e_cold_performance.v3",
+    checkoutSha: process.env.NEMOCLAW_E2E_EXPECTED_SHA || process.env.GITHUB_SHA || null,
     sandbox: SANDBOX_NAME,
     installExitCode: input.install.exitCode,
     firstTurnExitCode: turn.exitCode,
@@ -233,6 +253,7 @@ async function assertColdOnboardPerformance(input: {
       passed: performanceEvaluation.passed,
       violations: performanceEvaluation.violations,
     },
+    coldStartProof: coldStateProof,
     heartbeatCount,
     maxSilenceSecs,
     maxSilenceBudgetSecs: MAX_SILENCE_SECS,
@@ -246,6 +267,10 @@ async function assertColdOnboardPerformance(input: {
   expect(buildKitFallback, "expected no fallback from BuildKit to the gateway builder").toBe(false);
   expect(usedBuildKitPrebuild, "expected the cold install to use BuildKit").toBe(true);
   expect(classicBuildSteps, "expected no classic per-instruction build steps").toBe(0);
+  expect(
+    coldStateProof.passed,
+    `expected a fresh cold start: ${coldStateProof.violations.join("; ")}`,
+  ).toBe(true);
   expect(
     maxSilenceSecs,
     `longest silent gap ${maxSilenceSecs}s exceeds the ${MAX_SILENCE_SECS}s guarantee`,
@@ -314,7 +339,12 @@ test("full e2e: install, onboard, inference, cli operations, and cleanup", {
     redactionValues: [hosted.apiKey],
     timeoutMs: 120_000,
   });
-  await cleanup(host, sandbox);
+  const coldCleanupProof = await cleanupFullE2eState(
+    host,
+    sandbox,
+    redactionValues,
+    "cold-preclean",
+  );
 
   const coldOnboard = createColdOnboardCapture();
   coldOnboard &&
@@ -343,6 +373,7 @@ test("full e2e: install, onboard, inference, cli operations, and cleanup", {
         apiKey: hosted.apiKey,
         artifacts,
         budget: coldOnboardBudget,
+        cleanupProof: coldCleanupProof,
         install,
         installCompletedAtMs,
         outputEvents: coldOnboard.outputEvents,
@@ -437,7 +468,7 @@ test("full e2e: install, onboard, inference, cli operations, and cleanup", {
     ? await assertSecurityPosture(host, sandbox, SANDBOX_NAME, "openclaw")
     : null;
 
-  await cleanup(host, sandbox);
+  await cleanupFullE2eState(host, sandbox, redactionValues, "phase-6-cleanup");
   const registry = path.join(os.homedir(), ".nemoclaw", "sandboxes.json");
   const registryText = fs.existsSync(registry) ? fs.readFileSync(registry, "utf8") : "";
   expect(registryText).not.toContain(SANDBOX_NAME);

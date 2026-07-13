@@ -1,9 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
+  COLD_ONBOARD_CLEANUP_SEQUENCE,
+  cleanupColdOnboardState,
   evaluateColdOnboardPerformance,
+  evaluateColdOnboardState,
   maximumOutputSilenceMs,
   ONBOARD_PHASE_NAMES,
   readColdOnboardPerformanceBudget,
@@ -36,6 +39,9 @@ function phaseSpan(
     end_time_unix_nano: timestampNs(startMs + durationMs),
     duration_ms: durationMs,
     status: { code: "OK" },
+    ...(name === "nemoclaw.onboard.phase.gateway"
+      ? { attributes: { reuse_state: "missing", gpu_passthrough: true } }
+      : {}),
   };
 }
 
@@ -94,6 +100,7 @@ describe("onboard performance evidence", () => {
     expect(readOnboardTraceWindow(traceArtifact())).toEqual({
       durationMs: 5_000,
       finishedAtMs: 6_000,
+      gatewayReuseState: "missing",
       phaseDurationsMs: {
         "nemoclaw.onboard.phase.preflight": 250,
         "nemoclaw.onboard.phase.gateway": 500,
@@ -142,6 +149,7 @@ describe("onboard performance evidence", () => {
     ["foreign trace", 0, { trace_id: FOREIGN_TRACE_ID }, "phase.preflight"],
     ["wrong parent", 1, { parent_span_id: "0000000000000099" }, "not a child"],
     ["failed status", 2, { status: { code: "ERROR" } }, "status is missing or not OK"],
+    ["missing structured reuse state", 1, { attributes: {} }, "reuse_state"],
     ["malformed span id", 3, { span_id: "short" }, "span_id"],
     [
       "out-of-root window",
@@ -191,6 +199,97 @@ describe("onboard performance evidence", () => {
         ),
       ),
     ).toThrow("overlaps or precedes");
+  });
+
+  it("strictly clears both sandbox owners before the gateway registration", async () => {
+    const calls: string[] = [];
+    const host = {
+      cleanupSandbox: vi.fn(async (name: string) => {
+        calls.push(`host-sandbox:${name}`);
+      }),
+      cleanupGatewayRegistration: vi.fn(async (name: string) => {
+        calls.push(`host-gateway:${name}`);
+      }),
+    };
+    const sandbox = {
+      cleanupSandbox: vi.fn(async (name: string) => {
+        calls.push(`openshell-sandbox:${name}`);
+      }),
+    };
+    const options = {
+      gatewayRegistration: { artifactName: "gateway-cleanup" },
+      hostSandbox: { artifactName: "host-sandbox-cleanup" },
+      openshellSandbox: { artifactName: "openshell-sandbox-cleanup" },
+    };
+
+    await expect(
+      cleanupColdOnboardState({
+        gatewayName: "nemoclaw",
+        host,
+        options,
+        sandbox,
+        sandboxName: "e2e-full",
+      }),
+    ).resolves.toEqual({ completed: true, sequence: COLD_ONBOARD_CLEANUP_SEQUENCE });
+    expect(calls).toEqual([
+      "host-sandbox:e2e-full",
+      "openshell-sandbox:e2e-full",
+      "host-gateway:nemoclaw",
+    ]);
+    expect(host.cleanupSandbox).toHaveBeenCalledWith("e2e-full", options.hostSandbox);
+    expect(sandbox.cleanupSandbox).toHaveBeenCalledWith("e2e-full", options.openshellSandbox);
+    expect(host.cleanupGatewayRegistration).toHaveBeenCalledWith(
+      "nemoclaw",
+      options.gatewayRegistration,
+    );
+  });
+
+  it("does not swallow a gateway-registration cleanup failure", async () => {
+    const host = {
+      cleanupSandbox: vi.fn(async () => {}),
+      cleanupGatewayRegistration: vi.fn(async () => {
+        throw new Error("gateway cleanup denied");
+      }),
+    };
+    const sandbox = { cleanupSandbox: vi.fn(async () => {}) };
+
+    await expect(
+      cleanupColdOnboardState({
+        gatewayName: "nemoclaw",
+        host,
+        sandbox,
+        sandboxName: "e2e-full",
+      }),
+    ).rejects.toThrow("gateway cleanup denied");
+    expect(host.cleanupSandbox).toHaveBeenCalledOnce();
+    expect(sandbox.cleanupSandbox).toHaveBeenCalledOnce();
+    expect(host.cleanupGatewayRegistration).toHaveBeenCalledOnce();
+  });
+
+  it("accepts only structured missing state without reuse output", () => {
+    const cleanup = { completed: true, sequence: COLD_ONBOARD_CLEANUP_SEQUENCE } as const;
+    expect(evaluateColdOnboardState({ gatewayReuseState: "missing" }, "fresh", cleanup)).toEqual({
+      cleanup,
+      gatewayReuseState: "missing",
+      passed: true,
+      reuseMarkerFound: false,
+      violations: [],
+    });
+    expect(
+      evaluateColdOnboardState(
+        { gatewayReuseState: "healthy" },
+        "[reuse] Skipping gateway (running)",
+        cleanup,
+      ),
+    ).toMatchObject({
+      gatewayReuseState: "healthy",
+      passed: false,
+      reuseMarkerFound: true,
+      violations: [
+        'gateway phase reuse_state is "healthy" instead of "missing"',
+        "installer output contains a [reuse] marker",
+      ],
+    });
   });
 
   it("evaluates root-boundary and configured phase budgets independently", () => {

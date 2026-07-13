@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ShellProbeOutputEvent } from "./shell-probe.ts";
+import type { ShellProbeOutputEvent, ShellProbeRunOptions } from "./shell-probe.ts";
 
 const ONBOARD_SCOPE = "nemoclaw.onboard";
 const ONBOARD_ROOT_SPAN = "nemoclaw.onboard";
@@ -20,6 +20,11 @@ export const ONBOARD_PHASE_NAMES = [
 export type OnboardPhaseName = (typeof ONBOARD_PHASE_NAMES)[number];
 
 const ONBOARD_PHASE_NAME_SET = new Set<string>(ONBOARD_PHASE_NAMES);
+export const COLD_ONBOARD_CLEANUP_SEQUENCE = [
+  "host.cleanupSandbox",
+  "sandbox.cleanupSandbox",
+  "host.cleanupGatewayRegistration",
+] as const;
 const COLD_ONBOARD_BUDGET_KEYS = new Set([
   "rootStartToFirstTurnCompletionBudgetMs",
   "rootEndToFirstTurnCompletionBudgetMs",
@@ -29,8 +34,37 @@ const COLD_ONBOARD_BUDGET_KEYS = new Set([
 export interface OnboardTraceWindow {
   durationMs: number;
   finishedAtMs: number;
+  gatewayReuseState: string;
   phaseDurationsMs: Record<OnboardPhaseName, number>;
   startedAtMs: number;
+}
+
+export interface ColdOnboardCleanupProof {
+  completed: true;
+  sequence: typeof COLD_ONBOARD_CLEANUP_SEQUENCE;
+}
+
+export interface ColdOnboardStateProof {
+  cleanup: ColdOnboardCleanupProof;
+  gatewayReuseState: string;
+  passed: boolean;
+  reuseMarkerFound: boolean;
+  violations: string[];
+}
+
+interface ColdOnboardHostCleanup {
+  cleanupGatewayRegistration(name: string, options?: ShellProbeRunOptions): Promise<void>;
+  cleanupSandbox(name: string, options?: ShellProbeRunOptions): Promise<void>;
+}
+
+interface ColdOnboardSandboxCleanup {
+  cleanupSandbox(name: string, options?: ShellProbeRunOptions): Promise<void>;
+}
+
+interface ColdOnboardCleanupOptions {
+  gatewayRegistration?: ShellProbeRunOptions;
+  hostSandbox?: ShellProbeRunOptions;
+  openshellSandbox?: ShellProbeRunOptions;
 }
 
 export interface ColdOnboardPerformanceBudget {
@@ -75,6 +109,14 @@ function durationMilliseconds(value: unknown, spanLabel: string): number {
 function identifier(value: unknown, pattern: RegExp, field: string): string {
   if (typeof value !== "string" || !pattern.test(value)) {
     throw new Error(`trace artifact has an invalid ${field}`);
+  }
+  return value;
+}
+
+function stringAttribute(record: Record<string, unknown>, key: string, spanLabel: string): string {
+  const value = asRecord(record.attributes)?.[key];
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error(`${spanLabel} span has an invalid ${key} attribute`);
   }
   return value;
 }
@@ -151,6 +193,46 @@ export function readColdOnboardPerformanceBudget(value: unknown): ColdOnboardPer
   return budget;
 }
 
+export async function cleanupColdOnboardState(input: {
+  gatewayName: string;
+  host: ColdOnboardHostCleanup;
+  options?: ColdOnboardCleanupOptions;
+  sandbox: ColdOnboardSandboxCleanup;
+  sandboxName: string;
+}): Promise<ColdOnboardCleanupProof> {
+  await input.host.cleanupSandbox(input.sandboxName, input.options?.hostSandbox);
+  await input.sandbox.cleanupSandbox(input.sandboxName, input.options?.openshellSandbox);
+  await input.host.cleanupGatewayRegistration(
+    input.gatewayName,
+    input.options?.gatewayRegistration,
+  );
+  return { completed: true, sequence: COLD_ONBOARD_CLEANUP_SEQUENCE };
+}
+
+export function evaluateColdOnboardState(
+  trace: Pick<OnboardTraceWindow, "gatewayReuseState">,
+  installOutput: string,
+  cleanup: ColdOnboardCleanupProof,
+): ColdOnboardStateProof {
+  const reuseMarkerFound = installOutput.includes("[reuse]");
+  const violations: string[] = [];
+  if (trace.gatewayReuseState !== "missing") {
+    violations.push(
+      `gateway phase reuse_state is ${JSON.stringify(trace.gatewayReuseState)} instead of "missing"`,
+    );
+  }
+  if (reuseMarkerFound) {
+    violations.push("installer output contains a [reuse] marker");
+  }
+  return {
+    cleanup,
+    gatewayReuseState: trace.gatewayReuseState,
+    passed: violations.length === 0,
+    reuseMarkerFound,
+    violations,
+  };
+}
+
 export function readOnboardTraceWindow(artifact: unknown): OnboardTraceWindow {
   const artifactRecord = asRecord(artifact);
   const summaryTraceId = identifier(
@@ -199,6 +281,7 @@ export function readOnboardTraceWindow(artifact: unknown): OnboardTraceWindow {
   }
 
   const phaseDurationsMs = {} as Record<OnboardPhaseName, number>;
+  let gatewayReuseState: string | null = null;
   const spanIds = new Set([root.spanId]);
   let previousPhaseEndNs = root.startNs;
   for (const phaseName of ONBOARD_PHASE_NAMES) {
@@ -222,11 +305,19 @@ export function readOnboardTraceWindow(artifact: unknown): OnboardTraceWindow {
     }
     previousPhaseEndNs = phase.endNs;
     phaseDurationsMs[phaseName] = phase.durationMs;
+    if (phaseName === "nemoclaw.onboard.phase.gateway") {
+      gatewayReuseState = stringAttribute(phase.record, "reuse_state", "onboard gateway phase");
+    }
+  }
+
+  if (gatewayReuseState === null) {
+    throw new Error("trace artifact is missing the onboard gateway reuse_state");
   }
 
   return {
     durationMs: root.durationMs,
     finishedAtMs: Number(root.endNs / NANOSECONDS_PER_MILLISECOND),
+    gatewayReuseState,
     phaseDurationsMs,
     startedAtMs: Number(root.startNs / NANOSECONDS_PER_MILLISECOND),
   };
