@@ -298,11 +298,8 @@ describe("onboard-config.schema.json", () => {
     },
   };
 
-  it("accepts a minimal onboard performance budget", () => {
+  it("accepts a minimal onboard performance budget and rejects missing fullE2eColdPath", () => {
     expectValid(validate, validOnboardConfig, "minimal onboard config");
-  });
-
-  it("rejects onboard config without fullE2eColdPath", () => {
     const { fullE2eColdPath: _, ...without } = validOnboardConfig;
     expect(validate(without)).toBe(false);
   });
