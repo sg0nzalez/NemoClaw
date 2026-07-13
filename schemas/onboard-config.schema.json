@@ -12,7 +12,8 @@
     "scope",
     "totalBudgetMs",
     "regressionWarning",
-    "phaseRegressionWarning"
+    "phaseRegressionWarning",
+    "fullE2eColdPath"
   ],
   "properties": {
     "$comment": {
@@ -49,7 +50,8 @@
         },
         "postOnboardBudgetMs": {
           "type": "number",
-          "minimum": 0
+          "minimum": 0,
+          "description": "Must be ≤ totalBudgetMs; enforced at runtime by readColdOnboardPerformanceBudget"
         },
         "phaseBudgetsMs": {
           "type": "object",

@@ -291,10 +291,20 @@ describe("onboard-config.schema.json", () => {
     totalBudgetMs: 0,
     regressionWarning: { minDeltaMs: 0, minPercent: 0 },
     phaseRegressionWarning: { minDeltaMs: 0, minPercent: 0 },
+    fullE2eColdPath: {
+      totalBudgetMs: 0,
+      postOnboardBudgetMs: 0,
+      phaseBudgetsMs: { "nemoclaw.onboard.phase.sandbox": 0 },
+    },
   };
 
   it("accepts a minimal onboard performance budget", () => {
     expectValid(validate, validOnboardConfig, "minimal onboard config");
+  });
+
+  it("rejects onboard config without fullE2eColdPath", () => {
+    const { fullE2eColdPath: _, ...without } = validOnboardConfig;
+    expect(validate(without)).toBe(false);
   });
 
   it("rejects invalid threshold shapes", () => {

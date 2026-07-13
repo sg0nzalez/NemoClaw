@@ -163,6 +163,7 @@ async function assertColdOnboardPerformance(input: {
   traceDirectory: string;
   traceFile: string;
 }): Promise<void> {
+  const budget = readFullE2eColdPathBudget();
   const traceWindow = readAndDeleteTraceWindow(input.traceFile, input.traceDirectory);
   const ansiSgr = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
   const plain = resultText(input.install).replace(ansiSgr, "");
@@ -191,7 +192,6 @@ async function assertColdOnboardPerformance(input: {
   );
   const totalMs = Date.now() - traceWindow.startedAtMs;
   const totalSecs = Math.ceil(totalMs / 1_000);
-  const budget = readFullE2eColdPathBudget();
   const performance = evaluateColdOnboardPerformance(traceWindow, totalMs, budget);
   const turnText = resultText(turn);
   const assistantReply = extractOpenClawAgentPayloadText(turnText).trim();
@@ -244,7 +244,7 @@ async function assertColdOnboardPerformance(input: {
   ).toContain(EXPECTED_FIRST_REPLY);
   expect(
     performance.passed,
-    `[1/8]-to-first-response took ${totalSecs}s; ${performance.violations.join("; ")}`,
+    `onboard-root-to-first-response took ${totalSecs}s; ${performance.violations.join("; ")}`,
   ).toBe(true);
 }
 

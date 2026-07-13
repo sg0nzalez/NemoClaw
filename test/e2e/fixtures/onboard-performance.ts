@@ -168,22 +168,18 @@ export function evaluateColdOnboardPerformance(
   const postOnboardMs = totalMs - trace.durationMs;
   const violations: string[] = [];
   if (totalMs > budget.totalBudgetMs) {
-    violations.push(
-      `total ${Math.ceil(totalMs / 1_000)}s exceeds ${Math.ceil(budget.totalBudgetMs / 1_000)}s`,
-    );
+    violations.push(`total ${totalMs}ms exceeds ${budget.totalBudgetMs}ms`);
   }
   if (postOnboardMs > budget.postOnboardBudgetMs) {
     violations.push(
-      `post-onboard first response ${Math.ceil(postOnboardMs / 1_000)}s exceeds ${Math.ceil(budget.postOnboardBudgetMs / 1_000)}s`,
+      `post-onboard first response ${postOnboardMs}ms exceeds ${budget.postOnboardBudgetMs}ms`,
     );
   }
   for (const phaseName of ONBOARD_PHASE_NAMES) {
     const phaseBudgetMs = budget.phaseBudgetsMs[phaseName];
     const phaseDurationMs = trace.phaseDurationsMs[phaseName];
     if (phaseBudgetMs !== undefined && phaseDurationMs > phaseBudgetMs) {
-      violations.push(
-        `${phaseName} ${Math.ceil(phaseDurationMs / 1_000)}s exceeds ${Math.ceil(phaseBudgetMs / 1_000)}s`,
-      );
+      violations.push(`${phaseName} ${phaseDurationMs}ms exceeds ${phaseBudgetMs}ms`);
     }
   }
 

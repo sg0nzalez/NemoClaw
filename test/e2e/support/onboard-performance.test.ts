@@ -100,12 +100,15 @@ describe("onboard performance evidence", () => {
     expect(evaluateColdOnboardPerformance(trace, 5_250, budget)).toEqual({
       passed: false,
       postOnboardMs: 1_500,
-      violations: ["total 6s exceeds 5s", "post-onboard first response 2s exceeds 1s"],
+      violations: [
+        "total 5250ms exceeds 5000ms",
+        "post-onboard first response 1500ms exceeds 1000ms",
+      ],
     });
 
     trace.phaseDurationsMs["nemoclaw.onboard.phase.sandbox"] = 1_501;
     expect(evaluateColdOnboardPerformance(trace, 4_750, budget).violations).toEqual([
-      "nemoclaw.onboard.phase.sandbox 2s exceeds 2s",
+      "nemoclaw.onboard.phase.sandbox 1501ms exceeds 1500ms",
     ]);
   });
 
