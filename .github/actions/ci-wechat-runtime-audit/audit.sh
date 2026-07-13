@@ -54,7 +54,7 @@ trap cleanup EXIT
 
 mkdir -p "$report_dir"
 
-readarray -t package_identity < <(
+package_identity_output="$(
   PACKAGE_JSON="$package_json" PACKAGE_LOCK="$package_lock" NPM_REGISTRY_ORIGIN="${npm_registry%/}" node <<'NODE'
 const fs = require("node:fs");
 const packageJson = JSON.parse(fs.readFileSync(process.env.PACKAGE_JSON, "utf8"));
@@ -109,7 +109,13 @@ for (const [location, record] of Object.entries(packageLock.packages ?? {})) {
 }
 process.stdout.write(`${dependencyNames[0]}@${version}\n${plugin.resolved}\n${plugin.integrity}\n`);
 NODE
-)
+)"
+readarray -t package_identity <<<"$package_identity_output"
+if [[ ${#package_identity[@]} -ne 3 ]] \
+  || [[ -z "${package_identity[0]}" || -z "${package_identity[1]}" || -z "${package_identity[2]}" ]]; then
+  echo "ERROR: WeChat runtime package validation returned incomplete identity metadata" >&2
+  exit 1
+fi
 wechat_spec="${package_identity[0]}"
 wechat_tarball="${package_identity[1]}"
 wechat_integrity="${package_identity[2]}"

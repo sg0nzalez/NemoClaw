@@ -59,6 +59,7 @@ function runAuditValidation(
         ...process.env,
         NEMOCLAW_WECHAT_AUDIT_REPORT_DIR: "artifacts/wechat-runtime-audit",
         NEMOCLAW_WECHAT_AUDIT_TARGET_ROOT: targetRoot,
+        PATH: `${path.join(targetRoot, "bin")}${path.delimiter}${process.env.PATH ?? ""}`,
       },
     });
   } finally {
@@ -92,9 +93,8 @@ describe("WeChat runtime audit and install-cache gates (#5896)", () => {
     );
 
     const bootstrapCheckout = requiredStep(prJob, "Checkout pinned bootstrap WeChat runtime audit");
-    expect(bootstrapCheckout.if).toContain("github.event.pull_request.number == 6739");
-    expect(bootstrapCheckout.if).toContain(
-      "github.event.pull_request.head.repo.full_name == 'HOYALIM/NemoClaw'",
+    expect(bootstrapCheckout.if).toBe(
+      "${{ steps.trusted-wechat-audit.outputs.available != 'true' && github.event.pull_request.number == 6739 && github.event.pull_request.head.repo.full_name == 'HOYALIM/NemoClaw' }}",
     );
     expect(bootstrapCheckout.with).toMatchObject({
       repository: "HOYALIM/NemoClaw",
@@ -190,18 +190,24 @@ describe("WeChat runtime audit and install-cache gates (#5896)", () => {
   });
 
   it("rejects an off-origin transitive package archive", () => {
-    const result = runAuditValidation(({ runtimeDir }) => {
+    const result = runAuditValidation(({ targetRoot, runtimeDir }) => {
       const lockPath = path.join(runtimeDir, "package-lock.json");
       const lock = JSON.parse(fs.readFileSync(lockPath, "utf8"));
       lock.packages["node_modules/qrcode-terminal"].resolved =
         "https://registry.example.test/qrcode-terminal-0.12.0.tgz";
       fs.writeFileSync(lockPath, `${JSON.stringify(lock, null, 2)}\n`);
+      const binDir = path.join(targetRoot, "bin");
+      fs.mkdirSync(binDir);
+      const npm = path.join(binDir, "npm");
+      fs.writeFileSync(npm, "#!/bin/sh\necho npm-should-not-run >&2\nexit 99\n");
+      fs.chmodSync(npm, 0o755);
     });
 
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain(
       "locked package must resolve from the reviewed npm registry origin: node_modules/qrcode-terminal",
     );
+    expect(result.stderr).not.toContain("npm-should-not-run");
   });
 
   it("keeps the image cache trusted and deletes the sandbox-writable copy", () => {
