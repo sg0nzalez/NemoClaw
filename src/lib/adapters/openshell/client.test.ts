@@ -8,9 +8,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   captureOpenshellCommand,
   captureOpenshellCommandAsync,
+  captureOpenshellCommandBinary,
   captureSandboxSshConfigCommand,
   getInstalledOpenshellVersion,
   type OpenshellSpawnSync,
+  type OpenshellSpawnSyncBinary,
   parseVersionFromText,
   runOpenshellCommand,
   stripAnsi,
@@ -39,6 +41,17 @@ function makeSpawnResult(spec: SpawnResultSpec): SpawnSyncReturns<string> {
 
 function stubSpawnSync(spec: SpawnResultSpec): OpenshellSpawnSync {
   return () => makeSpawnResult(spec);
+}
+
+function stubBinarySpawnSync(stdout: Buffer, stderr = Buffer.alloc(0)): OpenshellSpawnSyncBinary {
+  return () => ({
+    pid: 123,
+    output: [stdout, stderr],
+    stdout,
+    stderr,
+    status: 0,
+    signal: null,
+  });
 }
 
 function timeoutError(): Error {
@@ -122,6 +135,19 @@ describe("openshell helpers", () => {
       output: "hello",
       stdout: "hello\n",
       stderr: "boom\n",
+    });
+  });
+
+  it("captures binary stdout without UTF-8 decoding", () => {
+    const bytes = Buffer.from([0, 255, 128, 10]);
+    const result = captureOpenshellCommandBinary("openshell", ["sandbox", "exec"], {
+      spawnSyncImpl: stubBinarySpawnSync(bytes, Buffer.from("warning")),
+    });
+
+    expect(result).toEqual({
+      status: 0,
+      stdout: bytes,
+      stderr: Buffer.from("warning"),
     });
   });
 

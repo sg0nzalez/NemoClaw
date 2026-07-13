@@ -49,6 +49,21 @@ describe("read-only OpenShell sandbox control routing", () => {
     expect(test.close).toHaveBeenCalledOnce();
   });
 
+  it("preserves binary stdout across the direct route", async () => {
+    const bytes = Buffer.from([0, 255, 128, 10]);
+    const result = { status: 0, stdout: "", stdoutBytes: bytes, stderr: "" };
+    const test = dependencies(result);
+    const binaryRequest = { ...request, stdoutEncoding: "buffer" as const };
+
+    await expect(
+      execSandboxReadOnlyWithGrpcFallback("nemoclaw", binaryRequest, test.deps),
+    ).resolves.toEqual(result);
+    expect(test.grpcExec).toHaveBeenCalledWith({
+      ...binaryRequest,
+      timeoutMs: OPENSHELL_OPERATION_TIMEOUT_MS,
+    });
+  });
+
   it("does not replay a completed non-zero command through the CLI", async () => {
     const result = { status: 2, stdout: "", stderr: "unknown flag" };
     const test = dependencies(result);

@@ -3,7 +3,6 @@
 
 import type { EventEmitter } from "node:events";
 import path from "node:path";
-import { StringDecoder } from "node:string_decoder";
 
 import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
@@ -231,10 +230,8 @@ function execute(
       metadata,
       options,
     );
-    const stdoutDecoder = new StringDecoder("utf8");
-    const stderrDecoder = new StringDecoder("utf8");
-    let stdout = "";
-    let stderr = "";
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
     let retainedBytes = 0;
     let status: number | null = null;
     let settled = false;
@@ -242,9 +239,11 @@ function execute(
     const finish = (error?: Error) => {
       if (settled) return;
       settled = true;
-      stdout += stdoutDecoder.end();
-      stderr += stderrDecoder.end();
+      const stdoutBytes = Buffer.concat(stdoutChunks);
+      const stdout = request.stdoutEncoding === "buffer" ? "" : stdoutBytes.toString("utf8");
+      const stderr = Buffer.concat(stderrChunks).toString("utf8");
       const result: SandboxExecResult = { status, stdout, stderr };
+      if (request.stdoutEncoding === "buffer") result.stdoutBytes = stdoutBytes;
       if (error) result.error = error;
       resolve(result);
     };
@@ -253,8 +252,8 @@ function execute(
       const remaining = maxOutputBytes - retainedBytes;
       const retained = data.subarray(0, Math.max(0, remaining));
       retainedBytes += retained.length;
-      if (destination === "stdout") stdout += stdoutDecoder.write(retained);
-      else stderr += stderrDecoder.write(retained);
+      if (destination === "stdout") stdoutChunks.push(retained);
+      else stderrChunks.push(retained);
       if (retained.length < data.length) {
         finish(new OpenShellGrpcOutputLimitError(maxOutputBytes));
         stream.cancel();

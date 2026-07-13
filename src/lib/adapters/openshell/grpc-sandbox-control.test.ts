@@ -4,25 +4,25 @@
 import { EventEmitter } from "node:events";
 import path from "node:path";
 import {
+  type CallOptions,
+  loadPackageDefinition,
   Metadata,
   Server,
   ServerCredentials,
-  type CallOptions,
-  type sendUnaryData,
   type ServerUnaryCall,
   type ServerWritableStream,
   type ServiceClientConstructor,
   type ServiceError,
+  type sendUnaryData,
 } from "@grpc/grpc-js";
-import { loadPackageDefinition } from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
 import { describe, expect, it, vi } from "vitest";
 
 import {
   createGrpcOpenShellSandboxControl,
   createOpenShellGrpcApi,
-  OpenShellGrpcOutputLimitError,
   type OpenShellGrpcApi,
+  OpenShellGrpcOutputLimitError,
 } from "./grpc-sandbox-control";
 
 class FakeStream extends EventEmitter {
@@ -213,6 +213,35 @@ describe("gRPC OpenShell sandbox control", () => {
       control.close();
       await shutdown(server);
     }
+  });
+
+  it("preserves binary stdout without UTF-8 replacement", async () => {
+    const bytes = Buffer.from([0, 255, 128, 10]);
+    const fake = fakeApi({
+      emit(stream) {
+        stream.emit("data", { stdout: { data: bytes.subarray(0, 2) } });
+        stream.emit("data", { stdout: { data: bytes.subarray(2) } });
+        stream.emit("data", { exit: { exitCode: 0 } });
+        stream.emit("end");
+      },
+    });
+    const control = createGrpcOpenShellSandboxControl(
+      { endpoint: "http://127.0.0.1:8080" },
+      fake.api,
+    );
+
+    await expect(
+      control.exec({
+        sandboxName: "alpha",
+        command: ["tar", "-cf", "-", "workspace"],
+        stdoutEncoding: "buffer",
+      }),
+    ).resolves.toEqual({
+      status: 0,
+      stdout: "",
+      stdoutBytes: bytes,
+      stderr: "",
+    });
   });
 
   it("returns lookup failures without starting exec", async () => {

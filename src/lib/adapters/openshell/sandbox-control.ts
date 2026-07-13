@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { CaptureOpenshellResult } from "./client";
+import { type CaptureOpenshellResult, captureOpenshellCommandBinary } from "./client";
+import { resolveOpenshell } from "./resolve";
 import { captureOpenshell } from "./runtime";
 
 export interface SandboxExecRequest {
@@ -13,11 +14,15 @@ export interface SandboxExecRequest {
   maxOutputBytes?: number;
   /** End-to-end lookup and execution deadline. Zero means no deadline. */
   timeoutMs?: number;
+  /** Preserve stdout bytes instead of decoding them as UTF-8. */
+  stdoutEncoding?: "utf8" | "buffer";
 }
 
 export interface SandboxExecResult {
   status: number | null;
   stdout: string;
+  /** Present when stdoutEncoding is `buffer`; stdout remains an empty string. */
+  stdoutBytes?: Buffer;
   stderr: string;
   error?: Error;
   signal?: NodeJS.Signals | null;
@@ -28,6 +33,17 @@ export interface OpenShellSandboxControl {
 }
 
 type CaptureOpenShell = typeof captureOpenshell;
+type CaptureOpenShellBinary = typeof captureOpenshellCommandBinary;
+
+export interface CliOpenShellSandboxControlDependencies {
+  captureBinary: CaptureOpenShellBinary;
+  resolveBinary: typeof resolveOpenshell;
+}
+
+const defaultCliDependencies: CliOpenShellSandboxControlDependencies = {
+  captureBinary: captureOpenshellCommandBinary,
+  resolveBinary: resolveOpenshell,
+};
 
 function normalizeExecResult(result: CaptureOpenshellResult): SandboxExecResult {
   const normalized: SandboxExecResult = {
@@ -42,9 +58,38 @@ function normalizeExecResult(result: CaptureOpenshellResult): SandboxExecResult 
 
 export function createCliOpenShellSandboxControl(
   capture: CaptureOpenShell = captureOpenshell,
+  dependencies: CliOpenShellSandboxControlDependencies = defaultCliDependencies,
 ): OpenShellSandboxControl {
   return {
     async exec(request): Promise<SandboxExecResult> {
+      if (request.stdoutEncoding === "buffer") {
+        const binary = dependencies.resolveBinary();
+        if (!binary) {
+          return {
+            status: null,
+            stdout: "",
+            stderr: "",
+            error: new Error("openshell CLI not found"),
+          };
+        }
+        const result = dependencies.captureBinary(
+          binary,
+          ["sandbox", "exec", "--name", request.sandboxName, "--", ...request.command],
+          {
+            input: request.stdin,
+            maxBuffer: request.maxOutputBytes,
+            timeout: request.timeoutMs,
+          },
+        );
+        return {
+          status: result.status,
+          stdout: "",
+          stdoutBytes: result.stdout,
+          stderr: result.stderr.toString("utf8"),
+          ...(result.error ? { error: result.error } : {}),
+          ...(result.signal !== undefined ? { signal: result.signal } : {}),
+        };
+      }
       const result = capture(
         ["sandbox", "exec", "--name", request.sandboxName, "--", ...request.command],
         {

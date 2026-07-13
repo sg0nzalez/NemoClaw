@@ -3,7 +3,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-import type { CaptureOpenshellResult } from "./client";
+import type { CaptureOpenshellBinaryResult, CaptureOpenshellResult } from "./client";
 import { createCliOpenShellSandboxControl } from "./sandbox-control";
 
 describe("CLI OpenShell sandbox control", () => {
@@ -62,5 +62,40 @@ describe("CLI OpenShell sandbox control", () => {
       error,
       signal: "SIGTERM",
     });
+  });
+
+  it("preserves archive bytes through the CLI fallback", async () => {
+    const bytes = Buffer.from([0, 255, 128, 10]);
+    const captureBinary = vi.fn(
+      (): CaptureOpenshellBinaryResult => ({
+        status: 0,
+        stdout: bytes,
+        stderr: Buffer.from("warning"),
+      }),
+    );
+    const control = createCliOpenShellSandboxControl(vi.fn(), {
+      resolveBinary: () => "/usr/bin/openshell",
+      captureBinary,
+    });
+
+    await expect(
+      control.exec({
+        sandboxName: "alpha",
+        command: ["tar", "-cf", "-", "workspace"],
+        maxOutputBytes: 1024,
+        stdoutEncoding: "buffer",
+        timeoutMs: 120_000,
+      }),
+    ).resolves.toEqual({
+      status: 0,
+      stdout: "",
+      stdoutBytes: bytes,
+      stderr: "warning",
+    });
+    expect(captureBinary).toHaveBeenCalledWith(
+      "/usr/bin/openshell",
+      ["sandbox", "exec", "--name", "alpha", "--", "tar", "-cf", "-", "workspace"],
+      { input: undefined, maxBuffer: 1024, timeout: 120_000 },
+    );
   });
 });
