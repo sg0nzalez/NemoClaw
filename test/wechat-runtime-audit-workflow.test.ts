@@ -98,7 +98,7 @@ describe("WeChat runtime audit and install-cache gates (#5896)", () => {
     );
     expect(bootstrapCheckout.with).toMatchObject({
       repository: "HOYALIM/NemoClaw",
-      ref: "e5285cd3fe90d99024bc10e494bc637092fd92c3",
+      ref: "0d2256d71d5bbba3bcaaaa4d01714fa56f22d1e2",
       path: ".trusted-wechat-audit-bootstrap",
       "persist-credentials": false,
     });
