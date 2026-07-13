@@ -313,6 +313,7 @@ Commits: `5f38b7c4`, `ccdac9ce`, `caaa5165`, `8c0ecac8`, `233d207e`,
 | `OS82-12` | Medium | OpenShell declares Docker 28.0+ while #6379 is on Docker 27 and NemoClaw marks DGX Spark tested. | Either validate and document a precise downstream exception from physical proof or raise the supported floor and preflight it. | Open product/platform decision. |
 | `OS82-13` | Low | Mount parsing/SELinux changes could affect the test-only tmpfs path. | Rerun the EXDEV tmpfs fixture and retain production no-mount evidence. | Open targeted test. |
 | `OS82-14` | Low | Sanitized MCP tool names are newly present in logs. | Record the additive observability/privacy behavior; ensure no downstream parser assumes the old shape. | Source-reviewed; targeted log check pending. |
+| `OS82-15` | High | The installer-hash workflow executes its checker and parser from the PR base SHA. One PR cannot safely teach that trusted base about a new release and consume the release; using the head checker would let reviewed code define its own trust rules. | First land archive safety, normalized full-script template validation, and multi-release trust while selectors remain `0.0.72`; prove the old base rejects a new release and the new base permits only structured release-data changes; then submit the `0.0.82` pin. | NemoClaw-only prerequisite implementation in progress. |
 
 An unresolved critical or high concern blocks the version selector change. A green
 aggregate test suite does not override an open ledger row.
@@ -334,19 +335,22 @@ restart/rebuild, and cleanup without a conditional skip or expected failure.
 
 ## Final acceptance gates
 
-1. A stable OpenShell tag contains `bb72d012` or a reviewed descendant. Re-run
+1. The trusted installer/hash prerequisite lands on NemoClaw `main` while all
+   runtime selectors remain `0.0.72`. Its base-owned parser rejects operational
+   installer drift and permits only validated release-data and selector changes.
+2. A stable OpenShell tag contains `bb72d012` or a reviewed descendant. Re-run
    this entire adjacent-source audit for every commit between `bb72d012` and that
    tag.
-2. The tag has a successful release publication. Every consumed archive and OCI
+3. The tag has a successful release publication. Every consumed archive and OCI
    child manifest is bound to that producer run and source identity.
-3. Blueprint bounds, installer tables, Brev defaults, workflow pins, feature-gate
+4. Blueprint bounds, installer tables, Brev defaults, workflow pins, feature-gate
    hashes, supervisor digest, credential manifest, tests, and active docs select
    one coherent version.
-4. Every concern-specific unit/integration proof above passes, followed by normal
+5. Every concern-specific unit/integration proof above passes, followed by normal
    repository checks and exact-head CI/advisor review.
-5. The non-skipped live matrix passes on Linux x86 Docker, macOS Docker
+6. The non-skipped live matrix passes on Linux x86 Docker, macOS Docker
    Desktop/Colima, WSL, Colossus, and physical DGX Spark arm64. Legacy gateway
    upgrade, restart, rollback, and teardown remain explicit phases.
-6. The physical #6379 Spark run completes an authenticated real MCP tool call and
+7. The physical #6379 Spark run completes an authenticated real MCP tool call and
    reports any failure honestly. Inclusion of `40194f93` alone cannot close the
    issue.

@@ -113,13 +113,17 @@ describe("OpenShell 0.0.82 migration review", () => {
   });
 
   it("tracks every material migration concern and refuses false-green evidence", () => {
-    for (let number = 1; number <= 14; number += 1) {
+    for (let number = 1; number <= 15; number += 1) {
       const id = `OS82-${String(number).padStart(2, "0")}`;
       expect(review.split(`| \`${id}\` |`), `${id} concern row`).toHaveLength(2);
     }
     expect(review).toContain("An unresolved critical or high concern blocks");
     expect(review).toContain("full managed MCP lifecycle");
     expect(review).toContain("without a conditional skip or expected failure");
+    expect(review).toContain("executes its checker and parser from the PR base SHA");
+    expect(review).toContain(
+      "using the head checker would let reviewed code define its own trust rules",
+    );
   });
 
   it("keeps the stable pin and physical Spark proof blocked until final evidence exists", () => {
