@@ -3,7 +3,10 @@
 
 import { log } from "../../cli/logger";
 import { OPENSHELL_OPERATION_TIMEOUT_MS } from "./timeouts";
-import { createGrpcOpenShellSandboxControlForGateway } from "./grpc-gateway-config";
+import {
+  createGrpcOpenShellSandboxControlForGateway,
+  OpenShellGrpcEdgeTunnelRequiredError,
+} from "./grpc-gateway-config";
 import {
   createCliOpenShellSandboxControl,
   type OpenShellSandboxControl,
@@ -23,6 +26,45 @@ const defaultDependencies: ReadOnlyRoutingDependencies = {
   createGrpc: createGrpcOpenShellSandboxControlForGateway,
   debug: (message, context) => log.debug(message, context),
 };
+
+export interface OpenShellMutationControlSelection {
+  control: OpenShellSandboxControl;
+  transport: "grpc" | "cli-edge-tunnel";
+  close(): void;
+}
+
+/**
+ * Select one transport before a mutating workflow starts. Direct gRPC is the
+ * default. The CLI is selected only for the explicit Cloudflare edge-tunnel
+ * mode that a direct client cannot traverse. This function never retries an
+ * operation after dispatch.
+ */
+export function selectOpenShellSandboxControlForMutation(
+  gatewayName: string,
+  dependencies: ReadOnlyRoutingDependencies = defaultDependencies,
+): OpenShellMutationControlSelection {
+  try {
+    const grpc = dependencies.createGrpc(gatewayName);
+    return {
+      control: grpc,
+      transport: "grpc",
+      close: () => {
+        try {
+          grpc.close();
+        } catch (error) {
+          dependencies.debug("OpenShell direct gRPC client close failed", error);
+        }
+      },
+    };
+  } catch (error) {
+    if (!(error instanceof OpenShellGrpcEdgeTunnelRequiredError)) throw error;
+    return {
+      control: dependencies.cli,
+      transport: "cli-edge-tunnel",
+      close: () => {},
+    };
+  }
+}
 
 /**
  * Prefer direct gRPC for a read-only sandbox exec and retry through the

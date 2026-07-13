@@ -1,76 +1,99 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import type { OpenShellSandboxControl } from "./adapters/openshell/sandbox-control";
 import { resolveSkillPaths } from "./skill-install";
 import { validateSkillName } from "./skill-name";
-import { checkExisting, removeSkill, verifyRemove } from "./skill-remote";
+import {
+  checkExisting,
+  removeSkill,
+  sandboxExec,
+  type SandboxControlContext,
+  verifyRemove,
+} from "./skill-remote";
+
+function context(
+  exec: OpenShellSandboxControl["exec"] = vi.fn(async () => {
+    throw new Error("unreachable");
+  }),
+): SandboxControlContext {
+  return { control: { exec }, sandboxName: "test-sandbox" };
+}
 
 describe("validateSkillName", () => {
-  it("accepts valid skill names", () => {
-    expect(validateSkillName("my-skill")).toBe(true);
-    expect(validateSkillName("my_skill")).toBe(true);
-    expect(validateSkillName("my.skill")).toBe(true);
-    expect(validateSkillName("MySkill123")).toBe(true);
-    expect(validateSkillName("digicon-zeiss-ai-strategy")).toBe(true);
-  });
+  it.each([
+    "my-skill",
+    "my_skill",
+    "my.skill",
+    "MySkill123",
+    "digicon-zeiss-ai-strategy",
+  ])("accepts %s", (name) => expect(validateSkillName(name)).toBe(true));
 
-  it("rejects empty string", () => {
-    expect(validateSkillName("")).toBe(false);
-  });
+  it.each([
+    "",
+    "my skill",
+    "my;skill",
+    "my$skill",
+    "my/skill",
+    "../escape",
+    "my`skill`",
+    ".",
+    "..",
+  ])("rejects %s", (name) => expect(validateSkillName(name)).toBe(false));
+});
 
-  it("rejects names with spaces", () => {
-    expect(validateSkillName("my skill")).toBe(false);
-  });
+describe("sandboxExec", () => {
+  it("runs one shell command through the selected control without transport retry", async () => {
+    const exec = vi.fn(async () => ({ status: 0, stdout: "ok\n", stderr: " warning\n" }));
+    const ctx = context(exec);
 
-  it("rejects names with shell metacharacters", () => {
-    expect(validateSkillName("my;skill")).toBe(false);
-    expect(validateSkillName("my$skill")).toBe(false);
-    expect(validateSkillName("my/skill")).toBe(false);
-    expect(validateSkillName("../escape")).toBe(false);
-    expect(validateSkillName("my`skill`")).toBe(false);
-  });
-
-  it("rejects dot and double-dot to prevent directory traversal on rm -rf", () => {
-    expect(validateSkillName(".")).toBe(false);
-    expect(validateSkillName("..")).toBe(false);
+    await expect(
+      sandboxExec(ctx, "cat > /tmp/file", { input: Buffer.from("body") }),
+    ).resolves.toEqual({
+      status: 0,
+      stdout: "ok",
+      stderr: "warning",
+    });
+    expect(exec).toHaveBeenCalledOnce();
+    expect(exec).toHaveBeenCalledWith({
+      sandboxName: "test-sandbox",
+      command: ["sh", "-lc", "cat > /tmp/file"],
+      stdin: Buffer.from("body"),
+      timeoutMs: 30_000,
+    });
   });
 });
 
-describe("removeSkill (unit — no SSH)", () => {
-  it("returns success=false and a warning when sshExec returns null (sandbox unreachable)", () => {
-    const paths = resolveSkillPaths(null, "test-skill");
-
-    const ctx = { configFile: "/nonexistent/ssh.conf", sandboxName: "test-sandbox" };
-    const result = removeSkill(ctx, paths);
+describe("removeSkill", () => {
+  it("returns failure and warnings when sandbox execution is unavailable", async () => {
+    const result = await removeSkill(context(), resolveSkillPaths(null, "test-skill"));
 
     expect(result.success).toBe(false);
     expect(result.removedUploadDir).toBe(false);
-    expect(result.messages.some((m) => m.startsWith("Warning:"))).toBe(true);
+    expect(result.messages.some((message) => message.startsWith("Warning:"))).toBe(true);
   });
 
-  it("success is false for OpenClaw when mirrorDir removal fails even if uploadDir was removed", () => {
-    const ctx = { configFile: "/tmp/ssh.conf", sandboxName: "test-sandbox" };
-    const paths = resolveSkillPaths(null, "test-skill");
-    const result = removeSkill(ctx, paths, {
-      sshExecImpl: (_ctx, command) => ({
+  it("fails when the OpenClaw mirror removal fails after upload removal", async () => {
+    const result = await removeSkill(context(), resolveSkillPaths(null, "test-skill"), {
+      execImpl: async (_ctx, command) => ({
         status: command.includes("$HOME/.openclaw/skills") ? 1 : 0,
         stdout: "",
         stderr: "",
       }),
     });
 
-    expect(result.removedUploadDir).toBe(true);
-    expect(result.removedMirrorDir).toBe(false);
-    expect(result.success).toBe(false);
+    expect(result).toMatchObject({
+      removedUploadDir: true,
+      removedMirrorDir: false,
+      success: false,
+    });
   });
 
-  it("removes OpenClaw upload and mirror dirs, then clears sessions", () => {
-    const ctx = { configFile: "/tmp/ssh.conf", sandboxName: "test-sandbox" };
-    const paths = resolveSkillPaths(null, "test-skill");
+  it("removes OpenClaw upload and mirror dirs, then clears sessions", async () => {
     const commands: string[] = [];
-    const result = removeSkill(ctx, paths, {
-      sshExecImpl: (_ctx, command) => {
+    const result = await removeSkill(context(), resolveSkillPaths(null, "test-skill"), {
+      execImpl: async (_ctx, command) => {
         commands.push(command);
         return { status: 0, stdout: "", stderr: "" };
       },
@@ -86,28 +109,17 @@ describe("removeSkill (unit — no SSH)", () => {
   });
 });
 
-describe("verifyRemove (unit — no SSH)", () => {
-  it("returns false when SSH is unreachable (conservative — treat failure as not-gone)", () => {
-    const paths = resolveSkillPaths(null, "test-skill");
-    const ctx = { configFile: "/nonexistent/ssh.conf", sandboxName: "test-sandbox" };
-    expect(verifyRemove(ctx, paths)).toBe(false);
-  });
-
-  it("returns false for non-OpenClaw paths when SSH is unreachable", () => {
-    const paths = resolveSkillPaths(
-      { name: "hermes", configPaths: { dir: "/sandbox/.hermes" } },
-      "test-skill",
+describe("verifyRemove", () => {
+  it("fails conservatively when sandbox execution is unavailable", async () => {
+    await expect(verifyRemove(context(), resolveSkillPaths(null, "test-skill"))).resolves.toBe(
+      false,
     );
-    const ctx = { configFile: "/nonexistent/ssh.conf", sandboxName: "test-sandbox" };
-    expect(verifyRemove(ctx, paths)).toBe(false);
   });
 
-  it("verifies both OpenClaw skill directories are gone", () => {
-    const paths = resolveSkillPaths(null, "test-skill");
-    const ctx = { configFile: "/tmp/ssh.conf", sandboxName: "test-sandbox" };
+  it("verifies both OpenClaw skill directories are gone", async () => {
     const commands: string[] = [];
-    const gone = verifyRemove(ctx, paths, {
-      sshExecImpl: (_ctx, command) => {
+    const gone = await verifyRemove(context(), resolveSkillPaths(null, "test-skill"), {
+      execImpl: async (_ctx, command) => {
         commands.push(command);
         return { status: 0, stdout: "GONE", stderr: "" };
       },
@@ -120,28 +132,17 @@ describe("verifyRemove (unit — no SSH)", () => {
   });
 });
 
-describe("checkExisting (unit — no SSH)", () => {
-  it("returns null when SSH is unreachable for OpenClaw paths", () => {
-    const paths = resolveSkillPaths(null, "test-skill");
-    const ctx = { configFile: "/nonexistent/ssh.conf", sandboxName: "test-sandbox" };
-    expect(checkExisting(ctx, paths)).toBeNull();
+describe("checkExisting", () => {
+  it("returns null when sandbox execution is unavailable", async () => {
+    await expect(
+      checkExisting(context(), resolveSkillPaths(null, "test-skill")),
+    ).resolves.toBeNull();
   });
 
-  it("returns null when SSH is unreachable for non-OpenClaw paths", () => {
-    const paths = resolveSkillPaths(
-      { name: "hermes", configPaths: { dir: "/sandbox/.hermes" } },
-      "test-skill",
-    );
-    const ctx = { configFile: "/nonexistent/ssh.conf", sandboxName: "test-sandbox" };
-    expect(checkExisting(ctx, paths)).toBeNull();
-  });
-
-  it("probes skill directories so removal can clean partial uploads", () => {
-    const paths = resolveSkillPaths(null, "test-skill");
-    const ctx = { configFile: "/tmp/ssh.conf", sandboxName: "test-sandbox" };
+  it("probes directories so removal can clean partial uploads", async () => {
     const commands: string[] = [];
-    const exists = checkExisting(ctx, paths, {
-      sshExecImpl: (_ctx, command) => {
+    const exists = await checkExisting(context(), resolveSkillPaths(null, "test-skill"), {
+      execImpl: async (_ctx, command) => {
         commands.push(command);
         return { status: 0, stdout: "EXISTS", stderr: "" };
       },
