@@ -797,6 +797,7 @@ describe("messaging-build-applier.mts: agent-install", () => {
       const tracePath = path.join(tmp, "openclaw.trace");
       const fakeOpenclaw = path.join(tmp, "openclaw");
       const fakeNpm = path.join(tmp, "npm");
+      const fakeNode = path.join(tmp, "node");
       fs.writeFileSync(
         fakeOpenclaw,
         [
@@ -822,6 +823,16 @@ describe("messaging-build-applier.mts: agent-install", () => {
           `  "@openclaw/msteams@2026.6.10") printf "%s\\n" "${OPENCLAW_MSTEAMS_2026_6_10_INTEGRITY}"; exit 0 ;;`,
           "esac",
           "exit 1",
+          "",
+        ].join("\n"),
+        { mode: 0o755 },
+      );
+      fs.writeFileSync(
+        fakeNode,
+        [
+          "#!/bin/sh",
+          'printf \'verify|%s|%s\\n\' "$3" "$4" >> "$OPENCLAW_TRACE"',
+          "exit 0",
           "",
         ].join("\n"),
         { mode: 0o755 },
@@ -868,6 +879,9 @@ describe("messaging-build-applier.mts: agent-install", () => {
           expect(trace).toContain("plugins|install|npm-pack:");
           expect(trace).toContain(`${archiveName}||||`);
         }
+        expect(trace).toContain(
+          "verify|/usr/local/lib/nemoclaw/wechat-runtime/package-lock.json|/sandbox/.openclaw/npm/projects",
+        );
       } finally {
         fs.rmSync(tmp, { recursive: true, force: true });
       }

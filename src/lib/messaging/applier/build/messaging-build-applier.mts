@@ -21,7 +21,7 @@ import { teamsManifest } from "../../channels/teams/manifest.ts";
 import { telegramManifest } from "../../channels/telegram/manifest.ts";
 import { wechatManifest } from "../../channels/wechat/manifest.ts";
 import { whatsappManifest } from "../../channels/whatsapp/manifest.ts";
-import type { ChannelManifest } from "../../manifest/types.ts";
+import type { ChannelAgentPackageRuntimeLockSpec, ChannelManifest } from "../../manifest/types.ts";
 
 type Env = Record<string, string | undefined>;
 type JsonObject = Record<string, any>;
@@ -123,6 +123,7 @@ type OpenClawPluginInstall = {
   readonly npmPackageSpec?: string;
   readonly integrity?: string;
   readonly tarballUrl?: string;
+  readonly runtimeLock?: ChannelAgentPackageRuntimeLockSpec;
   readonly pin: boolean;
 };
 
@@ -202,6 +203,28 @@ export function reviewedOpenClawPluginTarballUrlByPackageSpec(
   return Object.freeze(
     Object.fromEntries(entries.sort(([left], [right]) => left.localeCompare(right))),
   );
+}
+
+function reviewedOpenClawPluginRuntimeLocksByPackageSpec(
+  env: Env,
+  manifests: readonly ChannelManifest[],
+): Readonly<Record<string, ChannelAgentPackageRuntimeLockSpec>> {
+  const entries: [string, ChannelAgentPackageRuntimeLockSpec][] = [];
+  for (const manifest of manifests) {
+    for (const packageSpec of manifest.agentPackages ?? []) {
+      if (
+        packageSpec.agent !== "openclaw" ||
+        packageSpec.manager !== "openclaw-plugin" ||
+        !packageSpec.runtimeLock
+      ) {
+        continue;
+      }
+      const resolvedSpec = resolveOpenClawPackageSpec(packageSpec.spec, env);
+      const npmPackage = requireExactNpmPackageSpec(resolvedSpec, manifest.id);
+      entries.push([npmPackage.packageSpec, packageSpec.runtimeLock]);
+    }
+  }
+  return Object.freeze(Object.fromEntries(entries));
 }
 
 export function readMessagingBuildPlanFromEnv(
@@ -508,6 +531,7 @@ function collectOpenClawMessagingPluginInstalls(
   const trustedSpecs = trustedOpenClawPluginSpecsForManifests(trustedManifests, env);
   const reviewedIntegrity = reviewedOpenClawPluginIntegrityByPackageSpec(env, trustedManifests);
   const reviewedTarballUrls = reviewedOpenClawPluginTarballUrlByPackageSpec(env, trustedManifests);
+  const runtimeLocks = reviewedOpenClawPluginRuntimeLocksByPackageSpec(env, trustedManifests);
   for (const step of enabledBuildStepsForPhase(plan, "agent-install")) {
     if (step.kind !== "package-install") continue;
     if (step.value === undefined) {
@@ -533,6 +557,9 @@ function collectOpenClawMessagingPluginInstalls(
       ...(npmPackage ? { npmPackageSpec: npmPackage.packageSpec } : {}),
       ...(integrity ? { integrity } : {}),
       ...(tarballUrl ? { tarballUrl } : {}),
+      ...(npmPackage && runtimeLocks[npmPackage.packageSpec]
+        ? { runtimeLock: runtimeLocks[npmPackage.packageSpec] }
+        : {}),
       pin: integrity !== undefined,
     };
     const key = JSON.stringify(resolvedInstall);
@@ -668,11 +695,31 @@ export function installOpenClawMessagingPlugins(plan: MessagingBuildPlan | null,
       // on OpenClaw >= 2026.6.10 and crash-loops channel plugins that use
       // keyed state (e.g. WhatsApp). npm-pack installs always record the
       // exact resolved version, so `--pin` is not needed.
-      runCommand(["openclaw", "plugins", "install", `npm-pack:${packed.archivePath}`], {
+      const installEnv = {
         ...env,
         NPM_CONFIG_IGNORE_SCRIPTS: "true",
         npm_config_ignore_scripts: "true",
-      });
+        ...(install.runtimeLock
+          ? {
+              NPM_CONFIG_CACHE: install.runtimeLock.cachePath,
+              NPM_CONFIG_OFFLINE: String(install.runtimeLock.offline),
+              NPM_CONFIG_LEGACY_PEER_DEPS: String(install.runtimeLock.legacyPeerDeps),
+            }
+          : {}),
+      };
+      runCommand(["openclaw", "plugins", "install", `npm-pack:${packed.archivePath}`], installEnv);
+      if (install.runtimeLock) {
+        runCommand(
+          [
+            "node",
+            "--experimental-strip-types",
+            install.runtimeLock.verifierPath,
+            install.runtimeLock.lockFile,
+            install.runtimeLock.projectsRoot,
+          ],
+          installEnv,
+        );
+      }
     } finally {
       rmSync(packed.rootDir, { recursive: true, force: true });
     }

@@ -20,6 +20,18 @@ Update it and `agents/openclaw/mcporter-runtime/package*.json` together whenever
 - Advisory result: `0` known vulnerabilities across the resolved production dependency graph; npm verified registry signatures for all `120` resolved packages and attestations for `12` packages.
 
 Both image paths install the committed graph with `npm ci --ignore-scripts --omit=dev` because the published package declares no install-time lifecycle script and NemoClaw needs only its already-built CLI.
+
+## WeChat plugin runtime graph
+
+- Package: `@tencent-weixin/openclaw-weixin@2.4.3`.
+- Locked graph: `agents/openclaw/wechat-runtime/package-lock.json` (npm lockfile version 3).
+- Lock regeneration: `npm install --package-lock-only --legacy-peer-deps --ignore-scripts --omit=dev --prefix agents/openclaw/wechat-runtime`.
+- Installation boundary: the image materializes the reviewed lock into a dedicated npm cache and adds the exact package metadata needed by npm's offline resolver. The OpenClaw plugin installer consumes that cache in offline, legacy-peer mode, then `verify-wechat-runtime-lock.mts` rejects integrity, version, or dependency-set drift in the managed npm project.
+- Advisory command: `npm audit --omit=dev --json --prefix agents/openclaw/wechat-runtime`.
+- Advisory review: `2026-07-12`; result: `0` known vulnerabilities across the resolved production graph.
+- Regression test: `test/wechat-locked-install.test.ts` keeps the manifest runtime-lock paths, Docker cache inputs, and installer verification dispatch synchronized.
+
+The dedicated graph intentionally omits the plugin's `openclaw` peer dependency. The image already installs and integrity-verifies the reviewed OpenClaw runtime separately; auto-installing another OpenClaw copy would create a second unreviewed runtime graph.
 Disabling scripts also prevents transitive packages from executing lifecycle code during the trusted image build.
 The lock records the exact version, registry URL, and integrity for every transitive package; the top-level registry integrity check remains an independent control.
 

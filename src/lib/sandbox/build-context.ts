@@ -249,6 +249,10 @@ function stageOptimizedSandboxBuildContext(
     path.join(rootDir, "scripts", "patch-openclaw-device-self-approval.ts"),
     path.join(stagedScriptsDir, "patch-openclaw-device-self-approval.ts"),
   );
+  fs.copyFileSync(
+    path.join(rootDir, "scripts", "verify-wechat-runtime-lock.mts"),
+    path.join(stagedScriptsDir, "verify-wechat-runtime-lock.mts"),
+  );
 
   return { buildCtx, stagedDockerfile };
 }
