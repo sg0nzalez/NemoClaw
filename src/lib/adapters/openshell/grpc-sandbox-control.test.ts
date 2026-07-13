@@ -21,8 +21,9 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createGrpcOpenShellSandboxControl,
   createOpenShellGrpcApi,
-  type OpenShellGrpcApi,
   OpenShellGrpcOutputLimitError,
+  OpenShellGrpcPreDispatchError,
+  type OpenShellGrpcApi,
 } from "./grpc-sandbox-control";
 
 class FakeStream extends EventEmitter {
@@ -60,14 +61,13 @@ function fakeApi(fixture: FakeApiOptions = {}): {
       getMetadata.push(metadata);
       getOptions.push(options);
       queueMicrotask(() => {
-        if (fixture.getError) callback(fixture.getError);
-        else {
-          callback(null, {
-            sandbox: {
-              metadata: fixture.sandboxId === "" ? {} : { id: fixture.sandboxId ?? "sb-id" },
-            },
-          });
-        }
+        fixture.getError
+          ? callback(fixture.getError)
+          : callback(null, {
+              sandbox: {
+                metadata: fixture.sandboxId === "" ? {} : { id: fixture.sandboxId ?? "sb-id" },
+              },
+            });
       });
       return request;
     },
@@ -92,8 +92,7 @@ function serviceError(message: string): ServiceError {
 function bind(server: Server): Promise<number> {
   return new Promise((resolve, reject) => {
     server.bindAsync("127.0.0.1:0", ServerCredentials.createInsecure(), (error, port) => {
-      if (error) reject(error);
-      else resolve(port);
+      error ? reject(error) : resolve(port);
     });
   });
 }
@@ -101,8 +100,7 @@ function bind(server: Server): Promise<number> {
 function shutdown(server: Server): Promise<void> {
   return new Promise((resolve, reject) => {
     server.tryShutdown((error) => {
-      if (error) reject(error);
-      else resolve();
+      error ? reject(error) : resolve();
     });
   });
 }
@@ -256,7 +254,10 @@ describe("gRPC OpenShell sandbox control", () => {
       status: null,
       stdout: "",
       stderr: "",
-      error,
+      error: expect.objectContaining({
+        cause: error,
+        name: OpenShellGrpcPreDispatchError.name,
+      }),
     });
     expect(fake.execMetadata).toEqual([]);
   });
