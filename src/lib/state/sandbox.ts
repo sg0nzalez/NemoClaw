@@ -826,7 +826,6 @@ async function backupStateFile(
  */
 
 export { buildStateFileRestoreCommand } from "./state-file-restore.js";
-export { isSshTransportFailure } from "./ssh-transport.js";
 
 export async function backupSandboxState(
   sandboxName: string,
