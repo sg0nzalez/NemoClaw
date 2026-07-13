@@ -125,6 +125,12 @@ function validateTlsMaterial(config: OpenShellGrpcClientConfig, secure: boolean)
   }
 }
 
+export function validateOpenShellGrpcClientConfig(config: OpenShellGrpcClientConfig): void {
+  const { secure } = parseEndpoint(config.endpoint);
+  validateBearerToken(config.bearerToken, secure);
+  validateTlsMaterial(config, secure);
+}
+
 function createChannelCredentials(
   config: OpenShellGrpcClientConfig,
   secure: boolean,
@@ -148,8 +154,8 @@ function protocolPath(): string {
 }
 
 export function createOpenShellGrpcApi(config: OpenShellGrpcClientConfig): OpenShellGrpcApi {
+  validateOpenShellGrpcClientConfig(config);
   const { target, secure } = parseEndpoint(config.endpoint);
-  validateBearerToken(config.bearerToken, secure);
   const credentials = createChannelCredentials(config, secure);
   const protoFile = protocolPath();
   const packageDefinition = protoLoader.loadSync(protoFile, {
@@ -268,9 +274,7 @@ export function createGrpcOpenShellSandboxControl(
   config: OpenShellGrpcClientConfig,
   injectedClient?: OpenShellGrpcApi,
 ): GrpcOpenShellSandboxControl {
-  const { secure } = parseEndpoint(config.endpoint);
-  validateBearerToken(config.bearerToken, secure);
-  validateTlsMaterial(config, secure);
+  validateOpenShellGrpcClientConfig(config);
   const client = injectedClient ?? createOpenShellGrpcApi(config);
   return {
     close: () => client.close(),
