@@ -255,6 +255,11 @@ function stageOptimizedSandboxBuildContext(
     path.join(rootDir, "scripts", "verify-wechat-runtime-lock.mts"),
     path.join(stagedScriptsDir, "verify-wechat-runtime-lock.mts"),
   );
+  fs.mkdirSync(path.join(stagedScriptsDir, "lib"), { recursive: true });
+  fs.copyFileSync(
+    path.join(rootDir, "scripts", "lib", "reviewed-npm-archive.mts"),
+    path.join(stagedScriptsDir, "lib", "reviewed-npm-archive.mts"),
+  );
 
   return { buildCtx, stagedDockerfile };
 }

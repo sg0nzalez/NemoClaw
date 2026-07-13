@@ -262,6 +262,11 @@
       "category": "compatibility"
     },
     {
+      "file": "test/messaging-image-env-contract.test.ts",
+      "test": "%s keeps the full plan in build processes but not final runtime environments (#5896)",
+      "category": "security"
+    },
+    {
       "file": "test/mcp-openshell-workflow.test.ts",
       "test": "keeps the setup docs aligned with the stable default",
       "category": "compatibility"
