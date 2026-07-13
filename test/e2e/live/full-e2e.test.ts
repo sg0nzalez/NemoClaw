@@ -167,9 +167,10 @@ async function assertColdOnboardPerformance(input: {
   traceFile: string;
 }): Promise<void> {
   const traceWindow = readAndDeleteTraceWindow(input.traceFile, input.traceDirectory);
-  if (input.installCompletedAtMs < traceWindow.finishedAtMs) {
-    throw new Error("install completion precedes the onboard root end");
-  }
+  expect(
+    input.installCompletedAtMs,
+    "install completion must not precede the onboard root end",
+  ).toBeGreaterThanOrEqual(traceWindow.finishedAtMs);
   const ansiSgr = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
   const plain = resultText(input.install).replace(ansiSgr, "");
   const heartbeatCount = (plain.match(/Still working on /g) ?? []).length;
@@ -264,7 +265,7 @@ test("full e2e: install, onboard, inference, cli operations, and cleanup", {
   timeout: LIVE_TIMEOUT_MS,
 }, async ({ artifacts, cleanup: cleanupRegistry, host, sandbox, secrets, skip }) => {
   const hosted = requireHostedInferenceConfig(secrets);
-  const coldOnboardBudget = MEASURE_COLD_ONBOARD ? readFullE2eColdPathBudget() : null;
+  const coldOnboardBudget = readFullE2eColdPathBudget();
   const redactionValues = [hosted.apiKey];
   await artifacts.target.declare({
     id: "full-e2e",
@@ -337,19 +338,19 @@ test("full e2e: install, onboard, inference, cli operations, and cleanup", {
   });
   const installCompletedAtMs = Date.now();
   expect(install.exitCode, resultText(install)).toBe(0);
-  if (coldOnboard && coldOnboardBudget) {
-    await assertColdOnboardPerformance({
-      apiKey: hosted.apiKey,
-      artifacts,
-      budget: coldOnboardBudget,
-      install,
-      installCompletedAtMs,
-      outputEvents: coldOnboard.outputEvents,
-      sandbox,
-      traceDirectory: coldOnboard.traceDirectory,
-      traceFile: coldOnboard.traceFile,
-    });
-  }
+  await (coldOnboard
+    ? assertColdOnboardPerformance({
+        apiKey: hosted.apiKey,
+        artifacts,
+        budget: coldOnboardBudget,
+        install,
+        installCompletedAtMs,
+        outputEvents: coldOnboard.outputEvents,
+        sandbox,
+        traceDirectory: coldOnboard.traceDirectory,
+        traceFile: coldOnboard.traceFile,
+      })
+    : Promise.resolve());
 
   const pathProbe = await host.command(
     "bash",
