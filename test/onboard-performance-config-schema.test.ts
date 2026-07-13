@@ -16,12 +16,59 @@ const PHASE_NAMES = [
   "nemoclaw.onboard.phase.inference",
   "nemoclaw.onboard.phase.sandbox",
 ] as const;
+type PhaseName = (typeof PHASE_NAMES)[number];
+type PhaseBudgets = Record<PhaseName, number>;
+interface ColdPathBudget {
+  rootStartToFirstTurnCompletionBudgetMs: number;
+  rootEndToFirstTurnCompletionBudgetMs: number;
+  phaseBudgetsMs: PhaseBudgets;
+}
+interface CalibrationSample {
+  runId: number;
+  runUrl: string;
+  conclusion: string;
+  installExitCode: number;
+  firstTurnExitCode: number;
+  performancePassed: boolean;
+  usedBuildKitPrebuild: boolean;
+  buildKitFallback: boolean;
+  maxSilenceSecs: number;
+  responseChars: number;
+  measurementsMs: {
+    onboardRoot: number;
+    rootStartToFirstTurnCompletion: number;
+    rootEndToInstallCompletion: number;
+    firstTurnCommand: number;
+    rootEndToFirstTurnCompletion: number;
+    phases: PhaseBudgets;
+  };
+}
+interface Calibration {
+  schemaVersion: number;
+  baselineMainSha: string;
+  measurementHeadSha: string;
+  derivation: {
+    percentile: number;
+    percentileMethod: string;
+    minimumHeadroomMs: number;
+    relativeHeadroomPercent: number;
+    roundUpMs: number;
+  };
+  samples: CalibrationSample[];
+  derivedBudgetsMs: ColdPathBudget;
+}
 
 const schema = JSON.parse(
   readFileSync(join(REPO_ROOT, "schemas", "onboard-config.schema.json"), "utf8"),
 ) as object;
 const validate = new Ajv({ allErrors: true, strict: false, $data: true }).compile(schema);
 const phaseBudgetsMs = Object.fromEntries(PHASE_NAMES.map((name) => [name, 1_000]));
+const checkedInConfig = JSON.parse(
+  readFileSync(join(REPO_ROOT, "ci", "onboard-performance-budget.json"), "utf8"),
+) as { fullE2eColdPath: ColdPathBudget };
+const calibration = JSON.parse(
+  readFileSync(join(REPO_ROOT, "ci", "full-e2e-cold-path-calibration.json"), "utf8"),
+) as Calibration;
 const validConfig = {
   $comment: "Schema fixture",
   schemaVersion: 1,
@@ -39,10 +86,7 @@ const validConfig = {
 
 describe("onboard performance config schema", () => {
   it("accepts the checked-in config and a complete synthetic config", () => {
-    const checkedIn = JSON.parse(
-      readFileSync(join(REPO_ROOT, "ci", "onboard-performance-budget.json"), "utf8"),
-    ) as object;
-    expect(validate(checkedIn), JSON.stringify(validate.errors)).toBe(true);
+    expect(validate(checkedInConfig), JSON.stringify(validate.errors)).toBe(true);
     expect(validate(validConfig), JSON.stringify(validate.errors)).toBe(true);
   });
 
@@ -99,5 +143,77 @@ describe("onboard performance config schema", () => {
         regressionWarning: { minDeltaMs: -1, minPercent: 20 },
       }),
     ).toBe(false);
+  });
+});
+
+function derivedThreshold(values: number[], derivation: Calibration["derivation"]): number {
+  const sorted = [...values].sort((left, right) => left - right);
+  const rank = Math.max(1, Math.ceil((derivation.percentile / 100) * sorted.length));
+  const percentileValue = sorted[rank - 1];
+  const headroom = Math.max(
+    derivation.minimumHeadroomMs,
+    percentileValue * (derivation.relativeHeadroomPercent / 100),
+  );
+  return Math.ceil((percentileValue + headroom) / derivation.roundUpMs) * derivation.roundUpMs;
+}
+
+function deriveBudgets(input: Calibration): ColdPathBudget {
+  const threshold = (values: number[]) => derivedThreshold(values, input.derivation);
+  const phaseBudgets = {} as PhaseBudgets;
+  for (const phaseName of PHASE_NAMES) {
+    phaseBudgets[phaseName] = threshold(
+      input.samples.map((sample) => sample.measurementsMs.phases[phaseName]),
+    );
+  }
+  return {
+    rootStartToFirstTurnCompletionBudgetMs: threshold(
+      input.samples.map((sample) => sample.measurementsMs.rootStartToFirstTurnCompletion),
+    ),
+    rootEndToFirstTurnCompletionBudgetMs: threshold(
+      input.samples.map((sample) => sample.measurementsMs.rootEndToFirstTurnCompletion),
+    ),
+    phaseBudgetsMs: phaseBudgets,
+  };
+}
+
+describe("full-E2E cold-path calibration", () => {
+  it("records five independent successful exact-head samples", () => {
+    expect(calibration.schemaVersion).toBe(1);
+    expect(calibration.baselineMainSha).toMatch(/^[0-9a-f]{40}$/u);
+    expect(calibration.measurementHeadSha).toMatch(/^[0-9a-f]{40}$/u);
+    expect(calibration.derivation.percentileMethod).toBe("nearest-rank");
+    expect(calibration.samples).toHaveLength(5);
+    expect(new Set(calibration.samples.map((sample) => sample.runId)).size).toBe(5);
+
+    for (const sample of calibration.samples) {
+      expect(sample.runUrl).toBe(`https://github.com/NVIDIA/NemoClaw/actions/runs/${sample.runId}`);
+      expect(sample).toMatchObject({
+        conclusion: "success",
+        installExitCode: 0,
+        firstTurnExitCode: 0,
+        performancePassed: true,
+        usedBuildKitPrebuild: true,
+        buildKitFallback: false,
+      });
+      expect(sample.maxSilenceSecs).toBeLessThanOrEqual(60);
+      expect(sample.responseChars).toBeGreaterThan(0);
+      expect(Object.keys(sample.measurementsMs.phases)).toEqual(PHASE_NAMES);
+      for (const value of [
+        sample.measurementsMs.onboardRoot,
+        sample.measurementsMs.rootStartToFirstTurnCompletion,
+        sample.measurementsMs.rootEndToInstallCompletion,
+        sample.measurementsMs.firstTurnCommand,
+        sample.measurementsMs.rootEndToFirstTurnCompletion,
+        ...Object.values(sample.measurementsMs.phases),
+      ]) {
+        expect(Number.isFinite(value) && value >= 0).toBe(true);
+      }
+    }
+  });
+
+  it("keeps configured budgets derived from the checked-in samples", () => {
+    const derived = deriveBudgets(calibration);
+    expect(calibration.derivedBudgetsMs).toEqual(derived);
+    expect(checkedInConfig.fullE2eColdPath).toEqual(derived);
   });
 });
