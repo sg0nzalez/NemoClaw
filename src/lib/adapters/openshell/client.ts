@@ -282,27 +282,6 @@ export function captureOpenshellCommandBinary(
   };
 }
 
-export function captureSandboxSshConfigCommand(
-  binary: string,
-  sandboxName: string,
-  opts: CaptureOpenshellOptions = {},
-): CaptureOpenshellResult {
-  const sandboxGet = captureOpenshellCommand(binary, ["sandbox", "get", sandboxName], {
-    ...opts,
-    ignoreError: true,
-    includeStderr: true,
-  });
-  if (sandboxGet.status !== 0) {
-    const output = sandboxGet.output || `failed to query sandbox '${sandboxName}'`;
-    const sandboxMissing = /\bnot[- ]?found\b/i.test(output);
-    return {
-      ...sandboxGet,
-      output: sandboxMissing ? `sandbox '${sandboxName}' not found` : output,
-    };
-  }
-  return captureOpenshellCommand(binary, ["sandbox", "ssh-config", sandboxName], opts);
-}
-
 export function captureOpenshellCommandAsync(
   binary: string,
   args: string[],

@@ -7,7 +7,6 @@ import { ROOT } from "../../runner";
 import {
   captureOpenshellCommand,
   captureOpenshellCommandAsync,
-  captureSandboxSshConfigCommand,
   getInstalledOpenshellVersion,
   runOpenshellCommand,
 } from "./client";
@@ -73,20 +72,6 @@ export function captureOpenshell(args: CommandArgs, opts: RunnerOptions = {}) {
     input: opts.input,
     timeout: opts.timeout,
     maxBuffer: opts.maxBuffer,
-    errorLine: console.error,
-    exit: (code: number) => process.exit(code),
-  });
-}
-
-/** Capture the SSH config OpenShell emits for a sandbox. */
-export function captureSandboxSshConfig(sandboxName: string, opts: RunnerOptions = {}) {
-  return captureSandboxSshConfigCommand(getOpenshellBinary(), sandboxName, {
-    cwd: ROOT,
-    env: opts.env,
-    replaceEnv: opts.replaceEnv,
-    ignoreError: opts.ignoreError,
-    includeStreams: opts.includeStreams,
-    timeout: opts.timeout,
     errorLine: console.error,
     exit: (code: number) => process.exit(code),
   });

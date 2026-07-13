@@ -37,8 +37,6 @@ const REVIEWED_SITE_TUPLES = [
   ["src/lib/actions/sandbox/process-recovery.ts", "privileged-sandbox-exec", 2],
   ["src/lib/actions/sandbox/snapshot.ts", "docker-exec-command", 1],
   ["src/lib/adapters/docker/container.ts", "docker-exec-command", 1],
-  ["src/lib/adapters/openshell/client.ts", "openshell-ssh-config", 1],
-  ["src/lib/adapters/openshell/runtime.ts", "openshell-ssh-config", 1],
   ["src/lib/onboard.ts", "docker-exec-builder", 1],
   ["src/lib/resources-cmd.ts", "docker-exec-command", 1],
   ["src/lib/sandbox/config.ts", "privileged-sandbox-exec", 2],
@@ -53,8 +51,6 @@ export const REVIEWED_LEGACY_SANDBOX_TRANSPORT_SITES: readonly LegacySandboxTran
   REVIEWED_SITE_TUPLES.map(([relativePath, kind, calls]) => ({ relativePath, kind, calls }));
 
 const HELPER_KINDS = new Map<string, LegacySandboxTransportKind>([
-  ["captureSandboxSshConfig", "openshell-ssh-config"],
-  ["captureSandboxSshConfigCommand", "openshell-ssh-config"],
   ["createTempSshConfig", "ssh-temp-config"],
   ["dockerExecArgv", "docker-exec-builder"],
   ["privilegedSandboxExecArgv", "privileged-sandbox-exec"],

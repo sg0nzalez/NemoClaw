@@ -6,7 +6,7 @@ import { CLI_NAME } from "./cli/branding";
 import { G, R } from "./cli/terminal-style";
 
 export interface ShareCommandDeps {
-  /** Verify sandbox existence, then run `openshell sandbox ssh-config <name>` and return output. */
+  /** Run `openshell sandbox ssh-config <name>` and return its output. */
   getSshConfig: (sandboxName: string) => { status: number | null; output: string };
   /** Ensure the sandbox is live, exit process if not. */
   ensureLive: (sandboxName: string) => Promise<void>;
@@ -28,13 +28,9 @@ export interface ShareCommandDeps {
 }
 
 export function buildShareCommandDeps(): ShareCommandDeps {
-  const { captureOpenshell, captureSandboxSshConfig } = require("./adapters/openshell/runtime") as {
+  const { captureOpenshell } = require("./adapters/openshell/runtime") as {
     captureOpenshell: (
       args: string[],
-      opts?: { ignoreError?: boolean; timeout?: number },
-    ) => { status: number | null; output: string };
-    captureSandboxSshConfig: (
-      sandboxName: string,
       opts?: { ignoreError?: boolean; timeout?: number },
     ) => { status: number | null; output: string };
   };
@@ -44,7 +40,7 @@ export function buildShareCommandDeps(): ShareCommandDeps {
 
   return {
     getSshConfig: (sandboxName: string) =>
-      captureSandboxSshConfig(sandboxName, {
+      captureOpenshell(["sandbox", "ssh-config", sandboxName], {
         ignoreError: true,
         timeout: OPENSHELL_PROBE_TIMEOUT_MS,
       }),

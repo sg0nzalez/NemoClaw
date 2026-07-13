@@ -9,7 +9,6 @@ import {
   captureOpenshellCommand,
   captureOpenshellCommandAsync,
   captureOpenshellCommandBinary,
-  captureSandboxSshConfigCommand,
   getInstalledOpenshellVersion,
   type OpenshellSpawnSync,
   type OpenshellSpawnSyncBinary,
@@ -293,59 +292,6 @@ describe("openshell helpers", () => {
     expect(observedStdio).toEqual(["pipe", "pipe", "pipe"]);
     expect(observedInput).toBe(stdin);
     expect(result).toEqual({ status: 0, output: "ok" });
-  });
-
-  it("verifies sandbox existence before requesting SSH config", () => {
-    const calls: string[][] = [];
-    const spawnSyncImpl: OpenshellSpawnSync = (_command, args) => {
-      calls.push([...args]);
-      if (args.join(" ") === "sandbox get alpha") {
-        return makeSpawnResult({ status: 0, stdout: "alpha Ready\n", stderr: "" });
-      }
-      return makeSpawnResult({
-        status: 0,
-        stdout: "Host openshell-alpha\n",
-        stderr: "",
-      });
-    };
-
-    const result = captureSandboxSshConfigCommand("openshell", "alpha", { spawnSyncImpl });
-
-    expect(result).toEqual({ status: 0, output: "Host openshell-alpha" });
-    expect(calls).toEqual([
-      ["sandbox", "get", "alpha"],
-      ["sandbox", "ssh-config", "alpha"],
-    ]);
-  });
-
-  it("does not request SSH config when the sandbox is missing", () => {
-    const calls: string[][] = [];
-    const spawnSyncImpl: OpenshellSpawnSync = (_command, args) => {
-      calls.push([...args]);
-      return makeSpawnResult({ status: 1, stdout: "", stderr: "sandbox not found\n" });
-    };
-
-    const result = captureSandboxSshConfigCommand("openshell", "bogus", { spawnSyncImpl });
-
-    expect(result).toEqual({ status: 1, output: "sandbox 'bogus' not found" });
-    expect(calls).toEqual([["sandbox", "get", "bogus"]]);
-  });
-
-  it("preserves non-NotFound sandbox lookup failures", () => {
-    const calls: string[][] = [];
-    const spawnSyncImpl: OpenshellSpawnSync = (_command, args) => {
-      calls.push([...args]);
-      return makeSpawnResult({
-        status: 1,
-        stdout: "",
-        stderr: "transport error\nConnection refused\n",
-      });
-    };
-
-    const result = captureSandboxSshConfigCommand("openshell", "alpha", { spawnSyncImpl });
-
-    expect(result).toEqual({ status: 1, output: "transport error\nConnection refused" });
-    expect(calls).toEqual([["sandbox", "get", "alpha"]]);
   });
 
   it("bounds async captures and reports timeout metadata", async () => {

@@ -50,8 +50,7 @@ export function seedInitialPolicyContext(
 ): void {
   const refresh = deps.refresh ?? defaultRefresh;
   const logError = deps.logError ?? defaultLog;
-  // The refresh path eventually reaches `executeSandboxCommand` →
-  // `captureSandboxSshConfig` → `captureOpenshellCommand`, which calls
+  // The refresh path eventually reaches `captureOpenshellCommand`, which calls
   // `process.exit(1)` from `handleSpawnError` on any `spawnSync`-level
   // error (ENOENT, EMFILE, ETIMEDOUT, …) regardless of `ignoreError`.
   // When the onboard host is rebuild.ts, that exit fires inside rebuild's
@@ -62,9 +61,8 @@ export function seedInitialPolicyContext(
   // leaking the exit signal to the surrounding onboard run.
   //
   // Removal condition: this monkey-patch must stay until
-  // `src/lib/adapters/openshell/client.ts:handleSpawnError` (and the
-  // `captureSandboxSshConfigCommand` / `captureOpenshellCommand` callers
-  // in `src/lib/adapters/openshell/runtime.ts`) grow a "non-exiting"
+  // `src/lib/adapters/openshell/client.ts:handleSpawnError` and its
+  // `captureOpenshellCommand` caller grow a "non-exiting"
   // mode for best-effort callers — at which point `executeSandboxCommand`
   // can return `null` on spawn failure rather than exiting and the seed
   // can drop the shadow. Refresh must remain synchronous as long as the

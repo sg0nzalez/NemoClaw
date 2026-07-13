@@ -568,7 +568,6 @@ hermes-box  127.0.0.1  18789  12345  running`;
     const previousWaitSeconds = process.env.NEMOCLAW_GATEWAY_RECOVERY_WAIT_SECONDS;
     const previousPollInterval = process.env.NEMOCLAW_GATEWAY_RECOVERY_POLL_INTERVAL_SECONDS;
     const previousSettleSeconds = process.env.NEMOCLAW_GATEWAY_RECOVERY_SETTLE_SECONDS;
-    const sshCommands: string[] = [];
     let restarted = false;
     const requestGatewaySupervisorAction = vi.fn(() => {
       restarted = true;
@@ -580,16 +579,8 @@ hermes-box  127.0.0.1  18789  12345  running`;
     process.env.NEMOCLAW_GATEWAY_RECOVERY_SETTLE_SECONDS = "0";
 
     try {
-      vi.spyOn(openshellRuntime, "captureSandboxSshConfig").mockReturnValue({
-        status: 0,
-        output: "Host openshell-hermes-box\n  HostName 127.0.0.1\n",
-      } as never);
       vi.spyOn(childProcess, "spawnSync").mockImplementation(
-        (command: unknown, rawArgs: unknown) => {
-          if (command === "ssh") {
-            sshCommands.push(getSandboxExecShellCommand(rawArgs));
-            return { status: 0, stdout: "DASHBOARD_PID=5252\n", stderr: "" } as never;
-          }
+        (_command: unknown, rawArgs: unknown) => {
           const shellCommand = getSandboxExecShellCommand(rawArgs);
           if (shellCommand.includes("HTTP_CODE=$(curl")) {
             return {
@@ -646,7 +637,6 @@ hermes-box  127.0.0.1  18789  12345  running`;
       });
       expect(requestGatewaySupervisorAction).toHaveBeenCalledOnce();
       expect(requestGatewaySupervisorAction).toHaveBeenCalledWith("hermes-box", "recover");
-      expect(sshCommands).toHaveLength(0);
     } finally {
       previousWaitSeconds === undefined
         ? delete process.env.NEMOCLAW_GATEWAY_RECOVERY_WAIT_SECONDS
