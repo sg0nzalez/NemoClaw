@@ -70,4 +70,38 @@ describe("rebuild destroy validation diagnostics", () => {
     expect(mocks.reattachMcpAfterDeleteFailure).toHaveBeenCalledOnce();
     expect(relockShieldsIfNeeded).toHaveBeenCalledWith(true);
   });
+
+  it("waits for the user-managed-file probe before final validation", async () => {
+    let resolveProbe: () => void = () => undefined;
+    const probe = new Promise<void>((resolve) => {
+      resolveProbe = resolve;
+    });
+    mocks.warnUnpreservedUserManagedFiles.mockReturnValue(probe);
+    const validateAfterMcpPreparation = vi.fn(async () => ({
+      ok: false as const,
+      message: "validation blocked deletion",
+    }));
+    const bail = vi.fn((message: string): never => {
+      throw new Error(message);
+    });
+
+    const phase = runRebuildDestroyPhase({
+      sandboxName: "alpha",
+      sandboxEntry: { name: "alpha", agent: "langchain-deepagents-code" },
+      staleRecovery: false,
+      backupManifest: null,
+      log: vi.fn(),
+      bail,
+      relockShieldsIfNeeded: vi.fn(() => true),
+      validateAfterMcpPreparation,
+      onDeleted: vi.fn(),
+    });
+
+    await vi.waitFor(() => expect(mocks.warnUnpreservedUserManagedFiles).toHaveBeenCalledOnce());
+    expect(validateAfterMcpPreparation).not.toHaveBeenCalled();
+
+    resolveProbe();
+    await expect(phase).rejects.toThrow("validation blocked deletion");
+    expect(validateAfterMcpPreparation).toHaveBeenCalledOnce();
+  });
 });

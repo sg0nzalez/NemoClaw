@@ -41,7 +41,7 @@ function openshellExecResult(
   const shellCommand = getSandboxExecShellCommand(rawArgs);
   const isHealthProbe = shellCommand.includes("HTTP_CODE=$(curl");
   const launchRecovered = shellCommand.includes('"$AGENT_BIN" gateway run --port 19000');
-  if (launchRecovered) setRecovered(true);
+  setRecovered(recovered || launchRecovered);
   execCommands.push(shellCommand);
   const output = isHealthProbe
     ? recovered
@@ -79,9 +79,9 @@ describe("checkAndRecoverSandboxProcesses custom agent recovery", () => {
     const execCommands: string[] = [];
 
     vi.spyOn(childProcess, "spawnSync").mockImplementation((command: unknown, rawArgs: unknown) => {
-      if (String(command).endsWith("openshell")) {
-        execCommands.push(getSandboxExecShellCommand(rawArgs));
-      }
+      execCommands.push(
+        ...(String(command).endsWith("openshell") ? [getSandboxExecShellCommand(rawArgs)] : []),
+      );
       return { status: 1, stdout: "", stderr: "sandbox exec unavailable" } as never;
     });
     vi.spyOn(agentRuntime, "getSessionAgent").mockReturnValue({
