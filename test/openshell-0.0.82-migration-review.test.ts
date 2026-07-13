@@ -1,0 +1,135 @@
+// SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+import fs from "node:fs";
+import path from "node:path";
+import { describe, expect, it } from "vitest";
+
+const repoRoot = path.resolve(import.meta.dirname, "..");
+const review = fs.readFileSync(
+  path.join(repoRoot, "docs", "security", "openshell-0.0.82-migration-review.md"),
+  "utf8",
+);
+
+const adjacentRanges = [
+  { from: "v0.0.72", to: "v0.0.73", commits: 5, paths: 27 },
+  { from: "v0.0.73", to: "v0.0.74", commits: 6, paths: 25 },
+  { from: "v0.0.74", to: "v0.0.75", commits: 2, paths: 26 },
+  { from: "v0.0.75", to: "v0.0.76", commits: 3, paths: 28 },
+  { from: "v0.0.76", to: "v0.0.77", commits: 3, paths: 7 },
+  { from: "v0.0.77", to: "v0.0.78", commits: 6, paths: 23 },
+  { from: "v0.0.78", to: "v0.0.79", commits: 1, paths: 1 },
+  { from: "v0.0.79", to: "v0.0.80", commits: 5, paths: 15 },
+  { from: "v0.0.80", to: "v0.0.81", commits: 4, paths: 9 },
+  { from: "v0.0.81", to: "bb72d012", commits: 11, paths: 75 },
+] as const;
+
+const auditedCommits = [
+  "afc06dd2",
+  "a5161d0b",
+  "a2268060",
+  "f27ff150",
+  "474d2d4a",
+  "ed0026aa",
+  "0a25fdf5",
+  "5477e2f2",
+  "914da339",
+  "450685c7",
+  "45614a3f",
+  "abcd15d1",
+  "45060f44",
+  "43bb0302",
+  "5f9bf9ce",
+  "6461677c",
+  "f852d07b",
+  "6252aa17",
+  "31807d68",
+  "5656240c",
+  "290297ff",
+  "9c14de7b",
+  "eba5dd75",
+  "abe42fb5",
+  "a7271169",
+  "f7aa3aa3",
+  "2e2b497f",
+  "ed8ce820",
+  "5207f118",
+  "ff9af8e3",
+  "709aa0fe",
+  "83131d7e",
+  "88710225",
+  "49701088",
+  "420a855d",
+  "5f38b7c4",
+  "ccdac9ce",
+  "caaa5165",
+  "8c0ecac8",
+  "233d207e",
+  "10702133",
+  "bebf440b",
+  "8eacb477",
+  "614c8c16",
+  "40194f93",
+  "bb72d012",
+] as const;
+
+describe("OpenShell 0.0.82 migration review", () => {
+  it("records every adjacent release range and all 46 audited commits", () => {
+    expect(adjacentRanges.reduce((total, range) => total + range.commits, 0)).toBe(46);
+    for (const range of adjacentRanges) {
+      expect(review).toContain(
+        `| \`${range.from} -> ${range.to}\` | ${range.commits} | ${range.paths} |`,
+      );
+    }
+    for (const commit of auditedCommits) {
+      expect(review, `missing audited OpenShell commit ${commit}`).toContain(commit);
+    }
+    expect(review).toContain("174 distinct changed paths");
+  });
+
+  it("keeps source ancestry, release publication, and artifact provenance as separate gates", () => {
+    expect(review).toContain("This is a candidate migration review, not approval to ship");
+    expect(review).toContain("v0.0.81` is a source tag");
+    expect(review).toContain("it has no GitHub release");
+    expect(review).toContain("failed the Ubuntu 26.04 rootless-Podman E2E job");
+    expect(review).toContain("no verifiable source-to-image attestation");
+    expect(review).toContain("reject archive traversal, links, devices, duplicates");
+  });
+
+  it("tracks every material migration concern and refuses false-green evidence", () => {
+    for (let number = 1; number <= 14; number += 1) {
+      const id = `OS82-${String(number).padStart(2, "0")}`;
+      expect(review.split(`| \`${id}\` |`), `${id} concern row`).toHaveLength(2);
+    }
+    expect(review).toContain("An unresolved critical or high concern blocks");
+    expect(review).toContain("full managed MCP lifecycle");
+    expect(review).toContain("without a conditional skip or expected failure");
+  });
+
+  it("keeps the stable pin and physical Spark proof blocked until final evidence exists", () => {
+    const blueprint = fs.readFileSync(
+      path.join(repoRoot, "nemoclaw-blueprint", "blueprint.yaml"),
+      "utf8",
+    );
+    const manifest = JSON.parse(
+      fs.readFileSync(
+        path.join(
+          repoRoot,
+          "src",
+          "lib",
+          "actions",
+          "sandbox",
+          "openshell-child-visible-credentials.v0.0.72.json",
+        ),
+        "utf8",
+      ),
+    ) as { openshellVersion: string };
+
+    expect(blueprint).toContain('min_openshell_version: "0.0.72"');
+    expect(blueprint).toContain('max_openshell_version: "0.0.72"');
+    expect(manifest.openshellVersion).toBe("0.0.72");
+    expect(review).toContain("remains pinned to `0.0.72`");
+    expect(review).toContain("physical Docker 27 DGX Spark");
+    expect(review).toContain("Inclusion of `40194f93` alone cannot close");
+  });
+});
