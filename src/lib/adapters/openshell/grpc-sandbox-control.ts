@@ -39,7 +39,12 @@ export interface OpenShellGrpcApi {
     callback: (error: grpc.ServiceError | null, response?: GetSandboxResponse) => void,
   ): unknown;
   execSandbox(
-    request: { sandboxId: string; command: readonly string[]; timeoutSeconds?: number },
+    request: {
+      sandboxId: string;
+      command: readonly string[];
+      stdin?: Buffer;
+      timeoutSeconds?: number;
+    },
     metadata: grpc.Metadata,
     options: grpc.CallOptions,
   ): ExecEventStream;
@@ -217,7 +222,12 @@ function execute(
     const timeoutSeconds =
       request.timeoutMs && request.timeoutMs > 0 ? Math.ceil(request.timeoutMs / 1000) : undefined;
     const stream = client.execSandbox(
-      { sandboxId: id, command: request.command, timeoutSeconds },
+      {
+        sandboxId: id,
+        command: request.command,
+        stdin: request.stdin === undefined ? undefined : Buffer.from(request.stdin),
+        timeoutSeconds,
+      },
       metadata,
       options,
     );

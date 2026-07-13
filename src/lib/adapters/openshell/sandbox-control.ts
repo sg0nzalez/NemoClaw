@@ -7,6 +7,8 @@ import { captureOpenshell } from "./runtime";
 export interface SandboxExecRequest {
   sandboxName: string;
   command: readonly string[];
+  /** Optional bytes supplied to the remote command's standard input. */
+  stdin?: string | Buffer;
   /** Maximum combined stdout and stderr bytes retained by the transport. */
   maxOutputBytes?: number;
   /** End-to-end lookup and execution deadline. Zero means no deadline. */
@@ -48,6 +50,7 @@ export function createCliOpenShellSandboxControl(
         {
           ignoreError: true,
           includeStreams: true,
+          input: request.stdin,
           maxBuffer: request.maxOutputBytes,
           timeout: request.timeoutMs,
         },

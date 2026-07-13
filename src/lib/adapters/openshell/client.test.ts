@@ -251,6 +251,24 @@ describe("openshell helpers", () => {
     });
   });
 
+  it("pipes binary stdin through captured OpenShell commands", () => {
+    const stdin = Buffer.from([0, 255, 10]);
+    let observedStdio: unknown;
+    let observedInput: unknown;
+    const result = captureOpenshellCommand("openshell", ["sandbox", "exec"], {
+      input: stdin,
+      spawnSyncImpl: (_command, _args, options) => {
+        observedStdio = options.stdio;
+        observedInput = options.input;
+        return makeSpawnResult({ status: 0, stdout: "ok\n", stderr: "" });
+      },
+    });
+
+    expect(observedStdio).toEqual(["pipe", "pipe", "pipe"]);
+    expect(observedInput).toBe(stdin);
+    expect(result).toEqual({ status: 0, output: "ok" });
+  });
+
   it("verifies sandbox existence before requesting SSH config", () => {
     const calls: string[][] = [];
     const spawnSyncImpl: OpenshellSpawnSync = (_command, args) => {

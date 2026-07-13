@@ -20,7 +20,7 @@ type RunnerOptions = {
   env?: NodeJS.ProcessEnv;
   replaceEnv?: boolean;
   stdio?: StdioOptions;
-  input?: string;
+  input?: string | Buffer;
   ignoreError?: boolean;
   includeStderr?: boolean;
   includeStreams?: boolean;
@@ -70,6 +70,7 @@ export function captureOpenshell(args: CommandArgs, opts: RunnerOptions = {}) {
     ignoreError: opts.ignoreError,
     includeStderr: opts.includeStderr,
     includeStreams: opts.includeStreams,
+    input: opts.input,
     timeout: opts.timeout,
     maxBuffer: opts.maxBuffer,
     errorLine: console.error,

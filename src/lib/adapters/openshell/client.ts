@@ -42,12 +42,13 @@ function openshellSpawnEnv(opts: OpenshellSpawnOptions): NodeJS.ProcessEnv {
 
 export interface RunOpenshellOptions extends OpenshellSpawnOptions {
   stdio?: SpawnSyncOptions["stdio"];
-  input?: string;
+  input?: string | Buffer;
 }
 
 export interface CaptureOpenshellOptions extends OpenshellSpawnOptions {
   includeStderr?: boolean;
   includeStreams?: boolean;
+  input?: string | Buffer;
   maxBuffer?: number;
 }
 
@@ -212,7 +213,8 @@ export function captureOpenshellCommand(
     cwd: opts.cwd,
     env: openshellSpawnEnv(opts),
     encoding: "utf-8",
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: [opts.input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
+    input: opts.input,
     timeout: opts.timeout,
     maxBuffer: opts.maxBuffer,
   });

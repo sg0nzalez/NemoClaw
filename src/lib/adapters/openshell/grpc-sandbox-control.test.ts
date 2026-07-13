@@ -129,6 +129,7 @@ describe("gRPC OpenShell sandbox control", () => {
       control.exec({
         sandboxName: "alpha",
         command: ["sh", "-lc", "echo hello"],
+        stdin: "request body",
       }),
     ).resolves.toEqual({
       status: 7,
@@ -140,6 +141,7 @@ describe("gRPC OpenShell sandbox control", () => {
     expect((fake.stream as FakeStream & { request: unknown }).request).toEqual({
       sandboxId: "sb-id",
       command: ["sh", "-lc", "echo hello"],
+      stdin: Buffer.from("request body"),
     });
     control.close();
     expect(fake.close).toHaveBeenCalledOnce();
@@ -172,7 +174,7 @@ describe("gRPC OpenShell sandbox control", () => {
       },
       execSandbox(
         call: ServerWritableStream<
-          { sandboxId: string; command: string[] },
+          { sandboxId: string; command: string[]; stdin?: Buffer },
           {
             stdout?: { data: Buffer };
             stderr?: { data: Buffer };
@@ -193,7 +195,11 @@ describe("gRPC OpenShell sandbox control", () => {
     });
     try {
       await expect(
-        control.exec({ sandboxName: "alpha", command: ["printf", "wire"] }),
+        control.exec({
+          sandboxName: "alpha",
+          command: ["cat"],
+          stdin: Buffer.from([0, 255, 10]),
+        }),
       ).resolves.toEqual({
         status: 0,
         stdout: "wire stdout",
@@ -201,7 +207,7 @@ describe("gRPC OpenShell sandbox control", () => {
       });
       expect(requests).toEqual([
         { name: "alpha" },
-        { sandboxId: "wire-id", command: ["printf", "wire"] },
+        { sandboxId: "wire-id", command: ["cat"], stdin: Buffer.from([0, 255, 10]) },
       ]);
     } finally {
       control.close();
