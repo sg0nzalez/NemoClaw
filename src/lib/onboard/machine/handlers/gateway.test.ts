@@ -89,6 +89,32 @@ function baseOptions(
   };
 }
 
+async function captureTraceArtifact(run: () => Promise<void>): Promise<TraceArtifact> {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-gateway-trace-"));
+  const traceFile = path.join(directory, "trace.json");
+  const previousTraceFile = process.env[TRACE_FILE_ENV];
+  process.env[TRACE_FILE_ENV] = traceFile;
+  resetTraceForTests();
+
+  try {
+    await run();
+    flushTrace();
+    return JSON.parse(fs.readFileSync(traceFile, "utf8")) as TraceArtifact;
+  } finally {
+    previousTraceFile === undefined
+      ? Reflect.deleteProperty(process.env, TRACE_FILE_ENV)
+      : Reflect.set(process.env, TRACE_FILE_ENV, previousTraceFile);
+    resetTraceForTests();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+function gatewaySpans(artifact: TraceArtifact) {
+  return artifact.resource_spans[0].scope_spans[0].spans.filter(
+    (span) => span.name === ONBOARD_TRACE_PHASE_NAMES.gateway,
+  );
+}
+
 describe("handleGatewayState", () => {
   it("starts the gateway when no reusable gateway exists", async () => {
     const { deps, calls } = createDeps();
@@ -124,31 +150,37 @@ describe("handleGatewayState", () => {
   });
 
   it("emits one successful gateway phase when reusing a healthy gateway", async () => {
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-gateway-trace-"));
-    const traceFile = path.join(directory, "trace.json");
-    process.env[TRACE_FILE_ENV] = traceFile;
-    resetTraceForTests();
-
-    try {
+    const artifact = await captureTraceArtifact(async () => {
       const { deps } = createDeps();
 
       await handleGatewayState(baseOptions(deps, "healthy"));
-      flushTrace();
+    });
 
-      const artifact = JSON.parse(fs.readFileSync(traceFile, "utf8")) as TraceArtifact;
-      const gatewaySpans = artifact.resource_spans[0].scope_spans[0].spans.filter(
-        (span) => span.name === ONBOARD_TRACE_PHASE_NAMES.gateway,
-      );
-      expect(gatewaySpans).toHaveLength(1);
-      expect(gatewaySpans[0]).toMatchObject({
+    expect(gatewaySpans(artifact)).toEqual([
+      expect.objectContaining({
         status: { code: "OK" },
         attributes: { reuse_state: "healthy", gpu_passthrough: true },
+      }),
+    ]);
+  });
+
+  it("emits one failed gateway phase when stopped-container recovery fails", async () => {
+    const artifact = await captureTraceArtifact(async () => {
+      const { deps } = createDeps({
+        gatewayCliSupportsLifecycleCommands: vi.fn(() => true),
+        verifyGatewayContainerRunning: vi.fn(() => "stopped" as GatewayContainerState),
+        recoverGatewayRuntime: vi.fn(async () => false),
       });
-    } finally {
-      delete process.env[TRACE_FILE_ENV];
-      resetTraceForTests();
-      fs.rmSync(directory, { recursive: true, force: true });
-    }
+
+      await expect(handleGatewayState(baseOptions(deps, "healthy"))).rejects.toThrow("exit 1");
+    });
+
+    expect(gatewaySpans(artifact)).toEqual([
+      expect.objectContaining({
+        status: { code: "ERROR", message: "exit 1" },
+        attributes: { reuse_state: "healthy", gpu_passthrough: true },
+      }),
+    ]);
   });
 
   it("reuses healthy gateways on resume only when the gateway step was complete", async () => {
