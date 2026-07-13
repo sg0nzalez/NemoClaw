@@ -143,9 +143,7 @@ function makeHealthyVmGatewayEnv(prefix: string): Record<string, string> {
   };
 }
 
-// VM-driver env with an `imageTag` set in the sandbox registry so the
-// `resolveSrcPodImage()` fast path returns the image without falling back to
-// the docker/kubectl probe.
+// VM-driver env with the authoritative `imageTag` set in the sandbox registry.
 function makeVmRestoreToEnv(
   prefix: string,
   entry: Record<string, unknown> = { imageTag: "openshell/sandbox-from:fast-path-test" },
@@ -181,9 +179,7 @@ function makeVmRestoreToEnv(
     "exit 0",
   ]);
 
-  // `docker exec` must never run: if the fast path regresses,
-  // resolveSrcPodImage falls into the kubectl-via-docker probe and this
-  // marker shows up in the captured output.
+  // Snapshot restore must never bypass OpenShell through Docker.
   writeExecutable(path.join(localBin, "docker"), [
     'if [ "$1" = "exec" ]; then',
     '  echo "kubectl-must-not-run"',
@@ -223,9 +219,7 @@ describe("snapshot VM-driver gateway guard", () => {
     expect(r.out).not.toContain("Failed to query live sandbox state");
   });
 
-  // `snapshot restore --to <new>` on VM driver must use the registered
-  // imageTag, not the legacy `docker exec ... kubectl` probe.
-  it("snapshot restore --to uses registered imageTag for VM-driver auto-create instead of kubectl probe", () => {
+  it("snapshot restore --to uses the registered imageTag for VM-driver auto-create", () => {
     const env = makeVmRestoreToEnv("nemoclaw-snap-vm-gw-restore-to-");
 
     const seed = runCli("alpha snapshot create --name baseline", env);

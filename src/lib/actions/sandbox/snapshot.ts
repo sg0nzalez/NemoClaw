@@ -3,7 +3,6 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { dockerCapture } from "../../adapters/docker";
 import {
   captureOpenshell,
   getOpenshellBinary,
@@ -56,11 +55,7 @@ import {
   createSandboxExecMarker,
   extractSandboxExecCommandStdoutFromStreams,
 } from "./sandbox-exec-output";
-import {
-  probeGatewayRunning,
-  selectSandboxGatewayIfRegistered,
-  usesGatewayMetadataProbe,
-} from "./sandbox-gateway-routing";
+import { probeGatewayRunning, selectSandboxGatewayIfRegistered } from "./sandbox-gateway-routing";
 
 const useColor = !process.env.NO_COLOR && !!process.stdout.isTTY;
 const trueColor =
@@ -139,45 +134,11 @@ function renderSnapshotTable(
   }
 }
 
-// Resolve the running src pod's image. Docker- and VM-driver sandboxes don't
-// have the legacy cluster container — trust the registered imageTag and fail
-// fast if it's missing. Only the "kubernetes" driver falls back to the
-// kubectl probe inside the gateway container.
-function resolveSrcPodImage(
-  srcName: string,
-  srcEntry?: SandboxEntry | { name: string },
-): string | null {
-  const registeredImage = (srcEntry as { imageTag?: string | null } | undefined)?.imageTag;
-  const registeredDriver = (srcEntry as { openshellDriver?: string | null } | undefined)
-    ?.openshellDriver;
-  if (usesGatewayMetadataProbe(registeredDriver)) {
-    return registeredImage ?? null;
-  }
-
-  const srcGatewayName = resolveSandboxGatewayName(
-    srcEntry as { gatewayName?: string | null; gatewayPort?: number | null },
-  );
-  const gatewayContainer = `openshell-cluster-${srcGatewayName}`;
-  try {
-    const output = dockerCapture(
-      [
-        "exec",
-        gatewayContainer,
-        "kubectl",
-        "get",
-        "pod",
-        srcName,
-        "-n",
-        "openshell",
-        "-o",
-        'jsonpath={.spec.containers[?(@.name=="agent")].image}',
-      ],
-      { ignoreError: true, timeout: 10000 },
-    );
-    return output.trim().split(/\s+/)[0] || null;
-  } catch {
-    return null;
-  }
+// The registry image is recorded from OpenShell's create result and remains
+// the authoritative rebuild input. Legacy entries without it fail closed;
+// do not bypass the control plane to inspect a Kubernetes pod through Docker.
+function registeredSandboxImage(srcEntry: SandboxEntry | { name: string }): string | null {
+  return (srcEntry as { imageTag?: string | null }).imageTag ?? null;
 }
 
 // Auto-create a sandbox that clones the image of an existing one.
@@ -854,7 +815,7 @@ async function runSnapshotRestoreUnlocked(
       snapshotExit(1);
     }
     const srcEntry = registry.getSandbox(sandboxName) || { name: sandboxName };
-    const fromImage = resolveSrcPodImage(sandboxName, srcEntry);
+    const fromImage = registeredSandboxImage(srcEntry);
     if (!fromImage) {
       console.error(
         `  Cannot resolve image for source sandbox '${sandboxName}' — aborting before ` +
@@ -900,7 +861,7 @@ async function runSnapshotRestoreUnlocked(
         );
         snapshotExit(1);
       }
-      const lockedFromImage = resolveSrcPodImage(sandboxName, lockedSourceEntry);
+      const lockedFromImage = registeredSandboxImage(lockedSourceEntry);
       if (!lockedFromImage) {
         console.error(
           `  Cannot resolve the current image for source sandbox '${sandboxName}' — aborting before changing '${targetSandbox}'.`,

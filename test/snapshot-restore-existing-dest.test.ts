@@ -56,7 +56,7 @@ function runCli(
 interface MakeEnvOptions {
   /** When false, omit the snapshot manifest so getLatestBackup returns null. */
   withSnapshot?: boolean;
-  /** When false, fake docker exec returns an empty image string. */
+  /** When false, omit the source registry image. */
   withSourceImage?: boolean;
   /** Put dst on a registered non-default gateway and hide it from src's gateway list. */
   destinationGatewayPort?: number;
@@ -78,10 +78,7 @@ interface MakeEnvOptions {
  *    - `sandbox delete dst` exits 0 (and logs the call)
  *    - `sandbox create` exits non-zero (intentional; the integration tests
  *      only need to verify control flow reached/passed the delete step)
- *  - fake docker that:
- *    - `inspect ... State.Running` returns "true" (gateway up)
- *    - `exec ... kubectl get pod src ...` returns an image string (or empty
- *      when withSourceImage=false), exercising resolveSrcPodImage's preflight
+ *  - fake docker whose `inspect ... State.Running` returns "true" (gateway up)
  */
 function makeExistingDestEnv(
   prefix: string,
@@ -102,6 +99,9 @@ function makeExistingDestEnv(
       sandboxes: {
         src: {
           name: "src",
+          ...(opts.withSourceImage === false
+            ? {}
+            : { imageTag: "ghcr.io/nvidia/nemoclaw/sandbox-src:test" }),
           model: "test-model",
           provider: "nvidia-prod",
           gpuEnabled: false,
@@ -190,8 +190,6 @@ function makeExistingDestEnv(
     { mode: 0o755 },
   );
 
-  const sourceImageOutput =
-    opts.withSourceImage === false ? "" : "ghcr.io/nvidia/nemoclaw/sandbox-src:test";
   fs.writeFileSync(
     path.join(localBin, "docker"),
     [
@@ -201,14 +199,6 @@ function makeExistingDestEnv(
         ? `  case "$*" in *openshell-cluster-${destinationGatewayName}*) echo "false"; exit 0 ;; esac`
         : "  :",
       '  echo "true"',
-      "  exit 0",
-      "fi",
-      'if [ "$1" = "exec" ]; then',
-      // The action calls `docker exec <gateway> kubectl get pod <src> ...`.
-      // Return the configured image (or an empty string to simulate
-      // "image cannot be resolved", which #3756 P1 says must abort before
-      // we touch the destination).
-      `  printf '%s' ${JSON.stringify(sourceImageOutput)}`,
       "  exit 0",
       "fi",
       "exit 0",

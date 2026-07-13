@@ -146,7 +146,6 @@ const latestBackupFixture = {
 };
 
 vi.mock("../../adapters/docker", () => ({
-  dockerCapture: vi.fn(() => ""),
   dockerInspect: dockerInspectMock,
 }));
 
