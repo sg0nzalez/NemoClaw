@@ -96,6 +96,22 @@ describe("OpenShell 0.0.82 migration review", () => {
     expect(review).toContain("reject archive traversal, links, devices, duplicates");
   });
 
+  it("records exact development identities without treating them as a stable release", () => {
+    expect(review).toContain("0.0.82-dev.11+gbb72d012");
+    expect(review).toContain("0.0.82-dev.11+gbb72d0123");
+    expect(review).toContain("0.0.82.dev11+gbb72d0123");
+    expect(review).toContain("8266446648");
+    expect(review).toContain("8266452366");
+    expect(review).toContain("8266435047");
+    expect(review).toContain(
+      "sha256:fc441051102b1a16ffcabf59878fa464d3c548f29bfbfa6e4acb232ab67198b7",
+    );
+    expect(review).toContain("8266448422");
+    expect(review).toContain("8266451406");
+    expect(review).toContain("attestationStatus: absent");
+    expect(review).toContain("final stable release must be audited anew");
+  });
+
   it("tracks every material migration concern and refuses false-green evidence", () => {
     for (let number = 1; number <= 14; number += 1) {
       const id = `OS82-${String(number).padStart(2, "0")}`;

@@ -66,10 +66,15 @@ Release publication is a separate gate from source ancestry:
   but it has no GitHub release. Release Tag run
   [29101552146](https://github.com/NVIDIA/OpenShell/actions/runs/29101552146)
   failed the Ubuntu 26.04 rootless-Podman E2E job and skipped publication.
-- OpenShell `bb72d012` produced moving development build
-  `0.0.82.dev11+gbb72d0123` in successful Release Dev run
-  [29215426930](https://github.com/NVIDIA/OpenShell/actions/runs/29215426930).
-  A moving prerelease is useful for compatibility work, but is not a stable
+- OpenShell `bb72d012` produced a successful Release Dev run
+  [29215426930](https://github.com/NVIDIA/OpenShell/actions/runs/29215426930),
+  but it does not expose one interchangeable version string. The released CLI,
+  gateway, and standalone sandbox binaries report `0.0.82-dev.11+gbb72d012`;
+  the pipeline Cargo version and supervisor image report
+  `0.0.82-dev.11+gbb72d0123`; and Python wheel filenames use
+  `0.0.82.dev11+gbb72d0123`. Development compatibility manifests must record
+  the observed CLI output separately from producer and component versions. A
+  moving prerelease is useful for compatibility work, but is not a stable
   selector or final provenance record.
 
 ## Artifact baseline and provenance gap
@@ -102,6 +107,40 @@ CLI, gateway, or sandbox binary name. Absolute paths, parent traversal, extra or
 duplicate members, links, and devices fail closed. This structural validation is
 independent of release SHA-256 verification and also constrains the explicitly
 unverified development-channel path.
+
+### Candidate development artifact evidence
+
+The successful `bb72d012` Release Dev run provides bounded compatibility inputs,
+not release approval. The exact retained Linux amd64 artifacts inspected on July
+12, 2026 are:
+
+| Role | Actions artifact | Actions ZIP SHA-256 | Inner archive SHA-256 | Extracted binary SHA-256 |
+|---|---|---|---|---|
+| CLI | `8266446648` (`cli-linux-amd64`) | `78923b27a492204b6e869d9f5f392e57b37d8ddcb9367d746f4ee46cfaf0e5a2` | `d1732c0b87801560afd1b06cfea31c60d6a357100d5b817b4a4fb181b0b71933` | `09083ef8087e5191fc3513a7239b08041b511fdeb7f2fe074bdf8820886cbea1` |
+| Gateway | `8266452366` (`gateway-binary-linux-amd64`) | `39504758f07a8bac0a52d958ec56e380ac59824bde8db72a815a9b82c6bbcfd6` | `5e3728564b1f965cb5d320bab4f37d388303723f42a64c308227dbc1ef382043` | `39e75f7a2a96c220e3f2d645067f0623d922385ade07edb2037a27cc07ea81d1` |
+| Standalone sandbox | `8266435047` (`supervisor-binary-linux-amd64`) | `7b2e47adbbfc644806b465a4f4c3c7bfaba7117e1f19ec9f151b37695b418bf4` | `6f7040e89ec249df7f3b36ddff609a87f096fcdf62cd5c28e86757f175e40a7a` | `58e5d99261d2b8ea06664d020995830fd3f153ea692f36622b92f9b827ea60c8` |
+
+Each Actions ZIP contains exactly the expected archive, and each nested archive
+contains exactly one regular mode-0755 root-owned binary with no links or extra
+paths. The artifacts expire around July 18, 2026; their IDs are evidence only
+while retained and must not become long-lived dependency selectors.
+
+The development supervisor image resolves to immutable index
+`sha256:fc441051102b1a16ffcabf59878fa464d3c548f29bfbfa6e4acb232ab67198b7`:
+
+| Platform | Child manifest | Config | Binary layer | `/openshell-sandbox` SHA-256 |
+|---|---|---|---|---|
+| Linux amd64 | `sha256:4a54b434decd007d2a966edb5db751adb3ca4cf8ab8ac0b248901f8efe614b71` | `sha256:5432194fa43840c333bc7b166bf6e7c0e15247e9dc195cb9a38c1a85b7415f44` | `sha256:d1baeaebaddef6291e0a94b697f28c3c319ac2ec1a83843026e89553cc7cd27e` | `8e89067afca2d1c02a25fb19906dd27fd8d524ee4eb3b2b36b1210338dae9235` |
+| Linux arm64 | `sha256:fab8d5c551991648a19bf7876d2edf19fdcf4e95139ce5f75d638354c0820d51` | `sha256:66a1d121d6386e19297d05a950ba7409c5752f337bacfbc156c7c76513e40136` | `sha256:818c727cb5cbcdb78918a274ca6b9aa85be6a95fdb604e49f523cf2c87f2eba4` | `8ec9b88c49f001d070ada7bb5a98fb6f96498fc446b0f2f614056247d7300b85` |
+
+Those image binaries byte-match build artifacts `8266448422` (amd64) and
+`8266451406` (arm64), respectively. The match binds registry content to retained
+Actions output, but not cryptographically to source: GitHub returned no
+attestation for the index or either child manifest, and the OCI configs expose no
+source, revision, or version labels. Development proof must therefore record
+`attestationStatus: absent`, preserve every digest above, and avoid claiming
+source-to-image provenance. The final stable release must be audited anew rather
+than inheriting this development evidence.
 
 ## Adjacent release findings
 
@@ -262,12 +301,12 @@ Commits: `5f38b7c4`, `ccdac9ce`, `caaa5165`, `8c0ecac8`, `233d207e`,
 |---|---|---|---|---|
 | `OS82-01` | Critical | All stable selectors, archives, checksums, binaries, and the supervisor image could identify different builds. | Pin one published tag; verify producer run, signatures/attestations, release hashes, extracted binaries, component versions, OCI index and child manifests; reject archive traversal, links, devices, duplicates, or unexpected members. | Blocked: no stable `v0.0.82` release. |
 | `OS82-02` | Critical | `mcp status` can be honest while the affected Spark still cannot initialize resolver/CA state or perform a credential-bearing request. | Physical Docker 27 DGX Spark: register credential, require status success, load tools, complete a real MCP tool call, and prove the literal placeholder never reaches upstream. | Blocked on assigned hardware proof. |
-| `OS82-03` | High | `src/lib/actions/sandbox/exec.ts`, command dispatch, docs, and internal wrappers encode the old newline rejection. | Remove the obsolete public rejection; prove byte-exact LF, CRLF, quotes, and heredoc argv; retain NUL plus multiline workdir/environment rejection. | Migration in progress. |
+| `OS82-03` | High | `src/lib/actions/sandbox/exec.ts`, command dispatch, docs, and internal wrappers encode the old newline rejection. | Remove the obsolete public rejection; prove byte-exact LF, CRLF, quotes, and heredoc argv; retain NUL plus multiline workdir/environment rejection. | Source migration and focused tests complete; candidate runtime proof open. |
 | `OS82-04` | High | OpenShell child launch now clears the complete capability bounding set. Hosts without `CAP_SETPCAP` may fail if their runtime does not pre-clear it. | Prove entrypoint, exec, and connect launch with `CapBnd=0` on Linux Docker, DGX Spark arm64, macOS Docker Desktop/Colima, WSL, and Colossus; update NemoClaw's #3280 caveat only from runtime evidence. | Open runtime gate. |
 | `OS82-05` | High | Versioned credential placeholders and the eight-generation window change long-running MCP behavior. | Regenerate the exact-version child-visible manifest; reject reserved `v<digits>_` names; test more than eight rotations, removed keys, detach, restart/rebuild, fresh exec revision, expiry, and literal-placeholder scans. | Open migration and runtime gate. |
 | `OS82-06` | High | Initial policy acknowledgement and ordered retry can make the active gateway status lag enforcement. | Test initial LOADED/FAILED, hot update, retry outage/recovery, restart, exact version/hash re-read, and ordered drain. | Open runtime gate. |
 | `OS82-07` | High | Sequential nft setup can leave an incomplete policy-accept ruleset after a required command fails; Docker setup treats the error as nonfatal. | Inject each required failure; inspect IPv4/IPv6 TCP/UDP rules and direct-bypass negatives on Linux x86 and Spark arm64; verify restart and teardown. | Open security gate. |
-| `OS82-08` | High | The supervisor image gains Alpine and three networking packages and changes binary mode. | Review SBOM, vulnerabilities, licenses, executables, modes, multiarch manifests, source labels, and OCI provenance; preserve an explicit digest. | Open supply-chain gate. |
+| `OS82-08` | High | The supervisor image gains Alpine and three networking packages and changes binary mode. | Review SBOM, vulnerabilities, licenses, executables, modes, multiarch manifests, source labels, and OCI provenance; preserve an explicit digest. | Development image content audited; missing attestation and final stable image remain open. |
 | `OS82-09` | Medium-high | Normalized selected-driver config can change the effective Docker gateway even when the TOML text is unchanged. | Parse the final rendered TOML with the final binary; prove loopback/bridge listeners, JWT/mTLS, restart, persisted state, and legacy gateway upgrade. | Open runtime gate. |
 | `OS82-10` | Medium-high | Supervisor TLS identity variables are no longer child environment. Stale tests/comments can normalize a credential leak. | Assert absence from entrypoint, exec, and connect children and update the source-of-truth rationale. | Open migration gate. |
 | `OS82-11` | Medium-high | Live `/proc/<pid>/exe` identity changes replacement-time policy behavior. | Prove old process survives replacement and a new altered process at the same path is denied. | Open runtime gate. |
