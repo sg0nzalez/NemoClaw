@@ -13,7 +13,10 @@ import {
   type SandboxExecRequest,
   type SandboxExecResult,
 } from "./sandbox-control";
-import type { GrpcOpenShellSandboxControl } from "./grpc-sandbox-control";
+import {
+  type GrpcOpenShellSandboxControl,
+  OpenShellGrpcPreDispatchError,
+} from "./grpc-sandbox-control";
 
 export interface ReadOnlyRoutingDependencies {
   cli: OpenShellSandboxControl;
@@ -84,8 +87,11 @@ export async function execSandboxReadOnlyWithGrpcFallback(
       ...request,
       timeoutMs: request.timeoutMs ?? OPENSHELL_OPERATION_TIMEOUT_MS,
     });
-    if (!result.error) return result;
-    dependencies.debug("OpenShell direct gRPC read failed; retrying through the CLI", result.error);
+    if (!(result.error instanceof OpenShellGrpcPreDispatchError)) return result;
+    dependencies.debug(
+      "OpenShell direct gRPC lookup failed before dispatch; retrying through the CLI",
+      result.error.cause,
+    );
   } catch (error) {
     dependencies.debug(
       "OpenShell direct gRPC configuration failed; retrying through the CLI",

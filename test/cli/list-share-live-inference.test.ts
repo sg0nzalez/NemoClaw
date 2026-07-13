@@ -257,9 +257,8 @@ describe("list shows live gateway inference", () => {
           "  echo 'Sandbox: my-agent'",
           "  exit 0",
           "fi",
-          'if [ "$1" = "sandbox" ] && [ "$2" = "ssh-config" ] && [ "$3" = "my-agent" ]; then',
-          "  echo 'Host openshell-my-agent'",
-          "  echo '  HostName 127.0.0.1'",
+          'if [ "$1" = "sandbox" ] && [ "$2" = "exec" ]; then',
+          "  echo 'OpenClaw 2026.3.11 (old)'",
           "  exit 0",
           "fi",
           'if [ "$1" = "--version" ]; then',
@@ -270,12 +269,6 @@ describe("list shows live gateway inference", () => {
         ].join("\n"),
         { mode: 0o755 },
       );
-      fs.writeFileSync(
-        path.join(localBin, "ssh"),
-        ["#!/usr/bin/env bash", "echo 'OpenClaw 2026.3.11 (old)'", "exit 0"].join("\n"),
-        { mode: 0o755 },
-      );
-
       const r = runWithEnv("upgrade-sandboxes --check 2>&1", {
         HOME: home,
         PATH: `${localBin}:${process.env.PATH || ""}`,
@@ -331,9 +324,8 @@ describe("list shows live gateway inference", () => {
           "  echo 'Sandbox: my-agent'",
           "  exit 0",
           "fi",
-          'if [ "$1" = "sandbox" ] && [ "$2" = "ssh-config" ] && [ "$3" = "my-agent" ]; then',
-          "  echo 'Host openshell-my-agent'",
-          "  echo '  HostName 127.0.0.1'",
+          'if [ "$1" = "sandbox" ] && [ "$2" = "exec" ]; then',
+          "  echo 'OpenClaw 9999.12.31 (new)'",
           "  exit 0",
           "fi",
           'if [ "$1" = "--version" ]; then',
@@ -344,12 +336,6 @@ describe("list shows live gateway inference", () => {
         ].join("\n"),
         { mode: 0o755 },
       );
-      fs.writeFileSync(
-        path.join(localBin, "ssh"),
-        ["#!/usr/bin/env bash", "echo 'OpenClaw 9999.12.31 (new)'", "exit 0"].join("\n"),
-        { mode: 0o755 },
-      );
-
       const r = runWithEnv("upgrade-sandboxes --check 2>&1", {
         HOME: home,
         PATH: `${localBin}:${process.env.PATH || ""}`,
@@ -405,9 +391,8 @@ describe("list shows live gateway inference", () => {
           '  echo "my-agent   Running   openclaw"',
           "  exit 0",
           "fi",
-          'if [ "$1" = "sandbox" ] && [ "$2" = "ssh-config" ] && [ "$3" = "my-agent" ]; then',
-          "  echo 'Host openshell-my-agent'",
-          "  echo '  HostName 127.0.0.1'",
+          'if [ "$1" = "sandbox" ] && [ "$2" = "exec" ]; then',
+          `  echo 'OpenClaw ${OPENCLAW_EXPECTED_VERSION}'`,
           "  exit 0",
           "fi",
           'if [ "$1" = "--version" ]; then',
@@ -418,15 +403,6 @@ describe("list shows live gateway inference", () => {
         ].join("\n"),
         { mode: 0o755 },
       );
-      // Live probe reports the CURRENT agent version, so agent-version is NOT stale.
-      fs.writeFileSync(
-        path.join(localBin, "ssh"),
-        ["#!/usr/bin/env bash", `echo 'OpenClaw ${OPENCLAW_EXPECTED_VERSION}'`, "exit 0"].join(
-          "\n",
-        ),
-        { mode: 0o755 },
-      );
-
       const r = runWithEnv("upgrade-sandboxes --check 2>&1", {
         HOME: home,
         PATH: `${localBin}:${process.env.PATH || ""}`,
@@ -482,21 +458,14 @@ describe("list shows live gateway inference", () => {
           "  echo 'Sandbox: my-agent'",
           "  exit 0",
           "fi",
-          'if [ "$1" = "sandbox" ] && [ "$2" = "ssh-config" ] && [ "$3" = "my-agent" ]; then',
-          "  echo 'Host openshell-my-agent'",
-          "  echo '  HostName 127.0.0.1'",
+          'if [ "$1" = "sandbox" ] && [ "$2" = "exec" ]; then',
+          "  echo 'OpenClaw 2026.3.11 (old)'",
           "  exit 0",
           "fi",
           "exit 0",
         ].join("\n"),
         { mode: 0o755 },
       );
-      fs.writeFileSync(
-        path.join(localBin, "ssh"),
-        ["#!/usr/bin/env bash", "echo 'OpenClaw 2026.3.11 (old)'", "exit 0"].join("\n"),
-        { mode: 0o755 },
-      );
-
       const r = runWithEnv("upgrade-sandboxes --check 2>&1", {
         HOME: home,
         PATH: `${localBin}:${process.env.PATH || ""}`,
