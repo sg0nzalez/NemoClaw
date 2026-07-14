@@ -244,6 +244,44 @@ describe("gRPC OpenShell sandbox control", () => {
     expect(fake.close).toHaveBeenCalledOnce();
   });
 
+  it("treats a present exit frame with an omitted proto3 default scalar as status zero", async () => {
+    const fake = fakeApi({
+      emit(stream) {
+        stream.emit("data", { stdout: { data: Buffer.from("ok") } });
+        stream.emit("data", { exit: {} });
+        stream.emit("end");
+      },
+    });
+    const control = createGrpcOpenShellSandboxControl(
+      { endpoint: "http://127.0.0.1:8080" },
+      fake.api,
+    );
+
+    await expect(control.exec({ sandboxName: "alpha", command: ["true"] })).resolves.toEqual({
+      status: 0,
+      stdout: "ok",
+      stderr: "",
+    });
+  });
+
+  it("does not treat a malformed null exit code as the proto3 default zero", async () => {
+    const fake = fakeApi({
+      emit(stream) {
+        stream.emit("data", { exit: { exitCode: null } });
+        stream.emit("end");
+      },
+    });
+    const control = createGrpcOpenShellSandboxControl(
+      { endpoint: "http://127.0.0.1:8080" },
+      fake.api,
+    );
+
+    const result = await control.exec({ sandboxName: "alpha", command: ["true"] });
+
+    expect(result.status).toBeNull();
+    expect(result.error?.message).toBe("OpenShell gRPC exec stream ended without an exit status");
+  });
+
   it("executes against the pinned OpenShell service definition", async () => {
     const protoFile = path.resolve(
       __dirname,
@@ -275,14 +313,16 @@ describe("gRPC OpenShell sandbox control", () => {
           {
             stdout?: { data: Buffer };
             stderr?: { data: Buffer };
-            exit?: { exitCode: number };
+            exit?: { exitCode?: number };
           }
         >,
       ) {
         requests.push(call.request);
         call.write({ stdout: { data: Buffer.from("wire stdout") } });
         call.write({ stderr: { data: Buffer.from("wire stderr") } });
-        call.write({ exit: { exitCode: 0 } });
+        // Rust/prost does not encode the default proto3 int32 value. Exercise
+        // the exact successful exit event emitted by the v0.0.72 gateway.
+        call.write({ exit: {} });
         call.end();
       },
     });

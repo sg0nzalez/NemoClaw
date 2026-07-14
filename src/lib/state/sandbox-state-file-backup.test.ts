@@ -5,14 +5,54 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { findMultilineExecArg } from "../actions/sandbox/exec";
-import {
+
+const execReadOnly = vi.hoisted(() => vi.fn());
+const getSandbox = vi.hoisted(() => vi.fn());
+const loadAgent = vi.hoisted(() => vi.fn());
+
+vi.mock("../adapters/openshell/sandbox-control-routing.js", () => ({
+  execSandboxReadOnlyWithGrpcFallback: execReadOnly,
+}));
+vi.mock("./registry.js", () => ({ getSandbox }));
+vi.mock("../agent/defs.js", () => ({ loadAgent }));
+
+const ORIGINAL_HOME = process.env.HOME;
+const TMP_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-state-file-backup-"));
+process.env.HOME = TMP_HOME;
+
+const {
+  backupSandboxState,
   buildStateFileBackupExecRequest,
   classifyStateFileBackupExecResult,
   isSandboxExecTransportFailure,
   SQLITE_BACKUP_PY,
-} from "./sandbox";
+} = await import("./sandbox");
+
+afterAll(() => {
+  ORIGINAL_HOME === undefined
+    ? Reflect.deleteProperty(process.env, "HOME")
+    : Reflect.set(process.env, "HOME", ORIGINAL_HOME);
+  fs.rmSync(TMP_HOME, { force: true, recursive: true });
+});
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  fs.rmSync(path.join(TMP_HOME, ".nemoclaw"), { force: true, recursive: true });
+  getSandbox.mockReturnValue({
+    name: "hermes",
+    agent: "hermes",
+    policies: [],
+    gatewayName: "nemoclaw",
+  });
+  loadAgent.mockReturnValue({
+    configPaths: { dir: "/sandbox/.hermes" },
+    expectedVersion: null,
+    stateDirs: [],
+    stateFiles: [{ path: "runtime/state.db", strategy: "copy" }],
+  });
+});
 
 describe("state-file backup exec request", () => {
   it("streams the SQLite program through stdin and keeps every command argument single-line", () => {
@@ -130,5 +170,52 @@ describe("state-file backup exec request", () => {
       true,
     );
     expect(isSandboxExecTransportFailure({ status: null, signal: "SIGKILL" })).toBe(true);
+  });
+
+  it("persists binary state-file bytes with private mode and complete backup bookkeeping", async () => {
+    const bytes = Buffer.from([0x53, 0x51, 0x4c, 0x00, 0xff, 0xfe, 0x80, 0x0a]);
+    execReadOnly.mockResolvedValue({
+      status: 0,
+      stdout: "",
+      stdoutBytes: bytes,
+      stderr: "",
+    });
+
+    const result = await backupSandboxState("hermes", { name: "binary-state" });
+
+    expect(result).toMatchObject({
+      success: true,
+      backedUpDirs: [],
+      failedDirs: [],
+      backedUpFiles: ["runtime/state.db"],
+      failedFiles: [],
+    });
+    expect(result.manifest?.stateFiles).toEqual([{ path: "runtime/state.db", strategy: "copy" }]);
+    const persistedPath = path.join(result.manifest!.backupPath, "runtime", "state.db");
+    expect(fs.readFileSync(persistedPath)).toEqual(bytes);
+    expect(fs.statSync(persistedPath).mode & 0o777).toBe(0o600);
+    expect(execReadOnly).toHaveBeenCalledWith(
+      "nemoclaw",
+      expect.objectContaining({
+        sandboxName: "hermes",
+        stdoutEncoding: "buffer",
+      }),
+    );
+  });
+
+  it("fails closed when a successful state-file exec omits binary stdout", async () => {
+    execReadOnly.mockResolvedValue({ status: 0, stdout: "", stderr: "" });
+
+    const result = await backupSandboxState("hermes", { name: "missing-binary-state" });
+
+    expect(result).toMatchObject({
+      success: false,
+      backedUpFiles: [],
+      failedFiles: ["runtime/state.db"],
+      unreachable: false,
+    });
+    expect(fs.existsSync(path.join(result.manifest!.backupPath, "runtime", "state.db"))).toBe(
+      false,
+    );
   });
 });
