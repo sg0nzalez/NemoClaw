@@ -64,7 +64,8 @@
 // Mechanism mirrors slack-channel-guard.ts / googlechat-outbound-auth.ts
 // (load-time source rewrite of the @openclaw/googlechat dist bundle via the
 // module loader hooks). It targets the SAME dist chunk that
-// googlechat-outbound-auth already patches, so the loader-hook coverage is proven.
+// googlechat-outbound-auth already patches, so the CommonJS wrappers compose via
+// Module._compile and both transforms apply regardless of preload order.
 
 // Test seam: the self-installing IIFE below publishes its pure source-rewrite
 // helpers here so unit tests can exercise the anchor rewrites, drift handling, and
@@ -203,21 +204,38 @@ export const trustedProxyFetchPatchInternals = {};
     return null;
   }
 
+  // Compose with other CommonJS source-rewrite preloads by intercepting
+  // Module._compile instead of reading + compiling the file directly. Calling the
+  // previous loader lets each wrapper transform the same source in sequence,
+  // regardless of NODE_OPTIONS preload order.
+  function createComposableJsLoader(originalJsLoader) {
+    return function nemoclawGooglechatTrustedProxyJsLoader(mod, filename) {
+      if (!isOpenClawGooglechatFile(filename) || typeof mod._compile !== "function") {
+        return originalJsLoader.apply(this, arguments);
+      }
+
+      var originalCompile = mod._compile;
+      mod._compile = function nemoclawGooglechatTrustedProxyCompile(source, loadedFilename) {
+        var sourceText = sourceToText(source);
+        var patched =
+          sourceText === null
+            ? source
+            : patchTrustedProxyFetchSource(sourceText, loadedFilename || filename);
+        return originalCompile.call(this, patched, loadedFilename);
+      };
+      try {
+        return originalJsLoader.apply(this, arguments);
+      } finally {
+        mod._compile = originalCompile;
+      }
+    };
+  }
+
   function installTrustedProxyFetchPatch() {
     var Module = require("module");
-    var fs = require("fs");
     var originalJsLoader = Module._extensions && Module._extensions[".js"];
     if (typeof originalJsLoader === "function") {
-      Module._extensions[".js"] = function nemoclawGooglechatTrustedProxyJsLoader(mod, filename) {
-        if (isOpenClawGooglechatFile(filename)) {
-          var source = fs.readFileSync(filename, "utf8");
-          var patched = patchTrustedProxyFetchSource(source, filename);
-          if (patched !== source) {
-            return mod._compile(patched, filename);
-          }
-        }
-        return originalJsLoader.apply(this, arguments);
-      };
+      Module._extensions[".js"] = createComposableJsLoader(originalJsLoader);
     }
 
     if (typeof Module.registerHooks === "function") {
@@ -239,6 +257,7 @@ export const trustedProxyFetchPatchInternals = {};
   trustedProxyFetchPatchInternals.patchSource = patchTrustedProxyFetchSource;
   trustedProxyFetchPatchInternals.isPatchError = isTrustedProxyFetchPatchError;
   trustedProxyFetchPatchInternals.isOpenClawGooglechatFile = isOpenClawGooglechatFile;
+  trustedProxyFetchPatchInternals.createComposableJsLoader = createComposableJsLoader;
 
   try {
     installTrustedProxyFetchPatch();

@@ -185,21 +185,38 @@ export const outboundAuthPatchInternals = {};
     return null;
   }
 
+  // Compose with other CommonJS source-rewrite preloads by intercepting
+  // Module._compile instead of reading + compiling the file directly. Calling the
+  // previous loader lets each wrapper transform the same source in sequence,
+  // regardless of NODE_OPTIONS preload order.
+  function createComposableJsLoader(originalJsLoader) {
+    return function nemoclawGooglechatJsLoader(mod, filename) {
+      if (!isOpenClawGooglechatFile(filename) || typeof mod._compile !== "function") {
+        return originalJsLoader.apply(this, arguments);
+      }
+
+      var originalCompile = mod._compile;
+      mod._compile = function nemoclawGooglechatCompile(source, loadedFilename) {
+        var sourceText = sourceToText(source);
+        var patched =
+          sourceText === null
+            ? source
+            : patchGooglechatOutboundAuthSource(sourceText, loadedFilename || filename);
+        return originalCompile.call(this, patched, loadedFilename);
+      };
+      try {
+        return originalJsLoader.apply(this, arguments);
+      } finally {
+        mod._compile = originalCompile;
+      }
+    };
+  }
+
   function installGooglechatOutboundAuthPatch() {
     var Module = require("module");
-    var fs = require("fs");
     var originalJsLoader = Module._extensions && Module._extensions[".js"];
     if (typeof originalJsLoader === "function") {
-      Module._extensions[".js"] = function nemoclawGooglechatJsLoader(mod, filename) {
-        if (isOpenClawGooglechatFile(filename)) {
-          var source = fs.readFileSync(filename, "utf8");
-          var patched = patchGooglechatOutboundAuthSource(source, filename);
-          if (patched !== source) {
-            return mod._compile(patched, filename);
-          }
-        }
-        return originalJsLoader.apply(this, arguments);
-      };
+      Module._extensions[".js"] = createComposableJsLoader(originalJsLoader);
     }
 
     if (typeof Module.registerHooks === "function") {
@@ -222,6 +239,7 @@ export const outboundAuthPatchInternals = {};
   outboundAuthPatchInternals.buildShortCircuit = buildBearerShortCircuitSource;
   outboundAuthPatchInternals.isPatchError = isGooglechatOutboundAuthPatchError;
   outboundAuthPatchInternals.isOpenClawGooglechatFile = isOpenClawGooglechatFile;
+  outboundAuthPatchInternals.createComposableJsLoader = createComposableJsLoader;
 
   try {
     installGooglechatOutboundAuthPatch();

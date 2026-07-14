@@ -2,12 +2,24 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
+import { outboundAuthPatchInternals } from "./googlechat-outbound-auth";
 import { trustedProxyFetchPatchInternals } from "./googlechat-trusted-proxy-fetch";
 
-const { patchSource, isPatchError, isOpenClawGooglechatFile } = trustedProxyFetchPatchInternals as {
-  patchSource: (source: string, filename: string) => string;
-  isPatchError: (reason: unknown) => boolean;
-  isOpenClawGooglechatFile: (filename: string) => boolean;
+type CommonJsLoader = (
+  this: unknown,
+  mod: { _compile: (source: string, filename: string) => unknown },
+  filename: string,
+) => unknown;
+
+const { patchSource, isPatchError, isOpenClawGooglechatFile, createComposableJsLoader } =
+  trustedProxyFetchPatchInternals as {
+    patchSource: (source: string, filename: string) => string;
+    isPatchError: (reason: unknown) => boolean;
+    isOpenClawGooglechatFile: (filename: string) => boolean;
+    createComposableJsLoader: (loader: CommonJsLoader) => CommonJsLoader;
+  };
+const { createComposableJsLoader: createOutboundAuthJsLoader } = outboundAuthPatchInternals as {
+  createComposableJsLoader: (loader: CommonJsLoader) => CommonJsLoader;
 };
 
 const FILE = "/x/node_modules/@openclaw/googlechat/dist/api-XXXX.js";
@@ -34,6 +46,9 @@ const BUNDLE = [
   "    url,",
   "    init,",
   "  });",
+  "}",
+  "async function getGoogleChatAccessToken(account) {",
+  "  return (await account.auth.getClient()).getAccessToken();",
   "}",
 ].join("\n");
 
@@ -118,5 +133,26 @@ describe("googlechat trusted-proxy-fetch patch", () => {
         new Error("OpenClaw Google Chat trusted-proxy fetch anchors not recognized in x.js [..]"),
       ),
     ).toBe(true);
+  });
+
+  it.each([
+    ["trusted proxy then outbound auth", createOutboundAuthJsLoader, createComposableJsLoader],
+    ["outbound auth then trusted proxy", createComposableJsLoader, createOutboundAuthJsLoader],
+  ])("composes the CommonJS rewrites in either preload order: %s", (_label, outer, inner) => {
+    let compiledSource = "";
+    const mod = {
+      _compile(source: string) {
+        compiledSource = source;
+      },
+    };
+    const baseLoader: CommonJsLoader = (loadedModule, filename) =>
+      loadedModule._compile(BUNDLE, filename);
+
+    outer(inner(baseLoader))(mod, FILE);
+
+    expect(compiledSource).toContain(PATCH_MARKER);
+    expect(compiledSource).toContain(
+      "nemoclaw: googlechat outbound bearer via gateway-minted credential",
+    );
   });
 });

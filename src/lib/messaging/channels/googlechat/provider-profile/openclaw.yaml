@@ -13,10 +13,10 @@
 # Paired with the googlechat-outbound-auth runtime preload, which rewrites the
 # plugin's token producer to return that placeholder instead of signing in-process.
 #
-# The refresh material VALUES (client_email, private_key, scope) are supplied at
-# onboard/rebuild time via `openshell provider refresh configure --material ...`
-# (see src/lib/onboard/googlechat-bridge-provider.ts); the block below only
-# declares their shape so the gateway knows which keys are required/secret.
+# The refresh material VALUES are supplied at onboard/rebuild time by
+# src/lib/onboard/messaging-bridge-provider.ts. Non-secret values use `--material`;
+# the private key uses `--secret-material-env` so it never appears in argv. The
+# block below declares their shape so the gateway knows which keys are secret.
 id: google-chat-bridge
 display_name: Google Chat Bridge
 description: Gateway-minted Google Chat bot token (service-account JWT) for outbound chat.googleapis.com
