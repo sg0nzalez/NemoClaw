@@ -1,12 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { CaptureOpenshellResult } from "./client";
-import { captureOpenshell } from "./runtime";
 import {
   assertNoOpenShellGatewayEndpointOverride,
   type OpenShellGatewayEndpointEnvironment,
 } from "../../openshell-gateway-endpoint-guard";
+import type { CaptureOpenshellResult } from "./client";
+import { captureOpenshell } from "./runtime";
 
 export interface SandboxExecRequest {
   sandboxName: string;
@@ -34,8 +34,18 @@ export interface OpenShellSandboxControl {
 export type OpenShellExecRequestValidationIssue =
   | { kind: "empty-command" }
   | { kind: "too-many-arguments"; actual: number; max: number }
-  | { kind: "assembled-command-too-large"; actualBytes: number; maxBytes: number }
+  | {
+      kind: "assembled-command-too-large";
+      actualBytes: number;
+      maxBytes: number;
+    }
   | { kind: "encoded-request-too-large"; actualBytes: number; maxBytes: number }
+  | {
+      kind: "max-output-out-of-range";
+      actualBytes: number;
+      minBytes: number;
+      maxBytes: number;
+    }
   | { kind: "timeout-out-of-range"; actualMs: number; maxMs: number }
   | {
       kind: "argument-too-large";
@@ -50,6 +60,8 @@ export type OpenShellExecRequestValidationIssue =
     };
 
 export const OPENSHELL_EXEC_INVALID_ARGUMENT = "OPENSHELL_EXEC_INVALID_ARGUMENT";
+export const OPENSHELL_EXEC_DEFAULT_MAX_OUTPUT_BYTES = 1024 * 1024;
+export const OPENSHELL_EXEC_MAX_OUTPUT_BYTES = 256 * 1024 * 1024;
 
 /** A command OpenShell v0.0.72 will reject before attempting sandbox execution. */
 export class OpenShellExecRequestValidationError extends Error {
@@ -58,6 +70,16 @@ export class OpenShellExecRequestValidationError extends Error {
   constructor(readonly issue: OpenShellExecRequestValidationIssue) {
     super(openShellExecRequestValidationMessage(issue));
     this.name = "OpenShellExecRequestValidationError";
+  }
+}
+
+/** A transport-neutral combined stdout/stderr retention failure. */
+export class OpenShellExecOutputLimitError extends Error {
+  readonly code = "ENOBUFS";
+
+  constructor(readonly maxOutputBytes: number) {
+    super(`OpenShell exec output exceeded ${String(maxOutputBytes)} bytes`);
+    this.name = "OpenShellExecOutputLimitError";
   }
 }
 
@@ -81,6 +103,8 @@ function openShellExecRequestValidationMessage(issue: OpenShellExecRequestValida
       return `assembled command string exceeds ${String(issue.maxBytes)} byte limit`;
     case "encoded-request-too-large":
       return `encoded exec request exceeds ${String(issue.maxBytes)} byte limit`;
+    case "max-output-out-of-range":
+      return `maxOutputBytes must be a safe integer from ${String(issue.minBytes)} through ${String(issue.maxBytes)}`;
     case "timeout-out-of-range":
       return `timeoutMs must be a non-negative safe integer no greater than ${String(issue.maxMs)}`;
     case "argument-too-large":
@@ -223,6 +247,20 @@ export function validateOpenShellExecRequest(
   if (commandError) return commandError;
 
   if (
+    request.maxOutputBytes !== undefined &&
+    (!Number.isSafeInteger(request.maxOutputBytes) ||
+      request.maxOutputBytes < 0 ||
+      request.maxOutputBytes > OPENSHELL_EXEC_MAX_OUTPUT_BYTES)
+  ) {
+    return new OpenShellExecRequestValidationError({
+      kind: "max-output-out-of-range",
+      actualBytes: request.maxOutputBytes,
+      minBytes: 0,
+      maxBytes: OPENSHELL_EXEC_MAX_OUTPUT_BYTES,
+    });
+  }
+
+  if (
     request.timeoutMs !== undefined &&
     (!Number.isSafeInteger(request.timeoutMs) ||
       request.timeoutMs < 0 ||
@@ -252,11 +290,50 @@ export function openShellExecRequestValidationFailure(
   return { status: null, stdout: "", stderr: "", error };
 }
 
-function normalizeExecResult(result: CaptureOpenshellResult): SandboxExecResult {
+function isOutputLimitError(error: Error | undefined): boolean {
+  return (error as NodeJS.ErrnoException | undefined)?.code === "ENOBUFS";
+}
+
+function retainCombinedTextOutput(
+  stdout: string,
+  stderr: string,
+  maxOutputBytes: number,
+): { stdout: string; stderr: string; truncated: boolean } {
+  const stdoutBytes = Buffer.from(stdout, "utf8");
+  const stderrBytes = Buffer.from(stderr, "utf8");
+  const retainedStdout = stdoutBytes.subarray(0, maxOutputBytes);
+  const remaining = Math.max(0, maxOutputBytes - retainedStdout.length);
+  const retainedStderr = stderrBytes.subarray(0, remaining);
+  return {
+    stdout: retainedStdout.toString("utf8"),
+    stderr: retainedStderr.toString("utf8"),
+    truncated:
+      retainedStdout.length < stdoutBytes.length || retainedStderr.length < stderrBytes.length,
+  };
+}
+
+function normalizeExecResult(
+  result: CaptureOpenshellResult,
+  maxOutputBytes: number,
+): SandboxExecResult {
+  const retained = retainCombinedTextOutput(
+    result.stdout ?? result.output,
+    result.stderr ?? "",
+    maxOutputBytes,
+  );
+  if (retained.truncated || isOutputLimitError(result.error)) {
+    return {
+      status: null,
+      stdout: retained.stdout,
+      stderr: retained.stderr,
+      error: new OpenShellExecOutputLimitError(maxOutputBytes),
+      ...(result.signal !== undefined ? { signal: result.signal } : {}),
+    };
+  }
   const normalized: SandboxExecResult = {
     status: result.status,
-    stdout: result.stdout ?? result.output,
-    stderr: result.stderr ?? "",
+    stdout: retained.stdout,
+    stderr: retained.stderr,
   };
   if (result.error) normalized.error = result.error;
   if (result.signal !== undefined) normalized.signal = result.signal;
@@ -275,6 +352,7 @@ function createCliSandboxControl(
       if (validationError) return openShellExecRequestValidationFailure(validationError);
 
       const gatewayArgs = gatewayName ? ["--gateway", gatewayName] : [];
+      const maxOutputBytes = request.maxOutputBytes ?? OPENSHELL_EXEC_DEFAULT_MAX_OUTPUT_BYTES;
       const result = capture(
         [
           ...gatewayArgs,
@@ -289,11 +367,13 @@ function createCliSandboxControl(
           ignoreError: true,
           includeStreams: true,
           input: request.stdin,
-          maxBuffer: request.maxOutputBytes,
+          // Node treats maxBuffer=0 as unlimited. One byte is the smallest
+          // bounded capture; normalize it back to the requested zero-byte cap.
+          maxBuffer: maxOutputBytes === 0 ? 1 : maxOutputBytes,
           timeout: request.timeoutMs,
         },
       );
-      return normalizeExecResult(result);
+      return normalizeExecResult(result, maxOutputBytes);
     },
   };
 }
