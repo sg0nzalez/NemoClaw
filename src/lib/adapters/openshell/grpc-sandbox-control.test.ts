@@ -21,9 +21,9 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createGrpcOpenShellSandboxControl,
   createOpenShellGrpcApi,
-  OpenShellGrpcPreDispatchError,
   type OpenShellGrpcApi,
   OpenShellGrpcOutputLimitError,
+  OpenShellGrpcPreDispatchError,
 } from "./grpc-sandbox-control";
 
 class FakeStream extends EventEmitter {
