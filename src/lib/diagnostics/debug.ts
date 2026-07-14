@@ -387,7 +387,9 @@ export async function collectSandboxInternals(
     gatewayName = resolveSandboxGatewayName(sandbox);
   } catch (cause) {
     warn(
-      `Could not resolve the gateway for sandbox '${sandboxName}', skipping internals: ${cause instanceof Error ? cause.message : String(cause)}`,
+      redact(
+        `Could not resolve the gateway for sandbox '${sandboxName}', skipping internals: ${cause instanceof Error ? cause.message : String(cause)}`,
+      ),
     );
     return;
   }
