@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -75,9 +76,8 @@ function createBinaryTarArchive(): { archive: Buffer; payload: Buffer } {
       encoding: null,
       maxBuffer: 1024 * 1024,
     });
-    if (result.status !== 0 || !result.stdout) {
-      throw new Error(`Could not create test tar archive: ${String(result.stderr)}`);
-    }
+    assert.equal(result.status, 0, `Could not create test tar archive: ${String(result.stderr)}`);
+    assert(result.stdout, `Test tar archive was empty: ${String(result.stderr)}`);
     return { archive: Buffer.from(result.stdout), payload };
   } finally {
     fs.rmSync(source, { recursive: true, force: true });
@@ -121,11 +121,9 @@ function expectProbeAuditAndBinaryTarRequests(): void {
 }
 
 afterAll(() => {
-  if (ORIGINAL_HOME === undefined) {
-    delete process.env.HOME;
-  } else {
-    process.env.HOME = ORIGINAL_HOME;
-  }
+  void (ORIGINAL_HOME === undefined
+    ? Reflect.deleteProperty(process.env, "HOME")
+    : Reflect.set(process.env, "HOME", ORIGINAL_HOME));
   fs.rmSync(TEST_HOME, { recursive: true, force: true });
 });
 
