@@ -397,6 +397,14 @@ describe("gRPC OpenShell sandbox control", () => {
     expect(() => createOpenShellGrpcApi({ endpoint })).toThrow(message);
   });
 
+  it.each([
+    "http://127.0.0.1:8080",
+    "http://[::1]:8080",
+  ])("accepts literal loopback endpoint %s", (endpoint) => {
+    const api = createOpenShellGrpcApi({ endpoint });
+    api.close();
+  });
+
   it("rejects bearer tokens or TLS material on plaintext endpoints", () => {
     expect(() =>
       createOpenShellGrpcApi({
