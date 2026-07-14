@@ -12,6 +12,7 @@ import * as protoLoader from "@grpc/proto-loader";
 import {
   openShellExecRequestValidationFailure,
   validateOpenShellExecCommand,
+  validateOpenShellExecRequest,
   type OpenShellSandboxControl,
   type SandboxExecRequest,
   type SandboxExecResult,
@@ -340,6 +341,10 @@ export function createGrpcOpenShellSandboxControl(
           stderr: "",
           error: new OpenShellGrpcPreDispatchError(cause),
         };
+      }
+      const requestValidationError = validateOpenShellExecRequest(request, id);
+      if (requestValidationError) {
+        return openShellExecRequestValidationFailure(requestValidationError);
       }
       return execute(client, id, request, metadata, options);
     },

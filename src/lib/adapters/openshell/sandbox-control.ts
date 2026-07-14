@@ -31,6 +31,7 @@ export type OpenShellExecRequestValidationIssue =
   | { kind: "empty-command" }
   | { kind: "too-many-arguments"; actual: number; max: number }
   | { kind: "assembled-command-too-large"; actualBytes: number; maxBytes: number }
+  | { kind: "encoded-request-too-large"; actualBytes: number; maxBytes: number }
   | {
       kind: "argument-too-large";
       index: number;
@@ -60,6 +61,8 @@ type CaptureOpenShell = typeof captureOpenshell;
 const OPENSHELL_V0072_MAX_EXEC_COMMAND_ARGS = 1024;
 const OPENSHELL_V0072_MAX_EXEC_ARGUMENT_BYTES = 32 * 1024;
 const OPENSHELL_V0072_MAX_ASSEMBLED_COMMAND_BYTES = 256 * 1024;
+const OPENSHELL_V0072_MAX_DECODED_GRPC_MESSAGE_BYTES = 1024 * 1024;
+const OPENSHELL_V0072_SANDBOX_ID_PLACEHOLDER = "00000000-0000-0000-0000-000000000000";
 
 function openShellExecRequestValidationMessage(issue: OpenShellExecRequestValidationIssue): string {
   switch (issue.kind) {
@@ -69,6 +72,8 @@ function openShellExecRequestValidationMessage(issue: OpenShellExecRequestValida
       return `command array exceeds ${String(issue.max)} argument limit`;
     case "assembled-command-too-large":
       return `assembled command string exceeds ${String(issue.maxBytes)} byte limit`;
+    case "encoded-request-too-large":
+      return `encoded exec request exceeds ${String(issue.maxBytes)} byte limit`;
     case "argument-too-large":
       return `command argument ${String(issue.index)} exceeds ${String(issue.maxBytes)} byte limit`;
     case "argument-control-character":
@@ -164,6 +169,61 @@ export function validateOpenShellExecCommand(
   return null;
 }
 
+function protobufVarintByteLength(value: number): number {
+  let remaining = value;
+  let bytes = 1;
+  while (remaining >= 0x80) {
+    remaining = Math.floor(remaining / 0x80);
+    bytes += 1;
+  }
+  return bytes;
+}
+
+function protobufLengthDelimitedFieldByteLength(valueBytes: number): number {
+  // Every ExecSandboxRequest field used here has a one-byte protobuf tag.
+  return 1 + protobufVarintByteLength(valueBytes) + valueBytes;
+}
+
+function openShellExecRequestEncodedByteLength(
+  request: SandboxExecRequest,
+  sandboxId: string,
+): number {
+  let bytes = protobufLengthDelimitedFieldByteLength(Buffer.byteLength(sandboxId, "utf8"));
+  for (const argument of request.command) {
+    bytes += protobufLengthDelimitedFieldByteLength(Buffer.byteLength(argument, "utf8"));
+  }
+  if (request.timeoutMs !== undefined && request.timeoutMs > 0) {
+    const timeoutSeconds = Math.min(Math.ceil(request.timeoutMs / 1000), 0xffff_ffff);
+    bytes += 1 + protobufVarintByteLength(timeoutSeconds);
+  }
+  if (request.stdin !== undefined) {
+    const stdinBytes = Buffer.isBuffer(request.stdin)
+      ? request.stdin.length
+      : Buffer.byteLength(request.stdin, "utf8");
+    bytes += protobufLengthDelimitedFieldByteLength(stdinBytes);
+  }
+  return bytes;
+}
+
+/** Match v0.0.72's 1 MiB decoded unary gRPC request boundary. */
+export function validateOpenShellExecRequest(
+  request: SandboxExecRequest,
+  sandboxId: string = OPENSHELL_V0072_SANDBOX_ID_PLACEHOLDER,
+): OpenShellExecRequestValidationError | null {
+  const commandError = validateOpenShellExecCommand(request.command);
+  if (commandError) return commandError;
+
+  const actualBytes = openShellExecRequestEncodedByteLength(request, sandboxId);
+  if (actualBytes > OPENSHELL_V0072_MAX_DECODED_GRPC_MESSAGE_BYTES) {
+    return new OpenShellExecRequestValidationError({
+      kind: "encoded-request-too-large",
+      actualBytes,
+      maxBytes: OPENSHELL_V0072_MAX_DECODED_GRPC_MESSAGE_BYTES,
+    });
+  }
+  return null;
+}
+
 export function openShellExecRequestValidationFailure(
   error: OpenShellExecRequestValidationError,
 ): SandboxExecResult {
@@ -186,7 +246,9 @@ export function createCliOpenShellSandboxControl(
 ): OpenShellSandboxControl {
   return {
     async exec(request): Promise<SandboxExecResult> {
-      const validationError = validateOpenShellExecCommand(request.command);
+      // v0.0.72 creates UUID sandbox ids. Reserve that exact encoded width
+      // before invoking the CLI, which resolves the name to the id internally.
+      const validationError = validateOpenShellExecRequest(request);
       if (validationError) return openShellExecRequestValidationFailure(validationError);
 
       const result = capture(

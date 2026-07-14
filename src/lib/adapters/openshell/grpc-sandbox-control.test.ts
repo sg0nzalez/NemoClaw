@@ -122,6 +122,27 @@ describe("gRPC OpenShell sandbox control", () => {
     expect(fake.execMetadata).toEqual([]);
   });
 
+  it("rejects an oversized encoded request after lookup and before exec", async () => {
+    const fake = fakeApi({ sandboxId: "00000000-0000-0000-0000-000000000000" });
+    const control = createGrpcOpenShellSandboxControl(
+      { endpoint: "http://127.0.0.1:8080" },
+      fake.api,
+    );
+
+    const result = await control.exec({
+      sandboxName: "alpha",
+      command: ["sh", "-s"],
+      stdin: Buffer.alloc(1_048_527),
+    });
+
+    expect(result.error).toBeInstanceOf(OpenShellExecRequestValidationError);
+    expect((result.error as OpenShellExecRequestValidationError).issue.kind).toBe(
+      "encoded-request-too-large",
+    );
+    expect(fake.getMetadata).toHaveLength(1);
+    expect(fake.execMetadata).toEqual([]);
+  });
+
   it("dispatches an exact 32768-byte UTF-8 argument unchanged", async () => {
     const fake = fakeApi({
       emit(stream) {

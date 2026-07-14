@@ -8,6 +8,7 @@ import {
   createCliOpenShellSandboxControl,
   OpenShellExecRequestValidationError,
   validateOpenShellExecCommand,
+  validateOpenShellExecRequest,
 } from "./sandbox-control";
 
 function expectValidationIssue(
@@ -95,6 +96,45 @@ describe("OpenShell exec command validation", () => {
   });
 });
 
+describe("OpenShell exec request validation", () => {
+  it("allows the exact unary request boundary and rejects one byte more", () => {
+    const exactRequest = {
+      sandboxName: "alpha",
+      command: ["sh", "-s"],
+      stdin: Buffer.alloc(1_048_526),
+    };
+
+    expect(validateOpenShellExecRequest(exactRequest)).toBeNull();
+    const error = validateOpenShellExecRequest({
+      ...exactRequest,
+      stdin: Buffer.alloc(1_048_527),
+    });
+    expect(error?.issue).toEqual({
+      kind: "encoded-request-too-large",
+      actualBytes: 1_048_577,
+      maxBytes: 1_048_576,
+    });
+  });
+
+  it("includes timeoutSeconds in the encoded request boundary", () => {
+    const exactRequest = {
+      sandboxName: "alpha",
+      command: ["sh", "-s"],
+      stdin: Buffer.alloc(1_048_524),
+      timeoutMs: 120_000,
+    };
+
+    expect(validateOpenShellExecRequest(exactRequest)).toBeNull();
+    expect(
+      validateOpenShellExecRequest({ ...exactRequest, stdin: Buffer.alloc(1_048_525) })?.issue,
+    ).toEqual({
+      kind: "encoded-request-too-large",
+      actualBytes: 1_048_577,
+      maxBytes: 1_048_576,
+    });
+  });
+});
+
 describe("CLI OpenShell sandbox control", () => {
   it("maps a typed exec request to the existing CLI contract", async () => {
     const capture = vi.fn(
@@ -167,6 +207,23 @@ describe("CLI OpenShell sandbox control", () => {
       index: 0,
       character: "lf",
     });
+  });
+
+  it("rejects an oversized encoded request without invoking the CLI", async () => {
+    const capture = vi.fn<() => CaptureOpenshellResult>();
+    const control = createCliOpenShellSandboxControl(capture);
+
+    const result = await control.exec({
+      sandboxName: "alpha",
+      command: ["sh", "-s"],
+      stdin: Buffer.alloc(1_048_527),
+    });
+
+    expect(result.error).toBeInstanceOf(OpenShellExecRequestValidationError);
+    expect((result.error as OpenShellExecRequestValidationError).issue.kind).toBe(
+      "encoded-request-too-large",
+    );
+    expect(capture).not.toHaveBeenCalled();
   });
 
   it("forwards an exact-boundary argument unchanged", async () => {
