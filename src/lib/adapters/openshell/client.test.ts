@@ -155,7 +155,8 @@ describe("openshell helpers", () => {
       { maxBuffer: 1 },
     );
 
-    expect(result.status).toBeNull();
+    // Node can report either the completed exit status or null when ENOBUFS
+    // races a fast child exit. The error code and retained raw prefix are stable.
     expect((result.error as NodeJS.ErrnoException | undefined)?.code).toBe("ENOBUFS");
     expect(Buffer.isBuffer(result.stdout)).toBe(true);
     expect(result.stdout.length).toBeGreaterThan(0);
