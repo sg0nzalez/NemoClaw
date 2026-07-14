@@ -33,6 +33,7 @@ function dependencies(grpcResult: SandboxExecResult | Error, cliResult?: Sandbox
   const debug = vi.fn();
   return {
     close,
+    cli,
     grpcExec,
     cliExec,
     createCli,
@@ -244,7 +245,8 @@ describe("mutating OpenShell sandbox control routing", () => {
     const selected = selectOpenShellSandboxControlForMutation("nemoclaw", test.deps);
 
     expect(selected).toMatchObject({ control: expect.any(Object), transport: "grpc" });
-    expect(selected.control).not.toBe(test.deps.cli);
+    expect(selected.control).not.toBe(test.cli);
+    expect(test.createCli).not.toHaveBeenCalled();
     selected.close();
     expect(test.close).toHaveBeenCalledOnce();
   });
@@ -258,10 +260,11 @@ describe("mutating OpenShell sandbox control routing", () => {
     const selected = selectOpenShellSandboxControlForMutation("edge", test.deps);
 
     expect(selected).toEqual({
-      control: test.deps.cli,
+      control: test.cli,
       transport: "cli-edge-tunnel",
       close: expect.any(Function),
     });
+    expect(test.createCli).toHaveBeenCalledWith("edge");
     selected.close();
     expect(test.close).not.toHaveBeenCalled();
   });

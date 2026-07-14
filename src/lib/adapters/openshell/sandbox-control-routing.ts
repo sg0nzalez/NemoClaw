@@ -65,7 +65,7 @@ export function selectOpenShellSandboxControlForMutation(
   } catch (error) {
     if (!(error instanceof OpenShellGrpcEdgeTunnelRequiredError)) throw error;
     return {
-      control: dependencies.cli,
+      control: dependencies.createCli(gatewayName),
       transport: "cli-edge-tunnel",
       close: () => {},
     };
