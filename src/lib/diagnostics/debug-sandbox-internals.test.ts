@@ -114,10 +114,25 @@ describe("collectSandboxInternals", () => {
       [
         "partial output",
         "partial warning",
-        "  (sandbox command failed: API_KEY=<REDACTED>)",
+        "  (sandbox command failed; detail follows)",
+        "API_KEY=<REDACTED>",
         "",
       ].join("\n"),
     );
     expect(readFileSync(join(collectDir, "sandbox-free.txt"), "utf8")).toBe("free-ok\n");
+  });
+
+  it("redacts credentials split across stdout and stderr as one stream", async () => {
+    execSandbox.mockResolvedValue({
+      status: 0,
+      stdout: "Authorization: Bearer",
+      stderr: " secret-value",
+    });
+
+    await collectSandboxInternals(collectDir, "alpha", true);
+
+    expect(readFileSync(join(collectDir, "sandbox-ps.txt"), "utf8")).toBe(
+      "Authorization: <REDACTED>",
+    );
   });
 });

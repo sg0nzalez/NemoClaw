@@ -409,13 +409,14 @@ export async function collectSandboxInternals(
         command,
         timeoutMs: TIMEOUT_MS,
       });
-      const outputParts = [result.stdout, result.stderr]
-        .filter((value) => value.length > 0)
-        .map((value) => redact(value));
+      let raw = `${result.stdout}\n${result.stderr}`;
       if (result.error) {
-        outputParts.push(`  (sandbox command failed: ${redact(result.error.message)})`);
+        if (result.stdout.length === 0 && result.stderr.length === 0) raw = "";
+        if (raw.length > 0 && !raw.endsWith("\n")) raw += "\n";
+        raw += `  (sandbox command failed; detail follows)\n${result.error.message}`;
+        if (!raw.endsWith("\n")) raw += "\n";
       }
-      const redacted = `${outputParts.join("\n")}\n`;
+      const redacted = redact(raw);
       writeFileSync(join(collectDir, `${label}.txt`), redacted);
       console.log(redacted.trimEnd());
       if (result.status !== 0 && !result.error) {
