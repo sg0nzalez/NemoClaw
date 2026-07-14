@@ -2,51 +2,38 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../src/lib/adapters/openshell/sandbox-control-routing.js", async () => {
-  const { spawnSync } = await import("node:child_process");
-  const exec = async (request: {
-    command: readonly string[];
-    stdin?: string | Buffer;
-    maxOutputBytes?: number;
-    timeoutMs?: number;
-    stdoutEncoding?: "utf8" | "buffer";
-  }) => {
-    const binary = request.stdoutEncoding === "buffer";
-    const result = spawnSync("ssh", [String(request.command.at(-1) ?? "")], {
-      input: request.stdin,
-      maxBuffer: request.maxOutputBytes,
-      timeout: request.timeoutMs,
-      encoding: binary ? undefined : "utf8",
-    });
-    return {
-      status: result.status,
-      stdout: binary ? "" : String(result.stdout ?? ""),
-      ...(binary ? { stdoutBytes: Buffer.from(result.stdout ?? "") } : {}),
-      stderr: String(result.stderr ?? ""),
-      ...(result.error ? { error: result.error } : {}),
-      ...(result.signal ? { signal: result.signal } : {}),
-    };
-  };
-  return {
-    execSandboxReadOnlyWithGrpcFallback: async (
-      _gatewayName: string,
-      request: Parameters<typeof exec>[0],
-    ) => exec(request),
-    selectOpenShellSandboxControlForMutation: () => ({
-      control: { exec },
-      transport: "grpc",
-      close: () => {},
-    }),
-  };
-});
+import type { SandboxExecRequest } from "../src/lib/adapters/openshell/sandbox-control.js";
+import { restoreEnv } from "./helpers/env-test-helpers";
 
-import { restoreEnv, restoreEnvBulk } from "./helpers/env-test-helpers";
+const mocks = vi.hoisted(() => ({
+  exec: vi.fn(),
+  upload: vi.fn(),
+}));
+
+vi.mock("../src/lib/adapters/openshell/sandbox-control-routing.js", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("../src/lib/adapters/openshell/sandbox-control-routing.js")
+  >()),
+  execSandboxReadOnlyWithGrpcFallback: async (_gatewayName: string, request: SandboxExecRequest) =>
+    mocks.exec(request),
+  selectOpenShellSandboxControlForMutation: () => ({
+    control: { exec: mocks.exec },
+    transport: "grpc",
+    close: () => {},
+  }),
+}));
+
+vi.mock("../src/lib/adapters/openshell/sandbox-upload.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/lib/adapters/openshell/sandbox-upload.js")>()),
+  uploadSandboxPayloadFile: mocks.upload,
+}));
 
 const ORIGINAL_HOME = process.env.HOME;
 const TMP_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-managed-extensions-"));
@@ -64,10 +51,6 @@ assert.equal(
 );
 const sandboxState = loadedSandboxState as SandboxStateModule;
 const BACKUPS_ROOT = path.join(TMP_HOME, ".nemoclaw", "rebuild-backups");
-
-function writeExecutable(filePath: string, source: string): void {
-  fs.writeFileSync(filePath, source, { mode: 0o755 });
-}
 
 function writeBackup(
   sandboxName: string,
@@ -121,22 +104,6 @@ function writeOpenClawRegistry(sandboxName: string): void {
   );
 }
 
-function writeFakeOpenshell(binDir: string): string {
-  const openshell = path.join(binDir, "openshell");
-  writeExecutable(
-    openshell,
-    `#!/usr/bin/env node
-const args = process.argv.slice(2);
-if (args[0] === "sandbox" && args[1] === "ssh-config") {
-  process.stdout.write("Host openshell-alpha\\n  HostName 127.0.0.1\\n  User sandbox\\n");
-  process.exit(0);
-}
-process.exit(0);
-`,
-  );
-  return openshell;
-}
-
 afterAll(() => {
   restoreEnv("HOME", ORIGINAL_HOME);
   fs.rmSync(TMP_HOME, { recursive: true, force: true });
@@ -164,19 +131,18 @@ describe("OpenClaw managed extension snapshot restore", () => {
     freshPlugin,
   }) => {
     const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-extension-restore-"));
-    const oldPath = process.env.PATH;
-    const oldOpenshell = process.env.NEMOCLAW_OPENSHELL_BIN;
     try {
-      const binDir = path.join(fixture, "bin");
-      const openclawDir = path.join(fixture, "sandbox-root", ".openclaw");
+      const sandboxRoot = path.join(fs.realpathSync(fixture), "sandbox-root");
+      fs.mkdirSync(sandboxRoot);
+      const openclawDir = path.join(fs.realpathSync(sandboxRoot), ".openclaw");
       const freshRegistryPath = path.join(fixture, "fresh-installs.json");
-      const sshLog = path.join(fixture, "ssh-log.jsonl");
       const extensionsDir = path.join(openclawDir, "extensions");
+      const requests: SandboxExecRequest[] = [];
+      const stagedRemotePaths = new Map<string, string>();
       const builtInManagedExtensions =
         "nemoclaw,diagnostics-otel,brave,discord,openclaw-weixin,slack,whatsapp,msteams".split(",");
       const freshImagePlugins = freshPlugin ? [freshPlugin] : [];
       const managedExtensions = [...builtInManagedExtensions, ...freshImagePlugins];
-      fs.mkdirSync(binDir, { recursive: true });
       for (const extensionName of managedExtensions) {
         const extensionDir = path.join(extensionsDir, extensionName);
         fs.mkdirSync(extensionDir, { recursive: true });
@@ -223,61 +189,49 @@ describe("OpenClaw managed extension snapshot restore", () => {
         "restored\n",
       );
 
-      const openshell = writeFakeOpenshell(binDir);
-      writeExecutable(
-        path.join(binDir, "ssh"),
-        `#!/usr/bin/env node
-const fs = require("node:fs");
-const path = require("node:path");
-const { spawnSync } = require("node:child_process");
-const cmd = process.argv[process.argv.length - 1] || "";
-const installIndexSource = ${JSON.stringify(installIndexSource)};
-fs.appendFileSync(${JSON.stringify(sshLog)}, JSON.stringify({ cmd }) + "\\n");
-function readStdin() {
-  const chunks = [];
-  for (;;) {
-    const buf = Buffer.alloc(65536);
-    const n = fs.readSync(0, buf, 0, buf.length, null);
-    if (n === 0) break;
-    chunks.push(buf.subarray(0, n));
-  }
-  return Buffer.concat(chunks);
-}
-if (cmd.includes("installed_plugin_index") && cmd.includes("state/openclaw.sqlite")) {
-  if (installIndexSource === "sqlite") process.stdout.write(fs.readFileSync(${JSON.stringify(freshRegistryPath)}));
-  process.exit(installIndexSource === "sqlite" ? 0 : 2);
-}
-if (cmd.includes("plugins/installs.json") && cmd.includes("python3 -c")) {
-  if (installIndexSource === "legacy") process.stdout.write(fs.readFileSync(${JSON.stringify(freshRegistryPath)}));
-  process.exit(installIndexSource === "legacy" ? 0 : 2);
-}
-if (cmd.includes("/sandbox/.openclaw/extensions") && cmd.includes("-exec rm -rf")) {
-  const extensionsDir = ${JSON.stringify(extensionsDir)};
-  const managedExtensions = new Set(${JSON.stringify(managedExtensions)});
-  fs.mkdirSync(extensionsDir, { recursive: true });
-  for (const entry of fs.readdirSync(extensionsDir)) {
-    if (managedExtensions.has(entry)) continue;
-    fs.rmSync(path.join(extensionsDir, entry), { recursive: true, force: true });
-  }
-  process.exit(0);
-}
-if (cmd.includes("tar --no-same-owner -xf -")) {
-  const result = spawnSync("tar", ["--no-same-owner", "-xf", "-", "-C", ${JSON.stringify(openclawDir)}], {
-    input: readStdin(),
-    stdio: ["pipe", "pipe", "pipe"],
-  });
-  if (result.stdout) fs.writeSync(1, result.stdout);
-  if (result.stderr) fs.writeSync(2, result.stderr);
-  process.exit(result.status || 0);
-}
-if (cmd.includes("chown") || cmd.includes("[ -d ")) process.exit(0);
-process.exit(0);
-`,
+      mocks.upload.mockImplementation(
+        (_gateway: string, _sandbox: string, localPath: string, remotePath: string) => {
+          const stagedPath = path.join(
+            fs.realpathSync(path.dirname(remotePath)),
+            path.basename(remotePath),
+          );
+          fs.copyFileSync(localPath, stagedPath);
+          stagedRemotePaths.set(remotePath, stagedPath);
+          return { ok: true, remotePath };
+        },
       );
+      mocks.exec.mockImplementation(async (request: SandboxExecRequest) => {
+        requests.push(request);
+        const shellCommand = String(request.command[2] ?? "");
+        const registryRead =
+          (installIndexSource === "sqlite" && shellCommand.includes("state/openclaw.sqlite")) ||
+          (installIndexSource === "legacy" && shellCommand.includes("plugins/installs.json"));
+        if (request.command[0] === "sh") {
+          return {
+            status: registryRead ? 0 : 2,
+            stdout: registryRead ? fs.readFileSync(freshRegistryPath, "utf8") : "",
+            stderr: "",
+          };
+        }
+        const command = [...request.command];
+        command[3] = stagedRemotePaths.get(command[3]) ?? command[3];
+        command[4] = openclawDir;
+        const result = spawnSync(command[0], command.slice(1), {
+          input: request.stdin,
+          maxBuffer: request.maxOutputBytes,
+          timeout: request.timeoutMs,
+          encoding: "utf8",
+        });
+        return {
+          status: result.status,
+          stdout: String(result.stdout ?? ""),
+          stderr: String(result.stderr ?? ""),
+          ...(result.error ? { error: result.error } : {}),
+          ...(result.signal ? { signal: result.signal } : {}),
+        };
+      });
 
       writeOpenClawRegistry("alpha");
-      process.env.NEMOCLAW_OPENSHELL_BIN = openshell;
-      process.env.PATH = `${binDir}:${oldPath || ""}`;
 
       const restore = await sandboxState.restoreRecreatedSandboxState(
         "alpha",
@@ -301,24 +255,13 @@ process.exit(0);
         fs.readFileSync(path.join(extensionsDir, "user-extension", "marker.txt"), "utf-8"),
       ).toBe("restored\n");
 
-      const loggedCommands = fs
-        .readFileSync(sshLog, "utf-8")
-        .trim()
-        .split("\n")
-        .map((line) => JSON.parse(line).cmd as string);
-      const cleanupCommands = loggedCommands.filter(
-        (cmd) => cmd.includes("/sandbox/.openclaw/extensions") && cmd.includes("-exec rm -rf"),
-      );
-      expect(cleanupCommands).toHaveLength(1);
-      expect(loggedCommands.some((cmd) => cmd.includes("installed_plugin_index"))).toBe(true);
-      expect(loggedCommands.some((cmd) => cmd.includes("plugins/installs.json"))).toBe(
-        installIndexSource === "legacy",
-      );
-      const cleanupCommand = cleanupCommands[0];
-      expect(cleanupCommand).not.toContain("rm -rf -- /sandbox/.openclaw/extensions");
-      for (const extensionName of managedExtensions) {
-        expect(cleanupCommand).toContain(`! -name '${extensionName}'`);
-      }
+      expect(requests.filter((request) => request.command[0] === "python3")).toHaveLength(1);
+      expect(
+        requests.some((request) => request.command[2]?.includes("state/openclaw.sqlite")),
+      ).toBe(true);
+      expect(
+        requests.some((request) => request.command[2]?.includes("plugins/installs.json")),
+      ).toBe(installIndexSource === "legacy");
 
       fs.writeFileSync(
         freshRegistryPath,
@@ -351,18 +294,10 @@ process.exit(0);
           fs.readFileSync(path.join(extensionsDir, extensionName, "marker.txt"), "utf-8"),
         ).toBe(`fresh-${extensionName}\n`);
       }
-      const commandsAfterRejectedRestore = fs
-        .readFileSync(sshLog, "utf-8")
-        .trim()
-        .split("\n")
-        .map((line) => JSON.parse(line).cmd as string);
-      expect(
-        commandsAfterRejectedRestore.filter(
-          (cmd) => cmd.includes("/sandbox/.openclaw/extensions") && cmd.includes("-exec rm -rf"),
-        ),
-      ).toHaveLength(1);
+      expect(requests.filter((request) => request.command[0] === "python3")).toHaveLength(1);
     } finally {
-      restoreEnvBulk({ NEMOCLAW_OPENSHELL_BIN: oldOpenshell, PATH: oldPath });
+      mocks.exec.mockReset();
+      mocks.upload.mockReset();
       fs.rmSync(fixture, { recursive: true, force: true });
     }
   });

@@ -8,7 +8,17 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../adapters/openshell/sandbox-control-routing", async () => {
+const restoreTransport = vi.hoisted(() => ({
+  execCalls: 0,
+  hostPython: "python3",
+  liveDir: "",
+  pythonShim: "",
+  stageDir: "",
+  stagedRemotePaths: new Map<string, string>(),
+  uploadCalls: 0,
+}));
+
+vi.mock("../adapters/openshell/sandbox-control-routing.js", async () => {
   const { spawnSync } = await import("node:child_process");
   const exec = async (request: {
     command: readonly string[];
@@ -17,17 +27,30 @@ vi.mock("../adapters/openshell/sandbox-control-routing", async () => {
     timeoutMs?: number;
     stdoutEncoding?: "utf8" | "buffer";
   }) => {
-    const binary = request.stdoutEncoding === "buffer";
-    const result = spawnSync("ssh", [String(request.command.at(-1) ?? "")], {
-      input: request.stdin,
-      maxBuffer: request.maxOutputBytes,
-      timeout: request.timeoutMs,
-      encoding: binary ? undefined : "utf8",
-    });
+    restoreTransport.execCalls += 1;
+    const command = [...request.command];
+    const keyMerge = command[0] === "/opt/venv/bin/python3";
+    const args = keyMerge ? command.slice(3) : command.slice(1);
+    if (keyMerge) {
+      args[0] = restoreTransport.liveDir;
+      args[3] = restoreTransport.stagedRemotePaths.get(args[3]) ?? args[3];
+    } else {
+      args[2] = restoreTransport.stagedRemotePaths.get(args[2]) ?? args[2];
+      args[3] = restoreTransport.liveDir;
+    }
+    const result = spawnSync(
+      keyMerge ? restoreTransport.pythonShim : restoreTransport.hostPython,
+      keyMerge ? [String(request.stdin ?? ""), ...args] : args,
+      {
+        input: keyMerge ? undefined : request.stdin,
+        maxBuffer: request.maxOutputBytes,
+        timeout: request.timeoutMs,
+        encoding: "utf8",
+      },
+    );
     return {
       status: result.status,
-      stdout: binary ? "" : String(result.stdout ?? ""),
-      ...(binary ? { stdoutBytes: Buffer.from(result.stdout ?? "") } : {}),
+      stdout: String(result.stdout ?? ""),
       stderr: String(result.stderr ?? ""),
       ...(result.error ? { error: result.error } : {}),
       ...(result.signal ? { signal: result.signal } : {}),
@@ -46,6 +69,27 @@ vi.mock("../adapters/openshell/sandbox-control-routing", async () => {
   };
 });
 
+vi.mock("../adapters/openshell/sandbox-upload.js", async (importOriginal) => {
+  const fs = await import("node:fs");
+  const path = await import("node:path");
+  return {
+    ...(await importOriginal<typeof import("../adapters/openshell/sandbox-upload.js")>()),
+    uploadSandboxPayloadFile: (
+      _gateway: string,
+      _sandbox: string,
+      localPath: string,
+      remotePath: string,
+    ) => {
+      restoreTransport.uploadCalls += 1;
+      const stagedPath = path.join(restoreTransport.stageDir, path.basename(remotePath));
+      fs.copyFileSync(localPath, stagedPath);
+      fs.chmodSync(stagedPath, 0o600);
+      restoreTransport.stagedRemotePaths.set(remotePath, stagedPath);
+      return { ok: true, remotePath };
+    },
+  };
+});
+
 import * as sandboxState from "../state/sandbox";
 import { finalizeCreatedSandbox } from "./created-sandbox-finalization";
 import { getDcodeSelectionDrift } from "./dcode-selection-drift";
@@ -54,6 +98,9 @@ const fixtures: string[] = [];
 
 afterEach(() => {
   delete process.env.NEMOCLAW_OPENSHELL_BIN;
+  restoreTransport.execCalls = 0;
+  restoreTransport.stagedRemotePaths.clear();
+  restoreTransport.uploadCalls = 0;
   for (const fixture of fixtures.splice(0)) fs.rmSync(fixture, { recursive: true, force: true });
   vi.restoreAllMocks();
 });
@@ -67,7 +114,7 @@ function makeRestoreFixture(): {
   currentPath: string;
   oldPath: string;
 } {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-dcode-finalize-"));
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-dcode-finalize-")));
   fixtures.push(root);
   const bin = path.join(root, "bin");
   const backupPath = path.join(root, "backup");
@@ -181,27 +228,10 @@ sys.argv = [sys.argv[0], *sys.argv[script_index + 1:]]
 exec(script, {"__name__": "__main__"})
 `,
   );
-  const openshell = path.join(bin, "openshell");
-  executable(
-    openshell,
-    '#!/usr/bin/env bash\nprintf "Host openshell-dcode\\n  HostName 127.0.0.1\\n  User sandbox\\n"\n',
-  );
-  executable(
-    path.join(bin, "ssh"),
-    `#!/usr/bin/env node
-const fs = require("node:fs");
-const { spawnSync } = require("node:child_process");
-const command = process.argv.at(-1)
-  .replaceAll("/sandbox/.deepagents", ${JSON.stringify(liveDir)})
-  .replace("/opt/venv/bin/python3", ${JSON.stringify(python)});
-const result = spawnSync("bash", ["-c", command], { input: fs.readFileSync(0), stdio: ["pipe", "pipe", "pipe"] });
-if (result.stdout) fs.writeSync(1, result.stdout);
-if (result.stderr) fs.writeSync(2, result.stderr);
-process.exit(result.status ?? 1);
-`,
-  );
-  process.env.NEMOCLAW_OPENSHELL_BIN = openshell;
-  process.env.PATH = `${bin}${path.delimiter}${oldPath}`;
+  restoreTransport.hostPython = hostPython;
+  restoreTransport.liveDir = liveDir;
+  restoreTransport.pythonShim = python;
+  restoreTransport.stageDir = root;
   return { backupPath, currentPath, oldPath };
 }
 
@@ -231,6 +261,7 @@ describe("created DCode sandbox finalization", () => {
           restoreBackupPath: fixture.backupPath,
           preUpgradeBackup: false,
           targetAgentType: "langchain-deepagents-code",
+          gatewayName: "nemoclaw",
           validateManagedDcode: true,
           provider: "nvidia-prod",
           model: "new-model",
@@ -267,6 +298,8 @@ describe("created DCode sandbox finalization", () => {
       );
 
       expect(order).toEqual(["restore", "validate", "register"]);
+      expect(restoreTransport.uploadCalls).toBe(1);
+      expect(restoreTransport.execCalls).toBe(1);
       expect(registeredConfigs[0]).toContain('default = "openai:new-model"');
       expect(registeredConfigs[0]).not.toContain("old-model");
       expect(registeredConfigs[0]).not.toContain("[agents]");
@@ -287,6 +320,7 @@ describe("created DCode sandbox finalization", () => {
           restoreBackupPath: null,
           preUpgradeBackup: false,
           targetAgentType: "langchain-deepagents-code",
+          gatewayName: "nemoclaw",
           validateManagedDcode: true,
           provider: "nvidia-prod",
           model: "new-model",
@@ -330,6 +364,7 @@ describe("created DCode sandbox finalization", () => {
           restoreBackupPath: fixture.backupPath,
           preUpgradeBackup: false,
           targetAgentType: "langchain-deepagents-code",
+          gatewayName: "nemoclaw",
           validateManagedDcode: true,
           provider: "nvidia-prod",
           model: "new-model",
@@ -361,6 +396,8 @@ describe("created DCode sandbox finalization", () => {
         `  Warning: partial restore. Manual recovery: ${fixture.backupPath}`,
       );
       expect(registeredConfigs).toHaveLength(1);
+      expect(restoreTransport.uploadCalls).toBe(1);
+      expect(restoreTransport.execCalls).toBe(1);
       expect(registeredConfigs[0]).toContain('default = "openai:new-model"');
       expect(registeredConfigs[0]).not.toContain("old-model");
       expect(registeredConfigs[0]).toContain("[ui]\nshow_scrollbar = true");
@@ -380,6 +417,7 @@ describe("created DCode sandbox finalization", () => {
           restoreBackupPath: fixture.backupPath,
           preUpgradeBackup: false,
           targetAgentType: "langchain-deepagents-code",
+          gatewayName: "nemoclaw",
           customImage: true,
           validateManagedDcode: false,
           provider: "custom-provider",
@@ -403,6 +441,8 @@ describe("created DCode sandbox finalization", () => {
       );
 
       expect(registeredConfigs).toHaveLength(1);
+      expect(restoreTransport.uploadCalls).toBe(1);
+      expect(restoreTransport.execCalls).toBe(1);
       expect(registeredConfigs[0]).toContain('default = "openai:old-model"');
       expect(registeredConfigs[0]).toContain("[agents]");
       expect(registeredConfigs[0]).toContain('theme = "dark"');
@@ -432,6 +472,7 @@ describe("created OpenClaw sandbox finalization", () => {
         restoreBackupPath: null,
         preUpgradeBackup: false,
         targetAgentType: "openclaw",
+        gatewayName: "nemoclaw",
         validateManagedDcode: false,
         provider: "compatible-endpoint",
         model: "demo",
@@ -465,6 +506,7 @@ describe("created OpenClaw sandbox finalization", () => {
         restoreBackupPath: null,
         preUpgradeBackup: false,
         targetAgentType: "openclaw",
+        gatewayName: "nemoclaw",
         discoverOpenClawImagePluginInstalls: true,
         validateManagedDcode: false,
         provider: "compatible-endpoint",
@@ -512,6 +554,7 @@ describe("created OpenClaw sandbox finalization", () => {
         restoreBackupPath: "/tmp/openclaw-backup",
         preUpgradeBackup: false,
         targetAgentType: "openclaw",
+        gatewayName: "nemoclaw",
         discoverOpenClawImagePluginInstalls: true,
         validateManagedDcode: false,
         provider: "compatible-endpoint",
@@ -537,6 +580,7 @@ describe("created OpenClaw sandbox finalization", () => {
     expect(order).toEqual(["discover", "restore", "register"]);
     expect(restoreRecreatedSandboxState).toHaveBeenCalledWith("openclaw", "/tmp/openclaw-backup", {
       targetAgentType: "openclaw",
+      gatewayName: "nemoclaw",
       freshOpenClawImagePluginInstalls: pluginInstalls,
     });
     expect(register).toHaveBeenCalledWith(pluginInstalls);
@@ -554,6 +598,7 @@ describe("created OpenClaw sandbox finalization", () => {
           restoreBackupPath: "/tmp/openclaw-backup",
           preUpgradeBackup: false,
           targetAgentType: "openclaw",
+          gatewayName: "nemoclaw",
           discoverOpenClawImagePluginInstalls: true,
           validateManagedDcode: false,
           provider: "compatible-endpoint",
@@ -601,6 +646,7 @@ describe("created OpenClaw sandbox finalization", () => {
           restoreBackupPath: "/tmp/openclaw-backup",
           preUpgradeBackup: false,
           targetAgentType: "openclaw",
+          gatewayName: "nemoclaw",
           discoverOpenClawImagePluginInstalls: true,
           validateManagedDcode: false,
           provider: "compatible-endpoint",

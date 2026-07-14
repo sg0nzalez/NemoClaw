@@ -1,12 +1,17 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { afterAll, describe, expect, it, vi } from "vitest";
+
+const transport = vi.hoisted(() => ({
+  mutationRoot: "",
+  stagedRemotePaths: new Map<string, string>(),
+}));
 
 vi.mock("../src/lib/adapters/openshell/sandbox-control-routing.js", () => {
   const exec = async (request: {
@@ -16,6 +21,24 @@ vi.mock("../src/lib/adapters/openshell/sandbox-control-routing.js", () => {
     timeoutMs?: number;
     stdoutEncoding?: "utf8" | "buffer";
   }) => {
+    if (request.command[0] === "python3") {
+      const command = [...request.command];
+      command[3] = transport.stagedRemotePaths.get(command[3]) ?? command[3];
+      command[4] = transport.mutationRoot;
+      const result = spawnSync(command[0], command.slice(1), {
+        input: request.stdin,
+        maxBuffer: request.maxOutputBytes,
+        timeout: request.timeoutMs,
+        encoding: "utf8",
+      });
+      return {
+        status: result.status,
+        stdout: String(result.stdout ?? ""),
+        stderr: String(result.stderr ?? ""),
+        ...(result.error ? { error: result.error } : {}),
+        ...(result.signal ? { signal: result.signal } : {}),
+      };
+    }
     const result = spawnSync("ssh", [String(request.command.at(-1) ?? "")], {
       input: request.stdin,
       maxBuffer: request.maxOutputBytes,
@@ -45,6 +68,24 @@ vi.mock("../src/lib/adapters/openshell/sandbox-control-routing.js", () => {
   };
 });
 
+vi.mock("../src/lib/adapters/openshell/sandbox-upload.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/lib/adapters/openshell/sandbox-upload.js")>()),
+  uploadSandboxPayloadFile: (
+    _gateway: string,
+    _sandbox: string,
+    localPath: string,
+    remotePath: string,
+  ) => {
+    const stagedPath = path.join(
+      fs.realpathSync(path.dirname(remotePath)),
+      path.basename(remotePath),
+    );
+    fs.copyFileSync(localPath, stagedPath);
+    transport.stagedRemotePaths.set(remotePath, stagedPath);
+    return { ok: true, remotePath };
+  },
+}));
+
 // sandbox-state computes its backup root from HOME at module load time.
 const ORIGINAL_HOME = process.env.HOME;
 const TMP_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-snapshot-home-"));
@@ -69,9 +110,8 @@ function writeExecutable(filePath: string, source: string): void {
 }
 
 /**
- * Write fake `openshell` and `ssh` executables that mirror the backup/restore
- * SSH contract against a local sandbox-root directory, so backupSandboxState /
- * restoreSandboxState exercise the real code path without a live sandbox.
+ * Write fake binaries for the read-only backup probes. Restore uses the mocked
+ * upload and selected gRPC fixed-program path against the local sandbox root.
  */
 function writeFakeSandboxBins(binDir: string, fakeRoot: string): void {
   writeExecutable(
@@ -248,6 +288,7 @@ describe("OpenClaw durable config file (#5027)", () => {
           2,
         ),
       );
+      transport.mutationRoot = fs.realpathSync(openclawDir);
       const restore = await sandboxState.restoreSandboxState("alpha", backup.manifest!.backupPath);
       expect(restore.success).toBe(true);
       expect(restore.restoredFiles).toEqual(["openclaw.json"]);
@@ -383,6 +424,7 @@ describe("OpenClaw durable config file (#5027)", () => {
         ),
       );
 
+      transport.mutationRoot = fs.realpathSync(openclawDir);
       const restore = await sandboxState.restoreSandboxState("alpha", backup.manifest!.backupPath);
       expect(restore.success).toBe(true);
 

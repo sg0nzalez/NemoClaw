@@ -12,6 +12,7 @@ import { OPENCLAW_IMAGE_MANAGED_EXTENSION_DIRS } from "./openclaw-managed-extens
 import {
   buildFreshOpenClawPluginIndexSqliteReadCommand,
   hasCompleteOpenClawImagePluginProvenance,
+  OPENCLAW_PLUGIN_INDEX_SQLITE_PY,
   parseFreshOpenClawPluginExtensionDirs,
   parseOpenClawImagePluginInstalls,
   planOpenClawPluginRestore,
@@ -49,6 +50,13 @@ function createPluginIndexDatabase(dbPath: string, records: unknown): void {
   execFileSync("python3", ["-c", CREATE_PLUGIN_INDEX_SQLITE_PY, dbPath, JSON.stringify(records)]);
 }
 
+function runPluginIndexRead(root: string) {
+  return spawnSync("bash", ["-c", buildFreshOpenClawPluginIndexSqliteReadCommand(root)], {
+    input: OPENCLAW_PLUGIN_INDEX_SQLITE_PY,
+    encoding: "utf8",
+  });
+}
+
 describe("buildFreshOpenClawPluginIndexSqliteReadCommand", () => {
   it("reads canonical install records from the OpenClaw SQLite index", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-plugin-index-"));
@@ -58,12 +66,13 @@ describe("buildFreshOpenClawPluginIndexSqliteReadCommand", () => {
       createPluginIndexDatabase(dbPath, records);
       writeOpenClawConfig(root);
 
-      const stdout = execFileSync(
-        "bash",
-        ["-c", buildFreshOpenClawPluginIndexSqliteReadCommand(root)],
-        { encoding: "utf8" },
-      );
-      expect(JSON.parse(stdout)).toEqual({ version: 1, installRecords: records, loadPaths: [] });
+      const result = runPluginIndexRead(root);
+      expect(result.status, result.stderr).toBe(0);
+      expect(JSON.parse(result.stdout)).toEqual({
+        version: 1,
+        installRecords: records,
+        loadPaths: [],
+      });
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
@@ -74,9 +83,7 @@ describe("buildFreshOpenClawPluginIndexSqliteReadCommand", () => {
     try {
       createPluginIndexDatabase(path.join(root, "state", "openclaw.sqlite"), null);
       writeOpenClawConfig(root);
-      expect(() =>
-        execFileSync("bash", ["-c", buildFreshOpenClawPluginIndexSqliteReadCommand(root)]),
-      ).toThrow();
+      expect(runPluginIndexRead(root).status).not.toBe(0);
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
@@ -85,10 +92,7 @@ describe("buildFreshOpenClawPluginIndexSqliteReadCommand", () => {
   it("uses exit status 2 only when the canonical SQLite database is absent", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-plugin-index-"));
     try {
-      const result = spawnSync("bash", [
-        "-c",
-        buildFreshOpenClawPluginIndexSqliteReadCommand(root),
-      ]);
+      const result = runPluginIndexRead(root);
       expect(result.status).toBe(2);
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
@@ -101,10 +105,7 @@ describe("buildFreshOpenClawPluginIndexSqliteReadCommand", () => {
       const dbPath = path.join(root, "state", "openclaw.sqlite");
       fs.mkdirSync(path.dirname(dbPath), { recursive: true });
       fs.symlinkSync(path.join(root, "missing.sqlite"), dbPath);
-      const result = spawnSync("bash", [
-        "-c",
-        buildFreshOpenClawPluginIndexSqliteReadCommand(root),
-      ]);
+      const result = runPluginIndexRead(root);
       expect(result.status).toBe(10);
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
@@ -116,10 +117,7 @@ describe("buildFreshOpenClawPluginIndexSqliteReadCommand", () => {
     try {
       createPluginIndexDatabase(path.join(root, "state", "openclaw.sqlite"), {});
       fs.symlinkSync(path.join(root, "missing-openclaw.json"), path.join(root, "openclaw.json"));
-      const result = spawnSync("bash", [
-        "-c",
-        buildFreshOpenClawPluginIndexSqliteReadCommand(root),
-      ]);
+      const result = runPluginIndexRead(root);
       expect(result.status).toBe(10);
     } finally {
       fs.rmSync(root, { recursive: true, force: true });

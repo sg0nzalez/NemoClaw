@@ -25,15 +25,20 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "child_process";
 
-import { captureSandboxSshConfigCommand } from "../adapters/openshell/client.js";
-import { resolveOpenshell } from "../adapters/openshell/resolve.js";
 import {
   type SandboxExecRequest,
   type SandboxExecResult,
   validateOpenShellExecRequest,
 } from "../adapters/openshell/sandbox-control.js";
-import { execSandboxReadOnlyWithGrpcFallback } from "../adapters/openshell/sandbox-control-routing.js";
-import { OPENSHELL_PROBE_TIMEOUT_MS } from "../adapters/openshell/timeouts.js";
+import {
+  execSandboxReadOnlyWithGrpcFallback,
+  selectOpenShellSandboxControlForMutation,
+} from "../adapters/openshell/sandbox-control-routing.js";
+import {
+  cleanupSandboxPayloadAfterFailure,
+  createSandboxPayloadRemotePath,
+  uploadSandboxPayloadFile,
+} from "../adapters/openshell/sandbox-upload.js";
 import type { AgentStateFile } from "../agent/defs.js";
 import { loadAgent } from "../agent/defs.js";
 import { isObjectRecord, type UnknownRecord } from "../core/json-types.js";
@@ -42,14 +47,10 @@ import {
   classifyFailedDirsFromTarStderr,
 } from "../domain/backup-failure.js";
 import { resolveSandboxGatewayName } from "../onboard/gateway-binding.js";
+import { assertNoOpenShellGatewayEndpointOverride } from "../openshell-gateway-endpoint-guard.js";
 import { shellQuote } from "../runner.js";
-import { createTempSshConfig } from "../sandbox/temp-ssh-config.js";
 import { isSensitiveFile, sanitizeConfigFile } from "../security/credential-filter.js";
-import {
-  buildRestoreCleanupCommand,
-  buildRestoreTarArgs,
-  isAllowedStateSymlink,
-} from "./openclaw-managed-extensions.js";
+import { isAllowedStateSymlink } from "./openclaw-managed-extensions.js";
 import {
   discoverFreshOpenClawImagePluginInstalls,
   hasCompleteOpenClawImagePluginProvenance,
@@ -59,6 +60,10 @@ import {
 } from "./openclaw-plugin-restore.js";
 import type { CustomPolicyEntry } from "./registry.js";
 import * as registry from "./registry.js";
+import {
+  createStateDirectoryRestorePayload,
+  STATE_DIRECTORY_RESTORE_PYTHON,
+} from "./sandbox-restore-payload.js";
 import { restoreStateFile } from "./state-file-restore.js";
 import { runTarListing } from "./tar-listing.js";
 
@@ -180,6 +185,8 @@ export interface RecreatedSandboxRestoreOptions {
   allowCustomImageWholeStateFileRestore?: true;
   /** Pre-captured baseline avoids a second remote read during onboarding finalization. */
   freshOpenClawImagePluginInstalls?: readonly OpenClawImagePluginInstall[];
+  /** Explicit binding for a newly created sandbox not yet in the local registry. */
+  gatewayName?: string;
 }
 
 interface InternalRestoreOptions {
@@ -187,6 +194,7 @@ interface InternalRestoreOptions {
   allowCustomImageWholeStateFileRestore?: true;
   discoverFreshOpenClawImagePluginInstalls?: true;
   freshOpenClawImagePluginInstalls?: readonly OpenClawImagePluginInstall[];
+  gatewayName?: string;
 }
 
 export interface TarValidationResult {
@@ -556,34 +564,6 @@ export function safeTarExtract(tarBuffer: Buffer, targetDir: string): SafeExtrac
 
 // ── Helpers ────────────────────────────────────────────────────────
 
-export function getSshConfig(sandboxName: string): string | null {
-  const openshellBinary = resolveOpenshell();
-  if (!openshellBinary) return null;
-
-  const result = captureSandboxSshConfigCommand(openshellBinary, sandboxName, {
-    ignoreError: true,
-    timeout: OPENSHELL_PROBE_TIMEOUT_MS,
-  });
-  if (result.status !== 0) return null;
-  return result.output;
-}
-
-export function sshArgs(configFile: string, sandboxName: string): string[] {
-  return [
-    "-F",
-    configFile,
-    "-o",
-    "StrictHostKeyChecking=no",
-    "-o",
-    "UserKnownHostsFile=/dev/null",
-    "-o",
-    "ConnectTimeout=10",
-    "-o",
-    "LogLevel=ERROR",
-    `openshell-${sandboxName}`,
-  ];
-}
-
 function computeBlueprintDigest(): string | null {
   // Look for blueprint.yaml relative to the agent-defs ROOT
   const candidates = [
@@ -691,6 +671,12 @@ function isSafeStateDirPath(dirPath: string): boolean {
     normalized !== ".." &&
     !normalized.startsWith("../")
   );
+}
+
+const DISCOVERED_WORKSPACE_STATE_DIR_RE = /^workspace-[A-Za-z0-9._-]{1,245}$/;
+
+function isDiscoveredWorkspaceStateDir(dirPath: string): boolean {
+  return DISCOVERED_WORKSPACE_STATE_DIR_RE.test(dirPath);
 }
 
 export type SandboxDirectoryNameListResult =
@@ -1160,7 +1146,6 @@ async function backupStateFile(
  */
 
 export { isSshTransportFailure } from "./ssh-transport.js";
-export { buildStateFileRestoreCommand } from "./state-file-restore.js";
 
 export async function backupSandboxState(
   sandboxName: string,
@@ -1630,7 +1615,7 @@ export async function backupSandboxState(
   // and append newly-discovered workspace-* names that weren't already in
   // stateDirs. See issue #1260.
   const discoveredWorkspaces = backedUpDirs.filter(
-    (d) => d.startsWith("workspace-") && !stateDirs.includes(d),
+    (d) => isDiscoveredWorkspaceStateDir(d) && !stateDirs.includes(d),
   );
   if (discoveredWorkspaces.length > 0) {
     manifest.stateDirs = [...stateDirs, ...discoveredWorkspaces];
@@ -1660,7 +1645,10 @@ export async function backupSandboxState(
 /**
  * Restore state directories into a sandbox from a prior backup.
  */
-export function restoreSandboxState(sandboxName: string, backupPath: string): RestoreResult {
+export async function restoreSandboxState(
+  sandboxName: string,
+  backupPath: string,
+): Promise<RestoreResult> {
   const target = registry.getSandbox(sandboxName);
   if (!target) {
     return {
@@ -1678,11 +1666,11 @@ export function restoreSandboxState(sandboxName: string, backupPath: string): Re
   });
 }
 
-export function restoreRecreatedSandboxState(
+export async function restoreRecreatedSandboxState(
   sandboxName: string,
   backupPath: string,
   options: RecreatedSandboxRestoreOptions,
-): RestoreResult {
+): Promise<RestoreResult> {
   return restoreSandboxStateInternal(sandboxName, backupPath, {
     targetAgentType: options.targetAgentType,
     ...(options.allowCustomImageWholeStateFileRestore
@@ -1693,14 +1681,15 @@ export function restoreRecreatedSandboxState(
       ? { discoverFreshOpenClawImagePluginInstalls: true }
       : {}),
     freshOpenClawImagePluginInstalls: options.freshOpenClawImagePluginInstalls,
+    gatewayName: options.gatewayName,
   });
 }
 
-function restoreSandboxStateInternal(
+async function restoreSandboxStateInternal(
   sandboxName: string,
   backupPath: string,
   options: InternalRestoreOptions,
-): RestoreResult {
+): Promise<RestoreResult> {
   _log(`restoreSandboxState: sandbox=${sandboxName}, backupPath=${backupPath}`);
   const manifest = readManifest(backupPath);
   if (!manifest) {
@@ -1779,6 +1768,33 @@ function restoreSandboxStateInternal(
       `Backup state directory '${normalizedBackupDir}' does not match target directory '${normalizedTargetDir}'`,
     );
   }
+  const canonicalTargetDir = normalizedTargetDir;
+  const targetStateDirs = new Set<string>();
+  for (const targetDir of targetAgent.stateDirs) {
+    if (!isSafeStateDirPath(targetDir) || targetStateDirs.has(targetDir)) {
+      return failRestoreContract(
+        `Target agent manifest '${options.targetAgentType}' has an invalid or duplicate state directory declaration`,
+      );
+    }
+    targetStateDirs.add(targetDir);
+  }
+  for (const [label, backupDirs] of [
+    ["state directory", manifest.stateDirs],
+    ["backed-up state directory", manifest.backedUpDirs ?? []],
+  ] as const) {
+    const seenBackupDirs = new Set<string>();
+    for (const backupDir of backupDirs) {
+      if (seenBackupDirs.has(backupDir)) {
+        return failRestoreContract(`Backup manifest repeats ${label} '${backupDir}'`);
+      }
+      seenBackupDirs.add(backupDir);
+      if (!targetStateDirs.has(backupDir) && !isDiscoveredWorkspaceStateDir(backupDir)) {
+        return failRestoreContract(
+          `Backup state directory '${backupDir}' is not declared by target agent '${options.targetAgentType}'`,
+        );
+      }
+    }
+  }
   const targetStateFiles = new Map<string, AgentStateFile>();
   for (const targetFile of targetAgent.stateFiles) {
     const normalized = normalizeStateFilePath(targetFile.path);
@@ -1808,11 +1824,28 @@ function restoreSandboxStateInternal(
     }
   }
 
+  let gatewayName: string;
+  try {
+    const target =
+      options.gatewayName !== undefined
+        ? { gatewayName: options.gatewayName }
+        : registry.getSandbox(sandboxName);
+    if (!target) {
+      return failRestoreContract(
+        `Could not resolve target sandbox '${sandboxName}' gateway for state restore`,
+      );
+    }
+    gatewayName = resolveSandboxGatewayName(target);
+  } catch (cause) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    return failRestoreContract(`Could not resolve sandbox gateway: ${detail}`);
+  }
+
   let freshOpenClawImagePluginInstalls: readonly OpenClawImagePluginInstall[] | undefined;
   if (options.freshOpenClawImagePluginInstalls !== undefined) {
     const parsed = parseOpenClawImagePluginInstalls(
       options.freshOpenClawImagePluginInstalls,
-      targetAgent.configPaths.dir,
+      canonicalTargetDir,
     );
     if (!parsed.ok) {
       return {
@@ -1823,10 +1856,10 @@ function restoreSandboxStateInternal(
     }
     freshOpenClawImagePluginInstalls = parsed.pluginInstalls;
   } else if (options.discoverFreshOpenClawImagePluginInstalls === true) {
-    const discovery = discoverFreshOpenClawImagePluginInstalls(
+    const discovery = await discoverFreshOpenClawImagePluginInstalls(
       sandboxName,
-      { getSshConfig, sshArgs },
-      targetAgent.configPaths.dir,
+      gatewayName,
+      canonicalTargetDir,
     );
     if (!discovery.ok) {
       return {
@@ -1843,21 +1876,6 @@ function restoreSandboxStateInternal(
     return { success: true, restoredDirs, failedDirs, restoredFiles, failedFiles };
   }
 
-  _log("Getting SSH config for restore");
-  const sshConfig = getSshConfig(sandboxName);
-  if (!sshConfig) {
-    _log("FAILED: Could not get SSH config for restore");
-    return {
-      success: false,
-      restoredDirs,
-      failedDirs: [...localDirs],
-      restoredFiles,
-      failedFiles: localFiles.map((f) => f.path),
-    };
-  }
-
-  const tempSshConfig = createTempSshConfig(sshConfig, "nemoclaw-state-");
-  const configFile = tempSshConfig.file;
   const previousOpenClawImagePluginInstalls =
     freshOpenClawImagePluginInstalls !== undefined
       ? manifest.openclawImagePluginInstalls
@@ -1871,153 +1889,138 @@ function restoreSandboxStateInternal(
     previousOpenClawImagePluginInstalls !== undefined
       ? freshOpenClawImagePluginInstalls
       : undefined;
+  const pluginRestorePlan = planOpenClawPluginRestore({
+    agentType: manifest.agentType,
+    dir: canonicalTargetDir,
+    localDirs,
+    freshImagePluginInstalls: freshOpenClawImagePluginInstalls,
+    previousImagePluginInstalls: previousOpenClawImagePluginInstalls,
+  });
+  if (!pluginRestorePlan.ok) {
+    return {
+      success: false,
+      restoredDirs,
+      failedDirs: [...localDirs],
+      restoredFiles,
+      failedFiles: localFiles.map((f) => f.path),
+      error:
+        manifest.reconcileOpenClawImagePluginProvenance === true
+          ? OPENCLAW_IMAGE_PLUGIN_PROVENANCE_RESTORE_ERROR
+          : pluginRestorePlan.error,
+    };
+  }
+  if (
+    freshOpenClawImagePluginInstalls !== undefined &&
+    pluginRestorePlan.preservedExtensionDirs.length > 0
+  ) {
+    _log(
+      `Fresh image-managed OpenClaw extensions: [${pluginRestorePlan.freshExtensionDirs.join(",")}]`,
+    );
+    _log(
+      `Previous image-managed OpenClaw extensions: [${pluginRestorePlan.previousExtensionDirs.join(",")}]`,
+    );
+  }
+
+  let mutation;
   try {
-    const pluginRestorePlan = planOpenClawPluginRestore({
-      agentType: manifest.agentType,
-      dir,
-      localDirs,
-      freshImagePluginInstalls: freshOpenClawImagePluginInstalls,
-      previousImagePluginInstalls: previousOpenClawImagePluginInstalls,
-    });
-    if (!pluginRestorePlan.ok) {
-      return {
-        success: false,
-        restoredDirs,
-        failedDirs: [...localDirs],
-        restoredFiles,
-        failedFiles: localFiles.map((f) => f.path),
-        error:
-          manifest.reconcileOpenClawImagePluginProvenance === true
-            ? OPENCLAW_IMAGE_PLUGIN_PROVENANCE_RESTORE_ERROR
-            : pluginRestorePlan.error,
-      };
-    }
-    if (
-      freshOpenClawImagePluginInstalls !== undefined &&
-      pluginRestorePlan.preservedExtensionDirs.length > 0
-    ) {
-      _log(
-        `Fresh image-managed OpenClaw extensions: [${pluginRestorePlan.freshExtensionDirs.join(",")}]`,
-      );
-      _log(
-        `Previous image-managed OpenClaw extensions: [${pluginRestorePlan.previousExtensionDirs.join(",")}]`,
-      );
-    }
-
+    assertNoOpenShellGatewayEndpointOverride();
+    mutation = selectOpenShellSandboxControlForMutation(gatewayName);
+  } catch (cause) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    return failRestoreContract(`Could not select sandbox restore transport: ${detail}`);
+  }
+  try {
     if (localDirs.length > 0) {
-      // Upload via tar pipe
-      // NC-2227-04: Removed -h flag from restore as well — no symlink following.
-      const tarResult = spawnSync(
-        "tar",
-        buildRestoreTarArgs(backupPath, localDirs, pluginRestorePlan.archiveExcludedExtensionDirs),
-        {
-          stdio: ["ignore", "pipe", "pipe"],
-          timeout: 60000,
-          maxBuffer: 256 * 1024 * 1024,
-        },
-      );
-
-      if (tarResult.status !== 0 || !tarResult.stdout) {
-        return {
-          success: false,
-          restoredDirs,
-          failedDirs: [...localDirs],
-          restoredFiles,
-          failedFiles: localFiles.map((f) => f.path),
-        };
-      }
-
-      // Remove existing state dirs before extracting so stale files from later
-      // snapshots don't persist after restoring an earlier one. OpenClaw's
-      // image-managed extensions are preserved from the freshly built image and
-      // excluded from the restore tar; only user/non-managed extension entries
-      // are cleared and restored from the backup.
-      const rmCmd = buildRestoreCleanupCommand(
-        dir,
-        localDirs,
-        pluginRestorePlan.preservedExtensionDirs,
-        new Set(pluginRestorePlan.requiredFreshExtensionDirs),
-      );
-      _log(`Cleaning target dirs before restore: ${rmCmd}`);
-      const rmResult = spawnSync("ssh", [...sshArgs(configFile, sandboxName), rmCmd], {
-        stdio: ["ignore", "pipe", "pipe"],
-        timeout: 30000,
+      const remotePath = createSandboxPayloadRemotePath();
+      const requiredExtensions = new Set(pluginRestorePlan.requiredFreshExtensionDirs);
+      const staged = await createStateDirectoryRestorePayload({
+        backupPath,
+        directories: localDirs,
+        archiveExcludedExtensions: pluginRestorePlan.archiveExcludedExtensionDirs,
+        managedExtensions: pluginRestorePlan.preservedExtensionDirs.map((name) => ({
+          name,
+          required: requiredExtensions.has(name),
+        })),
+        remotePath,
       });
-      if (rmResult.status !== 0 || rmResult.error || rmResult.signal) {
-        const stderr = (rmResult.stderr?.toString() || "").trim();
-        const detail =
-          stderr ||
-          rmResult.error?.message ||
-          (rmResult.signal ? `signal ${rmResult.signal}` : `exit ${String(rmResult.status)}`);
-        _log(`FAILED: pre-restore cleanup failed: ${detail.substring(0, 200)}`);
-        return {
-          success: false,
-          restoredDirs,
-          failedDirs: [...localDirs],
-          restoredFiles,
-          failedFiles: localFiles.map((f) => f.path),
-        };
-      }
-
-      const extractCmd = `tar --no-same-owner -xf - -C ${shellQuote(dir)}`;
-      const sshResult = spawnSync("ssh", [...sshArgs(configFile, sandboxName), extractCmd], {
-        input: tarResult.stdout,
-        stdio: ["pipe", "pipe", "pipe"],
-        timeout: 120000,
-      });
-
-      if (sshResult.status === 0) {
-        const restoredPaths = localDirs.map((d) => `${dir}/${d}`);
-
-        // Best-effort only: OpenShell exec/SSH normally runs as the sandbox user,
-        // which cannot chown even files it owns. The tar restore above runs as the
-        // same user, so the real restore gate is whether the restored state dirs
-        // are usable by that user.
-        const chownCmd = `chown -R sandbox:sandbox -- ${restoredPaths.map(shellQuote).join(" ")} 2>/dev/null || true`;
-        _log(`Best-effort ownership repair: ${chownCmd}`);
-        const chownResult = spawnSync("ssh", [...sshArgs(configFile, sandboxName), chownCmd], {
-          stdio: ["ignore", "pipe", "pipe"],
-          timeout: 30000,
-        });
-        if (chownResult.error || chownResult.signal) {
-          const detail =
-            chownResult.error?.message ||
-            (chownResult.signal ? `signal ${chownResult.signal}` : "unknown error");
-          _log(
-            `WARNING: post-restore ownership repair did not complete: ${detail.substring(0, 200)}`,
-          );
-        }
-
-        const usabilityCmd = restoredPaths
-          .map(
-            (p) =>
-              `[ -d ${shellQuote(p)} ] && [ ! -L ${shellQuote(p)} ] && [ -r ${shellQuote(p)} ] && [ -w ${shellQuote(p)} ]`,
-          )
-          .join(" && ");
-        _log(`Verifying restored state usability: ${usabilityCmd}`);
-        const usabilityResult = spawnSync(
-          "ssh",
-          [...sshArgs(configFile, sandboxName), usabilityCmd],
-          {
-            stdio: ["ignore", "pipe", "pipe"],
-            timeout: 30000,
-          },
+      if (!staged.ok) return failRestoreContract(staged.error);
+      const request: SandboxExecRequest = {
+        sandboxName,
+        command: ["python3", "-I", "-", remotePath, canonicalTargetDir, staged.payload.sha256],
+        stdin: STATE_DIRECTORY_RESTORE_PYTHON,
+        timeoutMs: 120_000,
+        maxOutputBytes: 64 * 1024,
+      };
+      const validationError = validateOpenShellExecRequest(request);
+      if (validationError) {
+        staged.payload.cleanup();
+        return failRestoreContract(
+          `state directory restore request failed validation: ${validationError.message}`,
         );
-        if (usabilityResult.status === 0 && !usabilityResult.error && !usabilityResult.signal) {
-          restoredDirs.push(...localDirs);
-        } else {
-          const stderr = (usabilityResult.stderr?.toString() || "").trim();
-          const detail =
-            stderr ||
-            usabilityResult.error?.message ||
-            (usabilityResult.signal
-              ? `signal ${usabilityResult.signal}`
-              : `exit ${String(usabilityResult.status)}`);
-          _log(`FAILED: restored state usability check failed: ${detail.substring(0, 200)}`);
-          failedDirs.push(...localDirs);
+      }
+
+      let upload;
+      try {
+        upload = uploadSandboxPayloadFile(
+          gatewayName,
+          sandboxName,
+          staged.payload.localPath,
+          staged.payload.remotePath,
+        );
+      } finally {
+        staged.payload.cleanup();
+      }
+      const cleanupRemotePayload = async (): Promise<void> => {
+        if (!(await cleanupSandboxPayloadAfterFailure(mutation.control, sandboxName, remotePath))) {
+          _log(`WARNING: could not confirm cleanup of staged restore payload ${remotePath}`);
         }
+      };
+      if (!upload.ok) {
+        await cleanupRemotePayload();
+        return failRestoreContract(`state directory restore upload failed: ${upload.error}`);
+      }
+
+      let restoreResult: SandboxExecResult;
+      try {
+        restoreResult = await mutation.control.exec(request);
+      } catch (cause) {
+        await cleanupRemotePayload();
+        const detail = cause instanceof Error ? cause.message : String(cause);
+        return failRestoreContract(`state directory restore dispatch failed: ${detail}`);
+      }
+      if (
+        restoreResult.status === 0 &&
+        !restoreResult.error &&
+        !restoreResult.signal &&
+        restoreResult.stdout.trim() === "RESTORE_OK"
+      ) {
+        restoredDirs.push(...localDirs);
       } else {
+        await cleanupRemotePayload();
         failedDirs.push(...localDirs);
+        const detail =
+          restoreResult.stderr.trim() ||
+          restoreResult.error?.message ||
+          (restoreResult.signal
+            ? `signal ${restoreResult.signal}`
+            : `exit ${String(restoreResult.status)}`);
+        _log(`FAILED: state directory restore: ${detail.substring(0, 200)}`);
+        // Only explicit extraction/usability failures have a determinate
+        // directory mutation outcome that permits independent file writes.
+        if (
+          (restoreResult.status !== 24 && restoreResult.status !== 25) ||
+          restoreResult.status === null ||
+          restoreResult.error ||
+          restoreResult.signal
+        ) {
+          return {
+            success: false,
+            restoredDirs,
+            failedDirs,
+            restoredFiles,
+            failedFiles: localFiles.map((file) => file.path),
+          };
+        }
       }
     }
 
@@ -2025,9 +2028,10 @@ function restoreSandboxStateInternal(
       const targetStateFile = targetStateFiles.get(spec.path);
       if (!targetStateFile) throw new Error(`Validated target state file missing: ${spec.path}`);
       if (
-        restoreStateFile(
-          sshArgs(configFile, sandboxName),
-          dir,
+        await restoreStateFile(
+          mutation.control,
+          sandboxName,
+          canonicalTargetDir,
           spec,
           backupPath,
           targetStateFile.restore,
@@ -2035,6 +2039,7 @@ function restoreSandboxStateInternal(
           _log,
           configFreshOpenClawImagePluginInstalls,
           previousOpenClawImagePluginInstalls,
+          gatewayName,
         )
       ) {
         restoredFiles.push(spec.path);
@@ -2043,11 +2048,7 @@ function restoreSandboxStateInternal(
       }
     }
   } finally {
-    try {
-      tempSshConfig.cleanup();
-    } catch {
-      /* ignore */
-    }
+    mutation.close();
   }
 
   return {

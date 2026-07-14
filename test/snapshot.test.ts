@@ -1,17 +1,16 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
-//
-// Tests for snapshot versioning and naming added alongside the --name flag:
-//   - validateSnapshotName accepts/rejects names
-//   - listBackups computes virtual v<N> versions by timestamp-ascending position
-//   - findBackup resolves selectors (v<N>, name, exact timestamp)
-
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+const transport = vi.hoisted(() => ({
+  mutationRoot: "",
+  stagedRemotePaths: new Map<string, string>(),
+}));
 
 vi.mock("../src/lib/adapters/openshell/sandbox-control-routing.js", () => {
   const exec = async (request: {
@@ -21,6 +20,29 @@ vi.mock("../src/lib/adapters/openshell/sandbox-control-routing.js", () => {
     timeoutMs?: number;
     stdoutEncoding?: "utf8" | "buffer";
   }) => {
+    if (request.command[0] === "/opt/venv/bin/python3") {
+      const stagedPath = transport.stagedRemotePaths.get(request.command[6]);
+      if (stagedPath) fs.rmSync(stagedPath, { force: true });
+      return { status: 0, stdout: "KEY_ALLOWLIST_OK\n", stderr: "" };
+    }
+    if (request.command[0] === "python3") {
+      const command = [...request.command];
+      command[3] = transport.stagedRemotePaths.get(command[3]) ?? command[3];
+      command[4] = transport.mutationRoot;
+      const result = spawnSync(command[0], command.slice(1), {
+        input: request.stdin,
+        maxBuffer: request.maxOutputBytes,
+        timeout: request.timeoutMs,
+        encoding: "utf8",
+      });
+      return {
+        status: result.status,
+        stdout: String(result.stdout ?? ""),
+        stderr: String(result.stderr ?? ""),
+        ...(result.error ? { error: result.error } : {}),
+        ...(result.signal ? { signal: result.signal } : {}),
+      };
+    }
     const result = spawnSync("ssh", [String(request.command.at(-1) ?? "")], {
       input: request.stdin,
       maxBuffer: request.maxOutputBytes,
@@ -49,6 +71,24 @@ vi.mock("../src/lib/adapters/openshell/sandbox-control-routing.js", () => {
     }),
   };
 });
+
+vi.mock("../src/lib/adapters/openshell/sandbox-upload.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/lib/adapters/openshell/sandbox-upload.js")>()),
+  uploadSandboxPayloadFile: (
+    _gateway: string,
+    _sandbox: string,
+    localPath: string,
+    remotePath: string,
+  ) => {
+    const stagedPath = path.join(
+      fs.realpathSync(path.dirname(remotePath)),
+      path.basename(remotePath),
+    );
+    fs.copyFileSync(localPath, stagedPath);
+    transport.stagedRemotePaths.set(remotePath, stagedPath);
+    return { ok: true, remotePath };
+  },
+}));
 
 // Override HOME BEFORE importing sandbox-state — it reads process.env.HOME
 // at module-load time to compute REBUILD_BACKUPS_DIR. Captured original is
@@ -114,6 +154,8 @@ afterAll(() => {
 });
 beforeEach(() => {
   fs.rmSync(BACKUPS_ROOT, { recursive: true, force: true });
+  transport.mutationRoot = "";
+  transport.stagedRemotePaths.clear();
 });
 function writeExecutable(filePath: string, source: string): void {
   fs.writeFileSync(filePath, source, { mode: 0o755 });
@@ -572,7 +614,6 @@ process.exit(0);
     try {
       const binDir = path.join(fixture, "bin");
       const openclawDir = path.join(fixture, "sandbox-root", ".openclaw");
-      const sshLog = path.join(fixture, "ssh-log.jsonl");
       const existingDirs = ["agents", "workspace", "extensions"];
       fs.mkdirSync(binDir, { recursive: true });
       fs.mkdirSync(path.join(openclawDir, "agents", "main", "sessions"), { recursive: true });
@@ -588,14 +629,6 @@ const fs = require("node:fs");
 const { spawnSync } = require("node:child_process");
 const cmd = process.argv[process.argv.length - 1] || "";
 const existingDirs = ${JSON.stringify(existingDirs)};
-fs.appendFileSync(${JSON.stringify(sshLog)}, JSON.stringify({ cmd }) + "\\n");
-function readStdin() {
-  for (;;) {
-    const buf = Buffer.alloc(65536);
-    const n = fs.readSync(0, buf, 0, buf.length, null);
-    if (n === 0) break;
-  }
-}
 if (cmd.includes("[ -d ")) {
   process.stdout.write(existingDirs.join("\\0") + "\\0");
   process.exit(0);
@@ -617,13 +650,6 @@ if (cmd.includes("tar -cf -")) {
   process.stderr.write("tar: Exiting with failure status due to previous errors\\n");
   process.exit(2);
 }
-if (cmd.includes("rm -rf") || cmd.includes("tar --no-same-owner")) {
-  readStdin();
-  process.exit(0);
-}
-if (cmd.includes("chown") || cmd.includes("[ -r ")) {
-  process.exit(0);
-}
 process.exit(0);
 `,
       );
@@ -643,22 +669,14 @@ process.exit(0);
       expect(backup.manifest?.backedUpDirs).toEqual(["extensions"]);
       expect(fs.existsSync(path.join(backup.manifest!.backupPath, "agents"))).toBe(true);
 
+      transport.mutationRoot = fs.realpathSync(openclawDir);
       const restore = await sandboxState.restoreSandboxState("alpha", backup.manifest!.backupPath);
       expect(restore.success).toBe(true);
       expect(restore.restoredDirs).toEqual(["extensions"]);
-
-      const loggedCommands = fs
-        .readFileSync(sshLog, "utf-8")
-        .trim()
-        .split("\n")
-        .map((line) => JSON.parse(line).cmd as string);
-      const cleanupCommand = loggedCommands.find((cmd) => cmd.includes("rm -rf"));
-      expect(cleanupCommand).not.toContain("/sandbox/.openclaw/workspace");
-      expect(cleanupCommand).not.toContain("rm -rf -- /sandbox/.openclaw/extensions");
-      expect(cleanupCommand).toContain("/sandbox/.openclaw/extensions");
-      expect(cleanupCommand).toContain("! -name 'nemoclaw'");
-      expect(cleanupCommand).toContain("! -name 'openclaw-weixin'");
-      expect(cleanupCommand).not.toContain("/sandbox/.openclaw/agents");
+      expect(fs.readFileSync(path.join(openclawDir, "workspace", "marker.txt"), "utf8")).toBe(
+        "marker\n",
+      );
+      expect(fs.existsSync(path.join(openclawDir, "agents", "main", "sessions"))).toBe(true);
     } finally {
       if (oldOpenshell === undefined) {
         delete process.env.NEMOCLAW_OPENSHELL_BIN;
@@ -1226,14 +1244,6 @@ if (cmd.includes("tar -cf -")) {
   if (r.stderr) fs.writeSync(2, r.stderr);
   process.exit(r.status || 0);
 }
-if (cmd.includes("tar --no-same-owner -xf -")) {
-  // drain the piped restore tarball in chunks (no full-stream buffering)
-  const buf = Buffer.alloc(65536);
-  while (fs.readSync(0, buf, 0, buf.length, null) > 0) {
-    // discard
-  }
-  process.exit(0);
-}
 process.exit(0);
 `,
       );
@@ -1280,6 +1290,7 @@ process.exit(0);
 
       // #5753 is "lost after rebuild" (backup + recreate + restore): restore
       // must list agent/skills among the dirs it brings back into the sandbox.
+      transport.mutationRoot = fs.realpathSync(deepAgentsDir);
       const restore = await sandboxState.restoreSandboxState(
         "deepagents",
         backup.manifest!.backupPath,
@@ -1388,19 +1399,6 @@ if (cmd.includes(".hermes_history") && cmd.includes("cat --")) {
   process.stdout.write(fs.readFileSync(path.join(hermesDir, ".hermes_history")));
   process.exit(0);
 }
-if (cmd.includes("nemoclaw-sqlite-restore")) {
-  fs.mkdirSync(path.join(hermesDir, "runtime"), { recursive: true });
-  fs.writeFileSync(path.join(hermesDir, "runtime", "state.db"), readStdin());
-  process.exit(0);
-}
-if (cmd.includes(".nemoclaw-restore") && cmd.includes("SOUL.md")) {
-  fs.writeFileSync(path.join(hermesDir, "SOUL.md"), readStdin());
-  process.exit(0);
-}
-if (cmd.includes(".nemoclaw-restore") && cmd.includes(".hermes_history")) {
-  fs.writeFileSync(path.join(hermesDir, ".hermes_history"), readStdin());
-  process.exit(0);
-}
 process.exit(0);
 `,
       );
@@ -1464,6 +1462,7 @@ process.exit(0);
       fs.writeFileSync(path.join(hermesDir, "SOUL.md"), "changed soul\n");
       fs.writeFileSync(path.join(hermesDir, ".hermes_history"), "changed history\n");
       fs.writeFileSync(path.join(runtimeDir, "state.db"), "changed db\n");
+      transport.mutationRoot = fs.realpathSync(hermesDir);
       const restore = await sandboxState.restoreSandboxState("hermes", backup.manifest!.backupPath);
       expect(restore.success).toBe(true);
       expect(restore.restoredFiles).toEqual(["SOUL.md", ".hermes_history", "runtime/state.db"]);
