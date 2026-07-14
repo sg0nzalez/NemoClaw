@@ -4,7 +4,10 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { CaptureOpenshellBinaryResult, CaptureOpenshellResult } from "./client";
-import { createCliOpenShellSandboxControl } from "./sandbox-control";
+import {
+  createCliOpenShellSandboxControl,
+  createGatewayScopedCliOpenShellSandboxControl,
+} from "./sandbox-control";
 
 describe("CLI OpenShell sandbox control", () => {
   it("maps a typed exec request to the existing CLI contract", async () => {
@@ -94,6 +97,25 @@ describe("CLI OpenShell sandbox control", () => {
     expect(captureBinary).toHaveBeenCalledWith(
       ["sandbox", "exec", "--name", "alpha", "--", "tar", "-cf", "-", "workspace"],
       { input: undefined, maxBuffer: 1024, timeout: 120_000 },
+    );
+  });
+
+  it("pins fallback execution to the requested gateway", async () => {
+    const capture = vi.fn(
+      (): CaptureOpenshellResult => ({
+        status: 0,
+        output: "ok",
+        stdout: "ok\n",
+        stderr: "",
+      }),
+    );
+    const control = createGatewayScopedCliOpenShellSandboxControl("edge-west", capture);
+
+    await control.exec({ sandboxName: "alpha", command: ["true"] });
+
+    expect(capture).toHaveBeenCalledWith(
+      ["--gateway", "edge-west", "sandbox", "exec", "--name", "alpha", "--", "true"],
+      expect.objectContaining({ ignoreError: true, includeStreams: true }),
     );
   });
 });
