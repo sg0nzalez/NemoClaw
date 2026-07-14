@@ -73,6 +73,13 @@ export class OpenShellGrpcOutputLimitError extends Error {
   }
 }
 
+export class OpenShellGrpcPreDispatchError extends Error {
+  constructor(readonly cause: Error) {
+    super(cause.message, { cause });
+    this.name = "OpenShellGrpcPreDispatchError";
+  }
+}
+
 function isLoopback(hostname: string): boolean {
   const normalized = hostname.replace(/^\[|\]$/g, "").toLowerCase();
   const version = isIP(normalized);
@@ -311,7 +318,13 @@ export function createGrpcOpenShellSandboxControl(
       try {
         id = await sandboxId(client, request.sandboxName, metadata, options);
       } catch (error) {
-        return { status: null, stdout: "", stderr: "", error: error as Error };
+        const cause = error instanceof Error ? error : new Error(String(error));
+        return {
+          status: null,
+          stdout: "",
+          stderr: "",
+          error: new OpenShellGrpcPreDispatchError(cause),
+        };
       }
       return execute(client, id, request, metadata, options);
     },

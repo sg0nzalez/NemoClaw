@@ -21,6 +21,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createGrpcOpenShellSandboxControl,
   createOpenShellGrpcApi,
+  OpenShellGrpcPreDispatchError,
   type OpenShellGrpcApi,
   OpenShellGrpcOutputLimitError,
 } from "./grpc-sandbox-control";
@@ -218,7 +219,10 @@ describe("gRPC OpenShell sandbox control", () => {
       status: null,
       stdout: "",
       stderr: "",
-      error,
+      error: expect.objectContaining({
+        cause: error,
+        name: OpenShellGrpcPreDispatchError.name,
+      }),
     });
     expect(fake.execMetadata).toEqual([]);
   });
