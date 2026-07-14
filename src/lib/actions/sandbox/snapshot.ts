@@ -43,13 +43,13 @@ import type { SandboxEntry } from "../../state/registry";
 import * as registry from "../../state/registry";
 import { getSandboxEntryInference } from "../../state/registry-entry-view";
 import * as sandboxState from "../../state/sandbox";
-import { cleanupShieldsDestroyArtifacts, removeSandboxRegistryEntry } from "./destroy";
 import {
   DCODE_AGENT_NAME,
   DCODE_BUSY_PROBE_SCRIPT,
   DCODE_PROBE_STATE,
   parseDcodeProbeState,
 } from "./dcode-activity-probe";
+import { cleanupShieldsDestroyArtifacts, removeSandboxRegistryEntry } from "./destroy";
 import {
   buildSandboxExecMarkedCommand,
   createSandboxExecMarker,
@@ -205,16 +205,6 @@ async function autoCreateSandboxFromSource(
   if (verify.status !== 0 || !isSandboxReady(verify.output || "", dstName)) {
     console.error(`  Sandbox '${dstName}' did not reach Ready state after create.`);
     snapshotExit(1);
-  }
-
-  // DNS proxy is only meaningful for the kubernetes driver (matches onboard.ts).
-  const dnsScript = path.join(ROOT, "scripts", "setup-dns-proxy.sh");
-  const srcDriver = (srcEntry as { openshellDriver?: string | null }).openshellDriver;
-  if (srcDriver === "kubernetes" && fs.existsSync(dnsScript)) {
-    const srcGatewayName = resolveSandboxGatewayName(
-      srcEntry as { gatewayName?: string | null; gatewayPort?: number | null },
-    );
-    run(["bash", dnsScript, srcGatewayName, dstName], { ignoreError: true });
   }
 
   // Register dst in the NemoClaw registry, cloning most fields from src.

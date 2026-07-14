@@ -44,14 +44,10 @@ describe("connect route containment", () => {
     });
     const probe = vi.fn(() => ({ healthy: false, broken: true, detail: "BROKEN 503" }));
     const applyVmDnsMonkeypatch = vi.fn(() => ({ ok: false }));
-    const reapplyVmInferenceRoute = vi.fn(() => null);
-    const repairLegacyDnsProxy = vi.fn(() => ({ exitCode: 0 }));
     const deps: SandboxInferenceRouteRepairDeps = {
       probe,
       shouldApplyVmDnsMonkeypatch: vi.fn(() => false),
       applyVmDnsMonkeypatch,
-      reapplyVmInferenceRoute,
-      repairLegacyDnsProxy,
       assertRouteCompatible,
     };
     const sandbox: SandboxEntry = {
@@ -70,8 +66,6 @@ describe("connect route containment", () => {
     expect(assertRouteCompatible).toHaveBeenCalledWith("vm-box", sandbox);
     expect(probe).not.toHaveBeenCalled();
     expect(applyVmDnsMonkeypatch).not.toHaveBeenCalled();
-    expect(reapplyVmInferenceRoute).not.toHaveBeenCalled();
-    expect(repairLegacyDnsProxy).not.toHaveBeenCalled();
   });
 
   it("exits before connect-time route writes when another sandbox conflicts (#6315)", async () => {
@@ -109,7 +103,6 @@ describe("connect route containment", () => {
     expect(harness.captureOpenshellSpy).not.toHaveBeenCalled();
     expect(harness.runOpenshellSpy).not.toHaveBeenCalled();
     expect(harness.applyVmDnsMonkeypatchSpy).not.toHaveBeenCalled();
-    expect(harness.runSetupDnsProxySpy).not.toHaveBeenCalled();
     expect(harness.spawnSyncSpy).not.toHaveBeenCalledWith(
       "openshell",
       ["sandbox", "connect", "alpha"],
@@ -208,7 +201,6 @@ describe("connect route containment", () => {
     expect(harness.captureOpenshellSpy).not.toHaveBeenCalled();
     expect(harness.runOpenshellSpy).not.toHaveBeenCalled();
     expect(harness.applyVmDnsMonkeypatchSpy).not.toHaveBeenCalled();
-    expect(harness.runSetupDnsProxySpy).not.toHaveBeenCalled();
     expect(harness.errorSpy).toHaveBeenCalledWith(
       expect.stringContaining("changed OpenShell gateways while waiting"),
     );
@@ -237,7 +229,6 @@ describe("connect route containment", () => {
     expect(harness.captureOpenshellSpy).not.toHaveBeenCalled();
     expect(harness.runOpenshellSpy).not.toHaveBeenCalled();
     expect(harness.applyVmDnsMonkeypatchSpy).not.toHaveBeenCalled();
-    expect(harness.runSetupDnsProxySpy).not.toHaveBeenCalled();
     expect(harness.spawnSyncSpy).not.toHaveBeenCalledWith(
       "openshell",
       expect.any(Array),
@@ -290,7 +281,6 @@ describe("connect route containment", () => {
 
     expect(harness.runOpenshellSpy).not.toHaveBeenCalled();
     expect(harness.applyVmDnsMonkeypatchSpy).not.toHaveBeenCalled();
-    expect(harness.runSetupDnsProxySpy).not.toHaveBeenCalled();
     expect(harness.spawnSyncSpy).not.toHaveBeenCalledWith(
       "openshell",
       ["sandbox", "connect", "alpha"],
@@ -379,7 +369,7 @@ describe("connect route containment", () => {
     const inferenceWrites = harness.runOpenshellSpy.mock.calls
       .map((call) => call[0])
       .filter((args) => Array.isArray(args) && args[0] === "inference" && args[1] === "set");
-    expect(inferenceWrites).toHaveLength(3);
+    expect(inferenceWrites).toHaveLength(2);
     for (const args of inferenceWrites) {
       expect(args).toEqual([
         "inference",
@@ -396,6 +386,5 @@ describe("connect route containment", () => {
     expect([...inferenceReads, ...inferenceWrites]).not.toContainEqual(
       expect.arrayContaining(["-g", "nemoclaw"]),
     );
-    expect(harness.runSetupDnsProxySpy).not.toHaveBeenCalled();
   });
 });

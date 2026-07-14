@@ -124,7 +124,6 @@ describe("connectSandbox route lifecycle", () => {
         "alpha",
         expect.objectContaining({ openshellDriver: "vm" }),
       );
-      expect(harness.runSetupDnsProxySpy).not.toHaveBeenCalled();
       expect(harness.runOpenshellSpy).not.toHaveBeenCalled();
       const routeProbeCalls = harness.captureOpenshellSpy.mock.calls.filter((call) =>
         JSON.stringify(call[0]).includes("inference.local/v1/models"),
@@ -215,7 +214,6 @@ describe("connectSandbox route lifecycle", () => {
 
     await expect(harness.connectSandbox("alpha")).rejects.toThrow("process.exit(1)");
 
-    expect(harness.runSetupDnsProxySpy).toHaveBeenCalledOnce();
     expect(harness.runOpenshellSpy).toHaveBeenCalledOnce();
     expect(harness.runOpenshellSpy).toHaveBeenCalledWith(
       [
