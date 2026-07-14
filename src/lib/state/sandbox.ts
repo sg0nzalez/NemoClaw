@@ -778,7 +778,7 @@ function buildStateFileBackupCommand(dir: string, spec: StateFileSpec): string {
       '[ "${hardlink_count:-0}" = "0" ] || { echo "hard-linked sqlite state file rejected: $src" >&2; exit 11; }',
       'tmp="$(mktemp /tmp/nemoclaw-sqlite-backup.XXXXXX)"',
       "trap 'rm -f \"$tmp\"' EXIT",
-      'python3 - "$src" "$tmp"',
+      'python3 - "$src" "$tmp" || exit $?',
       'cat -- "$tmp"',
     ].join("; ");
   }
