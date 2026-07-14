@@ -146,7 +146,7 @@ function expectProbeAndAuditRequests(dirName = "state"): void {
     "nemoclaw",
     expect.objectContaining({
       sandboxName: "alpha",
-      command: ["sh", "-c", expect.stringContaining("find -files0-from=-")],
+      command: ["sh", "-c", expect.stringContaining("xargs -0 -r sh -c")],
       stdin: expectedAuditInput.input,
       maxOutputBytes: MAX_SANDBOX_DIRECTORY_AUDIT_BYTES + 1,
       stdoutEncoding: "buffer",
@@ -438,7 +438,9 @@ describe("backupSandboxState OpenShell directory transport", () => {
     expect(mocks.execSandboxReadOnlyWithGrpcFallback).toHaveBeenCalledTimes(2);
     expectProbeAndAuditRequests(dirName);
     const auditCommand = mocks.execSandboxReadOnlyWithGrpcFallback.mock.calls[1][1].command[2];
-    expect(auditCommand).toContain("find -files0-from=-");
+    expect(auditCommand).toContain("xargs -0 -r sh -c");
+    expect(auditCommand).toContain('find "$root"');
+    expect(auditCommand).not.toContain("-files0-from");
     expect(auditCommand).not.toContain("|| true");
     expect(auditCommand).not.toContain("-prune");
   });
@@ -479,7 +481,8 @@ describe("backupSandboxState OpenShell directory transport", () => {
     ).toEqual(payload);
     expectProbeAuditAndBinaryTarRequests("extensions");
     const auditCommand = mocks.execSandboxReadOnlyWithGrpcFallback.mock.calls[1][1].command[2];
-    expect(auditCommand).toContain("find -files0-from=-");
+    expect(auditCommand).toContain("xargs -0 -r sh -c");
+    expect(auditCommand).not.toContain("-files0-from");
     expect(auditCommand).not.toContain("|| true");
     expect(auditCommand).not.toContain("-prune");
   });

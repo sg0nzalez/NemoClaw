@@ -1051,7 +1051,7 @@ if (cmd.includes("find ")) {
     process.stderr.write("unsafe audit suppression\\n");
     process.exit(90);
   }
-  if (!cmd.includes("find -files0-from=-")) {
+  if (!cmd.includes("xargs -0 -r sh -c") || cmd.includes("-files0-from")) {
     process.stderr.write("missing bounded audit input\\n");
     process.exit(91);
   }

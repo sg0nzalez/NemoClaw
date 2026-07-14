@@ -923,8 +923,9 @@ export function parseSandboxDirectoryAudit(
 
 export function buildSandboxDirectoryAuditCommand(): string {
   return (
-    "find -files0-from=- \\( -type l -o \\( -type f -a -links +1 \\) -o " +
-    '\\( ! -type f -a ! -type d \\) \\) -printf "%y\\0%p\\0%l\\0"'
+    "xargs -0 -r sh -c 'for root do " +
+    'find "$root" \\( -type l -o \\( -type f -a -links +1 \\) -o ' +
+    '\\( ! -type f -a ! -type d \\) \\) -printf "%y\\0%p\\0%l\\0" || exit $?; done\' sh'
   );
 }
 
@@ -1394,9 +1395,11 @@ export async function backupSandboxState(
       //
       // The audit is a bounded NUL protocol of <type>, <absolute path>, and
       // <link target> triples. Filesystem names may contain tabs or newlines,
-      // so a text line protocol is not safe at this trust boundary. GNU find
-      // consumes a separate absolute-path NUL list and fails closed if any
-      // starting tree cannot be traversed.
+      // so a text line protocol is not safe at this trust boundary. xargs
+      // turns the separate absolute-path NUL list into positional parameters,
+      // keeping names out of shell syntax while remaining compatible with
+      // sandbox images whose GNU find predates -files0-from. Each find failure
+      // aborts the audit before any archive is requested.
       const auditInput = buildSandboxDirectoryAuditInput(dir, existingDirs);
       if (!auditInput.ok) {
         return {
