@@ -139,9 +139,9 @@ describe("gRPC OpenShell sandbox control", () => {
       control.exec({ sandboxName: "alpha", command: ["printf", boundaryArgument] }),
     ).resolves.toMatchObject({ status: 0 });
 
-    expect((fake.stream as FakeStream & { request: { command: string[] } }).request.command).toEqual(
-      ["printf", boundaryArgument],
-    );
+    expect(
+      (fake.stream as FakeStream & { request: { command: string[] } }).request.command,
+    ).toEqual(["printf", boundaryArgument]);
   });
 
   it("resolves a sandbox id and normalizes streamed output", async () => {
