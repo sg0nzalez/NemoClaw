@@ -9,10 +9,12 @@ import { StringDecoder } from "node:string_decoder";
 import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
 
-import type {
-  OpenShellSandboxControl,
-  SandboxExecRequest,
-  SandboxExecResult,
+import {
+  openShellExecRequestValidationFailure,
+  validateOpenShellExecCommand,
+  type OpenShellSandboxControl,
+  type SandboxExecRequest,
+  type SandboxExecResult,
 } from "./sandbox-control";
 
 const DEFAULT_EXEC_MAX_OUTPUT_BYTES = 1024 * 1024;
@@ -298,6 +300,9 @@ export function createGrpcOpenShellSandboxControl(
   return {
     close: () => client.close(),
     async exec(request): Promise<SandboxExecResult> {
+      const validationError = validateOpenShellExecCommand(request.command);
+      if (validationError) return openShellExecRequestValidationFailure(validationError);
+
       const maxOutputBytes = request.maxOutputBytes ?? DEFAULT_EXEC_MAX_OUTPUT_BYTES;
       if (!Number.isSafeInteger(maxOutputBytes) || maxOutputBytes < 0) {
         return {

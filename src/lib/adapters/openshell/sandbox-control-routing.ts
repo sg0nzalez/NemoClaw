@@ -9,9 +9,12 @@ import {
 } from "./grpc-sandbox-control";
 import {
   createCliOpenShellSandboxControl,
+  OpenShellExecRequestValidationError,
+  openShellExecRequestValidationFailure,
   type OpenShellSandboxControl,
   type SandboxExecRequest,
   type SandboxExecResult,
+  validateOpenShellExecCommand,
 } from "./sandbox-control";
 import { OPENSHELL_OPERATION_TIMEOUT_MS } from "./timeouts";
 
@@ -46,6 +49,9 @@ export async function execSandboxReadOnlyWithGrpcFallback(
   request: SandboxExecRequest,
   dependencies: ReadOnlyRoutingDependencies = defaultDependencies,
 ): Promise<SandboxExecResult> {
+  const validationError = validateOpenShellExecCommand(request.command);
+  if (validationError) return openShellExecRequestValidationFailure(validationError);
+
   let grpc: GrpcOpenShellSandboxControl | undefined;
   try {
     grpc = dependencies.createGrpc(gatewayName);
@@ -59,6 +65,9 @@ export async function execSandboxReadOnlyWithGrpcFallback(
       result.error.cause,
     );
   } catch (error) {
+    if (error instanceof OpenShellExecRequestValidationError) {
+      return openShellExecRequestValidationFailure(error);
+    }
     dependencies.debug(
       "OpenShell direct gRPC configuration failed; retrying through the CLI",
       error,
