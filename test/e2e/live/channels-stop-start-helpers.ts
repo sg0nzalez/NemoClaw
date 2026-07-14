@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { expect } from "../fixtures/e2e-test.ts";
+import { startChannelsStopStartProgress } from "./channels-stop-start-progress.ts";
 import { assertChannelsStopStartSandboxName } from "./channels-stop-start-safety.ts";
 import {
   type AgentKind,
@@ -438,6 +439,9 @@ export async function runChannelsStopStartTarget({
     sandboxName: SANDBOX_NAME,
     channels: CHANNELS,
   });
+
+  const progress = startChannelsStopStartProgress(AGENT);
+  cleanup.trackDisposable("stop channels stop/start progress", progress.stop);
 
   cleanup.trackGateway(host, "nemoclaw", {
     artifactName: `cleanup-openshell-gateway-destroy-${AGENT}`,
