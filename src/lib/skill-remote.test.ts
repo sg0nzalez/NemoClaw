@@ -187,10 +187,18 @@ describe("verifyRemove", () => {
 });
 
 describe("checkExisting", () => {
-  it("returns null when sandbox execution is unavailable", async () => {
+  it("maps a selected-control execution failure to an inconclusive result", async () => {
     await expect(
       checkExisting(context(), resolveSkillPaths(null, "test-skill")),
     ).resolves.toBeNull();
+  });
+
+  it("maps a successful absence sentinel to false", async () => {
+    const execImpl = vi.fn(async () => ({ status: 0, stdout: "ABSENT", stderr: "" }));
+
+    await expect(
+      checkExisting(context(), resolveSkillPaths(null, "test-skill"), { execImpl }),
+    ).resolves.toBe(false);
   });
 
   it("probes directories so removal can clean partial uploads", async () => {
