@@ -66,7 +66,7 @@ export interface MessagingBridgeProfile {
   readonly strategy: string;
   /** OAuth scope(s) declared in the profile's refresh block. */
   readonly scopes: readonly string[];
-  /** Material names the profile marks `secret: true` (passed as --secret-material-key). */
+  /** Material names the profile marks `secret: true` (ingested through --secret-material-env). */
   readonly secretMaterialKeys: readonly string[];
   /** Env var holding the pasted secret material (the channel's primary required secret). */
   readonly sourceSecretEnv: string;
@@ -424,19 +424,23 @@ export function configureMessagingBridgeRefreshes(
       return { ok: false, reason: built.reason };
     }
 
-    // SECURITY (host-local, tracked upstream): OpenShell `provider refresh configure`
-    // ingests refresh material only via `--material KEY=VALUE` argv — it has no stdin,
-    // file, or env-ref transport for secret material today. So secret material transits
-    // this argv. Accepted risk: it never enters the sandbox (the key-out-of-sandbox
-    // boundary holds), and the exposure is transient (this one configure call) and
-    // host-local (ps //proc/<pid>/cmdline on the trusted host that already holds the key
-    // to mint tokens). Tracked upstream to add a non-argv transport
-    // (--secret-material-file/stdin); switch to it when released.
-    const materialArgs = built.material.flatMap(({ key, value }) => [
-      "--material",
-      `${key}=${value}`,
-    ]);
-    const secretKeyArgs = built.secretKeys.flatMap((key) => ["--secret-material-key", key]);
+    // OpenShell reads secret refresh material from its own process environment,
+    // so private keys never appear in argv. Reuse the same ephemeral variable
+    // names safely: each profile is configured by a separate child process.
+    const secretKeys = new Set(built.secretKeys);
+    const materialArgs: string[] = [];
+    const secretMaterialEnv: NodeJS.ProcessEnv = {};
+    let secretIndex = 0;
+    for (const { key, value } of built.material) {
+      if (secretKeys.has(key)) {
+        const envName = `MESSAGING_BRIDGE_SECRET_${secretIndex}`;
+        secretIndex += 1;
+        secretMaterialEnv[envName] = value;
+        materialArgs.push("--secret-material-env", `${key}=${envName}`);
+        continue;
+      }
+      materialArgs.push("--material", `${key}=${value}`);
+    }
     const result = deps.runOpenshell(
       [
         "provider",
@@ -447,10 +451,13 @@ export function configureMessagingBridgeRefreshes(
         "--strategy",
         profile.strategy,
         ...materialArgs,
-        ...secretKeyArgs,
         bridge.name,
       ],
-      { ignoreError: true, stdio: ["ignore", "pipe", "pipe"] },
+      {
+        env: secretMaterialEnv,
+        ignoreError: true,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
     );
     if (result.status === 0) continue;
 

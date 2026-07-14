@@ -151,8 +151,12 @@ describe("configureMessagingBridgeRefreshes", () => {
     expect(result.ok).toBe(false);
   });
 
-  it("configures refresh and returns ok when runOpenshell succeeds", () => {
-    const runOpenshell = vi.fn((_args: string[], _opts: unknown) => ({ status: 0 }));
+  it("keeps private keys off argv while configuring refresh", () => {
+    const secretEnvName = "MESSAGING_BRIDGE_SECRET_0";
+    const parentSecret = process.env[secretEnvName];
+    const runOpenshell = vi.fn((_args: string[], _opts: { env?: NodeJS.ProcessEnv }) => ({
+      status: 0,
+    }));
     const result = configureMessagingBridgeRefreshes([BRIDGE_DEF], {
       runOpenshell,
       redact,
@@ -168,8 +172,13 @@ describe("configureMessagingBridgeRefreshes", () => {
     expect(args).toContain("google-service-account-jwt");
     expect(args).toContain("client_email=bot@p.iam.gserviceaccount.com");
     expect(args).toContain("scope=https://www.googleapis.com/auth/chat.bot");
-    expect(args).toContain("private_key");
+    expect(args).toContain("--secret-material-env");
+    expect(args).toContain(`private_key=${secretEnvName}`);
+    expect(args.join(" ")).not.toContain("fake-test-private-key-material");
     expect(args).toContain("sbx-googlechat-bridge");
+    const options = runOpenshell.mock.calls[0][1];
+    expect(options.env).toEqual({ [secretEnvName]: "fake-test-private-key-material" });
+    expect(process.env[secretEnvName]).toBe(parentSecret);
   });
 
   it("fails closed when runOpenshell exits nonzero", () => {
