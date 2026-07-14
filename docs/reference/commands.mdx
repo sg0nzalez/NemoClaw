@@ -2195,7 +2195,11 @@ Pass `-f` / `--file <agents.yaml>` to point at the manifest; `--yes` confirms th
 
 List OpenClaw conversation sessions in the sandbox.
 With no subcommand the in-sandbox CLI lists stored sessions for the configured default agent.
-NemoClaw invokes `openclaw sessions` via `openshell sandbox exec` and forwards OpenClaw flags verbatim, but filters default list output so internal `nemoclaw-onboard-warmup-*` sessions created during onboarding are hidden from user-facing output.
+NemoClaw invokes the read-only `openclaw sessions` command through the sandbox's named OpenShell gateway and forwards OpenClaw flags verbatim.
+It prefers the direct gRPC sandbox execution API.
+If gateway configuration or the gRPC transport fails before NemoClaw receives a command result, it retries this read-only list operation through the OpenShell CLI.
+A completed command, including a nonzero result, is never replayed during fallback.
+NemoClaw filters default list output so internal `nemoclaw-onboard-warmup-*` sessions created during onboarding are hidden from user-facing output.
 
 ```bash
 $$nemoclaw my-assistant sessions
