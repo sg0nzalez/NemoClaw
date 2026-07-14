@@ -78,7 +78,7 @@ describe("read-only OpenShell sandbox control routing", () => {
     expect(test.cliExec).not.toHaveBeenCalled();
   });
 
-  it("retries a pre-dispatch gRPC lookup failure without forwarding its deadline", async () => {
+  it("retries a pre-dispatch gRPC lookup failure with the same bounded deadline", async () => {
     const grpcError = new Error("UNAVAILABLE");
     const cliResult = { status: 0, stdout: "cli", stderr: "" };
     const test = dependencies(
@@ -95,7 +95,10 @@ describe("read-only OpenShell sandbox control routing", () => {
       execSandboxReadOnlyWithGrpcFallback("nemoclaw", request, test.deps),
     ).resolves.toEqual(cliResult);
 
-    expect(test.cliExec).toHaveBeenCalledWith(request);
+    expect(test.cliExec).toHaveBeenCalledWith({
+      ...request,
+      timeoutMs: OPENSHELL_OPERATION_TIMEOUT_MS,
+    });
     expect(test.debug).toHaveBeenCalledWith(expect.stringContaining("before dispatch"), grpcError);
     expect(test.close).toHaveBeenCalledOnce();
   });
@@ -110,7 +113,10 @@ describe("read-only OpenShell sandbox control routing", () => {
       execSandboxReadOnlyWithGrpcFallback("nemoclaw", request, test.deps),
     ).resolves.toEqual(cliResult);
 
-    expect(test.cliExec).toHaveBeenCalledWith(request);
+    expect(test.cliExec).toHaveBeenCalledWith({
+      ...request,
+      timeoutMs: OPENSHELL_OPERATION_TIMEOUT_MS,
+    });
     expect(test.debug).toHaveBeenCalledWith(
       expect.stringContaining("read-only exec failed"),
       grpcError,
@@ -143,7 +149,10 @@ describe("read-only OpenShell sandbox control routing", () => {
     });
 
     expect(test.grpcExec).not.toHaveBeenCalled();
-    expect(test.cliExec).toHaveBeenCalledWith(request);
+    expect(test.cliExec).toHaveBeenCalledWith({
+      ...request,
+      timeoutMs: OPENSHELL_OPERATION_TIMEOUT_MS,
+    });
     expect(test.debug).toHaveBeenCalledWith(expect.stringContaining("configuration failed"), error);
   });
 
