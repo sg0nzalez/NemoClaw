@@ -74,7 +74,6 @@ describe("CLI OpenShell sandbox control", () => {
       }),
     );
     const control = createCliOpenShellSandboxControl(vi.fn(), {
-      resolveBinary: () => "/usr/bin/openshell",
       captureBinary,
     });
 
@@ -93,7 +92,6 @@ describe("CLI OpenShell sandbox control", () => {
       stderr: "warning",
     });
     expect(captureBinary).toHaveBeenCalledWith(
-      "/usr/bin/openshell",
       ["sandbox", "exec", "--name", "alpha", "--", "tar", "-cf", "-", "workspace"],
       { input: undefined, maxBuffer: 1024, timeout: 120_000 },
     );
