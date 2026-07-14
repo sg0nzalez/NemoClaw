@@ -63,7 +63,7 @@ describe("legacy sandbox transport inventory", () => {
       "src/aliased-transport.ts": [
         'const sshCommand = "ssh";',
         "const invokeSsh = spawnSync;",
-        "invokeSsh(sshCommand, [\"sandbox\"]);",
+        'invokeSsh(sshCommand, ["sandbox"]);',
         'const sshfsCommand = ["sshfs", "sandbox:/", "/mnt"];',
         "const invokeSshfs = run;",
         "invokeSshfs(sshfsCommand);",
