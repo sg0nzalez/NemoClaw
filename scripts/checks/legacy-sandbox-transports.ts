@@ -211,12 +211,34 @@ function scanSource(
       ts.isImportDeclaration(node) &&
       ts.isStringLiteral(node.moduleSpecifier) &&
       /(?:^|\/)sandbox-control-routing(?:\.js)?$/u.test(node.moduleSpecifier.text) &&
-      node.importClause?.namedBindings &&
-      ts.isNamedImports(node.importClause.namedBindings) &&
-      node.importClause.namedBindings.elements.some(
+      node.importClause &&
+      !node.importClause.isTypeOnly &&
+      ((node.importClause.namedBindings && ts.isNamespaceImport(node.importClause.namedBindings)) ||
+        (node.importClause.namedBindings &&
+          ts.isNamedImports(node.importClause.namedBindings) &&
+          node.importClause.namedBindings.elements.some(
+            (specifier) =>
+              !specifier.isTypeOnly &&
+              (specifier.propertyName?.text ?? specifier.name.text) ===
+                "execSandboxReadOnlyWithGrpcFallback",
+          )))
+    ) {
+      increment(counts, "grpc-cli-read-only-fallback");
+    }
+
+    if (
+      ts.isExportDeclaration(node) &&
+      !node.isTypeOnly &&
+      node.moduleSpecifier &&
+      ts.isStringLiteral(node.moduleSpecifier) &&
+      /(?:^|\/)sandbox-control-routing(?:\.js)?$/u.test(node.moduleSpecifier.text) &&
+      node.exportClause &&
+      ts.isNamedExports(node.exportClause) &&
+      node.exportClause.elements.some(
         (specifier) =>
+          !specifier.isTypeOnly &&
           (specifier.propertyName?.text ?? specifier.name.text) ===
-          "execSandboxReadOnlyWithGrpcFallback",
+            "execSandboxReadOnlyWithGrpcFallback",
       )
     ) {
       increment(counts, "grpc-cli-read-only-fallback");
