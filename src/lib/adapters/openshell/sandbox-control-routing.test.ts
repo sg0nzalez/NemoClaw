@@ -38,7 +38,10 @@ const request = {
 describe("read-only OpenShell sandbox control routing", () => {
   it.each([
     ["too many session arguments", ["openclaw", "sessions", "list", ...Array(1022).fill("x")]],
-    ["an oversized UTF-8 session argument", ["openclaw", "sessions", "list", "é".repeat(16 * 1024 + 1)]],
+    [
+      "an oversized UTF-8 session argument",
+      ["openclaw", "sessions", "list", "é".repeat(16 * 1024 + 1)],
+    ],
     ["a NUL session argument", ["openclaw", "sessions", "list", "bad\0arg"]],
     ["an LF session argument", ["openclaw", "sessions", "list", "bad\narg"]],
     ["a CR session argument", ["openclaw", "sessions", "list", "bad\rarg"]],
@@ -68,11 +71,7 @@ describe("read-only OpenShell sandbox control routing", () => {
     ];
 
     await expect(
-      execSandboxReadOnlyWithGrpcFallback(
-        "nemoclaw",
-        { sandboxName: "alpha", command },
-        test.deps,
-      ),
+      execSandboxReadOnlyWithGrpcFallback("nemoclaw", { sandboxName: "alpha", command }, test.deps),
     ).resolves.toMatchObject({ status: 0 });
 
     expect(command).toHaveLength(1024);
