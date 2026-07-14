@@ -3,6 +3,10 @@
 
 import type { CaptureOpenshellResult } from "./client";
 import { captureOpenshell } from "./runtime";
+import {
+  assertNoOpenShellGatewayEndpointOverride,
+  type OpenShellGatewayEndpointEnvironment,
+} from "../../openshell-gateway-endpoint-guard";
 
 export interface SandboxExecRequest {
   sandboxName: string;
@@ -221,7 +225,9 @@ export function createCliOpenShellSandboxControl(
 export function createGatewayScopedCliOpenShellSandboxControl(
   gatewayName: string,
   capture: CaptureOpenShell = captureOpenshell,
+  env: OpenShellGatewayEndpointEnvironment = process.env,
 ): OpenShellSandboxControl {
+  assertNoOpenShellGatewayEndpointOverride(env);
   return createCliSandboxControl(capture, gatewayName);
 }
 
