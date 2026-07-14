@@ -142,7 +142,12 @@ describe("CLI OpenShell sandbox control", () => {
 
   it("forwards an exact-boundary argument unchanged", async () => {
     const capture = vi.fn(
-      (): CaptureOpenshellResult => ({ status: 0, output: "", stdout: "", stderr: "" }),
+      (_args: readonly string[]): CaptureOpenshellResult => ({
+        status: 0,
+        output: "",
+        stdout: "",
+        stderr: "",
+      }),
     );
     const control = createCliOpenShellSandboxControl(capture);
     const boundaryArgument = "é".repeat(16 * 1024);
@@ -159,6 +164,5 @@ describe("CLI OpenShell sandbox control", () => {
       "printf",
       boundaryArgument,
     ]);
-    expect(capture.mock.calls[0]?.[0]?.at(-1)).toBe(boundaryArgument);
   });
 });
