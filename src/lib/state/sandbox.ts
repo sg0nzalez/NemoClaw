@@ -41,8 +41,8 @@ import {
   BACKUP_FAILURE_ABSENT_AFTER_EXTRACTION,
   classifyFailedDirsFromTarStderr,
 } from "../domain/backup-failure.js";
-import { shellQuote } from "../runner.js";
 import { resolveSandboxGatewayName } from "../onboard/gateway-binding.js";
+import { shellQuote } from "../runner.js";
 import { createTempSshConfig } from "../sandbox/temp-ssh-config.js";
 import { isSensitiveFile, sanitizeConfigFile } from "../security/credential-filter.js";
 import {
@@ -1159,8 +1159,8 @@ async function backupStateFile(
  * Uses the agent manifest to determine which directories contain state.
  */
 
-export { buildStateFileRestoreCommand } from "./state-file-restore.js";
 export { isSshTransportFailure } from "./ssh-transport.js";
+export { buildStateFileRestoreCommand } from "./state-file-restore.js";
 
 export async function backupSandboxState(
   sandboxName: string,
