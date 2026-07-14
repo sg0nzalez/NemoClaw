@@ -34,6 +34,57 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
     expect(output).toContain("Restored 1 directories, 1 files");
   });
 
+  it("keeps a successful restore when every post-restore reconciliation warns", async () => {
+    const consoleLog = vi.spyOn(console, "log").mockImplementation(() => {});
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const customPolicy = {
+      name: "corp-policy",
+      content: "network_policies:\n  corp-policy: {}\n",
+      sourcePath: "/policies/corp-policy.yaml",
+    };
+    f.getLatestBackupMock.mockReturnValue({
+      timestamp: "2026-06-15T00:00:00.000Z",
+      backupPath: "/tmp/backup-alpha",
+      policyPresets: ["github", customPolicy.name],
+      customPolicies: [customPolicy],
+    });
+    f.restoreSandboxStateMock.mockResolvedValue({
+      success: true,
+      restoredDirs: ["workspace"],
+      restoredFiles: ["openclaw.json"],
+      failedDirs: [],
+      failedFiles: [],
+    });
+    f.shieldsMock.repairMutableConfigPermsMock.mockImplementation(() => {
+      throw new Error("permission repair failed");
+    });
+    f.applyPresetContentMock.mockImplementation(() => {
+      throw new Error("custom replay failed");
+    });
+    f.applyPresetMock.mockImplementation(() => {
+      throw new Error("preset reconciliation failed");
+    });
+    const { runSandboxSnapshot } = await import("./snapshot");
+
+    await expect(runSandboxSnapshot("alpha", { kind: "restore" })).resolves.toBeUndefined();
+
+    expect(f.shieldsMock.repairMutableConfigPermsMock).toHaveBeenCalledWith("alpha");
+    expect(f.applyPresetContentMock).toHaveBeenCalledWith(
+      "alpha",
+      customPolicy.name,
+      customPolicy.content,
+      { custom: { sourcePath: customPolicy.sourcePath } },
+    );
+    expect(f.applyPresetMock).toHaveBeenCalledWith("alpha", "github");
+    expect(consoleLog.mock.calls.flat().join("\n")).toContain("Restored 1 directories, 1 files");
+    const warnings = consoleWarn.mock.calls.flat().join("\n");
+    expect(warnings).toContain(
+      "OpenClaw config permission repair errored: permission repair failed",
+    );
+    expect(warnings).toContain("corp-policy (apply: custom replay failed)");
+    expect(warnings).toContain("github (apply: preset reconciliation failed)");
+  });
+
   it("delegates managed and custom-image snapshot restores to the state layer", async () => {
     f.getLatestBackupMock.mockReturnValue({
       snapshotVersion: 4,
