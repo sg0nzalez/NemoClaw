@@ -1359,6 +1359,10 @@ if (cmd.includes("[ -d ")) {
   process.exit(0);
 }
 if (cmd.includes("nemoclaw-sqlite-backup")) {
+  if (readStdin().toString("utf8") !== ${JSON.stringify(sandboxState.SQLITE_BACKUP_PY)}) {
+    process.stderr.write("unexpected sqlite backup script on stdin\\n");
+    process.exit(97);
+  }
   process.stdout.write(fs.readFileSync(path.join(hermesDir, "runtime", "state.db")));
   process.exit(0);
 }
@@ -1443,9 +1447,7 @@ process.exit(0);
       expect(fs.readFileSync(path.join(runtimeDir, "state.db"))).toEqual(stateDbBytes);
 
       const loggedCommands = fs.readFileSync(sshLog, "utf-8");
-      expect(loggedCommands).toContain("sqlite3.connect");
-      expect(loggedCommands).toContain("src_conn.backup(dst_conn)");
-      expect(loggedCommands).toContain("PRAGMA quick_check");
+      expect(loggedCommands).toContain('python3 - \\"$src\\" \\"$tmp\\"');
     } finally {
       if (oldOpenshell === undefined) {
         delete process.env.NEMOCLAW_OPENSHELL_BIN;

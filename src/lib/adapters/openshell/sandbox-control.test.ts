@@ -69,6 +69,7 @@ describe("CLI OpenShell sandbox control", () => {
 
   it("preserves archive bytes through the CLI fallback", async () => {
     const bytes = Buffer.from([0, 255, 128, 10]);
+    const stdin = "import sqlite3, sys\nsrc, dst = sys.argv[1], sys.argv[2]";
     const captureBinary = vi.fn(
       (): CaptureOpenshellBinaryResult => ({
         status: 0,
@@ -84,6 +85,7 @@ describe("CLI OpenShell sandbox control", () => {
       control.exec({
         sandboxName: "alpha",
         command: ["tar", "-cf", "-", "workspace"],
+        stdin,
         maxOutputBytes: 1024,
         stdoutEncoding: "buffer",
         timeoutMs: 120_000,
@@ -96,7 +98,7 @@ describe("CLI OpenShell sandbox control", () => {
     });
     expect(captureBinary).toHaveBeenCalledWith(
       ["sandbox", "exec", "--name", "alpha", "--", "tar", "-cf", "-", "workspace"],
-      { input: undefined, maxBuffer: 1024, timeout: 120_000 },
+      { input: stdin, maxBuffer: 1024, timeout: 120_000 },
     );
   });
 

@@ -28,6 +28,7 @@ import { spawnSync } from "child_process";
 import { captureSandboxSshConfigCommand } from "../adapters/openshell/client.js";
 import { resolveOpenshell } from "../adapters/openshell/resolve.js";
 import { execSandboxReadOnlyWithGrpcFallback } from "../adapters/openshell/sandbox-control-routing.js";
+import type { SandboxExecRequest } from "../adapters/openshell/sandbox-control.js";
 import { OPENSHELL_PROBE_TIMEOUT_MS } from "../adapters/openshell/timeouts.js";
 import type { AgentStateFile } from "../agent/defs.js";
 import { loadAgent } from "../agent/defs.js";
@@ -745,7 +746,8 @@ function stateFileRemotePath(dir: string, filePath: string): string {
   return `${dir.replace(/\/+$/, "")}/${filePath}`;
 }
 
-const SQLITE_BACKUP_PY = [
+/** @internal Exported so the transport-boundary test can pin the exact stdin payload. */
+export const SQLITE_BACKUP_PY = [
   "import sqlite3, sys",
   "src, dst = sys.argv[1], sys.argv[2]",
   "src_conn = sqlite3.connect('file:' + src + '?mode=ro', uri=True, timeout=30)",
@@ -773,7 +775,7 @@ function buildStateFileBackupCommand(dir: string, spec: StateFileSpec): string {
       '[ "${hardlink_count:-0}" = "0" ] || { echo "hard-linked sqlite state file rejected: $src" >&2; exit 11; }',
       'tmp="$(mktemp /tmp/nemoclaw-sqlite-backup.XXXXXX)"',
       "trap 'rm -f \"$tmp\"' EXIT",
-      `python3 -c ${shellQuote(SQLITE_BACKUP_PY)} "$src" "$tmp"`,
+      'python3 - "$src" "$tmp"',
       'cat -- "$tmp"',
     ].join("; ");
   }
@@ -786,6 +788,22 @@ function buildStateFileBackupCommand(dir: string, spec: StateFileSpec): string {
     '[ "${hardlink_count:-0}" = "0" ] || { echo "hard-linked state file rejected: $src" >&2; exit 11; }',
     'cat -- "$src"',
   ].join("; ");
+}
+
+/** @internal Exported to pin the state-file transport contract in focused tests. */
+export function buildStateFileBackupExecRequest(
+  sandboxName: string,
+  dir: string,
+  spec: StateFileSpec,
+): SandboxExecRequest {
+  return {
+    sandboxName,
+    command: ["sh", "-c", buildStateFileBackupCommand(dir, spec)],
+    ...(spec.strategy === "sqlite_backup" ? { stdin: SQLITE_BACKUP_PY } : {}),
+    timeoutMs: 120_000,
+    maxOutputBytes: 256 * 1024 * 1024,
+    stdoutEncoding: "buffer",
+  };
 }
 
 type StateFileBackupOutcome = "backed_up" | "missing" | "failed";
@@ -814,15 +832,11 @@ async function backupStateFile(
   spec: StateFileSpec,
   backupPath: string,
 ): Promise<StateFileBackupResult> {
-  const command = buildStateFileBackupCommand(dir, spec);
   _log(`Backing up state file ${spec.path} (${spec.strategy})`);
-  const result = await execSandboxReadOnlyWithGrpcFallback(gatewayName, {
-    sandboxName,
-    command: ["sh", "-c", command],
-    timeoutMs: 120_000,
-    maxOutputBytes: 256 * 1024 * 1024,
-    stdoutEncoding: "buffer",
-  });
+  const result = await execSandboxReadOnlyWithGrpcFallback(
+    gatewayName,
+    buildStateFileBackupExecRequest(sandboxName, dir, spec),
+  );
 
   if (result.status === 2) return { outcome: "missing", unreachable: false };
   if (result.status !== 0 || result.error || result.signal) {
