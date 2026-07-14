@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Freezes the direct host-to-sandbox transport surface while NemoClaw moves to
- * OpenShell's gRPC API. Every reviewed site must be removed or re-reviewed
- * explicitly; new SSH, SSHFS, or Docker-exec bypasses fail repository checks.
+ * Freezes the statically recognizable direct host-to-sandbox transport surface
+ * while NemoClaw moves to OpenShell's gRPC API. Literal calls and same-file
+ * immutable aliases must be removed or re-reviewed explicitly. This check is a
+ * review tripwire, not a general-purpose data-flow analysis.
  */
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -128,18 +129,62 @@ function expressionName(expression: ts.Expression): string | null {
   return null;
 }
 
+type ConstBindings = ReadonlyMap<string, ts.Expression | null>;
+
+function collectConstBindings(sourceFile: ts.SourceFile): ConstBindings {
+  const bindings = new Map<string, ts.Expression | null>();
+
+  function visit(node: ts.Node): void {
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.initializer &&
+      ts.isVariableDeclarationList(node.parent) &&
+      (node.parent.flags & ts.NodeFlags.Const) !== 0
+    ) {
+      const name = node.name.text;
+      bindings.set(name, bindings.has(name) ? null : node.initializer);
+    }
+    ts.forEachChild(node, visit);
+  }
+
+  visit(sourceFile);
+  return bindings;
+}
+
+function resolveAlias(
+  expression: ts.Expression,
+  bindings: ConstBindings,
+  seen = new Set<string>(),
+): ts.Expression {
+  if (!ts.isIdentifier(expression) || seen.has(expression.text)) return expression;
+  const binding = bindings.get(expression.text);
+  if (!binding) return expression;
+  seen.add(expression.text);
+  return resolveAlias(binding, bindings, seen);
+}
+
+function resolvedExpressionName(expression: ts.Expression, bindings: ConstBindings): string | null {
+  return expressionName(resolveAlias(expression, bindings));
+}
+
 function literalText(node: ts.Node | undefined): string | null {
   if (!node) return null;
   if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
   return null;
 }
 
-function commandFromArgument(argument: ts.Expression | undefined): string | null {
+function commandFromArgument(
+  argument: ts.Expression | undefined,
+  bindings: ConstBindings,
+): string | null {
   if (!argument) return null;
-  const direct = literalText(argument);
+  const resolved = resolveAlias(argument, bindings);
+  const direct = literalText(resolved);
   if (direct) return direct;
-  if (!ts.isArrayLiteralExpression(argument)) return null;
-  return literalText(argument.elements[0]);
+  if (!ts.isArrayLiteralExpression(resolved)) return null;
+  const first = resolved.elements[0];
+  return first && ts.isExpression(first) ? literalText(resolveAlias(first, bindings)) : null;
 }
 
 function increment(
@@ -161,6 +206,7 @@ function scanSource(
     ts.ScriptKind.TS,
   );
   const counts = new Map<LegacySandboxTransportKind, number>();
+  const bindings = collectConstBindings(sourceFile);
 
   function visit(node: ts.Node): void {
     if (ts.isArrayLiteralExpression(node)) {
@@ -175,17 +221,17 @@ function scanSource(
     }
 
     if (ts.isCallExpression(node)) {
-      const name = expressionName(node.expression);
+      const name = resolvedExpressionName(node.expression, bindings);
       const helperKind = name ? HELPER_KINDS.get(name) : undefined;
       if (helperKind) increment(counts, helperKind);
       if (name !== null && DOCKER_COMMAND_CALLS.has(name)) {
-        const firstDockerArg = commandFromArgument(node.arguments[0]);
+        const firstDockerArg = commandFromArgument(node.arguments[0], bindings);
         if (firstDockerArg === "exec") increment(counts, "docker-exec-command");
       }
 
       const commandArgumentIndex = name === "collect" ? 2 : 0;
       if (name === "collect" || (name !== null && COMMAND_CALLS.has(name))) {
-        const command = commandFromArgument(node.arguments[commandArgumentIndex]);
+        const command = commandFromArgument(node.arguments[commandArgumentIndex], bindings);
         const scansSandboxSsh = !NON_SANDBOX_SSH_ROOTS.some((root) =>
           relativePath.startsWith(root),
         );
