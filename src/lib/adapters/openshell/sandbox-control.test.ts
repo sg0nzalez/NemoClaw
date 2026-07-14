@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { CaptureOpenshellResult } from "./client";
 import {
   createCliOpenShellSandboxControl,
+  createGatewayScopedCliOpenShellSandboxControl,
   OpenShellExecRequestValidationError,
   validateOpenShellExecCommand,
   validateOpenShellExecRequest,
@@ -231,6 +232,25 @@ describe("CLI OpenShell sandbox control", () => {
       error,
       signal: "SIGTERM",
     });
+  });
+
+  it("pins fallback execution to the requested gateway", async () => {
+    const capture = vi.fn(
+      (): CaptureOpenshellResult => ({
+        status: 0,
+        output: "ok",
+        stdout: "ok\n",
+        stderr: "",
+      }),
+    );
+    const control = createGatewayScopedCliOpenShellSandboxControl("nemoclaw-19080", capture);
+
+    await control.exec({ sandboxName: "alpha", command: ["true"] });
+
+    expect(capture).toHaveBeenCalledWith(
+      ["--gateway", "nemoclaw-19080", "sandbox", "exec", "--name", "alpha", "--", "true"],
+      expect.objectContaining({ ignoreError: true, includeStreams: true }),
+    );
   });
 
   it("returns a standard failure without capture for invalid commands", async () => {

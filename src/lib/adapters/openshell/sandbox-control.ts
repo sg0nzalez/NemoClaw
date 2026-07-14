@@ -259,8 +259,9 @@ function normalizeExecResult(result: CaptureOpenshellResult): SandboxExecResult 
   return normalized;
 }
 
-export function createCliOpenShellSandboxControl(
-  capture: CaptureOpenShell = captureOpenshell,
+function createCliSandboxControl(
+  capture: CaptureOpenShell,
+  gatewayName?: string,
 ): OpenShellSandboxControl {
   return {
     async exec(request): Promise<SandboxExecResult> {
@@ -269,8 +270,17 @@ export function createCliOpenShellSandboxControl(
       const validationError = validateOpenShellExecRequest(request);
       if (validationError) return openShellExecRequestValidationFailure(validationError);
 
+      const gatewayArgs = gatewayName ? ["--gateway", gatewayName] : [];
       const result = capture(
-        ["sandbox", "exec", "--name", request.sandboxName, "--", ...request.command],
+        [
+          ...gatewayArgs,
+          "sandbox",
+          "exec",
+          "--name",
+          request.sandboxName,
+          "--",
+          ...request.command,
+        ],
         {
           ignoreError: true,
           includeStreams: true,
@@ -282,6 +292,20 @@ export function createCliOpenShellSandboxControl(
       return normalizeExecResult(result);
     },
   };
+}
+
+export function createCliOpenShellSandboxControl(
+  capture: CaptureOpenShell = captureOpenshell,
+): OpenShellSandboxControl {
+  return createCliSandboxControl(capture);
+}
+
+/** Bind every CLI fallback invocation to the gateway selected by the caller. */
+export function createGatewayScopedCliOpenShellSandboxControl(
+  gatewayName: string,
+  capture: CaptureOpenShell = captureOpenshell,
+): OpenShellSandboxControl {
+  return createCliSandboxControl(capture, gatewayName);
 }
 
 export const openShellSandboxControl = createCliOpenShellSandboxControl();
