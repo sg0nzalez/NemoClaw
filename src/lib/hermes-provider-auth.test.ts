@@ -185,47 +185,39 @@ describe("Hermes provider OpenShell credential handoff", () => {
       fetch: (async (url, init) => {
         const headers = new Headers(init?.headers);
         fetchCalls.push({ url: String(url), auth: headers.get("authorization") });
-        if (String(url).endsWith("/api/oauth/device/code")) {
-          return new Response(
-            JSON.stringify({
+        const responseBody = String(url).endsWith("/api/oauth/device/code")
+          ? {
               device_code: "device-1",
               user_code: "USER-1",
               verification_uri: "https://portal.example/verify",
               expires_in: 900,
               interval: 1,
-            }),
-            { status: 200, headers: { "Content-Type": "application/json" } },
-          );
-        }
-        if (String(url).endsWith("/api/oauth/token")) {
-          return new Response(
-            JSON.stringify({
-              access_token: "opaque-access",
-              refresh_token: "refresh-2",
-              expires_in: 900,
-              token_type: "Bearer",
-            }),
-            { status: 200, headers: { "Content-Type": "application/json" } },
-          );
-        }
-        return new Response(
-          JSON.stringify({
-            api_key: "agent-key-1",
-            key_id: "agent-key-id",
-            expires_in: 1800,
-            inference_base_url: "https://staging.nous.example/v1",
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
+            }
+          : String(url).endsWith("/api/oauth/token")
+            ? {
+                access_token: "opaque-access",
+                refresh_token: "refresh-2",
+                expires_in: 900,
+                token_type: "Bearer",
+              }
+            : {
+                api_key: "agent-key-1",
+                key_id: "agent-key-id",
+                expires_in: 1800,
+                inference_base_url: "https://staging.nous.example/v1",
+              };
+        return new Response(JSON.stringify(responseBody), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
       }) as typeof fetch,
       log: () => {},
       noBrowser: true,
       runOpenshell: (args: string[], opts: { env?: Record<string, string> } = {}) => {
         providerCalls.push({ args, env: opts.env });
-        if (args[0] === "provider" && args[1] === "get") {
-          return { status: 1, stdout: "", stderr: "" };
-        }
-        return { status: 0, stdout: "", stderr: "" };
+        return args[0] === "provider" && args[1] === "get"
+          ? { status: 1, stdout: "", stderr: "" }
+          : { status: 0, stdout: "", stderr: "" };
       },
     });
 
