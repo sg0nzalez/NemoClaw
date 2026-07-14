@@ -121,6 +121,7 @@ function makeHealthyVmGatewayEnv(prefix: string): Record<string, string> {
   // VM-driver snapshots should trust gateway metadata, not the legacy cluster
   // container probe.
   writeExecutable(path.join(localBin, "openshell"), [
+    'if [ "$1 $2 $3 $4" = "--gateway nemoclaw sandbox exec" ]; then shift 2; fi',
     'case "$1 $2" in',
     '  "gateway info") printf "Gateway Info\\n\\nGateway: nemoclaw\\nGateway endpoint: https://127.0.0.1:8080/\\n"; exit 0 ;;',
     '  "sandbox list") printf "NAME STATUS\\nalpha Ready\\n"; exit 0 ;;',
@@ -160,6 +161,7 @@ function makeVmRestoreToEnv(
 
   const cloneReadyMarker = path.join(home, "clone-1-ready");
   writeExecutable(path.join(localBin, "openshell"), [
+    'if [ "$1 $2 $3 $4" = "--gateway nemoclaw sandbox exec" ]; then shift 2; fi',
     'case "$1 $2" in',
     '  "gateway info") printf "Gateway Info\\n\\nGateway: nemoclaw\\nGateway endpoint: https://127.0.0.1:8080/\\n"; exit 0 ;;',
     '  "sandbox get") printf "{\\"name\\":\\"%s\\"}\\n" "$3"; exit 0 ;;',
