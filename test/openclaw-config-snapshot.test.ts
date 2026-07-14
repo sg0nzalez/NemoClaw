@@ -21,7 +21,7 @@ vi.mock("../src/lib/adapters/openshell/sandbox-control-routing.js", () => {
     timeoutMs?: number;
     stdoutEncoding?: "utf8" | "buffer";
   }) => {
-    if (request.command[0] === "python3") {
+    const restoreState = () => {
       const command = [...request.command];
       command[3] = transport.stagedRemotePaths.get(command[3]) ?? command[3];
       command[4] = transport.mutationRoot;
@@ -38,22 +38,25 @@ vi.mock("../src/lib/adapters/openshell/sandbox-control-routing.js", () => {
         ...(result.error ? { error: result.error } : {}),
         ...(result.signal ? { signal: result.signal } : {}),
       };
-    }
-    const result = spawnSync("ssh", [String(request.command.at(-1) ?? "")], {
-      input: request.stdin,
-      maxBuffer: request.maxOutputBytes,
-      timeout: request.timeoutMs,
-      encoding: request.stdoutEncoding === "buffer" ? undefined : "utf8",
-    });
-    const binary = request.stdoutEncoding === "buffer";
-    return {
-      status: result.status,
-      stdout: binary ? "" : String(result.stdout ?? ""),
-      ...(binary ? { stdoutBytes: Buffer.from(result.stdout ?? "") } : {}),
-      stderr: String(result.stderr ?? ""),
-      ...(result.error ? { error: result.error } : {}),
-      ...(result.signal ? { signal: result.signal } : {}),
     };
+    const readState = () => {
+      const result = spawnSync("ssh", [String(request.command.at(-1) ?? "")], {
+        input: request.stdin,
+        maxBuffer: request.maxOutputBytes,
+        timeout: request.timeoutMs,
+        encoding: request.stdoutEncoding === "buffer" ? undefined : "utf8",
+      });
+      const binary = request.stdoutEncoding === "buffer";
+      return {
+        status: result.status,
+        stdout: binary ? "" : String(result.stdout ?? ""),
+        ...(binary ? { stdoutBytes: Buffer.from(result.stdout ?? "") } : {}),
+        stderr: String(result.stderr ?? ""),
+        ...(result.error ? { error: result.error } : {}),
+        ...(result.signal ? { signal: result.signal } : {}),
+      };
+    };
+    return request.command[0] === "python3" ? restoreState() : readState();
   };
   return {
     execSandboxReadOnlyWithGrpcFallback: async (

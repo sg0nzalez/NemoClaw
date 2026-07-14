@@ -206,29 +206,30 @@ describe("OpenClaw managed extension snapshot restore", () => {
         const registryRead =
           (installIndexSource === "sqlite" && shellCommand.includes("state/openclaw.sqlite")) ||
           (installIndexSource === "legacy" && shellCommand.includes("plugins/installs.json"));
-        if (request.command[0] === "sh") {
-          return {
-            status: registryRead ? 0 : 2,
-            stdout: registryRead ? fs.readFileSync(freshRegistryPath, "utf8") : "",
-            stderr: "",
-          };
-        }
-        const command = [...request.command];
-        command[3] = stagedRemotePaths.get(command[3]) ?? command[3];
-        command[4] = openclawDir;
-        const result = spawnSync(command[0], command.slice(1), {
-          input: request.stdin,
-          maxBuffer: request.maxOutputBytes,
-          timeout: request.timeoutMs,
-          encoding: "utf8",
+        const readRegistry = () => ({
+          status: registryRead ? 0 : 2,
+          stdout: registryRead ? fs.readFileSync(freshRegistryPath, "utf8") : "",
+          stderr: "",
         });
-        return {
-          status: result.status,
-          stdout: String(result.stdout ?? ""),
-          stderr: String(result.stderr ?? ""),
-          ...(result.error ? { error: result.error } : {}),
-          ...(result.signal ? { signal: result.signal } : {}),
+        const restoreState = () => {
+          const command = [...request.command];
+          command[3] = stagedRemotePaths.get(command[3]) ?? command[3];
+          command[4] = openclawDir;
+          const result = spawnSync(command[0], command.slice(1), {
+            input: request.stdin,
+            maxBuffer: request.maxOutputBytes,
+            timeout: request.timeoutMs,
+            encoding: "utf8",
+          });
+          return {
+            status: result.status,
+            stdout: String(result.stdout ?? ""),
+            stderr: String(result.stderr ?? ""),
+            ...(result.error ? { error: result.error } : {}),
+            ...(result.signal ? { signal: result.signal } : {}),
+          };
         };
+        return request.command[0] === "sh" ? readRegistry() : restoreState();
       });
 
       writeOpenClawRegistry("alpha");

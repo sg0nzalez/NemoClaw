@@ -31,13 +31,15 @@ vi.mock("../adapters/openshell/sandbox-control-routing.js", async () => {
     const command = [...request.command];
     const keyMerge = command[0] === "/opt/venv/bin/python3";
     const args = keyMerge ? command.slice(3) : command.slice(1);
-    if (keyMerge) {
-      args[0] = restoreTransport.liveDir;
-      args[3] = restoreTransport.stagedRemotePaths.get(args[3]) ?? args[3];
-    } else {
-      args[2] = restoreTransport.stagedRemotePaths.get(args[2]) ?? args[2];
-      args[3] = restoreTransport.liveDir;
-    }
+    (keyMerge
+      ? () => {
+          args[0] = restoreTransport.liveDir;
+          args[3] = restoreTransport.stagedRemotePaths.get(args[3]) ?? args[3];
+        }
+      : () => {
+          args[2] = restoreTransport.stagedRemotePaths.get(args[2]) ?? args[2];
+          args[3] = restoreTransport.liveDir;
+        })();
     const result = spawnSync(
       keyMerge ? restoreTransport.pythonShim : restoreTransport.hostPython,
       keyMerge ? [String(request.stdin ?? ""), ...args] : args,

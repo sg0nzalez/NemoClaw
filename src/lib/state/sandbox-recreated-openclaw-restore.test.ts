@@ -138,33 +138,34 @@ async function runRestoreScenario(options: {
       },
     );
     mocks.exec.mockImplementation(async (request: SandboxExecRequest) => {
-      if (request.command[0] === "sh") {
-        return {
-          status: 0,
-          stdout: "",
-          stdoutBytes: fs.readFileSync(path.join(openclawDir, "openclaw.json")),
-          stderr: "",
-        };
-      }
-      const command = [...request.command];
-      command[3] = stagedRemotePaths.get(command[3]) ?? command[3];
-      command[4] = openclawDir;
-      const result = spawnSync(command[0], command.slice(1), {
-        input: request.stdin,
-        maxBuffer: request.maxOutputBytes,
-        timeout: request.timeoutMs,
-        encoding: request.stdoutEncoding === "buffer" ? undefined : "utf8",
+      const readConfig = () => ({
+        status: 0,
+        stdout: "",
+        stdoutBytes: fs.readFileSync(path.join(openclawDir, "openclaw.json")),
+        stderr: "",
       });
-      return {
-        status: result.status,
-        stdout: request.stdoutEncoding === "buffer" ? "" : String(result.stdout ?? ""),
-        ...(request.stdoutEncoding === "buffer"
-          ? { stdoutBytes: Buffer.from(result.stdout ?? "") }
-          : {}),
-        stderr: String(result.stderr ?? ""),
-        ...(result.error ? { error: result.error } : {}),
-        ...(result.signal ? { signal: result.signal } : {}),
+      const restoreState = () => {
+        const command = [...request.command];
+        command[3] = stagedRemotePaths.get(command[3]) ?? command[3];
+        command[4] = openclawDir;
+        const result = spawnSync(command[0], command.slice(1), {
+          input: request.stdin,
+          maxBuffer: request.maxOutputBytes,
+          timeout: request.timeoutMs,
+          encoding: request.stdoutEncoding === "buffer" ? undefined : "utf8",
+        });
+        return {
+          status: result.status,
+          stdout: request.stdoutEncoding === "buffer" ? "" : String(result.stdout ?? ""),
+          ...(request.stdoutEncoding === "buffer"
+            ? { stdoutBytes: Buffer.from(result.stdout ?? "") }
+            : {}),
+          stderr: String(result.stderr ?? ""),
+          ...(result.error ? { error: result.error } : {}),
+          ...(result.signal ? { signal: result.signal } : {}),
+        };
       };
+      return request.command[0] === "sh" ? readConfig() : restoreState();
     });
 
     const restore = await restoreRecreatedSandboxState("alpha", backupPath, {

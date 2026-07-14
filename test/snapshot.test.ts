@@ -20,44 +20,41 @@ vi.mock("../src/lib/adapters/openshell/sandbox-control-routing.js", () => {
     timeoutMs?: number;
     stdoutEncoding?: "utf8" | "buffer";
   }) => {
-    if (request.command[0] === "/opt/venv/bin/python3") {
-      const stagedPath = transport.stagedRemotePaths.get(request.command[6]);
-      if (stagedPath) fs.rmSync(stagedPath, { force: true });
-      return { status: 0, stdout: "KEY_ALLOWLIST_OK\n", stderr: "" };
-    }
-    if (request.command[0] === "python3") {
-      const command = [...request.command];
-      command[3] = transport.stagedRemotePaths.get(command[3]) ?? command[3];
-      command[4] = transport.mutationRoot;
+    const run = (command: string[], binary = false) => {
       const result = spawnSync(command[0], command.slice(1), {
         input: request.stdin,
         maxBuffer: request.maxOutputBytes,
         timeout: request.timeoutMs,
-        encoding: "utf8",
+        encoding: binary ? undefined : "utf8",
       });
       return {
         status: result.status,
-        stdout: String(result.stdout ?? ""),
+        stdout: binary ? "" : String(result.stdout ?? ""),
+        ...(binary ? { stdoutBytes: Buffer.from(result.stdout ?? "") } : {}),
         stderr: String(result.stderr ?? ""),
         ...(result.error ? { error: result.error } : {}),
         ...(result.signal ? { signal: result.signal } : {}),
       };
-    }
-    const result = spawnSync("ssh", [String(request.command.at(-1) ?? "")], {
-      input: request.stdin,
-      maxBuffer: request.maxOutputBytes,
-      timeout: request.timeoutMs,
-      encoding: request.stdoutEncoding === "buffer" ? undefined : "utf8",
-    });
-    const binary = request.stdoutEncoding === "buffer";
-    return {
-      status: result.status,
-      stdout: binary ? "" : String(result.stdout ?? ""),
-      ...(binary ? { stdoutBytes: Buffer.from(result.stdout ?? "") } : {}),
-      stderr: String(result.stderr ?? ""),
-      ...(result.error ? { error: result.error } : {}),
-      ...(result.signal ? { signal: result.signal } : {}),
     };
+    const mergeKeyAllowlist = () => {
+      const removeStaged = (stagedPath?: string) =>
+        stagedPath && fs.rmSync(stagedPath, { force: true });
+      removeStaged(transport.stagedRemotePaths.get(request.command[6]));
+      return { status: 0, stdout: "KEY_ALLOWLIST_OK\n", stderr: "" };
+    };
+    const restoreState = () => {
+      const command = [...request.command];
+      command[3] = transport.stagedRemotePaths.get(command[3]) ?? command[3];
+      command[4] = transport.mutationRoot;
+      return run(command);
+    };
+    const readState = () =>
+      run(["ssh", String(request.command.at(-1) ?? "")], request.stdoutEncoding === "buffer");
+    return request.command[0] === "/opt/venv/bin/python3"
+      ? mergeKeyAllowlist()
+      : request.command[0] === "python3"
+        ? restoreState()
+        : readState();
   };
   return {
     execSandboxReadOnlyWithGrpcFallback: async (
