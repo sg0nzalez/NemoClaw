@@ -1337,8 +1337,14 @@ if (cmd.includes("[ -d ")) {
   process.exit(0);
 }
 if (cmd.includes("nemoclaw-sqlite-backup")) {
+  const backupScript = readStdin();
+  if (backupScript.toString("utf8") !== ${JSON.stringify(sandboxState.SQLITE_BACKUP_PY)}) {
+    process.stderr.write("unexpected sqlite backup script on stdin\\n");
+    process.exit(97);
+  }
   const result = spawnSync("sh", ["-c", cmd.replaceAll("/sandbox/.hermes", hermesDir)], {
     encoding: null,
+    input: backupScript,
   });
   if (result.stdout) fs.writeSync(1, result.stdout);
   if (result.stderr) fs.writeSync(2, result.stderr);
@@ -1446,6 +1452,7 @@ process.exit(0);
         command.includes("nemoclaw-sqlite-backup"),
       );
       expect(sqliteBackupCommand).toBeDefined();
+      expect(sqliteBackupCommand).toContain('python3 - "$src" "$tmp"');
       expect(sqliteBackupCommand).not.toMatch(/[\u0000\r\n]/);
       expect(Buffer.byteLength(sqliteBackupCommand!, "utf8")).toBeLessThanOrEqual(32_768);
     } finally {

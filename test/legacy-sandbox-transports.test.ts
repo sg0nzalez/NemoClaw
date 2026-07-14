@@ -7,6 +7,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  REVIEWED_LEGACY_SANDBOX_TRANSPORT_SITES,
   auditLegacySandboxTransports,
   discoverLegacySandboxTransportSites,
 } from "../scripts/checks/legacy-sandbox-transports";
@@ -84,6 +85,106 @@ describe("legacy sandbox transport inventory", () => {
     ]);
   });
 
+  it("tracks reviewed read-only fallback importers, including aliased imports", () => {
+    const root = fixtureRepo({
+      "src/read-only-probe.ts": [
+        'import { execSandboxReadOnlyWithGrpcFallback as execReadOnly } from "./lib/adapters/openshell/sandbox-control-routing.js";',
+        'execReadOnly("gateway", request);',
+      ].join("\n"),
+    });
+
+    expect(discoverLegacySandboxTransportSites(root)).toEqual([
+      {
+        relativePath: "src/read-only-probe.ts",
+        kind: "grpc-cli-read-only-fallback",
+        calls: 1,
+      },
+    ]);
+  });
+
+  it("tracks namespace imports and direct or aliased named re-exports", () => {
+    const root = fixtureRepo({
+      "src/namespace-import.ts":
+        'import * as routing from "./lib/adapters/openshell/sandbox-control-routing.js";\nrouting.execSandboxReadOnlyWithGrpcFallback("gateway", request);',
+      "src/re-export.ts": [
+        'export { execSandboxReadOnlyWithGrpcFallback } from "./lib/adapters/openshell/sandbox-control-routing.js";',
+        'export { execSandboxReadOnlyWithGrpcFallback as execReadOnly } from "./lib/adapters/openshell/sandbox-control-routing.js";',
+      ].join("\n"),
+    });
+
+    expect(discoverLegacySandboxTransportSites(root)).toEqual([
+      {
+        relativePath: "src/namespace-import.ts",
+        kind: "grpc-cli-read-only-fallback",
+        calls: 1,
+      },
+      {
+        relativePath: "src/re-export.ts",
+        kind: "grpc-cli-read-only-fallback",
+        calls: 2,
+      },
+    ]);
+  });
+
+  it("ignores type-only fallback imports and re-exports", () => {
+    const root = fixtureRepo({
+      "src/type-only.ts": [
+        'import type { execSandboxReadOnlyWithGrpcFallback } from "./lib/adapters/openshell/sandbox-control-routing.js";',
+        'import { type execSandboxReadOnlyWithGrpcFallback as ExecReadOnly } from "./lib/adapters/openshell/sandbox-control-routing.js";',
+        'import type * as Routing from "./lib/adapters/openshell/sandbox-control-routing.js";',
+        'export type { execSandboxReadOnlyWithGrpcFallback } from "./lib/adapters/openshell/sandbox-control-routing.js";',
+        'export { type execSandboxReadOnlyWithGrpcFallback as ExecReadOnlyExport } from "./lib/adapters/openshell/sandbox-control-routing.js";',
+      ].join("\n"),
+    });
+
+    expect(discoverLegacySandboxTransportSites(root)).toEqual([]);
+  });
+
+  it("keeps every reviewed read-only fallback importer explicit", () => {
+    expect(
+      REVIEWED_LEGACY_SANDBOX_TRANSPORT_SITES.filter(
+        (site) => site.kind === "grpc-cli-read-only-fallback",
+      ),
+    ).toEqual([
+      {
+        relativePath: "src/lib/actions/sandbox/sessions/passthrough.ts",
+        kind: "grpc-cli-read-only-fallback",
+        calls: 1,
+      },
+      {
+        relativePath: "src/lib/diagnostics/debug.ts",
+        kind: "grpc-cli-read-only-fallback",
+        calls: 1,
+      },
+      {
+        relativePath: "src/lib/sandbox/version.ts",
+        kind: "grpc-cli-read-only-fallback",
+        calls: 1,
+      },
+      {
+        relativePath: "src/lib/state/sandbox.ts",
+        kind: "grpc-cli-read-only-fallback",
+        calls: 1,
+      },
+      {
+        relativePath: "src/lib/state/user-managed-files-probe.ts",
+        kind: "grpc-cli-read-only-fallback",
+        calls: 1,
+      },
+    ]);
+  });
+
+  it("fails closed when a new production file imports the read-only fallback", () => {
+    const root = fixtureRepo({
+      "src/unreviewed-probe.ts":
+        'import { execSandboxReadOnlyWithGrpcFallback } from "./lib/adapters/openshell/sandbox-control-routing";',
+    });
+
+    expect(auditLegacySandboxTransports(root, [])).toEqual([
+      "src/unreviewed-probe.ts:grpc-cli-read-only-fallback: found 1 unreviewed transport use(s)",
+    ]);
+  });
+
   it("ignores comments, inert strings, tests, and non-sandbox SSH workflows", () => {
     const root = fixtureRepo({
       "src/safe.ts": [
@@ -105,7 +206,7 @@ describe("legacy sandbox transport inventory", () => {
     });
 
     expect(auditLegacySandboxTransports(root, [])).toEqual([
-      "src/new-path.ts:ssh-command: found 1 unreviewed legacy transport call(s)",
+      "src/new-path.ts:ssh-command: found 1 unreviewed transport use(s)",
     ]);
   });
 });

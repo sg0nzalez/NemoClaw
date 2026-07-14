@@ -79,7 +79,7 @@ export function captureOpenshell(args: CommandArgs, opts: RunnerOptions = {}) {
   });
 }
 
-/** Run an OpenShell command and preserve stdout as raw bytes. */
+/** Run an OpenShell command and preserve output as raw bytes. */
 export function captureOpenshellBinary(args: CommandArgs, opts: RunnerOptions = {}) {
   return captureOpenshellCommandBinary(getOpenshellBinary(), args, {
     cwd: ROOT,
