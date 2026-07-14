@@ -1840,7 +1840,9 @@ Do not produce final JSON or update the finding ledger in this turn. Reply with 
 
 Use the PR diff already fetched by the scope/risk stage as shared conversation evidence, and call read-only repository tools when a citation needs confirmation. First classify linked issue text as binding acceptance or non-binding context using the system rubric, then map only binding clauses to code evidence. Review caller/callee contracts, state transitions, negative and error paths, behavior drift, documentation or migration gaps, and any fallback, recovery, tolerant parsing, monkeypatch, workaround, or compatibility behavior against the source-of-truth questions in the system rubric. Apply the simplification ladder only where it preserves correctness and trust boundaries. Leave detailed security and test-depth review to their dedicated turns.
 
-Do not produce final JSON or update the finding ledger in this turn. Reply with at most 8 concise, evidence-backed stage-analysis bullets; if this domain is not applicable, include that limitation in one bullet.
+When the diff adds, modifies, or removes a conditional that gates an operation, a function whose comments or tests describe an invariant, or a guard that prior code or checked-in tests treat as required — whether or not the PR summary labels it as a correctness guarantee — identify any guarantee the change makes or depends on (fail-closed check, locality invariant, ordering constraint, capacity gate, idempotency guarantee, atomicity or rollback boundary, rate or auth gate) and enumerate the specific ways it could be silently bypassed: alternate code branches (e.g. cache-hit paths that skip the check), combined input states (e.g. multiple env vars set simultaneously with documented precedence that differs from implementation), external system contract assumptions (e.g. what "unix://" actually proves about daemon locality), error path bypasses (e.g. an upstream call throws and the guard is skipped entirely), TOCTOU windows (e.g. state changes between the check and the operation it guards), and default or absent value assumptions (e.g. null vs empty vs absent behaving differently at a boundary). For each bypass path, verify against the diff whether it is closed, explicitly opted out under a maintainer decision (author_association OWNER/MEMBER/COLLABORATOR) or documented non-goal, or unaddressed; unauthorized opt-outs remain unaddressed. When the implementation makes assumptions about an external system's behavior (env var precedence, API semantics, filesystem guarantees), verify the assumption against upstream documentation using read-only tools, not just internal code consistency; if upstream documentation is unavailable or ambiguous, flag the assumption as unverified rather than treating it as confirmed.
+
+Do not produce final JSON or update the finding ledger in this turn. Reply with at most 8 concise, evidence-backed stage-analysis bullets; if this domain is not applicable, include that limitation in one bullet. Bypass analysis (from the paragraph above) must fit within 2–3 of those bullets — consolidate multiple bypass paths under one bullet per guarantee rather than one bullet per path, so the remaining budget covers caller/callee contracts, state transitions, behavior drift, and other correctness checks.
 `,
     },
     {
@@ -2300,12 +2302,46 @@ export function normalizeCombinedE2eResult(
     recommendationMetadata,
     metadata.deterministic.riskPlan,
   );
+  const inventory = trustedE2eRecommendationInventory();
+  const selectorTypes = new Map<string, "job" | "target">([
+    ...inventory.allowedJobIds.map((id) => [id, "job"] as const),
+    ...inventory.liveSupportedTargetIds.map((id) => [id, "target"] as const),
+  ]);
+  const targetInput = isObjectRecord(object.targets) ? object.targets : {};
+  const coverageTargets = (
+    tests: E2eCoverageResult["requiredTests"],
+    required: boolean,
+  ): Array<Record<string, unknown>> =>
+    tests.flatMap((test) => {
+      const selectorType = selectorTypes.get(test.id);
+      return selectorType
+        ? [
+            {
+              id: test.id,
+              workflow: inventory.workflow,
+              selectorType,
+              required,
+              reason: "Align this trusted selector with the normalized coverage decision.",
+            },
+          ]
+        : [];
+    });
   const normalizedTargets = normalizeE2eTargetAdvisorResult(
-    object.targets ?? {},
+    {
+      ...targetInput,
+      required: [
+        ...recordItems(targetInput.required),
+        ...coverageTargets(coverage.requiredTests, true),
+      ],
+      optional: [
+        ...recordItems(targetInput.optional),
+        ...coverageTargets(coverage.optionalTests, false),
+      ],
+    },
     recommendationMetadata,
     { riskPlan: metadata.deterministic.riskPlan },
   );
-  return {
+  return reconcileCombinedE2eResult({
     coverage,
     targets: {
       relevantChangedFiles: normalizedTargets.relevantChangedFiles,
@@ -2318,6 +2354,56 @@ export function normalizeCombinedE2eResult(
       noTargetE2eReason: normalizedTargets.noTargetE2eReason,
       confidence: normalizedTargets.confidence,
     },
+  });
+}
+
+function reconcileCombinedE2eResult(result: CombinedE2eResult): CombinedE2eResult {
+  const inventory = trustedE2eRecommendationInventory();
+  const regularIds = new Set([...inventory.allowedJobIds, ...inventory.liveSupportedTargetIds]);
+  const requiredIds = [
+    ...new Set([
+      ...result.coverage.requiredTests.map((item) => item.id),
+      ...result.targets.required.filter((item) => regularIds.has(item.id)).map((item) => item.id),
+    ]),
+  ];
+  const requiredIdSet = new Set(requiredIds);
+  const optionalIds = [
+    ...new Set([
+      ...result.coverage.optionalTests.map((item) => item.id),
+      ...result.targets.optional.filter((item) => regularIds.has(item.id)).map((item) => item.id),
+    ]),
+  ].filter((id) => !requiredIdSet.has(id));
+  const coverageById = new Map(
+    [...result.coverage.requiredTests, ...result.coverage.optionalTests].map((item) => [
+      item.id,
+      item,
+    ]),
+  );
+  const alignedCoverage = (ids: readonly string[]): E2eCoverageResult["requiredTests"] =>
+    ids.map(
+      (id) =>
+        coverageById.get(id) ?? {
+          id,
+          reason: `Selected from the trusted checked-in E2E coverage inventory.`,
+        },
+    );
+  const requiredCoverage = alignedCoverage(requiredIds);
+  const optionalCoverage = alignedCoverage(optionalIds);
+  return {
+    coverage: {
+      ...result.coverage,
+      requiredTests: requiredCoverage,
+      optionalTests: optionalCoverage,
+      noE2eReason:
+        requiredCoverage.length > 0 || optionalCoverage.length > 0
+          ? null
+          : "No deterministic or trusted-inventory E2E coverage was selected.",
+      confidence:
+        requiredCoverage.length > 0 && result.coverage.confidence === "low"
+          ? "medium"
+          : result.coverage.confidence,
+    },
+    targets: result.targets,
   };
 }
 
