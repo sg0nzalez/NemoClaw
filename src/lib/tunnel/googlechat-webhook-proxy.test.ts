@@ -1,8 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createServer, type Server } from "node:http";
 import { mkdtempSync, rmSync, statSync } from "node:fs";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -33,8 +34,9 @@ async function listen(server: Server): Promise<number> {
     server.listen(0, "127.0.0.1", () => resolve());
   });
   const address = server.address();
-  if (!address || typeof address === "string") throw new Error("Expected a TCP server address");
-  return address.port;
+  expect(address).not.toBeNull();
+  expect(typeof address).not.toBe("string");
+  return (address as AddressInfo).port;
 }
 
 describe("Google Chat webhook route proxy", () => {
