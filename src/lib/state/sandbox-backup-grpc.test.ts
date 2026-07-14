@@ -194,7 +194,39 @@ describe("backupSandboxState OpenShell directory transport", () => {
     expectProbeAndAuditRequests();
   });
 
+  it("fails closed when the audit cannot traverse a subtree with unreviewed entries", async () => {
+    mocks.execSandboxReadOnlyWithGrpcFallback
+      .mockResolvedValueOnce(completed("state\n"))
+      .mockResolvedValueOnce({
+        status: 1,
+        stdout: "",
+        stderr: `find: '${STATE_DIR}/state/private': Permission denied`,
+      });
+
+    const result = await backupSandboxState("alpha");
+
+    expect(result).toMatchObject({
+      success: false,
+      unreachable: false,
+      backedUpDirs: [],
+      failedDirs: ["state"],
+      error: expect.stringContaining("Pre-backup audit failed"),
+    });
+    expect(mocks.execSandboxReadOnlyWithGrpcFallback).toHaveBeenCalledTimes(2);
+    expectProbeAndAuditRequests();
+    const auditCommand = mocks.execSandboxReadOnlyWithGrpcFallback.mock.calls[1][1].command[2];
+    expect(auditCommand).toContain("audit_status=0");
+    expect(auditCommand).toContain('exit "$audit_status"');
+    expect(auditCommand).not.toContain("|| true");
+    expect(auditCommand).not.toContain("-prune");
+  });
+
   it("accepts the reviewed image symlink audit row before downloading the archive", async () => {
+    mocks.getSandbox.mockReturnValue({
+      name: "alpha",
+      agent: "openclaw",
+      policies: [],
+    });
     mocks.loadAgent.mockReturnValue({
       configPaths: { dir: STATE_DIR },
       expectedVersion: null,
@@ -222,6 +254,8 @@ describe("backupSandboxState OpenShell directory transport", () => {
       fs.readFileSync(path.join(result.manifest!.backupPath, "extensions", "payload.bin")),
     ).toEqual(payload);
     expectProbeAuditAndBinaryTarRequests("extensions");
+    const auditCommand = mocks.execSandboxReadOnlyWithGrpcFallback.mock.calls[1][1].command[2];
+    expect(auditCommand).toContain("-type d -uid 0 ! -readable ! -writable ! -executable -prune");
   });
 
   it("marks a binary tar transport failure unreachable and does not restore partial state", async () => {

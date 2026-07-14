@@ -1013,7 +1013,7 @@ process.exit(0);
     }
   });
 
-  it("treats audit-find exit 1 with empty stdout as a successful audit", async () => {
+  it("prunes inaccessible root-owned image subtrees without suppressing audit failures", async () => {
     const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-audit-perm-denied-"));
     const oldPath = process.env.PATH;
     const oldOpenshell = process.env.NEMOCLAW_OPENSHELL_BIN;
@@ -1044,12 +1044,9 @@ if (cmd.includes("openclaw.json")) {
   process.exit(2);
 }
 if (cmd.includes("find ")) {
-  // Simulate a permission-denied subdir: when the audit cmd lacks the
-  // \`|| true\` tolerance wrapper (pre-fix shape), exit non-zero so the
-  // caller treats it as audit failure. The post-fix shape wraps each
-  // \`find\` with \`|| true\` and joins with \`;\`, so the audit cmd as a
-  // whole exits 0 even though a remote \`find\` would have exited 1.
-  if (!cmd.includes("|| true")) {
+  // The known image-owned exception must be bounded by owner and effective
+  // access checks. Without that prune, simulate the real permission failure.
+  if (!cmd.includes("-uid 0 ! -readable ! -writable ! -executable -prune")) {
     process.stderr.write("find: '/sandbox/.openclaw/extensions/nemoclaw': Permission denied\\n");
     process.exit(1);
   }
@@ -1085,7 +1082,7 @@ process.exit(0);
     }
   });
 
-  it("still rejects violations from readable dirs even if a sibling find exits non-zero", async () => {
+  it("still rejects violations from readable dirs when an image sibling is pruned", async () => {
     const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-audit-mixed-perm-"));
     const oldPath = process.env.PATH;
     const oldOpenshell = process.env.NEMOCLAW_OPENSHELL_BIN;
@@ -1112,12 +1109,9 @@ if (cmd.includes("[ -d ")) {
   process.exit(0);
 }
 if (cmd.includes("find ")) {
-  // Match real-shell behaviour: without the \`|| true\` tolerance wrapper
-  // the perm-denied sibling \`find\` would have aborted the chain. The
-  // post-fix audit cmd still emits the violation stdout because \`;\`
-  // joins each per-dir block so the readable sibling's output is
-  // preserved.
-  if (!cmd.includes("|| true")) {
+  // Without the bounded image-owned prune, the inaccessible sibling would
+  // fail traversal before the caller can adjudicate the readable violation.
+  if (!cmd.includes("-uid 0 ! -readable ! -writable ! -executable -prune")) {
     process.stderr.write("find: '/sandbox/.openclaw/agents/main': Permission denied\\n");
     process.exit(1);
   }
