@@ -13,11 +13,11 @@ import {
 import {
   createGatewayScopedCliOpenShellSandboxControl,
   OpenShellExecRequestValidationError,
-  openShellExecRequestValidationFailure,
   type OpenShellSandboxControl,
+  openShellExecRequestValidationFailure,
   type SandboxExecRequest,
   type SandboxExecResult,
-  validateOpenShellExecCommand,
+  validateOpenShellExecRequest,
 } from "./sandbox-control";
 import { OPENSHELL_OPERATION_TIMEOUT_MS } from "./timeouts";
 
@@ -93,7 +93,11 @@ export async function execSandboxReadOnlyWithGrpcFallback(
   request: SandboxExecRequest,
   dependencies: ReadOnlyRoutingDependencies = defaultDependencies,
 ): Promise<SandboxExecResult> {
-  const validationError = validateOpenShellExecCommand(request.command);
+  const routedRequest = {
+    ...request,
+    timeoutMs: request.timeoutMs ?? OPENSHELL_OPERATION_TIMEOUT_MS,
+  };
+  const validationError = validateOpenShellExecRequest(routedRequest);
   if (validationError) return openShellExecRequestValidationFailure(validationError);
 
   let grpc: GrpcOpenShellSandboxControl;
@@ -107,18 +111,12 @@ export async function execSandboxReadOnlyWithGrpcFallback(
       "OpenShell direct gRPC configuration failed; retrying through the CLI",
       error,
     );
-    return dependencies.createCli(gatewayName).exec({
-      ...request,
-      timeoutMs: request.timeoutMs ?? OPENSHELL_OPERATION_TIMEOUT_MS,
-    });
+    return dependencies.createCli(gatewayName).exec(routedRequest);
   }
 
   let preDispatchError: OpenShellGrpcPreDispatchError | undefined;
   try {
-    const result = await grpc.exec({
-      ...request,
-      timeoutMs: request.timeoutMs ?? OPENSHELL_OPERATION_TIMEOUT_MS,
-    });
+    const result = await grpc.exec(routedRequest);
     if (!(result.error instanceof OpenShellGrpcPreDispatchError)) return result;
     preDispatchError = result.error;
   } catch (error) {
@@ -140,8 +138,5 @@ export async function execSandboxReadOnlyWithGrpcFallback(
     "OpenShell direct gRPC lookup failed before dispatch; retrying through the CLI",
     preDispatchError.cause,
   );
-  return dependencies.createCli(gatewayName).exec({
-    ...request,
-    timeoutMs: request.timeoutMs ?? OPENSHELL_OPERATION_TIMEOUT_MS,
-  });
+  return dependencies.createCli(gatewayName).exec(routedRequest);
 }

@@ -18,6 +18,12 @@ export type OpenshellSpawnSync = (
   options: SpawnSyncOptionsWithStringEncoding,
 ) => SpawnSyncReturns<string>;
 
+export type OpenshellSpawnSyncBinary = (
+  command: string,
+  args: readonly string[],
+  options: SpawnSyncOptions,
+) => SpawnSyncReturns<Buffer>;
+
 export type OpenshellSpawn = typeof spawn;
 
 interface OpenshellSpawnOptions {
@@ -31,7 +37,9 @@ interface OpenshellSpawnOptions {
   exit?: (code: number) => never;
 }
 
-function openshellSpawnEnv(opts: OpenshellSpawnOptions): NodeJS.ProcessEnv {
+function openshellSpawnEnv(
+  opts: Pick<OpenshellSpawnOptions, "env" | "replaceEnv">,
+): NodeJS.ProcessEnv {
   const explicitEnv = Object.fromEntries(
     Object.entries(opts.env ?? {}).filter(
       (entry): entry is [string, string] => entry[1] !== undefined,
@@ -62,6 +70,22 @@ export interface CaptureOpenshellResult {
   output: string;
   stdout?: string;
   stderr?: string;
+  error?: Error;
+  signal?: NodeJS.Signals | null;
+}
+
+export interface CaptureOpenshellBinaryOptions
+  extends Pick<
+    CaptureOpenshellOptions,
+    "cwd" | "env" | "replaceEnv" | "input" | "timeout" | "maxBuffer"
+  > {
+  spawnSyncImpl?: OpenshellSpawnSyncBinary;
+}
+
+export interface CaptureOpenshellBinaryResult {
+  status: number | null;
+  stdout: Buffer;
+  stderr: Buffer;
   error?: Error;
   signal?: NodeJS.Signals | null;
 }
@@ -234,6 +258,30 @@ export function captureOpenshellCommand(
     status: result.status ?? 1,
     output: captureOutput(result, opts),
     ...maybeCapturedStreams(result.stdout || "", result.stderr || "", opts),
+  };
+}
+
+/** Capture raw OpenShell output so byte limits are enforced before decoding. */
+export function captureOpenshellCommandBinary(
+  binary: string,
+  args: string[],
+  opts: CaptureOpenshellBinaryOptions = {},
+): CaptureOpenshellBinaryResult {
+  const spawnSyncImpl = opts.spawnSyncImpl ?? spawnSync;
+  const result = spawnSyncImpl(binary, args, {
+    cwd: opts.cwd,
+    env: openshellSpawnEnv(opts),
+    stdio: [opts.input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
+    input: opts.input,
+    timeout: opts.timeout,
+    maxBuffer: opts.maxBuffer,
+  });
+  return {
+    status: result.status,
+    stdout: result.stdout ?? Buffer.alloc(0),
+    stderr: result.stderr ?? Buffer.alloc(0),
+    ...(result.error ? { error: result.error } : {}),
+    ...(result.signal !== null ? { signal: result.signal } : {}),
   };
 }
 
