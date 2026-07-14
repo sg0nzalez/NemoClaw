@@ -84,6 +84,34 @@ describe("legacy sandbox transport inventory", () => {
     ]);
   });
 
+  it("tracks reviewed read-only fallback importers, including aliased imports", () => {
+    const root = fixtureRepo({
+      "src/read-only-probe.ts": [
+        'import { execSandboxReadOnlyWithGrpcFallback as execReadOnly } from "./lib/adapters/openshell/sandbox-control-routing.js";',
+        'execReadOnly("gateway", request);',
+      ].join("\n"),
+    });
+
+    expect(discoverLegacySandboxTransportSites(root)).toEqual([
+      {
+        relativePath: "src/read-only-probe.ts",
+        kind: "grpc-cli-read-only-fallback",
+        calls: 1,
+      },
+    ]);
+  });
+
+  it("fails closed when a new production file imports the read-only fallback", () => {
+    const root = fixtureRepo({
+      "src/unreviewed-probe.ts":
+        'import { execSandboxReadOnlyWithGrpcFallback } from "./lib/adapters/openshell/sandbox-control-routing";',
+    });
+
+    expect(auditLegacySandboxTransports(root, [])).toEqual([
+      "src/unreviewed-probe.ts:grpc-cli-read-only-fallback: found 1 unreviewed transport use(s)",
+    ]);
+  });
+
   it("ignores comments, inert strings, tests, and non-sandbox SSH workflows", () => {
     const root = fixtureRepo({
       "src/safe.ts": [
@@ -105,7 +133,7 @@ describe("legacy sandbox transport inventory", () => {
     });
 
     expect(auditLegacySandboxTransports(root, [])).toEqual([
-      "src/new-path.ts:ssh-command: found 1 unreviewed legacy transport call(s)",
+      "src/new-path.ts:ssh-command: found 1 unreviewed transport use(s)",
     ]);
   });
 });
