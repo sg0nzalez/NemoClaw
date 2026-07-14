@@ -507,7 +507,7 @@ const fs = require("node:fs");
 const cmd = process.argv[process.argv.length - 1] || "";
 const existingDirs = ${JSON.stringify(existingDirs)};
 if (cmd.includes("[ -d ")) {
-  process.stdout.write(existingDirs.join("\\n") + "\\n");
+  process.stdout.write(existingDirs.join("\\0") + "\\0");
   process.exit(0);
 }
 if (cmd.includes("openclaw.json") && cmd.includes("cat --")) {
@@ -585,7 +585,7 @@ function readStdin() {
   }
 }
 if (cmd.includes("[ -d ")) {
-  process.stdout.write(existingDirs.join("\\n") + "\\n");
+  process.stdout.write(existingDirs.join("\\0") + "\\0");
   process.exit(0);
 }
 if (cmd.includes("openclaw.json") && cmd.includes("cat --")) {
@@ -669,12 +669,15 @@ process.exit(0);
       fs.mkdirSync(binDir, { recursive: true });
       for (const d of existingDirs) fs.mkdirSync(path.join(openclawDir, d), { recursive: true });
 
-      const auditLines = [
-        "l\t/sandbox/.openclaw/extensions/openclaw-weixin/node_modules/.bin/qrcode-terminal\t../qrcode-terminal/bin/qrcode-terminal.js",
-        "l\t/sandbox/.openclaw/extensions/openclaw-weixin/node_modules/openclaw\t/usr/local/lib/node_modules/openclaw",
-        "l\t/sandbox/.openclaw/extensions/slack/node_modules/openclaw\t/usr/local/lib/node_modules/openclaw",
-        "l\t/sandbox/.openclaw/extensions/weather/node_modules/openclaw\t/usr/local/lib/node_modules/openclaw",
-      ].join("\n");
+      const auditLines =
+        [
+          "l\t/sandbox/.openclaw/extensions/openclaw-weixin/node_modules/.bin/qrcode-terminal\t../qrcode-terminal/bin/qrcode-terminal.js",
+          "l\t/sandbox/.openclaw/extensions/openclaw-weixin/node_modules/openclaw\t/usr/local/lib/node_modules/openclaw",
+          "l\t/sandbox/.openclaw/extensions/slack/node_modules/openclaw\t/usr/local/lib/node_modules/openclaw",
+          "l\t/sandbox/.openclaw/extensions/weather/node_modules/openclaw\t/usr/local/lib/node_modules/openclaw",
+        ]
+          .map((entry) => entry.split("\t").join("\0"))
+          .join("\0") + "\0";
 
       const openshell = writeFakeOpenshell(binDir);
       writeExecutable(
@@ -685,11 +688,11 @@ const fs = require("node:fs");
 const cmd = process.argv[process.argv.length - 1] || "";
 const existingDirs = ${JSON.stringify(existingDirs)};
 if (cmd.includes("[ -d ")) {
-  process.stdout.write(existingDirs.join("\\n") + "\\n");
+  process.stdout.write(existingDirs.join("\\0") + "\\0");
   process.exit(0);
 }
 if (cmd.includes("find ")) {
-  process.stdout.write(${JSON.stringify(auditLines)} + "\\n");
+  process.stdout.write(${JSON.stringify(auditLines)});
   process.exit(0);
 }
 if (cmd.includes("tar -cf -")) {
@@ -733,11 +736,14 @@ process.exit(0);
       fs.mkdirSync(binDir, { recursive: true });
       fs.mkdirSync(path.join(openclawDir, "extensions"), { recursive: true });
 
-      const auditLines = [
-        "l\t/sandbox/.openclaw/extensions/nemoclaw/node_modules/.bin/json5\t../json5/lib/cli.js",
-        "l\t/sandbox/.openclaw/extensions/nemoclaw/node_modules/.bin/yaml\t../yaml/bin.mjs",
-        "l\t/sandbox/.openclaw/extensions/nemoclaw/node_modules/.bin/node-which\t../which/bin/node-which",
-      ].join("\n");
+      const auditLines =
+        [
+          "l\t/sandbox/.openclaw/extensions/nemoclaw/node_modules/.bin/json5\t../json5/lib/cli.js",
+          "l\t/sandbox/.openclaw/extensions/nemoclaw/node_modules/.bin/yaml\t../yaml/bin.mjs",
+          "l\t/sandbox/.openclaw/extensions/nemoclaw/node_modules/.bin/node-which\t../which/bin/node-which",
+        ]
+          .map((entry) => entry.split("\t").join("\0"))
+          .join("\0") + "\0";
 
       const openshell = writeFakeOpenshell(binDir);
       writeExecutable(
@@ -749,11 +755,11 @@ const cmd = process.argv[process.argv.length - 1] || "";
 const existingDirs = ${JSON.stringify(existingDirs)};
 const openclawDir = ${JSON.stringify(openclawDir)};
 if (cmd.includes("[ -d ")) {
-  process.stdout.write(existingDirs.join("\\n") + "\\n");
+  process.stdout.write(existingDirs.join("\\0") + "\\0");
   process.exit(0);
 }
 if (cmd.includes("find ")) {
-  process.stdout.write(${JSON.stringify(auditLines)} + "\\n");
+  process.stdout.write(${JSON.stringify(auditLines)});
   process.exit(0);
 }
 if (cmd.includes("tar -cf -")) {
@@ -796,9 +802,12 @@ process.exit(0);
       fs.mkdirSync(binDir, { recursive: true });
       fs.mkdirSync(path.join(openclawDir, "extensions"), { recursive: true });
 
-      const auditLines = [
-        "l\t/sandbox/.openclaw/extensions/nemoclaw/node_modules/.bin/leak\t../../../../openclaw.json",
-      ].join("\n");
+      const auditLines =
+        [
+          "l\t/sandbox/.openclaw/extensions/nemoclaw/node_modules/.bin/leak\t../../../../openclaw.json",
+        ]
+          .map((entry) => entry.split("\t").join("\0"))
+          .join("\0") + "\0";
 
       const openshell = writeFakeOpenshell(binDir);
       writeExecutable(
@@ -807,11 +816,11 @@ process.exit(0);
 const cmd = process.argv[process.argv.length - 1] || "";
 const existingDirs = ${JSON.stringify(existingDirs)};
 if (cmd.includes("[ -d ")) {
-  process.stdout.write(existingDirs.join("\\n") + "\\n");
+  process.stdout.write(existingDirs.join("\\0") + "\\0");
   process.exit(0);
 }
 if (cmd.includes("find ")) {
-  process.stdout.write(${JSON.stringify(auditLines)} + "\\n");
+  process.stdout.write(${JSON.stringify(auditLines)});
   process.exit(0);
 }
 process.exit(0);
@@ -848,10 +857,13 @@ process.exit(0);
       fs.mkdirSync(binDir, { recursive: true });
       for (const d of existingDirs) fs.mkdirSync(path.join(openclawDir, d), { recursive: true });
 
-      const auditLines = [
-        "l\t/sandbox/.openclaw/extensions/openclaw-weixin/node_modules/openclaw\t/usr/local/lib/node_modules/openclaw",
-        "l\t/sandbox/.openclaw/workspace/leak\t/etc/passwd",
-      ].join("\n");
+      const auditLines =
+        [
+          "l\t/sandbox/.openclaw/extensions/openclaw-weixin/node_modules/openclaw\t/usr/local/lib/node_modules/openclaw",
+          "l\t/sandbox/.openclaw/workspace/leak\t/etc/passwd",
+        ]
+          .map((entry) => entry.split("\t").join("\0"))
+          .join("\0") + "\0";
 
       const openshell = writeFakeOpenshell(binDir);
       writeExecutable(
@@ -860,11 +872,11 @@ process.exit(0);
 const cmd = process.argv[process.argv.length - 1] || "";
 const existingDirs = ${JSON.stringify(existingDirs)};
 if (cmd.includes("[ -d ")) {
-  process.stdout.write(existingDirs.join("\\n") + "\\n");
+  process.stdout.write(existingDirs.join("\\0") + "\\0");
   process.exit(0);
 }
 if (cmd.includes("find ")) {
-  process.stdout.write(${JSON.stringify(auditLines)} + "\\n");
+  process.stdout.write(${JSON.stringify(auditLines)});
   process.exit(0);
 }
 process.exit(0);
@@ -906,9 +918,10 @@ process.exit(0);
       fs.mkdirSync(binDir, { recursive: true });
       for (const d of existingDirs) fs.mkdirSync(path.join(openclawDir, d), { recursive: true });
 
-      const auditLines = [
-        `l\t/sandbox/.openclaw/extensions/${extensionName}/node_modules/openclaw\t/etc/passwd`,
-      ].join("\n");
+      const auditLines =
+        [`l\t/sandbox/.openclaw/extensions/${extensionName}/node_modules/openclaw\t/etc/passwd`]
+          .map((entry) => entry.split("\t").join("\0"))
+          .join("\0") + "\0";
 
       const openshell = writeFakeOpenshell(binDir);
       writeExecutable(
@@ -917,11 +930,11 @@ process.exit(0);
 const cmd = process.argv[process.argv.length - 1] || "";
 const existingDirs = ${JSON.stringify(existingDirs)};
 if (cmd.includes("[ -d ")) {
-  process.stdout.write(existingDirs.join("\\n") + "\\n");
+  process.stdout.write(existingDirs.join("\\0") + "\\0");
   process.exit(0);
 }
 if (cmd.includes("find ")) {
-  process.stdout.write(${JSON.stringify(auditLines)} + "\\n");
+  process.stdout.write(${JSON.stringify(auditLines)});
   process.exit(0);
 }
 process.exit(0);
@@ -969,7 +982,7 @@ const { spawnSync } = require("node:child_process");
 const cmd = process.argv[process.argv.length - 1] || "";
 const existingDirs = ${JSON.stringify(existingDirs)};
 if (cmd.includes("[ -d ")) {
-  process.stdout.write(existingDirs.join("\\n") + "\\n");
+  process.stdout.write(existingDirs.join("\\0") + "\\0");
   process.exit(0);
 }
 if (cmd.includes("find ")) {
@@ -1029,7 +1042,7 @@ const fs = require("node:fs");
 const cmd = process.argv[process.argv.length - 1] || "";
 const existingDirs = ${JSON.stringify(existingDirs)};
 if (cmd.includes("[ -d ")) {
-  process.stdout.write(existingDirs.join("\\n") + "\\n");
+  process.stdout.write(existingDirs.join("\\0") + "\\0");
   process.exit(0);
 }
 if (cmd.includes("find ")) {
@@ -1037,8 +1050,8 @@ if (cmd.includes("find ")) {
     process.stderr.write("unsafe audit suppression\\n");
     process.exit(90);
   }
-  if (!cmd.includes("audit_status=0") || !cmd.includes('exit "$audit_status"')) {
-    process.stderr.write("missing audit status aggregation\\n");
+  if (!cmd.includes("find -files0-from=-")) {
+    process.stderr.write("missing bounded audit input\\n");
     process.exit(91);
   }
   process.stderr.write("find: '/sandbox/.openclaw/agents/main': Permission denied\\n");
@@ -1077,7 +1090,9 @@ process.exit(0);
 
       // `agents` simulates permission denial while `workspace` emits a symlink.
       // The aggregate command must preserve the traversal failure.
-      const auditLines = ["l\t/sandbox/.openclaw/workspace/leak\t../openclaw.json"].join("\n");
+      const auditLines = ["l", "/sandbox/.openclaw/workspace/leak", "../openclaw.json", ""].join(
+        "\0",
+      );
 
       writeExecutable(
         path.join(binDir, "ssh"),
@@ -1085,7 +1100,7 @@ process.exit(0);
 const cmd = process.argv[process.argv.length - 1] || "";
 const existingDirs = ${JSON.stringify(existingDirs)};
 if (cmd.includes("[ -d ")) {
-  process.stdout.write(existingDirs.join("\\n") + "\\n");
+  process.stdout.write(existingDirs.join("\\0") + "\\0");
   process.exit(0);
 }
 if (cmd.includes("find ")) {
@@ -1093,7 +1108,7 @@ if (cmd.includes("find ")) {
     process.stderr.write("unsafe audit suppression\\n");
     process.exit(90);
   }
-  process.stdout.write(${JSON.stringify(auditLines)} + "\\n");
+  process.stdout.write(${JSON.stringify(auditLines)});
   process.stderr.write("find: '/sandbox/.openclaw/agents/main': Permission denied\\n");
   process.exit(1);
 }
@@ -1185,7 +1200,7 @@ if (cmd.includes(".env") || cmd.includes(".mcp.json")) {
   process.exit(99);
 }
 if (cmd.includes("[ -d ")) {
-  process.stdout.write(".state\\nskills\\nagent/skills\\n");
+  process.stdout.write(".state\\0skills\\0agent/skills\\0");
   process.exit(0);
 }
 if (cmd.includes("find ")) {

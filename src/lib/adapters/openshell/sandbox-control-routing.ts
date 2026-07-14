@@ -82,7 +82,8 @@ export function selectOpenShellSandboxControlForMutation(
  *
  * This migration contract is limited to the reviewed read-only callers (the
  * session list, rebuild file probe, debug diagnostic probes, version probe,
- * and state-file backup reads at this slice), not a general routing policy.
+ * and state backup probes, audits, and reads at this slice), not a general
+ * routing policy.
  * Remove the CLI fallback when OpenShell's public client or bindings support
  * the edge-tunnel auth and credential-refresh lifecycle. Every added caller
  * requires a replay-semantics review; mutations must select one transport

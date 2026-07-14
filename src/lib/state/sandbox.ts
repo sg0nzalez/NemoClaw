@@ -27,9 +27,10 @@ import { spawnSync } from "child_process";
 
 import { captureSandboxSshConfigCommand } from "../adapters/openshell/client.js";
 import { resolveOpenshell } from "../adapters/openshell/resolve.js";
-import type {
-  SandboxExecRequest,
-  SandboxExecResult,
+import {
+  type SandboxExecRequest,
+  type SandboxExecResult,
+  validateOpenShellExecRequest,
 } from "../adapters/openshell/sandbox-control.js";
 import { execSandboxReadOnlyWithGrpcFallback } from "../adapters/openshell/sandbox-control-routing.js";
 import { OPENSHELL_PROBE_TIMEOUT_MS } from "../adapters/openshell/timeouts.js";
@@ -64,6 +65,11 @@ import { runTarListing } from "./tar-listing.js";
 const HOME_DIR = path.resolve(process.env.HOME || os.homedir());
 const REBUILD_BACKUPS_DIR = path.join(HOME_DIR, ".nemoclaw", "rebuild-backups");
 
+/** Conservative budget below v0.0.72's decoded ExecSandbox request limit. */
+export const MAX_SANDBOX_DIRECTORY_NAME_LIST_BYTES = 512 * 1024;
+/** Bound diagnostics emitted by the pre-backup filesystem audit. */
+export const MAX_SANDBOX_DIRECTORY_AUDIT_BYTES = 4 * 1024 * 1024;
+export const MAX_SANDBOX_DIRECTORY_AUDIT_ENTRIES = 16 * 1024;
 const MANIFEST_VERSION = 1;
 export const OPENCLAW_IMAGE_PLUGIN_PROVENANCE_RESTORE_ERROR =
   "custom-image OpenClaw plugin provenance is missing or invalid";
@@ -687,6 +693,267 @@ function isSafeStateDirPath(dirPath: string): boolean {
   );
 }
 
+export type SandboxDirectoryNameListResult =
+  | { ok: true; names: string[]; input: Buffer }
+  | { ok: false; error: string };
+
+export function buildSandboxDirectoryNameList(
+  names: readonly string[],
+): SandboxDirectoryNameListResult {
+  const uniqueNames: string[] = [];
+  const chunks: Buffer[] = [];
+  const seen = new Set<string>();
+  let totalBytes = 0;
+  for (const name of names) {
+    if (seen.has(name)) continue;
+    if (name.includes("\r") || name.includes("\n")) {
+      return {
+        ok: false,
+        error: "sandbox directory name list contains an unsafe CR/LF path",
+      };
+    }
+    if (!isSafeStateDirPath(name)) {
+      return { ok: false, error: "sandbox directory discovery returned an unsafe path" };
+    }
+    const encodedName = Buffer.from(name, "utf8");
+    if (encodedName.toString("utf8") !== name) {
+      return { ok: false, error: "sandbox directory discovery returned invalid UTF-8" };
+    }
+    totalBytes += encodedName.length + 1;
+    if (totalBytes > MAX_SANDBOX_DIRECTORY_NAME_LIST_BYTES) {
+      return {
+        ok: false,
+        error: `sandbox directory name list exceeds ${String(MAX_SANDBOX_DIRECTORY_NAME_LIST_BYTES)} bytes`,
+      };
+    }
+    seen.add(name);
+    uniqueNames.push(name);
+    chunks.push(encodedName, Buffer.from([0]));
+  }
+  return { ok: true, names: uniqueNames, input: Buffer.concat(chunks, totalBytes) };
+}
+
+export function parseSandboxDirectoryNameList(output: Buffer): SandboxDirectoryNameListResult {
+  if (output.length > MAX_SANDBOX_DIRECTORY_NAME_LIST_BYTES) {
+    return {
+      ok: false,
+      error: `sandbox directory name list exceeds ${String(MAX_SANDBOX_DIRECTORY_NAME_LIST_BYTES)} bytes`,
+    };
+  }
+  if (output.length === 0) return { ok: true, names: [], input: Buffer.alloc(0) };
+  if (output.at(-1) !== 0) {
+    return { ok: false, error: "sandbox directory discovery returned a truncated name list" };
+  }
+
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  const names: string[] = [];
+  let start = 0;
+  try {
+    for (let index = 0; index < output.length; index += 1) {
+      if (output[index] !== 0) continue;
+      if (index === start) {
+        return { ok: false, error: "sandbox directory discovery returned an empty path" };
+      }
+      names.push(decoder.decode(output.subarray(start, index)));
+      start = index + 1;
+    }
+  } catch {
+    return { ok: false, error: "sandbox directory discovery returned invalid UTF-8" };
+  }
+  return buildSandboxDirectoryNameList(names);
+}
+
+export function buildSandboxDirectoryDiscoveryCommand(dir: string): string {
+  const root = shellQuote(dir);
+  const declared =
+    "xargs -0 -r sh -c 'for name do " +
+    'if [ -d "$root/$name" ]; then printf "%s\\0" "$name"; fi; done\' sh';
+  const workspaces =
+    'for d in "$root"/workspace-*/; do ' +
+    '[ -d "$d" ] || continue; d="${d%/}"; printf \'%s\\0\' "${d##*/}"; done 2>/dev/null';
+  return `root=${root}; export root; ${declared} || exit $?; ${workspaces}`;
+}
+
+export type SandboxDirectoryAuditInputResult =
+  | { ok: true; input: Buffer }
+  | { ok: false; error: string };
+
+export interface SandboxDirectoryAuditEntry {
+  type: "l" | "f" | "b" | "c" | "p" | "s" | "D";
+  path: string;
+  linkTarget: string;
+}
+
+export type SandboxDirectoryAuditResult =
+  | { ok: true; entries: SandboxDirectoryAuditEntry[] }
+  | { ok: false; error: string };
+
+const SANDBOX_DIRECTORY_AUDIT_TYPES = new Set<SandboxDirectoryAuditEntry["type"]>([
+  "l",
+  "f",
+  "b",
+  "c",
+  "p",
+  "s",
+  "D",
+]);
+
+function normalizedAbsoluteSandboxRoot(root: string): string | null {
+  if (!root || root.includes("\0") || !path.posix.isAbsolute(root)) return null;
+  const withoutTrailingSlash = root === "/" ? root : root.replace(/\/+$/, "");
+  const normalized = path.posix.normalize(withoutTrailingSlash);
+  return normalized === withoutTrailingSlash ? normalized : null;
+}
+
+export function buildSandboxDirectoryAuditInput(
+  root: string,
+  names: readonly string[],
+): SandboxDirectoryAuditInputResult {
+  const normalizedRoot = normalizedAbsoluteSandboxRoot(root);
+  if (!normalizedRoot) {
+    return { ok: false, error: "sandbox directory audit has an invalid root" };
+  }
+
+  const chunks: Buffer[] = [];
+  let totalBytes = 0;
+  for (const name of names) {
+    if (!isSafeStateDirPath(name)) {
+      return { ok: false, error: "sandbox directory audit has an invalid state directory" };
+    }
+    const absoluteName = `${normalizedRoot === "/" ? "" : normalizedRoot}/${name}`;
+    const encodedName = Buffer.from(absoluteName, "utf8");
+    totalBytes += encodedName.length + 1;
+    if (totalBytes > MAX_SANDBOX_DIRECTORY_NAME_LIST_BYTES) {
+      return {
+        ok: false,
+        error: `sandbox directory audit input exceeds ${String(MAX_SANDBOX_DIRECTORY_NAME_LIST_BYTES)} bytes`,
+      };
+    }
+    chunks.push(encodedName, Buffer.from([0]));
+  }
+  return { ok: true, input: Buffer.concat(chunks, totalBytes) };
+}
+
+export function parseSandboxDirectoryAudit(
+  output: Buffer,
+  root: string,
+  expectedDirs: readonly string[],
+): SandboxDirectoryAuditResult {
+  if (output.length > MAX_SANDBOX_DIRECTORY_AUDIT_BYTES) {
+    return {
+      ok: false,
+      error: `sandbox directory audit exceeds ${String(MAX_SANDBOX_DIRECTORY_AUDIT_BYTES)} bytes`,
+    };
+  }
+  if (output.length === 0) return { ok: true, entries: [] };
+  if (output.at(-1) !== 0) {
+    return { ok: false, error: "sandbox directory audit returned a truncated record" };
+  }
+
+  let fieldCount = 0;
+  for (const byte of output) {
+    if (byte === 0) fieldCount += 1;
+  }
+  if (fieldCount % 3 !== 0) {
+    return { ok: false, error: "sandbox directory audit returned an incomplete record" };
+  }
+  const entryCount = fieldCount / 3;
+  if (entryCount > MAX_SANDBOX_DIRECTORY_AUDIT_ENTRIES) {
+    return {
+      ok: false,
+      error: `sandbox directory audit exceeds ${String(MAX_SANDBOX_DIRECTORY_AUDIT_ENTRIES)} entries`,
+    };
+  }
+
+  const normalizedRoot = normalizedAbsoluteSandboxRoot(root);
+  if (!normalizedRoot || expectedDirs.some((dirName) => !isSafeStateDirPath(dirName))) {
+    return { ok: false, error: "sandbox directory audit has an invalid root contract" };
+  }
+  const rootPrefix = normalizedRoot === "/" ? "/" : `${normalizedRoot}/`;
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  const fields: string[] = [];
+  let fieldStart = 0;
+  try {
+    for (let index = 0; index < output.length; index += 1) {
+      if (output[index] !== 0) continue;
+      fields.push(decoder.decode(output.subarray(fieldStart, index)));
+      fieldStart = index + 1;
+    }
+  } catch {
+    return { ok: false, error: "sandbox directory audit returned invalid UTF-8" };
+  }
+
+  const entries: SandboxDirectoryAuditEntry[] = [];
+  for (let index = 0; index < fields.length; index += 3) {
+    const rawType = fields[index];
+    const entryPath = fields[index + 1];
+    const linkTarget = fields[index + 2];
+    if (!SANDBOX_DIRECTORY_AUDIT_TYPES.has(rawType as SandboxDirectoryAuditEntry["type"])) {
+      return { ok: false, error: "sandbox directory audit returned an invalid file type" };
+    }
+    if (
+      !entryPath ||
+      !entryPath.startsWith(rootPrefix) ||
+      path.posix.normalize(entryPath) !== entryPath
+    ) {
+      return { ok: false, error: "sandbox directory audit returned a path outside its root" };
+    }
+    const relativePath = entryPath.slice(rootPrefix.length);
+    if (
+      !expectedDirs.some(
+        (dirName) => relativePath === dirName || relativePath.startsWith(`${dirName}/`),
+      )
+    ) {
+      return {
+        ok: false,
+        error: "sandbox directory audit returned a path outside its expected state directories",
+      };
+    }
+    if ((rawType === "l" && !linkTarget) || (rawType !== "l" && linkTarget)) {
+      return { ok: false, error: "sandbox directory audit returned an invalid link target field" };
+    }
+    entries.push({
+      type: rawType as SandboxDirectoryAuditEntry["type"],
+      path: entryPath,
+      linkTarget,
+    });
+  }
+  return { ok: true, entries };
+}
+
+export function buildSandboxDirectoryAuditCommand(): string {
+  return (
+    "find -files0-from=- \\( -type l -o \\( -type f -a -links +1 \\) -o " +
+    '\\( ! -type f -a ! -type d \\) \\) -printf "%y\\0%p\\0%l\\0"'
+  );
+}
+
+export function buildSandboxDirectoryTarCommand(dir: string): string {
+  return `tar -cf - -C ${shellQuote(dir)} --null --verbatim-files-from --files-from=-`;
+}
+
+type ReadOnlySandboxExecResult = Awaited<ReturnType<typeof execSandboxReadOnlyWithGrpcFallback>>;
+
+function sandboxExecFailed(result: ReadOnlySandboxExecResult): boolean {
+  return result.status !== 0 || Boolean(result.error) || Boolean(result.signal);
+}
+
+function sandboxExecFailureDetail(result: ReadOnlySandboxExecResult): string {
+  return (
+    result.stderr.trim() ||
+    result.error?.message ||
+    (result.signal ? `signal ${result.signal}` : `exit ${String(result.status)}`)
+  );
+}
+
+function sandboxDirectoryRequestValidationError(
+  request: SandboxExecRequest,
+  operation: string,
+): string | null {
+  const error = validateOpenShellExecRequest(request);
+  return error ? `${operation}: ${error.message}` : null;
+}
+
 function isStateDirArray(value: unknown): value is string[] {
   return isStringArray(value) && value.every(isSafeStateDirPath);
 }
@@ -1039,35 +1306,55 @@ export async function backupSandboxState(
   }
 
   if (stateDirs.length > 0) {
-    // Build tar command that only includes existing directories.
-    // First, check which declared state dirs actually exist in the sandbox,
-    // then additionally discover per-agent `workspace-*` directories produced
-    // by multi-agent OpenClaw deployments (see issue #1260) so they get
-    // snapshotted alongside the manifest-declared dirs. `awk '!seen[$0]++'`
-    // dedupes while preserving order.
-    const existCheckCmd = stateDirs
-      .map((d) => `[ -d ${shellQuote(`${dir}/${d}`)} ] && printf '%s\\n' ${shellQuote(d)}`)
-      .join("; ");
-    const workspaceGlobCmd = `for d in ${shellQuote(dir)}/workspace-*/; do [ -d "$d" ] && basename "$d"; done 2>/dev/null`;
-    const fullCheckCmd = `{ ${existCheckCmd}; ${workspaceGlobCmd}; } 2>/dev/null | awk '!seen[$0]++'`;
-    _log(`Checking existing dirs via OpenShell: ${fullCheckCmd.substring(0, 100)}...`);
-    const existResult = await execSandboxReadOnlyWithGrpcFallback(gatewayName, {
+    // Keep sandbox-controlled names out of argv. The same bounded NUL list is
+    // reused by discovery and tar so high-cardinality backups have constant
+    // command size and names containing CR/LF cannot alter shell syntax.
+    const declaredDirectoryNames = buildSandboxDirectoryNameList(stateDirs);
+    if (!declaredDirectoryNames.ok) {
+      _log(`FAILED: ${declaredDirectoryNames.error}`);
+      return {
+        success: false,
+        manifest,
+        backedUpDirs,
+        failedDirs: [...stateDirs],
+        backedUpFiles,
+        failedFiles: stateFiles.map((f) => f.path),
+        error: declaredDirectoryNames.error,
+      };
+    }
+    const fullCheckCmd = buildSandboxDirectoryDiscoveryCommand(dir);
+    const discoveryRequest: SandboxExecRequest = {
       sandboxName,
       command: ["sh", "-c", fullCheckCmd],
+      stdin: declaredDirectoryNames.input,
       timeoutMs: 30_000,
-    });
-    _log(
-      `Dir check: exit=${existResult.status}, stdout=${existResult.stdout.trim().substring(0, 200)}, stderr=${existResult.stderr.trim().substring(0, 200)}`,
+      maxOutputBytes: MAX_SANDBOX_DIRECTORY_NAME_LIST_BYTES + 1,
+      stdoutEncoding: "buffer",
+    };
+    const discoveryValidationError = sandboxDirectoryRequestValidationError(
+      discoveryRequest,
+      "sandbox directory discovery request",
     );
-    const existingDirs = existResult.stdout.trim().split("\n").filter(Boolean);
+    if (discoveryValidationError) {
+      return {
+        success: false,
+        manifest,
+        backedUpDirs,
+        failedDirs: [...stateDirs],
+        backedUpFiles,
+        failedFiles: stateFiles.map((f) => f.path),
+        error: discoveryValidationError,
+      };
+    }
+    _log(`Checking existing dirs via OpenShell: ${fullCheckCmd.substring(0, 100)}...`);
+    const existResult = await execSandboxReadOnlyWithGrpcFallback(gatewayName, discoveryRequest);
     _log(
-      `Existing dirs in sandbox: [${existingDirs.join(",")}] (${existingDirs.length}/${stateDirs.length})`,
+      `Dir check: exit=${existResult.status}, stdout=${String(existResult.stdoutBytes?.length ?? 0)} bytes, stderr=${existResult.stderr.trim().substring(0, 200)}`,
     );
 
-    if (existResult.status !== 0) {
-      _log(
-        `FAILED: sandbox dir check exited ${existResult.status} — cannot determine which dirs exist`,
-      );
+    if (sandboxExecFailed(existResult) || !existResult.stdoutBytes) {
+      const detail = sandboxExecFailureDetail(existResult);
+      _log(`FAILED: sandbox dir check failed (${detail}) — cannot determine which dirs exist`);
       return {
         success: false,
         unreachable: isSandboxExecTransportFailure(existResult),
@@ -1079,6 +1366,25 @@ export async function backupSandboxState(
       };
     }
 
+    const parsedDirectoryNames = parseSandboxDirectoryNameList(existResult.stdoutBytes);
+    if (!parsedDirectoryNames.ok) {
+      _log(`FAILED: ${parsedDirectoryNames.error}`);
+      return {
+        success: false,
+        manifest,
+        backedUpDirs,
+        failedDirs: [...stateDirs],
+        backedUpFiles,
+        failedFiles: stateFiles.map((f) => f.path),
+        error: parsedDirectoryNames.error,
+      };
+    }
+    const existingDirs = parsedDirectoryNames.names;
+    const directoryNameInput = parsedDirectoryNames.input;
+    _log(
+      `Existing dirs in sandbox: [${existingDirs.join(",")}] (${existingDirs.length}/${stateDirs.length})`,
+    );
+
     if (existingDirs.length === 0) {
       _log("No state dirs found in sandbox (all empty)");
     } else {
@@ -1086,30 +1392,51 @@ export async function backupSandboxState(
       // files inside state dirs. A compromised agent could plant a symlink like
       // workspace/copy -> ../openclaw.json to exfiltrate config via backup.
       //
-      // The printf format emits "<type>\t<absPath>\t<linkTarget>" — %l is
-      // empty for non-symlinks but always present, so the field count is
-      // stable. Tab separator assumes state-dir paths don't contain tabs,
-      // matching the wider convention in this file.
-      // Run every per-dir `find` even after any other traversal error so
-      // violations from readable siblings remain visible, but retain a
-      // non-zero status. Any unreadable subtree is unaudited and must fail
-      // closed before tar can archive unreviewed descendants.
-      const auditFindCommands = existingDirs
-        .map(
-          (d) =>
-            `find ${shellQuote(`${dir}/${d}`)} \\( -type l -o \\( -type f -a -links +1 \\) -o \\( ! -type f -a ! -type d \\) \\) -printf "%y\\t%p\\t%l\\n" || audit_status=$?`,
-        )
-        .join("; ");
-      const auditCmd = `audit_status=0; ${auditFindCommands}; exit "$audit_status"`;
-      _log(`Pre-backup audit: checking for symlinks, hard links, and special files`);
-      const auditResult = await execSandboxReadOnlyWithGrpcFallback(gatewayName, {
+      // The audit is a bounded NUL protocol of <type>, <absolute path>, and
+      // <link target> triples. Filesystem names may contain tabs or newlines,
+      // so a text line protocol is not safe at this trust boundary. GNU find
+      // consumes a separate absolute-path NUL list and fails closed if any
+      // starting tree cannot be traversed.
+      const auditInput = buildSandboxDirectoryAuditInput(dir, existingDirs);
+      if (!auditInput.ok) {
+        return {
+          success: false,
+          manifest,
+          backedUpDirs,
+          failedDirs: [...existingDirs],
+          backedUpFiles,
+          failedFiles: stateFiles.map((f) => f.path),
+          error: auditInput.error,
+        };
+      }
+      const auditCmd = buildSandboxDirectoryAuditCommand();
+      const auditRequest: SandboxExecRequest = {
         sandboxName,
         command: ["sh", "-c", auditCmd],
+        stdin: auditInput.input,
         timeoutMs: 30_000,
-      });
-      if (auditResult.status !== 0) {
-        const stderr = auditResult.stderr.trim();
-        const detail = stderr || auditResult.error?.message || `exit ${String(auditResult.status)}`;
+        maxOutputBytes: MAX_SANDBOX_DIRECTORY_AUDIT_BYTES + 1,
+        stdoutEncoding: "buffer",
+      };
+      const auditValidationError = sandboxDirectoryRequestValidationError(
+        auditRequest,
+        "sandbox directory audit request",
+      );
+      if (auditValidationError) {
+        return {
+          success: false,
+          manifest,
+          backedUpDirs,
+          failedDirs: [...existingDirs],
+          backedUpFiles,
+          failedFiles: stateFiles.map((f) => f.path),
+          error: auditValidationError,
+        };
+      }
+      _log(`Pre-backup audit: checking for symlinks, hard links, and special files`);
+      const auditResult = await execSandboxReadOnlyWithGrpcFallback(gatewayName, auditRequest);
+      if (sandboxExecFailed(auditResult)) {
+        const detail = sandboxExecFailureDetail(auditResult);
         _log(`FAILED: Pre-backup audit command failed — ${detail}`);
         return {
           success: false,
@@ -1122,24 +1449,40 @@ export async function backupSandboxState(
           error: `Pre-backup audit failed: ${detail}`,
         };
       }
-      const auditOutput = auditResult.stdout.trim();
-      if (auditOutput.length > 0) {
-        const allEntries = auditOutput.split("\n").filter((l) => l.length > 0);
+      if (!auditResult.stdoutBytes) {
+        return {
+          success: false,
+          manifest,
+          backedUpDirs,
+          failedDirs: [...existingDirs],
+          backedUpFiles,
+          failedFiles: stateFiles.map((f) => f.path),
+          error: "Pre-backup audit failed: binary stdout was not preserved",
+        };
+      }
+      const parsedAudit = parseSandboxDirectoryAudit(auditResult.stdoutBytes, dir, existingDirs);
+      if (!parsedAudit.ok) {
+        return {
+          success: false,
+          manifest,
+          backedUpDirs,
+          failedDirs: [...existingDirs],
+          backedUpFiles,
+          failedFiles: stateFiles.map((f) => f.path),
+          error: `Pre-backup audit rejected malformed output: ${parsedAudit.error}`,
+        };
+      }
+      if (parsedAudit.entries.length > 0) {
         const whitelisted: string[] = [];
         const violations: string[] = [];
         const dirPrefix = `${dir}/`;
-        for (const entry of allEntries) {
-          // find -printf "%y\t%p\t%l\n" → "<type>\t<absPath>\t<linkTarget>"
-          // (linkTarget is empty for non-symlinks).
-          const parts = entry.split("\t");
-          const type = parts[0] || "";
-          const absPath = parts[1] || entry;
-          const linkTarget = parts[2] || "";
-          const relPath = absPath.startsWith(dirPrefix) ? absPath.slice(dirPrefix.length) : absPath;
-          if (type === "l" && isAllowedStateSymlink(relPath, linkTarget)) {
-            whitelisted.push(entry);
+        for (const entry of parsedAudit.entries) {
+          const relPath = entry.path.slice(dirPrefix.length);
+          const description = `type=${entry.type} path=${JSON.stringify(entry.path)} target=${JSON.stringify(entry.linkTarget)}`;
+          if (entry.type === "l" && isAllowedStateSymlink(relPath, entry.linkTarget)) {
+            whitelisted.push(description);
           } else {
-            violations.push(entry);
+            violations.push(description);
           }
         }
         if (whitelisted.length > 0) {
@@ -1169,15 +1512,32 @@ export async function backupSandboxState(
       // NC-2227-04: Removed -h flag (was following symlinks). State dirs are
       // now agent-writable and co-located with config — a compromised agent
       // could create symlinks to exfiltrate config contents via backup.
-      const tarCmd = `tar -cf - -C ${shellQuote(dir)} -- ${existingDirs.map(shellQuote).join(" ")}`;
-      _log(`Downloading via OpenShell+tar: ${tarCmd}`);
-      const result = await execSandboxReadOnlyWithGrpcFallback(gatewayName, {
+      const tarCmd = buildSandboxDirectoryTarCommand(dir);
+      const tarRequest: SandboxExecRequest = {
         sandboxName,
         command: ["sh", "-c", tarCmd],
+        stdin: directoryNameInput,
         timeoutMs: 120_000,
         maxOutputBytes: 256 * 1024 * 1024,
         stdoutEncoding: "buffer",
-      });
+      };
+      const tarValidationError = sandboxDirectoryRequestValidationError(
+        tarRequest,
+        "sandbox directory archive request",
+      );
+      if (tarValidationError) {
+        return {
+          success: false,
+          manifest,
+          backedUpDirs,
+          failedDirs: [...existingDirs],
+          backedUpFiles,
+          failedFiles: stateFiles.map((f) => f.path),
+          error: tarValidationError,
+        };
+      }
+      _log(`Downloading via OpenShell+tar: ${tarCmd}`);
+      const result = await execSandboxReadOnlyWithGrpcFallback(gatewayName, tarRequest);
       _log(
         `OpenShell+tar download: exit=${result.status}, stdout=${result.stdoutBytes ? result.stdoutBytes.length + " bytes" : "null"}, stderr=${result.stderr.substring(0, 200)}`,
       );
@@ -1189,6 +1549,8 @@ export async function backupSandboxState(
       // and determine per-dir success from tar's reported read errors.
       const tarExitedWithData =
         Boolean(result.stdoutBytes?.length) &&
+        !result.error &&
+        !result.signal &&
         (result.status === 0 || result.status === 1 || result.status === 2);
 
       if (result.status !== 0 && result.stdoutBytes && result.stdoutBytes.length > 0) {
