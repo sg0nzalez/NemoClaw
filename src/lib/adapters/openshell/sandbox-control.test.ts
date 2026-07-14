@@ -56,6 +56,28 @@ describe("OpenShell exec command validation", () => {
     });
   });
 
+  it("allows the exact assembled command boundary and rejects one byte more", () => {
+    const prefix = Array.from({ length: 7 }, () => "x".repeat(32 * 1024));
+    const exactBoundary = [...prefix, "x".repeat(32 * 1024 - 7)];
+
+    expect(validateOpenShellExecCommand(exactBoundary)).toBeNull();
+    expectValidationIssue([...prefix, "x".repeat(32 * 1024 - 6)], {
+      kind: "assembled-command-too-large",
+      actualBytes: 256 * 1024 + 1,
+      maxBytes: 256 * 1024,
+    });
+  });
+
+  it("accounts for OpenShell single-quote expansion in the assembled command", () => {
+    const quotedArgument = "'".repeat(32 * 1024);
+
+    expectValidationIssue([quotedArgument, quotedArgument], {
+      kind: "assembled-command-too-large",
+      actualBytes: 10 * 32 * 1024 + 5,
+      maxBytes: 256 * 1024,
+    });
+  });
+
   it.each([
     ["nul", "\0"],
     ["lf", "\n"],

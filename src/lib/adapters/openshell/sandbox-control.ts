@@ -28,6 +28,7 @@ export interface OpenShellSandboxControl {
 export type OpenShellExecRequestValidationIssue =
   | { kind: "empty-command" }
   | { kind: "too-many-arguments"; actual: number; max: number }
+  | { kind: "assembled-command-too-large"; actualBytes: number; maxBytes: number }
   | {
       kind: "argument-too-large";
       index: number;
@@ -56,6 +57,7 @@ type CaptureOpenShell = typeof captureOpenshell;
 
 const OPENSHELL_V0072_MAX_EXEC_COMMAND_ARGS = 1024;
 const OPENSHELL_V0072_MAX_EXEC_ARGUMENT_BYTES = 32 * 1024;
+const OPENSHELL_V0072_MAX_ASSEMBLED_COMMAND_BYTES = 256 * 1024;
 
 function openShellExecRequestValidationMessage(issue: OpenShellExecRequestValidationIssue): string {
   switch (issue.kind) {
@@ -63,6 +65,8 @@ function openShellExecRequestValidationMessage(issue: OpenShellExecRequestValida
       return "command is required";
     case "too-many-arguments":
       return `command array exceeds ${String(issue.max)} argument limit`;
+    case "assembled-command-too-large":
+      return `assembled command string exceeds ${String(issue.maxBytes)} byte limit`;
     case "argument-too-large":
       return `command argument ${String(issue.index)} exceeds ${String(issue.maxBytes)} byte limit`;
     case "argument-control-character":
@@ -70,6 +74,35 @@ function openShellExecRequestValidationMessage(issue: OpenShellExecRequestValida
         ? `command argument ${String(issue.index)} contains null bytes`
         : `command argument ${String(issue.index)} contains newline or carriage return characters`;
   }
+}
+
+function openShellEscapedArgumentByteLength(argument: string): number {
+  const bytes = Buffer.from(argument, "utf8");
+  if (bytes.length === 0) return 2;
+
+  let safe = true;
+  let singleQuotes = 0;
+  for (const byte of bytes) {
+    if (byte === 0x27) singleQuotes += 1;
+    if (
+      !(
+        (byte >= 0x30 && byte <= 0x39) ||
+        (byte >= 0x41 && byte <= 0x5a) ||
+        (byte >= 0x61 && byte <= 0x7a) ||
+        byte === 0x2e ||
+        byte === 0x2f ||
+        byte === 0x2d ||
+        byte === 0x5f
+      )
+    ) {
+      safe = false;
+    }
+  }
+  if (safe) return bytes.length;
+
+  // OpenShell wraps unsafe arguments in single quotes and expands each
+  // embedded quote from one byte to the five-byte '\"'\"' sequence.
+  return bytes.length + 2 + singleQuotes * 4;
 }
 
 /** Match OpenShell v0.0.72's pre-dispatch command validation. */
@@ -112,6 +145,18 @@ export function validateOpenShellExecCommand(
         character: argument[newlineIndex] === "\n" ? "lf" : "cr",
       });
     }
+  }
+
+  const assembledBytes =
+    command.reduce((total, argument) => total + openShellEscapedArgumentByteLength(argument), 0) +
+    command.length -
+    1;
+  if (assembledBytes > OPENSHELL_V0072_MAX_ASSEMBLED_COMMAND_BYTES) {
+    return new OpenShellExecRequestValidationError({
+      kind: "assembled-command-too-large",
+      actualBytes: assembledBytes,
+      maxBytes: OPENSHELL_V0072_MAX_ASSEMBLED_COMMAND_BYTES,
+    });
   }
 
   return null;
