@@ -64,6 +64,17 @@ const ACTIVE_WORKFLOW_RUN_STATUSES = [
   "in_progress",
 ] as const;
 const ACTIVE_WORKFLOW_RUN_STATUS_SET = new Set<string>(ACTIVE_WORKFLOW_RUN_STATUSES);
+const WORKFLOW_RUN_CONCLUSIONS = new Set([
+  "action_required",
+  "cancelled",
+  "failure",
+  "neutral",
+  "skipped",
+  "stale",
+  "startup_failure",
+  "success",
+  "timed_out",
+]);
 const EVIDENCE_LIMITS = {
   maxDepth: 8,
   maxEntries: 4096,
@@ -136,7 +147,7 @@ type CheckConclusion = "success" | "failure";
 
 export type PullRequest = {
   number: number;
-  state: string;
+  state: "open" | "closed";
   changed_files: number;
   head: { ref: string; sha: string; repo: { full_name: string } | null };
   base: { sha: string; repo: { full_name: string } };
@@ -215,8 +226,6 @@ export type PrGateVerdict = {
   title: string;
   summary: string;
 };
-
-export class PrerequisiteCiError extends Error {}
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -745,6 +754,17 @@ async function matchingPrGateChecks(options: {
   return sameIdentity.filter((check) => check.app?.id === GITHUB_ACTIONS_APP_ID);
 }
 
+function validatePrGateCheckState(check: CheckRun): "in_progress" | "success" | "failure" {
+  if (check.status === "in_progress" && check.conclusion === null) return "in_progress";
+  if (
+    check.status === "completed" &&
+    (check.conclusion === "success" || check.conclusion === "failure")
+  ) {
+    return check.conclusion;
+  }
+  throw new Error("GitHub returned an invalid exact-diff check state");
+}
+
 async function ensurePrGateCheck(options: {
   repository: string;
   token: string;
@@ -911,7 +931,9 @@ function validatePullRequestIdentity(value: unknown): PullRequestListItem {
   ) {
     throw new Error("GitHub returned an invalid pull request number");
   }
-  if (value.state !== "open") throw new Error("GitHub returned invalid pull request state");
+  if (value.state !== "open" && value.state !== "closed") {
+    throw new Error("GitHub returned invalid pull request state");
+  }
   if (!isObjectRecord(value.head) || !isObjectRecord(value.base)) {
     throw new Error("GitHub returned invalid pull request refs");
   }
@@ -935,12 +957,32 @@ function validatePullRequestIdentity(value: unknown): PullRequestListItem {
   return value as PullRequestListItem;
 }
 
-function validatePullRequest(value: unknown): PullRequest {
+function validatePullRequestSnapshot(value: unknown): PullRequest {
   const identity = validatePullRequestIdentity(value);
   if (!isObjectRecord(value) || !Number.isSafeInteger(value.changed_files)) {
     throw new Error("GitHub returned an invalid pull request changed-file count");
   }
   return { ...identity, changed_files: value.changed_files as number };
+}
+
+function validatePullRequest(value: unknown): PullRequest {
+  const pull = validatePullRequestSnapshot(value);
+  if (pull.state !== "open") throw new Error("GitHub returned invalid pull request state");
+  return pull;
+}
+
+async function pullRequestSnapshot(options: {
+  repository: string;
+  token: string;
+  prNumber: number;
+}): Promise<PullRequest> {
+  return validatePullRequestSnapshot(
+    await githubApi<unknown>(
+      `repos/${options.repository}/pulls/${options.prNumber}`,
+      options.token,
+      { userAgent: USER_AGENT },
+    ),
+  );
 }
 
 async function requireLiveExactDiff(options: {
@@ -950,15 +992,7 @@ async function requireLiveExactDiff(options: {
   headSha: string;
   baseSha: string;
 }): Promise<PullRequest> {
-  const pull = validatePullRequest(
-    await githubApi<unknown>(
-      `repos/${options.repository}/pulls/${options.prNumber}`,
-      options.token,
-      {
-        userAgent: USER_AGENT,
-      },
-    ),
-  );
+  const pull = await pullRequestSnapshot(options);
   if (
     pull.number !== options.prNumber ||
     pull.state !== "open" ||
@@ -1008,6 +1042,7 @@ export async function resolvePullRequest(options: {
     .map(validatePullRequestIdentity)
     .filter(
       (pull) =>
+        pull.state === "open" &&
         pull.head.sha === options.headSha &&
         pull.head.ref === options.headBranch &&
         pull.head.repo?.full_name === options.headRepository &&
@@ -1418,6 +1453,22 @@ function diagnosticValue(value: unknown): string {
   return serialized.length > 256 ? `${serialized.slice(0, 253)}...` : serialized;
 }
 
+function assertWorkflowRunConclusion(value: unknown, label: string): asserts value is string {
+  if (typeof value !== "string" || !WORKFLOW_RUN_CONCLUSIONS.has(value)) {
+    throw new Error(`${label} is invalid`);
+  }
+}
+
+function assertWorkflowRunResult(run: WorkflowRun): void {
+  if (run.status === "completed") {
+    assertWorkflowRunConclusion(run.conclusion, "E2E workflow conclusion");
+    return;
+  }
+  if (!ACTIVE_WORKFLOW_RUN_STATUS_SET.has(run.status) || run.conclusion !== null) {
+    throw new Error("E2E workflow status and conclusion are invalid");
+  }
+}
+
 export function assertCorrelatedWorkflowRun(
   child: WorkflowRun,
   identity: WorkflowRunIdentity,
@@ -1533,6 +1584,7 @@ export async function startPrGate(
   }
   assertRepository(command.headRepository, "PR head repository");
   assertBranch(command.headBranch);
+  assertWorkflowRunConclusion(command.ciConclusion, "PR CI conclusion");
   const ciIdentity = parseCiRunIdentity(command.ciDisplayTitle);
   if (
     ciIdentity.headSha !== command.headSha ||
@@ -1550,21 +1602,47 @@ export async function startPrGate(
   if (existingChecks.length > 1) {
     throw new Error("Multiple exact-diff PR gate checks already exist");
   }
+  const existingCheckState = existingChecks[0]
+    ? validatePrGateCheckState(existingChecks[0])
+    : undefined;
   const existingCheckRunId =
-    existingChecks[0]?.status === "in_progress" ? existingChecks[0].id : undefined;
+    existingCheckState === "in_progress" ? existingChecks[0]!.id : undefined;
   if (existingCheckRunId) appendOutput("check_id", String(existingCheckRunId));
-  const pull = await requireLiveExactDiff({
+  const pull = await pullRequestSnapshot({
     repository,
     token,
     prNumber: ciIdentity.prNumber,
-    headSha: ciIdentity.headSha,
-    baseSha: ciIdentity.baseSha,
   });
   if (
+    pull.number !== ciIdentity.prNumber ||
+    pull.base.repo.full_name !== repository ||
     pull.head.repo?.full_name !== command.headRepository ||
     pull.head.ref !== command.headBranch
   ) {
     throw new Error("PR repository or branch does not match the triggering CI run");
+  }
+  const obsoleteTitle =
+    pull.state === "closed"
+      ? "PR is no longer open"
+      : pull.head.sha !== ciIdentity.headSha || pull.base.sha !== ciIdentity.baseSha
+        ? "PR revision changed"
+        : undefined;
+  if (obsoleteTitle) {
+    const obsoleteCheckRunId = existingChecks[0]?.id;
+    if (obsoleteCheckRunId && existingCheckState !== "failure") {
+      if (!existingCheckRunId) appendOutput("check_id", String(obsoleteCheckRunId));
+      await completeCheck({ repository, checkRunId: obsoleteCheckRunId }, token, {
+        conclusion: "failure",
+        title: obsoleteTitle,
+        summary: `CI completed for head ${ciIdentity.headSha} and base ${ciIdentity.baseSha}, but that is no longer the active PR revision. No E2E run was dispatched.`,
+      });
+      appendOutput("finalized", "true");
+    }
+    appendOutput("dispatched", "false");
+    console.log(
+      `Obsolete CI result ignored: pr=${ciIdentity.prNumber} head=${ciIdentity.headSha} base=${ciIdentity.baseSha} state=${pull.state}`,
+    );
+    return;
   }
   const checkRunId = await ensurePrGateCheck({
     repository,
@@ -1625,7 +1703,8 @@ export async function startPrGate(
       appendOutput("dispatched", "false");
       appendOutput("finalized", "true");
       finalized = true;
-      throw new PrerequisiteCiError(report.errorMessage);
+      console.log(report.errorMessage);
+      return;
     }
 
     const changedFiles = await pullChangedFiles(repository, pull, token);
@@ -1867,6 +1946,7 @@ export async function finishPrGate(options: {
       repository,
       workflowSha: state.workflowSha,
     });
+    assertWorkflowRunResult(child);
     if (child.status !== "completed") {
       await cancelChildRun(repository, token, options.childRunId);
       console.log(
@@ -1892,13 +1972,14 @@ export async function finishPrGate(options: {
       expectedShards: state.expectedShards,
       signals,
     });
-    await requireLiveExactDiff({
+    const pull = await pullRequestSnapshot({
       repository,
       token,
       prNumber: state.prNumber,
-      headSha: state.commitSha,
-      baseSha: state.baseSha,
     });
+    if (pull.number !== state.prNumber || pull.base.repo.full_name !== repository) {
+      throw new Error("pull request no longer matches the controller state");
+    }
     const matchingChecks = await matchingPrGateChecks({
       repository,
       token,
@@ -1909,15 +1990,40 @@ export async function finishPrGate(options: {
     if (matchingChecks.length !== 1 || matchingChecks[0]!.id !== options.checkRunId) {
       throw new Error("controller state does not match the exact PR gate check");
     }
+    const checkState = validatePrGateCheckState(matchingChecks[0]!);
+    const obsoleteTitle =
+      pull.state === "closed"
+        ? "PR closed during E2E"
+        : pull.head.sha !== state.commitSha || pull.base.sha !== state.baseSha
+          ? "PR revision changed during E2E"
+          : undefined;
+    if (obsoleteTitle) {
+      if (checkState !== "failure") {
+        await completeCheck(
+          context,
+          token,
+          {
+            conclusion: "failure",
+            title: obsoleteTitle,
+            summary:
+              "The dispatched run can no longer authorize this PR because its active revision changed before E2E finalization.",
+          },
+          childRunUrl,
+        );
+      }
+      appendOutput("finalized", "true");
+      finalized = true;
+      console.log(
+        `Obsolete E2E result ignored: pr=${state.prNumber} run=${options.childRunId} title=${obsoleteTitle} url=${childRunUrl}`,
+      );
+      return;
+    }
     await completeCheck(context, token, verdict, childRunUrl);
     appendOutput("finalized", "true");
     finalized = true;
     console.log(
       `Run completed: run=${options.childRunId} conclusion=${verdict.conclusion} title=${verdict.title} url=${childRunUrl}`,
     );
-    if (verdict.conclusion === "failure") {
-      throw new Error(`${verdict.title}: ${verdict.summary}`);
-    }
   } catch (error) {
     if (!finalized) {
       const closed = await completeFailureAfterControllerError(
@@ -2297,16 +2403,12 @@ export async function cancelPrGate(prNumber: number): Promise<number> {
   return active.size;
 }
 
-export function controllerErrorAnnotationTitle(error: unknown): string {
-  return error instanceof PrerequisiteCiError ? "PR CI did not pass" : "Controller failed";
-}
-
 function reportControllerError(error: unknown): void {
   const message = controllerErrorMessage(error);
   console.error(message);
   if (process.env.GITHUB_ACTIONS === "true") {
     const escaped = message.replace(/%/gu, "%25").replace(/\r/gu, "%0D").replace(/\n/gu, "%0A");
-    console.error(`::error title=${controllerErrorAnnotationTitle(error)}::${escaped}`);
+    console.error(`::error title=Controller failed::${escaped}`);
   }
 }
 

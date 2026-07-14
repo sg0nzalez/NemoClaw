@@ -102,10 +102,12 @@ Runtime families and changes to workflow-wired live tests select
 canonical selectors from the trusted `e2e.yaml` inventory independently of
 advisor output. Ordinary internal changes execute those focused selections.
 Gate initialization and CI coordination share one non-cancelling concurrency
-group for the head repository and branch. Before either path creates, fails, or
-updates a check, it reads the live PR and requires the event's exact head and
-base, including when PR CI failed. This keeps a stale seed or completed CI run
-from being applied to a newer exact diff.
+group for the head repository and branch. Gate initialization requires the
+live PR to match the event's exact head and base before reserving a check. CI
+coordination reads the live PR before updating a check. If completed CI belongs
+to a closed PR or an obsolete head or base, it does not dispatch E2E and closes
+any existing exact-diff gate for that event as failed. This keeps a stale seed
+or completed CI run from being applied to a newer exact diff.
 Control-plane selections remain hash-bound in the recorded plan, but their
 credentialed execution is waived only through the exact-diff approval below.
 Shared sandbox-boundary changes have a floor of `full-e2e`, `hermes-e2e`, and
@@ -200,7 +202,14 @@ before downloaded evidence is classified.
 
 When the plan selects jobs, the check passes only when the E2E run succeeds and
 every expected job shard uploads one complete passing signal with no skips or
-pending tests. Every other dispatched outcome fails.
+pending tests. Every other dispatched outcome fails the exact-diff check.
+Expected negative PR outcomes, including failed prerequisite CI, failed or
+incomplete E2E evidence, and a revision that closes or changes during
+coordination, fail the exact-diff check while the trusted `workflow_run`
+controller job succeeds. GitHub attaches that controller run to the
+default-branch workflow SHA, so malformed state, provenance mismatches, and API
+or check-publication failures remain controller errors that fail the controller
+job.
 The coordinator has a 180-minute job budget and gives evidence download its
 own 10-minute limit, so a stalled download fails instead of consuming the
 remaining coordination time.

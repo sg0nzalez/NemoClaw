@@ -96,6 +96,13 @@ function pullRequest(changedFiles = 1): PullRequest {
   };
 }
 
+function pullRequestDetailRoute(pull = pullRequest()) {
+  return githubFetchRoute(
+    ({ url, method }) => url.endsWith("/pulls/42") && method === "GET",
+    () => githubResponse(pull),
+  );
+}
+
 function pullRequestListItem(pull = pullRequest()): Omit<PullRequest, "changed_files"> {
   const { changed_files: _changedFiles, ...item } = pull;
   return item;
@@ -276,6 +283,153 @@ describe("PR E2E controller lifecycle", () => {
     }
   });
 
+  it("ignores a superseded failed-CI event before mutating the live base check", async () => {
+    const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-pr-e2e-gate-stale-ci-"));
+    const outputPath = path.join(workDir, "github-output");
+    fs.writeFileSync(outputPath, "", { mode: 0o600 });
+    vi.stubEnv("GITHUB_TOKEN", "token");
+    vi.stubEnv("GITHUB_REPOSITORY", "NVIDIA/NemoClaw");
+    vi.stubEnv("GITHUB_OUTPUT", outputPath);
+    const requests: RecordedGitHubRequest[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      createGitHubFetchRouter(
+        [
+          emptyPrGateCheckRunsRoute(),
+          pullRequestDetailRoute({
+            ...pullRequest(),
+            base: { ...pullRequest().base, sha: "c".repeat(40) },
+          }),
+        ],
+        requests,
+      ),
+    );
+
+    try {
+      await expect(
+        startPrGate({ ...startCommand(workDir), ciConclusion: "failure" }),
+      ).resolves.toBeUndefined();
+      expect(requests).toHaveLength(2);
+      expect(requests.filter((request) => request.url.includes("/check-runs?"))).toHaveLength(1);
+      expect(requests.some((request) => request.url.endsWith("/check-runs"))).toBe(false);
+      expect(requests.some((request) => request.method === "PATCH")).toBe(false);
+      expect(fs.readFileSync(outputPath, "utf8")).toBe("dispatched=false\n");
+    } finally {
+      fs.rmSync(workDir, { recursive: true, force: true });
+    }
+  });
+
+  it("closes an in-progress exact-diff check when its CI event is superseded", async () => {
+    const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-pr-e2e-gate-superseded-"));
+    const outputPath = path.join(workDir, "github-output");
+    fs.writeFileSync(outputPath, "", { mode: 0o600 });
+    vi.stubEnv("GITHUB_TOKEN", "token");
+    vi.stubEnv("GITHUB_REPOSITORY", "NVIDIA/NemoClaw");
+    vi.stubEnv("GITHUB_OUTPUT", outputPath);
+    const requests: RecordedGitHubRequest[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      createGitHubFetchRouter(
+        [
+          existingPrGateCheckRunsRoute(),
+          pullRequestDetailRoute({
+            ...pullRequest(),
+            head: { ...pullRequest().head, sha: "c".repeat(40) },
+          }),
+          githubFetchRoute(
+            ({ url, method }) => url.endsWith("/check-runs/17") && method === "PATCH",
+            () => githubResponse({}),
+          ),
+        ],
+        requests,
+      ),
+    );
+
+    try {
+      await expect(startPrGate(startCommand(workDir))).resolves.toBeUndefined();
+      expect(requests).toHaveLength(3);
+      expect(requests.some((request) => request.url.endsWith("/check-runs"))).toBe(false);
+      const completion = requests.find((request) => request.method === "PATCH");
+      expect(completion?.body).toMatchObject({
+        status: "completed",
+        conclusion: "failure",
+        output: { title: "PR revision changed" },
+      });
+      expect(fs.readFileSync(outputPath, "utf8")).toBe(
+        "check_id=17\nfinalized=true\ndispatched=false\n",
+      );
+    } finally {
+      fs.rmSync(workDir, { recursive: true, force: true });
+    }
+  });
+
+  it("replaces a completed success when a superseded CI event arrives", async () => {
+    const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-pr-e2e-gate-completed-"));
+    const outputPath = path.join(workDir, "github-output");
+    fs.writeFileSync(outputPath, "", { mode: 0o600 });
+    vi.stubEnv("GITHUB_TOKEN", "token");
+    vi.stubEnv("GITHUB_REPOSITORY", "NVIDIA/NemoClaw");
+    vi.stubEnv("GITHUB_OUTPUT", outputPath);
+    const requests: RecordedGitHubRequest[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      createGitHubFetchRouter(
+        [
+          existingPrGateCheckRunsRoute({ status: "completed", conclusion: "success" }),
+          pullRequestDetailRoute({
+            ...pullRequest(),
+            head: { ...pullRequest().head, sha: "c".repeat(40) },
+          }),
+          githubFetchRoute(
+            ({ url, method }) => url.endsWith("/check-runs/17") && method === "PATCH",
+            () => githubResponse({}),
+          ),
+        ],
+        requests,
+      ),
+    );
+
+    try {
+      await expect(startPrGate(startCommand(workDir))).resolves.toBeUndefined();
+      expect(requests).toHaveLength(3);
+      expect(requests.some((request) => request.url.endsWith("/check-runs"))).toBe(false);
+      const completion = requests.find((request) => request.method === "PATCH");
+      expect(completion?.body).toMatchObject({
+        status: "completed",
+        conclusion: "failure",
+        output: { title: "PR revision changed" },
+      });
+      expect(fs.readFileSync(outputPath, "utf8")).toBe(
+        "check_id=17\nfinalized=true\ndispatched=false\n",
+      );
+    } finally {
+      fs.rmSync(workDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a malformed exact-diff check state", async () => {
+    const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-pr-e2e-gate-check-state-"));
+    const outputPath = path.join(workDir, "github-output");
+    fs.writeFileSync(outputPath, "", { mode: 0o600 });
+    vi.stubEnv("GITHUB_TOKEN", "token");
+    vi.stubEnv("GITHUB_REPOSITORY", "NVIDIA/NemoClaw");
+    vi.stubEnv("GITHUB_OUTPUT", outputPath);
+    const requests: RecordedGitHubRequest[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      createGitHubFetchRouter(
+        [existingPrGateCheckRunsRoute({ status: "completed", conclusion: null })],
+        requests,
+      ),
+    );
+
+    try {
+      await expect(startPrGate(startCommand(workDir))).rejects.toThrow(
+        "GitHub returned an invalid exact-diff check state",
+      );
+      expect(requests).toHaveLength(1);
+      expect(fs.readFileSync(outputPath, "utf8")).toBe("");
+    } finally {
+      fs.rmSync(workDir, { recursive: true, force: true });
+    }
+  });
+
   it.each([
     {
       label: "the pull request base changes after dispatch",
@@ -283,14 +437,20 @@ describe("PR E2E controller lifecycle", () => {
         ...pullRequest(),
         base: { ...pullRequest().base, sha: "c".repeat(40) },
       },
-      expectedError: /expected exact head and base/u,
+      expectedTitle: "PR revision changed during E2E",
+      checkOverrides: { status: "completed", conclusion: "success" },
     },
     {
       label: "the pull request closes after dispatch",
       currentPull: { ...pullRequest(), state: "closed" },
-      expectedError: /invalid pull request state/u,
+      expectedTitle: "PR closed during E2E",
+      checkOverrides: {},
     },
-  ])("fails finalization when $label", async ({ currentPull, expectedError }) => {
+  ])("fails the exact check without failing the controller when $label", async ({
+    currentPull,
+    expectedTitle,
+    checkOverrides,
+  }) => {
     const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-pr-e2e-gate-retarget-"));
     const outputPath = path.join(workDir, "github-output");
     const statePath = path.join(workDir, "controller-state.json");
@@ -325,6 +485,7 @@ describe("PR E2E controller lifecycle", () => {
             ({ url, method }) => url.endsWith("/pulls/42") && method === "GET",
             () => githubResponse(currentPull),
           ),
+          existingPrGateCheckRunsRoute(checkOverrides),
           githubFetchRoute(
             ({ url, method }) => url.endsWith("/check-runs/17") && method === "PATCH",
             () => githubResponse({}),
@@ -343,19 +504,14 @@ describe("PR E2E controller lifecycle", () => {
           checkRunId: 17,
           childRunId: 23,
         }),
-      ).rejects.toThrow(expectedError);
-      expect(
-        requests.some(
-          (request) => request.url.includes("/commits/") && request.url.includes("/check-runs?"),
-        ),
-      ).toBe(false);
+      ).resolves.toBeUndefined();
       const completion = requests.find(
         (request) => request.url.endsWith("/check-runs/17") && request.method === "PATCH",
       );
       expect(completion?.body).toMatchObject({
         status: "completed",
         conclusion: "failure",
-        output: { title: "Evidence could not be verified" },
+        output: { title: expectedTitle },
       });
       expect(fs.readFileSync(outputPath, "utf8")).toContain("finalized=true");
     } finally {
@@ -367,22 +523,38 @@ describe("PR E2E controller lifecycle", () => {
     {
       label: "missing evidence",
       status: "completed",
+      conclusion: "success",
       expectCancellation: false,
       expectedTitle: "Evidence is missing",
-      expectedError: /Missing signals: onboard-repair:default, onboard-resume:default/u,
     },
     {
       label: "an unfinished child",
       status: "in_progress",
+      conclusion: null,
       expectCancellation: true,
       expectedTitle: "E2E run did not succeed",
-      expectedError: /The run concluded unfinished \(in_progress\)/u,
+    },
+    {
+      label: "a failed child",
+      status: "completed",
+      conclusion: "failure",
+      expectCancellation: false,
+      expectedTitle: "E2E run did not succeed",
+    },
+    {
+      label: "an invalid child result",
+      status: "unknown",
+      conclusion: null,
+      expectCancellation: false,
+      expectedTitle: "Evidence could not be verified",
+      expectedControllerError: "E2E workflow status and conclusion are invalid",
     },
   ])("closes the check as failure for $label", async ({
     status,
+    conclusion,
     expectCancellation,
     expectedTitle,
-    expectedError,
+    expectedControllerError,
   }) => {
     const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-pr-e2e-gate-finish-"));
     const outputPath = path.join(workDir, "github-output");
@@ -402,7 +574,7 @@ describe("PR E2E controller lifecycle", () => {
         [
           githubFetchRoute(
             ({ url, method }) => url.endsWith("/actions/runs/23") && method === "GET",
-            () => githubResponse(workflowRun(gate, { status, conclusion: "success" })),
+            () => githubResponse(workflowRun(gate, { status, conclusion })),
           ),
           githubFetchRoute(
             ({ url, method }) => url.endsWith("/actions/runs/23/cancel") && method === "POST",
@@ -423,15 +595,18 @@ describe("PR E2E controller lifecycle", () => {
     );
 
     try {
-      await expect(
-        finishPrGate({
-          statePath,
-          stateHash: sha256(serializedState),
-          evidencePath,
-          checkRunId: 17,
-          childRunId: 23,
-        }),
-      ).rejects.toThrow(expectedError);
+      const finalization = finishPrGate({
+        statePath,
+        stateHash: sha256(serializedState),
+        evidencePath,
+        checkRunId: 17,
+        childRunId: 23,
+      });
+      if (expectedControllerError) {
+        await expect(finalization).rejects.toThrow(expectedControllerError);
+      } else {
+        await expect(finalization).resolves.toBeUndefined();
+      }
       expect(requests.some((request) => request.url.endsWith("/actions/runs/23/cancel"))).toBe(
         expectCancellation,
       );

@@ -11,11 +11,9 @@ import { buildRiskPlan, riskPlanRequiredJobIds } from "../tools/advisors/risk-pl
 import {
   assertCorrelatedWorkflowRun,
   classifyPrGateEvidence,
-  controllerErrorAnnotationTitle,
   dispatchPrGate,
   expectedSignalShards,
   finishPrGate,
-  PrerequisiteCiError,
   type PrGateState,
   type PullRequest,
   parseControllerCommand,
@@ -365,15 +363,6 @@ describe("PR E2E controller", () => {
       fs.chmodSync(workDir, 0o700);
       fs.rmSync(workDir, { recursive: true, force: true });
     }
-  });
-
-  it("distinguishes prerequisite CI failures from controller failures in annotations", () => {
-    expect(controllerErrorAnnotationTitle(new PrerequisiteCiError("CI failed"))).toBe(
-      "PR CI did not pass",
-    );
-    expect(controllerErrorAnnotationTitle(new Error("controller failed"))).toBe(
-      "Controller failed",
-    );
   });
 
   it("validates the risk plan and bounded state", () => {
@@ -965,8 +954,53 @@ describe("PR E2E controller", () => {
     }
   });
 
-  it("rejects stale failed-CI evidence before mutating the live base check", async () => {
-    const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-pr-e2e-gate-stale-ci-"));
+  it("closes the exact check when CI completes after the pull request closes", async () => {
+    const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-pr-e2e-gate-closed-"));
+    const outputPath = path.join(workDir, "github-output");
+    fs.writeFileSync(outputPath, "", { mode: 0o600 });
+    vi.stubEnv("GITHUB_TOKEN", "token");
+    vi.stubEnv("GITHUB_REPOSITORY", "NVIDIA/NemoClaw");
+    vi.stubEnv("GITHUB_OUTPUT", outputPath);
+    const requests: RecordedGitHubRequest[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      createGitHubFetchRouter(
+        [
+          existingPrGateCheckRunsRoute(),
+          pullRequestDetailRoute({ ...pullRequest(), state: "closed" }),
+          githubFetchRoute(
+            ({ url, method }) => url.endsWith("/check-runs/17") && method === "PATCH",
+            () => githubResponse({}),
+          ),
+        ],
+        requests,
+      ),
+    );
+
+    try {
+      await expect(
+        startPrGate({
+          ...startCommand(workDir, ""),
+          ciConclusion: "failure",
+        }),
+      ).resolves.toBeUndefined();
+      expect(requests.some((request) => request.url.includes("/jobs?"))).toBe(false);
+      expect(requests.some((request) => request.url.endsWith("/dispatches"))).toBe(false);
+      const completion = requests.find((request) => request.method === "PATCH");
+      expect(completion?.body).toMatchObject({
+        status: "completed",
+        conclusion: "failure",
+        output: { title: "PR is no longer open" },
+      });
+      expect(fs.readFileSync(outputPath, "utf8")).toBe(
+        "check_id=17\nfinalized=true\ndispatched=false\n",
+      );
+    } finally {
+      fs.rmSync(workDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a closed pull request that does not match the triggering branch", async () => {
+    const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-pr-e2e-gate-closed-ref-"));
     const outputPath = path.join(workDir, "github-output");
     fs.writeFileSync(outputPath, "", { mode: 0o600 });
     vi.stubEnv("GITHUB_TOKEN", "token");
@@ -979,7 +1013,8 @@ describe("PR E2E controller", () => {
           emptyPrGateCheckRunsRoute(),
           pullRequestDetailRoute({
             ...pullRequest(),
-            base: { ...pullRequest().base, sha: "c".repeat(40) },
+            state: "closed",
+            head: { ...pullRequest().head, ref: "feature/other" },
           }),
         ],
         requests,
@@ -987,80 +1022,30 @@ describe("PR E2E controller", () => {
     );
 
     try {
-      await expect(
-        startPrGate({ ...startCommand(workDir), ciConclusion: "failure" }),
-      ).rejects.toThrow(/expected exact head and base/u);
-      expect(requests).toHaveLength(2);
-      expect(requests.filter((request) => request.url.includes("/check-runs?"))).toHaveLength(1);
-      expect(requests.some((request) => request.url.endsWith("/check-runs"))).toBe(false);
+      await expect(startPrGate(startCommand(workDir, ""))).rejects.toThrow(
+        "PR repository or branch does not match the triggering CI run",
+      );
+      expect(requests.some((request) => request.method !== "GET")).toBe(false);
       expect(fs.readFileSync(outputPath, "utf8")).toBe("");
     } finally {
       fs.rmSync(workDir, { recursive: true, force: true });
     }
   });
 
-  it("recovers a superseded exact-diff check for the workflow cleanup step", async () => {
-    const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-pr-e2e-gate-superseded-"));
+  it("rejects an unknown prerequisite CI conclusion before mutating checks", async () => {
+    const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-pr-e2e-gate-conclusion-"));
     const outputPath = path.join(workDir, "github-output");
     fs.writeFileSync(outputPath, "", { mode: 0o600 });
     vi.stubEnv("GITHUB_TOKEN", "token");
     vi.stubEnv("GITHUB_REPOSITORY", "NVIDIA/NemoClaw");
     vi.stubEnv("GITHUB_OUTPUT", outputPath);
-    const requests: RecordedGitHubRequest[] = [];
-    vi.spyOn(globalThis, "fetch").mockImplementation(
-      createGitHubFetchRouter(
-        [
-          existingPrGateCheckRunsRoute(),
-          pullRequestDetailRoute({
-            ...pullRequest(),
-            head: { ...pullRequest().head, sha: "c".repeat(40) },
-          }),
-        ],
-        requests,
-      ),
-    );
+    const fetchMock = vi.spyOn(globalThis, "fetch");
 
     try {
-      await expect(startPrGate(startCommand(workDir))).rejects.toThrow(
-        /expected exact head and base/u,
-      );
-      expect(requests).toHaveLength(2);
-      expect(requests.some((request) => request.url.endsWith("/check-runs"))).toBe(false);
-      expect(requests.some((request) => request.method === "PATCH")).toBe(false);
-      expect(fs.readFileSync(outputPath, "utf8")).toBe("check_id=17\n");
-    } finally {
-      fs.rmSync(workDir, { recursive: true, force: true });
-    }
-  });
-
-  it("does not reopen a completed check when a superseded CI event arrives", async () => {
-    const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-pr-e2e-gate-completed-"));
-    const outputPath = path.join(workDir, "github-output");
-    fs.writeFileSync(outputPath, "", { mode: 0o600 });
-    vi.stubEnv("GITHUB_TOKEN", "token");
-    vi.stubEnv("GITHUB_REPOSITORY", "NVIDIA/NemoClaw");
-    vi.stubEnv("GITHUB_OUTPUT", outputPath);
-    const requests: RecordedGitHubRequest[] = [];
-    vi.spyOn(globalThis, "fetch").mockImplementation(
-      createGitHubFetchRouter(
-        [
-          existingPrGateCheckRunsRoute({ status: "completed", conclusion: "success" }),
-          pullRequestDetailRoute({
-            ...pullRequest(),
-            head: { ...pullRequest().head, sha: "c".repeat(40) },
-          }),
-        ],
-        requests,
-      ),
-    );
-
-    try {
-      await expect(startPrGate(startCommand(workDir))).rejects.toThrow(
-        /expected exact head and base/u,
-      );
-      expect(requests).toHaveLength(2);
-      expect(requests.some((request) => request.url.endsWith("/check-runs"))).toBe(false);
-      expect(requests.some((request) => request.method === "PATCH")).toBe(false);
+      await expect(
+        startPrGate({ ...startCommand(workDir), ciConclusion: "unknown" }),
+      ).rejects.toThrow("PR CI conclusion is invalid");
+      expect(fetchMock).not.toHaveBeenCalled();
       expect(fs.readFileSync(outputPath, "utf8")).toBe("");
     } finally {
       fs.rmSync(workDir, { recursive: true, force: true });
@@ -1134,20 +1119,9 @@ describe("PR E2E controller", () => {
     );
 
     try {
-      let rejection: unknown;
-      try {
-        await startPrGate({ ...startCommand(workDir), ciConclusion: "failure" });
-      } catch (error) {
-        rejection = error;
-      }
-      expect(rejection).toBeInstanceOf(PrerequisiteCiError);
-      const rejectionMessage = (rejection as Error).message;
-      expect(rejectionMessage).toContain("PR #42: https://github.com/NVIDIA/NemoClaw/pull/42");
-      expect(rejectionMessage).toContain(
-        `CI run attempt ${CI_RUN_ATTEMPT}: https://github.com/NVIDIA/NemoClaw/actions/runs/${CI_RUN_ID}/attempts/${CI_RUN_ATTEMPT}`,
-      );
-      expect(rejectionMessage).toContain("cli-test-shards (6) (Run CLI coverage shard)");
-      expect(rejectionMessage).toContain("job listing truncated");
+      await expect(
+        startPrGate({ ...startCommand(workDir), ciConclusion: "failure" }),
+      ).resolves.toBeUndefined();
 
       expect(requests.some((request) => request.url.endsWith("/dispatches"))).toBe(false);
       expect(requests.filter((request) => request.url.endsWith("/pulls/42"))).toHaveLength(1);
@@ -1237,12 +1211,7 @@ describe("PR E2E controller", () => {
           ciConclusion: "failure",
           prNumber: undefined,
         }),
-      ).rejects.toThrow(
-        new RegExp(
-          `CI run attempt ${CI_RUN_ATTEMPT}: https://github\\.com/NVIDIA/NemoClaw/actions/runs/${CI_RUN_ID}/attempts/${CI_RUN_ATTEMPT}`,
-          "u",
-        ),
-      );
+      ).resolves.toBeUndefined();
 
       expect(requests.filter((request) => request.url.endsWith("/pulls/42"))).toHaveLength(1);
       expect(requests.some((request) => request.url.includes("/pulls?"))).toBe(false);
