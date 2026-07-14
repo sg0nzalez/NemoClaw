@@ -146,7 +146,7 @@ function expectProbeAndAuditRequests(dirName = "state"): void {
     "nemoclaw",
     expect.objectContaining({
       sandboxName: "alpha",
-      command: ["sh", "-c", expect.stringContaining("find -files0-from=-")],
+      command: ["sh", "-c", expect.stringContaining("xargs -0 -r sh -c")],
       stdin: expectedAuditInput.input,
       maxOutputBytes: MAX_SANDBOX_DIRECTORY_AUDIT_BYTES + 1,
       stdoutEncoding: "buffer",
@@ -206,6 +206,38 @@ beforeEach(() => {
 });
 
 describe("backupSandboxState OpenShell directory transport", () => {
+  it("fails closed before dispatch when the persisted gateway binding is invalid", async () => {
+    mocks.getSandbox.mockReturnValue({
+      name: "alpha",
+      agent: "fixture",
+      policies: [],
+      gatewayName: "untrusted-gateway",
+    });
+    mocks.loadAgent.mockReturnValue({
+      configPaths: { dir: STATE_DIR },
+      expectedVersion: null,
+      stateDirs: ["state", "workspace"],
+      stateFiles: [
+        { path: "SOUL.md", strategy: "copy" },
+        { path: "runtime/state.db", strategy: "sqlite_backup" },
+      ],
+    });
+
+    const result = await backupSandboxState("alpha");
+
+    expect(result).toMatchObject({
+      success: false,
+      backedUpDirs: [],
+      failedDirs: ["state", "workspace"],
+      backedUpFiles: [],
+      failedFiles: ["SOUL.md", "runtime/state.db"],
+      error: expect.stringContaining("Invalid persisted sandbox gateway binding"),
+    });
+    expect(mocks.execSandboxReadOnlyWithGrpcFallback).not.toHaveBeenCalled();
+    expect(mocks.resolveOpenshell).not.toHaveBeenCalled();
+    expect(mocks.captureSandboxSshConfigCommand).not.toHaveBeenCalled();
+  });
+
   it("probes, audits, and extracts binary tar bytes through the reviewed read-only route", async () => {
     const { archive, payload } = createBinaryTarArchive();
     expect(Buffer.from(archive.toString("utf8"), "utf8")).not.toEqual(archive);
@@ -406,7 +438,9 @@ describe("backupSandboxState OpenShell directory transport", () => {
     expect(mocks.execSandboxReadOnlyWithGrpcFallback).toHaveBeenCalledTimes(2);
     expectProbeAndAuditRequests(dirName);
     const auditCommand = mocks.execSandboxReadOnlyWithGrpcFallback.mock.calls[1][1].command[2];
-    expect(auditCommand).toContain("find -files0-from=-");
+    expect(auditCommand).toContain("xargs -0 -r sh -c");
+    expect(auditCommand).toContain('find "$root"');
+    expect(auditCommand).not.toContain("-files0-from");
     expect(auditCommand).not.toContain("|| true");
     expect(auditCommand).not.toContain("-prune");
   });
@@ -447,7 +481,8 @@ describe("backupSandboxState OpenShell directory transport", () => {
     ).toEqual(payload);
     expectProbeAuditAndBinaryTarRequests("extensions");
     const auditCommand = mocks.execSandboxReadOnlyWithGrpcFallback.mock.calls[1][1].command[2];
-    expect(auditCommand).toContain("find -files0-from=-");
+    expect(auditCommand).toContain("xargs -0 -r sh -c");
+    expect(auditCommand).not.toContain("-files0-from");
     expect(auditCommand).not.toContain("|| true");
     expect(auditCommand).not.toContain("-prune");
   });
