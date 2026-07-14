@@ -1,8 +1,16 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it } from "vitest";
-import { applyPreset, buildPolicyGetCommand, buildPolicySetCommand } from "../src/lib/policy";
+import { createRequire } from "node:module";
+import { describe, expect, it, vi } from "vitest";
+
+const requireForTest = createRequire(import.meta.url);
+const policyCommands = requireForTest(
+  "../src/lib/policy/index.ts",
+) as typeof import("../src/lib/policy");
+const openshellResolve = requireForTest(
+  "../src/lib/adapters/openshell/resolve.ts",
+) as typeof import("../src/lib/adapters/openshell/resolve");
 
 type OnboardReadinessInternals = {
   hasStaleGateway: (output: string | null | undefined) => boolean;
@@ -117,36 +125,57 @@ describe("sandbox readiness parsing", () => {
 // argument parsing (e.g. "my-assistant" → "m").
 describe("WSL sandbox name handling", () => {
   it("buildPolicySetCommand preserves hyphenated sandbox name as a separate argv element", () => {
-    const cmd = buildPolicySetCommand("/tmp/policy.yaml", "my-assistant");
+    const cmd = policyCommands.buildPolicySetCommand("/tmp/policy.yaml", "my-assistant");
     expect(cmd).toContain("my-assistant");
     // The sandbox name must be a discrete argv element, not concatenated into a shell string
     expect(cmd[cmd.length - 1]).toBe("my-assistant");
   });
 
   it("buildPolicyGetCommand preserves hyphenated sandbox name", () => {
-    const cmd = buildPolicyGetCommand("my-assistant");
+    const cmd = policyCommands.buildPolicyGetCommand("my-assistant");
     expect(cmd).toContain("my-assistant");
   });
 
+  it("buildPolicyGetFullCommand preserves hyphenated sandbox name", () => {
+    const cmd = policyCommands.buildPolicyGetFullCommand("my-assistant");
+    expect(cmd).toContain("my-assistant");
+    expect(cmd).toContain("--full");
+  });
+
+  it("falls back to the openshell command name when no binary path resolves", () => {
+    const resolveSpy = vi.spyOn(openshellResolve, "resolveOpenshell").mockReturnValue(null);
+    try {
+      expect(policyCommands.buildPolicyGetCommand("my-assistant")[0]).toBe("openshell");
+    } finally {
+      resolveSpy.mockRestore();
+    }
+  });
+
   it("buildPolicySetCommand preserves multi-hyphen names", () => {
-    const cmd = buildPolicySetCommand("/tmp/p.yaml", "my-dev-assistant-v2");
+    const cmd = policyCommands.buildPolicySetCommand("/tmp/p.yaml", "my-dev-assistant-v2");
     expect(cmd).toContain("my-dev-assistant-v2");
   });
 
   it("buildPolicySetCommand preserves single-char name", () => {
     // If WSL truncates "my-assistant" to "m", the single-char name should
     // still be passed through unchanged as an argv element
-    const cmd = buildPolicySetCommand("/tmp/p.yaml", "m");
+    const cmd = policyCommands.buildPolicySetCommand("/tmp/p.yaml", "m");
     expect(cmd).toContain("m");
   });
 
   it("applyPreset rejects truncated/invalid sandbox name", () => {
     // Empty name
-    expect(() => applyPreset("", "npm")).toThrow(/Invalid or truncated sandbox name/);
+    expect(() => policyCommands.applyPreset("", "npm")).toThrow(
+      /Invalid or truncated sandbox name/,
+    );
     // Name with uppercase (not valid per RFC 1123)
-    expect(() => applyPreset("My-Assistant", "npm")).toThrow(/Invalid or truncated sandbox name/);
+    expect(() => policyCommands.applyPreset("My-Assistant", "npm")).toThrow(
+      /Invalid or truncated sandbox name/,
+    );
     // Name starting with hyphen
-    expect(() => applyPreset("-broken", "npm")).toThrow(/Invalid or truncated sandbox name/);
+    expect(() => policyCommands.applyPreset("-broken", "npm")).toThrow(
+      /Invalid or truncated sandbox name/,
+    );
   });
 
   it("readiness check uses exact match preventing truncated name false-positive", () => {

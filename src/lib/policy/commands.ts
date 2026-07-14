@@ -3,8 +3,8 @@
 
 // Late binding keeps tests able to replace the resolver without rewiring
 // command builders that are shared by policy and Shields flows.
-const openshellResolveModule =
-  require("../adapters/openshell/resolve") as typeof import("../adapters/openshell/resolve");
+type OpenshellResolveModule = typeof import("../adapters/openshell/resolve");
+const openshellResolveModule = require("../adapters/openshell/resolve") as OpenshellResolveModule;
 
 function resolveOpenshellBinary(): string {
   return openshellResolveModule.resolveOpenshell() ?? "openshell";
