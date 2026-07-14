@@ -253,6 +253,17 @@ describe("CLI OpenShell sandbox control", () => {
     );
   });
 
+  it("rejects an ambient endpoint that could override the fallback gateway", () => {
+    const capture = vi.fn<() => CaptureOpenshellResult>();
+
+    expect(() =>
+      createGatewayScopedCliOpenShellSandboxControl("nemoclaw-19080", capture, {
+        OPENSHELL_GATEWAY_ENDPOINT: "https://other.example.test",
+      }),
+    ).toThrow(/Unset OPENSHELL_GATEWAY_ENDPOINT/);
+    expect(capture).not.toHaveBeenCalled();
+  });
+
   it("returns a standard failure without capture for invalid commands", async () => {
     const capture = vi.fn<() => CaptureOpenshellResult>();
     const control = createCliOpenShellSandboxControl(capture);
