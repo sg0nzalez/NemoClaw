@@ -3,7 +3,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-import type { CaptureOpenshellResult } from "./client";
+import type { CaptureOpenshellBinaryResult } from "./client";
 import {
   createCliOpenShellSandboxControl,
   createGatewayScopedCliOpenShellSandboxControl,
@@ -228,11 +228,10 @@ describe("OpenShell exec request validation", () => {
 describe("CLI OpenShell sandbox control", () => {
   it("maps a typed exec request to the existing CLI contract", async () => {
     const capture = vi.fn(
-      (): CaptureOpenshellResult => ({
+      (): CaptureOpenshellBinaryResult => ({
         status: 0,
-        output: "hello",
-        stdout: "hello\n",
-        stderr: "warning\n",
+        stdout: Buffer.from("hello\n"),
+        stderr: Buffer.from("warning\n"),
       }),
     );
     const control = createCliOpenShellSandboxControl(capture);
@@ -248,8 +247,6 @@ describe("CLI OpenShell sandbox control", () => {
     expect(capture).toHaveBeenCalledWith(
       ["sandbox", "exec", "--name", "alpha", "--", "openclaw", "sessions", "list", "--json"],
       {
-        ignoreError: true,
-        includeStreams: true,
         input: Buffer.from("request body"),
         maxBuffer: 4096,
         timeout: 30_000,
@@ -267,9 +264,10 @@ describe("CLI OpenShell sandbox control", () => {
       code: "EIO",
     });
     const capture = vi.fn(
-      (): CaptureOpenshellResult => ({
+      (): CaptureOpenshellBinaryResult => ({
         status: null,
-        output: "partial",
+        stdout: Buffer.from("partial"),
+        stderr: Buffer.alloc(0),
         error,
         signal: "SIGTERM",
       }),
@@ -287,11 +285,10 @@ describe("CLI OpenShell sandbox control", () => {
 
   it("pins fallback execution to the requested gateway", async () => {
     const capture = vi.fn(
-      (): CaptureOpenshellResult => ({
+      (): CaptureOpenshellBinaryResult => ({
         status: 0,
-        output: "ok",
-        stdout: "ok\n",
-        stderr: "",
+        stdout: Buffer.from("ok\n"),
+        stderr: Buffer.alloc(0),
       }),
     );
     const control = createGatewayScopedCliOpenShellSandboxControl("nemoclaw-19080", capture);
@@ -300,12 +297,12 @@ describe("CLI OpenShell sandbox control", () => {
 
     expect(capture).toHaveBeenCalledWith(
       ["--gateway", "nemoclaw-19080", "sandbox", "exec", "--name", "alpha", "--", "true"],
-      expect.objectContaining({ ignoreError: true, includeStreams: true }),
+      expect.objectContaining({ maxBuffer: 1024 * 1024 }),
     );
   });
 
   it("rejects an ambient endpoint that could override the fallback gateway", () => {
-    const capture = vi.fn<() => CaptureOpenshellResult>();
+    const capture = vi.fn<() => CaptureOpenshellBinaryResult>();
 
     expect(() =>
       createGatewayScopedCliOpenShellSandboxControl("nemoclaw-19080", capture, {
@@ -316,7 +313,7 @@ describe("CLI OpenShell sandbox control", () => {
   });
 
   it("returns a standard failure without capture for invalid commands", async () => {
-    const capture = vi.fn<() => CaptureOpenshellResult>();
+    const capture = vi.fn<() => CaptureOpenshellBinaryResult>();
     const control = createCliOpenShellSandboxControl(capture);
 
     const result = await control.exec({
@@ -335,7 +332,7 @@ describe("CLI OpenShell sandbox control", () => {
   });
 
   it("rejects an oversized encoded request without invoking the CLI", async () => {
-    const capture = vi.fn<() => CaptureOpenshellResult>();
+    const capture = vi.fn<() => CaptureOpenshellBinaryResult>();
     const control = createCliOpenShellSandboxControl(capture);
 
     const result = await control.exec({
@@ -352,7 +349,7 @@ describe("CLI OpenShell sandbox control", () => {
   });
 
   it("rejects a timeout that cannot be represented by the v0.0.72 request", async () => {
-    const capture = vi.fn<() => CaptureOpenshellResult>();
+    const capture = vi.fn<() => CaptureOpenshellBinaryResult>();
     const control = createCliOpenShellSandboxControl(capture);
 
     const result = await control.exec({
@@ -370,11 +367,10 @@ describe("CLI OpenShell sandbox control", () => {
 
   it("implements a zero-byte output cap without passing Node's unlimited maxBuffer=0", async () => {
     const capture = vi.fn(
-      (): CaptureOpenshellResult => ({
+      (): CaptureOpenshellBinaryResult => ({
         status: 0,
-        output: "visible output",
-        stdout: "visible output",
-        stderr: "warning",
+        stdout: Buffer.from("visible output"),
+        stderr: Buffer.from("warning"),
       }),
     );
     const control = createCliOpenShellSandboxControl(capture);
@@ -399,7 +395,11 @@ describe("CLI OpenShell sandbox control", () => {
 
   it("allows a command with a zero-byte output cap when it emits nothing", async () => {
     const capture = vi.fn(
-      (): CaptureOpenshellResult => ({ status: 0, output: "", stdout: "", stderr: "" }),
+      (): CaptureOpenshellBinaryResult => ({
+        status: 0,
+        stdout: Buffer.alloc(0),
+        stderr: Buffer.alloc(0),
+      }),
     );
     const control = createCliOpenShellSandboxControl(capture);
 
@@ -417,11 +417,10 @@ describe("CLI OpenShell sandbox control", () => {
       code: "ENOBUFS",
     });
     const capture = vi.fn(
-      (): CaptureOpenshellResult => ({
+      (): CaptureOpenshellBinaryResult => ({
         status: null,
-        output: "abcdef",
-        stdout: "abcdef",
-        stderr: "warning",
+        stdout: Buffer.from("abcdef"),
+        stderr: Buffer.from("warning"),
         error: captureError,
       }),
     );
@@ -442,13 +441,66 @@ describe("CLI OpenShell sandbox control", () => {
     expect((result.error as NodeJS.ErrnoException).code).toBe("ENOBUFS");
   });
 
+  it("measures raw invalid UTF-8 bytes without a false output-limit failure", async () => {
+    const capture = vi.fn(
+      (): CaptureOpenshellBinaryResult => ({
+        status: 0,
+        stdout: Buffer.from([0xff]),
+        stderr: Buffer.alloc(0),
+      }),
+    );
+    const control = createCliOpenShellSandboxControl(capture);
+
+    await expect(
+      control.exec({ sandboxName: "alpha", command: ["true"], maxOutputBytes: 1 }),
+    ).resolves.toEqual({ status: 0, stdout: "\ufffd", stderr: "" });
+  });
+
+  it("preserves a complete multibyte sequence at its exact raw-byte boundary", async () => {
+    const capture = vi.fn(
+      (): CaptureOpenshellBinaryResult => ({
+        status: 0,
+        stdout: Buffer.from("é"),
+        stderr: Buffer.alloc(0),
+      }),
+    );
+    const control = createCliOpenShellSandboxControl(capture);
+
+    await expect(
+      control.exec({ sandboxName: "alpha", command: ["true"], maxOutputBytes: 2 }),
+    ).resolves.toEqual({ status: 0, stdout: "é", stderr: "" });
+  });
+
+  it("reports raw-byte overflow even when the cap splits a multibyte sequence", async () => {
+    const captureError = Object.assign(new Error("spawnSync openshell ENOBUFS"), {
+      code: "ENOBUFS",
+    });
+    const capture = vi.fn(
+      (): CaptureOpenshellBinaryResult => ({
+        status: null,
+        stdout: Buffer.from("é"),
+        stderr: Buffer.alloc(0),
+        error: captureError,
+      }),
+    );
+    const control = createCliOpenShellSandboxControl(capture);
+
+    await expect(
+      control.exec({ sandboxName: "alpha", command: ["true"], maxOutputBytes: 1 }),
+    ).resolves.toEqual({
+      status: null,
+      stdout: "\ufffd",
+      stderr: "",
+      error: expect.any(OpenShellExecOutputLimitError),
+    });
+  });
+
   it("forwards an exact-boundary argument unchanged", async () => {
     const capture = vi.fn(
-      (_args: readonly string[]): CaptureOpenshellResult => ({
+      (_args: readonly string[]): CaptureOpenshellBinaryResult => ({
         status: 0,
-        output: "",
-        stdout: "",
-        stderr: "",
+        stdout: Buffer.alloc(0),
+        stderr: Buffer.alloc(0),
       }),
     );
     const control = createCliOpenShellSandboxControl(capture);

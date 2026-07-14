@@ -434,6 +434,46 @@ describe("gRPC OpenShell sandbox control", () => {
     expect(fake.stream.cancelled).toBe(true);
   });
 
+  it("measures raw invalid UTF-8 bytes without a false output-limit failure", async () => {
+    const fake = fakeApi({
+      emit(stream) {
+        stream.emit("data", { stdout: { data: Buffer.from([0xff]) } });
+        stream.emit("data", { exit: { exitCode: 0 } });
+        stream.emit("end");
+      },
+    });
+    const control = createGrpcOpenShellSandboxControl(
+      { endpoint: "http://127.0.0.1:8080" },
+      fake.api,
+    );
+
+    await expect(
+      control.exec({ sandboxName: "alpha", command: ["true"], maxOutputBytes: 1 }),
+    ).resolves.toEqual({ status: 0, stdout: "\ufffd", stderr: "" });
+  });
+
+  it("reports raw-byte overflow when the cap splits a multibyte sequence", async () => {
+    const fake = fakeApi({
+      emit(stream) {
+        stream.emit("data", { stdout: { data: Buffer.from("é") } });
+      },
+    });
+    const control = createGrpcOpenShellSandboxControl(
+      { endpoint: "http://127.0.0.1:8080" },
+      fake.api,
+    );
+
+    await expect(
+      control.exec({ sandboxName: "alpha", command: ["true"], maxOutputBytes: 1 }),
+    ).resolves.toEqual({
+      status: null,
+      stdout: "\ufffd",
+      stderr: "",
+      error: expect.any(OpenShellGrpcOutputLimitError),
+    });
+    expect(fake.stream.cancelled).toBe(true);
+  });
+
   it("treats zero as a zero-byte output cap", async () => {
     const fake = fakeApi({
       emit(stream) {
