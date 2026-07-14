@@ -174,6 +174,33 @@ sys.exit(exit_code)
     );
   });
 
+  it("describes and preserves an explicit DGX Station model override", () => {
+    const result = runExpressPromptWithTty("\n", "pipe", "DGX Station", {
+      NEMOCLAW_VLLM_MODEL: "custom-station-model",
+    });
+    const output = `${result.stdout}${result.stderr}`;
+    expect(result.status, output).toBe(0);
+    expect(output).toMatch(/managed local vLLM with model custom-station-model/);
+    expect(output).toMatch(/pulls the configured vLLM image\/model/);
+    expect(output).not.toMatch(/approximately 352 GB model/);
+    expect(output).toMatch(
+      /RESULT NON_INTERACTIVE=1 SUDO_MODE=prompt PROVIDER=install-vllm MODEL= VLLM_MODEL=custom-station-model POLICY=suggested YES=1 SANDBOX=my-assistant/,
+    );
+  });
+
+  it("treats a whitespace-only DGX Station model override as unset", () => {
+    const result = runExpressPromptWithTty("\n", "pipe", "DGX Station", {
+      NEMOCLAW_VLLM_MODEL: "  \t ",
+    });
+    const output = `${result.stdout}${result.stderr}`;
+    expect(result.status, output).toBe(0);
+    expect(output).toMatch(/managed local vLLM with NVIDIA Nemotron 3 Ultra 550B/);
+    expect(output).toMatch(/approximately 352 GB model/);
+    expect(output).toMatch(
+      /RESULT NON_INTERACTIVE=1 SUDO_MODE=prompt PROVIDER=install-vllm MODEL= VLLM_MODEL=nemotron-3-ultra-550b-a55b POLICY=suggested YES=1 SANDBOX=my-assistant/,
+    );
+  });
+
   it("detects Windows WSL as an express install platform", () => {
     const result = spawnSync(
       "bash",

@@ -2683,12 +2683,13 @@ describe_express_install() {
       sandbox_summary="${NEMOCLAW_SANDBOX_NAME:-my-assistant}"
       ;;
     "DGX Station")
-      if [ -n "${NEMOCLAW_VLLM_MODEL:-}" ]; then
+      if [ -n "$(printf "%s" "${NEMOCLAW_VLLM_MODEL:-}" | tr -d '[:space:]')" ]; then
         inference_summary="managed local vLLM with model ${NEMOCLAW_VLLM_MODEL}"
+        inference_disclosure="Managed vLLM pulls the configured vLLM image/model and runs a local inference container."
       else
         inference_summary="managed local vLLM with NVIDIA Nemotron 3 Ultra 550B"
+        inference_disclosure="Managed vLLM pulls the pinned Station image and approximately 352 GB model, then runs a local inference container."
       fi
-      inference_disclosure="Managed vLLM pulls the pinned Station image and approximately 352 GB model, then runs a local inference container."
       sandbox_summary="${NEMOCLAW_SANDBOX_NAME:-my-assistant}"
       ;;
     "Windows WSL")
@@ -2792,7 +2793,10 @@ maybe_offer_express_install() {
         "DGX Station")
           export NEMOCLAW_SANDBOX_NAME="${NEMOCLAW_SANDBOX_NAME:-my-assistant}"
           export NEMOCLAW_PROVIDER=install-vllm
-          export NEMOCLAW_VLLM_MODEL="${NEMOCLAW_VLLM_MODEL:-nemotron-3-ultra-550b-a55b}"
+          if [ -z "$(printf "%s" "${NEMOCLAW_VLLM_MODEL:-}" | tr -d '[:space:]')" ]; then
+            NEMOCLAW_VLLM_MODEL="nemotron-3-ultra-550b-a55b"
+          fi
+          export NEMOCLAW_VLLM_MODEL
           ;;
         "Windows WSL")
           export NEMOCLAW_PROVIDER=install-windows-ollama
