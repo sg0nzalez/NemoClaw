@@ -5,15 +5,15 @@ import {
   assertNoOpenShellGatewayEndpointOverride,
   type OpenShellGatewayEndpointEnvironment,
 } from "../../openshell-gateway-endpoint-guard";
-import type { CaptureOpenshellResult } from "./client";
-import { captureOpenshell } from "./runtime";
+import type { CaptureOpenshellBinaryResult } from "./client";
+import { captureOpenshellBinary } from "./runtime";
 
 export interface SandboxExecRequest {
   sandboxName: string;
   command: readonly string[];
   /** Optional bytes supplied to the remote command's standard input. */
   stdin?: string | Buffer;
-  /** Maximum combined stdout and stderr bytes retained by the transport. */
+  /** Maximum combined raw stdout and stderr bytes retained before UTF-8 decoding. */
   maxOutputBytes?: number;
   /** End-to-end lookup and execution deadline. Zero means no deadline. */
   timeoutMs?: number;
@@ -83,7 +83,7 @@ export class OpenShellExecOutputLimitError extends Error {
   }
 }
 
-type CaptureOpenShell = typeof captureOpenshell;
+type CaptureOpenShellBinary = typeof captureOpenshellBinary;
 
 const OPENSHELL_V0072_MAX_EXEC_COMMAND_ARGS = 1024;
 const OPENSHELL_V0072_MAX_EXEC_ARGUMENT_BYTES = 32 * 1024;
@@ -294,46 +294,41 @@ function isOutputLimitError(error: Error | undefined): boolean {
   return (error as NodeJS.ErrnoException | undefined)?.code === "ENOBUFS";
 }
 
-function retainCombinedTextOutput(
-  stdout: string,
-  stderr: string,
+function retainCombinedOutput(
+  stdout: Buffer,
+  stderr: Buffer,
   maxOutputBytes: number,
-): { stdout: string; stderr: string; truncated: boolean } {
-  const stdoutBytes = Buffer.from(stdout, "utf8");
-  const stderrBytes = Buffer.from(stderr, "utf8");
-  const retainedStdout = stdoutBytes.subarray(0, maxOutputBytes);
+): { stdout: Buffer; stderr: Buffer; truncated: boolean } {
+  const retainedStdout = stdout.subarray(0, maxOutputBytes);
   const remaining = Math.max(0, maxOutputBytes - retainedStdout.length);
-  const retainedStderr = stderrBytes.subarray(0, remaining);
+  const retainedStderr = stderr.subarray(0, remaining);
   return {
-    stdout: retainedStdout.toString("utf8"),
-    stderr: retainedStderr.toString("utf8"),
-    truncated:
-      retainedStdout.length < stdoutBytes.length || retainedStderr.length < stderrBytes.length,
+    stdout: retainedStdout,
+    stderr: retainedStderr,
+    truncated: retainedStdout.length < stdout.length || retainedStderr.length < stderr.length,
   };
 }
 
 function normalizeExecResult(
-  result: CaptureOpenshellResult,
+  result: CaptureOpenshellBinaryResult,
   maxOutputBytes: number,
 ): SandboxExecResult {
-  const retained = retainCombinedTextOutput(
-    result.stdout ?? result.output,
-    result.stderr ?? "",
-    maxOutputBytes,
-  );
+  const retained = retainCombinedOutput(result.stdout, result.stderr, maxOutputBytes);
+  const stdout = retained.stdout.toString("utf8");
+  const stderr = retained.stderr.toString("utf8");
   if (retained.truncated || isOutputLimitError(result.error)) {
     return {
       status: null,
-      stdout: retained.stdout,
-      stderr: retained.stderr,
+      stdout,
+      stderr,
       error: new OpenShellExecOutputLimitError(maxOutputBytes),
       ...(result.signal !== undefined ? { signal: result.signal } : {}),
     };
   }
   const normalized: SandboxExecResult = {
     status: result.status,
-    stdout: retained.stdout,
-    stderr: retained.stderr,
+    stdout,
+    stderr,
   };
   if (result.error) normalized.error = result.error;
   if (result.signal !== undefined) normalized.signal = result.signal;
@@ -341,7 +336,7 @@ function normalizeExecResult(
 }
 
 function createCliSandboxControl(
-  capture: CaptureOpenShell,
+  capture: CaptureOpenShellBinary,
   gatewayName?: string,
 ): OpenShellSandboxControl {
   return {
@@ -364,8 +359,6 @@ function createCliSandboxControl(
           ...request.command,
         ],
         {
-          ignoreError: true,
-          includeStreams: true,
           input: request.stdin,
           // Node treats maxBuffer=0 as unlimited. One byte is the smallest
           // bounded capture; normalize it back to the requested zero-byte cap.
@@ -379,7 +372,7 @@ function createCliSandboxControl(
 }
 
 export function createCliOpenShellSandboxControl(
-  capture: CaptureOpenShell = captureOpenshell,
+  capture: CaptureOpenShellBinary = captureOpenshellBinary,
 ): OpenShellSandboxControl {
   return createCliSandboxControl(capture);
 }
@@ -387,7 +380,7 @@ export function createCliOpenShellSandboxControl(
 /** Bind every CLI fallback invocation to the gateway selected by the caller. */
 export function createGatewayScopedCliOpenShellSandboxControl(
   gatewayName: string,
-  capture: CaptureOpenShell = captureOpenshell,
+  capture: CaptureOpenShellBinary = captureOpenshellBinary,
   env: OpenShellGatewayEndpointEnvironment = process.env,
 ): OpenShellSandboxControl {
   assertNoOpenShellGatewayEndpointOverride(env);
