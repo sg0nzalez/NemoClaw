@@ -180,7 +180,7 @@ describe("vLLM profile detection", () => {
     expect(profile!.defaultModel.envValue).toBe("deepseek-v4-flash");
   });
 
-  it("resolves Nemotron Ultra to the pinned Station runtime without Docker port publishing", () => {
+  it("resolves Nemotron Ultra to the pinned Station runtime on the bridge network", () => {
     mocks.getGpuIndicesByName.mockReturnValue([0]);
     const profile = detectVllmProfile({ platform: "station", type: "nvidia" });
     const ultra = VLLM_MODELS.find((model) => model.envValue === "nemotron-3-ultra-550b-a55b");
@@ -193,11 +193,12 @@ describe("vLLM profile detection", () => {
     );
     expect(runtime.imageDownloadSizeBytes).toBe(10_670_087_425);
     expect(runtime.buildDockerRunFlags!()).toEqual(
-      expect.arrayContaining(["--gpus", "device=0", "--network", "host", "--shm-size", "16g"]),
+      expect.arrayContaining(["--gpus", "device=0", "--shm-size", "16g"]),
     );
 
     const args = buildVllmRunArgs(runtime, ultra!, runtime.buildDockerRunFlags!());
-    expect(args).not.toContain("-p");
+    expect(args).not.toContain("--network");
+    expect(args).toEqual(expect.arrayContaining(["-p", "8000:8000"]));
     expect(args).toContain(runtime.image);
   });
 
@@ -546,8 +547,8 @@ describe("installVllm model resolution", () => {
       ]),
     );
     const [runArgs] = mocks.dockerRunDetached.mock.calls[0] as [string[]];
-    expect(runArgs).toEqual(expect.arrayContaining(["--network", "host", "--shm-size", "16g"]));
-    expect(runArgs).not.toContain("-p");
+    expect(runArgs).toEqual(expect.arrayContaining(["--shm-size", "16g", "-p", "8000:8000"]));
+    expect(runArgs).not.toContain("--network");
     expect(runArgs.at(-1)).toContain("--cpu-offload-gb 150");
     expect(runArgs.at(-1)).toContain("--reasoning-parser nemotron_v3");
   });

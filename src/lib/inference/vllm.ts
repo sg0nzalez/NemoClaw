@@ -71,9 +71,6 @@ export interface VllmProfile {
   // dockerRunFlags at install time. Used by Station to pick the GB300 GPU
   // out of a mixed-GPU host instead of using `--gpus all`.
   buildDockerRunFlags?: () => string[];
-  // Host-network recipes already bind the service port directly and must not
-  // also add Docker's `-p` publishing flag.
-  publishPort?: boolean;
   // Maximum wall-clock safety budget for image pulls. The Docker adapter uses
   // a shorter progress watchdog for stalls, so slow-but-moving pulls can keep
   // going until this last-ditch cap.
@@ -455,7 +452,8 @@ export function buildVllmRunArgs(
     ...safeRunFlags,
     "--label",
     `${NEMOCLAW_VLLM_MANAGED_LABEL}=true`,
-    ...(profile.publishPort === false ? [] : ["-p", `${String(VLLM_PORT)}:8000`]),
+    "-p",
+    `${String(VLLM_PORT)}:8000`,
     "--name",
     containerName,
     "--entrypoint",
@@ -478,7 +476,6 @@ export function resolveVllmRuntimeProfile(profile: VllmProfile, model: VllmModel
     buildDockerRunFlags: profile.buildDockerRunFlags
       ? () => [...profile.buildDockerRunFlags!(), ...extraRunArgs]
       : undefined,
-    publishPort: runtime.publishPort ?? profile.publishPort,
   };
 }
 
