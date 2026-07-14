@@ -507,7 +507,7 @@ export async function restoreStateFile(
   }
   const cleanupRemotePayload = async (): Promise<void> => {
     if (!(await cleanupSandboxPayloadAfterFailure(sandboxControl, sandboxName, remotePath))) {
-      log(`WARNING: could not confirm cleanup of staged state file ${spec.path}`);
+      log(`WARNING: could not confirm cleanup of staged state file ${spec.path} at ${remotePath}`);
     }
   };
   if (!upload.ok) {

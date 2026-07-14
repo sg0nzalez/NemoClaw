@@ -178,7 +178,7 @@ function makeVmRestoreToEnv(
     `  "sandbox list") if [ -f ${JSON.stringify(cloneReadyMarker)} ]; then printf "NAME STATUS\\nalpha Ready\\nclone-1 Ready\\n"; else printf "NAME STATUS\\nalpha Ready\\n"; fi; exit 0 ;;`,
     // Restore writes config bytes on stdin. Consume them before exiting so the
     // fake CLI cannot race its caller into a Linux-only EPIPE.
-    '  "sandbox exec") case "$*" in *NEMOCLAW_DCODE_PROBE*) printf "NEMOCLAW_DCODE_PROBE=no-runtime\\n" ;; *installed_plugin_index*) printf "{\\"version\\":1,\\"installRecords\\":{},\\"loadPaths\\":[]}" ;; *openclaw.json*) printf "{\\"gateway\\":{\\"auth\\":{\\"token\\":\\"fresh\\"}}}" ;; esac; cat >/dev/null; exit 0 ;;',
+    '  "sandbox exec") case "$*" in *NEMOCLAW_DCODE_PROBE*) printf "NEMOCLAW_DCODE_PROBE=no-runtime\\n" ;; *installed_plugin_index*) printf "{\\"version\\":1,\\"installRecords\\":{},\\"loadPaths\\":[]}" ;; *"-- python3 -I - /tmp/nemoclaw-state-restore-"*"/sandbox/.openclaw openclaw.json copy"*) printf "STATE_FILE_OK\\n" ;; *openclaw.json*) printf "{\\"gateway\\":{\\"auth\\":{\\"token\\":\\"fresh\\"}}}" ;; esac; cat >/dev/null; exit 0 ;;',
     `  "sandbox create") touch ${JSON.stringify(cloneReadyMarker)}; printf "created clone-1\\n"; exit 0 ;;`,
     "esac",
     'if [ "$1" = "status" ]; then exit 0; fi',

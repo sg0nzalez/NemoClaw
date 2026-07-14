@@ -58,6 +58,29 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
   });
 
   it("keeps active-timer restore, permission repair, and policy reconciliation serialized", async () => {
+    const order: string[] = [];
+    const lockReleased = vi.fn(() => order.push("lock released"));
+    const restoredState = {
+      success: true,
+      restoredDirs: ["workspace"],
+      restoredFiles: ["openclaw.json"],
+      failedDirs: [],
+      failedFiles: [],
+    };
+    let releaseRestore = () => {};
+    const pendingRestore = new Promise<typeof restoredState>((resolve) => {
+      releaseRestore = () => resolve(restoredState);
+    });
+    f.lifecycleMock.withTimerBoundMock.mockImplementation(
+      async (_sandboxName, command, operation) => {
+        f.lifecycleMock.events.push(`lock:${command}`);
+        try {
+          return await operation();
+        } finally {
+          lockReleased();
+        }
+      },
+    );
     f.lifecycleMock.readTimerMarkerMock.mockReturnValue({
       pid: 4242,
       sandboxName: "alpha",
@@ -70,21 +93,44 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
       backupPath: "/tmp/backup-alpha",
       policyPresets: ["github"],
     });
-    f.restoreSandboxStateMock.mockReturnValue({
-      success: true,
-      restoredDirs: ["workspace"],
-      restoredFiles: ["openclaw.json"],
-      failedDirs: [],
-      failedFiles: [],
+    f.restoreSandboxStateMock.mockImplementation(() => {
+      order.push("restore");
+      return pendingRestore;
+    });
+    f.shieldsMock.repairMutableConfigPermsMock.mockImplementation(() => {
+      order.push("repair permissions");
+      return { applied: true, verified: true, errors: [] };
+    });
+    f.applyPresetMock.mockImplementation(() => {
+      order.push("reconcile policy");
+      return true;
     });
     const { runSandboxSnapshot } = await import("./snapshot");
 
-    await runSandboxSnapshot("alpha", { kind: "restore" });
+    const restoreOperation = runSandboxSnapshot("alpha", { kind: "restore" });
+    const completion = restoreOperation.then(() => order.push("complete"));
+    await vi.waitFor(() => expect(f.restoreSandboxStateMock).toHaveBeenCalledOnce());
 
     expect(f.lifecycleMock.events).toContain("lock:restore sandbox snapshot");
     expect(f.restoreSandboxStateMock).toHaveBeenCalledWith("alpha", "/tmp/backup-alpha");
+    expect(f.shieldsMock.repairMutableConfigPermsMock).not.toHaveBeenCalled();
+    expect(f.applyPresetMock).not.toHaveBeenCalled();
+    expect(lockReleased).not.toHaveBeenCalled();
+    expect(order).toEqual(["restore"]);
+
+    releaseRestore();
+    await completion;
+
     expect(f.shieldsMock.repairMutableConfigPermsMock).toHaveBeenCalledWith("alpha");
     expect(f.applyPresetMock).toHaveBeenCalledWith("alpha", "github");
+    expect(lockReleased).toHaveBeenCalledOnce();
+    expect(order).toEqual([
+      "restore",
+      "repair permissions",
+      "reconcile policy",
+      "lock released",
+      "complete",
+    ]);
   });
 
   it("hardens an active timer window before force-deleting a restore destination", async () => {

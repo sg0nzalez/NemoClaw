@@ -285,6 +285,47 @@ describe("state directory restore transport boundary", () => {
   });
 
   it.each([
+    [
+      "returns an unconfirmed result",
+      () =>
+        mocks.exec.mockResolvedValueOnce({ status: 1, stdout: "", stderr: "cleanup unavailable" }),
+    ],
+    ["throws", () => mocks.exec.mockRejectedValueOnce(new Error("cleanup unavailable"))],
+  ])("retries only the exact staged cleanup path when the first attempt %s", async (_label, stageFirstCleanup) => {
+    const backupPath = writeDirectoryBackup();
+    const stagedPaths = new Set(["/tmp/unrelated"]);
+    mocks.upload.mockImplementation(
+      (_gateway: string, _sandbox: string, _local: string, remotePath: string) => {
+        stagedPaths.add(remotePath);
+        return { ok: true, remotePath };
+      },
+    );
+    mocks.exec.mockResolvedValueOnce({ status: 1, stdout: "", stderr: "restore failed" });
+    stageFirstCleanup();
+    mocks.exec.mockImplementationOnce(async (request) => {
+      stagedPaths.delete(String(request.command.at(-1)));
+      return cleanupCompleted();
+    });
+
+    const result = await restoreRecreatedSandboxState("alpha", backupPath, {
+      targetAgentType: "fixture",
+    });
+
+    const restoreRequests = restoreExecCalls();
+    const cleanupRequests = cleanupExecCalls();
+    const exactStagedPath = restoreRequests[0]?.[0].command[3];
+    expect(result).toMatchObject({ success: false, failedDirs: ["workspace"] });
+    expect(restoreRequests).toHaveLength(1);
+    expect(cleanupRequests).toHaveLength(2);
+    expect(cleanupRequests[1]?.[0]).toBe(cleanupRequests[0]?.[0]);
+    expect(cleanupRequests.map(([request]) => request.command.at(-1))).toEqual([
+      exactStagedPath,
+      exactStagedPath,
+    ]);
+    expect(stagedPaths).toEqual(new Set(["/tmp/unrelated"]));
+  });
+
+  it.each([
     ["error result", { status: null, stdout: "", stderr: "", error: new Error("unknown") }],
     ["signal result", { status: null, stdout: "", stderr: "", signal: "SIGTERM" }],
   ])("never replays an indeterminate %s", async (_label, outcome) => {
@@ -298,7 +339,7 @@ describe("state directory restore transport boundary", () => {
     expect(result).toMatchObject({ success: false, failedDirs: ["workspace"] });
     expect(mocks.upload).toHaveBeenCalledOnce();
     expect(restoreExecCalls()).toHaveLength(1);
-    expect(cleanupExecCalls()).toHaveLength(1);
+    expect(cleanupExecCalls()).toHaveLength(2);
     expect(mocks.close).toHaveBeenCalledOnce();
   });
 
@@ -314,7 +355,7 @@ describe("state directory restore transport boundary", () => {
     expect(result.error).toContain("dispatch failed");
     expect(mocks.upload).toHaveBeenCalledOnce();
     expect(restoreExecCalls()).toHaveLength(1);
-    expect(cleanupExecCalls()).toHaveLength(1);
+    expect(cleanupExecCalls()).toHaveLength(2);
   });
 
   it.each([
@@ -338,7 +379,7 @@ describe("state directory restore transport boundary", () => {
       failedFiles: ["config.json"],
     });
     expect(restoreExecCalls()).toHaveLength(1);
-    expect(cleanupExecCalls()).toHaveLength(1);
+    expect(cleanupExecCalls()).toHaveLength(2);
     expect(mocks.upload).toHaveBeenCalledOnce();
   });
 

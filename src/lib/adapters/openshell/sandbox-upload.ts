@@ -35,6 +35,7 @@ export const SANDBOX_PAYLOAD_UPLOAD_TIMEOUT_MS = 120_000;
 export const SANDBOX_PAYLOAD_UPLOAD_MAX_OUTPUT_BYTES = 64 * 1024;
 export const SANDBOX_PAYLOAD_CLEANUP_TIMEOUT_MS = 30_000;
 export const SANDBOX_PAYLOAD_CLEANUP_MAX_OUTPUT_BYTES = 64 * 1024;
+export const SANDBOX_PAYLOAD_CLEANUP_MAX_ATTEMPTS = 2;
 export const SANDBOX_PAYLOAD_CLEANUP_OK = "SANDBOX_PAYLOAD_CLEANUP_OK";
 
 const SANDBOX_PAYLOAD_REMOTE_PATH_RE =
@@ -249,7 +250,15 @@ export function uploadSandboxPayloadFile(
   }
 }
 
-/** Best-effort, non-replaying cleanup for a possibly uploaded private payload. */
+/**
+ * Bounded, non-replaying cleanup for a possibly uploaded private payload.
+ *
+ * The exact-path unlink is idempotent, so an unconfirmed first attempt gets one
+ * identical cleanup-only recovery attempt. At most two 30-second calls can run;
+ * this recovery never redispatches the upload or restore operation.
+ * Remove this recovery when OpenShell provides transactional upload-and-restore,
+ * a server-confirmed idempotent delete, or lease expiry for staged payloads.
+ */
 export async function cleanupSandboxPayloadAfterFailure(
   sandboxControl: OpenShellSandboxControl,
   sandboxName: string,
@@ -264,15 +273,20 @@ export async function cleanupSandboxPayloadAfterFailure(
     maxOutputBytes: SANDBOX_PAYLOAD_CLEANUP_MAX_OUTPUT_BYTES,
   };
   if (validateOpenShellExecRequest(request)) return false;
-  try {
-    const result = await sandboxControl.exec(request);
-    return (
-      result.status === 0 &&
-      !result.error &&
-      !result.signal &&
-      result.stdout.trim() === SANDBOX_PAYLOAD_CLEANUP_OK
-    );
-  } catch {
-    return false;
+  for (let attempt = 0; attempt < SANDBOX_PAYLOAD_CLEANUP_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const result = await sandboxControl.exec(request);
+      if (
+        result.status === 0 &&
+        !result.error &&
+        !result.signal &&
+        result.stdout.trim() === SANDBOX_PAYLOAD_CLEANUP_OK
+      ) {
+        return true;
+      }
+    } catch {
+      // A failed attempt is unconfirmed; the loop remains cleanup-only and bounded above.
+    }
   }
+  return false;
 }

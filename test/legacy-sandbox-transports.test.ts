@@ -7,9 +7,9 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
-  REVIEWED_LEGACY_SANDBOX_TRANSPORT_SITES,
   auditLegacySandboxTransports,
   discoverLegacySandboxTransportSites,
+  REVIEWED_LEGACY_SANDBOX_TRANSPORT_SITES,
 } from "../scripts/checks/legacy-sandbox-transports";
 
 const fixtures: string[] = [];
@@ -158,6 +158,11 @@ describe("legacy sandbox transport inventory", () => {
       },
       {
         relativePath: "src/lib/sandbox/version.ts",
+        kind: "grpc-cli-read-only-fallback",
+        calls: 1,
+      },
+      {
+        relativePath: "src/lib/state/openclaw-plugin-restore.ts",
         kind: "grpc-cli-read-only-fallback",
         calls: 1,
       },
