@@ -166,6 +166,10 @@ describe("state-file backup exec request", () => {
 
     expect(isSandboxExecTransportFailure({ status: null, error: outputLimit })).toBe(false);
     expect(isSandboxExecTransportFailure({ status: null, error: invalidRequest })).toBe(false);
+    expect(isSandboxExecTransportFailure({ status: 255 })).toBe(false);
+    expect(isSandboxExecTransportFailure({ status: 0, signal: "SIGKILL" })).toBe(false);
+    expect(isSandboxExecTransportFailure({ status: 1, signal: "SIGINT" })).toBe(false);
+    expect(isSandboxExecTransportFailure({ status: null })).toBe(true);
     expect(isSandboxExecTransportFailure({ status: null, error: new Error("UNAVAILABLE") })).toBe(
       true,
     );

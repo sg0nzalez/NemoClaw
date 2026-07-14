@@ -205,7 +205,7 @@ describe("gRPC OpenShell sandbox control", () => {
     ).toEqual(["printf", boundaryArgument]);
   });
 
-  it("resolves a sandbox id and normalizes streamed output", async () => {
+  it("resolves a sandbox id and preserves exit status 255 with normalized output", async () => {
     const euro = Buffer.from("€");
     const fake = fakeApi({
       emit(stream) {
@@ -213,7 +213,7 @@ describe("gRPC OpenShell sandbox control", () => {
         stream.emit("data", { stdout: { data: euro.subarray(0, 1) } });
         stream.emit("data", { stdout: { data: euro.subarray(1) } });
         stream.emit("data", { stderr: { data: Buffer.from("warning\n") } });
-        stream.emit("data", { exit: { exitCode: 7 } });
+        stream.emit("data", { exit: { exitCode: 255 } });
         stream.emit("end");
       },
     });
@@ -229,7 +229,7 @@ describe("gRPC OpenShell sandbox control", () => {
         stdin: "request body",
       }),
     ).resolves.toEqual({
-      status: 7,
+      status: 255,
       stdout: "hello €",
       stderr: "warning\n",
     });
