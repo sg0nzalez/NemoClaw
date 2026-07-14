@@ -11,11 +11,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { SANDBOX_BUILD_CONTEXT_PREFIX } from "../sandbox/build-context";
 import { createOpenshellCliHelpers } from "./openshell-cli";
 import {
+  buildSandboxRuntimeEnvArgs,
   prepareSandboxCreateLaunch,
   prepareSandboxCreateLaunchWithPrebuild,
 } from "./sandbox-create-launch";
 
 const disabledHermesDashboardState = { config: null, enabled: false };
+const IMAGE_ID = `sha256:${"a".repeat(64)}`;
 const temporaryBuildContexts: string[] = [];
 
 function createTrustedBuildContext(): string {
@@ -29,6 +31,35 @@ afterEach(() => {
   for (const buildCtx of temporaryBuildContexts.splice(0)) {
     fs.rmSync(buildCtx, { recursive: true, force: true });
   }
+});
+
+describe("buildSandboxRuntimeEnvArgs", () => {
+  it("omits credential-bearing env when omitCredentialEnv is set", () => {
+    const base = {
+      agent: { name: "openclaw", configPaths: { dir: "/sandbox/.openclaw" } } as any,
+      chatUiUrl: "http://127.0.0.1:19000/",
+      manageDashboard: true,
+      getDashboardForwardPort: () => "19000",
+      hermesDashboardState: disabledHermesDashboardState,
+      extraPlaceholderKeys: ["TELEGRAM_BOT_TOKEN_AGENT_A"],
+      env: {
+        HTTPS_PROXY: "http://proxyuser:proxypass@proxy.example:8080",
+        NEMOCLAW_PROXY_HOST: "host.docker.internal",
+        NEMOCLAW_PROXY_PORT: "3129",
+      } as NodeJS.ProcessEnv,
+    };
+
+    const included = buildSandboxRuntimeEnvArgs(base).envArgs;
+    expect(included).toContain("NEMOCLAW_EXTRA_PLACEHOLDER_KEYS=TELEGRAM_BOT_TOKEN_AGENT_A");
+    expect(included.some((arg) => arg.startsWith("HTTPS_PROXY="))).toBe(true);
+
+    const omitted = buildSandboxRuntimeEnvArgs({ ...base, omitCredentialEnv: true }).envArgs;
+    expect(omitted.some((arg) => arg.startsWith("NEMOCLAW_EXTRA_PLACEHOLDER_KEYS"))).toBe(false);
+    expect(omitted.some((arg) => arg.includes("proxypass"))).toBe(false);
+    expect(omitted.some((arg) => arg.startsWith("HTTPS_PROXY="))).toBe(false);
+    expect(omitted).toContain("NEMOCLAW_DASHBOARD_PORT=19000");
+    expect(omitted).toContain("NEMOCLAW_PROXY_HOST=host.docker.internal");
+  });
 });
 
 describe("prepareSandboxCreateLaunch", () => {
@@ -86,6 +117,7 @@ describe("prepareSandboxCreateLaunch", () => {
     expect(result.createCommand).toBe(
       `openshell sandbox create --from /tmp/build/Dockerfile --name demo -- ${result.sandboxStartupCommand.join(" ")} 2>&1`,
     );
+    expect(result.createArgv).toEqual(["bash", "-lc", result.createCommand]);
   });
 
   it("forwards only the allowlisted OpenClaw auto-pair runtime controls", () => {
@@ -169,8 +201,12 @@ describe("prepareSandboxCreateLaunch", () => {
     });
 
     expect(result.effectiveDashboardPort).toBe("0");
-    expect(result.envArgs).toEqual([]);
-    expect(result.sandboxStartupCommand).toEqual(["env", "nemoclaw-start"]);
+    expect(result.envArgs).toEqual(["NEMOCLAW_OBSERVABILITY=0"]);
+    expect(result.sandboxStartupCommand).toEqual([
+      "env",
+      "NEMOCLAW_OBSERVABILITY=0",
+      "nemoclaw-start",
+    ]);
   });
 
   it("drops credential-bearing proxy URLs from Deep Agents Code sandbox create env", () => {
@@ -252,6 +288,7 @@ describe("prepareSandboxCreateLaunch", () => {
         getDashboardForwardPort: () => "19000",
         hermesDashboardState: disabledHermesDashboardState,
         openshellShellCommand: helpers.openshellShellCommand,
+        openshellArgv: helpers.openshellArgv,
         buildEnv: () => ({}),
       });
 
@@ -275,6 +312,7 @@ describe("prepareSandboxCreateLaunch", () => {
       expect(fs.existsSync(injectedFromPath)).toBe(false);
       expect(fs.existsSync(injectedUrlPath)).toBe(false);
       expect(fs.existsSync(injectedProxyPath)).toBe(false);
+      expect(result.createArgv).toEqual([fakeOpenshell, ...capturedArgs]);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -339,6 +377,7 @@ describe("prepareSandboxCreateLaunchWithPrebuild", () => {
         dockerDriverGateway: true,
         env: { NEMOCLAW_SANDBOX_PREBUILD: "1" },
         buildImage,
+        inspectImageId: () => IMAGE_ID,
         log: vi.fn(),
         origin: "generated",
       },
@@ -347,6 +386,7 @@ describe("prepareSandboxCreateLaunchWithPrebuild", () => {
     expect(result.prebuild).toEqual({
       createArgs: ["--from", "nemoclaw-sandbox-local:demo-build-123", "--name", "demo"],
       imageRef: "nemoclaw-sandbox-local:demo-build-123",
+      imageId: IMAGE_ID,
     });
     expect(result.createCommand).toContain(
       "sandbox create --from nemoclaw-sandbox-local:demo-build-123 --name demo",
@@ -383,6 +423,7 @@ describe("prepareSandboxCreateLaunchWithPrebuild", () => {
     expect(result.prebuild).toEqual({
       createArgs: ["--from", dockerfile, "--name", "demo"],
       imageRef: null,
+      imageId: null,
     });
     expect(result.createCommand).toContain(`sandbox create --from ${dockerfile} --name demo`);
     expect(result.createCommand).not.toContain("nemoclaw-sandbox-local");

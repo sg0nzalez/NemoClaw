@@ -6,9 +6,120 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 // Import source directly so this test cannot pass against a stale build.
 import {
   confirmRecoveredSandboxGatewayManaged,
-  probeSandboxInferenceGatewayHealth,
   waitForRecoveredSandboxGateway,
+  waitForRecreatedSandboxOpenShellReady,
 } from "./process-recovery";
+
+const OPENSHELL_SANDBOX_NOT_READY_STDERR = `Error:   × code: 'The system is not in a state required for the operation's
+  │ execution', message: "sandbox is not ready"
+`;
+
+describe("recreated sandbox OpenShell readiness", () => {
+  it("retries only the structured not-ready state until OpenShell accepts the sandbox", () => {
+    const notReady = {
+      status: 1,
+      output: OPENSHELL_SANDBOX_NOT_READY_STDERR.trim(),
+      stdout: "",
+      stderr: OPENSHELL_SANDBOX_NOT_READY_STDERR,
+    };
+    const captureOpenshellImpl = vi
+      .fn()
+      .mockReturnValueOnce(notReady)
+      .mockReturnValueOnce(notReady)
+      .mockReturnValueOnce({ status: 0, output: "", stdout: "", stderr: "" });
+    const beforeProbe = vi.fn(() => true);
+    const sleeps: number[] = [];
+
+    expect(
+      waitForRecreatedSandboxOpenShellReady("recreated-box", {
+        beforeProbe,
+        captureOpenshellImpl,
+        intervalSeconds: 3,
+        sleepImpl: (seconds) => sleeps.push(seconds),
+        timeoutSeconds: 6,
+      }),
+    ).toBe(true);
+    expect(captureOpenshellImpl).toHaveBeenCalledTimes(3);
+    expect(captureOpenshellImpl).toHaveBeenCalledWith(
+      ["sandbox", "exec", "--name", "recreated-box", "--", "true"],
+      expect.objectContaining({
+        ignoreError: true,
+        includeStderr: true,
+        includeStreams: true,
+      }),
+    );
+    expect(beforeProbe).toHaveBeenCalledTimes(3);
+    expect(sleeps).toEqual([3, 3]);
+  });
+
+  it("fails immediately on an unknown OpenShell error", () => {
+    const captureOpenshellImpl = vi.fn(() => ({
+      status: 1,
+      output: "permission denied",
+      stdout: "",
+      stderr: "permission denied",
+    }));
+    const sleeps: number[] = [];
+
+    expect(
+      waitForRecreatedSandboxOpenShellReady("recreated-box", {
+        captureOpenshellImpl,
+        intervalSeconds: 3,
+        sleepImpl: (seconds) => sleeps.push(seconds),
+        timeoutSeconds: 30,
+      }),
+    ).toBe(false);
+    expect(captureOpenshellImpl).toHaveBeenCalledOnce();
+    expect(sleeps).toEqual([]);
+  });
+
+  it("does not retry an outcome-uncertain OpenShell timeout", () => {
+    const timeoutError = Object.assign(new Error("timed out"), { code: "ETIMEDOUT" });
+    const captureOpenshellImpl = vi.fn(() => ({
+      status: null,
+      output: "",
+      stdout: "",
+      stderr: "",
+      error: timeoutError,
+    }));
+    const sleeps: number[] = [];
+
+    expect(
+      waitForRecreatedSandboxOpenShellReady("recreated-box", {
+        captureOpenshellImpl,
+        intervalSeconds: 3,
+        sleepImpl: (seconds) => sleeps.push(seconds),
+        timeoutSeconds: 30,
+      }),
+    ).toBe(false);
+    expect(captureOpenshellImpl).toHaveBeenCalledOnce();
+    expect(sleeps).toEqual([]);
+  });
+
+  it("rechecks the pinned managed guard before every readiness retry", () => {
+    const captureOpenshellImpl = vi.fn(() => ({
+      status: 1,
+      output: OPENSHELL_SANDBOX_NOT_READY_STDERR.trim(),
+      stdout: "",
+      stderr: OPENSHELL_SANDBOX_NOT_READY_STDERR,
+    }));
+    const beforeProbe = vi.fn().mockReturnValueOnce(true).mockReturnValue(false);
+    const sleeps: number[] = [];
+
+    expect(
+      waitForRecreatedSandboxOpenShellReady("recreated-box", {
+        beforeProbe,
+        captureOpenshellImpl,
+        intervalSeconds: 3,
+        sleepImpl: (seconds) => sleeps.push(seconds),
+        timeoutSeconds: 6,
+      }),
+    ).toBe(false);
+    expect(beforeProbe).toHaveBeenCalledTimes(2);
+    expect(captureOpenshellImpl).toHaveBeenCalledOnce();
+    expect(sleeps).toEqual([3]);
+  });
+});
 
 describe("confirmRecoveredSandboxGatewayManaged scope", () => {
   const requestGatewaySupervisorAction = vi.fn(() => ({
@@ -87,55 +198,6 @@ describe("confirmRecoveredSandboxGatewayManaged scope", () => {
         }),
       }),
     ).toBe(false);
-  });
-});
-
-describe("probeSandboxInferenceGatewayHealth gateway-chain subprobe (#3265)", () => {
-  const makeExec =
-    (stdout: string, status = 0) =>
-    async () => ({ status, stdout, stderr: "" });
-
-  it("reports healthy on any HTTP response (including 401) because the routing chain is up", async () => {
-    const result = await probeSandboxInferenceGatewayHealth("my-sandbox", {
-      execImpl: makeExec("200"),
-    });
-    expect(result?.ok).toBe(true);
-    expect(result?.httpStatus).toBe(200);
-    expect(result?.endpoint).toBe("https://inference.local/v1/models");
-    expect(result?.detail).toContain("HTTP 200");
-    expect(result?.detail).toContain("full chain reachable");
-  });
-
-  it("treats 401 as routing-OK (auth wall reached means the chain works)", async () => {
-    const result = await probeSandboxInferenceGatewayHealth("my-sandbox", {
-      execImpl: makeExec("401"),
-    });
-    expect(result?.ok).toBe(true);
-    expect(result?.httpStatus).toBe(401);
-  });
-
-  it("reports unreachable when curl returns 000 (DNS or connection refused)", async () => {
-    const result = await probeSandboxInferenceGatewayHealth("my-sandbox", {
-      execImpl: makeExec("000"),
-    });
-    expect(result?.ok).toBe(false);
-    expect(result?.httpStatus).toBe(0);
-    expect(result?.detail).toContain("unreachable");
-    expect(result?.detail).toContain("https://inference.local/v1/models");
-  });
-
-  it("returns null when the sandbox exec itself fails (probe unavailable, omit the line)", async () => {
-    const result = await probeSandboxInferenceGatewayHealth("my-sandbox", {
-      execImpl: async () => null,
-    });
-    expect(result).toBeNull();
-  });
-
-  it("returns null when exec returns a non-zero status (sandbox unreachable or stopped)", async () => {
-    const result = await probeSandboxInferenceGatewayHealth("my-sandbox", {
-      execImpl: makeExec("000", 127),
-    });
-    expect(result).toBeNull();
   });
 });
 

@@ -27,12 +27,12 @@
  * This matrix locks the nonexistent-sandbox share/upload surfaces instead.
  *
  * Issue instance 3 (onboard dashboard-port exhaustion) is locked by its own
- * hermetic `onboard` spawn in the second describe below: it binds the whole
- * dashboard port range and drives the real `onboard` preflight to the
- * fail-fast "All dashboard ports in range … are occupied" exit, asserting a
- * non-zero code. (That preflight exits via an explicit `exitFn(1)`, so it never
- * rode the `oclif.exit === 0` catch-all this PR hardens — the spawn simply
- * proves the surface stays non-zero end-to-end.)
+ * hermetic `onboard` spawn in the second describe below: a fake `lsof` reports
+ * the whole dashboard port range as occupied and drives the real `onboard`
+ * preflight to the fail-fast "All dashboard ports in range … are occupied"
+ * exit, asserting a non-zero code. (That preflight exits via an explicit
+ * `exitFn(1)`, so it never rode the `oclif.exit === 0` catch-all this PR
+ * hardens — the spawn simply proves the surface stays non-zero end-to-end.)
  *
  * Issue instance 5 (Model Router Python preflight) is the one surface left to
  * unit tests: `reconcileModelRouter` runs only deep in `onboard`, behind live
@@ -50,7 +50,7 @@
 
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
-import net from "node:net";
+import { createServer } from "node:net";
 import os from "node:os";
 import path from "node:path";
 
@@ -241,32 +241,37 @@ describe("user-error/startup surfaces return non-zero exit (#5974)", () => {
 describe("onboard dashboard-port exhaustion exits non-zero (#5974)", () => {
   const PORT_RANGE_START = 18789;
   const PORT_RANGE_END = 18799;
+  const OCCUPIED_PORT_CASES = Array.from(
+    { length: PORT_RANGE_END - PORT_RANGE_START + 1 },
+    (_unused, index) => PORT_RANGE_START + index,
+  ).join("|");
   let home: string;
   let binDir: string;
-  let servers: net.Server[];
 
-  beforeEach(async () => {
+  beforeEach(() => {
     home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-5974-onboard-"));
     binDir = path.join(home, "bin");
     fs.mkdirSync(binDir, { recursive: true });
 
-    // Fake openshell: report a supported version and embed the capability
-    // markers the installer greps for with `strings`, so onboard's preflight
-    // neither attempts a network reinstall nor fails the credential-rewrite
-    // capability gate before it reaches the dashboard-port check.
-    fs.writeFileSync(
-      path.join(binDir, "openshell"),
-      [
-        "#!/usr/bin/env bash",
-        "# openshell capabilities: request-body-credential-rewrite websocket-credential-rewrite",
-        'case "$1" in',
-        '  --version) echo "openshell 0.0.44"; exit 0;;',
-        "esac",
-        "echo '' >&2",
-        "exit 1",
-      ].join("\n"),
-      { mode: 0o755 },
-    );
+    // Fake one coherent OpenShell release: onboard probes the CLI with `-V`,
+    // validates the sibling gateway/sandbox versions with `--version`, and
+    // scans the component set for all required capability markers. Keeping
+    // those contracts current prevents this fixture from reaching the network
+    // installer before it reaches the dashboard-port check.
+    for (const component of ["openshell", "openshell-gateway", "openshell-sandbox"]) {
+      fs.writeFileSync(
+        path.join(binDir, component),
+        [
+          "#!/usr/bin/env bash",
+          "# openshell capabilities: request-body-credential-rewrite websocket-credential-rewrite allow_all_known_mcp_methods",
+          'case "${1:-}" in',
+          '  -V|--version) printf "%s 0.0.72\\n" "${0##*/}"; exit 0;;',
+          "esac",
+          "exit 1",
+        ].join("\n"),
+        { mode: 0o755 },
+      );
+    }
     fs.writeFileSync(
       path.join(binDir, "docker"),
       [
@@ -278,33 +283,40 @@ describe("onboard dashboard-port exhaustion exits non-zero (#5974)", () => {
       { mode: 0o755 },
     );
 
-    // Occupy the entire dashboard port range so the preflight has no free port.
-    servers = [];
-    const ports = Array.from(
-      { length: PORT_RANGE_END - PORT_RANGE_START + 1 },
-      (_unused, i) => PORT_RANGE_START + i,
-    );
-    await Promise.all(
-      ports.map(
-        (port) =>
-          new Promise<void>((resolve) => {
-            const server = net.createServer();
-            server.once("error", () => resolve());
-            server.listen(port, "127.0.0.1", () => {
-              servers.push(server);
-              resolve();
-            });
-          }),
-      ),
+    // Report the whole dashboard range as occupied without binding host-global
+    // ports that can interfere with other integration workers.
+    fs.writeFileSync(
+      path.join(binDir, "lsof"),
+      [
+        "#!/usr/bin/env bash",
+        'port=""',
+        'for arg in "$@"; do',
+        '  case "$arg" in :*) port="${arg#:}";; esac',
+        "done",
+        'case "$port" in',
+        `  ${OCCUPIED_PORT_CASES}) echo "node 1 user 1u IPv4 TCP 127.0.0.1:\${port} (LISTEN)"; exit 0;;`,
+        "esac",
+        "exit 1",
+      ].join("\n"),
+      { mode: 0o755 },
     );
   });
 
   afterEach(() => {
-    for (const server of servers) server.close();
     fs.rmSync(home, { recursive: true, force: true });
   });
 
-  it("prints the canonical message and exits non-zero", testTimeoutOptions(60_000), () => {
+  it("prints the canonical message and exits non-zero", testTimeoutOptions(60_000), async () => {
+    // Ask the OS for an unused port instead of probing the host-global default
+    // 8080, which may legitimately belong to another local test or service.
+    const listener = createServer();
+    await new Promise<void>((resolve, reject) => {
+      listener.once("error", reject);
+      listener.listen(0, "127.0.0.1", resolve);
+    });
+    const gatewayPort = (listener.address() as { port: number }).port;
+    await new Promise<void>((resolve) => listener.close(() => resolve()));
+
     const result = spawnSync(
       process.execPath,
       [CLI, "onboard", "--name", "port-test", "--no-gpu", "--non-interactive"],
@@ -318,6 +330,11 @@ describe("onboard dashboard-port exhaustion exits non-zero (#5974)", () => {
           NEMOCLAW_TEST_NO_SLEEP: "1",
           NEMOCLAW_STATUS_PROBE_TIMEOUT_MS: "2000",
           NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE: "1",
+          NEMOCLAW_GATEWAY_PORT: String(gatewayPort),
+          NEMOCLAW_OPENSHELL_BIN: path.join(binDir, "openshell"),
+          NEMOCLAW_OPENSHELL_CHANNEL: "stable",
+          NEMOCLAW_OPENSHELL_GATEWAY_BIN: path.join(binDir, "openshell-gateway"),
+          NEMOCLAW_OPENSHELL_SANDBOX_BIN: path.join(binDir, "openshell-sandbox"),
         },
       },
     );
@@ -327,6 +344,7 @@ describe("onboard dashboard-port exhaustion exits non-zero (#5974)", () => {
     expect(combined).toContain(
       `All dashboard ports in range ${PORT_RANGE_START}-${PORT_RANGE_END} are occupied`,
     );
+    expect(combined).not.toMatch(/\b(?:installing|reinstalling|upgrading)\b/i);
     expect(result.status).toBeGreaterThan(0);
   });
 });

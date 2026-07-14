@@ -40,12 +40,14 @@ function normalizeReadModesForDockerCopy(rootDir: string): void {
   }
 }
 
-function stageMcporterRuntime(rootDir: string, buildCtx: string): void {
-  const sourceDir = path.join(rootDir, "agents", "openclaw", "mcporter-runtime");
-  const stagedDir = path.join(buildCtx, "agents", "openclaw", "mcporter-runtime");
-  fs.mkdirSync(stagedDir, { recursive: true });
-  for (const fileName of ["package.json", "package-lock.json"]) {
-    fs.copyFileSync(path.join(sourceDir, fileName), path.join(stagedDir, fileName));
+function stageOpenClawRuntimeGraphs(rootDir: string, buildCtx: string): void {
+  for (const runtimeName of ["mcporter-runtime", "wechat-runtime"]) {
+    const sourceDir = path.join(rootDir, "agents", "openclaw", runtimeName);
+    const stagedDir = path.join(buildCtx, "agents", "openclaw", runtimeName);
+    fs.mkdirSync(stagedDir, { recursive: true });
+    for (const fileName of ["package.json", "package-lock.json"]) {
+      fs.copyFileSync(path.join(sourceDir, fileName), path.join(stagedDir, fileName));
+    }
   }
   normalizeReadModesForDockerCopy(path.join(buildCtx, "agents"));
 }
@@ -60,7 +62,7 @@ function stageLegacySandboxBuildContext(
     path.join(rootDir, "tsconfig.runtime-preloads.json"),
     path.join(buildCtx, "tsconfig.runtime-preloads.json"),
   );
-  stageMcporterRuntime(rootDir, buildCtx);
+  stageOpenClawRuntimeGraphs(rootDir, buildCtx);
   fs.cpSync(path.join(rootDir, "nemoclaw"), path.join(buildCtx, "nemoclaw"), {
     recursive: true,
   });
@@ -110,7 +112,7 @@ function stageOptimizedSandboxBuildContext(
     path.join(rootDir, "tsconfig.runtime-preloads.json"),
     path.join(buildCtx, "tsconfig.runtime-preloads.json"),
   );
-  stageMcporterRuntime(rootDir, buildCtx);
+  stageOpenClawRuntimeGraphs(rootDir, buildCtx);
 
   fs.mkdirSync(stagedNemoclawDir, { recursive: true });
   for (const fileName of [
@@ -236,6 +238,11 @@ function stageOptimizedSandboxBuildContext(
     path.join(rootDir, "scripts", "patch-openclaw-chat-send.js"),
     path.join(stagedScriptsDir, "patch-openclaw-chat-send.js"),
   );
+  // Dockerfile copies this OpenClaw MCP patch into the optimized build context.
+  fs.copyFileSync(
+    path.join(rootDir, "scripts", "patch-openclaw-mcp-npx.mts"),
+    path.join(stagedScriptsDir, "patch-openclaw-mcp-npx.mts"),
+  );
   fs.copyFileSync(
     path.join(rootDir, "scripts", "patch-openclaw-issue-4434-diagnostics.ts"),
     path.join(stagedScriptsDir, "patch-openclaw-issue-4434-diagnostics.ts"),
@@ -243,6 +250,15 @@ function stageOptimizedSandboxBuildContext(
   fs.copyFileSync(
     path.join(rootDir, "scripts", "patch-openclaw-device-self-approval.ts"),
     path.join(stagedScriptsDir, "patch-openclaw-device-self-approval.ts"),
+  );
+  fs.copyFileSync(
+    path.join(rootDir, "scripts", "verify-wechat-runtime-lock.mts"),
+    path.join(stagedScriptsDir, "verify-wechat-runtime-lock.mts"),
+  );
+  fs.mkdirSync(path.join(stagedScriptsDir, "lib"), { recursive: true });
+  fs.copyFileSync(
+    path.join(rootDir, "scripts", "lib", "reviewed-npm-archive.mts"),
+    path.join(stagedScriptsDir, "lib", "reviewed-npm-archive.mts"),
   );
 
   return { buildCtx, stagedDockerfile };

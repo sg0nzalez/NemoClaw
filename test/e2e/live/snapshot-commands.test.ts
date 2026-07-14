@@ -12,17 +12,23 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
+import { resultText } from "../fixtures/clients/command.ts";
 import type { HostCliClient } from "../fixtures/clients/host.ts";
-import { type SandboxClient, validateSandboxName } from "../fixtures/clients/sandbox.ts";
+import {
+  type SandboxClient,
+  trustedSandboxShellScript,
+  validateSandboxName,
+} from "../fixtures/clients/sandbox.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
-import { shouldRunLiveE2E } from "../fixtures/live-project-gate.ts";
-import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
-import { isTransientProviderValidationFailure } from "./network-policy-transient-provider.ts";
+import { startFakeOpenAiCompatibleServer } from "../fixtures/fake-openai-compatible.ts";
+import { REPO_ROOT } from "../fixtures/paths.ts";
+import {
+  buildSnapshotCommandEnv,
+  type SnapshotInferenceFixture,
+} from "./snapshot-commands-helpers.ts";
 import { scanSnapshotCredentialLeaks } from "./snapshot-credential-scanner.ts";
 
-const REPO_ROOT = path.resolve(import.meta.dirname, "../../..");
 const SANDBOX_NAME = process.env.NEMOCLAW_SANDBOX_NAME ?? "e2e-snapshot";
 validateSandboxName(SANDBOX_NAME);
 const BACKUP_ROOT = path.join(os.homedir(), ".nemoclaw", "rebuild-backups");
@@ -33,25 +39,14 @@ if (!BACKUP_DIR.startsWith(`${path.resolve(BACKUP_ROOT)}${path.sep}`)) {
 const MARKER_FILE = "/sandbox/.openclaw/workspace/snapshot-marker.txt";
 const SECOND_MARKER = "/sandbox/.openclaw/workspace/snapshot-marker-2.txt";
 const LIVE_TIMEOUT_MS = 30 * 60_000;
-const INSTALL_ATTEMPTS = process.env.CI === "true" || process.env.GITHUB_ACTIONS === "true" ? 3 : 1;
-function resultText(result: Pick<ShellProbeResult, "stdout" | "stderr">): string {
-  return [result.stdout, result.stderr].filter(Boolean).join("\n");
+const INFERENCE_API_KEY = "nvapi-snapshot-commands-fixture-credential";
+const INFERENCE_MODEL = "snapshot-commands-model";
+
+function commandEnv(inference?: SnapshotInferenceFixture): NodeJS.ProcessEnv {
+  return buildSnapshotCommandEnv(SANDBOX_NAME, inference);
 }
 
-function commandEnv(apiKey?: string): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {
-    ...buildAvailabilityProbeEnv(),
-    NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE: "1",
-    NEMOCLAW_NON_INTERACTIVE: "1",
-    NEMOCLAW_RECREATE_SANDBOX: "1",
-    NEMOCLAW_SANDBOX_NAME: SANDBOX_NAME,
-    OPENSHELL_GATEWAY: process.env.OPENSHELL_GATEWAY ?? "nemoclaw",
-  };
-  if (apiKey) env.NVIDIA_INFERENCE_API_KEY = apiKey;
-  return env;
-}
-
-async function bestEffort(run: () => Promise<unknown>): Promise<void> {
+async function bestEffortPreclean(run: () => Promise<unknown>): Promise<void> {
   try {
     await run();
   } catch {
@@ -59,26 +54,24 @@ async function bestEffort(run: () => Promise<unknown>): Promise<void> {
   }
 }
 
-async function cleanupSnapshotSandbox(
+async function precleanSnapshotSandbox(
   host: HostCliClient,
   sandbox: SandboxClient,
   label: string,
 ): Promise<void> {
-  await bestEffort(() =>
-    host.command("nemoclaw", [SANDBOX_NAME, "destroy", "--yes"], {
-      artifactName: `${label}-nemoclaw-destroy`,
-      env: commandEnv(),
-      timeoutMs: 120_000,
-    }),
-  );
-  await bestEffort(() =>
+  await host.bestEffortCleanupSandbox(SANDBOX_NAME, {
+    artifactName: `${label}-nemoclaw-destroy`,
+    env: commandEnv(),
+    timeoutMs: 120_000,
+  });
+  await bestEffortPreclean(() =>
     sandbox.openshell(["sandbox", "delete", SANDBOX_NAME], {
       artifactName: `${label}-openshell-sandbox-delete`,
       env: commandEnv(),
       timeoutMs: 60_000,
     }),
   );
-  await bestEffort(() =>
+  await bestEffortPreclean(() =>
     sandbox.openshell(["gateway", "destroy", "-g", "nemoclaw"], {
       artifactName: `${label}-openshell-gateway-destroy`,
       env: commandEnv(),
@@ -109,242 +102,404 @@ function firstSnapshotTimestamp(listOutput: string): string {
   return match[0];
 }
 
-test.skipIf(!shouldRunLiveE2E())(
-  "snapshot commands preserve create/list/latest restore/targeted restore/no-leak lifecycle",
-  { timeout: LIVE_TIMEOUT_MS },
-  async ({ artifacts, cleanup, host, sandbox, secrets, skip }) => {
-    const apiKey = secrets.required("NVIDIA_INFERENCE_API_KEY");
-    await artifacts.writeJson("target.json", {
-      id: "snapshot-commands",
-      runner: "vitest",
-      boundary: "install.sh + nemoclaw snapshot commands + openshell sandbox exec",
-      sandboxName: SANDBOX_NAME,
-      backupDir: BACKUP_DIR,
-      contracts: [
-        "install.sh onboards a live OpenClaw sandbox",
-        "snapshot create reports Snapshot v<N> created",
-        "snapshot list shows versioned snapshots and parseable timestamps",
-        "latest snapshot restore recovers latest workspace state",
-        "timestamp-targeted restore recovers the first snapshot state",
-        "snapshot directory excludes credential-bearing env/json files",
-        "snapshot help advertises create/list/restore",
-      ],
-    });
+function snapshotManifestDirectories(): string[] {
+  return fs
+    .readdirSync(BACKUP_DIR, { withFileTypes: true })
+    .filter(
+      (entry) =>
+        entry.isDirectory() &&
+        fs.existsSync(path.join(BACKUP_DIR, entry.name, "rebuild-manifest.json")),
+    )
+    .map((entry) => entry.name)
+    .sort();
+}
 
-    const dockerInfo = await host.command("docker", ["info"], {
-      artifactName: "phase-0-docker-info",
-      env: buildAvailabilityProbeEnv(),
-      timeoutMs: 30_000,
-    });
-    if (dockerInfo.exitCode !== 0) {
-      if (process.env.GITHUB_ACTIONS === "true") {
-        throw new Error(`Docker is required for snapshot commands E2E: ${resultText(dockerInfo)}`);
-      }
-      skip(`Docker is required for snapshot commands E2E: ${resultText(dockerInfo)}`);
+test("snapshot commands preserve create/list/latest restore/targeted restore/no-leak lifecycle", {
+  timeout: LIVE_TIMEOUT_MS,
+}, async ({ artifacts, cleanup, host, sandbox, skip }) => {
+  await artifacts.target.declare({
+    id: "snapshot-commands",
+    boundary: "install.sh + nemoclaw snapshot commands + openshell sandbox exec",
+    sandboxName: SANDBOX_NAME,
+    backupDir: BACKUP_DIR,
+    contracts: [
+      "install.sh onboards a live OpenClaw sandbox",
+      "onboard authenticates to a hermetic compatible inference endpoint",
+      "snapshot create reports Snapshot v<N> created",
+      "snapshot list shows versioned snapshots and parseable timestamps",
+      "latest snapshot restore recovers latest workspace state",
+      "timestamp-targeted restore recovers the first snapshot state",
+      "snapshot directory excludes credential-bearing env/json files",
+      "snapshot help advertises create/list/restore",
+      "strict backup-all starts a stopped Docker sandbox, creates a snapshot, and returns it to exited state",
+    ],
+  });
+
+  const dockerInfo = await host.command("docker", ["info"], {
+    artifactName: "phase-0-docker-info",
+    env: buildAvailabilityProbeEnv(),
+    timeoutMs: 30_000,
+  });
+  if (dockerInfo.exitCode !== 0) {
+    if (process.env.GITHUB_ACTIONS === "true") {
+      throw new Error(`Docker is required for snapshot commands E2E: ${resultText(dockerInfo)}`);
     }
+    skip(`Docker is required for snapshot commands E2E: ${resultText(dockerInfo)}`);
+  }
 
-    cleanup.add(`destroy snapshot sandbox ${SANDBOX_NAME}`, () =>
-      cleanupSnapshotSandbox(host, sandbox, "cleanup"),
-    );
+  const inference = await startFakeOpenAiCompatibleServer({
+    apiKey: INFERENCE_API_KEY,
+    host: "0.0.0.0",
+    model: INFERENCE_MODEL,
+    publicHost: "host.openshell.internal",
+    requireAuth: true,
+    requireAuthModels: true,
+  });
+  cleanup.trackDisposable("close snapshot commands compatible inference fixture", async () => {
+    await artifacts.writeJson("compatible-inference-requests.json", inference.requests());
+    await inference.close();
+  });
+  const inferenceConfig = {
+    apiKey: INFERENCE_API_KEY,
+    endpointUrl: inference.baseUrl,
+    model: INFERENCE_MODEL,
+  };
 
-    await cleanupSnapshotSandbox(host, sandbox, "pre-cleanup");
-    fs.rmSync(BACKUP_DIR, { recursive: true, force: true });
-
-    let install: ShellProbeResult | undefined;
-    for (let attempt = 1; attempt <= INSTALL_ATTEMPTS; attempt += 1) {
-      install = await host.command("bash", ["install.sh", "--non-interactive", "--fresh"], {
-        artifactName:
-          attempt === 1
-            ? "phase-1-install-nemoclaw"
-            : `phase-1-install-nemoclaw-attempt-${attempt}`,
-        cwd: REPO_ROOT,
-        env: commandEnv(apiKey),
-        redactionValues: [apiKey],
-        timeoutMs: 20 * 60_000,
-      });
-      if (install.exitCode === 0) break;
-      if (isTransientProviderValidationFailure(install) && attempt < INSTALL_ATTEMPTS) {
-        await new Promise((resolve) => setTimeout(resolve, 10_000 * attempt));
-        continue;
-      }
-      if (isTransientProviderValidationFailure(install) && process.env.GITHUB_ACTIONS === "true") {
-        await artifacts.writeJson("transient-provider-validation.skip.json", {
-          reason: "transient NVIDIA Endpoints validation failure during install.sh onboard",
-          attempts: INSTALL_ATTEMPTS,
-          sourceBoundary: "external NVIDIA Endpoints provider availability",
-          removalCondition:
-            "remove once CI endpoint validation is stable for a release cycle or covered by a hermetic provider-validation fixture",
-        });
-        skip(
-          `NVIDIA Endpoints validation hit a transient upstream/rate-limit failure after ${INSTALL_ATTEMPTS} attempts`,
-        );
-      }
-      break;
-    }
-    expect(install?.exitCode, install ? resultText(install) : "install did not run").toBe(0);
-
-    const cliProbe = await host.command(
-      "bash",
-      ["-lc", "command -v nemoclaw && command -v openshell"],
-      {
-        artifactName: "phase-1-cli-probe",
-        env: commandEnv(),
-        timeoutMs: 30_000,
-      },
-    );
-    expect(cliProbe.exitCode, resultText(cliProbe)).toBe(0);
-    expect(cliProbe.stdout).toContain("nemoclaw");
-    expect(cliProbe.stdout).toContain("openshell");
-
-    const markerContent = `SNAPSHOT_E2E_${Date.now()}`;
-    const secondContent = `SNAPSHOT_E2E_SECOND_${Date.now()}`;
-
-    const writeMarker = await sandbox.exec(
-      SANDBOX_NAME,
-      [
-        "sh",
-        "-lc",
-        `mkdir -p /sandbox/.openclaw/workspace && printf '%s' '${markerContent}' > ${MARKER_FILE}`,
-      ],
-      {
-        artifactName: "phase-2-write-marker",
-        env: commandEnv(),
-        timeoutMs: 60_000,
-      },
-    );
-    expect(writeMarker.exitCode, resultText(writeMarker)).toBe(0);
-    await expectSandboxFileContent(sandbox, MARKER_FILE, markerContent, "phase-2-read-marker");
-
-    const firstCreate = await host.command("nemoclaw", [SANDBOX_NAME, "snapshot", "create"], {
-      artifactName: "phase-3-snapshot-create-first",
-      env: commandEnv(),
-      timeoutMs: 120_000,
-    });
-    expect(firstCreate.exitCode, resultText(firstCreate)).toBe(0);
-    expect(resultText(firstCreate)).toMatch(/Snapshot v\d+.*created/);
-    expect(resultText(firstCreate)).toContain("rebuild-backups");
-
-    const list = await host.command("nemoclaw", [SANDBOX_NAME, "snapshot", "list"], {
-      artifactName: "phase-4-snapshot-list",
+  cleanup.trackGateway(host, "nemoclaw", {
+    artifactName: "cleanup-openshell-gateway-destroy",
+    env: commandEnv(),
+    timeoutMs: 60_000,
+  });
+  cleanup.trackDisposable(`delete OpenShell sandbox ${SANDBOX_NAME}`, () =>
+    sandbox.cleanupSandbox(SANDBOX_NAME, {
+      artifactName: "cleanup-openshell-sandbox-delete",
       env: commandEnv(),
       timeoutMs: 60_000,
-    });
-    expect(list.exitCode, resultText(list)).toBe(0);
-    expect(resultText(list)).toContain("snapshot(s)");
-    const timestamp = firstSnapshotTimestamp(resultText(list));
-    await artifacts.writeJson("phase-4-first-snapshot.json", { timestamp });
+    }),
+  );
+  cleanup.trackSandbox(host, SANDBOX_NAME, {
+    artifactName: "cleanup-nemoclaw-destroy",
+    env: commandEnv(),
+    timeoutMs: 120_000,
+  });
 
-    const modify = await sandbox.exec(
-      SANDBOX_NAME,
-      ["sh", "-lc", `rm -f ${MARKER_FILE} && printf '%s' '${secondContent}' > ${SECOND_MARKER}`],
-      {
-        artifactName: "phase-5-modify-workspace",
-        env: commandEnv(),
-        timeoutMs: 60_000,
-      },
-    );
-    expect(modify.exitCode, resultText(modify)).toBe(0);
+  await precleanSnapshotSandbox(host, sandbox, "pre-cleanup");
+  fs.rmSync(BACKUP_DIR, { recursive: true, force: true });
 
-    const firstGone = await sandbox.exec(SANDBOX_NAME, ["sh", "-lc", `test ! -e ${MARKER_FILE}`], {
-      artifactName: "phase-5-first-marker-gone",
+  const install = await host.command("bash", ["install.sh", "--non-interactive", "--fresh"], {
+    artifactName: "phase-1-install-nemoclaw",
+    cwd: REPO_ROOT,
+    env: commandEnv(inferenceConfig),
+    redactionValues: [INFERENCE_API_KEY],
+    timeoutMs: 20 * 60_000,
+  });
+  expect(install.exitCode, resultText(install)).toBe(0);
+
+  const authenticatedInference = await sandbox.execShell(
+    SANDBOX_NAME,
+    trustedSandboxShellScript(
+      `curl -fsS --max-time 60 https://inference.local/v1/chat/completions -H 'Content-Type: application/json' --data '${JSON.stringify(
+        {
+          model: INFERENCE_MODEL,
+          messages: [{ role: "user", content: "reply with OK" }],
+          max_tokens: 8,
+        },
+      )}'`,
+    ),
+    {
+      artifactName: "phase-1-authenticated-inference-post",
+      env: commandEnv(),
+      timeoutMs: 90_000,
+    },
+  );
+  expect(
+    authenticatedInference.exitCode,
+    `${authenticatedInference.stdout}\n${authenticatedInference.stderr}`,
+  ).toBe(0);
+  expect(inference.requests()).toContainEqual(
+    expect.objectContaining({
+      auth: "ok",
+      model: INFERENCE_MODEL,
+      path: "/v1/chat/completions",
+    }),
+  );
+
+  const cliProbe = await host.command(
+    "bash",
+    ["-lc", "command -v nemoclaw && command -v openshell"],
+    {
+      artifactName: "phase-1-cli-probe",
       env: commandEnv(),
       timeoutMs: 30_000,
-    });
-    expect(firstGone.exitCode, resultText(firstGone)).toBe(0);
+    },
+  );
+  expect(cliProbe.exitCode, resultText(cliProbe)).toBe(0);
+  expect(cliProbe.stdout).toContain("nemoclaw");
+  expect(cliProbe.stdout).toContain("openshell");
 
-    const secondCreate = await host.command("nemoclaw", [SANDBOX_NAME, "snapshot", "create"], {
-      artifactName: "phase-5-snapshot-create-second",
+  const markerContent = `SNAPSHOT_E2E_${Date.now()}`;
+  const secondContent = `SNAPSHOT_E2E_SECOND_${Date.now()}`;
+
+  const writeMarker = await sandbox.exec(
+    SANDBOX_NAME,
+    [
+      "sh",
+      "-lc",
+      `mkdir -p /sandbox/.openclaw/workspace && printf '%s' '${markerContent}' > ${MARKER_FILE}`,
+    ],
+    {
+      artifactName: "phase-2-write-marker",
       env: commandEnv(),
-      timeoutMs: 120_000,
-    });
-    expect(secondCreate.exitCode, resultText(secondCreate)).toBe(0);
-    expect(resultText(secondCreate)).toMatch(/Snapshot v\d+.*created/);
+      timeoutMs: 60_000,
+    },
+  );
+  expect(writeMarker.exitCode, resultText(writeMarker)).toBe(0);
+  await expectSandboxFileContent(sandbox, MARKER_FILE, markerContent, "phase-2-read-marker");
 
-    const perturb = await sandbox.exec(
-      SANDBOX_NAME,
-      ["sh", "-lc", `rm -f ${SECOND_MARKER} && printf '%s' 'BROKEN' > ${MARKER_FILE}`],
-      {
-        artifactName: "phase-5-perturb-workspace",
-        env: commandEnv(),
-        timeoutMs: 60_000,
-      },
-    );
-    expect(perturb.exitCode, resultText(perturb)).toBe(0);
+  const firstCreate = await host.command("nemoclaw", [SANDBOX_NAME, "snapshot", "create"], {
+    artifactName: "phase-3-snapshot-create-first",
+    env: commandEnv(),
+    timeoutMs: 120_000,
+  });
+  expect(firstCreate.exitCode, resultText(firstCreate)).toBe(0);
+  expect(resultText(firstCreate)).toMatch(/Snapshot v\d+.*created/);
+  expect(resultText(firstCreate)).toContain("rebuild-backups");
 
-    const latestRestore = await host.command("nemoclaw", [SANDBOX_NAME, "snapshot", "restore"], {
-      artifactName: "phase-6-snapshot-restore-latest",
+  const list = await host.command("nemoclaw", [SANDBOX_NAME, "snapshot", "list"], {
+    artifactName: "phase-4-snapshot-list",
+    env: commandEnv(),
+    timeoutMs: 60_000,
+  });
+  expect(list.exitCode, resultText(list)).toBe(0);
+  expect(resultText(list)).toContain("snapshot(s)");
+  const timestamp = firstSnapshotTimestamp(resultText(list));
+  await artifacts.writeJson("phase-4-first-snapshot.json", { timestamp });
+
+  const modify = await sandbox.exec(
+    SANDBOX_NAME,
+    ["sh", "-lc", `rm -f ${MARKER_FILE} && printf '%s' '${secondContent}' > ${SECOND_MARKER}`],
+    {
+      artifactName: "phase-5-modify-workspace",
       env: commandEnv(),
-      timeoutMs: 120_000,
-    });
-    expect(latestRestore.exitCode, resultText(latestRestore)).toBe(0);
-    expect(resultText(latestRestore)).toContain("Restored");
-    await expectSandboxFileContent(
-      sandbox,
-      SECOND_MARKER,
-      secondContent,
-      "phase-6-read-second-marker-after-latest-restore",
-    );
-    const firstGoneAfterLatest = await sandbox.exec(
-      SANDBOX_NAME,
-      ["sh", "-lc", `test ! -e ${MARKER_FILE}`],
-      {
-        artifactName: "phase-6-first-marker-absent-after-latest-restore",
-        env: commandEnv(),
-        timeoutMs: 30_000,
-      },
-    );
-    expect(firstGoneAfterLatest.exitCode, resultText(firstGoneAfterLatest)).toBe(0);
+      timeoutMs: 60_000,
+    },
+  );
+  expect(modify.exitCode, resultText(modify)).toBe(0);
 
-    const targetedRestore = await host.command(
-      "nemoclaw",
-      [SANDBOX_NAME, "snapshot", "restore", timestamp],
-      {
-        artifactName: "phase-7-snapshot-restore-first-timestamp",
-        env: commandEnv(),
-        timeoutMs: 120_000,
-      },
-    );
-    expect(targetedRestore.exitCode, resultText(targetedRestore)).toBe(0);
-    expect(resultText(targetedRestore)).toContain("Restored");
-    await expectSandboxFileContent(
-      sandbox,
-      MARKER_FILE,
-      markerContent,
-      "phase-7-read-first-marker-after-targeted-restore",
-    );
-    const secondGone = await sandbox.exec(
-      SANDBOX_NAME,
-      ["sh", "-lc", `test ! -e ${SECOND_MARKER}`],
-      {
-        artifactName: "phase-7-second-marker-absent-after-targeted-restore",
-        env: commandEnv(),
-        timeoutMs: 30_000,
-      },
-    );
-    expect(secondGone.exitCode, resultText(secondGone)).toBe(0);
+  const firstGone = await sandbox.exec(SANDBOX_NAME, ["sh", "-lc", `test ! -e ${MARKER_FILE}`], {
+    artifactName: "phase-5-first-marker-gone",
+    env: commandEnv(),
+    timeoutMs: 30_000,
+  });
+  expect(firstGone.exitCode, resultText(firstGone)).toBe(0);
 
-    const credentialLeaks = scanSnapshotCredentialLeaks(BACKUP_DIR);
-    await artifacts.writeJson("phase-8-credential-scan.json", {
-      backupDir: BACKUP_DIR,
-      leakedFiles: credentialLeaks,
-    });
-    expect(credentialLeaks).toEqual([]);
+  const secondCreate = await host.command("nemoclaw", [SANDBOX_NAME, "snapshot", "create"], {
+    artifactName: "phase-5-snapshot-create-second",
+    env: commandEnv(),
+    timeoutMs: 120_000,
+  });
+  expect(secondCreate.exitCode, resultText(secondCreate)).toBe(0);
+  expect(resultText(secondCreate)).toMatch(/Snapshot v\d+.*created/);
 
-    const help = await host.command("nemoclaw", [SANDBOX_NAME, "snapshot"], {
-      artifactName: "phase-9-snapshot-help",
+  const perturb = await sandbox.exec(
+    SANDBOX_NAME,
+    ["sh", "-lc", `rm -f ${SECOND_MARKER} && printf '%s' 'BROKEN' > ${MARKER_FILE}`],
+    {
+      artifactName: "phase-5-perturb-workspace",
+      env: commandEnv(),
+      timeoutMs: 60_000,
+    },
+  );
+  expect(perturb.exitCode, resultText(perturb)).toBe(0);
+
+  const latestRestore = await host.command("nemoclaw", [SANDBOX_NAME, "snapshot", "restore"], {
+    artifactName: "phase-6-snapshot-restore-latest",
+    env: commandEnv(),
+    timeoutMs: 120_000,
+  });
+  expect(latestRestore.exitCode, resultText(latestRestore)).toBe(0);
+  expect(resultText(latestRestore)).toContain("Restored");
+  await expectSandboxFileContent(
+    sandbox,
+    SECOND_MARKER,
+    secondContent,
+    "phase-6-read-second-marker-after-latest-restore",
+  );
+  const firstGoneAfterLatest = await sandbox.exec(
+    SANDBOX_NAME,
+    ["sh", "-lc", `test ! -e ${MARKER_FILE}`],
+    {
+      artifactName: "phase-6-first-marker-absent-after-latest-restore",
       env: commandEnv(),
       timeoutMs: 30_000,
-    });
-    expect(help.exitCode, resultText(help)).toBe(0);
-    expect(resultText(help)).toContain("snapshot create");
-    expect(resultText(help)).toContain("snapshot list");
-    expect(resultText(help)).toContain("snapshot restore");
+    },
+  );
+  expect(firstGoneAfterLatest.exitCode, resultText(firstGoneAfterLatest)).toBe(0);
 
-    await artifacts.writeJson("target-result.json", {
-      id: "snapshot-commands",
-      status: "passed",
-      firstSnapshotTimestamp: timestamp,
-      backupDir: BACKUP_DIR,
-    });
-  },
-);
+  const targetedRestore = await host.command(
+    "nemoclaw",
+    [SANDBOX_NAME, "snapshot", "restore", timestamp],
+    {
+      artifactName: "phase-7-snapshot-restore-first-timestamp",
+      env: commandEnv(),
+      timeoutMs: 120_000,
+    },
+  );
+  expect(targetedRestore.exitCode, resultText(targetedRestore)).toBe(0);
+  expect(resultText(targetedRestore)).toContain("Restored");
+  await expectSandboxFileContent(
+    sandbox,
+    MARKER_FILE,
+    markerContent,
+    "phase-7-read-first-marker-after-targeted-restore",
+  );
+  const secondGone = await sandbox.exec(SANDBOX_NAME, ["sh", "-lc", `test ! -e ${SECOND_MARKER}`], {
+    artifactName: "phase-7-second-marker-absent-after-targeted-restore",
+    env: commandEnv(),
+    timeoutMs: 30_000,
+  });
+  expect(secondGone.exitCode, resultText(secondGone)).toBe(0);
+
+  const credentialLeaks = scanSnapshotCredentialLeaks(BACKUP_DIR);
+  await artifacts.writeJson("phase-8-credential-scan.json", {
+    backupDir: BACKUP_DIR,
+    leakedFiles: credentialLeaks,
+  });
+  expect(credentialLeaks).toEqual([]);
+
+  const help = await host.command("nemoclaw", [SANDBOX_NAME, "snapshot"], {
+    artifactName: "phase-9-snapshot-help",
+    env: commandEnv(),
+    timeoutMs: 30_000,
+  });
+  expect(help.exitCode, resultText(help)).toBe(0);
+  expect(resultText(help)).toContain("snapshot create");
+  expect(resultText(help)).toContain("snapshot list");
+  expect(resultText(help)).toContain("snapshot restore");
+
+  const snapshotsBeforeStoppedBackup = snapshotManifestDirectories();
+  const containerLookup = await host.command(
+    "docker",
+    [
+      "ps",
+      "-aq",
+      "--filter",
+      "label=openshell.ai/managed-by=openshell",
+      "--filter",
+      `label=openshell.ai/sandbox-name=${SANDBOX_NAME}`,
+    ],
+    {
+      artifactName: "phase-10-stopped-backup-container-lookup",
+      env: commandEnv(),
+      timeoutMs: 30_000,
+    },
+  );
+  expect(containerLookup.exitCode, resultText(containerLookup)).toBe(0);
+  const containerIds = containerLookup.stdout.split(/\r?\n/).filter(Boolean);
+  expect(containerIds).toHaveLength(1);
+  const containerId = containerIds[0] as string;
+
+  const stop = await host.command("docker", ["stop", containerId], {
+    artifactName: "phase-10-stop-sandbox-container",
+    env: commandEnv(),
+    timeoutMs: 60_000,
+  });
+  expect(stop.exitCode, resultText(stop)).toBe(0);
+
+  const strictBackup = await host.command("nemoclaw", ["backup-all"], {
+    artifactName: "phase-10-strict-backup-all-stopped",
+    env: { ...commandEnv(), NEMOCLAW_REQUIRE_ALL_SANDBOX_BACKUPS: "1" },
+    timeoutMs: 180_000,
+  });
+  expect(strictBackup.exitCode, resultText(strictBackup)).toBe(0);
+  expect(resultText(strictBackup)).toContain(`Starting stopped sandbox '${SANDBOX_NAME}'`);
+  expect(resultText(strictBackup)).toContain(`Returned '${SANDBOX_NAME}' to its stopped state`);
+  expect(resultText(strictBackup)).toContain("1 backed up, 0 failed, 0 skipped");
+
+  const finalContainerState = await host.command(
+    "docker",
+    ["inspect", "--format", "{{.State.Status}}", containerId],
+    {
+      artifactName: "phase-10-final-container-state",
+      env: commandEnv(),
+      timeoutMs: 30_000,
+    },
+  );
+  expect(finalContainerState.exitCode, resultText(finalContainerState)).toBe(0);
+  expect(finalContainerState.stdout.trim()).toBe("exited");
+
+  const snapshotsAfterStoppedBackup = snapshotManifestDirectories();
+  const stoppedBackupSnapshots = snapshotsAfterStoppedBackup.filter(
+    (entry) => !snapshotsBeforeStoppedBackup.includes(entry),
+  );
+  expect(stoppedBackupSnapshots).toHaveLength(1);
+  const stoppedBackupTimestamp = stoppedBackupSnapshots[0] as string;
+  const stoppedBackupManifest = JSON.parse(
+    fs.readFileSync(path.join(BACKUP_DIR, stoppedBackupTimestamp, "rebuild-manifest.json"), "utf8"),
+  ) as { sandboxName?: unknown; backedUpDirs?: unknown };
+  expect(stoppedBackupManifest.sandboxName).toBe(SANDBOX_NAME);
+  expect(stoppedBackupManifest.backedUpDirs).toEqual(expect.arrayContaining(["workspace"]));
+
+  const restart = await host.command("docker", ["start", containerId], {
+    artifactName: "phase-10-restart-for-stopped-snapshot-restore",
+    env: commandEnv(),
+    timeoutMs: 60_000,
+  });
+  expect(restart.exitCode, resultText(restart)).toBe(0);
+  const waitForExec = await host.command(
+    "bash",
+    [
+      "-lc",
+      'name="$1"; for _i in $(seq 1 30); do openshell sandbox exec --name "$name" -- true >/dev/null 2>&1 && exit 0; sleep 2; done; openshell sandbox exec --name "$name" -- true',
+      "wait-for-sandbox-exec",
+      SANDBOX_NAME,
+    ],
+    {
+      artifactName: "phase-10-wait-for-restarted-sandbox-exec",
+      env: commandEnv(),
+      timeoutMs: 90_000,
+    },
+  );
+  expect(waitForExec.exitCode, resultText(waitForExec)).toBe(0);
+  const perturbAfterStoppedBackup = await sandbox.exec(
+    SANDBOX_NAME,
+    ["sh", "-lc", `printf '%s' 'BROKEN_AFTER_STOPPED_BACKUP' > ${MARKER_FILE}`],
+    {
+      artifactName: "phase-10-perturb-after-stopped-backup",
+      env: commandEnv(),
+      timeoutMs: 30_000,
+    },
+  );
+  expect(perturbAfterStoppedBackup.exitCode, resultText(perturbAfterStoppedBackup)).toBe(0);
+  const restoreStoppedBackup = await host.command(
+    "nemoclaw",
+    [SANDBOX_NAME, "snapshot", "restore", stoppedBackupTimestamp],
+    {
+      artifactName: "phase-10-restore-stopped-backup",
+      env: commandEnv(),
+      timeoutMs: 120_000,
+    },
+  );
+  expect(restoreStoppedBackup.exitCode, resultText(restoreStoppedBackup)).toBe(0);
+  expect(resultText(restoreStoppedBackup)).toContain("Restored");
+  await expectSandboxFileContent(
+    sandbox,
+    MARKER_FILE,
+    markerContent,
+    "phase-10-read-marker-after-stopped-backup-restore",
+  );
+  expect(scanSnapshotCredentialLeaks(BACKUP_DIR)).toEqual([]);
+  await artifacts.writeJson("phase-10-stopped-backup-proof.json", {
+    containerId,
+    finalContainerState: finalContainerState.stdout.trim(),
+    stoppedBackupTimestamp,
+  });
+
+  await artifacts.target.complete({
+    id: "snapshot-commands",
+    status: "passed",
+    firstSnapshotTimestamp: timestamp,
+    stoppedBackupTimestamp,
+    backupDir: BACKUP_DIR,
+  });
+});

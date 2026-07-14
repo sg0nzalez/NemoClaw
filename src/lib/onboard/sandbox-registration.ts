@@ -6,9 +6,11 @@ import type { InferenceSelection } from "../inference/selection";
 import { inferenceSelectionRegistryFields } from "../inference/selection";
 import { type WebSearchConfig, webSearchProviderForConfig } from "../inference/web-search";
 import * as onboardSession from "../state/onboard-session";
+import type { OpenClawImagePluginInstall } from "../state/openclaw-plugin-restore";
 import type { SandboxEntry, SandboxMcpState, SandboxMessagingState } from "../state/registry";
 import * as registry from "../state/registry";
 import { DEFAULT_TOOL_DISCLOSURE, type ToolDisclosure } from "../tool-disclosure";
+import type { DcodeAutoApprovalMode } from "./dcode-auto-approval";
 import {
   getHermesDashboardRegistryFields,
   type HermesDashboardOnboardState,
@@ -34,8 +36,12 @@ export interface CreatedSandboxRegistryEntryInput {
   agent: AgentDefinition | null | undefined;
   agentVersionKnown: boolean;
   imageTag: string | null;
+  openclawImagePluginInstalls?: readonly OpenClawImagePluginInstall[];
   appliedPolicies: string[];
   toolDisclosure?: ToolDisclosure;
+  observabilityEnabled?: boolean;
+  dcodeAutoApprovalMode?: DcodeAutoApprovalMode;
+  policyTier?: SandboxEntry["policyTier"];
   webSearchEnabled?: boolean;
   webSearchProvider?: SandboxEntry["webSearchProvider"];
   fromDockerfile?: string | null;
@@ -49,6 +55,7 @@ export interface CreatedSandboxRegistryEntryInput {
   hermesToolGateways: string[];
   hermesDashboardState: HermesDashboardOnboardState;
   dashboardPort: number;
+  dashboardRemoteBindPrepared?: boolean;
   gatewayName: string;
   gatewayPort: number;
 }
@@ -61,15 +68,21 @@ export function creationFidelity(
   webSearchConfig: WebSearchConfig | null,
   fromDockerfile: string | null,
   hermesAuthMethod: "oauth" | "api_key" | null,
+  dashboardRemoteBindPrepared?: boolean,
 ): Pick<
   SandboxEntry,
-  "webSearchEnabled" | "webSearchProvider" | "fromDockerfile" | "hermesAuthMethod"
+  | "webSearchEnabled"
+  | "webSearchProvider"
+  | "fromDockerfile"
+  | "hermesAuthMethod"
+  | "dashboardRemoteBindPrepared"
 > {
   return {
     webSearchEnabled: webSearchConfig?.fetchEnabled === true,
     webSearchProvider: webSearchConfig ? webSearchProviderForConfig(webSearchConfig) : null,
     fromDockerfile,
     hermesAuthMethod,
+    dashboardRemoteBindPrepared: dashboardRemoteBindPrepared === true,
   };
 }
 
@@ -111,8 +124,21 @@ export function buildCreatedSandboxRegistryEntry(
     ...input.runtimeFields,
     ...getSandboxAgentRegistryFields(input.agent, input.agentVersionKnown),
     imageTag: input.imageTag,
+    ...(input.openclawImagePluginInstalls !== undefined
+      ? {
+          openclawImagePluginInstalls: input.openclawImagePluginInstalls.map((install) => ({
+            ...install,
+            ...(install.loadPaths !== undefined ? { loadPaths: [...install.loadPaths] } : {}),
+          })),
+        }
+      : {}),
     policies: input.appliedPolicies,
     toolDisclosure: input.toolDisclosure ?? DEFAULT_TOOL_DISCLOSURE,
+    observabilityEnabled: input.observabilityEnabled === true,
+    ...(input.dcodeAutoApprovalMode !== undefined
+      ? { dcodeAutoApprovalMode: input.dcodeAutoApprovalMode }
+      : {}),
+    ...(input.policyTier !== undefined ? { policyTier: input.policyTier } : {}),
     webSearchEnabled: input.webSearchEnabled === true,
     webSearchProvider:
       input.webSearchEnabled === true ? (input.webSearchProvider ?? "brave") : null,
@@ -124,6 +150,7 @@ export function buildCreatedSandboxRegistryEntry(
       input.hermesToolGateways.length > 0 ? [...input.hermesToolGateways] : undefined,
     ...getHermesDashboardRegistryFields(input.hermesDashboardState),
     dashboardPort: input.dashboardPort,
+    dashboardRemoteBindPrepared: input.dashboardRemoteBindPrepared === true,
     gatewayName: input.gatewayName,
     gatewayPort: input.gatewayPort,
   };

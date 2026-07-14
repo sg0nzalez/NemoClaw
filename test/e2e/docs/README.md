@@ -72,17 +72,25 @@ npx tsx test/e2e/registry/run.ts --emit-live-matrix --targets ubuntu-repo-cloud-
 npx vitest run --project e2e-support --silent=false --reporter=default
 
 # Opt-in live E2E targets
-npm run build:cli
-NEMOCLAW_RUN_LIVE_E2E=1 npx vitest run --project e2e-live --silent=false --reporter=default
+npm run test:live-e2e -- --silent=false --reporter=default
 ```
 
-Live E2E projects do not retry an entire failed test. These tests mutate host,
-Docker, gateway, and sandbox state, so re-entering one on the same runner can
-replace the original failure with stale-lock, storage-exhaustion, or ownership
-noise. A target may retry a transient operation only inside its own cleanup
-boundary. Retry a full target by starting a fresh workflow run and runner.
+The aggregate live command rebuilds the CLI before Vitest starts and runs live
+test files serially.
+Live E2E projects do not retry an entire failed test.
+These tests mutate host, Docker, gateway, and sandbox state, so re-entering one
+on the same runner can replace the original failure with stale-lock,
+storage-exhaustion, or ownership noise. A target may retry a transient operation
+only inside its own cleanup boundary.
+Retry a full target by starting a fresh workflow run and runner.
 
 The retired `--emit-matrix` and `--plan-only` paths must not be reintroduced.
+
+When adding or changing a live test, update `test/e2e/mock-parity.json` with
+the fast PR-collected test that covers its mockable contract. If the behavior
+cannot be reproduced without real infrastructure, record a concise
+`liveOnlyReason` instead. The PR and `main` `e2e-support` lanes enforce this
+changed-file policy without requiring an immediate backfill of untouched tests.
 
 ## Repository Layout
 
@@ -92,11 +100,30 @@ test/e2e/
   fixtures/              # Vitest fixtures, clients, redaction, artifacts, cleanup
   live/                  # Opt-in live E2E target tests
   manifests/             # Product-facing NemoClawInstance desired state
+  mock-parity.json        # Changed live-test to fast-test parity decisions
   registry/              # Typed registry, matrix helpers, expected states
   support/               # Fast fixture/support and metadata tests
 ```
 
 ## CI Entry Points
+
+- `tools/advisors/risk-plan.mts` is the small deterministic selection policy
+  shared by PR Review Advisor and the PR E2E controller. It maps
+  changed runtime surfaces to invariant families and
+  canonical `e2e.yaml` jobs; it is not a second test runner or migration-status
+  ledger. The advisor uses it as recommendation context, while the controller
+  applies it independently without model output.
+
+- `.github/workflows/pr-e2e-gate.yaml` reserves `E2E / PR Gate` on every exact
+  PR head, including forks, before `CI / Pull Request` completes. The trusted
+  controller builds the risk plan from GitHub's complete file list. Internal
+  revisions normally dispatch every selected job and verify each expected
+  `risk-signal.json`; this remains automatic when their `e2e-control-plane`
+  matches are drawn only from the trusted controller workflow and script.
+  Other or mixed internal control-plane revisions require a maintainer-authorized
+  exact-SHA run; only its verified evidence can pass the gate. Risky forks
+  retain the audited credentialed-E2E skip approval. See
+  [NemoClaw E2E CI](../README.md) for the full lifecycle.
 
 - `.github/workflows/e2e.yaml` runs selected or all supported
   live E2E targets and uploads an explicit artifact allowlist with
@@ -109,11 +136,17 @@ test/e2e/
   These per-target timing summaries are artifact evidence only.
   The Slack and GitHub scorecard timing comparison remains scoped to the
   dedicated `cloud-onboard` artifact.
+  PR E2E dispatches validate the PR head commit and controller metadata before
+  preparation, attach `test/e2e/risk-signal-reporter.ts` to live Vitest
+  invocations, and suppress PR reporting and scorecards. The workflow boundary
+  requires every selected job shard to upload its evidence artifact.
 - `.github/workflows/e2e-branch-validation.yaml`, `macos-e2e.yaml`,
   `wsl-e2e.yaml`, `ollama-proxy-e2e.yaml`, and `regression-e2e.yaml` call
   focused E2E targets directly for their E2E coverage.
-- `vitest.config.ts` contains `e2e-support` for fast fixture/support
-  tests and `e2e-live` for opt-in live target execution.
+- `vitest.config.ts` contains `e2e-support` for fast fixture/support tests and
+  `e2e-live` for opt-in live target execution. The PR and `main` aggregate
+  checks require `e2e-support` for code changes; the project never opts into
+  live targets.
 
 ## Migration Tracking
 

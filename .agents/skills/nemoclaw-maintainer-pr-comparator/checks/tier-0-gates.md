@@ -3,7 +3,7 @@
 
 # Tier 0 — Plumbing Gates
 
-Mandatory prerequisites. Any gate failure means the PR cannot be merged in its current state. Six gates total. Run `scripts/collect-gates.sh <pr>` to evaluate gates 1-5 mechanically; run `scripts/check-coderabbit-threads.sh <pr>` for gate 6.
+Mandatory prerequisites. Any gate failure means the PR cannot be merged in its current state. Six gates total. Run `scripts/collect-gates.sh <pr>` to evaluate gates 1-5 mechanically and run `scripts/check-coderabbit-threads.sh <pr>` for gate 6.
 
 ## Contents
 

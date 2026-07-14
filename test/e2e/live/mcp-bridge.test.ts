@@ -4,9 +4,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-
 import YAML from "yaml";
-
 import {
   buildDeepAgentsMcpStatusCommand,
   buildHermesMcpStatusCommand,
@@ -17,6 +15,8 @@ import { parseOpenShellPolicy } from "../../../src/lib/policy/merge";
 import type { McpBridgeEntry } from "../../../src/lib/state/registry";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
 import type { CleanupRegistry } from "../fixtures/cleanup.ts";
+import { assertCleanupSucceededOrAbsent } from "../fixtures/cleanup-resources.ts";
+import { assertExitZero as expectExitZero, resultText } from "../fixtures/clients/command.ts";
 import type { HostCliClient } from "../fixtures/clients/host.ts";
 import { type SandboxClient, trustedSandboxShellScript } from "../fixtures/clients/sandbox.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
@@ -30,6 +30,7 @@ import {
 import {
   buildMcpDnsRebindingProbeScript,
   hostAddressForSandbox,
+  hostPrivateAddressForSandbox,
   isExpectedMcpCurlPolicyDenial,
   type McpDnsRebindingAdapter,
   remapDnsRebindingHostname,
@@ -61,11 +62,7 @@ const COMPATIBLE_KEY = MCP_BRIDGE_TEST_CREDENTIALS.compatibleEndpoint;
 const COMPATIBLE_MODEL = "mock/mcp-bridge";
 const TOOL_CHALLENGE = "nemoclaw-authenticated-mcp-proof";
 const REGISTRY_FILE = path.join(process.env.HOME ?? os.homedir(), ".nemoclaw", "sandboxes.json");
-const liveTest = process.env.NEMOCLAW_RUN_LIVE_E2E === "1" ? test : test.skip;
-const liveAgentMatrixTest =
-  process.env.NEMOCLAW_RUN_LIVE_E2E === "1" && process.env.NEMOCLAW_MCP_BRIDGE_AGENT_MATRIX === "1"
-    ? test
-    : test.skip;
+const liveAgentMatrixTest = process.env.NEMOCLAW_MCP_BRIDGE_AGENT_MATRIX === "1" ? test : test.skip;
 
 type McpAgent = "openclaw" | "hermes" | "langchain-deepagents-code";
 type McpAdapter = "mcporter" | "hermes-config" | "deepagents-config";
@@ -74,14 +71,8 @@ const MCP_MUTATION_TIMEOUT_MS: Record<McpAdapter, number> = {
   "hermes-config": 12 * 60_000,
   mcporter: 3 * 60_000,
 };
-
-function resultText(result: ShellProbeResult): string {
-  return [result.stdout, result.stderr].filter(Boolean).join("\n");
-}
-
-function expectExitZero(result: ShellProbeResult, label: string): void {
-  expect(result.exitCode, `${label}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`).toBe(0);
-}
+const MCP_BRIDGE_ALREADY_ABSENT =
+  /No MCP servers are registered|No MCP server '.+' is registered|MCP server '.+' not found/iu;
 
 function expectExitNonZero(result: ShellProbeResult, label: string, pattern: RegExp): void {
   expect(
@@ -95,24 +86,22 @@ function parseCurrentPolicy(raw: string): string {
   return parseOpenShellPolicy(raw).yamlBody;
 }
 
-async function bestEffortRemoveBridge(
+async function cleanupMcpBridge(
   host: HostCliClient,
   sandboxName: string,
   server: string,
   adapter: McpAdapter,
 ): Promise<void> {
-  await host.nemoclaw([sandboxName, "mcp", "remove", server, "--force"], {
+  const result = await host.nemoclaw([sandboxName, "mcp", "remove", server, "--force"], {
     artifactName: `cleanup-mcp-remove-${server}`,
     env: buildAvailabilityProbeEnv(),
     timeoutMs: MCP_MUTATION_TIMEOUT_MS[adapter],
   });
-}
-
-async function cleanupSandbox(host: HostCliClient, sandboxName: string): Promise<void> {
-  await host.bestEffortCleanupSandbox(sandboxName, {
-    artifactName: "cleanup-destroy-sandbox",
-    timeoutMs: 15 * 60_000,
-  });
+  assertCleanupSucceededOrAbsent(
+    result,
+    MCP_BRIDGE_ALREADY_ABSENT,
+    `cleanup MCP bridge ${server} on sandbox ${sandboxName}`,
+  );
 }
 
 async function onboardAgent(
@@ -121,9 +110,10 @@ async function onboardAgent(
   endpointUrl: string,
   options: { agent: McpAgent; sandboxName: string; artifactName: string },
 ): Promise<void> {
-  cleanup.add(`destroy MCP bridge ${options.agent} sandbox`, () =>
-    cleanupSandbox(host, options.sandboxName),
-  );
+  cleanup.trackSandbox(host, options.sandboxName, {
+    artifactName: "cleanup-destroy-sandbox",
+    timeoutMs: 15 * 60_000,
+  });
   await host.cleanupSandbox(options.sandboxName, {
     artifactName: "precleanup-destroy-sandbox",
     timeoutMs: 15 * 60_000,
@@ -181,7 +171,6 @@ async function assertAdapterDnsRebindingDenied(
   options: {
     adapter: McpDnsRebindingAdapter;
     artifactPrefix: string;
-    hostAddress: string;
     sandboxName: string;
     secretPaths: string[];
   },
@@ -193,7 +182,7 @@ async function assertAdapterDnsRebindingDenied(
     rebindMcp.close(),
   );
   cleanup.add(`remove ${options.artifactPrefix} DNS rebinding MCP bridge`, () =>
-    bestEffortRemoveBridge(host, options.sandboxName, REBIND_SERVER_NAME, options.adapter),
+    cleanupMcpBridge(host, options.sandboxName, REBIND_SERVER_NAME, options.adapter),
   );
   const rebindMcpUrl = `https://${REBIND_HOSTNAME}:${rebindMcp.port}/mcp`;
   const hostsFixture = await setupDnsRebindingHostsFixture(
@@ -289,12 +278,13 @@ async function assertAdapterDnsRebindingDenied(
   // reachable runner address would receive the request. The pinned v0.0.72
   // implementation instead returns the one resolved-and-validated SocketAddr
   // list directly to connect; see the exact proxy.rs citation in the helper.
-  expect(options.hostAddress).not.toBe(REBIND_PUBLIC_IP);
+  const reboundAddress = await hostPrivateAddressForSandbox(host);
+  expect(reboundAddress).not.toBe(REBIND_PUBLIC_IP);
   await remapDnsRebindingHostname(
     host,
     options.sandboxName,
     hostsFixture,
-    options.hostAddress,
+    reboundAddress,
     `${options.artifactPrefix}-mcp-dns-rebinding-map-private-unpinned-after-add`,
   );
   const denial = await sandbox.execShell(
@@ -422,12 +412,7 @@ async function assertConcurrentAddSerialized(
   },
 ): Promise<void> {
   cleanup.add(`remove ${options.artifactPrefix} concurrent MCP bridge`, () =>
-    bestEffortRemoveBridge(
-      host,
-      options.sandboxName,
-      CONCURRENT_SERVER_NAME,
-      options.expectedAdapter,
-    ),
+    cleanupMcpBridge(host, options.sandboxName, CONCURRENT_SERVER_NAME, options.expectedAdapter),
   );
   const args = [
     options.sandboxName,
@@ -833,7 +818,7 @@ async function rebuildWithoutMcpHostSecret(
   expectExitZero(rebuild, `${artifactPrefix} rebuild without MCP host secret`);
 }
 
-liveTest("mcp-bridge", { timeout: 45 * 60_000 }, async ({ artifacts, cleanup, host, sandbox }) => {
+test("mcp-bridge", { timeout: 45 * 60_000 }, async ({ artifacts, cleanup, host, sandbox }) => {
   await artifacts.writeJson("scenario.json", {
     id: "mcp-bridge",
     sandbox: OPENCLAW_SANDBOX_NAME,
@@ -882,10 +867,10 @@ liveTest("mcp-bridge", { timeout: 45 * 60_000 }, async ({ artifacts, cleanup, ho
   });
 
   cleanup.add("remove MCP bridge", () =>
-    bestEffortRemoveBridge(host, OPENCLAW_SANDBOX_NAME, SERVER_NAME, "mcporter"),
+    cleanupMcpBridge(host, OPENCLAW_SANDBOX_NAME, SERVER_NAME, "mcporter"),
   );
   cleanup.add("remove unexpected missing-secret MCP state", () =>
-    bestEffortRemoveBridge(host, OPENCLAW_SANDBOX_NAME, "missingsecret", "mcporter"),
+    cleanupMcpBridge(host, OPENCLAW_SANDBOX_NAME, "missingsecret", "mcporter"),
   );
 
   await expectMcpCliFailure(
@@ -1036,7 +1021,6 @@ req.end(body);
   await assertAdapterDnsRebindingDenied(host, sandbox, cleanup, {
     adapter: "mcporter",
     artifactPrefix: "openclaw",
-    hostAddress,
     sandboxName: OPENCLAW_SANDBOX_NAME,
     secretPaths: ["/sandbox/.openclaw", "/sandbox/.mcp.json"],
   });
@@ -1240,7 +1224,7 @@ liveAgentMatrixTest(
       artifactName: "onboard-hermes-mcp-bridge",
     });
     cleanup.add("remove Hermes MCP bridge", () =>
-      bestEffortRemoveBridge(host, HERMES_SANDBOX_NAME, SERVER_NAME, "hermes-config"),
+      cleanupMcpBridge(host, HERMES_SANDBOX_NAME, SERVER_NAME, "hermes-config"),
     );
 
     await assertConcurrentAddSerialized(host, cleanup, {
@@ -1274,7 +1258,6 @@ liveAgentMatrixTest(
     await assertAdapterDnsRebindingDenied(host, sandbox, cleanup, {
       adapter: "hermes-config",
       artifactPrefix: "hermes",
-      hostAddress,
       sandboxName: HERMES_SANDBOX_NAME,
       secretPaths: ["/sandbox/.hermes"],
     });
@@ -1400,7 +1383,7 @@ liveAgentMatrixTest(
       artifactName: "onboard-deepagents-mcp-bridge",
     });
     cleanup.add("remove Deep Agents MCP bridge", () =>
-      bestEffortRemoveBridge(host, DEEPAGENTS_SANDBOX_NAME, SERVER_NAME, "deepagents-config"),
+      cleanupMcpBridge(host, DEEPAGENTS_SANDBOX_NAME, SERVER_NAME, "deepagents-config"),
     );
 
     await assertConcurrentAddSerialized(host, cleanup, {
@@ -1427,7 +1410,6 @@ liveAgentMatrixTest(
     await assertAdapterDnsRebindingDenied(host, sandbox, cleanup, {
       adapter: "deepagents-config",
       artifactPrefix: "deepagents",
-      hostAddress,
       sandboxName: DEEPAGENTS_SANDBOX_NAME,
       secretPaths: ["/sandbox/.deepagents"],
     });

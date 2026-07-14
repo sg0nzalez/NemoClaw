@@ -8,7 +8,6 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { managedDcodeConfigRestorePolicy } from "../state/dcode-config-restore-input";
 import * as sandboxState from "../state/sandbox";
 import { finalizeCreatedSandbox } from "./created-sandbox-finalization";
 import { getDcodeSelectionDrift } from "./dcode-selection-drift";
@@ -109,61 +108,38 @@ function makeRestoreFixture(): {
   executable(
     python,
     `#!${hostPython}
-import json, sys, types
+import json
+import subprocess
+import sys
+import types
 
-class TOMLDecodeError(ValueError):
-    pass
+NODE_TOML_WRITER = r"""
+const fs = require("node:fs");
+const { stringify } = require("smol-toml");
+const value = JSON.parse(fs.readFileSync(0, "utf8"));
+process.stdout.write(stringify(value));
+"""
 
-def parse_scalar(value):
-    if value == "true": return True
-    if value == "false": return False
-    try: return json.loads(value)
-    except (TypeError, ValueError) as error: raise TOMLDecodeError("malformed") from error
-
-def loads(text):
-    document = {}
-    table = document
-    for raw_line in text.splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"): continue
-        if line.startswith("[") and line.endswith("]"):
-            table = document
-            for name in line[1:-1].split("."):
-                table = table.setdefault(name, {})
-            continue
-        if "=" not in line: raise TOMLDecodeError("malformed")
-        key, value = line.split("=", 1)
-        table[key.strip()] = parse_scalar(value.strip())
-    return document
-
-def scalar(value):
-    if isinstance(value, bool): return "true" if value else "false"
-    if isinstance(value, str): return json.dumps(value)
-    if isinstance(value, list): return "[" + ", ".join(scalar(item) for item in value) + "]"
-    if isinstance(value, (int, float)): return str(value)
-    raise TypeError("unsupported test TOML value")
-
-def dumps(document):
-    lines = []
-    def emit(prefix, table):
-        if prefix: lines.append("[" + ".".join(prefix) + "]")
-        for key, value in table.items():
-            if not isinstance(value, dict): lines.append(key + " = " + scalar(value))
-        if prefix: lines.append("")
-        for key, value in table.items():
-            if isinstance(value, dict): emit([*prefix, key], value)
-    emit([], document)
-    return "\\n".join(lines).rstrip() + "\\n"
+def dumps(value):
+    completed = subprocess.run(
+        ["node", "-e", NODE_TOML_WRITER],
+        input=json.dumps(value, allow_nan=False),
+        capture_output=True,
+        check=True,
+        text=True,
+    )
+    return completed.stdout
 
 tomli_w = types.ModuleType("tomli_w")
 tomli_w.dumps = dumps
-tomllib = types.ModuleType("tomllib")
-tomllib.loads = loads
-tomllib.TOMLDecodeError = TOMLDecodeError
-sys.modules["tomllib"] = tomllib
 sys.modules["tomli_w"] = tomli_w
-script = sys.argv[3]
-sys.argv = [sys.argv[0], *sys.argv[4:]]
+
+try:
+    script_index = sys.argv.index("-c", 1) + 1
+except ValueError:
+    script_index = 1
+script = sys.argv[script_index]
+sys.argv = [sys.argv[0], *sys.argv[script_index + 1:]]
 exec(script, {"__name__": "__main__"})
 `,
   );
@@ -216,16 +192,22 @@ describe("created DCode sandbox finalization", () => {
           sandboxName: "dcode",
           restoreBackupPath: fixture.backupPath,
           preUpgradeBackup: false,
+          targetAgentType: "langchain-deepagents-code",
           validateManagedDcode: true,
           provider: "nvidia-prod",
           model: "new-model",
           preferredInferenceApi: null,
         },
         {
-          restoreSandboxState: (name, backup, options) => {
+          discoverFreshOpenClawImagePluginInstalls: () => ({
+            ok: true,
+            extensionDirs: [],
+            pluginInstalls: [],
+          }),
+          restoreRecreatedSandboxState: (name, backup, options) => {
             order.push("restore");
-            expect(options?.stateFileRestorePolicy).toBe(managedDcodeConfigRestorePolicy);
-            return sandboxState.restoreSandboxState(name, backup, options);
+            expect(options.allowCustomImageWholeStateFileRestore).toBeUndefined();
+            return sandboxState.restoreRecreatedSandboxState(name, backup, options);
           },
           getDcodeSelectionDrift: (name, provider, model, api) => {
             order.push("validate");
@@ -266,13 +248,15 @@ describe("created DCode sandbox finalization", () => {
           sandboxName: "dcode",
           restoreBackupPath: null,
           preUpgradeBackup: false,
+          targetAgentType: "langchain-deepagents-code",
           validateManagedDcode: true,
           provider: "nvidia-prod",
           model: "new-model",
           preferredInferenceApi: null,
         },
         {
-          restoreSandboxState: vi.fn(),
+          discoverFreshOpenClawImagePluginInstalls: vi.fn(),
+          restoreRecreatedSandboxState: vi.fn(),
           getDcodeSelectionDrift: () => ({
             changed: true,
             providerChanged: false,
@@ -307,14 +291,16 @@ describe("created DCode sandbox finalization", () => {
           sandboxName: "dcode",
           restoreBackupPath: fixture.backupPath,
           preUpgradeBackup: false,
+          targetAgentType: "langchain-deepagents-code",
           validateManagedDcode: true,
           provider: "nvidia-prod",
           model: "new-model",
           preferredInferenceApi: null,
         },
         {
-          restoreSandboxState: (name, backup, options) => {
-            const restored = sandboxState.restoreSandboxState(name, backup, options);
+          discoverFreshOpenClawImagePluginInstalls: vi.fn(),
+          restoreRecreatedSandboxState: (name, backup, options) => {
+            const restored = sandboxState.restoreRecreatedSandboxState(name, backup, options);
             return { ...restored, success: false, failedDirs: ["skills"] };
           },
           getDcodeSelectionDrift: (name, provider, model, api) =>
@@ -347,28 +333,114 @@ describe("created DCode sandbox finalization", () => {
   });
 
   it("keeps custom-image restores outside the managed config merge (#6311)", () => {
-    const restoreSandboxState = vi.fn(() => ({
-      success: true,
-      restoredDirs: [],
-      failedDirs: [],
-      restoredFiles: ["config.toml"],
-      failedFiles: [],
-    }));
+    const fixture = makeRestoreFixture();
+    const registeredConfigs: string[] = [];
+    try {
+      finalizeCreatedSandbox(
+        {
+          sandboxName: "custom-dcode",
+          restoreBackupPath: fixture.backupPath,
+          preUpgradeBackup: false,
+          targetAgentType: "langchain-deepagents-code",
+          customImage: true,
+          validateManagedDcode: false,
+          provider: "custom-provider",
+          model: "custom-model",
+          preferredInferenceApi: null,
+        },
+        {
+          discoverFreshOpenClawImagePluginInstalls: vi.fn(),
+          restoreRecreatedSandboxState: (name, backup, options) => {
+            expect(options.allowCustomImageWholeStateFileRestore).toBe(true);
+            return sandboxState.restoreRecreatedSandboxState(name, backup, options);
+          },
+          getDcodeSelectionDrift: vi.fn(),
+          register: () => registeredConfigs.push(fs.readFileSync(fixture.currentPath, "utf8")),
+          note: vi.fn(),
+          error: vi.fn(),
+          exitProcess: (code): never => {
+            throw new Error(`exit ${code}`);
+          },
+        },
+      );
+
+      expect(registeredConfigs).toHaveLength(1);
+      expect(registeredConfigs[0]).toContain('default = "openai:old-model"');
+      expect(registeredConfigs[0]).toContain("[agents]");
+      expect(registeredConfigs[0]).toContain('theme = "dark"');
+      expect(registeredConfigs[0]).not.toContain("new-model");
+    } finally {
+      process.env.PATH = fixture.oldPath;
+    }
+  });
+});
+
+describe("created OpenClaw sandbox finalization", () => {
+  const pluginInstalls = [
+    {
+      id: "weather",
+      installPath: "/sandbox/.openclaw/extensions/weather",
+      loadPaths: [],
+    },
+  ];
+
+  it("skips image-plugin discovery for a managed OpenClaw image", () => {
+    const discoverFreshOpenClawImagePluginInstalls = vi.fn();
+    const register = vi.fn();
 
     finalizeCreatedSandbox(
       {
-        sandboxName: "custom-dcode",
-        restoreBackupPath: "/tmp/custom-backup",
+        sandboxName: "openclaw",
+        restoreBackupPath: null,
         preUpgradeBackup: false,
+        targetAgentType: "openclaw",
         validateManagedDcode: false,
-        provider: "custom-provider",
-        model: "custom-model",
-        preferredInferenceApi: null,
+        provider: "compatible-endpoint",
+        model: "demo",
+        preferredInferenceApi: "openai-completions",
       },
       {
-        restoreSandboxState,
+        discoverFreshOpenClawImagePluginInstalls,
+        restoreRecreatedSandboxState: vi.fn(),
         getDcodeSelectionDrift: vi.fn(),
-        register: vi.fn(),
+        register,
+        note: vi.fn(),
+        error: vi.fn(),
+        exitProcess: (code) => {
+          throw new Error(`unexpected exit ${code}`);
+        },
+      },
+    );
+
+    expect(discoverFreshOpenClawImagePluginInstalls).not.toHaveBeenCalled();
+    expect(register).toHaveBeenCalledWith(undefined);
+  });
+
+  it("captures and registers a fresh image plugin baseline without a restore", () => {
+    const order: string[] = [];
+    const restoreRecreatedSandboxState = vi.fn();
+    const register = vi.fn(() => order.push("register"));
+
+    finalizeCreatedSandbox(
+      {
+        sandboxName: "openclaw",
+        restoreBackupPath: null,
+        preUpgradeBackup: false,
+        targetAgentType: "openclaw",
+        discoverOpenClawImagePluginInstalls: true,
+        validateManagedDcode: false,
+        provider: "compatible-endpoint",
+        model: "demo",
+        preferredInferenceApi: "openai-completions",
+      },
+      {
+        discoverFreshOpenClawImagePluginInstalls: () => {
+          order.push("discover");
+          return { ok: true, extensionDirs: ["weather"], pluginInstalls };
+        },
+        restoreRecreatedSandboxState,
+        getDcodeSelectionDrift: vi.fn(),
+        register,
         note: vi.fn(),
         error: vi.fn(),
         exitProcess: (code): never => {
@@ -377,10 +449,160 @@ describe("created DCode sandbox finalization", () => {
       },
     );
 
-    expect(restoreSandboxState).toHaveBeenCalledWith(
-      "custom-dcode",
-      "/tmp/custom-backup",
-      undefined,
+    expect(order).toEqual(["discover", "register"]);
+    expect(restoreRecreatedSandboxState).not.toHaveBeenCalled();
+    expect(register).toHaveBeenCalledWith(pluginInstalls);
+  });
+
+  it("preserves the fresh image plugin baseline across recreation before registration", () => {
+    const order: string[] = [];
+    const register = vi.fn(() => order.push("register"));
+    const restoreRecreatedSandboxState = vi.fn(() => {
+      order.push("restore");
+      return {
+        success: true,
+        restoredDirs: ["extensions"],
+        failedDirs: [],
+        restoredFiles: ["openclaw.json"],
+        failedFiles: [],
+      };
+    });
+
+    finalizeCreatedSandbox(
+      {
+        sandboxName: "openclaw",
+        restoreBackupPath: "/tmp/openclaw-backup",
+        preUpgradeBackup: false,
+        targetAgentType: "openclaw",
+        discoverOpenClawImagePluginInstalls: true,
+        validateManagedDcode: false,
+        provider: "compatible-endpoint",
+        model: "demo",
+        preferredInferenceApi: "openai-completions",
+      },
+      {
+        discoverFreshOpenClawImagePluginInstalls: () => {
+          order.push("discover");
+          return { ok: true, extensionDirs: ["weather"], pluginInstalls };
+        },
+        restoreRecreatedSandboxState,
+        getDcodeSelectionDrift: vi.fn(),
+        register,
+        note: vi.fn(),
+        error: vi.fn(),
+        exitProcess: (code): never => {
+          throw new Error(`exit ${code}`);
+        },
+      },
     );
+
+    expect(order).toEqual(["discover", "restore", "register"]);
+    expect(restoreRecreatedSandboxState).toHaveBeenCalledWith("openclaw", "/tmp/openclaw-backup", {
+      targetAgentType: "openclaw",
+      freshOpenClawImagePluginInstalls: pluginInstalls,
+    });
+    expect(register).toHaveBeenCalledWith(pluginInstalls);
+  });
+
+  it("fails closed before restore and registration when provenance discovery fails", () => {
+    const restoreRecreatedSandboxState = vi.fn();
+    const register = vi.fn();
+    const error = vi.fn();
+
+    expect(() =>
+      finalizeCreatedSandbox(
+        {
+          sandboxName: "openclaw",
+          restoreBackupPath: "/tmp/openclaw-backup",
+          preUpgradeBackup: false,
+          targetAgentType: "openclaw",
+          discoverOpenClawImagePluginInstalls: true,
+          validateManagedDcode: false,
+          provider: "compatible-endpoint",
+          model: "demo",
+          preferredInferenceApi: "openai-completions",
+        },
+        {
+          discoverFreshOpenClawImagePluginInstalls: () => ({
+            ok: false,
+            error: "registry unreadable",
+          }),
+          restoreRecreatedSandboxState,
+          getDcodeSelectionDrift: vi.fn(),
+          register,
+          note: vi.fn(),
+          error,
+          exitProcess: (code): never => {
+            throw new Error(`exit ${code}`);
+          },
+        },
+      ),
+    ).toThrow("exit 1");
+
+    expect(restoreRecreatedSandboxState).not.toHaveBeenCalled();
+    expect(register).not.toHaveBeenCalled();
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("registry unreadable"));
+    expect(error).toHaveBeenCalledWith(
+      "  State was not restored and registry metadata was not updated.",
+    );
+    expect(error).toHaveBeenCalledWith('    openshell sandbox delete "openclaw"');
+    expect(error).toHaveBeenCalledWith(
+      "  Then rerun the original `nemoclaw onboard --from <Dockerfile>` command.",
+    );
+    expect(error).toHaveBeenCalledWith("  Manual recovery: /tmp/openclaw-backup");
+  });
+
+  it("does not register after a marked backup provenance mismatch", () => {
+    const register = vi.fn();
+    const error = vi.fn();
+
+    expect(() =>
+      finalizeCreatedSandbox(
+        {
+          sandboxName: "openclaw",
+          restoreBackupPath: "/tmp/openclaw-backup",
+          preUpgradeBackup: false,
+          targetAgentType: "openclaw",
+          discoverOpenClawImagePluginInstalls: true,
+          validateManagedDcode: false,
+          provider: "compatible-endpoint",
+          model: "demo",
+          preferredInferenceApi: "openai-completions",
+        },
+        {
+          discoverFreshOpenClawImagePluginInstalls: () => ({
+            ok: true,
+            extensionDirs: ["weather"],
+            pluginInstalls,
+          }),
+          restoreRecreatedSandboxState: () => ({
+            success: false,
+            restoredDirs: [],
+            failedDirs: ["manifest"],
+            restoredFiles: [],
+            failedFiles: [],
+            error: sandboxState.OPENCLAW_IMAGE_PLUGIN_PROVENANCE_RESTORE_ERROR,
+          }),
+          getDcodeSelectionDrift: vi.fn(),
+          register,
+          note: vi.fn(),
+          error,
+          exitProcess: (code): never => {
+            throw new Error(`exit ${code}`);
+          },
+        },
+      ),
+    ).toThrow("exit 1");
+
+    expect(register).not.toHaveBeenCalled();
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("future rebuild would be unsafe"));
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining(sandboxState.OPENCLAW_IMAGE_PLUGIN_PROVENANCE_RESTORE_ERROR),
+    );
+    expect(error).toHaveBeenCalledWith('    openshell sandbox delete "openclaw"');
+    expect(error).toHaveBeenCalledWith(
+      "  Then rerun the original `nemoclaw onboard --from <Dockerfile>` command.",
+    );
+    expect(error).toHaveBeenCalledWith("  Manual recovery: /tmp/openclaw-backup");
   });
 });

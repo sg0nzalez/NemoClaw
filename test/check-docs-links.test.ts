@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect } from "vitest";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { describe, expect, it } from "vitest";
 
 const REPO_ROOT = path.dirname(import.meta.dirname);
 const CHECK_DOCS = path.join(import.meta.dirname, "e2e", "e2e-cloud-experimental", "check-docs.sh");
@@ -87,7 +87,7 @@ describe("check-docs link validation", () => {
         "",
         "[OpenClaw overview](/user-guide/openclaw/about/overview)",
         "[OpenClaw home](/openclaw)",
-        "[OpenClaw hardening](/user-guide/openclaw/manage-sandboxes/sandbox-hardening)",
+        "[OpenClaw hardening](/user-guide/openclaw/manage-sandboxes/configure-sandboxes/review-sandbox-hardening)",
         '<Card title="Hermes overview" href="/user-guide/hermes/about/overview">',
         '<Card title="Hermes home" href="/user-guide/hermes">',
         "",
@@ -116,9 +116,61 @@ describe("check-docs link validation", () => {
     );
     expect(routeRelativeResult.status).toBe(0);
     expect(`${slugAliasResult.stdout}${slugAliasResult.stderr}`).not.toContain(
-      "../manage-sandboxes/sandbox-hardening",
+      "../manage-sandboxes/configure-sandboxes/review-sandbox-hardening",
     );
     expect(slugAliasResult.status).toBe(0);
+  });
+
+  it("resolves route-relative links from Deep Agents generated source aliases", () => {
+    const tempDir = fs.mkdtempSync(path.join(REPO_ROOT, "docs", "check-docs-deepagents-"));
+    const sourcePath = path.join(tempDir, "source.mdx");
+    const navPath = path.join(tempDir, "index.yml");
+    const sourceRel = path.relative(path.join(REPO_ROOT, "docs"), sourcePath);
+    const generatedRel = `_build/agent-variants/${sourceRel.replace(/\.mdx$/, ".deepagents.generated.mdx")}`;
+    const targetRel = path.relative(
+      path.join(REPO_ROOT, "docs"),
+      path.join(tempDir, "target.deepagents.generated.mdx"),
+    );
+    try {
+      fs.writeFileSync(
+        sourcePath,
+        [
+          "---",
+          'title: "Temporary Deep Agents Source"',
+          "---",
+          "",
+          "[Generated target](target)",
+          "",
+        ].join("\n"),
+      );
+      fs.writeFileSync(
+        navPath,
+        [
+          "navigation:",
+          "  - tab: user-guide",
+          "    variants:",
+          "      - title: Deep Agents",
+          "        slug: deepagents",
+          "        layout:",
+          '          - section: "Temporary"',
+          "            slug: temporary",
+          "            contents:",
+          '              - page: "Source"',
+          `                path: ${generatedRel}`,
+          "                slug: source",
+          '              - page: "Target"',
+          `                path: ${targetRel}`,
+          "                slug: target",
+          "",
+        ].join("\n"),
+      );
+
+      const result = runCheckDocs(sourcePath, { CHECK_DOCS_FERN_NAV_YML: navPath });
+
+      expect(result.status).toBe(0);
+    } finally {
+      fs.rmSync(tempDir, { force: true, recursive: true });
+    }
   });
 
   it("rejects .md/.mdx suffixes for links that resolve as Fern routes", () => {

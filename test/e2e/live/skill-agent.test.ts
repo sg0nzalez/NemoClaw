@@ -5,6 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { shellQuote } from "../../../src/lib/core/shell-quote";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
+import { resultText } from "../fixtures/clients/command.ts";
 import {
   type SandboxClient,
   trustedSandboxShellScript,
@@ -12,7 +13,7 @@ import {
 } from "../fixtures/clients/sandbox.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
 import { requireHostedInferenceConfig } from "../fixtures/hosted-inference.ts";
-import { shouldRunLiveE2E } from "../fixtures/live-project-gate.ts";
+import { CLI_ENTRYPOINT, REPO_ROOT } from "../fixtures/paths.ts";
 import {
   agentSectionContainsToken,
   isAgentVerificationFailClosed,
@@ -21,12 +22,10 @@ import {
   VERIFY_PHRASE,
 } from "../support/skill-agent-classifiers.ts";
 
-// Keep this as a direct live test: the the contract is skill fixture
+// Keep this as a direct live test: the contract is skill fixture
 // injection into a real OpenClaw sandbox plus an agent turn that must read
 // hands off to this live target.
 
-const REPO_ROOT = path.resolve(import.meta.dirname, "../../..");
-const CLI_ENTRYPOINT = path.join(REPO_ROOT, "bin", "nemoclaw.js");
 const ADD_SKILL_SCRIPT = path.join(
   REPO_ROOT,
   "test",
@@ -55,10 +54,6 @@ const RETRY_SLEEP_MS =
   Number.parseInt(process.env.E2E_SKILL_AGENT_RETRY_SLEEP_SEC ?? "15", 10) * 1_000;
 
 process.env.NEMOCLAW_CLI_BIN ??= CLI_ENTRYPOINT;
-
-function resultText(result: { stdout: string; stderr: string }): string {
-  return [result.stdout, result.stderr].filter(Boolean).join("\n");
-}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -107,9 +102,7 @@ async function ignoreCleanupError(run: () => Promise<unknown>): Promise<void> {
   }
 }
 
-const runSkillAgentTest = shouldRunLiveE2E() ? test : test.skip;
-
-runSkillAgentTest(
+test(
   "skill-agent: injected sandbox skill is read by a real OpenClaw agent turn",
   async ({ artifacts, cleanup, host, sandbox, secrets, skip }) => {
     expect(
@@ -139,9 +132,8 @@ runSkillAgentTest(
     const hosted = requireHostedInferenceConfig(secrets);
     const apiKey = hosted.apiKey;
 
-    await artifacts.writeJson("target.json", {
+    await artifacts.target.declare({
       id: "skill-agent",
-      runner: "vitest",
       boundary: "direct-cli-onboard-sandbox-skill-and-agent-turn",
       contract: [
         "Docker is available before onboarding",
@@ -155,6 +147,41 @@ runSkillAgentTest(
 
     let sandboxProvisioned = false;
     const cleanupEnv = buildAvailabilityProbeEnv();
+    type CleanupAttemptState = {
+      outcome: "pending" | "passed" | "failed";
+      error?: string;
+    };
+    const cleanupAttempts: {
+      nemoclaw: CleanupAttemptState;
+      openshell: CleanupAttemptState;
+    } = {
+      nemoclaw: { outcome: "pending" },
+      openshell: { outcome: "pending" },
+    };
+    const cleanupResultEvidence = (artifactName: string) => {
+      const resultArtifact = `shell/${artifactName}.result.json`;
+      try {
+        const result = JSON.parse(fs.readFileSync(artifacts.pathFor(resultArtifact), "utf8")) as {
+          exitCode: number | null;
+          signal: NodeJS.Signals | null;
+          timedOut: boolean;
+        };
+        return {
+          exitCode: result.exitCode,
+          resultArtifact,
+          signal: result.signal,
+          timedOut: result.timedOut,
+        };
+      } catch (error) {
+        return {
+          evidenceError: error instanceof Error ? error.message : String(error),
+          exitCode: null,
+          resultArtifact,
+          signal: null,
+          timedOut: null,
+        };
+      }
+    };
     await ignoreCleanupError(() =>
       host.command("node", [CLI_ENTRYPOINT, SANDBOX_NAME, "destroy", "--yes"], {
         artifactName: "pre-cleanup-nemoclaw-destroy-skill-agent",
@@ -170,32 +197,57 @@ runSkillAgentTest(
       }),
     );
 
-    cleanup.add(`destroy skill-agent sandbox ${SANDBOX_NAME}`, async () => {
-      const destroy = await host.command(
-        "node",
-        [CLI_ENTRYPOINT, SANDBOX_NAME, "destroy", "--yes"],
-        {
-          artifactName: "cleanup-nemoclaw-destroy-skill-agent",
-          env: buildAvailabilityProbeEnv(),
-          timeoutMs: 120_000,
-        },
-      );
-      const deleteSandbox = await sandbox.openshell(["sandbox", "delete", SANDBOX_NAME], {
-        artifactName: "cleanup-openshell-sandbox-delete-skill-agent",
-        env: buildAvailabilityProbeEnv(),
-        timeoutMs: 60_000,
-      });
+    cleanup.trackDisposable("write skill-agent cleanup summary", async () => {
+      const destroyEvidence = cleanupResultEvidence("cleanup-nemoclaw-destroy-skill-agent");
+      const deleteEvidence = cleanupResultEvidence("cleanup-openshell-sandbox-delete-skill-agent");
       await artifacts.writeJson("cleanup-skill-agent-summary.json", {
         sandboxProvisioned,
-        destroyExitCode: destroy.exitCode,
-        deleteExitCode: deleteSandbox.exitCode,
+        destroyExitCode: destroyEvidence.exitCode,
+        deleteExitCode: deleteEvidence.exitCode,
+        resources: ["nemoclaw sandbox", "OpenShell sandbox fallback"],
+        attempts: {
+          nemoclaw: { ...cleanupAttempts.nemoclaw, ...destroyEvidence },
+          openshell: { ...cleanupAttempts.openshell, ...deleteEvidence },
+        },
       });
-      if (sandboxProvisioned && destroy.exitCode !== 0 && deleteSandbox.exitCode !== 0) {
-        throw new Error(
-          `skill-agent cleanup failed\n${resultText(destroy)}\n${resultText(deleteSandbox)}`,
-        );
+    });
+    const openshellCleanupOptions = {
+      artifactName: "cleanup-openshell-sandbox-delete-skill-agent",
+      env: buildAvailabilityProbeEnv(),
+      timeoutMs: 60_000,
+    };
+    cleanup.trackDisposable(`delete OpenShell sandbox ${SANDBOX_NAME}`, async () => {
+      try {
+        await sandbox.cleanupSandbox(SANDBOX_NAME, openshellCleanupOptions);
+        cleanupAttempts.openshell.outcome = "passed";
+      } catch (error) {
+        cleanupAttempts.openshell.outcome = "failed";
+        cleanupAttempts.openshell.error = error instanceof Error ? error.message : String(error);
+        throw error;
       }
     });
+    const nemoclawCleanupOptions = {
+      artifactName: "cleanup-nemoclaw-destroy-skill-agent",
+      env: buildAvailabilityProbeEnv(),
+      redactionValues: [apiKey],
+      timeoutMs: 120_000,
+    };
+    cleanup.trackSandbox(
+      {
+        cleanupSandbox: async (name: string) => {
+          try {
+            await host.cleanupSandbox(name, nemoclawCleanupOptions);
+            cleanupAttempts.nemoclaw.outcome = "passed";
+          } catch (error) {
+            cleanupAttempts.nemoclaw.outcome = "failed";
+            cleanupAttempts.nemoclaw.error = error instanceof Error ? error.message : String(error);
+            throw error;
+          }
+        },
+      },
+      SANDBOX_NAME,
+      nemoclawCleanupOptions,
+    );
 
     const onboard = await host.command(
       "node",
@@ -227,7 +279,7 @@ runSkillAgentTest(
     );
     const onboardText = resultText(onboard);
     if (onboard.exitCode !== 0 && isExternalProviderValidationFailure(onboardText)) {
-      await artifacts.writeJson("target-result.json", {
+      await artifacts.target.complete({
         id: "skill-agent",
         status: "skipped",
         reason: "external-provider-validation-unavailable-before-sandbox-skill-check",
@@ -293,7 +345,7 @@ runSkillAgentTest(
     if (!agentOk) {
       const fixturePresent = await verifySkillFixturePresent(sandbox, SANDBOX_NAME);
       if (shouldSkipExternalAgentVerificationFailure(lastAgentOutput, fixturePresent)) {
-        await artifacts.writeJson("target-result.json", {
+        await artifacts.target.complete({
           id: "skill-agent",
           status: "skipped",
           reason: "external-agent-verification-flake-after-fixture-present",
@@ -310,7 +362,7 @@ runSkillAgentTest(
       `Agent did not return ${VERIFY_PHRASE}; last exit ${lastExitCode}\n${lastAgentOutput.slice(-12_000)}`,
     ).toBe(true);
 
-    await artifacts.writeJson("target-result.json", {
+    await artifacts.target.complete({
       id: "skill-agent",
       status: "passed",
       assertions: {

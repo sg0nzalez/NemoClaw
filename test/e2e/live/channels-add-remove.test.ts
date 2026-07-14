@@ -15,7 +15,6 @@ import {
 } from "../fixtures/clients/sandbox.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
 import { startFakeOpenAiCompatibleServer } from "../fixtures/fake-openai-compatible.ts";
-import { shouldRunLiveE2E } from "../fixtures/live-project-gate.ts";
 import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
 
 // Preserve the user-visible contract: onboard OpenClaw without messaging,
@@ -94,7 +93,7 @@ function redactionValues(apiKey: string): string[] {
   return [apiKey, TELEGRAM_TOKEN].filter((value) => value.length > 0);
 }
 
-async function bestEffort(run: () => Promise<unknown>): Promise<void> {
+async function bestEffortPreclean(run: () => Promise<unknown>): Promise<void> {
   try {
     await run();
   } catch {
@@ -364,9 +363,7 @@ async function telegramEgressProbe(
   return { result, status: "inconclusive" };
 }
 
-const liveTest = shouldRunLiveE2E() ? test : test.skip;
-
-liveTest(
+test(
   "channels add/remove telegram updates registry, gateway, policy, and sandbox state",
   testTimeoutOptions(TEST_TIMEOUT_MS),
   async ({ artifacts, cleanup, environment, host, lifecycle, onboard, sandbox }) => {
@@ -398,9 +395,8 @@ liveTest(
       onboarding: "cloud-openclaw",
     });
 
-    await artifacts.writeJson("target.json", {
+    await artifacts.target.declare({
       id: "channels-add-remove",
-      runner: "vitest",
       sandboxName: SANDBOX_NAME,
       contract: [
         "onboard creates an OpenClaw sandbox with no Telegram channel",
@@ -412,33 +408,36 @@ liveTest(
       ],
     });
 
-    cleanup.add(`destroy ${SANDBOX_NAME} after channels add/remove live test`, async () => {
-      await bestEffort(() => onboard.destroySandbox(SANDBOX_NAME, "cleanup-nemoclaw-destroy"));
-      await bestEffort(() =>
-        sandbox.openshell(["sandbox", "delete", SANDBOX_NAME], {
-          artifactName: "cleanup-openshell-sandbox-delete",
-          env: sandboxAccessEnv(),
-          timeoutMs: COMMAND_TIMEOUT_MS,
-        }),
-      );
-      await bestEffort(() =>
-        host.command("openshell", ["gateway", "destroy", "-g", "nemoclaw"], {
-          artifactName: "cleanup-openshell-gateway-destroy",
-          env: baseEnv(),
-          timeoutMs: COMMAND_TIMEOUT_MS,
-        }),
-      );
+    cleanup.trackGateway(host, "nemoclaw", {
+      artifactName: "cleanup-openshell-gateway-destroy",
+      env: baseEnv(),
+      timeoutMs: COMMAND_TIMEOUT_MS,
     });
+    cleanup.trackDisposable(`delete ${SANDBOX_NAME} OpenShell sandbox`, () =>
+      sandbox.cleanupSandbox(SANDBOX_NAME, {
+        artifactName: "cleanup-openshell-sandbox-delete",
+        env: sandboxAccessEnv(),
+        timeoutMs: COMMAND_TIMEOUT_MS,
+      }),
+    );
+    cleanup.trackDisposable(
+      `destroy ${SANDBOX_NAME} after channels add/remove live test`,
+      async () => {
+        await onboard.destroySandbox(SANDBOX_NAME, "cleanup-nemoclaw-destroy");
+      },
+    );
 
-    await bestEffort(() => onboard.destroySandbox(SANDBOX_NAME, "pre-cleanup-nemoclaw-destroy"));
-    await bestEffort(() =>
+    await bestEffortPreclean(() =>
+      onboard.destroySandbox(SANDBOX_NAME, "pre-cleanup-nemoclaw-destroy"),
+    );
+    await bestEffortPreclean(() =>
       sandbox.openshell(["sandbox", "delete", SANDBOX_NAME], {
         artifactName: "pre-cleanup-openshell-sandbox-delete",
         env: sandboxAccessEnv(),
         timeoutMs: COMMAND_TIMEOUT_MS,
       }),
     );
-    await bestEffort(() =>
+    await bestEffortPreclean(() =>
       host.command("openshell", ["gateway", "destroy", "-g", "nemoclaw"], {
         artifactName: "pre-cleanup-openshell-gateway-destroy",
         env: baseEnv(),

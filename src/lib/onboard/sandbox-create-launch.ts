@@ -17,6 +17,7 @@ import {
 } from "./sandbox-prebuild";
 
 type OpenshellShellCommand = (args: string[]) => string;
+type OpenshellArgv = (args: string[]) => string[];
 
 // These non-secret scheduler controls are intentionally forwarded for bounded
 // live-test and operator tuning. Keep this as an exact allowlist: the host's
@@ -42,6 +43,7 @@ function appendOpenClawAutoPairRuntimeEnvArgs(
 
 export interface SandboxCreateLaunchInput {
   agent: AgentDefinition | null | undefined;
+  observabilityEnabled?: boolean;
   chatUiUrl: string;
   createArgs: readonly string[];
   sandboxName?: string;
@@ -51,11 +53,13 @@ export interface SandboxCreateLaunchInput {
   hermesDashboardState: HermesDashboardOnboardState;
   manageDashboard?: boolean;
   openshellShellCommand: OpenshellShellCommand;
+  openshellArgv?: OpenshellArgv;
   buildEnv?(): Record<string, string>;
 }
 
 export interface SandboxCreateLaunch {
   createCommand: string;
+  createArgv: string[];
   effectiveDashboardPort: string;
   envArgs: string[];
   sandboxEnv: Record<string, string>;
@@ -71,9 +75,38 @@ export interface SandboxCreateLaunchWithPrebuild extends SandboxCreateLaunch {
   prebuild: SandboxPrebuildResult;
 }
 
-export function prepareSandboxCreateLaunch(input: SandboxCreateLaunchInput): SandboxCreateLaunch {
-  const env = input.env ?? process.env;
-  const manageDashboard = input.manageDashboard ?? true;
+export function renderSandboxCreateCommand(
+  createArgs: readonly string[],
+  sandboxStartupCommand: readonly string[],
+  openshellShellCommand: OpenshellShellCommand,
+): string {
+  return `${openshellShellCommand([
+    "sandbox",
+    "create",
+    ...createArgs,
+    "--",
+    ...sandboxStartupCommand,
+  ])} 2>&1`;
+}
+
+export interface SandboxRuntimeEnvArgsInput {
+  agent: AgentDefinition | null;
+  chatUiUrl: string;
+  manageDashboard: boolean;
+  getDashboardForwardPort(chatUiUrl: string): string;
+  hermesDashboardState: HermesDashboardOnboardState;
+  extraPlaceholderKeys: readonly string[];
+  observabilityEnabled?: boolean;
+  sandboxName?: string;
+  env: NodeJS.ProcessEnv;
+  omitCredentialEnv?: boolean;
+}
+
+export function buildSandboxRuntimeEnvArgs(input: SandboxRuntimeEnvArgsInput): {
+  envArgs: string[];
+  effectiveDashboardPort: string;
+} {
+  const { agent, env, manageDashboard } = input;
   const envArgs = manageDashboard ? [formatEnvAssignment("CHAT_UI_URL", input.chatUiUrl)] : [];
 
   // When manageDashboard is enabled, pass the effective dashboard port into
@@ -87,13 +120,17 @@ export function prepareSandboxCreateLaunch(input: SandboxCreateLaunchInput): San
     : "0";
   if (manageDashboard) {
     envArgs.push(formatEnvAssignment("NEMOCLAW_DASHBOARD_PORT", effectiveDashboardPort));
+    if (env.NEMOCLAW_DASHBOARD_BIND === "0.0.0.0") {
+      envArgs.push(formatEnvAssignment("NEMOCLAW_DASHBOARD_BIND", "0.0.0.0"));
+    }
   }
 
-  appendOpenClawRuntimeEnvArgs(envArgs, input.agent ?? null);
-  appendOpenClawAutoPairRuntimeEnvArgs(envArgs, input.agent ?? null, env);
+  appendOpenClawRuntimeEnvArgs(envArgs, agent);
+  appendOpenClawAutoPairRuntimeEnvArgs(envArgs, agent, env);
   appendHermesDashboardEnvArgs(envArgs, input.hermesDashboardState, formatEnvAssignment);
   appendHostProxyEnvArgs(envArgs, env, {
-    dropCredentialBearingProxyUrls: input.agent?.name === "langchain-deepagents-code",
+    dropCredentialBearingProxyUrls:
+      agent?.name === "langchain-deepagents-code" || input.omitCredentialEnv === true,
   });
 
   // Propagate NEMOCLAW_PROXY_HOST / NEMOCLAW_PROXY_PORT to runtime containers
@@ -112,14 +149,40 @@ export function prepareSandboxCreateLaunch(input: SandboxCreateLaunchInput): San
     envArgs.push(formatEnvAssignment("NEMOCLAW_PROXY_PORT", sandboxProxyPort));
   }
 
-  if (input.agent?.name === "langchain-deepagents-code") {
+  if (agent?.name === "langchain-deepagents-code") {
     const sandboxName = input.sandboxName;
     if (sandboxName) {
       envArgs.push(formatEnvAssignment("NEMOCLAW_SANDBOX_NAME", sandboxName));
     }
+    envArgs.push(
+      formatEnvAssignment(
+        "NEMOCLAW_OBSERVABILITY",
+        input.observabilityEnabled === true ? "1" : "0",
+      ),
+    );
   }
 
-  appendExtraPlaceholderKeysEnvArg(envArgs, input.extraPlaceholderKeys, formatEnvAssignment);
+  if (!input.omitCredentialEnv) {
+    appendExtraPlaceholderKeysEnvArg(envArgs, input.extraPlaceholderKeys, formatEnvAssignment);
+  }
+
+  return { envArgs, effectiveDashboardPort };
+}
+
+export function prepareSandboxCreateLaunch(input: SandboxCreateLaunchInput): SandboxCreateLaunch {
+  const env = input.env ?? process.env;
+  const manageDashboard = input.manageDashboard ?? true;
+  const { envArgs, effectiveDashboardPort } = buildSandboxRuntimeEnvArgs({
+    agent: input.agent ?? null,
+    chatUiUrl: input.chatUiUrl,
+    manageDashboard,
+    getDashboardForwardPort: input.getDashboardForwardPort,
+    hermesDashboardState: input.hermesDashboardState,
+    extraPlaceholderKeys: input.extraPlaceholderKeys,
+    observabilityEnabled: input.observabilityEnabled,
+    sandboxName: input.sandboxName,
+    env,
+  });
 
   const sandboxEnv = (input.buildEnv ?? buildSubprocessEnv)();
   // Remove host-infrastructure credentials that the generic allowlist
@@ -132,16 +195,19 @@ export function prepareSandboxCreateLaunch(input: SandboxCreateLaunchInput): San
   // command (awk, always 0) unless pipefail is set. Removing the pipe
   // lets the real exit code flow through to run().
   const sandboxStartupCommand = ["env", ...envArgs, "nemoclaw-start"];
-  const createCommand = `${input.openshellShellCommand([
-    "sandbox",
-    "create",
-    ...input.createArgs,
-    "--",
-    ...sandboxStartupCommand,
-  ])} 2>&1`;
+  const openshellArgs = ["sandbox", "create", ...input.createArgs, "--", ...sandboxStartupCommand];
+  const createCommand = renderSandboxCreateCommand(
+    input.createArgs,
+    sandboxStartupCommand,
+    input.openshellShellCommand,
+  );
+  const createArgv = input.openshellArgv
+    ? input.openshellArgv(openshellArgs)
+    : ["bash", "-lc", createCommand];
 
   return {
     createCommand,
+    createArgv,
     effectiveDashboardPort,
     envArgs,
     sandboxEnv,

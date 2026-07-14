@@ -96,6 +96,7 @@ export function createDeps(
 ) {
   let session = createSession();
   const calls = {
+    checkGatewayRouteCompatibility: vi.fn(() => ({ ok: true as const })),
     note: vi.fn(),
     updateSession: vi.fn((mutator: (value: Session) => Session | void) => {
       session = mutator(session) ?? session;
@@ -114,6 +115,40 @@ export function createDeps(
     promptName: vi.fn(async () => "my-assistant"),
     selectResourceProfile: vi.fn(async () => null as ResourceProfile | null),
     stopStale: vi.fn(),
+    planRegisteredExtraProviders: vi.fn(() => ({
+      extraProviders: [] as string[],
+      staleExtraProviders: [] as string[],
+    })),
+    resolveCreateIntent: vi.fn(
+      async (input: {
+        sandboxName: string;
+        extraProviders: readonly string[];
+        staleExtraProviders: readonly string[];
+      }) => ({
+        sandboxName: input.sandboxName,
+        activeMessagingChannels: [],
+        messagingProviderRequests: [],
+        reusableMessagingProviders: [],
+        extraProviders: [...input.extraProviders],
+        staleExtraProviders: [...input.staleExtraProviders],
+        hermesToolGateways: [],
+        policy: {
+          basePolicyPath: "/repo/policy.yaml",
+          activeMessagingChannels: [],
+          options: {
+            directGpu: false,
+            additionalPresets: [],
+            policyTier: null,
+          },
+        },
+        gpuCreateArgs: [],
+        resourceCreateArgs: [],
+        gpuRoutePlan: "none" as const,
+        sandboxGpuLogMessage: null,
+        disabledChannelNames: [],
+        extraPlaceholderKeys: [],
+      }),
+    ),
     createSandbox: vi.fn(async () => "my-assistant"),
     updateSandbox: vi.fn(),
     complete: vi.fn(async (_stepName: string, updates: SessionUpdates) => {
@@ -127,6 +162,24 @@ export function createDeps(
     exit: vi.fn((code: number): never => {
       throw new Error(`exit ${code}`);
     }),
+    withGatewayRouteMutationLock: vi.fn(),
+    withDashboardPortReservationLock: vi.fn(),
+  };
+  const runWithDashboardPortReservationLock =
+    overrides.withDashboardPortReservationLock ??
+    (async <T>(operation: () => Promise<T> | T): Promise<T> => {
+      calls.withDashboardPortReservationLock(operation);
+      return await operation();
+    });
+  const runWithGatewayRouteMutationLock = async <T>(
+    gatewayName: string,
+    operation: () => Promise<T> | T,
+  ): Promise<T> => {
+    if (overrides.withGatewayRouteMutationLock) {
+      return await overrides.withGatewayRouteMutationLock(gatewayName, operation);
+    }
+    calls.withGatewayRouteMutationLock(gatewayName, operation);
+    return await operation();
   };
   return {
     calls,
@@ -144,6 +197,10 @@ export function createDeps(
       getSandboxHermesToolGateways: () => [],
       getSandboxRegistryEntry: (name: string) => ({
         name,
+        provider: "provider",
+        model: "model",
+        endpointUrl: null,
+        preferredInferenceApi: "openai-completions",
         webSearchEnabled: false,
         toolDisclosure: "progressive" as const,
         fromDockerfile: null,
@@ -169,6 +226,8 @@ export function createDeps(
       selectResourceProfileForSandbox: calls.selectResourceProfile,
       stopStaleDashboardListenersForSandbox: calls.stopStale,
       listRegistrySandboxes: () => ({ sandboxes: [{ name: "old" }] }),
+      planRegisteredExtraProviders: calls.planRegisteredExtraProviders,
+      resolveSandboxCreateIntent: calls.resolveCreateIntent,
       createSandbox: calls.createSandbox,
       updateSandboxRegistry: calls.updateSandbox,
       getSandboxAgentRegistryFields: () => ({ agent: null }),
@@ -180,6 +239,10 @@ export function createDeps(
       error: calls.error,
       exitProcess: calls.exit,
       ...overrides,
+      checkGatewayRouteCompatibility:
+        overrides.checkGatewayRouteCompatibility ?? calls.checkGatewayRouteCompatibility,
+      withDashboardPortReservationLock: runWithDashboardPortReservationLock,
+      withGatewayRouteMutationLock: runWithGatewayRouteMutationLock,
     },
     getSession: () => session,
   };
@@ -207,6 +270,8 @@ export function baseOptions(
     resume: false,
     fresh: false,
     resumeAgentChanged: false,
+    recreateSandbox: () => false,
+    gatewayName: "nemoclaw",
     session,
     sandboxName: null,
     model: "model",

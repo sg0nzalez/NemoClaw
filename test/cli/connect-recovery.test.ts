@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { nonWslPlatformNodeOptions } from "../helpers/platform-override-node-options";
 import {
   runWithEnv,
   testTimeoutOptions,
@@ -206,6 +207,7 @@ describe("CLI connect recovery process contracts", () => {
       try {
         const result = runWithEnv("alpha connect --probe-only", {
           HOME: home,
+          NODE_OPTIONS: nonWslPlatformNodeOptions(home),
           PATH: `${localBin}:${process.env.PATH || ""}`,
         });
 
@@ -280,6 +282,7 @@ describe("CLI connect recovery process contracts", () => {
       try {
         const result = runWithEnv("alpha connect --probe-only", {
           HOME: home,
+          NODE_OPTIONS: nonWslPlatformNodeOptions(home),
           PATH: `${localBin}:${process.env.PATH || ""}`,
         });
 
@@ -348,6 +351,7 @@ describe("CLI connect recovery process contracts", () => {
     try {
       const result = runWithEnv("alpha connect --probe-only", {
         HOME: home,
+        NODE_OPTIONS: nonWslPlatformNodeOptions(home),
         PATH: `${localBin}:${process.env.PATH || ""}`,
       });
 
@@ -447,6 +451,10 @@ describe("CLI connect recovery process contracts", () => {
         "  echo '  Phase: Ready'",
         "  exit 0",
         "fi",
+        'if [ "$1" = "sandbox" ] && [ "$2" = "exec" ] && [ "$3" = "--name" ] && [ "$4" = "alpha" ]; then',
+        "  echo 'OK 200'",
+        "  exit 0",
+        "fi",
         'if [ "$1" = "sandbox" ] && [ "$2" = "connect" ] && [ "$3" = "alpha" ]; then',
         "  exit 0",
         "fi",
@@ -461,6 +469,7 @@ describe("CLI connect recovery process contracts", () => {
 
     const result = runWithEnv("alpha connect", {
       HOME: home,
+      NODE_OPTIONS: nonWslPlatformNodeOptions(home),
       PATH: `${localBin}:${process.env.PATH || ""}`,
     });
 

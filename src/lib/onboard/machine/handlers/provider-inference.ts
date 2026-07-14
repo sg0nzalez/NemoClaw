@@ -1,15 +1,33 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { clearAutoDetectedCompatibleContextWindow } from "../../../inference/compatible-endpoint-context";
 import { resolveAgentProviderInferenceApi } from "../../../inference/config";
+import type {
+  CurrentGatewayRouteCompatibilityCheck,
+  CurrentGatewayRouteDiscoveryPreflight,
+  GatewayRouteDiscoveryConstraints,
+} from "../../../inference/gateway-route-compatibility";
 import type { WebSearchConfig } from "../../../inference/web-search";
 import type { HermesAuthMethod, Session, SessionUpdates } from "../../../state/onboard-session";
+import type { OnboardInferenceCapabilityCache } from "../../inference-capability-cache";
+import type {
+  createProviderRecoveryReceiptLedger,
+  ProviderRecoveryReceipt,
+} from "../../rebuild-route-handoff";
 import { withInferenceTrace, withProviderSelectionTrace } from "../../tracing";
 import { advanceTo, type OnboardStateTransitionResult, retryTo } from "../result";
+import { createRecovery, type RecoveryAuthority } from "./provider-inference-recovery";
+import {
+  assertProviderInferenceRouteCompatible,
+  guardProviderInferenceRouteSelection,
+  type ProviderInferenceProbeRoute,
+} from "./provider-inference-route-containment";
 
 export type ProviderInferenceRetry = { retry: "selection" } | { ok: true; retry?: undefined };
 
 export interface ProviderInferenceSetupOptions {
+  gatewayName?: string;
   allowToolsIncompatible?: boolean;
   skipHostInferenceSmoke?: boolean;
   reuseGatewayCredentialWithoutLocalKey?: boolean;
@@ -20,6 +38,14 @@ export interface ProviderInferenceSetupOptions {
    * compatible-anthropic-endpoint register type=openai).
    */
   preferredInferenceApi?: string | null;
+  /** Public addresses approved for custom endpoint host probes. */
+  endpointPinnedAddresses?: readonly string[];
+  /** One-shot host capability cache carried only through this onboarding run. */
+  inferenceCapabilityCache?: OnboardInferenceCapabilityCache;
+  /** Onboard session that owns the route reservation this setup creates. */
+  reservationSessionId?: string;
+  /** Recheck recorded-route ownership after acquiring route mutation locks. */
+  isRecordedProviderRecoveryAuthorized?: () => boolean;
 }
 
 export interface ProviderSelectionResult {
@@ -35,9 +61,13 @@ export interface ProviderSelectionResult {
   allowToolsIncompatible?: boolean;
   skipHostInferenceSmoke?: boolean;
   reuseGatewayCredentialWithoutLocalKey?: boolean;
+  recoveredFromSandbox?: boolean;
+  endpointPinnedAddresses?: string[];
+  inferenceCapabilityCache?: OnboardInferenceCapabilityCache;
 }
 
 export interface ProviderInferenceStateOptions<Gpu, Agent, Host> {
+  gatewayName: string;
   resume: boolean;
   fresh: boolean;
   session: Session | null;
@@ -49,6 +79,9 @@ export interface ProviderInferenceStateOptions<Gpu, Agent, Host> {
   forceInferenceSetup?: boolean;
   /** Trust the rebuild-preflighted session selection even if its old step marker is incomplete. */
   authoritativeResumeConfig?: boolean;
+  /** One-shot authority, activated at selection, to recover a recorded provider during rebuild. */
+  providerRecoveryReceipt?: ProviderRecoveryReceipt | null;
+  providerRecoveryReceiptLedger?: ReturnType<typeof createProviderRecoveryReceiptLedger>;
   initial: {
     model: string | null;
     provider: string | null;
@@ -69,12 +102,28 @@ export interface ProviderInferenceStateOptions<Gpu, Agent, Host> {
     hermesApiKeyCredentialEnv: string;
   };
   deps: {
+    checkGatewayRouteCompatibility: CurrentGatewayRouteCompatibilityCheck;
+    preflightGatewayRouteDiscovery: CurrentGatewayRouteDiscoveryPreflight;
+    getSandboxRecoveryAuthority(
+      sandboxName: string,
+      sessionId: string | null | undefined,
+    ): RecoveryAuthority;
+    withGatewayRouteMutationLock<T>(
+      gatewayName: string,
+      operation: () => Promise<T> | T,
+    ): Promise<T>;
     normalizeHermesAuthMethod(value: string | null | undefined): HermesAuthMethod | null;
     setupNim(
       gpu: Gpu,
       sandboxName: string | null,
       agent: Agent,
       allowRecordedProviderRecovery?: boolean,
+      gatewayName?: string,
+      assertRouteCompatible?: (
+        route: ProviderInferenceProbeRoute,
+      ) => GatewayRouteDiscoveryConstraints,
+      canProbeRoute?: (provider: string) => boolean,
+      recoverySessionId?: string | null,
     ): Promise<ProviderSelectionResult>;
     setupInference(
       sandboxName: string | null,
@@ -94,10 +143,12 @@ export interface ProviderInferenceStateOptions<Gpu, Agent, Host> {
     toSessionUpdates(updates: Record<string, unknown>): SessionUpdates;
     skippedStepMessage(stepName: string, detail?: string | null): void;
     ensureResumeProviderReady(
+      gatewayName: string,
       provider: string | null | undefined,
       credentialEnv: string | null | undefined,
     ): Promise<{ forceInferenceSetup: boolean; credentialEnv: string | null }>;
     isResumeProviderSurfaceReady(
+      gatewayName: string,
       provider: string | null | undefined,
       preferredInferenceApi: string | null | undefined,
       credentialEnv: string | null | undefined,
@@ -125,14 +176,27 @@ export interface ProviderInferenceStateOptions<Gpu, Agent, Host> {
     isNonInteractive(): boolean;
     getOpenshellBinary(): string;
     needsBedrockRuntimeAdapter(provider: string, endpointUrl: string | null): boolean;
-    isInferenceRouteReady(provider: string, model: string): boolean;
+    isInferenceRouteReady(gatewayName: string, provider: string, model: string): boolean;
     isRoutedInferenceProvider(provider: string): boolean;
     reconcileModelRouter(): Promise<void>;
     reupsertRoutedProvider(
+      gatewayName: string,
       provider: string,
       endpointUrl: string | null,
       credentialEnv: string | null,
     ): { ok: boolean; endpointUrl: string; message?: string; status?: number };
+    reserveSandboxInferenceRoute(
+      sandboxName: string,
+      route: {
+        provider: string;
+        model: string;
+        endpointUrl: string | null;
+        credentialEnv: string | null;
+        preferredInferenceApi: string | null;
+        gatewayName: string;
+        reservationSessionId?: string;
+      },
+    ): boolean;
     registryUpdateSandbox(sandboxName: string, updates: { nimContainer?: string | null }): void;
     promptValidatedSandboxName(agent: Agent): Promise<string>;
     assessHost(): Host;
@@ -232,6 +296,7 @@ function shouldRefreshCompatibleEndpointRouteForMessaging(
 }
 
 export async function handleProviderInferenceState<Gpu, Agent, Host>({
+  gatewayName,
   resume,
   fresh,
   session,
@@ -241,6 +306,8 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
   forceProviderSelection: initialForceProviderSelection = false,
   forceInferenceSetup: initialForceInferenceSetup = false,
   authoritativeResumeConfig = false,
+  providerRecoveryReceipt = null,
+  providerRecoveryReceiptLedger,
   initial,
   selectedMessagingChannels,
   env,
@@ -275,12 +342,27 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
   let allowToolsIncompatible = false;
   let skipHostInferenceSmoke = false;
   let reuseGatewayCredentialWithoutLocalKey = false;
+  let endpointPinnedAddresses: string[] | undefined;
+  let inferenceCapabilityCache: OnboardInferenceCapabilityCache | undefined;
   const effectiveResume = resume && !fresh;
   const stateResults: OnboardStateTransitionResult[] = [];
   const retryStateResults: OnboardStateTransitionResult[] = [];
 
   while (true) {
+    // Drop a context window auto-detected by a prior compatible-endpoint pass
+    // before every provider-selection path — fresh, resume, and repair — so a
+    // retry to a different provider/endpoint cannot inherit endpoint A's probed
+    // max_model_len as a bogus user override. Only clears a value this process
+    // auto-detected, never a user override or a legitimately resumed window
+    // (#6177; resume/repair coverage per PR #6293 PRA-3).
+    clearAutoDetectedCompatibleContextWindow(process.env);
     let forceInferenceSetup = initialForceInferenceSetup;
+    let recoveredRecordedProvider = false;
+    const providerRecovery = createRecovery(fresh, sandboxName, session, deps, {
+      recoveryReceipt: providerRecoveryReceipt,
+      recoveryReceiptLedger: providerRecoveryReceiptLedger,
+      gatewayName,
+    });
     const resumeProviderSelection =
       !forceProviderSelection &&
       effectiveResume &&
@@ -289,7 +371,13 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
       typeof model === "string";
     let shouldRecordProviderSelection = false;
     if (resumeProviderSelection) {
-      const recovery = await deps.ensureResumeProviderReady(provider, credentialEnv);
+      assertProviderInferenceRouteCompatible(deps, gatewayName, sandboxName, {
+        provider,
+        model,
+        endpointUrl,
+        preferredInferenceApi,
+      });
+      const recovery = await deps.ensureResumeProviderReady(gatewayName, provider, credentialEnv);
       forceInferenceSetup ||= recovery.forceInferenceSetup;
       credentialEnv = recovery.credentialEnv;
       // Rebuild may be resuming a legacy session whose step marker was never
@@ -307,6 +395,7 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
       }
       if (
         !deps.isResumeProviderSurfaceReady(
+          gatewayName,
           provider,
           preferredInferenceApi,
           credentialEnv,
@@ -382,10 +471,32 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
       }
     } else {
       await deps.startRecordedStep("provider_selection");
+      const recoverRecordedProvider = providerRecovery.shouldRecover();
       const selection = await withProviderSelectionTrace(
         sandboxName,
         (agent as { name?: string } | null)?.name,
-        () => deps.setupNim(gpu, sandboxName, agent, !fresh),
+        () =>
+          deps.setupNim(
+            gpu,
+            sandboxName,
+            agent,
+            recoverRecordedProvider,
+            gatewayName,
+            (route) => guardProviderInferenceRouteSelection(deps, gatewayName, sandboxName, route),
+            (provider) =>
+              deps.preflightGatewayRouteDiscovery({
+                gatewayName,
+                sandboxName,
+                route: {
+                  provider,
+                  model: null,
+                  endpointUrl: null,
+                  preferredInferenceApi: null,
+                  credentialEnv: null,
+                },
+              }).ok,
+            providerRecovery.sessionId,
+          ),
       );
       model = selection.model;
       provider = selection.provider;
@@ -400,6 +511,10 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
       skipHostInferenceSmoke = selection.skipHostInferenceSmoke === true;
       reuseGatewayCredentialWithoutLocalKey =
         selection.reuseGatewayCredentialWithoutLocalKey === true;
+      recoveredRecordedProvider = selection.recoveredFromSandbox === true;
+      forceInferenceSetup ||= recoveredRecordedProvider;
+      endpointPinnedAddresses = selection.endpointPinnedAddresses;
+      inferenceCapabilityCache = selection.inferenceCapabilityCache;
       shouldRecordProviderSelection = true;
     }
 
@@ -418,6 +533,14 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
       provider,
       preferredInferenceApi,
     );
+    if (!resumeProviderSelection) {
+      assertProviderInferenceRouteCompatible(deps, gatewayName, sandboxName, {
+        provider,
+        model,
+        endpointUrl,
+        preferredInferenceApi,
+      });
+    }
     if (shouldRecordProviderSelection) {
       session = await deps.recordStepComplete(
         "provider_selection",
@@ -451,7 +574,7 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
       !forceProviderSelection &&
       !forceInferenceSetup &&
       effectiveResume &&
-      deps.isInferenceRouteReady(provider, model);
+      deps.isInferenceRouteReady(gatewayName, provider, model);
     if (resumeInference) {
       if (provider === constants.hermesProviderName) {
         let inferenceResult: ProviderInferenceRetry;
@@ -459,12 +582,16 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
           if (!sandboxName) sandboxName = await deps.promptValidatedSandboxName(agent);
           const confirmedSandboxName = sandboxName;
           const inferenceOptions = {
+            gatewayName,
             allowToolsIncompatible,
             ...(skipHostInferenceSmoke ? { skipHostInferenceSmoke } : {}),
             ...(reuseGatewayCredentialWithoutLocalKey
               ? { reuseGatewayCredentialWithoutLocalKey }
               : {}),
             ...(preferredInferenceApi ? { preferredInferenceApi } : {}),
+            ...(endpointPinnedAddresses ? { endpointPinnedAddresses } : {}),
+            ...(inferenceCapabilityCache ? { inferenceCapabilityCache } : {}),
+            reservationSessionId: session?.sessionId,
           };
           await deps.startRecordedStep("inference", { provider, model });
           inferenceResult = await withInferenceTrace(
@@ -509,26 +636,87 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
         );
         break;
       }
-      if (deps.isRoutedInferenceProvider(provider)) {
-        try {
-          await deps.reconcileModelRouter();
-        } catch (err) {
-          deps.error(
-            `  ✗ Failed to reconcile model router: ${err instanceof Error ? err.message : String(err)}`,
-          );
-          deps.exitProcess(1);
-        }
+      const sandboxStepComplete = session?.steps?.sandbox?.status === "complete";
+      const resumeReservationName =
+        authoritativeResumeConfig || !sandboxStepComplete
+          ? (sandboxName ?? (await deps.promptValidatedSandboxName(agent)))
+          : null;
+      if (resumeReservationName) sandboxName = resumeReservationName;
+      const routedInferenceProvider = deps.isRoutedInferenceProvider(provider);
+      if (routedInferenceProvider) {
         // #4564: re-upsert the gateway provider with the sandbox-facing
         // endpoint so a stale localhost base URL recorded by an earlier run is
         // repaired on resume instead of surviving and breaking inference.local.
-        const reupserted = deps.reupsertRoutedProvider(provider, endpointUrl, credentialEnv);
+        const routedRepair = await deps.withGatewayRouteMutationLock(gatewayName, async () => {
+          assertProviderInferenceRouteCompatible(deps, gatewayName, sandboxName, {
+            provider: selectedProvider,
+            model: selectedModel,
+            endpointUrl,
+            preferredInferenceApi,
+          });
+          try {
+            await deps.reconcileModelRouter();
+          } catch (err) {
+            deps.error(
+              `  ✗ Failed to reconcile model router: ${err instanceof Error ? err.message : String(err)}`,
+            );
+            deps.exitProcess(1);
+          }
+          const reupserted = deps.reupsertRoutedProvider(
+            gatewayName,
+            selectedProvider,
+            endpointUrl,
+            credentialEnv,
+          );
+          const reserved =
+            reupserted.ok && resumeReservationName
+              ? deps.reserveSandboxInferenceRoute(resumeReservationName, {
+                  provider: selectedProvider,
+                  model: selectedModel,
+                  endpointUrl: reupserted.endpointUrl,
+                  credentialEnv,
+                  preferredInferenceApi,
+                  gatewayName,
+                  reservationSessionId: session?.sessionId,
+                })
+              : null;
+          return { reupserted, reserved };
+        });
+        const { reupserted, reserved } = routedRepair;
         if (!reupserted.ok) {
           deps.error(
             `  ${reupserted.message ?? "Failed to update the routed inference provider."}`,
           );
           deps.exitProcess(reupserted.status ?? 1);
         }
+        if (reserved === false) {
+          deps.error(`  Failed to reserve inference route for sandbox '${resumeReservationName}'.`);
+          deps.exitProcess(1);
+        }
         endpointUrl = reupserted.endpointUrl;
+      }
+      if (resumeReservationName && !routedInferenceProvider) {
+        const reserved = await deps.withGatewayRouteMutationLock(gatewayName, () => {
+          assertProviderInferenceRouteCompatible(deps, gatewayName, resumeReservationName, {
+            provider: selectedProvider,
+            model: selectedModel,
+            endpointUrl,
+            preferredInferenceApi,
+          });
+          return deps.reserveSandboxInferenceRoute(resumeReservationName, {
+            provider: selectedProvider,
+            model: selectedModel,
+            endpointUrl,
+            credentialEnv,
+            preferredInferenceApi,
+            gatewayName,
+            reservationSessionId: session?.sessionId,
+          });
+        });
+        if (!reserved) {
+          deps.error(`  Failed to reserve inference route for sandbox '${resumeReservationName}'.`);
+          deps.exitProcess(1);
+        }
       }
       deps.skippedStepMessage("inference", `${provider} / ${model}`);
       await deps.recordStateSkipped("inference", {
@@ -583,10 +771,18 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
       }
 
       const inferenceOptions = {
+        gatewayName,
         allowToolsIncompatible,
         ...(skipHostInferenceSmoke ? { skipHostInferenceSmoke } : {}),
         ...(reuseGatewayCredentialWithoutLocalKey ? { reuseGatewayCredentialWithoutLocalKey } : {}),
         ...(preferredInferenceApi ? { preferredInferenceApi } : {}),
+        ...(endpointPinnedAddresses ? { endpointPinnedAddresses } : {}),
+        ...(inferenceCapabilityCache ? { inferenceCapabilityCache } : {}),
+        ...providerRecovery.setupOptions(
+          recoveredRecordedProvider,
+          confirmedSandboxName,
+          session?.sessionId,
+        ),
       };
       await deps.startRecordedStep("inference", { provider, model });
       inferenceResult = await withInferenceTrace(

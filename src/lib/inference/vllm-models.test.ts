@@ -16,6 +16,25 @@ import {
 } from "./vllm-models";
 
 describe("vllm model registry", () => {
+  it("records a finite positive Hugging Face download size for every model", () => {
+    for (const model of VLLM_MODELS) {
+      expect(Number.isFinite(model.downloadSizeBytes)).toBe(true);
+      expect(model.downloadSizeBytes).toBeGreaterThan(0);
+    }
+  });
+
+  it("pins the official Hugging Face repository totals", () => {
+    expect(
+      Object.fromEntries(VLLM_MODELS.map((model) => [model.envValue, model.downloadSizeBytes])),
+    ).toEqual({
+      "qwen3.6-27b": 30_900_000_000,
+      "deepseek-r1-distill-70b": 141_000_000_000,
+      "nemotron-3-nano-4b": 5_280_000_000,
+      "deepseek-v4-flash": 160_000_000_000,
+      "qwen3.6-35b-a3b-nvfp4": 23_500_000_000,
+    });
+  });
+
   it("returns null when NEMOCLAW_VLLM_MODEL is unset so the caller can fall back to the profile default", () => {
     expect(selectVllmModelFromEnv({} as NodeJS.ProcessEnv)).toBeNull();
   });
@@ -209,7 +228,7 @@ describe("vllm model registry", () => {
     expect(qwen35b!.gated).toBe(false);
   });
 
-  it("builds the NVFP4 serve command from the DGX Spark model-card recipe", () => {
+  it("builds the NVFP4 serve command from the DGX Spark model-card recipe (#6457)", () => {
     const qwen35b = VLLM_MODELS.find((m) => m.envValue === "qwen3.6-35b-a3b-nvfp4");
     const cmd = buildVllmServeCommand(qwen35b!);
     // The current NVIDIA model card no longer needs Spark-specific env exports.
@@ -227,7 +246,16 @@ describe("vllm model registry", () => {
     expect(cmd).toContain("--attention-backend flashinfer");
     expect(cmd).toContain("--moe-backend marlin");
     expect(cmd).toContain("--enable-auto-tool-choice");
-    expect(cmd).toContain("--tool-call-parser qwen3_xml");
+    // #6457: `qwen3_coder` (not `qwen3_xml`) is the validated tool-call parser
+    // for this Spark checkpoint; `qwen3_xml` mis-parses its tool-call frames and
+    // breaks Deep Agents Code tool calls with HTTP 400.
+    expect(cmd).toContain("--tool-call-parser qwen3_coder");
+    expect(cmd).not.toContain("qwen3_xml");
+    // Exactly one tool-call parser is configured for the Spark recipe, so the
+    // #6457 regression (serving this checkpoint with qwen3_xml, which mis-parses
+    // its tool-call frames and fails Deep Agents Code with HTTP 400) cannot creep
+    // back in alongside qwen3_coder.
+    expect(cmd.match(/--tool-call-parser/g)).toHaveLength(1);
     expect(cmd).toContain("--reasoning-parser qwen3");
     expect(cmd).toContain("--max-model-len 262144");
     expect(cmd).toContain(

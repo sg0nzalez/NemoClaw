@@ -94,15 +94,63 @@ describe("registry", () => {
       name: "alpha",
       webSearchEnabled: true,
       toolDisclosure: "direct",
+      observabilityEnabled: true,
       fromDockerfile: "/tmp/Dockerfile.custom",
       hermesAuthMethod: "oauth",
     });
     expect(registry.getSandbox("alpha")).toMatchObject({
       webSearchEnabled: true,
       toolDisclosure: "direct",
+      observabilityEnabled: true,
       fromDockerfile: "/tmp/Dockerfile.custom",
       hermesAuthMethod: "oauth",
     });
+  });
+
+  it("round-trips absent, known-empty, populated, and cloned image-plugin provenance", () => {
+    const weatherInstall = {
+      id: "weather",
+      installPath: "/sandbox/.openclaw/extensions/weather",
+      loadPaths: [],
+    };
+    registry.registerSandbox({ name: "legacy", agent: "openclaw" });
+    registry.registerSandbox({
+      name: "known-empty",
+      agent: "openclaw",
+      openclawImagePluginInstalls: [],
+    });
+    registry.registerSandbox({
+      name: "populated",
+      agent: "openclaw",
+      openclawImagePluginInstalls: [weatherInstall],
+    });
+    registry.registerSandbox({
+      ...registry.getSandbox("populated"),
+      name: "populated-clone",
+    });
+    registry.registerSandbox({
+      ...registry.getSandbox("known-empty"),
+      name: "known-empty-clone",
+    });
+
+    const data = JSON.parse(fs.readFileSync(regFile, "utf-8")).sandboxes;
+    expect(registry.getSandbox("legacy").openclawImagePluginInstalls).toBeUndefined();
+    expect(registry.getSandbox("known-empty").openclawImagePluginInstalls).toEqual([]);
+    expect(registry.getSandbox("known-empty-clone").openclawImagePluginInstalls).toEqual([]);
+    expect(registry.getSandbox("populated").openclawImagePluginInstalls).toEqual([weatherInstall]);
+    expect(registry.getSandbox("populated-clone").openclawImagePluginInstalls).toEqual([
+      weatherInstall,
+    ]);
+    expect(data.legacy.openclawImagePluginInstalls).toBeUndefined();
+    expect(data["known-empty"].openclawImagePluginInstalls).toEqual([]);
+    expect(data["known-empty-clone"].openclawImagePluginInstalls).toEqual([]);
+    expect(data.populated.openclawImagePluginInstalls).toEqual([weatherInstall]);
+    expect(data["populated-clone"].openclawImagePluginInstalls).toEqual([weatherInstall]);
+  });
+
+  it("does not invent observability intent for legacy registry rows", () => {
+    registry.registerSandbox({ name: "legacy" });
+    expect(registry.getSandbox("legacy").observabilityEnabled).toBeUndefined();
   });
 
   it("preserves missing tool-disclosure state on reconstructed legacy rows", () => {
@@ -802,6 +850,62 @@ describe("registry", () => {
     ]);
     expect(data.sandboxes.messaging.messagingChannels).toBeUndefined();
     expect(data.sandboxes.messaging.messagingChannelConfig).toBeUndefined();
+  });
+
+  it("drops legacy providerCredentialHashes when rewriting messaging rows (#3631)", () => {
+    const basePlan = makeMessagingPlan("messaging", ["telegram"]);
+    const binding = {
+      channelId: "telegram",
+      credentialId: "telegramBotToken",
+      sourceInput: "botToken",
+      providerName: "messaging-telegram-bridge",
+      providerEnvKey: "TELEGRAM_BOT_TOKEN",
+      placeholder: "openshell:resolve:env:TELEGRAM_BOT_TOKEN",
+      credentialAvailable: true,
+      credentialHash: "new-hash",
+    };
+    fs.mkdirSync(path.dirname(regFile), { recursive: true });
+    fs.writeFileSync(
+      regFile,
+      `${JSON.stringify(
+        {
+          sandboxes: {
+            messaging: {
+              name: "messaging",
+              messaging: {
+                schemaVersion: 1,
+                plan: {
+                  ...basePlan,
+                  credentialBindings: [binding],
+                },
+              },
+              providerCredentialHashes: [
+                {
+                  channel: "telegram",
+                  credentialHashes: { TELEGRAM_BOT_TOKEN: "old-hash" },
+                },
+              ],
+            },
+          },
+          defaultSandbox: "messaging",
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    registry.updateSandbox("messaging", { model: "new-model" });
+
+    const data = JSON.parse(fs.readFileSync(regFile, "utf-8"));
+    expect(data.sandboxes.messaging.providerCredentialHashes).toBeUndefined();
+    expect(data.sandboxes.messaging.messaging.plan.credentialBindings).toEqual([
+      {
+        channelId: "telegram",
+        providerEnvKey: "TELEGRAM_BOT_TOKEN",
+        credentialAvailable: true,
+        credentialHash: "new-hash",
+      },
+    ]);
   });
 
   it("imageTag defaults to null when not provided", () => {

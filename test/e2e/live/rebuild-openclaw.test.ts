@@ -7,6 +7,8 @@ import os from "node:os";
 import path from "node:path";
 import { shellQuote } from "../../../src/lib/core/shell-quote";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
+import { assertCleanupSucceededOrAbsent } from "../fixtures/cleanup-resources.ts";
+import { assertExitZero as expectExitZero, resultText } from "../fixtures/clients/command.ts";
 import type { HostCliClient } from "../fixtures/clients/host.ts";
 import { validateSandboxName } from "../fixtures/clients/sandbox.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
@@ -17,7 +19,7 @@ import {
   snapshotFile,
   writeJsonFile,
 } from "../fixtures/file-state.ts";
-import { shouldRunLiveE2E } from "../fixtures/live-project-gate.ts";
+import { CLI_ENTRYPOINT, REPO_ROOT } from "../fixtures/paths.ts";
 import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
 import { createOldBaseBuildContext } from "./rebuild-openclaw-old-base-context.ts";
 
@@ -28,8 +30,6 @@ import { createOldBaseBuildContext } from "./rebuild-openclaw-old-base-context.t
 //
 // Simplicity boundary: no new registry, fixture family, or migration ledger.
 
-const REPO_ROOT = path.resolve(import.meta.dirname, "../../..");
-const CLI_ENTRYPOINT = path.join(REPO_ROOT, "bin", "nemoclaw.js");
 const OLD_OPENCLAW_VERSION = "2026.3.11";
 const MARKER_FILE = "/sandbox/.openclaw/workspace/rebuild-marker.txt";
 const REGISTRY_FILE = path.join(os.homedir(), ".nemoclaw", "sandboxes.json");
@@ -78,14 +78,6 @@ interface GatewayTokenRotationResult {
   hashReferencesConfig: boolean;
   hashChanged: boolean;
   hashValid: boolean;
-}
-
-function resultText(result: ShellProbeResult): string {
-  return [result.stdout, result.stderr].filter(Boolean).join("\n");
-}
-
-function expectExitZero(result: ShellProbeResult, label: string): void {
-  expect(result.exitCode, `${label} failed:\n${resultText(result)}`).toBe(0);
 }
 
 function isRetryableOnboardEndpointFailure(result: ShellProbeResult): boolean {
@@ -143,6 +135,33 @@ function openshellBestEffort(
       env: dockerContextEnv(),
       timeoutMs: OPENSHELL_TIMEOUT_MS,
     },
+  );
+}
+
+async function cleanupRebuiltNemoClawSandbox(host: HostCliClient, apiKey: string): Promise<void> {
+  const result = await host.command("node", [CLI_ENTRYPOINT, SANDBOX_NAME, "destroy", "--yes"], {
+    artifactName: "cleanup-nemoclaw-destroy",
+    env: cliEnv(apiKey),
+    redactionValues: [apiKey],
+    timeoutMs: 2 * 60_000,
+  });
+  assertCleanupSucceededOrAbsent(
+    result,
+    /Sandbox '.+' does not exist|Run 'nemoclaw onboard' to create one|sandbox .* not found|no such sandbox/iu,
+    `cleanup rebuilt sandbox ${SANDBOX_NAME}`,
+  );
+}
+
+async function cleanupOldOpenClawBaseImage(host: HostCliClient): Promise<void> {
+  const result = await host.command("docker", ["rmi", OLD_BASE_TAG], {
+    artifactName: "cleanup-docker-rmi-old-base",
+    env: dockerContextEnv(),
+    timeoutMs: OPENSHELL_TIMEOUT_MS,
+  });
+  assertCleanupSucceededOrAbsent(
+    result,
+    /No such image|image .* not found/iu,
+    `cleanup old OpenClaw base image ${OLD_BASE_TAG}`,
   );
 }
 
@@ -320,9 +339,10 @@ function backupCredentialLeakPaths(backupDir: string, oldGatewayToken: string): 
   return leaks;
 }
 
-// Gate this live test on NEMOCLAW_RUN_LIVE_E2E=1. Accidental cli-test-shard
-// discovery must not build Docker images, mutate ~/.nemoclaw, or call NVIDIA.
-test.skipIf(!shouldRunLiveE2E())(
+// The e2e-live Vitest project owns the NEMOCLAW_RUN_LIVE_E2E collection gate.
+// Accidental cli-test-shard discovery must not build Docker images, mutate
+// ~/.nemoclaw, or call NVIDIA.
+test(
   "rebuild-openclaw: old OpenClaw sandbox rebuild preserves state and rotates gateway token",
   async ({ artifacts, cleanup, host, sandbox, secrets, skip }) => {
     const apiKey = secrets.required("NVIDIA_INFERENCE_API_KEY");
@@ -387,39 +407,29 @@ test.skipIf(!shouldRunLiveE2E())(
     const registrySnapshot = snapshotFile(REGISTRY_FILE);
     const sessionSnapshot = snapshotFile(SESSION_FILE);
     const sandboxBackupRoot = path.join(BACKUP_ROOT, SANDBOX_NAME);
-    cleanup.add(`restore NemoClaw state files for ${SANDBOX_NAME}`, () => {
+    cleanup.trackDisposable(`restore NemoClaw state files for ${SANDBOX_NAME}`, () => {
       restoreFile(REGISTRY_FILE, registrySnapshot);
       restoreFile(SESSION_FILE, sessionSnapshot);
       fs.rmSync(sandboxBackupRoot, { recursive: true, force: true });
     });
-
-    cleanup.add(`destroy rebuilt sandbox ${SANDBOX_NAME}`, async () => {
-      await host.command(
-        "node",
-        [CLI_ENTRYPOINT, SANDBOX_NAME, "destroy", "--yes", "--cleanup-gateway"],
-        {
-          artifactName: "cleanup-nemoclaw-destroy",
-          env: cliEnv(apiKey),
-          redactionValues: [apiKey],
-          timeoutMs: 2 * 60_000,
-        },
-      );
-      await openshellBestEffort(
-        host,
-        ["sandbox", "delete", SANDBOX_NAME],
-        "cleanup-openshell-sandbox-delete",
-      );
-      await openshellBestEffort(
-        host,
-        ["gateway", "destroy", "-g", "nemoclaw"],
-        "cleanup-openshell-gateway-destroy",
-      );
-      await host.command("docker", ["rmi", OLD_BASE_TAG], {
-        artifactName: "cleanup-docker-rmi-old-base",
+    cleanup.trackDisposable(`remove old OpenClaw base image ${OLD_BASE_TAG}`, () =>
+      cleanupOldOpenClawBaseImage(host),
+    );
+    cleanup.trackGateway(host, "nemoclaw", {
+      artifactName: "cleanup-openshell-gateway-destroy",
+      env: dockerContextEnv(),
+      timeoutMs: OPENSHELL_TIMEOUT_MS,
+    });
+    cleanup.trackDisposable(`delete rebuilt OpenShell sandbox ${SANDBOX_NAME}`, () =>
+      sandbox.cleanupSandbox(SANDBOX_NAME, {
+        artifactName: "cleanup-openshell-sandbox-delete",
         env: dockerContextEnv(),
         timeoutMs: OPENSHELL_TIMEOUT_MS,
-      });
-    });
+      }),
+    );
+    cleanup.trackDisposable(`destroy rebuilt sandbox ${SANDBOX_NAME}`, () =>
+      cleanupRebuiltNemoClawSandbox(host, apiKey),
+    );
 
     // Phase 1: create a normal current sandbox first so the real gateway and
     // session/credential scaffolding exist, matching the legacy install/onboard
@@ -701,6 +711,9 @@ print(json.dumps({'seeded': saved == os.environ['PRE_REBUILD_GATEWAY_TOKEN'], 'h
       },
     );
     expectExitZero(rebuild, "nemoclaw rebuild");
+    const rebuildText = resultText(rebuild);
+    expect(rebuildText).toContain(`Sandbox '${SANDBOX_NAME}' rebuilt successfully`);
+    expect(rebuildText).not.toContain("post-restore steps were incomplete");
 
     // Phase 7: state preservation, upgrade, token rotation, backup hygiene, and
     // policy-preset preservation assertions.

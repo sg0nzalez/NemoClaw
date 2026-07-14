@@ -302,7 +302,17 @@ def _proc_pid_namespace_inode(proc_pid_fd: int) -> int | None:
 
 
 def _cmdline_is_nemoclaw_start(raw: bytes) -> bool:
-    return any(argument in NEMOCLAW_START_ARGV for argument in raw.split(b"\0"))
+    normalized = raw.rstrip(b"\0")
+    arguments = tuple(normalized.split(b"\0")) if normalized else ()
+    # Docker appends CMD arguments after ENTRYPOINT. Authenticate the canonical
+    # startup script position while allowing those opaque trailing arguments.
+    direct = bool(arguments) and arguments[0] in NEMOCLAW_START_ARGV
+    bash = (
+        len(arguments) >= 2
+        and arguments[0] in {b"bash", b"/bin/bash", b"/usr/bin/bash"}
+        and arguments[1] in NEMOCLAW_START_ARGV
+    )
+    return direct or bash
 
 
 def _cmdline_is_openshell_supervisor(raw: bytes) -> bool:
@@ -635,6 +645,7 @@ def _pinned_process_matches_supervised_nonroot_start(
             and second_status[0] == expected_effective_uid
             and first_status[1][-1] == numeric_pid
             and second_status[1][-1] == numeric_pid
+            and first_cmdline == second_cmdline
             and _cmdline_is_nemoclaw_start(first_cmdline)
             and _cmdline_is_nemoclaw_start(second_cmdline)
             and namespace_matches
@@ -1223,6 +1234,76 @@ def _hash_text(
     return text, config_snapshot, env_snapshot
 
 
+def _applied_mcp_hash_text(
+    config_path: str,
+    env_path: str,
+    compat_hash: str,
+    source_hash_text: str,
+    current_mcp: str,
+    state: McpHashState,
+    mode: str,
+) -> tuple[str, FileSnapshot, FileSnapshot]:
+    """Build the metadata-only MCP applied-state commit from one stable input."""
+    if not secrets.compare_digest(current_mcp, state.intended):
+        raise UnsafePathError("Hermes MCP config changed before applied-state commit")
+    # Applying intent is a metadata-only commit. Require the complete
+    # config/env snapshot to still match the pending trust anchor rather than
+    # re-hashing and blessing unrelated concurrent changes.
+    pending_hash_text, config_snapshot, env_snapshot = _hash_text(
+        config_path, env_path, state
+    )
+    if not secrets.compare_digest(pending_hash_text, source_hash_text):
+        raise UnsafePathError(
+            "Hermes config or env changed before applied-state commit"
+        )
+    if mode == "both" and not secrets.compare_digest(
+        _read_hash_file(compat_hash), source_hash_text
+    ):
+        raise UnsafePathError(
+            "Hermes strict and compatibility MCP state differ before "
+            "applied-state commit"
+        )
+    applied_state = McpHashState(state.intended, state.intended)
+    lines = pending_hash_text.splitlines(keepends=True)
+    state_line = (
+        f"{MCP_HASH_STATE_PREFIX} intended={applied_state.intended} "
+        f"applied={applied_state.applied}\n"
+    )
+    for index, line in enumerate(lines):
+        if line.startswith(MCP_HASH_STATE_PREFIX):
+            lines[index] = state_line
+            break
+    else:
+        raise UnsafePathError(
+            "Hermes MCP state marker missing before applied-state commit"
+        )
+    return "".join(lines), config_snapshot, env_snapshot
+
+
+def _hash_text_for_refresh(
+    config_path: str,
+    env_path: str,
+    compat_hash: str,
+    source_hash_text: str,
+    current_mcp: str,
+    state: McpHashState,
+    mode: str,
+    mcp_transition: str,
+) -> tuple[str, FileSnapshot, FileSnapshot]:
+    """Resolve the hash refresh payload and its input snapshots in one step."""
+    if mcp_transition == "apply":
+        return _applied_mcp_hash_text(
+            config_path,
+            env_path,
+            compat_hash,
+            source_hash_text,
+            current_mcp,
+            state,
+            mode,
+        )
+    return _hash_text(config_path, env_path, state)
+
+
 def _sealed_file_limit(name: str) -> int:
     if name == "config.yaml":
         return MAX_CONFIG_INPUT_BYTES
@@ -1322,38 +1403,16 @@ def refresh_hashes(
                 "Hermes MCP rollback config does not match the previously applied state"
             )
         state = McpHashState(current_mcp, state.intended)
-    else:
-        if not secrets.compare_digest(current_mcp, state.intended):
-            raise UnsafePathError(
-                "Hermes MCP config changed before applied-state commit"
-            )
-        # Applying intent is a metadata-only commit. Require the complete
-        # config/env snapshot to still match the pending trust anchor rather
-        # than re-hashing and blessing unrelated concurrent changes.
-        pending_hash_text, config_snapshot, env_snapshot = _hash_text(
-            config_path, env_path, state
-        )
-        if not secrets.compare_digest(pending_hash_text, source_hash_text):
-            raise UnsafePathError(
-                "Hermes config or env changed before applied-state commit"
-            )
-        if mode == "both" and not secrets.compare_digest(
-            _read_hash_file(compat_hash), source_hash_text
-        ):
-            raise UnsafePathError(
-                "Hermes strict and compatibility MCP state differ before applied-state commit"
-            )
-        state = McpHashState(state.intended, state.intended)
-        lines = pending_hash_text.splitlines(keepends=True)
-        lines[2] = (
-            f"{MCP_HASH_STATE_PREFIX} intended={state.intended} applied={state.applied}\n"
-        )
-        hash_text = "".join(lines)
-
-    if mcp_transition != "apply":
-        hash_text, config_snapshot, env_snapshot = _hash_text(
-            config_path, env_path, state
-        )
+    hash_text, config_snapshot, env_snapshot = _hash_text_for_refresh(
+        config_path,
+        env_path,
+        compat_hash,
+        source_hash_text,
+        current_mcp,
+        state,
+        mode,
+        mcp_transition,
+    )
 
     def assert_inputs_stable() -> None:
         config = _open_regular(config_path)
@@ -2653,7 +2712,7 @@ def seal_restart(
         try:
             _verify_strict_hash(hermes_dir, hash_file)
         except StrictHashMismatchError:
-            if purpose != "config-write" or expected_config_sha256 is None:
+            if purpose not in ("config-write", "shields-mutable") or expected_config_sha256 is None:
                 raise
             _reconcile_nonroot_startup_api_key_hash(
                 hermes_dir,
@@ -3441,8 +3500,23 @@ def begin_shields_transition(
             rollback_mode or "mutable",
         )
 
+    # A fresh managed non-root Hermes start mints exactly one API_SERVER_KEY and
+    # refreshes its sandbox-owned compatibility anchor, while the root-owned
+    # strict anchor deliberately remains unchanged. The first shields-down is
+    # the next root transaction and must admit that same narrowly reviewed
+    # reconciliation as write-config. Derive the expected config digest from
+    # the existing strict anchor so shields can never bless config drift.
+    strict_config_sha256, _strict_env_sha256, _strict_mcp_state = _parse_config_hash(
+        _read_hash_file(hash_file),
+        os.path.join(hermes_dir, "config.yaml"),
+        os.path.join(hermes_dir, ".env"),
+    )
     original_locked = seal_restart(
-        hermes_dir, hash_file, state_file, purpose="shields-mutable"
+        hermes_dir,
+        hash_file,
+        state_file,
+        purpose="shields-mutable",
+        expected_config_sha256=strict_config_sha256,
     )
     try:
         state_data = _load_restart_state(state_file)
@@ -3567,23 +3641,24 @@ def _configure_shields_target_metadata(
             )
 
     sandbox_uid, sandbox_gid = _sandbox_identity()
-    if mode == "locked":
-        desired_uid = os.geteuid()
-        desired_gid = os.getegid()
-        desired_dir_mode = 0o755
-        desired_file_mode = 0o444
-        # `/sandbox` must remain a usable home, but its sticky root-owned entry
-        # prevents the sandbox identity from renaming the root-owned `.hermes`
-        # lock root out from under the protected files.
-        parent_meta.update({"uid": os.geteuid(), "gid": sandbox_gid, "mode": 0o1775})
-    elif mode == "mutable":
-        desired_uid = sandbox_uid
-        desired_gid = sandbox_gid
-        desired_dir_mode = 0o3770
-        desired_file_mode = 0o640
-        parent_meta.update({"uid": sandbox_uid, "gid": sandbox_gid, "mode": 0o755})
-    else:
+    if mode not in ("locked", "mutable"):
         raise UnsafePathError(f"refusing unsupported Hermes shields target: {mode}")
+
+    locked = mode == "locked"
+    desired_uid = os.geteuid() if locked else sandbox_uid
+    desired_gid = os.getegid() if locked else sandbox_gid
+    desired_dir_mode = 0o755 if locked else 0o3770
+    desired_file_mode = 0o444 if locked else 0o640
+    # `/sandbox` must remain a usable home, but its sticky root-owned entry
+    # prevents the sandbox identity from renaming the root-owned `.hermes`
+    # lock root out from under the protected files.
+    parent_meta.update(
+        {
+            "uid": desired_uid,
+            "gid": sandbox_gid,
+            "mode": 0o1775 if locked else 0o755,
+        }
+    )
 
     state_data["parent"] = parent_meta
     state_data["parent_flags"] = int(state_data.get("parent_flags", 0)) & ~(

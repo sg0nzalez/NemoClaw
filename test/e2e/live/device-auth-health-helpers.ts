@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import fs from "node:fs";
-import path from "node:path";
 
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
 import type { HostCliClient } from "../fixtures/clients/host.ts";
@@ -12,10 +11,10 @@ import {
   trustedSandboxShellScript,
   validateSandboxName,
 } from "../fixtures/clients/sandbox.ts";
+import { REPO_ROOT } from "../fixtures/paths.ts";
 import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
 import { isTransientProviderValidationFailure } from "./network-policy-transient-provider.ts";
 
-const REPO_ROOT = path.resolve(import.meta.dirname, "../../..");
 export const SANDBOX_NAME = process.env.NEMOCLAW_SANDBOX_NAME ?? "e2e-health-auth";
 validateSandboxName(SANDBOX_NAME);
 export const DASHBOARD_PORT = process.env.NEMOCLAW_DASHBOARD_PORT ?? "18789";
@@ -50,7 +49,7 @@ export function commandEnv(inference?: DeviceAuthInferenceFixture): NodeJS.Proce
   return env;
 }
 
-export async function bestEffort(run: () => Promise<unknown>): Promise<void> {
+export async function preCleanBestEffort(run: () => Promise<unknown>): Promise<void> {
   try {
     await run();
   } catch {
@@ -94,15 +93,15 @@ export async function cleanupDeviceAuthSandbox(
   host: HostCliClient,
   sandbox: SandboxClient,
 ): Promise<void> {
-  await bestEffort(() =>
+  await preCleanBestEffort(() =>
     host.nemoclaw([SANDBOX_NAME, "destroy", "--yes"], {
       artifactName: "cleanup-nemoclaw-destroy-device-auth-health",
       env: commandEnv(),
       timeoutMs: 120_000,
     }),
   );
-  await bestEffort(() =>
-    sandbox.openshell(["sandbox", "delete", SANDBOX_NAME], {
+  await preCleanBestEffort(() =>
+    sandbox.cleanupSandbox(SANDBOX_NAME, {
       artifactName: "cleanup-openshell-delete-device-auth-health",
       env: commandEnv(),
       timeoutMs: 60_000,

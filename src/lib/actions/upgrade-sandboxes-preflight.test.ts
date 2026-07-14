@@ -13,7 +13,6 @@ const mocks = vi.hoisted(() => ({
   parseLiveSandboxEntries: vi.fn(),
   parseReadySandboxNames: vi.fn(),
   prompt: vi.fn(),
-  rebuildSandbox: vi.fn(),
   shouldSkipUpgradeConfirmation: vi.fn(),
   splitRebuildableSandboxes: vi.fn(),
 }));
@@ -38,16 +37,21 @@ vi.mock("../runtime-recovery", () => ({
   parseReadySandboxNames: mocks.parseReadySandboxNames,
 }));
 vi.mock("../sandbox/version", () => ({ checkAgentVersion: mocks.checkAgentVersion }));
-vi.mock("../state/registry", () => ({ listSandboxes: mocks.listSandboxes }));
+vi.mock("../state/registry", () => ({
+  isRouteOnlySandboxReservation: (entry: { pendingRouteReservation?: true; createdAt?: string }) =>
+    entry.pendingRouteReservation === true && entry.createdAt === undefined,
+  listSandboxes: mocks.listSandboxes,
+}));
 vi.mock("../state/sandbox", () => ({ getLatestBackup: mocks.getLatestBackup }));
-vi.mock("./sandbox/rebuild", () => ({ rebuildSandbox: mocks.rebuildSandbox }));
 
-import { upgradeSandboxes } from "./upgrade-sandboxes";
+import { upgradeSandboxes, upgradeSandboxesDependencies } from "./upgrade-sandboxes";
 
 describe("upgrade-sandboxes gateway preflight adapter (#6237)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv("NEMOCLAW_RESTORE_LATEST_BACKUP_ON_RECREATE", "");
+    vi.spyOn(upgradeSandboxesDependencies, "getGatewayPort").mockReturnValue(8080);
+    vi.spyOn(upgradeSandboxesDependencies, "rebuildSandbox").mockResolvedValue(undefined);
     mocks.captureSandboxListWithGatewayPreflightOrExit.mockResolvedValue({
       status: 0,
       output: "alpha Ready",
@@ -110,6 +114,6 @@ describe("upgrade-sandboxes gateway preflight adapter (#6237)", () => {
 
     expect(mocks.classifyUpgradeableSandboxes).not.toHaveBeenCalled();
     expect(mocks.getLatestBackup).not.toHaveBeenCalled();
-    expect(mocks.rebuildSandbox).not.toHaveBeenCalled();
+    expect(upgradeSandboxesDependencies.rebuildSandbox).not.toHaveBeenCalled();
   });
 });

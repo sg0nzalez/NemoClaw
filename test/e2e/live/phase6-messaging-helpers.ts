@@ -1,10 +1,17 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import path from "node:path";
-
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
-import { shellQuote } from "../fixtures/clients/command.ts";
+import type { CleanupRegistry } from "../fixtures/cleanup.ts";
+import {
+  cleanupWhenCommandAvailable,
+  cleanupWhenOpenShellAvailable,
+} from "../fixtures/cleanup-resources.ts";
+import {
+  assertExitZero as expectExitZero,
+  resultText,
+  shellQuote,
+} from "../fixtures/clients/command.ts";
 import type { HostCliClient } from "../fixtures/clients/host.ts";
 import {
   type SandboxClient,
@@ -13,11 +20,13 @@ import {
   validateSandboxName,
 } from "../fixtures/clients/sandbox.ts";
 import { expect } from "../fixtures/e2e-test.ts";
+import { CLI_ENTRYPOINT, REPO_ROOT } from "../fixtures/paths.ts";
 import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
 import { isNvidiaEndpointRateLimitFailure } from "./messaging-providers-helpers.ts";
 
-export const REPO_ROOT = path.resolve(import.meta.dirname, "../../..");
-export const CLI = process.env.NEMOCLAW_CLI_BIN ?? path.join(REPO_ROOT, "bin", "nemoclaw.js");
+export { expectExitZero, REPO_ROOT, resultText };
+
+export const CLI = process.env.NEMOCLAW_CLI_BIN ?? CLI_ENTRYPOINT;
 
 export const INSTALL_TIMEOUT_MS = 45 * 60_000;
 export const COMMAND_TIMEOUT_MS = 120_000;
@@ -26,10 +35,6 @@ export type AgentKind = "openclaw" | "hermes";
 
 export function stripAnsi(value: string): string {
   return value.replace(/\u001b\[[0-9;]*m/g, "");
-}
-
-export function resultText(result: Pick<ShellProbeResult, "stdout" | "stderr">): string {
-  return [result.stdout, result.stderr].filter(Boolean).join("\n");
 }
 
 export { shellQuote };
@@ -64,16 +69,12 @@ export function redactionValues(apiKey: string | undefined): string[] {
   return [apiKey].filter((value): value is string => typeof value === "string" && value.length > 0);
 }
 
-export async function bestEffort(run: () => Promise<unknown>): Promise<void> {
+export async function runSecondaryCleanup(run: () => Promise<unknown>): Promise<void> {
   try {
     await run();
   } catch {
     // Cleanup and diagnostics must not hide primary test failures.
   }
-}
-
-export function expectExitZero(result: ShellProbeResult, label: string): void {
-  expect(result.exitCode, `${label}\n${resultText(result)}`).toBe(0);
 }
 
 export async function precleanSandbox(
@@ -83,7 +84,7 @@ export async function precleanSandbox(
   redactions: string[],
   prefix: string,
 ): Promise<void> {
-  await bestEffort(() =>
+  await runSecondaryCleanup(() =>
     host.command("node", [CLI, sandboxName, "destroy", "--yes"], {
       artifactName: `${prefix}-nemoclaw-destroy`,
       env,
@@ -91,8 +92,8 @@ export async function precleanSandbox(
       timeoutMs: 15 * 60_000,
     }),
   );
-  await bestEffort(() =>
-    host.command("openshell", ["sandbox", "delete", sandboxName], {
+  await runSecondaryCleanup(() =>
+    host.command(host.openshellCommandPath, ["sandbox", "delete", sandboxName], {
       artifactName: `${prefix}-openshell-sandbox-delete`,
       env,
       redactionValues: redactions,
@@ -109,6 +110,94 @@ export async function cleanupSandbox(
   prefix: string,
 ): Promise<void> {
   await precleanSandbox(host, sandboxName, env, redactions, prefix);
+}
+
+export function trackSandboxCleanup(
+  cleanup: CleanupRegistry,
+  host: HostCliClient,
+  sandbox: SandboxClient,
+  sandboxName: string,
+  env: NodeJS.ProcessEnv,
+  redactions: string[],
+  prefix: string,
+): void {
+  cleanup.trackDisposable(`delete OpenShell sandbox ${sandboxName}`, () =>
+    sandbox.cleanupSandbox(sandboxName, {
+      artifactName: `${prefix}-openshell-sandbox-delete`,
+      env,
+      redactionValues: redactions,
+      timeoutMs: 120_000,
+    }),
+  );
+  cleanup.trackSandbox(host, sandboxName, {
+    artifactName: `${prefix}-nemoclaw-destroy`,
+    env,
+    redactionValues: redactions,
+    timeoutMs: 15 * 60_000,
+  });
+}
+
+export function trackPreinstallSandboxCleanup(
+  cleanup: CleanupRegistry,
+  host: HostCliClient,
+  sandbox: SandboxClient,
+  sandboxName: string,
+  env: NodeJS.ProcessEnv,
+  redactions: string[],
+  prefix: string,
+): void {
+  const openshellOptions = {
+    artifactName: `${prefix}-openshell-sandbox-delete`,
+    env,
+    redactionValues: redactions,
+    timeoutMs: 120_000,
+  };
+  cleanup.trackDisposable(`delete OpenShell sandbox ${sandboxName}`, () =>
+    cleanupWhenOpenShellAvailable(
+      host,
+      {
+        artifactName: `${prefix}-probe-openshell-sandbox-delete`,
+        env,
+        redactionValues: redactions,
+        timeoutMs: 30_000,
+      },
+      () => sandbox.cleanupSandbox(sandboxName, openshellOptions),
+    ),
+  );
+  const nemoclawOptions = {
+    artifactName: `${prefix}-nemoclaw-destroy`,
+    env,
+    redactionValues: redactions,
+    timeoutMs: 15 * 60_000,
+  };
+  cleanup.trackSandbox(
+    {
+      cleanupSandbox: (name: string) =>
+        cleanupWhenCommandAvailable(
+          host,
+          host.commandPath,
+          {
+            artifactName: `${prefix}-probe-nemoclaw-destroy`,
+            env,
+            redactionValues: redactions,
+            timeoutMs: 30_000,
+          },
+          () =>
+            cleanupWhenOpenShellAvailable(
+              host,
+              {
+                artifactName: `${prefix}-probe-openshell-nemoclaw-destroy`,
+                env,
+                redactionValues: redactions,
+                timeoutMs: 30_000,
+              },
+              () => host.cleanupSandbox(name, nemoclawOptions),
+            ),
+        ),
+    },
+    sandboxName,
+    nemoclawOptions,
+  );
 }
 
 export async function installSandbox(
@@ -155,7 +244,7 @@ export async function expectSandboxReady(
   redactions: string[],
   artifactName: string,
 ): Promise<void> {
-  const list = await host.command("openshell", ["sandbox", "list"], {
+  const list = await host.command(host.openshellCommandPath, ["sandbox", "list"], {
     artifactName,
     env,
     redactionValues: redactions,

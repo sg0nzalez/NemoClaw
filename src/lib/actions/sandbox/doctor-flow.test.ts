@@ -1,7 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import fs from "node:fs";
 import { createRequire } from "node:module";
+import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import { testTimeoutOptions } from "../../../../test/helpers/timeouts";
@@ -29,6 +31,7 @@ function createDoctorHarness(): {
   resolveOpenShellSpy: MockInstance;
   runSandboxDoctor: RunSandboxDoctor;
 } {
+  const provider = "ollama-local";
   delete require.cache[requireDist.resolve(doctorModulePath)];
 
   const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
@@ -50,13 +53,13 @@ function createDoctorHarness(): {
   const tunnelServices = requireDist("../../tunnel/services.js");
   const doctorHostCommand = requireDist("./doctor-host-command.js");
   const doctorToolScope = requireDist("./doctor-tool-scope.js");
-  const processRecovery = requireDist("./process-recovery.js");
+  const inferenceRouteHealth = requireDist("./inference-route-health.js");
 
   const getSandboxSpy = vi.spyOn(registry, "getSandbox").mockReturnValue({
     name: "alpha",
     agent: "openclaw",
     model: "registry-model",
-    provider: "ollama-local",
+    provider,
     openshellDriver: "docker",
     gatewayName: "nemoclaw-19080",
     gatewayPort: 19080,
@@ -95,7 +98,7 @@ function createDoctorHarness(): {
         return { status: 0, output: "alpha Ready" };
       }
       if (argv[0] === "inference" && argv[1] === "get") {
-        return { status: 0, output: "Provider: ollama-local\nModel: live-model\n" };
+        return { status: 0, output: `Provider: ${provider}\nModel: live-model\n` };
       }
       return { status: 0, output: "" };
     });
@@ -116,11 +119,12 @@ function createDoctorHarness(): {
     detail: "healthy",
   });
   const probeSandboxInferenceGatewayHealthSpy = vi
-    .spyOn(processRecovery, "probeSandboxInferenceGatewayHealth")
+    .spyOn(inferenceRouteHealth, "probeSandboxInferenceGatewayHealth")
     .mockResolvedValue({
       ok: false,
-      endpoint: "http://127.0.0.1:19000/v1/chat/completions",
-      detail: "gateway refused connection",
+      endpoint: "https://inference.local/v1/models",
+      httpStatus: 0,
+      detail: "Inference gateway unreachable inside the sandbox.",
     });
   const loadAgentSpy = vi.spyOn(agentDefs, "loadAgent").mockReturnValue({
     name: "openclaw",
@@ -178,6 +182,14 @@ function createDoctorHarness(): {
     ]);
 
   logSpy.mockClear();
+  const runSandboxDoctor = requireDist(doctorModulePath).runSandboxDoctor;
+  const existsSync = fs.existsSync.bind(fs);
+  const cliBuildPath = [process.cwd(), "dist", "nemoclaw.js"].join(path.sep);
+  vi.spyOn(fs, "existsSync").mockImplementation((candidate) =>
+    typeof candidate === "string" && path.resolve(candidate) === cliBuildPath
+      ? true
+      : existsSync(candidate),
+  );
 
   return {
     buildToolScopeChecksSpy,
@@ -195,7 +207,7 @@ function createDoctorHarness(): {
     recoverNamedGatewayRuntimeSpy,
     repairMutableConfigPermsSpy,
     resolveOpenShellSpy,
-    runSandboxDoctor: requireDist(doctorModulePath).runSandboxDoctor,
+    runSandboxDoctor,
   };
 }
 
@@ -231,10 +243,14 @@ describe("runSandboxDoctor flow", () => {
           expect.objectContaining({ group: "Host", label: "Docker daemon", status: "ok" }),
           expect.objectContaining({ group: "Gateway", label: "OpenShell status", status: "ok" }),
           expect.objectContaining({ group: "Sandbox", label: "Live sandbox", status: "ok" }),
-          expect.objectContaining({ group: "Inference", label: "Provider health", status: "ok" }),
           expect.objectContaining({
             group: "Inference",
-            label: "Provider health (gateway)",
+            label: "Provider health (upstream)",
+            status: "ok",
+          }),
+          expect.objectContaining({
+            group: "Inference",
+            label: "Inference route (gateway)",
             status: "fail",
           }),
           expect.objectContaining({ group: "Messaging", label: "Channels", status: "info" }),
@@ -296,7 +312,7 @@ describe("runSandboxDoctor flow", () => {
       expect.arrayContaining([
         expect.objectContaining({
           group: "Inference",
-          label: "Provider health (gateway)",
+          label: "Inference route (gateway)",
           status: "info",
           detail: "skipped because the sandbox is not reachable through its named gateway",
         }),
@@ -338,6 +354,7 @@ describe("runSandboxDoctor flow", () => {
     harness.probeSandboxInferenceGatewayHealthSpy.mockResolvedValue({
       ok: true,
       endpoint: "http://127.0.0.1:19000/v1/chat/completions",
+      httpStatus: 200,
       detail: "healthy",
     });
 
@@ -376,10 +393,11 @@ describe("runSandboxDoctor flow", () => {
       configFile: "openclaw.json",
       issues: ["directory mode is 700"],
     });
-    const processRecovery = requireDist("./process-recovery.js");
-    vi.mocked(processRecovery.probeSandboxInferenceGatewayHealth).mockResolvedValue({
+    const inferenceRouteHealth = requireDist("./inference-route-health.js");
+    vi.mocked(inferenceRouteHealth.probeSandboxInferenceGatewayHealth).mockResolvedValue({
       ok: true,
       endpoint: "http://127.0.0.1:19000/v1/chat/completions",
+      httpStatus: 200,
       detail: "healthy",
     });
 
@@ -428,7 +446,7 @@ describe("runSandboxDoctor flow", () => {
     expect(report?.checks).toContainEqual(
       expect.objectContaining({
         group: "Inference",
-        label: "Provider health (gateway)",
+        label: "Inference route (gateway)",
       }),
     );
   });

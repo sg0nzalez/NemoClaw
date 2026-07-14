@@ -14,12 +14,14 @@ import os from "node:os";
 import path from "node:path";
 import type { ArtifactSink } from "../fixtures/artifacts.ts";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
+import { assertCleanupSucceededOrAbsent } from "../fixtures/cleanup-resources.ts";
+import { resultText } from "../fixtures/clients/command.ts";
 import type { HostCliClient } from "../fixtures/clients/host.ts";
 import { type SandboxClient, validateSandboxName } from "../fixtures/clients/sandbox.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
 import { testHomeEnvironment } from "../fixtures/environment-profiles.ts";
 import { requireHostedInferenceConfig } from "../fixtures/hosted-inference.ts";
-import { shouldRunLiveE2E } from "../fixtures/live-project-gate.ts";
+import { CLI_ENTRYPOINT, REPO_ROOT } from "../fixtures/paths.ts";
 import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
 import {
   buildPreContractExternalProviderSkipEvidence,
@@ -27,8 +29,6 @@ import {
   type PreContractExternalProviderFailure,
 } from "./cloud-inference-provider-skip.ts";
 
-const REPO_ROOT = path.resolve(import.meta.dirname, "../../..");
-const CLI_ENTRYPOINT = path.join(REPO_ROOT, "bin", "nemoclaw.js");
 const REPO_SKILL_VALIDATOR = path.join(
   REPO_ROOT,
   "test",
@@ -72,10 +72,6 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function resultText(result: Pick<ShellProbeResult, "stdout" | "stderr">): string {
-  return [result.stdout, result.stderr].filter(Boolean).join("\n");
-}
-
 async function writePreContractExternalProviderSkip(
   artifacts: ArtifactSink,
   install: ShellProbeResult,
@@ -83,14 +79,14 @@ async function writePreContractExternalProviderSkip(
 ): Promise<void> {
   const evidence = buildPreContractExternalProviderSkipEvidence(install, classification);
   await artifacts.writeJson("transient-provider-validation.skip.json", evidence);
-  await artifacts.writeJson("target-result.json", evidence);
+  await artifacts.target.complete(evidence);
 }
 
 function testEnv(home: string, extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   return testHomeEnvironment(home, extra, { ...process.env, OPENSHELL_GATEWAY: "nemoclaw" });
 }
 
-async function bestEffort(run: () => Promise<unknown>): Promise<void> {
+async function bestEffortPreclean(run: () => Promise<unknown>): Promise<void> {
   try {
     await run();
   } catch {
@@ -105,19 +101,31 @@ async function cleanupCloudInferenceState(
   home: string,
 ): Promise<void> {
   const env = testEnv(home);
-  await bestEffort(() =>
-    host.command("node", [CLI_ENTRYPOINT, SANDBOX_NAME, "destroy", "--yes"], {
-      artifactName: "cleanup-nemoclaw-destroy-cloud-inference",
-      env,
-      timeoutMs: 120_000,
-    }),
-  );
-  await bestEffort(() =>
+  await bestEffortPreclean(() => cleanupCloudInferenceNemoClawSandbox(host, home));
+  await bestEffortPreclean(() =>
     sandbox.openshell(["sandbox", "delete", SANDBOX_NAME], {
       artifactName: "cleanup-openshell-sandbox-delete-cloud-inference",
       env,
       timeoutMs: 60_000,
     }),
+  );
+}
+
+async function cleanupCloudInferenceNemoClawSandbox(
+  host: HostCliClient,
+  home: string,
+): Promise<void> {
+  const result = await host.command("node", [CLI_ENTRYPOINT, SANDBOX_NAME, "destroy", "--yes"], {
+    artifactName: "cleanup-nemoclaw-destroy-cloud-inference",
+    env: testEnv(home),
+    timeoutMs: 120_000,
+  });
+  assertCleanupSucceededOrAbsent(
+    result,
+    /Sandbox '.+' does not exist|Run 'nemoclaw onboard' to create one|sandbox .* not found|no such sandbox/iu.test(
+      resultText(result),
+    ),
+    `cleanup cloud inference sandbox ${SANDBOX_NAME}`,
   );
 }
 
@@ -217,7 +225,7 @@ async function expectLiveChatPong(
   throw new Error(`Live chat failed after ${MAX_ATTEMPTS} attempt(s): ${lastFailure}`);
 }
 
-test.skipIf(!shouldRunLiveE2E())(
+test(
   "cloud inference: inference.local chat and OpenClaw skill filesystem validate",
   async ({ artifacts, cleanup, host, sandbox, secrets, skip }) => {
     const hosted = requireHostedInferenceConfig(secrets);
@@ -233,9 +241,8 @@ test.skipIf(!shouldRunLiveE2E())(
       `missing sandbox skill validator: ${SANDBOX_SKILL_VALIDATOR}`,
     ).toBe(true);
 
-    await artifacts.writeJson("target.json", {
+    await artifacts.target.declare({
       id: "cloud-inference",
-      runner: "vitest",
       boundary: "install-sh-onboard-sandbox-inference-local-skill-filesystem",
       contracts: [
         "Docker is running before install/onboard",
@@ -268,10 +275,19 @@ test.skipIf(!shouldRunLiveE2E())(
     }
 
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-cloud-inference-home-"));
-    cleanup.add(`remove cloud inference state for ${SANDBOX_NAME}`, async () => {
-      await cleanupCloudInferenceState(host, sandbox, home);
-      fs.rmSync(home, { recursive: true, force: true });
-    });
+    cleanup.trackDisposable(`remove cloud inference test home ${home}`, () =>
+      fs.rmSync(home, { recursive: true, force: true }),
+    );
+    cleanup.trackDisposable(`delete cloud inference OpenShell sandbox ${SANDBOX_NAME}`, () =>
+      sandbox.cleanupSandbox(SANDBOX_NAME, {
+        artifactName: "cleanup-openshell-sandbox-delete-cloud-inference",
+        env: testEnv(home),
+        timeoutMs: 60_000,
+      }),
+    );
+    cleanup.trackDisposable(`destroy cloud inference sandbox ${SANDBOX_NAME}`, () =>
+      cleanupCloudInferenceNemoClawSandbox(host, home),
+    );
     await cleanupCloudInferenceState(host, sandbox, home);
 
     const install = await host.command(
@@ -329,7 +345,7 @@ test.skipIf(!shouldRunLiveE2E())(
         : "unknown";
     expect(sandboxSkillStatus, resultText(sandboxSkills)).not.toBe("unknown");
 
-    await artifacts.writeJson("target-result.json", {
+    await artifacts.target.complete({
       id: "cloud-inference",
       status: "passed",
       assertions: {

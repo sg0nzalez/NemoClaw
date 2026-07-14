@@ -8,7 +8,12 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import YAML from "yaml";
 import { generateHermesConfig } from "../agents/hermes/config/generate.ts";
+import { discoverModelSpecificSetups } from "../agents/hermes/config/model-specific-setup.ts";
 import { HERMES_PROXY_API_KEY_PLACEHOLDER } from "../src/lib/hermes-proxy-api-key";
+import {
+  applyCompatibleEndpointContextWindow,
+  resetCompatibleEndpointContextWindowAutoState,
+} from "../src/lib/inference/compatible-endpoint-context";
 import {
   applyMessagingBuildPhase,
   readMessagingBuildPlanFromEnv,
@@ -378,7 +383,8 @@ describe("agents/hermes/generate-config.ts", () => {
   it("generates API server config without messaging platform token blocks", () => {
     const { config, envFile } = runConfigScript();
 
-    expect(config._config_version).toBe(30);
+    expect(config._config_version).toBe(32);
+    expect(config.agent?.verify_on_stop).toBe(false);
     expect(config.display).toMatchObject({
       compact: false,
       tool_progress: "all",
@@ -505,6 +511,55 @@ describe("agents/hermes/generate-config.ts", () => {
         discover_models: true,
       },
     ]);
+  });
+
+  it("bakes NEMOCLAW_CONTEXT_WINDOW as model.context_length so Hermes cannot downgrade it (#6177)", () => {
+    const { config } = runConfigScript({
+      NEMOCLAW_MODEL: "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4",
+      NEMOCLAW_CONTEXT_WINDOW: "65536",
+    });
+
+    expect(config.model.context_length).toBe(65536);
+    // context_window is silently ignored by Hermes; we must not emit it.
+    expect(config.model.context_window).toBeUndefined();
+  });
+
+  it("chains the endpoint probe through to model.context_length in the generated config (#6177)", async () => {
+    // Source-level regression across the boundary: the same probe onboarding
+    // calls resolves a compatible endpoint's max_model_len into
+    // NEMOCLAW_CONTEXT_WINDOW, and the real generator must bake it as
+    // model.context_length (never context_window). Uses an injected fetcher so
+    // no network is required.
+    resetCompatibleEndpointContextWindowAutoState();
+    const model = "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4";
+    fs.mkdirSync(path.join(tmpDir, ".hermes"), { recursive: true });
+    const env = buildHermesTestEnv({ NEMOCLAW_MODEL: model });
+    await applyCompatibleEndpointContextWindow("https://endpoint.example/v1", model, {
+      env,
+      fetchModels: () => ({ data: [{ id: model, max_model_len: 65_536 }] }),
+      resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+    });
+    expect(env.NEMOCLAW_CONTEXT_WINDOW).toBe("65536");
+
+    withEnv(env, () =>
+      generateHermesConfig({ env, scriptDir: SCRIPT_DIR, homeDir: tmpDir, log: () => {} }),
+    );
+    const { config } = readGeneratedConfig();
+    expect(config.model.context_length).toBe(65536);
+    expect(config.model.context_window).toBeUndefined();
+    resetCompatibleEndpointContextWindowAutoState();
+  });
+
+  it("omits context_length when no context window is configured so Hermes auto-detects (#6177)", () => {
+    const { config } = runConfigScript();
+
+    expect(config.model.context_length).toBeUndefined();
+  });
+
+  it("ignores a malformed NEMOCLAW_CONTEXT_WINDOW and lets Hermes auto-detect (#6177)", () => {
+    const { config } = runConfigScript({ NEMOCLAW_CONTEXT_WINDOW: "not-a-number" });
+
+    expect(config.model.context_length).toBeUndefined();
   });
 
   it("falls back to a stable picker provider name when no upstream is named", () => {
@@ -873,7 +928,10 @@ describe("agents/hermes/generate-config.ts", () => {
 
     expect(config.telegram).toEqual({ require_mention: true });
     expect(config.platforms.telegram).toEqual({ enabled: true });
-    expect(config.platforms.slack).toEqual({ enabled: true });
+    expect(config.platforms.slack).toEqual({
+      enabled: true,
+      extra: { rich_blocks: true },
+    });
     expectRemotePlatformToolsets(config.platform_toolsets.telegram);
     expectRemotePlatformToolsets(config.platform_toolsets.slack);
     expect(envFile).toContain("TELEGRAM_BOT_TOKEN=openshell:resolve:env:TELEGRAM_BOT_TOKEN\n");
@@ -900,7 +958,10 @@ describe("agents/hermes/generate-config.ts", () => {
       NEMOCLAW_MESSAGING_CHANNELS_B64: encodeJson(["slack"]),
     });
 
-    expect(config.platforms.slack).toEqual({ enabled: true });
+    expect(config.platforms.slack).toEqual({
+      enabled: true,
+      extra: { rich_blocks: true },
+    });
     expect(config.platforms.api_server.enabled).toBe(true);
   });
 
@@ -1041,6 +1102,38 @@ describe("agents/hermes/generate-config.ts", () => {
     expect(config.model.default).toBe("fixture/hermes-model");
     expect(config.hermesCompat).toBeUndefined();
     expect(JSON.stringify(config)).not.toContain("future");
+  });
+
+  it("matches bounded bare model-family prefixes for Hermes manifests", () => {
+    const blueprintDir = path.join(tmpDir, "fixture-blueprint");
+    const registryDir = writeRegistryManifest(blueprintDir, "hermes/family.json", {
+      id: "fixture-hermes-family",
+      agent: "hermes",
+      description: "Fixture Hermes model family",
+      match: { modelIdPrefixes: ["gpt-5", "o3"] },
+      effects: { hermesCompat: {} },
+    });
+    const env = buildHermesTestEnv({ NEMOCLAW_MODEL_SPECIFIC_SETUP_DIR: registryDir });
+
+    for (const [model, expectedMatches] of [
+      ["gpt-5.4-turbo", 1],
+      ["azure/gpt-5.4", 1],
+      ["openai/o3-mini", 1],
+      ["gpt-50", 0],
+      ["o30", 0],
+    ] as const) {
+      const matches = discoverModelSpecificSetups(
+        "hermes",
+        {
+          model,
+          providerKey: "custom",
+          inferenceApi: "openai-completions",
+          baseUrl: "https://inference.local/v1",
+        },
+        { env, scriptDir: SCRIPT_DIR },
+      );
+      expect(matches, model).toHaveLength(expectedMatches);
+    }
   });
 
   it("discovers the bundled registry from the script path when cwd differs", () => {

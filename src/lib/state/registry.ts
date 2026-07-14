@@ -4,8 +4,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { isErrnoException } from "../core/errno";
+import { isObjectRecord } from "../core/json-types";
 import type { InferenceSelection } from "../inference/selection";
-import { inferenceSelectionRegistryFields } from "../inference/selection";
+import {
+  inferenceSelectionRegistryFields,
+  normalizeInferenceSelection,
+} from "../inference/selection";
 import { normalizeToolDisclosure, type ToolDisclosure } from "../tool-disclosure";
 import { ensureConfigDir, readConfigFile, writeConfigFile } from "./config-io";
 import {
@@ -15,12 +19,14 @@ import {
   normalizeExtraProviders,
   readExtraProviders,
 } from "./extra-providers";
+import type { OpenClawImagePluginInstall } from "./openclaw-plugin-restore";
 import {
   normalizeSandboxMcpState,
   type SandboxMcpState,
   serializeSandboxMcpStateForDisk,
 } from "./registry-mcp";
 import type { SandboxMessagingState } from "./registry-messaging";
+import { parseSandboxRegistryEntries, retainedDefaultSandbox } from "./registry-normalization";
 import * as reversibleRemoval from "./registry-reversible-removal";
 
 export {
@@ -31,6 +37,10 @@ export {
 } from "./registry-entry-view";
 
 import type { WebSearchProvider } from "../inference/web-search";
+import {
+  type DcodeAutoApprovalMode,
+  isDcodeAutoApprovalMode,
+} from "../onboard/dcode-auto-approval";
 import {
   cloneSandboxMessagingState,
   getConfiguredMessagingChannels as getRegistryConfiguredMessagingChannels,
@@ -79,6 +89,10 @@ export interface SandboxGpuProofResult {
 
 export interface SandboxEntry extends Partial<InferenceSelection> {
   name: string;
+  /** Route-only placeholder created before sandbox creation; never eligible as the default. */
+  pendingRouteReservation?: true;
+  /** Onboard session that owns a pending reservation, so resume preserves its own row while abandoned reservations stay reconcilable. */
+  reservationSessionId?: string;
   createdAt?: string;
   gpuEnabled?: boolean;
   hostGpuDetected?: boolean;
@@ -100,10 +114,16 @@ export interface SandboxEntry extends Partial<InferenceSelection> {
   webSearchEnabled?: boolean;
   /** Selected disclosure preference; model compatibility safeguards may downgrade runtime behavior. */
   toolDisclosure?: ToolDisclosure;
+  /** Enables backend-neutral trace export to the fixed local OTLP collector boundary. */
+  observabilityEnabled?: boolean;
+  /** Image-baked permission to expose DCode's per-thread auto-approval opt-in. */
+  dcodeAutoApprovalMode?: DcodeAutoApprovalMode;
   /** Durable provider identity for enabled managed web search. */
   webSearchProvider?: WebSearchProvider | null;
   agent?: string | null;
   agentVersion?: string | null;
+  /** Plugin install baseline captured before state is restored into a fresh OpenClaw image. */
+  openclawImagePluginInstalls?: OpenClawImagePluginInstall[];
   // NemoClaw build fingerprint (the NemoClaw CLI/build version) stamped only on
   // NemoClaw-managed images at create/rebuild time. `upgrade-sandboxes` compares
   // it against the running NemoClaw build so an image/build change with an
@@ -122,6 +142,8 @@ export interface SandboxEntry extends Partial<InferenceSelection> {
   hermesDashboardInternalPort?: number | null;
   hermesDashboardTui?: boolean;
   dashboardPort?: number | null;
+  /** Remote dashboard exposure was included in the sandbox's generated config. */
+  dashboardRemoteBindPrepared?: boolean;
   // OpenShell gateway registration name and host port bound to this sandbox.
   // Persisted so later lifecycle commands operate on the sandbox's own gateway
   // instead of the process-global `nemoclaw` singleton — a second sandbox on a
@@ -344,7 +366,7 @@ export function withLock<T>(fn: () => T): T {
 
 export function load(): SandboxRegistry {
   return normalizeRegistry(
-    readConfigFile<SandboxRegistry>(REGISTRY_FILE, { sandboxes: {}, defaultSandbox: null }),
+    readConfigFile<unknown>(REGISTRY_FILE, { sandboxes: {}, defaultSandbox: null }),
   );
 }
 
@@ -352,19 +374,23 @@ export function save(data: SandboxRegistry): void {
   writeConfigFile(REGISTRY_FILE, serializeRegistryForDisk(data));
 }
 
-function normalizeRegistry(data: SandboxRegistry): SandboxRegistry {
+function normalizeRegistry(value: unknown): SandboxRegistry {
+  const data = isObjectRecord(value) ? value : {};
   const extraProviders = normalizeExtraProviders(data.extraProviders);
+  const sandboxes = Object.fromEntries(
+    parseSandboxRegistryEntries(data.sandboxes).map(([name, entry]) => [
+      name,
+      normalizeSandboxEntryForRuntime(entry),
+    ]),
+  );
   const base: SandboxRegistry = {
-    defaultSandbox: data.defaultSandbox ?? null,
+    // Preserve a stale string pointer at read time so diagnostics can explain
+    // which sandbox disappeared. Mutation paths repair it before persistence.
+    defaultSandbox: typeof data.defaultSandbox === "string" ? data.defaultSandbox : null,
     defaultSelectionRevision: reversibleRemoval.normalizeDefaultSelectionRevision(
       data.defaultSelectionRevision,
     ),
-    sandboxes: Object.fromEntries(
-      sandboxRegistryEntries(data).map(([name, entry]) => [
-        name,
-        normalizeSandboxEntryForRuntime(entry),
-      ]),
-    ),
+    sandboxes,
   };
   if (extraProviders) base.extraProviders = extraProviders;
   return base;
@@ -372,35 +398,26 @@ function normalizeRegistry(data: SandboxRegistry): SandboxRegistry {
 
 function serializeRegistryForDisk(data: SandboxRegistry): SandboxRegistry {
   const extraProviders = normalizeExtraProviders(data.extraProviders);
+  const sandboxes = Object.fromEntries(
+    Object.entries(data.sandboxes).map(([name, entry]) => [
+      name,
+      serializeSandboxEntryForDisk(entry),
+    ]),
+  );
+  const defaultSandbox = retainedDefaultSandbox(data.defaultSandbox, sandboxes);
+  const currentDefaultSelectionRevision = reversibleRemoval.normalizeDefaultSelectionRevision(
+    data.defaultSelectionRevision,
+  );
   const base: SandboxRegistry = {
-    defaultSandbox: data.defaultSandbox ?? null,
-    defaultSelectionRevision: reversibleRemoval.normalizeDefaultSelectionRevision(
-      data.defaultSelectionRevision,
-    ),
-    sandboxes: Object.fromEntries(
-      sandboxRegistryEntries(data).map(([name, entry]) => [
-        name,
-        serializeSandboxEntryForDisk(entry),
-      ]),
-    ),
+    defaultSandbox,
+    defaultSelectionRevision:
+      defaultSandbox === data.defaultSandbox
+        ? currentDefaultSelectionRevision
+        : reversibleRemoval.incrementDefaultSelectionRevision(currentDefaultSelectionRevision),
+    sandboxes,
   };
   if (extraProviders) base.extraProviders = extraProviders;
   return base;
-}
-
-function sandboxRegistryEntries(data: SandboxRegistry): Array<[string, SandboxEntry]> {
-  const sandboxes = isRecord(data.sandboxes) ? data.sandboxes : {};
-  return Object.entries(sandboxes).filter((entry): entry is [string, SandboxEntry] =>
-    isSandboxEntryLike(entry[1]),
-  );
-}
-
-function isSandboxEntryLike(entry: unknown): entry is SandboxEntry {
-  return isRecord(entry);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function normalizeSandboxEntryForRuntime(entry: SandboxEntry): SandboxEntry {
@@ -416,21 +433,22 @@ function normalizeSandboxEntryForRuntime(entry: SandboxEntry): SandboxEntry {
 
 /**
  * Prepare a sandbox entry for persistence: normalize messaging state and drop
- * transient #5714 display-only markers (`recoveredFromGateway`, `livePhase`)
+ * transient #5714 display-only markers plus legacy provider credential hashes
  * that must never reach sandboxes.json.
  */
 function serializeSandboxEntryForDisk(entry: SandboxEntry): SandboxEntry {
-  // #5714: defensively drop transient, display-only recovery markers so they
-  // can never reach sandboxes.json even if a caller force-passed one through
-  // updateSandbox(). These are not part of the durable SandboxEntry type; they
-  // live only on the ephemeral list-recovery rows.
+  // Defensively drop non-durable recovery markers and legacy
+  // providerCredentialHashes so they can never reach sandboxes.json even if a
+  // caller force-passed them through updateSandbox().
   const {
     recoveredFromGateway: _recovered,
     livePhase: _phase,
+    providerCredentialHashes: _legacyProviderCredentialHashes,
     ...durable
   } = entry as SandboxEntry & {
     recoveredFromGateway?: boolean;
     livePhase?: string | null;
+    providerCredentialHashes?: unknown;
   };
   const messaging = serializeSandboxMessagingStateForDisk(durable.messaging);
   const mcp = serializeSandboxMcpStateForDisk(durable.mcp);
@@ -449,16 +467,25 @@ export function getSandbox(name: string): SandboxEntry | null {
 
 export function getDefault(): string | null {
   const data = load();
-  if (data.defaultSandbox && data.sandboxes[data.defaultSandbox]) {
+  if (
+    data.defaultSandbox &&
+    data.sandboxes[data.defaultSandbox] &&
+    data.sandboxes[data.defaultSandbox].pendingRouteReservation !== true
+  ) {
     return data.defaultSandbox;
   }
-  const names = Object.keys(data.sandboxes);
+  const names = Object.values(data.sandboxes)
+    .filter((sandbox) => sandbox.pendingRouteReservation !== true)
+    .map((sandbox) => sandbox.name);
   return names.length > 0 ? names[0] || null : null;
 }
 
 export function registerSandbox(entry: SandboxEntry): void {
   withLock(() => {
     const data = load();
+    if (retainedDefaultSandbox(data.defaultSandbox, data.sandboxes) === null) {
+      data.defaultSandbox = null;
+    }
     data.sandboxes[entry.name] = {
       name: entry.name,
       createdAt: entry.createdAt || new Date().toISOString(),
@@ -478,6 +505,11 @@ export function registerSandbox(entry: SandboxEntry): void {
       // Preserve absence on reconstructed legacy rows. Only a freshly built
       // sandbox registration may claim the new progressive default.
       toolDisclosure: normalizeToolDisclosure(entry.toolDisclosure) ?? undefined,
+      observabilityEnabled:
+        typeof entry.observabilityEnabled === "boolean" ? entry.observabilityEnabled : undefined,
+      dcodeAutoApprovalMode: isDcodeAutoApprovalMode(entry.dcodeAutoApprovalMode)
+        ? entry.dcodeAutoApprovalMode
+        : undefined,
       webSearchProvider:
         entry.webSearchEnabled === true &&
         (entry.webSearchProvider === "brave" || entry.webSearchProvider === "tavily")
@@ -490,6 +522,12 @@ export function registerSandbox(entry: SandboxEntry): void {
       // cannot inherit a stale finalized marker. See #4621.
       agent: entry.agent || null,
       agentVersion: entry.agentVersion || null,
+      openclawImagePluginInstalls: Array.isArray(entry.openclawImagePluginInstalls)
+        ? entry.openclawImagePluginInstalls.map((install) => ({
+            ...install,
+            ...(install.loadPaths !== undefined ? { loadPaths: [...install.loadPaths] } : {}),
+          }))
+        : undefined,
       nemoclawVersion: entry.nemoclawVersion || null,
       fromDockerfile: entry.fromDockerfile || null,
       hermesAuthMethod:
@@ -508,11 +546,66 @@ export function registerSandbox(entry: SandboxEntry): void {
       hermesDashboardInternalPort: entry.hermesDashboardInternalPort ?? undefined,
       hermesDashboardTui: entry.hermesDashboardTui === true ? true : undefined,
       dashboardPort: entry.dashboardPort ?? undefined,
+      dashboardRemoteBindPrepared: entry.dashboardRemoteBindPrepared === true ? true : undefined,
       gatewayName: entry.gatewayName ?? undefined,
       gatewayPort: entry.gatewayPort ?? undefined,
     };
     save(reversibleRemoval.claimInitialDefaultInRegistry(data, entry.name));
   });
+}
+
+type SandboxInferenceRouteReservation = Pick<
+  InferenceSelection,
+  "provider" | "model" | "endpointUrl" | "credentialEnv" | "preferredInferenceApi"
+> & {
+  gatewayName: string;
+  reservationSessionId?: string;
+};
+
+/**
+ * Persist a route dependency before releasing the shared-gateway mutation
+ * lock. A newly reserved row deliberately does not claim the default sandbox;
+ * normal sandbox registration replaces it after creation completes.
+ */
+export function reserveSandboxInferenceRoute(
+  name: string,
+  route: SandboxInferenceRouteReservation,
+): boolean {
+  return withLock(() => {
+    const data = load();
+    const existing = data.sandboxes[name];
+    const normalized = normalizeInferenceSelection(route);
+    data.sandboxes[name] = {
+      ...(existing ?? { name, pendingRouteReservation: true as const }),
+      pendingRouteReservation: true,
+      reservationSessionId: route.reservationSessionId ?? existing?.reservationSessionId,
+      provider: normalized.provider,
+      model: normalized.model,
+      endpointUrl: normalized.endpointUrl,
+      credentialEnv: normalized.credentialEnv,
+      preferredInferenceApi: normalized.preferredInferenceApi,
+      gatewayName: route.gatewayName,
+      gatewayPort: undefined,
+    };
+    save(data);
+    return true;
+  });
+}
+
+/** True only for an inference route reserved before sandbox registration. */
+export function isRouteOnlySandboxReservation(entry: SandboxEntry): boolean {
+  return entry.pendingRouteReservation === true && entry.createdAt === undefined;
+}
+
+export function isPendingReservationForSession(
+  entry: SandboxEntry | null,
+  sessionId: string | null | undefined,
+): boolean {
+  return (
+    entry?.pendingRouteReservation === true &&
+    Boolean(sessionId) &&
+    entry.reservationSessionId === sessionId
+  );
 }
 
 export function updateSandbox(name: string, updates: Partial<SandboxEntry>): boolean {
@@ -578,7 +671,9 @@ export function listSandboxes(): { sandboxes: SandboxEntry[]; defaultSandbox: st
 
 export function setDefault(name: string): boolean {
   return withLock(() => {
-    const registry = reversibleRemoval.setDefaultInRegistry(load(), name);
+    const current = load();
+    if (current.sandboxes[name]?.pendingRouteReservation === true) return false;
+    const registry = reversibleRemoval.setDefaultInRegistry(current, name);
     if (!registry) return false;
     save(registry);
     return true;

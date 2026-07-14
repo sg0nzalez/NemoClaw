@@ -4,10 +4,9 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
+import { resultText } from "../fixtures/clients/command.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
-import { shouldRunLiveE2E } from "../fixtures/live-project-gate.ts";
 import {
   latestRebuildBackupDir,
   listCredentialLeakPaths,
@@ -38,10 +37,6 @@ const ONBOARD_TIMEOUT_MS = TEST_TIMEOUT_MS;
 const REBUILD_TIMEOUT_MS = TEST_TIMEOUT_MS;
 const MARKER_CONTENT = `REBUILD_E2E_${Date.now()}`;
 
-function resultText(result: ShellProbeResult): string {
-  return [result.stdout, result.stderr].filter(Boolean).join("\n");
-}
-
 function sandboxRebuildEnv(apiKey: string, extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   return {
     ...buildAvailabilityProbeEnv(),
@@ -61,7 +56,7 @@ function assertTestOwnedSandboxName(): void {
   }
 }
 
-async function bestEffort(run: () => Promise<unknown>): Promise<void> {
+async function bestEffortPreclean(run: () => Promise<unknown>): Promise<void> {
   try {
     await run();
   } catch {
@@ -69,7 +64,7 @@ async function bestEffort(run: () => Promise<unknown>): Promise<void> {
   }
 }
 
-test.skipIf(!shouldRunLiveE2E())(
+test(
   "sandbox-rebuild: rebuild preserves marker state and refreshes registry metadata",
   async ({
     artifacts,
@@ -126,24 +121,29 @@ test.skipIf(!shouldRunLiveE2E())(
       "rebuild-backups",
       SANDBOX_NAME,
     );
-    cleanup.add(`restore NemoClaw state files for ${SANDBOX_NAME}`, () => {
+    cleanup.trackDisposable(`restore NemoClaw state files for ${SANDBOX_NAME}`, () => {
       restoreRegistryAndSession(stateSnapshot);
       fs.rmSync(backupRoot, { recursive: true, force: true });
     });
-    cleanup.add(`destroy sandbox ${SANDBOX_NAME}`, async () => {
-      if (process.env.NEMOCLAW_E2E_KEEP_SANDBOX === "1") return;
-      await bestEffort(() => onboard.destroySandbox(SANDBOX_NAME, "cleanup-nemoclaw-destroy"));
-      await bestEffort(() =>
-        sandbox.openshell(["sandbox", "delete", SANDBOX_NAME], {
+    if (process.env.NEMOCLAW_E2E_KEEP_SANDBOX !== "1") {
+      cleanup.trackDisposable(`delete OpenShell sandbox ${SANDBOX_NAME}`, () =>
+        sandbox.cleanupSandbox(SANDBOX_NAME, {
           artifactName: "cleanup-openshell-sandbox-delete",
           env: buildAvailabilityProbeEnv(),
           timeoutMs: 60_000,
         }),
       );
-    });
+      cleanup.trackSandbox(host, SANDBOX_NAME, {
+        artifactName: "cleanup-nemoclaw-destroy",
+        env: buildAvailabilityProbeEnv(),
+        timeoutMs: 15 * 60_000,
+      });
+    }
 
-    await bestEffort(() => onboard.destroySandbox(SANDBOX_NAME, "pre-cleanup-nemoclaw-destroy"));
-    await bestEffort(() =>
+    await bestEffortPreclean(() =>
+      onboard.destroySandbox(SANDBOX_NAME, "pre-cleanup-nemoclaw-destroy"),
+    );
+    await bestEffortPreclean(() =>
       sandbox.openshell(["sandbox", "delete", SANDBOX_NAME], {
         artifactName: "pre-cleanup-openshell-sandbox-delete",
         env: buildAvailabilityProbeEnv(),

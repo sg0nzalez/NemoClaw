@@ -18,8 +18,8 @@ const {
   getChatCompletionsProbeCurlArgs,
   getChatCompletionsProbePayload,
   getDeepSeekV4ProValidationProbeCurlArgs,
+  getProbeExtraHeaders,
   getKimiK26ValidationProbeCurlArgs,
-  getValidationProbeCurlArgs,
   hasChatCompletionsToolCall,
   hasChatCompletionsToolCallLeak,
   hasResponsesToolCall,
@@ -28,19 +28,18 @@ const {
   RETRIABLE_HTTP_PROBE_STATUSES,
 } = require("./onboard-probes");
 
-// Restore an env var to its pre-test value without branching at the call
-// site. Centralizing the conditional keeps test bodies linear and keeps the
-// codebase-growth-guardrails "if count" steady; see PR #5975 review.
-function restoreEnv(name: string, original: string | undefined): void {
-  if (original === undefined) {
-    delete process.env[name];
-  } else {
-    process.env[name] = original;
-  }
-}
-
 const FAKE_CONFIG_PATH = "/tmp/nemoclaw-test-credential.conf";
 const FAKE_CREDENTIAL_ARGS = ["--config", FAKE_CONFIG_PATH] as const;
+
+describe("OpenRouter probe headers", () => {
+  it("adds default OpenRouter headers only for the OpenRouter provider (#5826)", () => {
+    expect(getProbeExtraHeaders("openrouter-api")).toEqual([
+      "HTTP-Referer: https://www.nvidia.com/nemoclaw/",
+      "X-OpenRouter-Title: NVIDIA NemoClaw",
+    ]);
+    expect(getProbeExtraHeaders("openai-api")).toEqual([]);
+  });
+});
 
 describe("OpenAI-compatible inference probe response parsing", () => {
   it("detects tool-calling responses payloads conservatively", () => {
@@ -321,24 +320,13 @@ describe("OpenAI-compatible inference probes", () => {
     });
   });
 
-  it("allows onboard validation max-time to be raised from the environment", () => {
-    const original = process.env.NEMOCLAW_ONBOARD_VALIDATION_TIMEOUT_SECONDS;
-    process.env.NEMOCLAW_ONBOARD_VALIDATION_TIMEOUT_SECONDS = "300";
-    try {
-      expect(getValidationProbeCurlArgs({ isWsl: false })).toEqual([
-        "--connect-timeout",
-        "10",
-        "--max-time",
-        "300",
-      ]);
-      expect(getKimiK26ValidationProbeCurlArgs({ isWsl: false })).toEqual([
-        "--connect-timeout",
-        "10",
-        "--max-time",
-        "300",
-      ]);
-    } finally {
-      restoreEnv("NEMOCLAW_ONBOARD_VALIDATION_TIMEOUT_SECONDS", original);
+  it("uses max_completion_tokens for GPT-5 family and reasoning models (#6642)", () => {
+    for (const model of ["gpt-5.4", "azure/gpt-5.4", "o3-mini", "o1"]) {
+      expect(getChatCompletionsProbePayload(model)).toEqual({
+        model,
+        messages: [{ role: "user", content: "Reply with exactly: OK" }],
+        max_completion_tokens: 8,
+      });
     }
   });
 
@@ -463,6 +451,54 @@ describe("OpenAI-compatible inference probes", () => {
       expect(result).toMatchObject({ ok: false });
       expect(result.message).toMatch(
         /cannot be validated.*structured Chat Completions tool calls/i,
+      );
+    });
+  });
+
+  describe("private-address SSRF guard (#6293)", () => {
+    it("rejects a non-loopback private LAN endpoint before issuing any probe (#6293)", () => {
+      const result = probeOpenAiLikeEndpoint(
+        "http://192.168.1.50:8000/v1",
+        "openai/model",
+        "dummy",
+        {
+          skipResponsesProbe: true,
+        },
+      );
+      expect(result).toMatchObject({ ok: false });
+      expect(result.message).toMatch(/private\/internal address/i);
+    });
+
+    it("rejects the link-local cloud-metadata endpoint before any probe (#6293)", () => {
+      const result = probeOpenAiLikeEndpoint("http://169.254.169.254/v1", "openai/model", "dummy", {
+        skipResponsesProbe: true,
+      });
+      expect(result).toMatchObject({ ok: false });
+      expect(result.message).toMatch(/private\/internal address/i);
+    });
+
+    it("allows a loopback endpoint so local inference validation can proceed (#6293)", () => {
+      const body = `if [ -n "$outfile" ]; then
+  cat <<'JSON' > "$outfile"
+{"choices":[{"message":{"content":"OK"}}]}
+JSON
+fi
+printf '200'
+exit 0
+`;
+      withFakeCurlProbe(
+        { script: makeFakeCurlScript(body), dirPrefix: "nemoclaw-loopback-probe-" },
+        () => {
+          const result = probeOpenAiLikeEndpoint(
+            "http://127.0.0.1:11434/v1",
+            "openai/model",
+            "dummy",
+            {
+              skipResponsesProbe: true,
+            },
+          );
+          expect(result).toMatchObject({ ok: true });
+        },
       );
     });
   });
@@ -634,7 +670,7 @@ exit 0
       );
     });
 
-    it("keeps timeout retries strict when chat-completions tool calling is required", () => {
+    it("keeps GPT-5 timeout retries strict when tool calling is required (#6642)", () => {
       const script = `#!/usr/bin/env bash
 outfile=""
 payload=""
@@ -670,7 +706,7 @@ exit 0
         ({ counter, tmpDir }) => {
           const result = probeOpenAiLikeEndpoint(
             "https://api.example.com/v1",
-            "test-model",
+            "gpt-5.4",
             "sk-test",
             { skipResponsesProbe: true, requireChatCompletionsToolCalling: true },
           );
@@ -683,9 +719,11 @@ exit 0
           );
           expect(retryPayload).toMatchObject({
             tool_choice: "required",
-            max_tokens: 256,
+            max_completion_tokens: 256,
             stream: false,
           });
+          expect(retryPayload.max_tokens).toBeUndefined();
+          expect(retryPayload.temperature).toBeUndefined();
         },
       );
     });

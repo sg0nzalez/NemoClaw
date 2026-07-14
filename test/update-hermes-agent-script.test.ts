@@ -16,7 +16,7 @@ const HERMES_BASE_DOCKERFILE = path.join(
   "Dockerfile.base",
 );
 const HERMES_MANIFEST = path.join(import.meta.dirname, "..", "agents", "hermes", "manifest.yaml");
-const TARGET_TAG = "v2026.6.19";
+const TARGET_TAG = "v2026.7.1";
 
 const CURRENT_INSTALLED_BASE = [
   "# Calver tag v2026.6.5 = Hermes Agent v0.16.0.",
@@ -88,7 +88,7 @@ printf 'fake archive' > "$output"
     );
     writeExecutable(
       path.join(fakeBin, "tar"),
-      "#!/usr/bin/env bash\nprintf 'version = \"0.17.0\"\\n'\n",
+      "#!/usr/bin/env bash\nprintf 'version = \"0.18.0\"\\n'\n",
     );
     writeExecutable(path.join(fakeBin, "npm"), "#!/usr/bin/env bash\nprintf 'sha512-test\\n'\n");
     writeExecutable(
@@ -107,7 +107,7 @@ esac
 set -euo pipefail
 printf '%s|%s\\n' "\${NEMOCLAW_HERMES_SANDBOX_BASE_IMAGE_REF:-}" "$*" >> "$FAKE_NEMOHERMES_LOG"
 if [[ "$*" == "hermes exec -- hermes --version" ]]; then
-  printf '0.17.0\\n'
+  printf '0.18.0\\n'
 fi
 `,
     );
@@ -130,7 +130,7 @@ fi
       expect(run.status, `${run.stdout}\n${run.stderr}`).toBe(0);
       expect(fs.readFileSync(dockerLog, "utf8")).toContain(`tag ${baseRef} ${pinnedRef}`);
       expect(fs.readFileSync(nemohermesLog, "utf8")).toContain(`${pinnedRef}|hermes rebuild`);
-      expect(run.stdout).toContain("OK: sandbox reports Hermes Agent v0.17.0");
+      expect(run.stdout).toContain("OK: sandbox reports Hermes Agent v0.18.0");
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
@@ -305,6 +305,53 @@ fi
       expect(run.stdout).toContain("marker /opt/hermes/.venv/bin/python -I");
       expect(fs.readFileSync(installedDockerfile, "utf-8")).toBe(CURRENT_INSTALLED_BASE);
       expect(fs.readFileSync(installedAgentDockerfile, "utf-8")).toBe(preMcpDockerfile);
+    } finally {
+      fs.rmSync(tmpHome, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses installed copies with an independently pinned final workaround guard (#5254)", () => {
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-update-final-guard-"));
+    const installedDockerfile = path.join(
+      tmpHome,
+      ".nemoclaw",
+      "source",
+      "agents",
+      "hermes",
+      "Dockerfile.base",
+    );
+    const installedAgentDockerfile = path.join(path.dirname(installedDockerfile), "Dockerfile");
+    const staleGuardDockerfile = [
+      CURRENT_INSTALLED_DOCKERFILE,
+      "ARG HERMES_SEMVER=0.17.0",
+      'RUN if [ "$HERMES_SEMVER" != "0.17.0" ]; then exit 1; fi',
+      "",
+    ].join("\n");
+    fs.mkdirSync(path.dirname(installedDockerfile), { recursive: true });
+    fs.writeFileSync(installedDockerfile, CURRENT_INSTALLED_BASE);
+    fs.writeFileSync(installedAgentDockerfile, staleGuardDockerfile);
+
+    const run = spawnSync(
+      "bash",
+      [SCRIPT, "--tag", TARGET_TAG, "--check", "--update-installed-copies"],
+      {
+        encoding: "utf-8",
+        env: {
+          ...process.env,
+          HOME: tmpHome,
+          NEMOCLAW_SOURCE_ROOT: undefined,
+        },
+        timeout: 5000,
+      },
+    );
+
+    try {
+      expect(run.status).toBe(1);
+      expect(run.stdout).toContain("INVALID: installed copy");
+      expect(run.stdout).toContain("final Dockerfile #5254 guard");
+      expect(run.stdout).toContain("installed hermes --version");
+      expect(fs.readFileSync(installedDockerfile, "utf-8")).toBe(CURRENT_INSTALLED_BASE);
+      expect(fs.readFileSync(installedAgentDockerfile, "utf-8")).toBe(staleGuardDockerfile);
     } finally {
       fs.rmSync(tmpHome, { recursive: true, force: true });
     }

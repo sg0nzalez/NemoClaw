@@ -12,9 +12,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-
 import YAML from "yaml";
-
 import {
   isCredentialField,
   isSensitiveFile,
@@ -22,13 +20,14 @@ import {
   stripCredentials,
 } from "../../../src/lib/security/credential-filter.ts";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
+import { assertCleanupSucceededOrAbsent } from "../fixtures/cleanup-resources.ts";
+import { resultText } from "../fixtures/clients/command.ts";
 import type { HostCliClient } from "../fixtures/clients/host.ts";
 import { type SandboxClient, validateSandboxName } from "../fixtures/clients/sandbox.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
 import { testHomeEnvironment } from "../fixtures/environment-profiles.ts";
+import { CLI_ENTRYPOINT, REPO_ROOT } from "../fixtures/paths.ts";
 
-const REPO_ROOT = path.resolve(import.meta.dirname, "../../..");
-const CLI_ENTRYPOINT = path.join(REPO_ROOT, "bin", "nemoclaw.js");
 const BLUEPRINT_FILE = path.join(REPO_ROOT, "nemoclaw-blueprint", "blueprint.yaml");
 const SANDBOX_NAME =
   process.env.NEMOCLAW_SANDBOX_NAME ?? `e2e-credential-sanitization-${process.pid}`;
@@ -45,15 +44,11 @@ type Blueprint = {
   components?: { sandbox?: { image?: unknown } };
 };
 
-function resultText(result: CommandText): string {
-  return [result.stdout, result.stderr].filter(Boolean).join("\n");
-}
-
 function testEnv(home: string, extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   return testHomeEnvironment(home, extra);
 }
 
-async function bestEffort(run: () => Promise<unknown>): Promise<void> {
+async function bestEffortPreclean(run: () => Promise<unknown>): Promise<void> {
   try {
     await run();
   } catch {
@@ -67,26 +62,38 @@ async function cleanupCredentialSanitizationState(
   home: string,
 ): Promise<void> {
   const env = testEnv(home);
-  await bestEffort(() =>
-    host.command("node", [CLI_ENTRYPOINT, SANDBOX_NAME, "destroy", "--yes"], {
-      artifactName: "cleanup-nemoclaw-destroy-credential-sanitization",
-      env,
-      timeoutMs: 120_000,
-    }),
-  );
-  await bestEffort(() =>
+  await bestEffortPreclean(() => cleanupCredentialSanitizationNemoClawSandbox(host, home));
+  await bestEffortPreclean(() =>
     host.command("openshell", ["sandbox", "delete", SANDBOX_NAME], {
       artifactName: "cleanup-openshell-sandbox-delete-credential-sanitization",
       env,
       timeoutMs: 60_000,
     }),
   );
-  await bestEffort(() =>
+  await bestEffortPreclean(() =>
     host.command("openshell", ["gateway", "destroy", "-g", "nemoclaw"], {
       artifactName: "cleanup-openshell-gateway-destroy-credential-sanitization",
       env,
       timeoutMs: 120_000,
     }),
+  );
+}
+
+async function cleanupCredentialSanitizationNemoClawSandbox(
+  host: HostCliClient,
+  home: string,
+): Promise<void> {
+  const result = await host.command("node", [CLI_ENTRYPOINT, SANDBOX_NAME, "destroy", "--yes"], {
+    artifactName: "cleanup-nemoclaw-destroy-credential-sanitization",
+    env: testEnv(home),
+    timeoutMs: 120_000,
+  });
+  assertCleanupSucceededOrAbsent(
+    result,
+    /Sandbox '.+' does not exist|Run 'nemoclaw onboard' to create one|sandbox .* not found|no such sandbox/iu.test(
+      resultText(result),
+    ),
+    `cleanup credential sanitization sandbox ${SANDBOX_NAME}`,
   );
 }
 
@@ -289,9 +296,8 @@ runCredentialSanitizationTest(
       "run `npm run build:cli` before live repo CLI targets",
     ).toBe(true);
 
-    await artifacts.writeJson("target.json", {
+    await artifacts.target.declare({
       id: "credential-sanitization",
-      runner: "vitest",
       boundary: "install-sh-onboard-and-sandbox-exec",
       sandboxName: SANDBOX_NAME,
       contracts: [
@@ -324,10 +330,27 @@ runCredentialSanitizationTest(
     }
 
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-cred-sanitization-home-"));
-    cleanup.add(`remove credential sanitization state for ${SANDBOX_NAME}`, async () => {
-      await cleanupCredentialSanitizationState(host, home);
-      fs.rmSync(home, { recursive: true, force: true });
+    const cleanupEnv = testEnv(home);
+    cleanup.trackDisposable(`remove credential sanitization test home ${home}`, () =>
+      fs.rmSync(home, { recursive: true, force: true }),
+    );
+    cleanup.trackGateway(host, "nemoclaw", {
+      artifactName: "cleanup-openshell-gateway-destroy-credential-sanitization",
+      env: cleanupEnv,
+      timeoutMs: 120_000,
     });
+    cleanup.trackDisposable(
+      `delete credential sanitization OpenShell sandbox ${SANDBOX_NAME}`,
+      () =>
+        sandbox.cleanupSandbox(SANDBOX_NAME, {
+          artifactName: "cleanup-openshell-sandbox-delete-credential-sanitization",
+          env: cleanupEnv,
+          timeoutMs: 60_000,
+        }),
+    );
+    cleanup.trackDisposable(`destroy credential sanitization sandbox ${SANDBOX_NAME}`, () =>
+      cleanupCredentialSanitizationNemoClawSandbox(host, home),
+    );
 
     await cleanupCredentialSanitizationState(host, home);
 

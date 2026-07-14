@@ -54,8 +54,20 @@ export interface ModelValidationFailure extends ValidationFailureLike {
 export type ModelValidationResult = ModelValidationSuccess | ModelValidationFailure;
 
 export interface SandboxCreateIntent {
+  /** Complete secret-free create plan resolved by the onboarding machine. */
+  readonly resolved?: import("./sandbox-create-intent-types").SandboxCreateIntent;
   readonly recreate: boolean;
   readonly toolDisclosure: import("../tool-disclosure").ToolDisclosure;
+  readonly observabilityEnabled: boolean;
+  /** Present only when the operator explicitly selected observability on or off. */
+  readonly observabilityRequestedExplicitly?: true;
+  readonly dcodeAutoApprovalMode?: import("./dcode-auto-approval").DcodeAutoApprovalMode;
+  /** Non-secret upstream endpoint metadata for managed image config generation. */
+  readonly endpointUrl?: string | null;
+  /** Internal authoritative rebuild tier used before replacement registration completes. */
+  readonly policyTier?: string | null;
+  /** Gateway-level extra providers reconciled immediately before sandbox creation. */
+  readonly extraProviders?: readonly string[];
 }
 
 export type OnboardOptions = {
@@ -74,6 +86,8 @@ export type OnboardOptions = {
   rebuildRegistryInferenceRoute?: import("./rebuild-route-handoff").RebuildRouteHandoff | null;
   /** Internal one-shot authority to upsert a provider observed missing during rebuild preflight. */
   rebuildProviderReconfigure?: import("./rebuild-route-handoff").RebuildProviderReconfigureHandoff;
+  /** Internal one-shot authority to recover the recorded provider during a locked rebuild resume. */
+  providerRecoveryReceipt?: import("./rebuild-route-handoff").ProviderRecoveryReceipt;
   /** Internal one-shot handoff for the exact image context validated before rebuild deletion. */
   preparedImageRebuild?: import("./prepared-dcode-rebuild").PreparedImageRebuildHandoff;
   resume?: boolean;
@@ -85,6 +99,12 @@ export type OnboardOptions = {
   acceptThirdPartySoftware?: boolean;
   agent?: string | null;
   toolDisclosure?: import("../tool-disclosure").ToolDisclosure | null;
+  observabilityEnabled?: boolean | null;
+  /** Internal provenance for an authoritative observability value. */
+  observabilityRequestedExplicitly?: boolean;
+  dcodeAutoApprovalMode?: import("./dcode-auto-approval").DcodeAutoApprovalMode | null;
+  /** Internal authoritative rebuild tier; never exposed as an onboard CLI option. */
+  policyTier?: string | null;
   controlUiPort?: number | null;
   gpu?: boolean;
   noGpu?: boolean;

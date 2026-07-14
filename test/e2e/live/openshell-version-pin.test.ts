@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
+// @module-tag e2e/credential-free
 
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -8,18 +9,18 @@ import path from "node:path";
 
 import { type ArtifactSink } from "../fixtures/artifacts.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
+import { REPO_ROOT } from "../fixtures/paths.ts";
 
-// #3474). The former bash script is a hermetic installer-script behavioral
+// #3474). The former bash script is a self-contained installer-script behavioral
 // test: it runs scripts/install-openshell.sh under a stubbed PATH where the
 // already-installed openshell reports a too-new version (0.0.73) and the
 // downloaded archives produce a binary that reports the pinned 0.0.72.
 //
-// This is a free-standing live test (per #5049's pattern) — it does not exercise
+// This credential-free E2E test does not exercise
 // the registry-driven steady-state probe model. There is no OpenClaw instance,
 // no environment phase, no lifecycle. The test consumes only the `artifacts`
 // fixture from e2e-test.ts so failures attach the per-target artifact root.
 
-const REPO_ROOT = path.resolve(import.meta.dirname, "../../..");
 const INSTALL_SCRIPT = path.join(REPO_ROOT, "scripts", "install-openshell.sh");
 
 test("openshell-version-pin: selects shipping 0.0.72 between older and too-new releases", () => {
@@ -98,7 +99,7 @@ function writeExecutable(target: string, contents: string): void {
 
 // Bash helpers shared by the gh and curl stubs: write a fake archive and emit
 // the same pinned digest lines the real OpenShell v0.0.72 release uses. A fake
-// sha256sum below keeps this test hermetic even though the tarball bytes are
+// sha256sum below keeps this test self-contained even though the tarball bytes are
 // synthetic.
 const SHARED_DOWNLOAD_BASH_HELPERS = `\
 write_asset() {
@@ -249,14 +250,39 @@ esac`,
   );
 }
 
-// tar stub: write the corresponding binary into the -C outdir. Each binary
-// reports the replacement version + carries the messaging-rewrite and MCP-L7
-// capability markers so the post-install feature probes pass.
+// tar stub: model archive listing, inspection, and extraction. Each extracted
+// binary reports the replacement version + carries the messaging-rewrite and
+// MCP-L7 capability markers so the post-install feature probes pass.
 function createFakeTar(binDir: string, replacementVersion: string): void {
   writeExecutable(
     path.join(binDir, "tar"),
     `#!/usr/bin/env bash
 set -euo pipefail
+mode="\${1:-}"
+archive="\${2:-}"
+case "$(basename "$archive")" in
+  openshell-gateway-*) name="openshell-gateway" ;;
+  openshell-sandbox-*) name="openshell-sandbox" ;;
+  openshell-*) name="openshell" ;;
+  *) exit 2 ;;
+esac
+
+case "$mode" in
+  -tzf)
+    printf '%s\\n' "$name"
+    exit 0
+    ;;
+  -tvzf)
+    printf '%s\\n' "-rwxr-xr-x 0/0 0 2026-01-01 00:00 $name"
+    exit 0
+    ;;
+  xzf|-xzf)
+    ;;
+  *)
+    exit 2
+    ;;
+esac
+
 outdir=""
 prev=""
 for arg in "$@"; do
@@ -267,11 +293,6 @@ for arg in "$@"; do
   prev="$arg"
 done
 [ -n "$outdir" ] || exit 1
-case "$*" in
-  *openshell-gateway*) name="openshell-gateway" ;;
-  *openshell-sandbox*) name="openshell-sandbox" ;;
-  *) name="openshell" ;;
-esac
 cat > "$outdir/$name" <<'EOS'
 #!/usr/bin/env bash
 if [ "\${1:-}" = "--version" ]; then echo "openshell ${replacementVersion}"; exit 0; fi
@@ -310,9 +331,8 @@ async function runVersionPinTarget(
   artifacts: ArtifactSink,
   options: { ghDownloadMode: GhDownloadMode },
 ): Promise<void> {
-  await artifacts.writeJson("target.json", {
+  await artifacts.target.declare({
     id: "openshell-version-pin",
-    runner: "vitest",
     boundary: "installer-script-unit",
     regressionTarget: "#3474",
     ghDownloadMode: options.ghDownloadMode,

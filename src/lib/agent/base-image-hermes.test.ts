@@ -39,6 +39,7 @@ describe("agent base image provisioning", () => {
     });
   });
 
+  // source-shape-contract: security -- Tracked immutable Hermes base digest must feed the production image resolver
   it("accepts only the tracked published Hermes base digest", () => {
     const dockerfilePath = path.resolve(import.meta.dirname, "../../../agents/hermes/Dockerfile");
     const dockerfile = fs.readFileSync(dockerfilePath, "utf8");
@@ -144,6 +145,42 @@ describe("agent base image provisioning", () => {
         "failed the required runtime compatibility checks",
       );
     });
+  });
+
+  it("reports forced-rebuild typed validation failures as compatibility diagnostics and cleans up (#6624)", () => {
+    withMockedDocker(
+      ({
+        ensureAgentBaseImage,
+        dockerBuildMock,
+        resolveSandboxBaseImageMock,
+        dockerRmiMock,
+        SandboxBaseImageResolutionError,
+      }) => {
+        resolveSandboxBaseImageMock.mockImplementation(() => {
+          throw new SandboxBaseImageResolutionError("exact validation failed");
+        });
+
+        let error: Error | null = null;
+        try {
+          ensureAgentBaseImage(makeAgent(), { forceBaseImageRebuild: true });
+        } catch (caught) {
+          error = caught as Error;
+        }
+
+        expect(error?.message).toBe(
+          "Built Hermes Agent base image failed the required runtime compatibility checks",
+        );
+        expect(error?.message).not.toContain("exact validation failed");
+        const temporaryTag = dockerBuildMock.mock.calls[0]?.[1];
+        expect(temporaryTag).toEqual(
+          expect.stringMatching(/^nemoclaw-hermes-sandbox-base-local:build-\d+-[0-9a-f]{16}$/),
+        );
+        expect(dockerRmiMock).toHaveBeenCalledWith(temporaryTag, {
+          ignoreError: true,
+          suppressOutput: true,
+        });
+      },
+    );
   });
 
   it("validates an explicit override strictly instead of falling back", () => {

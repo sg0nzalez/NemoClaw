@@ -13,15 +13,18 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
+import {
+  cleanupWhenCommandAvailable,
+  cleanupWhenOpenShellAvailable,
+} from "../fixtures/cleanup-resources.ts";
 import { assertExitZero, resultText, sandboxAccessEnv } from "../fixtures/clients/index.ts";
 import { trustedProviderEndpoint } from "../fixtures/clients/provider.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
 import { requireHostedInferenceConfig } from "../fixtures/hosted-inference.ts";
-import { shouldRunLiveE2E } from "../fixtures/live-project-gate.ts";
+import { REPO_ROOT } from "../fixtures/paths.ts";
 import type { NemoClawInstance } from "../fixtures/phases/index.ts";
 import type { SandboxMarker } from "../fixtures/phases/state-validation.ts";
 
-const REPO_ROOT = path.resolve(import.meta.dirname, "../../..");
 const SANDBOX_NAME = process.env.NEMOCLAW_SANDBOX_NAME ?? "e2e-survival";
 const MIN_OPENSHELL_VERSION = "0.0.24";
 const MODEL = process.env.NEMOCLAW_MODEL ?? "nvidia/nemotron-3-super-120b-a12b";
@@ -71,7 +74,7 @@ async function expectSandboxExecAlive(
   expect(alive.stdout.trim(), resultText(alive)).toBe("alive");
 }
 
-test.skipIf(!shouldRunLiveE2E())(
+test(
   "sandbox survives gateway restart with registry, state, SSH, and live inference intact",
   async ({
     artifacts,
@@ -88,9 +91,8 @@ test.skipIf(!shouldRunLiveE2E())(
     const hosted = requireHostedInferenceConfig(secrets);
     const apiKey = hosted.apiKey;
 
-    await artifacts.writeJson("target.json", {
+    await artifacts.target.declare({
       id: "sandbox-survival",
-      runner: "vitest",
       boundary: "install-sh-docker-openshell-gateway-sandbox-inference",
       contracts: [
         "install.sh --non-interactive creates the named OpenClaw sandbox",
@@ -162,25 +164,51 @@ test.skipIf(!shouldRunLiveE2E())(
       force: true,
     });
 
-    cleanup.add(`destroy sandbox ${SANDBOX_NAME}`, async () => {
-      await host.bestEffortCleanupSandbox(SANDBOX_NAME, {
-        artifactName: "cleanup-nemoclaw-destroy-sandbox-survival",
-      });
-    });
-    cleanup.add("destroy shared NemoClaw gateway", async () => {
-      await host.command(
-        "sh",
-        [
-          "-lc",
-          "command -v openshell >/dev/null 2>&1 && openshell gateway destroy -g nemoclaw || true",
-        ],
-        {
-          artifactName: "cleanup-openshell-gateway-destroy",
-          env: buildAvailabilityProbeEnv(),
-          timeoutMs: 120_000,
-        },
-      );
-    });
+    const gatewayCleanupOptions = {
+      artifactName: "cleanup-openshell-gateway-destroy",
+      env: buildAvailabilityProbeEnv(),
+      redactionValues: [apiKey],
+      timeoutMs: 120_000,
+    };
+    cleanup.trackGateway(
+      {
+        cleanupGatewayRegistration: (name: string) =>
+          cleanupWhenOpenShellAvailable(
+            host,
+            {
+              artifactName: "cleanup-probe-openshell-gateway-sandbox-survival",
+              env: gatewayCleanupOptions.env,
+              redactionValues: gatewayCleanupOptions.redactionValues,
+              timeoutMs: 30_000,
+            },
+            () => host.cleanupGatewayRegistration(name, gatewayCleanupOptions),
+          ),
+      },
+      "nemoclaw",
+      gatewayCleanupOptions,
+    );
+    const sandboxCleanupOptions = {
+      artifactName: "cleanup-nemoclaw-destroy-sandbox-survival",
+      redactionValues: [apiKey],
+    };
+    cleanup.trackSandbox(
+      {
+        cleanupSandbox: (name: string) =>
+          cleanupWhenCommandAvailable(
+            host,
+            host.commandPath,
+            {
+              artifactName: "cleanup-probe-nemoclaw-sandbox-survival",
+              env: buildAvailabilityProbeEnv(),
+              redactionValues: sandboxCleanupOptions.redactionValues,
+              timeoutMs: 30_000,
+            },
+            () => host.cleanupSandbox(name, sandboxCleanupOptions),
+          ),
+      },
+      SANDBOX_NAME,
+      sandboxCleanupOptions,
+    );
 
     const install = await host.command("bash", ["install.sh", "--non-interactive"], {
       artifactName: "install-sh-sandbox-survival",
@@ -304,7 +332,7 @@ test.skipIf(!shouldRunLiveE2E())(
       new RegExp(`(^|\\s)${SANDBOX_NAME}(\\s|$)`, "m"),
     );
 
-    await artifacts.writeJson("target-result.json", {
+    await artifacts.target.complete({
       id: "sandbox-survival",
       status: "passed",
       assertions: {

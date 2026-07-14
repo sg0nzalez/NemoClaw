@@ -35,6 +35,8 @@ export interface VllmModelDef {
   label: string;
   /** Stable identifier accepted via `NEMOCLAW_VLLM_MODEL`. */
   envValue: string;
+  /** Approximate full Hugging Face repository download size in bytes. */
+  downloadSizeBytes: number;
   /** `--max-model-len` flag value. */
   maxModelLen: number;
   /** Model-specific flags appended after the shared serving flags. */
@@ -63,6 +65,7 @@ export const VLLM_MODELS: readonly VllmModelDef[] = [
     id: "Qwen/Qwen3.6-27B-FP8",
     label: "Qwen3.6 27B FP8",
     envValue: "qwen3.6-27b",
+    downloadSizeBytes: 30_900_000_000,
     maxModelLen: 262144,
     modelArgs: [
       "--gpu-memory-utilization",
@@ -85,6 +88,7 @@ export const VLLM_MODELS: readonly VllmModelDef[] = [
     id: "deepseek-ai/DeepSeek-R1-Distill-Llama-70B",
     label: "DeepSeek-R1 Distill Llama 70B",
     envValue: "deepseek-r1-distill-70b",
+    downloadSizeBytes: 141_000_000_000,
     maxModelLen: 32768,
     modelArgs: [
       "--gpu-memory-utilization",
@@ -104,6 +108,7 @@ export const VLLM_MODELS: readonly VllmModelDef[] = [
     id: "nvidia/NVIDIA-Nemotron-3-Nano-4B-FP8",
     label: "NVIDIA Nemotron-3 Nano 4B FP8",
     envValue: "nemotron-3-nano-4b",
+    downloadSizeBytes: 5_280_000_000,
     // Matches the model card's `max_position_embeddings` and the vLLM
     // example NVIDIA publishes for this checkpoint. The previous value
     // (262000) was an undocumented round-down with no headroom rationale.
@@ -133,6 +138,7 @@ export const VLLM_MODELS: readonly VllmModelDef[] = [
     id: "deepseek-ai/DeepSeek-V4-Flash",
     label: "DeepSeek V4 Flash",
     envValue: "deepseek-v4-flash",
+    downloadSizeBytes: 160_000_000_000,
     maxModelLen: 1048576,
     modelArgs: [
       "--kv-cache-dtype",
@@ -173,6 +179,7 @@ export const VLLM_MODELS: readonly VllmModelDef[] = [
     id: "nvidia/Qwen3.6-35B-A3B-NVFP4",
     label: "Qwen3.6 35B-A3B NVFP4",
     envValue: "qwen3.6-35b-a3b-nvfp4",
+    downloadSizeBytes: 23_500_000_000,
     maxModelLen: 262144,
     // Additive flags on top of the shared serving defaults. The shared flags
     // already cover --tensor-parallel-size/--pipeline-parallel-size/
@@ -200,8 +207,19 @@ export const VLLM_MODELS: readonly VllmModelDef[] = [
       "--async-scheduling",
       "--enable-prefix-caching",
       "--enable-auto-tool-choice",
+      // `qwen3_coder`, not `qwen3_xml` (#6457). On DGX Spark this checkpoint's
+      // tool-call frames do not round-trip through vLLM's `qwen3_xml` parser: it
+      // logs `qwen3xml_tool_parser.py:303 Error when parsing XML elements: not
+      // well-formed (invalid token)` and emits truncated/extra-`}` tool
+      // arguments, so Deep Agents Code headless (`dcode -n`) tool calls fail
+      // with `POST /v1/chat/completions 400 Bad Request`
+      // (`json.decoder.JSONDecodeError: Extra data`) and `dcode` exits 1.
+      // `qwen3_coder` matches this Qwen3.6-family checkpoint's emitted tool-call
+      // format — the parser the other Qwen3.6 recipes in this registry already
+      // use (Qwen3.6-27B-FP8, Nemotron-3-Nano-4B). Validated end-to-end on real
+      // DGX Spark (GB10); see PR verification notes for the `dcode -n` transcript.
       "--tool-call-parser",
-      "qwen3_xml",
+      "qwen3_coder",
       "--reasoning-parser",
       "qwen3",
       "--speculative-config",

@@ -11,9 +11,14 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-
 import { containsInteger42Answer } from "../../helpers/e2e-answer-assertions.ts";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
+import type { CleanupRegistry } from "../fixtures/cleanup.ts";
+import {
+  assertExitZero as expectExitZero,
+  outputContainsSandbox,
+  resultText,
+} from "../fixtures/clients/command.ts";
 import type { HostCliClient } from "../fixtures/clients/host.ts";
 import { type SandboxClient, trustedSandboxShellScript } from "../fixtures/clients/sandbox.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
@@ -29,23 +34,7 @@ const SANDBOX_A = "e2e-sbx-a";
 const SANDBOX_B = "e2e-sbx-b";
 const REGISTRY_FILE = path.join(process.env.HOME ?? os.homedir(), ".nemoclaw", "sandboxes.json");
 const GATEWAY_CONTAINER = "openshell-cluster-nemoclaw";
-const liveTest = process.env.NEMOCLAW_RUN_LIVE_E2E === "1" ? test : test.skip;
-
-type ProcessResult = { exitCode: number | null; stdout: string; stderr: string };
-type CleanupRegistry = { add(name: string, run: () => Promise<void> | void): void };
-
-function resultText(result: ProcessResult): string {
-  return [result.stdout, result.stderr].filter(Boolean).join("\n");
-}
-
-function outputContainsSandbox(result: ProcessResult, sandboxName: string): boolean {
-  const escaped = sandboxName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`(^|\\s)${escaped}(\\s|$)`, "m").test(resultText(result));
-}
-
-function expectExitZero(result: ProcessResult, label: string): void {
-  expect(result.exitCode, `${label}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`).toBe(0);
-}
+const GATEWAY_PORT = process.env.NEMOCLAW_GATEWAY_PORT ?? "8080";
 
 async function onboardSandbox(
   host: HostCliClient,
@@ -55,7 +44,7 @@ async function onboardSandbox(
   hosted: HostedInferenceConfig,
   extraEnv: NodeJS.ProcessEnv = {},
 ): Promise<ShellProbeResult> {
-  cleanup.add(`destroy sandbox ${sandboxName}`, () => host.cleanupSandbox(sandboxName));
+  cleanup.trackSandbox(host, sandboxName);
   const result = await host.nemoclaw(
     ["onboard", "--non-interactive", "--yes", "--yes-i-accept-third-party-software"],
     {
@@ -515,13 +504,20 @@ async function assertDestroyRemovesSandbox(
   host: HostCliClient,
   sandbox: SandboxClient,
   sandboxName: string,
+  options: { cleanupGateway?: boolean } = {},
 ): Promise<void> {
-  const destroy = await host.nemoclaw([sandboxName, "destroy", "--yes"], {
+  const destroyArgs = [
+    sandboxName,
+    "destroy",
+    "--yes",
+    ...(options.cleanupGateway ? ["--cleanup-gateway"] : []),
+  ];
+  const destroy = await host.nemoclaw(destroyArgs, {
     artifactName: `tc-sbx-05-destroy-${sandboxName}`,
     env: buildAvailabilityProbeEnv(),
     timeoutMs: 15 * 60_000,
   });
-  expectExitZero(destroy, `nemoclaw ${sandboxName} destroy --yes`);
+  expectExitZero(destroy, `nemoclaw ${destroyArgs.join(" ")}`);
 
   const list = await host.nemoclaw(["list"], {
     artifactName: `tc-sbx-05-nemoclaw-list-after-destroy-${sandboxName}`,
@@ -536,6 +532,29 @@ async function assertDestroyRemovesSandbox(
     timeoutMs: 60_000,
   });
   expect(outputContainsSandbox(openshellList, sandboxName), resultText(openshellList)).toBe(false);
+}
+
+async function expectHostPortFree(
+  host: HostCliClient,
+  port: string,
+  artifactName: string,
+  timeoutMs = 90_000,
+): Promise<void> {
+  const probe = await host.command(
+    "node",
+    [
+      "-e",
+      'const net=require("node:net"); const port=Number(process.argv[1]); const deadline=Date.now()+Number(process.argv[2]); const attempt=()=>{ const server=net.createServer(); server.once("error", error => { if (Date.now() >= deadline) { console.error(error.code || "bind failed"); process.exit(1); } setTimeout(attempt, 2000); }); server.listen(port, "127.0.0.1", () => server.close(error => { if (error) { console.error(error.message); process.exit(1); } console.log("available"); })); }; attempt();',
+      port,
+      String(timeoutMs),
+    ],
+    {
+      artifactName,
+      env: buildAvailabilityProbeEnv(),
+      timeoutMs: timeoutMs + 30_000,
+    },
+  );
+  expectExitZero(probe, `gateway port ${port} remained occupied after final destroy`);
 }
 
 type GatewayRecoveryOutcome =
@@ -599,14 +618,13 @@ async function assertGatewayRecovery(
   return recoveryOutcome;
 }
 
-liveTest(
+test(
   "sandbox operations preserve list/status/logs/recovery/multi-sandbox contracts",
   async ({ artifacts, cleanup, docker, environment, host, sandbox, secrets }) => {
     const hosted = requireHostedInferenceConfig(secrets);
 
-    await artifacts.writeJson("target.json", {
+    await artifacts.target.declare({
       id: "sandbox-operations",
-      runner: "vitest",
       boundary: "repo-cli-docker-openshell-sandbox",
       contracts: [
         "TC-SBX-01 list shows onboarded sandbox",
@@ -622,18 +640,17 @@ liveTest(
         "TC-SBX-09 tmux and PTY lifecycle work inside sandbox",
         "TC-SBX-10 two sandboxes list with model/provider metadata",
         "TC-SBX-11 sandboxes cannot reach each other by hostname",
+        "TC-SBX-12 destroying the non-final sandbox preserves the survivor and final destroy releases the gateway port through the macOS default or explicit non-macOS cleanup",
       ],
     });
 
     await docker.requireDocker();
 
     await environment.assertReady(ENVIRONMENT);
-    cleanup.add("remove shared NemoClaw gateway registration", () =>
-      host.cleanupGatewayRegistration("nemoclaw", {
-        env: buildAvailabilityProbeEnv(),
-        timeoutMs: 5 * 60_000,
-      }),
-    );
+    cleanup.trackGateway(host, "nemoclaw", {
+      env: buildAvailabilityProbeEnv(),
+      timeoutMs: 5 * 60_000,
+    });
     await host.cleanupSandbox(SANDBOX_B);
     await host.cleanupSandbox(SANDBOX_A);
 
@@ -656,12 +673,22 @@ liveTest(
     await assertNetworkIsolation(sandbox, SANDBOX_A, SANDBOX_B, "tc-sbx-11-a-cannot-reach-b");
     await assertNetworkIsolation(sandbox, SANDBOX_B, SANDBOX_A, "tc-sbx-11-b-cannot-reach-a");
     await assertDestroyRemovesSandbox(host, sandbox, SANDBOX_B);
+    await expectListed(host, SANDBOX_A, "tc-sbx-12-survivor-listed-after-destroy-b");
+    await assertAgentCanAnswer(host, SANDBOX_A, "tc-sbx-12-survivor-agent-after-destroy-b");
 
     const gatewayRecovery = await assertGatewayRecovery(host, SANDBOX_A);
+    const finalDestroyCleanupMode =
+      process.platform === "darwin" ? "macos-default" : "explicit-non-macos";
+    await assertDestroyRemovesSandbox(host, sandbox, SANDBOX_A, {
+      cleanupGateway: finalDestroyCleanupMode === "explicit-non-macos",
+    });
+    await expectHostPortFree(host, GATEWAY_PORT, "tc-sbx-12-final-destroy-gateway-port-free");
 
-    await artifacts.writeJson("target-result.json", {
+    await artifacts.target.complete({
       id: "sandbox-operations",
       status: "passed",
+      finalDestroyCleanupMode,
+      finalGatewayPortReleased: true,
       gatewayRecovery,
       legacySource: "test/e2e/test-sandbox-operations.sh",
     });

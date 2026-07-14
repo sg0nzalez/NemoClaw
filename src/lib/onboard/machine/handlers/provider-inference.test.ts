@@ -7,158 +7,42 @@ import path from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { createSession, type Session, type SessionUpdates } from "../../../state/onboard-session";
+import { createSession } from "../../../state/onboard-session";
 import { patchStagedDockerfile } from "../../dockerfile-patch";
 import { clearCompatibleEndpointReasoning } from "../../reasoning-mode";
 import {
   handleProviderInferenceState,
   type ProviderInferenceStateOptions,
-  type ProviderSelectionResult,
 } from "./provider-inference";
-
-type Gpu = { type: string } | null;
-type Agent = { name: string; inference?: { provider_type?: string } } | null;
-type Host = { cpus?: number };
-
-const baseSelection: ProviderSelectionResult = {
-  model: "nvidia/test",
-  provider: "nvidia-prod",
-  endpointUrl: "https://integrate.api.nvidia.com/v1",
-  credentialEnv: "NVIDIA_INFERENCE_API_KEY",
-  hermesAuthMethod: null,
-  hermesToolGateways: [],
-  preferredInferenceApi: "openai-responses",
-  compatibleEndpointReasoning: null,
-  nimContainer: null,
-};
-
-function createDeps(
-  overrides: Partial<ProviderInferenceStateOptions<Gpu, Agent, Host>["deps"]> = {},
-) {
-  const calls = {
-    setupNim: vi.fn(async () => ({ ...baseSelection })),
-    setupInference: vi.fn(async () => ({ ok: true as const })),
-    startStep: vi.fn(async () => undefined),
-    complete: vi.fn(async () => createSession()),
-    skipped: vi.fn(),
-    recoverProvider: vi.fn(
-      async (_provider: string | null | undefined, credentialEnv: string | null | undefined) => ({
-        forceInferenceSetup: false,
-        credentialEnv: credentialEnv ?? null,
-      }),
-    ),
-    surfaceReady: vi.fn(() => true),
-    recordSkip: vi.fn(async () => createSession()),
-    repairEvent: vi.fn(async () => createSession()),
-    hydrate: vi.fn(),
-    repair: vi.fn(),
-    routeReady: vi.fn(() => false),
-    reconcileRouter: vi.fn(async () => undefined),
-    reupsertRoutedProvider: vi.fn(
-      (_provider: string, endpointUrl: string | null, _credentialEnv: string | null) => ({
-        ok: true as const,
-        endpointUrl: "http://host.openshell.internal:4000/v1",
-      }),
-    ),
-    updateSandbox: vi.fn(),
-    promptName: vi.fn(async () => "my-assistant"),
-    promptYesNo: vi.fn(async () => true),
-    log: vi.fn(),
-    error: vi.fn(),
-    exit: vi.fn((code: number): never => {
-      throw new Error(`exit ${code}`);
-    }),
-    deleteEnv: vi.fn(),
-  };
-  return {
-    calls,
-    deps: {
-      normalizeHermesAuthMethod: (value: string | null | undefined) =>
-        value === "oauth" || value === "api_key" ? value : null,
-      setupNim: calls.setupNim,
-      setupInference: calls.setupInference,
-      startRecordedStep: calls.startStep,
-      recordStepComplete: calls.complete,
-      toSessionUpdates: (updates: Record<string, unknown>) => updates as SessionUpdates,
-      skippedStepMessage: calls.skipped,
-      ensureResumeProviderReady: calls.recoverProvider,
-      isResumeProviderSurfaceReady: calls.surfaceReady,
-      recordStateSkipped: calls.recordSkip,
-      recordRepairEvent: calls.repairEvent,
-      hydrateCredentialEnv: calls.hydrate,
-      configureCompatibleEndpointReasoning: async (value?: string | null) =>
-        value === "true" ? "true" : "false",
-      clearCompatibleEndpointReasoning: () => null,
-      repairLocalInferenceSystemdOverrideOrExit: calls.repair,
-      isNonInteractive: () => true,
-      getOpenshellBinary: () => "/usr/bin/openshell",
-      needsBedrockRuntimeAdapter: () => false,
-      isInferenceRouteReady: calls.routeReady,
-      isRoutedInferenceProvider: (provider: string) => provider === "nvidia-router",
-      reconcileModelRouter: calls.reconcileRouter,
-      reupsertRoutedProvider: calls.reupsertRoutedProvider,
-      registryUpdateSandbox: calls.updateSandbox,
-      promptValidatedSandboxName: calls.promptName,
-      assessHost: () => ({ cpus: 8 }),
-      formatSandboxBuildEstimateNote: () => "estimate",
-      formatOnboardConfigSummary: (options: {
-        provider: string;
-        model: string;
-        sandboxName: string;
-      }) => `summary:${options.provider}/${options.model}/${options.sandboxName}`,
-      promptYesNoOrDefault: calls.promptYesNo,
-      cliName: () => "nemoclaw",
-      log: calls.log,
-      error: calls.error,
-      exitProcess: calls.exit,
-      deleteEnv: calls.deleteEnv,
-      ...overrides,
-    },
-  };
-}
-
-function baseOptions(
-  deps: ProviderInferenceStateOptions<Gpu, Agent, Host>["deps"],
-  session: Session | null = createSession(),
-): ProviderInferenceStateOptions<Gpu, Agent, Host> {
-  return {
-    resume: false,
-    fresh: false,
-    session,
-    gpu: { type: "nvidia" },
-    sandboxName: null,
-    agent: null,
-    initial: {
-      model: session?.model ?? null,
-      provider: session?.provider ?? null,
-      endpointUrl: session?.endpointUrl ?? null,
-      credentialEnv: session?.credentialEnv ?? null,
-      hermesAuthMethod: session?.hermesAuthMethod ?? null,
-      hermesToolGateways: session?.hermesToolGateways ?? [],
-      preferredInferenceApi: session?.preferredInferenceApi ?? null,
-      compatibleEndpointReasoning: session?.compatibleEndpointReasoning ?? null,
-      nimContainer: session?.nimContainer ?? null,
-      webSearchConfig: session?.webSearchConfig ?? null,
-    },
-    selectedMessagingChannels: [],
-    env: {},
-    constants: {
-      hermesProviderName: "hermes-provider",
-      hermesApiKeyAuthMethod: "api_key",
-      hermesApiKeyCredentialEnv: "NOUS_API_KEY",
-    },
-    deps,
-  };
-}
+import {
+  type Agent,
+  activatedRecoveryReceipt,
+  baseOptions,
+  baseSelection,
+  createDeps,
+  type Gpu,
+  type Host,
+} from "./provider-inference.test-support";
 
 describe("handleProviderInferenceState", () => {
   it("runs provider selection and inference setup on a fresh flow", async () => {
     const { deps, calls } = createDeps();
+    const session = createSession();
+    calls.complete.mockResolvedValue(session);
 
-    const result = await handleProviderInferenceState(baseOptions(deps));
+    const result = await handleProviderInferenceState(baseOptions(deps, session));
 
     expect(calls.startStep).toHaveBeenNthCalledWith(1, "provider_selection");
-    expect(calls.setupNim).toHaveBeenCalledWith({ type: "nvidia" }, null, null, true);
+    expect(calls.setupNim).toHaveBeenCalledWith(
+      { type: "nvidia" },
+      null,
+      null,
+      true,
+      "nemoclaw",
+      expect.any(Function),
+      expect.any(Function),
+      session.sessionId,
+    );
     expect(calls.promptName).toHaveBeenCalledWith(null);
     expect(calls.log).toHaveBeenCalledWith("summary:nvidia-prod/nvidia/test/my-assistant");
     expect(calls.startStep).toHaveBeenNthCalledWith(2, "inference", {
@@ -173,7 +57,12 @@ describe("handleProviderInferenceState", () => {
       "NVIDIA_INFERENCE_API_KEY",
       null,
       [],
-      { allowToolsIncompatible: false, preferredInferenceApi: "openai-responses" },
+      {
+        gatewayName: "nemoclaw",
+        allowToolsIncompatible: false,
+        preferredInferenceApi: "openai-responses",
+        reservationSessionId: session.sessionId,
+      },
     );
     expect(calls.deleteEnv).toHaveBeenCalledWith("NVIDIA_INFERENCE_API_KEY");
     expect(result).toMatchObject({
@@ -213,9 +102,11 @@ describe("handleProviderInferenceState", () => {
       preferredInferenceApi: "anthropic-messages",
     }));
     const { deps, calls } = createDeps({ setupNim });
+    const session = createSession();
+    calls.complete.mockResolvedValue(session);
 
     const result = await handleProviderInferenceState({
-      ...baseOptions(deps),
+      ...baseOptions(deps, session),
       agent: { name: "hermes" },
       sandboxName: "hermes-custom",
     });
@@ -237,7 +128,12 @@ describe("handleProviderInferenceState", () => {
       "COMPATIBLE_ANTHROPIC_API_KEY",
       null,
       [],
-      { allowToolsIncompatible: false, preferredInferenceApi: "openai-completions" },
+      {
+        gatewayName: "nemoclaw",
+        allowToolsIncompatible: false,
+        preferredInferenceApi: "openai-completions",
+        reservationSessionId: session.sessionId,
+      },
     );
     expect(result.preferredInferenceApi).toBe("openai-completions");
   });
@@ -253,6 +149,7 @@ describe("handleProviderInferenceState", () => {
       preferredInferenceApi: "anthropic-messages",
     });
     const { deps, calls } = createDeps({ isInferenceRouteReady: vi.fn(() => true) });
+    calls.complete.mockResolvedValue(session);
 
     const result = await handleProviderInferenceState({
       ...baseOptions(deps, session),
@@ -275,7 +172,12 @@ describe("handleProviderInferenceState", () => {
       "COMPATIBLE_ANTHROPIC_API_KEY",
       null,
       [],
-      { allowToolsIncompatible: false, preferredInferenceApi: "openai-completions" },
+      {
+        gatewayName: "nemoclaw",
+        allowToolsIncompatible: false,
+        preferredInferenceApi: "openai-completions",
+        reservationSessionId: session.sessionId,
+      },
     );
     expect(calls.complete).toHaveBeenCalledWith(
       "inference",
@@ -294,13 +196,16 @@ describe("handleProviderInferenceState", () => {
       credentialEnv: "COMPATIBLE_ANTHROPIC_API_KEY",
       preferredInferenceApi: "openai-completions",
     });
+    const surfaceReady = vi.fn(() => false);
     const { deps, calls } = createDeps({
       isInferenceRouteReady: vi.fn(() => true),
-      isResumeProviderSurfaceReady: vi.fn(() => false),
+      isResumeProviderSurfaceReady: surfaceReady,
     });
+    calls.complete.mockResolvedValue(session);
 
     await handleProviderInferenceState({
       ...baseOptions(deps, session),
+      gatewayName: "nemoclaw-9090",
       resume: true,
       authoritativeResumeConfig: true,
       agent: { name: "hermes" },
@@ -310,6 +215,13 @@ describe("handleProviderInferenceState", () => {
     expect(calls.log).toHaveBeenCalledWith(
       "  [resume] Refreshing the gateway provider to match the required inference surface.",
     );
+    expect(surfaceReady).toHaveBeenCalledWith(
+      "nemoclaw-9090",
+      "compatible-anthropic-endpoint",
+      "openai-completions",
+      "COMPATIBLE_ANTHROPIC_API_KEY",
+      "https://inference-api.nvidia.com",
+    );
     expect(calls.setupInference).toHaveBeenCalledWith(
       "hermes-custom",
       "nvidia/nvidia/nemotron-3-super-v3",
@@ -318,7 +230,12 @@ describe("handleProviderInferenceState", () => {
       "COMPATIBLE_ANTHROPIC_API_KEY",
       null,
       [],
-      { allowToolsIncompatible: false, preferredInferenceApi: "openai-completions" },
+      {
+        gatewayName: "nemoclaw-9090",
+        allowToolsIncompatible: false,
+        preferredInferenceApi: "openai-completions",
+        reservationSessionId: session.sessionId,
+      },
     );
   });
 
@@ -388,18 +305,6 @@ describe("handleProviderInferenceState", () => {
     });
   });
 
-  it("disables recorded provider recovery during fresh provider selection", async () => {
-    const { deps, calls } = createDeps();
-
-    await handleProviderInferenceState({
-      ...baseOptions(deps),
-      fresh: true,
-      sandboxName: "dcode-station",
-    });
-
-    expect(calls.setupNim).toHaveBeenCalledWith({ type: "nvidia" }, "dcode-station", null, false);
-  });
-
   it("does not use resume shortcuts when fresh is also set", async () => {
     const session = createSession({ provider: "ollama-local", model: "llama3.1" });
     session.steps.provider_selection.status = "complete";
@@ -414,7 +319,16 @@ describe("handleProviderInferenceState", () => {
 
     expect(calls.recoverProvider).not.toHaveBeenCalled();
     expect(calls.skipped).not.toHaveBeenCalledWith("provider_selection", expect.anything());
-    expect(calls.setupNim).toHaveBeenCalledWith({ type: "nvidia" }, "dcode-station", null, false);
+    expect(calls.setupNim).toHaveBeenCalledWith(
+      { type: "nvidia" },
+      "dcode-station",
+      null,
+      false,
+      "nemoclaw",
+      expect.any(Function),
+      expect.any(Function),
+      session.sessionId,
+    );
     expect(calls.setupInference).toHaveBeenCalled();
   });
 
@@ -427,6 +341,8 @@ describe("handleProviderInferenceState", () => {
       preferredInferenceApi: "openai-completions",
     });
     const { deps, calls } = createDeps({ isInferenceRouteReady: vi.fn(() => true) });
+    const rebuiltSession = createSession({ sessionId: "rebuild-session-id" });
+    calls.complete.mockResolvedValueOnce(rebuiltSession);
 
     const result = await handleProviderInferenceState({
       ...baseOptions(deps, session),
@@ -436,7 +352,11 @@ describe("handleProviderInferenceState", () => {
     });
 
     expect(calls.setupNim).not.toHaveBeenCalled();
-    expect(calls.recoverProvider).toHaveBeenCalledWith("compatible-endpoint", "COMPATIBLE_API_KEY");
+    expect(calls.recoverProvider).toHaveBeenCalledWith(
+      "nemoclaw",
+      "compatible-endpoint",
+      "COMPATIBLE_API_KEY",
+    );
     expect(calls.complete).toHaveBeenCalledWith(
       "provider_selection",
       expect.objectContaining({
@@ -451,6 +371,36 @@ describe("handleProviderInferenceState", () => {
       endpointUrl: "https://compatible.example.test/v1",
       preferredInferenceApi: "openai-completions",
     });
+    expect(calls.reserveRoute).toHaveBeenCalledWith("mcp-rebuild", {
+      provider: "compatible-endpoint",
+      model: "mock/mcp-bridge",
+      endpointUrl: "https://compatible.example.test/v1",
+      credentialEnv: "COMPATIBLE_API_KEY",
+      preferredInferenceApi: "openai-completions",
+      gatewayName: "nemoclaw",
+      reservationSessionId: rebuiltSession.sessionId,
+    });
+  });
+
+  it("stops an authoritative rebuild before inference state when route persistence throws", async () => {
+    const session = createSession({ provider: "openai-api", model: "gpt-test" });
+    const { deps, calls } = createDeps({ isInferenceRouteReady: vi.fn(() => true) });
+    calls.reserveRoute.mockImplementation(() => {
+      throw new Error("registry save failed");
+    });
+
+    await expect(
+      handleProviderInferenceState({
+        ...baseOptions(deps, session),
+        resume: true,
+        authoritativeResumeConfig: true,
+        sandboxName: "failed-rebuild",
+      }),
+    ).rejects.toThrow("registry save failed");
+
+    expect(calls.skipped).not.toHaveBeenCalledWith("inference", expect.anything());
+    expect(calls.recordSkip).not.toHaveBeenCalledWith("inference", expect.anything());
+    expect(calls.complete).not.toHaveBeenCalledWith("inference", expect.anything());
   });
 
   it("clears non-NVIDIA provider credentials when inference setup fails", async () => {
@@ -519,7 +469,7 @@ describe("handleProviderInferenceState", () => {
 
     expect(calls.setupNim).not.toHaveBeenCalled();
     expect(calls.setupInference).not.toHaveBeenCalled();
-    expect(calls.recoverProvider).toHaveBeenCalledWith("ollama-local", null);
+    expect(calls.recoverProvider).toHaveBeenCalledWith("nemoclaw", "ollama-local", null);
     expect(calls.skipped).toHaveBeenCalledWith("provider_selection", "ollama-local / llama3.1");
     expect(calls.recordSkip).toHaveBeenCalledWith("provider_selection", {
       reason: "resume",
@@ -543,6 +493,93 @@ describe("handleProviderInferenceState", () => {
       model: "llama3.1",
     });
     expect(result).toMatchObject({ provider: "ollama-local", model: "llama3.1" });
+  });
+
+  it("reserves the prompted sandbox route when resume skips already-ready inference (#6562)", async () => {
+    const session = createSession({
+      provider: "nvidia-prod",
+      model: "nvidia/nemotron-test",
+      endpointUrl: "https://integrate.api.nvidia.com/v1",
+      credentialEnv: "NVIDIA_INFERENCE_API_KEY",
+      preferredInferenceApi: "openai-responses",
+    });
+    session.steps.provider_selection.status = "complete";
+    const { deps, calls } = createDeps({ isInferenceRouteReady: vi.fn(() => true) });
+    calls.promptName.mockResolvedValueOnce("tm");
+
+    const result = await handleProviderInferenceState({
+      ...baseOptions(deps, session),
+      resume: true,
+      sandboxName: null,
+    });
+
+    expect(calls.promptName).toHaveBeenCalledWith(null);
+    expect(calls.setupNim).not.toHaveBeenCalled();
+    expect(calls.setupInference).not.toHaveBeenCalled();
+    expect(calls.reserveRoute).toHaveBeenCalledWith("tm", {
+      provider: "nvidia-prod",
+      model: "nvidia/nemotron-test",
+      endpointUrl: "https://integrate.api.nvidia.com/v1",
+      credentialEnv: "NVIDIA_INFERENCE_API_KEY",
+      preferredInferenceApi: "openai-responses",
+      gatewayName: "nemoclaw",
+      reservationSessionId: session.sessionId,
+    });
+    expect(result.sandboxName).toBe("tm");
+  });
+
+  it("does not reserve a route when resume skips inference after sandbox completion (#6562)", async () => {
+    const session = createSession({
+      sandboxName: "completed-sandbox",
+      provider: "nvidia-prod",
+      model: "nvidia/nemotron-test",
+      endpointUrl: "https://integrate.api.nvidia.com/v1",
+      credentialEnv: "NVIDIA_INFERENCE_API_KEY",
+      preferredInferenceApi: "openai-responses",
+    });
+    session.steps.provider_selection.status = "complete";
+    session.steps.sandbox.status = "complete";
+    const { deps, calls } = createDeps({ isInferenceRouteReady: vi.fn(() => true) });
+
+    const result = await handleProviderInferenceState({
+      ...baseOptions(deps, session),
+      resume: true,
+      sandboxName: "completed-sandbox",
+    });
+
+    expect(calls.promptName).not.toHaveBeenCalled();
+    expect(calls.setupNim).not.toHaveBeenCalled();
+    expect(calls.setupInference).not.toHaveBeenCalled();
+    expect(calls.reserveRoute).not.toHaveBeenCalled();
+    expect(result.sandboxName).toBe("completed-sandbox");
+  });
+
+  it("reserves the prompted sandbox route after redoing provider selection on resume (#6562)", async () => {
+    const session = createSession();
+    const completedSelection = createSession({ sessionId: "resume-selection-session" });
+    const { deps, calls } = createDeps({ isInferenceRouteReady: vi.fn(() => true) });
+    calls.complete.mockResolvedValueOnce(completedSelection);
+    calls.promptName.mockResolvedValueOnce("tm");
+
+    const result = await handleProviderInferenceState({
+      ...baseOptions(deps, session),
+      resume: true,
+      sandboxName: null,
+    });
+
+    expect(calls.setupNim).toHaveBeenCalledOnce();
+    expect(calls.setupInference).not.toHaveBeenCalled();
+    expect(calls.promptName).toHaveBeenCalledWith(null);
+    expect(calls.reserveRoute).toHaveBeenCalledWith("tm", {
+      provider: "nvidia-prod",
+      model: "nvidia/test",
+      endpointUrl: "https://integrate.api.nvidia.com/v1",
+      credentialEnv: "NVIDIA_INFERENCE_API_KEY",
+      preferredInferenceApi: "openai-responses",
+      gatewayName: "nemoclaw",
+      reservationSessionId: "resume-selection-session",
+    });
+    expect(result.sandboxName).toBe("tm");
   });
 
   it("coerces a resumed anthropic-messages seed for an OpenAI-only agent (#6294)", async () => {
@@ -580,7 +617,10 @@ describe("handleProviderInferenceState", () => {
       "COMPATIBLE_ANTHROPIC_API_KEY",
       null,
       [],
-      expect.objectContaining({ preferredInferenceApi: "openai-completions" }),
+      expect.objectContaining({
+        gatewayName: "nemoclaw",
+        preferredInferenceApi: "openai-completions",
+      }),
     );
     // The coerced value is persisted only after the setup succeeded, with the
     // inference step record — never with a pre-setup provider_selection write
@@ -705,6 +745,7 @@ describe("handleProviderInferenceState", () => {
         credentialEnv: "COMPATIBLE_API_KEY",
       })),
     });
+    calls.complete.mockResolvedValue(session);
 
     await handleProviderInferenceState({
       ...baseOptions(deps, session),
@@ -722,7 +763,11 @@ describe("handleProviderInferenceState", () => {
       "COMPATIBLE_API_KEY",
       null,
       [],
-      { allowToolsIncompatible: false },
+      {
+        gatewayName: "nemoclaw",
+        allowToolsIncompatible: false,
+        reservationSessionId: session.sessionId,
+      },
     );
   });
 
@@ -741,6 +786,7 @@ describe("handleProviderInferenceState", () => {
         credentialEnv: "COMPATIBLE_API_KEY",
       })),
     });
+    calls.complete.mockResolvedValue(session);
 
     await handleProviderInferenceState({
       ...baseOptions(deps, session),
@@ -758,7 +804,11 @@ describe("handleProviderInferenceState", () => {
       "COMPATIBLE_API_KEY",
       null,
       [],
-      { allowToolsIncompatible: false },
+      {
+        gatewayName: "nemoclaw",
+        allowToolsIncompatible: false,
+        reservationSessionId: session.sessionId,
+      },
     );
   });
 
@@ -774,6 +824,7 @@ describe("handleProviderInferenceState", () => {
       hydrateCredentialEnv: vi.fn(() => "host-key"),
       isInferenceRouteReady: vi.fn(() => true),
     });
+    calls.complete.mockResolvedValue(session);
 
     await handleProviderInferenceState({
       ...baseOptions(deps, session),
@@ -795,15 +846,20 @@ describe("handleProviderInferenceState", () => {
       "COMPATIBLE_API_KEY",
       null,
       [],
-      { allowToolsIncompatible: false },
+      {
+        gatewayName: "nemoclaw",
+        allowToolsIncompatible: false,
+        reservationSessionId: session.sessionId,
+      },
     );
     expect(calls.log).toHaveBeenCalledWith(
       "  [resume] Refreshing compatible-endpoint inference route for messaging.",
     );
   });
 
-  it("revalidates recovered identity before reusing a gateway credential on messaging resume", async () => {
+  it("uses an activated receipt to recover identity before reusing a gateway credential on messaging resume", async () => {
     const session = createSession({
+      sandboxName: "my-assistant",
       provider: "compatible-endpoint",
       model: "nvidia/nemotron",
       endpointUrl: "https://integrate.api.nvidia.com/v1",
@@ -835,7 +891,6 @@ describe("handleProviderInferenceState", () => {
         healthChecks: [],
       },
     });
-    session.steps.provider_selection.status = "complete";
     const setupNim = vi.fn(async () => ({
       ...baseSelection,
       model: "nvidia/nemotron",
@@ -845,21 +900,52 @@ describe("handleProviderInferenceState", () => {
       preferredInferenceApi: "openai-completions",
       skipHostInferenceSmoke: true,
       reuseGatewayCredentialWithoutLocalKey: true,
+      recoveredFromSandbox: true,
     }));
+    let recoveryAuthorization: (() => boolean) | undefined;
+    const setupInference = vi.fn<
+      ProviderInferenceStateOptions<Gpu, Agent, Host>["deps"]["setupInference"]
+    >(async (...args) => {
+      recoveryAuthorization = args[7]?.isRecordedProviderRecoveryAuthorized;
+      return { ok: true };
+    });
     const { deps, calls } = createDeps({
       setupNim,
+      setupInference,
       hydrateCredentialEnv: vi.fn(() => null),
       isInferenceRouteReady: vi.fn(() => true),
+    });
+    calls.complete.mockResolvedValue(session);
+    const { receipt, ledger } = activatedRecoveryReceipt({
+      sandboxName: "my-assistant",
+      sessionId: session.sessionId,
+      provider: "compatible-endpoint",
+      model: "nvidia/nemotron",
+      endpointUrl: "https://integrate.api.nvidia.com/v1",
+      preferredInferenceApi: "openai-completions",
     });
 
     await handleProviderInferenceState({
       ...baseOptions(deps, session),
       resume: true,
       sandboxName: "my-assistant",
+      providerRecoveryReceipt: receipt,
+      providerRecoveryReceiptLedger: ledger,
     });
 
     expect(setupNim).toHaveBeenCalledOnce();
-    expect(calls.setupInference).toHaveBeenCalledWith(
+    expect(calls.skipped).not.toHaveBeenCalledWith("provider_selection", expect.anything());
+    expect(setupNim).toHaveBeenCalledWith(
+      { type: "nvidia" },
+      "my-assistant",
+      null,
+      true,
+      "nemoclaw",
+      expect.any(Function),
+      expect.any(Function),
+      session.sessionId,
+    );
+    expect(setupInference).toHaveBeenCalledWith(
       "my-assistant",
       "nvidia/nemotron",
       "compatible-endpoint",
@@ -868,15 +954,16 @@ describe("handleProviderInferenceState", () => {
       null,
       [],
       {
+        gatewayName: "nemoclaw",
         allowToolsIncompatible: false,
         skipHostInferenceSmoke: true,
         reuseGatewayCredentialWithoutLocalKey: true,
         preferredInferenceApi: "openai-completions",
+        reservationSessionId: session.sessionId,
+        isRecordedProviderRecoveryAuthorized: expect.any(Function),
       },
     );
-    expect(calls.log).toHaveBeenCalledWith(
-      "  [resume] Revalidating recovered compatible-endpoint identity before reusing its gateway credential.",
-    );
+    expect(recoveryAuthorization?.()).toBe(true);
   });
 
   it("keeps the compatible-endpoint resume shortcut when no messaging channels are selected", async () => {
@@ -945,6 +1032,7 @@ describe("handleProviderInferenceState", () => {
       hydrateCredentialEnv: vi.fn(() => "nvapi-test"),
       isInferenceRouteReady: vi.fn(() => true),
     });
+    calls.complete.mockResolvedValue(session);
 
     await handleProviderInferenceState({
       ...baseOptions(deps, session),
@@ -961,7 +1049,11 @@ describe("handleProviderInferenceState", () => {
       "COMPATIBLE_API_KEY",
       null,
       [],
-      { allowToolsIncompatible: false },
+      {
+        gatewayName: "nemoclaw",
+        allowToolsIncompatible: false,
+        reservationSessionId: session.sessionId,
+      },
     );
     expect(calls.log).toHaveBeenCalledWith(
       "  [resume] Refreshing compatible-endpoint inference route for messaging.",
@@ -980,6 +1072,15 @@ describe("handleProviderInferenceState", () => {
     });
 
     expect(calls.reconcileRouter).toHaveBeenCalledOnce();
+    expect(calls.reserveRoute).toHaveBeenCalledWith("router-sandbox", {
+      provider: "nvidia-router",
+      model: "router/model",
+      endpointUrl: "http://host.openshell.internal:4000/v1",
+      credentialEnv: null,
+      preferredInferenceApi: null,
+      gatewayName: "nemoclaw",
+      reservationSessionId: session.sessionId,
+    });
   });
 
   // #5974 instance 5: the Model Router Python preflight (`prepareModelRouterVenv`)
@@ -1033,12 +1134,73 @@ describe("handleProviderInferenceState", () => {
 
     expect(calls.reconcileRouter).toHaveBeenCalledOnce();
     expect(calls.reupsertRoutedProvider).toHaveBeenCalledWith(
+      "nemoclaw",
       "nvidia-router",
       "http://localhost:4000/v1",
       "NVIDIA_INFERENCE_API_KEY",
     );
     expect(calls.setupInference).not.toHaveBeenCalled();
     expect(result.endpointUrl).toBe("http://host.openshell.internal:4000/v1");
+  });
+
+  it("reserves an authoritative routed repair inside the same gateway lock", async () => {
+    const session = createSession({
+      provider: "nvidia-router",
+      model: "router/model",
+      endpointUrl: "http://localhost:4000/v1",
+      credentialEnv: "NVIDIA_INFERENCE_API_KEY",
+    });
+    session.steps.provider_selection.status = "complete";
+    let insideGatewayLock = false;
+    const gatewayLocks: string[] = [];
+    const withGatewayRouteMutationLock: ProviderInferenceStateOptions<
+      Gpu,
+      Agent,
+      Host
+    >["deps"]["withGatewayRouteMutationLock"] = async (gatewayName, operation) => {
+      gatewayLocks.push(gatewayName);
+      insideGatewayLock = true;
+      try {
+        return await operation();
+      } finally {
+        insideGatewayLock = false;
+      }
+    };
+    const { deps, calls } = createDeps({
+      isInferenceRouteReady: vi.fn(() => true),
+      withGatewayRouteMutationLock,
+    });
+    const rebuiltSession = createSession({ sessionId: "router-rebuild-session-id" });
+    calls.complete.mockResolvedValueOnce(rebuiltSession);
+    calls.reconcileRouter.mockImplementation(async () => {
+      expect(insideGatewayLock).toBe(true);
+    });
+    calls.reupsertRoutedProvider.mockImplementation(() => {
+      expect(insideGatewayLock).toBe(true);
+      return { ok: true, endpointUrl: "http://host.openshell.internal:4000/v1" };
+    });
+    calls.reserveRoute.mockImplementation(() => {
+      expect(insideGatewayLock).toBe(true);
+      return true;
+    });
+
+    await handleProviderInferenceState({
+      ...baseOptions(deps, session),
+      resume: true,
+      authoritativeResumeConfig: true,
+      sandboxName: "router-rebuild",
+    });
+
+    expect(gatewayLocks).toEqual(["nemoclaw"]);
+    expect(calls.reserveRoute).toHaveBeenCalledWith("router-rebuild", {
+      provider: "nvidia-router",
+      model: "router/model",
+      endpointUrl: "http://host.openshell.internal:4000/v1",
+      credentialEnv: "NVIDIA_INFERENCE_API_KEY",
+      preferredInferenceApi: null,
+      gatewayName: "nemoclaw",
+      reservationSessionId: rebuiltSession.sessionId,
+    });
   });
 
   it("aborts resume when re-upserting the routed provider fails (#4564)", async () => {
@@ -1084,6 +1246,28 @@ describe("handleProviderInferenceState", () => {
     const result = await handleProviderInferenceState(baseOptions(deps));
 
     expect(setupNim).toHaveBeenCalledTimes(2);
+    expect(setupNim).toHaveBeenNthCalledWith(
+      1,
+      { type: "nvidia" },
+      null,
+      null,
+      true,
+      "nemoclaw",
+      expect.any(Function),
+      expect.any(Function),
+      expect.any(String),
+    );
+    expect(setupNim).toHaveBeenNthCalledWith(
+      2,
+      { type: "nvidia" },
+      "my-assistant",
+      null,
+      false,
+      "nemoclaw",
+      expect.any(Function),
+      expect.any(Function),
+      expect.any(String),
+    );
     expect(setupInference).toHaveBeenCalledTimes(2);
     expect(result.model).toBe("good");
     expect(calls.startStep).toHaveBeenCalledWith("provider_selection");
@@ -1139,8 +1323,10 @@ describe("handleProviderInferenceState", () => {
       allowToolsIncompatible: true,
     }));
     const { deps, calls } = createDeps({ setupNim });
+    const session = createSession();
+    calls.complete.mockResolvedValue(session);
 
-    await handleProviderInferenceState(baseOptions(deps));
+    await handleProviderInferenceState(baseOptions(deps, session));
 
     expect(calls.setupInference).toHaveBeenCalledWith(
       "my-assistant",
@@ -1150,7 +1336,12 @@ describe("handleProviderInferenceState", () => {
       null,
       null,
       [],
-      { allowToolsIncompatible: true, preferredInferenceApi: "openai-responses" },
+      {
+        gatewayName: "nemoclaw",
+        allowToolsIncompatible: true,
+        preferredInferenceApi: "openai-responses",
+        reservationSessionId: session.sessionId,
+      },
     );
   });
 });

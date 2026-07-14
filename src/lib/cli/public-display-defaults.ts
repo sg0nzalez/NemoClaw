@@ -25,6 +25,13 @@ const PUBLIC_DISPLAY_LAYOUT: Record<string, readonly PublicDisplayLayout[]> = {
       order: 40,
     },
   ],
+  completion: [
+    {
+      group: "Getting Started",
+      order: 1.75,
+      flags: "[bash|zsh|fish]",
+    },
+  ],
   "credentials:add": [
     {
       group: "Credentials",
@@ -341,6 +348,14 @@ const PUBLIC_DISPLAY_LAYOUT: Record<string, readonly PublicDisplayLayout[]> = {
       flags: "[--follow] [--tail <lines>|-n <lines>] [--since <duration>]",
     },
   ],
+  "sandbox:policy:get": [
+    {
+      group: "Policy Presets",
+      order: 16,
+      description: "Export round-trippable base policy YAML",
+      flags: "[--raw]",
+    },
+  ],
   "sandbox:policy:add": [
     {
       group: "Policy Presets",
@@ -375,13 +390,25 @@ const PUBLIC_DISPLAY_LAYOUT: Record<string, readonly PublicDisplayLayout[]> = {
     {
       group: "Sandbox Management",
       order: 13,
-      flags: "[--yes|-y|--force] [--verbose|-v]",
+      flags: "[--yes|-y|--force] [--verbose|-v] [--observability|--no-observability]",
     },
   ],
   "sandbox:recover": [
     {
       group: "Sandbox Management",
       order: 3.5,
+    },
+  ],
+  "sandbox:stop": [
+    {
+      group: "Sandbox Management",
+      order: 3.6,
+    },
+  ],
+  "sandbox:start": [
+    {
+      group: "Sandbox Management",
+      order: 3.7,
     },
   ],
   "sandbox:share:mount": [

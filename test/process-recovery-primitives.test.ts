@@ -59,11 +59,20 @@ describe("resolveSandboxDashboardPort", () => {
     ).toBe(18789);
   });
 
-  it("keeps non-OpenClaw agents on their declared forward port", () => {
+  it("keeps non-OpenClaw agents on their recorded custom dashboard port (#6277)", () => {
     expect(
       resolveSandboxDashboardPort("hermes-box", {
         getSessionAgent: () => ({ forwardPort: 8642 }),
         getSandbox: () => ({ name: "hermes-box", dashboardPort: 18790 }),
+      }),
+    ).toBe(18790);
+  });
+
+  it("falls back to a non-OpenClaw agent's declared port without registry metadata", () => {
+    expect(
+      resolveSandboxDashboardPort("hermes-box", {
+        getSessionAgent: () => ({ forwardPort: 8642 }),
+        getSandbox: () => null,
       }),
     ).toBe(8642);
   });
@@ -159,6 +168,34 @@ describe("classifySandboxForwardHealth", () => {
         "18790",
       ),
     ).toBe(true);
+  });
+
+  it("requires the requested bind when classifying a remote forward", () => {
+    expect(
+      classifySandboxForwardHealth(
+        [
+          {
+            sandboxName: "beta",
+            bind: "127.0.0.1",
+            port: "18790",
+            status: "running",
+          },
+        ],
+        "beta",
+        "18790",
+        "0.0.0.0",
+      ),
+    ).toBe(false);
+    expect(
+      ["::", "[::]", "*"].map((bind) =>
+        classifySandboxForwardHealth(
+          [{ sandboxName: "beta", bind, port: "18790", status: "running" }],
+          "beta",
+          "18790",
+          "0.0.0.0",
+        ),
+      ),
+    ).toEqual([true, true, true]);
   });
 });
 

@@ -28,6 +28,7 @@ import {
   inferenceSetAttemptCount,
   runInferenceSetWithRetry,
 } from "../fixtures/inference-switch-retry.ts";
+import { CLI_ENTRYPOINT, REPO_ROOT } from "../fixtures/paths.ts";
 import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
 import { stripAnsi } from "./json-envelope.ts";
 import { isTransientProviderValidationFailure } from "./network-policy-transient-provider.ts";
@@ -36,8 +37,9 @@ import {
   PUBLIC_NVIDIA_SWITCH_PROVIDER,
 } from "./public-nvidia-switch-provider.ts";
 
-export const REPO_ROOT = path.resolve(import.meta.dirname, "../../..");
-export const CLI = path.join(REPO_ROOT, "bin", "nemoclaw.js");
+export { REPO_ROOT };
+
+export const CLI = CLI_ENTRYPOINT;
 export const SANDBOX_NAME = process.env.NEMOCLAW_SANDBOX_NAME ?? "e2e-hermes-inference-switch";
 validateSandboxName(SANDBOX_NAME);
 const USE_COMPATIBLE_HOSTED = process.env.NEMOCLAW_E2E_USE_HOSTED_INFERENCE === "1";
@@ -131,7 +133,7 @@ export function env(apiKey?: string, extra: NodeJS.ProcessEnv = {}): NodeJS.Proc
   return { ...out, ...extra };
 }
 
-export async function bestEffort(run: () => Promise<unknown>): Promise<void> {
+export async function preCleanBestEffort(run: () => Promise<unknown>): Promise<void> {
   try {
     await run();
   } catch {}
@@ -223,14 +225,14 @@ export async function cleanupHermesSwitch(
   host: HostCliClient,
   sandbox: SandboxClient,
 ): Promise<void> {
-  await bestEffort(() =>
+  await preCleanBestEffort(() =>
     host.command("node", [CLI, SANDBOX_NAME, "destroy", "--yes", "--cleanup-gateway"], {
       artifactName: "cleanup-nemoclaw-destroy",
       env: env(),
       timeoutMs: 120_000,
     }),
   );
-  await bestEffort(() =>
+  await preCleanBestEffort(() =>
     sandbox.openshell(["sandbox", "delete", SANDBOX_NAME], {
       artifactName: "cleanup-openshell-delete",
       env: env(),

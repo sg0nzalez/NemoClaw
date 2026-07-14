@@ -154,6 +154,41 @@ describe("onboarding phase fixture", () => {
     ]);
   });
 
+  it("opts the canonical Deep Agents Code target into composed observability", async () => {
+    const runner = new FakeRunner();
+    runner.enqueue(shellResult(0, "onboarded\n"));
+    const secrets = new FakeSecrets({ NVIDIA_INFERENCE_API_KEY: "secret-token" });
+    const onboard = new OnboardingPhaseFixture(new HostCliClient(runner), secrets);
+
+    const instance = await onboard.from(ready({ onboarding: "cloud-langchain-deepagents-code" }), {
+      sandboxName: "e2e-ubuntu-repo-cloud-langchain-deepagents-code",
+    });
+
+    expect(instance).toMatchObject({
+      agent: "langchain-deepagents-code",
+      sandboxName: "e2e-ubuntu-repo-cloud-langchain-deepagents-code",
+    });
+    expect(runner.calls[0]).toMatchObject({
+      command: "nemoclaw",
+      args: [
+        "onboard",
+        "--non-interactive",
+        "--yes",
+        "--yes-i-accept-third-party-software",
+        "--observability",
+      ],
+      options: {
+        artifactName: "onboard-cloud-langchain-deepagents-code",
+        env: expect.objectContaining({
+          NEMOCLAW_AGENT: "langchain-deepagents-code",
+          NVIDIA_INFERENCE_API_KEY: "secret-token",
+        }),
+        redactionValues: ["secret-token"],
+        timeoutMs: 900_000,
+      },
+    });
+  });
+
   it("fails cloud OpenClaw onboarding on non-zero exit", async () => {
     const runner = new FakeRunner();
     runner.enqueue(shellResult(42, "provider rejected credential"));
@@ -307,6 +342,78 @@ describe("onboarding phase fixture", () => {
     expect(secrets.requiredCalls).toEqual(["NVIDIA_INFERENCE_API_KEY"]);
     expect(cleanup.calls).toHaveLength(1);
     expect(cleanup.calls[0]?.name).toBe("destroy NemoClaw sandbox e2e-no-docker");
+  });
+
+  it("runs the missing custom policy presets negative path", async () => {
+    const runner = new FakeRunner();
+    runner.enqueue(
+      shellResult(1, "NEMOCLAW_POLICY_PRESETS is required when NEMOCLAW_POLICY_MODE=custom."),
+    );
+    const secrets = new FakeSecrets({ NVIDIA_INFERENCE_API_KEY: "secret-token" });
+    const cleanup = new FakeCleanup();
+    const onboard = new OnboardingPhaseFixture(new HostCliClient(runner), secrets, cleanup);
+
+    const instance = await onboard.from(
+      ready({ onboarding: "cloud-openclaw-policy-custom-missing-presets" }),
+      { sandboxName: "e2e-policy-custom-missing" },
+    );
+
+    expect(instance).toMatchObject({
+      onboarding: "cloud-openclaw-policy-custom-missing-presets",
+      sandboxName: "e2e-policy-custom-missing",
+      expectedFailure: {
+        phase: "onboarding",
+        errorClass: "policy-presets-required",
+      },
+    });
+    expect(runner.calls[0]).toMatchObject({
+      command: "nemoclaw",
+      args: ["onboard", "--non-interactive", "--yes", "--yes-i-accept-third-party-software"],
+      options: {
+        artifactName: "onboard-cloud-openclaw-policy-custom-missing-presets",
+        env: expect.objectContaining({
+          NEMOCLAW_POLICY_MODE: "custom",
+          NEMOCLAW_POLICY_PRESETS: "",
+          NEMOCLAW_SANDBOX_NAME: "e2e-policy-custom-missing",
+          NVIDIA_INFERENCE_API_KEY: "secret-token",
+        }),
+        redactionValues: ["secret-token"],
+        timeoutMs: 900_000,
+      },
+    });
+    expect(cleanup.calls).toHaveLength(1);
+    expect(cleanup.calls[0]?.name).toBe("destroy NemoClaw sandbox e2e-policy-custom-missing");
+  });
+
+  it("rejects unrelated failures for the missing custom policy presets negative path", async () => {
+    const runner = new FakeRunner();
+    runner.enqueue(shellResult(1, "provider rejected credential"));
+    const onboard = new OnboardingPhaseFixture(
+      new HostCliClient(runner),
+      new FakeSecrets({ NVIDIA_INFERENCE_API_KEY: "secret" }),
+    );
+
+    await expect(
+      onboard.from(ready({ onboarding: "cloud-openclaw-policy-custom-missing-presets" })),
+    ).rejects.toThrow(/failed without the policy preset signature/);
+  });
+
+  it("rejects the expected policy preset failure when it includes a stack trace", async () => {
+    const runner = new FakeRunner();
+    runner.enqueue(
+      shellResult(
+        1,
+        "NEMOCLAW_POLICY_PRESETS is required when NEMOCLAW_POLICY_MODE=custom.\nTypeError: unexpected\n    at Object.onboard (/app/onboard.js:1:1)",
+      ),
+    );
+    const onboard = new OnboardingPhaseFixture(
+      new HostCliClient(runner),
+      new FakeSecrets({ NVIDIA_INFERENCE_API_KEY: "secret" }),
+    );
+
+    await expect(
+      onboard.from(ready({ onboarding: "cloud-openclaw-policy-custom-missing-presets" })),
+    ).rejects.toThrow(/failed with a JavaScript stack trace/);
   });
 
   it("publishes redacted legacy preflight evidence for the no-Docker negative path", async () => {

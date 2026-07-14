@@ -218,7 +218,9 @@ describe("install.sh OpenShell gateway upgrade guard", () => {
 
     const output = result.stdout + result.stderr;
     expect(result.status).not.toBe(0);
-    expect(output).toContain("Resolve every reported sandbox backup failure");
+    expect(output).toContain(
+      "Resolve every reported sandbox backup failure or skipped sandbox using the CLI output above",
+    );
     expect(output).not.toContain("NEMOCLAW_OPENSHELL_UPGRADE_PREPARED");
     expect(cliLog.split(/\r?\n/)).toContain("current:backup-all");
     expect(openshellLog).toBe("");
@@ -300,6 +302,7 @@ describe("install.sh OpenShell gateway upgrade guard", () => {
     ["a non-object sandboxes field", '{"sandboxes":[]}'],
     ["a malformed sandbox row", '{"sandboxes":{"alpha":null}}'],
     ["a sandbox row without a name", '{"sandboxes":{"alpha":{}}}'],
+    ["a sandbox row with a whitespace-only name", '{"sandboxes":{"   ":{"name":"   "}}}'],
     [
       "a sandbox row whose name differs from its registry key",
       '{"sandboxes":{"alpha":{"name":"beta"}}}',
@@ -331,6 +334,49 @@ describe("install.sh OpenShell gateway upgrade guard", () => {
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("RESTORE=");
     expect(cliLog).toBe("");
+    expect(openshellLog).toBe("");
+  });
+
+  it("ignores a route-only reservation during pre-upgrade backup (#6500)", () => {
+    const { result, cliLog, openshellLog } = runPreinstallUpgradeGuard(
+      {
+        NON_INTERACTIVE: "1",
+        NEMOCLAW_SINGLE_SESSION: "1",
+      },
+      {
+        registryJson:
+          '{"sandboxes":{"tm":{"name":"tm","pendingRouteReservation":true,"provider":"nvidia-prod","model":"nemotron"}}}',
+      },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("RESTORE=");
+    expect(result.stdout).toContain("CONFIRMED_NAMES=");
+    expect(result.stdout + result.stderr).not.toContain("managed-image");
+    expect(cliLog).toBe("");
+    expect(openshellLog).toBe("");
+  });
+
+  it("backs up only real sandboxes in a mixed reservation registry (#6500)", () => {
+    const { result, cliLog, openshellLog } = runPreinstallUpgradeGuard(
+      {
+        NON_INTERACTIVE: "1",
+        NEMOCLAW_CONFIRM_LEGACY_MANAGED_RECREATE: '["alpha","beta"]',
+      },
+      {
+        hasOldCli: false,
+        openshellVersion: "0.0.44",
+        registryJson:
+          '{"sandboxes":{"tm":{"name":"tm","pendingRouteReservation":true},"alpha":{"name":"alpha"},"beta":{"name":"beta","pendingRouteReservation":true,"createdAt":"2026-07-13T00:00:00.000Z"}}}',
+      },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("Backing up 2 sandbox(es)");
+    expect(result.stdout).toContain('CONFIRMED_NAMES=["alpha","beta"]');
+    expect(result.stdout + result.stderr).not.toContain('"tm"');
+    expect(cliLog.split(/\r?\n/)).toContain("current:backup-all");
+    expect(cliLog).toContain("require-all-env=1");
     expect(openshellLog).toBe("");
   });
 

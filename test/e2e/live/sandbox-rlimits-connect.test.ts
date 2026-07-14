@@ -2,21 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
+import { resultText } from "../fixtures/clients/command.ts";
 import { validateSandboxName } from "../fixtures/clients/sandbox.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
-import { shouldRunLiveE2E } from "../fixtures/live-project-gate.ts";
 import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
 
 const SANDBOX_NAME = process.env.NEMOCLAW_SANDBOX_NAME ?? "test-490817";
 const LIVE_TIMEOUT_MS = 45 * 60_000;
-const runConnectRlimitTest =
-  shouldRunLiveE2E() && process.env.NEMOCLAW_E2E_CONNECT_RLIMITS === "1" ? test : test.skip;
+const runConnectRlimitTest = process.env.NEMOCLAW_E2E_CONNECT_RLIMITS === "1" ? test : test.skip;
 
 validateSandboxName(SANDBOX_NAME);
-
-function resultText(result: Pick<ShellProbeResult, "stdout" | "stderr">): string {
-  return [result.stdout, result.stderr].filter(Boolean).join("\n");
-}
 
 function numericProbe(text: string, key: string): number {
   const match = text.match(new RegExp(`${key}=(\\d+)`));
@@ -30,12 +25,11 @@ function expectNoRlimitStartupDiagnostics(text: string): void {
   );
 }
 
-function connectAcceptanceScript(cliPath: string, sandboxName: string): string {
+function connectAcceptanceScript(cliPath: string): string {
   const cli = JSON.stringify(cliPath);
-  const sandbox = JSON.stringify(sandboxName);
   return [
     "set -euo pipefail",
-    `cat <<'NEMOCLAW_CONNECT_RLIMITS' | ${cli} ${sandbox} connect`,
+    `cat <<'NEMOCLAW_CONNECT_RLIMITS' | ${cli} connect`,
     "set -euo pipefail",
     'printf "__NEMOCLAW_RLIMIT_CONNECT_BEGIN__\\n"',
     'bash -lc \'printf "login_nproc=%s\\nlogin_nofile=%s\\n" "$(ulimit -u)" "$(ulimit -n)"; ulimit -a\'',
@@ -58,14 +52,14 @@ runConnectRlimitTest(
   async ({ artifacts, cleanup, host, secrets }) => {
     const apiKey = secrets.required("NVIDIA_API_KEY");
     const redactionValues = secrets.redactionValues([apiKey]);
-    await artifacts.writeJson("target.json", {
+    await artifacts.target.declare({
       id: "sandbox-rlimits-connect",
       issue: 2173,
       optIn: "NEMOCLAW_RUN_LIVE_E2E=1 NEMOCLAW_E2E_CONNECT_RLIMITS=1",
       sandboxName: SANDBOX_NAME,
       acceptancePath: [
         "nemoclaw onboard --non-interactive --yes-i-accept-third-party-software",
-        `nemoclaw ${SANDBOX_NAME} connect`,
+        "nemoclaw connect (routes through the onboarded default sandbox)",
         "bash -lc 'ulimit -u; ulimit -n'",
         "bash -ic 'ulimit -u; ulimit -n'",
         "ulimit -a",
@@ -83,12 +77,10 @@ runConnectRlimitTest(
     });
     expect(docker.exitCode, resultText(docker)).toBe(0);
 
-    cleanup.add("remove rlimit acceptance sandbox", () =>
-      host.bestEffortCleanupSandbox(SANDBOX_NAME, {
-        env: buildAvailabilityProbeEnv(),
-        timeoutMs: 15 * 60_000,
-      }),
-    );
+    cleanup.trackSandbox(host, SANDBOX_NAME, {
+      env: buildAvailabilityProbeEnv(),
+      timeoutMs: 15 * 60_000,
+    });
     await host.bestEffortCleanupSandbox(SANDBOX_NAME, {
       env: buildAvailabilityProbeEnv(),
       timeoutMs: 15 * 60_000,
@@ -114,16 +106,12 @@ runConnectRlimitTest(
     );
     expect(onboard.exitCode, resultText(onboard)).toBe(0);
 
-    const connect = await host.command(
-      "bash",
-      ["-lc", connectAcceptanceScript(host.commandPath, SANDBOX_NAME)],
-      {
-        artifactName: "phase-2-connect-rlimits",
-        env: buildAvailabilityProbeEnv(),
-        redactionValues,
-        timeoutMs: 10 * 60_000,
-      },
-    );
+    const connect = await host.command("bash", ["-lc", connectAcceptanceScript(host.commandPath)], {
+      artifactName: "phase-2-connect-rlimits",
+      env: buildAvailabilityProbeEnv(),
+      redactionValues,
+      timeoutMs: 10 * 60_000,
+    });
     const output = resultText(connect);
     await artifacts.writeText("connect-rlimits-output.txt", output);
     expect(connect.exitCode, output).toBe(0);

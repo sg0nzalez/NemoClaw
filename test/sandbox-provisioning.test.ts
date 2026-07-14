@@ -297,61 +297,6 @@ describe("sandbox provisioning: runtime npm online state", () => {
   });
 });
 
-describe("sandbox provisioning: non-messaging OpenClaw plugins", () => {
-  it("pins Brave web-search and preserves its placeholder during build-time doctor", () => {
-    const braveIntegrity =
-      "sha512-DDRnb4reL99O8kbISNbRFyk/xoUPYHsXG3UGikKAsVs+zIldYYA0hY0d3Z2aWoE+0vfda27mJUByCo7Xr15qdw==";
-    const dockerfile = fs.readFileSync(DOCKERFILE, "utf-8");
-    const command = dockerRunCommandBetween(
-      dockerfile,
-      "# Install non-messaging OpenClaw plugins",
-      '# hadolint ignore=DL3059,DL4006\nRUN OPENCLAW_VERSION="${OPENCLAW_VERSION}" node --experimental-strip-types /src/lib/messaging/applier/build/messaging-build-applier.mts --agent openclaw --phase agent-install',
-    );
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-brave-plugin-install-"));
-    try {
-      const { result, calls } = runLoggedDockerShell(
-        command,
-        tmp,
-        [
-          [
-            "npm() {",
-            '  printf "npm %s|BRAVE_API_KEY=%s\\n" "$*" "${BRAVE_API_KEY:-}" >> "$call_log"',
-            `  if [ "$1 $2 $3" = "view @openclaw/brave-plugin@2026.6.10 dist.integrity" ]; then printf "%s\\n" "${braveIntegrity}"; return 0; fi`,
-            '  if [ "$1 $2 $3" = "view @openclaw/brave-plugin@2026.6.10 dist.tarball" ]; then printf "%s\\n" "https://registry.npmjs.org/@openclaw/brave-plugin/-/brave-plugin-2026.6.10.tgz"; return 0; fi',
-            `  if [ "$1" = "pack" ]; then pack_dir="\${4:-}"; test -n "$pack_dir"; printf "fake brave plugin tarball" > "$pack_dir/brave-plugin-2026.6.10.tgz"; printf '[{"filename":"brave-plugin-2026.6.10.tgz","integrity":"%s"}]\\n' "${braveIntegrity}"; return 0; fi`,
-            "  return 1",
-            "}",
-            "openclaw() {",
-            '  printf "%s|BRAVE_API_KEY=%s\\n" "$*" "${BRAVE_API_KEY:-}" >> "$call_log"',
-            "}",
-          ].join("\n"),
-        ],
-        {
-          NEMOCLAW_OPENCLAW_OTEL: "0",
-          NEMOCLAW_WEB_SEARCH_ENABLED: "1",
-          NEMOCLAW_WEB_SEARCH_PROVIDER: "brave",
-          OPENCLAW_VERSION: "2026.6.10",
-          OPENCLAW_BRAVE_PLUGIN_2026_6_10_INTEGRITY: braveIntegrity,
-        },
-      );
-
-      expect(result.status, `stderr: ${result.stderr}`).toBe(0);
-      expect(calls).toContain("npm view @openclaw/brave-plugin@2026.6.10 dist.integrity");
-      expect(calls).toContain("npm view @openclaw/brave-plugin@2026.6.10 dist.tarball");
-      expect(calls).toContain(
-        "npm pack https://registry.npmjs.org/@openclaw/brave-plugin/-/brave-plugin-2026.6.10.tgz --pack-destination",
-      );
-      expect(calls).toContain("plugins install ");
-      expect(calls).toContain("brave-plugin-2026.6.10.tgz --pin|BRAVE_API_KEY=");
-      expect(calls).toContain(
-        "doctor --fix --non-interactive|BRAVE_API_KEY=openshell:resolve:env:BRAVE_API_KEY",
-      );
-    } finally {
-      fs.rmSync(tmp, { recursive: true, force: true });
-    }
-  });
-});
-
 function dockerfileEnvDirectives(text: string): string[] {
   const lines = text.split("\n");
   const directives: string[] = [];
@@ -1212,8 +1157,10 @@ describe("Hermes sandbox provisioning", () => {
       gatewayControlPath,
       path.join(localLib, "sandbox-init.sh"),
       path.join(localLib, "validate-hermes-env-secret-boundary.py"),
+      path.join(localLib, "patch-hermes-session-list-preview.py"),
       path.join(localLib, "seed-hermes-dashboard-config.py"),
       path.join(localLib, "hermes-runtime-config-guard.py"),
+      path.join(localLib, "finalize-tirith-marker.py"),
       buildMcpDigestPath,
       mcpConfigTransactionPath,
       mcpManifest,
@@ -1231,14 +1178,12 @@ describe("Hermes sandbox provisioning", () => {
       .replaceAll("/usr/local/lib/nemoclaw", localLib)
       .replaceAll("/etc/profile.d", profileDir)
       .replaceAll("/etc/bash.bashrc", bashrcPath);
-
     try {
       fs.mkdirSync(localBin, { recursive: true });
       fs.mkdirSync(localLib, { recursive: true });
       fs.mkdirSync(etcDir, { recursive: true });
       fs.writeFileSync(bashrcPath, "# fixture\n", { mode: 0o600 });
       for (const file of files) fs.writeFileSync(file, "# fixture\n", { mode: 0o600 });
-
       const { result, calls } = runLoggedDockerShell(command, tmp, [
         'chown() { printf "chown %s\\n" "$*" >> "$call_log"; }',
       ]);

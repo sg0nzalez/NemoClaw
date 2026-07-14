@@ -20,6 +20,33 @@ export type InstalledSlackRuntimeProof = {
   channelId: string;
 };
 
+export const SLACK_MANAGED_NPM_PROJECT_DISCOVERY_SOURCE = String.raw`
+function addManagedNpmProjectSlackCandidates(projectsDir, addExternalCandidate) {
+  let entries;
+  try {
+    entries = fs.readdirSync(projectsDir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+    if (!entry.isDirectory()) continue;
+    const projectRoot = path.join(projectsDir, entry.name);
+    let dependencies;
+    try {
+      dependencies = JSON.parse(
+        fs.readFileSync(path.join(projectRoot, "package.json"), "utf8"),
+      ).dependencies;
+    } catch {
+      continue;
+    }
+    if (!dependencies || !Object.hasOwn(dependencies, "@openclaw/slack")) continue;
+    addExternalCandidate(
+      path.join(projectRoot, "node_modules", "@openclaw", "slack"),
+    );
+  }
+}
+`;
+
 export const SLACK_INSTALLED_RUNTIME_PROOF_SOURCE = String.raw`
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -29,6 +56,8 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 const allowLegacyTestApi = process.env.NEMOCLAW_E2E_ALLOW_LEGACY_SLACK_TEST_API === "1";
+
+${SLACK_MANAGED_NPM_PROJECT_DISCOVERY_SOURCE}
 
 function invariant(condition, message) {
   if (!condition) throw new Error(message);
@@ -78,8 +107,11 @@ function resolveOpenClawSlackApiLocation() {
     }
   };
 
-  addExternalCandidate(
-    path.join(process.env.OPENCLAW_STATE_DIR || "/sandbox/.openclaw", "extensions", "slack"),
+  const openclawStateDir = process.env.OPENCLAW_STATE_DIR || "/sandbox/.openclaw";
+  addExternalCandidate(path.join(openclawStateDir, "extensions", "slack"));
+  addManagedNpmProjectSlackCandidates(
+    path.join(openclawStateDir, "npm", "projects"),
+    addExternalCandidate,
   );
   addExternalCandidate(process.env.OPENCLAW_SLACK_PACKAGE_ROOT);
   addCoreCandidate(process.env.OPENCLAW_PACKAGE_ROOT);
@@ -548,7 +580,7 @@ console.log(
 );
 `;
 
-function parseInstalledSlackProof(stdout: string): InstalledSlackRuntimeProof {
+export function parseInstalledSlackProof(stdout: string, stderr = ""): InstalledSlackRuntimeProof {
   for (const line of stdout.trim().split(/\r?\n/u).reverse()) {
     try {
       const value = JSON.parse(line) as Partial<InstalledSlackRuntimeProof>;
@@ -569,7 +601,17 @@ function parseInstalledSlackProof(stdout: string): InstalledSlackRuntimeProof {
       // Module discovery can emit non-JSON diagnostics before the proof record.
     }
   }
-  throw new Error(`installed Slack runtime proof did not emit a valid result:\n${stdout}`);
+  const diagnostics = [
+    stdout.trim() ? `stdout:\n${stdout.trim()}` : "",
+    stderr.trim() ? `stderr:\n${stderr.trim()}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+  throw new Error(
+    `installed Slack runtime proof did not emit a valid result:\n${
+      diagnostics || "stdout and stderr were empty"
+    }`,
+  );
 }
 
 export async function runInstalledSlackRuntimeProof(
@@ -589,5 +631,5 @@ export async function runInstalledSlackRuntimeProof(
     timeoutMs: 120_000,
   });
   expectExitZero(result, "installed OpenClaw Slack runtime proof");
-  return parseInstalledSlackProof(result.stdout);
+  return parseInstalledSlackProof(result.stdout, result.stderr);
 }

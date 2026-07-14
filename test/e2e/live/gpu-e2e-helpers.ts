@@ -9,10 +9,12 @@ import type { HostCliClient } from "../fixtures/clients/host.ts";
 import { resultText } from "../fixtures/clients/index.ts";
 import { type SandboxClient, validateSandboxName } from "../fixtures/clients/sandbox.ts";
 import { expect } from "../fixtures/e2e-test.ts";
+import { CLI_ENTRYPOINT, REPO_ROOT } from "../fixtures/paths.ts";
 import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
 
-export const REPO_ROOT = path.resolve(import.meta.dirname, "../../..");
-export const CLI = path.join(REPO_ROOT, "bin", "nemoclaw.js");
+export { REPO_ROOT };
+
+export const CLI = CLI_ENTRYPOINT;
 export const SANDBOX_NAME = process.env.NEMOCLAW_SANDBOX_NAME ?? "e2e-gpu-ollama";
 validateSandboxName(SANDBOX_NAME);
 export const PROXY_PORT = tcpPort(process.env.NEMOCLAW_OLLAMA_PROXY_PORT, "11435");
@@ -52,7 +54,10 @@ function isShellProbeResult(value: unknown): value is ShellProbeResult {
   );
 }
 
-export async function bestEffort(label: string, run: () => Promise<unknown>): Promise<void> {
+export async function preCleanBestEffort(
+  label: string,
+  run: () => Promise<unknown>,
+): Promise<void> {
   try {
     const result = await run();
     if (isShellProbeResult(result) && result.exitCode !== 0) {
@@ -111,21 +116,21 @@ export function chatContent(raw: string): string {
 }
 
 export async function cleanupGpu(host: HostCliClient, sandbox: SandboxClient): Promise<void> {
-  await bestEffort("destroy GPU sandbox", () =>
+  await preCleanBestEffort("destroy GPU sandbox", () =>
     host.command("node", [CLI, SANDBOX_NAME, "destroy", "--yes"], {
       artifactName: "cleanup-destroy-gpu",
       env: env(),
       timeoutMs: 120_000,
     }),
   );
-  await bestEffort("delete OpenShell sandbox", () =>
-    sandbox.openshell(["sandbox", "delete", SANDBOX_NAME], {
+  await preCleanBestEffort("delete OpenShell sandbox", () =>
+    sandbox.cleanupSandbox(SANDBOX_NAME, {
       artifactName: "cleanup-delete-gpu",
       env: env(),
       timeoutMs: 60_000,
     }),
   );
-  await bestEffort("destroy OpenShell gateway", () =>
+  await preCleanBestEffort("destroy OpenShell gateway", () =>
     sandbox.openshell(["gateway", "destroy", "-g", "nemoclaw"], {
       artifactName: "cleanup-gateway-destroy-gpu",
       env: env(),

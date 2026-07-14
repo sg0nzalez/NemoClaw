@@ -7,6 +7,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import YAML from "yaml";
+import { SHARED_E2E_JOB_ID } from "./credential-free-tests.mts";
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const DEFAULT_ACTION_PATH = join(
@@ -34,8 +35,10 @@ const CALLER_ALWAYS = "always()";
 const MCP_SCANNED_UPLOAD_CONDITION =
   "${{ always() && steps.mcp_artifact_secret_scan.outcome == 'success' }}";
 const TARGET_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
-const EXPECTED_UPLOAD_JOB_COUNT = 73;
-const EXPECTED_DEFAULT_CALLER_COUNT = 62;
+
+const SHARED_E2E_JOBS: ReadonlyMap<string, { targetId: string }> = new Map([
+  [SHARED_E2E_JOB_ID, { targetId: "${{ matrix.id }}" }],
+]);
 
 type WorkflowRecord = Record<string, unknown>;
 type WorkflowStep = WorkflowRecord & {
@@ -47,7 +50,7 @@ type WorkflowStep = WorkflowRecord & {
 
 type ExplicitUploadContract = {
   name: string;
-  path: string;
+  path?: string;
 };
 
 const EXPLICIT_UPLOAD_CONTRACTS = new Map<string, ExplicitUploadContract>([
@@ -95,6 +98,13 @@ const EXPLICIT_UPLOAD_CONTRACTS = new Map<string, ExplicitUploadContract>([
     },
   ],
   [
+    "hermes-gpu-startup",
+    {
+      name: "e2e-hermes-gpu-startup-${{ matrix.scenario }}",
+      path: "e2e-artifacts/live/hermes-gpu-startup/${{ matrix.scenario }}/",
+    },
+  ],
+  [
     "hermes-slack",
     {
       name: "e2e-hermes-slack",
@@ -120,6 +130,12 @@ const EXPLICIT_UPLOAD_CONTRACTS = new Map<string, ExplicitUploadContract>([
     {
       name: "e2e-openclaw-inference-switch-${{ matrix.mode }}",
       path: "e2e-artifacts/live/openclaw-inference-switch/${{ matrix.mode }}/",
+    },
+  ],
+  [
+    "openshell-gateway-upgrade",
+    {
+      name: "e2e-openshell-gateway-upgrade-${{ matrix.legacy.id }}",
     },
   ],
   [
@@ -256,27 +272,38 @@ export function validateUploadE2eArtifactsInvocations(workflow: WorkflowRecord):
     Object.entries(jobs)
       .filter(([jobName, value]) => {
         const job = record(value);
-        return jobName === "live" || record(job.env).E2E_JOB === "1";
+        const jobSteps = steps(job.steps);
+        const env = record(job.env);
+        return (
+          jobName === "live" ||
+          env.E2E_JOB === "1" ||
+          env.NEMOCLAW_RUN_LIVE_E2E === "1" ||
+          SHARED_E2E_JOBS.has(jobName) ||
+          jobSteps.some(
+            (step) => typeof step.run === "string" && step.run.includes("--project e2e-live"),
+          )
+        );
       })
       .map(([jobName]) => jobName),
   );
-  const defaultJobs = [...expectedJobs].filter(
-    (jobName) => !EXPLICIT_UPLOAD_CONTRACTS.has(jobName),
-  );
-
-  if (expectedJobs.size !== EXPECTED_UPLOAD_JOB_COUNT) {
-    errors.push(
-      `upload-e2e-artifacts must cover exactly ${EXPECTED_UPLOAD_JOB_COUNT} live and E2E_JOB execution jobs`,
-    );
-  }
-  if (defaultJobs.length !== EXPECTED_DEFAULT_CALLER_COUNT) {
-    errors.push(
-      `upload-e2e-artifacts must keep exactly ${EXPECTED_DEFAULT_CALLER_COUNT} default callers`,
-    );
-  }
   for (const jobName of EXPLICIT_UPLOAD_CONTRACTS.keys()) {
     if (!expectedJobs.has(jobName)) {
       errors.push(`upload-e2e-artifacts explicit caller is missing: ${jobName}`);
+    }
+  }
+
+  for (const jobName of SHARED_E2E_JOBS.keys()) {
+    const value = jobs[jobName];
+    if (value === undefined) {
+      errors.push(`upload-e2e-artifacts shared job is missing: ${jobName}`);
+      continue;
+    }
+    const env = record(record(value).env);
+    if (Object.hasOwn(env, "E2E_JOB")) {
+      errors.push(`${jobName} must not declare E2E_JOB`);
+    }
+    if (Object.hasOwn(env, "E2E_EXECUTION_PROFILE")) {
+      errors.push(`${jobName} must not declare E2E_EXECUTION_PROFILE`);
     }
   }
 
@@ -353,6 +380,15 @@ export function validateUploadE2eArtifactsInvocations(workflow: WorkflowRecord):
       errors.push(`${jobName} upload-e2e-artifacts must use the action defaults`);
     }
     const targetId = record(job.env).E2E_TARGET_ID;
+    const sharedJobContract = SHARED_E2E_JOBS.get(jobName);
+    if (sharedJobContract) {
+      if (targetId !== sharedJobContract.targetId) {
+        errors.push(
+          `${jobName} default upload caller E2E_TARGET_ID must be '${sharedJobContract.targetId}'`,
+        );
+      }
+      continue;
+    }
     if (typeof targetId !== "string" || !TARGET_ID_PATTERN.test(targetId)) {
       errors.push(`${jobName} default upload caller must declare a valid E2E_TARGET_ID`);
     } else if (targetId !== jobName) {

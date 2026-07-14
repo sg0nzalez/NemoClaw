@@ -44,6 +44,7 @@ import {
   type PolicyValue,
   parseNetworkPolicies,
 } from "./preset-parsing";
+import { splitSemanticFindings, validatePolicySemantics } from "./semantic-validation";
 
 const PRESETS_DIR = path.join(ROOT, "nemoclaw-blueprint", "policies", "presets");
 
@@ -176,6 +177,12 @@ function parsePresetPolicyKeys(presetContent: string | null | undefined): string
   const presetEntries = extractPresetEntries(presetContent);
   if (!presetEntries) return [];
   return Object.keys(parseNetworkPolicies(`network_policies:\n${presetEntries}`) || {});
+}
+
+/** Preserve invalid registered content as indeterminate for ownership decisions. */
+function parsePresetPolicyKeysForOwnership(presetContent: string): string[] | null {
+  const networkPolicies = parseNetworkPolicies(presetContent);
+  return networkPolicies === null ? null : Object.keys(networkPolicies);
 }
 
 const AGENT_PRESET_KEY_ALIASES: Readonly<Record<string, readonly string[]>> =
@@ -863,6 +870,22 @@ function applyPresetContent(
       );
       return false;
     }
+    const { errors: semanticErrors, warnings: semanticWarnings } = splitSemanticFindings(
+      validatePolicySemantics({ network_policies: np }),
+    );
+    for (const finding of semanticWarnings) {
+      console.warn(
+        `  Preset '${presetName}' has a policy warning at ${finding.path}: ${finding.message}`,
+      );
+    }
+    if (semanticErrors.length > 0) {
+      for (const finding of semanticErrors) {
+        console.error(
+          `  Preset '${presetName}' has an unsafe endpoint at ${finding.path}: ${finding.message}`,
+        );
+      }
+      return false;
+    }
   }
 
   const presetEntries = extractPresetEntries(presetContent);
@@ -1215,6 +1238,22 @@ function loadPresetFromFile(filePath: string): { presetName: string; content: st
     );
     return null;
   }
+  const { errors: semanticErrors, warnings: semanticWarnings } = splitSemanticFindings(
+    validatePolicySemantics(parsed),
+  );
+  for (const finding of semanticWarnings) {
+    console.warn(
+      `  Preset '${presetName}' has a policy warning at ${finding.path}: ${finding.message}: ${filePath}`,
+    );
+  }
+  if (semanticErrors.length > 0) {
+    for (const finding of semanticErrors) {
+      console.error(
+        `  Preset '${presetName}' has an unsafe endpoint at ${finding.path}: ${finding.message}: ${filePath}`,
+      );
+    }
+    return null;
+  }
   const builtin = listPresets().map((p) => p.name);
   if (builtin.includes(presetName)) {
     console.error(
@@ -1251,6 +1290,60 @@ function listCustomPresets(sandboxName: string): PresetInfo[] {
     name: e.name,
     description: "custom preset",
   }));
+}
+
+/** Return whether registered custom content owns an exact live network-policy key. */
+function customPresetOwnsNetworkPolicyKey(sandboxName: string, policyKey: string): boolean {
+  let candidates: ReturnType<typeof registry.getCustomPolicies>;
+  try {
+    candidates = [];
+    for (const entry of registry.getCustomPolicies(sandboxName)) {
+      const keys = parsePresetPolicyKeysForOwnership(entry.content);
+      if (keys === null) {
+        throw new Error("invalid registered custom policy content");
+      }
+      if (keys.includes(policyKey)) candidates.push(entry);
+    }
+  } catch {
+    throw new Error(
+      `Could not inspect registered custom policy ownership for '${policyKey}' in sandbox '${sandboxName}'; refusing to reconcile overlapping built-in policy content.`,
+    );
+  }
+  if (candidates.length === 0) return false;
+
+  let rawPolicy: string;
+  try {
+    rawPolicy = runCapture(buildPolicyGetCommand(sandboxName));
+  } catch {
+    throw new Error(
+      `Could not read live policy ownership for '${policyKey}' in sandbox '${sandboxName}'; refusing to reconcile overlapping built-in policy content.`,
+    );
+  }
+  const states = candidates.map((entry) =>
+    inspectPresetContentGatewayState({
+      readPolicy: () => rawPolicy,
+      parseCurrentPolicy: parseCurrentPolicyOrEmpty,
+      extractPresetEntries,
+      presetContent: entry.content,
+      policyKey,
+    }),
+  );
+  if (states.includes("match")) return true;
+  if (states.includes(null)) {
+    throw new Error(
+      `Could not determine live policy ownership for '${policyKey}' in sandbox '${sandboxName}'; refusing to reconcile overlapping built-in policy content.`,
+    );
+  }
+  return false;
+}
+
+/** Drop built-in registry attribution without mutating overlapping live policy content. */
+function removeBuiltinPresetAttribution(sandboxName: string, presetName: string): void {
+  const sandbox = registry.getSandbox(sandboxName);
+  if (!sandbox) return;
+  const policies = (sandbox.policies ?? []).filter((name) => name !== presetName);
+  if (policies.length === (sandbox.policies ?? []).length) return;
+  registry.updateSandbox(sandboxName, { policies });
 }
 
 /**
@@ -1296,12 +1389,14 @@ function getGatewayPresets(sandboxName: string): string[] | null {
 function getPresetContentGatewayState(
   sandboxName: string,
   presetContent: string,
+  policyKey?: string,
 ): "match" | "absent" | "drift" | null {
   return inspectPresetContentGatewayState({
     readPolicy: () => runCapture(buildPolicyGetCommand(sandboxName)),
     parseCurrentPolicy: parseCurrentPolicyOrEmpty,
     extractPresetEntries,
     presetContent,
+    policyKey,
   });
 }
 
@@ -1428,6 +1523,7 @@ export {
   buildPolicyGetFullCommand,
   buildPolicySetCommand,
   clampSetupPolicyPresetNames,
+  customPresetOwnsNetworkPolicyKey,
   extractPresetEntries,
   filterSetupPolicyPresets,
   getAppliedPresets,
@@ -1450,6 +1546,7 @@ export {
   parseCurrentPolicyOrEmpty as parseCurrentPolicy,
   parsePresetPolicyKeys,
   presetContentMatchesGateway,
+  removeBuiltinPresetAttribution,
   removePreset,
   removePresetFromPolicy,
   resolvePermissivePolicyPath,

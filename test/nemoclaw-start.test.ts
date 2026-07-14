@@ -548,7 +548,6 @@ describe("nemoclaw-start non-root fallback", () => {
       ["#!/usr/bin/env bash", "set -euo pipefail", fn, "fix_openclaw_ownership"].join("\n"),
       { mode: 0o700 },
     );
-
     try {
       const result = spawnSync("bash", [scriptPath], {
         encoding: "utf-8",
@@ -695,7 +694,8 @@ describe("nemoclaw-start gateway token export (#1114)", () => {
     expect(result.stderr).toContain("Dashboard auth token redacted from startup logs.");
     expect(result.stderr).not.toContain("#token=");
     expect(result.stderr).not.toContain("tok'en");
-    expect(envFile).toContain("export OPENCLAW_GATEWAY_TOKEN='tok'\\''en'");
+    expect(envFile).toContain("OPENCLAW_GATEWAY_TOKEN='tok'\\''en'");
+    expect(envFile).toContain("export OPENCLAW_GATEWAY_TOKEN");
     expect(envFile).toContain("nemoclaw-configure-guard begin");
     expect(envFile).not.toContain(".bashrc");
     expect(envFile).not.toContain(".profile");
@@ -713,7 +713,7 @@ describe("nemoclaw-start gateway token export (#1114)", () => {
     expect(envFile).toContain("export OPENCLAW_GATEWAY_PORT='18790'");
     expect(envFile).toContain("export NEMOCLAW_OPENCLAW_GATEWAY_URL='ws://127.0.0.1:18790'");
     expect(envFile).not.toContain("export OPENCLAW_GATEWAY_URL='ws://127.0.0.1:18790'");
-    expect(envFile).toContain("export OPENCLAW_GATEWAY_TOKEN='token'");
+    expect(envFile).toContain("OPENCLAW_GATEWAY_TOKEN='token'");
   });
   it("writes OpenClaw state env for connect-shell pairing approval (#3730)", () => {
     const { result, envFile } = runGatewayTokenHarness(
@@ -726,7 +726,7 @@ describe("nemoclaw-start gateway token export (#1114)", () => {
     expect(envFile).toContain("export OPENCLAW_CONFIG_PATH='/sandbox/.openclaw/openclaw.json'");
     expect(envFile).toContain("export OPENCLAW_OAUTH_DIR='/sandbox/.openclaw/credentials'");
     expect(envFile.indexOf("export OPENCLAW_STATE_DIR=")).toBeLessThan(
-      envFile.indexOf("export OPENCLAW_GATEWAY_TOKEN="),
+      envFile.indexOf("OPENCLAW_GATEWAY_TOKEN='"),
     );
   });
 
@@ -744,7 +744,7 @@ describe("nemoclaw-start gateway token export (#1114)", () => {
     expect(envFile).toContain("export OPENCLAW_GATEWAY_PORT='18790'");
     expect(envFile).toContain("export NEMOCLAW_OPENCLAW_GATEWAY_URL='ws://127.0.0.1:18790'");
     expect(envFile).not.toContain("export OPENCLAW_GATEWAY_URL='ws://127.0.0.1:18790'");
-    expect(envFile).toContain(`export OPENCLAW_GATEWAY_TOKEN='${configAfter.gateway.auth.token}'`);
+    expect(envFile).toContain(`OPENCLAW_GATEWAY_TOKEN='${configAfter.gateway.auth.token}'`);
     expect(envFile).not.toContain("stale-token");
     expect(hashAfter).not.toBe("initial-hash\n");
     expect(hashAfter).toMatch(/ openclaw\.json\n$/);
@@ -762,7 +762,7 @@ describe("nemoclaw-start gateway token export (#1114)", () => {
     expect(configAfter.gateway.auth.token).toEqual(expect.any(String));
     expect(configAfter.gateway.auth.token).not.toBe("");
     expect(configAfter.gateway.auth.token).not.toBe(oldToken);
-    expect(envFile).toContain(`export OPENCLAW_GATEWAY_TOKEN='${configAfter.gateway.auth.token}'`);
+    expect(envFile).toContain(`OPENCLAW_GATEWAY_TOKEN='${configAfter.gateway.auth.token}'`);
     expect(envFile).not.toContain(oldToken);
     expect(envFile).not.toContain("stale-token");
     expect(hashAfter).not.toBe("initial-hash\n");
@@ -789,7 +789,7 @@ describe("nemoclaw-start gateway token export (#1114)", () => {
     expect(configAfter.gateway.auth.token).not.toBe("");
     expect(configAfter.gateway.auth.token).not.toBe(oldToken);
     expect(configAfter.model).toBe("nvidia/nemotron-3-super-120b-a12b");
-    expect(envFile).toContain(`export OPENCLAW_GATEWAY_TOKEN='${configAfter.gateway.auth.token}'`);
+    expect(envFile).toContain(`OPENCLAW_GATEWAY_TOKEN='${configAfter.gateway.auth.token}'`);
     expect(envFile).not.toContain(oldToken);
     expect(envFile).not.toContain("stale-token");
     expect(hashAfter).not.toBe("initial-hash\n");
@@ -1554,6 +1554,7 @@ describe("nemoclaw-start auto-pair client whitelisting (#117)", () => {
         "not-a-device",
         { requestId: "ok-browser", clientId: "openclaw-control-ui", clientMode: "unknown" },
         { requestId: "ok-browser", clientId: "openclaw-control-ui", clientMode: "unknown" },
+        { requestId: "ok-agent-cli", clientId: "cli", clientMode: "cli" },
         { requestId: "ok-webchat", clientId: "other-client", clientMode: "webchat" },
         { requestId: "reject-me", clientId: "evil-client", clientMode: "unknown" },
       ],
@@ -1592,7 +1593,6 @@ exit 2
     );
 
     const autoPairScript = autoPairPythonScript(src);
-
     try {
       const run = spawnSync("python3", ["-c", autoPairScript], {
         encoding: "utf-8",
@@ -1613,22 +1613,26 @@ exit 2
       expect(run.stdout).toContain(
         "[auto-pair] approved request=ok-browser client=openclaw-control-ui",
       );
+      expect(run.stdout).toContain("[auto-pair] approved request=ok-agent-cli client=cli mode=cli");
       expect(run.stdout).toContain("[auto-pair] rejected unknown client=other-client mode=webchat");
       expect(run.stdout).toContain("[auto-pair] rejected unknown client=evil-client mode=unknown");
       expect(run.stdout).toContain(
-        "[auto-pair] browser pairing converged; entering slow-mode approvals=1",
+        "[auto-pair] browser pairing converged; entering slow-mode approvals=2",
       );
-      expect(fs.readFileSync(approveLog, "utf-8").trim().split("\n")).toEqual(["ok-browser"]);
+      expect(fs.readFileSync(approveLog, "utf-8").trim().split("\n")).toEqual([
+        "ok-browser",
+        "ok-agent-cli",
+      ]);
       const envLogLines = fs.readFileSync(envLog, "utf-8").trim().split("\n");
       expect(envLogLines).toContain("list:ws://127.0.0.1:18789:18789:test-gateway-token");
       expect(envLogLines).toContain("approve:ok-browser:unset:unset:unset");
+      expect(envLogLines).toContain("approve:ok-agent-cli:unset:unset:unset");
       expect(envLogLines).not.toContain("approve:ok-webchat:unset:unset:unset");
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   }, 40_000);
 });
-
 describe("nemoclaw-start auto-pair slow-mode keepalive (#4263)", () => {
   const src = fs.readFileSync(START_SCRIPT, "utf-8");
 
@@ -1651,7 +1655,7 @@ describe("nemoclaw-start auto-pair slow-mode keepalive (#4263)", () => {
     const stateFile = path.join(tmpDir, "list-count");
     const approveLog = path.join(tmpDir, "approvals.log");
     const browserClient = { clientId: "openclaw-control-ui", clientMode: "webchat" };
-    const cliClient = { clientId: "openclaw-cli", clientMode: "cli" };
+    const cliClient = { clientId: "cli", clientMode: "cli" };
     const initialPending = JSON.stringify({
       pending: [{ requestId: "browser-pair", ...browserClient }],
       paired: [],
@@ -1717,12 +1721,8 @@ exit 2
         "[auto-pair] browser pairing converged; entering slow-mode approvals=1",
       );
       // Concurrent late wave — proxy for two sibling sandboxes' upgrades.
-      expect(run.stdout).toContain(
-        "[auto-pair] approved request=late-cli client=openclaw-cli mode=cli",
-      );
-      expect(run.stdout).toContain(
-        "[auto-pair] approved request=late-cli-b client=openclaw-cli mode=cli",
-      );
+      expect(run.stdout).toContain("[auto-pair] approved request=late-cli client=cli mode=cli");
+      expect(run.stdout).toContain("[auto-pair] approved request=late-cli-b client=cli mode=cli");
       expect(run.stdout).toContain("watcher deadline reached approvals=3");
       // Single marker per poll wave, transition after convergence.
       expect(run.stdout).toContain("[auto-pair] fast-reentry bumped polls=3 approved=3 mode=slow");
@@ -2704,10 +2704,6 @@ describe("seed_default_workspace_templates (#3240)", () => {
     const stepDownLog = path.join(tmpDir, "step-down.log");
     fs.mkdirSync(workspaceDir, { recursive: true });
     writeTemplates(templatesDir);
-    fs.mkdirSync(path.join(tmpDir, "openclaw", "docs", "reference"), { recursive: true });
-    fs.cpSync(templatesDir, path.join(tmpDir, "openclaw", "docs", "reference", "templates"), {
-      recursive: true,
-    });
     const configPath = path.join(tmpDir, "openclaw.json");
     fs.writeFileSync(configPath, JSON.stringify({ agents: { defaults: { skipBootstrap: true } } }));
     const scriptPath = path.join(tmpDir, "seed-as-sandbox.sh");
@@ -2718,9 +2714,10 @@ describe("seed_default_workspace_templates (#3240)", () => {
     const seedAsSandbox = extractShellFunctionFromSource(
       src,
       "seed_default_workspace_templates_as_sandbox",
-    )
-      .replaceAll("/sandbox/.openclaw/workspace", workspaceDir)
-      .replaceAll("/sandbox/.openclaw/openclaw.json", configPath);
+    ).replace(
+      "seed_default_workspace_templates /sandbox/.openclaw/workspace '' /sandbox/.openclaw/openclaw.json",
+      `seed_default_workspace_templates ${JSON.stringify(workspaceDir)} ${JSON.stringify(templatesDir)} ${JSON.stringify(configPath)}`,
+    );
     fs.writeFileSync(
       scriptPath,
       [
@@ -2728,7 +2725,7 @@ describe("seed_default_workspace_templates (#3240)", () => {
         "set -euo pipefail",
         `STEP_DOWN_LOG=${JSON.stringify(stepDownLog)}`,
         `STEP_DOWN_PREFIX_SANDBOX=(bash -c 'printf "%s\\n" "$0" >"$STEP_DOWN_LOG"; exec "$@"' sandbox-step-down)`,
-        `seed_default_workspace_templates() { printf 'seeded\\n' > ${JSON.stringify(path.join(workspaceDir, "SOUL.md"))}; }`,
+        extractShellFunctionFromSource(src, "seed_default_workspace_templates"),
         runStepDown,
         seedAsSandbox,
         "seed_default_workspace_templates_as_sandbox",
@@ -2743,7 +2740,10 @@ describe("seed_default_workspace_templates (#3240)", () => {
       });
       expect(result.status, result.stderr || result.stdout).toBe(0);
       expect(fs.readFileSync(stepDownLog, "utf-8").trim()).toBe("sandbox-step-down");
+      expect(fs.existsSync(path.join(workspaceDir, "AGENTS.md"))).toBe(true);
       expect(fs.existsSync(path.join(workspaceDir, "SOUL.md"))).toBe(true);
+      expect(fs.existsSync(path.join(workspaceDir, "BOOTSTRAP.md"))).toBe(false);
+      expect(result.stderr).toContain("seeded 6 default workspace template");
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -4018,7 +4018,7 @@ describe("openclaw.json baseline + recovery (#3118)", () => {
       "#!/usr/bin/env bash",
       "set -euo pipefail",
       `export NEMOCLAW_MUTABLE_CONFIG_NORMALIZER=${JSON.stringify(helperPath)}`,
-      helperFns,
+      `${extractShellFunction("resolve_mutable_config_normalizer")}\n${helperFns}`,
       fn,
       "recover_openclaw_config_if_empty",
     ]
@@ -4129,7 +4129,7 @@ describe("openclaw.json baseline + recovery (#3118)", () => {
     const wrapper = [
       "#!/usr/bin/env bash",
       "set -euo pipefail",
-      extractShellFunction("normalize_mutable_config_perms").replaceAll("/sandbox", root),
+      `${extractShellFunction("resolve_mutable_config_normalizer")}\n${extractShellFunction("normalize_mutable_config_perms").replaceAll("/sandbox", root)}`,
       "normalize_mutable_config_perms",
     ]
       .filter(Boolean)
@@ -4810,16 +4810,15 @@ describe("direct-root entrypoint composition under CAP_DAC_OVERRIDE drop", () =>
 
       expect(fs.existsSync(proxyEnvFile)).toBe(true);
       const proxyEnv = fs.readFileSync(proxyEnvFile, "utf-8");
-      expect(proxyEnv).toMatch(/export OPENCLAW_GATEWAY_TOKEN='[A-Za-z0-9_-]{20,}'/);
+      expect(proxyEnv).toMatch(/OPENCLAW_GATEWAY_TOKEN='[A-Za-z0-9_-]{20,}'/);
+      expect(proxyEnv).toContain("export OPENCLAW_GATEWAY_TOKEN");
 
       expect((fs.statSync(bashrcPath).mode & 0o777).toString(8)).toBe("444");
       expect((fs.statSync(profilePath).mode & 0o777).toString(8)).toBe("444");
 
       const updatedConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
       expect(updatedConfig.gateway?.auth?.token).toMatch(/^[A-Za-z0-9_-]{20,}$/);
-      expect(proxyEnv).toContain(
-        `export OPENCLAW_GATEWAY_TOKEN='${updatedConfig.gateway.auth.token}'`,
-      );
+      expect(proxyEnv).toContain(`OPENCLAW_GATEWAY_TOKEN='${updatedConfig.gateway.auth.token}'`);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }

@@ -17,7 +17,18 @@ Update documentation when your change:
 - Fixes a bug that the docs describe incorrectly.
 - Changes an API, protocol, or policy schema.
 
-## Update Docs with Contributor Skills
+## Confirm Product Scope Before Writing Docs
+
+Canonical documentation describes behavior that NemoClaw has chosen to support and maintain.
+A documentation PR must not establish a new supported integration, solution workflow, custom image, third-party stack, or product surface by itself.
+
+Technical correctness, successful builds, and working examples are necessary evidence, but they are not product approval.
+Before documenting a new surface, confirm that an accepted issue or design decision defines ownership, compatibility and upgrade expectations, security review, lifecycle support, and validation.
+
+Route independent solutions, complete use-case examples, and third-party integrations through [Community Solutions](resources/community-contributions.mdx).
+If the correct destination is unclear, request maintainer direction before drafting the page.
+
+## Update and Refactor Docs with Agent Skills
 
 If you use an AI coding agent (Cursor, Claude Code, Codex, etc.), the repo includes the `nemoclaw-contributor-update-docs` skill that automates doc work.
 Use it before writing from scratch.
@@ -28,6 +39,10 @@ For example, ask your agent to "catch up the docs for the changes I made in this
 During release prep, run the skill first, make any doc version bumps, then open the docs refresh PR.
 
 The skill lives in `.agents/skills/nemoclaw-contributor-update-docs/` and follows the style guide below automatically.
+
+Use the maintainer-owned `nemoclaw-maintainer-refactor-docs` skill when a page or section has grown too large, mixes several user tasks, or needs a nested TOC.
+Use it to inventory the existing content, organize topics around the user journey, keep foldable navigation groups non-clickable, assign one canonical owner per topic, and preserve Fern routes, redirects, and agent variants during the split.
+Find the skill in `.agents/skills/nemoclaw-maintainer-refactor-docs/`.
 
 ## Markdown Docs for AI Agents
 
@@ -54,7 +69,7 @@ To print the pinned Fern CLI version, run:
 npm run docs:deps
 ```
 
-To validate the Fern configuration and migrated MDX pages, run:
+To validate the Fern configuration and MDX pages, run:
 
 ```bash
 npm run docs
@@ -80,13 +95,27 @@ The watcher rejects blank or malformed overrides before it starts Fern.
 Fern `.mdx` pages are the canonical docs source.
 Fern publishes Markdown routes for AI agents from the same source pages.
 
+## Publishing Docs
+
+GitHub Actions publishes Fern docs from the same source files that `npm run docs` validates locally.
+
+Docs PRs get Fern previews when they change `docs/`, `fern/`, or docs build inputs.
+The preview workflow publishes to the staging Fern instance with a `pr-<number>` preview ID and posts the preview URL on the PR when `FERN_TOKEN` is available.
+
+After a docs PR merges, pushes to `main` publish the affected docs to the staging Fern instance.
+The staging publish job regenerates agent variants, validates Fern docs, publishes staging, and deletes the merged PR preview when it can map the merge commit back to a PR.
+
+Public docs publish automatically when a `v*.*.*` release tag is pushed.
+The public publish job runs in the `docs-public` environment, verifies that the tag commit is reachable from `origin/main`, regenerates agent variants, validates Fern docs, and publishes to the public Fern instance.
+If the tag does not point to a commit on `main`, the job stops before installing dependencies or running Fern.
+
 ## Agent Variant Generation
 
-Some Fern pages appear in both the OpenClaw and Hermes guide variants.
-The `scripts/sync-agent-variant-docs.ts` script reads `docs/index.yml` and renders variant-specific copies for every page that appears in both guide variants before Fern validates or publishes the site.
+Some Fern pages appear in the OpenClaw, Hermes, and Deep Agents guide variants.
+The `scripts/sync-agent-variant-docs.ts` script reads `docs/index.yml` and renders variant-specific copies for every page that appears in multiple guide variants before Fern validates or publishes the site.
 The source pages stay in their normal `docs/` locations, and generated pages are written under `docs/_build/agent-variants/`, which is ignored by Git.
 Navigation in `docs/index.yml` points Fern at generated pages for shared entries so Fern still renders normal fenced code blocks with copy buttons and syntax highlighting.
-OpenClaw-only or Hermes-only pages stay as source pages in navigation.
+OpenClaw-only, Hermes-only, or Deep Agents-only pages stay as source pages in navigation.
 
 When shared page content is the same except for the host CLI binary, write one source page and use `$$nemoclaw` as a build-time placeholder.
 Do not duplicate fenced code blocks or inline command examples only to switch between `nemoclaw` and `nemohermes`.
@@ -203,7 +232,7 @@ Remove them during review.
   ```
 
 - Use `$$nemoclaw` as a build-time placeholder for NemoClaw host CLI command examples in shared variant pages.
-  The docs build resolves it to `nemoclaw` for OpenClaw pages and `nemohermes` for Hermes pages before Fern renders code blocks.
+  The docs build resolves it to `nemoclaw` for OpenClaw pages, `nemohermes` for Hermes pages, and `nemo-deepagents` for Deep Agents pages before Fern renders code blocks.
   This preserves Fern's native fenced-code UI while keeping one source sample.
 - Do not write duplicate `<AgentOnly>` fenced code blocks when the only difference is `nemoclaw` versus `nemohermes`.
   Use `<AgentOnly>` blocks only when the surrounding content differs between the OpenClaw and Hermes variants.
@@ -219,7 +248,6 @@ Remove them during review.
 
 - Use tables for structured comparisons. Keep tables simple (no nested formatting).
 - Use Fern callout components (`<Note>`, `<Tip>`, `<Warning>`) for callouts in MDX pages, not bold text.
-- Use MyST admonitions (`:::{tip}`, `:::{note}`, `:::{warning}`) only in legacy `.md` pages that have not migrated yet.
 - Avoid nested admonitions.
 - Do not number section titles. Write "Deploy a Gateway" not "Section 1: Deploy a Gateway" or "Step 3: Verify."
 - Do not use colons in titles. Write "Deploy and Manage Gateways" not "Gateways: Deploy and Manage."
@@ -263,6 +291,9 @@ feat(cli): add policy-add command
 
 When reviewing documentation:
 
+- Confirm that the page documents an approved and maintained NemoClaw product surface.
+- Do not approve a new integration or solution solely because its instructions work or its checks pass.
+- Route independent third-party solutions to [Community Solutions](resources/community-contributions.mdx) when no product decision establishes core ownership.
 - Check that the style guide rules above are followed.
 - Watch for LLM-generated patterns (excessive bold, em dashes, filler).
 - Verify code examples are accurate and runnable.

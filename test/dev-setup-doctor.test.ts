@@ -84,12 +84,8 @@ function createFixture(): Fixture {
     "node_modules/.bin/pi",
     "nemoclaw/node_modules/.bin/tsc",
     "bin/nemoclaw.js",
-    ".venv/bin/python",
   ]) {
-    writeExecutable(
-      path.join(repo, file),
-      file === ".venv/bin/python" ? '#!/usr/bin/env bash\necho "Python 3.12.1"\n' : undefined,
-    );
+    writeExecutable(path.join(repo, file));
   }
   writeExecutable(
     path.join(repo, "node_modules", ".bin", "prek"),
@@ -120,7 +116,7 @@ fi
     fakeBin,
     "node",
     `if [ "\${1:-}" = "--version" ]; then
-  echo "v22.16.0"
+  echo "v22.19.0"
 elif [ "\${1:-}" = "${repo}/bin/nemoclaw.js" ] && [ "\${2:-}" = "onboard" ]; then
   echo "runtime onboard"
 else
@@ -141,7 +137,6 @@ else
 fi`,
   );
   writeTool(fakeBin, "python3", 'echo "Python 3.12.1"');
-  writeTool(fakeBin, "uv", 'echo "uv 0.11.0"');
   writeTool(fakeBin, "hadolint", 'echo "Haskell Dockerfile Linter 2.14.0"');
   writeTool(
     fakeBin,
@@ -298,7 +293,7 @@ describe("contributor environment doctor", () => {
 
     expect(result.status).toBe(0);
     expect(result.output).toContain("Ready to create a feature branch.");
-    expect(result.output).toContain("Python repository environment 3.12.1");
+    expect(result.output).toContain("Python 3.12.1");
     expect(result.output).toContain("Git commit signing configured (ssh)");
     expect(result.output).toContain("Docker 29.6.1: 4 vCPU, 16.0 GiB, overlay2 storage");
     expect(result.output).toContain("0 failed");
@@ -307,26 +302,27 @@ describe("contributor environment doctor", () => {
 
   it("rejects unsupported tool versions with a precise remediation", () => {
     const fixture = createFixture();
-    writeTool(fixture.fakeBin, "node", 'echo "v20.15.0"');
+    writeTool(fixture.fakeBin, "node", 'echo "v22.18.0"');
 
     const result = runDoctor(fixture);
 
     expect(result.status).toBe(1);
-    expect(result.output).toContain("Node.js 20.15.0 is below 22.16.0");
-    expect(result.output).toContain("Next: Install Node.js 22.16 or newer.");
+    expect(result.output).toContain("Node.js 22.18.0 is below 22.19.0");
+    expect(result.output).toContain("Next: Install Node.js 22.19 or newer.");
   }, 30_000);
 
-  it("requires the uv-managed repository Python environment", () => {
+  it("requires Python 3.11 or newer", () => {
     const fixture = createFixture();
-    fs.rmSync(path.join(fixture.repo, ".venv"), { recursive: true });
+    writeTool(fixture.fakeBin, "python3", 'echo "Python 3.10.0"');
+    for (const name of ["python3.14", "python3.13", "python3.12", "python3.11"]) {
+      writeTool(fixture.fakeBin, name, 'echo "Python 3.10.0"');
+    }
 
     const result = runDoctor(fixture);
 
     expect(result.status).toBe(1);
-    expect(result.output).toContain("Python repository environment: missing");
-    expect(result.output).toContain(
-      "Next: Run: uv sync --python /path/to/python3.11-or-newer --no-python-downloads",
-    );
+    expect(result.output).toContain("Python 3.11 or newer: not found");
+    expect(result.output).toContain("Next: Install Python 3.11 or newer.");
   });
 
   it("rejects build artifacts older than their source trees", () => {
@@ -580,10 +576,7 @@ describe("contributor repository setup", () => {
     const commands = readCommandLog(fixture);
     expect(commands).toContain("npm install --include=dev --ignore-scripts");
     expect(commands).toContain("npm --prefix nemoclaw install --include=dev --ignore-scripts");
-    expect(commands).toContain(
-      `uv sync --python ${path.join(fixture.repo, ".venv", "bin", "python")} --no-python-downloads`,
-    );
-    expect(commands).not.toContain("uv sync --python 3.11");
+    expect(commands).not.toContain("uv sync");
     expect(commands).toContain("prek install");
     expect(commands).not.toContain("npm-link-or-shim");
     expect(commands).not.toContain("onboard");
@@ -598,10 +591,7 @@ describe("contributor repository setup", () => {
     const commands = readCommandLog(fixture);
     expect(commands).toContain("npm install --include=dev --ignore-scripts");
     expect(commands).toContain("npm --prefix nemoclaw install --include=dev --ignore-scripts");
-    expect(commands).toContain(
-      `uv sync --python ${path.join(fixture.repo, ".venv", "bin", "python")} --no-python-downloads`,
-    );
-    expect(commands).not.toContain("uv sync --python 3.11");
+    expect(commands).not.toContain("uv sync");
     expect(commands).not.toContain("npm-link-or-shim");
     expect(commands).not.toContain("onboard");
   });
@@ -620,25 +610,28 @@ describe("contributor repository setup", () => {
     expect(commands).toContain("npm --prefix nemoclaw install --include=dev --ignore-scripts");
   });
 
-  it("stops before repository changes when a required host command is missing", () => {
+  it("stops before repository changes when a supported Python is missing", () => {
     const fixture = createFixture();
-    fs.rmSync(path.join(fixture.fakeBin, "uv"));
+    writeTool(fixture.fakeBin, "python3", 'echo "Python 3.10.0"');
+    for (const name of ["python3.14", "python3.13", "python3.12", "python3.11"]) {
+      writeTool(fixture.fakeBin, name, 'echo "Python 3.10.0"');
+    }
 
     const result = runSetup(fixture);
 
     expect(result.status).toBe(1);
-    expect(result.output).toContain("Missing required host command: uv");
+    expect(result.output).toContain("Python 3.11 or newer was not found locally.");
     expect(readCommandLog(fixture)).not.toContain("npm install");
   });
 
   it("rejects unsupported Node.js before repository changes", () => {
     const fixture = createFixture();
-    writeTool(fixture.fakeBin, "node", 'echo "v20.15.0"');
+    writeTool(fixture.fakeBin, "node", 'echo "v22.18.0"');
 
     const result = runSetup(fixture);
 
     expect(result.status).toBe(1);
-    expect(result.output).toContain("Node.js 20.15.0 is below 22.16.0");
+    expect(result.output).toContain("Node.js 22.18.0 is below 22.19.0");
     expect(readCommandLog(fixture)).not.toContain("npm install");
   });
 

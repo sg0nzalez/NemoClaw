@@ -3,7 +3,7 @@
 
 /**
  *
- * Preserves the the contract with real Docker/OpenShell/NemoClaw boundaries:
+ * Preserves the contract with real Docker/OpenShell/NemoClaw boundaries:
  * onboard an OpenClaw sandbox, kill and recover the gateway via the production
  * `connect --probe-only` path, verify the guard-chain preloads remain present,
  * prove inference.local keeps serving models, exercise the missing proxy-env
@@ -192,7 +192,11 @@ async function onboardWithCompatibleEndpoint(
     result.exitCode,
     `compatible OpenClaw onboard failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
   ).toBe(0);
-  cleanup.add(`destroy NemoClaw sandbox ${sandboxName}`, () => cleanupSandbox(host, sandboxName));
+  cleanup.trackSandbox(host, sandboxName, {
+    artifactName: `cleanup-destroy-${sandboxName}`,
+    env: probeEnv(),
+    timeoutMs: 15 * 60_000,
+  });
 
   return {
     onboarding: "cloud-openclaw",
@@ -431,7 +435,7 @@ test("issue-2478: gateway recovery preserves guard chain and avoids crash loop",
   runtime,
   sandbox,
 }) => {
-  await artifacts.writeJson("target.json", {
+  await artifacts.target.declare({
     id: "issue-2478-crash-loop-recovery",
     issues: ["#2478", "#2701"],
     crashCycles: CRASH_CYCLES,

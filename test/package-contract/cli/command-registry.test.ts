@@ -56,16 +56,17 @@ describe("command-registry", () => {
   });
 
   describe("sandboxCommands()", () => {
-    it("should return exactly 57 entries", () => {
-      // 49 visible + 8 hidden (shields×3 + config get/set/rotate-token +
+    it("should return exactly 60 entries", () => {
+      // 52 visible + 8 hidden (shields×3 + config get/set/rotate-token +
       // inference get/set).
-      // 49 visible includes the sessions group (root + list + reset + delete +
+      // 52 visible includes the sessions group (root + list + reset + delete +
       // export), the agents quartet (add + apply + delete + list), the
-      // singular `agent` passthrough that forwards to `openclaw agent`, and
-      // the download + upload host-side openshell wrappers, plus five MCP
-      // bridge display entries under the `mcp` parent and the gateway restart
-      // command under the `gateway` parent.
-      expect(sandboxCommands()).toHaveLength(57);
+      // singular `agent` passthrough that forwards to `openclaw agent`, the
+      // download + upload host-side openshell wrappers, the stop + start
+      // container lifecycle pair (#6026), plus five MCP bridge display entries
+      // under the `mcp` parent and the gateway restart command under the
+      // `gateway` parent.
+      expect(sandboxCommands()).toHaveLength(60);
     });
 
     it("every entry has scope sandbox", () => {
@@ -188,10 +189,11 @@ describe("command-registry", () => {
   });
 
   describe("globalCommandTokens()", () => {
-    it("returns the exact set of 26 tokens matching the global dispatch commands", () => {
+    it("returns the exact set of 27 tokens matching the global dispatch commands", () => {
       const tokens = globalCommandTokens();
       const expected = new Set([
         "agents",
+        "completion",
         "onboard",
         "update",
         "list",
@@ -223,9 +225,9 @@ describe("command-registry", () => {
   });
 
   describe("sandboxActionTokens()", () => {
-    it("returns exactly 32 unique action tokens including empty string", () => {
+    it("returns exactly 35 unique action tokens including empty string", () => {
       const tokens = sandboxActionTokens();
-      expect(tokens).toHaveLength(32);
+      expect(tokens).toHaveLength(35);
       // Must contain every first-level sandbox action plus the empty default action.
       const expected = new Set([
         "agent",
@@ -235,11 +237,14 @@ describe("command-registry", () => {
         "download",
         "exec",
         "status",
+        "stop",
+        "start",
         "doctor",
         "inference",
         "logs",
         "policy-add",
         "policy-explain",
+        "policy-get",
         "policy-remove",
         "policy-list",
         "hosts-add",

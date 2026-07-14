@@ -36,6 +36,7 @@ export function dcodeInput(
     provider: "compatible-endpoint",
     preferredInferenceApi: "openai-completions",
     compatibleEndpointReasoning: "false",
+    dcodeAutoApprovalMode: "disabled",
     toolDisclosure: "progressive",
     webSearchConfig: null,
     sandboxGpuConfig: {
@@ -76,6 +77,7 @@ export async function createPreparedDcodeImageFixture(
   }));
   const prepareDockerfilePatch = vi.fn(async () => ({
     buildId: "dcode-build-1",
+    dashboardRemoteBindPrepared: false,
     resolvedBaseImage: null,
   }));
   const buildImage = vi.fn(() => ({ status: 0 }) as never);

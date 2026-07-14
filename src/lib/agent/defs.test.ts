@@ -35,106 +35,6 @@ afterEach(() => {
 });
 
 describe("agent definitions", () => {
-  it("loads computed OpenClaw manifest properties", () => {
-    const openclaw = loadAgent("openclaw");
-
-    expect(openclaw.name).toBe("openclaw");
-    expect(openclaw.displayName).toBe("OpenClaw");
-    expect(openclaw.runtime).toEqual({ kind: "gateway" });
-    expect(openclaw.healthProbe?.port).toBe(18789);
-    expect(openclaw.forwardPort).toBe(18789);
-    expect(openclaw.configPaths).toEqual({
-      dir: "/sandbox/.openclaw",
-      configFile: "openclaw.json",
-      envFile: null,
-      format: "json",
-    });
-    expect(openclaw.inferenceProviderOptions).toEqual([]);
-    expect(openclaw.mcpCapability).toEqual({ support: "bridge", adapter: "mcporter" });
-    // OpenClaw uses device_pairing web auth — no fetchable bearer token.
-    expect(openclaw.webAuth).toEqual({ method: "none", env: null });
-    // #5027: openclaw.json must be declared as a durable state file so
-    // backup-all/rebuild preserve core settings (model/provider, MCP, agents).
-    expect(openclaw.stateFiles).toEqual([{ path: "openclaw.json", strategy: "copy" }]);
-    expect(openclaw.userManagedFiles).toEqual([".env", ".mcp.json"]);
-    expect(openclaw.legacyPaths?.startScript).toContain("scripts/nemoclaw-start.sh");
-  });
-
-  it("loads Hermes manifest properties without falling back to OpenClaw defaults", () => {
-    const hermes = loadAgent("hermes");
-
-    expect(hermes.name).toBe("hermes");
-    expect(hermes.displayName).toBe("Hermes Agent");
-    expect(hermes.runtime).toEqual({ kind: "gateway" });
-    expect(hermes.hasDevicePairing).toBe(false);
-    expect(hermes.configPaths).toEqual({
-      dir: "/sandbox/.hermes",
-      configFile: "config.yaml",
-      envFile: ".env",
-      format: "yaml",
-    });
-    expect(hermes.inferenceProviderOptions).toEqual(["hermesProvider"]);
-    expect(hermes.mcpCapability).toEqual({ support: "bridge", adapter: "hermes-config" });
-    expect(hermes.healthProbe?.url).toBe("http://localhost:8642/health");
-    expect(hermes.forwardPort).toBe(18789);
-    expect(hermes.forward_ports).toEqual([18789, 8642]);
-    expect(hermes.dashboard).toEqual({
-      kind: "ui",
-      label: "Dashboard",
-      path: "/",
-      healthPath: "/api/status",
-      auth: "session",
-    });
-    expect(hermes.dashboardUi).toBeNull();
-    // Hermes' OpenAI-compatible API uses a bearer token read from API_SERVER_KEY.
-    expect(hermes.webAuth).toEqual({ method: "bearer_token", env: "API_SERVER_KEY" });
-    expect(hermes.userManagedFiles).toEqual([".hermes/.env"]);
-  });
-
-  it("declares the Hermes expected version in the runtime semver scheme", () => {
-    const hermes = loadAgent("hermes");
-
-    expect(hermes.expectedVersion).toMatch(/^\d+\.\d+\.\d+$/);
-    const major = Number.parseInt(String(hermes.expectedVersion).split(".")[0] ?? "", 10);
-    expect(major).toBeLessThan(1000);
-  });
-
-  it("loads the LangChain Deep Agents Code terminal acceptance contract", () => {
-    const deepAgentsCode = loadAgent("langchain-deepagents-code");
-
-    expect(deepAgentsCode.name).toBe("langchain-deepagents-code");
-    expect(deepAgentsCode.displayName).toBe("LangChain Deep Agents Code");
-    expect(deepAgentsCode.runtime).toEqual({
-      kind: "terminal",
-      interactive_command: "dcode",
-      headless_command: "dcode -n",
-      smoke_commands: [
-        "dcode --version",
-        "test -s /sandbox/.deepagents/config.toml && echo NEMOCLAW_DEEPAGENTS_CONFIG_OK",
-      ],
-    });
-    expect(deepAgentsCode.binary_path).toBe("/usr/local/bin/dcode");
-    expect(deepAgentsCode.versionCommand).toBe("dcode --version");
-    expect(deepAgentsCode.expectedVersion).toBe("0.1.30");
-    expect(deepAgentsCode.healthProbe).toBeNull();
-    expect(deepAgentsCode.forwardPort).toBe(0);
-    expect(deepAgentsCode.configPaths).toEqual({
-      dir: "/sandbox/.deepagents",
-      configFile: "config.toml",
-      envFile: ".env",
-      format: "toml",
-    });
-    expect(deepAgentsCode.inference?.provider_type).toBe("openai_compatible");
-    expect(deepAgentsCode.mcpCapability).toEqual({
-      support: "bridge",
-      adapter: "deepagents-config",
-    });
-    expect(deepAgentsCode.stateDirs).toEqual([".state", "skills", "agent/skills"]);
-    expect(deepAgentsCode.stateFiles).toEqual([{ path: "config.toml", strategy: "copy" }]);
-    expect(deepAgentsCode.stateFiles.map((entry) => entry.path)).not.toContain(".env");
-    expect(deepAgentsCode.userManagedFiles).toEqual([".deepagents/.env", ".deepagents/.mcp.json"]);
-  });
-
   it("orders OpenClaw first in interactive choices", () => {
     const choices = getAgentChoices();
     expect(choices[0]?.name).toBe("openclaw");
@@ -295,6 +195,24 @@ describe("agent definitions", () => {
     );
 
     expect(() => loadAgent(agentName)).toThrow(/inference\.provider_type/);
+  });
+
+  it.each([
+    "42",
+    '"bad model"',
+  ])("rejects invalid inference default models in manifests (%s)", (defaultModel) => {
+    const agentName = `invalid-inference-default-model-${String(Date.now())}-${defaultModel.length}`;
+    writeTempAgentManifest(
+      agentName,
+      [
+        `name: ${agentName}`,
+        "display_name: Broken Inference Default",
+        "inference:",
+        `  default_model: ${defaultModel}`,
+      ].join("\n"),
+    );
+
+    expect(() => loadAgent(agentName)).toThrow(/inference\.default_model/);
   });
 
   it("rejects invalid MCP bridge adapter declarations in manifests", () => {

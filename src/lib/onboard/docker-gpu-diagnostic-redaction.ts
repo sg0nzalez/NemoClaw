@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { redactFull } from "../security/redact";
-import type { DockerContainerInspect } from "./docker-gpu-patch";
+import { redact, redactFull } from "../security/redact";
+import type { DockerContainerInspect } from "./docker-gpu-patch-types";
 
 const SENSITIVE_ENV_KEY =
   /(?:api_?key|private_?key|(?:^|_)key$|token|secret|password|credential|authorization|cookie|proxy)/i;
@@ -69,16 +69,22 @@ export function discoverDockerGpuDiagnosticSensitiveValues(
 }
 
 /**
- * Owns the redaction state for one diagnostic bundle. Full Docker inspect
- * records are observed before any artifact is written so conventionally
- * sensitive and custom-placeholder values are removed from every sink.
+ * SOURCE_OF_TRUTH_REVIEW (shared Docker GPU diagnostic redaction; #6110):
+ * invalidState: inspect, network, log, or startup-command credentials reach an artifact sink.
+ * sourceBoundary: this shared collector redacts Docker/OpenShell output before every write.
+ * whyNotSourceFix: supported Docker and OpenShell versions expose unredacted runtime metadata.
+ * regressionTest: docker-gpu-diagnostic-redaction.test.ts proves sink-wide canary removal.
+ * removalCondition: supported upstream inspect and log APIs provide equivalent secret redaction.
  */
 export function createDockerGpuDiagnosticRedactor(
   initialSensitiveValues: Iterable<string> = [],
 ): DockerGpuDiagnosticRedactor {
   const sensitiveValues = new Set([...initialSensitiveValues].filter((value) => value.length > 0));
   const redactText = (text: string): string => {
-    let redacted = redactFull(text);
+    // `redactFull` covers known secret shapes, while `redact` additionally
+    // parses credential-bearing URLs such as proxy values. Apply both before
+    // replacing opaque values learned from Docker inspect records.
+    let redacted = redactFull(redact(text));
     for (const value of [...sensitiveValues].sort((left, right) => right.length - left.length)) {
       redacted = redacted.split(value).join("<REDACTED>");
     }
