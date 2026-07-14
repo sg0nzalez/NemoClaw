@@ -409,11 +409,18 @@ export async function collectSandboxInternals(
         command,
         timeoutMs: TIMEOUT_MS,
       });
-      const raw = `${result.stdout}\n${result.stderr}`;
-      const redacted = redact(raw);
+      const outputParts = [result.stdout, result.stderr]
+        .filter((value) => value.length > 0)
+        .map((value) => redact(value));
+      if (result.error) {
+        outputParts.push(`  (sandbox command failed: ${redact(result.error.message)})`);
+      }
+      const redacted = `${outputParts.join("\n")}\n`;
       writeFileSync(join(collectDir, `${label}.txt`), redacted);
       console.log(redacted.trimEnd());
-      if (result.status !== 0) console.log("  (command exited with non-zero status)");
+      if (result.status !== 0 && !result.error) {
+        console.log("  (command exited with non-zero status)");
+      }
     } catch (cause) {
       const detail = cause instanceof Error ? cause.message : String(cause);
       writeCollectedMessage(collectDir, label, `  (sandbox command failed: ${redact(detail)})`);

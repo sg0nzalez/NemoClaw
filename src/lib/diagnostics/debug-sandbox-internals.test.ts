@@ -96,4 +96,28 @@ describe("collectSandboxInternals", () => {
     );
     expect(readFileSync(join(collectDir, "sandbox-free.txt"), "utf8")).toBe("free-ok\n");
   });
+
+  it("records resolved transport errors with partial output and continues collecting", async () => {
+    execSandbox
+      .mockResolvedValueOnce({
+        status: null,
+        stdout: "partial output",
+        stderr: "partial warning",
+        error: new Error("API_KEY=secret-value"),
+      })
+      .mockResolvedValue({ status: 0, stdout: "free-ok", stderr: "" });
+
+    await collectSandboxInternals(collectDir, "alpha", true);
+
+    expect(execSandbox).toHaveBeenCalledTimes(2);
+    expect(readFileSync(join(collectDir, "sandbox-ps.txt"), "utf8")).toBe(
+      [
+        "partial output",
+        "partial warning",
+        "  (sandbox command failed: API_KEY=<REDACTED>)",
+        "",
+      ].join("\n"),
+    );
+    expect(readFileSync(join(collectDir, "sandbox-free.txt"), "utf8")).toBe("free-ok\n");
+  });
 });
