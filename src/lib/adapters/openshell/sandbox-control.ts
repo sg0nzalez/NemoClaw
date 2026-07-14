@@ -1,9 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { type CaptureOpenshellResult, captureOpenshellCommandBinary } from "./client";
-import { resolveOpenshell } from "./resolve";
-import { captureOpenshell } from "./runtime";
+import type { CaptureOpenshellResult } from "./client";
+import { captureOpenshell, captureOpenshellBinary } from "./runtime";
 
 export interface SandboxExecRequest {
   sandboxName: string;
@@ -33,16 +32,14 @@ export interface OpenShellSandboxControl {
 }
 
 type CaptureOpenShell = typeof captureOpenshell;
-type CaptureOpenShellBinary = typeof captureOpenshellCommandBinary;
+type CaptureOpenShellBinary = typeof captureOpenshellBinary;
 
 export interface CliOpenShellSandboxControlDependencies {
   captureBinary: CaptureOpenShellBinary;
-  resolveBinary: typeof resolveOpenshell;
 }
 
 const defaultCliDependencies: CliOpenShellSandboxControlDependencies = {
-  captureBinary: captureOpenshellCommandBinary,
-  resolveBinary: resolveOpenshell,
+  captureBinary: captureOpenshellBinary,
 };
 
 function normalizeExecResult(result: CaptureOpenshellResult): SandboxExecResult {
@@ -63,17 +60,7 @@ export function createCliOpenShellSandboxControl(
   return {
     async exec(request): Promise<SandboxExecResult> {
       if (request.stdoutEncoding === "buffer") {
-        const binary = dependencies.resolveBinary();
-        if (!binary) {
-          return {
-            status: null,
-            stdout: "",
-            stderr: "",
-            error: new Error("openshell CLI not found"),
-          };
-        }
         const result = dependencies.captureBinary(
-          binary,
           ["sandbox", "exec", "--name", request.sandboxName, "--", ...request.command],
           {
             input: request.stdin,

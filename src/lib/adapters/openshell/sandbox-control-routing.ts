@@ -80,13 +80,13 @@ export function selectOpenShellSandboxControlForMutation(
  * associated credential lifecycle, so NemoClaw cannot replace that path here.
  *
  * This migration contract is limited to call sites whose operations were
- * individually reviewed as side-effect-free, including session listing,
- * rebuild and managed-file probes, debug diagnostics, version checks, and
- * state-backup reads at this slice. It is not a general routing policy. Remove
- * the CLI fallback when OpenShell's public client or bindings support the
- * edge-tunnel auth and credential-refresh lifecycle. Every added caller
+ * individually reviewed as side-effect-free: session listing, rebuild and
+ * managed-file probes, debug diagnostics, version checks, and state-backup
+ * probes, audits, and reads in this slice. It is not a general routing policy.
+ * Remove the CLI fallback when OpenShell's public client or bindings support
+ * the edge-tunnel auth and credential-refresh lifecycle. Every added caller
  * requires a replay-semantics review; mutations must select one transport
- * before dispatch and must never be replayed.
+ * before dispatch and must never be replayed automatically.
  */
 export async function execSandboxReadOnlyWithGrpcFallback(
   gatewayName: string,

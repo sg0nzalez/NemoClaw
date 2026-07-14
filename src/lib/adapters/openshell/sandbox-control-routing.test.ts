@@ -104,7 +104,7 @@ describe("read-only OpenShell sandbox control routing", () => {
   });
 
   it("retries a post-dispatch gRPC stream failure because the command is read-only", async () => {
-    const grpcError = new Error("stream reset");
+    const grpcError = new Error("OpenShell gRPC exec stream ended without an exit status");
     const result = { status: null, stdout: "partial", stderr: "", error: grpcError };
     const cliResult = { status: 0, stdout: "cli", stderr: "" };
     const test = dependencies(result, cliResult);

@@ -1312,11 +1312,12 @@ describe("Hermes durable state files", () => {
       const hermesDir = path.join(fakeRoot, ".hermes");
       const runtimeDir = path.join(hermesDir, "runtime");
       const sshLog = path.join(fixture, "ssh-log.jsonl");
+      const stateDbBytes = Buffer.from([0x53, 0x51, 0x4c, 0x00, 0xff, 0xfe, 0x80, 0x0a]);
       fs.mkdirSync(binDir, { recursive: true });
       fs.mkdirSync(runtimeDir, { recursive: true });
       fs.writeFileSync(path.join(hermesDir, "SOUL.md"), "original soul\n");
       fs.writeFileSync(path.join(hermesDir, ".hermes_history"), "original history\n");
-      fs.writeFileSync(path.join(runtimeDir, "state.db"), "original sqlite backup\n");
+      fs.writeFileSync(path.join(runtimeDir, "state.db"), stateDbBytes);
       fs.writeFileSync(path.join(hermesDir, "config.yaml"), "token: should-not-copy\n");
       fs.writeFileSync(path.join(hermesDir, ".env"), "API_TOKEN=should-not-copy\n");
       fs.writeFileSync(path.join(hermesDir, "auth.json"), '{"token":"should-not-copy"}\n');
@@ -1423,8 +1424,8 @@ process.exit(0);
         fs.readFileSync(path.join(backup.manifest!.backupPath, ".hermes_history"), "utf-8"),
       ).toBe("original history\n");
       expect(
-        fs.readFileSync(path.join(backup.manifest!.backupPath, "runtime", "state.db"), "utf-8"),
-      ).toBe("original sqlite backup\n");
+        fs.readFileSync(path.join(backup.manifest!.backupPath, "runtime", "state.db")),
+      ).toEqual(stateDbBytes);
       expect(fs.existsSync(path.join(backup.manifest!.backupPath, "config.yaml"))).toBe(false);
       expect(fs.existsSync(path.join(backup.manifest!.backupPath, ".env"))).toBe(false);
       expect(fs.existsSync(path.join(backup.manifest!.backupPath, "auth.json"))).toBe(false);
@@ -1439,9 +1440,7 @@ process.exit(0);
       expect(fs.readFileSync(path.join(hermesDir, ".hermes_history"), "utf-8")).toBe(
         "original history\n",
       );
-      expect(fs.readFileSync(path.join(runtimeDir, "state.db"), "utf-8")).toBe(
-        "original sqlite backup\n",
-      );
+      expect(fs.readFileSync(path.join(runtimeDir, "state.db"))).toEqual(stateDbBytes);
 
       const loggedCommands = fs.readFileSync(sshLog, "utf-8");
       expect(loggedCommands).toContain("sqlite3.connect");
