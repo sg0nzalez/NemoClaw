@@ -11,7 +11,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
-import { addSandboxChannel, removeSandboxChannel } from "../src/lib/actions/sandbox/policy-channel";
+import {
+  addSandboxChannel,
+  removeSandboxChannel,
+  startSandboxChannel,
+  stopSandboxChannel,
+} from "../src/lib/actions/sandbox/policy-channel";
 import { policyChannelDependencies } from "../src/lib/actions/sandbox/policy-channel-dependencies";
 import * as processRecovery from "../src/lib/actions/sandbox/process-recovery";
 import * as runtime from "../src/lib/adapters/openshell/runtime";
@@ -110,6 +115,9 @@ beforeEach(() => {
     registryEntry = { ...registryEntry, ...update } as SandboxEntry;
     return true;
   });
+  vi.spyOn(registry, "getDisabledChannels").mockImplementation(() => [
+    ...(registryEntry.messaging?.plan.disabledChannels ?? []),
+  ]);
 
   appliedPresets = [];
   vi.spyOn(policies, "loadPresetForSandbox").mockReturnValue(
@@ -270,5 +278,44 @@ describe("channels add owns the bridge-provider lifecycle (#6120)", () => {
     expect(appliedPresets).not.toContain("googlechat");
     expect(session.policyPresets).not.toContain("googlechat");
     expect(stopGooglechatWebhookTunnelSpy).toHaveBeenCalledWith("test-sb");
+  });
+
+  it("preserves the bridge and webhook endpoint while stop/start restores the enabled plan", async () => {
+    await addSandboxChannel("test-sb", { channel: "googlechat" });
+    providerSpy.mockClear();
+    runOpenshellSpy.mockClear();
+    stopGooglechatWebhookTunnelSpy.mockClear();
+    vi.mocked(policies.applyPreset).mockClear();
+
+    await stopSandboxChannel("test-sb", { channel: "googlechat" });
+
+    const stoppedPlan = registryEntry.messaging?.plan;
+    expect(stoppedPlan?.workflow).toBe("stop-channel");
+    expect(stoppedPlan?.disabledChannels).toEqual(["googlechat"]);
+    expect(stoppedPlan?.channels).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ channelId: "googlechat", active: false, disabled: true }),
+      ]),
+    );
+    expect(providerSpy).not.toHaveBeenCalled();
+    expect(openshellCalls()).toEqual([]);
+    expect(stopGooglechatWebhookTunnelSpy).not.toHaveBeenCalled();
+
+    await startSandboxChannel("test-sb", { channel: "googlechat" });
+
+    const startedPlan = registryEntry.messaging?.plan;
+    expect(startedPlan?.workflow).toBe("start-channel");
+    expect(startedPlan?.disabledChannels).toEqual([]);
+    expect(startedPlan?.channels).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ channelId: "googlechat", active: true, disabled: false }),
+      ]),
+    );
+    expect(policies.applyPreset).toHaveBeenCalledWith("test-sb", "googlechat");
+    expect(appliedPresets).toContain("googlechat");
+    expect(session.policyPresets).toContain("googlechat");
+    expect(providerSpy).not.toHaveBeenCalled();
+    expect(openshellCalls()).toEqual([]);
+    expect(stopGooglechatWebhookTunnelSpy).not.toHaveBeenCalled();
   });
 });
