@@ -43,6 +43,7 @@ The next rebuild omits WeChat configuration and per-account state files.
 
 <AgentOnly variant="openclaw">
 `channels remove googlechat` detaches and deletes the `<sandbox>-googlechat-bridge` provider before the rebuild removes Google Chat configuration and the matching policy preset.
+It also stops the dedicated cloudflared process and webhook proxy for that sandbox.
 </AgentOnly>
 
 For in-sandbox QR-paired channels such as WhatsApp, `channels remove` destructively clears the session directory before rebuild so stale auth files do not reconnect the channel.
@@ -87,6 +88,7 @@ The bot token remains in the OpenShell provider across the stop and start cycle.
 
 <AgentOnly variant="openclaw">
 Google Chat stop and start cycles also preserve the bridge provider and its gateway-side refresh material.
+They preserve the dedicated public webhook endpoint so the Google Cloud configuration can keep the same URL.
 The next rebuild reuses that provider without requiring the service-account JSON again.
 </AgentOnly>
 

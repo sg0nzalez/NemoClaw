@@ -1467,6 +1467,15 @@ async function removeSandboxChannelUnlocked(
     process.exit(1);
   }
 
+  if (canonical === "googlechat") {
+    try {
+      policyChannelDependencies.stopGooglechatWebhookTunnel(sandboxName);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`  ${YW}⚠${R} Could not stop the Google Chat webhook tunnel: ${message}`);
+    }
+  }
+
   // Token-based channels: best-effort tidy of any leftover dir. Token
   // revocation already prevents the bot from authenticating, so a
   // failure here is a warning, not a bail.

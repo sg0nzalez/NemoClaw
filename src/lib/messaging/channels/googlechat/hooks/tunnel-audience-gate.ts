@@ -109,7 +109,7 @@ export function createGooglechatTunnelAudienceGateHook(
           "cloudflared is not installed; cannot expose a public Google Chat webhook.",
         );
       }
-      log("  Google Chat needs a public HTTPS URL. Starting a tunnel (nemoclaw tunnel start)…");
+      log("  Google Chat needs a public HTTPS URL. Starting a dedicated webhook tunnel…");
       const startTunnel = requireOption(options.startTunnel, "startTunnel");
       await startTunnel();
       if (!readTunnelState().running) {

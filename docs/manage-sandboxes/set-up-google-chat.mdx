@@ -12,9 +12,9 @@ content:
 Google Chat support is experimental and available only for OpenClaw sandboxes.
 It receives events at `/googlechat` on the OpenClaw dashboard port and sends replies through the Google Chat API.
 
-<Warning title="Public Dashboard Port">
-The default cloudflared tunnel exposes the entire OpenClaw dashboard port, not only the `/googlechat` path.
-Open the Control UI through `http://127.0.0.1:18789`, not through the public tunnel URL.
+<Warning title="Webhook Only">
+The automatic public endpoint accepts only `POST /googlechat` and denies dashboard, health, WebSocket, and other control paths.
+Continue to open the Control UI through `http://127.0.0.1:18789`; the Google Chat URL is not a dashboard URL.
 </Warning>
 
 ## Prepare the Google Cloud Configuration
@@ -31,15 +31,17 @@ Do not copy it into the sandbox or its OpenClaw configuration.
 
 ## Prepare the Public Webhook
 
-The default `app-url` audience flow uses the same cloudflared service as `nemoclaw tunnel start`.
+The default `app-url` audience flow starts a dedicated cloudflared service in front of a loopback-only webhook proxy.
+The proxy forwards only `POST /googlechat` to OpenClaw and limits webhook request bodies to 1 MiB.
+It is separate from `nemoclaw tunnel start`, which remains the explicit full-dashboard tunnel command.
 Install `cloudflared` on the host before enrollment when you do not already have a public endpoint.
 
-When no tunnel is running, NemoClaw starts one and prints the exact HTTPS endpoint ending in `/googlechat`.
+When the dedicated Google Chat tunnel is not running, NemoClaw starts it and prints the exact HTTPS endpoint ending in `/googlechat`.
 Copy that complete URL into the Google Chat API HTTP endpoint field without adding a trailing slash, then confirm the prompt.
-NemoClaw stops a tunnel that it started if you do not confirm the endpoint or if enrollment fails before confirmation.
+NemoClaw stops the dedicated tunnel and webhook proxy if you do not confirm the endpoint or if enrollment fails before confirmation.
 
 If `GOOGLECHAT_AUDIENCE` already contains the public webhook URL, NemoClaw uses it and does not start or change cloudflared.
-That endpoint must forward to the OpenClaw dashboard port and preserve the `/googlechat` path.
+That operator-managed endpoint must preserve `/googlechat` and deny every other dashboard or control path before forwarding to OpenClaw.
 
 Google Chat enrollment always requires an interactive terminal.
 NemoClaw skips the channel when `NEMOCLAW_NON_INTERACTIVE=1`, even if you provide the audience and service-account environment variables.
@@ -101,7 +103,10 @@ The re-add flow prompts for the service-account JSON again when it is not alread
 ## Verify the Channel
 
 After the rebuild, send a direct message from an allowed or paired account and confirm that OpenClaw replies.
-If the webhook returns an error, verify that the public endpoint still ends in `/googlechat`, the tunnel is running, and the Google Chat API configuration contains the exact same URL.
+If the webhook returns an error, verify that the public endpoint still ends in `/googlechat`, the dedicated tunnel and webhook proxy are running, and the Google Chat API configuration contains the exact same URL.
 
 Use the host-side `channels stop`, `channels start`, and `channels remove` commands to manage the integration.
+`channels stop googlechat` leaves the dedicated endpoint running so `channels start googlechat` can keep the same Google Cloud endpoint URL.
+`channels remove googlechat` and `nemoclaw <name> destroy` stop the dedicated cloudflared process and webhook proxy.
+`nemoclaw tunnel stop` does not stop the dedicated Google Chat endpoint; it controls the separate full-dashboard tunnel.
 Refer to [Manage Messaging Channels](manage-messaging-channels) for lifecycle behavior.

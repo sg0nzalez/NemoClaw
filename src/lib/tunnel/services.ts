@@ -502,9 +502,9 @@ export function stopAll(opts: ServiceOptions = {}): void {
 
 /**
  * Resolve the PID directory for host-side services without starting or stopping
- * anything. Lets callers (e.g. the Google Chat tunnel/audience enroll gate) read
- * cloudflared state and the tunnel URL via the same resolution `start`/`stop`/
- * `status` use, so they all target the same tunnel.
+ * anything. Callers can derive an adjacent purpose-specific state directory
+ * while preserving the same validated sandbox-name and environment precedence
+ * used by `start`, `stop`, and `status`.
  */
 export function resolveServicePidDir(opts: ServiceOptions = {}): string {
   return resolvePidDir(opts);

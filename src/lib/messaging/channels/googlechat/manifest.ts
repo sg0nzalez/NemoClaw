@@ -6,9 +6,9 @@ import type { ChannelManifest } from "../../manifest";
 // Google Chat is an inbound-webhook channel. Unlike Microsoft Teams (which runs
 // its own bot web server on a separate port and needs a host forward), the
 // Google Chat webhook is served by the OpenClaw gateway on the shared dashboard
-// port (18789) at `/googlechat` — the same port `nemoclaw tunnel start` already
-// exposes. So there is no `hostForward`; the tunnel/audience enroll hook derives
-// the public webhook URL from the existing cloudflared tunnel instead.
+// port (18789) at `/googlechat`. There is no `hostForward`; the tunnel/audience
+// enroll hook publishes only that route through a dedicated loopback proxy and
+// cloudflared process rather than exposing the full dashboard origin.
 export const googlechatManifest = {
   schemaVersion: 1,
   id: "googlechat",
@@ -37,7 +37,7 @@ export const googlechatManifest = {
     "         GOOGLECHAT_APP_PRINCIPAL=<N> nemoclaw <sandbox> channels add googlechat",
     "         nemoclaw <sandbox> rebuild --yes",
     "──────────────────────────────────────────────────────────────",
-    "The cloudflared tunnel exposes the whole dashboard port publicly; open the Control UI from http://127.0.0.1:18789 (localhost), not the public URL.",
+    "The dedicated public endpoint forwards only POST /googlechat; open the Control UI from http://127.0.0.1:18789 (localhost), not the webhook URL.",
   ],
   supportedAgents: ["openclaw"],
   auth: {

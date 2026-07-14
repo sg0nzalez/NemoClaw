@@ -72,6 +72,7 @@ let logSpy: MockInstance;
 let exitSpy: MockInstance;
 let providerSpy: MockInstance;
 let runOpenshellSpy: MockInstance;
+let stopGooglechatWebhookTunnelSpy: MockInstance;
 let testHome: string;
 let registryEntry: SandboxEntry;
 let appliedPresets: string[];
@@ -143,6 +144,9 @@ beforeEach(() => {
   // refresh boundary. Individual failure tests override the spy below.
   providerSpy = vi.spyOn(policyChannelDependencies, "upsertMessagingProviders");
   vi.spyOn(policyChannelDependencies, "rebuildSandbox").mockImplementation(async () => undefined);
+  stopGooglechatWebhookTunnelSpy = vi
+    .spyOn(policyChannelDependencies, "stopGooglechatWebhookTunnel")
+    .mockImplementation(() => undefined);
 
   runOpenshellSpy = vi.spyOn(runtime, "runOpenshell").mockImplementation(() => ({
     pid: 0,
@@ -265,5 +269,6 @@ describe("channels add owns the bridge-provider lifecycle (#6120)", () => {
     );
     expect(appliedPresets).not.toContain("googlechat");
     expect(session.policyPresets).not.toContain("googlechat");
+    expect(stopGooglechatWebhookTunnelSpy).toHaveBeenCalledWith("test-sb");
   });
 });
