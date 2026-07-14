@@ -39,9 +39,12 @@ export async function uploadToSandbox(opts: SandboxUploadOptions): Promise<Sandb
     allowNonReadyPhase: opts.allowNonReadyPhase ?? true,
   });
 
-  runOpenshell(["sandbox", "upload", "-g", gatewayName, opts.sandboxName, hostPath, sandboxDest], {
-    stdio: "inherit",
-  });
+  runOpenshell(
+    ["sandbox", "upload", "-g", gatewayName, "--", opts.sandboxName, hostPath, sandboxDest],
+    {
+      stdio: "inherit",
+    },
+  );
 
   return { hostPath, sandboxDest };
 }

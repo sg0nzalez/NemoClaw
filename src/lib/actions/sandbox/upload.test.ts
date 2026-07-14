@@ -49,6 +49,7 @@ describe("uploadToSandbox", () => {
         "upload",
         "-g",
         "nemoclaw-9090",
+        "--",
         "alpha",
         expectedHostPath,
         "/sandbox/.openclaw/workspace/SOUL.md",
@@ -74,7 +75,7 @@ describe("uploadToSandbox", () => {
       sandboxDest: "/sandbox/etc/",
     });
     const args = runMock.mock.calls[0]?.[0];
-    expect(args?.[5]).toBe("/etc/hosts");
+    expect(args?.[6]).toBe("/etc/hosts");
   });
 
   it("preserves a trailing separator on a relative host directory source", async () => {
@@ -84,9 +85,31 @@ describe("uploadToSandbox", () => {
       sandboxDest: "/sandbox/work/",
     });
     const args = runMock.mock.calls[0]?.[0];
-    const hostPath = args?.[5] as string;
+    const hostPath = args?.[6] as string;
     expect(hostPath.endsWith(path.sep) || hostPath.endsWith("/")).toBe(true);
     expect(hostPath.slice(0, -1)).toBe(path.resolve(process.cwd(), "src"));
+  });
+
+  it("keeps a flag-shaped sandbox destination after the option terminator", async () => {
+    await uploadToSandbox({
+      sandboxName: "alpha",
+      hostPath: "./SOUL.md",
+      sandboxDest: "--gateway-endpoint=https://other-gateway.example.test",
+    });
+
+    expect(runMock).toHaveBeenCalledWith(
+      [
+        "sandbox",
+        "upload",
+        "-g",
+        "nemoclaw-9090",
+        "--",
+        "alpha",
+        path.resolve(process.cwd(), "SOUL.md"),
+        "--gateway-endpoint=https://other-gateway.example.test",
+      ],
+      expect.objectContaining({ stdio: "inherit" }),
+    );
   });
 
   it("throws (does not exit) when no host path is given", async () => {
