@@ -148,6 +148,21 @@ describe("openshell helpers", () => {
     expect(result).toEqual({ status: 0, stdout: bytes, stderr });
   });
 
+  it("preserves real child-process ENOBUFS metadata and partial raw output", () => {
+    const result = captureOpenshellCommandBinary(
+      process.execPath,
+      ["-e", "process.stdout.write(Buffer.from([0xc3, 0xa9]))"],
+      { maxBuffer: 1 },
+    );
+
+    expect(result.status).toBeNull();
+    expect((result.error as NodeJS.ErrnoException | undefined)?.code).toBe("ENOBUFS");
+    expect(Buffer.isBuffer(result.stdout)).toBe(true);
+    expect(result.stdout.length).toBeGreaterThan(0);
+    expect(result.stdout[0]).toBe(0xc3);
+    expect(Buffer.isBuffer(result.stderr)).toBe(true);
+  });
+
   it("returns the spawn result when the command succeeds", () => {
     const result = runOpenshellCommand("openshell", ["status"], {
       spawnSyncImpl: stubSpawnSync({
