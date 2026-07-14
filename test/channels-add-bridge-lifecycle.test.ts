@@ -11,7 +11,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
-import { addSandboxChannel } from "../src/lib/actions/sandbox/policy-channel";
+import { addSandboxChannel, removeSandboxChannel } from "../src/lib/actions/sandbox/policy-channel";
 import { policyChannelDependencies } from "../src/lib/actions/sandbox/policy-channel-dependencies";
 import * as processRecovery from "../src/lib/actions/sandbox/process-recovery";
 import * as runtime from "../src/lib/adapters/openshell/runtime";
@@ -73,6 +73,9 @@ let exitSpy: MockInstance;
 let providerSpy: MockInstance;
 let runOpenshellSpy: MockInstance;
 let testHome: string;
+let registryEntry: SandboxEntry;
+let appliedPresets: string[];
+let session: onboardSession.Session;
 
 function printedText(): string {
   return [...logSpy.mock.calls, ...errorSpy.mock.calls]
@@ -96,34 +99,49 @@ beforeEach(() => {
     throw new ExitError(code);
   }) as never);
 
-  const entry = { name: "test-sb", agent: "openclaw" } as SandboxEntry;
-  vi.spyOn(registry, "getSandbox").mockImplementation(() => entry);
+  registryEntry = { name: "test-sb", agent: "openclaw", policies: [] } as SandboxEntry;
+  vi.spyOn(registry, "getSandbox").mockImplementation(() => registryEntry);
   vi.spyOn(registry, "listSandboxes").mockImplementation(() => ({
-    sandboxes: [entry],
+    sandboxes: [registryEntry],
     defaultSandbox: "test-sb",
   }));
-  vi.spyOn(registry, "updateSandbox").mockReturnValue(true);
+  vi.spyOn(registry, "updateSandbox").mockImplementation((_name, update) => {
+    registryEntry = { ...registryEntry, ...update } as SandboxEntry;
+    return true;
+  });
 
+  appliedPresets = [];
   vi.spyOn(policies, "loadPresetForSandbox").mockReturnValue(
     "network_policies:\n  stub:\n    egress:\n      - host: example.com\n",
   );
-  vi.spyOn(policies, "applyPreset").mockReturnValue(true);
-  vi.spyOn(policies, "getAppliedPresets").mockReturnValue([]);
+  vi.spyOn(policies, "applyPreset").mockImplementation((_sandboxName, preset) => {
+    if (!appliedPresets.includes(preset)) appliedPresets.push(preset);
+    return true;
+  });
+  vi.spyOn(policies, "removePreset").mockImplementation((_sandboxName, preset) => {
+    appliedPresets = appliedPresets.filter((name) => name !== preset);
+    return true;
+  });
+  vi.spyOn(policies, "getAppliedPresets").mockImplementation(() => [...appliedPresets]);
 
   vi.spyOn(store, "getCredential").mockImplementation((key) => process.env[key] || null);
   vi.spyOn(store, "saveCredential").mockImplementation(() => undefined);
   vi.spyOn(store, "prompt").mockResolvedValue("y");
 
-  const session = {
+  session = {
     sandboxName: "test-sb",
     policyPresets: [],
   } as unknown as onboardSession.Session;
   vi.spyOn(onboardSession, "loadSession").mockReturnValue(session);
-  vi.spyOn(onboardSession, "updateSession").mockImplementation(() => session);
+  vi.spyOn(onboardSession, "updateSession").mockImplementation((update) => {
+    session = update(session) ?? session;
+    return session;
+  });
 
-  providerSpy = vi
-    .spyOn(policyChannelDependencies, "upsertMessagingProviders")
-    .mockImplementation(() => []);
+  // Keep the real provider orchestration on the success path so this test
+  // crosses the direct channel action, generic provider upsert, and OpenShell
+  // refresh boundary. Individual failure tests override the spy below.
+  providerSpy = vi.spyOn(policyChannelDependencies, "upsertMessagingProviders");
   vi.spyOn(policyChannelDependencies, "rebuildSandbox").mockImplementation(async () => undefined);
 
   runOpenshellSpy = vi.spyOn(runtime, "runOpenshell").mockImplementation(() => ({
@@ -164,7 +182,7 @@ afterEach(() => {
 });
 
 describe("channels add owns the bridge-provider lifecycle (#6120)", () => {
-  it("creates and refresh-configures the gateway bridge provider on the direct add path", async () => {
+  it("creates the bridge while keeping service-account material outside argv and durable state", async () => {
     await addSandboxChannel("test-sb", { channel: "googlechat" });
 
     expect(providerSpy).toHaveBeenCalledWith(
@@ -177,6 +195,23 @@ describe("channels add owns the bridge-provider lifecycle (#6120)", () => {
         },
       ],
       { bestEffort: true },
+    );
+    const refreshCall = runOpenshellSpy.mock.calls.find(
+      (call) =>
+        (call[0] as string[])[0] === "provider" &&
+        (call[0] as string[])[1] === "refresh" &&
+        (call[0] as string[])[2] === "configure",
+    );
+    expect(refreshCall).toBeDefined();
+    const refreshArgs = refreshCall?.[0] as string[];
+    expect(refreshArgs).toContain("--secret-material-env");
+    expect(refreshArgs).toContain("private_key=MESSAGING_BRIDGE_SECRET_0");
+    expect(refreshArgs.join(" ")).not.toContain("fake-test-private-key-material");
+    expect(refreshCall?.[1]).toMatchObject({
+      env: { MESSAGING_BRIDGE_SECRET_0: "fake-test-private-key-material" },
+    });
+    expect(JSON.stringify({ registryEntry, session })).not.toContain(
+      "fake-test-private-key-material",
     );
     expect(printedText()).toContain("Registered googlechat bridge");
   });
@@ -209,5 +244,26 @@ describe("channels add owns the bridge-provider lifecycle (#6120)", () => {
         ["provider", "delete", "test-sb-googlechat-bridge"],
       ]),
     );
+  });
+
+  it("removes the bridge provider, policy, and durable plan through the channel action", async () => {
+    await addSandboxChannel("test-sb", { channel: "googlechat" });
+    expect(registry.getConfiguredMessagingChannelsFromEntry(registryEntry)).toContain("googlechat");
+    expect(appliedPresets).toContain("googlechat");
+
+    runOpenshellSpy.mockClear();
+    await removeSandboxChannel("test-sb", { channel: "googlechat" });
+
+    expect(openshellCalls()).toEqual(
+      expect.arrayContaining([
+        ["sandbox", "provider", "detach", "test-sb", "test-sb-googlechat-bridge"],
+        ["provider", "delete", "test-sb-googlechat-bridge"],
+      ]),
+    );
+    expect(registry.getConfiguredMessagingChannelsFromEntry(registryEntry)).not.toContain(
+      "googlechat",
+    );
+    expect(appliedPresets).not.toContain("googlechat");
+    expect(session.policyPresets).not.toContain("googlechat");
   });
 });
