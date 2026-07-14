@@ -3,7 +3,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-import type { CaptureOpenshellBinaryResult } from "./client";
+import { type CaptureOpenshellBinaryResult, captureOpenshellCommandBinary } from "./client";
 import {
   createCliOpenShellSandboxControl,
   createGatewayScopedCliOpenShellSandboxControl,
@@ -490,6 +490,44 @@ describe("CLI OpenShell sandbox control", () => {
     ).resolves.toEqual({
       status: null,
       stdout: "\ufffd",
+      stderr: "",
+      error: expect.any(OpenShellExecOutputLimitError),
+    });
+  });
+
+  it("normalizes real child-process ENOBUFS through the CLI boundary", async () => {
+    const control = createCliOpenShellSandboxControl((_args, options) =>
+      captureOpenshellCommandBinary(
+        process.execPath,
+        ["-e", "process.stdout.write(Buffer.from([0xc3, 0xa9]))"],
+        options,
+      ),
+    );
+
+    await expect(
+      control.exec({ sandboxName: "alpha", command: ["true"], maxOutputBytes: 1 }),
+    ).resolves.toMatchObject({
+      status: null,
+      stdout: "\ufffd",
+      stderr: "",
+      error: expect.any(OpenShellExecOutputLimitError),
+    });
+  });
+
+  it("normalizes the real child-process path back to a requested zero-byte cap", async () => {
+    const control = createCliOpenShellSandboxControl((_args, options) =>
+      captureOpenshellCommandBinary(
+        process.execPath,
+        ["-e", "process.stdout.write(Buffer.from([0x78]))"],
+        options,
+      ),
+    );
+
+    await expect(
+      control.exec({ sandboxName: "alpha", command: ["true"], maxOutputBytes: 0 }),
+    ).resolves.toEqual({
+      status: null,
+      stdout: "",
       stderr: "",
       error: expect.any(OpenShellExecOutputLimitError),
     });
