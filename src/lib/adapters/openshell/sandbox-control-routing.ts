@@ -12,7 +12,7 @@ import {
   OpenShellGrpcPreDispatchError,
 } from "./grpc-sandbox-control";
 import {
-  createCliOpenShellSandboxControl,
+  createGatewayScopedCliOpenShellSandboxControl,
   type OpenShellSandboxControl,
   type SandboxExecRequest,
   type SandboxExecResult,
@@ -20,13 +20,13 @@ import {
 import { OPENSHELL_OPERATION_TIMEOUT_MS } from "./timeouts";
 
 export interface ReadOnlyRoutingDependencies {
-  cli: OpenShellSandboxControl;
+  createCli: (gatewayName: string) => OpenShellSandboxControl;
   createGrpc: (gatewayName: string) => GrpcOpenShellSandboxControl;
   debug: (message: string, context: unknown) => void;
 }
 
 const defaultDependencies: ReadOnlyRoutingDependencies = {
-  cli: createCliOpenShellSandboxControl(),
+  createCli: createGatewayScopedCliOpenShellSandboxControl,
   createGrpc: createGrpcOpenShellSandboxControlForGateway,
   debug: (message, context) => log.debug(message, context),
 };
@@ -63,7 +63,7 @@ export function selectOpenShellSandboxControlForMutation(
   } catch (error) {
     if (!(error instanceof OpenShellGrpcEdgeTunnelRequiredError)) throw error;
     return {
-      control: dependencies.cli,
+      control: dependencies.createCli(gatewayName),
       transport: "cli-edge-tunnel",
       close: () => {},
     };
@@ -121,7 +121,7 @@ export async function execSandboxReadOnlyWithGrpcFallback(
       dependencies.debug("OpenShell direct gRPC client close failed", error);
     }
   }
-  return dependencies.cli.exec({
+  return dependencies.createCli(gatewayName).exec({
     ...request,
     timeoutMs: request.timeoutMs ?? OPENSHELL_OPERATION_TIMEOUT_MS,
   });

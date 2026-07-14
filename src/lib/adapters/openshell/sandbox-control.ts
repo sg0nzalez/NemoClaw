@@ -53,21 +53,29 @@ function normalizeExecResult(result: CaptureOpenshellResult): SandboxExecResult 
   return normalized;
 }
 
-export function createCliOpenShellSandboxControl(
-  capture: CaptureOpenShell = captureOpenshell,
-  dependencies: CliOpenShellSandboxControlDependencies = defaultCliDependencies,
+function createCliSandboxControl(
+  capture: CaptureOpenShell,
+  dependencies: CliOpenShellSandboxControlDependencies,
+  gatewayName?: string,
 ): OpenShellSandboxControl {
   return {
     async exec(request): Promise<SandboxExecResult> {
+      const gatewayArgs = gatewayName ? ["--gateway", gatewayName] : [];
+      const command = [
+        ...gatewayArgs,
+        "sandbox",
+        "exec",
+        "--name",
+        request.sandboxName,
+        "--",
+        ...request.command,
+      ];
       if (request.stdoutEncoding === "buffer") {
-        const result = dependencies.captureBinary(
-          ["sandbox", "exec", "--name", request.sandboxName, "--", ...request.command],
-          {
-            input: request.stdin,
-            maxBuffer: request.maxOutputBytes,
-            timeout: request.timeoutMs,
-          },
-        );
+        const result = dependencies.captureBinary(command, {
+          input: request.stdin,
+          maxBuffer: request.maxOutputBytes,
+          timeout: request.timeoutMs,
+        });
         return {
           status: result.status,
           stdout: "",
@@ -77,19 +85,32 @@ export function createCliOpenShellSandboxControl(
           ...(result.signal !== undefined ? { signal: result.signal } : {}),
         };
       }
-      const result = capture(
-        ["sandbox", "exec", "--name", request.sandboxName, "--", ...request.command],
-        {
-          ignoreError: true,
-          includeStreams: true,
-          input: request.stdin,
-          maxBuffer: request.maxOutputBytes,
-          timeout: request.timeoutMs,
-        },
-      );
+      const result = capture(command, {
+        ignoreError: true,
+        includeStreams: true,
+        input: request.stdin,
+        maxBuffer: request.maxOutputBytes,
+        timeout: request.timeoutMs,
+      });
       return normalizeExecResult(result);
     },
   };
+}
+
+export function createCliOpenShellSandboxControl(
+  capture: CaptureOpenShell = captureOpenshell,
+  dependencies: CliOpenShellSandboxControlDependencies = defaultCliDependencies,
+): OpenShellSandboxControl {
+  return createCliSandboxControl(capture, dependencies);
+}
+
+/** Bind every CLI fallback invocation to the gateway selected by the caller. */
+export function createGatewayScopedCliOpenShellSandboxControl(
+  gatewayName: string,
+  capture: CaptureOpenShell = captureOpenshell,
+  dependencies: CliOpenShellSandboxControlDependencies = defaultCliDependencies,
+): OpenShellSandboxControl {
+  return createCliSandboxControl(capture, dependencies, gatewayName);
 }
 
 export const openShellSandboxControl = createCliOpenShellSandboxControl();
