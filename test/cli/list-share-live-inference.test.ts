@@ -24,6 +24,9 @@ const HEALTHY_DEFAULT_GATEWAY_STUB = [
   "fi",
 ];
 
+const GATEWAY_SCOPED_SANDBOX_EXEC_STUB =
+  'if [ "$1" = "--gateway" ] && [ "$2" = "nemoclaw" ] && [ "$3" = "sandbox" ] && [ "$4" = "exec" ] && [ "$5" = "--name" ] && [ "$6" = "my-agent" ]; then';
+
 function createShareTestEnv(prefix: string): Record<string, string> {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   const localBin = path.join(home, "bin");
@@ -257,7 +260,7 @@ describe("list shows live gateway inference", () => {
           "  echo 'Sandbox: my-agent'",
           "  exit 0",
           "fi",
-          'if [ "$1" = "sandbox" ] && [ "$2" = "exec" ]; then',
+          GATEWAY_SCOPED_SANDBOX_EXEC_STUB,
           "  echo 'OpenClaw 2026.3.11 (old)'",
           "  exit 0",
           "fi",
@@ -324,7 +327,7 @@ describe("list shows live gateway inference", () => {
           "  echo 'Sandbox: my-agent'",
           "  exit 0",
           "fi",
-          'if [ "$1" = "sandbox" ] && [ "$2" = "exec" ]; then',
+          GATEWAY_SCOPED_SANDBOX_EXEC_STUB,
           "  echo 'OpenClaw 9999.12.31 (new)'",
           "  exit 0",
           "fi",
@@ -391,7 +394,7 @@ describe("list shows live gateway inference", () => {
           '  echo "my-agent   Running   openclaw"',
           "  exit 0",
           "fi",
-          'if [ "$1" = "sandbox" ] && [ "$2" = "exec" ]; then',
+          GATEWAY_SCOPED_SANDBOX_EXEC_STUB,
           `  echo 'OpenClaw ${OPENCLAW_EXPECTED_VERSION}'`,
           "  exit 0",
           "fi",
@@ -458,7 +461,7 @@ describe("list shows live gateway inference", () => {
           "  echo 'Sandbox: my-agent'",
           "  exit 0",
           "fi",
-          'if [ "$1" = "sandbox" ] && [ "$2" = "exec" ]; then',
+          GATEWAY_SCOPED_SANDBOX_EXEC_STUB,
           "  echo 'OpenClaw 2026.3.11 (old)'",
           "  exit 0",
           "fi",

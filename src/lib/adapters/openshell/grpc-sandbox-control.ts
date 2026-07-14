@@ -2,18 +2,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { EventEmitter } from "node:events";
+import { isIP } from "node:net";
 import path from "node:path";
 
 import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
 
-import type {
-  OpenShellSandboxControl,
-  SandboxExecRequest,
-  SandboxExecResult,
+import {
+  OPENSHELL_EXEC_DEFAULT_MAX_OUTPUT_BYTES,
+  OpenShellExecOutputLimitError,
+  type OpenShellSandboxControl,
+  openShellExecRequestValidationFailure,
+  type SandboxExecRequest,
+  type SandboxExecResult,
+  validateOpenShellExecRequest,
 } from "./sandbox-control";
 
-const DEFAULT_EXEC_MAX_OUTPUT_BYTES = 1024 * 1024;
 const PROTO_VERSION = "0.0.72";
 
 interface GetSandboxResponse {
@@ -67,14 +71,7 @@ export interface GrpcOpenShellSandboxControl extends OpenShellSandboxControl {
   close(): void;
 }
 
-export class OpenShellGrpcOutputLimitError extends Error {
-  readonly code = "ENOBUFS";
-
-  constructor(readonly maxOutputBytes: number) {
-    super(`OpenShell gRPC exec output exceeded ${maxOutputBytes} bytes`);
-    this.name = "OpenShellGrpcOutputLimitError";
-  }
-}
+export { OpenShellExecOutputLimitError as OpenShellGrpcOutputLimitError } from "./sandbox-control";
 
 export class OpenShellGrpcPreDispatchError extends Error {
   constructor(readonly cause: Error) {
@@ -85,8 +82,9 @@ export class OpenShellGrpcPreDispatchError extends Error {
 
 function isLoopback(hostname: string): boolean {
   const normalized = hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  const version = isIP(normalized);
   return (
-    normalized === "localhost" || normalized === "::1" || /^127(?:\.\d{1,3}){3}$/.test(normalized)
+    (version === 4 && normalized.startsWith("127.")) || (version === 6 && normalized === "::1")
   );
 }
 
@@ -223,7 +221,7 @@ function execute(
   metadata: grpc.Metadata,
   options: grpc.CallOptions,
 ): Promise<SandboxExecResult> {
-  const maxOutputBytes = request.maxOutputBytes ?? DEFAULT_EXEC_MAX_OUTPUT_BYTES;
+  const maxOutputBytes = request.maxOutputBytes ?? OPENSHELL_EXEC_DEFAULT_MAX_OUTPUT_BYTES;
   return new Promise((resolve) => {
     const timeoutSeconds =
       request.timeoutMs && request.timeoutMs > 0 ? Math.ceil(request.timeoutMs / 1000) : undefined;
@@ -262,7 +260,7 @@ function execute(
       if (destination === "stdout") stdoutChunks.push(retained);
       else stderrChunks.push(retained);
       if (retained.length < data.length) {
-        finish(new OpenShellGrpcOutputLimitError(maxOutputBytes));
+        finish(new OpenShellExecOutputLimitError(maxOutputBytes));
         stream.cancel();
       }
     };
@@ -271,8 +269,13 @@ function execute(
       if (settled) return;
       if (event.stdout) append("stdout", asBuffer(event.stdout.data));
       else if (event.stderr) append("stderr", asBuffer(event.stderr.data));
-      else if (event.exit && Number.isInteger(event.exit.exitCode)) {
-        status = event.exit.exitCode as number;
+      else if (event.exit) {
+        // Rust/prost omits a proto3 scalar whose value is the default zero, so
+        // a successful command arrives through proto-loader as `exit: {}`.
+        // The enclosing oneof message is the exit-status signal; a missing
+        // scalar inside that present message therefore means exit code 0.
+        const exitCode = event.exit.exitCode === undefined ? 0 : event.exit.exitCode;
+        if (Number.isInteger(exitCode)) status = exitCode;
       }
     });
     stream.on("error", (error: Error) => finish(error));
@@ -295,26 +298,10 @@ export function createGrpcOpenShellSandboxControl(
   return {
     close: () => client.close(),
     async exec(request): Promise<SandboxExecResult> {
-      const maxOutputBytes = request.maxOutputBytes ?? DEFAULT_EXEC_MAX_OUTPUT_BYTES;
-      if (!Number.isSafeInteger(maxOutputBytes) || maxOutputBytes < 0) {
-        return {
-          status: null,
-          stdout: "",
-          stderr: "",
-          error: new Error("maxOutputBytes must be a non-negative safe integer"),
-        };
-      }
-      if (
-        request.timeoutMs !== undefined &&
-        (!Number.isSafeInteger(request.timeoutMs) || request.timeoutMs < 0)
-      ) {
-        return {
-          status: null,
-          stdout: "",
-          stderr: "",
-          error: new Error("timeoutMs must be a non-negative safe integer"),
-        };
-      }
+      // Validate against the exact v0.0.72 UUID-width request before lookup so
+      // transport-independent limits cannot cause any gateway activity.
+      const validationError = validateOpenShellExecRequest(request);
+      if (validationError) return openShellExecRequestValidationFailure(validationError);
       const metadata = callMetadata(config.bearerToken);
       const deadline =
         request.timeoutMs && request.timeoutMs > 0
@@ -332,6 +319,10 @@ export function createGrpcOpenShellSandboxControl(
           stderr: "",
           error: new OpenShellGrpcPreDispatchError(cause),
         };
+      }
+      const requestValidationError = validateOpenShellExecRequest(request, id);
+      if (requestValidationError) {
+        return openShellExecRequestValidationFailure(requestValidationError);
       }
       return execute(client, id, request, metadata, options);
     },
