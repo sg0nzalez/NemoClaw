@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -49,7 +48,8 @@ const ownership: StateFileKeyAllowlistRestoreOwnership = {
 };
 
 function createBackupFixture(): { backupPath: string; backupContents: Buffer } {
-  const backupPath = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-custom-state-"));
+  const backupPath = fs.mkdtempSync(path.join(process.cwd(), ".nemoclaw-custom-state-"));
+  fs.chmodSync(backupPath, 0o700);
   fixtures.push(backupPath);
   const backupContents = Buffer.from(
     '[models]\ndefault = "backup-owned"\n\n[ui]\nshow_scrollbar = true\n',
@@ -237,7 +237,7 @@ describe("custom-image state-file restore capability (#6334)", () => {
     expect(restored).toBe(false);
     expect(mocks.upload).toHaveBeenCalledOnce();
     expect(restoreExecCalls()).toHaveLength(1);
-    expect(cleanupExecCalls()).toHaveLength(1);
+    expect(cleanupExecCalls()).toHaveLength(2);
   });
 
   it("rejects status zero without the fixed success sentinel", async () => {
@@ -264,7 +264,7 @@ describe("custom-image state-file restore capability (#6334)", () => {
     expect(restored).toBe(false);
     expect(mocks.upload).toHaveBeenCalledOnce();
     expect(restoreExecCalls()).toHaveLength(1);
-    expect(cleanupExecCalls()).toHaveLength(1);
+    expect(cleanupExecCalls()).toHaveLength(2);
   });
 
   it("does not dispatch after a state-file upload failure", async () => {

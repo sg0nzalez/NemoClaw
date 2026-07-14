@@ -84,30 +84,49 @@ describe("OpenShell sandbox payload upload", () => {
     expect(staged.ok).toBe(true);
     assert(staged.ok);
 
-    expect(fs.statSync(path.dirname(staged.payload.localPath)).mode & 0o777).toBe(0o700);
-    expect(fs.statSync(staged.payload.localPath).mode & 0o777).toBe(0o600);
-    expect(fs.readFileSync(staged.payload.localPath)).toEqual(Buffer.from([0x00, 0xff, 0x41]));
-    staged.payload.cleanup();
+    try {
+      expect(fs.statSync(path.dirname(staged.payload.localPath)).mode & 0o777).toBe(0o700);
+      const payloadFd = fs.openSync(
+        staged.payload.localPath,
+        fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW,
+      );
+      try {
+        expect(fs.fstatSync(payloadFd).mode & 0o777).toBe(0o600);
+        expect(fs.readFileSync(payloadFd)).toEqual(Buffer.from([0x00, 0xff, 0x41]));
+      } finally {
+        fs.closeSync(payloadFd);
+      }
+    } finally {
+      staged.payload.cleanup();
+    }
     staged.payload.cleanup();
     expect(fs.existsSync(staged.payload.localPath)).toBe(false);
   });
 
   it("removes private staging when the source file cannot be opened", () => {
+    const trustedSourceRoot = fs.mkdtempSync(
+      path.join(process.cwd(), ".nemoclaw-sandbox-upload-source-"),
+    );
+    fs.chmodSync(trustedSourceRoot, 0o700);
     const before = new Set(
       fs.readdirSync(os.tmpdir()).filter((entry) => entry.startsWith("nemoclaw-state-upload-")),
     );
 
-    const staged = createPrivateSandboxPayloadFileFromPath(
-      path.join(os.tmpdir(), `missing-${String(process.pid)}-${String(Date.now())}`),
-      1024,
-    );
+    try {
+      const staged = createPrivateSandboxPayloadFileFromPath(
+        path.join(trustedSourceRoot, "missing"),
+        1024,
+      );
 
-    expect(staged.ok).toBe(false);
-    expect(
-      fs
-        .readdirSync(os.tmpdir())
-        .filter((entry) => entry.startsWith("nemoclaw-state-upload-") && !before.has(entry)),
-    ).toEqual([]);
+      expect(staged.ok).toBe(false);
+      expect(
+        fs
+          .readdirSync(os.tmpdir())
+          .filter((entry) => entry.startsWith("nemoclaw-state-upload-") && !before.has(entry)),
+      ).toEqual([]);
+    } finally {
+      fs.rmSync(trustedSourceRoot, { recursive: true, force: true });
+    }
   });
 
   it("creates unguessable remote paths in the reviewed namespace", () => {
