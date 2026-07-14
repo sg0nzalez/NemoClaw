@@ -4,26 +4,26 @@
 import { EventEmitter } from "node:events";
 import path from "node:path";
 import {
+  type CallOptions,
+  loadPackageDefinition,
   Metadata,
   Server,
   ServerCredentials,
-  type CallOptions,
-  type sendUnaryData,
   type ServerUnaryCall,
   type ServerWritableStream,
   type ServiceClientConstructor,
   type ServiceError,
+  type sendUnaryData,
 } from "@grpc/grpc-js";
-import { loadPackageDefinition } from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
 import { describe, expect, it, vi } from "vitest";
 
 import {
   createGrpcOpenShellSandboxControl,
   createOpenShellGrpcApi,
-  OpenShellGrpcOutputLimitError,
   OpenShellGrpcPreDispatchError,
   type OpenShellGrpcApi,
+  OpenShellGrpcOutputLimitError,
 } from "./grpc-sandbox-control";
 
 class FakeStream extends EventEmitter {
@@ -261,7 +261,7 @@ describe("gRPC OpenShell sandbox control", () => {
   it("rejects sandbox responses without a stable id", async () => {
     const fake = fakeApi({ sandboxId: "" });
     const control = createGrpcOpenShellSandboxControl(
-      { endpoint: "http://localhost:8080" },
+      { endpoint: "http://127.0.0.1:8080" },
       fake.api,
     );
 
@@ -358,7 +358,11 @@ describe("gRPC OpenShell sandbox control", () => {
 
   it.each([
     ["ftp://localhost:8080", "must use http:// or https://"],
+    ["http://localhost:8080", "restricted to loopback"],
     ["http://gateway.example:8080", "restricted to loopback"],
+    ["http://128.0.0.1:8080", "restricted to loopback"],
+    ["http://[::2]:8080", "restricted to loopback"],
+    ["http://127.999.999.999:8080", "Invalid OpenShell gRPC endpoint"],
     ["http://localhost:8080/path", "must not contain"],
   ])("rejects unsafe endpoint %s", (endpoint, message) => {
     expect(() => createOpenShellGrpcApi({ endpoint })).toThrow(message);
@@ -367,13 +371,13 @@ describe("gRPC OpenShell sandbox control", () => {
   it("rejects bearer tokens or TLS material on plaintext endpoints", () => {
     expect(() =>
       createOpenShellGrpcApi({
-        endpoint: "http://localhost:8080",
+        endpoint: "http://127.0.0.1:8080",
         bearerToken: "token",
       }),
     ).toThrow("requires TLS");
     expect(() =>
       createOpenShellGrpcApi({
-        endpoint: "http://localhost:8080",
+        endpoint: "http://127.0.0.1:8080",
         caCertificate: Buffer.from("ca"),
       }),
     ).toThrow("require an https:// endpoint");
