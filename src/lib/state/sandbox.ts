@@ -27,6 +27,7 @@ import { spawnSync } from "child_process";
 
 import { captureSandboxSshConfigCommand } from "../adapters/openshell/client.js";
 import { resolveOpenshell } from "../adapters/openshell/resolve.js";
+import { execSandboxReadOnlyWithGrpcFallback } from "../adapters/openshell/sandbox-control-routing.js";
 import { OPENSHELL_PROBE_TIMEOUT_MS } from "../adapters/openshell/timeouts.js";
 import type { AgentStateFile } from "../agent/defs.js";
 import { loadAgent } from "../agent/defs.js";
@@ -35,6 +36,7 @@ import {
   BACKUP_FAILURE_ABSENT_AFTER_EXTRACTION,
   classifyFailedDirsFromTarStderr,
 } from "../domain/backup-failure.js";
+import { resolveSandboxGatewayName } from "../onboard/gateway-binding.js";
 import { shellQuote } from "../runner.js";
 import { createTempSshConfig } from "../sandbox/temp-ssh-config.js";
 import { isSensitiveFile, sanitizeConfigFile } from "../security/credential-filter.js";
@@ -790,37 +792,46 @@ type StateFileBackupOutcome = "backed_up" | "missing" | "failed";
 
 interface StateFileBackupResult {
   outcome: StateFileBackupOutcome;
-  // Set on "failed" when the SSH probe itself failed at the transport level
-  // (exit 255, signal-killed, spawn error). The caller (backupSandboxState)
-  // propagates this into BackupResult.unreachable so that
+  // Set on "failed" when sandbox exec itself failed at the transport level.
+  // The caller propagates this into BackupResult.unreachable so that
   // NEMOCLAW_SKIP_UNREACHABLE_SANDBOX_BACKUP=1 activates for state-file
   // failures too, not only the initial dir probe. See #6188.
   unreachable: boolean;
 }
 
-function backupStateFile(
-  configFile: string,
+function isSandboxExecTransportFailure(result: {
+  status: number | null;
+  error?: Error;
+  signal?: NodeJS.Signals | null;
+}): boolean {
+  return Boolean(result.error || result.signal || result.status === null);
+}
+
+async function backupStateFile(
+  gatewayName: string,
   sandboxName: string,
   dir: string,
   spec: StateFileSpec,
   backupPath: string,
-): StateFileBackupResult {
+): Promise<StateFileBackupResult> {
   const command = buildStateFileBackupCommand(dir, spec);
   _log(`Backing up state file ${spec.path} (${spec.strategy})`);
-  const result = spawnSync("ssh", [...sshArgs(configFile, sandboxName), command], {
-    stdio: ["ignore", "pipe", "pipe"],
-    timeout: 120000,
-    maxBuffer: 256 * 1024 * 1024,
+  const result = await execSandboxReadOnlyWithGrpcFallback(gatewayName, {
+    sandboxName,
+    command: ["sh", "-c", command],
+    timeoutMs: 120_000,
+    maxOutputBytes: 256 * 1024 * 1024,
+    stdoutEncoding: "buffer",
   });
 
   if (result.status === 2) return { outcome: "missing", unreachable: false };
-  if (result.status !== 0 || result.error || result.signal || !result.stdout) {
+  if (result.status !== 0 || result.error || result.signal) {
     const detail =
-      (result.stderr?.toString() || "").trim() ||
+      result.stderr.trim() ||
       result.error?.message ||
       (result.signal ? `signal ${result.signal}` : `exit ${String(result.status)}`);
     _log(`FAILED: state file backup ${spec.path}: ${detail.substring(0, 200)}`);
-    return { outcome: "failed", unreachable: isSshTransportFailure(result) };
+    return { outcome: "failed", unreachable: isSandboxExecTransportFailure(result) };
   }
 
   const localPath = path.join(backupPath, spec.path);
@@ -828,7 +839,11 @@ function backupStateFile(
   rejectSymlinksOnPath(parent);
   mkdirSync(parent, { recursive: true, mode: 0o700 });
   rejectSymlinksOnPath(localPath);
-  writeFileSync(localPath, result.stdout);
+  if (!result.stdoutBytes) {
+    _log(`FAILED: state file backup ${spec.path}: binary stdout was not preserved`);
+    return { outcome: "failed", unreachable: false };
+  }
+  writeFileSync(localPath, result.stdoutBytes);
   chmodSync(localPath, 0o600);
   return { outcome: "backed_up", unreachable: false };
 }
@@ -846,7 +861,10 @@ export { buildStateFileRestoreCommand } from "./state-file-restore.js";
 // module. Prefer importing directly from ./ssh-transport in new code.
 export { isSshTransportFailure };
 
-export function backupSandboxState(sandboxName: string, options: BackupOptions = {}): BackupResult {
+export async function backupSandboxState(
+  sandboxName: string,
+  options: BackupOptions = {},
+): Promise<BackupResult> {
   const sb = registry.getSandbox(sandboxName);
   const agentName = sb?.agent || "openclaw";
   const agent = loadAgent(agentName);
@@ -969,31 +987,52 @@ export function backupSandboxState(sandboxName: string, options: BackupOptions =
     return { success: true, manifest, backedUpDirs, failedDirs, backedUpFiles, failedFiles };
   }
 
-  // SSH+tar single-roundtrip download
-  _log("Getting SSH config via openshell sandbox ssh-config");
-  const sshConfig = getSshConfig(sandboxName);
-  if (!sshConfig) {
-    _log("FAILED: Could not get SSH config");
-    // For a sandbox the registry reported as running, an unreachable
-    // `openshell sandbox ssh-config` lookup is a transport-level failure —
-    // treat it the same as the initial dir probe and propagate `unreachable`
-    // so NEMOCLAW_SKIP_UNREACHABLE_SANDBOX_BACKUP=1 can activate. (#6188)
-    return {
-      success: false,
-      manifest,
-      backedUpDirs,
-      failedDirs: [...stateDirs],
-      backedUpFiles,
-      failedFiles: stateFiles.map((f) => f.path),
-      unreachable: true,
-    };
+  let stateFileGatewayName: string | undefined;
+  if (stateFiles.length > 0) {
+    try {
+      stateFileGatewayName = resolveSandboxGatewayName(sb);
+    } catch (cause) {
+      const detail = cause instanceof Error ? cause.message : String(cause);
+      _log(`FAILED: Could not resolve sandbox gateway for state-file backup: ${detail}`);
+      return {
+        success: false,
+        manifest,
+        backedUpDirs,
+        failedDirs: [...stateDirs],
+        backedUpFiles,
+        failedFiles: stateFiles.map((file) => file.path),
+        error: detail,
+      };
+    }
   }
-  _log(`SSH config obtained (${sshConfig.length} bytes)`);
 
-  const tempSshConfig = createTempSshConfig(sshConfig, "nemoclaw-state-");
-  const configFile = tempSshConfig.file;
-  try {
-    if (stateDirs.length > 0) {
+  // State-directory backup remains on the existing SSH+tar path until the
+  // next migration layer moves its probe, audit, and archive download together.
+  if (stateDirs.length > 0) {
+    // SSH+tar single-roundtrip download
+    _log("Getting SSH config via openshell sandbox ssh-config");
+    const sshConfig = getSshConfig(sandboxName);
+    if (!sshConfig) {
+      _log("FAILED: Could not get SSH config");
+      // For a sandbox the registry reported as running, an unreachable
+      // `openshell sandbox ssh-config` lookup is a transport-level failure —
+      // treat it the same as the initial dir probe and propagate `unreachable`
+      // so NEMOCLAW_SKIP_UNREACHABLE_SANDBOX_BACKUP=1 can activate. (#6188)
+      return {
+        success: false,
+        manifest,
+        backedUpDirs,
+        failedDirs: [...stateDirs],
+        backedUpFiles,
+        failedFiles: stateFiles.map((f) => f.path),
+        unreachable: true,
+      };
+    }
+    _log(`SSH config obtained (${sshConfig.length} bytes)`);
+
+    const tempSshConfig = createTempSshConfig(sshConfig, "nemoclaw-state-");
+    const configFile = tempSshConfig.file;
+    try {
       // Build tar command that only includes existing directories.
       // First, check which declared state dirs actually exist in the sandbox,
       // then additionally discover per-agent `workspace-*` directories produced
@@ -1210,10 +1249,24 @@ export function backupSandboxState(sandboxName: string, options: BackupOptions =
           failedDirs.push(...existingDirs);
         }
       }
+    } finally {
+      try {
+        tempSshConfig.cleanup();
+      } catch {
+        /* ignore */
+      }
     }
+  }
 
+  if (stateFileGatewayName !== undefined) {
     for (const spec of stateFiles) {
-      const result = backupStateFile(configFile, sandboxName, dir, spec, backupPath);
+      const result = await backupStateFile(
+        stateFileGatewayName,
+        sandboxName,
+        dir,
+        spec,
+        backupPath,
+      );
       if (result.outcome === "backed_up") {
         backedUpFiles.push(spec.path);
       } else if (result.outcome === "failed") {
@@ -1223,12 +1276,6 @@ export function backupSandboxState(sandboxName: string, options: BackupOptions =
         // for state-file failures — not only the initial dir probe. (#6188)
         if (result.unreachable) unreachable = true;
       }
-    }
-  } finally {
-    try {
-      tempSshConfig.cleanup();
-    } catch {
-      /* ignore */
     }
   }
 

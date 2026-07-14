@@ -54,7 +54,7 @@ const REVIEWED_SITE_TUPLES = [
   ["src/lib/state/openclaw-plugin-restore.ts", "ssh-command", 2],
   ["src/lib/state/openclaw-plugin-restore.ts", "ssh-temp-config", 1],
   ["src/lib/state/sandbox.ts", "openshell-ssh-config", 1],
-  ["src/lib/state/sandbox.ts", "ssh-command", 8],
+  ["src/lib/state/sandbox.ts", "ssh-command", 7],
   ["src/lib/state/sandbox.ts", "ssh-temp-config", 2],
   ["src/lib/state/state-file-restore.ts", "ssh-command", 1],
   ["src/lib/tunnel/sandbox-gateway-stop.ts", "docker-exec-command", 2],
