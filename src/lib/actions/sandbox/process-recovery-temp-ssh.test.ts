@@ -16,6 +16,7 @@ vi.mock("node:child_process", async (importOriginal) => {
 
 vi.mock("../../adapters/openshell/runtime", () => ({
   captureOpenshell: vi.fn(),
+  captureOpenshellBinary: vi.fn(),
   captureOpenshellForStatus: vi.fn(),
   captureSandboxSshConfig,
   getOpenshellBinary: vi.fn(() => "openshell"),
