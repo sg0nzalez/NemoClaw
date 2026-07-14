@@ -132,6 +132,22 @@ describe("read-only OpenShell sandbox control routing", () => {
     expect(test.close).toHaveBeenCalledOnce();
   });
 
+  it("fails closed when the scoped CLI refuses an endpoint override after lookup", async () => {
+    const cause = new Error("UNAVAILABLE");
+    const refusal = new Error("Unset OPENSHELL_GATEWAY_ENDPOINT and retry");
+    const test = dependencies(new OpenShellGrpcPreDispatchError(cause));
+    test.createCli.mockImplementation(() => {
+      throw refusal;
+    });
+
+    await expect(execSandboxReadOnlyWithGrpcFallback("nemoclaw", request, test.deps)).rejects.toBe(
+      refusal,
+    );
+
+    expect(test.cliExec).not.toHaveBeenCalled();
+    expect(test.close).toHaveBeenCalledOnce();
+  });
+
   it("uses direct gRPC with a bounded deadline", async () => {
     const test = dependencies({ status: 0, stdout: "grpc", stderr: "" });
 
@@ -219,6 +235,25 @@ describe("read-only OpenShell sandbox control routing", () => {
     expect(test.debug).toHaveBeenCalledWith(expect.stringContaining("configuration failed"), error);
   });
 
+  it("fails closed when the scoped CLI refuses an endpoint override after configuration", async () => {
+    const configurationError = new Error("edge tunnel required");
+    const refusal = new Error("Unset OPENSHELL_GATEWAY_ENDPOINT and retry");
+    const test = dependencies({ status: 0, stdout: "unused", stderr: "" });
+    test.createGrpc.mockImplementation(() => {
+      throw configurationError;
+    });
+    test.createCli.mockImplementation(() => {
+      throw refusal;
+    });
+
+    await expect(execSandboxReadOnlyWithGrpcFallback("edge", request, test.deps)).rejects.toBe(
+      refusal,
+    );
+
+    expect(test.grpcExec).not.toHaveBeenCalled();
+    expect(test.cliExec).not.toHaveBeenCalled();
+  });
+
   it("does not let close failures replace a successful result", async () => {
     const test = dependencies({ status: 0, stdout: "grpc", stderr: "" });
     const closeError = new Error("close failed");
@@ -267,6 +302,22 @@ describe("mutating OpenShell sandbox control routing", () => {
     expect(test.createCli).toHaveBeenCalledWith("edge");
     selected.close();
     expect(test.close).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the mutation CLI factory refuses an endpoint override", () => {
+    const refusal = new Error("Unset OPENSHELL_GATEWAY_ENDPOINT and retry");
+    const test = dependencies({ status: 0, stdout: "unused", stderr: "" });
+    test.createGrpc.mockImplementation(() => {
+      throw new OpenShellGrpcEdgeTunnelRequiredError();
+    });
+    test.createCli.mockImplementation(() => {
+      throw refusal;
+    });
+
+    expect(() => selectOpenShellSandboxControlForMutation("edge", test.deps)).toThrow(refusal);
+
+    expect(test.createCli).toHaveBeenCalledWith("edge");
+    expect(test.cliExec).not.toHaveBeenCalled();
   });
 
   it("does not turn a completed mutation into failure when the client cannot close", () => {
