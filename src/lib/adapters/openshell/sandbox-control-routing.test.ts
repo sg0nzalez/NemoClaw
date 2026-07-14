@@ -8,8 +8,9 @@ import {
   OpenShellGrpcPreDispatchError,
 } from "./grpc-sandbox-control";
 import {
-  type OpenShellSandboxControl,
+  OPENSHELL_EXEC_MAX_OUTPUT_BYTES,
   OpenShellExecRequestValidationError,
+  type OpenShellSandboxControl,
   openShellExecRequestValidationFailure,
   type SandboxExecResult,
 } from "./sandbox-control";
@@ -89,8 +90,31 @@ describe("read-only OpenShell sandbox control routing", () => {
     expect(test.cliExec).not.toHaveBeenCalled();
   });
 
+  it.each([
+    -1,
+    1.5,
+    OPENSHELL_EXEC_MAX_OUTPUT_BYTES + 1,
+  ])("rejects maxOutputBytes=%s before creating either transport", async (maxOutputBytes) => {
+    const test = dependencies({ status: 0, stdout: "unused", stderr: "" });
+
+    const result = await execSandboxReadOnlyWithGrpcFallback(
+      "nemoclaw",
+      { ...request, maxOutputBytes },
+      test.deps,
+    );
+
+    expect(result.error).toBeInstanceOf(OpenShellExecRequestValidationError);
+    expect((result.error as OpenShellExecRequestValidationError).issue.kind).toBe(
+      "max-output-out-of-range",
+    );
+    expect(test.createGrpc).not.toHaveBeenCalled();
+    expect(test.createCli).not.toHaveBeenCalled();
+  });
+
   it("does not route a thrown typed validation error through the CLI", async () => {
-    const error = new OpenShellExecRequestValidationError({ kind: "empty-command" });
+    const error = new OpenShellExecRequestValidationError({
+      kind: "empty-command",
+    });
     const test = dependencies(error);
 
     await expect(
@@ -198,7 +222,12 @@ describe("read-only OpenShell sandbox control routing", () => {
 
   it("does not replay a post-dispatch gRPC stream failure", async () => {
     const grpcError = new Error("stream reset");
-    const result = { status: null, stdout: "partial", stderr: "", error: grpcError };
+    const result = {
+      status: null,
+      stdout: "partial",
+      stderr: "",
+      error: grpcError,
+    };
     const test = dependencies(result);
 
     await expect(
