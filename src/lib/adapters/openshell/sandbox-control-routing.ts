@@ -12,9 +12,12 @@ import {
 } from "./grpc-sandbox-control";
 import {
   createCliOpenShellSandboxControl,
+  OpenShellExecRequestValidationError,
+  openShellExecRequestValidationFailure,
   type OpenShellSandboxControl,
   type SandboxExecRequest,
   type SandboxExecResult,
+  validateOpenShellExecCommand,
 } from "./sandbox-control";
 import { OPENSHELL_OPERATION_TIMEOUT_MS } from "./timeouts";
 
@@ -89,30 +92,53 @@ export async function execSandboxReadOnlyWithGrpcFallback(
   request: SandboxExecRequest,
   dependencies: ReadOnlyRoutingDependencies = defaultDependencies,
 ): Promise<SandboxExecResult> {
-  let grpc: GrpcOpenShellSandboxControl | undefined;
+  const validationError = validateOpenShellExecCommand(request.command);
+  if (validationError) return openShellExecRequestValidationFailure(validationError);
+
+  let grpc: GrpcOpenShellSandboxControl;
   try {
     grpc = dependencies.createGrpc(gatewayName);
+  } catch (error) {
+    if (error instanceof OpenShellExecRequestValidationError) {
+      return openShellExecRequestValidationFailure(error);
+    }
+    dependencies.debug(
+      "OpenShell direct gRPC configuration failed; retrying through the CLI",
+      error,
+    );
+    return dependencies.cli.exec({
+      ...request,
+      timeoutMs: request.timeoutMs ?? OPENSHELL_OPERATION_TIMEOUT_MS,
+    });
+  }
+
+  let preDispatchError: OpenShellGrpcPreDispatchError | undefined;
+  try {
     const result = await grpc.exec({
       ...request,
       timeoutMs: request.timeoutMs ?? OPENSHELL_OPERATION_TIMEOUT_MS,
     });
     if (!(result.error instanceof OpenShellGrpcPreDispatchError)) return result;
-    dependencies.debug(
-      "OpenShell direct gRPC lookup failed before dispatch; retrying through the CLI",
-      result.error.cause,
-    );
+    preDispatchError = result.error;
   } catch (error) {
-    dependencies.debug(
-      "OpenShell direct gRPC configuration failed; retrying through the CLI",
-      error,
-    );
+    if (error instanceof OpenShellGrpcPreDispatchError) {
+      preDispatchError = error;
+    } else {
+      const cause = error instanceof Error ? error : new Error(String(error));
+      return { status: null, stdout: "", stderr: "", error: cause };
+    }
   } finally {
     try {
-      grpc?.close();
+      grpc.close();
     } catch (error) {
       dependencies.debug("OpenShell direct gRPC client close failed", error);
     }
   }
+
+  dependencies.debug(
+    "OpenShell direct gRPC lookup failed before dispatch; retrying through the CLI",
+    preDispatchError.cause,
+  );
   return dependencies.cli.exec({
     ...request,
     timeoutMs: request.timeoutMs ?? OPENSHELL_OPERATION_TIMEOUT_MS,
