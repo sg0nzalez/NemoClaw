@@ -7,7 +7,10 @@ import { captureOpenshell } from "./runtime";
 export interface SandboxExecRequest {
   sandboxName: string;
   command: readonly string[];
+  /** Maximum combined stdout and stderr bytes retained by the transport. */
   maxOutputBytes?: number;
+  /** End-to-end lookup and execution deadline. Zero means no deadline. */
+  timeoutMs?: number;
 }
 
 export interface SandboxExecResult {
@@ -46,6 +49,7 @@ export function createCliOpenShellSandboxControl(
           ignoreError: true,
           includeStreams: true,
           maxBuffer: request.maxOutputBytes,
+          timeout: request.timeoutMs,
         },
       );
       return normalizeExecResult(result);
