@@ -102,6 +102,36 @@ describe("CLI OpenShell sandbox control", () => {
     );
   });
 
+  it("preserves binary transport errors and signals even with a nominal exit status", async () => {
+    const error = Object.assign(new Error("spawnSync openshell ENOBUFS"), { code: "ENOBUFS" });
+    const bytes = Buffer.from([0, 255, 128, 10]);
+    const captureBinary = vi.fn(
+      (): CaptureOpenshellBinaryResult => ({
+        status: 0,
+        stdout: bytes,
+        stderr: Buffer.from("truncated"),
+        error,
+        signal: "SIGTERM",
+      }),
+    );
+    const control = createCliOpenShellSandboxControl(vi.fn(), { captureBinary });
+
+    await expect(
+      control.exec({
+        sandboxName: "alpha",
+        command: ["cat", "/sandbox/state.db"],
+        stdoutEncoding: "buffer",
+      }),
+    ).resolves.toEqual({
+      status: 0,
+      stdout: "",
+      stdoutBytes: bytes,
+      stderr: "truncated",
+      error,
+      signal: "SIGTERM",
+    });
+  });
+
   it("pins fallback execution to the requested gateway", async () => {
     const capture = vi.fn(
       (): CaptureOpenshellResult => ({

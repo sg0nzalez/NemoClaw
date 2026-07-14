@@ -27,8 +27,11 @@ import { spawnSync } from "child_process";
 
 import { captureSandboxSshConfigCommand } from "../adapters/openshell/client.js";
 import { resolveOpenshell } from "../adapters/openshell/resolve.js";
+import type {
+  SandboxExecRequest,
+  SandboxExecResult,
+} from "../adapters/openshell/sandbox-control.js";
 import { execSandboxReadOnlyWithGrpcFallback } from "../adapters/openshell/sandbox-control-routing.js";
-import type { SandboxExecRequest } from "../adapters/openshell/sandbox-control.js";
 import { OPENSHELL_PROBE_TIMEOUT_MS } from "../adapters/openshell/timeouts.js";
 import type { AgentStateFile } from "../agent/defs.js";
 import { loadAgent } from "../agent/defs.js";
@@ -806,7 +809,7 @@ export function buildStateFileBackupExecRequest(
   };
 }
 
-type StateFileBackupOutcome = "backed_up" | "missing" | "failed";
+export type StateFileBackupOutcome = "backed_up" | "missing" | "failed";
 
 interface StateFileBackupResult {
   outcome: StateFileBackupOutcome;
@@ -817,12 +820,28 @@ interface StateFileBackupResult {
   unreachable: boolean;
 }
 
-function isSandboxExecTransportFailure(result: {
+/** @internal Distinguish remote reachability failures from terminal local request failures. */
+export function isSandboxExecTransportFailure(result: {
   status: number | null;
   error?: Error;
   signal?: NodeJS.Signals | null;
 }): boolean {
+  const code = (result.error as NodeJS.ErrnoException | undefined)?.code;
+  // Both transports use ENOBUFS for the shared raw-output cap. The canonical
+  // request validator uses OPENSHELL_EXEC_INVALID_ARGUMENT. Neither can be
+  // repaired by retrying or by treating the sandbox as unreachable.
+  if (code === "ENOBUFS" || code === "OPENSHELL_EXEC_INVALID_ARGUMENT") return false;
   return Boolean(result.error || result.signal || result.status === null);
+}
+
+/** @internal Pin the binary state-file result contract independently of filesystem writes. */
+export function classifyStateFileBackupExecResult(
+  result: SandboxExecResult,
+): StateFileBackupOutcome {
+  if (result.error || result.signal) return "failed";
+  if (result.status === 2) return "missing";
+  if (result.status !== 0 || !result.stdoutBytes) return "failed";
+  return "backed_up";
 }
 
 async function backupStateFile(
@@ -838,12 +857,17 @@ async function backupStateFile(
     buildStateFileBackupExecRequest(sandboxName, dir, spec),
   );
 
-  if (result.status === 2) return { outcome: "missing", unreachable: false };
-  if (result.status !== 0 || result.error || result.signal) {
+  const outcome = classifyStateFileBackupExecResult(result);
+  if (outcome === "missing") return { outcome, unreachable: false };
+  if (outcome === "failed") {
     const detail =
       result.stderr.trim() ||
       result.error?.message ||
-      (result.signal ? `signal ${result.signal}` : `exit ${String(result.status)}`);
+      (result.signal
+        ? `signal ${result.signal}`
+        : result.status === 0
+          ? "binary stdout was not preserved"
+          : `exit ${String(result.status)}`);
     _log(`FAILED: state file backup ${spec.path}: ${detail.substring(0, 200)}`);
     return { outcome: "failed", unreachable: isSandboxExecTransportFailure(result) };
   }
@@ -853,11 +877,12 @@ async function backupStateFile(
   rejectSymlinksOnPath(parent);
   mkdirSync(parent, { recursive: true, mode: 0o700 });
   rejectSymlinksOnPath(localPath);
-  if (!result.stdoutBytes) {
+  const stdoutBytes = result.stdoutBytes;
+  if (!stdoutBytes) {
     _log(`FAILED: state file backup ${spec.path}: binary stdout was not preserved`);
     return { outcome: "failed", unreachable: false };
   }
-  writeFileSync(localPath, result.stdoutBytes);
+  writeFileSync(localPath, stdoutBytes);
   chmodSync(localPath, 0o600);
   return { outcome: "backed_up", unreachable: false };
 }

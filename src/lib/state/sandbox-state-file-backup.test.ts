@@ -3,7 +3,12 @@
 
 import { describe, expect, it } from "vitest";
 import { findMultilineExecArg } from "../actions/sandbox/exec";
-import { buildStateFileBackupExecRequest, SQLITE_BACKUP_PY } from "./sandbox";
+import {
+  buildStateFileBackupExecRequest,
+  classifyStateFileBackupExecResult,
+  isSandboxExecTransportFailure,
+  SQLITE_BACKUP_PY,
+} from "./sandbox";
 
 describe("state-file backup exec request", () => {
   it("streams the SQLite program through stdin and keeps every command argument single-line", () => {
@@ -40,5 +45,58 @@ describe("state-file backup exec request", () => {
 
     expect(request.command).toEqual(["sh", "-c", expect.stringContaining('cat -- "$src"')]);
     expect(request).not.toHaveProperty("stdin");
+  });
+
+  it("accepts only an error-free binary result as a completed backup", () => {
+    const bytes = Buffer.from([0, 255, 128, 10]);
+    expect(
+      classifyStateFileBackupExecResult({
+        status: 0,
+        stdout: "",
+        stdoutBytes: bytes,
+        stderr: "",
+      }),
+    ).toBe("backed_up");
+    expect(
+      classifyStateFileBackupExecResult({
+        status: 0,
+        stdout: "",
+        stdoutBytes: bytes,
+        stderr: "",
+        error: new Error("stream failed"),
+      }),
+    ).toBe("failed");
+    expect(
+      classifyStateFileBackupExecResult({
+        status: 0,
+        stdout: "",
+        stdoutBytes: bytes,
+        stderr: "",
+        signal: "SIGTERM",
+      }),
+    ).toBe("failed");
+    expect(
+      classifyStateFileBackupExecResult({
+        status: 2,
+        stdout: "",
+        stderr: "",
+        error: new Error("lookup failed"),
+      }),
+    ).toBe("failed");
+    expect(classifyStateFileBackupExecResult({ status: 0, stdout: "", stderr: "" })).toBe("failed");
+  });
+
+  it("does not classify terminal local validation and output limits as unreachable", () => {
+    const outputLimit = Object.assign(new Error("output limit"), { code: "ENOBUFS" });
+    const invalidRequest = Object.assign(new Error("invalid request"), {
+      code: "OPENSHELL_EXEC_INVALID_ARGUMENT",
+    });
+
+    expect(isSandboxExecTransportFailure({ status: null, error: outputLimit })).toBe(false);
+    expect(isSandboxExecTransportFailure({ status: null, error: invalidRequest })).toBe(false);
+    expect(isSandboxExecTransportFailure({ status: null, error: new Error("UNAVAILABLE") })).toBe(
+      true,
+    );
+    expect(isSandboxExecTransportFailure({ status: null, signal: "SIGKILL" })).toBe(true);
   });
 });
