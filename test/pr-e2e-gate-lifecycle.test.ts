@@ -541,20 +541,11 @@ describe("PR E2E controller lifecycle", () => {
       expectCancellation: false,
       expectedTitle: "E2E run did not succeed",
     },
-    {
-      label: "an invalid child result",
-      status: "unknown",
-      conclusion: null,
-      expectCancellation: false,
-      expectedTitle: "Evidence could not be verified",
-      expectedControllerError: "E2E workflow status and conclusion are invalid",
-    },
   ])("closes the check as failure for $label", async ({
     status,
     conclusion,
     expectCancellation,
     expectedTitle,
-    expectedControllerError,
   }) => {
     const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-pr-e2e-gate-finish-"));
     const outputPath = path.join(workDir, "github-output");
@@ -595,18 +586,15 @@ describe("PR E2E controller lifecycle", () => {
     );
 
     try {
-      const finalization = finishPrGate({
-        statePath,
-        stateHash: sha256(serializedState),
-        evidencePath,
-        checkRunId: 17,
-        childRunId: 23,
-      });
-      if (expectedControllerError) {
-        await expect(finalization).rejects.toThrow(expectedControllerError);
-      } else {
-        await expect(finalization).resolves.toBeUndefined();
-      }
+      await expect(
+        finishPrGate({
+          statePath,
+          stateHash: sha256(serializedState),
+          evidencePath,
+          checkRunId: 17,
+          childRunId: 23,
+        }),
+      ).resolves.toBeUndefined();
       expect(requests.some((request) => request.url.endsWith("/actions/runs/23/cancel"))).toBe(
         expectCancellation,
       );
@@ -615,6 +603,61 @@ describe("PR E2E controller lifecycle", () => {
         status: "completed",
         conclusion: "failure",
         output: { title: expectedTitle },
+      });
+      expect(fs.readFileSync(outputPath, "utf8")).toContain("finalized=true");
+    } finally {
+      fs.rmSync(workDir, { recursive: true, force: true });
+    }
+  });
+
+  it("fails the controller for an invalid child workflow result", async () => {
+    const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-pr-e2e-gate-invalid-child-"));
+    const outputPath = path.join(workDir, "github-output");
+    const statePath = path.join(workDir, "controller-state.json");
+    const evidencePath = path.join(workDir, "evidence");
+    const gate = state();
+    const serializedState = `${JSON.stringify(gate, null, 2)}\n`;
+    fs.writeFileSync(outputPath, "", { mode: 0o600 });
+    fs.writeFileSync(statePath, serializedState, { mode: 0o600 });
+    fs.mkdirSync(evidencePath);
+    vi.stubEnv("GITHUB_TOKEN", "token");
+    vi.stubEnv("GITHUB_REPOSITORY", "NVIDIA/NemoClaw");
+    vi.stubEnv("GITHUB_OUTPUT", outputPath);
+    const requests: RecordedGitHubRequest[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      createGitHubFetchRouter(
+        [
+          githubFetchRoute(
+            ({ url, method }) => url.endsWith("/actions/runs/23") && method === "GET",
+            () => githubResponse(workflowRun(gate, { status: "unknown", conclusion: null })),
+          ),
+          githubFetchRoute(
+            ({ url, method }) => url.endsWith("/check-runs/17") && method === "PATCH",
+            () => githubResponse({}),
+          ),
+        ],
+        requests,
+      ),
+    );
+
+    try {
+      await expect(
+        finishPrGate({
+          statePath,
+          stateHash: sha256(serializedState),
+          evidencePath,
+          checkRunId: 17,
+          childRunId: 23,
+        }),
+      ).rejects.toThrow("E2E workflow status and conclusion are invalid");
+      expect(requests.some((request) => request.url.endsWith("/actions/runs/23/cancel"))).toBe(
+        false,
+      );
+      const completion = requests.find((request) => request.url.endsWith("/check-runs/17"));
+      expect(completion?.body).toMatchObject({
+        status: "completed",
+        conclusion: "failure",
+        output: { title: "Evidence could not be verified" },
       });
       expect(fs.readFileSync(outputPath, "utf8")).toContain("finalized=true");
     } finally {
