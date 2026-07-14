@@ -196,6 +196,21 @@ detect_express_platform
     );
   });
 
+  it("uses the Nemotron Ultra recipe without follow-up choices on DGX Station", () => {
+    const result = runExpressPromptWithTty("\n", "pipe", "DGX Station");
+    const output = `${result.stdout}${result.stderr}`;
+    expect(result.status, output).toBe(0);
+    expect(output).toMatch(/Detected DGX Station/);
+    expect(output).toMatch(
+      /Express install will configure managed local vLLM with NVIDIA Nemotron 3 Ultra 550B/,
+    );
+    expect(output).toMatch(/approximately 352 GB model/);
+    expect(output).toMatch(/Using express install for DGX Station/);
+    expect(output).toMatch(
+      /RESULT NON_INTERACTIVE=1 SUDO_MODE=prompt PROVIDER=install-vllm MODEL= VLLM_MODEL=nemotron-3-ultra-550b-a55b POLICY=suggested YES=1 SANDBOX=my-assistant/,
+    );
+  });
+
   it("detects Windows WSL as an express install platform", () => {
     const result = spawnSync(
       "bash",

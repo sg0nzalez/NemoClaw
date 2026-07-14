@@ -57,6 +57,37 @@ describe("vllm model registry", () => {
     ).toEqual(deepseek);
   });
 
+  it("pins the DGX Station Nemotron Ultra serving recipe", () => {
+    const ultra = VLLM_MODELS.find((m) => m.envValue === "nemotron-3-ultra-550b-a55b");
+    expect(ultra).toBeDefined();
+    expect(ultra!.id).toBe("nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-NVFP4");
+    expect(ultra!.revision).toBe("183968f87ae4cedce3039313cac1fd43d112c578");
+    expect(ultra!.servedModelId).toBe("nvidia/nemotron-3-ultra-550b-a55b");
+    expect(ultra!.runtime).toEqual({
+      image:
+        "vllm/vllm-openai@sha256:0fec7ec5f3e6bc168e54899935fb0557da908a4832a1dbc88e2debcf2f889416",
+      imageDownloadSizeBytes: 10_670_087_425,
+      dockerRunArgs: ["--network", "host", "--shm-size", "16g"],
+      publishPort: false,
+    });
+
+    const cmd = buildVllmServeCommand(ultra!);
+    expect(cmd).toContain("vllm serve nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-NVFP4");
+    expect(cmd).toContain("--revision 183968f87ae4cedce3039313cac1fd43d112c578");
+    expect(cmd).toContain("--served-model-name nvidia/nemotron-3-ultra-550b-a55b");
+    expect(cmd).toContain("--cpu-offload-gb 150 --cpu-offload-params experts");
+    expect(cmd).toContain(`--kernel_config '{"enable_flashinfer_autotune": false}'`);
+    expect(cmd).toContain("--max-num-seqs 256 --gpu-memory-utilization 0.9");
+    expect(cmd).toContain("--reasoning-parser nemotron_v3");
+    expect(cmd).toContain("--enable-auto-tool-choice --tool-call-parser qwen3_coder");
+    expect(cmd).toContain(
+      `--default-chat-template-kwargs '{"enable_thinking":true,"force_nonempty_content":true}'`,
+    );
+    expect(cmd).toMatch(
+      /^export VLLM_WEIGHT_OFFLOADING_DISABLE_PIN_MEMORY=1 && export VLLM_NVFP4_GEMM_BACKEND=flashinfer-trtllm && /,
+    );
+  });
+
   it("rejects an unknown NEMOCLAW_VLLM_MODEL with a helpful message", () => {
     expect(() =>
       selectVllmModelFromEnv({ NEMOCLAW_VLLM_MODEL: "made-up-model" } as NodeJS.ProcessEnv),
@@ -267,6 +298,7 @@ describe("modelsForPlatform", () => {
     expect(slugs).toContain("nemotron-3-nano-4b");
     expect(slugs).toContain("deepseek-r1-distill-70b");
     expect(slugs).toContain("deepseek-v4-flash");
+    expect(slugs).toContain("nemotron-3-ultra-550b-a55b");
     expect(slugs).not.toContain("qwen3.6-35b-a3b-nvfp4");
   });
 
