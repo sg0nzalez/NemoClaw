@@ -18,6 +18,18 @@ const MODEL_MINIMUM_HEADROOM_BYTES = 2n * GIB_BYTES;
 const DEFAULT_CONTAINERD_ROOT = "/var/lib/containerd";
 const DEFAULT_CONTAINERD_CONFIG = "/etc/containerd/config.toml";
 const DEFAULT_DOCKER_SOCKET = "/var/run/docker.sock";
+// `/var/run` is a symlink to `/run` on modern systemd Linux, so the Docker
+// daemon socket is canonically `/run/docker.sock` and `/var/run/docker.sock`
+// addresses the same file. Accept both (and their `unix://` forms) as the
+// default local socket, mirroring the socket candidates probed in platform.ts,
+// so a `DOCKER_HOST` pointing at either does not read as a non-default socket
+// and abort managed-vLLM disk-space verification. (#6858)
+const DEFAULT_DOCKER_SOCKET_PATHS = ["/var/run/docker.sock", "/run/docker.sock"];
+
+function isDefaultDockerSocket(endpoint: string): boolean {
+  const socketPath = endpoint.startsWith("unix://") ? endpoint.slice("unix://".length) : endpoint;
+  return DEFAULT_DOCKER_SOCKET_PATHS.includes(socketPath);
+}
 const DOCKER_SOCKET_PEER_PROBE_TIMEOUT_MS = 5_000;
 // SO_PEERCRED translates the daemon PID into the caller's PID namespace. A
 // hidden peer therefore exposes the namespace-local PID 1 topology directly,
@@ -314,7 +326,7 @@ function nativeDockerHostProblem(info: DockerInfoShape, deps: StorageProbeDeps):
   if (endpoint) {
     const localSocket = endpoint.startsWith("unix://") || path.isAbsolute(endpoint);
     if (!localSocket) return `Docker uses a remote endpoint (${endpoint})`;
-    if (endpoint !== DEFAULT_DOCKER_SOCKET && endpoint !== `unix://${DEFAULT_DOCKER_SOCKET}`) {
+    if (!isDefaultDockerSocket(endpoint)) {
       return `Docker uses a non-default socket (${endpoint}) whose daemon host filesystem cannot be verified`;
     }
   }

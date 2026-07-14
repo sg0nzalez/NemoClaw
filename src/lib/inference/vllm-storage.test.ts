@@ -298,6 +298,24 @@ describe("Docker image-storage detection", () => {
     });
   });
 
+  it("accepts /run/docker.sock as a default socket (systemd /var/run -> /run symlink) (#6858)", () => {
+    // Regression: DOCKER_HOST=unix:///run/docker.sock is the same daemon socket
+    // as /var/run/docker.sock on systemd Linux, but was read as "non-default" and
+    // aborted express managed-vLLM disk-space verification.
+    vi.stubEnv("DOCKER_HOST", "unix:///run/docker.sock");
+    vi.stubEnv("DOCKER_CONTEXT", "default");
+
+    expect(
+      probeDockerHostLocality({
+        clientContainerized: false,
+        dockerInfo: () => nativeDockerInfo(),
+        osRelease: nativeHost.osRelease,
+        platform: nativeHost.platform,
+        dockerSocketPeerSharesMountNamespace: () => true,
+      }),
+    ).toEqual({ ok: true });
+  });
+
   it("fails closed when the default Docker socket is mounted into a client container (#6757)", () => {
     vi.stubEnv("DOCKER_HOST", "unix:///var/run/docker.sock");
     vi.stubEnv("DOCKER_CONTEXT", "default");
