@@ -1,4 +1,3 @@
-// @ts-nocheck
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -71,7 +70,28 @@
 // helpers here so unit tests can exercise the anchor rewrites, drift handling, and
 // idempotency directly. Requiring this module still installs the loader hooks, but
 // that install is inert for files outside @openclaw/googlechat.
-export const trustedProxyFetchPatchInternals = {};
+type CommonJsModuleLike = {
+  _compile?: (source: unknown, filename?: string) => unknown;
+};
+
+type CommonJsLoader = (
+  this: unknown,
+  mod: CommonJsModuleLike,
+  filename: string,
+  ...args: unknown[]
+) => unknown;
+
+type ModuleLoadResult = Record<string, unknown> & { source?: unknown };
+type NextModuleLoad = (urlValue: string, context: unknown) => ModuleLoadResult;
+
+type TrustedProxyFetchPatchInternals = {
+  patchSource: (source: string, filename: string) => string;
+  isPatchError: (reason: unknown) => boolean;
+  isOpenClawGooglechatFile: (filename: unknown) => boolean;
+  createComposableJsLoader: (loader: CommonJsLoader) => CommonJsLoader;
+};
+
+export const trustedProxyFetchPatchInternals = {} as TrustedProxyFetchPatchInternals;
 
 (function () {
   "use strict";
@@ -82,16 +102,23 @@ export const trustedProxyFetchPatchInternals = {};
   // this constant is defined right beside it, so its presence identifies the bundle.
   var BUNDLE_MARKER = "GOOGLE_AUTH_AUDIT_CONTEXT";
 
-  if (process.__nemoclawGooglechatTrustedProxyFetchInstalled) return;
+  var processWithPatchMarker = process as NodeJS.Process & {
+    __nemoclawGooglechatTrustedProxyFetchInstalled?: boolean;
+  };
+  if (processWithPatchMarker.__nemoclawGooglechatTrustedProxyFetchInstalled) return;
   try {
-    Object.defineProperty(process, "__nemoclawGooglechatTrustedProxyFetchInstalled", {
-      value: true,
-    });
+    Object.defineProperty(
+      processWithPatchMarker,
+      "__nemoclawGooglechatTrustedProxyFetchInstalled",
+      {
+        value: true,
+      },
+    );
   } catch (_e) {
-    process.__nemoclawGooglechatTrustedProxyFetchInstalled = true;
+    processWithPatchMarker.__nemoclawGooglechatTrustedProxyFetchInstalled = true;
   }
 
-  function isOpenClawGooglechatFile(filename) {
+  function isOpenClawGooglechatFile(filename: unknown): boolean {
     var normalized = String(filename || "").replace(/\\/g, "/");
     if (!normalized.endsWith(".js")) return false;
     // The plugin loads either from a package path (/@openclaw/googlechat/) or, when
@@ -119,13 +146,13 @@ export const trustedProxyFetchPatchInternals = {};
   // uniquely identifies this call (the google-auth call opens with auditContext).
   var ANCHOR_C = /fetchWithSsrFGuard\(\{(\s*)url\s*,/;
 
-  function patchTrustedProxyFetchSource(source, filename) {
+  function patchTrustedProxyFetchSource(source: string, filename: string): string {
     // Not the plugin's google-auth/api bundle — pass through untouched.
     if (source.indexOf(BUNDLE_MARKER) === -1) return source;
     // Already patched (idempotent across repeated --require of this preload).
     if (source.indexOf(PATCH_MARKER) !== -1) return source;
 
-    var missing = [];
+    var missing: string[] = [];
     if (!ANCHOR_A.test(source)) missing.push("createGoogleAuthFetch dispatcherPolicy");
     if (!ANCHOR_B.test(source)) missing.push("fetchChatCerts (googlechat.auth.certs)");
     if (!ANCHOR_C.test(source)) missing.push("withGoogleChatResponse outbound fetch");
@@ -177,15 +204,22 @@ export const trustedProxyFetchPatchInternals = {};
     return patched;
   }
 
-  function isTrustedProxyFetchPatchError(reason) {
-    var msg = String((reason && reason.message) || reason || "");
+  function errorMessage(reason: unknown): string {
+    if (typeof reason === "object" && reason !== null && "message" in reason) {
+      return String(Reflect.get(reason, "message") ?? "");
+    }
+    return String(reason ?? "");
+  }
+
+  function isTrustedProxyFetchPatchError(reason: unknown): boolean {
+    var msg = errorMessage(reason);
     return (
       msg.indexOf("OpenClaw Google Chat trusted-proxy fetch anchors") !== -1 &&
       msg.indexOf("not recognized") !== -1
     );
   }
 
-  function fileNameFromModuleUrl(urlValue) {
+  function fileNameFromModuleUrl(urlValue: unknown): string {
     if (typeof urlValue !== "string" || !urlValue.startsWith("file:")) return "";
     try {
       return require("url").fileURLToPath(urlValue);
@@ -194,7 +228,7 @@ export const trustedProxyFetchPatchInternals = {};
     }
   }
 
-  function sourceToText(source) {
+  function sourceToText(source: unknown): string | null {
     if (typeof source === "string") return source;
     if (typeof Buffer !== "undefined") {
       if (Buffer.isBuffer(source)) return source.toString("utf8");
@@ -208,14 +242,23 @@ export const trustedProxyFetchPatchInternals = {};
   // Module._compile instead of reading + compiling the file directly. Calling the
   // previous loader lets each wrapper transform the same source in sequence,
   // regardless of NODE_OPTIONS preload order.
-  function createComposableJsLoader(originalJsLoader) {
-    return function nemoclawGooglechatTrustedProxyJsLoader(mod, filename) {
+  function createComposableJsLoader(originalJsLoader: CommonJsLoader): CommonJsLoader {
+    return function nemoclawGooglechatTrustedProxyJsLoader(
+      this: unknown,
+      mod: CommonJsModuleLike,
+      filename: string,
+      ...args: unknown[]
+    ) {
       if (!isOpenClawGooglechatFile(filename) || typeof mod._compile !== "function") {
-        return originalJsLoader.apply(this, arguments);
+        return originalJsLoader.call(this, mod, filename, ...args);
       }
 
       var originalCompile = mod._compile;
-      mod._compile = function nemoclawGooglechatTrustedProxyCompile(source, loadedFilename) {
+      mod._compile = function nemoclawGooglechatTrustedProxyCompile(
+        this: unknown,
+        source: unknown,
+        loadedFilename?: string,
+      ) {
         var sourceText = sourceToText(source);
         var patched =
           sourceText === null
@@ -224,7 +267,7 @@ export const trustedProxyFetchPatchInternals = {};
         return originalCompile.call(this, patched, loadedFilename);
       };
       try {
-        return originalJsLoader.apply(this, arguments);
+        return originalJsLoader.call(this, mod, filename, ...args);
       } finally {
         mod._compile = originalCompile;
       }
@@ -240,7 +283,11 @@ export const trustedProxyFetchPatchInternals = {};
 
     if (typeof Module.registerHooks === "function") {
       Module.registerHooks({
-        load: function nemoclawGooglechatTrustedProxyLoadHook(urlValue, context, nextLoad) {
+        load: function nemoclawGooglechatTrustedProxyLoadHook(
+          urlValue: string,
+          context: unknown,
+          nextLoad: NextModuleLoad,
+        ) {
           var result = nextLoad(urlValue, context);
           var filename = fileNameFromModuleUrl(urlValue);
           if (!isOpenClawGooglechatFile(filename)) return result;
@@ -268,9 +315,7 @@ export const trustedProxyFetchPatchInternals = {};
   } catch (e) {
     if (isTrustedProxyFetchPatchError(e)) {
       process.stderr.write(
-        "[channels] [googlechat] trusted-proxy-fetch patch NOT applied: " +
-          String(e && e.message) +
-          "\n",
+        "[channels] [googlechat] trusted-proxy-fetch patch NOT applied: " + errorMessage(e) + "\n",
       );
     }
     // Any other failure: never break gateway boot.

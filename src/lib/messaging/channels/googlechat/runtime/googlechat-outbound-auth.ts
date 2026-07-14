@@ -1,4 +1,3 @@
-// @ts-nocheck
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -73,7 +72,29 @@
 // helpers here so unit tests can exercise patch / shape-drift / short-circuit
 // behavior directly. Requiring this module still installs the loader hooks, but
 // that install is inert for files outside @openclaw/googlechat.
-export const outboundAuthPatchInternals = {};
+type CommonJsModuleLike = {
+  _compile?: (source: unknown, filename?: string) => unknown;
+};
+
+type CommonJsLoader = (
+  this: unknown,
+  mod: CommonJsModuleLike,
+  filename: string,
+  ...args: unknown[]
+) => unknown;
+
+type ModuleLoadResult = Record<string, unknown> & { source?: unknown };
+type NextModuleLoad = (urlValue: string, context: unknown) => ModuleLoadResult;
+
+type OutboundAuthPatchInternals = {
+  patchSource: (source: string, filename: string) => string;
+  buildShortCircuit: () => string;
+  isPatchError: (reason: unknown) => boolean;
+  isOpenClawGooglechatFile: (filename: unknown) => boolean;
+  createComposableJsLoader: (loader: CommonJsLoader) => CommonJsLoader;
+};
+
+export const outboundAuthPatchInternals = {} as OutboundAuthPatchInternals;
 
 (function () {
   "use strict";
@@ -87,14 +108,19 @@ export const outboundAuthPatchInternals = {};
   var CALL_MARKER = "nemoclaw: googlechat outbound bearer via gateway-minted credential";
   var DEF_SIGNATURE = "function getGoogleChatAccessToken";
 
-  if (process.__nemoclawGooglechatOutboundAuthInstalled) return;
+  var processWithPatchMarker = process as NodeJS.Process & {
+    __nemoclawGooglechatOutboundAuthInstalled?: boolean;
+  };
+  if (processWithPatchMarker.__nemoclawGooglechatOutboundAuthInstalled) return;
   try {
-    Object.defineProperty(process, "__nemoclawGooglechatOutboundAuthInstalled", { value: true });
+    Object.defineProperty(processWithPatchMarker, "__nemoclawGooglechatOutboundAuthInstalled", {
+      value: true,
+    });
   } catch (_e) {
-    process.__nemoclawGooglechatOutboundAuthInstalled = true;
+    processWithPatchMarker.__nemoclawGooglechatOutboundAuthInstalled = true;
   }
 
-  function isOpenClawGooglechatFile(filename) {
+  function isOpenClawGooglechatFile(filename: unknown): boolean {
     var normalized = String(filename || "").replace(/\\/g, "/");
     if (!normalized.endsWith(".js")) return false;
     // The plugin loads either from a package path (/@openclaw/googlechat/) or, when
@@ -120,7 +146,7 @@ export const outboundAuthPatchInternals = {};
   // non-OpenShell deployments. When the env is UNSET the guard THROWS (the outbound
   // bearer must come from the gateway credential). Built as a single line (no
   // template-literal escaping) for a clean source rewrite.
-  function buildBearerShortCircuitSource() {
+  function buildBearerShortCircuitSource(): string {
     var canonical = "openshell:resolve:env:" + ENV_VAR;
     return (
       'var __nemoGcRaw = (typeof process !== "undefined" && process.env) ' +
@@ -137,7 +163,7 @@ export const outboundAuthPatchInternals = {};
     );
   }
 
-  function patchGooglechatOutboundAuthSource(source, filename) {
+  function patchGooglechatOutboundAuthSource(source: string, filename: string): string {
     // Only the dist chunk that DEFINES the producer is a patch target; files that
     // merely call/import it (substring without the `function` keyword) pass through.
     if (source.indexOf(DEF_SIGNATURE) === -1) return source;
@@ -158,15 +184,22 @@ export const outboundAuthPatchInternals = {};
     return source.replace(anchor, "$1\n  " + buildBearerShortCircuitSource());
   }
 
-  function isGooglechatOutboundAuthPatchError(reason) {
-    var msg = String((reason && reason.message) || reason || "");
+  function errorMessage(reason: unknown): string {
+    if (typeof reason === "object" && reason !== null && "message" in reason) {
+      return String(Reflect.get(reason, "message") ?? "");
+    }
+    return String(reason ?? "");
+  }
+
+  function isGooglechatOutboundAuthPatchError(reason: unknown): boolean {
+    var msg = errorMessage(reason);
     return (
       msg.indexOf("OpenClaw Google Chat getGoogleChatAccessToken") !== -1 &&
       msg.indexOf("shape not recognized") !== -1
     );
   }
 
-  function fileNameFromModuleUrl(urlValue) {
+  function fileNameFromModuleUrl(urlValue: unknown): string {
     if (typeof urlValue !== "string" || !urlValue.startsWith("file:")) return "";
     try {
       return require("url").fileURLToPath(urlValue);
@@ -175,7 +208,7 @@ export const outboundAuthPatchInternals = {};
     }
   }
 
-  function sourceToText(source) {
+  function sourceToText(source: unknown): string | null {
     if (typeof source === "string") return source;
     if (typeof Buffer !== "undefined") {
       if (Buffer.isBuffer(source)) return source.toString("utf8");
@@ -189,14 +222,23 @@ export const outboundAuthPatchInternals = {};
   // Module._compile instead of reading + compiling the file directly. Calling the
   // previous loader lets each wrapper transform the same source in sequence,
   // regardless of NODE_OPTIONS preload order.
-  function createComposableJsLoader(originalJsLoader) {
-    return function nemoclawGooglechatJsLoader(mod, filename) {
+  function createComposableJsLoader(originalJsLoader: CommonJsLoader): CommonJsLoader {
+    return function nemoclawGooglechatJsLoader(
+      this: unknown,
+      mod: CommonJsModuleLike,
+      filename: string,
+      ...args: unknown[]
+    ) {
       if (!isOpenClawGooglechatFile(filename) || typeof mod._compile !== "function") {
-        return originalJsLoader.apply(this, arguments);
+        return originalJsLoader.call(this, mod, filename, ...args);
       }
 
       var originalCompile = mod._compile;
-      mod._compile = function nemoclawGooglechatCompile(source, loadedFilename) {
+      mod._compile = function nemoclawGooglechatCompile(
+        this: unknown,
+        source: unknown,
+        loadedFilename?: string,
+      ) {
         var sourceText = sourceToText(source);
         var patched =
           sourceText === null
@@ -205,7 +247,7 @@ export const outboundAuthPatchInternals = {};
         return originalCompile.call(this, patched, loadedFilename);
       };
       try {
-        return originalJsLoader.apply(this, arguments);
+        return originalJsLoader.call(this, mod, filename, ...args);
       } finally {
         mod._compile = originalCompile;
       }
@@ -221,7 +263,11 @@ export const outboundAuthPatchInternals = {};
 
     if (typeof Module.registerHooks === "function") {
       Module.registerHooks({
-        load: function nemoclawGooglechatLoadHook(urlValue, context, nextLoad) {
+        load: function nemoclawGooglechatLoadHook(
+          urlValue: string,
+          context: unknown,
+          nextLoad: NextModuleLoad,
+        ) {
           var result = nextLoad(urlValue, context);
           var filename = fileNameFromModuleUrl(urlValue);
           if (!isOpenClawGooglechatFile(filename)) return result;
@@ -257,7 +303,7 @@ export const outboundAuthPatchInternals = {};
       // degrading silently. Boot/health-time fail-closed on drift is a tracked
       // follow-up.
       process.stderr.write(
-        "[channels] [googlechat] outbound-auth patch NOT applied: " + String(e && e.message) + "\n",
+        "[channels] [googlechat] outbound-auth patch NOT applied: " + errorMessage(e) + "\n",
       );
     }
     // Any other failure: never break gateway boot.
