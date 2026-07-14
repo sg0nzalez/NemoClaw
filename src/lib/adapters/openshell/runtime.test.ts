@@ -50,7 +50,7 @@ describe("OpenShell runtime capture", () => {
     expect(mocks.captureOpenshellCommand.mock.calls[0]?.[2]?.input).toBe(input);
   });
 
-  it("runs binary captures from the standard NemoClaw working directory", () => {
+  it("runs raw captures from the standard NemoClaw working directory", () => {
     const input = Buffer.from([0, 255, 10]);
     const args = ["sandbox", "exec", "--name", "alpha", "--", "cat"];
 
