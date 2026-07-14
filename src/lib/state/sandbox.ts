@@ -40,6 +40,7 @@ import { shellQuote } from "../runner.js";
 import { resolveSandboxGatewayName } from "../onboard/gateway-binding.js";
 import { createTempSshConfig } from "../sandbox/temp-ssh-config.js";
 import { isSensitiveFile, sanitizeConfigFile } from "../security/credential-filter.js";
+import { buildEncodedPythonInvocation } from "./encoded-python.js";
 import {
   buildRestoreCleanupCommand,
   buildRestoreTarArgs,
@@ -771,7 +772,7 @@ function buildStateFileBackupCommand(dir: string, spec: StateFileSpec): string {
       '[ "${hardlink_count:-0}" = "0" ] || { echo "hard-linked sqlite state file rejected: $src" >&2; exit 11; }',
       'tmp="$(mktemp /tmp/nemoclaw-sqlite-backup.XXXXXX)"',
       "trap 'rm -f \"$tmp\"' EXIT",
-      `python3 -c ${shellQuote(SQLITE_BACKUP_PY)} "$src" "$tmp"`,
+      `${buildEncodedPythonInvocation("python3", SQLITE_BACKUP_PY)} "$src" "$tmp"`,
       'cat -- "$tmp"',
     ].join("; ");
   }

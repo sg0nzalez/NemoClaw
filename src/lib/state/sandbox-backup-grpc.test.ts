@@ -297,6 +297,26 @@ describe("backupSandboxState OpenShell directory transport", () => {
     expectProbeAuditAndBinaryTarRequests();
   });
 
+  it("fails closed when a clean tar result omits binary stdout", async () => {
+    queueSuccessfulProbeAndAudit();
+    mocks.execSandboxReadOnlyWithGrpcFallback.mockResolvedValueOnce({
+      status: 0,
+      stdout: "",
+      stderr: "",
+    });
+
+    const result = await backupSandboxState("alpha");
+
+    expect(result).toMatchObject({
+      success: false,
+      backedUpDirs: [],
+      failedDirs: ["state"],
+    });
+    expect(result.manifest?.backedUpDirs).toEqual([]);
+    expect(fs.existsSync(path.join(result.manifest!.backupPath, "state"))).toBe(false);
+    expectProbeAuditAndBinaryTarRequests();
+  });
+
   it("fails closed without claiming unreachable for a completed nonzero tar result", async () => {
     queueSuccessfulProbeAndAudit();
     mocks.execSandboxReadOnlyWithGrpcFallback.mockResolvedValueOnce({

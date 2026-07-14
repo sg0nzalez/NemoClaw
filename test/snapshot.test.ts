@@ -1279,12 +1279,22 @@ describe("Hermes durable state files", () => {
       const hermesDir = path.join(fakeRoot, ".hermes");
       const runtimeDir = path.join(hermesDir, "runtime");
       const sshLog = path.join(fixture, "ssh-log.jsonl");
-      const stateDbBytes = Buffer.from([0x53, 0x51, 0x4c, 0x00, 0xff, 0xfe, 0x80, 0x0a]);
+      const stateDbPayload = Buffer.from([0x53, 0x51, 0x4c, 0x00, 0xff, 0xfe, 0x80, 0x0a]);
       fs.mkdirSync(binDir, { recursive: true });
       fs.mkdirSync(runtimeDir, { recursive: true });
       fs.writeFileSync(path.join(hermesDir, "SOUL.md"), "original soul\n");
       fs.writeFileSync(path.join(hermesDir, ".hermes_history"), "original history\n");
-      fs.writeFileSync(path.join(runtimeDir, "state.db"), stateDbBytes);
+      const stateDbPath = path.join(runtimeDir, "state.db");
+      const seededDatabase = spawnSync(
+        "python3",
+        [
+          "-c",
+          "import sqlite3,sys; db=sqlite3.connect(sys.argv[1]); db.execute('CREATE TABLE payload (data BLOB NOT NULL)'); db.execute('INSERT INTO payload VALUES (?)', (sys.stdin.buffer.read(),)); db.commit(); db.close()",
+          stateDbPath,
+        ],
+        { input: stateDbPayload },
+      );
+      expect(seededDatabase.status, String(seededDatabase.stderr)).toBe(0);
       fs.writeFileSync(path.join(hermesDir, "config.yaml"), "token: should-not-copy\n");
       fs.writeFileSync(path.join(hermesDir, ".env"), "API_TOKEN=should-not-copy\n");
       fs.writeFileSync(path.join(hermesDir, "auth.json"), '{"token":"should-not-copy"}\n');
@@ -1307,6 +1317,7 @@ process.exit(0);
         `#!/usr/bin/env node
 const fs = require("fs");
 const path = require("path");
+const { spawnSync } = require("child_process");
 const root = ${JSON.stringify(fakeRoot)};
 const log = ${JSON.stringify(sshLog)};
 const cmd = process.argv[process.argv.length - 1] || "";
@@ -1326,8 +1337,12 @@ if (cmd.includes("[ -d ")) {
   process.exit(0);
 }
 if (cmd.includes("nemoclaw-sqlite-backup")) {
-  process.stdout.write(fs.readFileSync(path.join(hermesDir, "runtime", "state.db")));
-  process.exit(0);
+  const result = spawnSync("sh", ["-c", cmd.replaceAll("/sandbox/.hermes", hermesDir)], {
+    encoding: null,
+  });
+  if (result.stdout) fs.writeSync(1, result.stdout);
+  if (result.stderr) fs.writeSync(2, result.stderr);
+  process.exit(result.status === null ? 1 : result.status);
 }
 if (cmd.includes("SOUL.md") && cmd.includes("cat --")) {
   process.stdout.write(fs.readFileSync(path.join(hermesDir, "SOUL.md")));
@@ -1390,9 +1405,22 @@ process.exit(0);
       expect(
         fs.readFileSync(path.join(backup.manifest!.backupPath, ".hermes_history"), "utf-8"),
       ).toBe("original history\n");
-      expect(
-        fs.readFileSync(path.join(backup.manifest!.backupPath, "runtime", "state.db")),
-      ).toEqual(stateDbBytes);
+      const backedUpStateDbPath = path.join(backup.manifest!.backupPath, "runtime", "state.db");
+      const backedUpStateDbBytes = fs.readFileSync(backedUpStateDbPath);
+      expect(Buffer.from(backedUpStateDbBytes.toString("utf8"), "utf8")).not.toEqual(
+        backedUpStateDbBytes,
+      );
+      const backedUpPayload = spawnSync(
+        "python3",
+        [
+          "-c",
+          "import sqlite3,sys; db=sqlite3.connect(sys.argv[1]); sys.stdout.buffer.write(db.execute('SELECT data FROM payload').fetchone()[0]); db.close()",
+          backedUpStateDbPath,
+        ],
+        { encoding: null },
+      );
+      expect(backedUpPayload.status, String(backedUpPayload.stderr)).toBe(0);
+      expect(backedUpPayload.stdout).toEqual(stateDbPayload);
       expect(fs.existsSync(path.join(backup.manifest!.backupPath, "config.yaml"))).toBe(false);
       expect(fs.existsSync(path.join(backup.manifest!.backupPath, ".env"))).toBe(false);
       expect(fs.existsSync(path.join(backup.manifest!.backupPath, "auth.json"))).toBe(false);
@@ -1407,12 +1435,19 @@ process.exit(0);
       expect(fs.readFileSync(path.join(hermesDir, ".hermes_history"), "utf-8")).toBe(
         "original history\n",
       );
-      expect(fs.readFileSync(path.join(runtimeDir, "state.db"))).toEqual(stateDbBytes);
+      expect(fs.readFileSync(path.join(runtimeDir, "state.db"))).toEqual(backedUpStateDbBytes);
 
-      const loggedCommands = fs.readFileSync(sshLog, "utf-8");
-      expect(loggedCommands).toContain("sqlite3.connect");
-      expect(loggedCommands).toContain("src_conn.backup(dst_conn)");
-      expect(loggedCommands).toContain("PRAGMA quick_check");
+      const loggedCommands = fs
+        .readFileSync(sshLog, "utf-8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line).cmd as string);
+      const sqliteBackupCommand = loggedCommands.find((command) =>
+        command.includes("nemoclaw-sqlite-backup"),
+      );
+      expect(sqliteBackupCommand).toBeDefined();
+      expect(sqliteBackupCommand).not.toMatch(/[\u0000\r\n]/);
+      expect(Buffer.byteLength(sqliteBackupCommand!, "utf8")).toBeLessThanOrEqual(32_768);
     } finally {
       if (oldOpenshell === undefined) {
         delete process.env.NEMOCLAW_OPENSHELL_BIN;
