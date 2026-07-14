@@ -101,6 +101,44 @@ describe("legacy sandbox transport inventory", () => {
     ]);
   });
 
+  it("tracks namespace imports and direct or aliased named re-exports", () => {
+    const root = fixtureRepo({
+      "src/namespace-import.ts":
+        'import * as routing from "./lib/adapters/openshell/sandbox-control-routing.js";\nrouting.execSandboxReadOnlyWithGrpcFallback("gateway", request);',
+      "src/re-export.ts": [
+        'export { execSandboxReadOnlyWithGrpcFallback } from "./lib/adapters/openshell/sandbox-control-routing.js";',
+        'export { execSandboxReadOnlyWithGrpcFallback as execReadOnly } from "./lib/adapters/openshell/sandbox-control-routing.js";',
+      ].join("\n"),
+    });
+
+    expect(discoverLegacySandboxTransportSites(root)).toEqual([
+      {
+        relativePath: "src/namespace-import.ts",
+        kind: "grpc-cli-read-only-fallback",
+        calls: 1,
+      },
+      {
+        relativePath: "src/re-export.ts",
+        kind: "grpc-cli-read-only-fallback",
+        calls: 2,
+      },
+    ]);
+  });
+
+  it("ignores type-only fallback imports and re-exports", () => {
+    const root = fixtureRepo({
+      "src/type-only.ts": [
+        'import type { execSandboxReadOnlyWithGrpcFallback } from "./lib/adapters/openshell/sandbox-control-routing.js";',
+        'import { type execSandboxReadOnlyWithGrpcFallback as ExecReadOnly } from "./lib/adapters/openshell/sandbox-control-routing.js";',
+        'import type * as Routing from "./lib/adapters/openshell/sandbox-control-routing.js";',
+        'export type { execSandboxReadOnlyWithGrpcFallback } from "./lib/adapters/openshell/sandbox-control-routing.js";',
+        'export { type execSandboxReadOnlyWithGrpcFallback as ExecReadOnlyExport } from "./lib/adapters/openshell/sandbox-control-routing.js";',
+      ].join("\n"),
+    });
+
+    expect(discoverLegacySandboxTransportSites(root)).toEqual([]);
+  });
+
   it("fails closed when a new production file imports the read-only fallback", () => {
     const root = fixtureRepo({
       "src/unreviewed-probe.ts":
