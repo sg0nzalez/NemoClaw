@@ -31,11 +31,9 @@ const {
 } = await import("./sandbox");
 
 afterAll(() => {
-  if (ORIGINAL_HOME === undefined) {
-    delete process.env.HOME;
-  } else {
-    process.env.HOME = ORIGINAL_HOME;
-  }
+  ORIGINAL_HOME === undefined
+    ? Reflect.deleteProperty(process.env, "HOME")
+    : Reflect.set(process.env, "HOME", ORIGINAL_HOME);
   fs.rmSync(TMP_HOME, { force: true, recursive: true });
 });
 
