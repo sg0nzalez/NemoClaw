@@ -94,33 +94,38 @@ describe("removeSkill", () => {
     const paths = resolveSkillPaths(null, "test-skill");
     const mirrorDir = paths.mirrorDir!;
     const unrelatedPath = "/sandbox/.openclaw/skills/other-skill";
-    const existingPaths = new Set([paths.uploadDir, mirrorDir, unrelatedPath]);
-    const commands: string[] = [];
-    let mirrorAttempts = 0;
+    const clearSessions = `printf '{}' > '${paths.sessionFile}'`;
+    const verifyGone = `test ! -e '${paths.uploadDir}' && test ! -e "${mirrorDir}" && echo GONE || echo EXISTS`;
+    const scriptedResults = [
+      {
+        command: `rm -rf '${paths.uploadDir}'`,
+        result: { status: 0, stdout: "", stderr: "" },
+      },
+      {
+        command: `rm -rf "${mirrorDir}"`,
+        result: { status: 1, stdout: "", stderr: "failed" },
+      },
+      { command: clearSessions, result: { status: 0, stdout: "", stderr: "" } },
+      {
+        command: `rm -rf '${paths.uploadDir}'`,
+        result: { status: 0, stdout: "", stderr: "" },
+      },
+      {
+        command: `rm -rf "${mirrorDir}"`,
+        result: { status: 0, stdout: "", stderr: "" },
+      },
+      { command: clearSessions, result: { status: 0, stdout: "", stderr: "" } },
+      {
+        command: verifyGone,
+        result: { status: 0, stdout: "GONE", stderr: "" },
+      },
+    ];
     const execImpl = vi.fn(async (_ctx: SandboxControlContext, command: string) => {
-      commands.push(command);
-      if (command === `rm -rf '${paths.uploadDir}'`) {
-        existingPaths.delete(paths.uploadDir);
-        return { status: 0, stdout: "", stderr: "" };
-      }
-      if (command === `rm -rf "${mirrorDir}"`) {
-        mirrorAttempts += 1;
-        if (mirrorAttempts === 1) return { status: 1, stdout: "", stderr: "failed" };
-        existingPaths.delete(mirrorDir);
-        return { status: 0, stdout: "", stderr: "" };
-      }
-      if (command.startsWith("printf '{}' >")) {
-        return { status: 0, stdout: "", stderr: "" };
-      }
-      if (command.startsWith("test ! -e")) {
-        return {
-          status: 0,
-          stdout:
-            existingPaths.has(paths.uploadDir) || existingPaths.has(mirrorDir) ? "EXISTS" : "GONE",
-          stderr: "",
-        };
-      }
-      return { status: 1, stdout: "", stderr: `unexpected command: ${command}` };
+      const next = scriptedResults.shift();
+      expect(next).toBeDefined();
+      expect(command).toBe(next!.command);
+      expect(command).not.toContain(unrelatedPath);
+      return next!.result;
     });
 
     await expect(removeSkill(context(), paths, { execImpl })).resolves.toMatchObject({
@@ -136,10 +141,7 @@ describe("removeSkill", () => {
     });
     await expect(verifyRemove(context(), paths, { execImpl })).resolves.toBe(true);
 
-    expect(existingPaths.has(paths.uploadDir)).toBe(false);
-    expect(existingPaths.has(mirrorDir)).toBe(false);
-    expect(existingPaths.has(unrelatedPath)).toBe(true);
-    expect(commands.every((command) => !command.includes(unrelatedPath))).toBe(true);
+    expect(scriptedResults).toEqual([]);
   });
 
   it("removes OpenClaw upload and mirror dirs, then clears sessions", async () => {
