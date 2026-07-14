@@ -197,7 +197,6 @@ export const VLLM_MODELS: readonly VllmModelDef[] = [
     id: "nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-NVFP4",
     label: "NVIDIA Nemotron 3 Ultra 550B NVFP4",
     envValue: "nemotron-3-ultra-550b-a55b",
-    downloadSizeBytes: 352_381_245_521,
     maxModelLen: 262144,
     revision: "183968f87ae4cedce3039313cac1fd43d112c578",
     // Keep the route identity aligned with NemoClaw's existing managed
