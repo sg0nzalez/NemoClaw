@@ -285,19 +285,17 @@ export async function installSandboxSkill(
   try {
     const ctx = { control: selected.control, sandboxName };
 
-    // 5. Check if skill already exists (update vs fresh install). This probe is
-    //    advisory for install only: transient control-plane or remote shell
-    //    failures can make the stat probe inconclusive even when a
-    //    subsequent upload succeeds. Upload plus verifyInstall() remain the
-    //    source of truth for install success; remove keeps null fatal because it
-    //    is destructive. Once OpenShell exposes a typed stat API or exec probe
-    //    failures are reliably distinguishable from absent dirs across supported
-    //    versions, remove this fallback and fail before upload.
+    // 5. Check if skill already exists (update vs fresh install). A successful
+    //    sentinel response distinguishes absence from an existing directory;
+    //    an inconclusive control result is an execution failure, not absence.
+    //    Fail closed before upload so a probe failure cannot precede mutation.
     const existingCheck = await skillInstall.checkExisting(ctx, paths);
     if (existingCheck === null) {
       console.error(
-        `  ${YW}Warning: could not check sandbox for existing skill — treating as fresh install.${R}`,
+        `  Could not check if skill '${frontmatter.name}' exists — sandbox may be unreachable. No files were uploaded.`,
       );
+      process.exitCode = 1;
+      return;
     }
     const isUpdate = existingCheck === true;
 
