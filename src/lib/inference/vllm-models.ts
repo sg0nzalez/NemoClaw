@@ -36,8 +36,6 @@ export interface VllmRuntimeOverride {
   imageDownloadSizeBytes: number;
   /** Additional `docker run` arguments required by this recipe. */
   dockerRunArgs?: readonly string[];
-  /** Whether the managed container should publish localhost:8000. */
-  publishPort?: boolean;
 }
 
 export const NEMOTRON_ULTRA_STATION_IMAGE = {
@@ -235,8 +233,9 @@ export const VLLM_MODELS: readonly VllmModelDef[] = [
     runtime: {
       image: NEMOTRON_ULTRA_STATION_IMAGE.arm64.ref,
       imageDownloadSizeBytes: NEMOTRON_ULTRA_STATION_IMAGE.arm64.downloadSizeBytes,
-      dockerRunArgs: ["--network", "host", "--shm-size", "16g"],
-      publishPort: false,
+      // Keep NemoClaw's bridge-networked local-inference boundary instead of
+      // importing the playbook's host-network setting.
+      dockerRunArgs: ["--shm-size", "16g"],
     },
   },
   {

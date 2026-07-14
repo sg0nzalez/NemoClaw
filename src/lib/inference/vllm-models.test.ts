@@ -67,8 +67,7 @@ describe("vllm model registry", () => {
       image:
         "vllm/vllm-openai@sha256:0fec7ec5f3e6bc168e54899935fb0557da908a4832a1dbc88e2debcf2f889416",
       imageDownloadSizeBytes: 10_670_087_425,
-      dockerRunArgs: ["--network", "host", "--shm-size", "16g"],
-      publishPort: false,
+      dockerRunArgs: ["--shm-size", "16g"],
     });
 
     const cmd = buildVllmServeCommand(ultra!);

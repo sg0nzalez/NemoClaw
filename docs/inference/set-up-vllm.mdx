@@ -142,8 +142,9 @@ When you start managed vLLM outside the installer express flow, NemoClaw uses th
 | Linux with an NVIDIA GPU | `nvidia/NVIDIA-Nemotron-3-Nano-4B-FP8` |
 
 On DGX Station, accepting the installer express prompt sets `NEMOCLAW_VLLM_MODEL=nemotron-3-ultra-550b-a55b` and overrides the profile default.
-The registered recipe configures the pinned model revision, CPU offload, host networking, `16 GB` of shared memory, and the Nemotron reasoning and tool-call parsers.
-Because the service uses host networking and listens on port `8000`, apply the firewall guidance at the top of this page.
+The registered recipe configures the pinned model revision, CPU offload, `16 GB` of shared memory, and the Nemotron reasoning and tool-call parsers.
+NemoClaw intentionally keeps its existing bridge-networked managed-inference topology instead of importing the playbook's host-network setting.
+The container publishes port `8000` through Docker, so apply the firewall guidance at the top of this page.
 
 <Warning>
 DGX Station and its managed-vLLM paths remain Deferred until NemoClaw completes end-to-end validation on physical DGX Station hardware.
