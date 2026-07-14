@@ -180,7 +180,7 @@ describe("checkAgentVersion", () => {
 
     expect(result.detectionMethod).toBe("unknown");
     expect(result.unavailableReason).toBe("probe-failed");
-    expect(registry.getSandbox("test-sb")?.agentVersion).toBeUndefined();
+    expect(registry.getSandbox("test-sb")?.agentVersion).toBeNull();
   });
 
   it("can skip live probing when no cached version is available", async () => {
