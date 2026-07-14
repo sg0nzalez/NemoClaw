@@ -115,7 +115,7 @@ beforeEach(() => {
     "network_policies:\n  stub:\n    egress:\n      - host: example.com\n",
   );
   vi.spyOn(policies, "applyPreset").mockImplementation((_sandboxName, preset) => {
-    if (!appliedPresets.includes(preset)) appliedPresets.push(preset);
+    appliedPresets = [...new Set([...appliedPresets, preset])];
     return true;
   });
   vi.spyOn(policies, "removePreset").mockImplementation((_sandboxName, preset) => {
