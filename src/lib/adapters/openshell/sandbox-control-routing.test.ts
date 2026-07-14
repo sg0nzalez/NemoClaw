@@ -123,6 +123,35 @@ describe("read-only OpenShell sandbox control routing", () => {
     );
   });
 
+  it("preserves binary stdout through a read-only CLI fallback", async () => {
+    const grpcError = new Error("OpenShell gRPC exec stream ended without an exit status");
+    const grpcResult = {
+      status: null,
+      stdout: "",
+      stdoutBytes: Buffer.from([1, 2]),
+      stderr: "",
+      error: grpcError,
+    };
+    const bytes = Buffer.from([0, 255, 128, 10]);
+    const cliResult = { status: 0, stdout: "", stdoutBytes: bytes, stderr: "" };
+    const binaryRequest = { ...request, stdoutEncoding: "buffer" as const };
+    const test = dependencies(grpcResult, cliResult);
+
+    const result = await execSandboxReadOnlyWithGrpcFallback("nemoclaw", binaryRequest, test.deps);
+
+    expect(result).toEqual(cliResult);
+    expect(result.stdout).toBe("");
+    expect(result.stdoutBytes).toEqual(bytes);
+    expect(test.cliExec).toHaveBeenCalledWith({
+      ...binaryRequest,
+      timeoutMs: OPENSHELL_OPERATION_TIMEOUT_MS,
+    });
+    expect(test.debug).toHaveBeenCalledWith(
+      expect.stringContaining("read-only exec failed"),
+      grpcError,
+    );
+  });
+
   it("does not retry a local gRPC output limit failure", async () => {
     const error = new OpenShellGrpcOutputLimitError(4096);
     const result = { status: null, stdout: "partial", stderr: "", error };

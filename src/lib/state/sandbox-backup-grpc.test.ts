@@ -60,19 +60,19 @@ function completed(stdout = ""): ExecResult {
   return { status: 0, stdout, stderr: "" };
 }
 
-function queueSuccessfulProbeAndAudit(): void {
+function queueSuccessfulProbeAndAudit(dirName = "state", auditOutput = ""): void {
   mocks.execSandboxReadOnlyWithGrpcFallback
-    .mockResolvedValueOnce(completed("state\n"))
-    .mockResolvedValueOnce(completed());
+    .mockResolvedValueOnce(completed(`${dirName}\n`))
+    .mockResolvedValueOnce(completed(auditOutput));
 }
 
-function createBinaryTarArchive(): { archive: Buffer; payload: Buffer } {
+function createBinaryTarArchive(dirName = "state"): { archive: Buffer; payload: Buffer } {
   const source = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-grpc-state-source-"));
   const payload = Buffer.from([0x53, 0x54, 0x41, 0x54, 0x45, 0x00, 0xff, 0xfe, 0x80, 0x0a]);
   try {
-    fs.mkdirSync(path.join(source, "state"), { recursive: true });
-    fs.writeFileSync(path.join(source, "state", "payload.bin"), payload);
-    const result = spawnSync("tar", ["-cf", "-", "-C", source, "state"], {
+    fs.mkdirSync(path.join(source, dirName), { recursive: true });
+    fs.writeFileSync(path.join(source, dirName, "payload.bin"), payload);
+    const result = spawnSync("tar", ["-cf", "-", "-C", source, dirName], {
       encoding: null,
       maxBuffer: 1024 * 1024,
     });
@@ -84,15 +84,14 @@ function createBinaryTarArchive(): { archive: Buffer; payload: Buffer } {
   }
 }
 
-function expectProbeAuditAndBinaryTarRequests(): void {
-  expect(mocks.execSandboxReadOnlyWithGrpcFallback).toHaveBeenCalledTimes(3);
+function expectProbeAndAuditRequests(dirName = "state"): void {
   const calls = mocks.execSandboxReadOnlyWithGrpcFallback.mock.calls;
 
   expect(calls[0]).toEqual([
     "nemoclaw",
     expect.objectContaining({
       sandboxName: "alpha",
-      command: ["sh", "-c", expect.stringContaining(`[ -d '${STATE_DIR}/state' ]`)],
+      command: ["sh", "-c", expect.stringContaining(`[ -d '${STATE_DIR}/${dirName}' ]`)],
       timeoutMs: 30_000,
     }),
   ]);
@@ -100,24 +99,30 @@ function expectProbeAuditAndBinaryTarRequests(): void {
     "nemoclaw",
     expect.objectContaining({
       sandboxName: "alpha",
-      command: ["sh", "-c", expect.stringContaining(`find '${STATE_DIR}/state'`)],
+      command: ["sh", "-c", expect.stringContaining(`find '${STATE_DIR}/${dirName}'`)],
       timeoutMs: 30_000,
     }),
-  ]);
-  expect(calls[2]).toEqual([
-    "nemoclaw",
-    {
-      sandboxName: "alpha",
-      command: ["sh", "-c", `tar -cf - -C '${STATE_DIR}' -- 'state'`],
-      timeoutMs: 120_000,
-      maxOutputBytes: 256 * 1024 * 1024,
-      stdoutEncoding: "buffer",
-    },
   ]);
 
   // Directory backup must not recreate the removed SSH-config transport.
   expect(mocks.resolveOpenshell).not.toHaveBeenCalled();
   expect(mocks.captureSandboxSshConfigCommand).not.toHaveBeenCalled();
+}
+
+function expectProbeAuditAndBinaryTarRequests(dirName = "state"): void {
+  expect(mocks.execSandboxReadOnlyWithGrpcFallback).toHaveBeenCalledTimes(3);
+  expectProbeAndAuditRequests(dirName);
+  const calls = mocks.execSandboxReadOnlyWithGrpcFallback.mock.calls;
+  expect(calls[2]).toEqual([
+    "nemoclaw",
+    {
+      sandboxName: "alpha",
+      command: ["sh", "-c", `tar -cf - -C '${STATE_DIR}' -- '${dirName}'`],
+      timeoutMs: 120_000,
+      maxOutputBytes: 256 * 1024 * 1024,
+      stdoutEncoding: "buffer",
+    },
+  ]);
 }
 
 afterAll(() => {
@@ -168,6 +173,55 @@ describe("backupSandboxState OpenShell directory transport", () => {
       payload,
     );
     expectProbeAuditAndBinaryTarRequests();
+  });
+
+  it.each([
+    ["symlink", `l\t${STATE_DIR}/state/leak\t/etc/passwd`],
+    ["hard link", `f\t${STATE_DIR}/state/shared.db\t`],
+    ["special file", `p\t${STATE_DIR}/state/control.fifo\t`],
+  ])("rejects an unsafe %s audit row before requesting a tar archive", async (_kind, row) => {
+    queueSuccessfulProbeAndAudit("state", `${row}\n`);
+
+    const result = await backupSandboxState("alpha");
+
+    expect(result).toMatchObject({
+      success: false,
+      backedUpDirs: [],
+      failedDirs: ["state"],
+      error: expect.stringContaining("Pre-backup audit rejected"),
+    });
+    expect(mocks.execSandboxReadOnlyWithGrpcFallback).toHaveBeenCalledTimes(2);
+    expectProbeAndAuditRequests();
+  });
+
+  it("accepts the reviewed image symlink audit row before downloading the archive", async () => {
+    mocks.loadAgent.mockReturnValue({
+      configPaths: { dir: STATE_DIR },
+      expectedVersion: null,
+      stateDirs: ["extensions"],
+      stateFiles: [],
+    });
+    const { archive, payload } = createBinaryTarArchive("extensions");
+    const allowedAuditRow =
+      `l\t${STATE_DIR}/extensions/openclaw-weixin/node_modules/.bin/qrcode-terminal` +
+      "\t../qrcode-terminal/bin/qrcode-terminal.js\n";
+    queueSuccessfulProbeAndAudit("extensions", allowedAuditRow);
+    mocks.execSandboxReadOnlyWithGrpcFallback.mockResolvedValueOnce({
+      ...completed(),
+      stdoutBytes: archive,
+    });
+
+    const result = await backupSandboxState("alpha");
+
+    expect(result).toMatchObject({
+      success: true,
+      backedUpDirs: ["extensions"],
+      failedDirs: [],
+    });
+    expect(
+      fs.readFileSync(path.join(result.manifest!.backupPath, "extensions", "payload.bin")),
+    ).toEqual(payload);
+    expectProbeAuditAndBinaryTarRequests("extensions");
   });
 
   it("marks a binary tar transport failure unreachable and does not restore partial state", async () => {
