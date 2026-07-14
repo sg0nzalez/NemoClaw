@@ -32,6 +32,7 @@ export type OpenShellExecRequestValidationIssue =
   | { kind: "too-many-arguments"; actual: number; max: number }
   | { kind: "assembled-command-too-large"; actualBytes: number; maxBytes: number }
   | { kind: "encoded-request-too-large"; actualBytes: number; maxBytes: number }
+  | { kind: "timeout-out-of-range"; actualMs: number; maxMs: number }
   | {
       kind: "argument-too-large";
       index: number;
@@ -62,6 +63,8 @@ const OPENSHELL_V0072_MAX_EXEC_COMMAND_ARGS = 1024;
 const OPENSHELL_V0072_MAX_EXEC_ARGUMENT_BYTES = 32 * 1024;
 const OPENSHELL_V0072_MAX_ASSEMBLED_COMMAND_BYTES = 256 * 1024;
 const OPENSHELL_V0072_MAX_DECODED_GRPC_MESSAGE_BYTES = 1024 * 1024;
+const OPENSHELL_V0072_MAX_EXEC_TIMEOUT_SECONDS = 0xffff_ffff;
+const OPENSHELL_V0072_MAX_EXEC_TIMEOUT_MS = OPENSHELL_V0072_MAX_EXEC_TIMEOUT_SECONDS * 1000;
 const OPENSHELL_V0072_SANDBOX_ID_PLACEHOLDER = "00000000-0000-0000-0000-000000000000";
 
 function openShellExecRequestValidationMessage(issue: OpenShellExecRequestValidationIssue): string {
@@ -74,6 +77,8 @@ function openShellExecRequestValidationMessage(issue: OpenShellExecRequestValida
       return `assembled command string exceeds ${String(issue.maxBytes)} byte limit`;
     case "encoded-request-too-large":
       return `encoded exec request exceeds ${String(issue.maxBytes)} byte limit`;
+    case "timeout-out-of-range":
+      return `timeoutMs must be a non-negative safe integer no greater than ${String(issue.maxMs)}`;
     case "argument-too-large":
       return `command argument ${String(issue.index)} exceeds ${String(issue.maxBytes)} byte limit`;
     case "argument-control-character":
@@ -193,7 +198,7 @@ function openShellExecRequestEncodedByteLength(
     bytes += protobufLengthDelimitedFieldByteLength(Buffer.byteLength(argument, "utf8"));
   }
   if (request.timeoutMs !== undefined && request.timeoutMs > 0) {
-    const timeoutSeconds = Math.min(Math.ceil(request.timeoutMs / 1000), 0xffff_ffff);
+    const timeoutSeconds = Math.ceil(request.timeoutMs / 1000);
     bytes += 1 + protobufVarintByteLength(timeoutSeconds);
   }
   if (request.stdin !== undefined) {
@@ -212,6 +217,19 @@ export function validateOpenShellExecRequest(
 ): OpenShellExecRequestValidationError | null {
   const commandError = validateOpenShellExecCommand(request.command);
   if (commandError) return commandError;
+
+  if (
+    request.timeoutMs !== undefined &&
+    (!Number.isSafeInteger(request.timeoutMs) ||
+      request.timeoutMs < 0 ||
+      request.timeoutMs > OPENSHELL_V0072_MAX_EXEC_TIMEOUT_MS)
+  ) {
+    return new OpenShellExecRequestValidationError({
+      kind: "timeout-out-of-range",
+      actualMs: request.timeoutMs,
+      maxMs: OPENSHELL_V0072_MAX_EXEC_TIMEOUT_MS,
+    });
+  }
 
   const actualBytes = openShellExecRequestEncodedByteLength(request, sandboxId);
   if (actualBytes > OPENSHELL_V0072_MAX_DECODED_GRPC_MESSAGE_BYTES) {
