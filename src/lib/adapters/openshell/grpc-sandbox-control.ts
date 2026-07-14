@@ -269,8 +269,13 @@ function execute(
       if (settled) return;
       if (event.stdout) append("stdout", asBuffer(event.stdout.data));
       else if (event.stderr) append("stderr", asBuffer(event.stderr.data));
-      else if (event.exit && Number.isInteger(event.exit.exitCode)) {
-        status = event.exit.exitCode as number;
+      else if (event.exit) {
+        // Rust/prost omits a proto3 scalar whose value is the default zero, so
+        // a successful command arrives through proto-loader as `exit: {}`.
+        // The enclosing oneof message is the exit-status signal; a missing
+        // scalar inside that present message therefore means exit code 0.
+        const exitCode = event.exit.exitCode === undefined ? 0 : event.exit.exitCode;
+        if (Number.isInteger(exitCode)) status = exitCode;
       }
     });
     stream.on("error", (error: Error) => finish(error));
