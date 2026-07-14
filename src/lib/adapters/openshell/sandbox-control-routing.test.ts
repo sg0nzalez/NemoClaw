@@ -94,6 +94,32 @@ describe("read-only OpenShell sandbox control routing", () => {
     expect(test.cliExec).not.toHaveBeenCalled();
   });
 
+  it("does not replay a rejected gRPC execution through the CLI", async () => {
+    const error = new Error("stream rejected after dispatch");
+    const test = dependencies(error);
+
+    await expect(
+      execSandboxReadOnlyWithGrpcFallback("nemoclaw", request, test.deps),
+    ).resolves.toEqual({ status: null, stdout: "", stderr: "", error });
+
+    expect(test.grpcExec).toHaveBeenCalledOnce();
+    expect(test.cliExec).not.toHaveBeenCalled();
+    expect(test.close).toHaveBeenCalledOnce();
+  });
+
+  it("retries a rejected explicit pre-dispatch lookup failure through the CLI", async () => {
+    const cause = new Error("UNAVAILABLE");
+    const test = dependencies(new OpenShellGrpcPreDispatchError(cause));
+
+    await expect(
+      execSandboxReadOnlyWithGrpcFallback("nemoclaw", request, test.deps),
+    ).resolves.toEqual({ status: 0, stdout: "cli", stderr: "" });
+
+    expect(test.cliExec).toHaveBeenCalledOnce();
+    expect(test.debug).toHaveBeenCalledWith(expect.stringContaining("before dispatch"), cause);
+    expect(test.close).toHaveBeenCalledOnce();
+  });
+
   it("uses direct gRPC with a bounded deadline", async () => {
     const test = dependencies({ status: 0, stdout: "grpc", stderr: "" });
 

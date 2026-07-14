@@ -133,6 +133,46 @@ describe("OpenShell exec request validation", () => {
       maxBytes: 1_048_576,
     });
   });
+
+  it("accepts the uint32 timeout boundary and rejects values protobufjs would wrap", () => {
+    const request = {
+      sandboxName: "alpha",
+      command: ["x"],
+      stdin: Buffer.alloc(1_048_525),
+      timeoutMs: 0xffff_ffff * 1000,
+    };
+
+    expect(validateOpenShellExecRequest(request)).toBeNull();
+    expect(
+      validateOpenShellExecRequest({ ...request, stdin: Buffer.alloc(1_048_526) })?.issue,
+    ).toEqual({
+      kind: "encoded-request-too-large",
+      actualBytes: 1_048_577,
+      maxBytes: 1_048_576,
+    });
+    expect(
+      validateOpenShellExecRequest({ ...request, timeoutMs: request.timeoutMs + 1 })?.issue,
+    ).toEqual({
+      kind: "timeout-out-of-range",
+      actualMs: 0xffff_ffff * 1000 + 1,
+      maxMs: 0xffff_ffff * 1000,
+    });
+  });
+
+  it.each([
+    -1,
+    1.5,
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+  ])("rejects an invalid timeout of %s", (timeoutMs) => {
+    expect(
+      validateOpenShellExecRequest({
+        sandboxName: "alpha",
+        command: ["true"],
+        timeoutMs,
+      })?.issue.kind,
+    ).toBe("timeout-out-of-range");
+  });
 });
 
 describe("CLI OpenShell sandbox control", () => {
@@ -222,6 +262,23 @@ describe("CLI OpenShell sandbox control", () => {
     expect(result.error).toBeInstanceOf(OpenShellExecRequestValidationError);
     expect((result.error as OpenShellExecRequestValidationError).issue.kind).toBe(
       "encoded-request-too-large",
+    );
+    expect(capture).not.toHaveBeenCalled();
+  });
+
+  it("rejects a timeout that cannot be represented by the v0.0.72 request", async () => {
+    const capture = vi.fn<() => CaptureOpenshellResult>();
+    const control = createCliOpenShellSandboxControl(capture);
+
+    const result = await control.exec({
+      sandboxName: "alpha",
+      command: ["true"],
+      timeoutMs: 0xffff_ffff * 1000 + 1,
+    });
+
+    expect(result.error).toBeInstanceOf(OpenShellExecRequestValidationError);
+    expect((result.error as OpenShellExecRequestValidationError).issue.kind).toBe(
+      "timeout-out-of-range",
     );
     expect(capture).not.toHaveBeenCalled();
   });
