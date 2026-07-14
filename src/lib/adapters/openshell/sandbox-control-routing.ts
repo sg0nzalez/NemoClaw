@@ -11,7 +11,7 @@ import {
   OpenShellGrpcPreDispatchError,
 } from "./grpc-sandbox-control";
 import {
-  createCliOpenShellSandboxControl,
+  createGatewayScopedCliOpenShellSandboxControl,
   OpenShellExecRequestValidationError,
   openShellExecRequestValidationFailure,
   type OpenShellSandboxControl,
@@ -22,13 +22,13 @@ import {
 import { OPENSHELL_OPERATION_TIMEOUT_MS } from "./timeouts";
 
 export interface ReadOnlyRoutingDependencies {
-  cli: OpenShellSandboxControl;
+  createCli: (gatewayName: string) => OpenShellSandboxControl;
   createGrpc: (gatewayName: string) => GrpcOpenShellSandboxControl;
   debug: (message: string, context: unknown) => void;
 }
 
 const defaultDependencies: ReadOnlyRoutingDependencies = {
-  cli: createCliOpenShellSandboxControl(),
+  createCli: createGatewayScopedCliOpenShellSandboxControl,
   createGrpc: createGrpcOpenShellSandboxControlForGateway,
   debug: (message, context) => log.debug(message, context),
 };
@@ -65,7 +65,7 @@ export function selectOpenShellSandboxControlForMutation(
   } catch (error) {
     if (!(error instanceof OpenShellGrpcEdgeTunnelRequiredError)) throw error;
     return {
-      control: dependencies.cli,
+      control: dependencies.createCli(gatewayName),
       transport: "cli-edge-tunnel",
       close: () => {},
     };
@@ -106,7 +106,7 @@ export async function execSandboxReadOnlyWithGrpcFallback(
       "OpenShell direct gRPC configuration failed; retrying through the CLI",
       error,
     );
-    return dependencies.cli.exec({
+    return dependencies.createCli(gatewayName).exec({
       ...request,
       timeoutMs: request.timeoutMs ?? OPENSHELL_OPERATION_TIMEOUT_MS,
     });
@@ -139,7 +139,7 @@ export async function execSandboxReadOnlyWithGrpcFallback(
     "OpenShell direct gRPC lookup failed before dispatch; retrying through the CLI",
     preDispatchError.cause,
   );
-  return dependencies.cli.exec({
+  return dependencies.createCli(gatewayName).exec({
     ...request,
     timeoutMs: request.timeoutMs ?? OPENSHELL_OPERATION_TIMEOUT_MS,
   });

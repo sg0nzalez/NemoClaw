@@ -28,9 +28,19 @@ function dependencies(grpcResult: SandboxExecResult | Error, cliResult?: Sandbox
   const grpc: GrpcOpenShellSandboxControl = { close, exec: grpcExec };
   const cliExec = vi.fn(async () => cliResult ?? { status: 0, stdout: "cli", stderr: "" });
   const cli: OpenShellSandboxControl = { exec: cliExec };
+  const createCli = vi.fn(() => cli);
   const createGrpc = vi.fn(() => grpc);
   const debug = vi.fn();
-  return { close, grpcExec, cliExec, createGrpc, debug, deps: { cli, createGrpc, debug } };
+  return {
+    close,
+    cli,
+    grpcExec,
+    cliExec,
+    createCli,
+    createGrpc,
+    debug,
+    deps: { createCli, createGrpc, debug },
+  };
 }
 
 const request = {
@@ -62,6 +72,7 @@ describe("read-only OpenShell sandbox control routing", () => {
     expect(test.createGrpc).not.toHaveBeenCalled();
     expect(test.grpcExec).not.toHaveBeenCalled();
     expect(test.cliExec).not.toHaveBeenCalled();
+    expect(test.createCli).not.toHaveBeenCalled();
   });
 
   it("accepts the exact session count and UTF-8 byte boundaries", async () => {
@@ -116,6 +127,7 @@ describe("read-only OpenShell sandbox control routing", () => {
     ).resolves.toEqual({ status: 0, stdout: "cli", stderr: "" });
 
     expect(test.cliExec).toHaveBeenCalledOnce();
+    expect(test.createCli).toHaveBeenCalledWith("nemoclaw");
     expect(test.debug).toHaveBeenCalledWith(expect.stringContaining("before dispatch"), cause);
     expect(test.close).toHaveBeenCalledOnce();
   });
@@ -168,6 +180,7 @@ describe("read-only OpenShell sandbox control routing", () => {
       ...request,
       timeoutMs: OPENSHELL_OPERATION_TIMEOUT_MS,
     });
+    expect(test.createCli).toHaveBeenCalledWith("nemoclaw");
     expect(test.debug).toHaveBeenCalledWith(expect.stringContaining("before dispatch"), grpcError);
     expect(test.close).toHaveBeenCalledOnce();
   });
@@ -198,6 +211,7 @@ describe("read-only OpenShell sandbox control routing", () => {
     });
 
     expect(test.grpcExec).not.toHaveBeenCalled();
+    expect(test.createCli).toHaveBeenCalledWith("edge");
     expect(test.cliExec).toHaveBeenCalledWith({
       ...request,
       timeoutMs: OPENSHELL_OPERATION_TIMEOUT_MS,
@@ -231,7 +245,8 @@ describe("mutating OpenShell sandbox control routing", () => {
     const selected = selectOpenShellSandboxControlForMutation("nemoclaw", test.deps);
 
     expect(selected).toMatchObject({ control: expect.any(Object), transport: "grpc" });
-    expect(selected.control).not.toBe(test.deps.cli);
+    expect(selected.control).not.toBe(test.cli);
+    expect(test.createCli).not.toHaveBeenCalled();
     selected.close();
     expect(test.close).toHaveBeenCalledOnce();
   });
@@ -245,10 +260,11 @@ describe("mutating OpenShell sandbox control routing", () => {
     const selected = selectOpenShellSandboxControlForMutation("edge", test.deps);
 
     expect(selected).toEqual({
-      control: test.deps.cli,
+      control: test.cli,
       transport: "cli-edge-tunnel",
       close: expect.any(Function),
     });
+    expect(test.createCli).toHaveBeenCalledWith("edge");
     selected.close();
     expect(test.close).not.toHaveBeenCalled();
   });
