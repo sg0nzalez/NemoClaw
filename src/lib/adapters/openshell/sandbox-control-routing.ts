@@ -2,18 +2,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { log } from "../../cli/logger";
-import { OPENSHELL_OPERATION_TIMEOUT_MS } from "./timeouts";
 import { createGrpcOpenShellSandboxControlForGateway } from "./grpc-gateway-config";
+import {
+  type GrpcOpenShellSandboxControl,
+  OpenShellGrpcPreDispatchError,
+} from "./grpc-sandbox-control";
 import {
   createCliOpenShellSandboxControl,
   type OpenShellSandboxControl,
   type SandboxExecRequest,
   type SandboxExecResult,
 } from "./sandbox-control";
-import {
-  type GrpcOpenShellSandboxControl,
-  OpenShellGrpcPreDispatchError,
-} from "./grpc-sandbox-control";
+import { OPENSHELL_OPERATION_TIMEOUT_MS } from "./timeouts";
 
 export interface ReadOnlyRoutingDependencies {
   cli: OpenShellSandboxControl;
@@ -62,5 +62,8 @@ export async function execSandboxReadOnlyWithGrpcFallback(
       dependencies.debug("OpenShell direct gRPC client close failed", error);
     }
   }
-  return dependencies.cli.exec(request);
+  return dependencies.cli.exec({
+    ...request,
+    timeoutMs: request.timeoutMs ?? OPENSHELL_OPERATION_TIMEOUT_MS,
+  });
 }
