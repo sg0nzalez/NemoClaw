@@ -23,6 +23,7 @@ import {
   createOpenShellGrpcApi,
   type OpenShellGrpcApi,
   OpenShellGrpcOutputLimitError,
+  OpenShellGrpcPreDispatchError,
 } from "./grpc-sandbox-control";
 
 class FakeStream extends EventEmitter {
@@ -218,7 +219,10 @@ describe("gRPC OpenShell sandbox control", () => {
       status: null,
       stdout: "",
       stderr: "",
-      error,
+      error: expect.objectContaining({
+        cause: error,
+        name: OpenShellGrpcPreDispatchError.name,
+      }),
     });
     expect(fake.execMetadata).toEqual([]);
   });
@@ -356,6 +360,14 @@ describe("gRPC OpenShell sandbox control", () => {
     ["http://localhost:8080/path", "must not contain"],
   ])("rejects unsafe endpoint %s", (endpoint, message) => {
     expect(() => createOpenShellGrpcApi({ endpoint })).toThrow(message);
+  });
+
+  it.each([
+    "http://127.0.0.1:8080",
+    "http://[::1]:8080",
+  ])("accepts literal loopback endpoint %s", (endpoint) => {
+    const api = createOpenShellGrpcApi({ endpoint });
+    api.close();
   });
 
   it("rejects bearer tokens or TLS material on plaintext endpoints", () => {
