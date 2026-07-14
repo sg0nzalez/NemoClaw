@@ -25,6 +25,7 @@ import {
   OpenShellGrpcOutputLimitError,
   OpenShellGrpcPreDispatchError,
 } from "./grpc-sandbox-control";
+import { OpenShellExecRequestValidationError } from "./sandbox-control";
 
 class FakeStream extends EventEmitter {
   cancelled = false;
@@ -106,6 +107,43 @@ function shutdown(server: Server): Promise<void> {
 }
 
 describe("gRPC OpenShell sandbox control", () => {
+  it("rejects invalid commands before sandbox lookup or exec", async () => {
+    const fake = fakeApi();
+    const control = createGrpcOpenShellSandboxControl(
+      { endpoint: "http://127.0.0.1:8080" },
+      fake.api,
+    );
+
+    const result = await control.exec({ sandboxName: "alpha", command: ["bad\ncommand"] });
+
+    expect(result).toMatchObject({ status: null, stdout: "", stderr: "" });
+    expect(result.error).toBeInstanceOf(OpenShellExecRequestValidationError);
+    expect(fake.getMetadata).toEqual([]);
+    expect(fake.execMetadata).toEqual([]);
+  });
+
+  it("dispatches an exact 32768-byte UTF-8 argument unchanged", async () => {
+    const fake = fakeApi({
+      emit(stream) {
+        stream.emit("data", { exit: { exitCode: 0 } });
+        stream.emit("end");
+      },
+    });
+    const control = createGrpcOpenShellSandboxControl(
+      { endpoint: "http://127.0.0.1:8080" },
+      fake.api,
+    );
+    const boundaryArgument = "é".repeat(16 * 1024);
+
+    await expect(
+      control.exec({ sandboxName: "alpha", command: ["printf", boundaryArgument] }),
+    ).resolves.toMatchObject({ status: 0 });
+
+    expect((fake.stream as FakeStream & { request: { command: string[] } }).request.command).toEqual(
+      ["printf", boundaryArgument],
+    );
+  });
+
   it("resolves a sandbox id and normalizes streamed output", async () => {
     const euro = Buffer.from("€");
     const fake = fakeApi({

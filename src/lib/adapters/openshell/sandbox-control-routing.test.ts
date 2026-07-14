@@ -7,7 +7,12 @@ import {
   type GrpcOpenShellSandboxControl,
   OpenShellGrpcPreDispatchError,
 } from "./grpc-sandbox-control";
-import type { OpenShellSandboxControl, SandboxExecResult } from "./sandbox-control";
+import {
+  type OpenShellSandboxControl,
+  OpenShellExecRequestValidationError,
+  openShellExecRequestValidationFailure,
+  type SandboxExecResult,
+} from "./sandbox-control";
 import { execSandboxReadOnlyWithGrpcFallback } from "./sandbox-control-routing";
 import { OPENSHELL_OPERATION_TIMEOUT_MS } from "./timeouts";
 
@@ -31,6 +36,61 @@ const request = {
 };
 
 describe("read-only OpenShell sandbox control routing", () => {
+  it.each([
+    ["too many session arguments", ["openclaw", "sessions", "list", ...Array(1022).fill("x")]],
+    ["an oversized UTF-8 session argument", ["openclaw", "sessions", "list", "é".repeat(16 * 1024 + 1)]],
+    ["a NUL session argument", ["openclaw", "sessions", "list", "bad\0arg"]],
+    ["an LF session argument", ["openclaw", "sessions", "list", "bad\narg"]],
+    ["a CR session argument", ["openclaw", "sessions", "list", "bad\rarg"]],
+  ])("rejects %s before creating either transport", async (_label, command) => {
+    const test = dependencies({ status: 0, stdout: "unused", stderr: "" });
+
+    const result = await execSandboxReadOnlyWithGrpcFallback(
+      "nemoclaw",
+      { sandboxName: "alpha", command },
+      test.deps,
+    );
+
+    expect(result.error).toBeInstanceOf(OpenShellExecRequestValidationError);
+    expect(test.createGrpc).not.toHaveBeenCalled();
+    expect(test.grpcExec).not.toHaveBeenCalled();
+    expect(test.cliExec).not.toHaveBeenCalled();
+  });
+
+  it("accepts the exact session count and UTF-8 byte boundaries", async () => {
+    const test = dependencies({ status: 0, stdout: "grpc", stderr: "" });
+    const command = [
+      "openclaw",
+      "sessions",
+      "list",
+      "é".repeat(16 * 1024),
+      ...Array(1020).fill("x"),
+    ];
+
+    await expect(
+      execSandboxReadOnlyWithGrpcFallback(
+        "nemoclaw",
+        { sandboxName: "alpha", command },
+        test.deps,
+      ),
+    ).resolves.toMatchObject({ status: 0 });
+
+    expect(command).toHaveLength(1024);
+    expect(test.grpcExec).toHaveBeenCalledOnce();
+    expect(test.cliExec).not.toHaveBeenCalled();
+  });
+
+  it("does not route a thrown typed validation error through the CLI", async () => {
+    const error = new OpenShellExecRequestValidationError({ kind: "empty-command" });
+    const test = dependencies(error);
+
+    await expect(
+      execSandboxReadOnlyWithGrpcFallback("nemoclaw", request, test.deps),
+    ).resolves.toEqual(openShellExecRequestValidationFailure(error));
+
+    expect(test.cliExec).not.toHaveBeenCalled();
+  });
+
   it("uses direct gRPC with a bounded deadline", async () => {
     const test = dependencies({ status: 0, stdout: "grpc", stderr: "" });
 
