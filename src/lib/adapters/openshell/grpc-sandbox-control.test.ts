@@ -25,7 +25,10 @@ import {
   OpenShellGrpcOutputLimitError,
   OpenShellGrpcPreDispatchError,
 } from "./grpc-sandbox-control";
-import { OpenShellExecRequestValidationError } from "./sandbox-control";
+import {
+  OPENSHELL_EXEC_MAX_OUTPUT_BYTES,
+  OpenShellExecRequestValidationError,
+} from "./sandbox-control";
 
 class FakeStream extends EventEmitter {
   cancelled = false;
@@ -79,7 +82,15 @@ function fakeApi(fixture: FakeApiOptions = {}): {
       return Object.assign(stream, { request });
     },
   };
-  return { api, stream, getMetadata, execMetadata, getOptions, execOptions, close };
+  return {
+    api,
+    stream,
+    getMetadata,
+    execMetadata,
+    getOptions,
+    execOptions,
+    close,
+  };
 }
 
 function serviceError(message: string): ServiceError {
@@ -114,7 +125,10 @@ describe("gRPC OpenShell sandbox control", () => {
       fake.api,
     );
 
-    const result = await control.exec({ sandboxName: "alpha", command: ["bad\ncommand"] });
+    const result = await control.exec({
+      sandboxName: "alpha",
+      command: ["bad\ncommand"],
+    });
 
     expect(result).toMatchObject({ status: null, stdout: "", stderr: "" });
     expect(result.error).toBeInstanceOf(OpenShellExecRequestValidationError);
@@ -122,7 +136,7 @@ describe("gRPC OpenShell sandbox control", () => {
     expect(fake.execMetadata).toEqual([]);
   });
 
-  it("rejects an oversized encoded request after lookup and before exec", async () => {
+  it("rejects an oversized encoded request before lookup or exec", async () => {
     const fake = fakeApi({ sandboxId: "00000000-0000-0000-0000-000000000000" });
     const control = createGrpcOpenShellSandboxControl(
       { endpoint: "http://127.0.0.1:8080" },
@@ -139,6 +153,29 @@ describe("gRPC OpenShell sandbox control", () => {
     expect((result.error as OpenShellExecRequestValidationError).issue.kind).toBe(
       "encoded-request-too-large",
     );
+    expect(fake.getMetadata).toEqual([]);
+    expect(fake.execMetadata).toEqual([]);
+  });
+
+  it("revalidates the encoded boundary with the sandbox id returned by lookup", async () => {
+    const fake = fakeApi({ sandboxId: "00000000-0000-0000-0000-000000000000x" });
+    const control = createGrpcOpenShellSandboxControl(
+      { endpoint: "http://127.0.0.1:8080" },
+      fake.api,
+    );
+
+    const result = await control.exec({
+      sandboxName: "alpha",
+      command: ["sh", "-s"],
+      stdin: Buffer.alloc(1_048_526),
+    });
+
+    expect(result.error).toBeInstanceOf(OpenShellExecRequestValidationError);
+    expect((result.error as OpenShellExecRequestValidationError).issue).toEqual({
+      kind: "encoded-request-too-large",
+      actualBytes: 1_048_577,
+      maxBytes: 1_048_576,
+    });
     expect(fake.getMetadata).toHaveLength(1);
     expect(fake.execMetadata).toEqual([]);
   });
@@ -157,7 +194,10 @@ describe("gRPC OpenShell sandbox control", () => {
     const boundaryArgument = "é".repeat(16 * 1024);
 
     await expect(
-      control.exec({ sandboxName: "alpha", command: ["printf", boundaryArgument] }),
+      control.exec({
+        sandboxName: "alpha",
+        command: ["printf", boundaryArgument],
+      }),
     ).resolves.toMatchObject({ status: 0 });
 
     expect(
@@ -264,7 +304,11 @@ describe("gRPC OpenShell sandbox control", () => {
       });
       expect(requests).toEqual([
         { name: "alpha" },
-        { sandboxId: "wire-id", command: ["cat"], stdin: Buffer.from([0, 255, 10]) },
+        {
+          sandboxId: "wire-id",
+          command: ["cat"],
+          stdin: Buffer.from([0, 255, 10]),
+        },
       ]);
     } finally {
       control.close();
@@ -305,7 +349,11 @@ describe("gRPC OpenShell sandbox control", () => {
     );
     const before = Date.now();
 
-    await control.exec({ sandboxName: "alpha", command: ["true"], timeoutMs: 1500 });
+    await control.exec({
+      sandboxName: "alpha",
+      command: ["true"],
+      timeoutMs: 1500,
+    });
 
     expect(fake.getOptions[0].deadline).toBeInstanceOf(Date);
     expect(fake.execOptions[0].deadline).toBe(fake.getOptions[0].deadline);
@@ -341,6 +389,8 @@ describe("gRPC OpenShell sandbox control", () => {
 
   it.each([
     [{ maxOutputBytes: -1 }, "maxOutputBytes"],
+    [{ maxOutputBytes: 1.5 }, "maxOutputBytes"],
+    [{ maxOutputBytes: OPENSHELL_EXEC_MAX_OUTPUT_BYTES + 1 }, "maxOutputBytes"],
     [{ timeoutMs: 1.5 }, "timeoutMs"],
   ])("rejects invalid execution limits before gateway lookup", async (limits, field) => {
     const fake = fakeApi();
@@ -349,8 +399,13 @@ describe("gRPC OpenShell sandbox control", () => {
       fake.api,
     );
 
-    const result = await control.exec({ sandboxName: "alpha", command: ["true"], ...limits });
+    const result = await control.exec({
+      sandboxName: "alpha",
+      command: ["true"],
+      ...limits,
+    });
 
+    expect(result.error).toBeInstanceOf(OpenShellExecRequestValidationError);
     expect(result.error?.message).toContain(field);
     expect(fake.getMetadata).toEqual([]);
   });
@@ -376,6 +431,32 @@ describe("gRPC OpenShell sandbox control", () => {
       error: expect.any(OpenShellGrpcOutputLimitError),
     });
     expect((result.error as NodeJS.ErrnoException).code).toBe("ENOBUFS");
+    expect(fake.stream.cancelled).toBe(true);
+  });
+
+  it("treats zero as a zero-byte output cap", async () => {
+    const fake = fakeApi({
+      emit(stream) {
+        stream.emit("data", { stdout: { data: Buffer.from("x") } });
+      },
+    });
+    const control = createGrpcOpenShellSandboxControl(
+      { endpoint: "http://127.0.0.1:8080" },
+      fake.api,
+    );
+
+    const result = await control.exec({
+      sandboxName: "alpha",
+      command: ["true"],
+      maxOutputBytes: 0,
+    });
+
+    expect(result).toEqual({
+      status: null,
+      stdout: "",
+      stderr: "",
+      error: expect.any(OpenShellGrpcOutputLimitError),
+    });
     expect(fake.stream.cancelled).toBe(true);
   });
 
