@@ -71,17 +71,18 @@ export function selectOpenShellSandboxControlForMutation(
 }
 
 /**
- * Prefer direct gRPC for the OpenClaw session-list read and retry through the
- * OpenShell CLI only when configuration or sandbox lookup fails before Exec is
- * dispatched. OpenShell v0.0.72 can persist `auth_mode: "cloudflare_jwt"`;
- * only its CLI can establish that OpenShell-owned edge tunnel and manage the
- * associated credential lifecycle, so NemoClaw cannot replace that path here.
+ * Prefer direct gRPC for explicitly reviewed read-only probes and retry through
+ * the OpenShell CLI only when configuration or sandbox lookup fails before
+ * Exec is dispatched. OpenShell v0.0.72 can persist
+ * `auth_mode: "cloudflare_jwt"`; only its CLI can establish that
+ * OpenShell-owned edge tunnel and manage the associated credential lifecycle,
+ * so NemoClaw cannot replace that path here.
  *
- * This is a migration compatibility contract for the single current caller,
- * `runSessionsPassthrough`, not a general routing policy. Remove the CLI
- * fallback when OpenShell's public client or bindings support the edge-tunnel
- * auth and credential-refresh lifecycle. Do not reuse it for another command
- * without reviewing that command's replay semantics; mutations must select one
+ * This migration contract is limited to the reviewed read-only callers (the
+ * session list and rebuild file probe at this slice), not a general routing
+ * policy. Remove the CLI fallback when OpenShell's public client or bindings
+ * support the edge-tunnel auth and credential-refresh lifecycle. Every added
+ * caller requires a replay-semantics review; mutations must select one
  * transport before dispatch and must never be replayed automatically.
  */
 export async function execSandboxReadOnlyWithGrpcFallback(
