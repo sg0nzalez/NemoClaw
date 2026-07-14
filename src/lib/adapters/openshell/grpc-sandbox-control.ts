@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { EventEmitter } from "node:events";
+import { isIP } from "node:net";
 import path from "node:path";
 
 import * as grpc from "@grpc/grpc-js";
@@ -85,8 +86,9 @@ export class OpenShellGrpcPreDispatchError extends Error {
 
 function isLoopback(hostname: string): boolean {
   const normalized = hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  const version = isIP(normalized);
   return (
-    normalized === "localhost" || normalized === "::1" || /^127(?:\.\d{1,3}){3}$/.test(normalized)
+    (version === 4 && normalized.startsWith("127.")) || (version === 6 && normalized === "::1")
   );
 }
 
