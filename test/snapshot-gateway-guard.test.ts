@@ -196,8 +196,8 @@ function makeVmRestoreToEnv(
 
   return {
     HOME: home,
-    NEMOCLAW_REBUILD_VERBOSE: "1",
     PATH: `${localBin}:${process.env.PATH ?? ""}`,
+    XDG_CONFIG_HOME: path.join(home, ".config"),
   };
 }
 
