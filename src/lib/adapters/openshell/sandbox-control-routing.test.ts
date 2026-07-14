@@ -304,6 +304,22 @@ describe("mutating OpenShell sandbox control routing", () => {
     expect(test.close).not.toHaveBeenCalled();
   });
 
+  it("fails closed when the mutation CLI factory refuses an endpoint override", () => {
+    const refusal = new Error("Unset OPENSHELL_GATEWAY_ENDPOINT and retry");
+    const test = dependencies({ status: 0, stdout: "unused", stderr: "" });
+    test.createGrpc.mockImplementation(() => {
+      throw new OpenShellGrpcEdgeTunnelRequiredError();
+    });
+    test.createCli.mockImplementation(() => {
+      throw refusal;
+    });
+
+    expect(() => selectOpenShellSandboxControlForMutation("edge", test.deps)).toThrow(refusal);
+
+    expect(test.createCli).toHaveBeenCalledWith("edge");
+    expect(test.cliExec).not.toHaveBeenCalled();
+  });
+
   it("does not turn a completed mutation into failure when the client cannot close", () => {
     const test = dependencies({ status: 0, stdout: "grpc", stderr: "" });
     const error = new Error("close failed");
