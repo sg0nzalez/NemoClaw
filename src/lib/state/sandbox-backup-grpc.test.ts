@@ -194,13 +194,27 @@ describe("backupSandboxState OpenShell directory transport", () => {
     expectProbeAndAuditRequests();
   });
 
-  it("fails closed when the audit cannot traverse a subtree with unreviewed entries", async () => {
+  it.each([
+    "agents",
+    "extensions",
+  ])("fails closed when an OpenClaw %s subtree cannot be audited", async (dirName) => {
+    mocks.getSandbox.mockReturnValue({
+      name: "alpha",
+      agent: "openclaw",
+      policies: [],
+    });
+    mocks.loadAgent.mockReturnValue({
+      configPaths: { dir: STATE_DIR },
+      expectedVersion: null,
+      stateDirs: [dirName],
+      stateFiles: [],
+    });
     mocks.execSandboxReadOnlyWithGrpcFallback
-      .mockResolvedValueOnce(completed("state\n"))
+      .mockResolvedValueOnce(completed(`${dirName}\n`))
       .mockResolvedValueOnce({
         status: 1,
         stdout: "",
-        stderr: `find: '${STATE_DIR}/state/private': Permission denied`,
+        stderr: `find: '${STATE_DIR}/${dirName}/image-owned': Permission denied`,
       });
 
     const result = await backupSandboxState("alpha");
@@ -209,11 +223,11 @@ describe("backupSandboxState OpenShell directory transport", () => {
       success: false,
       unreachable: false,
       backedUpDirs: [],
-      failedDirs: ["state"],
+      failedDirs: [dirName],
       error: expect.stringContaining("Pre-backup audit failed"),
     });
     expect(mocks.execSandboxReadOnlyWithGrpcFallback).toHaveBeenCalledTimes(2);
-    expectProbeAndAuditRequests();
+    expectProbeAndAuditRequests(dirName);
     const auditCommand = mocks.execSandboxReadOnlyWithGrpcFallback.mock.calls[1][1].command[2];
     expect(auditCommand).toContain("audit_status=0");
     expect(auditCommand).toContain('exit "$audit_status"');
@@ -255,7 +269,10 @@ describe("backupSandboxState OpenShell directory transport", () => {
     ).toEqual(payload);
     expectProbeAuditAndBinaryTarRequests("extensions");
     const auditCommand = mocks.execSandboxReadOnlyWithGrpcFallback.mock.calls[1][1].command[2];
-    expect(auditCommand).toContain("-type d -uid 0 ! -readable ! -writable ! -executable -prune");
+    expect(auditCommand).toContain("audit_status=0");
+    expect(auditCommand).toContain('exit "$audit_status"');
+    expect(auditCommand).not.toContain("|| true");
+    expect(auditCommand).not.toContain("-prune");
   });
 
   it("marks a binary tar transport failure unreachable and does not restore partial state", async () => {

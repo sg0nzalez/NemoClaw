@@ -1013,22 +1013,18 @@ process.exit(0);
     }
   });
 
-  it("prunes inaccessible root-owned image subtrees without suppressing audit failures", async () => {
+  it("fails closed when OpenClaw image subtrees cannot be audited", async () => {
     const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-audit-perm-denied-"));
     const oldPath = process.env.PATH;
-    const oldOpenshell = process.env.NEMOCLAW_OPENSHELL_BIN;
     try {
       const binDir = path.join(fixture, "bin");
-      const openclawDir = path.join(fixture, "sandbox-root", ".openclaw");
+      const archiveAttempt = path.join(fixture, "archive-attempted");
       const existingDirs = ["agents", "extensions", "workspace"];
       fs.mkdirSync(binDir, { recursive: true });
-      for (const d of existingDirs) fs.mkdirSync(path.join(openclawDir, d), { recursive: true });
 
-      const openshell = writeFakeOpenshell(binDir);
       writeExecutable(
         path.join(binDir, "ssh"),
         `#!/usr/bin/env node
-const { spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const cmd = process.argv[process.argv.length - 1] || "";
 const existingDirs = ${JSON.stringify(existingDirs)};
@@ -1036,69 +1032,53 @@ if (cmd.includes("[ -d ")) {
   process.stdout.write(existingDirs.join("\\n") + "\\n");
   process.exit(0);
 }
-if (cmd.includes("openclaw.json")) {
-  // No openclaw.json in this fixture: the state-file backup command's
-  // \`[ ! -e "$src" ] && exit 2\` fires (missing, not a failure). Handled
-  // before the generic \`find \` matcher below, which would otherwise catch
-  // the command's internal hardlink-check find.
-  process.exit(2);
-}
 if (cmd.includes("find ")) {
-  // The known image-owned exception must be bounded by owner and effective
-  // access checks. Without that prune, simulate the real permission failure.
-  if (!cmd.includes("-uid 0 ! -readable ! -writable ! -executable -prune")) {
-    process.stderr.write("find: '/sandbox/.openclaw/extensions/nemoclaw': Permission denied\\n");
-    process.exit(1);
+  if (cmd.includes("-prune") || cmd.includes("|| true")) {
+    process.stderr.write("unsafe audit suppression\\n");
+    process.exit(90);
   }
-  process.exit(0);
+  if (!cmd.includes("audit_status=0") || !cmd.includes('exit "$audit_status"')) {
+    process.stderr.write("missing audit status aggregation\\n");
+    process.exit(91);
+  }
+  process.stderr.write("find: '/sandbox/.openclaw/agents/main': Permission denied\\n");
+  process.exit(1);
 }
 if (cmd.includes("tar -cf -")) {
-  const r = spawnSync("tar", ["-cf", "-", "-C", ${JSON.stringify(openclawDir)}, ...existingDirs], {
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  if (r.stdout) fs.writeSync(1, r.stdout);
-  process.exit(r.status || 0);
+  fs.writeFileSync(${JSON.stringify(archiveAttempt)}, "attempted");
+  process.exit(92);
 }
 process.exit(0);
 `,
       );
 
       writeOpenClawRegistry("alpha");
-      process.env.NEMOCLAW_OPENSHELL_BIN = openshell;
       process.env.PATH = `${binDir}:${oldPath || ""}`;
 
       const backup = await sandboxState.backupSandboxState("alpha");
-      expect(backup.success).toBe(true);
-      expect(backup.error).toBeUndefined();
-      expect(backup.backedUpDirs).toEqual(existingDirs);
+      expect(backup.success).toBe(false);
+      expect(backup.backedUpDirs).toEqual([]);
+      expect(backup.failedDirs).toEqual(existingDirs);
+      expect(backup.error).toMatch(/agents\/main.*Permission denied/);
+      expect(fs.existsSync(archiveAttempt)).toBe(false);
     } finally {
-      if (oldOpenshell === undefined) {
-        delete process.env.NEMOCLAW_OPENSHELL_BIN;
-      } else {
-        process.env.NEMOCLAW_OPENSHELL_BIN = oldOpenshell;
-      }
       process.env.PATH = oldPath;
       fs.rmSync(fixture, { recursive: true, force: true });
     }
   });
 
-  it("still rejects violations from readable dirs when an image sibling is pruned", async () => {
+  it("retains a traversal failure when a readable sibling reports a violation", async () => {
     const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-audit-mixed-perm-"));
     const oldPath = process.env.PATH;
-    const oldOpenshell = process.env.NEMOCLAW_OPENSHELL_BIN;
     try {
       const binDir = path.join(fixture, "bin");
-      const openclawDir = path.join(fixture, "sandbox-root", ".openclaw");
       const existingDirs = ["agents", "workspace"];
       fs.mkdirSync(binDir, { recursive: true });
-      for (const d of existingDirs) fs.mkdirSync(path.join(openclawDir, d), { recursive: true });
 
-      // `agents` simulates perm-denied (no rows emitted); `workspace` emits
-      // a symlink that is not in the audit allow-list, which must still be
-      // caught even when a sibling find exits non-zero.
+      // `agents` simulates permission denial while `workspace` emits a symlink.
+      // The aggregate command must preserve the traversal failure.
       const auditLines = ["l\t/sandbox/.openclaw/workspace/leak\t../openclaw.json"].join("\n");
 
-      const openshell = writeFakeOpenshell(binDir);
       writeExecutable(
         path.join(binDir, "ssh"),
         `#!/usr/bin/env node
@@ -1109,32 +1089,25 @@ if (cmd.includes("[ -d ")) {
   process.exit(0);
 }
 if (cmd.includes("find ")) {
-  // Without the bounded image-owned prune, the inaccessible sibling would
-  // fail traversal before the caller can adjudicate the readable violation.
-  if (!cmd.includes("-uid 0 ! -readable ! -writable ! -executable -prune")) {
-    process.stderr.write("find: '/sandbox/.openclaw/agents/main': Permission denied\\n");
-    process.exit(1);
+  if (cmd.includes("-prune") || cmd.includes("|| true")) {
+    process.stderr.write("unsafe audit suppression\\n");
+    process.exit(90);
   }
   process.stdout.write(${JSON.stringify(auditLines)} + "\\n");
-  process.exit(0);
+  process.stderr.write("find: '/sandbox/.openclaw/agents/main': Permission denied\\n");
+  process.exit(1);
 }
 process.exit(0);
 `,
       );
 
       writeOpenClawRegistry("alpha");
-      process.env.NEMOCLAW_OPENSHELL_BIN = openshell;
       process.env.PATH = `${binDir}:${oldPath || ""}`;
 
       const backup = await sandboxState.backupSandboxState("alpha");
       expect(backup.success).toBe(false);
-      expect(backup.error).toMatch(/workspace\/leak/);
+      expect(backup.error).toMatch(/agents\/main.*Permission denied/);
     } finally {
-      if (oldOpenshell === undefined) {
-        delete process.env.NEMOCLAW_OPENSHELL_BIN;
-      } else {
-        process.env.NEMOCLAW_OPENSHELL_BIN = oldOpenshell;
-      }
       process.env.PATH = oldPath;
       fs.rmSync(fixture, { recursive: true, force: true });
     }

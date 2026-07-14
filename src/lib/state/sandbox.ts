@@ -1051,26 +1051,15 @@ export async function backupSandboxState(
       // empty for non-symlinks but always present, so the field count is
       // stable. Tab separator assumes state-dir paths don't contain tabs,
       // matching the wider convention in this file.
-      // OpenClaw images currently contain root-owned, inaccessible image
-      // subtrees below `agents` and `extensions` (#4059). Prune only directories
-      // whose owner and access checks prove the sandbox user cannot read,
-      // traverse, or modify them; the explicit symlink allowlist below still
-      // governs symlinks in audited state. Remove this prune when the image
-      // build makes those trees traversable by the sandbox exec user.
-      //
       // Run every per-dir `find` even after any other traversal error so
       // violations from readable siblings remain visible, but retain a
-      // non-zero status. An unreadable, agent-controlled subtree is unaudited
-      // and must fail closed before tar can archive unreviewed descendants.
+      // non-zero status. Any unreadable subtree is unaudited and must fail
+      // closed before tar can archive unreviewed descendants.
       const auditFindCommands = existingDirs
-        .map((d) => {
-          const auditRoot = `${dir}/${d}`;
-          const trustedImagePrune =
-            agentName === "openclaw" && (d === "agents" || d === "extensions")
-              ? `\\( -path ${shellQuote(`${auditRoot}/*`)} -type d -uid 0 ! -readable ! -writable ! -executable -prune \\) -o `
-              : "";
-          return `find ${shellQuote(auditRoot)} ${trustedImagePrune}\\( -type l -o \\( -type f -a -links +1 \\) -o \\( ! -type f -a ! -type d \\) \\) -printf "%y\\t%p\\t%l\\n" || audit_status=$?`;
-        })
+        .map(
+          (d) =>
+            `find ${shellQuote(`${dir}/${d}`)} \\( -type l -o \\( -type f -a -links +1 \\) -o \\( ! -type f -a ! -type d \\) \\) -printf "%y\\t%p\\t%l\\n" || audit_status=$?`,
+        )
         .join("; ");
       const auditCmd = `audit_status=0; ${auditFindCommands}; exit "$audit_status"`;
       _log(`Pre-backup audit: checking for symlinks, hard links, and special files`);
