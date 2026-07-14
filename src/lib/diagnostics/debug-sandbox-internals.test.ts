@@ -83,6 +83,23 @@ describe("collectSandboxInternals", () => {
     expect(execSandbox).not.toHaveBeenCalled();
   });
 
+  it("redacts credential-shaped invalid gateway bindings from terminal warnings", async () => {
+    const secret = ["sk-proj", "debugregistrycredential"].join("-");
+    getSandbox.mockReturnValue({ gatewayName: secret });
+    const consoleLog = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    try {
+      await collectSandboxInternals(collectDir, "alpha", true);
+
+      const terminalOutput = consoleLog.mock.calls.flat().join("\n");
+      expect(terminalOutput).not.toContain(secret);
+      expect(terminalOutput).toContain("<REDACTED>");
+      expect(execSandbox).not.toHaveBeenCalled();
+    } finally {
+      consoleLog.mockRestore();
+    }
+  });
+
   it("records one routing failure and continues collecting", async () => {
     execSandbox
       .mockRejectedValueOnce(new Error("API_KEY=secret-value"))
