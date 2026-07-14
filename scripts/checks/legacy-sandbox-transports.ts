@@ -34,7 +34,6 @@ type ReviewedSiteTuple = readonly [string, LegacySandboxTransportKind, number];
 const REVIEWED_SITE_TUPLES = [
   ["src/lib/actions/sandbox/host-aliases.ts", "docker-exec-command", 1],
   ["src/lib/actions/sandbox/process-recovery.ts", "privileged-sandbox-exec", 2],
-  ["src/lib/resources-cmd.ts", "docker-exec-command", 1],
   ["src/lib/sandbox/config.ts", "privileged-sandbox-exec", 2],
   ["src/lib/share-command-deps.ts", "openshell-ssh-config", 1],
   ["src/lib/share-command.ts", "sshfs-command", 1],

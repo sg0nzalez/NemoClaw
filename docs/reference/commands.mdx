@@ -164,13 +164,11 @@ Start a new shell session to refresh the cached sandbox names after creating or 
 ### `$$nemoclaw resources`
 
 Display host hardware inventory and configured sandbox resource profiles.
-Use `--json` for machine-readable CPU, memory, GPU, Kubernetes allocatable-capacity, and profile data.
+Use `--json` for machine-readable CPU, memory, GPU, and profile data.
 
 ```bash
 $$nemoclaw resources [--json]
 ```
-
-If the gateway is not running, Kubernetes allocatable fields are omitted and host CPU/RAM totals are still shown.
 
 ### `$$nemoclaw agents list`
 

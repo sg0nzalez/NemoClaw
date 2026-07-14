@@ -49,23 +49,23 @@ describe("resources-cmd", () => {
     expect(() => resolveResourceValue("12.5%", 16, "cpu")).toThrow("integer between 1% and 100%");
   });
 
-  it("resolves profiles against Kubernetes allocatable capacity when available", () => {
+  it("resolves profiles against host capacity", () => {
     const resolved = resolveProfile(
       {
         cpu: "50%",
         memory: "25%",
       },
       {
-        cpu: { cores: 16, model: "test-cpu", allocatable: "7500m" },
-        memory: { totalMB: 32768, swapMB: 0, allocatableMB: 16384 },
+        cpu: { cores: 16, model: "test-cpu" },
+        memory: { totalMB: 32768, swapMB: 0 },
         gpu: null,
         profiles: null,
       },
     );
 
     expect(resolved).toEqual({
-      cpu: "3750m",
-      memory: "4Gi",
+      cpu: "8",
+      memory: "8Gi",
     });
   });
 
