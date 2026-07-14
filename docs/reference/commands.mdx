@@ -3121,7 +3121,6 @@ For contributor guidance on how these command files are structured, refer to
 | `$$nemoclaw internal uninstall plan` | `uninstall.sh` / `$$nemoclaw uninstall` | Build a deterministic uninstall plan without applying it. |
 | `$$nemoclaw internal uninstall run-plan` | `uninstall.sh` / `$$nemoclaw uninstall` | Remove host-side NemoClaw resources from a previously built plan. |
 | `$$nemoclaw internal uninstall classify-shim` | `uninstall.sh` / `$$nemoclaw uninstall` | Classify whether a shim path is safe for the uninstaller to remove. |
-| `$$nemoclaw internal dns fix-coredns` | onboarding / sandbox setup | Patch CoreDNS to use a non-loopback upstream resolver. |
 | `$$nemoclaw internal dev npm-link-or-shim` | `scripts/npm-link-or-shim.sh` (development) | Run `npm link`, falling back to a user-local NemoClaw development shim. |
 
 These commands do not appear in the command-level parity check, which compares

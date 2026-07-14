@@ -313,11 +313,10 @@ const {
     inferenceCompat: LooseObject | null;
   };
 };
-const { sleepSeconds, waitUntil } = require("./core/wait");
+const { sleepSeconds } = require("./core/wait");
 const platformUtils: typeof import("./platform") = require("./platform");
-const { isWsl, shouldPatchCoredns } = platformUtils;
+const { isWsl } = platformUtils;
 const {
-  getContainerRuntime,
   repairLocalInferenceSystemdOverrideOrExit,
   rejectUnsupportedWindowsHostOllama,
   shouldFrontOllamaWithProxy,
@@ -1889,39 +1888,6 @@ async function startGatewayWithOptions(
 
   console.log("  ✓ Gateway is healthy");
 
-  // CoreDNS fix — k3s-inside-Docker has broken DNS forwarding on all platforms.
-  const runtime = getContainerRuntime();
-  if (shouldPatchCoredns(runtime)) {
-    console.log("  Patching CoreDNS DNS forwarding...");
-    run(["bash", path.join(SCRIPTS, "fix-coredns.sh"), GATEWAY_NAME], {
-      ignoreError: true,
-    });
-    const corednsReady = waitUntil(() => {
-      const check = runCaptureOpenshell(
-        [
-          "doctor",
-          "exec",
-          "--",
-          "kubectl",
-          "get",
-          "pods",
-          "-n",
-          "kube-system",
-          "-l",
-          "k8s-app=kube-dns",
-          "-o",
-          'jsonpath={range .items[*]}{.status.phase}{" "}{range .status.containerStatuses[*]}{.ready}{" "}{end}{end}',
-        ],
-        { ignoreError: true },
-      );
-      return check.includes("Running") && check.includes("true") && !check.includes("false");
-    }, 10);
-    if (!corednsReady) {
-      console.warn(
-        "  CoreDNS did not report ready within timeout; continuing may cause DNS flakiness.",
-      );
-    }
-  }
   runOpenshell(["gateway", "select", GATEWAY_NAME], { ignoreError: true });
   process.env.OPENSHELL_GATEWAY = GATEWAY_NAME;
 }
@@ -2219,12 +2185,6 @@ async function recoverGatewayRuntime() {
     status = runCaptureOpenshell(["status"], { ignoreError: true });
     if (status.includes("Connected") && isSelectedGateway(status) && (await isGatewayHttpReady())) {
       process.env.OPENSHELL_GATEWAY = GATEWAY_NAME;
-      const runtime = getContainerRuntime();
-      if (shouldPatchCoredns(runtime)) {
-        run(["bash", path.join(SCRIPTS, "fix-coredns.sh"), GATEWAY_NAME], {
-          ignoreError: true,
-        });
-      }
       return true;
     }
     if (i < recoveryPollCount - 1) sleepSeconds(recoveryPollInterval);
