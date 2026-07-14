@@ -32,7 +32,7 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..
 type ReviewedSiteTuple = readonly [string, LegacySandboxTransportKind, number];
 
 const REVIEWED_SITE_TUPLES = [
-  ["src/lib/actions/dns/index.ts", "docker-exec-command", 4],
+  ["src/lib/actions/dns/index.ts", "docker-exec-command", 2],
   ["src/lib/actions/sandbox/host-aliases.ts", "docker-exec-command", 1],
   ["src/lib/actions/sandbox/process-recovery.ts", "privileged-sandbox-exec", 2],
   ["src/lib/resources-cmd.ts", "docker-exec-command", 1],
