@@ -59,8 +59,10 @@ import {
   NEMOCLAW_VLLM_CONTAINER_NAME,
   NEMOCLAW_VLLM_MANAGED_LABEL,
   pullImage,
+  resolveVllmRuntimeProfile,
   resolveVllmServedModelId,
 } from "./vllm";
+import { VLLM_MODELS } from "./vllm-models";
 
 beforeEach(() => {
   mocks.dockerImageInspectFormat.mockReturnValue("");
@@ -176,6 +178,27 @@ describe("vLLM profile detection", () => {
     expect(profile!.imageDownloadSizeBytes).toBe(9_603_085_145);
     expect(profile!.defaultModel.id).toBe("deepseek-ai/DeepSeek-V4-Flash");
     expect(profile!.defaultModel.envValue).toBe("deepseek-v4-flash");
+  });
+
+  it("resolves Nemotron Ultra to the pinned Station runtime without Docker port publishing", () => {
+    mocks.getGpuIndicesByName.mockReturnValue([0]);
+    const profile = detectVllmProfile({ platform: "station", type: "nvidia" });
+    const ultra = VLLM_MODELS.find((model) => model.envValue === "nemotron-3-ultra-550b-a55b");
+
+    expect(profile).not.toBeNull();
+    expect(ultra).toBeDefined();
+    const runtime = resolveVllmRuntimeProfile(profile!, ultra!);
+    expect(runtime.image).toBe(
+      "vllm/vllm-openai@sha256:0fec7ec5f3e6bc168e54899935fb0557da908a4832a1dbc88e2debcf2f889416",
+    );
+    expect(runtime.imageDownloadSizeBytes).toBe(10_670_087_425);
+    expect(runtime.buildDockerRunFlags!()).toEqual(
+      expect.arrayContaining(["--gpus", "device=0", "--network", "host", "--shm-size", "16g"]),
+    );
+
+    const args = buildVllmRunArgs(runtime, ultra!, runtime.buildDockerRunFlags!());
+    expect(args).not.toContain("-p");
+    expect(args).toContain(runtime.image);
   });
 
   it("keeps DGX Spark on the Qwen3.6 35B NVFP4 default", () => {
@@ -490,6 +513,43 @@ describe("installVllm model resolution", () => {
     expect(promptFn).not.toHaveBeenCalled();
     const summary = logSpy.mock.calls.map((c: unknown[]) => String(c[0])).join("\n");
     expect(summary).toContain("Model: Qwen/Qwen3.6-27B-FP8 (NEMOCLAW_VLLM_MODEL override)");
+  });
+
+  it("installs the complete Nemotron Ultra Station recipe without another selection", async () => {
+    process.env.NEMOCLAW_VLLM_MODEL = "nemotron-3-ultra-550b-a55b";
+    const profile = detectVllmProfile({ platform: "station", type: "nvidia" })!;
+    const beforeInstall = vi.fn();
+    const promptFn = vi.fn<(q: string) => Promise<string>>();
+    mockSuccessfulVllmInstall(profile.containerName);
+
+    const result = await installVllm(profile, {
+      hasImage: true,
+      nonInteractive: true,
+      promptFn,
+      beforeInstall,
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(promptFn).not.toHaveBeenCalled();
+    expect(beforeInstall).toHaveBeenCalledWith("nvidia/nemotron-3-ultra-550b-a55b");
+    expect(mocks.dockerPullWithProgressWatchdog).toHaveBeenCalledWith(
+      "vllm/vllm-openai@sha256:0fec7ec5f3e6bc168e54899935fb0557da908a4832a1dbc88e2debcf2f889416",
+      expect.any(Object),
+    );
+    const [downloadArgs] = mocks.dockerSpawn.mock.calls[0] as [string[]];
+    expect(downloadArgs).toEqual(
+      expect.arrayContaining([
+        "download",
+        "nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-NVFP4",
+        "--revision",
+        "183968f87ae4cedce3039313cac1fd43d112c578",
+      ]),
+    );
+    const [runArgs] = mocks.dockerRunDetached.mock.calls[0] as [string[]];
+    expect(runArgs).toEqual(expect.arrayContaining(["--network", "host", "--shm-size", "16g"]));
+    expect(runArgs).not.toContain("-p");
+    expect(runArgs.at(-1)).toContain("--cpu-offload-gb 150");
+    expect(runArgs.at(-1)).toContain("--reasoning-parser nemotron_v3");
   });
 
   it("offers the interactive picker when no env override is set", async () => {

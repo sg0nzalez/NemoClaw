@@ -5,8 +5,9 @@
  * Registry of models the express vLLM install path knows how to serve.
  *
  * Each entry pins the model-specific `vllm serve` flags (reasoning parser,
- * tool-call parser, max model length, load format) so the express path can
- * swap models without leaving the wrong flags behind.
+ * tool-call parser, max model length, load format) and any required runtime
+ * image/container overrides so the express path can swap models without
+ * leaving the wrong recipe behind.
  *
  * Selection precedence in `installVllm`:
  *   1. `NEMOCLAW_VLLM_MODEL=<envValue-or-HF-id>` for automation overrides.
@@ -28,6 +29,25 @@
 
 export type VllmPlatform = "spark" | "station" | "linux";
 
+export interface VllmRuntimeOverride {
+  /** Model-specific runtime image, pinned by digest. */
+  image: string;
+  /** Compressed size of the selected platform manifest. */
+  imageDownloadSizeBytes: number;
+  /** Additional `docker run` arguments required by this recipe. */
+  dockerRunArgs?: readonly string[];
+  /** Whether the managed container should publish localhost:8000. */
+  publishPort?: boolean;
+}
+
+export const NEMOTRON_ULTRA_STATION_IMAGE = {
+  tag: "vllm/vllm-openai:v0.22.0",
+  arm64: {
+    ref: "vllm/vllm-openai@sha256:0fec7ec5f3e6bc168e54899935fb0557da908a4832a1dbc88e2debcf2f889416",
+    downloadSizeBytes: 10_670_087_425,
+  },
+} as const;
+
 export interface VllmModelDef {
   /** Hugging Face model id (also passed to `vllm serve`). */
   id: string;
@@ -39,6 +59,10 @@ export interface VllmModelDef {
   downloadSizeBytes: number;
   /** `--max-model-len` flag value. */
   maxModelLen: number;
+  /** Immutable Hugging Face revision used for download and serving. */
+  revision?: string;
+  /** Stable model name exposed by the local OpenAI-compatible endpoint. */
+  servedModelId?: string;
   /** Model-specific flags appended after the shared serving flags. */
   modelArgs: string[];
   /** True when the upstream HF repo requires accepting a licence. */
@@ -58,6 +82,8 @@ export interface VllmModelDef {
    * container shell.
    */
   serveEnv?: Record<string, string>;
+  /** Runtime overrides for recipes that cannot use the platform image. */
+  runtime?: VllmRuntimeOverride;
 }
 
 export const VLLM_MODELS: readonly VllmModelDef[] = [
@@ -174,6 +200,50 @@ export const VLLM_MODELS: readonly VllmModelDef[] = [
     ],
     gated: false,
     platforms: ["station"],
+  },
+  {
+    id: "nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-NVFP4",
+    label: "NVIDIA Nemotron 3 Ultra 550B NVFP4",
+    envValue: "nemotron-3-ultra-550b-a55b",
+    downloadSizeBytes: 352_381_245_521,
+    maxModelLen: 262144,
+    revision: "183968f87ae4cedce3039313cac1fd43d112c578",
+    // Keep the route identity aligned with NemoClaw's existing managed
+    // Nemotron Ultra compatibility manifests and request adapters.
+    servedModelId: "nvidia/nemotron-3-ultra-550b-a55b",
+    modelArgs: [
+      "--host",
+      "0.0.0.0",
+      "--cpu-offload-gb",
+      "150",
+      "--cpu-offload-params",
+      "experts",
+      "--kernel_config",
+      `'{"enable_flashinfer_autotune": false}'`,
+      "--max-num-seqs",
+      "256",
+      "--gpu-memory-utilization",
+      "0.9",
+      "--reasoning-parser",
+      "nemotron_v3",
+      "--enable-auto-tool-choice",
+      "--tool-call-parser",
+      "qwen3_coder",
+      "--default-chat-template-kwargs",
+      `'{"enable_thinking":true,"force_nonempty_content":true}'`,
+    ],
+    gated: false,
+    platforms: ["station"],
+    serveEnv: {
+      VLLM_WEIGHT_OFFLOADING_DISABLE_PIN_MEMORY: "1",
+      VLLM_NVFP4_GEMM_BACKEND: "flashinfer-trtllm",
+    },
+    runtime: {
+      image: NEMOTRON_ULTRA_STATION_IMAGE.arm64.ref,
+      imageDownloadSizeBytes: NEMOTRON_ULTRA_STATION_IMAGE.arm64.downloadSizeBytes,
+      dockerRunArgs: ["--network", "host", "--shm-size", "16g"],
+      publishPort: false,
+    },
   },
   {
     id: "nvidia/Qwen3.6-35B-A3B-NVFP4",
@@ -404,6 +474,8 @@ export function buildVllmServeCommand(
     ...SHARED_VLLM_ARGS,
     "--max-model-len",
     String(model.maxModelLen),
+    ...(model.revision ? ["--revision", model.revision] : []),
+    ...(model.servedModelId ? ["--served-model-name", model.servedModelId] : []),
     ...model.modelArgs,
   ];
   const extraArgs = parseVllmExtraServeArgs(env).map(shellQuote);

@@ -294,9 +294,14 @@ describe("inference setup navigation", () => {
     const markdown = fs.readFileSync(vllmSetupPath, "utf8");
     const entries = [
       {
-        prefix: "- DGX Spark and DGX Station",
+        prefix: "- DGX Spark and DGX Station models without a model-specific runtime",
         image: VLLM_IMAGES.ngc2605Post1.arm64,
         tag: VLLM_IMAGES.ngc2605Post1.tag,
+      },
+      {
+        prefix: "- The DGX Station Nemotron 3 Ultra express recipe",
+        image: VLLM_IMAGES.vllm022.arm64,
+        tag: VLLM_IMAGES.vllm022.tag,
       },
       {
         prefix: "- Generic Linux `arm64` hosts",

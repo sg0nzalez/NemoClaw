@@ -25,6 +25,7 @@ import { getGpuIndicesByName } from "./nim";
 import { buildVllmDockerEnv } from "./vllm-docker-env";
 import {
   buildVllmServeCommand,
+  NEMOTRON_ULTRA_STATION_IMAGE,
   parseVllmExtraServeArgs,
   VLLM_EXTRA_ARGS_ENV,
   VLLM_MODELS,
@@ -70,6 +71,9 @@ export interface VllmProfile {
   // dockerRunFlags at install time. Used by Station to pick the GB300 GPU
   // out of a mixed-GPU host instead of using `--gpus all`.
   buildDockerRunFlags?: () => string[];
+  // Host-network recipes already bind the service port directly and must not
+  // also add Docker's `-p` publishing flag.
+  publishPort?: boolean;
   // Maximum wall-clock safety budget for image pulls. The Docker adapter uses
   // a shorter progress watchdog for stalls, so slow-but-moving pulls can keep
   // going until this last-ditch cap.
@@ -82,6 +86,7 @@ export interface VllmProfile {
 // named release tags. Pinning the digest makes a cache hit authoritative: an
 // explicit pull cannot begin downloading different same-tag layers.
 export const VLLM_IMAGES = {
+  vllm022: NEMOTRON_ULTRA_STATION_IMAGE,
   ngc2603Post1: {
     tag: "nvcr.io/nvidia/vllm:26.03.post1-py3",
     amd64: {
@@ -339,6 +344,7 @@ function downloadModel(
         profile.image,
         "download",
         model.id,
+        ...(model.revision ? ["--revision", model.revision] : []),
       ],
       {
         env: buildVllmDockerEnv(buildHfTokenForwardEnv()),
@@ -449,8 +455,7 @@ export function buildVllmRunArgs(
     ...safeRunFlags,
     "--label",
     `${NEMOCLAW_VLLM_MANAGED_LABEL}=true`,
-    "-p",
-    `${String(VLLM_PORT)}:8000`,
+    ...(profile.publishPort === false ? [] : ["-p", `${String(VLLM_PORT)}:8000`]),
     "--name",
     containerName,
     "--entrypoint",
@@ -459,6 +464,22 @@ export function buildVllmRunArgs(
     "-lc",
     buildVllmServeCommand(model, env),
   ];
+}
+
+export function resolveVllmRuntimeProfile(profile: VllmProfile, model: VllmModelDef): VllmProfile {
+  const runtime = model.runtime;
+  if (!runtime) return profile;
+  const extraRunArgs = [...(runtime.dockerRunArgs ?? [])];
+  return {
+    ...profile,
+    image: runtime.image,
+    imageDownloadSizeBytes: runtime.imageDownloadSizeBytes,
+    dockerRunFlags: [...profile.dockerRunFlags, ...extraRunArgs],
+    buildDockerRunFlags: profile.buildDockerRunFlags
+      ? () => [...profile.buildDockerRunFlags!(), ...extraRunArgs]
+      : undefined,
+    publishPort: runtime.publishPort ?? profile.publishPort,
+  };
 }
 
 type VllmContainerOwnership =
@@ -833,12 +854,13 @@ export async function installVllm(
   });
   if (!resolved) return { ok: false };
   const { model, source: modelSource } = resolved;
+  const runtimeProfile = resolveVllmRuntimeProfile(profile, model);
 
   let extraServeArgs: string[];
   let servedModelId: string;
   try {
     extraServeArgs = parseVllmExtraServeArgs();
-    servedModelId = resolveVllmServedModelId(model.id, extraServeArgs);
+    servedModelId = resolveVllmServedModelId(model.servedModelId ?? model.id, extraServeArgs);
   } catch (err) {
     console.error(`  vLLM install failed: ${(err as Error).message}`);
     return { ok: false };
@@ -846,8 +868,8 @@ export async function installVllm(
   opts.beforeInstall?.(servedModelId);
 
   console.log("");
-  console.log(`  vLLM (${profile.name}):`);
-  console.log(`    Image: ${profile.image}`);
+  console.log(`  vLLM (${runtimeProfile.name}):`);
+  console.log(`    Image: ${runtimeProfile.image}`);
   console.log(
     `    Model: ${model.id}${modelSource === "env" ? " (NEMOCLAW_VLLM_MODEL override)" : ""}`,
   );
@@ -876,21 +898,21 @@ export async function installVllm(
 
   // Fail before large downloads when the fixed name belongs to another
   // operator. startContainer repeats this check to close the teardown race.
-  const replacement = vllmContainerReplacementTarget(profile.containerName);
+  const replacement = vllmContainerReplacementTarget(runtimeProfile.containerName);
   if (!replacement.ok) {
     console.error(`  vLLM install failed: ${replacement.reason}`);
     return { ok: false };
   }
 
-  const hasImage = imageIsCached(profile);
-  if (!hasImage && !(await imageStorageAccepted(profile, opts))) {
+  const hasImage = imageIsCached(runtimeProfile);
+  if (!hasImage && !(await imageStorageAccepted(runtimeProfile, opts))) {
     return { ok: false };
   }
-  if (!(await modelStorageAccepted(model, opts, hasImage ? profile.image : undefined))) {
+  if (!(await modelStorageAccepted(model, opts, hasImage ? runtimeProfile.image : undefined))) {
     return { ok: false };
   }
 
-  const pull = await pullImage(profile);
+  const pull = await pullImage(runtimeProfile);
   if (!pull.ok) {
     console.error(`  vLLM install failed: ${String(pull.reason)}`);
     return { ok: false };
@@ -898,29 +920,31 @@ export async function installVllm(
 
   // The image now exists, so this re-probe also proves daemon/client bind
   // identity before their individually valid estimates can overcommit storage.
-  if (!(await modelStorageAccepted(model, opts, profile.image))) {
+  if (!(await modelStorageAccepted(model, opts, runtimeProfile.image))) {
     return { ok: false };
   }
 
-  const modelDownload = await downloadModel(profile, model);
+  const modelDownload = await downloadModel(runtimeProfile, model);
   if (!modelDownload.ok) {
     console.error(`  vLLM install failed: ${String(modelDownload.reason)}`);
     return { ok: false };
   }
 
-  const start = startContainer(profile, model);
+  const start = startContainer(runtimeProfile, model);
   if (!start.ok) {
     console.error(`  vLLM install failed: ${String(start.reason)}`);
     return { ok: false };
   }
 
   emit("Launching vLLM");
-  emit(`Launch can take 5 minutes to ${String(Math.ceil(profile.loadTimeoutSec / 60))} minutes`);
+  emit(
+    `Launch can take 5 minutes to ${String(Math.ceil(runtimeProfile.loadTimeoutSec / 60))} minutes`,
+  );
 
-  const ready = await waitForVllmReady(profile);
+  const ready = await waitForVllmReady(runtimeProfile);
   if (!ready.ok) {
-    printContainerLogTail(profile);
-    dockerStop(profile.containerName, {
+    printContainerLogTail(runtimeProfile);
+    dockerStop(runtimeProfile.containerName, {
       env: buildVllmDockerEnv(),
       ignoreError: true,
       suppressOutput: true,
@@ -929,7 +953,7 @@ export async function installVllm(
     return { ok: false };
   }
 
-  if (!containerStillRunning(profile)) {
+  if (!containerStillRunning(runtimeProfile)) {
     console.error("  vLLM container exited unexpectedly after readiness");
     return { ok: false };
   }
