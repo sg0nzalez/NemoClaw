@@ -8,14 +8,16 @@ import {
 } from "./grpc-gateway-config";
 import {
   type GrpcOpenShellSandboxControl,
-  OpenShellGrpcOutputLimitError,
   OpenShellGrpcPreDispatchError,
 } from "./grpc-sandbox-control";
 import {
   createGatewayScopedCliOpenShellSandboxControl,
+  OpenShellExecRequestValidationError,
+  openShellExecRequestValidationFailure,
   type OpenShellSandboxControl,
   type SandboxExecRequest,
   type SandboxExecResult,
+  validateOpenShellExecCommand,
 } from "./sandbox-control";
 import { OPENSHELL_OPERATION_TIMEOUT_MS } from "./timeouts";
 
@@ -71,56 +73,73 @@ export function selectOpenShellSandboxControlForMutation(
 }
 
 /**
- * Prefer direct gRPC for explicitly reviewed read-only operations and retry
- * through the OpenShell CLI on configuration or gRPC transport failure. These
- * callers are side-effect-free, so a post-dispatch stream failure may discard
- * partial output and replay safely; a local output-limit failure remains
- * terminal. OpenShell v0.0.72 can persist `auth_mode: "cloudflare_jwt"`;
- * only its CLI can establish that OpenShell-owned edge tunnel and manage the
- * associated credential lifecycle, so NemoClaw cannot replace that path here.
+ * Prefer direct gRPC for explicitly reviewed read-only probes and retry through
+ * the OpenShell CLI only when configuration or sandbox lookup fails before
+ * Exec is dispatched. OpenShell v0.0.72 can persist
+ * `auth_mode: "cloudflare_jwt"`; only its CLI can establish that
+ * OpenShell-owned edge tunnel and manage the associated credential lifecycle,
+ * so NemoClaw cannot replace that path here.
  *
- * This migration contract is limited to call sites whose operations were
- * individually reviewed as side-effect-free, including session listing,
- * rebuild and managed-file probes, debug diagnostics, and version checks at
- * this slice. It is not a general routing policy. Remove the CLI fallback when
+ * This migration contract is limited to the reviewed read-only callers (the
+ * session list, rebuild file probe, debug diagnostic probes, and version probe
+ * at this slice), not a general routing policy. Remove the CLI fallback when
  * OpenShell's public client or bindings support the edge-tunnel auth and
  * credential-refresh lifecycle. Every added caller requires a replay-semantics
  * review; mutations must select one transport before dispatch and must never
- * be replayed.
+ * be replayed automatically.
  */
 export async function execSandboxReadOnlyWithGrpcFallback(
   gatewayName: string,
   request: SandboxExecRequest,
   dependencies: ReadOnlyRoutingDependencies = defaultDependencies,
 ): Promise<SandboxExecResult> {
-  let grpc: GrpcOpenShellSandboxControl | undefined;
+  const validationError = validateOpenShellExecCommand(request.command);
+  if (validationError) return openShellExecRequestValidationFailure(validationError);
+
+  let grpc: GrpcOpenShellSandboxControl;
   try {
     grpc = dependencies.createGrpc(gatewayName);
-    const result = await grpc.exec({
-      ...request,
-      timeoutMs: request.timeoutMs ?? OPENSHELL_OPERATION_TIMEOUT_MS,
-    });
-    if (!result.error || result.error instanceof OpenShellGrpcOutputLimitError) return result;
-    const context =
-      result.error instanceof OpenShellGrpcPreDispatchError ? result.error.cause : result.error;
-    dependencies.debug(
-      result.error instanceof OpenShellGrpcPreDispatchError
-        ? "OpenShell direct gRPC lookup failed before dispatch; retrying through the CLI"
-        : "OpenShell direct gRPC read-only exec failed; retrying through the CLI",
-      context,
-    );
   } catch (error) {
+    if (error instanceof OpenShellExecRequestValidationError) {
+      return openShellExecRequestValidationFailure(error);
+    }
     dependencies.debug(
       "OpenShell direct gRPC configuration failed; retrying through the CLI",
       error,
     );
+    return dependencies.createCli(gatewayName).exec({
+      ...request,
+      timeoutMs: request.timeoutMs ?? OPENSHELL_OPERATION_TIMEOUT_MS,
+    });
+  }
+
+  let preDispatchError: OpenShellGrpcPreDispatchError | undefined;
+  try {
+    const result = await grpc.exec({
+      ...request,
+      timeoutMs: request.timeoutMs ?? OPENSHELL_OPERATION_TIMEOUT_MS,
+    });
+    if (!(result.error instanceof OpenShellGrpcPreDispatchError)) return result;
+    preDispatchError = result.error;
+  } catch (error) {
+    if (error instanceof OpenShellGrpcPreDispatchError) {
+      preDispatchError = error;
+    } else {
+      const cause = error instanceof Error ? error : new Error(String(error));
+      return { status: null, stdout: "", stderr: "", error: cause };
+    }
   } finally {
     try {
-      grpc?.close();
+      grpc.close();
     } catch (error) {
       dependencies.debug("OpenShell direct gRPC client close failed", error);
     }
   }
+
+  dependencies.debug(
+    "OpenShell direct gRPC lookup failed before dispatch; retrying through the CLI",
+    preDispatchError.cause,
+  );
   return dependencies.createCli(gatewayName).exec({
     ...request,
     timeoutMs: request.timeoutMs ?? OPENSHELL_OPERATION_TIMEOUT_MS,
