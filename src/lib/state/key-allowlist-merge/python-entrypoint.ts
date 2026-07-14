@@ -4,11 +4,11 @@
 /** Python entrypoint kept separate from parsing, ownership, and replacement helpers. */
 export const KEY_ALLOWLIST_ENTRYPOINT_PYTHON = String.raw`
 def main():
-    if len(sys.argv) != 4:
-        fail("expected a config base, relative path, and ownership spec")
-    base_dir, relative_path, spec_raw = sys.argv[1:]
+    if len(sys.argv) != 6:
+        fail("expected a config base, relative path, ownership spec, staged path, and digest")
+    base_dir, relative_path, spec_raw = sys.argv[1:4]
     spec = load_spec(spec_raw)
-    _backup_text, backup = read_stdin_config("backed-up")
+    _backup_text, backup = read_staged_config(sys.argv[4], sys.argv[5], "backed-up")
     parent_fd, current_name = open_config_parent(base_dir, relative_path)
     try:
         current_text, current, current_metadata = read_regular_file_at(
@@ -24,4 +24,5 @@ def main():
 
 
 main()
+print("KEY_ALLOWLIST_OK")
 `.trim();
