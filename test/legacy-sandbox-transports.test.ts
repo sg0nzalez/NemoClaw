@@ -58,6 +58,32 @@ describe("legacy sandbox transport inventory", () => {
     ]);
   });
 
+  it("discovers immutable command and callee aliases without claiming general data flow", () => {
+    const root = fixtureRepo({
+      "src/aliased-transport.ts": [
+        'const sshCommand = "ssh";',
+        "const invokeSsh = spawnSync;",
+        "invokeSsh(sshCommand, [\"sandbox\"]);",
+        'const sshfsCommand = ["sshfs", "sandbox:/", "/mnt"];',
+        "const invokeSshfs = run;",
+        "invokeSshfs(sshfsCommand);",
+        'const dockerArgs = ["exec", "openshell-cluster-nemoclaw", "true"];',
+        "const invokeDocker = dockerSpawnSync;",
+        "invokeDocker(dockerArgs);",
+      ].join("\n"),
+    });
+
+    expect(discoverLegacySandboxTransportSites(root)).toEqual([
+      {
+        relativePath: "src/aliased-transport.ts",
+        kind: "docker-exec-command",
+        calls: 1,
+      },
+      { relativePath: "src/aliased-transport.ts", kind: "ssh-command", calls: 1 },
+      { relativePath: "src/aliased-transport.ts", kind: "sshfs-command", calls: 1 },
+    ]);
+  });
+
   it("ignores comments, inert strings, tests, and non-sandbox SSH workflows", () => {
     const root = fixtureRepo({
       "src/safe.ts": [
