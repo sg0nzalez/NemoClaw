@@ -40,7 +40,8 @@ RUN ln -s /opt/nemoclaw/node_modules /opt/nemoclaw-root/node_modules \
     && /opt/nemoclaw/node_modules/.bin/tsc -p tsconfig.runtime-preloads.json
 
 # Build the agent-neutral, names-only MCP diagnostic once from a committed
-# production lock. The final image copies only this root-owned runtime.
+# production lock. The final image copies only the bundled runtime, not its
+# build-time dependency tree.
 FROM node:22-trixie-slim@sha256:2d9f5c76c8f4dd36e8f253bee5d828a83a6c09f36188f0b0414325232e0b175d AS mcp-tool-discovery-runtime
 ARG NEMOCLAW_CORPORATE_CA_B64
 ENV AWS_EC2_METADATA_DISABLED=true \
@@ -48,11 +49,9 @@ ENV AWS_EC2_METADATA_DISABLED=true \
     NPM_CONFIG_FUND=false \
     NPM_CONFIG_UPDATE_NOTIFIER=false
 WORKDIR /opt/mcp-tool-discovery-runtime
-COPY tools/mcp-tool-discovery-runtime/package.json tools/mcp-tool-discovery-runtime/package-lock.json tools/mcp-tool-discovery-runtime/tsconfig.json tools/mcp-tool-discovery-runtime/install-reviewed-runtime.sh tools/mcp-tool-discovery-runtime/*.ts ./
+COPY tools/mcp-tool-discovery-runtime/package.json tools/mcp-tool-discovery-runtime/package-lock.json tools/mcp-tool-discovery-runtime/tsconfig.json tools/mcp-tool-discovery-runtime/install-reviewed-runtime.sh tools/mcp-tool-discovery-runtime/build-runtime.mjs tools/mcp-tool-discovery-runtime/*.ts ./
 RUN ./install-reviewed-runtime.sh \
     && rm -f ./install-reviewed-runtime.sh
-RUN chown -R root:root /opt/mcp-tool-discovery-runtime \
-    && chmod -R a=rX /opt/mcp-tool-discovery-runtime
 
 # Stage 3: Runtime image — pull cached base from GHCR
 # hadolint ignore=DL3006
@@ -61,8 +60,8 @@ ARG BASE_IMAGE
 # OpenShell blocks the link-local EC2 Instance Metadata Service. Keep AWS SDK
 # credential chains from attempting an impossible metadata discovery path.
 ENV AWS_EC2_METADATA_DISABLED=true
-COPY --from=mcp-tool-discovery-runtime /opt/mcp-tool-discovery-runtime/ /usr/local/lib/nemoclaw/mcp-tool-discovery-runtime/
-RUN discovery_contract="$(node --experimental-strip-types /usr/local/lib/nemoclaw/mcp-tool-discovery-runtime/mcp-tool-discovery.ts)" \
+COPY --from=mcp-tool-discovery-runtime /opt/mcp-tool-discovery-runtime/dist/ /usr/local/lib/nemoclaw/mcp-tool-discovery-runtime/
+RUN discovery_contract="$(node /usr/local/lib/nemoclaw/mcp-tool-discovery-runtime/mcp-tool-discovery.mjs)" \
     && node -e 'const result = JSON.parse(process.argv[1]); if (result.protocol !== 1 || result.ok !== false || result.detail !== "tool discovery received invalid runtime arguments") process.exit(1);' "$discovery_contract" \
     && discovery_unsafe="$(find -L /usr/local/lib/nemoclaw/mcp-tool-discovery-runtime \( ! -user root -o -perm /022 \) -print -quit)" \
     && test -z "$discovery_unsafe"

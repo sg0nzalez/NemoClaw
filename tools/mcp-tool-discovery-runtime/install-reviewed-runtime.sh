@@ -45,6 +45,5 @@ fi
 npm ci --ignore-scripts --no-audit --no-fund --no-progress
 npm audit signatures
 npm run typecheck
-npm prune --ignore-scripts --omit=dev --no-audit --no-fund
+npm run bundle
 npm audit --omit=dev --audit-level=low
-npm audit signatures

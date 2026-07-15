@@ -40,7 +40,9 @@ describe("MCP tool discovery host boundary (#6901)", () => {
       expect(built).not.toBeNull();
       expect(built?.command).toContain(expectedAncestor[adapter]);
       expect(built?.command).toContain(MCP_TOOL_DISCOVERY_RUNTIME_PATH);
-      expect(built?.command).toContain("--experimental-strip-types");
+      expect(MCP_TOOL_DISCOVERY_RUNTIME_PATH).toMatch(/\.mjs$/u);
+      expect(built?.command).not.toContain("--experimental-strip-types");
+      expect(built?.command).not.toContain("node_modules");
       expect(built?.command).toContain("openshell:resolve:env:GITHUB_TOKEN");
       expect(built?.command).not.toContain("tools/call");
       expect(built?.command).toContain("rebuild the sandbox");

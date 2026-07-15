@@ -21,9 +21,7 @@ import {
 import { buildTrustedProxyEnvSourceShell } from "./trusted-proxy-env";
 
 export const MCP_TOOL_DISCOVERY_RUNTIME_PATH =
-  "/usr/local/lib/nemoclaw/mcp-tool-discovery-runtime/mcp-tool-discovery.ts";
-const MCP_TOOL_DISCOVERY_RUNTIME_MODULE_PATH =
-  "/usr/local/lib/nemoclaw/mcp-tool-discovery-runtime/node_modules/@modelcontextprotocol/sdk";
+  "/usr/local/lib/nemoclaw/mcp-tool-discovery-runtime/mcp-tool-discovery.mjs";
 export const MCP_TOOL_DISCOVERY_RESULT_PROTOCOL = 1;
 export const MCP_TOOL_DISCOVERY_MAX_TOOLS = 500;
 export const MCP_TOOL_DISCOVERY_MAX_NAME_BYTES = 256;
@@ -90,7 +88,6 @@ export function buildMcpToolDiscoveryCommand(
   });
   const runtimeCommand = wrapMcpRuntimeCommand(adapter, [
     "node",
-    "--experimental-strip-types",
     MCP_TOOL_DISCOVERY_RUNTIME_PATH,
     "--url",
     entry.url,
@@ -98,7 +95,7 @@ export function buildMcpToolDiscoveryCommand(
     authorization,
   ]);
   const body = [
-    `if [ ! -r ${shellQuote(MCP_TOOL_DISCOVERY_RUNTIME_PATH)} ] || [ ! -d ${shellQuote(MCP_TOOL_DISCOVERY_RUNTIME_MODULE_PATH)} ]; then`,
+    `if [ ! -r ${shellQuote(MCP_TOOL_DISCOVERY_RUNTIME_PATH)} ]; then`,
     `  printf '%s\\n' ${shellQuote(missingRuntimeResult)}`,
     "  exit 0",
     "fi",
