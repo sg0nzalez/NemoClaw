@@ -17,7 +17,7 @@ export const PROXY_SCRIPT = path.resolve(
   import.meta.dirname,
   "..",
   "scripts",
-  "ollama-auth-proxy.js",
+  "ollama-auth-proxy.mts",
 );
 const proxyOwners = new WeakMap<ChildProcess, ChildProcessOwner>();
 

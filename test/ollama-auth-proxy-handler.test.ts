@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Mocked unit coverage for the Bearer-token enforcement and header-stripping
-// contract of scripts/ollama-auth-proxy.js. The live E2E target
+// contract of scripts/ollama-auth-proxy.mts. The live E2E target
 // (test/e2e/live/ollama-auth-proxy.test.ts) exercises the same boundary but
 // needs a real Ollama install plus a model pull; this pins the security-
 // critical request-handler behavior hermetically.

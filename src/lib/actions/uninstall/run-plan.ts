@@ -377,7 +377,7 @@ function stopMatchingPids(pattern: string, runtime: UninstallRuntime, label: str
 // to confirm a candidate PID is the Ollama auth proxy and not another node
 // process that happens to be on the same port. Mirrors the
 // `isOllamaProxyProcess` check in `src/lib/onboard-ollama-proxy.ts`.
-const OLLAMA_AUTH_PROXY_CMDLINE_MARK = "ollama-auth-proxy.js";
+const OLLAMA_AUTH_PROXY_CMDLINE_MARK = "ollama-auth-proxy";
 
 // Resolve the proxy port from runtime.env (rather than `process.env` at
 // module-load time) so a user who onboarded with NEMOCLAW_OLLAMA_PROXY_PORT
