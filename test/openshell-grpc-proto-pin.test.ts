@@ -60,6 +60,24 @@ describe("OpenShell gRPC protocol pin", () => {
     });
   });
 
+  it("rejects a declared protocol source that is missing", () => {
+    withFixture("1.2.3", 'syntax = "proto3";\n', (root, digest) => {
+      expect(
+        verifyOpenShellGrpcProtoPin(root, {
+          version: "1.2.3",
+          files: {
+            "openshell.proto": digest,
+            "sandbox.proto": "a".repeat(64),
+          },
+        }),
+      ).toEqual([
+        expect.stringMatching(
+          /^third_party\/openshell\/v1\.2\.3\/proto\/sandbox\.proto: failed to read \(/,
+        ),
+      ]);
+    });
+  });
+
   it("rejects protocol sources omitted from the package", () => {
     withFixture(
       "1.2.3",

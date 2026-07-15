@@ -8,11 +8,18 @@ import {
   getOpenshellBinary,
   runOpenshell,
 } from "../../adapters/openshell/runtime";
+import { getOpenShellSandboxDescriptor } from "../../adapters/openshell/sandbox-control-routing";
 import { OPENSHELL_PROBE_TIMEOUT_MS } from "../../adapters/openshell/timeouts";
 import { CLI_NAME } from "../../cli/branding";
 import { prompt as askPrompt } from "../../credentials/store";
 import { formatFailedBackupItems } from "../../domain/backup-failure";
 import { getSandboxDeleteOutcome } from "../../domain/sandbox/destroy";
+import {
+  HERMES_DASHBOARD_ENABLE_ENV,
+  HERMES_DASHBOARD_INTERNAL_PORT_ENV,
+  HERMES_DASHBOARD_PORT_ENV,
+  HERMES_DASHBOARD_TUI_ENV,
+} from "../../hermes-dashboard";
 import {
   checkGatewayRouteCompatibility,
   formatGatewayRouteConflict,
@@ -20,7 +27,14 @@ import {
 import { withGatewayRouteMutationLock } from "../../inference/gateway-route-mutation-lock";
 import * as nim from "../../inference/nim";
 import { listMessagingProviderSuffixes } from "../../messaging/channels";
+import {
+  findAvailableDashboardPort,
+  getRegistryOccupiedDashboardPorts,
+  withDashboardPortReservationLock,
+} from "../../onboard/dashboard-port";
+import { isValidForwardPort } from "../../onboard/dashboard-runtime";
 import { resolveSandboxGatewayName } from "../../onboard/gateway-binding";
+import { resolveHermesDashboardOnboardState } from "../../onboard/hermes-dashboard";
 import {
   isDcodeAgent,
   OBSERVABILITY_OTLP_LOCAL_POLICY_PRESET,
@@ -43,19 +57,23 @@ import type { SandboxEntry } from "../../state/registry";
 import * as registry from "../../state/registry";
 import { getSandboxEntryInference } from "../../state/registry-entry-view";
 import * as sandboxState from "../../state/sandbox";
-import { cleanupShieldsDestroyArtifacts, removeSandboxRegistryEntry } from "./destroy";
 import {
   DCODE_AGENT_NAME,
   DCODE_BUSY_PROBE_SCRIPT,
   DCODE_PROBE_STATE,
   parseDcodeProbeState,
 } from "./dcode-activity-probe";
+import { cleanupShieldsDestroyArtifacts, removeSandboxRegistryEntry } from "./destroy";
 import {
   buildSandboxExecMarkedCommand,
   createSandboxExecMarker,
   extractSandboxExecCommandStdoutFromStreams,
 } from "./sandbox-exec-output";
-import { probeGatewayRunning, selectSandboxGatewayIfRegistered } from "./sandbox-gateway-routing";
+import {
+  probeGatewayRunning,
+  selectSandboxGatewayIfRegistered,
+  usesGatewayMetadataProbe,
+} from "./sandbox-gateway-routing";
 
 const useColor = !process.env.NO_COLOR && !!process.stdout.isTTY;
 const trueColor =
@@ -134,14 +152,113 @@ function renderSnapshotTable(
   }
 }
 
-// The registry image is recorded from OpenShell's create result and remains
-// the authoritative rebuild input. Legacy entries without it fail closed;
-// do not bypass the control plane to inspect a Kubernetes pod through Docker.
-function registeredSandboxImage(srcEntry: SandboxEntry | { name: string }): string | null {
-  return (srcEntry as { imageTag?: string | null }).imageTag ?? null;
+// Resolve the running source sandbox's image. Docker- and VM-driver sandboxes
+// trust the registered imageTag. Kubernetes sandboxes use OpenShell's strict
+// descriptor read instead of reaching through the gateway container to run
+// kubectl on OpenShell's internal cluster.
+async function resolveSrcPodImage(
+  srcName: string,
+  srcEntry?: SandboxEntry | { name: string },
+): Promise<string | null> {
+  const registeredImage = (srcEntry as { imageTag?: string | null } | undefined)?.imageTag;
+  const registeredDriver = (srcEntry as { openshellDriver?: string | null } | undefined)
+    ?.openshellDriver;
+  if (usesGatewayMetadataProbe(registeredDriver)) {
+    return registeredImage ?? null;
+  }
+
+  const srcGatewayName = resolveSandboxGatewayName(
+    srcEntry as { gatewayName?: string | null; gatewayPort?: number | null },
+  );
+  try {
+    return (await getOpenShellSandboxDescriptor(srcGatewayName, srcName)).image;
+  } catch {
+    return null;
+  }
 }
 
-// Auto-create a sandbox that clones the image of an existing one.
+// Allocate the clone's own dashboard port. Dashboard ports are per-sandbox
+// host resources: the host forward for src's port is owned by src, so a clone
+// that inherits the port gets a dashboard URL that points at src's dashboard
+// and a rebuild preflight that rejects the clone forever (#6746). Allocate
+// dst's own port instead, from the same per-gateway forward list +
+// cross-gateway registry occupancy view as onboard's `ensureDashboardForward`.
+// Sources without a dashboard port (non-dashboard-managed agents) return null
+// so the clone's field stays unset. Callers must invoke this before any
+// destructive step (e.g. deleting a `--force` destination) so port-range
+// exhaustion aborts before, not after, the mutation.
+function allocateCloneDashboardPort(
+  dstName: string,
+  srcEntry: {
+    name?: string;
+    dashboardPort?: number | null;
+    hermesDashboardEnabled?: boolean;
+    hermesDashboardInternalPort?: number | null;
+  },
+): number | null {
+  const srcPort = srcEntry.dashboardPort;
+  if (typeof srcPort !== "number" || !Number.isInteger(srcPort) || srcPort <= 0) return null;
+  const forwards = captureOpenshell(["forward", "list"], { ignoreError: true });
+  const occupied = getRegistryOccupiedDashboardPorts(dstName);
+  const hermesInternalPort = srcEntry.hermesDashboardInternalPort;
+  if (srcEntry.hermesDashboardEnabled === true && isValidForwardPort(hermesInternalPort)) {
+    occupied.set(
+      String(hermesInternalPort),
+      `${srcEntry.name ?? "source"} (Hermes dashboard internal)`,
+    );
+  }
+  try {
+    return findAvailableDashboardPort(dstName, srcPort, forwards.output || "", undefined, occupied);
+  } catch (err) {
+    console.error(`  ${err instanceof Error ? err.message : String(err)}`);
+    snapshotExit(1);
+  }
+}
+
+function resolveCloneDashboardEnvArgs(
+  srcEntry: SandboxEntry | { name: string },
+  dstDashboardPort: number | null,
+): string[] {
+  const envArgs: string[] = [];
+  if (dstDashboardPort !== null) {
+    envArgs.push(`CHAT_UI_URL=http://127.0.0.1:${dstDashboardPort}`);
+    envArgs.push(`NEMOCLAW_DASHBOARD_PORT=${dstDashboardPort}`);
+  }
+
+  const source = srcEntry as SandboxEntry;
+  if (source.agent !== "hermes") return envArgs;
+  if (source.hermesDashboardEnabled !== true) {
+    envArgs.push(`${HERMES_DASHBOARD_ENABLE_ENV}=0`);
+    return envArgs;
+  }
+  if (dstDashboardPort === null) {
+    console.error("  Cannot clone enabled Hermes dashboard settings without a dashboard port.");
+    snapshotExit(1);
+  }
+  const hermesEnv: NodeJS.ProcessEnv = {
+    [HERMES_DASHBOARD_ENABLE_ENV]: "1",
+    [HERMES_DASHBOARD_PORT_ENV]: String(dstDashboardPort),
+    [HERMES_DASHBOARD_INTERNAL_PORT_ENV]: String(source.hermesDashboardInternalPort),
+    [HERMES_DASHBOARD_TUI_ENV]: source.hermesDashboardTui === true ? "1" : "0",
+  };
+  try {
+    resolveHermesDashboardOnboardState({
+      agentName: source.agent,
+      effectivePort: dstDashboardPort,
+      env: hermesEnv,
+    });
+  } catch (error) {
+    console.error(
+      `  Cannot clone Hermes dashboard settings: ${error instanceof Error ? error.message : String(error)}.`,
+    );
+    snapshotExit(1);
+  }
+  for (const [name, value] of Object.entries(hermesEnv)) {
+    envArgs.push(`${name}=${value}`);
+  }
+  return envArgs;
+}
+
 // Used by `snapshot restore --to <dst>` when dst does not exist yet: reuses
 // the source's baked image so the user does not have to re-run onboarding.
 // Returns true on success; on failure, logs and throws SnapshotCommandError.
@@ -150,6 +267,8 @@ async function autoCreateSandboxFromSource(
   dstName: string,
   srcEntry: SandboxEntry | { name: string },
   fromImage: string,
+  dstDashboardPort: number | null,
+  dashboardEnvArgs: readonly string[],
 ): Promise<void> {
   const basePolicy = path.join(ROOT, "nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml");
   const openshellBin = getOpenshellBinary();
@@ -158,6 +277,7 @@ async function autoCreateSandboxFromSource(
   const startupCommand = [
     "env",
     `NEMOCLAW_OBSERVABILITY=${sourceObservabilityEnabled ? "1" : "0"}`,
+    ...dashboardEnvArgs,
     "nemoclaw-start",
   ];
   const createEnv = { ...process.env };
@@ -233,6 +353,14 @@ async function autoCreateSandboxFromSource(
     // so clear src's proof rather than inheriting it — otherwise dst could show
     // `Sandbox GPU: enabled (CUDA verified)` based on another sandbox's run (#4231).
     sandboxGpuProof: null,
+    dashboardPort: dstDashboardPort,
+    // The shared image keeps Hermes' image-baked internal listener port, but
+    // the public WebUI port is a per-sandbox host resource and must follow the
+    // clone's newly allocated dashboard port so rebuild validation converges.
+    hermesDashboardPort:
+      (srcEntry as SandboxEntry).hermesDashboardEnabled === true
+        ? dstDashboardPort
+        : (srcEntry as SandboxEntry).hermesDashboardPort,
   });
 
   console.log(`  ${G}\u2713${R} Sandbox '${dstName}' created`);
@@ -815,7 +943,7 @@ async function runSnapshotRestoreUnlocked(
       snapshotExit(1);
     }
     const srcEntry = registry.getSandbox(sandboxName) || { name: sandboxName };
-    const fromImage = registeredSandboxImage(srcEntry);
+    const fromImage = await resolveSrcPodImage(sandboxName, srcEntry);
     if (!fromImage) {
       console.error(
         `  Cannot resolve image for source sandbox '${sandboxName}' — aborting before ` +
@@ -841,7 +969,7 @@ async function runSnapshotRestoreUnlocked(
       }
     }
     const sourceGatewayName = resolveSandboxGatewayName(srcEntry);
-    await withGatewayRouteMutationLock(sourceGatewayName, async () => {
+    const createAndRegisterClone = async (): Promise<void> => {
       if (!targetExists && registry.getSandbox(targetSandbox)) {
         console.error(
           `  Destination sandbox '${targetSandbox}' was registered while this restore was waiting. Retry with --force only after reviewing that sandbox.`,
@@ -861,7 +989,7 @@ async function runSnapshotRestoreUnlocked(
         );
         snapshotExit(1);
       }
-      const lockedFromImage = registeredSandboxImage(lockedSourceEntry);
+      const lockedFromImage = await resolveSrcPodImage(sandboxName, lockedSourceEntry);
       if (!lockedFromImage) {
         console.error(
           `  Cannot resolve the current image for source sandbox '${sandboxName}' — aborting before changing '${targetSandbox}'.`,
@@ -885,6 +1013,12 @@ async function runSnapshotRestoreUnlocked(
         console.error(`  Error: ${formatGatewayRouteConflict(compatibility)}`);
         snapshotExit(1);
       }
+      // Allocate the clone's dashboard port before any destructive action, so
+      // dashboard-port-range exhaustion aborts before `deleteSandboxForRestore`
+      // removes the existing `--force` destination — matching the pre-delete
+      // validation the image and gateway-route checks above already do (#3756).
+      const dstDashboardPort = allocateCloneDashboardPort(targetSandbox, lockedSourceEntry);
+      const dashboardEnvArgs = resolveCloneDashboardEnvArgs(lockedSourceEntry, dstDashboardPort);
       if (targetExists) {
         if (targetEntry) {
           verifyRestoreDestinationOnOwnGateway(targetSandbox);
@@ -900,8 +1034,16 @@ async function runSnapshotRestoreUnlocked(
         targetSandbox,
         lockedSourceEntry,
         lockedFromImage,
+        dstDashboardPort,
+        dashboardEnvArgs,
       );
-    });
+    };
+    // Lock order matches onboard: sandbox (outer caller), host dashboard,
+    // gateway route. The host-wide lease stays held from port selection until
+    // the clone is durably registered, including across different gateways.
+    await withDashboardPortReservationLock(() =>
+      withGatewayRouteMutationLock(sourceGatewayName, createAndRegisterClone),
+    );
   }
   await withTimerBoundShieldsMutationLockAsync(
     targetSandbox,

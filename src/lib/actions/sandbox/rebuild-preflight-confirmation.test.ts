@@ -5,12 +5,17 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as openshellResolve from "../../adapters/openshell/resolve";
 import { redact } from "../../security/redact";
 import * as sandboxSession from "../../state/sandbox-session";
+import type { RebuildSandboxEntry } from "./rebuild-flow-helpers";
 import {
   confirmSandboxRebuildIfNeeded,
   countActiveSandboxSessionsForRebuild,
   createRebuildCommandContext,
+  type RebuildVersionCheck,
 } from "./rebuild-preflight-confirmation";
-import { isSingleAgentRebuildSupported } from "./rebuild-preflight-guards";
+import {
+  expectedRebuildEntryAfterVersionCheck,
+  isSingleAgentRebuildSupported,
+} from "./rebuild-preflight-guards";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -167,6 +172,61 @@ describe("createRebuildCommandContext bail behaviour (#6376)", () => {
 });
 
 describe("rebuild preflight guards", () => {
+  it("allows only the sandbox-exec agent-version cache write after confirmation", () => {
+    const confirmedEntry: RebuildSandboxEntry = {
+      name: "alpha",
+      agent: "openclaw",
+      agentVersion: null,
+      policies: ["npm"],
+      gatewayName: "nemoclaw",
+    };
+    const confirmedEntrySnapshot = JSON.stringify(confirmedEntry);
+    const concurrentlyChangedEntry = { ...confirmedEntry, gatewayName: "other-gateway" };
+    const versionCheck: RebuildVersionCheck = {
+      sandboxVersion: "2026.7.14",
+      expectedVersion: "2026.7.14",
+      isStale: false,
+      verificationFailed: false,
+      detectionMethod: "sandbox-exec",
+    };
+
+    const expectedEntry = expectedRebuildEntryAfterVersionCheck(
+      concurrentlyChangedEntry,
+      confirmedEntrySnapshot,
+      versionCheck,
+    );
+
+    expect(expectedEntry).toStrictEqual({ ...confirmedEntry, agentVersion: "2026.7.14" });
+    expect(expectedEntry).not.toBe(concurrentlyChangedEntry);
+  });
+
+  it.each([
+    ["registry", "2026.7.14"],
+    ["unknown", null],
+    ["sandbox-exec", null],
+  ] as const)("returns the original entry for %s detection with sandbox version %s", (detectionMethod, sandboxVersion) => {
+    const confirmedEntry: RebuildSandboxEntry = {
+      name: "alpha",
+      agent: "openclaw",
+      agentVersion: null,
+    };
+    const versionCheck: RebuildVersionCheck = {
+      sandboxVersion,
+      expectedVersion: "2026.7.14",
+      isStale: false,
+      verificationFailed: sandboxVersion === null,
+      detectionMethod,
+    };
+
+    expect(
+      expectedRebuildEntryAfterVersionCheck(
+        confirmedEntry,
+        JSON.stringify(confirmedEntry),
+        versionCheck,
+      ),
+    ).toBe(confirmedEntry);
+  });
+
   it("rejects a multi-agent sandbox before later rebuild work", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const bail = (message: string): never => {

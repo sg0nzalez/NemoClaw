@@ -15,6 +15,8 @@ import { resolveSandboxGatewayName } from "../onboard/gateway-binding.js";
 import * as registry from "../state/registry.js";
 import { evaluateStaleness } from "./version-scheme.js";
 
+const VERSION_PROBE_MAX_OUTPUT_BYTES = 64 * 1024;
+
 export interface VersionCheckResult {
   sandboxVersion: string | null;
   expectedVersion: string | null;
@@ -85,6 +87,7 @@ export async function probeAgentVersion(sandboxName: string): Promise<string | n
       {
         sandboxName,
         command: ["sh", "-c", agent.versionCommand],
+        maxOutputBytes: VERSION_PROBE_MAX_OUTPUT_BYTES,
         timeoutMs: 15_000,
       },
     );

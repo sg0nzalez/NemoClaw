@@ -16,7 +16,7 @@ function makeDeps(overrides: Partial<ShareCommandDeps> = {}): ShareCommandDeps {
   return {
     getSshConfig: () => ({ status: 0, output: "" }),
     ensureLive: async () => undefined,
-    checkSandboxPathExists: () => true,
+    checkSandboxPathExists: async () => true,
     colorGreen: "",
     colorReset: "",
     cliName: "nemoclaw",
@@ -29,23 +29,23 @@ describe("assertSandboxPathExistsOrExit (#3414)", () => {
     vi.restoreAllMocks();
   });
 
-  it("returns without writing to stderr when the remote path exists", () => {
-    const deps = makeDeps({ checkSandboxPathExists: () => true });
+  it("returns without writing to stderr when the remote path exists", async () => {
+    const deps = makeDeps({ checkSandboxPathExists: async () => true });
     const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => {
       throw new Error("should not exit");
     });
     const errSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
-    assertSandboxPathExistsOrExit(deps, "my-assistant", "/sandbox");
+    await assertSandboxPathExistsOrExit(deps, "my-assistant", "/sandbox");
 
     expect(exitSpy).not.toHaveBeenCalled();
     expect(errSpy).not.toHaveBeenCalled();
   });
 
-  it("exits 1 with a structured error when the remote path does not exist", () => {
+  it("exits 1 with a structured error when the remote path does not exist", async () => {
     let pathChecked: { sandboxName?: string; remotePath?: string } = {};
     const deps = makeDeps({
-      checkSandboxPathExists: (sandboxName, remotePath) => {
+      checkSandboxPathExists: async (sandboxName, remotePath) => {
         pathChecked = { sandboxName, remotePath };
         return false;
       },
@@ -55,9 +55,9 @@ describe("assertSandboxPathExistsOrExit (#3414)", () => {
     });
     const errSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
-    expect(() => assertSandboxPathExistsOrExit(deps, "my-assistant", "/sandbox/typo")).toThrow(
-      ProcessExitError,
-    );
+    await expect(
+      assertSandboxPathExistsOrExit(deps, "my-assistant", "/sandbox/typo"),
+    ).rejects.toThrow(ProcessExitError);
 
     expect(exitSpy).toHaveBeenCalledWith(1);
     expect(pathChecked).toEqual({ sandboxName: "my-assistant", remotePath: "/sandbox/typo" });
@@ -75,17 +75,17 @@ describe("assertSandboxPathExistsOrExit (#3414)", () => {
     expect(errorOutput).toContain("check for typos");
   });
 
-  it("uses the configured cliName in the verify-with hint (supports nemohermes alias)", () => {
+  it("uses the configured cliName in the verify-with hint (supports nemohermes alias)", async () => {
     const deps = makeDeps({
       cliName: "nemohermes",
-      checkSandboxPathExists: () => false,
+      checkSandboxPathExists: async () => false,
     });
     vi.spyOn(process, "exit").mockImplementation(() => {
       throw new ProcessExitError(1);
     });
     const errSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
-    expect(() => assertSandboxPathExistsOrExit(deps, "hermes", "/sandbox/missing")).toThrow(
+    await expect(assertSandboxPathExistsOrExit(deps, "hermes", "/sandbox/missing")).rejects.toThrow(
       ProcessExitError,
     );
 

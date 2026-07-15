@@ -121,6 +121,7 @@ function makeHealthyVmGatewayEnv(prefix: string): Record<string, string> {
   // VM-driver snapshots should trust gateway metadata, not the legacy cluster
   // container probe.
   writeExecutable(path.join(localBin, "openshell"), [
+    'if [ "$1 $2 $3 $4" = "--gateway nemoclaw sandbox exec" ]; then shift 2; fi',
     'case "$1 $2" in',
     '  "gateway info") printf "Gateway Info\\n\\nGateway: nemoclaw\\nGateway endpoint: https://127.0.0.1:8080/\\n"; exit 0 ;;',
     '  "sandbox list") printf "NAME STATUS\\nalpha Ready\\n"; exit 0 ;;',
@@ -143,7 +144,9 @@ function makeHealthyVmGatewayEnv(prefix: string): Record<string, string> {
   };
 }
 
-// VM-driver env with the authoritative `imageTag` set in the sandbox registry.
+// VM-driver env with an `imageTag` set in the sandbox registry so the
+// `resolveSrcPodImage()` fast path returns the image without falling back to
+// the docker/kubectl probe.
 function makeVmRestoreToEnv(
   prefix: string,
   entry: Record<string, unknown> = { imageTag: "openshell/sandbox-from:fast-path-test" },
@@ -168,20 +171,23 @@ function makeVmRestoreToEnv(
 
   const cloneReadyMarker = path.join(home, "clone-1-ready");
   writeExecutable(path.join(localBin, "openshell"), [
+    'if [ "$1 $2 $3 $4" = "--gateway nemoclaw sandbox exec" ]; then shift 2; fi',
     'case "$1 $2" in',
     '  "gateway info") printf "Gateway Info\\n\\nGateway: nemoclaw\\nGateway endpoint: https://127.0.0.1:8080/\\n"; exit 0 ;;',
     '  "sandbox get") printf "{\\"name\\":\\"%s\\"}\\n" "$3"; exit 0 ;;',
     `  "sandbox list") if [ -f ${JSON.stringify(cloneReadyMarker)} ]; then printf "NAME STATUS\\nalpha Ready\\nclone-1 Ready\\n"; else printf "NAME STATUS\\nalpha Ready\\n"; fi; exit 0 ;;`,
     // Restore writes config bytes on stdin. Consume them before exiting so the
     // fake CLI cannot race its caller into a Linux-only EPIPE.
-    '  "sandbox exec") case "$*" in *NEMOCLAW_DCODE_PROBE*) printf "NEMOCLAW_DCODE_PROBE=no-runtime\\n" ;; *installed_plugin_index*) printf "{\\"version\\":1,\\"installRecords\\":{},\\"loadPaths\\":[]}" ;; *openclaw.json*) printf "{\\"gateway\\":{\\"auth\\":{\\"token\\":\\"fresh\\"}}}" ;; esac; cat >/dev/null; exit 0 ;;',
+    '  "sandbox exec") case "$*" in *NEMOCLAW_DCODE_PROBE*) printf "NEMOCLAW_DCODE_PROBE=no-runtime\\n" ;; *installed_plugin_index*) printf "{\\"version\\":1,\\"installRecords\\":{},\\"loadPaths\\":[]}" ;; *"-- python3 -I - /tmp/nemoclaw-state-restore-"*"/sandbox/.openclaw openclaw.json copy"*) printf "STATE_FILE_OK\\n" ;; *openclaw.json*) printf "{\\"gateway\\":{\\"auth\\":{\\"token\\":\\"fresh\\"}}}" ;; esac; cat >/dev/null; exit 0 ;;',
     `  "sandbox create") touch ${JSON.stringify(cloneReadyMarker)}; printf "created clone-1\\n"; exit 0 ;;`,
     "esac",
     'if [ "$1" = "status" ]; then exit 0; fi',
     "exit 0",
   ]);
 
-  // Snapshot restore must never bypass OpenShell through Docker.
+  // `docker exec` must never run: if the fast path regresses,
+  // resolveSrcPodImage falls into the kubectl-via-docker probe and this
+  // marker shows up in the captured output.
   writeExecutable(path.join(localBin, "docker"), [
     'if [ "$1" = "exec" ]; then',
     '  echo "kubectl-must-not-run"',
@@ -222,7 +228,9 @@ describe("snapshot VM-driver gateway guard", () => {
     expect(r.out).not.toContain("Failed to query live sandbox state");
   });
 
-  it("snapshot restore --to uses the registered imageTag for VM-driver auto-create", () => {
+  // `snapshot restore --to <new>` on VM driver must use the registered
+  // imageTag, not the legacy `docker exec ... kubectl` probe.
+  it("snapshot restore --to uses registered imageTag for VM-driver auto-create instead of kubectl probe", () => {
     const env = makeVmRestoreToEnv("nemoclaw-snap-vm-gw-restore-to-");
 
     const seed = runCli("alpha snapshot create --name baseline", env);
