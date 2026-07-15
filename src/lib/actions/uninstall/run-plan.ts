@@ -611,23 +611,24 @@ function stopOrphanedOpenShell(runtime: UninstallRuntime): void {
   }
 }
 
-function removeNemoclawOpenShellGatewayUserService(runtime: UninstallRuntime): void {
-  if (runtime.platform !== "linux") return;
+function removeNemoclawOpenShellGatewayUserService(runtime: UninstallRuntime): boolean {
+  if (runtime.platform !== "linux") return true;
   const servicePath = getNemoclawOpenShellGatewayUserServicePath(runtime.env.HOME || os.homedir());
-  if (!runtime.existsSync(servicePath)) return;
+  if (!runtime.existsSync(servicePath)) return true;
 
   let unit = "";
   try {
     unit = fs.readFileSync(servicePath, "utf-8");
   } catch {
     runtime.warn(`Failed to read ${servicePath}; leaving gateway user service in place.`);
-    return;
+    return true;
   }
   if (!unit.includes(NEMOCLAW_OPENSHELL_GATEWAY_USER_SERVICE_MARKER)) {
     runtime.warn(`Leaving ${servicePath} in place because it is not NemoClaw-managed.`);
-    return;
+    return true;
   }
 
+  let disabled = true;
   if (runtime.commandExists("systemctl")) {
     const disable = runtime.run(
       "systemctl",
@@ -638,6 +639,7 @@ function removeNemoclawOpenShellGatewayUserService(runtime: UninstallRuntime): v
       runtime.log(`Disabled ${OPENSHELL_GATEWAY_USER_SERVICE}.service`);
     } else {
       runtime.warn(`Failed to disable ${OPENSHELL_GATEWAY_USER_SERVICE}.service`);
+      disabled = false;
     }
   } else {
     runtime.warn("systemctl not found; removing NemoClaw gateway user service file only.");
@@ -653,6 +655,7 @@ function removeNemoclawOpenShellGatewayUserService(runtime: UninstallRuntime): v
     });
     if (reload.status !== 0) runtime.warn("Failed to reload the user systemd manager.");
   }
+  return disabled;
 }
 
 function removeOpenShellResources(options: UninstallRunOptions, runtime: UninstallRuntime): void {
@@ -947,7 +950,7 @@ function executePlan(
     if (step.name === "Stopping services") {
       stopHelperServices(paths, runtime);
       removeGlob(paths.helperServiceGlob, runtime);
-      if (!options.keepOpenShell) removeNemoclawOpenShellGatewayUserService(runtime);
+      if (!options.keepOpenShell && !removeNemoclawOpenShellGatewayUserService(runtime)) ok = false;
       stopMatchingPids(
         `openshell.*forward.*${runtime.env.NEMOCLAW_DASHBOARD_PORT || "18789"}`,
         runtime,

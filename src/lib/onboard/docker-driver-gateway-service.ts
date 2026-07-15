@@ -134,6 +134,10 @@ export function getNemoclawOpenShellGatewayUserServiceBinaryPaths(home = os.home
   ];
 }
 
+function formatError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function readTextFileIfPresent(
   filePath: string,
   opts: Pick<OpenShellGatewayUserServiceOptions, "readFileSync"> = {},
@@ -160,6 +164,28 @@ function isNemoclawManagedOpenShellGatewayUserServiceUnit(
   return readTextFileIfPresent(filePath, opts).includes(
     NEMOCLAW_OPENSHELL_GATEWAY_USER_SERVICE_MARKER,
   );
+}
+
+function extractUnitFileExecStartPath(unit: string): string | null {
+  const match = /^ExecStart=([^\s]+)\s*$/m.exec(unit);
+  const execStart = match?.[1]?.trim();
+  if (!execStart || !path.isAbsolute(execStart)) return null;
+  if (path.basename(execStart) !== "openshell-gateway") return null;
+  try {
+    assertSafeSystemdExecPath(execStart);
+    return execStart;
+  } catch {
+    return null;
+  }
+}
+
+function readNemoclawManagedOpenShellGatewayUserServiceExecStart(
+  filePath: string,
+  opts: Pick<OpenShellGatewayUserServiceOptions, "readFileSync"> = {},
+): string | null {
+  const unit = readTextFileIfPresent(filePath, opts);
+  if (!unit.includes(NEMOCLAW_OPENSHELL_GATEWAY_USER_SERVICE_MARKER)) return null;
+  return extractUnitFileExecStartPath(unit);
 }
 
 function hasUpstreamOpenShellGatewayUserService(
@@ -200,10 +226,15 @@ function resolveOpenShellGatewayUserService(
   }
   if (hasNemoclawOpenShellGatewayUserService(opts)) {
     const home = opts.home ?? os.homedir();
+    const servicePath = getNemoclawOpenShellGatewayUserServicePath(home);
+    const execStart = readNemoclawManagedOpenShellGatewayUserServiceExecStart(servicePath, opts);
     return {
       serviceName: OPENSHELL_GATEWAY_USER_SERVICE,
-      trustedBinaryPaths: getNemoclawOpenShellGatewayUserServiceBinaryPaths(home),
-      trustedUnitPaths: [getNemoclawOpenShellGatewayUserServicePath(home)],
+      trustedBinaryPaths: [
+        ...getNemoclawOpenShellGatewayUserServiceBinaryPaths(home),
+        ...(execStart ? [execStart] : []),
+      ],
+      trustedUnitPaths: [servicePath],
     };
   }
   return null;
@@ -382,7 +413,15 @@ export function installNemoclawOpenShellGatewayUserService(
       })
     ) {
       const rmSync = opts.rmSync ?? fs.rmSync;
-      rmSync(servicePath, { force: true });
+      try {
+        rmSync(servicePath, { force: true });
+      } catch (error) {
+        return {
+          installed: false,
+          path: servicePath,
+          reason: `failed to remove NemoClaw gateway user service override: ${formatError(error)}`,
+        };
+      }
       return {
         installed: false,
         path: servicePath,
@@ -423,11 +462,27 @@ export function installNemoclawOpenShellGatewayUserService(
   const mkdirSync = opts.mkdirSync ?? fs.mkdirSync;
   const chmodSync = opts.chmodSync ?? fs.chmodSync;
   const writeFileSync = opts.writeFileSync ?? fs.writeFileSync;
-  mkdirSync(serviceDir, { recursive: true, mode: 0o700 });
-  chmodSync(serviceDir, 0o700);
-  writeFileSync(servicePath, unit, { encoding: "utf-8", mode: 0o600 });
-  chmodSync(servicePath, 0o600);
+  try {
+    mkdirSync(serviceDir, { recursive: true, mode: 0o700 });
+    chmodSync(serviceDir, 0o700);
+    writeFileSync(servicePath, unit, { encoding: "utf-8", mode: 0o600 });
+    chmodSync(servicePath, 0o600);
+  } catch (error) {
+    return {
+      installed: false,
+      path: servicePath,
+      reason: `failed to write OpenShell gateway user service: ${formatError(error)}`,
+    };
+  }
   return { installed: true, path: servicePath };
+}
+
+function isBenignGatewayUserServiceInstallSkip(reason: string | undefined): boolean {
+  return (
+    reason === "not a Linux host" ||
+    reason === "upstream OpenShell gateway service is installed" ||
+    reason === "OpenShell gateway binary not found"
+  );
 }
 
 export function installAndReportNemoclawOpenShellGatewayUserService(
@@ -440,7 +495,7 @@ export function installAndReportNemoclawOpenShellGatewayUserService(
     log(`  Installed OpenShell gateway user service: ${result.path}`);
   } else if (result.removed && result.path) {
     log(`  Removed NemoClaw OpenShell gateway user service override: ${result.path}`);
-  } else if (result.reason?.startsWith("refusing")) {
+  } else if (result.reason && !isBenignGatewayUserServiceInstallSkip(result.reason)) {
     warn(`  OpenShell gateway user service not installed: ${result.reason}.`);
   }
   return result;

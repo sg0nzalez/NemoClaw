@@ -1119,6 +1119,89 @@ prefer_user_local_openshell() {
   fi
 }
 
+NEMOCLAW_GATEWAY_SERVICE_MARKER="NEMOCLAW_MANAGED_OPENSHELL_GATEWAY=1"
+
+upstream_openshell_gateway_user_service_installed() {
+  [[ "$(uname -s)" == "Linux" ]] || return 1
+  [[ -f /usr/local/lib/systemd/user/openshell-gateway.service ]] \
+    || [[ -f /usr/lib/systemd/user/openshell-gateway.service ]] \
+    || [[ -f /lib/systemd/user/openshell-gateway.service ]]
+}
+
+resolve_openshell_gateway_bin_for_service() {
+  local gateway_bin="${NEMOCLAW_OPENSHELL_GATEWAY_BIN:-}"
+  if [[ -n "$gateway_bin" && -x "$gateway_bin" ]]; then
+    printf "%s\n" "$gateway_bin"
+    return 0
+  fi
+
+  gateway_bin="$(command -v openshell-gateway 2>/dev/null || true)"
+  [[ -n "$gateway_bin" && -x "$gateway_bin" ]] || return 1
+  printf "%s\n" "$gateway_bin"
+}
+
+install_nemoclaw_openshell_gateway_user_service() {
+  [[ "$(uname -s)" == "Linux" ]] || return 0
+
+  local gateway_bin
+  gateway_bin="$(resolve_openshell_gateway_bin_for_service)" || return 0
+
+  local service_dir="${HOME}/.config/systemd/user"
+  local service_path="${service_dir}/openshell-gateway.service"
+
+  if upstream_openshell_gateway_user_service_installed; then
+    if [[ -f "$service_path" ]] && grep -q "$NEMOCLAW_GATEWAY_SERVICE_MARKER" "$service_path"; then
+      rm -f "$service_path"
+      info "Removed NemoClaw OpenShell gateway user service override: $service_path"
+    fi
+    return 0
+  fi
+
+  case "$gateway_bin" in
+    *[[:space:]]*)
+      warn "Skipping OpenShell gateway user service because the binary path contains whitespace: $gateway_bin"
+      return 0
+      ;;
+  esac
+
+  if [[ -f "$service_path" ]] && ! grep -q "$NEMOCLAW_GATEWAY_SERVICE_MARKER" "$service_path"; then
+    warn "Leaving non-NemoClaw OpenShell gateway user service in place: $service_path"
+    return 0
+  fi
+
+  if ! {
+    mkdir -p "$service_dir" \
+      && chmod 700 "$service_dir" \
+      && cat >"$service_path" <<EOF
+# NemoClaw-managed OpenShell gateway user service
+# $NEMOCLAW_GATEWAY_SERVICE_MARKER
+[Unit]
+Description=OpenShell Gateway
+Documentation=https://github.com/NVIDIA/OpenShell
+After=default.target
+
+[Service]
+Type=simple
+StateDirectory=openshell/gateway
+EnvironmentFile=-%E/openshell/gateway.env
+ExecStart=$gateway_bin
+Restart=on-failure
+RestartSec=5s
+PrivateTmp=true
+UMask=0077
+
+[Install]
+WantedBy=default.target
+EOF
+    chmod 600 "$service_path"
+  }; then
+    warn "Could not install OpenShell gateway user service at $service_path"
+    return 0
+  fi
+
+  info "Installed OpenShell gateway user service at $service_path"
+}
+
 # Run scripts/install-openshell.sh during install_nemoclaw when appropriate.
 # - mode=force:      always invoke (GitHub-clone branch — fresh install path)
 # - mode=if-missing: invoke only when openshell is absent from PATH
@@ -1137,6 +1220,7 @@ maybe_install_openshell_during_install() {
   fi
   spin "Installing OpenShell CLI" bash "${NEMOCLAW_SOURCE_ROOT}/scripts/install-openshell.sh"
   prefer_user_local_openshell
+  install_nemoclaw_openshell_gateway_user_service
 }
 
 ensure_cli_shim() {

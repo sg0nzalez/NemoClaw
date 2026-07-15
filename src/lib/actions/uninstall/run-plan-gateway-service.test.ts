@@ -12,6 +12,7 @@ import {
   NEMOCLAW_OPENSHELL_GATEWAY_USER_SERVICE_MARKER,
   OPENSHELL_GATEWAY_USER_SERVICE,
 } from "../../onboard/docker-driver-gateway-service";
+import { HOST_GATEWAY_PGREP_PATTERN } from "../../onboard/host-gateway-process";
 import { type RunResult, runUninstallPlan } from "./run-plan";
 
 function ok(stdout = ""): RunResult {
@@ -67,36 +68,7 @@ describe("uninstall OpenShell gateway user service", () => {
   it("keeps the host OpenShell gateway process when OpenShell is kept", () => {
     const gatewayPid = 9999887;
     const killed: number[] = [];
-    const run = vi.fn((command: string, args: string[]) => {
-      if (
-        command === "pgrep" &&
-        args[0] === "-f" &&
-        String(args[1]).includes("openshell-gateway")
-      ) {
-        return ok(`${gatewayPid}\n`);
-      }
-      if (
-        command === "ps" &&
-        args[0] === "-p" &&
-        args[1] === String(gatewayPid) &&
-        args[2] === "-o" &&
-        args[3] === "pid="
-      ) {
-        return ok(`${gatewayPid}\n`);
-      }
-      if (
-        command === "ps" &&
-        args[0] === "-p" &&
-        args[1] === String(gatewayPid) &&
-        args[2] === "-o" &&
-        args[3] === "args="
-      ) {
-        return ok("/home/test/.local/bin/openshell-gateway --port 8080\n");
-      }
-      if (command === "lsof") return ok("");
-      if (command === "pgrep") return { status: 1, stdout: "", stderr: "" };
-      return ok();
-    });
+    const run = vi.fn((_command: string, _args: string[]) => ok());
 
     const result = runUninstallPlan(
       { assumeYes: true, deleteModels: false, keepOpenShell: true },
@@ -117,12 +89,9 @@ describe("uninstall OpenShell gateway user service", () => {
 
     expect(result.exitCode).toBe(0);
     expect(killed).not.toContain(gatewayPid);
-    expect(
-      run.mock.calls.some(
-        ([command, args]) =>
-          command === "pgrep" && args[0] === "-f" && String(args[1]).includes("openshell-gateway"),
-      ),
-    ).toBe(false);
+    expect(run.mock.calls.map(([command, args]) => [command, ...args].join("\0"))).not.toContain(
+      ["pgrep", "-f", HOST_GATEWAY_PGREP_PATTERN].join("\0"),
+    );
   });
 
   it("removes the NemoClaw-managed user service when OpenShell is removed", () => {
@@ -172,6 +141,61 @@ describe("uninstall OpenShell gateway user service", () => {
       ]);
       expect(runCalls).toContainEqual(["systemctl", "--user", "daemon-reload"]);
       expect(logs).toContain(`Removed ${servicePath}`);
+    } finally {
+      fs.rmSync(tmpHome, { recursive: true, force: true });
+    }
+  });
+
+  it("reports an incomplete uninstall when the service cannot be disabled", () => {
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-uninstall-gateway-service-"));
+    const servicePath = getNemoclawOpenShellGatewayUserServicePath(tmpHome);
+    fs.mkdirSync(path.dirname(servicePath), { recursive: true });
+    fs.writeFileSync(
+      servicePath,
+      [
+        "# NemoClaw-managed OpenShell gateway user service",
+        `# ${NEMOCLAW_OPENSHELL_GATEWAY_USER_SERVICE_MARKER}`,
+        "[Service]",
+        "ExecStart=/home/test/.local/bin/openshell-gateway",
+        "",
+      ].join("\n"),
+    );
+    const warnings: string[] = [];
+    const errors: string[] = [];
+    const runResults = new Map<string, RunResult>([
+      [
+        ["systemctl", "--user", "disable", "--now", OPENSHELL_GATEWAY_USER_SERVICE].join("\0"),
+        { status: 1, stdout: "", stderr: "failed\n" },
+      ],
+    ]);
+
+    try {
+      const result = runUninstallPlan(
+        { assumeYes: true, deleteModels: false, keepOpenShell: false },
+        {
+          commandExists: (command) => command === "systemctl",
+          env: { HOME: tmpHome } as NodeJS.ProcessEnv,
+          error: (line) => {
+            warnings.push(line);
+            errors.push(line);
+          },
+          existsSync: (target) => String(target).startsWith(tmpHome) && fs.existsSync(target),
+          isTty: false,
+          platform: "linux",
+          rmSync: fs.rmSync,
+          run: vi.fn((command: string, args: string[]) => {
+            return runResults.get([command, ...args].join("\0")) ?? ok();
+          }),
+          runDocker: () => ok(""),
+        },
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(fs.existsSync(servicePath)).toBe(false);
+      expect(warnings).toContain(`Failed to disable ${OPENSHELL_GATEWAY_USER_SERVICE}.service`);
+      expect(errors).toContain(
+        "Uninstall completed with errors. Some state may remain on disk; see warnings above.",
+      );
     } finally {
       fs.rmSync(tmpHome, { recursive: true, force: true });
     }

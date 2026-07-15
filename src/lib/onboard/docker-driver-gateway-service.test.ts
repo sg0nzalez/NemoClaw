@@ -11,6 +11,7 @@ import {
   getOpenShellGatewayUserServicePaths,
   hasNemoclawOpenShellGatewayUserService,
   hasOpenShellGatewayUserService,
+  installAndReportNemoclawOpenShellGatewayUserService,
   installNemoclawOpenShellGatewayUserService,
   NEMOCLAW_OPENSHELL_GATEWAY_USER_SERVICE_MARKER,
   type SpawnSyncLikeResult,
@@ -191,6 +192,34 @@ describe("docker-driver-gateway-service", () => {
     ]);
   });
 
+  it("trusts the actual binary path written into a NemoClaw-managed user service", () => {
+    const home = "/home/nvidia";
+    const servicePath = getNemoclawOpenShellGatewayUserServicePath(home);
+    const gatewayBin = "/opt/nemoclaw/openshell/bin/openshell-gateway";
+    const spawnSyncImpl = vi.fn((_command: string, args: string[]) =>
+      args.includes("show")
+        ? spawnResult(0, "", trustedShowOutput(servicePath, gatewayBin))
+        : spawnResult(),
+    );
+
+    const result = startOpenShellGatewayUserService({
+      commandExists: (command) => command === "systemctl",
+      env: {},
+      existsSync: (candidate) => candidate === servicePath,
+      home,
+      platform: "linux",
+      readFileSync: () => buildNemoclawOpenShellGatewayUserService(gatewayBin),
+      spawnSyncImpl,
+    });
+
+    expect(result).toEqual({
+      attempted: true,
+      fallbackAllowed: false,
+      serviceName: "openshell-gateway",
+      started: true,
+    });
+  });
+
   it("installs the NemoClaw-managed user service without overwriting foreign units", () => {
     const home = "/home/nvidia";
     const servicePath = getNemoclawOpenShellGatewayUserServicePath(home);
@@ -276,6 +305,42 @@ describe("docker-driver-gateway-service", () => {
     });
     expect(removed).toEqual([servicePath]);
     expect(writes).toEqual([]);
+  });
+
+  it("returns filesystem failures as install failures for standalone fallback", () => {
+    const home = "/home/nvidia";
+    const servicePath = getNemoclawOpenShellGatewayUserServicePath(home);
+
+    expect(
+      installNemoclawOpenShellGatewayUserService({
+        chmodSync: vi.fn(),
+        existsSync: () => false,
+        gatewayBin: "/home/nvidia/.local/bin/openshell-gateway",
+        home,
+        mkdirSync: vi.fn(() => {
+          throw new Error("permission denied");
+        }) as never,
+        platform: "linux",
+      }),
+    ).toEqual({
+      installed: false,
+      path: servicePath,
+      reason: "failed to write OpenShell gateway user service: permission denied",
+    });
+  });
+
+  it("warns for actionable service install failures", () => {
+    const warn = vi.fn();
+
+    installAndReportNemoclawOpenShellGatewayUserService({
+      gatewayBin: "/home/nvidia/bad path/openshell-gateway",
+      platform: "linux",
+      warn,
+    });
+
+    expect(warn).toHaveBeenCalledWith(
+      "  OpenShell gateway user service not installed: OpenShell gateway service ExecStart path cannot contain whitespace.",
+    );
   });
 
   it("allows standalone fallback when the user systemd manager is unavailable", () => {
