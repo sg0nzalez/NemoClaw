@@ -7,9 +7,29 @@
 # pre-built Hermes base image. Mirrors the OpenClaw Dockerfile structure.
 
 ARG BASE_IMAGE=ghcr.io/nvidia/nemoclaw/hermes-sandbox-base@sha256:fa05221f5c7bcafea7e263c84e5d06f87e37d1ccb78dc28c113f1a4066aa544c
+ARG NEMOCLAW_CORPORATE_CA_B64=
+
+FROM node:22-trixie-slim@sha256:2d9f5c76c8f4dd36e8f253bee5d828a83a6c09f36188f0b0414325232e0b175d AS mcp-tool-discovery-runtime
+ARG NEMOCLAW_CORPORATE_CA_B64
+ENV NPM_CONFIG_AUDIT=false \
+    NPM_CONFIG_FUND=false \
+    NPM_CONFIG_UPDATE_NOTIFIER=false
+WORKDIR /opt/mcp-tool-discovery-runtime
+COPY tools/mcp-tool-discovery-runtime/package.json tools/mcp-tool-discovery-runtime/package-lock.json tools/mcp-tool-discovery-runtime/install-reviewed-runtime.sh ./
+RUN sh ./install-reviewed-runtime.sh \
+    && rm -f ./install-reviewed-runtime.sh
+COPY tools/mcp-tool-discovery-runtime/*.ts ./
+RUN chown -R root:root /opt/mcp-tool-discovery-runtime \
+    && chmod -R a=rX /opt/mcp-tool-discovery-runtime
 
 # hadolint ignore=DL3006
 FROM ${BASE_IMAGE}
+
+COPY --from=mcp-tool-discovery-runtime /opt/mcp-tool-discovery-runtime/ /usr/local/lib/nemoclaw/mcp-tool-discovery-runtime/
+RUN discovery_contract="$(node --experimental-strip-types /usr/local/lib/nemoclaw/mcp-tool-discovery-runtime/mcp-tool-discovery.ts)" \
+    && node -e 'const result = JSON.parse(process.argv[1]); if (result.protocol !== 1 || result.ok !== false || result.detail !== "tool discovery received invalid runtime arguments") process.exit(1);' "$discovery_contract" \
+    && discovery_unsafe="$(find /usr/local/lib/nemoclaw/mcp-tool-discovery-runtime \( ! -user root -o -perm /022 \) -print -quit)" \
+    && test -z "$discovery_unsafe"
 
 # Keep the final image contract explicit even when the published base image
 # changes independently of this Dockerfile.
@@ -286,7 +306,7 @@ ARG NEMOCLAW_DARWIN_VM_COMPAT=0
 # here; the RUN below decodes it to a root-owned file that the entrypoint
 # appends to the OpenShell trust bundle at runtime. The CA is a public
 # certificate, not a secret, so baking it into an image layer is acceptable.
-ARG NEMOCLAW_CORPORATE_CA_B64=
+ARG NEMOCLAW_CORPORATE_CA_B64
 # Total model context window (input + output tokens). Empty by default so
 # Hermes auto-detects from the endpoint's /v1/models max_model_len; onboard
 # rewrites this ARG (via dockerfile-patch) when it probes a runtime value or

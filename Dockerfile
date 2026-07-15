@@ -10,6 +10,7 @@
 # Global ARG — must be declared before the first FROM to be visible
 # to all FROM directives. Can be overridden via --build-arg.
 ARG BASE_IMAGE=ghcr.io/nvidia/nemoclaw/sandbox-base:latest
+ARG NEMOCLAW_CORPORATE_CA_B64=
 
 # Stage 1: Build TypeScript plugin from source
 FROM node:22-trixie-slim@sha256:2d9f5c76c8f4dd36e8f253bee5d828a83a6c09f36188f0b0414325232e0b175d AS builder
@@ -38,10 +39,34 @@ COPY src/lib/messaging/channels/ /opt/nemoclaw-root/src/lib/messaging/channels/
 RUN ln -s /opt/nemoclaw/node_modules /opt/nemoclaw-root/node_modules \
     && /opt/nemoclaw/node_modules/.bin/tsc -p tsconfig.runtime-preloads.json
 
+# Build the agent-neutral, names-only MCP diagnostic once from a committed
+# production lock. The final image copies only this root-owned runtime.
+FROM node:22-trixie-slim@sha256:2d9f5c76c8f4dd36e8f253bee5d828a83a6c09f36188f0b0414325232e0b175d AS mcp-tool-discovery-runtime
+ARG NEMOCLAW_CORPORATE_CA_B64
+ENV AWS_EC2_METADATA_DISABLED=true \
+    NPM_CONFIG_AUDIT=false \
+    NPM_CONFIG_FUND=false \
+    NPM_CONFIG_UPDATE_NOTIFIER=false
+WORKDIR /opt/mcp-tool-discovery-runtime
+COPY tools/mcp-tool-discovery-runtime/package.json tools/mcp-tool-discovery-runtime/package-lock.json tools/mcp-tool-discovery-runtime/install-reviewed-runtime.sh ./
+RUN sh ./install-reviewed-runtime.sh \
+    && rm -f ./install-reviewed-runtime.sh
+COPY tools/mcp-tool-discovery-runtime/*.ts ./
+RUN chown -R root:root /opt/mcp-tool-discovery-runtime \
+    && chmod -R a=rX /opt/mcp-tool-discovery-runtime
+
 # Stage 3: Runtime image — pull cached base from GHCR
 # hadolint ignore=DL3006
 FROM ${BASE_IMAGE}
 ARG BASE_IMAGE
+# OpenShell blocks the link-local EC2 Instance Metadata Service. Keep AWS SDK
+# credential chains from attempting an impossible metadata discovery path.
+ENV AWS_EC2_METADATA_DISABLED=true
+COPY --from=mcp-tool-discovery-runtime /opt/mcp-tool-discovery-runtime/ /usr/local/lib/nemoclaw/mcp-tool-discovery-runtime/
+RUN discovery_contract="$(node --experimental-strip-types /usr/local/lib/nemoclaw/mcp-tool-discovery-runtime/mcp-tool-discovery.ts)" \
+    && node -e 'const result = JSON.parse(process.argv[1]); if (result.protocol !== 1 || result.ok !== false || result.detail !== "tool discovery received invalid runtime arguments") process.exit(1);' "$discovery_contract" \
+    && discovery_unsafe="$(find /usr/local/lib/nemoclaw/mcp-tool-discovery-runtime \( ! -user root -o -perm /022 \) -print -quit)" \
+    && test -z "$discovery_unsafe"
 # Dependency review evidence for this runtime pin lives in
 # docs/security/openclaw-2026.6.10-dependency-review.md.
 ARG OPENCLAW_VERSION=2026.6.10
@@ -71,10 +96,6 @@ COPY agents/openclaw/wechat-runtime/package.json /usr/local/lib/nemoclaw/wechat-
 COPY agents/openclaw/wechat-runtime/package-lock.json /usr/local/lib/nemoclaw/wechat-runtime/package-lock.json
 COPY scripts/lib/reviewed-npm-archive.mts /scripts/lib/reviewed-npm-archive.mts
 
-# OpenShell blocks the link-local EC2 Instance Metadata Service. Keep AWS SDK
-# credential chains from attempting an impossible metadata discovery path.
-ENV AWS_EC2_METADATA_DISABLED=true
-
 # OpenClaw 2026.6.10 loads some generated source through jiti. Disable its
 # filesystem transform cache so source fragments that mention provider marker
 # names do not persist under /tmp/jiti inside the sandbox.
@@ -85,7 +106,7 @@ ENV JITI_FS_CACHE=false
 # here; the RUN below decodes it to a root-owned file that the entrypoint
 # appends to the OpenShell trust bundle at runtime. The CA is a public
 # certificate, not a secret, so baking it into an image layer is acceptable.
-ARG NEMOCLAW_CORPORATE_CA_B64=
+ARG NEMOCLAW_CORPORATE_CA_B64
 
 # Decode the host corporate-proxy CA (#6210) to a root-owned, read-only file
 # when onboard baked one in. No-op when NEMOCLAW_CORPORATE_CA_B64 is empty. The

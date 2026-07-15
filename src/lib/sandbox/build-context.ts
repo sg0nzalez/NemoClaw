@@ -52,6 +52,22 @@ function stageOpenClawRuntimeGraphs(rootDir: string, buildCtx: string): void {
   normalizeReadModesForDockerCopy(path.join(buildCtx, "agents"));
 }
 
+function stageMcpToolDiscoveryRuntime(rootDir: string, buildCtx: string): void {
+  const sourceDir = path.join(rootDir, "tools", "mcp-tool-discovery-runtime");
+  const stagedDir = path.join(buildCtx, "tools", "mcp-tool-discovery-runtime");
+  fs.mkdirSync(stagedDir, { recursive: true });
+  for (const fileName of [
+    "package.json",
+    "package-lock.json",
+    "install-reviewed-runtime.sh",
+    "mcp-tool-discovery.ts",
+    "tool-discovery-core.ts",
+  ]) {
+    fs.copyFileSync(path.join(sourceDir, fileName), path.join(stagedDir, fileName));
+  }
+  normalizeReadModesForDockerCopy(path.join(buildCtx, "tools"));
+}
+
 function stageLegacySandboxBuildContext(
   rootDir: string,
   tmpDir: string = os.tmpdir(),
@@ -63,6 +79,7 @@ function stageLegacySandboxBuildContext(
     path.join(buildCtx, "tsconfig.runtime-preloads.json"),
   );
   stageOpenClawRuntimeGraphs(rootDir, buildCtx);
+  stageMcpToolDiscoveryRuntime(rootDir, buildCtx);
   fs.cpSync(path.join(rootDir, "nemoclaw"), path.join(buildCtx, "nemoclaw"), {
     recursive: true,
   });
@@ -113,6 +130,7 @@ function stageOptimizedSandboxBuildContext(
     path.join(buildCtx, "tsconfig.runtime-preloads.json"),
   );
   stageOpenClawRuntimeGraphs(rootDir, buildCtx);
+  stageMcpToolDiscoveryRuntime(rootDir, buildCtx);
 
   fs.mkdirSync(stagedNemoclawDir, { recursive: true });
   for (const fileName of [

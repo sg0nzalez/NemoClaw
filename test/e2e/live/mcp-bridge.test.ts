@@ -38,10 +38,12 @@ import {
   setupDnsRebindingHostsFixture,
 } from "./mcp-bridge-sandbox.ts";
 import {
+  type FakeMcpHttpsServer,
   startCompatibleMock,
   startFakeMcpHttpsServer,
   startPublicMcpHttpsTunnel,
 } from "./mcp-bridge-servers.ts";
+import { assertAdvertisedMcpTools } from "./mcp-bridge-tool-discovery.ts";
 import { assertRawOpenShellAllowedIpsRebindingDenied } from "./openshell-allowed-ips-rebinding.ts";
 
 const OPENCLAW_SANDBOX_NAME = process.env.NEMOCLAW_SANDBOX_NAME ?? "e2e-mcp-bridge";
@@ -327,6 +329,7 @@ async function addBridgeAndReadStatus(
     mcpUrl: string;
     expectedAdapter: McpAdapter;
     artifactPrefix: string;
+    fakeMcp: FakeMcpHttpsServer;
   },
 ): Promise<string> {
   const add = await host.nemoclaw(
@@ -398,6 +401,12 @@ async function addBridgeAndReadStatus(
   expect(statusJson.provider.name).toMatch(
     new RegExp(`^${options.sandboxName}-mcp-${SERVER_NAME}-[a-f0-9]{16}$`),
   );
+
+  await assertAdvertisedMcpTools(host, options.fakeMcp, {
+    sandboxName: options.sandboxName,
+    artifactPrefix: options.artifactPrefix,
+    hostSecret: HOST_SECRET,
+  });
   return statusJson.provider.name;
 }
 
@@ -921,6 +930,7 @@ test("mcp-bridge", { timeout: 45 * 60_000 }, async ({ artifacts, cleanup, host, 
     mcpUrl,
     expectedAdapter: "mcporter",
     artifactPrefix: "openclaw",
+    fakeMcp,
   });
   await assertBridgeInfrastructure(host, sandbox, {
     sandboxName: OPENCLAW_SANDBOX_NAME,
@@ -1240,6 +1250,7 @@ liveAgentMatrixTest(
       mcpUrl,
       expectedAdapter: "hermes-config",
       artifactPrefix: "hermes",
+      fakeMcp,
     });
     await assertAuthenticatedMcpDiscovery(fakeMcp, {
       requestOffset: initialDiscoveryOffset,
@@ -1398,6 +1409,7 @@ liveAgentMatrixTest(
       mcpUrl,
       expectedAdapter: "deepagents-config",
       artifactPrefix: "deepagents",
+      fakeMcp,
     });
     await assertBridgeInfrastructure(host, sandbox, {
       sandboxName: DEEPAGENTS_SANDBOX_NAME,

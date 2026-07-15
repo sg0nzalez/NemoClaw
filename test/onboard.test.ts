@@ -655,6 +655,11 @@ startGateway(null).catch(() => {});
       expect(stagedDockerfile).toBe(path.join(buildCtx, "Dockerfile"));
       expect(fs.existsSync(path.join(buildCtx, "nemoclaw", "package-lock.json"))).toBe(true);
       expect(fs.existsSync(path.join(buildCtx, "nemoclaw", "src"))).toBe(true);
+      expect(
+        fs.existsSync(
+          path.join(buildCtx, "tools", "mcp-tool-discovery-runtime", "mcp-tool-discovery.ts"),
+        ),
+      ).toBe(true);
       expect(fs.existsSync(path.join(buildCtx, "nemoclaw-blueprint", ".venv"))).toBe(false);
       expect(fs.existsSync(path.join(buildCtx, "scripts", "nemoclaw-start.sh"))).toBe(true);
       expect(fs.existsSync(path.join(buildCtx, "scripts", "patch-openclaw-tool-catalog.js"))).toBe(

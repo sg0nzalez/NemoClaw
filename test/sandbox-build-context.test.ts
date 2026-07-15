@@ -46,6 +46,15 @@ describe("sandbox build context staging", () => {
     for (const fileName of [
       "package.json",
       "package-lock.json",
+      "install-reviewed-runtime.sh",
+      "mcp-tool-discovery.ts",
+      "tool-discovery-core.ts",
+    ]) {
+      writeFixture(path.join("tools", "mcp-tool-discovery-runtime", fileName));
+    }
+    for (const fileName of [
+      "package.json",
+      "package-lock.json",
       "tsconfig.json",
       "openclaw.plugin.json",
     ]) {
@@ -183,6 +192,26 @@ describe("sandbox build context staging", () => {
     }
   }
 
+  function expectStagedMcpToolDiscoveryRuntime(buildCtx: string, sourceRoot: string) {
+    const runtimeDir = path.join(buildCtx, "tools", "mcp-tool-discovery-runtime");
+    expect(fs.readdirSync(runtimeDir).sort()).toEqual([
+      "install-reviewed-runtime.sh",
+      "mcp-tool-discovery.ts",
+      "package-lock.json",
+      "package.json",
+      "tool-discovery-core.ts",
+    ]);
+    for (const fileName of fs.readdirSync(runtimeDir)) {
+      expect(fs.readFileSync(path.join(runtimeDir, fileName), "utf8")).toBe(
+        fs.readFileSync(
+          path.join(sourceRoot, "tools", "mcp-tool-discovery-runtime", fileName),
+          "utf8",
+        ),
+      );
+      expect((fs.statSync(path.join(runtimeDir, fileName)).mode & 0o777).toString(8)).toBe("644");
+    }
+  }
+
   function expectStagedToolDisclosureContract(buildCtx: string) {
     expect(fs.existsSync(path.join(buildCtx, "src", "lib", "tool-disclosure.ts"))).toBe(true);
   }
@@ -228,6 +257,7 @@ describe("sandbox build context staging", () => {
       const { buildCtx } = stageOptimizedSandboxBuildContext(sourceRoot, tmpDir);
       expectStagedBlueprintModes(buildCtx);
       expectStagedOpenClawRuntimeGraphs(buildCtx, sourceRoot);
+      expectStagedMcpToolDiscoveryRuntime(buildCtx, sourceRoot);
       expectStagedToolDisclosureContract(buildCtx);
     } finally {
       fs.rmSync(sourceRoot, { recursive: true, force: true });
@@ -258,6 +288,7 @@ describe("sandbox build context staging", () => {
       const { buildCtx } = stageLegacySandboxBuildContext(sourceRoot, tmpDir);
       expectStagedBlueprintModes(buildCtx);
       expectStagedOpenClawRuntimeGraphs(buildCtx, sourceRoot);
+      expectStagedMcpToolDiscoveryRuntime(buildCtx, sourceRoot);
       expectStagedToolDisclosureContract(buildCtx);
     } finally {
       fs.rmSync(sourceRoot, { recursive: true, force: true });
@@ -290,6 +321,7 @@ describe("sandbox build context staging", () => {
       expectDockerfileScriptCopiesExist(buildCtx, stagedDockerfile);
       expect(fs.existsSync(path.join(buildCtx, "tsconfig.runtime-preloads.json"))).toBe(true);
       expectStagedOpenClawRuntimeGraphs(buildCtx, repoRoot);
+      expectStagedMcpToolDiscoveryRuntime(buildCtx, repoRoot);
       expect(fs.existsSync(path.join(buildCtx, "nemoclaw-blueprint", ".venv"))).toBe(false);
       expect(fs.existsSync(path.join(buildCtx, "nemoclaw-blueprint", "blueprint.yaml"))).toBe(true);
       expect(

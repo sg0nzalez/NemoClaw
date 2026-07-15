@@ -1,0 +1,15 @@
+{
+  "$comment": "SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.\nSPDX-License-Identifier: Apache-2.0",
+  "name": "nemoclaw-mcp-tool-discovery-runtime",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Locked shared runtime for names-only managed MCP tool discovery",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.29.0"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}

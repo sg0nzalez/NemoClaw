@@ -1,0 +1,235 @@
+// SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+import type { AgentMcpAdapter } from "../../agent/defs";
+import { shellQuote } from "../../core/shell-quote";
+import type { McpBridgeEntry } from "../../state/registry";
+import { authorizationValue } from "./mcp-bridge-adapter-status";
+import type { McpBridgeStatus } from "./mcp-bridge-contracts";
+import { redactBridgeSecretsForDisplay } from "./mcp-bridge-output";
+import {
+  MCP_RUNTIME_SANITIZED_ENV_VARS,
+  wrapMcpRuntimeCommand,
+} from "./mcp-bridge-runtime-command";
+import { normalizeMcpServerUrl } from "./mcp-bridge-validation";
+import { executeSandboxCommand, type SandboxCommandResult } from "./process-recovery";
+import {
+  buildSandboxExecMarkedCommand,
+  createSandboxExecMarker,
+  extractSandboxExecCommandStdoutFromStreams,
+} from "./sandbox-exec-output";
+import { buildTrustedProxyEnvSourceShell } from "./trusted-proxy-env";
+
+export const MCP_TOOL_DISCOVERY_RUNTIME_PATH =
+  "/usr/local/lib/nemoclaw/mcp-tool-discovery-runtime/mcp-tool-discovery.ts";
+const MCP_TOOL_DISCOVERY_RUNTIME_MODULE_PATH =
+  "/usr/local/lib/nemoclaw/mcp-tool-discovery-runtime/node_modules/@modelcontextprotocol/sdk";
+export const MCP_TOOL_DISCOVERY_RESULT_PROTOCOL = 1;
+export const MCP_TOOL_DISCOVERY_MAX_TOOLS = 500;
+export const MCP_TOOL_DISCOVERY_MAX_NAME_BYTES = 256;
+const MCP_TOOL_DISCOVERY_MAX_DETAIL_BYTES = 512;
+const MCP_TOOL_DISCOVERY_MAX_OUTPUT_BYTES = 196_608;
+const UNSAFE_TEXT = /[\u0000-\u001f\u007f-\u009f]/u;
+
+export interface McpToolDiscoveryReadiness {
+  policyGatewayPresent: boolean | null;
+  providerAttached: boolean | null;
+  providerCredentialReady: boolean;
+}
+
+export interface McpToolDiscoveryCommand {
+  command: string;
+  resultMarker: string;
+}
+
+function failure(detail: string): NonNullable<McpBridgeStatus["toolDiscovery"]> {
+  return { ok: false, count: 0, tools: [], truncated: false, detail };
+}
+
+export function toolDiscoveryReadinessSkipDetail(
+  readiness: McpToolDiscoveryReadiness,
+): string | undefined {
+  if (readiness.policyGatewayPresent === null) {
+    return "tool discovery skipped: the effective generated MCP policy could not be inspected";
+  }
+  if (!readiness.policyGatewayPresent) {
+    return "tool discovery skipped: the generated MCP policy does not match the effective gateway policy";
+  }
+  if (readiness.providerAttached === null) {
+    return "tool discovery skipped: provider attachment could not be inspected";
+  }
+  if (!readiness.providerAttached) {
+    return "tool discovery skipped: the credential provider is not attached to the sandbox";
+  }
+  if (!readiness.providerCredentialReady) {
+    return "tool discovery skipped: the OpenShell provider does not match the recorded credential binding";
+  }
+  return undefined;
+}
+
+export function buildMcpToolDiscoveryCommand(
+  entry: Pick<McpBridgeEntry, "server" | "url" | "env">,
+  adapter: AgentMcpAdapter,
+): McpToolDiscoveryCommand | null {
+  const authorization = authorizationValue(entry);
+  if (!authorization) return null;
+  try {
+    if (normalizeMcpServerUrl(entry.url) !== entry.url) return null;
+  } catch {
+    return null;
+  }
+
+  const resultMarker = createSandboxExecMarker();
+  const missingRuntimeResult = JSON.stringify({
+    protocol: MCP_TOOL_DISCOVERY_RESULT_PROTOCOL,
+    ok: false,
+    count: 0,
+    tools: [],
+    truncated: false,
+    detail: "sandbox image does not include the MCP tool discovery runtime; rebuild the sandbox",
+  });
+  const runtimeCommand = wrapMcpRuntimeCommand(adapter, [
+    "node",
+    "--experimental-strip-types",
+    MCP_TOOL_DISCOVERY_RUNTIME_PATH,
+    "--url",
+    entry.url,
+    "--authorization",
+    authorization,
+  ]);
+  const body = [
+    `if [ ! -r ${shellQuote(MCP_TOOL_DISCOVERY_RUNTIME_PATH)} ] || [ ! -d ${shellQuote(MCP_TOOL_DISCOVERY_RUNTIME_MODULE_PATH)} ]; then`,
+    `  printf '%s\\n' ${shellQuote(missingRuntimeResult)}`,
+    "  exit 0",
+    "fi",
+    runtimeCommand,
+  ].join("\n");
+
+  return {
+    resultMarker,
+    command: [
+      buildTrustedProxyEnvSourceShell(),
+      `unset ${MCP_RUNTIME_SANITIZED_ENV_VARS.join(" ")} || true`,
+      buildSandboxExecMarkedCommand(body, resultMarker),
+    ].join("\n"),
+  };
+}
+
+function utf8Bytes(value: string): number {
+  return Buffer.byteLength(value, "utf8");
+}
+
+function safeString(value: unknown, maxBytes: number): value is string {
+  return typeof value === "string" && utf8Bytes(value) <= maxBytes && !UNSAFE_TEXT.test(value);
+}
+
+function compareNames(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+export function classifyMcpToolDiscoveryResult(
+  result: SandboxCommandResult | null,
+  entry: Pick<McpBridgeEntry, "env">,
+  resultMarker: string,
+): NonNullable<McpBridgeStatus["toolDiscovery"]> {
+  if (result === null) return failure("sandbox unreachable");
+  if (result.status !== 0) {
+    return failure(
+      "MCP tool discovery runtime failed to start; rebuild the sandbox if the image predates this diagnostic",
+    );
+  }
+  const output = extractSandboxExecCommandStdoutFromStreams(
+    { stdout: result.stdout, stderr: result.stderr },
+    resultMarker,
+  );
+  if (output === null) return failure("tool discovery output missing trusted result frame");
+  if (utf8Bytes(output) > MCP_TOOL_DISCOVERY_MAX_OUTPUT_BYTES) {
+    return failure("tool discovery returned an oversized result");
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(output);
+  } catch {
+    return failure("tool discovery returned an invalid result");
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return failure("tool discovery returned an invalid result");
+  }
+  const value = parsed as Record<string, unknown>;
+  if (
+    value.protocol !== MCP_TOOL_DISCOVERY_RESULT_PROTOCOL ||
+    typeof value.ok !== "boolean" ||
+    typeof value.count !== "number" ||
+    !Number.isSafeInteger(value.count) ||
+    value.count < 0 ||
+    !Array.isArray(value.tools) ||
+    value.tools.length !== value.count ||
+    value.tools.length > MCP_TOOL_DISCOVERY_MAX_TOOLS ||
+    typeof value.truncated !== "boolean"
+  ) {
+    return failure("tool discovery returned an invalid result");
+  }
+
+  const tools: string[] = [];
+  const seen = new Set<string>();
+  for (const tool of value.tools) {
+    if (
+      !safeString(tool, MCP_TOOL_DISCOVERY_MAX_NAME_BYTES) ||
+      tool.length === 0 ||
+      seen.has(tool)
+    ) {
+      return failure("tool discovery returned an invalid tool name");
+    }
+    seen.add(tool);
+    tools.push(tool);
+  }
+  const sortedTools = [...tools].sort(compareNames);
+  if (tools.some((tool, index) => tool !== sortedTools[index])) {
+    return failure("tool discovery returned a non-deterministic tool inventory");
+  }
+
+  const detail = value.detail;
+  if (detail !== undefined && !safeString(detail, MCP_TOOL_DISCOVERY_MAX_DETAIL_BYTES)) {
+    return failure("tool discovery returned an invalid detail");
+  }
+  if ((value.ok && value.truncated) || (!value.ok && !detail)) {
+    return failure("tool discovery returned an inconsistent result");
+  }
+  if (!value.ok && !value.truncated && tools.length > 0) {
+    return failure("tool discovery returned an inconsistent partial result");
+  }
+
+  const redactedDetail = detail ? redactBridgeSecretsForDisplay(detail, entry) : undefined;
+  if (redactedDetail && utf8Bytes(redactedDetail) > MCP_TOOL_DISCOVERY_MAX_DETAIL_BYTES) {
+    return failure("tool discovery returned an oversized detail after redaction");
+  }
+  return {
+    ok: value.ok,
+    count: tools.length,
+    tools,
+    truncated: value.truncated,
+    ...(redactedDetail ? { detail: redactedDetail } : {}),
+  };
+}
+
+export function discoverMcpTools(
+  sandboxName: string,
+  entry: McpBridgeEntry,
+  adapter: AgentMcpAdapter | undefined,
+  readiness: McpToolDiscoveryReadiness,
+): NonNullable<McpBridgeStatus["toolDiscovery"]> {
+  if (!adapter) return failure("tool discovery skipped: MCP adapter is not declared");
+  if (entry.addState) return failure("tool discovery skipped: add transaction is incomplete");
+  const readinessSkipDetail = toolDiscoveryReadinessSkipDetail(readiness);
+  if (readinessSkipDetail) return failure(readinessSkipDetail);
+  const discoveryCommand = buildMcpToolDiscoveryCommand(entry, adapter);
+  if (!discoveryCommand) {
+    return failure("tool discovery skipped: no credential binding or safe endpoint is available");
+  }
+  return classifyMcpToolDiscoveryResult(
+    executeSandboxCommand(sandboxName, discoveryCommand.command),
+    entry,
+    discoveryCommand.resultMarker,
+  );
+}

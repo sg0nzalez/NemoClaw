@@ -89,6 +89,21 @@ processRecovery.executeSandboxCommand = (sandboxName, command) => {
       stderr: "",
     };
   }
+  if (command.includes("mcp-tool-discovery-runtime")) {
+    const resultMarker = command.match(/__NEMOCLAW_SANDBOX_EXEC_STARTED___[0-9a-f]{32}/)?.[0];
+    if (!resultMarker) throw new Error("tool discovery result marker missing");
+    return {
+      status: 0,
+      stdout: resultMarker + "\n" + JSON.stringify({
+        protocol: 1,
+        ok: true,
+        count: 2,
+        tools: ["alpha", "zeta"],
+        truncated: false,
+      }),
+      stderr: "",
+    };
+  }
   return { status: 0, stdout: "registered", stderr: "" };
 };
 registry.registerSandbox({
@@ -363,6 +378,89 @@ describe("MCP status wire-level credential-resolution probe", { timeout: 15_000 
     const payload = JSON.parse(stdout) as { errorLines: string[]; exitCode: number };
     expect(payload.exitCode).toBe(2);
     expect(payload.errorLines.join("\n")).toContain("at most one of --probe / --no-probe");
+  });
+
+  it("discovers tools for one named server without duplicating the implicit probe (#6901)", () => {
+    const home = createTempHome("nemoclaw-mcp-tools-single-");
+    const { stdout } = runHarness(
+      home,
+      String.raw`
+  await bridge.dispatchMcpBridgeCommand("alpha", ["status", "github", "--tools", "--json"]);
+  const status = JSON.parse(logLines.join("\n"));
+  process.stdout.write(JSON.stringify({
+    status,
+    probed: executedSandboxCommands.some((c) => c.includes("NEMOCLAW_MCP_PROBE")),
+    discovered: executedSandboxCommands.some((c) => c.includes("mcp-tool-discovery-runtime")),
+  }));
+`,
+    );
+    const payload = JSON.parse(stdout) as {
+      status: {
+        provider: { credentialResolution?: unknown };
+        toolDiscovery: { ok: boolean; count: number; tools: string[]; truncated: boolean };
+      };
+      probed: boolean;
+      discovered: boolean;
+    };
+    expect(payload.probed).toBe(false);
+    expect(payload.discovered).toBe(true);
+    expect(payload.status.provider.credentialResolution).toBeUndefined();
+    expect(payload.status.toolDiscovery).toEqual({
+      ok: true,
+      count: 2,
+      tools: ["alpha", "zeta"],
+      truncated: false,
+    });
+  });
+
+  it("runs both diagnostics only when --probe is explicit with --tools (#6901)", () => {
+    const home = createTempHome("nemoclaw-mcp-tools-explicit-probe-");
+    const { stdout } = runHarness(
+      home,
+      String.raw`
+  await bridge.dispatchMcpBridgeCommand("alpha", ["status", "github", "--tools", "--probe", "--json"]);
+  const status = JSON.parse(logLines.join("\n"));
+  process.stdout.write(JSON.stringify({
+    hasResolution: !!status.provider.credentialResolution,
+    hasDiscovery: !!status.toolDiscovery,
+    probeCommands: executedSandboxCommands.filter((c) => c.includes("NEMOCLAW_MCP_PROBE")).length,
+    discoveryCommands: executedSandboxCommands.filter((c) => c.includes("mcp-tool-discovery-runtime")).length,
+  }));
+`,
+    );
+    expect(JSON.parse(stdout)).toEqual({
+      hasResolution: true,
+      hasDiscovery: true,
+      probeCommands: 1,
+      discoveryCommands: 1,
+    });
+  });
+
+  it("requires a named server for --tools and renders the discovered names (#6901)", () => {
+    const home = createTempHome("nemoclaw-mcp-tools-validation-");
+    const { stdout } = runHarness(
+      home,
+      String.raw`
+  await bridge.dispatchMcpBridgeCommand("alpha", ["status", "--tools"]);
+  const rejectedExitCode = process.exitCode ?? 0;
+  process.exitCode = 0;
+  const rejection = [...errorLines];
+  errorLines.length = 0;
+  logLines.length = 0;
+  await bridge.dispatchMcpBridgeCommand("alpha", ["status", "github", "--tools"]);
+  process.stdout.write(JSON.stringify({ rejectedExitCode, rejection, rendered: logLines }));
+`,
+    );
+    const payload = JSON.parse(stdout) as {
+      rejectedExitCode: number;
+      rejection: string[];
+      rendered: string[];
+    };
+    expect(payload.rejectedExitCode).toBe(2);
+    expect(payload.rejection.join("\n")).toContain("one MCP server name");
+    expect(payload.rendered.some((line) => line.includes("tool discovery: successful"))).toBe(true);
+    expect(payload.rendered.some((line) => line.includes("tools discovered: 2"))).toBe(true);
+    expect(payload.rendered.some((line) => line.includes("- alpha"))).toBe(true);
   });
 });
 
