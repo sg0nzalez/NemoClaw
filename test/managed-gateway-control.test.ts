@@ -248,6 +248,36 @@ with tempfile.TemporaryDirectory() as root:
         write_process(
             proc_root,
             namespace_path,
+            46,
+            666,
+            1,
+            1000,
+            b"short-lived-process\0",
+        )
+        real_capture = reader.capture
+        transient_capture_attempts = 0
+        def capture_with_transient_churn(pid):
+            global transient_capture_attempts
+            if pid == 46:
+                transient_capture_attempts += 1
+                if transient_capture_attempts == 1:
+                    raise control.ControlError("SUPERVISOR_UNAVAILABLE")
+            return real_capture(pid)
+        reader.capture = capture_with_transient_churn
+        try:
+            transient_churn_supervisor = control._discover_supervisor(reader)
+            transient_process_churn = [
+                transient_churn_supervisor.pid,
+                transient_capture_attempts,
+            ]
+        except control.ControlError as error:
+            transient_process_churn = [error.code, transient_capture_attempts]
+        finally:
+            reader.capture = real_capture
+        remove_process(proc_root, 46)
+        write_process(
+            proc_root,
+            namespace_path,
             45,
             555,
             1,
@@ -696,6 +726,7 @@ with tempfile.TemporaryDirectory() as root:
         "missing_supervisor": missing_supervisor,
         "appearing_supervisor": appearing_supervisor,
         "unreadable_process": unreadable_process,
+        "transient_process_churn": transient_process_churn,
         "duplicate_supervisor": duplicate_supervisor,
         "duplicate": duplicate,
         "signals": sent,
@@ -767,6 +798,7 @@ describe("managed gateway root control", () => {
       missing_supervisor: "SUPERVISOR_NOT_RUNNING",
       appearing_supervisor: "SUPERVISOR_UNAVAILABLE",
       unreadable_process: "SUPERVISOR_UNAVAILABLE",
+      transient_process_churn: [40, 2],
       duplicate_supervisor: "SUPERVISOR_UNAVAILABLE",
       duplicate: "SUPERVISOR_UNAVAILABLE",
       signals: [15, 9],

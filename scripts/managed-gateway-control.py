@@ -78,6 +78,7 @@ KILL_GRACE_SECONDS = 5.0
 RECOVERY_TIMEOUT_SECONDS = 150.0
 RECOVER_EXISTING_GRACE_SECONDS = 10.0
 POLL_SECONDS = 0.2
+SUPERVISOR_DISCOVERY_ATTEMPTS = 3
 NEMOCLAW_RUNTIME_DIR = "/run/nemoclaw"
 NEMOCLAW_RUNTIME_DIR_MODE = 0o711
 EXPECTED_EXIT_MARKER_NAME = "managed-gateway-expected-exit"
@@ -776,14 +777,26 @@ def _supervisor_candidates(
     return matches, inconclusive
 
 
+def _conclusive_supervisor_candidates(
+    reader: ProcReader, pid1: ProcessIdentity, sandbox_uid: int
+) -> list[ProcessIdentity]:
+    """Retry process-table churn, but only return a fully conclusive scan."""
+
+    for attempt in range(SUPERVISOR_DISCOVERY_ATTEMPTS):
+        matches, inconclusive = _supervisor_candidates(reader, pid1, sandbox_uid)
+        if not inconclusive:
+            return matches
+        if attempt + 1 < SUPERVISOR_DISCOVERY_ATTEMPTS:
+            time.sleep(POLL_SECONDS)
+    raise ControlError("SUPERVISOR_UNAVAILABLE")
+
+
 def _discover_supervisor(reader: ProcReader) -> ProcessIdentity:
     pid1 = reader.capture(1)
     if not _is_openshell(pid1):
         raise ControlError("SUPERVISOR_UNAVAILABLE")
     sandbox_uid = _sandbox_uid()
-    matches, inconclusive = _supervisor_candidates(reader, pid1, sandbox_uid)
-    if inconclusive:
-        raise ControlError("SUPERVISOR_UNAVAILABLE")
+    matches = _conclusive_supervisor_candidates(reader, pid1, sandbox_uid)
     if len(matches) == 0:
         # A zero-match scan is the only absence signal that may authorize the
         # host to recreate a legacy Docker container with its managed startup
@@ -792,14 +805,11 @@ def _discover_supervisor(reader: ProcReader) -> ProcessIdentity:
         # races remain generic unavailability rather than destructive-recovery
         # authorization.
         between_pid1 = reader.capture(1)
-        second_matches, second_inconclusive = _supervisor_candidates(
-            reader, pid1, sandbox_uid
-        )
+        second_matches = _conclusive_supervisor_candidates(reader, pid1, sandbox_uid)
         after_pid1 = reader.capture(1)
         if (
             between_pid1.stable_key() == pid1.stable_key()
             and after_pid1.stable_key() == pid1.stable_key()
-            and not second_inconclusive
             and len(second_matches) == 0
         ):
             raise ControlError("SUPERVISOR_NOT_RUNNING")
