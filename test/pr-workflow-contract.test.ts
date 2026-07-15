@@ -975,7 +975,6 @@ describe("pull request and main workflow contracts", () => {
     expect(parityStep.run).toContain("base=HEAD^1");
     expect(parityStep.run).toContain("head=HEAD^2");
     expect(parityStep.run).toContain('base="$PUSH_BASE_SHA"');
-
     const trustedCapabilityProbe = requiredWorkflowStep(
       prWorkflow.jobs["cli-test-shards"],
       "Detect trusted E2E support sharding",
