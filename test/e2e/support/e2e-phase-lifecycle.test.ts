@@ -132,7 +132,7 @@ describe("LifecyclePhaseFixture.simulate post-reboot-recovery (stop-original)", 
     expect(result.profile).toBe("post-reboot-recovery");
     expect(result.steps.map((step) => step.id)).toEqual([
       "docker-stop:openshell-cluster-e2e-ubuntu-repo-cloud-openclaw",
-      "gateway-restart:user-service-or-session",
+      "gateway-restart:user-service",
       "gateway-connected:nemoclaw",
       "nemoclaw-status:e2e-ubuntu-repo-cloud-openclaw",
     ]);
@@ -143,7 +143,7 @@ describe("LifecyclePhaseFixture.simulate post-reboot-recovery (stop-original)", 
       "sh -lc command -v openshell >/dev/null 2>&1 && openshell gateway stop -g nemoclaw || true",
       expect.stringContaining("sh -lc pid_file="),
       expect.stringContaining("sh -lc cid="),
-      expect.stringContaining("sh -lc set -eu"),
+      expect.stringContaining("systemctl --user is-enabled openshell-gateway"),
       "openshell status",
       "nemoclaw e2e-ubuntu-repo-cloud-openclaw status",
     ]);
@@ -190,6 +190,28 @@ describe("LifecyclePhaseFixture.simulate post-reboot-recovery (stop-original)", 
     await expect(
       fixture(runner, cleanup).simulate("post-reboot-recovery", instance()),
     ).rejects.toThrow(/could not query Docker for label/);
+  });
+
+  it("fails when the managed OpenShell gateway user service is unavailable", async () => {
+    const runner = new FakeRunner();
+    runner.enqueue(shellResult(0, "container-1\n")); // discover
+    runner.enqueue(shellResult(0)); // docker stop
+    runner.enqueue(shellResult(0)); // forward stop
+    runner.enqueue(shellResult(0)); // gateway stop
+    runner.enqueue(shellResult(0)); // pid stop
+    runner.enqueue(shellResult(0)); // container stop
+    runner.enqueue(shellResult(75, "")); // no managed user service available
+    const cleanup = new FakeCleanup();
+
+    await expect(
+      fixture(runner, cleanup).simulate("post-reboot-recovery", instance()),
+    ).rejects.toThrow(/OpenShell gateway user service is not available/);
+
+    expect(runner.calls.map((call) => `${call.command} ${call.args.join(" ")}`)).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("systemctl --user is-enabled openshell-gateway"),
+      ]),
+    );
   });
 });
 

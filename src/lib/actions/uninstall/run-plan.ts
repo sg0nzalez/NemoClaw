@@ -621,7 +621,7 @@ function removeNemoclawOpenShellGatewayUserService(runtime: UninstallRuntime): b
     unit = fs.readFileSync(servicePath, "utf-8");
   } catch {
     runtime.warn(`Failed to read ${servicePath}; leaving gateway user service in place.`);
-    return true;
+    return false;
   }
   if (
     !unit

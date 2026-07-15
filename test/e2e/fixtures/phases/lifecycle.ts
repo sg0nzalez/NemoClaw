@@ -36,6 +36,9 @@ const REBUILD_TIMEOUT_MS = 20 * 60_000;
 const SANDBOX_READY_ATTEMPTS = 30;
 const SANDBOX_READY_DELAY_MS = 5_000;
 const USER_SERVICE_UNAVAILABLE_EXIT = 75;
+const OPENSHELL_GATEWAY_USER_SERVICE = "openshell-gateway";
+const NEMOCLAW_OPENSHELL_GATEWAY_USER_SERVICE_MARKER_LINE =
+  "# NEMOCLAW_MANAGED_OPENSHELL_GATEWAY=1";
 
 export type LifecycleProfile = "post-reboot-recovery" | "dcode-rebuild-invalid-credential";
 
@@ -269,10 +272,11 @@ export class LifecyclePhaseFixture {
 
     const previousRuntime = await this.restartGatewayRuntime({
       delayMs: 0,
+      requireUserService: true,
       sandboxName: instance.sandboxName,
     });
     steps.push({
-      id: `gateway-restart:${previousRuntime?.kind ?? "user-service-or-session"}`,
+      id: `gateway-restart:${previousRuntime?.kind ?? "user-service"}`,
       results: [],
     });
     await this.waitForGatewayConnected();
@@ -359,9 +363,11 @@ export class LifecyclePhaseFixture {
 
   async startGatewayRuntime(
     previousRuntime: HostGatewayRuntime | null,
-    options: { sandboxName?: string } = {},
+    options: { requireUserService?: boolean; sandboxName?: string } = {},
   ): Promise<ShellProbeResult> {
-    const userServiceStart = await this.startOpenShellGatewayUserService();
+    const userServiceStart = await this.startOpenShellGatewayUserService({
+      requireAvailable: options.requireUserService,
+    });
     if (userServiceStart) return userServiceStart;
     if (options.sandboxName) {
       return await this.host.nemoclaw([options.sandboxName, "status"], {
@@ -384,18 +390,22 @@ export class LifecyclePhaseFixture {
     });
   }
 
-  private async startOpenShellGatewayUserService(): Promise<ShellProbeResult | null> {
+  private async startOpenShellGatewayUserService(options: {
+    requireAvailable?: boolean;
+  }): Promise<ShellProbeResult | null> {
     const result = await this.host.command(
       "sh",
       [
         "-lc",
         [
           "set -eu",
+          `unit="$HOME/.config/systemd/user/${OPENSHELL_GATEWAY_USER_SERVICE}.service"`,
           `if ! command -v systemctl >/dev/null 2>&1; then exit ${USER_SERVICE_UNAVAILABLE_EXIT}; fi`,
-          `fragment="$(systemctl --user show openshell-gateway --property=FragmentPath --value 2>/dev/null || true)"`,
-          `case "$fragment" in */openshell-gateway.service) ;; *) exit ${USER_SERVICE_UNAVAILABLE_EXIT} ;; esac`,
+          `if [ ! -f "$unit" ]; then exit ${USER_SERVICE_UNAVAILABLE_EXIT}; fi`,
+          `grep -Fxq '${NEMOCLAW_OPENSHELL_GATEWAY_USER_SERVICE_MARKER_LINE}' "$unit" || exit ${USER_SERVICE_UNAVAILABLE_EXIT}`,
+          `systemctl --user is-enabled ${OPENSHELL_GATEWAY_USER_SERVICE} >/dev/null`,
           "systemctl --user daemon-reload",
-          "systemctl --user restart openshell-gateway",
+          `systemctl --user restart ${OPENSHELL_GATEWAY_USER_SERVICE}`,
         ].join("\n"),
       ],
       {
@@ -405,7 +415,14 @@ export class LifecyclePhaseFixture {
       },
     );
     if (result.exitCode === 0) return result;
-    if (result.exitCode === USER_SERVICE_UNAVAILABLE_EXIT) return null;
+    if (result.exitCode === USER_SERVICE_UNAVAILABLE_EXIT && !options.requireAvailable) {
+      return null;
+    }
+    if (result.exitCode === USER_SERVICE_UNAVAILABLE_EXIT) {
+      throw new Error(
+        `OpenShell gateway user service is not available for reboot lifecycle recovery.`,
+      );
+    }
     throw new Error(
       `OpenShell gateway user service restart failed during reboot lifecycle: ` +
         `${result.stderr || result.stdout || `exit ${String(result.exitCode)}`}`,
@@ -413,7 +430,7 @@ export class LifecyclePhaseFixture {
   }
 
   async restartGatewayRuntime(
-    options: { delayMs?: number; sandboxName?: string } = {},
+    options: { delayMs?: number; requireUserService?: boolean; sandboxName?: string } = {},
   ): Promise<HostGatewayRuntime | null> {
     const previousRuntime = await this.stopGatewayRuntime();
     if (this.gateway) {
@@ -426,6 +443,7 @@ export class LifecyclePhaseFixture {
       await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
     await this.startGatewayRuntime(previousRuntime, {
+      requireUserService: options.requireUserService,
       sandboxName: options.sandboxName,
     });
     return previousRuntime;

@@ -848,17 +848,36 @@ Follow these steps to reconnect.
    - **Linux:** start Docker if it is not already running (`sudo systemctl start docker`)
    - **macOS:** open Docker Desktop or start Colima (`colima start`)
 
+1. Check the managed OpenShell gateway service on Linux tarball installs.
+
+   NemoClaw installs a marked user `openshell-gateway.service` on Linux tarball installs.
+   The systemd user manager starts it after reboot, or at the next user session when lingering is not enabled.
+   If `systemctl --user` is available, check and restart it first:
+
+   ```bash
+   systemctl --user status openshell-gateway
+   systemctl --user restart openshell-gateway
+   ```
+
+   On macOS, non-systemd Linux hosts, or hosts where the user service cannot be reached, continue with the NemoClaw recovery step below.
+
 1. Check sandbox state.
 
    ```bash
    openshell sandbox list
    ```
 
-   If the sandbox shows `Ready`, skip to step 4.
+   If the sandbox shows `Ready`, skip to step 5.
 
 1. Recover the managed gateway (if needed).
 
-   If the sandbox is not listed or the command fails, let NemoClaw recover the managed gateway and sandbox registration:
+   If the sandbox is not listed after the service restart, or `systemctl --user` is unavailable, first ask NemoClaw to reconnect through the recorded sandbox:
+
+   ```bash
+   $$nemoclaw <name> status
+   ```
+
+   If that cannot restore the gateway registration, resume onboarding to recreate the managed gateway metadata:
 
    ```bash
    $$nemoclaw onboard --resume

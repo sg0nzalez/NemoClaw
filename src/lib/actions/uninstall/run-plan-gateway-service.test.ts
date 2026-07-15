@@ -149,6 +149,49 @@ describe("uninstall OpenShell gateway user service", () => {
     }
   });
 
+  it("reports incomplete uninstall when the managed service cannot be read", () => {
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-uninstall-gateway-service-"));
+    const servicePath = writeManagedService(tmpHome);
+    const errors: string[] = [];
+    const originalReadFileSync = fs.readFileSync;
+    const readSpy = vi.spyOn(fs, "readFileSync").mockImplementation(((
+      target: fs.PathOrFileDescriptor,
+      options?: Parameters<typeof fs.readFileSync>[1],
+    ) => {
+      if (String(target) === servicePath) throw new Error("permission denied");
+      return originalReadFileSync(target, options as never) as ReturnType<typeof fs.readFileSync>;
+    }) as typeof fs.readFileSync);
+
+    try {
+      const result = runUninstallPlan(
+        { assumeYes: true, deleteModels: false, keepOpenShell: false },
+        {
+          commandExists: () => true,
+          env: { HOME: tmpHome } as NodeJS.ProcessEnv,
+          error: (line) => errors.push(line),
+          existsSync: (target) => String(target).startsWith(tmpHome) && fs.existsSync(target),
+          isTty: false,
+          platform: "linux",
+          rmSync: fs.rmSync,
+          run: vi.fn(() => ok()),
+          runDocker: () => ok(""),
+        },
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(fs.existsSync(servicePath)).toBe(true);
+      expect(errors).toContain(
+        `Failed to read ${servicePath}; leaving gateway user service in place.`,
+      );
+      expect(errors).toContain(
+        "Uninstall completed with errors. Some state may remain on disk; see warnings above.",
+      );
+    } finally {
+      readSpy.mockRestore();
+      fs.rmSync(tmpHome, { recursive: true, force: true });
+    }
+  });
+
   it("does not remove Linux user service units on macOS", () => {
     const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-uninstall-macos-service-"));
     const servicePath = writeManagedService(tmpHome);
