@@ -128,11 +128,10 @@ describe("shared MCP tool discovery runtime", () => {
         (_input: string | URL, init?: RequestInit) =>
           new Promise<Response>((_resolve, reject) => {
             const signal = init?.signal;
-            if (!signal) throw new Error("combined abort signal missing");
+            expect(signal).toBeDefined();
             const rejectAbort = () =>
               reject(new DOMException("Bearer untrusted-timeout-detail", "AbortError"));
-            if (signal.aborted) rejectAbort();
-            else signal.addEventListener("abort", rejectAbort, { once: true });
+            signal?.addEventListener("abort", rejectAbort, { once: true });
           }),
       );
       const boundedFetch = createBoundedMcpFetch(blockingFetch, deadline.signal);
