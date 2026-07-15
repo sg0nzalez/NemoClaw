@@ -1847,7 +1847,7 @@ For QR-paired channels (today: WhatsApp), NemoClaw destructively clears the in-s
 - OpenClaw: `/sandbox/.openclaw/<channel>/` (for example `/sandbox/.openclaw/whatsapp/`).
 - Hermes: `/sandbox/.hermes/platforms/<channel>/` (for example `/sandbox/.hermes/platforms/whatsapp/`).
 
-The cleanup tries `openshell sandbox exec` first and falls back to SSH if the exec wrapper does not return the success sentinel. If both transports fail (the sandbox is stopped, the gateway is down, or SSH cannot reach it) the command refuses to proceed to the rebuild and asks you to start the sandbox and re-run, so a half-removed state cannot leave stale Baileys auth files behind for the next rebuild to restore.
+The cleanup selects one OpenShell mutation transport and dispatches the deletion once. It does not fall back to SSH or replay the deletion when the result is inconclusive, because the first dispatch may already have removed the state. If the sandbox is stopped, its gateway is unreachable, or success cannot be confirmed, the command refuses to proceed to the rebuild and asks you to start the sandbox and re-run `channels remove`. Host-side channel state stays unchanged on that failure path, so the re-run can reconcile the removal without restoring stale Baileys auth files.
 
 ```bash
 $$nemoclaw my-assistant channels remove telegram

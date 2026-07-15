@@ -21,6 +21,7 @@ function checkAndRecoverSandboxProcesses(
 }
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });
 
@@ -79,6 +80,36 @@ function withFakeOpenshellBinary<T>(fn: () => T): T {
 }
 
 describe("checkAndRecoverSandboxProcesses custom agent recovery", () => {
+  it("fails closed before custom recovery dispatch when an endpoint override is set", () => {
+    const agentRuntime = requireSource("../src/lib/agent/runtime.ts");
+    const registry = requireSource("../src/lib/state/registry.ts");
+    const childProcess = requireSource("node:child_process");
+    const spawnSpy = vi.spyOn(childProcess, "spawnSync");
+
+    vi.stubEnv("OPENSHELL_GATEWAY_ENDPOINT", "https://other-gateway.example.test");
+    vi.spyOn(agentRuntime, "getSessionAgent").mockReturnValue({
+      name: "custom-agent",
+      displayName: "Custom Agent",
+      binary_path: "/usr/local/bin/custom-agent",
+      gateway_command: "custom-agent gateway run",
+      forwardPort: 19000,
+      healthProbe: { url: "http://127.0.0.1:19000/health", port: 19000 },
+    });
+    vi.spyOn(registry, "getSandbox").mockReturnValue({
+      name: "custom-box",
+      agent: "custom-agent",
+      dashboardPort: 19000,
+    });
+
+    expect(() =>
+      checkAndRecoverSandboxProcesses("custom-box", {
+        quiet: true,
+        isSandboxGatewayRunningImpl: () => false,
+      }),
+    ).toThrow(/Unset OPENSHELL_GATEWAY_ENDPOINT/);
+    expect(spawnSpy).not.toHaveBeenCalled();
+  });
+
   it("does not replay a custom health probe when OpenShell exec is unavailable", () => {
     const agentRuntime = requireSource("../src/lib/agent/runtime.ts");
     const registry = requireSource("../src/lib/state/registry.ts");
