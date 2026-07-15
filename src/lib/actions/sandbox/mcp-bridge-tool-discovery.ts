@@ -26,7 +26,10 @@ export const MCP_TOOL_DISCOVERY_RESULT_PROTOCOL = 1;
 export const MCP_TOOL_DISCOVERY_MAX_TOOLS = 500;
 export const MCP_TOOL_DISCOVERY_MAX_NAME_BYTES = 256;
 const MCP_TOOL_DISCOVERY_MAX_DETAIL_BYTES = 512;
-const MCP_TOOL_DISCOVERY_MAX_OUTPUT_BYTES = 196_608;
+// The compact runtime result may JSON-escape every byte in 500 valid 256-byte
+// tool names. Keep that worst case inside the host boundary while retaining a
+// strict cap on sandbox output.
+const MCP_TOOL_DISCOVERY_MAX_OUTPUT_BYTES = 256 * 1_024;
 const UNSAFE_TEXT = /[\u0000-\u001f\u007f-\u009f]/u;
 
 export interface McpToolDiscoveryReadiness {

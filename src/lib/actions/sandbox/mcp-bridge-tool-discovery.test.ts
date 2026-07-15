@@ -80,6 +80,32 @@ describe("MCP tool discovery host boundary (#6901)", () => {
     });
   });
 
+  it("accepts the bounded inventory when valid names require maximum JSON escaping", () => {
+    const tools = Array.from(
+      { length: 500 },
+      (_, index) => `${"\\".repeat(250)}${String(index).padStart(6, "0")}`,
+    );
+
+    expect(
+      classifyMcpToolDiscoveryResult(
+        framedResult({
+          protocol: 1,
+          ok: true,
+          count: tools.length,
+          tools,
+          truncated: false,
+        }),
+        entry,
+        marker,
+      ),
+    ).toEqual({
+      ok: true,
+      count: tools.length,
+      tools,
+      truncated: false,
+    });
+  });
+
   it("fails closed on malformed, duplicate, unsorted, or unframed results", () => {
     for (const result of [
       framedResult({ protocol: 1, ok: true, count: 1, tools: ["bad\nname"], truncated: false }),
