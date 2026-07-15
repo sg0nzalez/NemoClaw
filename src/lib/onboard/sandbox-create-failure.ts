@@ -47,10 +47,14 @@ export function removeFailedSandboxForRetry(
   sandboxName: string,
   runOpenshell: SandboxDeleteRunner,
 ): void {
-  const result = runOpenshell(["sandbox", "delete", sandboxName], { ignoreError: true });
-  if (result.status === 0) {
-    console.error("  The failed sandbox has been removed; retry will recreate it.");
-    return;
+  try {
+    const result = runOpenshell(["sandbox", "delete", sandboxName], { ignoreError: true });
+    if (result.status === 0) {
+      console.error("  The failed sandbox has been removed; retry will recreate it.");
+      return;
+    }
+  } catch {
+    // Preserve the original create failure and its exit status below.
   }
   console.error("  Could not remove the failed sandbox. Manual cleanup:");
   console.error(`    openshell sandbox delete "${sandboxName}"`);

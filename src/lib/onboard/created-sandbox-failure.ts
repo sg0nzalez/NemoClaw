@@ -55,10 +55,18 @@ export function reportSandboxCreateFailure(
     deps.error("");
     deps.error(redactedCreateOutput);
   }
-  deps.printCreateFailureDiagnostics(options.sandboxName, {
-    backupPath: options.restoreBackupPath,
-  });
-  deps.cleanupFailedCreate(failure.kind, redactedCreateOutput);
+  try {
+    deps.printCreateFailureDiagnostics(options.sandboxName, {
+      backupPath: options.restoreBackupPath,
+    });
+  } catch {
+    deps.error("  Could not save sandbox failure diagnostics; continuing recovery.");
+  }
+  try {
+    deps.cleanupFailedCreate(failure.kind, redactedCreateOutput);
+  } catch {
+    deps.error("  Automatic failed-sandbox cleanup did not complete; continuing recovery.");
+  }
   deps.error("  Try:  openshell sandbox list        # check gateway state");
   deps.printRecoveryHints(redactedCreateOutput, { createArgs: options.createArgs });
   return deps.exitProcess(options.createStatus === 0 ? 1 : options.createStatus);

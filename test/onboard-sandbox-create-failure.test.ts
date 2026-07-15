@@ -190,4 +190,25 @@ describe("sandbox create failure handling", () => {
 
     expect(runOpenshell).not.toHaveBeenCalled();
   });
+
+  it("keeps a throwing delete runner on the manual-cleanup path", () => {
+    const runOpenshell = vi.fn(() => {
+      throw new Error("gateway unavailable");
+    });
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    cleanupLandlockSandboxAfterCreateFailure({
+      failureKind: "landlock_enforcement_failed",
+      createOutput:
+        "Created sandbox: dcode-landlock-current\n" +
+        "Landlock unavailable in hard_requirement mode: not enabled in the active LSM set",
+      sandboxName: "dcode-landlock-current",
+      runOpenshell,
+    });
+
+    expect(runOpenshell).toHaveBeenCalledOnce();
+    expect(error).toHaveBeenCalledWith("  Could not remove the failed sandbox. Manual cleanup:");
+    expect(error).toHaveBeenCalledWith('    openshell sandbox delete "dcode-landlock-current"');
+    error.mockRestore();
+  });
 });

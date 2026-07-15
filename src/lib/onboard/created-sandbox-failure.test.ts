@@ -93,6 +93,47 @@ describe("reportSandboxCreateFailure", () => {
     expect(deps.warn).not.toHaveBeenCalled();
   });
 
+  it("preserves cleanup, recovery hints, and exit status when diagnostics collection fails", () => {
+    const deps = createFailureDeps({
+      printCreateFailureDiagnostics: vi.fn(() => {
+        throw new Error("diagnostics disk unavailable");
+      }),
+    });
+
+    expect(() =>
+      reportSandboxCreateFailure(createFailureOptions({ createStatus: 47 }), deps),
+    ).toThrow(ExitSignal);
+
+    expect(deps.cleanupFailedCreate).toHaveBeenCalledWith("unknown", "boom");
+    expect(deps.printRecoveryHints).toHaveBeenCalledWith("boom", {
+      createArgs: ["sandbox", "create", "alpha"],
+    });
+    expect(deps.error).toHaveBeenCalledWith(
+      "  Could not save sandbox failure diagnostics; continuing recovery.",
+    );
+    expect(deps.exitProcess).toHaveBeenCalledWith(47);
+  });
+
+  it("preserves recovery hints and exit status when cleanup fails unexpectedly", () => {
+    const deps = createFailureDeps({
+      cleanupFailedCreate: vi.fn(() => {
+        throw new Error("delete runner unavailable");
+      }),
+    });
+
+    expect(() =>
+      reportSandboxCreateFailure(createFailureOptions({ createStatus: 53 }), deps),
+    ).toThrow(ExitSignal);
+
+    expect(deps.printRecoveryHints).toHaveBeenCalledWith("boom", {
+      createArgs: ["sandbox", "create", "alpha"],
+    });
+    expect(deps.error).toHaveBeenCalledWith(
+      "  Automatic failed-sandbox cleanup did not complete; continuing recovery.",
+    );
+    expect(deps.exitProcess).toHaveBeenCalledWith(53);
+  });
+
   it("redacts create output before classification and echoing", () => {
     // With output: leading blank + headline + blank + output echo + "Try:" hint = 5 error() calls.
     const withOutput = createFailureDeps();
