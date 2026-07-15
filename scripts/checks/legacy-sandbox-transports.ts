@@ -238,7 +238,12 @@ function scanSource(
       if (first === "docker" && second === "exec") {
         increment(counts, "docker-exec-command");
       }
-      if (first === "sandbox" && second === "ssh-config") {
+      const openshellCommandIndex =
+        first === "--gateway" ? 2 : first?.startsWith("--gateway=") ? 1 : 0;
+      if (
+        literalText(node.elements[openshellCommandIndex]) === "sandbox" &&
+        literalText(node.elements[openshellCommandIndex + 1]) === "ssh-config"
+      ) {
         increment(counts, "openshell-ssh-config");
       }
     }
