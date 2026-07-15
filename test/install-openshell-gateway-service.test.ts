@@ -91,6 +91,62 @@ describe("install.sh OpenShell gateway service", () => {
     }
   });
 
+  it("skips OpenShell reinstall on macOS when the Homebrew service is present", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-install-gateway-service-"));
+    const eventsPath = path.join(tmp, "events.log");
+
+    try {
+      const result = runInstallHelper(
+        tmp,
+        [
+          'uname() { [[ "${1:-}" == "-s" ]] && printf "Darwin\\n" || printf "arm64\\n"; }',
+          'command_exists() { [[ "$1" == openshell ]]; }',
+          'brew() { [[ "$*" == "list --formula openshell" ]]; }',
+          `spin() { printf 'spin\\n' >>${JSON.stringify(eventsPath)}; return 1; }`,
+          `prefer_user_local_openshell() { printf 'prefer\\n' >>${JSON.stringify(eventsPath)}; }`,
+          `install_nemoclaw_openshell_gateway_user_service() { printf 'service\\n' >>${JSON.stringify(eventsPath)}; }`,
+          "maybe_install_openshell_during_install if-missing",
+        ].join("\n"),
+      );
+
+      expect(result.status).toBe(0);
+      expect(fs.readFileSync(eventsPath, "utf-8")).toBe("prefer\nservice\n");
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("installs OpenShell on macOS when only the CLI exists and the Homebrew service is missing", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-install-gateway-service-"));
+    const eventsPath = path.join(tmp, "events.log");
+
+    try {
+      const result = runInstallHelper(
+        tmp,
+        [
+          'uname() { [[ "${1:-}" == "-s" ]] && printf "Darwin\\n" || printf "arm64\\n"; }',
+          'command_exists() { [[ "$1" == openshell ]]; }',
+          'brew() { [[ "$*" == "list --formula openshell" ]] && return 1; return 0; }',
+          `spin() { printf 'spin:%s\\n' "$*" >>${JSON.stringify(eventsPath)}; return 0; }`,
+          `prefer_user_local_openshell() { printf 'prefer\\n' >>${JSON.stringify(eventsPath)}; }`,
+          `install_nemoclaw_openshell_gateway_user_service() { printf 'service\\n' >>${JSON.stringify(eventsPath)}; }`,
+          "maybe_install_openshell_during_install if-missing",
+        ].join("\n"),
+      );
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain(
+        "OpenShell CLI exists but the macOS Homebrew gateway service is missing.",
+      );
+      const events = fs.readFileSync(eventsPath, "utf-8");
+      expect(events).toContain("spin:Installing OpenShell CLI bash ");
+      expect(events).toContain("/scripts/install-openshell.sh\n");
+      expect(events).toContain("prefer\nservice\n");
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it("uses absolute XDG_CONFIG_HOME for the Linux user service path", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-install-gateway-service-"));
     const configHome = path.join(tmp, "xdg-config");

@@ -848,9 +848,16 @@ Follow these steps to reconnect.
    - **Linux:** start Docker if it is not already running (`sudo systemctl start docker`)
    - **macOS:** open Docker Desktop or start Colima (`colima start`)
 
-1. Check the managed OpenShell gateway service on Linux tarball installs.
+1. Check the managed OpenShell gateway service.
 
-   NemoClaw installs a marked user `openshell-gateway.service` on Linux tarball installs.
+   On Apple Silicon macOS, OpenShell is installed through Homebrew and the gateway is a Homebrew service:
+
+   ```bash
+   brew services list
+   brew services restart openshell
+   ```
+
+   On Linux tarball installs, NemoClaw installs a marked user `openshell-gateway.service`.
    The unit is written under `$XDG_CONFIG_HOME/systemd/user` when `XDG_CONFIG_HOME` is absolute, otherwise under `~/.config/systemd/user`.
    The service generates the local OpenShell mTLS bundle before starting and then reads NemoClaw's `openshell/gateway.env` overrides.
    The systemd user manager starts it after reboot, or at the next user session when lingering is not enabled.
@@ -861,7 +868,7 @@ Follow these steps to reconnect.
    systemctl --user restart openshell-gateway
    ```
 
-   On macOS, non-systemd Linux hosts, or hosts where the user service cannot be reached, continue with the NemoClaw recovery step below.
+   On non-systemd Linux hosts or hosts where the user service cannot be reached, continue with the NemoClaw recovery step below.
 
 1. Check sandbox state.
 

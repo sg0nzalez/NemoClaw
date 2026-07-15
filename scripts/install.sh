@@ -1129,6 +1129,12 @@ upstream_openshell_gateway_user_service_installed() {
     || [[ -f /lib/systemd/user/openshell-gateway.service ]]
 }
 
+macos_openshell_homebrew_gateway_service_installed() {
+  [[ "$(uname -s)" == "Darwin" ]] || return 1
+  command -v brew >/dev/null 2>&1 || return 1
+  brew list --formula openshell >/dev/null 2>&1
+}
+
 resolve_openshell_gateway_bin_for_service() {
   local gateway_bin="${NEMOCLAW_OPENSHELL_GATEWAY_BIN:-}"
   if [[ -n "$gateway_bin" && -x "$gateway_bin" ]]; then
@@ -1255,9 +1261,13 @@ maybe_install_openshell_during_install() {
     return 0
   fi
   if [[ "$mode" == "if-missing" ]] && command_exists openshell; then
-    prefer_user_local_openshell
-    install_nemoclaw_openshell_gateway_user_service
-    return 0
+    if [[ "$(uname -s)" == "Darwin" ]] && ! macos_openshell_homebrew_gateway_service_installed; then
+      info "OpenShell CLI exists but the macOS Homebrew gateway service is missing."
+    else
+      prefer_user_local_openshell
+      install_nemoclaw_openshell_gateway_user_service
+      return 0
+    fi
   fi
   spin "Installing OpenShell CLI" bash "${NEMOCLAW_SOURCE_ROOT}/scripts/install-openshell.sh"
   prefer_user_local_openshell

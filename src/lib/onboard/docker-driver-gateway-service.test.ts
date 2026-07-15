@@ -61,12 +61,27 @@ function homeEnv(home: string, xdgConfigHome = ""): NodeJS.ProcessEnv {
 }
 
 describe("docker-driver-gateway-service", () => {
-  it("detects the upstream OpenShell user service only on Linux", () => {
+  it("detects the platform OpenShell gateway service", () => {
     const existsSync = (candidate: string) =>
       candidate === "/usr/lib/systemd/user/openshell-gateway.service";
+    const spawnSyncImpl = vi.fn((_command: string, args: string[]) =>
+      args.join(" ") === "list --formula openshell" ? spawnResult() : spawnResult(1, "unexpected"),
+    );
 
     expect(hasOpenShellGatewayUserService({ existsSync, platform: "linux" })).toBe(true);
     expect(hasOpenShellGatewayUserService({ existsSync, platform: "darwin" })).toBe(false);
+    expect(
+      hasOpenShellGatewayUserService({
+        commandExists: (command) => command === "brew",
+        platform: "darwin",
+        spawnSyncImpl,
+      }),
+    ).toBe(true);
+    expect(spawnSyncImpl).toHaveBeenCalledWith(
+      "brew",
+      ["list", "--formula", "openshell"],
+      expect.objectContaining({ encoding: "utf-8" }),
+    );
     expect(getOpenShellGatewayUserServicePaths()).toEqual([
       "/usr/local/lib/systemd/user/openshell-gateway.service",
       "/usr/lib/systemd/user/openshell-gateway.service",
@@ -287,6 +302,57 @@ describe("docker-driver-gateway-service", () => {
       ["systemctl", ["--user", "restart", "openshell-gateway"]],
       ["systemctl", ["--user", "is-active", "--quiet", "openshell-gateway"]],
     ]);
+  });
+
+  it("restarts the macOS Homebrew gateway service", () => {
+    const events: string[] = [];
+    const spawnSyncImpl = vi.fn((_command: string, args: string[]) => {
+      events.push(args.join(" "));
+      return spawnResult();
+    });
+
+    const result = startOpenShellGatewayUserService({
+      commandExists: (command) => command === "brew",
+      env: {},
+      platform: "darwin",
+      prepareServiceEnv: () => events.push("prepare-env"),
+      spawnSyncImpl,
+    });
+
+    expect(result).toEqual({
+      attempted: true,
+      fallbackAllowed: false,
+      manager: "homebrew",
+      serviceName: "openshell",
+      started: true,
+      statusCommand: "brew services info openshell",
+    });
+    expect(events).toEqual([
+      "list --formula openshell",
+      "prepare-env",
+      "services restart openshell",
+    ]);
+  });
+
+  it("does not fall back when the macOS Homebrew service restart fails", () => {
+    const result = startOpenShellGatewayUserService({
+      commandExists: (command) => command === "brew",
+      env: {},
+      platform: "darwin",
+      spawnSyncImpl: vi.fn((_command: string, args: string[]) =>
+        args[0] === "services" ? spawnResult(1, "launchctl failed") : spawnResult(),
+      ),
+    });
+
+    expect(result).toMatchObject({
+      attempted: true,
+      fallbackAllowed: false,
+      manager: "homebrew",
+      serviceName: "openshell",
+      started: false,
+      statusCommand: "brew services info openshell",
+    });
+    expect(result.reason).toContain("launchctl failed");
   });
 
   it("allows standalone fallback when the user systemd manager is unavailable", () => {
