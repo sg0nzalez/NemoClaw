@@ -283,10 +283,8 @@ async function assertAdapterDnsRebindingDenied(
     `${options.artifactPrefix}-dns-rebinding-secret-absent-from-sandbox`,
   );
 
-  // If OpenShell resolved a second time after validating allowed_ips, this
-  // reachable runner address would receive the request. The pinned v0.0.72
-  // implementation instead returns the one resolved-and-validated SocketAddr
-  // list directly to connect; see the exact proxy.rs citation in the helper.
+  // A second resolution after allowed_ips validation would reach the runner address.
+  // The pinned implementation connects with the already validated SocketAddr list.
   const reboundAddress = await hostPrivateAddressForSandbox(host);
   expect(reboundAddress).not.toBe(REBIND_PUBLIC_IP);
   await remapDnsRebindingHostname(
@@ -317,9 +315,7 @@ async function assertAdapterDnsRebindingDenied(
     `${options.artifactPrefix} rebound request must not reach the upstream MCP server`,
   ).toHaveLength(0);
 
-  // Restore while the current sandbox container is stable. Removing the MCP
-  // route reloads policy and can restart the container first; the registered
-  // cleanup remains an idempotent fallback.
+  // Restore before route removal can reload policy; registered cleanup remains a fallback.
   await restoreDnsRebindingHostsFixture(host, options.sandboxName, hostsFixture);
   const remove = await host.nemoclaw([options.sandboxName, "mcp", "remove", REBIND_SERVER_NAME], {
     artifactName: `${options.artifactPrefix}-mcp-dns-rebinding-remove`,
@@ -450,11 +446,8 @@ async function assertConcurrentAddSerialized(
         artifactName: `${options.artifactPrefix}-mcp-concurrent-add-${attempt}`,
         env,
         redactionValues: [HOST_SECRET],
-        // Hermes may need one host-authenticated managed restart (210s), a
-        // fresh helper-readiness window (90s), and its acknowledged config
-        // reload (300s). Keep both concurrent clients alive through that
-        // bounded recovery; the loser then acquires the lifecycle lock and
-        // rejects the committed duplicate.
+        // Cover a managed restart, helper readiness, and acknowledged config reload.
+        // The losing client then acquires the lock and rejects the committed duplicate.
         timeoutMs: MCP_MUTATION_TIMEOUT_MS[options.expectedAdapter],
       }),
     ),
@@ -881,10 +874,8 @@ test("mcp-bridge", { timeout: 45 * 60_000 }, async ({ artifacts, cleanup, host, 
     sandboxName: OPENCLAW_SANDBOX_NAME,
     artifactName: "onboard-openclaw-mcp-bridge",
   });
-  // Exercise the raw OpenShell `allowed_ips` boundary before any NemoClaw MCP
-  // mutation. The helper uses a direct curl request with a /** binary grant,
-  // then restores this sandbox's exact base policy before returning, so this
-  // proof is independent of both the CLI implementation and adapter identity.
+  // Exercise the raw OpenShell `allowed_ips` boundary before any NemoClaw MCP mutation.
+  // The helper restores the base policy, keeping this proof independent of the CLI and adapter.
   await assertRawOpenShellAllowedIpsRebindingDenied({
     artifacts,
     env: buildAvailabilityProbeEnv(),
