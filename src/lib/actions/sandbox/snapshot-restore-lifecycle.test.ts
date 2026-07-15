@@ -185,6 +185,26 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
   });
 
   it("hardens an active timer window before force-deleting a restore destination", async () => {
+    const mutationOrder: string[] = [];
+    f.getOpenShellSandboxDescriptorMock.mockImplementation(async (_gateway, sandboxName) => {
+      mutationOrder.push("read descriptor");
+      return {
+        id: `${sandboxName}-id`,
+        name: sandboxName,
+        image: "nemoclaw-alpha:live-descriptor",
+      };
+    });
+    f.runOpenshellMock.mockImplementation((args) => {
+      if (args[0] === "sandbox" && args[1] === "delete") {
+        mutationOrder.push("delete");
+        f.lifecycleMock.events.push("delete");
+      }
+      return { status: 0, output: "" };
+    });
+    f.streamSandboxCreateMock.mockImplementation(async () => {
+      mutationOrder.push("create");
+      return { status: 0, output: "", sawProgress: false, forcedReady: false };
+    });
     f.lifecycleMock.readTimerMarkerMock.mockReturnValue({
       pid: 4242,
       sandboxName: "beta",
@@ -246,50 +266,43 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
       f.lifecycleMock.events.indexOf("cleanup-shields"),
     );
     expect(f.streamSandboxCreateMock).toHaveBeenCalled();
+    expect(f.getOpenShellSandboxDescriptorMock).toHaveBeenNthCalledWith(1, "nemoclaw", "alpha");
+    expect(f.getOpenShellSandboxDescriptorMock).toHaveBeenNthCalledWith(2, "nemoclaw", "alpha");
+    expect(f.streamSandboxCreateMock.mock.calls[0]?.[1]).toContain(
+      "nemoclaw-alpha:live-descriptor",
+    );
+    expect(mutationOrder).toEqual(["read descriptor", "read descriptor", "delete", "create"]);
     expect(f.restoreSandboxStateMock).toHaveBeenCalledWith("beta", "/tmp/backup-alpha");
   });
 
-  it("uses the live OpenShell descriptor image for Kubernetes snapshot clones", async () => {
-    let registeredClone: ReturnType<typeof f.getSandboxMock> = null;
-    f.registerSandboxMock.mockImplementation((entry) => (registeredClone = entry as never));
-    f.getSandboxMock.mockImplementation((name) =>
-      name === "alpha"
-        ? {
-            name: "alpha",
-            agent: "openclaw",
-            gatewayName: "nemoclaw-8090",
-            imageTag: "nemoclaw-alpha:stale-registry",
-            openshellDriver: "kubernetes",
-            provider: "nvidia-nim",
-            model: "nvidia/model-a",
-          }
-        : registeredClone,
-    );
-    f.getOpenShellSandboxDescriptorMock.mockResolvedValue({
-      id: "alpha-id",
-      name: "alpha",
-      image: "nemoclaw-alpha:live-descriptor",
-    });
-    f.captureOpenshellMock.mockImplementation((args) =>
-      f.openshellResponses(args, {
-        "sandbox exec": { status: 0, output: f.dcodeProbeOutput("no-runtime") },
-        "sandbox list": { status: 0, output: "alpha Ready\nbeta Ready\n" },
-      }),
-    );
+  it("does not delete or create when the live source descriptor drifts", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    f.getSandboxMock.mockImplementation((name) => ({
+      name: name ?? "alpha",
+      agent: "openclaw",
+      provider: "nvidia-nim",
+      model: "nvidia/model-a",
+    }));
+    f.parseLiveSandboxNamesMock.mockReturnValue(new Set(["alpha", "beta"]));
     f.getLatestBackupMock.mockReturnValue({ ...f.latestBackupFixture });
+    f.getOpenShellSandboxDescriptorMock
+      .mockResolvedValueOnce({ id: "alpha-id", name: "alpha", image: "alpha:v1" })
+      .mockResolvedValueOnce({ id: "alpha-id", name: "alpha", image: "alpha:v2" });
     const { runSandboxSnapshot } = await import("./snapshot");
 
-    await runSandboxSnapshot("alpha", { kind: "restore", to: "beta" });
+    await expect(
+      runSandboxSnapshot("alpha", {
+        kind: "restore",
+        to: "beta",
+        force: true,
+        yes: true,
+      }),
+    ).rejects.toMatchObject({ exitCode: 1 });
 
-    expect(f.getOpenShellSandboxDescriptorMock).toHaveBeenCalledTimes(2);
-    expect(f.getOpenShellSandboxDescriptorMock).toHaveBeenNthCalledWith(
-      1,
-      "nemoclaw-8090",
-      "alpha",
-    );
-    const createArgs = f.streamSandboxCreateMock.mock.calls[0]?.[1] ?? [];
-    expect(createArgs).toContain("nemoclaw-alpha:live-descriptor");
-    expect(createArgs).not.toContain("nemoclaw-alpha:stale-registry");
+    expect(consoleError.mock.calls.flat().join("\n")).toContain("Source sandbox image changed");
+    expect(f.lifecycleMock.events).not.toContain("delete");
+    expect(f.streamSandboxCreateMock).not.toHaveBeenCalled();
+    expect(f.registerSandboxMock).not.toHaveBeenCalled();
   });
 
   it("blocks auto-create before deleting a destination when a gateway peer conflicts", async () => {

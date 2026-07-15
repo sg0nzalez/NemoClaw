@@ -69,11 +69,12 @@ import {
   createSandboxExecMarker,
   extractSandboxExecCommandStdoutFromStreams,
 } from "./sandbox-exec-output";
+import { probeGatewayRunning, selectSandboxGatewayIfRegistered } from "./sandbox-gateway-routing";
 import {
-  probeGatewayRunning,
-  selectSandboxGatewayIfRegistered,
-  usesGatewayMetadataProbe,
-} from "./sandbox-gateway-routing";
+  commitWithStableSnapshotRestoreSource,
+  type SnapshotRestoreSourceDescriptor,
+  SnapshotRestoreSourceError,
+} from "./snapshot-restore-source";
 
 const useColor = !process.env.NO_COLOR && !!process.stdout.isTTY;
 const trueColor =
@@ -152,29 +153,18 @@ function renderSnapshotTable(
   }
 }
 
-// Resolve the running source sandbox's image. Docker- and VM-driver sandboxes
-// trust the registered imageTag. Kubernetes sandboxes use OpenShell's strict
-// descriptor read instead of reaching through the gateway container to run
-// kubectl on OpenShell's internal cluster.
-async function resolveSrcPodImage(
-  srcName: string,
-  srcEntry?: SandboxEntry | { name: string },
-): Promise<string | null> {
-  const registeredImage = (srcEntry as { imageTag?: string | null } | undefined)?.imageTag;
-  const registeredDriver = (srcEntry as { openshellDriver?: string | null } | undefined)
-    ?.openshellDriver;
-  if (usesGatewayMetadataProbe(registeredDriver)) {
-    return registeredImage ?? null;
+async function readSnapshotRestoreSourceDescriptor(
+  sandboxName: string,
+): Promise<SnapshotRestoreSourceDescriptor> {
+  const sourceEntry = registry.getSandbox(sandboxName);
+  if (!sourceEntry) {
+    throw new Error(`Source sandbox '${sandboxName}' has no durable route metadata.`);
   }
-
-  const srcGatewayName = resolveSandboxGatewayName(
-    srcEntry as { gatewayName?: string | null; gatewayPort?: number | null },
-  );
-  try {
-    return (await getOpenShellSandboxDescriptor(srcGatewayName, srcName)).image;
-  } catch {
-    return null;
-  }
+  const gatewayName = resolveSandboxGatewayName(sourceEntry);
+  return {
+    gatewayName,
+    ...(await getOpenShellSandboxDescriptor(gatewayName, sandboxName)),
+  };
 }
 
 // Allocate the clone's own dashboard port. Dashboard ports are per-sandbox
@@ -913,7 +903,7 @@ async function runSnapshotRestoreUnlocked(
     // used to overlay onto the live filesystem silently. Refuse by default
     // *before* doing any source-side preflight, so the user sees the
     // precise "destination exists" error instead of a misleading
-    // "source not found" or "cannot resolve image" message when both are
+    // "source not found" or "invalid source descriptor" message when both are
     // also broken.
     if (targetExists && !request.force) {
       console.error(`  Destination sandbox '${targetSandbox}' already exists.`);
@@ -926,9 +916,7 @@ async function runSnapshotRestoreUnlocked(
       snapshotExit(1);
     }
     // Cross-sandbox restore — whether dst exists (with --force) or not,
-    // we must be able to clone the source's running pod image. Resolve it
-    // upfront so a missing source / unresolvable image cannot delete the
-    // destination first (#3756 P1).
+    // the source must still be live before entering the guarded clone flow.
     if (!sourceLiveNames.has(sandboxName)) {
       if (targetExists) {
         console.error(
@@ -942,12 +930,10 @@ async function runSnapshotRestoreUnlocked(
       }
       snapshotExit(1);
     }
-    const srcEntry = registry.getSandbox(sandboxName) || { name: sandboxName };
-    const fromImage = await resolveSrcPodImage(sandboxName, srcEntry);
-    if (!fromImage) {
+    const srcEntry = registry.getSandbox(sandboxName);
+    if (!srcEntry) {
       console.error(
-        `  Cannot resolve image for source sandbox '${sandboxName}' — aborting before ` +
-          (targetExists ? `deleting '${targetSandbox}'.` : `creating '${targetSandbox}'.`),
+        `  Cannot auto-create '${targetSandbox}': source '${sandboxName}' has no durable route metadata.`,
       );
       snapshotExit(1);
     }
@@ -970,73 +956,78 @@ async function runSnapshotRestoreUnlocked(
     }
     const sourceGatewayName = resolveSandboxGatewayName(srcEntry);
     const createAndRegisterClone = async (): Promise<void> => {
-      if (!targetExists && registry.getSandbox(targetSandbox)) {
-        console.error(
-          `  Destination sandbox '${targetSandbox}' was registered while this restore was waiting. Retry with --force only after reviewing that sandbox.`,
-        );
-        snapshotExit(1);
-      }
-      const lockedSourceEntry = registry.getSandbox(sandboxName);
-      if (!lockedSourceEntry) {
-        console.error(
-          `  Cannot auto-create '${targetSandbox}': source '${sandboxName}' has no durable inference route metadata.`,
-        );
-        snapshotExit(1);
-      }
-      if (getSandboxEntryInference(lockedSourceEntry).kind !== "configured") {
-        console.error(
-          `  Cannot auto-create '${targetSandbox}': source '${sandboxName}' has no complete durable inference route.`,
-        );
-        snapshotExit(1);
-      }
-      const lockedFromImage = await resolveSrcPodImage(sandboxName, lockedSourceEntry);
-      if (!lockedFromImage) {
-        console.error(
-          `  Cannot resolve the current image for source sandbox '${sandboxName}' — aborting before changing '${targetSandbox}'.`,
-        );
-        snapshotExit(1);
-      }
-      const lockedGatewayName = resolveSandboxGatewayName(lockedSourceEntry);
-      if (lockedGatewayName !== sourceGatewayName) {
-        console.error(
-          `  Source sandbox '${sandboxName}' changed OpenShell gateways while waiting to restore. Retry the command.`,
-        );
-        snapshotExit(1);
-      }
-      const compatibility = checkGatewayRouteCompatibility({
-        gatewayName: sourceGatewayName,
-        sandboxName: targetSandbox,
-        route: lockedSourceEntry,
-        sandboxes: registry.listSandboxes().sandboxes,
-      });
-      if (!compatibility.ok) {
-        console.error(`  Error: ${formatGatewayRouteConflict(compatibility)}`);
-        snapshotExit(1);
-      }
-      // Allocate the clone's dashboard port before any destructive action, so
-      // dashboard-port-range exhaustion aborts before `deleteSandboxForRestore`
-      // removes the existing `--force` destination — matching the pre-delete
-      // validation the image and gateway-route checks above already do (#3756).
-      const dstDashboardPort = allocateCloneDashboardPort(targetSandbox, lockedSourceEntry);
-      const dashboardEnvArgs = resolveCloneDashboardEnvArgs(lockedSourceEntry, dstDashboardPort);
-      if (targetExists) {
-        if (targetEntry) {
-          verifyRestoreDestinationOnOwnGateway(targetSandbox);
-        }
-        deleteSandboxForRestore(targetSandbox);
-        requireLiveSandboxesOnSandboxGateway(
+      try {
+        await commitWithStableSnapshotRestoreSource({
+          gatewayName: sourceGatewayName,
           sandboxName,
-          "  Failed to re-select source sandbox gateway after deleting destination.",
-        );
+          readDescriptor: readSnapshotRestoreSourceDescriptor,
+          preMutationCheck: () => {
+            if (!targetExists && registry.getSandbox(targetSandbox)) {
+              console.error(
+                `  Destination sandbox '${targetSandbox}' was registered while this restore was waiting. Retry with --force only after reviewing that sandbox.`,
+              );
+              snapshotExit(1);
+            }
+            const sourceEntry = registry.getSandbox(sandboxName);
+            if (!sourceEntry) {
+              console.error(
+                `  Cannot auto-create '${targetSandbox}': source '${sandboxName}' has no durable inference route metadata.`,
+              );
+              snapshotExit(1);
+            }
+            if (getSandboxEntryInference(sourceEntry).kind !== "configured") {
+              console.error(
+                `  Cannot auto-create '${targetSandbox}': source '${sandboxName}' has no complete durable inference route.`,
+              );
+              snapshotExit(1);
+            }
+            if (resolveSandboxGatewayName(sourceEntry) !== sourceGatewayName) {
+              console.error(
+                `  Source sandbox '${sandboxName}' changed OpenShell gateways while waiting to restore. Retry the command.`,
+              );
+              snapshotExit(1);
+            }
+            const compatibility = checkGatewayRouteCompatibility({
+              gatewayName: sourceGatewayName,
+              sandboxName: targetSandbox,
+              route: sourceEntry,
+              sandboxes: registry.listSandboxes().sandboxes,
+            });
+            if (!compatibility.ok) {
+              console.error(`  Error: ${formatGatewayRouteConflict(compatibility)}`);
+              snapshotExit(1);
+            }
+            const dashboardPort = allocateCloneDashboardPort(targetSandbox, sourceEntry);
+            const dashboardEnvArgs = resolveCloneDashboardEnvArgs(sourceEntry, dashboardPort);
+            if (targetExists && targetEntry) {
+              verifyRestoreDestinationOnOwnGateway(targetSandbox);
+            }
+            return { dashboardEnvArgs, dashboardPort, sourceEntry };
+          },
+          commit: async (descriptor, preflight) => {
+            if (targetExists) {
+              deleteSandboxForRestore(targetSandbox);
+              requireLiveSandboxesOnSandboxGateway(
+                sandboxName,
+                "  Failed to re-select source sandbox gateway after deleting destination.",
+              );
+            }
+            await autoCreateSandboxFromSource(
+              sandboxName,
+              targetSandbox,
+              preflight.sourceEntry,
+              descriptor.image,
+              preflight.dashboardPort,
+              preflight.dashboardEnvArgs,
+            );
+          },
+        });
+      } catch (error) {
+        if (!(error instanceof SnapshotRestoreSourceError)) throw error;
+        const detail = error instanceof Error ? error.message : String(error);
+        console.error(`  Cannot verify source sandbox '${sandboxName}': ${detail}`);
+        snapshotExit(1);
       }
-      await autoCreateSandboxFromSource(
-        sandboxName,
-        targetSandbox,
-        lockedSourceEntry,
-        lockedFromImage,
-        dstDashboardPort,
-        dashboardEnvArgs,
-      );
     };
     // Lock order matches onboard: sandbox (outer caller), host dashboard,
     // gateway route. The host-wide lease stays held from port selection until

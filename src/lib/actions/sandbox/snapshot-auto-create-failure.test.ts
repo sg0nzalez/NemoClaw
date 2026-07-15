@@ -20,6 +20,11 @@ const getSandboxMock = vi.fn((name?: string) =>
 );
 const registerSandboxMock = vi.fn();
 const restoreSandboxStateMock = vi.fn();
+const getOpenShellSandboxDescriptorMock = vi.fn(async (_gateway: string, name: string) => ({
+  id: `${name}-id`,
+  name,
+  image: "nemoclaw-alpha:live",
+}));
 const streamSandboxCreateMock = vi.fn<SnapshotStreamSandboxCreateMock>(async () => ({
   status: 7,
   output: "create failed before registry write",
@@ -34,7 +39,7 @@ vi.mock("../../adapters/openshell/runtime", () => ({
   runOpenshell: vi.fn(() => ({ status: 0, output: "" })),
 }));
 vi.mock("../../adapters/openshell/sandbox-control-routing", () => ({
-  getOpenShellSandboxDescriptor: vi.fn(),
+  getOpenShellSandboxDescriptor: getOpenShellSandboxDescriptorMock,
 }));
 vi.mock("../../credentials/store", () => ({ prompt: vi.fn() }));
 vi.mock("../../domain/sandbox/destroy", () => ({
