@@ -114,10 +114,16 @@ function restoreEnv(name: string, value: string | undefined): void {
 }
 
 describe("LifecyclePhaseFixture.simulate post-reboot-recovery (stop-original)", () => {
-  it("stops the labeled container then runs `nemoclaw <name> status`", async () => {
+  it("stops the labeled container, restarts the gateway service, then runs status", async () => {
     const runner = new FakeRunner();
     runner.enqueue(shellResult(0, "openshell-cluster-e2e-ubuntu-repo-cloud-openclaw\n")); // discover
     runner.enqueue(shellResult(0)); // docker stop
+    runner.enqueue(shellResult(0)); // forward stop
+    runner.enqueue(shellResult(0)); // gateway stop
+    runner.enqueue(shellResult(0)); // pid stop
+    runner.enqueue(shellResult(0)); // container stop
+    runner.enqueue(shellResult(0)); // user service restart
+    runner.enqueue(shellResult(0, "Connected to nemoclaw\n")); // openshell status
     runner.enqueue(shellResult(1, "Removed stale local registry entry.\n")); // status (non-zero on unfixed)
     const cleanup = new FakeCleanup();
 
@@ -126,28 +132,20 @@ describe("LifecyclePhaseFixture.simulate post-reboot-recovery (stop-original)", 
     expect(result.profile).toBe("post-reboot-recovery");
     expect(result.steps.map((step) => step.id)).toEqual([
       "docker-stop:openshell-cluster-e2e-ubuntu-repo-cloud-openclaw",
+      "gateway-restart:user-service-or-session",
+      "gateway-connected:nemoclaw",
       "nemoclaw-status:e2e-ubuntu-repo-cloud-openclaw",
     ]);
-    expect(runner.calls.map((call) => ({ command: call.command, args: call.args }))).toEqual([
-      {
-        command: "docker",
-        args: [
-          "ps",
-          "-a",
-          "--filter",
-          "label=openshell.ai/sandbox-name=e2e-ubuntu-repo-cloud-openclaw",
-          "--format",
-          "{{.Names}}",
-        ],
-      },
-      {
-        command: "docker",
-        args: ["stop", "openshell-cluster-e2e-ubuntu-repo-cloud-openclaw"],
-      },
-      {
-        command: "nemoclaw",
-        args: ["e2e-ubuntu-repo-cloud-openclaw", "status"],
-      },
+    expect(runner.calls.map((call) => `${call.command} ${call.args.join(" ")}`)).toEqual([
+      "docker ps -a --filter label=openshell.ai/sandbox-name=e2e-ubuntu-repo-cloud-openclaw --format {{.Names}}",
+      "docker stop openshell-cluster-e2e-ubuntu-repo-cloud-openclaw",
+      "sh -lc command -v openshell >/dev/null 2>&1 && openshell forward stop 18789 || true",
+      "sh -lc command -v openshell >/dev/null 2>&1 && openshell gateway stop -g nemoclaw || true",
+      expect.stringContaining("sh -lc pid_file="),
+      expect.stringContaining("sh -lc cid="),
+      expect.stringContaining("sh -lc set -eu"),
+      "openshell status",
+      "nemoclaw e2e-ubuntu-repo-cloud-openclaw status",
     ]);
     expect(cleanup.calls.map((call) => call.name)).toEqual([
       "lifecycle.docker-start:openshell-cluster-e2e-ubuntu-repo-cloud-openclaw",
@@ -158,6 +156,12 @@ describe("LifecyclePhaseFixture.simulate post-reboot-recovery (stop-original)", 
     const runner = new FakeRunner();
     runner.enqueue(shellResult(0, "container-1\n")); // discover
     runner.enqueue(shellResult(0)); // docker stop
+    runner.enqueue(shellResult(0)); // forward stop
+    runner.enqueue(shellResult(0)); // gateway stop
+    runner.enqueue(shellResult(0)); // pid stop
+    runner.enqueue(shellResult(0)); // container stop
+    runner.enqueue(shellResult(0)); // user service restart
+    runner.enqueue(shellResult(0, "Connected to nemoclaw\n")); // openshell status
     runner.enqueue(shellResult(1, "Removed stale local registry entry.\n")); // status non-zero
     const cleanup = new FakeCleanup();
 
@@ -195,6 +199,12 @@ describe("LifecyclePhaseFixture.simulate post-reboot-recovery (rename-to-gpu-bac
     runner.enqueue(shellResult(0, "openshell-cluster-e2e-x\n")); // discover
     runner.enqueue(shellResult(0)); // docker stop
     runner.enqueue(shellResult(0)); // docker rename
+    runner.enqueue(shellResult(0)); // forward stop
+    runner.enqueue(shellResult(0)); // gateway stop
+    runner.enqueue(shellResult(0)); // pid stop
+    runner.enqueue(shellResult(0)); // container stop
+    runner.enqueue(shellResult(0)); // user service restart
+    runner.enqueue(shellResult(0, "Connected to nemoclaw\n")); // openshell status
     runner.enqueue(shellResult(1, "Removed stale local registry entry.\n")); // status
     const cleanup = new FakeCleanup();
 
@@ -267,6 +277,7 @@ describe("LifecyclePhaseFixture gateway runtime restart helpers", () => {
     runner.enqueue(shellResult(1, "")); // expectHostRuntimeStopped pid probe
     runner.enqueue(shellResult(0, "")); // expectHostRuntimeStopped container probe
     runner.enqueue(shellResult(0)); // lifecycle-gateway-stopped true artifact
+    runner.enqueue(shellResult(75, "")); // no user service available
     runner.enqueue(shellResult(0, "status recovered\n")); // start through nemoclaw status
     runner.enqueue(shellResult(0, "Connected to nemoclaw\n")); // waitForGatewayConnected
     const cleanup = new FakeCleanup();
@@ -289,6 +300,7 @@ describe("LifecyclePhaseFixture gateway runtime restart helpers", () => {
       expect.stringContaining("sh -lc pid_file="),
       "docker ps -qf name=openshell-cluster-nemoclaw",
       "true ",
+      expect.stringContaining("sh -lc set -eu"),
       "nemoclaw status",
       "openshell status",
     ]);
@@ -296,6 +308,7 @@ describe("LifecyclePhaseFixture gateway runtime restart helpers", () => {
 
   it("can recover a PID runtime through sandbox-specific status", async () => {
     const runner = new FakeRunner();
+    runner.enqueue(shellResult(75, "")); // no user service available
     runner.enqueue(shellResult(0, "status recovered\n"));
     const cleanup = new FakeCleanup();
 
@@ -309,6 +322,7 @@ describe("LifecyclePhaseFixture gateway runtime restart helpers", () => {
     ).resolves.toMatchObject({ exitCode: 0 });
 
     expect(runner.calls.map((call) => `${call.command} ${call.args.join(" ")}`)).toEqual([
+      expect.stringContaining("sh -lc set -eu"),
       "nemoclaw e2e-survival status",
     ]);
   });
