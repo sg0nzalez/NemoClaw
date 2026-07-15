@@ -42,6 +42,12 @@ function mountedAt(dir: string): string {
   return `/dev/fuse on ${path.resolve(dir)} type fuse.sshfs (rw)\n`;
 }
 
+function mockShareMountPreflight(): void {
+  spawnSyncMock
+    .mockReturnValueOnce({ status: 0, stdout: "/usr/bin/sshfs\n", stderr: "" })
+    .mockReturnValueOnce({ status: 1, stdout: "", stderr: "" });
+}
+
 function withProcessPlatform(platform: NodeJS.Platform, fn: () => void): void {
   const descriptor = Object.getOwnPropertyDescriptor(process, "platform");
   Object.defineProperty(process, "platform", { value: platform });
@@ -203,14 +209,7 @@ describe("ShareCommand mount/status actions", () => {
     const exitSpy = vi.spyOn(process, "exit").mockImplementation(((_code?: number) => {
       throw new Error("__test_exit__");
     }) as never);
-    spawnSyncMock.mockImplementation((cmd: string, args: string[]) => {
-      if (cmd === "sh" && args[1] === "command -v sshfs") {
-        return { status: 0, stdout: "/usr/bin/sshfs\n", stderr: "" };
-      }
-      if (cmd === "mountpoint") return { status: 1, stdout: "", stderr: "" };
-      if (cmd === "mount") return { status: 0, stdout: "", stderr: "" };
-      return { status: 1, stdout: "", stderr: "" };
-    });
+    mockShareMountPreflight();
 
     await expect(
       runShareMount(
