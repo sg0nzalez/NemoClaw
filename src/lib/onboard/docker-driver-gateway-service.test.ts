@@ -56,6 +56,30 @@ function spawnResult(status = 0, stderr = "", stdout = ""): SpawnSyncLikeResult 
   };
 }
 
+function homebrewServiceStatusResult({
+  exitCode = 0,
+  running = true,
+  status = "started",
+}: {
+  exitCode?: number | null;
+  running?: boolean;
+  status?: string;
+} = {}): SpawnSyncLikeResult {
+  return spawnResult(
+    0,
+    "",
+    JSON.stringify([
+      {
+        exit_code: exitCode,
+        loaded: true,
+        name: "openshell",
+        running,
+        status,
+      },
+    ]),
+  );
+}
+
 function homeEnv(home: string, xdgConfigHome = ""): NodeJS.ProcessEnv {
   return { HOME: home, XDG_CONFIG_HOME: xdgConfigHome } as NodeJS.ProcessEnv;
 }
@@ -313,23 +337,11 @@ describe("docker-driver-gateway-service", () => {
   it("restarts the macOS Homebrew gateway service", () => {
     const events: string[] = [];
     const spawnSyncImpl = vi.fn((_command: string, args: string[]) => {
-      events.push(args.join(" "));
-      if (args.join(" ") === "services info --json openshell") {
-        return spawnResult(
-          0,
-          "",
-          JSON.stringify([
-            {
-              exit_code: 0,
-              loaded: true,
-              name: "openshell",
-              running: true,
-              status: "started",
-            },
-          ]),
-        );
-      }
-      return spawnResult();
+      const command = args.join(" ");
+      events.push(command);
+      return command === "services info --json openshell"
+        ? homebrewServiceStatusResult()
+        : spawnResult();
     });
 
     const result = startOpenShellGatewayUserService({
@@ -360,21 +372,15 @@ describe("docker-driver-gateway-service", () => {
     let statusChecks = 0;
     const sleepSeconds = vi.fn();
     const spawnSyncImpl = vi.fn((_command: string, args: string[]) => {
-      if (args.join(" ") !== "services info --json openshell") return spawnResult();
-      statusChecks += 1;
-      return spawnResult(
-        0,
-        "",
-        JSON.stringify([
-          {
-            exit_code: statusChecks === 1 ? null : 0,
-            loaded: true,
-            name: "openshell",
-            running: statusChecks > 1,
-            status: "started",
-          },
-        ]),
-      );
+      const isStatusCheck = args.join(" ") === "services info --json openshell";
+      const result = isStatusCheck
+        ? homebrewServiceStatusResult({
+            exitCode: statusChecks === 0 ? null : 0,
+            running: statusChecks > 0,
+          })
+        : spawnResult();
+      statusChecks += Number(isStatusCheck);
+      return result;
     });
 
     const result = startOpenShellGatewayUserService({
@@ -393,22 +399,9 @@ describe("docker-driver-gateway-service", () => {
 
   it("rejects a macOS Homebrew service that exits after a successful restart", () => {
     const spawnSyncImpl = vi.fn((_command: string, args: string[]) => {
-      if (args.join(" ") === "services info --json openshell") {
-        return spawnResult(
-          0,
-          "",
-          JSON.stringify([
-            {
-              exit_code: 1,
-              loaded: true,
-              name: "openshell",
-              running: false,
-              status: "error",
-            },
-          ]),
-        );
-      }
-      return spawnResult();
+      return args.join(" ") === "services info --json openshell"
+        ? homebrewServiceStatusResult({ exitCode: 1, running: false, status: "error" })
+        : spawnResult();
     });
 
     const result = startOpenShellGatewayUserService({

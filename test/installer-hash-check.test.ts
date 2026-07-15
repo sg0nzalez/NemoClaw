@@ -480,14 +480,11 @@ function renderPinFunction(
 function replacePinFunction(
   source: string,
   functionName: string,
-  nextFunctionName: string,
+  nextMarker: string,
   replacement: string,
 ): string {
   const start = source.indexOf(`${functionName}() {`);
-  let next = source.indexOf(`\n${nextFunctionName}() {`, start);
-  if (next === -1) {
-    next = source.indexOf(`\n${nextFunctionName}`, start);
-  }
+  const next = source.indexOf(`\n${nextMarker}`, start);
   expect(start, `${functionName} template start`).not.toBe(-1);
   expect(next, `${functionName} template end`).not.toBe(-1);
   return `${source.slice(0, start)}${replacement}${source.slice(next)}`;
@@ -510,7 +507,7 @@ function renderInstallerTemplate(
   const withArchivePinFunction = replacePinFunction(
     selected,
     "openshell_pinned_sha256",
-    "openshell_checksum_line",
+    "openshell_checksum_line() {",
     pinFunction,
   );
   const withPinFunction = replacePinFunction(
@@ -540,7 +537,7 @@ function renderBrevTemplate(openshellVersion: string, pinFunction: string): stri
   return replacePinFunction(
     selected,
     "openshell_cli_pinned_sha256",
-    "openshell_checksum_line",
+    "openshell_checksum_line() {",
     pinFunction,
   );
 }
@@ -655,7 +652,10 @@ case "\${1:-}" in
     printf '%s  %s\\n' '${FORMULA_DIGEST}' "$1"
     ;;
   *)
-    /usr/bin/sha256sum "$@"
+    case "$(uname -s)" in
+      Darwin) /usr/bin/shasum -a 256 "$@" ;;
+      *) /usr/bin/sha256sum "$@" ;;
+    esac
     ;;
 esac
 `,
