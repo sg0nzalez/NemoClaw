@@ -1007,7 +1007,9 @@ function executePlan(
           removeFileWithOptionalSudo(target, runtime);
       if (!removePathExcept(paths.nemoclawStateDir, preserveUnderStateDir, runtime)) ok = false;
       removePath(paths.gatewayLocalStateDir, runtime);
-      removePath(paths.openshellConfigDir, runtime);
+      if (options.keepOpenShell)
+        runtime.log("Keeping OpenShell gateway configuration as requested.");
+      else removePath(paths.openshellConfigDir, runtime);
       removePath(paths.nemoclawConfigDir, runtime);
     }
   }

@@ -35,10 +35,18 @@ function writeManagedService(home: string): string {
   return servicePath;
 }
 
+function writeGatewayEnv(home: string): string {
+  const envPath = path.join(home, ".config", "openshell", "gateway.env");
+  fs.mkdirSync(path.dirname(envPath), { recursive: true });
+  fs.writeFileSync(envPath, "OPENSHELL_SERVER_PORT=8080\n");
+  return envPath;
+}
+
 describe("uninstall OpenShell gateway user service", () => {
   it("keeps OpenShell service and host gateway process when OpenShell is kept", () => {
     const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-uninstall-gateway-service-"));
     const servicePath = writeManagedService(tmpHome);
+    const envPath = writeGatewayEnv(tmpHome);
     const run = vi.fn((_command: string, _args: string[]) => ok());
 
     try {
@@ -58,6 +66,7 @@ describe("uninstall OpenShell gateway user service", () => {
 
       expect(result.exitCode).toBe(0);
       expect(fs.existsSync(servicePath)).toBe(true);
+      expect(fs.existsSync(envPath)).toBe(true);
       expect(run.mock.calls.map(([command, args]) => [command, ...args].join("\0"))).not.toContain(
         ["pgrep", "-f", HOST_GATEWAY_PGREP_PATTERN].join("\0"),
       );
@@ -69,6 +78,7 @@ describe("uninstall OpenShell gateway user service", () => {
   it("removes the NemoClaw-managed Linux user service on full uninstall", () => {
     const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-uninstall-gateway-service-"));
     const servicePath = writeManagedService(tmpHome);
+    const envPath = writeGatewayEnv(tmpHome);
     const runCalls: string[][] = [];
 
     try {
@@ -91,6 +101,7 @@ describe("uninstall OpenShell gateway user service", () => {
 
       expect(result.exitCode).toBe(0);
       expect(fs.existsSync(servicePath)).toBe(false);
+      expect(fs.existsSync(envPath)).toBe(false);
       expect(runCalls).toContainEqual([
         "systemctl",
         "--user",
