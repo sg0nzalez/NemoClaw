@@ -86,6 +86,13 @@ function containerCanReachHostLoopback(
   return isWsl(opts) && runtime === "docker-desktop";
 }
 
+function shouldPatchCoredns(runtime: ContainerRuntime, opts: WslDetectionOptions = {}): boolean {
+  // CoreDNS patching is needed for Colima and Podman (both use custom network bridges).
+  // OpenShell owns sandbox DNS on WSL2; this host-side CoreDNS patch is not applicable there.
+  if (isWsl(opts)) return false;
+  return runtime === "colima" || runtime === "podman";
+}
+
 function getColimaDockerSocketCandidates(opts: PlatformLookupOptions = {}): string[] {
   const home = opts.home ?? process.env.HOME ?? "/tmp";
   return [
@@ -181,4 +188,5 @@ export {
   getPodmanSocketCandidates,
   inferContainerRuntime,
   isWsl,
+  shouldPatchCoredns,
 };

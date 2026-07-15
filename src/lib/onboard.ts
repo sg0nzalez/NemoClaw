@@ -313,10 +313,11 @@ const {
     inferenceCompat: LooseObject | null;
   };
 };
-const { sleepSeconds } = require("./core/wait");
+const { sleepSeconds, waitUntil } = require("./core/wait");
 const platformUtils: typeof import("./platform") = require("./platform");
-const { isWsl } = platformUtils;
+const { isWsl, shouldPatchCoredns } = platformUtils;
 const {
+  getContainerRuntime,
   repairLocalInferenceSystemdOverrideOrExit,
   rejectUnsupportedWindowsHostOllama,
   shouldFrontOllamaWithProxy,
@@ -1432,18 +1433,11 @@ function registerDockerDriverGatewayEndpoint(): boolean {
   return ok;
 }
 
-function attachGatewayMetadataIfNeeded({
-  forceRefresh = false,
-}: {
-  forceRefresh?: boolean;
-} = {}): boolean {
+function attachGatewayMetadataIfNeeded(): boolean {
   const gwInfo = runCaptureOpenshell(["gateway", "info", "-g", GATEWAY_NAME], {
     ignoreError: true,
   });
-  // runCaptureOpenshell may return stale-but-present gateway metadata. When
-  // hasStaleGateway(gwInfo) is truthy we skip runOpenshell unless a repair
-  // flow explicitly forces a refresh after recreating bootstrap secrets.
-  if (!forceRefresh && hasStaleGateway(gwInfo)) return true;
+  if (hasStaleGateway(gwInfo)) return true;
 
   if (isLinuxDockerDriverGatewayEnabled()) {
     return registerDockerDriverGatewayEndpoint();
@@ -1888,6 +1882,39 @@ async function startGatewayWithOptions(
 
   console.log("  ✓ Gateway is healthy");
 
+  // CoreDNS fix — k3s-inside-Docker has broken DNS forwarding on all platforms.
+  const runtime = getContainerRuntime();
+  if (shouldPatchCoredns(runtime)) {
+    console.log("  Patching CoreDNS DNS forwarding...");
+    run(["bash", path.join(SCRIPTS, "fix-coredns.sh"), GATEWAY_NAME], {
+      ignoreError: true,
+    });
+    const corednsReady = waitUntil(() => {
+      const check = runCaptureOpenshell(
+        [
+          "doctor",
+          "exec",
+          "--",
+          "kubectl",
+          "get",
+          "pods",
+          "-n",
+          "kube-system",
+          "-l",
+          "k8s-app=kube-dns",
+          "-o",
+          'jsonpath={range .items[*]}{.status.phase}{" "}{range .status.containerStatuses[*]}{.ready}{" "}{end}{end}',
+        ],
+        { ignoreError: true },
+      );
+      return check.includes("Running") && check.includes("true") && !check.includes("false");
+    }, 10);
+    if (!corednsReady) {
+      console.warn(
+        "  CoreDNS did not report ready within timeout; continuing may cause DNS flakiness.",
+      );
+    }
+  }
   runOpenshell(["gateway", "select", GATEWAY_NAME], { ignoreError: true });
   process.env.OPENSHELL_GATEWAY = GATEWAY_NAME;
 }
@@ -2185,6 +2212,12 @@ async function recoverGatewayRuntime() {
     status = runCaptureOpenshell(["status"], { ignoreError: true });
     if (status.includes("Connected") && isSelectedGateway(status) && (await isGatewayHttpReady())) {
       process.env.OPENSHELL_GATEWAY = GATEWAY_NAME;
+      const runtime = getContainerRuntime();
+      if (shouldPatchCoredns(runtime)) {
+        run(["bash", path.join(SCRIPTS, "fix-coredns.sh"), GATEWAY_NAME], {
+          ignoreError: true,
+        });
+      }
       return true;
     }
     if (i < recoveryPollCount - 1) sleepSeconds(recoveryPollInterval);
@@ -2812,7 +2845,6 @@ async function createSandboxWithBaseImageResolution(
     finalHermesDashboardState = hermesDashboardForwarding.resolveStateForPort(actualDashboardPort);
     hermesDashboardForwarding.ensureForState(finalHermesDashboardState, sandboxName, true);
   }
-
   // openshell tags images with seconds; buildId is ms. Parse actual tag from output. Fixes #2672.
   const resolvedImageTag =
     registryImageRef ??
@@ -2826,6 +2858,7 @@ async function createSandboxWithBaseImageResolution(
       restoreBackupPath,
       preUpgradeBackup: pendingStateRestoreBackupPath !== null,
       targetAgentType: agent?.name ?? "openclaw",
+      gatewayName: GATEWAY_NAME,
       customImage: Boolean(fromDockerfile),
       discoverOpenClawImagePluginInstalls: customOpenClawImage,
       validateManagedDcode: isManagedDcodeAgent,
@@ -2835,7 +2868,7 @@ async function createSandboxWithBaseImageResolution(
     },
     // biome-ignore format: keep src/lib/onboard.ts within the growth guardrail.
     {
-      discoverFreshOpenClawImagePluginInstalls: (name) => openClawPluginRestore.discoverFreshOpenClawImagePluginInstalls(name, GATEWAY_NAME, agent?.configPaths.dir), restoreRecreatedSandboxState: (name, backupPath, options) => sandboxState.restoreRecreatedSandboxState(name, backupPath, { ...options, gatewayName: GATEWAY_NAME }),
+      discoverFreshOpenClawImagePluginInstalls: (name) => openClawPluginRestore.discoverFreshOpenClawImagePluginInstalls(name, GATEWAY_NAME, agent?.configPaths.dir), restoreRecreatedSandboxState: (name, backupPath, options) => sandboxState.restoreRecreatedSandboxState(name, backupPath, options),
       getDcodeSelectionDrift: (name, selectedProvider, selectedModel, selectedApi) =>
         getDcodeSelectionDrift(name, selectedProvider, selectedModel, selectedApi, {
           runCaptureOpenshell,

@@ -2186,6 +2186,11 @@ Use `--follow` to stream logs in real time while debugging.
 
 For an end-to-end walkthrough with local inference on DGX Spark, refer to the [NVIDIA Spark playbook](https://build.nvidia.com/spark/nemoclaw).
 
+### CoreDNS CrashLoop after onboarding
+
+If CoreDNS in the embedded k3s cluster crashes shortly after setup, it is usually because it resolves against `127.0.0.11`, which does not route inside the gateway container.
+Run `fix-coredns.sh` to point CoreDNS at the container gateway IP instead, then recreate the sandbox.
+
 ### `k3s` cannot find a freshly built image
 
 After building a new sandbox image, `k3s` inside the gateway container sometimes fails to pull it even though the image exists on the host.

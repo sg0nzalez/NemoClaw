@@ -6,7 +6,7 @@ import { type WaitUntilOptions, waitUntilAsync } from "../core/wait";
 type RunCaptureOpenshell = (args: string[], opts?: { ignoreError?: boolean }) => string;
 
 export interface GatewayHealthWaitOptions {
-  attachGatewayMetadataIfNeeded: (options?: { forceRefresh?: boolean }) => void;
+  attachGatewayMetadataIfNeeded: () => void;
   gatewayName: string;
   healthPollCount: number;
   healthPollIntervalSeconds: number;

@@ -149,6 +149,7 @@ describe("checkAgentVersion", () => {
     expect(execSandbox).toHaveBeenCalledWith("nemoclaw-19080", {
       sandboxName: "test-sb",
       command: ["sh", "-c", "openclaw --version"],
+      maxOutputBytes: 64 * 1024,
       timeoutMs: 15_000,
     });
 
@@ -164,6 +165,22 @@ describe("checkAgentVersion", () => {
     expect(result.detectionMethod).toBe("unknown");
     expect(result.unavailableReason).toBe("probe-failed");
     expect(result.isStale).toBe(false);
+  });
+
+  it("treats a returned sandbox exec error as an unknown probe without caching output", async () => {
+    registry.registerSandbox({ name: "test-sb", agent: null, gatewayPort: 19080 });
+    execSandbox.mockResolvedValue({
+      status: null,
+      stdout: "OpenClaw 2026.5.27\n",
+      stderr: "",
+      error: new Error("output limit exceeded"),
+    });
+
+    const result = await checkAgentVersion("test-sb");
+
+    expect(result.detectionMethod).toBe("unknown");
+    expect(result.unavailableReason).toBe("probe-failed");
+    expect(registry.getSandbox("test-sb")?.agentVersion).toBeNull();
   });
 
   it("can skip live probing when no cached version is available", async () => {

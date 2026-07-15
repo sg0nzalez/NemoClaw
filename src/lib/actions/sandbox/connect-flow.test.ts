@@ -357,7 +357,7 @@ describe("connectSandbox flow", () => {
     const errorOutput = harness.errorSpy.mock.calls.flat().join("\n");
     expect(errorOutput).toContain("did not return a trusted result");
     expect(errorOutput).toContain("Last probe: sandbox exec transport failed");
-    expect(errorOutput).not.toContain("after DNS and route repair");
+    expect(errorOutput).not.toContain("after route repair");
     expect(exitSpy).toHaveBeenCalledWith(1);
   });
 
@@ -395,7 +395,7 @@ describe("connectSandbox flow", () => {
     const errorOutput = harness.errorSpy.mock.calls.flat().join("\n");
     expect(errorOutput).toContain("did not return a trusted result");
     expect(errorOutput).toContain("openshell sandbox exec exited with status 1");
-    expect(errorOutput).not.toContain("after DNS and route repair");
+    expect(errorOutput).not.toContain("after route repair");
     expect(exitSpy).toHaveBeenCalledWith(1);
   });
 
@@ -430,7 +430,7 @@ describe("connectSandbox flow", () => {
     const errorOutput = harness.errorSpy.mock.calls.flat().join("\n");
     expect(errorOutput).toContain("did not return a trusted result");
     expect(errorOutput).toContain("OpenShell CA bundle missing or unreadable");
-    expect(errorOutput).not.toContain("after DNS and route repair");
+    expect(errorOutput).not.toContain("after route repair");
     expect(exitSpy).toHaveBeenCalledWith(1);
   });
 

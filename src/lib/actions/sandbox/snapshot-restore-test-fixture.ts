@@ -23,6 +23,11 @@ export type SandboxRecord = {
   observabilityEnabled?: boolean;
   provider?: string | null;
   model?: string | null;
+  dashboardPort?: number | null;
+  hermesDashboardEnabled?: boolean;
+  hermesDashboardPort?: number | null;
+  hermesDashboardInternalPort?: number | null;
+  hermesDashboardTui?: boolean;
 };
 export type DcodeProbeState = "active" | "idle" | "unverifiable" | "no-runtime";
 
@@ -109,6 +114,13 @@ export const getCustomPoliciesMock = vi.fn(
   () => [] as Array<{ name: string; content: string; sourcePath?: string }>,
 );
 export const getLatestBackupMock = vi.fn(() => null as Record<string, unknown> | null);
+export const getOpenShellSandboxDescriptorMock = vi.fn(
+  async (_gatewayName: string, sandboxName: string) => ({
+    id: `${sandboxName}-id`,
+    name: sandboxName,
+    image: `nemoclaw-${sandboxName}:live`,
+  }),
+);
 export const applyPresetMock = vi.fn((_sandbox: string, _preset: string) => true);
 export const applyPresetContentMock = vi.fn(
   (_sandbox: string, _name: string, _content: string, _options?: unknown) => true,
@@ -129,6 +141,7 @@ export const parseLiveSandboxNamesMock = vi.fn(() => new Set(["alpha"]));
 export const registerSandboxMock = vi.fn();
 export const updateSandboxMock = vi.fn();
 export const restoreSandboxStateMock = vi.fn();
+export const runnerRunMock = vi.fn(() => ({ status: 0 }));
 export const runOpenshellMock = vi.fn((args: string[]) => {
   args[0] === "sandbox" && args[1] === "delete" && lifecycleMock.events.push("delete");
   return { status: 0, output: "" };
@@ -157,6 +170,10 @@ vi.mock("../../adapters/openshell/runtime", () => ({
   runOpenshell: runOpenshellMock,
 }));
 
+vi.mock("../../adapters/openshell/sandbox-control-routing", () => ({
+  getOpenShellSandboxDescriptor: getOpenShellSandboxDescriptorMock,
+}));
+
 vi.mock("../../credentials/store", () => ({
   prompt: vi.fn(),
 }));
@@ -181,7 +198,7 @@ vi.mock("../../policy", () => ({
 
 vi.mock("../../runner", () => ({
   ROOT: "/repo",
-  run: vi.fn(() => ({ status: 0 })),
+  run: runnerRunMock,
   shellQuote: (value: string) => `'${value}'`,
   validateName: vi.fn((value: string) => value),
 }));
@@ -256,6 +273,11 @@ export function resetSnapshotRestoreMocks(): void {
   getAppliedPresetsMock.mockReturnValue([]);
   getCustomPoliciesMock.mockReturnValue([]);
   getLatestBackupMock.mockReturnValue(null);
+  getOpenShellSandboxDescriptorMock.mockImplementation(async (_gatewayName, sandboxName) => ({
+    id: `${sandboxName}-id`,
+    name: sandboxName,
+    image: `nemoclaw-${sandboxName}:live`,
+  }));
   applyPresetMock.mockReturnValue(true);
   applyPresetContentMock.mockReturnValue(true);
   removePresetMock.mockReturnValue(true);
