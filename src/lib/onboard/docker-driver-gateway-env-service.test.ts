@@ -55,44 +55,6 @@ describe("package-managed Docker-driver gateway env service", () => {
     }
   });
 
-  it("writes the service env under XDG_CONFIG_HOME", async () => {
-    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-gateway-env-"));
-    const xdgConfigHome = path.join(tempHome, "xdg-config");
-    const envFile = path.join(xdgConfigHome, "openshell", "gateway.env");
-
-    try {
-      await expect(
-        startPackageManagedDockerDriverGatewayWithEnvOverride({
-          clearDockerDriverGatewayRuntimeFiles: vi.fn(),
-          env: { XDG_CONFIG_HOME: xdgConfigHome },
-          exitOnFailure: false,
-          gatewayEnv: {
-            OPENSHELL_BIND_ADDRESS: "127.0.0.1",
-            OPENSHELL_GATEWAY_CONFIG: writeSafeGatewayAuthConfig(tempHome),
-          },
-          gatewayName: "nemoclaw",
-          hasOpenShellGatewayUserService: () => true,
-          isDockerDriverGatewayReady: async () => true,
-          registerDockerDriverGatewayEndpoint: () => true,
-          runCaptureOpenshell: (args) =>
-            args[0] === "status"
-              ? "Gateway: nemoclaw\nConnected"
-              : "Gateway: nemoclaw\nGateway endpoint: https://127.0.0.1:8080/",
-          skipSandboxBridgeReachability: false,
-          startOpenShellGatewayUserService: (opts) => {
-            opts?.prepareServiceEnv?.();
-            return { attempted: true, fallbackAllowed: false, started: true };
-          },
-          verifySandboxBridgeGatewayReachableOrExit: async () => undefined,
-        }),
-      ).resolves.toBe(true);
-
-      expect(fs.readFileSync(envFile, "utf-8")).toContain("OPENSHELL_BIND_ADDRESS=127.0.0.1\n");
-    } finally {
-      fs.rmSync(tempHome, { recursive: true, force: true });
-    }
-  });
-
   it("rejects package-managed wildcard binds before writing the service env", () => {
     expect(() =>
       startPackageManagedDockerDriverGatewayWithEnvOverride({

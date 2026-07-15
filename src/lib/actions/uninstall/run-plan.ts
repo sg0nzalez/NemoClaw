@@ -613,10 +613,7 @@ function stopOrphanedOpenShell(runtime: UninstallRuntime): void {
 
 function removeNemoclawOpenShellGatewayUserService(runtime: UninstallRuntime): boolean {
   if (runtime.platform !== "linux") return true;
-  const servicePath = getNemoclawOpenShellGatewayUserServicePath(
-    runtime.env.HOME || os.homedir(),
-    runtime.env.XDG_CONFIG_HOME,
-  );
+  const servicePath = getNemoclawOpenShellGatewayUserServicePath(runtime.env.HOME || os.homedir());
   if (!runtime.existsSync(servicePath)) return true;
 
   let unit = "";

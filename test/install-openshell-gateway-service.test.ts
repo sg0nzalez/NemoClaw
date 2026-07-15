@@ -48,41 +48,4 @@ describe("install.sh OpenShell gateway service", () => {
     expect(unit).toContain("NEMOCLAW_MANAGED_OPENSHELL_GATEWAY=1");
     expect(unit).toContain(`ExecStart=${gatewayBin}`);
   });
-
-  it("stages the Linux OpenShell gateway user service under XDG_CONFIG_HOME", () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-install-gateway-service-"));
-    const gatewayBin = path.join(tmp, "bin", "openshell-gateway");
-    const xdgConfigHome = path.join(tmp, "xdg-config");
-    const servicePath = path.join(xdgConfigHome, "systemd", "user", "openshell-gateway.service");
-    fs.mkdirSync(path.dirname(gatewayBin), { recursive: true });
-    writeExecutable(gatewayBin, "#!/usr/bin/env bash\nexit 0\n");
-
-    const result = spawnSync(
-      "bash",
-      [
-        "-c",
-        [
-          "set -euo pipefail",
-          `source ${JSON.stringify(INSTALLER)}`,
-          "upstream_openshell_gateway_user_service_installed() { return 1; }",
-          `resolve_openshell_gateway_bin_for_service() { printf '%s\\n' ${JSON.stringify(gatewayBin)}; }`,
-          "install_nemoclaw_openshell_gateway_user_service",
-        ].join("\n"),
-      ],
-      {
-        cwd: tmp,
-        encoding: "utf-8",
-        env: {
-          ...process.env,
-          HOME: tmp,
-          PATH: TEST_SYSTEM_PATH,
-          XDG_CONFIG_HOME: xdgConfigHome,
-          NEMOCLAW_REPO_ROOT: path.dirname(INSTALLER),
-        },
-      },
-    );
-
-    expect(result.status).toBe(0);
-    expect(fs.readFileSync(servicePath, "utf-8")).toContain(`ExecStart=${gatewayBin}`);
-  });
 });

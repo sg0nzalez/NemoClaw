@@ -102,29 +102,6 @@ describe("docker-driver-gateway-service", () => {
     ).toBe(false);
   });
 
-  it("detects a NemoClaw-managed user service under XDG_CONFIG_HOME", () => {
-    const home = "/home/nvidia";
-    const xdgConfigHome = "/run/user/1000/nemoclaw-config";
-    const servicePath = getNemoclawOpenShellGatewayUserServicePath(home, xdgConfigHome);
-    const gatewayBin = "/home/nvidia/.local/bin/openshell-gateway";
-    const existsSync = vi.fn((candidate: string) => candidate === servicePath);
-    const readFileSync = vi.fn((candidate: string) =>
-      candidate === servicePath ? buildNemoclawOpenShellGatewayUserService(gatewayBin) : "",
-    );
-
-    expect(servicePath).toBe(`${xdgConfigHome}/systemd/user/openshell-gateway.service`);
-    expect(
-      hasOpenShellGatewayUserService({
-        env: { XDG_CONFIG_HOME: xdgConfigHome },
-        existsSync,
-        home,
-        platform: "linux",
-        readFileSync,
-      }),
-    ).toBe(true);
-    expect(existsSync.mock.calls.flat()).toContain(servicePath);
-  });
-
   it("ignores stale per-user service units so standalone fallback remains available", () => {
     const home = "/home/nvidia";
     const servicePath = getNemoclawOpenShellGatewayUserServicePath(home);
@@ -284,29 +261,6 @@ describe("docker-driver-gateway-service", () => {
       path: servicePath,
       reason: "refusing to overwrite a non-NemoClaw gateway user service",
     });
-  });
-
-  it("installs the NemoClaw-managed user service under XDG_CONFIG_HOME", () => {
-    const home = "/home/nvidia";
-    const xdgConfigHome = "/tmp/nvidia-config";
-    const servicePath = getNemoclawOpenShellGatewayUserServicePath(home, xdgConfigHome);
-    const writes: string[] = [];
-
-    const result = installNemoclawOpenShellGatewayUserService({
-      chmodSync: vi.fn(),
-      env: { XDG_CONFIG_HOME: xdgConfigHome },
-      existsSync: () => false,
-      gatewayBin: "/home/nvidia/.local/bin/openshell-gateway",
-      home,
-      mkdirSync: vi.fn() as never,
-      platform: "linux",
-      writeFileSync: vi.fn((target) => {
-        writes.push(String(target));
-      }) as never,
-    });
-
-    expect(result).toEqual({ installed: true, path: servicePath });
-    expect(writes).toEqual([servicePath]);
   });
 
   it("does not install a Linux systemd user service on macOS", () => {
