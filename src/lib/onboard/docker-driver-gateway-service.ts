@@ -3,6 +3,7 @@
 
 import { type SpawnSyncOptions, spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 import { sleepSeconds, waitUntilAsync } from "../core/wait";
@@ -15,13 +16,18 @@ import {
 import { isDockerDriverGatewayHttpReady } from "./gateway-http-readiness";
 
 export const OPENSHELL_GATEWAY_USER_SERVICE = "openshell-gateway";
+export const NEMOCLAW_OPENSHELL_GATEWAY_USER_SERVICE = OPENSHELL_GATEWAY_USER_SERVICE;
+export const NEMOCLAW_OPENSHELL_GATEWAY_USER_SERVICE_MARKER =
+  "NEMOCLAW_MANAGED_OPENSHELL_GATEWAY=1";
 
 export interface OpenShellGatewayUserServiceOptions {
   commandExists?: (command: string) => boolean;
   env?: NodeJS.ProcessEnv;
   existsSync?: (filePath: string) => boolean;
+  home?: string;
   platform?: NodeJS.Platform;
   prepareServiceEnv?: () => void;
+  readFileSync?: (filePath: string, encoding: BufferEncoding) => string;
   spawnSyncImpl?: SpawnSyncLike;
 }
 
@@ -29,7 +35,27 @@ export interface OpenShellGatewayUserServiceStartResult {
   attempted: boolean;
   fallbackAllowed: boolean;
   reason?: string;
+  serviceName?: string;
   started: boolean;
+}
+
+export interface InstallNemoclawOpenShellGatewayUserServiceOptions
+  extends Pick<
+    OpenShellGatewayUserServiceOptions,
+    "existsSync" | "home" | "platform" | "readFileSync"
+  > {
+  chmodSync?: (filePath: string, mode: number) => void;
+  gatewayBin: string | null;
+  mkdirSync?: typeof fs.mkdirSync;
+  rmSync?: typeof fs.rmSync;
+  writeFileSync?: typeof fs.writeFileSync;
+}
+
+export interface InstallNemoclawOpenShellGatewayUserServiceResult {
+  installed: boolean;
+  path?: string;
+  reason?: string;
+  removed?: boolean;
 }
 
 export interface SpawnSyncLikeResult {
@@ -73,6 +99,12 @@ interface OpenShellGatewayUserServiceIdentity {
   fragmentPath: string;
 }
 
+interface OpenShellGatewayUserServiceTarget {
+  serviceName: string;
+  trustedBinaryPaths: string[];
+  trustedUnitPaths: string[];
+}
+
 export function getOpenShellGatewayUserServicePaths(): string[] {
   return [
     "/usr/local/lib/systemd/user/openshell-gateway.service",
@@ -85,12 +117,99 @@ export function getOpenShellGatewayUserServiceBinaryPaths(): string[] {
   return ["/usr/local/bin/openshell-gateway", "/usr/bin/openshell-gateway"];
 }
 
-export function hasOpenShellGatewayUserService(
+export function getNemoclawOpenShellGatewayUserServicePath(home = os.homedir()): string {
+  return path.join(home, ".config", "systemd", "user", "openshell-gateway.service");
+}
+
+export function getNemoclawOpenShellGatewayUserServiceBinaryPaths(home = os.homedir()): string[] {
+  return [
+    path.join(home, ".local", "bin", "openshell-gateway"),
+    ...getOpenShellGatewayUserServiceBinaryPaths(),
+  ];
+}
+
+function readTextFileIfPresent(
+  filePath: string,
+  opts: Pick<OpenShellGatewayUserServiceOptions, "readFileSync"> = {},
+): string {
+  const readFileSync = opts.readFileSync ?? fs.readFileSync;
+  try {
+    return readFileSync(filePath, "utf-8");
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      "code" in error &&
+      (error as NodeJS.ErrnoException).code === "ENOENT"
+    ) {
+      return "";
+    }
+    return "";
+  }
+}
+
+function isNemoclawManagedOpenShellGatewayUserServiceUnit(
+  filePath: string,
+  opts: Pick<OpenShellGatewayUserServiceOptions, "readFileSync"> = {},
+): boolean {
+  return readTextFileIfPresent(filePath, opts).includes(
+    NEMOCLAW_OPENSHELL_GATEWAY_USER_SERVICE_MARKER,
+  );
+}
+
+function hasUpstreamOpenShellGatewayUserService(
   opts: Pick<OpenShellGatewayUserServiceOptions, "existsSync" | "platform"> = {},
 ): boolean {
   if ((opts.platform ?? process.platform) !== "linux") return false;
   const existsSync = opts.existsSync ?? fs.existsSync;
   return getOpenShellGatewayUserServicePaths().some((candidate) => existsSync(candidate));
+}
+
+export function hasNemoclawOpenShellGatewayUserService(
+  opts: Pick<
+    OpenShellGatewayUserServiceOptions,
+    "existsSync" | "home" | "platform" | "readFileSync"
+  > = {},
+): boolean {
+  if ((opts.platform ?? process.platform) !== "linux") return false;
+  const existsSync = opts.existsSync ?? fs.existsSync;
+  const servicePath = getNemoclawOpenShellGatewayUserServicePath(opts.home);
+  return (
+    existsSync(servicePath) && isNemoclawManagedOpenShellGatewayUserServiceUnit(servicePath, opts)
+  );
+}
+
+function resolveOpenShellGatewayUserService(
+  opts: Pick<
+    OpenShellGatewayUserServiceOptions,
+    "existsSync" | "home" | "platform" | "readFileSync"
+  > = {},
+): OpenShellGatewayUserServiceTarget | null {
+  if ((opts.platform ?? process.platform) !== "linux") return null;
+  if (hasUpstreamOpenShellGatewayUserService(opts)) {
+    return {
+      serviceName: OPENSHELL_GATEWAY_USER_SERVICE,
+      trustedBinaryPaths: getOpenShellGatewayUserServiceBinaryPaths(),
+      trustedUnitPaths: getOpenShellGatewayUserServicePaths(),
+    };
+  }
+  if (hasNemoclawOpenShellGatewayUserService(opts)) {
+    const home = opts.home ?? os.homedir();
+    return {
+      serviceName: OPENSHELL_GATEWAY_USER_SERVICE,
+      trustedBinaryPaths: getNemoclawOpenShellGatewayUserServiceBinaryPaths(home),
+      trustedUnitPaths: [getNemoclawOpenShellGatewayUserServicePath(home)],
+    };
+  }
+  return null;
+}
+
+export function hasOpenShellGatewayUserService(
+  opts: Pick<
+    OpenShellGatewayUserServiceOptions,
+    "existsSync" | "home" | "platform" | "readFileSync"
+  > = {},
+): boolean {
+  return resolveOpenShellGatewayUserService(opts) !== null;
 }
 
 function defaultCommandExists(command: string, env: NodeJS.ProcessEnv): boolean {
@@ -145,17 +264,18 @@ function parseSystemctlShowProperties(output: string): Record<string, string> {
 }
 
 function isTrustedOpenShellGatewayUserServiceIdentity(
+  service: OpenShellGatewayUserServiceTarget,
   identity: OpenShellGatewayUserServiceIdentity,
 ): boolean {
   const fragmentPath = path.normalize(identity.fragmentPath.trim());
-  const trustedUnit = getOpenShellGatewayUserServicePaths().some(
+  const trustedUnit = service.trustedUnitPaths.some(
     (candidate) => path.normalize(candidate) === fragmentPath,
   );
   if (!trustedUnit) return false;
   const execStartPath = extractSystemdExecStartPath(identity.execStart);
   if (!execStartPath) return false;
   const normalizedExecStartPath = path.normalize(execStartPath);
-  return getOpenShellGatewayUserServiceBinaryPaths().some(
+  return service.trustedBinaryPaths.some(
     (candidate) => path.normalize(candidate) === normalizedExecStartPath,
   );
 }
@@ -168,17 +288,18 @@ function extractSystemdExecStartPath(execStart: string): string | null {
 }
 
 function readTrustedOpenShellGatewayUserServiceIdentity(
+  service: OpenShellGatewayUserServiceTarget,
   opts: Required<Pick<OpenShellGatewayUserServiceOptions, "env" | "spawnSyncImpl">>,
 ): { fallbackAllowed: boolean; ok: boolean; reason?: string } {
   const result = runSystemctlUser(
-    ["show", OPENSHELL_GATEWAY_USER_SERVICE, "--property=FragmentPath", "--property=ExecStart"],
+    ["show", service.serviceName, "--property=FragmentPath", "--property=ExecStart"],
     opts,
   );
   if (!result.ok) {
     return {
       fallbackAllowed: userManagerLooksUnavailable(result.reason ?? ""),
       ok: false,
-      reason: `systemctl --user show ${OPENSHELL_GATEWAY_USER_SERVICE} failed: ${result.reason}`,
+      reason: `systemctl --user show ${service.serviceName} failed: ${result.reason}`,
     };
   }
 
@@ -194,14 +315,113 @@ function readTrustedOpenShellGatewayUserServiceIdentity(
       reason: "service identity is incomplete",
     };
   }
-  if (!isTrustedOpenShellGatewayUserServiceIdentity(identity)) {
+  if (!isTrustedOpenShellGatewayUserServiceIdentity(service, identity)) {
     return {
       fallbackAllowed: true,
       ok: false,
-      reason: `service identity is not the package-managed OpenShell gateway (${identity.fragmentPath})`,
+      reason: `service identity is not a trusted OpenShell gateway (${identity.fragmentPath})`,
     };
   }
   return { fallbackAllowed: false, ok: true };
+}
+
+function assertSafeSystemdExecPath(filePath: string): void {
+  if (!path.isAbsolute(filePath)) {
+    throw new Error("OpenShell gateway service ExecStart must be an absolute path");
+  }
+  if (/[\0\r\n\t ]/.test(filePath)) {
+    throw new Error("OpenShell gateway service ExecStart path cannot contain whitespace");
+  }
+}
+
+export function buildNemoclawOpenShellGatewayUserService(gatewayBin: string): string {
+  assertSafeSystemdExecPath(gatewayBin);
+  return [
+    "# NemoClaw-managed OpenShell gateway user service",
+    `# ${NEMOCLAW_OPENSHELL_GATEWAY_USER_SERVICE_MARKER}`,
+    "[Unit]",
+    "Description=OpenShell Gateway",
+    "Documentation=https://github.com/NVIDIA/OpenShell",
+    "After=default.target",
+    "",
+    "[Service]",
+    "Type=simple",
+    "StateDirectory=openshell/gateway",
+    "EnvironmentFile=-%E/openshell/gateway.env",
+    `ExecStart=${gatewayBin}`,
+    "Restart=on-failure",
+    "RestartSec=5s",
+    "PrivateTmp=true",
+    "UMask=0077",
+    "",
+    "[Install]",
+    "WantedBy=default.target",
+    "",
+  ].join("\n");
+}
+
+export function installNemoclawOpenShellGatewayUserService(
+  opts: InstallNemoclawOpenShellGatewayUserServiceOptions,
+): InstallNemoclawOpenShellGatewayUserServiceResult {
+  const platform = opts.platform ?? process.platform;
+  if (platform !== "linux") return { installed: false, reason: "not a Linux host" };
+  const home = opts.home ?? os.homedir();
+  const servicePath = getNemoclawOpenShellGatewayUserServicePath(home);
+  const existsSync = opts.existsSync ?? fs.existsSync;
+  if (hasUpstreamOpenShellGatewayUserService(opts)) {
+    if (
+      existsSync(servicePath) &&
+      isNemoclawManagedOpenShellGatewayUserServiceUnit(servicePath, {
+        readFileSync: opts.readFileSync,
+      })
+    ) {
+      const rmSync = opts.rmSync ?? fs.rmSync;
+      rmSync(servicePath, { force: true });
+      return {
+        installed: false,
+        path: servicePath,
+        reason: "upstream OpenShell gateway service is installed",
+        removed: true,
+      };
+    }
+    return { installed: false, reason: "upstream OpenShell gateway service is installed" };
+  }
+  if (!opts.gatewayBin) return { installed: false, reason: "OpenShell gateway binary not found" };
+
+  const alreadyExists = existsSync(servicePath);
+  if (
+    alreadyExists &&
+    !isNemoclawManagedOpenShellGatewayUserServiceUnit(servicePath, {
+      readFileSync: opts.readFileSync,
+    })
+  ) {
+    return {
+      installed: false,
+      path: servicePath,
+      reason: "refusing to overwrite a non-NemoClaw gateway user service",
+    };
+  }
+
+  let unit: string;
+  try {
+    unit = buildNemoclawOpenShellGatewayUserService(opts.gatewayBin);
+  } catch (error) {
+    return {
+      installed: false,
+      path: servicePath,
+      reason: error instanceof Error ? error.message : String(error),
+    };
+  }
+
+  const serviceDir = path.dirname(servicePath);
+  const mkdirSync = opts.mkdirSync ?? fs.mkdirSync;
+  const chmodSync = opts.chmodSync ?? fs.chmodSync;
+  const writeFileSync = opts.writeFileSync ?? fs.writeFileSync;
+  mkdirSync(serviceDir, { recursive: true, mode: 0o700 });
+  chmodSync(serviceDir, 0o700);
+  writeFileSync(servicePath, unit, { encoding: "utf-8", mode: 0o600 });
+  chmodSync(servicePath, 0o600);
+  return { installed: true, path: servicePath };
 }
 
 export function startOpenShellGatewayUserService(
@@ -212,7 +432,13 @@ export function startOpenShellGatewayUserService(
     return { attempted: false, fallbackAllowed: true, started: false, reason: "not a Linux host" };
   }
   const existsSync = opts.existsSync ?? fs.existsSync;
-  if (!hasOpenShellGatewayUserService({ existsSync, platform })) {
+  const service = resolveOpenShellGatewayUserService({
+    existsSync,
+    home: opts.home,
+    platform,
+    readFileSync: opts.readFileSync,
+  });
+  if (!service) {
     return {
       attempted: false,
       fallbackAllowed: true,
@@ -246,7 +472,7 @@ export function startOpenShellGatewayUserService(
     }
   }
 
-  const identity = readTrustedOpenShellGatewayUserServiceIdentity({ env, spawnSyncImpl });
+  const identity = readTrustedOpenShellGatewayUserServiceIdentity(service, { env, spawnSyncImpl });
   if (!identity.ok) {
     return {
       attempted: true,
@@ -269,8 +495,8 @@ export function startOpenShellGatewayUserService(
   }
 
   for (const args of [
-    ["enable", OPENSHELL_GATEWAY_USER_SERVICE],
-    ["restart", OPENSHELL_GATEWAY_USER_SERVICE],
+    ["enable", service.serviceName],
+    ["restart", service.serviceName],
   ]) {
     const result = runSystemctlUser(args, { env, spawnSyncImpl });
     if (!result.ok) {
@@ -284,7 +510,12 @@ export function startOpenShellGatewayUserService(
     }
   }
 
-  return { attempted: true, fallbackAllowed: false, started: true };
+  return {
+    attempted: true,
+    fallbackAllowed: false,
+    serviceName: service.serviceName,
+    started: true,
+  };
 }
 
 export async function startPackageManagedDockerDriverGateway({
@@ -308,7 +539,7 @@ export async function startPackageManagedDockerDriverGateway({
 }: PackageManagedDockerDriverGatewayOptions): Promise<boolean> {
   if (!hasOpenShellGatewayUserServiceImpl()) return false;
 
-  console.log("  Starting OpenShell Docker-driver gateway via upstream user service...");
+  console.log("  Starting OpenShell Docker-driver gateway via user service...");
   const serviceStart = startOpenShellGatewayUserServiceImpl({
     prepareServiceEnv: prepareOpenShellGatewayUserServiceEnv,
   });
@@ -322,7 +553,11 @@ export async function startPackageManagedDockerDriverGateway({
     }
     const message = `OpenShell gateway user service failed to start${detail}.`;
     console.error(`  ${message}`);
-    console.error("  Check: systemctl --user status openshell-gateway");
+    console.error(
+      `  Check: systemctl --user status ${
+        serviceStart.serviceName ?? OPENSHELL_GATEWAY_USER_SERVICE
+      }`,
+    );
     if (exitOnFailure) process.exit(1);
     throw new Error(message);
   }

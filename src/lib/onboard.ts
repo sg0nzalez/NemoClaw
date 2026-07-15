@@ -534,6 +534,8 @@ const {
 } = require("./onboard/gateway-start-failure") as typeof import("./onboard/gateway-start-failure");
 const dockerDriverGatewayEnv: typeof import("./onboard/docker-driver-gateway-env") =
   require("./onboard/docker-driver-gateway-env");
+const dockerDriverGatewayService: typeof import("./onboard/docker-driver-gateway-service") =
+  require("./onboard/docker-driver-gateway-service");
 const dockerDriverGatewayRuntimeMarker: typeof import("./onboard/docker-driver-gateway-runtime-marker") =
   require("./onboard/docker-driver-gateway-runtime-marker");
 const gatewayBinding: typeof import("./onboard/gateway-binding") = require("./onboard/gateway-binding");
@@ -1985,6 +1987,18 @@ async function startDockerDriverGateway({
   const identityGatewayBin = runtimeIdentity?.identityGatewayBin ?? gatewayBin;
   const { verifySandboxBridgeGatewayReachableOrExit } =
     require("./onboard/gateway-sandbox-reachability") as typeof import("./onboard/gateway-sandbox-reachability");
+  const gatewayService = dockerDriverGatewayService.installNemoclawOpenShellGatewayUserService({
+    gatewayBin,
+  });
+  if (gatewayService.installed && gatewayService.path) {
+    console.log(`  Installed OpenShell gateway user service: ${gatewayService.path}`);
+  } else if (gatewayService.removed && gatewayService.path) {
+    console.log(
+      `  Removed NemoClaw OpenShell gateway user service override: ${gatewayService.path}`,
+    );
+  } else if (gatewayService.reason?.startsWith("refusing")) {
+    console.warn(`  OpenShell gateway user service not installed: ${gatewayService.reason}.`);
+  }
   if (
     await dockerDriverGatewayEnv.startPackageManagedDockerDriverGatewayWithEnvOverride({
       clearDockerDriverGatewayRuntimeFiles,

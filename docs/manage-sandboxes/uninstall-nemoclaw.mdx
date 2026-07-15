@@ -20,7 +20,7 @@ $$nemoclaw uninstall
 | Flag | Effect |
 |---|---|
 | `--yes` | Skip the confirmation prompt. |
-| `--keep-openshell` | Leave OpenShell binaries installed. |
+| `--keep-openshell` | Leave OpenShell binaries installed. NemoClaw still disables and removes its own marked `~/.config/systemd/user/openshell-gateway.service` user unit when present, and never removes upstream package-managed OpenShell service units. |
 | `--delete-models` | Also remove NemoClaw-pulled Ollama models. |
 | `--destroy-user-data` | Also remove preserved user data in `rebuild-backups/`, `backups/`, and `sandboxes.json`. |
 | `--gateway <name>` | Override the gateway name to remove. The default is `nemoclaw`. |

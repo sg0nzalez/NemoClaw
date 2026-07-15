@@ -16,6 +16,70 @@ fail() {
   exit 1
 }
 
+NEMOCLAW_GATEWAY_SERVICE_MARKER="NEMOCLAW_MANAGED_OPENSHELL_GATEWAY=1"
+
+upstream_openshell_gateway_service_installed() {
+  [ -f /usr/local/lib/systemd/user/openshell-gateway.service ] \
+    || [ -f /usr/lib/systemd/user/openshell-gateway.service ] \
+    || [ -f /lib/systemd/user/openshell-gateway.service ]
+}
+
+install_nemoclaw_openshell_gateway_user_service() {
+  [ "$OS" = "Linux" ] || return 0
+  [ -x "$target_dir/openshell-gateway" ] || return 0
+
+  local config_home="${XDG_CONFIG_HOME:-$HOME/.config}"
+  local service_dir="$config_home/systemd/user"
+  local service_path="$service_dir/openshell-gateway.service"
+
+  if upstream_openshell_gateway_service_installed; then
+    if [ -f "$service_path" ] && grep -q "$NEMOCLAW_GATEWAY_SERVICE_MARKER" "$service_path"; then
+      rm -f "$service_path"
+      info "Removed NemoClaw OpenShell gateway user service override: $service_path"
+    fi
+    return 0
+  fi
+
+  local gateway_bin="$target_dir/openshell-gateway"
+  case "$gateway_bin" in
+    *[[:space:]]*)
+      warn "Skipping OpenShell gateway user service because the binary path contains whitespace: $gateway_bin"
+      return 0
+      ;;
+  esac
+
+  if [ -f "$service_path" ] && ! grep -q "$NEMOCLAW_GATEWAY_SERVICE_MARKER" "$service_path"; then
+    warn "Leaving non-NemoClaw OpenShell gateway user service in place: $service_path"
+    return 0
+  fi
+
+  mkdir -p "$service_dir"
+  chmod 700 "$service_dir"
+  cat >"$service_path" <<EOF
+# NemoClaw-managed OpenShell gateway user service
+# $NEMOCLAW_GATEWAY_SERVICE_MARKER
+[Unit]
+Description=OpenShell Gateway
+Documentation=https://github.com/NVIDIA/OpenShell
+After=default.target
+
+[Service]
+Type=simple
+StateDirectory=openshell/gateway
+EnvironmentFile=-%E/openshell/gateway.env
+ExecStart=$gateway_bin
+Restart=on-failure
+RestartSec=5s
+PrivateTmp=true
+UMask=0077
+
+[Install]
+WantedBy=default.target
+EOF
+  chmod 600 "$service_path"
+  info "Installed OpenShell gateway user service at $service_path"
+}
+
 OS="$(uname -s)"
 ARCH="$(uname -m)"
 
@@ -827,5 +891,6 @@ fi
 required_driver_bins_installed_in_dir "$target_dir" \
   || fail "OpenShell release '$RELEASE_TAG' did not install the required Docker-driver binaries."
 require_openshell_messaging_features "$target_dir/openshell"
+install_nemoclaw_openshell_gateway_user_service
 
 info "$("$target_dir/openshell" --version 2>&1 || echo openshell) installed"
