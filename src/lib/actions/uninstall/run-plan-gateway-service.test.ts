@@ -158,8 +158,11 @@ describe("uninstall OpenShell gateway user service", () => {
       target: fs.PathOrFileDescriptor,
       options?: Parameters<typeof fs.readFileSync>[1],
     ) => {
-      if (String(target) === servicePath) throw new Error("permission denied");
-      return originalReadFileSync(target, options as never) as ReturnType<typeof fs.readFileSync>;
+      return String(target) === servicePath
+        ? (() => {
+            throw new Error("permission denied");
+          })()
+        : (originalReadFileSync(target, options as never) as ReturnType<typeof fs.readFileSync>);
     }) as typeof fs.readFileSync);
 
     try {
