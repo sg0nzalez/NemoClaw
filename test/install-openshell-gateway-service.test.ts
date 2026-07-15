@@ -22,6 +22,7 @@ function runInstallHelper(tmp: string, body: string, env: NodeJS.ProcessEnv = {}
         ...process.env,
         HOME: tmp,
         PATH: TEST_SYSTEM_PATH,
+        XDG_CONFIG_HOME: "",
         NEMOCLAW_REPO_ROOT: path.dirname(INSTALLER),
         ...env,
       },

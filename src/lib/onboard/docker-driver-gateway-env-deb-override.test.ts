@@ -12,6 +12,10 @@ import {
   writeDockerGatewayDebEnvOverride,
 } from "./docker-driver-gateway-env";
 
+function homeEnv(home: string, xdgConfigHome = ""): NodeJS.ProcessEnv {
+  return { HOME: home, XDG_CONFIG_HOME: xdgConfigHome } as NodeJS.ProcessEnv;
+}
+
 describe("buildDockerGatewayDebEnvFile", () => {
   it("replaces all managed gateway env keys and preserves unrelated values", () => {
     const next = buildDockerGatewayDebEnvFile(
@@ -114,7 +118,7 @@ describe("writeDockerGatewayDebEnvOverride", () => {
         () => ({
           OPENSHELL_BIND_ADDRESS: "127.0.0.1",
         }),
-        { platform: "linux" },
+        { env: homeEnv(tempHome), platform: "linux" },
       );
 
       const envFileContent = fs.readFileSync(envFile, "utf-8");
@@ -142,7 +146,7 @@ describe("writeDockerGatewayDebEnvOverride", () => {
         () => ({
           OPENSHELL_BIND_ADDRESS: "127.0.0.1",
         }),
-        { platform: "linux" },
+        { env: homeEnv(tempHome), platform: "linux" },
       );
 
       expect(wrote).toBe(false);
