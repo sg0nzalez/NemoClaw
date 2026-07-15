@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { spawn, spawnSync } from "node:child_process";
+import { validateOpenShellExecCommand } from "../../adapters/openshell/sandbox-control";
 import { spawnExitCode } from "../../core/process-exit";
 import type {
   MutableConfigPermsInspection,
@@ -412,6 +413,12 @@ export async function execSandbox(
     console.error(multilineExecMessage(CLI_NAME, sandboxName, command, multilineIndex));
     process.exit(2);
   }
+  const wrappedCommand = wrapExecCommandWithRuntimeEnv(command);
+  const validationError = validateOpenShellExecCommand(wrappedCommand);
+  if (validationError) {
+    console.error(`error: ${validationError.message}`);
+    process.exit(2);
+  }
   const binary = (deps.resolveBinary ?? defaultResolveBinary)();
   if (options.workdir) {
     validateWorkdirOrFail(binary, sandboxName, options.workdir, deps.probeWorkdir);
@@ -420,7 +427,7 @@ export async function execSandbox(
   const completion = await runSandboxExecCommand(
     binary,
     sandboxName,
-    wrapExecCommandWithRuntimeEnv(command),
+    wrappedCommand,
     options,
     deps.run ?? ((runBinary, runArgs) => runSandboxExecChild(runBinary, runArgs, options)),
     deps.cleanupDeps ?? {

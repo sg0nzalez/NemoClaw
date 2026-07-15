@@ -8,8 +8,8 @@ import { validateSkillName } from "./skill-name";
 import {
   checkExisting,
   removeSkill,
-  sandboxExec,
   type SandboxControlContext,
+  sandboxExec,
   verifyRemove,
 } from "./skill-remote";
 
@@ -90,6 +90,60 @@ describe("removeSkill", () => {
     });
   });
 
+  it("converges when retried after removing only the upload directory", async () => {
+    const paths = resolveSkillPaths(null, "test-skill");
+    const mirrorDir = paths.mirrorDir!;
+    const unrelatedPath = "/sandbox/.openclaw/skills/other-skill";
+    const clearSessions = `printf '{}' > '${paths.sessionFile}'`;
+    const verifyGone = `test ! -e '${paths.uploadDir}' && test ! -e "${mirrorDir}" && echo GONE || echo EXISTS`;
+    const scriptedResults = [
+      {
+        command: `rm -rf '${paths.uploadDir}'`,
+        result: { status: 0, stdout: "", stderr: "" },
+      },
+      {
+        command: `rm -rf "${mirrorDir}"`,
+        result: { status: 1, stdout: "", stderr: "failed" },
+      },
+      { command: clearSessions, result: { status: 0, stdout: "", stderr: "" } },
+      {
+        command: `rm -rf '${paths.uploadDir}'`,
+        result: { status: 0, stdout: "", stderr: "" },
+      },
+      {
+        command: `rm -rf "${mirrorDir}"`,
+        result: { status: 0, stdout: "", stderr: "" },
+      },
+      { command: clearSessions, result: { status: 0, stdout: "", stderr: "" } },
+      {
+        command: verifyGone,
+        result: { status: 0, stdout: "GONE", stderr: "" },
+      },
+    ];
+    const execImpl = vi.fn(async (_ctx: SandboxControlContext, command: string) => {
+      const next = scriptedResults.shift();
+      expect(next).toBeDefined();
+      expect(command).toBe(next!.command);
+      expect(command).not.toContain(unrelatedPath);
+      return next!.result;
+    });
+
+    await expect(removeSkill(context(), paths, { execImpl })).resolves.toMatchObject({
+      removedUploadDir: true,
+      removedMirrorDir: false,
+      success: false,
+    });
+    await expect(removeSkill(context(), paths, { execImpl })).resolves.toMatchObject({
+      clearedSessions: true,
+      removedMirrorDir: true,
+      removedUploadDir: true,
+      success: true,
+    });
+    await expect(verifyRemove(context(), paths, { execImpl })).resolves.toBe(true);
+
+    expect(scriptedResults).toEqual([]);
+  });
+
   it("removes OpenClaw upload and mirror dirs, then clears sessions", async () => {
     const commands: string[] = [];
     const result = await removeSkill(context(), resolveSkillPaths(null, "test-skill"), {
@@ -133,10 +187,18 @@ describe("verifyRemove", () => {
 });
 
 describe("checkExisting", () => {
-  it("returns null when sandbox execution is unavailable", async () => {
+  it("maps a selected-control execution failure to an inconclusive result", async () => {
     await expect(
       checkExisting(context(), resolveSkillPaths(null, "test-skill")),
     ).resolves.toBeNull();
+  });
+
+  it("maps a successful absence sentinel to false", async () => {
+    const execImpl = vi.fn(async () => ({ status: 0, stdout: "ABSENT", stderr: "" }));
+
+    await expect(
+      checkExisting(context(), resolveSkillPaths(null, "test-skill"), { execImpl }),
+    ).resolves.toBe(false);
   });
 
   it("probes directories so removal can clean partial uploads", async () => {

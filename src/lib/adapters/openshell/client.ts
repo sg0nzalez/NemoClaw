@@ -75,7 +75,10 @@ export interface CaptureOpenshellResult {
 }
 
 export interface CaptureOpenshellBinaryOptions
-  extends Omit<CaptureOpenshellOptions, "includeStderr" | "includeStreams" | "spawnSyncImpl"> {
+  extends Pick<
+    CaptureOpenshellOptions,
+    "cwd" | "env" | "replaceEnv" | "input" | "timeout" | "maxBuffer"
+  > {
   spawnSyncImpl?: OpenshellSpawnSyncBinary;
 }
 
@@ -258,7 +261,7 @@ export function captureOpenshellCommand(
   };
 }
 
-/** Capture an OpenShell command without decoding stdout, for archive streams. */
+/** Capture raw OpenShell output so byte limits are enforced before decoding. */
 export function captureOpenshellCommandBinary(
   binary: string,
   args: string[],
