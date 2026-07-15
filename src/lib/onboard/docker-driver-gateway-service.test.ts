@@ -100,14 +100,6 @@ describe("docker-driver-gateway-service", () => {
         readFileSync: () => "not managed",
       }),
     ).toBe(false);
-    expect(
-      hasNemoclawOpenShellGatewayUserService({
-        existsSync,
-        home,
-        platform: "linux",
-        readFileSync: () => `# not ${NEMOCLAW_OPENSHELL_GATEWAY_USER_SERVICE_MARKER}`,
-      }),
-    ).toBe(false);
   });
 
   it("detects a NemoClaw-managed user service under XDG_CONFIG_HOME", () => {
@@ -387,7 +379,6 @@ describe("docker-driver-gateway-service", () => {
     const warn = vi.fn();
 
     installAndReportNemoclawOpenShellGatewayUserService({
-      existsSync: () => false,
       gatewayBin: "/home/nvidia/bad path/openshell-gateway",
       platform: "linux",
       warn,

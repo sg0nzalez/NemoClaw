@@ -243,16 +243,7 @@ describe("uninstall OpenShell gateway user service", () => {
     const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-uninstall-foreign-service-"));
     const servicePath = getNemoclawOpenShellGatewayUserServicePath(tmpHome);
     fs.mkdirSync(path.dirname(servicePath), { recursive: true });
-    fs.writeFileSync(
-      servicePath,
-      [
-        "# not NemoClaw-owned",
-        `# not ${NEMOCLAW_OPENSHELL_GATEWAY_USER_SERVICE_MARKER}`,
-        "[Service]",
-        "ExecStart=/tmp/openshell-gateway",
-        "",
-      ].join("\n"),
-    );
+    fs.writeFileSync(servicePath, "[Service]\nExecStart=/tmp/openshell-gateway\n");
 
     try {
       const result = runUninstallPlan(

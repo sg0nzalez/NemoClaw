@@ -25,7 +25,7 @@ import {
 import { buildUninstallPlan, type UninstallPlan } from "../../domain/uninstall/plan";
 import {
   getNemoclawOpenShellGatewayUserServicePath,
-  NEMOCLAW_OPENSHELL_GATEWAY_USER_SERVICE_MARKER_LINE,
+  NEMOCLAW_OPENSHELL_GATEWAY_USER_SERVICE_MARKER,
   OPENSHELL_GATEWAY_USER_SERVICE,
 } from "../../onboard/docker-driver-gateway-service";
 import { stopHostGatewayProcesses } from "../../onboard/host-gateway-process";
@@ -626,11 +626,7 @@ function removeNemoclawOpenShellGatewayUserService(runtime: UninstallRuntime): b
     runtime.warn(`Failed to read ${servicePath}; leaving gateway user service in place.`);
     return true;
   }
-  if (
-    !unit
-      .split(/\r?\n/)
-      .some((line) => line.trimEnd() === NEMOCLAW_OPENSHELL_GATEWAY_USER_SERVICE_MARKER_LINE)
-  ) {
+  if (!unit.includes(NEMOCLAW_OPENSHELL_GATEWAY_USER_SERVICE_MARKER)) {
     runtime.warn(`Leaving ${servicePath} in place because it is not NemoClaw-managed.`);
     return true;
   }
