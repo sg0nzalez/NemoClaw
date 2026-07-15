@@ -3,7 +3,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 import {
-  commitWithStableSnapshotRestoreSource,
+  runSnapshotRestoreMutationAfterSourceRecheck,
   type SnapshotRestoreSourceDescriptor,
 } from "./snapshot-restore-source";
 
@@ -14,8 +14,8 @@ const source = {
   image: "registry/source@sha256:abc",
 } satisfies SnapshotRestoreSourceDescriptor;
 
-describe("commitWithStableSnapshotRestoreSource", () => {
-  it("reads twice and commits only the second descriptor with preflight state", async () => {
+describe("runSnapshotRestoreMutationAfterSourceRecheck", () => {
+  it("samples twice and mutates only with the second descriptor and preflight state", async () => {
     const events: string[] = [];
     const reads = [
       { ...source, readNumber: 1 },
@@ -25,7 +25,7 @@ describe("commitWithStableSnapshotRestoreSource", () => {
       events.push("read");
       return reads[readDescriptor.mock.calls.length - 1];
     });
-    const result = await commitWithStableSnapshotRestoreSource({
+    const result = await runSnapshotRestoreMutationAfterSourceRecheck({
       gatewayName: source.gatewayName,
       sandboxName: source.name,
       readDescriptor,
@@ -33,8 +33,8 @@ describe("commitWithStableSnapshotRestoreSource", () => {
         events.push("preflight");
         return "checked";
       },
-      commit: (descriptor, preflight) => {
-        events.push("commit");
+      mutate: (descriptor, preflight) => {
+        events.push("mutate");
         expect((descriptor as (typeof reads)[number]).readNumber).toBe(2);
         expect(preflight).toBe("checked");
         return descriptor.image;
@@ -42,60 +42,60 @@ describe("commitWithStableSnapshotRestoreSource", () => {
     });
 
     expect(result).toBe(source.image);
-    expect(events).toEqual(["read", "preflight", "read", "commit"]);
+    expect(events).toEqual(["read", "preflight", "read", "mutate"]);
     expect(readDescriptor).toHaveBeenCalledTimes(2);
   });
 
-  it("does not re-read or commit when read-only preflight fails", async () => {
+  it("does not re-read or mutate when read-only preflight fails", async () => {
     const readDescriptor = vi.fn(async () => source);
-    const commit = vi.fn();
+    const mutate = vi.fn();
     await expect(
-      commitWithStableSnapshotRestoreSource({
+      runSnapshotRestoreMutationAfterSourceRecheck({
         gatewayName: source.gatewayName,
         sandboxName: source.name,
         readDescriptor,
         preMutationCheck: () => {
           throw new Error("unsafe destination");
         },
-        commit,
+        mutate,
       }),
     ).rejects.toThrow("unsafe destination");
     expect(readDescriptor).toHaveBeenCalledOnce();
-    expect(commit).not.toHaveBeenCalled();
+    expect(mutate).not.toHaveBeenCalled();
   });
 
   it.each([
     ["empty id", { ...source, id: "" }],
     ["padded image", { ...source, image: ` ${source.image}` }],
   ])("fails closed for an invalid %s", async (_label, invalid) => {
-    const commit = vi.fn();
+    const mutate = vi.fn();
     await expect(
-      commitWithStableSnapshotRestoreSource({
+      runSnapshotRestoreMutationAfterSourceRecheck({
         gatewayName: source.gatewayName,
         sandboxName: source.name,
         readDescriptor: async () => invalid,
         preMutationCheck: vi.fn(),
-        commit,
+        mutate,
       }),
     ).rejects.toThrow(/Failed to read source sandbox before mutation/);
-    expect(commit).not.toHaveBeenCalled();
+    expect(mutate).not.toHaveBeenCalled();
   });
 
   it.each([
     ["name", { ...source, name: "other" }],
     ["gateway", { ...source, gatewayName: "gateway-b" }],
   ])("fails closed when the persisted %s does not match", async (_label, descriptor) => {
-    const commit = vi.fn();
+    const mutate = vi.fn();
     await expect(
-      commitWithStableSnapshotRestoreSource({
+      runSnapshotRestoreMutationAfterSourceRecheck({
         gatewayName: source.gatewayName,
         sandboxName: source.name,
         readDescriptor: async () => descriptor,
         preMutationCheck: vi.fn(),
-        commit,
+        mutate,
       }),
     ).rejects.toThrow(/does not match the persisted source route/);
-    expect(commit).not.toHaveBeenCalled();
+    expect(mutate).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -103,57 +103,57 @@ describe("commitWithStableSnapshotRestoreSource", () => {
     "id",
     "name",
     "image",
-  ] as const)("fails closed when source %s drifts", async (key) => {
-    const commit = vi.fn();
+  ] as const)("rejects source %s drift observed between samples", async (key) => {
+    const mutate = vi.fn();
     const values = [source[key], `${source[key]}-changed`];
     const readDescriptor = vi.fn(async () => ({
       ...source,
       [key]: values[readDescriptor.mock.calls.length - 1],
     }));
     await expect(
-      commitWithStableSnapshotRestoreSource({
+      runSnapshotRestoreMutationAfterSourceRecheck({
         gatewayName: source.gatewayName,
         sandboxName: source.name,
         readDescriptor,
         preMutationCheck: vi.fn(),
-        commit,
+        mutate,
       }),
-    ).rejects.toThrow(`Source sandbox ${key} changed`);
-    expect(commit).not.toHaveBeenCalled();
+    ).rejects.toThrow(`Source sandbox ${key} differed between pre-mutation descriptor samples`);
+    expect(mutate).not.toHaveBeenCalled();
   });
 
   it.each([
-    [1, [() => Promise.reject(new Error("unavailable")), async () => source]],
-    [2, [async () => source, () => Promise.reject(new Error("unavailable"))]],
-  ] as const)("fails closed when descriptor read %i fails", async (failedRead, reads) => {
-    const commit = vi.fn();
+    [1, [() => Promise.reject(new Error("unavailable")), async () => source], "before mutation"],
+    [2, [async () => source, () => Promise.reject(new Error("unavailable"))], "after preflight"],
+  ] as const)("fails closed when descriptor read %i fails", async (failedRead, reads, phase) => {
+    const mutate = vi.fn();
     const preMutationCheck = vi.fn();
     const readDescriptor = vi
       .fn()
       .mockImplementationOnce(reads[0])
       .mockImplementationOnce(reads[1]);
     await expect(
-      commitWithStableSnapshotRestoreSource({
+      runSnapshotRestoreMutationAfterSourceRecheck({
         gatewayName: source.gatewayName,
         sandboxName: source.name,
         readDescriptor,
         preMutationCheck,
-        commit,
+        mutate,
       }),
-    ).rejects.toThrow(/Failed to read source sandbox .*mutation: unavailable/);
+    ).rejects.toThrow(`Failed to read source sandbox ${phase}: unavailable`);
     expect(preMutationCheck).toHaveBeenCalledTimes(failedRead - 1);
-    expect(commit).not.toHaveBeenCalled();
+    expect(mutate).not.toHaveBeenCalled();
   });
 
   it("preserves mutation failures without relabeling them as descriptor failures", async () => {
     const failure = new Error("create failed");
     await expect(
-      commitWithStableSnapshotRestoreSource({
+      runSnapshotRestoreMutationAfterSourceRecheck({
         gatewayName: source.gatewayName,
         sandboxName: source.name,
         readDescriptor: async () => source,
         preMutationCheck: vi.fn(),
-        commit: () => {
+        mutate: () => {
           throw failure;
         },
       }),

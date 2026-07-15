@@ -19,12 +19,12 @@ export class SnapshotRestoreSourceError extends Error {
   }
 }
 
-interface StableSourceOptions<TPreflight, TResult> {
+interface SourceRecheckOptions<TPreflight, TResult> {
   gatewayName: string;
   sandboxName: string;
   readDescriptor: SnapshotRestoreSourceReader;
   preMutationCheck: () => Promise<TPreflight> | TPreflight;
-  commit: (
+  mutate: (
     descriptor: SnapshotRestoreSourceDescriptor,
     preflight: TPreflight,
   ) => Promise<TResult> | TResult;
@@ -42,8 +42,16 @@ function checkedDescriptor(
   return { ...descriptor };
 }
 
-export async function commitWithStableSnapshotRestoreSource<TPreflight, TResult>(
-  options: StableSourceOptions<TPreflight, TResult>,
+/**
+ * Rechecks the source descriptor before handing control to the mutation callback.
+ *
+ * This is a best-effort sampled drift check, not an atomic source lock. It rejects
+ * changes observed between the two reads, but an external OpenShell mutation can
+ * still occur after the second read. Callers must not infer source stability across
+ * the callback without a server-side revision or compare-and-create primitive.
+ */
+export async function runSnapshotRestoreMutationAfterSourceRecheck<TPreflight, TResult>(
+  options: SourceRecheckOptions<TPreflight, TResult>,
 ): Promise<TResult> {
   const read = async (phase: string) => {
     try {
@@ -55,20 +63,20 @@ export async function commitWithStableSnapshotRestoreSource<TPreflight, TResult>
       });
     }
   };
-  const pinned = await read("before mutation");
-  if (pinned.gatewayName !== options.gatewayName || pinned.name !== options.sandboxName) {
+  const firstSample = await read("before mutation");
+  if (firstSample.gatewayName !== options.gatewayName || firstSample.name !== options.sandboxName) {
     throw new SnapshotRestoreSourceError(
       "OpenShell sandbox descriptor does not match the persisted source route.",
     );
   }
   const preflight = await options.preMutationCheck();
-  const current = await read("immediately before mutation");
+  const secondSample = await read("after preflight");
   for (const key of ["gatewayName", "id", "name", "image"] as const) {
-    if (current[key] !== pinned[key]) {
+    if (secondSample[key] !== firstSample[key]) {
       throw new SnapshotRestoreSourceError(
-        `Source sandbox ${key} changed before snapshot restore mutation.`,
+        `Source sandbox ${key} differed between pre-mutation descriptor samples.`,
       );
     }
   }
-  return options.commit(current, preflight);
+  return options.mutate(secondSample, preflight);
 }

@@ -71,7 +71,7 @@ import {
 } from "./sandbox-exec-output";
 import { probeGatewayRunning, selectSandboxGatewayIfRegistered } from "./sandbox-gateway-routing";
 import {
-  commitWithStableSnapshotRestoreSource,
+  runSnapshotRestoreMutationAfterSourceRecheck,
   type SnapshotRestoreSourceDescriptor,
   SnapshotRestoreSourceError,
 } from "./snapshot-restore-source";
@@ -957,7 +957,7 @@ async function runSnapshotRestoreUnlocked(
     const sourceGatewayName = resolveSandboxGatewayName(srcEntry);
     const createAndRegisterClone = async (): Promise<void> => {
       try {
-        await commitWithStableSnapshotRestoreSource({
+        await runSnapshotRestoreMutationAfterSourceRecheck({
           gatewayName: sourceGatewayName,
           sandboxName,
           readDescriptor: readSnapshotRestoreSourceDescriptor,
@@ -1004,7 +1004,7 @@ async function runSnapshotRestoreUnlocked(
             }
             return { dashboardEnvArgs, dashboardPort, sourceEntry };
           },
-          commit: async (descriptor, preflight) => {
+          mutate: async (descriptor, preflight) => {
             if (targetExists) {
               deleteSandboxForRestore(targetSandbox);
               requireLiveSandboxesOnSandboxGateway(

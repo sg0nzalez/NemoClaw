@@ -273,7 +273,7 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
     expect(f.restoreSandboxStateMock).toHaveBeenCalledWith("beta", "/tmp/backup-alpha");
   });
 
-  it("does not delete or create when the live source descriptor drifts", async () => {
+  it("does not delete or create when a descriptor difference is observed between samples", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     f.getSandboxMock.mockImplementation((name) => ({
       name: name ?? "alpha",
@@ -297,7 +297,9 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
       }),
     ).rejects.toMatchObject({ exitCode: 1 });
 
-    expect(consoleError.mock.calls.flat().join("\n")).toContain("Source sandbox image changed");
+    expect(consoleError.mock.calls.flat().join("\n")).toContain(
+      "Source sandbox image differed between pre-mutation descriptor samples",
+    );
     expect(f.lifecycleMock.events).not.toContain("delete");
     expect(f.streamSandboxCreateMock).not.toHaveBeenCalled();
     expect(f.registerSandboxMock).not.toHaveBeenCalled();
