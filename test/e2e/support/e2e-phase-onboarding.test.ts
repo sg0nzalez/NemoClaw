@@ -161,7 +161,6 @@ describe("onboarding phase fixture", () => {
         1,
         [
           "Landlock path unavailable in hard_requirement mode: /definitely-missing-nemoclaw-landlock-e2e",
-          "The failed sandbox has been removed; retry will recreate it.",
         ].join("\n"),
       ),
     );

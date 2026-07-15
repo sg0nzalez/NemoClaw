@@ -9,8 +9,8 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 // This subprocess test exercises the full onboard FSM wiring with the real
-// failure classifier, registry gate, and readiness tracing. Focused helper
-// tests cover cleanup decisions so this file can stay at the lifecycle level.
+// failure classifier, registry gate, and readiness tracing. It also protects
+// the ownership boundary: unstructured create output cannot authorize deletion.
 const MESSAGING_ENV_PREFIXES = ["DISCORD_", "SLACK_", "TELEGRAM_", "WHATSAPP_"] as const;
 
 type Scenario = {
@@ -236,7 +236,7 @@ describe("DCode Landlock onboarding flow", () => {
         "Landlock path unavailable in hard_requirement mode: /app (read_only): No such file or directory",
       ready: false,
     },
-  ])("removes the failed sandbox without recording it as ready when $name (#5795)", (scenario) => {
+  ])("fails closed without guessing at sandbox ownership when $name (#5795)", (scenario) => {
     const { result, outcome } = runScenario(scenario);
     const stderr = String(result.stderr);
 
@@ -248,7 +248,7 @@ describe("DCode Landlock onboarding flow", () => {
       outcome.commands.some((command) =>
         command.endsWith("openshell sandbox delete dcode-landlock-flow"),
       ),
-    ).toBe(true);
+    ).toBe(false);
     expect(outcome.registerCalls).toEqual([]);
     expect(outcome.updateCalls).toEqual([]);
   });

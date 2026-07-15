@@ -342,12 +342,6 @@ export class OnboardingPhaseFixture {
           `DCode Landlock negative proof missed the hard-required path failure: ${negativeOutput}`,
         );
       }
-      if (!negativeOutput.includes("The failed sandbox has been removed")) {
-        throw new Error(
-          `DCode Landlock negative proof missed successful cleanup evidence: ${negativeOutput}`,
-        );
-      }
-
       const openshellList = await this.host.command(
         this.host.openshellCommandPath,
         ["sandbox", "list"],

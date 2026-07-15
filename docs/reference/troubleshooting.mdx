@@ -1883,7 +1883,8 @@ OpenClaw and Hermes can apply the access rights available from Linux 5.13 onward
 Deep Agents Code uses `hard_requirement` compatibility.
 The pinned OpenShell runtime builds a Landlock ABI v2 ruleset, so this mode requires Linux 5.19 or later in addition to an enabled LSM and permitted syscalls.
 If OpenShell detects that Landlock is unavailable, cannot open a configured policy path, or cannot enforce the prepared ruleset, sandbox startup fails and `$$nemoclaw onboard` returns a nonzero exit instead of reporting the terminal runtime as ready.
-When OpenShell creates the sandbox but it fails before reaching Ready, NemoClaw removes the failed sandbox so the next onboarding attempt can reuse the same name.
+NemoClaw does not automatically delete a failed sandbox from create-stream text because that output does not carry an authoritative resource identity.
+If OpenShell retains the failed resource, inspect it with `openshell sandbox get <name>` and delete it only after confirming that it belongs to the failed attempt.
 Do not replace `hard_requirement` with `best_effort` to bypass this failure.
 
 Review the onboarding error first because a policy-path failure names the inaccessible path.

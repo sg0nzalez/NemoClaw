@@ -19,7 +19,6 @@ export type SandboxCreateFailureReportOptions = {
 export type SandboxCreateFailureReportDeps = {
   classifyCreateFailure(output: string): { kind: string };
   printCreateFailureDiagnostics(sandboxName: string, options: { backupPath: string | null }): void;
-  cleanupFailedCreate(failureKind: string, createOutput: string): void;
   printRecoveryHints(output: string, options: { createArgs: readonly string[] }): void;
   warn(message: string): void;
   error(message: string): void;
@@ -61,11 +60,6 @@ export function reportSandboxCreateFailure(
     });
   } catch {
     deps.error("  Could not save sandbox failure diagnostics; continuing recovery.");
-  }
-  try {
-    deps.cleanupFailedCreate(failure.kind, redactedCreateOutput);
-  } catch {
-    deps.error("  Automatic failed-sandbox cleanup did not complete; continuing recovery.");
   }
   deps.error("  Try:  openshell sandbox list        # check gateway state");
   deps.printRecoveryHints(redactedCreateOutput, { createArgs: options.createArgs });

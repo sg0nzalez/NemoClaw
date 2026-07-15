@@ -5,10 +5,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import {
-  cleanupLandlockSandboxAfterCreateFailure,
   collectSandboxCreateFailureDiagnostics,
   printSandboxCreateFailureDiagnostics,
 } from "../src/lib/onboard/sandbox-create-failure.js";
@@ -128,87 +127,5 @@ describe("sandbox create failure diagnostics", () => {
     expect(fs.readFileSync(path.join(diagnostics!.dir, "summary.txt"), "utf-8")).toContain(
       "gateway_tail=",
     );
-  });
-});
-
-describe("sandbox create failure handling", () => {
-  it("does not delete an existing sandbox when hard-required Landlock fails before gateway upload", () => {
-    const runOpenshell = vi.fn(() => ({ status: 0 }));
-
-    cleanupLandlockSandboxAfterCreateFailure({
-      failureKind: "landlock_enforcement_failed",
-      createOutput:
-        "Landlock unavailable in hard_requirement mode: not enabled in the active LSM set",
-      sandboxName: "dcode-landlock-precreate",
-      runOpenshell,
-    });
-
-    expect(runOpenshell).not.toHaveBeenCalled();
-  });
-
-  it("removes a failed sandbox when hard-required Landlock output proves gateway creation", () => {
-    const runOpenshell = vi.fn(() => ({ status: 0 }));
-
-    cleanupLandlockSandboxAfterCreateFailure({
-      failureKind: "landlock_enforcement_failed",
-      createOutput:
-        "Created sandbox: dcode-landlock-created\n" +
-        "Landlock unavailable in hard_requirement mode: not enabled in the active LSM set",
-      sandboxName: "dcode-landlock-created",
-      runOpenshell,
-    });
-
-    expect(runOpenshell).toHaveBeenCalledWith(["sandbox", "delete", "dcode-landlock-created"], {
-      ignoreError: true,
-    });
-  });
-
-  it("does not delete the requested sandbox when Landlock output names a different created sandbox", () => {
-    const runOpenshell = vi.fn(() => ({ status: 0 }));
-
-    cleanupLandlockSandboxAfterCreateFailure({
-      failureKind: "landlock_enforcement_failed",
-      createOutput:
-        "Created sandbox: other-dcode\n" +
-        "Landlock unavailable in hard_requirement mode: not enabled in the active LSM set",
-      sandboxName: "dcode-landlock-current",
-      runOpenshell,
-    });
-
-    expect(runOpenshell).not.toHaveBeenCalled();
-  });
-
-  it("does not delete for a non-Landlock failure even with exact create evidence", () => {
-    const runOpenshell = vi.fn(() => ({ status: 0 }));
-
-    cleanupLandlockSandboxAfterCreateFailure({
-      failureKind: "unknown",
-      createOutput: "Created sandbox: dcode-landlock-current\nprovider setup failed",
-      sandboxName: "dcode-landlock-current",
-      runOpenshell,
-    });
-
-    expect(runOpenshell).not.toHaveBeenCalled();
-  });
-
-  it("keeps a throwing delete runner on the manual-cleanup path", () => {
-    const runOpenshell = vi.fn(() => {
-      throw new Error("gateway unavailable");
-    });
-    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
-
-    cleanupLandlockSandboxAfterCreateFailure({
-      failureKind: "landlock_enforcement_failed",
-      createOutput:
-        "Created sandbox: dcode-landlock-current\n" +
-        "Landlock unavailable in hard_requirement mode: not enabled in the active LSM set",
-      sandboxName: "dcode-landlock-current",
-      runOpenshell,
-    });
-
-    expect(runOpenshell).toHaveBeenCalledOnce();
-    expect(error).toHaveBeenCalledWith("  Could not remove the failed sandbox. Manual cleanup:");
-    expect(error).toHaveBeenCalledWith('    openshell sandbox delete "dcode-landlock-current"');
-    error.mockRestore();
   });
 });

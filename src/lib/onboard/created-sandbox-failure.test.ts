@@ -25,7 +25,6 @@ function createFailureDeps(
   return {
     classifyCreateFailure: vi.fn(() => ({ kind: "unknown" })),
     printCreateFailureDiagnostics: vi.fn(),
-    cleanupFailedCreate: vi.fn(),
     printRecoveryHints: vi.fn(),
     warn: vi.fn(),
     error: vi.fn(),
@@ -59,7 +58,6 @@ describe("reportSandboxCreateFailure", () => {
       "  Create stream exited with code 3 after sandbox was created.",
     );
     expect(deps.printCreateFailureDiagnostics).not.toHaveBeenCalled();
-    expect(deps.cleanupFailedCreate).not.toHaveBeenCalled();
     expect(deps.printRecoveryHints).not.toHaveBeenCalled();
     expect(deps.exitProcess).not.toHaveBeenCalled();
   });
@@ -75,17 +73,11 @@ describe("reportSandboxCreateFailure", () => {
     expect(deps.printCreateFailureDiagnostics).toHaveBeenCalledWith("alpha", {
       backupPath: "/tmp/backup",
     });
-    expect(deps.cleanupFailedCreate).toHaveBeenCalledWith("unknown", "boom");
     expect(deps.printRecoveryHints).toHaveBeenCalledWith("boom", {
       createArgs: ["sandbox", "create", "alpha"],
     });
     expect(
       (deps.printCreateFailureDiagnostics as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0],
-    ).toBeLessThan(
-      (deps.cleanupFailedCreate as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0],
-    );
-    expect(
-      (deps.cleanupFailedCreate as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0],
     ).toBeLessThan(
       (deps.printRecoveryHints as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0],
     );
@@ -93,7 +85,7 @@ describe("reportSandboxCreateFailure", () => {
     expect(deps.warn).not.toHaveBeenCalled();
   });
 
-  it("preserves cleanup, recovery hints, and exit status when diagnostics collection fails", () => {
+  it("preserves recovery hints and exit status when diagnostics collection fails", () => {
     const deps = createFailureDeps({
       printCreateFailureDiagnostics: vi.fn(() => {
         throw new Error("diagnostics disk unavailable");
@@ -104,7 +96,6 @@ describe("reportSandboxCreateFailure", () => {
       reportSandboxCreateFailure(createFailureOptions({ createStatus: 47 }), deps),
     ).toThrow(ExitSignal);
 
-    expect(deps.cleanupFailedCreate).toHaveBeenCalledWith("unknown", "boom");
     expect(deps.printRecoveryHints).toHaveBeenCalledWith("boom", {
       createArgs: ["sandbox", "create", "alpha"],
     });
@@ -112,26 +103,6 @@ describe("reportSandboxCreateFailure", () => {
       "  Could not save sandbox failure diagnostics; continuing recovery.",
     );
     expect(deps.exitProcess).toHaveBeenCalledWith(47);
-  });
-
-  it("preserves recovery hints and exit status when cleanup fails unexpectedly", () => {
-    const deps = createFailureDeps({
-      cleanupFailedCreate: vi.fn(() => {
-        throw new Error("delete runner unavailable");
-      }),
-    });
-
-    expect(() =>
-      reportSandboxCreateFailure(createFailureOptions({ createStatus: 53 }), deps),
-    ).toThrow(ExitSignal);
-
-    expect(deps.printRecoveryHints).toHaveBeenCalledWith("boom", {
-      createArgs: ["sandbox", "create", "alpha"],
-    });
-    expect(deps.error).toHaveBeenCalledWith(
-      "  Automatic failed-sandbox cleanup did not complete; continuing recovery.",
-    );
-    expect(deps.exitProcess).toHaveBeenCalledWith(53);
   });
 
   it("redacts create output before classification and echoing", () => {

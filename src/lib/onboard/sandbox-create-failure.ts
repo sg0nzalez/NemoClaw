@@ -31,62 +31,6 @@ export type SandboxCreateFailureDiagnosticOptions = {
   now?: Date;
 };
 
-type SandboxDeleteRunner = (
-  args: string[],
-  options?: { ignoreError?: boolean },
-) => { status?: number | null };
-
-export type LandlockCreateFailureCleanupOptions = {
-  failureKind: string;
-  createOutput?: string;
-  sandboxName: string;
-  runOpenshell: SandboxDeleteRunner;
-};
-
-export function removeFailedSandboxForRetry(
-  sandboxName: string,
-  runOpenshell: SandboxDeleteRunner,
-): void {
-  try {
-    const result = runOpenshell(["sandbox", "delete", sandboxName], { ignoreError: true });
-    if (result.status === 0) {
-      console.error("  The failed sandbox has been removed; retry will recreate it.");
-      return;
-    }
-  } catch {
-    // Preserve the original create failure and its exit status below.
-  }
-  console.error("  Could not remove the failed sandbox. Manual cleanup:");
-  console.error(`    openshell sandbox delete "${sandboxName}"`);
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function hasCreatedSandboxEvidence(output: string | undefined, sandboxName: string): boolean {
-  if (!output) return false;
-  const createdSandboxLine = new RegExp(
-    `^\\s*Created sandbox:\\s*${escapeRegExp(sandboxName)}\\s*$`,
-    "im",
-  );
-  return createdSandboxLine.test(stripAnsi(output));
-}
-
-export function cleanupLandlockSandboxAfterCreateFailure({
-  failureKind,
-  createOutput,
-  sandboxName,
-  runOpenshell,
-}: LandlockCreateFailureCleanupOptions): void {
-  if (
-    failureKind === "landlock_enforcement_failed" &&
-    hasCreatedSandboxEvidence(createOutput, sandboxName)
-  ) {
-    removeFailedSandboxForRetry(sandboxName, runOpenshell);
-  }
-}
-
 function stripAnsi(value: string): string {
   return String(value || "").replace(ANSI_RE, "");
 }

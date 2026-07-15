@@ -18,10 +18,7 @@ import {
   queryOpenShellDockerSandboxContainers,
   queryOpenShellDockerSandboxRuntimeSnapshot,
 } from "./openshell-docker-sandbox-containers";
-import {
-  cleanupLandlockSandboxAfterCreateFailure,
-  printSandboxCreateFailureDiagnostics,
-} from "./sandbox-create-failure";
+import { printSandboxCreateFailureDiagnostics } from "./sandbox-create-failure";
 import * as sandboxGpuCreateAttempt from "./sandbox-gpu-create-attempt";
 import type {
   SandboxGpuCreateFlowDeps,
@@ -162,13 +159,6 @@ export function createSandboxGpuCreateAttemptRunner(
           {
             classifyCreateFailure: classifySandboxCreateFailure,
             printCreateFailureDiagnostics: printSandboxCreateFailureDiagnostics,
-            cleanupFailedCreate: (failureKind, createOutput) =>
-              cleanupLandlockSandboxAfterCreateFailure({
-                failureKind,
-                createOutput,
-                sandboxName: input.sandboxName,
-                runOpenshell: deps.runOpenshell,
-              }),
             printRecoveryHints: printSandboxCreateRecoveryHints,
             warn: (message) => console.warn(message),
             error: (message) => console.error(message),
