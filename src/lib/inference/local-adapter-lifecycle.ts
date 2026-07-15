@@ -25,8 +25,6 @@ export type RunFn = (
   options?: { ignoreError?: boolean; suppressOutput?: boolean },
 ) => unknown;
 
-export type LocalAdapterProcessMatcher = string | ((commandLine: string) => boolean);
-
 export const DEFAULT_LOCAL_ADAPTER_STATE_DIR = nemoclawStateRoot(os.homedir(), GATEWAY_PORT);
 
 export function ensureLocalAdapterStateDir(stateDir = DEFAULT_LOCAL_ADAPTER_STATE_DIR): void {
@@ -138,25 +136,26 @@ export function loadLocalAdapterPid(filePath: string): number | null {
 
 export function isLocalAdapterProcess(
   pid: number | null | undefined,
-  processMatcher: LocalAdapterProcessMatcher,
+  processNeedle: string | RegExp,
   runCapture: RunCaptureFn,
 ): boolean {
   if (!Number.isInteger(pid) || !pid || pid <= 0) return false;
-  const cmdline = runCapture(["ps", "-p", String(pid), "-o", "args="], { ignoreError: true });
-  const commandLine = String(cmdline || "");
-  return typeof processMatcher === "function"
-    ? processMatcher(commandLine)
-    : commandLine.includes(processMatcher);
+  const cmdline = String(
+    runCapture(["ps", "-p", String(pid), "-o", "args="], { ignoreError: true }) || "",
+  );
+  return typeof processNeedle === "string"
+    ? cmdline.includes(processNeedle)
+    : processNeedle.test(cmdline);
 }
 
 export function killLocalAdapterPid(options: {
   pidPath: string;
-  processMatcher: LocalAdapterProcessMatcher;
+  processNeedle: string | RegExp;
   run: RunFn;
   runCapture: RunCaptureFn;
 }): void {
   const persistedPid = loadLocalAdapterPid(options.pidPath);
-  if (isLocalAdapterProcess(persistedPid, options.processMatcher, options.runCapture)) {
+  if (isLocalAdapterProcess(persistedPid, options.processNeedle, options.runCapture)) {
     options.run(["kill", String(persistedPid)], { ignoreError: true, suppressOutput: true });
   }
   removeLocalAdapterFile(options.pidPath);

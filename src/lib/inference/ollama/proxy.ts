@@ -28,7 +28,7 @@ const {
   validateOllamaModel,
 } = require("../local");
 const { anyRegistryModelFits, modelFitsAvailableMemory } = require("../ollama-model-registry");
-const { isOllamaAuthProxyCommandLine }: typeof import("./process") = require("./process");
+const { OLLAMA_AUTH_PROXY_PROCESS_NEEDLE }: typeof import("./process") = require("./process");
 const { buildSubprocessEnv } = require("../../subprocess-env");
 const { prompt } = require("../../credentials/store");
 const { promptManualModelId } = require("../model-prompts");
@@ -136,7 +136,7 @@ function loadPersistedProxyPid(): number | null {
 // ── Process management ───────────────────────────────────────────
 
 function isOllamaProxyProcess(pid: number | null | undefined): boolean {
-  return isLocalAdapterProcess(pid, isOllamaAuthProxyCommandLine, runCapture);
+  return isLocalAdapterProcess(pid, OLLAMA_AUTH_PROXY_PROCESS_NEEDLE, runCapture);
 }
 
 function spawnOllamaAuthProxy(token: string): number | null {
@@ -157,7 +157,7 @@ function killStaleProxy(): void {
   try {
     killLocalAdapterPid({
       pidPath: PROXY_PID_PATH,
-      processMatcher: isOllamaAuthProxyCommandLine,
+      processNeedle: OLLAMA_AUTH_PROXY_PROCESS_NEEDLE,
       run,
       runCapture,
     });

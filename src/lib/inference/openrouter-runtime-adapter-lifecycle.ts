@@ -127,7 +127,7 @@ function isAdapterProcess(pid: number | null | undefined): boolean {
 function killStaleAdapter(): void {
   killLocalAdapterPid({
     pidPath: PID_PATH,
-    processMatcher: PROCESS_NEEDLE,
+    processNeedle: PROCESS_NEEDLE,
     run,
     runCapture,
   });

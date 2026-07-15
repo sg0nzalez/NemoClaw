@@ -22,7 +22,7 @@ import {
   writeLocalAdapterJsonFile,
   writeLocalAdapterSecretFile,
 } from "./local-adapter-lifecycle";
-import { isOllamaAuthProxyCommandLine } from "./ollama/process";
+import { OLLAMA_AUTH_PROXY_PROCESS_NEEDLE } from "./ollama/process";
 
 const tempDirs: string[] = [];
 const servers: http.Server[] = [];
@@ -91,11 +91,13 @@ describe("local adapter lifecycle", () => {
     const killed: string[][] = [];
     const commandLine = `node /opt/nemoclaw/scripts/${scriptName}`;
 
-    expect(isLocalAdapterProcess(789, isOllamaAuthProxyCommandLine, () => commandLine)).toBe(true);
+    expect(isLocalAdapterProcess(789, OLLAMA_AUTH_PROXY_PROCESS_NEEDLE, () => commandLine)).toBe(
+      true,
+    );
 
     killLocalAdapterPid({
       pidPath,
-      processMatcher: isOllamaAuthProxyCommandLine,
+      processNeedle: OLLAMA_AUTH_PROXY_PROCESS_NEEDLE,
       run: (args) => {
         killed.push(args);
       },
@@ -116,7 +118,7 @@ describe("local adapter lifecycle", () => {
 
     killLocalAdapterPid({
       pidPath,
-      processMatcher: isOllamaAuthProxyCommandLine,
+      processNeedle: OLLAMA_AUTH_PROXY_PROCESS_NEEDLE,
       run: (args) => {
         killed.push(args);
       },
