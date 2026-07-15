@@ -1,16 +1,16 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
-//
-// Tests for snapshot versioning and naming added alongside the --name flag:
-//   - validateSnapshotName accepts/rejects names
-//   - listBackups computes virtual v<N> versions by timestamp-ascending position
-//   - findBackup resolves selectors (v<N>, name, exact timestamp)
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+const transport = vi.hoisted(() => ({
+  mutationRoot: "",
+  stagedRemotePaths: new Map<string, string>(),
+}));
 
 vi.mock("../src/lib/adapters/openshell/sandbox-control-routing.js", () => {
   const exec = async (request: {
@@ -20,21 +20,41 @@ vi.mock("../src/lib/adapters/openshell/sandbox-control-routing.js", () => {
     timeoutMs?: number;
     stdoutEncoding?: "utf8" | "buffer";
   }) => {
-    const result = spawnSync("ssh", [String(request.command.at(-1) ?? "")], {
-      input: request.stdin,
-      maxBuffer: request.maxOutputBytes,
-      timeout: request.timeoutMs,
-      encoding: request.stdoutEncoding === "buffer" ? undefined : "utf8",
-    });
-    const binary = request.stdoutEncoding === "buffer";
-    return {
-      status: result.status,
-      stdout: binary ? "" : String(result.stdout ?? ""),
-      ...(binary ? { stdoutBytes: Buffer.from(result.stdout ?? "") } : {}),
-      stderr: String(result.stderr ?? ""),
-      ...(result.error ? { error: result.error } : {}),
-      ...(result.signal ? { signal: result.signal } : {}),
+    const run = (command: string[], binary = false) => {
+      const result = spawnSync(command[0], command.slice(1), {
+        input: request.stdin,
+        maxBuffer: request.maxOutputBytes,
+        timeout: request.timeoutMs,
+        encoding: binary ? undefined : "utf8",
+      });
+      return {
+        status: result.status,
+        stdout: binary ? "" : String(result.stdout ?? ""),
+        ...(binary ? { stdoutBytes: Buffer.from(result.stdout ?? "") } : {}),
+        stderr: String(result.stderr ?? ""),
+        ...(result.error ? { error: result.error } : {}),
+        ...(result.signal ? { signal: result.signal } : {}),
+      };
     };
+    const mergeKeyAllowlist = () => {
+      const removeStaged = (stagedPath?: string) =>
+        stagedPath && fs.rmSync(stagedPath, { force: true });
+      removeStaged(transport.stagedRemotePaths.get(request.command[6]));
+      return { status: 0, stdout: "KEY_ALLOWLIST_OK\n", stderr: "" };
+    };
+    const restoreState = () => {
+      const command = [...request.command];
+      command[3] = transport.stagedRemotePaths.get(command[3]) ?? command[3];
+      command[4] = transport.mutationRoot;
+      return run(command);
+    };
+    const readState = () =>
+      run(["ssh", String(request.command.at(-1) ?? "")], request.stdoutEncoding === "buffer");
+    return request.command[0] === "/opt/venv/bin/python3"
+      ? mergeKeyAllowlist()
+      : request.command[0] === "python3"
+        ? restoreState()
+        : readState();
   };
   return {
     execSandboxReadOnlyWithGrpcFallback: async (
@@ -48,6 +68,24 @@ vi.mock("../src/lib/adapters/openshell/sandbox-control-routing.js", () => {
     }),
   };
 });
+
+vi.mock("../src/lib/adapters/openshell/sandbox-upload.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/lib/adapters/openshell/sandbox-upload.js")>()),
+  uploadSandboxPayloadFile: (
+    _gateway: string,
+    _sandbox: string,
+    localPath: string,
+    remotePath: string,
+  ) => {
+    const stagedPath = path.join(
+      fs.realpathSync(path.dirname(remotePath)),
+      path.basename(remotePath),
+    );
+    fs.copyFileSync(localPath, stagedPath);
+    transport.stagedRemotePaths.set(remotePath, stagedPath);
+    return { ok: true, remotePath };
+  },
+}));
 
 // Override HOME BEFORE importing sandbox-state — it reads process.env.HOME
 // at module-load time to compute REBUILD_BACKUPS_DIR. Captured original is
@@ -113,6 +151,8 @@ afterAll(() => {
 });
 beforeEach(() => {
   fs.rmSync(BACKUPS_ROOT, { recursive: true, force: true });
+  transport.mutationRoot = "";
+  transport.stagedRemotePaths.clear();
 });
 function writeExecutable(filePath: string, source: string): void {
   fs.writeFileSync(filePath, source, { mode: 0o755 });
@@ -518,7 +558,7 @@ const fs = require("node:fs");
 const cmd = process.argv[process.argv.length - 1] || "";
 const existingDirs = ${JSON.stringify(existingDirs)};
 if (cmd.includes("[ -d ")) {
-  process.stdout.write(existingDirs.join("\\n") + "\\n");
+  process.stdout.write(existingDirs.join("\\0") + "\\0");
   process.exit(0);
 }
 if (cmd.includes("openclaw.json") && cmd.includes("cat --")) {
@@ -571,7 +611,6 @@ process.exit(0);
     try {
       const binDir = path.join(fixture, "bin");
       const openclawDir = path.join(fixture, "sandbox-root", ".openclaw");
-      const sshLog = path.join(fixture, "ssh-log.jsonl");
       const existingDirs = ["agents", "workspace", "extensions"];
       fs.mkdirSync(binDir, { recursive: true });
       fs.mkdirSync(path.join(openclawDir, "agents", "main", "sessions"), { recursive: true });
@@ -587,16 +626,8 @@ const fs = require("node:fs");
 const { spawnSync } = require("node:child_process");
 const cmd = process.argv[process.argv.length - 1] || "";
 const existingDirs = ${JSON.stringify(existingDirs)};
-fs.appendFileSync(${JSON.stringify(sshLog)}, JSON.stringify({ cmd }) + "\\n");
-function readStdin() {
-  for (;;) {
-    const buf = Buffer.alloc(65536);
-    const n = fs.readSync(0, buf, 0, buf.length, null);
-    if (n === 0) break;
-  }
-}
 if (cmd.includes("[ -d ")) {
-  process.stdout.write(existingDirs.join("\\n") + "\\n");
+  process.stdout.write(existingDirs.join("\\0") + "\\0");
   process.exit(0);
 }
 if (cmd.includes("openclaw.json") && cmd.includes("cat --")) {
@@ -615,13 +646,6 @@ if (cmd.includes("tar -cf -")) {
   process.stderr.write("tar: workspace/marker.txt: Cannot read: Input/output error\\n");
   process.stderr.write("tar: Exiting with failure status due to previous errors\\n");
   process.exit(2);
-}
-if (cmd.includes("rm -rf") || cmd.includes("tar --no-same-owner")) {
-  readStdin();
-  process.exit(0);
-}
-if (cmd.includes("chown") || cmd.includes("[ -r ")) {
-  process.exit(0);
 }
 process.exit(0);
 `,
@@ -642,22 +666,14 @@ process.exit(0);
       expect(backup.manifest?.backedUpDirs).toEqual(["extensions"]);
       expect(fs.existsSync(path.join(backup.manifest!.backupPath, "agents"))).toBe(true);
 
+      transport.mutationRoot = fs.realpathSync(openclawDir);
       const restore = await sandboxState.restoreSandboxState("alpha", backup.manifest!.backupPath);
       expect(restore.success).toBe(true);
       expect(restore.restoredDirs).toEqual(["extensions"]);
-
-      const loggedCommands = fs
-        .readFileSync(sshLog, "utf-8")
-        .trim()
-        .split("\n")
-        .map((line) => JSON.parse(line).cmd as string);
-      const cleanupCommand = loggedCommands.find((cmd) => cmd.includes("rm -rf"));
-      expect(cleanupCommand).not.toContain("/sandbox/.openclaw/workspace");
-      expect(cleanupCommand).not.toContain("rm -rf -- /sandbox/.openclaw/extensions");
-      expect(cleanupCommand).toContain("/sandbox/.openclaw/extensions");
-      expect(cleanupCommand).toContain("! -name 'nemoclaw'");
-      expect(cleanupCommand).toContain("! -name 'openclaw-weixin'");
-      expect(cleanupCommand).not.toContain("/sandbox/.openclaw/agents");
+      expect(fs.readFileSync(path.join(openclawDir, "workspace", "marker.txt"), "utf8")).toBe(
+        "marker\n",
+      );
+      expect(fs.existsSync(path.join(openclawDir, "agents", "main", "sessions"))).toBe(true);
     } finally {
       if (oldOpenshell === undefined) {
         delete process.env.NEMOCLAW_OPENSHELL_BIN;
@@ -680,12 +696,15 @@ process.exit(0);
       fs.mkdirSync(binDir, { recursive: true });
       for (const d of existingDirs) fs.mkdirSync(path.join(openclawDir, d), { recursive: true });
 
-      const auditLines = [
-        "l\t/sandbox/.openclaw/extensions/openclaw-weixin/node_modules/.bin/qrcode-terminal\t../qrcode-terminal/bin/qrcode-terminal.js",
-        "l\t/sandbox/.openclaw/extensions/openclaw-weixin/node_modules/openclaw\t/usr/local/lib/node_modules/openclaw",
-        "l\t/sandbox/.openclaw/extensions/slack/node_modules/openclaw\t/usr/local/lib/node_modules/openclaw",
-        "l\t/sandbox/.openclaw/extensions/weather/node_modules/openclaw\t/usr/local/lib/node_modules/openclaw",
-      ].join("\n");
+      const auditLines =
+        [
+          "l\t/sandbox/.openclaw/extensions/openclaw-weixin/node_modules/.bin/qrcode-terminal\t../qrcode-terminal/bin/qrcode-terminal.js",
+          "l\t/sandbox/.openclaw/extensions/openclaw-weixin/node_modules/openclaw\t/usr/local/lib/node_modules/openclaw",
+          "l\t/sandbox/.openclaw/extensions/slack/node_modules/openclaw\t/usr/local/lib/node_modules/openclaw",
+          "l\t/sandbox/.openclaw/extensions/weather/node_modules/openclaw\t/usr/local/lib/node_modules/openclaw",
+        ]
+          .map((entry) => entry.split("\t").join("\0"))
+          .join("\0") + "\0";
 
       const openshell = writeFakeOpenshell(binDir);
       writeExecutable(
@@ -696,11 +715,11 @@ const fs = require("node:fs");
 const cmd = process.argv[process.argv.length - 1] || "";
 const existingDirs = ${JSON.stringify(existingDirs)};
 if (cmd.includes("[ -d ")) {
-  process.stdout.write(existingDirs.join("\\n") + "\\n");
+  process.stdout.write(existingDirs.join("\\0") + "\\0");
   process.exit(0);
 }
 if (cmd.includes("find ")) {
-  process.stdout.write(${JSON.stringify(auditLines)} + "\\n");
+  process.stdout.write(${JSON.stringify(auditLines)});
   process.exit(0);
 }
 if (cmd.includes("tar -cf -")) {
@@ -744,11 +763,14 @@ process.exit(0);
       fs.mkdirSync(binDir, { recursive: true });
       fs.mkdirSync(path.join(openclawDir, "extensions"), { recursive: true });
 
-      const auditLines = [
-        "l\t/sandbox/.openclaw/extensions/nemoclaw/node_modules/.bin/json5\t../json5/lib/cli.js",
-        "l\t/sandbox/.openclaw/extensions/nemoclaw/node_modules/.bin/yaml\t../yaml/bin.mjs",
-        "l\t/sandbox/.openclaw/extensions/nemoclaw/node_modules/.bin/node-which\t../which/bin/node-which",
-      ].join("\n");
+      const auditLines =
+        [
+          "l\t/sandbox/.openclaw/extensions/nemoclaw/node_modules/.bin/json5\t../json5/lib/cli.js",
+          "l\t/sandbox/.openclaw/extensions/nemoclaw/node_modules/.bin/yaml\t../yaml/bin.mjs",
+          "l\t/sandbox/.openclaw/extensions/nemoclaw/node_modules/.bin/node-which\t../which/bin/node-which",
+        ]
+          .map((entry) => entry.split("\t").join("\0"))
+          .join("\0") + "\0";
 
       const openshell = writeFakeOpenshell(binDir);
       writeExecutable(
@@ -760,11 +782,11 @@ const cmd = process.argv[process.argv.length - 1] || "";
 const existingDirs = ${JSON.stringify(existingDirs)};
 const openclawDir = ${JSON.stringify(openclawDir)};
 if (cmd.includes("[ -d ")) {
-  process.stdout.write(existingDirs.join("\\n") + "\\n");
+  process.stdout.write(existingDirs.join("\\0") + "\\0");
   process.exit(0);
 }
 if (cmd.includes("find ")) {
-  process.stdout.write(${JSON.stringify(auditLines)} + "\\n");
+  process.stdout.write(${JSON.stringify(auditLines)});
   process.exit(0);
 }
 if (cmd.includes("tar -cf -")) {
@@ -807,9 +829,12 @@ process.exit(0);
       fs.mkdirSync(binDir, { recursive: true });
       fs.mkdirSync(path.join(openclawDir, "extensions"), { recursive: true });
 
-      const auditLines = [
-        "l\t/sandbox/.openclaw/extensions/nemoclaw/node_modules/.bin/leak\t../../../../openclaw.json",
-      ].join("\n");
+      const auditLines =
+        [
+          "l\t/sandbox/.openclaw/extensions/nemoclaw/node_modules/.bin/leak\t../../../../openclaw.json",
+        ]
+          .map((entry) => entry.split("\t").join("\0"))
+          .join("\0") + "\0";
 
       const openshell = writeFakeOpenshell(binDir);
       writeExecutable(
@@ -818,11 +843,11 @@ process.exit(0);
 const cmd = process.argv[process.argv.length - 1] || "";
 const existingDirs = ${JSON.stringify(existingDirs)};
 if (cmd.includes("[ -d ")) {
-  process.stdout.write(existingDirs.join("\\n") + "\\n");
+  process.stdout.write(existingDirs.join("\\0") + "\\0");
   process.exit(0);
 }
 if (cmd.includes("find ")) {
-  process.stdout.write(${JSON.stringify(auditLines)} + "\\n");
+  process.stdout.write(${JSON.stringify(auditLines)});
   process.exit(0);
 }
 process.exit(0);
@@ -859,10 +884,13 @@ process.exit(0);
       fs.mkdirSync(binDir, { recursive: true });
       for (const d of existingDirs) fs.mkdirSync(path.join(openclawDir, d), { recursive: true });
 
-      const auditLines = [
-        "l\t/sandbox/.openclaw/extensions/openclaw-weixin/node_modules/openclaw\t/usr/local/lib/node_modules/openclaw",
-        "l\t/sandbox/.openclaw/workspace/leak\t/etc/passwd",
-      ].join("\n");
+      const auditLines =
+        [
+          "l\t/sandbox/.openclaw/extensions/openclaw-weixin/node_modules/openclaw\t/usr/local/lib/node_modules/openclaw",
+          "l\t/sandbox/.openclaw/workspace/leak\t/etc/passwd",
+        ]
+          .map((entry) => entry.split("\t").join("\0"))
+          .join("\0") + "\0";
 
       const openshell = writeFakeOpenshell(binDir);
       writeExecutable(
@@ -871,11 +899,11 @@ process.exit(0);
 const cmd = process.argv[process.argv.length - 1] || "";
 const existingDirs = ${JSON.stringify(existingDirs)};
 if (cmd.includes("[ -d ")) {
-  process.stdout.write(existingDirs.join("\\n") + "\\n");
+  process.stdout.write(existingDirs.join("\\0") + "\\0");
   process.exit(0);
 }
 if (cmd.includes("find ")) {
-  process.stdout.write(${JSON.stringify(auditLines)} + "\\n");
+  process.stdout.write(${JSON.stringify(auditLines)});
   process.exit(0);
 }
 process.exit(0);
@@ -917,9 +945,10 @@ process.exit(0);
       fs.mkdirSync(binDir, { recursive: true });
       for (const d of existingDirs) fs.mkdirSync(path.join(openclawDir, d), { recursive: true });
 
-      const auditLines = [
-        `l\t/sandbox/.openclaw/extensions/${extensionName}/node_modules/openclaw\t/etc/passwd`,
-      ].join("\n");
+      const auditLines =
+        [`l\t/sandbox/.openclaw/extensions/${extensionName}/node_modules/openclaw\t/etc/passwd`]
+          .map((entry) => entry.split("\t").join("\0"))
+          .join("\0") + "\0";
 
       const openshell = writeFakeOpenshell(binDir);
       writeExecutable(
@@ -928,11 +957,11 @@ process.exit(0);
 const cmd = process.argv[process.argv.length - 1] || "";
 const existingDirs = ${JSON.stringify(existingDirs)};
 if (cmd.includes("[ -d ")) {
-  process.stdout.write(existingDirs.join("\\n") + "\\n");
+  process.stdout.write(existingDirs.join("\\0") + "\\0");
   process.exit(0);
 }
 if (cmd.includes("find ")) {
-  process.stdout.write(${JSON.stringify(auditLines)} + "\\n");
+  process.stdout.write(${JSON.stringify(auditLines)});
   process.exit(0);
 }
 process.exit(0);
@@ -980,7 +1009,7 @@ const { spawnSync } = require("node:child_process");
 const cmd = process.argv[process.argv.length - 1] || "";
 const existingDirs = ${JSON.stringify(existingDirs)};
 if (cmd.includes("[ -d ")) {
-  process.stdout.write(existingDirs.join("\\n") + "\\n");
+  process.stdout.write(existingDirs.join("\\0") + "\\0");
   process.exit(0);
 }
 if (cmd.includes("find ")) {
@@ -1024,134 +1053,103 @@ process.exit(0);
     }
   });
 
-  it("treats audit-find exit 1 with empty stdout as a successful audit", async () => {
+  it("fails closed when OpenClaw image subtrees cannot be audited", async () => {
     const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-audit-perm-denied-"));
     const oldPath = process.env.PATH;
-    const oldOpenshell = process.env.NEMOCLAW_OPENSHELL_BIN;
     try {
       const binDir = path.join(fixture, "bin");
-      const openclawDir = path.join(fixture, "sandbox-root", ".openclaw");
+      const archiveAttempt = path.join(fixture, "archive-attempted");
       const existingDirs = ["agents", "extensions", "workspace"];
       fs.mkdirSync(binDir, { recursive: true });
-      for (const d of existingDirs) fs.mkdirSync(path.join(openclawDir, d), { recursive: true });
 
-      const openshell = writeFakeOpenshell(binDir);
       writeExecutable(
         path.join(binDir, "ssh"),
         `#!/usr/bin/env node
-const { spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const cmd = process.argv[process.argv.length - 1] || "";
 const existingDirs = ${JSON.stringify(existingDirs)};
 if (cmd.includes("[ -d ")) {
-  process.stdout.write(existingDirs.join("\\n") + "\\n");
+  process.stdout.write(existingDirs.join("\\0") + "\\0");
   process.exit(0);
-}
-if (cmd.includes("openclaw.json")) {
-  // No openclaw.json in this fixture: the state-file backup command's
-  // \`[ ! -e "$src" ] && exit 2\` fires (missing, not a failure). Handled
-  // before the generic \`find \` matcher below, which would otherwise catch
-  // the command's internal hardlink-check find.
-  process.exit(2);
 }
 if (cmd.includes("find ")) {
-  // Simulate a permission-denied subdir: when the audit cmd lacks the
-  // \`|| true\` tolerance wrapper (pre-fix shape), exit non-zero so the
-  // caller treats it as audit failure. The post-fix shape wraps each
-  // \`find\` with \`|| true\` and joins with \`;\`, so the audit cmd as a
-  // whole exits 0 even though a remote \`find\` would have exited 1.
-  if (!cmd.includes("|| true")) {
-    process.stderr.write("find: '/sandbox/.openclaw/extensions/nemoclaw': Permission denied\\n");
-    process.exit(1);
+  if (cmd.includes("-prune") || cmd.includes("|| true")) {
+    process.stderr.write("unsafe audit suppression\\n");
+    process.exit(90);
   }
-  process.exit(0);
+  if (!cmd.includes("xargs -0 -r sh -c") || cmd.includes("-files0-from")) {
+    process.stderr.write("missing bounded audit input\\n");
+    process.exit(91);
+  }
+  process.stderr.write("find: '/sandbox/.openclaw/agents/main': Permission denied\\n");
+  process.exit(1);
 }
 if (cmd.includes("tar -cf -")) {
-  const r = spawnSync("tar", ["-cf", "-", "-C", ${JSON.stringify(openclawDir)}, ...existingDirs], {
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  if (r.stdout) fs.writeSync(1, r.stdout);
-  process.exit(r.status || 0);
+  fs.writeFileSync(${JSON.stringify(archiveAttempt)}, "attempted");
+  process.exit(92);
 }
 process.exit(0);
 `,
       );
 
       writeOpenClawRegistry("alpha");
-      process.env.NEMOCLAW_OPENSHELL_BIN = openshell;
       process.env.PATH = `${binDir}:${oldPath || ""}`;
 
       const backup = await sandboxState.backupSandboxState("alpha");
-      expect(backup.success).toBe(true);
-      expect(backup.error).toBeUndefined();
-      expect(backup.backedUpDirs).toEqual(existingDirs);
+      expect(backup.success).toBe(false);
+      expect(backup.backedUpDirs).toEqual([]);
+      expect(backup.failedDirs).toEqual(existingDirs);
+      expect(backup.error).toMatch(/agents\/main.*Permission denied/);
+      expect(fs.existsSync(archiveAttempt)).toBe(false);
     } finally {
-      if (oldOpenshell === undefined) {
-        delete process.env.NEMOCLAW_OPENSHELL_BIN;
-      } else {
-        process.env.NEMOCLAW_OPENSHELL_BIN = oldOpenshell;
-      }
       process.env.PATH = oldPath;
       fs.rmSync(fixture, { recursive: true, force: true });
     }
   });
 
-  it("still rejects violations from readable dirs even if a sibling find exits non-zero", async () => {
+  it("retains a traversal failure when a readable sibling reports a violation", async () => {
     const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-audit-mixed-perm-"));
     const oldPath = process.env.PATH;
-    const oldOpenshell = process.env.NEMOCLAW_OPENSHELL_BIN;
     try {
       const binDir = path.join(fixture, "bin");
-      const openclawDir = path.join(fixture, "sandbox-root", ".openclaw");
       const existingDirs = ["agents", "workspace"];
       fs.mkdirSync(binDir, { recursive: true });
-      for (const d of existingDirs) fs.mkdirSync(path.join(openclawDir, d), { recursive: true });
 
-      // `agents` simulates perm-denied (no rows emitted); `workspace` emits
-      // a symlink that is not in the audit allow-list, which must still be
-      // caught even when a sibling find exits non-zero.
-      const auditLines = ["l\t/sandbox/.openclaw/workspace/leak\t../openclaw.json"].join("\n");
+      // `agents` simulates permission denial while `workspace` emits a symlink.
+      // The aggregate command must preserve the traversal failure.
+      const auditLines = ["l", "/sandbox/.openclaw/workspace/leak", "../openclaw.json", ""].join(
+        "\0",
+      );
 
-      const openshell = writeFakeOpenshell(binDir);
       writeExecutable(
         path.join(binDir, "ssh"),
         `#!/usr/bin/env node
 const cmd = process.argv[process.argv.length - 1] || "";
 const existingDirs = ${JSON.stringify(existingDirs)};
 if (cmd.includes("[ -d ")) {
-  process.stdout.write(existingDirs.join("\\n") + "\\n");
+  process.stdout.write(existingDirs.join("\\0") + "\\0");
   process.exit(0);
 }
 if (cmd.includes("find ")) {
-  // Match real-shell behaviour: without the \`|| true\` tolerance wrapper
-  // the perm-denied sibling \`find\` would have aborted the chain. The
-  // post-fix audit cmd still emits the violation stdout because \`;\`
-  // joins each per-dir block so the readable sibling's output is
-  // preserved.
-  if (!cmd.includes("|| true")) {
-    process.stderr.write("find: '/sandbox/.openclaw/agents/main': Permission denied\\n");
-    process.exit(1);
+  if (cmd.includes("-prune") || cmd.includes("|| true")) {
+    process.stderr.write("unsafe audit suppression\\n");
+    process.exit(90);
   }
-  process.stdout.write(${JSON.stringify(auditLines)} + "\\n");
-  process.exit(0);
+  process.stdout.write(${JSON.stringify(auditLines)});
+  process.stderr.write("find: '/sandbox/.openclaw/agents/main': Permission denied\\n");
+  process.exit(1);
 }
 process.exit(0);
 `,
       );
 
       writeOpenClawRegistry("alpha");
-      process.env.NEMOCLAW_OPENSHELL_BIN = openshell;
       process.env.PATH = `${binDir}:${oldPath || ""}`;
 
       const backup = await sandboxState.backupSandboxState("alpha");
       expect(backup.success).toBe(false);
-      expect(backup.error).toMatch(/workspace\/leak/);
+      expect(backup.error).toMatch(/agents\/main.*Permission denied/);
     } finally {
-      if (oldOpenshell === undefined) {
-        delete process.env.NEMOCLAW_OPENSHELL_BIN;
-      } else {
-        process.env.NEMOCLAW_OPENSHELL_BIN = oldOpenshell;
-      }
       process.env.PATH = oldPath;
       fs.rmSync(fixture, { recursive: true, force: true });
     }
@@ -1229,7 +1227,7 @@ if (cmd.includes(".env") || cmd.includes(".mcp.json")) {
   process.exit(99);
 }
 if (cmd.includes("[ -d ")) {
-  process.stdout.write(".state\\nskills\\nagent/skills\\n");
+  process.stdout.write(".state\\0skills\\0agent/skills\\0");
   process.exit(0);
 }
 if (cmd.includes("find ")) {
@@ -1242,14 +1240,6 @@ if (cmd.includes("tar -cf -")) {
   if (r.stdout) fs.writeSync(1, r.stdout);
   if (r.stderr) fs.writeSync(2, r.stderr);
   process.exit(r.status || 0);
-}
-if (cmd.includes("tar --no-same-owner -xf -")) {
-  // drain the piped restore tarball in chunks (no full-stream buffering)
-  const buf = Buffer.alloc(65536);
-  while (fs.readSync(0, buf, 0, buf.length, null) > 0) {
-    // discard
-  }
-  process.exit(0);
 }
 process.exit(0);
 `,
@@ -1297,6 +1287,7 @@ process.exit(0);
 
       // #5753 is "lost after rebuild" (backup + recreate + restore): restore
       // must list agent/skills among the dirs it brings back into the sandbox.
+      transport.mutationRoot = fs.realpathSync(deepAgentsDir);
       const restore = await sandboxState.restoreSandboxState(
         "deepagents",
         backup.manifest!.backupPath,
@@ -1326,11 +1317,22 @@ describe("Hermes durable state files", () => {
       const hermesDir = path.join(fakeRoot, ".hermes");
       const runtimeDir = path.join(hermesDir, "runtime");
       const sshLog = path.join(fixture, "ssh-log.jsonl");
+      const stateDbPayload = Buffer.from([0x53, 0x51, 0x4c, 0x00, 0xff, 0xfe, 0x80, 0x0a]);
       fs.mkdirSync(binDir, { recursive: true });
       fs.mkdirSync(runtimeDir, { recursive: true });
       fs.writeFileSync(path.join(hermesDir, "SOUL.md"), "original soul\n");
       fs.writeFileSync(path.join(hermesDir, ".hermes_history"), "original history\n");
-      fs.writeFileSync(path.join(runtimeDir, "state.db"), "original sqlite backup\n");
+      const stateDbPath = path.join(runtimeDir, "state.db");
+      const seededDatabase = spawnSync(
+        "python3",
+        [
+          "-c",
+          "import sqlite3,sys; db=sqlite3.connect(sys.argv[1]); db.execute('CREATE TABLE payload (data BLOB NOT NULL)'); db.execute('INSERT INTO payload VALUES (?)', (sys.stdin.buffer.read(),)); db.commit(); db.close()",
+          stateDbPath,
+        ],
+        { input: stateDbPayload },
+      );
+      expect(seededDatabase.status, String(seededDatabase.stderr)).toBe(0);
       fs.writeFileSync(path.join(hermesDir, "config.yaml"), "token: should-not-copy\n");
       fs.writeFileSync(path.join(hermesDir, ".env"), "API_TOKEN=should-not-copy\n");
       fs.writeFileSync(path.join(hermesDir, "auth.json"), '{"token":"should-not-copy"}\n');
@@ -1353,6 +1355,7 @@ process.exit(0);
         `#!/usr/bin/env node
 const fs = require("fs");
 const path = require("path");
+const { spawnSync } = require("child_process");
 const root = ${JSON.stringify(fakeRoot)};
 const log = ${JSON.stringify(sshLog)};
 const cmd = process.argv[process.argv.length - 1] || "";
@@ -1372,8 +1375,18 @@ if (cmd.includes("[ -d ")) {
   process.exit(0);
 }
 if (cmd.includes("nemoclaw-sqlite-backup")) {
-  process.stdout.write(fs.readFileSync(path.join(hermesDir, "runtime", "state.db")));
-  process.exit(0);
+  const backupScript = readStdin();
+  if (backupScript.toString("utf8") !== ${JSON.stringify(sandboxState.SQLITE_BACKUP_PY)}) {
+    process.stderr.write("unexpected sqlite backup script on stdin\\n");
+    process.exit(97);
+  }
+  const result = spawnSync("sh", ["-c", cmd.replaceAll("/sandbox/.hermes", hermesDir)], {
+    encoding: null,
+    input: backupScript,
+  });
+  if (result.stdout) fs.writeSync(1, result.stdout);
+  if (result.stderr) fs.writeSync(2, result.stderr);
+  process.exit(result.status === null ? 1 : result.status);
 }
 if (cmd.includes("SOUL.md") && cmd.includes("cat --")) {
   process.stdout.write(fs.readFileSync(path.join(hermesDir, "SOUL.md")));
@@ -1381,19 +1394,6 @@ if (cmd.includes("SOUL.md") && cmd.includes("cat --")) {
 }
 if (cmd.includes(".hermes_history") && cmd.includes("cat --")) {
   process.stdout.write(fs.readFileSync(path.join(hermesDir, ".hermes_history")));
-  process.exit(0);
-}
-if (cmd.includes("nemoclaw-sqlite-restore")) {
-  fs.mkdirSync(path.join(hermesDir, "runtime"), { recursive: true });
-  fs.writeFileSync(path.join(hermesDir, "runtime", "state.db"), readStdin());
-  process.exit(0);
-}
-if (cmd.includes(".nemoclaw-restore") && cmd.includes("SOUL.md")) {
-  fs.writeFileSync(path.join(hermesDir, "SOUL.md"), readStdin());
-  process.exit(0);
-}
-if (cmd.includes(".nemoclaw-restore") && cmd.includes(".hermes_history")) {
-  fs.writeFileSync(path.join(hermesDir, ".hermes_history"), readStdin());
   process.exit(0);
 }
 process.exit(0);
@@ -1436,9 +1436,22 @@ process.exit(0);
       expect(
         fs.readFileSync(path.join(backup.manifest!.backupPath, ".hermes_history"), "utf-8"),
       ).toBe("original history\n");
-      expect(
-        fs.readFileSync(path.join(backup.manifest!.backupPath, "runtime", "state.db"), "utf-8"),
-      ).toBe("original sqlite backup\n");
+      const backedUpStateDbPath = path.join(backup.manifest!.backupPath, "runtime", "state.db");
+      const backedUpStateDbBytes = fs.readFileSync(backedUpStateDbPath);
+      expect(Buffer.from(backedUpStateDbBytes.toString("utf8"), "utf8")).not.toEqual(
+        backedUpStateDbBytes,
+      );
+      const backedUpPayload = spawnSync(
+        "python3",
+        [
+          "-c",
+          "import sqlite3,sys; db=sqlite3.connect(sys.argv[1]); sys.stdout.buffer.write(db.execute('SELECT data FROM payload').fetchone()[0]); db.close()",
+          backedUpStateDbPath,
+        ],
+        { encoding: null },
+      );
+      expect(backedUpPayload.status, String(backedUpPayload.stderr)).toBe(0);
+      expect(backedUpPayload.stdout).toEqual(stateDbPayload);
       expect(fs.existsSync(path.join(backup.manifest!.backupPath, "config.yaml"))).toBe(false);
       expect(fs.existsSync(path.join(backup.manifest!.backupPath, ".env"))).toBe(false);
       expect(fs.existsSync(path.join(backup.manifest!.backupPath, "auth.json"))).toBe(false);
@@ -1446,6 +1459,7 @@ process.exit(0);
       fs.writeFileSync(path.join(hermesDir, "SOUL.md"), "changed soul\n");
       fs.writeFileSync(path.join(hermesDir, ".hermes_history"), "changed history\n");
       fs.writeFileSync(path.join(runtimeDir, "state.db"), "changed db\n");
+      transport.mutationRoot = fs.realpathSync(hermesDir);
       const restore = await sandboxState.restoreSandboxState("hermes", backup.manifest!.backupPath);
       expect(restore.success).toBe(true);
       expect(restore.restoredFiles).toEqual(["SOUL.md", ".hermes_history", "runtime/state.db"]);
@@ -1453,14 +1467,20 @@ process.exit(0);
       expect(fs.readFileSync(path.join(hermesDir, ".hermes_history"), "utf-8")).toBe(
         "original history\n",
       );
-      expect(fs.readFileSync(path.join(runtimeDir, "state.db"), "utf-8")).toBe(
-        "original sqlite backup\n",
-      );
+      expect(fs.readFileSync(path.join(runtimeDir, "state.db"))).toEqual(backedUpStateDbBytes);
 
-      const loggedCommands = fs.readFileSync(sshLog, "utf-8");
-      expect(loggedCommands).toContain("sqlite3.connect");
-      expect(loggedCommands).toContain("src_conn.backup(dst_conn)");
-      expect(loggedCommands).toContain("PRAGMA quick_check");
+      const loggedCommands = fs
+        .readFileSync(sshLog, "utf-8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line).cmd as string);
+      const sqliteBackupCommand = loggedCommands.find((command) =>
+        command.includes("nemoclaw-sqlite-backup"),
+      );
+      expect(sqliteBackupCommand).toBeDefined();
+      expect(sqliteBackupCommand).toContain('python3 - "$src" "$tmp"');
+      expect(sqliteBackupCommand).not.toMatch(/[\u0000\r\n]/);
+      expect(Buffer.byteLength(sqliteBackupCommand!, "utf8")).toBeLessThanOrEqual(32_768);
     } finally {
       if (oldOpenshell === undefined) {
         delete process.env.NEMOCLAW_OPENSHELL_BIN;

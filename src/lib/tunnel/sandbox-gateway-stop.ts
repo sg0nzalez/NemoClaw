@@ -7,6 +7,8 @@ import {
   spawnSync,
 } from "node:child_process";
 
+import { dockerSpawnSync } from "../adapters/docker";
+import { getGatewayClusterContainerName } from "../adapters/openshell/gateway-drift";
 import { resolveOpenshell } from "../adapters/openshell/resolve";
 import * as agentRuntime from "../agent/runtime";
 import { resolveSandboxGatewayName } from "../onboard/gateway-binding";
@@ -27,6 +29,7 @@ export type SandboxGatewayStopDeps = {
   getAgentDisplayName?: typeof agentRuntime.getAgentDisplayName;
   hasGatewayRuntime?: typeof agentRuntime.hasGatewayRuntime;
   resolveOpenshell?: typeof resolveOpenshell;
+  runDocker?: typeof dockerSpawnSync;
   runProcess?: ProcessRunner;
   info?: Reporter;
   warn?: Reporter;
@@ -102,6 +105,14 @@ export function stopSandboxChannels(sandboxName: string, deps: SandboxGatewaySto
   const gatewayLabel = `${agentDisplayName} gateway`;
   info(`Stopping in-sandbox ${gatewayLabel} (sandbox: ${validatedSandboxName})...`);
 
+  const privilegedResult = stopSandboxChannelsViaKubectl(
+    validatedSandboxName,
+    gatewayName,
+    GATEWAY_STOP_SCRIPT,
+    deps.runDocker ?? dockerSpawnSync,
+  );
+  if (reportStopResult(privilegedResult, gatewayLabel, info, warn)) return;
+
   const openshell = (deps.resolveOpenshell ?? resolveOpenshell)();
   if (!openshell) {
     warn(`openshell not found — cannot stop ${gatewayLabel} inside sandbox.`);
@@ -121,19 +132,72 @@ export function stopSandboxChannels(sandboxName: string, deps: SandboxGatewaySto
   reportStopResult(fallbackResult, gatewayLabel, info, warn);
 }
 
+function isSandboxPodName(line: string, sandboxName: string): boolean {
+  if (!line.startsWith("pod/")) return false;
+  const podName = line.slice("pod/".length);
+  if (podName === sandboxName) return true;
+  const prefix = `${sandboxName}-`;
+  if (!podName.startsWith(prefix)) return false;
+  const generatedSuffix = podName.slice(prefix.length);
+  return /^[a-z0-9]+$/.test(generatedSuffix);
+}
+
+function stopSandboxChannelsViaKubectl(
+  sandboxName: string,
+  gatewayName: string,
+  gatewayStopScript: string,
+  runDocker: typeof dockerSpawnSync,
+): StopAttemptResult | null {
+  const gatewayContainer = getGatewayClusterContainerName(gatewayName);
+  const podsResult = runDocker(
+    ["exec", gatewayContainer, "kubectl", "get", "pods", "-n", "openshell", "-o", "name"],
+    { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"], timeout: 10000 },
+  );
+  if (podsResult.status !== 0 || !podsResult.stdout) return null;
+
+  const podOutput =
+    typeof podsResult.stdout === "string" ? podsResult.stdout : podsResult.stdout.toString();
+  const pod = podOutput
+    .split(/\r?\n/)
+    .map((line: string) => line.trim())
+    .find((line: string) => isSandboxPodName(line, sandboxName));
+  if (!pod) return null;
+
+  return runDocker(
+    [
+      "exec",
+      gatewayContainer,
+      "kubectl",
+      "exec",
+      "-n",
+      "openshell",
+      "-c",
+      "agent",
+      pod,
+      "--",
+      "sh",
+      "-lc",
+      gatewayStopScript,
+    ],
+    { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"], timeout: 20000 },
+  );
+}
+
 function reportStopResult(
-  result: StopAttemptResult,
+  result: StopAttemptResult | null,
   gatewayLabel: string,
   info: Reporter,
   warn: Reporter,
-): void {
+): boolean {
+  if (!result) return false;
+
   if (result.status === 0) {
     info(`${gatewayLabel} stopped inside sandbox.`);
-    return;
+    return true;
   }
   if (result.status === 1) {
     info(`${gatewayLabel} was not running inside sandbox.`);
-    return;
+    return true;
   }
 
   const details = [result.stderr, result.stdout]
@@ -146,4 +210,5 @@ function reportStopResult(
       " The sandbox may be unreachable or the gateway may still be running." +
       (details ? ` Details: ${details}` : ""),
   );
+  return true;
 }

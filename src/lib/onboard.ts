@@ -2876,7 +2876,6 @@ async function createSandboxWithBaseImageResolution(
     finalHermesDashboardState = hermesDashboardForwarding.resolveStateForPort(actualDashboardPort);
     hermesDashboardForwarding.ensureForState(finalHermesDashboardState, sandboxName, true);
   }
-
   // openshell tags images with seconds; buildId is ms. Parse actual tag from output. Fixes #2672.
   const resolvedImageTag =
     registryImageRef ??
@@ -2890,6 +2889,7 @@ async function createSandboxWithBaseImageResolution(
       restoreBackupPath,
       preUpgradeBackup: pendingStateRestoreBackupPath !== null,
       targetAgentType: agent?.name ?? "openclaw",
+      gatewayName: GATEWAY_NAME,
       customImage: Boolean(fromDockerfile),
       discoverOpenClawImagePluginInstalls: customOpenClawImage,
       validateManagedDcode: isManagedDcodeAgent,
@@ -2899,7 +2899,7 @@ async function createSandboxWithBaseImageResolution(
     },
     // biome-ignore format: keep src/lib/onboard.ts within the growth guardrail.
     {
-      discoverFreshOpenClawImagePluginInstalls: (name) => openClawPluginRestore.discoverFreshOpenClawImagePluginInstalls(name, GATEWAY_NAME, agent?.configPaths.dir), restoreRecreatedSandboxState: (name, backupPath, options) => sandboxState.restoreRecreatedSandboxState(name, backupPath, { ...options, gatewayName: GATEWAY_NAME }),
+      discoverFreshOpenClawImagePluginInstalls: (name) => openClawPluginRestore.discoverFreshOpenClawImagePluginInstalls(name, GATEWAY_NAME, agent?.configPaths.dir), restoreRecreatedSandboxState: (name, backupPath, options) => sandboxState.restoreRecreatedSandboxState(name, backupPath, options),
       getDcodeSelectionDrift: (name, selectedProvider, selectedModel, selectedApi) =>
         getDcodeSelectionDrift(name, selectedProvider, selectedModel, selectedApi, {
           runCaptureOpenshell,

@@ -9,9 +9,16 @@ import {
   OpenShellGrpcOutputLimitError,
   OpenShellGrpcPreDispatchError,
 } from "./grpc-sandbox-control";
-import type { OpenShellSandboxControl, SandboxExecResult } from "./sandbox-control";
+import {
+  OPENSHELL_EXEC_MAX_OUTPUT_BYTES,
+  OpenShellExecRequestValidationError,
+  type OpenShellSandboxControl,
+  openShellExecRequestValidationFailure,
+  type SandboxExecResult,
+} from "./sandbox-control";
 import {
   execSandboxReadOnlyWithGrpcFallback,
+  getOpenShellSandboxDescriptor,
   selectOpenShellSandboxControlForMutation,
 } from "./sandbox-control-routing";
 import { OPENSHELL_OPERATION_TIMEOUT_MS } from "./timeouts";
@@ -21,12 +28,28 @@ function dependencies(grpcResult: SandboxExecResult | Error, cliResult?: Sandbox
   const grpcExec = vi.fn(() =>
     grpcResult instanceof Error ? Promise.reject(grpcResult) : Promise.resolve(grpcResult),
   );
-  const grpc: GrpcOpenShellSandboxControl = { close, exec: grpcExec };
+  const getSandboxDescriptor = vi.fn(async (sandboxName: string) => ({
+    id: "sb-id",
+    name: sandboxName,
+    image: "nvcr.io/nvidia/nemoclaw:test",
+  }));
+  const grpc: GrpcOpenShellSandboxControl = { close, exec: grpcExec, getSandboxDescriptor };
   const cliExec = vi.fn(async () => cliResult ?? { status: 0, stdout: "cli", stderr: "" });
   const cli: OpenShellSandboxControl = { exec: cliExec };
+  const createCli = vi.fn(() => cli);
   const createGrpc = vi.fn(() => grpc);
   const debug = vi.fn();
-  return { close, grpcExec, cliExec, createGrpc, debug, deps: { cli, createGrpc, debug } };
+  return {
+    close,
+    cli,
+    grpcExec,
+    getSandboxDescriptor,
+    cliExec,
+    createCli,
+    createGrpc,
+    debug,
+    deps: { createCli, createGrpc, debug },
+  };
 }
 
 const request = {
@@ -35,7 +58,171 @@ const request = {
   maxOutputBytes: 4096,
 };
 
+describe("OpenShell sandbox descriptor routing", () => {
+  it("reads from the selected gateway and closes without invoking the CLI", async () => {
+    const test = dependencies({ status: 0, stdout: "unused", stderr: "" });
+
+    await expect(
+      getOpenShellSandboxDescriptor("nemoclaw-9090", "alpha", test.deps),
+    ).resolves.toEqual({
+      id: "sb-id",
+      name: "alpha",
+      image: "nvcr.io/nvidia/nemoclaw:test",
+    });
+    expect(test.createGrpc).toHaveBeenCalledWith("nemoclaw-9090");
+    expect(test.getSandboxDescriptor).toHaveBeenCalledWith("alpha");
+    expect(test.createCli).not.toHaveBeenCalled();
+    expect(test.cliExec).not.toHaveBeenCalled();
+    expect(test.close).toHaveBeenCalledOnce();
+  });
+
+  it("propagates read failures, closes, and never falls back to the CLI", async () => {
+    const error = new Error("descriptor unavailable");
+    const test = dependencies({ status: 0, stdout: "unused", stderr: "" });
+    test.getSandboxDescriptor.mockRejectedValue(error);
+
+    await expect(getOpenShellSandboxDescriptor("nemoclaw", "alpha", test.deps)).rejects.toBe(error);
+    expect(test.createCli).not.toHaveBeenCalled();
+    expect(test.cliExec).not.toHaveBeenCalled();
+    expect(test.close).toHaveBeenCalledOnce();
+  });
+
+  it("rejects a gateway endpoint override before creating a client", async () => {
+    const test = dependencies({ status: 0, stdout: "unused", stderr: "" });
+    vi.stubEnv("OPENSHELL_GATEWAY_ENDPOINT", "https://other.example.test");
+    try {
+      await expect(getOpenShellSandboxDescriptor("nemoclaw", "alpha", test.deps)).rejects.toThrow(
+        "Unset OPENSHELL_GATEWAY_ENDPOINT",
+      );
+      expect(test.createGrpc).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+});
+
 describe("read-only OpenShell sandbox control routing", () => {
+  it.each([
+    ["too many session arguments", ["openclaw", "sessions", "list", ...Array(1022).fill("x")]],
+    [
+      "an oversized UTF-8 session argument",
+      ["openclaw", "sessions", "list", "é".repeat(16 * 1024 + 1)],
+    ],
+    ["a NUL session argument", ["openclaw", "sessions", "list", "bad\0arg"]],
+    ["an LF session argument", ["openclaw", "sessions", "list", "bad\narg"]],
+    ["a CR session argument", ["openclaw", "sessions", "list", "bad\rarg"]],
+  ])("rejects %s before creating either transport", async (_label, command) => {
+    const test = dependencies({ status: 0, stdout: "unused", stderr: "" });
+
+    const result = await execSandboxReadOnlyWithGrpcFallback(
+      "nemoclaw",
+      { sandboxName: "alpha", command },
+      test.deps,
+    );
+
+    expect(result.error).toBeInstanceOf(OpenShellExecRequestValidationError);
+    expect(test.createGrpc).not.toHaveBeenCalled();
+    expect(test.grpcExec).not.toHaveBeenCalled();
+    expect(test.cliExec).not.toHaveBeenCalled();
+    expect(test.createCli).not.toHaveBeenCalled();
+  });
+
+  it("accepts the exact session count and UTF-8 byte boundaries", async () => {
+    const test = dependencies({ status: 0, stdout: "grpc", stderr: "" });
+    const command = [
+      "openclaw",
+      "sessions",
+      "list",
+      "é".repeat(16 * 1024),
+      ...Array(1020).fill("x"),
+    ];
+
+    await expect(
+      execSandboxReadOnlyWithGrpcFallback("nemoclaw", { sandboxName: "alpha", command }, test.deps),
+    ).resolves.toMatchObject({ status: 0 });
+
+    expect(command).toHaveLength(1024);
+    expect(test.grpcExec).toHaveBeenCalledOnce();
+    expect(test.cliExec).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    -1,
+    1.5,
+    OPENSHELL_EXEC_MAX_OUTPUT_BYTES + 1,
+  ])("rejects maxOutputBytes=%s before creating either transport", async (maxOutputBytes) => {
+    const test = dependencies({ status: 0, stdout: "unused", stderr: "" });
+
+    const result = await execSandboxReadOnlyWithGrpcFallback(
+      "nemoclaw",
+      { ...request, maxOutputBytes },
+      test.deps,
+    );
+
+    expect(result.error).toBeInstanceOf(OpenShellExecRequestValidationError);
+    expect((result.error as OpenShellExecRequestValidationError).issue.kind).toBe(
+      "max-output-out-of-range",
+    );
+    expect(test.createGrpc).not.toHaveBeenCalled();
+    expect(test.createCli).not.toHaveBeenCalled();
+  });
+
+  it("does not route a thrown typed validation error through the CLI", async () => {
+    const error = new OpenShellExecRequestValidationError({
+      kind: "empty-command",
+    });
+    const test = dependencies(error);
+
+    await expect(
+      execSandboxReadOnlyWithGrpcFallback("nemoclaw", request, test.deps),
+    ).resolves.toEqual(openShellExecRequestValidationFailure(error));
+
+    expect(test.cliExec).not.toHaveBeenCalled();
+  });
+
+  it("does not replay a rejected gRPC execution through the CLI", async () => {
+    const error = new Error("stream rejected after dispatch");
+    const test = dependencies(error);
+
+    await expect(
+      execSandboxReadOnlyWithGrpcFallback("nemoclaw", request, test.deps),
+    ).resolves.toEqual({ status: null, stdout: "", stderr: "", error });
+
+    expect(test.grpcExec).toHaveBeenCalledOnce();
+    expect(test.cliExec).not.toHaveBeenCalled();
+    expect(test.close).toHaveBeenCalledOnce();
+  });
+
+  it("retries a rejected explicit pre-dispatch lookup failure through the CLI", async () => {
+    const cause = new Error("UNAVAILABLE");
+    const test = dependencies(new OpenShellGrpcPreDispatchError(cause));
+
+    await expect(
+      execSandboxReadOnlyWithGrpcFallback("nemoclaw", request, test.deps),
+    ).resolves.toEqual({ status: 0, stdout: "cli", stderr: "" });
+
+    expect(test.cliExec).toHaveBeenCalledOnce();
+    expect(test.createCli).toHaveBeenCalledWith("nemoclaw");
+    expect(test.debug).toHaveBeenCalledWith(expect.stringContaining("before dispatch"), cause);
+    expect(test.close).toHaveBeenCalledOnce();
+  });
+
+  it("fails closed when the scoped CLI refuses an endpoint override after lookup", async () => {
+    const cause = new Error("UNAVAILABLE");
+    const refusal = new Error("Unset OPENSHELL_GATEWAY_ENDPOINT and retry");
+    const test = dependencies(new OpenShellGrpcPreDispatchError(cause));
+    test.createCli.mockImplementation(() => {
+      throw refusal;
+    });
+
+    await expect(execSandboxReadOnlyWithGrpcFallback("nemoclaw", request, test.deps)).rejects.toBe(
+      refusal,
+    );
+
+    expect(test.cliExec).not.toHaveBeenCalled();
+    expect(test.close).toHaveBeenCalledOnce();
+  });
+
   it("uses direct gRPC with a bounded deadline", async () => {
     const test = dependencies({ status: 0, stdout: "grpc", stderr: "" });
 
@@ -56,12 +243,43 @@ describe("read-only OpenShell sandbox control routing", () => {
     const bytes = Buffer.from([0, 255, 128, 10]);
     const result = { status: 0, stdout: "", stdoutBytes: bytes, stderr: "" };
     const test = dependencies(result);
-    const binaryRequest = { ...request, stdoutEncoding: "buffer" as const };
+    const stdin = "import sqlite3, sys\nsrc, dst = sys.argv[1], sys.argv[2]";
+    const binaryRequest = { ...request, stdin, stdoutEncoding: "buffer" as const };
 
     await expect(
       execSandboxReadOnlyWithGrpcFallback("nemoclaw", binaryRequest, test.deps),
     ).resolves.toEqual(result);
     expect(test.grpcExec).toHaveBeenCalledWith({
+      ...binaryRequest,
+      timeoutMs: OPENSHELL_OPERATION_TIMEOUT_MS,
+    });
+  });
+
+  it("preserves stdin and binary stdout across the pre-dispatch CLI fallback", async () => {
+    const stdin = "import sqlite3, sys\nsrc, dst = sys.argv[1], sys.argv[2]";
+    const bytes = Buffer.from([0, 255, 128, 10]);
+    const grpcError = new Error("UNAVAILABLE");
+    const cliResult = { status: 0, stdout: "", stdoutBytes: bytes, stderr: "" };
+    const test = dependencies(
+      {
+        status: null,
+        stdout: "",
+        stderr: "",
+        error: new OpenShellGrpcPreDispatchError(grpcError),
+      },
+      cliResult,
+    );
+    const binaryRequest = { ...request, stdin, stdoutEncoding: "buffer" as const };
+
+    await expect(
+      execSandboxReadOnlyWithGrpcFallback("nemoclaw", binaryRequest, test.deps),
+    ).resolves.toEqual(cliResult);
+
+    expect(test.grpcExec).toHaveBeenCalledWith({
+      ...binaryRequest,
+      timeoutMs: OPENSHELL_OPERATION_TIMEOUT_MS,
+    });
+    expect(test.cliExec).toHaveBeenCalledWith({
       ...binaryRequest,
       timeoutMs: OPENSHELL_OPERATION_TIMEOUT_MS,
     });
@@ -78,7 +296,23 @@ describe("read-only OpenShell sandbox control routing", () => {
     expect(test.cliExec).not.toHaveBeenCalled();
   });
 
-  it("retries a pre-dispatch gRPC lookup failure without forwarding its deadline", async () => {
+  it("does not replay a signaled command through the CLI", async () => {
+    const result = {
+      status: null,
+      stdout: "partial",
+      stderr: "terminated",
+      signal: "SIGTERM" as NodeJS.Signals,
+    };
+    const test = dependencies(result);
+
+    await expect(
+      execSandboxReadOnlyWithGrpcFallback("nemoclaw", request, test.deps),
+    ).resolves.toEqual(result);
+
+    expect(test.cliExec).not.toHaveBeenCalled();
+  });
+
+  it("retries a pre-dispatch gRPC lookup failure with the same bounded deadline", async () => {
     const grpcError = new Error("UNAVAILABLE");
     const cliResult = { status: 0, stdout: "cli", stderr: "" };
     const test = dependencies(
@@ -95,29 +329,33 @@ describe("read-only OpenShell sandbox control routing", () => {
       execSandboxReadOnlyWithGrpcFallback("nemoclaw", request, test.deps),
     ).resolves.toEqual(cliResult);
 
-    expect(test.cliExec).toHaveBeenCalledWith(request);
+    expect(test.cliExec).toHaveBeenCalledWith({
+      ...request,
+      timeoutMs: OPENSHELL_OPERATION_TIMEOUT_MS,
+    });
+    expect(test.createCli).toHaveBeenCalledWith("nemoclaw");
     expect(test.debug).toHaveBeenCalledWith(expect.stringContaining("before dispatch"), grpcError);
     expect(test.close).toHaveBeenCalledOnce();
   });
 
-  it("retries a post-dispatch gRPC stream failure because the command is read-only", async () => {
+  it("does not replay a post-dispatch gRPC stream failure", async () => {
     const grpcError = new Error("stream reset");
-    const result = { status: null, stdout: "partial", stderr: "", error: grpcError };
-    const cliResult = { status: 0, stdout: "cli", stderr: "" };
-    const test = dependencies(result, cliResult);
+    const result = {
+      status: null,
+      stdout: "partial",
+      stderr: "",
+      error: grpcError,
+    };
+    const test = dependencies(result);
 
     await expect(
       execSandboxReadOnlyWithGrpcFallback("nemoclaw", request, test.deps),
-    ).resolves.toEqual(cliResult);
+    ).resolves.toEqual(result);
 
-    expect(test.cliExec).toHaveBeenCalledWith(request);
-    expect(test.debug).toHaveBeenCalledWith(
-      expect.stringContaining("read-only exec failed"),
-      grpcError,
-    );
+    expect(test.cliExec).not.toHaveBeenCalled();
   });
 
-  it("does not retry a local gRPC output limit failure", async () => {
+  it("does not replay a local gRPC output-limit failure", async () => {
     const error = new OpenShellGrpcOutputLimitError(4096);
     const result = { status: null, stdout: "partial", stderr: "", error };
     const test = dependencies(result);
@@ -143,8 +381,31 @@ describe("read-only OpenShell sandbox control routing", () => {
     });
 
     expect(test.grpcExec).not.toHaveBeenCalled();
-    expect(test.cliExec).toHaveBeenCalledWith(request);
+    expect(test.createCli).toHaveBeenCalledWith("edge");
+    expect(test.cliExec).toHaveBeenCalledWith({
+      ...request,
+      timeoutMs: OPENSHELL_OPERATION_TIMEOUT_MS,
+    });
     expect(test.debug).toHaveBeenCalledWith(expect.stringContaining("configuration failed"), error);
+  });
+
+  it("fails closed when the scoped CLI refuses an endpoint override after configuration", async () => {
+    const configurationError = new Error("edge tunnel required");
+    const refusal = new Error("Unset OPENSHELL_GATEWAY_ENDPOINT and retry");
+    const test = dependencies({ status: 0, stdout: "unused", stderr: "" });
+    test.createGrpc.mockImplementation(() => {
+      throw configurationError;
+    });
+    test.createCli.mockImplementation(() => {
+      throw refusal;
+    });
+
+    await expect(execSandboxReadOnlyWithGrpcFallback("edge", request, test.deps)).rejects.toBe(
+      refusal,
+    );
+
+    expect(test.grpcExec).not.toHaveBeenCalled();
+    expect(test.cliExec).not.toHaveBeenCalled();
   });
 
   it("does not let close failures replace a successful result", async () => {
@@ -173,7 +434,8 @@ describe("mutating OpenShell sandbox control routing", () => {
     const selected = selectOpenShellSandboxControlForMutation("nemoclaw", test.deps);
 
     expect(selected).toMatchObject({ control: expect.any(Object), transport: "grpc" });
-    expect(selected.control).not.toBe(test.deps.cli);
+    expect(selected.control).not.toBe(test.cli);
+    expect(test.createCli).not.toHaveBeenCalled();
     selected.close();
     expect(test.close).toHaveBeenCalledOnce();
   });
@@ -187,12 +449,29 @@ describe("mutating OpenShell sandbox control routing", () => {
     const selected = selectOpenShellSandboxControlForMutation("edge", test.deps);
 
     expect(selected).toEqual({
-      control: test.deps.cli,
+      control: test.cli,
       transport: "cli-edge-tunnel",
       close: expect.any(Function),
     });
+    expect(test.createCli).toHaveBeenCalledWith("edge");
     selected.close();
     expect(test.close).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the mutation CLI factory refuses an endpoint override", () => {
+    const refusal = new Error("Unset OPENSHELL_GATEWAY_ENDPOINT and retry");
+    const test = dependencies({ status: 0, stdout: "unused", stderr: "" });
+    test.createGrpc.mockImplementation(() => {
+      throw new OpenShellGrpcEdgeTunnelRequiredError();
+    });
+    test.createCli.mockImplementation(() => {
+      throw refusal;
+    });
+
+    expect(() => selectOpenShellSandboxControlForMutation("edge", test.deps)).toThrow(refusal);
+
+    expect(test.createCli).toHaveBeenCalledWith("edge");
+    expect(test.cliExec).not.toHaveBeenCalled();
   });
 
   it("does not turn a completed mutation into failure when the client cannot close", () => {

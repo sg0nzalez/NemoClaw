@@ -387,7 +387,9 @@ export async function collectSandboxInternals(
     gatewayName = resolveSandboxGatewayName(sandbox);
   } catch (cause) {
     warn(
-      `Could not resolve the gateway for sandbox '${sandboxName}', skipping internals: ${cause instanceof Error ? cause.message : String(cause)}`,
+      redact(
+        `Could not resolve the gateway for sandbox '${sandboxName}', skipping internals: ${cause instanceof Error ? cause.message : String(cause)}`,
+      ),
     );
     return;
   }
@@ -409,11 +411,19 @@ export async function collectSandboxInternals(
         command,
         timeoutMs: TIMEOUT_MS,
       });
-      const raw = `${result.stdout}\n${result.stderr}`;
+      let raw = `${result.stdout}\n${result.stderr}`;
+      if (result.error) {
+        if (result.stdout.length === 0 && result.stderr.length === 0) raw = "";
+        if (raw.length > 0 && !raw.endsWith("\n")) raw += "\n";
+        raw += `  (sandbox command failed; detail follows)\n${result.error.message}`;
+        if (!raw.endsWith("\n")) raw += "\n";
+      }
       const redacted = redact(raw);
       writeFileSync(join(collectDir, `${label}.txt`), redacted);
       console.log(redacted.trimEnd());
-      if (result.status !== 0) console.log("  (command exited with non-zero status)");
+      if (result.status !== 0 && !result.error) {
+        console.log("  (command exited with non-zero status)");
+      }
     } catch (cause) {
       const detail = cause instanceof Error ? cause.message : String(cause);
       writeCollectedMessage(collectDir, label, `  (sandbox command failed: ${redact(detail)})`);
