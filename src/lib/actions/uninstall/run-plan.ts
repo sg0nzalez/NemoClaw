@@ -24,6 +24,7 @@ import {
 } from "../../domain/uninstall/paths";
 import { buildUninstallPlan, type UninstallPlan } from "../../domain/uninstall/plan";
 import {
+  getOpenShellUserConfigHome,
   getNemoclawOpenShellGatewayUserServicePath,
   NEMOCLAW_OPENSHELL_GATEWAY_USER_SERVICE_MARKER_LINE,
   OPENSHELL_GATEWAY_USER_SERVICE,
@@ -1037,12 +1038,15 @@ export function buildRunPlan(
 ): { paths: UninstallPaths; plan: UninstallPlan } {
   const env = { ...process.env, ...(deps.env ?? {}) };
   const home = env.HOME || os.homedir();
-  const paths = defaultUninstallPaths({
-    home,
-    repoRoot: path.resolve(__dirname, "..", "..", ".."),
-    tmpDir: env.TMPDIR,
-    xdgBinHome: env.XDG_BIN_HOME,
-  });
+  const paths = {
+    ...defaultUninstallPaths({
+      home,
+      repoRoot: path.resolve(__dirname, "..", "..", ".."),
+      tmpDir: env.TMPDIR,
+      xdgBinHome: env.XDG_BIN_HOME,
+    }),
+    openshellConfigDir: path.join(getOpenShellUserConfigHome(home, env), "openshell"),
+  };
   const plan = buildUninstallPlan(paths, {
     deleteModels: options.deleteModels,
     gatewayName: options.gatewayName,

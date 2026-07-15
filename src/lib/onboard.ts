@@ -2010,9 +2010,7 @@ async function startDockerDriverGateway({
     ignoreError: true,
   });
   const activeGatewayInfo = runCaptureOpenshell(["gateway", "info"], { ignoreError: true });
-  // Port availability and listener enumeration are not atomic. The cutover
-  // rechecks health before adoption, reaps every observed duplicate, and
-  // requires a fresh strict bind proof after reaping before launch.
+  // Cutover rechecks health, reaps duplicates, and requires strict bind proof before launch.
   const portListenerScan = getDockerDriverGatewayPortListenerScan(
     await checkGatewayPortAvailable(),
     { gatewayBin: identityGatewayBin },

@@ -8,6 +8,7 @@ import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  getOpenShellUserConfigHome,
   getNemoclawOpenShellGatewayUserServicePath,
   NEMOCLAW_OPENSHELL_GATEWAY_USER_SERVICE_MARKER,
   OPENSHELL_GATEWAY_USER_SERVICE,
@@ -19,8 +20,8 @@ function ok(stdout = ""): RunResult {
   return { status: 0, stdout, stderr: "" };
 }
 
-function writeManagedService(home: string): string {
-  const servicePath = getNemoclawOpenShellGatewayUserServicePath(home);
+function writeManagedService(home: string, env?: NodeJS.ProcessEnv): string {
+  const servicePath = getNemoclawOpenShellGatewayUserServicePath(home, env);
   fs.mkdirSync(path.dirname(servicePath), { recursive: true });
   fs.writeFileSync(
     servicePath,
@@ -35,8 +36,8 @@ function writeManagedService(home: string): string {
   return servicePath;
 }
 
-function writeGatewayEnv(home: string): string {
-  const envPath = path.join(home, ".config", "openshell", "gateway.env");
+function writeGatewayEnv(home: string, env?: NodeJS.ProcessEnv): string {
+  const envPath = path.join(getOpenShellUserConfigHome(home, env), "openshell", "gateway.env");
   fs.mkdirSync(path.dirname(envPath), { recursive: true });
   fs.writeFileSync(envPath, "OPENSHELL_SERVER_PORT=8080\n");
   return envPath;
@@ -44,9 +45,13 @@ function writeGatewayEnv(home: string): string {
 
 describe("uninstall OpenShell gateway user service", () => {
   it("keeps OpenShell service and host gateway process when OpenShell is kept", () => {
-    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-uninstall-gateway-service-"));
-    const servicePath = writeManagedService(tmpHome);
-    const envPath = writeGatewayEnv(tmpHome);
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-uninstall-gateway-service-"));
+    const tmpHome = path.join(tmpRoot, "home");
+    const xdgConfigHome = path.join(tmpRoot, "xdg-config");
+    fs.mkdirSync(tmpHome, { recursive: true });
+    const env = { HOME: tmpHome, XDG_CONFIG_HOME: xdgConfigHome } as NodeJS.ProcessEnv;
+    const servicePath = writeManagedService(tmpHome, env);
+    const envPath = writeGatewayEnv(tmpHome, env);
     const run = vi.fn((_command: string, _args: string[]) => ok());
 
     try {
@@ -54,8 +59,8 @@ describe("uninstall OpenShell gateway user service", () => {
         { assumeYes: true, deleteModels: false, keepOpenShell: true },
         {
           commandExists: () => true,
-          env: { HOME: tmpHome } as NodeJS.ProcessEnv,
-          existsSync: (target) => String(target).startsWith(tmpHome) && fs.existsSync(target),
+          env,
+          existsSync: (target) => String(target).startsWith(tmpRoot) && fs.existsSync(target),
           isTty: false,
           platform: "linux",
           rmSync: fs.rmSync,
@@ -72,14 +77,18 @@ describe("uninstall OpenShell gateway user service", () => {
       );
       expect(run.mock.calls.some(([command]) => command === "pgrep")).toBe(false);
     } finally {
-      fs.rmSync(tmpHome, { recursive: true, force: true });
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
     }
   });
 
   it("removes the NemoClaw-managed Linux user service on full uninstall", () => {
-    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-uninstall-gateway-service-"));
-    const servicePath = writeManagedService(tmpHome);
-    const envPath = writeGatewayEnv(tmpHome);
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-uninstall-gateway-service-"));
+    const tmpHome = path.join(tmpRoot, "home");
+    const xdgConfigHome = path.join(tmpRoot, "xdg-config");
+    fs.mkdirSync(tmpHome, { recursive: true });
+    const env = { HOME: tmpHome, XDG_CONFIG_HOME: xdgConfigHome } as NodeJS.ProcessEnv;
+    const servicePath = writeManagedService(tmpHome, env);
+    const envPath = writeGatewayEnv(tmpHome, env);
     const runCalls: string[][] = [];
 
     try {
@@ -87,8 +96,8 @@ describe("uninstall OpenShell gateway user service", () => {
         { assumeYes: true, deleteModels: false, keepOpenShell: false },
         {
           commandExists: (command) => command === "systemctl",
-          env: { HOME: tmpHome } as NodeJS.ProcessEnv,
-          existsSync: (target) => String(target).startsWith(tmpHome) && fs.existsSync(target),
+          env,
+          existsSync: (target) => String(target).startsWith(tmpRoot) && fs.existsSync(target),
           isTty: false,
           platform: "linux",
           rmSync: fs.rmSync,
@@ -111,7 +120,7 @@ describe("uninstall OpenShell gateway user service", () => {
         OPENSHELL_GATEWAY_USER_SERVICE,
       ]);
     } finally {
-      fs.rmSync(tmpHome, { recursive: true, force: true });
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
     }
   });
 
