@@ -154,21 +154,64 @@ describe("onboarding phase fixture", () => {
     ]);
   });
 
-  it("opts the canonical Deep Agents Code target into composed observability", async () => {
+  it("proves hard-required Landlock cleanup before canonical Deep Agents Code readiness", async () => {
     const runner = new FakeRunner();
+    runner.enqueue(
+      shellResult(
+        1,
+        [
+          "Landlock path unavailable in hard_requirement mode: /definitely-missing-nemoclaw-landlock-e2e",
+          "The failed sandbox has been removed; retry will recreate it.",
+        ].join("\n"),
+      ),
+    );
+    runner.enqueue(shellResult(0, "NAME STATUS\n"));
+    runner.enqueue(shellResult(0, "No sandboxes registered.\n"));
     runner.enqueue(shellResult(0, "onboarded\n"));
     const secrets = new FakeSecrets({ NVIDIA_INFERENCE_API_KEY: "secret-token" });
     const onboard = new OnboardingPhaseFixture(new HostCliClient(runner), secrets);
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "dcode-landlock-policy-"));
+    const policyPath = path.join(tempDir, "policy-additions.yaml");
+    fs.writeFileSync(
+      policyPath,
+      "version: 1\nfilesystem_policy:\n  read_only:\n    - /usr\nnetwork_policies:\n  fixture: {}\n",
+      "utf8",
+    );
 
     const instance = await onboard.from(ready({ onboarding: "cloud-langchain-deepagents-code" }), {
       sandboxName: "e2e-ubuntu-repo-cloud-langchain-deepagents-code",
+      dcodePolicyPath: policyPath,
     });
 
     expect(instance).toMatchObject({
       agent: "langchain-deepagents-code",
       sandboxName: "e2e-ubuntu-repo-cloud-langchain-deepagents-code",
     });
+    expect(fs.readFileSync(policyPath, "utf8")).toBe(
+      "version: 1\nfilesystem_policy:\n  read_only:\n    - /usr\nnetwork_policies:\n  fixture: {}\n",
+    );
     expect(runner.calls[0]).toMatchObject({
+      command: "nemoclaw",
+      args: ["onboard", "--non-interactive", "--yes", "--yes-i-accept-third-party-software"],
+      options: {
+        artifactName: "onboard-cloud-langchain-deepagents-code-landlock-negative",
+        env: expect.objectContaining({
+          NEMOCLAW_AGENT: "langchain-deepagents-code",
+          NEMOCLAW_SANDBOX_NAME: "e2e-dcode-landlock-negative",
+        }),
+        redactionValues: ["secret-token"],
+        timeoutMs: 900_000,
+      },
+    });
+    expect(runner.calls[1]).toMatchObject({
+      command: "openshell",
+      args: ["sandbox", "list"],
+    });
+    expect(runner.calls[2]).toMatchObject({
+      command: "nemoclaw",
+      args: ["list"],
+    });
+    expect(runner.calls[3]).toMatchObject({
       command: "nemoclaw",
       args: [
         "onboard",
@@ -187,6 +230,32 @@ describe("onboarding phase fixture", () => {
         timeoutMs: 900_000,
       },
     });
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it("restores the exact DCode policy when the Landlock negative proof fails", async () => {
+    const runner = new FakeRunner();
+    runner.enqueue(shellResult(1, "unexpected create failure\n"));
+    const onboard = new OnboardingPhaseFixture(
+      new HostCliClient(runner),
+      new FakeSecrets({ NVIDIA_INFERENCE_API_KEY: "secret-token" }),
+    );
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "dcode-landlock-policy-restore-"));
+    const policyPath = path.join(tempDir, "policy-additions.yaml");
+    const originalPolicy =
+      "version: 1\nfilesystem_policy:\n  read_only:\n    - /usr\nnetwork_policies:\n  fixture: {}\n";
+    fs.writeFileSync(policyPath, originalPolicy, "utf8");
+
+    await expect(
+      onboard.from(ready({ onboarding: "cloud-langchain-deepagents-code" }), {
+        sandboxName: "e2e-ubuntu-repo-cloud-langchain-deepagents-code",
+        dcodePolicyPath: policyPath,
+      }),
+    ).rejects.toThrow("missed the hard-required path failure");
+
+    expect(fs.readFileSync(policyPath, "utf8")).toBe(originalPolicy);
+    expect(runner.calls).toHaveLength(1);
+    fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
   it("fails cloud OpenClaw onboarding on non-zero exit", async () => {

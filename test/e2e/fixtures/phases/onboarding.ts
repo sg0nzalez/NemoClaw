@@ -1,12 +1,17 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { ArtifactSink } from "../artifacts.ts";
 import { buildAvailabilityProbeEnv } from "../availability-env.ts";
-import { artifactLabel, assertExitZero, resultText } from "../clients/command.ts";
+import {
+  artifactLabel,
+  assertExitZero,
+  outputContainsSandbox,
+  resultText,
+} from "../clients/command.ts";
 import type { HostCliClient } from "../clients/host.ts";
 import { validateSandboxName } from "../clients/sandbox.ts";
 import {
@@ -15,6 +20,7 @@ import {
   HOSTED_INFERENCE_CREDENTIAL_ENV,
   HOSTED_INFERENCE_PROVIDER,
 } from "../hosted-inference.ts";
+import { REPO_ROOT } from "../paths.ts";
 import { redactString } from "../redaction.ts";
 import type { ShellProbeResult } from "../shell-probe.ts";
 import type { EnvironmentReady } from "./environment.ts";
@@ -53,6 +59,14 @@ const JAVASCRIPT_STACK_TRACE_PATTERNS = [
   /(^|\s)(TypeError|ReferenceError|SyntaxError):/m,
   /^\s+at /m,
 ];
+const DCODE_POLICY_PATH = join(
+  REPO_ROOT,
+  "agents",
+  "langchain-deepagents-code",
+  "policy-additions.yaml",
+);
+const DCODE_LANDLOCK_MISSING_PATH = "/definitely-missing-nemoclaw-landlock-e2e";
+const DCODE_LANDLOCK_NEGATIVE_SANDBOX = "e2e-dcode-landlock-negative";
 
 function hasJavaScriptStackTrace(text: string): boolean {
   return JAVASCRIPT_STACK_TRACE_PATTERNS.some((pattern) => pattern.test(text));
@@ -70,6 +84,8 @@ export interface OnboardingCleanup {
 export interface OnboardingOptions {
   sandboxName?: string;
   timeoutMs?: number;
+  /** Test-fixture override; live targets use the canonical DCode policy. */
+  dcodePolicyPath?: string;
 }
 
 export type OnboardingExpectedFailure =
@@ -241,6 +257,11 @@ export class OnboardingPhaseFixture {
     const sandboxName = sandboxNameFromOptions(environment.onboarding, options);
     const apiKey = this.secrets.required("NVIDIA_INFERENCE_API_KEY");
     this.registerSandboxCleanup(sandboxName);
+    await this.proveDcodeLandlockFailureCleanup(
+      apiKey,
+      options.dcodePolicyPath ?? DCODE_POLICY_PATH,
+      options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    );
     const result = await this.host.nemoclaw([...ONBOARD_ARGS, "--observability"], {
       artifactName: "onboard-cloud-langchain-deepagents-code",
       env: commandEnv(sandboxName, {
@@ -274,6 +295,89 @@ export class OnboardingPhaseFixture {
       gatewayUrl: OPENCLAW_GATEWAY_URL,
       result,
     };
+  }
+
+  private async proveDcodeLandlockFailureCleanup(
+    apiKey: string,
+    policyPath: string,
+    timeoutMs: number,
+  ): Promise<void> {
+    const negativeSandboxName = DCODE_LANDLOCK_NEGATIVE_SANDBOX;
+    validateSandboxName(negativeSandboxName);
+    this.registerSandboxCleanup(negativeSandboxName);
+
+    const originalPolicy = await readFile(policyPath, "utf8");
+    const readOnlyHeader = /^  read_only:\s*$/gm;
+    const readOnlyHeaders = originalPolicy.match(readOnlyHeader) ?? [];
+    if (readOnlyHeaders.length !== 1) {
+      throw new Error(
+        `DCode Landlock negative proof expected one filesystem read_only block, found ${readOnlyHeaders.length}.`,
+      );
+    }
+    const negativePolicy = originalPolicy.replace(
+      readOnlyHeader,
+      `  read_only:\n    - ${DCODE_LANDLOCK_MISSING_PATH}`,
+    );
+
+    try {
+      await writeFile(policyPath, negativePolicy, "utf8");
+      const negative = await this.host.nemoclaw(ONBOARD_ARGS, {
+        artifactName: "onboard-cloud-langchain-deepagents-code-landlock-negative",
+        env: commandEnv(negativeSandboxName, {
+          NEMOCLAW_AGENT: "langchain-deepagents-code",
+          NVIDIA_INFERENCE_API_KEY: apiKey,
+          [HOSTED_INFERENCE_CREDENTIAL_ENV]: apiKey,
+        }),
+        redactionValues: [apiKey],
+        timeoutMs,
+      });
+      const negativeOutput = this.redact(resultText(negative), [apiKey]);
+      if (negative.exitCode === 0) {
+        throw new Error(
+          "DCode hard-required Landlock missing-path onboarding unexpectedly passed.",
+        );
+      }
+      if (!negativeOutput.includes("Landlock path unavailable in hard_requirement mode")) {
+        throw new Error(
+          `DCode Landlock negative proof missed the hard-required path failure: ${negativeOutput}`,
+        );
+      }
+      if (!negativeOutput.includes("The failed sandbox has been removed")) {
+        throw new Error(
+          `DCode Landlock negative proof missed successful cleanup evidence: ${negativeOutput}`,
+        );
+      }
+
+      const openshellList = await this.host.command(
+        this.host.openshellCommandPath,
+        ["sandbox", "list"],
+        {
+          artifactName: "onboard-cloud-langchain-deepagents-code-landlock-openshell-list",
+          env: commandEnv(negativeSandboxName, { OPENSHELL_GATEWAY: "nemoclaw" }),
+          timeoutMs: 60_000,
+        },
+      );
+      assertExitZero(openshellList, "list OpenShell sandboxes after Landlock create failure");
+      if (outputContainsSandbox(openshellList, negativeSandboxName)) {
+        throw new Error(
+          `OpenShell retained failed Landlock sandbox '${negativeSandboxName}' after cleanup.`,
+        );
+      }
+
+      const nemoclawList = await this.host.nemoclaw(["list"], {
+        artifactName: "onboard-cloud-langchain-deepagents-code-landlock-nemoclaw-list",
+        env: commandEnv(negativeSandboxName),
+        timeoutMs: 60_000,
+      });
+      assertExitZero(nemoclawList, "list NemoClaw sandboxes after Landlock create failure");
+      if (outputContainsSandbox(nemoclawList, negativeSandboxName)) {
+        throw new Error(
+          `NemoClaw recorded failed Landlock sandbox '${negativeSandboxName}' as managed state.`,
+        );
+      }
+    } finally {
+      await writeFile(policyPath, originalPolicy, "utf8");
+    }
   }
 
   async cloudOpenClawNoDocker(

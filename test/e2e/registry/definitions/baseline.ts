@@ -87,7 +87,8 @@ const canonicalTargetInputs: CanonicalTargetInput[] = [
     ),
     expectedStateId: "cloud-deepagents-code-ready",
     suiteIds: ["smoke", "inference", "terminal-agent", "deepagents-code-policy"],
-    description: "Ubuntu repo checkout with Docker and LangChain Deep Agents Code onboarding.",
+    description:
+      "Ubuntu repo checkout with Docker, hard-required Landlock failure cleanup, and successful LangChain Deep Agents Code onboarding.",
     requiredSecrets: ["NVIDIA_INFERENCE_API_KEY"],
   },
   {
