@@ -196,6 +196,58 @@ custom-box  127.0.0.1  19000  12345  running`;
     }
   });
 
+  it("does not replay transport when custom recovery exec fails after a stopped probe", () => {
+    const agentRuntime = requireSource("../src/lib/agent/runtime.ts");
+    const registry = requireSource("../src/lib/state/registry.ts");
+    const childProcess = requireSource("node:child_process");
+    const execCommands: string[] = [];
+    const otherCommands: string[] = [];
+
+    vi.spyOn(childProcess, "spawnSync").mockImplementation((command: unknown, rawArgs: unknown) => {
+      const shellCommand = getSandboxExecShellCommand(rawArgs);
+      const isOpenshell = String(command).endsWith("openshell");
+      execCommands.push(...(isOpenshell ? [shellCommand] : []));
+      otherCommands.push(...(isOpenshell ? [] : [String(command)]));
+      return (
+        isOpenshell
+          ? shellCommand.includes("HTTP_CODE=$(curl")
+            ? {
+                status: 0,
+                stdout: "__NEMOCLAW_SANDBOX_EXEC_STARTED__\nSTOPPED\n",
+                stderr: "",
+              }
+            : { status: 1, stdout: "", stderr: "manifest launch failed" }
+          : { status: 1, stdout: "", stderr: "" }
+      ) as never;
+    });
+    vi.spyOn(agentRuntime, "getSessionAgent").mockReturnValue({
+      name: "custom-agent",
+      displayName: "Custom Agent",
+      binary_path: "/usr/local/bin/custom-agent",
+      gateway_command: "custom-agent gateway run",
+      forwardPort: 19000,
+      healthProbe: { url: "http://127.0.0.1:19000/health", port: 19000 },
+    });
+    vi.spyOn(registry, "getSandbox").mockReturnValue({
+      name: "custom-box",
+      agent: "custom-agent",
+      dashboardPort: 19000,
+    });
+
+    expect(
+      withFakeOpenshellBinary(() => checkAndRecoverSandboxProcesses("custom-box", { quiet: true })),
+    ).toEqual({
+      checked: true,
+      wasRunning: false,
+      recovered: false,
+      forwardRecovered: false,
+    });
+    expect(execCommands).toHaveLength(2);
+    expect(execCommands[0]).toContain("HTTP_CODE=$(curl");
+    expect(execCommands[1]).toContain('"$AGENT_BIN" gateway run --port 19000');
+    expect(otherCommands).toEqual([]);
+  });
+
   it("fails closed when a persisted non-OpenClaw manifest cannot be loaded", () => {
     const agentRuntime = requireSource("../src/lib/agent/runtime.ts");
     const registry = requireSource("../src/lib/state/registry.ts");
