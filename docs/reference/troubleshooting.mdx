@@ -761,26 +761,66 @@ Silent retry would loop on the same failure if your original choice, such as an 
 - In non-interactive mode (piped `curl | bash` with `NEMOCLAW_NON_INTERACTIVE=1`, CI, scripts), the installer refuses and exits with a non-zero status so a scripted re-run cannot loop.
   You must opt in to one of two paths explicitly:
 
-  Start over with new choices (discards the recorded session and provider/model selection):
+Start over with new choices to discard the recorded session and provider/model selection.
 
-  ```bash
-  curl -fsSL https://www.nvidia.com/nemoclaw.sh | bash -s -- --fresh
-  ```
+<AgentOnly variant="openclaw">
 
-  Or equivalently, via env var.
-  The variable must be set on the `bash` side of the pipe, not on `curl`, since only the right-hand process inherits it:
+```bash
+curl -fsSL https://www.nvidia.com/nemoclaw.sh | bash -s -- --fresh
+```
 
-  ```bash
-  curl -fsSL https://www.nvidia.com/nemoclaw.sh | NEMOCLAW_FRESH=1 bash
-  ```
+</AgentOnly>
 
-  Retry the same session.
+<AgentOnly variant="hermes">
 
-  This is only useful if the original failure was transient, for example a network blip or a stopped Docker daemon, and not a wrong provider choice:
+```bash
+curl -fsSL https://www.nvidia.com/nemoclaw.sh | NEMOCLAW_AGENT=hermes bash -s -- --fresh
+```
 
-  ```bash
-  $$nemoclaw onboard --resume
-  ```
+</AgentOnly>
+
+<AgentOnly variant="deepagents">
+
+```bash
+curl -fsSL https://www.nvidia.com/nemoclaw.sh | NEMOCLAW_AGENT=langchain-deepagents-code bash -s -- --fresh
+```
+
+</AgentOnly>
+
+Or use environment variables instead.
+Set them on the `bash` side of the pipe because only the right-hand process inherits them.
+
+<AgentOnly variant="openclaw">
+
+```bash
+curl -fsSL https://www.nvidia.com/nemoclaw.sh | NEMOCLAW_FRESH=1 bash
+```
+
+</AgentOnly>
+
+<AgentOnly variant="hermes">
+
+```bash
+curl -fsSL https://www.nvidia.com/nemoclaw.sh | NEMOCLAW_AGENT=hermes NEMOCLAW_FRESH=1 bash
+```
+
+</AgentOnly>
+
+<AgentOnly variant="deepagents">
+
+```bash
+curl -fsSL https://www.nvidia.com/nemoclaw.sh | NEMOCLAW_AGENT=langchain-deepagents-code NEMOCLAW_FRESH=1 bash
+```
+
+</AgentOnly>
+
+Retry the same session.
+
+This is only useful if the original failure was transient, for example a network blip or a stopped Docker daemon, and not a wrong provider choice:
+
+```bash
+$$nemoclaw onboard --resume
+```
 
 <AgentOnly variant="openclaw">
 
@@ -933,15 +973,19 @@ On a direct-container deployment, first confirm that the sandbox is running:
 $$nemoclaw <name> status
 ```
 
-When `recover` repairs a stopped built-in gateway, NemoClaw automatically retries only when stdout is empty and stderr is exactly one `SUPERVISOR_BUSY` or `SUPERVISOR_UNAVAILABLE` line, with at most three controller attempts.
+When `recover` repairs a stopped built-in gateway, NemoClaw repeats the recovery action only for an exit status of `1` with blank stdout and a sole nonblank stderr line equal to `SUPERVISOR_BUSY`, with at most three controller attempts.
+The same result is inconclusive during managed settle confirmation and can be probed again only within the configured settle window.
+NemoClaw treats `SUPERVISOR_UNAVAILABLE` as terminal because it can report unreadable or untrusted supervisor state, ambiguous discovery, or a process-identity change.
 It does not retry other status or output combinations.
 `SUPERVISOR_NOT_RUNNING` is a separate result that requires two zero-supervisor scans with a stable PID 1 and does not enter that retry loop.
 On a supported local Docker-driver sandbox with the legacy keepalive startup, it can authorize a container-identity-pinned recreation that commits only after managed health and settle checks pass.
 To bypass that trusted recreation while troubleshooting, run `NEMOCLAW_DISABLE_SUPERVISOR_RELAUNCH=1 $$nemoclaw <name> recover`; NemoClaw leaves the container unchanged and returns rebuild or re-onboard guidance.
 If that bounded retry is exhausted, or if `gateway restart` reports `SUPERVISOR_BUSY`, wait for the active request to finish and retry the command.
-If the error mentions `SUPERVISOR_NOT_RUNNING` and trusted recreation could not proceed, `SUPERVISOR_REBUILD_REQUIRED`, `SUPERVISOR_UNAVAILABLE`, a missing `nemoclaw-gateway-control` helper, or a missing managed controller, the sandbox image may predate the current lifecycle contract.
-The managed controller also refuses an ambiguous or changing process tree instead of guessing which same-UID process is the gateway.
-Rebuild the image before retrying:
+If the error mentions `SUPERVISOR_NOT_RUNNING` and trusted recreation could not proceed, `SUPERVISOR_REBUILD_REQUIRED`, a missing `nemoclaw-gateway-control` helper, or a missing managed controller, the sandbox image may predate the current lifecycle contract.
+An exact `SUPERVISOR_UNAVAILABLE` result instead means the managed controller refused the current supervisor state rather than guessing which same-UID process is the gateway.
+The current recovery action and any managed settle confirmation stop immediately.
+If `recover` reports this result, follow its host-side `gateway restart` guidance.
+If restart also reports `SUPERVISOR_UNAVAILABLE`, or the image is incompatible, rebuild the image:
 
 ```bash
 $$nemoclaw <name> rebuild --yes
@@ -2444,6 +2488,9 @@ If the process exists but the endpoint is unreachable, use the restart action wh
 ### Ollama inference fails or hangs in WSL
 
 Ollama configures context length based on your hardware.
+
+<AgentOnly variant="openclaw">
+
 On some GPUs (for example RTX 3500), the default context length is not sufficient for OpenClaw.
 During onboarding, NemoClaw raises loaded-model context lengths below `16384` to `16384` when `NEMOCLAW_CONTEXT_WINDOW` is unset.
 Set the variable manually when you need a different value or when you run Ollama outside the managed onboarding path.
@@ -2453,6 +2500,26 @@ Force a larger context length:
 pkill -f 'ollama serve'
 OLLAMA_CONTEXT_LENGTH=16384 ollama serve
 ```
+
+</AgentOnly>
+
+<AgentOnly variant="hermes">
+
+Hermes requires at least `64000` tokens.
+During onboarding, NemoClaw verifies the loaded model's actual `context_length` through Ollama's `/api/ps` endpoint.
+Resumed onboarding and sandbox rebuilds warm the exact recorded Ollama model and repeat this check before reusing its route.
+Resume stops when that recorded model is missing, Ollama is unreachable, model warm-up fails, or the runtime context cannot be verified.
+If you set `NEMOCLAW_CONTEXT_WINDOW` above `64000`, the loaded model must provide at least that larger value.
+If the runtime value is too small, missing, or malformed, onboarding stops before sandbox creation and asks you to restart the host daemon with the required context length.
+`NEMOCLAW_CONTEXT_WINDOW` controls Hermes prompt budgeting; it does not change the Ollama daemon or bypass this runtime check.
+Force a larger context length:
+
+```bash
+pkill -f 'ollama serve'
+OLLAMA_CONTEXT_LENGTH=64000 ollama serve
+```
+
+</AgentOnly>
 
 Verify that Ollama inference works:
 
@@ -2470,10 +2537,23 @@ sudo systemctl status ollama
 
 If it is active, stop it first, then start with the custom context length:
 
+<AgentOnly variant="openclaw">
+
 ```bash
 sudo systemctl stop ollama
 OLLAMA_CONTEXT_LENGTH=16384 ollama serve
 ```
+
+</AgentOnly>
+
+<AgentOnly variant="hermes">
+
+```bash
+sudo systemctl stop ollama
+OLLAMA_CONTEXT_LENGTH=64000 ollama serve
+```
+
+</AgentOnly>
 
 For additional troubleshooting, refer to the [Windows Setup](../get-started/prerequisites/windows-preparation) page.
 <AgentOnly variant="openclaw">
@@ -2582,6 +2662,22 @@ After the rebuild completes, return to the Skills page to confirm the skill is r
 
 The issues below are common problems you may encounter when running Hermes through `nemohermes`.
 For setup, refer to [Quickstart with Hermes](../../hermes/get-started/quickstart).
+
+### Hermes dashboard config did not converge
+
+`nemohermes inference set` updates the OpenShell route, registry, and `/sandbox/.hermes/config.yaml` before it refreshes the separate dashboard profile.
+If the dashboard profile exists but NemoClaw cannot confirm that `/sandbox/.hermes/dashboard-home/config.yaml` was updated, the command exits nonzero without printing `Inference route synced`.
+The committed route and main Hermes config are not rolled back.
+
+Restart the sandbox so startup mirrors the committed model route into the dashboard profile:
+
+```bash
+nemohermes <name> stop
+nemohermes <name> start
+```
+
+Then run `nemohermes inference get` and verify Dashboard Chat uses the selected model.
+If the command succeeds because the dashboard profile is missing, the dashboard is disabled and no dashboard recovery is required.
 
 ### Hermes restart reports `config hash mismatch`
 
