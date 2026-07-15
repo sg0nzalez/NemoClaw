@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import path from "node:path";
+
 import { describe, expect, it, vi } from "vitest";
 
 import { createVirtualClock } from "./__test-helpers__/virtual-clock";
@@ -9,8 +11,10 @@ import {
   getNemoclawOpenShellGatewayUserServicePath,
   getOpenShellGatewayUserServiceBinaryPaths,
   getOpenShellGatewayUserServicePaths,
+  getOpenShellUserConfigHome,
   hasNemoclawOpenShellGatewayUserService,
   hasOpenShellGatewayUserService,
+  installAndReportNemoclawOpenShellGatewayUserService,
   installNemoclawOpenShellGatewayUserService,
   NEMOCLAW_OPENSHELL_GATEWAY_USER_SERVICE_MARKER,
   type SpawnSyncLikeResult,
@@ -70,6 +74,22 @@ describe("docker-driver-gateway-service", () => {
     ]);
   });
 
+  it("resolves the service unit under the effective XDG config home", () => {
+    expect(
+      getNemoclawOpenShellGatewayUserServicePath("/home/nvidia", {
+        XDG_CONFIG_HOME: "/tmp/nemoclaw-config",
+      }),
+    ).toBe("/tmp/nemoclaw-config/systemd/user/openshell-gateway.service");
+    expect(
+      getNemoclawOpenShellGatewayUserServicePath("/home/nvidia", {
+        XDG_CONFIG_HOME: "relative-config",
+      }),
+    ).toBe("/home/nvidia/.config/systemd/user/openshell-gateway.service");
+    expect(getOpenShellUserConfigHome("/home/nvidia", { XDG_CONFIG_HOME: "/tmp/config" })).toBe(
+      "/tmp/config",
+    );
+  });
+
   it("ignores stale per-user service units so standalone fallback remains available", () => {
     const home = "/home/nvidia";
     const servicePath = getNemoclawOpenShellGatewayUserServicePath(home);
@@ -89,20 +109,35 @@ describe("docker-driver-gateway-service", () => {
     const home = "/home/nvidia";
     const servicePath = getNemoclawOpenShellGatewayUserServicePath(home);
     const gatewayBin = "/home/nvidia/.local/bin/openshell-gateway";
+    const chmodSync = vi.fn();
+    const mkdirSync = vi.fn();
     const writeFileSync = vi.fn();
 
     expect(
       installNemoclawOpenShellGatewayUserService({
-        chmodSync: vi.fn(),
+        chmodSync,
         existsSync: () => false,
         gatewayBin,
         home,
-        mkdirSync: vi.fn() as never,
+        mkdirSync: mkdirSync as never,
         platform: "linux",
         writeFileSync: writeFileSync as never,
       }),
     ).toEqual({ installed: true, path: servicePath });
+    expect(mkdirSync).toHaveBeenCalledWith(path.dirname(servicePath), {
+      recursive: true,
+      mode: 0o700,
+    });
+    expect(chmodSync).toHaveBeenCalledWith(path.dirname(servicePath), 0o700);
+    expect(chmodSync).toHaveBeenCalledWith(servicePath, 0o600);
     expect(String(writeFileSync.mock.calls[0]?.[1])).toContain(`ExecStart=${gatewayBin}`);
+    expect(String(writeFileSync.mock.calls[0]?.[1])).toContain("After=default.target");
+    expect(String(writeFileSync.mock.calls[0]?.[1])).toContain(
+      "Environment=OPENSHELL_LOCAL_TLS_DIR=%h/.local/state/openshell/tls",
+    );
+    expect(String(writeFileSync.mock.calls[0]?.[1])).toContain(
+      `ExecStartPre=${gatewayBin} generate-certs --output-dir \${OPENSHELL_LOCAL_TLS_DIR} --server-san host.openshell.internal --server-san localhost --server-san 127.0.0.1`,
+    );
     expect(
       hasNemoclawOpenShellGatewayUserService({
         existsSync: (candidate) => candidate === servicePath,
@@ -118,6 +153,22 @@ describe("docker-driver-gateway-service", () => {
         writeFileSync: vi.fn() as never,
       }),
     ).toEqual({ installed: false, reason: "not a Linux host" });
+  });
+
+  it("warns when Linux service installation cannot find a gateway binary", () => {
+    const warn = vi.fn();
+
+    expect(
+      installAndReportNemoclawOpenShellGatewayUserService({
+        existsSync: () => false,
+        gatewayBin: null,
+        platform: "linux",
+        warn,
+      }),
+    ).toEqual({ installed: false, reason: "OpenShell gateway binary not found" });
+    expect(warn).toHaveBeenCalledWith(
+      "  OpenShell gateway user service not installed: OpenShell gateway binary not found.",
+    );
   });
 
   it("removes a NemoClaw user override when an upstream service exists", () => {
@@ -192,7 +243,7 @@ describe("docker-driver-gateway-service", () => {
   it("restarts the upstream user service with systemctl --user after validating identity", () => {
     const events: string[] = [];
     const spawnSyncImpl = vi.fn((_command: string, args: string[]) => {
-      events.push(args[1] ?? args[0] ?? "");
+      events.push(args[0] === "is-active" ? "is-active" : (args[1] ?? args[0] ?? ""));
       return args.includes("show") ? spawnResult(0, "", trustedShowOutput()) : spawnResult();
     });
 
@@ -206,7 +257,14 @@ describe("docker-driver-gateway-service", () => {
     });
 
     expect(result).toMatchObject({ attempted: true, fallbackAllowed: false, started: true });
-    expect(events).toEqual(["daemon-reload", "show", "prepare-env", "enable", "restart"]);
+    expect(events).toEqual([
+      "daemon-reload",
+      "show",
+      "prepare-env",
+      "enable",
+      "restart",
+      "is-active",
+    ]);
     expect(spawnSyncImpl.mock.calls.map(([command, args]) => [command, args])).toEqual([
       ["systemctl", ["--user", "daemon-reload"]],
       [
@@ -215,6 +273,7 @@ describe("docker-driver-gateway-service", () => {
       ],
       ["systemctl", ["--user", "enable", "openshell-gateway"]],
       ["systemctl", ["--user", "restart", "openshell-gateway"]],
+      ["systemctl", ["--user", "is-active", "--quiet", "openshell-gateway"]],
     ]);
   });
 
@@ -298,6 +357,29 @@ describe("docker-driver-gateway-service", () => {
       started: false,
     });
     expect(result.reason).toContain("No such file or directory");
+  });
+
+  it("does not report service startup success when the restarted service is inactive", () => {
+    const result = startOpenShellGatewayUserService({
+      commandExists: () => true,
+      env: {},
+      existsSync: () => true,
+      platform: "linux",
+      spawnSyncImpl: vi.fn((_command: string, args: string[]) =>
+        args.includes("show")
+          ? spawnResult(0, "", trustedShowOutput())
+          : args.includes("is-active")
+            ? spawnResult(3, "inactive")
+            : spawnResult(),
+      ),
+    });
+
+    expect(result).toMatchObject({
+      attempted: true,
+      fallbackAllowed: false,
+      started: false,
+    });
+    expect(result.reason).toContain("is-active --quiet openshell-gateway failed");
   });
 
   it("falls back instead of trusting an unverified service identity", () => {
@@ -409,6 +491,60 @@ describe("docker-driver-gateway-service", () => {
     expect(events).toEqual(["register", "sleep", "register", "ready", "clear", "verify"]);
   });
 
+  it("accepts package-managed service health when CLI metadata is healthy and direct gRPC probe is unavailable", async () => {
+    const clearDockerDriverGatewayRuntimeFiles = vi.fn();
+
+    await expect(
+      startPackageManagedDockerDriverGateway({
+        clearDockerDriverGatewayRuntimeFiles,
+        exitOnFailure: false,
+        gatewayName: "nemoclaw",
+        hasOpenShellGatewayUserService: () => true,
+        healthPollCount: 1,
+        healthPollInterval: 0,
+        isDockerDriverGatewayReady: async () => false,
+        registerDockerDriverGatewayEndpoint: () => true,
+        runCaptureOpenshell: (args) => (args[0] === "status" ? STATUS_CONNECTED : GATEWAY_INFO),
+        skipSandboxBridgeReachability: false,
+        startOpenShellGatewayUserService: () => ({
+          attempted: true,
+          fallbackAllowed: false,
+          started: true,
+        }),
+        verifySandboxBridgeGatewayReachableOrExit: vi.fn(),
+      }),
+    ).resolves.toBe(true);
+
+    expect(clearDockerDriverGatewayRuntimeFiles).toHaveBeenCalledOnce();
+  });
+
+  it("accepts package-managed service health when direct gRPC probe is healthy and CLI status is unavailable", async () => {
+    const clearDockerDriverGatewayRuntimeFiles = vi.fn();
+
+    await expect(
+      startPackageManagedDockerDriverGateway({
+        clearDockerDriverGatewayRuntimeFiles,
+        exitOnFailure: false,
+        gatewayName: "nemoclaw",
+        hasOpenShellGatewayUserService: () => true,
+        healthPollCount: 1,
+        healthPollInterval: 0,
+        isDockerDriverGatewayReady: async () => true,
+        registerDockerDriverGatewayEndpoint: () => true,
+        runCaptureOpenshell: (args) => (args[0] === "gateway" ? GATEWAY_INFO : ""),
+        skipSandboxBridgeReachability: false,
+        startOpenShellGatewayUserService: () => ({
+          attempted: true,
+          fallbackAllowed: false,
+          started: true,
+        }),
+        verifySandboxBridgeGatewayReachableOrExit: vi.fn(),
+      }),
+    ).resolves.toBe(true);
+
+    expect(clearDockerDriverGatewayRuntimeFiles).toHaveBeenCalledOnce();
+  });
+
   it("preserves bounded immediate package-service probes when the interval is zero", async () => {
     const clock = createVirtualClock();
     let registerCount = 0;
@@ -485,7 +621,7 @@ describe("docker-driver-gateway-service", () => {
         isDockerDriverGatewayReady: async () => false,
         now: clock.now,
         registerDockerDriverGatewayEndpoint: () => true,
-        runCaptureOpenshell: (args) => (args[0] === "status" ? STATUS_CONNECTED : GATEWAY_INFO),
+        runCaptureOpenshell: (args) => (args[0] === "status" ? "Error: Connection refused" : ""),
         sleepSeconds: clock.advance,
         skipSandboxBridgeReachability: false,
         startOpenShellGatewayUserService: () => ({

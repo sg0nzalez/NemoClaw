@@ -1159,10 +1159,19 @@ is_nemoclaw_openshell_gateway_user_service() {
   grep -Fxq "$NEMOCLAW_GATEWAY_SERVICE_MARKER_LINE" "$service_path"
 }
 
+openshell_user_config_home() {
+  if [[ -n "${XDG_CONFIG_HOME:-}" && "$XDG_CONFIG_HOME" == /* ]]; then
+    printf '%s\n' "$XDG_CONFIG_HOME"
+  else
+    printf '%s\n' "${HOME}/.config"
+  fi
+}
+
 install_nemoclaw_openshell_gateway_user_service() {
   [[ "$(uname -s)" == "Linux" ]] || return 0
 
-  local service_dir="${HOME}/.config/systemd/user"
+  local service_dir
+  service_dir="$(openshell_user_config_home)/systemd/user"
   local service_path="${service_dir}/openshell-gateway.service"
 
   if upstream_openshell_gateway_user_service_installed; then
@@ -1206,11 +1215,14 @@ $NEMOCLAW_GATEWAY_SERVICE_MARKER_LINE
 [Unit]
 Description=OpenShell Gateway
 Documentation=https://github.com/NVIDIA/OpenShell
+After=default.target
 
 [Service]
 Type=simple
 StateDirectory=openshell/gateway
+Environment=OPENSHELL_LOCAL_TLS_DIR=%h/.local/state/openshell/tls
 EnvironmentFile=-%E/openshell/gateway.env
+ExecStartPre=$gateway_bin generate-certs --output-dir \${OPENSHELL_LOCAL_TLS_DIR} --server-san host.openshell.internal --server-san localhost --server-san 127.0.0.1
 ExecStart=$gateway_bin
 Restart=on-failure
 RestartSec=5s
@@ -1243,6 +1255,8 @@ maybe_install_openshell_during_install() {
     return 0
   fi
   if [[ "$mode" == "if-missing" ]] && command_exists openshell; then
+    prefer_user_local_openshell
+    install_nemoclaw_openshell_gateway_user_service
     return 0
   fi
   spin "Installing OpenShell CLI" bash "${NEMOCLAW_SOURCE_ROOT}/scripts/install-openshell.sh"

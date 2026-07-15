@@ -70,6 +70,7 @@ describe("uninstall OpenShell gateway user service", () => {
       expect(run.mock.calls.map(([command, args]) => [command, ...args].join("\0"))).not.toContain(
         ["pgrep", "-f", HOST_GATEWAY_PGREP_PATTERN].join("\0"),
       );
+      expect(run.mock.calls.some(([command]) => command === "pgrep")).toBe(false);
     } finally {
       fs.rmSync(tmpHome, { recursive: true, force: true });
     }
@@ -191,6 +192,77 @@ describe("uninstall OpenShell gateway user service", () => {
       );
     } finally {
       readSpy.mockRestore();
+      fs.rmSync(tmpHome, { recursive: true, force: true });
+    }
+  });
+
+  it("reports incomplete uninstall when the managed service file cannot be removed", () => {
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-uninstall-gateway-service-"));
+    const servicePath = writeManagedService(tmpHome);
+    const errors: string[] = [];
+
+    try {
+      const result = runUninstallPlan(
+        { assumeYes: true, deleteModels: false, keepOpenShell: false },
+        {
+          commandExists: (command) => command === "systemctl",
+          env: { HOME: tmpHome } as NodeJS.ProcessEnv,
+          error: (line) => errors.push(line),
+          existsSync: (target) => String(target).startsWith(tmpHome) && fs.existsSync(target),
+          isTty: false,
+          platform: "linux",
+          rmSync: vi.fn((target: fs.PathLike) => {
+            if (String(target) === servicePath) throw new Error("permission denied");
+            fs.rmSync(target, { recursive: true, force: true });
+          }) as typeof fs.rmSync,
+          run: vi.fn(() => ok()),
+          runDocker: () => ok(""),
+        },
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(fs.existsSync(servicePath)).toBe(true);
+      expect(errors).toContain(`Failed to remove ${servicePath}: permission denied`);
+      expect(errors).toContain(
+        "Uninstall completed with errors. Some state may remain on disk; see warnings above.",
+      );
+    } finally {
+      fs.rmSync(tmpHome, { recursive: true, force: true });
+    }
+  });
+
+  it("reports incomplete uninstall when user systemd reload fails after removal", () => {
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-uninstall-gateway-service-"));
+    const servicePath = writeManagedService(tmpHome);
+    const errors: string[] = [];
+
+    try {
+      const result = runUninstallPlan(
+        { assumeYes: true, deleteModels: false, keepOpenShell: false },
+        {
+          commandExists: (command) => command === "systemctl",
+          env: { HOME: tmpHome } as NodeJS.ProcessEnv,
+          error: (line) => errors.push(line),
+          existsSync: (target) => String(target).startsWith(tmpHome) && fs.existsSync(target),
+          isTty: false,
+          platform: "linux",
+          rmSync: fs.rmSync,
+          run: vi.fn((command: string, args: string[]) =>
+            command === "systemctl" && args.includes("daemon-reload")
+              ? { status: 1, stdout: "", stderr: "failed\n" }
+              : ok(),
+          ),
+          runDocker: () => ok(""),
+        },
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(fs.existsSync(servicePath)).toBe(false);
+      expect(errors).toContain("Failed to reload the user systemd manager.");
+      expect(errors).toContain(
+        "Uninstall completed with errors. Some state may remain on disk; see warnings above.",
+      );
+    } finally {
       fs.rmSync(tmpHome, { recursive: true, force: true });
     }
   });

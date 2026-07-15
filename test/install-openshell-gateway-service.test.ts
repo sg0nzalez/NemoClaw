@@ -50,7 +50,68 @@ describe("install.sh OpenShell gateway service", () => {
       const unit = fs.readFileSync(servicePath, "utf-8");
       expect(result.status).toBe(0);
       expect(unit).toContain("# NEMOCLAW_MANAGED_OPENSHELL_GATEWAY=1");
+      expect(unit).toContain("After=default.target");
+      expect(unit).toContain("Environment=OPENSHELL_LOCAL_TLS_DIR=%h/.local/state/openshell/tls");
+      expect(unit).toContain(
+        `ExecStartPre=${gatewayBin} generate-certs --output-dir \${OPENSHELL_LOCAL_TLS_DIR} --server-san host.openshell.internal --server-san localhost --server-san 127.0.0.1`,
+      );
       expect(unit).toContain(`ExecStart=${gatewayBin}`);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("reconciles the service when OpenShell already exists in if-missing mode", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-install-gateway-service-"));
+    const gatewayBin = path.join(tmp, ".local", "bin", "openshell-gateway");
+    const servicePath = path.join(tmp, ".config", "systemd", "user", "openshell-gateway.service");
+    const eventsPath = path.join(tmp, "events.log");
+    fs.mkdirSync(path.dirname(gatewayBin), { recursive: true });
+    writeExecutable(gatewayBin, "#!/usr/bin/env bash\nexit 0\n");
+
+    try {
+      const result = runInstallHelper(
+        tmp,
+        [
+          'command_exists() { [[ "$1" == openshell ]]; }',
+          `spin() { printf 'spin\\n' >>${JSON.stringify(eventsPath)}; return 1; }`,
+          `prefer_user_local_openshell() { printf 'prefer\\n' >>${JSON.stringify(eventsPath)}; }`,
+          "upstream_openshell_gateway_user_service_installed() { return 1; }",
+          `resolve_openshell_gateway_bin_for_service() { printf '%s\\n' ${JSON.stringify(gatewayBin)}; }`,
+          "maybe_install_openshell_during_install if-missing",
+        ].join("\n"),
+      );
+
+      expect(result.status).toBe(0);
+      expect(fs.readFileSync(servicePath, "utf-8")).toContain(`ExecStart=${gatewayBin}`);
+      expect(fs.readFileSync(eventsPath, "utf-8")).toBe("prefer\n");
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("uses absolute XDG_CONFIG_HOME for the Linux user service path", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-install-gateway-service-"));
+    const configHome = path.join(tmp, "xdg-config");
+    const gatewayBin = path.join(tmp, ".local", "bin", "openshell-gateway");
+    const servicePath = path.join(configHome, "systemd", "user", "openshell-gateway.service");
+    fs.mkdirSync(path.dirname(gatewayBin), { recursive: true });
+    writeExecutable(gatewayBin, "#!/usr/bin/env bash\nexit 0\n");
+
+    try {
+      const result = runInstallHelper(
+        tmp,
+        [
+          "upstream_openshell_gateway_user_service_installed() { return 1; }",
+          `resolve_openshell_gateway_bin_for_service() { printf '%s\\n' ${JSON.stringify(gatewayBin)}; }`,
+          "install_nemoclaw_openshell_gateway_user_service",
+        ].join("\n"),
+        { XDG_CONFIG_HOME: configHome },
+      );
+
+      expect(result.status).toBe(0);
+      expect(fs.readFileSync(servicePath, "utf-8")).toContain(`ExecStart=${gatewayBin}`);
+      expect(fs.existsSync(path.join(tmp, ".config", "systemd", "user"))).toBe(false);
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }

@@ -11,17 +11,17 @@ import { type AgentBranding, getAgentBranding } from "../../cli/branding";
 import { isStdinTty, readLineFromStdin } from "../../core/stdin";
 import { sleepMs } from "../../core/wait";
 import {
-  defaultUninstallPaths,
-  NEMOCLAW_OLLAMA_MODELS,
-  NEMOCLAW_PROVIDERS,
-  type UninstallPaths,
-} from "../../domain/uninstall/paths";
-import {
   gatewayDestroySkipMessage,
   OPENSHELL_SANDBOXES_DELETE_SKIP_MESSAGE,
   preservedRegistryUnrecoverableWarnings,
   providerDeleteSkipMessage,
 } from "../../domain/uninstall/messaging";
+import {
+  defaultUninstallPaths,
+  NEMOCLAW_OLLAMA_MODELS,
+  NEMOCLAW_PROVIDERS,
+  type UninstallPaths,
+} from "../../domain/uninstall/paths";
 import { buildUninstallPlan, type UninstallPlan } from "../../domain/uninstall/plan";
 import {
   getNemoclawOpenShellGatewayUserServicePath,
@@ -613,7 +613,10 @@ function stopOrphanedOpenShell(runtime: UninstallRuntime): void {
 
 function removeNemoclawOpenShellGatewayUserService(runtime: UninstallRuntime): boolean {
   if (runtime.platform !== "linux") return true;
-  const servicePath = getNemoclawOpenShellGatewayUserServicePath(runtime.env.HOME || os.homedir());
+  const servicePath = getNemoclawOpenShellGatewayUserServicePath(
+    runtime.env.HOME || os.homedir(),
+    runtime.env,
+  );
   if (!runtime.existsSync(servicePath)) return true;
 
   let unit = "";
@@ -649,15 +652,27 @@ function removeNemoclawOpenShellGatewayUserService(runtime: UninstallRuntime): b
     runtime.warn("systemctl not found; removing NemoClaw gateway user service file only.");
   }
 
-  runtime.rmSync(servicePath, { force: true });
-  runtime.log(`Removed ${servicePath}`);
+  let removed = false;
+  try {
+    runtime.rmSync(servicePath, { force: true });
+    removed = true;
+  } catch (error) {
+    runtime.warn(
+      `Failed to remove ${servicePath}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    disabled = false;
+  }
+  if (removed) runtime.log(`Removed ${servicePath}`);
 
   if (runtime.commandExists("systemctl")) {
     const reload = runtime.run("systemctl", ["--user", "daemon-reload"], {
       env: runtime.env,
       stdio: "ignore",
     });
-    if (reload.status !== 0) runtime.warn("Failed to reload the user systemd manager.");
+    if (reload.status !== 0) {
+      runtime.warn("Failed to reload the user systemd manager.");
+      disabled = false;
+    }
   }
   return disabled;
 }
@@ -954,22 +969,22 @@ function executePlan(
     if (step.name === "Stopping services") {
       stopHelperServices(paths, runtime);
       removeGlob(paths.helperServiceGlob, runtime);
-      if (!options.keepOpenShell && !removeNemoclawOpenShellGatewayUserService(runtime)) ok = false;
-      stopMatchingPids(
-        `openshell.*forward.*${runtime.env.NEMOCLAW_DASHBOARD_PORT || "18789"}`,
-        runtime,
-        "local OpenShell forward processes",
-      );
-      stopStaleDashboardListeners({
-        run: runtime.run,
-        kill: runtime.kill,
-        env: runtime.env,
-        log: runtime.log,
-        warn: runtime.warn,
-        commandExists: runtime.commandExists,
-      });
-      stopOrphanedOpenShell(runtime);
       if (!options.keepOpenShell) {
+        if (!removeNemoclawOpenShellGatewayUserService(runtime)) ok = false;
+        stopMatchingPids(
+          `openshell.*forward.*${runtime.env.NEMOCLAW_DASHBOARD_PORT || "18789"}`,
+          runtime,
+          "local OpenShell forward processes",
+        );
+        stopStaleDashboardListeners({
+          run: runtime.run,
+          kill: runtime.kill,
+          env: runtime.env,
+          log: runtime.log,
+          warn: runtime.warn,
+          commandExists: runtime.commandExists,
+        });
+        stopOrphanedOpenShell(runtime);
         stopHostGatewayProcesses(
           {
             run: runtime.run,

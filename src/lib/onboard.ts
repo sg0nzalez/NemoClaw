@@ -1992,7 +1992,8 @@ async function startDockerDriverGateway({
       gatewayBin,
       gatewayEnv: driftGatewayEnv,
       gatewayName: GATEWAY_NAME,
-      isDockerDriverGatewayReady: () => isDockerDriverGatewayHttpReady(),
+      isDockerDriverGatewayReady: () =>
+        isDockerDriverGatewayHttpReady(undefined, undefined, driftGatewayEnv),
       registerDockerDriverGatewayEndpoint,
       runCaptureOpenshell,
       skipSandboxBridgeReachability,
@@ -2039,7 +2040,8 @@ async function startDockerDriverGateway({
       getDockerDriverGatewayRuntimeDrift,
       logDockerDriverGatewayRestart,
       registerDockerDriverGatewayEndpoint,
-      isDockerDriverGatewayHttpReady,
+      isDockerDriverGatewayHttpReady: () =>
+        isDockerDriverGatewayHttpReady(undefined, undefined, driftGatewayEnv),
       verifySandboxBridgeGatewayReachableOrExit: (fail, options) =>
         verifySandboxBridgeGatewayReachableOrExit(fail, {
           ...options,

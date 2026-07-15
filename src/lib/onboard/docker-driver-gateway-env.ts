@@ -18,6 +18,7 @@ import {
 } from "./docker-driver-gateway-config";
 import { buildDockerDriverGatewayLocalTlsEnv } from "./docker-driver-gateway-local-tls";
 import {
+  getOpenShellUserConfigHome,
   hasOpenShellGatewayUserService,
   installAndReportNemoclawOpenShellGatewayUserService,
   type PackageManagedDockerDriverGatewayOptions,
@@ -58,8 +59,10 @@ export type PackageManagedDockerDriverGatewayWithEnvOverrideOptions = Omit<
   PackageManagedDockerDriverGatewayOptions,
   "prepareOpenShellGatewayUserServiceEnv"
 > & {
+  env?: NodeJS.ProcessEnv;
   gatewayBin?: string | null;
   gatewayEnv: Record<string, string>;
+  home?: string;
 };
 
 export function getGatewayPortCheckOptions(): { host: string } {
@@ -260,9 +263,14 @@ function readTextFileIfPresent(filePath: string): string {
   }
 }
 
-function writeDockerGatewayDebEnvOverrideFile(getOverride: () => Record<string, string>): void {
+function writeDockerGatewayDebEnvOverrideFile(
+  getOverride: () => Record<string, string>,
+  opts: { env?: NodeJS.ProcessEnv; home?: string } = {},
+): void {
   const override = getOverride();
-  const envDir = path.join(os.homedir(), ".config", "openshell");
+  const env = opts.env ?? process.env;
+  const home = opts.home ?? opts.env?.HOME ?? os.homedir();
+  const envDir = path.join(getOpenShellUserConfigHome(home, env), "openshell");
   const envFile = path.join(envDir, "gateway.env");
   fs.mkdirSync(envDir, { recursive: true, mode: 0o700 });
   fs.chmodSync(envDir, 0o700);
@@ -279,7 +287,7 @@ export function writeDockerGatewayDebEnvOverride(
   opts: Parameters<typeof hasOpenShellGatewayUserService>[0] = {},
 ): boolean {
   if (!hasOpenShellGatewayUserService(opts)) return false;
-  writeDockerGatewayDebEnvOverrideFile(getOverride);
+  writeDockerGatewayDebEnvOverrideFile(getOverride, opts);
   return true;
 }
 
@@ -292,18 +300,26 @@ export function writeDockerGatewayDebEnvOverrideOrThrow(
   }
 }
 
-export function startPackageManagedDockerDriverGatewayWithEnvOverride({
-  gatewayBin,
-  gatewayEnv,
-  ...options
-}: PackageManagedDockerDriverGatewayWithEnvOverrideOptions): Promise<boolean> {
+export function startPackageManagedDockerDriverGatewayWithEnvOverride(
+  optionsWithEnv: PackageManagedDockerDriverGatewayWithEnvOverrideOptions,
+): Promise<boolean> {
+  const { env: _env, gatewayBin, gatewayEnv, home, ...options } = optionsWithEnv;
+  const env = optionsWithEnv.env ?? process.env;
   assertDockerDriverGatewayAuthConfigSafe(gatewayEnv);
+  const effectiveHome = home ?? optionsWithEnv.env?.HOME ?? os.homedir();
   if (gatewayBin !== undefined) {
-    installAndReportNemoclawOpenShellGatewayUserService({ gatewayBin });
+    installAndReportNemoclawOpenShellGatewayUserService({
+      env,
+      gatewayBin,
+      home: effectiveHome,
+    });
   }
   return startPackageManagedDockerDriverGateway({
     ...options,
+    hasOpenShellGatewayUserService:
+      options.hasOpenShellGatewayUserService ??
+      (() => hasOpenShellGatewayUserService({ env, home: effectiveHome })),
     prepareOpenShellGatewayUserServiceEnv: () =>
-      writeDockerGatewayDebEnvOverrideFile(() => gatewayEnv),
+      writeDockerGatewayDebEnvOverrideFile(() => gatewayEnv, { env, home: effectiveHome }),
   });
 }

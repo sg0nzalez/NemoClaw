@@ -6,9 +6,8 @@ import os from "node:os";
 import path from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
-
-import { startPackageManagedDockerDriverGatewayWithEnvOverride } from "./docker-driver-gateway-env";
 import { writeSafeGatewayAuthConfig } from "../../../test/support/docker-driver-gateway-env-test-support";
+import { startPackageManagedDockerDriverGatewayWithEnvOverride } from "./docker-driver-gateway-env";
 
 describe("package-managed Docker-driver gateway env service", () => {
   it("writes the service env only when package-managed startup prepares the service", async () => {
@@ -56,6 +55,54 @@ describe("package-managed Docker-driver gateway env service", () => {
       expect(fs.readFileSync(servicePath, "utf-8")).toContain(`ExecStart=${gatewayBin}`);
       expect(fs.readFileSync(envFile, "utf-8")).toContain("OPENSHELL_BIND_ADDRESS=127.0.0.1\n");
       expect(fs.readFileSync(envFile, "utf-8")).toContain("OPENSHELL_SERVER_PORT=18080\n");
+    } finally {
+      existsSpy.mockRestore();
+      homedirSpy.mockRestore();
+      fs.rmSync(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  it("uses one XDG config root for the service unit and gateway env", async () => {
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-gateway-env-"));
+    const configHome = path.join(tempHome, "xdg-config");
+    const gatewayBin = path.join(tempHome, ".local", "bin", "openshell-gateway");
+    const servicePath = path.join(configHome, "systemd", "user", "openshell-gateway.service");
+    const envFile = path.join(configHome, "openshell", "gateway.env");
+    const existsSpy = vi.spyOn(fs, "existsSync").mockReturnValue(false);
+    const homedirSpy = vi.spyOn(os, "homedir").mockReturnValue(tempHome);
+
+    try {
+      await expect(
+        startPackageManagedDockerDriverGatewayWithEnvOverride({
+          clearDockerDriverGatewayRuntimeFiles: vi.fn(),
+          env: { XDG_CONFIG_HOME: configHome },
+          exitOnFailure: false,
+          gatewayBin,
+          gatewayEnv: {
+            OPENSHELL_BIND_ADDRESS: "127.0.0.1",
+            OPENSHELL_GATEWAY_CONFIG: writeSafeGatewayAuthConfig(tempHome),
+            OPENSHELL_SERVER_PORT: "18080",
+          },
+          gatewayName: "nemoclaw",
+          hasOpenShellGatewayUserService: () => true,
+          isDockerDriverGatewayReady: async () => true,
+          registerDockerDriverGatewayEndpoint: () => true,
+          runCaptureOpenshell: (args) =>
+            args[0] === "status"
+              ? "Gateway: nemoclaw\nConnected"
+              : "Gateway: nemoclaw\nGateway endpoint: https://127.0.0.1:18080/",
+          skipSandboxBridgeReachability: false,
+          startOpenShellGatewayUserService: (opts) => {
+            opts?.prepareServiceEnv?.();
+            return { attempted: true, fallbackAllowed: false, started: true };
+          },
+          verifySandboxBridgeGatewayReachableOrExit: async () => undefined,
+        }),
+      ).resolves.toBe(true);
+
+      expect(fs.readFileSync(servicePath, "utf-8")).toContain(`ExecStart=${gatewayBin}`);
+      expect(fs.readFileSync(envFile, "utf-8")).toContain("OPENSHELL_SERVER_PORT=18080\n");
+      expect(fs.existsSync(path.join(tempHome, ".config", "openshell", "gateway.env"))).toBe(false);
     } finally {
       existsSpy.mockRestore();
       homedirSpy.mockRestore();
