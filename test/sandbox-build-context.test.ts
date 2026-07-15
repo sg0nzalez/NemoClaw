@@ -46,11 +46,16 @@ describe("sandbox build context staging", () => {
     for (const fileName of [
       "package.json",
       "package-lock.json",
+      "tsconfig.json",
       "install-reviewed-runtime.sh",
       "mcp-tool-discovery.ts",
       "tool-discovery-core.ts",
     ]) {
-      writeFixture(path.join("tools", "mcp-tool-discovery-runtime", fileName));
+      writeFixture(
+        path.join("tools", "mcp-tool-discovery-runtime", fileName),
+        "fixture\n",
+        fileName === "install-reviewed-runtime.sh" ? 0o755 : 0o644,
+      );
     }
     for (const fileName of [
       "package.json",
@@ -200,6 +205,7 @@ describe("sandbox build context staging", () => {
       "package-lock.json",
       "package.json",
       "tool-discovery-core.ts",
+      "tsconfig.json",
     ]);
     for (const fileName of fs.readdirSync(runtimeDir)) {
       expect(fs.readFileSync(path.join(runtimeDir, fileName), "utf8")).toBe(
@@ -208,7 +214,9 @@ describe("sandbox build context staging", () => {
           "utf8",
         ),
       );
-      expect((fs.statSync(path.join(runtimeDir, fileName)).mode & 0o777).toString(8)).toBe("644");
+      expect((fs.statSync(path.join(runtimeDir, fileName)).mode & 0o777).toString(8)).toBe(
+        fileName === "install-reviewed-runtime.sh" ? "755" : "644",
+      );
     }
   }
 

@@ -1,8 +1,15 @@
+#!/bin/sh
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-# shellcheck shell=sh
 
 set -eu
+
+script_dir=$(
+  CDPATH=''
+  cd -- "$(dirname -- "$0")"
+  pwd
+)
+cd "$script_dir"
 
 if [ -n "${NEMOCLAW_CORPORATE_CA_B64:-}" ]; then
   command -v base64 >/dev/null 2>&1 || {
@@ -35,6 +42,9 @@ if [ -n "${NEMOCLAW_CORPORATE_CA_B64:-}" ]; then
   export NODE_EXTRA_CA_CERTS="$ca_file"
 fi
 
-npm ci --ignore-scripts --omit=dev --no-audit --no-fund --no-progress
+npm ci --ignore-scripts --no-audit --no-fund --no-progress
+npm audit signatures
+npm run typecheck
+npm prune --ignore-scripts --omit=dev --no-audit --no-fund
 npm audit --omit=dev --audit-level=low
 npm audit signatures

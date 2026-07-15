@@ -240,6 +240,11 @@ export async function statusMcpBridge(
     }
     const unsafeCredentialMayBeAttached =
       !!credentialWarning && !!entry?.providerName && attached !== false;
+    const readiness = {
+      policyGatewayPresent: policyPresence,
+      providerAttached: attached,
+      providerCredentialReady,
+    };
     const credentialResolution =
       options.probeCredentialResolution && entry
         ? unsafeCredentialMayBeAttached
@@ -248,11 +253,7 @@ export async function statusMcpBridge(
               detail:
                 "probe skipped: the unsupported legacy credential may still be attached to fresh sandbox children",
             }
-          : probeCredentialResolution(sandboxName, entry, support.adapter, {
-              policyGatewayPresent: policyPresence,
-              providerAttached: attached,
-              providerCredentialReady,
-            })
+          : probeCredentialResolution(sandboxName, entry, support.adapter, readiness)
         : undefined;
     const resolutionWarning = credentialResolution
       ? credentialResolutionWarning(entry?.env[0], credentialResolution)
@@ -269,11 +270,7 @@ export async function statusMcpBridge(
               detail:
                 "tool discovery skipped: the unsupported legacy credential may still be attached to fresh sandbox children",
             }
-          : discoverMcpTools(sandboxName, entry, support.adapter, {
-              policyGatewayPresent: policyPresence,
-              providerAttached: attached,
-              providerCredentialReady,
-            })
+          : discoverMcpTools(sandboxName, entry, support.adapter, readiness)
         : undefined;
     return {
       server: name,

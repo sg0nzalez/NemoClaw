@@ -8,6 +8,7 @@ import {
   enumerateMcpToolNames,
   MCP_TOOL_DISCOVERY_LIMITS,
   MCP_TOOL_DISCOVERY_PROTOCOL,
+  normalizeMcpToolPage,
   safeToolDiscoveryErrorDetail,
   ToolDiscoveryRuntimeError,
 } from "../../../../tools/mcp-tool-discovery-runtime/tool-discovery-core.ts";
@@ -50,6 +51,10 @@ describe("shared MCP tool discovery runtime", () => {
         page += 1;
         return { tools: [{ name: `tool-${page}` }], nextCursor: "repeat" };
       }),
+    ).rejects.toMatchObject({ code: "invalid-response" });
+
+    await expect(
+      enumerateMcpToolNames(async () => normalizeMcpToolPage({ tools: [], nextCursor: "" })),
     ).rejects.toMatchObject({ code: "invalid-response" });
   });
 
@@ -113,6 +118,31 @@ describe("shared MCP tool discovery runtime", () => {
     await expect(oversizedFetch("https://example.test/mcp")).rejects.toMatchObject({
       code: "response-too-large",
     });
+  });
+
+  it("bounds both total-deadline and per-request aborts with a credential-safe timeout", async () => {
+    for (const abortSource of ["deadline", "request"] as const) {
+      const deadline = new AbortController();
+      const request = new AbortController();
+      const blockingFetch = vi.fn(
+        (_input: string | URL, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            const signal = init?.signal;
+            if (!signal) throw new Error("combined abort signal missing");
+            const rejectAbort = () =>
+              reject(new DOMException("Bearer untrusted-timeout-detail", "AbortError"));
+            if (signal.aborted) rejectAbort();
+            else signal.addEventListener("abort", rejectAbort, { once: true });
+          }),
+      );
+      const boundedFetch = createBoundedMcpFetch(blockingFetch, deadline.signal);
+      const pending = boundedFetch("https://example.test/mcp", { signal: request.signal });
+      (abortSource === "deadline" ? deadline : request).abort();
+      const error = await pending.catch((caught: unknown) => caught);
+      expect(error).toMatchObject({ code: "timeout" });
+      expect(safeToolDiscoveryErrorDetail(error)).toBe("tool discovery timed out after 10s");
+      expect(safeToolDiscoveryErrorDetail(error)).not.toContain("untrusted-timeout-detail");
+    }
   });
 
   it("maps failures to bounded details without echoing untrusted messages", () => {

@@ -48,10 +48,9 @@ ENV AWS_EC2_METADATA_DISABLED=true \
     NPM_CONFIG_FUND=false \
     NPM_CONFIG_UPDATE_NOTIFIER=false
 WORKDIR /opt/mcp-tool-discovery-runtime
-COPY tools/mcp-tool-discovery-runtime/package.json tools/mcp-tool-discovery-runtime/package-lock.json tools/mcp-tool-discovery-runtime/install-reviewed-runtime.sh ./
-RUN sh ./install-reviewed-runtime.sh \
+COPY tools/mcp-tool-discovery-runtime/package.json tools/mcp-tool-discovery-runtime/package-lock.json tools/mcp-tool-discovery-runtime/tsconfig.json tools/mcp-tool-discovery-runtime/install-reviewed-runtime.sh tools/mcp-tool-discovery-runtime/*.ts ./
+RUN ./install-reviewed-runtime.sh \
     && rm -f ./install-reviewed-runtime.sh
-COPY tools/mcp-tool-discovery-runtime/*.ts ./
 RUN chown -R root:root /opt/mcp-tool-discovery-runtime \
     && chmod -R a=rX /opt/mcp-tool-discovery-runtime
 
@@ -65,7 +64,7 @@ ENV AWS_EC2_METADATA_DISABLED=true
 COPY --from=mcp-tool-discovery-runtime /opt/mcp-tool-discovery-runtime/ /usr/local/lib/nemoclaw/mcp-tool-discovery-runtime/
 RUN discovery_contract="$(node --experimental-strip-types /usr/local/lib/nemoclaw/mcp-tool-discovery-runtime/mcp-tool-discovery.ts)" \
     && node -e 'const result = JSON.parse(process.argv[1]); if (result.protocol !== 1 || result.ok !== false || result.detail !== "tool discovery received invalid runtime arguments") process.exit(1);' "$discovery_contract" \
-    && discovery_unsafe="$(find /usr/local/lib/nemoclaw/mcp-tool-discovery-runtime \( ! -user root -o -perm /022 \) -print -quit)" \
+    && discovery_unsafe="$(find -L /usr/local/lib/nemoclaw/mcp-tool-discovery-runtime \( ! -user root -o -perm /022 \) -print -quit)" \
     && test -z "$discovery_unsafe"
 # Dependency review evidence for this runtime pin lives in
 # docs/security/openclaw-2026.6.10-dependency-review.md.

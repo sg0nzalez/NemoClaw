@@ -10,6 +10,7 @@ import {
   MCP_TOOL_DISCOVERY_LIMITS,
   MCP_TOOL_DISCOVERY_PROTOCOL,
   type McpToolDiscoveryResult,
+  normalizeMcpToolPage,
   safeToolDiscoveryErrorDetail,
 } from "./tool-discovery-core.ts";
 
@@ -87,7 +88,7 @@ async function main(): Promise<void> {
     writeResult(
       await enumerateMcpToolNames(async (cursor) => {
         const page = await client.listTools(cursor ? { cursor } : undefined, requestOptions);
-        return { tools: page.tools, ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}) };
+        return normalizeMcpToolPage(page);
       }),
     );
   } catch (error) {

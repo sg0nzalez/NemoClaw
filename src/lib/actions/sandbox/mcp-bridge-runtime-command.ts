@@ -18,6 +18,10 @@ export const MCP_RUNTIME_SANITIZED_ENV_VARS = [
   "NEMOCLAW_OPENCLAW_ALLOW_INSECURE_PRIVATE_WS",
 ] as const;
 
+function unsupportedAdapter(adapter: never): never {
+  throw new Error(`Unsupported MCP adapter: ${String(adapter)}`);
+}
+
 /**
  * OpenShell binds generated MCP policies to the configured adapter executable
  * and its process ancestry. Keep that runtime as the parent of a shared child
@@ -44,5 +48,7 @@ export function wrapMcpRuntimeCommand(
         "import subprocess, sys; raise SystemExit(subprocess.run(sys.argv[1:], check=False).returncode)";
       return `/opt/venv/bin/python3 -c ${shellQuote(runner)} ${quotedCommand}`;
     }
+    default:
+      return unsupportedAdapter(adapter);
   }
 }

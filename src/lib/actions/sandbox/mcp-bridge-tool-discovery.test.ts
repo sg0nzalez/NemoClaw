@@ -27,7 +27,7 @@ function framedResult(value: unknown) {
   };
 }
 
-describe("MCP tool discovery host boundary", () => {
+describe("MCP tool discovery host boundary (#6901)", () => {
   it("launches the same shared runtime below every adapter policy ancestor", () => {
     const expectedAncestor: Record<AgentMcpAdapter, string> = {
       mcporter: "nemoclaw-start node -e",
@@ -45,6 +45,16 @@ describe("MCP tool discovery host boundary", () => {
       expect(built?.command).not.toContain("tools/call");
       expect(built?.command).toContain("rebuild the sandbox");
     }
+  });
+
+  it("refuses command construction without a credential binding or canonical URL", () => {
+    expect(buildMcpToolDiscoveryCommand({ ...entry, env: [] }, "mcporter")).toBeNull();
+    expect(
+      buildMcpToolDiscoveryCommand(
+        { ...entry, url: "https://api.githubcopilot.com:443/mcp/" },
+        "mcporter",
+      ),
+    ).toBeNull();
   });
 
   it("accepts one framed, deterministic, names-only runtime result", () => {

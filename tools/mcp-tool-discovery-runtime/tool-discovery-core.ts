@@ -28,6 +28,13 @@ export interface McpToolPage {
 
 export type McpToolPageLoader = (cursor?: string) => Promise<McpToolPage>;
 
+export function normalizeMcpToolPage(page: McpToolPage): McpToolPage {
+  return {
+    tools: page.tools,
+    ...(page.nextCursor !== undefined ? { nextCursor: page.nextCursor } : {}),
+  };
+}
+
 type ToolDiscoveryErrorCode = "invalid-response" | "redirect" | "response-too-large" | "timeout";
 
 export class ToolDiscoveryRuntimeError extends Error {

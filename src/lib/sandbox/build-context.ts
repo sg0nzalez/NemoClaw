@@ -59,6 +59,7 @@ function stageMcpToolDiscoveryRuntime(rootDir: string, buildCtx: string): void {
   for (const fileName of [
     "package.json",
     "package-lock.json",
+    "tsconfig.json",
     "install-reviewed-runtime.sh",
     "mcp-tool-discovery.ts",
     "tool-discovery-core.ts",
