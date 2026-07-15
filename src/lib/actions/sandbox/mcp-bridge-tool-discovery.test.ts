@@ -106,6 +106,26 @@ describe("MCP tool discovery host boundary (#6901)", () => {
     });
   });
 
+  it("retains a strict host cap above the maximum compact runtime inventory", () => {
+    expect(
+      classifyMcpToolDiscoveryResult(
+        {
+          status: 0,
+          stdout: `${marker}\n${"x".repeat(256 * 1_024 + 1)}`,
+          stderr: "",
+        },
+        entry,
+        marker,
+      ),
+    ).toEqual({
+      ok: false,
+      count: 0,
+      tools: [],
+      truncated: false,
+      detail: "tool discovery returned an oversized result",
+    });
+  });
+
   it("fails closed on malformed, duplicate, unsorted, or unframed results", () => {
     for (const result of [
       framedResult({ protocol: 1, ok: true, count: 1, tools: ["bad\nname"], truncated: false }),
