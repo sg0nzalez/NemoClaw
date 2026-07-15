@@ -48,7 +48,7 @@ describe("sandbox build context staging", () => {
       "package-lock.json",
       "tsconfig.json",
       "install-reviewed-runtime.sh",
-      "build-runtime.mjs",
+      "build-runtime.ts",
       "mcp-tool-discovery.ts",
       "tool-discovery-core.ts",
     ]) {
@@ -201,7 +201,7 @@ describe("sandbox build context staging", () => {
   function expectStagedMcpToolDiscoveryRuntime(buildCtx: string, sourceRoot: string) {
     const runtimeDir = path.join(buildCtx, "tools", "mcp-tool-discovery-runtime");
     expect(fs.readdirSync(runtimeDir).sort()).toEqual([
-      "build-runtime.mjs",
+      "build-runtime.ts",
       "install-reviewed-runtime.sh",
       "mcp-tool-discovery.ts",
       "package-lock.json",

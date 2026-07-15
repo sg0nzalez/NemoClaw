@@ -49,7 +49,7 @@ ENV AWS_EC2_METADATA_DISABLED=true \
     NPM_CONFIG_FUND=false \
     NPM_CONFIG_UPDATE_NOTIFIER=false
 WORKDIR /opt/mcp-tool-discovery-runtime
-COPY tools/mcp-tool-discovery-runtime/package.json tools/mcp-tool-discovery-runtime/package-lock.json tools/mcp-tool-discovery-runtime/tsconfig.json tools/mcp-tool-discovery-runtime/install-reviewed-runtime.sh tools/mcp-tool-discovery-runtime/build-runtime.mjs tools/mcp-tool-discovery-runtime/*.ts ./
+COPY tools/mcp-tool-discovery-runtime/package.json tools/mcp-tool-discovery-runtime/package-lock.json tools/mcp-tool-discovery-runtime/tsconfig.json tools/mcp-tool-discovery-runtime/install-reviewed-runtime.sh tools/mcp-tool-discovery-runtime/*.ts ./
 RUN ./install-reviewed-runtime.sh \
     && rm -f ./install-reviewed-runtime.sh
 

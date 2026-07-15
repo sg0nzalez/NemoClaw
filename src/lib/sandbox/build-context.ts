@@ -61,7 +61,7 @@ function stageMcpToolDiscoveryRuntime(rootDir: string, buildCtx: string): void {
     "package-lock.json",
     "tsconfig.json",
     "install-reviewed-runtime.sh",
-    "build-runtime.mjs",
+    "build-runtime.ts",
     "mcp-tool-discovery.ts",
     "tool-discovery-core.ts",
   ]) {

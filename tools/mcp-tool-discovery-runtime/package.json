@@ -18,7 +18,7 @@
     "node": ">=22.19.0"
   },
   "scripts": {
-    "bundle": "node build-runtime.mjs",
+    "bundle": "node --experimental-strip-types build-runtime.ts",
     "typecheck": "tsc -p tsconfig.json"
   }
 }

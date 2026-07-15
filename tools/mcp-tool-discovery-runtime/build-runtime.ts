@@ -6,11 +6,18 @@ import path from "node:path";
 
 import { build } from "esbuild";
 
+interface PackageLicense {
+  name: string;
+  version: string;
+  declaredLicense: string;
+  text: string;
+}
+
 const outputDir = path.resolve("dist");
 const bundlePath = path.join(outputDir, "mcp-tool-discovery.mjs");
 const licenseFileNames = ["LICENSE", "LICENSE.md", "LICENSE.txt", "license", "license.md"];
 
-function packageNameFromInput(inputPath) {
+function packageNameFromInput(inputPath: string): string | null {
   const normalized = inputPath.replaceAll("\\", "/");
   const marker = "node_modules/";
   const markerIndex = normalized.lastIndexOf(marker);
@@ -20,9 +27,15 @@ function packageNameFromInput(inputPath) {
   return segments[0] || null;
 }
 
-function readPackageLicense(packageName) {
+function readPackageLicense(packageName: string): PackageLicense {
   const packageDir = path.resolve("node_modules", packageName);
-  const manifest = JSON.parse(fs.readFileSync(path.join(packageDir, "package.json"), "utf8"));
+  const manifest = JSON.parse(fs.readFileSync(path.join(packageDir, "package.json"), "utf8")) as {
+    version?: unknown;
+    license?: unknown;
+  };
+  if (typeof manifest.version !== "string" || typeof manifest.license !== "string") {
+    throw new Error(`bundled package ${packageName} has invalid license metadata`);
+  }
   const licenseFileName = licenseFileNames.find((candidate) =>
     fs.existsSync(path.join(packageDir, candidate)),
   );
@@ -47,7 +60,7 @@ const result = await build({
 });
 
 const bundledPackages = [...new Set(Object.keys(result.metafile.inputs).map(packageNameFromInput))]
-  .filter((name) => name !== null)
+  .filter((name): name is string => name !== null)
   .sort();
 if (!bundledPackages.includes("@modelcontextprotocol/sdk")) {
   throw new Error("the MCP SDK was not present in the bundled input graph");
