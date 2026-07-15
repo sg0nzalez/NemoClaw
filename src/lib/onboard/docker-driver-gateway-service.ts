@@ -16,9 +16,9 @@ import {
 import { isDockerDriverGatewayHttpReady } from "./gateway-http-readiness";
 
 export const OPENSHELL_GATEWAY_USER_SERVICE = "openshell-gateway";
-export const NEMOCLAW_OPENSHELL_GATEWAY_USER_SERVICE = OPENSHELL_GATEWAY_USER_SERVICE;
 export const NEMOCLAW_OPENSHELL_GATEWAY_USER_SERVICE_MARKER =
   "NEMOCLAW_MANAGED_OPENSHELL_GATEWAY=1";
+export const NEMOCLAW_OPENSHELL_GATEWAY_USER_SERVICE_MARKER_LINE = `# ${NEMOCLAW_OPENSHELL_GATEWAY_USER_SERVICE_MARKER}`;
 
 export interface OpenShellGatewayUserServiceOptions {
   commandExists?: (command: string) => boolean;
@@ -145,25 +145,22 @@ function readTextFileIfPresent(
   const readFileSync = opts.readFileSync ?? fs.readFileSync;
   try {
     return readFileSync(filePath, "utf-8");
-  } catch (error) {
-    if (
-      error instanceof Error &&
-      "code" in error &&
-      (error as NodeJS.ErrnoException).code === "ENOENT"
-    ) {
-      return "";
-    }
+  } catch {
     return "";
   }
+}
+
+function hasNemoclawOpenShellGatewayUserServiceMarker(unit: string): boolean {
+  return unit
+    .split(/\r?\n/)
+    .some((line) => line.trimEnd() === NEMOCLAW_OPENSHELL_GATEWAY_USER_SERVICE_MARKER_LINE);
 }
 
 function isNemoclawManagedOpenShellGatewayUserServiceUnit(
   filePath: string,
   opts: Pick<OpenShellGatewayUserServiceOptions, "readFileSync"> = {},
 ): boolean {
-  return readTextFileIfPresent(filePath, opts).includes(
-    NEMOCLAW_OPENSHELL_GATEWAY_USER_SERVICE_MARKER,
-  );
+  return hasNemoclawOpenShellGatewayUserServiceMarker(readTextFileIfPresent(filePath, opts));
 }
 
 function extractUnitFileExecStartPath(unit: string): string | null {
@@ -184,7 +181,7 @@ function readNemoclawManagedOpenShellGatewayUserServiceExecStart(
   opts: Pick<OpenShellGatewayUserServiceOptions, "readFileSync"> = {},
 ): string | null {
   const unit = readTextFileIfPresent(filePath, opts);
-  if (!unit.includes(NEMOCLAW_OPENSHELL_GATEWAY_USER_SERVICE_MARKER)) return null;
+  if (!hasNemoclawOpenShellGatewayUserServiceMarker(unit)) return null;
   return extractUnitFileExecStartPath(unit);
 }
 
@@ -375,7 +372,7 @@ export function buildNemoclawOpenShellGatewayUserService(gatewayBin: string): st
   assertSafeSystemdExecPath(gatewayBin);
   return [
     "# NemoClaw-managed OpenShell gateway user service",
-    `# ${NEMOCLAW_OPENSHELL_GATEWAY_USER_SERVICE_MARKER}`,
+    NEMOCLAW_OPENSHELL_GATEWAY_USER_SERVICE_MARKER_LINE,
     "[Unit]",
     "Description=OpenShell Gateway",
     "Documentation=https://github.com/NVIDIA/OpenShell",

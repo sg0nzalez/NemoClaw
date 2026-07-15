@@ -297,10 +297,10 @@ export function startPackageManagedDockerDriverGatewayWithEnvOverride({
   gatewayEnv,
   ...options
 }: PackageManagedDockerDriverGatewayWithEnvOverrideOptions): Promise<boolean> {
+  assertDockerDriverGatewayAuthConfigSafe(gatewayEnv);
   if (gatewayBin !== undefined) {
     installAndReportNemoclawOpenShellGatewayUserService({ gatewayBin });
   }
-  assertDockerDriverGatewayAuthConfigSafe(gatewayEnv);
   return startPackageManagedDockerDriverGateway({
     ...options,
     prepareOpenShellGatewayUserServiceEnv: () =>

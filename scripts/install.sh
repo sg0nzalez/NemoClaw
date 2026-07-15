@@ -1120,6 +1120,7 @@ prefer_user_local_openshell() {
 }
 
 NEMOCLAW_GATEWAY_SERVICE_MARKER="NEMOCLAW_MANAGED_OPENSHELL_GATEWAY=1"
+NEMOCLAW_GATEWAY_SERVICE_MARKER_LINE="# ${NEMOCLAW_GATEWAY_SERVICE_MARKER}"
 
 upstream_openshell_gateway_user_service_installed() {
   [[ "$(uname -s)" == "Linux" ]] || return 1
@@ -1140,31 +1141,42 @@ resolve_openshell_gateway_bin_for_service() {
   printf "%s\n" "$gateway_bin"
 }
 
+is_nemoclaw_openshell_gateway_user_service() {
+  local service_path="${1:-}"
+  [[ -f "$service_path" ]] || return 1
+  grep -Fxq "$NEMOCLAW_GATEWAY_SERVICE_MARKER_LINE" "$service_path"
+}
+
 install_nemoclaw_openshell_gateway_user_service() {
   [[ "$(uname -s)" == "Linux" ]] || return 0
-
-  local gateway_bin
-  gateway_bin="$(resolve_openshell_gateway_bin_for_service)" || return 0
 
   local service_dir="${HOME}/.config/systemd/user"
   local service_path="${service_dir}/openshell-gateway.service"
 
   if upstream_openshell_gateway_user_service_installed; then
-    if [[ -f "$service_path" ]] && grep -q "$NEMOCLAW_GATEWAY_SERVICE_MARKER" "$service_path"; then
+    if is_nemoclaw_openshell_gateway_user_service "$service_path"; then
       rm -f "$service_path"
       info "Removed NemoClaw OpenShell gateway user service override: $service_path"
     fi
     return 0
   fi
 
+  local gateway_bin
+  gateway_bin="$(resolve_openshell_gateway_bin_for_service)" || return 0
+
   case "$gateway_bin" in
     *[[:space:]]*)
       warn "Skipping OpenShell gateway user service because the binary path contains whitespace: $gateway_bin"
       return 0
       ;;
+    /*) ;;
+    *)
+      warn "Skipping OpenShell gateway user service because the binary path is not absolute: $gateway_bin"
+      return 0
+      ;;
   esac
 
-  if [[ -f "$service_path" ]] && ! grep -q "$NEMOCLAW_GATEWAY_SERVICE_MARKER" "$service_path"; then
+  if [[ -f "$service_path" ]] && ! is_nemoclaw_openshell_gateway_user_service "$service_path"; then
     warn "Leaving non-NemoClaw OpenShell gateway user service in place: $service_path"
     return 0
   fi
@@ -1174,7 +1186,7 @@ install_nemoclaw_openshell_gateway_user_service() {
       && chmod 700 "$service_dir" \
       && cat >"$service_path" <<EOF
 # NemoClaw-managed OpenShell gateway user service
-# $NEMOCLAW_GATEWAY_SERVICE_MARKER
+$NEMOCLAW_GATEWAY_SERVICE_MARKER_LINE
 [Unit]
 Description=OpenShell Gateway
 Documentation=https://github.com/NVIDIA/OpenShell
