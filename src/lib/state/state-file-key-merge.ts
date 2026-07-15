@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { StateFileKeyAllowlistRestoreOwnership, StateFileUserKeyType } from "../agent/defs.js";
-import { shellQuote } from "../runner.js";
 
 export { KEY_ALLOWLIST_MERGE_PYTHON } from "./key-allowlist-merge/python-script.js";
 
@@ -43,30 +42,4 @@ export function stateFileKeyMergeSpec(
       value: header.value,
     })),
   };
-}
-
-function assertSafeStateFilePath(path: string): void {
-  if (path.startsWith("/") || path.split("/").some((segment) => segment === "..")) {
-    throw new Error(`State file path '${path}' must be a relative path without '..' segments`);
-  }
-}
-
-export function buildKeyAllowlistMergeRestoreCommand(
-  dir: string,
-  spec: { path: string },
-  ownership: StateFileKeyAllowlistRestoreOwnership,
-): string {
-  assertSafeStateFilePath(spec.path);
-  const normalizedDir = dir.replace(/\/+$/, "");
-  const destination = shellQuote(`${normalizedDir}/${spec.path}`);
-  const baseDir = shellQuote(normalizedDir);
-  const relativePath = shellQuote(spec.path);
-  const mergeSpec = shellQuote(JSON.stringify(stateFileKeyMergeSpec(ownership)));
-  return [
-    `dst=${destination}`,
-    'parent="$(dirname "$dst")"',
-    '[ -d "$parent" ] && [ ! -L "$parent" ] || { echo "unsafe config parent" >&2; exit 10; }',
-    '[ -f "$dst" ] && [ ! -L "$dst" ] || { echo "fresh config is missing or unsafe" >&2; exit 11; }',
-    `/opt/venv/bin/python3 -I -c ${shellQuote(KEY_ALLOWLIST_MERGE_PYTHON)} ${baseDir} ${relativePath} ${mergeSpec}`,
-  ].join("; ");
 }

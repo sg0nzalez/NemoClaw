@@ -50,7 +50,9 @@ export async function sandboxExec(
 /**
  * Check whether a skill directory already exists at the upload path or, for
  * OpenClaw, the mirror path. Directory probes let removal clean partial
- * uploads whose manifest write failed.
+ * uploads whose manifest write failed. A recognized sentinel from a
+ * successful command maps to true or false. Transport errors, nonzero status,
+ * and malformed output map to null so callers can fail before mutation.
  */
 export async function checkExisting(
   ctx: SandboxControlContext,

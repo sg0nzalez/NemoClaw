@@ -3,7 +3,6 @@
 
 import path from "node:path";
 
-import { shellQuote } from "../core/shell-quote.js";
 import { listOpenClawPluginExtensionIds } from "../messaging/channels/metadata.js";
 
 // Exact symlinks baked into OpenClaw messaging images at build time. Source
@@ -85,73 +84,4 @@ export function shouldPreserveOpenClawManagedExtensions(
     localDirs.includes("extensions") &&
     (manifest.agentType === "openclaw" || dir.replace(/\/+$/, "") === "/sandbox/.openclaw")
   );
-}
-
-export function buildRestoreTarArgs(
-  backupPath: string,
-  localDirs: readonly string[],
-  managedExtensionDirs: readonly string[],
-): string[] {
-  const args = ["-cf", "-", "-C", backupPath];
-  for (const extensionName of managedExtensionDirs) {
-    args.push("--exclude", `extensions/${extensionName}`);
-  }
-  args.push("--", ...localDirs);
-  return args;
-}
-
-function buildOpenClawExtensionsCleanupCommand(
-  dir: string,
-  managedExtensionDirs: readonly string[],
-  requiredExtensionDirs: ReadonlySet<string>,
-): string {
-  const extensionsDir = `${dir}/extensions`;
-  const quotedExtensionsDir = shellQuote(extensionsDir);
-  const validationCommands = managedExtensionDirs
-    .map((extensionName) => {
-      const managedPath = `${extensionsDir}/${extensionName}`;
-      if (requiredExtensionDirs.has(extensionName)) {
-        return (
-          `p=${shellQuote(managedPath)}; ` +
-          'if [ ! -d "$p" ] || [ -L "$p" ]; then ' +
-          'echo "refusing missing or unsafe image-managed extension: $p" >&2; exit 20; fi'
-        );
-      }
-      return (
-        `p=${shellQuote(managedPath)}; ` +
-        'if { [ -e "$p" ] || [ -L "$p" ]; } && { [ ! -d "$p" ] || [ -L "$p" ]; }; then ' +
-        'echo "refusing to preserve unsafe managed extension: $p" >&2; exit 20; fi'
-      );
-    })
-    .join("; ");
-  const validateManagedPaths = `{ ${validationCommands}; }`;
-  const preservedNames = managedExtensionDirs
-    .map((extensionName) => `! -name ${shellQuote(extensionName)}`)
-    .join(" ");
-
-  return [
-    `mkdir -p -- ${quotedExtensionsDir}`,
-    validateManagedPaths,
-    `find ${quotedExtensionsDir} -mindepth 1 -maxdepth 1 ${preservedNames} -exec rm -rf -- {} +`,
-  ].join(" && ");
-}
-
-export function buildRestoreCleanupCommand(
-  dir: string,
-  localDirs: readonly string[],
-  managedExtensionDirs: readonly string[],
-  requiredExtensionDirs: ReadonlySet<string>,
-): string {
-  const preserveManagedExtensions = managedExtensionDirs.length > 0;
-  const commands: string[] = [];
-  for (const dirName of localDirs) {
-    if (preserveManagedExtensions && dirName === "extensions") continue;
-    commands.push(`rm -rf -- ${shellQuote(`${dir}/${dirName}`)}`);
-  }
-  if (preserveManagedExtensions) {
-    commands.push(
-      buildOpenClawExtensionsCleanupCommand(dir, managedExtensionDirs, requiredExtensionDirs),
-    );
-  }
-  return commands.length > 0 ? commands.join(" && ") : ":";
 }

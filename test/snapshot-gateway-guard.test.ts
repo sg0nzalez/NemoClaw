@@ -121,6 +121,7 @@ function makeHealthyVmGatewayEnv(prefix: string): Record<string, string> {
   // VM-driver snapshots should trust gateway metadata, not the legacy cluster
   // container probe.
   writeExecutable(path.join(localBin, "openshell"), [
+    'if [ "$1 $2 $3 $4" = "--gateway nemoclaw sandbox exec" ]; then shift 2; fi',
     'case "$1 $2" in',
     '  "gateway info") printf "Gateway Info\\n\\nGateway: nemoclaw\\nGateway endpoint: https://127.0.0.1:8080/\\n"; exit 0 ;;',
     '  "sandbox list") printf "NAME STATUS\\nalpha Ready\\n"; exit 0 ;;',
@@ -170,13 +171,14 @@ function makeVmRestoreToEnv(
 
   const cloneReadyMarker = path.join(home, "clone-1-ready");
   writeExecutable(path.join(localBin, "openshell"), [
+    'if [ "$1 $2 $3 $4" = "--gateway nemoclaw sandbox exec" ]; then shift 2; fi',
     'case "$1 $2" in',
     '  "gateway info") printf "Gateway Info\\n\\nGateway: nemoclaw\\nGateway endpoint: https://127.0.0.1:8080/\\n"; exit 0 ;;',
     '  "sandbox get") printf "{\\"name\\":\\"%s\\"}\\n" "$3"; exit 0 ;;',
     `  "sandbox list") if [ -f ${JSON.stringify(cloneReadyMarker)} ]; then printf "NAME STATUS\\nalpha Ready\\nclone-1 Ready\\n"; else printf "NAME STATUS\\nalpha Ready\\n"; fi; exit 0 ;;`,
     // Restore writes config bytes on stdin. Consume them before exiting so the
     // fake CLI cannot race its caller into a Linux-only EPIPE.
-    '  "sandbox exec") case "$*" in *NEMOCLAW_DCODE_PROBE*) printf "NEMOCLAW_DCODE_PROBE=no-runtime\\n" ;; *installed_plugin_index*) printf "{\\"version\\":1,\\"installRecords\\":{},\\"loadPaths\\":[]}" ;; *openclaw.json*) printf "{\\"gateway\\":{\\"auth\\":{\\"token\\":\\"fresh\\"}}}" ;; esac; cat >/dev/null; exit 0 ;;',
+    '  "sandbox exec") case "$*" in *NEMOCLAW_DCODE_PROBE*) printf "NEMOCLAW_DCODE_PROBE=no-runtime\\n" ;; *installed_plugin_index*) printf "{\\"version\\":1,\\"installRecords\\":{},\\"loadPaths\\":[]}" ;; *"-- python3 -I - /tmp/nemoclaw-state-restore-"*"/sandbox/.openclaw openclaw.json copy"*) printf "STATE_FILE_OK\\n" ;; *openclaw.json*) printf "{\\"gateway\\":{\\"auth\\":{\\"token\\":\\"fresh\\"}}}" ;; esac; cat >/dev/null; exit 0 ;;',
     `  "sandbox create") touch ${JSON.stringify(cloneReadyMarker)}; printf "created clone-1\\n"; exit 0 ;;`,
     "esac",
     'if [ "$1" = "status" ]; then exit 0; fi',

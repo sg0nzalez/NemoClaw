@@ -7,6 +7,7 @@ import { ROOT } from "../../runner";
 import {
   captureOpenshellCommand,
   captureOpenshellCommandAsync,
+  captureOpenshellCommandBinary,
   getInstalledOpenshellVersion,
   runOpenshellCommand,
 } from "./client";
@@ -74,6 +75,18 @@ export function captureOpenshell(args: CommandArgs, opts: RunnerOptions = {}) {
     maxBuffer: opts.maxBuffer,
     errorLine: console.error,
     exit: (code: number) => process.exit(code),
+  });
+}
+
+/** Run an OpenShell command and preserve output as raw bytes. */
+export function captureOpenshellBinary(args: CommandArgs, opts: RunnerOptions = {}) {
+  return captureOpenshellCommandBinary(getOpenshellBinary(), args, {
+    cwd: ROOT,
+    env: opts.env,
+    replaceEnv: opts.replaceEnv,
+    input: opts.input,
+    timeout: opts.timeout,
+    maxBuffer: opts.maxBuffer,
   });
 }
 
