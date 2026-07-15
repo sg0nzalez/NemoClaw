@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Freezes the direct host-to-sandbox transport surface while NemoClaw moves to
- * OpenShell's gRPC API. Every reviewed site must be removed or re-reviewed
- * explicitly; new SSH, SSHFS, or Docker-exec bypasses fail repository checks.
+ * Freezes the statically recognizable direct host-to-sandbox transport surface
+ * and the reviewed gRPC-to-CLI read-only fallback importers while NemoClaw
+ * moves to OpenShell's gRPC API. Literal calls, same-file immutable aliases,
+ * and fallback importers must be removed or re-reviewed explicitly. This check
+ * is a review tripwire, not a general-purpose data-flow analysis.
  */
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -15,6 +17,7 @@ import ts from "typescript";
 export type LegacySandboxTransportKind =
   | "docker-exec-command"
   | "docker-exec-builder"
+  | "grpc-cli-read-only-fallback"
   | "openshell-ssh-config"
   | "privileged-sandbox-exec"
   | "ssh-command"
@@ -32,19 +35,31 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..
 type ReviewedSiteTuple = readonly [string, LegacySandboxTransportKind, number];
 
 const REVIEWED_SITE_TUPLES = [
+  ["src/lib/actions/sandbox/host-aliases.ts", "docker-exec-command", 1],
+  ["src/lib/actions/sandbox/sessions/passthrough.ts", "grpc-cli-read-only-fallback", 1],
   ["src/lib/actions/sandbox/process-recovery.ts", "privileged-sandbox-exec", 2],
+  ["src/lib/diagnostics/debug.ts", "grpc-cli-read-only-fallback", 1],
+  ["src/lib/resources-cmd.ts", "docker-exec-command", 1],
   ["src/lib/sandbox/config.ts", "privileged-sandbox-exec", 2],
+  ["src/lib/sandbox/version.ts", "grpc-cli-read-only-fallback", 1],
+  ["src/lib/share-command-deps.ts", "grpc-cli-read-only-fallback", 1],
   ["src/lib/share-command-deps.ts", "openshell-ssh-config", 1],
   ["src/lib/share-command.ts", "sshfs-command", 1],
   ["src/lib/shields/index.ts", "privileged-sandbox-exec", 4],
   ["src/lib/shields/mutable-config-repair.ts", "privileged-sandbox-exec", 2],
+  ["src/lib/state/openclaw-plugin-restore.ts", "grpc-cli-read-only-fallback", 1],
+  ["src/lib/state/sandbox.ts", "grpc-cli-read-only-fallback", 1],
+  ["src/lib/state/user-managed-files-probe.ts", "grpc-cli-read-only-fallback", 1],
 ] as const satisfies readonly ReviewedSiteTuple[];
 
 export const REVIEWED_LEGACY_SANDBOX_TRANSPORT_SITES: readonly LegacySandboxTransportSite[] =
   REVIEWED_SITE_TUPLES.map(([relativePath, kind, calls]) => ({ relativePath, kind, calls }));
 
 const HELPER_KINDS = new Map<string, LegacySandboxTransportKind>([
+  ["captureSandboxSshConfig", "openshell-ssh-config"],
+  ["captureSandboxSshConfigCommand", "openshell-ssh-config"],
   ["createTempSshConfig", "ssh-temp-config"],
+  ["dockerExecArgv", "docker-exec-builder"],
   ["privilegedSandboxExecArgv", "privileged-sandbox-exec"],
 ]);
 
@@ -96,18 +111,62 @@ function expressionName(expression: ts.Expression): string | null {
   return null;
 }
 
+type ConstBindings = ReadonlyMap<string, ts.Expression | null>;
+
+function collectConstBindings(sourceFile: ts.SourceFile): ConstBindings {
+  const bindings = new Map<string, ts.Expression | null>();
+
+  function visit(node: ts.Node): void {
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.initializer &&
+      ts.isVariableDeclarationList(node.parent) &&
+      (node.parent.flags & ts.NodeFlags.Const) !== 0
+    ) {
+      const name = node.name.text;
+      bindings.set(name, bindings.has(name) ? null : node.initializer);
+    }
+    ts.forEachChild(node, visit);
+  }
+
+  visit(sourceFile);
+  return bindings;
+}
+
+function resolveAlias(
+  expression: ts.Expression,
+  bindings: ConstBindings,
+  seen = new Set<string>(),
+): ts.Expression {
+  if (!ts.isIdentifier(expression) || seen.has(expression.text)) return expression;
+  const binding = bindings.get(expression.text);
+  if (!binding) return expression;
+  seen.add(expression.text);
+  return resolveAlias(binding, bindings, seen);
+}
+
+function resolvedExpressionName(expression: ts.Expression, bindings: ConstBindings): string | null {
+  return expressionName(resolveAlias(expression, bindings));
+}
+
 function literalText(node: ts.Node | undefined): string | null {
   if (!node) return null;
   if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
   return null;
 }
 
-function commandFromArgument(argument: ts.Expression | undefined): string | null {
+function commandFromArgument(
+  argument: ts.Expression | undefined,
+  bindings: ConstBindings,
+): string | null {
   if (!argument) return null;
-  const direct = literalText(argument);
+  const resolved = resolveAlias(argument, bindings);
+  const direct = literalText(resolved);
   if (direct) return direct;
-  if (!ts.isArrayLiteralExpression(argument)) return null;
-  return literalText(argument.elements[0]);
+  if (!ts.isArrayLiteralExpression(resolved)) return null;
+  const first = resolved.elements[0];
+  return first && ts.isExpression(first) ? literalText(resolveAlias(first, bindings)) : null;
 }
 
 function increment(
@@ -115,6 +174,14 @@ function increment(
   kind: LegacySandboxTransportKind,
 ) {
   counts.set(kind, (counts.get(kind) ?? 0) + 1);
+}
+
+function isSandboxControlRoutingModule(node: ts.Node | undefined): boolean {
+  return (
+    node !== undefined &&
+    ts.isStringLiteralLike(node) &&
+    /(?:^|\/)sandbox-control-routing(?:\.js)?$/u.test(node.text)
+  );
 }
 
 function scanSource(
@@ -129,31 +196,75 @@ function scanSource(
     ts.ScriptKind.TS,
   );
   const counts = new Map<LegacySandboxTransportKind, number>();
+  const bindings = collectConstBindings(sourceFile);
 
   function visit(node: ts.Node): void {
+    if (
+      ts.isImportDeclaration(node) &&
+      isSandboxControlRoutingModule(node.moduleSpecifier) &&
+      node.importClause &&
+      !node.importClause.isTypeOnly &&
+      ((node.importClause.namedBindings && ts.isNamespaceImport(node.importClause.namedBindings)) ||
+        (node.importClause.namedBindings &&
+          ts.isNamedImports(node.importClause.namedBindings) &&
+          node.importClause.namedBindings.elements.some(
+            (specifier) =>
+              !specifier.isTypeOnly &&
+              (specifier.propertyName?.text ?? specifier.name.text) ===
+                "execSandboxReadOnlyWithGrpcFallback",
+          )))
+    ) {
+      increment(counts, "grpc-cli-read-only-fallback");
+    }
+
+    if (
+      ts.isExportDeclaration(node) &&
+      !node.isTypeOnly &&
+      node.moduleSpecifier &&
+      isSandboxControlRoutingModule(node.moduleSpecifier) &&
+      node.exportClause &&
+      ts.isNamedExports(node.exportClause) &&
+      node.exportClause.elements.some(
+        (specifier) =>
+          !specifier.isTypeOnly &&
+          (specifier.propertyName?.text ?? specifier.name.text) ===
+            "execSandboxReadOnlyWithGrpcFallback",
+      )
+    ) {
+      increment(counts, "grpc-cli-read-only-fallback");
+    }
+
     if (ts.isArrayLiteralExpression(node)) {
       const first = literalText(node.elements[0]);
       const second = literalText(node.elements[1]);
       if (first === "docker" && second === "exec") {
         increment(counts, "docker-exec-command");
       }
-      if (first === "sandbox" && second === "ssh-config") {
+      const openshellCommandIndex =
+        first === "--gateway" ? 2 : first?.startsWith("--gateway=") ? 1 : 0;
+      if (
+        literalText(node.elements[openshellCommandIndex]) === "sandbox" &&
+        literalText(node.elements[openshellCommandIndex + 1]) === "ssh-config"
+      ) {
         increment(counts, "openshell-ssh-config");
       }
     }
 
     if (ts.isCallExpression(node)) {
-      const name = expressionName(node.expression);
+      const name = resolvedExpressionName(node.expression, bindings);
+      if (name === "require" && isSandboxControlRoutingModule(node.arguments[0])) {
+        increment(counts, "grpc-cli-read-only-fallback");
+      }
       const helperKind = name ? HELPER_KINDS.get(name) : undefined;
       if (helperKind) increment(counts, helperKind);
       if (name !== null && DOCKER_COMMAND_CALLS.has(name)) {
-        const firstDockerArg = commandFromArgument(node.arguments[0]);
+        const firstDockerArg = commandFromArgument(node.arguments[0], bindings);
         if (firstDockerArg === "exec") increment(counts, "docker-exec-command");
       }
 
       const commandArgumentIndex = name === "collect" ? 2 : 0;
       if (name === "collect" || (name !== null && COMMAND_CALLS.has(name))) {
-        const command = commandFromArgument(node.arguments[commandArgumentIndex]);
+        const command = commandFromArgument(node.arguments[commandArgumentIndex], bindings);
         const scansSandboxSsh = !NON_SANDBOX_SSH_ROOTS.some((root) =>
           relativePath.startsWith(root),
         );
@@ -203,17 +314,15 @@ export function auditLegacySandboxTransports(
     const key = siteKey(reviewed);
     const current = discovered.get(key);
     if (!current) {
-      violations.push(`${key}: reviewed legacy transport is gone; remove this allowlist entry`);
+      violations.push(`${key}: reviewed transport use is gone; remove this allowlist entry`);
     } else if (current.calls !== reviewed.calls) {
-      violations.push(
-        `${key}: expected ${reviewed.calls} reviewed call(s), found ${current.calls}`,
-      );
+      violations.push(`${key}: expected ${reviewed.calls} reviewed use(s), found ${current.calls}`);
     }
     discovered.delete(key);
   }
 
   for (const site of discovered.values()) {
-    violations.push(`${siteKey(site)}: found ${site.calls} unreviewed legacy transport call(s)`);
+    violations.push(`${siteKey(site)}: found ${site.calls} unreviewed transport use(s)`);
   }
 
   return violations;
@@ -229,5 +338,7 @@ if (isEntrypoint) {
     process.exit(1);
   }
 
-  console.log("Legacy sandbox SSH, SSHFS, and Docker-exec sites match the reviewed inventory.");
+  console.log(
+    "Legacy sandbox transports and gRPC-to-CLI fallback importers match the reviewed inventory.",
+  );
 }

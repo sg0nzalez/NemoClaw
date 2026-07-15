@@ -58,7 +58,7 @@ export type OpenClawPluginRestorePlanResult =
     }
   | { ok: false; error: string };
 
-const OPENCLAW_PLUGIN_INDEX_SQLITE_PY = [
+export const OPENCLAW_PLUGIN_INDEX_SQLITE_PY = [
   "import json, sqlite3, sys, urllib.parse",
   'uri = "file:" + urllib.parse.quote(sys.argv[1], safe="/") + "?mode=ro"',
   "conn = sqlite3.connect(uri, uri=True, timeout=30)",
@@ -77,7 +77,7 @@ const OPENCLAW_PLUGIN_INDEX_SQLITE_PY = [
   "    conn.close()",
 ].join("\n");
 
-const OPENCLAW_PLUGIN_INDEX_LEGACY_PY = [
+export const OPENCLAW_PLUGIN_INDEX_LEGACY_PY = [
   "import json, sys",
   "with open(sys.argv[1], 'r', encoding='utf-8') as index_file: index = json.load(index_file)",
   "with open(sys.argv[2], 'r', encoding='utf-8') as config_file: config = json.load(config_file)",
@@ -108,7 +108,7 @@ export function buildFreshOpenClawPluginIndexSqliteReadCommand(dir: string): str
     `cfg=${quotedConfigPath}`,
     ...buildSafeRegularFileReadGuard("db", 2),
     ...buildSafeRegularFileReadGuard("cfg", 12),
-    `python3 -c ${shellQuote(OPENCLAW_PLUGIN_INDEX_SQLITE_PY)} "$db" "$cfg"`,
+    'python3 -I - "$db" "$cfg"',
   ].join("; ");
 }
 
@@ -122,7 +122,7 @@ function buildLegacyOpenClawPluginIndexReadCommand(dir: string): string {
     `cfg=${quotedConfigPath}`,
     ...buildSafeRegularFileReadGuard("src", 2),
     ...buildSafeRegularFileReadGuard("cfg", 12),
-    `python3 -c ${shellQuote(OPENCLAW_PLUGIN_INDEX_LEGACY_PY)} "$src" "$cfg"`,
+    'python3 -I - "$src" "$cfg"',
   ].join("; ");
 }
 
@@ -137,6 +137,7 @@ async function readFreshOpenClawPluginInstallIndex(
   const sqliteResult = await execSandboxReadOnlyWithGrpcFallback(gatewayName, {
     sandboxName,
     command: ["sh", "-c", buildFreshOpenClawPluginIndexSqliteReadCommand(dir)],
+    stdin: OPENCLAW_PLUGIN_INDEX_SQLITE_PY,
     timeoutMs: 30_000,
     maxOutputBytes: OPENCLAW_PLUGIN_INSTALL_REGISTRY_MAX_BYTES,
   });
@@ -145,6 +146,7 @@ async function readFreshOpenClawPluginInstallIndex(
   return execSandboxReadOnlyWithGrpcFallback(gatewayName, {
     sandboxName,
     command: ["sh", "-c", buildLegacyOpenClawPluginIndexReadCommand(dir)],
+    stdin: OPENCLAW_PLUGIN_INDEX_LEGACY_PY,
     timeoutMs: 30_000,
     maxOutputBytes: OPENCLAW_PLUGIN_INSTALL_REGISTRY_MAX_BYTES,
   });

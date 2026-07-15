@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { spawnSyncMock } = vi.hoisted(() => ({
   spawnSyncMock: vi.fn(),
@@ -30,7 +30,7 @@ function makeDeps(overrides: Partial<ShareCommandDeps> = {}): ShareCommandDeps {
       output: "Host openshell-alpha\n  HostName 127.0.0.1\n",
     })),
     ensureLive: vi.fn(async () => undefined),
-    checkSandboxPathExists: vi.fn(() => true),
+    checkSandboxPathExists: vi.fn(async () => true),
     colorGreen: "",
     colorReset: "",
     cliName: "nemoclaw",
@@ -40,6 +40,12 @@ function makeDeps(overrides: Partial<ShareCommandDeps> = {}): ShareCommandDeps {
 
 function mountedAt(dir: string): string {
   return `/dev/fuse on ${path.resolve(dir)} type fuse.sshfs (rw)\n`;
+}
+
+function mockShareMountPreflight(): void {
+  spawnSyncMock
+    .mockReturnValueOnce({ status: 0, stdout: "/usr/bin/sshfs\n", stderr: "" })
+    .mockReturnValueOnce({ status: 1, stdout: "", stderr: "" });
 }
 
 function withProcessPlatform(platform: NodeJS.Platform, fn: () => void): void {
@@ -194,6 +200,32 @@ describe("ShareCommand mount/status actions", () => {
     await expect(runShareMount({ sandboxName: "alpha" }, deps)).rejects.toThrow(
       /sshfs is not installed/,
     );
+  });
+
+  it("does not read SSH config or start sshfs when the sandbox path cannot be verified", async () => {
+    const deps = makeDeps({
+      checkSandboxPathExists: vi.fn(async () => false),
+    });
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((_code?: number) => {
+      throw new Error("__test_exit__");
+    }) as never);
+    mockShareMountPreflight();
+
+    await expect(
+      runShareMount(
+        {
+          sandboxName: "alpha",
+          remotePath: "/missing",
+          localMount: "/tmp/nemoclaw-share-missing-path",
+        },
+        deps,
+      ),
+    ).rejects.toThrow("__test_exit__");
+
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(deps.checkSandboxPathExists).toHaveBeenCalledWith("alpha", "/missing");
+    expect(deps.getSshConfig).not.toHaveBeenCalled();
+    expect(spawnSyncMock.mock.calls.map(([command]) => command)).not.toContain("sshfs");
   });
 
   it("surfaces SFTP-specific remediation when sshfs fails after sandbox validation", async () => {

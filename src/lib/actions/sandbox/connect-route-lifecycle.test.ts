@@ -190,7 +190,7 @@ describe("connectSandbox route lifecycle", () => {
     expect(errorOutput).toContain("failed to verify or repair inference route");
     expect(errorOutput).toContain("did not return a trusted result");
     expect(errorOutput).toContain("route is not known healthy");
-    expect(errorOutput).not.toContain("after DNS and route repair");
+    expect(errorOutput).not.toContain("after route repair");
     expect(errorOutput).not.toContain("route is known to be broken");
     expect(harness.captureOpenshellSpy).toHaveBeenCalledWith(
       ["inference", "get", "-g", "nemoclaw"],
@@ -235,7 +235,7 @@ describe("connectSandbox route lifecycle", () => {
       expect.any(Object),
     );
     const errorOutput = harness.errorSpy.mock.calls.map((call) => String(call[0] ?? "")).join("\n");
-    expect(errorOutput).toContain("inference.local is still unavailable");
+    expect(errorOutput).toContain("inside 'alpha' after route repair.");
     expect(errorOutput).toContain(
       "Connect is stopping because the sandbox inference route is known to be broken",
     );

@@ -70,28 +70,6 @@ detect_docker_host() {
   return 1
 }
 
-docker_host_runtime() {
-  local docker_host="${1:-${DOCKER_HOST:-}}"
-
-  case "$docker_host" in
-    unix://*"/.colima/default/docker.sock" | unix://*"/.config/colima/default/docker.sock")
-      printf 'colima\n'
-      ;;
-    unix://*"/podman/machine/podman.sock" | unix://*"/podman/podman.sock")
-      printf 'podman\n'
-      ;;
-    unix://*"/.docker/run/docker.sock")
-      printf 'docker-desktop\n'
-      ;;
-    "")
-      return 1
-      ;;
-    *)
-      printf 'custom\n'
-      ;;
-  esac
-}
-
 infer_container_runtime_from_info() {
   local info="${1:-}"
   local normalized
@@ -139,97 +117,6 @@ find_podman_socket() {
         return 0
       fi
     done
-  fi
-
-  return 1
-}
-
-is_loopback_ip() {
-  local ip="${1:-}"
-  [[ "$ip" == 127.* ]]
-}
-
-first_non_loopback_nameserver() {
-  local resolv_conf="${1:-}"
-
-  if [ -z "$resolv_conf" ]; then
-    return 1
-  fi
-
-  printf '%s\n' "$resolv_conf" \
-    | awk '$1 == "nameserver" && $2 !~ /^127\./ { print $2; exit }'
-}
-
-get_colima_vm_nameserver() {
-  if ! command -v colima >/dev/null 2>&1; then
-    return 1
-  fi
-
-  local profile="${COLIMA_PROFILE:-default}"
-  local resolv_conf
-  resolv_conf="$(colima ssh --profile "$profile" -- cat /etc/resolv.conf </dev/null 2>/dev/null || true)"
-  first_non_loopback_nameserver "$resolv_conf"
-}
-
-resolve_coredns_upstream() {
-  local container_resolv_conf="${1:-}"
-  local host_resolv_conf="${2:-}"
-  local runtime="${3:-unknown}"
-  local nameserver=""
-
-  nameserver="$(first_non_loopback_nameserver "$container_resolv_conf" || true)"
-  if [ -n "$nameserver" ]; then
-    printf '%s\n' "$nameserver"
-    return 0
-  fi
-
-  if [ "$runtime" = "colima" ]; then
-    nameserver="$(get_colima_vm_nameserver || true)"
-    if [ -n "$nameserver" ]; then
-      printf '%s\n' "$nameserver"
-      return 0
-    fi
-  fi
-
-  nameserver="$(first_non_loopback_nameserver "$host_resolv_conf" || true)"
-  if [ -n "$nameserver" ]; then
-    printf '%s\n' "$nameserver"
-    return 0
-  fi
-
-  return 1
-}
-
-select_openshell_cluster_container() {
-  local gateway_name="${1:-}"
-  local containers="${2:-}"
-  local matches=""
-  local count=0
-  local match_count=0
-
-  if [ -z "$containers" ]; then
-    return 1
-  fi
-
-  count="$(printf '%s\n' "$containers" | awk 'NF { count += 1 } END { print count + 0 }')"
-
-  if [ -n "$gateway_name" ]; then
-    matches="$(printf '%s\n' "$containers" | grep -F -- "$gateway_name" || true)"
-    match_count="$(printf '%s\n' "$matches" | awk 'NF { count += 1 } END { print count + 0 }')"
-
-    if [ "$match_count" -eq 1 ]; then
-      printf '%s\n' "$matches"
-      return 0
-    fi
-
-    if [ "$match_count" -gt 1 ]; then
-      return 1
-    fi
-  fi
-
-  if [ "$count" -eq 1 ]; then
-    printf '%s\n' "$containers"
-    return 0
   fi
 
   return 1

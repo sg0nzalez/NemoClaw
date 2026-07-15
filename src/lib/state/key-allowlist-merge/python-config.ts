@@ -4,6 +4,7 @@
 /** Python helpers that parse TOML and open the fresh config without following links. */
 export const KEY_ALLOWLIST_CONFIG_PYTHON = String.raw`
 import copy
+import hashlib
 import json
 import math
 import os
@@ -36,9 +37,69 @@ def parse_config_payload(payload, label):
     return text, parsed
 
 
-def read_stdin_config(label):
-    payload = sys.stdin.buffer.read(MAX_CONFIG_BYTES + 1)
-    return parse_config_payload(payload, label)
+def read_staged_config(pathname, expected_digest, label):
+    if (
+        not isinstance(pathname, str)
+        or not os.path.isabs(pathname)
+        or not os.path.basename(pathname).startswith("nemoclaw-state-restore-")
+        or os.path.normpath(pathname) != pathname
+    ):
+        fail("staged config path is invalid")
+    if len(expected_digest) != 64 or any(char not in "0123456789abcdef" for char in expected_digest):
+        fail("staged config digest is invalid")
+    flags = os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0)
+    parent_fd = os.open("/", flags)
+    parts = pathname.split("/")[1:]
+    try:
+        for component in parts[:-1]:
+            next_fd = os.open(component, flags, dir_fd=parent_fd)
+            os.close(parent_fd)
+            parent_fd = next_fd
+        before = os.stat(parts[-1], dir_fd=parent_fd, follow_symlinks=False)
+        payload_fd = os.open(
+            parts[-1], os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=parent_fd
+        )
+        try:
+            metadata = os.fstat(payload_fd)
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_nlink != 1
+                or metadata.st_size > MAX_CONFIG_BYTES
+                or metadata.st_uid != os.geteuid()
+                or metadata.st_gid != os.getegid()
+                or metadata.st_mode & 0o022
+                or (metadata.st_dev, metadata.st_ino) != (before.st_dev, before.st_ino)
+            ):
+                fail("staged config is not a single bounded regular file")
+            os.unlink(parts[-1], dir_fd=parent_fd)
+            baseline = os.fstat(payload_fd)
+            chunks = []
+            total = 0
+            digest = hashlib.sha256()
+            while True:
+                chunk = os.read(payload_fd, 65536)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > MAX_CONFIG_BYTES:
+                    fail("staged config exceeds the restore size limit")
+                digest.update(chunk)
+                chunks.append(chunk)
+            after = os.fstat(payload_fd)
+            if (
+                total != baseline.st_size
+                or after.st_size != baseline.st_size
+                or after.st_mtime_ns != baseline.st_mtime_ns
+                or after.st_ctime_ns != baseline.st_ctime_ns
+            ):
+                fail("staged config changed while snapshotting")
+            if digest.hexdigest() != expected_digest:
+                fail("staged config digest mismatch")
+        finally:
+            os.close(payload_fd)
+    finally:
+        os.close(parent_fd)
+    return parse_config_payload(b"".join(chunks), label)
 
 
 def open_config_parent(base_dir, relative_path):

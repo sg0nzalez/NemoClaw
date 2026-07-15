@@ -4,16 +4,24 @@
 /**
  * Hardware resource discovery for NemoClaw.
  *
- * Provides `nemoclaw resources` — a read-only inventory of host CPU, RAM,
- * and GPU capacity. Used by the NemoClaw Installer to auto-select profiles
- * and models based on available hardware.
+ * Provides `nemoclaw resources` — a read-only inventory of CPU, RAM, GPU,
+ * and Kubernetes allocatable capacity. Used by the NemoClaw Installer to
+ * auto-select profiles and models based on available hardware.
  */
 
-import { execSync, spawnSync } from "child_process";
-import * as fs from "fs";
 import * as os from "os";
+import * as fs from "fs";
 import * as path from "path";
+import { spawnSync, execSync } from "child_process";
 import * as YAML from "yaml";
+
+import { dockerSpawnSync } from "./adapters/docker";
+
+const GATEWAY_NAME = "nemoclaw";
+
+function getGatewayContainer(): string {
+  return `openshell-cluster-${GATEWAY_NAME}`;
+}
 
 function getBlueprintPath(): string {
   return path.join(__dirname, "..", "..", "nemoclaw-blueprint", "blueprint.yaml");
@@ -44,8 +52,8 @@ export interface ResourceProfile {
 }
 
 export interface HardwareResources {
-  cpu: { cores: number; model: string };
-  memory: { totalMB: number; swapMB: number };
+  cpu: { cores: number; model: string; allocatable?: string };
+  memory: { totalMB: number; swapMB: number; allocatableMB?: number };
   gpu: { type: string; name: string; count: number; vramMB: number } | null;
   profiles: Record<string, ResourceProfile> | null;
 }
@@ -54,7 +62,8 @@ export interface HardwareResources {
 
 /**
  * Query system hardware resources. Returns CPU, memory, and GPU info.
- * Profile percentages are resolved against host totals.
+ * Also attempts to read Kubernetes node allocatable capacity from the
+ * gateway's k3s cluster (returns undefined fields if gateway is not running).
  */
 export function getHardwareResources(): HardwareResources {
   const cpus = os.cpus();
@@ -75,6 +84,30 @@ export function getHardwareResources(): HardwareResources {
   } catch {
     // Non-Linux or /proc unreadable — fall back to os.totalmem()
     totalMB = Math.round(os.totalmem() / 1024 / 1024);
+  }
+
+  // Kubernetes allocatable (best-effort — only works if gateway is running)
+  let allocatableCpu: string | undefined;
+  let allocatableMemMB: number | undefined;
+  try {
+    const container = getGatewayContainer();
+    const result = dockerSpawnSync(["exec", container, "kubectl", "get", "nodes", "-o", "json"], {
+      encoding: "utf-8",
+      timeout: 10000,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    if (result.status === 0 && result.stdout) {
+      const nodes = JSON.parse(String(result.stdout));
+      const alloc = nodes.items?.[0]?.status?.allocatable;
+      if (alloc) {
+        allocatableCpu = alloc.cpu;
+        const memStr: string = alloc.memory || "";
+        const kiMatch = memStr.match(/^(\d+)Ki$/);
+        if (kiMatch) allocatableMemMB = Math.round(parseInt(kiMatch[1], 10) / 1024);
+      }
+    }
+  } catch {
+    // Gateway not running — skip k8s allocatable
   }
 
   // GPU detection via nvidia-smi
@@ -108,8 +141,8 @@ export function getHardwareResources(): HardwareResources {
   }
 
   return {
-    cpu: { cores: cpus.length, model: cpuModel },
-    memory: { totalMB, swapMB },
+    cpu: { cores: cpus.length, model: cpuModel, allocatable: allocatableCpu },
+    memory: { totalMB, swapMB, allocatableMB: allocatableMemMB },
     gpu,
     profiles,
   };
@@ -129,7 +162,13 @@ export function printHardwareResources(json: boolean): HardwareResources {
   console.log("  Hardware Resources");
   console.log("  " + "\u2500".repeat(44));
   console.log(`  CPU:       ${hw.cpu.cores} cores (${hw.cpu.model})`);
+  if (hw.cpu.allocatable) {
+    console.log(`             k8s allocatable: ${hw.cpu.allocatable}`);
+  }
   console.log(`  RAM:       ${hw.memory.totalMB} MB + ${hw.memory.swapMB} MB swap`);
+  if (hw.memory.allocatableMB) {
+    console.log(`             k8s allocatable: ${hw.memory.allocatableMB} MB`);
+  }
   if (hw.gpu) {
     console.log(`  GPU:       ${hw.gpu.name}`);
     console.log(
@@ -185,12 +224,33 @@ export function resolveResourceValue(value: string, total: number, unit: "cpu" |
 }
 
 /**
- * Resolve profile percentages to absolutes against host totals.
+ * Parse a Kubernetes CPU quantity.
+ * Handles plain quantities ("16", "3.5") and millicores ("7500m" -> 7.5).
+ */
+function parseCpuQuantity(value: string): number | null {
+  const trimmed = value.trim();
+  if (trimmed.endsWith("m")) {
+    const millis = parseInt(trimmed.slice(0, -1), 10);
+    if (isNaN(millis)) return null;
+    return millis / 1000;
+  }
+  const cores = parseFloat(trimmed);
+  return isNaN(cores) ? null : cores;
+}
+
+/**
+ * Resolve profile percentages to absolutes. Prefers k8s allocatable capacity
+ * when available (accounts for kubelet/system reservations); falls back to
+ * host totals when gateway is not running.
  */
 export function resolveProfile(profile: ResourceProfile, hw: HardwareResources): ResourceProfile {
+  const cpuTotal = hw.cpu.allocatable
+    ? (parseCpuQuantity(hw.cpu.allocatable) ?? hw.cpu.cores)
+    : hw.cpu.cores;
+  const memTotalMB = hw.memory.allocatableMB ?? hw.memory.totalMB;
   return {
-    cpu: resolveResourceValue(profile.cpu, hw.cpu.cores, "cpu"),
-    memory: resolveResourceValue(profile.memory, hw.memory.totalMB, "memory"),
+    cpu: resolveResourceValue(profile.cpu, cpuTotal, "cpu"),
+    memory: resolveResourceValue(profile.memory, memTotalMB, "memory"),
   };
 }
 

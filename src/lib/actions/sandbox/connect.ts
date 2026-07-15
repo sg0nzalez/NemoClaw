@@ -521,7 +521,7 @@ function printUnrecoverableInferenceRoute(
   { repairAttempted = true }: { repairAttempted?: boolean } = {},
 ): void {
   const reason = repairAttempted
-    ? `inference.local is still unavailable inside '${sandboxName}' after DNS and route repair.`
+    ? `inference.local is still unavailable inside '${sandboxName}' after route repair.`
     : `the authoritative inference.local probe inside '${sandboxName}' did not return a trusted result.`;
   const boundedDetail = sanitizeRouteValueForDisplay(redact(detail))
     .replace(/\s+/g, " ")

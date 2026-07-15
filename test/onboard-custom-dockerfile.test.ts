@@ -186,6 +186,17 @@ describe("onboard custom Dockerfile", () => {
 
       fs.mkdirSync(fakeBin, { recursive: true });
       writeOkOpenshell(fakeBin);
+      fs.writeFileSync(
+        path.join(fakeBin, "openshell"),
+        [
+          "#!/bin/sh",
+          'case "$*" in',
+          '  *"state/openclaw.sqlite"*openclaw.json*) printf \'%s\\n\' \'{"version":1,"installRecords":{},"loadPaths":[]}\' ;;',
+          "esac",
+          "exit 0",
+        ].join("\n"),
+        { mode: 0o755 },
+      );
       const gatewayDir = path.join(tmpDir, ".config", "openshell", "gateways", "nemoclaw");
       fs.mkdirSync(gatewayDir, { recursive: true });
       fs.writeFileSync(
@@ -209,20 +220,6 @@ const childProcess = require("node:child_process");
 const { EventEmitter } = require("node:events");
 const fs = require("node:fs");
 const path = require("node:path");
-
-const originalSpawnSync = childProcess.spawnSync;
-childProcess.spawnSync = (command, args, options) => {
-  const normalized = _n([command, ...(Array.isArray(args) ? args : [])]);
-  if (String(command).endsWith("openshell") && normalized.includes("sandbox exec") && normalized.includes("installed_plugin_index")) {
-    return {
-      status: 0,
-      signal: null,
-      stdout: Buffer.from(JSON.stringify({ version: 1, installRecords: {}, loadPaths: [] })),
-      stderr: Buffer.alloc(0),
-    };
-  }
-  return originalSpawnSync(command, args, options);
-};
 
 const commands = [];
 let hasExtraFileAtSpawn = false;

@@ -338,9 +338,10 @@ The next rebuild produces an image without the WeChat channel block in `openclaw
 
 For in-sandbox QR-paired channels (today: WhatsApp), `channels remove` destructively clears the in-sandbox session directory before the rebuild so the next rebuild does not restore stale auth files and reconnect the channel.
 The cleanup targets `/sandbox/.openclaw/<channel>/` for OpenClaw and `/sandbox/.hermes/platforms/<channel>/` for Hermes.
-The cleanup tries `openshell sandbox exec` and falls back to SSH if that does not produce the success sentinel.
-If neither transport can reach a running sandbox for a QR-paired channel, the command exits non-zero and asks you to start the sandbox and re-run.
-NemoClaw deliberately leaves the registry, policy preset, and `session.policyPresets` unchanged on that failure path, so a follow-up re-run completes the removal cleanly.
+The cleanup selects one OpenShell mutation transport and dispatches the deletion once.
+It does not fall back to SSH or replay the deletion when the result is inconclusive, because the first dispatch may already have removed the state.
+If the sandbox is stopped, its gateway is unreachable, or success cannot be confirmed, the command exits non-zero and asks you to start the sandbox and re-run `channels remove`.
+NemoClaw deliberately leaves the registry, policy preset, and `session.policyPresets` unchanged on that failure path, so the re-run reconciles the removal cleanly.
 
 `channels remove whatsapp` clears the client-side Baileys session inside the sandbox.
 It cannot deregister the linked device with WhatsApp's servers because that requires an active Baileys connection to issue the logout RPC, and the command no longer has that connection after it removes the session files.
