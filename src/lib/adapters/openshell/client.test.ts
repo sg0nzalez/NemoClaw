@@ -137,17 +137,30 @@ describe("openshell helpers", () => {
     });
   });
 
-  it("captures binary stdout without UTF-8 decoding", () => {
+  it("captures raw stdout and stderr without UTF-8 decoding", () => {
     const bytes = Buffer.from([0, 255, 128, 10]);
+    const stderr = Buffer.from("warning");
     const result = captureOpenshellCommandBinary("openshell", ["sandbox", "exec"], {
-      spawnSyncImpl: stubBinarySpawnSync(bytes, Buffer.from("warning")),
+      spawnSyncImpl: stubBinarySpawnSync(bytes, stderr),
     });
 
-    expect(result).toEqual({
-      status: 0,
-      stdout: bytes,
-      stderr: Buffer.from("warning"),
-    });
+    expect(result).toEqual({ status: 0, stdout: bytes, stderr });
+  });
+
+  it("preserves real child-process ENOBUFS metadata and partial raw output", () => {
+    const result = captureOpenshellCommandBinary(
+      process.execPath,
+      ["-e", "process.stdout.write(Buffer.from([0xc3, 0xa9]))"],
+      { maxBuffer: 1 },
+    );
+
+    // Node can report either the completed exit status or null when ENOBUFS
+    // races a fast child exit. The error code and retained raw prefix are stable.
+    expect((result.error as NodeJS.ErrnoException | undefined)?.code).toBe("ENOBUFS");
+    expect(Buffer.isBuffer(result.stdout)).toBe(true);
+    expect(result.stdout.length).toBeGreaterThan(0);
+    expect(result.stdout[0]).toBe(0xc3);
+    expect(Buffer.isBuffer(result.stderr)).toBe(true);
   });
 
   it("returns the spawn result when the command succeeds", () => {

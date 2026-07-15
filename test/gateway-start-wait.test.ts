@@ -117,7 +117,7 @@ describe("gateway startup wait config", () => {
   });
 });
 
-describe("gateway bootstrap secret repair", () => {
+describe("gateway endpoint metadata", () => {
   it("uses the configured gateway port for local metadata reattachment", () => {
     process.env.NEMOCLAW_GATEWAY_PORT = "9443";
     const { getGatewayLocalEndpoint } = loadOnboard();

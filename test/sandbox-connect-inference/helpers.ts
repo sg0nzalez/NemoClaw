@@ -6,6 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, expect } from "vitest";
+import { nonWslPlatformNodeOptions } from "../helpers/platform-override-node-options";
 import { execTimeout } from "../helpers/timeouts";
 
 /**
@@ -377,6 +378,50 @@ if (
   process.exit(0);
 }
 
+if (cmd.includes("get service kube-dns")) {
+  process.stdout.write("10.43.0.10");
+  process.exit(0);
+}
+if (cmd.includes("get endpoints kube-dns")) {
+  process.stdout.write("10.42.0.15");
+  process.exit(0);
+}
+if (cmd.includes("get pods -n openshell -o name")) {
+  process.stdout.write("pod/${sandboxName}-abc\\n");
+  process.exit(0);
+}
+if (cmd.includes("ip addr show")) {
+  process.stdout.write("10.200.0.1\\n");
+  process.exit(0);
+}
+if (cmd.includes("cat /tmp/dns-proxy.pid")) {
+  process.stdout.write("12345\\n");
+  process.exit(0);
+}
+if (cmd.includes("cat /tmp/dns-proxy.log")) {
+  process.stdout.write("dns-proxy: 10.200.0.1:53 -> 10.43.0.10:53 pid=12345\\n");
+  process.exit(0);
+}
+if (cmd.includes("python3 -c")) {
+  process.stdout.write("ok");
+  process.exit(0);
+}
+if (cmd.includes("ls /run/netns/")) {
+  process.stdout.write("sandbox-ns\\n");
+  process.exit(0);
+}
+if (cmd.includes("test -x")) {
+  process.exit(cmd.includes("/usr/sbin/iptables") ? 0 : 1);
+}
+if (cmd.includes("cat /etc/resolv.conf")) {
+  process.stdout.write("nameserver 10.200.0.1\\n");
+  process.exit(0);
+}
+if (cmd.includes("getent hosts github.com")) {
+  process.stdout.write("140.82.112.4 github.com\\n");
+  process.exit(0);
+}
+
 process.exit(0);
 `,
   );
@@ -527,6 +572,7 @@ export function runConnect(
       encoding: "utf-8",
       env: {
         HOME: tmpDir,
+        NODE_OPTIONS: nonWslPlatformNodeOptions(tmpDir, ""),
         PATH: `${path.join(tmpDir, ".local", "bin")}:/usr/bin:/bin`,
         NEMOCLAW_DISABLE_GATEWAY_DRIFT_PREFLIGHT: "1",
         NEMOCLAW_NO_CONNECT_HINT: "1",

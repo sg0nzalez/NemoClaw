@@ -6,6 +6,7 @@ import type { SandboxEntry } from "../../state/registry";
 
 vi.mock("../../adapters/openshell/runtime", () => ({
   captureOpenshell: vi.fn(() => ({ status: 0, output: "" })),
+  captureOpenshellBinary: vi.fn(),
   getOpenshellBinary: vi.fn(() => "openshell"),
   runOpenshell: vi.fn(() => ({ status: 0 })),
 }));
@@ -73,7 +74,9 @@ function makeRepairDeps(
   const calls = {
     logs: [] as string[],
     errors: [] as string[],
+    legacyRepairs: [] as Array<{ sandboxName: string; quiet: boolean }>,
     monkeypatches: [] as string[],
+    reapplications: [] as string[],
     probeOptions: [] as Array<object | undefined>,
   };
   const queue = [...probes];
@@ -86,6 +89,14 @@ function makeRepairDeps(
     applyVmDnsMonkeypatch: vi.fn((sandboxName) => {
       calls.monkeypatches.push(sandboxName);
       return { ok: false, reason: "not mocked" };
+    }),
+    reapplyVmInferenceRoute: vi.fn((sandboxName) => {
+      calls.reapplications.push(sandboxName);
+      return queue.shift() ?? broken("missing mocked reapply probe");
+    }),
+    repairLegacyDnsProxy: vi.fn((sandboxName, quiet) => {
+      calls.legacyRepairs.push({ sandboxName, quiet });
+      return { exitCode: 0 };
     }),
     log: (message) => calls.logs.push(message),
     error: (message) => calls.errors.push(message),
@@ -120,10 +131,41 @@ describe("sandbox connect route repair unit flow", () => {
       repairAttempted: false,
       detail: "OK 200",
     });
+    expect(calls.legacyRepairs).toEqual([]);
+    expect(calls.reapplications).toEqual([]);
   });
 
-  it("delegates broken kubernetes routes to the managed reset", () => {
-    const { calls, deps } = makeRepairDeps([broken()]);
+  it("repairs legacy kubernetes routes through the DNS proxy path", () => {
+    const { calls, deps } = makeRepairDeps([broken(), healthy()]);
+
+    const result = repairSandboxInferenceRouteWithDeps(
+      "legacy-box",
+      sandbox({ openshellDriver: "kubernetes" }),
+      {},
+      deps,
+    );
+
+    expect(result).toEqual({
+      healthy: true,
+      repairAttempted: true,
+      detail: "OK 200",
+    });
+    expect(calls.legacyRepairs).toEqual([{ sandboxName: "legacy-box", quiet: false }]);
+    expect(calls.reapplications).toEqual([]);
+    expect(calls.probeOptions).toEqual([undefined, { attempts: 3, delayMs: 2000 }]);
+    expect(calls.logs).toContain(
+      "  inference.local is unavailable inside 'legacy-box'. Repairing sandbox DNS proxy...",
+    );
+    expect(calls.logs).toContain("  inference.local route repaired.");
+  });
+
+  it("returns the DNS repair failure detail without route reapply on legacy sandboxes", () => {
+    const { calls, deps } = makeRepairDeps([broken()], {
+      repairLegacyDnsProxy: vi.fn((sandboxName, quiet) => {
+        calls.legacyRepairs.push({ sandboxName, quiet });
+        return { exitCode: 1, message: "Could not find gateway container" };
+      }),
+    });
 
     const result = repairSandboxInferenceRouteWithDeps(
       "legacy-box",
@@ -135,10 +177,27 @@ describe("sandbox connect route repair unit flow", () => {
     expect(result).toEqual({
       healthy: false,
       repairAttempted: true,
-      detail: "BROKEN 503",
+      detail: "Could not find gateway container",
     });
-    expect(calls.probeOptions).toEqual([undefined]);
-    expect(calls.monkeypatches).toEqual([]);
+    expect(calls.errors).toContain("  Warning: failed to repair sandbox DNS proxy.");
+    expect(calls.reapplications).toEqual([]);
+  });
+
+  it("uses inference route reapply instead of legacy DNS repair for docker sandboxes", () => {
+    const { calls, deps } = makeRepairDeps([broken(), healthy()]);
+
+    const result = repairSandboxInferenceRouteWithDeps(
+      "docker-box",
+      sandbox({ openshellDriver: "docker" }),
+      {},
+      deps,
+    );
+
+    expect(result.healthy).toBe(true);
+    expect(result.repairAttempted).toBe(true);
+    expect(calls.legacyRepairs).toEqual([]);
+    expect(calls.reapplications).toEqual(["docker-box"]);
+    expect(calls.logs).toContain("  inference.local route repaired.");
   });
 
   it("lets the VM monkeypatch satisfy the route before inference reapply", () => {
@@ -159,6 +218,8 @@ describe("sandbox connect route repair unit flow", () => {
 
     expect(result.healthy).toBe(true);
     expect(calls.monkeypatches).toEqual(["vm-box"]);
+    expect(calls.reapplications).toEqual([]);
+    expect(calls.legacyRepairs).toEqual([]);
     expect(calls.probeOptions).toEqual([undefined, { attempts: 3, delayMs: 2000 }]);
     expect(calls.logs).toContain(
       "  inference.local is unavailable inside 'vm-box'. Applying OpenShell VM DNS monkeypatch...",
@@ -168,8 +229,8 @@ describe("sandbox connect route repair unit flow", () => {
     );
   });
 
-  it("delegates to managed reset when the VM monkeypatch leaves the route broken", () => {
-    const { calls, deps } = makeRepairDeps([broken(), broken()], {
+  it("falls back to inference reapply when the VM monkeypatch leaves the route broken", () => {
+    const { calls, deps } = makeRepairDeps([broken(), broken(), healthy()], {
       shouldApplyVmDnsMonkeypatch: vi.fn(() => true),
       applyVmDnsMonkeypatch: vi.fn((sandboxName) => {
         calls.monkeypatches.push(sandboxName);
@@ -184,14 +245,31 @@ describe("sandbox connect route repair unit flow", () => {
       deps,
     );
 
+    expect(result.healthy).toBe(true);
+    expect(calls.monkeypatches).toEqual(["vm-box"]);
+    expect(calls.reapplications).toEqual(["vm-box"]);
+    expect(calls.errors).toContain(
+      "  Warning: OpenShell VM DNS monkeypatch completed but inference.local is still unavailable.",
+    );
+  });
+
+  it("reports broken non-legacy routes after inference reapply cannot repair them", () => {
+    const { calls, deps } = makeRepairDeps([broken(), broken()]);
+
+    const result = repairSandboxInferenceRouteWithDeps(
+      "vm-box",
+      sandbox({ openshellDriver: "vm" }),
+      {},
+      deps,
+    );
+
     expect(result).toEqual({
       healthy: false,
       repairAttempted: true,
       detail: "BROKEN 503",
     });
-    expect(calls.monkeypatches).toEqual(["vm-box"]);
     expect(calls.errors).toContain(
-      "  Warning: OpenShell VM DNS monkeypatch completed but inference.local is still unavailable.",
+      "  Warning: inference.local is still unavailable through the OpenShell vm gateway path.",
     );
   });
 });

@@ -17,8 +17,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { describe, it, expect } from "vitest";
-
+import { describe, expect, it } from "vitest";
+import { writeOpenShellSandboxDescriptorPreload } from "./helpers/openshell-sandbox-descriptor-preload";
 import { execTimeout } from "./helpers/timeouts";
 
 const CLI = path.join(import.meta.dirname, "..", "bin", "nemoclaw.js");
@@ -56,7 +56,7 @@ function runCli(
 interface MakeEnvOptions {
   /** When false, omit the snapshot manifest so getLatestBackup returns null. */
   withSnapshot?: boolean;
-  /** When false, omit the source registry image. */
+  /** When false, return an empty image from the live source descriptor. */
   withSourceImage?: boolean;
   /** Put dst on a registered non-default gateway and hide it from src's gateway list. */
   destinationGatewayPort?: number;
@@ -149,6 +149,10 @@ function makeExistingDestEnv(
   }
 
   const osLog = path.join(home, "openshell.log");
+  const descriptorNodeOptions = writeOpenShellSandboxDescriptorPreload(
+    home,
+    opts.withSourceImage === false ? "" : "ghcr.io/nvidia/nemoclaw/sandbox-src:test",
+  );
   const activeGateway = path.join(home, "active-gateway");
   fs.writeFileSync(
     path.join(localBin, "openshell"),
@@ -206,7 +210,14 @@ function makeExistingDestEnv(
     { mode: 0o755 },
   );
 
-  return { env: { HOME: home, PATH: `${localBin}:${process.env.PATH ?? ""}` }, osLog };
+  return {
+    env: {
+      HOME: home,
+      NODE_OPTIONS: descriptorNodeOptions,
+      PATH: `${localBin}:${process.env.PATH ?? ""}`,
+    },
+    osLog,
+  };
 }
 
 describe("snapshot restore --to existing destination (#3756)", () => {
@@ -232,9 +243,9 @@ describe("snapshot restore --to existing destination (#3756)", () => {
     expect(log).not.toMatch(/sandbox delete dst/);
   });
 
-  it("refuses by default before running source-image preflight per Codex P2 review (#3796)", () => {
-    // Existing destination + unresolvable source image. The user must see the
-    // precise "destination exists" error, not the "cannot resolve image"
+  it("refuses by default before running source-descriptor preflight (#3796)", () => {
+    // Existing destination + invalid source descriptor. The user must see the
+    // precise "destination exists" error, not the descriptor validation
     // misdirection that would land if the refusal came after preflight.
     const { env } = makeExistingDestEnv("nemoclaw-snap-restore-refuse-before-preflight-", {
       withSourceImage: false,
@@ -330,14 +341,13 @@ describe("snapshot restore --to existing destination (#3756)", () => {
     expect(log).not.toMatch(/sandbox delete dst/);
   });
 
-  it("does NOT delete the destination when the source pod image cannot be resolved (--force --yes)", () => {
+  it("does NOT delete the destination when the live source image is invalid (--force --yes)", () => {
     const { env, osLog } = makeExistingDestEnv("nemoclaw-snap-restore-no-image-", {
       withSourceImage: false,
     });
     const r = runCli(["src", "snapshot", "restore", "--to", "dst", "--force", "--yes"], env);
     expect(r.code).toBe(1);
-    expect(r.out).toMatch(/Cannot resolve image for source sandbox 'src'/);
-    expect(r.out).toMatch(/aborting before deleting 'dst'/);
+    expect(r.out).toMatch(/invalid image/);
     expect(r.out).not.toMatch(/Deleting existing destination 'dst'/);
     const log = fs.existsSync(osLog) ? fs.readFileSync(osLog, "utf-8") : "";
     expect(log).not.toMatch(/sandbox delete dst/);

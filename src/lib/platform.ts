@@ -88,7 +88,7 @@ function containerCanReachHostLoopback(
 
 function shouldPatchCoredns(runtime: ContainerRuntime, opts: WslDetectionOptions = {}): boolean {
   // CoreDNS patching is needed for Colima and Podman (both use custom network bridges).
-  // OpenShell owns sandbox DNS on WSL2; this host-side CoreDNS patch is not applicable there.
+  // On WSL2, the host DNS is not routable from k3s pods — skip and let setup-dns-proxy.sh handle it.
   if (isWsl(opts)) return false;
   return runtime === "colima" || runtime === "podman";
 }

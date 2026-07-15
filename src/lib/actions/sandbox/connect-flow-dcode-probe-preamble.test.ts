@@ -54,6 +54,7 @@ describe("connectSandbox DCode probe preamble boundary", () => {
     await expect(harness.connectSandbox("alpha")).rejects.toThrow("process.exit(1)");
 
     expect(harness.applyVmDnsMonkeypatchSpy).not.toHaveBeenCalled();
+    expect(harness.runSetupDnsProxySpy).not.toHaveBeenCalled();
     expect(harness.runOpenshellSpy).not.toHaveBeenCalled();
     expect(harness.spawnSyncSpy).not.toHaveBeenCalled();
     expect(harness.errorSpy.mock.calls.flat().join("\n")).toContain(
@@ -84,6 +85,7 @@ describe("connectSandbox DCode probe preamble boundary", () => {
     await expect(harness.connectSandbox("alpha")).rejects.toThrow("process.exit(1)");
 
     expect(harness.applyVmDnsMonkeypatchSpy).not.toHaveBeenCalled();
+    expect(harness.runSetupDnsProxySpy).not.toHaveBeenCalled();
     expect(harness.runOpenshellSpy).not.toHaveBeenCalled();
     expect(harness.spawnSyncSpy).not.toHaveBeenCalledWith(
       "openshell",
@@ -112,6 +114,7 @@ describe("connectSandbox DCode probe preamble boundary", () => {
     await expect(harness.connectSandbox("alpha")).rejects.toThrow("process.exit(1)");
 
     expect(harness.applyVmDnsMonkeypatchSpy).not.toHaveBeenCalled();
+    expect(harness.runSetupDnsProxySpy).not.toHaveBeenCalled();
     expect(harness.runOpenshellSpy).not.toHaveBeenCalled();
     expect(harness.spawnSyncSpy).not.toHaveBeenCalledWith(
       "openshell",

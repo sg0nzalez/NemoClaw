@@ -13,13 +13,13 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { GATEWAY_STOP_SCRIPT } from "./gateway-stop-script";
 
 // Linux-only: execute the production shell script against real processes while
 // scoping its ps snapshot to PIDs created by this test. This guards all gateway
 // argv forms without risking unrelated developer or CI processes.
-describe("GATEWAY_STOP_SCRIPT (executed)", () => {
+describe("GATEWAY_STOP_SCRIPT (executed via production sh -s stdin)", () => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const cp = require("node:child_process");
   const children: Array<{ pid?: number }> = [];
@@ -81,8 +81,9 @@ ps() {
   fi
 }
 ${script}`;
-    const result = cp.spawnSync("sh", ["-lc", scopedScript], {
+    const result = cp.spawnSync("sh", ["-s"], {
       encoding: "utf-8",
+      input: scopedScript,
       timeout: 20000,
     });
     assert(result.status !== null, `stop script did not exit: ${result.signal} ${result.stderr}`);
@@ -92,6 +93,14 @@ ${script}`;
   function processStartTime(pid: number): string {
     const stat = readFileSync(`/proc/${pid}/stat`, "utf-8");
     return stat.replace(/^[^)]*\) /, "").split(" ")[19];
+  }
+
+  async function waitForArgv0(pid: number, expected: string): Promise<void> {
+    await vi.waitFor(
+      () =>
+        expect(readFileSync(`/proc/${pid}/cmdline`, "utf-8").split("\0")[0] ?? "").toBe(expected),
+      { timeout: 5_000, interval: 10 },
+    );
   }
 
   function identityFixture(
@@ -143,6 +152,7 @@ ${script}`;
     "finds and kills a gateway whose argv was rewritten to bare 'openclaw' (#4951)",
     async () => {
       const pid = spawnWithArgv0("openclaw");
+      await waitForArgv0(pid, "openclaw");
       expect(runStopScript(stopScriptWithGatewayIdentity(pid))).toBe(0);
       await new Promise((r) => setTimeout(r, 300));
       expect(isAlive(pid)).toBe(false);

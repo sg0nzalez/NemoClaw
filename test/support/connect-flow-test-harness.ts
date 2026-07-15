@@ -37,6 +37,7 @@ export type ConnectHarness = {
   resolveAgentConfigSpy: MockInstance;
   runAutoPairSpy: MockInstance;
   runOpenshellSpy: MockInstance;
+  runSetupDnsProxySpy: MockInstance;
   spawnSyncSpy: MockInstance;
   withGatewayRouteMutationLockSpy: MockInstance;
   writeSandboxConfigSpy: MockInstance;
@@ -99,6 +100,7 @@ export function createConnectHarness(options: ConnectHarnessOptions = {}): Conne
   const runtime = requireDist("../../src/lib/adapters/openshell/runtime.js");
   const resolve = requireDist("../../src/lib/adapters/openshell/resolve.js");
   const agentRuntime = requireDist("../../src/lib/agent/runtime.js");
+  const dns = requireDist("../../src/lib/actions/dns/index.js");
   const gatewayState = requireDist("../../src/lib/actions/sandbox/gateway-state.js");
   const processRecovery = requireDist("../../src/lib/actions/sandbox/process-recovery.js");
   const autoPairApproval = requireDist("../../src/lib/actions/sandbox/auto-pair-approval.js");
@@ -158,6 +160,7 @@ export function createConnectHarness(options: ConnectHarnessOptions = {}): Conne
         (async (_gatewayName: string, operation: () => Promise<unknown> | unknown) =>
           await operation())) as never,
     );
+  const runSetupDnsProxySpy = vi.spyOn(dns, "runSetupDnsProxy").mockReturnValue({ exitCode: 0 });
   const applyVmDnsMonkeypatchSpy = vi
     .spyOn(vmDnsMonkeypatch, "applyOpenShellVmDnsMonkeypatch")
     .mockReturnValue({ attempted: true, changed: true, ok: true, status: "applied" });
@@ -259,6 +262,7 @@ export function createConnectHarness(options: ConnectHarnessOptions = {}): Conne
     resolveAgentConfigSpy,
     runAutoPairSpy,
     runOpenshellSpy,
+    runSetupDnsProxySpy,
     spawnSyncSpy,
     withGatewayRouteMutationLockSpy,
     writeSandboxConfigSpy,

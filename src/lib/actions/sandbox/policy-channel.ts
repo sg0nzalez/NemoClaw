@@ -4,6 +4,14 @@
 import fs from "node:fs";
 import path from "node:path";
 import { runOpenshell } from "../../adapters/openshell/runtime";
+import {
+  type SandboxExecRequest,
+  validateOpenShellExecRequest,
+} from "../../adapters/openshell/sandbox-control";
+import {
+  type OpenShellMutationControlSelection,
+  selectOpenShellSandboxControlForMutation,
+} from "../../adapters/openshell/sandbox-control-routing";
 import { type AgentDefinition, loadAgent } from "../../agent/defs";
 import { CLI_DISPLAY_NAME, CLI_NAME } from "../../cli/branding";
 import { isNonInteractiveEnv } from "../../core/non-interactive";
@@ -36,8 +44,10 @@ import {
 import { findChannelConflicts } from "../../messaging/applier/conflict-detection/registry";
 import { hydrateMessagingChannelConfig } from "../../messaging-channel-config";
 import { filterSetupPolicyPresetsForAgent } from "../../onboard/agent-policy-presets";
+import { resolveSandboxGatewayName } from "../../onboard/gateway-binding";
 import { getStoredMessagingChannelConfig } from "../../onboard/messaging-config";
 import { getMessagingToken } from "../../onboard/messaging-token";
+import { assertNoOpenShellGatewayEndpointOverride } from "../../openshell-gateway-endpoint-guard";
 import * as policies from "../../policy";
 import { formatPolicyListPresetRow } from "../../policy/policy-list-display";
 import { shellQuote } from "../../runner";
@@ -59,7 +69,7 @@ import { getSandboxTargetGatewayName } from "./gateway-target";
 import { ensureMessagingHostForwardAfterRebuild } from "./messaging-host-forward-lifecycle";
 import { policyChannelDependencies } from "./policy-channel-dependencies";
 import { refreshSandboxPolicyContextFile } from "./policy-context-refresh";
-import { executeSandboxCommand, executeSandboxExecCommand } from "./process-recovery";
+import { executeSandboxExecCommand } from "./process-recovery";
 
 const isNonInteractive = isNonInteractiveEnv;
 
@@ -1182,28 +1192,57 @@ const CHANNEL_CLEAR_SENTINEL = "NEMOCLAW_CHANNEL_CLEAR_OK";
 // the state_dirs backup does not restore an auth blob the operator just
 // asked NemoClaw to forget. Returns true when no cleanup was needed OR
 // when the in-sandbox rm produced our success sentinel; false otherwise.
-// Tries `openshell sandbox exec` first and falls back to SSH for transient
-// wrapper hiccups (mirrors the pattern in process-recovery.ts:286-296).
+// Selects one OpenShell mutation transport before dispatch and never retries:
+// a failed exec may already have removed the state remotely.
 // Fixes #3998.
-function clearSandboxChannelDurableState(sandboxName: string, channelName: string): boolean {
-  const agent = resolveAgentForSandbox(sandboxName);
+async function clearSandboxChannelDurableState(
+  sandboxName: string,
+  channelName: string,
+  entry: registry.SandboxEntry | null,
+): Promise<boolean> {
+  if (!entry || entry.name !== sandboxName) {
+    console.error(
+      `  ${YW}⚠${R} Could not resolve the registered OpenShell gateway for sandbox '${sandboxName}'.`,
+    );
+    return false;
+  }
+
+  const agent = loadAgent(entry.agent || "openclaw");
   const paths = getSandboxChannelStatePaths(agent, channelName).filter(isSafeChannelStatePath);
   if (paths.length === 0) return true;
 
   const quoted = paths.map((p) => shellQuote(p)).join(" ");
-  const cmd = `rm -rf -- ${quoted} && printf '%s\\n' ${shellQuote(CHANNEL_CLEAR_SENTINEL)}`;
-  const sentinelSeen = (result: { stdout?: string | null } | null): boolean =>
-    !!result && typeof result.stdout === "string" && result.stdout.includes(CHANNEL_CLEAR_SENTINEL);
-
-  let result = executeSandboxExecCommand(sandboxName, cmd);
-  if (!sentinelSeen(result)) {
-    result = executeSandboxCommand(sandboxName, cmd);
-  }
-  if (!sentinelSeen(result)) {
+  const stdin = `set -eu\nrm -rf -- ${quoted}\nprintf '%s\\n' ${shellQuote(CHANNEL_CLEAR_SENTINEL)}\n`;
+  const request: SandboxExecRequest = {
+    sandboxName,
+    command: ["sh", "-s"],
+    stdin,
+    timeoutMs: 30_000,
+    maxOutputBytes: 64 * 1024,
+  };
+  let selected: OpenShellMutationControlSelection | undefined;
+  try {
+    const validationError = validateOpenShellExecRequest(request);
+    if (validationError) throw validationError;
+    assertNoOpenShellGatewayEndpointOverride();
+    selected = selectOpenShellSandboxControlForMutation(resolveSandboxGatewayName(entry));
+    const result = await selected.control.exec(request);
+    if (
+      result.error ||
+      result.signal ||
+      result.status === null ||
+      result.status !== 0 ||
+      !result.stdout.split(/\r?\n/u).includes(CHANNEL_CLEAR_SENTINEL)
+    ) {
+      throw result.error ?? new Error("OpenShell channel-state cleanup did not complete");
+    }
+  } catch {
     console.error(
       `  ${YW}⚠${R} Could not clear in-sandbox '${channelName}' channel state at ${paths.join(", ")}.`,
     );
     return false;
+  } finally {
+    selected?.close();
   }
   console.log(`  ${G}✓${R} Cleared in-sandbox '${channelName}' channel state.`);
   return true;
@@ -1363,7 +1402,7 @@ async function removeSandboxChannelUnlocked(
   if (
     isQrChannel &&
     hasChannelResidue &&
-    !clearSandboxChannelDurableState(sandboxName, canonical)
+    !(await clearSandboxChannelDurableState(sandboxName, canonical, registryEntry))
   ) {
     console.error(
       `  Refusing to proceed: '${canonical}' session state is still inside the sandbox.`,
@@ -1391,7 +1430,7 @@ async function removeSandboxChannelUnlocked(
   // revocation already prevents the bot from authenticating, so a
   // failure here is a warning, not a bail.
   if (!isQrChannel) {
-    clearSandboxChannelDurableState(sandboxName, canonical);
+    await clearSandboxChannelDurableState(sandboxName, canonical, registryEntry);
   }
 
   await promptAndRebuild(sandboxName, `remove '${canonical}'`);

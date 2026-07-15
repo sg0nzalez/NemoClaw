@@ -155,7 +155,7 @@ const os = require("os");
 const path = require("path");
 const pRetry = require("p-retry");
 const runner: typeof import("./runner") = require("./runner");
-const { ROOT, SCRIPTS, redact, run, runCapture, runCaptureEx, validateName } = runner;
+const { ROOT, SCRIPTS, redact, run, runCapture, runCaptureEx, runFile, validateName } = runner;
 const braveProviderProfile: typeof import("./onboard/brave-provider-profile") = require("./onboard/brave-provider-profile");
 const {
   applyExtraProviderReconciliation,
@@ -1433,18 +1433,11 @@ function registerDockerDriverGatewayEndpoint(): boolean {
   return ok;
 }
 
-function attachGatewayMetadataIfNeeded({
-  forceRefresh = false,
-}: {
-  forceRefresh?: boolean;
-} = {}): boolean {
+function attachGatewayMetadataIfNeeded(): boolean {
   const gwInfo = runCaptureOpenshell(["gateway", "info", "-g", GATEWAY_NAME], {
     ignoreError: true,
   });
-  // runCaptureOpenshell may return stale-but-present gateway metadata. When
-  // hasStaleGateway(gwInfo) is truthy we skip runOpenshell unless a repair
-  // flow explicitly forces a refresh after recreating bootstrap secrets.
-  if (!forceRefresh && hasStaleGateway(gwInfo)) return true;
+  if (hasStaleGateway(gwInfo)) return true;
 
   if (isLinuxDockerDriverGatewayEnabled()) {
     return registerDockerDriverGatewayEndpoint();
@@ -2852,7 +2845,6 @@ async function createSandboxWithBaseImageResolution(
     finalHermesDashboardState = hermesDashboardForwarding.resolveStateForPort(actualDashboardPort);
     hermesDashboardForwarding.ensureForState(finalHermesDashboardState, sandboxName, true);
   }
-
   // openshell tags images with seconds; buildId is ms. Parse actual tag from output. Fixes #2672.
   const resolvedImageTag =
     registryImageRef ??
@@ -2866,6 +2858,7 @@ async function createSandboxWithBaseImageResolution(
       restoreBackupPath,
       preUpgradeBackup: pendingStateRestoreBackupPath !== null,
       targetAgentType: agent?.name ?? "openclaw",
+      gatewayName: GATEWAY_NAME,
       customImage: Boolean(fromDockerfile),
       discoverOpenClawImagePluginInstalls: customOpenClawImage,
       validateManagedDcode: isManagedDcodeAgent,
@@ -2875,7 +2868,7 @@ async function createSandboxWithBaseImageResolution(
     },
     // biome-ignore format: keep src/lib/onboard.ts within the growth guardrail.
     {
-      discoverFreshOpenClawImagePluginInstalls: (name) => openClawPluginRestore.discoverFreshOpenClawImagePluginInstalls(name, GATEWAY_NAME, agent?.configPaths.dir), restoreRecreatedSandboxState: (name, backupPath, options) => sandboxState.restoreRecreatedSandboxState(name, backupPath, { ...options, gatewayName: GATEWAY_NAME }),
+      discoverFreshOpenClawImagePluginInstalls: (name) => openClawPluginRestore.discoverFreshOpenClawImagePluginInstalls(name, GATEWAY_NAME, agent?.configPaths.dir), restoreRecreatedSandboxState: (name, backupPath, options) => sandboxState.restoreRecreatedSandboxState(name, backupPath, options),
       getDcodeSelectionDrift: (name, selectedProvider, selectedModel, selectedApi) =>
         getDcodeSelectionDrift(name, selectedProvider, selectedModel, selectedApi, {
           runCaptureOpenshell,
@@ -2915,6 +2908,15 @@ async function createSandboxWithBaseImageResolution(
     },
   );
   restoreDefaultAfterRecreate(registry.setDefault, sandboxName, sandboxWasLiveDefault); // #4614: default deferred to finalization
+
+  // DNS proxy — run a forwarder in the sandbox pod so the isolated
+  // sandbox namespace can resolve hostnames (fixes #626).
+  if (sandboxRuntimeFields.openshellDriver === "kubernetes") {
+    console.log("  Setting up sandbox DNS proxy...");
+    runFile("bash", [path.join(SCRIPTS, "setup-dns-proxy.sh"), GATEWAY_NAME, sandboxName], {
+      ignoreError: true,
+    });
+  }
 
   require("./onboard/vm-dns-monkeypatch").applyOnboardVmDnsMonkeypatch(
     sandboxName,
