@@ -103,8 +103,10 @@ describe("legacy sandbox transport inventory", () => {
     ]);
   });
 
-  it("tracks namespace imports and direct or aliased named re-exports", () => {
+  it("tracks namespace imports, dynamic requires, and named re-exports", () => {
     const root = fixtureRepo({
+      "src/dynamic-require.ts":
+        'const { execSandboxReadOnlyWithGrpcFallback } = require("./lib/adapters/openshell/sandbox-control-routing");',
       "src/namespace-import.ts":
         'import * as routing from "./lib/adapters/openshell/sandbox-control-routing.js";\nrouting.execSandboxReadOnlyWithGrpcFallback("gateway", request);',
       "src/re-export.ts": [
@@ -114,6 +116,11 @@ describe("legacy sandbox transport inventory", () => {
     });
 
     expect(discoverLegacySandboxTransportSites(root)).toEqual([
+      {
+        relativePath: "src/dynamic-require.ts",
+        kind: "grpc-cli-read-only-fallback",
+        calls: 1,
+      },
       {
         relativePath: "src/namespace-import.ts",
         kind: "grpc-cli-read-only-fallback",
@@ -159,6 +166,11 @@ describe("legacy sandbox transport inventory", () => {
       },
       {
         relativePath: "src/lib/sandbox/version.ts",
+        kind: "grpc-cli-read-only-fallback",
+        calls: 1,
+      },
+      {
+        relativePath: "src/lib/share-command-deps.ts",
         kind: "grpc-cli-read-only-fallback",
         calls: 1,
       },

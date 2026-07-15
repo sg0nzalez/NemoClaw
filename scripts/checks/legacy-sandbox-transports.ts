@@ -46,6 +46,7 @@ const REVIEWED_SITE_TUPLES = [
   ["src/lib/resources-cmd.ts", "docker-exec-command", 1],
   ["src/lib/sandbox/config.ts", "privileged-sandbox-exec", 2],
   ["src/lib/sandbox/version.ts", "grpc-cli-read-only-fallback", 1],
+  ["src/lib/share-command-deps.ts", "grpc-cli-read-only-fallback", 1],
   ["src/lib/share-command-deps.ts", "openshell-ssh-config", 1],
   ["src/lib/share-command.ts", "sshfs-command", 1],
   ["src/lib/shields/index.ts", "privileged-sandbox-exec", 4],
@@ -180,6 +181,14 @@ function increment(
   counts.set(kind, (counts.get(kind) ?? 0) + 1);
 }
 
+function isSandboxControlRoutingModule(node: ts.Node | undefined): boolean {
+  return (
+    node !== undefined &&
+    ts.isStringLiteralLike(node) &&
+    /(?:^|\/)sandbox-control-routing(?:\.js)?$/u.test(node.text)
+  );
+}
+
 function scanSource(
   relativePath: string,
   sourceText: string,
@@ -197,8 +206,7 @@ function scanSource(
   function visit(node: ts.Node): void {
     if (
       ts.isImportDeclaration(node) &&
-      ts.isStringLiteral(node.moduleSpecifier) &&
-      /(?:^|\/)sandbox-control-routing(?:\.js)?$/u.test(node.moduleSpecifier.text) &&
+      isSandboxControlRoutingModule(node.moduleSpecifier) &&
       node.importClause &&
       !node.importClause.isTypeOnly &&
       ((node.importClause.namedBindings && ts.isNamespaceImport(node.importClause.namedBindings)) ||
@@ -218,8 +226,7 @@ function scanSource(
       ts.isExportDeclaration(node) &&
       !node.isTypeOnly &&
       node.moduleSpecifier &&
-      ts.isStringLiteral(node.moduleSpecifier) &&
-      /(?:^|\/)sandbox-control-routing(?:\.js)?$/u.test(node.moduleSpecifier.text) &&
+      isSandboxControlRoutingModule(node.moduleSpecifier) &&
       node.exportClause &&
       ts.isNamedExports(node.exportClause) &&
       node.exportClause.elements.some(
@@ -250,6 +257,9 @@ function scanSource(
 
     if (ts.isCallExpression(node)) {
       const name = resolvedExpressionName(node.expression, bindings);
+      if (name === "require" && isSandboxControlRoutingModule(node.arguments[0])) {
+        increment(counts, "grpc-cli-read-only-fallback");
+      }
       const helperKind = name ? HELPER_KINDS.get(name) : undefined;
       if (helperKind) increment(counts, helperKind);
       if (name !== null && DOCKER_COMMAND_CALLS.has(name)) {
