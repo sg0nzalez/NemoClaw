@@ -4,10 +4,7 @@
 import { stringify } from "smol-toml";
 import { describe, expect, it } from "vitest";
 
-import {
-  buildKeyAllowlistMergeRestoreCommand,
-  KEY_ALLOWLIST_MERGE_PYTHON,
-} from "./state-file-key-merge";
+import { KEY_ALLOWLIST_MERGE_PYTHON } from "./state-file-key-merge";
 import {
   DCODE_OWNERSHIP,
   generatedCurrent,
@@ -21,7 +18,7 @@ import {
 } from "./state-file-key-merge-test-fixture";
 
 describe("key-allowlist state-file merge", () => {
-  it("executes the full production command with backup TOML only on stdin", () => {
+  it("executes the fixed merge program with a staged payload and digest", () => {
     const backup = stringify({ ui: { show_scrollbar: true } });
     const current = generatedCurrent({
       models: { default: "openai:nvidia/new-model" },
@@ -71,6 +68,22 @@ describe("key-allowlist state-file merge", () => {
 
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("config parent directory is unsafe");
+    expect(result.current).toBe(current);
+  });
+
+  it.each([
+    ["group-writable stage", { stagedMode: 0o620 }],
+    ["digest mismatch", { stagedDigest: "0".repeat(64) }],
+  ])("rejects a %s before changing the current config", (_label, options) => {
+    const backup = stringify({ ui: { show_scrollbar: true } });
+    const current = generatedCurrent({
+      models: { default: "openai:nvidia/new-model" },
+      update: { check: false, auto_update: false },
+    });
+
+    const result = runProductionCommand(backup, current, options);
+
+    expect(result.status).not.toBe(0);
     expect(result.current).toBe(current);
   });
 
@@ -134,28 +147,9 @@ describe("key-allowlist state-file merge", () => {
     expect(result.stageEntries).toEqual([]);
   });
 
-  it("builds a same-directory staged atomic restore command for any config dir", () => {
-    const command = buildKeyAllowlistMergeRestoreCommand(
-      "/sandbox/.deepagents/",
-      { path: "config.toml" },
-      DCODE_OWNERSHIP,
-    );
-
-    expect(command).toContain("/opt/venv/bin/python3 -I -c");
-    expect(command).toContain('"$dst"');
-    expect(command).not.toContain("mktemp");
-    expect(command).not.toContain('chmod 600 "$');
-    expect(command).toContain("/sandbox/.deepagents/config.toml");
-    expect(command).toContain("show_scrollbar");
+  it("keeps the atomic replacement primitive in the fixed merge program", () => {
     expect(KEY_ALLOWLIST_MERGE_PYTHON).toContain(
       "os.replace(staged_name, current_name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)",
     );
-
-    const custom = buildKeyAllowlistMergeRestoreCommand(
-      "/sandbox/.custom",
-      { path: "config.toml" },
-      DCODE_OWNERSHIP,
-    );
-    expect(custom).toContain("/sandbox/.custom/config.toml");
   });
 });
