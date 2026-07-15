@@ -32,7 +32,7 @@ function runInstallHelper(tmp: string, body: string, env: NodeJS.ProcessEnv = {}
 describe("install.sh OpenShell gateway service", () => {
   it("stages a Linux OpenShell gateway user service from the installer wrapper", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-install-gateway-service-"));
-    const gatewayBin = path.join(tmp, "bin", "openshell-gateway");
+    const gatewayBin = path.join(tmp, ".local", "bin", "openshell-gateway");
     const servicePath = path.join(tmp, ".config", "systemd", "user", "openshell-gateway.service");
     fs.mkdirSync(path.dirname(gatewayBin), { recursive: true });
     writeExecutable(gatewayBin, "#!/usr/bin/env bash\nexit 0\n");
@@ -106,7 +106,7 @@ describe("install.sh OpenShell gateway service", () => {
 
   it("does not overwrite a foreign user service containing the marker text", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-install-gateway-service-"));
-    const gatewayBin = path.join(tmp, "bin", "openshell-gateway");
+    const gatewayBin = path.join(tmp, ".local", "bin", "openshell-gateway");
     const servicePath = path.join(tmp, ".config", "systemd", "user", "openshell-gateway.service");
     const originalUnit = "# foreign unit\n# not NEMOCLAW_MANAGED_OPENSHELL_GATEWAY=1\n";
     fs.mkdirSync(path.dirname(gatewayBin), { recursive: true });

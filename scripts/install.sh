@@ -1141,6 +1141,18 @@ resolve_openshell_gateway_bin_for_service() {
   printf "%s\n" "$gateway_bin"
 }
 
+trusted_openshell_gateway_bin_for_service() {
+  local gateway_bin="${1:-}"
+  case "$gateway_bin" in
+    "${HOME}/.local/bin/openshell-gateway" | /usr/local/bin/openshell-gateway | /usr/bin/openshell-gateway)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 is_nemoclaw_openshell_gateway_user_service() {
   local service_path="${1:-}"
   [[ -f "$service_path" ]] || return 1
@@ -1175,6 +1187,10 @@ install_nemoclaw_openshell_gateway_user_service() {
       return 0
       ;;
   esac
+  if ! trusted_openshell_gateway_bin_for_service "$gateway_bin"; then
+    warn "Skipping OpenShell gateway user service because the binary path is not a trusted install path: $gateway_bin"
+    return 0
+  fi
 
   if [[ -f "$service_path" ]] && ! is_nemoclaw_openshell_gateway_user_service "$service_path"; then
     warn "Leaving non-NemoClaw OpenShell gateway user service in place: $service_path"
@@ -1190,7 +1206,6 @@ $NEMOCLAW_GATEWAY_SERVICE_MARKER_LINE
 [Unit]
 Description=OpenShell Gateway
 Documentation=https://github.com/NVIDIA/OpenShell
-After=default.target
 
 [Service]
 Type=simple

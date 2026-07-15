@@ -156,6 +156,14 @@ describe("docker-driver-gateway-service", () => {
         platform: "linux",
       }).reason,
     ).toMatch(/cannot contain whitespace/);
+    expect(
+      installNemoclawOpenShellGatewayUserService({
+        existsSync: () => false,
+        gatewayBin: "/opt/openshell/bin/openshell-gateway",
+        home: "/home/nvidia",
+        platform: "linux",
+      }).reason,
+    ).toMatch(/not in a trusted install path/);
   });
 
   it("restarts the NemoClaw-managed user service after validating its identity", () => {

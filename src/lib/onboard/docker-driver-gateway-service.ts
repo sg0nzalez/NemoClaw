@@ -163,28 +163,6 @@ function isNemoclawManagedOpenShellGatewayUserServiceUnit(
   return hasNemoclawOpenShellGatewayUserServiceMarker(readTextFileIfPresent(filePath, opts));
 }
 
-function extractUnitFileExecStartPath(unit: string): string | null {
-  const match = /^ExecStart=([^\s]+)\s*$/m.exec(unit);
-  const execStart = match?.[1]?.trim();
-  if (!execStart || !path.isAbsolute(execStart)) return null;
-  if (path.basename(execStart) !== "openshell-gateway") return null;
-  try {
-    assertSafeSystemdExecPath(execStart);
-    return execStart;
-  } catch {
-    return null;
-  }
-}
-
-function readNemoclawManagedOpenShellGatewayUserServiceExecStart(
-  filePath: string,
-  opts: Pick<OpenShellGatewayUserServiceOptions, "readFileSync"> = {},
-): string | null {
-  const unit = readTextFileIfPresent(filePath, opts);
-  if (!hasNemoclawOpenShellGatewayUserServiceMarker(unit)) return null;
-  return extractUnitFileExecStartPath(unit);
-}
-
 function hasUpstreamOpenShellGatewayUserService(
   opts: Pick<OpenShellGatewayUserServiceOptions, "existsSync" | "platform"> = {},
 ): boolean {
@@ -224,13 +202,9 @@ function resolveOpenShellGatewayUserService(
   if (hasNemoclawOpenShellGatewayUserService(opts)) {
     const home = opts.home ?? os.homedir();
     const servicePath = getNemoclawOpenShellGatewayUserServicePath(home);
-    const execStart = readNemoclawManagedOpenShellGatewayUserServiceExecStart(servicePath, opts);
     return {
       serviceName: OPENSHELL_GATEWAY_USER_SERVICE,
-      trustedBinaryPaths: [
-        ...getNemoclawOpenShellGatewayUserServiceBinaryPaths(home),
-        ...(execStart ? [execStart] : []),
-      ],
+      trustedBinaryPaths: getNemoclawOpenShellGatewayUserServiceBinaryPaths(home),
       trustedUnitPaths: [servicePath],
     };
   }
@@ -368,6 +342,13 @@ function assertSafeSystemdExecPath(filePath: string): void {
   }
 }
 
+function isTrustedNemoclawGatewayServiceBinaryPath(filePath: string, home: string): boolean {
+  const normalizedPath = path.normalize(filePath);
+  return getNemoclawOpenShellGatewayUserServiceBinaryPaths(home).some(
+    (candidate) => path.normalize(candidate) === normalizedPath,
+  );
+}
+
 export function buildNemoclawOpenShellGatewayUserService(gatewayBin: string): string {
   assertSafeSystemdExecPath(gatewayBin);
   return [
@@ -376,7 +357,6 @@ export function buildNemoclawOpenShellGatewayUserService(gatewayBin: string): st
     "[Unit]",
     "Description=OpenShell Gateway",
     "Documentation=https://github.com/NVIDIA/OpenShell",
-    "After=default.target",
     "",
     "[Service]",
     "Type=simple",
@@ -452,6 +432,13 @@ export function installNemoclawOpenShellGatewayUserService(
       installed: false,
       path: servicePath,
       reason: error instanceof Error ? error.message : String(error),
+    };
+  }
+  if (!isTrustedNemoclawGatewayServiceBinaryPath(opts.gatewayBin, home)) {
+    return {
+      installed: false,
+      path: servicePath,
+      reason: "OpenShell gateway service ExecStart path is not in a trusted install path",
     };
   }
 
