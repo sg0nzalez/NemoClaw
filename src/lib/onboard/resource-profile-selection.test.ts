@@ -5,6 +5,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ResourceProfileSelectionDeps } from "./resource-profile-selection";
 import { selectResourceProfileForSandbox } from "./resource-profile-selection.js";
 
+const mocks = vi.hoisted(() => ({
+  getHardwareResources: vi.fn(),
+}));
+
+vi.mock("../resources-cmd", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../resources-cmd")>()),
+  getHardwareResources: mocks.getHardwareResources,
+}));
+
 function makeDeps(
   overrides: Partial<ResourceProfileSelectionDeps> = {},
 ): ResourceProfileSelectionDeps {
@@ -21,18 +30,27 @@ function makeDeps(
 describe("selectResourceProfileForSandbox", () => {
   let exitSpy: ReturnType<typeof vi.spyOn>;
   let errorSpy: ReturnType<typeof vi.spyOn>;
+  let logSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.getHardwareResources.mockReturnValue({
+      cpu: { cores: 16, model: "test-cpu" },
+      memory: { totalMB: 32768, swapMB: 0 },
+      gpu: null,
+      profiles: null,
+    });
     exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
       throw new Error(`process.exit(${code})`);
     }) as never);
     errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
   });
 
   afterEach(() => {
     exitSpy.mockRestore();
     errorSpy.mockRestore();
+    logSpy.mockRestore();
   });
 
   it("selects a named resource profile from the environment", async () => {
@@ -117,6 +135,21 @@ describe("selectResourceProfileForSandbox", () => {
     });
 
     expect(deps.prompt).toHaveBeenCalledTimes(2);
+  });
+
+  it("previews a custom profile against host CPU and RAM totals", async () => {
+    const deps = makeDeps({
+      promptOrDefault: vi.fn().mockResolvedValue("5"),
+      prompt: vi.fn().mockResolvedValueOnce("50%").mockResolvedValueOnce("25%"),
+    });
+
+    await expect(selectResourceProfileForSandbox(deps)).resolves.toEqual({
+      cpu: "50%",
+      memory: "25%",
+    });
+
+    expect(logSpy).toHaveBeenCalledWith("  Available: 16 CPU cores, 32768 MB RAM");
+    expect(logSpy).toHaveBeenCalledWith("  Resolved: CPU=8, RAM=8Gi");
   });
 
   it("exits when custom profile validation fails", async () => {
