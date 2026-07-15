@@ -146,6 +146,44 @@ describe("uninstall OpenShell gateway user service", () => {
     }
   });
 
+  it("removes the NemoClaw-managed user service from XDG_CONFIG_HOME", () => {
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-uninstall-gateway-service-"));
+    const xdgConfigHome = path.join(tmpHome, "xdg-config");
+    const servicePath = getNemoclawOpenShellGatewayUserServicePath(tmpHome, xdgConfigHome);
+    fs.mkdirSync(path.dirname(servicePath), { recursive: true });
+    fs.writeFileSync(
+      servicePath,
+      [
+        "# NemoClaw-managed OpenShell gateway user service",
+        `# ${NEMOCLAW_OPENSHELL_GATEWAY_USER_SERVICE_MARKER}`,
+        "[Service]",
+        "ExecStart=/home/test/.local/bin/openshell-gateway",
+        "",
+      ].join("\n"),
+    );
+
+    try {
+      const result = runUninstallPlan(
+        { assumeYes: true, deleteModels: false, keepOpenShell: false },
+        {
+          commandExists: (command) => command === "systemctl",
+          env: { HOME: tmpHome, XDG_CONFIG_HOME: xdgConfigHome } as NodeJS.ProcessEnv,
+          existsSync: (target) => String(target).startsWith(tmpHome) && fs.existsSync(target),
+          isTty: false,
+          platform: "linux",
+          rmSync: fs.rmSync,
+          run: vi.fn(() => ok()),
+          runDocker: () => ok(""),
+        },
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(fs.existsSync(servicePath)).toBe(false);
+    } finally {
+      fs.rmSync(tmpHome, { recursive: true, force: true });
+    }
+  });
+
   it("reports an incomplete uninstall when the service cannot be disabled", () => {
     const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-uninstall-gateway-service-"));
     const servicePath = getNemoclawOpenShellGatewayUserServicePath(tmpHome);

@@ -42,7 +42,7 @@ export interface OpenShellGatewayUserServiceStartResult {
 export interface InstallNemoclawOpenShellGatewayUserServiceOptions
   extends Pick<
     OpenShellGatewayUserServiceOptions,
-    "existsSync" | "home" | "platform" | "readFileSync"
+    "env" | "existsSync" | "home" | "platform" | "readFileSync"
   > {
   chmodSync?: (filePath: string, mode: number) => void;
   gatewayBin: string | null;
@@ -79,6 +79,7 @@ export type SpawnSyncLike = (
 
 export interface PackageManagedDockerDriverGatewayOptions {
   clearDockerDriverGatewayRuntimeFiles: () => void;
+  env?: NodeJS.ProcessEnv;
   exitOnFailure: boolean;
   gatewayName: string;
   hasOpenShellGatewayUserService?: () => boolean;
@@ -92,7 +93,7 @@ export interface PackageManagedDockerDriverGatewayOptions {
   prepareOpenShellGatewayUserServiceEnv?: () => void;
   skipSandboxBridgeReachability: boolean;
   startOpenShellGatewayUserService?: (
-    opts?: Pick<OpenShellGatewayUserServiceOptions, "prepareServiceEnv">,
+    opts?: Pick<OpenShellGatewayUserServiceOptions, "env" | "prepareServiceEnv">,
   ) => OpenShellGatewayUserServiceStartResult;
   verifySandboxBridgeGatewayReachableOrExit: (
     exitOnFailure: boolean,
@@ -123,8 +124,21 @@ export function getOpenShellGatewayUserServiceBinaryPaths(): string[] {
   return ["/usr/local/bin/openshell-gateway", "/usr/bin/openshell-gateway"];
 }
 
-export function getNemoclawOpenShellGatewayUserServicePath(home = os.homedir()): string {
-  return path.join(home, ".config", "systemd", "user", "openshell-gateway.service");
+function getSystemdUserConfigHome(home: string, xdgConfigHome?: string): string {
+  if (xdgConfigHome && path.isAbsolute(xdgConfigHome)) return xdgConfigHome;
+  return path.join(home, ".config");
+}
+
+export function getNemoclawOpenShellGatewayUserServicePath(
+  home = os.homedir(),
+  xdgConfigHome?: string,
+): string {
+  return path.join(
+    getSystemdUserConfigHome(home, xdgConfigHome),
+    "systemd",
+    "user",
+    "openshell-gateway.service",
+  );
 }
 
 export function getNemoclawOpenShellGatewayUserServiceBinaryPaths(home = os.homedir()): string[] {
@@ -199,12 +213,15 @@ function hasUpstreamOpenShellGatewayUserService(
 export function hasNemoclawOpenShellGatewayUserService(
   opts: Pick<
     OpenShellGatewayUserServiceOptions,
-    "existsSync" | "home" | "platform" | "readFileSync"
+    "env" | "existsSync" | "home" | "platform" | "readFileSync"
   > = {},
 ): boolean {
   if ((opts.platform ?? process.platform) !== "linux") return false;
   const existsSync = opts.existsSync ?? fs.existsSync;
-  const servicePath = getNemoclawOpenShellGatewayUserServicePath(opts.home);
+  const servicePath = getNemoclawOpenShellGatewayUserServicePath(
+    opts.home,
+    opts.env?.XDG_CONFIG_HOME,
+  );
   return (
     existsSync(servicePath) && isNemoclawManagedOpenShellGatewayUserServiceUnit(servicePath, opts)
   );
@@ -213,7 +230,7 @@ export function hasNemoclawOpenShellGatewayUserService(
 function resolveOpenShellGatewayUserService(
   opts: Pick<
     OpenShellGatewayUserServiceOptions,
-    "existsSync" | "home" | "platform" | "readFileSync"
+    "env" | "existsSync" | "home" | "platform" | "readFileSync"
   > = {},
 ): OpenShellGatewayUserServiceTarget | null {
   if ((opts.platform ?? process.platform) !== "linux") return null;
@@ -226,7 +243,7 @@ function resolveOpenShellGatewayUserService(
   }
   if (hasNemoclawOpenShellGatewayUserService(opts)) {
     const home = opts.home ?? os.homedir();
-    const servicePath = getNemoclawOpenShellGatewayUserServicePath(home);
+    const servicePath = getNemoclawOpenShellGatewayUserServicePath(home, opts.env?.XDG_CONFIG_HOME);
     const execStart = readNemoclawManagedOpenShellGatewayUserServiceExecStart(servicePath, opts);
     return {
       serviceName: OPENSHELL_GATEWAY_USER_SERVICE,
@@ -243,7 +260,7 @@ function resolveOpenShellGatewayUserService(
 export function hasOpenShellGatewayUserService(
   opts: Pick<
     OpenShellGatewayUserServiceOptions,
-    "existsSync" | "home" | "platform" | "readFileSync"
+    "env" | "existsSync" | "home" | "platform" | "readFileSync"
   > = {},
 ): boolean {
   return resolveOpenShellGatewayUserService(opts) !== null;
@@ -403,7 +420,7 @@ export function installNemoclawOpenShellGatewayUserService(
   const platform = opts.platform ?? process.platform;
   if (platform !== "linux") return { installed: false, reason: "not a Linux host" };
   const home = opts.home ?? os.homedir();
-  const servicePath = getNemoclawOpenShellGatewayUserServicePath(home);
+  const servicePath = getNemoclawOpenShellGatewayUserServicePath(home, opts.env?.XDG_CONFIG_HOME);
   const existsSync = opts.existsSync ?? fs.existsSync;
   if (hasUpstreamOpenShellGatewayUserService(opts)) {
     if (
@@ -508,8 +525,10 @@ export function startOpenShellGatewayUserService(
   if (platform !== "linux") {
     return { attempted: false, fallbackAllowed: true, started: false, reason: "not a Linux host" };
   }
+  const env = opts.env ?? process.env;
   const existsSync = opts.existsSync ?? fs.existsSync;
   const service = resolveOpenShellGatewayUserService({
+    env,
     existsSync,
     home: opts.home,
     platform,
@@ -524,7 +543,6 @@ export function startOpenShellGatewayUserService(
     };
   }
 
-  const env = opts.env ?? process.env;
   const commandExists = opts.commandExists ?? ((command) => defaultCommandExists(command, env));
   if (!commandExists("systemctl")) {
     return {
@@ -608,16 +626,22 @@ export async function startPackageManagedDockerDriverGateway({
   registerDockerDriverGatewayEndpoint,
   runCaptureOpenshell,
   sleepSeconds: sleepSecondsImpl = sleepSeconds,
+  env = process.env,
   prepareOpenShellGatewayUserServiceEnv,
   skipSandboxBridgeReachability,
   startOpenShellGatewayUserService:
     startOpenShellGatewayUserServiceImpl = startOpenShellGatewayUserService,
   verifySandboxBridgeGatewayReachableOrExit,
 }: PackageManagedDockerDriverGatewayOptions): Promise<boolean> {
-  if (!hasOpenShellGatewayUserServiceImpl()) return false;
+  const hasService =
+    hasOpenShellGatewayUserServiceImpl === hasOpenShellGatewayUserService
+      ? hasOpenShellGatewayUserService({ env })
+      : hasOpenShellGatewayUserServiceImpl();
+  if (!hasService) return false;
 
   console.log("  Starting OpenShell Docker-driver gateway via user service...");
   const serviceStart = startOpenShellGatewayUserServiceImpl({
+    env,
     prepareServiceEnv: prepareOpenShellGatewayUserServiceEnv,
   });
   if (!serviceStart.started) {

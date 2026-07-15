@@ -1146,7 +1146,12 @@ install_nemoclaw_openshell_gateway_user_service() {
   local gateway_bin
   gateway_bin="$(resolve_openshell_gateway_bin_for_service)" || return 0
 
-  local service_dir="${HOME}/.config/systemd/user"
+  local config_home="${XDG_CONFIG_HOME:-${HOME}/.config}"
+  case "$config_home" in
+    /*) ;;
+    *) config_home="${HOME}/.config" ;;
+  esac
+  local service_dir="${config_home}/systemd/user"
   local service_path="${service_dir}/openshell-gateway.service"
 
   if upstream_openshell_gateway_user_service_installed; then
