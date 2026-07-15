@@ -357,7 +357,7 @@ describe("runSandboxGpuCreateFlow native failure and readiness", () => {
     expect(output).not.toContain("super-secret-create-value");
   });
 
-  it("deletes an exact created sandbox when hard-required Landlock startup fails (#5795)", async () => {
+  it("does not delete a same-name sandbox from hard-required Landlock create output (#5795)", async () => {
     mocks.streamSandboxCreate.mockResolvedValueOnce({
       status: 17,
       output: [
@@ -372,10 +372,7 @@ describe("runSandboxGpuCreateFlow native failure and readiness", () => {
 
     await expect(runSandboxGpuCreateFlow(createInput(), deps)).rejects.toThrow("process.exit:17");
 
-    expect(deps.runOpenshell).toHaveBeenCalledWith(
-      ["sandbox", "delete", "alpha"],
-      expect.objectContaining({ ignoreError: true }),
-    );
+    expect(deps.runOpenshell).not.toHaveBeenCalled();
     expect(exit).toHaveBeenCalledWith(17);
     expect(mocks.waitForCreatedSandboxReadyWithTrace).not.toHaveBeenCalled();
   });
