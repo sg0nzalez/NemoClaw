@@ -35,7 +35,7 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..
 type ReviewedSiteTuple = readonly [string, LegacySandboxTransportKind, number];
 
 const REVIEWED_SITE_TUPLES = [
-  ["src/lib/actions/dns/index.ts", "docker-exec-command", 4],
+  ["src/lib/actions/dns/index.ts", "docker-exec-command", 2],
   ["src/lib/actions/sandbox/host-aliases.ts", "docker-exec-command", 1],
   ["src/lib/actions/sandbox/sessions/passthrough.ts", "grpc-cli-read-only-fallback", 1],
   ["src/lib/actions/sandbox/process-recovery.ts", "privileged-sandbox-exec", 2],

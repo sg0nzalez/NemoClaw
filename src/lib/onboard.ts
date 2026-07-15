@@ -155,7 +155,7 @@ const os = require("os");
 const path = require("path");
 const pRetry = require("p-retry");
 const runner: typeof import("./runner") = require("./runner");
-const { ROOT, SCRIPTS, redact, run, runCapture, runCaptureEx, runFile, validateName } = runner;
+const { ROOT, SCRIPTS, redact, run, runCapture, runCaptureEx, validateName } = runner;
 const braveProviderProfile: typeof import("./onboard/brave-provider-profile") = require("./onboard/brave-provider-profile");
 const {
   applyExtraProviderReconciliation,
@@ -2908,15 +2908,6 @@ async function createSandboxWithBaseImageResolution(
     },
   );
   restoreDefaultAfterRecreate(registry.setDefault, sandboxName, sandboxWasLiveDefault); // #4614: default deferred to finalization
-
-  // DNS proxy — run a forwarder in the sandbox pod so the isolated
-  // sandbox namespace can resolve hostnames (fixes #626).
-  if (sandboxRuntimeFields.openshellDriver === "kubernetes") {
-    console.log("  Setting up sandbox DNS proxy...");
-    runFile("bash", [path.join(SCRIPTS, "setup-dns-proxy.sh"), GATEWAY_NAME, sandboxName], {
-      ignoreError: true,
-    });
-  }
 
   require("./onboard/vm-dns-monkeypatch").applyOnboardVmDnsMonkeypatch(
     sandboxName,

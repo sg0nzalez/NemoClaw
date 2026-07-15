@@ -51,7 +51,6 @@ import {
   createSystemDeps as createSessionDeps,
   getActiveSandboxSessions,
 } from "../../state/sandbox-session";
-import { runSetupDnsProxy } from "../dns";
 import { runSandboxAutoPairApprovalPass } from "./auto-pair-approval";
 import {
   CONNECT_AUTO_PAIR_APPROVE_TIMEOUT_S,
@@ -131,14 +130,6 @@ export type SandboxInferenceRouteRepairDeps = {
     sandboxName: string,
     sb: SandboxEntry | null,
   ) => { ok: boolean; reason?: string };
-  reapplyVmInferenceRoute: (
-    sandboxName: string,
-    sb: SandboxEntry | null,
-  ) => SandboxInferenceRouteProbe | null;
-  repairLegacyDnsProxy: (
-    sandboxName: string,
-    quiet: boolean,
-  ) => { exitCode: number; message?: string | null };
   assertRouteCompatible?: (sandboxName: string, sb: SandboxEntry | null) => void;
   log?: (message: string) => void;
   error?: (message: string) => void;
@@ -403,33 +394,6 @@ function probeSandboxInferenceRoute(
   );
 }
 
-function shouldUseLegacyDnsProxyRepair(sb: SandboxEntry | null): boolean {
-  // The legacy repair patches CoreDNS inside an `openshell-cluster-<name>`
-  // container, which only the k3s/kubernetes gateway runs. The docker driver
-  // runs the gateway as `nemoclaw-openshell-gateway` with host networking, and
-  // the vm driver has no cluster container either, so both recover the route via
-  // `openshell inference set` instead of the cluster CoreDNS patch. Mirrors
-  // usesGatewayMetadataProbe (snapshot.ts) and the `!== "docker"` guard on the
-  // snapshot DNS-proxy step. (#3403)
-  const driver = sb?.openshellDriver;
-  return driver !== "vm" && driver !== "docker";
-}
-
-function reapplyVmInferenceRoute(
-  sandboxName: string,
-  sb: SandboxEntry | null,
-  agent: InferenceRouteProbeAgent,
-  gatewayName: string,
-): SandboxInferenceRouteProbe | null {
-  const inference = sb ? registry.getSandboxEntryInference(sb) : null;
-  if (inference?.kind !== "configured") return null;
-  runOpenshell(buildGatewayInferenceSetArgs(gatewayName, inference.provider, inference.model), {
-    ignoreError: true,
-    timeout: OPENSHELL_OPERATION_TIMEOUT_MS,
-  });
-  return probeSandboxInferenceRoute(sandboxName, agent);
-}
-
 export function repairSandboxInferenceRouteWithDeps(
   sandboxName: string,
   sb: SandboxEntry | null,
@@ -449,104 +413,46 @@ export function repairSandboxInferenceRouteWithDeps(
   if (!initialProbe.broken) {
     return { healthy: false, repairAttempted: false, detail: initialProbe.detail };
   }
-  if (!shouldUseLegacyDnsProxyRepair(sb)) {
-    if (deps.shouldApplyVmDnsMonkeypatch(sb)) {
-      if (!quiet) {
-        log("");
-        log(
-          `  inference.local is unavailable inside '${sandboxName}'. Applying OpenShell VM DNS monkeypatch...`,
-        );
-      }
-      const patch = deps.applyVmDnsMonkeypatch(sandboxName, sb);
-      const patchedProbe = patch.ok
-        ? deps.probe(sandboxName, {
-            attempts: INFERENCE_ROUTE_POST_REPAIR_PROBE_ATTEMPTS,
-            delayMs: INFERENCE_ROUTE_POST_REPAIR_PROBE_DELAY_MS,
-          })
-        : null;
-      if (patchedProbe?.healthy) {
-        if (!quiet) {
-          log("  inference.local route repaired.");
-        }
-        return {
-          healthy: true,
-          repairAttempted: true,
-          detail: patchedProbe.detail,
-        };
-      }
-      if (!quiet) {
-        if (!patch.ok && patch.reason) {
-          error(`  Warning: OpenShell VM DNS monkeypatch did not apply: ${patch.reason}`);
-        } else if (patchedProbe?.broken) {
-          error(
-            "  Warning: OpenShell VM DNS monkeypatch completed but inference.local is still unavailable.",
-          );
-        }
-      }
-    }
-
+  let repairDetail = initialProbe.detail;
+  if (deps.shouldApplyVmDnsMonkeypatch(sb)) {
     if (!quiet) {
       log("");
       log(
-        `  inference.local is unavailable inside '${sandboxName}'. Reapplying OpenShell inference route...`,
+        `  inference.local is unavailable inside '${sandboxName}'. Applying OpenShell VM DNS monkeypatch...`,
       );
     }
-    const finalProbe = deps.reapplyVmInferenceRoute(sandboxName, sb);
-    if (!quiet) {
-      if (finalProbe?.healthy) {
+    const patch = deps.applyVmDnsMonkeypatch(sandboxName, sb);
+    const patchedProbe = patch.ok
+      ? deps.probe(sandboxName, {
+          attempts: INFERENCE_ROUTE_POST_REPAIR_PROBE_ATTEMPTS,
+          delayMs: INFERENCE_ROUTE_POST_REPAIR_PROBE_DELAY_MS,
+        })
+      : null;
+    if (patchedProbe) repairDetail = patchedProbe.detail;
+    if (patchedProbe?.healthy) {
+      if (!quiet) {
         log("  inference.local route repaired.");
-      } else if (finalProbe?.broken) {
+      }
+      return {
+        healthy: true,
+        repairAttempted: true,
+        detail: patchedProbe.detail,
+      };
+    }
+    if (!quiet) {
+      if (!patch.ok && patch.reason) {
+        error(`  Warning: OpenShell VM DNS monkeypatch did not apply: ${patch.reason}`);
+      } else if (patchedProbe?.broken) {
         error(
-          `  Warning: inference.local is still unavailable through the OpenShell ${sb?.openshellDriver || "non-legacy"} gateway path.`,
+          "  Warning: OpenShell VM DNS monkeypatch completed but inference.local is still unavailable.",
         );
       }
     }
-    if (!finalProbe) {
-      return {
-        healthy: false,
-        repairAttempted: true,
-        detail: "missing sandbox provider or model",
-      };
-    }
-    return {
-      healthy: finalProbe.healthy,
-      repairAttempted: true,
-      detail: finalProbe.detail,
-    };
-  }
-
-  if (!quiet) {
-    log("");
-    log(`  inference.local is unavailable inside '${sandboxName}'. Repairing sandbox DNS proxy...`);
-  }
-  const repair = deps.repairLegacyDnsProxy(sandboxName, quiet);
-  if (repair.exitCode !== 0) {
-    if (!quiet) {
-      error("  Warning: failed to repair sandbox DNS proxy.");
-      if (repair.message) error(`  ${repair.message}`);
-    }
-    return {
-      healthy: false,
-      repairAttempted: true,
-      detail: repair.message || initialProbe.detail,
-    };
-  }
-
-  const repairedProbe = deps.probe(sandboxName, {
-    attempts: INFERENCE_ROUTE_POST_REPAIR_PROBE_ATTEMPTS,
-    delayMs: INFERENCE_ROUTE_POST_REPAIR_PROBE_DELAY_MS,
-  });
-  if (!quiet) {
-    if (repairedProbe.healthy) {
-      log("  inference.local route repaired.");
-    } else if (repairedProbe.broken) {
-      error("  Warning: inference.local is still unavailable after DNS proxy repair.");
-    }
   }
   return {
-    healthy: repairedProbe.healthy,
+    healthy: false,
     repairAttempted: true,
-    detail: repairedProbe.detail,
+    detail: repairDetail,
   };
 }
 
@@ -566,13 +472,6 @@ function repairSandboxInferenceRouteIfNeeded(
       probe: (name, options) => probeSandboxInferenceRoute(name, agent, options),
       shouldApplyVmDnsMonkeypatch,
       applyVmDnsMonkeypatch: applyOpenShellVmDnsMonkeypatch,
-      reapplyVmInferenceRoute: (name, sandbox) =>
-        reapplyVmInferenceRoute(name, sandbox, agent, gatewayName),
-      repairLegacyDnsProxy: (name, isQuiet) =>
-        runSetupDnsProxy(
-          { gatewayName, sandboxName: name },
-          { log: isQuiet ? () => undefined : console.log },
-        ),
       assertRouteCompatible: (name, sandbox) => {
         if (sandbox) assertSandboxGatewayRouteCompatible(name, sandbox, gatewayName);
       },
@@ -622,7 +521,7 @@ function printUnrecoverableInferenceRoute(
   { repairAttempted = true }: { repairAttempted?: boolean } = {},
 ): void {
   const reason = repairAttempted
-    ? `inference.local is still unavailable inside '${sandboxName}' after DNS and route repair.`
+    ? `inference.local is still unavailable inside '${sandboxName}' after route repair.`
     : `the authoritative inference.local probe inside '${sandboxName}' did not return a trusted result.`;
   const boundedDetail = sanitizeRouteValueForDisplay(redact(detail))
     .replace(/\s+/g, " ")

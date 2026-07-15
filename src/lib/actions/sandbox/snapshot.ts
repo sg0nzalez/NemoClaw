@@ -317,16 +317,6 @@ async function autoCreateSandboxFromSource(
     snapshotExit(1);
   }
 
-  // DNS proxy is only meaningful for the kubernetes driver (matches onboard.ts).
-  const dnsScript = path.join(ROOT, "scripts", "setup-dns-proxy.sh");
-  const srcDriver = (srcEntry as { openshellDriver?: string | null }).openshellDriver;
-  if (srcDriver === "kubernetes" && fs.existsSync(dnsScript)) {
-    const srcGatewayName = resolveSandboxGatewayName(
-      srcEntry as { gatewayName?: string | null; gatewayPort?: number | null },
-    );
-    run(["bash", dnsScript, srcGatewayName, dstName], { ignoreError: true });
-  }
-
   // Register dst in the NemoClaw registry, cloning most fields from src.
   // Policies are cleared here — the caller replays them from the snapshot
   // manifest after the restore succeeds and writes them back into this entry.

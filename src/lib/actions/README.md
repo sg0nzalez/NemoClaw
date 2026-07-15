@@ -15,7 +15,7 @@ src/lib/actions/<area>/<verb>.test.ts
 Examples:
 
 ```text
-dns/index.ts                    # internal dns fix-coredns/setup-proxy orchestration
+dns/index.ts                    # internal dns fix-coredns orchestration
 dev/npm-link-or-shim.ts          # prepare-time dev shim orchestration
 installer/plan.ts                # deterministic installer planning
 uninstall/plan.ts                # host uninstall planning

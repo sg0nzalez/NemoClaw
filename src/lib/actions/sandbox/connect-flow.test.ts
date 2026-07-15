@@ -310,7 +310,6 @@ describe("connectSandbox flow", () => {
     await expect(harness.connectSandbox("alpha")).rejects.toThrow("process.exit(1)");
 
     expect(harness.applyVmDnsMonkeypatchSpy).not.toHaveBeenCalled();
-    expect(harness.runSetupDnsProxySpy).not.toHaveBeenCalled();
     expect(harness.spawnSyncSpy).not.toHaveBeenCalledWith(
       "openshell",
       ["sandbox", "connect", "alpha"],
@@ -349,7 +348,6 @@ describe("connectSandbox flow", () => {
       "inference.local/v1/models",
     );
     expect(harness.applyVmDnsMonkeypatchSpy).not.toHaveBeenCalled();
-    expect(harness.runSetupDnsProxySpy).not.toHaveBeenCalled();
     expect(harness.runOpenshellSpy).not.toHaveBeenCalled();
     expect(harness.spawnSyncSpy).not.toHaveBeenCalledWith(
       "openshell",
@@ -359,7 +357,7 @@ describe("connectSandbox flow", () => {
     const errorOutput = harness.errorSpy.mock.calls.flat().join("\n");
     expect(errorOutput).toContain("did not return a trusted result");
     expect(errorOutput).toContain("Last probe: sandbox exec transport failed");
-    expect(errorOutput).not.toContain("after DNS and route repair");
+    expect(errorOutput).not.toContain("after route repair");
     expect(exitSpy).toHaveBeenCalledWith(1);
   });
 
@@ -388,7 +386,6 @@ describe("connectSandbox flow", () => {
       "inference.local/v1/models",
     );
     expect(harness.applyVmDnsMonkeypatchSpy).not.toHaveBeenCalled();
-    expect(harness.runSetupDnsProxySpy).not.toHaveBeenCalled();
     expect(harness.runOpenshellSpy).not.toHaveBeenCalled();
     expect(harness.spawnSyncSpy).not.toHaveBeenCalledWith(
       "openshell",
@@ -398,7 +395,7 @@ describe("connectSandbox flow", () => {
     const errorOutput = harness.errorSpy.mock.calls.flat().join("\n");
     expect(errorOutput).toContain("did not return a trusted result");
     expect(errorOutput).toContain("openshell sandbox exec exited with status 1");
-    expect(errorOutput).not.toContain("after DNS and route repair");
+    expect(errorOutput).not.toContain("after route repair");
     expect(exitSpy).toHaveBeenCalledWith(1);
   });
 
@@ -424,7 +421,6 @@ describe("connectSandbox flow", () => {
     await expect(harness.connectSandbox("alpha")).rejects.toThrow("process.exit(1)");
 
     expect(harness.applyVmDnsMonkeypatchSpy).not.toHaveBeenCalled();
-    expect(harness.runSetupDnsProxySpy).not.toHaveBeenCalled();
     expect(harness.runOpenshellSpy).not.toHaveBeenCalled();
     expect(harness.spawnSyncSpy).not.toHaveBeenCalledWith(
       "openshell",
@@ -434,7 +430,7 @@ describe("connectSandbox flow", () => {
     const errorOutput = harness.errorSpy.mock.calls.flat().join("\n");
     expect(errorOutput).toContain("did not return a trusted result");
     expect(errorOutput).toContain("OpenShell CA bundle missing or unreadable");
-    expect(errorOutput).not.toContain("after DNS and route repair");
+    expect(errorOutput).not.toContain("after route repair");
     expect(exitSpy).toHaveBeenCalledWith(1);
   });
 

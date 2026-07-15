@@ -67,7 +67,6 @@ describe("sandbox connect inference route swap (#1248)", () => {
             'BROKEN 503 {"error":"upstream unavailable"}',
             'BROKEN 503 {"error":"upstream unavailable"}',
             'BROKEN 503 {"error":"upstream unavailable"}',
-            'BROKEN 503 {"error":"upstream unavailable"}',
             "OK 200",
           ],
         },
@@ -133,7 +132,6 @@ describe("sandbox connect inference route swap (#1248)", () => {
         "qwen3:0.6b",
         {
           inferenceProbeResponses: [
-            'BROKEN 503 {"error":"upstream unavailable"}',
             'BROKEN 503 {"error":"upstream unavailable"}',
             'BROKEN 503 {"error":"upstream unavailable"}',
             'BROKEN 503 {"error":"upstream unavailable"}',
