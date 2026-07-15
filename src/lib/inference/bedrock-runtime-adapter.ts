@@ -323,7 +323,7 @@ function isAdapterProcess(pid: number | null | undefined): boolean {
 function killStaleAdapter(): void {
   killLocalAdapterPid({
     pidPath: PID_PATH,
-    processNeedle: "bedrock-runtime-adapter.js",
+    processMatcher: "bedrock-runtime-adapter.js",
     run,
     runCapture,
   });
