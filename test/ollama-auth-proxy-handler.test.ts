@@ -23,7 +23,9 @@ import { afterEach, beforeEach, describe, expect, vi } from "vitest";
 import { test as it } from "./helpers/owned-test-resources";
 
 import {
+  forceKill,
   freePort,
+  PROXY_SCRIPT,
   request,
   startBackend,
   startProxy,
@@ -127,6 +129,38 @@ describe("ollama-auth-proxy request handler", () => {
 });
 
 describe("ollama-auth-proxy process ownership", () => {
+  it("reports EADDRINUSE and exits nonzero when the configured port is occupied", async ({
+    onTestFinished,
+    resources,
+  }) => {
+    const portOwner = resources.ownServer(net.createServer());
+    await new Promise<void>((resolve, reject) => {
+      portOwner.once("error", reject);
+      portOwner.listen(0, "0.0.0.0", resolve);
+    });
+    const occupiedPort = (portOwner.address() as AddressInfo).port;
+    const child = spawn(process.execPath, [PROXY_SCRIPT], {
+      env: {
+        ...process.env,
+        OLLAMA_PROXY_TOKEN: TOKEN,
+        OLLAMA_PROXY_PORT: String(occupiedPort),
+        OLLAMA_BACKEND_PORT: "1",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    onTestFinished(() => forceKill(child));
+    const stderrChunks: Buffer[] = [];
+    child.stderr?.on("data", (chunk) => stderrChunks.push(Buffer.from(chunk)));
+
+    const [exitCode, signal] = (await once(child, "close")) as [number | null, string | null];
+    const stderr = Buffer.concat(stderrChunks).toString("utf8");
+
+    expect(signal).toBeNull();
+    expect(exitCode).not.toBe(0);
+    expect(stderr).toContain(`Ollama auth proxy: port ${occupiedPort} is already in use`);
+    expect(stderr).not.toContain(TOKEN);
+  });
+
   it("reaps the proxy before reporting a readiness failure", async ({
     onTestFinished,
     resources,
