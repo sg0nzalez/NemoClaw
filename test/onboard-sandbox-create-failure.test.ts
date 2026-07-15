@@ -12,6 +12,10 @@ import {
   printSandboxCreateFailureDiagnostics,
 } from "../src/lib/onboard/sandbox-create-failure.js";
 
+function permissionMode(filePath: string): number {
+  return fs.statSync(filePath).mode & 0o777;
+}
+
 describe("sandbox create failure diagnostics", () => {
   it("preserves gateway failure lines and VM console output before cleanup", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-create-failure-"));
@@ -23,7 +27,15 @@ describe("sandbox create failure diagnostics", () => {
     const gatewayLogPath = path.join(logDir, "openshell-gateway.log");
 
     fs.mkdirSync(stateDir, { recursive: true });
-    fs.writeFileSync(consolePath, "vm console detail\nAuthorization: Bearer secret-token\n");
+    const rawSecrets = ["secret-token", "nvapi-secret", "session-secret"];
+    fs.writeFileSync(
+      consolePath,
+      [
+        "vm console detail",
+        "Authorization: Bearer secret-token",
+        "NVIDIA_API_KEY=nvapi-secret",
+      ].join("\n"),
+    );
     fs.writeFileSync(
       gatewayLogPath,
       [
@@ -32,6 +44,7 @@ describe("sandbox create failure diagnostics", () => {
         `2026-05-12T20:30:56Z INFO vm driver: resolved image ref, preparing rootfs sandbox_id=${sandboxId} state_dir=${stateDir}`,
         `2026-05-12T20:34:28Z INFO vm driver: spawning VM launcher sandbox_id=${sandboxId} console_output=${consolePath}`,
         `2026-05-12T20:34:28Z ERROR supervisor sandbox_id=${sandboxId} Authorization: Bearer secret-token`,
+        `2026-05-12T20:34:28Z ERROR supervisor sandbox_id=${sandboxId} Cookie: session=session-secret`,
         "[2026-05-12T20:34:29Z ERROR krun] Building the microVM failed: Internal(Vm(VmSetup(VmCreate)))",
         `2026-05-12T20:34:29Z WARN Sandbox failed to become ready sandbox_id=${sandboxId} sandbox_name=my-assistant reason=ProcessExited`,
       ].join("\n"),
@@ -47,25 +60,29 @@ describe("sandbox create failure diagnostics", () => {
     expect(diagnostics?.copiedConsoleOutput).toBe(
       path.join(diagnostics!.dir, "rootfs-console.log"),
     );
-    const copiedConsole = fs.readFileSync(
-      path.join(diagnostics!.dir, "rootfs-console.log"),
-      "utf-8",
-    );
+    const copiedConsolePath = path.join(diagnostics!.dir, "rootfs-console.log");
+    const relevantPath = path.join(diagnostics!.dir, "openshell-gateway-relevant.log");
+    const summaryPath = path.join(diagnostics!.dir, "summary.txt");
+    const copiedConsole = fs.readFileSync(copiedConsolePath, "utf-8");
     expect(copiedConsole).toContain("vm console detail");
     expect(copiedConsole).toContain("Bearer <REDACTED>");
     expect(copiedConsole).not.toContain("secret-token");
-    const relevant = fs.readFileSync(
-      path.join(diagnostics!.dir, "openshell-gateway-relevant.log"),
-      "utf-8",
-    );
+    const relevant = fs.readFileSync(relevantPath, "utf-8");
     expect(relevant).toContain("VmCreate");
     expect(relevant).toContain("sandbox_name=my-assistant");
     expect(relevant).toContain("Bearer <REDACTED>");
-    expect(relevant).not.toContain("secret-token");
-    expect(diagnostics?.summaryLines.join("\n")).not.toContain("secret-token");
-    expect(fs.readFileSync(path.join(diagnostics!.dir, "summary.txt"), "utf-8")).toContain(
-      "backup_path=/tmp/pre-upgrade-backup",
-    );
+    const summary = fs.readFileSync(summaryPath, "utf-8");
+    expect(summary).toContain("backup_path=/tmp/pre-upgrade-backup");
+    for (const secret of rawSecrets) {
+      expect(copiedConsole).not.toContain(secret);
+      expect(relevant).not.toContain(secret);
+      expect(summary).not.toContain(secret);
+      expect(diagnostics?.summaryLines.join("\n")).not.toContain(secret);
+    }
+    expect(permissionMode(diagnostics!.dir)).toBe(0o700);
+    for (const artifactPath of [copiedConsolePath, relevantPath, summaryPath]) {
+      expect(permissionMode(artifactPath), artifactPath).toBe(0o600);
+    }
   });
 
   it("prints saved diagnostics and retained backup details", () => {
@@ -124,6 +141,7 @@ describe("sandbox create failure diagnostics", () => {
       ),
     ).toBe(true);
     expect(diagnostics?.summaryLines.join("\n")).not.toContain("secret-token");
+    expect(permissionMode(diagnostics!.gatewayTailPath!)).toBe(0o600);
     expect(fs.readFileSync(path.join(diagnostics!.dir, "summary.txt"), "utf-8")).toContain(
       "gateway_tail=",
     );
