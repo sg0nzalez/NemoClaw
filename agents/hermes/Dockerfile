@@ -24,8 +24,8 @@ RUN chown -R root:root /opt/mcp-tool-discovery-runtime \
 # hadolint ignore=DL3006
 FROM ${BASE_IMAGE}
 
-COPY --from=mcp-tool-discovery-runtime /opt/mcp-tool-discovery-runtime/ /usr/local/lib/nemoclaw/mcp-tool-discovery-runtime/
-RUN discovery_contract="$(node --experimental-strip-types /usr/local/lib/nemoclaw/mcp-tool-discovery-runtime/mcp-tool-discovery.ts)" \
+COPY --from=mcp-tool-discovery-runtime /opt/mcp-tool-discovery-runtime/dist/ /usr/local/lib/nemoclaw/mcp-tool-discovery-runtime/
+RUN discovery_contract="$(node /usr/local/lib/nemoclaw/mcp-tool-discovery-runtime/mcp-tool-discovery.mjs)" \
     && node -e 'const result = JSON.parse(process.argv[1]); if (result.protocol !== 1 || result.ok !== false || result.detail !== "tool discovery received invalid runtime arguments") process.exit(1);' "$discovery_contract" \
     && discovery_unsafe="$(find -L /usr/local/lib/nemoclaw/mcp-tool-discovery-runtime \( ! -user root -o -perm /022 \) -print -quit)" \
     && test -z "$discovery_unsafe"
