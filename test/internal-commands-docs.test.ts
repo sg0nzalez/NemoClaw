@@ -85,7 +85,7 @@ describe("internal command documentation (#3782)", () => {
   it("registers the hidden internal command family", () => {
     // Guards against the manifest silently losing the family (which would make
     // the documentation assertions below vacuously pass).
-    expect(internalIds.length).toBeGreaterThanOrEqual(8);
+    expect(internalIds.length).toBeGreaterThanOrEqual(7);
   });
 
   it.each(references)("documents every hidden internal command in $name", ({ text, binary }) => {

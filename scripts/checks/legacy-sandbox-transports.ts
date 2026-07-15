@@ -35,7 +35,6 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..
 type ReviewedSiteTuple = readonly [string, LegacySandboxTransportKind, number];
 
 const REVIEWED_SITE_TUPLES = [
-  ["src/lib/actions/dns/index.ts", "docker-exec-command", 2],
   ["src/lib/actions/sandbox/host-aliases.ts", "docker-exec-command", 1],
   ["src/lib/actions/sandbox/sessions/passthrough.ts", "grpc-cli-read-only-fallback", 1],
   ["src/lib/actions/sandbox/process-recovery.ts", "privileged-sandbox-exec", 2],
@@ -84,7 +83,7 @@ const DOCKER_COMMAND_CALLS = new Set([
   "runDocker",
 ]);
 
-const NON_SANDBOX_SSH_ROOTS = ["src/lib/actions/dns/", "src/lib/deploy/"] as const;
+const NON_SANDBOX_SSH_ROOTS = ["src/lib/deploy/"] as const;
 
 function productionTypeScriptFiles(directory: string): string[] {
   if (!existsSync(directory)) return [];

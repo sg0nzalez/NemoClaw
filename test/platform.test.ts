@@ -12,7 +12,6 @@ import {
   getPodmanSocketCandidates,
   inferContainerRuntime,
   isWsl,
-  shouldPatchCoredns,
 } from "../src/lib/platform";
 
 describe("platform helpers", () => {
@@ -161,26 +160,6 @@ describe("platform helpers", () => {
 
     it("detects Colima", () => {
       expect(inferContainerRuntime("Server: Colima\n Docker Engine - Community")).toBe("colima");
-    });
-  });
-
-  describe("shouldPatchCoredns", () => {
-    // Pass explicit `isWsl: false` so this test pins the function's runtime
-    // matching logic on every host. Without the override, `shouldPatchCoredns`
-    // consults `isWsl()`, which returns true on WSL2 dev machines (via
-    // `os.release()`), and the assertions flip below.
-    it("patches CoreDNS for Colima and Podman (non-WSL host)", () => {
-      expect(shouldPatchCoredns("colima", { isWsl: false })).toBe(true);
-      expect(shouldPatchCoredns("podman", { isWsl: false })).toBe(true);
-      expect(shouldPatchCoredns("docker-desktop", { isWsl: false })).toBe(false);
-      expect(shouldPatchCoredns("docker", { isWsl: false })).toBe(false);
-    });
-
-    it("never patches CoreDNS on WSL2 (host DNS unreachable from k3s pods)", () => {
-      expect(shouldPatchCoredns("colima", { isWsl: true })).toBe(false);
-      expect(shouldPatchCoredns("podman", { isWsl: true })).toBe(false);
-      expect(shouldPatchCoredns("docker-desktop", { isWsl: true })).toBe(false);
-      expect(shouldPatchCoredns("docker", { isWsl: true })).toBe(false);
     });
   });
 

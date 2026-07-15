@@ -62,34 +62,6 @@ describe("shell runtime helpers", () => {
     fs.rmSync(home, { recursive: true, force: true });
   });
 
-  it("classifies a Docker Desktop DOCKER_HOST correctly", () => {
-    const result = runShell(
-      `source "${RUNTIME_SH}"; docker_host_runtime "unix:///Users/test/.docker/run/docker.sock"`,
-    );
-
-    expect(result.status).toBe(0);
-    expect(result.stdout.trim()).toBe("docker-desktop");
-  });
-
-  it("selects the matching gateway cluster when a gateway name is present", () => {
-    const result = runShell(
-      `source "${RUNTIME_SH}";
-       select_openshell_cluster_container "nemoclaw" $'openshell-cluster-alpha\\nopenshell-cluster-nemoclaw'`,
-    );
-
-    expect(result.status).toBe(0);
-    expect(result.stdout.trim()).toBe("openshell-cluster-nemoclaw");
-  });
-
-  it("fails on ambiguous cluster selection", () => {
-    const result = runShell(
-      `source "${RUNTIME_SH}";
-       select_openshell_cluster_container "" $'openshell-cluster-a\\nopenshell-cluster-b'`,
-    );
-
-    expect(result.status).not.toBe(0);
-  });
-
   it("finds the XDG Colima socket", () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-runtime-shell-"));
     const xdgColimaSocket = path.join(home, ".config/colima/default/docker.sock");
@@ -127,22 +99,6 @@ describe("shell runtime helpers", () => {
     expect(result.status).toBe(0);
     expect(result.stdout.trim()).toBe(podmanSocket);
     fs.rmSync(home, { recursive: true, force: true });
-  });
-
-  it("classifies a Podman DOCKER_HOST correctly", () => {
-    const result = runShell(
-      `source "${RUNTIME_SH}"; docker_host_runtime "unix:///run/user/1000/podman/podman.sock"`,
-    );
-    expect(result.status).toBe(0);
-    expect(result.stdout.trim()).toBe("podman");
-  });
-
-  it("classifies a Podman machine socket correctly", () => {
-    const result = runShell(
-      `source "${RUNTIME_SH}"; docker_host_runtime "unix:///Users/test/.local/share/containers/podman/machine/podman.sock"`,
-    );
-    expect(result.status).toBe(0);
-    expect(result.stdout.trim()).toBe("podman");
   });
 
   it("returns the vllm-local base URL", () => {
@@ -198,61 +154,5 @@ describe("shell runtime helpers", () => {
 
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain(`Invalid ${name}=${value} (expected 1024-65535)`);
-  });
-
-  it("returns the first non-loopback nameserver", () => {
-    const result = runShell(
-      `source "${RUNTIME_SH}"; first_non_loopback_nameserver $'nameserver 127.0.0.11\\nnameserver 10.0.0.2'`,
-    );
-
-    expect(result.status).toBe(0);
-    expect(result.stdout.trim()).toBe("10.0.0.2");
-  });
-
-  it("prefers the container nameserver when it is not loopback", () => {
-    const result = runShell(
-      `source "${RUNTIME_SH}"; resolve_coredns_upstream $'nameserver 10.0.0.2' $'nameserver 1.1.1.1' colima`,
-    );
-
-    expect(result.status).toBe(0);
-    expect(result.stdout.trim()).toBe("10.0.0.2");
-  });
-
-  it("falls back to the Colima VM nameserver when the container resolver is loopback", () => {
-    const result = runShell(
-      `source "${RUNTIME_SH}";
-       get_colima_vm_nameserver() { printf '192.168.5.1\\n'; }
-       resolve_coredns_upstream $'nameserver 127.0.0.11' $'nameserver 1.1.1.1' colima`,
-    );
-
-    expect(result.status).toBe(0);
-    expect(result.stdout.trim()).toBe("192.168.5.1");
-  });
-
-  it("falls back to the host nameserver when no Colima VM nameserver is available", () => {
-    const result = runShell(
-      `source "${RUNTIME_SH}";
-       get_colima_vm_nameserver() { return 1; }
-       resolve_coredns_upstream $'nameserver 127.0.0.11' $'nameserver 9.9.9.9' colima`,
-    );
-
-    expect(result.status).toBe(0);
-    expect(result.stdout.trim()).toBe("9.9.9.9");
-  });
-
-  it("does not consume installer stdin when reading the Colima VM nameserver", () => {
-    const result = runShell(
-      `function colima() { cat > /dev/null || true; printf 'nameserver 100.100.100.100\\n'; }
-       source "${RUNTIME_SH}"
-       nameserver_output="$(mktemp "\${TMPDIR:-/tmp}/nemoclaw-colima-ns.XXXXXX")"
-       trap 'rm -f "$nameserver_output"' EXIT
-       printf 'sandbox-answer\\n' | {
-         get_colima_vm_nameserver > "$nameserver_output"
-         cat
-       }`,
-    );
-
-    expect(result.status).toBe(0);
-    expect(result.stdout.trim()).toBe("sandbox-answer");
   });
 });

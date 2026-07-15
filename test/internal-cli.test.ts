@@ -8,16 +8,6 @@ import { describe, expect, it } from "vitest";
 const CLI = path.join(import.meta.dirname, "..", "bin", "nemoclaw.js");
 
 describe("internal oclif namespace", () => {
-  it("passes internal subcommands directly to oclif space-separated routing", () => {
-    const result = spawnSync(process.execPath, [CLI, "internal", "dns", "fix-coredns", "--help"], {
-      encoding: "utf-8",
-    });
-
-    expect(result.status).toBe(0);
-    expect(result.stdout).toContain("Internal: patch CoreDNS");
-    expect(result.stdout).toContain("nemoclaw internal dns fix-coredns [gateway-name]");
-  });
-
   it("exposes uninstall plan commands through oclif routing", () => {
     const result = spawnSync(
       process.execPath,

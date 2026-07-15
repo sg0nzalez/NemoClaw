@@ -1,8 +1,6 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import path from "node:path";
-
 import { dockerContainerInspectFormat } from "../adapters/docker";
 import { getGatewayClusterContainerName } from "../adapters/openshell/gateway-drift";
 import { getGatewayHttpEndpoint } from "../core/gateway-address";
@@ -19,14 +17,11 @@ import {
   validateGatewayPort,
 } from "../core/ports";
 import { sleepSeconds, waitUntilAsync } from "../core/wait";
-import { shouldPatchCoredns } from "../platform";
-import { run, SCRIPTS } from "../runner";
 import { isGatewayHealthy } from "../state/gateway";
 import { isLinuxDockerDriverGatewayEnabled } from "./docker-driver-platform";
 import { envInt } from "./env";
 import { resolveGatewayName, resolveGatewayPortFromName } from "./gateway-binding";
 import { isGatewayHttpReady } from "./gateway-http-readiness";
-import { getContainerRuntime } from "./local-inference-topology";
 
 export type StartGatewayForRecoveryOptions = {
   gatewayName?: string;
@@ -60,9 +55,6 @@ export type GatewayRecoveryDeps = {
   // to the production implementations.
   isGatewayHealthy?: typeof isGatewayHealthy;
   isGatewayHttpReady?: typeof isGatewayHttpReady;
-  getContainerRuntime?: typeof getContainerRuntime;
-  shouldPatchCoredns?: typeof shouldPatchCoredns;
-  runCorednsPatch?(gatewayName: string): void;
   // Injected clock reader for deadline-driven tests. Defaults to Date.now.
   // A test can pair a virtual sleeper (that advances a captured value) with
   // this reader to drive deterministic deadline expiration without real
@@ -234,16 +226,6 @@ async function startTargetGatewayForRecovery(
 
   if (healthy) {
     process.env.OPENSHELL_GATEWAY = gatewayName;
-    const runtime = (deps.getContainerRuntime ?? getContainerRuntime)();
-    if ((deps.shouldPatchCoredns ?? shouldPatchCoredns)(runtime)) {
-      const runCorednsPatch =
-        deps.runCorednsPatch ??
-        ((targetGatewayName: string) =>
-          run(["bash", path.join(SCRIPTS, "fix-coredns.sh"), targetGatewayName], {
-            ignoreError: true,
-          }));
-      runCorednsPatch(gatewayName);
-    }
     return;
   }
 

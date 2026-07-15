@@ -212,7 +212,7 @@ describe("legacy sandbox transport inventory", () => {
       ].join("\n"),
       "src/safe.test.ts": 'spawnSync("ssh", ["sandbox"]);',
       "src/lib/deploy/remote.ts": 'spawnSync("ssh", ["host"]);',
-      "src/lib/actions/dns/colima.ts": 'run(["ssh", "vm"]);',
+      "src/lib/deploy/colima.ts": 'run(["ssh", "vm"]);',
     });
 
     expect(discoverLegacySandboxTransportSites(root)).toEqual([]);
