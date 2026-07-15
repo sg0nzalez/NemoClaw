@@ -13,12 +13,16 @@ import { writeSafeGatewayAuthConfig } from "../../../test/support/docker-driver-
 describe("package-managed Docker-driver gateway env service", () => {
   it("writes the service env only when package-managed startup prepares the service", async () => {
     const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-gateway-env-"));
+    const gatewayBin = path.join(tempHome, ".local", "bin", "openshell-gateway");
+    const servicePath = path.join(
+      tempHome,
+      ".config",
+      "systemd",
+      "user",
+      "openshell-gateway.service",
+    );
     const envFile = path.join(tempHome, ".config", "openshell", "gateway.env");
-    const existsSpy = vi
-      .spyOn(fs, "existsSync")
-      .mockImplementation(
-        (candidate) => candidate === "/usr/lib/systemd/user/openshell-gateway.service",
-      );
+    const existsSpy = vi.spyOn(fs, "existsSync").mockReturnValue(false);
     const homedirSpy = vi.spyOn(os, "homedir").mockReturnValue(tempHome);
 
     try {
@@ -26,9 +30,11 @@ describe("package-managed Docker-driver gateway env service", () => {
         startPackageManagedDockerDriverGatewayWithEnvOverride({
           clearDockerDriverGatewayRuntimeFiles: vi.fn(),
           exitOnFailure: false,
+          gatewayBin,
           gatewayEnv: {
             OPENSHELL_BIND_ADDRESS: "127.0.0.1",
             OPENSHELL_GATEWAY_CONFIG: writeSafeGatewayAuthConfig(tempHome),
+            OPENSHELL_SERVER_PORT: "18080",
           },
           gatewayName: "nemoclaw",
           hasOpenShellGatewayUserService: () => true,
@@ -37,7 +43,7 @@ describe("package-managed Docker-driver gateway env service", () => {
           runCaptureOpenshell: (args) =>
             args[0] === "status"
               ? "Gateway: nemoclaw\nConnected"
-              : "Gateway: nemoclaw\nGateway endpoint: https://127.0.0.1:8080/",
+              : "Gateway: nemoclaw\nGateway endpoint: https://127.0.0.1:18080/",
           skipSandboxBridgeReachability: false,
           startOpenShellGatewayUserService: (opts) => {
             opts?.prepareServiceEnv?.();
@@ -47,7 +53,9 @@ describe("package-managed Docker-driver gateway env service", () => {
         }),
       ).resolves.toBe(true);
 
+      expect(fs.readFileSync(servicePath, "utf-8")).toContain(`ExecStart=${gatewayBin}`);
       expect(fs.readFileSync(envFile, "utf-8")).toContain("OPENSHELL_BIND_ADDRESS=127.0.0.1\n");
+      expect(fs.readFileSync(envFile, "utf-8")).toContain("OPENSHELL_SERVER_PORT=18080\n");
     } finally {
       existsSpy.mockRestore();
       homedirSpy.mockRestore();
