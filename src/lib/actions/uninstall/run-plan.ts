@@ -57,6 +57,7 @@ export interface UninstallRunDeps {
   isTty?: boolean;
   kill?: (pid: number, signal?: NodeJS.Signals | number) => boolean;
   log?: (message: string) => void;
+  platform?: NodeJS.Platform;
   readLine?: () => string | null;
   rmSync?: typeof fs.rmSync;
   run?: (command: string, args: string[], options?: SpawnSyncOptions) => RunResult;
@@ -238,6 +239,7 @@ interface UninstallRuntime {
   isTty: boolean;
   kill: (pid: number, signal?: NodeJS.Signals | number) => boolean;
   log: (message: string) => void;
+  platform: NodeJS.Platform;
   readLine: () => string | null;
   rmSync: typeof fs.rmSync;
   run: (command: string, args: string[], options?: SpawnSyncOptions) => RunResult;
@@ -266,6 +268,7 @@ function buildRuntime(deps: UninstallRunDeps): UninstallRuntime {
         }
       }),
     log: deps.log ?? ((message) => console.log(message)),
+    platform: deps.platform ?? process.platform,
     readLine: deps.readLine ?? readLineFromStdin,
     rmSync: deps.rmSync ?? fs.rmSync,
     run: deps.run ?? defaultRun,
@@ -609,7 +612,7 @@ function stopOrphanedOpenShell(runtime: UninstallRuntime): void {
 }
 
 function removeNemoclawOpenShellGatewayUserService(runtime: UninstallRuntime): void {
-  if (process.platform !== "linux") return;
+  if (runtime.platform !== "linux") return;
   const servicePath = getNemoclawOpenShellGatewayUserServicePath(runtime.env.HOME || os.homedir());
   if (!runtime.existsSync(servicePath)) return;
 
@@ -944,7 +947,7 @@ function executePlan(
     if (step.name === "Stopping services") {
       stopHelperServices(paths, runtime);
       removeGlob(paths.helperServiceGlob, runtime);
-      removeNemoclawOpenShellGatewayUserService(runtime);
+      if (!options.keepOpenShell) removeNemoclawOpenShellGatewayUserService(runtime);
       stopMatchingPids(
         `openshell.*forward.*${runtime.env.NEMOCLAW_DASHBOARD_PORT || "18789"}`,
         runtime,
@@ -959,17 +962,19 @@ function executePlan(
         commandExists: runtime.commandExists,
       });
       stopOrphanedOpenShell(runtime);
-      stopHostGatewayProcesses(
-        {
-          run: runtime.run,
-          kill: runtime.kill,
-          env: runtime.env,
-          log: runtime.log,
-          warn: runtime.warn,
-          commandExists: runtime.commandExists,
-        },
-        { logNoProcesses: true },
-      );
+      if (!options.keepOpenShell) {
+        stopHostGatewayProcesses(
+          {
+            run: runtime.run,
+            kill: runtime.kill,
+            env: runtime.env,
+            log: runtime.log,
+            warn: runtime.warn,
+            commandExists: runtime.commandExists,
+          },
+          { logNoProcesses: true },
+        );
+      }
       stopOllamaAuthProxy(paths, runtime);
       stopOpenRouterRuntimeAdapter(paths, runtime);
       stopModelRouter(paths, runtime);

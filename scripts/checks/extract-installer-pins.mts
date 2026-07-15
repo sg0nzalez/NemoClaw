@@ -48,7 +48,7 @@ const MAX_INSTALLER_INPUT_BYTES = 1024 * 1024;
 // release; the later pin PR may then change release data without authorizing
 // any operational installer change. A mismatch reports the candidate hash.
 const TRUSTED_INSTALLER_TEMPLATE_SHA256 =
-  "a101f002bd8e02aa7b38960ddcb76c9fca419bc3766f6870446f6a7e99e14d78";
+  "99afb2182930f0017be0211a403aa796f49fa42be17092a04ea637f54daba1d0";
 const TRUSTED_BREV_TEMPLATE_SHA256 =
   "c0a4ddf25a02a9fe02b2df53a60942ea887610f04d4ce16a121b6e79a5aeff1a";
 const EXPECTED_INSTALLER_ASSETS = [

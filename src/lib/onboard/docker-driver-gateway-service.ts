@@ -58,6 +58,12 @@ export interface InstallNemoclawOpenShellGatewayUserServiceResult {
   removed?: boolean;
 }
 
+export interface InstallAndReportNemoclawOpenShellGatewayUserServiceOptions
+  extends InstallNemoclawOpenShellGatewayUserServiceOptions {
+  log?: (message: string) => void;
+  warn?: (message: string) => void;
+}
+
 export interface SpawnSyncLikeResult {
   error?: Error;
   status: number | null;
@@ -422,6 +428,22 @@ export function installNemoclawOpenShellGatewayUserService(
   writeFileSync(servicePath, unit, { encoding: "utf-8", mode: 0o600 });
   chmodSync(servicePath, 0o600);
   return { installed: true, path: servicePath };
+}
+
+export function installAndReportNemoclawOpenShellGatewayUserService(
+  opts: InstallAndReportNemoclawOpenShellGatewayUserServiceOptions,
+): InstallNemoclawOpenShellGatewayUserServiceResult {
+  const result = installNemoclawOpenShellGatewayUserService(opts);
+  const log = opts.log ?? console.log;
+  const warn = opts.warn ?? console.warn;
+  if (result.installed && result.path) {
+    log(`  Installed OpenShell gateway user service: ${result.path}`);
+  } else if (result.removed && result.path) {
+    log(`  Removed NemoClaw OpenShell gateway user service override: ${result.path}`);
+  } else if (result.reason?.startsWith("refusing")) {
+    warn(`  OpenShell gateway user service not installed: ${result.reason}.`);
+  }
+  return result;
 }
 
 export function startOpenShellGatewayUserService(

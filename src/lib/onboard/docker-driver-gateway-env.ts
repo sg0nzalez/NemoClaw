@@ -19,6 +19,7 @@ import {
 import { buildDockerDriverGatewayLocalTlsEnv } from "./docker-driver-gateway-local-tls";
 import {
   hasOpenShellGatewayUserService,
+  installAndReportNemoclawOpenShellGatewayUserService,
   type PackageManagedDockerDriverGatewayOptions,
   startPackageManagedDockerDriverGateway,
 } from "./docker-driver-gateway-service";
@@ -57,6 +58,7 @@ export type PackageManagedDockerDriverGatewayWithEnvOverrideOptions = Omit<
   PackageManagedDockerDriverGatewayOptions,
   "prepareOpenShellGatewayUserServiceEnv"
 > & {
+  gatewayBin?: string | null;
   gatewayEnv: Record<string, string>;
 };
 
@@ -291,9 +293,13 @@ export function writeDockerGatewayDebEnvOverrideOrThrow(
 }
 
 export function startPackageManagedDockerDriverGatewayWithEnvOverride({
+  gatewayBin,
   gatewayEnv,
   ...options
 }: PackageManagedDockerDriverGatewayWithEnvOverrideOptions): Promise<boolean> {
+  if (gatewayBin !== undefined) {
+    installAndReportNemoclawOpenShellGatewayUserService({ gatewayBin });
+  }
   assertDockerDriverGatewayAuthConfigSafe(gatewayEnv);
   return startPackageManagedDockerDriverGateway({
     ...options,

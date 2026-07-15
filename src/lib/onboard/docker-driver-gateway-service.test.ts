@@ -234,6 +234,19 @@ describe("docker-driver-gateway-service", () => {
     });
   });
 
+  it("does not install a Linux systemd user service on macOS", () => {
+    const writeFileSync = vi.fn();
+
+    expect(
+      installNemoclawOpenShellGatewayUserService({
+        gatewayBin: "/opt/homebrew/bin/openshell-gateway",
+        platform: "darwin",
+        writeFileSync: writeFileSync as never,
+      }),
+    ).toEqual({ installed: false, reason: "not a Linux host" });
+    expect(writeFileSync).not.toHaveBeenCalled();
+  });
+
   it("removes a marked user service override when an upstream package service exists", () => {
     const home = "/home/nvidia";
     const servicePath = getNemoclawOpenShellGatewayUserServicePath(home);

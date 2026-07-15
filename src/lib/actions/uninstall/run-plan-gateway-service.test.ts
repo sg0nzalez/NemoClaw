@@ -19,7 +19,7 @@ function ok(stdout = ""): RunResult {
 }
 
 describe("uninstall OpenShell gateway user service", () => {
-  it("removes the NemoClaw-managed user service even when OpenShell binaries are kept", () => {
+  it("keeps the NemoClaw-managed user service when OpenShell binaries are kept", () => {
     const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-uninstall-gateway-service-"));
     const servicePath = getNemoclawOpenShellGatewayUserServicePath(tmpHome);
     fs.mkdirSync(path.dirname(servicePath), { recursive: true });
@@ -45,6 +45,113 @@ describe("uninstall OpenShell gateway user service", () => {
           existsSync: (target) => String(target).startsWith(tmpHome) && fs.existsSync(target),
           isTty: false,
           log: (line) => logs.push(line),
+          platform: "linux",
+          rmSync: fs.rmSync,
+          run: vi.fn((command: string, args: string[]) => {
+            runCalls.push([command, ...args]);
+            return ok();
+          }),
+          runDocker: () => ok(""),
+        },
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(fs.existsSync(servicePath)).toBe(true);
+      expect(runCalls).toEqual([]);
+      expect(logs).not.toContain(`Removed ${servicePath}`);
+    } finally {
+      fs.rmSync(tmpHome, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the host OpenShell gateway process when OpenShell is kept", () => {
+    const gatewayPid = 9999887;
+    const killed: number[] = [];
+    const run = vi.fn((command: string, args: string[]) => {
+      if (
+        command === "pgrep" &&
+        args[0] === "-f" &&
+        String(args[1]).includes("openshell-gateway")
+      ) {
+        return ok(`${gatewayPid}\n`);
+      }
+      if (
+        command === "ps" &&
+        args[0] === "-p" &&
+        args[1] === String(gatewayPid) &&
+        args[2] === "-o" &&
+        args[3] === "pid="
+      ) {
+        return ok(`${gatewayPid}\n`);
+      }
+      if (
+        command === "ps" &&
+        args[0] === "-p" &&
+        args[1] === String(gatewayPid) &&
+        args[2] === "-o" &&
+        args[3] === "args="
+      ) {
+        return ok("/home/test/.local/bin/openshell-gateway --port 8080\n");
+      }
+      if (command === "lsof") return ok("");
+      if (command === "pgrep") return { status: 1, stdout: "", stderr: "" };
+      return ok();
+    });
+
+    const result = runUninstallPlan(
+      { assumeYes: true, deleteModels: false, keepOpenShell: true },
+      {
+        commandExists: () => true,
+        env: { HOME: "/tmp/nemoclaw-uninstall-test-keep-openshell" } as NodeJS.ProcessEnv,
+        existsSync: () => false,
+        isTty: false,
+        kill: (pid) => {
+          killed.push(pid);
+          return true;
+        },
+        rmSync: vi.fn(),
+        run,
+        runDocker: () => ok(""),
+      },
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(killed).not.toContain(gatewayPid);
+    expect(
+      run.mock.calls.some(
+        ([command, args]) =>
+          command === "pgrep" && args[0] === "-f" && String(args[1]).includes("openshell-gateway"),
+      ),
+    ).toBe(false);
+  });
+
+  it("removes the NemoClaw-managed user service when OpenShell is removed", () => {
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-uninstall-gateway-service-"));
+    const servicePath = getNemoclawOpenShellGatewayUserServicePath(tmpHome);
+    fs.mkdirSync(path.dirname(servicePath), { recursive: true });
+    fs.writeFileSync(
+      servicePath,
+      [
+        "# NemoClaw-managed OpenShell gateway user service",
+        `# ${NEMOCLAW_OPENSHELL_GATEWAY_USER_SERVICE_MARKER}`,
+        "[Service]",
+        "ExecStart=/home/test/.local/bin/openshell-gateway",
+        "",
+      ].join("\n"),
+    );
+    const logs: string[] = [];
+    const runCalls: string[][] = [];
+
+    try {
+      const result = runUninstallPlan(
+        { assumeYes: true, deleteModels: false, keepOpenShell: false },
+        {
+          commandExists: (command) => command === "systemctl",
+          env: { HOME: tmpHome } as NodeJS.ProcessEnv,
+          existsSync: (target) => String(target).startsWith(tmpHome) && fs.existsSync(target),
+          isTty: false,
+          log: (line) => logs.push(line),
+          platform: "linux",
           rmSync: fs.rmSync,
           run: vi.fn((command: string, args: string[]) => {
             runCalls.push([command, ...args]);
@@ -84,6 +191,7 @@ describe("uninstall OpenShell gateway user service", () => {
           env: { HOME: tmpHome } as NodeJS.ProcessEnv,
           existsSync: (target) => String(target).startsWith(tmpHome) && fs.existsSync(target),
           isTty: false,
+          platform: "linux",
           rmSync: fs.rmSync,
           run: vi.fn(() => ok()),
           runDocker: () => ok(""),
@@ -92,6 +200,47 @@ describe("uninstall OpenShell gateway user service", () => {
 
       expect(result.exitCode).toBe(0);
       expect(fs.existsSync(servicePath)).toBe(true);
+    } finally {
+      fs.rmSync(tmpHome, { recursive: true, force: true });
+    }
+  });
+
+  it("does not remove Linux user service units on macOS", () => {
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-uninstall-macos-service-"));
+    const servicePath = getNemoclawOpenShellGatewayUserServicePath(tmpHome);
+    fs.mkdirSync(path.dirname(servicePath), { recursive: true });
+    fs.writeFileSync(
+      servicePath,
+      [
+        "# NemoClaw-managed OpenShell gateway user service",
+        `# ${NEMOCLAW_OPENSHELL_GATEWAY_USER_SERVICE_MARKER}`,
+        "",
+      ].join("\n"),
+    );
+    const run = vi.fn(() => ok());
+
+    try {
+      const result = runUninstallPlan(
+        { assumeYes: true, deleteModels: false, keepOpenShell: false },
+        {
+          commandExists: () => true,
+          env: { HOME: tmpHome } as NodeJS.ProcessEnv,
+          existsSync: (target) => String(target).startsWith(tmpHome) && fs.existsSync(target),
+          isTty: false,
+          platform: "darwin",
+          rmSync: fs.rmSync,
+          run,
+          runDocker: () => ok(""),
+        },
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(fs.existsSync(servicePath)).toBe(true);
+      expect(run).not.toHaveBeenCalledWith(
+        "systemctl",
+        expect.arrayContaining(["disable"]),
+        expect.anything(),
+      );
     } finally {
       fs.rmSync(tmpHome, { recursive: true, force: true });
     }
