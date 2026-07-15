@@ -20,6 +20,10 @@ function ok(stdout = ""): RunResult {
   return { status: 0, stdout, stderr: "" };
 }
 
+function homeEnv(home: string, xdgConfigHome = ""): NodeJS.ProcessEnv {
+  return { HOME: home, XDG_CONFIG_HOME: xdgConfigHome } as NodeJS.ProcessEnv;
+}
+
 function writeManagedService(home: string, env?: NodeJS.ProcessEnv): string {
   const servicePath = getNemoclawOpenShellGatewayUserServicePath(home, env);
   fs.mkdirSync(path.dirname(servicePath), { recursive: true });
@@ -49,7 +53,7 @@ describe("uninstall OpenShell gateway user service", () => {
     const tmpHome = path.join(tmpRoot, "home");
     const xdgConfigHome = path.join(tmpRoot, "xdg-config");
     fs.mkdirSync(tmpHome, { recursive: true });
-    const env = { HOME: tmpHome, XDG_CONFIG_HOME: xdgConfigHome } as NodeJS.ProcessEnv;
+    const env = homeEnv(tmpHome, xdgConfigHome);
     const servicePath = writeManagedService(tmpHome, env);
     const envPath = writeGatewayEnv(tmpHome, env);
     const run = vi.fn((_command: string, _args: string[]) => ok());
@@ -86,7 +90,7 @@ describe("uninstall OpenShell gateway user service", () => {
     const tmpHome = path.join(tmpRoot, "home");
     const xdgConfigHome = path.join(tmpRoot, "xdg-config");
     fs.mkdirSync(tmpHome, { recursive: true });
-    const env = { HOME: tmpHome, XDG_CONFIG_HOME: xdgConfigHome } as NodeJS.ProcessEnv;
+    const env = homeEnv(tmpHome, xdgConfigHome);
     const servicePath = writeManagedService(tmpHome, env);
     const envPath = writeGatewayEnv(tmpHome, env);
     const runCalls: string[][] = [];
@@ -134,7 +138,7 @@ describe("uninstall OpenShell gateway user service", () => {
         { assumeYes: true, deleteModels: false, keepOpenShell: false },
         {
           commandExists: (command) => command === "systemctl",
-          env: { HOME: tmpHome } as NodeJS.ProcessEnv,
+          env: homeEnv(tmpHome),
           error: (line) => errors.push(line),
           existsSync: (target) => String(target).startsWith(tmpHome) && fs.existsSync(target),
           isTty: false,
@@ -180,7 +184,7 @@ describe("uninstall OpenShell gateway user service", () => {
         { assumeYes: true, deleteModels: false, keepOpenShell: false },
         {
           commandExists: () => true,
-          env: { HOME: tmpHome } as NodeJS.ProcessEnv,
+          env: homeEnv(tmpHome),
           error: (line) => errors.push(line),
           existsSync: (target) => String(target).startsWith(tmpHome) && fs.existsSync(target),
           isTty: false,
@@ -215,15 +219,18 @@ describe("uninstall OpenShell gateway user service", () => {
         { assumeYes: true, deleteModels: false, keepOpenShell: false },
         {
           commandExists: (command) => command === "systemctl",
-          env: { HOME: tmpHome } as NodeJS.ProcessEnv,
+          env: homeEnv(tmpHome),
           error: (line) => errors.push(line),
           existsSync: (target) => String(target).startsWith(tmpHome) && fs.existsSync(target),
           isTty: false,
           platform: "linux",
-          rmSync: vi.fn((target: fs.PathLike) => {
-            if (String(target) === servicePath) throw new Error("permission denied");
-            fs.rmSync(target, { recursive: true, force: true });
-          }) as typeof fs.rmSync,
+          rmSync: vi.fn((target: fs.PathLike) =>
+            String(target) === servicePath
+              ? (() => {
+                  throw new Error("permission denied");
+                })()
+              : fs.rmSync(target, { recursive: true, force: true }),
+          ) as typeof fs.rmSync,
           run: vi.fn(() => ok()),
           runDocker: () => ok(""),
         },
@@ -250,7 +257,7 @@ describe("uninstall OpenShell gateway user service", () => {
         { assumeYes: true, deleteModels: false, keepOpenShell: false },
         {
           commandExists: (command) => command === "systemctl",
-          env: { HOME: tmpHome } as NodeJS.ProcessEnv,
+          env: homeEnv(tmpHome),
           error: (line) => errors.push(line),
           existsSync: (target) => String(target).startsWith(tmpHome) && fs.existsSync(target),
           isTty: false,
@@ -285,7 +292,7 @@ describe("uninstall OpenShell gateway user service", () => {
         { assumeYes: true, deleteModels: false, keepOpenShell: false },
         {
           commandExists: () => true,
-          env: { HOME: tmpHome } as NodeJS.ProcessEnv,
+          env: homeEnv(tmpHome),
           existsSync: (target) => String(target).startsWith(tmpHome) && fs.existsSync(target),
           isTty: false,
           platform: "darwin",

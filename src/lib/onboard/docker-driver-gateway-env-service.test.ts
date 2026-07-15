@@ -9,9 +9,14 @@ import { describe, expect, it, vi } from "vitest";
 import { writeSafeGatewayAuthConfig } from "../../../test/support/docker-driver-gateway-env-test-support";
 import { startPackageManagedDockerDriverGatewayWithEnvOverride } from "./docker-driver-gateway-env";
 
+function homeEnv(home: string, xdgConfigHome = ""): NodeJS.ProcessEnv {
+  return { HOME: home, XDG_CONFIG_HOME: xdgConfigHome } as NodeJS.ProcessEnv;
+}
+
 describe("package-managed Docker-driver gateway env service", () => {
   it("writes the service env only when package-managed startup prepares the service", async () => {
     const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-gateway-env-"));
+    const env = homeEnv(tempHome);
     const gatewayBin = path.join(tempHome, ".local", "bin", "openshell-gateway");
     const servicePath = path.join(
       tempHome,
@@ -28,6 +33,7 @@ describe("package-managed Docker-driver gateway env service", () => {
       await expect(
         startPackageManagedDockerDriverGatewayWithEnvOverride({
           clearDockerDriverGatewayRuntimeFiles: vi.fn(),
+          env,
           exitOnFailure: false,
           gatewayBin,
           gatewayEnv: {
@@ -65,6 +71,7 @@ describe("package-managed Docker-driver gateway env service", () => {
   it("uses one XDG config root for the service unit and gateway env", async () => {
     const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-gateway-env-"));
     const configHome = path.join(tempHome, "xdg-config");
+    const env = homeEnv(tempHome, configHome);
     const gatewayBin = path.join(tempHome, ".local", "bin", "openshell-gateway");
     const servicePath = path.join(configHome, "systemd", "user", "openshell-gateway.service");
     const envFile = path.join(configHome, "openshell", "gateway.env");
@@ -75,7 +82,7 @@ describe("package-managed Docker-driver gateway env service", () => {
       await expect(
         startPackageManagedDockerDriverGatewayWithEnvOverride({
           clearDockerDriverGatewayRuntimeFiles: vi.fn(),
-          env: { XDG_CONFIG_HOME: configHome },
+          env,
           exitOnFailure: false,
           gatewayBin,
           gatewayEnv: {
@@ -133,6 +140,7 @@ describe("package-managed Docker-driver gateway env service", () => {
     const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-gateway-env-"));
     const envFile = path.join(tempHome, ".config", "openshell", "gateway.env");
     const startService = vi.fn();
+    const env = homeEnv(tempHome);
     const homedirSpy = vi.spyOn(os, "homedir").mockReturnValue(tempHome);
     try {
       for (const key of [
@@ -151,6 +159,7 @@ describe("package-managed Docker-driver gateway env service", () => {
         expect(() =>
           startPackageManagedDockerDriverGatewayWithEnvOverride({
             clearDockerDriverGatewayRuntimeFiles: vi.fn(),
+            env,
             exitOnFailure: false,
             gatewayEnv: {
               OPENSHELL_BIND_ADDRESS: "127.0.0.1",

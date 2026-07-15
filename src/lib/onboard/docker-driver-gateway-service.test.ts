@@ -56,6 +56,10 @@ function spawnResult(status = 0, stderr = "", stdout = ""): SpawnSyncLikeResult 
   };
 }
 
+function homeEnv(home: string, xdgConfigHome = ""): NodeJS.ProcessEnv {
+  return { HOME: home, XDG_CONFIG_HOME: xdgConfigHome } as NodeJS.ProcessEnv;
+}
+
 describe("docker-driver-gateway-service", () => {
   it("detects the upstream OpenShell user service only on Linux", () => {
     const existsSync = (candidate: string) =>
@@ -92,12 +96,14 @@ describe("docker-driver-gateway-service", () => {
 
   it("ignores stale per-user service units so standalone fallback remains available", () => {
     const home = "/home/nvidia";
-    const servicePath = getNemoclawOpenShellGatewayUserServicePath(home);
+    const env = homeEnv(home);
+    const servicePath = getNemoclawOpenShellGatewayUserServicePath(home, env);
     const existsSync = vi.fn((candidate: string) => candidate === servicePath);
 
     expect(
       hasOpenShellGatewayUserService({
         existsSync,
+        env,
         home,
         platform: "linux",
         readFileSync: () => `# not ${NEMOCLAW_OPENSHELL_GATEWAY_USER_SERVICE_MARKER}`,
@@ -107,7 +113,8 @@ describe("docker-driver-gateway-service", () => {
 
   it("detects and installs a NemoClaw-managed user service on Linux only", () => {
     const home = "/home/nvidia";
-    const servicePath = getNemoclawOpenShellGatewayUserServicePath(home);
+    const env = homeEnv(home);
+    const servicePath = getNemoclawOpenShellGatewayUserServicePath(home, env);
     const gatewayBin = "/home/nvidia/.local/bin/openshell-gateway";
     const chmodSync = vi.fn();
     const mkdirSync = vi.fn();
@@ -116,6 +123,7 @@ describe("docker-driver-gateway-service", () => {
     expect(
       installNemoclawOpenShellGatewayUserService({
         chmodSync,
+        env,
         existsSync: () => false,
         gatewayBin,
         home,
@@ -141,6 +149,7 @@ describe("docker-driver-gateway-service", () => {
     expect(
       hasNemoclawOpenShellGatewayUserService({
         existsSync: (candidate) => candidate === servicePath,
+        env,
         home,
         platform: "linux",
         readFileSync: () => buildNemoclawOpenShellGatewayUserService(gatewayBin),
@@ -173,7 +182,8 @@ describe("docker-driver-gateway-service", () => {
 
   it("removes a NemoClaw user override when an upstream service exists", () => {
     const home = "/home/nvidia";
-    const servicePath = getNemoclawOpenShellGatewayUserServicePath(home);
+    const env = homeEnv(home);
+    const servicePath = getNemoclawOpenShellGatewayUserServicePath(home, env);
     const rmSync = vi.fn();
 
     expect(
@@ -181,6 +191,7 @@ describe("docker-driver-gateway-service", () => {
         existsSync: (candidate) =>
           candidate === "/usr/lib/systemd/user/openshell-gateway.service" ||
           candidate === servicePath,
+        env,
         gatewayBin: null,
         home,
         platform: "linux",
@@ -219,7 +230,8 @@ describe("docker-driver-gateway-service", () => {
 
   it("restarts the NemoClaw-managed user service after validating its identity", () => {
     const home = "/home/nvidia";
-    const servicePath = getNemoclawOpenShellGatewayUserServicePath(home);
+    const env = homeEnv(home);
+    const servicePath = getNemoclawOpenShellGatewayUserServicePath(home, env);
     const gatewayBin = "/home/nvidia/.local/bin/openshell-gateway";
     const spawnSyncImpl = vi.fn((_command: string, args: string[]) =>
       args.includes("show")
@@ -230,7 +242,7 @@ describe("docker-driver-gateway-service", () => {
     expect(
       startOpenShellGatewayUserService({
         commandExists: (command) => command === "systemctl",
-        env: {},
+        env,
         existsSync: (candidate) => candidate === servicePath,
         home,
         platform: "linux",
