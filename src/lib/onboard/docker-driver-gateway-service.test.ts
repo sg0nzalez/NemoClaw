@@ -69,7 +69,13 @@ describe("docker-driver-gateway-service", () => {
     );
 
     expect(hasOpenShellGatewayUserService({ existsSync, platform: "linux" })).toBe(true);
-    expect(hasOpenShellGatewayUserService({ existsSync, platform: "darwin" })).toBe(false);
+    expect(
+      hasOpenShellGatewayUserService({
+        commandExists: () => false,
+        existsSync,
+        platform: "darwin",
+      }),
+    ).toBe(false);
     expect(
       hasOpenShellGatewayUserService({
         commandExists: (command) => command === "brew",
@@ -308,6 +314,21 @@ describe("docker-driver-gateway-service", () => {
     const events: string[] = [];
     const spawnSyncImpl = vi.fn((_command: string, args: string[]) => {
       events.push(args.join(" "));
+      if (args.join(" ") === "services info --json openshell") {
+        return spawnResult(
+          0,
+          "",
+          JSON.stringify([
+            {
+              exit_code: 0,
+              loaded: true,
+              name: "openshell",
+              running: true,
+              status: "started",
+            },
+          ]),
+        );
+      }
       return spawnResult();
     });
 
@@ -331,7 +352,140 @@ describe("docker-driver-gateway-service", () => {
       "list --formula openshell",
       "prepare-env",
       "services restart openshell",
+      "services info --json openshell",
     ]);
+  });
+
+  it("waits briefly for a restarted macOS Homebrew service to begin running", () => {
+    let statusChecks = 0;
+    const sleepSeconds = vi.fn();
+    const spawnSyncImpl = vi.fn((_command: string, args: string[]) => {
+      if (args.join(" ") !== "services info --json openshell") return spawnResult();
+      statusChecks += 1;
+      return spawnResult(
+        0,
+        "",
+        JSON.stringify([
+          {
+            exit_code: statusChecks === 1 ? null : 0,
+            loaded: true,
+            name: "openshell",
+            running: statusChecks > 1,
+            status: "started",
+          },
+        ]),
+      );
+    });
+
+    const result = startOpenShellGatewayUserService({
+      commandExists: (command) => command === "brew",
+      env: {},
+      platform: "darwin",
+      sleepSeconds,
+      spawnSyncImpl,
+    });
+
+    expect(result).toMatchObject({ manager: "homebrew", started: true });
+    expect(statusChecks).toBe(2);
+    expect(sleepSeconds).toHaveBeenCalledOnce();
+    expect(sleepSeconds).toHaveBeenCalledWith(0.25);
+  });
+
+  it("rejects a macOS Homebrew service that exits after a successful restart", () => {
+    const spawnSyncImpl = vi.fn((_command: string, args: string[]) => {
+      if (args.join(" ") === "services info --json openshell") {
+        return spawnResult(
+          0,
+          "",
+          JSON.stringify([
+            {
+              exit_code: 1,
+              loaded: true,
+              name: "openshell",
+              running: false,
+              status: "error",
+            },
+          ]),
+        );
+      }
+      return spawnResult();
+    });
+
+    const result = startOpenShellGatewayUserService({
+      commandExists: (command) => command === "brew",
+      env: {},
+      platform: "darwin",
+      sleepSeconds: vi.fn(),
+      spawnSyncImpl,
+    });
+
+    expect(result).toMatchObject({
+      attempted: true,
+      fallbackAllowed: false,
+      manager: "homebrew",
+      serviceName: "openshell",
+      started: false,
+    });
+    expect(result.reason).toMatch(/not running.*status=error.*exit_code=1/);
+  });
+
+  it("rechecks Homebrew service liveness before the sandbox bridge probe", async () => {
+    const verifySandboxBridgeGatewayReachableOrExit = vi.fn();
+
+    await expect(
+      startPackageManagedDockerDriverGateway({
+        clearDockerDriverGatewayRuntimeFiles: vi.fn(),
+        exitOnFailure: false,
+        gatewayName: "nemoclaw",
+        getHomebrewServiceRunningState: () => ({
+          ok: false,
+          reason: "brew services info --json openshell reports exit_code=1",
+        }),
+        hasOpenShellGatewayUserService: () => true,
+        healthPollCount: 1,
+        healthPollInterval: 0,
+        isDockerDriverGatewayReady: async () => true,
+        registerDockerDriverGatewayEndpoint: () => true,
+        runCaptureOpenshell: (args) => (args[0] === "status" ? STATUS_CONNECTED : GATEWAY_INFO),
+        skipSandboxBridgeReachability: false,
+        startOpenShellGatewayUserService: () => ({
+          attempted: true,
+          fallbackAllowed: false,
+          manager: "homebrew",
+          started: true,
+          statusCommand: "brew services info openshell",
+        }),
+        verifySandboxBridgeGatewayReachableOrExit,
+      }),
+    ).rejects.toThrow(/service stopped after startup.*exit_code=1/);
+
+    expect(verifySandboxBridgeGatewayReachableOrExit).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "not json",
+    "[]",
+  ])("fails closed when Homebrew service status is unusable: %s", (stdout) => {
+    const result = startOpenShellGatewayUserService({
+      commandExists: (command) => command === "brew",
+      env: {},
+      platform: "darwin",
+      sleepSeconds: vi.fn(),
+      spawnSyncImpl: vi.fn((_command: string, args: string[]) =>
+        args.join(" ") === "services info --json openshell"
+          ? spawnResult(0, "", stdout)
+          : spawnResult(),
+      ),
+    });
+
+    expect(result).toMatchObject({
+      attempted: true,
+      fallbackAllowed: false,
+      manager: "homebrew",
+      serviceName: "openshell",
+      started: false,
+    });
+    expect(result.reason).toContain("brew services info --json openshell");
   });
 
   it("does not fall back when the macOS Homebrew service restart fails", () => {
@@ -340,7 +494,9 @@ describe("docker-driver-gateway-service", () => {
       env: {},
       platform: "darwin",
       spawnSyncImpl: vi.fn((_command: string, args: string[]) =>
-        args[0] === "services" ? spawnResult(1, "launchctl failed") : spawnResult(),
+        args.join(" ") === "services restart openshell"
+          ? spawnResult(1, "launchctl failed")
+          : spawnResult(),
       ),
     });
 

@@ -6,7 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { sleepSeconds, waitUntilAsync } from "../core/wait";
+import { sleepSeconds, waitUntil, waitUntilAsync } from "../core/wait";
 import { isGatewayHealthy } from "../state/gateway";
 import { envInt } from "./env";
 import {
@@ -20,6 +20,8 @@ export const OPENSHELL_GATEWAY_HOMEBREW_SERVICE = "openshell";
 export const NEMOCLAW_OPENSHELL_GATEWAY_USER_SERVICE_MARKER =
   "NEMOCLAW_MANAGED_OPENSHELL_GATEWAY=1";
 export const NEMOCLAW_OPENSHELL_GATEWAY_USER_SERVICE_MARKER_LINE = `# ${NEMOCLAW_OPENSHELL_GATEWAY_USER_SERVICE_MARKER}`;
+const HOMEBREW_SERVICE_STATUS_POLL_ATTEMPTS = 5;
+const HOMEBREW_SERVICE_STATUS_POLL_INTERVAL_SECONDS = 0.25;
 
 export interface OpenShellGatewayUserServiceOptions {
   commandExists?: (command: string) => boolean;
@@ -29,6 +31,7 @@ export interface OpenShellGatewayUserServiceOptions {
   platform?: NodeJS.Platform;
   prepareServiceEnv?: () => void;
   readFileSync?: (filePath: string, encoding: BufferEncoding) => string;
+  sleepSeconds?: (seconds: number) => void;
   spawnSyncImpl?: SpawnSyncLike;
 }
 
@@ -84,6 +87,7 @@ export interface PackageManagedDockerDriverGatewayOptions {
   clearDockerDriverGatewayRuntimeFiles: () => void;
   exitOnFailure: boolean;
   gatewayName: string;
+  getHomebrewServiceRunningState?: () => { ok: boolean; reason?: string };
   hasOpenShellGatewayUserService?: () => boolean;
   healthPollCount?: number;
   healthPollInterval?: number;
@@ -342,6 +346,75 @@ function runBrew(
     return { ok: false, reason: detail };
   }
   return { ok: true, stdout: text(result.stdout) };
+}
+
+function parseHomebrewServiceRunningState(
+  output: string,
+  serviceName: string,
+): { ok: boolean; reason?: string } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(output);
+  } catch {
+    return { ok: false, reason: "returned invalid JSON" };
+  }
+  if (!Array.isArray(parsed)) return { ok: false, reason: "returned a non-array response" };
+  const service = parsed.find(
+    (entry): entry is Record<string, unknown> =>
+      typeof entry === "object" && entry !== null && entry.name === serviceName,
+  );
+  if (!service) return { ok: false, reason: `did not report service ${serviceName}` };
+  if (service.loaded === true && service.running === true) return { ok: true };
+  return {
+    ok: false,
+    reason: `${serviceName} is not running (loaded=${String(service.loaded ?? "<missing>")}, running=${String(service.running ?? "<missing>")}, status=${String(service.status ?? "<missing>")}, exit_code=${String(service.exit_code ?? "<missing>")})`,
+  };
+}
+
+function readHomebrewServiceRunningState(
+  opts: Pick<OpenShellGatewayUserServiceOptions, "env" | "spawnSyncImpl"> & {
+    serviceName?: string;
+  } = {},
+): { ok: boolean; reason?: string } {
+  const env = opts.env ?? process.env;
+  const spawnSyncImpl = opts.spawnSyncImpl ?? spawnSync;
+  const serviceName = opts.serviceName ?? OPENSHELL_GATEWAY_HOMEBREW_SERVICE;
+  const statusArgs = ["services", "info", "--json", serviceName];
+  const status = runBrew(statusArgs, { env, spawnSyncImpl });
+  if (!status.ok) {
+    return { ok: false, reason: `brew ${statusArgs.join(" ")} failed: ${status.reason}` };
+  }
+  const running = parseHomebrewServiceRunningState(status.stdout ?? "", serviceName);
+  if (!running.ok) {
+    return { ok: false, reason: `brew ${statusArgs.join(" ")} ${running.reason}` };
+  }
+  return { ok: true };
+}
+
+function waitForHomebrewServiceRunning(
+  opts: Pick<OpenShellGatewayUserServiceOptions, "env" | "sleepSeconds" | "spawnSyncImpl"> & {
+    serviceName?: string;
+  } = {},
+): { ok: boolean; reason?: string } {
+  const sleepSecondsImpl = opts.sleepSeconds ?? sleepSeconds;
+  let latest: { ok: boolean; reason?: string } = {
+    ok: false,
+    reason: "Homebrew service status was not checked",
+  };
+  const running = waitUntil(
+    () => {
+      latest = readHomebrewServiceRunningState(opts);
+      return latest.ok;
+    },
+    {
+      backoffFactor: 1,
+      initialIntervalMs: HOMEBREW_SERVICE_STATUS_POLL_INTERVAL_SECONDS * 1000,
+      maxAttempts: HOMEBREW_SERVICE_STATUS_POLL_ATTEMPTS,
+      maxIntervalMs: HOMEBREW_SERVICE_STATUS_POLL_INTERVAL_SECONDS * 1000,
+      sleep: (ms) => sleepSecondsImpl(ms / 1000),
+    },
+  );
+  return running ? { ok: true } : latest;
 }
 
 function parseSystemctlShowProperties(output: string): Record<string, string> {
@@ -645,6 +718,24 @@ export function startOpenShellGatewayUserService(
       };
     }
 
+    const running = waitForHomebrewServiceRunning({
+      env,
+      serviceName: service.serviceName,
+      sleepSeconds: opts.sleepSeconds,
+      spawnSyncImpl,
+    });
+    if (!running.ok) {
+      return {
+        attempted: true,
+        fallbackAllowed: false,
+        manager: service.manager,
+        reason: running.reason,
+        serviceName: service.serviceName,
+        started: false,
+        statusCommand: service.statusCommand,
+      };
+    }
+
     return {
       attempted: true,
       fallbackAllowed: false,
@@ -761,6 +852,8 @@ export async function startPackageManagedDockerDriverGateway({
   clearDockerDriverGatewayRuntimeFiles,
   exitOnFailure,
   gatewayName,
+  getHomebrewServiceRunningState:
+    getHomebrewServiceRunningStateImpl = readHomebrewServiceRunningState,
   hasOpenShellGatewayUserService:
     hasOpenShellGatewayUserServiceImpl = hasOpenShellGatewayUserService,
   healthPollCount,
@@ -831,6 +924,17 @@ export async function startPackageManagedDockerDriverGateway({
       return cliHealthy || grpcHealthy;
     }, waitOptions));
   if (healthy) {
+    if (serviceStart.manager === "homebrew") {
+      const running = getHomebrewServiceRunningStateImpl();
+      if (!running.ok) {
+        const detail = running.reason ? ` (${running.reason})` : "";
+        const message = `OpenShell gateway service stopped after startup${detail}.`;
+        console.error(`  ${message}`);
+        console.error(`  Check: ${serviceStart.statusCommand}`);
+        if (exitOnFailure) process.exit(1);
+        throw new Error(message);
+      }
+    }
     clearDockerDriverGatewayRuntimeFiles();
     await verifySandboxBridgeGatewayReachableOrExit(exitOnFailure, {
       skip: skipSandboxBridgeReachability,

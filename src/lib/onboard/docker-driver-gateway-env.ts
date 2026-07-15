@@ -28,6 +28,7 @@ import {
 export { getGatewayHttpsEndpoint, startPackageManagedDockerDriverGateway };
 
 export const DOCKER_DRIVER_GATEWAY_RUNTIME_ENV_KEYS = [
+  "DOCKER_HOST",
   "OPENSHELL_DRIVERS",
   "OPENSHELL_BIND_ADDRESS",
   "OPENSHELL_SERVER_PORT",
@@ -245,7 +246,25 @@ function formatEnvironmentFileAssignment(key: string, value: string): string {
   if (/[\0\r\n]/.test(value)) {
     throw new Error(`Invalid OpenShell gateway env value for ${key}: contains a line break`);
   }
+  if (key === "DOCKER_HOST") {
+    const dockerHost = normalizePackageServiceDockerHost(value);
+    if (!dockerHost) throw new Error("Invalid empty DOCKER_HOST for the OpenShell gateway service");
+    return `${key}='${dockerHost}'`;
+  }
   return `${key}=${value}`;
+}
+
+function normalizePackageServiceDockerHost(value: string | undefined): string | undefined {
+  const candidate = String(value || "").trim();
+  if (!candidate) return undefined;
+  const prefix = "unix://";
+  const socketPath = candidate.startsWith(prefix) ? candidate.slice(prefix.length) : "";
+  if (path.isAbsolute(socketPath) && !/[\0\r\n']/.test(socketPath)) {
+    return candidate;
+  }
+  throw new Error(
+    "Invalid DOCKER_HOST for the OpenShell gateway service; only safely serializable absolute unix:// Docker sockets are supported.",
+  );
 }
 
 function readTextFileIfPresent(filePath: string): string {
@@ -319,7 +338,15 @@ export function startPackageManagedDockerDriverGatewayWithEnvOverride(
     hasOpenShellGatewayUserService:
       options.hasOpenShellGatewayUserService ??
       (() => hasOpenShellGatewayUserService({ env, home: effectiveHome })),
-    prepareOpenShellGatewayUserServiceEnv: () =>
-      writeDockerGatewayDebEnvOverrideFile(() => gatewayEnv, { env, home: effectiveHome }),
+    prepareOpenShellGatewayUserServiceEnv: () => {
+      const serviceGatewayEnv = { ...gatewayEnv };
+      delete serviceGatewayEnv.DOCKER_HOST;
+      const dockerHost = normalizePackageServiceDockerHost(env.DOCKER_HOST);
+      if (dockerHost) serviceGatewayEnv.DOCKER_HOST = dockerHost;
+      writeDockerGatewayDebEnvOverrideFile(() => serviceGatewayEnv, {
+        env,
+        home: effectiveHome,
+      });
+    },
   });
 }

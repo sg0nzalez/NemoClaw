@@ -24,6 +24,7 @@ describe("buildDockerGatewayDebEnvFile", () => {
         "OPENSHELL_BIND_ADDRESS=127.0.0.1",
         "OPENSHELL_SERVER_PORT=8080",
         "OPENSHELL_DOCKER_SUPERVISOR_IMAGE=old",
+        "DOCKER_HOST=unix:///tmp/old-docker.sock",
       ].join("\n"),
       {
         OPENSHELL_DRIVERS: "docker",
@@ -39,6 +40,7 @@ describe("buildDockerGatewayDebEnvFile", () => {
         OPENSHELL_DOCKER_SUPERVISOR_IMAGE: "new",
         OPENSHELL_GATEWAY_CONFIG: "/tmp/openshell-gateway.toml",
         OPENSHELL_VM_DRIVER_STATE_DIR: "/tmp/old-vm-driver",
+        DOCKER_HOST: "unix:///tmp/new-docker.sock",
       },
     );
 
@@ -48,8 +50,10 @@ describe("buildDockerGatewayDebEnvFile", () => {
     expect(next).toContain("OPENSHELL_DOCKER_SUPERVISOR_IMAGE=new\n");
     expect(next).toContain("OPENSHELL_GATEWAY_CONFIG=/tmp/openshell-gateway.toml\n");
     expect(next).toContain("OPENSHELL_VM_DRIVER_STATE_DIR=/tmp/old-vm-driver\n");
+    expect(next).toContain("DOCKER_HOST='unix:///tmp/new-docker.sock'\n");
     expect(next).not.toContain("OPENSHELL_BIND_ADDRESS=127.0.0.1");
     expect(next).not.toContain("OPENSHELL_DOCKER_SUPERVISOR_IMAGE=old");
+    expect(next).not.toContain("DOCKER_HOST=unix:///tmp/old-docker.sock");
   });
 
   it("removes stale VM driver env keys when writing a Docker-driver env file", () => {
@@ -65,6 +69,22 @@ describe("buildDockerGatewayDebEnvFile", () => {
     );
 
     expect(next).toBe("OPENSHELL_DRIVERS=docker\n");
+  });
+
+  it("removes a stale Docker endpoint when the current runtime uses the default socket", () => {
+    const next = buildDockerGatewayDebEnvFile("DOCKER_HOST=unix:///tmp/old-docker.sock\n", {
+      OPENSHELL_DRIVERS: "docker",
+    });
+
+    expect(next).toBe("OPENSHELL_DRIVERS=docker\n");
+  });
+
+  it("quotes Docker socket paths for both service env readers", () => {
+    const dockerHost = "unix:///Users/José Doe/.colima/$(literal)/docker.sock";
+
+    expect(buildDockerGatewayDebEnvFile("", { DOCKER_HOST: dockerHost })).toBe(
+      `DOCKER_HOST='${dockerHost}'\n`,
+    );
   });
 
   it("removes stale auth-disable env so OpenShell 0.0.72 TOML auth policy stays authoritative", () => {
