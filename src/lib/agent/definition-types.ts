@@ -25,9 +25,46 @@ export interface AgentConfigPaths {
 
 export type AgentStateFileStrategy = "copy" | "sqlite_backup";
 
+export type StateFileRestoreMerge = "key-allowlist" | "openclaw-config";
+
+export type StateFileUserKeyType = "boolean" | "string" | "integer" | "number" | "enum";
+
+export interface StateFileUserKey {
+  key: string;
+  type: StateFileUserKeyType;
+  values?: readonly (string | number | boolean)[];
+  min?: number;
+  max?: number;
+  maxLength?: number;
+}
+
+export interface StateFileFreshHeader {
+  match: "exact" | "prefix";
+  value: string;
+}
+
+export interface StateFileKeyAllowlistRestoreOwnership {
+  merge: "key-allowlist";
+  userKeys: readonly StateFileUserKey[];
+  requireFreshTables?: readonly string[];
+  requireFreshHeaders?: readonly StateFileFreshHeader[];
+}
+
+export interface StateFileOpenClawRestoreOwnership {
+  merge: "openclaw-config";
+  userKeys?: never;
+  requireFreshTables?: never;
+  requireFreshHeaders?: never;
+}
+
+export type StateFileRestoreOwnership =
+  | StateFileKeyAllowlistRestoreOwnership
+  | StateFileOpenClawRestoreOwnership;
+
 export interface AgentStateFile {
   path: string;
   strategy: AgentStateFileStrategy;
+  restore?: StateFileRestoreOwnership;
 }
 
 export type AgentDashboardKind = "ui" | "api";
@@ -64,7 +101,6 @@ export interface AgentLegacyPaths {
 }
 
 export type AgentVersionScheme = "semver" | "calendar";
-export type AgentLandlockCompatibility = "best_effort" | "hard_requirement";
 
 export interface AgentDefinition {
   name: string;
@@ -77,7 +113,6 @@ export interface AgentDefinition {
   gateway_command?: string;
   runtime?: AgentRuntime;
   device_pairing?: boolean;
-  landlockCompatibility?: AgentLandlockCompatibility;
   phone_home_hosts?: string[];
   forward_ports?: number[];
   health_probe?: AgentHealthProbe;
@@ -85,6 +120,7 @@ export interface AgentDefinition {
   inference?: AgentInference;
   mcp?: AgentMcpCapability;
   state_dirs?: string[];
+  runtime_auth_state_dirs?: string[];
   state_files?: AgentStateFile[];
   user_managed_files?: string[];
   _legacy_paths?: StringMap;
@@ -100,6 +136,7 @@ export interface AgentDefinition {
   readonly inferenceProviderOptions: string[];
   readonly mcpCapability: AgentMcpCapability;
   readonly stateDirs: string[];
+  readonly runtimeAuthStateDirs: string[];
   readonly stateFiles: AgentStateFile[];
   readonly userManagedFiles: string[];
   readonly versionCommand: string;

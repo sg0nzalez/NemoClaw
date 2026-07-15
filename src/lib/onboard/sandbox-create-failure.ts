@@ -5,9 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { printSandboxCreateRecoveryHints } from "../build-context";
-import { classifySandboxCreateFailure } from "../validation";
-import { reportSandboxCreateFailure } from "./created-sandbox-failure";
+import { redactFull } from "../security/redact";
 
 const ANSI_RE = /\x1B(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\)|[@-_])/g;
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
@@ -36,21 +34,7 @@ export type SandboxCreateFailureDiagnosticOptions = {
 type SandboxDeleteRunner = (
   args: string[],
   options?: { ignoreError?: boolean },
-) => { status: number | null };
-
-export type SandboxCreateResult = {
-  status: number;
-  output?: string;
-};
-
-export type SandboxCreateFailureHandlerOptions = {
-  createResult: SandboxCreateResult;
-  sandboxName: string;
-  backupPath?: string | null;
-  createArgs?: readonly string[];
-  runOpenshell: SandboxDeleteRunner;
-  exit?: (code?: number) => never;
-};
+) => { status?: number | null };
 
 export type LandlockCreateFailureCleanupOptions = {
   failureKind: string;
@@ -97,42 +81,6 @@ export function cleanupLandlockSandboxAfterCreateFailure({
   ) {
     removeFailedSandboxForRetry(sandboxName, runOpenshell);
   }
-}
-
-export function handleNonzeroSandboxCreateResult({
-  createResult,
-  sandboxName,
-  backupPath,
-  createArgs,
-  runOpenshell,
-  exit = process.exit,
-}: SandboxCreateFailureHandlerOptions): "wait_for_ready" {
-  reportSandboxCreateFailure(
-    {
-      sandboxName,
-      createStatus: createResult.status,
-      createOutput: createResult.output ?? "",
-      restoreBackupPath: backupPath ?? null,
-      createArgs: createArgs ?? [],
-    },
-    {
-      classifyCreateFailure: classifySandboxCreateFailure,
-      printCreateFailureDiagnostics: (name, options) =>
-        printSandboxCreateFailureDiagnostics(name, options),
-      cleanupFailedCreate: (failureKind, createOutput) =>
-        cleanupLandlockSandboxAfterCreateFailure({
-          failureKind,
-          createOutput,
-          sandboxName,
-          runOpenshell,
-        }),
-      printRecoveryHints: printSandboxCreateRecoveryHints,
-      warn: (message) => console.warn(message),
-      error: (message) => console.error(message),
-      exitProcess: (code) => exit(code),
-    },
-  );
-  return "wait_for_ready";
 }
 
 function stripAnsi(value: string): string {
@@ -228,11 +176,12 @@ function latestFieldValue(lines: string[], field: string): string | null {
   return null;
 }
 
-function copyFileIfPresent(src: string | null, dst: string): string | null {
+function copyRedactedTextFileIfPresent(src: string | null, dst: string): string | null {
   if (!src) return null;
   try {
     if (!fs.existsSync(src)) return null;
-    fs.copyFileSync(src, dst);
+    const content = fs.readFileSync(src, "utf8");
+    fs.writeFileSync(dst, redactFull(stripAnsi(content)), { mode: 0o600 });
     return dst;
   } catch {
     return null;
@@ -283,30 +232,34 @@ export function collectSandboxCreateFailureDiagnostics(
     rawLines && relevantLines.length === 0
       ? rawLines.filter((line) => line.trim()).slice(-MAX_GATEWAY_TAIL_LINES)
       : [];
+  const redactedRelevantLines = relevantLines.map((line) => redactFull(line));
+  const redactedGatewayTailLines = gatewayTailLines.map((line) => redactFull(line));
   const stateDir = latestFieldValue(relevantLines, "state_dir");
   const consoleOutput =
     latestFieldValue(relevantLines, "console_output") ??
     (stateDir ? path.join(stateDir, "rootfs-console.log") : null);
-  const copiedConsoleOutput = copyFileIfPresent(
+  const copiedConsoleOutput = copyRedactedTextFileIfPresent(
     consoleOutput,
     path.join(dir, "rootfs-console.log"),
   );
   const stateEntries = listStateDir(stateDir);
   const backupPath = options.backupPath ?? null;
 
-  if (relevantLines.length > 0) {
+  if (redactedRelevantLines.length > 0) {
     fs.writeFileSync(
       path.join(dir, "openshell-gateway-relevant.log"),
-      `${relevantLines.join("\n")}\n`,
+      `${redactedRelevantLines.join("\n")}\n`,
       {
         mode: 0o600,
       },
     );
   }
   const gatewayTailPath =
-    gatewayTailLines.length > 0 ? path.join(dir, "openshell-gateway-tail.log") : null;
+    redactedGatewayTailLines.length > 0 ? path.join(dir, "openshell-gateway-tail.log") : null;
   if (gatewayTailPath) {
-    fs.writeFileSync(gatewayTailPath, `${gatewayTailLines.join("\n")}\n`, { mode: 0o600 });
+    fs.writeFileSync(gatewayTailPath, `${redactedGatewayTailLines.join("\n")}\n`, {
+      mode: 0o600,
+    });
   }
   const summaryLines = [
     `created_at=${now.toISOString()}`,
@@ -318,10 +271,10 @@ export function collectSandboxCreateFailureDiagnostics(
     `console_output=${consoleOutput ?? "unknown"}`,
     `copied_console_output=${copiedConsoleOutput ?? "not-copied"}`,
     `backup_path=${backupPath ?? "none"}`,
-  ];
+  ].map((line) => redactFull(line));
   if (stateEntries.length > 0) {
     summaryLines.push("state_dir_entries:");
-    summaryLines.push(...stateEntries.map((entry) => `  ${entry}`));
+    summaryLines.push(...stateEntries.map((entry) => redactFull(`  ${entry}`)));
   }
   fs.writeFileSync(path.join(dir, "summary.txt"), `${summaryLines.join("\n")}\n`, {
     mode: 0o600,
@@ -336,7 +289,10 @@ export function collectSandboxCreateFailureDiagnostics(
     copiedConsoleOutput,
     gatewayTailPath,
     backupPath,
-    summaryLines: relevantLines.length > 0 ? relevantLines.slice(-8) : gatewayTailLines.slice(-8),
+    summaryLines:
+      redactedRelevantLines.length > 0
+        ? redactedRelevantLines.slice(-8)
+        : redactedGatewayTailLines.slice(-8),
   };
 }
 
@@ -355,7 +311,7 @@ export function printSandboxCreateFailureDiagnostics(
     }
   }
   if (diagnostics.backupPath) {
-    console.error(`  State backup retained: ${diagnostics.backupPath}`);
+    console.error(`  State backup retained: ${redactFull(diagnostics.backupPath)}`);
   }
   return diagnostics;
 }

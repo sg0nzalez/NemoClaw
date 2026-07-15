@@ -21,7 +21,6 @@ import type {
   AgentDashboard,
   AgentDefinition,
   AgentHealthProbe,
-  AgentLandlockCompatibility,
   AgentLegacyPaths,
   AgentMcpCapability,
   AgentStateFile,
@@ -33,7 +32,6 @@ import {
   readDashboard,
   readHealthProbe,
   readInference,
-  readLandlockCompatibility,
   readMcpCapability,
   readObject,
   readPortArray,
@@ -55,7 +53,6 @@ export type {
   AgentDefinition,
   AgentHealthProbe,
   AgentInference,
-  AgentLandlockCompatibility,
   AgentLegacyPaths,
   AgentMcpAdapter,
   AgentMcpCapability,
@@ -63,6 +60,13 @@ export type {
   AgentStateFile,
   AgentStateFileStrategy,
   AgentVersionScheme,
+  StateFileFreshHeader,
+  StateFileKeyAllowlistRestoreOwnership,
+  StateFileOpenClawRestoreOwnership,
+  StateFileRestoreMerge,
+  StateFileRestoreOwnership,
+  StateFileUserKey,
+  StateFileUserKeyType,
 } from "./definition-types";
 export type { AgentRuntime, AgentRuntimeKind } from "./runtime-manifest";
 export { getAgentRuntimeKind, isTerminalAgent } from "./runtime-manifest";
@@ -134,9 +138,16 @@ export function loadAgent(name: string): AgentDefinition {
   const healthProbe = readHealthProbe(raw);
   const config = readObject(raw, "config");
   const inference = readInference(raw);
-  const landlockCompatibility = readLandlockCompatibility(raw) ?? "best_effort";
   const mcp = readMcpCapability(raw);
   const stateDirs = readStringArray(raw, "state_dirs");
+  const runtimeAuthStateDirs = readStringArray(raw, "runtime_auth_state_dirs");
+  for (const dir of runtimeAuthStateDirs ?? []) {
+    if (!stateDirs?.includes(dir)) {
+      throw new Error(
+        `Agent manifest field 'runtime_auth_state_dirs' entry '${dir}' must also be listed in 'state_dirs'`,
+      );
+    }
+  }
   const stateFiles = readStateFiles(raw);
   const userManagedFiles = readUserManagedFiles(raw);
   const phoneHomeHosts = readStringArray(raw, "phone_home_hosts");
@@ -155,7 +166,6 @@ export function loadAgent(name: string): AgentDefinition {
     gateway_command: gatewayCommand,
     runtime,
     device_pairing: readBoolean(raw, "device_pairing"),
-    landlockCompatibility,
     phone_home_hosts: phoneHomeHosts,
     forward_ports: forwardPorts,
     health_probe: healthProbe,
@@ -163,6 +173,7 @@ export function loadAgent(name: string): AgentDefinition {
     inference,
     mcp,
     state_dirs: stateDirs,
+    runtime_auth_state_dirs: runtimeAuthStateDirs,
     state_files: stateFiles,
     user_managed_files: userManagedFiles,
     _legacy_paths: legacyPathConfig,
@@ -224,6 +235,10 @@ export function loadAgent(name: string): AgentDefinition {
 
     get stateDirs(): string[] {
       return stateDirs ?? [];
+    },
+
+    get runtimeAuthStateDirs(): string[] {
+      return runtimeAuthStateDirs ?? [];
     },
 
     get stateFiles(): AgentStateFile[] {

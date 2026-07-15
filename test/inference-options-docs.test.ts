@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import type * as TypeScript from "typescript";
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
+import { VLLM_IMAGES } from "../src/lib/inference/vllm.js";
 import { getSandboxRuntimeInferenceEndpoint } from "../src/lib/onboard/docker-gpu-local-inference.js";
 import { shouldForceCompletionsApi } from "../src/lib/validation.js";
 
@@ -24,7 +25,7 @@ const { probeOpenAiLikeEndpoint } = require("../src/lib/inference/onboard-probes
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const chooseModelPath = path.join(repoRoot, "docs", "inference", "choose-model.mdx");
 const hermesProviderPath = path.join(repoRoot, "docs", "inference", "use-hermes-provider.mdx");
-const releaseNotesPath = path.join(repoRoot, "docs", "about", "release-notes.mdx");
+const releaseNotesPath = path.join(repoRoot, "docs", "changelog", "2026-07-09.mdx");
 const inferenceDocsDir = path.join(repoRoot, "docs", "inference");
 const docsNavPath = path.join(repoRoot, "docs", "index.yml");
 const fernDocsPath = path.join(repoRoot, "fern", "docs.yml");
@@ -162,6 +163,7 @@ function stripFencedCodeBlocks(markdown: string): string {
 }
 
 describe("inference options model task-fit docs (#4755)", () => {
+  // source-shape-contract: compatibility -- Published task-fit guidance must cover every curated onboarding model identifier
   it("keeps a per-model task-fit comparison table for curated onboarding models", () => {
     const markdown = fs.readFileSync(chooseModelPath, "utf8");
     const start = markdown.indexOf("## Model Task Fit");
@@ -224,10 +226,8 @@ describe("inference setup navigation", () => {
   it("routes the latest local and compatible inference release note through the shared chooser", () => {
     const markdown = fs.readFileSync(releaseNotesPath, "utf8");
     const releaseStart = markdown.indexOf("## v0.0.79");
-    const releaseEnd = markdown.indexOf("## v0.0.78", releaseStart);
     expect(releaseStart).toBeGreaterThanOrEqual(0);
-    expect(releaseEnd).toBeGreaterThan(releaseStart);
-    const release = markdown.slice(releaseStart, releaseEnd);
+    const release = markdown.slice(releaseStart);
     const bulletStart = release.indexOf("- Local and compatible inference setup");
     const bulletEnd = release.indexOf("\n- ", bulletStart + 1);
     expect(bulletStart).toBeGreaterThanOrEqual(0);
@@ -235,9 +235,9 @@ describe("inference setup navigation", () => {
     const bullet = release.slice(bulletStart, bulletEnd);
 
     expect(bullet).toContain(
-      "[Choose a Local Inference Server](../inference/local-inference/choose-local-inference-server)",
+      "[Choose a Local Inference Server](/user-guide/openclaw/inference/local-inference/choose-local-inference-server)",
     );
-    expect(bullet).not.toContain("../inference/local-inference/set-up-ollama");
+    expect(bullet).not.toContain("/inference/local-inference/set-up-ollama");
   });
 
   it("routes local options to focused setup pages", () => {
@@ -286,6 +286,35 @@ describe("inference setup navigation", () => {
     expect(hostValues).toEqual(["0.0.0.0"]);
     expect(markdown).toContain("default-deny inbound rules");
     expect(markdown).toContain("only from the OpenShell Docker subnet to its gateway address");
+  });
+
+  it("keeps managed image tags, digests, and compressed sizes in sync with source", () => {
+    const markdown = fs.readFileSync(vllmSetupPath, "utf8");
+    const entries = [
+      {
+        prefix: "- DGX Spark and DGX Station",
+        image: VLLM_IMAGES.ngc2605Post1.arm64,
+        tag: VLLM_IMAGES.ngc2605Post1.tag,
+      },
+      {
+        prefix: "- Generic Linux `arm64` hosts",
+        image: VLLM_IMAGES.ngc2603Post1.arm64,
+        tag: VLLM_IMAGES.ngc2603Post1.tag,
+      },
+      {
+        prefix: "- Generic Linux `amd64` hosts",
+        image: VLLM_IMAGES.ngc2603Post1.amd64,
+        tag: VLLM_IMAGES.ngc2603Post1.tag,
+      },
+    ] as const;
+
+    for (const { prefix, image, tag } of entries) {
+      const line = markdown.split("\n").find((candidate) => candidate.startsWith(prefix));
+      expect(line, `missing managed-image documentation for ${prefix}`).toBeDefined();
+      expect(line).toContain(`\`${image.ref.split("@")[1]}\``);
+      expect(line).toContain(`\`${(image.downloadSizeBytes / 1_000_000_000).toFixed(2)} GB\``);
+      expect(line).toContain(`\`${tag}\``);
+    }
   });
 
   it("keeps tool-calling remediation canonical in troubleshooting", () => {

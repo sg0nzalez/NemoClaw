@@ -6,9 +6,48 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
+import { OnboardInferenceCapabilityCache } from "./inference-capability-cache";
 import { createInferenceSelectionValidationHelpers } from "./inference-selection-validation";
 
 describe("inference selection validation", () => {
+  it("records a completed Chat Completions selection for the matching smoke check", async () => {
+    const capabilityCache = new OnboardInferenceCapabilityCache();
+    const helpers = createInferenceSelectionValidationHelpers({
+      isNonInteractive: () => false,
+      agentProductName: () => "OpenClaw",
+      getCredential: () => "test-key",
+      probeOpenAiLikeEndpoint: vi.fn(() => ({
+        ok: true,
+        api: "openai-completions",
+        label: "Chat Completions API",
+      })),
+      promptValidationRecovery: vi.fn(async () => "selection" as const),
+    });
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    try {
+      await expect(
+        helpers.validateOpenAiLikeSelection(
+          "OpenAI",
+          "https://api.example.test/v1/",
+          "model-a",
+          "OPENAI_API_KEY",
+          undefined,
+          undefined,
+          { capabilityCache },
+        ),
+      ).resolves.toEqual({ ok: true, api: "openai-completions" });
+      expect(
+        capabilityCache.takeCompletedOpenAiChat({
+          endpointUrl: "https://api.example.test/v1",
+          model: "model-a",
+        }),
+      ).toBe(true);
+    } finally {
+      log.mockRestore();
+    }
+  });
+
   it("preserves non-zero exit signaling when non-interactive endpoint validation fails (#5721)", async () => {
     const originalExitCode = process.exitCode;
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -115,6 +154,121 @@ describe("inference selection validation", () => {
           "COMPATIBLE_API_KEY",
         ),
       ).resolves.toEqual({ ok: false, retry: "selection" });
+      expect(probeOpenAiLikeEndpoint).not.toHaveBeenCalled();
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it("probes an exactly allowlisted private endpoint with DNS pinning (#6861)", async () => {
+    vi.stubEnv("NEMOCLAW_TRUSTED_PRIVATE_INFERENCE_HOSTS", "llm.corp.example");
+    const probeOpenAiLikeEndpoint = vi.fn(() => ({ ok: true, api: "openai-completions" }));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const helpers = createInferenceSelectionValidationHelpers({
+      isNonInteractive: () => false,
+      agentProductName: () => "OpenClaw",
+      getCredential: () => "test-key",
+      probeOpenAiLikeEndpoint,
+      promptValidationRecovery: vi.fn(async () => "selection" as const),
+      resolveEndpointHost: async () => [{ address: "10.0.0.8", family: 4 }],
+    });
+
+    try {
+      const result = await helpers.validateCustomOpenAiLikeSelection(
+        "Custom endpoint",
+        "https://llm.corp.example/v1",
+        "model-a",
+        "COMPATIBLE_API_KEY",
+      );
+      expect(result).toMatchObject({
+        ok: true,
+        api: "openai-completions",
+        pinnedAddresses: ["10.0.0.8"],
+      });
+      expect(result.ok && result.trustedPrivateCapability?.addresses).toEqual(["10.0.0.8"]);
+      expect(probeOpenAiLikeEndpoint).toHaveBeenCalledWith(
+        "https://llm.corp.example/v1",
+        "model-a",
+        "test-key",
+        expect.objectContaining({
+          pinnedAddresses: ["10.0.0.8"],
+          trustedPrivateCapability: expect.objectContaining({ addresses: ["10.0.0.8"] }),
+        }),
+      );
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("operator-trusted private"));
+    } finally {
+      warn.mockRestore();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("honors an exactly allowlisted private endpoint during non-interactive validation (#6861)", async () => {
+    vi.stubEnv("NEMOCLAW_TRUSTED_PRIVATE_INFERENCE_HOSTS", "llm.corp.example");
+    const probeOpenAiLikeEndpoint = vi.fn(() => ({ ok: true, api: "openai-completions" }));
+    const promptValidationRecovery = vi.fn(async () => "selection" as const);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const helpers = createInferenceSelectionValidationHelpers({
+      isNonInteractive: () => true,
+      agentProductName: () => "OpenClaw",
+      getCredential: () => "test-key",
+      probeOpenAiLikeEndpoint,
+      promptValidationRecovery,
+      resolveEndpointHost: async () => [{ address: "10.0.0.8", family: 4 }],
+    });
+
+    try {
+      const result = await helpers.validateCustomOpenAiLikeSelection(
+        "Custom endpoint",
+        "https://llm.corp.example/v1",
+        "model-a",
+        "COMPATIBLE_API_KEY",
+      );
+
+      expect(result).toMatchObject({
+        ok: true,
+        api: "openai-completions",
+        pinnedAddresses: ["10.0.0.8"],
+      });
+      expect(result.ok && result.trustedPrivateCapability?.addresses).toEqual(["10.0.0.8"]);
+      expect(promptValidationRecovery).not.toHaveBeenCalled();
+      expect(probeOpenAiLikeEndpoint).toHaveBeenCalledOnce();
+    } finally {
+      warn.mockRestore();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("routes an unreachable custom endpoint through transport recovery, not a silent loop (#6854)", async () => {
+    const probeOpenAiLikeEndpoint = vi.fn(() => ({ ok: true, api: "openai-completions" }));
+    let capturedRecovery: { kind?: string } | undefined;
+    const promptValidationRecovery = vi.fn(async (_label: string, recovery: { kind?: string }) => {
+      capturedRecovery = recovery;
+      return "retry" as const;
+    });
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const helpers = createInferenceSelectionValidationHelpers({
+      isNonInteractive: () => false,
+      agentProductName: () => "OpenClaw",
+      getCredential: () => "test-key",
+      probeOpenAiLikeEndpoint,
+      promptValidationRecovery,
+      resolveEndpointHost: async () => {
+        throw new Error("getaddrinfo ENOTFOUND example.invalid");
+      },
+    });
+
+    try {
+      await helpers.validateCustomOpenAiLikeSelection(
+        "Custom endpoint",
+        "https://example.invalid/v1",
+        "model-a",
+        "COMPATIBLE_API_KEY",
+      );
+      // A DNS-unreachable endpoint is a transport failure: the recovery prompt
+      // receives a transport classification (DNS/VPN/URL hint + retry/back/exit),
+      // not the silent selection loop the private-IP path takes.
+      expect(promptValidationRecovery).toHaveBeenCalled();
+      expect(capturedRecovery?.kind).toBe("transport");
       expect(probeOpenAiLikeEndpoint).not.toHaveBeenCalled();
     } finally {
       error.mockRestore();
@@ -487,6 +641,166 @@ exit 0
       expect(error.mock.calls.map((args) => args.join(" ")).join("\n")).toContain(
         "Anthropic Messages API (streaming): duplicate message_start",
       );
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it("suggests an OpenAI-compatible endpoint or OpenClaw when an Anthropic-only endpoint lacks Chat Completions (#6765)", async () => {
+    const originalExitCode = process.exitCode;
+    const probeOpenAiLikeEndpoint = vi.fn(async () => ({
+      ok: false,
+      failures: [{ name: "Chat Completions API", httpStatus: 404 }],
+    }));
+    const exit = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const promptValidationRecovery = vi.fn(async () => "selection" as const);
+    const helpers = createInferenceSelectionValidationHelpers({
+      isNonInteractive: () => true,
+      agentProductName: () => "Deep Agents",
+      getCredential: () => "test-key",
+      probeOpenAiLikeEndpoint,
+      promptValidationRecovery,
+      resolveEndpointHost: async () => [{ address: "93.184.216.34", family: 4 }],
+    });
+
+    try {
+      await expect(
+        helpers.validateCustomAnthropicSelection(
+          "Other Anthropic-compatible endpoint",
+          "https://anthropic-only.example",
+          "model-a",
+          "COMPATIBLE_ANTHROPIC_API_KEY",
+          null,
+          { intendedApi: "openai-completions" },
+        ),
+      ).rejects.toThrow("Non-interactive endpoint validation failed.");
+      expect(exit).toHaveBeenCalledWith(1);
+      expect(promptValidationRecovery).not.toHaveBeenCalled();
+      const errorOutput = error.mock.calls.map((args) => args.join(" ")).join("\n");
+      expect(errorOutput).toContain(
+        "Other Anthropic-compatible endpoint endpoint validation failed.",
+      );
+      expect(errorOutput).toContain("OpenAI Chat Completions API (/v1/chat/completions)");
+      expect(errorOutput).toContain("`nemoclaw onboard --agent openclaw`.");
+      expect(errorOutput).not.toContain("nemohermes");
+    } finally {
+      process.exitCode = originalExitCode;
+      error.mockRestore();
+      exit.mockRestore();
+    }
+  });
+
+  it("does not report a missing Chat Completions surface for a model-specific 404 (#6765)", async () => {
+    const probeOpenAiLikeEndpoint = vi.fn(async () => ({
+      ok: false,
+      failures: [
+        {
+          name: "Chat Completions API",
+          httpStatus: 404,
+          message: "model model-a not found",
+        },
+      ],
+    }));
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const promptValidationRecovery = vi.fn(async () => "model" as const);
+    const helpers = createInferenceSelectionValidationHelpers({
+      isNonInteractive: () => false,
+      agentProductName: () => "Deep Agents",
+      getCredential: () => "test-key",
+      probeOpenAiLikeEndpoint,
+      promptValidationRecovery,
+      resolveEndpointHost: async () => [{ address: "93.184.216.34", family: 4 }],
+    });
+
+    try {
+      await expect(
+        helpers.validateCustomAnthropicSelection(
+          "Other Anthropic-compatible endpoint",
+          "https://compatible.example",
+          "model-a",
+          "COMPATIBLE_ANTHROPIC_API_KEY",
+          null,
+          { intendedApi: "openai-completions" },
+        ),
+      ).resolves.toEqual({ ok: false, retry: "model" });
+      expect(promptValidationRecovery).toHaveBeenCalledOnce();
+      const errorOutput = error.mock.calls.map((args) => args.join(" ")).join("\n");
+      expect(errorOutput).toContain(
+        "Other Anthropic-compatible endpoint endpoint validation failed.",
+      );
+      expect(errorOutput).not.toContain("does not serve it");
+      expect(errorOutput).not.toContain("switch to an Anthropic-native agent");
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it("does not suggest switching agents when a native Anthropic selection fails (#6765)", async () => {
+    const probeAnthropicEndpoint = vi.fn(() => ({
+      ok: false,
+      failures: [{ name: "Anthropic Messages API", httpStatus: 404 }],
+    }));
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const promptValidationRecovery = vi.fn(async () => "model" as const);
+    const helpers = createInferenceSelectionValidationHelpers({
+      isNonInteractive: () => false,
+      agentProductName: () => "OpenClaw",
+      getCredential: () => "test-key",
+      probeAnthropicEndpoint,
+      promptValidationRecovery,
+      resolveEndpointHost: async () => [{ address: "93.184.216.34", family: 4 }],
+    });
+
+    try {
+      await expect(
+        helpers.validateCustomAnthropicSelection(
+          "Custom Anthropic endpoint",
+          "https://compatible.example",
+          "model-a",
+          "COMPATIBLE_ANTHROPIC_API_KEY",
+        ),
+      ).resolves.toEqual({ ok: false, retry: "model" });
+      const errorOutput = error.mock.calls.map((args) => args.join(" ")).join("\n");
+      expect(errorOutput).toContain("Custom Anthropic endpoint endpoint validation failed.");
+      expect(errorOutput).not.toContain("nemoclaw onboard --agent openclaw");
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it("omits the agent-switch hint when the Chat Completions surface exists but rejects auth (#6765)", async () => {
+    const probeOpenAiLikeEndpoint = vi.fn(async () => ({
+      ok: false,
+      failures: [{ name: "Chat Completions API", httpStatus: 403 }],
+    }));
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const promptValidationRecovery = vi.fn(async () => "credential" as const);
+    const helpers = createInferenceSelectionValidationHelpers({
+      isNonInteractive: () => false,
+      agentProductName: () => "Deep Agents",
+      getCredential: () => "test-key",
+      probeOpenAiLikeEndpoint,
+      promptValidationRecovery,
+      resolveEndpointHost: async () => [{ address: "93.184.216.34", family: 4 }],
+    });
+
+    try {
+      await expect(
+        helpers.validateCustomAnthropicSelection(
+          "Other Anthropic-compatible endpoint",
+          "https://anthropic-only.example",
+          "model-a",
+          "COMPATIBLE_ANTHROPIC_API_KEY",
+          null,
+          { intendedApi: "openai-completions" },
+        ),
+      ).resolves.toEqual({ ok: false, retry: "credential" });
+      const errorOutput = error.mock.calls.map((args) => args.join(" ")).join("\n");
+      expect(errorOutput).toContain(
+        "Other Anthropic-compatible endpoint endpoint validation failed.",
+      );
+      expect(errorOutput).not.toContain("switch to an Anthropic-native agent");
     } finally {
       error.mockRestore();
     }

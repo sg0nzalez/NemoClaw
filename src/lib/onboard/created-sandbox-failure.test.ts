@@ -127,12 +127,11 @@ describe("reportSandboxCreateFailure", () => {
 
   it("redacts multiple known token formats in create output", () => {
     const deps = createFailureDeps();
-    const awsAccessToken = ["AKIA", "ABCDEFGHIJKLMNOP"].join("");
     const createOutput = [
       "Authorization: Bearer secret-token",
       "github ghp_abcdefghijklmnopqrstuvwxyz1234567890",
       "openai sk-abcdefghijklmnopqrstuvwxyz1234567890",
-      `aws ${awsAccessToken}`,
+      "aws AKIAABCDEFGHIJKLMNOP", // gitleaks:allow
     ].join("\n");
 
     expect(() => reportSandboxCreateFailure(createFailureOptions({ createOutput }), deps)).toThrow(
@@ -145,14 +144,14 @@ describe("reportSandboxCreateFailure", () => {
     expect(echoed).not.toContain("secret-token");
     expect(echoed).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz1234567890");
     expect(echoed).not.toContain("sk-abcdefghijklmnopqrstuvwxyz1234567890");
-    expect(echoed).not.toContain(awsAccessToken);
+    expect(echoed).not.toContain("AKIAABCDEFGHIJKLMNOP"); // gitleaks:allow
     const hinted = (deps.printRecoveryHints as ReturnType<typeof vi.fn>).mock.calls
       .map((call) => String(call[0]))
       .join("\n");
     expect(hinted).not.toContain("secret-token");
     expect(hinted).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz1234567890");
     expect(hinted).not.toContain("sk-abcdefghijklmnopqrstuvwxyz1234567890");
-    expect(hinted).not.toContain(awsAccessToken);
+    expect(hinted).not.toContain("AKIAABCDEFGHIJKLMNOP"); // gitleaks:allow
   });
 
   it("falls back to exit code 1 when the create status is zero", () => {

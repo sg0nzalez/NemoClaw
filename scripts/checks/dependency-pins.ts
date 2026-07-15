@@ -31,6 +31,11 @@ type DependencyPins = Readonly<{
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const OPENCLAW_VERSION_ARG_SUFFIX_RE = /[.-]/g;
 const NUMERIC_VERSION_RE = /^[0-9]+\.[0-9]+\.[0-9]+$/;
+const OPENSHELL_RELEASE_MANIFESTS = [
+  "openshell-checksums-sha256.txt",
+  "openshell-gateway-checksums-sha256.txt",
+  "openshell-sandbox-checksums-sha256.txt",
+] as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -263,11 +268,35 @@ function requireVersionReference(
   }
 }
 
+function requireOpenShellReleaseManifestAllowlist(
+  source: string,
+  expectedVersion: string,
+  failures: string[],
+): void {
+  const entries = [
+    ...source.matchAll(/^\s*"([0-9]+\.[0-9]+\.[0-9]+)\|([^|"\s]+)\|([a-f0-9]{64})"\s*$/gm),
+  ]
+    .filter((match) => match[1] === expectedVersion)
+    .map((match) => match[2])
+    .filter((manifest): manifest is string => manifest !== undefined);
+  const complete =
+    entries.length === OPENSHELL_RELEASE_MANIFESTS.length &&
+    OPENSHELL_RELEASE_MANIFESTS.every(
+      (manifest) => entries.filter((entry) => entry === manifest).length === 1,
+    );
+  if (!complete) {
+    failures.push(
+      `OpenShell release-manifest allowlist: expected one complete entry for ${expectedVersion}`,
+    );
+  }
+}
+
 function verifyOpenShellPins(
   pins: OpenShellPins,
   sources: {
     brevLaunchable: string;
     credentialBoundary: Record<string, unknown>;
+    e2eWorkflow: Record<string, unknown>;
     hermesDockerfile: string;
     hermesMcpConfigTransaction: string;
     installer: string;
@@ -308,17 +337,7 @@ function verifyOpenShellPins(
     "OpenShell installer PIN_VERSION",
     failures,
   );
-  compare(
-    extractSingle(
-      sources.installerHashCheck,
-      /^OPENSHELL_RELEASE_VERSION="([^"]+)"\s*$/gm,
-      "OpenShell installer hash release",
-      failures,
-    ),
-    pins.maxVersion,
-    "OpenShell installer hash release",
-    failures,
-  );
+  requireOpenShellReleaseManifestAllowlist(sources.installerHashCheck, pins.maxVersion, failures);
   compare(
     extractSingle(
       sources.openshellVersion,
@@ -364,6 +383,17 @@ function verifyOpenShellPins(
     ),
     pins.maxVersion,
     "Brev launchable stable OpenShell default",
+    failures,
+  );
+  compare(
+    extractMappingString(
+      sources.e2eWorkflow,
+      ["jobs", "openshell-gateway-auth-contract", "env", "NEMOCLAW_OPENSHELL_PIN_VERSION"],
+      ".github/workflows/e2e.yaml gateway auth OpenShell version",
+      failures,
+    ),
+    pins.maxVersion,
+    ".github/workflows/e2e.yaml gateway auth OpenShell version",
     failures,
   );
   compare(
@@ -507,6 +537,7 @@ export function verifyDependencyPins(rootDir: string = REPO_ROOT): string[] {
   const brevLaunchable = readText(rootDir, "scripts/brev-launchable-ci-cpu.sh", failures);
   const installer = readText(rootDir, "scripts/install-openshell.sh", failures);
   const installerHashCheck = readText(rootDir, "scripts/check-installer-hash.sh", failures);
+  const e2eWorkflowSource = readText(rootDir, ".github/workflows/e2e.yaml", failures);
   const openclawManifestSource = readText(rootDir, "agents/openclaw/manifest.yaml", failures);
   const hermesManifestSource = readText(rootDir, "agents/hermes/manifest.yaml", failures);
   const dockerfile = readText(rootDir, "Dockerfile", failures);
@@ -560,14 +591,22 @@ export function verifyDependencyPins(rootDir: string = REPO_ROOT): string[] {
     "JSON",
     failures,
   );
+  const e2eWorkflow = parseMapping(
+    e2eWorkflowSource,
+    ".github/workflows/e2e.yaml",
+    "YAML",
+    failures,
+  );
   const packageJson = parseMapping(packageJsonSource, "nemoclaw/package.json", "JSON", failures);
-  if (!openclawManifest || !hermesManifest || !credentialBoundary || !packageJson) return failures;
+  if (!openclawManifest || !hermesManifest || !credentialBoundary || !e2eWorkflow || !packageJson)
+    return failures;
 
   verifyOpenShellPins(
     pins.openshell,
     {
       brevLaunchable,
       credentialBoundary,
+      e2eWorkflow,
       hermesDockerfile,
       hermesMcpConfigTransaction,
       installer,

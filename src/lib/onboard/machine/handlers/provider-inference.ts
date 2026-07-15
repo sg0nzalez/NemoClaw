@@ -3,13 +3,20 @@
 
 import { clearAutoDetectedCompatibleContextWindow } from "../../../inference/compatible-endpoint-context";
 import { resolveAgentProviderInferenceApi } from "../../../inference/config";
-import type {
-  CurrentGatewayRouteCompatibilityCheck,
-  CurrentGatewayRouteDiscoveryPreflight,
-  GatewayRouteDiscoveryConstraints,
+import type { TrustedPrivateEndpointCapability } from "../../../inference/endpoint-ssrf-preflight";
+import {
+  type CurrentGatewayRouteCompatibilityCheck,
+  type CurrentGatewayRouteDiscoveryPreflight,
+  type GatewayRouteDiscoveryConstraints,
+  isAdvisoryGatewayRouteConflict,
 } from "../../../inference/gateway-route-compatibility";
 import type { WebSearchConfig } from "../../../inference/web-search";
 import type { HermesAuthMethod, Session, SessionUpdates } from "../../../state/onboard-session";
+import type { OnboardInferenceCapabilityCache } from "../../inference-capability-cache";
+import type {
+  createProviderRecoveryReceiptLedger,
+  ProviderRecoveryReceipt,
+} from "../../rebuild-route-handoff";
 import { withInferenceTrace, withProviderSelectionTrace } from "../../tracing";
 import { advanceTo, type OnboardStateTransitionResult, retryTo } from "../result";
 import { createRecovery, type RecoveryAuthority } from "./provider-inference-recovery";
@@ -35,6 +42,10 @@ export interface ProviderInferenceSetupOptions {
   preferredInferenceApi?: string | null;
   /** Public addresses approved for custom endpoint host probes. */
   endpointPinnedAddresses?: readonly string[];
+  /** Non-forgeable proof of the exact private subset admitted by the custom preflight. */
+  endpointTrustedPrivateCapability?: TrustedPrivateEndpointCapability;
+  /** One-shot host capability cache carried only through this onboarding run. */
+  inferenceCapabilityCache?: OnboardInferenceCapabilityCache;
   /** Onboard session that owns the route reservation this setup creates. */
   reservationSessionId?: string;
   /** Recheck recorded-route ownership after acquiring route mutation locks. */
@@ -56,6 +67,8 @@ export interface ProviderSelectionResult {
   reuseGatewayCredentialWithoutLocalKey?: boolean;
   recoveredFromSandbox?: boolean;
   endpointPinnedAddresses?: string[];
+  endpointTrustedPrivateCapability?: TrustedPrivateEndpointCapability;
+  inferenceCapabilityCache?: OnboardInferenceCapabilityCache;
 }
 
 export interface ProviderInferenceStateOptions<Gpu, Agent, Host> {
@@ -71,6 +84,9 @@ export interface ProviderInferenceStateOptions<Gpu, Agent, Host> {
   forceInferenceSetup?: boolean;
   /** Trust the rebuild-preflighted session selection even if its old step marker is incomplete. */
   authoritativeResumeConfig?: boolean;
+  /** One-shot authority, activated at selection, to recover a recorded provider during rebuild. */
+  providerRecoveryReceipt?: ProviderRecoveryReceipt | null;
+  providerRecoveryReceiptLedger?: ReturnType<typeof createProviderRecoveryReceiptLedger>;
   initial: {
     model: string | null;
     provider: string | null;
@@ -295,6 +311,8 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
   forceProviderSelection: initialForceProviderSelection = false,
   forceInferenceSetup: initialForceInferenceSetup = false,
   authoritativeResumeConfig = false,
+  providerRecoveryReceipt = null,
+  providerRecoveryReceiptLedger,
   initial,
   selectedMessagingChannels,
   env,
@@ -330,6 +348,8 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
   let skipHostInferenceSmoke = false;
   let reuseGatewayCredentialWithoutLocalKey = false;
   let endpointPinnedAddresses: string[] | undefined;
+  let endpointTrustedPrivateCapability: TrustedPrivateEndpointCapability | undefined;
+  let inferenceCapabilityCache: OnboardInferenceCapabilityCache | undefined;
   const effectiveResume = resume && !fresh;
   const stateResults: OnboardStateTransitionResult[] = [];
   const retryStateResults: OnboardStateTransitionResult[] = [];
@@ -345,7 +365,9 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
     let forceInferenceSetup = initialForceInferenceSetup;
     let recoveredRecordedProvider = false;
     const providerRecovery = createRecovery(fresh, sandboxName, session, deps, {
-      authoritativeResumeConfig,
+      recoveryReceipt: providerRecoveryReceipt,
+      recoveryReceiptLedger: providerRecoveryReceiptLedger,
+      gatewayName,
     });
     const resumeProviderSelection =
       !forceProviderSelection &&
@@ -359,6 +381,7 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
         provider,
         model,
         endpointUrl,
+        credentialEnv,
         preferredInferenceApi,
       });
       const recovery = await deps.ensureResumeProviderReady(gatewayName, provider, credentialEnv);
@@ -467,8 +490,8 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
             recoverRecordedProvider,
             gatewayName,
             (route) => guardProviderInferenceRouteSelection(deps, gatewayName, sandboxName, route),
-            (provider) =>
-              deps.preflightGatewayRouteDiscovery({
+            (provider) => {
+              const preflight = deps.preflightGatewayRouteDiscovery({
                 gatewayName,
                 sandboxName,
                 route: {
@@ -478,7 +501,9 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
                   preferredInferenceApi: null,
                   credentialEnv: null,
                 },
-              }).ok,
+              });
+              return preflight.ok || isAdvisoryGatewayRouteConflict(preflight.result);
+            },
             providerRecovery.sessionId,
           ),
       );
@@ -498,6 +523,8 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
       recoveredRecordedProvider = selection.recoveredFromSandbox === true;
       forceInferenceSetup ||= recoveredRecordedProvider;
       endpointPinnedAddresses = selection.endpointPinnedAddresses;
+      endpointTrustedPrivateCapability = selection.endpointTrustedPrivateCapability;
+      inferenceCapabilityCache = selection.inferenceCapabilityCache;
       shouldRecordProviderSelection = true;
     }
 
@@ -521,6 +548,7 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
         provider,
         model,
         endpointUrl,
+        credentialEnv,
         preferredInferenceApi,
       });
     }
@@ -573,6 +601,8 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
               : {}),
             ...(preferredInferenceApi ? { preferredInferenceApi } : {}),
             ...(endpointPinnedAddresses ? { endpointPinnedAddresses } : {}),
+            ...(endpointTrustedPrivateCapability ? { endpointTrustedPrivateCapability } : {}),
+            ...(inferenceCapabilityCache ? { inferenceCapabilityCache } : {}),
             reservationSessionId: session?.sessionId,
           };
           await deps.startRecordedStep("inference", { provider, model });
@@ -618,10 +648,12 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
         );
         break;
       }
-      const authoritativeReservationName = authoritativeResumeConfig
-        ? (sandboxName ?? (await deps.promptValidatedSandboxName(agent)))
-        : null;
-      if (authoritativeReservationName) sandboxName = authoritativeReservationName;
+      const sandboxStepComplete = session?.steps?.sandbox?.status === "complete";
+      const resumeReservationName =
+        authoritativeResumeConfig || !sandboxStepComplete
+          ? (sandboxName ?? (await deps.promptValidatedSandboxName(agent)))
+          : null;
+      if (resumeReservationName) sandboxName = resumeReservationName;
       const routedInferenceProvider = deps.isRoutedInferenceProvider(provider);
       if (routedInferenceProvider) {
         // #4564: re-upsert the gateway provider with the sandbox-facing
@@ -632,6 +664,7 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
             provider: selectedProvider,
             model: selectedModel,
             endpointUrl,
+            credentialEnv,
             preferredInferenceApi,
           });
           try {
@@ -649,8 +682,8 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
             credentialEnv,
           );
           const reserved =
-            reupserted.ok && authoritativeReservationName
-              ? deps.reserveSandboxInferenceRoute(authoritativeReservationName, {
+            reupserted.ok && resumeReservationName
+              ? deps.reserveSandboxInferenceRoute(resumeReservationName, {
                   provider: selectedProvider,
                   model: selectedModel,
                   endpointUrl: reupserted.endpointUrl,
@@ -670,22 +703,21 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
           deps.exitProcess(reupserted.status ?? 1);
         }
         if (reserved === false) {
-          deps.error(
-            `  Failed to reserve inference route for sandbox '${authoritativeReservationName}'.`,
-          );
+          deps.error(`  Failed to reserve inference route for sandbox '${resumeReservationName}'.`);
           deps.exitProcess(1);
         }
         endpointUrl = reupserted.endpointUrl;
       }
-      if (authoritativeReservationName && !routedInferenceProvider) {
+      if (resumeReservationName && !routedInferenceProvider) {
         const reserved = await deps.withGatewayRouteMutationLock(gatewayName, () => {
-          assertProviderInferenceRouteCompatible(deps, gatewayName, authoritativeReservationName, {
+          assertProviderInferenceRouteCompatible(deps, gatewayName, resumeReservationName, {
             provider: selectedProvider,
             model: selectedModel,
             endpointUrl,
+            credentialEnv,
             preferredInferenceApi,
           });
-          return deps.reserveSandboxInferenceRoute(authoritativeReservationName, {
+          return deps.reserveSandboxInferenceRoute(resumeReservationName, {
             provider: selectedProvider,
             model: selectedModel,
             endpointUrl,
@@ -696,9 +728,7 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
           });
         });
         if (!reserved) {
-          deps.error(
-            `  Failed to reserve inference route for sandbox '${authoritativeReservationName}'.`,
-          );
+          deps.error(`  Failed to reserve inference route for sandbox '${resumeReservationName}'.`);
           deps.exitProcess(1);
         }
       }
@@ -761,6 +791,8 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
         ...(reuseGatewayCredentialWithoutLocalKey ? { reuseGatewayCredentialWithoutLocalKey } : {}),
         ...(preferredInferenceApi ? { preferredInferenceApi } : {}),
         ...(endpointPinnedAddresses ? { endpointPinnedAddresses } : {}),
+        ...(endpointTrustedPrivateCapability ? { endpointTrustedPrivateCapability } : {}),
+        ...(inferenceCapabilityCache ? { inferenceCapabilityCache } : {}),
         ...providerRecovery.setupOptions(
           recoveredRecordedProvider,
           confirmedSandboxName,

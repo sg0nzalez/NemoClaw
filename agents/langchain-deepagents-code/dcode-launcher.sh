@@ -45,9 +45,12 @@ unset _NEMOCLAW_SANDBOX_RLIMITS
 # entrypoint's environment, so an opted-in direct dcode exec can lose tracing.
 # Source boundary: start.sh materializes only the credential-free enable bit;
 # this launcher recovers it only from a regular, non-symlink marker.
-# Source-fix constraint: NemoClaw cannot make OpenShell preserve entrypoint env.
+# Source-fix constraint: NemoClaw cannot make OpenShell preserve entrypoint env,
+# and policy-only reloads clear /tmp without re-running the entrypoint. Keep the
+# reconstructable bit in the sandbox workspace so those reloads retain it.
 # Regression: the proxy-launcher tests cover exact values and unsafe file types.
-# Removal condition: OpenShell propagates the bit to every exec/login process.
+# Removal condition: OpenShell propagates the bit to every exec/login process
+# and preserves it across policy reloads or re-runs the entrypoint afterward.
 # The marker is convenience state, not an authorization boundary; the
 # host-selected network policy controls whether local OTLP egress exists.
 unset NEMOCLAW_OBSERVABILITY
@@ -207,17 +210,5 @@ fi
 case "${1:-}" in
   status | whoami | identity | --version | -v | -V) exec "$MANAGED_DCODE_WRAPPER" "$@" ;;
 esac
-
-# DCode's one-shot mode owns and cleans up its server lifecycle before exiting.
-# Keep that established automation path outside the interactive-session
-# supervisor; this also preserves the wrapper's exact parser diagnostics.
-_nemoclaw_dcode_args=("$@")
-for ((_nemoclaw_arg_index = 0; _nemoclaw_arg_index < ${#_nemoclaw_dcode_args[@]}; _nemoclaw_arg_index++)); do
-  _nemoclaw_arg="${_nemoclaw_dcode_args[_nemoclaw_arg_index]}"
-  case "$_nemoclaw_arg" in
-    -n | -n?* | --non-interactive | --non-interactive=*) exec "$MANAGED_DCODE_WRAPPER" "$@" ;;
-  esac
-done
-unset _nemoclaw_dcode_args _nemoclaw_arg_index _nemoclaw_arg
 
 exec /opt/venv/bin/python3 -I "$MANAGED_SESSION_SUPERVISOR" "$MANAGED_DCODE_WRAPPER" "$@"

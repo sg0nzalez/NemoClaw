@@ -9,6 +9,13 @@ NVIDIA NemoClaw is an open-source reference stack for running always-on AI agent
 
 Status: Active development. Interfaces may change without notice.
 
+## Product Scope Gate
+
+Technical correctness, passing tests, and green CI do not establish product approval.
+Before implementing or approving a change that creates a supported integration, solution recipe, custom image, third-party stack, or other product surface, confirm that an accepted issue or design decision establishes the scope and that ownership, lifecycle, compatibility, security, and validation expectations are defined.
+If the product decision is missing, do not approve or document the contribution as canonical NemoClaw behavior.
+Stop and request maintainer direction, or route an independent solution through [Community Solutions](docs/resources/community-contributions.mdx).
+
 ## Agent Skills
 
 This repo ships agent skills under `.agents/skills/`.
@@ -50,6 +57,10 @@ Package-specific guides:
 | Run all tests for broad changes | `npm test` |
 | Render behavior-oriented test tree | `npm run test:spec` |
 | Run fast source tests | `npm run test:fast` |
+| Run tests affected by current changes | `npm run test:changed` |
+| Watch focused source tests | `npm run test:watch` |
+| Shuffle focused tests without coverage | `npm run test:shuffle` |
+| Diagnose async leaks or shutdown hangs | `npm run test:diagnose:leaks` |
 | Run integration tests | `npm run test:integration` |
 | Run package contracts | `npm run test:package` |
 | Run E2E support tests | `npx vitest run --project e2e-support` |
@@ -58,6 +69,7 @@ Package-specific guides:
 | Run repo-wide pre-commit and coverage checks | `npm run check` |
 | Reproduce `pre-commit`, `commit-msg`, and `pre-push` checks for the current diff | `npm run check:diff` |
 | Type-check CLI | `npm run typecheck:cli` |
+| Type-check plugin and plugin tests | `npm --prefix nemoclaw run typecheck` |
 | Auto-format | `npm run format` |
 | Build docs | `npm run docs` |
 | Serve docs locally | `npm run docs:live` |
@@ -92,7 +104,10 @@ When writing tests:
 - Root-level tests (`test/`) use ESM imports
 - Plugin tests use TypeScript and are co-located with their source files
 - Import CLI source from ordinary tests. Put genuine compiled-artifact assertions under `test/package-contract/`.
-- Keep project globs disjoint; `npm run test:projects:check` derives membership from Vitest and rejects overlap.
+- Keep project globs disjoint and exhaustive; `npm run test:projects:check` compares filesystem candidates with Vitest and rejects missing, overlapping, or unexpected membership.
+- Deterministic projects clear mock calls, restore `vi.spyOn`, and undo `vi.stubEnv` and `vi.stubGlobal` before each test. Create those spies and stubs in `beforeEach` or the test body unless a documented import-time stub must run before module evaluation. Restore direct environment or global mutations yourself, and reset mock implementations explicitly when needed. Live E2E and automatic `mockReset` are intentionally excluded.
+- Use `npm run test:changed` or `npm run test:watch` for focused CLI, plugin, and E2E-support feedback. Add only concrete opaque-input mappings to `test/helpers/vitest-watch-triggers.ts` when the import graph cannot see a YAML, Python, shell, generated, or workflow dependency.
+- Use `npm run test:shuffle -- --sequence.seed=<seed>` to replay a printed test-order seed. Use `npm run test:diagnose:leaks` for async-resource or shutdown-hang diagnostics; both commands keep coverage disabled, and leak diagnostics can accompany exit code 0 when assertions pass.
 - Write behavior-oriented titles, put local issue references in a final `(#1234)` suffix, and use `npm run test:spec` for the hierarchical specification view.
 - Mock external dependencies; don't call real NVIDIA APIs in unit tests
 - E2E tests run on ephemeral Brev cloud instances
@@ -133,7 +148,7 @@ For shell scripts use `#` comments. For Markdown use HTML comments.
 
 ### JavaScript
 
-- `bin/` launcher and remaining `scripts/*.js`: **CommonJS** (`require`/`module.exports`), Node.js 22.16+
+- `bin/` launcher and remaining `scripts/*.js`: **CommonJS** (`require`/`module.exports`), Node.js 22.19+
 - `test/`: **ESM** (`import`/`export`)
 - Biome config in `biome.json`
 - Keep function complexity low; existing complexity hotspots are tracked separately
@@ -143,7 +158,8 @@ For shell scripts use `#` comments. For Markdown use HTML comments.
 
 - Plugin code in `nemoclaw/src/` is linted and formatted by the root Biome config
 - CLI type-checking via `tsconfig.cli.json`
-- Plugin type-checking via `nemoclaw/tsconfig.json`
+- Plugin production and test type-checking via `npm --prefix nemoclaw run typecheck`, using
+  `nemoclaw/tsconfig.json` and `nemoclaw/tsconfig.test.json`
 
 ### Shell Scripts
 
@@ -171,10 +187,11 @@ All hooks managed by [prek](https://prek.j178.dev/) (installed via `npm install`
 
 1. Read `CONTRIBUTING.md` for the full contributor guide
 2. Before coding, state what success looks like. Ask only when a choice changes behavior, security, data safety, or a supported contract. Then make the smallest change that works. For a QA-escaped defect, also add the test or diagnostic that should have caught it.
-3. For a first-time checkout, use `.agents/skills/nemoclaw-contributor-onboard/SKILL.md` or run `npm run dev:setup`
-4. Run `npm run dev:doctor` to verify the contributor environment without changing it
-5. Use `./scripts/dev-setup.sh --expose-cli` only with explicit approval for host-visible CLI exposure
-6. Run the tests targeted to the behavior you change once per relevant change set; rerun them after later edits or hook autofixes that can affect that behavior
+3. Apply the product scope gate above before implementing or approving a new supported surface
+4. For a first-time checkout, use `.agents/skills/nemoclaw-contributor-onboard/SKILL.md` or run `npm run dev:setup`
+5. Run `npm run dev:doctor` to verify the contributor environment without changing it
+6. Use `./scripts/dev-setup.sh --expose-cli` only with explicit approval for host-visible CLI exposure
+7. Run the tests targeted to the behavior you change once per relevant change set; rerun them after later edits or hook autofixes that can affect that behavior
 
 ### Plain Language and Direct Design
 
@@ -216,7 +233,7 @@ Follow `.agents/skills/_shared/pr-follow-up.md`: after opening or pushing to a P
 **Adding model-specific sandbox compatibility:**
 
 - Add a declarative manifest under `nemoclaw-blueprint/model-specific-setup/<agent>/`
-- Use one exact `agent` per manifest (`openclaw`, `hermes`, etc.); do not make shared multi-agent manifests
+- Use one `agent` per manifest (`openclaw`, `hermes`, etc.); do not make shared multi-agent manifests
 - Put OpenClaw executable wrappers under `nemoclaw-blueprint/openclaw-plugins/`
 - Put Hermes executable wrappers under `agents/hermes/`
 - Keep `agents/hermes/generate-config.ts` as a thin build-time entrypoint; add Hermes env parsing, config construction, registry handling, and serialization under `agents/hermes/config/`
@@ -236,7 +253,7 @@ Follow `.agents/skills/_shared/pr-follow-up.md`: after opening or pushing to a P
 - After completing development changes, run a documentation writer subagent before final handoff. Give it the changed files, behavior summary, and test evidence so it can update docs or report that no doc changes are needed.
 - For normal docs changes, include source pages under `docs/`.
 - Update `.agents/skills/nemoclaw-user-guide/SKILL.md` only when the AI-agent docs routing guidance changes.
-- During release prep, run `nemoclaw-contributor-update-docs`, make doc version bumps, and open the docs refresh PR with the docs changes.
+- During pre-tag release prep, run `nemoclaw-contributor-update-docs` and include the canonical release entry in the release-note docs PR. Create or update `docs/changelog/YYYY-MM-DD.mdx` for `vX.Y.Z` following `docs/CONTRIBUTING.md`; a PR that updates ordinary pages without the dated changelog entry is incomplete. Merge that PR, or record an explicit maintainer waiver, before generating the release plan.
 
 ## PR Requirements
 

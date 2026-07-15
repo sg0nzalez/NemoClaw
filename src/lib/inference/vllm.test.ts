@@ -9,21 +9,25 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   dockerCapture: vi.fn(),
   dockerForceRm: vi.fn(),
+  dockerImageInspectFormat: vi.fn(),
   dockerPullWithProgressWatchdog: vi.fn(),
   dockerRunDetached: vi.fn(),
   dockerSpawn: vi.fn(),
   dockerStop: vi.fn(),
   getGpuIndicesByName: vi.fn<(_pattern: RegExp) => number[]>(() => []),
+  probeDockerStorage: vi.fn(),
   runCapture: vi.fn(),
 }));
 
-vi.mock("../runner", () => ({
+vi.mock("../runner", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../runner")>()),
   runCapture: mocks.runCapture,
 }));
 
 vi.mock("../adapters/docker", () => ({
   dockerCapture: mocks.dockerCapture,
   dockerForceRm: mocks.dockerForceRm,
+  dockerImageInspectFormat: mocks.dockerImageInspectFormat,
   dockerPullWithProgressWatchdog: mocks.dockerPullWithProgressWatchdog,
   dockerRunDetached: mocks.dockerRunDetached,
   dockerSpawn: mocks.dockerSpawn,
@@ -34,13 +38,32 @@ vi.mock("./nim", () => ({
   getGpuIndicesByName: mocks.getGpuIndicesByName,
 }));
 
+vi.mock("./vllm-storage", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./vllm-storage")>();
+  return {
+    ...actual,
+    probeDockerStorage: mocks.probeDockerStorage,
+  };
+});
+
 import {
   buildVllmRunArgs,
   detectVllmProfile,
   installVllm,
+  isNemoClawManagedVllmRunning,
+  NEMOCLAW_VLLM_CONTAINER_NAME,
+  NEMOCLAW_VLLM_MANAGED_LABEL,
   pullImage,
   resolveVllmServedModelId,
 } from "./vllm";
+
+beforeEach(() => {
+  mocks.dockerImageInspectFormat.mockReturnValue("");
+  mocks.probeDockerStorage.mockReturnValue({
+    ok: true,
+    capacity: { availableBytes: 1_000_000_000_000n, path: "/docker", source: "Docker" },
+  });
+});
 
 function mockDockerSpawnSuccess(): EventEmitter & {
   stdout: EventEmitter;
@@ -56,13 +79,25 @@ function mockDockerSpawnSuccess(): EventEmitter & {
   return proc;
 }
 
-function mockSuccessfulVllmInstall(containerName: string): void {
-  const captureByCommand: Record<string, string> = {
+const MANAGED_CONTAINER_ID = "a".repeat(64);
+
+function vllmContainerRow(
+  containerName: string,
+  { id = MANAGED_CONTAINER_ID, label = "true", state = "exited" } = {},
+): string {
+  return `${id}|${containerName}|${state}|${label}`;
+}
+
+function mockSuccessfulVllmInstall(
+  containerName: string,
+  ownershipResponses: readonly (() => string)[] = [() => "", () => ""],
+): void {
+  const runCaptureByCommand: Record<string, string> = {
     curl: '{"data":[]}',
     sh: "/usr/bin/tool\n",
   };
   mocks.runCapture.mockImplementation(
-    (cmd: readonly string[]) => captureByCommand[cmd[0] ?? ""] ?? "",
+    (cmd: readonly string[]) => runCaptureByCommand[cmd[0] ?? ""] ?? "",
   );
   mocks.dockerPullWithProgressWatchdog.mockResolvedValue({
     status: 0,
@@ -73,7 +108,21 @@ function mockSuccessfulVllmInstall(containerName: string): void {
   });
   mocks.dockerSpawn.mockReturnValue(mockDockerSpawnSuccess());
   mocks.dockerRunDetached.mockReturnValue({ status: 0, stdout: "", stderr: "", error: null });
-  mocks.dockerCapture.mockReturnValue(`${containerName}\n`);
+  const ownershipQueue = [...ownershipResponses];
+  const dockerCaptureByCommand = new Map<string, () => string>([
+    ["container", () => (ownershipQueue.shift() ?? (() => ""))()],
+    ["ps", () => `${containerName}\n`],
+  ]);
+  mocks.dockerCapture.mockImplementation((args: readonly string[]) =>
+    (dockerCaptureByCommand.get(args[0] ?? "") ?? (() => ""))(),
+  );
+}
+
+function mockInconclusiveDockerStorage(): void {
+  mocks.probeDockerStorage.mockReturnValue({
+    ok: false,
+    reason: "Docker uses a remote endpoint (ssh://builder.example.test)",
+  });
 }
 
 describe("vLLM served route identity", () => {
@@ -102,7 +151,10 @@ describe("vLLM profile detection", () => {
 
     expect(profile).not.toBeNull();
     expect(profile!.name).toBe("DGX Station");
-    expect(profile!.image).toBe("nvcr.io/nvidia/vllm:26.05.post1-py3");
+    expect(profile!.image).toBe(
+      "nvcr.io/nvidia/vllm@sha256:9204569b17ee4c0eff75194b8e6e458479c8aee18953b5ab9cf359fcdac659e2",
+    );
+    expect(profile!.imageDownloadSizeBytes).toBe(9_603_085_145);
     expect(profile!.defaultModel.id).toBe("deepseek-ai/DeepSeek-V4-Flash");
     expect(profile!.defaultModel.envValue).toBe("deepseek-v4-flash");
   });
@@ -112,19 +164,50 @@ describe("vLLM profile detection", () => {
 
     expect(profile).not.toBeNull();
     expect(profile!.name).toBe("DGX Spark");
-    expect(profile!.image).toBe("nvcr.io/nvidia/vllm:26.05.post1-py3");
+    expect(profile!.image).toBe(
+      "nvcr.io/nvidia/vllm@sha256:9204569b17ee4c0eff75194b8e6e458479c8aee18953b5ab9cf359fcdac659e2",
+    );
+    expect(profile!.imageDownloadSizeBytes).toBe(9_603_085_145);
     expect(profile!.defaultModel.id).toBe("nvidia/Qwen3.6-35B-A3B-NVFP4");
     expect(profile!.defaultModel.envValue).toBe("qwen3.6-35b-a3b-nvfp4");
   });
 
-  it("keeps generic Linux on the smaller Nemotron Nano default", () => {
-    const profile = detectVllmProfile({ platform: "linux", type: "nvidia" });
+  it.each([
+    {
+      arch: "arm64",
+      image:
+        "nvcr.io/nvidia/vllm@sha256:447995cbb57e6c7cf792cab95e9852e5f62b5fb6d2f39e030fa4eda9a54eadb4",
+      imageDownloadSizeBytes: 9_278_081_698,
+    },
+    {
+      arch: "x64",
+      image:
+        "nvcr.io/nvidia/vllm@sha256:7be6c2f676c36059a494fe17254e69ae5c677535ba6191044e5fc8e42a91c773",
+      imageDownloadSizeBytes: 8_928_665_752,
+    },
+  ] as const)("keeps generic Linux on the smaller Nemotron Nano default for $arch", async ({
+    arch,
+    image,
+    imageDownloadSizeBytes,
+  }) => {
+    const originalArch = Object.getOwnPropertyDescriptor(process, "arch")!;
+    try {
+      Object.defineProperty(process, "arch", { configurable: true, value: arch });
+      vi.resetModules();
+      const { detectVllmProfile: detectVllmProfileForArch } = await import("./vllm");
 
-    expect(profile).not.toBeNull();
-    expect(profile!.name).toBe("Linux + NVIDIA GPU");
-    expect(profile!.image).toBe("nvcr.io/nvidia/vllm:26.03.post1-py3");
-    expect(profile!.defaultModel.id).toBe("nvidia/NVIDIA-Nemotron-3-Nano-4B-FP8");
-    expect(profile!.defaultModel.envValue).toBe("nemotron-3-nano-4b");
+      const profile = detectVllmProfileForArch({ platform: "linux", type: "nvidia" });
+
+      expect(profile).not.toBeNull();
+      expect(profile!.name).toBe("Linux + NVIDIA GPU");
+      expect(profile!.image).toBe(image);
+      expect(profile!.imageDownloadSizeBytes).toBe(imageDownloadSizeBytes);
+      expect(profile!.defaultModel.id).toBe("nvidia/NVIDIA-Nemotron-3-Nano-4B-FP8");
+      expect(profile!.defaultModel.envValue).toBe("nemotron-3-nano-4b");
+    } finally {
+      Object.defineProperty(process, "arch", originalArch);
+      vi.resetModules();
+    }
   });
 
   it("generic-Linux default model pins the tool-call flags (#6314)", () => {
@@ -168,10 +251,14 @@ describe("vLLM image pull", () => {
 
     await expect(pullImage(profile!)).resolves.toEqual({ ok: true });
 
-    expect(mocks.dockerPullWithProgressWatchdog).toHaveBeenCalledWith(profile!.image, {
-      maxTimeoutMs: profile!.pullTimeoutSec * 1000,
-      logLine: expect.any(Function),
-    });
+    expect(mocks.dockerPullWithProgressWatchdog).toHaveBeenCalledWith(
+      profile!.image,
+      expect.objectContaining({
+        env: expect.any(Object),
+        maxTimeoutMs: profile!.pullTimeoutSec * 1000,
+        logLine: expect.any(Function),
+      }),
+    );
     const options = mocks.dockerPullWithProgressWatchdog.mock.calls[0][1];
     options.logLine("abc123def: Downloading 1MB/10MB");
     expect(stdoutWrite).toHaveBeenCalledWith("  ==> abc123def: Downloading 1MB/10MB\n");
@@ -207,9 +294,12 @@ describe("vLLM run command", () => {
     const profile = detectVllmProfile({ platform: "spark", type: "nvidia" });
     expect(profile).not.toBeNull();
     const args = buildVllmRunArgs(profile!, profile!.defaultModel, profile!.dockerRunFlags);
-    expect(args.slice(0, 2)).toEqual(["--restart", "unless-stopped"]);
+    expect(args.slice(0, 3)).toEqual(["--pull=never", "--restart", "unless-stopped"]);
     expect(args).toContain("--name");
     expect(args[args.indexOf("--name") + 1]).toBe(profile!.containerName);
+    expect(args).toEqual(
+      expect.arrayContaining(["--label", `${NEMOCLAW_VLLM_MANAGED_LABEL}=true`]),
+    );
     expect(args).toContain("8000:8000");
   });
 
@@ -275,6 +365,52 @@ describe("vLLM run command", () => {
   });
 });
 
+describe("managed vLLM ownership", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("recognizes only the exact running container with the managed label", () => {
+    mocks.dockerCapture.mockReturnValue(
+      vllmContainerRow(NEMOCLAW_VLLM_CONTAINER_NAME, { state: "running" }),
+    );
+
+    expect(isNemoClawManagedVllmRunning()).toBe(true);
+    expect(mocks.dockerCapture).toHaveBeenCalledWith(
+      [
+        "container",
+        "ls",
+        "--all",
+        "--no-trunc",
+        "--filter",
+        `name=^/${NEMOCLAW_VLLM_CONTAINER_NAME}$`,
+        "--format",
+        `{{.ID}}|{{.Names}}|{{.State}}|{{.Label "${NEMOCLAW_VLLM_MANAGED_LABEL}"}}`,
+      ],
+      expect.objectContaining({ timeout: 10_000 }),
+    );
+  });
+
+  it.each([
+    vllmContainerRow(NEMOCLAW_VLLM_CONTAINER_NAME),
+    vllmContainerRow(NEMOCLAW_VLLM_CONTAINER_NAME, { label: "" }),
+    vllmContainerRow(NEMOCLAW_VLLM_CONTAINER_NAME, { label: "false", state: "running" }),
+    "",
+    "malformed",
+    `${vllmContainerRow(NEMOCLAW_VLLM_CONTAINER_NAME)}\n${vllmContainerRow(NEMOCLAW_VLLM_CONTAINER_NAME)}`,
+  ])("fails closed for inspect output %j", (output) => {
+    mocks.dockerCapture.mockReturnValue(output);
+    expect(isNemoClawManagedVllmRunning()).toBe(false);
+  });
+
+  it("fails closed when Docker inspection throws", () => {
+    mocks.dockerCapture.mockImplementation(() => {
+      throw new Error("docker unavailable");
+    });
+    expect(isNemoClawManagedVllmRunning()).toBe(false);
+  });
+});
+
 describe("installVllm model resolution", () => {
   let logSpy: ReturnType<typeof vi.spyOn>;
   let errSpy: ReturnType<typeof vi.spyOn>;
@@ -288,6 +424,7 @@ describe("installVllm model resolution", () => {
     stdoutWrite = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     delete process.env.NEMOCLAW_VLLM_MODEL;
     delete process.env.NEMOCLAW_VLLM_EXTRA_ARGS_JSON;
+    delete process.env.NEMOCLAW_IGNORE_VLLM_DISK_SPACE;
     delete process.env.HF_TOKEN;
     delete process.env.HUGGING_FACE_HUB_TOKEN;
     // Fail dockerPrereqsOk so the function returns before any docker work,
@@ -413,10 +550,253 @@ describe("installVllm model resolution", () => {
     expect(mocks.dockerSpawn).not.toHaveBeenCalled();
   });
 
+  it.each([
+    "n",
+    "",
+    "later",
+  ])("stops an uncached image pull when the storage warning receives '%s' (#6757)", async (storageReply) => {
+    const profile = detectVllmProfile({ platform: "station", type: "nvidia" })!;
+    process.env.NEMOCLAW_VLLM_MODEL = profile.defaultModel.envValue;
+    mockSuccessfulVllmInstall(profile.containerName);
+    mocks.probeDockerStorage.mockReturnValue({
+      ok: true,
+      capacity: { availableBytes: 1n, path: "/docker-low", source: "Docker pull staging" },
+    });
+    const replies = ["y", storageReply];
+
+    const result = await installVllm(profile, {
+      hasImage: false,
+      nonInteractive: false,
+      promptFn: vi.fn(async () => replies.shift() ?? ""),
+    });
+
+    expect(result).toEqual({ ok: false });
+    expect(mocks.dockerPullWithProgressWatchdog).not.toHaveBeenCalled();
+    expect(mocks.dockerSpawn).not.toHaveBeenCalled();
+    const errors = errSpy.mock.calls.map((call: unknown[]) => String(call[0])).join("\n");
+    expect(errors).toContain("Insufficient Docker storage for the managed vLLM image");
+    expect(errors).toContain(profile.image);
+    expect(errors).toContain("Available:");
+    expect(errors).toContain("Required:");
+    expect(errors).toContain("docker system df");
+  });
+
+  it("continues an uncached image pull only after an explicit storage yes (#6757)", async () => {
+    const profile = detectVllmProfile({ platform: "spark", type: "nvidia" })!;
+    process.env.NEMOCLAW_VLLM_MODEL = profile.defaultModel.envValue;
+    mockSuccessfulVllmInstall(profile.containerName);
+    mocks.probeDockerStorage.mockReturnValue({
+      ok: true,
+      capacity: { availableBytes: 1n, path: "/docker-low", source: "Docker root directory" },
+    });
+    const replies = ["y", "y"];
+
+    const result = await installVllm(profile, {
+      hasImage: false,
+      nonInteractive: false,
+      promptFn: vi.fn(async () => replies.shift() ?? ""),
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(mocks.dockerPullWithProgressWatchdog).toHaveBeenCalledTimes(1);
+    expect(mocks.dockerSpawn).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails safely before downloads in non-interactive low-storage setup (#6757)", async () => {
+    const profile = detectVllmProfile({ platform: "station", type: "nvidia" })!;
+    process.env.NEMOCLAW_VLLM_MODEL = profile.defaultModel.envValue;
+    process.env.NEMOCLAW_YES = "1";
+    mockSuccessfulVllmInstall(profile.containerName);
+    mocks.probeDockerStorage.mockReturnValue({
+      ok: true,
+      capacity: { availableBytes: 1n, path: "/docker-low", source: "containerd image store" },
+    });
+
+    const result = await installVllm(profile, {
+      hasImage: false,
+      nonInteractive: true,
+      promptFn: vi.fn(),
+    });
+
+    expect(result).toEqual({ ok: false });
+    expect(mocks.dockerPullWithProgressWatchdog).not.toHaveBeenCalled();
+    expect(mocks.dockerSpawn).not.toHaveBeenCalled();
+    expect(errSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Non-interactive setup stops before the guarded download"),
+    );
+  });
+
+  it("reports an inconclusive capacity check without blocking the image pull (#6757)", async () => {
+    const profile = detectVllmProfile({ platform: "station", type: "nvidia" })!;
+    process.env.NEMOCLAW_VLLM_MODEL = profile.defaultModel.envValue;
+    mockSuccessfulVllmInstall(profile.containerName);
+    mockInconclusiveDockerStorage();
+    const promptFn = vi.fn();
+
+    const result = await installVllm(profile, {
+      hasImage: false,
+      nonInteractive: true,
+      promptFn,
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(promptFn).not.toHaveBeenCalled();
+    expect(mocks.dockerPullWithProgressWatchdog).toHaveBeenCalledTimes(1);
+    expect(mocks.dockerSpawn).toHaveBeenCalledTimes(1);
+    const errors = errSpy.mock.calls.map((call: unknown[]) => String(call[0])).join("\n");
+    expect(errors).toContain("Unable to verify Docker storage for the managed vLLM image");
+    expect(errors).toContain("Available: unknown (");
+    expect(errors).toContain("Continuing because Docker storage capacity could not be verified");
+  });
+
+  it("honors only the dedicated disk-space override in non-interactive setup (#6757)", async () => {
+    const profile = detectVllmProfile({ platform: "station", type: "nvidia" })!;
+    process.env.NEMOCLAW_VLLM_MODEL = profile.defaultModel.envValue;
+    process.env.NEMOCLAW_IGNORE_VLLM_DISK_SPACE = "1";
+    mockSuccessfulVllmInstall(profile.containerName);
+    mocks.probeDockerStorage.mockReturnValue({
+      ok: true,
+      capacity: { availableBytes: 1n, path: "/docker-low", source: "containerd image store" },
+    });
+    const result = await installVllm(profile, {
+      hasImage: false,
+      nonInteractive: true,
+      promptFn: vi.fn(),
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(mocks.dockerPullWithProgressWatchdog).toHaveBeenCalledTimes(1);
+    expect(mocks.dockerSpawn).toHaveBeenCalledTimes(1);
+    expect(errSpy).toHaveBeenCalledWith(
+      expect.stringContaining("NEMOCLAW_IGNORE_VLLM_DISK_SPACE=1"),
+    );
+  });
+
+  it("reuses an authoritatively cached image without a cold-pull capacity check (#6757)", async () => {
+    const profile = detectVllmProfile({ platform: "spark", type: "nvidia" })!;
+    mockSuccessfulVllmInstall(profile.containerName);
+    mocks.dockerImageInspectFormat.mockReturnValue("sha256:cached-image");
+    mocks.probeDockerStorage.mockImplementation(() => {
+      throw new Error("cached images must not probe cold-pull capacity");
+    });
+
+    const result = await installVllm(profile, {
+      hasImage: false,
+      nonInteractive: true,
+      promptFn: vi.fn(),
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(mocks.dockerImageInspectFormat).toHaveBeenCalledWith(
+      "{{.Id}}",
+      profile.image,
+      expect.objectContaining({ env: expect.any(Object), ignoreError: true, timeout: 10_000 }),
+    );
+    expect(mocks.probeDockerStorage).not.toHaveBeenCalled();
+    expect(mocks.dockerPullWithProgressWatchdog).toHaveBeenCalledTimes(1);
+    expect(mocks.dockerSpawn).toHaveBeenCalledTimes(1);
+    const [downloadArgs] = mocks.dockerSpawn.mock.calls[0] as [string[]];
+    expect(downloadArgs).toContain("--pull=never");
+  });
+
+  it("guards a stale cached-image hint before any implicit pull can start (#6757)", async () => {
+    const profile = detectVllmProfile({ platform: "spark", type: "nvidia" })!;
+    process.env.NEMOCLAW_VLLM_MODEL = profile.defaultModel.envValue;
+    mockSuccessfulVllmInstall(profile.containerName);
+    mocks.dockerImageInspectFormat.mockReturnValue("");
+    mocks.probeDockerStorage.mockReturnValue({
+      ok: true,
+      capacity: { availableBytes: 1n, path: "/docker-low", source: "Docker root directory" },
+    });
+    const replies = ["y", "n"];
+
+    const result = await installVllm(profile, {
+      hasImage: true,
+      nonInteractive: false,
+      promptFn: vi.fn(async () => replies.shift() ?? ""),
+    });
+
+    expect(result).toEqual({ ok: false });
+    expect(mocks.probeDockerStorage).toHaveBeenCalledTimes(1);
+    expect(mocks.dockerPullWithProgressWatchdog).not.toHaveBeenCalled();
+    expect(mocks.dockerSpawn).not.toHaveBeenCalled();
+  });
+
+  it("uses one Docker context throughout a successful managed install (#6757)", async () => {
+    process.env.DOCKER_CONTEXT = "local-test-context";
+    delete process.env.DOCKER_HOST;
+    const profile = detectVllmProfile({ platform: "spark", type: "nvidia" })!;
+    mockSuccessfulVllmInstall(profile.containerName);
+
+    const result = await installVllm(profile, {
+      hasImage: false,
+      nonInteractive: true,
+      promptFn: vi.fn(),
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(mocks.probeDockerStorage).toHaveBeenCalledTimes(1);
+
+    const dockerAdapterOptions = [
+      ...mocks.dockerImageInspectFormat.mock.calls.map((call) => call[2]),
+      ...mocks.dockerPullWithProgressWatchdog.mock.calls.map((call) => call[1]),
+      ...mocks.dockerSpawn.mock.calls.map((call) => call[1]),
+      ...mocks.dockerForceRm.mock.calls.map((call) => call[1]),
+      ...mocks.dockerRunDetached.mock.calls.map((call) => call[1]),
+      ...mocks.dockerCapture.mock.calls.map((call) => call[1]),
+    ];
+    expect(dockerAdapterOptions).toHaveLength(7);
+    for (const options of dockerAdapterOptions) {
+      expect(options).toEqual(
+        expect.objectContaining({
+          env: expect.objectContaining({ DOCKER_CONTEXT: "local-test-context" }),
+        }),
+      );
+    }
+  });
+
   it("starts the long-lived vLLM container through Docker argv, not a shell command", async () => {
     process.env.HF_TOKEN = "hf_test";
     const profile = detectVllmProfile({ platform: "spark", type: "nvidia" })!;
     mockSuccessfulVllmInstall(profile.containerName);
+    mocks.dockerImageInspectFormat.mockReturnValue("sha256:cached-image");
+
+    const result = await installVllm(profile, {
+      hasImage: true,
+      nonInteractive: true,
+      promptFn: vi.fn(),
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(mocks.dockerForceRm).not.toHaveBeenCalled();
+    expect(mocks.dockerRunDetached).toHaveBeenCalledTimes(1);
+    const [args, opts] = mocks.dockerRunDetached.mock.calls[0] as [
+      string[],
+      { env?: Record<string, string> },
+    ];
+    expect(args).toEqual(
+      expect.arrayContaining([
+        "--pull=never",
+        "--restart",
+        "unless-stopped",
+        "-e",
+        "HF_TOKEN",
+        profile.image,
+      ]),
+    );
+    expect(args.join(" ")).not.toContain("hf_test");
+    expect(args.some((arg) => arg.includes("docker run"))).toBe(false);
+    expect(args[args.indexOf("-lc") + 1]).toContain("vllm serve");
+    expect(opts).toEqual(
+      expect.objectContaining({ env: expect.objectContaining({ HF_TOKEN: "hf_test" }) }),
+    );
+  });
+
+  it("replaces only an existing managed container by its inspected ID", async () => {
+    const profile = detectVllmProfile({ platform: "spark", type: "nvidia" })!;
+    const managed = vllmContainerRow(profile.containerName);
+    mockSuccessfulVllmInstall(profile.containerName, [() => managed, () => managed]);
+    mocks.dockerImageInspectFormat.mockReturnValue("sha256:cached-image");
 
     const result = await installVllm(profile, {
       hasImage: true,
@@ -426,21 +806,83 @@ describe("installVllm model resolution", () => {
 
     expect(result).toEqual({ ok: true });
     expect(mocks.dockerForceRm).toHaveBeenCalledWith(
-      profile.containerName,
+      MANAGED_CONTAINER_ID,
       expect.objectContaining({ ignoreError: true, suppressOutput: true }),
     );
+    expect(mocks.dockerForceRm).not.toHaveBeenCalledWith(profile.containerName, expect.anything());
     expect(mocks.dockerRunDetached).toHaveBeenCalledTimes(1);
-    const [args, opts] = mocks.dockerRunDetached.mock.calls[0] as [
-      string[],
-      { env?: Record<string, string> },
-    ];
-    expect(args).toEqual(
-      expect.arrayContaining(["--restart", "unless-stopped", "-e", "HF_TOKEN", profile.image]),
+  });
+
+  it.each([
+    "",
+    "false",
+  ])("preserves a same-name container with managed label %j before downloads", async (label) => {
+    const profile = detectVllmProfile({ platform: "spark", type: "nvidia" })!;
+    mockSuccessfulVllmInstall(profile.containerName, [
+      () => vllmContainerRow(profile.containerName, { label }),
+    ]);
+
+    const result = await installVllm(profile, {
+      hasImage: true,
+      nonInteractive: true,
+      promptFn: vi.fn(),
+    });
+
+    expect(result).toEqual({ ok: false });
+    expect(mocks.dockerForceRm).not.toHaveBeenCalled();
+    expect(mocks.dockerRunDetached).not.toHaveBeenCalled();
+    expect(mocks.dockerPullWithProgressWatchdog).not.toHaveBeenCalled();
+    expect(mocks.dockerSpawn).not.toHaveBeenCalled();
+    expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("NemoClaw will not remove it"));
+  });
+
+  it.each([
+    [
+      "Docker inspection failure",
+      (): string => {
+        throw new Error("docker unavailable");
+      },
+    ],
+    ["malformed ownership output", (): string => "malformed"],
+  ] as const)("fails closed on %s", async (_name, ownershipResponse) => {
+    const profile = detectVllmProfile({ platform: "spark", type: "nvidia" })!;
+    mockSuccessfulVllmInstall(profile.containerName, [ownershipResponse]);
+
+    const result = await installVllm(profile, {
+      hasImage: true,
+      nonInteractive: true,
+      promptFn: vi.fn(),
+    });
+
+    expect(result).toEqual({ ok: false });
+    expect(mocks.dockerForceRm).not.toHaveBeenCalled();
+    expect(mocks.dockerRunDetached).not.toHaveBeenCalled();
+    expect(mocks.dockerPullWithProgressWatchdog).not.toHaveBeenCalled();
+    expect(errSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Could not verify ownership of Docker container"),
     );
-    expect(args.join(" ")).not.toContain("hf_test");
-    expect(args.some((arg) => arg.includes("docker run"))).toBe(false);
-    expect(args[args.indexOf("-lc") + 1]).toContain("vllm serve");
-    expect(opts).toEqual(expect.objectContaining({ env: { HF_TOKEN: "hf_test" } }));
+  });
+
+  it("rechecks ownership after downloads and preserves a replacement container", async () => {
+    const profile = detectVllmProfile({ platform: "spark", type: "nvidia" })!;
+    mockSuccessfulVllmInstall(profile.containerName, [
+      () => vllmContainerRow(profile.containerName),
+      () => vllmContainerRow(profile.containerName, { label: "" }),
+    ]);
+    mocks.dockerImageInspectFormat.mockReturnValue("sha256:cached-image");
+
+    const result = await installVllm(profile, {
+      hasImage: true,
+      nonInteractive: true,
+      promptFn: vi.fn(),
+    });
+
+    expect(result).toEqual({ ok: false });
+    expect(mocks.dockerPullWithProgressWatchdog).toHaveBeenCalledTimes(1);
+    expect(mocks.dockerSpawn).toHaveBeenCalledTimes(1);
+    expect(mocks.dockerForceRm).not.toHaveBeenCalled();
+    expect(mocks.dockerRunDetached).not.toHaveBeenCalled();
+    expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("NemoClaw will not remove it"));
   });
 
   it("rejects invalid profile run flags before launching the long-lived container", async () => {
@@ -450,6 +892,7 @@ describe("installVllm model resolution", () => {
       buildDockerRunFlags: () => ["--label", ""],
     };
     mockSuccessfulVllmInstall(profile.containerName);
+    mocks.dockerImageInspectFormat.mockReturnValue("sha256:cached-image");
 
     const result = await installVllm(profile, {
       hasImage: true,

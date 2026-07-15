@@ -15,6 +15,12 @@ import { captureSandboxListWithGatewayPreflightOrExit } from "../openshell-sandb
 import { parseReadySandboxNames } from "../runtime-recovery";
 import * as registry from "../state/registry";
 import * as sandboxState from "../state/sandbox";
+import {
+  backupStartedSandboxState,
+  returnSandboxContainerToStopped,
+  type StartedForBackup,
+  startStoppedSandboxContainerForBackup,
+} from "./sandbox/stopped-sandbox-backup";
 
 const useColor = !process.env.NO_COLOR && !!process.stdout.isTTY;
 const trueColor =
@@ -29,8 +35,14 @@ export function shouldSkipUnreachableSandboxBackup(env: NodeJS.ProcessEnv): bool
   return env.NEMOCLAW_SKIP_UNREACHABLE_SANDBOX_BACKUP === "1";
 }
 
+function notRunningBackupSkipMessage(name: string): string {
+  return `Skipping '${name}' (not running; start the sandbox/container and rerun '${CLI_NAME} backup-all' so NemoClaw can capture a fresh snapshot)`;
+}
+
 export async function backupAll(): Promise<void> {
-  const { sandboxes } = registry.listSandboxes();
+  const sandboxes = registry
+    .listSandboxes()
+    .sandboxes.filter((sandbox) => !registry.isRouteOnlySandboxReservation(sandbox));
   if (sandboxes.length === 0) {
     console.log("  No sandboxes registered. Nothing to back up.");
     return;
@@ -48,16 +60,31 @@ export async function backupAll(): Promise<void> {
   let failed = 0;
   let skipped = 0;
   let unreachableRunning = 0;
+  let notRunningSkipped = 0;
   for (const sb of sandboxes) {
+    // A registered docker-driver sandbox whose container is merely stopped is
+    // backupable: start it for the duration of the backup and return it to
+    // its stopped state after (#6500). Anything else that is not Ready keeps
+    // the existing skip (and, under installer-strict mode, the #6114 gate).
+    let startedForBackup: StartedForBackup | null = null;
     if (!readyNames.has(sb.name)) {
-      console.log(`  ${D}Skipping '${sb.name}' (not running)${R}`);
-      skipped++;
-      continue;
+      startedForBackup = startStoppedSandboxContainerForBackup(sb.name);
+      if (!startedForBackup) {
+        console.log(`  ${D}${notRunningBackupSkipMessage(sb.name)}${R}`);
+        skipped++;
+        notRunningSkipped++;
+        continue;
+      }
+      console.log(`  Starting stopped sandbox '${sb.name}' to back it up...`);
     }
     console.log(`  Backing up '${sb.name}'...`);
-    let result: sandboxState.BackupResult;
+    let result: sandboxState.BackupResult | null = null;
+    let orphanManifestMessage: string | null = null;
+    let returnedToStopped = true;
     try {
-      result = sandboxState.backupSandboxState(sb.name);
+      result = startedForBackup
+        ? await backupStartedSandboxState(sb.name)
+        : sandboxState.backupSandboxState(sb.name);
     } catch (err: unknown) {
       // Source-of-truth review (#5734 / #5819):
       //
@@ -94,10 +121,29 @@ export async function backupAll(): Promise<void> {
       if (!/^Agent '[^']+' not found: .+\/manifest\.yaml$/.test(msg)) {
         throw err;
       }
-      console.log(`  ${YW}⚠${R} Skipped '${sb.name}' (orphan manifest): ${msg}`);
+      orphanManifestMessage = msg;
+    } finally {
+      if (startedForBackup) {
+        if (returnSandboxContainerToStopped(startedForBackup.containerName)) {
+          console.log(`  ${D}Returned '${sb.name}' to its stopped state.${R}`);
+        } else {
+          returnedToStopped = false;
+          console.error(
+            `  ${RD}✗${R} ${sb.name}: backup cleanup failed (could not return its container to the stopped state; the container was left running)`,
+          );
+        }
+      }
+    }
+    if (!returnedToStopped) {
+      failed++;
+      continue;
+    }
+    if (orphanManifestMessage) {
+      console.log(`  ${YW}⚠${R} Skipped '${sb.name}' (orphan manifest): ${orphanManifestMessage}`);
       skipped++;
       continue;
     }
+    if (!result) throw new Error(`Backup for '${sb.name}' completed without a result`);
     if (result.success) {
       console.log(
         `  ${G}✓${R} ${sb.name}: ${result.backedUpDirs.length} dirs, ${result.backedUpFiles.length} files → ${result.manifest?.backupPath || "unknown"}`,
@@ -152,6 +198,11 @@ export async function backupAll(): Promise<void> {
     console.error(
       `  Strict pre-upgrade backup requires every registered sandbox to be backed up; ${skipped} sandbox(es) were skipped.`,
     );
+    if (notRunningSkipped > 0) {
+      console.error(
+        `  ${notRunningSkipped} skipped sandbox(es) were not running. Start each sandbox/container, then rerun the installer or '${CLI_NAME} backup-all'.`,
+      );
+    }
     console.error("  Resolve each skipped sandbox using its reason above and retry.");
   }
   if (failed > 0 || (requireAll && skipped > 0)) process.exit(1);

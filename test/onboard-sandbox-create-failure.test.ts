@@ -5,11 +5,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
+  cleanupLandlockSandboxAfterCreateFailure,
   collectSandboxCreateFailureDiagnostics,
-  handleNonzeroSandboxCreateResult,
   printSandboxCreateFailureDiagnostics,
 } from "../src/lib/onboard/sandbox-create-failure.js";
 
@@ -24,7 +24,7 @@ describe("sandbox create failure diagnostics", () => {
     const gatewayLogPath = path.join(logDir, "openshell-gateway.log");
 
     fs.mkdirSync(stateDir, { recursive: true });
-    fs.writeFileSync(consolePath, "vm console detail\n");
+    fs.writeFileSync(consolePath, "vm console detail\nAuthorization: Bearer secret-token\n");
     fs.writeFileSync(
       gatewayLogPath,
       [
@@ -32,6 +32,7 @@ describe("sandbox create failure diagnostics", () => {
         `2026-05-12T20:30:56Z INFO vm driver: create_sandbox received sandbox_id=${sandboxId} sandbox_name=my-assistant`,
         `2026-05-12T20:30:56Z INFO vm driver: resolved image ref, preparing rootfs sandbox_id=${sandboxId} state_dir=${stateDir}`,
         `2026-05-12T20:34:28Z INFO vm driver: spawning VM launcher sandbox_id=${sandboxId} console_output=${consolePath}`,
+        `2026-05-12T20:34:28Z ERROR supervisor sandbox_id=${sandboxId} Authorization: Bearer secret-token`,
         "[2026-05-12T20:34:29Z ERROR krun] Building the microVM failed: Internal(Vm(VmSetup(VmCreate)))",
         `2026-05-12T20:34:29Z WARN Sandbox failed to become ready sandbox_id=${sandboxId} sandbox_name=my-assistant reason=ProcessExited`,
       ].join("\n"),
@@ -47,15 +48,22 @@ describe("sandbox create failure diagnostics", () => {
     expect(diagnostics?.copiedConsoleOutput).toBe(
       path.join(diagnostics!.dir, "rootfs-console.log"),
     );
-    expect(fs.readFileSync(path.join(diagnostics!.dir, "rootfs-console.log"), "utf-8")).toContain(
-      "vm console detail",
+    const copiedConsole = fs.readFileSync(
+      path.join(diagnostics!.dir, "rootfs-console.log"),
+      "utf-8",
     );
+    expect(copiedConsole).toContain("vm console detail");
+    expect(copiedConsole).toContain("Bearer <REDACTED>");
+    expect(copiedConsole).not.toContain("secret-token");
     const relevant = fs.readFileSync(
       path.join(diagnostics!.dir, "openshell-gateway-relevant.log"),
       "utf-8",
     );
     expect(relevant).toContain("VmCreate");
     expect(relevant).toContain("sandbox_name=my-assistant");
+    expect(relevant).toContain("Bearer <REDACTED>");
+    expect(relevant).not.toContain("secret-token");
+    expect(diagnostics?.summaryLines.join("\n")).not.toContain("secret-token");
     expect(fs.readFileSync(path.join(diagnostics!.dir, "summary.txt"), "utf-8")).toContain(
       "backup_path=/tmp/pre-upgrade-backup",
     );
@@ -95,7 +103,7 @@ describe("sandbox create failure diagnostics", () => {
       gatewayLogPath,
       [
         "2026-05-12T20:30:00Z INFO gateway starting",
-        "2026-05-12T20:30:01Z WARN gateway exited before request dispatch",
+        "2026-05-12T20:30:01Z WARN gateway exited before request dispatch Authorization: Bearer secret-token",
       ].join("\n"),
     );
 
@@ -107,12 +115,16 @@ describe("sandbox create failure diagnostics", () => {
     expect(diagnostics?.gatewayTailPath).toBe(
       path.join(diagnostics!.dir, "openshell-gateway-tail.log"),
     );
-    expect(fs.readFileSync(diagnostics!.gatewayTailPath!, "utf-8")).toContain(
-      "gateway exited before request dispatch",
-    );
-    expect(diagnostics?.summaryLines).toContain(
-      "2026-05-12T20:30:01Z WARN gateway exited before request dispatch",
-    );
+    const gatewayTail = fs.readFileSync(diagnostics!.gatewayTailPath!, "utf-8");
+    expect(gatewayTail).toContain("gateway exited before request dispatch");
+    expect(gatewayTail).toContain("Bearer <REDACTED>");
+    expect(gatewayTail).not.toContain("secret-token");
+    expect(
+      diagnostics?.summaryLines.some((line) =>
+        line.includes("gateway exited before request dispatch"),
+      ),
+    ).toBe(true);
+    expect(diagnostics?.summaryLines.join("\n")).not.toContain("secret-token");
     expect(fs.readFileSync(path.join(diagnostics!.dir, "summary.txt"), "utf-8")).toContain(
       "gateway_tail=",
     );
@@ -121,154 +133,61 @@ describe("sandbox create failure diagnostics", () => {
 
 describe("sandbox create failure handling", () => {
   it("does not delete an existing sandbox when hard-required Landlock fails before gateway upload", () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-create-failure-handle-"));
-    const messages: string[] = [];
-    const deleteCalls: string[][] = [];
-    const originalError = console.error;
-    const originalHome = process.env.HOME;
-    console.error = (message?: unknown) => {
-      messages.push(String(message ?? ""));
-    };
-    process.env.HOME = tmp;
+    const runOpenshell = vi.fn(() => ({ status: 0 }));
 
-    try {
-      expect(() =>
-        handleNonzeroSandboxCreateResult({
-          createResult: {
-            status: 1,
-            output:
-              "Landlock unavailable in hard_requirement mode: not enabled in the active LSM set",
-          },
-          sandboxName: "dcode-landlock-precreate",
-          runOpenshell: (args) => {
-            deleteCalls.push(args);
-            return { status: 0 };
-          },
-          exit: (code) => {
-            throw new Error(`exit:${String(code)}`);
-          },
-        }),
-      ).toThrow("exit:1");
+    cleanupLandlockSandboxAfterCreateFailure({
+      failureKind: "landlock_enforcement_failed",
+      createOutput:
+        "Landlock unavailable in hard_requirement mode: not enabled in the active LSM set",
+      sandboxName: "dcode-landlock-precreate",
+      runOpenshell,
+    });
 
-      expect(deleteCalls).toEqual([]);
-      expect(messages).not.toContain(
-        "  The failed sandbox has been removed; retry will recreate it.",
-      );
-    } finally {
-      console.error = originalError;
-      originalHome === undefined ? delete process.env.HOME : (process.env.HOME = originalHome);
-      fs.rmSync(tmp, { recursive: true, force: true });
-    }
+    expect(runOpenshell).not.toHaveBeenCalled();
   });
 
   it("removes a failed sandbox when hard-required Landlock output proves gateway creation", () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-create-failure-created-"));
-    const messages: string[] = [];
-    const deleteCalls: string[][] = [];
-    const originalError = console.error;
-    const originalHome = process.env.HOME;
-    console.error = (message?: unknown) => {
-      messages.push(String(message ?? ""));
-    };
-    process.env.HOME = tmp;
+    const runOpenshell = vi.fn(() => ({ status: 0 }));
 
-    try {
-      expect(() =>
-        handleNonzeroSandboxCreateResult({
-          createResult: {
-            status: 1,
-            output:
-              "Created sandbox: dcode-landlock-created\n" +
-              "Landlock unavailable in hard_requirement mode: not enabled in the active LSM set",
-          },
-          sandboxName: "dcode-landlock-created",
-          runOpenshell: (args) => {
-            deleteCalls.push(args);
-            return { status: 0 };
-          },
-          exit: (code) => {
-            throw new Error(`exit:${String(code)}`);
-          },
-        }),
-      ).toThrow("exit:1");
+    cleanupLandlockSandboxAfterCreateFailure({
+      failureKind: "landlock_enforcement_failed",
+      createOutput:
+        "Created sandbox: dcode-landlock-created\n" +
+        "Landlock unavailable in hard_requirement mode: not enabled in the active LSM set",
+      sandboxName: "dcode-landlock-created",
+      runOpenshell,
+    });
 
-      expect(deleteCalls).toEqual([["sandbox", "delete", "dcode-landlock-created"]]);
-      expect(messages).toContain("  The failed sandbox has been removed; retry will recreate it.");
-    } finally {
-      console.error = originalError;
-      originalHome === undefined ? delete process.env.HOME : (process.env.HOME = originalHome);
-      fs.rmSync(tmp, { recursive: true, force: true });
-    }
+    expect(runOpenshell).toHaveBeenCalledWith(["sandbox", "delete", "dcode-landlock-created"], {
+      ignoreError: true,
+    });
   });
 
   it("does not delete the requested sandbox when Landlock output names a different created sandbox", () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-create-failure-other-"));
-    const messages: string[] = [];
-    const deleteCalls: string[][] = [];
-    const originalError = console.error;
-    const originalHome = process.env.HOME;
-    console.error = (message?: unknown) => {
-      messages.push(String(message ?? ""));
-    };
-    process.env.HOME = tmp;
+    const runOpenshell = vi.fn(() => ({ status: 0 }));
 
-    try {
-      expect(() =>
-        handleNonzeroSandboxCreateResult({
-          createResult: {
-            status: 1,
-            output:
-              "Created sandbox: other-dcode\n" +
-              "Landlock unavailable in hard_requirement mode: not enabled in the active LSM set",
-          },
-          sandboxName: "dcode-landlock-current",
-          runOpenshell: (args) => {
-            deleteCalls.push(args);
-            return { status: 0 };
-          },
-          exit: (code) => {
-            throw new Error(`exit:${String(code)}`);
-          },
-        }),
-      ).toThrow("exit:1");
+    cleanupLandlockSandboxAfterCreateFailure({
+      failureKind: "landlock_enforcement_failed",
+      createOutput:
+        "Created sandbox: other-dcode\n" +
+        "Landlock unavailable in hard_requirement mode: not enabled in the active LSM set",
+      sandboxName: "dcode-landlock-current",
+      runOpenshell,
+    });
 
-      expect(deleteCalls).toEqual([]);
-      expect(messages).not.toContain(
-        "  The failed sandbox has been removed; retry will recreate it.",
-      );
-    } finally {
-      console.error = originalError;
-      originalHome === undefined ? delete process.env.HOME : (process.env.HOME = originalHome);
-      fs.rmSync(tmp, { recursive: true, force: true });
-    }
+    expect(runOpenshell).not.toHaveBeenCalled();
   });
 
-  it("waits for readiness after an incomplete non-Landlock create stream", () => {
-    const warnings: string[] = [];
-    const originalWarn = console.warn;
-    console.warn = (message?: unknown) => {
-      warnings.push(String(message ?? ""));
-    };
+  it("does not delete for a non-Landlock failure even with exact create evidence", () => {
+    const runOpenshell = vi.fn(() => ({ status: 0 }));
 
-    try {
-      const action = handleNonzeroSandboxCreateResult({
-        createResult: {
-          status: 255,
-          output: "Created sandbox: dcode-stream\nssh: connection closed",
-        },
-        sandboxName: "dcode-stream",
-        runOpenshell: () => {
-          throw new Error("delete should not run for incomplete create streams");
-        },
-        exit: (code) => {
-          throw new Error(`unexpected exit:${String(code)}`);
-        },
-      });
+    cleanupLandlockSandboxAfterCreateFailure({
+      failureKind: "unknown",
+      createOutput: "Created sandbox: dcode-landlock-current\nprovider setup failed",
+      sandboxName: "dcode-landlock-current",
+      runOpenshell,
+    });
 
-      expect(action).toBe("wait_for_ready");
-      expect(warnings).toContain("  Checking whether the sandbox reaches Ready state...");
-    } finally {
-      console.warn = originalWarn;
-    }
+    expect(runOpenshell).not.toHaveBeenCalled();
   });
 });

@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { applyCompatibleEndpointContextWindow } from "../inference/compatible-endpoint-context";
+import type { TrustedPrivateEndpointCapability } from "../inference/endpoint-ssrf-preflight";
 import type { GatewayRouteDiscoveryConstraints } from "../inference/gateway-route-compatibility";
 import { getProbeExtraHeaders } from "../inference/onboard-probes";
+import type { OnboardInferenceCapabilityCache } from "./inference-capability-cache";
 import type { NvidiaFeaturedModelSession } from "./nvidia-featured-model-selection";
 
 export { createNvidiaFeaturedModelSession } from "./nvidia-featured-model-selection";
@@ -24,7 +26,11 @@ export type SetupNimSelectionState<THermesAuthMethod = unknown> = {
   skipHostInferenceSmoke?: boolean;
   /** Public addresses approved for the selected custom endpoint. */
   endpointPinnedAddresses?: string[];
+  /** Non-forgeable proof of the exact private subset admitted by the selected preflight. */
+  endpointTrustedPrivateCapability?: TrustedPrivateEndpointCapability;
   reuseGatewayCredentialWithoutLocalKey?: boolean;
+  /** Ephemeral selection-to-smoke validation cache; never written to session state. */
+  inferenceCapabilityCache?: OnboardInferenceCapabilityCache;
   nvidiaFeaturedModels?: NvidiaFeaturedModelSession;
   openRouterFeaturedModels?: NvidiaFeaturedModelSession;
   /** Attempt-wide shared-gateway guard, invoked after identity selection and before probes. */
@@ -55,6 +61,7 @@ export function applyCloudFallbackSelection(
   state.skipHostInferenceSmoke = false;
   state.reuseGatewayCredentialWithoutLocalKey = false;
   delete state.endpointPinnedAddresses;
+  delete state.endpointTrustedPrivateCapability;
 }
 
 export function clearNimContainerBeforeRetry(state: SetupNimSelectionState): void {
@@ -110,10 +117,17 @@ type ProbeOptions = {
   skipResponsesProbe?: boolean;
   authMode?: ProbeAuthMode;
   extraHeaders?: readonly string[];
+  capabilityCache?: OnboardInferenceCapabilityCache;
 };
 
 type ValidationResult =
-  | { ok: true; api: string | null; retry?: never; pinnedAddresses?: string[] }
+  | {
+      ok: true;
+      api: string | null;
+      retry?: never;
+      pinnedAddresses?: string[];
+      trustedPrivateCapability?: TrustedPrivateEndpointCapability;
+    }
   | { ok: false; api?: string; retry?: "credential" | "retry" | "model" | "selection" | string };
 
 type RemoteModelValidationResult = "selected" | "retry-model" | "retry-selection";
@@ -203,6 +217,7 @@ export function createRemoteModelValidator(deps: RemoteModelValidatorDeps): {
       intendedInferenceApi = "anthropic-messages",
     }) => {
       delete state.endpointPinnedAddresses;
+      delete state.endpointTrustedPrivateCapability;
       const selectedModel = deps.requireValue(
         deps.isBackToSelection(state.model) ? null : state.model,
         `Missing model for ${remoteConfig.label}`,
@@ -229,6 +244,9 @@ export function createRemoteModelValidator(deps: RemoteModelValidatorDeps): {
           if (validation.pinnedAddresses)
             state.endpointPinnedAddresses = validation.pinnedAddresses;
           else delete state.endpointPinnedAddresses;
+          if (validation.trustedPrivateCapability)
+            state.endpointTrustedPrivateCapability = validation.trustedPrivateCapability;
+          else delete state.endpointTrustedPrivateCapability;
           // Probe the endpoint's runtime max_model_len so a custom vLLM endpoint
           // gets its real context window baked in instead of a small
           // architecture default; an explicit override always wins (#6177).
@@ -274,6 +292,9 @@ export function createRemoteModelValidator(deps: RemoteModelValidatorDeps): {
           if (validation.pinnedAddresses)
             state.endpointPinnedAddresses = validation.pinnedAddresses;
           else delete state.endpointPinnedAddresses;
+          if (validation.trustedPrivateCapability)
+            state.endpointTrustedPrivateCapability = validation.trustedPrivateCapability;
+          else delete state.endpointTrustedPrivateCapability;
           state.preferredInferenceApi = validation.api;
           return "selected";
         }
@@ -316,6 +337,7 @@ export function createRemoteModelValidator(deps: RemoteModelValidatorDeps): {
           authMode: deps.getProbeAuthMode(state.provider),
           extraHeaders:
             deps.getProbeExtraHeaders?.(state.provider) ?? getProbeExtraHeaders(state.provider),
+          capabilityCache: state.inferenceCapabilityCache,
         },
       );
       if (validation.ok) {

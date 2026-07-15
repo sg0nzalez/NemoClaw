@@ -282,7 +282,7 @@ afterEach(() => {
 
 describe("advisor session runner", () => {
   it("uses one bounded provider-aware retry layer for transient failures", () => {
-    expect(advisorRetrySettings("openai/openai/gpt-5.5")).toEqual({
+    expect(advisorRetrySettings("azure/openai/gpt-5.6-terra")).toEqual({
       enabled: true,
       maxRetries: 4,
       baseDelayMs: 6_000,
@@ -373,11 +373,11 @@ describe("advisor session runner", () => {
     const result = await run([analysisTurn("only-analysis"), commitTurn("only-commit")]);
 
     expect(result.fatalError).toContain(
-      "only-commit atomic-terminal repair must commit turn_action successfully exactly once",
+      "only-commit atomic-terminal repair must commit turn_action successfully once",
     );
     expect(result.turnErrors).toEqual([
       expect.stringContaining(
-        "only-commit atomic-terminal repair must commit turn_action successfully exactly once",
+        "only-commit atomic-terminal repair must commit turn_action successfully once",
       ),
     ]);
     expect(sdk.state.prompts).toHaveLength(3);

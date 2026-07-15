@@ -54,6 +54,8 @@ export interface ModelValidationFailure extends ValidationFailureLike {
 export type ModelValidationResult = ModelValidationSuccess | ModelValidationFailure;
 
 export interface SandboxCreateIntent {
+  /** Complete secret-free create plan resolved by the onboarding machine. */
+  readonly resolved?: import("./sandbox-create-intent-types").SandboxCreateIntent;
   readonly recreate: boolean;
   readonly toolDisclosure: import("../tool-disclosure").ToolDisclosure;
   readonly observabilityEnabled: boolean;
@@ -84,6 +86,8 @@ export type OnboardOptions = {
   rebuildRegistryInferenceRoute?: import("./rebuild-route-handoff").RebuildRouteHandoff | null;
   /** Internal one-shot authority to upsert a provider observed missing during rebuild preflight. */
   rebuildProviderReconfigure?: import("./rebuild-route-handoff").RebuildProviderReconfigureHandoff;
+  /** Internal one-shot authority to recover the recorded provider during a locked rebuild resume. */
+  providerRecoveryReceipt?: import("./rebuild-route-handoff").ProviderRecoveryReceipt;
   /** Internal one-shot handoff for the exact image context validated before rebuild deletion. */
   preparedImageRebuild?: import("./prepared-dcode-rebuild").PreparedImageRebuildHandoff;
   resume?: boolean;

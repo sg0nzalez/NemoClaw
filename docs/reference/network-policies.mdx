@@ -74,7 +74,7 @@ The following endpoint groups are allowed by default:
 | Policy | Endpoints | Binaries | Rules |
 | --- | --- | --- | --- |
 | `nvidia` | `integrate.api.nvidia.com:443` | `/usr/local/bin/openclaw` | POST to inference and embedding paths, GET to model listings |
-| `clawhub` | `clawhub.ai:443` | `/usr/local/bin/openclaw`, `/usr/local/bin/node` | GET, POST |
+| `clawhub` | `clawhub.ai:443` | `/usr/local/bin/openclaw`, `/usr/local/bin/node` | GET, POST, including scoped package paths |
 | `openclaw_api` | `openclaw.ai:443` | `/usr/local/bin/openclaw`, `/usr/local/bin/node` | GET, POST |
 | `openclaw_docs` | `docs.openclaw.ai:443` | `/usr/local/bin/openclaw` | GET only |
 | `npm_registry` | `registry.npmjs.org:443` | `/usr/local/bin/openclaw` only (openclaw plugins install) | GET only |
@@ -111,7 +111,7 @@ Refer to [Customize the Network Policy](../network-policy/customize-network-poli
 The baseline policy does not include messaging endpoints for Telegram, Discord, Slack, WeChat, or WhatsApp.
 Enable the channel during onboarding or apply the matching messaging preset so the sandbox can reach that platform.
 WeChat and WhatsApp are experimental.
-Review [Messaging Channels](../manage-sandboxes/messaging-channels) before enabling them.
+Review [Choose Messaging Channels](../manage-sandboxes/messaging-channels/choose-messaging-channels) before enabling them.
 </Note>
 
 </AgentOnly>

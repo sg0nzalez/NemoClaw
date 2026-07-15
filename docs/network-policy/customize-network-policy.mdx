@@ -77,6 +77,9 @@ Each entry in the `network` section defines an endpoint group with the following
 `rules`
 : HTTP methods and paths that are permitted.
 
+`allow_encoded_slash`
+: Allows percent-encoded slashes such as `%2F` in request paths. Leave this disabled unless the service uses encoded slashes as part of its documented route format, such as ClawHub scoped package names.
+
 ### Re-Run Onboard
 
 Apply the updated policy by re-running the onboard wizard:
@@ -353,6 +356,8 @@ network_policies:
 
 The top-level `preset.name` must be a lowercase RFC 1123 label (letters, digits, hyphens) and must not collide with a built-in preset name such as `slack` or `pypi`.
 Rename `preset.name` if NemoClaw refuses to apply the file because of a collision.
+Each endpoint must name a specific host or a scoped subdomain wildcard such as `*.example.com`.
+NemoClaw rejects catch-all destinations including `*`, `0.0.0.0`, `0.0.0.0/0`, `::`, and `::/0` before it applies a custom preset.
 Rule matchers must match the endpoint protocol.
 REST and WebSocket rules require `method` and `path`; REST accepts standard HTTP methods or `*`, while WebSocket accepts `GET`, `WEBSOCKET_TEXT`, or `*`.
 JSON-RPC rules accept only `method`, and MCP rules accept `method` plus optional `tool` or `params.name` matchers.

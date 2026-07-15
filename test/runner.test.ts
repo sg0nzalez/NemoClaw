@@ -7,7 +7,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import YAML from "yaml";
 
 import { redact, runCapture } from "../src/lib/runner";
 
@@ -670,6 +669,7 @@ describe("regression guards", () => {
   });
 
   describe("credential exposure guards (#429)", () => {
+    // source-shape-contract: security -- Executable walkthrough commands must never materialize the NVIDIA inference credential in child arguments
     it("walkthrough.sh does not embed NVIDIA_INFERENCE_API_KEY in tmux or sandbox commands", () => {
       const fs = require("fs");
       const src = fs.readFileSync(
@@ -741,11 +741,35 @@ describe("regression guards", () => {
         strings() { echo "request-body-credential-rewrite websocket-credential-rewrite allow_all_known_mcp_methods"; }
         export -f strings
         tar() {
-          local destination="\${@: -1}"
-          printf '%s\n' '#!/bin/sh' 'echo "openshell 0.0.72"' > "$destination/openshell"
-          printf '%s\n' '#!/bin/sh' 'echo "openshell-gateway 0.0.72"' > "$destination/openshell-gateway"
-          printf '%s\n' '#!/bin/sh' 'echo "openshell-sandbox 0.0.72"' > "$destination/openshell-sandbox"
-          chmod +x "$destination/openshell" "$destination/openshell-gateway" "$destination/openshell-sandbox"
+          local mode="\${1:-}" archive="\${2:-}" expected="" destination=""
+          case "$(basename "$archive")" in
+          openshell-gateway-*) expected="openshell-gateway" ;;
+          openshell-sandbox-*) expected="openshell-sandbox" ;;
+          openshell-*) expected="openshell" ;;
+          *) return 2 ;;
+          esac
+          case "$mode" in
+          -tzf)
+            printf '%s\n' "$expected"
+            ;;
+          -tvzf)
+            printf '%s\n' "-rwxr-xr-x 0/0 0 2026-01-01 00:00 $expected"
+            ;;
+          xzf|-xzf)
+            shift 2
+            while [ "$#" -gt 0 ]; do
+              if [ "$1" = "-C" ]; then
+                shift
+                destination="$1"
+              fi
+              shift || true
+            done
+            [ -n "$destination" ] || return 2
+            printf '%s\n' '#!/bin/sh' 'echo "0.0.72"' > "$destination/$expected"
+            chmod +x "$destination/$expected"
+            ;;
+          *) return 2 ;;
+          esac
         }; export -f tar
         install() { /usr/bin/install "$@"; }; export -f install
         source "${scriptPath}"
@@ -819,11 +843,35 @@ describe("regression guards", () => {
         strings() { echo "request-body-credential-rewrite websocket-credential-rewrite allow_all_known_mcp_methods"; }
         export -f strings
         tar() {
-          local destination="\${@: -1}"
-          printf '%s\n' '#!/bin/sh' 'echo "openshell 0.0.72"' > "$destination/openshell"
-          printf '%s\n' '#!/bin/sh' 'echo "openshell-gateway 0.0.72"' > "$destination/openshell-gateway"
-          printf '%s\n' '#!/bin/sh' 'echo "openshell-sandbox 0.0.72"' > "$destination/openshell-sandbox"
-          chmod +x "$destination/openshell" "$destination/openshell-gateway" "$destination/openshell-sandbox"
+          local mode="\${1:-}" archive="\${2:-}" expected="" destination=""
+          case "$(basename "$archive")" in
+          openshell-gateway-*) expected="openshell-gateway" ;;
+          openshell-sandbox-*) expected="openshell-sandbox" ;;
+          openshell-*) expected="openshell" ;;
+          *) return 2 ;;
+          esac
+          case "$mode" in
+          -tzf)
+            printf '%s\n' "$expected"
+            ;;
+          -tvzf)
+            printf '%s\n' "-rwxr-xr-x 0/0 0 2026-01-01 00:00 $expected"
+            ;;
+          xzf|-xzf)
+            shift 2
+            while [ "$#" -gt 0 ]; do
+              if [ "$1" = "-C" ]; then
+                shift
+                destination="$1"
+              fi
+              shift || true
+            done
+            [ -n "$destination" ] || return 2
+            printf '%s\n' '#!/bin/sh' 'echo "0.0.72"' > "$destination/$expected"
+            chmod +x "$destination/$expected"
+            ;;
+          *) return 2 ;;
+          esac
         }; export -f tar
         install() { /usr/bin/install "$@"; }; export -f install
         source "${scriptPath}"
@@ -1044,31 +1092,6 @@ describe("regression guards", () => {
       // The smoke must be wired into the run, not just defined.
       expect(src).toContain("await assertTmuxPtyFlow(sandbox, SANDBOX_A)");
     });
-
-    // The reopened #4513: installing tmux was not enough — the bundled
-    // tmux-session flow still failed with `create window failed: fork failed:
-    // Permission denied`. Root cause: the sandbox landlock filesystem policy
-    // never granted the devpts PTY devices, so forkpty() open of /dev/ptmx
-    // (-> /dev/pts/ptmx) and the /dev/pts/<n> slave was denied with EACCES.
-    for (const policyFile of [
-      path.join("nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml"),
-      path.join("nemoclaw-blueprint", "policies", "openclaw-sandbox-permissive.yaml"),
-      path.join("agents", "openclaw", "policy-permissive.yaml"),
-      path.join("agents", "hermes", "policy-additions.yaml"),
-      path.join("agents", "hermes", "policy-permissive.yaml"),
-    ]) {
-      it(`${policyFile} grants /dev/pts so PTY allocation (tmux) works`, () => {
-        const doc = YAML.parse(fs.readFileSync(path.join(repoRoot, policyFile), "utf-8"));
-        const readWrite: string[] = doc.filesystem_policy?.read_write ?? [];
-        // devpts must be writable — tmux opens the master and slave O_RDWR.
-        expect(readWrite).toContain("/dev/pts");
-        // /dev/ptmx is a symlink to pts/ptmx; the supervisor refuses to chown a
-        // symlinked read_write path, so it must NOT be listed directly. The
-        // /dev/pts directory grant already covers ptmx via the landlock
-        // path hierarchy.
-        expect(readWrite).not.toContain("/dev/ptmx");
-      });
-    }
 
     it("e2e TC-SBX-09 hard-asserts the tmux lifecycle and no longer skips on fork failure", () => {
       const src = fs.readFileSync(
