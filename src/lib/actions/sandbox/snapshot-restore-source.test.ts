@@ -122,19 +122,21 @@ describe("commitWithStableSnapshotRestoreSource", () => {
     expect(commit).not.toHaveBeenCalled();
   });
 
-  it.each([1, 2])("fails closed when descriptor read %i fails", async (failedRead) => {
+  it.each([
+    [1, [() => Promise.reject(new Error("unavailable")), async () => source]],
+    [2, [async () => source, () => Promise.reject(new Error("unavailable"))]],
+  ] as const)("fails closed when descriptor read %i fails", async (failedRead, reads) => {
     const commit = vi.fn();
     const preMutationCheck = vi.fn();
-    let calls = 0;
+    const readDescriptor = vi
+      .fn()
+      .mockImplementationOnce(reads[0])
+      .mockImplementationOnce(reads[1]);
     await expect(
       commitWithStableSnapshotRestoreSource({
         gatewayName: source.gatewayName,
         sandboxName: source.name,
-        readDescriptor: async () => {
-          calls += 1;
-          if (calls === failedRead) throw new Error("unavailable");
-          return source;
-        },
+        readDescriptor,
         preMutationCheck,
         commit,
       }),

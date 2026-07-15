@@ -185,25 +185,10 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
   });
 
   it("hardens an active timer window before force-deleting a restore destination", async () => {
-    const mutationOrder: string[] = [];
-    f.getOpenShellSandboxDescriptorMock.mockImplementation(async (_gateway, sandboxName) => {
-      mutationOrder.push("read descriptor");
-      return {
-        id: `${sandboxName}-id`,
-        name: sandboxName,
-        image: "nemoclaw-alpha:live-descriptor",
-      };
-    });
-    f.runOpenshellMock.mockImplementation((args) => {
-      if (args[0] === "sandbox" && args[1] === "delete") {
-        mutationOrder.push("delete");
-        f.lifecycleMock.events.push("delete");
-      }
-      return { status: 0, output: "" };
-    });
-    f.streamSandboxCreateMock.mockImplementation(async () => {
-      mutationOrder.push("create");
-      return { status: 0, output: "", sawProgress: false, forcedReady: false };
+    f.getOpenShellSandboxDescriptorMock.mockResolvedValue({
+      id: "alpha-id",
+      name: "alpha",
+      image: "nemoclaw-alpha:live-descriptor",
     });
     f.lifecycleMock.readTimerMarkerMock.mockReturnValue({
       pid: 4242,
@@ -268,10 +253,23 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
     expect(f.streamSandboxCreateMock).toHaveBeenCalled();
     expect(f.getOpenShellSandboxDescriptorMock).toHaveBeenNthCalledWith(1, "nemoclaw", "alpha");
     expect(f.getOpenShellSandboxDescriptorMock).toHaveBeenNthCalledWith(2, "nemoclaw", "alpha");
+    expect(f.getOpenShellSandboxDescriptorMock).toHaveBeenCalledTimes(2);
     expect(f.streamSandboxCreateMock.mock.calls[0]?.[1]).toContain(
       "nemoclaw-alpha:live-descriptor",
     );
-    expect(mutationOrder).toEqual(["read descriptor", "read descriptor", "delete", "create"]);
+    expect(f.streamSandboxCreateMock).toHaveBeenCalledOnce();
+    const destinationDeleteCalls = f.runOpenshellMock.mock.calls.filter(
+      ([args]) => args.join("\0") === "sandbox\0delete\0beta",
+    );
+    expect(destinationDeleteCalls).toHaveLength(1);
+    const deleteCallIndex = f.runOpenshellMock.mock.calls.indexOf(destinationDeleteCalls[0]);
+    const [firstReadOrder, secondReadOrder] =
+      f.getOpenShellSandboxDescriptorMock.mock.invocationCallOrder;
+    const deleteOrder = f.runOpenshellMock.mock.invocationCallOrder[deleteCallIndex];
+    const [createOrder] = f.streamSandboxCreateMock.mock.invocationCallOrder;
+    expect(firstReadOrder).toBeLessThan(secondReadOrder);
+    expect(secondReadOrder).toBeLessThan(deleteOrder);
+    expect(deleteOrder).toBeLessThan(createOrder);
     expect(f.restoreSandboxStateMock).toHaveBeenCalledWith("beta", "/tmp/backup-alpha");
   });
 
