@@ -133,6 +133,43 @@ describe("execSandbox multi-line guard (#5980)", () => {
     expect(printed).toContain('bash -lc "cmd1; cmd2"');
   });
 
+  it.each([
+    ["a NUL byte", ["printf", "bad\0arg"]],
+    ["an oversized UTF-8 argument", ["printf", "é".repeat(16 * 1024 + 1)]],
+    ["too many wrapped arguments", Array.from({ length: 1018 }, () => "x")],
+  ])("rejects %s before direct CLI dispatch", async (_label, command) => {
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
+      throw new Error(`exit:${code}`);
+    }) as never);
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const run = vi.fn(() => ({ status: 0 }));
+
+    await expect(
+      execSandbox("alpha", command, {}, { run, resolveBinary: () => "openshell" }),
+    ).rejects.toThrow("exit:2");
+
+    expect(run).not.toHaveBeenCalled();
+    expect(exitSpy).toHaveBeenCalledWith(2);
+    expect(errSpy.mock.calls.map((call) => String(call[0])).join("\n")).toContain("error: command");
+  });
+
+  it("dispatches the exact wrapped argument-count and UTF-8 byte boundaries", async () => {
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
+      throw new Error(`exit:${code}`);
+    }) as never);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const run = vi.fn(() => ({ status: 0 }));
+    const command = ["é".repeat(16 * 1024), ...Array.from({ length: 1016 }, () => "x")];
+
+    await expect(
+      execSandbox("alpha", command, {}, { run, resolveBinary: () => "openshell" }),
+    ).rejects.toThrow("exit:0");
+
+    expect(wrapExecCommandWithRuntimeEnv(command)).toHaveLength(1024);
+    expect(run).toHaveBeenCalledOnce();
+    expect(exitSpy).toHaveBeenCalledWith(0);
+  });
+
   it("forwards the semicolon workaround to dispatch and exits with the inner status", async () => {
     // The reporter's confirmed workaround (`bash -lc "cmd1; cmd2"`) carries no
     // newline/carriage return, so it passes the guard and dispatches. Injecting

@@ -35,7 +35,12 @@ const MESSAGING_ENV_PREFIXES = [
 function buildCleanEnv(extraEnv: Record<string, string>, home: string): NodeJS.ProcessEnv {
   const filtered: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(process.env)) {
-    if (MESSAGING_ENV_PREFIXES.some((prefix) => key.startsWith(prefix))) continue;
+    if (
+      key === "OPENSHELL_GATEWAY_ENDPOINT" ||
+      MESSAGING_ENV_PREFIXES.some((prefix) => key.startsWith(prefix))
+    ) {
+      continue;
+    }
     filtered[key] = value;
   }
   return {
@@ -67,14 +72,20 @@ function buildPreamble({
   presetNamesApplied = ["npm", "pypi", "huggingface", "brew", "whatsapp"],
   sandboxAgent = "openclaw",
   channelInRegistry = "whatsapp",
-  sandboxExecResult = { status: 0, stdout: "NEMOCLAW_CHANNEL_CLEAR_OK", stderr: "" },
-  sshFallbackResult = null as { status: number; stdout: string; stderr: string } | null,
+  sandboxExecResult = { status: 0, stdout: "NEMOCLAW_CHANNEL_CLEAR_OK\n", stderr: "" },
+  rejectSandboxExecRequest = false,
 }: {
   presetNamesApplied?: string[];
   sandboxAgent?: string;
   channelInRegistry?: string;
-  sandboxExecResult?: { status: number; stdout: string; stderr: string } | null;
-  sshFallbackResult?: { status: number; stdout: string; stderr: string } | null;
+  sandboxExecResult?: {
+    status: number | null;
+    stdout: string;
+    stderr: string;
+    errorMessage?: string;
+    signal?: NodeJS.Signals | null;
+  };
+  rejectSandboxExecRequest?: boolean;
 } = {}): string {
   const j = (p: string) =>
     JSON.stringify(path.join(repoRoot, "src", "lib", p.replace(/\.js$/, ".ts")));
@@ -89,16 +100,45 @@ runner.runCapture = () => "";
 const adapterRuntime = require(${j("adapters/openshell/runtime.js")});
 adapterRuntime.runOpenshell = () => ({ status: 0, stdout: "", stderr: "" });
 
-const processRecovery = require(${j("actions/sandbox/process-recovery.js")});
-const sandboxExecCalls = [];
-const sandboxSshCalls = [];
-processRecovery.executeSandboxExecCommand = (sandboxName, command) => {
-  sandboxExecCalls.push({ sandboxName, command });
-  return ${JSON.stringify(sandboxExecResult)};
+const sandboxControl = require(${j("adapters/openshell/sandbox-control.js")});
+const canonicalValidateOpenShellExecRequest = sandboxControl.validateOpenShellExecRequest;
+const sandboxControlValidationCalls = [];
+const sandboxControlCallOrder = [];
+sandboxControl.validateOpenShellExecRequest = (request) => {
+  sandboxControlValidationCalls.push(request);
+  sandboxControlCallOrder.push("validate");
+  return ${JSON.stringify(rejectSandboxExecRequest)}
+    ? new Error("test rejected channel cleanup request")
+    : canonicalValidateOpenShellExecRequest(request);
 };
-processRecovery.executeSandboxCommand = (sandboxName, command) => {
-  sandboxSshCalls.push({ sandboxName, command });
-  return ${JSON.stringify(sshFallbackResult)};
+
+const sandboxControlRouting = require(${j("adapters/openshell/sandbox-control-routing.js")});
+const sandboxExecCalls = [];
+const sandboxControlSelections = [];
+let sandboxControlCloseCalls = 0;
+const configuredExecResult = ${JSON.stringify(sandboxExecResult)};
+sandboxControlRouting.selectOpenShellSandboxControlForMutation = (gatewayName) => {
+  sandboxControlSelections.push(gatewayName);
+  sandboxControlCallOrder.push("select");
+  return {
+    transport: "grpc",
+    control: {
+      exec: async (request) => {
+        sandboxExecCalls.push(request);
+        sandboxControlCallOrder.push("exec");
+        return {
+          status: configuredExecResult.status,
+          stdout: configuredExecResult.stdout,
+          stderr: configuredExecResult.stderr,
+          ...(configuredExecResult.errorMessage
+            ? { error: new Error(configuredExecResult.errorMessage) }
+            : {}),
+          ...(configuredExecResult.signal ? { signal: configuredExecResult.signal } : {}),
+        };
+      },
+    },
+    close: () => { sandboxControlCloseCalls += 1; },
+  };
 };
 
 const gatewayRuntime = require(${j("gateway-runtime-action.js")});
@@ -171,6 +211,8 @@ const registryUpdates = [];
 registry.getSandbox = () => ({
   name: "test-sb",
   agent: ${JSON.stringify(sandboxAgent)},
+  gatewayName: "nemoclaw-19080",
+  gatewayPort: 19080,
   messaging: { schemaVersion: 1, plan: makeMessagingPlan() },
   policies: ${JSON.stringify(presetNamesApplied)},
 });
@@ -208,11 +250,14 @@ const channelModule = require(${j("actions/sandbox/policy-channel.js")});
 module.exports = {
   channelModule,
   sandboxExecCalls,
-  sandboxSshCalls,
+  sandboxControlValidationCalls,
+  sandboxControlCallOrder,
+  sandboxControlSelections,
   removedPresets,
   registryUpdates,
   sessionStore,
   callOrder,
+  getSandboxControlCloseCalls: () => sandboxControlCloseCalls,
   getExitCode: () => exitCode,
 };
 `;
@@ -228,6 +273,10 @@ const ctx = module.exports;
     await ctx.channelModule.removeSandboxChannel("test-sb", { channel: "whatsapp" });
     process.stdout.write("\\n__RESULT__" + JSON.stringify({
       sandboxExecCalls: ctx.sandboxExecCalls,
+      sandboxControlValidationCalls: ctx.sandboxControlValidationCalls,
+      sandboxControlCallOrder: ctx.sandboxControlCallOrder,
+      sandboxControlSelections: ctx.sandboxControlSelections,
+      sandboxControlCloseCalls: ctx.getSandboxControlCloseCalls(),
       sessionPolicyPresets: ctx.sessionStore.policyPresets,
       removedPresets: ctx.removedPresets,
       callOrder: ctx.callOrder,
@@ -266,22 +315,26 @@ const ctx = module.exports;
         "non-channel presets must stay in session.policyPresets",
       );
 
-      const cleanupCalls = payload.sandboxExecCalls.filter((c: { command: string }) =>
-        c.command.startsWith("rm -rf"),
-      );
-      assert.equal(
-        cleanupCalls.length,
-        1,
-        `expected one rm -rf sandbox-exec call; got ${cleanupCalls.length}`,
-      );
+      assert.equal(payload.sandboxExecCalls.length, 1, "cleanup must dispatch exactly once");
+      assert.deepEqual(payload.sandboxControlValidationCalls, payload.sandboxExecCalls);
+      assert.deepEqual(payload.sandboxControlCallOrder, ["validate", "select", "exec"]);
+      assert.deepEqual(payload.sandboxControlSelections, ["nemoclaw-19080"]);
+      assert.equal(payload.sandboxControlCloseCalls, 1, "selected control must close once");
+      const cleanup = payload.sandboxExecCalls[0];
+      assert.deepEqual(cleanup.command, ["sh", "-s"]);
+      assert.equal(cleanup.timeoutMs, 30_000);
+      assert.equal(cleanup.maxOutputBytes, 64 * 1024);
+      assert.equal(typeof cleanup.stdin, "string");
+      assert.equal(cleanup.stdin.endsWith("\n"), true);
       const expectedPath =
         sandboxAgent === "openclaw"
           ? "/sandbox/.openclaw/whatsapp"
           : "/sandbox/.hermes/platforms/whatsapp";
       assert.ok(
-        cleanupCalls[0].command.includes(expectedPath),
-        `expected cleanup to target '${expectedPath}'; got ${cleanupCalls[0].command}`,
+        cleanup.stdin.includes(expectedPath),
+        `expected cleanup stdin to target '${expectedPath}'; got ${cleanup.stdin}`,
       );
+      assert.match(cleanup.stdin, /printf '%s\\n' 'NEMOCLAW_CHANNEL_CLEAR_OK'/u);
 
       const rebuildIdx = payload.callOrder.indexOf("promptAndRebuild");
       const clearIdx = payload.callOrder.indexOf("clearedSandboxState");
@@ -300,68 +353,40 @@ const ctx = module.exports;
     });
   }
 
-  it("falls back to SSH when sandbox-exec wrapper does not return the sentinel", () => {
-    const script = `${buildPreamble({
-      sandboxAgent: "openclaw",
-      sandboxExecResult: null,
-      sshFallbackResult: { status: 0, stdout: "NEMOCLAW_CHANNEL_CLEAR_OK", stderr: "" },
-    })}
-const ctx = module.exports;
-(async () => {
-  try {
-    await ctx.channelModule.removeSandboxChannel("test-sb", { channel: "whatsapp" });
-    process.stdout.write("\\n__RESULT__" + JSON.stringify({
-      sandboxExecCalls: ctx.sandboxExecCalls,
-      sandboxSshCalls: ctx.sandboxSshCalls,
-      removedPresets: ctx.removedPresets,
-      callOrder: ctx.callOrder,
-      exitCode: ctx.getExitCode(),
-    }) + "\\n");
-  } catch (err) {
-    process.stdout.write("\\n__RESULT__" + JSON.stringify({ error: err.message, stack: err.stack }) + "\\n");
-  }
-})();
-`;
-    const result = runScript(script);
-    assert.equal(result.status, 0, `script failed: ${result.stderr}\n${result.stdout}`);
-    const marker = result.stdout.lastIndexOf("__RESULT__");
-    assert.ok(marker >= 0, `no __RESULT__ marker:\n${result.stdout}`);
-    const payload = JSON.parse(result.stdout.slice(marker + "__RESULT__".length).trim());
-    assert.ok(!payload.error, `unexpected error: ${payload.error}\n${payload.stack || ""}`);
-
-    assert.equal(
-      payload.exitCode,
-      null,
-      `must not exit when SSH fallback recovers; got exitCode=${payload.exitCode}`,
-    );
-    assert.equal(payload.sandboxExecCalls.length, 1, "exec attempt must run first");
-    assert.equal(
-      payload.sandboxSshCalls.length,
-      1,
-      "SSH fallback must run once when exec returns null",
-    );
-    assert.deepEqual(
-      payload.removedPresets,
-      [{ sandboxName: "test-sb", presetName: "whatsapp" }],
-      "remove flow must continue after SSH-recovered cleanup",
-    );
-    assert.ok(
-      payload.callOrder.includes("promptAndRebuild"),
-      `rebuild must be queued after SSH-recovered cleanup; callOrder=${JSON.stringify(payload.callOrder)}`,
-    );
-  });
-
-  it("aborts before rebuild when both exec and SSH cleanup fail for a QR channel", () => {
-    const script = `${buildPreamble({
-      sandboxAgent: "openclaw",
-      sandboxExecResult: { status: 1, stdout: "", stderr: "sandbox is not running" },
-      sshFallbackResult: { status: 255, stdout: "", stderr: "ssh: connect to host ... failed" },
-    })}
+  for (const [label, sandboxExecResult] of [
+    ["returns nonzero", { status: 1, stdout: "NEMOCLAW_CHANNEL_CLEAR_OK\n", stderr: "" }],
+    ["has no exit status", { status: null, stdout: "NEMOCLAW_CHANNEL_CLEAR_OK\n", stderr: "" }],
+    [
+      "is signaled",
+      {
+        status: 0,
+        stdout: "NEMOCLAW_CHANNEL_CLEAR_OK\n",
+        stderr: "",
+        signal: "SIGTERM" as NodeJS.Signals,
+      },
+    ],
+    [
+      "returns an error",
+      {
+        status: 0,
+        stdout: "NEMOCLAW_CHANNEL_CLEAR_OK\n",
+        stderr: "",
+        errorMessage: "transport failed",
+      },
+    ],
+    [
+      "omits the exact marker",
+      { status: 0, stdout: "prefix-NEMOCLAW_CHANNEL_CLEAR_OK", stderr: "" },
+    ],
+  ] as const) {
+    it(`never replays cleanup when the selected mutation exec ${label}`, () => {
+      const script = `${buildPreamble({ sandboxExecResult })}
 const ctx = module.exports;
 (async () => {
   const dumpState = () => ({
     sandboxExecCalls: ctx.sandboxExecCalls,
-    sandboxSshCalls: ctx.sandboxSshCalls,
+    sandboxControlSelections: ctx.sandboxControlSelections,
+    sandboxControlCloseCalls: ctx.getSandboxControlCloseCalls(),
     sessionPolicyPresets: ctx.sessionStore.policyPresets,
     removedPresets: ctx.removedPresets,
     registryUpdates: ctx.registryUpdates,
@@ -380,47 +405,111 @@ const ctx = module.exports;
   }
 })();
 `;
+      const result = runScript(script);
+      assert.equal(result.status, 0, `script failed: ${result.stderr}\n${result.stdout}`);
+      const marker = result.stdout.lastIndexOf("__RESULT__");
+      assert.ok(marker >= 0, `no __RESULT__ marker:\n${result.stdout}`);
+      const payload = JSON.parse(result.stdout.slice(marker + "__RESULT__".length).trim());
+      assert.ok(!payload.error, `unexpected error: ${payload.error}\n${payload.stack || ""}`);
+
+      assert.equal(payload.exitCode, 1, "QR channel cleanup failure must exit non-zero");
+      assert.deepEqual(payload.sandboxControlSelections, ["nemoclaw-19080"]);
+      assert.equal(payload.sandboxExecCalls.length, 1, "cleanup must never be replayed");
+      assert.equal(payload.sandboxControlCloseCalls, 1, "selected control must close once");
+      assert.ok(
+        !payload.callOrder.includes("promptAndRebuild"),
+        `rebuild must NOT be queued on cleanup failure; callOrder=${JSON.stringify(payload.callOrder)}`,
+      );
+      assert.deepEqual(payload.removedPresets, []);
+      assert.deepEqual(payload.registryUpdates, []);
+      assert.deepEqual(payload.sessionPolicyPresets, [
+        "npm",
+        "pypi",
+        "huggingface",
+        "brew",
+        "whatsapp",
+      ]);
+    });
+  }
+
+  it("rejects an invalid cleanup request before selecting a mutation control", () => {
+    const script = `${buildPreamble({ rejectSandboxExecRequest: true })}
+const ctx = module.exports;
+(async () => {
+  const dumpState = () => ({
+    sandboxExecCalls: ctx.sandboxExecCalls,
+    sandboxControlValidationCalls: ctx.sandboxControlValidationCalls,
+    sandboxControlCallOrder: ctx.sandboxControlCallOrder,
+    sandboxControlSelections: ctx.sandboxControlSelections,
+    sandboxControlCloseCalls: ctx.getSandboxControlCloseCalls(),
+    removedPresets: ctx.removedPresets,
+    callOrder: ctx.callOrder,
+    exitCode: ctx.getExitCode(),
+  });
+  try {
+    await ctx.channelModule.removeSandboxChannel("test-sb", { channel: "whatsapp" });
+    process.stdout.write("\\n__RESULT__" + JSON.stringify(dumpState()) + "\\n");
+  } catch (err) {
+    const payload = String(err.message).startsWith("__PROCESS_EXIT__")
+      ? dumpState()
+      : { error: err.message, stack: err.stack };
+    process.stdout.write("\\n__RESULT__" + JSON.stringify(payload) + "\\n");
+  }
+})();
+`;
     const result = runScript(script);
     assert.equal(result.status, 0, `script failed: ${result.stderr}\n${result.stdout}`);
     const marker = result.stdout.lastIndexOf("__RESULT__");
     assert.ok(marker >= 0, `no __RESULT__ marker:\n${result.stdout}`);
     const payload = JSON.parse(result.stdout.slice(marker + "__RESULT__".length).trim());
     assert.ok(!payload.error, `unexpected error: ${payload.error}\n${payload.stack || ""}`);
+    assert.equal(payload.exitCode, 1);
+    assert.equal(payload.sandboxControlValidationCalls.length, 1);
+    assert.deepEqual(payload.sandboxControlCallOrder, ["validate"]);
+    assert.deepEqual(payload.sandboxControlSelections, []);
+    assert.deepEqual(payload.sandboxExecCalls, []);
+    assert.equal(payload.sandboxControlCloseCalls, 0);
+    assert.deepEqual(payload.removedPresets, []);
+    assert.ok(!payload.callOrder.includes("promptAndRebuild"));
+  });
 
-    assert.equal(payload.exitCode, 1, "QR channel cleanup failure must exit non-zero");
-    assert.ok(
-      !payload.callOrder.includes("promptAndRebuild"),
-      `rebuild must NOT be queued on cleanup failure; callOrder=${JSON.stringify(payload.callOrder)}`,
-    );
-    assert.deepEqual(
-      payload.removedPresets,
-      [],
-      "policy preset must NOT be un-applied when we bail early on cleanup failure",
-    );
-    assert.deepEqual(
-      payload.registryUpdates,
-      [],
-      "registry must NOT be mutated when we bail early on cleanup failure",
-    );
-    assert.deepEqual(
-      payload.sessionPolicyPresets,
-      ["npm", "pypi", "huggingface", "brew", "whatsapp"],
-      "session.policyPresets must be unchanged on early-bail",
-    );
-
-    const cleanupCalls = payload.sandboxExecCalls.filter((c: { command: string }) =>
-      c.command.startsWith("rm -rf"),
-    );
-    assert.equal(cleanupCalls.length, 1, "expected the rm -rf attempt that failed");
-    assert.equal(
-      payload.sandboxSshCalls.length,
-      1,
-      `SSH fallback must be attempted before aborting; sandboxSshCalls=${JSON.stringify(payload.sandboxSshCalls)}`,
-    );
-    assert.ok(
-      payload.sandboxSshCalls[0].command.startsWith("rm -rf"),
-      `SSH fallback must invoke the rm -rf cleanup; got ${payload.sandboxSshCalls[0].command}`,
-    );
+  it("rejects a process-level gateway endpoint override before cleanup selection", () => {
+    const script = `${buildPreamble()}
+const ctx = module.exports;
+(async () => {
+  const dumpState = () => ({
+    sandboxExecCalls: ctx.sandboxExecCalls,
+    sandboxControlSelections: ctx.sandboxControlSelections,
+    sandboxControlCloseCalls: ctx.getSandboxControlCloseCalls(),
+    removedPresets: ctx.removedPresets,
+    callOrder: ctx.callOrder,
+    exitCode: ctx.getExitCode(),
+  });
+  try {
+    await ctx.channelModule.removeSandboxChannel("test-sb", { channel: "whatsapp" });
+    process.stdout.write("\\n__RESULT__" + JSON.stringify(dumpState()) + "\\n");
+  } catch (err) {
+    const payload = String(err.message).startsWith("__PROCESS_EXIT__")
+      ? dumpState()
+      : { error: err.message, stack: err.stack };
+    process.stdout.write("\\n__RESULT__" + JSON.stringify(payload) + "\\n");
+  }
+})();
+`;
+    const result = runScript(script, {
+      OPENSHELL_GATEWAY_ENDPOINT: "http://127.0.0.1:6553",
+    });
+    assert.equal(result.status, 0, `script failed: ${result.stderr}\n${result.stdout}`);
+    const marker = result.stdout.lastIndexOf("__RESULT__");
+    assert.ok(marker >= 0, `no __RESULT__ marker:\n${result.stdout}`);
+    const payload = JSON.parse(result.stdout.slice(marker + "__RESULT__".length).trim());
+    assert.ok(!payload.error, `unexpected error: ${payload.error}\n${payload.stack || ""}`);
+    assert.equal(payload.exitCode, 1);
+    assert.deepEqual(payload.sandboxControlSelections, []);
+    assert.deepEqual(payload.sandboxExecCalls, []);
+    assert.equal(payload.sandboxControlCloseCalls, 0);
+    assert.deepEqual(payload.removedPresets, []);
+    assert.ok(!payload.callOrder.includes("promptAndRebuild"));
   });
 
   it("treats a leftover session.policyPresets entry as residue and runs cleanup", () => {
@@ -434,6 +523,8 @@ const registryOverride = require(${JSON.stringify(path.join(repoRoot, "src", "li
 registryOverride.getSandbox = () => ({
   name: "test-sb",
   agent: "openclaw",
+  gatewayName: "nemoclaw-19080",
+  gatewayPort: 19080,
   policies: [],
 });
 const policiesOverride = require(${JSON.stringify(path.join(repoRoot, "src", "lib", "policy/index.ts"))});
@@ -459,14 +550,8 @@ policiesOverride.getAppliedPresets = () => [];
     const payload = JSON.parse(result.stdout.slice(marker + "__RESULT__".length).trim());
     assert.ok(!payload.error, `unexpected error: ${payload.error}\n${payload.stack || ""}`);
 
-    const cleanupCalls = payload.sandboxExecCalls.filter((c: { command: string }) =>
-      c.command.startsWith("rm -rf"),
-    );
-    assert.equal(
-      cleanupCalls.length,
-      1,
-      `cleanup must run when only session.policyPresets has residue; got ${JSON.stringify(payload.sandboxExecCalls)}`,
-    );
+    assert.equal(payload.sandboxExecCalls.length, 1);
+    assert.ok(payload.sandboxExecCalls[0].stdin.includes("/sandbox/.openclaw/whatsapp"));
     assert.ok(
       !payload.sessionPolicyPresets.includes("whatsapp"),
       `session.policyPresets must be stripped after the residue-driven cleanup`,
@@ -480,7 +565,6 @@ policiesOverride.getAppliedPresets = () => [];
       sandboxAgent: "openclaw",
       channelInRegistry: "telegram",
       sandboxExecResult: { status: 1, stdout: "", stderr: "sandbox is not running" },
-      sshFallbackResult: { status: 255, stdout: "", stderr: "ssh: connect to host ... failed" },
     })}
 const ctx = module.exports;
 (async () => {
@@ -488,7 +572,6 @@ const ctx = module.exports;
     await ctx.channelModule.removeSandboxChannel("test-sb", { channel: "whatsapp" });
     process.stdout.write("\\n__RESULT__" + JSON.stringify({
       sandboxExecCalls: ctx.sandboxExecCalls,
-      sandboxSshCalls: ctx.sandboxSshCalls,
       callOrder: ctx.callOrder,
       exitCode: ctx.getExitCode(),
     }) + "\\n");
@@ -513,11 +596,6 @@ const ctx = module.exports;
       payload.sandboxExecCalls.length,
       0,
       `sandbox-exec cleanup must NOT run when channel was never configured; got ${JSON.stringify(payload.sandboxExecCalls)}`,
-    );
-    assert.equal(
-      payload.sandboxSshCalls.length,
-      0,
-      "SSH fallback must NOT run when channel was never configured",
     );
     assert.ok(
       payload.callOrder.includes("promptAndRebuild"),

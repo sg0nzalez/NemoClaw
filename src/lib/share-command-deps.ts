@@ -4,6 +4,7 @@
 import { OPENSHELL_PROBE_TIMEOUT_MS } from "./adapters/openshell/timeouts";
 import { CLI_NAME } from "./cli/branding";
 import { G, R } from "./cli/terminal-style";
+import { assertNoOpenShellGatewayEndpointOverride } from "./openshell-gateway-endpoint-guard";
 
 export interface ShareCommandDeps {
   /** Run `openshell sandbox ssh-config <name>` and return its output. */
@@ -11,14 +12,12 @@ export interface ShareCommandDeps {
   /** Ensure the sandbox is live, exit process if not. */
   ensureLive: (sandboxName: string) => Promise<void>;
   /**
-   * Check whether `remotePath` exists inside the sandbox via
-   * `openshell sandbox exec -n <name> -- test -e <remotePath>`. Returns true when
-   * the path exists; false when it is missing, when the sandbox is unreachable,
-   * or when the exec itself fails. Used by `share mount` as a pre-flight
-   * before invoking `sshfs`, which exits non-zero with empty stderr on a
-   * missing remote path and leaves the user with nothing actionable. See #3414.
+   * Check whether `remotePath` exists via a replay-safe, gateway-scoped gRPC
+   * probe with the reviewed read-only CLI fallback. Returns false when the path
+   * is missing or the sandbox cannot be queried. Used by `share mount` before
+   * invoking `sshfs`, which otherwise exits non-zero with empty stderr. See #3414.
    */
-  checkSandboxPathExists: (sandboxName: string, remotePath: string) => boolean;
+  checkSandboxPathExists: (sandboxName: string, remotePath: string) => Promise<boolean>;
   /** NVIDIA-green ANSI code (empty string if color disabled). */
   colorGreen: string;
   /** ANSI reset code (empty string if color disabled). */
@@ -37,22 +36,48 @@ export function buildShareCommandDeps(): ShareCommandDeps {
   const { ensureLiveSandboxOrExit } = require("./actions/sandbox/gateway-state") as {
     ensureLiveSandboxOrExit: (sandboxName: string) => Promise<unknown>;
   };
+  const { getSandboxTargetGatewayName } = require("./actions/sandbox/gateway-target") as {
+    getSandboxTargetGatewayName: (sandboxName: string) => string;
+  };
+  const { execSandboxReadOnlyWithGrpcFallback } =
+    require("./adapters/openshell/sandbox-control-routing") as typeof import("./adapters/openshell/sandbox-control-routing.js");
 
   return {
-    getSshConfig: (sandboxName: string) =>
-      captureOpenshell(["sandbox", "ssh-config", sandboxName], {
-        ignoreError: true,
-        timeout: OPENSHELL_PROBE_TIMEOUT_MS,
-      }),
+    getSshConfig: (sandboxName: string) => {
+      assertNoOpenShellGatewayEndpointOverride();
+      return captureOpenshell(
+        [
+          "--gateway",
+          getSandboxTargetGatewayName(sandboxName),
+          "sandbox",
+          "ssh-config",
+          sandboxName,
+        ],
+        {
+          ignoreError: true,
+          timeout: OPENSHELL_PROBE_TIMEOUT_MS,
+        },
+      );
+    },
     ensureLive: async (sandboxName: string) => {
       await ensureLiveSandboxOrExit(sandboxName);
     },
-    checkSandboxPathExists: (sandboxName: string, remotePath: string) => {
-      const result = captureOpenshell(
-        ["sandbox", "exec", "-n", sandboxName, "--", "test", "-e", remotePath],
-        { ignoreError: true, timeout: OPENSHELL_PROBE_TIMEOUT_MS },
-      );
-      return result.status === 0;
+    checkSandboxPathExists: async (sandboxName: string, remotePath: string) => {
+      try {
+        assertNoOpenShellGatewayEndpointOverride();
+        const result = await execSandboxReadOnlyWithGrpcFallback(
+          getSandboxTargetGatewayName(sandboxName),
+          {
+            sandboxName,
+            command: ["test", "-e", remotePath],
+            maxOutputBytes: 4096,
+            timeoutMs: OPENSHELL_PROBE_TIMEOUT_MS,
+          },
+        );
+        return result.status === 0 && !result.error && !result.signal;
+      } catch {
+        return false;
+      }
     },
     colorGreen: G,
     colorReset: R,

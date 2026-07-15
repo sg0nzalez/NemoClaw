@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import fs from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import Ajv2020 from "ajv/dist/2020.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -287,6 +288,41 @@ describe("PR review advisor", () => {
     expect(comment).not.toContain("rm -rf");
   });
 
+  it("reconciles trusted E2E coverage and selector tiers before publication", () => {
+    const normalize = (required: Array<Record<string, string>> = []) =>
+      normalizeReviewResult(
+        validResult({
+          e2e: {
+            coverage: {
+              requiredTests: [],
+              optionalTests: [{ id: "docs-validation", reason: "Documentation changed." }],
+              confidence: "low",
+            },
+            targets: { required, optional: [], confidence: "low" },
+          },
+        }),
+        metadata({ changedFiles: [] }),
+      ).e2e;
+    const optional = normalize();
+    expect(optional.coverage.optionalTests.map(({ id }) => id)).toEqual(["docs-validation"]);
+    expect(optional.targets.optional).toEqual([
+      expect.objectContaining({ id: "docs-validation", selectorType: "job", required: false }),
+    ]);
+    const required = normalize([
+      {
+        id: "docs-validation",
+        workflow: "e2e.yaml",
+        selectorType: "job",
+        reason: "The live documentation check is required.",
+      },
+    ]);
+    expect(required.coverage.requiredTests.map(({ id }) => id)).toEqual(["docs-validation"]);
+    expect(required.targets.required).toEqual([
+      expect.objectContaining({ id: "docs-validation", selectorType: "job", required: true }),
+    ]);
+    expect([required.coverage.optionalTests, required.targets.optional]).toEqual([[], []]);
+  });
+
   it("renders the reasons for recommended E2E coverage", () => {
     const result = normalizeReviewResult(
       validResult({
@@ -321,9 +357,8 @@ describe("PR review advisor", () => {
     expect(comment).toContain(
       "- <code>security-posture</code> — Selected from the trusted checked-in E2E coverage inventory.",
     );
-    expect(comment).toContain(
-      "**Why no selector is recommended:** No trusted E2E selector was selected.",
-    );
+    expect(comment).toContain("**Recommended selectors:** <code>security-posture</code>");
+    expect(comment).not.toContain("Why no selector is recommended");
 
     const noE2eResult = normalizeReviewResult(validResult(), metadata());
     const noE2eComment = buildComment({
@@ -668,7 +703,7 @@ diff --git a/test/plain-logic.test.ts b/test/plain-logic.test.ts
 
   it("skips symlinked changed test files in static test inventory", () => {
     const tmp = fs.mkdtempSync(path.join(ROOT, ".tmp-pr-advisor-symlink-"));
-    const outside = fs.mkdtempSync(path.join(ROOT, "..", ".tmp-pr-advisor-outside-"));
+    const outside = fs.mkdtempSync(path.join(tmpdir(), "nemoclaw-pr-advisor-outside-"));
     const outsideFile = path.join(outside, "secret.test.ts");
     const linkPath = path.join(tmp, "linked.test.ts");
     fs.writeFileSync(outsideFile, 'describe("secret outside test", () => {});\n');

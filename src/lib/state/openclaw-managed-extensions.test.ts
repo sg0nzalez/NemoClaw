@@ -1,16 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { execFileSync } from "node:child_process";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
-
 import { describe, expect, it } from "vitest";
 
 import {
-  buildRestoreCleanupCommand,
-  buildRestoreTarArgs,
   isAllowedStateSymlink,
   OPENCLAW_IMAGE_MANAGED_EXTENSION_DIRS,
   shouldPreserveOpenClawManagedExtensions,
@@ -60,43 +53,6 @@ describe("OpenClaw managed extension policy", () => {
         "extensions",
       ]),
     ).toBe(false);
-  });
-
-  it("excludes only image-managed extensions from the restore archive", () => {
-    const args = buildRestoreTarArgs(
-      "/tmp/rebuild backup",
-      ["workspace", "extensions"],
-      OPENCLAW_IMAGE_MANAGED_EXTENSION_DIRS,
-    );
-
-    expect(args.slice(0, 4)).toEqual(["-cf", "-", "-C", "/tmp/rebuild backup"]);
-    expect(args.flatMap((arg, index) => (arg === "--exclude" ? [args[index + 1]] : []))).toEqual(
-      EXPECTED_MANAGED_EXTENSIONS.map((name) => `extensions/${name}`),
-    );
-    expect(args.slice(-3)).toEqual(["--", "workspace", "extensions"]);
-    expect(args).not.toContain("extensions/telegram");
-  });
-
-  it("also excludes dynamically discovered fresh plugin directories", () => {
-    const args = buildRestoreTarArgs(
-      "/tmp/backup",
-      ["extensions"],
-      [...OPENCLAW_IMAGE_MANAGED_EXTENSION_DIRS, "weather"],
-    );
-
-    expect(args).toContain("extensions/weather");
-  });
-
-  it("leaves ordinary restore archives unfiltered", () => {
-    expect(buildRestoreTarArgs("/tmp/backup", ["workspace", "extensions"], [])).toEqual([
-      "-cf",
-      "-",
-      "-C",
-      "/tmp/backup",
-      "--",
-      "workspace",
-      "extensions",
-    ]);
   });
 });
 
@@ -167,94 +123,5 @@ describe("OpenClaw managed extension symlink policy", () => {
     ["extensions/nemoclaw/node_modules/.bin/json5", "/host/etc/passwd"],
   ])("rejects source and target traversal vectors: %s -> %s", (source, target) => {
     expect(isAllowedStateSymlink(source, target)).toBe(false);
-  });
-});
-
-describe("OpenClaw managed extension cleanup", () => {
-  it("removes ordinary state while preserving and validating managed extension directories", () => {
-    const command = buildRestoreCleanupCommand(
-      "/sandbox/.openclaw",
-      ["workspace", "extensions"],
-      OPENCLAW_IMAGE_MANAGED_EXTENSION_DIRS,
-      new Set(),
-    );
-
-    expect(command).toContain("rm -rf -- '/sandbox/.openclaw/workspace'");
-    expect(command).not.toContain("rm -rf -- '/sandbox/.openclaw/extensions'");
-    expect(command).toContain("mkdir -p -- '/sandbox/.openclaw/extensions'");
-    for (const extensionName of EXPECTED_MANAGED_EXTENSIONS) {
-      expect(command).toContain(`p='/sandbox/.openclaw/extensions/${extensionName}'`);
-      expect(command).toContain(`! -name '${extensionName}'`);
-    }
-    expect(command).toContain('[ -e "$p" ] || [ -L "$p" ]');
-    expect(command).toContain('[ ! -d "$p" ] || [ -L "$p" ]');
-    expect(command).toContain("-exec rm -rf -- {} +");
-  });
-
-  it("executes cleanup without deleting managed directories and rejects dangling symlinks", () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-managed-extensions-"));
-    const extensions = path.join(root, "extensions");
-    const managed = path.join(extensions, "nemoclaw");
-    const dangling = path.join(extensions, "brave");
-    const userExtension = path.join(extensions, "user-extension");
-    fs.mkdirSync(managed, { recursive: true });
-    fs.mkdirSync(userExtension);
-    fs.symlinkSync(path.join(root, "missing-target"), dangling);
-    const command = buildRestoreCleanupCommand(
-      root,
-      ["extensions"],
-      OPENCLAW_IMAGE_MANAGED_EXTENSION_DIRS,
-      new Set(),
-    );
-
-    expect(() => execFileSync("bash", ["-c", command], { stdio: "pipe" })).toThrow();
-    expect(fs.lstatSync(dangling).isSymbolicLink()).toBe(true);
-    fs.unlinkSync(dangling);
-    execFileSync("bash", ["-c", command], { stdio: "pipe" });
-
-    expect(fs.statSync(managed).isDirectory()).toBe(true);
-    expect(fs.existsSync(userExtension)).toBe(false);
-    fs.rmSync(root, { recursive: true, force: true });
-  });
-
-  it("requires dynamically discovered fresh plugin directories to remain real directories", () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-required-extension-"));
-    try {
-      const extensions = path.join(root, "extensions");
-      const weather = path.join(extensions, "weather");
-      const userExtension = path.join(extensions, "user-extension");
-      fs.mkdirSync(weather, { recursive: true });
-      fs.mkdirSync(userExtension);
-      const command = buildRestoreCleanupCommand(
-        root,
-        ["extensions"],
-        [...OPENCLAW_IMAGE_MANAGED_EXTENSION_DIRS, "weather"],
-        new Set(["weather"]),
-      );
-
-      execFileSync("bash", ["-c", command], { stdio: "pipe" });
-      expect(fs.statSync(weather).isDirectory()).toBe(true);
-      expect(fs.existsSync(userExtension)).toBe(false);
-
-      fs.rmSync(weather, { recursive: true, force: true });
-      expect(() => execFileSync("bash", ["-c", command], { stdio: "pipe" })).toThrow();
-
-      const target = path.join(root, "weather-target");
-      fs.mkdirSync(target);
-      fs.symlinkSync(target, weather);
-      expect(() => execFileSync("bash", ["-c", command], { stdio: "pipe" })).toThrow();
-    } finally {
-      fs.rmSync(root, { recursive: true, force: true });
-    }
-  });
-
-  it("removes complete state directories when managed preservation is disabled", () => {
-    expect(
-      buildRestoreCleanupCommand("/sandbox/.openclaw", ["workspace", "extensions"], [], new Set()),
-    ).toBe("rm -rf -- '/sandbox/.openclaw/workspace' && rm -rf -- '/sandbox/.openclaw/extensions'");
-  });
-
-  it("returns a no-op when no restore directories require cleanup", () => {
-    expect(buildRestoreCleanupCommand("/sandbox/.openclaw", [], [], new Set())).toBe(":");
   });
 });
