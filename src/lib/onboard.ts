@@ -260,7 +260,7 @@ const resumeProviderShim = require("./onboard/resume-provider-shim");
 const hermesProviderAuth = require("./hermes-provider-auth");
 const onboardHermesDashboard: typeof import("./onboard/hermes-dashboard") = require("./onboard/hermes-dashboard");
 const hermesAuth: typeof import("./onboard/hermes-auth") = require("./onboard/hermes-auth");
-const { warnIfLandlockUnsupported } = require("./onboard/landlock-warning");
+const { warnIfManagedAgentLandlockUnsupported } = require("./onboard/landlock-warning");
 const {
   HERMES_AUTH_METHOD_API_KEY,
   HERMES_AUTH_METHOD_OAUTH,
@@ -2965,11 +2965,7 @@ async function createSandboxWithBaseImageResolution(
 
   console.log(`  ✓ Sandbox '${sandboxName}' created`);
 
-  warnIfLandlockUnsupported({
-    compatibility: isManagedDcodeAgent ? "hard_requirement" : "best_effort",
-    dockerInfoFormat,
-    runCapture,
-  });
+  warnIfManagedAgentLandlockUnsupported(isManagedDcodeAgent, dockerInfoFormat, runCapture);
 
   // #4614: arm rollback only when the sandbox was not live before (never a recreate/rebuild).
   if (!liveExists) sandboxCancelRollback.arm(sandboxName);

@@ -53,3 +53,15 @@ export function warnIfLandlockUnsupported({
     /* best effort warning */
   }
 }
+
+export function warnIfManagedAgentLandlockUnsupported(
+  isManagedDcodeAgent: boolean,
+  dockerInfoFormat: (format: string, options?: { ignoreError?: boolean }) => string,
+  runCapture: (args: string[], options?: { ignoreError?: boolean }) => string,
+): void {
+  warnIfLandlockUnsupported({
+    compatibility: isManagedDcodeAgent ? "hard_requirement" : "best_effort",
+    dockerInfoFormat,
+    runCapture,
+  });
+}
