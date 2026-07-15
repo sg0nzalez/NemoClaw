@@ -141,6 +141,7 @@ export const parseLiveSandboxNamesMock = vi.fn(() => new Set(["alpha"]));
 export const registerSandboxMock = vi.fn();
 export const updateSandboxMock = vi.fn();
 export const restoreSandboxStateMock = vi.fn();
+export const runnerRunMock = vi.fn(() => ({ status: 0 }));
 export const runOpenshellMock = vi.fn((args: string[]) => {
   args[0] === "sandbox" && args[1] === "delete" && lifecycleMock.events.push("delete");
   return { status: 0, output: "" };
@@ -197,7 +198,7 @@ vi.mock("../../policy", () => ({
 
 vi.mock("../../runner", () => ({
   ROOT: "/repo",
-  run: vi.fn(() => ({ status: 0 })),
+  run: runnerRunMock,
   shellQuote: (value: string) => `'${value}'`,
   validateName: vi.fn((value: string) => value),
 }));

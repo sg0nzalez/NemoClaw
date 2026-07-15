@@ -42,7 +42,7 @@ import {
 } from "../../onboard/observability-policy-presets";
 import { normalizePolicyTierName } from "../../onboard/policy-tier-suppression";
 import * as policies from "../../policy";
-import { ROOT, run, validateName } from "../../runner";
+import { ROOT, validateName } from "../../runner";
 import { parseLiveSandboxNames } from "../../runtime-recovery";
 import { streamSandboxCreate } from "../../sandbox/create-stream";
 import * as shields from "../../shields";

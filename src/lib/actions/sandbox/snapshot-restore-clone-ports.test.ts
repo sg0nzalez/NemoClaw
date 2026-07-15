@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import fs from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -26,6 +27,72 @@ vi.mock("../../onboard/dashboard-port", () => ({
 
 beforeEach(f.resetSnapshotRestoreMocks);
 afterEach(f.cleanupSnapshotRestoreMocks);
+describe("runSandboxSnapshot restore: new Kubernetes destination", () => {
+  it("restores a Kubernetes clone after Ready without invoking the retired DNS proxy", async () => {
+    let registeredClone: f.SandboxRecord | null = null;
+    f.registerSandboxMock.mockImplementation(
+      (entry) => (registeredClone = entry as f.SandboxRecord),
+    );
+    f.getSandboxMock.mockImplementation((name) =>
+      name === "alpha"
+        ? {
+            name: "alpha",
+            agent: "openclaw",
+            gatewayName: "nemoclaw",
+            imageTag: "nemoclaw-alpha:test",
+            openshellDriver: "kubernetes",
+            provider: "nvidia-nim",
+            model: "nvidia/model-a",
+          }
+        : registeredClone,
+    );
+    f.captureOpenshellMock.mockImplementation((args) =>
+      f.openshellResponses(args, {
+        "sandbox exec": { status: 0, output: f.dcodeProbeOutput("idle") },
+        "sandbox list": { status: 0, output: "alpha Ready\nbeta Ready\n" },
+      }),
+    );
+    f.parseLiveSandboxNamesMock.mockReturnValue(new Set(["alpha"]));
+    f.getLatestBackupMock.mockReturnValue({ ...f.latestBackupFixture });
+    const actualExistsSync = fs.existsSync;
+    vi.spyOn(fs, "existsSync").mockImplementation(
+      (candidate) =>
+        String(candidate) === "/repo/scripts/setup-dns-proxy.sh" || actualExistsSync(candidate),
+    );
+    f.streamSandboxCreateMock.mockImplementationOnce(async (_command, _args, _env, options) => {
+      expect(options?.readyCheck?.()).toBe(true);
+      return { status: 0, output: "", sawProgress: true, forcedReady: false };
+    });
+    const { runSandboxSnapshot } = await import("./snapshot");
+
+    await runSandboxSnapshot("alpha", { kind: "restore", to: "beta" });
+
+    expect(f.streamSandboxCreateMock).toHaveBeenCalledOnce();
+    expect(f.streamSandboxCreateMock.mock.calls[0]?.[1]).toEqual(
+      expect.arrayContaining([
+        "sandbox",
+        "create",
+        "--name",
+        "beta",
+        "--from",
+        "nemoclaw-alpha:live",
+      ]),
+    );
+    expect(
+      f.captureOpenshellMock.mock.calls.filter(([args]) => args.join(" ") === "sandbox list"),
+    ).toHaveLength(3);
+    expect(f.registerSandboxMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "beta",
+        gatewayName: "nemoclaw",
+        openshellDriver: "kubernetes",
+      }),
+    );
+    expect(f.restoreSandboxStateMock).toHaveBeenCalledWith("beta", "/tmp/backup-alpha");
+    expect(f.runnerRunMock).not.toHaveBeenCalled();
+  });
+});
+
 describe("runSandboxSnapshot restore: clone dashboard port identity", () => {
   it("allocates the auto-created clone its own dashboard port instead of inheriting the source's (#6746)", async () => {
     let registeredClone: f.SandboxRecord | null = null;
