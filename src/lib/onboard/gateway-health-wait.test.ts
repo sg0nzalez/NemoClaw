@@ -14,11 +14,13 @@ import {
 function buildOptions(overrides: Partial<GatewayHealthWaitOptions> = {}): GatewayHealthWaitOptions {
   return {
     attachGatewayMetadataIfNeeded: vi.fn(),
+    gatewayClusterHealthcheckPassed: vi.fn(() => false),
     gatewayName: "nemoclaw",
     healthPollCount: 1,
     healthPollIntervalSeconds: 2,
     isGatewayHealthy: vi.fn(() => true),
     isGatewayHttpReady: vi.fn(async () => true),
+    repairGatewayBootstrapSecrets: vi.fn(() => ({ repaired: false })),
     runCaptureOpenshell: vi.fn((args: string[]) => {
       if (args[0] === "status") return "status";
       if (args[0] === "gateway" && args[1] === "info" && args[2] === "-g") return "named";
@@ -48,7 +50,6 @@ describe("waitForGatewayHealth", () => {
 
     expect(isGatewayHealthy).toHaveBeenCalledTimes(2);
     expect(isGatewayHttpReady).toHaveBeenCalledTimes(2);
-    expect(options.attachGatewayMetadataIfNeeded).toHaveBeenCalledTimes(2);
     expect(options.sleepSeconds).toHaveBeenCalledTimes(1);
     expect(options.sleepSeconds).toHaveBeenCalledWith(2);
   });
@@ -67,6 +68,30 @@ describe("waitForGatewayHealth", () => {
     expect(options.isGatewayHealthy).toHaveBeenCalledTimes(2);
     expect(options.isGatewayHttpReady).toHaveBeenCalledTimes(2);
     expect(options.sleepSeconds).toHaveBeenCalledTimes(2);
+  });
+
+  it("force-refreshes metadata after bootstrap secret repair", async () => {
+    const options = buildOptions({
+      gatewayClusterHealthcheckPassed: vi.fn(() => true),
+      repairGatewayBootstrapSecrets: vi.fn(() => ({ repaired: true })),
+    });
+
+    await expect(waitForGatewayHealth(options)).resolves.toBe(true);
+
+    expect(options.attachGatewayMetadataIfNeeded).toHaveBeenCalledOnce();
+    expect(options.attachGatewayMetadataIfNeeded).toHaveBeenCalledWith({ forceRefresh: true });
+    expect(options.gatewayClusterHealthcheckPassed).not.toHaveBeenCalled();
+  });
+
+  it("attaches metadata without force when cluster healthcheck passes without repair", async () => {
+    const options = buildOptions({
+      gatewayClusterHealthcheckPassed: vi.fn(() => true),
+    });
+
+    await expect(waitForGatewayHealth(options)).resolves.toBe(true);
+
+    expect(options.attachGatewayMetadataIfNeeded).toHaveBeenCalledOnce();
+    expect(options.attachGatewayMetadataIfNeeded).toHaveBeenCalledWith();
   });
 
   it("polls until the configured health deadline instead of stopping at the count cap (#3768)", async () => {
@@ -164,6 +189,7 @@ describe("waitForGatewayHealth", () => {
 
     await expect(waitForGatewayHealth(options)).resolves.toBe(false);
 
+    expect(options.repairGatewayBootstrapSecrets).not.toHaveBeenCalled();
     expect(options.attachGatewayMetadataIfNeeded).not.toHaveBeenCalled();
     expect(options.runCaptureOpenshell).not.toHaveBeenCalled();
     expect(options.isGatewayHealthy).not.toHaveBeenCalled();

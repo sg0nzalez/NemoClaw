@@ -17,6 +17,7 @@ export type CreatedSandboxFinalizationOptions = {
   restoreBackupPath: string | null;
   preUpgradeBackup: boolean;
   targetAgentType: string;
+  gatewayName: string;
   customImage?: boolean;
   discoverOpenClawImagePluginInstalls?: boolean;
   validateManagedDcode: boolean;
@@ -79,6 +80,7 @@ export async function finalizeCreatedSandbox(
       options.restoreBackupPath,
       {
         targetAgentType: options.targetAgentType,
+        gatewayName: options.gatewayName,
         ...(options.customImage ? { allowCustomImageWholeStateFileRestore: true } : {}),
         ...(freshOpenClawImagePluginInstalls !== undefined
           ? { freshOpenClawImagePluginInstalls }

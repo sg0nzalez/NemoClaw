@@ -146,4 +146,57 @@ describe("gateway bootstrap secret repair", () => {
       OPENSHELL_SSH_GATEWAY_PORT: "9443",
     });
   });
+
+  it("repairs the client CA and client TLS secrets together", () => {
+    const { getGatewayBootstrapRepairPlan } = loadOnboard();
+    expect(getGatewayBootstrapRepairPlan(["openshell-client-tls"])).toEqual({
+      missingSecrets: ["openshell-client-tls"],
+      needsRepair: true,
+      needsServerTls: false,
+      needsClientBundle: true,
+      needsHandshake: false,
+    });
+  });
+
+  it("ignores unknown secret names when planning repairs", () => {
+    const { getGatewayBootstrapRepairPlan } = loadOnboard();
+
+    expect(
+      getGatewayBootstrapRepairPlan([
+        "openshell-client-tls",
+        "noise",
+        " openshell-server-tls ",
+        "",
+      ]),
+    ).toEqual({
+      missingSecrets: ["openshell-client-tls", "openshell-server-tls"],
+      needsRepair: true,
+      needsServerTls: true,
+      needsClientBundle: true,
+      needsHandshake: false,
+    });
+  });
+
+  it("emits a script that creates all missing bootstrap secrets", () => {
+    const { buildGatewayBootstrapSecretsScript } = loadOnboard();
+    const script = buildGatewayBootstrapSecretsScript([
+      "openshell-server-tls",
+      "openshell-server-client-ca",
+      "openshell-client-tls",
+      "openshell-ssh-handshake",
+    ]);
+
+    expect(script).toContain("openshell-server-tls");
+    expect(script).toContain("openshell-server-client-ca");
+    expect(script).toContain("openshell-client-tls");
+    expect(script).toContain("openshell-ssh-handshake");
+    expect(script).toContain("CN=openshell-client-ca");
+    expect(script).toContain("CN=openshell-client");
+    expect(script).toContain("subjectAltName=DNS:openshell");
+  });
+
+  it("skips secret generation when nothing is missing", () => {
+    const { buildGatewayBootstrapSecretsScript } = loadOnboard();
+    expect(buildGatewayBootstrapSecretsScript([]).trim()).toBe("exit 0");
+  });
 });

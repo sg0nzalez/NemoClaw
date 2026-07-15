@@ -99,6 +99,11 @@ const {
 const onboardDashboard: typeof import("./onboard/dashboard") = require("./onboard/dashboard");
 const dashboardRuntime: typeof import("./onboard/dashboard-runtime") = require("./onboard/dashboard-runtime");
 const {
+  buildGatewayBootstrapSecretsScript,
+  createGatewayBootstrapRepairHelpers,
+  getGatewayBootstrapRepairPlan,
+}: typeof import("./onboard/gateway-bootstrap") = require("./onboard/gateway-bootstrap");
+const {
   buildDirectGpuPolicyYaml,
   buildDirectSandboxGpuProofCommands,
 }: typeof import("./onboard/initial-policy") = require("./onboard/initial-policy");
@@ -168,6 +173,7 @@ const { getNameValidationGuidance } = nameValidation;
 const docker: typeof import("./adapters/docker") = require("./adapters/docker");
 const {
   dockerContainerInspectFormat,
+  dockerExecArgv,
   dockerInfoFormat,
   dockerInspect,
   dockerRemoveVolumesByPrefix,
@@ -1374,6 +1380,10 @@ function getGatewayHealthWaitConfig(_startStatus = 0, containerState = "") {
   };
 }
 
+function buildGatewayClusterExecArgv(script: string): string[] {
+  return dockerExecArgv(getGatewayClusterContainerName(GATEWAY_NAME), ["sh", "-lc", script]);
+}
+
 function captureProcessArgs(pid: number): string {
   return runCapture(["ps", "-p", String(pid), "-o", "args="], {
     ignoreError: true,
@@ -1387,6 +1397,13 @@ function checkGatewayPortAvailable() {
 function getGatewayLocalEndpoint(): string {
   return dockerDriverGatewayEnv.getGatewayHttpsEndpoint(GATEWAY_PORT);
 }
+
+const { gatewayClusterHealthcheckPassed, repairGatewayBootstrapSecrets } =
+  createGatewayBootstrapRepairHelpers({
+    buildGatewayClusterExecArgv,
+    run,
+    runCapture,
+  });
 
 function registerDockerDriverGatewayEndpoint(): boolean {
   const selectExisting = runQuietOpenshell(["gateway", "select", GATEWAY_NAME]);
@@ -1853,12 +1870,14 @@ async function startGatewayWithOptions(
         if (
           await waitForGatewayHealth({
             attachGatewayMetadataIfNeeded,
+            gatewayClusterHealthcheckPassed,
             gatewayName: GATEWAY_NAME,
             healthPollCount: healthWait.count,
             healthPollIntervalSeconds: healthWait.interval,
             isGatewayHealthy,
             isGatewayHttpReady: (signal) =>
               isGatewayHttpReady(undefined, undefined, undefined, signal),
+            repairGatewayBootstrapSecrets,
             runCaptureOpenshell,
             sleepSeconds,
           })
@@ -2215,7 +2234,12 @@ async function recoverGatewayRuntime() {
     ? recoveryWait.interval
     : envInt("NEMOCLAW_HEALTH_POLL_INTERVAL", 2);
   for (let i = 0; i < recoveryPollCount; i++) {
-    attachGatewayMetadataIfNeeded();
+    const repairResult = repairGatewayBootstrapSecrets();
+    if (repairResult.repaired) {
+      attachGatewayMetadataIfNeeded({ forceRefresh: true });
+    } else if (gatewayClusterHealthcheckPassed()) {
+      attachGatewayMetadataIfNeeded();
+    }
     status = runCaptureOpenshell(["status"], { ignoreError: true });
     if (status.includes("Connected") && isSelectedGateway(status) && (await isGatewayHttpReady())) {
       process.env.OPENSHELL_GATEWAY = GATEWAY_NAME;
@@ -2852,7 +2876,6 @@ async function createSandboxWithBaseImageResolution(
     finalHermesDashboardState = hermesDashboardForwarding.resolveStateForPort(actualDashboardPort);
     hermesDashboardForwarding.ensureForState(finalHermesDashboardState, sandboxName, true);
   }
-
   // openshell tags images with seconds; buildId is ms. Parse actual tag from output. Fixes #2672.
   const resolvedImageTag =
     registryImageRef ??
@@ -2866,6 +2889,7 @@ async function createSandboxWithBaseImageResolution(
       restoreBackupPath,
       preUpgradeBackup: pendingStateRestoreBackupPath !== null,
       targetAgentType: agent?.name ?? "openclaw",
+      gatewayName: GATEWAY_NAME,
       customImage: Boolean(fromDockerfile),
       discoverOpenClawImagePluginInstalls: customOpenClawImage,
       validateManagedDcode: isManagedDcodeAgent,
@@ -2875,7 +2899,7 @@ async function createSandboxWithBaseImageResolution(
     },
     // biome-ignore format: keep src/lib/onboard.ts within the growth guardrail.
     {
-      discoverFreshOpenClawImagePluginInstalls: (name) => openClawPluginRestore.discoverFreshOpenClawImagePluginInstalls(name, GATEWAY_NAME, agent?.configPaths.dir), restoreRecreatedSandboxState: (name, backupPath, options) => sandboxState.restoreRecreatedSandboxState(name, backupPath, { ...options, gatewayName: GATEWAY_NAME }),
+      discoverFreshOpenClawImagePluginInstalls: (name) => openClawPluginRestore.discoverFreshOpenClawImagePluginInstalls(name, GATEWAY_NAME, agent?.configPaths.dir), restoreRecreatedSandboxState: (name, backupPath, options) => sandboxState.restoreRecreatedSandboxState(name, backupPath, options),
       getDcodeSelectionDrift: (name, selectedProvider, selectedModel, selectedApi) =>
         getDcodeSelectionDrift(name, selectedProvider, selectedModel, selectedApi, {
           runCaptureOpenshell,
@@ -4673,6 +4697,7 @@ async function runOnboard(opts: OnboardOptions = {}): Promise<void> {
 module.exports = {
   buildOrphanedSandboxRollbackMessage,
   buildProviderArgs,
+  buildGatewayBootstrapSecretsScript,
   buildCompatibleEndpointSandboxSmokeCommand,
   buildCompatibleEndpointSandboxSmokeScript,
   buildSandboxConfigSyncScript,
@@ -4691,6 +4716,7 @@ module.exports = {
   areRequiredDockerDriverBinariesPresent,
   ensureOpenshellForOnboard,
   shouldRequireDockerDriverEnv,
+  getGatewayBootstrapRepairPlan,
   getGatewayLocalEndpoint,
   getGatewayStartEnv,
   getDockerDriverGatewayEnv,

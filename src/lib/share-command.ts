@@ -13,9 +13,8 @@ import { spawnSync } from "child_process";
 import fs from "fs";
 import os from "os";
 import path from "path";
-
-import { buildShareCommandDeps } from "./share-command-deps";
 import type { ShareCommandDeps } from "./share-command-deps";
+import { buildShareCommandDeps } from "./share-command-deps";
 
 export class ShareCommandError extends Error {
   readonly lines: readonly string[];
@@ -74,12 +73,12 @@ export function defaultShareMountDir(sandboxName: string): string {
  * Exported so the behavior is testable without driving the full sshfs
  * lifecycle. See #3414.
  */
-export function assertSandboxPathExistsOrExit(
+export async function assertSandboxPathExistsOrExit(
   deps: ShareCommandDeps,
   sandboxName: string,
   remotePath: string,
-): void {
-  if (deps.checkSandboxPathExists(sandboxName, remotePath)) return;
+): Promise<void> {
+  if (await deps.checkSandboxPathExists(sandboxName, remotePath)) return;
   // The probe returns false for both "path is missing" and "exec itself
   // failed" (transient gRPC, sandbox just restarted, etc.), so phrase the
   // headline as a verification failure rather than a definitive claim that
@@ -210,7 +209,7 @@ export async function runShareMount(
   await deps.ensureLive(sandboxName);
 
   // Pre-flight: confirm the remote source path actually exists. See #3414.
-  assertSandboxPathExistsOrExit(deps, sandboxName, remotePath);
+  await assertSandboxPathExistsOrExit(deps, sandboxName, remotePath);
 
   // Get SSH config
   const sshConfigResult = deps.getSshConfig(sandboxName);

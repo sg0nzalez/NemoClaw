@@ -201,11 +201,11 @@ describe("sandbox skill action orchestration", () => {
     expect(skillInstall.uploadDirectory).not.toHaveBeenCalled();
   });
 
-  it("continues skill install when the existence probe is unknown because upload plus verify are authoritative", async () => {
+  it("fails skill install before upload when the existence probe is inconclusive", async () => {
     const skillDir = makeSkillDir();
     skillInstall.checkExisting.mockResolvedValue(null);
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
 
     try {
       await installSandboxSkill("alpha", { command: "install", path: skillDir });
@@ -214,10 +214,26 @@ describe("sandbox skill action orchestration", () => {
     }
 
     expect(error).toHaveBeenCalledWith(
-      expect.stringContaining(
-        "Warning: could not check sandbox for existing skill — treating as fresh install.",
-      ),
+      "  Could not check if skill 'demo-skill' exists — sandbox may be unreachable. No files were uploaded.",
     );
+    expect(skillInstall.uploadDirectory).not.toHaveBeenCalled();
+    expect(skillInstall.postInstall).not.toHaveBeenCalled();
+    expect(skillInstall.verifyInstall).not.toHaveBeenCalled();
+    expect(closeControl).toHaveBeenCalledOnce();
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("installs when the existence probe confirms the skill is absent", async () => {
+    const skillDir = makeSkillDir();
+    skillInstall.checkExisting.mockResolvedValue(false);
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    try {
+      await installSandboxSkill("alpha", { command: "install", path: skillDir });
+    } finally {
+      fs.rmSync(skillDir, { recursive: true, force: true });
+    }
+
     expect(skillInstall.uploadDirectory).toHaveBeenCalledWith(
       { control, sandboxName: "alpha" },
       skillDir,

@@ -9,7 +9,11 @@ vi.mock("../adapters/openshell/sandbox-control-routing", () => ({
   execSandboxReadOnlyWithGrpcFallback: vi.fn(),
 }));
 
-import { discoverFreshOpenClawPluginExtensionDirs } from "./openclaw-plugin-restore";
+import {
+  discoverFreshOpenClawPluginExtensionDirs,
+  OPENCLAW_PLUGIN_INDEX_LEGACY_PY,
+  OPENCLAW_PLUGIN_INDEX_SQLITE_PY,
+} from "./openclaw-plugin-restore";
 
 const OPENCLAW_DIR = "/sandbox/.openclaw";
 const MAX_PLUGIN_REGISTRY_BYTES = 1024 * 1024;
@@ -55,6 +59,8 @@ describe("fresh OpenClaw plugin registry reads", () => {
     expect(execMock).toHaveBeenCalledOnce();
     expect(execMock.mock.calls[0]?.[1]).toEqual(
       expect.objectContaining({
+        command: ["sh", "-c", expect.stringContaining('python3 -I - "$db" "$cfg"')],
+        stdin: OPENCLAW_PLUGIN_INDEX_SQLITE_PY,
         maxOutputBytes: MAX_PLUGIN_REGISTRY_BYTES,
         timeoutMs: 30_000,
       }),
@@ -91,6 +97,9 @@ describe("fresh OpenClaw plugin registry reads", () => {
     });
     expect(parseSpy).not.toHaveBeenCalled();
     expect(execMock).toHaveBeenCalledTimes(2);
+    expect(execMock.mock.calls[1]?.[1]).toEqual(
+      expect.objectContaining({ stdin: OPENCLAW_PLUGIN_INDEX_LEGACY_PY }),
+    );
     for (const call of execMock.mock.calls) {
       expect(call[1]).toEqual(
         expect.objectContaining({

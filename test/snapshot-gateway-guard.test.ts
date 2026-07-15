@@ -10,7 +10,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-
+import { writeOpenShellSandboxDescriptorPreload } from "./helpers/openshell-sandbox-descriptor-preload";
 import { execTimeout } from "./helpers/timeouts";
 
 const CLI = path.join(import.meta.dirname, "..", "bin", "nemoclaw.js");
@@ -121,6 +121,7 @@ function makeHealthyVmGatewayEnv(prefix: string): Record<string, string> {
   // VM-driver snapshots should trust gateway metadata, not the legacy cluster
   // container probe.
   writeExecutable(path.join(localBin, "openshell"), [
+    'if [ "$1 $2 $3 $4" = "--gateway nemoclaw sandbox exec" ]; then shift 2; fi',
     'case "$1 $2" in',
     '  "gateway info") printf "Gateway Info\\n\\nGateway: nemoclaw\\nGateway endpoint: https://127.0.0.1:8080/\\n"; exit 0 ;;',
     '  "sandbox list") printf "NAME STATUS\\nalpha Ready\\n"; exit 0 ;;',
@@ -155,6 +156,10 @@ function makeVmRestoreToEnv(
     openshellDriver: "vm",
     ...entry,
   });
+  const descriptorNodeOptions = writeOpenShellSandboxDescriptorPreload(
+    home,
+    typeof entry.imageTag === "string" ? entry.imageTag : "",
+  );
   const gatewayDir = path.join(home, ".config", "openshell", "gateways", "nemoclaw");
   fs.mkdirSync(gatewayDir, { recursive: true });
   fs.writeFileSync(
@@ -168,13 +173,14 @@ function makeVmRestoreToEnv(
 
   const cloneReadyMarker = path.join(home, "clone-1-ready");
   writeExecutable(path.join(localBin, "openshell"), [
+    'if [ "$1 $2 $3 $4" = "--gateway nemoclaw sandbox exec" ]; then shift 2; fi',
     'case "$1 $2" in',
     '  "gateway info") printf "Gateway Info\\n\\nGateway: nemoclaw\\nGateway endpoint: https://127.0.0.1:8080/\\n"; exit 0 ;;',
     '  "sandbox get") printf "{\\"name\\":\\"%s\\"}\\n" "$3"; exit 0 ;;',
     `  "sandbox list") if [ -f ${JSON.stringify(cloneReadyMarker)} ]; then printf "NAME STATUS\\nalpha Ready\\nclone-1 Ready\\n"; else printf "NAME STATUS\\nalpha Ready\\n"; fi; exit 0 ;;`,
     // Restore writes config bytes on stdin. Consume them before exiting so the
     // fake CLI cannot race its caller into a Linux-only EPIPE.
-    '  "sandbox exec") case "$*" in *NEMOCLAW_DCODE_PROBE*) printf "NEMOCLAW_DCODE_PROBE=no-runtime\\n" ;; *installed_plugin_index*) printf "{\\"version\\":1,\\"installRecords\\":{},\\"loadPaths\\":[]}" ;; *openclaw.json*) printf "{\\"gateway\\":{\\"auth\\":{\\"token\\":\\"fresh\\"}}}" ;; esac; cat >/dev/null; exit 0 ;;',
+    '  "sandbox exec") case "$*" in *NEMOCLAW_DCODE_PROBE*) printf "NEMOCLAW_DCODE_PROBE=no-runtime\\n" ;; *installed_plugin_index*) printf "{\\"version\\":1,\\"installRecords\\":{},\\"loadPaths\\":[]}" ;; *"-- python3 -I - /tmp/nemoclaw-state-restore-"*"/sandbox/.openclaw openclaw.json copy"*) printf "STATE_FILE_OK\\n" ;; *openclaw.json*) printf "{\\"gateway\\":{\\"auth\\":{\\"token\\":\\"fresh\\"}}}" ;; esac; cat >/dev/null; exit 0 ;;',
     `  "sandbox create") touch ${JSON.stringify(cloneReadyMarker)}; printf "created clone-1\\n"; exit 0 ;;`,
     "esac",
     'if [ "$1" = "status" ]; then exit 0; fi',
@@ -192,6 +198,7 @@ function makeVmRestoreToEnv(
 
   return {
     HOME: home,
+    NODE_OPTIONS: descriptorNodeOptions,
     PATH: `${localBin}:${process.env.PATH ?? ""}`,
     XDG_CONFIG_HOME: path.join(home, ".config"),
   };
@@ -222,7 +229,7 @@ describe("snapshot VM-driver gateway guard", () => {
     expect(r.out).not.toContain("Failed to query live sandbox state");
   });
 
-  it("snapshot restore --to uses the registered imageTag for VM-driver auto-create", () => {
+  it("snapshot restore --to uses the live descriptor image for VM-driver auto-create", () => {
     const env = makeVmRestoreToEnv("nemoclaw-snap-vm-gw-restore-to-");
 
     const seed = runCli("alpha snapshot create --name baseline", env);
@@ -236,7 +243,7 @@ describe("snapshot VM-driver gateway guard", () => {
     expect(r.out).toContain("openshell/sandbox-from:fast-path-test");
   }, 15000);
 
-  it("snapshot restore --to fails closed for VM-driver entries missing imageTag", () => {
+  it("snapshot restore --to fails closed when the live descriptor has no image", () => {
     const env = makeVmRestoreToEnv("nemoclaw-snap-vm-gw-restore-to-missing-image-", {
       imageTag: null,
     });
@@ -246,7 +253,7 @@ describe("snapshot VM-driver gateway guard", () => {
 
     const r = runCli("alpha snapshot restore baseline --to clone-1", env);
     expect(r.code).toBe(1);
-    expect(r.out).toContain("Cannot resolve image");
+    expect(r.out).toContain("invalid image");
     expect(r.out).not.toContain("kubectl-must-not-run");
   }, 15000);
 });
