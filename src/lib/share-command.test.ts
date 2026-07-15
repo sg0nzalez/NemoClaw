@@ -196,6 +196,39 @@ describe("ShareCommand mount/status actions", () => {
     );
   });
 
+  it("does not read SSH config or start sshfs when the sandbox path cannot be verified", async () => {
+    const deps = makeDeps({
+      checkSandboxPathExists: vi.fn(async () => false),
+    });
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((_code?: number) => {
+      throw new Error("__test_exit__");
+    }) as never);
+    spawnSyncMock.mockImplementation((cmd: string, args: string[]) => {
+      if (cmd === "sh" && args[1] === "command -v sshfs") {
+        return { status: 0, stdout: "/usr/bin/sshfs\n", stderr: "" };
+      }
+      if (cmd === "mountpoint") return { status: 1, stdout: "", stderr: "" };
+      if (cmd === "mount") return { status: 0, stdout: "", stderr: "" };
+      return { status: 1, stdout: "", stderr: "" };
+    });
+
+    await expect(
+      runShareMount(
+        {
+          sandboxName: "alpha",
+          remotePath: "/missing",
+          localMount: "/tmp/nemoclaw-share-missing-path",
+        },
+        deps,
+      ),
+    ).rejects.toThrow("__test_exit__");
+
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(deps.checkSandboxPathExists).toHaveBeenCalledWith("alpha", "/missing");
+    expect(deps.getSshConfig).not.toHaveBeenCalled();
+    expect(spawnSyncMock.mock.calls.map(([command]) => command)).not.toContain("sshfs");
+  });
+
   it("surfaces SFTP-specific remediation when sshfs fails after sandbox validation", async () => {
     const deps = makeDeps();
     const localMount = fs.mkdtempSync(path.join(process.cwd(), ".tmp-share-sftp-"));
