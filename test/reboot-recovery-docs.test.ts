@@ -20,12 +20,13 @@ function section(markdown: string, heading: string): string {
 }
 
 describe("reboot recovery documentation", () => {
-  it("routes Linux users through the managed OpenShell service before onboard resume", () => {
+  it("routes macOS and Linux through managed OpenShell services before onboard resume", () => {
     const reboot = section(troubleshooting, "### Reconnect after a host reboot");
 
+    expect(reboot).toContain("brew services restart openshell");
     expect(reboot).toContain("openshell-gateway.service");
     expect(reboot).toContain("systemctl --user restart openshell-gateway");
-    expect(reboot).toContain("macOS, non-systemd Linux hosts");
+    expect(reboot).toContain("non-systemd Linux hosts");
     expect(reboot.indexOf("systemctl --user restart openshell-gateway")).toBeLessThan(
       reboot.indexOf("$$nemoclaw onboard --resume"),
     );
