@@ -361,6 +361,40 @@ main "$@"
   });
 
   it.each([
+    ["Unsupported DGX Station OS", { NEMOCLAW_NO_EXPRESS: "1" }],
+    ["Unsupported DGX Station generation", { NEMOCLAW_PROVIDER: "openai" }],
+  ])("allows an explicit non-express path on %s", (platform, overrides) => {
+    const result = spawnSync(
+      "bash",
+      [
+        "--noprofile",
+        "--norc",
+        "-c",
+        `
+source "$INSTALLER_UNDER_TEST" >/dev/null
+validate_express_platform_boundary "$EXPRESS_PLATFORM"
+printf 'NON_EXPRESS_ALLOWED\n'
+`,
+      ],
+      {
+        cwd: path.join(import.meta.dirname, ".."),
+        encoding: "utf-8",
+        env: {
+          HOME: fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-express-platform-override-")),
+          PATH: TEST_SYSTEM_PATH,
+          INSTALLER_UNDER_TEST: INSTALLER_PAYLOAD,
+          EXPRESS_PLATFORM: platform,
+          ...overrides,
+        },
+      },
+    );
+    const output = `${result.stdout}${result.stderr}`;
+
+    expect(result.status, output).toBe(0);
+    expect(output).toContain("NON_EXPRESS_ALLOWED");
+  });
+
+  it.each([
     ["NEMOCLAW_NO_EXPRESS", "1", /cannot be combined with NEMOCLAW_NO_EXPRESS=1/],
     ["NON_INTERACTIVE", "1", /cannot be combined with --non-interactive/],
     ["NEMOCLAW_PROVIDER", "install-vllm", /conflicts with NEMOCLAW_PROVIDER=install-vllm/],
@@ -442,6 +476,47 @@ detect_express_platform
       expect(result.status, `${result.stdout}${result.stderr}`).toBe(0);
       expect(result.stdout).toBe("");
     }
+  });
+
+  it("classifies older DGX Station generations as unsupported", () => {
+    const result = detectExpressPlatformForProductName("NVIDIA DGX Station A100");
+
+    expect(result.status, `${result.stdout}${result.stderr}`).toBe(0);
+    expect(result.stdout).toBe("Unsupported DGX Station generation");
+  });
+
+  it.each([
+    "Unsupported DGX Station OS",
+    "Unsupported DGX Station generation",
+  ])("rejects %s before the express prompt", (platform) => {
+    const result = spawnSync(
+      "bash",
+      [
+        "--noprofile",
+        "--norc",
+        "-c",
+        `
+source "$INSTALLER_UNDER_TEST" >/dev/null
+validate_express_platform_boundary "$EXPRESS_PLATFORM"
+printf 'PROMPT_REACHED\n'
+`,
+      ],
+      {
+        cwd: path.join(import.meta.dirname, ".."),
+        encoding: "utf-8",
+        env: {
+          HOME: fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-express-platform-reject-")),
+          PATH: TEST_SYSTEM_PATH,
+          INSTALLER_UNDER_TEST: INSTALLER_PAYLOAD,
+          EXPRESS_PLATFORM: platform,
+        },
+      },
+    );
+    const output = `${result.stdout}${result.stderr}`;
+
+    expect(result.status, output).not.toBe(0);
+    expect(output).toMatch(/outside the validated Station/);
+    expect(output).not.toContain("PROMPT_REACHED");
   });
 
   it("maps Windows WSL express install to Windows-host Ollama", () => {

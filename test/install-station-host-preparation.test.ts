@@ -11,6 +11,7 @@ import { INSTALLER_PAYLOAD, TEST_SYSTEM_PATH } from "./helpers/installer-sourced
 const REPO_ROOT = path.resolve(import.meta.dirname, "..");
 const PUBLIC_BOOTSTRAP = path.join(REPO_ROOT, "install.sh");
 const STATION_PREPARE = path.join(REPO_ROOT, "scripts", "prepare-dgx-station-host.sh");
+const STATION_REVISION = "a".repeat(40);
 const STATION_DOCS = [
   path.join(REPO_ROOT, "docs", "get-started", "prerequisites.mdx"),
   path.join(REPO_ROOT, "docs", "get-started", "quickstart.mdx"),
@@ -41,7 +42,13 @@ describe("DGX Station host preparation", () => {
   it("keeps documented Station pins and Deferred status aligned", () => {
     const helper = fs.readFileSync(STATION_PREPARE, "utf-8");
     const docs = STATION_DOCS.map((doc) => fs.readFileSync(doc, "utf-8"));
-    const pinnedValues = ["DRIVER_VERSION", "DOCKER_VERSION", "TOOLKIT_VERSION"].map((name) => {
+    const pinnedValues = [
+      "DRIVER_VERSION",
+      "DOCKER_VERSION",
+      "TOOLKIT_VERSION",
+      "FACTORY_DKMS_VERSION",
+      "TARGET_DKMS_VERSION",
+    ].map((name) => {
       const value = helper.match(new RegExp(`readonly ${name}="([^"]+)"`))?.[1];
       expect(value, `${name} must remain declared in the Station helper`).toBeTruthy();
       return value as string;
@@ -74,6 +81,50 @@ package_state 'docker-ce=5:29.6.1-1~ubuntu.24.04~noble'
     expect(result.stdout.trim()).toBe(expected);
   });
 
+  it.each([
+    ["Dell Pro Max with Station GB300", true],
+    ["NVIDIA DGX Station GB300", true],
+    ["NVIDIA DGX Station A100", false],
+    ["Dell Pro Max with Station GB200", false],
+    ["Dell Pro Max with GB300", false],
+  ])("accepts only Station GB300 DMI: %s", (product, accepted) => {
+    const { result } = runSourced(STATION_PREPARE, `is_station_product "$PRODUCT"`, {
+      PRODUCT: product,
+    });
+
+    expect(result.status === 0).toBe(accepted);
+  });
+
+  it("allows only the reviewed factory DKMS transition", () => {
+    const approved = runSourced(
+      STATION_PREPARE,
+      `
+installed_version() {
+  if [[ "$1" == "dkms" ]]; then printf '%s' "$DKMS_ACTUAL"; fi
+}
+package_state 'dkms=1:3.4.0-1ubuntu1'
+assert_no_package_mismatches
+`,
+      { DKMS_ACTUAL: "3.0.11-1ubuntu13" },
+    );
+    expect(approved.result.status, approved.output).toBe(0);
+    expect(approved.output).toContain("approved-transition");
+    expect(approved.output).toContain("status=approved_transition");
+
+    const arbitrary = runSourced(
+      STATION_PREPARE,
+      `
+installed_version() {
+  if [[ "$1" == "dkms" ]]; then printf '%s' "$DKMS_ACTUAL"; fi
+}
+assert_no_package_mismatches
+`,
+      { DKMS_ACTUAL: "3.2.0-1" },
+    );
+    expect(arbitrary.result.status, arbitrary.output).not.toBe(0);
+    expect(arbitrary.output).toMatch(/dkms status=mismatch/);
+  });
+
   it("refuses to change an existing mismatched prerequisite", () => {
     const { result, output } = runSourced(
       STATION_PREPARE,
@@ -87,7 +138,42 @@ assert_no_package_mismatches
 
     expect(result.status, output).not.toBe(0);
     expect(output).toMatch(/docker-ce status=mismatch/);
-    expect(output).toMatch(/refusing to upgrade or downgrade them automatically/);
+    expect(output).toMatch(/refusing to change them automatically/);
+  });
+
+  it("warns about unrelated failed units but blocks failed runtime units", () => {
+    const unrelated = runSourced(
+      STATION_PREPARE,
+      `
+systemctl() { printf 'cloud-init.service loaded failed failed Cloud init\n'; }
+check_failed_units
+`,
+    );
+    expect(unrelated.result.status, unrelated.output).toBe(0);
+    expect(unrelated.output).toMatch(/outside the Station preparation transaction/);
+
+    const critical = runSourced(
+      STATION_PREPARE,
+      `
+systemctl() { printf 'docker.service loaded failed failed Docker\n'; }
+check_failed_units
+`,
+    );
+    expect(critical.result.status, critical.output).not.toBe(0);
+    expect(critical.output).toMatch(/failed preparation-critical unit: docker.service/);
+  });
+
+  it("fails closed when failed-service inspection is unavailable", () => {
+    const { result, output } = runSourced(
+      STATION_PREPARE,
+      `
+systemctl() { return 1; }
+check_failed_units
+`,
+    );
+
+    expect(result.status, output).not.toBe(0);
+    expect(output).toMatch(/Unable to inspect failed system services/);
   });
 
   it("reuses exact packages and proceeds directly to runtime probes", () => {
@@ -114,7 +200,7 @@ run_apply
     expect(output).toContain("APPLY_RESULT=COMPLETE");
   });
 
-  it("installs only missing packages and returns the reboot-required contract", () => {
+  it("applies the reviewed factory DKMS transition and returns the reboot-required contract", () => {
     const { result, output } = runSourced(
       STATION_PREPARE,
       `
@@ -122,9 +208,12 @@ common_preflight() { :; }
 require_command() { :; }
 acquire_sudo() { :; }
 all_packages_exact() { return 1; }
-assert_no_package_mismatches() { printf 'NO_MISMATCHES\n'; }
+installed_version() {
+  if [[ "$1" == "dkms" ]]; then printf '3.0.11-1ubuntu13'; fi
+}
 install_packages() { printf 'INSTALL_PACKAGES\n'; }
 ensure_docker_group() { printf 'ENSURE_DOCKER_GROUP\n'; }
+check_no_workloads() { printf 'RECHECK_ALL_WORKLOADS\n'; }
 write_install_boot_marker() { printf 'WRITE_BOOT_MARKER\n'; }
 sudo() { printf 'SUDO %s\n' "$*"; }
 run_apply
@@ -132,9 +221,10 @@ run_apply
     );
 
     expect(result.status, output).toBe(10);
-    expect(output).toContain("NO_MISMATCHES");
+    expect(output).toContain("package=dkms status=approved_transition");
     expect(output).toContain("INSTALL_PACKAGES");
     expect(output).toContain("ENSURE_DOCKER_GROUP");
+    expect(output).toContain("RECHECK_ALL_WORKLOADS");
     expect(output).toContain("WRITE_BOOT_MARKER");
     expect(output).toContain(
       "systemctl enable containerd.service docker.service nvidia-cdi-refresh.path nvidia-cdi-refresh.service",
@@ -149,6 +239,7 @@ run_apply
 configure_repositories() { printf 'CONFIGURE_REPOSITORIES\n'; }
 validate_package_availability() { printf 'VALIDATE_PACKAGES\n'; }
 simulate_install() { printf 'SIMULATE_INSTALL\n'; }
+check_no_workloads() { printf 'RECHECK_ALL_WORKLOADS\n'; }
 package_is_exact() { return 0; }
 sudo() { printf 'SUDO %s\n' "$*"; }
 install_packages
@@ -158,6 +249,7 @@ install_packages
     expect(result.status, output).toBe(0);
     expect(output).toContain("apt-get update");
     expect(output).toContain("apt-get install -y --no-install-recommends");
+    expect(output).toContain("RECHECK_ALL_WORKLOADS");
     for (const spec of [
       "libnvidia-container-tools=1.19.1-1",
       "libnvidia-container1=1.19.1-1",
@@ -173,6 +265,7 @@ install_packages
     const { result, output } = runSourced(
       STATION_PREPARE,
       `
+check_no_workloads() { printf 'RECHECK_ALL_WORKLOADS\n'; }
 sudo() { printf 'SUDO %s\n' "$*"; }
 run_cdi_test_sudo() { printf 'CDI_TEST\n'; return 0; }
 refresh_cdi() { printf 'REFRESH_CDI\n'; }
@@ -181,6 +274,7 @@ ensure_cdi_runtime
     );
 
     expect(result.status, output).toBe(0);
+    expect(output).toContain("RECHECK_ALL_WORKLOADS");
     expect(output).toContain("systemctl enable nvidia-cdi-refresh.path nvidia-cdi-refresh.service");
     expect(output).toContain("systemctl start nvidia-cdi-refresh.path");
     expect(output).toContain("cdi_contract=pass_without_configuration_change");
@@ -283,6 +377,7 @@ check_no_workloads
     const { result, output } = runSourced(
       STATION_PREPARE,
       `
+assert_root_directory_safe() { :; }
 installed_version() { printf '2.0-1'; }
 ensure_cuda_keyring "$HOME/cuda-keyring.deb"
 `,
@@ -296,6 +391,8 @@ ensure_cuda_keyring "$HOME/cuda-keyring.deb"
     const { result, output } = runSourced(
       STATION_PREPARE,
       `
+assert_root_directory_safe() { :; }
+assert_root_regular_file_safe() { :; }
 installed_version() { printf '1.1-1'; }
 dpkg() { :; }
 curl() { printf 'DOWNLOAD\n'; }
@@ -317,6 +414,8 @@ ensure_cuda_keyring "$HOME/cuda-keyring.deb"
       `
 printf 'validated\n' >"$HOME/source"
 cp "$HOME/source" "$HOME/target"
+assert_root_directory_safe() { :; }
+assert_root_regular_file_safe() { :; }
 sudo() { "$@"; }
 install_exact_file_or_reuse "$HOME/source" "$HOME/target" 0644 test_repository_file
 printf 'modified\n' >"$HOME/target"
@@ -327,6 +426,53 @@ install_exact_file_or_reuse "$HOME/source" "$HOME/target" 0644 test_repository_f
     expect(result.status, output).not.toBe(0);
     expect(output).toMatch(/test_repository_file=exact/);
     expect(output).toMatch(/refusing to overwrite/);
+  });
+
+  it("rejects privileged files with unsafe ownership, mode, type, or parent metadata", () => {
+    for (const metadata of ["1000 0 644", "0 0 666"]) {
+      const { result, output } = runSourced(
+        STATION_PREPARE,
+        `
+sudo() {
+  if [[ "$1" == "test" ]]; then return 0; fi
+  if [[ "$1" == "stat" ]]; then printf '%s\n' "$ROOT_METADATA"; return 0; fi
+  return 1
+}
+assert_root_regular_file_safe /etc/example 0644 test_file
+`,
+        { ROOT_METADATA: metadata },
+      );
+      expect(result.status, output).not.toBe(0);
+      expect(output).toMatch(/root-owned regular file/);
+    }
+
+    const unsafeType = runSourced(
+      STATION_PREPARE,
+      `
+sudo() {
+  [[ "$*" == "test ! -L /etc/example" ]] && return 0
+  [[ "$*" == "test -f /etc/example" ]] && return 1
+  return 1
+}
+assert_root_regular_file_safe /etc/example 0644 test_file
+`,
+    );
+    expect(unsafeType.result.status, unsafeType.output).not.toBe(0);
+    expect(unsafeType.output).toMatch(/root-owned regular file/);
+
+    const unsafeParent = runSourced(
+      STATION_PREPARE,
+      `
+sudo() {
+  if [[ "$1" == "test" ]]; then return 0; fi
+  if [[ "$1" == "stat" ]]; then printf '0 0 777\n'; return 0; fi
+  return 1
+}
+assert_root_directory_safe /etc/apt/keyrings test_directory
+`,
+    );
+    expect(unsafeParent.result.status, unsafeParent.output).not.toBe(0);
+    expect(unsafeParent.output).toMatch(/not group- or other-writable/);
   });
 
   it("requires a new login after adding Docker group membership", () => {
@@ -356,6 +502,8 @@ run_apply
       STATION_PREPARE,
       `
 generated=0
+check_no_workloads() { printf 'RECHECK_ALL_WORKLOADS\n'; }
+assert_transient_cdi_output_safe() { printf 'CDI_OUTPUT_SAFE %s\n' "$1"; }
 sudo() {
   printf 'SUDO %s\n' "$*"
   if [[ "$*" == "systemctl restart nvidia-cdi-refresh.service" ]]; then return 1; fi
@@ -373,6 +521,7 @@ refresh_cdi
     expect(result.status, output).toBe(0);
     expect(output).toContain("systemctl status nvidia-cdi-refresh.service --no-pager");
     expect(output).toContain("journalctl -u nvidia-cdi-refresh.service --no-pager -n 50");
+    expect(output).toContain("RECHECK_ALL_WORKLOADS");
     expect(output).toContain("nvidia-ctk cdi generate --output=/var/run/cdi/nvidia.yaml");
     expect(output).toContain("cdi=nvidia.com/gpu=all source=direct_transient_fallback");
     expect(output).not.toContain("/etc/cdi");
@@ -383,6 +532,8 @@ refresh_cdi
       STATION_PREPARE,
       `
 generated=0
+check_no_workloads() { printf 'RECHECK_ALL_WORKLOADS\n'; }
+assert_transient_cdi_output_safe() { printf 'CDI_OUTPUT_SAFE %s\n' "$1"; }
 sudo() {
   printf 'SUDO %s\n' "$*"
   if [[ "$*" == "test -e $CDI_REFRESH_ENV_FILE" ]]; then return 1; fi
@@ -397,6 +548,7 @@ refresh_cdi
     );
 
     expect(result.status, output).toBe(0);
+    expect(output).toContain("RECHECK_ALL_WORKLOADS");
     expect(output).toMatch(/completed without advertising nvidia\.com\/gpu=all/);
     expect(output).toContain("nvidia-ctk cdi generate --output=/var/run/cdi/nvidia.yaml");
     expect(output).toContain("cdi=nvidia.com/gpu=all source=direct_transient_fallback");
@@ -406,6 +558,8 @@ refresh_cdi
     const { result, output } = runSourced(
       STATION_PREPARE,
       `
+check_no_workloads() { printf 'RECHECK_ALL_WORKLOADS\n'; }
+assert_transient_cdi_output_safe() { printf 'CDI_OUTPUT_SAFE %s\n' "$1"; }
 sudo() {
   printf 'SUDO %s\n' "$*"
   if [[ "$*" == "systemctl restart nvidia-cdi-refresh.service" ]]; then return 1; fi
@@ -418,6 +572,9 @@ refresh_cdi
     );
 
     expect(result.status, output).not.toBe(0);
+    expect(output).toContain("systemctl status nvidia-cdi-refresh.service --no-pager");
+    expect(output).toContain("journalctl -u nvidia-cdi-refresh.service --no-pager -n 50");
+    expect(output).toContain("RECHECK_ALL_WORKLOADS");
     expect(output).toContain("nvidia-ctk cdi generate --output=/var/run/cdi/nvidia.yaml");
     expect(output).toMatch(/Direct transient CDI generation failed/);
   });
@@ -426,6 +583,8 @@ refresh_cdi
     const { result, output } = runSourced(
       STATION_PREPARE,
       `
+check_no_workloads() { printf 'RECHECK_ALL_WORKLOADS\n'; }
+assert_transient_cdi_output_safe() { printf 'CDI_OUTPUT_SAFE %s\n' "$1"; }
 sudo() {
   printf 'SUDO %s\n' "$*"
   if [[ "$*" == "systemctl restart nvidia-cdi-refresh.service" ]]; then return 1; fi
@@ -446,6 +605,7 @@ refresh_cdi
     const { result, output } = runSourced(
       STATION_PREPARE,
       `
+check_no_workloads() { printf 'RECHECK_ALL_WORKLOADS\n'; }
 sudo() {
   printf 'SUDO %s\n' "$*"
   if [[ "$*" == "systemctl restart nvidia-cdi-refresh.service" ]]; then return 1; fi
@@ -459,6 +619,26 @@ refresh_cdi
     expect(output).toMatch(/contains administrator overrides/);
     expect(output).toMatch(/refusing to bypass/);
     expect(output).not.toContain("nvidia-ctk cdi generate --output=/var/run/cdi/nvidia.yaml");
+  });
+
+  it("rejects a symbolic link at the privileged transient CDI output", () => {
+    const { result, output } = runSourced(
+      STATION_PREPARE,
+      `
+ensure_root_directory_safe() { printf 'ENSURE_ROOT_DIRECTORY_SAFE\n'; }
+readlink() { printf '/run/cdi\n'; }
+sudo() {
+  printf 'SUDO %s\n' "$*"
+  if [[ "$*" == "test ! -L /run/cdi/nvidia.yaml" ]]; then return 1; fi
+  return 0
+}
+assert_transient_cdi_output_safe 0
+`,
+    );
+
+    expect(result.status, output).not.toBe(0);
+    expect(output).toContain("ENSURE_ROOT_DIRECTORY_SAFE");
+    expect(output).toMatch(/must not be a symbolic link/);
   });
 
   it("rechecks every workload gate immediately before Docker runtime mutation", () => {
@@ -513,9 +693,16 @@ run_gpus_test_sudo() {
 run_cdi_test_sudo() { return 0; }
 docker_has_nvidia_runtime_sudo() { return 1; }
 check_no_workloads() { printf 'RECHECK_ALL_WORKLOADS\n'; }
+ensure_root_directory_safe() { :; }
+assert_root_directory_safe() { :; }
+assert_root_regular_file_safe() { :; }
+root_regular_file_is_safe() { return 0; }
 sudo() {
-  [[ "$*" == "docker ps -aq" ]] && return 0
-  [[ "$*" == "test -e /etc/docker/daemon.json" ]] && return 1
+  if [[ "$*" == "mktemp -d /var/backups/station-bootstrap/docker-runtime.XXXXXXXXXX" ]]; then
+    printf '/var/backups/station-bootstrap/docker-runtime.TEST'
+    return 0
+  fi
+  [[ "$*" == "test -e /etc/docker/daemon.json" || "$*" == "test -L /etc/docker/daemon.json" ]] && return 1
   printf 'SUDO %s\n' "$*"
 }
 configure_docker_runtime_if_needed
@@ -529,10 +716,41 @@ configure_docker_runtime_if_needed
     expect(output).toContain("docker_gpus_contract=pass");
   });
 
+  it("restores the prior Docker configuration when a post-mutation launch probe fails", () => {
+    const { result, output } = runSourced(
+      STATION_PREPARE,
+      `
+run_gpus_test_sudo() { printf 'GPU_PROBE\n'; return 1; }
+run_cdi_test_sudo() { return 0; }
+docker_has_nvidia_runtime_sudo() { return 1; }
+check_no_workloads() { printf 'RECHECK_ALL_WORKLOADS\n'; }
+ensure_root_directory_safe() { :; }
+assert_root_directory_safe() { :; }
+assert_root_regular_file_safe() { :; }
+root_regular_file_is_safe() { return 0; }
+sudo() {
+  if [[ "$*" == "mktemp -d /var/backups/station-bootstrap/docker-runtime.XXXXXXXXXX" ]]; then
+    printf '/var/backups/station-bootstrap/docker-runtime.TEST'
+    return 0
+  fi
+  [[ "$*" == "test -e /etc/docker/daemon.json" || "$*" == "test -L /etc/docker/daemon.json" ]] && return 1
+  printf 'SUDO %s\n' "$*"
+}
+configure_docker_runtime_if_needed
+`,
+    );
+
+    expect(result.status, output).not.toBe(0);
+    expect(output).toContain("Restoring the Docker daemon configuration");
+    expect(output).toContain("rm -f -- /etc/docker/daemon.json");
+    expect(output).toMatch(/prior Docker daemon configuration was restored/);
+  });
+
   it("accepts a successful packaged CDI refresh", () => {
     const { result, output } = runSourced(
       STATION_PREPARE,
       `
+check_no_workloads() { printf 'RECHECK_ALL_WORKLOADS\n'; }
 sudo() { printf 'SUDO %s\n' "$*"; }
 nvidia-ctk() {
   [[ "$*" == "cdi list" ]] && printf 'nvidia.com/gpu=all\n'
@@ -611,6 +829,25 @@ write_install_boot_marker
     expect(result.status, output).not.toBe(0);
     expect(output).toMatch(/Refusing symbolic link in Station bootstrap state path/);
     expect(fs.existsSync(path.join(home, "redirect-target", "install-boot-id"))).toBe(false);
+  });
+
+  it("rejects a direct boot-marker symlink without modifying its target", () => {
+    const { home, result, output } = runSourced(
+      STATION_PREPARE,
+      `
+mkdir -p "$HOME/.local/state/station-bootstrap"
+chmod 0700 "$HOME/.local/state/station-bootstrap"
+printf 'preserve-this-target\n' >"$HOME/marker-target"
+ln -s "$HOME/marker-target" "$HOME/.local/state/station-bootstrap/install-boot-id"
+write_install_boot_marker
+`,
+    );
+
+    expect(result.status, output).not.toBe(0);
+    expect(output).toMatch(/Refusing symbolic link for Station bootstrap boot marker/);
+    expect(fs.readFileSync(path.join(home, "marker-target"), "utf-8")).toBe(
+      "preserve-this-target\n",
+    );
   });
 });
 
@@ -725,6 +962,7 @@ prepare_installer_host
       `
 _SELECTED_EXPRESS_PLATFORM='DGX Station'
 NEMOCLAW_VLLM_MODEL='nemotron-3-ultra-550b-a55b'
+station_installer_revision() { printf '${STATION_REVISION}'; }
 run_station_host_preparation() { return 10; }
 ensure_station_express_host
 `,
@@ -732,9 +970,11 @@ ensure_station_express_host
     const stateFile = path.join(home, ".nemoclaw", "station-express-resume");
 
     expect(result.status, output).toBe(10);
-    expect(fs.readFileSync(stateFile, "utf-8")).toBe("nemotron-3-ultra-550b-a55b\n");
+    expect(fs.readFileSync(stateFile, "utf-8")).toBe(
+      `revision=${STATION_REVISION}\nmodel=nemotron-3-ultra-550b-a55b\n`,
+    );
     expect(fs.statSync(stateFile).mode & 0o777).toBe(0o600);
-    expect(output).toMatch(/rerun the same NemoClaw installer command/);
+    expect(output).toContain(`NEMOCLAW_INSTALL_TAG=${STATION_REVISION}`);
   });
 
   it("rejects a resume-state symlink without loading its target", () => {
@@ -767,6 +1007,7 @@ printf 'preserve-this-target\n' >"$HOME/resume-target"
 ln -s "$HOME/resume-target" "$HOME/.nemoclaw/station-express-resume"
 _SELECTED_EXPRESS_PLATFORM='DGX Station'
 NEMOCLAW_VLLM_MODEL='nemotron-3-ultra-550b-a55b'
+station_installer_revision() { printf '${STATION_REVISION}'; }
 run_station_host_preparation() { return 10; }
 ensure_station_express_host
 `,
@@ -786,7 +1027,7 @@ ensure_station_express_host
     fs.mkdirSync(stateDir, { mode: 0o700 });
     fs.writeFileSync(
       path.join(stateDir, "station-express-resume"),
-      "nemotron-3-ultra-550b-a55b\n",
+      `revision=${STATION_REVISION}\nmodel=nemotron-3-ultra-550b-a55b\n`,
       { mode: 0o600 },
     );
     const result = spawnSync(
@@ -798,6 +1039,7 @@ ensure_station_express_host
         `
 source "$INSTALLER_UNDER_TEST" >/dev/null
 detect_express_platform() { printf 'DGX Station'; }
+station_installer_revision() { printf '${STATION_REVISION}'; }
 NON_INTERACTIVE=''
 NEMOCLAW_PROVIDER=''
 NEMOCLAW_NO_EXPRESS=''
@@ -829,7 +1071,7 @@ printf 'RESULT PLATFORM=%s PROVIDER=%s MODEL=%s VLLM_MODEL=%s\n' \
   });
 
   it("preserves an explicit provider even when Station resume state exists", () => {
-    const { result, output } = runSourced(
+    const { home, result, output } = runSourced(
       INSTALLER_PAYLOAD,
       `
 mkdir -p "$HOME/.nemoclaw"
@@ -849,6 +1091,28 @@ printf 'RESULT PROVIDER=%s\n' "$NEMOCLAW_PROVIDER"
     expect(output).toContain("NEMOCLAW_PROVIDER=openai already set");
     expect(output).toContain("RESULT PROVIDER=openai");
     expect(output).not.toContain("Resuming the accepted express install");
+    expect(fs.existsSync(path.join(home, ".nemoclaw", "station-express-resume"))).toBe(false);
+  });
+
+  it("clears pending Station resume state when express install is explicitly disabled", () => {
+    const { home, result, output } = runSourced(
+      INSTALLER_PAYLOAD,
+      `
+mkdir -p "$HOME/.nemoclaw"
+chmod 0700 "$HOME/.nemoclaw"
+printf 'revision=${STATION_REVISION}\nmodel=nemotron-3-ultra-550b-a55b\n' >"$HOME/.nemoclaw/station-express-resume"
+chmod 0600 "$HOME/.nemoclaw/station-express-resume"
+detect_express_platform() { printf 'DGX Station'; }
+NON_INTERACTIVE=''
+NEMOCLAW_PROVIDER=''
+NEMOCLAW_NO_EXPRESS='1'
+maybe_offer_express_install
+`,
+    );
+
+    expect(result.status, output).toBe(0);
+    expect(output).toContain("NEMOCLAW_NO_EXPRESS=1");
+    expect(fs.existsSync(path.join(home, ".nemoclaw", "station-express-resume"))).toBe(false);
   });
 
   it("does not load Station resume state on DGX Spark", () => {
@@ -882,7 +1146,7 @@ printf 'RESULT MODEL=%s\n' "$NEMOCLAW_VLLM_MODEL"
     fs.mkdirSync(stateDir, { mode: 0o700 });
     fs.writeFileSync(
       path.join(stateDir, "station-express-resume"),
-      "nemotron-3-ultra-550b-a55b\nunexpected\n",
+      `revision=${STATION_REVISION}\nmodel=nemotron-3-ultra-550b-a55b\nunexpected\n`,
       { mode: 0o600 },
     );
     const result = spawnSync(
@@ -909,5 +1173,25 @@ printf 'RESULT MODEL=%s\n' "$NEMOCLAW_VLLM_MODEL"
 
     expect(result.status, output).not.toBe(0);
     expect(output).toMatch(/resume state is invalid/);
+  });
+
+  it("rejects resume under a different installer revision with exact rerun guidance", () => {
+    const savedRevision = "b".repeat(40);
+    const currentRevision = "c".repeat(40);
+    const { result, output } = runSourced(
+      INSTALLER_PAYLOAD,
+      `
+mkdir -p "$HOME/.nemoclaw"
+chmod 0700 "$HOME/.nemoclaw"
+printf 'revision=${savedRevision}\nmodel=nemotron-3-ultra-550b-a55b\n' >"$HOME/.nemoclaw/station-express-resume"
+chmod 0600 "$HOME/.nemoclaw/station-express-resume"
+station_installer_revision() { printf '${currentRevision}'; }
+load_station_express_resume
+`,
+    );
+
+    expect(result.status, output).not.toBe(0);
+    expect(output).toContain(`requires NemoClaw revision ${savedRevision}`);
+    expect(output).toContain(`NEMOCLAW_INSTALL_TAG=${savedRevision}`);
   });
 });

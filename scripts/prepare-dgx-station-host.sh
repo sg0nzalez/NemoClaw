@@ -20,13 +20,17 @@ readonly DOCKER_KEY_FINGERPRINT="9DC858229FC7DD38854AE2D88D81803C0EBFCD88"
 readonly DRIVER_VERSION="610.43.02"
 readonly DOCKER_VERSION="29.6.1"
 readonly TOOLKIT_VERSION="1.19.1"
+readonly FACTORY_DKMS_VERSION="3.0.11-1ubuntu13"
+readonly TARGET_DKMS_VERSION="1:3.4.0-1ubuntu1"
 readonly ACCEPTANCE_IMAGE="ubuntu@sha256:7f622ca8766bccb22f04242ecb6f19f770b2f08827dc4b8c707de5e78a6da7ab"
 readonly STATE_DIR="${HOME}/.local/state/station-bootstrap"
 readonly INSTALL_BOOT_MARKER="${STATE_DIR}/install-boot-id"
 readonly CDI_REFRESH_ENV_FILE="/etc/nvidia-container-toolkit/nvidia-cdi-refresh.env"
+readonly TRANSIENT_CDI_SPEC_PATH="/var/run/cdi/nvidia.yaml"
+readonly TRANSIENT_CDI_SPEC_CANONICAL_PATH="/run/cdi/nvidia.yaml"
 
 readonly -a PACKAGE_SPECS=(
-  "dkms=1:3.4.0-1ubuntu1"
+  "dkms=${TARGET_DKMS_VERSION}"
   "nvidia-driver-pinning-610=610-2ubuntu1"
   "nvidia-driver-open=610.43.02-1ubuntu1"
   "containerd.io=2.2.6-1~ubuntu.24.04~noble"
@@ -87,13 +91,12 @@ is_valid_mode() {
 
 is_station_product() {
   local product=${1:-}
-  [[ "$product" == *"Station GB300"* || "$product" == *"DGX Station"* ]]
+  [[ "$product" == *"Station"* && "$product" == *"GB300"* ]]
 }
 
-is_expected_failed_unit() {
+is_preparation_critical_unit() {
   case "${1:-}" in
-    cloud-init.service | fwupd-refresh.service | NetworkManager-wait-online.service | systemd-networkd-wait-online.service | \
-      sssd-autofs.socket | sssd-nss.socket | sssd-pam-priv.socket | sssd-pam.socket)
+    containerd.service | docker.service | nvidia-cdi-refresh.service | nvidia-persistenced.service)
       return 0
       ;;
     *) return 1 ;;
@@ -145,6 +148,8 @@ package_state() {
     printf 'missing\n'
   elif [[ "$actual" == "$expected" ]]; then
     printf 'exact\n'
+  elif [[ "$name" == "dkms" && "$actual" == "$FACTORY_DKMS_VERSION" && "$expected" == "$TARGET_DKMS_VERSION" ]]; then
+    printf 'approved-transition\n'
   else
     printf 'mismatch\n'
   fi
@@ -154,6 +159,13 @@ assert_no_package_mismatches() {
   local spec state name expected actual mismatch=0
   for spec in "${PACKAGE_SPECS[@]}"; do
     state="$(package_state "$spec")"
+    if [[ "$state" == "approved-transition" ]]; then
+      name="$(package_name "$spec")"
+      expected="$(package_expected_version "$spec")"
+      actual="$(installed_version "$name")"
+      info "package=${name} status=approved_transition actual=${actual} expected=${expected}"
+      continue
+    fi
     [[ "$state" == "mismatch" ]] || continue
     name="$(package_name "$spec")"
     expected="$(package_expected_version "$spec")"
@@ -161,7 +173,7 @@ assert_no_package_mismatches() {
     warn "package=${name} status=mismatch actual=${actual} expected=${expected}"
     mismatch=1
   done
-  ((mismatch == 0)) || fatal "Existing Station prerequisite versions differ from the validated pins; refusing to upgrade or downgrade them automatically"
+  ((mismatch == 0)) || fatal "Existing Station prerequisite versions differ from the validated pins or approved factory transition; refusing to change them automatically"
 }
 
 all_packages_exact() {
@@ -185,6 +197,10 @@ require_command() {
   command -v "$1" >/dev/null 2>&1 || fatal "Required command is missing: $1"
 }
 
+file_mode() {
+  stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1"
+}
+
 check_platform() {
   local arch product
   arch="$(uname -m)"
@@ -195,6 +211,8 @@ check_platform() {
   source /etc/os-release
   [[ "${ID:-}" == "ubuntu" && "${VERSION_ID:-}" == "24.04" ]] \
     || fatal "Expected Ubuntu 24.04, found ${PRETTY_NAME:-unknown}"
+  [[ ! -e /etc/dgx-release && ! -L /etc/dgx-release ]] \
+    || fatal "DGX OS/BaseOS is outside this recipe's validated boundary; use the generic Ubuntu 24.04 ARM64 image"
 
   product="$(</sys/class/dmi/id/product_name)"
   is_station_product "$product" || fatal "Expected DGX Station GB300 DMI, found ${product}"
@@ -239,24 +257,28 @@ check_package_managers_idle() {
 }
 
 check_failed_units() {
-  local unit unexpected=0
+  local unit failed_output blocking=0
   local -a units=()
-  mapfile -t units < <(systemctl --failed --no-legend --plain 2>/dev/null | awk 'NF {print $1}')
+  failed_output="$(systemctl --failed --no-legend --plain 2>/dev/null)" \
+    || fatal "Unable to inspect failed system services"
+  while IFS= read -r unit; do
+    [[ -n "$unit" ]] && units+=("$unit")
+  done < <(awk 'NF {print $1}' <<<"$failed_output")
   if ((${#units[@]} == 0)); then
     info "failed_units=none"
     return 0
   fi
   for unit in "${units[@]}"; do
-    if is_expected_failed_unit "$unit"; then
-      warn "pre-existing OEM failed unit allowed for this pilot: ${unit}"
-    elif is_driver_transitional_unit "$unit" && all_packages_exact; then
+    if is_driver_transitional_unit "$unit" && all_packages_exact && ! driver_loaded_exact; then
       warn "driver unit failure allowed only until post-reboot verification: ${unit}"
+    elif is_preparation_critical_unit "$unit"; then
+      warn "failed preparation-critical unit: ${unit}"
+      blocking=1
     else
-      warn "unexpected failed unit: ${unit}"
-      unexpected=1
+      warn "pre-existing failed unit outside the Station preparation transaction: ${unit}"
     fi
   done
-  ((unexpected == 0)) || fatal "Unexpected failed units block Station preparation"
+  ((blocking == 0)) || fatal "Failed driver or container runtime units block Station preparation"
 }
 
 check_no_workloads() {
@@ -302,25 +324,55 @@ driver_loaded_exact() {
 }
 
 assert_station_state_dir_safe() {
-  local path
+  local path mode
   for path in "${HOME}/.local" "${HOME}/.local/state" "$STATE_DIR"; do
     [[ ! -L "$path" ]] || fatal "Refusing symbolic link in Station bootstrap state path: ${path}"
+    [[ ! -e "$path" || -d "$path" ]] || fatal "Station bootstrap state path is not a directory: ${path}"
+    if [[ -e "$path" ]]; then
+      [[ -O "$path" ]] || fatal "Station bootstrap state path is not owned by the current user: ${path}"
+      mode="$(file_mode "$path")"
+      (((8#$mode & 0022) == 0)) || fatal "Station bootstrap state path is group- or other-writable: ${path}"
+    fi
   done
 }
 
+assert_install_boot_marker_safe() {
+  local mode
+  [[ ! -L "$INSTALL_BOOT_MARKER" ]] || fatal "Refusing symbolic link for Station bootstrap boot marker: ${INSTALL_BOOT_MARKER}"
+  [[ ! -e "$INSTALL_BOOT_MARKER" || -f "$INSTALL_BOOT_MARKER" ]] \
+    || fatal "Station bootstrap boot marker is not a regular file: ${INSTALL_BOOT_MARKER}"
+  if [[ -e "$INSTALL_BOOT_MARKER" ]]; then
+    [[ -O "$INSTALL_BOOT_MARKER" ]] || fatal "Station bootstrap boot marker is not owned by the current user"
+    mode="$(file_mode "$INSTALL_BOOT_MARKER")"
+    [[ "$mode" == "600" ]] || fatal "Station bootstrap boot marker must have mode 0600"
+  fi
+}
+
 write_install_boot_marker() {
+  local temp_file
   assert_station_state_dir_safe
   mkdir -p "$STATE_DIR"
   assert_station_state_dir_safe
   chmod 0700 "$STATE_DIR"
-  cp /proc/sys/kernel/random/boot_id "$INSTALL_BOOT_MARKER"
-  chmod 0600 "$INSTALL_BOOT_MARKER"
+  assert_install_boot_marker_safe
+  temp_file="$(mktemp "${INSTALL_BOOT_MARKER}.tmp.XXXXXX")"
+  chmod 0600 "$temp_file"
+  tr -d '[:space:]' </proc/sys/kernel/random/boot_id >"$temp_file"
+  printf '\n' >>"$temp_file"
+  mv -f "$temp_file" "$INSTALL_BOOT_MARKER"
+  assert_install_boot_marker_safe
 }
 
 install_boot_marker_matches_current_boot() {
+  local installed_boot current_boot
   assert_station_state_dir_safe
-  [[ -r "$INSTALL_BOOT_MARKER" ]] || return 1
-  [[ "$(tr -d '[:space:]' <"$INSTALL_BOOT_MARKER")" == "$(tr -d '[:space:]' </proc/sys/kernel/random/boot_id)" ]]
+  [[ -e "$INSTALL_BOOT_MARKER" || -L "$INSTALL_BOOT_MARKER" ]] || return 1
+  assert_install_boot_marker_safe
+  installed_boot="$(tr -d '[:space:]' <"$INSTALL_BOOT_MARKER")"
+  current_boot="$(tr -d '[:space:]' </proc/sys/kernel/random/boot_id)"
+  [[ "$installed_boot" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] \
+    || fatal "Station bootstrap boot marker is invalid"
+  [[ "$installed_boot" == "$current_boot" ]]
 }
 
 print_package_status() {
@@ -333,6 +385,8 @@ print_package_status() {
       info "package=${name} status=exact version=${actual}"
     elif [[ -z "$actual" ]]; then
       info "package=${name} status=missing expected=${expected}"
+    elif [[ "$name" == "dkms" && "$actual" == "$FACTORY_DKMS_VERSION" ]]; then
+      info "package=${name} status=approved_transition actual=${actual} expected=${expected}"
     else
       warn "package=${name} status=mismatch actual=${actual} expected=${expected}"
     fi
@@ -346,6 +400,7 @@ common_preflight() {
   require_command getent
   require_command ps
   require_command ss
+  require_command stat
   require_command systemctl
   check_platform
   check_secure_boot
@@ -370,8 +425,57 @@ verify_key_fingerprint() {
     | grep -Fxq "$expected" || fatal "Expected signing-key fingerprint ${expected} was not found in ${path}"
 }
 
+root_directory_is_safe() {
+  local path=$1 metadata uid gid mode
+  sudo test ! -L "$path" || return 1
+  sudo test -d "$path" || return 1
+  metadata="$(sudo stat -c '%u %g %a' -- "$path")" || return 1
+  read -r uid gid mode <<<"$metadata"
+  [[ "$uid" == "0" && "$gid" == "0" && "$mode" =~ ^[0-7]{3,4}$ ]] || return 1
+  (((8#$mode & 0022) == 0))
+}
+
+assert_root_directory_safe() {
+  local path=$1 label=$2
+  root_directory_is_safe "$path" \
+    || fatal "${label} must be a root-owned directory that is not group- or other-writable: ${path}"
+}
+
+ensure_root_directory_safe() {
+  local path=$1 parent=$2 mode=$3 label=$4
+  assert_root_directory_safe "$parent" "${label} parent"
+  sudo test ! -L "$path" || fatal "${label} must not be a symbolic link: ${path}"
+  if ! sudo test -e "$path"; then
+    sudo install -d -o root -g root -m "$mode" "$path"
+  fi
+  assert_root_directory_safe "$path" "$label"
+}
+
+root_regular_file_is_safe() {
+  local path=$1 expected_mode=${2:-} metadata uid gid mode
+  sudo test ! -L "$path" || return 1
+  sudo test -f "$path" || return 1
+  metadata="$(sudo stat -c '%u %g %a' -- "$path")" || return 1
+  read -r uid gid mode <<<"$metadata"
+  [[ "$uid" == "0" && "$gid" == "0" && "$mode" =~ ^[0-7]{3,4}$ ]] || return 1
+  (((8#$mode & 0022) == 0)) || return 1
+  [[ -z "$expected_mode" || "$mode" == "${expected_mode#0}" ]]
+}
+
+assert_root_regular_file_safe() {
+  local path=$1 expected_mode=$2 label=$3
+  if [[ -n "$expected_mode" ]]; then
+    root_regular_file_is_safe "$path" "$expected_mode" \
+      || fatal "${label} must be a root-owned regular file with mode ${expected_mode}: ${path}"
+  else
+    root_regular_file_is_safe "$path" "" \
+      || fatal "${label} must be a root-owned regular file that is not group- or other-writable: ${path}"
+  fi
+}
+
 ensure_cuda_keyring() {
   local cuda_deb=$1 actual verification
+  assert_root_directory_safe /usr/share/keyrings "CUDA repository keyring directory"
   actual="$(installed_version cuda-keyring)"
   if [[ -z "$actual" ]]; then
     curl --fail --silent --show-error --location "$CUDA_KEYRING_URL" --output "$cuda_deb"
@@ -388,21 +492,24 @@ ensure_cuda_keyring() {
     fatal "Existing cuda-keyring version ${actual} differs from validated pin ${CUDA_KEYRING_PACKAGE_VERSION}; refusing to upgrade or downgrade it automatically"
   fi
 
-  sudo test ! -L /usr/share/keyrings/cuda-archive-keyring.gpg \
-    || fatal "CUDA repository keyring must not be a symbolic link"
+  assert_root_regular_file_safe /usr/share/keyrings/cuda-archive-keyring.gpg 0644 "CUDA repository keyring"
   verify_key_fingerprint /usr/share/keyrings/cuda-archive-keyring.gpg "$CUDA_KEY_FINGERPRINT"
 }
 
 install_exact_file_or_reuse() {
-  local source=$1 target=$2 mode=$3 label=$4
+  local source=$1 target=$2 mode=$3 label=$4 parent
+  parent="$(dirname "$target")"
+  assert_root_directory_safe "$parent" "${label} directory"
   sudo test ! -L "$target" || fatal "${label} must not be a symbolic link: ${target}"
   if sudo test -e "$target"; then
+    assert_root_regular_file_safe "$target" "$mode" "$label"
     sudo cmp -s "$source" "$target" \
       || fatal "Existing ${label} differs from the validated content; refusing to overwrite ${target}"
     info "${label}=exact path=${target}"
     return 0
   fi
-  sudo install -m "$mode" "$source" "$target"
+  sudo install -o root -g root -m "$mode" "$source" "$target"
+  assert_root_regular_file_safe "$target" "$mode" "$label"
   info "${label}=installed path=${target}"
 }
 
@@ -421,7 +528,8 @@ configure_repositories() {
   verify_file_sha256 "$docker_asc" "$DOCKER_KEY_SHA256"
   verify_key_fingerprint "$docker_asc" "$DOCKER_KEY_FINGERPRINT"
   gpg --batch --yes --dearmor --output "$docker_gpg" "$docker_asc"
-  sudo install -d -m 0755 /etc/apt/keyrings
+  ensure_root_directory_safe /etc/apt/keyrings /etc/apt 0755 "Docker repository key directory"
+  assert_root_directory_safe /etc/apt/sources.list.d "Docker repository source directory"
   install_exact_file_or_reuse "$docker_gpg" /etc/apt/keyrings/docker.gpg 0644 docker_repository_key
   printf '%s\n' \
     'deb [arch=arm64 signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu noble stable' \
@@ -457,6 +565,7 @@ install_packages() {
   sudo apt-get update
   validate_package_availability
   simulate_install
+  check_no_workloads
   info "Installing pinned Station prerequisites"
   sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     "${PACKAGE_SPECS[@]}"
@@ -494,6 +603,7 @@ cdi_refresh_has_custom_environment() {
 
 ensure_cdi_refresh_lifecycle() {
   ((CDI_LIFECYCLE_READY == 0)) || return 0
+  check_no_workloads
   sudo systemctl enable nvidia-cdi-refresh.path nvidia-cdi-refresh.service \
     || fatal "Could not enable the packaged NVIDIA CDI refresh lifecycle"
   sudo systemctl start nvidia-cdi-refresh.path \
@@ -512,7 +622,24 @@ verify_cdi_refresh_lifecycle() {
   info "cdi_refresh_lifecycle=verified"
 }
 
+assert_transient_cdi_output_safe() {
+  local require_file=${1:-0} resolved_directory
+  ensure_root_directory_safe /run/cdi /run 0755 "NVIDIA CDI runtime directory"
+  resolved_directory="$(readlink -f /var/run/cdi)" \
+    || fatal "Could not resolve NVIDIA's transient CDI runtime directory"
+  [[ "$resolved_directory" == "/run/cdi" ]] \
+    || fatal "Expected /var/run/cdi to resolve to /run/cdi, found ${resolved_directory}"
+  sudo test ! -L "$TRANSIENT_CDI_SPEC_CANONICAL_PATH" \
+    || fatal "Transient NVIDIA CDI specification must not be a symbolic link: ${TRANSIENT_CDI_SPEC_CANONICAL_PATH}"
+  if sudo test -e "$TRANSIENT_CDI_SPEC_CANONICAL_PATH"; then
+    assert_root_regular_file_safe "$TRANSIENT_CDI_SPEC_CANONICAL_PATH" "" "Transient NVIDIA CDI specification"
+  elif [[ "$require_file" == "1" ]]; then
+    fatal "Transient NVIDIA CDI generation did not create ${TRANSIENT_CDI_SPEC_CANONICAL_PATH}"
+  fi
+}
+
 refresh_cdi() {
+  check_no_workloads
   ensure_cdi_refresh_lifecycle
   if ! sudo systemctl restart nvidia-cdi-refresh.service; then
     warn "Packaged CDI refresh failed; collecting diagnostics before the NVIDIA transient fallback"
@@ -534,8 +661,11 @@ refresh_cdi() {
     fatal "${CDI_REFRESH_ENV_FILE} contains administrator overrides; refusing to bypass them with default direct CDI generation"
   fi
   warn "Generating NVIDIA's transient CDI specification at /var/run/cdi/nvidia.yaml"
-  sudo nvidia-ctk cdi generate --output=/var/run/cdi/nvidia.yaml \
+  check_no_workloads
+  assert_transient_cdi_output_safe 0
+  sudo nvidia-ctk cdi generate --output="$TRANSIENT_CDI_SPEC_PATH" \
     || fatal "Direct transient CDI generation failed; inspect the packaged service diagnostics"
+  assert_transient_cdi_output_safe 1
   nvidia-ctk cdi list | grep -Fxq 'nvidia.com/gpu=all' \
     || fatal "CDI device nvidia.com/gpu=all is unavailable after direct transient generation"
   info "cdi=nvidia.com/gpu=all source=direct_transient_fallback"
@@ -578,7 +708,7 @@ ensure_cdi_runtime() {
 }
 
 configure_docker_runtime_if_needed() {
-  local backup_dir timestamp
+  local backup_dir previous_daemon=0
   if run_gpus_test_sudo; then
     info "docker_gpus_contract=pass_without_configuration_change"
     return 0
@@ -592,25 +722,67 @@ configure_docker_runtime_if_needed() {
   # missing-runtime state. It remains required until this acceptance probe
   # succeeds through a replacement Docker/NVIDIA runtime integration.
   warn "Docker --gpus all failed and Docker reports no NVIDIA runtime; applying the reviewed NVIDIA runtime registration"
-  [[ -z "$(sudo docker ps -aq)" ]] || fatal "Docker became non-idle before runtime configuration"
-  timestamp="$(date -u '+%Y%m%dT%H%M%SZ')"
-  backup_dir="/var/backups/station-bootstrap/${timestamp}"
-  sudo install -d -m 0700 "$backup_dir"
-  if sudo test -e /etc/docker/daemon.json; then
-    sudo cp --preserve=all /etc/docker/daemon.json "${backup_dir}/daemon.json"
+  check_no_workloads
+  ensure_root_directory_safe /etc/docker /etc 0755 "Docker configuration directory"
+  ensure_root_directory_safe /var/backups/station-bootstrap /var/backups 0700 "Station bootstrap backup directory"
+  backup_dir="$(sudo mktemp -d /var/backups/station-bootstrap/docker-runtime.XXXXXXXXXX)" \
+    || fatal "Could not create a unique Docker runtime backup directory"
+  assert_root_directory_safe "$backup_dir" "Docker runtime backup directory"
+  if sudo test -e /etc/docker/daemon.json || sudo test -L /etc/docker/daemon.json; then
+    assert_root_regular_file_safe /etc/docker/daemon.json "" "Docker daemon configuration"
+    sudo cp --archive --no-dereference -- /etc/docker/daemon.json "${backup_dir}/daemon.json"
+    assert_root_regular_file_safe "${backup_dir}/daemon.json" "" "Docker daemon configuration backup"
+    previous_daemon=1
   else
     sudo touch "${backup_dir}/daemon.json.absent"
     sudo chmod 0600 "${backup_dir}/daemon.json.absent"
   fi
   check_no_workloads
-  sudo nvidia-ctk runtime configure --runtime=docker
-  sudo systemctl restart docker.service
-  run_gpus_test_sudo || fatal "Docker --gpus all still fails after NVIDIA runtime registration"
-  run_cdi_test_sudo || fatal "CDI launch regressed after NVIDIA runtime registration"
+  if ! sudo nvidia-ctk runtime configure --runtime=docker; then
+    fail_after_docker_runtime_rollback "$backup_dir" "$previous_daemon" "NVIDIA runtime registration failed"
+  fi
+  if ! root_regular_file_is_safe /etc/docker/daemon.json ""; then
+    fail_after_docker_runtime_rollback "$backup_dir" "$previous_daemon" "NVIDIA runtime registration produced an unsafe Docker daemon configuration"
+  fi
+  if ! (check_no_workloads); then
+    fail_after_docker_runtime_rollback "$backup_dir" "$previous_daemon" "A workload appeared before Docker restart"
+  fi
+  if ! sudo systemctl restart docker.service; then
+    fail_after_docker_runtime_rollback "$backup_dir" "$previous_daemon" "Docker restart failed after NVIDIA runtime registration"
+  fi
+  if ! run_gpus_test_sudo; then
+    fail_after_docker_runtime_rollback "$backup_dir" "$previous_daemon" "Docker --gpus all still fails after NVIDIA runtime registration"
+  fi
+  if ! run_cdi_test_sudo; then
+    fail_after_docker_runtime_rollback "$backup_dir" "$previous_daemon" "CDI launch regressed after NVIDIA runtime registration"
+  fi
   info "docker_gpus_contract=pass backup=${backup_dir}"
 }
 
+rollback_docker_runtime_config() {
+  local backup_dir=$1 previous_daemon=$2
+  warn "Restoring the Docker daemon configuration from ${backup_dir}"
+  if [[ "$previous_daemon" == "1" ]]; then
+    root_regular_file_is_safe "${backup_dir}/daemon.json" "" || return 1
+    sudo rm -f -- /etc/docker/daemon.json || return 1
+    sudo cp --archive --no-dereference -- "${backup_dir}/daemon.json" /etc/docker/daemon.json || return 1
+    root_regular_file_is_safe /etc/docker/daemon.json "" || return 1
+  else
+    sudo rm -f -- /etc/docker/daemon.json || return 1
+  fi
+  sudo systemctl restart docker.service
+}
+
+fail_after_docker_runtime_rollback() {
+  local backup_dir=$1 previous_daemon=$2 reason=$3
+  if rollback_docker_runtime_config "$backup_dir" "$previous_daemon"; then
+    fatal "${reason}; the prior Docker daemon configuration was restored"
+  fi
+  fatal "${reason}; automatic Docker daemon rollback failed, restore from ${backup_dir} before retrying"
+}
+
 finish_runtime() {
+  check_no_workloads
   sudo systemctl enable --now containerd.service docker.service
   ensure_docker_group
   ensure_acceptance_image
@@ -700,6 +872,7 @@ run_apply() {
   require_command dpkg
   require_command gpg
   require_command grep
+  require_command readlink
   require_command sha256sum
   require_command sudo
   acquire_sudo
@@ -717,6 +890,7 @@ run_apply() {
     assert_no_package_mismatches
     install_packages
     ensure_docker_group
+    check_no_workloads
     sudo systemctl enable containerd.service docker.service nvidia-cdi-refresh.path nvidia-cdi-refresh.service
     write_install_boot_marker
     info "APPLY_RESULT=REBOOT_REQUIRED"
