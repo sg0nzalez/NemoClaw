@@ -410,11 +410,9 @@ main "$@"
 
   it.each([
     ["NEMOCLAW_NO_EXPRESS", "1", /cannot be combined with NEMOCLAW_NO_EXPRESS=1/],
-    [
-      "NON_INTERACTIVE",
-      "1",
-      /cannot be combined with non-interactive mode \(triggered by: the --non-interactive flag\)/,
-    ],
+    // Set directly (bypasses main's flag parsing), so the origin is unknown and
+    // the "(triggered by: …)" clause is omitted.
+    ["NON_INTERACTIVE", "1", /cannot be combined with non-interactive mode\./],
     ["NEMOCLAW_PROVIDER", "install-vllm", /conflicts with NEMOCLAW_PROVIDER=install-vllm/],
   ])("rejects %s when the Station demo override would otherwise be ignored", (name, value, message) => {
     const result = runExpressPromptWithTty("\n", "pipe", "DGX Station", {

@@ -2888,10 +2888,14 @@ validate_station_deepseek_override() {
     # #7009: name what actually put the run in non-interactive mode so the user
     # can act on it. NON_INTERACTIVE_SOURCE is recorded in main() where the
     # origin is still known (main exports NON_INTERACTIVE into
-    # NEMOCLAW_NON_INTERACTIVE, erasing the distinction here). Fall back to the
-    # flag wording for direct callers (tests) that set NON_INTERACTIVE without
-    # going through main's flag parsing.
-    error "--station-deepseek selects the DGX Station express prompt and cannot be combined with non-interactive mode (triggered by: ${NON_INTERACTIVE_SOURCE:-the --non-interactive flag})."
+    # NEMOCLAW_NON_INTERACTIVE, erasing the distinction here). Append the clause
+    # only when the origin is known, so direct callers that set NON_INTERACTIVE
+    # without going through main's flag parsing still get a clean message.
+    local trigger_note=""
+    if [ -n "${NON_INTERACTIVE_SOURCE:-}" ]; then
+      trigger_note=" (triggered by: ${NON_INTERACTIVE_SOURCE})"
+    fi
+    error "--station-deepseek selects the DGX Station express prompt and cannot be combined with non-interactive mode${trigger_note}."
   fi
   if [ -n "${NEMOCLAW_PROVIDER:-}" ]; then
     error "--station-deepseek conflicts with NEMOCLAW_PROVIDER=${NEMOCLAW_PROVIDER}. Remove the provider override to use Station express install."
@@ -3162,7 +3166,6 @@ main() {
   if [ "${ACCEPT_THIRD_PARTY_SOFTWARE:-}" = "1" ] && [ "${NON_INTERACTIVE:-}" != "1" ] \
     && [ "${STATION_DEEPSEEK:-}" != "1" ]; then
     NON_INTERACTIVE=1
-    NON_INTERACTIVE_SOURCE="NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE=1 (implies --non-interactive)"
   fi
 
   export NEMOCLAW_NON_INTERACTIVE="${NON_INTERACTIVE}"
