@@ -1728,7 +1728,13 @@ function unlockAgentConfigUnderMutationLock(
         target.configDir,
       ]);
       const [mode, owner] = dirPerms.split(" ");
-      if (mode !== dirMode) issues.push(`config dir mode=${mode} (expected ${dirMode})`);
+      // The Hermes dashboard can tighten its mutable home from 03770 to 0700.
+      // Both postures are sandbox-owned; protected files remain exactly 0640.
+      const validDirMode = mode === dirMode || (target.agentName === "hermes" && mode === "700");
+      if (!validDirMode) {
+        const expectedDirModes = target.agentName === "hermes" ? `700 or ${dirMode}` : dirMode;
+        issues.push(`config dir mode=${mode} (expected ${expectedDirModes})`);
+      }
       if (owner !== "sandbox:sandbox") {
         issues.push(`config dir owner=${owner} (expected sandbox:sandbox)`);
       }
