@@ -970,8 +970,10 @@ PAYLOAD
   cat > "$target/scripts/prepare-dgx-station-host.sh" <<'HELPER'
 #!/usr/bin/env bash
 set -euo pipefail
-[ "\${1:-}" = "--apply" ]
-printf 'PREPARE_STATION\\n'
+case "\${1:-}" in
+  --check|--apply|--verify) printf 'PREPARE_STATION_%s\\n' "\${1#--}" ;;
+  *) exit 2 ;;
+esac
 HELPER
   chmod +x "$target/scripts/install.sh" "$target/scripts/prepare-dgx-station-host.sh"
   exit 0
@@ -1003,8 +1005,14 @@ exit 0
 
     expect(result.status, output).toBe(0);
     expect(output).toContain("DGX Station host prerequisites are ready");
-    expect(output.indexOf("PREPARE_STATION")).toBeGreaterThanOrEqual(0);
-    expect(output.indexOf("PREPARE_STATION")).toBeLessThan(output.indexOf("ENSURE_DOCKER"));
+    expect(output.indexOf("PREPARE_STATION_check")).toBeGreaterThanOrEqual(0);
+    expect(output.indexOf("PREPARE_STATION_check")).toBeLessThan(
+      output.indexOf("PREPARE_STATION_apply"),
+    );
+    expect(output.indexOf("PREPARE_STATION_apply")).toBeLessThan(
+      output.indexOf("PREPARE_STATION_verify"),
+    );
+    expect(output.indexOf("PREPARE_STATION_verify")).toBeLessThan(output.indexOf("ENSURE_DOCKER"));
     expect(output.indexOf("ENSURE_DOCKER")).toBeLessThan(output.indexOf("ENSURE_BUILD_DEPS"));
   });
 
@@ -1064,10 +1072,34 @@ ensure_station_express_host
 
     expect(result.status, output).toBe(10);
     expect(fs.readFileSync(stateFile, "utf-8")).toBe(
-      `revision=${STATION_REVISION}\nmodel=nemotron-3-ultra-550b-a55b\n`,
+      `revision=${STATION_REVISION}\nmodel=nemotron-3-ultra-550b-a55b\nmode=express\n`,
     );
     expect(fs.statSync(stateFile).mode & 0o777).toBe(0o600);
     expect(output).toContain(`NEMOCLAW_INSTALL_TAG=${STATION_REVISION}`);
+  });
+
+  it("persists provider-only origin and prints an exact provider resume command", () => {
+    const { home, result, output } = runSourced(
+      INSTALLER_PAYLOAD,
+      `
+_SELECTED_EXPRESS_PLATFORM='DGX Station'
+_STATION_INSTALL_MODE='provider'
+NEMOCLAW_PROVIDER='install-vllm'
+unset NEMOCLAW_VLLM_MODEL
+station_installer_revision() { printf '${STATION_REVISION}'; }
+run_station_host_preparation() { return 10; }
+ensure_station_express_host
+`,
+    );
+    const stateFile = path.join(home, ".nemoclaw", "station-express-resume");
+
+    expect(result.status, output).toBe(10);
+    expect(fs.readFileSync(stateFile, "utf-8")).toBe(
+      `revision=${STATION_REVISION}\nmodel=auto\nmode=provider\n`,
+    );
+    expect(output).toContain(
+      `NEMOCLAW_PROVIDER=install-vllm NEMOCLAW_INSTALL_TAG=${STATION_REVISION} bash`,
+    );
   });
 
   it("rejects a resume-state symlink without loading its target", () => {
@@ -1120,7 +1152,7 @@ ensure_station_express_host
     fs.mkdirSync(stateDir, { mode: 0o700 });
     fs.writeFileSync(
       path.join(stateDir, "station-express-resume"),
-      `revision=${STATION_REVISION}\nmodel=nemotron-3-ultra-550b-a55b\n`,
+      `revision=${STATION_REVISION}\nmodel=nemotron-3-ultra-550b-a55b\nmode=express\n`,
       { mode: 0o600 },
     );
     const result = spawnSync(
@@ -1163,6 +1195,137 @@ printf 'RESULT PLATFORM=%s PROVIDER=%s MODEL=%s VLLM_MODEL=%s\n' \
     );
   });
 
+  it("resumes provider-only Station setup without enabling express policy", () => {
+    const { result, output } = runSourced(
+      INSTALLER_PAYLOAD,
+      `
+mkdir -p "$HOME/.nemoclaw"
+chmod 0700 "$HOME/.nemoclaw"
+printf 'revision=${STATION_REVISION}\nmodel=auto\nmode=provider\n' >"$HOME/.nemoclaw/station-express-resume"
+chmod 0600 "$HOME/.nemoclaw/station-express-resume"
+detect_express_platform() { printf 'DGX Station'; }
+station_installer_revision() { printf '${STATION_REVISION}'; }
+NON_INTERACTIVE=''
+NEMOCLAW_PROVIDER=''
+NEMOCLAW_NO_EXPRESS=''
+unset NEMOCLAW_POLICY_MODE NEMOCLAW_YES NEMOCLAW_SANDBOX_NAME
+maybe_offer_express_install
+printf 'RESULT MODE=%s PROVIDER=%s POLICY=%s YES=%s SANDBOX=%s\n' \
+  "$_STATION_INSTALL_MODE" "$NEMOCLAW_PROVIDER" "\${NEMOCLAW_POLICY_MODE:-}" "\${NEMOCLAW_YES:-}" "\${NEMOCLAW_SANDBOX_NAME:-}"
+`,
+    );
+
+    expect(result.status, output).toBe(0);
+    expect(output).toContain("Resuming the accepted managed-vLLM provider setup");
+    expect(output).toContain("RESULT MODE=provider PROVIDER=install-vllm POLICY= YES= SANDBOX=");
+    expect(output).not.toContain("Resuming the accepted express install");
+  });
+
+  it("preserves an explicit model supplied on a pre-discovery reboot rerun", () => {
+    const { result, output } = runSourced(
+      INSTALLER_PAYLOAD,
+      `
+mkdir -p "$HOME/.nemoclaw"
+chmod 0700 "$HOME/.nemoclaw"
+printf 'revision=${STATION_REVISION}\nmodel=nemotron-3-ultra-550b-a55b\nmode=express\n' >"$HOME/.nemoclaw/station-express-resume"
+chmod 0600 "$HOME/.nemoclaw/station-express-resume"
+station_installer_revision() { printf '${STATION_REVISION}'; }
+NEMOCLAW_VLLM_MODEL='deepseek-v4-flash'
+load_station_express_resume
+printf 'RESULT MODEL=%s\n' "$NEMOCLAW_VLLM_MODEL"
+`,
+    );
+
+    expect(result.status, output).toBe(0);
+    expect(output).toContain("RESULT MODEL=deepseek-v4-flash");
+  });
+
+  it("fails closed when a model rerun would bypass pending pair revalidation", () => {
+    const { home, result, output } = runSourced(
+      INSTALLER_PAYLOAD,
+      `
+mkdir -p "$HOME/.nemoclaw"
+chmod 0700 "$HOME/.nemoclaw"
+printf 'revision=${STATION_REVISION}\nmodel=auto\nmode=express\n' >"$HOME/.nemoclaw/station-express-resume"
+printf '{}\n' >"$HOME/.nemoclaw/station-dual-pair-resume.json"
+chmod 0600 "$HOME/.nemoclaw/station-express-resume" "$HOME/.nemoclaw/station-dual-pair-resume.json"
+station_installer_revision() { printf '${STATION_REVISION}'; }
+NEMOCLAW_VLLM_MODEL='deepseek-v4-flash'
+load_station_express_resume
+`,
+    );
+
+    expect(result.status, output).not.toBe(0);
+    expect(output).toContain("refusing to replace its model");
+    expect(fs.existsSync(path.join(home, ".nemoclaw", "station-dual-pair-resume.json"))).toBe(true);
+  });
+
+  it("fails closed when Station setup is disabled with a pending pair resume", () => {
+    const { home, result, output } = runSourced(
+      INSTALLER_PAYLOAD,
+      `
+mkdir -p "$HOME/.nemoclaw"
+chmod 0700 "$HOME/.nemoclaw"
+printf '{}\n' >"$HOME/.nemoclaw/station-dual-pair-resume.json"
+chmod 0600 "$HOME/.nemoclaw/station-dual-pair-resume.json"
+detect_express_platform() { printf 'DGX Station'; }
+NEMOCLAW_NO_EXPRESS='1'
+NEMOCLAW_PROVIDER=''
+maybe_offer_express_install
+`,
+    );
+
+    expect(result.status, output).not.toBe(0);
+    expect(output).toContain("finish exact pair revalidation before disabling Station setup");
+    expect(fs.existsSync(path.join(home, ".nemoclaw", "station-dual-pair-resume.json"))).toBe(true);
+  });
+
+  it("forces pending pair recovery before a non-interactive skip path", () => {
+    const { result, output } = runSourced(
+      INSTALLER_PAYLOAD,
+      `
+mkdir -p "$HOME/.nemoclaw"
+chmod 0700 "$HOME/.nemoclaw"
+printf 'revision=${STATION_REVISION}\nmodel=auto\nmode=express\n' >"$HOME/.nemoclaw/station-express-resume"
+printf '{}\n' >"$HOME/.nemoclaw/station-dual-pair-resume.json"
+chmod 0600 "$HOME/.nemoclaw/station-express-resume" "$HOME/.nemoclaw/station-dual-pair-resume.json"
+detect_express_platform() { printf 'DGX Station'; }
+station_installer_revision() { printf '${STATION_REVISION}'; }
+NON_INTERACTIVE='1'
+NEMOCLAW_PROVIDER=''
+NEMOCLAW_NO_EXPRESS=''
+maybe_offer_express_install
+printf 'RESULT PLATFORM=%s PROVIDER=%s MODE=%s\n' "$_SELECTED_EXPRESS_PLATFORM" "$NEMOCLAW_PROVIDER" "$_STATION_INSTALL_MODE"
+`,
+    );
+
+    expect(result.status, output).toBe(0);
+    expect(output).toContain("Resuming the accepted express install");
+    expect(output).toContain("RESULT PLATFORM=DGX Station PROVIDER=install-vllm MODE=express");
+    expect(output).not.toContain("Skipping express prompt (--non-interactive set)");
+  });
+
+  it("rejects pair-only crash state before prompts or fallback", () => {
+    const { result, output } = runSourced(
+      INSTALLER_PAYLOAD,
+      `
+mkdir -p "$HOME/.nemoclaw"
+chmod 0700 "$HOME/.nemoclaw"
+printf '{}\n' >"$HOME/.nemoclaw/station-dual-pair-resume.json"
+chmod 0600 "$HOME/.nemoclaw/station-dual-pair-resume.json"
+detect_express_platform() { printf 'DGX Station'; }
+NON_INTERACTIVE='1'
+NEMOCLAW_PROVIDER=''
+NEMOCLAW_NO_EXPRESS=''
+maybe_offer_express_install
+`,
+    );
+
+    expect(result.status, output).not.toBe(0);
+    expect(output).toContain("pair state exists without its required installer resume state");
+    expect(output).not.toContain("Skipping express prompt");
+  });
+
   it("preserves an explicit provider even when Station resume state exists", () => {
     const { home, result, output } = runSourced(
       INSTALLER_PAYLOAD,
@@ -1193,7 +1356,7 @@ printf 'RESULT PROVIDER=%s\n' "$NEMOCLAW_PROVIDER"
       `
 mkdir -p "$HOME/.nemoclaw"
 chmod 0700 "$HOME/.nemoclaw"
-printf 'revision=${STATION_REVISION}\nmodel=nemotron-3-ultra-550b-a55b\n' >"$HOME/.nemoclaw/station-express-resume"
+printf 'revision=${STATION_REVISION}\nmodel=nemotron-3-ultra-550b-a55b\nmode=express\n' >"$HOME/.nemoclaw/station-express-resume"
 chmod 0600 "$HOME/.nemoclaw/station-express-resume"
 detect_express_platform() { printf 'DGX Station'; }
 NON_INTERACTIVE=''
@@ -1239,7 +1402,7 @@ printf 'RESULT MODEL=%s\n' "$NEMOCLAW_VLLM_MODEL"
     fs.mkdirSync(stateDir, { mode: 0o700 });
     fs.writeFileSync(
       path.join(stateDir, "station-express-resume"),
-      `revision=${STATION_REVISION}\nmodel=nemotron-3-ultra-550b-a55b\nunexpected\n`,
+      `revision=${STATION_REVISION}\nmodel=nemotron-3-ultra-550b-a55b\nmode=express\nunexpected\n`,
       { mode: 0o600 },
     );
     const result = spawnSync(
@@ -1276,7 +1439,7 @@ printf 'RESULT MODEL=%s\n' "$NEMOCLAW_VLLM_MODEL"
       `
 mkdir -p "$HOME/.nemoclaw"
 chmod 0700 "$HOME/.nemoclaw"
-printf 'revision=${savedRevision}\nmodel=nemotron-3-ultra-550b-a55b\n' >"$HOME/.nemoclaw/station-express-resume"
+printf 'revision=${savedRevision}\nmodel=nemotron-3-ultra-550b-a55b\nmode=express\n' >"$HOME/.nemoclaw/station-express-resume"
 chmod 0600 "$HOME/.nemoclaw/station-express-resume"
 station_installer_revision() { printf '${currentRevision}'; }
 load_station_express_resume

@@ -58,6 +58,12 @@ Any other failed unit blocks preparation for administrator review.
 It does not install a host CUDA toolkit or Docker Compose.
 If any other existing prerequisite version differs, preparation stops instead of changing it automatically.
 After changing pinned packages, the installer exits with status `10`; reboot, sign in, and run the printed command, which pins the exact accepted NemoClaw commit before resuming express setup.
+For automatic dual-Station qualification, configure both Stations before installation with exactly two active 400 Gbit/s Ethernet CX-8 rails, MTU 9000, and one usable private `/30` address per rail.
+The reciprocal addresses must have direct link routes, the expected peer MAC neighbors, and jumbo-frame connectivity in both directions.
+The SSH target must already have usable host-key trust and non-interactive authentication, and the selected peer account must have passwordless `sudo` for remote host preparation.
+NemoClaw checks only the two deterministic `/30` counterpart addresses; it does not scan other addresses, configure rails, or enroll SSH trust.
+If either host preparation requires a reboot, the installer stops with status `10` and names the host to reboot manually.
+Its owner-only resume state binds the exact NemoClaw revision, preparation helper, SSH host key, GPU identities, and reciprocal rails; the installer never reboots a host automatically.
 
 <Warning title="DGX Station Support Status">
 DGX Station remains Deferred.

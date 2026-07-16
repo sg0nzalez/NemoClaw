@@ -145,8 +145,15 @@ When you start managed vLLM outside the installer express flow, NemoClaw uses th
 | DGX Station | `deepseek-ai/DeepSeek-V4-Flash` |
 | Linux with an NVIDIA GPU | `nvidia/NVIDIA-Nemotron-3-Nano-4B-FP8` |
 
-On DGX Station, accepting the installer express prompt sets `NEMOCLAW_VLLM_MODEL=nemotron-3-ultra-550b-a55b` and overrides the profile default.
-Pass `--station-deepseek` to select the existing `deepseek-v4-flash` recipe while retaining the same one-confirmation express flow.
+On DGX Station, accepting the installer express prompt leaves the model selector unset while it checks for a trusted reciprocal pair.
+The installer derives exactly one counterpart from each of two configured private `/30` CX-8 rails and consults existing SSH trust only for those two addresses.
+At least one derived address must already be trusted; if both are trusted, their host keys must identify one coherent SSH host. After the Stations pass reciprocal GPU, rail, MAC, route, neighbor, and jumbo-frame checks across both rails, the installer prepares both hosts, exports the qualified peer, and automatically selects `nemotron-3-ultra-550b-a55b`.
+With both model and peer unset, if no trusted pair qualifies, it retains the single-Station `deepseek-v4-flash` profile default.
+Setting `NEMOCLAW_VLLM_MODEL` remains authoritative; setting `NEMOCLAW_DGX_STATION_PEER` requests that exact already-trusted peer and fails closed if it does not qualify.
+Pass `--station-deepseek` to select the existing `deepseek-v4-flash` recipe explicitly while retaining the same one-confirmation express flow.
+Configure the physical rails and SSH host-key and authentication trust before installation.
+NemoClaw does not modify rail configuration, enroll SSH trust, or reboot either host automatically.
+If either host requires a reboot after pinned prerequisite changes, the installer stops with status `10` and resumes only after the manual reboot with owner-only state tied to the printed exact revision and reciprocal identity.
 The registered Ultra recipe tracks the [official DGX Station deployment guide](https://github.com/NVIDIA-NeMo/Nemotron/blob/287ae845639d2ce998998cb8fd1f70a3fa943c0b/usage-cookbook/Nemotron-3-Ultra/StationDeploymentGuide/README.md) and configures the pinned model revision, CPU offload, `16 GB` of shared memory, memory/stack ulimits, MTP speculative decoding, and the Nemotron reasoning and tool-call parsers.
 NemoClaw intentionally keeps its existing bridge-networked managed-inference topology instead of importing the playbook's host-network setting.
 The container publishes port `8000` through Docker, so apply the firewall guidance at the top of this page.
@@ -174,7 +181,8 @@ NEMOCLAW_PROVIDER=install-vllm \
 On DGX Spark and DGX Station, `NEMOCLAW_PROVIDER=install-vllm` is sufficient for a non-interactive run.
 Add `NEMOCLAW_EXPERIMENTAL=1` on a generic Linux NVIDIA GPU host.
 Non-interactive runs use the profile default unless you set `NEMOCLAW_VLLM_MODEL`.
-On DGX Station, a direct provider-only run therefore selects `deepseek-v4-flash`; the installer express flow sets the Nemotron 3 Ultra override for you.
+The commands above invoke `nemoclaw onboard` directly, so a DGX Station run with no model or peer selects the `deepseek-v4-flash` profile default.
+When `NEMOCLAW_PROVIDER=install-vllm` is instead supplied to the shell installer, the installer enters the same Station host-preparation and trusted-pair discovery boundary used by express setup and selects Nemotron 3 Ultra only after a reciprocal pair qualifies.
 
 ## Select a Managed Model
 

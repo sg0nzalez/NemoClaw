@@ -609,7 +609,10 @@ describe("starter prompt docs CTA", () => {
       "Windows WSL Express: `NEMOCLAW_PROVIDER=install-windows-ollama`",
     );
     expect(promptSource).toContain(
-      "NEMOCLAW_VLLM_MODEL=nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-NVFP4",
+      "leave `NEMOCLAW_VLLM_MODEL` unset for DGX Spark Express and for automatic DGX Station trusted-pair selection",
+    );
+    expect(promptSource).toContain(
+      "At least one derived address must already be trusted; if both are trusted, their host keys must identify one coherent SSH host.",
     );
     expect(promptSource).toContain(
       "Leave `NEMOCLAW_VLLM_MODEL` unset so the installed maintained release selects its current Spark Express model.",
@@ -640,7 +643,7 @@ describe("starter prompt docs CTA", () => {
     );
     expect(promptSource).not.toContain("\n- Ask for Balanced, Restricted, or Open policy.\n");
     expect(promptSource).toContain(
-      "Managed vLLM: `NEMOCLAW_PROVIDER=install-vllm`; leave `NEMOCLAW_VLLM_MODEL` unset for DGX Spark Express, set it to `nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-NVFP4` for DGX Station Express",
+      "Managed vLLM: `NEMOCLAW_PROVIDER=install-vllm`; leave `NEMOCLAW_VLLM_MODEL` unset for DGX Spark Express and for automatic DGX Station trusted-pair selection, or preserve an approved explicit model override.",
     );
   });
 

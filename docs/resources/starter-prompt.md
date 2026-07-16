@@ -79,17 +79,17 @@ If DGX Spark Express is selected:
 
 If DGX Station Express is selected:
 
-- Use managed vLLM.
-- Explicitly select `nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-NVFP4`.
-- Do not leave the model unset; the ordinary managed-vLLM default can select DeepSeek and would not reproduce Express.
-- Set `NEMOCLAW_PROVIDER=install-vllm`.
-- Set `NEMOCLAW_VLLM_MODEL=nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-NVFP4`.
-- Disclose that the model download is approximately 352 GB, in addition to the vLLM container and temporary download space.
+- Use managed vLLM and set `NEMOCLAW_PROVIDER=install-vllm`.
+- Leave `NEMOCLAW_VLLM_MODEL` unset unless the user explicitly selected a model.
+- Explain that the installer checks only the deterministic counterpart on each of two configured private `/30` CX-8 rails. At least one derived address must already be trusted; if both are trusted, their host keys must identify one coherent SSH host. It selects pinned Nemotron 3 Ultra only when the reciprocal pair then qualifies; otherwise the existing single-Station DeepSeek default remains.
+- If the user supplies `NEMOCLAW_DGX_STATION_PEER`, preserve that exact selection and explain that setup stops if the already-trusted peer does not qualify.
+- Confirm that the physical rails and SSH host-key and authentication trust were configured outside NemoClaw. Do not configure the rails, enroll SSH trust, or approve an automatic reboot.
+- Explain the container and selected model download before it begins, without assuming the Ultra recipe was selected.
 - Verify the model-cache filesystem and Docker storage have sufficient capacity.
 - Warn that DGX Station managed deployment has deferred end-to-end physical-hardware validation.
 - Describe it as an evaluation path, not a validated production deployment.
 - Explain that startup may fail despite passing initial checks.
-- Ask separately for approval of the approximately 352 GB download.
+- If either host requires a reboot, let the installer stop, ask the user to reboot the named host manually, and resume only with the printed exact-revision command and owner-only state.
 
 For both Express paths:
 
@@ -200,7 +200,7 @@ Use this provider mapping for non-interactive setup:
 - Anthropic-compatible: `NEMOCLAW_PROVIDER=anthropicCompatible`, endpoint, model, `COMPATIBLE_ANTHROPIC_API_KEY`.
 - Ollama: `NEMOCLAW_PROVIDER=ollama`, optional `NEMOCLAW_MODEL`.
 - Existing vLLM: `NEMOCLAW_PROVIDER=vllm`.
-- Managed vLLM: `NEMOCLAW_PROVIDER=install-vllm`; leave `NEMOCLAW_VLLM_MODEL` unset for DGX Spark Express, set it to `nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-NVFP4` for DGX Station Express, or use an approved optional override for non-Express setup.
+- Managed vLLM: `NEMOCLAW_PROVIDER=install-vllm`; leave `NEMOCLAW_VLLM_MODEL` unset for DGX Spark Express and for automatic DGX Station trusted-pair selection, or preserve an approved explicit model override.
 - Windows WSL Express: `NEMOCLAW_PROVIDER=install-windows-ollama`.
 
 Do not offer Hermes Provider for OpenClaw or Deep Agents.

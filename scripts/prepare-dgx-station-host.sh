@@ -73,6 +73,17 @@ on_error() {
   exit "$rc"
 }
 
+# Remote pair preparation must never fall back to an interactive sudo prompt.
+# Keep the helper's local behavior unchanged unless its caller explicitly opts
+# into this strict mode after proving `sudo -n true` succeeds.
+sudo() {
+  if [[ "${NEMOCLAW_STATION_PREP_SUDO_NONINTERACTIVE:-0}" == "1" && "${1:-}" != "-n" ]]; then
+    command sudo -n "$@"
+  else
+    command sudo "$@"
+  fi
+}
+
 usage() {
   cat <<'EOF'
 Usage: prepare-dgx-station-host.sh --check|--apply|--verify

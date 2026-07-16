@@ -244,22 +244,24 @@ detect_express_platform
     );
   });
 
-  it("uses the Nemotron Ultra recipe without follow-up choices on DGX Station", () => {
+  it("defers automatic Station model selection until reciprocal pair discovery", () => {
     const result = runExpressPromptWithTty("\n", "pipe", "DGX Station");
     const output = `${result.stdout}${result.stderr}`;
     expect(result.status, output).toBe(0);
     expect(output).toMatch(/Detected DGX Station/);
     expect(output).toMatch(
-      /Express install will configure managed local vLLM with NVIDIA Nemotron 3 Ultra 550B/,
+      /Express install will configure managed local vLLM using automatic Station model selection/,
     );
-    expect(output).toMatch(/approximately 352 GB model/);
+    expect(output).toMatch(
+      /pretrusted reciprocal dual-Station pair selects NVIDIA Nemotron 3 Ultra/,
+    );
     expect(output).toMatch(
       /installs missing pinned driver, Docker, and NVIDIA Container Toolkit packages/,
     );
     expect(output).toMatch(/DGX Station remains Deferred/);
     expect(output).toMatch(/Using express install for DGX Station/);
     expect(output).toMatch(
-      /RESULT NON_INTERACTIVE=1 SUDO_MODE=prompt PROVIDER=install-vllm MODEL=nvidia\/nemotron-3-ultra-550b-a55b VLLM_MODEL=nemotron-3-ultra-550b-a55b POLICY=suggested YES=1 SANDBOX=my-assistant/,
+      /RESULT NON_INTERACTIVE=1 SUDO_MODE=prompt PROVIDER=install-vllm MODEL= VLLM_MODEL= POLICY=suggested YES=1 SANDBOX=my-assistant/,
     );
   });
 
@@ -514,10 +516,12 @@ printf 'NON_EXPRESS_ALLOWED\n'
     });
     const output = `${result.stdout}${result.stderr}`;
     expect(result.status, output).toBe(0);
-    expect(output).toMatch(/managed local vLLM with NVIDIA Nemotron 3 Ultra 550B/);
-    expect(output).toMatch(/approximately 352 GB model/);
+    expect(output).toMatch(/managed local vLLM using automatic Station model selection/);
     expect(output).toMatch(
-      /RESULT NON_INTERACTIVE=1 SUDO_MODE=prompt PROVIDER=install-vllm MODEL=nvidia\/nemotron-3-ultra-550b-a55b VLLM_MODEL=nemotron-3-ultra-550b-a55b POLICY=suggested YES=1 SANDBOX=my-assistant/,
+      /pretrusted reciprocal dual-Station pair selects NVIDIA Nemotron 3 Ultra/,
+    );
+    expect(output).toMatch(
+      /RESULT NON_INTERACTIVE=1 SUDO_MODE=prompt PROVIDER=install-vllm MODEL= VLLM_MODEL= POLICY=suggested YES=1 SANDBOX=my-assistant/,
     );
   });
 
