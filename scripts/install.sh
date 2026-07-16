@@ -3140,7 +3140,8 @@ clear_station_express_resume() {
 station_resume_install_command() {
   local revision="$1"
   if [ "${_STATION_INSTALL_MODE:-express}" = "provider" ]; then
-    printf 'curl -fsSL https://www.nvidia.com/nemoclaw.sh | NEMOCLAW_PROVIDER=install-vllm NEMOCLAW_INSTALL_TAG=%s bash' "$revision"
+    local provider_assignment="NEMOCLAW_PROVIDER=install-vllm "
+    printf 'curl -fsSL https://www.nvidia.com/nemoclaw.sh | %sNEMOCLAW_INSTALL_TAG=%s bash' "$provider_assignment" "$revision"
   else
     printf 'curl -fsSL https://www.nvidia.com/nemoclaw.sh | NEMOCLAW_INSTALL_TAG=%s bash' "$revision"
   fi
