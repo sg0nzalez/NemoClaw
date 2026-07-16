@@ -9,10 +9,26 @@ import { describe, expect, it } from "vitest";
 
 import {
   auditOpenShellPolicyMutationReads,
+  countPolicyReadCalls,
   discoverPolicyReadSites,
 } from "../scripts/checks/openshell-policy-mutation-read.mts";
 
 describe("OpenShell policy mutation read discovery", () => {
+  it("counts executable policy reads without comment or string decoys", () => {
+    const source = [
+      "// buildPolicyGetCommand(commentedSandbox);",
+      'const decoy = "buildPolicyGetFullCommand(stringSandbox)";',
+      "policyBuilders.buildPolicyGetCommand(sandboxName);",
+      'policyBuilders["buildPolicyGetFullCommand"](sandboxName);',
+      '["openshell", "policy", "get", "--base", sandboxName];',
+      '["policy", "get", "--full", sandboxName];',
+      'const arrayDecoy = `["policy", "get", "--base", sandboxName]`;',
+      '["not-openshell", "policy", "get", "--base", sandboxName];',
+    ].join("\n");
+
+    expect(countPolicyReadCalls(source, "fixture.ts")).toBe(4);
+  });
+
   it("discovers builder and direct policy reads in new production files", () => {
     const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-policy-read-discovery-"));
     const mutationPath = path.join(repoRoot, "src", "lib", "new-policy-mutation.ts");

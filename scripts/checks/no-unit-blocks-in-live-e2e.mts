@@ -38,9 +38,12 @@ const IT_PRIMITIVE_MEMBERS = new Set([
   "concurrent",
   "each",
   "fails",
+  "for",
   "only",
+  "runIf",
   "sequential",
   "skip",
+  "skipIf",
   "todo",
 ]);
 
@@ -77,9 +80,8 @@ export function findLiveUnitBlocks(source: string, file: string): LiveUnitBlockV
     if (ts.isIdentifier(expression)) return expression.text === "it";
     return (
       ts.isPropertyAccessExpression(expression) &&
-      ts.isIdentifier(expression.expression) &&
-      expression.expression.text === "it" &&
-      IT_PRIMITIVE_MEMBERS.has(expression.name.text)
+      IT_PRIMITIVE_MEMBERS.has(expression.name.text) &&
+      isItPrimitive(expression.expression)
     );
   }
 

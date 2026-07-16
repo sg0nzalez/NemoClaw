@@ -35,6 +35,17 @@ describe("live E2E unit-block guard", () => {
     expect(linesFlagged(source)).toEqual([1, 2, 3]);
   });
 
+  it("flags conditional and nested it modifier chains", () => {
+    const source = [
+      'it.skipIf(false)("conditional skip", () => {});',
+      'it.runIf(true)("conditional run", () => {});',
+      'it.for([1, 2])("parameterized", () => {});',
+      'it.concurrent.skip("nested modifier", () => {});',
+    ].join("\n");
+
+    expect(linesFlagged(source)).toEqual([1, 2, 3, 4]);
+  });
+
   it("does not flag test(...) — the live-case primitive", () => {
     const source = [
       'test("live case", async ({ host }) => {});',

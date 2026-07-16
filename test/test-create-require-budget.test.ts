@@ -8,6 +8,10 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  extractTrustedCreateRequireAllowlists,
+  trustedCreateRequireExpansionFailure,
+} from "../.github/actions/ci-static-checks/create-require-ratchet.mts";
+import {
   collectProductionCreateRequireSources,
   collectTestSupportCreateRequireSources,
   containsCreateRequireIdentifier,
@@ -168,5 +172,29 @@ describe("CLI createRequire budget", () => {
         ].join("\n"),
       ),
     ).toThrow("CLI_CREATE_REQUIRE_FILES must be a literal string array");
+  });
+
+  it("duplicates the ratchet in base-trusted CI code that rejects PR additions (#6245)", () => {
+    const baselineSource = [
+      'export const CLI_CREATE_REQUIRE_FILES = ["src/a.test.ts"] as const;',
+      "export const TEST_SUPPORT_CREATE_REQUIRE_FILES = [] as const;",
+    ].join("\n");
+    const currentSource = [
+      'export const CLI_CREATE_REQUIRE_FILES = ["src/a.test.ts", "src/new.test.ts"] as const;',
+      'export const TEST_SUPPORT_CREATE_REQUIRE_FILES = ["test/new.ts"] as const;',
+    ].join("\n");
+
+    expect(
+      trustedCreateRequireExpansionFailure(
+        extractTrustedCreateRequireAllowlists(currentSource),
+        extractTrustedCreateRequireAllowlists(baselineSource),
+      ),
+    ).toContain("src/new.test.ts");
+    expect(
+      trustedCreateRequireExpansionFailure(
+        extractTrustedCreateRequireAllowlists(currentSource),
+        extractTrustedCreateRequireAllowlists(baselineSource),
+      ),
+    ).toContain("test/new.ts");
   });
 });

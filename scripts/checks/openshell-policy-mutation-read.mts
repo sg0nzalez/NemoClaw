@@ -22,6 +22,8 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import ts from "typescript";
+
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
 interface AuditedMutationRead {
@@ -79,9 +81,63 @@ export interface DiscoveredPolicyReadSite {
   readonly readCalls: number;
 }
 
-const POLICY_GET_BUILDER_CALL = /\bbuildPolicyGet(?:Full)?Command\s*\(/gu;
-const DIRECT_POLICY_GET_CALL =
-  /\[\s*(?:["'`]openshell["'`]\s*,\s*)?["'`]policy["'`]\s*,\s*["'`]get["'`]\s*,\s*["'`]--(?:base|full)["'`]/gu;
+const POLICY_GET_BUILDERS = new Set(["buildPolicyGetCommand", "buildPolicyGetFullCommand"]);
+
+function calledName(expression: ts.LeftHandSideExpression): string | null {
+  if (ts.isIdentifier(expression)) return expression.text;
+  if (ts.isPropertyAccessExpression(expression)) return expression.name.text;
+  if (
+    ts.isElementAccessExpression(expression) &&
+    expression.argumentExpression &&
+    ts.isStringLiteralLike(expression.argumentExpression)
+  ) {
+    return expression.argumentExpression.text;
+  }
+  return null;
+}
+
+function literalText(expression: ts.Expression): string | null {
+  return ts.isStringLiteralLike(expression) ? expression.text : null;
+}
+
+function isDirectPolicyRead(expression: ts.ArrayLiteralExpression): boolean {
+  const first = expression.elements[0];
+  if (!first || !ts.isExpression(first)) return false;
+  const firstText = literalText(first);
+  const offset =
+    firstText === "policy"
+      ? 0
+      : firstText === "openshell" ||
+          (ts.isCallExpression(first) && calledName(first.expression) === "resolveOpenshellBinary")
+        ? 1
+        : -1;
+  if (offset < 0) return false;
+  const values = expression.elements.map((element) =>
+    ts.isExpression(element) ? literalText(element) : null,
+  );
+  return (
+    values[offset] === "policy" &&
+    values[offset + 1] === "get" &&
+    (values[offset + 2] === "--base" || values[offset + 2] === "--full")
+  );
+}
+
+export function countPolicyReadCalls(source: string, fileName: string): number {
+  const sourceFile = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true);
+  let readCalls = 0;
+
+  function visit(node: ts.Node): void {
+    if (ts.isCallExpression(node) && POLICY_GET_BUILDERS.has(calledName(node.expression) ?? "")) {
+      readCalls += 1;
+    } else if (ts.isArrayLiteralExpression(node) && isDirectPolicyRead(node)) {
+      readCalls += 1;
+    }
+    ts.forEachChild(node, visit);
+  }
+
+  visit(sourceFile);
+  return readCalls;
+}
 
 function productionTypeScriptFiles(directory: string): string[] {
   if (!existsSync(directory)) return [];
@@ -104,9 +160,7 @@ export function discoverPolicyReadSites(repoRoot: string): DiscoveredPolicyReadS
     .flatMap((sourceRoot) => productionTypeScriptFiles(path.join(repoRoot, sourceRoot)))
     .flatMap((sourcePath) => {
       const source = readFileSync(sourcePath, "utf8");
-      const readCalls =
-        (source.match(POLICY_GET_BUILDER_CALL) ?? []).length +
-        (source.match(DIRECT_POLICY_GET_CALL) ?? []).length;
+      const readCalls = countPolicyReadCalls(source, sourcePath);
       return readCalls > 0
         ? [
             {

@@ -199,6 +199,28 @@ describe("CLI layer import boundaries (#6245)", () => {
     }
   });
 
+  it("resolves an extensionless directory import to its index module (#6245)", () => {
+    const targetDir = fs.mkdtempSync(
+      path.join(REPO_ROOT, "src/lib/actions/__boundary-extensionless-directory-"),
+    );
+    const target = path.join(targetDir, "index.mts");
+    const importer = fixturePath("src/lib/domain", "extensionless-directory-importer", ".mts");
+    const specifier = path.relative(path.dirname(importer), targetDir).split(path.sep).join("/");
+    try {
+      fs.writeFileSync(target, "export const value = true;\n");
+      fs.writeFileSync(importer, `import { value } from "${specifier}";\nexport { value };\n`);
+
+      expect(findLayerImportBoundaryViolations(importer)).toEqual([
+        expect.objectContaining({
+          detail: `domain must not import ${path.relative(REPO_ROOT, target)}`,
+        }),
+      ]);
+    } finally {
+      fs.rmSync(importer, { force: true });
+      fs.rmSync(targetDir, { force: true, recursive: true });
+    }
+  });
+
   it.each([
     ".test.mts",
     ".spec.cts",

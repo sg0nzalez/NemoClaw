@@ -115,9 +115,9 @@ function resolveInternalImport(fromAbsPath: string, specifier: string): string |
   const base = path.resolve(path.dirname(fromAbsPath), specifier);
   const extensions = [".ts", ".tsx", ".mts", ".cts"];
   const candidates = [
-    base,
     ...extensions.map((extension) => `${base}${extension}`),
     ...extensions.map((extension) => path.join(base, `index${extension}`)),
+    base,
   ];
   const found = candidates.find((candidate) => existsSync(candidate));
   if (!found) return toRepoPath(`${base}.ts`);

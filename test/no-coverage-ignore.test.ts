@@ -33,14 +33,16 @@ describe("coverage ignore guard", () => {
   });
 });
 
-describe("scanned source path selection", () => {
-  it("scans .mts files under tracked roots", () => {
+describe("scanned source path selection (#6921)", () => {
+  it("scans .mts and .tsx files under tracked roots", () => {
     expect(isScannedSourcePath("scripts/checks/no-coverage-ignore.mts")).toBe(true);
     expect(isScannedSourcePath("src/lib/example.mts")).toBe(true);
+    expect(isScannedSourcePath("src/lib/example.tsx")).toBe(true);
   });
 
   it("excludes non-source extensions and paths outside tracked roots", () => {
     expect(isScannedSourcePath("scripts/checks/README.md")).toBe(false);
     expect(isScannedSourcePath("docs/example.mts")).toBe(false);
+    expect(isScannedSourcePath("src/lib/example.tsx.bak")).toBe(false);
   });
 });
