@@ -6,6 +6,8 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import * as importedMcpBridgeValidation from "../../src/lib/actions/sandbox/mcp-bridge-validation.ts";
+import type { E2eRiskSignal } from "./risk-signal.ts";
+import * as importedRiskSignal from "./risk-signal.ts";
 
 // The root TypeScript package is exposed as CJS under the exact `node --import
 // tsx` / `npx tsx` workflow execution mode, but as an ESM namespace under
@@ -22,6 +24,12 @@ const {
   MCP_CREDENTIAL_BOUNDARY_OPENSHELL_VERSION,
   McpCredentialBoundaryRuntimeVersionError,
 } = mcpBridgeValidation;
+const riskSignal = (
+  "default" in importedRiskSignal && importedRiskSignal.default
+    ? importedRiskSignal.default
+    : importedRiskSignal
+) as typeof import("./risk-signal.ts");
+const { configuredRiskSignalEnvironment, writeRiskSignalCounts } = riskSignal;
 
 export const MCP_BRIDGE_RUNTIME_COMPATIBILITY_ARTIFACT = "openshell-runtime-compatibility.json";
 
@@ -129,6 +137,22 @@ export function recordMcpBridgeRuntimeCompatibility(
   }
 }
 
+export function recordExpectedMismatchRiskSignal(
+  result: McpBridgeRuntimeCompatibilityResult,
+  env: NodeJS.ProcessEnv = process.env,
+  resolveHead?: (workspace: string) => string,
+): E2eRiskSignal | null {
+  if (result.mode !== "expected-version-mismatch") return null;
+  const environment = configuredRiskSignalEnvironment(env, resolveHead);
+  if (!environment) return null;
+  return writeRiskSignalCounts(
+    environment,
+    { passed: 1, failed: 0, skipped: 0, pending: 0 },
+    0,
+    "passed",
+  );
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     const artifactDirectory = process.env.E2E_ARTIFACT_DIR;
@@ -142,6 +166,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       githubOutputPath,
       githubStepSummaryPath: process.env.GITHUB_STEP_SUMMARY,
     });
+    recordExpectedMismatchRiskSignal(result);
     if (result.mode === "expected-version-mismatch") {
       console.log(
         "::notice title=OpenShell dev compatibility::The installed OpenShell runtime is outside the reviewed credential boundary; full MCP lifecycle was not run. See the structured compatibility artifact for version evidence.",

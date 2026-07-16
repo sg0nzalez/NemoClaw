@@ -15,6 +15,7 @@ import {
 import {
   classifyMcpBridgeRuntimeCompatibility,
   MCP_BRIDGE_RUNTIME_COMPATIBILITY_ARTIFACT,
+  recordExpectedMismatchRiskSignal,
   recordMcpBridgeRuntimeCompatibility,
 } from "../../../tools/e2e/mcp-bridge-runtime-compatibility.mts";
 
@@ -113,9 +114,49 @@ describe("MCP bridge dev runtime compatibility", () => {
       expect(fs.readFileSync(summaryPath, "utf8")).toContain(
         "the exact-version gate rejected the unsupported runtime as required",
       );
+      expect(
+        recordExpectedMismatchRiskSignal(
+          result,
+          {
+            E2E_ARTIFACT_DIR: directory,
+            E2E_TARGET_ID: "mcp-bridge-dev",
+            GITHUB_WORKSPACE: "/workspace",
+            NEMOCLAW_E2E_EXPECTED_SHA: "a".repeat(40),
+            NEMOCLAW_E2E_PLAN_HASH: "b".repeat(64),
+            NEMOCLAW_E2E_CORRELATION_ID: "12345678-1234-4123-8123-123456789abc",
+            NEMOCLAW_E2E_SHARD: "hermes",
+          },
+          () => "a".repeat(40),
+        ),
+      ).toMatchObject({
+        jobId: "mcp-bridge-dev",
+        shardId: "hermes",
+        passed: 1,
+        failed: 0,
+        skipped: 0,
+        pending: 0,
+        unhandledErrors: 0,
+        runReason: "passed",
+      });
+      expect(JSON.parse(fs.readFileSync(path.join(directory, "risk-signal.json"), "utf8"))).toEqual(
+        expect.objectContaining({
+          expectedSha: "a".repeat(40),
+          testedSha: "a".repeat(40),
+          planHash: "b".repeat(64),
+          correlationId: "12345678-1234-4123-8123-123456789abc",
+        }),
+      );
     } finally {
       fs.rmSync(directory, { force: true, recursive: true });
     }
+  });
+
+  it("leaves aligned runtimes to the full lifecycle risk reporter (#6426)", () => {
+    const result = classifyMcpBridgeRuntimeCompatibility(
+      assertRuntimeVersion(MCP_CREDENTIAL_BOUNDARY_OPENSHELL_VERSION),
+    );
+
+    expect(recordExpectedMismatchRiskSignal(result, {})).toBeNull();
   });
 
   it("keeps every result except an exact version mismatch fatal (#6426)", () => {

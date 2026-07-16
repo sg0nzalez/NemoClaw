@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -33,6 +33,9 @@ function runCompatibilityCli(versionStdout: string, versionStderr = "") {
     { mode: 0o755 },
   );
   fs.chmodSync(openshellPath, 0o755);
+  const expectedSha = execFileSync("git", ["rev-parse", "--verify", "HEAD"], {
+    encoding: "utf8",
+  }).trim();
 
   const result = spawnSync(
     process.execPath,
@@ -48,8 +51,14 @@ function runCompatibilityCli(versionStdout: string, versionStderr = "") {
         NODE_NO_WARNINGS: "1",
         NEMOCLAW_OPENSHELL_BIN: openshellPath,
         E2E_ARTIFACT_DIR: artifactDirectory,
+        E2E_TARGET_ID: "mcp-bridge-dev",
+        GITHUB_WORKSPACE: process.cwd(),
         GITHUB_OUTPUT: githubOutputPath,
         GITHUB_STEP_SUMMARY: githubSummaryPath,
+        NEMOCLAW_E2E_CORRELATION_ID: "12345678-1234-4123-8123-123456789abc",
+        NEMOCLAW_E2E_EXPECTED_SHA: expectedSha,
+        NEMOCLAW_E2E_PLAN_HASH: "b".repeat(64),
+        NEMOCLAW_E2E_SHARD: "hermes",
       },
       killSignal: "SIGKILL",
       timeout: 30_000,
@@ -103,6 +112,18 @@ describe.skipIf(process.platform === "win32")("MCP bridge compatibility CLI", ()
         fullLifecycle: "not-run",
       });
       expect(artifact).not.toHaveProperty("guardMessage");
+      expect(
+        JSON.parse(fs.readFileSync(path.join(run.artifactDirectory, "risk-signal.json"), "utf8")),
+      ).toMatchObject({
+        jobId: "mcp-bridge-dev",
+        shardId: "hermes",
+        passed: 1,
+        failed: 0,
+        skipped: 0,
+        pending: 0,
+        unhandledErrors: 0,
+        runReason: "passed",
+      });
       const summary = fs.readFileSync(run.githubSummaryPath, "utf8");
       expect(summary).toContain(
         "the exact-version gate rejected the unsupported runtime as required",
