@@ -218,6 +218,9 @@ detect_express_platform
       /Express install will configure managed local vLLM with NVIDIA Nemotron 3 Ultra 550B/,
     );
     expect(output).toMatch(/approximately 352 GB model/);
+    expect(output).toMatch(
+      /installs missing pinned driver, Docker, and NVIDIA Container Toolkit packages/,
+    );
     expect(output).toMatch(/Using express install for DGX Station/);
     expect(output).toMatch(
       /RESULT NON_INTERACTIVE=1 SUDO_MODE=prompt PROVIDER=install-vllm MODEL=nvidia\/nemotron-3-ultra-550b-a55b VLLM_MODEL=nemotron-3-ultra-550b-a55b POLICY=suggested YES=1 SANDBOX=my-assistant/,

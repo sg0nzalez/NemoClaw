@@ -1,0 +1,324 @@
+// SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { describe, expect, it } from "vitest";
+import { INSTALLER_PAYLOAD, TEST_SYSTEM_PATH } from "./helpers/installer-sourced-env";
+
+const REPO_ROOT = path.resolve(import.meta.dirname, "..");
+const STATION_PREPARE = path.join(REPO_ROOT, "scripts", "prepare-dgx-station-host.sh");
+
+function runSourced(script: string, body: string, extraEnv: Record<string, string> = {}) {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-station-host-"));
+  const result = spawnSync(
+    "bash",
+    ["--noprofile", "--norc", "-c", `source "$SCRIPT_UNDER_TEST" >/dev/null\n${body}`],
+    {
+      cwd: REPO_ROOT,
+      encoding: "utf-8",
+      env: {
+        HOME: home,
+        PATH: TEST_SYSTEM_PATH,
+        SCRIPT_UNDER_TEST: script,
+        ...extraEnv,
+      },
+    },
+  );
+  return { home, result, output: `${result.stdout}${result.stderr}` };
+}
+
+describe("DGX Station host preparation", () => {
+  it.each([
+    ["", "missing"],
+    ["5:29.6.1-1~ubuntu.24.04~noble", "exact"],
+    ["5:30.0.0-1~ubuntu.24.04~noble", "mismatch"],
+  ])("classifies an installed package version as %s -> %s", (actual, expected) => {
+    const { result, output } = runSourced(
+      STATION_PREPARE,
+      `
+installed_version() {
+  if [[ "$1" == "docker-ce" ]]; then printf '%s' "$PACKAGE_ACTUAL"; fi
+}
+package_state 'docker-ce=5:29.6.1-1~ubuntu.24.04~noble'
+`,
+      { PACKAGE_ACTUAL: actual },
+    );
+
+    expect(result.status, output).toBe(0);
+    expect(result.stdout.trim()).toBe(expected);
+  });
+
+  it("refuses to change an existing mismatched prerequisite", () => {
+    const { result, output } = runSourced(
+      STATION_PREPARE,
+      `
+installed_version() {
+  if [[ "$1" == "docker-ce" ]]; then printf '5:30.0.0-1~ubuntu.24.04~noble'; fi
+}
+assert_no_package_mismatches
+`,
+    );
+
+    expect(result.status, output).not.toBe(0);
+    expect(output).toMatch(/docker-ce status=mismatch/);
+    expect(output).toMatch(/refusing to upgrade or downgrade them automatically/);
+  });
+
+  it("reuses exact packages and proceeds directly to runtime probes", () => {
+    const { result, output } = runSourced(
+      STATION_PREPARE,
+      `
+common_preflight() { :; }
+require_command() { :; }
+acquire_sudo() { :; }
+all_packages_exact() { return 0; }
+install_boot_marker_matches_current_boot() { return 1; }
+driver_loaded_exact() { return 0; }
+install_packages() { printf 'INSTALL_PACKAGES\n'; }
+finish_runtime() { printf 'FINISH_RUNTIME\n'; }
+verify_apply_state() { printf 'VERIFY_APPLY_STATE\n'; }
+run_apply
+`,
+    );
+
+    expect(result.status, output).toBe(0);
+    expect(output).toContain("FINISH_RUNTIME");
+    expect(output).toContain("VERIFY_APPLY_STATE");
+    expect(output).not.toContain("INSTALL_PACKAGES");
+    expect(output).toContain("APPLY_RESULT=COMPLETE");
+  });
+
+  it("installs only missing packages and returns the reboot-required contract", () => {
+    const { result, output } = runSourced(
+      STATION_PREPARE,
+      `
+common_preflight() { :; }
+require_command() { :; }
+acquire_sudo() { :; }
+all_packages_exact() { return 1; }
+assert_no_package_mismatches() { printf 'NO_MISMATCHES\n'; }
+install_packages() { printf 'INSTALL_PACKAGES\n'; }
+ensure_docker_group() { printf 'ENSURE_DOCKER_GROUP\n'; }
+write_install_boot_marker() { printf 'WRITE_BOOT_MARKER\n'; }
+sudo() { printf 'SUDO %s\n' "$*"; }
+run_apply
+`,
+    );
+
+    expect(result.status, output).toBe(10);
+    expect(output).toContain("NO_MISMATCHES");
+    expect(output).toContain("INSTALL_PACKAGES");
+    expect(output).toContain("ENSURE_DOCKER_GROUP");
+    expect(output).toContain("WRITE_BOOT_MARKER");
+    expect(output).toContain("APPLY_RESULT=REBOOT_REQUIRED");
+  });
+
+  it("does not refresh CDI when the GPU launch probe already passes", () => {
+    const { result, output } = runSourced(
+      STATION_PREPARE,
+      `
+run_cdi_test_sudo() { printf 'CDI_TEST\n'; return 0; }
+refresh_cdi() { printf 'REFRESH_CDI\n'; }
+ensure_cdi_runtime
+`,
+    );
+
+    expect(result.status, output).toBe(0);
+    expect(output).toContain("cdi_contract=pass_without_configuration_change");
+    expect(output).not.toContain("REFRESH_CDI");
+  });
+
+  it("refreshes CDI once when the initial GPU launch probe fails", () => {
+    const { result, output } = runSourced(
+      STATION_PREPARE,
+      `
+calls=0
+run_cdi_test_sudo() {
+  calls=$((calls + 1))
+  printf 'CDI_TEST_%s\n' "$calls"
+  [[ "$calls" -gt 1 ]]
+}
+refresh_cdi() { printf 'REFRESH_CDI\n'; }
+ensure_cdi_runtime
+`,
+    );
+
+    expect(result.status, output).toBe(0);
+    expect(output).toContain("CDI_TEST_1");
+    expect(output).toContain("REFRESH_CDI");
+    expect(output).toContain("CDI_TEST_2");
+    expect(output).toContain("cdi_contract=pass_after_refresh");
+  });
+
+  it("ignores the installer process while still blocking a real vLLM workload", () => {
+    const selfOnly = runSourced(
+      STATION_PREPARE,
+      `
+ps() {
+  printf '%s %s bash bash /tmp/NemoClaw/scripts/prepare-dgx-station-host.sh --apply\n' "$$" "$PPID"
+  printf '%s 1 bash bash /tmp/NemoClaw/scripts/install.sh\n' "$PPID"
+}
+ss() { :; }
+check_no_workloads
+`,
+    );
+    expect(selfOnly.result.status, selfOnly.output).toBe(0);
+
+    const active = runSourced(
+      STATION_PREPARE,
+      `
+ps() { printf '999 1 python python -m vllm serve model\n'; }
+ss() { :; }
+check_no_workloads
+`,
+    );
+    expect(active.result.status, active.output).not.toBe(0);
+    expect(active.output).toMatch(/Agent or inference workload is active/);
+  });
+
+  it("uses sudo to inspect containers during apply until Docker group access is active", () => {
+    const { result, output } = runSourced(
+      STATION_PREPARE,
+      `
+MODE='--apply'
+ps() { printf '%s %s bash bash prepare-dgx-station-host.sh --apply\n' "$$" "$PPID"; }
+ss() { :; }
+docker() { return 1; }
+sudo() {
+  if [[ "$1" == "-n" ]]; then shift; fi
+  [[ "$*" == "docker ps -aq" ]] || return 1
+}
+systemctl() { return 0; }
+check_no_workloads
+`,
+      { PATH: `${path.dirname(process.execPath)}:${TEST_SYSTEM_PATH}` },
+    );
+
+    expect(result.status, output).toBe(0);
+    expect(output).toContain("docker_access=sudo_until_group_membership_is_active");
+    expect(output).toContain("workloads=none");
+  });
+});
+
+describe("DGX Station express host integration", () => {
+  it("runs Station preparation before the generic Docker bootstrap", () => {
+    const { result, output } = runSourced(
+      INSTALLER_PAYLOAD,
+      `
+maybe_offer_express_install() { printf 'SELECT_EXPRESS\n'; _SELECTED_EXPRESS_PLATFORM='DGX Station'; }
+ensure_station_express_host() { printf 'PREPARE_STATION\n'; }
+ensure_docker() { printf 'ENSURE_DOCKER\n'; }
+ensure_openshell_build_deps() { printf 'ENSURE_BUILD_DEPS\n'; }
+prepare_installer_host
+`,
+    );
+
+    expect(result.status, output).toBe(0);
+    expect(result.stdout.trim().split("\n")).toEqual([
+      "SELECT_EXPRESS",
+      "PREPARE_STATION",
+      "ENSURE_DOCKER",
+      "ENSURE_BUILD_DEPS",
+    ]);
+  });
+
+  it("persists the selected model when host preparation requires a reboot", () => {
+    const { home, result, output } = runSourced(
+      INSTALLER_PAYLOAD,
+      `
+_SELECTED_EXPRESS_PLATFORM='DGX Station'
+NEMOCLAW_VLLM_MODEL='nemotron-3-ultra-550b-a55b'
+run_station_host_preparation() { return 10; }
+ensure_station_express_host
+`,
+    );
+    const stateFile = path.join(home, ".nemoclaw", "station-express-resume");
+
+    expect(result.status, output).toBe(10);
+    expect(fs.readFileSync(stateFile, "utf-8")).toBe("nemotron-3-ultra-550b-a55b\n");
+    expect(fs.statSync(stateFile).mode & 0o777).toBe(0o600);
+    expect(output).toMatch(/rerun the same NemoClaw installer command/);
+  });
+
+  it("resumes the accepted Station recipe without another prompt", () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-station-resume-"));
+    const stateDir = path.join(home, ".nemoclaw");
+    fs.mkdirSync(stateDir, { mode: 0o700 });
+    fs.writeFileSync(
+      path.join(stateDir, "station-express-resume"),
+      "nemotron-3-ultra-550b-a55b\n",
+      { mode: 0o600 },
+    );
+    const result = spawnSync(
+      "bash",
+      [
+        "--noprofile",
+        "--norc",
+        "-c",
+        `
+source "$INSTALLER_UNDER_TEST" >/dev/null
+detect_express_platform() { printf 'DGX Station'; }
+NON_INTERACTIVE=''
+NEMOCLAW_PROVIDER=''
+NEMOCLAW_NO_EXPRESS=''
+maybe_offer_express_install
+printf 'RESULT PLATFORM=%s PROVIDER=%s MODEL=%s VLLM_MODEL=%s\n' \
+  "$_SELECTED_EXPRESS_PLATFORM" "$NEMOCLAW_PROVIDER" "\${NEMOCLAW_MODEL:-}" "$NEMOCLAW_VLLM_MODEL"
+`,
+      ],
+      {
+        cwd: REPO_ROOT,
+        encoding: "utf-8",
+        env: {
+          HOME: home,
+          PATH: TEST_SYSTEM_PATH,
+          INSTALLER_UNDER_TEST: INSTALLER_PAYLOAD,
+        },
+      },
+    );
+    const output = `${result.stdout}${result.stderr}`;
+
+    expect(result.status, output).toBe(0);
+    expect(output).toMatch(/Resuming the accepted express install/);
+    expect(output).not.toMatch(/Run express install with these settings/);
+    expect(output).toMatch(
+      /RESULT PLATFORM=DGX Station PROVIDER=install-vllm MODEL=nvidia\/nemotron-3-ultra-550b-a55b VLLM_MODEL=nemotron-3-ultra-550b-a55b/,
+    );
+  });
+
+  it("rejects a multi-line Station resume state", () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-station-resume-invalid-"));
+    const stateDir = path.join(home, ".nemoclaw");
+    fs.mkdirSync(stateDir, { mode: 0o700 });
+    fs.writeFileSync(
+      path.join(stateDir, "station-express-resume"),
+      "nemotron-3-ultra-550b-a55b\nunexpected\n",
+      { mode: 0o600 },
+    );
+    const result = spawnSync(
+      "bash",
+      [
+        "--noprofile",
+        "--norc",
+        "-c",
+        `source "$INSTALLER_UNDER_TEST" >/dev/null; load_station_express_resume`,
+      ],
+      {
+        cwd: REPO_ROOT,
+        encoding: "utf-8",
+        env: {
+          HOME: home,
+          PATH: TEST_SYSTEM_PATH,
+          INSTALLER_UNDER_TEST: INSTALLER_PAYLOAD,
+        },
+      },
+    );
+    const output = `${result.stdout}${result.stderr}`;
+
+    expect(result.status, output).not.toBe(0);
+    expect(output).toMatch(/resume state is invalid/);
+  });
+});
