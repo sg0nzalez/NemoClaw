@@ -173,6 +173,7 @@ install_packages
     const { result, output } = runSourced(
       STATION_PREPARE,
       `
+sudo() { printf 'SUDO %s\n' "$*"; }
 run_cdi_test_sudo() { printf 'CDI_TEST\n'; return 0; }
 refresh_cdi() { printf 'REFRESH_CDI\n'; }
 ensure_cdi_runtime
@@ -180,6 +181,8 @@ ensure_cdi_runtime
     );
 
     expect(result.status, output).toBe(0);
+    expect(output).toContain("systemctl enable nvidia-cdi-refresh.path nvidia-cdi-refresh.service");
+    expect(output).toContain("systemctl start nvidia-cdi-refresh.path");
     expect(output).toContain("cdi_contract=pass_without_configuration_change");
     expect(output).not.toContain("REFRESH_CDI");
   });
@@ -189,6 +192,7 @@ ensure_cdi_runtime
       STATION_PREPARE,
       `
 calls=0
+ensure_cdi_refresh_lifecycle() { printf 'ENSURE_CDI_LIFECYCLE\n'; }
 run_cdi_test_sudo() {
   calls=$((calls + 1))
   printf 'CDI_TEST_%s\n' "$calls"
@@ -201,6 +205,7 @@ ensure_cdi_runtime
 
     expect(result.status, output).toBe(0);
     expect(output).toContain("CDI_TEST_1");
+    expect(output).toContain("ENSURE_CDI_LIFECYCLE");
     expect(output).toContain("REFRESH_CDI");
     expect(output).toContain("CDI_TEST_2");
     expect(output).toContain("cdi_contract=pass_after_refresh");
@@ -543,6 +548,22 @@ refresh_cdi
     expect(output).toContain("cdi=nvidia.com/gpu=all source=packaged_refresh_service");
     expect(output).not.toContain("systemctl status");
     expect(output).not.toContain("cdi generate");
+  });
+
+  it("verifies the durable packaged CDI refresh lifecycle", () => {
+    const { result, output } = runSourced(
+      STATION_PREPARE,
+      `
+systemctl() { printf 'SYSTEMCTL %s\n' "$*"; }
+verify_cdi_refresh_lifecycle
+`,
+    );
+
+    expect(result.status, output).toBe(0);
+    expect(output).toContain("SYSTEMCTL is-enabled --quiet nvidia-cdi-refresh.path");
+    expect(output).toContain("SYSTEMCTL is-enabled --quiet nvidia-cdi-refresh.service");
+    expect(output).toContain("SYSTEMCTL is-active --quiet nvidia-cdi-refresh.path");
+    expect(output).toContain("cdi_refresh_lifecycle=verified");
   });
 
   it.each(["--check", "--verify"])("keeps %s read-only under HOME", (mode) => {

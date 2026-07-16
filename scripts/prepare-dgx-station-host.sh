@@ -42,6 +42,7 @@ readonly -a PACKAGE_SPECS=(
 MODE=""
 LOG_FILE=""
 DOCKER_GROUP_ADDED=0
+CDI_LIFECYCLE_READY=0
 
 info() {
   printf '[station-prepare] %s %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$*"
@@ -491,11 +492,28 @@ cdi_refresh_has_custom_environment() {
   fatal "Could not inspect ${CDI_REFRESH_ENV_FILE} before CDI fallback"
 }
 
-refresh_cdi() {
+ensure_cdi_refresh_lifecycle() {
+  ((CDI_LIFECYCLE_READY == 0)) || return 0
   sudo systemctl enable nvidia-cdi-refresh.path nvidia-cdi-refresh.service \
     || fatal "Could not enable the packaged NVIDIA CDI refresh lifecycle"
   sudo systemctl start nvidia-cdi-refresh.path \
     || fatal "Could not activate the packaged NVIDIA CDI refresh path"
+  CDI_LIFECYCLE_READY=1
+  info "cdi_refresh_lifecycle=enabled"
+}
+
+verify_cdi_refresh_lifecycle() {
+  systemctl is-enabled --quiet nvidia-cdi-refresh.path \
+    || fatal "nvidia-cdi-refresh.path is not enabled"
+  systemctl is-enabled --quiet nvidia-cdi-refresh.service \
+    || fatal "nvidia-cdi-refresh.service is not enabled"
+  systemctl is-active --quiet nvidia-cdi-refresh.path \
+    || fatal "nvidia-cdi-refresh.path is not active"
+  info "cdi_refresh_lifecycle=verified"
+}
+
+refresh_cdi() {
+  ensure_cdi_refresh_lifecycle
   if ! sudo systemctl restart nvidia-cdi-refresh.service; then
     warn "Packaged CDI refresh failed; collecting diagnostics before the NVIDIA transient fallback"
     sudo systemctl status nvidia-cdi-refresh.service --no-pager || true
@@ -547,6 +565,7 @@ docker_has_nvidia_runtime_sudo() {
 }
 
 ensure_cdi_runtime() {
+  ensure_cdi_refresh_lifecycle
   if run_cdi_test_sudo; then
     info "cdi_contract=pass_without_configuration_change"
     return 0
@@ -610,6 +629,7 @@ verify_apply_state() {
   systemctl is-active --quiet nvidia-persistenced.service || fatal "nvidia-persistenced.service is not active"
   systemctl is-active --quiet containerd.service || fatal "containerd.service is not active"
   systemctl is-active --quiet docker.service || fatal "docker.service is not active"
+  verify_cdi_refresh_lifecycle
   nvidia-ctk cdi list | grep -Fxq 'nvidia.com/gpu=all' || fatal "CDI verification failed"
   sudo docker image inspect "$ACCEPTANCE_IMAGE" >/dev/null 2>&1 || fatal "Digest-pinned acceptance image is missing"
   [[ -z "$(sudo docker ps -aq)" ]] || fatal "Verification found a leftover Docker container"
@@ -642,6 +662,7 @@ verify_host() {
   systemctl is-active --quiet nvidia-persistenced.service || fatal "nvidia-persistenced.service is not active"
   systemctl is-active --quiet containerd.service || fatal "containerd.service is not active"
   systemctl is-active --quiet docker.service || fatal "docker.service is not active"
+  verify_cdi_refresh_lifecycle
   id -nG "$user_name" | tr ' ' '\n' | grep -Fxq docker || fatal "${user_name} is not in the docker group"
   docker info >/dev/null 2>&1 || fatal "${user_name} cannot access Docker; start a new login session"
   nvidia-ctk cdi list | grep -Fxq 'nvidia.com/gpu=all' || fatal "CDI verification failed"
