@@ -61,6 +61,25 @@ describe("DGX Station host preparation", () => {
     }
   });
 
+  it("uses the documented plain-Ubuntu driver-injection probe for CDI and --gpus", () => {
+    const { result, output } = runSourced(
+      STATION_PREPARE,
+      `
+sudo() { printf 'SUDO %s\\n' "$*"; }
+run_cdi_test_sudo
+run_gpus_test_sudo
+`,
+    );
+
+    const image =
+      "docker.io/library/ubuntu@sha256:7f622ca8766bccb22f04242ecb6f19f770b2f08827dc4b8c707de5e78a6da7ab";
+    expect(result.status, output).toBe(0);
+    expect(output).toContain(
+      `SUDO docker run --rm --device nvidia.com/gpu=all ${image} nvidia-smi`,
+    );
+    expect(output).toContain(`SUDO docker run --rm --gpus all ${image} nvidia-smi`);
+  });
+
   it.each([
     ["", "missing"],
     ["5:29.6.1-1~ubuntu.24.04~noble", "exact"],
