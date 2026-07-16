@@ -4,7 +4,6 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -18,7 +17,6 @@ import {
   downloadExactImageManifest,
   EVIDENCE_FILE,
   ExactImageQualificationError,
-  type ExactImageQualificationRequest,
   extractExactManifestArchive,
   finalizeExactImageQualification,
   GITHUB_API_VERSION,
@@ -39,167 +37,27 @@ import {
   validateWorkflowDispatchDetails,
   waitForExactImageQualification,
 } from "../tools/e2e/exact-image-qualification-controller.mts";
-
-const CANDIDATE_SHA = "a".repeat(40);
-const PRODUCER_SHA = "b".repeat(40);
-const CORRELATION_ID = "123e4567-e89b-42d3-a456-426614174000";
-const RUN_ID = "24680";
-const WORKFLOW_ID = 13579;
-const BASE_TIME = Date.UTC(2026, 0, 1);
-const API_RUN_URL = `https://api.github.com/repos/${PRODUCER_REPOSITORY}/actions/runs/${RUN_ID}`;
-const HTML_RUN_URL = `https://github.com/${PRODUCER_REPOSITORY}/actions/runs/${RUN_ID}`;
-
-const REQUEST: ExactImageQualificationRequest = {
-  actor: "maintainer",
-  candidateSha: CANDIDATE_SHA,
-  eventName: "workflow_dispatch",
-  reason: "Qualify the current daily candidate before tagging",
-  ref: "refs/heads/main",
-  requesterRunAttempt: 1,
-  requesterRunId: "97531",
-  workflowSha: CANDIDATE_SHA,
-};
-
-type ApiOptions = {
-  artifacts?: unknown;
-  dispatch?: unknown;
-  permission?: string;
-  roleName?: string;
-  producerSha?: string;
-  requesterSha?: string;
-  run?: unknown;
-  runs?: unknown;
-  workflow?: unknown;
-};
-
-function mainRef(sha: string) {
-  return { ref: "refs/heads/main", object: { type: "commit", sha } };
-}
-
-function dispatchDetails() {
-  return {
-    workflow_run_id: Number(RUN_ID),
-    run_url: API_RUN_URL,
-    html_url: HTML_RUN_URL,
-  };
-}
-
-function workflowRun(overrides: Record<string, unknown> = {}) {
-  return {
-    id: Number(RUN_ID),
-    workflow_id: WORKFLOW_ID,
-    run_attempt: 1,
-    event: "workflow_dispatch",
-    head_branch: "main",
-    head_sha: PRODUCER_SHA,
-    path: PRODUCER_WORKFLOW_PATH,
-    display_title: `Qualify NemoClaw ${CANDIDATE_SHA} (${CORRELATION_ID})`,
-    url: API_RUN_URL,
-    html_url: HTML_RUN_URL,
-    repository: { full_name: PRODUCER_REPOSITORY },
-    head_repository: { full_name: PRODUCER_REPOSITORY },
-    status: "queued",
-    conclusion: null,
-    created_at: new Date(BASE_TIME).toISOString(),
-    ...overrides,
-  };
-}
-
-function createApi(options: ApiOptions = {}) {
-  return vi.fn(async (apiPath: string, _token: string, requestOptions?: unknown) => {
-    if (apiPath === "repos/NVIDIA/NemoClaw/git/ref/heads/main") {
-      return mainRef(options.requesterSha ?? CANDIDATE_SHA);
-    }
-    if (apiPath.includes("/collaborators/")) {
-      return {
-        permission: options.permission ?? "write",
-        role_name: options.roleName ?? "maintain",
-      };
-    }
-    if (apiPath === `repos/${PRODUCER_REPOSITORY}/git/ref/heads/main`) {
-      return mainRef(options.producerSha ?? PRODUCER_SHA);
-    }
-    if (apiPath === `repos/${PRODUCER_REPOSITORY}/actions/workflows/${PRODUCER_WORKFLOW_FILE}`) {
-      return (
-        options.workflow ?? {
-          id: WORKFLOW_ID,
-          path: PRODUCER_WORKFLOW_PATH,
-          state: "active",
-        }
-      );
-    }
-    if (
-      apiPath ===
-      `repos/${PRODUCER_REPOSITORY}/actions/workflows/${PRODUCER_WORKFLOW_FILE}/dispatches`
-    ) {
-      return options.dispatch === undefined ? dispatchDetails() : options.dispatch;
-    }
-    if (apiPath === `repos/${PRODUCER_REPOSITORY}/actions/runs/${RUN_ID}`) {
-      return options.run ?? workflowRun();
-    }
-    if (apiPath === `repos/${PRODUCER_REPOSITORY}/actions/runs/${RUN_ID}/cancel`) {
-      return undefined;
-    }
-    if (
-      apiPath.startsWith(
-        `repos/${PRODUCER_REPOSITORY}/actions/workflows/${PRODUCER_WORKFLOW_FILE}/runs?`,
-      )
-    ) {
-      return options.runs ?? { total_count: 0, workflow_runs: [] };
-    }
-    if (apiPath === `repos/${PRODUCER_REPOSITORY}/actions/runs/${RUN_ID}/artifacts?per_page=100`) {
-      return options.artifacts;
-    }
-    throw new Error(`unexpected API call ${apiPath} ${JSON.stringify(requestOptions)}`);
-  });
-}
-
-function dependencies(api: ReturnType<typeof createApi>, extra: QualificationDependencies = {}) {
-  return {
-    now: () => BASE_TIME,
-    ...extra,
-    api: api as QualificationDependencies["api"],
-    randomUuid: () => CORRELATION_ID,
-  };
-}
-
-function tempDirectory(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-image-qualification-test-"));
-}
-
-async function startedState(api = createApi()) {
-  const workDir = tempDirectory();
-  const state = await startExactImageQualification(
-    {
-      request: REQUEST,
-      coreToken: "core-token",
-      producerToken: "producer-token",
-      workDir,
-    },
-    dependencies(api),
-  );
-  return { api, state, workDir };
-}
-
-function artifactList(archive: Buffer, overrides: Record<string, unknown> = {}) {
-  const artifactId = 86420;
-  return {
-    total_count: 1,
-    artifacts: [
-      {
-        id: artifactId,
-        name: `nemoclaw-image-handoff-v1-${RUN_ID}-1`,
-        expired: false,
-        digest: `sha256:${createHash("sha256").update(archive).digest("hex")}`,
-        size_in_bytes: archive.length,
-        url: `https://api.github.com/repos/${PRODUCER_REPOSITORY}/actions/artifacts/${artifactId}`,
-        archive_download_url: `https://api.github.com/repos/${PRODUCER_REPOSITORY}/actions/artifacts/${artifactId}/zip`,
-        workflow_run: { id: Number(RUN_ID), head_sha: PRODUCER_SHA },
-        ...overrides,
-      },
-    ],
-  };
-}
+import {
+  API_RUN_URL,
+  artifactList,
+  BASE_TIME,
+  CANDIDATE_SHA,
+  CORRELATION_ID,
+  createApi,
+  createArchiveRunCommand,
+  createRoutedApi,
+  dependencies,
+  dispatchDetails,
+  HTML_RUN_URL,
+  PRODUCER_SHA,
+  qualificationApiRoute,
+  REQUEST,
+  RUN_ID,
+  startedState,
+  tempDirectory,
+  WORKFLOW_ID,
+  workflowRun,
+} from "./helpers/exact-image-qualification-controller-fixture.ts";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -372,23 +230,26 @@ describe("exact producer dispatch binding", () => {
     const workDir = tempDirectory();
     const base = createApi();
     let cancelObserved = false;
-    const api = vi.fn(async (apiPath: string, token: string, requestOptions?: unknown) => {
-      if (apiPath.endsWith(`/workflows/${PRODUCER_WORKFLOW_FILE}/dispatches`)) {
+    let stateExistedAtCancel = false;
+    const api = createRoutedApi(base, [
+      qualificationApiRoute.dispatch(() => {
         throw new Error("response connection reset after server acceptance");
-      }
-      if (apiPath.includes(`/workflows/${PRODUCER_WORKFLOW_FILE}/runs?`)) {
-        return { total_count: 1, workflow_runs: [workflowRun()] };
-      }
-      if (apiPath === `repos/${PRODUCER_REPOSITORY}/actions/runs/${RUN_ID}/cancel`) {
-        expect(fs.existsSync(path.join(workDir, STATE_FILE))).toBe(true);
+      }),
+      qualificationApiRoute.workflowRuns(() => ({
+        total_count: 1,
+        workflow_runs: [workflowRun()],
+      })),
+      qualificationApiRoute.cancelRun(() => {
+        stateExistedAtCancel = fs.existsSync(path.join(workDir, STATE_FILE));
         cancelObserved = true;
         return undefined;
-      }
-      if (apiPath === `repos/${PRODUCER_REPOSITORY}/actions/runs/${RUN_ID}` && cancelObserved) {
-        return workflowRun({ status: "completed", conclusion: "cancelled" });
-      }
-      return base(apiPath, token, requestOptions);
-    });
+      }),
+      qualificationApiRoute.run(() =>
+        cancelObserved
+          ? workflowRun({ status: "completed", conclusion: "cancelled" })
+          : workflowRun(),
+      ),
+    ]);
     try {
       await expect(
         startExactImageQualification(
@@ -407,6 +268,7 @@ describe("exact producer dispatch binding", () => {
         ),
       ).toHaveLength(1);
       expect(cancelObserved).toBe(true);
+      expect(stateExistedAtCancel).toBe(true);
       expect(readExactImageQualificationState(workDir).producer.runId).toBe(RUN_ID);
       expect(fs.existsSync(path.join(workDir, DISPATCH_INTENT_FILE))).toBe(true);
       expect(
@@ -426,36 +288,37 @@ describe("exact producer dispatch binding", () => {
     const historicalRuns = Array.from({ length: 101 }, (_value, index) =>
       workflowRun({ created_at: new Date(BASE_TIME - (index + 2) * 10 * 60_000).toISOString() }),
     );
-    const api = vi.fn(async (apiPath: string, token: string, requestOptions?: unknown) => {
-      if (apiPath.endsWith(`/workflows/${PRODUCER_WORKFLOW_FILE}/dispatches`)) {
+    let observedCreatedFilter: string | null = null;
+    let observedHeadShaFilter = false;
+    let observedScopedRuns: unknown[] = [];
+    const api = createRoutedApi(base, [
+      qualificationApiRoute.dispatch(() => {
         throw new Error("lost response after main advanced");
-      }
-      if (apiPath.includes(`/workflows/${PRODUCER_WORKFLOW_FILE}/runs?`)) {
+      }),
+      qualificationApiRoute.workflowRuns((apiPath) => {
         const query = new URLSearchParams(apiPath.split("?", 2)[1]);
-        expect(query.get("created")).toBe("2025-12-31T23:59:00Z..2026-01-01T00:01:30Z");
-        expect(apiPath).not.toContain("head_sha=");
+        observedCreatedFilter = query.get("created");
+        observedHeadShaFilter = apiPath.includes("head_sha=");
         const [earliest, latest] = (query.get("created") ?? "").split("..").map(Date.parse);
         const scoped = [...historicalRuns, movedRun].filter(({ created_at }) => {
           const createdAt = Date.parse(created_at);
           return createdAt >= earliest && createdAt <= latest;
         });
-        expect(historicalRuns).toHaveLength(101);
-        expect(scoped).toEqual([movedRun]);
+        observedScopedRuns = scoped;
         return { total_count: scoped.length, workflow_runs: scoped };
-      }
-      if (apiPath === `repos/${PRODUCER_REPOSITORY}/actions/runs/${RUN_ID}/cancel`) {
+      }),
+      qualificationApiRoute.cancelRun(() => {
         cancelled = true;
         return undefined;
-      }
-      if (apiPath === `repos/${PRODUCER_REPOSITORY}/actions/runs/${RUN_ID}` && cancelled) {
-        return workflowRun({
+      }),
+      qualificationApiRoute.run(() =>
+        workflowRun({
           head_sha: movedSha,
-          status: "completed",
-          conclusion: "cancelled",
-        });
-      }
-      return base(apiPath, token, requestOptions);
-    });
+          status: cancelled ? "completed" : "queued",
+          conclusion: cancelled ? "cancelled" : null,
+        }),
+      ),
+    ]);
     try {
       await expect(
         startExactImageQualification(
@@ -469,6 +332,10 @@ describe("exact producer dispatch binding", () => {
         ),
       ).rejects.toMatchObject({ code: "DISPATCH_AMBIGUOUS" });
       expect(cancelled).toBe(true);
+      expect(observedCreatedFilter).toBe("2025-12-31T23:59:00Z..2026-01-01T00:01:30Z");
+      expect(observedHeadShaFilter).toBe(false);
+      expect(historicalRuns).toHaveLength(101);
+      expect(observedScopedRuns).toEqual([movedRun]);
       expect(readExactImageQualificationState(workDir).producer).toMatchObject({
         runId: RUN_ID,
         repositorySha: movedSha,
@@ -504,20 +371,19 @@ describe("exact producer dispatch binding", () => {
 
       const base = createApi();
       let cancelled = false;
-      const cleanupApi = vi.fn(async (apiPath: string, token: string, requestOptions?: unknown) => {
-        if (apiPath === `repos/${PRODUCER_REPOSITORY}/actions/runs/${RUN_ID}/cancel`) {
+      const cleanupApi = createRoutedApi(base, [
+        qualificationApiRoute.cancelRun(() => {
           cancelled = true;
           return undefined;
-        }
-        if (apiPath === `repos/${PRODUCER_REPOSITORY}/actions/runs/${RUN_ID}`) {
-          return workflowRun({
+        }),
+        qualificationApiRoute.run(() =>
+          workflowRun({
             head_sha: movedSha,
             status: cancelled ? "completed" : "queued",
             conclusion: cancelled ? "cancelled" : null,
-          });
-        }
-        return base(apiPath, token, requestOptions);
-      });
+          }),
+        ),
+      ]);
       await expect(
         cancelActiveExactImageQualification(
           { workDir, producerToken: "producer-token" },
@@ -537,15 +403,15 @@ describe("exact producer dispatch binding", () => {
     const workDir = tempDirectory();
     const base = createApi();
     const completed = workflowRun({ status: "completed", conclusion: "success" });
-    const api = vi.fn(async (apiPath: string, token: string, requestOptions?: unknown) => {
-      if (apiPath.endsWith(`/workflows/${PRODUCER_WORKFLOW_FILE}/dispatches`)) {
+    const api = createRoutedApi(base, [
+      qualificationApiRoute.dispatch(() => {
         throw new Error("lost response");
-      }
-      if (apiPath.includes(`/workflows/${PRODUCER_WORKFLOW_FILE}/runs?`)) {
-        return { total_count: 1, workflow_runs: [completed] };
-      }
-      return base(apiPath, token, requestOptions);
-    });
+      }),
+      qualificationApiRoute.workflowRuns(() => ({
+        total_count: 1,
+        workflow_runs: [completed],
+      })),
+    ]);
     try {
       await expect(
         startExactImageQualification(
@@ -570,18 +436,18 @@ describe("exact producer dispatch binding", () => {
   it("retains the recovered run identity when cancellation fails", async () => {
     const workDir = tempDirectory();
     const base = createApi();
-    const api = vi.fn(async (apiPath: string, token: string, requestOptions?: unknown) => {
-      if (apiPath.endsWith(`/workflows/${PRODUCER_WORKFLOW_FILE}/dispatches`)) {
+    const api = createRoutedApi(base, [
+      qualificationApiRoute.dispatch(() => {
         throw new Error("lost response");
-      }
-      if (apiPath.includes(`/workflows/${PRODUCER_WORKFLOW_FILE}/runs?`)) {
-        return { total_count: 1, workflow_runs: [workflowRun()] };
-      }
-      if (apiPath === `repos/${PRODUCER_REPOSITORY}/actions/runs/${RUN_ID}/cancel`) {
+      }),
+      qualificationApiRoute.workflowRuns(() => ({
+        total_count: 1,
+        workflow_runs: [workflowRun()],
+      })),
+      qualificationApiRoute.cancelRun(() => {
         throw new Error("cancel transport failed");
-      }
-      return base(apiPath, token, requestOptions);
-    });
+      }),
+    ]);
     try {
       await expect(
         startExactImageQualification(
@@ -607,30 +473,27 @@ describe("exact producer dispatch binding", () => {
     const workDir = tempDirectory();
     const base = createApi();
     let clock = BASE_TIME;
-    const api = vi.fn(async (apiPath: string, token: string, requestOptions?: unknown) => {
-      if (apiPath.endsWith(`/workflows/${PRODUCER_WORKFLOW_FILE}/dispatches`)) {
+    const nearMatches = [
+      workflowRun({ display_title: "wrong correlation" }),
+      workflowRun({ workflow_id: WORKFLOW_ID + 1 }),
+      workflowRun({ run_attempt: 2 }),
+      workflowRun({ event: "push" }),
+      workflowRun({ head_branch: "feature" }),
+      workflowRun({ path: ".github/workflows/other.yml" }),
+      workflowRun({ repository: { full_name: "other/repository" } }),
+      workflowRun({ head_repository: { full_name: "other/repository" } }),
+      workflowRun({ created_at: new Date(BASE_TIME - 2 * 60_000).toISOString() }),
+      workflowRun({ url: `${API_RUN_URL}/wrong` }),
+    ];
+    const api = createRoutedApi(base, [
+      qualificationApiRoute.dispatch(() => {
         throw new Error("lost response");
-      }
-      if (apiPath.includes(`/workflows/${PRODUCER_WORKFLOW_FILE}/runs?`)) {
-        const nearMatches = [
-          workflowRun({ display_title: "wrong correlation" }),
-          workflowRun({ workflow_id: WORKFLOW_ID + 1 }),
-          workflowRun({ run_attempt: 2 }),
-          workflowRun({ event: "push" }),
-          workflowRun({ head_branch: "feature" }),
-          workflowRun({ path: ".github/workflows/other.yml" }),
-          workflowRun({ repository: { full_name: "other/repository" } }),
-          workflowRun({ head_repository: { full_name: "other/repository" } }),
-          workflowRun({ created_at: new Date(BASE_TIME - 2 * 60_000).toISOString() }),
-          workflowRun({ url: `${API_RUN_URL}/wrong` }),
-        ];
-        return {
-          total_count: nearMatches.length,
-          workflow_runs: nearMatches,
-        };
-      }
-      return base(apiPath, token, requestOptions);
-    });
+      }),
+      qualificationApiRoute.workflowRuns(() => ({
+        total_count: nearMatches.length,
+        workflow_runs: nearMatches,
+      })),
+    ]);
     try {
       await expect(
         startExactImageQualification(
@@ -692,19 +555,19 @@ describe("exact producer dispatch binding", () => {
 
       const base = createApi();
       let cancelled = false;
-      const cleanupApi = vi.fn(async (apiPath: string, token: string, requestOptions?: unknown) => {
-        if (apiPath.includes(`/workflows/${PRODUCER_WORKFLOW_FILE}/runs?`)) {
-          return { total_count: 1, workflow_runs: [workflowRun()] };
-        }
-        if (apiPath === `repos/${PRODUCER_REPOSITORY}/actions/runs/${RUN_ID}/cancel`) {
+      const cleanupApi = createRoutedApi(base, [
+        qualificationApiRoute.workflowRuns(() => ({
+          total_count: 1,
+          workflow_runs: [workflowRun()],
+        })),
+        qualificationApiRoute.cancelRun(() => {
           cancelled = true;
           return undefined;
-        }
-        if (apiPath === `repos/${PRODUCER_REPOSITORY}/actions/runs/${RUN_ID}` && cancelled) {
-          return workflowRun({ status: "completed", conclusion: "cancelled" });
-        }
-        return base(apiPath, token, requestOptions);
-      });
+        }),
+        qualificationApiRoute.run(() =>
+          cancelled ? workflowRun({ status: "completed", conclusion: "cancelled" }) : workflowRun(),
+        ),
+      ]);
       await expect(
         cancelActiveExactImageQualification(
           { workDir, producerToken: "producer-token" },
@@ -733,16 +596,16 @@ describe("exact producer dispatch binding", () => {
       url: `https://api.github.com/repos/${PRODUCER_REPOSITORY}/actions/runs/${secondId}`,
       html_url: `https://github.com/${PRODUCER_REPOSITORY}/actions/runs/${secondId}`,
     });
-    const api = vi.fn(async (apiPath: string, token: string, requestOptions?: unknown) => {
-      if (apiPath.endsWith(`/workflows/${PRODUCER_WORKFLOW_FILE}/dispatches`)) {
+    const api = createRoutedApi(base, [
+      qualificationApiRoute.dispatch(() => {
         throw new Error("lost response");
-      }
-      if (apiPath.includes(`/workflows/${PRODUCER_WORKFLOW_FILE}/runs?`)) {
-        return { total_count: 2, workflow_runs: [workflowRun(), second] };
-      }
-      if (apiPath.endsWith("/cancel")) return undefined;
-      return base(apiPath, token, requestOptions);
-    });
+      }),
+      qualificationApiRoute.workflowRuns(() => ({
+        total_count: 2,
+        workflow_runs: [workflowRun(), second],
+      })),
+      qualificationApiRoute.cancelAnyRun(() => undefined),
+    ]);
     try {
       await expect(
         startExactImageQualification(
@@ -1026,26 +889,9 @@ describe("qualification artifact integrity", () => {
           dependencies(createApi({ artifacts: artifactList(archive) }), {
             now: () => clock,
             fetch: async () => new Response(archive, { status: 200 }),
-            runCommand: (_command, args) => {
-              if (args[0] === "-Z1") {
-                return {
-                  status: 0,
-                  stdout: Buffer.from(`${MANIFEST_ARTIFACT_FILE}\n`),
-                  stderr: Buffer.alloc(0),
-                };
-              }
-              if (args[0] === "-Zl") {
-                return {
-                  status: 0,
-                  stdout: Buffer.from(
-                    `-rw-r--r--  3.0 unx  20 tx 20 stor ${MANIFEST_ARTIFACT_FILE}\n`,
-                  ),
-                  stderr: Buffer.alloc(0),
-                };
-              }
+            runCommand: createArchiveRunCommand(manifest, () => {
               clock = BASE_TIME + 45 * 60_000;
-              return { status: 0, stdout: manifest, stderr: Buffer.alloc(0) };
-            },
+            }),
           }),
         ),
       ).rejects.toMatchObject({ code: "QUALIFICATION_TIMEOUT" });
