@@ -334,6 +334,27 @@ refresh_cdi
     expect(output).not.toContain("cdi generate");
   });
 
+  it("rechecks every workload gate immediately before Docker runtime mutation", () => {
+    const { result, output } = runSourced(
+      STATION_PREPARE,
+      `
+run_gpus_test_sudo() { return 1; }
+sudo() {
+  [[ "$*" == "docker ps -aq" ]] && return 0
+  [[ "$*" == "test -e /etc/docker/daemon.json" ]] && return 1
+  printf 'SUDO %s\n' "$*"
+}
+check_no_workloads() { printf 'RECHECK_ALL_WORKLOADS\n'; return 1; }
+configure_docker_runtime_if_needed
+`,
+    );
+
+    expect(result.status, output).not.toBe(0);
+    expect(output).toContain("RECHECK_ALL_WORKLOADS");
+    expect(output).not.toContain("nvidia-ctk runtime configure");
+    expect(output).not.toContain("systemctl restart docker.service");
+  });
+
   it("accepts a successful packaged CDI refresh", () => {
     const { result, output } = runSourced(
       STATION_PREPARE,
@@ -427,7 +448,10 @@ prepare_installer_host
       INSTALLER_PAYLOAD,
       `
 maybe_offer_express_install() { _SELECTED_EXPRESS_PLATFORM='DGX Spark'; }
-run_station_host_preparation() { printf 'PREPARE_STATION\n'; }
+ensure_station_express_host() {
+  [[ "$_SELECTED_EXPRESS_PLATFORM" == 'DGX Station' ]] && printf 'PREPARE_STATION\n'
+  return 0
+}
 ensure_docker() { printf 'ENSURE_DOCKER\n'; }
 ensure_openshell_build_deps() { printf 'ENSURE_BUILD_DEPS\n'; }
 prepare_installer_host

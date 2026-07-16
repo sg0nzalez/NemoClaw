@@ -535,6 +535,7 @@ configure_docker_runtime_if_needed() {
     sudo touch "${backup_dir}/daemon.json.absent"
     sudo chmod 0600 "${backup_dir}/daemon.json.absent"
   fi
+  check_no_workloads
   sudo nvidia-ctk runtime configure --runtime=docker
   sudo systemctl restart docker.service
   run_gpus_test_sudo || fatal "Docker --gpus all still fails after NVIDIA runtime registration"
