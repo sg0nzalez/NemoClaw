@@ -106,6 +106,7 @@ const AUTO_RESTORE_COMPLETION_GRACE_MS = 30_000;
 const HERMES_RUNTIME_CONFIG_GUARD = "/usr/local/lib/nemoclaw/hermes-runtime-config-guard.py";
 const HERMES_PYTHON = "/opt/hermes/.venv/bin/python";
 const HERMES_RESTART_SEAL_STATE = "/run/nemoclaw/hermes-restart-seal.json";
+const HERMES_ROOT_LIFECYCLE_MARKER = "/run/nemoclaw/hermes-root-lifecycle";
 const HERMES_CONFIG_HASH = "/etc/nemoclaw/hermes.config-hash";
 const STATE_DIR_GUARD_TIMEOUT_MS = 15 * 60 * 1000;
 const OPENCLAW_CONFIG_GUARD_TIMEOUT_MS = 6 * 60 * 1000;
@@ -463,6 +464,22 @@ function privilegedSandboxExecCapture(sandboxName: string, cmd: string[], timeou
     stdio: ["ignore", "pipe", "pipe"],
     timeout,
   }).trim();
+}
+
+function inspectHermesRootLifecycleTopology(
+  sandboxName: string,
+): "managed-nonroot" | "root-separated" {
+  const topology = privilegedSandboxExecCapture(sandboxName, [
+    "sh",
+    "-c",
+    'if [ ! -e "$1" ] && [ ! -L "$1" ]; then printf managed-nonroot; else printf root-separated; fi',
+    "sh",
+    HERMES_ROOT_LIFECYCLE_MARKER,
+  ]);
+  if (topology !== "managed-nonroot" && topology !== "root-separated") {
+    throw new Error(`Unexpected Hermes workload topology response: ${topology}`);
+  }
+  return topology;
 }
 
 function hermesShieldsGuardArgs(
@@ -1728,11 +1745,20 @@ function unlockAgentConfigUnderMutationLock(
         target.configDir,
       ]);
       const [mode, owner] = dirPerms.split(" ");
-      // The Hermes dashboard can tighten its mutable home from 03770 to 0700.
-      // Both postures are sandbox-owned; protected files remain exactly 0640.
-      const validDirMode = mode === dirMode || (target.agentName === "hermes" && mode === "700");
+      // A sealed transaction has already attested a live Hermes topology. The
+      // managed same-UID topology can tolerate the dashboard tightening its
+      // mutable home to 0700; the root-separated gateway still needs 03770.
+      const privateHermesRootAllowed =
+        target.agentName === "hermes" &&
+        mode === "700" &&
+        transaction !== null &&
+        inspectHermesRootLifecycleTopology(sandboxName) === "managed-nonroot";
+      const validDirMode = mode === dirMode || privateHermesRootAllowed;
       if (!validDirMode) {
-        const expectedDirModes = target.agentName === "hermes" ? `700 or ${dirMode}` : dirMode;
+        const expectedDirModes =
+          target.agentName === "hermes" && transaction !== null
+            ? `${dirMode}, or 700 in the managed non-root topology`
+            : dirMode;
         issues.push(`config dir mode=${mode} (expected ${expectedDirModes})`);
       }
       if (owner !== "sandbox:sandbox") {

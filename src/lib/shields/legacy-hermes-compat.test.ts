@@ -12,6 +12,7 @@ const requireSource = createRequire(import.meta.url);
 const INDEX_MODULE = "./index.js";
 const HERMES_PYTHON = "/opt/hermes/.venv/bin/python";
 const HERMES_GUARD = "/usr/local/lib/nemoclaw/hermes-runtime-config-guard.py";
+const HERMES_ROOT_LIFECYCLE_MARKER = "/run/nemoclaw/hermes-root-lifecycle";
 const LOCK_TOKEN = "a".repeat(64);
 const OLD_GUARD_HELP = "usage: guard {ensure-api-key,refresh-hashes,provider-placeholders}";
 const PARTIAL_GUARD_HELP = "begin-shields-transition --rollback-shields-mode";
@@ -128,7 +129,11 @@ describe("legacy Hermes shields compatibility", () => {
     fs.rmSync(homeDir, { recursive: true, force: true });
   });
 
-  function installExecResponses(help: string, hermesDirMode = "3770"): void {
+  function installExecResponses(
+    help: string,
+    hermesDirMode = "3770",
+    hermesTopology = "managed-nonroot",
+  ): void {
     dockerExecSpy.mockImplementation((cmd: string[]) => {
       switch (true) {
         case cmd.includes(HERMES_GUARD) && cmd.includes("--help"):
@@ -143,6 +148,8 @@ describe("legacy Hermes shields compatibility", () => {
             : "640 sandbox:sandbox";
         case cmd[0] === "lsattr":
           return `---------------- ${cmd.at(-1)}`;
+        case cmd.includes(HERMES_ROOT_LIFECYCLE_MARKER):
+          return hermesTopology;
         default:
           return "";
       }
@@ -274,7 +281,20 @@ describe("legacy Hermes shields compatibility", () => {
     ).not.toThrow();
 
     const commands = dockerExecSpy.mock.calls.map(commandFromCall);
+    expect(commands.some((cmd) => cmd.includes(HERMES_ROOT_LIFECYCLE_MARKER))).toBe(true);
     expect(commands.some((cmd) => isGuardAction(cmd, "finish-shields-transition"))).toBe(true);
+  });
+
+  it("rejects a private Hermes root in the root-separated topology", () => {
+    installExecResponses(CURRENT_GUARD_HELP, "700", "root-separated");
+
+    expect(() => shields.unlockAgentConfig("current-hermes", hermesTarget(), true, true)).toThrow(
+      /managed non-root topology/,
+    );
+
+    const commands = dockerExecSpy.mock.calls.map(commandFromCall);
+    expect(commands.some((cmd) => cmd.includes(HERMES_ROOT_LIFECYCLE_MARKER))).toBe(true);
+    expect(commands.some((cmd) => isGuardAction(cmd, "finish-shields-transition"))).toBe(false);
   });
 
   it("rejects other sandbox-owned Hermes root modes before finishing a sealed unlock", () => {
