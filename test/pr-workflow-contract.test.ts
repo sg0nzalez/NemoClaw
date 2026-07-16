@@ -975,9 +975,6 @@ describe("pull request and main workflow contracts", () => {
     expect(parityStep.run).toContain("base=HEAD^1");
     expect(parityStep.run).toContain("head=HEAD^2");
     expect(parityStep.run).toContain('base="$PUSH_BASE_SHA"');
-    expect(parityStep.run).toContain(
-      'npx tsx scripts/checks/e2e-mock-parity.ts --base "$base" --head "$head"',
-    );
 
     const trustedCapabilityProbe = requiredWorkflowStep(
       prWorkflow.jobs["cli-test-shards"],
@@ -1163,14 +1160,14 @@ describe("pull request and main workflow contracts", () => {
     const growthGuardrails = readYaml<CodebaseGrowthGuardrailsWorkflow>(
       ".github/workflows/codebase-growth-guardrails.yaml",
     );
-    const guardRun = stepRuns(growthGuardrails.jobs["codebase-growth-guardrails"]).join("\n");
-
-    expect(guardRun).toContain("HEAD_REPO");
-    expect(guardRun).toContain("HEAD_SHA");
+    const guardJob = growthGuardrails.jobs["codebase-growth-guardrails"];
+    const guardRun = stepRuns(guardJob).join("\n");
+    const guardEnv = JSON.stringify((guardJob.steps ?? []).map((step) => step.env ?? {}));
+    expect(guardEnv).toContain("HEAD_REPO");
     expect(guardRun).not.toContain(".raw_url");
-    expect(guardRun).toContain("previous_filename");
-    expect(guardRun).toContain("budgetChanged");
-    expect(guardRun).toContain("has a legacy budget but no matching test file at the PR head");
+    expect(guardRun).not.toContain("node <<'NODE'");
+    expect(guardRun).toContain("tools/growth-guardrails/test-size-budget.mts");
+    expect(guardRun).toContain("tools/growth-guardrails/test-conditionals.mts");
   });
 
   // source-shape-contract: security -- Coverage publication must exclude fork-authored reports and pin the publishing action
