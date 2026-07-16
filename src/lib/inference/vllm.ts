@@ -18,6 +18,7 @@ import {
   dockerStop,
 } from "../adapters/docker";
 import { buildValidatedCurlCommandArgs } from "../adapters/http/curl-args";
+import { labeledWarnLine } from "../cli/terminal-style";
 import { VLLM_PORT } from "../core/ports";
 import { shellQuote } from "../core/shell-quote";
 import { isAffirmativeAnswer } from "../onboard/prompt-helpers";
@@ -779,7 +780,9 @@ function printImageStorageWarning(
   const insufficient = probe.ok && probe.capacity.availableBytes < requiredBytes;
   console.error("");
   console.error(
-    `  [WARN] ${insufficient ? "Insufficient" : "Unable to verify"} Docker storage for the managed vLLM image.`,
+    labeledWarnLine(
+      `${insufficient ? "Insufficient" : "Unable to verify"} Docker storage for the managed vLLM image.`,
+    ),
   );
   console.error("");
   console.error(`  Image:     ${profile.image}`);
@@ -813,7 +816,9 @@ function printModelStorageWarning(
   const insufficient = probe.ok && probe.capacity.availableBytes < requiredBytes;
   console.error("");
   console.error(
-    `  [WARN] ${insufficient ? "Insufficient" : "Unable to verify"} storage for the managed vLLM model cache.`,
+    labeledWarnLine(
+      `${insufficient ? "Insufficient" : "Unable to verify"} storage for the managed vLLM model cache.`,
+    ),
   );
   console.error("");
   console.error(`  Model:     ${model.id}`);

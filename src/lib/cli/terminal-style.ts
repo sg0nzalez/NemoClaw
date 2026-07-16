@@ -26,7 +26,7 @@ export const YW = useColor ? "\x1b[1;33m" : "";
 // FORCE_COLOR (#6004). The old output keyed color off stdout, which dropped
 // color on `onboard >log` and leaked ANSI into `onboard 2>log`.
 function stderrSeverityLine(
-  marker: "⚠ " | "✗ ",
+  marker: "⚠ " | "✗ " | "[WARN] ",
   format: "yellow" | "red",
   message: string,
 ): string {
@@ -35,4 +35,6 @@ function stderrSeverityLine(
 }
 
 export const warnLine = (message: string): string => stderrSeverityLine("⚠ ", "yellow", message);
+export const labeledWarnLine = (message: string): string =>
+  stderrSeverityLine("[WARN] ", "yellow", message);
 export const failLine = (message: string): string => stderrSeverityLine("✗ ", "red", message);

@@ -3,7 +3,7 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { B, D, failLine, G, R, RD, warnLine, YW } from "./terminal-style";
+import { B, D, failLine, G, labeledWarnLine, R, RD, warnLine, YW } from "./terminal-style";
 
 describe("terminal-style", () => {
   it("exports terminal style strings", () => {
@@ -70,6 +70,7 @@ describe("preflight severity lines (#6004)", () => {
       stubStream(process.stderr, true, 24);
       stubStream(process.stdout, false, 1);
       expect(warnLine("disk low")).toBe(`  ${YELLOW("⚠ disk low")}`);
+      expect(labeledWarnLine("disk low")).toBe(`  ${YELLOW("[WARN] disk low")}`);
       expect(failLine("docker down")).toBe(`  ${RED("✗ docker down")}`);
     });
   });
@@ -82,6 +83,7 @@ describe("preflight severity lines (#6004)", () => {
       stubStream(process.stdout, true, 24);
       stubStream(process.stderr, false, 1);
       expect(warnLine("disk low")).toBe("  ⚠ disk low");
+      expect(labeledWarnLine("disk low")).toBe("  [WARN] disk low");
       expect(failLine("docker down")).toBe("  ✗ docker down");
     });
   });
@@ -93,6 +95,7 @@ describe("preflight severity lines (#6004)", () => {
       stubStream(process.stdout, true, 24);
       stubStream(process.stderr, true, 24);
       expect(warnLine("a")).toBe("  ⚠ a");
+      expect(labeledWarnLine("a")).toBe("  [WARN] a");
       expect(failLine("b")).toBe("  ✗ b");
     });
   });

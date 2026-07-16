@@ -574,6 +574,7 @@ describe("installVllm model resolution", () => {
     delete process.env.NEMOCLAW_VLLM_EXTRA_ARGS_JSON;
     delete process.env.HF_TOKEN;
     delete process.env.HUGGING_FACE_HUB_TOKEN;
+    process.env.NO_COLOR = "1";
     // Fail dockerPrereqsOk so the function returns before any docker work,
     // letting tests assert on the resolved model + summary line without
     // mocking the full install chain.
