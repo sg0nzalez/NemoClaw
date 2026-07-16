@@ -277,6 +277,17 @@ describe("legacy Hermes shields compatibility", () => {
     expect(commands.some((cmd) => isGuardAction(cmd, "finish-shields-transition"))).toBe(true);
   });
 
+  it("rejects other sandbox-owned Hermes root modes before finishing a sealed unlock", () => {
+    installExecResponses(CURRENT_GUARD_HELP, "750");
+
+    expect(() => shields.unlockAgentConfig("current-hermes", hermesTarget(), true, true)).toThrow(
+      /config dir mode/,
+    );
+
+    const commands = dockerExecSpy.mock.calls.map(commandFromCall);
+    expect(commands.some((cmd) => isGuardAction(cmd, "finish-shields-transition"))).toBe(false);
+  });
+
   it("isolates Hermes guard Python and scrubs every privileged shields exec", () => {
     installExecResponses(CURRENT_GUARD_HELP);
 
