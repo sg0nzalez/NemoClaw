@@ -65,6 +65,12 @@ const PROC_DONE = "NEMOCLAW_WA_PROC_DONE";
 // `[whatsapp]` so telegram breadcrumbs never get miscounted as WA liveness.
 const GW_ALIVE = "NEMOCLAW_WA_GW_ALIVE";
 const GW_LAST_INBOUND = "NEMOCLAW_WA_GW_LAST_INBOUND";
+// The canonical in-sandbox gateway log. NemoClaw launches the OpenClaw gateway
+// with stdout+stderr redirected here (see agent/gateway-script-shared.ts), so
+// every `[whatsapp] …` breadcrumb lands in this one file — the same log the
+// telegram status hook reads. The OpenClaw-internal dated log under
+// /tmp/openclaw-<uid>/ is not guaranteed to exist or to hold these lines.
+const OPENCLAW_GATEWAY_LOG_FILE = "/tmp/gateway.log";
 
 /** WhatsApp uses the generic channel-health hook options unchanged. */
 export type WhatsappStatusHealthHookOptions = ChannelStatusHealthHookOptions;
@@ -234,19 +240,16 @@ function buildWhatsappProbeScript(stateDirs: readonly string[]): string {
     `  done`,
     `done`,
     `printf '%s\\n' ${quotePath(LOG_END)}`,
-    // Part 2 (gateway-log liveness). The OpenClaw gateway log has whatsapp
-    // lines like `... channels/whatsapp ... starting provider` and
-    // `... [whatsapp] ... Inbound message from ...`. Scope grep to whatsapp
-    // so telegram lines are not miscounted, and emit ONLY the markers +
-    // the ISO timestamp — never a raw log line. For hermes runs the glob
-    // finds no files and the block is a no-op.
-    `for gwlog in /tmp/openclaw-*/openclaw-*.log; do`,
-    `  [ -f "$gwlog" ] || continue`,
-    `  __wa_scoped=$(tail -n 500 "$gwlog" 2>/dev/null | grep -E 'channels/whatsapp|\\[whatsapp\\]')`,
-    `  printf '%s' "$__wa_scoped" | grep -qE 'starting provider|Listening for WhatsApp inbound' && printf '%s\\n' ${quotePath(GW_ALIVE)}`,
-    `  __wa_last=$(printf '%s' "$__wa_scoped" | grep -E 'Inbound message' | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+([+-][0-9:]+|Z)?' | tail -n 1)`,
-    `  [ -n "$__wa_last" ] && printf '%s %s\\n' ${quotePath(GW_LAST_INBOUND)} "$__wa_last"`,
-    `done`,
+    // Part 2 (gateway-log liveness). The canonical gateway log holds plaintext
+    // `[whatsapp] … starting provider` / `[whatsapp] … Listening for WhatsApp
+    // inbound` / `[whatsapp] … Inbound message …` breadcrumbs. Scope grep to
+    // whatsapp so telegram lines are not miscounted, and emit ONLY the markers
+    // + the ISO timestamp — never a raw log line (an inbound line carries a
+    // phone number). Absent for a hermes runtime → the block is a no-op.
+    `__wa_scoped=$(tail -n 500 ${quotePath(OPENCLAW_GATEWAY_LOG_FILE)} 2>/dev/null | grep -aE 'channels/whatsapp|\\[whatsapp\\]')`,
+    `printf '%s' "$__wa_scoped" | grep -qE 'starting provider|Listening for WhatsApp inbound' && printf '%s\\n' ${quotePath(GW_ALIVE)}`,
+    `__wa_last=$(printf '%s' "$__wa_scoped" | grep -E 'Inbound message' | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+([+-][0-9:]+|Z)?' | tail -n 1)`,
+    `[ -n "$__wa_last" ] && printf '%s %s\\n' ${quotePath(GW_LAST_INBOUND)} "$__wa_last"`,
     `__nemoclaw_wa_self_pid=$$`,
     // Match both process-name-with-whatsapp and processes whose argv
     // mentions the WhatsApp state directory or known plugin paths. A

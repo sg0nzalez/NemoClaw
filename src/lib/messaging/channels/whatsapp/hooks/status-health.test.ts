@@ -188,6 +188,12 @@ describe("whatsapp.statusHealth hook", () => {
     expect(command).toMatch(/\\\[whatsapp\\\]/);
     expect(command).toMatch(/NEMOCLAW_WA_GW_ALIVE/);
     expect(command).toMatch(/NEMOCLAW_WA_GW_LAST_INBOUND/);
+    // Part 2 must read the canonical in-sandbox gateway log (where NemoClaw
+    // redirects gateway stdout, same as the telegram hook), NOT the OpenClaw
+    // internal dated log — the latter is not guaranteed to exist on every
+    // sandbox and would silently disable in-process bridge liveness detection.
+    expect(command).toContain("/tmp/gateway.log");
+    expect(command).not.toContain("/tmp/openclaw-");
   });
 
   it("selects the hermes state-dir path when the agent is hermes", () => {
