@@ -264,6 +264,11 @@ describe("dependency pin drift check", () => {
 
   it.each([
     {
+      name: "an unsafe OpenShell minimum",
+      overrides: { openshellMin: "../1.2.3" },
+      failure: "nemoclaw-blueprint/blueprint.yaml min_openshell_version must match X.Y.Z",
+    },
+    {
       name: "an unsafe OpenShell maximum",
       overrides: { openshellMax: "../1.2.4" },
       failure: "nemoclaw-blueprint/blueprint.yaml max_openshell_version must match X.Y.Z",

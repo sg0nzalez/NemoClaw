@@ -65,6 +65,26 @@ describe("live E2E unit-block guard", () => {
     expect(linesFlagged(source)).toEqual([]);
   });
 
+  it("ignores plain multiline block comments and resumes scanning after the terminator", () => {
+    const source = [
+      "/*",
+      'it("a commented unit case", () => {});',
+      "*/",
+      'it("an executable unit case", () => {});',
+    ].join("\n");
+
+    expect(linesFlagged(source)).toEqual([4]);
+  });
+
+  it("handles same-line block comments without hiding following code", () => {
+    const source = [
+      '/* it("commented", () => {}); */ it("executable", () => {});',
+      'const marker = "/* it(\\"string data\\", () => {}); */";',
+    ].join("\n");
+
+    expect(linesFlagged(source)).toEqual([1]);
+  });
+
   it("does not match it inside a longer identifier", () => {
     const source = [
       'const wait = () => {}; wait("not a test");',

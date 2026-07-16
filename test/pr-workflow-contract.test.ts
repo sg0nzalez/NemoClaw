@@ -773,6 +773,9 @@ describe("pull request and main workflow contracts", () => {
         "${{ github.workflow }}-${{ github.ref }}-${{ github.event.action != 'edited' || github.event.changes.base != null }}",
       "cancel-in-progress": true,
     });
+    expect(
+      requiredWorkflowStep(prWorkflow.jobs["static-checks"], "Checkout").with?.["fetch-depth"],
+    ).toBe(0);
     for (const [jobName, stepName, trustedActionPath, mainActionPath] of [
       [
         "static-checks",
