@@ -3090,6 +3090,7 @@ describe_express_install() {
         inference_disclosure="Managed vLLM pulls the pinned Station image and approximately 352 GB model, then runs a local inference container."
       fi
       printf "  Station host setup reuses exact prerequisite versions, installs missing pinned driver, Docker, and NVIDIA Container Toolkit packages, and may require one reboot.\n"
+      printf "  DGX Station remains Deferred; this recipe has not completed end-to-end validation on physical hardware.\n"
       sandbox_summary="${NEMOCLAW_SANDBOX_NAME:-my-assistant}"
       ;;
     "Windows WSL")
@@ -3143,6 +3144,10 @@ maybe_offer_express_install() {
     info "Detected ${platform}. Skipping express prompt (NEMOCLAW_NO_EXPRESS=1)."
     return 0
   fi
+  if [ -n "${NEMOCLAW_PROVIDER:-}" ]; then
+    info "Detected ${platform}. Skipping express prompt (NEMOCLAW_PROVIDER=${NEMOCLAW_PROVIDER} already set)."
+    return 0
+  fi
   if [ "$platform" = "DGX Station" ] && load_station_express_resume; then
     info "Detected DGX Station. Resuming the accepted express install after host preparation."
     activate_express_install "$platform"
@@ -3150,10 +3155,6 @@ maybe_offer_express_install() {
   fi
   if [ "${NON_INTERACTIVE:-}" = "1" ]; then
     info "Detected ${platform}. Skipping express prompt (--non-interactive set)."
-    return 0
-  fi
-  if [ -n "${NEMOCLAW_PROVIDER:-}" ]; then
-    info "Detected ${platform}. Skipping express prompt (NEMOCLAW_PROVIDER=${NEMOCLAW_PROVIDER} already set)."
     return 0
   fi
   local reply=""

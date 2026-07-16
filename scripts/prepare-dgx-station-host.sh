@@ -11,6 +11,7 @@ readonly MIN_FREE_KIB=$((20 * 1024 * 1024))
 
 readonly CUDA_KEYRING_URL="https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/sbsa/cuda-keyring_1.1-1_all.deb"
 readonly CUDA_KEYRING_SHA256="6ea7d2737648936820e85677177957a0f6521b840d98eb0bbae0a4f003fa7249"
+readonly CUDA_KEYRING_PACKAGE_VERSION="1.1-1"
 readonly CUDA_KEY_FINGERPRINT="EB693B3035CD5710E231E123A4B469963BF863CC" # gitleaks:allow -- public NVIDIA signing-key fingerprint
 readonly DOCKER_KEY_URL="https://download.docker.com/linux/ubuntu/gpg"
 readonly DOCKER_KEY_SHA256="1500c1f56fa9e26b9b8f42452a553675796ade0807cdce11975eb98170b3a570" # gitleaks:allow -- public Docker GPG-key integrity pin
@@ -39,6 +40,7 @@ readonly -a PACKAGE_SPECS=(
 
 MODE=""
 LOG_FILE=""
+DOCKER_GROUP_ADDED=0
 
 info() {
   printf '[station-prepare] %s %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$*"
@@ -283,8 +285,7 @@ check_no_workloads() {
     elif systemctl is-active --quiet docker.service; then
       fatal "Docker is active but inaccessible to this login; start a new login session with docker-group membership"
     else
-      info "docker_daemon=inactive"
-      containers=""
+      fatal "Docker is installed but inactive, so existing container state cannot be verified safely; start Docker and rerun preparation"
     fi
   fi
   [[ -z "$containers" ]] || fatal "Existing Docker containers block host preparation: ${containers}"
@@ -357,6 +358,42 @@ verify_key_fingerprint() {
     | grep -Fxq "$expected" || fatal "Expected signing-key fingerprint ${expected} was not found in ${path}"
 }
 
+ensure_cuda_keyring() {
+  local cuda_deb=$1 actual verification
+  actual="$(installed_version cuda-keyring)"
+  if [[ -z "$actual" ]]; then
+    curl --fail --silent --show-error --location "$CUDA_KEYRING_URL" --output "$cuda_deb"
+    verify_file_sha256 "$cuda_deb" "$CUDA_KEYRING_SHA256"
+    sudo dpkg -i "$cuda_deb"
+    package_is_exact "cuda-keyring=${CUDA_KEYRING_PACKAGE_VERSION}" \
+      || fatal "Installed cuda-keyring does not match ${CUDA_KEYRING_PACKAGE_VERSION}"
+  elif [[ "$actual" == "$CUDA_KEYRING_PACKAGE_VERSION" ]]; then
+    verification="$(dpkg -V cuda-keyring 2>&1)" \
+      || fatal "Unable to verify the installed cuda-keyring package"
+    [[ -z "$verification" ]] || fatal "Installed cuda-keyring files differ from the package manifest: ${verification}"
+    info "cuda_keyring=exact version=${actual}"
+  else
+    fatal "Existing cuda-keyring version ${actual} differs from validated pin ${CUDA_KEYRING_PACKAGE_VERSION}; refusing to upgrade or downgrade it automatically"
+  fi
+
+  sudo test ! -L /usr/share/keyrings/cuda-archive-keyring.gpg \
+    || fatal "CUDA repository keyring must not be a symbolic link"
+  verify_key_fingerprint /usr/share/keyrings/cuda-archive-keyring.gpg "$CUDA_KEY_FINGERPRINT"
+}
+
+install_exact_file_or_reuse() {
+  local source=$1 target=$2 mode=$3 label=$4
+  sudo test ! -L "$target" || fatal "${label} must not be a symbolic link: ${target}"
+  if sudo test -e "$target"; then
+    sudo cmp -s "$source" "$target" \
+      || fatal "Existing ${label} differs from the validated content; refusing to overwrite ${target}"
+    info "${label}=exact path=${target}"
+    return 0
+  fi
+  sudo install -m "$mode" "$source" "$target"
+  info "${label}=installed path=${target}"
+}
+
 configure_repositories() {
   local tmp cuda_deb docker_asc docker_gpg docker_list
   tmp="$(mktemp -d)"
@@ -366,21 +403,18 @@ configure_repositories() {
   docker_list="${tmp}/docker.list"
 
   info "Downloading and verifying official repository keys"
-  curl --fail --silent --show-error --location "$CUDA_KEYRING_URL" --output "$cuda_deb"
-  verify_file_sha256 "$cuda_deb" "$CUDA_KEYRING_SHA256"
-  sudo dpkg -i "$cuda_deb"
-  verify_key_fingerprint /usr/share/keyrings/cuda-archive-keyring.gpg "$CUDA_KEY_FINGERPRINT"
+  ensure_cuda_keyring "$cuda_deb"
 
   curl --fail --silent --show-error --location "$DOCKER_KEY_URL" --output "$docker_asc"
   verify_file_sha256 "$docker_asc" "$DOCKER_KEY_SHA256"
   verify_key_fingerprint "$docker_asc" "$DOCKER_KEY_FINGERPRINT"
   gpg --batch --yes --dearmor --output "$docker_gpg" "$docker_asc"
   sudo install -d -m 0755 /etc/apt/keyrings
-  sudo install -m 0644 "$docker_gpg" /etc/apt/keyrings/docker.gpg
+  install_exact_file_or_reuse "$docker_gpg" /etc/apt/keyrings/docker.gpg 0644 docker_repository_key
   printf '%s\n' \
     'deb [arch=arm64 signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu noble stable' \
     >"$docker_list"
-  sudo install -m 0644 "$docker_list" /etc/apt/sources.list.d/docker.list
+  install_exact_file_or_reuse "$docker_list" /etc/apt/sources.list.d/docker.list 0644 docker_repository_source
 
   rm -rf "$tmp"
   info "repository_keys=verified"
@@ -427,6 +461,7 @@ ensure_docker_group() {
   getent group docker >/dev/null 2>&1 || fatal "Docker group is missing after package installation"
   if ! id -nG "$user_name" | tr ' ' '\n' | grep -Fxq docker; then
     sudo usermod -aG docker "$user_name"
+    DOCKER_GROUP_ADDED=1
     info "docker_group=added user=${user_name}; a new login is required"
   else
     info "docker_group=present user=${user_name}"
@@ -436,9 +471,10 @@ ensure_docker_group() {
 refresh_cdi() {
   sudo systemctl enable --now nvidia-cdi-refresh.path
   if ! sudo systemctl restart nvidia-cdi-refresh.service; then
-    warn "Packaged CDI refresh failed; generating the exact fallback spec"
-    sudo install -d -m 0755 /etc/cdi
-    sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+    warn "Packaged CDI refresh failed; refusing to create a persistent manual CDI specification"
+    sudo systemctl status nvidia-cdi-refresh.service --no-pager || true
+    sudo journalctl -u nvidia-cdi-refresh.service --no-pager -n 50 || true
+    fatal "nvidia-cdi-refresh.service failed; fix the packaged service and rerun preparation"
   fi
   nvidia-ctk cdi list | grep -Fxq 'nvidia.com/gpu=all' || fatal "CDI device nvidia.com/gpu=all is unavailable"
   info "cdi=nvidia.com/gpu=all"
@@ -579,7 +615,9 @@ run_check() {
 run_apply() {
   require_command apt-cache
   require_command apt-get
+  require_command cmp
   require_command curl
+  require_command dpkg
   require_command gpg
   require_command grep
   require_command sha256sum
@@ -622,6 +660,12 @@ run_apply() {
 
   finish_runtime
   verify_apply_state
+  if ((DOCKER_GROUP_ADDED == 1)); then
+    warn "Docker group membership was added and requires a new login before onboarding"
+    info "APPLY_RESULT=REBOOT_REQUIRED"
+    info "Run: sudo reboot"
+    exit "$REBOOT_REQUIRED_EXIT"
+  fi
   rm -f "$INSTALL_BOOT_MARKER"
   info "APPLY_RESULT=COMPLETE"
 }
@@ -642,7 +686,11 @@ main() {
     exit 2
   fi
   MODE=$1
-  setup_log
+  if [[ "$MODE" == "--apply" ]]; then
+    setup_log
+  else
+    info "version=${SCRIPT_VERSION} mode=${MODE} log=disabled_read_only"
+  fi
   trap 'on_error "$LINENO"' ERR
   case "$MODE" in
     --check) run_check ;;

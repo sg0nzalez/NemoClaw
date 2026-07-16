@@ -48,6 +48,11 @@ It does not install a host CUDA toolkit or Docker Compose.
 If an existing prerequisite has a different version, preparation stops instead of automatically upgrading or downgrading it.
 After installing missing pinned packages, the installer exits with status `10`; reboot, sign in, and rerun the same installer command to resume express setup.
 
+<Warning title="DGX Station Support Status">
+DGX Station remains Deferred.
+Full NemoClaw onboarding with this recipe has not completed end-to-end validation on physical DGX Station hardware.
+</Warning>
+
 <Warning title="Docker Group Access">
 NemoClaw needs Docker access.
 On personal Linux development machines, adding your user to the `docker` group is the standard way to run Docker without sudo.

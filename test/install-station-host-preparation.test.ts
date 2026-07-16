@@ -25,6 +25,8 @@ function runSourced(script: string, body: string, extraEnv: Record<string, strin
         SCRIPT_UNDER_TEST: script,
         ...extraEnv,
       },
+      timeout: 15_000,
+      killSignal: "SIGKILL",
     },
   );
   return { home, result, output: `${result.stdout}${result.stderr}` };
@@ -201,6 +203,150 @@ check_no_workloads
     expect(output).toContain("docker_access=sudo_until_group_membership_is_active");
     expect(output).toContain("workloads=none");
   });
+
+  it("fails closed when Docker is installed but its container state cannot be queried", () => {
+    const { result, output } = runSourced(
+      STATION_PREPARE,
+      `
+MODE='--apply'
+ps() { printf '%s %s bash bash prepare-dgx-station-host.sh --apply\n' "$$" "$PPID"; }
+ss() { :; }
+docker() { return 1; }
+sudo() { return 1; }
+systemctl() { return 1; }
+check_no_workloads
+`,
+      { PATH: `${path.dirname(process.execPath)}:${TEST_SYSTEM_PATH}` },
+    );
+
+    expect(result.status, output).not.toBe(0);
+    expect(output).toMatch(/container state cannot be verified safely/);
+  });
+
+  it("refuses an installed CUDA keyring version that differs from the pin", () => {
+    const { result, output } = runSourced(
+      STATION_PREPARE,
+      `
+installed_version() { printf '2.0-1'; }
+ensure_cuda_keyring "$HOME/cuda-keyring.deb"
+`,
+    );
+
+    expect(result.status, output).not.toBe(0);
+    expect(output).toMatch(/refusing to upgrade or downgrade it automatically/);
+  });
+
+  it("reuses an exact verified CUDA keyring without downloading it again", () => {
+    const { result, output } = runSourced(
+      STATION_PREPARE,
+      `
+installed_version() { printf '1.1-1'; }
+dpkg() { :; }
+curl() { printf 'DOWNLOAD\n'; }
+sudo() { "$@"; }
+verify_key_fingerprint() { printf 'VERIFIED_FINGERPRINT\n'; }
+ensure_cuda_keyring "$HOME/cuda-keyring.deb"
+`,
+    );
+
+    expect(result.status, output).toBe(0);
+    expect(output).toContain("cuda_keyring=exact version=1.1-1");
+    expect(output).toContain("VERIFIED_FINGERPRINT");
+    expect(output).not.toContain("DOWNLOAD");
+  });
+
+  it("reuses exact repository files and refuses to overwrite mismatched content", () => {
+    const { result, output } = runSourced(
+      STATION_PREPARE,
+      `
+printf 'validated\n' >"$HOME/source"
+cp "$HOME/source" "$HOME/target"
+sudo() { "$@"; }
+install_exact_file_or_reuse "$HOME/source" "$HOME/target" 0644 test_repository_file
+printf 'modified\n' >"$HOME/target"
+install_exact_file_or_reuse "$HOME/source" "$HOME/target" 0644 test_repository_file
+`,
+    );
+
+    expect(result.status, output).not.toBe(0);
+    expect(output).toMatch(/test_repository_file=exact/);
+    expect(output).toMatch(/refusing to overwrite/);
+  });
+
+  it("requires a new login after adding Docker group membership", () => {
+    const { result, output } = runSourced(
+      STATION_PREPARE,
+      `
+common_preflight() { :; }
+require_command() { :; }
+acquire_sudo() { :; }
+all_packages_exact() { return 0; }
+install_boot_marker_matches_current_boot() { return 1; }
+driver_loaded_exact() { return 0; }
+finish_runtime() { DOCKER_GROUP_ADDED=1; printf 'FINISH_RUNTIME\n'; }
+verify_apply_state() { printf 'VERIFY_APPLY_STATE\n'; }
+run_apply
+`,
+    );
+
+    expect(result.status, output).toBe(10);
+    expect(output).toContain("VERIFY_APPLY_STATE");
+    expect(output).toContain("APPLY_RESULT=REBOOT_REQUIRED");
+    expect(output).toMatch(/new login before onboarding/);
+  });
+
+  it("diagnoses packaged CDI refresh failure without writing a manual specification", () => {
+    const { result, output } = runSourced(
+      STATION_PREPARE,
+      `
+sudo() {
+  printf 'SUDO %s\n' "$*"
+  [[ "$*" != "systemctl restart nvidia-cdi-refresh.service" ]]
+}
+refresh_cdi
+`,
+    );
+
+    expect(result.status, output).not.toBe(0);
+    expect(output).toContain("systemctl status nvidia-cdi-refresh.service --no-pager");
+    expect(output).toContain("journalctl -u nvidia-cdi-refresh.service --no-pager -n 50");
+    expect(output).toMatch(/refusing to create a persistent manual CDI specification/);
+    expect(output).not.toContain("cdi generate");
+  });
+
+  it("accepts a successful packaged CDI refresh", () => {
+    const { result, output } = runSourced(
+      STATION_PREPARE,
+      `
+sudo() { printf 'SUDO %s\n' "$*"; }
+nvidia-ctk() {
+  [[ "$*" == "cdi list" ]] && printf 'nvidia.com/gpu=all\n'
+}
+refresh_cdi
+`,
+    );
+
+    expect(result.status, output).toBe(0);
+    expect(output).toContain("systemctl restart nvidia-cdi-refresh.service");
+    expect(output).toContain("cdi=nvidia.com/gpu=all");
+    expect(output).not.toContain("systemctl status");
+  });
+
+  it.each(["--check", "--verify"])("keeps %s read-only under HOME", (mode) => {
+    const { home, result, output } = runSourced(
+      STATION_PREPARE,
+      `
+run_check() { :; }
+run_verify() { :; }
+main "$READ_MODE"
+`,
+      { READ_MODE: mode },
+    );
+
+    expect(result.status, output).toBe(0);
+    expect(output).toContain("log=disabled_read_only");
+    expect(fs.existsSync(path.join(home, "station-bootstrap-logs"))).toBe(false);
+  });
 });
 
 describe("DGX Station express host integration", () => {
@@ -277,6 +423,8 @@ printf 'RESULT PLATFORM=%s PROVIDER=%s MODEL=%s VLLM_MODEL=%s\n' \
           PATH: TEST_SYSTEM_PATH,
           INSTALLER_UNDER_TEST: INSTALLER_PAYLOAD,
         },
+        timeout: 15_000,
+        killSignal: "SIGKILL",
       },
     );
     const output = `${result.stdout}${result.stderr}`;
@@ -287,6 +435,29 @@ printf 'RESULT PLATFORM=%s PROVIDER=%s MODEL=%s VLLM_MODEL=%s\n' \
     expect(output).toMatch(
       /RESULT PLATFORM=DGX Station PROVIDER=install-vllm MODEL=nvidia\/nemotron-3-ultra-550b-a55b VLLM_MODEL=nemotron-3-ultra-550b-a55b/,
     );
+  });
+
+  it("preserves an explicit provider even when Station resume state exists", () => {
+    const { result, output } = runSourced(
+      INSTALLER_PAYLOAD,
+      `
+mkdir -p "$HOME/.nemoclaw"
+chmod 0700 "$HOME/.nemoclaw"
+printf 'nemotron-3-ultra-550b-a55b\n' >"$HOME/.nemoclaw/station-express-resume"
+chmod 0600 "$HOME/.nemoclaw/station-express-resume"
+detect_express_platform() { printf 'DGX Station'; }
+NON_INTERACTIVE=''
+NEMOCLAW_PROVIDER='openai'
+NEMOCLAW_NO_EXPRESS=''
+maybe_offer_express_install
+printf 'RESULT PROVIDER=%s\n' "$NEMOCLAW_PROVIDER"
+`,
+    );
+
+    expect(result.status, output).toBe(0);
+    expect(output).toContain("NEMOCLAW_PROVIDER=openai already set");
+    expect(output).toContain("RESULT PROVIDER=openai");
+    expect(output).not.toContain("Resuming the accepted express install");
   });
 
   it("rejects a multi-line Station resume state", () => {
@@ -314,6 +485,8 @@ printf 'RESULT PLATFORM=%s PROVIDER=%s MODEL=%s VLLM_MODEL=%s\n' \
           PATH: TEST_SYSTEM_PATH,
           INSTALLER_UNDER_TEST: INSTALLER_PAYLOAD,
         },
+        timeout: 15_000,
+        killSignal: "SIGKILL",
       },
     );
     const output = `${result.stdout}${result.stderr}`;
