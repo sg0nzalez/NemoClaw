@@ -379,9 +379,10 @@ main "$@"
 source "$INSTALLER_UNDER_TEST" >/dev/null
 detect_express_platform() { printf "%s" "$EXPRESS_PLATFORM"; }
 print_banner() { :; }
-# Stop main cleanly right after preflight_explicit_express_flags passes, echoing
+# Stop main right after flag parsing — before validate (which requires a TTY for
+# --station-deepseek, #7014) and before the notice prompt — echoing
 # NON_INTERACTIVE so the test can confirm the notice env var did not infer it.
-preflight_usage_notice_prompt() { printf "PROCEEDED NON_INTERACTIVE=%s\\n" "\${NON_INTERACTIVE:-}"; exit 0; }
+preflight_explicit_express_flags() { printf "PROCEEDED NON_INTERACTIVE=%s\\n" "\${NON_INTERACTIVE:-}"; exit 0; }
 main "$@"
 `,
         "_",
@@ -405,6 +406,53 @@ main "$@"
     // The notice acceptance must not have flipped the run non-interactive.
     expect(output).not.toMatch(/PROCEEDED NON_INTERACTIVE=1/);
     expect(output).not.toMatch(/cannot be combined with non-interactive mode/);
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("errors instead of silently skipping --station-deepseek when no interactive terminal is available (#7014)", () => {
+    // `setsid` runs main in a new session with no controlling terminal, and
+    // stdin is a pipe — so neither `-t 0` nor /dev/tty is available, making the
+    // check deterministic regardless of how the test runner was launched.
+    // Docker / build deps are mocked to prove the error fires before any host
+    // mutation (the preflight validation path).
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-station-notty-"));
+    const mutationLog = path.join(tmp, "host-mutations.log");
+    const result = spawnSync(
+      "setsid",
+      [
+        "bash",
+        "--noprofile",
+        "--norc",
+        "-c",
+        `
+source "$INSTALLER_UNDER_TEST" >/dev/null
+detect_express_platform() { printf "%s" "$EXPRESS_PLATFORM"; }
+ensure_docker() { printf "ensure_docker\\n" >>"$MUTATION_LOG"; }
+ensure_openshell_build_deps() { printf "ensure_openshell_build_deps\\n" >>"$MUTATION_LOG"; }
+main "$@"
+`,
+        "_",
+        "--station-deepseek",
+      ],
+      {
+        cwd: tmp,
+        input: "",
+        encoding: "utf-8",
+        env: {
+          HOME: tmp,
+          PATH: TEST_SYSTEM_PATH,
+          INSTALLER_UNDER_TEST: INSTALLER_PAYLOAD,
+          MUTATION_LOG: mutationLog,
+          EXPRESS_PLATFORM: "DGX Station",
+        },
+      },
+    );
+    const output = `${result.stdout}${result.stderr}`;
+    const mutations = fs.existsSync(mutationLog) ? fs.readFileSync(mutationLog, "utf-8") : "";
+    expect(result.status, output).not.toBe(0);
+    expect(output).toMatch(/--station-deepseek.*needs an interactive terminal/);
+    // Failed at preflight, before Docker / build-dependency mutation.
+    expect(mutations).toBe("");
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
