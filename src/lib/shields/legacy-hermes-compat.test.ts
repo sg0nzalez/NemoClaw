@@ -297,6 +297,18 @@ describe("legacy Hermes shields compatibility", () => {
     expect(commands.some((cmd) => isGuardAction(cmd, "finish-shields-transition"))).toBe(false);
   });
 
+  it("rejects an unexpected Hermes topology response before finishing", () => {
+    installExecResponses(CURRENT_GUARD_HELP, "700", "unexpected-topology");
+
+    expect(() => shields.unlockAgentConfig("current-hermes", hermesTarget(), true, true)).toThrow(
+      /Unexpected Hermes workload topology response/,
+    );
+
+    const commands = dockerExecSpy.mock.calls.map(commandFromCall);
+    expect(commands.some((cmd) => cmd.includes(HERMES_ROOT_LIFECYCLE_MARKER))).toBe(true);
+    expect(commands.some((cmd) => isGuardAction(cmd, "finish-shields-transition"))).toBe(false);
+  });
+
   it("rejects other sandbox-owned Hermes root modes before finishing a sealed unlock", () => {
     installExecResponses(CURRENT_GUARD_HELP, "750");
 
