@@ -43,9 +43,9 @@ The installer also requires `strings` from `binutils` to verify the OpenShell bi
 
 On an Ubuntu 24.04 ARM64 DGX Station GB300, accepting express install prepares the host with NVIDIA open driver `610.43.02`, Docker CE `29.6.1` with Buildx, and NVIDIA Container Toolkit `1.19.1`.
 The preparation probes package and runtime state first, reuses exact matches, and installs only missing pinned packages, including the NVIDIA Container Toolkit libraries and `nvidia-ctk` CLI.
-Package downloads from the Ubuntu, NVIDIA, and Docker repository hosts can proceed concurrently within one serialized APT transaction.
-After reboot, preparation enables NVIDIA's packaged CDI refresh service, requires the `nvidia.com/gpu=all` device, and verifies it with a real container launch.
+After reboot, preparation enables NVIDIA's packaged CDI refresh path and service, requires the `nvidia.com/gpu=all` device, and verifies it with a real container launch.
 If the packaged refresh does not produce that device, it uses NVIDIA's documented transient generation fallback at `/var/run/cdi/nvidia.yaml`; it does not create a persistent manual CDI configuration under `/etc`.
+If an administrator has customized the packaged CDI refresh environment, preparation stops instead of bypassing that policy with default direct generation.
 If the `docker --gpus all` acceptance probe fails, preparation registers the NVIDIA Docker runtime only when `docker info` diagnoses that runtime as absent; any other launch failure stops without changing daemon configuration.
 That registration remains required until the same acceptance probe succeeds through a replacement Docker and NVIDIA runtime integration, so preparation does not remove it automatically.
 It requires Secure Boot to be disabled, matching headers for the running kernel, at least 20 GiB free on the root filesystem, and no active agent, inference, or Docker workloads.

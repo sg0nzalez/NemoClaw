@@ -136,10 +136,13 @@ run_apply
     expect(output).toContain("INSTALL_PACKAGES");
     expect(output).toContain("ENSURE_DOCKER_GROUP");
     expect(output).toContain("WRITE_BOOT_MARKER");
+    expect(output).toContain(
+      "systemctl enable containerd.service docker.service nvidia-cdi-refresh.path nvidia-cdi-refresh.service",
+    );
     expect(output).toContain("APPLY_RESULT=REBOOT_REQUIRED");
   });
 
-  it("installs the exact NVIDIA Container Toolkit package contract with safe parallel fetches", () => {
+  it("installs the exact NVIDIA Container Toolkit package contract", () => {
     const { result, output } = runSourced(
       STATION_PREPARE,
       `
@@ -153,10 +156,8 @@ install_packages
     );
 
     expect(result.status, output).toBe(0);
-    expect(output).toContain("apt-get -o Acquire::Queue-Mode=host update");
-    expect(output).toContain(
-      "apt-get -o Acquire::Queue-Mode=host install -y --no-install-recommends",
-    );
+    expect(output).toContain("apt-get update");
+    expect(output).toContain("apt-get install -y --no-install-recommends");
     for (const spec of [
       "libnvidia-container-tools=1.19.1-1",
       "libnvidia-container1=1.19.1-1",
@@ -353,6 +354,7 @@ generated=0
 sudo() {
   printf 'SUDO %s\n' "$*"
   if [[ "$*" == "systemctl restart nvidia-cdi-refresh.service" ]]; then return 1; fi
+  if [[ "$*" == "test -e $CDI_REFRESH_ENV_FILE" ]]; then return 1; fi
   if [[ "$*" == "nvidia-ctk cdi generate --output=/var/run/cdi/nvidia.yaml" ]]; then generated=1; fi
   return 0
 }
@@ -378,6 +380,7 @@ refresh_cdi
 generated=0
 sudo() {
   printf 'SUDO %s\n' "$*"
+  if [[ "$*" == "test -e $CDI_REFRESH_ENV_FILE" ]]; then return 1; fi
   if [[ "$*" == "nvidia-ctk cdi generate --output=/var/run/cdi/nvidia.yaml" ]]; then generated=1; fi
   return 0
 }
@@ -401,6 +404,7 @@ refresh_cdi
 sudo() {
   printf 'SUDO %s\n' "$*"
   if [[ "$*" == "systemctl restart nvidia-cdi-refresh.service" ]]; then return 1; fi
+  if [[ "$*" == "test -e $CDI_REFRESH_ENV_FILE" ]]; then return 1; fi
   if [[ "$*" == "nvidia-ctk cdi generate --output=/var/run/cdi/nvidia.yaml" ]]; then return 1; fi
   return 0
 }
@@ -411,6 +415,45 @@ refresh_cdi
     expect(result.status, output).not.toBe(0);
     expect(output).toContain("nvidia-ctk cdi generate --output=/var/run/cdi/nvidia.yaml");
     expect(output).toMatch(/Direct transient CDI generation failed/);
+  });
+
+  it("fails closed when direct CDI generation produces no GPU device", () => {
+    const { result, output } = runSourced(
+      STATION_PREPARE,
+      `
+sudo() {
+  printf 'SUDO %s\n' "$*"
+  if [[ "$*" == "systemctl restart nvidia-cdi-refresh.service" ]]; then return 1; fi
+  if [[ "$*" == "test -e $CDI_REFRESH_ENV_FILE" ]]; then return 1; fi
+  return 0
+}
+nvidia-ctk() { :; }
+refresh_cdi
+`,
+    );
+
+    expect(result.status, output).not.toBe(0);
+    expect(output).toContain("nvidia-ctk cdi generate --output=/var/run/cdi/nvidia.yaml");
+    expect(output).toMatch(/unavailable after direct transient generation/);
+  });
+
+  it("does not bypass an administrator-customized CDI refresh environment", () => {
+    const { result, output } = runSourced(
+      STATION_PREPARE,
+      `
+sudo() {
+  printf 'SUDO %s\n' "$*"
+  if [[ "$*" == "systemctl restart nvidia-cdi-refresh.service" ]]; then return 1; fi
+  return 0
+}
+refresh_cdi
+`,
+    );
+
+    expect(result.status, output).not.toBe(0);
+    expect(output).toMatch(/contains administrator overrides/);
+    expect(output).toMatch(/refusing to bypass/);
+    expect(output).not.toContain("nvidia-ctk cdi generate --output=/var/run/cdi/nvidia.yaml");
   });
 
   it("rechecks every workload gate immediately before Docker runtime mutation", () => {
@@ -494,6 +537,8 @@ refresh_cdi
     );
 
     expect(result.status, output).toBe(0);
+    expect(output).toContain("systemctl enable nvidia-cdi-refresh.path nvidia-cdi-refresh.service");
+    expect(output).toContain("systemctl start nvidia-cdi-refresh.path");
     expect(output).toContain("systemctl restart nvidia-cdi-refresh.service");
     expect(output).toContain("cdi=nvidia.com/gpu=all source=packaged_refresh_service");
     expect(output).not.toContain("systemctl status");

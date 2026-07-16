@@ -123,7 +123,6 @@ Use these details when your first-run path needs more control.
     On DGX Station, accepting the express prompt selects the pinned `nemotron-3-ultra-550b-a55b` managed-vLLM recipe and completes onboarding without more provider, model, policy, or sandbox-name choices.
     The Station path probes the validated driver, Docker, Buildx, and NVIDIA Container Toolkit versions, reuses exact matches, and installs missing pinned packages without additional choices.
     It establishes NVIDIA CDI through the packaged refresh service, with NVIDIA's transient `/var/run/cdi/nvidia.yaml` generation command as a fallback, then proves both CDI and `--gpus all` with real container launches.
-    APT fetches from separate Ubuntu, NVIDIA, and Docker repository hosts concurrently while package installation and host mutations remain serialized.
     After it installs missing pinned packages, the installer exits with status `10` at the validated reboot boundary; reboot, sign in, and rerun the same installer command to resume the accepted recipe without another prompt.
     This automation does not change Station's Deferred support status; physical end-to-end validation remains open.
     Pass `--station-deepseek` to use DeepSeek V4 Flash for a Station demo instead.
@@ -197,7 +196,6 @@ Use these details when your first-run path needs more control.
     DGX Station express install explicitly selects `nemotron-3-ultra-550b-a55b` instead of the Station managed-vLLM profile default, `deepseek-v4-flash`, and discloses the approximately `352 GB` model download before confirmation.
     Before onboarding, the Station path checks for NVIDIA open driver `610.43.02`, Docker CE `29.6.1` with Buildx, NVIDIA Container Toolkit `1.19.1`, and the NVIDIA CDI device `nvidia.com/gpu=all`.
     It reuses exact versions, installs missing pinned packages, and refuses to automatically upgrade or downgrade an existing mismatched version.
-    APT downloads from separate repository hosts can overlap, but package installation, driver activation, service changes, and runtime acceptance checks remain serialized.
     Installing missing pinned packages exits with status `10` for a reboot; after you sign in and rerun the same installer command, the accepted express recipe resumes without another prompt.
     This automation does not change Station's Deferred support status; physical end-to-end validation remains open.
     To select DeepSeek V4 Flash while retaining the one-confirmation Station express flow, run `curl -fsSL https://www.nvidia.com/nemoclaw.sh | bash -s -- --station-deepseek`.

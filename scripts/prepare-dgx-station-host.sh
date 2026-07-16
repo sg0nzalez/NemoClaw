@@ -23,7 +23,7 @@ readonly TOOLKIT_VERSION="1.19.1"
 readonly ACCEPTANCE_IMAGE="ubuntu@sha256:7f622ca8766bccb22f04242ecb6f19f770b2f08827dc4b8c707de5e78a6da7ab"
 readonly STATE_DIR="${HOME}/.local/state/station-bootstrap"
 readonly INSTALL_BOOT_MARKER="${STATE_DIR}/install-boot-id"
-readonly -a APT_DOWNLOAD_OPTIONS=("-o" "Acquire::Queue-Mode=host")
+readonly CDI_REFRESH_ENV_FILE="/etc/nvidia-container-toolkit/nvidia-cdi-refresh.env"
 
 readonly -a PACKAGE_SPECS=(
   "dkms=1:3.4.0-1ubuntu1"
@@ -441,7 +441,7 @@ validate_package_availability() {
 
 simulate_install() {
   local simulation
-  simulation="$(apt-get "${APT_DOWNLOAD_OPTIONS[@]}" -s install --no-install-recommends "${PACKAGE_SPECS[@]}")" \
+  simulation="$(apt-get -s install --no-install-recommends "${PACKAGE_SPECS[@]}")" \
     || fatal "APT simulation failed"
   printf '%s\n' "$simulation"
   if grep -Eq '^(Remv |Purg )' <<<"$simulation"; then
@@ -452,12 +452,12 @@ simulate_install() {
 
 install_packages() {
   configure_repositories
-  info "Refreshing package metadata with one download connection per repository host"
-  sudo apt-get "${APT_DOWNLOAD_OPTIONS[@]}" update
+  info "Refreshing package metadata"
+  sudo apt-get update
   validate_package_availability
   simulate_install
-  info "Installing pinned Station prerequisites with parallel downloads across repository hosts"
-  sudo env DEBIAN_FRONTEND=noninteractive apt-get "${APT_DOWNLOAD_OPTIONS[@]}" install -y --no-install-recommends \
+  info "Installing pinned Station prerequisites"
+  sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     "${PACKAGE_SPECS[@]}"
 
   local spec
@@ -479,8 +479,23 @@ ensure_docker_group() {
   fi
 }
 
+cdi_refresh_has_custom_environment() {
+  local grep_status
+  sudo test -e "$CDI_REFRESH_ENV_FILE" || return 1
+  if sudo grep -Eq '^[[:space:]]*[^#[:space:]]' "$CDI_REFRESH_ENV_FILE"; then
+    return 0
+  else
+    grep_status=$?
+  fi
+  ((grep_status == 1)) && return 1
+  fatal "Could not inspect ${CDI_REFRESH_ENV_FILE} before CDI fallback"
+}
+
 refresh_cdi() {
-  sudo systemctl enable --now nvidia-cdi-refresh.path
+  sudo systemctl enable nvidia-cdi-refresh.path nvidia-cdi-refresh.service \
+    || fatal "Could not enable the packaged NVIDIA CDI refresh lifecycle"
+  sudo systemctl start nvidia-cdi-refresh.path \
+    || fatal "Could not activate the packaged NVIDIA CDI refresh path"
   if ! sudo systemctl restart nvidia-cdi-refresh.service; then
     warn "Packaged CDI refresh failed; collecting diagnostics before the NVIDIA transient fallback"
     sudo systemctl status nvidia-cdi-refresh.service --no-pager || true
@@ -497,6 +512,9 @@ refresh_cdi() {
   # This is NVIDIA's documented fallback and writes the same transient /var/run
   # specification as nvidia-cdi-refresh.service. It does not create a persistent
   # manual CDI configuration under /etc.
+  if cdi_refresh_has_custom_environment; then
+    fatal "${CDI_REFRESH_ENV_FILE} contains administrator overrides; refusing to bypass them with default direct CDI generation"
+  fi
   warn "Generating NVIDIA's transient CDI specification at /var/run/cdi/nvidia.yaml"
   sudo nvidia-ctk cdi generate --output=/var/run/cdi/nvidia.yaml \
     || fatal "Direct transient CDI generation failed; inspect the packaged service diagnostics"
@@ -678,7 +696,7 @@ run_apply() {
     assert_no_package_mismatches
     install_packages
     ensure_docker_group
-    sudo systemctl enable containerd.service docker.service nvidia-cdi-refresh.path
+    sudo systemctl enable containerd.service docker.service nvidia-cdi-refresh.path nvidia-cdi-refresh.service
     write_install_boot_marker
     info "APPLY_RESULT=REBOOT_REQUIRED"
     info "Run: sudo reboot"
