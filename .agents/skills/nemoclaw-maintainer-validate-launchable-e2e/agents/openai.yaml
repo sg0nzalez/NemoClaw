@@ -1,0 +1,7 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+interface:
+  display_name: "NemoClaw Launchable E2E Gate"
+  short_description: "Validate the pre-tag Launchable E2E gate"
+  default_prompt: "Use $nemoclaw-maintainer-validate-launchable-e2e to validate a NemoClaw release candidate through the staging Launchable E2E gate."
