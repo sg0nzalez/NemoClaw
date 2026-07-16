@@ -505,6 +505,14 @@ run_gpus_test_sudo() {
   sudo docker run --rm --gpus all "$ACCEPTANCE_IMAGE" nvidia-smi
 }
 
+docker_has_nvidia_runtime_sudo() {
+  local runtimes
+  runtimes="$(
+    sudo docker info --format '{{range $name, $_ := .Runtimes}}{{println $name}}{{end}}'
+  )" || fatal "Could not inspect Docker runtimes after the --gpus all probe failed"
+  grep -Fxq 'nvidia' <<<"$runtimes"
+}
+
 ensure_cdi_runtime() {
   if run_cdi_test_sudo; then
     info "cdi_contract=pass_without_configuration_change"
@@ -524,7 +532,14 @@ configure_docker_runtime_if_needed() {
     return 0
   fi
 
-  warn "Docker --gpus all failed; applying the reviewed NVIDIA runtime registration"
+  if docker_has_nvidia_runtime_sudo; then
+    fatal "Docker --gpus all failed even though the NVIDIA runtime is registered; daemon configuration was left unchanged. Inspect the failed container launch and rerun preparation."
+  fi
+
+  # Persistent registration is the supported repair only for the diagnosed
+  # missing-runtime state. It remains required until this acceptance probe
+  # succeeds through a replacement Docker/NVIDIA runtime integration.
+  warn "Docker --gpus all failed and Docker reports no NVIDIA runtime; applying the reviewed NVIDIA runtime registration"
   [[ -z "$(sudo docker ps -aq)" ]] || fatal "Docker became non-idle before runtime configuration"
   timestamp="$(date -u '+%Y%m%dT%H%M%SZ')"
   backup_dir="/var/backups/station-bootstrap/${timestamp}"

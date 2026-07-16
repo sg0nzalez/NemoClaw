@@ -340,6 +340,7 @@ refresh_cdi
       STATION_PREPARE,
       `
 run_gpus_test_sudo() { return 1; }
+docker_has_nvidia_runtime_sudo() { return 1; }
 sudo() {
   [[ "$*" == "docker ps -aq" ]] && return 0
   [[ "$*" == "test -e /etc/docker/daemon.json" ]] && return 1
@@ -354,6 +355,52 @@ configure_docker_runtime_if_needed
     expect(output).toContain("RECHECK_ALL_WORKLOADS");
     expect(output).not.toContain("nvidia-ctk runtime configure");
     expect(output).not.toContain("systemctl restart docker.service");
+  });
+
+  it("leaves Docker unchanged when the NVIDIA runtime is already registered", () => {
+    const { result, output } = runSourced(
+      STATION_PREPARE,
+      `
+run_gpus_test_sudo() { return 1; }
+docker_has_nvidia_runtime_sudo() { return 0; }
+sudo() { printf 'SUDO %s\n' "$*"; }
+configure_docker_runtime_if_needed
+`,
+    );
+
+    expect(result.status, output).not.toBe(0);
+    expect(output).toMatch(/NVIDIA runtime is registered/);
+    expect(output).toMatch(/daemon configuration was left unchanged/);
+    expect(output).not.toContain("nvidia-ctk runtime configure");
+    expect(output).not.toContain("systemctl restart docker.service");
+  });
+
+  it("registers the NVIDIA runtime only when Docker reports it missing", () => {
+    const { result, output } = runSourced(
+      STATION_PREPARE,
+      `
+calls=0
+run_gpus_test_sudo() {
+  calls=$((calls + 1))
+  [[ "$calls" -gt 1 ]]
+}
+run_cdi_test_sudo() { return 0; }
+docker_has_nvidia_runtime_sudo() { return 1; }
+check_no_workloads() { printf 'RECHECK_ALL_WORKLOADS\n'; }
+sudo() {
+  [[ "$*" == "docker ps -aq" ]] && return 0
+  [[ "$*" == "test -e /etc/docker/daemon.json" ]] && return 1
+  printf 'SUDO %s\n' "$*"
+}
+configure_docker_runtime_if_needed
+`,
+    );
+
+    expect(result.status, output).toBe(0);
+    expect(output).toContain("Docker reports no NVIDIA runtime");
+    expect(output).toContain("nvidia-ctk runtime configure --runtime=docker");
+    expect(output).toContain("systemctl restart docker.service");
+    expect(output).toContain("docker_gpus_contract=pass");
   });
 
   it("accepts a successful packaged CDI refresh", () => {

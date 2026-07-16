@@ -43,6 +43,8 @@ The installer also requires `strings` from `binutils` to verify the OpenShell bi
 
 On an Ubuntu 24.04 ARM64 DGX Station GB300, accepting express install prepares the host with NVIDIA open driver `610.43.02`, Docker CE `29.6.1` with Buildx, and NVIDIA Container Toolkit `1.19.1`.
 The preparation probes package and runtime state first, reuses exact matches, and installs only missing pinned packages.
+If the `docker --gpus all` acceptance probe fails, preparation registers the NVIDIA Docker runtime only when `docker info` diagnoses that runtime as absent; any other launch failure stops without changing daemon configuration.
+That registration remains required until the same acceptance probe succeeds through a replacement Docker and NVIDIA runtime integration, so preparation does not remove it automatically.
 It requires Secure Boot to be disabled, matching headers for the running kernel, at least 20 GiB free on the root filesystem, and no active agent, inference, or Docker workloads.
 It does not install a host CUDA toolkit or Docker Compose.
 If an existing prerequisite has a different version, preparation stops instead of automatically upgrading or downgrading it.
