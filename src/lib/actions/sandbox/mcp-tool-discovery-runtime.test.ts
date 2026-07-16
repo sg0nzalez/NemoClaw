@@ -9,6 +9,7 @@ import {
   MCP_TOOL_DISCOVERY_LIMITS,
   MCP_TOOL_DISCOVERY_PROTOCOL,
   normalizeMcpToolPage,
+  runMcpToolDiscoverySession,
   safeToolDiscoveryErrorDetail,
   ToolDiscoveryRuntimeError,
 } from "../../../../tools/mcp-tool-discovery-runtime/tool-discovery-core.ts";
@@ -96,6 +97,42 @@ describe("shared MCP tool discovery runtime", () => {
     });
   });
 
+  it("attempts both cleanup operations after failed connected discovery", async () => {
+    const terminateSession = vi.fn(async () => {
+      throw new Error("untrusted terminate failure");
+    });
+    const close = vi.fn(async () => {
+      throw new Error("untrusted close failure");
+    });
+    const publishResult = vi.fn();
+
+    await runMcpToolDiscoverySession({
+      connect: vi.fn(async () => undefined),
+      loadPage: vi.fn(async () => {
+        throw new Error("Bearer untrusted discovery failure");
+      }),
+      hasSession: () => true,
+      terminateSession,
+      close,
+      publishResult,
+    });
+
+    expect(terminateSession).toHaveBeenCalledOnce();
+    expect(close).toHaveBeenCalledOnce();
+    expect(publishResult).toHaveBeenCalledOnce();
+    const result = publishResult.mock.calls[0]?.[0];
+    expect(result).toEqual({
+      ok: false,
+      count: 0,
+      tools: [],
+      truncated: false,
+      detail: "MCP tool discovery request failed",
+    });
+    expect(JSON.stringify(result)).not.toContain("Bearer");
+    expect(JSON.stringify(result)).not.toContain("terminate failure");
+    expect(JSON.stringify(result)).not.toContain("close failure");
+  });
+
   it("rejects redirects and declared oversized responses before reading bodies", async () => {
     const deadline = AbortSignal.timeout(1_000);
     const redirectFetch = createBoundedMcpFetch(
@@ -118,6 +155,31 @@ describe("shared MCP tool discovery runtime", () => {
     await expect(oversizedFetch("https://example.test/mcp")).rejects.toMatchObject({
       code: "response-too-large",
     });
+  });
+
+  it("cancels a chunked response after cumulative bytes cross the limit", async () => {
+    const sourceCancel = vi.fn();
+    let chunk = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        chunk += 1;
+        controller.enqueue(
+          new Uint8Array(chunk === 1 ? MCP_TOOL_DISCOVERY_LIMITS.maxResponseBytes : 1),
+        );
+      },
+      cancel: sourceCancel,
+    });
+    const boundedFetch = createBoundedMcpFetch(
+      async () => new Response(body),
+      AbortSignal.timeout(1_000),
+    );
+
+    const response = await boundedFetch("https://example.test/mcp");
+    expect(response.headers.get("content-length")).toBeNull();
+    await expect(response.arrayBuffer()).rejects.toMatchObject({
+      code: "response-too-large",
+    });
+    expect(sourceCancel).toHaveBeenCalledOnce();
   });
 
   it("bounds both total-deadline and per-request aborts with a credential-safe timeout", async () => {

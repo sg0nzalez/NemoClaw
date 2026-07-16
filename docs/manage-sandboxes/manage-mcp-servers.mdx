@@ -49,7 +49,8 @@ Agent configuration, progressive disclosure, runtime filters, and session state 
 NemoClaw runs the standard MCP `initialize`, `notifications/initialized`, and paginated `tools/list` lifecycle.
 It retains and returns tool names only, never prints the other tool-definition fields returned by `tools/list`, and never calls a tool.
 The client bounds total time, per-request time, cumulative response bytes, pages, tool count, cursor length, and tool-name length.
-It closes the MCP session and transport on both success and failure.
+It attempts to close the MCP session and transport on both success and failure.
+Cleanup errors do not replace the bounded, credential-safe discovery result.
 
 JSON output adds a per-server `toolDiscovery` object without changing the existing status fields:
 

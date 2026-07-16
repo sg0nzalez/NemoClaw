@@ -2010,7 +2010,8 @@ For HTTP 401 or 403, a confirmed-valid credential means the host is not rewritin
 Every other outcome — differing rejections (an endpoint may reject two different literal bearers differently), endpoints that skip authentication, endpoint outages, policy denials, and unreachable sandboxes — reports as `unknown` rather than blaming the credential rewrite, and a persisted URL that fails the current authenticated-endpoint boundary is never probed.
 
 Pass `--tools` with one server name to make a live MCP connection through the selected agent's policy, credential placeholder, proxy environment, and adapter runtime ancestry.
-The shared client performs `initialize`, `notifications/initialized`, and paginated `tools/list`, then closes the MCP session and transport.
+The shared client performs `initialize`, `notifications/initialized`, and paginated `tools/list`, then attempts to close the MCP session and transport.
+Cleanup errors do not replace the bounded, credential-safe discovery result.
 It retains and returns deterministic tool names only, never prints the other tool-definition fields returned by `tools/list`, and never calls a tool.
 The operation is bounded by total and per-request timeouts plus response-byte, page, tool-count, cursor-length, and tool-name limits.
 

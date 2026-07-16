@@ -6,12 +6,11 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 
 import {
   createBoundedMcpFetch,
-  enumerateMcpToolNames,
   MCP_TOOL_DISCOVERY_LIMITS,
   MCP_TOOL_DISCOVERY_PROTOCOL,
   type McpToolDiscoveryResult,
   normalizeMcpToolPage,
-  safeToolDiscoveryErrorDetail,
+  runMcpToolDiscoverySession,
 } from "./tool-discovery-core.ts";
 
 interface RuntimeArguments {
@@ -83,36 +82,17 @@ async function main(): Promise<void> {
     maxTotalTimeout: MCP_TOOL_DISCOVERY_LIMITS.maxTotalTimeMs,
   };
 
-  try {
-    await client.connect(transport, requestOptions);
-    writeResult(
-      await enumerateMcpToolNames(async (cursor) => {
-        const page = await client.listTools(cursor ? { cursor } : undefined, requestOptions);
-        return normalizeMcpToolPage(page);
-      }),
-    );
-  } catch (error) {
-    writeResult({
-      ok: false,
-      count: 0,
-      tools: [],
-      truncated: false,
-      detail: safeToolDiscoveryErrorDetail(error),
-    });
-  } finally {
-    if (transport.sessionId) {
-      try {
-        await transport.terminateSession();
-      } catch {
-        // Session cleanup is best effort after the bounded diagnostic result.
-      }
-    }
-    try {
-      await client.close();
-    } catch {
-      // Closing an already-failed transport must not replace the diagnostic.
-    }
-  }
+  await runMcpToolDiscoverySession({
+    connect: () => client.connect(transport, requestOptions),
+    loadPage: async (cursor) => {
+      const page = await client.listTools(cursor ? { cursor } : undefined, requestOptions);
+      return normalizeMcpToolPage(page);
+    },
+    hasSession: () => Boolean(transport.sessionId),
+    terminateSession: () => transport.terminateSession(),
+    close: () => client.close(),
+    publishResult: writeResult,
+  });
 }
 
 await main();

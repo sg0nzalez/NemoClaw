@@ -28,6 +28,15 @@ export interface McpToolPage {
 
 export type McpToolPageLoader = (cursor?: string) => Promise<McpToolPage>;
 
+export interface McpToolDiscoverySession {
+  connect: () => Promise<void>;
+  loadPage: McpToolPageLoader;
+  hasSession: () => boolean;
+  terminateSession: () => Promise<void>;
+  close: () => Promise<void>;
+  publishResult: (result: McpToolDiscoveryResult) => void;
+}
+
 export function normalizeMcpToolPage(page: McpToolPage): McpToolPage {
   return {
     tools: page.tools,
@@ -144,6 +153,41 @@ export async function enumerateMcpToolNames(
   }
 
   throw new ToolDiscoveryRuntimeError("invalid-response");
+}
+
+export async function runMcpToolDiscoverySession(session: McpToolDiscoverySession): Promise<void> {
+  try {
+    await session.connect();
+    session.publishResult(await enumerateMcpToolNames(session.loadPage));
+  } catch (error) {
+    session.publishResult({
+      ok: false,
+      count: 0,
+      tools: [],
+      truncated: false,
+      detail: safeToolDiscoveryErrorDetail(error),
+    });
+  } finally {
+    // Source boundary: after connect, the remote MCP server owns session
+    // lifetime. SDK cleanup can reject once the transport has failed, so the
+    // client cannot prove remote reclamation. Attempt both cleanup operations
+    // without replacing the bounded, credential-safe diagnostic result.
+    // mcp-tool-discovery-runtime.test.ts pins the failed-discovery path. Remove
+    // this fallback when the SDK guarantees idempotent non-throwing cleanup or
+    // exposes a bounded cleanup outcome that the diagnostic can report safely.
+    if (session.hasSession()) {
+      try {
+        await session.terminateSession();
+      } catch {
+        // Best effort at the remote-session ownership boundary described above.
+      }
+    }
+    try {
+      await session.close();
+    } catch {
+      // Best effort at the failed-transport ownership boundary described above.
+    }
+  }
 }
 
 export type ToolDiscoveryFetch = (input: string | URL, init?: RequestInit) => Promise<Response>;
