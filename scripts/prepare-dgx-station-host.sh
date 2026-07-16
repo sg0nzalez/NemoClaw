@@ -5,7 +5,7 @@
 set -Eeuo pipefail
 umask 077
 
-readonly SCRIPT_VERSION="2026-07-16.2"
+readonly SCRIPT_VERSION="2026-07-16.3"
 readonly REBOOT_REQUIRED_EXIT=10
 readonly MIN_FREE_KIB=$((20 * 1024 * 1024))
 # The qualified generic image currently ships this OEM telemetry bootcmd. Its
@@ -31,9 +31,6 @@ readonly TARGET_DKMS_VERSION="1:3.4.0-1ubuntu1"
 readonly ACCEPTANCE_IMAGE="ubuntu@sha256:7f622ca8766bccb22f04242ecb6f19f770b2f08827dc4b8c707de5e78a6da7ab"
 readonly STATE_DIR="${HOME}/.local/state/station-bootstrap"
 readonly INSTALL_BOOT_MARKER="${STATE_DIR}/install-boot-id"
-readonly CDI_REFRESH_ENV_FILE="/etc/nvidia-container-toolkit/nvidia-cdi-refresh.env"
-readonly TRANSIENT_CDI_SPEC_PATH="/var/run/cdi/nvidia.yaml"
-readonly TRANSIENT_CDI_SPEC_CANONICAL_PATH="/run/cdi/nvidia.yaml"
 
 readonly -a PACKAGE_SPECS=(
   "dkms=${TARGET_DKMS_VERSION}"
@@ -653,18 +650,6 @@ ensure_docker_group() {
   fi
 }
 
-cdi_refresh_has_custom_environment() {
-  local grep_status
-  sudo test -e "$CDI_REFRESH_ENV_FILE" || return 1
-  if sudo grep -Eq '^[[:space:]]*[^#[:space:]]' "$CDI_REFRESH_ENV_FILE"; then
-    return 0
-  else
-    grep_status=$?
-  fi
-  ((grep_status == 1)) && return 1
-  fatal "Could not inspect ${CDI_REFRESH_ENV_FILE} before CDI fallback"
-}
-
 ensure_cdi_refresh_lifecycle() {
   ((CDI_LIFECYCLE_READY == 0)) || return 0
   check_no_workloads
@@ -686,53 +671,22 @@ verify_cdi_refresh_lifecycle() {
   info "cdi_refresh_lifecycle=verified"
 }
 
-assert_transient_cdi_output_safe() {
-  local require_file=${1:-0} resolved_directory
-  ensure_root_directory_safe /run/cdi /run 0755 "NVIDIA CDI runtime directory"
-  resolved_directory="$(readlink -f /var/run/cdi)" \
-    || fatal "Could not resolve NVIDIA's transient CDI runtime directory"
-  [[ "$resolved_directory" == "/run/cdi" ]] \
-    || fatal "Expected /var/run/cdi to resolve to /run/cdi, found ${resolved_directory}"
-  sudo test ! -L "$TRANSIENT_CDI_SPEC_CANONICAL_PATH" \
-    || fatal "Transient NVIDIA CDI specification must not be a symbolic link: ${TRANSIENT_CDI_SPEC_CANONICAL_PATH}"
-  if sudo test -e "$TRANSIENT_CDI_SPEC_CANONICAL_PATH"; then
-    assert_root_regular_file_safe "$TRANSIENT_CDI_SPEC_CANONICAL_PATH" "" "Transient NVIDIA CDI specification"
-  elif [[ "$require_file" == "1" ]]; then
-    fatal "Transient NVIDIA CDI generation did not create ${TRANSIENT_CDI_SPEC_CANONICAL_PATH}"
-  fi
-}
-
 refresh_cdi() {
   check_no_workloads
   ensure_cdi_refresh_lifecycle
   if ! sudo systemctl restart nvidia-cdi-refresh.service; then
-    warn "Packaged CDI refresh failed; collecting diagnostics before the NVIDIA transient fallback"
+    warn "Packaged CDI refresh failed; collecting diagnostics"
     sudo systemctl status nvidia-cdi-refresh.service --no-pager || true
     sudo journalctl -u nvidia-cdi-refresh.service --no-pager -n 50 || true
-  elif nvidia-ctk cdi list | grep -Fxq 'nvidia.com/gpu=all'; then
-    info "cdi=nvidia.com/gpu=all source=packaged_refresh_service"
-    return 0
-  else
+    fatal "Packaged CDI refresh failed; repair nvidia-cdi-refresh.service before rerunning preparation"
+  fi
+  if ! nvidia-ctk cdi list | grep -Fxq 'nvidia.com/gpu=all'; then
     warn "Packaged CDI refresh completed without advertising nvidia.com/gpu=all"
     sudo systemctl status nvidia-cdi-refresh.service --no-pager || true
     sudo journalctl -u nvidia-cdi-refresh.service --no-pager -n 50 || true
+    fatal "Packaged CDI refresh did not advertise nvidia.com/gpu=all; direct CDI generation is not permitted"
   fi
-
-  # This is NVIDIA's documented fallback and writes the same transient /var/run
-  # specification as nvidia-cdi-refresh.service. It does not create a persistent
-  # manual CDI configuration under /etc.
-  if cdi_refresh_has_custom_environment; then
-    fatal "${CDI_REFRESH_ENV_FILE} contains administrator overrides; refusing to bypass them with default direct CDI generation"
-  fi
-  warn "Generating NVIDIA's transient CDI specification at /var/run/cdi/nvidia.yaml"
-  check_no_workloads
-  assert_transient_cdi_output_safe 0
-  sudo nvidia-ctk cdi generate --output="$TRANSIENT_CDI_SPEC_PATH" \
-    || fatal "Direct transient CDI generation failed; inspect the packaged service diagnostics"
-  assert_transient_cdi_output_safe 1
-  nvidia-ctk cdi list | grep -Fxq 'nvidia.com/gpu=all' \
-    || fatal "CDI device nvidia.com/gpu=all is unavailable after direct transient generation"
-  info "cdi=nvidia.com/gpu=all source=direct_transient_fallback"
+  info "cdi=nvidia.com/gpu=all source=packaged_refresh_service"
 }
 
 ensure_acceptance_image() {

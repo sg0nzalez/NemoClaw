@@ -650,74 +650,14 @@ run_apply
     expect(output).toMatch(/new login before onboarding/);
   });
 
-  it("falls back to NVIDIA's transient CDI generation when the packaged refresh fails", () => {
+  it("fails closed when the packaged CDI refresh service fails", () => {
     const { result, output } = runSourced(
       STATION_PREPARE,
       `
-generated=0
 check_no_workloads() { printf 'RECHECK_ALL_WORKLOADS\n'; }
-assert_transient_cdi_output_safe() { printf 'CDI_OUTPUT_SAFE %s\n' "$1"; }
 sudo() {
   printf 'SUDO %s\n' "$*"
   if [[ "$*" == "systemctl restart nvidia-cdi-refresh.service" ]]; then return 1; fi
-  if [[ "$*" == "test -e $CDI_REFRESH_ENV_FILE" ]]; then return 1; fi
-  if [[ "$*" == "nvidia-ctk cdi generate --output=/var/run/cdi/nvidia.yaml" ]]; then generated=1; fi
-  return 0
-}
-nvidia-ctk() {
-  if [[ "$*" == "cdi list" && "$generated" == "1" ]]; then printf 'nvidia.com/gpu=all\n'; fi
-}
-refresh_cdi
-`,
-    );
-
-    expect(result.status, output).toBe(0);
-    expect(output).toContain("systemctl status nvidia-cdi-refresh.service --no-pager");
-    expect(output).toContain("journalctl -u nvidia-cdi-refresh.service --no-pager -n 50");
-    expect(output).toContain("RECHECK_ALL_WORKLOADS");
-    expect(output).toContain("nvidia-ctk cdi generate --output=/var/run/cdi/nvidia.yaml");
-    expect(output).toContain("cdi=nvidia.com/gpu=all source=direct_transient_fallback");
-    expect(output).not.toContain("/etc/cdi");
-  });
-
-  it("uses the transient CDI fallback when the packaged refresh produces no GPU device", () => {
-    const { result, output } = runSourced(
-      STATION_PREPARE,
-      `
-generated=0
-check_no_workloads() { printf 'RECHECK_ALL_WORKLOADS\n'; }
-assert_transient_cdi_output_safe() { printf 'CDI_OUTPUT_SAFE %s\n' "$1"; }
-sudo() {
-  printf 'SUDO %s\n' "$*"
-  if [[ "$*" == "test -e $CDI_REFRESH_ENV_FILE" ]]; then return 1; fi
-  if [[ "$*" == "nvidia-ctk cdi generate --output=/var/run/cdi/nvidia.yaml" ]]; then generated=1; fi
-  return 0
-}
-nvidia-ctk() {
-  if [[ "$*" == "cdi list" && "$generated" == "1" ]]; then printf 'nvidia.com/gpu=all\n'; fi
-}
-refresh_cdi
-`,
-    );
-
-    expect(result.status, output).toBe(0);
-    expect(output).toContain("RECHECK_ALL_WORKLOADS");
-    expect(output).toMatch(/completed without advertising nvidia\.com\/gpu=all/);
-    expect(output).toContain("nvidia-ctk cdi generate --output=/var/run/cdi/nvidia.yaml");
-    expect(output).toContain("cdi=nvidia.com/gpu=all source=direct_transient_fallback");
-  });
-
-  it("fails closed when direct transient CDI generation also fails", () => {
-    const { result, output } = runSourced(
-      STATION_PREPARE,
-      `
-check_no_workloads() { printf 'RECHECK_ALL_WORKLOADS\n'; }
-assert_transient_cdi_output_safe() { printf 'CDI_OUTPUT_SAFE %s\n' "$1"; }
-sudo() {
-  printf 'SUDO %s\n' "$*"
-  if [[ "$*" == "systemctl restart nvidia-cdi-refresh.service" ]]; then return 1; fi
-  if [[ "$*" == "test -e $CDI_REFRESH_ENV_FILE" ]]; then return 1; fi
-  if [[ "$*" == "nvidia-ctk cdi generate --output=/var/run/cdi/nvidia.yaml" ]]; then return 1; fi
   return 0
 }
 refresh_cdi
@@ -728,20 +668,17 @@ refresh_cdi
     expect(output).toContain("systemctl status nvidia-cdi-refresh.service --no-pager");
     expect(output).toContain("journalctl -u nvidia-cdi-refresh.service --no-pager -n 50");
     expect(output).toContain("RECHECK_ALL_WORKLOADS");
-    expect(output).toContain("nvidia-ctk cdi generate --output=/var/run/cdi/nvidia.yaml");
-    expect(output).toMatch(/Direct transient CDI generation failed/);
+    expect(output).toMatch(/repair nvidia-cdi-refresh\.service/);
+    expect(output).not.toContain("nvidia-ctk cdi generate");
   });
 
-  it("fails closed when direct CDI generation produces no GPU device", () => {
+  it("fails closed when the packaged CDI refresh produces no GPU device", () => {
     const { result, output } = runSourced(
       STATION_PREPARE,
       `
 check_no_workloads() { printf 'RECHECK_ALL_WORKLOADS\n'; }
-assert_transient_cdi_output_safe() { printf 'CDI_OUTPUT_SAFE %s\n' "$1"; }
 sudo() {
   printf 'SUDO %s\n' "$*"
-  if [[ "$*" == "systemctl restart nvidia-cdi-refresh.service" ]]; then return 1; fi
-  if [[ "$*" == "test -e $CDI_REFRESH_ENV_FILE" ]]; then return 1; fi
   return 0
 }
 nvidia-ctk() { :; }
@@ -750,48 +687,12 @@ refresh_cdi
     );
 
     expect(result.status, output).not.toBe(0);
-    expect(output).toContain("nvidia-ctk cdi generate --output=/var/run/cdi/nvidia.yaml");
-    expect(output).toMatch(/unavailable after direct transient generation/);
-  });
-
-  it("does not bypass an administrator-customized CDI refresh environment", () => {
-    const { result, output } = runSourced(
-      STATION_PREPARE,
-      `
-check_no_workloads() { printf 'RECHECK_ALL_WORKLOADS\n'; }
-sudo() {
-  printf 'SUDO %s\n' "$*"
-  if [[ "$*" == "systemctl restart nvidia-cdi-refresh.service" ]]; then return 1; fi
-  return 0
-}
-refresh_cdi
-`,
-    );
-
-    expect(result.status, output).not.toBe(0);
-    expect(output).toMatch(/contains administrator overrides/);
-    expect(output).toMatch(/refusing to bypass/);
-    expect(output).not.toContain("nvidia-ctk cdi generate --output=/var/run/cdi/nvidia.yaml");
-  });
-
-  it("rejects a symbolic link at the privileged transient CDI output", () => {
-    const { result, output } = runSourced(
-      STATION_PREPARE,
-      `
-ensure_root_directory_safe() { printf 'ENSURE_ROOT_DIRECTORY_SAFE\n'; }
-readlink() { printf '/run/cdi\n'; }
-sudo() {
-  printf 'SUDO %s\n' "$*"
-  if [[ "$*" == "test ! -L /run/cdi/nvidia.yaml" ]]; then return 1; fi
-  return 0
-}
-assert_transient_cdi_output_safe 0
-`,
-    );
-
-    expect(result.status, output).not.toBe(0);
-    expect(output).toContain("ENSURE_ROOT_DIRECTORY_SAFE");
-    expect(output).toMatch(/must not be a symbolic link/);
+    expect(output).toContain("RECHECK_ALL_WORKLOADS");
+    expect(output).toMatch(/completed without advertising nvidia\.com\/gpu=all/);
+    expect(output).toContain("systemctl status nvidia-cdi-refresh.service --no-pager");
+    expect(output).toContain("journalctl -u nvidia-cdi-refresh.service --no-pager -n 50");
+    expect(output).toMatch(/direct CDI generation is not permitted/);
+    expect(output).not.toContain("nvidia-ctk cdi generate");
   });
 
   it("rechecks every workload gate immediately before Docker runtime mutation", () => {
