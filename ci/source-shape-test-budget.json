@@ -127,6 +127,11 @@
       "category": "security"
     },
     {
+      "file": "test/exact-image-qualification-workflow.test.ts",
+      "test": "keeps draft exact-image qualification manual, protected, and evidence-only",
+      "category": "security"
+    },
+    {
       "file": "test/e2e/live/hermes-e2e.test.ts",
       "test": "hermes-e2e: install.sh onboards Hermes and proves health plus live inference",
       "category": "security"

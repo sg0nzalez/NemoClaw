@@ -1,0 +1,203 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+name: Draft / Brev Launchable Qualification
+run-name: Draft image qualification for ${{ inputs.candidate_sha }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: Current lowercase 40-character NemoClaw main commit SHA to qualify.
+        required: true
+        type: string
+      reason:
+        description: Audit reason for starting this pre-tag qualification image build.
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: draft-brev-launchable-qualification-${{ inputs.candidate_sha }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Validate draft qualification request
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout trusted controller
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.0.0
+        with:
+          node-version: "22"
+
+      - name: Validate candidate and maintainer authority
+        env:
+          ACTOR: ${{ github.triggering_actor }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          GITHUB_TOKEN: ${{ github.token }}
+          QUALIFICATION_REASON: ${{ inputs.reason }}
+          REQUESTER_RUN_ATTEMPT: ${{ github.run_attempt }}
+          REQUESTER_RUN_ID: ${{ github.run_id }}
+          REQUEST_REF: ${{ github.ref }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+        run: >-
+          node --experimental-strip-types --no-warnings
+          tools/e2e/exact-image-qualification-controller.mts
+          --mode preflight
+          --actor "$ACTOR"
+          --candidate-sha "$CANDIDATE_SHA"
+          --event-name "$EVENT_NAME"
+          --reason "$QUALIFICATION_REASON"
+          --ref "$REQUEST_REF"
+          --requester-run-attempt "$REQUESTER_RUN_ATTEMPT"
+          --requester-run-id "$REQUESTER_RUN_ID"
+          --workflow-sha "$WORKFLOW_SHA"
+
+  qualify:
+    name: Build and verify exact staging image
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment:
+      name: approve-brev-launchable-qualification
+      deployment: false
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout trusted controller
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.0.0
+        with:
+          node-version: "22"
+
+      - id: workspace
+        name: Create private evidence workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          work_dir="$(mktemp -d "${RUNNER_TEMP}/nemoclaw-image-qualification.XXXXXX")"
+          chmod 700 "$work_dir"
+          printf 'work_dir=%s\n' "$work_dir" >> "$GITHUB_OUTPUT"
+
+      - id: start
+        name: Dispatch exact qualification image build
+        env:
+          ACTOR: ${{ github.triggering_actor }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          GITHUB_TOKEN: ${{ github.token }}
+          NEMOCLAW_IMAGE_QUALIFICATION_TOKEN: ${{ secrets.NEMOCLAW_IMAGE_QUALIFICATION_TOKEN }}
+          QUALIFICATION_REASON: ${{ inputs.reason }}
+          REQUESTER_RUN_ATTEMPT: ${{ github.run_attempt }}
+          REQUESTER_RUN_ID: ${{ github.run_id }}
+          REQUEST_REF: ${{ github.ref }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+        run: >-
+          node --experimental-strip-types --no-warnings
+          tools/e2e/exact-image-qualification-controller.mts
+          --mode start
+          --actor "$ACTOR"
+          --candidate-sha "$CANDIDATE_SHA"
+          --event-name "$EVENT_NAME"
+          --reason "$QUALIFICATION_REASON"
+          --ref "$REQUEST_REF"
+          --requester-run-attempt "$REQUESTER_RUN_ATTEMPT"
+          --requester-run-id "$REQUESTER_RUN_ID"
+          --workflow-sha "$WORKFLOW_SHA"
+          --work-dir "${{ steps.workspace.outputs.work_dir }}"
+
+      - name: Wait for the bound producer run
+        env:
+          NEMOCLAW_IMAGE_QUALIFICATION_TOKEN: ${{ secrets.NEMOCLAW_IMAGE_QUALIFICATION_TOKEN }}
+        run: >-
+          node --experimental-strip-types --no-warnings
+          tools/e2e/exact-image-qualification-controller.mts
+          --mode wait
+          --work-dir "${{ steps.workspace.outputs.work_dir }}"
+
+      - name: Download and verify the bound manifest artifact
+        env:
+          NEMOCLAW_IMAGE_QUALIFICATION_TOKEN: ${{ secrets.NEMOCLAW_IMAGE_QUALIFICATION_TOKEN }}
+        run: >-
+          node --experimental-strip-types --no-warnings
+          tools/e2e/exact-image-qualification-controller.mts
+          --mode download
+          --work-dir "${{ steps.workspace.outputs.work_dir }}"
+
+      - name: Validate the exact image manifest
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          CORRELATION_ID: ${{ steps.start.outputs.correlation_id }}
+          IMAGE_REPOSITORY_SHA: ${{ steps.start.outputs.image_repository_sha }}
+          PRODUCER_RUN_ATTEMPT: ${{ steps.start.outputs.producer_run_attempt }}
+          PRODUCER_RUN_ID: ${{ steps.start.outputs.producer_run_id }}
+          REQUESTER_RUN_ATTEMPT: ${{ github.run_attempt }}
+          REQUESTER_RUN_ID: ${{ github.run_id }}
+        run: >-
+          node --experimental-strip-types --no-warnings
+          tools/e2e/validate-exact-image-manifest.mts
+          --manifest "${{ steps.workspace.outputs.work_dir }}/nemoclaw-image-manifest.v1.json"
+          --output "${{ steps.workspace.outputs.work_dir }}/validated-manifest.v1.json"
+          --nemoclaw-sha "$CANDIDATE_SHA"
+          --requester-run-id "$REQUESTER_RUN_ID"
+          --requester-run-attempt "$REQUESTER_RUN_ATTEMPT"
+          --correlation-id "$CORRELATION_ID"
+          --image-repository-sha "$IMAGE_REPOSITORY_SHA"
+          --producer-run-id "$PRODUCER_RUN_ID"
+          --producer-run-attempt "$PRODUCER_RUN_ATTEMPT"
+
+      - name: Record accepted provenance and hashes
+        run: >-
+          node --experimental-strip-types --no-warnings
+          tools/e2e/exact-image-qualification-controller.mts
+          --mode finalize
+          --work-dir "${{ steps.workspace.outputs.work_dir }}"
+
+      - name: Cancel an incomplete producer run
+        if: ${{ always() && steps.workspace.outputs.work_dir != '' && steps.start.outcome != 'skipped' }}
+        continue-on-error: true
+        env:
+          NEMOCLAW_IMAGE_QUALIFICATION_TOKEN: ${{ secrets.NEMOCLAW_IMAGE_QUALIFICATION_TOKEN }}
+        run: >-
+          node --experimental-strip-types --no-warnings
+          tools/e2e/exact-image-qualification-controller.mts
+          --mode cancel
+          --work-dir "${{ steps.workspace.outputs.work_dir }}"
+
+      - name: Upload draft qualification evidence
+        if: ${{ always() && steps.workspace.outputs.work_dir != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: draft-brev-launchable-qualification-${{ inputs.candidate_sha }}-${{ github.run_id }}
+          path: |
+            ${{ steps.workspace.outputs.work_dir }}/dispatch-intent.v1.json
+            ${{ steps.workspace.outputs.work_dir }}/dispatch-reconciliation.v1.json
+            ${{ steps.workspace.outputs.work_dir }}/controller-state.json
+            ${{ steps.workspace.outputs.work_dir }}/controller-state.corrupt-*.json
+            ${{ steps.workspace.outputs.work_dir }}/nemoclaw-image-handoff.zip
+            ${{ steps.workspace.outputs.work_dir }}/nemoclaw-image-manifest.v1.json
+            ${{ steps.workspace.outputs.work_dir }}/validated-manifest.v1.json
+            ${{ steps.workspace.outputs.work_dir }}/qualification-evidence.v1.json
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Remove private evidence workspace
+        if: ${{ always() && steps.workspace.outputs.work_dir != '' }}
+        run: rm -rf -- "${{ steps.workspace.outputs.work_dir }}"

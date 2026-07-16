@@ -1,0 +1,122 @@
+// SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+import { expect, it } from "vitest";
+
+import {
+  readRepoText,
+  readYaml,
+  type Workflow,
+  type WorkflowJob,
+} from "./helpers/e2e-workflow-contract";
+
+const WORKFLOW_PATH = ".github/workflows/brev-launchable-qualification.yaml";
+const CONTROLLER_PATH = "tools/e2e/exact-image-qualification-controller.mts";
+
+type DraftQualificationWorkflow = Workflow & {
+  name: string;
+  on: Record<string, unknown>;
+  permissions: Record<string, string>;
+  concurrency: { group: string; "cancel-in-progress": boolean };
+};
+
+function strings(value: unknown): string[] {
+  return typeof value === "string"
+    ? [value]
+    : Array.isArray(value)
+      ? value.flatMap(strings)
+      : value && typeof value === "object"
+        ? Object.values(value).flatMap(strings)
+        : [];
+}
+
+function job(workflow: DraftQualificationWorkflow, name: string): WorkflowJob {
+  const value = workflow.jobs[name];
+  expect(value, `missing ${name} job`).toBeDefined();
+  return value!;
+}
+
+// source-shape-contract: security -- The draft cross-repository image handoff must remain manual, protected, fixed-target, least-privilege, and stop before any Brev deployment
+it("keeps draft exact-image qualification manual, protected, and evidence-only", () => {
+  const workflow = readYaml<DraftQualificationWorkflow>(WORKFLOW_PATH);
+  const source = readRepoText(WORKFLOW_PATH);
+  const controller = readRepoText(CONTROLLER_PATH);
+  const preflight = job(workflow, "preflight");
+  const qualify = job(workflow, "qualify");
+  const workflowStrings = strings(workflow);
+
+  expect(workflow.name).toBe("Draft / Brev Launchable Qualification");
+  expect(Object.keys(workflow.on)).toEqual(["workflow_dispatch"]);
+  expect(source).not.toMatch(/^\s+(?:push|schedule|workflow_run|pull_request):/mu);
+  expect(Object.keys((workflow.on.workflow_dispatch as { inputs: object }).inputs)).toEqual([
+    "candidate_sha",
+    "reason",
+  ]);
+  expect(workflow.permissions).toEqual({});
+  expect(workflow.concurrency).toEqual({
+    group: "draft-brev-launchable-qualification-${{ inputs.candidate_sha }}",
+    "cancel-in-progress": false,
+  });
+
+  expect(preflight.permissions).toEqual({ contents: "read" });
+  expect(preflight.environment).toBeUndefined();
+  expect(JSON.stringify(preflight)).not.toContain("NEMOCLAW_IMAGE_QUALIFICATION_TOKEN");
+  expect(qualify.permissions).toEqual({ contents: "read" });
+  expect(qualify.environment).toEqual({
+    name: "approve-brev-launchable-qualification",
+    deployment: false,
+  });
+  expect(JSON.stringify(qualify)).toContain("NEMOCLAW_IMAGE_QUALIFICATION_TOKEN");
+  expect(source.match(/secrets\.NEMOCLAW_IMAGE_QUALIFICATION_TOKEN/gu)).toHaveLength(4);
+  expect(workflowStrings).not.toContain("id-token: write");
+  expect(source).not.toMatch(/npm (?:ci|install)/u);
+  for (const step of [...(preflight.steps ?? []), ...(qualify.steps ?? [])]) {
+    expect(step.run ?? "").not.toContain("${{ inputs.");
+  }
+
+  const actionUses = workflowStrings.filter((value) => value.includes("actions/"));
+  expect(actionUses.length).toBeGreaterThan(0);
+  for (const use of actionUses) expect(use).toMatch(/^actions\/[a-z-]+@[0-9a-f]{40}$/u);
+  for (const checkout of qualify.steps?.filter((step) =>
+    step.uses?.startsWith("actions/checkout@"),
+  ) ?? []) {
+    expect(checkout.with).toMatchObject({
+      ref: "${{ github.workflow_sha }}",
+      "persist-credentials": false,
+    });
+  }
+
+  expect(controller).toContain('export const PRODUCER_REPOSITORY = "brevdev/nemoclaw-image"');
+  expect(controller).toContain(
+    'export const PRODUCER_WORKFLOW_FILE = "build-qualification-image.yml"',
+  );
+  expect(controller).toContain('export const PRODUCER_REF = "main"');
+  expect(controller).toContain('export const GITHUB_API_VERSION = "2026-03-10"');
+  expect(controller).toContain("return_run_details: true");
+  expect(controller).toContain("fs.renameSync(temporary, file)");
+  expect(controller).not.toMatch(/actions\/runs\?/u);
+  expect(controller).toContain("actions/workflows/${PRODUCER_WORKFLOW_FILE}/runs");
+
+  const validate = qualify.steps?.find((step) => step.name === "Validate the exact image manifest");
+  expect(validate?.run).toContain("tools/e2e/validate-exact-image-manifest.mts");
+  for (const flag of [
+    "--nemoclaw-sha",
+    "--requester-run-id",
+    "--requester-run-attempt",
+    "--correlation-id",
+    "--image-repository-sha",
+    "--producer-run-id",
+    "--producer-run-attempt",
+  ]) {
+    expect(validate?.run).toContain(flag);
+  }
+
+  expect(source).toContain("retention-days: 90");
+  expect(source).toContain("dispatch-intent.v1.json");
+  expect(source).toContain("dispatch-reconciliation.v1.json");
+  expect(source).toContain("controller-state.corrupt-*.json");
+  expect(source).toContain("--mode finalize");
+  expect(source).not.toMatch(/\b(?:brev|gcloud)\s+(?:launch|deploy|set|create|update)\b/iu);
+  expect(source).not.toContain("launchable_id");
+  expect(source).not.toContain("image_family");
+});
