@@ -5,24 +5,23 @@
  * Pure helpers that translate raw probe evidence collected from inside a
  * sandbox into a structured WhatsApp channel diagnostic.
  *
- * The probes themselves live in `actions/sandbox/channel-status.ts`; this
- * module never touches the filesystem, child processes, or the clock so the
- * evaluation can be exercised hermetically from fixtures. Issue #4386 reported
- * a paired-looking WhatsApp channel where the Noise WebSocket was alive but no
- * inbound events arrived, and the existing CLI surface silently rendered
- * "healthy". The diagnostic below separates QR/session state, WebSocket state,
- * inbound-event delivery, and policy/config coverage so a paired-but-idle
- * channel cannot be mistaken for working.
+ * Consumed by the `whatsapp.statusHealth` status hook (see `status-health.ts`);
+ * this module never touches the filesystem, child processes, or the clock so
+ * the evaluation can be exercised hermetically from fixtures. Issue #4386
+ * reported a paired-looking WhatsApp channel where the Noise WebSocket was
+ * alive but no inbound events arrived, and the existing CLI surface silently
+ * rendered "healthy". The diagnostic below separates QR/session state,
+ * WebSocket state, inbound-event delivery, and policy/config coverage so a
+ * paired-but-idle channel cannot be mistaken for working.
  */
 
-export type DiagnosticSeverity = "ok" | "warn" | "fail" | "info";
+import type {
+  ChannelHealthReport,
+  DiagnosticSeverity,
+  DiagnosticSignal,
+} from "../../channel-health";
 
-export type DiagnosticSignal = {
-  label: string;
-  severity: DiagnosticSeverity;
-  detail: string;
-  hint?: string;
-};
+export type { DiagnosticSeverity, DiagnosticSignal } from "../../channel-health";
 
 export type WhatsappVerdict =
   | "healthy"
@@ -58,8 +57,8 @@ export type WhatsappHeartbeat = {
 export type WhatsappProbeInput = {
   // Agent owning the sandbox: "openclaw", "hermes", etc. Used for hint text.
   agent: string;
-  // State directories inspected inside the sandbox. Discovered from the agent
-  // manifest in the orchestrator.
+  // State directories inspected inside the sandbox. Discovered from the
+  // agent-scoped path convention by the hook that builds this input.
   stateDirs: readonly string[];
   // True when the bridge state directory exists inside the sandbox and is
   // non-empty. False when the directory is missing or empty. Null when the
@@ -91,15 +90,17 @@ export type WhatsappProbeInput = {
   channelEnabledInRegistry: boolean;
 };
 
-export type WhatsappDiagnosticReport = {
-  schemaVersion: 1;
+/**
+ * WhatsApp extends the generic {@link ChannelHealthReport} with a `heartbeat`
+ * field so the renderer can still surface the parsed heartbeat block that
+ * predates the generic status-hook contract. The base guard used by
+ * `readChannelHealthOutputs` only checks the base fields, so this extra
+ * property survives round-tripping through the status-runner.
+ */
+export type WhatsappDiagnosticReport = ChannelHealthReport & {
   channel: "whatsapp";
-  agent: string;
   verdict: WhatsappVerdict;
-  probedAt: string;
-  signals: DiagnosticSignal[];
   heartbeat: WhatsappHeartbeat | null;
-  hints: string[];
 };
 
 // Bridges flush their session blob immediately after a successful QR pair;

@@ -8,7 +8,7 @@ import {
   parseWhatsappHeartbeat,
   summarizeWhatsappLogLines,
   type WhatsappProbeInput,
-} from "./whatsapp-diagnostics";
+} from "./status-health-eval";
 
 const PROBED_AT = "2026-05-28T04:00:00.000Z";
 
