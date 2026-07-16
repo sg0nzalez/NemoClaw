@@ -98,6 +98,10 @@ function preparationOptions() {
   return { revision: REVISION, helperSha256: HELPER_SHA256 };
 }
 
+function throwFixtureError(error: Error): never {
+  throw error;
+}
+
 class PreparationHarness {
   readonly calls: string[] = [];
   readonly statePhases: DualStationResumeState["phase"][] = [];
@@ -124,12 +128,12 @@ class PreparationHarness {
     inspectPretrustedTarget: (target) => {
       this.calls.push(`trust:${target}`);
       const error = this.trustErrors.get(target);
-      if (error) throw error;
+      error && throwFixtureError(error);
       return this.trusted.get(target) ?? null;
     },
     probePeerHost: (binding) => {
       this.calls.push(`probe:peer:${binding.sshTarget}`);
-      if (this.peerProbeError) throw this.peerProbeError;
+      this.peerProbeError && throwFixtureError(this.peerProbeError);
       return structuredClone(this.peer);
     },
     probeLocalConnectivity: () => {
