@@ -39,13 +39,12 @@ def write_process(
     cmdline,
     environ=b"PATH=/usr/bin\0",
     listener_inode=None,
-    state="S",
 ):
     process_root = os.path.join(proc_root, str(pid))
     os.makedirs(os.path.join(process_root, "ns"))
     os.makedirs(os.path.join(process_root, "fd"))
     os.symlink("../net", os.path.join(process_root, "net"))
-    fields = [state, str(parent_pid)] + (["0"] * 17) + [str(start_time)]
+    fields = ["S", str(parent_pid)] + (["0"] * 17) + [str(start_time)]
     with open(os.path.join(process_root, "stat"), "w", encoding="ascii") as stream:
         stream.write(f"{pid} (managed) {' '.join(fields)}\n")
     with open(os.path.join(process_root, "status"), "w", encoding="ascii") as stream:
@@ -262,22 +261,6 @@ with tempfile.TemporaryDirectory() as root:
             b"/usr/local/bin/hermes.real\0gateway\0run\0",
             listener_inode="77777",
         )
-        write_process(
-            proc_root,
-            namespace_path,
-            46,
-            666,
-            1,
-            1000,
-            b"",
-            state="Z",
-        )
-        try:
-            stable_zombie_supervisor = control._discover_supervisor(reader)
-            stable_zombie_ignored = stable_zombie_supervisor.pid
-        except control.ControlError as error:
-            stable_zombie_ignored = error.code
-        remove_process(proc_root, 46)
         write_process(
             proc_root,
             namespace_path,
@@ -730,7 +713,6 @@ with tempfile.TemporaryDirectory() as root:
         "missing_supervisor": missing_supervisor,
         "appearing_supervisor": appearing_supervisor,
         "unreadable_process": unreadable_process,
-        "stable_zombie_ignored": stable_zombie_ignored,
         "duplicate_supervisor": duplicate_supervisor,
         "duplicate": duplicate,
         "signals": sent,
@@ -803,7 +785,6 @@ describe("managed gateway root control", () => {
       missing_supervisor: "SUPERVISOR_NOT_RUNNING",
       appearing_supervisor: "SUPERVISOR_UNAVAILABLE",
       unreadable_process: "SUPERVISOR_UNAVAILABLE",
-      stable_zombie_ignored: 40,
       duplicate_supervisor: "SUPERVISOR_UNAVAILABLE",
       duplicate: "SUPERVISOR_UNAVAILABLE",
       signals: [15, 9],

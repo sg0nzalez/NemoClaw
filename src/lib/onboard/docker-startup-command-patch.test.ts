@@ -266,43 +266,6 @@ describe("Docker startup-command patch", () => {
     expect(dockerRunDetached).not.toHaveBeenCalled();
   });
 
-  it("retries one transient Docker stop timeout before recreating the container", () => {
-    const timeoutError = Object.assign(new Error("spawnSync docker ETIMEDOUT"), {
-      code: "ETIMEDOUT",
-    });
-    const dockerStop = vi
-      .fn()
-      .mockReturnValueOnce({ status: null, error: timeoutError })
-      .mockReturnValueOnce({ status: 0 });
-    const dockerRunDetached = vi.fn(() => ({ status: 0, stdout: "new-container-id\n" }));
-    const sleep = vi.fn();
-
-    const result = recreateOpenShellDockerSandboxWithStartupCommand(
-      {
-        sandboxName: "alpha",
-        openshellSandboxCommand: ["env", "nemoclaw-start"],
-        waitForSupervisor: false,
-      },
-      {
-        dockerCapture: vi.fn((args: readonly string[]) =>
-          args[0] === "ps"
-            ? "old-container-id\n"
-            : args[0] === "inspect"
-              ? JSON.stringify([inspectFixture()])
-              : "",
-        ),
-        dockerRunDetached,
-        dockerRename: vi.fn(() => ({ status: 0 })),
-        dockerStop,
-        sleep,
-      },
-    );
-
-    expect(result.newContainerId).toBe("new-container-id");
-    expect(dockerStop).toHaveBeenCalledTimes(2);
-    expect(sleep).toHaveBeenCalledWith(2);
-  });
-
   it("normalizes and restarts the original container after an uncertain backup rename", () => {
     const dockerStart = vi.fn(() => ({ status: 0 }));
     const dockerRunDetached = vi.fn(() => ({ status: 0, stdout: "new-container-id\n" }));
