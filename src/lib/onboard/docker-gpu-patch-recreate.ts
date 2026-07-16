@@ -39,6 +39,7 @@ import { openshellSandboxCommandEnvValue } from "./docker-startup-command-env";
 import { findOpenShellDockerSandboxContainerIds } from "./openshell-docker-sandbox-containers";
 
 const DOCKER_GPU_PATCH_WAIT_SECS = 180;
+const DOCKER_GPU_PATCH_STOP_RETRY_DELAY_SECS = 2;
 const MAX_DOCKER_CONTAINER_NAME_LENGTH = 253;
 
 type RecreateDeps = Required<
@@ -89,6 +90,10 @@ function resultText(
   return `${String(result.stderr || "")} ${String(result.stdout || "")} ${String(
     result.error?.message || "",
   )}`.trim();
+}
+
+function isDockerCommandTimeout(result: { error?: Error | null } | null): boolean {
+  return (result?.error as NodeJS.ErrnoException | undefined)?.code === "ETIMEDOUT";
 }
 
 function inspectDockerContainer(
@@ -252,10 +257,20 @@ export function recreateOpenShellDockerSandboxContainer(
       suppressOutput: true,
       timeout: DOCKER_GPU_PATCH_TIMEOUT_MS,
     };
-    const stopResult = d.dockerStop(oldContainerId, {
+    let stopResult = d.dockerStop(oldContainerId, {
       ...containerMutationOptions,
       timeout: DOCKER_GPU_PATCH_STOP_TIMEOUT_MS,
     });
+    if (!hasZeroDockerExitStatus(stopResult) && isDockerCommandTimeout(stopResult)) {
+      // The Docker daemon can briefly remain busy flushing a just-built image. A timed-out
+      // client does not prove the stop failed, so retry the idempotent operation once before
+      // restoring the original container and abandoning the safe recreation path.
+      d.sleep(DOCKER_GPU_PATCH_STOP_RETRY_DELAY_SECS);
+      stopResult = d.dockerStop(oldContainerId, {
+        ...containerMutationOptions,
+        timeout: DOCKER_GPU_PATCH_STOP_TIMEOUT_MS,
+      });
+    }
     if (!hasZeroDockerExitStatus(stopResult)) {
       context.rolledBack = hasZeroDockerExitStatus(
         d.dockerStart(oldContainerId, containerMutationOptions),
