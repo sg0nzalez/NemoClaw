@@ -5,9 +5,15 @@
 set -Eeuo pipefail
 umask 077
 
-readonly SCRIPT_VERSION="2026-07-16.1"
+readonly SCRIPT_VERSION="2026-07-16.2"
 readonly REBOOT_REQUIRED_EXIT=10
 readonly MIN_FREE_KIB=$((20 * 1024 * 1024))
+# The qualified generic image currently ships this OEM telemetry bootcmd. Its
+# exception disappears automatically when the file changes or the bootcmd
+# failure is fixed; update the pin only with a newly audited image.
+readonly FACTORY_CLOUD_INIT_TELEMETRY="/etc/cloud/telemetry-bootcmd-event.py"
+readonly FACTORY_CLOUD_INIT_RESULT="/run/cloud-init/result.json"
+readonly FACTORY_CLOUD_INIT_TELEMETRY_SHA256="09a526c73fcbbe238db56f0ba4ce90a5a0634bab14b5122b016089d581f07275"
 
 readonly CUDA_KEYRING_URL="https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/sbsa/cuda-keyring_1.1-1_all.deb"
 readonly CUDA_KEYRING_SHA256="6ea7d2737648936820e85677177957a0f6521b840d98eb0bbae0a4f003fa7249"
@@ -47,6 +53,7 @@ MODE=""
 LOG_FILE=""
 DOCKER_GROUP_ADDED=0
 CDI_LIFECYCLE_READY=0
+NETWORK_VALIDATED=0
 
 info() {
   printf '[station-prepare] %s %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$*"
@@ -105,6 +112,57 @@ is_preparation_critical_unit() {
 
 is_driver_transitional_unit() {
   [[ "${1:-}" == "nvidia-persistenced.service" ]]
+}
+
+root_owned_file_is_not_writable_by_group_or_other() {
+  local metadata kind uid gid mode
+  metadata="$(stat -Lc '%F|%u|%g|%a' "$1" 2>/dev/null)" || return 1
+  IFS='|' read -r kind uid gid mode <<<"$metadata"
+  [[ "$kind" == "regular file" && "$uid" == "0" && "$gid" == "0" && "$mode" =~ ^[0-7]{3,4}$ ]] \
+    || return 1
+  (((8#$mode & 0022) == 0))
+}
+
+cloud_init_failure_is_qualified() {
+  local actual_sha
+  ((NETWORK_VALIDATED == 1)) || return 1
+  root_owned_file_is_not_writable_by_group_or_other "$FACTORY_CLOUD_INIT_TELEMETRY" \
+    || return 1
+  root_owned_file_is_not_writable_by_group_or_other "$FACTORY_CLOUD_INIT_RESULT" || return 1
+  actual_sha="$(sha256sum "$FACTORY_CLOUD_INIT_TELEMETRY" 2>/dev/null | awk '{print $1}')"
+  [[ "$actual_sha" == "$FACTORY_CLOUD_INIT_TELEMETRY_SHA256" ]] || return 1
+  grep -Fq "\"('bootcmd', ProcessExecutionError(" "$FACTORY_CLOUD_INIT_RESULT"
+}
+
+network_wait_failure_is_qualified() {
+  ((NETWORK_VALIDATED == 1)) \
+    && systemctl is-active --quiet NetworkManager.service \
+    && systemctl is-active --quiet network-online.target
+}
+
+fwupd_refresh_failure_is_qualified() {
+  local state
+  ((NETWORK_VALIDATED == 1)) || return 1
+  state="$(systemctl is-enabled fwupd.service 2>/dev/null)" || true
+  [[ "$state" == "masked" ]]
+}
+
+sssd_socket_failure_is_qualified() {
+  [[ ! -e /etc/sssd/sssd.conf && ! -L /etc/sssd/sssd.conf ]]
+}
+
+is_qualified_factory_failed_unit() {
+  case "${1:-}" in
+    cloud-init.service) cloud_init_failure_is_qualified ;;
+    NetworkManager-wait-online.service | systemd-networkd-wait-online.service)
+      network_wait_failure_is_qualified
+      ;;
+    fwupd-refresh.service) fwupd_refresh_failure_is_qualified ;;
+    sssd-autofs.socket | sssd-nss.socket | sssd-pam.socket | sssd-pam-priv.socket)
+      sssd_socket_failure_is_qualified
+      ;;
+    *) return 1 ;;
+  esac
 }
 
 package_name() {
@@ -246,6 +304,7 @@ check_network() {
   for host in developer.download.nvidia.com download.docker.com registry-1.docker.io; do
     getent ahosts "$host" >/dev/null 2>&1 || fatal "DNS resolution failed for ${host}"
   done
+  NETWORK_VALIDATED=1
   info "network=required_vendor_hosts_resolve"
 }
 
@@ -274,11 +333,14 @@ check_failed_units() {
     elif is_preparation_critical_unit "$unit"; then
       warn "failed preparation-critical unit: ${unit}"
       blocking=1
+    elif is_qualified_factory_failed_unit "$unit"; then
+      warn "condition-qualified generic-image failed unit: ${unit}"
     else
-      warn "pre-existing failed unit outside the Station preparation transaction: ${unit}"
+      warn "unqualified failed unit: ${unit}"
+      blocking=1
     fi
   done
-  ((blocking == 0)) || fatal "Failed driver or container runtime units block Station preparation"
+  ((blocking == 0)) || fatal "Unqualified failed system units block Station preparation"
 }
 
 check_no_workloads() {
@@ -398,7 +460,9 @@ common_preflight() {
   require_command df
   require_command dpkg-query
   require_command getent
+  require_command grep
   require_command ps
+  require_command sha256sum
   require_command ss
   require_command stat
   require_command systemctl

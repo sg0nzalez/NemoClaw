@@ -141,16 +141,30 @@ assert_no_package_mismatches
     expect(output).toMatch(/refusing to change them automatically/);
   });
 
-  it("warns about unrelated failed units but blocks failed runtime units", () => {
-    const unrelated = runSourced(
+  it("allows only condition-qualified factory failures and blocks other failed units", () => {
+    const qualified = runSourced(
       STATION_PREPARE,
       `
 systemctl() { printf 'cloud-init.service loaded failed failed Cloud init\n'; }
+cloud_init_failure_is_qualified() { return 0; }
 check_failed_units
 `,
     );
-    expect(unrelated.result.status, unrelated.output).toBe(0);
-    expect(unrelated.output).toMatch(/outside the Station preparation transaction/);
+    expect(qualified.result.status, qualified.output).toBe(0);
+    expect(qualified.output).toMatch(
+      /condition-qualified generic-image failed unit: cloud-init.service/,
+    );
+
+    const unrelated = runSourced(
+      STATION_PREPARE,
+      `
+systemctl() { printf 'ssh.service loaded failed failed SSH\n'; }
+check_failed_units
+`,
+    );
+    expect(unrelated.result.status, unrelated.output).not.toBe(0);
+    expect(unrelated.output).toMatch(/unqualified failed unit: ssh.service/);
+    expect(unrelated.output).toMatch(/Unqualified failed system units block Station preparation/);
 
     const critical = runSourced(
       STATION_PREPARE,
@@ -161,6 +175,145 @@ check_failed_units
     );
     expect(critical.result.status, critical.output).not.toBe(0);
     expect(critical.output).toMatch(/failed preparation-critical unit: docker.service/);
+  });
+
+  it("qualifies network-wait failures only after current network health is established", () => {
+    const healthy = runSourced(
+      STATION_PREPARE,
+      `
+NETWORK_VALIDATED=1
+systemctl() {
+  case "$*" in
+    'is-active --quiet NetworkManager.service'|'is-active --quiet network-online.target') return 0 ;;
+    *) return 1 ;;
+  esac
+}
+network_wait_failure_is_qualified
+`,
+    );
+    expect(healthy.result.status, healthy.output).toBe(0);
+
+    const unvalidated = runSourced(
+      STATION_PREPARE,
+      `
+NETWORK_VALIDATED=0
+systemctl() { return 0; }
+network_wait_failure_is_qualified
+`,
+    );
+    expect(unvalidated.result.status, unvalidated.output).not.toBe(0);
+
+    const inactiveManager = runSourced(
+      STATION_PREPARE,
+      `
+NETWORK_VALIDATED=1
+systemctl() { return 1; }
+network_wait_failure_is_qualified
+`,
+    );
+    expect(inactiveManager.result.status, inactiveManager.output).not.toBe(0);
+  });
+
+  it("qualifies only the pinned OEM cloud-init bootcmd failure", () => {
+    const qualified = runSourced(
+      STATION_PREPARE,
+      `
+NETWORK_VALIDATED=1
+stat() { printf 'regular file|0|0|755\n'; }
+sha256sum() { printf '%s  %s\n' "$FACTORY_CLOUD_INIT_TELEMETRY_SHA256" "$1"; }
+grep() { return 0; }
+cloud_init_failure_is_qualified
+`,
+    );
+    expect(qualified.result.status, qualified.output).toBe(0);
+
+    const changedTelemetry = runSourced(
+      STATION_PREPARE,
+      `
+NETWORK_VALIDATED=1
+stat() { printf 'regular file|0|0|755\n'; }
+sha256sum() { printf '%064d  %s\n' 0 "$1"; }
+grep() { return 0; }
+cloud_init_failure_is_qualified
+`,
+    );
+    expect(changedTelemetry.result.status, changedTelemetry.output).not.toBe(0);
+
+    const unsafeEvidence = runSourced(
+      STATION_PREPARE,
+      `
+NETWORK_VALIDATED=1
+stat() { printf 'regular file|0|0|777\n'; }
+sha256sum() { printf '%s  %s\n' "$FACTORY_CLOUD_INIT_TELEMETRY_SHA256" "$1"; }
+grep() { return 0; }
+cloud_init_failure_is_qualified
+`,
+    );
+    expect(unsafeEvidence.result.status, unsafeEvidence.output).not.toBe(0);
+  });
+
+  it("requires exact conditions for auxiliary factory-image failures", () => {
+    const maskedFwupd = runSourced(
+      STATION_PREPARE,
+      `
+NETWORK_VALIDATED=1
+systemctl() { printf 'masked\n'; }
+fwupd_refresh_failure_is_qualified
+`,
+    );
+    expect(maskedFwupd.result.status, maskedFwupd.output).toBe(0);
+
+    const enabledFwupd = runSourced(
+      STATION_PREPARE,
+      `
+NETWORK_VALIDATED=1
+systemctl() { printf 'enabled\n'; }
+fwupd_refresh_failure_is_qualified
+`,
+    );
+    expect(enabledFwupd.result.status, enabledFwupd.output).not.toBe(0);
+
+    const exactUnits = runSourced(
+      STATION_PREPARE,
+      `
+cloud_init_failure_is_qualified() { return 0; }
+network_wait_failure_is_qualified() { return 0; }
+fwupd_refresh_failure_is_qualified() { return 0; }
+sssd_socket_failure_is_qualified() { return 0; }
+for unit in \
+  cloud-init.service \
+  NetworkManager-wait-online.service \
+  systemd-networkd-wait-online.service \
+  fwupd-refresh.service \
+  sssd-autofs.socket \
+  sssd-nss.socket \
+  sssd-pam.socket \
+  sssd-pam-priv.socket; do
+  is_qualified_factory_failed_unit "$unit" || exit 1
+done
+is_qualified_factory_failed_unit ssh.service && exit 1
+exit 0
+`,
+    );
+    expect(exactUnits.result.status, exactUnits.output).toBe(0);
+  });
+
+  it("discloses Docker-group root-equivalent access before Station express consent", () => {
+    const { result, output } = runSourced(
+      INSTALLER_PAYLOAD,
+      `
+STATION_DEEPSEEK=0
+NEMOCLAW_VLLM_MODEL=''
+describe_express_install 'DGX Station'
+`,
+    );
+
+    expect(result.status, output).toBe(0);
+    expect(output).toContain("docker group, which grants root-equivalent control");
+    expect(output).toContain("only for trusted single-user development hosts");
+    expect(output).toContain(
+      "shared or managed hosts require an organization-approved Docker access path",
+    );
   });
 
   it("fails closed when failed-service inspection is unavailable", () => {
