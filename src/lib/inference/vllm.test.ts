@@ -877,11 +877,11 @@ describe("installVllm model resolution", () => {
     expect(mocks.dockerPullWithProgressWatchdog).toHaveBeenCalledTimes(1);
     expect(mocks.dockerSpawn).toHaveBeenCalledTimes(1);
     const errors = errSpy.mock.calls.map((call: unknown[]) => String(call[0])).join("\n");
-    expect(errors).toContain("Insufficient storage for the managed vLLM model cache");
+    expect(errors).toContain("[WARN] Insufficient storage for the managed vLLM model cache");
     expect(errors).toContain("nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-NVFP4");
     expect(errors).toContain("Hugging Face cache");
     expect(errors).toContain(
-      "Continuing because managed vLLM storage estimates are advisory in non-interactive setup",
+      "[INFO] Continuing because managed vLLM storage estimates are advisory in non-interactive setup",
     );
   });
 
@@ -1017,11 +1017,11 @@ describe("installVllm model resolution", () => {
     expect(mocks.dockerPullWithProgressWatchdog).toHaveBeenCalledTimes(1);
     expect(mocks.dockerSpawn).toHaveBeenCalledTimes(1);
     expect(errSpy).toHaveBeenCalledWith(
-      expect.stringContaining("Insufficient storage for the managed vLLM model cache"),
+      expect.stringContaining("[WARN] Insufficient storage for the managed vLLM model cache"),
     );
     expect(errSpy).toHaveBeenCalledWith(
       expect.stringContaining(
-        "Continuing because managed vLLM storage estimates are advisory in non-interactive setup",
+        "[INFO] Continuing because managed vLLM storage estimates are advisory in non-interactive setup",
       ),
     );
   });
@@ -1154,9 +1154,10 @@ describe("installVllm model resolution", () => {
     expect(mocks.dockerPullWithProgressWatchdog).toHaveBeenCalledTimes(1);
     expect(mocks.dockerSpawn).toHaveBeenCalledTimes(1);
     expect(errSpy).toHaveBeenCalledWith(
-      expect.stringContaining(
-        "Continuing because managed vLLM storage estimates are advisory in non-interactive setup",
-      ),
+      "  [WARN] Insufficient Docker storage for the managed vLLM image.",
+    );
+    expect(errSpy).toHaveBeenCalledWith(
+      "  [INFO] Continuing because managed vLLM storage estimates are advisory in non-interactive setup.",
     );
   });
 
