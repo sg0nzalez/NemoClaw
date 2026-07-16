@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import { INSTALLER_PAYLOAD, TEST_SYSTEM_PATH } from "./helpers/installer-sourced-env";
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "..");
+const PUBLIC_BOOTSTRAP = path.join(REPO_ROOT, "install.sh");
 const STATION_PREPARE = path.join(REPO_ROOT, "scripts", "prepare-dgx-station-host.sh");
 const STATION_DOCS = [
   path.join(REPO_ROOT, "docs", "get-started", "prerequisites.mdx"),
@@ -422,6 +423,69 @@ write_install_boot_marker
 });
 
 describe("DGX Station express host integration", () => {
+  it("ships and invokes Station preparation through the public curl bootstrap", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-station-public-bootstrap-"));
+    const fakeBin = path.join(tmp, "bin");
+    fs.mkdirSync(fakeBin);
+    fs.writeFileSync(
+      path.join(fakeBin, "git"),
+      `#!/usr/bin/env bash
+set -euo pipefail
+if [ "\${1:-}" = "init" ]; then
+  target="\${@: -1}"
+  mkdir -p "$target/scripts"
+  cat > "$target/scripts/install.sh" <<'PAYLOAD'
+#!/usr/bin/env bash
+# NEMOCLAW_VERSIONED_INSTALLER_PAYLOAD=1
+set -euo pipefail
+source "\${INSTALLER_UNDER_TEST:?}" >/dev/null
+SCRIPT_DIR="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
+maybe_offer_express_install() { _SELECTED_EXPRESS_PLATFORM='DGX Station'; }
+ensure_docker() { printf 'ENSURE_DOCKER\\n'; }
+ensure_openshell_build_deps() { printf 'ENSURE_BUILD_DEPS\\n'; }
+prepare_installer_host
+PAYLOAD
+  cat > "$target/scripts/prepare-dgx-station-host.sh" <<'HELPER'
+#!/usr/bin/env bash
+set -euo pipefail
+[ "\${1:-}" = "--apply" ]
+printf 'PREPARE_STATION\\n'
+HELPER
+  chmod +x "$target/scripts/install.sh" "$target/scripts/prepare-dgx-station-host.sh"
+  exit 0
+fi
+if [ "\${1:-}" = "-C" ]; then shift 2; fi
+case "\${1:-}" in
+  remote|fetch|checkout) exit 0 ;;
+esac
+exit 0
+`,
+      { mode: 0o755 },
+    );
+
+    const result = spawnSync("bash", [], {
+      cwd: tmp,
+      input: fs.readFileSync(PUBLIC_BOOTSTRAP, "utf-8"),
+      encoding: "utf-8",
+      env: {
+        ...process.env,
+        HOME: tmp,
+        PATH: `${fakeBin}:${TEST_SYSTEM_PATH}`,
+        INSTALLER_UNDER_TEST: INSTALLER_PAYLOAD,
+        NEMOCLAW_INSTALL_REF: "refs/tags/station-fixture",
+      },
+      timeout: 15_000,
+      killSignal: "SIGKILL",
+    });
+    const output = `${result.stdout}${result.stderr}`;
+
+    expect(result.status, output).toBe(0);
+    expect(output).toContain("DGX Station host prerequisites are ready");
+    expect(output.indexOf("PREPARE_STATION")).toBeGreaterThanOrEqual(0);
+    expect(output.indexOf("PREPARE_STATION")).toBeLessThan(output.indexOf("ENSURE_DOCKER"));
+    expect(output.indexOf("ENSURE_DOCKER")).toBeLessThan(output.indexOf("ENSURE_BUILD_DEPS"));
+  });
+
   it("runs Station preparation before the generic Docker bootstrap", () => {
     const { result, output } = runSourced(
       INSTALLER_PAYLOAD,

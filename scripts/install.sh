@@ -3021,6 +3021,9 @@ activate_express_install() {
 }
 
 run_station_host_preparation() {
+  # Public curl|bash starts in the root bootstrap, which clones the complete
+  # selected ref before executing this payload. Keep the sibling lookup and
+  # fail-closed check so Station preparation cannot drift from that ref.
   local helper="${SCRIPT_DIR}/prepare-dgx-station-host.sh"
   [[ -f "$helper" ]] || error "DGX Station host preparation helper is missing: ${helper}"
   bash "$helper" --apply
