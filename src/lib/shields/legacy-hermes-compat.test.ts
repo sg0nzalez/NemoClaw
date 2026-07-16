@@ -138,10 +138,15 @@ describe("legacy Hermes shields compatibility", () => {
     topologyResponseOverride?: string,
   ): void {
     const localMarker = path.join(homeDir, "hermes-root-lifecycle");
-    if (markerState === "regular") {
-      fs.writeFileSync(localMarker, "root-separated\n");
-    } else if (markerState === "dangling-symlink") {
-      fs.symlinkSync(`${localMarker}.missing`, localMarker);
+    switch (markerState) {
+      case "missing":
+        break;
+      case "regular":
+        fs.writeFileSync(localMarker, "root-separated\n");
+        break;
+      case "dangling-symlink":
+        fs.symlinkSync(`${localMarker}.missing`, localMarker);
+        break;
     }
     dockerExecSpy.mockImplementation((cmd: string[]) => {
       switch (true) {
@@ -158,11 +163,13 @@ describe("legacy Hermes shields compatibility", () => {
         case cmd[0] === "lsattr":
           return `---------------- ${cmd.at(-1)}`;
         case cmd.includes(HERMES_ROOT_LIFECYCLE_MARKER): {
-          if (topologyResponseOverride !== undefined) return topologyResponseOverride;
           const localProbe = cmd.map((arg) =>
             arg === HERMES_ROOT_LIFECYCLE_MARKER ? localMarker : arg,
           );
-          return execFileSync(localProbe[0], localProbe.slice(1), { encoding: "utf8" });
+          return (
+            topologyResponseOverride ??
+            execFileSync(localProbe[0], localProbe.slice(1), { encoding: "utf8" })
+          );
         }
         default:
           return "";
