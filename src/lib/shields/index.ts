@@ -515,6 +515,7 @@ const HERMES_SEALED_SHIELDS_CONTRACT = [
   "prepare-shields-abort",
   "abort-shields-transition",
   "--rollback-shields-mode",
+  "root-lifecycle-finish-v1",
 ] as const;
 const HERMES_LEGACY_GUARD_CONTRACT = [
   "ensure-api-key",

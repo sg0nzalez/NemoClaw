@@ -59,6 +59,8 @@ RESTART_ORPHAN_MARKER_NAME = ".nemoclaw-hermes-restart-seal"
 SHIELDS_TRANSITION_LEASE_SECONDS = 300
 STATE_WORKER_LEASE_SECONDS = 15 * 60
 HERMES_STARTUP_READY_FILE = "/run/nemoclaw/hermes-startup-ready"
+HERMES_ROOT_LIFECYCLE_MARKER = "/run/nemoclaw/hermes-root-lifecycle"
+ROOT_LIFECYCLE_FINISH_CAPABILITY = "root-lifecycle-finish-v1"
 NEMOCLAW_RUNTIME_DIR = "/run/nemoclaw"
 NEMOCLAW_RUNTIME_DIR_MODE = 0o711
 HERMES_RESTART_STATE_FILE = "/run/nemoclaw/hermes-restart-seal.json"
@@ -3542,8 +3544,7 @@ def begin_shields_transition(
         finally:
             os.close(hermes_fd)
 
-        state_data["phase"] = "shields-transition-pending"
-        state_data["shields_transition"] = {
+        transition: dict[str, object] = {
             "mode": mode,
             "original_locked": original_locked,
             "rollback_mode": rollback_mode
@@ -3551,6 +3552,12 @@ def begin_shields_transition(
             "lease_expires_ns": time.time_ns()
             + SHIELDS_TRANSITION_LEASE_SECONDS * 1_000_000_000,
         }
+        if mode == "mutable":
+            transition["root_lifecycle_topology"] = (
+                _inspect_hermes_root_lifecycle_topology()
+            )
+        state_data["phase"] = "shields-transition-pending"
+        state_data["shields_transition"] = transition
         _write_restart_state(state_file, state_data, create=False)
         return lock_token, original_locked
     except Exception:
@@ -3986,6 +3993,33 @@ def _freeze_shields_directories(state_data: dict[str, object], hermes_dir: str) 
         os.close(parent_fd)
 
 
+def _inspect_hermes_root_lifecycle_topology() -> str:
+    try:
+        os.lstat(HERMES_ROOT_LIFECYCLE_MARKER)
+    except FileNotFoundError:
+        return "managed-nonroot"
+    except OSError as exc:
+        raise UnsafePathError(
+            "refusing Hermes root lifecycle topology probe failure"
+        ) from exc
+    return "root-separated"
+
+
+def _private_mutable_hermes_root_allowed(
+    transition: dict[str, object],
+    mode: str,
+    recorded_mode: object,
+    observed_mode: int,
+) -> bool:
+    return (
+        mode == "mutable"
+        and recorded_mode == 0o3770
+        and observed_mode == 0o700
+        and transition.get("root_lifecycle_topology") == "managed-nonroot"
+        and _inspect_hermes_root_lifecycle_topology() == "managed-nonroot"
+    )
+
+
 def finish_shields_transition(
     hermes_dir: str, hash_file: str, state_file: str, lock_token: str
 ) -> tuple[str, bool]:
@@ -4023,11 +4057,20 @@ def finish_shields_transition(
         hermes_st = os.fstat(hermes_fd)
         if not _same_inode(hermes_st, hermes_meta):
             raise UnsafePathError("refusing shields finish because .hermes changed")
-        if (
-            hermes_st.st_uid != hermes_meta.get("uid")
-            or hermes_st.st_gid != hermes_meta.get("gid")
-            or stat.S_IMODE(hermes_st.st_mode) != hermes_meta.get("mode")
-        ):
+        observed_mode = stat.S_IMODE(hermes_st.st_mode)
+        owner_matches = (
+            hermes_st.st_uid == hermes_meta.get("uid")
+            and hermes_st.st_gid == hermes_meta.get("gid")
+        )
+        mode_matches = observed_mode == hermes_meta.get("mode")
+        if owner_matches and not mode_matches:
+            mode_matches = _private_mutable_hermes_root_allowed(
+                transition,
+                mode,
+                hermes_meta.get("mode"),
+                observed_mode,
+            )
+        if not owner_matches or not mode_matches:
             raise UnsafePathError(
                 "refusing shields finish because .hermes metadata drifted"
             )
@@ -4723,7 +4766,9 @@ def provider_placeholders(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        epilog=f"capabilities: {ROOT_LIFECYCLE_FINISH_CAPABILITY}"
+    )
     parser.add_argument(
         "action",
         choices=(

@@ -123,7 +123,7 @@ When rebuild starts with shields up, NemoClaw opens a 30-minute shields-down win
 A detached auto-lock timer remains the recovery authority until NemoClaw commits a successful shields-up state, including when the host rebuild process exits unexpectedly.
 
 <AgentOnly variant="hermes">
-For an older Hermes image that predates sealed shields transitions, only the rebuild workflow may use the descriptor-safe compatibility transition needed to archive and replace the sandbox.
+For an older Hermes image that predates sealed shields transitions or lacks the current sealed-shields finish capability, only the rebuild workflow may use the descriptor-safe compatibility transition needed to archive and replace the sandbox.
 That transition verifies the strict and compatibility hashes and publishes fresh config inodes before changing their lock posture, while ordinary `shields up` and `shields down` commands continue to refuse the older protocol.
 </AgentOnly>
 

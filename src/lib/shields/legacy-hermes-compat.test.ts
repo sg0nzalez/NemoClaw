@@ -17,7 +17,7 @@ const HERMES_ROOT_LIFECYCLE_MARKER = "/run/nemoclaw/hermes-root-lifecycle";
 const LOCK_TOKEN = "a".repeat(64);
 const OLD_GUARD_HELP = "usage: guard {ensure-api-key,refresh-hashes,provider-placeholders}";
 const PARTIAL_GUARD_HELP = "begin-shields-transition --rollback-shields-mode";
-const CURRENT_GUARD_HELP = [
+const PRE_PRIVATE_ROOT_GUARD_HELP = [
   "begin-shields-transition",
   "run-state-dir-transition",
   "apply-shields-transition",
@@ -25,7 +25,9 @@ const CURRENT_GUARD_HELP = [
   "prepare-shields-abort",
   "abort-shields-transition",
   "--rollback-shields-mode",
+  OLD_GUARD_HELP,
 ].join(" ");
+const CURRENT_GUARD_HELP = `${PRE_PRIVATE_ROOT_GUARD_HELP} root-lifecycle-finish-v1`;
 
 type ShieldsModule = typeof import("./index");
 type HermesRootLifecycleMarkerState = "missing" | "regular" | "dangling-symlink";
@@ -136,6 +138,7 @@ describe("legacy Hermes shields compatibility", () => {
     hermesDirMode = "3770",
     markerState: HermesRootLifecycleMarkerState = "missing",
     topologyResponseOverride?: string,
+    topologyProbeError?: Error,
   ): void {
     const localMarker = path.join(homeDir, "hermes-root-lifecycle");
     switch (markerState) {
@@ -163,6 +166,12 @@ describe("legacy Hermes shields compatibility", () => {
         case cmd[0] === "lsattr":
           return `---------------- ${cmd.at(-1)}`;
         case cmd.includes(HERMES_ROOT_LIFECYCLE_MARKER): {
+          switch (topologyProbeError) {
+            case undefined:
+              break;
+            default:
+              throw topologyProbeError;
+          }
           const localProbe = cmd.map((arg) =>
             arg === HERMES_ROOT_LIFECYCLE_MARKER ? localMarker : arg,
           );
@@ -230,6 +239,21 @@ describe("legacy Hermes shields compatibility", () => {
 
     expect(() =>
       shields.shieldsDown("partial-hermes", {
+        skipTimer: true,
+        throwOnError: true,
+      }),
+    ).toThrow(/predates sealed shields transitions|incomplete|rebuild/i);
+
+    expect(runSpy).not.toHaveBeenCalled();
+    const commands = dockerExecSpy.mock.calls.map(commandFromCall);
+    expect(commands.some((cmd) => isGuardAction(cmd, "begin-shields-transition"))).toBe(false);
+  });
+
+  it("rejects a pre-capability sealed guard before policy or state mutation", () => {
+    installExecResponses(PRE_PRIVATE_ROOT_GUARD_HELP);
+
+    expect(() =>
+      shields.shieldsDown("pre-private-root-hermes", {
         skipTimer: true,
         throwOnError: true,
       }),
@@ -339,6 +363,35 @@ describe("legacy Hermes shields compatibility", () => {
 
     const commands = dockerExecSpy.mock.calls.map(commandFromCall);
     expect(commands.some((cmd) => cmd.includes(HERMES_ROOT_LIFECYCLE_MARKER))).toBe(true);
+    expect(commands.some((cmd) => isGuardAction(cmd, "finish-shields-transition"))).toBe(false);
+  });
+
+  it("aborts the sealed transaction when the Hermes topology probe fails", () => {
+    installExecResponses(
+      CURRENT_GUARD_HELP,
+      "700",
+      "missing",
+      undefined,
+      new Error("topology probe unavailable"),
+    );
+
+    expect(() => shields.unlockAgentConfig("current-hermes", hermesTarget(), true, true)).toThrow(
+      /topology probe unavailable/,
+    );
+
+    const commands = dockerExecSpy.mock.calls.map(commandFromCall);
+    const guardActions = commands.flatMap((cmd) => {
+      const guardIndex = cmd.indexOf(HERMES_GUARD);
+      return guardIndex >= 0 && cmd[guardIndex + 1] !== "--help" ? [cmd[guardIndex + 1]] : [];
+    });
+    expect(guardActions).toEqual([
+      "begin-shields-transition",
+      "run-state-dir-transition",
+      "apply-shields-transition",
+      "prepare-shields-abort",
+      "run-state-dir-transition",
+      "abort-shields-transition",
+    ]);
     expect(commands.some((cmd) => isGuardAction(cmd, "finish-shields-transition"))).toBe(false);
   });
 
