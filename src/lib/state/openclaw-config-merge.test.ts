@@ -87,6 +87,79 @@ describe("mergeOpenClawRestoredConfig", () => {
     expect((merged as { channels: Record<string, unknown> }).channels.slack).toBeUndefined();
   });
 
+  it("refreshes the agent's primary model from the rebuild after a provider switch (#7011)", () => {
+    // Backup was captured on the old provider (vllm-local / DeepSeek); the fresh
+    // rebuild reflects the switched provider (NVIDIA Endpoints / Nemotron). The
+    // agent routes on agents.defaults.model.primary, so it must follow the fresh
+    // rebuild, not the stale backup — otherwise the sandbox agent keeps calling
+    // the old model even though models.providers routing is already refreshed.
+    const merged = mergeOpenClawRestoredConfig(
+      {
+        models: {
+          providers: {
+            inference: { models: [{ id: "deepseek-ai/DeepSeek-V4-Flash" }] },
+          },
+        },
+        agents: {
+          defaults: {
+            model: { primary: "inference/deepseek-ai/DeepSeek-V4-Flash" },
+            timeoutSeconds: 900,
+          },
+          list: [{ id: "main", model: "inference/deepseek-ai/DeepSeek-V4-Flash" }],
+        },
+      },
+      {
+        models: {
+          providers: {
+            inference: { models: [{ id: "nvidia/nemotron-3-ultra-550b-a55b" }] },
+          },
+        },
+        agents: {
+          defaults: {
+            model: { primary: "inference/nvidia/nemotron-3-ultra-550b-a55b" },
+          },
+        },
+      },
+    );
+
+    expect(merged).toMatchObject({
+      models: {
+        providers: {
+          inference: { models: [{ id: "nvidia/nemotron-3-ultra-550b-a55b" }] },
+        },
+      },
+      agents: {
+        defaults: {
+          // fresh rebuild owns the routing reference
+          model: { primary: "inference/nvidia/nemotron-3-ultra-550b-a55b" },
+          // backup-durable user tuning is still inherited
+          timeoutSeconds: 900,
+        },
+        // the main agent's routing model follows the fresh primary too
+        list: [{ id: "main", model: "inference/nvidia/nemotron-3-ultra-550b-a55b" }],
+      },
+    });
+  });
+
+  it("inherits backup agent config unchanged when the rebuild has no agent primary (#7011)", () => {
+    const merged = mergeOpenClawRestoredConfig(
+      {
+        agents: {
+          defaults: { model: { primary: "inference/deepseek-ai/DeepSeek-V4-Flash" } },
+          list: [{ id: "researcher", model: "inference/custom", default: true }],
+        },
+      },
+      { gateway: { auth: { token: "fresh" } } },
+    );
+
+    expect(merged).toMatchObject({
+      agents: {
+        defaults: { model: { primary: "inference/deepseek-ai/DeepSeek-V4-Flash" } },
+        list: [{ id: "researcher", model: "inference/custom", default: true }],
+      },
+    });
+  });
+
   it("keeps the rebuilt gateway section — including the reload pin — over the backup's (#4710)", () => {
     // gateway.reload.mode="hot" is what keeps the in-sandbox gateway from
     // SIGUSR1-restarting itself out from under the nemoclaw-start respawn
