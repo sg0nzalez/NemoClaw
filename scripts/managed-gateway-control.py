@@ -79,6 +79,7 @@ RECOVERY_TIMEOUT_SECONDS = 150.0
 RECOVER_EXISTING_GRACE_SECONDS = 10.0
 POLL_SECONDS = 0.2
 SUPERVISOR_DISCOVERY_ATTEMPTS = 3
+SUPERVISOR_DISCOVERY_RETRY_SECONDS = 0.02
 NEMOCLAW_RUNTIME_DIR = "/run/nemoclaw"
 NEMOCLAW_RUNTIME_DIR_MODE = 0o711
 EXPECTED_EXIT_MARKER_NAME = "managed-gateway-expected-exit"
@@ -782,26 +783,31 @@ def _supervisor_candidates(
     return matches, inconclusive
 
 
-def _conclusive_supervisor_candidates(
-    reader: ProcReader, pid1: ProcessIdentity, sandbox_uid: int
-) -> list[ProcessIdentity]:
-    """Retry process-table churn, but only return a fully conclusive scan."""
-
-    for attempt in range(SUPERVISOR_DISCOVERY_ATTEMPTS):
-        matches, inconclusive = _supervisor_candidates(reader, pid1, sandbox_uid)
-        if not inconclusive:
-            return matches
-        if attempt + 1 < SUPERVISOR_DISCOVERY_ATTEMPTS:
-            time.sleep(POLL_SECONDS)
-    raise ControlError("SUPERVISOR_UNAVAILABLE")
-
-
 def _discover_supervisor(reader: ProcReader) -> ProcessIdentity:
     pid1 = reader.capture(1)
     if not _is_openshell(pid1):
         raise ControlError("SUPERVISOR_UNAVAILABLE")
     sandbox_uid = _sandbox_uid()
-    matches = _conclusive_supervisor_candidates(reader, pid1, sandbox_uid)
+    matches, inconclusive = _supervisor_candidates(reader, pid1, sandbox_uid)
+    if inconclusive:
+        # Busy agents can create or reap an unrelated short-lived process while
+        # /proc is being read. Retry only when one exact supervisor was already
+        # proven, and require that same pinned identity on every scan. A missing,
+        # changing, or duplicate supervisor still fails closed immediately.
+        if len(matches) != 1:
+            raise ControlError("SUPERVISOR_UNAVAILABLE")
+        expected = matches[0].stable_key()
+        for _attempt in range(1, SUPERVISOR_DISCOVERY_ATTEMPTS):
+            time.sleep(SUPERVISOR_DISCOVERY_RETRY_SECONDS)
+            if reader.capture(1).stable_key() != pid1.stable_key():
+                raise ControlError("SUPERVISOR_UNAVAILABLE")
+            matches, inconclusive = _supervisor_candidates(reader, pid1, sandbox_uid)
+            if len(matches) != 1 or matches[0].stable_key() != expected:
+                raise ControlError("SUPERVISOR_UNAVAILABLE")
+            if not inconclusive:
+                break
+        if inconclusive:
+            raise ControlError("SUPERVISOR_UNAVAILABLE")
     if len(matches) == 0:
         # A zero-match scan is the only absence signal that may authorize the
         # host to recreate a legacy Docker container with its managed startup
@@ -810,11 +816,14 @@ def _discover_supervisor(reader: ProcReader) -> ProcessIdentity:
         # races remain generic unavailability rather than destructive-recovery
         # authorization.
         between_pid1 = reader.capture(1)
-        second_matches = _conclusive_supervisor_candidates(reader, pid1, sandbox_uid)
+        second_matches, second_inconclusive = _supervisor_candidates(
+            reader, pid1, sandbox_uid
+        )
         after_pid1 = reader.capture(1)
         if (
             between_pid1.stable_key() == pid1.stable_key()
             and after_pid1.stable_key() == pid1.stable_key()
+            and not second_inconclusive
             and len(second_matches) == 0
         ):
             raise ControlError("SUPERVISOR_NOT_RUNNING")

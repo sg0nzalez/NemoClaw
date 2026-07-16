@@ -160,6 +160,22 @@ with tempfile.TemporaryDirectory() as root:
             candidates[0], replace(supervisor, namespace_inode=None), hermes
         )
 
+        real_supervisor_candidates = control._supervisor_candidates
+        transient_scan_calls = []
+        def transient_unrelated_process_churn(reader, pid1, sandbox_uid):
+            matches, inconclusive = real_supervisor_candidates(reader, pid1, sandbox_uid)
+            transient_scan_calls.append(len(matches))
+            return matches, len(transient_scan_calls) == 1 or inconclusive
+        control._supervisor_candidates = transient_unrelated_process_churn
+        try:
+            transient_supervisor = control._discover_supervisor(reader)
+            transient_supervisor_retry = [
+                transient_supervisor.pid,
+                len(transient_scan_calls),
+            ]
+        finally:
+            control._supervisor_candidates = real_supervisor_candidates
+
         real_namespace_inode = control._namespace_inode
         control._namespace_inode = lambda _pid_fd: None
         try:
@@ -261,36 +277,6 @@ with tempfile.TemporaryDirectory() as root:
             stable_zombie_ignored = stable_zombie_supervisor.pid
         except control.ControlError as error:
             stable_zombie_ignored = error.code
-        remove_process(proc_root, 46)
-        write_process(
-            proc_root,
-            namespace_path,
-            46,
-            666,
-            1,
-            1000,
-            b"short-lived-process\0",
-        )
-        real_capture = reader.capture
-        transient_capture_attempts = 0
-        def capture_with_transient_churn(pid):
-            global transient_capture_attempts
-            if pid == 46:
-                transient_capture_attempts += 1
-                if transient_capture_attempts == 1:
-                    raise control.ControlError("SUPERVISOR_UNAVAILABLE")
-            return real_capture(pid)
-        reader.capture = capture_with_transient_churn
-        try:
-            transient_churn_supervisor = control._discover_supervisor(reader)
-            transient_process_churn = [
-                transient_churn_supervisor.pid,
-                transient_capture_attempts,
-            ]
-        except control.ControlError as error:
-            transient_process_churn = [error.code, transient_capture_attempts]
-        finally:
-            reader.capture = real_capture
         remove_process(proc_root, 46)
         write_process(
             proc_root,
@@ -737,13 +723,13 @@ with tempfile.TemporaryDirectory() as root:
         "initial": initial_proof,
         "state_key_behavior": state_key_behavior,
         "mixed_namespace_rejected": mixed_namespace_rejected,
+        "transient_supervisor_retry": transient_supervisor_retry,
         "namespace_denied": namespace_denied,
         "preflight": preflight_steps,
         "runtime_validation": runtime_validation,
         "missing_supervisor": missing_supervisor,
         "appearing_supervisor": appearing_supervisor,
         "unreadable_process": unreadable_process,
-        "transient_process_churn": transient_process_churn,
         "stable_zombie_ignored": stable_zombie_ignored,
         "duplicate_supervisor": duplicate_supervisor,
         "duplicate": duplicate,
@@ -795,6 +781,7 @@ describe("managed gateway root control", () => {
       },
       state_key_behavior: [true, false],
       mixed_namespace_rejected: true,
+      transient_supervisor_retry: [40, 2],
       namespace_denied: true,
       preflight: [
         {
@@ -816,7 +803,6 @@ describe("managed gateway root control", () => {
       missing_supervisor: "SUPERVISOR_NOT_RUNNING",
       appearing_supervisor: "SUPERVISOR_UNAVAILABLE",
       unreadable_process: "SUPERVISOR_UNAVAILABLE",
-      transient_process_churn: [40, 2],
       stable_zombie_ignored: 40,
       duplicate_supervisor: "SUPERVISOR_UNAVAILABLE",
       duplicate: "SUPERVISOR_UNAVAILABLE",
