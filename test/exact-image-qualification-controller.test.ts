@@ -48,6 +48,7 @@ import {
   createRoutedApi,
   dependencies,
   dispatchDetails,
+  dispatchIntent,
   HTML_RUN_URL,
   PRODUCER_SHA,
   qualificationApiRoute,
@@ -582,6 +583,35 @@ describe("exact producer dispatch binding", () => {
       expect(
         fs.readdirSync(workDir).some((name) => name.startsWith("controller-state.corrupt-")),
       ).toBe(true);
+    } finally {
+      fs.rmSync(workDir, { recursive: true, force: true });
+    }
+  });
+
+  it("fails closed when unreadable state cannot be preserved before cleanup reconciliation", async () => {
+    const workDir = tempDirectory();
+    const controllerState = "not valid JSON";
+    const api = createApi();
+    try {
+      fs.writeFileSync(
+        path.join(workDir, DISPATCH_INTENT_FILE),
+        `${JSON.stringify(dispatchIntent(), null, 2)}\n`,
+        { mode: 0o600 },
+      );
+      fs.writeFileSync(path.join(workDir, STATE_FILE), controllerState, { mode: 0o600 });
+      vi.spyOn(fs, "renameSync").mockImplementation(() => {
+        throw new Error("preservation denied");
+      });
+
+      await expect(
+        cancelActiveExactImageQualification(
+          { workDir, producerToken: "producer-token" },
+          dependencies(api),
+        ),
+      ).rejects.toMatchObject({ code: "OUTPUT_WRITE_FAILED" });
+      expect(api).not.toHaveBeenCalled();
+      expect(fs.readFileSync(path.join(workDir, STATE_FILE), "utf8")).toBe(controllerState);
+      expect(fs.existsSync(path.join(workDir, DISPATCH_RECONCILIATION_FILE))).toBe(false);
     } finally {
       fs.rmSync(workDir, { recursive: true, force: true });
     }

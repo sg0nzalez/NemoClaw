@@ -667,10 +667,8 @@ function preserveUnreadableState(workDir: string): void {
   );
   try {
     fs.renameSync(file, preserved);
-  } catch (error) {
-    console.warn(
-      `Could not preserve unreadable controller state before intent recovery: ${error instanceof Error ? error.message : "unknown error"}`,
-    );
+  } catch {
+    fail("OUTPUT_WRITE_FAILED", "unreadable controller state could not be preserved safely");
   }
 }
 

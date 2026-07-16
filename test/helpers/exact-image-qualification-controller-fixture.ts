@@ -9,8 +9,10 @@ import path from "node:path";
 import { vi } from "vitest";
 
 import {
+  type ExactImageDispatchIntent,
   type ExactImageQualificationRequest,
   MANIFEST_ARTIFACT_FILE,
+  PRODUCER_REF,
   PRODUCER_REPOSITORY,
   PRODUCER_WORKFLOW_FILE,
   PRODUCER_WORKFLOW_PATH,
@@ -37,6 +39,30 @@ export const REQUEST: ExactImageQualificationRequest = {
   requesterRunId: "97531",
   workflowSha: CANDIDATE_SHA,
 };
+
+export function dispatchIntent(): ExactImageDispatchIntent {
+  return {
+    schemaVersion: 1,
+    kind: "nemoclaw-exact-image-dispatch-intent",
+    requestStartedAt: new Date(BASE_TIME).toISOString(),
+    request: {
+      actor: REQUEST.actor,
+      candidateSha: REQUEST.candidateSha,
+      correlationId: CORRELATION_ID,
+      reason: REQUEST.reason,
+      requesterRunAttempt: REQUEST.requesterRunAttempt,
+      requesterRunId: REQUEST.requesterRunId,
+      workflowSha: REQUEST.workflowSha,
+    },
+    producer: {
+      repository: PRODUCER_REPOSITORY,
+      repositorySha: PRODUCER_SHA,
+      ref: PRODUCER_REF,
+      workflowId: String(WORKFLOW_ID),
+      workflowPath: PRODUCER_WORKFLOW_PATH,
+    },
+  };
+}
 
 type ApiOptions = {
   artifacts?: unknown;
