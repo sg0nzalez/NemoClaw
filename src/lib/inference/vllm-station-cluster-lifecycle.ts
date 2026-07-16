@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, createHmac, randomBytes } from "node:crypto";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -39,7 +39,7 @@ const DOCKER_LATE_CREATE_RECONCILE_INTERVAL_MS = 250;
 const DOCKER_CONTAINER_ID_PATTERN = /^[a-f0-9]{64}$/;
 const CLUSTER_ID_PATTERN = /^[a-f0-9]{64}$/;
 const SHA256_HEX_PATTERN = /^[a-f0-9]{64}$/;
-const IMMUTABLE_IMAGE_PATTERN = /^[^\s@]+(?:\/[^\s@]+)+@sha256:[a-f0-9]{64}$/;
+const IMMUTABLE_IMAGE_PATTERN = /^(?:[^\s/@]+\/)+[^\s/@]+@sha256:[a-f0-9]{64}$/;
 const IMAGE_ID_PATTERN = /^sha256:[a-f0-9]{64}$/;
 const SAFE_DEVICE_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
 const SAFE_UVERBS_DEVICE_PATTERN = /^\/dev\/infiniband\/uverbs[0-9]+$/;
@@ -48,7 +48,7 @@ const GPU_SMOKE_NONCE_PATTERN = /^[a-f0-9]{32}$/;
 const TRANSACTION_ID_PATTERN = /^[a-f0-9]{32}$/;
 const GPU_SMOKE_CONTAINER_PREFIX = "nemoclaw-vllm-gpu-smoke";
 const DUAL_STATION_VLLM_LAUNCH_SCHEMA = "1";
-const API_KEY_FINGERPRINT_DOMAIN = "nemoclaw-dual-station-vllm-api-key\0";
+const VLLM_FINGERPRINT_CONTEXT = "nemoclaw-dual-station-vllm-api-key\0";
 
 export type DualStationVllmRole = "head" | "worker";
 
@@ -271,14 +271,16 @@ function assertSafeStartConfig(config: DualStationVllmStartConfig): void {
   }
 }
 
-/** Domain-separated, non-secret binding for the host-persisted service key. */
+/** Domain-separated, non-secret binding for the host-persisted high-entropy service key. */
 export function dualStationVllmApiKeyFingerprint(apiKey: string): string {
   if (!DUAL_STATION_VLLM_API_KEY_PATTERN.test(apiKey)) {
     throw new Error(
       "Dual-Station vLLM API key must be exactly 64 lowercase hexadecimal characters.",
     );
   }
-  return createHash("sha256").update(API_KEY_FINGERPRINT_DOMAIN).update(apiKey).digest("hex");
+  return createHmac("sha256", Buffer.from(apiKey, "hex"))
+    .update(VLLM_FINGERPRINT_CONTEXT)
+    .digest("hex");
 }
 
 function withoutVllmApiKey(env: Record<string, string>): Record<string, string> {

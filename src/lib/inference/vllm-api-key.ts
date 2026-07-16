@@ -48,34 +48,29 @@ export function loadDualStationVllmApiKey(
   options: Pick<DualStationVllmApiKeyOptions, "stateDir"> = {},
 ): string | null {
   const filePath = dualStationVllmApiKeyPath(options.stateDir ?? defaultStateDir());
-  let before: fs.Stats;
-  try {
-    before = fs.lstatSync(filePath);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw error;
+  const noFollow = fs.constants.O_NOFOLLOW;
+  if (typeof noFollow !== "number") {
+    throw new Error("Secure no-follow file opens are unavailable on this platform");
   }
-  if (before.isSymbolicLink()) {
-    throw new Error(
-      `Refusing to read dual-Station vLLM API key through a symbolic link: ${filePath}`,
-    );
-  }
-  assertPrivateRegularFile(before, filePath);
-  if (before.size < 64 || before.size > 65) {
-    throw new Error(`Dual-Station vLLM API key file is malformed: ${filePath}`);
-  }
-
-  const noFollow = fs.constants.O_NOFOLLOW ?? 0;
   const nonBlock = fs.constants.O_NONBLOCK ?? 0;
   let fd: number | undefined;
   try {
-    fd = fs.openSync(filePath, fs.constants.O_RDONLY | noFollow | nonBlock);
+    try {
+      fd = fs.openSync(filePath, fs.constants.O_RDONLY | noFollow | nonBlock);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") return null;
+      if (code === "ELOOP") {
+        throw new Error(
+          `Refusing to read dual-Station vLLM API key through a symbolic link: ${filePath}`,
+        );
+      }
+      throw error;
+    }
     const opened = fs.fstatSync(fd);
     assertPrivateRegularFile(opened, filePath);
-    if (opened.dev !== before.dev || opened.ino !== before.ino) {
-      throw new Error(
-        `Dual-Station vLLM API key file changed while it was being opened: ${filePath}`,
-      );
+    if (opened.size < 64 || opened.size > 65) {
+      throw new Error(`Dual-Station vLLM API key file is malformed: ${filePath}`);
     }
     const value = fs.readFileSync(fd, "utf8").trim();
     if (!DUAL_STATION_VLLM_API_KEY_PATTERN.test(value)) {

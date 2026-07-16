@@ -402,6 +402,26 @@ function harness(
 }
 
 describe("dual-Station managed vLLM run argv", () => {
+  it("derives stable, distinct service-key fingerprints", () => {
+    expect(API_KEY_FINGERPRINT).toMatch(/^[a-f0-9]{64}$/u);
+    expect(dualStationVllmApiKeyFingerprint(API_KEY)).toBe(API_KEY_FINGERPRINT);
+    expect(dualStationVllmApiKeyFingerprint("f".repeat(64))).not.toBe(API_KEY_FINGERPRINT);
+  });
+
+  it("rejects a long slash-heavy runtime image", () => {
+    const plan = {
+      ...fixturePlan(),
+      runtime: {
+        ...DUAL_STATION_VLLM_RUNTIME,
+        image: `${"!/".repeat(10_000)}image@sha256:${"a".repeat(64)}`,
+      },
+    } as unknown as DualStationVllmPlan;
+
+    expect(() =>
+      buildDualStationVllmRunArgs(plan, "head", TRANSACTION_ID, API_KEY_FINGERPRINT),
+    ).toThrow("exact pinned runtime contract");
+  });
+
   it.each(["head", "worker"] as const)("builds the exact %s launch contract", (role) => {
     const plan = fixturePlan();
     const args = buildDualStationVllmRunArgs(plan, role, TRANSACTION_ID, API_KEY_FINGERPRINT);
