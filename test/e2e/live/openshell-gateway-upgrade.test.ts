@@ -33,22 +33,30 @@ import { startFakeOpenAiCompatibleServer } from "../fixtures/fake-openai-compati
 import { REPO_ROOT } from "../fixtures/paths.ts";
 import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
 import {
+  buildGatewayUpgradeIsolatedEnv,
+  createGatewayUpgradeIsolatedHome,
   currentGatewayUpgradeInstallerArgs,
   oldGatewayUpgradeInstallerArgs,
+  prepareGatewayUpgradeOpenShellFixture,
   upgradeGatewayCleanupScript,
   upgradeGatewayStateCleanupScript,
   validateLegacyGatewayUpgradeFixture,
 } from "./openshell-gateway-upgrade-helpers.ts";
 
 const INSTALL_OPENSHELL = path.join(REPO_ROOT, "scripts", "install-openshell.sh");
-const STATE_DIR = path.join(
-  os.homedir(),
-  ".local",
-  "state",
-  "nemoclaw",
-  "openshell-docker-gateway",
-);
-const PID_FILE = path.join(STATE_DIR, "openshell-gateway.pid");
+const HOST_HOME = os.homedir();
+let gatewayUpgradePaths = {
+  home: HOST_HOME,
+  pidFile: path.join(
+    HOST_HOME,
+    ".local",
+    "state",
+    "nemoclaw",
+    "openshell-docker-gateway",
+    "openshell-gateway.pid",
+  ),
+  registryFile: path.join(HOST_HOME, ".nemoclaw", "sandboxes.json"),
+};
 const OLD_NEMOCLAW_REF = process.env.NEMOCLAW_OLD_NEMOCLAW_REF ?? "v0.0.36";
 const OLD_NEMOCLAW_COMMIT =
   process.env.NEMOCLAW_OLD_NEMOCLAW_COMMIT ?? "3351fbdd4eb7d9b80ec471545083956327da2b10";
@@ -80,7 +88,6 @@ const SURVIVOR_SANDBOX =
     .join("-");
 const SURVIVOR_MARKER = `gateway-upgrade-survivor-${Date.now()}`;
 const SURVIVOR_MARKER_PATH = "/sandbox/.openclaw/workspace/nemoclaw-gateway-upgrade-marker";
-const REGISTRY_FILE = path.join(os.homedir(), ".nemoclaw", "sandboxes.json");
 const TEST_TIMEOUT_MS = 60 * 60_000;
 const INSTALL_TIMEOUT_MS = 35 * 60_000;
 const OPENSHELL_TIMEOUT_MS = 2 * 60_000;
@@ -98,12 +105,17 @@ function writeExecutable(target: string, contents: string): void {
 }
 
 function liveEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
-  return {
-    ...buildAvailabilityProbeEnv(),
-    NEMOCLAW_NON_INTERACTIVE: "1",
-    NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE: "1",
-    ...extra,
-  };
+  const base = buildAvailabilityProbeEnv();
+  return buildGatewayUpgradeIsolatedEnv(
+    {
+      ...base,
+      NEMOCLAW_NON_INTERACTIVE: "1",
+      NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE: "1",
+      ...extra,
+    },
+    gatewayUpgradePaths.home,
+    HOST_HOME,
+  );
 }
 
 function withoutEnvKeys(env: NodeJS.ProcessEnv, keys: readonly string[]): NodeJS.ProcessEnv {
@@ -403,7 +415,10 @@ async function runInstallerPayload(
     : installerCommand;
   const hiddenOpenShellPreflight = options.hideUserLocalOpenShell
     ? [
-        'test -x "$HOME/.local/bin/openshell"',
+        'if [ ! -x "$HOME/.local/bin/openshell" ]; then',
+        '  echo "Expected the v0.0.55 fixture OpenShell at $HOME/.local/bin/openshell; PATH resolves openshell to $(command -v openshell 2>/dev/null || echo missing)" >&2',
+        "  exit 1",
+        "fi",
         "if command -v openshell >/dev/null 2>&1; then",
         '  echo "Expected the v0.0.55 user-local OpenShell binary to be absent from PATH" >&2',
         "  exit 1",
@@ -432,7 +447,7 @@ ${installerInvocation}`,
 }
 
 async function preCleanUpgradeGateway(host: HostCliClient, artifactName: string): Promise<void> {
-  const result = await bash(host, upgradeGatewayCleanupScript(PID_FILE), {
+  const result = await bash(host, upgradeGatewayCleanupScript(gatewayUpgradePaths.pidFile), {
     artifactName,
     timeoutMs: 120_000,
   });
@@ -443,6 +458,7 @@ async function installOldNemoclawAndClaw(
   host: HostCliClient,
   artifacts: ArtifactSink,
   fakeBaseUrl: string,
+  expectedOldOpenShellPath?: string,
 ): Promise<void> {
   const oldInstaller = artifacts.pathFor("old-install.sh");
   const oldInstallLog = artifacts.pathFor("old-install.log");
@@ -521,13 +537,24 @@ async function installOldNemoclawAndClaw(
     new RegExp(`OpenClaw ${oldOpenClawVersionPattern}|openclaw@${oldOpenClawVersionPattern}`),
   );
 
-  const openshellVersion = await bash(host, `openshell --version`, {
-    artifactName: "old-openshell-version",
-    timeoutMs: 30_000,
-  });
-  expectExitZero(openshellVersion, "old openshell --version");
+  const openshellIdentity = await bash(
+    host,
+    `command -v openshell
+openshell --version`,
+    {
+      artifactName: "old-openshell-version",
+      timeoutMs: 30_000,
+    },
+  );
+  expectExitZero(openshellIdentity, "resolve old openshell and read its version");
+  if (expectedOldOpenShellPath) {
+    expect(
+      openshellIdentity.stdout.trim().split(/\r?\n/)[0],
+      "v0.0.55 fixture must leave the old OpenShell binary in the user-local path",
+    ).toBe(expectedOldOpenShellPath);
+  }
   expectOutputContains(
-    openshellVersion,
+    openshellIdentity,
     OLD_OPENSHELL_VERSION,
     `old NemoClaw install must leave OpenShell ${OLD_OPENSHELL_VERSION}`,
   );
@@ -549,7 +576,7 @@ git -C "$HOME/.nemoclaw/source" rev-parse --verify HEAD`,
   expectExitZero(list, "old nemoclaw list");
   expectOutputContains(list, SURVIVOR_SANDBOX, "old NemoClaw install must register survivor claw");
 
-  const oldRegistry = JSON.parse(fs.readFileSync(REGISTRY_FILE, "utf8")) as {
+  const oldRegistry = JSON.parse(fs.readFileSync(gatewayUpgradePaths.registryFile, "utf8")) as {
     sandboxes?: Record<string, { nemoclawVersion?: unknown; fromDockerfile?: unknown }>;
   };
   expect(oldRegistry.sandboxes?.[SURVIVOR_SANDBOX]).toBeDefined();
@@ -718,8 +745,9 @@ async function assertSurvivorSandboxAfterUpgrade(host: HostCliClient): Promise<v
   );
   expect(agentCheck.stdout.trim().length).toBeGreaterThan(0);
 
-  expect(fs.existsSync(REGISTRY_FILE), `${REGISTRY_FILE} must exist after upgrade`).toBe(true);
-  expect(fs.readFileSync(REGISTRY_FILE, "utf8")).toContain(`"${SURVIVOR_SANDBOX}"`);
+  const registryFile = gatewayUpgradePaths.registryFile;
+  expect(fs.existsSync(registryFile), `${registryFile} must exist after upgrade`).toBe(true);
+  expect(fs.readFileSync(registryFile, "utf8")).toContain(`"${SURVIVOR_SANDBOX}"`);
 
   const list = await bash(host, `nemoclaw list`, {
     artifactName: "post-upgrade-nemoclaw-list",
@@ -789,6 +817,17 @@ runLinuxOpenShellGatewayUpgrade(
   "openshell-gateway-upgrade: upgrades old working OpenClaw claw and restores survivor state",
   { timeout: TEST_TIMEOUT_MS },
   async ({ artifacts, cleanup, host, sandbox }) => {
+    const previousGatewayUpgradePaths = gatewayUpgradePaths;
+    const isolatedHome = createGatewayUpgradeIsolatedHome();
+    gatewayUpgradePaths = isolatedHome;
+    cleanup.trackDisposable("remove isolated OpenShell gateway upgrade HOME", () => {
+      try {
+        isolatedHome.remove();
+      } finally {
+        gatewayUpgradePaths = previousGatewayUpgradePaths;
+      }
+    });
+
     await artifacts.writeJson("live-upgrade-target.json", {
       id: "openshell-gateway-upgrade",
       runner: "vitest",
@@ -808,13 +847,18 @@ runLinuxOpenShellGatewayUpgrade(
       oldSandboxBaseImageRef: OLD_SANDBOX_BASE_IMAGE_REF,
       currentOpenShellVersion: CURRENT_OPENSHELL_VERSION,
       survivorSandbox: SURVIVOR_SANDBOX,
+      isolatedHome: isolatedHome.home,
     });
 
     cleanup.trackDisposable("remove openshell gateway upgrade state", async () => {
-      const result = await bash(host, upgradeGatewayStateCleanupScript(PID_FILE), {
-        artifactName: "cleanup-gateway-state",
-        timeoutMs: 120_000,
-      });
+      const result = await bash(
+        host,
+        upgradeGatewayStateCleanupScript(gatewayUpgradePaths.pidFile),
+        {
+          artifactName: "cleanup-gateway-state",
+          timeoutMs: 120_000,
+        },
+      );
       expectExitZero(result, "cleanup OpenShell gateway upgrade state");
     });
     cleanup.trackGateway(host, "nemoclaw", {
@@ -850,7 +894,11 @@ runLinuxOpenShellGatewayUpgrade(
       baseUrl: fake.baseUrl,
     });
 
-    await installOldNemoclawAndClaw(host, artifacts, fake.baseUrl);
+    const oldOpenShellFixturePath = prepareGatewayUpgradeOpenShellFixture(
+      OLD_NEMOCLAW_REF,
+      gatewayUpgradePaths.home,
+    );
+    await installOldNemoclawAndClaw(host, artifacts, fake.baseUrl, oldOpenShellFixturePath);
     const survivorPid = await startSurvivorAgentInExistingClaw(host);
     expect(Number.isInteger(survivorPid) && survivorPid > 0).toBe(true);
     await installCurrentNemoclawUpgrade(

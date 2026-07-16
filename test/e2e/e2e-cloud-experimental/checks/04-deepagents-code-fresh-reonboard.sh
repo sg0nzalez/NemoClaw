@@ -29,6 +29,27 @@ pass() {
   printf '%s: OK (%s)\n' "$PREFIX" "$1"
 }
 
+print_redacted_status_stdout() {
+  local raw_stdout="$1"
+  local redacted_stdout
+
+  if [ -z "$raw_stdout" ]; then
+    printf '%s: diagnostic: nemoclaw status stdout after re-onboard: <no stdout captured>\n' "$PREFIX" >&2
+    return
+  fi
+
+  if redacted_stdout="$(
+    printf '%s' "$raw_stdout" \
+      | python3 "$REPO/test/e2e/lib/redact-text.py" 2>/dev/null
+  )"; then
+    printf '%s: diagnostic: nemoclaw status stdout after re-onboard:\n%s\n' \
+      "$PREFIX" "$redacted_stdout" >&2
+  else
+    printf '%s: diagnostic: nemoclaw status stdout after re-onboard: <diagnostic unavailable: redaction failed>\n' \
+      "$PREFIX" >&2
+  fi
+}
+
 sandbox_exec() {
   openshell sandbox exec --name "$SANDBOX_NAME" -- bash -c "$1" 2>&1
 }
@@ -259,7 +280,10 @@ if (JSON.parse(process.env.CONFIG_MODEL_JSON) !== "openai:" + process.env.MODEL_
 ' || fail "keyed config get did not return model B after re-onboard"
 pass "keyed config get reports model B after re-onboard"
 
-status_json="$("$CLI" "$SANDBOX_NAME" status --json 2>&1)" || fail "nemoclaw status failed after re-onboard"
+if ! status_json="$("$CLI" "$SANDBOX_NAME" status --json 2>/dev/null)"; then
+  print_redacted_status_stdout "${status_json:-}"
+  fail "nemoclaw status failed after re-onboard"
+fi
 STATUS_JSON="$status_json" SANDBOX_NAME="$SANDBOX_NAME" MODEL_B="$model_b" node -e '
 const status = JSON.parse(process.env.STATUS_JSON);
 if (status.name !== process.env.SANDBOX_NAME ||

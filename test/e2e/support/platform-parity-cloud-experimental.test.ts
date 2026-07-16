@@ -53,6 +53,77 @@ function shellResult(exitCode: number, stdout: string, stderr = ""): ShellProbeR
   };
 }
 
+const STATUS_NVAPI_CANARY = "nvapi-TEST_NOT_REAL_1234567890abcdef";
+const STATUS_GITHUB_CANARY = "github_pat_TEST_NOT_REAL_1234567890abcdef";
+const STATUS_STDERR_CANARY = "ghp_TESTNOTREAL1234567890";
+
+function runFreshReonboardStatusFailure(redactorFails = false) {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-dcode-status-diagnostic-"));
+  const statusCalls = path.join(tempDir, "status-calls");
+  const fakeCli = path.join(tempDir, "nemoclaw");
+
+  try {
+    fs.writeFileSync(
+      fakeCli,
+      [
+        "#!/bin/sh",
+        '  printf "status\\n" >> "$FAKE_STATUS_CALLS"',
+        '  printf "status stdout %s %s\\n" "$FAKE_STATUS_NVAPI_CANARY" "$FAKE_STATUS_GITHUB_CANARY"',
+        '  printf "status stderr %s\\n" "$FAKE_STATUS_STDERR_CANARY" >&2',
+        "  exit 37",
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+
+    if (redactorFails) {
+      fs.writeFileSync(path.join(tempDir, "python3"), "#!/bin/sh\nexit 42\n", { mode: 0o755 });
+    }
+
+    const script = fs.readFileSync(dcodeFreshReonboardCheck, "utf8");
+    const helperStart = script.indexOf("print_redacted_status_stdout() {");
+    const helperEnd = script.indexOf("\n}\n\nsandbox_exec() {", helperStart);
+    const statusStart = script.indexOf('if ! status_json="$("$CLI"');
+    const statusEnd = script.indexOf("\nfi\nSTATUS_JSON=", statusStart);
+    if (helperStart < 0 || helperEnd < 0 || statusStart < 0 || statusEnd < 0) {
+      throw new Error(
+        "could not extract the status diagnostic path from the fresh re-onboard check",
+      );
+    }
+    const harness = [
+      "set -euo pipefail",
+      script.slice(helperStart, helperEnd + 2),
+      'fail() { printf "%s: FAIL: %s\\n" "$PREFIX" "$1" >&2; exit 1; }',
+      script.slice(statusStart, statusEnd + 3),
+      "",
+    ].join("\n");
+
+    const result = spawnSync("bash", ["-c", harness], {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        CLI: fakeCli,
+        FAKE_STATUS_CALLS: statusCalls,
+        FAKE_STATUS_GITHUB_CANARY: STATUS_GITHUB_CANARY,
+        FAKE_STATUS_NVAPI_CANARY: STATUS_NVAPI_CANARY,
+        FAKE_STATUS_STDERR_CANARY: STATUS_STDERR_CANARY,
+        PATH: `${tempDir}:${DEFAULT_TEST_PATH}`,
+        PREFIX: "04-deepagents-code-fresh-reonboard",
+        REPO: process.cwd(),
+        SANDBOX_NAME: "deepagents-sandbox",
+      },
+    });
+
+    return {
+      result,
+      statusCalls: fs.existsSync(statusCalls) ? fs.readFileSync(statusCalls, "utf8") : "",
+    };
+  } finally {
+    fs.rmSync(tempDir, { force: true, recursive: true });
+  }
+}
+
 describe("P0-E cloud-experimental parity guardrails", () => {
   it("skips the destructive fresh re-onboard check outside a Deep Agents sandbox", () => {
     const binDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-fake-openshell-"));
@@ -85,6 +156,31 @@ describe("P0-E cloud-experimental parity guardrails", () => {
     expect(script).toContain("sha256sum /sandbox/.deepagents/config.toml");
     expect(script).toContain("config is baked into the sandbox image at build time");
     expect(script).toContain("re-onboard with the new selection");
+  });
+
+  it("redacts failed status stdout, drops stderr, and does not retry", () => {
+    const { result, statusCalls } = runFreshReonboardStatusFailure();
+    const output = `${result.stdout}\n${result.stderr}`;
+
+    expect(result.status, output).toBe(1);
+    expect(result.stderr).toContain("diagnostic: nemoclaw status stdout after re-onboard:");
+    expect((result.stderr.match(/\[REDACTED\]/g) ?? []).length).toBeGreaterThanOrEqual(2);
+    expect(output).not.toContain(STATUS_NVAPI_CANARY);
+    expect(output).not.toContain(STATUS_GITHUB_CANARY);
+    expect(output).not.toContain(STATUS_STDERR_CANARY);
+    expect(statusCalls).toBe("status\n");
+  });
+
+  it("withholds failed status stdout when canonical redaction fails", () => {
+    const { result, statusCalls } = runFreshReonboardStatusFailure(true);
+    const output = `${result.stdout}\n${result.stderr}`;
+
+    expect(result.status, output).toBe(1);
+    expect(result.stderr).toContain("<diagnostic unavailable: redaction failed>");
+    expect(output).not.toContain(STATUS_NVAPI_CANARY);
+    expect(output).not.toContain(STATUS_GITHUB_CANARY);
+    expect(output).not.toContain(STATUS_STDERR_CANARY);
+    expect(statusCalls).toBe("status\n");
   });
 
   it("preserves the repeated env-unset pairs from the failed observability invocation", async () => {

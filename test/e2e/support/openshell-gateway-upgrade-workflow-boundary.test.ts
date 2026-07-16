@@ -15,8 +15,11 @@ import {
   validateE2eWorkflowBoundary,
 } from "../../../tools/e2e/workflow-boundary.mts";
 import {
+  buildGatewayUpgradeIsolatedEnv,
+  createGatewayUpgradeIsolatedHome,
   currentGatewayUpgradeInstallerArgs,
   oldGatewayUpgradeInstallerArgs,
+  prepareGatewayUpgradeOpenShellFixture,
   upgradeGatewayCleanupScript,
   validateLegacyGatewayUpgradeFixture,
 } from "../live/openshell-gateway-upgrade-helpers.ts";
@@ -65,6 +68,112 @@ describe("OpenShell gateway upgrade workflow boundary", () => {
     expect(currentGatewayUpgradeInstallerArgs("current-install.sh", { interactive: true })).toEqual(
       ["current-install.sh"],
     );
+  });
+
+  it("seeds and removes the v0.0.55 stale-PATH fixture only inside an isolated HOME (#6114)", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-gateway-upgrade-openshell-"));
+    const callerHome = path.join(tmp, "caller-home");
+    const callerTarget = path.join(callerHome, ".local", "bin", "openshell");
+
+    try {
+      fs.mkdirSync(path.dirname(callerTarget), { recursive: true });
+      fs.writeFileSync(callerTarget, "caller's openshell\n");
+      fs.chmodSync(callerTarget, 0o440);
+
+      const isolated = createGatewayUpgradeIsolatedHome(tmp);
+      const fixturePath = prepareGatewayUpgradeOpenShellFixture("v0.0.55", isolated.home);
+      expect(fixturePath).toBe(isolated.openshellPath);
+      const result = spawnSync(fixturePath!, ["--version"], { encoding: "utf8" });
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toBe("openshell 0.0.0\n");
+      expect(fs.statSync(isolated.openshellPath).mode & 0o777).toBe(0o755);
+      expect(isolated.pidFile).toBe(
+        path.join(
+          isolated.home,
+          ".local",
+          "state",
+          "nemoclaw",
+          "openshell-docker-gateway",
+          "openshell-gateway.pid",
+        ),
+      );
+      expect(isolated.registryFile).toBe(path.join(isolated.home, ".nemoclaw", "sandboxes.json"));
+      const isolatedEnv = buildGatewayUpgradeIsolatedEnv(
+        {
+          HOME: callerHome,
+          PATH: `${path.join(callerHome, ".local", "bin")}${path.delimiter}/usr/bin`,
+        },
+        isolated.home,
+        callerHome,
+      );
+      expect(isolatedEnv.HOME).toBe(isolated.home);
+      expect(isolatedEnv.PATH).toBe("/usr/bin");
+      expect(isolatedEnv.DOCKER_CONFIG).toBe(path.join(callerHome, ".docker"));
+      expect(fs.readFileSync(callerTarget, "utf8")).toBe("caller's openshell\n");
+      expect(fs.statSync(callerTarget).mode & 0o777).toBe(0o440);
+      expect(prepareGatewayUpgradeOpenShellFixture("v0.0.36", callerHome)).toBeUndefined();
+
+      isolated.remove();
+      expect(fs.existsSync(isolated.home)).toBe(false);
+      expect(fs.readFileSync(callerTarget, "utf8")).toBe("caller's openshell\n");
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses symlink and non-regular v0.0.55 fixture paths without touching their targets (#6114)", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-gateway-upgrade-openshell-"));
+    const target = path.join(tmp, ".local", "bin", "openshell");
+    const symlinkDestination = path.join(tmp, "real-openshell");
+
+    try {
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(symlinkDestination, "must remain unchanged\n");
+      fs.symlinkSync(symlinkDestination, target);
+      expect(() => prepareGatewayUpgradeOpenShellFixture("v0.0.55", tmp)).toThrow(
+        /fixture path must start absent/,
+      );
+      expect(fs.readFileSync(symlinkDestination, "utf8")).toBe("must remain unchanged\n");
+
+      fs.unlinkSync(target);
+      fs.mkdirSync(target);
+      expect(() => prepareGatewayUpgradeOpenShellFixture("v0.0.55", tmp)).toThrow(
+        /fixture path must start absent/,
+      );
+      expect(fs.statSync(target).isDirectory()).toBe(true);
+
+      const binDir = path.dirname(target);
+      fs.rmSync(binDir, { recursive: true });
+      const outsideBin = path.join(tmp, "outside-bin");
+      fs.mkdirSync(outsideBin);
+      fs.symlinkSync(outsideBin, binDir);
+      expect(() => prepareGatewayUpgradeOpenShellFixture("v0.0.55", tmp)).toThrow(
+        /non-directory OpenShell fixture path component/,
+      );
+      expect(fs.existsSync(path.join(outsideBin, "openshell"))).toBe(false);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses to remove a replaced isolated HOME through a symlink (#6114)", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-gateway-upgrade-openshell-"));
+    const outsideHome = path.join(tmp, "outside-home");
+    const sentinel = path.join(outsideHome, "must-remain");
+
+    try {
+      const isolated = createGatewayUpgradeIsolatedHome(tmp);
+      fs.rmSync(isolated.home, { recursive: true });
+      fs.mkdirSync(outsideHome);
+      fs.writeFileSync(sentinel, "unchanged\n");
+      fs.symlinkSync(outsideHome, isolated.home);
+
+      expect(() => isolated.remove()).toThrow(/replaced OpenShell gateway upgrade HOME/);
+      expect(fs.readFileSync(sentinel, "utf8")).toBe("unchanged\n");
+      expect(fs.lstatSync(isolated.home).isSymbolicLink()).toBe(true);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   });
 
   it("rejects mutable or injectable historical fixture inputs before use (#6114)", () => {
