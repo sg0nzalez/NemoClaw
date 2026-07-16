@@ -5,7 +5,7 @@
 set -Eeuo pipefail
 umask 077
 
-readonly SCRIPT_VERSION="2026-07-16.3"
+readonly SCRIPT_VERSION="2026-07-16.4"
 readonly REBOOT_REQUIRED_EXIT=10
 readonly MIN_FREE_KIB=$((20 * 1024 * 1024))
 # The qualified generic image currently ships this OEM telemetry bootcmd. Its
@@ -763,7 +763,7 @@ configure_docker_runtime_if_needed() {
     fail_after_docker_runtime_rollback "$backup_dir" "$previous_daemon" "NVIDIA runtime registration produced an unsafe Docker daemon configuration"
   fi
   if ! (check_no_workloads); then
-    fail_after_docker_runtime_rollback "$backup_dir" "$previous_daemon" "A workload appeared before Docker restart"
+    fail_after_docker_runtime_rollback "$backup_dir" "$previous_daemon" "A workload appeared before Docker restart" 0
   fi
   if ! sudo systemctl restart docker.service; then
     fail_after_docker_runtime_rollback "$backup_dir" "$previous_daemon" "Docker restart failed after NVIDIA runtime registration"
@@ -778,7 +778,7 @@ configure_docker_runtime_if_needed() {
 }
 
 rollback_docker_runtime_config() {
-  local backup_dir=$1 previous_daemon=$2
+  local backup_dir=$1 previous_daemon=$2 restart_after_restore=${3:-1}
   warn "Restoring the Docker daemon configuration from ${backup_dir}"
   if [[ "$previous_daemon" == "1" ]]; then
     root_regular_file_is_safe "${backup_dir}/daemon.json" "" || return 1
@@ -788,12 +788,14 @@ rollback_docker_runtime_config() {
   else
     sudo rm -f -- /etc/docker/daemon.json || return 1
   fi
-  sudo systemctl restart docker.service
+  if [[ "$restart_after_restore" == "1" ]]; then
+    sudo systemctl restart docker.service
+  fi
 }
 
 fail_after_docker_runtime_rollback() {
-  local backup_dir=$1 previous_daemon=$2 reason=$3
-  if rollback_docker_runtime_config "$backup_dir" "$previous_daemon"; then
+  local backup_dir=$1 previous_daemon=$2 reason=$3 restart_after_restore=${4:-1}
+  if rollback_docker_runtime_config "$backup_dir" "$previous_daemon" "$restart_after_restore"; then
     fatal "${reason}; the prior Docker daemon configuration was restored"
   fi
   fatal "${reason}; automatic Docker daemon rollback failed, restore from ${backup_dir} before retrying"

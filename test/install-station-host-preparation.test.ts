@@ -770,6 +770,45 @@ configure_docker_runtime_if_needed
     expect(output).toContain("docker_gpus_contract=pass");
   });
 
+  it("restores configuration without restarting Docker when a workload appears at the restart boundary", () => {
+    const { result, output } = runSourced(
+      STATION_PREPARE,
+      `
+runtime_configured=0
+run_gpus_test_sudo() { return 1; }
+run_cdi_test_sudo() { return 0; }
+docker_has_nvidia_runtime_sudo() { return 1; }
+check_no_workloads() {
+  printf 'RECHECK_ALL_WORKLOADS configured=%s\n' "$runtime_configured"
+  [[ "$runtime_configured" == "0" ]]
+}
+ensure_root_directory_safe() { :; }
+assert_root_directory_safe() { :; }
+assert_root_regular_file_safe() { :; }
+root_regular_file_is_safe() { return 0; }
+sudo() {
+  if [[ "$*" == "mktemp -d /var/backups/station-bootstrap/docker-runtime.XXXXXXXXXX" ]]; then
+    printf '/var/backups/station-bootstrap/docker-runtime.TEST'
+    return 0
+  fi
+  [[ "$*" == "test -e /etc/docker/daemon.json" || "$*" == "test -L /etc/docker/daemon.json" ]] && return 1
+  if [[ "$*" == "nvidia-ctk runtime configure --runtime=docker" ]]; then
+    runtime_configured=1
+  fi
+  printf 'SUDO %s\n' "$*"
+}
+configure_docker_runtime_if_needed
+`,
+    );
+
+    expect(result.status, output).not.toBe(0);
+    expect(output).toContain("RECHECK_ALL_WORKLOADS configured=1");
+    expect(output).toContain("rm -f -- /etc/docker/daemon.json");
+    expect(output).toMatch(/A workload appeared before Docker restart/);
+    expect(output).toMatch(/prior Docker daemon configuration was restored/);
+    expect(output).not.toContain("systemctl restart docker.service");
+  });
+
   it("restores the prior Docker configuration when a post-mutation launch probe fails", () => {
     const { result, output } = runSourced(
       STATION_PREPARE,
