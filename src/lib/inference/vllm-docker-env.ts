@@ -4,6 +4,11 @@
 import { isIP } from "node:net";
 
 import { buildSubprocessEnv } from "../subprocess-env";
+import {
+  assertDualStationSshBindingFiles,
+  type DualStationSshBinding,
+  dualStationDockerSshUri,
+} from "./vllm-station-ssh-binding";
 
 const DOCKER_CLIENT_ENV_NAMES = [
   "DOCKER_API_VERSION",
@@ -135,11 +140,13 @@ export function buildVllmSshTransportEnv(
  * ambient context, client config, API pin, or TCP/TLS settings to influence it.
  */
 export function buildRemoteVllmDockerEnv(
-  sshUri: string,
+  binding: DualStationSshBinding,
   source: NodeJS.ProcessEnv = process.env,
 ): Record<string, string> {
-  const remoteHost = validateRemoteDockerSshUri(sshUri);
+  assertDualStationSshBindingFiles(binding);
+  const remoteHost = validateRemoteDockerSshUri(dualStationDockerSshUri(binding));
   const env = buildVllmSshTransportEnv({ DOCKER_HOST: remoteHost }, source);
   for (const name of REMOTE_DOCKER_INCOMPATIBLE_ENV_NAMES) delete env[name];
+  env.PATH = binding.sshWrapperDirectory;
   return env;
 }

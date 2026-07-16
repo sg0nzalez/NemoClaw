@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { SpawnSyncOptionsWithStringEncoding } from "node:child_process";
+import fs from "node:fs";
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { buildRemoteVllmDockerEnv } from "./vllm-docker-env";
 import {
@@ -16,24 +17,52 @@ import {
   type StationHostProbe,
   type StationProbeCommandResult,
   type StationRailConnectivityRequest,
+  validatePeerTarget,
 } from "./vllm-station-cluster";
+import {
+  type DualStationSshBinding,
+  loadDualStationSshBindingHandoff,
+  NEMOCLAW_DGX_STATION_SSH_BINDING_ENV,
+} from "./vllm-station-ssh-binding";
+import {
+  createDualStationSshBindingFixture,
+  type DualStationSshBindingFixture,
+} from "./vllm-station-ssh-binding.test-support";
 
 const LOCAL_HOME = "/home/local";
 const PEER_HOME = "/home/nvidia";
-const STRICT_DOCKER_SSH_CONFIG = [
-  "batchmode yes",
-  "stricthostkeychecking true",
-  "permitlocalcommand no",
-  "forwardagent no",
-  "forwardx11 no",
-  "forwardx11trusted no",
-  "tunnel false",
-  "updatehostkeys no",
-  "controlmaster false",
-  "controlpersist no",
-  "sendenv LANG",
-  "sendenv LC_*",
-].join("\n");
+function strictDockerSshConfig(binding: DualStationSshBinding): string {
+  return [
+    `hostname ${binding.resolvedHost}`,
+    `user ${binding.sshUser}`,
+    `port ${String(binding.port)}`,
+    `hostkeyalias ${binding.lookupHost}`,
+    `userknownhostsfile ${binding.knownHostsFile}`,
+    "globalknownhostsfile /dev/null",
+    "batchmode yes",
+    "stricthostkeychecking true",
+    "permitlocalcommand no",
+    "forwardagent no",
+    "forwardx11 no",
+    "forwardx11trusted no",
+    "tunnel false",
+    "updatehostkeys no",
+    "controlmaster false",
+    "controlpersist no",
+    "sendenv LANG",
+    "sendenv LC_*",
+  ].join("\n");
+}
+
+let sshFixture: DualStationSshBindingFixture;
+
+beforeEach(() => {
+  sshFixture = createDualStationSshBindingFixture();
+});
+
+afterEach(() => {
+  sshFixture.cleanup();
+});
 
 function snapshotPath(home: string): string {
   return [
@@ -174,15 +203,18 @@ function fixtureDeps(
 ): FixtureDeps {
   const localHost = vi.fn(() => command(local));
   const peerHost = vi.fn(() => command(peer));
-  const sshConfig = vi.fn(() => command(STRICT_DOCKER_SSH_CONFIG));
+  const sshConfig = vi.fn((binding: DualStationSshBinding) =>
+    command(strictDockerSshConfig(binding)),
+  );
   const localConnectivity = vi.fn((requests: readonly StationRailConnectivityRequest[]) =>
     connectivityResponse(requests, options.localConnectivityAlter),
   );
   const peerConnectivity = vi.fn(
-    (_target: string, requests: readonly StationRailConnectivityRequest[]) =>
+    (_binding: DualStationSshBinding, requests: readonly StationRailConnectivityRequest[]) =>
       connectivityResponse(requests, options.peerConnectivityAlter),
   );
   return {
+    loadPeerSshBinding: loadDualStationSshBindingHandoff,
     probePeerSshConfig: sshConfig,
     probeLocalHost: localHost,
     probePeerHost: peerHost,
@@ -193,8 +225,15 @@ function fixtureDeps(
 }
 
 function runWith(deps: StationClusterProbeDeps, target = "nvidia@station-b") {
+  if (validatePeerTarget(target).ok && sshFixture.binding.peerTarget !== target) {
+    sshFixture.cleanup();
+    sshFixture = createDualStationSshBindingFixture(target);
+  }
   return probeDualStationVllmCapability({
-    env: { [NEMOCLAW_DGX_STATION_PEER_ENV]: target },
+    env: {
+      [NEMOCLAW_DGX_STATION_PEER_ENV]: target,
+      [NEMOCLAW_DGX_STATION_SSH_BINDING_ENV]: sshFixture.token,
+    },
     deps,
   });
 }
@@ -241,11 +280,38 @@ describe("probeDualStationVllmCapability", () => {
     expect(deps.calls.peerHost).not.toHaveBeenCalled();
   });
 
+  it("requires the installer-qualified SSH binding before any peer probe", () => {
+    const deps = fixtureDeps();
+
+    expect(
+      probeDualStationVllmCapability({
+        env: { [NEMOCLAW_DGX_STATION_PEER_ENV]: "nvidia@station-b" },
+        deps,
+      }),
+    ).toMatchObject({ kind: "unavailable", code: "peer-ssh-config-unsafe" });
+    expect(deps.calls.sshConfig).not.toHaveBeenCalled();
+    expect(deps.calls.localHost).not.toHaveBeenCalled();
+    expect(deps.calls.peerHost).not.toHaveBeenCalled();
+  });
+
+  it("rejects a changed qualified host-key pin before any peer probe", () => {
+    const deps = fixtureDeps();
+    fs.appendFileSync(sshFixture.binding.knownHostsFile, "changed\n");
+
+    expect(runWith(deps)).toMatchObject({
+      kind: "unavailable",
+      code: "peer-ssh-config-unsafe",
+    });
+    expect(deps.calls.sshConfig).not.toHaveBeenCalled();
+    expect(deps.calls.localHost).not.toHaveBeenCalled();
+    expect(deps.calls.peerHost).not.toHaveBeenCalled();
+  });
+
   it("rejects Docker-over-SSH when the effective operator config weakens peer trust", () => {
     const deps = fixtureDeps();
-    deps.probePeerSshConfig = () =>
+    deps.probePeerSshConfig = (binding) =>
       command(
-        STRICT_DOCKER_SSH_CONFIG.replace(
+        strictDockerSshConfig(binding).replace(
           "stricthostkeychecking true",
           "stricthostkeychecking false",
         ),
@@ -261,7 +327,7 @@ describe("probeDualStationVllmCapability", () => {
 
   it("rejects an SSH config that can SendEnv arbitrary NemoClaw secrets", () => {
     const deps = fixtureDeps();
-    deps.probePeerSshConfig = () => command(`${STRICT_DOCKER_SSH_CONFIG}\nsendenv *`);
+    deps.probePeerSshConfig = (binding) => command(`${strictDockerSshConfig(binding)}\nsendenv *`);
 
     expect(runWith(deps)).toMatchObject({
       kind: "unavailable",
@@ -277,6 +343,7 @@ describe("probeDualStationVllmCapability", () => {
       probeDualStationVllmCapability({
         env: {
           [NEMOCLAW_DGX_STATION_PEER_ENV]: "nvidia@station-b",
+          [NEMOCLAW_DGX_STATION_SSH_BINDING_ENV]: sshFixture.token,
           DOCKER_CONTEXT: "remote-builder",
         },
         deps,
@@ -290,13 +357,17 @@ describe("probeDualStationVllmCapability", () => {
     "station-b",
     "nvidia@station-b",
     "_svc@192.168.50.20",
-  ])("returns a downstream-compatible canonical Docker-over-SSH URI for %s", (target) => {
-    expect(runWith(fixtureDeps(), target)).toMatchObject({
+  ])("returns the qualified binding for %s", (target) => {
+    const result = runWith(fixtureDeps(), target);
+    expect(result).toMatchObject({
       kind: "ready",
       peerModelSnapshot: "ready",
-      plan: { peerSshTarget: target, peerDockerHost: `ssh://${target}` },
+      plan: { peerSshBinding: { peerTarget: target } },
     });
-    expect(buildRemoteVllmDockerEnv(`ssh://${target}`, {}).DOCKER_HOST).toBe(`ssh://${target}`);
+    if (result.kind !== "ready") throw new Error("expected ready fixture");
+    expect(buildRemoteVllmDockerEnv(result.plan.peerSshBinding, {}).DOCKER_HOST).toBe(
+      `ssh://${result.plan.peerSshBinding.sshUser}@${result.plan.peerSshBinding.resolvedHost}`,
+    );
   });
 
   it("returns a deterministic two-rail TP2 plan and permits one auxiliary non-GB300 GPU", () => {
@@ -307,8 +378,11 @@ describe("probeDualStationVllmCapability", () => {
     expect(result).toMatchObject({
       kind: "ready",
       plan: {
-        peerSshTarget: "nvidia@station-b",
-        peerDockerHost: "ssh://nvidia@station-b",
+        peerSshBinding: {
+          peerTarget: "nvidia@station-b",
+          resolvedHost: "192.168.50.20",
+          sshUser: "nvidia",
+        },
         runtime: {
           image:
             "vllm/vllm-openai@sha256:0fec7ec5f3e6bc168e54899935fb0557da908a4832a1dbc88e2debcf2f889416",
@@ -358,7 +432,7 @@ describe("probeDualStationVllmCapability", () => {
         ],
       },
     });
-    expect(deps.calls.peerHost).toHaveBeenCalledWith("nvidia@station-b");
+    expect(deps.calls.peerHost).toHaveBeenCalledWith(sshFixture.binding);
     expect(deps.calls.localConnectivity).toHaveBeenCalledWith([
       {
         netdev: "cx8a0",
@@ -373,7 +447,7 @@ describe("probeDualStationVllmCapability", () => {
         expectedPeerMac: "02:00:00:bb:00:01",
       },
     ]);
-    expect(deps.calls.peerConnectivity).toHaveBeenCalledWith("nvidia@station-b", [
+    expect(deps.calls.peerConnectivity).toHaveBeenCalledWith(sshFixture.binding, [
       {
         netdev: "cx8b0",
         sourceAddress: "192.168.240.2",
@@ -687,15 +761,27 @@ describe("probe command boundary", () => {
         _file: string,
         _args: readonly string[],
         _options: SpawnSyncOptionsWithStringEncoding,
-      ): StationProbeCommandResult => command(STRICT_DOCKER_SSH_CONFIG),
+      ): StationProbeCommandResult => command(strictDockerSshConfig(sshFixture.binding)),
     );
     const deps = createStationClusterProbeDeps(spawn);
 
-    deps.probePeerSshConfig("nvidia@station-b");
+    deps.probePeerSshConfig(sshFixture.binding);
 
     const [file, args, options] = spawn.mock.calls[0];
     expect(file).toBe("ssh");
-    expect(args).toEqual(["-G", "-T", "-o", "ConnectTimeout=30", "--", "nvidia@station-b"]);
+    expect(args).toEqual(
+      expect.arrayContaining([
+        "-G",
+        "BatchMode=yes",
+        `UserKnownHostsFile=${sshFixture.binding.knownHostsFile}`,
+        `HostKeyAlias=${sshFixture.binding.lookupHost}`,
+        `Hostname=${sshFixture.binding.resolvedHost}`,
+        "User=nvidia",
+        "Port=22",
+        "--",
+        "nvidia@station-b",
+      ]),
+    );
     expect(options.input).toBe("");
     expect(options.timeout).toBe(20_000);
   });
@@ -710,7 +796,7 @@ describe("probe command boundary", () => {
     );
     const deps = createStationClusterProbeDeps(spawn);
 
-    deps.probePeerHost("nvidia@station-b");
+    deps.probePeerHost(sshFixture.binding);
 
     const [file, args, options] = spawn.mock.calls[0];
     expect(file).toBe("ssh");
@@ -755,7 +841,7 @@ describe("probe command boundary", () => {
     );
     const deps = createStationClusterProbeDeps(spawn);
 
-    deps.probePeerHost("nvidia@station-b");
+    deps.probePeerHost(sshFixture.binding);
 
     const [, , options] = spawn.mock.calls[0];
     expect(options.env?.OPENSHELL_GATEWAY_AUTH_TOKEN).toBeUndefined();
@@ -806,7 +892,7 @@ describe("probe command boundary", () => {
       },
     ];
 
-    deps.probePeerConnectivity("station-b", requests);
+    deps.probePeerConnectivity(sshFixture.binding, requests);
 
     const [, args, options] = spawn.mock.calls[0];
     expect(args.at(-1)).toBe(

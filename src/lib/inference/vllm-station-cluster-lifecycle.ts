@@ -12,6 +12,10 @@ import { buildLocalDualStationDockerEnv, buildRemoteVllmDockerEnv } from "./vllm
 import { buildNemotronUltraDistributedServeCommand } from "./vllm-models";
 import { DUAL_STATION_VLLM_RUNTIME, type DualStationVllmPlan } from "./vllm-station-cluster";
 import { withDualStationVllmLifecycleLock } from "./vllm-station-lifecycle-lock";
+import {
+  assertDualStationSshBindingFiles,
+  type DualStationSshBinding,
+} from "./vllm-station-ssh-binding";
 
 export const DUAL_STATION_VLLM_HEAD_CONTAINER_NAME = "nemoclaw-vllm";
 export const DUAL_STATION_VLLM_WORKER_CONTAINER_NAME = "nemoclaw-vllm-worker";
@@ -75,7 +79,7 @@ export interface DualStationVllmLifecycleDeps {
     options?: DualStationDockerOptions,
   ): DualStationDockerResult;
   buildLocalDockerEnv(): Record<string, string>;
-  buildRemoteDockerEnv(sshUri: string): Record<string, string>;
+  buildRemoteDockerEnv(binding: DualStationSshBinding): Record<string, string>;
   createProbeNonce(): string;
   createTransactionId(): string;
   waitBeforeReconcile(ms: number): Promise<void>;
@@ -180,6 +184,7 @@ function isRfc1918Ipv4(address: string): boolean {
 }
 
 function assertSafePlan(plan: DualStationVllmPlan): void {
+  assertDualStationSshBindingFiles(plan.peerSshBinding);
   if (
     !IMMUTABLE_IMAGE_PATTERN.test(plan.runtime.image) ||
     plan.runtime.image !== DUAL_STATION_VLLM_RUNTIME.image ||
@@ -508,7 +513,7 @@ function specsForPlan(
       image: plan.runtime.image,
       launchContract: dualStationVllmLaunchContract(plan, "worker"),
       apiKeyFingerprint,
-      env: withoutVllmApiKey(deps.buildRemoteDockerEnv(plan.peerDockerHost)),
+      env: withoutVllmApiKey(deps.buildRemoteDockerEnv(plan.peerSshBinding)),
     },
   };
 }

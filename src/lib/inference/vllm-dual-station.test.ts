@@ -93,6 +93,10 @@ vi.mock("./vllm-api-key", () => ({
 
 import { detectVllmProfile, installVllm } from "./vllm";
 import { DUAL_STATION_VLLM_RUNTIME, type DualStationVllmPlan } from "./vllm-station-cluster";
+import {
+  createDualStationSshBindingFixture,
+  type DualStationSshBindingFixture,
+} from "./vllm-station-ssh-binding.test-support";
 
 const API_KEY = "ab".repeat(32);
 const HEAD_ID = "a".repeat(64);
@@ -101,8 +105,7 @@ const HEAD_BASE_URL = "http://192.168.100.1:8000";
 
 function plan(): DualStationVllmPlan {
   return {
-    peerSshTarget: "nvidia@station-b",
-    peerDockerHost: "ssh://nvidia@station-b",
+    peerSshBinding: sshFixture.binding,
     runtime: DUAL_STATION_VLLM_RUNTIME,
     local: {
       hostname: "station-a",
@@ -179,9 +182,11 @@ let logSpy: ReturnType<typeof vi.spyOn>;
 let errorSpy: ReturnType<typeof vi.spyOn>;
 let mkdirSpy: ReturnType<typeof vi.spyOn>;
 let stdoutSpy: ReturnType<typeof vi.spyOn>;
+let sshFixture: DualStationSshBindingFixture;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  sshFixture = createDualStationSshBindingFixture();
   process.env.NEMOCLAW_VLLM_MODEL = "nemotron-3-ultra-550b-a55b";
   process.env.NEMOCLAW_DGX_STATION_PEER = "nvidia@station-b";
   process.env.HF_TOKEN = "hf_test";
@@ -268,6 +273,7 @@ afterEach(() => {
   errorSpy.mockRestore();
   mkdirSpy.mockRestore();
   stdoutSpy.mockRestore();
+  sshFixture.cleanup();
   process.env = { ...originalEnv };
 });
 
@@ -316,7 +322,10 @@ describe("dual DGX Station vLLM install orchestration", () => {
     expect(mocks.dockerPullWithProgressWatchdog).toHaveBeenCalledTimes(2);
     const localPullOptions = mocks.dockerPullWithProgressWatchdog.mock.calls[0][1];
     const peerPullOptions = mocks.dockerPullWithProgressWatchdog.mock.calls[1][1];
-    expect(peerPullOptions.env.DOCKER_HOST).toBe("ssh://nvidia@station-b");
+    expect(peerPullOptions.env.DOCKER_HOST).toBe("ssh://nvidia@192.168.50.20");
+    expect(peerPullOptions.env.PATH.split(":")[0]).toBe(
+      clusterPlan.peerSshBinding.sshWrapperDirectory,
+    );
     expect(localPullOptions.env.DOCKER_HOST).not.toBe(peerPullOptions.env.DOCKER_HOST);
     expect(localPullOptions.env.DOCKER_CONTEXT).toBe("default");
     expect(peerPullOptions.env.DOCKER_CONTEXT).toBeUndefined();

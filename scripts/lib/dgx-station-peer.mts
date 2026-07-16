@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import net from "node:net";
+import { stationKnownHostsDigest } from "../../src/lib/inference/vllm-station-ssh-binding.ts";
 
 export const DUAL_STATION_RESUME_SCHEMA_VERSION = 1;
 export const STATION_PREP_REBOOT_REQUIRED_EXIT = 10;
@@ -15,6 +16,8 @@ const GPU_UUID_PATTERN = /^GPU-[A-Za-z0-9-]+$/;
 const HOST_KEY_DIGEST_PATTERN = /^[a-f0-9]{64}$/;
 const HOST_KEY_FINGERPRINT_PATTERN = /^SHA256:[A-Za-z0-9+/]{16,86}={0,2}$/;
 const MAC_PATTERN = /^(?:[0-9a-f]{2}:){5}[0-9a-f]{2}$/;
+const MAX_KNOWN_HOSTS_BYTES = 64 * 1024;
+const MAX_KNOWN_HOSTS_LINE_BYTES = 16 * 1024;
 
 export type StationPrepMode = "--check" | "--apply" | "--verify";
 
@@ -93,8 +96,18 @@ export interface DualStationResumeState extends DualStationPairIdentity {
 
 export type DualStationPreparationResult =
   | { kind: "single-station"; reason: string }
-  | { kind: "ready"; peerTarget: string; identity: DualStationPairIdentity }
-  | { kind: "reboot-required"; peerTarget: string; identity: DualStationPairIdentity };
+  | {
+      kind: "ready";
+      peerTarget: string;
+      identity: DualStationPairIdentity;
+      binding: PretrustedSshTarget;
+    }
+  | {
+      kind: "reboot-required";
+      peerTarget: string;
+      identity: DualStationPairIdentity;
+      binding: PretrustedSshTarget;
+    };
 
 export interface DualStationPreparationOptions {
   revision: string;
@@ -604,12 +617,22 @@ function validateKnownHostsLookupHost(binding: PretrustedSshTarget): void {
 }
 
 function validateBinding(binding: PretrustedSshTarget): void {
-  validateStationPeerTarget(binding.requestedTarget);
-  validateStationPeerTarget(binding.sshTarget);
+  const requestedTarget = validateStationPeerTarget(binding.requestedTarget);
+  const sshTarget = validateStationPeerTarget(binding.sshTarget);
+  if (requestedTarget !== sshTarget) {
+    throw new Error("Pretrusted SSH target changed after configuration resolution");
+  }
   if (!isSafeTargetHost(binding.resolvedHost)) {
     throw new Error("Pretrusted SSH target resolved to an unsafe host");
   }
-  if (!SAFE_USERNAME_PATTERN.test(binding.sshUser) || binding.port < 1 || binding.port > 65535) {
+  const explicitUser = sshTarget.includes("@") ? sshTarget.slice(0, sshTarget.indexOf("@")) : null;
+  if (
+    !SAFE_USERNAME_PATTERN.test(binding.sshUser) ||
+    (explicitUser !== null && explicitUser !== binding.sshUser) ||
+    !Number.isInteger(binding.port) ||
+    binding.port < 1 ||
+    binding.port > 65535
+  ) {
     throw new Error("Pretrusted SSH target has an unsafe user or port");
   }
   validateKnownHostsLookupHost(binding);
@@ -617,16 +640,32 @@ function validateBinding(binding: PretrustedSshTarget): void {
     throw new Error("Pretrusted SSH target has an invalid host-key digest");
   }
   if (
+    !Array.isArray(binding.keyFingerprints) ||
     binding.keyFingerprints.length === 0 ||
     binding.keyFingerprints.some(
-      (fingerprint) => !HOST_KEY_FINGERPRINT_PATTERN.test(fingerprint),
+      (fingerprint) =>
+        typeof fingerprint !== "string" || !HOST_KEY_FINGERPRINT_PATTERN.test(fingerprint),
     ) ||
+    !Array.isArray(binding.knownHostsLines) ||
     binding.knownHostsLines.length === 0 ||
     binding.knownHostsLines.some(
-      (line) => line.length === 0 || line.length > 16 * 1024 || /[\u0000\r\n]/.test(line),
+      (line) =>
+        typeof line !== "string" ||
+        line.length === 0 ||
+        Buffer.byteLength(line, "utf8") > MAX_KNOWN_HOSTS_LINE_BYTES ||
+        line !== line.trim() ||
+        line.startsWith("#") ||
+        /[\u0000\r\n]/.test(line),
     )
   ) {
     throw new Error("Pretrusted SSH target has invalid known-hosts evidence");
+  }
+  const knownHosts = `${[...new Set(binding.knownHostsLines)].sort().join("\n")}\n`;
+  if (
+    Buffer.byteLength(knownHosts, "utf8") > MAX_KNOWN_HOSTS_BYTES ||
+    stationKnownHostsDigest(knownHosts) !== binding.hostKeyDigest
+  ) {
+    throw new Error("Pretrusted SSH target known-hosts evidence does not match its digest");
   }
 }
 
@@ -799,7 +838,12 @@ export function prepareDualStationPair(
   deps.writeResumeState(state);
   if (options.reuseExistingManagedPair) {
     deps.writeResumeState({ ...state, phase: "ready" });
-    return { kind: "ready", peerTarget: binding.sshTarget, identity: plan.identity };
+    return {
+      kind: "ready",
+      peerTarget: binding.sshTarget,
+      identity: plan.identity,
+      binding,
+    };
   }
   deps.log(`Preparing reciprocal peer ${binding.sshTarget} with the exact reviewed helper`);
 
@@ -811,7 +855,12 @@ export function prepareDualStationPair(
   const applyStatus = deps.runRemoteHelper(binding, "--apply");
   if (applyStatus === STATION_PREP_REBOOT_REQUIRED_EXIT) {
     deps.writeResumeState({ ...state, phase: "remote-reboot-required" });
-    return { kind: "reboot-required", peerTarget: binding.sshTarget, identity: plan.identity };
+    return {
+      kind: "reboot-required",
+      peerTarget: binding.sshTarget,
+      identity: plan.identity,
+      binding,
+    };
   }
   if (applyStatus !== 0) {
     throw new Error("Peer DGX Station host preparation failed; refusing single-Station fallback");
@@ -821,5 +870,10 @@ export function prepareDualStationPair(
   }
 
   deps.writeResumeState({ ...state, phase: "ready" });
-  return { kind: "ready", peerTarget: binding.sshTarget, identity: plan.identity };
+  return {
+    kind: "ready",
+    peerTarget: binding.sshTarget,
+    identity: plan.identity,
+    binding,
+  };
 }

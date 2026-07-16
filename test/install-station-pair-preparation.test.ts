@@ -27,6 +27,10 @@ import {
   strictStationPrepSshTransportArgs,
   writeDualStationResumeState,
 } from "../scripts/prepare-dual-dgx-station.mts";
+import {
+  stationKnownHostsDigest,
+  strictStationSshTransportArgs,
+} from "../src/lib/inference/vllm-station-ssh-binding.ts";
 import { INSTALLER_PAYLOAD, TEST_SYSTEM_PATH } from "./helpers/installer-sourced-env";
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "..");
@@ -34,7 +38,8 @@ const COORDINATOR = path.join(REPO_ROOT, "scripts", "prepare-dual-dgx-station.mt
 const STATION_HELPER = path.join(REPO_ROOT, "scripts", "prepare-dgx-station-host.sh");
 const REVISION = "a".repeat(40);
 const HELPER_SHA256 = "b".repeat(64);
-const HOST_KEY_DIGEST = "c".repeat(64);
+const HOST_KEY_DATA = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+const HOST_KEY_DIGEST = stationKnownHostsDigest(`10.10.0.2 ssh-ed25519 ${HOST_KEY_DATA}\n`);
 const HOST_KEY_FINGERPRINT = `SHA256:${"A".repeat(43)}`;
 
 function stationHost(side: "local" | "peer"): StationDiscoveryHost {
@@ -78,7 +83,8 @@ function stationHost(side: "local" | "peer"): StationDiscoveryHost {
   };
 }
 
-function sshBinding(target = "10.10.0.2", hostKeyDigest = HOST_KEY_DIGEST): PretrustedSshTarget {
+function sshBinding(target = "10.10.0.2", keyData = HOST_KEY_DATA): PretrustedSshTarget {
+  const knownHostsLine = `${target.slice(target.lastIndexOf("@") + 1)} ssh-ed25519 ${keyData}`;
   return {
     requestedTarget: target,
     sshTarget: target,
@@ -86,11 +92,9 @@ function sshBinding(target = "10.10.0.2", hostKeyDigest = HOST_KEY_DIGEST): Pret
     sshUser: "ubuntu",
     port: 22,
     lookupHost: target.slice(target.lastIndexOf("@") + 1),
-    hostKeyDigest,
+    hostKeyDigest: stationKnownHostsDigest(`${knownHostsLine}\n`),
     keyFingerprints: [HOST_KEY_FINGERPRINT],
-    knownHostsLines: [
-      `${target.slice(target.lastIndexOf("@") + 1)} ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKey`,
-    ],
+    knownHostsLines: [knownHostsLine],
   };
 }
 
@@ -220,6 +224,13 @@ function runInstallerBody(body: string, extraEnv: Record<string, string> = {}) {
 function coordinatorResult(kind: "ready" | "reboot-required", peer = "10.10.0.2"): string {
   const state = readyState();
   state.peerTarget = peer;
+  const sshBinding = Buffer.from(
+    JSON.stringify({
+      bindingFile: "/tmp/nemoclaw-station-pair/resume.json.ssh-binding/binding.json",
+      hostKeyDigest: state.hostKeyDigest,
+    }),
+    "utf8",
+  ).toString("base64url");
   return JSON.stringify({
     kind,
     peerTarget: peer,
@@ -230,6 +241,7 @@ function coordinatorResult(kind: "ready" | "reboot-required", peer = "10.10.0.2"
       peerGpuUuid: state.peerGpuUuid,
       rails: state.rails,
     },
+    sshBinding,
   });
 }
 
@@ -302,6 +314,7 @@ describe("deterministic dual-DGX Station peer discovery", () => {
 
     expect(result.kind).toBe("ready");
     expect(result.kind === "ready" && result.peerTarget).toBe("10.10.0.2");
+    expect(result.kind === "ready" && result.binding).toEqual(sshBinding());
     expect(harness.statePhases).toEqual(["remote-preparation", "ready"]);
     expect(harness.calls.indexOf("local:--verify")).toBeLessThan(
       harness.calls.indexOf("probe:peer:10.10.0.2"),
@@ -325,7 +338,7 @@ describe("deterministic dual-DGX Station peer discovery", () => {
 
     const ambiguous = new PreparationHarness();
     ambiguous.trusted.set("10.10.0.2", sshBinding("10.10.0.2"));
-    ambiguous.trusted.set("10.10.0.6", sshBinding("10.10.0.6", "d".repeat(64)));
+    ambiguous.trusted.set("10.10.0.6", sshBinding("10.10.0.6", "AAAAC3NzaChangedKey"));
     const result = prepareDualStationPair(preparationOptions(), ambiguous.deps);
     expect(result).toMatchObject({
       kind: "single-station",
@@ -345,6 +358,93 @@ describe("deterministic dual-DGX Station peer discovery", () => {
       "log:Ignoring derived peer 10.10.0.2: pre-existing SSH trust is unusable (unsafe HostKeyAlias)",
     );
     expect(harness.calls.some((call) => call.startsWith("probe:peer:"))).toBe(false);
+  });
+
+  it("rejects altered endpoint, port, and known-hosts evidence before peer contact", () => {
+    const oversizedLines = Array.from(
+      { length: 5 },
+      (_, index) => `10.10.0.${String(index + 2)} ssh-ed25519 A${"B".repeat(14_000)}`,
+    );
+    const scenarios: Array<{
+      name: string;
+      mutate(binding: PretrustedSshTarget): void;
+    }> = [
+      {
+        name: "requested target substitution",
+        mutate: (binding) => {
+          binding.requestedTarget = "10.10.0.6";
+        },
+      },
+      {
+        name: "fractional port",
+        mutate: (binding) => {
+          binding.port = 22.5;
+        },
+      },
+      {
+        name: "blank known-hosts line",
+        mutate: (binding) => {
+          binding.knownHostsLines = [""];
+        },
+      },
+      {
+        name: "untrimmed known-hosts line",
+        mutate: (binding) => {
+          binding.knownHostsLines = [`${binding.knownHostsLines[0]} `];
+        },
+      },
+      {
+        name: "comment known-hosts line",
+        mutate: (binding) => {
+          binding.knownHostsLines = ["# no trust evidence"];
+        },
+      },
+      {
+        name: "oversized known-hosts evidence",
+        mutate: (binding) => {
+          binding.knownHostsLines = oversizedLines;
+        },
+      },
+      {
+        name: "known-hosts digest mismatch",
+        mutate: (binding) => {
+          binding.knownHostsLines = ["10.10.0.2 ssh-ed25519 AAAAC3NzaChangedKey"];
+        },
+      },
+    ];
+
+    for (const scenario of scenarios) {
+      const harness = new PreparationHarness();
+      const binding = sshBinding();
+      scenario.mutate(binding);
+      harness.trusted.set("10.10.0.2", binding);
+      expect(
+        prepareDualStationPair(preparationOptions(), harness.deps),
+        scenario.name,
+      ).toMatchObject({ kind: "single-station" });
+      expect(
+        harness.calls.some((call) => call.startsWith("probe:peer:")),
+        scenario.name,
+      ).toBe(false);
+      expect(
+        harness.calls.some((call) => call.startsWith("remote:")),
+        scenario.name,
+      ).toBe(false);
+    }
+  });
+
+  it("rejects an explicit target whose resolved SSH user changed before peer contact", () => {
+    const explicit = "ubuntu@station-b";
+    const harness = new PreparationHarness();
+    const binding = sshBinding(explicit);
+    binding.sshUser = "root";
+    harness.trusted.set(explicit, binding);
+
+    expect(() =>
+      prepareDualStationPair({ ...preparationOptions(), explicitPeer: explicit }, harness.deps),
+    ).toThrow(/unsafe user or port/);
+    expect(harness.calls.some((call) => call.startsWith("probe:peer:"))).toBe(false);
+    expect(harness.calls.some((call) => call.startsWith("remote:"))).toBe(false);
   });
 
   it("requires reciprocal rail addresses and MACs plus a distinct peer GPU", () => {
@@ -443,6 +543,7 @@ describe("dual-DGX Station reboot resume and reuse", () => {
 
     const interrupted = prepareDualStationPair(preparationOptions(), first.deps);
     expect(interrupted.kind).toBe("reboot-required");
+    expect(interrupted.kind === "reboot-required" && interrupted.binding).toEqual(sshBinding());
     expect(first.resume?.phase).toBe("remote-reboot-required");
     expect(first.resume?.helperSha256).toBe(HELPER_SHA256);
     expect(first.calls.some((call) => call.endsWith(":--verify"))).toBe(true);
@@ -482,7 +583,7 @@ describe("dual-DGX Station reboot resume and reuse", () => {
       {
         name: "host key",
         configure: (harness) => {
-          harness.trusted.set("10.10.0.2", sshBinding("10.10.0.2", "d".repeat(64)));
+          harness.trusted.set("10.10.0.2", sshBinding("10.10.0.2", "AAAAC3NzaChangedKey"));
         },
         expected: /host-key identity changed/,
       },
@@ -593,6 +694,21 @@ describe.sequential("dual-DGX Station trust and resume-state boundaries", () => 
     }
   });
 
+  it("clears an owner-only SSH binding orphan even when pair state is absent", () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-pair-state-"));
+    fs.chmodSync(directory, 0o700);
+    const statePath = path.join(directory, "resume.json");
+    const bindingDirectory = `${statePath}.ssh-binding`;
+    try {
+      fs.mkdirSync(bindingDirectory, { mode: 0o700 });
+      fs.writeFileSync(path.join(bindingDirectory, "orphan"), "binding\n", { mode: 0o600 });
+      clearDualStationResumeState(statePath);
+      expect(fs.existsSync(bindingDirectory)).toBe(false);
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("rejects malformed, permissive, symlinked, and substitution-prone state", () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-pair-state-"));
     fs.chmodSync(directory, 0o700);
@@ -635,6 +751,7 @@ describe.sequential("dual-DGX Station trust and resume-state boundaries", () => 
 
   it("uses a strict noninteractive SSH argument boundary and exact-byte helper command", () => {
     const args = strictStationPrepSshTransportArgs();
+    expect(args).toEqual(strictStationSshTransportArgs());
     expect(args).toContain("BatchMode=yes");
     expect(args).toContain("StrictHostKeyChecking=yes");
     expect(args).toContain("VerifyHostKeyDNS=no");
@@ -820,9 +937,9 @@ station_installer_revision() { printf '%s' "$PAIR_REVISION"; }
 station_dual_pair_resume_pending() { return 0; }
 _SELECTED_EXPRESS_PLATFORM='DGX Station'
 _STATION_EXPRESS_MODEL_WAS_EXPLICIT=0
-unset NEMOCLAW_VLLM_MODEL NEMOCLAW_MODEL NEMOCLAW_DGX_STATION_PEER
+unset NEMOCLAW_VLLM_MODEL NEMOCLAW_MODEL NEMOCLAW_DGX_STATION_PEER NEMOCLAW_DGX_STATION_SSH_BINDING
 ensure_station_express_pair
-printf 'RESULT peer=%s model=%s selector=%s\n' "\${NEMOCLAW_DGX_STATION_PEER:-}" "\${NEMOCLAW_MODEL:-}" "\${NEMOCLAW_VLLM_MODEL:-}"
+printf 'RESULT peer=%s model=%s selector=%s binding=%s\n' "\${NEMOCLAW_DGX_STATION_PEER:-}" "\${NEMOCLAW_MODEL:-}" "\${NEMOCLAW_VLLM_MODEL:-}" "\${NEMOCLAW_DGX_STATION_SSH_BINDING:-}"
 `,
       {
         PAIR_ARGS_FILE: argsFile,
@@ -835,6 +952,8 @@ printf 'RESULT peer=%s model=%s selector=%s\n' "\${NEMOCLAW_DGX_STATION_PEER:-}"
       expect(output).toContain(
         "RESULT peer=10.10.0.2 model=nvidia/nemotron-3-ultra-550b-a55b selector=",
       );
+      const expectedToken = JSON.parse(coordinatorResult("ready")).sshBinding;
+      expect(output).toContain(`binding=${expectedToken}`);
       const args = fs.readFileSync(argsFile, "utf8");
       expect(args).toContain("--helper");
       expect(args).toContain("prepare-dgx-station-host.sh");
@@ -865,9 +984,9 @@ _SELECTED_EXPRESS_PLATFORM='DGX Station'
 _STATION_EXPRESS_MODEL_WAS_EXPLICIT=0
 _STATION_EXPRESS_DEFERRED_MANAGED_PAIR=1
 NEMOCLAW_DGX_STATION_PEER="$PAIR_PEER"
-unset NEMOCLAW_VLLM_MODEL NEMOCLAW_MODEL
+unset NEMOCLAW_VLLM_MODEL NEMOCLAW_MODEL NEMOCLAW_DGX_STATION_SSH_BINDING
 ensure_station_express_pair
-printf 'RESULT peer=%s model=%s\n' "$NEMOCLAW_DGX_STATION_PEER" "$NEMOCLAW_MODEL"
+printf 'RESULT peer=%s model=%s binding=%s\n' "$NEMOCLAW_DGX_STATION_PEER" "$NEMOCLAW_MODEL" "$NEMOCLAW_DGX_STATION_SSH_BINDING"
 `,
       {
         PAIR_ARGS_FILE: argsFile,
@@ -881,6 +1000,7 @@ printf 'RESULT peer=%s model=%s\n' "$NEMOCLAW_DGX_STATION_PEER" "$NEMOCLAW_MODEL
       expect(output).toContain(
         `RESULT peer=${explicitPeer} model=nvidia/nemotron-3-ultra-550b-a55b`,
       );
+      expect(output).toContain(`binding=${JSON.parse(coordinatorResult("ready")).sshBinding}`);
       const args = fs.readFileSync(argsFile, "utf8");
       expect(args).toContain(`--explicit-peer ${explicitPeer}`);
       expect(args).toContain("--reuse-existing-managed-pair");
@@ -904,15 +1024,16 @@ station_installer_revision() { printf '%s' "$PAIR_REVISION"; }
 _SELECTED_EXPRESS_PLATFORM='DGX Station'
 _STATION_EXPRESS_MODEL_WAS_EXPLICIT=0
 unset NEMOCLAW_VLLM_MODEL NEMOCLAW_MODEL NEMOCLAW_DGX_STATION_PEER
+NEMOCLAW_DGX_STATION_SSH_BINDING='stale'
 ensure_station_express_pair
-printf 'RESULT peer=%s model=%s selector=%s\n' "\${NEMOCLAW_DGX_STATION_PEER:-}" "\${NEMOCLAW_MODEL:-}" "\${NEMOCLAW_VLLM_MODEL:-}"
+printf 'RESULT peer=%s model=%s selector=%s binding=%s\n' "\${NEMOCLAW_DGX_STATION_PEER:-}" "\${NEMOCLAW_MODEL:-}" "\${NEMOCLAW_VLLM_MODEL:-}" "\${NEMOCLAW_DGX_STATION_SSH_BINDING:-}"
 `,
       { PAIR_REVISION: REVISION },
     );
     try {
       expect(result.status, output).toBe(0);
       expect(output).toContain("No trusted reciprocal dual-DGX Station pair was detected");
-      expect(output).toContain("RESULT peer= model= selector=");
+      expect(output).toContain("RESULT peer= model= selector= binding=");
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }

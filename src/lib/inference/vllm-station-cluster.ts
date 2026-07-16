@@ -8,13 +8,18 @@ import path from "node:path";
 import { buildSubprocessEnv } from "../subprocess-env";
 import { buildVllmSshTransportEnv } from "./vllm-docker-env";
 import { NEMOTRON_ULTRA_STATION_IMAGE, VLLM_MODELS } from "./vllm-models";
+import {
+  type DualStationSshBinding,
+  dualStationPinnedSshArgs,
+  loadDualStationSshBindingHandoff,
+  NEMOCLAW_DGX_STATION_SSH_BINDING_ENV,
+} from "./vllm-station-ssh-binding";
 
 export const NEMOCLAW_DGX_STATION_PEER_ENV = "NEMOCLAW_DGX_STATION_PEER";
 
 const HOST_PROBE_SCHEMA_VERSION = 1;
 const CONNECTIVITY_PROBE_SCHEMA_VERSION = 1;
 const COMMAND_TIMEOUT_MS = 20_000;
-const CONNECT_TIMEOUT_SECONDS = 5;
 const MAX_PROBE_OUTPUT_BYTES = 1024 * 1024;
 const PREFERRED_ROCE_GID_INDEX = 3;
 const EXPECTED_ULTRA_WEIGHT_SHARDS = 113;
@@ -134,14 +139,15 @@ export interface StationProbeCommandResult {
 }
 
 export interface StationClusterProbeDeps {
-  probePeerSshConfig(peerTarget: string): StationProbeCommandResult;
+  loadPeerSshBinding(token: string, expectedPeerTarget: string): DualStationSshBinding;
+  probePeerSshConfig(binding: DualStationSshBinding): StationProbeCommandResult;
   probeLocalHost(): StationProbeCommandResult;
-  probePeerHost(peerTarget: string): StationProbeCommandResult;
+  probePeerHost(binding: DualStationSshBinding): StationProbeCommandResult;
   probeLocalConnectivity(
     requests: readonly StationRailConnectivityRequest[],
   ): StationProbeCommandResult;
   probePeerConnectivity(
-    peerTarget: string,
+    binding: DualStationSshBinding,
     requests: readonly StationRailConnectivityRequest[],
   ): StationProbeCommandResult;
 }
@@ -192,8 +198,7 @@ export interface DualStationPlanRail {
 }
 
 export interface DualStationVllmPlan {
-  peerSshTarget: string;
-  peerDockerHost: string;
+  peerSshBinding: DualStationSshBinding;
   runtime: typeof DUAL_STATION_VLLM_RUNTIME;
   local: DualStationPlanNode;
   peer: DualStationPlanNode;
@@ -672,50 +677,8 @@ function sshCommandOptions(input: string): SpawnSyncOptionsWithStringEncoding {
   };
 }
 
-export function strictStationSshTransportArgs(): string[] {
-  return [
-    "-T",
-    "-o",
-    "BatchMode=yes",
-    "-o",
-    "StrictHostKeyChecking=yes",
-    "-o",
-    "NumberOfPasswordPrompts=0",
-    "-o",
-    `ConnectTimeout=${String(CONNECT_TIMEOUT_SECONDS)}`,
-    "-o",
-    "ConnectionAttempts=1",
-    "-o",
-    "ServerAliveInterval=5",
-    "-o",
-    "ServerAliveCountMax=1",
-    "-o",
-    "ClearAllForwardings=yes",
-    "-o",
-    "ForwardAgent=no",
-    "-o",
-    "ForwardX11=no",
-    "-o",
-    "ForwardX11Trusted=no",
-    "-o",
-    "Tunnel=no",
-    "-o",
-    "UpdateHostKeys=no",
-    "-o",
-    "ControlMaster=no",
-    "-o",
-    "ControlPath=none",
-    "-o",
-    "PermitLocalCommand=no",
-    "-o",
-    "RemoteCommand=none",
-    "-o",
-    "LogLevel=ERROR",
-  ];
-}
-
-function strictSshArgs(peerTarget: string, remoteCommand: string): string[] {
-  return [...strictStationSshTransportArgs(), "--", peerTarget, remoteCommand];
+function strictSshArgs(binding: DualStationSshBinding, remoteCommand: string): string[] {
+  return [...dualStationPinnedSshArgs(binding), "--", binding.peerTarget, remoteCommand];
 }
 
 function connectivityArgv(requests: readonly StationRailConnectivityRequest[]): string[] {
@@ -744,22 +707,19 @@ export function createStationClusterProbeDeps(
   spawn: StationProbeSpawn = defaultSpawn,
 ): StationClusterProbeDeps {
   return {
-    probePeerSshConfig: (peerTarget) => {
-      const validated = validatePeerTarget(peerTarget);
-      if (!validated.ok) throw new Error(validated.reason);
+    loadPeerSshBinding: loadDualStationSshBindingHandoff,
+    probePeerSshConfig: (binding) => {
       return spawn(
         "ssh",
-        ["-G", "-T", "-o", "ConnectTimeout=30", "--", validated.target],
+        ["-G", ...dualStationPinnedSshArgs(binding), "--", binding.peerTarget],
         sshCommandOptions(""),
       );
     },
     probeLocalHost: () => spawn("python3", ["-"], localProbeCommandOptions(HOST_PROBE_SCRIPT)),
-    probePeerHost: (peerTarget) => {
-      const validated = validatePeerTarget(peerTarget);
-      if (!validated.ok) throw new Error(validated.reason);
+    probePeerHost: (binding) => {
       return spawn(
         "ssh",
-        strictSshArgs(validated.target, "python3 -"),
+        strictSshArgs(binding, "python3 -"),
         sshCommandOptions(HOST_PROBE_SCRIPT),
       );
     },
@@ -767,14 +727,12 @@ export function createStationClusterProbeDeps(
       const args = connectivityArgv(requests);
       return spawn("python3", ["-", ...args], localProbeCommandOptions(CONNECTIVITY_PROBE_SCRIPT));
     },
-    probePeerConnectivity: (peerTarget, requests) => {
-      const validated = validatePeerTarget(peerTarget);
-      if (!validated.ok) throw new Error(validated.reason);
+    probePeerConnectivity: (binding, requests) => {
       const args = connectivityArgv(requests);
       const remoteCommand = ["python3", "-", ...args].join(" ");
       return spawn(
         "ssh",
-        strictSshArgs(validated.target, remoteCommand),
+        strictSshArgs(binding, remoteCommand),
         sshCommandOptions(CONNECTIVITY_PROBE_SCRIPT),
       );
     },
@@ -1084,7 +1042,10 @@ function unavailable(code: StationClusterFailureCode, reason: string): PlanFailu
   return { kind: "unavailable", code, reason };
 }
 
-function dockerSshConfigIsStrict(result: StationProbeCommandResult): boolean {
+function dockerSshConfigIsStrict(
+  result: StationProbeCommandResult,
+  binding: DualStationSshBinding,
+): boolean {
   if (!commandSucceeded(result)) return false;
   const values = new Map<string, string[]>();
   for (const rawLine of result.stdout.split(/\r?\n/)) {
@@ -1093,19 +1054,29 @@ function dockerSshConfigIsStrict(result: StationProbeCommandResult): boolean {
     const separator = line.search(/\s/);
     if (separator <= 0) return false;
     const key = line.slice(0, separator).toLowerCase();
-    const value = line.slice(separator).trim().toLowerCase();
+    const value = line.slice(separator).trim();
     values.set(key, [...(values.get(key) ?? []), value]);
   }
   const exactly = (key: string, allowed: readonly string[]): boolean => {
-    const observed = values.get(key) ?? [];
+    const observed = (values.get(key) ?? []).map((value) => value.toLowerCase());
     return observed.length === 1 && allowed.includes(observed[0]);
   };
-  const absentOrNone = (key: string): boolean => {
+  const exactlyValue = (key: string, expected: string): boolean => {
     const observed = values.get(key) ?? [];
+    return observed.length === 1 && observed[0] === expected;
+  };
+  const absentOrNone = (key: string): boolean => {
+    const observed = (values.get(key) ?? []).map((value) => value.toLowerCase());
     return observed.length === 0 || (observed.length === 1 && observed[0] === "none");
   };
-  const sendEnv = values.get("sendenv") ?? [];
+  const sendEnv = (values.get("sendenv") ?? []).map((value) => value.toLowerCase());
   return (
+    exactlyValue("hostname", binding.resolvedHost) &&
+    exactlyValue("user", binding.sshUser) &&
+    exactlyValue("port", String(binding.port)) &&
+    exactlyValue("hostkeyalias", binding.lookupHost) &&
+    exactlyValue("userknownhostsfile", binding.knownHostsFile) &&
+    exactlyValue("globalknownhostsfile", "/dev/null") &&
     exactly("batchmode", ["yes"]) &&
     exactly("stricthostkeychecking", ["yes", "true"]) &&
     exactly("permitlocalcommand", ["no"]) &&
@@ -1124,7 +1095,7 @@ function dockerSshConfigIsStrict(result: StationProbeCommandResult): boolean {
     !values.has("localforward") &&
     !values.has("remoteforward") &&
     !values.has("dynamicforward") &&
-    !values.has("knownhostscommand") &&
+    absentOrNone("knownhostscommand") &&
     !values.has("setenv") &&
     sendEnv.every((value) => value === "lang" || value === "lc_*")
   );
@@ -1302,7 +1273,7 @@ function expectedPeerSnapshotPath(peer: StationHostProbe): string {
 }
 
 function buildStaticPlan(
-  peerTarget: string,
+  peerSshBinding: DualStationSshBinding,
   local: StationHostProbe,
   peer: StationHostProbe,
 ): StaticPlan | PlanFailure {
@@ -1435,8 +1406,7 @@ function buildStaticPlan(
 
   return {
     plan: {
-      peerSshTarget: peerTarget,
-      peerDockerHost: `ssh://${peerTarget}`,
+      peerSshBinding,
       runtime: DUAL_STATION_VLLM_RUNTIME,
       local: {
         hostname: local.hostname,
@@ -1527,7 +1497,7 @@ export interface ProbeDualStationVllmOptions {
  * Read-only, fail-closed capability probe for the explicit two-Station path.
  *
  * An unset/blank NEMOCLAW_DGX_STATION_PEER returns before touching deps. A
- * configured peer is contacted exactly by that pretrusted SSH destination;
+ * configured peer is contacted only through the installer-qualified binding;
  * the probe never discovers hosts, changes known_hosts, prompts, or mutates
  * either machine.
  */
@@ -1541,6 +1511,13 @@ export function probeDualStationVllmCapability(
   }
   const peerValidation = validatePeerTarget(rawPeer);
   if (!peerValidation.ok) return unavailable("invalid-peer", peerValidation.reason);
+  const rawBinding = env[NEMOCLAW_DGX_STATION_SSH_BINDING_ENV];
+  if (rawBinding === undefined || rawBinding === "" || rawBinding.trim() === "") {
+    return unavailable(
+      "peer-ssh-config-unsafe",
+      `${NEMOCLAW_DGX_STATION_SSH_BINDING_ENV} must identify the installer-qualified peer`,
+    );
+  }
   const localDockerOverride = DUAL_STATION_LOCAL_DOCKER_OVERRIDE_ENV_NAMES.find(
     (name) => env[name] !== undefined && String(env[name]).trim() !== "",
   );
@@ -1552,9 +1529,24 @@ export function probeDualStationVllmCapability(
   }
 
   const deps = options.deps ?? defaultStationClusterProbeDeps;
+  let peerSshBinding: DualStationSshBinding;
   try {
-    const sshConfig = deps.probePeerSshConfig(peerValidation.target);
-    if (!dockerSshConfigIsStrict(sshConfig)) {
+    peerSshBinding = deps.loadPeerSshBinding(rawBinding, peerValidation.target);
+  } catch {
+    return unavailable(
+      "peer-ssh-config-unsafe",
+      "installer-qualified Station SSH binding is invalid or changed",
+    );
+  }
+  if (peerSshBinding.peerTarget !== peerValidation.target) {
+    return unavailable(
+      "peer-ssh-config-unsafe",
+      "qualified Station SSH binding does not match the configured peer",
+    );
+  }
+  try {
+    const sshConfig = deps.probePeerSshConfig(peerSshBinding);
+    if (!dockerSshConfigIsStrict(sshConfig, peerSshBinding)) {
       return unavailable(
         "peer-ssh-config-unsafe",
         "configured peer SSH options are not safe for Docker transport; require BatchMode=yes, StrictHostKeyChecking=yes, no forwarding/proxy/local commands, and no connection sharing",
@@ -1562,13 +1554,10 @@ export function probeDualStationVllmCapability(
     }
     const localResult = parseHostCommand(deps.probeLocalHost(), "local-probe-failed");
     if ("kind" in localResult) return localResult;
-    const peerResult = parseHostCommand(
-      deps.probePeerHost(peerValidation.target),
-      "peer-probe-failed",
-    );
+    const peerResult = parseHostCommand(deps.probePeerHost(peerSshBinding), "peer-probe-failed");
     if ("kind" in peerResult) return peerResult;
 
-    const staticPlan = buildStaticPlan(peerValidation.target, localResult, peerResult);
+    const staticPlan = buildStaticPlan(peerSshBinding, localResult, peerResult);
     if ("kind" in staticPlan) return staticPlan;
 
     const localConnectivityResult = deps.probeLocalConnectivity(staticPlan.localConnectivity);
@@ -1595,7 +1584,7 @@ export function probeDualStationVllmCapability(
     }
 
     const peerConnectivityResult = deps.probePeerConnectivity(
-      peerValidation.target,
+      peerSshBinding,
       staticPlan.peerConnectivity,
     );
     if (!commandSucceeded(peerConnectivityResult)) {

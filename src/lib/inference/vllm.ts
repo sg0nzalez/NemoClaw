@@ -1308,7 +1308,7 @@ export async function installVllm(
   if (dualStationPlan) {
     let peerDockerEnv: Record<string, string>;
     try {
-      peerDockerEnv = buildRemoteVllmDockerEnv(dualStationPlan.peerDockerHost);
+      peerDockerEnv = buildRemoteVllmDockerEnv(dualStationPlan.peerSshBinding);
     } catch (err) {
       console.error(`  vLLM install failed: ${(err as Error).message}`);
       return { ok: false };

@@ -9,7 +9,12 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-
+import {
+  clearDualStationSshBinding,
+  encodeDualStationSshBindingHandoff,
+  stationKnownHostsDigest,
+  writeDualStationSshBinding,
+} from "../src/lib/inference/vllm-station-ssh-binding.ts";
 import {
   type DualStationPreparationDeps,
   type DualStationResumeState,
@@ -501,7 +506,6 @@ function knownHostEvidence(
   digest: string;
 } | null {
   const lines = new Set<string>();
-  const keys = new Set<string>();
   const fingerprints = new Set<string>();
   for (const file of files) {
     if (!path.isAbsolute(file)) continue;
@@ -535,7 +539,6 @@ function knownHostEvidence(
       const fingerprint = fingerprintKnownHostKey(keyType, keyData);
       if (!fingerprint) continue;
       lines.add(line);
-      keys.add(`${marker ?? ""}|${keyType}|${keyData}`);
       // Preserve matching revocations in the private pinned file so the
       // subsequent SSH connection cannot resurrect a key the operator or
       // system administrator explicitly revoked. A revoked line alone is not
@@ -545,12 +548,11 @@ function knownHostEvidence(
     }
   }
   if (lines.size === 0 || fingerprints.size === 0) return null;
+  const retainedLines = [...lines].sort();
   return {
-    lines: [...lines].sort(),
+    lines: retainedLines,
     fingerprints: [...fingerprints].sort(),
-    digest: createHash("sha256")
-      .update([...keys].sort().join("\n"))
-      .digest("hex"),
+    digest: stationKnownHostsDigest(`${retainedLines.join("\n")}\n`),
   };
 }
 
@@ -810,8 +812,8 @@ export function writeDualStationResumeState(
 
 export function clearDualStationResumeState(statePath: string): void {
   const current = readDualStationResumeState(statePath);
-  if (!current) return;
-  fs.unlinkSync(statePath);
+  clearDualStationSshBinding(statePath);
+  if (current) fs.unlinkSync(statePath);
 }
 
 function parseCliOptions(args: readonly string[]): CliOptions {
@@ -1007,8 +1009,31 @@ export function runCli(args: readonly string[]): number {
     );
     if (result.kind === "single-station") {
       runtime.deps.log(`Using the existing single-Station path: ${result.reason}`);
+      // A single-Station result is possible only without pair resume state.
+      // Remove any owner-only binding orphan left by an interrupted earlier
+      // cleanup so it cannot linger without the pair identity that owns it.
+      if (readDualStationResumeState(options.statePath)) {
+        throw new Error("Single-Station fallback cannot discard exact pair resume state");
+      }
+      clearDualStationSshBinding(options.statePath);
+      process.stdout.write(`${JSON.stringify(result)}\n`);
+      return 0;
     }
-    process.stdout.write(`${JSON.stringify(result)}\n`);
+    if (
+      result.binding.sshTarget !== result.peerTarget ||
+      result.binding.hostKeyDigest !== result.identity.hostKeyDigest
+    ) {
+      throw new Error("Qualified Station SSH binding does not match the prepared pair identity");
+    }
+    const binding = writeDualStationSshBinding(options.statePath, result.binding);
+    process.stdout.write(
+      `${JSON.stringify({
+        kind: result.kind,
+        peerTarget: result.peerTarget,
+        identity: result.identity,
+        sshBinding: encodeDualStationSshBindingHandoff(binding),
+      })}\n`,
+    );
     return result.kind === "reboot-required" ? 10 : 0;
   } finally {
     runtime.cleanup();

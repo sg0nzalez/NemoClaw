@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { AsyncLocalStorage } from "node:async_hooks";
-import { describe, expect, it, vi } from "vitest";
+import fs from "node:fs";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DUAL_STATION_VLLM_RUNTIME, type DualStationVllmPlan } from "./vllm-station-cluster";
 import {
   areDualStationManagedVllmContainersRunning,
@@ -32,6 +33,11 @@ import {
   startDualStationManagedVllm,
   withDualStationManagedVllmLifecycle,
 } from "./vllm-station-cluster-lifecycle";
+import type { DualStationSshBinding } from "./vllm-station-ssh-binding";
+import {
+  createDualStationSshBindingFixture,
+  type DualStationSshBindingFixture,
+} from "./vllm-station-ssh-binding.test-support";
 
 const WORKER_ID = "a".repeat(64);
 const HEAD_ID = "b".repeat(64);
@@ -41,11 +47,19 @@ const API_KEY = "e".repeat(64);
 const START_CONFIG = { apiKey: API_KEY };
 const API_KEY_FINGERPRINT = dualStationVllmApiKeyFingerprint(API_KEY);
 const TRANSACTION_ID = "1".repeat(32);
+let sshFixture: DualStationSshBindingFixture;
+
+beforeEach(() => {
+  sshFixture = createDualStationSshBindingFixture();
+});
+
+afterEach(() => {
+  sshFixture.cleanup();
+});
 
 function fixturePlan(): DualStationVllmPlan {
   return {
-    peerSshTarget: "nvidia@station-b",
-    peerDockerHost: "ssh://nvidia@station-b",
+    peerSshBinding: sshFixture.binding,
     runtime: DUAL_STATION_VLLM_RUNTIME,
     local: {
       hostname: "station-a",
@@ -199,9 +213,9 @@ function harness(
     args: readonly string[];
     options: DualStationDockerOptions | undefined;
   }> = [];
-  const buildRemoteDockerEnv = vi.fn((sshUri: string) => ({
+  const buildRemoteDockerEnv = vi.fn((binding: DualStationSshBinding) => ({
     TARGET: "peer",
-    DOCKER_HOST: sshUri,
+    DOCKER_HOST: `ssh://${binding.sshUser}@${binding.resolvedHost}`,
     VLLM_API_KEY: "ambient-must-be-stripped",
   }));
   let nonceCounter = 0;
@@ -554,6 +568,18 @@ describe("dual-Station managed vLLM lifecycle", () => {
     expect(fake.operations.some((operation) => operation.kind === "rm")).toBe(false);
   });
 
+  it("rejects a changed host-key pin before reading or mutating either Docker daemon", () => {
+    const fake = harness();
+    fs.appendFileSync(sshFixture.binding.knownHostsFile, "changed\n");
+
+    expect(preflightDualStationManagedVllm(fixturePlan(), fake.deps)).toMatchObject({
+      ok: false,
+      reason: expect.stringContaining("known-hosts binding changed"),
+    });
+    expect(fake.operations).toEqual([]);
+    expect(fake.buildRemoteDockerEnv).not.toHaveBeenCalled();
+  });
+
   it("proves exact-image GPU execution on both daemons and removes both exact probe IDs", async () => {
     const fake = harness();
 
@@ -653,7 +679,7 @@ describe("dual-Station managed vLLM lifecycle", () => {
     for (const options of [...fake.captureOptions, ...fake.rmOptions]) {
       expect(options?.env?.VLLM_API_KEY).toBeUndefined();
     }
-    expect(fake.buildRemoteDockerEnv).toHaveBeenCalledWith("ssh://nvidia@station-b");
+    expect(fake.buildRemoteDockerEnv).toHaveBeenCalledWith(sshFixture.binding);
   });
 
   it("reuses an already-running exact pair without tearing down the working service", async () => {

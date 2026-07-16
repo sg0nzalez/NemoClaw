@@ -1,18 +1,29 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import fs from "node:fs";
+
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DUAL_STATION_VLLM_RUNTIME, type DualStationVllmPlan } from "./vllm-station-cluster";
 import {
   type ModelStagingCommandResult,
   stageDualStationModelSnapshot,
 } from "./vllm-station-model-staging";
+import {
+  createDualStationSshBindingFixture,
+  type DualStationSshBindingFixture,
+} from "./vllm-station-ssh-binding.test-support";
+
+let sshFixture: DualStationSshBindingFixture;
+
+beforeEach(() => {
+  sshFixture = createDualStationSshBindingFixture();
+});
 
 function plan(): DualStationVllmPlan {
   return {
-    peerSshTarget: "nvidia@station-b",
-    peerDockerHost: "ssh://nvidia@station-b",
+    peerSshBinding: sshFixture.binding,
     runtime: DUAL_STATION_VLLM_RUNTIME,
     local: {
       hostname: "station-a",
@@ -102,6 +113,7 @@ function stagingSuffix(runCommand: ReturnType<typeof successfulTransferRunner>):
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  sshFixture.cleanup();
 });
 
 describe("dual-Station pinned model staging", () => {
@@ -138,6 +150,12 @@ describe("dual-Station pinned model staging", () => {
         "StrictHostKeyChecking=yes",
         "ClearAllForwardings=yes",
         "ControlMaster=no",
+        `UserKnownHostsFile=${sshFixture.binding.knownHostsFile}`,
+        "GlobalKnownHostsFile=/dev/null",
+        `HostKeyAlias=${sshFixture.binding.lookupHost}`,
+        `Hostname=${sshFixture.binding.resolvedHost}`,
+        "User=nvidia",
+        "Port=22",
         "--",
         "nvidia@station-b",
         "python3 -",
@@ -187,19 +205,23 @@ describe("dual-Station pinned model staging", () => {
     const reversedLocal = reversed.local;
     reversed.local = reversed.peer;
     reversed.peer = reversedLocal;
-    reversed.peerSshTarget = "nvidia@station-a";
-    reversed.peerDockerHost = "ssh://nvidia@station-a";
+    const reversedSshFixture = createDualStationSshBindingFixture("nvidia@station-a");
+    reversed.peerSshBinding = reversedSshFixture.binding;
     const differentHead = plan();
     differentHead.local.gpu.uuid = "GPU-c";
     const originalRunner = successfulTransferRunner();
     const reversedRunner = successfulTransferRunner();
     const differentHeadRunner = successfulTransferRunner();
 
-    await Promise.all([
-      stageDualStationModelSnapshot(original, { runCommand: originalRunner }),
-      stageDualStationModelSnapshot(reversed, { runCommand: reversedRunner }),
-      stageDualStationModelSnapshot(differentHead, { runCommand: differentHeadRunner }),
-    ]);
+    try {
+      await Promise.all([
+        stageDualStationModelSnapshot(original, { runCommand: originalRunner }),
+        stageDualStationModelSnapshot(reversed, { runCommand: reversedRunner }),
+        stageDualStationModelSnapshot(differentHead, { runCommand: differentHeadRunner }),
+      ]);
+    } finally {
+      reversedSshFixture.cleanup();
+    }
 
     const suffixes = [
       stagingSuffix(originalRunner),
@@ -242,6 +264,17 @@ describe("dual-Station pinned model staging", () => {
     await expect(stageDualStationModelSnapshot(unsafe, { runCommand })).resolves.toEqual({
       ok: false,
       reason: "peer home is unsafe for model staging",
+    });
+    expect(runCommand).not.toHaveBeenCalled();
+  });
+
+  it("fails before any command when the qualified host-key pin changes", async () => {
+    fs.appendFileSync(sshFixture.binding.knownHostsFile, "changed\n");
+    const runCommand = vi.fn();
+
+    await expect(stageDualStationModelSnapshot(plan(), { runCommand })).resolves.toMatchObject({
+      ok: false,
+      reason: expect.stringContaining("known-hosts binding changed"),
     });
     expect(runCommand).not.toHaveBeenCalled();
   });

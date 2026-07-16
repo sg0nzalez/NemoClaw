@@ -3290,6 +3290,7 @@ parse_station_dual_pair_result() {
   node -e '
     const fs = require("node:fs");
     const net = require("node:net");
+    const path = require("node:path");
     const fail = () => process.exit(2);
     try {
       const raw = fs.readFileSync(0, "utf8");
@@ -3322,7 +3323,23 @@ parse_station_dual_pair_result() {
         if (net.isIP(rail.localAddress) !== 4 || net.isIP(rail.peerAddress) !== 4) fail();
         if (!mac.test(rail.localMac) || !mac.test(rail.peerMac)) fail();
       }
-      process.stdout.write(`${value.kind}\n${peer}\n`);
+      const token = value.sshBinding;
+      if (typeof token !== "string" || token.length === 0 || token.length > 8192 || !/^[A-Za-z0-9_-]+$/.test(token)) fail();
+      let handoff;
+      try {
+        const decoded = Buffer.from(token, "base64url");
+        if (decoded.toString("base64url") !== token) fail();
+        handoff = JSON.parse(decoded.toString("utf8"));
+      } catch {
+        fail();
+      }
+      if (!handoff || typeof handoff !== "object" || Array.isArray(handoff)) fail();
+      if (JSON.stringify(Object.keys(handoff).sort()) !== JSON.stringify(["bindingFile", "hostKeyDigest"])) fail();
+      const bindingFile = handoff.bindingFile;
+      if (typeof bindingFile !== "string" || bindingFile.length === 0 || bindingFile.length > 4096 || bindingFile !== bindingFile.trim() || /[\u0000-\u001f\u007f]/.test(bindingFile)) fail();
+      if (!path.isAbsolute(bindingFile) || path.normalize(bindingFile) !== bindingFile) fail();
+      if (handoff.hostKeyDigest !== identity.hostKeyDigest) fail();
+      process.stdout.write(`${value.kind}\n${peer}\n${token}\n`);
     } catch {
       fail();
     }
@@ -3341,7 +3358,7 @@ ensure_station_express_pair() {
   [[ -f "$coordinator" ]] || error "Dual DGX Station preparation coordinator is missing: ${coordinator}"
   [[ -f "$helper" ]] || error "DGX Station host preparation helper is missing: ${helper}"
 
-  local state_dir state_file revision output parsed kind peer_target status=0
+  local state_dir state_file revision output parsed kind peer_target ssh_binding status=0
   state_dir="$(ensure_nemoclaw_state_dir)" || error "Could not prepare owner-only NemoClaw state for dual DGX Station discovery."
   state_file="${state_dir}/station-dual-pair-resume.json"
   assert_nemoclaw_state_path_safe "$state_file"
@@ -3384,6 +3401,7 @@ ensure_station_express_pair() {
   fi
   kind="$(printf '%s\n' "$parsed" | sed -n '1p')"
   peer_target="$(printf '%s\n' "$parsed" | sed -n '2p')"
+  ssh_binding="$(printf '%s\n' "$parsed" | sed -n '3p')"
 
   case "$kind" in
     single-station)
@@ -3399,6 +3417,7 @@ ensure_station_express_pair() {
       if [ "${_STATION_EXPRESS_MODEL_WAS_EXPLICIT:-0}" = "0" ]; then
         unset NEMOCLAW_VLLM_MODEL
       fi
+      unset NEMOCLAW_DGX_STATION_SSH_BINDING
       info "No trusted reciprocal dual-DGX Station pair was detected; using the existing single-Station profile default."
       ;;
     ready)
@@ -3407,7 +3426,8 @@ ensure_station_express_pair() {
       station_dual_pair_resume_pending \
         || error "Dual DGX Station preparation returned ready without exact pair resume state; refusing to continue."
       NEMOCLAW_DGX_STATION_PEER="$peer_target"
-      export NEMOCLAW_DGX_STATION_PEER
+      NEMOCLAW_DGX_STATION_SSH_BINDING="$ssh_binding"
+      export NEMOCLAW_DGX_STATION_PEER NEMOCLAW_DGX_STATION_SSH_BINDING
       if [ "${_STATION_EXPRESS_MODEL_WAS_EXPLICIT:-0}" = "0" ]; then
         # Leave the vLLM selector unset. The trusted peer is the existing
         # installVllm signal that performs the authoritative full capability
@@ -3441,7 +3461,7 @@ clear_station_dual_pair_resume() {
   local state_file coordinator="${SCRIPT_DIR}/prepare-dual-dgx-station.mts"
   state_file="$(station_dual_pair_resume_file)" || return 0
   assert_nemoclaw_state_path_safe "$state_file"
-  [[ -e "$state_file" || -L "$state_file" ]] || return 0
+  [[ -e "$state_file" || -L "$state_file" || -e "${state_file}.ssh-binding" || -L "${state_file}.ssh-binding" ]] || return 0
   [[ -f "$coordinator" ]] || error "Dual DGX Station preparation coordinator is missing: ${coordinator}"
   node --no-warnings --experimental-strip-types "$coordinator" --state "$state_file" --clear-state >/dev/null \
     || error "Could not safely clear completed dual DGX Station resume state: ${state_file}"

@@ -1,15 +1,34 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildLocalDualStationDockerEnv,
   buildRemoteVllmDockerEnv,
   buildVllmDockerEnv,
 } from "./vllm-docker-env";
+import {
+  clearDualStationSshBinding,
+  stationKnownHostsDigest,
+  writeDualStationSshBinding,
+} from "./vllm-station-ssh-binding";
+import {
+  createDualStationSshBindingFixture,
+  type DualStationSshBindingFixture,
+} from "./vllm-station-ssh-binding.test-support";
+
+let sshFixture: DualStationSshBindingFixture;
+
+beforeEach(() => {
+  sshFixture = createDualStationSshBindingFixture("station@dgx-peer.example.test");
+});
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  sshFixture.cleanup();
 });
 
 describe("managed vLLM Docker client environment", () => {
@@ -55,14 +74,15 @@ describe("managed vLLM Docker client environment", () => {
     vi.stubEnv("OPENSHELL_GATEWAY_AUTH_TOKEN", "must-not-cross-ssh");
     vi.stubEnv("UNRELATED_SECRET", "do-not-forward");
 
-    const env = buildRemoteVllmDockerEnv("ssh://station@dgx-peer.example.test:22");
+    const env = buildRemoteVllmDockerEnv(sshFixture.binding);
 
     expect(env).toEqual(
       expect.objectContaining({
-        DOCKER_HOST: "ssh://station@dgx-peer.example.test:22",
+        DOCKER_HOST: "ssh://station@192.168.50.20",
         SSH_AUTH_SOCK: "/tmp/ssh-agent.sock",
       }),
     );
+    expect(env.PATH).toBe(sshFixture.binding.sshWrapperDirectory);
     expect(env.DOCKER_API_VERSION).toBeUndefined();
     expect(env.DOCKER_CERT_PATH).toBeUndefined();
     expect(env.DOCKER_CONFIG).toBeUndefined();
@@ -89,16 +109,52 @@ describe("managed vLLM Docker client environment", () => {
     expect(env.DOCKER_CONFIG).toBeUndefined();
   });
 
-  it.each([
-    "tcp://dgx-peer.example.test:2376",
-    "ssh://station:secret@dgx-peer.example.test",
-    "ssh://dgx-peer.example.test/",
-    "ssh://dgx-peer.example.test?context=other",
-    "ssh://Dgx-Peer.example.test",
-    " ssh://dgx-peer.example.test",
-  ])("rejects a non-canonical or unsafe remote Docker target: %s", (sshUri) => {
-    expect(() => buildRemoteVllmDockerEnv(sshUri)).toThrow(
-      "Remote Docker host must be a canonical ssh://[user@]host[:port] URI",
+  it("rejects a changed qualified host-key pin before constructing a Docker environment", () => {
+    fs.appendFileSync(sshFixture.binding.knownHostsFile, "changed\n");
+
+    expect(() => buildRemoteVllmDockerEnv(sshFixture.binding)).toThrow(
+      "Station SSH known-hosts binding changed after qualification",
     );
+  });
+
+  it("keeps an existing environment pinned when a later qualification writes a new version", () => {
+    const first = sshFixture.binding;
+    const firstEnv = buildRemoteVllmDockerEnv(first);
+    const replacementHost = "192.168.50.21";
+    const replacementLines = [
+      `${replacementHost} ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIcmVwbGFjZW1lbnQ=`,
+    ];
+    const second = writeDualStationSshBinding(
+      sshFixture.resumeStatePath,
+      {
+        ...sshFixture.identity,
+        resolvedHost: replacementHost,
+        lookupHost: replacementHost,
+        hostKeyDigest: stationKnownHostsDigest(`${replacementLines.join("\n")}\n`),
+        knownHostsLines: replacementLines,
+      },
+      { dockerCliFile: sshFixture.dockerCliFile },
+    );
+    const secondEnv = buildRemoteVllmDockerEnv(second);
+
+    expect(second.sshWrapperDirectory).not.toBe(first.sshWrapperDirectory);
+    expect(firstEnv.PATH).toBe(first.sshWrapperDirectory);
+    expect(secondEnv.PATH).toBe(second.sshWrapperDirectory);
+    expect(firstEnv.DOCKER_HOST).toBe("ssh://station@192.168.50.20");
+    expect(secondEnv.DOCKER_HOST).toBe(`ssh://station@${replacementHost}`);
+    expect(buildRemoteVllmDockerEnv(first)).toEqual(firstEnv);
+    expect(fs.existsSync(first.dockerShimFile)).toBe(true);
+    expect(fs.existsSync(second.dockerShimFile)).toBe(true);
+  });
+
+  it("fails closed instead of falling through to ambient Docker after cleanup", () => {
+    const env = buildRemoteVllmDockerEnv(sshFixture.binding);
+
+    clearDualStationSshBinding(sshFixture.resumeStatePath);
+
+    const result = spawnSync("docker", ["version"], { env, encoding: "utf8" });
+    expect(result.status).toBeNull();
+    expect(result.error).toMatchObject({ code: "ENOENT" });
+    expect(() => buildRemoteVllmDockerEnv(sshFixture.binding)).toThrow();
   });
 });

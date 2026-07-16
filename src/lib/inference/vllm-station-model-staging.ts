@@ -6,12 +6,8 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 
 import { buildVllmSshTransportEnv } from "./vllm-docker-env";
-import {
-  DUAL_STATION_VLLM_RUNTIME,
-  type DualStationVllmPlan,
-  strictStationSshTransportArgs,
-  validatePeerTarget,
-} from "./vllm-station-cluster";
+import { DUAL_STATION_VLLM_RUNTIME, type DualStationVllmPlan } from "./vllm-station-cluster";
+import { dualStationPinnedSshArgs } from "./vllm-station-ssh-binding";
 
 const MANIFEST_SCHEMA_VERSION = 1;
 const MAX_MANIFEST_BYTES = 2 * 1024 * 1024;
@@ -182,10 +178,7 @@ function stagingPaths(plan: DualStationVllmPlan): StagingPaths {
       throw new Error(`${label} home is unsafe for model staging`);
     }
   }
-  const validatedPeer = validatePeerTarget(plan.peerSshTarget);
-  if (!validatedPeer.ok || validatedPeer.target !== plan.peerSshTarget) {
-    throw new Error("peer SSH target is unsafe for model staging");
-  }
+  dualStationPinnedSshArgs(plan.peerSshBinding);
   if (
     plan.runtime.modelId !== DUAL_STATION_VLLM_RUNTIME.modelId ||
     plan.runtime.modelRevision !== DUAL_STATION_VLLM_RUNTIME.modelRevision ||
@@ -576,11 +569,20 @@ function parseRemoteState(
 }
 
 function sshArgs(plan: DualStationVllmPlan): string[] {
-  return [...strictStationSshTransportArgs(), "--", plan.peerSshTarget, "python3 -"];
+  return [
+    ...dualStationPinnedSshArgs(plan.peerSshBinding),
+    "--",
+    plan.peerSshBinding.peerTarget,
+    "python3 -",
+  ];
 }
 
-function rsyncRsh(): string {
-  return ["ssh", ...strictStationSshTransportArgs()].join(" ");
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", `'"'"'`)}'`;
+}
+
+function rsyncRsh(plan: DualStationVllmPlan): string {
+  return ["ssh", ...dualStationPinnedSshArgs(plan.peerSshBinding)].map(shellQuote).join(" ");
 }
 
 /**
@@ -616,11 +618,16 @@ export async function stageDualStationModelSnapshot(
     return { ok: false, reason: (err as Error).message };
   }
 
-  const prepare = await deps.runCommand("ssh", sshArgs(plan), {
-    env,
-    input: remoteScript(plan, paths, manifest, "prepare"),
-    timeoutMs: SNAPSHOT_AUDIT_TIMEOUT_MS,
-  });
+  let prepare: ModelStagingCommandResult;
+  try {
+    prepare = await deps.runCommand("ssh", sshArgs(plan), {
+      env,
+      input: remoteScript(plan, paths, manifest, "prepare"),
+      timeoutMs: SNAPSHOT_AUDIT_TIMEOUT_MS,
+    });
+  } catch (err) {
+    return { ok: false, reason: (err as Error).message };
+  }
   try {
     if (prepare.status === 0 && JSON.parse(prepare.stdout.trim()).state === "ready") {
       parseRemoteState("peer snapshot preflight", prepare, "ready");
@@ -631,40 +638,50 @@ export async function stageDualStationModelSnapshot(
     return { ok: false, reason: (err as Error).message };
   }
 
-  const rsync = await deps.runCommand(
-    "rsync",
-    [
-      "--recursive",
-      "--times",
-      "--copy-links",
-      "--checksum",
-      "--partial",
-      "--protect-args",
-      "--no-owner",
-      "--no-group",
-      "--chmod=Du=rwx,Dgo=,Fu=rw,Fgo=",
-      "--info=progress2",
-      `--rsh=${rsyncRsh()}`,
-      "--",
-      `${paths.localSnapshot}/`,
-      `${plan.peerSshTarget}:${paths.peerStaging}/`,
-    ],
-    {
-      env,
-      timeoutMs: RSYNC_TIMEOUT_MS,
-      idleTimeoutMs: RSYNC_IDLE_TIMEOUT_MS,
-      streamOutput: true,
-    },
-  );
+  let rsync: ModelStagingCommandResult;
+  try {
+    rsync = await deps.runCommand(
+      "rsync",
+      [
+        "--recursive",
+        "--times",
+        "--copy-links",
+        "--checksum",
+        "--partial",
+        "--protect-args",
+        "--no-owner",
+        "--no-group",
+        "--chmod=Du=rwx,Dgo=,Fu=rw,Fgo=",
+        "--info=progress2",
+        `--rsh=${rsyncRsh(plan)}`,
+        "--",
+        `${paths.localSnapshot}/`,
+        `${plan.peerSshBinding.peerTarget}:${paths.peerStaging}/`,
+      ],
+      {
+        env,
+        timeoutMs: RSYNC_TIMEOUT_MS,
+        idleTimeoutMs: RSYNC_IDLE_TIMEOUT_MS,
+        streamOutput: true,
+      },
+    );
+  } catch (err) {
+    return { ok: false, reason: (err as Error).message };
+  }
   if (rsync.status !== 0 || rsync.timedOut || rsync.error) {
     return { ok: false, reason: commandFailure("peer snapshot transfer", rsync) };
   }
 
-  const finalize = await deps.runCommand("ssh", sshArgs(plan), {
-    env,
-    input: remoteScript(plan, paths, manifest, "finalize"),
-    timeoutMs: SNAPSHOT_AUDIT_TIMEOUT_MS,
-  });
+  let finalize: ModelStagingCommandResult;
+  try {
+    finalize = await deps.runCommand("ssh", sshArgs(plan), {
+      env,
+      input: remoteScript(plan, paths, manifest, "finalize"),
+      timeoutMs: SNAPSHOT_AUDIT_TIMEOUT_MS,
+    });
+  } catch (err) {
+    return { ok: false, reason: (err as Error).message };
+  }
   try {
     parseRemoteState("peer snapshot verification", finalize, "ready");
   } catch (err) {
