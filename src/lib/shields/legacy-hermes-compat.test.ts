@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import os from "node:os";
@@ -27,6 +28,7 @@ const CURRENT_GUARD_HELP = [
 ].join(" ");
 
 type ShieldsModule = typeof import("./index");
+type HermesRootLifecycleMarkerState = "missing" | "regular" | "dangling-symlink";
 
 function hermesTarget() {
   return {
@@ -132,8 +134,15 @@ describe("legacy Hermes shields compatibility", () => {
   function installExecResponses(
     help: string,
     hermesDirMode = "3770",
-    hermesTopology = "managed-nonroot",
+    markerState: HermesRootLifecycleMarkerState = "missing",
+    topologyResponseOverride?: string,
   ): void {
+    const localMarker = path.join(homeDir, "hermes-root-lifecycle");
+    if (markerState === "regular") {
+      fs.writeFileSync(localMarker, "root-separated\n");
+    } else if (markerState === "dangling-symlink") {
+      fs.symlinkSync(`${localMarker}.missing`, localMarker);
+    }
     dockerExecSpy.mockImplementation((cmd: string[]) => {
       switch (true) {
         case cmd.includes(HERMES_GUARD) && cmd.includes("--help"):
@@ -148,8 +157,13 @@ describe("legacy Hermes shields compatibility", () => {
             : "640 sandbox:sandbox";
         case cmd[0] === "lsattr":
           return `---------------- ${cmd.at(-1)}`;
-        case cmd.includes(HERMES_ROOT_LIFECYCLE_MARKER):
-          return hermesTopology;
+        case cmd.includes(HERMES_ROOT_LIFECYCLE_MARKER): {
+          if (topologyResponseOverride !== undefined) return topologyResponseOverride;
+          const localProbe = cmd.map((arg) =>
+            arg === HERMES_ROOT_LIFECYCLE_MARKER ? localMarker : arg,
+          );
+          return execFileSync(localProbe[0], localProbe.slice(1), { encoding: "utf8" });
+        }
         default:
           return "";
       }
@@ -286,7 +300,19 @@ describe("legacy Hermes shields compatibility", () => {
   });
 
   it("rejects a private Hermes root in the root-separated topology", () => {
-    installExecResponses(CURRENT_GUARD_HELP, "700", "root-separated");
+    installExecResponses(CURRENT_GUARD_HELP, "700", "regular");
+
+    expect(() => shields.unlockAgentConfig("current-hermes", hermesTarget(), true, true)).toThrow(
+      /managed non-root topology/,
+    );
+
+    const commands = dockerExecSpy.mock.calls.map(commandFromCall);
+    expect(commands.some((cmd) => cmd.includes(HERMES_ROOT_LIFECYCLE_MARKER))).toBe(true);
+    expect(commands.some((cmd) => isGuardAction(cmd, "finish-shields-transition"))).toBe(false);
+  });
+
+  it("rejects a dangling lifecycle marker as root-separated", () => {
+    installExecResponses(CURRENT_GUARD_HELP, "700", "dangling-symlink");
 
     expect(() => shields.unlockAgentConfig("current-hermes", hermesTarget(), true, true)).toThrow(
       /managed non-root topology/,
@@ -298,7 +324,7 @@ describe("legacy Hermes shields compatibility", () => {
   });
 
   it("rejects an unexpected Hermes topology response before finishing", () => {
-    installExecResponses(CURRENT_GUARD_HELP, "700", "unexpected-topology");
+    installExecResponses(CURRENT_GUARD_HELP, "700", "missing", "unexpected-topology");
 
     expect(() => shields.unlockAgentConfig("current-hermes", hermesTarget(), true, true)).toThrow(
       /Unexpected Hermes workload topology response/,
