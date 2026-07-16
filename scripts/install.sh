@@ -3159,8 +3159,8 @@ main() {
   # licence, the other opts into an interactive express flow. Inferring
   # non-interactive from the notice would make the express flow reject its own
   # required flag (validate_station_deepseek_override).
-  if [ "${ACCEPT_THIRD_PARTY_SOFTWARE:-}" = "1" ] && [ "${NON_INTERACTIVE:-}" != "1" ] &&
-    [ "${STATION_DEEPSEEK:-}" != "1" ]; then
+  if [ "${ACCEPT_THIRD_PARTY_SOFTWARE:-}" = "1" ] && [ "${NON_INTERACTIVE:-}" != "1" ] \
+    && [ "${STATION_DEEPSEEK:-}" != "1" ]; then
     NON_INTERACTIVE=1
     NON_INTERACTIVE_SOURCE="NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE=1 (implies --non-interactive)"
   fi
