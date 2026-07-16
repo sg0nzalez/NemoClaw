@@ -3051,6 +3051,8 @@ ensure_station_express_host() {
 
 prepare_installer_host() {
   maybe_offer_express_install
+  # Intentional ordering: Station preparation owns the reboot boundary before
+  # generic Docker bootstrap; ensure_station_express_host is a no-op elsewhere.
   ensure_station_express_host
   ensure_docker
   ensure_openshell_build_deps

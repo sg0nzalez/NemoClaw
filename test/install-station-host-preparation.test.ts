@@ -10,6 +10,10 @@ import { INSTALLER_PAYLOAD, TEST_SYSTEM_PATH } from "./helpers/installer-sourced
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "..");
 const STATION_PREPARE = path.join(REPO_ROOT, "scripts", "prepare-dgx-station-host.sh");
+const STATION_DOCS = [
+  path.join(REPO_ROOT, "docs", "get-started", "prerequisites.mdx"),
+  path.join(REPO_ROOT, "docs", "get-started", "quickstart.mdx"),
+];
 
 function runSourced(script: string, body: string, extraEnv: Record<string, string> = {}) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-station-host-"));
@@ -33,6 +37,22 @@ function runSourced(script: string, body: string, extraEnv: Record<string, strin
 }
 
 describe("DGX Station host preparation", () => {
+  it("keeps documented Station pins and Deferred status aligned", () => {
+    const helper = fs.readFileSync(STATION_PREPARE, "utf-8");
+    const docs = STATION_DOCS.map((doc) => fs.readFileSync(doc, "utf-8"));
+    const pinnedValues = ["DRIVER_VERSION", "DOCKER_VERSION", "TOOLKIT_VERSION"].map((name) => {
+      const value = helper.match(new RegExp(`readonly ${name}="([^"]+)"`))?.[1];
+      expect(value, `${name} must remain declared in the Station helper`).toBeTruthy();
+      return value as string;
+    });
+
+    for (const doc of docs) {
+      for (const version of pinnedValues) expect(doc).toContain(version);
+      expect(doc).toMatch(/(?:DGX )?Station(?: remains|'s) Deferred/);
+      expect(doc).toMatch(/physical (?:DGX Station )?hardware|physical end-to-end validation/);
+    }
+  });
+
   it.each([
     ["", "missing"],
     ["5:29.6.1-1~ubuntu.24.04~noble", "exact"],
@@ -363,6 +383,21 @@ run_verify
     expect(result.status, output).not.toBe(0);
     expect(output).toMatch(/Pinned driver is not loaded/);
   });
+
+  it("rejects a symlinked Station bootstrap state directory", () => {
+    const { home, result, output } = runSourced(
+      STATION_PREPARE,
+      `
+mkdir -p "$HOME/.local/state" "$HOME/redirect-target"
+ln -s "$HOME/redirect-target" "$HOME/.local/state/station-bootstrap"
+write_install_boot_marker
+`,
+    );
+
+    expect(result.status, output).not.toBe(0);
+    expect(output).toMatch(/Refusing symbolic link in Station bootstrap state path/);
+    expect(fs.existsSync(path.join(home, "redirect-target", "install-boot-id"))).toBe(false);
+  });
 });
 
 describe("DGX Station express host integration", () => {
@@ -385,6 +420,23 @@ prepare_installer_host
       "ENSURE_DOCKER",
       "ENSURE_BUILD_DEPS",
     ]);
+  });
+
+  it("skips Station preparation before Docker bootstrap on non-Station platforms", () => {
+    const { result, output } = runSourced(
+      INSTALLER_PAYLOAD,
+      `
+maybe_offer_express_install() { _SELECTED_EXPRESS_PLATFORM='DGX Spark'; }
+run_station_host_preparation() { printf 'PREPARE_STATION\n'; }
+ensure_docker() { printf 'ENSURE_DOCKER\n'; }
+ensure_openshell_build_deps() { printf 'ENSURE_BUILD_DEPS\n'; }
+prepare_installer_host
+`,
+    );
+
+    expect(result.status, output).toBe(0);
+    expect(output).not.toContain("PREPARE_STATION");
+    expect(result.stdout.trim().split("\n")).toEqual(["ENSURE_DOCKER", "ENSURE_BUILD_DEPS"]);
   });
 
   it("persists the selected model when host preparation requires a reboot", () => {

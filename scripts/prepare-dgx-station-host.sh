@@ -299,14 +299,24 @@ driver_loaded_exact() {
   [[ "$loaded" == "$DRIVER_VERSION" ]]
 }
 
+assert_station_state_dir_safe() {
+  local path
+  for path in "${HOME}/.local" "${HOME}/.local/state" "$STATE_DIR"; do
+    [[ ! -L "$path" ]] || fatal "Refusing symbolic link in Station bootstrap state path: ${path}"
+  done
+}
+
 write_install_boot_marker() {
+  assert_station_state_dir_safe
   mkdir -p "$STATE_DIR"
+  assert_station_state_dir_safe
   chmod 0700 "$STATE_DIR"
   cp /proc/sys/kernel/random/boot_id "$INSTALL_BOOT_MARKER"
   chmod 0600 "$INSTALL_BOOT_MARKER"
 }
 
 install_boot_marker_matches_current_boot() {
+  assert_station_state_dir_safe
   [[ -r "$INSTALL_BOOT_MARKER" ]] || return 1
   [[ "$(tr -d '[:space:]' <"$INSTALL_BOOT_MARKER")" == "$(tr -d '[:space:]' </proc/sys/kernel/random/boot_id)" ]]
 }
