@@ -296,12 +296,20 @@ detect_express_platform
       message: /--station-deepseek requires a detected DGX Station \(detected: DGX Spark\)/,
     },
     {
-      name: "a conflicting non-interactive flag",
+      name: "a conflicting non-interactive flag (names the flag as the trigger)",
       args: ["--station-deepseek", "--non-interactive"],
       platform: "DGX Station",
       env: {},
       message:
-        /--station-deepseek selects the DGX Station express prompt and cannot be combined with --non-interactive/,
+        /--station-deepseek selects the DGX Station express prompt and cannot be combined with non-interactive mode \(triggered by: the --non-interactive flag\)/,
+    },
+    {
+      name: "a conflicting NEMOCLAW_NON_INTERACTIVE env var (names the env var as the trigger)",
+      args: ["--station-deepseek"],
+      platform: "DGX Station",
+      env: { NEMOCLAW_NON_INTERACTIVE: "1" },
+      message:
+        /--station-deepseek selects the DGX Station express prompt and cannot be combined with non-interactive mode \(triggered by: NEMOCLAW_NON_INTERACTIVE=1\)/,
     },
     {
       name: "a conflicting Station model",
@@ -358,7 +366,7 @@ main "$@"
 
   it.each([
     ["NEMOCLAW_NO_EXPRESS", "1", /cannot be combined with NEMOCLAW_NO_EXPRESS=1/],
-    ["NON_INTERACTIVE", "1", /cannot be combined with --non-interactive/],
+    ["NON_INTERACTIVE", "1", /cannot be combined with non-interactive mode/],
     ["NEMOCLAW_PROVIDER", "install-vllm", /conflicts with NEMOCLAW_PROVIDER=install-vllm/],
   ])("rejects %s when the Station demo override would otherwise be ignored", (name, value, message) => {
     const result = runExpressPromptWithTty("\n", "pipe", "DGX Station", {
