@@ -356,6 +356,50 @@ main "$@"
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
+  it("proceeds past the express preflight for --station-deepseek with NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE=1 (#7008)", () => {
+    // #7008: accepting the third-party-software notice must NOT imply
+    // --non-interactive when --station-deepseek explicitly selects the
+    // interactive DGX Station express prompt. The two signals are orthogonal.
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-station-accept3p-"));
+    const result = spawnSync(
+      "bash",
+      [
+        "--noprofile",
+        "--norc",
+        "-c",
+        `
+source "$INSTALLER_UNDER_TEST" >/dev/null
+detect_express_platform() { printf "%s" "$EXPRESS_PLATFORM"; }
+print_banner() { :; }
+# Stop main cleanly right after preflight_explicit_express_flags passes, echoing
+# NON_INTERACTIVE so the test can confirm the notice env var did not infer it.
+preflight_usage_notice_prompt() { printf "PROCEEDED NON_INTERACTIVE=%s\\n" "\${NON_INTERACTIVE:-}"; exit 0; }
+main "$@"
+`,
+        "_",
+        "--station-deepseek",
+      ],
+      {
+        cwd: tmp,
+        encoding: "utf-8",
+        env: {
+          HOME: tmp,
+          PATH: TEST_SYSTEM_PATH,
+          INSTALLER_UNDER_TEST: INSTALLER_PAYLOAD,
+          EXPRESS_PLATFORM: "DGX Station",
+          NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE: "1",
+        },
+      },
+    );
+    const output = `${result.stdout}${result.stderr}`;
+    expect(result.status, output).toBe(0);
+    expect(output).toMatch(/PROCEEDED NON_INTERACTIVE=/);
+    // The notice acceptance must not have flipped the run non-interactive.
+    expect(output).not.toMatch(/PROCEEDED NON_INTERACTIVE=1/);
+    expect(output).not.toMatch(/cannot be combined with/);
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
   it.each([
     ["NEMOCLAW_NO_EXPRESS", "1", /cannot be combined with NEMOCLAW_NO_EXPRESS=1/],
     ["NON_INTERACTIVE", "1", /cannot be combined with --non-interactive/],

@@ -3135,7 +3135,15 @@ main() {
   # (run_onboard has the same gate). Without this, ACCEPT_THIRD_PARTY_SOFTWARE=1
   # alone clears the preflight below but the install can still partial-fail at
   # run_onboard with the same TTY error, leaving phases 1/2 on disk anyway.
-  if [ "${ACCEPT_THIRD_PARTY_SOFTWARE:-}" = "1" ] && [ "${NON_INTERACTIVE:-}" != "1" ]; then
+  #
+  # #7008: `--station-deepseek` is the exception — it explicitly selects the
+  # interactive DGX Station express prompt, so accepting the notice must NOT
+  # imply non-interactive there. The two signals are orthogonal: one accepts a
+  # licence, the other opts into an interactive express flow. Inferring
+  # non-interactive from the notice would make the express flow reject its own
+  # required flag (validate_station_deepseek_override).
+  if [ "${ACCEPT_THIRD_PARTY_SOFTWARE:-}" = "1" ] && [ "${NON_INTERACTIVE:-}" != "1" ] \
+    && [ "${STATION_DEEPSEEK:-}" != "1" ]; then
     NON_INTERACTIVE=1
   fi
 
