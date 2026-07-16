@@ -389,6 +389,49 @@ ensure_station_express_host
     expect(output).toMatch(/rerun the same NemoClaw installer command/);
   });
 
+  it("rejects a resume-state symlink without loading its target", () => {
+    const { home, result, output } = runSourced(
+      INSTALLER_PAYLOAD,
+      `
+mkdir -p "$HOME/.nemoclaw"
+chmod 0700 "$HOME/.nemoclaw"
+printf 'deepseek-v4-flash\n' >"$HOME/resume-target"
+ln -s "$HOME/resume-target" "$HOME/.nemoclaw/station-express-resume"
+load_station_express_resume
+`,
+    );
+    const target = path.join(home, "resume-target");
+    const stateFile = path.join(home, ".nemoclaw", "station-express-resume");
+
+    expect(result.status, output).toBe(1);
+    expect(output).toMatch(/Refusing symbolic link in NemoClaw state path/);
+    expect(fs.readFileSync(target, "utf-8")).toBe("deepseek-v4-flash\n");
+    expect(fs.lstatSync(stateFile).isSymbolicLink()).toBe(true);
+  });
+
+  it("rejects a resume-state symlink without modifying its target", () => {
+    const { home, result, output } = runSourced(
+      INSTALLER_PAYLOAD,
+      `
+mkdir -p "$HOME/.nemoclaw"
+chmod 0700 "$HOME/.nemoclaw"
+printf 'preserve-this-target\n' >"$HOME/resume-target"
+ln -s "$HOME/resume-target" "$HOME/.nemoclaw/station-express-resume"
+_SELECTED_EXPRESS_PLATFORM='DGX Station'
+NEMOCLAW_VLLM_MODEL='nemotron-3-ultra-550b-a55b'
+run_station_host_preparation() { return 10; }
+ensure_station_express_host
+`,
+    );
+    const target = path.join(home, "resume-target");
+    const stateFile = path.join(home, ".nemoclaw", "station-express-resume");
+
+    expect(result.status, output).toBe(1);
+    expect(output).toMatch(/Refusing symbolic link in NemoClaw state path/);
+    expect(fs.readFileSync(target, "utf-8")).toBe("preserve-this-target\n");
+    expect(fs.lstatSync(stateFile).isSymbolicLink()).toBe(true);
+  });
+
   it("resumes the accepted Station recipe without another prompt", () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-station-resume-"));
     const stateDir = path.join(home, ".nemoclaw");
