@@ -83,6 +83,17 @@ export interface DiscoveredPolicyReadSite {
 
 const POLICY_GET_BUILDERS = new Set(["buildPolicyGetCommand", "buildPolicyGetFullCommand"]);
 
+interface PolicyBuilderBindings {
+  readonly identifiers: ReadonlySet<string>;
+  readonly namespaces: ReadonlySet<string>;
+}
+
+const POLICY_BUILDER_MODULE_SUFFIXES = [
+  "/src/lib/policy",
+  "/src/lib/policy/index",
+  "/src/lib/policy/commands",
+] as const;
+
 function calledName(expression: ts.LeftHandSideExpression): string | null {
   if (ts.isIdentifier(expression)) return expression.text;
   if (ts.isPropertyAccessExpression(expression)) return expression.name.text;
@@ -94,6 +105,102 @@ function calledName(expression: ts.LeftHandSideExpression): string | null {
     return expression.argumentExpression.text;
   }
   return null;
+}
+
+function isPolicyBuilderModule(fileName: string, moduleSpecifier: string): boolean {
+  if (!moduleSpecifier.startsWith(".")) return false;
+  const resolved = path
+    .resolve(path.dirname(fileName), moduleSpecifier)
+    .split(path.sep)
+    .join("/")
+    .replace(/\.[cm]?[jt]sx?$/u, "");
+  return POLICY_BUILDER_MODULE_SUFFIXES.some((suffix) => resolved.endsWith(suffix));
+}
+
+function requireModuleSpecifier(expression: ts.Expression | undefined): string | null {
+  if (
+    !expression ||
+    !ts.isCallExpression(expression) ||
+    !ts.isIdentifier(expression.expression) ||
+    expression.expression.text !== "require" ||
+    expression.arguments.length !== 1
+  ) {
+    return null;
+  }
+  const [moduleSpecifier] = expression.arguments;
+  return moduleSpecifier && ts.isStringLiteralLike(moduleSpecifier) ? moduleSpecifier.text : null;
+}
+
+function collectRequiredPolicyBindings(
+  declaration: ts.VariableDeclaration,
+  fileName: string,
+  identifiers: Set<string>,
+  namespaces: Set<string>,
+): void {
+  const moduleSpecifier = requireModuleSpecifier(declaration.initializer);
+  if (!moduleSpecifier || !isPolicyBuilderModule(fileName, moduleSpecifier)) return;
+  if (ts.isIdentifier(declaration.name)) {
+    namespaces.add(declaration.name.text);
+    return;
+  }
+  if (!ts.isObjectBindingPattern(declaration.name)) return;
+  for (const element of declaration.name.elements) {
+    if (element.dotDotDotToken || !ts.isIdentifier(element.name)) continue;
+    const importedName = element.propertyName ?? element.name;
+    if (
+      (ts.isIdentifier(importedName) || ts.isStringLiteralLike(importedName)) &&
+      POLICY_GET_BUILDERS.has(importedName.text)
+    ) {
+      identifiers.add(element.name.text);
+    }
+  }
+}
+
+function collectPolicyBuilderBindings(
+  sourceFile: ts.SourceFile,
+  fileName: string,
+): PolicyBuilderBindings {
+  const identifiers = new Set<string>();
+  const namespaces = new Set<string>();
+  for (const statement of sourceFile.statements) {
+    if (
+      ts.isImportDeclaration(statement) &&
+      ts.isStringLiteralLike(statement.moduleSpecifier) &&
+      statement.importClause &&
+      !statement.importClause.isTypeOnly &&
+      isPolicyBuilderModule(fileName, statement.moduleSpecifier.text)
+    ) {
+      const { namedBindings } = statement.importClause;
+      if (namedBindings && ts.isNamespaceImport(namedBindings)) {
+        namespaces.add(namedBindings.name.text);
+      } else if (namedBindings) {
+        for (const element of namedBindings.elements) {
+          if (element.isTypeOnly) continue;
+          const importedName = element.propertyName?.text ?? element.name.text;
+          if (POLICY_GET_BUILDERS.has(importedName)) identifiers.add(element.name.text);
+        }
+      }
+    } else if (ts.isVariableStatement(statement)) {
+      for (const declaration of statement.declarationList.declarations) {
+        collectRequiredPolicyBindings(declaration, fileName, identifiers, namespaces);
+      }
+    }
+  }
+  return { identifiers, namespaces };
+}
+
+function isPolicyBuilderCall(
+  expression: ts.LeftHandSideExpression,
+  bindings: PolicyBuilderBindings,
+): boolean {
+  if (ts.isIdentifier(expression)) return bindings.identifiers.has(expression.text);
+  const memberName = calledName(expression);
+  if (!memberName || !POLICY_GET_BUILDERS.has(memberName)) return false;
+  const target =
+    ts.isPropertyAccessExpression(expression) || ts.isElementAccessExpression(expression)
+      ? expression.expression
+      : null;
+  return !!target && ts.isIdentifier(target) && bindings.namespaces.has(target.text);
 }
 
 function literalText(expression: ts.Expression): string | null {
@@ -124,10 +231,11 @@ function isDirectPolicyRead(expression: ts.ArrayLiteralExpression): boolean {
 
 export function countPolicyReadCalls(source: string, fileName: string): number {
   const sourceFile = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true);
+  const builderBindings = collectPolicyBuilderBindings(sourceFile, fileName);
   let readCalls = 0;
 
   function visit(node: ts.Node): void {
-    if (ts.isCallExpression(node) && POLICY_GET_BUILDERS.has(calledName(node.expression) ?? "")) {
+    if (ts.isCallExpression(node) && isPolicyBuilderCall(node.expression, builderBindings)) {
       readCalls += 1;
     } else if (ts.isArrayLiteralExpression(node) && isDirectPolicyRead(node)) {
       readCalls += 1;

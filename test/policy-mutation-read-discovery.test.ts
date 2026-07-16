@@ -13,20 +13,43 @@ import {
   discoverPolicyReadSites,
 } from "../scripts/checks/openshell-policy-mutation-read.mts";
 
-describe("OpenShell policy mutation read discovery", () => {
-  it("counts executable policy reads without comment or string decoys", () => {
+describe("OpenShell policy mutation read discovery (#6921)", () => {
+  it("counts canonical builder bindings and direct argv reads", () => {
     const source = [
+      'import { buildPolicyGetCommand as buildBase } from "./policy/commands";',
+      'import * as policyBuilders from "./policy/index";',
+      'const { buildPolicyGetFullCommand: buildFull } = require("./policy");',
+      'const requiredPolicyBuilders = require("./policy");',
       "// buildPolicyGetCommand(commentedSandbox);",
       'const decoy = "buildPolicyGetFullCommand(stringSandbox)";',
+      "buildBase(sandboxName);",
       "policyBuilders.buildPolicyGetCommand(sandboxName);",
       'policyBuilders["buildPolicyGetFullCommand"](sandboxName);',
+      "buildFull(sandboxName);",
+      "requiredPolicyBuilders.buildPolicyGetCommand(sandboxName);",
       '["openshell", "policy", "get", "--base", sandboxName];',
       '["policy", "get", "--full", sandboxName];',
       'const arrayDecoy = `["policy", "get", "--base", sandboxName]`;',
       '["not-openshell", "policy", "get", "--base", sandboxName];',
     ].join("\n");
 
-    expect(countPolicyReadCalls(source, "fixture.ts")).toBe(4);
+    expect(countPolicyReadCalls(source, "/repo/src/lib/fixture.ts")).toBe(7);
+  });
+
+  it("ignores similarly named calls without canonical policy bindings", () => {
+    const source = [
+      'import { buildPolicyGetCommand as unrelated } from "./fixture-helpers";',
+      'import * as fixtureBuilders from "./fixture-helpers";',
+      'const requiredFixtureBuilders = require("./fixture-helpers");',
+      "const fixture = { buildPolicyGetCommand() {}, buildPolicyGetFullCommand() {} };",
+      "unrelated(sandboxName);",
+      "fixtureBuilders.buildPolicyGetCommand(sandboxName);",
+      "requiredFixtureBuilders.buildPolicyGetFullCommand(sandboxName);",
+      "fixture.buildPolicyGetCommand(sandboxName);",
+      'fixture["buildPolicyGetFullCommand"](sandboxName);',
+    ].join("\n");
+
+    expect(countPolicyReadCalls(source, "/repo/src/lib/fixture.ts")).toBe(0);
   });
 
   it("discovers builder and direct policy reads in new production files", () => {
@@ -35,7 +58,13 @@ describe("OpenShell policy mutation read discovery", () => {
     const diagnosticPath = path.join(repoRoot, "nemoclaw", "src", "new-policy-diagnostic.ts");
     fs.mkdirSync(path.dirname(mutationPath), { recursive: true });
     fs.mkdirSync(path.dirname(diagnosticPath), { recursive: true });
-    fs.writeFileSync(mutationPath, "runCapture(buildPolicyGetCommand(sandboxName));\n");
+    fs.writeFileSync(
+      mutationPath,
+      [
+        'import { buildPolicyGetCommand } from "./policy/commands";',
+        "runCapture(buildPolicyGetCommand(sandboxName));",
+      ].join("\n"),
+    );
     fs.writeFileSync(
       diagnosticPath,
       'runCmd(["openshell", "policy", "get", "--full", sandboxName]);\n',
