@@ -9,6 +9,7 @@ import {
   MCP_TOOL_DISCOVERY_LIMITS,
   MCP_TOOL_DISCOVERY_PROTOCOL,
   normalizeMcpToolPage,
+  parseMcpToolDiscoveryArguments,
   runMcpToolDiscoverySession,
   safeToolDiscoveryErrorDetail,
   ToolDiscoveryRuntimeError,
@@ -20,6 +21,20 @@ import {
 } from "./mcp-bridge-tool-discovery";
 
 describe("shared MCP tool discovery runtime", () => {
+  it("rejects every credential-bearing invocation before network access", () => {
+    expect(() =>
+      parseMcpToolDiscoveryArguments([
+        "--url",
+        "https://malicious.example.test/mcp",
+        "--authorization",
+        "arbitrary-format-secret-that-the-server-would-echo",
+      ]),
+    ).toThrow("invalid arguments");
+    expect(parseMcpToolDiscoveryArguments(["--url", "https://example.test/mcp"])).toEqual({
+      url: new URL("https://example.test/mcp"),
+    });
+  });
+
   it("enumerates every page and returns deterministic names only", async () => {
     const loadPage = vi
       .fn()

@@ -10,42 +10,18 @@ import {
   MCP_TOOL_DISCOVERY_PROTOCOL,
   type McpToolDiscoveryResult,
   normalizeMcpToolPage,
+  parseMcpToolDiscoveryArguments,
   runMcpToolDiscoverySession,
 } from "./tool-discovery-core.ts";
-
-interface RuntimeArguments {
-  url: URL;
-  authorization: string;
-}
-
-function parseArguments(args: string[]): RuntimeArguments {
-  if (args.length !== 4 || args[0] !== "--url" || args[2] !== "--authorization") {
-    throw new Error("invalid arguments");
-  }
-  const url = new URL(args[1]);
-  const authorization = args[3];
-  if (
-    url.protocol !== "https:" ||
-    url.username !== "" ||
-    url.password !== "" ||
-    url.hash !== "" ||
-    authorization.length === 0 ||
-    authorization.length > 4_096 ||
-    /[\u0000-\u001f\u007f-\u009f]/u.test(authorization)
-  ) {
-    throw new Error("invalid arguments");
-  }
-  return { url, authorization };
-}
 
 function writeResult(result: McpToolDiscoveryResult): void {
   process.stdout.write(`${JSON.stringify({ protocol: MCP_TOOL_DISCOVERY_PROTOCOL, ...result })}\n`);
 }
 
 async function main(): Promise<void> {
-  let runtimeArguments: RuntimeArguments;
+  let runtimeArguments: { url: URL };
   try {
-    runtimeArguments = parseArguments(process.argv.slice(2));
+    runtimeArguments = parseMcpToolDiscoveryArguments(process.argv.slice(2));
   } catch {
     writeResult({
       ok: false,
@@ -61,10 +37,7 @@ async function main(): Promise<void> {
   const boundedFetch = createBoundedMcpFetch(globalThis.fetch, deadlineSignal);
   const transport = new StreamableHTTPClientTransport(runtimeArguments.url, {
     fetch: boundedFetch,
-    requestInit: {
-      headers: { authorization: runtimeArguments.authorization },
-      redirect: "manual",
-    },
+    requestInit: { redirect: "manual" },
     reconnectionOptions: {
       maxReconnectionDelay: 1,
       initialReconnectionDelay: 1,

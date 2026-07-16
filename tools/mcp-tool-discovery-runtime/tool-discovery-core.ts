@@ -26,6 +26,15 @@ export interface McpToolPage {
   nextCursor?: string;
 }
 
+export function parseMcpToolDiscoveryArguments(args: string[]): { url: URL } {
+  if (args.length !== 2 || args[0] !== "--url") throw new Error("invalid arguments");
+  const url = new URL(args[1]);
+  if (url.protocol !== "https:" || url.username !== "" || url.password !== "" || url.hash !== "") {
+    throw new Error("invalid arguments");
+  }
+  return { url };
+}
+
 export type McpToolPageLoader = (cursor?: string) => Promise<McpToolPage>;
 
 export interface McpToolDiscoverySession {

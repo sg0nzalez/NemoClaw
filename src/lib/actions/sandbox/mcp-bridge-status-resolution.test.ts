@@ -380,7 +380,7 @@ describe("MCP status wire-level credential-resolution probe", { timeout: 15_000 
     expect(payload.errorLines.join("\n")).toContain("at most one of --probe / --no-probe");
   });
 
-  it("discovers tools for one named server without duplicating the implicit probe (#6901)", () => {
+  it("fails closed before authenticated discovery without duplicating the implicit probe (#6901)", () => {
     const home = createTempHome("nemoclaw-mcp-tools-single-");
     const { stdout } = runHarness(
       home,
@@ -403,13 +403,14 @@ describe("MCP status wire-level credential-resolution probe", { timeout: 15_000 
       discovered: boolean;
     };
     expect(payload.probed).toBe(false);
-    expect(payload.discovered).toBe(true);
+    expect(payload.discovered).toBe(false);
     expect(payload.status.provider.credentialResolution).toBeUndefined();
-    expect(payload.status.toolDiscovery).toEqual({
-      ok: true,
-      count: 2,
-      tools: ["alpha", "zeta"],
+    expect(payload.status.toolDiscovery).toMatchObject({
+      ok: false,
+      count: 0,
+      tools: [],
       truncated: false,
+      detail: expect.stringContaining("authenticated MCP discovery is disabled"),
     });
   });
 
@@ -432,7 +433,7 @@ describe("MCP status wire-level credential-resolution probe", { timeout: 15_000 
       hasResolution: true,
       hasDiscovery: true,
       probeCommands: 1,
-      discoveryCommands: 1,
+      discoveryCommands: 0,
     });
   });
 
@@ -458,9 +459,10 @@ describe("MCP status wire-level credential-resolution probe", { timeout: 15_000 
     };
     expect(payload.rejectedExitCode).toBe(2);
     expect(payload.rejection.join("\n")).toContain("one MCP server name");
-    expect(payload.rendered.some((line) => line.includes("tool discovery: successful"))).toBe(true);
-    expect(payload.rendered.some((line) => line.includes("tools discovered: 2"))).toBe(true);
-    expect(payload.rendered.some((line) => line.includes("- alpha"))).toBe(true);
+    expect(payload.rendered.some((line) => line.includes("tool discovery: FAILED"))).toBe(true);
+    expect(
+      payload.rendered.some((line) => line.includes("authenticated MCP discovery is disabled")),
+    ).toBe(true);
   });
 });
 

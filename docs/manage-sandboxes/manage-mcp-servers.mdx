@@ -33,43 +33,48 @@ The JSON value `support.mode: "bridge"` identifies the agent's config-adapter ca
 
 ## Discover Advertised Tools
 
-Pass `--tools` with one server name to make a live MCP connection and list the tool names that the server advertises:
+Pass `--tools` with one server name to request the server's advertised tool names:
 
 ```bash
 $$nemoclaw my-sandbox mcp status github --tools
 $$nemoclaw my-sandbox mcp status github --tools --json
 ```
 
-Tool discovery uses the same generated policy, provider attachment, credential placeholder, proxy environment, and adapter runtime ancestry as the selected agent.
-It is available consistently for managed OpenClaw, Hermes, and LangChain Deep Agents Code sandboxes.
+Every server added through the supported `mcp add` flow has a bearer credential, so tool discovery currently fails closed for those managed registrations before the discovery path sends a network request.
+An MCP server receives the resolved credential and controls every advertised name, so it could echo an arbitrary-format credential through a name; the sandbox runtime sees only the OpenShell placeholder and cannot reliably recognize or redact that value.
+The JSON result sets `toolDiscovery.ok` to `false` and explains that authenticated discovery is disabled.
 
-The result is a point-in-time list from the MCP server, not an attestation of the exact tools visible to the model in an active agent session.
+The shared discovery runtime accepts only credential-free HTTPS requests and never accepts or sends an authorization value.
+For an eligible credential-free registry entry, it uses the selected agent's generated policy, proxy environment, and adapter runtime ancestry consistently across OpenClaw, Hermes, and LangChain Deep Agents Code sandboxes.
+
+An eligible credential-free result is a point-in-time list from the MCP server, not an attestation of the exact tools visible to the model in an active agent session.
 Agent configuration, progressive disclosure, runtime filters, and session state can further limit model-visible tools.
 
-NemoClaw runs the standard MCP `initialize`, `notifications/initialized`, and paginated `tools/list` lifecycle.
+For an eligible credential-free request, NemoClaw runs the standard MCP `initialize`, `notifications/initialized`, and paginated `tools/list` lifecycle.
 It retains and returns tool names only, never prints the other tool-definition fields returned by `tools/list`, and never calls a tool.
 The client bounds total time, per-request time, cumulative response bytes, pages, tool count, cursor length, and tool-name length.
 It attempts to close the MCP session and transport on both success and failure.
-Cleanup errors do not replace the bounded, credential-safe discovery result.
+Cleanup errors do not replace the bounded discovery result.
 
 JSON output adds a per-server `toolDiscovery` object without changing the existing status fields:
 
 ```json
 {
   "toolDiscovery": {
-    "ok": true,
-    "count": 2,
-    "tools": ["get_issue", "search_code"],
-    "truncated": false
+    "ok": false,
+    "count": 0,
+    "tools": [],
+    "truncated": false,
+    "detail": "tool discovery skipped: authenticated MCP discovery is disabled because a remote server could echo credential-bearing input in advertised tool names"
   }
 }
 ```
 
-Discovery is opt-in because it sends network traffic to the configured MCP endpoint.
+Discovery is opt-in; a managed registration with a credential is rejected before the discovery path sends network traffic.
 `--tools` requires one server name and suppresses the named-server credential-resolution probe that would otherwise run by default.
 Pass `--probe --tools` when you intentionally want both live checks.
 
-An older sandbox image that does not contain the shared discovery client reports that a rebuild is required.
+For an eligible credential-free entry, an older sandbox image that does not contain the shared discovery client reports that a rebuild is required.
 Run `$$nemoclaw my-sandbox rebuild` and retry the command.
 
 A discovery failure sets `toolDiscovery.ok` to `false` and leaves the ordinary provider, policy, environment, and adapter status available.

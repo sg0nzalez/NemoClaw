@@ -6,9 +6,9 @@ import { shellQuote } from "../../core/shell-quote";
 
 /**
  * Variables sourced for sandbox proxy access that must not leak into a child
- * diagnostic process. The managed MCP credential remains an explicit
- * openshell:resolve placeholder in the command arguments and is resolved only
- * at the OpenShell egress boundary.
+ * diagnostic process. The discovery runtime does not accept a managed MCP
+ * credential or Authorization header; authenticated discovery fails closed
+ * before this command is built.
  */
 export const MCP_RUNTIME_SANITIZED_ENV_VARS = [
   "OPENCLAW_GATEWAY_URL",

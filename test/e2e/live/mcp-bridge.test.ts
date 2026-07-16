@@ -45,7 +45,7 @@ import {
   startFakeMcpHttpsServer,
   startPublicMcpHttpsTunnel,
 } from "./mcp-bridge-servers.ts";
-import { assertAdvertisedMcpTools } from "./mcp-bridge-tool-discovery.ts";
+import { assertAuthenticatedMcpToolDiscoveryBlocked } from "./mcp-bridge-tool-discovery.ts";
 import { assertRawOpenShellAllowedIpsRebindingDenied } from "./openshell-allowed-ips-rebinding.ts";
 
 const OPENCLAW_SANDBOX_NAME = process.env.NEMOCLAW_SANDBOX_NAME ?? "e2e-mcp-bridge";
@@ -405,7 +405,7 @@ async function addBridgeAndReadStatus(
     new RegExp(`^${options.sandboxName}-mcp-${SERVER_NAME}-[a-f0-9]{16}$`),
   );
 
-  await assertAdvertisedMcpTools(host, options.fakeMcp, {
+  await assertAuthenticatedMcpToolDiscoveryBlocked(host, options.fakeMcp, {
     sandboxName: options.sandboxName,
     artifactPrefix: options.artifactPrefix,
     hostSecret: HOST_SECRET,

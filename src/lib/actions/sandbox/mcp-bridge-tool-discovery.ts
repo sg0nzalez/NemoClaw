@@ -26,6 +26,8 @@ export const MCP_TOOL_DISCOVERY_RESULT_PROTOCOL = 1;
 export const MCP_TOOL_DISCOVERY_MAX_TOOLS = 500;
 export const MCP_TOOL_DISCOVERY_MAX_NAME_BYTES = 256;
 const MCP_TOOL_DISCOVERY_MAX_DETAIL_BYTES = 512;
+const AUTHENTICATED_TOOL_DISCOVERY_DISABLED_DETAIL =
+  "tool discovery skipped: authenticated MCP discovery is disabled because a remote server could echo credential-bearing input in advertised tool names";
 // The compact runtime result may JSON-escape every byte in 500 valid 256-byte
 // tool names. Keep that worst case inside the host boundary while retaining a
 // strict cap on sandbox output.
@@ -34,8 +36,6 @@ const UNSAFE_TEXT = /[\u0000-\u001f\u007f-\u009f]/u;
 
 export interface McpToolDiscoveryReadiness {
   policyGatewayPresent: boolean | null;
-  providerAttached: boolean | null;
-  providerCredentialReady: boolean;
 }
 
 export interface McpToolDiscoveryCommand {
@@ -56,15 +56,6 @@ export function toolDiscoveryReadinessSkipDetail(
   if (!readiness.policyGatewayPresent) {
     return "tool discovery skipped: the generated MCP policy does not match the effective gateway policy";
   }
-  if (readiness.providerAttached === null) {
-    return "tool discovery skipped: provider attachment could not be inspected";
-  }
-  if (!readiness.providerAttached) {
-    return "tool discovery skipped: the credential provider is not attached to the sandbox";
-  }
-  if (!readiness.providerCredentialReady) {
-    return "tool discovery skipped: the OpenShell provider does not match the recorded credential binding";
-  }
   return undefined;
 }
 
@@ -73,7 +64,11 @@ export function buildMcpToolDiscoveryCommand(
   adapter: AgentMcpAdapter,
 ): McpToolDiscoveryCommand | null {
   const authorization = authorizationValue(entry);
-  if (!authorization) return null;
+  // The real credential is injected by OpenShell after this process boundary,
+  // so the runtime cannot recognize an arbitrary credential echoed by a
+  // malicious endpoint. Do not let any authenticated response reach the
+  // names-only output channel until that information flow can be isolated.
+  if (authorization) return null;
   try {
     if (normalizeMcpServerUrl(entry.url) !== entry.url) return null;
   } catch {
@@ -94,8 +89,6 @@ export function buildMcpToolDiscoveryCommand(
     MCP_TOOL_DISCOVERY_RUNTIME_PATH,
     "--url",
     entry.url,
-    "--authorization",
-    authorization,
   ]);
   const body = [
     `if [ ! -r ${shellQuote(MCP_TOOL_DISCOVERY_RUNTIME_PATH)} ]; then`,
@@ -221,11 +214,12 @@ export function discoverMcpTools(
 ): NonNullable<McpBridgeStatus["toolDiscovery"]> {
   if (!adapter) return failure("tool discovery skipped: MCP adapter is not declared");
   if (entry.addState) return failure("tool discovery skipped: add transaction is incomplete");
+  if (authorizationValue(entry)) return failure(AUTHENTICATED_TOOL_DISCOVERY_DISABLED_DETAIL);
   const readinessSkipDetail = toolDiscoveryReadinessSkipDetail(readiness);
   if (readinessSkipDetail) return failure(readinessSkipDetail);
   const discoveryCommand = buildMcpToolDiscoveryCommand(entry, adapter);
   if (!discoveryCommand) {
-    return failure("tool discovery skipped: no credential binding or safe endpoint is available");
+    return failure("tool discovery skipped: no safe unauthenticated endpoint is available");
   }
   return classifyMcpToolDiscoveryResult(
     executeSandboxCommand(sandboxName, discoveryCommand.command),

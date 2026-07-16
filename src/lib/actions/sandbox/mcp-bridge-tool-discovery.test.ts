@@ -8,6 +8,7 @@ import type { McpBridgeEntry } from "../../state/registry";
 import {
   buildMcpToolDiscoveryCommand,
   classifyMcpToolDiscoveryResult,
+  discoverMcpTools,
   MCP_TOOL_DISCOVERY_RUNTIME_PATH,
   toolDiscoveryReadinessSkipDetail,
 } from "./mcp-bridge-tool-discovery";
@@ -18,6 +19,7 @@ const entry = {
   url: "https://api.githubcopilot.com/mcp/",
   env: ["GITHUB_TOKEN"],
 } as McpBridgeEntry;
+const unauthenticatedEntry = { ...entry, env: [] } as McpBridgeEntry;
 
 function framedResult(value: unknown) {
   return {
@@ -36,24 +38,37 @@ describe("MCP tool discovery host boundary (#6901)", () => {
     };
 
     for (const adapter of Object.keys(expectedAncestor) as AgentMcpAdapter[]) {
-      const built = buildMcpToolDiscoveryCommand(entry, adapter);
+      const built = buildMcpToolDiscoveryCommand(unauthenticatedEntry, adapter);
       expect(built).not.toBeNull();
       expect(built?.command).toContain(expectedAncestor[adapter]);
       expect(built?.command).toContain(MCP_TOOL_DISCOVERY_RUNTIME_PATH);
       expect(MCP_TOOL_DISCOVERY_RUNTIME_PATH).toMatch(/\.mjs$/u);
       expect(built?.command).not.toContain("--experimental-strip-types");
       expect(built?.command).not.toContain("node_modules");
-      expect(built?.command).toContain("openshell:resolve:env:GITHUB_TOKEN");
+      expect(built?.command).not.toContain("--authorization");
+      expect(built?.command).not.toContain("openshell:resolve:env:GITHUB_TOKEN");
       expect(built?.command).not.toContain("tools/call");
       expect(built?.command).toContain("rebuild the sandbox");
     }
   });
 
-  it("refuses command construction without a credential binding or canonical URL", () => {
-    expect(buildMcpToolDiscoveryCommand({ ...entry, env: [] }, "mcporter")).toBeNull();
+  it("refuses authenticated command construction or a non-canonical URL", () => {
+    expect(buildMcpToolDiscoveryCommand(entry, "mcporter")).toBeNull();
+    expect(
+      discoverMcpTools("must-not-connect", entry, "mcporter", {
+        policyGatewayPresent: true,
+      }),
+    ).toEqual({
+      ok: false,
+      count: 0,
+      tools: [],
+      truncated: false,
+      detail:
+        "tool discovery skipped: authenticated MCP discovery is disabled because a remote server could echo credential-bearing input in advertised tool names",
+    });
     expect(
       buildMcpToolDiscoveryCommand(
-        { ...entry, url: "https://api.githubcopilot.com:443/mcp/" },
+        { ...unauthenticatedEntry, url: "https://api.githubcopilot.com:443/mcp/" },
         "mcporter",
       ),
     ).toBeNull();
@@ -171,29 +186,16 @@ describe("MCP tool discovery host boundary (#6901)", () => {
     expect(
       toolDiscoveryReadinessSkipDetail({
         policyGatewayPresent: false,
-        providerAttached: true,
-        providerCredentialReady: true,
       }),
     ).toContain("policy does not match");
     expect(
       toolDiscoveryReadinessSkipDetail({
-        policyGatewayPresent: true,
-        providerAttached: false,
-        providerCredentialReady: true,
+        policyGatewayPresent: null,
       }),
-    ).toContain("provider is not attached");
+    ).toContain("could not be inspected");
     expect(
       toolDiscoveryReadinessSkipDetail({
         policyGatewayPresent: true,
-        providerAttached: true,
-        providerCredentialReady: false,
-      }),
-    ).toContain("does not match");
-    expect(
-      toolDiscoveryReadinessSkipDetail({
-        policyGatewayPresent: true,
-        providerAttached: true,
-        providerCredentialReady: true,
       }),
     ).toBeUndefined();
   });
