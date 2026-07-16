@@ -130,14 +130,35 @@ describe("exact staging image manifest consumer", () => {
   });
 
   it("requires an immutable self-link reconstructed from project and image name", () => {
+    const canonical = exactImageManifest().imageSelfLink;
     for (const imageSelfLink of [
       "https://www.googleapis.com/compute/v1/projects/brevdevprod/global/images/family/nemoclaw-brev-staging-cpu",
       "https://www.googleapis.com/compute/v1/projects/other/global/images/nemoclaw-brev-cpu-v0-1-0-20260716-a-staging-190-1",
+      `${canonical}?alt=json`,
+      `${canonical}#fragment`,
+      `${canonical}\n`,
     ]) {
       expectCode(
         () =>
           validateExactImageManifest(
             exactImageManifest({ imageSelfLink }),
+            exactImageManifestExpectations(),
+          ),
+        "IMAGE_IDENTITY_MISMATCH",
+      );
+    }
+  });
+
+  it("rejects noncanonical GCP project identifiers even when the self-link repeats them", () => {
+    for (const project of ["short", "-leading", "trailing-", "UPPERCASE", "evil?x=y#z\nproject"]) {
+      const imageName = exactImageManifest().imageName;
+      expectCode(
+        () =>
+          validateExactImageManifest(
+            exactImageManifest({
+              project,
+              imageSelfLink: `https://www.googleapis.com/compute/v1/projects/${project}/global/images/${imageName}`,
+            }),
             exactImageManifestExpectations(),
           ),
         "IMAGE_IDENTITY_MISMATCH",

@@ -102,9 +102,8 @@ const REQUIRED_FIELD_SET = new Set<string>(REQUIRED_FIELDS);
 const FULL_SHA_PATTERN = /^[0-9a-f]{40}$/u;
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const DECIMAL_ID_PATTERN = /^[1-9][0-9]*$/u;
+const GCP_PROJECT_ID_PATTERN = /^[a-z][a-z0-9-]{4,28}[a-z0-9]$/u;
 const IMAGE_NAME_PATTERN = /^[a-z](?:[-a-z0-9]{0,61}[a-z0-9])?$/u;
-const IMAGE_SELF_LINK_PATTERN =
-  /^https:\/\/www[.]googleapis[.]com\/compute\/v1\/projects\/[^/]+\/global\/images\/[^/]+$/u;
 const RFC3339_PATTERN =
   /^(\d{4})-(\d{2})-(\d{2})T([01]\d|2[0-3]):([0-5]\d):([0-5]\d)(?:[.](\d{1,9}))?(Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/u;
 
@@ -152,12 +151,6 @@ function requirePositiveInteger(record: Record<string, unknown>, field: string):
 function requirePattern(value: string, field: string, pattern: RegExp): void {
   if (!pattern.test(value)) {
     fail("ARTIFACT_MISSING_OR_INVALID", `${field} has an invalid format`);
-  }
-}
-
-function requireIdentityPattern(value: string, field: string, pattern: RegExp): void {
-  if (!pattern.test(value)) {
-    fail("IMAGE_IDENTITY_MISMATCH", `${field} has an invalid format`);
   }
 }
 
@@ -321,13 +314,36 @@ function buildManifest(record: Record<string, unknown>): ExactImageManifest {
   requirePattern(manifest.imageRepositorySha, "imageRepositorySha", FULL_SHA_PATTERN);
   requirePattern(manifest.workflowRunId, "workflowRunId", DECIMAL_ID_PATTERN);
   requirePattern(manifest.imageOriginWorkflowRunId, "imageOriginWorkflowRunId", DECIMAL_ID_PATTERN);
+  if (!GCP_PROJECT_ID_PATTERN.test(manifest.project)) {
+    fail("IMAGE_IDENTITY_MISMATCH", "project must be a canonical GCP project ID");
+  }
   requirePattern(manifest.imageName, "imageName", IMAGE_NAME_PATTERN);
   requirePattern(manifest.imageId, "imageId", DECIMAL_ID_PATTERN);
-  requireIdentityPattern(manifest.imageSelfLink, "imageSelfLink", IMAGE_SELF_LINK_PATTERN);
-  if (manifest.project.length === 0) {
-    fail("ARTIFACT_MISSING_OR_INVALID", "project must not be empty");
-  }
   return manifest;
+}
+
+function validateImageSelfLink(manifest: ExactImageManifest): void {
+  const expectedPath = `/compute/v1/projects/${manifest.project}/global/images/${manifest.imageName}`;
+  const expectedSelfLink = `https://www.googleapis.com${expectedPath}`;
+  let parsed: URL;
+  try {
+    parsed = new URL(manifest.imageSelfLink);
+  } catch {
+    fail("IMAGE_IDENTITY_MISMATCH", "imageSelfLink must be an absolute URL");
+  }
+  if (
+    parsed.protocol !== "https:" ||
+    parsed.hostname !== "www.googleapis.com" ||
+    parsed.port !== "" ||
+    parsed.username !== "" ||
+    parsed.password !== "" ||
+    parsed.search !== "" ||
+    parsed.hash !== "" ||
+    parsed.pathname !== expectedPath ||
+    manifest.imageSelfLink !== expectedSelfLink
+  ) {
+    fail("IMAGE_IDENTITY_MISMATCH", "imageSelfLink does not exactly identify project/imageName");
+  }
 }
 
 export function parseExactImageManifestJson(contents: string): unknown {
@@ -347,10 +363,7 @@ export function validateExactImageManifest(
   validateExactFields(record);
   const manifest = buildManifest(record);
 
-  const expectedSelfLink = `https://www.googleapis.com/compute/v1/projects/${manifest.project}/global/images/${manifest.imageName}`;
-  if (manifest.imageSelfLink !== expectedSelfLink) {
-    fail("IMAGE_IDENTITY_MISMATCH", "imageSelfLink does not exactly match project and imageName");
-  }
+  validateImageSelfLink(manifest);
   if (
     manifest.result === "built" &&
     (manifest.imageOriginWorkflowRunId !== manifest.workflowRunId ||

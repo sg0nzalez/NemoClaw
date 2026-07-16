@@ -37,6 +37,7 @@ const FULL_SHA_PATTERN = /^[0-9a-f]{40}$/u;
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const DECIMAL_ID_PATTERN = /^[1-9][0-9]*$/u;
 const ARTIFACT_DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/u;
+const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
 const GITHUB_LOGIN_PATTERN = /^(?!-)[A-Za-z0-9-]{1,39}(?<!-)$/u;
 const MAX_REASON_BYTES = 500;
 const MAX_STATE_BYTES = 128 * 1024;
@@ -233,6 +234,61 @@ function record(value: unknown, label: string): Record<string, unknown> {
     fail("PROVENANCE_MISMATCH", `${label} must be an object`);
   }
   return value as Record<string, unknown>;
+}
+
+function requireExactRecordFields(
+  value: Record<string, unknown>,
+  fields: readonly string[],
+  label: string,
+): void {
+  const allowed = new Set(fields);
+  for (const field of fields) {
+    if (!Object.hasOwn(value, field)) {
+      fail("PROVENANCE_MISMATCH", `${label} is missing ${field}`);
+    }
+  }
+  const unexpected = Object.keys(value)
+    .filter((field) => !allowed.has(field))
+    .sort();
+  if (unexpected.length > 0) {
+    fail("PROVENANCE_MISMATCH", `${label} contains unexpected field ${unexpected[0]}`);
+  }
+}
+
+function persistedString(
+  value: Record<string, unknown>,
+  field: string,
+  label: string,
+  pattern?: RegExp,
+): string {
+  const result = value[field];
+  if (typeof result !== "string" || (pattern !== undefined && !pattern.test(result))) {
+    fail("PROVENANCE_MISMATCH", `${label} has an invalid format`);
+  }
+  return result;
+}
+
+function persistedTimestamp(value: unknown, label: string): number {
+  if (typeof value !== "string") {
+    fail("PROVENANCE_MISMATCH", `${label} must be a timestamp string`);
+  }
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed) || new Date(parsed).toISOString() !== value) {
+    fail("PROVENANCE_MISMATCH", `${label} must be a canonical UTC timestamp`);
+  }
+  return parsed;
+}
+
+function validatePersistedReason(value: unknown, label: string): void {
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    value !== value.trim() ||
+    Buffer.byteLength(value, "utf8") > MAX_REASON_BYTES ||
+    /[\u0000-\u001f\u007f]/u.test(value)
+  ) {
+    fail("PROVENANCE_MISMATCH", `${label} is invalid`);
+  }
 }
 
 function safePositiveId(value: unknown, label: string): string {
@@ -515,30 +571,22 @@ export function validateQualificationWorkflowRun(
 
 function validateCancellationWorkflowRun(
   value: unknown,
-  runId: string,
+  state: ExactImageQualificationState,
 ): { status: string; conclusion: string | null } {
   const run = record(value, "producer cancellation workflow run");
-  if (safePositiveId(run.id, "producer cancellation run ID") !== runId) {
-    fail("PROVENANCE_MISMATCH", "producer cancellation run ID changed");
-  }
-  const details = canonicalDispatchDetails(runId);
-  requireExactString(run.url, details.runUrl, "producer cancellation run URL");
-  requireExactString(run.html_url, details.htmlUrl, "producer cancellation HTML URL");
-  const allowedStatuses = new Set([
-    "queued",
-    "in_progress",
-    "completed",
-    "waiting",
-    "requested",
-    "pending",
-  ]);
-  if (typeof run.status !== "string" || !allowedStatuses.has(run.status)) {
-    fail("PROVENANCE_MISMATCH", "producer cancellation run has an unsupported status");
-  }
-  if (run.conclusion !== null && typeof run.conclusion !== "string") {
-    fail("PROVENANCE_MISMATCH", "producer cancellation conclusion must be a string or null");
-  }
-  return { status: run.status, conclusion: run.conclusion as string | null };
+  const observedHeadSha = persistedString(
+    run,
+    "head_sha",
+    "producer cancellation head SHA",
+    FULL_SHA_PATTERN,
+  );
+  const validated = validateQualificationWorkflowRun(value, {
+    ...expectedRun(state),
+    // A run whose producer ref moved after dispatch remains cleanup-owned but
+    // can never become qualification evidence; all other identity must bind.
+    producerSha: observedHeadSha,
+  });
+  return { status: validated.status, conclusion: validated.conclusion };
 }
 
 function statePath(workDir: string): string {
@@ -564,43 +612,130 @@ function readDispatchIntent(workDir: string): ExactImageDispatchIntent | null {
   let contents: string | null;
   try {
     contents = privateFileRuntime.readPrivateRegularFile(intentPath(workDir), {
+      allowMissing: true,
       maxBytes: MAX_STATE_BYTES,
     });
   } catch {
     fail("PROVENANCE_MISMATCH", "dispatch intent could not be read safely");
   }
   if (contents === null) return null;
+  let parsed: unknown;
   try {
-    const intent = JSON.parse(contents) as ExactImageDispatchIntent;
-    if (
-      intent.schemaVersion !== 1 ||
-      intent.kind !== "nemoclaw-exact-image-dispatch-intent" ||
-      !GITHUB_LOGIN_PATTERN.test(intent.request?.actor ?? "") ||
-      !FULL_SHA_PATTERN.test(intent.request?.candidateSha ?? "") ||
-      !UUID_V4_PATTERN.test(intent.request?.correlationId ?? "") ||
-      !FULL_SHA_PATTERN.test(intent.request?.workflowSha ?? "") ||
-      intent.request?.candidateSha !== intent.request?.workflowSha ||
-      intent.request?.requesterRunAttempt !== 1 ||
-      !DECIMAL_ID_PATTERN.test(intent.request?.requesterRunId ?? "") ||
-      typeof intent.request?.reason !== "string" ||
-      intent.request.reason.length === 0 ||
-      intent.request.reason !== intent.request.reason.trim() ||
-      Buffer.byteLength(intent.request.reason, "utf8") > MAX_REASON_BYTES ||
-      /[\u0000-\u001f\u007f]/u.test(intent.request.reason) ||
-      intent.producer?.repository !== PRODUCER_REPOSITORY ||
-      !FULL_SHA_PATTERN.test(intent.producer?.repositorySha ?? "") ||
-      intent.producer?.ref !== PRODUCER_REF ||
-      intent.producer?.workflowPath !== PRODUCER_WORKFLOW_PATH ||
-      !DECIMAL_ID_PATTERN.test(intent.producer?.workflowId ?? "") ||
-      !Number.isFinite(Date.parse(intent.requestStartedAt))
-    ) {
-      fail("PROVENANCE_MISMATCH", "dispatch intent is invalid");
-    }
-    return intent;
-  } catch (error) {
-    if (error instanceof ExactImageQualificationError) throw error;
+    parsed = JSON.parse(contents) as unknown;
+  } catch {
     fail("PROVENANCE_MISMATCH", "dispatch intent is not valid JSON");
   }
+  const intent = record(parsed, "dispatch intent");
+  requireExactRecordFields(
+    intent,
+    ["schemaVersion", "kind", "requestStartedAt", "request", "producer"],
+    "dispatch intent",
+  );
+  if (intent.schemaVersion !== 1 || intent.kind !== "nemoclaw-exact-image-dispatch-intent") {
+    fail("PROVENANCE_MISMATCH", "dispatch intent schema identity is invalid");
+  }
+  persistedTimestamp(intent.requestStartedAt, "dispatch intent requestStartedAt");
+
+  const request = record(intent.request, "dispatch intent request");
+  requireExactRecordFields(
+    request,
+    [
+      "actor",
+      "candidateSha",
+      "correlationId",
+      "reason",
+      "requesterRunAttempt",
+      "requesterRunId",
+      "workflowSha",
+    ],
+    "dispatch intent request",
+  );
+  persistedString(request, "actor", "dispatch intent actor", GITHUB_LOGIN_PATTERN);
+  const candidateSha = persistedString(
+    request,
+    "candidateSha",
+    "dispatch intent candidate SHA",
+    FULL_SHA_PATTERN,
+  );
+  persistedString(request, "correlationId", "dispatch intent correlation ID", UUID_V4_PATTERN);
+  validatePersistedReason(request.reason, "dispatch intent reason");
+  if (request.requesterRunAttempt !== 1) {
+    fail("PROVENANCE_MISMATCH", "dispatch intent requester run attempt must equal 1");
+  }
+  persistedString(
+    request,
+    "requesterRunId",
+    "dispatch intent requester run ID",
+    DECIMAL_ID_PATTERN,
+  );
+  const workflowSha = persistedString(
+    request,
+    "workflowSha",
+    "dispatch intent workflow SHA",
+    FULL_SHA_PATTERN,
+  );
+  if (candidateSha !== workflowSha) {
+    fail("PROVENANCE_MISMATCH", "dispatch intent candidate and workflow SHAs differ");
+  }
+
+  const producer = record(intent.producer, "dispatch intent producer");
+  requireExactRecordFields(
+    producer,
+    ["repository", "repositorySha", "ref", "workflowId", "workflowPath"],
+    "dispatch intent producer",
+  );
+  requireExactString(producer.repository, PRODUCER_REPOSITORY, "dispatch intent repository");
+  persistedString(producer, "repositorySha", "dispatch intent producer SHA", FULL_SHA_PATTERN);
+  requireExactString(producer.ref, PRODUCER_REF, "dispatch intent producer ref");
+  persistedString(producer, "workflowId", "dispatch intent workflow ID", DECIMAL_ID_PATTERN);
+  requireExactString(
+    producer.workflowPath,
+    PRODUCER_WORKFLOW_PATH,
+    "dispatch intent workflow path",
+  );
+  return intent as unknown as ExactImageDispatchIntent;
+}
+
+function requiredDispatchIntent(workDir: string): ExactImageDispatchIntent {
+  const intent = readDispatchIntent(workDir);
+  if (intent === null) fail("PROVENANCE_MISMATCH", "dispatch intent is missing");
+  return intent;
+}
+
+function validateStateIntentBinding(
+  state: ExactImageQualificationState,
+  intent: ExactImageDispatchIntent,
+): void {
+  const comparisons: Array<[unknown, unknown, string]> = [
+    [state.dispatchedAt, intent.requestStartedAt, "dispatch timestamp"],
+    [state.request.actor, intent.request.actor, "actor"],
+    [state.request.candidateSha, intent.request.candidateSha, "candidate SHA"],
+    [state.request.correlationId, intent.request.correlationId, "correlation ID"],
+    [state.request.reason, intent.request.reason, "reason"],
+    [
+      state.request.requesterRunAttempt,
+      intent.request.requesterRunAttempt,
+      "requester run attempt",
+    ],
+    [state.request.requesterRunId, intent.request.requesterRunId, "requester run ID"],
+    [state.request.workflowSha, intent.request.workflowSha, "workflow SHA"],
+    [state.producer.repository, intent.producer.repository, "producer repository"],
+    [state.producer.repositorySha, intent.producer.repositorySha, "producer SHA"],
+    [state.producer.ref, intent.producer.ref, "producer ref"],
+    [state.producer.workflowId, intent.producer.workflowId, "producer workflow ID"],
+    [state.producer.workflowPath, intent.producer.workflowPath, "producer workflow path"],
+  ];
+  for (const [actual, expected, label] of comparisons) {
+    if (actual !== expected) {
+      fail("PROVENANCE_MISMATCH", `controller state ${label} does not match dispatch intent`);
+    }
+  }
+}
+
+function readBoundExactImageQualificationState(workDir: string): ExactImageQualificationState {
+  const state = readExactImageQualificationState(workDir);
+  validateStateIntentBinding(state, requiredDispatchIntent(workDir));
+  return state;
 }
 
 function writeDispatchReconciliation(
@@ -650,9 +785,260 @@ function writeAtomicPrivateRegularFile(file: string, contents: string): void {
   }
 }
 
+type PersistedQualificationStatus = ExactImageQualificationState["status"];
+
+function validatePersistedRequest(value: unknown): void {
+  const request = record(value, "controller state request");
+  requireExactRecordFields(
+    request,
+    [
+      "actor",
+      "candidateSha",
+      "correlationId",
+      "reason",
+      "requesterRunAttempt",
+      "requesterRunId",
+      "workflowSha",
+    ],
+    "controller state request",
+  );
+  persistedString(request, "actor", "controller state actor", GITHUB_LOGIN_PATTERN);
+  const candidateSha = persistedString(
+    request,
+    "candidateSha",
+    "controller state candidate SHA",
+    FULL_SHA_PATTERN,
+  );
+  persistedString(request, "correlationId", "controller state correlation ID", UUID_V4_PATTERN);
+  validatePersistedReason(request.reason, "controller state reason");
+  if (request.requesterRunAttempt !== 1) {
+    fail("PROVENANCE_MISMATCH", "controller state requester run attempt must equal 1");
+  }
+  persistedString(
+    request,
+    "requesterRunId",
+    "controller state requester run ID",
+    DECIMAL_ID_PATTERN,
+  );
+  const workflowSha = persistedString(
+    request,
+    "workflowSha",
+    "controller state workflow SHA",
+    FULL_SHA_PATTERN,
+  );
+  if (candidateSha !== workflowSha) {
+    fail("PROVENANCE_MISMATCH", "controller state candidate and workflow SHAs differ");
+  }
+}
+
+function validatePersistedProducer(
+  value: unknown,
+  status: PersistedQualificationStatus,
+  dispatchedAt: number,
+): { completedAt: number | null; runId: string } {
+  const producer = record(value, "controller state producer");
+  const completed = status !== "dispatched";
+  requireExactRecordFields(
+    producer,
+    [
+      "repository",
+      "repositorySha",
+      "ref",
+      "workflowPath",
+      "runId",
+      "runAttempt",
+      "workflowId",
+      "runUrl",
+      "htmlUrl",
+      ...(completed ? ["completedAt"] : []),
+    ],
+    "controller state producer",
+  );
+  requireExactString(producer.repository, PRODUCER_REPOSITORY, "controller state repository");
+  persistedString(producer, "repositorySha", "controller state producer SHA", FULL_SHA_PATTERN);
+  requireExactString(producer.ref, PRODUCER_REF, "controller state producer ref");
+  requireExactString(
+    producer.workflowPath,
+    PRODUCER_WORKFLOW_PATH,
+    "controller state workflow path",
+  );
+  const runId = persistedString(
+    producer,
+    "runId",
+    "controller state producer run ID",
+    DECIMAL_ID_PATTERN,
+  );
+  if (producer.runAttempt !== 1) {
+    fail("PROVENANCE_MISMATCH", "controller state producer run attempt must equal 1");
+  }
+  persistedString(
+    producer,
+    "workflowId",
+    "controller state producer workflow ID",
+    DECIMAL_ID_PATTERN,
+  );
+  const expectedUrls = canonicalDispatchDetails(runId);
+  requireExactString(producer.runUrl, expectedUrls.runUrl, "controller state producer run URL");
+  requireExactString(producer.htmlUrl, expectedUrls.htmlUrl, "controller state producer HTML URL");
+  const completedAt = completed
+    ? persistedTimestamp(producer.completedAt, "controller state completedAt")
+    : null;
+  if (completedAt !== null && completedAt < dispatchedAt) {
+    fail("PROVENANCE_MISMATCH", "controller state completedAt precedes dispatchedAt");
+  }
+  if (completedAt !== null && completedAt > dispatchedAt + QUALIFICATION_TIMEOUT_MS) {
+    fail("PROVENANCE_MISMATCH", "controller state completedAt exceeds qualification deadline");
+  }
+  return { completedAt, runId };
+}
+
+function validatePersistedArtifact(value: unknown, runId: string): string {
+  const artifact = record(value, "controller state artifact");
+  requireExactRecordFields(
+    artifact,
+    [
+      "id",
+      "name",
+      "digest",
+      "sizeInBytes",
+      "apiUrl",
+      "archiveDownloadUrl",
+      "archiveSha256",
+      "manifestSha256",
+    ],
+    "controller state artifact",
+  );
+  const id = persistedString(artifact, "id", "controller state artifact ID", DECIMAL_ID_PATTERN);
+  requireExactString(
+    artifact.name,
+    `nemoclaw-image-handoff-v1-${runId}-1`,
+    "controller state artifact name",
+  );
+  const digest = persistedString(
+    artifact,
+    "digest",
+    "controller state artifact digest",
+    ARTIFACT_DIGEST_PATTERN,
+  );
+  if (
+    !Number.isSafeInteger(artifact.sizeInBytes) ||
+    (artifact.sizeInBytes as number) < 1 ||
+    (artifact.sizeInBytes as number) > MAX_ARCHIVE_BYTES
+  ) {
+    fail("PROVENANCE_MISMATCH", "controller state artifact size is invalid");
+  }
+  const apiUrl = `https://api.github.com/repos/${PRODUCER_REPOSITORY}/actions/artifacts/${id}`;
+  requireExactString(artifact.apiUrl, apiUrl, "controller state artifact API URL");
+  requireExactString(
+    artifact.archiveDownloadUrl,
+    `${apiUrl}/zip`,
+    "controller state artifact archive URL",
+  );
+  const archiveSha256 = persistedString(
+    artifact,
+    "archiveSha256",
+    "controller state archive hash",
+    SHA256_PATTERN,
+  );
+  if (digest !== `sha256:${archiveSha256}`) {
+    fail("PROVENANCE_MISMATCH", "controller state artifact digest does not match archive hash");
+  }
+  return persistedString(
+    artifact,
+    "manifestSha256",
+    "controller state manifest hash",
+    SHA256_PATTERN,
+  );
+}
+
+function validatePersistedValidation(
+  value: unknown,
+  manifestSha256: string,
+  completedAt: number,
+  dispatchedAt: number,
+): void {
+  const validation = record(value, "controller state validation");
+  requireExactRecordFields(
+    validation,
+    ["acceptedAt", "manifestSha256", "normalizedManifestSha256"],
+    "controller state validation",
+  );
+  const acceptedAt = persistedTimestamp(validation.acceptedAt, "controller state acceptedAt");
+  if (acceptedAt < completedAt) {
+    fail("PROVENANCE_MISMATCH", "controller state acceptedAt precedes completedAt");
+  }
+  if (acceptedAt > dispatchedAt + QUALIFICATION_TIMEOUT_MS) {
+    fail("PROVENANCE_MISMATCH", "controller state acceptedAt exceeds qualification deadline");
+  }
+  requireExactString(
+    validation.manifestSha256,
+    manifestSha256,
+    "controller state accepted manifest hash",
+  );
+  persistedString(
+    validation,
+    "normalizedManifestSha256",
+    "controller state normalized manifest hash",
+    SHA256_PATTERN,
+  );
+}
+
+function validatePersistedQualificationState(value: unknown): ExactImageQualificationState {
+  const state = record(value, "controller state");
+  const statuses = new Set<PersistedQualificationStatus>([
+    "dispatched",
+    "completed",
+    "downloaded",
+    "validated",
+  ]);
+  if (
+    typeof state.status !== "string" ||
+    !statuses.has(state.status as PersistedQualificationStatus)
+  ) {
+    fail("PROVENANCE_MISMATCH", "controller state status is invalid");
+  }
+  const status = state.status as PersistedQualificationStatus;
+  const hasArtifact = status === "downloaded" || status === "validated";
+  requireExactRecordFields(
+    state,
+    [
+      "schemaVersion",
+      "status",
+      "dispatchedAt",
+      "request",
+      "producer",
+      ...(hasArtifact ? ["artifact"] : []),
+      ...(status === "validated" ? ["validation"] : []),
+    ],
+    "controller state",
+  );
+  if (state.schemaVersion !== 1) {
+    fail("PROVENANCE_MISMATCH", "controller state schema version must equal 1");
+  }
+  const dispatchedAt = persistedTimestamp(state.dispatchedAt, "controller state dispatchedAt");
+  validatePersistedRequest(state.request);
+  const producer = validatePersistedProducer(state.producer, status, dispatchedAt);
+  const manifestSha256 = hasArtifact
+    ? validatePersistedArtifact(state.artifact, producer.runId)
+    : null;
+  if (status === "validated") {
+    if (manifestSha256 === null || producer.completedAt === null) {
+      fail("PROVENANCE_MISMATCH", "validated controller state is incomplete");
+    }
+    validatePersistedValidation(
+      state.validation,
+      manifestSha256,
+      producer.completedAt,
+      dispatchedAt,
+    );
+  }
+  return state as unknown as ExactImageQualificationState;
+}
+
 function writeState(workDir: string, state: ExactImageQualificationState): void {
   try {
-    writeAtomicPrivateRegularFile(statePath(workDir), `${JSON.stringify(state, null, 2)}\n`);
+    const validated = validatePersistedQualificationState(state);
+    writeAtomicPrivateRegularFile(statePath(workDir), `${JSON.stringify(validated, null, 2)}\n`);
   } catch {
     fail("OUTPUT_WRITE_FAILED", "controller state could not be written safely");
   }
@@ -682,11 +1068,13 @@ export function readExactImageQualificationState(workDir: string): ExactImageQua
     fail("PROVENANCE_MISMATCH", "controller state could not be read safely");
   }
   if (contents === null) fail("PROVENANCE_MISMATCH", "controller state is missing");
+  let parsed: unknown;
   try {
-    return JSON.parse(contents) as ExactImageQualificationState;
+    parsed = JSON.parse(contents) as unknown;
   } catch {
     fail("PROVENANCE_MISMATCH", "controller state is not valid JSON");
   }
+  return validatePersistedQualificationState(parsed);
 }
 
 function canonicalDispatchDetails(runId: string): DispatchDetails {
@@ -826,7 +1214,7 @@ async function cancelAndVerifyRecoveredRun(
         token,
         { apiVersion: GITHUB_API_VERSION, expectedStatus: 200 },
       ),
-      state.producer.runId,
+      state,
     );
     if (run.status === "completed") return true;
     if (cancellationError !== undefined) throw cancellationError;
@@ -1099,7 +1487,10 @@ export async function waitForExactImageQualification(
   const now = dependencies.now ?? Date.now;
   const pause = dependencies.sleep ?? sleep;
   const configured = limits(dependencies);
-  const state = readExactImageQualificationState(options.workDir);
+  const state = readBoundExactImageQualificationState(options.workDir);
+  if (state.status !== "dispatched") {
+    fail("PROVENANCE_MISMATCH", "producer run may only be awaited from dispatched state");
+  }
   const startedAt = Date.parse(state.dispatchedAt);
   const hardDeadline = qualificationDeadline(state, configured.qualificationTimeoutMs);
   const deadline = acceptanceDeadline(state, dependencies);
@@ -1328,7 +1719,7 @@ export async function downloadExactImageManifest(
   options: { workDir: string; producerToken: string },
   dependencies: QualificationDependencies = {},
 ): Promise<QualificationArtifact> {
-  const state = readExactImageQualificationState(options.workDir);
+  const state = readBoundExactImageQualificationState(options.workDir);
   if (state.status !== "completed") {
     fail("PROVENANCE_MISMATCH", "producer run must complete before artifact download");
   }
@@ -1446,7 +1837,7 @@ export function finalizeExactImageQualification(
   workDir: string,
   dependencies: QualificationDependencies = {},
 ): ExactImageQualificationState {
-  const state = readExactImageQualificationState(workDir);
+  const state = readBoundExactImageQualificationState(workDir);
   if (state.status !== "downloaded" || !state.artifact) {
     fail("PROVENANCE_MISMATCH", "artifact must be digest-verified before finalization");
   }
@@ -1478,6 +1869,10 @@ export function finalizeExactImageQualification(
     artifact: state.artifact,
     validation: state.validation,
   };
+  // The state is the durable commit point for acceptance. Validate and persist
+  // that transition before publishing an accepted receipt so a rejected state
+  // can never leave accepted evidence behind.
+  writeState(workDir, state);
   try {
     privateFileRuntime.writePrivateRegularFile(
       path.join(workDir, EVIDENCE_FILE),
@@ -1486,7 +1881,6 @@ export function finalizeExactImageQualification(
   } catch {
     fail("OUTPUT_WRITE_FAILED", "qualification evidence could not be written safely");
   }
-  writeState(workDir, state);
   return state;
 }
 
@@ -1502,19 +1896,36 @@ export async function cancelActiveExactImageQualification(
       if (fs.existsSync(statePath(options.workDir))) throw error;
       return false;
     }
-    const intent = readDispatchIntent(options.workDir);
-    if (intent === null) return false;
+    // State crosses independent workflow steps and is untrusted/damaged-disk input on every read.
+    // Atomic replacement prevents ordinary partial writes, while this permanent defense-in-depth
+    // path preserves interruption/filesystem-corruption evidence and reconciles only from the
+    // separately validated durable intent.
     preserveUnreadableState(options.workDir);
+    const intent = requiredDispatchIntent(options.workDir);
     return reconcileAmbiguousDispatch({ ...options, intent, mode: "cleanup" }, dependencies);
   }
   const now = dependencies.now ?? Date.now;
   const configured = limits(dependencies);
-  if (state.status !== "dispatched") return false;
+  const intent = requiredDispatchIntent(options.workDir);
+  try {
+    validateStateIntentBinding(state, intent);
+  } catch {
+    preserveUnreadableState(options.workDir);
+    return reconcileAmbiguousDispatch({ ...options, intent, mode: "cleanup" }, dependencies);
+  }
   const deadline = now() + configured.cleanupTimeoutMs;
   const api = boundedApiClient(dependencies.api ?? githubApi, dependencies, deadline);
+  const initial = validateCancellationWorkflowRun(
+    await api<unknown>(
+      `repos/${PRODUCER_REPOSITORY}/actions/runs/${state.producer.runId}`,
+      options.producerToken,
+      { apiVersion: GITHUB_API_VERSION, expectedStatus: 200 },
+    ),
+    state,
+  );
   return cancelAndVerifyRecoveredRun(
     state,
-    { status: "unknown" },
+    initial,
     options.producerToken,
     api,
     dependencies.sleep ?? sleep,

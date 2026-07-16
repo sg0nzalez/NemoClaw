@@ -175,6 +175,32 @@ describe("exact producer dispatch binding", () => {
     }
   });
 
+  it("keeps the previous state intact when atomic replacement is interrupted", async () => {
+    const workDir = tempDirectory();
+    const previousState = "previous state evidence\n";
+    fs.writeFileSync(path.join(workDir, STATE_FILE), previousState, { mode: 0o600 });
+    vi.spyOn(fs, "renameSync").mockImplementation(() => {
+      throw new Error("simulated interruption before atomic replacement");
+    });
+    try {
+      await expect(
+        startExactImageQualification(
+          {
+            request: REQUEST,
+            coreToken: "core-token",
+            producerToken: "producer-token",
+            workDir,
+          },
+          dependencies(createApi()),
+        ),
+      ).rejects.toMatchObject({ code: "OUTPUT_WRITE_FAILED" });
+      expect(fs.readFileSync(path.join(workDir, STATE_FILE), "utf8")).toBe(previousState);
+      expect(fs.readdirSync(workDir).filter((name) => name.endsWith(".tmp"))).toEqual([]);
+    } finally {
+      fs.rmSync(workDir, { recursive: true, force: true });
+    }
+  });
+
   it("requires HTTP 200 and sends the explicit API-version header", async () => {
     const fetchMock = vi.fn(
       async (_input: string | URL | Request, _init?: RequestInit) =>
@@ -280,7 +306,7 @@ describe("exact producer dispatch binding", () => {
     }
   });
 
-  it("finds the current correlation in a bounded creation window despite history and producer drift", async () => {
+  it("finds and cleans the exact correlation after producer drift without qualifying it", async () => {
     const workDir = tempDirectory();
     const movedSha = "c".repeat(40);
     const base = createApi();
@@ -337,9 +363,9 @@ describe("exact producer dispatch binding", () => {
       expect(observedHeadShaFilter).toBe(false);
       expect(historicalRuns).toHaveLength(101);
       expect(observedScopedRuns).toEqual([movedRun]);
-      expect(readExactImageQualificationState(workDir).producer).toMatchObject({
-        runId: RUN_ID,
-        repositorySha: movedSha,
+      expect(readExactImageQualificationState(workDir)).toMatchObject({
+        status: "dispatched",
+        producer: { runId: RUN_ID, repositorySha: movedSha },
       });
       expect(
         JSON.parse(fs.readFileSync(path.join(workDir, DISPATCH_RECONCILIATION_FILE), "utf8")),
@@ -348,12 +374,13 @@ describe("exact producer dispatch binding", () => {
         runIds: [RUN_ID],
         producerHeadShas: { [RUN_ID]: movedSha },
       });
+      expect(fs.existsSync(path.join(workDir, EVIDENCE_FILE))).toBe(false);
     } finally {
       fs.rmSync(workDir, { recursive: true, force: true });
     }
   });
 
-  it("uses the response-bound run ID for cleanup after strict normal-path provenance fails", async () => {
+  it("cleans the response-bound run after producer SHA provenance fails", async () => {
     const workDir = tempDirectory();
     const movedSha = "c".repeat(40);
     try {
@@ -392,9 +419,11 @@ describe("exact producer dispatch binding", () => {
         ),
       ).resolves.toBe(true);
       expect(cancelled).toBe(true);
-      expect(cleanupApi.mock.calls[0]?.[0]).toBe(
-        `repos/${PRODUCER_REPOSITORY}/actions/runs/${RUN_ID}/cancel`,
-      );
+      expect(
+        cleanupApi.mock.calls.filter(([apiPath]) => String(apiPath).endsWith("/cancel")),
+      ).toHaveLength(1);
+      expect(readExactImageQualificationState(workDir).status).toBe("dispatched");
+      expect(fs.existsSync(path.join(workDir, EVIDENCE_FILE))).toBe(false);
     } finally {
       fs.rmSync(workDir, { recursive: true, force: true });
     }
@@ -527,8 +556,9 @@ describe("exact producer dispatch binding", () => {
     }
   });
 
-  it("lets always-run cleanup recover and cancel a run that appeared after start reconciliation", async () => {
+  it("lets cleanup preserve semantically invalid state and recover only from durable intent", async () => {
     const workDir = tempDirectory();
+    const untrustedRunId = "99999";
     let startClock = BASE_TIME;
     try {
       await expect(
@@ -552,7 +582,15 @@ describe("exact producer dispatch binding", () => {
         ),
       ).rejects.toMatchObject({ code: "DISPATCH_AMBIGUOUS" });
       expect(fs.existsSync(path.join(workDir, STATE_FILE))).toBe(false);
-      fs.writeFileSync(path.join(workDir, STATE_FILE), "", { mode: 0o600 });
+      fs.writeFileSync(
+        path.join(workDir, STATE_FILE),
+        JSON.stringify({
+          schemaVersion: 1,
+          status: "dispatched",
+          producer: { runId: untrustedRunId },
+        }),
+        { mode: 0o600 },
+      );
 
       const base = createApi();
       let cancelled = false;
@@ -579,12 +617,143 @@ describe("exact producer dispatch binding", () => {
         ),
       ).resolves.toBe(true);
       expect(cancelled).toBe(true);
+      expect(
+        cleanupApi.mock.calls.some(([apiPath]) => String(apiPath).includes(untrustedRunId)),
+      ).toBe(false);
       expect(readExactImageQualificationState(workDir).producer.runId).toBe(RUN_ID);
       expect(
         fs.readdirSync(workDir).some((name) => name.startsWith("controller-state.corrupt-")),
       ).toBe(true);
     } finally {
       fs.rmSync(workDir, { recursive: true, force: true });
+    }
+  });
+
+  it("binds a valid state tuple to durable intent before any cancellation POST", async () => {
+    const started = await startedState();
+    const untrustedRunId = "99999";
+    const untrustedCorrelationId = "87654321-4321-4321-8321-cba987654321";
+    const state = readExactImageQualificationState(started.workDir);
+    state.request.correlationId = untrustedCorrelationId;
+    state.producer.runId = untrustedRunId;
+    state.producer.runUrl = `https://api.github.com/repos/${PRODUCER_REPOSITORY}/actions/runs/${untrustedRunId}`;
+    state.producer.htmlUrl = `https://github.com/${PRODUCER_REPOSITORY}/actions/runs/${untrustedRunId}`;
+    fs.writeFileSync(path.join(started.workDir, STATE_FILE), `${JSON.stringify(state)}\n`, {
+      mode: 0o600,
+    });
+
+    const base = createApi();
+    let cancelled = false;
+    const cleanupApi = createRoutedApi(base, [
+      qualificationApiRoute.workflowRuns(() => ({
+        total_count: 1,
+        workflow_runs: [workflowRun()],
+      })),
+      qualificationApiRoute.cancelRun(() => {
+        cancelled = true;
+        return undefined;
+      }),
+      qualificationApiRoute.run(() =>
+        cancelled ? workflowRun({ status: "completed", conclusion: "cancelled" }) : workflowRun(),
+      ),
+    ]);
+    try {
+      await expect(
+        cancelActiveExactImageQualification(
+          { workDir: started.workDir, producerToken: "producer-token" },
+          dependencies(cleanupApi as ReturnType<typeof createApi>),
+        ),
+      ).resolves.toBe(true);
+      expect(cancelled).toBe(true);
+      expect(
+        cleanupApi.mock.calls.some(([apiPath]) => String(apiPath).includes(untrustedRunId)),
+      ).toBe(false);
+      expect(readExactImageQualificationState(started.workDir).producer.runId).toBe(RUN_ID);
+      expect(
+        fs
+          .readdirSync(started.workDir)
+          .some((name) => name.startsWith("controller-state.corrupt-")),
+      ).toBe(true);
+    } finally {
+      fs.rmSync(started.workDir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not let a forged terminal state suppress cleanup of the active bound run", async () => {
+    const started = await startedState();
+    const state = readExactImageQualificationState(started.workDir);
+    state.status = "completed";
+    state.producer.completedAt = new Date(BASE_TIME + 1_000).toISOString();
+    fs.writeFileSync(path.join(started.workDir, STATE_FILE), `${JSON.stringify(state)}\n`, {
+      mode: 0o600,
+    });
+
+    let cancelled = false;
+    const cleanupApi = createRoutedApi(createApi(), [
+      qualificationApiRoute.cancelRun(() => {
+        cancelled = true;
+        return undefined;
+      }),
+      qualificationApiRoute.run(() =>
+        cancelled
+          ? workflowRun({ status: "completed", conclusion: "cancelled" })
+          : workflowRun({ status: "queued", conclusion: null }),
+      ),
+    ]);
+    try {
+      await expect(
+        cancelActiveExactImageQualification(
+          { workDir: started.workDir, producerToken: "producer-token" },
+          dependencies(cleanupApi as ReturnType<typeof createApi>),
+        ),
+      ).resolves.toBe(true);
+      expect(cancelled).toBe(true);
+      expect(
+        cleanupApi.mock.calls.filter(([apiPath]) => String(apiPath).endsWith("/cancel")),
+      ).toHaveLength(1);
+    } finally {
+      fs.rmSync(started.workDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects run-ID-only state corruption before any cancellation POST", async () => {
+    const started = await startedState();
+    const untrustedRunId = "99999";
+    const untrustedApiUrl = `https://api.github.com/repos/${PRODUCER_REPOSITORY}/actions/runs/${untrustedRunId}`;
+    const untrustedHtmlUrl = `https://github.com/${PRODUCER_REPOSITORY}/actions/runs/${untrustedRunId}`;
+    const state = readExactImageQualificationState(started.workDir);
+    state.producer.runId = untrustedRunId;
+    state.producer.runUrl = untrustedApiUrl;
+    state.producer.htmlUrl = untrustedHtmlUrl;
+    fs.writeFileSync(path.join(started.workDir, STATE_FILE), `${JSON.stringify(state)}\n`, {
+      mode: 0o600,
+    });
+
+    const cancelAttempt = vi.fn();
+    const cleanupApi = createRoutedApi(createApi(), [
+      qualificationApiRoute.runAny(() =>
+        workflowRun({
+          id: Number(untrustedRunId),
+          display_title: "Unrelated qualification run",
+          url: untrustedApiUrl,
+          html_url: untrustedHtmlUrl,
+        }),
+      ),
+      qualificationApiRoute.cancelAnyRun(cancelAttempt),
+    ]);
+    try {
+      await expect(
+        cancelActiveExactImageQualification(
+          { workDir: started.workDir, producerToken: "producer-token" },
+          dependencies(cleanupApi as ReturnType<typeof createApi>),
+        ),
+      ).rejects.toMatchObject({ code: "PROVENANCE_MISMATCH" });
+      expect(cancelAttempt).not.toHaveBeenCalled();
+      expect(cleanupApi.mock.calls.map(([apiPath]) => apiPath)).toEqual([
+        `repos/${PRODUCER_REPOSITORY}/actions/runs/${untrustedRunId}`,
+      ]);
+    } finally {
+      fs.rmSync(started.workDir, { recursive: true, force: true });
     }
   });
 
@@ -726,6 +895,70 @@ describe("bound producer polling", () => {
     }
   });
 
+  it("rejects repeated wait from a terminal state before polling or mutation", async () => {
+    const started = await startedState();
+    const state = readExactImageQualificationState(started.workDir);
+    state.status = "completed";
+    state.producer.completedAt = new Date(BASE_TIME + 1_000).toISOString();
+    fs.writeFileSync(path.join(started.workDir, STATE_FILE), `${JSON.stringify(state)}\n`, {
+      mode: 0o600,
+    });
+    const api = createApi();
+    try {
+      await expect(
+        waitForExactImageQualification(
+          { workDir: started.workDir, producerToken: "producer-token" },
+          dependencies(api),
+        ),
+      ).rejects.toMatchObject({ code: "PROVENANCE_MISMATCH" });
+      expect(api).not.toHaveBeenCalled();
+      expect(readExactImageQualificationState(started.workDir)).toEqual(state);
+    } finally {
+      fs.rmSync(started.workDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects persisted completion and acceptance after the hard deadline", async () => {
+    const started = await startedState();
+    const state = readExactImageQualificationState(started.workDir);
+    state.status = "completed";
+    state.producer.completedAt = new Date(BASE_TIME + 45 * 60_000 + 1).toISOString();
+    fs.writeFileSync(path.join(started.workDir, STATE_FILE), `${JSON.stringify(state)}\n`, {
+      mode: 0o600,
+    });
+    try {
+      expect(() => readExactImageQualificationState(started.workDir)).toThrow(
+        /completedAt exceeds qualification deadline/u,
+      );
+
+      state.status = "validated";
+      state.producer.completedAt = new Date(BASE_TIME + 1_000).toISOString();
+      state.artifact = {
+        id: "86420",
+        name: `nemoclaw-image-handoff-v1-${RUN_ID}-1`,
+        digest: `sha256:${"0".repeat(64)}`,
+        sizeInBytes: 1,
+        apiUrl: `https://api.github.com/repos/${PRODUCER_REPOSITORY}/actions/artifacts/86420`,
+        archiveDownloadUrl: `https://api.github.com/repos/${PRODUCER_REPOSITORY}/actions/artifacts/86420/zip`,
+        archiveSha256: "0".repeat(64),
+        manifestSha256: "1".repeat(64),
+      };
+      state.validation = {
+        acceptedAt: new Date(BASE_TIME + 45 * 60_000 + 1).toISOString(),
+        manifestSha256: "1".repeat(64),
+        normalizedManifestSha256: "2".repeat(64),
+      };
+      fs.writeFileSync(path.join(started.workDir, STATE_FILE), `${JSON.stringify(state)}\n`, {
+        mode: 0o600,
+      });
+      expect(() => readExactImageQualificationState(started.workDir)).toThrow(
+        /acceptedAt exceeds qualification deadline/u,
+      );
+    } finally {
+      fs.rmSync(started.workDir, { recursive: true, force: true });
+    }
+  });
+
   it("cancels a run that remains queued beyond the queue budget", async () => {
     const { workDir } = await startedState();
     const api = createApi({ run: workflowRun({ status: "queued" }) });
@@ -834,6 +1067,41 @@ describe("qualification artifact integrity", () => {
           manifestSha256: createHash("sha256").update(manifest).digest("hex"),
         },
       });
+    } finally {
+      fs.rmSync(started.workDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects persisted artifact metadata whose GitHub digest and archive hash diverge", async () => {
+    const archive = Buffer.from("deterministic archive bytes");
+    const manifest = Buffer.from('{"schemaVersion":1}\n');
+    const started = await startedState();
+    await waitForExactImageQualification(
+      { workDir: started.workDir, producerToken: "producer-token" },
+      dependencies(
+        createApi({ run: workflowRun({ status: "completed", conclusion: "success" }) }),
+        { now: () => BASE_TIME + 1_000 },
+      ),
+    );
+    await downloadExactImageManifest(
+      { workDir: started.workDir, producerToken: "producer-token" },
+      dependencies(createApi({ artifacts: artifactList(archive) }), {
+        fetch: async () => new Response(archive, { status: 200 }),
+        runCommand: createArchiveRunCommand(manifest),
+      }),
+    );
+    const state = JSON.parse(
+      fs.readFileSync(path.join(started.workDir, STATE_FILE), "utf8"),
+    ) as Record<string, unknown> & { artifact: { archiveSha256: string } };
+    state.artifact.archiveSha256 = "0".repeat(64);
+    fs.writeFileSync(path.join(started.workDir, STATE_FILE), `${JSON.stringify(state)}\n`, {
+      mode: 0o600,
+    });
+    try {
+      expect(() => readExactImageQualificationState(started.workDir)).toThrow(
+        /digest does not match archive hash/u,
+      );
+      expect(fs.existsSync(path.join(started.workDir, EVIDENCE_FILE))).toBe(false);
     } finally {
       fs.rmSync(started.workDir, { recursive: true, force: true });
     }
@@ -1046,6 +1314,41 @@ describe("qualification evidence finalization", () => {
     }
   });
 
+  it("never publishes accepted evidence when the validated state transition is rejected", async () => {
+    const archive = Buffer.from("archive");
+    const manifest = Buffer.from('{"schemaVersion":1}\n');
+    const normalized = Buffer.from('{"schemaVersion":1,"accepted":true}\n');
+    const started = await startedState();
+    await waitForExactImageQualification(
+      { workDir: started.workDir, producerToken: "producer-token" },
+      dependencies(
+        createApi({ run: workflowRun({ status: "completed", conclusion: "success" }) }),
+        { now: () => BASE_TIME + 3_000 },
+      ),
+    );
+    await downloadExactImageManifest(
+      { workDir: started.workDir, producerToken: "producer-token" },
+      dependencies(createApi({ artifacts: artifactList(archive) }), {
+        fetch: async () => new Response(archive, { status: 200 }),
+        runCommand: createArchiveRunCommand(manifest),
+      }),
+    );
+    fs.writeFileSync(path.join(started.workDir, VALIDATED_MANIFEST_FILE), normalized, {
+      mode: 0o600,
+    });
+    try {
+      expect(() =>
+        finalizeExactImageQualification(started.workDir, {
+          now: () => BASE_TIME + 2_000,
+        }),
+      ).toThrowError(expect.objectContaining({ code: "OUTPUT_WRITE_FAILED" }));
+      expect(fs.existsSync(path.join(started.workDir, EVIDENCE_FILE))).toBe(false);
+      expect(readExactImageQualificationState(started.workDir).status).toBe("downloaded");
+    } finally {
+      fs.rmSync(started.workDir, { recursive: true, force: true });
+    }
+  });
+
   it("refuses accepted evidence at the shared deadline", () => {
     const workDir = tempDirectory();
     const manifest = Buffer.from('{"schemaVersion":1}\n');
@@ -1074,6 +1377,7 @@ describe("qualification evidence finalization", () => {
         workflowId: String(WORKFLOW_ID),
         runUrl: API_RUN_URL,
         htmlUrl: HTML_RUN_URL,
+        completedAt: new Date(BASE_TIME + 1_000).toISOString(),
       },
       artifact: {
         id: "86420",
@@ -1086,6 +1390,11 @@ describe("qualification evidence finalization", () => {
         manifestSha256,
       },
     };
+    fs.writeFileSync(
+      path.join(workDir, DISPATCH_INTENT_FILE),
+      `${JSON.stringify(dispatchIntent(), null, 2)}\n`,
+      { mode: 0o600 },
+    );
     fs.writeFileSync(path.join(workDir, STATE_FILE), `${JSON.stringify(state)}\n`, { mode: 0o600 });
     fs.writeFileSync(path.join(workDir, MANIFEST_ARTIFACT_FILE), manifest, { mode: 0o600 });
     fs.writeFileSync(path.join(workDir, VALIDATED_MANIFEST_FILE), normalized, { mode: 0o600 });

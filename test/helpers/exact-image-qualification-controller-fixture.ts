@@ -183,6 +183,11 @@ export const qualificationApiRoute = {
     route((apiPath) => apiPath.includes(`/workflows/${PRODUCER_WORKFLOW_FILE}/runs?`), respond),
   run: (respond: ApiRouteHandler): ApiRoute =>
     route((apiPath) => apiPath === `repos/${PRODUCER_REPOSITORY}/actions/runs/${RUN_ID}`, respond),
+  runAny: (respond: ApiRouteHandler): ApiRoute =>
+    route(
+      (apiPath) => /^repos\/brevdev\/nemoclaw-image\/actions\/runs\/[1-9][0-9]*$/u.test(apiPath),
+      respond,
+    ),
   cancelRun: (respond: ApiRouteHandler): ApiRoute =>
     route(
       (apiPath) => apiPath === `repos/${PRODUCER_REPOSITORY}/actions/runs/${RUN_ID}/cancel`,
