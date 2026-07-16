@@ -70,15 +70,21 @@ export function buildGatewayUpgradeIsolatedEnv(
   hostHome: string,
 ): NodeJS.ProcessEnv {
   const hostUserLocalBin = path.join(hostHome, ".local", "bin");
+  const isolatedUserLocalBin = path.join(isolatedHome, ".local", "bin");
   const configuredPath = base.PATH ?? "/usr/local/bin:/usr/bin:/bin";
+  const isolatedPath = configuredPath
+    .split(path.delimiter)
+    .filter(
+      (entry) =>
+        entry &&
+        path.resolve(entry) !== path.resolve(hostUserLocalBin) &&
+        path.resolve(entry) !== path.resolve(isolatedUserLocalBin),
+    );
   return {
     ...base,
     DOCKER_CONFIG: base.DOCKER_CONFIG ?? path.join(hostHome, ".docker"),
     HOME: isolatedHome,
-    PATH: configuredPath
-      .split(path.delimiter)
-      .filter((entry) => entry && path.resolve(entry) !== path.resolve(hostUserLocalBin))
-      .join(path.delimiter),
+    PATH: [isolatedUserLocalBin, ...isolatedPath].join(path.delimiter),
   };
 }
 

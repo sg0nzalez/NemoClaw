@@ -101,14 +101,22 @@ describe("OpenShell gateway upgrade workflow boundary", () => {
       const isolatedEnv = buildGatewayUpgradeIsolatedEnv(
         {
           HOME: callerHome,
-          PATH: `${path.join(callerHome, ".local", "bin")}${path.delimiter}/usr/bin`,
+          PATH: `${path.join(callerHome, ".local", "bin")}${path.delimiter}/usr/bin${path.delimiter}/bin`,
         },
         isolated.home,
         callerHome,
       );
       expect(isolatedEnv.HOME).toBe(isolated.home);
-      expect(isolatedEnv.PATH).toBe("/usr/bin");
+      expect(isolatedEnv.PATH).toBe(
+        `${path.join(isolated.home, ".local", "bin")}${path.delimiter}/usr/bin${path.delimiter}/bin`,
+      );
       expect(isolatedEnv.DOCKER_CONFIG).toBe(path.join(callerHome, ".docker"));
+      const cleanupProbe = spawnSync("openshell", ["--version"], {
+        encoding: "utf8",
+        env: isolatedEnv,
+      });
+      expect(cleanupProbe.status, cleanupProbe.stderr).toBe(0);
+      expect(cleanupProbe.stdout).toBe("openshell 0.0.0\n");
       expect(fs.readFileSync(callerTarget, "utf8")).toBe("caller's openshell\n");
       expect(fs.statSync(callerTarget).mode & 0o777).toBe(0o440);
       expect(prepareGatewayUpgradeOpenShellFixture("v0.0.36", callerHome)).toBeUndefined();
