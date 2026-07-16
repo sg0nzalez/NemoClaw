@@ -27,6 +27,8 @@
  * envelope, and tool-call behaviour validated.
  */
 
+import net from "node:net";
+
 export type VllmPlatform = "spark" | "station" | "linux";
 
 export interface VllmRuntimeOverride {
@@ -245,7 +247,7 @@ export const VLLM_MODELS: readonly VllmModelDef[] = [
       "--default-chat-template-kwargs",
       `'{"enable_thinking":true,"force_nonempty_content":true}'`,
     ],
-    gated: false,
+    gated: true,
     platforms: ["station"],
     serveEnv: {
       VLLM_WEIGHT_OFFLOADING_DISABLE_PIN_MEMORY: "1",
@@ -470,6 +472,120 @@ const SHARED_VLLM_ARGS: readonly string[] = [
 function shellQuote(value: string): string {
   if (/^[A-Za-z0-9_@%+=:,./-]+$/.test(value)) return value;
   return `'${value.replace(/'/g, `'\"'\"'`)}'`;
+}
+
+function rewriteVllmArgs(
+  args: readonly string[],
+  overrides: Readonly<Record<string, string>>,
+  omittedFlags: ReadonlySet<string> = new Set(),
+): string[] {
+  const result: string[] = [];
+  const remainingOverrides = new Set(Object.keys(overrides));
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (omittedFlags.has(arg)) {
+      if (index === args.length - 1) throw new Error(`Missing value for vLLM argument '${arg}'.`);
+      index += 1;
+      continue;
+    }
+    if (Object.prototype.hasOwnProperty.call(overrides, arg)) {
+      if (index === args.length - 1) throw new Error(`Missing value for vLLM argument '${arg}'.`);
+      result.push(arg, overrides[arg]);
+      remainingOverrides.delete(arg);
+      index += 1;
+      continue;
+    }
+    result.push(arg);
+  }
+  if (remainingOverrides.size > 0) {
+    throw new Error(`Cannot override missing vLLM argument '${[...remainingOverrides][0]}'.`);
+  }
+  return result;
+}
+
+export interface NemotronUltraDistributedServeOptions {
+  /** vLLM multiprocessing rank: 0 serves the API and 1 runs headless. */
+  nodeRank: 0 | 1;
+  /** Routable rank-0 address used by both nodes for the distributed rendezvous. */
+  masterAddr: string;
+  /** Routable rank-0 port used by both nodes for the distributed rendezvous. */
+  masterPort: number;
+}
+
+/**
+ * Build one side of the validated two-Station Nemotron Ultra vLLM v0.22
+ * direct-tensor-parallel launch. Existing callers keep the single-node
+ * registry command unless they opt into this rank/address/port API.
+ */
+export function buildNemotronUltraDistributedServeCommand(
+  options: NemotronUltraDistributedServeOptions,
+): string {
+  if (options.nodeRank !== 0 && options.nodeRank !== 1) {
+    throw new Error("Nemotron Ultra distributed nodeRank must be 0 or 1.");
+  }
+  const masterAddr = options.masterAddr.trim();
+  if (net.isIP(masterAddr) !== 4) {
+    throw new Error("Nemotron Ultra distributed masterAddr must be a canonical IPv4 address.");
+  }
+  if (
+    !Number.isInteger(options.masterPort) ||
+    options.masterPort < 1 ||
+    options.masterPort > 65535
+  ) {
+    throw new Error("Nemotron Ultra distributed masterPort must be an integer from 1 to 65535.");
+  }
+
+  const model = VLLM_MODELS.find(
+    (candidate) => candidate.envValue === "nemotron-3-ultra-550b-a55b",
+  );
+  if (!model?.revision || !model.servedModelId) {
+    throw new Error(
+      "Nemotron Ultra distributed serving requires a pinned revision and served model id.",
+    );
+  }
+
+  const sharedArgs = rewriteVllmArgs(SHARED_VLLM_ARGS, { "--tensor-parallel-size": "2" });
+  const modelArgs = rewriteVllmArgs(
+    model.modelArgs,
+    {
+      // Rank 0 binds only to the selected direct-attach RoCE address. This
+      // keeps the API off the management network while still giving the
+      // OpenShell route a host-reachable endpoint. The lifecycle also enables
+      // vLLM bearer authentication. The headless worker exposes no API.
+      "--host": options.nodeRank === 0 ? masterAddr : "127.0.0.1",
+      "--max-num-seqs": "16",
+      "--gpu-memory-utilization": "0.85",
+    },
+    new Set(["--kernel_config", "--speculative-config"]),
+  );
+  const serveEnv = {
+    ...model.serveEnv,
+    VLLM_FLOAT32_MATMUL_PRECISION: "high",
+  };
+  const envPrefix = `${Object.entries(serveEnv)
+    .map(([key, value]) => `export ${key}=${value}`)
+    .join(" && ")} && `;
+  const args = [
+    ...sharedArgs,
+    "--nnodes",
+    "2",
+    "--node-rank",
+    String(options.nodeRank),
+    "--master-addr",
+    shellQuote(masterAddr),
+    "--master-port",
+    String(options.masterPort),
+    ...(options.nodeRank === 1 ? ["--headless"] : []),
+    "--max-model-len",
+    "32768",
+    "--revision",
+    model.revision,
+    "--served-model-name",
+    model.servedModelId,
+    ...modelArgs,
+  ];
+
+  return `${envPrefix}vllm serve ${model.id} ${args.join(" ")}`;
 }
 
 /**

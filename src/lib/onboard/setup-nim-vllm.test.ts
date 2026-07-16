@@ -30,6 +30,10 @@ function deps(overrides: Partial<SetupNimVllmDeps> = {}): SetupNimVllmDeps {
     runCapture: () => JSON.stringify({ data: [{ id: "served/model" }] }),
     getLocalProviderBaseUrl: () => "http://host.openshell.internal:8000/v1",
     getLocalProviderValidationBaseUrl: () => "http://127.0.0.1:8000/v1",
+    getManagedVllmProviderBinding: () => null,
+    queryVllmModels: () => {
+      throw new Error("unexpected authenticated vLLM query");
+    },
     isSafeModelId: () => true,
     requireValue,
     validateOpenAiLikeSelection: async () => ({ ok: true, api: "openai-completions" }),
@@ -74,6 +78,122 @@ describe("setupNim vLLM route containment", () => {
 
     await expect(handler(selection)).resolves.toBe("selected");
     expect(events).toEqual(["preflight", "probe", "exact", "validate"]);
+  });
+
+  it("authenticates managed model discovery and OpenAI validation without exposing the key", async () => {
+    const apiKey = "a".repeat(64);
+    const runCapture = vi.fn(() => "");
+    const queryVllmModels = vi.fn(() => JSON.stringify({ data: [{ id: "served/model" }] }));
+    const validateOpenAiLikeSelection = vi.fn(async () => ({
+      ok: true,
+      api: "openai-completions",
+    }));
+    const handler = createSetupNimVllmHandler(
+      deps({
+        runCapture,
+        getLocalProviderBaseUrl: () => "http://10.40.0.1:8000/v1",
+        getLocalProviderValidationBaseUrl: () => "http://10.40.0.1:8000/v1",
+        getManagedVllmProviderBinding: () => ({
+          baseUrl: "http://10.40.0.1:8000/v1",
+          apiKey,
+        }),
+        queryVllmModels,
+        validateOpenAiLikeSelection,
+      }),
+    );
+
+    await expect(handler(state(null))).resolves.toBe("selected");
+    expect(runCapture).not.toHaveBeenCalled();
+    expect(queryVllmModels).toHaveBeenCalledWith("http://10.40.0.1:8000/v1", apiKey);
+    expect(validateOpenAiLikeSelection).toHaveBeenCalledWith(
+      "Local vLLM",
+      "http://10.40.0.1:8000/v1",
+      "served/model",
+      null,
+      undefined,
+      undefined,
+      expect.objectContaining({
+        apiKey,
+        pinnedAddresses: [],
+        trustedPrivateCapability: expect.objectContaining({ addresses: ["10.40.0.1"] }),
+      }),
+    );
+    const renderedOutput = [
+      ...vi.mocked(console.log).mock.calls,
+      ...vi.mocked(console.error).mock.calls,
+      ...vi.mocked(console.warn).mock.calls,
+    ]
+      .flat()
+      .join("\n");
+    expect(renderedOutput).not.toContain(apiKey);
+    expect(renderedOutput).toContain("Using managed dual-Station vLLM endpoint");
+    expect(renderedOutput).not.toContain("localhost:8000");
+  });
+
+  it("uses topology-neutral mismatch recovery for a managed dual endpoint", async () => {
+    const selection = state("required/model");
+    const validateOpenAiLikeSelection = vi.fn(async () => ({ ok: true }));
+    const handler = createSetupNimVllmHandler(
+      deps({
+        getLocalProviderBaseUrl: () => "http://10.40.0.1:8000/v1",
+        getLocalProviderValidationBaseUrl: () => "http://10.40.0.1:8000/v1",
+        getManagedVllmProviderBinding: () => ({
+          baseUrl: "http://10.40.0.1:8000/v1",
+          apiKey: "a".repeat(64),
+        }),
+        queryVllmModels: () => JSON.stringify({ data: [{ id: "served/model" }] }),
+        validateOpenAiLikeSelection,
+      }),
+    );
+
+    await expect(handler(selection)).rejects.toThrow("exit 1");
+    expect(validateOpenAiLikeSelection).not.toHaveBeenCalled();
+    expect(console.error).toHaveBeenCalledWith(
+      "  To install 'required/model', stop the managed dual-Station vLLM deployment, then rerun the original install/onboard command.",
+    );
+    expect(vi.mocked(console.error).mock.calls.flat().join("\n")).not.toContain("localhost");
+  });
+
+  it("fails closed before probing a managed dual endpoint whose key is missing", async () => {
+    const runCapture = vi.fn(() => "");
+    const queryVllmModels = vi.fn(() => "");
+    const handler = createSetupNimVllmHandler(
+      deps({
+        runCapture,
+        getManagedVllmProviderBinding: () => {
+          throw new Error("Managed dual-Station vLLM authentication is missing.");
+        },
+        queryVllmModels,
+      }),
+    );
+
+    await expect(handler(state(null))).rejects.toThrow("exit 1");
+    expect(runCapture).not.toHaveBeenCalled();
+    expect(queryVllmModels).not.toHaveBeenCalled();
+    expect(console.error).toHaveBeenCalledWith(
+      "  Managed vLLM authentication state is unsafe or unreadable.",
+    );
+  });
+
+  it("fails closed before endpoint probes when managed auth state is unsafe", async () => {
+    const queryVllmModels = vi.fn(() => "");
+    const validateOpenAiLikeSelection = vi.fn(async () => ({ ok: true }));
+    const handler = createSetupNimVllmHandler(
+      deps({
+        getManagedVllmProviderBinding: () => {
+          throw new Error(`unsafe ${"b".repeat(64)}`);
+        },
+        queryVllmModels,
+        validateOpenAiLikeSelection,
+      }),
+    );
+
+    await expect(handler(state(null))).rejects.toThrow("exit 1");
+    expect(queryVllmModels).not.toHaveBeenCalled();
+    expect(validateOpenAiLikeSelection).not.toHaveBeenCalled();
+    expect(console.error).toHaveBeenCalledWith(
+      "  Managed vLLM authentication state is unsafe or unreadable.",
+    );
   });
 
   it("rejects a detected model that differs from the durable shared route before validation", async () => {

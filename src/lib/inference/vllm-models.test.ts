@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   assertGatedModelAccess,
+  buildNemotronUltraDistributedServeCommand,
   buildVllmServeCommand,
   DEFAULT_VLLM_MODEL,
   modelsForPlatform,
@@ -101,6 +102,84 @@ describe("vllm model registry", () => {
     );
   });
 
+  it("builds the pinned two-Station Nemotron Ultra vLLM v0.22 head command", () => {
+    const cmd = buildNemotronUltraDistributedServeCommand({
+      nodeRank: 0,
+      masterAddr: "192.168.240.1",
+      masterPort: 29501,
+    });
+
+    expect(cmd).toBe(
+      [
+        "export VLLM_WEIGHT_OFFLOADING_DISABLE_PIN_MEMORY=1",
+        "&& export VLLM_NVFP4_GEMM_BACKEND=flashinfer-trtllm",
+        "&& export VLLM_FLOAT32_MATMUL_PRECISION=high",
+        "&& vllm serve nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-NVFP4",
+        "--tensor-parallel-size 2",
+        "--pipeline-parallel-size 1",
+        "--data-parallel-size 1",
+        "--port 8000",
+        "--trust-remote-code",
+        "--nnodes 2",
+        "--node-rank 0",
+        "--master-addr 192.168.240.1",
+        "--master-port 29501",
+        "--max-model-len 32768",
+        "--revision 183968f87ae4cedce3039313cac1fd43d112c578",
+        "--served-model-name nvidia/nemotron-3-ultra-550b-a55b",
+        "--host 192.168.240.1",
+        "--cpu-offload-gb 150",
+        "--cpu-offload-params experts",
+        "--max-num-seqs 16",
+        "--gpu-memory-utilization 0.85",
+        "--reasoning-parser nemotron_v3",
+        "--enable-auto-tool-choice",
+        "--tool-call-parser qwen3_coder",
+        `--default-chat-template-kwargs '{"enable_thinking":true,"force_nonempty_content":true}'`,
+      ].join(" "),
+    );
+    expect(cmd).not.toContain("--headless");
+    expect(cmd).not.toContain("--kernel_config");
+    expect(cmd).not.toContain("--speculative-config");
+  });
+
+  it("adds headless mode only to the rank-1 Nemotron Ultra command", () => {
+    const head = buildNemotronUltraDistributedServeCommand({
+      nodeRank: 0,
+      masterAddr: "192.168.240.1",
+      masterPort: 29501,
+    });
+    const worker = buildNemotronUltraDistributedServeCommand({
+      nodeRank: 1,
+      masterAddr: "192.168.240.1",
+      masterPort: 29501,
+    });
+
+    expect(worker).toBe(
+      head
+        .replace("--node-rank 0", "--node-rank 1")
+        .replace("--master-port 29501", "--master-port 29501 --headless")
+        .replace("--host 192.168.240.1", "--host 127.0.0.1"),
+    );
+  });
+
+  it("rejects invalid two-Station Nemotron Ultra rendezvous options", () => {
+    expect(() =>
+      buildNemotronUltraDistributedServeCommand({
+        nodeRank: 0,
+        masterAddr: "station a",
+        masterPort: 29501,
+      }),
+    ).toThrow(/masterAddr/);
+    expect(() =>
+      buildNemotronUltraDistributedServeCommand({
+        nodeRank: 1,
+        masterAddr: "192.168.240.1",
+        masterPort: 70000,
+      }),
+    ).toThrow(/masterPort/);
+  });
+
   it("rejects an unknown NEMOCLAW_VLLM_MODEL with a helpful message", () => {
     expect(() =>
       selectVllmModelFromEnv({ NEMOCLAW_VLLM_MODEL: "made-up-model" } as NodeJS.ProcessEnv),
@@ -128,6 +207,14 @@ describe("vllm model registry", () => {
   it("rejects a gated model when no Hugging Face token is set", () => {
     const deepseek = VLLM_MODELS.find((m) => m.envValue === "deepseek-r1-distill-70b");
     expect(() => assertGatedModelAccess(deepseek!, {} as NodeJS.ProcessEnv)).toThrow(
+      /gated on Hugging Face/,
+    );
+  });
+
+  it("keeps the pinned Nemotron Ultra recipe behind Hugging Face access", () => {
+    const ultra = VLLM_MODELS.find((m) => m.envValue === "nemotron-3-ultra-550b-a55b");
+    expect(ultra?.gated).toBe(true);
+    expect(() => assertGatedModelAccess(ultra!, {} as NodeJS.ProcessEnv)).toThrow(
       /gated on Hugging Face/,
     );
   });

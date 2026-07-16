@@ -8,6 +8,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import {
   dockerCapture,
   dockerForceRm,
@@ -17,14 +18,21 @@ import {
   dockerSpawn,
   dockerStop,
 } from "../adapters/docker";
+import { createBearerAuthConfig } from "../adapters/http/auth-config";
 import { buildValidatedCurlCommandArgs } from "../adapters/http/curl-args";
+import { runCurlProbe } from "../adapters/http/probe";
 import { VLLM_PORT } from "../core/ports";
 import { shellQuote } from "../core/shell-quote";
 import { isAffirmativeAnswer } from "../onboard/prompt-helpers";
 import { runCapture } from "../runner";
 import { isSafeModelId } from "../validation";
 import { getGpuIndicesByName } from "./nim";
-import { buildVllmDockerEnv } from "./vllm-docker-env";
+import { ensureDualStationVllmApiKey, loadDualStationVllmApiKey } from "./vllm-api-key";
+import {
+  buildLocalDualStationDockerEnv,
+  buildRemoteVllmDockerEnv,
+  buildVllmDockerEnv,
+} from "./vllm-docker-env";
 import {
   buildVllmServeCommand,
   NEMOTRON_ULTRA_STATION_IMAGE,
@@ -35,6 +43,24 @@ import {
   type VllmPlatform,
 } from "./vllm-models";
 import { resolveVllmInstallModel } from "./vllm-prompt";
+import {
+  type DualStationVllmPlan,
+  NEMOCLAW_DGX_STATION_PEER_ENV,
+  probeDualStationVllmCapability,
+} from "./vllm-station-cluster";
+import {
+  areDualStationManagedVllmContainersRunning,
+  cleanupDualStationManagedVllm,
+  DUAL_STATION_VLLM_CLUSTER_LABEL,
+  DUAL_STATION_VLLM_ENDPOINT_LABEL,
+  DUAL_STATION_VLLM_ROLE_LABEL,
+  getDualStationManagedVllmBaseUrl,
+  preflightDualStationGpuRuntime,
+  preflightDualStationManagedVllm,
+  startDualStationManagedVllm,
+  withDualStationManagedVllmLifecycle,
+} from "./vllm-station-cluster-lifecycle";
+import { stageDualStationModelSnapshot } from "./vllm-station-model-staging";
 import {
   findUnwritableTreePath,
   formatStorageBytes,
@@ -331,7 +357,10 @@ function dockerPrereqsOk(): { ok: boolean; reason?: string } {
   return { ok: true };
 }
 
-export async function pullImage(profile: VllmProfile): Promise<{ ok: boolean; reason?: string }> {
+export async function pullImage(
+  profile: VllmProfile,
+  dockerEnv: Record<string, string> = buildVllmDockerEnv(),
+): Promise<{ ok: boolean; reason?: string }> {
   try {
     assertVllmRegistryDigestRef(profile.image);
   } catch (err) {
@@ -342,7 +371,7 @@ export async function pullImage(profile: VllmProfile): Promise<{ ok: boolean; re
   // profile, so all profiles intentionally share the 15-minute stall default.
   // The profile-specific maximum still bounds the complete pull operation.
   const result = await dockerPullWithProgressWatchdog(profile.image, {
-    env: buildVllmDockerEnv(),
+    env: dockerEnv,
     maxTimeoutMs: profile.pullTimeoutSec * 1000,
     logLine: emit,
   });
@@ -365,6 +394,7 @@ export async function pullImage(profile: VllmProfile): Promise<{ ok: boolean; re
 function downloadModel(
   profile: VllmProfile,
   model: VllmModelDef,
+  dockerEnv: Record<string, string> = buildVllmDockerEnv(),
 ): Promise<{ ok: boolean; reason?: string }> {
   emit(`Pre-downloading model with hf: ${model.id}`);
   return new Promise((resolve) => {
@@ -388,7 +418,7 @@ function downloadModel(
         ...(model.revision ? ["--revision", model.revision] : []),
       ],
       {
-        env: buildVllmDockerEnv(buildHfTokenForwardEnv()),
+        env: { ...dockerEnv, ...buildHfTokenForwardEnv() },
         stdio: ["ignore", "pipe", "pipe"],
       },
     );
@@ -566,12 +596,21 @@ export function assertVllmRegistryDigestRef(image: string): void {
 
 type VllmContainerOwnership =
   | { kind: "absent" }
+  | { kind: "dual-managed"; containerId: string; running: boolean }
   | { kind: "foreign" }
   | { kind: "managed"; containerId: string; running: boolean }
   | { kind: "unknown" };
 
 function inspectVllmContainerOwnership(containerName: string): VllmContainerOwnership {
-  const format = `{{.ID}}|{{.Names}}|{{.State}}|{{.Label "${NEMOCLAW_VLLM_MANAGED_LABEL}"}}`;
+  const format = [
+    "{{.ID}}",
+    "{{.Names}}",
+    "{{.State}}",
+    `{{.Label "${NEMOCLAW_VLLM_MANAGED_LABEL}"}}`,
+    `{{.Label "${DUAL_STATION_VLLM_ROLE_LABEL}"}}`,
+    `{{.Label "${DUAL_STATION_VLLM_ENDPOINT_LABEL}"}}`,
+    `{{.Label "${DUAL_STATION_VLLM_CLUSTER_LABEL}"}}`,
+  ].join("|");
   try {
     const output = dockerCapture(
       [
@@ -591,12 +630,25 @@ function inspectVllmContainerOwnership(containerName: string): VllmContainerOwne
     const rows = output.split(/\r?\n/);
     if (rows.length !== 1) return { kind: "unknown" };
     const fields = rows[0].split("|");
-    if (fields.length !== 4) return { kind: "unknown" };
-    const [containerId, observedName, state, managedLabel] = fields;
+    if (fields.length !== 7) return { kind: "unknown" };
+    const [containerId, observedName, state, managedLabel, dualRole, dualEndpoint, dualCluster] =
+      fields;
     if (observedName !== containerName || !DOCKER_CONTAINER_ID_PATTERN.test(containerId)) {
       return { kind: "unknown" };
     }
     if (managedLabel !== "true") return { kind: "foreign" };
+    const hasAnyDualLabel = Boolean(dualRole || dualEndpoint || dualCluster);
+    if (hasAnyDualLabel) {
+      const exactDualHead =
+        dualRole === "head" &&
+        /^http:\/\/192\.168\.|^http:\/\/10\.|^http:\/\/172\.(?:1[6-9]|2[0-9]|3[01])\./.test(
+          dualEndpoint,
+        ) &&
+        /^[a-f0-9]{64}$/.test(dualCluster);
+      return exactDualHead
+        ? { kind: "dual-managed", containerId, running: state === "running" }
+        : { kind: "unknown" };
+    }
     return { kind: "managed", containerId, running: state === "running" };
   } catch {
     return { kind: "unknown" };
@@ -619,6 +671,14 @@ function vllmContainerReplacementTarget(
       reason: `Could not verify ownership of Docker container "${containerName}". NemoClaw will not remove it. Check Docker access and retry.`,
     };
   }
+  if (ownership.kind === "dual-managed") {
+    return {
+      ok: false,
+      reason:
+        `Container "${containerName}" is the head of a managed dual-Station deployment. ` +
+        `Refusing single-host replacement because it would orphan the peer worker. Restore ${NEMOCLAW_DGX_STATION_PEER_ENV} and select Nemotron Ultra to manage the pair.`,
+    };
+  }
   return ownership.kind === "managed"
     ? { ok: true, containerId: ownership.containerId }
     : { ok: true };
@@ -626,7 +686,7 @@ function vllmContainerReplacementTarget(
 
 export function isNemoClawManagedVllmRunning(): boolean {
   const ownership = inspectVllmContainerOwnership(NEMOCLAW_VLLM_CONTAINER_NAME);
-  return ownership.kind === "managed" && ownership.running;
+  return (ownership.kind === "managed" || ownership.kind === "dual-managed") && ownership.running;
 }
 
 function startContainer(
@@ -667,11 +727,17 @@ function startContainer(
   return { ok: true };
 }
 
-function vllmModelsEndpoint(): string {
-  return `http://127.0.0.1:${String(VLLM_PORT)}/v1/models`;
-}
-
-function vllmEndpointReady(): boolean {
+function vllmEndpointReady(baseUrl?: string): boolean {
+  if (baseUrl) {
+    // The dual-Station /v1 surface is bearer-protected. vLLM deliberately
+    // leaves /health outside its auth middleware, so readiness can stay
+    // secret-free while onboarding separately validates model inventory with
+    // the persisted key.
+    return runCurlProbe(
+      ["-sS", "--connect-timeout", "2", "--max-time", "5", `${baseUrl.replace(/\/+$/, "")}/health`],
+      { pinnedAddresses: [] },
+    ).ok;
+  }
   const response = runCapture(
     [
       "curl",
@@ -681,7 +747,7 @@ function vllmEndpointReady(): boolean {
         "2",
         "--max-time",
         "5",
-        vllmModelsEndpoint(),
+        `http://127.0.0.1:${String(VLLM_PORT)}/v1/models`,
       ]),
     ],
     { ignoreError: true },
@@ -695,27 +761,102 @@ function vllmEndpointReady(): boolean {
   }
 }
 
-function readContainerLogTail(profile: VllmProfile, lineCount = 80): string[] {
+function verifyDualStationVllmAuthBoundary(
+  baseUrl: string,
+  apiKey: string,
+  expectedModelId: string,
+): { ok: true } | { ok: false; reason: string } {
+  const modelsUrl = `${baseUrl.replace(/\/+$/, "")}/v1/models`;
+  const unauthenticated = runCurlProbe(
+    ["-sS", "--connect-timeout", "3", "--max-time", "5", modelsUrl],
+    { pinnedAddresses: [] },
+  );
+  if (unauthenticated.httpStatus !== 401) {
+    return {
+      ok: false,
+      reason:
+        `unauthenticated model inventory returned HTTP ${String(unauthenticated.httpStatus)}; ` +
+        "expected vLLM to reject it with HTTP 401",
+    };
+  }
+
+  let authConfig: ReturnType<typeof createBearerAuthConfig> | undefined;
+  try {
+    authConfig = createBearerAuthConfig(apiKey, { prefix: "nemoclaw-vllm-install-auth" });
+    const authenticated = runCurlProbe(
+      ["-sS", "--connect-timeout", "3", "--max-time", "5", ...authConfig.args, modelsUrl],
+      {
+        trustedConfigFiles: authConfig.trustedConfigFiles,
+        pinnedAddresses: [],
+      },
+    );
+    if (!authenticated.ok) {
+      return {
+        ok: false,
+        reason: `authenticated model inventory failed: ${authenticated.message}`,
+      };
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(authenticated.body);
+    } catch {
+      return { ok: false, reason: "authenticated model inventory returned malformed JSON" };
+    }
+    const data = (parsed as { data?: unknown } | null)?.data;
+    const ids = (Array.isArray(data) ? data : []).flatMap((entry) => {
+      if (typeof entry !== "object" || entry === null) return [];
+      const id = (entry as { id?: unknown }).id;
+      return typeof id === "string" ? [id] : [];
+    });
+    if (ids.length !== 1 || ids[0] !== expectedModelId) {
+      return {
+        ok: false,
+        reason: `authenticated model inventory did not expose exactly '${expectedModelId}'`,
+      };
+    }
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      reason: `authenticated model inventory failed: ${(error as Error).message}`,
+    };
+  } finally {
+    authConfig?.cleanup();
+  }
+}
+
+function readContainerLogTail(
+  profile: VllmProfile,
+  lineCount = 80,
+  dockerEnv: Record<string, string> = buildVllmDockerEnv(),
+): string[] {
   const output = dockerCapture(["logs", "--tail", String(lineCount), profile.containerName], {
-    env: buildVllmDockerEnv(),
+    env: dockerEnv,
     ignoreError: true,
   }).trim();
   if (!output) return [];
   return output.split(/\r?\n/).slice(-lineCount);
 }
 
-function printContainerLogTail(profile: VllmProfile): void {
-  const tail = readContainerLogTail(profile);
+function printContainerLogTail(
+  profile: VllmProfile,
+  dockerEnv: Record<string, string> = buildVllmDockerEnv(),
+): void {
+  const tail = readContainerLogTail(profile, 80, dockerEnv);
   if (tail.length === 0) return;
   process.stderr.write(`  --- Last ${String(tail.length)} vLLM log lines: ---\n`);
   for (const line of tail) process.stderr.write(`    ${line}\n`);
   process.stderr.write("  ---\n");
 }
 
-// Poll the real OpenAI-compatible models endpoint instead of interpreting
-// vLLM startup logs. Logs stay quiet on the happy path and print only on
-// failure.
-function waitForVllmReady(profile: VllmProfile): Promise<{ ok: boolean; reason?: string }> {
+// Poll the real OpenAI-compatible models endpoint for the legacy local path,
+// or the secret-free vLLM health endpoint for authenticated dual-Station
+// serving. Logs stay quiet on the happy path and print only on failure.
+function waitForVllmReady(
+  profile: VllmProfile,
+  baseUrl?: string,
+  dockerEnv: Record<string, string> = buildVllmDockerEnv(),
+): Promise<{ ok: boolean; reason?: string }> {
   return new Promise((resolve) => {
     let resolved = false;
     const start = Date.now();
@@ -735,7 +876,7 @@ function waitForVllmReady(profile: VllmProfile): Promise<{ ok: boolean; reason?:
 
     function poll(): void {
       if (resolved) return;
-      if (vllmEndpointReady()) {
+      if (vllmEndpointReady(baseUrl)) {
         emit(`vLLM is serving on :${String(VLLM_PORT)}`);
         done({ ok: true });
         return;
@@ -748,7 +889,7 @@ function waitForVllmReady(profile: VllmProfile): Promise<{ ok: boolean; reason?:
         });
         return;
       }
-      if (!containerStillRunning(profile)) {
+      if (!containerStillRunning(profile, dockerEnv)) {
         done({ ok: false, reason: "vLLM container exited before readiness" });
         return;
       }
@@ -763,10 +904,13 @@ function waitForVllmReady(profile: VllmProfile): Promise<{ ok: boolean; reason?:
   });
 }
 
-function containerStillRunning(profile: VllmProfile): boolean {
+function containerStillRunning(
+  profile: VllmProfile,
+  dockerEnv: Record<string, string> = buildVllmDockerEnv(),
+): boolean {
   const out = dockerCapture(
     ["ps", "--filter", `name=${profile.containerName}`, "--format", "{{.Names}}"],
-    { env: buildVllmDockerEnv(), ignoreError: true },
+    { env: dockerEnv, ignoreError: true },
   ).trim();
   return out === profile.containerName;
 }
@@ -847,8 +991,18 @@ function printModelStorageWarning(
 async function imageStorageAccepted(
   profile: VllmProfile,
   opts: InstallVllmOptions,
+  dockerEnv: Record<string, string> = buildVllmDockerEnv(),
 ): Promise<boolean> {
-  const probe = probeDockerStorage();
+  const probe = probeDockerStorage({
+    dockerContext: dockerEnv.DOCKER_CONTEXT,
+    dockerHost: dockerEnv.DOCKER_HOST,
+    dockerInfo: () =>
+      dockerCapture(["info", "--format", "{{json .}}"], {
+        env: dockerEnv,
+        ignoreError: true,
+        timeout: 10_000,
+      }),
+  });
   const requiredBytes = imageStorageRequirementBytes(profile.imageDownloadSizeBytes);
   if (probe.ok && probe.capacity.availableBytes >= requiredBytes) {
     return true;
@@ -933,10 +1087,13 @@ interface InstallVllmOptions {
   beforeInstall?: (modelId: string) => void;
 }
 
-function imageIsCached(profile: VllmProfile): boolean {
+function imageIsCached(
+  profile: VllmProfile,
+  dockerEnv: Record<string, string> = buildVllmDockerEnv(),
+): boolean {
   return Boolean(
     dockerImageInspectFormat("{{.Id}}", profile.image, {
-      env: buildVllmDockerEnv(),
+      env: dockerEnv,
       ignoreError: true,
       timeout: 10_000,
     }).trim(),
@@ -971,13 +1128,51 @@ export async function installVllm(
   profile: VllmProfile,
   opts: InstallVllmOptions,
 ): Promise<{ ok: boolean }> {
+  let dualStationPlan: DualStationVllmPlan | null = null;
+  let peerModelSnapshot: "ready" | "staging-required" | null = null;
+  const explicitModel = String(process.env.NEMOCLAW_VLLM_MODEL ?? "").trim();
+  const configuredPeer = String(process.env[NEMOCLAW_DGX_STATION_PEER_ENV] ?? "").trim();
+
   // Model selection lives in `resolveVllmInstallModel` so this entry point
   // stays focused on the docker side effects. Gated-model access is checked
   // there before any docker work happens.
-  const resolved = await resolveVllmInstallModel(profile, {
-    nonInteractive: opts.nonInteractive,
-    promptFn: opts.promptFn,
-  });
+  let resolved: Awaited<ReturnType<typeof resolveVllmInstallModel>>;
+  if (profile.platform === "station" && configuredPeer && !explicitModel) {
+    const capability = probeDualStationVllmCapability();
+    if (capability.kind !== "ready") {
+      const reason =
+        capability.kind === "unavailable"
+          ? capability.reason
+          : "the explicit peer configuration disappeared";
+      console.error(`  Dual DGX Station setup unavailable: ${reason}`);
+      return { ok: false };
+    }
+    const ultra = VLLM_MODELS.find(
+      (candidate) => candidate.envValue === "nemotron-3-ultra-550b-a55b",
+    );
+    if (!ultra) {
+      console.error("  vLLM install failed: Nemotron Ultra is missing from the model registry");
+      return { ok: false };
+    }
+    resolved = await resolveVllmInstallModel(
+      { ...profile, defaultModel: ultra },
+      {
+        // A qualified explicit peer is the model-selection signal. The normal
+        // resolver still owns access validation, but no second model choice is
+        // presented after hardware qualification.
+        nonInteractive: true,
+        promptFn: opts.promptFn,
+      },
+    );
+    if (!resolved) return { ok: false };
+    dualStationPlan = capability.plan;
+    peerModelSnapshot = capability.peerModelSnapshot;
+  } else {
+    resolved = await resolveVllmInstallModel(profile, {
+      nonInteractive: opts.nonInteractive,
+      promptFn: opts.promptFn,
+    });
+  }
   if (!resolved) return { ok: false };
   const { model, source: modelSource } = resolved;
   if (model.runtime && !model.platforms.includes(profile.platform)) {
@@ -1001,6 +1196,35 @@ export async function installVllm(
     console.error(`  vLLM install failed: ${(err as Error).message}`);
     return { ok: false };
   }
+
+  if (profile.platform === "station" && model.envValue === "nemotron-3-ultra-550b-a55b") {
+    if (!dualStationPlan) {
+      const capability = probeDualStationVllmCapability();
+      if (capability.kind === "unavailable") {
+        console.error(`  Dual DGX Station setup unavailable: ${capability.reason}`);
+        return { ok: false };
+      }
+      if (capability.kind === "ready") {
+        dualStationPlan = capability.plan;
+        peerModelSnapshot = capability.peerModelSnapshot;
+      }
+    }
+    if (dualStationPlan) {
+      if (VLLM_PORT !== 8000) {
+        console.error(
+          "  Dual DGX Station setup requires the default vLLM port 8000; unset NEMOCLAW_VLLM_PORT and retry.",
+        );
+        return { ok: false };
+      }
+      if (extraServeArgs.length > 0) {
+        console.error(
+          `  Dual DGX Station setup does not accept ${VLLM_EXTRA_ARGS_ENV}; the verified distributed launch is fixed.`,
+        );
+        return { ok: false };
+      }
+    }
+  }
+  const localDockerEnv = dualStationPlan ? buildLocalDualStationDockerEnv() : buildVllmDockerEnv();
   opts.beforeInstall?.(servedModelId);
 
   console.log("");
@@ -1012,6 +1236,14 @@ export async function installVllm(
   if (extraServeArgs.length > 0) {
     console.log(
       `    Extra serve args: ${String(extraServeArgs.length)} token(s) from ${VLLM_EXTRA_ARGS_ENV}`,
+    );
+  }
+  if (dualStationPlan) {
+    console.log(
+      `    Topology: 2× DGX Station (${dualStationPlan.local.hostname} + ${dualStationPlan.peer.hostname})`,
+    );
+    console.log(
+      `    Fabric: ${dualStationPlan.rails.map((rail) => rail.subnet).join(", ")} (RoCEv2 GID ${String(dualStationPlan.roceGidIndex)})`,
     );
   }
   if (!opts.hasImage) console.log("    Image download on first run, cached after");
@@ -1032,12 +1264,21 @@ export async function installVllm(
     return { ok: false };
   }
 
-  // Fail before large downloads when the fixed name belongs to another
-  // operator. startContainer repeats this check to close the teardown race.
-  const replacement = vllmContainerReplacementTarget(runtimeProfile.containerName);
-  if (!replacement.ok) {
-    console.error(`  vLLM install failed: ${replacement.reason}`);
-    return { ok: false };
+  // Fail before large downloads when either daemon has an ambiguous or
+  // foreign fixed-name container. Each launch path repeats this ownership
+  // check immediately before teardown to close the name-transfer race.
+  if (dualStationPlan) {
+    const preflight = preflightDualStationManagedVllm(dualStationPlan);
+    if (!preflight.ok) {
+      console.error(`  vLLM install failed: ${preflight.reason}`);
+      return { ok: false };
+    }
+  } else {
+    const replacement = vllmContainerReplacementTarget(runtimeProfile.containerName);
+    if (!replacement.ok) {
+      console.error(`  vLLM install failed: ${replacement.reason}`);
+      return { ok: false };
+    }
   }
 
   // Guard the host filesystem before an image pull or model-download
@@ -1047,8 +1288,8 @@ export async function installVllm(
     return { ok: false };
   }
 
-  const hasImage = imageIsCached(runtimeProfile);
-  if (!hasImage && !(await imageStorageAccepted(runtimeProfile, opts))) {
+  const hasImage = imageIsCached(runtimeProfile, localDockerEnv);
+  if (!hasImage && !(await imageStorageAccepted(runtimeProfile, opts, localDockerEnv))) {
     return { ok: false };
   }
 
@@ -1058,10 +1299,31 @@ export async function installVllm(
     return { ok: false };
   }
 
-  const pull = await pullImage(runtimeProfile);
+  const pull = await pullImage(runtimeProfile, localDockerEnv);
   if (!pull.ok) {
     console.error(`  vLLM install failed: ${String(pull.reason)}`);
     return { ok: false };
+  }
+
+  if (dualStationPlan) {
+    let peerDockerEnv: Record<string, string>;
+    try {
+      peerDockerEnv = buildRemoteVllmDockerEnv(dualStationPlan.peerDockerHost);
+    } catch (err) {
+      console.error(`  vLLM install failed: ${(err as Error).message}`);
+      return { ok: false };
+    }
+    emit(`Pulling the pinned vLLM image on peer ${dualStationPlan.peer.hostname}`);
+    const peerPull = await pullImage(runtimeProfile, peerDockerEnv);
+    if (!peerPull.ok) {
+      console.error(`  vLLM install failed on peer: ${String(peerPull.reason)}`);
+      return { ok: false };
+    }
+    const gpuPreflight = await preflightDualStationGpuRuntime(dualStationPlan);
+    if (!gpuPreflight.ok) {
+      console.error(`  vLLM install failed: ${gpuPreflight.reason}`);
+      return { ok: false };
+    }
   }
 
   // A cold image pull can consume the same host filesystem that backs the
@@ -1071,10 +1333,144 @@ export async function installVllm(
     return { ok: false };
   }
 
-  const modelDownload = await downloadModel(runtimeProfile, model);
+  const modelDownload = await downloadModel(runtimeProfile, model, localDockerEnv);
   if (!modelDownload.ok) {
     console.error(`  vLLM install failed: ${String(modelDownload.reason)}`);
     return { ok: false };
+  }
+
+  if (dualStationPlan) {
+    const stagingPlan = dualStationPlan;
+    try {
+      const verification = await withDualStationManagedVllmLifecycle(async () => {
+        emit(
+          peerModelSnapshot === "staging-required"
+            ? `Staging the pinned model snapshot on peer ${stagingPlan.peer.hostname}`
+            : `Verifying the pinned model snapshot on peer ${stagingPlan.peer.hostname}`,
+        );
+        const staging = await stageDualStationModelSnapshot(stagingPlan);
+        if (!staging.ok) return { ok: false as const, reason: staging.reason };
+
+        const refreshedCapability = probeDualStationVllmCapability();
+        if (refreshedCapability.kind !== "ready") {
+          const reason =
+            refreshedCapability.kind === "unavailable"
+              ? refreshedCapability.reason
+              : "the explicit peer configuration disappeared";
+          return {
+            ok: false as const,
+            reason: `dual-Station capability changed: ${reason}`,
+          };
+        }
+        if (!isDeepStrictEqual(refreshedCapability.plan, stagingPlan)) {
+          return {
+            ok: false as const,
+            reason:
+              "dual-Station topology changed during download; rerun setup against a stable pair.",
+          };
+        }
+        if (refreshedCapability.peerModelSnapshot !== "ready") {
+          return {
+            ok: false as const,
+            reason: "peer pinned model snapshot was not verified after staging.",
+          };
+        }
+        return { ok: true as const, plan: refreshedCapability.plan };
+      });
+      if (!verification.ok) {
+        console.error(`  vLLM install failed: ${verification.reason}`);
+        return { ok: false };
+      }
+      dualStationPlan = verification.plan;
+    } catch (error) {
+      console.error(
+        `  vLLM install failed: dual-Station lifecycle lock failed during model verification: ${(error as Error).message}`,
+      );
+      return { ok: false };
+    }
+  }
+
+  let dualStationApiKey: string | null = null;
+  if (dualStationPlan) {
+    try {
+      const existingManagedBaseUrl = getDualStationManagedVllmBaseUrl();
+      const existingApiKey = existingManagedBaseUrl ? loadDualStationVllmApiKey() : null;
+      // If the key file alone was lost, create a new host-global key. The
+      // lifecycle fingerprint then forces a coordinated pair replacement
+      // under its lock instead of reusing containers bound to an unknown key.
+      dualStationApiKey = existingApiKey ?? ensureDualStationVllmApiKey();
+    } catch (err) {
+      console.error(`  vLLM install failed: ${(err as Error).message}`);
+      return { ok: false };
+    }
+  }
+
+  if (dualStationPlan) {
+    if (!dualStationApiKey) {
+      console.error("  vLLM install failed: dual-Station API key was not provisioned");
+      return { ok: false };
+    }
+    try {
+      return await withDualStationManagedVllmLifecycle(async () => {
+        const start = await startDualStationManagedVllm(dualStationPlan, {
+          apiKey: dualStationApiKey,
+        });
+        if (!start.ok) {
+          console.error(`  vLLM install failed: ${start.reason}`);
+          for (const rollbackError of start.rollbackErrors) {
+            console.error(`  vLLM rollback warning: ${rollbackError}`);
+          }
+          return { ok: false };
+        }
+
+        emit("Launching vLLM");
+        emit(
+          `Launch can take 5 minutes to ${String(Math.ceil(runtimeProfile.loadTimeoutSec / 60))} minutes`,
+        );
+
+        const ready = await waitForVllmReady(runtimeProfile, start.baseUrl, localDockerEnv);
+        if (!ready.ok) {
+          printContainerLogTail(runtimeProfile, localDockerEnv);
+          if (!start.reusedExisting) {
+            const cleanup = await cleanupDualStationManagedVllm(dualStationPlan);
+            if (!cleanup.ok) console.error(`  vLLM rollback warning: ${cleanup.reason}`);
+          }
+          console.error(`  vLLM install failed: ${String(ready.reason)}`);
+          return { ok: false };
+        }
+
+        const authBoundary = verifyDualStationVllmAuthBoundary(
+          start.baseUrl,
+          dualStationApiKey,
+          servedModelId,
+        );
+        if (!authBoundary.ok) {
+          if (!start.reusedExisting) {
+            const cleanup = await cleanupDualStationManagedVllm(dualStationPlan);
+            if (!cleanup.ok) console.error(`  vLLM rollback warning: ${cleanup.reason}`);
+          }
+          console.error(`  vLLM install failed: ${authBoundary.reason}`);
+          return { ok: false };
+        }
+
+        if (!areDualStationManagedVllmContainersRunning(dualStationPlan)) {
+          if (!start.reusedExisting) {
+            const cleanup = await cleanupDualStationManagedVllm(dualStationPlan);
+            if (!cleanup.ok) console.error(`  vLLM rollback warning: ${cleanup.reason}`);
+          }
+          console.error("  vLLM distributed containers exited unexpectedly after readiness");
+          return { ok: false };
+        }
+
+        console.log(`  ✓ vLLM ready across two DGX Stations at ${start.baseUrl}`);
+        return { ok: true };
+      });
+    } catch (error) {
+      console.error(
+        `  vLLM install failed: dual-Station lifecycle lock failed: ${(error as Error).message}`,
+      );
+      return { ok: false };
+    }
   }
 
   const start = startContainer(runtimeProfile, model);
@@ -1088,9 +1484,9 @@ export async function installVllm(
     `Launch can take 5 minutes to ${String(Math.ceil(runtimeProfile.loadTimeoutSec / 60))} minutes`,
   );
 
-  const ready = await waitForVllmReady(runtimeProfile);
+  const ready = await waitForVllmReady(runtimeProfile, undefined, localDockerEnv);
   if (!ready.ok) {
-    printContainerLogTail(runtimeProfile);
+    printContainerLogTail(runtimeProfile, localDockerEnv);
     dockerStop(runtimeProfile.containerName, {
       env: buildVllmDockerEnv(),
       ignoreError: true,
@@ -1100,7 +1496,7 @@ export async function installVllm(
     return { ok: false };
   }
 
-  if (!containerStillRunning(runtimeProfile)) {
+  if (!containerStillRunning(runtimeProfile, localDockerEnv)) {
     console.error("  vLLM container exited unexpectedly after readiness");
     return { ok: false };
   }

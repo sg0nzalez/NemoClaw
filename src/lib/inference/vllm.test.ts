@@ -58,7 +58,6 @@ import {
   buildVllmRunArgs,
   detectVllmProfile,
   installVllm,
-  isNemoClawManagedVllmRunning,
   NEMOCLAW_VLLM_CONTAINER_NAME,
   NEMOCLAW_VLLM_MANAGED_LABEL,
   pullImage,
@@ -119,9 +118,16 @@ const MANAGED_CONTAINER_ID = "a".repeat(64);
 
 function vllmContainerRow(
   containerName: string,
-  { id = MANAGED_CONTAINER_ID, label = "true", state = "exited" } = {},
+  {
+    id = MANAGED_CONTAINER_ID,
+    label = "true",
+    state = "exited",
+    dualRole = "",
+    dualEndpoint = "",
+    dualCluster = "",
+  } = {},
 ): string {
-  return `${id}|${containerName}|${state}|${label}`;
+  return [id, containerName, state, label, dualRole, dualEndpoint, dualCluster].join("|");
 }
 
 function mockSuccessfulVllmInstall(
@@ -511,52 +517,6 @@ describe("vLLM run command", () => {
   });
 });
 
-describe("managed vLLM ownership", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it("recognizes only the exact running container with the managed label", () => {
-    mocks.dockerCapture.mockReturnValue(
-      vllmContainerRow(NEMOCLAW_VLLM_CONTAINER_NAME, { state: "running" }),
-    );
-
-    expect(isNemoClawManagedVllmRunning()).toBe(true);
-    expect(mocks.dockerCapture).toHaveBeenCalledWith(
-      [
-        "container",
-        "ls",
-        "--all",
-        "--no-trunc",
-        "--filter",
-        `name=^/${NEMOCLAW_VLLM_CONTAINER_NAME}$`,
-        "--format",
-        `{{.ID}}|{{.Names}}|{{.State}}|{{.Label "${NEMOCLAW_VLLM_MANAGED_LABEL}"}}`,
-      ],
-      expect.objectContaining({ timeout: 10_000 }),
-    );
-  });
-
-  it.each([
-    vllmContainerRow(NEMOCLAW_VLLM_CONTAINER_NAME),
-    vllmContainerRow(NEMOCLAW_VLLM_CONTAINER_NAME, { label: "" }),
-    vllmContainerRow(NEMOCLAW_VLLM_CONTAINER_NAME, { label: "false", state: "running" }),
-    "",
-    "malformed",
-    `${vllmContainerRow(NEMOCLAW_VLLM_CONTAINER_NAME)}\n${vllmContainerRow(NEMOCLAW_VLLM_CONTAINER_NAME)}`,
-  ])("fails closed for inspect output %j", (output) => {
-    mocks.dockerCapture.mockReturnValue(output);
-    expect(isNemoClawManagedVllmRunning()).toBe(false);
-  });
-
-  it("fails closed when Docker inspection throws", () => {
-    mocks.dockerCapture.mockImplementation(() => {
-      throw new Error("docker unavailable");
-    });
-    expect(isNemoClawManagedVllmRunning()).toBe(false);
-  });
-});
-
 describe("installVllm model resolution", () => {
   let logSpy: ReturnType<typeof vi.spyOn>;
   let errSpy: ReturnType<typeof vi.spyOn>;
@@ -572,6 +532,7 @@ describe("installVllm model resolution", () => {
     stdoutWrite = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     delete process.env.NEMOCLAW_VLLM_MODEL;
     delete process.env.NEMOCLAW_VLLM_EXTRA_ARGS_JSON;
+    delete process.env.NEMOCLAW_DGX_STATION_PEER;
     delete process.env.HF_TOKEN;
     delete process.env.HUGGING_FACE_HUB_TOKEN;
     // Fail dockerPrereqsOk so the function returns before any docker work,
@@ -647,6 +608,7 @@ describe("installVllm model resolution", () => {
 
   it("rejects a Station-only runtime override before side effects on generic Linux", async () => {
     process.env.NEMOCLAW_VLLM_MODEL = "nemotron-3-ultra-550b-a55b";
+    process.env.HF_TOKEN = "hf_test";
     const profile = detectVllmProfile({ platform: "linux", type: "nvidia" })!;
     const beforeInstall = vi.fn();
 
@@ -670,6 +632,7 @@ describe("installVllm model resolution", () => {
 
   it("installs the complete Nemotron Ultra Station recipe without another selection", async () => {
     process.env.NEMOCLAW_VLLM_MODEL = "nemotron-3-ultra-550b-a55b";
+    process.env.HF_TOKEN = "hf_test";
     const profile = detectVllmProfile({ platform: "station", type: "nvidia" })!;
     const beforeInstall = vi.fn();
     const promptFn = vi.fn<(q: string) => Promise<string>>();
@@ -851,6 +814,7 @@ describe("installVllm model resolution", () => {
 
   it("continues a non-interactive Ultra download when the HF cache is too small", async () => {
     process.env.NEMOCLAW_VLLM_MODEL = "nemotron-3-ultra-550b-a55b";
+    process.env.HF_TOKEN = "hf_test";
     const profile = detectVllmProfile({ platform: "station", type: "nvidia" })!;
     mockSuccessfulVllmInstall(profile.containerName);
     mocks.dockerImageInspectFormat.mockReturnValue("sha256:cached-image");
@@ -896,6 +860,7 @@ describe("installVllm model resolution", () => {
     downloads,
   }) => {
     process.env.NEMOCLAW_VLLM_MODEL = "nemotron-3-ultra-550b-a55b";
+    process.env.HF_TOKEN = "hf_test";
     const profile = detectVllmProfile({ platform: "station", type: "nvidia" })!;
     mockSuccessfulVllmInstall(profile.containerName);
     mocks.dockerImageInspectFormat.mockReturnValue("sha256:cached-image");
@@ -925,6 +890,7 @@ describe("installVllm model resolution", () => {
 
   it("fails closed before downloads when non-interactive model-cache capacity is inconclusive", async () => {
     process.env.NEMOCLAW_VLLM_MODEL = "nemotron-3-ultra-550b-a55b";
+    process.env.HF_TOKEN = "hf_test";
     const profile = detectVllmProfile({ platform: "station", type: "nvidia" })!;
     mockSuccessfulVllmInstall(profile.containerName);
     mocks.probeHostStorage.mockReturnValue(inconclusiveModelStorage());
@@ -961,6 +927,7 @@ describe("installVllm model resolution", () => {
     downloads,
   }) => {
     process.env.NEMOCLAW_VLLM_MODEL = "nemotron-3-ultra-550b-a55b";
+    process.env.HF_TOKEN = "hf_test";
     const profile = detectVllmProfile({ platform: "station", type: "nvidia" })!;
     mockSuccessfulVllmInstall(profile.containerName);
     mocks.dockerImageInspectFormat.mockReturnValue("sha256:cached-image");
@@ -983,6 +950,7 @@ describe("installVllm model resolution", () => {
 
   it("re-probes after a cold image pull before continuing past a storage warning", async () => {
     process.env.NEMOCLAW_VLLM_MODEL = "nemotron-3-ultra-550b-a55b";
+    process.env.HF_TOKEN = "hf_test";
     const profile = detectVllmProfile({ platform: "station", type: "nvidia" })!;
     mockSuccessfulVllmInstall(profile.containerName);
     mocks.probeHostStorage
@@ -1028,6 +996,7 @@ describe("installVllm model resolution", () => {
 
   it("stops when the post-pull model-cache capacity re-probe is inconclusive", async () => {
     process.env.NEMOCLAW_VLLM_MODEL = "nemotron-3-ultra-550b-a55b";
+    process.env.HF_TOKEN = "hf_test";
     const profile = detectVllmProfile({ platform: "station", type: "nvidia" })!;
     mockSuccessfulVllmInstall(profile.containerName);
     mocks.probeHostStorage
@@ -1059,6 +1028,7 @@ describe("installVllm model resolution", () => {
 
   it("requires only missing snapshot bytes plus headroom for a partial Ultra cache", async () => {
     process.env.NEMOCLAW_VLLM_MODEL = "nemotron-3-ultra-550b-a55b";
+    process.env.HF_TOKEN = "hf_test";
     const profile = detectVllmProfile({ platform: "station", type: "nvidia" })!;
     mockSuccessfulVllmInstall(profile.containerName);
     mocks.dockerImageInspectFormat.mockReturnValue("sha256:cached-image");
@@ -1088,6 +1058,7 @@ describe("installVllm model resolution", () => {
 
   it("skips the capacity gate for a complete pinned Ultra snapshot", async () => {
     process.env.NEMOCLAW_VLLM_MODEL = "nemotron-3-ultra-550b-a55b";
+    process.env.HF_TOKEN = "hf_test";
     const profile = detectVllmProfile({ platform: "station", type: "nvidia" })!;
     mockSuccessfulVllmInstall(profile.containerName);
     mocks.dockerImageInspectFormat.mockReturnValue("sha256:cached-image");
@@ -1374,6 +1345,28 @@ describe("installVllm model resolution", () => {
     );
     expect(mocks.dockerForceRm).not.toHaveBeenCalledWith(profile.containerName, expect.anything());
     expect(mocks.dockerRunDetached).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses single-host replacement of a managed dual head so the peer is not orphaned", async () => {
+    const profile = detectVllmProfile({ platform: "spark", type: "nvidia" })!;
+    const dualHead = vllmContainerRow(profile.containerName, {
+      state: "running",
+      dualRole: "head",
+      dualEndpoint: "http://192.168.100.1:8000",
+      dualCluster: "f".repeat(64),
+    });
+    mockSuccessfulVllmInstall(profile.containerName, [() => dualHead]);
+
+    const result = await installVllm(profile, {
+      hasImage: true,
+      nonInteractive: true,
+      promptFn: vi.fn(),
+    });
+
+    expect(result).toEqual({ ok: false });
+    expect(mocks.dockerForceRm).not.toHaveBeenCalled();
+    expect(mocks.dockerSpawn).not.toHaveBeenCalled();
+    expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("orphan the peer worker"));
   });
 
   it.each([

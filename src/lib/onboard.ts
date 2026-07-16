@@ -1086,7 +1086,7 @@ const {
 // biome-ignore format: keep src/lib/onboard.ts net-neutral for growth guardrail.
 const handleVllmSelection = createSetupNimVllmHandler({
   VLLM_PORT, runCapture, getLocalProviderBaseUrl, getLocalProviderValidationBaseUrl,
-  isSafeModelId, requireValue, validateOpenAiLikeSelection,
+  getManagedVllmProviderBinding: localInference.getManagedDualStationVllmProviderBinding, queryVllmModels: (baseUrl, apiKey) => { const result = localInference.probeVllmModels(baseUrl, apiKey); return result.ok ? result.body : ""; }, isSafeModelId, requireValue, validateOpenAiLikeSelection,
   applyVllmRuntimeContextWindow: localInference.applyVllmRuntimeContextWindow, isDgxSparkHost: () => nim.detectNvidiaPlatform() === "spark", isNemoClawManagedVllmRunning,
   exitProcess: (code) => process.exit(code),
 });

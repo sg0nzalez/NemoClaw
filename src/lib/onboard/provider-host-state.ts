@@ -2,8 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { dockerCapture as defaultDockerCapture } from "../adapters/docker";
-import { OLLAMA_PORT, VLLM_PORT } from "../core/ports";
-import { findReachableOllamaHost, OLLAMA_HOST_DOCKER_INTERNAL } from "../inference/local";
+import { OLLAMA_PORT } from "../core/ports";
+import {
+  findReachableOllamaHost,
+  getLocalProviderAvailabilityEndpoint,
+  OLLAMA_HOST_DOCKER_INTERNAL,
+} from "../inference/local";
 import type { NvidiaPlatform } from "../inference/nim";
 import { detectVllmProfile, type VllmProfile } from "../inference/vllm";
 import { buildVllmDockerEnv } from "../inference/vllm-docker-env";
@@ -112,10 +116,14 @@ function buildDeps(
 }
 
 function probeVllmRunning(runCapture: RunCapture): boolean {
-  return !!runCapture(
-    ["curl", "-sf", ...LOCAL_PROVIDER_PROBE_CURL_ARGS, `http://127.0.0.1:${VLLM_PORT}/v1/models`],
-    { ignoreError: true },
-  );
+  const endpoint = getLocalProviderAvailabilityEndpoint("vllm-local");
+  if (!endpoint) return false;
+  const writeOut = endpoint.endsWith("/health")
+    ? ["--noproxy", "*", "--write-out", "%{http_code}"]
+    : [];
+  return !!runCapture(["curl", "-sf", ...LOCAL_PROVIDER_PROBE_CURL_ARGS, ...writeOut, endpoint], {
+    ignoreError: true,
+  });
 }
 
 function probeWindowsOllamaReachable(input: {

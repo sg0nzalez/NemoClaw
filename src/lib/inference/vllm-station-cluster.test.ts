@@ -1,0 +1,842 @@
+// SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+import type { SpawnSyncOptionsWithStringEncoding } from "node:child_process";
+
+import { describe, expect, it, vi } from "vitest";
+
+import { buildRemoteVllmDockerEnv } from "./vllm-docker-env";
+import {
+  createStationClusterProbeDeps,
+  DUAL_STATION_VLLM_RUNTIME,
+  NEMOCLAW_DGX_STATION_PEER_ENV,
+  parseStationHostProbe,
+  probeDualStationVllmCapability,
+  type StationClusterProbeDeps,
+  type StationHostProbe,
+  type StationProbeCommandResult,
+  type StationRailConnectivityRequest,
+} from "./vllm-station-cluster";
+
+const LOCAL_HOME = "/home/local";
+const PEER_HOME = "/home/nvidia";
+const STRICT_DOCKER_SSH_CONFIG = [
+  "batchmode yes",
+  "stricthostkeychecking true",
+  "permitlocalcommand no",
+  "forwardagent no",
+  "forwardx11 no",
+  "forwardx11trusted no",
+  "tunnel false",
+  "updatehostkeys no",
+  "controlmaster false",
+  "controlpersist no",
+  "sendenv LANG",
+  "sendenv LC_*",
+].join("\n");
+
+function snapshotPath(home: string): string {
+  return [
+    home,
+    ".cache/huggingface/hub",
+    `models--${DUAL_STATION_VLLM_RUNTIME.modelId.replace("/", "--")}`,
+    "snapshots",
+    DUAL_STATION_VLLM_RUNTIME.modelRevision,
+  ].join("/");
+}
+
+function rail(
+  rdmaDevice: string,
+  netdev: string,
+  pciAddress: string,
+  address: string,
+  gidIndexes: number[] = [3, 5],
+) {
+  const hostOctet = netdev.includes("a") ? "aa" : "bb";
+  const railOctet = netdev.endsWith("0") ? "00" : "01";
+  return {
+    rdmaDevice,
+    port: 1,
+    netdev,
+    macAddress: `02:00:00:${hostOctet}:00:${railOctet}`,
+    uverbsDevice: `/dev/infiniband/uverbs${rdmaDevice.endsWith("0") ? "0" : "1"}`,
+    pciAddress,
+    pciName: `${pciAddress} Ethernet controller: NVIDIA ConnectX-8 SuperNIC`,
+    state: "4: ACTIVE",
+    linkLayer: "Ethernet",
+    speedMbps: 400_000,
+    mtu: 9000,
+    ipv4Addresses: [{ address, prefixLength: 30 }],
+    roceV2Ipv4Gids: gidIndexes.map((index) => ({ index, address })),
+  };
+}
+
+function setRailAddress(
+  item: ReturnType<typeof rail>,
+  address: string,
+  prefixLength: number,
+): void {
+  item.ipv4Addresses = [{ address, prefixLength }];
+  item.roceV2Ipv4Gids = item.roceV2Ipv4Gids.map((gid) => ({ ...gid, address }));
+}
+
+function hostFixture(side: "local" | "peer"): StationHostProbe {
+  const isLocal = side === "local";
+  const home = isLocal ? LOCAL_HOME : PEER_HOME;
+  return {
+    schemaVersion: 1,
+    hostname: isLocal ? "station-a" : "station-b",
+    productName: "NVIDIA DGX Station GB300",
+    architecture: "aarch64",
+    home,
+    uid: isLocal ? 1000 : 1001,
+    gpus: isLocal
+      ? [{ index: 0, name: "NVIDIA GB300", uuid: "GPU-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" }]
+      : [
+          {
+            index: 0,
+            name: "NVIDIA RTX PRO 6000",
+            uuid: "GPU-11111111-2222-3333-4444-555555555555",
+          },
+          {
+            index: 1,
+            name: "NVIDIA GB300 Grace Blackwell Superchip",
+            uuid: "GPU-99999999-8888-7777-6666-555555555555",
+          },
+        ],
+    docker: { reachable: true, nvidiaRuntime: true },
+    rsyncAvailable: true,
+    nvidiaPeermemLoaded: true,
+    rails: isLocal
+      ? [
+          rail("mlx5_0", "cx8a0", "0001:03:00.0", "192.168.240.1"),
+          rail("mlx5_1", "cx8a1", "0001:03:00.1", "192.168.240.5"),
+        ]
+      : [
+          // Deliberately reverse inventory order; matching is by subnet.
+          rail("mlx5_1", "cx8b1", "0002:03:00.1", "192.168.240.6"),
+          rail("mlx5_0", "cx8b0", "0002:03:00.0", "192.168.240.2"),
+        ],
+    modelSnapshot: {
+      modelId: DUAL_STATION_VLLM_RUNTIME.modelId,
+      revision: DUAL_STATION_VLLM_RUNTIME.modelRevision,
+      path: snapshotPath(home),
+      directoryExists: !isLocal,
+      complete: !isLocal,
+      shardCount: isLocal ? 0 : 113,
+      reason: isLocal ? "not staged yet" : "",
+    },
+  };
+}
+
+function command(stdout: unknown, status = 0): StationProbeCommandResult {
+  return { status, stdout: typeof stdout === "string" ? stdout : JSON.stringify(stdout) };
+}
+
+function connectivityResponse(
+  requests: readonly StationRailConnectivityRequest[],
+  alter: (check: Record<string, unknown>, index: number) => void = () => undefined,
+): StationProbeCommandResult {
+  const checks = requests.map((request, index) => {
+    const check: Record<string, unknown> = {
+      ...request,
+      routeDevice: request.netdev,
+      routeSource: request.sourceAddress,
+      routeGateway: null,
+      routeScope: "link",
+      peerMac: request.expectedPeerMac,
+      peerNeighborState: "REACHABLE",
+      jumboPing: true,
+    };
+    alter(check, index);
+    return check;
+  });
+  return command({ schemaVersion: 1, checks });
+}
+
+type FixtureDeps = StationClusterProbeDeps & {
+  calls: {
+    sshConfig: ReturnType<typeof vi.fn>;
+    localHost: ReturnType<typeof vi.fn>;
+    peerHost: ReturnType<typeof vi.fn>;
+    localConnectivity: ReturnType<typeof vi.fn>;
+    peerConnectivity: ReturnType<typeof vi.fn>;
+  };
+};
+
+function fixtureDeps(
+  local = hostFixture("local"),
+  peer = hostFixture("peer"),
+  options: {
+    localConnectivityAlter?: (check: Record<string, unknown>, index: number) => void;
+    peerConnectivityAlter?: (check: Record<string, unknown>, index: number) => void;
+  } = {},
+): FixtureDeps {
+  const localHost = vi.fn(() => command(local));
+  const peerHost = vi.fn(() => command(peer));
+  const sshConfig = vi.fn(() => command(STRICT_DOCKER_SSH_CONFIG));
+  const localConnectivity = vi.fn((requests: readonly StationRailConnectivityRequest[]) =>
+    connectivityResponse(requests, options.localConnectivityAlter),
+  );
+  const peerConnectivity = vi.fn(
+    (_target: string, requests: readonly StationRailConnectivityRequest[]) =>
+      connectivityResponse(requests, options.peerConnectivityAlter),
+  );
+  return {
+    probePeerSshConfig: sshConfig,
+    probeLocalHost: localHost,
+    probePeerHost: peerHost,
+    probeLocalConnectivity: localConnectivity,
+    probePeerConnectivity: peerConnectivity,
+    calls: { sshConfig, localHost, peerHost, localConnectivity, peerConnectivity },
+  };
+}
+
+function runWith(deps: StationClusterProbeDeps, target = "nvidia@station-b") {
+  return probeDualStationVllmCapability({
+    env: { [NEMOCLAW_DGX_STATION_PEER_ENV]: target },
+    deps,
+  });
+}
+
+describe("probeDualStationVllmCapability", () => {
+  it.each([
+    undefined,
+    "",
+    "   ",
+  ])("does no work when the explicit peer is absent or blank (%s)", (value) => {
+    const deps = fixtureDeps();
+    const env = value === undefined ? {} : { [NEMOCLAW_DGX_STATION_PEER_ENV]: value };
+
+    expect(probeDualStationVllmCapability({ env, deps })).toEqual({ kind: "not-configured" });
+    expect(deps.calls.sshConfig).not.toHaveBeenCalled();
+    expect(deps.calls.localHost).not.toHaveBeenCalled();
+    expect(deps.calls.peerHost).not.toHaveBeenCalled();
+    expect(deps.calls.localConnectivity).not.toHaveBeenCalled();
+    expect(deps.calls.peerConnectivity).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "ssh://station-b",
+    "-oProxyCommand=bad",
+    "station-a,station-b",
+    "station-b:2222",
+    "user name@station-b",
+    "station-b;id",
+    "station-b$(id)",
+    "user@station-b@other",
+    " station-b",
+    "station-b\nother",
+    "Station-B",
+    "station_b",
+    "station..b",
+    "station-b.",
+    "1user@station-b",
+  ])("rejects a non-single-host peer value without executing: %s", (target) => {
+    const deps = fixtureDeps();
+
+    expect(runWith(deps, target)).toMatchObject({ kind: "unavailable", code: "invalid-peer" });
+    expect(deps.calls.sshConfig).not.toHaveBeenCalled();
+    expect(deps.calls.localHost).not.toHaveBeenCalled();
+    expect(deps.calls.peerHost).not.toHaveBeenCalled();
+  });
+
+  it("rejects Docker-over-SSH when the effective operator config weakens peer trust", () => {
+    const deps = fixtureDeps();
+    deps.probePeerSshConfig = () =>
+      command(
+        STRICT_DOCKER_SSH_CONFIG.replace(
+          "stricthostkeychecking true",
+          "stricthostkeychecking false",
+        ),
+      );
+
+    expect(runWith(deps)).toMatchObject({
+      kind: "unavailable",
+      code: "peer-ssh-config-unsafe",
+    });
+    expect(deps.calls.localHost).not.toHaveBeenCalled();
+    expect(deps.calls.peerHost).not.toHaveBeenCalled();
+  });
+
+  it("rejects an SSH config that can SendEnv arbitrary NemoClaw secrets", () => {
+    const deps = fixtureDeps();
+    deps.probePeerSshConfig = () => command(`${STRICT_DOCKER_SSH_CONFIG}\nsendenv *`);
+
+    expect(runWith(deps)).toMatchObject({
+      kind: "unavailable",
+      code: "peer-ssh-config-unsafe",
+    });
+    expect(deps.calls.localHost).not.toHaveBeenCalled();
+  });
+
+  it("rejects an ambient Docker client override before mixing it with local hardware", () => {
+    const deps = fixtureDeps();
+
+    expect(
+      probeDualStationVllmCapability({
+        env: {
+          [NEMOCLAW_DGX_STATION_PEER_ENV]: "nvidia@station-b",
+          DOCKER_CONTEXT: "remote-builder",
+        },
+        deps,
+      }),
+    ).toMatchObject({ kind: "unavailable", code: "local-docker-unavailable" });
+    expect(deps.calls.sshConfig).not.toHaveBeenCalled();
+    expect(deps.calls.localHost).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "station-b",
+    "nvidia@station-b",
+    "_svc@192.168.50.20",
+  ])("returns a downstream-compatible canonical Docker-over-SSH URI for %s", (target) => {
+    expect(runWith(fixtureDeps(), target)).toMatchObject({
+      kind: "ready",
+      peerModelSnapshot: "ready",
+      plan: { peerSshTarget: target, peerDockerHost: `ssh://${target}` },
+    });
+    expect(buildRemoteVllmDockerEnv(`ssh://${target}`, {}).DOCKER_HOST).toBe(`ssh://${target}`);
+  });
+
+  it("returns a deterministic two-rail TP2 plan and permits one auxiliary non-GB300 GPU", () => {
+    const deps = fixtureDeps();
+
+    const result = runWith(deps);
+
+    expect(result).toMatchObject({
+      kind: "ready",
+      plan: {
+        peerSshTarget: "nvidia@station-b",
+        peerDockerHost: "ssh://nvidia@station-b",
+        runtime: {
+          image:
+            "vllm/vllm-openai@sha256:0fec7ec5f3e6bc168e54899935fb0557da908a4832a1dbc88e2debcf2f889416",
+          modelRevision: "183968f87ae4cedce3039313cac1fd43d112c578",
+          tensorParallelSize: 2,
+          nodeCount: 2,
+        },
+        local: { home: LOCAL_HOME, uid: 1000, gpu: { index: 0, name: "NVIDIA GB300" } },
+        peer: {
+          home: PEER_HOME,
+          uid: 1001,
+          gpu: { index: 1, name: "NVIDIA GB300 Grace Blackwell Superchip" },
+        },
+        masterAddress: "192.168.240.1",
+        roceGidIndex: 3,
+        rails: [
+          {
+            subnet: "192.168.240.0/30",
+            local: {
+              rdmaDevice: "mlx5_0",
+              netdev: "cx8a0",
+              uverbsDevice: "/dev/infiniband/uverbs0",
+              address: "192.168.240.1",
+            },
+            peer: {
+              rdmaDevice: "mlx5_0",
+              netdev: "cx8b0",
+              uverbsDevice: "/dev/infiniband/uverbs0",
+              address: "192.168.240.2",
+            },
+          },
+          {
+            subnet: "192.168.240.4/30",
+            local: {
+              rdmaDevice: "mlx5_1",
+              netdev: "cx8a1",
+              uverbsDevice: "/dev/infiniband/uverbs1",
+              address: "192.168.240.5",
+            },
+            peer: {
+              rdmaDevice: "mlx5_1",
+              netdev: "cx8b1",
+              uverbsDevice: "/dev/infiniband/uverbs1",
+              address: "192.168.240.6",
+            },
+          },
+        ],
+      },
+    });
+    expect(deps.calls.peerHost).toHaveBeenCalledWith("nvidia@station-b");
+    expect(deps.calls.localConnectivity).toHaveBeenCalledWith([
+      {
+        netdev: "cx8a0",
+        sourceAddress: "192.168.240.1",
+        peerAddress: "192.168.240.2",
+        expectedPeerMac: "02:00:00:bb:00:00",
+      },
+      {
+        netdev: "cx8a1",
+        sourceAddress: "192.168.240.5",
+        peerAddress: "192.168.240.6",
+        expectedPeerMac: "02:00:00:bb:00:01",
+      },
+    ]);
+    expect(deps.calls.peerConnectivity).toHaveBeenCalledWith("nvidia@station-b", [
+      {
+        netdev: "cx8b0",
+        sourceAddress: "192.168.240.2",
+        peerAddress: "192.168.240.1",
+        expectedPeerMac: "02:00:00:aa:00:00",
+      },
+      {
+        netdev: "cx8b1",
+        sourceAddress: "192.168.240.6",
+        peerAddress: "192.168.240.5",
+        expectedPeerMac: "02:00:00:aa:00:01",
+      },
+    ]);
+  });
+
+  it("uses the lowest common RoCEv2 IPv4 GID when preferred index 3 is unavailable", () => {
+    const local = hostFixture("local");
+    const peer = hostFixture("peer");
+    for (const item of [...local.rails, ...peer.rails]) {
+      item.roceV2Ipv4Gids = item.roceV2Ipv4Gids.map((gid) => ({ ...gid, index: 5 }));
+    }
+
+    expect(runWith(fixtureDeps(local, peer))).toMatchObject({
+      kind: "ready",
+      plan: { roceGidIndex: 5 },
+    });
+  });
+
+  it.each([
+    "DGX-Station",
+    "P3830",
+    "NVIDIA Station GB300",
+  ])("accepts an existing Station firmware product identifier: %s", (productName) => {
+    const peer = hostFixture("peer");
+    peer.productName = productName;
+
+    expect(runWith(fixtureDeps(hostFixture("local"), peer))).toMatchObject({
+      kind: "ready",
+      peerModelSnapshot: "ready",
+    });
+  });
+
+  it.each([
+    {
+      name: "non-Station peer",
+      code: "peer-not-station",
+      mutate: (host: StationHostProbe) => {
+        host.productName = "Generic Linux Workstation";
+      },
+    },
+    {
+      name: "more than one peer GB300",
+      code: "peer-gpu-unavailable",
+      mutate: (host: StationHostProbe) => {
+        host.gpus.push({ index: 2, name: "NVIDIA GB300", uuid: "GPU-aaaa-bbbb-cccc-dddd" });
+      },
+    },
+    {
+      name: "missing peer NVIDIA runtime",
+      code: "peer-docker-unavailable",
+      mutate: (host: StationHostProbe) => {
+        host.docker.nvidiaRuntime = false;
+      },
+    },
+    {
+      name: "missing peer nvidia_peermem",
+      code: "peer-fabric-unavailable",
+      mutate: (host: StationHostProbe) => {
+        host.nvidiaPeermemLoaded = false;
+      },
+    },
+    {
+      name: "slow peer rail",
+      code: "peer-fabric-unavailable",
+      mutate: (host: StationHostProbe) => {
+        host.rails[0].speedMbps = 200_000;
+      },
+    },
+    {
+      name: "non-jumbo peer rail",
+      code: "peer-fabric-unavailable",
+      mutate: (host: StationHostProbe) => {
+        host.rails[1].mtu = 1500;
+      },
+    },
+    {
+      name: "unsupported peer RDMA port",
+      code: "peer-fabric-unavailable",
+      mutate: (host: StationHostProbe) => {
+        host.rails[0].port = 2;
+      },
+    },
+    {
+      name: "missing peer uverbs character device",
+      code: "peer-fabric-unavailable",
+      mutate: (host: StationHostProbe) => {
+        host.rails[0].uverbsDevice = "";
+      },
+    },
+    {
+      name: "duplicate peer uverbs mapping",
+      code: "peer-fabric-unavailable",
+      mutate: (host: StationHostProbe) => {
+        host.rails[1].uverbsDevice = host.rails[0].uverbsDevice;
+      },
+    },
+    {
+      name: "incomplete peer snapshot",
+      code: "peer-model-cache-unavailable",
+      mutate: (host: StationHostProbe) => {
+        host.modelSnapshot.complete = false;
+      },
+    },
+    {
+      name: "wrong peer snapshot revision",
+      code: "peer-model-cache-unavailable",
+      mutate: (host: StationHostProbe) => {
+        host.modelSnapshot.revision = "f".repeat(40);
+      },
+    },
+    {
+      name: "truncated peer snapshot manifest",
+      code: "peer-model-cache-unavailable",
+      mutate: (host: StationHostProbe) => {
+        host.modelSnapshot.shardCount = 1;
+      },
+    },
+  ])("fails closed for $name", ({ code, mutate }) => {
+    const peer = hostFixture("peer");
+    mutate(peer);
+
+    expect(runWith(fixtureDeps(hostFixture("local"), peer))).toMatchObject({
+      kind: "unavailable",
+      code,
+    });
+  });
+
+  it("qualifies a missing peer snapshot when exact staging prerequisites exist", () => {
+    const peer = hostFixture("peer");
+    peer.modelSnapshot.directoryExists = false;
+    peer.modelSnapshot.complete = false;
+    peer.modelSnapshot.shardCount = 0;
+    peer.modelSnapshot.reason = "snapshot directory is missing";
+
+    expect(runWith(fixtureDeps(hostFixture("local"), peer))).toMatchObject({
+      kind: "ready",
+      peerModelSnapshot: "staging-required",
+    });
+  });
+
+  it.each([
+    { side: "local", code: "local-model-staging-unavailable" },
+    { side: "peer", code: "peer-model-staging-unavailable" },
+  ])("requires rsync on the $side host before qualifying a missing snapshot", ({ side, code }) => {
+    const local = hostFixture("local");
+    const peer = hostFixture("peer");
+    peer.modelSnapshot.directoryExists = false;
+    peer.modelSnapshot.complete = false;
+    peer.modelSnapshot.shardCount = 0;
+    peer.modelSnapshot.reason = "snapshot directory is missing";
+    (side === "local" ? local : peer).rsyncAvailable = false;
+
+    expect(runWith(fixtureDeps(local, peer))).toMatchObject({ kind: "unavailable", code });
+  });
+
+  it("rejects rails that do not form two distinct shared direct subnets", () => {
+    const peer = hostFixture("peer");
+    peer.rails[0].ipv4Addresses = [{ address: "10.20.30.2", prefixLength: 30 }];
+    peer.rails[0].roceV2Ipv4Gids = [{ index: 3, address: "10.20.30.2" }];
+
+    expect(runWith(fixtureDeps(hostFixture("local"), peer))).toMatchObject({
+      kind: "unavailable",
+      code: "fabric-mismatch",
+    });
+  });
+
+  it("rejects two otherwise matching switched /24 rail networks", () => {
+    const local = hostFixture("local");
+    const peer = hostFixture("peer");
+    setRailAddress(local.rails[0], "192.168.100.1", 24);
+    setRailAddress(local.rails[1], "192.168.101.1", 24);
+    setRailAddress(peer.rails.find((item) => item.rdmaDevice === "mlx5_0")!, "192.168.100.2", 24);
+    setRailAddress(peer.rails.find((item) => item.rdmaDevice === "mlx5_1")!, "192.168.101.2", 24);
+
+    expect(runWith(fixtureDeps(local, peer))).toMatchObject({
+      kind: "unavailable",
+      code: "fabric-mismatch",
+    });
+  });
+
+  it("rejects public addresses even when they form matching /30 rail networks", () => {
+    const local = hostFixture("local");
+    const peer = hostFixture("peer");
+    setRailAddress(local.rails[0], "203.0.113.1", 30);
+    setRailAddress(local.rails[1], "198.51.100.5", 30);
+    setRailAddress(peer.rails.find((item) => item.rdmaDevice === "mlx5_0")!, "203.0.113.2", 30);
+    setRailAddress(peer.rails.find((item) => item.rdmaDevice === "mlx5_1")!, "198.51.100.6", 30);
+
+    expect(runWith(fixtureDeps(local, peer))).toMatchObject({
+      kind: "unavailable",
+      code: "fabric-mismatch",
+    });
+  });
+
+  it("rejects asymmetric RoCEv2 IPv4 GID indexes", () => {
+    const peer = hostFixture("peer");
+    peer.rails[0].roceV2Ipv4Gids = peer.rails[0].roceV2Ipv4Gids.map((gid) => ({
+      ...gid,
+      index: 7,
+    }));
+
+    expect(runWith(fixtureDeps(hostFixture("local"), peer))).toMatchObject({
+      kind: "unavailable",
+      code: "gid-mismatch",
+    });
+  });
+
+  it("rejects an SSH target that resolves back to the local Station identity", () => {
+    const local = hostFixture("local");
+    const peer = hostFixture("peer");
+    peer.gpus[1].uuid = local.gpus[0].uuid;
+
+    expect(runWith(fixtureDeps(local, peer))).toMatchObject({
+      kind: "unavailable",
+      code: "fabric-mismatch",
+    });
+  });
+
+  it("allows distinct factory-imaged Stations that report the same hostname", () => {
+    const local = hostFixture("local");
+    const peer = hostFixture("peer");
+    peer.hostname = local.hostname;
+
+    expect(runWith(fixtureDeps(local, peer))).toMatchObject({ kind: "ready" });
+  });
+
+  it("rejects a local route that traverses a gateway", () => {
+    const deps = fixtureDeps(hostFixture("local"), hostFixture("peer"), {
+      localConnectivityAlter: (check, index) => {
+        check.routeGateway = index === 0 ? "192.168.240.254" : check.routeGateway;
+      },
+    });
+
+    expect(runWith(deps)).toMatchObject({
+      kind: "unavailable",
+      code: "local-connectivity-failed",
+    });
+    expect(deps.calls.peerConnectivity).not.toHaveBeenCalled();
+  });
+
+  it("rejects a peer rail that cannot pass an MTU-9000 ping", () => {
+    const deps = fixtureDeps(hostFixture("local"), hostFixture("peer"), {
+      peerConnectivityAlter: (check, index) => {
+        check.jumboPing = index === 1 ? false : check.jumboPing;
+      },
+    });
+
+    expect(runWith(deps)).toMatchObject({
+      kind: "unavailable",
+      code: "peer-connectivity-failed",
+    });
+  });
+
+  it("rejects a route without a scope-link connected-prefix proof", () => {
+    const deps = fixtureDeps(hostFixture("local"), hostFixture("peer"), {
+      localConnectivityAlter: (check, index) => {
+        check.routeScope = index === 0 ? "global" : check.routeScope;
+      },
+    });
+
+    expect(runWith(deps)).toMatchObject({
+      kind: "unavailable",
+      code: "local-connectivity-failed",
+    });
+  });
+
+  it("rejects a neighbor MAC that does not identify the matched peer rail", () => {
+    const deps = fixtureDeps(hostFixture("local"), hostFixture("peer"), {
+      peerConnectivityAlter: (check, index) => {
+        check.peerMac = index === 0 ? "02:00:00:cc:00:00" : check.peerMac;
+      },
+    });
+
+    expect(runWith(deps)).toMatchObject({
+      kind: "unavailable",
+      code: "peer-connectivity-failed",
+    });
+  });
+
+  it("fails closed on command failure or malformed host JSON", () => {
+    const localFailure = fixtureDeps();
+    localFailure.probeLocalHost = () => command("", 1);
+    expect(runWith(localFailure)).toMatchObject({
+      kind: "unavailable",
+      code: "local-probe-failed",
+    });
+
+    const peerMalformed = fixtureDeps();
+    peerMalformed.probePeerHost = () => command("not-json");
+    expect(runWith(peerMalformed)).toMatchObject({
+      kind: "unavailable",
+      code: "peer-probe-failed",
+    });
+  });
+});
+
+describe("probe command boundary", () => {
+  it("audits the exact effective SSH config used later by Docker transport", () => {
+    const spawn = vi.fn(
+      (
+        _file: string,
+        _args: readonly string[],
+        _options: SpawnSyncOptionsWithStringEncoding,
+      ): StationProbeCommandResult => command(STRICT_DOCKER_SSH_CONFIG),
+    );
+    const deps = createStationClusterProbeDeps(spawn);
+
+    deps.probePeerSshConfig("nvidia@station-b");
+
+    const [file, args, options] = spawn.mock.calls[0];
+    expect(file).toBe("ssh");
+    expect(args).toEqual(["-G", "-T", "-o", "ConnectTimeout=30", "--", "nvidia@station-b"]);
+    expect(options.input).toBe("");
+    expect(options.timeout).toBe(20_000);
+  });
+
+  it("uses a fixed stdin script and strict pretrusted SSH without discovery or prompting", () => {
+    const spawn = vi.fn(
+      (
+        _file: string,
+        _args: readonly string[],
+        _options: SpawnSyncOptionsWithStringEncoding,
+      ): StationProbeCommandResult => command({}),
+    );
+    const deps = createStationClusterProbeDeps(spawn);
+
+    deps.probePeerHost("nvidia@station-b");
+
+    const [file, args, options] = spawn.mock.calls[0];
+    expect(file).toBe("ssh");
+    expect(args).toEqual(
+      expect.arrayContaining([
+        "BatchMode=yes",
+        "StrictHostKeyChecking=yes",
+        "NumberOfPasswordPrompts=0",
+        "ConnectTimeout=5",
+        "ClearAllForwardings=yes",
+        "--",
+        "nvidia@station-b",
+        "python3 -",
+      ]),
+    );
+    expect(args.join(" ")).not.toMatch(/keyscan|accept-new|StrictHostKeyChecking=no/);
+    expect(options.input).toEqual(expect.stringContaining('docker", "info'));
+    expect(options.input).toEqual(expect.stringContaining("/sys/firmware/devicetree/base/model"));
+    expect(options.input).toEqual(expect.stringContaining("shard_path.is_absolute()"));
+    expect(options.input).toEqual(expect.stringContaining('shutil.which("rsync")'));
+    expect(options.input).toEqual(expect.stringContaining('"directoryExists"'));
+    expect(options.input).toEqual(expect.stringContaining("len(shards) != 113"));
+    expect(options.input).toEqual(
+      expect.stringContaining("observed_tensor_size != expected_total_size"),
+    );
+    expect(options.input).toEqual(expect.stringContaining('"infiniband_verbs"'));
+    expect(options.input).toEqual(expect.stringContaining('re.fullmatch(r"uverbs[0-9]+"'));
+    expect(options.input).toEqual(expect.stringContaining("len(names) != 1"));
+    expect(options.input).toEqual(expect.stringContaining("stat.S_ISCHR"));
+    expect(options.timeout).toBe(20_000);
+    expect(options.maxBuffer).toBe(1024 * 1024);
+  });
+
+  it("removes OPENSHELL secrets from the direct SSH probe environment", () => {
+    vi.stubEnv("OPENSHELL_GATEWAY_AUTH_TOKEN", "must-not-cross-ssh");
+    const spawn = vi.fn(
+      (
+        _file: string,
+        _args: readonly string[],
+        _options: SpawnSyncOptionsWithStringEncoding,
+      ): StationProbeCommandResult => command({}),
+    );
+    const deps = createStationClusterProbeDeps(spawn);
+
+    deps.probePeerHost("nvidia@station-b");
+
+    const [, , options] = spawn.mock.calls[0];
+    expect(options.env?.OPENSHELL_GATEWAY_AUTH_TOKEN).toBeUndefined();
+    expect(options.env?.PATH).toBeTruthy();
+    vi.unstubAllEnvs();
+  });
+
+  it("pins the local hardware probe to Docker's physical default context", () => {
+    const spawn = vi.fn(
+      (
+        _file: string,
+        _args: readonly string[],
+        _options: SpawnSyncOptionsWithStringEncoding,
+      ): StationProbeCommandResult => command({}),
+    );
+    const deps = createStationClusterProbeDeps(spawn);
+
+    deps.probeLocalHost();
+
+    const [file, , options] = spawn.mock.calls[0];
+    expect(file).toBe("python3");
+    expect(options.env?.DOCKER_CONTEXT).toBe("default");
+    expect(options.env?.DOCKER_HOST).toBeUndefined();
+    expect(options.env?.DOCKER_CONFIG).toBeUndefined();
+  });
+
+  it("passes only validated discovered rail values to the fixed peer connectivity script", () => {
+    const spawn = vi.fn(
+      (
+        _file: string,
+        _args: readonly string[],
+        _options: SpawnSyncOptionsWithStringEncoding,
+      ): StationProbeCommandResult => command({}),
+    );
+    const deps = createStationClusterProbeDeps(spawn);
+    const requests = [
+      {
+        netdev: "cx8b0",
+        sourceAddress: "192.168.240.2",
+        peerAddress: "192.168.240.1",
+        expectedPeerMac: "02:00:00:aa:00:00",
+      },
+      {
+        netdev: "cx8b1",
+        sourceAddress: "192.168.240.6",
+        peerAddress: "192.168.240.5",
+        expectedPeerMac: "02:00:00:aa:00:01",
+      },
+    ];
+
+    deps.probePeerConnectivity("station-b", requests);
+
+    const [, args, options] = spawn.mock.calls[0];
+    expect(args.at(-1)).toBe(
+      "python3 - cx8b0 192.168.240.2 192.168.240.1 cx8b1 192.168.240.6 192.168.240.5",
+    );
+    expect(options.input).toEqual(expect.stringContaining('"ping", "-4", "-M", "do"'));
+    expect(options.input).toEqual(
+      expect.stringContaining('"route", "get", peer, "from", source, "oif", netdev'),
+    );
+    expect(options.input).toEqual(
+      expect.stringContaining('"route", "show", "exact", network, "dev", netdev'),
+    );
+    expect(options.input).toEqual(
+      expect.stringContaining('"neighbor", "show", "to", peer, "dev", netdev'),
+    );
+    expect(options.input).toEqual(expect.stringContaining('"-I", source, peer'));
+  });
+});
+
+describe("parseStationHostProbe", () => {
+  it("rejects unsupported schemas and unsafe device names", () => {
+    const unsupported = { ...hostFixture("local"), schemaVersion: 2 };
+    expect(() => parseStationHostProbe(JSON.stringify(unsupported))).toThrow(/schema version/);
+
+    const unsafe = hostFixture("local");
+    unsafe.rails[0].netdev = "cx8;touch /tmp/pwned";
+    expect(() => parseStationHostProbe(JSON.stringify(unsafe))).toThrow(/unsafe device name/);
+
+    const unsafeUverbs = hostFixture("local");
+    unsafeUverbs.rails[0].uverbsDevice = "/dev/infiniband/../mem";
+    expect(() => parseStationHostProbe(JSON.stringify(unsafeUverbs))).toThrow(/uverbs/);
+  });
+});
