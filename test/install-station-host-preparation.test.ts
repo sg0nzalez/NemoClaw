@@ -347,6 +347,22 @@ main "$READ_MODE"
     expect(output).toContain("log=disabled_read_only");
     expect(fs.existsSync(path.join(home, "station-bootstrap-logs"))).toBe(false);
   });
+
+  it("fails verification when exact packages are present but the driver is not loaded", () => {
+    const { result, output } = runSourced(
+      STATION_PREPARE,
+      `
+common_preflight() { :; }
+require_command() { :; }
+all_packages_exact() { return 0; }
+driver_loaded_exact() { return 1; }
+run_verify
+`,
+    );
+
+    expect(result.status, output).not.toBe(0);
+    expect(output).toMatch(/Pinned driver is not loaded/);
+  });
 });
 
 describe("DGX Station express host integration", () => {
@@ -501,6 +517,31 @@ printf 'RESULT PROVIDER=%s\n' "$NEMOCLAW_PROVIDER"
     expect(output).toContain("NEMOCLAW_PROVIDER=openai already set");
     expect(output).toContain("RESULT PROVIDER=openai");
     expect(output).not.toContain("Resuming the accepted express install");
+  });
+
+  it("does not load Station resume state on DGX Spark", () => {
+    const { result, output } = runSourced(
+      INSTALLER_PAYLOAD,
+      `
+mkdir -p "$HOME/.nemoclaw"
+chmod 0700 "$HOME/.nemoclaw"
+printf 'nemotron-3-ultra-550b-a55b\n' >"$HOME/.nemoclaw/station-express-resume"
+chmod 0600 "$HOME/.nemoclaw/station-express-resume"
+detect_express_platform() { printf 'DGX Spark'; }
+NON_INTERACTIVE='1'
+NEMOCLAW_PROVIDER=''
+NEMOCLAW_NO_EXPRESS=''
+NEMOCLAW_VLLM_MODEL=''
+maybe_offer_express_install
+printf 'RESULT MODEL=%s\n' "$NEMOCLAW_VLLM_MODEL"
+`,
+    );
+
+    expect(result.status, output).toBe(0);
+    expect(output).toContain("Detected DGX Spark. Skipping express prompt (--non-interactive set)");
+    expect(output).toContain("RESULT MODEL=");
+    expect(output).not.toContain("Resuming the accepted express install");
+    expect(output).not.toContain("nemotron-3-ultra-550b-a55b");
   });
 
   it("rejects a multi-line Station resume state", () => {
