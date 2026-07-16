@@ -5,7 +5,7 @@
 set -Eeuo pipefail
 umask 077
 
-readonly SCRIPT_VERSION="2026-07-15.1"
+readonly SCRIPT_VERSION="2026-07-16.1"
 readonly REBOOT_REQUIRED_EXIT=10
 readonly MIN_FREE_KIB=$((20 * 1024 * 1024))
 
@@ -23,6 +23,7 @@ readonly TOOLKIT_VERSION="1.19.1"
 readonly ACCEPTANCE_IMAGE="ubuntu@sha256:7f622ca8766bccb22f04242ecb6f19f770b2f08827dc4b8c707de5e78a6da7ab"
 readonly STATE_DIR="${HOME}/.local/state/station-bootstrap"
 readonly INSTALL_BOOT_MARKER="${STATE_DIR}/install-boot-id"
+readonly -a APT_DOWNLOAD_OPTIONS=("-o" "Acquire::Queue-Mode=host")
 
 readonly -a PACKAGE_SPECS=(
   "dkms=1:3.4.0-1ubuntu1"
@@ -440,7 +441,7 @@ validate_package_availability() {
 
 simulate_install() {
   local simulation
-  simulation="$(apt-get -s install --no-install-recommends "${PACKAGE_SPECS[@]}")" \
+  simulation="$(apt-get "${APT_DOWNLOAD_OPTIONS[@]}" -s install --no-install-recommends "${PACKAGE_SPECS[@]}")" \
     || fatal "APT simulation failed"
   printf '%s\n' "$simulation"
   if grep -Eq '^(Remv |Purg )' <<<"$simulation"; then
@@ -451,12 +452,12 @@ simulate_install() {
 
 install_packages() {
   configure_repositories
-  info "Refreshing package metadata"
-  sudo apt-get update
+  info "Refreshing package metadata with one download connection per repository host"
+  sudo apt-get "${APT_DOWNLOAD_OPTIONS[@]}" update
   validate_package_availability
   simulate_install
-  info "Installing pinned Station prerequisites"
-  sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+  info "Installing pinned Station prerequisites with parallel downloads across repository hosts"
+  sudo env DEBIAN_FRONTEND=noninteractive apt-get "${APT_DOWNLOAD_OPTIONS[@]}" install -y --no-install-recommends \
     "${PACKAGE_SPECS[@]}"
 
   local spec
@@ -481,13 +482,27 @@ ensure_docker_group() {
 refresh_cdi() {
   sudo systemctl enable --now nvidia-cdi-refresh.path
   if ! sudo systemctl restart nvidia-cdi-refresh.service; then
-    warn "Packaged CDI refresh failed; refusing to create a persistent manual CDI specification"
+    warn "Packaged CDI refresh failed; collecting diagnostics before the NVIDIA transient fallback"
     sudo systemctl status nvidia-cdi-refresh.service --no-pager || true
     sudo journalctl -u nvidia-cdi-refresh.service --no-pager -n 50 || true
-    fatal "nvidia-cdi-refresh.service failed; fix the packaged service and rerun preparation"
+  elif nvidia-ctk cdi list | grep -Fxq 'nvidia.com/gpu=all'; then
+    info "cdi=nvidia.com/gpu=all source=packaged_refresh_service"
+    return 0
+  else
+    warn "Packaged CDI refresh completed without advertising nvidia.com/gpu=all"
+    sudo systemctl status nvidia-cdi-refresh.service --no-pager || true
+    sudo journalctl -u nvidia-cdi-refresh.service --no-pager -n 50 || true
   fi
-  nvidia-ctk cdi list | grep -Fxq 'nvidia.com/gpu=all' || fatal "CDI device nvidia.com/gpu=all is unavailable"
-  info "cdi=nvidia.com/gpu=all"
+
+  # This is NVIDIA's documented fallback and writes the same transient /var/run
+  # specification as nvidia-cdi-refresh.service. It does not create a persistent
+  # manual CDI configuration under /etc.
+  warn "Generating NVIDIA's transient CDI specification at /var/run/cdi/nvidia.yaml"
+  sudo nvidia-ctk cdi generate --output=/var/run/cdi/nvidia.yaml \
+    || fatal "Direct transient CDI generation failed; inspect the packaged service diagnostics"
+  nvidia-ctk cdi list | grep -Fxq 'nvidia.com/gpu=all' \
+    || fatal "CDI device nvidia.com/gpu=all is unavailable after direct transient generation"
+  info "cdi=nvidia.com/gpu=all source=direct_transient_fallback"
 }
 
 ensure_acceptance_image() {

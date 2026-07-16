@@ -139,6 +139,35 @@ run_apply
     expect(output).toContain("APPLY_RESULT=REBOOT_REQUIRED");
   });
 
+  it("installs the exact NVIDIA Container Toolkit package contract with safe parallel fetches", () => {
+    const { result, output } = runSourced(
+      STATION_PREPARE,
+      `
+configure_repositories() { printf 'CONFIGURE_REPOSITORIES\n'; }
+validate_package_availability() { printf 'VALIDATE_PACKAGES\n'; }
+simulate_install() { printf 'SIMULATE_INSTALL\n'; }
+package_is_exact() { return 0; }
+sudo() { printf 'SUDO %s\n' "$*"; }
+install_packages
+`,
+    );
+
+    expect(result.status, output).toBe(0);
+    expect(output).toContain("apt-get -o Acquire::Queue-Mode=host update");
+    expect(output).toContain(
+      "apt-get -o Acquire::Queue-Mode=host install -y --no-install-recommends",
+    );
+    for (const spec of [
+      "libnvidia-container-tools=1.19.1-1",
+      "libnvidia-container1=1.19.1-1",
+      "nvidia-container-toolkit=1.19.1-1",
+      "nvidia-container-toolkit-base=1.19.1-1",
+    ]) {
+      expect(output).toContain(spec);
+    }
+    expect(output).toContain("pinned_packages=installed");
+  });
+
   it("does not refresh CDI when the GPU launch probe already passes", () => {
     const { result, output } = runSourced(
       STATION_PREPARE,
@@ -316,23 +345,72 @@ run_apply
     expect(output).toMatch(/new login before onboarding/);
   });
 
-  it("diagnoses packaged CDI refresh failure without writing a manual specification", () => {
+  it("falls back to NVIDIA's transient CDI generation when the packaged refresh fails", () => {
+    const { result, output } = runSourced(
+      STATION_PREPARE,
+      `
+generated=0
+sudo() {
+  printf 'SUDO %s\n' "$*"
+  if [[ "$*" == "systemctl restart nvidia-cdi-refresh.service" ]]; then return 1; fi
+  if [[ "$*" == "nvidia-ctk cdi generate --output=/var/run/cdi/nvidia.yaml" ]]; then generated=1; fi
+  return 0
+}
+nvidia-ctk() {
+  if [[ "$*" == "cdi list" && "$generated" == "1" ]]; then printf 'nvidia.com/gpu=all\n'; fi
+}
+refresh_cdi
+`,
+    );
+
+    expect(result.status, output).toBe(0);
+    expect(output).toContain("systemctl status nvidia-cdi-refresh.service --no-pager");
+    expect(output).toContain("journalctl -u nvidia-cdi-refresh.service --no-pager -n 50");
+    expect(output).toContain("nvidia-ctk cdi generate --output=/var/run/cdi/nvidia.yaml");
+    expect(output).toContain("cdi=nvidia.com/gpu=all source=direct_transient_fallback");
+    expect(output).not.toContain("/etc/cdi");
+  });
+
+  it("uses the transient CDI fallback when the packaged refresh produces no GPU device", () => {
+    const { result, output } = runSourced(
+      STATION_PREPARE,
+      `
+generated=0
+sudo() {
+  printf 'SUDO %s\n' "$*"
+  if [[ "$*" == "nvidia-ctk cdi generate --output=/var/run/cdi/nvidia.yaml" ]]; then generated=1; fi
+  return 0
+}
+nvidia-ctk() {
+  if [[ "$*" == "cdi list" && "$generated" == "1" ]]; then printf 'nvidia.com/gpu=all\n'; fi
+}
+refresh_cdi
+`,
+    );
+
+    expect(result.status, output).toBe(0);
+    expect(output).toMatch(/completed without advertising nvidia\.com\/gpu=all/);
+    expect(output).toContain("nvidia-ctk cdi generate --output=/var/run/cdi/nvidia.yaml");
+    expect(output).toContain("cdi=nvidia.com/gpu=all source=direct_transient_fallback");
+  });
+
+  it("fails closed when direct transient CDI generation also fails", () => {
     const { result, output } = runSourced(
       STATION_PREPARE,
       `
 sudo() {
   printf 'SUDO %s\n' "$*"
-  [[ "$*" != "systemctl restart nvidia-cdi-refresh.service" ]]
+  if [[ "$*" == "systemctl restart nvidia-cdi-refresh.service" ]]; then return 1; fi
+  if [[ "$*" == "nvidia-ctk cdi generate --output=/var/run/cdi/nvidia.yaml" ]]; then return 1; fi
+  return 0
 }
 refresh_cdi
 `,
     );
 
     expect(result.status, output).not.toBe(0);
-    expect(output).toContain("systemctl status nvidia-cdi-refresh.service --no-pager");
-    expect(output).toContain("journalctl -u nvidia-cdi-refresh.service --no-pager -n 50");
-    expect(output).toMatch(/refusing to create a persistent manual CDI specification/);
-    expect(output).not.toContain("cdi generate");
+    expect(output).toContain("nvidia-ctk cdi generate --output=/var/run/cdi/nvidia.yaml");
+    expect(output).toMatch(/Direct transient CDI generation failed/);
   });
 
   it("rechecks every workload gate immediately before Docker runtime mutation", () => {
@@ -417,8 +495,9 @@ refresh_cdi
 
     expect(result.status, output).toBe(0);
     expect(output).toContain("systemctl restart nvidia-cdi-refresh.service");
-    expect(output).toContain("cdi=nvidia.com/gpu=all");
+    expect(output).toContain("cdi=nvidia.com/gpu=all source=packaged_refresh_service");
     expect(output).not.toContain("systemctl status");
+    expect(output).not.toContain("cdi generate");
   });
 
   it.each(["--check", "--verify"])("keeps %s read-only under HOME", (mode) => {
