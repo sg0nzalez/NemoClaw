@@ -779,7 +779,7 @@ function printImageStorageWarning(
   const insufficient = probe.ok && probe.capacity.availableBytes < requiredBytes;
   console.error("");
   console.error(
-    `  ${insufficient ? "Insufficient" : "Unable to verify"} Docker storage for the managed vLLM image.`,
+    `  [WARN] ${insufficient ? "Insufficient" : "Unable to verify"} Docker storage for the managed vLLM image.`,
   );
   console.error("");
   console.error(`  Image:     ${profile.image}`);
@@ -813,7 +813,7 @@ function printModelStorageWarning(
   const insufficient = probe.ok && probe.capacity.availableBytes < requiredBytes;
   console.error("");
   console.error(
-    `  ${insufficient ? "Insufficient" : "Unable to verify"} storage for the managed vLLM model cache.`,
+    `  [WARN] ${insufficient ? "Insufficient" : "Unable to verify"} storage for the managed vLLM model cache.`,
   );
   console.error("");
   console.error(`  Model:     ${model.id}`);
@@ -860,7 +860,7 @@ async function imageStorageAccepted(
   }
   if (opts.nonInteractive) {
     console.error(
-      "  Continuing because managed vLLM storage estimates are advisory in non-interactive setup.",
+      "  [INFO] Continuing because managed vLLM storage estimates are advisory in non-interactive setup.",
     );
     return true;
   }
@@ -887,7 +887,7 @@ async function modelStorageAccepted(
   printModelStorageWarning(model, probe, requiredBytes, cachedBytes, snapshotBytes);
   if (probe.ok && opts.nonInteractive) {
     console.error(
-      "  Continuing because managed vLLM storage estimates are advisory in non-interactive setup.",
+      "  [INFO] Continuing because managed vLLM storage estimates are advisory in non-interactive setup.",
     );
     return true;
   }
