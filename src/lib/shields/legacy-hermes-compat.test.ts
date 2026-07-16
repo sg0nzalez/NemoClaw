@@ -128,7 +128,7 @@ describe("legacy Hermes shields compatibility", () => {
     fs.rmSync(homeDir, { recursive: true, force: true });
   });
 
-  function installExecResponses(help: string): void {
+  function installExecResponses(help: string, mutableHermesDirMode = "3770"): void {
     dockerExecSpy.mockImplementation((cmd: string[]) => {
       switch (true) {
         case cmd.includes(HERMES_GUARD) && cmd.includes("--help"):
@@ -138,7 +138,9 @@ describe("legacy Hermes shields compatibility", () => {
         case isGuardAction(cmd, "apply-shields-transition"):
           return "shields_mode=mutable chattr_applied=0";
         case cmd[0] === "stat":
-          return cmd.at(-1) === "/sandbox/.hermes" ? "3770 sandbox:sandbox" : "640 sandbox:sandbox";
+          return cmd.at(-1) === "/sandbox/.hermes"
+            ? `${mutableHermesDirMode} sandbox:sandbox`
+            : "640 sandbox:sandbox";
         case cmd[0] === "lsattr":
           return `---------------- ${cmd.at(-1)}`;
         default:
@@ -262,6 +264,18 @@ describe("legacy Hermes shields compatibility", () => {
     expect(commands.some((cmd) => isGuardAction(cmd, "apply-shields-transition"))).toBe(true);
     expect(commands.some((cmd) => isGuardAction(cmd, "finish-shields-transition"))).toBe(true);
     expect(commands.some(isInlinePython)).toBe(false);
+  });
+
+  it("lets the sealed guard authorize managed non-root Hermes mode 0700", () => {
+    installExecResponses(CURRENT_GUARD_HELP, "700");
+
+    expect(() =>
+      shields.unlockAgentConfig("current-hermes", hermesTarget(), true, true),
+    ).not.toThrow();
+
+    const commands = dockerExecSpy.mock.calls.map(commandFromCall);
+    expect(commands.some((cmd) => isGuardAction(cmd, "finish-shields-transition"))).toBe(true);
+    expect(commands.some((cmd) => isGuardAction(cmd, "prepare-shields-abort"))).toBe(false);
   });
 
   it("isolates Hermes guard Python and scrubs every privileged shields exec", () => {

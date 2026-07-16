@@ -27,6 +27,11 @@ import {
 } from "./gpu-e2e-helpers.ts";
 
 const TIMEOUT_MS = 75 * 60_000;
+const RESTART_REPLY_TOKEN = "NEMOCLAW_GPU_RESTART_OK";
+const RESTART_REPLY_PROMPT =
+  `This is a direct user request that requires a visible reply, not a heartbeat or ` +
+  `background event. Reply with exactly: ${RESTART_REPLY_TOKEN}. Do not use OpenClaw's ` +
+  "NO_REPLY silent-response sentinel.";
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -300,7 +305,7 @@ exit 1`,
       "--session-id",
       `e2e-gpu-ollama-restart-${Date.now()}-${process.pid}`,
       "-m",
-      "Reply with exactly one word: PONG",
+      RESTART_REPLY_PROMPT,
     ],
     {
       artifactName: "agent-after-ollama-daemon-restart",
@@ -311,7 +316,7 @@ exit 1`,
   expect(recovered.exitCode, resultText(recovered)).toBe(0);
   expect(resultText(recovered)).toContain("Checking Ollama model readiness after daemon restart");
   expect(resultText(recovered)).toContain(`Ollama model '${model}' is loaded and ready.`);
-  expect(parseOpenClawAgentText(recovered.stdout)).toMatch(/pong/i);
+  expect(parseOpenClawAgentText(recovered.stdout)).toContain(RESTART_REPLY_TOKEN);
 
   const loaded = await host.command("curl", ["-fsS", "http://127.0.0.1:11434/api/ps"], {
     artifactName: "ollama-model-loaded-after-recovery",

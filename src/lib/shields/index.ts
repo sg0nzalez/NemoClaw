@@ -1635,10 +1635,10 @@ function unlockAgentConfigUnderMutationLock(
   // control-UI mutations (Enable Dreaming, account toggles) EACCES
   // against sandbox:sandbox 600 even after shields-down
   // (#2681 supersedes #2693).
-  // Hermes keeps config files non-group-writable, but its root entrypoint runs
-  // the gateway as a separate UID in the sandbox group. The config root stays
-  // group-writable + sticky so Hermes can create top-level runtime state while
-  // the gateway UID cannot remove sandbox-owned config files.
+  // Hermes keeps config files non-group-writable. Its root-separated topology
+  // uses a group-writable sticky config root for the distinct gateway UID;
+  // OpenShell's managed non-root topology uses upstream Hermes' private 0700
+  // HERMES_HOME because the agent and gateway share the sandbox identity.
   const fileMode = target.agentName === "hermes" ? "640" : "660";
   const dirMode = target.agentName === "hermes" ? "3770" : "2770";
   let transaction: {
@@ -1728,7 +1728,11 @@ function unlockAgentConfigUnderMutationLock(
         target.configDir,
       ]);
       const [mode, owner] = dirPerms.split(" ");
-      if (mode !== dirMode) issues.push(`config dir mode=${mode} (expected ${dirMode})`);
+      const acceptedDirModes =
+        target.agentName === "hermes" && transaction ? ["700", "3770"] : [dirMode];
+      if (!acceptedDirModes.includes(mode)) {
+        issues.push(`config dir mode=${mode} (expected ${acceptedDirModes.join(" or ")})`);
+      }
       if (owner !== "sandbox:sandbox") {
         issues.push(`config dir owner=${owner} (expected sandbox:sandbox)`);
       }

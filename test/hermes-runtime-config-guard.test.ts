@@ -616,6 +616,59 @@ with tempfile.TemporaryDirectory() as tmp:
 });
 
 describe("Hermes shields outer namespace containment", () => {
+  it("selects private mutable HERMES_HOME mode only for managed non-root topology", () => {
+    const result = runPythonHarness(`${loadGuardModule}
+import json
+import os
+import tempfile
+
+with tempfile.TemporaryDirectory() as tmp:
+    hermes = os.path.join(tmp, ".hermes")
+    os.mkdir(hermes, 0o700)
+    files = {}
+    for name in guard.SEALED_FILE_NAMES:
+        path = os.path.join(hermes, name)
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write("trusted\\n")
+        files[name] = {
+            "original": guard._inode_metadata(os.stat(path, follow_symlinks=False)),
+            "flags": 0,
+        }
+
+    def configured_mode(managed_nonroot):
+        state = {
+            "parent": guard._inode_metadata(os.stat(tmp, follow_symlinks=False)),
+            "parent_flags": 0,
+            "hermes": guard._inode_metadata(os.stat(hermes, follow_symlinks=False)),
+            "hermes_flags": 0,
+            "files": files,
+        }
+        transition = {}
+        guard._managed_nonroot_reconciliation_is_allowed = lambda: managed_nonroot
+        guard._sandbox_identity = lambda: (os.geteuid(), os.getegid())
+        guard._get_inode_flags = lambda _fd: 0
+        guard._configure_shields_target_metadata(
+            state,
+            transition,
+            hermes,
+            "mutable",
+            capture_original=True,
+        )
+        return state["hermes"]["mode"]
+
+    print(json.dumps({
+        "managed_nonroot": configured_mode(True),
+        "root_separated": configured_mode(False),
+    }))
+`);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({
+      managed_nonroot: 0o700,
+      root_separated: 0o3770,
+    });
+  });
+
   it("keeps the exact state worker PID alive as the in-container timeout owner", () => {
     const result = runPythonHarness(`${loadGuardModule}
 import json

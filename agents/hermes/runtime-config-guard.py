@@ -3593,6 +3593,15 @@ def _sandbox_identity() -> tuple[int, int]:
         raise UnsafePathError("sandbox account lookup failed") from exc
 
 
+def _mutable_shields_dir_mode() -> int:
+    # Upstream Hermes secures HERMES_HOME to 0700 whenever it loads config.
+    # That is the usable mutable posture in OpenShell's managed non-root
+    # topology because the agent and gateway share the sandbox identity. The
+    # root-separated topology still needs the sandbox group on the config root
+    # so its distinct gateway identity can read config and create runtime state.
+    return 0o700 if _managed_nonroot_reconciliation_is_allowed() else 0o3770
+
+
 def _configure_shields_target_metadata(
     state_data: dict[str, object],
     transition: dict[str, object],
@@ -3647,7 +3656,7 @@ def _configure_shields_target_metadata(
     locked = mode == "locked"
     desired_uid = os.geteuid() if locked else sandbox_uid
     desired_gid = os.getegid() if locked else sandbox_gid
-    desired_dir_mode = 0o755 if locked else 0o3770
+    desired_dir_mode = 0o755 if locked else _mutable_shields_dir_mode()
     desired_file_mode = 0o444 if locked else 0o640
     # `/sandbox` must remain a usable home, but its sticky root-owned entry
     # prevents the sandbox identity from renaming the root-owned `.hermes`

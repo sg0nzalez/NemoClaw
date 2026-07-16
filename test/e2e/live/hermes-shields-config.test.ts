@@ -110,7 +110,7 @@ async function expectMutablePosture(sandbox: SandboxClient, cycle: number): Prom
   );
   assertExitZero(result, `inspect Hermes mutable posture after cycle ${cycle}`);
   expect(result.stdout).toContain("755 sandbox:sandbox /sandbox");
-  expect(result.stdout).toContain(`3770 sandbox:sandbox ${HERMES_DIR}`);
+  expect(result.stdout).toContain(`700 sandbox:sandbox ${HERMES_DIR}`);
   expect(result.stdout).toContain(`640 sandbox:sandbox ${CONFIG_PATH}`);
   expect(result.stdout).toContain(`640 sandbox:sandbox ${HERMES_DIR}/.env`);
   expect(result.stdout).toContain(`640 sandbox:sandbox ${HERMES_DIR}/.config-hash`);
@@ -158,7 +158,7 @@ test("hermes-shields-config: fresh non-root Hermes sandbox completes two shields
     boundary: "fresh CPU-only Hermes onboard plus two real shields down/up transitions",
     contracts: [
       "fresh OpenShell-managed non-root Hermes startup mints its API key",
-      "the first shields-down reconciles the startup hash anchor",
+      "the first shields-down reconciles the startup hash anchor and managed non-root home mode",
       "shields-up establishes the root-owned locked posture",
       "a second down/up cycle completes without corrupting config state",
     ],
