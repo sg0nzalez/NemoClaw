@@ -481,30 +481,46 @@ shutil.disk_usage = lambda _path: _NemoClawDiskUsage()
     fixturePlan.peer.home = peerHome;
     const peerStaging = peerStagingForPlan(fixturePlan);
     fs.mkdirSync(peerStaging, { mode: 0o700, recursive: true });
-    fs.writeFileSync(path.join(peerStaging, "config.json"), "xx");
-    const statfs = sufficientStatfs();
+    const corruptSnapshotBytes = 64 * 1024 * 1024;
+    const corruptPartial = path.join(peerStaging, "config.json");
+    fs.writeFileSync(corruptPartial, "");
+    fs.truncateSync(corruptPartial, corruptSnapshotBytes);
+    const capacityManifest = JSON.stringify({
+      schemaVersion: 1,
+      files: [
+        {
+          path: "config.json",
+          size: corruptSnapshotBytes,
+          sha256: createHash("sha256").update("expected snapshot contents").digest("hex"),
+        },
+      ],
+      directories: [],
+      totalBytes: corruptSnapshotBytes,
+    });
     const headroomOnly = `import shutil
 class _NemoClawDiskUsage:
     free = 5 * 1024 * 1024 * 1024
 shutil.disk_usage = lambda _path: _NemoClawDiskUsage()
 `;
     const runCommand = createManifestPeerPythonRunner({
-      localManifest: manifest(),
+      localManifest: capacityManifest,
       peerHome,
       peerInputPrefix: headroomOnly,
     });
 
     try {
       await expect(
-        stageDualStationModelSnapshot(fixturePlan, { runCommand, statfs }),
+        stageDualStationModelSnapshot(fixturePlan, {
+          runCommand,
+          statfs: sufficientStatfs(),
+        }),
       ).resolves.toEqual({
         ok: false,
         reason:
           "peer snapshot preflight failed: peer model cache does not have enough free space for the pinned snapshot",
       });
       expect(runCommand.mock.calls.map((call) => call[0])).toEqual(["python3", "ssh"]);
-      expect(statfs).not.toHaveBeenCalled();
-      expect(fs.readFileSync(path.join(peerStaging, "config.json"), "utf8")).toBe("xx");
+      expect(fs.statSync(corruptPartial).size).toBe(corruptSnapshotBytes);
     } finally {
       fs.rmSync(remoteRoot, { force: true, recursive: true });
     }

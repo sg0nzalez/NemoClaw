@@ -6,6 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createStrictVllmOwnershipCapture } from "../../../test/support/vllm-ownership-test-support";
 
 const mocks = vi.hoisted(() => ({
   dockerCapture: vi.fn(),
@@ -147,23 +148,14 @@ function mockSuccessfulVllmInstall(
   });
   mocks.dockerSpawn.mockReturnValue(mockDockerSpawnSuccess());
   mocks.dockerRunDetached.mockReturnValue({ status: 0, stdout: "", stderr: "", error: null });
-  const ownershipQueue = [...ownershipResponses];
   const dockerCaptureByCommand = new Map<string, () => string>([
-    ["container", () => (ownershipQueue.shift() ?? (() => ""))()],
     ["ps", () => `${containerName}\n`],
   ]);
-  const dockerCaptureByContextAndCommand = new Map<string, () => string>([
-    ["default:container", () => (ownershipQueue.shift() ?? (() => ""))()],
-  ]);
+  const ambientContext = process.env.DOCKER_CONTEXT ?? "ambient";
   mocks.dockerCapture.mockImplementation(
-    (args: readonly string[], options?: { env?: NodeJS.ProcessEnv }) =>
-      (
-        dockerCaptureByContextAndCommand.get(
-          `${options?.env?.DOCKER_CONTEXT ?? "ambient"}:${args[0] ?? ""}`,
-        ) ??
-        dockerCaptureByCommand.get(args[0] ?? "") ??
-        (() => "")
-      )(),
+    createStrictVllmOwnershipCapture(ownershipResponses, ambientContext, (command) =>
+      (dockerCaptureByCommand.get(command) ?? (() => ""))(),
+    ),
   );
 }
 
