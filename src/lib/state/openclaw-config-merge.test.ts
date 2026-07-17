@@ -160,6 +160,39 @@ describe("mergeOpenClawRestoredConfig", () => {
     });
   });
 
+  it("refreshes only the default agent's model when no main agent exists (#7011)", () => {
+    // Fallback branch: with no `main` agent, the fresh primary re-owns the first
+    // `default: true` agent's string model and leaves other durable agents alone.
+    const merged = mergeOpenClawRestoredConfig(
+      {
+        agents: {
+          defaults: { model: { primary: "inference/deepseek-ai/DeepSeek-V4-Flash" } },
+          list: [
+            { id: "researcher", default: true, model: "inference/deepseek-ai/DeepSeek-V4-Flash" },
+            { id: "planner", model: "inference/pinned-by-user" },
+          ],
+        },
+      },
+      {
+        agents: {
+          defaults: { model: { primary: "inference/nvidia/nemotron-3-ultra-550b-a55b" } },
+        },
+      },
+    );
+
+    expect(merged).toMatchObject({
+      agents: {
+        defaults: { model: { primary: "inference/nvidia/nemotron-3-ultra-550b-a55b" } },
+        list: [
+          // selected default agent follows the fresh primary
+          { id: "researcher", default: true, model: "inference/nvidia/nemotron-3-ultra-550b-a55b" },
+          // a non-default agent's pinned model is left untouched
+          { id: "planner", model: "inference/pinned-by-user" },
+        ],
+      },
+    });
+  });
+
   it("keeps the rebuilt gateway section — including the reload pin — over the backup's (#4710)", () => {
     // gateway.reload.mode="hot" is what keeps the in-sandbox gateway from
     // SIGUSR1-restarting itself out from under the nemoclaw-start respawn
