@@ -121,7 +121,7 @@ Use these details when your first-run path needs more control.
 
     DGX Spark, Station GB300 hosts running the generic Ubuntu 24.04 ARM64 image, and Windows WSL offer an interactive express-install path that chooses a managed local inference option for the platform.
     On that Station configuration, accepting the express prompt prepares the local host, then checks for one trusted reciprocal peer only at the deterministic counterpart address on each of the two configured private `/30` CX-8 rails.
-    At least one derived rail address must already be trusted; if both are trusted, their host keys must identify the same SSH host. The installer prepares both hosts and automatically selects the pinned `nemotron-3-ultra-550b-a55b` managed-vLLM recipe only after the two Stations pass reciprocal identity and connectivity checks across both rails.
+    At least one derived rail address must already be trusted; if both are trusted, their host keys must identify the same SSH host. The installer prepares the peer with the same reviewed helper and automatically selects the pinned `nemotron-3-ultra-550b-a55b` managed-vLLM recipe only after the two Stations pass reciprocal identity and connectivity checks across both rails.
     If no trusted pair qualifies and no model or peer was selected explicitly, onboarding retains the existing single-Station `deepseek-v4-flash` profile default.
     Complete the physical rail configuration and SSH host-key and authentication setup before installation; NemoClaw does not configure the rails or enroll SSH trust.
     DGX OS, NVIDIA BaseOS images, and other Station generations stop before host preparation.
@@ -133,6 +133,7 @@ Use these details when your first-run path needs more control.
     Reboot the named host, sign in, and run the printed exact-commit command to resume from owner-only state without another prompt.
     This automation does not change Station's Deferred support status; physical end-to-end validation remains open.
     Pass `--station-deepseek` to use DeepSeek V4 Flash for a Station demo instead.
+    The flag selects the interactive express prompt and requires terminal access.
     Refer to [Platform Support](../reference/platform-support) and [Choose an Inference Provider](../inference/learn-and-choose/choose-inference-provider) for the current platform behavior.
 
     If `nemoclaw` is not found after installation and you use nvm or fnm, open a new terminal or reload your shell profile.
@@ -198,7 +199,7 @@ Use these details when your first-run path needs more control.
     ```
 
     On DGX Spark, Station GB300 hosts running the generic Ubuntu 24.04 ARM64 image, and Windows WSL, interactive installation offers express install after you accept the third-party software notice.
-    Express install switches onboarding to non-interactive mode, allows `sudo` password prompts for required host changes, and selects the managed local inference path for that platform.
+    After you confirm the interactive express prompt, the installer switches the remaining onboarding to non-interactive mode, allows `sudo` password prompts for required host changes, and selects the managed local inference path for that platform.
     DGX Spark uses managed vLLM with `qwen3.6-35b-a3b-nvfp4` by default.
     With no explicit model selection, DGX Station express install checks the deterministic counterparts on two configured private `/30` CX-8 rails.
     At least one derived address must already be trusted; if both are trusted, their host keys must identify one SSH host. It automatically selects `nemotron-3-ultra-550b-a55b` only when reciprocal Station, GPU, rail, MAC, route, neighbor, and jumbo-frame checks then qualify the pair.
@@ -216,6 +217,20 @@ Use these details when your first-run path needs more control.
     Changing pinned packages on either Station exits with status `10` for a manual reboot; after you sign in and run the printed exact-commit command, owner-only resume state continues the accepted recipe without another prompt.
     This automation does not change Station's Deferred support status; physical end-to-end validation remains open.
     To select DeepSeek V4 Flash while retaining the one-confirmation Station express flow, run `curl -fsSL https://www.nvidia.com/nemoclaw.sh | bash -s -- --station-deepseek`.
+    The `--station-deepseek` flag requires an interactive terminal; in a `curl | bash` pipeline, `/dev/tty` must be available.
+    Without terminal access, the installer stops before it installs Docker or build dependencies instead of ignoring the flag.
+    For a headless or CI install on a prepared DGX Station, omit the flag and select the same managed-vLLM recipe explicitly.
+
+    ```bash
+    curl -fsSL https://www.nvidia.com/nemoclaw.sh | \
+      NEMOCLAW_NON_INTERACTIVE=1 \
+      NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE=1 \
+      NEMOCLAW_PROVIDER=install-vllm \
+      NEMOCLAW_VLLM_MODEL=deepseek-v4-flash \
+      NEMOCLAW_SANDBOX_NAME=my-assistant \
+      bash
+    ```
+
     Unless `NEMOCLAW_POLICY_TIER` is set, express install applies policy in `suggested` mode with the `balanced` tier, including the base sandbox policy and supported package, model, web-search, and local-inference presets.
     Express install uses `my-assistant` as the sandbox name across all platforms unless `NEMOCLAW_SANDBOX_NAME` is set.
     Windows WSL selects the Windows-host Ollama setup path.
