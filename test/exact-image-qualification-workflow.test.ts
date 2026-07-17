@@ -58,6 +58,12 @@ it("keeps exact-image Launchable qualification protected, reusable, and fail-clo
     "candidate_sha",
     "reason",
   ]);
+  expect(Object.keys((workflow.on.workflow_call as { secrets: object }).secrets)).toEqual([
+    "NEMOCLAW_IMAGE_DISPATCH_TOKEN",
+    "BREV_API_KEY",
+    "BREV_ORG_ID",
+    "NVIDIA_INFERENCE_API_KEY",
+  ]);
   expect(workflow.permissions).toEqual({});
   expect(workflow.concurrency).toEqual({
     group: "brev-launchable-qualification-${{ inputs.candidate_sha }}",
@@ -73,7 +79,7 @@ it("keeps exact-image Launchable qualification protected, reusable, and fail-clo
     deployment: false,
   });
   expect(JSON.stringify(qualify)).toContain("NEMOCLAW_IMAGE_QUALIFICATION_TOKEN");
-  expect(source.match(/secrets\.NEMOCLAW_IMAGE_QUALIFICATION_TOKEN/gu)).toHaveLength(4);
+  expect(source.match(/secrets\.NEMOCLAW_IMAGE_DISPATCH_TOKEN/gu)).toHaveLength(4);
   expect(workflowStrings).not.toContain("id-token: write");
   expect(source).not.toMatch(/npm (?:ci|install)/u);
   for (const step of [...(preflight.steps ?? []), ...(qualify.steps ?? [])]) {

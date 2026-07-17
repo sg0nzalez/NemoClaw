@@ -26,7 +26,7 @@ on:
         required: true
         type: string
     secrets:
-      NEMOCLAW_IMAGE_QUALIFICATION_TOKEN:
+      NEMOCLAW_IMAGE_DISPATCH_TOKEN:
         required: true
       BREV_API_KEY:
         required: true
@@ -122,7 +122,7 @@ jobs:
           CANDIDATE_SHA: ${{ inputs.candidate_sha }}
           EVENT_NAME: ${{ github.event_name }}
           GITHUB_TOKEN: ${{ github.token }}
-          NEMOCLAW_IMAGE_QUALIFICATION_TOKEN: ${{ secrets.NEMOCLAW_IMAGE_QUALIFICATION_TOKEN }}
+          NEMOCLAW_IMAGE_QUALIFICATION_TOKEN: ${{ secrets.NEMOCLAW_IMAGE_DISPATCH_TOKEN }}
           QUALIFICATION_REASON: ${{ inputs.reason }}
           REQUESTER_RUN_ATTEMPT: ${{ github.run_attempt }}
           REQUESTER_RUN_ID: ${{ github.run_id }}
@@ -144,7 +144,7 @@ jobs:
 
       - name: Wait for the bound producer run
         env:
-          NEMOCLAW_IMAGE_QUALIFICATION_TOKEN: ${{ secrets.NEMOCLAW_IMAGE_QUALIFICATION_TOKEN }}
+          NEMOCLAW_IMAGE_QUALIFICATION_TOKEN: ${{ secrets.NEMOCLAW_IMAGE_DISPATCH_TOKEN }}
         run: >-
           node --experimental-strip-types --no-warnings
           tools/e2e/exact-image-qualification-controller.mts
@@ -153,7 +153,7 @@ jobs:
 
       - name: Download and verify the bound manifest artifact
         env:
-          NEMOCLAW_IMAGE_QUALIFICATION_TOKEN: ${{ secrets.NEMOCLAW_IMAGE_QUALIFICATION_TOKEN }}
+          NEMOCLAW_IMAGE_QUALIFICATION_TOKEN: ${{ secrets.NEMOCLAW_IMAGE_DISPATCH_TOKEN }}
         run: >-
           node --experimental-strip-types --no-warnings
           tools/e2e/exact-image-qualification-controller.mts
@@ -269,7 +269,7 @@ jobs:
         if: ${{ always() && steps.workspace.outputs.work_dir != '' && steps.start.outcome != 'skipped' }}
         continue-on-error: true
         env:
-          NEMOCLAW_IMAGE_QUALIFICATION_TOKEN: ${{ secrets.NEMOCLAW_IMAGE_QUALIFICATION_TOKEN }}
+          NEMOCLAW_IMAGE_QUALIFICATION_TOKEN: ${{ secrets.NEMOCLAW_IMAGE_DISPATCH_TOKEN }}
         run: >-
           node --experimental-strip-types --no-warnings
           tools/e2e/exact-image-qualification-controller.mts
