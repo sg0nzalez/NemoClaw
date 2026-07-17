@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import assert from "node:assert/strict";
 import type { SpawnSyncOptionsWithStringEncoding } from "node:child_process";
 import fs from "node:fs";
 
@@ -27,6 +28,7 @@ import {
 import {
   createDualStationSshBindingFixture,
   type DualStationSshBindingFixture,
+  retargetDualStationSshBindingFixture,
 } from "./vllm-station-ssh-binding.test-support";
 
 const LOCAL_HOME = "/home/local";
@@ -225,10 +227,11 @@ function fixtureDeps(
 }
 
 function runWith(deps: StationClusterProbeDeps, target = "nvidia@station-b") {
-  if (validatePeerTarget(target).ok && sshFixture.binding.peerTarget !== target) {
-    sshFixture.cleanup();
-    sshFixture = createDualStationSshBindingFixture(target);
-  }
+  sshFixture = retargetDualStationSshBindingFixture(
+    sshFixture,
+    target,
+    validatePeerTarget(target).ok,
+  );
   return probeDualStationVllmCapability({
     env: {
       [NEMOCLAW_DGX_STATION_PEER_ENV]: target,
@@ -364,7 +367,7 @@ describe("probeDualStationVllmCapability", () => {
       peerModelSnapshot: "ready",
       plan: { peerSshBinding: { peerTarget: target } },
     });
-    if (result.kind !== "ready") throw new Error("expected ready fixture");
+    assert(result.kind === "ready", "expected ready fixture");
     expect(buildRemoteVllmDockerEnv(result.plan.peerSshBinding, {}).DOCKER_HOST).toBe(
       `ssh://${result.plan.peerSshBinding.sshUser}@${result.plan.peerSshBinding.resolvedHost}`,
     );
