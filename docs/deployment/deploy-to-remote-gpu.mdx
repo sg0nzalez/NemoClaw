@@ -2,14 +2,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 title: "Deploy NemoClaw to a Remote GPU Instance"
-sidebar-title: "Deploy to Remote GPU Instances"
 description: "Run NemoClaw on a remote GPU instance and understand the legacy Brev compatibility flow."
-description-agent: "Explains how to run NemoClaw on a remote GPU instance, including the deprecated Brev compatibility path and the preferred installer plus onboard flow. Use when deploying NemoClaw to a remote VM, onboarding a Brev instance, or migrating away from the legacy `nemoclaw deploy` wrapper."
-keywords: ["deploy nemoclaw remote gpu", "nemoclaw brev cloud deployment"]
-content:
-  type: "how_to"
-skill:
-  priority: 10
 ---
 Run NemoClaw on a remote GPU instance through [Brev](https://brev.nvidia.com).
 Prefer provisioning the VM first, running the standard NemoClaw installer on that host, and then running `nemoclaw onboard`.

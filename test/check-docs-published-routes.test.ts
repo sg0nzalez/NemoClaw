@@ -85,10 +85,7 @@ function withChangelogSource(source: string, run: (docsDir: string) => void): vo
 function commandsSource(body: string): string {
   return `---
 title: "Commands"
-sidebar-title: "Commands"
 description: "Commands."
-description-agent: "Commands."
-keywords: ["commands"]
 ---
 import { AgentOnly } from "../_components/AgentGuide";
 

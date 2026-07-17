@@ -76,14 +76,6 @@ function replaceFrontmatterLine(frontmatter: string, key: string, value: string)
   return frontmatter.replace(pattern, `${key}: ${value}`);
 }
 
-function upsertFrontmatterLine(frontmatter: string, key: string, value: string): string {
-  const pattern = new RegExp(`^${escapeRegExp(key)}:.*$`, "m");
-  if (pattern.test(frontmatter)) {
-    return frontmatter.replace(pattern, `${key}: ${value}`);
-  }
-  return frontmatter.replace(/\n---\n$/, `\n${key}: ${value}\n---\n`);
-}
-
 function stripAgentOnlyBlocksForVariant(body: string, activeVariant: AgentVariant): string {
   type OpenBlock = {
     include: boolean;
@@ -189,16 +181,6 @@ function updateCommandsFrontmatter(frontmatter: string, variant: AgentVariant): 
       "description",
       '"Full CLI reference for standalone NemoHermes commands and Hermes-specific in-sandbox commands."',
     );
-    next = replaceFrontmatterLine(
-      next,
-      "description-agent",
-      '"Includes the full CLI reference for standalone NemoHermes commands and Hermes-specific in-sandbox commands. Use when looking up a specific `nemohermes` subcommand, flag, argument, or exit code."',
-    );
-    next = replaceFrontmatterLine(
-      next,
-      "keywords",
-      '["nemohermes cli commands", "hermes command reference", "nemohermes command reference"]',
-    );
   } else {
     next = replaceFrontmatterLine(next, "title", '"NemoDeepAgents CLI Commands Reference"');
     next = replaceFrontmatterLine(
@@ -206,19 +188,7 @@ function updateCommandsFrontmatter(frontmatter: string, variant: AgentVariant): 
       "description",
       '"Full CLI reference for standalone NemoDeepAgents commands and Deep Agents-specific in-sandbox commands."',
     );
-    next = replaceFrontmatterLine(
-      next,
-      "description-agent",
-      '"Includes the full CLI reference for standalone NemoDeepAgents commands and Deep Agents-specific in-sandbox commands. Use when looking up a specific `nemo-deepagents` subcommand, flag, argument, or exit code."',
-    );
-    next = replaceFrontmatterLine(
-      next,
-      "keywords",
-      '["nemo-deepagents cli commands", "deep agents command reference", "nemo-deepagents command reference"]',
-    );
   }
-  next = replaceFrontmatterLine(next, "sidebar-title", '"Commands"');
-  next = upsertFrontmatterLine(next, "exclude-from-skills-gen", "true");
   return next.replaceAll("`nemoclaw`", `\`${cli}\``);
 }
 

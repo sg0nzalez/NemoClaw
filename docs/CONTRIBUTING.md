@@ -211,9 +211,8 @@ Reserve `npm run check` for repo-wide validation or coverage-baseline changes.
 
 ### Format
 
-- Fern pages use MDX with YAML frontmatter. Use a flat `title`, `description`, optional `sidebar-title`, `description-agent`, `keywords`, and `position`.
+- Fern pages use MDX with YAML frontmatter. Include only a flat `title` and `description`.
 - Do not duplicate the page title as a body H1 in MDX pages because Fern renders the title from frontmatter.
-- Use `description-agent` as a concise routing summary for AI documentation clients and search indexes.
 - Include the SPDX license header in MDX frontmatter as comments:
 
   ```yaml
@@ -222,7 +221,6 @@ Reserve `npm run check` for repo-wide validation or coverage-baseline changes.
   # SPDX-License-Identifier: Apache-2.0
   title: "NemoClaw Page Title"
   description: "One-sentence summary for readers, SEO, and doc search snippets."
-  description-agent: "Third-person verb summary for agent routing. Add 'Use when...' with trigger phrases."
   ---
   ```
 
@@ -232,12 +230,8 @@ Reserve `npm run check` for repo-wide validation or coverage-baseline changes.
 ---
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-title: "NemoClaw Page Title: Subtitle with Context"
-sidebar-title: "Short Nav Title"
+title: "NemoClaw Page Title with Context"
 description: "One-sentence summary for readers, SEO, and doc search snippets."
-description-agent: "Third-person verb summary for agent routing. Add 'Use when...' with trigger phrases."
-keywords: "primary keyword, secondary keyword phrase"
-position: 1
 ---
 ```
 

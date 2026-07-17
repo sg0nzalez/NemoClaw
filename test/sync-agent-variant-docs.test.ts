@@ -10,12 +10,7 @@ const FRONTMATTER = `---
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 title: "NemoClaw CLI Commands Reference"
-sidebar-title: "Commands"
 description: "Full CLI reference for standalone NemoClaw commands and agent-specific in-sandbox commands."
-description-agent: "Includes the full CLI reference for standalone NemoClaw commands and agent-specific in-sandbox commands. Use when looking up a specific \`nemoclaw\`, \`nemohermes\`, \`nemo-deepagents\`, \`dcode\`, or \`/nemoclaw\` subcommand, flag, argument, or exit code."
-keywords: ["nemoclaw cli commands", "nemoclaw command reference", "nemo-deepagents commands", "dcode commands"]
-content:
-  type: "reference"
 ---
 `;
 
@@ -51,7 +46,10 @@ The gateway state path is \`~/.local/state/nemoclaw\`.
 `);
 
     expect(rendered).toContain("### `nemohermes list`");
-    expect(rendered).toContain("exclude-from-skills-gen: true");
+    expect(rendered).toContain('title: "NemoHermes CLI Commands Reference"');
+    expect(rendered).toContain(
+      'description: "Full CLI reference for standalone NemoHermes commands and Hermes-specific in-sandbox commands."',
+    );
     expect(rendered).toContain("nemohermes list");
     expect(rendered).toContain("NEMOCLAW_PROVIDER=routed nemohermes onboard --non-interactive");
     expect(rendered).toContain("URL=$(nemohermes my-assistant dashboard-url --quiet)");
@@ -83,7 +81,10 @@ The gateway state path is \`~/.local/state/nemoclaw\`.
 `);
 
     expect(rendered).toContain("### `nemo-deepagents list`");
-    expect(rendered).toContain("exclude-from-skills-gen: true");
+    expect(rendered).toContain('title: "NemoDeepAgents CLI Commands Reference"');
+    expect(rendered).toContain(
+      'description: "Full CLI reference for standalone NemoDeepAgents commands and Deep Agents-specific in-sandbox commands."',
+    );
     expect(rendered).toContain("nemo-deepagents list");
     expect(rendered).toContain(
       "NEMOCLAW_AGENT=langchain-deepagents-code nemo-deepagents onboard --non-interactive",

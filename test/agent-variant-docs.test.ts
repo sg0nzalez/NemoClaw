@@ -9,7 +9,7 @@ import { renderAgentVariantPage } from "../scripts/sync-agent-variant-docs.mts";
 
 const source = `---
 title: "Example"
-description-agent: "Use when looking up $$nemoclaw commands."
+description: "Use when looking up $$nemoclaw commands."
 ---
 import { AgentCli, AgentOnly } from "../_components/AgentGuide";
 
@@ -39,7 +39,7 @@ describe("agent variant docs", () => {
 
     expect(rendered).toContain("OpenClaw only.");
     expect(rendered).toContain("Gateway agents only.");
-    expect(rendered).toContain('description-agent: "Use when looking up nemoclaw commands."');
+    expect(rendered).toContain('description: "Use when looking up nemoclaw commands."');
     expect(rendered).not.toContain("Hermes only.");
     expect(rendered).not.toContain("Deep Agents only.");
     expect(rendered).toContain("nemoclaw list");
@@ -54,7 +54,7 @@ describe("agent variant docs", () => {
     expect(rendered).toContain("Hermes only.");
     expect(rendered).toContain("Gateway agents only.");
     expect(rendered).not.toContain("Deep Agents only.");
-    expect(rendered).toContain('description-agent: "Use when looking up nemohermes commands."');
+    expect(rendered).toContain('description: "Use when looking up nemohermes commands."');
     expect(rendered).toContain("nemohermes list");
     expect(rendered).not.toContain("$$nemoclaw");
     expect(rendered).not.toContain("<AgentOnly");
@@ -67,9 +67,7 @@ describe("agent variant docs", () => {
     expect(rendered).not.toContain("Hermes only.");
     expect(rendered).toContain("Deep Agents only.");
     expect(rendered).not.toContain("Gateway agents only.");
-    expect(rendered).toContain(
-      'description-agent: "Use when looking up nemo-deepagents commands."',
-    );
+    expect(rendered).toContain('description: "Use when looking up nemo-deepagents commands."');
     expect(rendered).toContain("nemo-deepagents list");
     expect(rendered).not.toContain("$$nemoclaw");
     expect(rendered).not.toContain("<AgentOnly");
