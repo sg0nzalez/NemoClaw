@@ -668,12 +668,7 @@ function readDispatchIntent(workDir: string): ExactImageDispatchIntent | null {
     "dispatch intent request",
   );
   persistedString(request, "actor", "dispatch intent actor", GITHUB_LOGIN_PATTERN);
-  const candidateSha = persistedString(
-    request,
-    "candidateSha",
-    "dispatch intent candidate SHA",
-    FULL_SHA_PATTERN,
-  );
+  persistedString(request, "candidateSha", "dispatch intent candidate SHA", FULL_SHA_PATTERN);
   persistedString(request, "correlationId", "dispatch intent correlation ID", UUID_V4_PATTERN);
   validatePersistedReason(request.reason, "dispatch intent reason");
   if (request.requesterRunAttempt !== 1) {
@@ -685,15 +680,7 @@ function readDispatchIntent(workDir: string): ExactImageDispatchIntent | null {
     "dispatch intent requester run ID",
     DECIMAL_ID_PATTERN,
   );
-  const workflowSha = persistedString(
-    request,
-    "workflowSha",
-    "dispatch intent workflow SHA",
-    FULL_SHA_PATTERN,
-  );
-  if (candidateSha !== workflowSha) {
-    fail("PROVENANCE_MISMATCH", "dispatch intent candidate and workflow SHAs differ");
-  }
+  persistedString(request, "workflowSha", "dispatch intent workflow SHA", FULL_SHA_PATTERN);
 
   const producer = record(intent.producer, "dispatch intent producer");
   requireExactRecordFields(
@@ -820,12 +807,7 @@ function validatePersistedRequest(value: unknown): void {
     "controller state request",
   );
   persistedString(request, "actor", "controller state actor", GITHUB_LOGIN_PATTERN);
-  const candidateSha = persistedString(
-    request,
-    "candidateSha",
-    "controller state candidate SHA",
-    FULL_SHA_PATTERN,
-  );
+  persistedString(request, "candidateSha", "controller state candidate SHA", FULL_SHA_PATTERN);
   persistedString(request, "correlationId", "controller state correlation ID", UUID_V4_PATTERN);
   validatePersistedReason(request.reason, "controller state reason");
   if (request.requesterRunAttempt !== 1) {
@@ -837,15 +819,7 @@ function validatePersistedRequest(value: unknown): void {
     "controller state requester run ID",
     DECIMAL_ID_PATTERN,
   );
-  const workflowSha = persistedString(
-    request,
-    "workflowSha",
-    "controller state workflow SHA",
-    FULL_SHA_PATTERN,
-  );
-  if (candidateSha !== workflowSha) {
-    fail("PROVENANCE_MISMATCH", "controller state candidate and workflow SHAs differ");
-  }
+  persistedString(request, "workflowSha", "controller state workflow SHA", FULL_SHA_PATTERN);
 }
 
 function validatePersistedProducer(

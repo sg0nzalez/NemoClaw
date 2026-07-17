@@ -56,6 +56,7 @@ import {
   RUN_ID,
   startedState,
   tempDirectory,
+  WORKFLOW_SHA,
   WORKFLOW_ID,
   workflowRun,
 } from "./helpers/exact-image-qualification-controller-fixture.ts";
@@ -111,7 +112,7 @@ describe("exact image qualification request", () => {
         "--requester-run-id",
         REQUEST.requesterRunId,
         "--workflow-sha",
-        CANDIDATE_SHA,
+        WORKFLOW_SHA,
       ]),
     ).toEqual({ mode: "preflight", request: REQUEST });
     expect(() =>
@@ -128,6 +129,28 @@ describe("exact image qualification request", () => {
 });
 
 describe("exact producer dispatch binding", () => {
+  it("preserves a selected candidate distinct from the trusted workflow SHA", async () => {
+    expect(REQUEST.candidateSha).not.toBe(REQUEST.workflowSha);
+    const { state, workDir } = await startedState();
+    try {
+      expect(readExactImageQualificationState(workDir).request).toMatchObject({
+        candidateSha: CANDIDATE_SHA,
+        workflowSha: WORKFLOW_SHA,
+      });
+      await expect(
+        waitForExactImageQualification(
+          { workDir, producerToken: "producer-token" },
+          dependencies(
+            createApi({ run: workflowRun({ status: "completed", conclusion: "success" }) }),
+            { now: () => BASE_TIME + 1_000 },
+          ),
+        ),
+      ).resolves.toMatchObject({ id: state.producer.runId, conclusion: "success" });
+    } finally {
+      fs.rmSync(workDir, { recursive: true, force: true });
+    }
+  });
+
   it("accepts GitHub's maintain role mapping but rejects ordinary write access", async () => {
     const accepted = await startedState(createApi({ permission: "write", roleName: "maintain" }));
     fs.rmSync(accepted.workDir, { recursive: true, force: true });
@@ -1374,7 +1397,7 @@ describe("qualification evidence finalization", () => {
         reason: REQUEST.reason,
         requesterRunAttempt: 1,
         requesterRunId: REQUEST.requesterRunId,
-        workflowSha: CANDIDATE_SHA,
+        workflowSha: WORKFLOW_SHA,
       },
       producer: {
         repository: PRODUCER_REPOSITORY,

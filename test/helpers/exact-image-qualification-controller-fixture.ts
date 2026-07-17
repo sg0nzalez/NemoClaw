@@ -21,6 +21,7 @@ import {
 } from "../../tools/e2e/exact-image-qualification-controller.mts";
 
 export const CANDIDATE_SHA = "a".repeat(40);
+export const WORKFLOW_SHA = "c".repeat(40);
 export const PRODUCER_SHA = "b".repeat(40);
 export const CORRELATION_ID = "123e4567-e89b-42d3-a456-426614174000";
 export const RUN_ID = "24680";
@@ -37,7 +38,7 @@ export const REQUEST: ExactImageQualificationRequest = {
   ref: "refs/heads/main",
   requesterRunAttempt: 1,
   requesterRunId: "97531",
-  workflowSha: CANDIDATE_SHA,
+  workflowSha: WORKFLOW_SHA,
 };
 
 export function dispatchIntent(): ExactImageDispatchIntent {
@@ -123,7 +124,7 @@ export function workflowRun(overrides: Record<string, unknown> = {}) {
 export function createApi(options: ApiOptions = {}) {
   return vi.fn(async (apiPath: string, _token: string, requestOptions?: unknown) => {
     if (apiPath === "repos/NVIDIA/NemoClaw/git/ref/heads/main") {
-      return mainRef(options.requesterSha ?? CANDIDATE_SHA);
+      return mainRef(options.requesterSha ?? WORKFLOW_SHA);
     }
     if (apiPath === `repos/NVIDIA/NemoClaw/git/commits/${CANDIDATE_SHA}`) {
       return { sha: CANDIDATE_SHA };
