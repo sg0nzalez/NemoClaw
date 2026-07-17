@@ -443,18 +443,34 @@ describe("dual DGX Station vLLM install orchestration", () => {
     expect(promptFn).not.toHaveBeenCalledWith(expect.stringContaining("Choose model"));
   });
 
-  it("keeps an explicit model override ahead of peer-driven automatic selection", async () => {
-    process.env.NEMOCLAW_VLLM_MODEL = "nemotron-3-nano-4b";
-    mocks.runCapture.mockReturnValue("");
+  it("rejects a configured peer combined with an explicit non-Ultra model", async () => {
+    process.env.NEMOCLAW_VLLM_MODEL = "deepseek-r1-distill-70b";
+    delete process.env.HF_TOKEN;
+    delete process.env.HUGGING_FACE_HUB_TOKEN;
+    const beforeInstall = vi.fn();
+    const promptFn = vi.fn();
     const profile = detectVllmProfile({ platform: "station", type: "nvidia" });
 
     await expect(
-      installVllm(profile!, { hasImage: true, nonInteractive: true, promptFn: vi.fn() }),
+      installVllm(profile!, {
+        hasImage: true,
+        nonInteractive: true,
+        promptFn,
+        beforeInstall,
+      }),
     ).resolves.toEqual({ ok: false });
 
+    expect(promptFn).not.toHaveBeenCalled();
+    expect(beforeInstall).not.toHaveBeenCalled();
     expect(mocks.probeCapability).not.toHaveBeenCalled();
     expect(mocks.stageModelSnapshot).not.toHaveBeenCalled();
-    expect(errorSpy).toHaveBeenCalledWith("  vLLM install failed: docker not found on PATH");
+    expect(mocks.runCapture).not.toHaveBeenCalled();
+    expect(mocks.dockerPullWithProgressWatchdog).not.toHaveBeenCalled();
+    expect(mocks.dockerSpawn).not.toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalledWith(
+      "  vLLM install failed: NEMOCLAW_DGX_STATION_PEER requires the DGX Station dual-serving model. " +
+        "Unset NEMOCLAW_VLLM_MODEL or select nemotron-3-ultra-550b-a55b; the explicit model override remains authoritative.",
+    );
   });
 
   it("stages a missing peer snapshot after download and requires a ready re-probe", async () => {

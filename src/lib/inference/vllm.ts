@@ -1153,12 +1153,35 @@ export async function installVllm(
   let peerModelSnapshot: "ready" | "staging-required" | null = null;
   const explicitModel = String(process.env.NEMOCLAW_VLLM_MODEL ?? "").trim();
   const configuredPeer = String(process.env[NEMOCLAW_DGX_STATION_PEER_ENV] ?? "").trim();
+  const ultra =
+    profile.platform === "station" && configuredPeer
+      ? VLLM_MODELS.find((candidate) => candidate.envValue === "nemotron-3-ultra-550b-a55b")
+      : undefined;
+
+  if (profile.platform === "station" && configuredPeer) {
+    if (!ultra) {
+      console.error("  vLLM install failed: Nemotron Ultra is missing from the model registry");
+      return { ok: false };
+    }
+    const normalizedExplicitModel = explicitModel.toLowerCase();
+    if (
+      normalizedExplicitModel &&
+      normalizedExplicitModel !== ultra.envValue.toLowerCase() &&
+      normalizedExplicitModel !== ultra.id.toLowerCase()
+    ) {
+      console.error(
+        `  vLLM install failed: ${NEMOCLAW_DGX_STATION_PEER_ENV} requires the DGX Station dual-serving model. ` +
+          "Unset NEMOCLAW_VLLM_MODEL or select nemotron-3-ultra-550b-a55b; the explicit model override remains authoritative.",
+      );
+      return { ok: false };
+    }
+  }
 
   // Model selection lives in `resolveVllmInstallModel` so this entry point
   // stays focused on the docker side effects. Gated-model access is checked
   // there before any docker work happens.
   let resolved: Awaited<ReturnType<typeof resolveVllmInstallModel>>;
-  if (profile.platform === "station" && configuredPeer && !explicitModel) {
+  if (profile.platform === "station" && configuredPeer && !explicitModel && ultra) {
     const capability = probeDualStationVllmCapability();
     if (capability.kind !== "ready") {
       const reason =
@@ -1166,13 +1189,6 @@ export async function installVllm(
           ? capability.reason
           : "the explicit peer configuration disappeared";
       console.error(`  Dual DGX Station setup unavailable: ${reason}`);
-      return { ok: false };
-    }
-    const ultra = VLLM_MODELS.find(
-      (candidate) => candidate.envValue === "nemotron-3-ultra-550b-a55b",
-    );
-    if (!ultra) {
-      console.error("  vLLM install failed: Nemotron Ultra is missing from the model registry");
       return { ok: false };
     }
     resolved = await resolveVllmInstallModel(
