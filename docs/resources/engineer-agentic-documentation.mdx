@@ -12,6 +12,7 @@ content:
 
 Agentic documentation is a documentation system that helps an AI agent find the right source, apply it to the user's context, take bounded action, and verify the result.
 It serves people and agents from one governed source instead of maintaining a website, prompt library, and skill catalog as separate bodies of content.
+It also places agents inside the documentation lifecycle so product changes arrive with accurate documentation instead of becoming a later handoff to a writing team.
 
 This guide turns the current NemoClaw documentation architecture into a reusable model for other engineering teams.
 The file names and tools are NemoClaw examples, but the contracts apply to any docs-as-code stack.
@@ -37,6 +38,47 @@ A reliable agentic documentation system supports the following contract.
 
 Treat failures in any row as documentation defects.
 A polished site with weak retrieval or verification is not agent-ready.
+
+## Move Documentation Into the Engineering Loop
+
+Many documentation workflows begin after engineering work is complete.
+The writer identifies which features are shipping, finds the responsible engineers, interviews them to reconstruct the behavior, and then creates a separate documentation change.
+This manual intake phase consumes time and can lose important context between implementation and publication.
+
+NemoClaw moves routine documentation work into the developer's engineering pull request.
+The agent working on the developer's machine can inspect the code, tests, issue, and pull-request context while the change is still fresh.
+Repository instructions tell that agent when documentation is required, where the content belongs, how to write it, and which checks prove the result.
+
+| Stage | Separate documentation handoff | Repository-embedded workflow |
+|---|---|---|
+| Discover changes | A writer collects release scope from meetings, messages, and issue lists. | The developer's agent inspects the current diff, issue, and changed behavior. |
+| Transfer knowledge | A writer interviews engineers and reconstructs implementation details. | The agent reads the implementation and tests, then asks only when a decision or supported contract is unclear. |
+| Draft documentation | A writer creates a later documentation task or pull request. | The agent updates the canonical page in the engineering pull request. |
+| Review accuracy | Documentation and implementation may be reviewed at different times. | Reviewers see the behavior, tests, and documentation together. |
+| Prepare a release | A writer performs a broad catch-up pass before publication. | Continuous updates reduce catch-up work, while the release workflow verifies completeness and creates the canonical changelog entry. |
+
+The repository provides a control stack for this workflow:
+
+- The root `AGENTS.md` defines repository-wide success criteria, product scope, and documentation expectations.
+- `docs/AGENTS.md` defines the documentation role, source-of-truth rules, variant patterns, and verification requirements.
+- `docs/CONTRIBUTING.md` defines the public writing, navigation, release, and review contracts.
+- The `nemoclaw-contributor-update-docs` skill maps product changes to canonical pages and produces an evidence-backed documentation update.
+- Build scripts, tests, hooks, previews, and publication workflows enforce the contracts after the agent edits the files.
+
+The expected pull-request loop is direct:
+
+1. The developer's agent reads the repository and documentation instructions.
+2. It inspects the implemented behavior and its tests.
+3. It decides whether the change has user-facing documentation impact.
+4. It updates the canonical page in the same pull request when documentation is required.
+5. It runs the relevant documentation and product-parity checks.
+6. It reports the pages changed, behavior represented, and verification evidence.
+
+This model removes the need for a writer to manually reconstruct every incremental product change.
+It does not remove documentation ownership.
+It shifts the writer's role toward designing the system, maintaining the instructions, monitoring outcomes, and handling work that requires editorial judgment.
+When the instructions are working, the writer can review by exception.
+Routine pull-request updates that already meet the documentation contract do not need line editing, so the writer can focus on unclear product scope, structural pressure, and recurring failure patterns.
 
 ## Use a Layered Architecture
 
@@ -171,6 +213,30 @@ The refactor workflow inventories every topic, defines ownership and URL migrati
 Design each workflow to produce evidence instead of a generic statement that the docs were updated.
 The agent should report the files changed, source behavior represented, checks run, and intentionally deferred work.
 
+## Let the Corpus Grow and Tend It
+
+Do not require every engineering pull request to redesign the documentation structure.
+Let agents make small, accurate updates to the current canonical page while the product evolves.
+Restructure the corpus after repeated changes reveal its real shape.
+
+This is continuous growth with periodic curation.
+The daily engineering loop keeps behavior and documentation aligned, while a daily or weekly maintenance pass improves sections that have outgrown their original purpose.
+
+Use observable signals to start a restructuring pass:
+
+- A page serves several distinct user tasks.
+- A section has become difficult to scan or navigate.
+- A paragraph contains several decisions, procedures, or failure modes.
+- The same guidance appears in several pages.
+- A common task is buried under an unrelated heading or navigation group.
+- Product variants have started to drift because their shared and distinct behavior is unclear.
+
+During the maintenance pass, split overgrown pages, clarify headings, move reusable reference material to one owner, remove duplication, and preserve published routes.
+If agents repeatedly produce the same structural or style problem, improve the repository instructions or workflow skill so later pull requests correct the pattern at its source.
+
+This cadence avoids premature reorganization while keeping the documentation usable as it grows.
+It also reserves the writer's time for structure, user journeys, and editorial quality instead of routine transcription.
+
 ## Generate Variants Without Duplicating Sources
 
 Many products publish documentation for editions, platforms, runtimes, or deployment models.
@@ -223,6 +289,26 @@ Define the following controls:
 NemoClaw applies the same scope gate to code review and documentation review.
 A working example and a green build establish technical evidence, but they do not establish product approval.
 
+## Keep High-Judgment Work Human-Owned
+
+Agents execute documented rules well when the repository gives them accurate context and deterministic checks.
+People remain responsible for decisions that create or change those rules.
+
+Keep human ownership over the following work:
+
+- Decide whether a feature, integration, or workflow is a supported product surface.
+- Decide which user problem a page owns and where readers should encounter it.
+- Resolve conflicts between implementation details, product intent, security requirements, and user expectations.
+- Restructure sections when accumulated changes reveal a better organization.
+- Set the editorial voice, evidence standard, release narrative, and publication policy.
+- Review recurring agent mistakes and improve the instructions, skills, tests, or source structure that allowed them.
+
+Formal information-architecture terminology can help teams discuss this work, but the terminology is not the source of quality.
+If you can recognize that a page is doing too many jobs, decide where a user expects to find a topic, and give each topic one clear owner, you are already practicing the part of information architecture that this operating model needs.
+
+The durable division of labor is concise.
+Agents handle repeatable work close to the engineering source, while people own product meaning, system design, exceptions, and editorial judgment.
+
 ## Measure Retrieval and Task Quality
 
 Measure whether agents can complete documentation-backed tasks, not only whether pages receive traffic.
@@ -235,6 +321,7 @@ Track a small evaluation set across common and high-risk user journeys:
 - Task completion, measured by whether the documented procedure reaches its success check.
 - Safety compliance, measured by whether the agent stops at approval, credential, and destructive-action boundaries.
 - Freshness, measured by the delay between a product change and its verified documentation update.
+- Editorial intervention, measured by how often routine documentation changes require a manual rewrite after the agent follows the repository workflow.
 - Drift detection, measured by which parity gate catches an intentionally stale fixture.
 
 Keep evaluation prompts versioned with the documentation system.
@@ -263,6 +350,7 @@ The current NemoClaw repository provides concrete examples for each layer.
 | Concern | NemoClaw implementation |
 |---|---|
 | Canonical content | `docs/**/*.mdx`. |
+| Repository-wide documentation contract | `AGENTS.md`. |
 | Authoring and review policy | `docs/CONTRIBUTING.md` and `docs/AGENTS.md`. |
 | Navigation and variants | `docs/index.yml`. |
 | Site and redirect configuration | `fern/docs.yml` and `fern/fern.config.json`. |
