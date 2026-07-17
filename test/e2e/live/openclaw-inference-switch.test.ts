@@ -4,10 +4,11 @@
 /**
  * Preserve the script's real user-visible boundary: install.sh onboards an
  * OpenClaw sandbox, `nemoclaw inference set` switches the running route, then
- * OpenShell route state, OpenClaw config/hash state, registry/session state,
- * inference.local, and a real OpenClaw agent turn are checked from the live
- * host/sandbox boundary. Target-specific helpers stay local; shared shell
- * primitives come from the fixture layer's production-backed helper.
+ * a state-preserving rebuild is run before OpenShell route state, OpenClaw
+ * config/hash state, registry/session state, inference.local, and a real
+ * OpenClaw agent turn are checked from the live host/sandbox boundary.
+ * Target-specific helpers stay local; shared shell primitives come from the
+ * fixture layer's production-backed helper.
  */
 
 import fs from "node:fs";
@@ -59,6 +60,7 @@ const SWITCH_MOCK_ANTHROPIC = process.env.NEMOCLAW_SWITCH_MOCK_ANTHROPIC ?? "0";
 const SWITCH_MOCK_PORT = parsePortEnv("NEMOCLAW_SWITCH_MOCK_PORT", 0);
 const TEST_TIMEOUT_MS = 75 * 60_000;
 const INSTALL_TIMEOUT_MS = 30 * 60_000;
+const REBUILD_TIMEOUT_MS = 30 * 60_000;
 const COMMAND_TIMEOUT_MS = 120_000;
 const INFERENCE_TIMEOUT_MS = 150_000;
 const AGENT_TIMEOUT_MS = 150_000;
@@ -87,6 +89,7 @@ interface OpenClawConfig {
         primary?: unknown;
       };
     };
+    list?: Array<{ id?: unknown; default?: unknown; model?: unknown }>;
   };
   models?: {
     providers?: Record<
@@ -476,8 +479,10 @@ async function assertRegistryAndSession(
       expect(sandbox?.preferredInferenceApi).toBe("openai-completions");
       break;
     case "compatible-anthropic-endpoint":
-      expect(sandbox?.endpointUrl).toBe(
-        process.env.NEMOCLAW_SWITCH_ENDPOINT_URL ?? options.mockProvider?.endpointUrl,
+      expect(new URL(sandbox?.endpointUrl ?? "").toString()).toBe(
+        new URL(
+          process.env.NEMOCLAW_SWITCH_ENDPOINT_URL ?? options.mockProvider?.endpointUrl ?? "",
+        ).toString(),
       );
       expect(sandbox?.credentialEnv).toBe("COMPATIBLE_ANTHROPIC_API_KEY");
       expect(sandbox?.preferredInferenceApi).toBe("anthropic-messages");
@@ -510,7 +515,11 @@ async function assertRegistryAndSession(
   }
 }
 
-async function assertOpenClawConfig(sandbox: SandboxClient, home: string): Promise<void> {
+async function assertOpenClawConfig(
+  sandbox: SandboxClient,
+  home: string,
+  expectAgentListModel = false,
+): Promise<void> {
   const configResult = await sandbox.exec(
     SANDBOX_NAME,
     ["cat", "/sandbox/.openclaw/openclaw.json"],
@@ -529,6 +538,10 @@ async function assertOpenClawConfig(sandbox: SandboxClient, home: string): Promi
   const firstModel = provider?.models?.[0];
 
   expect(config.agents?.defaults?.model?.primary).toBe(expectedPrimary);
+  const primaryAgent =
+    config.agents?.list?.find((agent) => agent.id === "main") ??
+    config.agents?.list?.find((agent) => agent.default === true);
+  if (expectAgentListModel) expect(primaryAgent?.model).toBe(expectedPrimary);
   expect(provider?.baseUrl).toBe(
     SWITCH_INFERENCE_API === "anthropic-messages"
       ? "https://inference.local"
@@ -552,6 +565,40 @@ async function assertOpenClawConfig(sandbox: SandboxClient, home: string): Promi
   );
   expect(hashCheck.exitCode, resultText(hashCheck)).toBe(0);
   expect(hashCheck.stdout.trim()).toBe("OK");
+}
+
+async function seedStaleAgentModelSnapshot(
+  host: HostCliClient,
+  sandbox: SandboxClient,
+  home: string,
+): Promise<void> {
+  const stalePrimary = `inference/${MOCK_BASELINE_MODEL}`;
+  for (const [key, value] of [
+    ["agents.defaults.model.primary", stalePrimary],
+    ["agents.list", JSON.stringify([{ id: "main", default: true, model: stalePrimary }])],
+  ]) {
+    const result = await runNemoclaw(
+      host,
+      home,
+      [SANDBOX_NAME, "config", "set", "--key", key, "--value", value],
+      { artifactName: `seed-stale-${key.replaceAll(".", "-")}` },
+    );
+    expect(result.exitCode, resultText(result)).toBe(0);
+  }
+
+  const configResult = await sandbox.exec(
+    SANDBOX_NAME,
+    ["cat", "/sandbox/.openclaw/openclaw.json"],
+    {
+      artifactName: "read-seeded-stale-agent-model-snapshot",
+      env: commandEnv(home),
+      timeoutMs: COMMAND_TIMEOUT_MS,
+    },
+  );
+  expect(configResult.exitCode, resultText(configResult)).toBe(0);
+  const config = JSON.parse(configResult.stdout) as OpenClawConfig;
+  expect(config.agents?.defaults?.model?.primary).toBe(stalePrimary);
+  expect(config.agents?.list?.find((agent) => agent.id === "main")?.model).toBe(stalePrimary);
 }
 
 function isTransientLiveHttpCode(status: string): boolean {
@@ -895,7 +942,7 @@ test("openclaw-inference-switch: switches route and preserves live OpenClaw beha
 }, async ({ artifacts, cleanup, host, sandbox, secrets, skip }) => {
   await artifacts.target.declare({
     id: "openclaw-inference-switch",
-    boundary: "install-sh-openclaw-inference-set-and-live-agent-turn",
+    boundary: "install-sh-openclaw-inference-set-rebuild-and-live-agent-turn",
     sandboxName: SANDBOX_NAME,
     switchProvider: SWITCH_PROVIDER,
     switchModel: SWITCH_MODEL,
@@ -905,6 +952,7 @@ test("openclaw-inference-switch: switches route and preserves live OpenClaw beha
       "install.sh --non-interactive onboards an OpenClaw sandbox",
       "nemoclaw inference set switches the running sandbox route",
       "OpenClaw gateway is supervisor-restarted only when the inference API family changes",
+      "a state-preserving rebuild replaces stale default and primary-agent model bindings",
       "OpenShell route points at the switched provider/model",
       "OpenClaw config and .config-hash reflect the switched inference API/model",
       "registry and onboard session record the switched provider/model",
@@ -1069,6 +1117,19 @@ test("openclaw-inference-switch: switches route and preserves live OpenClaw beha
   await assertOpenClawConfig(sandbox, home);
   await assertRegistryAndSession(home, { mockProvider });
 
+  await seedStaleAgentModelSnapshot(host, sandbox, home);
+
+  const rebuild = await runNemoclaw(host, home, [SANDBOX_NAME, "rebuild", "--yes"], {
+    artifactName: "nemoclaw-rebuild-after-inference-switch",
+    redactionValues,
+    timeoutMs: REBUILD_TIMEOUT_MS,
+  });
+  expect(rebuild.exitCode, resultText(rebuild)).toBe(0);
+
+  await assertOpenShellRoute(host, home);
+  await assertOpenClawConfig(sandbox, home, true);
+  await assertRegistryAndSession(home, { mockProvider });
+
   const inference = await checkSandboxInference(sandbox, home);
   if (inference !== "ok") {
     await artifacts.target.complete({
@@ -1105,6 +1166,7 @@ test("openclaw-inference-switch: switches route and preserves live OpenClaw beha
       dockerRunning: docker.exitCode === 0,
       installCompleted: install.exitCode === 0,
       inferenceSetCompleted: switchResult.exitCode === 0,
+      rebuildCompleted: rebuild.exitCode === 0,
       gatewayRestartExpected,
       gatewayPidStable,
       routeChecked: true,
