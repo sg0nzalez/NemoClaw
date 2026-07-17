@@ -616,7 +616,7 @@ with tempfile.TemporaryDirectory() as tmp:
 });
 
 describe("Hermes shields outer namespace containment", () => {
-  it("selects private mutable HERMES_HOME mode only for managed non-root topology", () => {
+  it("keeps mutable metadata canonical so a private Hermes root requires topology attestation", () => {
     const result = runPythonHarness(`${loadGuardModule}
 import json
 import os
@@ -635,37 +635,56 @@ with tempfile.TemporaryDirectory() as tmp:
             "flags": 0,
         }
 
-    def configured_mode(managed_nonroot):
-        state = {
-            "parent": guard._inode_metadata(os.stat(tmp, follow_symlinks=False)),
-            "parent_flags": 0,
-            "hermes": guard._inode_metadata(os.stat(hermes, follow_symlinks=False)),
-            "hermes_flags": 0,
-            "files": files,
-        }
-        transition = {}
-        guard._managed_nonroot_reconciliation_is_allowed = lambda: managed_nonroot
-        guard._sandbox_identity = lambda: (os.geteuid(), os.getegid())
-        guard._get_inode_flags = lambda _fd: 0
-        guard._configure_shields_target_metadata(
-            state,
-            transition,
-            hermes,
-            "mutable",
-            capture_original=True,
-        )
-        return state["hermes"]["mode"]
+    state = {
+        "parent": guard._inode_metadata(os.stat(tmp, follow_symlinks=False)),
+        "parent_flags": 0,
+        "hermes": guard._inode_metadata(os.stat(hermes, follow_symlinks=False)),
+        "hermes_flags": 0,
+        "files": files,
+    }
+    guard._sandbox_identity = lambda: (os.geteuid(), os.getegid())
+    guard._get_inode_flags = lambda _fd: 0
+    guard._configure_shields_target_metadata(
+        state,
+        {},
+        hermes,
+        "mutable",
+        capture_original=True,
+    )
+
+    attestation_calls = []
+    guard._attested_shields_runtime_topology = (
+        lambda: attestation_calls.append("called") or "unknown"
+    )
+    hermes_fd = os.open(hermes, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        try:
+            guard._reconcile_private_mutable_shields_root(
+                hermes_fd,
+                os.fstat(hermes_fd),
+                state["hermes"],
+                "mutable",
+            )
+        except guard.UnsafePathError as exc:
+            error = str(exc)
+        else:
+            error = ""
+    finally:
+        os.close(hermes_fd)
 
     print(json.dumps({
-        "managed_nonroot": configured_mode(True),
-        "root_separated": configured_mode(False),
+        "attestation_calls": attestation_calls,
+        "error": error,
+        "expected_mode": state["hermes"]["mode"],
     }))
 `);
 
     expect(result.status, result.stderr).toBe(0);
     expect(JSON.parse(result.stdout)).toEqual({
-      managed_nonroot: 0o700,
-      root_separated: 0o3770,
+      attestation_calls: ["called"],
+      error:
+        "refusing shields finish because private mutable .hermes lacks an attested same-UID topology",
+      expected_mode: 0o3770,
     });
   });
 

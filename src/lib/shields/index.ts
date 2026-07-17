@@ -1728,10 +1728,19 @@ function unlockAgentConfigUnderMutationLock(
         target.configDir,
       ]);
       const [mode, owner] = dirPerms.split(" ");
-      const acceptedDirModes =
-        target.agentName === "hermes" && transaction ? ["700", "3770"] : [dirMode];
-      if (!acceptedDirModes.includes(mode)) {
-        issues.push(`config dir mode=${mode} (expected ${acceptedDirModes.join(" or ")})`);
+      // A 0700 Hermes root is provisional here. The token-bound guard finish
+      // preserves it only for an attested same-UID topology, repairs and
+      // verifies 03770 for a root-separated topology, and fails closed for an
+      // unknown topology.
+      const validDirMode =
+        mode === dirMode ||
+        (target.agentName === "hermes" && mode === "700" && transaction !== null);
+      if (!validDirMode) {
+        const expectedDirModes =
+          target.agentName === "hermes" && transaction !== null
+            ? `${dirMode}, or provisional 700 pending sealed guard topology attestation`
+            : dirMode;
+        issues.push(`config dir mode=${mode} (expected ${expectedDirModes})`);
       }
       if (owner !== "sandbox:sandbox") {
         issues.push(`config dir owner=${owner} (expected sandbox:sandbox)`);
