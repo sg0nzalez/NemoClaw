@@ -240,11 +240,10 @@ describe("dual-Station managed vLLM run argv", () => {
     expect(
       args.some(
         (arg) =>
-          arg === "-p" ||
-          arg === "-P" ||
+          arg.startsWith("-p") ||
+          arg.startsWith("-P") ||
           arg === "--publish" ||
           arg === "--publish-all" ||
-          arg.startsWith("-p=") ||
           arg.startsWith("--publish=") ||
           arg.startsWith("--publish-all="),
       ),
