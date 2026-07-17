@@ -117,7 +117,12 @@ async function onboardAgent(
   host: HostCliClient,
   cleanup: CleanupRegistry,
   endpointUrl: string,
-  options: { agent: McpAgent; sandboxName: string; artifactName: string },
+  options: {
+    agent: McpAgent;
+    sandboxName: string;
+    artifactName: string;
+    envOverlay?: NodeJS.ProcessEnv;
+  },
 ): Promise<void> {
   cleanup.trackSandbox(host, options.sandboxName, {
     artifactName: "cleanup-destroy-sandbox",
@@ -133,6 +138,7 @@ async function onboardAgent(
       artifactName: options.artifactName,
       env: {
         ...buildAvailabilityProbeEnv(),
+        ...options.envOverlay,
         COMPATIBLE_API_KEY: COMPATIBLE_KEY,
         NVIDIA_INFERENCE_API_KEY: COMPATIBLE_KEY,
         NEMOCLAW_AGENT: options.agent,
@@ -1374,6 +1380,7 @@ mcpBridgeShardTest("deepagents")(
       agent: "langchain-deepagents-code",
       sandboxName: DEEPAGENTS_SANDBOX_NAME,
       artifactName: "onboard-deepagents-mcp-bridge",
+      envOverlay: exactMainProof.envOverlay,
     });
     await exactMainProof.afterOnboard();
     cleanup.add("remove Deep Agents MCP bridge", () =>

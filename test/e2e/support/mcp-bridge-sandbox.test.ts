@@ -304,6 +304,10 @@ network_policies:
 
   it("runs the zero-upstream rebinding proof for all three adapters", () => {
     const source = fs.readFileSync("test/e2e/live/mcp-bridge.test.ts", "utf8");
+    const exactMainProofSource = fs.readFileSync(
+      "test/e2e/live/openshell-exact-main-mcp-proof.ts",
+      "utf8",
+    );
 
     expect(source.match(/await assertAdapterDnsRebindingDenied/g)).toHaveLength(3);
     for (const adapter of [
@@ -315,6 +319,8 @@ network_policies:
     }
     expect(source).toContain("rebound request must not reach the upstream MCP server");
     expect(source).toContain(").toHaveLength(0);");
+    expect(exactMainProofSource).toContain("envOverlay: driverConfig.envOverlay");
+    expect(source).toContain("envOverlay: exactMainProof.envOverlay");
   });
 
   it("restores the DNS fixture before MCP removal can restart the sandbox", () => {
