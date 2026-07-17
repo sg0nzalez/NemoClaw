@@ -243,6 +243,56 @@ describe("mergeOpenClawRestoredConfig", () => {
     ).toEqual({ command: "npx", args: ["-y", "fs-server", "/work"] });
   });
 
+  it("keeps the fresh agent model routing while restoring durable agent tuning (#7011)", () => {
+    // Reporter scenario: switch inference provider/model, then rebuild. The
+    // backup (pre-switch config) must not revert agents.defaults.model.primary
+    // or a per-agent model ref, or the agent keeps routing to the old model
+    // even though the host route was updated.
+    const merged = mergeOpenClawRestoredConfig(
+      {
+        agents: {
+          defaults: {
+            model: { primary: "inference/nvidia/nemotron-3-super-120b-a12b" },
+            thinkingDefault: "off",
+            timeoutSeconds: 600,
+          },
+          list: [
+            { id: "main", default: true, model: "inference/nvidia/nemotron-3-super-120b-a12b" },
+          ],
+        },
+        mcp: { servers: { fs: { command: "npx" } } },
+      },
+      {
+        agents: {
+          defaults: {
+            model: { primary: "inference/nvidia/nemotron-3-ultra-550b-a55b" },
+            thinkingDefault: "on",
+          },
+          list: [{ id: "main", default: true }],
+        },
+      },
+    );
+
+    const agents = (merged as { agents: Record<string, unknown> }).agents;
+    const defaults = agents.defaults as Record<string, unknown>;
+    // Routing identity is owned by the fresh rebuild.
+    expect((defaults.model as Record<string, unknown>).primary).toBe(
+      "inference/nvidia/nemotron-3-ultra-550b-a55b",
+    );
+    // Durable user tuning is restored from the backup.
+    expect(defaults.thinkingDefault).toBe("off");
+    expect(defaults.timeoutSeconds).toBe(600);
+    // The fresh main agent routes via defaults (no per-agent model); the stale
+    // backup ref must not be resurrected.
+    const mainAgent = (agents.list as Record<string, unknown>[])[0];
+    expect("model" in mainAgent).toBe(false);
+    expect(mainAgent.default).toBe(true);
+    // Unrelated durable sections survive.
+    expect((merged as { mcp: { servers: Record<string, unknown> } }).mcp.servers.fs).toEqual({
+      command: "npx",
+    });
+  });
+
   it("keeps current provider and plugin entries for matching keys", () => {
     const merged = mergeOpenClawRestoredConfig(
       {

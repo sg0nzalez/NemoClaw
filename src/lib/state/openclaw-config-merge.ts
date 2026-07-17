@@ -33,7 +33,13 @@ export const OPENCLAW_CONFIG_RESTORE_OWNERSHIP = {
   providerRuntimeOwnedFields: ["baseUrl", "api", "apiKey"],
   /** A model entry's routing identity is owned by the fresh rebuild. */
   modelRuntimeOwnedFields: ["id", "name"],
-  /** Durable user-owned top-level sections are inherited from the backup. */
+  /**
+   * Durable user-owned top-level sections are inherited from the backup. Note
+   * `agents` is durable EXCEPT for its model routing identity
+   * (`agents.defaults.model` and per-agent `model` refs), which the fresh
+   * rebuild owns so a provider/model switch is not reverted (see
+   * mergeOpenClawAgents, issue #7011).
+   */
   backupDurableSections: ["mcp", "mcpServers", "customAgents", "agents"],
   /** NemoClaw's cross-agent disclosure selection owns this generated key. */
   currentGeneratedToolFields: ["toolSearch"],
@@ -368,6 +374,61 @@ function mergeOpenClawModels(backupModels: unknown, currentModels: unknown): unk
   return merged;
 }
 
+function agentEntryId(entry: unknown): string | null {
+  if (isPlainObject(entry) && typeof entry.id === "string" && entry.id) return entry.id;
+  return null;
+}
+
+/**
+ * Merge the `agents` section. The backup restores the user's durable agent
+ * config (per-agent customizations and non-routing defaults such as
+ * `thinkingDefault` / `timeoutSeconds` / `compaction`), but the model *routing*
+ * identity is owned by the fresh rebuild: `agents.defaults.model` (which holds
+ * `primary`) and each agent-list entry's `model` ref.
+ *
+ * Without this, a provider/model switch is silently reverted on rebuild: the
+ * backup (pre-switch config) wins the routing ref, so the sandbox keeps routing
+ * to the old model even though the host route and `inference get` show the new
+ * one (issue #7011). This mirrors how the `models` section already lets the
+ * fresh rebuild own the routing identity (id/name) while restoring user tuning.
+ */
+function mergeOpenClawAgents(backupAgents: unknown, currentAgents: unknown): unknown {
+  if (!isPlainObject(currentAgents)) return cloneJson(backupAgents ?? currentAgents);
+  const backup = isPlainObject(backupAgents) ? backupAgents : {};
+  const merged = mergeJsonObjects(currentAgents, backup);
+
+  // Fresh rebuild owns agents.defaults.model (the routing block).
+  if (isPlainObject(currentAgents.defaults) && "model" in currentAgents.defaults) {
+    const mergedDefaults = isPlainObject(merged.defaults)
+      ? merged.defaults
+      : ((merged.defaults = {}) as Record<string, unknown>);
+    mergedDefaults.model = cloneJson(currentAgents.defaults.model);
+  }
+
+  // Fresh rebuild owns each agent-list entry's `model` routing ref (by id). An
+  // agent that the fresh config routes via defaults (no `model` key) must not
+  // resurrect a stale per-agent ref from the backup.
+  if (Array.isArray(merged.list) && Array.isArray(currentAgents.list)) {
+    const freshById = new Map<string, Record<string, unknown>>();
+    for (const entry of currentAgents.list) {
+      const id = agentEntryId(entry);
+      if (id && isPlainObject(entry) && !freshById.has(id)) freshById.set(id, entry);
+    }
+    merged.list = merged.list.map((entry) => {
+      if (!isPlainObject(entry)) return entry;
+      const id = agentEntryId(entry);
+      const fresh = id ? freshById.get(id) : undefined;
+      if (!fresh) return entry;
+      const next: Record<string, unknown> = { ...entry };
+      if ("model" in fresh) next.model = cloneJson(fresh.model);
+      else delete next.model;
+      return next;
+    });
+  }
+
+  return merged;
+}
+
 function mergeOpenClawPlugins(
   backupPlugins: unknown,
   currentPlugins: unknown,
@@ -452,6 +513,9 @@ export function mergeOpenClawRestoredConfig(
     previousOwnership.ids,
   );
   merged.models = mergeOpenClawModels(backedUpConfig.models, currentConfig.models);
+  if ("agents" in backedUpConfig || "agents" in currentConfig) {
+    merged.agents = mergeOpenClawAgents(backedUpConfig.agents, currentConfig.agents);
+  }
   merged.plugins = mergeOpenClawPlugins(
     backedUpConfig.plugins,
     currentConfig.plugins,
