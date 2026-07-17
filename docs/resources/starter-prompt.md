@@ -81,9 +81,12 @@ If DGX Station Express is selected:
 
 - Use managed vLLM and set `NEMOCLAW_PROVIDER=install-vllm`.
 - Leave `NEMOCLAW_VLLM_MODEL` unset unless the user explicitly selected a model.
-- Explain that the installer checks only the deterministic counterpart on each of two configured private `/30` CX-8 rails. At least one derived address must already be trusted; if both are trusted, their host keys must identify one coherent SSH host. It selects pinned Nemotron 3 Ultra only when the reciprocal pair then qualifies; otherwise the existing single-Station DeepSeek default remains.
+- Explain that the installer checks only the deterministic counterpart on each of two configured private `/30` CX-8 rails.
+  At least one derived address must already be trusted; if both are trusted, their host keys must identify one coherent SSH host.
+  It selects pinned Nemotron 3 Ultra only when the reciprocal pair then qualifies; otherwise the existing single-Station DeepSeek default remains.
 - If the user supplies `NEMOCLAW_DGX_STATION_PEER`, preserve that exact selection and explain that setup stops if the already-trusted peer does not qualify.
-- Confirm that the physical rails and SSH host-key and authentication trust were configured outside NemoClaw. Do not configure the rails, enroll SSH trust, or approve an automatic reboot.
+- Confirm that the physical rails and SSH host-key and authentication trust were configured outside NemoClaw.
+  Do not configure the rails, enroll SSH trust, or approve an automatic reboot.
 - Explain the container and selected model download before it begins, without assuming the Ultra recipe was selected.
 - Verify the model-cache filesystem and Docker storage have sufficient capacity.
 - Warn that DGX Station managed deployment has deferred end-to-end physical-hardware validation.

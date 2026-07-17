@@ -124,6 +124,9 @@ Use these details when your first-run path needs more control.
     At least one derived rail address must already be trusted; if both are trusted, their host keys must identify the same SSH host. The installer prepares the peer with the same reviewed helper and automatically selects the pinned `nemotron-3-ultra-550b-a55b` managed-vLLM recipe only after the two Stations pass reciprocal identity and connectivity checks across both rails.
     If no trusted pair qualifies and no model or peer was selected explicitly, onboarding retains the existing single-Station `deepseek-v4-flash` profile default.
     Complete the physical rail configuration and SSH host-key and authentication setup before installation; NemoClaw does not configure the rails or enroll SSH trust.
+    Station host preparation records the preparing non-root account's UID in root-owned `/etc/nemoclaw/dual-station-controller-uid`.
+    That binding prevents a different local account from managing the fixed dual-Station containers.
+    Rebinding requires an administrator to remove the file explicitly before preparation is rerun as the replacement account.
     DGX OS, NVIDIA BaseOS images, and other Station generations stop before host preparation.
     Set `NEMOCLAW_NO_EXPRESS=1`, or select a provider other than `install-vllm`, to continue on an unqualified Station without host automation.
     It probes the pinned driver, Docker, Buildx, and NVIDIA Container Toolkit versions, reuses exact matches, installs missing pins, and permits only the reviewed factory `dkms` transition.

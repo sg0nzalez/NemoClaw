@@ -41,6 +41,7 @@ function runSourced(script: string, body: string, extraEnv: Record<string, strin
 describe("DGX Station host preparation", () => {
   it("keeps documented Station pins and Deferred status aligned", () => {
     const helper = fs.readFileSync(STATION_PREPARE, "utf-8");
+    expect(helper).toContain('readonly SCRIPT_VERSION="2026-07-16.7"');
     const docs = STATION_DOCS.map((doc) => fs.readFileSync(doc, "utf-8"));
     const pinnedValues = [
       "DRIVER_VERSION",
@@ -358,6 +359,7 @@ acquire_sudo() { :; }
 all_packages_exact() { return 0; }
 install_boot_marker_matches_current_boot() { return 1; }
 driver_loaded_exact() { return 0; }
+ensure_dual_station_controller_uid_binding() { printf 'ENSURE_CONTROLLER_UID\n'; }
 install_packages() { printf 'INSTALL_PACKAGES\n'; }
 finish_runtime() { printf 'FINISH_RUNTIME\n'; }
 verify_apply_state() { printf 'VERIFY_APPLY_STATE\n'; }
@@ -366,6 +368,7 @@ run_apply
     );
 
     expect(result.status, output).toBe(0);
+    expect(output).toContain("ENSURE_CONTROLLER_UID");
     expect(output).toContain("FINISH_RUNTIME");
     expect(output).toContain("VERIFY_APPLY_STATE");
     expect(output).not.toContain("INSTALL_PACKAGES");
@@ -380,6 +383,7 @@ common_preflight() { :; }
 require_command() { :; }
 acquire_sudo() { :; }
 all_packages_exact() { return 1; }
+ensure_dual_station_controller_uid_binding() { printf 'ENSURE_CONTROLLER_UID\n'; }
 installed_version() {
   if [[ "$1" == "dkms" ]]; then printf '3.0.11-1ubuntu13'; fi
 }
@@ -394,6 +398,7 @@ run_apply
 
     expect(result.status, output).toBe(10);
     expect(output).toContain("package=dkms status=approved_transition");
+    expect(output).toContain("ENSURE_CONTROLLER_UID");
     expect(output).toContain("INSTALL_PACKAGES");
     expect(output).toContain("ENSURE_DOCKER_GROUP");
     expect(output).toContain("RECHECK_ALL_WORKLOADS");
@@ -657,6 +662,7 @@ acquire_sudo() { :; }
 all_packages_exact() { return 0; }
 install_boot_marker_matches_current_boot() { return 1; }
 driver_loaded_exact() { return 0; }
+ensure_dual_station_controller_uid_binding() { printf 'ENSURE_CONTROLLER_UID\n'; }
 finish_runtime() { DOCKER_GROUP_ADDED=1; printf 'FINISH_RUNTIME\n'; }
 verify_apply_state() { printf 'VERIFY_APPLY_STATE\n'; }
 run_apply

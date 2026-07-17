@@ -51,12 +51,14 @@ import {
 import {
   areDualStationManagedVllmContainersRunning,
   cleanupDualStationManagedVllm,
+  commitDualStationLegacyMigration,
   DUAL_STATION_VLLM_CLUSTER_LABEL,
   DUAL_STATION_VLLM_ENDPOINT_LABEL,
   DUAL_STATION_VLLM_ROLE_LABEL,
   getDualStationManagedVllmBaseUrl,
   preflightDualStationGpuRuntime,
   preflightDualStationManagedVllm,
+  rollbackDualStationLegacyMigration,
   startDualStationManagedVllm,
   withDualStationManagedVllmLifecycle,
 } from "./vllm-station-cluster-lifecycle";
@@ -601,7 +603,10 @@ type VllmContainerOwnership =
   | { kind: "managed"; containerId: string; running: boolean }
   | { kind: "unknown" };
 
-function inspectVllmContainerOwnership(containerName: string): VllmContainerOwnership {
+function inspectVllmContainerOwnershipInDockerEnv(
+  containerName: string,
+  env: Record<string, string>,
+): VllmContainerOwnership {
   const format = [
     "{{.ID}}",
     "{{.Names}}",
@@ -623,7 +628,7 @@ function inspectVllmContainerOwnership(containerName: string): VllmContainerOwne
         "--format",
         format,
       ],
-      { env: buildVllmDockerEnv(), timeout: 10_000 },
+      { env, timeout: 10_000 },
     ).trim();
     if (!output) return { kind: "absent" };
 
@@ -653,6 +658,22 @@ function inspectVllmContainerOwnership(containerName: string): VllmContainerOwne
   } catch {
     return { kind: "unknown" };
   }
+}
+
+function inspectVllmContainerOwnership(containerName: string): VllmContainerOwnership {
+  // A managed dual-Station head always lives on the physical host's default
+  // daemon. Inspect it before following ambient single-host Docker routing so
+  // DOCKER_HOST, DOCKER_CONTEXT, or Docker's persisted currentContext cannot
+  // hide the pair from running-state detection or replacement guards.
+  const canonicalOwnership = inspectVllmContainerOwnershipInDockerEnv(
+    containerName,
+    buildLocalDualStationDockerEnv(),
+  );
+  if (canonicalOwnership.kind === "dual-managed" || canonicalOwnership.kind === "unknown") {
+    return canonicalOwnership;
+  }
+
+  return inspectVllmContainerOwnershipInDockerEnv(containerName, buildVllmDockerEnv());
 }
 
 function vllmContainerReplacementTarget(
@@ -1423,6 +1444,24 @@ export async function installVllm(
           return { ok: false };
         }
 
+        const rollbackStartedPair = async (): Promise<void> => {
+          if (start.reusedExisting) return;
+          if (start.legacyMigration) {
+            const rollback = await rollbackDualStationLegacyMigration(
+              dualStationPlan,
+              start.legacyMigration,
+            );
+            if (!rollback.ok) {
+              for (const rollbackError of rollback.rollbackErrors) {
+                console.error(`  vLLM rollback warning: ${rollbackError}`);
+              }
+            }
+            return;
+          }
+          const cleanup = await cleanupDualStationManagedVllm(dualStationPlan);
+          if (!cleanup.ok) console.error(`  vLLM rollback warning: ${cleanup.reason}`);
+        };
+
         emit("Launching vLLM");
         emit(
           `Launch can take 5 minutes to ${String(Math.ceil(runtimeProfile.loadTimeoutSec / 60))} minutes`,
@@ -1431,10 +1470,7 @@ export async function installVllm(
         const ready = await waitForVllmReady(runtimeProfile, start.baseUrl, localDockerEnv);
         if (!ready.ok) {
           printContainerLogTail(runtimeProfile, localDockerEnv);
-          if (!start.reusedExisting) {
-            const cleanup = await cleanupDualStationManagedVllm(dualStationPlan);
-            if (!cleanup.ok) console.error(`  vLLM rollback warning: ${cleanup.reason}`);
-          }
+          await rollbackStartedPair();
           console.error(`  vLLM install failed: ${String(ready.reason)}`);
           return { ok: false };
         }
@@ -1445,21 +1481,30 @@ export async function installVllm(
           servedModelId,
         );
         if (!authBoundary.ok) {
-          if (!start.reusedExisting) {
-            const cleanup = await cleanupDualStationManagedVllm(dualStationPlan);
-            if (!cleanup.ok) console.error(`  vLLM rollback warning: ${cleanup.reason}`);
-          }
+          await rollbackStartedPair();
           console.error(`  vLLM install failed: ${authBoundary.reason}`);
           return { ok: false };
         }
 
         if (!areDualStationManagedVllmContainersRunning(dualStationPlan)) {
-          if (!start.reusedExisting) {
-            const cleanup = await cleanupDualStationManagedVllm(dualStationPlan);
-            if (!cleanup.ok) console.error(`  vLLM rollback warning: ${cleanup.reason}`);
-          }
+          await rollbackStartedPair();
           console.error("  vLLM distributed containers exited unexpectedly after readiness");
           return { ok: false };
+        }
+
+        if (start.legacyMigration) {
+          const commit = await commitDualStationLegacyMigration(
+            dualStationPlan,
+            start.legacyMigration,
+          );
+          if (!commit.ok) {
+            await rollbackStartedPair();
+            console.error(`  vLLM install failed: ${commit.reason}`);
+            return { ok: false };
+          }
+          for (const warning of commit.cleanupWarnings) {
+            console.error(`  vLLM cleanup warning: ${warning}`);
+          }
         }
 
         console.log(`  ✓ vLLM ready across two DGX Stations at ${start.baseUrl}`);

@@ -19,7 +19,7 @@ const MAC_PATTERN = /^(?:[0-9a-f]{2}:){5}[0-9a-f]{2}$/;
 const MAX_KNOWN_HOSTS_BYTES = 64 * 1024;
 const MAX_KNOWN_HOSTS_LINE_BYTES = 16 * 1024;
 
-export type StationPrepMode = "--check" | "--apply" | "--verify";
+export type StationPrepMode = "--check" | "--apply" | "--verify" | "--bind-controller";
 
 export interface StationIpv4Address {
   address: string;
@@ -114,10 +114,11 @@ export interface DualStationPreparationOptions {
   helperSha256: string;
   explicitPeer?: string;
   reuseExistingManagedPair?: boolean;
+  migrateLegacySingleStationHead?: boolean;
 }
 
 export interface DualStationPreparationDeps {
-  runLocalHelper(mode: "--check" | "--verify"): number;
+  runLocalHelper(mode: StationPrepMode): number;
   probeLocalHost(): StationDiscoveryHost;
   inspectPretrustedTarget(target: string): PretrustedSshTarget | null;
   probePeerHost(target: PretrustedSshTarget): StationDiscoveryHost;
@@ -760,8 +761,11 @@ export function prepareDualStationPair(
   if (!HOST_KEY_DIGEST_PATTERN.test(options.helperSha256)) {
     throw new Error("Exact Station host-preparation helper SHA-256 is required");
   }
+  if (options.reuseExistingManagedPair && options.migrateLegacySingleStationHead) {
+    throw new Error("Managed-pair reuse and legacy single-head migration are mutually exclusive");
+  }
 
-  if (!options.reuseExistingManagedPair) {
+  if (!options.reuseExistingManagedPair && !options.migrateLegacySingleStationHead) {
     deps.log("Checking the local Station with the reviewed host-preparation helper");
     if (deps.runLocalHelper("--check") !== 0) {
       throw new Error("Local DGX Station host-preparation check failed before peer contact");
@@ -769,8 +773,10 @@ export function prepareDualStationPair(
     if (deps.runLocalHelper("--verify") !== 0) {
       throw new Error("Local DGX Station verification failed before peer contact");
     }
+  } else if (options.reuseExistingManagedPair) {
+    deps.log("Revalidating the exact running managed pair without disrupting its workloads");
   } else {
-    deps.log("Revalidating the exact running managed pair without host mutation");
+    deps.log("Revalidating the exact running legacy single-Station head before migration");
   }
 
   const resume = deps.readResumeState();
@@ -789,7 +795,10 @@ export function prepareDualStationPair(
   const selected = selectPretrustedTarget(options, local, resume, deps);
   if ("kind" in selected) return selected;
   const strict = Boolean(
-    resume || options.explicitPeer?.trim() || options.reuseExistingManagedPair,
+    resume ||
+      options.explicitPeer?.trim() ||
+      options.reuseExistingManagedPair ||
+      options.migrateLegacySingleStationHead,
   );
   const { binding, automatic } = selected;
 
@@ -836,7 +845,17 @@ export function prepareDualStationPair(
     ...plan.identity,
   };
   deps.writeResumeState(state);
+  if (options.reuseExistingManagedPair || options.migrateLegacySingleStationHead) {
+    deps.log("Binding the local Station controller account without disrupting managed inference");
+    if (deps.runLocalHelper("--bind-controller") !== 0) {
+      throw new Error("Local DGX Station controller UID binding failed");
+    }
+  }
   if (options.reuseExistingManagedPair) {
+    deps.log("Binding the reciprocal peer controller account without disrupting managed inference");
+    if (deps.runRemoteHelper(binding, "--bind-controller") !== 0) {
+      throw new Error("Peer DGX Station controller UID binding failed");
+    }
     deps.writeResumeState({ ...state, phase: "ready" });
     return {
       kind: "ready",

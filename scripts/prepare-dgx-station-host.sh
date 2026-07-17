@@ -5,7 +5,7 @@
 set -Eeuo pipefail
 umask 077
 
-readonly SCRIPT_VERSION="2026-07-16.5"
+readonly SCRIPT_VERSION="2026-07-16.7"
 readonly REBOOT_REQUIRED_EXIT=10
 readonly MIN_FREE_KIB=$((20 * 1024 * 1024))
 # The qualified generic image currently ships this OEM telemetry bootcmd. Its
@@ -35,6 +35,9 @@ readonly TARGET_DKMS_VERSION="1:3.4.0-1ubuntu1"
 readonly ACCEPTANCE_IMAGE="docker.io/library/ubuntu@sha256:7f622ca8766bccb22f04242ecb6f19f770b2f08827dc4b8c707de5e78a6da7ab"
 readonly STATE_DIR="${HOME}/.local/state/station-bootstrap"
 readonly INSTALL_BOOT_MARKER="${STATE_DIR}/install-boot-id"
+readonly NEMOCLAW_CONFIG_DIR="/etc/nemoclaw"
+readonly DUAL_STATION_CONTROLLER_UID_FILE="${NEMOCLAW_CONFIG_DIR}/dual-station-controller-uid"
+readonly DUAL_STATION_CONTROLLER_UID_MODE="0644"
 
 readonly -a PACKAGE_SPECS=(
   "dkms=${TARGET_DKMS_VERSION}"
@@ -90,11 +93,14 @@ sudo() {
 
 usage() {
   cat <<'EOF'
-Usage: prepare-dgx-station-host.sh --check|--apply|--verify
+Usage: prepare-dgx-station-host.sh --check|--apply|--verify|--bind-controller
 
   --check   Read-only eligibility and current-state report.
   --apply   Install exact prerequisites or finish post-reboot runtime setup.
   --verify  Read-only host verification plus ephemeral GPU container tests.
+  --bind-controller
+             Bind only the current non-root controller UID without inspecting
+             or disrupting an already-running managed inference workload.
 
 Exit 10 from --apply means an operator-controlled reboot is required. After
 the reboot, run --apply once more, followed by --verify.
@@ -103,7 +109,7 @@ EOF
 
 is_valid_mode() {
   case "${1:-}" in
-    --check | --apply | --verify) return 0 ;;
+    --check | --apply | --verify | --bind-controller) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -589,6 +595,112 @@ install_exact_file_or_reuse() {
   info "${label}=installed path=${target}"
 }
 
+preparation_controller_uid_for() {
+  local effective_uid=${1:-} sudo_uid=${2:-} uid
+  if [[ "$effective_uid" == "0" ]]; then
+    uid="$sudo_uid"
+  else
+    uid="$effective_uid"
+  fi
+  if ! [[ "$uid" =~ ^[1-9][0-9]*$ && ${#uid} -le 10 ]] || ((10#$uid > 4294967295)); then
+    fatal "Station preparation must be run by a non-root controller account"
+  fi
+  printf '%s\n' "$uid"
+}
+
+preparation_controller_uid() {
+  preparation_controller_uid_for "$EUID" "${SUDO_UID:-}"
+}
+
+root_directory_is_safe_unprivileged() {
+  local path=$1 expected_mode=${2:-} metadata uid gid mode
+  test ! -L "$path" || return 1
+  test -d "$path" || return 1
+  metadata="$(stat -c '%u %g %a' -- "$path")" || return 1
+  read -r uid gid mode <<<"$metadata"
+  [[ "$uid" == "0" && "$gid" == "0" && "$mode" =~ ^[0-7]{3,4}$ ]] || return 1
+  (((8#$mode & 0022) == 0)) || return 1
+  [[ -z "$expected_mode" || "$mode" == "${expected_mode#0}" ]]
+}
+
+root_regular_file_is_safe_unprivileged() {
+  local path=$1 expected_mode=$2 metadata uid gid mode
+  test ! -L "$path" || return 1
+  test -f "$path" || return 1
+  metadata="$(stat -c '%u %g %a' -- "$path")" || return 1
+  read -r uid gid mode <<<"$metadata"
+  [[ "$uid" == "0" && "$gid" == "0" && "$mode" == "${expected_mode#0}" ]]
+}
+
+verify_dual_station_controller_uid_binding() {
+  local expected_uid=${1:-} config_dir=${2:-$NEMOCLAW_CONFIG_DIR}
+  local binding_file=${3:-$DUAL_STATION_CONTROLLER_UID_FILE}
+  [[ -n "$expected_uid" ]] || expected_uid="$(preparation_controller_uid)"
+  root_directory_is_safe_unprivileged "$config_dir" 0755 \
+    || fatal "NemoClaw configuration directory must be root-owned with mode 0755 so the prepared controller can read its binding: ${config_dir}"
+  root_regular_file_is_safe_unprivileged "$binding_file" "$DUAL_STATION_CONTROLLER_UID_MODE" \
+    || fatal "Dual-Station controller UID binding must be a root-owned regular file with mode ${DUAL_STATION_CONTROLLER_UID_MODE}: ${binding_file}"
+  if ! printf '%s\n' "$expected_uid" | cmp -s - "$binding_file"; then
+    fatal "Dual-Station is already bound to a different controller UID; an administrator must remove ${binding_file} before rebinding"
+  fi
+  info "dual_station_controller_uid=verified uid=${expected_uid} path=${binding_file}"
+}
+
+ensure_dual_station_controller_uid_binding() {
+  local config_dir=${1:-$NEMOCLAW_CONFIG_DIR}
+  local binding_file=${2:-$DUAL_STATION_CONTROLLER_UID_FILE}
+  local expected_uid parent tmp published=0
+  expected_uid="$(preparation_controller_uid)"
+  parent="$(dirname "$config_dir")"
+  ensure_root_directory_safe \
+    "$config_dir" "$parent" 0755 "NemoClaw configuration directory"
+  root_directory_is_safe_unprivileged "$config_dir" 0755 \
+    || fatal "NemoClaw configuration directory must be root-owned with mode 0755 before binding the controller: ${config_dir}"
+  sudo test ! -L "$binding_file" \
+    || fatal "Dual-Station controller UID binding must not be a symbolic link: ${binding_file}"
+  if sudo test -e "$binding_file"; then
+    verify_dual_station_controller_uid_binding "$expected_uid" "$config_dir" "$binding_file"
+    return 0
+  fi
+
+  tmp="$(sudo mktemp "${config_dir}/.dual-station-controller-uid.XXXXXXXXXX")" \
+    || fatal "Could not create the root-owned Dual-Station controller UID candidate"
+  if [[ "$tmp" != "${config_dir}/.dual-station-controller-uid."* || "$tmp" == *$'\n'* ]]; then
+    sudo rm -f -- "$tmp" || true
+    fatal "Root-owned Dual-Station controller UID candidate path was invalid"
+  fi
+  if ! printf '%s\n' "$expected_uid" | sudo tee "$tmp" >/dev/null; then
+    sudo rm -f -- "$tmp" || true
+    fatal "Could not write the Dual-Station controller UID candidate"
+  fi
+  if ! sudo chown root:root "$tmp" || ! sudo chmod "$DUAL_STATION_CONTROLLER_UID_MODE" "$tmp"; then
+    sudo rm -f -- "$tmp" || true
+    fatal "Could not secure the Dual-Station controller UID candidate"
+  fi
+  if ! root_regular_file_is_safe "$tmp" "$DUAL_STATION_CONTROLLER_UID_MODE"; then
+    sudo rm -f -- "$tmp" || true
+    fatal "Dual-Station controller UID candidate metadata was unsafe"
+  fi
+  if ! printf '%s\n' "$expected_uid" | sudo cmp -s - "$tmp"; then
+    sudo rm -f -- "$tmp" || true
+    fatal "Dual-Station controller UID candidate content was invalid"
+  fi
+  if sudo ln -- "$tmp" "$binding_file" 2>/dev/null; then
+    published=1
+  fi
+  sudo rm -f -- "$tmp" \
+    || fatal "Could not remove the Dual-Station controller UID candidate"
+  if ((published == 0)); then
+    sudo test ! -L "$binding_file" \
+      || fatal "Dual-Station controller UID binding must not be a symbolic link: ${binding_file}"
+    sudo test -e "$binding_file" \
+      || fatal "Could not publish the Dual-Station controller UID binding without replacement"
+  else
+    info "dual_station_controller_uid=installed uid=${expected_uid} path=${binding_file}"
+  fi
+  verify_dual_station_controller_uid_binding "$expected_uid" "$config_dir" "$binding_file"
+}
+
 configure_repositories() {
   local tmp cuda_deb docker_asc docker_gpg docker_list
   tmp="$(mktemp -d)"
@@ -840,6 +952,7 @@ verify_apply_state() {
   nvidia-ctk cdi list | grep -Fxq 'nvidia.com/gpu=all' || fatal "CDI verification failed"
   sudo docker image inspect "$ACCEPTANCE_IMAGE" >/dev/null 2>&1 || fatal "Digest-pinned acceptance image is missing"
   [[ -z "$(sudo docker ps -aq)" ]] || fatal "Verification found a leftover Docker container"
+  verify_dual_station_controller_uid_binding
   info "STATION_HOST_READY"
 }
 
@@ -877,6 +990,7 @@ verify_host() {
   docker run --rm --device nvidia.com/gpu=all "$ACCEPTANCE_IMAGE" nvidia-smi >/dev/null
   docker run --rm --gpus all "$ACCEPTANCE_IMAGE" nvidia-smi >/dev/null
   [[ -z "$(docker ps -aq)" ]] || fatal "Verification left a Docker container behind"
+  verify_dual_station_controller_uid_binding
   info "docker=$(docker version --format '{{.Server.Version}}') expected_docker=${DOCKER_VERSION} toolkit=$(nvidia-ctk --version | head -n1) expected_toolkit=${TOOLKIT_VERSION}"
   info "STATION_HOST_READY"
 }
@@ -921,6 +1035,8 @@ run_apply() {
     fatal "An unrelated reboot is already pending"
   fi
 
+  ensure_dual_station_controller_uid_binding
+
   if ! all_packages_exact; then
     assert_no_package_mismatches
     install_packages
@@ -961,12 +1077,23 @@ run_apply() {
 
 run_verify() {
   common_preflight
+  require_command cmp
   require_command docker
   require_command nvidia-ctk
   require_command nvidia-smi
   all_packages_exact || fatal "Pinned prerequisite packages are incomplete; run --apply"
   driver_loaded_exact || fatal "Pinned driver is not loaded; reboot, then run --apply"
   verify_host
+}
+
+run_bind_controller() {
+  require_command cmp
+  require_command stat
+  require_command sudo
+  check_platform
+  acquire_sudo
+  ensure_dual_station_controller_uid_binding
+  info "CONTROLLER_UID_BINDING_READY"
 }
 
 main() {
@@ -977,6 +1104,8 @@ main() {
   MODE=$1
   if [[ "$MODE" == "--apply" ]]; then
     setup_log
+  elif [[ "$MODE" == "--bind-controller" ]]; then
+    info "version=${SCRIPT_VERSION} mode=${MODE} log=disabled_binding_only"
   else
     info "version=${SCRIPT_VERSION} mode=${MODE} log=disabled_read_only"
   fi
@@ -985,6 +1114,7 @@ main() {
     --check) run_check ;;
     --apply) run_apply ;;
     --verify) run_verify ;;
+    --bind-controller) run_bind_controller ;;
   esac
 }
 

@@ -3,6 +3,7 @@
 
 import { type ChildProcess, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
+import fs from "node:fs";
 import path from "node:path";
 
 import { buildVllmSshTransportEnv } from "./vllm-docker-env";
@@ -15,6 +16,8 @@ const MAX_COMMAND_OUTPUT_BYTES = 256 * 1024;
 const SNAPSHOT_AUDIT_TIMEOUT_MS = 6 * 60 * 60 * 1000;
 const RSYNC_TIMEOUT_MS = 12 * 60 * 60 * 1000;
 const RSYNC_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
+const LOCAL_STAGING_MIN_HEADROOM_BYTES = 5n * 1024n * 1024n * 1024n;
+const MAX_SNAPSHOT_BYTES = 1024 * 1024 * 1024 * 1024;
 const SAFE_POSIX_PATH_PATTERN = /^\/(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+$/;
 
 export interface ModelStagingCommandOptions {
@@ -39,6 +42,9 @@ export interface DualStationModelStagingDeps {
     args: readonly string[],
     options: ModelStagingCommandOptions,
   ): Promise<ModelStagingCommandResult>;
+  statfs?(
+    filePath: string,
+  ): Promise<{ bavail: bigint; bsize: bigint }> | { bavail: bigint; bsize: bigint };
 }
 
 export type DualStationModelStagingResult =
@@ -136,7 +142,13 @@ function defaultRunCommand(
   });
 }
 
-const defaultDeps: DualStationModelStagingDeps = { runCommand: defaultRunCommand };
+const defaultDeps: DualStationModelStagingDeps = {
+  runCommand: defaultRunCommand,
+  statfs(filePath) {
+    const stats = fs.statfsSync(filePath, { bigint: true });
+    return { bavail: stats.bavail, bsize: stats.bsize };
+  },
+};
 
 function snapshotPath(home: string): string {
   return path.posix.join(
@@ -209,12 +221,18 @@ import re
 import stat
 import sys
 
-if len(sys.argv) != 3:
-    raise SystemExit("expected snapshot and model-root paths")
+if len(sys.argv) not in (3, 4):
+    raise SystemExit("expected snapshot and model-root paths, plus optional materialized-snapshot path")
 
 snapshot = Path(sys.argv[1])
 model_root = Path(sys.argv[2])
+materialized_snapshot = Path(sys.argv[3]) if len(sys.argv) == 4 else None
 safe_component = re.compile(r"^[A-Za-z0-9._-]+$")
+weight_index_name = "model.safetensors.index.json"
+max_weight_index_bytes = 64 * 1024 * 1024
+
+def fail(message):
+    raise SystemExit(message)
 
 def relative_name(candidate):
     relative = candidate.relative_to(snapshot)
@@ -224,45 +242,88 @@ def relative_name(candidate):
 
 def resolved_regular_file(candidate):
     metadata = candidate.lstat()
-    resolved = candidate.resolve(strict=True) if stat.S_ISLNK(metadata.st_mode) else candidate
+    resolved = candidate.resolve(strict=True)
     try:
-        common = os.path.commonpath((str(model_root.resolve(strict=True)), str(resolved.resolve(strict=True))))
+        common = os.path.commonpath((str(canonical_model_root), str(resolved)))
     except (OSError, ValueError):
         raise SystemExit("snapshot file could not be resolved")
-    if common != str(model_root.resolve(strict=True)):
+    if common != str(canonical_model_root):
         raise SystemExit("snapshot symlink escapes the pinned model cache")
     if not resolved.is_file():
         raise SystemExit("snapshot contains a non-regular file")
     return resolved
 
+def create_materialized_directory(relative):
+    if materialized_snapshot is None:
+        return
+    destination = materialized_snapshot / relative
+    try:
+        destination.mkdir(mode=0o700)
+    except FileExistsError:
+        fail("materialized snapshot path changed during audit")
+
+def audit_regular_file(source, relative):
+    if not hasattr(os, "O_NOFOLLOW"):
+        fail("snapshot audit requires O_NOFOLLOW support")
+    source_flags = os.O_RDONLY | os.O_NOFOLLOW
+    destination_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+    digest = hashlib.sha256()
+    index_bytes = bytearray() if relative == weight_index_name else None
+    size = 0
+    try:
+        source_handle = os.fdopen(os.open(source, source_flags), "rb")
+    except OSError:
+        fail("snapshot file changed while it was being opened")
+    with source_handle:
+        if not stat.S_ISREG(os.fstat(source_handle.fileno()).st_mode):
+            fail("snapshot contains a non-regular file")
+        destination_handle = None
+        if materialized_snapshot is not None:
+            destination = materialized_snapshot / relative
+            try:
+                destination_handle = os.fdopen(
+                    os.open(destination, destination_flags, 0o400),
+                    "wb",
+                )
+            except OSError:
+                fail("materialized snapshot path changed during audit")
+        try:
+            for chunk in iter(lambda: source_handle.read(8 * 1024 * 1024), b""):
+                size += len(chunk)
+                digest.update(chunk)
+                if index_bytes is not None:
+                    if len(index_bytes) + len(chunk) > max_weight_index_bytes:
+                        fail("pinned local weight index exceeds the safety bound")
+                    index_bytes.extend(chunk)
+                if destination_handle is not None:
+                    destination_handle.write(chunk)
+            if destination_handle is not None:
+                destination_handle.flush()
+                os.fsync(destination_handle.fileno())
+                os.fchmod(destination_handle.fileno(), 0o400)
+        finally:
+            if destination_handle is not None:
+                destination_handle.close()
+    return size, digest.hexdigest(), index_bytes
+
 if snapshot.is_symlink() or not snapshot.is_dir():
     raise SystemExit("pinned local snapshot directory is missing or unsafe")
 if model_root.is_symlink() or not model_root.is_dir():
     raise SystemExit("pinned local model cache root is missing or unsafe")
-
-try:
-    index = json.loads((snapshot / "model.safetensors.index.json").read_text(encoding="utf-8"))
-    weight_map = index.get("weight_map", {})
-    shards = sorted(set(weight_map.values())) if isinstance(weight_map, dict) else []
-except (OSError, UnicodeError, json.JSONDecodeError):
-    raise SystemExit("pinned local weight index is missing or malformed")
-if len(shards) != 113 or any(
-    not isinstance(item, str)
-    or Path(item).name != item
-    or not safe_component.fullmatch(item)
-    or not item.endswith(".safetensors")
-    for item in shards
-):
-    raise SystemExit("pinned local weight index has an unexpected shard set")
-if not (snapshot / "config.json").is_file():
-    raise SystemExit("pinned local config.json is missing")
-if not any((snapshot / name).is_file() for name in ("tokenizer.json", "tokenizer.model", "vocab.json")):
-    raise SystemExit("pinned local tokenizer assets are missing")
+canonical_model_root = model_root.resolve(strict=True)
+if materialized_snapshot is not None:
+    if os.path.lexists(materialized_snapshot):
+        fail("private materialized snapshot path already exists")
+    try:
+        materialized_snapshot.mkdir(mode=0o700)
+    except OSError:
+        fail("private materialized snapshot could not be created")
 
 files = []
 directories = []
 total_bytes = 0
 entry_count = 0
+weight_index_bytes = None
 for current, dirnames, filenames in os.walk(snapshot, topdown=True, followlinks=False):
     current_path = Path(current)
     dirnames.sort()
@@ -273,26 +334,50 @@ for current, dirnames, filenames in os.walk(snapshot, topdown=True, followlinks=
         mode = directory.lstat().st_mode
         if stat.S_ISLNK(mode) or not stat.S_ISDIR(mode):
             raise SystemExit("snapshot contains an unsafe directory")
+        create_materialized_directory(relative)
         directories.append(relative)
         entry_count += 1
     for filename in filenames:
         candidate = current_path / filename
         relative = relative_name(candidate)
         resolved = resolved_regular_file(candidate)
-        digest = hashlib.sha256()
-        size = 0
-        with resolved.open("rb") as handle:
-            for chunk in iter(lambda: handle.read(8 * 1024 * 1024), b""):
-                size += len(chunk)
-                digest.update(chunk)
-        files.append({"path": relative, "size": size, "sha256": digest.hexdigest()})
+        size, digest, audited_index_bytes = audit_regular_file(resolved, relative)
+        if audited_index_bytes is not None:
+            weight_index_bytes = audited_index_bytes
+        files.append({"path": relative, "size": size, "sha256": digest})
         total_bytes += size
         entry_count += 1
-        if entry_count > 4096 or total_bytes > 1024 * 1024 * 1024 * 1024:
+        if entry_count > 4096 or total_bytes > ${String(MAX_SNAPSHOT_BYTES)}:
             raise SystemExit("snapshot exceeds the staging safety bounds")
 
-if not files or any(not (snapshot / shard).exists() for shard in shards):
+file_paths = {item["path"] for item in files}
+try:
+    if weight_index_bytes is None:
+        fail("pinned local weight index is missing or malformed")
+    index = json.loads(weight_index_bytes.decode("utf-8"))
+    weight_map = index.get("weight_map", {})
+    shards = sorted(set(weight_map.values())) if isinstance(weight_map, dict) else []
+except (OSError, UnicodeError, json.JSONDecodeError):
+    fail("pinned local weight index is missing or malformed")
+if len(shards) != 113 or any(
+    not isinstance(item, str)
+    or Path(item).name != item
+    or not safe_component.fullmatch(item)
+    or not item.endswith(".safetensors")
+    for item in shards
+):
+    fail("pinned local weight index has an unexpected shard set")
+if "config.json" not in file_paths:
+    fail("pinned local config.json is missing")
+if not any(name in file_paths for name in ("tokenizer.json", "tokenizer.model", "vocab.json")):
+    fail("pinned local tokenizer assets are missing")
+if not files or any(shard not in file_paths for shard in shards):
     raise SystemExit("pinned local snapshot is incomplete")
+if materialized_snapshot is not None:
+    for current, dirnames, _filenames in os.walk(materialized_snapshot, topdown=False):
+        for dirname in dirnames:
+            os.chmod(Path(current) / dirname, 0o500, follow_symlinks=False)
+    os.chmod(materialized_snapshot, 0o500, follow_symlinks=False)
 print(json.dumps({
     "schemaVersion": 1,
     "files": files,
@@ -324,6 +409,7 @@ function parseManifest(result: ModelStagingCommandResult): SnapshotManifest {
     !Array.isArray(record.directories) ||
     !Number.isSafeInteger(record.totalBytes) ||
     Number(record.totalBytes) <= 0 ||
+    Number(record.totalBytes) > MAX_SNAPSHOT_BYTES ||
     record.files.length === 0 ||
     record.files.length + record.directories.length > 4096
   ) {
@@ -373,7 +459,7 @@ function remoteScript(
   plan: DualStationVllmPlan,
   paths: StagingPaths,
   manifest: SnapshotManifest,
-  operation: "prepare" | "finalize",
+  operation: "prepare" | "finalize" | "cleanup",
 ): string {
   const manifestBase64 = Buffer.from(JSON.stringify(manifest), "utf8").toString("base64");
   return String.raw`
@@ -501,17 +587,21 @@ if OPERATION == "prepare":
     if path_exists(FINAL):
         if manifest(FINAL) != EXPECTED:
             fail("peer pinned snapshot already exists with different content")
+        if path_exists(STAGING):
+            verify_partial(STAGING)
+            shutil.rmtree(STAGING)
         print(json.dumps({"state": "ready"}, separators=(",", ":")))
     else:
         if path_exists(STAGING):
             reusable_bytes = verify_partial(STAGING)
         else:
-            STAGING.mkdir(mode=0o700)
             reusable_bytes = 0
         remaining_bytes = max(0, EXPECTED["totalBytes"] - reusable_bytes)
         headroom_bytes = max(5 * 1024 * 1024 * 1024, EXPECTED["totalBytes"] // 20)
         if shutil.disk_usage(STAGING.parent).free < remaining_bytes + headroom_bytes:
             fail("peer model cache does not have enough free space for the pinned snapshot")
+        if not path_exists(STAGING):
+            STAGING.mkdir(mode=0o700)
         print(json.dumps({"state": "transfer"}, separators=(",", ":")))
 elif OPERATION == "finalize":
     if path_exists(FINAL):
@@ -529,6 +619,11 @@ elif OPERATION == "finalize":
         if installed_identity != staged_identity:
             fail("peer pinned snapshot identity changed during atomic install")
     print(json.dumps({"state": "ready"}, separators=(",", ":")))
+elif OPERATION == "cleanup":
+    if path_exists(STAGING):
+        verify_partial(STAGING)
+        shutil.rmtree(STAGING)
+    print(json.dumps({"state": "cleaned"}, separators=(",", ":")))
 else:
     fail("unsupported model staging operation")
 `;
@@ -547,7 +642,7 @@ function commandFailure(label: string, result: ModelStagingCommandResult): strin
 function parseRemoteState(
   label: string,
   result: ModelStagingCommandResult,
-  expected: "ready" | "transfer",
+  expected: "cleaned" | "ready" | "transfer",
 ): void {
   if (result.status !== 0 || result.timedOut || result.error) {
     throw new Error(commandFailure(label, result));
@@ -568,6 +663,26 @@ function parseRemoteState(
   }
 }
 
+function parseRemotePrepareState(result: ModelStagingCommandResult): "ready" | "transfer" {
+  if (result.status !== 0 || result.timedOut || result.error) {
+    throw new Error(commandFailure("peer snapshot preflight", result));
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(result.stdout.trim());
+  } catch {
+    throw new Error("peer snapshot preflight returned invalid JSON");
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("peer snapshot preflight returned an unexpected state");
+  }
+  const state = (parsed as Record<string, unknown>).state;
+  if (state !== "ready" && state !== "transfer") {
+    throw new Error("peer snapshot preflight returned an unexpected state");
+  }
+  return state;
+}
+
 function sshArgs(plan: DualStationVllmPlan): string[] {
   return [
     ...dualStationPinnedSshArgs(plan.peerSshBinding),
@@ -585,10 +700,267 @@ function rsyncRsh(plan: DualStationVllmPlan): string {
   return ["ssh", ...dualStationPinnedSshArgs(plan.peerSshBinding)].map(shellQuote).join(" ");
 }
 
+function createLocalStagingRoot(modelRoot: string): { root: string; snapshot: string } {
+  const modelRootMetadata = fs.lstatSync(modelRoot);
+  if (modelRootMetadata.isSymbolicLink() || !modelRootMetadata.isDirectory()) {
+    throw new Error("pinned local model cache root is missing or unsafe");
+  }
+  // Keep the potentially large immutable copy on the model-cache filesystem;
+  // the OS temporary filesystem is commonly too small for the Ultra snapshot.
+  const root = fs.mkdtempSync(path.join(modelRoot, ".nemoclaw-vllm-model-staging-"));
+  try {
+    fs.chmodSync(root, 0o700);
+  } catch (err) {
+    try {
+      fs.rmSync(root, { force: false, recursive: true });
+    } catch (cleanupError) {
+      throw new Error(
+        `${(err as Error).message}; local staging setup cleanup failed: ${(cleanupError as Error).message}`,
+      );
+    }
+    throw err;
+  }
+  return { root, snapshot: path.join(root, "snapshot") };
+}
+
+function makeLocalStagingTreeRemovable(candidate: string): void {
+  const metadata = fs.lstatSync(candidate);
+  if (metadata.isSymbolicLink()) {
+    throw new Error("local audited snapshot cleanup encountered a symbolic link");
+  }
+  if (metadata.isDirectory()) {
+    fs.chmodSync(candidate, 0o700);
+    for (const entry of fs.readdirSync(candidate)) {
+      makeLocalStagingTreeRemovable(path.join(candidate, entry));
+    }
+    return;
+  }
+  if (!metadata.isFile()) {
+    throw new Error("local audited snapshot cleanup encountered a non-file entry");
+  }
+}
+
+function clearLocalStagingRoot(root: string): void {
+  makeLocalStagingTreeRemovable(root);
+  fs.rmSync(root, { force: false, recursive: true });
+}
+
+async function cleanupPeerStaging(
+  plan: DualStationVllmPlan,
+  paths: StagingPaths,
+  manifest: SnapshotManifest,
+  deps: DualStationModelStagingDeps,
+  env: Record<string, string>,
+): Promise<string | null> {
+  try {
+    const cleanup = await deps.runCommand("ssh", sshArgs(plan), {
+      env,
+      input: remoteScript(plan, paths, manifest, "cleanup"),
+      timeoutMs: SNAPSHOT_AUDIT_TIMEOUT_MS,
+    });
+    parseRemoteState("peer snapshot cleanup", cleanup, "cleaned");
+    return null;
+  } catch (err) {
+    return (err as Error).message;
+  }
+}
+
+async function failAfterPeerCleanup(
+  reason: string,
+  plan: DualStationVllmPlan,
+  paths: StagingPaths,
+  manifest: SnapshotManifest,
+  deps: DualStationModelStagingDeps,
+  env: Record<string, string>,
+): Promise<DualStationModelStagingResult> {
+  const cleanupFailure = await cleanupPeerStaging(plan, paths, manifest, deps, env);
+  return {
+    ok: false,
+    reason: cleanupFailure ? `${reason}; ${cleanupFailure}` : reason,
+  };
+}
+
+async function auditLocalSnapshot(
+  paths: StagingPaths,
+  deps: DualStationModelStagingDeps,
+  env: Record<string, string>,
+  localMaterializedSnapshot?: string,
+): Promise<SnapshotManifest> {
+  const args = ["-", paths.localSnapshot, paths.localModelRoot];
+  if (localMaterializedSnapshot !== undefined) args.push(localMaterializedSnapshot);
+  const audit = await deps.runCommand("python3", args, {
+    env,
+    input: LOCAL_MANIFEST_SCRIPT,
+    timeoutMs: SNAPSHOT_AUDIT_TIMEOUT_MS,
+  });
+  return parseManifest(audit);
+}
+
+async function preparePeerSnapshot(
+  plan: DualStationVllmPlan,
+  paths: StagingPaths,
+  manifest: SnapshotManifest,
+  deps: DualStationModelStagingDeps,
+  env: Record<string, string>,
+): Promise<"ready" | "transfer"> {
+  const prepare = await deps.runCommand("ssh", sshArgs(plan), {
+    env,
+    input: remoteScript(plan, paths, manifest, "prepare"),
+    timeoutMs: SNAPSHOT_AUDIT_TIMEOUT_MS,
+  });
+  return parseRemotePrepareState(prepare);
+}
+
+function manifestsEqual(left: SnapshotManifest, right: SnapshotManifest): boolean {
+  return (
+    left.schemaVersion === right.schemaVersion &&
+    left.totalBytes === right.totalBytes &&
+    left.directories.length === right.directories.length &&
+    left.directories.every((directory, index) => directory === right.directories[index]) &&
+    left.files.length === right.files.length &&
+    left.files.every((file, index) => {
+      const other = right.files[index];
+      return (
+        other !== undefined &&
+        file.path === other.path &&
+        file.size === other.size &&
+        file.sha256 === other.sha256
+      );
+    })
+  );
+}
+
+async function requireLocalStagingCapacity(
+  modelRoot: string,
+  manifest: SnapshotManifest,
+  deps: DualStationModelStagingDeps,
+): Promise<void> {
+  let stats: { bavail: bigint; bsize: bigint };
+  try {
+    const statfs = deps.statfs ?? defaultDeps.statfs;
+    if (!statfs) throw new Error("statfs dependency is unavailable");
+    stats = await statfs(modelRoot);
+  } catch (err) {
+    throw new Error(`local model cache capacity check failed: ${(err as Error).message}`);
+  }
+  if (
+    typeof stats.bavail !== "bigint" ||
+    typeof stats.bsize !== "bigint" ||
+    stats.bavail < 0n ||
+    stats.bsize <= 0n
+  ) {
+    throw new Error("local model cache capacity check returned invalid filesystem data");
+  }
+  const snapshotBytes = BigInt(manifest.totalBytes);
+  const proportionalHeadroom = (snapshotBytes + 19n) / 20n;
+  const headroom =
+    proportionalHeadroom > LOCAL_STAGING_MIN_HEADROOM_BYTES
+      ? proportionalHeadroom
+      : LOCAL_STAGING_MIN_HEADROOM_BYTES;
+  if (stats.bavail * stats.bsize < snapshotBytes + headroom) {
+    throw new Error(
+      "local model cache does not have enough free space for the audited snapshot copy",
+    );
+  }
+}
+
+async function stagePreparedSnapshot(
+  plan: DualStationVllmPlan,
+  paths: StagingPaths,
+  auditedManifest: SnapshotManifest,
+  localMaterializedSnapshot: string,
+  deps: DualStationModelStagingDeps,
+  env: Record<string, string>,
+): Promise<DualStationModelStagingResult> {
+  let transferManifest: SnapshotManifest;
+  try {
+    transferManifest = await auditLocalSnapshot(paths, deps, env, localMaterializedSnapshot);
+  } catch (err) {
+    return failAfterPeerCleanup((err as Error).message, plan, paths, auditedManifest, deps, env);
+  }
+  if (!manifestsEqual(auditedManifest, transferManifest)) {
+    return failAfterPeerCleanup(
+      "local pinned snapshot changed between audit and materialization",
+      plan,
+      paths,
+      auditedManifest,
+      deps,
+      env,
+    );
+  }
+
+  let prepareState: "ready" | "transfer";
+  try {
+    prepareState = await preparePeerSnapshot(plan, paths, transferManifest, deps, env);
+  } catch (err) {
+    return failAfterPeerCleanup((err as Error).message, plan, paths, transferManifest, deps, env);
+  }
+  if (prepareState === "ready") {
+    return { ok: true, transferred: false };
+  }
+
+  let rsync: ModelStagingCommandResult;
+  try {
+    rsync = await deps.runCommand(
+      "rsync",
+      [
+        "--recursive",
+        "--times",
+        "--checksum",
+        "--partial",
+        "--protect-args",
+        "--no-owner",
+        "--no-group",
+        "--chmod=Du=rwx,Dgo=,Fu=rw,Fgo=",
+        "--info=progress2",
+        `--rsh=${rsyncRsh(plan)}`,
+        "--",
+        `${localMaterializedSnapshot}/`,
+        `${plan.peerSshBinding.peerTarget}:${paths.peerStaging}/`,
+      ],
+      {
+        env,
+        timeoutMs: RSYNC_TIMEOUT_MS,
+        idleTimeoutMs: RSYNC_IDLE_TIMEOUT_MS,
+        streamOutput: true,
+      },
+    );
+  } catch (err) {
+    return failAfterPeerCleanup((err as Error).message, plan, paths, transferManifest, deps, env);
+  }
+  if (rsync.status !== 0 || rsync.timedOut || rsync.error) {
+    return failAfterPeerCleanup(
+      commandFailure("peer snapshot transfer", rsync),
+      plan,
+      paths,
+      transferManifest,
+      deps,
+      env,
+    );
+  }
+
+  let finalize: ModelStagingCommandResult;
+  try {
+    finalize = await deps.runCommand("ssh", sshArgs(plan), {
+      env,
+      input: remoteScript(plan, paths, transferManifest, "finalize"),
+      timeoutMs: SNAPSHOT_AUDIT_TIMEOUT_MS,
+    });
+  } catch (err) {
+    return failAfterPeerCleanup((err as Error).message, plan, paths, transferManifest, deps, env);
+  }
+  try {
+    parseRemoteState("peer snapshot verification", finalize, "ready");
+  } catch (err) {
+    return failAfterPeerCleanup((err as Error).message, plan, paths, transferManifest, deps, env);
+  }
+  return { ok: true, transferred: true };
+}
+
 /**
- * Materialize only the pinned snapshot on the pre-trusted peer. Hugging Face
- * snapshot symlinks are copied as regular files after an escape check, so no
- * token or unrelated blob cache crosses the SSH boundary.
+ * Audit before peer preflight so an already-ready peer avoids the large local
+ * copy. Transfers use only a second, immutable audit that exactly matches the
+ * first manifest, so no token or unrelated blob cache crosses the SSH boundary.
  */
 export async function stageDualStationModelSnapshot(
   plan: DualStationVllmPlan,
@@ -602,90 +974,71 @@ export async function stageDualStationModelSnapshot(
   }
   const env = buildVllmSshTransportEnv({ LC_ALL: "C" });
 
-  let manifest: SnapshotManifest;
+  let auditedManifest: SnapshotManifest;
   try {
-    const audit = await deps.runCommand(
-      "python3",
-      ["-", paths.localSnapshot, paths.localModelRoot],
-      {
-        env,
-        input: LOCAL_MANIFEST_SCRIPT,
-        timeoutMs: SNAPSHOT_AUDIT_TIMEOUT_MS,
-      },
-    );
-    manifest = parseManifest(audit);
+    auditedManifest = await auditLocalSnapshot(paths, deps, env);
   } catch (err) {
     return { ok: false, reason: (err as Error).message };
   }
 
-  let prepare: ModelStagingCommandResult;
+  let prepareState: "ready" | "transfer";
   try {
-    prepare = await deps.runCommand("ssh", sshArgs(plan), {
+    prepareState = await preparePeerSnapshot(plan, paths, auditedManifest, deps, env);
+  } catch (err) {
+    return { ok: false, reason: (err as Error).message };
+  }
+  if (prepareState === "ready") {
+    return { ok: true, transferred: false };
+  }
+
+  try {
+    await requireLocalStagingCapacity(paths.localModelRoot, auditedManifest, deps);
+  } catch (err) {
+    return failAfterPeerCleanup((err as Error).message, plan, paths, auditedManifest, deps, env);
+  }
+
+  let localStaging: { root: string; snapshot: string };
+  try {
+    localStaging = createLocalStagingRoot(paths.localModelRoot);
+  } catch (err) {
+    return failAfterPeerCleanup(
+      `local audited snapshot setup failed: ${(err as Error).message}`,
+      plan,
+      paths,
+      auditedManifest,
+      deps,
       env,
-      input: remoteScript(plan, paths, manifest, "prepare"),
-      timeoutMs: SNAPSHOT_AUDIT_TIMEOUT_MS,
-    });
-  } catch (err) {
-    return { ok: false, reason: (err as Error).message };
-  }
-  try {
-    if (prepare.status === 0 && JSON.parse(prepare.stdout.trim()).state === "ready") {
-      parseRemoteState("peer snapshot preflight", prepare, "ready");
-      return { ok: true, transferred: false };
-    }
-    parseRemoteState("peer snapshot preflight", prepare, "transfer");
-  } catch (err) {
-    return { ok: false, reason: (err as Error).message };
+    );
   }
 
-  let rsync: ModelStagingCommandResult;
+  let result: DualStationModelStagingResult;
   try {
-    rsync = await deps.runCommand(
-      "rsync",
-      [
-        "--recursive",
-        "--times",
-        "--copy-links",
-        "--checksum",
-        "--partial",
-        "--protect-args",
-        "--no-owner",
-        "--no-group",
-        "--chmod=Du=rwx,Dgo=,Fu=rw,Fgo=",
-        "--info=progress2",
-        `--rsh=${rsyncRsh(plan)}`,
-        "--",
-        `${paths.localSnapshot}/`,
-        `${plan.peerSshBinding.peerTarget}:${paths.peerStaging}/`,
-      ],
-      {
-        env,
-        timeoutMs: RSYNC_TIMEOUT_MS,
-        idleTimeoutMs: RSYNC_IDLE_TIMEOUT_MS,
-        streamOutput: true,
-      },
+    result = await stagePreparedSnapshot(
+      plan,
+      paths,
+      auditedManifest,
+      localStaging.snapshot,
+      deps,
+      env,
     );
   } catch (err) {
-    return { ok: false, reason: (err as Error).message };
-  }
-  if (rsync.status !== 0 || rsync.timedOut || rsync.error) {
-    return { ok: false, reason: commandFailure("peer snapshot transfer", rsync) };
-  }
-
-  let finalize: ModelStagingCommandResult;
-  try {
-    finalize = await deps.runCommand("ssh", sshArgs(plan), {
+    result = await failAfterPeerCleanup(
+      (err as Error).message,
+      plan,
+      paths,
+      auditedManifest,
+      deps,
       env,
-      input: remoteScript(plan, paths, manifest, "finalize"),
-      timeoutMs: SNAPSHOT_AUDIT_TIMEOUT_MS,
-    });
-  } catch (err) {
-    return { ok: false, reason: (err as Error).message };
+    );
   }
   try {
-    parseRemoteState("peer snapshot verification", finalize, "ready");
+    clearLocalStagingRoot(localStaging.root);
   } catch (err) {
-    return { ok: false, reason: (err as Error).message };
+    const cleanupFailure = `local audited snapshot cleanup failed: ${(err as Error).message}`;
+    return {
+      ok: false,
+      reason: result.ok ? cleanupFailure : `${result.reason}; ${cleanupFailure}`,
+    };
   }
-  return { ok: true, transferred: true };
+  return result;
 }

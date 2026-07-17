@@ -40,6 +40,8 @@ export const DUAL_STATION_SIMULATION_POISON_EXECUTABLES = Object.freeze([
 ]);
 
 export const DUAL_STATION_SIMULATION_TIMEOUT_MS = 120_000;
+export const DUAL_STATION_SIMULATION_FIXTURE_PYTHON_ENV =
+  "NEMOCLAW_TEST_DUAL_STATION_FIXTURE_PYTHON";
 
 const INHERITED_ENV_KEYS = Object.freeze([
   "CI",
@@ -111,6 +113,52 @@ export function dualStationSimulationEnvironment(
   return env;
 }
 
+function canonicalExecutable(candidate: string): string | null {
+  try {
+    const canonical = fs.realpathSync(candidate);
+    if (!path.isAbsolute(canonical) || path.normalize(canonical) !== canonical) return null;
+    const metadata = fs.statSync(canonical);
+    if (!metadata.isFile()) return null;
+    fs.accessSync(canonical, fs.constants.X_OK);
+    return canonical;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Capture one absolute Python interpreter for behavioral fixtures before PATH
+ * is poisoned. The simulator passes only this canonical path to its test
+ * worker; production probes and every PATH-based Python invocation remain
+ * guarded by the exit-97 shims.
+ */
+export function resolveDualStationSimulationFixturePython(
+  sourceEnv: NodeJS.ProcessEnv = process.env,
+): string {
+  const captured = sourceEnv[DUAL_STATION_SIMULATION_FIXTURE_PYTHON_ENV];
+  if (captured !== undefined) {
+    if (!path.isAbsolute(captured) || path.normalize(captured) !== captured) {
+      throw new Error("The dual-Station simulator fixture Python path must be absolute");
+    }
+    const canonical = canonicalExecutable(captured);
+    if (!canonical || canonical !== captured) {
+      throw new Error("The dual-Station simulator fixture Python path is not canonical executable");
+    }
+    return canonical;
+  }
+
+  for (const directory of (sourceEnv.PATH ?? "").split(path.delimiter)) {
+    if (!directory || !path.isAbsolute(directory) || path.normalize(directory) !== directory) {
+      continue;
+    }
+    const canonical = canonicalExecutable(path.join(directory, "python3"));
+    if (canonical) return canonical;
+  }
+  throw new Error(
+    "The dual-Station simulator requires python3 for its local embedded-script fixtures",
+  );
+}
+
 export function buildDualStationSimulationInvocation(
   repositoryRoot: string,
   sourceEnv: NodeJS.ProcessEnv = process.env,
@@ -150,7 +198,11 @@ function describeSimulation(): void {
     `${JSON.stringify(
       {
         mode: "simulation-only",
-        localProcesses: ["repository-local Vitest worker", "fixture-only shell syntax checks"],
+        localProcesses: [
+          "repository-local Vitest worker",
+          "fixture-only shell syntax checks",
+          "captured absolute Python interpreter for embedded-script fixtures",
+        ],
         liveTargets: [],
         externalCommandShims: DUAL_STATION_SIMULATION_POISON_EXECUTABLES,
         suites: DUAL_STATION_SIMULATION_SUITES,
@@ -172,6 +224,7 @@ export function main(argv: readonly string[] = process.argv.slice(2)): number {
 
   assertDualStationSimulationPlatform();
   const invocation = buildDualStationSimulationInvocation(repositoryRoot());
+  const fixturePython = resolveDualStationSimulationFixturePython(invocation.env);
   const poisonBin = createSimulationPoisonBin();
   invocation.env.PATH = [poisonBin.directory, invocation.env.PATH]
     .filter((entry): entry is string => Boolean(entry))
@@ -181,6 +234,7 @@ export function main(argv: readonly string[] = process.argv.slice(2)): number {
   invocation.env.TEMP = poisonBin.tempDirectory;
   invocation.env.TMP = poisonBin.tempDirectory;
   invocation.env.TMPDIR = poisonBin.tempDirectory;
+  invocation.env[DUAL_STATION_SIMULATION_FIXTURE_PYTHON_ENV] = fixturePython;
   delete invocation.env.XDG_RUNTIME_DIR;
   process.stdout.write(
     "Running the guarded, fixture-backed dual-Station simulator. " +

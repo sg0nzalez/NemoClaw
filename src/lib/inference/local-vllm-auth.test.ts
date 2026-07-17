@@ -2,10 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import fs from "node:fs";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { DUAL_STATION_VLLM_RUNTIME } from "./vllm-station-cluster";
+
+interface ManagedBaseUrlOverrides {
+  loadApiKey?: () => string | null;
+  onManagedHeadObserved?: () => void;
+}
 
 const lifecycle = vi.hoisted(() => ({
-  baseUrl: vi.fn<() => string | null>(),
+  baseUrl: vi.fn<(overrides?: ManagedBaseUrlOverrides) => string | null>(),
 }));
 
 vi.mock("./vllm-station-cluster-lifecycle", () => ({
@@ -19,6 +26,7 @@ import {
   getLocalProviderHealthCheck,
   getLocalProviderHealthEndpoint,
   getManagedDualStationVllmProviderBinding,
+  getManagedDualStationVllmProviderState,
   LOCAL_INFERENCE_SANDBOX_HOST_URL_ENV,
   probeLocalProviderHealth,
   probeVllmModels,
@@ -27,11 +35,51 @@ import {
 
 const BASE_URL = "http://10.40.0.1:8000";
 const API_KEY = "e".repeat(64);
+const OTHER_API_KEY = "f".repeat(64);
+
+let actualLifecycle: typeof import("./vllm-station-cluster-lifecycle");
+
+beforeAll(async () => {
+  actualLifecycle = await vi.importActual("./vllm-station-cluster-lifecycle");
+});
+
+function productionManagedBaseUrlResolver(
+  expectedApiKey = API_KEY,
+  apiKeyFingerprint = actualLifecycle.dualStationVllmApiKeyFingerprint(expectedApiKey),
+) {
+  const row = [
+    "a".repeat(64),
+    actualLifecycle.DUAL_STATION_VLLM_HEAD_CONTAINER_NAME,
+    "running",
+    DUAL_STATION_VLLM_RUNTIME.image,
+    "true",
+    "head",
+    BASE_URL,
+    "b".repeat(64),
+    "GPU-12345678",
+    "1",
+    "c".repeat(64),
+    apiKeyFingerprint,
+    "d".repeat(32),
+  ].join("\t");
+
+  return (overrides: ManagedBaseUrlOverrides = {}): string | null =>
+    actualLifecycle.getDualStationManagedVllmBaseUrl({
+      dockerCapture: () => row,
+      buildLocalDockerEnv: () => ({}),
+      loadApiKey: overrides.loadApiKey ?? (() => null),
+      onManagedHeadObserved: overrides.onManagedHeadObserved ?? (() => undefined),
+      localInterfaceAddresses: () => ["10.40.0.1"],
+    });
+}
 
 beforeEach(() => {
   vi.stubEnv(LOCAL_INFERENCE_SANDBOX_HOST_URL_ENV, undefined);
   lifecycle.baseUrl.mockReset();
-  lifecycle.baseUrl.mockReturnValue(BASE_URL);
+  lifecycle.baseUrl.mockImplementation((overrides) => {
+    if (!overrides?.loadApiKey) return BASE_URL;
+    return overrides.loadApiKey() === API_KEY ? BASE_URL : null;
+  });
 });
 
 afterEach(() => vi.unstubAllEnvs());
@@ -95,6 +143,11 @@ describe("managed dual-Station vLLM authentication", () => {
 
   it("returns one atomic provider endpoint and credential binding", () => {
     expect(getManagedDualStationVllmProviderBinding({ loadApiKeyImpl: () => API_KEY })).toEqual({
+      baseUrl: `${BASE_URL}/v1`,
+      apiKey: API_KEY,
+    });
+    expect(getManagedDualStationVllmProviderState({ loadApiKeyImpl: () => API_KEY })).toEqual({
+      kind: "ready",
       baseUrl: `${BASE_URL}/v1`,
       apiKey: API_KEY,
     });
@@ -203,9 +256,10 @@ describe("managed dual-Station vLLM authentication", () => {
     expect(result?.detail).toContain("different/model");
   });
 
-  it("fails closed before model inventory when the managed key is absent", () => {
+  it("fails closed through production lifecycle recovery when the managed key is absent", () => {
     const runCurlProbeImpl = vi.fn();
     const result = probeLocalProviderHealth("vllm-local", {
+      getManagedVllmBaseUrlImpl: productionManagedBaseUrlResolver(),
       model: "required/model",
       loadVllmApiKeyImpl: () => null,
       runCurlProbeImpl,
@@ -215,5 +269,47 @@ describe("managed dual-Station vLLM authentication", () => {
     expect(result?.ok).toBe(false);
     expect(result?.failureLabel).toBe("unauthorized");
     expect(result?.detail).not.toContain(API_KEY);
+  });
+
+  it("fails closed through production lifecycle recovery when managed key state is unsafe", () => {
+    const runCurlProbeImpl = vi.fn();
+    const result = probeLocalProviderHealth("vllm-local", {
+      getManagedVllmBaseUrlImpl: productionManagedBaseUrlResolver(),
+      model: "required/model",
+      loadVllmApiKeyImpl: () => {
+        throw new Error(`unsafe ${API_KEY}`);
+      },
+      runCurlProbeImpl,
+    });
+
+    expect(runCurlProbeImpl).not.toHaveBeenCalled();
+    expect(result?.ok).toBe(false);
+    expect(result?.failureLabel).toBe("unhealthy");
+    expect(result?.detail).not.toContain(API_KEY);
+  });
+
+  it("returns invalid-auth when the private key does not match the managed lifecycle", () => {
+    expect(
+      getManagedDualStationVllmProviderState({
+        getManagedBaseUrlImpl: productionManagedBaseUrlResolver(OTHER_API_KEY),
+        loadApiKeyImpl: () => API_KEY,
+      }),
+    ).toEqual({ kind: "invalid-auth", reason: "mismatched" });
+  });
+
+  it("fails closed when an owned managed head has invalid auth fingerprint metadata", () => {
+    const runCurlProbeImpl = vi.fn();
+    const result = probeLocalProviderHealth("vllm-local", {
+      getManagedVllmBaseUrlImpl: productionManagedBaseUrlResolver(API_KEY, ""),
+      loadVllmApiKeyImpl: () => API_KEY,
+      runCurlProbeImpl,
+    });
+
+    expect(runCurlProbeImpl).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      ok: false,
+      endpoint: "managed dual-Station vLLM",
+      failureLabel: "unhealthy",
+    });
   });
 });

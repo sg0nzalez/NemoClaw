@@ -3,6 +3,8 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DUAL_STATION_VLLM_RUNTIME, type DualStationVllmPlan } from "./vllm-station-cluster";
 import {
@@ -10,6 +12,7 @@ import {
   buildDualStationGpuSmokeRunArgs,
   buildDualStationVllmRunArgs,
   cleanupDualStationManagedVllm,
+  commitDualStationLegacyMigration,
   DUAL_STATION_VLLM_API_KEY_FINGERPRINT_LABEL,
   DUAL_STATION_VLLM_CLUSTER_LABEL,
   DUAL_STATION_VLLM_ENDPOINT_LABEL,
@@ -30,9 +33,11 @@ import {
   getDualStationManagedVllmBaseUrl,
   preflightDualStationGpuRuntime,
   preflightDualStationManagedVllm,
+  rollbackDualStationLegacyMigration,
   startDualStationManagedVllm,
   withDualStationManagedVllmLifecycle,
 } from "./vllm-station-cluster-lifecycle";
+import { withDualStationVllmLifecycleLock } from "./vllm-station-lifecycle-lock";
 import type { DualStationSshBinding } from "./vllm-station-ssh-binding";
 import {
   createDualStationSshBindingFixture,
@@ -41,6 +46,7 @@ import {
 
 const WORKER_ID = "a".repeat(64);
 const HEAD_ID = "b".repeat(64);
+const LEGACY_HEAD_ID = "9".repeat(64);
 const WORKER_SMOKE_ID = "c".repeat(64);
 const HEAD_SMOKE_ID = "d".repeat(64);
 const API_KEY = "e".repeat(64);
@@ -195,20 +201,26 @@ function fakeContainer(
   };
 }
 
-function harness(
-  options: {
-    failRole?: "head" | "worker";
-    invalidIdRole?: "head" | "worker";
-    failSmokeTarget?: "local" | "peer";
-    failSmokeCleanupTarget?: "local" | "peer";
-    missingImageTarget?: "local" | "peer";
-    smokeGpuOutput?: Partial<Record<"local" | "peer", string>>;
-    lateCreateRole?: "head" | "worker";
-    failedRoleForeignTransaction?: "head" | "worker";
-  } = {},
-) {
+type HarnessOptions = {
+  failRole?: "head" | "worker";
+  invalidIdRole?: "head" | "worker";
+  failSmokeTarget?: "local" | "peer";
+  failSmokeCleanupTarget?: "local" | "peer";
+  missingImageTarget?: "local" | "peer";
+  smokeGpuOutput?: Partial<Record<"local" | "peer", string>>;
+  lateCreateRole?: "head" | "worker";
+  failedRoleForeignTransaction?: "head" | "worker";
+  failFinalInspectionRole?: "head" | "worker";
+  failLegacyBackupRemoval?: boolean;
+};
+
+function harness(options: HarnessOptions = {}) {
   const containers = new Map<string, FakeContainer[]>();
-  const operations: Array<{ kind: "capture" | "rm" | "run"; target: string; value: string }> = [];
+  const operations: Array<{
+    kind: "capture" | "rename" | "rm" | "run" | "start" | "stop";
+    target: string;
+    value: string;
+  }> = [];
   const captureOptions: Array<DualStationDockerOptions | undefined> = [];
   const rmOptions: Array<DualStationDockerOptions | undefined> = [];
   const runCalls: Array<{
@@ -227,6 +239,9 @@ function harness(
   let lifecycleLockTail = Promise.resolve();
   const lifecycleLockContext = new AsyncLocalStorage<boolean>();
   let lateContainer: { targetName: string; container: FakeContainer } | null = null;
+  const launchedRoles = new Set<"head" | "worker">();
+  const managedInspectionCounts = { head: 0, worker: 0 };
+  let finalInspectionFailureInjected = false;
 
   async function acquireLifecycleLock<T>(operation: () => Promise<T> | T): Promise<T> {
     const previous = lifecycleLockTail;
@@ -253,6 +268,18 @@ function harness(
     return `${targetName}:${name}`;
   }
 
+  function exactContainerById(
+    targetName: string,
+    containerId: string,
+  ): { containerKey: string; entries: FakeContainer[]; container: FakeContainer } | null {
+    for (const [containerKey, entries] of containers.entries()) {
+      if (!containerKey.startsWith(`${targetName}:`)) continue;
+      const container = entries.find((entry) => entry.id === containerId);
+      if (container) return { containerKey, entries, container };
+    }
+    return null;
+  }
+
   const deps: DualStationVllmLifecycleDeps = {
     buildLocalDockerEnv: () => ({
       TARGET: "local",
@@ -267,6 +294,8 @@ function harness(
       transactionCounter += 1;
       return transactionCounter.toString(16).padStart(32, "0");
     },
+    effectiveControllerUid: () => fixturePlan().local.uid,
+    readControllerUid: () => fixturePlan().local.uid,
     loadApiKey: () => API_KEY,
     localInterfaceAddresses: () => [fixturePlan().masterAddress],
     waitBeforeReconcile: async () => {
@@ -281,6 +310,35 @@ function harness(
     dockerCapture: (args, optionsArg) => {
       captureOptions.push(optionsArg);
       const targetName = target(optionsArg);
+      if (args[0] === "container" && args[1] === "rename") {
+        const containerId = args[2];
+        const newName = args[3];
+        operations.push({
+          kind: "rename",
+          target: targetName,
+          value: `${containerId}:${newName}`,
+        });
+        const located = exactContainerById(targetName, containerId);
+        if (!located || (containers.get(key(targetName, newName)) ?? []).length > 0) {
+          return raise("rename failed");
+        }
+        containers.set(
+          located.containerKey,
+          located.entries.filter((entry) => entry.id !== containerId),
+        );
+        located.container.name = newName;
+        containers.set(key(targetName, newName), [located.container]);
+        return "";
+      }
+      if (args[0] === "container" && (args[1] === "start" || args[1] === "stop")) {
+        const action = args[1];
+        const containerId = args.at(-1) ?? "";
+        operations.push({ kind: action, target: targetName, value: containerId });
+        const located = exactContainerById(targetName, containerId);
+        if (!located) return raise(`${action} failed`);
+        located.container.state = action === "start" ? "running" : "exited";
+        return containerId;
+      }
       switch (args[0]) {
         case "image": {
           operations.push({ kind: "capture", target: targetName, value: `image:${args.at(-1)}` });
@@ -305,7 +363,25 @@ function harness(
       operations.push({ kind: "capture", target: targetName, value: name });
       const isSmokeInspection =
         dockerValues(args, "--format")[0]?.includes(DUAL_STATION_VLLM_GPU_SMOKE_LABEL) ?? false;
-      return (containers.get(key(targetName, name)) ?? [])
+      let inspected = containers.get(key(targetName, name)) ?? [];
+      const inspectedRole =
+        name === DUAL_STATION_VLLM_HEAD_CONTAINER_NAME
+          ? "head"
+          : name === DUAL_STATION_VLLM_WORKER_CONTAINER_NAME
+            ? "worker"
+            : null;
+      if (!isSmokeInspection && inspectedRole && launchedRoles.has(inspectedRole)) {
+        managedInspectionCounts[inspectedRole] += 1;
+        if (
+          options.failFinalInspectionRole === inspectedRole &&
+          managedInspectionCounts[inspectedRole] === 2 &&
+          !finalInspectionFailureInjected
+        ) {
+          finalInspectionFailureInjected = true;
+          inspected = inspected.map((container) => ({ ...container, state: "exited" }));
+        }
+      }
+      return inspected
         .map((container) =>
           isSmokeInspection
             ? [
@@ -349,6 +425,7 @@ function harness(
           break;
       }
       const role = name === DUAL_STATION_VLLM_HEAD_CONTAINER_NAME ? "head" : "worker";
+      launchedRoles.add(role);
       const imageIndex = args.indexOf("/bin/bash") + 1;
       const container = fakeContainer(role, {
         image: args[imageIndex],
@@ -381,8 +458,9 @@ function harness(
       const targetName = target(optionsArg);
       operations.push({ kind: "rm", target: targetName, value: containerId });
       const shouldFail =
-        options.failSmokeCleanupTarget === targetName &&
-        (containerId === WORKER_SMOKE_ID || containerId === HEAD_SMOKE_ID);
+        (options.failSmokeCleanupTarget === targetName &&
+          (containerId === WORKER_SMOKE_ID || containerId === HEAD_SMOKE_ID)) ||
+        (options.failLegacyBackupRemoval && containerId === LEGACY_HEAD_ID);
       const match = [...containers.entries()].find(
         ([containerKey, entries]) =>
           containerKey.startsWith(`${targetName}:`) &&
@@ -415,6 +493,29 @@ function harness(
     runCalls,
     seed,
   };
+}
+
+type LifecycleHarness = ReturnType<typeof harness>;
+
+function seedLegacyHead(fake: LifecycleHarness): void {
+  fake.seed(
+    "local",
+    fakeContainer("head", {
+      id: LEGACY_HEAD_ID,
+      labels: { [DUAL_STATION_VLLM_MANAGED_LABEL]: "true" },
+    }),
+  );
+}
+
+function expectRestoredLegacyHead(fake: LifecycleHarness): void {
+  expect(fake.containers.get(`local:${DUAL_STATION_VLLM_HEAD_CONTAINER_NAME}`)).toEqual([
+    expect.objectContaining({
+      id: LEGACY_HEAD_ID,
+      name: DUAL_STATION_VLLM_HEAD_CONTAINER_NAME,
+      state: "running",
+    }),
+  ]);
+  expect(fake.containers.get(`peer:${DUAL_STATION_VLLM_WORKER_CONTAINER_NAME}`) ?? []).toEqual([]);
 }
 
 describe("dual-Station managed vLLM run argv", () => {
@@ -630,6 +731,70 @@ describe("dual-Station managed vLLM run argv", () => {
 });
 
 describe("dual-Station managed vLLM lifecycle", () => {
+  it("rejects an effective account that differs from the prepared controller", () => {
+    const fake = harness();
+
+    expect(
+      preflightDualStationManagedVllm(fixturePlan(), {
+        ...fake.deps,
+        effectiveControllerUid: () => fixturePlan().local.uid + 1,
+      }),
+    ).toEqual({
+      ok: false,
+      reason:
+        "Dual-Station lifecycle effective UID 1001 does not match prepared controller UID 1000",
+    });
+    expect(fake.operations).toEqual([]);
+  });
+
+  it("rejects a prepared controller account that does not own the probed local Station plan", () => {
+    const fake = harness();
+
+    expect(
+      preflightDualStationManagedVllm(fixturePlan(), {
+        ...fake.deps,
+        effectiveControllerUid: () => fixturePlan().local.uid + 1,
+        readControllerUid: () => fixturePlan().local.uid + 1,
+      }),
+    ).toEqual({
+      ok: false,
+      reason: "Dual-Station lifecycle controller UID must match probed local UID 1000",
+    });
+    expect(fake.operations).toEqual([]);
+  });
+
+  it("anchors the default lock under the effective account home instead of mutable HOME", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-station-lock-home-"));
+    const accountHome = path.join(root, "account-home");
+    const ambientHome = path.join(root, "ambient-home");
+    fs.mkdirSync(accountHome, { mode: 0o700 });
+    const userInfo = os.userInfo();
+    const userInfoSpy = vi.spyOn(os, "userInfo").mockReturnValue({
+      ...userInfo,
+      homedir: accountHome,
+    });
+    vi.stubEnv("HOME", ambientHome);
+    try {
+      await withDualStationVllmLifecycleLock(
+        () => {
+          expect(
+            fs.existsSync(path.join(accountHome, ".nemoclaw", "state", "mcp-lifecycle-locks")),
+          ).toBe(true);
+          expect(fs.existsSync(ambientHome)).toBe(false);
+        },
+        { pollIntervalMs: 5, timeoutMs: 250, corruptLockGraceMs: 5 },
+        {
+          readControllerUid: () => userInfo.uid,
+          effectiveControllerUid: () => userInfo.uid,
+        },
+      );
+    } finally {
+      vi.unstubAllEnvs();
+      userInfoSpy.mockRestore();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("provides a read-only ownership preflight before download work", () => {
     const fake = harness();
 
@@ -905,26 +1070,157 @@ describe("dual-Station managed vLLM lifecycle", () => {
     expect(fake.containers.get(`peer:${DUAL_STATION_VLLM_WORKER_CONTAINER_NAME}`)).toHaveLength(1);
   });
 
-  it("migrates only the exact legacy single-Station head when the peer name is absent", async () => {
+  it("migrates only the exact running legacy single-Station head from the rollback window", async () => {
     const fake = harness();
+    seedLegacyHead(fake);
+    const started = await startDualStationManagedVllm(fixturePlan(), START_CONFIG, fake.deps);
+    expect(started).toMatchObject({
+      ok: true,
+      reusedExisting: false,
+      legacyMigration: expect.objectContaining({ legacyContainerId: LEGACY_HEAD_ID }),
+    });
+    if (!started.ok || !started.legacyMigration)
+      throw new Error("expected legacy migration handle");
+    expect(
+      fake.operations.some(({ kind, value }) => kind === "rm" && value === LEGACY_HEAD_ID),
+    ).toBe(false);
+    await expect(
+      commitDualStationLegacyMigration(fixturePlan(), started.legacyMigration, fake.deps),
+    ).resolves.toEqual({ ok: true, cleanupWarnings: [] });
+    const cutoverOrder = fake.operations
+      .filter(
+        ({ kind, value }) =>
+          (kind === "run" &&
+            (value === DUAL_STATION_VLLM_WORKER_CONTAINER_NAME ||
+              value === DUAL_STATION_VLLM_HEAD_CONTAINER_NAME)) ||
+          kind === "rename" ||
+          ((kind === "stop" || kind === "rm") && value === LEGACY_HEAD_ID),
+      )
+      .map(({ kind, value }) => `${kind}:${value}`);
+    expect(cutoverOrder).toEqual([
+      `run:${DUAL_STATION_VLLM_WORKER_CONTAINER_NAME}`,
+      expect.stringMatching(`^rename:${LEGACY_HEAD_ID}:nemoclaw-vllm-legacy-`),
+      `stop:${LEGACY_HEAD_ID}`,
+      `run:${DUAL_STATION_VLLM_HEAD_CONTAINER_NAME}`,
+      `rm:${LEGACY_HEAD_ID}`,
+    ]);
+  });
+
+  it("restores the preserved legacy head when external validation rolls back", async () => {
+    const fake = harness();
+    seedLegacyHead(fake);
+    const started = await startDualStationManagedVllm(fixturePlan(), START_CONFIG, fake.deps);
+    if (!started.ok || !started.legacyMigration)
+      throw new Error("expected legacy migration handle");
+
+    await expect(
+      rollbackDualStationLegacyMigration(fixturePlan(), started.legacyMigration, fake.deps),
+    ).resolves.toEqual({ ok: true });
+    expectRestoredLegacyHead(fake);
+  });
+
+  it("keeps the running legacy head untouched when the peer worker cannot start", async () => {
+    const fake = harness({ failRole: "worker" });
+    seedLegacyHead(fake);
+    expect(await startDualStationManagedVllm(fixturePlan(), START_CONFIG, fake.deps)).toEqual({
+      ok: false,
+      reason: "worker container failed to start",
+      rollbackErrors: [],
+    });
+    expectRestoredLegacyHead(fake);
+    expect(fake.operations.some(({ kind }) => ["rename", "start", "stop"].includes(kind))).toBe(
+      false,
+    );
+    expect(
+      fake.operations.some(({ kind, value }) => kind === "rm" && value === LEGACY_HEAD_ID),
+    ).toBe(false);
+  });
+
+  it.each([
+    ["new head launch", { failRole: "head" }, "head container failed to start", false],
+    [
+      "final pair verification",
+      { failFinalInspectionRole: "head" },
+      "dual-Station containers did not remain running",
+      true,
+    ],
+  ] as const)("restores the exact legacy head after %s failure", async (_case, options, reason, ranHead) => {
+    const fake = harness(options);
+    seedLegacyHead(fake);
+    expect(await startDualStationManagedVllm(fixturePlan(), START_CONFIG, fake.deps)).toEqual({
+      ok: false,
+      reason,
+      rollbackErrors: [],
+    });
+    expectRestoredLegacyHead(fake);
+    expect(fake.operations).toEqual(
+      expect.arrayContaining([
+        { kind: "rm", target: "peer", value: WORKER_ID },
+        { kind: "start", target: "local", value: LEGACY_HEAD_ID },
+      ]),
+    );
+    expect(fake.operations.some(({ kind, value }) => kind === "rm" && value === HEAD_ID)).toBe(
+      ranHead,
+    );
+    expect(
+      fake.operations.some(({ kind, value }) => kind === "rm" && value === LEGACY_HEAD_ID),
+    ).toBe(false);
+  });
+
+  it("keeps the validated new pair when legacy backup removal is ambiguous", async () => {
+    const fake = harness({ failLegacyBackupRemoval: true });
+    seedLegacyHead(fake);
+    const started = await startDualStationManagedVllm(fixturePlan(), START_CONFIG, fake.deps);
+    if (!started.ok || !started.legacyMigration)
+      throw new Error("expected legacy migration handle");
+    await expect(
+      commitDualStationLegacyMigration(fixturePlan(), started.legacyMigration, fake.deps),
+    ).resolves.toMatchObject({
+      ok: true,
+      cleanupWarnings: [expect.stringContaining("legacy backup")],
+    });
+    expect(fake.containers.get(`local:${DUAL_STATION_VLLM_HEAD_CONTAINER_NAME}`)).toEqual([
+      expect.objectContaining({ id: HEAD_ID, state: "running" }),
+    ]);
+    expect(fake.containers.get(`peer:${DUAL_STATION_VLLM_WORKER_CONTAINER_NAME}`)).toEqual([
+      expect.objectContaining({ id: WORKER_ID, state: "running" }),
+    ]);
+    const preservedBackup = [...fake.containers.entries()].flatMap(([containerKey, entries]) =>
+      containerKey.startsWith(`local:${DUAL_STATION_VLLM_HEAD_CONTAINER_NAME}-legacy-`)
+        ? entries
+        : [],
+    );
+    expect(preservedBackup).toEqual([
+      expect.objectContaining({ id: LEGACY_HEAD_ID, state: "exited" }),
+    ]);
+  });
+
+  it.each([
+    ["stopped", { state: "exited" }],
+    [
+      "outside the frozen image window",
+      {
+        image:
+          "vllm/vllm-openai@sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      },
+    ],
+  ])("refuses a schema-less managed head that is %s", async (_case, override) => {
+    const fake = harness();
+    const plan = fixturePlan();
     fake.seed(
       "local",
       fakeContainer("head", {
+        ...override,
         labels: { [DUAL_STATION_VLLM_MANAGED_LABEL]: "true" },
       }),
     );
 
-    expect(await startDualStationManagedVllm(fixturePlan(), START_CONFIG, fake.deps)).toMatchObject(
-      {
-        ok: true,
-        reusedExisting: false,
-      },
-    );
-    expect(fake.operations.filter((operation) => operation.kind === "rm")).toContainEqual({
-      kind: "rm",
-      target: "local",
-      value: HEAD_ID,
+    expect(await startDualStationManagedVllm(plan, START_CONFIG, fake.deps)).toMatchObject({
+      ok: false,
+      reason: expect.stringContaining("foreign"),
     });
+    expect(fake.operations.some((operation) => operation.kind === "rm")).toBe(false);
+    expect(fake.operations.some((operation) => operation.kind === "run")).toBe(false);
   });
 
   it("refuses a same-image worker that belongs to another physical cluster plan", () => {
@@ -977,6 +1273,45 @@ describe("dual-Station managed vLLM lifecycle", () => {
       { kind: "rm", target: "peer", value: WORKER_ID },
     ]);
   });
+
+  it("uses the real reentrant lease across an outer lifecycle and start rollback", async () => {
+    const fake = harness({ failRole: "head" });
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-station-real-lock-"));
+    const withRealLock: DualStationVllmLifecycleDeps["withLifecycleLock"] = (operation) =>
+      withDualStationVllmLifecycleLock(
+        operation,
+        {
+          stateDir,
+          pollIntervalMs: 5,
+          timeoutMs: 250,
+          corruptLockGraceMs: 5,
+        },
+        {
+          readControllerUid: () => fixturePlan().local.uid,
+          effectiveControllerUid: () => fixturePlan().local.uid,
+        },
+      );
+    const deps = { ...fake.deps, withLifecycleLock: withRealLock };
+    try {
+      expect(
+        await withDualStationManagedVllmLifecycle(
+          () => startDualStationManagedVllm(fixturePlan(), START_CONFIG, deps),
+          deps,
+        ),
+      ).toEqual({
+        ok: false,
+        reason: "head container failed to start",
+        rollbackErrors: [],
+      });
+      expect(fake.operations.filter((operation) => operation.kind === "rm")).toContainEqual({
+        kind: "rm",
+        target: "peer",
+        value: WORKER_ID,
+      });
+    } finally {
+      fs.rmSync(stateDir, { recursive: true, force: true });
+    }
+  }, 2_000);
 
   it("rejects an invalid docker-run ID and recovers only its exact owned ID", async () => {
     const fake = harness({ invalidIdRole: "worker" });
@@ -1042,6 +1377,25 @@ describe("managed dual-Station base URL recovery", () => {
     expect(fake.captureOptions.at(-1)?.env?.VLLM_API_KEY).toBeUndefined();
   });
 
+  it("reports a structurally managed running head before API-key fingerprint validation", () => {
+    const fake = harness();
+    const head = fakeContainer("head");
+    head.labels[DUAL_STATION_VLLM_API_KEY_FINGERPRINT_LABEL] = "invalid";
+    fake.seed("local", head);
+    const onManagedHeadObserved = vi.fn();
+    const loadApiKey = vi.fn(() => API_KEY);
+
+    expect(
+      getDualStationManagedVllmBaseUrl({
+        ...fake.deps,
+        onManagedHeadObserved,
+        loadApiKey,
+      }),
+    ).toBeNull();
+    expect(onManagedHeadObserved).toHaveBeenCalledOnce();
+    expect(loadApiKey).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["missing persisted key", { loadApiKey: () => null }],
     ["mismatched persisted key", { loadApiKey: () => "a".repeat(64) }],
@@ -1075,6 +1429,7 @@ describe("managed dual-Station base URL recovery", () => {
 
   it("rejects an owned-looking head that does not use the pinned runtime image", () => {
     const fake = harness();
+    const onManagedHeadObserved = vi.fn();
     fake.seed(
       "local",
       fakeContainer("head", {
@@ -1083,6 +1438,7 @@ describe("managed dual-Station base URL recovery", () => {
       }),
     );
 
-    expect(getDualStationManagedVllmBaseUrl(fake.deps)).toBeNull();
+    expect(getDualStationManagedVllmBaseUrl({ ...fake.deps, onManagedHeadObserved })).toBeNull();
+    expect(onManagedHeadObserved).not.toHaveBeenCalled();
   });
 });

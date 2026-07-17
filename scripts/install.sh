@@ -2893,12 +2893,14 @@ validate_express_platform_boundary() {
 
 STATION_ULTRA_VLLM_MODEL="nemotron-3-ultra-550b-a55b"
 STATION_ULTRA_SERVED_MODEL="nvidia/nemotron-3-ultra-550b-a55b"
+STATION_ULTRA_LEGACY_VLLM_IMAGE="vllm/vllm-openai@sha256:0fec7ec5f3e6bc168e54899935fb0557da908a4832a1dbc88e2debcf2f889416"
 STATION_DEEPSEEK_VLLM_MODEL="deepseek-v4-flash"
 STATION_DEEPSEEK_SERVED_MODEL="deepseek-ai/DeepSeek-V4-Flash"
 _SELECTED_EXPRESS_PLATFORM=""
 _STATION_EXPRESS_RESUME_REVISION=""
 _STATION_EXPRESS_MODEL_WAS_EXPLICIT=0
 _STATION_EXPRESS_DEFERRED_MANAGED_PAIR=0
+_STATION_EXPRESS_MIGRATING_LEGACY_HEAD=0
 _STATION_INSTALL_MODE=""
 
 normalize_station_vllm_model() {
@@ -3230,12 +3232,19 @@ run_station_host_preparation() {
   bash "$helper" --verify
 }
 
+station_local_default_docker() {
+  (
+    unset DOCKER_HOST DOCKER_CONTEXT
+    docker --context default "$@"
+  )
+}
+
 station_managed_dual_head_running() {
   command_exists docker || return 1
 
   local inspection name running managed role schema cluster launch_contract api_fingerprint transaction
   inspection="$(
-    docker container inspect --format \
+    station_local_default_docker container inspect --format \
       '{{.Name}} {{.State.Running}} {{index .Config.Labels "com.nvidia.nemoclaw.managed-vllm"}} {{index .Config.Labels "com.nvidia.nemoclaw.vllm-role"}} {{index .Config.Labels "com.nvidia.nemoclaw.vllm-launch-schema"}} {{index .Config.Labels "com.nvidia.nemoclaw.vllm-cluster"}} {{index .Config.Labels "com.nvidia.nemoclaw.vllm-launch-contract"}} {{index .Config.Labels "com.nvidia.nemoclaw.vllm-api-key-fingerprint"}} {{index .Config.Labels "com.nvidia.nemoclaw.vllm-transaction"}}' \
       nemoclaw-vllm 2>/dev/null
   )" || return 1
@@ -3251,10 +3260,35 @@ station_managed_dual_head_running() {
     "$transaction" =~ ^[a-f0-9]{32}$ ]]
 }
 
+station_migratable_legacy_single_head_running() {
+  command_exists docker || return 1
+
+  local inspection name running image managed role endpoint cluster gpu schema launch_contract api_fingerprint transaction
+  inspection="$(
+    station_local_default_docker container inspect --format \
+      '{{.Name}}|{{.State.Running}}|{{.Config.Image}}|{{with index .Config.Labels "com.nvidia.nemoclaw.managed-vllm"}}{{.}}{{else}}-{{end}}|{{with index .Config.Labels "com.nvidia.nemoclaw.vllm-role"}}{{.}}{{else}}-{{end}}|{{with index .Config.Labels "com.nvidia.nemoclaw.vllm-endpoint"}}{{.}}{{else}}-{{end}}|{{with index .Config.Labels "com.nvidia.nemoclaw.vllm-cluster"}}{{.}}{{else}}-{{end}}|{{with index .Config.Labels "com.nvidia.nemoclaw.vllm-gpu"}}{{.}}{{else}}-{{end}}|{{with index .Config.Labels "com.nvidia.nemoclaw.vllm-launch-schema"}}{{.}}{{else}}-{{end}}|{{with index .Config.Labels "com.nvidia.nemoclaw.vllm-launch-contract"}}{{.}}{{else}}-{{end}}|{{with index .Config.Labels "com.nvidia.nemoclaw.vllm-api-key-fingerprint"}}{{.}}{{else}}-{{end}}|{{with index .Config.Labels "com.nvidia.nemoclaw.vllm-transaction"}}{{.}}{{else}}-{{end}}' \
+      nemoclaw-vllm 2>/dev/null
+  )" || return 1
+  IFS='|' read -r name running image managed role endpoint cluster gpu schema launch_contract api_fingerprint transaction <<<"$inspection"
+  [[ "$name" == "/nemoclaw-vllm" &&
+    "$running" == "true" &&
+    "$image" == "$STATION_ULTRA_LEGACY_VLLM_IMAGE" &&
+    "$managed" == "true" &&
+    "$role" == "-" &&
+    "$endpoint" == "-" &&
+    "$cluster" == "-" &&
+    "$gpu" == "-" &&
+    "$schema" == "-" &&
+    "$launch_contract" == "-" &&
+    "$api_fingerprint" == "-" &&
+    "$transaction" == "-" ]]
+}
+
 ensure_station_express_host() {
   [[ "${_SELECTED_EXPRESS_PLATFORM:-}" == "DGX Station" ]] || return 0
 
   _STATION_EXPRESS_DEFERRED_MANAGED_PAIR=0
+  _STATION_EXPRESS_MIGRATING_LEGACY_HEAD=0
   if station_dual_model_requested && station_managed_dual_head_running; then
     # The host-preparation helper intentionally refuses active workloads. Only
     # this complete dual-head ownership contract may defer local preparation;
@@ -3262,6 +3296,14 @@ ensure_station_express_host() {
     # the existing lifecycle is allowed to reuse it.
     _STATION_EXPRESS_DEFERRED_MANAGED_PAIR=1
     info "Found a complete running NemoClaw-managed dual-Station head candidate; deferring host preparation until reciprocal pair and lifecycle validation."
+    return 0
+  fi
+  if station_dual_model_requested && station_migratable_legacy_single_head_running; then
+    # This exact frozen legacy head is the only single-host workload that the
+    # dual lifecycle can migrate. Bind its controller without running the
+    # workload-rejecting host probes, then prepare the newly qualified peer.
+    _STATION_EXPRESS_MIGRATING_LEGACY_HEAD=1
+    info "Found the exact running legacy single-Station Ultra head; deferring workload-safe controller binding and reciprocal peer preparation."
     return 0
   fi
 
@@ -3404,6 +3446,9 @@ ensure_station_express_pair() {
   if [ "${_STATION_EXPRESS_DEFERRED_MANAGED_PAIR:-0}" = "1" ]; then
     pair_command+=(--reuse-existing-managed-pair)
   fi
+  if [ "${_STATION_EXPRESS_MIGRATING_LEGACY_HEAD:-0}" = "1" ]; then
+    pair_command+=(--migrate-legacy-single-head)
+  fi
 
   info "Checking for one pretrusted reciprocal dual-DGX Station peer on the two direct /30 rail counterparts."
   # Publish the companion mode/model state before the coordinator can persist
@@ -3437,6 +3482,8 @@ ensure_station_express_pair() {
         || error "Dual DGX Station preparation returned an inconsistent reboot result; refusing to continue."
       [ "${_STATION_EXPRESS_DEFERRED_MANAGED_PAIR:-0}" != "1" ] \
         || error "The running managed dual-Station head could not be matched to its trusted reciprocal peer; refusing single-Station fallback."
+      [ "${_STATION_EXPRESS_MIGRATING_LEGACY_HEAD:-0}" != "1" ] \
+        || error "The running legacy single-Station head could not be matched to a trusted reciprocal peer; refusing migration and single-Station fallback."
       [ -z "${NEMOCLAW_DGX_STATION_PEER:-}" ] \
         || error "The explicit DGX Station peer could not be qualified; refusing single-Station fallback."
       station_dual_pair_resume_pending \

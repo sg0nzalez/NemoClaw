@@ -52,7 +52,15 @@ describe("qualified dual-Station SSH binding", () => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-station-ssh-binding-"));
     fs.chmodSync(root, 0o700);
     dockerCliFile = path.join(root, "docker-cli");
-    fs.writeFileSync(dockerCliFile, "#!/bin/bash\nexit 0\n", { mode: 0o700 });
+    fs.writeFileSync(
+      dockerCliFile,
+      `#!/bin/bash
+set -Eeuo pipefail
+printf '%s\\0' "$@" > "${"${NEMOCLAW_TEST_DOCKER_RECORD:?}"}"
+exit "${"${NEMOCLAW_TEST_DOCKER_EXIT:-0}"}"
+`,
+      { mode: 0o700 },
+    );
     fs.chmodSync(dockerCliFile, 0o700);
     resumeStatePath = path.join(root, "station-dual-pair-resume.json");
   });
@@ -100,6 +108,13 @@ describe("qualified dual-Station SSH binding", () => {
     expect(() => stationKnownHostsDigest(`@revoked ${PEER_HOST} ssh-rsa ${RSA_KEY}`)).toThrow(
       "no trusted key",
     );
+    expect(() =>
+      stationKnownHostsDigest(
+        [`@cert-authority ${PEER_HOST} ssh-ed25519 ${ED25519_KEY}`, KNOWN_HOSTS_LINES[0]].join(
+          "\n",
+        ),
+      ),
+    ).toThrow("marker is not allowed");
   });
 
   it("persists owner-only evidence and reloads one canonical handoff", () => {
@@ -164,20 +179,32 @@ describe("qualified dual-Station SSH binding", () => {
       `ssh://station@${PEER_HOST}:${String(PEER_PORT)}`,
     );
 
-    const wrapper = fs.readFileSync(binding.sshWrapperFile, "utf8");
-    expect(wrapper).toMatch(/^#!\/bin\/bash\n/);
-    expect(wrapper).toContain(`/usr/bin/sha256sum < "$known_hosts"`);
-    expect(wrapper).toContain("exec /usr/bin/ssh '-T'");
-    expect(wrapper).toContain(`'UserKnownHostsFile=${binding.knownHostsFile}'`);
-    expect(wrapper).toContain(`'HostKeyAlias=${binding.lookupHost}'`);
-    expect(wrapper).toContain(`'Hostname=${PEER_HOST}'`);
-    expect(wrapper).toContain('"$@"');
     expect(spawnSync("/bin/bash", ["-n", binding.sshWrapperFile]).status).toBe(0);
-
-    const dockerShim = fs.readFileSync(binding.dockerShimFile, "utf8");
-    expect(dockerShim).toMatch(/^#!\/bin\/bash\n/);
-    expect(dockerShim).toContain(`exec '${binding.dockerCliFile}' "$@"`);
     expect(spawnSync("/bin/bash", ["-n", binding.dockerShimFile]).status).toBe(0);
+
+    const dockerRecord = path.join(root, "docker-args");
+    const dockerResult = spawnSync(
+      binding.dockerShimFile,
+      ["context", "inspect", "value with spaces"],
+      {
+        env: {
+          ...process.env,
+          NEMOCLAW_TEST_DOCKER_EXIT: "37",
+          NEMOCLAW_TEST_DOCKER_RECORD: dockerRecord,
+        },
+      },
+    );
+    expect(dockerResult.status).toBe(37);
+    expect(fs.readFileSync(dockerRecord).toString("utf8").split("\0").slice(0, -1)).toEqual([
+      "context",
+      "inspect",
+      "value with spaces",
+    ]);
+
+    fs.appendFileSync(binding.knownHostsFile, "# tampered\n");
+    const sshResult = spawnSync(binding.sshWrapperFile, ["-V"], { encoding: "utf8" });
+    expect(sshResult.status).toBe(255);
+    expect(sshResult.stderr).toContain("refused a changed dual-Station SSH host-key pin");
   });
 
   it("omits only the default SSH port from the Docker URI", () => {

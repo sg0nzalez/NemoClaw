@@ -46,6 +46,7 @@ type CliOptions = {
   revision: string;
   explicitPeer?: string;
   reuseExistingManagedPair: boolean;
+  migrateLegacySingleStationHead: boolean;
   clearState: boolean;
 };
 
@@ -692,7 +693,12 @@ function connectivityMatches(
 
 export function buildRemoteHelperCommand(helperSha256: string, mode: StationPrepMode): string {
   if (!/^[a-f0-9]{64}$/.test(helperSha256)) throw new Error("Helper SHA-256 is invalid");
-  if (mode !== "--check" && mode !== "--apply" && mode !== "--verify") {
+  if (
+    mode !== "--check" &&
+    mode !== "--apply" &&
+    mode !== "--verify" &&
+    mode !== "--bind-controller"
+  ) {
     throw new Error("Helper mode is invalid");
   }
   return [
@@ -783,6 +789,7 @@ export function writeDualStationResumeState(
   if (typeof noFollow !== "number") throw new Error("O_NOFOLLOW is required for resume state");
   const temporary = `${statePath}.tmp.${randomBytes(12).toString("hex")}`;
   let fd: number | null = null;
+  let failure: { error: unknown } | null = null;
   try {
     fd = fs.openSync(
       temporary,
@@ -795,35 +802,70 @@ export function writeDualStationResumeState(
     fd = null;
     fs.renameSync(temporary, statePath);
     const directoryFd = fs.openSync(directory, fs.constants.O_RDONLY);
+    let directoryFailure: { error: unknown } | null = null;
     try {
       fs.fsyncSync(directoryFd);
-    } finally {
-      fs.closeSync(directoryFd);
-    }
-  } finally {
-    if (fd !== null) fs.closeSync(fd);
-    try {
-      fs.unlinkSync(temporary);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      directoryFailure = { error };
+    }
+    try {
+      fs.closeSync(directoryFd);
+    } catch (error) {
+      directoryFailure ??= { error };
+    }
+    if (directoryFailure) throw directoryFailure.error;
+  } catch (error) {
+    failure = { error };
+  }
+  if (fd !== null) {
+    try {
+      fs.closeSync(fd);
+    } catch (error) {
+      failure ??= { error };
     }
   }
+  try {
+    fs.unlinkSync(temporary);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") failure ??= { error };
+  }
+  if (failure) throw failure.error;
 }
 
 export function clearDualStationResumeState(statePath: string): void {
   const current = readDualStationResumeState(statePath);
   clearDualStationSshBinding(statePath);
-  if (current) fs.unlinkSync(statePath);
+  if (!current) return;
+
+  fs.unlinkSync(statePath);
+  const directoryFd = fs.openSync(path.dirname(statePath), fs.constants.O_RDONLY);
+  let failure: { error: unknown } | null = null;
+  try {
+    fs.fsyncSync(directoryFd);
+  } catch (error) {
+    failure = { error };
+  }
+  try {
+    fs.closeSync(directoryFd);
+  } catch (error) {
+    failure ??= { error };
+  }
+  if (failure) throw failure.error;
 }
 
 function parseCliOptions(args: readonly string[]): CliOptions {
   const values = new Map<string, string>();
   let reuseExistingManagedPair = false;
+  let migrateLegacySingleStationHead = false;
   let clearState = false;
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === "--reuse-existing-managed-pair") {
       reuseExistingManagedPair = true;
+      continue;
+    }
+    if (arg === "--migrate-legacy-single-head") {
+      migrateLegacySingleStationHead = true;
       continue;
     }
     if (arg === "--clear-state") {
@@ -858,6 +900,7 @@ function parseCliOptions(args: readonly string[]): CliOptions {
     revision,
     explicitPeer,
     reuseExistingManagedPair,
+    migrateLegacySingleStationHead,
     clearState,
   };
 }
@@ -930,7 +973,7 @@ function createRuntimeDeps(options: CliOptions): {
     return file;
   };
 
-  const runLocalHelper = (mode: "--check" | "--verify"): number => {
+  const runLocalHelper = (mode: StationPrepMode): number => {
     return runStreamingCommand("bash", [pinnedHelperPath, mode], "");
   };
 
@@ -1004,6 +1047,7 @@ export function runCli(args: readonly string[]): number {
         helperSha256: runtime.helperSha256,
         explicitPeer: options.explicitPeer,
         reuseExistingManagedPair: options.reuseExistingManagedPair,
+        migrateLegacySingleStationHead: options.migrateLegacySingleStationHead,
       },
       runtime.deps,
     );

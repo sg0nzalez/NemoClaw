@@ -254,6 +254,8 @@ export interface LocalProviderHealthProbeOptions {
   loadOllamaProxyTokenImpl?: () => string | null;
   /** Reads the managed dual-Station vLLM key. Injectable so tests stay deterministic. */
   loadVllmApiKeyImpl?: () => string | null;
+  /** Recovers an owned managed endpoint while validating the injected key in one lifecycle read. */
+  getManagedVllmBaseUrlImpl?: ManagedDualStationVllmBaseUrlResolver;
 }
 
 function defaultLoadOllamaProxyToken(): string | null {
@@ -415,26 +417,84 @@ export interface ManagedDualStationVllmProviderBinding {
   apiKey: string;
 }
 
+type ManagedDualStationVllmBaseUrlResolver = (overrides?: {
+  loadApiKey?: () => string | null;
+  onManagedHeadObserved?: () => void;
+}) => string | null;
+
+export type ManagedDualStationVllmProviderState =
+  | { kind: "absent" }
+  | { kind: "invalid-auth"; reason: "missing" | "unsafe" | "mismatched" }
+  | ({ kind: "ready" } & ManagedDualStationVllmProviderBinding);
+
 export interface ManagedDualStationVllmProviderBindingOptions {
   hostUrl?: string | null;
-  getManagedBaseUrlImpl?: () => string | null;
+  getManagedBaseUrlImpl?: ManagedDualStationVllmBaseUrlResolver;
   loadApiKeyImpl?: () => string | null;
 }
 
-/** Recover one endpoint+credential pair only from an owned managed-dual container. */
+/** Recover endpoint and credential as one lifecycle-validated state. */
+export function getManagedDualStationVllmProviderState(
+  options: ManagedDualStationVllmProviderBindingOptions = {},
+): ManagedDualStationVllmProviderState {
+  const configuredHostUrl = configuredLocalInferenceHostUrl(options.hostUrl);
+  if (configuredHostUrl) return { kind: "absent" };
+
+  const loadApiKey = options.loadApiKeyImpl ?? loadDualStationVllmApiKey;
+  let keyRead = false;
+  let managedHeadObserved = false;
+  let apiKey: string | null = null;
+  let authFailure: "missing" | "unsafe" | null = null;
+  let managedBaseUrl: string | null;
+  try {
+    managedBaseUrl = (options.getManagedBaseUrlImpl ?? getDualStationManagedVllmBaseUrl)({
+      onManagedHeadObserved: () => {
+        managedHeadObserved = true;
+      },
+      loadApiKey: () => {
+        keyRead = true;
+        try {
+          apiKey = loadApiKey();
+          if (!apiKey) authFailure = "missing";
+          return apiKey;
+        } catch {
+          authFailure = "unsafe";
+          return null;
+        }
+      },
+    });
+  } catch (error) {
+    // A malformed key can make lifecycle fingerprint validation throw. Once
+    // key recovery began, treat every such failure as unsafe authentication;
+    // unrelated endpoint-inspection failures retain their existing behavior.
+    if (keyRead) return { kind: "invalid-auth", reason: "unsafe" };
+    throw error;
+  }
+
+  // Production recovery reports a structurally owned managed head before it
+  // validates fingerprint metadata. Test resolvers may still signal ownership
+  // by invoking the key reader, so only the absence of both signals permits the
+  // legacy single-host path.
+  if (!managedHeadObserved && !keyRead) return { kind: "absent" };
+  if (!managedBaseUrl || !apiKey) {
+    return { kind: "invalid-auth", reason: authFailure ?? "mismatched" };
+  }
+  return { kind: "ready", baseUrl: `${managedBaseUrl}/v1`, apiKey };
+}
+
+/** Compatibility binding for onboarding and context-window callers. */
 export function getManagedDualStationVllmProviderBinding(
   options: ManagedDualStationVllmProviderBindingOptions = {},
 ): ManagedDualStationVllmProviderBinding | null {
-  const configuredHostUrl = configuredLocalInferenceHostUrl(options.hostUrl);
-  if (configuredHostUrl) return null;
-
-  const managedBaseUrl = (options.getManagedBaseUrlImpl ?? getDualStationManagedVllmBaseUrl)();
-  if (!managedBaseUrl) return null;
-  const apiKey = (options.loadApiKeyImpl ?? loadDualStationVllmApiKey)();
-  if (!apiKey) {
+  const state = getManagedDualStationVllmProviderState(options);
+  if (state.kind === "absent") return null;
+  if (state.kind === "invalid-auth") {
+    if (state.reason !== "missing") {
+      throw new Error("Managed dual-Station vLLM authentication is unsafe or mismatched.");
+    }
     throw new Error("Managed dual-Station vLLM authentication is missing.");
   }
-  return { baseUrl: `${managedBaseUrl}/v1`, apiKey };
+  return { baseUrl: state.baseUrl, apiKey: state.apiKey };
 }
 
 export function getLocalProviderBaseUrl(
@@ -673,29 +733,39 @@ export function probeLocalProviderHealth(
   const providerLabel = getLocalProviderLabel(provider);
   if (!providerLabel) return null;
 
-  let managedBinding: ManagedDualStationVllmProviderBinding | null = null;
+  let managedState: ManagedDualStationVllmProviderState = { kind: "absent" };
   if (provider === "vllm-local") {
     try {
-      managedBinding = getManagedDualStationVllmProviderBinding({
+      managedState = getManagedDualStationVllmProviderState({
+        getManagedBaseUrlImpl: options.getManagedVllmBaseUrlImpl,
         loadApiKeyImpl: options.loadVllmApiKeyImpl,
       });
-    } catch (error) {
-      const missingAuth =
-        error instanceof Error &&
-        error.message === "Managed dual-Station vLLM authentication is missing.";
+    } catch {
       return {
         ok: false,
         providerLabel,
-        endpoint:
-          getLocalProviderHealthEndpoint(provider) ?? `http://127.0.0.1:${VLLM_PORT}/v1/models`,
-        failureLabel: missingAuth ? "unauthorized" : "unhealthy",
+        endpoint: "managed dual-Station vLLM",
+        failureLabel: "unhealthy",
         probeLabel: "vllm backend",
-        detail: missingAuth
-          ? "Local vLLM requires its managed bearer credential, but no private key is available. Re-run `nemoclaw onboard` to repair the dual-Station provider."
-          : "Local vLLM authentication state is unsafe or unreadable. Re-run `nemoclaw onboard` to repair the managed dual-Station provider.",
+        detail:
+          "Local vLLM authentication state could not be inspected safely. Re-run `nemoclaw onboard` to repair the managed dual-Station provider.",
       };
     }
   }
+  if (managedState.kind === "invalid-auth") {
+    const missingAuth = managedState.reason === "missing";
+    return {
+      ok: false,
+      providerLabel,
+      endpoint: "managed dual-Station vLLM",
+      failureLabel: missingAuth ? "unauthorized" : "unhealthy",
+      probeLabel: "vllm backend",
+      detail: missingAuth
+        ? "Local vLLM requires its managed bearer credential, but no private key is available. Re-run `nemoclaw onboard` to repair the dual-Station provider."
+        : "Local vLLM authentication state is unsafe or does not match the managed service. Re-run `nemoclaw onboard` to repair the managed dual-Station provider.",
+    };
+  }
+  const managedBinding = managedState.kind === "ready" ? managedState : null;
   const endpoint = managedBinding
     ? `${managedBinding.baseUrl}/models`
     : provider === "vllm-local"

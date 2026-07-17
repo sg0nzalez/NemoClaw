@@ -84,6 +84,38 @@ describe("managed vLLM ownership", () => {
     expect(isNemoClawManagedVllmRunning()).toBe(true);
   });
 
+  it("checks the canonical local daemon before an ambient remote Docker host", () => {
+    const previousDockerHost = process.env.DOCKER_HOST;
+    const previousDockerContext = process.env.DOCKER_CONTEXT;
+    process.env.DOCKER_HOST = "ssh://builder.example.test";
+    delete process.env.DOCKER_CONTEXT;
+    mocks.dockerCapture.mockImplementation(
+      (_args: readonly string[], options?: { env?: NodeJS.ProcessEnv }) =>
+        options?.env?.DOCKER_CONTEXT === "default"
+          ? vllmContainerRow(NEMOCLAW_VLLM_CONTAINER_NAME, {
+              state: "running",
+              dualRole: "head",
+              dualEndpoint: "http://192.168.100.1:8000",
+              dualCluster: "f".repeat(64),
+            })
+          : "",
+    );
+
+    try {
+      expect(isNemoClawManagedVllmRunning()).toBe(true);
+      expect(mocks.dockerCapture).toHaveBeenCalledTimes(1);
+      expect(mocks.dockerCapture.mock.calls[0]?.[1]?.env).toMatchObject({
+        DOCKER_CONTEXT: "default",
+      });
+      expect(mocks.dockerCapture.mock.calls[0]?.[1]?.env).not.toHaveProperty("DOCKER_HOST");
+    } finally {
+      if (previousDockerHost === undefined) delete process.env.DOCKER_HOST;
+      else process.env.DOCKER_HOST = previousDockerHost;
+      if (previousDockerContext === undefined) delete process.env.DOCKER_CONTEXT;
+      else process.env.DOCKER_CONTEXT = previousDockerContext;
+    }
+  });
+
   it.each([
     vllmContainerRow(NEMOCLAW_VLLM_CONTAINER_NAME),
     vllmContainerRow(NEMOCLAW_VLLM_CONTAINER_NAME, { label: "" }),

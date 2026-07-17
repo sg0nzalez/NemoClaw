@@ -696,6 +696,7 @@ describe("Vitest project membership boundary", () => {
       ["test/install-openshell-version-check.test.ts", "installer-integration"],
       ["test/install-preflight-docker-bootstrap.test.ts", "installer-integration"],
       ["test/install-preflight.test.ts", "installer-integration"],
+      ["test/install-station-controller-binding.test.ts", "installer-integration"],
       ["test/install-station-host-preparation.test.ts", "installer-integration"],
       ["test/install-station-pair-preparation.test.ts", "installer-integration"],
       ["test/package-contract/example.test.js", "package-contract"],

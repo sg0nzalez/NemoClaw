@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   areContainersRunning: vi.fn(),
   cleanup: vi.fn(),
+  commitLegacyMigration: vi.fn(),
   dockerCapture: vi.fn(),
   dockerForceRm: vi.fn(),
   dockerImageInspectFormat: vi.fn(),
@@ -31,6 +32,7 @@ const mocks = vi.hoisted(() => ({
   probeHostStorage: vi.fn(),
   runCapture: vi.fn(),
   runCurlProbe: vi.fn(),
+  rollbackLegacyMigration: vi.fn(),
   startManaged: vi.fn(),
   stageModelSnapshot: vi.fn(),
   withLifecycle: vi.fn(),
@@ -79,9 +81,11 @@ vi.mock("./vllm-station-model-staging", () => ({
 vi.mock("./vllm-station-cluster-lifecycle", () => ({
   areDualStationManagedVllmContainersRunning: mocks.areContainersRunning,
   cleanupDualStationManagedVllm: mocks.cleanup,
+  commitDualStationLegacyMigration: mocks.commitLegacyMigration,
   getDualStationManagedVllmBaseUrl: mocks.getManagedBaseUrl,
   preflightDualStationGpuRuntime: mocks.preflightGpuRuntime,
   preflightDualStationManagedVllm: mocks.preflightOwnership,
+  rollbackDualStationLegacyMigration: mocks.rollbackLegacyMigration,
   startDualStationManagedVllm: mocks.startManaged,
   withDualStationManagedVllmLifecycle: mocks.withLifecycle,
 }));
@@ -102,6 +106,13 @@ const API_KEY = "ab".repeat(32);
 const HEAD_ID = "a".repeat(64);
 const WORKER_ID = "b".repeat(64);
 const HEAD_BASE_URL = "http://192.168.100.1:8000";
+const LEGACY_MIGRATION = {
+  backupContainerName: `nemoclaw-vllm-legacy-${"1".repeat(32)}`,
+  legacyContainerId: "c".repeat(64),
+  transactionId: "1".repeat(32),
+  headContainerId: HEAD_ID,
+  workerContainerId: WORKER_ID,
+};
 
 function plan(): DualStationVllmPlan {
   return {
@@ -221,6 +232,8 @@ beforeEach(() => {
   mocks.withLifecycle.mockImplementation(async (operation) => await operation());
   mocks.areContainersRunning.mockReturnValue(true);
   mocks.cleanup.mockReturnValue({ ok: true, removedContainerIds: [] });
+  mocks.commitLegacyMigration.mockResolvedValue({ ok: true, cleanupWarnings: [] });
+  mocks.rollbackLegacyMigration.mockResolvedValue({ ok: true });
   mocks.findUnwritableTreePath.mockReturnValue(null);
   mocks.measureDirectorySizeBytes.mockReturnValue(0n);
   mocks.probeDockerStorage.mockReturnValue({
@@ -568,6 +581,77 @@ describe("dual DGX Station vLLM install orchestration", () => {
     expect(errorSpy).toHaveBeenCalledWith(
       "  vLLM install failed: dual-Station topology changed during download; rerun setup against a stable pair.",
     );
+  });
+
+  it("commits legacy retirement only after readiness, auth, and final pair validation", async () => {
+    mocks.startManaged.mockReturnValue({
+      ok: true,
+      baseUrl: HEAD_BASE_URL,
+      headContainerId: HEAD_ID,
+      workerContainerId: WORKER_ID,
+      reusedExisting: false,
+      legacyMigration: LEGACY_MIGRATION,
+    });
+    const profile = detectVllmProfile({ platform: "station", type: "nvidia" });
+
+    await expect(
+      installVllm(profile!, { hasImage: true, nonInteractive: true, promptFn: vi.fn() }),
+    ).resolves.toEqual({ ok: true });
+
+    expect(mocks.commitLegacyMigration).toHaveBeenCalledWith(plan(), LEGACY_MIGRATION);
+    expect(mocks.commitLegacyMigration.mock.invocationCallOrder[0]).toBeGreaterThan(
+      mocks.areContainersRunning.mock.invocationCallOrder[0],
+    );
+    expect(mocks.commitLegacyMigration.mock.invocationCallOrder[0]).toBeGreaterThan(
+      mocks.runCurlProbe.mock.invocationCallOrder.at(-1) ?? 0,
+    );
+    expect(mocks.rollbackLegacyMigration).not.toHaveBeenCalled();
+    expect(mocks.cleanup).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "readiness",
+    "authentication",
+    "final running check",
+    "commit validation",
+  ])("restores legacy state when external %s fails", async (failure) => {
+    mocks.startManaged.mockReturnValue({
+      ok: true,
+      baseUrl: HEAD_BASE_URL,
+      headContainerId: HEAD_ID,
+      workerContainerId: WORKER_ID,
+      reusedExisting: false,
+      legacyMigration: LEGACY_MIGRATION,
+    });
+    if (failure === "readiness") {
+      mocks.runCurlProbe.mockReturnValue({ ok: false, httpStatus: 503, message: "loading" });
+      mocks.dockerCapture.mockReturnValue("");
+    } else if (failure === "authentication") {
+      mocks.runCurlProbe.mockImplementation((args: string[]) => ({
+        ok: true,
+        httpStatus: 200,
+        message: "ok",
+        body: args.at(-1)?.endsWith("/v1/models")
+          ? JSON.stringify({ data: [{ id: "nvidia/nemotron-3-ultra-550b-a55b" }] })
+          : "",
+      }));
+    } else if (failure === "final running check") {
+      mocks.areContainersRunning.mockReturnValue(false);
+    } else {
+      mocks.commitLegacyMigration.mockResolvedValue({
+        ok: false,
+        reason: "new dual-Station transaction changed before commit",
+      });
+    }
+    const profile = detectVllmProfile({ platform: "station", type: "nvidia" });
+
+    await expect(
+      installVllm(profile!, { hasImage: true, nonInteractive: true, promptFn: vi.fn() }),
+    ).resolves.toEqual({ ok: false });
+
+    expect(mocks.rollbackLegacyMigration).toHaveBeenCalledWith(plan(), LEGACY_MIGRATION);
+    expect(mocks.cleanup).not.toHaveBeenCalled();
+    expect(mocks.commitLegacyMigration.mock.calls.length > 0).toBe(failure === "commit validation");
   });
 
   it("rolls back a new pair when unauthenticated model inventory is exposed", async () => {

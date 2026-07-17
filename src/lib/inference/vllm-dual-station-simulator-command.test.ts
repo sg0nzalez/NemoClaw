@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -10,10 +11,12 @@ import {
   assertDualStationSimulationPlatform,
   buildDualStationSimulationInvocation,
   createSimulationPoisonBin,
+  DUAL_STATION_SIMULATION_FIXTURE_PYTHON_ENV,
   DUAL_STATION_SIMULATION_POISON_EXECUTABLES,
   DUAL_STATION_SIMULATION_SUITES,
   dualStationSimulationEnvironment,
   main,
+  resolveDualStationSimulationFixturePython,
 } from "../../../scripts/simulate-dual-station.mts";
 
 describe("dual-Station simulator command", () => {
@@ -52,6 +55,39 @@ describe("dual-Station simulator command", () => {
     expect(fs.existsSync(poisonBin.directory)).toBe(false);
   });
 
+  it("uses one captured absolute Python only for embedded fixtures", () => {
+    const fixturePython = resolveDualStationSimulationFixturePython();
+    const poisonBin = createSimulationPoisonBin();
+    const env = dualStationSimulationEnvironment(process.env);
+    env.PATH = [poisonBin.directory, env.PATH]
+      .filter((entry): entry is string => Boolean(entry))
+      .join(path.delimiter);
+    env.HOME = poisonBin.homeDirectory;
+    env.TMPDIR = poisonBin.tempDirectory;
+    env[DUAL_STATION_SIMULATION_FIXTURE_PYTHON_ENV] = fixturePython;
+
+    try {
+      expect(path.isAbsolute(fixturePython)).toBe(true);
+      expect(resolveDualStationSimulationFixturePython(env)).toBe(fixturePython);
+
+      const guarded = spawnSync("python3", ["-c", "print('must-not-run')"], {
+        encoding: "utf8",
+        env,
+      });
+      expect(guarded.status, guarded.stderr).toBe(97);
+      expect(guarded.stderr).toContain("simulator blocked external command: python3");
+
+      const fixture = spawnSync(fixturePython, ["-c", "print('fixture-ok')"], {
+        encoding: "utf8",
+        env,
+      });
+      expect(fixture.status, fixture.stderr).toBe(0);
+      expect(fixture.stdout.trim()).toBe("fixture-ok");
+    } finally {
+      poisonBin.cleanup();
+    }
+  });
+
   it("inherits only local process basics and forces live projects off", () => {
     const env = dualStationSimulationEnvironment({
       PATH: "/fixture/bin",
@@ -65,6 +101,7 @@ describe("dual-Station simulator command", () => {
       HF_TOKEN: "should-not-leak",
       NEMOCLAW_DGX_STATION_PEER: "should-not-run",
       NEMOCLAW_DGX_STATION_SSH_BINDING: "should-not-run",
+      [DUAL_STATION_SIMULATION_FIXTURE_PYTHON_ENV]: "/should/not/inherit/python3",
       NEMOCLAW_RUN_BRANCH_VALIDATION_E2E: "1",
       NEMOCLAW_RUN_LIVE_E2E: "1",
       UNRELATED_AMBIENT_VALUE: "should-not-inherit",

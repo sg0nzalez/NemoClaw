@@ -266,13 +266,16 @@ export function stationKnownHostsDigest(raw: string): string {
     if (!line || line.startsWith("#") || /[\u0000\r\n]/.test(line)) continue;
     const fields = line.split(/\s+/);
     const marker = fields[0]?.startsWith("@") ? (fields.shift() ?? "") : "";
+    if (marker !== "" && marker !== "@revoked") {
+      throw new Error("Pinned Station known-hosts marker is not allowed");
+    }
     if (fields.length < 3) throw new Error("Pinned Station known-hosts data is invalid");
     const [_hosts, keyType, keyData] = fields;
     if (!SSH_KEY_TYPE_PATTERN.test(keyType) || !SSH_KEY_DATA_PATTERN.test(keyData)) {
       throw new Error("Pinned Station known-hosts key is invalid");
     }
     keys.add(`${marker}|${keyType}|${keyData}`);
-    if (marker !== "@revoked") positiveKeys += 1;
+    if (marker === "") positiveKeys += 1;
   }
   if (keys.size === 0 || positiveKeys === 0) {
     throw new Error("Pinned Station known-hosts data has no trusted key");
@@ -371,7 +374,14 @@ function renderSshWrapper(binding: PinnedStationEndpoint & { knownHostsSha256: s
 set -Eeuo pipefail
 readonly known_hosts=${shellQuote(binding.knownHostsFile)}
 readonly expected_sha256=${shellQuote(binding.knownHostsSha256)}
-actual_sha256="$(/usr/bin/sha256sum < "$known_hosts")" || exit 255
+if [[ -x /usr/bin/sha256sum ]]; then
+  actual_sha256="$(/usr/bin/sha256sum < "$known_hosts")" || exit 255
+elif [[ -x /usr/bin/shasum ]]; then
+  actual_sha256="$(/usr/bin/shasum -a 256 < "$known_hosts")" || exit 255
+else
+  printf '%s\n' 'NemoClaw could not verify the dual-Station SSH host-key pin.' >&2
+  exit 255
+fi
 actual_sha256="${"${actual_sha256%% *}"}"
 if [[ "$actual_sha256" != "$expected_sha256" ]]; then
   printf '%s\n' 'NemoClaw refused a changed dual-Station SSH host-key pin.' >&2

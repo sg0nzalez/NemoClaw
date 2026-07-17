@@ -11,7 +11,11 @@ import { DUAL_STATION_VLLM_API_KEY_PATTERN, loadDualStationVllmApiKey } from "./
 import { buildLocalDualStationDockerEnv, buildRemoteVllmDockerEnv } from "./vllm-docker-env";
 import { buildNemotronUltraDistributedServeCommand } from "./vllm-models";
 import { DUAL_STATION_VLLM_RUNTIME, type DualStationVllmPlan } from "./vllm-station-cluster";
-import { withDualStationVllmLifecycleLock } from "./vllm-station-lifecycle-lock";
+import {
+  assertDualStationControllerAccount,
+  readDualStationControllerUid,
+  withDualStationVllmLifecycleLock,
+} from "./vllm-station-lifecycle-lock";
 import {
   assertDualStationSshBindingFiles,
   type DualStationSshBinding,
@@ -56,6 +60,11 @@ const TRANSACTION_ID_PATTERN = /^[a-f0-9]{32}$/;
 const GPU_SMOKE_CONTAINER_PREFIX = "nemoclaw-vllm-gpu-smoke";
 const DUAL_STATION_VLLM_LAUNCH_SCHEMA = "1";
 const VLLM_FINGERPRINT_CONTEXT = "nemoclaw-dual-station-vllm-api-key\0";
+// Compatibility bridge for schema-less single-Station Ultra containers from
+// the v0.0.86 rollback window before dual launch schema 1.
+// Do not add future image digests; retire this branch when v0.0.86 support ends.
+const LEGACY_SINGLE_STATION_MIGRATION_IMAGE =
+  "vllm/vllm-openai@sha256:0fec7ec5f3e6bc168e54899935fb0557da908a4832a1dbc88e2debcf2f889416";
 
 export type DualStationVllmRole = "head" | "worker";
 
@@ -85,6 +94,9 @@ export interface DualStationVllmLifecycleDeps {
   buildRemoteDockerEnv(binding: DualStationSshBinding): Record<string, string>;
   createProbeNonce(): string;
   createTransactionId(): string;
+  effectiveControllerUid(): number | null;
+  readControllerUid(): number;
+  onManagedHeadObserved?(): void;
   waitBeforeReconcile(ms: number): Promise<void>;
   withLifecycleLock<T>(operation: () => Promise<T> | T): Promise<T>;
   loadApiKey(): string | null;
@@ -96,6 +108,14 @@ export interface DualStationVllmStartConfig {
   apiKey: string;
 }
 
+export interface DualStationLegacyMigration {
+  backupContainerName: string;
+  legacyContainerId: string;
+  transactionId: string;
+  headContainerId: string;
+  workerContainerId: string;
+}
+
 export type StartDualStationVllmResult =
   | {
       ok: true;
@@ -104,6 +124,8 @@ export type StartDualStationVllmResult =
       workerContainerId: string;
       /** True when an already-running exact owned pair was left untouched. */
       reusedExisting: boolean;
+      /** Present until the caller commits or rolls back external validation. */
+      legacyMigration?: DualStationLegacyMigration;
     }
   | { ok: false; reason: string; rollbackErrors: string[] };
 
@@ -112,6 +134,14 @@ export type CleanupDualStationVllmResult =
   | { ok: false; reason: string };
 
 export type PreflightDualStationVllmResult = { ok: true } | { ok: false; reason: string };
+
+export type CommitDualStationLegacyMigrationResult =
+  | { ok: true; cleanupWarnings: string[] }
+  | { ok: false; reason: string };
+
+export type RollbackDualStationLegacyMigrationResult =
+  | { ok: true }
+  | { ok: false; rollbackErrors: string[] };
 
 type ManagedContainerSpec = {
   role: DualStationVllmRole;
@@ -137,6 +167,12 @@ type ManagedContainerInspection =
   | { kind: "legacy-managed"; containerId: string; running: boolean }
   | { kind: "foreign" | "ambiguous" | "unknown" };
 
+type LegacyHeadCutover = {
+  originalSpec: ManagedContainerSpec;
+  backupSpec: ManagedContainerSpec;
+  containerId: string;
+};
+
 type GpuSmokeSpec = {
   role: DualStationVllmRole;
   containerName: string;
@@ -159,6 +195,9 @@ const DEFAULT_DEPS: DualStationVllmLifecycleDeps = {
   buildRemoteDockerEnv: buildRemoteVllmDockerEnv,
   createProbeNonce: () => randomBytes(16).toString("hex"),
   createTransactionId: () => randomBytes(16).toString("hex"),
+  effectiveControllerUid: () => process.getuid?.() ?? null,
+  readControllerUid: readDualStationControllerUid,
+  onManagedHeadObserved: () => undefined,
   waitBeforeReconcile: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   withLifecycleLock: withDualStationVllmLifecycleLock,
   loadApiKey: loadDualStationVllmApiKey,
@@ -553,6 +592,15 @@ function specsForPlan(
   config?: DualStationVllmStartConfig,
 ): { head: ManagedContainerSpec; worker: ManagedContainerSpec } {
   assertSafePlan(plan);
+  const controllerUid = assertDualStationControllerAccount(
+    deps.readControllerUid,
+    deps.effectiveControllerUid,
+  );
+  if (controllerUid !== plan.local.uid) {
+    throw new Error(
+      `Dual-Station lifecycle controller UID must match probed local UID ${String(plan.local.uid)}`,
+    );
+  }
   const clusterId = clusterIdForPlan(plan);
   const apiKeyFingerprint = config ? dualStationVllmApiKeyFingerprint(config.apiKey) : null;
   return {
@@ -629,6 +677,7 @@ function inspectRows(
 function inspectManagedContainer(
   spec: ManagedContainerSpec,
   deps: DualStationVllmLifecycleDeps,
+  options: { allowStoppedLegacy?: boolean } = {},
 ): ManagedContainerInspection {
   const rows = inspectRows(spec.name, spec.env, deps);
   if (rows === null) return { kind: "unknown" };
@@ -656,6 +705,8 @@ function inspectManagedContainer(
     spec.role === "head" &&
     name === spec.name &&
     image === spec.image &&
+    image === LEGACY_SINGLE_STATION_MIGRATION_IMAGE &&
+    (state === "running" || (options.allowStoppedLegacy && state === "exited")) &&
     managed === "true" &&
     !role &&
     !endpoint &&
@@ -916,6 +967,189 @@ function removeExact(
   } catch {
     return false;
   }
+}
+
+function runExactContainerMutation(
+  spec: ManagedContainerSpec,
+  args: readonly string[],
+  deps: DualStationVllmLifecycleDeps,
+): void {
+  deps.dockerCapture(["container", ...args], {
+    env: spec.env,
+    timeout: DOCKER_MUTATION_TIMEOUT_MS,
+  });
+}
+
+function exactLegacyGeneration(
+  spec: ManagedContainerSpec,
+  containerId: string,
+  deps: DualStationVllmLifecycleDeps,
+): Extract<ManagedContainerInspection, { kind: "legacy-managed" }> | null {
+  const inspection = inspectManagedContainer(spec, deps, { allowStoppedLegacy: true });
+  return inspection.kind === "legacy-managed" && inspection.containerId === containerId
+    ? inspection
+    : null;
+}
+
+function restoreLegacyHead(
+  cutover: LegacyHeadCutover,
+  deps: DualStationVllmLifecycleDeps,
+): string | null {
+  let original = exactLegacyGeneration(cutover.originalSpec, cutover.containerId, deps);
+  let backup = exactLegacyGeneration(cutover.backupSpec, cutover.containerId, deps);
+
+  if (original && backup) {
+    return "legacy head restoration found the exact container ID under two names";
+  }
+  if (!original) {
+    if (!backup) return "legacy head restoration could not find the exact owned container ID";
+    if (inspectManagedContainer(cutover.originalSpec, deps).kind !== "absent") {
+      return "legacy head restoration found the original name occupied";
+    }
+    try {
+      runExactContainerMutation(
+        cutover.backupSpec,
+        ["rename", cutover.containerId, cutover.originalSpec.name],
+        deps,
+      );
+    } catch {
+      // Docker may commit a rename before its client reports failure. Reconcile
+      // the exact generation below instead of trusting the command response.
+    }
+    original = exactLegacyGeneration(cutover.originalSpec, cutover.containerId, deps);
+    backup = exactLegacyGeneration(cutover.backupSpec, cutover.containerId, deps);
+    if (!original || backup) {
+      return "legacy head restoration could not restore the exact original container name";
+    }
+  }
+
+  if (!original.running) {
+    try {
+      runExactContainerMutation(cutover.originalSpec, ["start", cutover.containerId], deps);
+    } catch {
+      // As with rename, validate the exact postcondition rather than the Docker
+      // client's response so a committed start is not reported as lost.
+    }
+    original = exactLegacyGeneration(cutover.originalSpec, cutover.containerId, deps);
+  }
+  return original?.running
+    ? null
+    : "legacy head restoration could not restart the exact owned container ID";
+}
+
+function prepareLegacyHeadCutover(
+  spec: ManagedContainerSpec,
+  containerId: string,
+  transactionId: string,
+  deps: DualStationVllmLifecycleDeps,
+):
+  | { ok: true; cutover: LegacyHeadCutover }
+  | { ok: false; reason: string; rollbackErrors: string[] } {
+  const cutover: LegacyHeadCutover = {
+    originalSpec: spec,
+    backupSpec: { ...spec, name: `${spec.name}-legacy-${transactionId}` },
+    containerId,
+  };
+  const fail = (reason: string) => {
+    const restoreError = restoreLegacyHead(cutover, deps);
+    return {
+      ok: false as const,
+      reason,
+      rollbackErrors: restoreError ? [restoreError] : [],
+    };
+  };
+
+  const original = exactLegacyGeneration(spec, containerId, deps);
+  if (!original?.running) {
+    return {
+      ok: false,
+      reason: "legacy head changed before transactional cutover",
+      rollbackErrors: [],
+    };
+  }
+  if (inspectManagedContainer(cutover.backupSpec, deps).kind !== "absent") {
+    return {
+      ok: false,
+      reason: "legacy head backup name is not absent",
+      rollbackErrors: [],
+    };
+  }
+
+  try {
+    runExactContainerMutation(spec, ["rename", containerId, cutover.backupSpec.name], deps);
+  } catch {
+    // Reconcile below: rename can succeed even when the client times out.
+  }
+  const renamed = exactLegacyGeneration(cutover.backupSpec, containerId, deps);
+  if (!renamed?.running || inspectManagedContainer(cutover.originalSpec, deps).kind !== "absent") {
+    return fail("failed to preserve the exact legacy head under its transaction backup name");
+  }
+
+  try {
+    runExactContainerMutation(cutover.backupSpec, ["stop", "--time", "30", containerId], deps);
+  } catch {
+    // Reconcile and restore below if the exact generation is not stopped.
+  }
+  const stopped = exactLegacyGeneration(cutover.backupSpec, containerId, deps);
+  if (!stopped || stopped.running) {
+    return fail("failed to stop the preserved exact legacy head for cutover");
+  }
+  return { ok: true, cutover };
+}
+
+function rollbackNewPairAndRestoreLegacy(
+  entries: readonly { spec: ManagedContainerSpec; containerId: string }[],
+  transactionId: string,
+  cutover: LegacyHeadCutover,
+  deps: DualStationVllmLifecycleDeps,
+): string[] {
+  const errors = rollbackExact(entries, transactionId, deps);
+  const restoreError = restoreLegacyHead(cutover, deps);
+  if (restoreError) errors.push(restoreError);
+  return errors;
+}
+
+function finalizeLegacyHeadCutover(
+  cutover: LegacyHeadCutover,
+  deps: DualStationVllmLifecycleDeps,
+): string | null {
+  const initial = inspectManagedContainer(cutover.backupSpec, deps, {
+    allowStoppedLegacy: true,
+  });
+  if (initial.kind === "absent") return null;
+  const backup = exactLegacyGeneration(cutover.backupSpec, cutover.containerId, deps);
+  if (!backup || backup.running) {
+    return "could not verify the stopped exact legacy backup for post-commit cleanup";
+  }
+  const removed = removeExact(cutover.backupSpec, cutover.containerId, deps);
+  const after = inspectManagedContainer(cutover.backupSpec, deps);
+  // A Docker client error can race a committed removal. Accept either the
+  // successful exact-ID mutation or an exact-name absence on reconciliation.
+  return removed || after.kind === "absent"
+    ? null
+    : "could not remove the stopped exact legacy backup after the new pair committed";
+}
+
+function legacyCutoverFromMigration(
+  specs: ReturnType<typeof specsForPlan>,
+  migration: DualStationLegacyMigration,
+): LegacyHeadCutover | null {
+  if (
+    !TRANSACTION_ID_PATTERN.test(migration.transactionId) ||
+    !DOCKER_CONTAINER_ID_PATTERN.test(migration.legacyContainerId) ||
+    !DOCKER_CONTAINER_ID_PATTERN.test(migration.headContainerId) ||
+    !DOCKER_CONTAINER_ID_PATTERN.test(migration.workerContainerId) ||
+    new Set([migration.legacyContainerId, migration.headContainerId, migration.workerContainerId])
+      .size !== 3 ||
+    migration.backupContainerName !== `${specs.head.name}-legacy-${migration.transactionId}`
+  ) {
+    return null;
+  }
+  return {
+    originalSpec: specs.head,
+    backupSpec: { ...specs.head, name: migration.backupContainerName },
+    containerId: migration.legacyContainerId,
+  };
 }
 
 function removeTransactionExact(
@@ -1198,10 +1432,9 @@ export async function startDualStationManagedVllm(
         [specs.head, existingHead],
         [specs.worker, existingWorker],
       ] as const) {
-        if (
-          (inspection.kind === "managed" || inspection.kind === "legacy-managed") &&
-          !removeExact(spec, inspection.containerId, deps)
-        ) {
+        // A legacy head remains live until the newly created peer worker is
+        // proven running. Its cutover is handled transactionally below.
+        if (inspection.kind === "managed" && !removeExact(spec, inspection.containerId, deps)) {
           return {
             ok: false,
             reason: `failed to remove existing owned ${spec.role} container`,
@@ -1222,6 +1455,31 @@ export async function startDualStationManagedVllm(
         return { ok: false, reason: "worker container failed to start", rollbackErrors };
       }
 
+      let legacyCutover: LegacyHeadCutover | null = null;
+      if (existingHead.kind === "legacy-managed") {
+        const prepared = prepareLegacyHeadCutover(
+          specs.head,
+          existingHead.containerId,
+          transactionId,
+          deps,
+        );
+        if (!prepared.ok) {
+          return {
+            ok: false,
+            reason: prepared.reason,
+            rollbackErrors: [
+              ...rollbackExact(
+                [{ spec: specs.worker, containerId: worker.containerId }],
+                transactionId,
+                deps,
+              ),
+              ...prepared.rollbackErrors,
+            ],
+          };
+        }
+        legacyCutover = prepared.cutover;
+      }
+
       const head = await startOne(plan, specs.head, config, transactionId, deps);
       if (!head.ok) {
         const rollback = [
@@ -1231,7 +1489,9 @@ export async function startDualStationManagedVllm(
         return {
           ok: false,
           reason: "head container failed to start",
-          rollbackErrors: rollbackExact(rollback, transactionId, deps),
+          rollbackErrors: legacyCutover
+            ? rollbackNewPairAndRestoreLegacy(rollback, transactionId, legacyCutover, deps)
+            : rollbackExact(rollback, transactionId, deps),
         };
       }
 
@@ -1249,17 +1509,16 @@ export async function startDualStationManagedVllm(
         finalWorker.transactionId !== transactionId ||
         finalWorker.containerId !== worker.containerId
       ) {
+        const rollback = [
+          { spec: specs.head, containerId: head.containerId },
+          { spec: specs.worker, containerId: worker.containerId },
+        ];
         return {
           ok: false,
           reason: "dual-Station containers did not remain running",
-          rollbackErrors: rollbackExact(
-            [
-              { spec: specs.head, containerId: head.containerId },
-              { spec: specs.worker, containerId: worker.containerId },
-            ],
-            transactionId,
-            deps,
-          ),
+          rollbackErrors: legacyCutover
+            ? rollbackNewPairAndRestoreLegacy(rollback, transactionId, legacyCutover, deps)
+            : rollbackExact(rollback, transactionId, deps),
         };
       }
 
@@ -1269,6 +1528,17 @@ export async function startDualStationManagedVllm(
         headContainerId: head.containerId,
         workerContainerId: worker.containerId,
         reusedExisting: false,
+        ...(legacyCutover
+          ? {
+              legacyMigration: {
+                backupContainerName: legacyCutover.backupSpec.name,
+                legacyContainerId: legacyCutover.containerId,
+                transactionId,
+                headContainerId: head.containerId,
+                workerContainerId: worker.containerId,
+              },
+            }
+          : {}),
       };
     });
   } catch (error) {
@@ -1276,6 +1546,73 @@ export async function startDualStationManagedVllm(
       ok: false,
       reason: `dual-Station lifecycle lock failed: ${(error as Error).message}`,
       rollbackErrors: [],
+    };
+  }
+}
+
+/** Retire the preserved legacy generation only after external readiness/auth commit. */
+export async function commitDualStationLegacyMigration(
+  plan: DualStationVllmPlan,
+  migration: DualStationLegacyMigration,
+  overrides: Partial<DualStationVllmLifecycleDeps> = {},
+): Promise<CommitDualStationLegacyMigrationResult> {
+  const deps = depsWith(overrides);
+  try {
+    const specs = specsForPlan(plan, deps);
+    const cutover = legacyCutoverFromMigration(specs, migration);
+    if (!cutover) return { ok: false, reason: "legacy migration handle is invalid" };
+    return await deps.withLifecycleLock(() => {
+      const head = inspectManagedContainer(specs.head, deps);
+      const worker = inspectManagedContainer(specs.worker, deps);
+      if (
+        head.kind !== "managed" ||
+        !head.running ||
+        !head.reusable ||
+        head.containerId !== migration.headContainerId ||
+        head.transactionId !== migration.transactionId ||
+        worker.kind !== "managed" ||
+        !worker.running ||
+        !worker.reusable ||
+        worker.containerId !== migration.workerContainerId ||
+        worker.transactionId !== migration.transactionId
+      ) {
+        return { ok: false, reason: "new dual-Station transaction changed before commit" };
+      }
+      const warning = finalizeLegacyHeadCutover(cutover, deps);
+      return { ok: true, cleanupWarnings: warning ? [warning] : [] };
+    });
+  } catch (error) {
+    return { ok: false, reason: `legacy migration commit failed: ${(error as Error).message}` };
+  }
+}
+
+/** Remove only the new transaction and restore its exact preserved legacy generation. */
+export async function rollbackDualStationLegacyMigration(
+  plan: DualStationVllmPlan,
+  migration: DualStationLegacyMigration,
+  overrides: Partial<DualStationVllmLifecycleDeps> = {},
+): Promise<RollbackDualStationLegacyMigrationResult> {
+  const deps = depsWith(overrides);
+  try {
+    const specs = specsForPlan(plan, deps);
+    const cutover = legacyCutoverFromMigration(specs, migration);
+    if (!cutover) return { ok: false, rollbackErrors: ["legacy migration handle is invalid"] };
+    return await deps.withLifecycleLock(() => {
+      const rollbackErrors = rollbackNewPairAndRestoreLegacy(
+        [
+          { spec: specs.head, containerId: migration.headContainerId },
+          { spec: specs.worker, containerId: migration.workerContainerId },
+        ],
+        migration.transactionId,
+        cutover,
+        deps,
+      );
+      return rollbackErrors.length === 0 ? { ok: true } : { ok: false, rollbackErrors };
+    });
+  } catch (error) {
+    return {
+      ok: false,
+      rollbackErrors: [`legacy migration rollback failed: ${(error as Error).message}`],
     };
   }
 }
@@ -1412,11 +1749,12 @@ export function getDualStationManagedVllmBaseUrl(
     !SAFE_GPU_UUID_PATTERN.test(gpuUuid) ||
     launchSchema !== DUAL_STATION_VLLM_LAUNCH_SCHEMA ||
     !SHA256_HEX_PATTERN.test(launchContract) ||
-    !SHA256_HEX_PATTERN.test(apiKeyFingerprint) ||
     !TRANSACTION_ID_PATTERN.test(transactionId)
   ) {
     return null;
   }
+  deps.onManagedHeadObserved?.();
+  if (!SHA256_HEX_PATTERN.test(apiKeyFingerprint)) return null;
   let apiKey: string | null;
   try {
     apiKey = deps.loadApiKey();

@@ -2,10 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import assert from "node:assert/strict";
-import type { SpawnSyncOptionsWithStringEncoding } from "node:child_process";
+import { type SpawnSyncOptionsWithStringEncoding, spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { resolveDualStationSimulationFixturePython } from "../../../scripts/simulate-dual-station.mts";
 
 import { buildRemoteVllmDockerEnv } from "./vllm-docker-env";
 import {
@@ -63,6 +67,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   sshFixture.cleanup();
 });
 
@@ -825,19 +830,140 @@ describe("probe command boundary", () => {
     expect(args.join(" ")).not.toMatch(/keyscan|accept-new|StrictHostKeyChecking=no/);
     expect(options.input).toEqual(expect.stringContaining('docker", "info'));
     expect(options.input).toEqual(expect.stringContaining("/sys/firmware/devicetree/base/model"));
-    expect(options.input).toEqual(expect.stringContaining("shard_path.is_absolute()"));
-    expect(options.input).toEqual(expect.stringContaining('shutil.which("rsync")'));
-    expect(options.input).toEqual(expect.stringContaining('"directoryExists"'));
-    expect(options.input).toEqual(expect.stringContaining("len(shards) != 113"));
-    expect(options.input).toEqual(
-      expect.stringContaining("observed_tensor_size != expected_total_size"),
-    );
-    expect(options.input).toEqual(expect.stringContaining('"infiniband_verbs"'));
-    expect(options.input).toEqual(expect.stringContaining('re.fullmatch(r"uverbs[0-9]+"'));
-    expect(options.input).toEqual(expect.stringContaining("len(names) != 1"));
-    expect(options.input).toEqual(expect.stringContaining("stat.S_ISCHR"));
     expect(options.timeout).toBe(20_000);
     expect(options.maxBuffer).toBe(1024 * 1024);
+  });
+
+  it("executes the host probe and reports malformed weights plus missing staging tools", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-station-probe-fixture-"));
+    const home = path.join(root, "home");
+    const bin = path.join(root, "bin");
+    const snapshot = snapshotPath(home);
+    fs.mkdirSync(snapshot, { mode: 0o700, recursive: true });
+    fs.mkdirSync(bin, { mode: 0o700 });
+    fs.writeFileSync(path.join(snapshot, "config.json"), "{}");
+    fs.writeFileSync(path.join(snapshot, "tokenizer.json"), "{}");
+    const shards = Array.from(
+      { length: 113 },
+      (_, index) => `model-${String(index + 1).padStart(5, "0")}-of-00113.safetensors`,
+    );
+    fs.writeFileSync(
+      path.join(snapshot, "model.safetensors.index.json"),
+      JSON.stringify({
+        metadata: { total_size: 1 },
+        weight_map: Object.fromEntries(
+          shards.map((shard, index) => [`model.layers.${String(index)}.weight`, shard]),
+        ),
+      }),
+    );
+    fs.writeFileSync(path.join(snapshot, shards[0]), "malformed");
+
+    let probeScript = "";
+    const recordingSpawn = vi.fn(
+      (
+        _file: string,
+        _args: readonly string[],
+        options: SpawnSyncOptionsWithStringEncoding,
+      ): StationProbeCommandResult => {
+        probeScript = typeof options.input === "string" ? options.input : "";
+        return command({});
+      },
+    );
+    createStationClusterProbeDeps(recordingSpawn).probeLocalHost();
+    const python = resolveDualStationSimulationFixturePython();
+
+    try {
+      const executed = spawnSync(python, ["-"], {
+        encoding: "utf8",
+        env: { ...process.env, HOME: home, PATH: bin },
+        input: probeScript,
+        timeout: 20_000,
+      });
+      expect(executed.status, executed.stderr).toBe(0);
+      const observed = JSON.parse(executed.stdout) as StationHostProbe;
+      expect(observed.modelSnapshot).toMatchObject({
+        complete: false,
+        shardCount: 113,
+        reason: expect.stringContaining("weight shards are unreadable or malformed"),
+      });
+      expect(observed.rsyncAvailable).toBe(false);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("executes the host probe and refuses a non-character uverbs device", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-station-verbs-fixture-"));
+    const home = path.join(root, "home");
+    const bin = path.join(root, "bin");
+    fs.mkdirSync(home, { mode: 0o700 });
+    fs.mkdirSync(bin, { mode: 0o700 });
+
+    let probeScript = "";
+    const recordingSpawn = vi.fn(
+      (
+        _file: string,
+        _args: readonly string[],
+        options: SpawnSyncOptionsWithStringEncoding,
+      ): StationProbeCommandResult => {
+        probeScript = typeof options.input === "string" ? options.input : "";
+        return command({});
+      },
+    );
+    createStationClusterProbeDeps(recordingSpawn).probeLocalHost();
+    const python = resolveDualStationSimulationFixturePython();
+    const fixturePrelude = String.raw`
+import pathlib
+import stat as fixture_stat
+import subprocess
+
+class FixtureResult:
+    def __init__(self, returncode, stdout=""):
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = ""
+
+original_iterdir = pathlib.Path.iterdir
+original_stat = pathlib.Path.stat
+
+def fixture_iterdir(candidate):
+    if str(candidate) == "/sys/class/infiniband/mlx5_0/device/infiniband_verbs":
+        return iter([candidate / "uverbs0"])
+    return original_iterdir(candidate)
+
+def fixture_path_stat(candidate, *args, **kwargs):
+    if str(candidate) == "/dev/infiniband/uverbs0":
+        return type("FixtureStat", (), {"st_mode": fixture_stat.S_IFREG | 0o600})()
+    return original_stat(candidate, *args, **kwargs)
+
+def fixture_run(argv, **_kwargs):
+    if argv and argv[0] == "ibdev2netdev":
+        return FixtureResult(0, "mlx5_0 port 1 ==> cx8p0 (Up)")
+    return FixtureResult(127)
+
+pathlib.Path.iterdir = fixture_iterdir
+pathlib.Path.stat = fixture_path_stat
+subprocess.run = fixture_run
+`;
+
+    try {
+      const executed = spawnSync(python, ["-"], {
+        encoding: "utf8",
+        env: { ...process.env, HOME: home, PATH: bin },
+        input: `${fixturePrelude}\n${probeScript}`,
+        timeout: 20_000,
+      });
+      expect(executed.status, executed.stderr).toBe(0);
+      const observed = JSON.parse(executed.stdout) as StationHostProbe;
+      expect(observed.rails).toHaveLength(1);
+      expect(observed.rails[0]).toMatchObject({
+        rdmaDevice: "mlx5_0",
+        netdev: "cx8p0",
+        uverbsDevice: "",
+      });
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("removes OPENSHELL secrets from the direct SSH probe environment", () => {
@@ -856,7 +982,6 @@ describe("probe command boundary", () => {
     const [, , options] = spawn.mock.calls[0];
     expect(options.env?.OPENSHELL_GATEWAY_AUTH_TOKEN).toBeUndefined();
     expect(options.env?.PATH).toBeTruthy();
-    vi.unstubAllEnvs();
   });
 
   it("pins the local hardware probe to Docker's physical default context", () => {

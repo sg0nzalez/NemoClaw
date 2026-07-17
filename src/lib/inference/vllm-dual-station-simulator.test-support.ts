@@ -260,6 +260,8 @@ export function createDualStationLifecycleSimulator() {
     }),
     createProbeNonce: () => (++nonceCounter).toString(16).padStart(32, "0"),
     createTransactionId: () => (++transactionCounter).toString(16).padStart(32, "0"),
+    effectiveControllerUid: () => stationHost("local").uid,
+    readControllerUid: () => stationHost("local").uid,
     waitBeforeReconcile: async () => undefined,
     withLifecycleLock: async <T>(operation: () => Promise<T> | T): Promise<T> => await operation(),
     loadApiKey: () => DUAL_STATION_SIMULATOR_API_KEY,

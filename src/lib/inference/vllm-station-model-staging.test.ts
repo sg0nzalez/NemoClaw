@@ -1,12 +1,19 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { resolveDualStationSimulationFixturePython } from "../../../scripts/simulate-dual-station.mts";
+
 import { DUAL_STATION_VLLM_RUNTIME, type DualStationVllmPlan } from "./vllm-station-cluster";
 import {
+  type ModelStagingCommandOptions,
   type ModelStagingCommandResult,
   stageDualStationModelSnapshot,
 } from "./vllm-station-model-staging";
@@ -16,9 +23,30 @@ import {
 } from "./vllm-station-ssh-binding.test-support";
 
 let sshFixture: DualStationSshBindingFixture;
+let mockedLocalRoot: string;
+let mockedLocalHome: string;
+let mockedLocalModelRoot: string;
+
+function modelRootForHome(home: string): string {
+  return path.join(
+    home,
+    ".cache",
+    "huggingface",
+    "hub",
+    `models--${DUAL_STATION_VLLM_RUNTIME.modelId.replace("/", "--")}`,
+  );
+}
+
+function snapshotForHome(home: string): string {
+  return path.join(modelRootForHome(home), "snapshots", DUAL_STATION_VLLM_RUNTIME.modelRevision);
+}
 
 beforeEach(() => {
   sshFixture = createDualStationSshBindingFixture();
+  mockedLocalRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-model-staging-test-"));
+  mockedLocalHome = path.join(mockedLocalRoot, "home");
+  mockedLocalModelRoot = modelRootForHome(mockedLocalHome);
+  fs.mkdirSync(mockedLocalModelRoot, { mode: 0o700, recursive: true });
 });
 
 function plan(): DualStationVllmPlan {
@@ -27,7 +55,7 @@ function plan(): DualStationVllmPlan {
     runtime: DUAL_STATION_VLLM_RUNTIME,
     local: {
       hostname: "station-a",
-      home: "/home/nvidia",
+      home: mockedLocalHome,
       uid: 1000,
       gid: 1000,
       gpu: { index: 0, name: "NVIDIA GB300", uuid: "GPU-a" },
@@ -93,10 +121,83 @@ function result(stdout = "", status = 0): ModelStagingCommandResult {
 function manifest(): string {
   return JSON.stringify({
     schemaVersion: 1,
-    files: [{ path: "config.json", size: 2, sha256: "a".repeat(64) }],
+    files: [
+      {
+        path: "config.json",
+        size: 2,
+        sha256: createHash("sha256").update("{}").digest("hex"),
+      },
+    ],
     directories: [],
     totalBytes: 2,
   });
+}
+
+function peerStagingForPlan(value: DualStationVllmPlan): string {
+  const identity = [
+    "nemoclaw-dual-station-model-staging-v1",
+    DUAL_STATION_VLLM_RUNTIME.image,
+    DUAL_STATION_VLLM_RUNTIME.modelId,
+    DUAL_STATION_VLLM_RUNTIME.modelRevision,
+    DUAL_STATION_VLLM_RUNTIME.servedModelId,
+    String(DUAL_STATION_VLLM_RUNTIME.tensorParallelSize),
+    String(DUAL_STATION_VLLM_RUNTIME.nodeCount),
+    value.local.gpu.uuid,
+    value.peer.gpu.uuid,
+  ].join("\0");
+  const transaction = createHash("sha256").update(identity, "utf8").digest("hex").slice(0, 32);
+  return path.join(
+    path.dirname(snapshotForHome(value.peer.home)),
+    `.nemoclaw-staging-${transaction}`,
+  );
+}
+
+function sufficientStatfs() {
+  return vi.fn().mockResolvedValue({ bavail: 1024n * 1024n * 1024n, bsize: 4096n });
+}
+
+function runPython(
+  args: readonly string[],
+  options: ModelStagingCommandOptions,
+): ModelStagingCommandResult {
+  const completed = spawnSync(resolveDualStationSimulationFixturePython(), [...args], {
+    encoding: "utf8",
+    env: options.env,
+    input: options.input,
+    timeout: options.timeoutMs,
+  });
+  return {
+    status: completed.status,
+    stdout: completed.stdout ?? "",
+    stderr: completed.stderr ?? "",
+    error: completed.error?.message,
+    timedOut: (completed.error as NodeJS.ErrnoException | undefined)?.code === "ETIMEDOUT",
+  };
+}
+
+function createLocalSnapshotFixture(): { root: string; home: string; snapshot: string } {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-model-snapshot-"));
+  const home = path.join(root, "home");
+  const snapshot = snapshotForHome(home);
+  fs.mkdirSync(snapshot, { mode: 0o700, recursive: true });
+  const shards = Array.from(
+    { length: 113 },
+    (_, index) => `model-${String(index + 1).padStart(5, "0")}-of-00113.safetensors`,
+  );
+  for (const [index, shard] of shards.entries()) {
+    fs.writeFileSync(path.join(snapshot, shard), `shard-${String(index)}`);
+  }
+  fs.writeFileSync(path.join(snapshot, "config.json"), "{}");
+  fs.writeFileSync(path.join(snapshot, "tokenizer.json"), "{}");
+  fs.writeFileSync(
+    path.join(snapshot, "model.safetensors.index.json"),
+    JSON.stringify({
+      weight_map: Object.fromEntries(
+        shards.map((shard, index) => [`model.layers.${String(index)}.weight`, shard]),
+      ),
+    }),
+  );
+  return { root, home, snapshot };
 }
 
 function successfulTransferRunner() {
@@ -104,18 +205,25 @@ function successfulTransferRunner() {
     .fn()
     .mockResolvedValueOnce(result(manifest()))
     .mockResolvedValueOnce(result('{"state":"transfer"}'))
+    .mockResolvedValueOnce(result(manifest()))
+    .mockResolvedValueOnce(result('{"state":"transfer"}'))
     .mockResolvedValueOnce(result())
     .mockResolvedValueOnce(result('{"state":"ready"}'));
 }
 
 function stagingSuffix(runCommand: ReturnType<typeof successfulTransferRunner>): string {
-  const destination = String(runCommand.mock.calls[2][1].at(-1));
+  const destination = String(runCommand.mock.calls[4][1].at(-1));
   return destination.match(/\.nemoclaw-staging-[a-f0-9]{32}/)?.[0] ?? "";
 }
 
 afterEach(() => {
+  const stagingLeftovers = fs
+    .readdirSync(mockedLocalModelRoot)
+    .filter((entry) => entry.startsWith(".nemoclaw-vllm-model-staging-"));
   vi.unstubAllEnvs();
   sshFixture.cleanup();
+  fs.rmSync(mockedLocalRoot, { force: true, recursive: true });
+  expect(stagingLeftovers).toEqual([]);
 });
 
 describe("dual-Station pinned model staging", () => {
@@ -123,27 +231,29 @@ describe("dual-Station pinned model staging", () => {
     vi.stubEnv("OPENSHELL_GATEWAY_AUTH_TOKEN", "must-not-cross-ssh");
     vi.stubEnv("HF_TOKEN", "must-not-cross-ssh");
     const runCommand = successfulTransferRunner();
+    const statfs = sufficientStatfs();
 
-    await expect(stageDualStationModelSnapshot(plan(), { runCommand })).resolves.toEqual({
+    await expect(stageDualStationModelSnapshot(plan(), { runCommand, statfs })).resolves.toEqual({
       ok: true,
       transferred: true,
     });
 
-    expect(runCommand).toHaveBeenCalledTimes(4);
+    expect(runCommand).toHaveBeenCalledTimes(6);
     expect(runCommand.mock.calls.map((call) => call[0])).toEqual([
+      "python3",
+      "ssh",
       "python3",
       "ssh",
       "rsync",
       "ssh",
     ]);
-    const localArgs = runCommand.mock.calls[0][1] as string[];
-    expect(localArgs).toEqual([
-      "-",
-      `/home/nvidia/.cache/huggingface/hub/models--${DUAL_STATION_VLLM_RUNTIME.modelId.replace("/", "--")}/snapshots/${DUAL_STATION_VLLM_RUNTIME.modelRevision}`,
-      `/home/nvidia/.cache/huggingface/hub/models--${DUAL_STATION_VLLM_RUNTIME.modelId.replace("/", "--")}`,
-    ]);
-    expect(runCommand.mock.calls[0][2].input).toContain("snapshot symlink escapes");
-    expect(runCommand.mock.calls[0][2].input).toContain("len(shards) != 113");
+    const auditArgs = runCommand.mock.calls[0][1] as string[];
+    expect(auditArgs).toEqual(["-", snapshotForHome(mockedLocalHome), mockedLocalModelRoot]);
+    const materializeArgs = runCommand.mock.calls[2][1] as string[];
+    expect(materializeArgs.slice(0, 3)).toEqual(auditArgs);
+    expect(materializeArgs[3]).toMatch(/nemoclaw-vllm-model-staging-[^/]+\/snapshot$/);
+    expect(path.dirname(path.dirname(materializeArgs[3]))).toBe(mockedLocalModelRoot);
+    expect(statfs).toHaveBeenCalledWith(mockedLocalModelRoot);
 
     const sshArgs = runCommand.mock.calls[1][1] as string[];
     expect(sshArgs).toEqual(
@@ -163,28 +273,170 @@ describe("dual-Station pinned model staging", () => {
         "python3 -",
       ]),
     );
-    expect(runCommand.mock.calls[1][2].input).toContain("peer pinned snapshot already exists");
-    expect(runCommand.mock.calls[1][2].input).toContain("shutil.disk_usage(STAGING.parent).free");
-    expect(runCommand.mock.calls[3][2].input).toContain("os.rename(STAGING, FINAL)");
-    expect(runCommand.mock.calls[3][2].input).toContain("installed_identity != staged_identity");
-
-    const rsyncArgs = runCommand.mock.calls[2][1] as string[];
+    const rsyncArgs = runCommand.mock.calls[4][1] as string[];
     expect(rsyncArgs).toEqual(
-      expect.arrayContaining(["--copy-links", "--checksum", "--partial", "--protect-args", "--"]),
+      expect.arrayContaining(["--checksum", "--partial", "--protect-args", "--"]),
     );
+    expect(rsyncArgs).not.toContain("--copy-links");
     expect(rsyncArgs).not.toContain("--delete");
+    expect(rsyncArgs.at(-2)).toBe(`${materializeArgs[3]}/`);
     expect(rsyncArgs.at(-1)).toMatch(
       new RegExp(
         `^nvidia@station-b:/home/nvidia/\\.cache/huggingface/hub/models--${DUAL_STATION_VLLM_RUNTIME.modelId.replace("/", "--")}/snapshots/\\.nemoclaw-staging-[a-f0-9]{32}/$`,
       ),
     );
     expect(rsyncArgs.join(" ")).toContain("StrictHostKeyChecking=yes");
-    expect(runCommand.mock.calls[2][2]).toMatchObject({
+    expect(runCommand.mock.calls[4][2]).toMatchObject({
       idleTimeoutMs: 30 * 60 * 1000,
       streamOutput: true,
     });
-    expect(runCommand.mock.calls[2][2].env.OPENSHELL_GATEWAY_AUTH_TOKEN).toBeUndefined();
-    expect(runCommand.mock.calls[2][2].env.HF_TOKEN).toBeUndefined();
+    expect(runCommand.mock.calls[4][2].env.OPENSHELL_GATEWAY_AUTH_TOKEN).toBeUndefined();
+    expect(runCommand.mock.calls[4][2].env.HF_TOKEN).toBeUndefined();
+  });
+
+  it("transfers the materialized bytes if the source changes after the second audit", async () => {
+    const fixture = createLocalSnapshotFixture();
+    const fixturePlan = plan();
+    fixturePlan.local.home = fixture.home;
+    let pythonCall = 0;
+    let sshCall = 0;
+    let transferSource = "";
+    let transferredConfig = "";
+    let snapshotMode = 0;
+    let configMode = 0;
+    const runCommand = vi.fn(
+      async (
+        file: string,
+        args: readonly string[],
+        options: ModelStagingCommandOptions,
+      ): Promise<ModelStagingCommandResult> => {
+        if (file === "python3") {
+          pythonCall += 1;
+          const audit = runPython(args, options);
+          if (pythonCall === 2 && audit.status === 0) {
+            fs.writeFileSync(path.join(fixture.snapshot, "config.json"), "changed-after-audit");
+          }
+          return audit;
+        }
+        if (file === "ssh") {
+          sshCall += 1;
+          return result(sshCall <= 2 ? '{"state":"transfer"}' : '{"state":"ready"}');
+        }
+        if (file === "rsync") {
+          transferSource = String(args.at(-2)).replace(/\/$/, "");
+          transferredConfig = fs.readFileSync(path.join(transferSource, "config.json"), "utf8");
+          snapshotMode = fs.statSync(transferSource).mode & 0o777;
+          configMode = fs.statSync(path.join(transferSource, "config.json")).mode & 0o777;
+          return result();
+        }
+        throw new Error(`unexpected command: ${file}`);
+      },
+    );
+    const statfs = sufficientStatfs();
+
+    try {
+      await expect(
+        stageDualStationModelSnapshot(fixturePlan, { runCommand, statfs }),
+      ).resolves.toEqual({ ok: true, transferred: true });
+      expect(transferredConfig).toBe("{}");
+      expect(snapshotMode).toBe(0o500);
+      expect(configMode).toBe(0o400);
+      expect(transferSource).not.toBe(fixture.snapshot);
+      expect(path.dirname(path.dirname(transferSource))).toBe(modelRootForHome(fixture.home));
+      expect(fs.existsSync(transferSource)).toBe(false);
+    } finally {
+      fs.rmSync(fixture.root, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects source mutation between audits and cleans both staging roots", async () => {
+    const fixture = createLocalSnapshotFixture();
+    const fixturePlan = plan();
+    fixturePlan.local.home = fixture.home;
+    let pythonCall = 0;
+    let materializedSnapshot = "";
+    const runCommand = vi.fn(
+      async (
+        file: string,
+        args: readonly string[],
+        options: ModelStagingCommandOptions,
+      ): Promise<ModelStagingCommandResult> => {
+        if (file === "python3") {
+          pythonCall += 1;
+          if (args[3] !== undefined) materializedSnapshot = String(args[3]);
+          const audit = runPython(args, options);
+          if (pythonCall === 1 && audit.status === 0) {
+            fs.writeFileSync(path.join(fixture.snapshot, "config.json"), "changed-between-audits");
+          }
+          return audit;
+        }
+        if (file === "ssh") {
+          return result(pythonCall === 1 ? '{"state":"transfer"}' : '{"state":"cleaned"}');
+        }
+        throw new Error(`unexpected command: ${file}`);
+      },
+    );
+
+    try {
+      await expect(
+        stageDualStationModelSnapshot(fixturePlan, {
+          runCommand,
+          statfs: sufficientStatfs(),
+        }),
+      ).resolves.toEqual({
+        ok: false,
+        reason: "local pinned snapshot changed between audit and materialization",
+      });
+      expect(runCommand.mock.calls.map((call) => call[0])).toEqual([
+        "python3",
+        "ssh",
+        "python3",
+        "ssh",
+      ]);
+      expect(fs.existsSync(materializedSnapshot)).toBe(false);
+      expect(runCommand).not.toHaveBeenCalledWith("rsync", expect.anything(), expect.anything());
+    } finally {
+      fs.rmSync(fixture.root, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects a snapshot symlink escape through the public staging boundary", async () => {
+    const fixture = createLocalSnapshotFixture();
+    const fixturePlan = plan();
+    fixturePlan.local.home = fixture.home;
+    const outside = path.join(fixture.root, "outside-tokenizer.json");
+    const tokenizer = path.join(fixture.snapshot, "tokenizer.json");
+    fs.writeFileSync(outside, "{}");
+    fs.unlinkSync(tokenizer);
+    fs.symlinkSync(outside, tokenizer);
+    const runCommand = vi.fn(
+      async (
+        file: string,
+        args: readonly string[],
+        options: ModelStagingCommandOptions,
+      ): Promise<ModelStagingCommandResult> => {
+        if (file !== "python3") throw new Error(`unexpected command: ${file}`);
+        return runPython(args, options);
+      },
+    );
+
+    try {
+      await expect(
+        stageDualStationModelSnapshot(fixturePlan, { runCommand }),
+      ).resolves.toMatchObject({
+        ok: false,
+        reason: expect.stringContaining("snapshot symlink escapes the pinned model cache"),
+      });
+      expect(runCommand).toHaveBeenCalledTimes(1);
+      expect(runCommand.mock.calls[0][1] as string[]).toHaveLength(3);
+      expect(
+        fs
+          .readdirSync(modelRootForHome(fixture.home))
+          .some((entry) => entry.startsWith(".nemoclaw-vllm-model-staging-")),
+      ).toBe(false);
+    } finally {
+      fs.rmSync(fixture.root, { force: true, recursive: true });
+    }
   });
 
   it("does no transfer when the peer already has the exact byte manifest", async () => {
@@ -192,13 +444,137 @@ describe("dual-Station pinned model staging", () => {
       .fn()
       .mockResolvedValueOnce(result(manifest()))
       .mockResolvedValueOnce(result('{"state":"ready"}'));
+    const statfs = sufficientStatfs();
 
-    await expect(stageDualStationModelSnapshot(plan(), { runCommand })).resolves.toEqual({
+    await expect(stageDualStationModelSnapshot(plan(), { runCommand, statfs })).resolves.toEqual({
       ok: true,
       transferred: false,
     });
     expect(runCommand).toHaveBeenCalledTimes(2);
+    expect(statfs).not.toHaveBeenCalled();
+    expect(runCommand.mock.calls[0][1] as string[]).toHaveLength(3);
     expect(runCommand).not.toHaveBeenCalledWith("rsync", expect.anything(), expect.anything());
+    expect(
+      fs
+        .readdirSync(mockedLocalModelRoot)
+        .some((entry) => entry.startsWith(".nemoclaw-vllm-model-staging-")),
+    ).toBe(false);
+  });
+
+  it("removes deterministic peer staging when the final snapshot is already exact", async () => {
+    const remoteRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-model-peer-ready-"));
+    const peerHome = path.join(remoteRoot, "peer-home");
+    fs.mkdirSync(peerHome, { mode: 0o700 });
+    const fixturePlan = plan();
+    fixturePlan.peer.home = peerHome;
+    const finalSnapshot = snapshotForHome(peerHome);
+    const peerStaging = peerStagingForPlan(fixturePlan);
+    fs.mkdirSync(finalSnapshot, { mode: 0o700, recursive: true });
+    fs.writeFileSync(path.join(finalSnapshot, "config.json"), "{}");
+    fs.mkdirSync(peerStaging, { mode: 0o700 });
+    fs.writeFileSync(path.join(peerStaging, "config.json"), "{");
+    const statfs = sufficientStatfs();
+    const runCommand = vi.fn(
+      async (
+        file: string,
+        _args: readonly string[],
+        options: ModelStagingCommandOptions,
+      ): Promise<ModelStagingCommandResult> => {
+        if (file === "python3") return result(manifest());
+        if (file === "ssh") {
+          return runPython(["-"], {
+            ...options,
+            env: { ...options.env, HOME: peerHome },
+          });
+        }
+        throw new Error(`unexpected command: ${file}`);
+      },
+    );
+
+    try {
+      await expect(
+        stageDualStationModelSnapshot(fixturePlan, { runCommand, statfs }),
+      ).resolves.toEqual({ ok: true, transferred: false });
+      expect(runCommand.mock.calls.map((call) => call[0])).toEqual(["python3", "ssh"]);
+      expect(statfs).not.toHaveBeenCalled();
+      expect(fs.existsSync(finalSnapshot)).toBe(true);
+      expect(fs.existsSync(peerStaging)).toBe(false);
+      expect(runCommand).not.toHaveBeenCalledWith("rsync", expect.anything(), expect.anything());
+    } finally {
+      fs.rmSync(remoteRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("cleans peer staging without materializing when local capacity is insufficient", async () => {
+    const runCommand = vi
+      .fn()
+      .mockResolvedValueOnce(result(manifest()))
+      .mockResolvedValueOnce(result('{"state":"transfer"}'))
+      .mockResolvedValueOnce(result('{"state":"cleaned"}'));
+    const statfs = vi.fn().mockResolvedValue({ bavail: 1n, bsize: 4096n });
+
+    await expect(stageDualStationModelSnapshot(plan(), { runCommand, statfs })).resolves.toEqual({
+      ok: false,
+      reason: "local model cache does not have enough free space for the audited snapshot copy",
+    });
+    expect(statfs).toHaveBeenCalledWith(mockedLocalModelRoot);
+    expect(runCommand.mock.calls.map((call) => call[0])).toEqual(["python3", "ssh", "ssh"]);
+    expect(runCommand).not.toHaveBeenCalledWith("rsync", expect.anything(), expect.anything());
+    expect(
+      fs
+        .readdirSync(mockedLocalModelRoot)
+        .some((entry) => entry.startsWith(".nemoclaw-vllm-model-staging-")),
+    ).toBe(false);
+  });
+
+  it("fails remote capacity preflight before creating either staging copy", async () => {
+    const remoteRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-model-peer-capacity-"));
+    const peerHome = path.join(remoteRoot, "peer-home");
+    fs.mkdirSync(peerHome, { mode: 0o700 });
+    const fixturePlan = plan();
+    fixturePlan.peer.home = peerHome;
+    const statfs = sufficientStatfs();
+    const runCommand = vi.fn(
+      async (
+        file: string,
+        _args: readonly string[],
+        options: ModelStagingCommandOptions,
+      ): Promise<ModelStagingCommandResult> => {
+        if (file === "python3") return result(manifest());
+        if (file === "ssh") {
+          const noCapacity = `import shutil
+class _NemoClawDiskUsage:
+    free = 0
+shutil.disk_usage = lambda _path: _NemoClawDiskUsage()
+`;
+          return runPython(["-"], {
+            ...options,
+            env: { ...options.env, HOME: peerHome },
+            input: `${noCapacity}${options.input ?? ""}`,
+          });
+        }
+        throw new Error(`unexpected command: ${file}`);
+      },
+    );
+
+    try {
+      await expect(
+        stageDualStationModelSnapshot(fixturePlan, { runCommand, statfs }),
+      ).resolves.toEqual({
+        ok: false,
+        reason:
+          "peer snapshot preflight failed: peer model cache does not have enough free space for the pinned snapshot",
+      });
+      expect(runCommand.mock.calls.map((call) => call[0])).toEqual(["python3", "ssh"]);
+      expect(statfs).not.toHaveBeenCalled();
+      expect(
+        fs
+          .readdirSync(path.dirname(snapshotForHome(peerHome)))
+          .some((entry) => entry.startsWith(".nemoclaw-staging-")),
+      ).toBe(false);
+    } finally {
+      fs.rmSync(remoteRoot, { force: true, recursive: true });
+    }
   });
 
   it("gives concurrent reversed and different local heads disjoint retry-safe staging paths", async () => {
@@ -207,6 +583,8 @@ describe("dual-Station pinned model staging", () => {
     const reversedLocal = reversed.local;
     reversed.local = reversed.peer;
     reversed.peer = reversedLocal;
+    reversed.local.home = mockedLocalHome;
+    reversed.peer.home = "/home/nvidia";
     const reversedSshFixture = createDualStationSshBindingFixture("nvidia@station-a");
     reversed.peerSshBinding = reversedSshFixture.binding;
     const differentHead = plan();
@@ -217,9 +595,18 @@ describe("dual-Station pinned model staging", () => {
 
     try {
       await Promise.all([
-        stageDualStationModelSnapshot(original, { runCommand: originalRunner }),
-        stageDualStationModelSnapshot(reversed, { runCommand: reversedRunner }),
-        stageDualStationModelSnapshot(differentHead, { runCommand: differentHeadRunner }),
+        stageDualStationModelSnapshot(original, {
+          runCommand: originalRunner,
+          statfs: sufficientStatfs(),
+        }),
+        stageDualStationModelSnapshot(reversed, {
+          runCommand: reversedRunner,
+          statfs: sufficientStatfs(),
+        }),
+        stageDualStationModelSnapshot(differentHead, {
+          runCommand: differentHeadRunner,
+          statfs: sufficientStatfs(),
+        }),
       ]);
     } finally {
       reversedSshFixture.cleanup();
@@ -238,24 +625,183 @@ describe("dual-Station pinned model staging", () => {
     const firstRunner = successfulTransferRunner();
     const retryRunner = successfulTransferRunner();
 
-    await stageDualStationModelSnapshot(plan(), { runCommand: firstRunner });
-    await stageDualStationModelSnapshot(plan(), { runCommand: retryRunner });
+    await stageDualStationModelSnapshot(plan(), {
+      runCommand: firstRunner,
+      statfs: sufficientStatfs(),
+    });
+    await stageDualStationModelSnapshot(plan(), {
+      runCommand: retryRunner,
+      statfs: sufficientStatfs(),
+    });
 
     expect(stagingSuffix(firstRunner)).toBe(stagingSuffix(retryRunner));
   });
 
-  it("leaves the private staging tree for a safe retry when rsync fails", async () => {
+  it("cleans the private peer staging tree when rsync fails", async () => {
     const runCommand = vi
       .fn()
       .mockResolvedValueOnce(result(manifest()))
       .mockResolvedValueOnce(result('{"state":"transfer"}'))
-      .mockResolvedValueOnce({ status: 23, stdout: "", stderr: "partial transfer" });
+      .mockResolvedValueOnce(result(manifest()))
+      .mockResolvedValueOnce(result('{"state":"transfer"}'))
+      .mockResolvedValueOnce({ status: 23, stdout: "", stderr: "partial transfer" })
+      .mockResolvedValueOnce(result('{"state":"cleaned"}'));
 
-    await expect(stageDualStationModelSnapshot(plan(), { runCommand })).resolves.toEqual({
-      ok: false,
-      reason: "peer snapshot transfer failed: partial transfer",
-    });
-    expect(runCommand).toHaveBeenCalledTimes(3);
+    await expect(
+      stageDualStationModelSnapshot(plan(), { runCommand, statfs: sufficientStatfs() }),
+    ).resolves.toEqual({ ok: false, reason: "peer snapshot transfer failed: partial transfer" });
+    expect(runCommand).toHaveBeenCalledTimes(6);
+    expect(runCommand.mock.calls.map((call) => call[0])).toEqual([
+      "python3",
+      "ssh",
+      "python3",
+      "ssh",
+      "rsync",
+      "ssh",
+    ]);
+  });
+
+  it("removes peer bytes that fail real manifest verification", async () => {
+    const remoteRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-model-peer-"));
+    const peerHome = path.join(remoteRoot, "peer-home");
+    fs.mkdirSync(peerHome, { mode: 0o700 });
+    const fixturePlan = plan();
+    fixturePlan.peer.home = peerHome;
+    let stagingPath = "";
+    const runCommand = vi.fn(
+      async (
+        file: string,
+        args: readonly string[],
+        options: ModelStagingCommandOptions,
+      ): Promise<ModelStagingCommandResult> => {
+        if (file === "python3") return result(manifest());
+        if (file === "ssh") {
+          return runPython(["-"], {
+            ...options,
+            env: { ...options.env, HOME: peerHome },
+          });
+        }
+        if (file === "rsync") {
+          const destination = String(args.at(-1));
+          stagingPath = destination.slice(destination.indexOf(":") + 1).replace(/\/$/, "");
+          fs.mkdirSync(stagingPath, { mode: 0o700, recursive: true });
+          fs.writeFileSync(path.join(stagingPath, "config.json"), "xx");
+          return result();
+        }
+        throw new Error(`unexpected command: ${file}`);
+      },
+    );
+    const statfs = sufficientStatfs();
+
+    try {
+      await expect(
+        stageDualStationModelSnapshot(fixturePlan, { runCommand, statfs }),
+      ).resolves.toEqual({
+        ok: false,
+        reason:
+          "peer snapshot verification failed: peer staged snapshot failed byte-integrity verification",
+      });
+      expect(runCommand.mock.calls.map((call) => call[0])).toEqual([
+        "python3",
+        "ssh",
+        "python3",
+        "ssh",
+        "rsync",
+        "ssh",
+        "ssh",
+      ]);
+      expect(fs.existsSync(stagingPath)).toBe(false);
+    } finally {
+      fs.rmSync(remoteRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("fails closed when atomic install resolves to a different directory identity", async () => {
+    const fixture = createLocalSnapshotFixture();
+    const remoteRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-model-peer-identity-"));
+    const peerHome = path.join(remoteRoot, "peer-home");
+    fs.mkdirSync(peerHome, { mode: 0o700 });
+    const fixturePlan = plan();
+    fixturePlan.local.home = fixture.home;
+    fixturePlan.peer.home = peerHome;
+    let sshCall = 0;
+    let materializedSnapshot = "";
+    const runCommand = vi.fn(
+      async (
+        file: string,
+        args: readonly string[],
+        options: ModelStagingCommandOptions,
+      ): Promise<ModelStagingCommandResult> => {
+        if (file === "python3") {
+          if (args[3] !== undefined) materializedSnapshot = String(args[3]);
+          return runPython(args, options);
+        }
+        if (file === "ssh") {
+          sshCall += 1;
+          const ampleCapacity = `import shutil
+class _NemoClawDiskUsage:
+    free = 1 << 50
+shutil.disk_usage = lambda _path: _NemoClawDiskUsage()
+`;
+          const replaceInstalledIdentity =
+            sshCall === 3
+              ? `import os
+_nemoclaw_original_rename = os.rename
+def _nemoclaw_replace_after_rename(source, destination):
+    _nemoclaw_original_rename(source, destination)
+    _nemoclaw_original_rename(destination, str(destination) + ".nemoclaw-test-original")
+    os.mkdir(destination, 0o700)
+os.rename = _nemoclaw_replace_after_rename
+`
+              : "";
+          return runPython(["-"], {
+            ...options,
+            env: { ...options.env, HOME: peerHome },
+            input: `${ampleCapacity}${replaceInstalledIdentity}${options.input ?? ""}`,
+          });
+        }
+        if (file === "rsync") {
+          const source = String(args.at(-2)).replace(/\/$/, "");
+          const destination = String(args.at(-1));
+          const stagingPath = destination.slice(destination.indexOf(":") + 1).replace(/\/$/, "");
+          for (const entry of fs.readdirSync(source)) {
+            fs.cpSync(path.join(source, entry), path.join(stagingPath, entry), {
+              recursive: true,
+            });
+          }
+          return result();
+        }
+        throw new Error(`unexpected command: ${file}`);
+      },
+    );
+
+    try {
+      await expect(
+        stageDualStationModelSnapshot(fixturePlan, {
+          runCommand,
+          statfs: sufficientStatfs(),
+        }),
+      ).resolves.toEqual({
+        ok: false,
+        reason:
+          "peer snapshot verification failed: peer pinned snapshot identity changed during atomic install",
+      });
+      expect(runCommand.mock.calls.map((call) => call[0])).toEqual([
+        "python3",
+        "ssh",
+        "python3",
+        "ssh",
+        "rsync",
+        "ssh",
+        "ssh",
+      ]);
+      expect(fs.existsSync(materializedSnapshot)).toBe(false);
+      expect(fs.existsSync(snapshotForHome(peerHome))).toBe(true);
+      expect(fs.existsSync(`${snapshotForHome(peerHome)}.nemoclaw-test-original`)).toBe(true);
+    } finally {
+      fs.rmSync(fixture.root, { force: true, recursive: true });
+      fs.rmSync(remoteRoot, { force: true, recursive: true });
+    }
   });
 
   it("rejects a peer home that cannot be represented without remote shell syntax", async () => {
