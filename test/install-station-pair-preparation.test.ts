@@ -290,6 +290,17 @@ describe("deterministic dual-DGX Station peer discovery", () => {
     expect(deriveDiscoveryCandidates(stationHost("local"))).toEqual(["10.10.0.2", "10.10.0.6"]);
   });
 
+  it.each([
+    "DGX-Station",
+    "P3830",
+    "NVIDIA Station GB300",
+  ])("accepts an existing Station firmware product identifier: %s", (productName) => {
+    const host = stationHost("local");
+    host.productName = productName;
+
+    expect(deriveDiscoveryCandidates(host)).toEqual(["10.10.0.2", "10.10.0.6"]);
+  });
+
   it("rejects extra rails, duplicate identities, and non-jumbo links", () => {
     const extraRail = stationHost("local");
     extraRail.rails.push({

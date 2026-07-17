@@ -2852,6 +2852,13 @@ is_wsl_host() {
 # and Windows WSL from the host environment. Echoes "DGX Spark",
 # "DGX Station", "Windows WSL", or empty. Used to gate the express install
 # prompt; only platforms with a known sensible default are offered.
+is_station_gb300_product() {
+  local product=${1:-}
+  [[ "$product" =~ (^|[^[:alnum:]])[Pp]3830([^[:alnum:]]|$) ]] \
+    || [[ "$product" == *[Ss][Tt][Aa][Tt][Ii][Oo][Nn]* &&
+      "$product" == *[Gg][Bb]300* ]]
+}
+
 detect_express_platform() {
   local model=""
   if is_wsl_host; then
@@ -2865,14 +2872,20 @@ detect_express_platform() {
     model="$(tr -d '\0' </sys/firmware/devicetree/base/model 2>/dev/null || true)"
   fi
   case "$model" in
-    *DGX*Spark*) printf "DGX Spark" ;;
-    *Station*GB300*)
-      if [ -e /etc/dgx-release ] || [ -L /etc/dgx-release ]; then
-        printf "Unsupported DGX Station OS"
-      else
-        printf "DGX Station"
-      fi
+    *DGX*Spark*)
+      printf "DGX Spark"
+      return
       ;;
+  esac
+  if is_station_gb300_product "$model"; then
+    if [ -e /etc/dgx-release ] || [ -L /etc/dgx-release ]; then
+      printf "Unsupported DGX Station OS"
+    else
+      printf "DGX Station"
+    fi
+    return
+  fi
+  case "$model" in
     *DGX*Station*) printf "Unsupported DGX Station generation" ;;
     *) ;;
   esac

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import net from "node:net";
+import { isDgxStationGb300Product } from "../../src/lib/inference/dgx-station-identity.ts";
 import { stationKnownHostsDigest } from "../../src/lib/inference/vllm-station-ssh-binding.ts";
 
 export const DUAL_STATION_RESUME_SCHEMA_VERSION = 1;
@@ -355,10 +356,7 @@ function selectedGb300(host: StationDiscoveryHost, label: string): StationDiscov
 
 function assertStationIdentity(host: StationDiscoveryHost, label: string): void {
   if (
-    !(
-      /DGX[_\s-]+Station/i.test(host.productName) ||
-      (/Station/i.test(host.productName) && /GB300/i.test(host.productName))
-    ) ||
+    !isDgxStationGb300Product(host.productName) ||
     !/^(?:aarch64|arm64)$/i.test(host.architecture)
   ) {
     throw new Error(`${label} is not a verified arm64 DGX Station GB300`);

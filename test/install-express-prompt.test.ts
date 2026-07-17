@@ -637,15 +637,23 @@ detect_express_platform
     expect(result.stdout).toBe("Windows WSL");
   });
 
-  it("recognizes Station GB300 OEM firmware as DGX Station", () => {
-    const result = detectExpressPlatformForProductName("Dell Pro Max with Station GB300");
+  it.each([
+    "P3830",
+    "NVIDIA P3830 Rev A",
+    "Dell Pro Max with Station GB300",
+  ])("recognizes supported Station GB300 firmware as DGX Station: %s", (productName) => {
+    const result = detectExpressPlatformForProductName(productName);
 
     expect(result.status, `${result.stdout}${result.stderr}`).toBe(0);
     expect(result.stdout).toBe("DGX Station");
   });
 
-  it("requires both Station and GB300 for the OEM firmware match", () => {
-    for (const productName of ["Dell Pro Max with Station GB200", "Dell Pro Max with GB300"]) {
+  it("rejects partial and unsupported Station product identifiers", () => {
+    for (const productName of [
+      "Acme XP3830 Workstation",
+      "Dell Pro Max with Station GB200",
+      "Dell Pro Max with GB300",
+    ]) {
       const result = detectExpressPlatformForProductName(productName);
 
       expect(result.status, `${result.stdout}${result.stderr}`).toBe(0);

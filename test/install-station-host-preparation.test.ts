@@ -102,13 +102,16 @@ package_state 'docker-ce=5:29.6.1-1~ubuntu.24.04~noble'
   });
 
   it.each([
+    ["P3830", true],
+    ["NVIDIA P3830 Rev A", true],
     ["Dell Pro Max with Station GB300", true],
     ["NVIDIA DGX Station GB300", true],
+    ["Acme XP3830 Workstation", false],
     ["NVIDIA DGX Station A100", false],
     ["Dell Pro Max with Station GB200", false],
     ["Dell Pro Max with GB300", false],
   ])("accepts only Station GB300 DMI: %s", (product, accepted) => {
-    const { result } = runSourced(STATION_PREPARE, `is_station_product "$PRODUCT"`, {
+    const { result } = runSourced(STATION_PREPARE, `is_station_gb300_product "$PRODUCT"`, {
       PRODUCT: product,
     });
 

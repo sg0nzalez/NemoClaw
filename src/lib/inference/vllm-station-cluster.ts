@@ -6,6 +6,7 @@ import net from "node:net";
 import path from "node:path";
 
 import { buildSubprocessEnv } from "../subprocess-env";
+import { isDgxStationGb300Product } from "./dgx-station-identity";
 import { buildVllmSshTransportEnv } from "./vllm-docker-env";
 import { NEMOTRON_ULTRA_STATION_IMAGE, VLLM_MODELS } from "./vllm-models";
 import {
@@ -1110,14 +1111,6 @@ function selectGb300(host: StationHostProbe): StationGpuProbe | null {
   return matches.length === 1 ? matches[0] : null;
 }
 
-function isDgxStationProduct(productName: string): boolean {
-  return (
-    /(?<![A-Za-z0-9])P3830(?![A-Za-z0-9])/i.test(productName) ||
-    /DGX[_\s-]+Station/i.test(productName) ||
-    (/Station/i.test(productName) && /GB300/i.test(productName))
-  );
-}
-
 function qualifiedRails(host: StationHostProbe): StationRailProbe[] | null {
   const cx8Rails = host.rails.filter((rail) => /ConnectX[- ]?8|\bCX-?8\b/i.test(rail.pciName));
   if (cx8Rails.length !== 2) return null;
@@ -1281,10 +1274,16 @@ function buildStaticPlan(
   local: StationHostProbe,
   peer: StationHostProbe,
 ): StaticPlan | PlanFailure {
-  if (!isDgxStationProduct(local.productName) || !/^(?:aarch64|arm64)$/i.test(local.architecture)) {
+  if (
+    !isDgxStationGb300Product(local.productName) ||
+    !/^(?:aarch64|arm64)$/i.test(local.architecture)
+  ) {
     return unavailable("local-not-station", "local host is not a verified arm64 DGX Station");
   }
-  if (!isDgxStationProduct(peer.productName) || !/^(?:aarch64|arm64)$/i.test(peer.architecture)) {
+  if (
+    !isDgxStationGb300Product(peer.productName) ||
+    !/^(?:aarch64|arm64)$/i.test(peer.architecture)
+  ) {
     return unavailable("peer-not-station", "configured peer is not a verified arm64 DGX Station");
   }
 

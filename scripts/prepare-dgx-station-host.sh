@@ -114,9 +114,11 @@ is_valid_mode() {
   esac
 }
 
-is_station_product() {
+is_station_gb300_product() {
   local product=${1:-}
-  [[ "$product" == *"Station"* && "$product" == *"GB300"* ]]
+  [[ "$product" =~ (^|[^[:alnum:]])[Pp]3830([^[:alnum:]]|$) ]] \
+    || [[ "$product" == *[Ss][Tt][Aa][Tt][Ii][Oo][Nn]* &&
+      "$product" == *[Gg][Bb]300* ]]
 }
 
 is_preparation_critical_unit() {
@@ -291,7 +293,7 @@ check_platform() {
     || fatal "DGX OS/BaseOS is outside this recipe's validated boundary; use the generic Ubuntu 24.04 ARM64 image"
 
   product="$(</sys/class/dmi/id/product_name)"
-  is_station_product "$product" || fatal "Expected DGX Station GB300 DMI, found ${product}"
+  is_station_gb300_product "$product" || fatal "Expected DGX Station GB300 DMI, found ${product}"
   info "platform=${product} os=${PRETTY_NAME} arch=${arch} kernel=$(uname -r)"
 }
 
@@ -1035,7 +1037,8 @@ run_apply() {
     fatal "An unrelated reboot is already pending"
   fi
 
-  ensure_dual_station_controller_uid_binding
+  ensure_dual_station_controller_uid_binding \
+    "$NEMOCLAW_CONFIG_DIR" "$DUAL_STATION_CONTROLLER_UID_FILE"
 
   if ! all_packages_exact; then
     assert_no_package_mismatches
@@ -1092,7 +1095,8 @@ run_bind_controller() {
   require_command sudo
   check_platform
   acquire_sudo
-  ensure_dual_station_controller_uid_binding
+  ensure_dual_station_controller_uid_binding \
+    "$NEMOCLAW_CONFIG_DIR" "$DUAL_STATION_CONTROLLER_UID_FILE"
   info "CONTROLLER_UID_BINDING_READY"
 }
 
