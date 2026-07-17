@@ -33,7 +33,7 @@ describe("OpenShell policy mutation read discovery (#6921)", () => {
       '["not-openshell", "policy", "get", "--base", sandboxName];',
     ].join("\n");
 
-    expect(countPolicyReadCalls(source, "/repo/src/lib/fixture.ts")).toBe(7);
+    expect(countPolicyReadCalls(source, "/repo/src/lib/fixture.ts", "/repo")).toBe(7);
   });
 
   it("ignores similarly named calls without canonical policy bindings", () => {
@@ -49,7 +49,45 @@ describe("OpenShell policy mutation read discovery (#6921)", () => {
       'fixture["buildPolicyGetFullCommand"](sandboxName);',
     ].join("\n");
 
-    expect(countPolicyReadCalls(source, "/repo/src/lib/fixture.ts")).toBe(0);
+    expect(countPolicyReadCalls(source, "/repo/src/lib/fixture.ts", "/repo")).toBe(0);
+  });
+
+  it("ignores a named policy builder import when a nested binding shadows its alias", () => {
+    const source = [
+      'import { buildPolicyGetCommand as buildBase } from "./policy/commands";',
+      "buildBase(rootSandbox);",
+      "function inspect(buildBase: (sandbox: string) => string[]) {",
+      "  buildBase(shadowedSandbox);",
+      "}",
+    ].join("\n");
+
+    expect(countPolicyReadCalls(source, "/repo/src/lib/fixture.ts", "/repo")).toBe(1);
+  });
+
+  it("ignores a namespace policy import when a nested binding shadows its alias", () => {
+    const source = [
+      'import * as policyBuilders from "./policy/index";',
+      "policyBuilders.buildPolicyGetCommand(rootSandbox);",
+      "function inspect(policyBuilders: Record<string, (sandbox: string) => string[]>) {",
+      "  policyBuilders.buildPolicyGetCommand(shadowedSandbox);",
+      '  policyBuilders["buildPolicyGetFullCommand"](shadowedSandbox);',
+      "}",
+    ].join("\n");
+
+    expect(countPolicyReadCalls(source, "/repo/src/lib/fixture.ts", "/repo")).toBe(1);
+  });
+
+  it("ignores policy-shaped modules outside the repository-root canonical policy path", () => {
+    const source = [
+      'import { buildPolicyGetCommand as decoyBase } from "./vendor/src/lib/policy";',
+      'import * as decoyBuilders from "./vendor/src/lib/policy/commands";',
+      'const requiredDecoyBuilders = require("./vendor/src/lib/policy/index");',
+      "decoyBase(sandboxName);",
+      "decoyBuilders.buildPolicyGetFullCommand(sandboxName);",
+      "requiredDecoyBuilders.buildPolicyGetCommand(sandboxName);",
+    ].join("\n");
+
+    expect(countPolicyReadCalls(source, "/repo/src/lib/fixture.ts", "/repo")).toBe(0);
   });
 
   it("discovers builder and direct policy reads in new production files", () => {

@@ -84,14 +84,14 @@ export interface DiscoveredPolicyReadSite {
 const POLICY_GET_BUILDERS = new Set(["buildPolicyGetCommand", "buildPolicyGetFullCommand"]);
 
 interface PolicyBuilderBindings {
-  readonly identifiers: ReadonlySet<string>;
-  readonly namespaces: ReadonlySet<string>;
+  readonly identifiers: ReadonlySet<ts.Symbol>;
+  readonly namespaces: ReadonlySet<ts.Symbol>;
 }
 
-const POLICY_BUILDER_MODULE_SUFFIXES = [
-  "/src/lib/policy",
-  "/src/lib/policy/index",
-  "/src/lib/policy/commands",
+const POLICY_BUILDER_MODULE_PATHS = [
+  "src/lib/policy",
+  "src/lib/policy/index",
+  "src/lib/policy/commands",
 ] as const;
 
 function calledName(expression: ts.LeftHandSideExpression): string | null {
@@ -107,14 +107,18 @@ function calledName(expression: ts.LeftHandSideExpression): string | null {
   return null;
 }
 
-function isPolicyBuilderModule(fileName: string, moduleSpecifier: string): boolean {
+function isPolicyBuilderModule(
+  fileName: string,
+  moduleSpecifier: string,
+  repoRoot: string,
+): boolean {
   if (!moduleSpecifier.startsWith(".")) return false;
   const resolved = path
     .resolve(path.dirname(fileName), moduleSpecifier)
-    .split(path.sep)
-    .join("/")
     .replace(/\.[cm]?[jt]sx?$/u, "");
-  return POLICY_BUILDER_MODULE_SUFFIXES.some((suffix) => resolved.endsWith(suffix));
+  return POLICY_BUILDER_MODULE_PATHS.some(
+    (relativePath) => resolved === path.resolve(repoRoot, relativePath),
+  );
 }
 
 function requireModuleSpecifier(expression: ts.Expression | undefined): string | null {
@@ -134,13 +138,16 @@ function requireModuleSpecifier(expression: ts.Expression | undefined): string |
 function collectRequiredPolicyBindings(
   declaration: ts.VariableDeclaration,
   fileName: string,
-  identifiers: Set<string>,
-  namespaces: Set<string>,
+  repoRoot: string,
+  checker: ts.TypeChecker,
+  identifiers: Set<ts.Symbol>,
+  namespaces: Set<ts.Symbol>,
 ): void {
   const moduleSpecifier = requireModuleSpecifier(declaration.initializer);
-  if (!moduleSpecifier || !isPolicyBuilderModule(fileName, moduleSpecifier)) return;
+  if (!moduleSpecifier || !isPolicyBuilderModule(fileName, moduleSpecifier, repoRoot)) return;
   if (ts.isIdentifier(declaration.name)) {
-    namespaces.add(declaration.name.text);
+    const symbol = checker.getSymbolAtLocation(declaration.name);
+    if (symbol) namespaces.add(symbol);
     return;
   }
   if (!ts.isObjectBindingPattern(declaration.name)) return;
@@ -151,7 +158,8 @@ function collectRequiredPolicyBindings(
       (ts.isIdentifier(importedName) || ts.isStringLiteralLike(importedName)) &&
       POLICY_GET_BUILDERS.has(importedName.text)
     ) {
-      identifiers.add(element.name.text);
+      const symbol = checker.getSymbolAtLocation(element.name);
+      if (symbol) identifiers.add(symbol);
     }
   }
 }
@@ -159,30 +167,42 @@ function collectRequiredPolicyBindings(
 function collectPolicyBuilderBindings(
   sourceFile: ts.SourceFile,
   fileName: string,
+  repoRoot: string,
+  checker: ts.TypeChecker,
 ): PolicyBuilderBindings {
-  const identifiers = new Set<string>();
-  const namespaces = new Set<string>();
+  const identifiers = new Set<ts.Symbol>();
+  const namespaces = new Set<ts.Symbol>();
   for (const statement of sourceFile.statements) {
     if (
       ts.isImportDeclaration(statement) &&
       ts.isStringLiteralLike(statement.moduleSpecifier) &&
       statement.importClause &&
       !statement.importClause.isTypeOnly &&
-      isPolicyBuilderModule(fileName, statement.moduleSpecifier.text)
+      isPolicyBuilderModule(fileName, statement.moduleSpecifier.text, repoRoot)
     ) {
       const { namedBindings } = statement.importClause;
       if (namedBindings && ts.isNamespaceImport(namedBindings)) {
-        namespaces.add(namedBindings.name.text);
+        const symbol = checker.getSymbolAtLocation(namedBindings.name);
+        if (symbol) namespaces.add(symbol);
       } else if (namedBindings) {
         for (const element of namedBindings.elements) {
           if (element.isTypeOnly) continue;
           const importedName = element.propertyName?.text ?? element.name.text;
-          if (POLICY_GET_BUILDERS.has(importedName)) identifiers.add(element.name.text);
+          if (!POLICY_GET_BUILDERS.has(importedName)) continue;
+          const symbol = checker.getSymbolAtLocation(element.name);
+          if (symbol) identifiers.add(symbol);
         }
       }
     } else if (ts.isVariableStatement(statement)) {
       for (const declaration of statement.declarationList.declarations) {
-        collectRequiredPolicyBindings(declaration, fileName, identifiers, namespaces);
+        collectRequiredPolicyBindings(
+          declaration,
+          fileName,
+          repoRoot,
+          checker,
+          identifiers,
+          namespaces,
+        );
       }
     }
   }
@@ -192,15 +212,46 @@ function collectPolicyBuilderBindings(
 function isPolicyBuilderCall(
   expression: ts.LeftHandSideExpression,
   bindings: PolicyBuilderBindings,
+  checker: ts.TypeChecker,
 ): boolean {
-  if (ts.isIdentifier(expression)) return bindings.identifiers.has(expression.text);
+  if (ts.isIdentifier(expression)) {
+    const symbol = checker.getSymbolAtLocation(expression);
+    return !!symbol && bindings.identifiers.has(symbol);
+  }
   const memberName = calledName(expression);
   if (!memberName || !POLICY_GET_BUILDERS.has(memberName)) return false;
   const target =
     ts.isPropertyAccessExpression(expression) || ts.isElementAccessExpression(expression)
       ? expression.expression
       : null;
-  return !!target && ts.isIdentifier(target) && bindings.namespaces.has(target.text);
+  if (!target || !ts.isIdentifier(target)) return false;
+  const symbol = checker.getSymbolAtLocation(target);
+  return !!symbol && bindings.namespaces.has(symbol);
+}
+
+function createBoundSourceFile(
+  source: string,
+  fileName: string,
+): { readonly sourceFile: ts.SourceFile; readonly checker: ts.TypeChecker } {
+  const absoluteFileName = path.resolve(fileName);
+  const compilerOptions: ts.CompilerOptions = {
+    module: ts.ModuleKind.ESNext,
+    noLib: true,
+    noResolve: true,
+    target: ts.ScriptTarget.Latest,
+  };
+  const host = ts.createCompilerHost(compilerOptions, true);
+  host.fileExists = (candidate) => path.resolve(candidate) === absoluteFileName;
+  host.readFile = (candidate) =>
+    path.resolve(candidate) === absoluteFileName ? source : undefined;
+  host.getSourceFile = (candidate, languageVersion) =>
+    path.resolve(candidate) === absoluteFileName
+      ? ts.createSourceFile(candidate, source, languageVersion, true)
+      : undefined;
+  const program = ts.createProgram([absoluteFileName], compilerOptions, host);
+  const sourceFile = program.getSourceFile(absoluteFileName);
+  if (!sourceFile) throw new Error(`Unable to parse policy read source: ${fileName}`);
+  return { sourceFile, checker: program.getTypeChecker() };
 }
 
 function literalText(expression: ts.Expression): string | null {
@@ -229,13 +280,20 @@ function isDirectPolicyRead(expression: ts.ArrayLiteralExpression): boolean {
   );
 }
 
-export function countPolicyReadCalls(source: string, fileName: string): number {
-  const sourceFile = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true);
-  const builderBindings = collectPolicyBuilderBindings(sourceFile, fileName);
+export function countPolicyReadCalls(
+  source: string,
+  fileName: string,
+  repoRoot = REPO_ROOT,
+): number {
+  const { sourceFile, checker } = createBoundSourceFile(source, fileName);
+  const builderBindings = collectPolicyBuilderBindings(sourceFile, fileName, repoRoot, checker);
   let readCalls = 0;
 
   function visit(node: ts.Node): void {
-    if (ts.isCallExpression(node) && isPolicyBuilderCall(node.expression, builderBindings)) {
+    if (
+      ts.isCallExpression(node) &&
+      isPolicyBuilderCall(node.expression, builderBindings, checker)
+    ) {
       readCalls += 1;
     } else if (ts.isArrayLiteralExpression(node) && isDirectPolicyRead(node)) {
       readCalls += 1;
@@ -268,7 +326,7 @@ export function discoverPolicyReadSites(repoRoot: string): DiscoveredPolicyReadS
     .flatMap((sourceRoot) => productionTypeScriptFiles(path.join(repoRoot, sourceRoot)))
     .flatMap((sourcePath) => {
       const source = readFileSync(sourcePath, "utf8");
-      const readCalls = countPolicyReadCalls(source, sourcePath);
+      const readCalls = countPolicyReadCalls(source, sourcePath, repoRoot);
       return readCalls > 0
         ? [
             {
