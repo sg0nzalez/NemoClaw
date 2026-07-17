@@ -92,8 +92,8 @@ sandboxState.backupSandboxState = (name) => {
     manifest: { backupPath: "/tmp/fake-fresh-backup", timestamp: "2026-05-25T00:00:00Z" },
   };
 };
-sandboxState.restoreRecreatedSandboxState = (name, backupPath) => {
-  events.push({ kind: "restore", name, backupPath });
+sandboxState.restoreRecreatedSandboxState = (name, backupPath, options) => {
+  events.push({ kind: "restore", name, backupPath, options });
   return {
     success: true,
     restoredDirs: ["workspace"],
@@ -197,6 +197,7 @@ const MARKER_SHA = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852
       name?: string;
       backupPath?: string;
       marker?: string | null;
+      options?: { restoreMissingManagedChannels?: boolean };
     }>;
     const getLatestIndex = events.findIndex((e) => e.kind === "getLatestBackup");
     const deleteIndex = events.findIndex(
@@ -215,6 +216,11 @@ const MARKER_SHA = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852
       events[restoreIndex]?.backupPath,
       "/tmp/fake-pre-upgrade-backup",
       "should restore from the selected pre-upgrade backup rather than a fresh backup",
+    );
+    assert.equal(
+      events[restoreIndex]?.options?.restoreMissingManagedChannels,
+      true,
+      "pre-upgrade restore should recover sanitized legacy managed-channel state",
     );
 
     const execIndex = events.findIndex((e) => e.kind === "exec");

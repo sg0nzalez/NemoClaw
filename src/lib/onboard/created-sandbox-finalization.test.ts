@@ -504,6 +504,45 @@ describe("created OpenClaw sandbox finalization", () => {
     expect(register).toHaveBeenCalledWith(pluginInstalls);
   });
 
+  it("restores missing managed channels only from an installer pre-upgrade backup (#7073)", () => {
+    const restoreRecreatedSandboxState = vi.fn(() => ({
+      success: true,
+      restoredDirs: [],
+      failedDirs: [],
+      restoredFiles: ["openclaw.json"],
+      failedFiles: [],
+    }));
+
+    finalizeCreatedSandbox(
+      {
+        sandboxName: "openclaw",
+        restoreBackupPath: "/tmp/openclaw-backup",
+        preUpgradeBackup: true,
+        targetAgentType: "openclaw",
+        validateManagedDcode: false,
+        provider: "compatible-endpoint",
+        model: "demo",
+        preferredInferenceApi: "openai-completions",
+      },
+      {
+        discoverFreshOpenClawImagePluginInstalls: vi.fn(),
+        restoreRecreatedSandboxState,
+        getDcodeSelectionDrift: vi.fn(),
+        register: vi.fn(),
+        note: vi.fn(),
+        error: vi.fn(),
+        exitProcess: (code): never => {
+          throw new Error(`exit ${code}`);
+        },
+      },
+    );
+
+    expect(restoreRecreatedSandboxState).toHaveBeenCalledWith("openclaw", "/tmp/openclaw-backup", {
+      targetAgentType: "openclaw",
+      restoreMissingManagedChannels: true,
+    });
+  });
+
   it("fails closed before restore and registration when provenance discovery fails", () => {
     const restoreRecreatedSandboxState = vi.fn();
     const register = vi.fn();

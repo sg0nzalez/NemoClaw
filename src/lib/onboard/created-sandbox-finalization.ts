@@ -83,6 +83,7 @@ export function finalizeCreatedSandbox(
         ...(freshOpenClawImagePluginInstalls !== undefined
           ? { freshOpenClawImagePluginInstalls }
           : {}),
+        ...(options.preUpgradeBackup ? { restoreMissingManagedChannels: true } : {}),
       },
     );
     if (restore.success) {

@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   startStoppedSandboxContainerForBackup: vi.fn(),
   backupStartedSandboxState: vi.fn(),
   returnSandboxContainerToStopped: vi.fn(),
+  probeUnpreservedSandboxRootEntries: vi.fn(),
 }));
 
 vi.mock("../state/registry", () => ({
@@ -46,6 +47,9 @@ vi.mock("./sandbox/stopped-sandbox-backup", () => ({
   backupStartedSandboxState: mocks.backupStartedSandboxState,
   returnSandboxContainerToStopped: mocks.returnSandboxContainerToStopped,
 }));
+vi.mock("../state/user-managed-files-probe", () => ({
+  probeUnpreservedSandboxRootEntries: mocks.probeUnpreservedSandboxRootEntries,
+}));
 vi.mock("../domain/lifecycle/options", () => ({
   normalizeGarbageCollectImagesOptions: (o: unknown) => o || {},
 }));
@@ -57,6 +61,7 @@ import {
   backupAll,
   garbageCollectImages,
   rebuildBackupsDirectory,
+  shouldAcceptUnpreservedSandboxData,
   shouldSkipUnreachableSandboxBackup,
 } from "./maintenance";
 
@@ -64,7 +69,10 @@ describe("backupAll", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.backupStartedSandboxState.mockReset();
+    mocks.probeUnpreservedSandboxRootEntries.mockReset();
+    mocks.probeUnpreservedSandboxRootEntries.mockReturnValue({ existing: [] });
     delete process.env.NEMOCLAW_REQUIRE_ALL_SANDBOX_BACKUPS;
+    delete process.env.NEMOCLAW_ACCEPT_UNPRESERVED_SANDBOX_DATA;
     mocks.captureSandboxListWithGatewayPreflightOrExit.mockResolvedValue({
       status: 0,
       output: "sb-good\nsb-bad\n",
@@ -76,6 +84,7 @@ describe("backupAll", () => {
 
   afterEach(() => {
     delete process.env.NEMOCLAW_REQUIRE_ALL_SANDBOX_BACKUPS;
+    delete process.env.NEMOCLAW_ACCEPT_UNPRESERVED_SANDBOX_DATA;
     delete process.env.NEMOCLAW_SKIP_UNREACHABLE_SANDBOX_BACKUP;
     vi.restoreAllMocks();
   });
@@ -180,6 +189,100 @@ describe("backupAll", () => {
     });
     expect(mocks.backupSandboxState).toHaveBeenCalledWith("sb-good");
     logSpy.mockRestore();
+  });
+
+  it("stops strict pre-upgrade before undeclared sandbox data can be lost (#7073)", async () => {
+    mocks.listSandboxes.mockReturnValue({
+      sandboxes: [{ name: "my-assistant" }],
+      defaultSandbox: "my-assistant",
+    });
+    mocks.parseReadySandboxNames.mockReturnValue(new Set(["my-assistant"]));
+    mocks.probeUnpreservedSandboxRootEntries.mockReturnValue({
+      existing: ["/sandbox/.env", "/sandbox/user-data"],
+    });
+    mocks.backupSandboxState.mockReturnValue({
+      success: true,
+      backedUpDirs: ["workspace"],
+      failedDirs: [],
+      backedUpFiles: ["openclaw.json"],
+      failedFiles: [],
+      manifest: { backupPath: "/backups/my-assistant/timestamp" },
+    });
+    process.env.NEMOCLAW_REQUIRE_ALL_SANDBOX_BACKUPS = "1";
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
+      throw new Error(`exit:${code}`);
+    }) as never);
+
+    await expect(backupAll()).rejects.toThrow("exit:1");
+
+    expect(mocks.backupSandboxState).toHaveBeenCalledWith("my-assistant");
+    const output = errorSpy.mock.calls.flat().join("\n");
+    expect(output).toContain('"/sandbox/.env", "/sandbox/user-data"');
+    expect(output).toContain("NEMOCLAW_ACCEPT_UNPRESERVED_SANDBOX_DATA=1");
+  });
+
+  it("backs up after explicit acknowledgement of unpreserved sandbox data (#7073)", async () => {
+    mocks.listSandboxes.mockReturnValue({
+      sandboxes: [{ name: "my-assistant" }],
+      defaultSandbox: "my-assistant",
+    });
+    mocks.parseReadySandboxNames.mockReturnValue(new Set(["my-assistant"]));
+    mocks.probeUnpreservedSandboxRootEntries.mockReturnValue({
+      existing: ["/sandbox/user-data"],
+    });
+    mocks.backupSandboxState.mockReturnValue({
+      success: true,
+      backedUpDirs: ["workspace"],
+      failedDirs: [],
+      backedUpFiles: ["openclaw.json"],
+      failedFiles: [],
+      manifest: { backupPath: "/backups/my-assistant/timestamp" },
+    });
+    process.env.NEMOCLAW_REQUIRE_ALL_SANDBOX_BACKUPS = "1";
+    process.env.NEMOCLAW_ACCEPT_UNPRESERVED_SANDBOX_DATA = "1";
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    await backupAll();
+
+    expect(mocks.backupSandboxState).toHaveBeenCalledWith("my-assistant");
+    expect(warnSpy.mock.calls.flat().join("\n")).toContain(
+      'explicitly accepted unpreserved sandbox data: "/sandbox/user-data"',
+    );
+  });
+
+  it("fails strict backup when the sandbox-root preservation boundary cannot be inspected (#7073)", async () => {
+    mocks.listSandboxes.mockReturnValue({
+      sandboxes: [{ name: "my-assistant" }],
+      defaultSandbox: "my-assistant",
+    });
+    mocks.parseReadySandboxNames.mockReturnValue(new Set(["my-assistant"]));
+    mocks.probeUnpreservedSandboxRootEntries.mockImplementation(() => {
+      throw new Error("unpreserved sandbox-root probe failed: permission denied");
+    });
+    mocks.backupSandboxState.mockReturnValue({
+      success: true,
+      backedUpDirs: ["workspace"],
+      failedDirs: [],
+      backedUpFiles: ["openclaw.json"],
+      failedFiles: [],
+      manifest: { backupPath: "/backups/my-assistant/timestamp" },
+    });
+    process.env.NEMOCLAW_REQUIRE_ALL_SANDBOX_BACKUPS = "1";
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
+      throw new Error(`exit:${code}`);
+    }) as never);
+
+    await expect(backupAll()).rejects.toThrow("exit:1");
+
+    expect(mocks.backupSandboxState).toHaveBeenCalledWith("my-assistant");
+    expect(errorSpy.mock.calls.flat().join("\n")).toContain(
+      "could not verify unpreserved /sandbox data",
+    );
   });
 
   it("does not back up when gateway preflight exits", async () => {
@@ -309,6 +412,9 @@ describe("backupAll", () => {
     expect(exitSpy).not.toHaveBeenCalled();
     expect(mocks.backupStartedSandboxState).toHaveBeenCalledWith("sb-stopped");
     expect(mocks.backupSandboxState).toHaveBeenCalledWith("sb-good");
+    expect(mocks.backupStartedSandboxState.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.probeUnpreservedSandboxRootEntries.mock.invocationCallOrder[1] ?? 0,
+    );
     expect(mocks.returnSandboxContainerToStopped).toHaveBeenCalledWith("openshell-sb-stopped-abc");
     const logOutput = logSpy.mock.calls.flat().join("\n");
     expect(logOutput).toContain("Starting stopped sandbox 'sb-stopped' to back it up");
@@ -698,6 +804,18 @@ describe("shouldSkipUnreachableSandboxBackup", () => {
       shouldSkipUnreachableSandboxBackup({ NEMOCLAW_SKIP_UNREACHABLE_SANDBOX_BACKUP: "true" }),
     ).toBe(false);
     expect(shouldSkipUnreachableSandboxBackup({})).toBe(false);
+  });
+});
+
+describe("shouldAcceptUnpreservedSandboxData", () => {
+  it("requires an exact explicit acknowledgement", () => {
+    expect(
+      shouldAcceptUnpreservedSandboxData({ NEMOCLAW_ACCEPT_UNPRESERVED_SANDBOX_DATA: "1" }),
+    ).toBe(true);
+    expect(
+      shouldAcceptUnpreservedSandboxData({ NEMOCLAW_ACCEPT_UNPRESERVED_SANDBOX_DATA: "true" }),
+    ).toBe(false);
+    expect(shouldAcceptUnpreservedSandboxData({})).toBe(false);
   });
 });
 

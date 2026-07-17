@@ -172,6 +172,8 @@ export interface RecreatedSandboxRestoreOptions {
   allowCustomImageWholeStateFileRestore?: true;
   /** Pre-captured baseline avoids a second remote read during onboarding finalization. */
   freshOpenClawImagePluginInstalls?: readonly OpenClawImagePluginInstall[];
+  /** Legacy upgrade rows lack persisted messaging intent; recover missing sanitized channel blocks. */
+  restoreMissingManagedChannels?: true;
 }
 
 interface InternalRestoreOptions {
@@ -179,6 +181,7 @@ interface InternalRestoreOptions {
   allowCustomImageWholeStateFileRestore?: true;
   discoverFreshOpenClawImagePluginInstalls?: true;
   freshOpenClawImagePluginInstalls?: readonly OpenClawImagePluginInstall[];
+  restoreMissingManagedChannels?: true;
 }
 
 export interface TarValidationResult {
@@ -1315,6 +1318,7 @@ export function restoreRecreatedSandboxState(
       ? { discoverFreshOpenClawImagePluginInstalls: true }
       : {}),
     freshOpenClawImagePluginInstalls: options.freshOpenClawImagePluginInstalls,
+    ...(options.restoreMissingManagedChannels ? { restoreMissingManagedChannels: true } : {}),
   });
 }
 
@@ -1670,6 +1674,7 @@ function restoreSandboxStateInternal(
           _log,
           configFreshOpenClawImagePluginInstalls,
           previousOpenClawImagePluginInstalls,
+          options.restoreMissingManagedChannels === true,
         )
       ) {
         restoredFiles.push(spec.path);

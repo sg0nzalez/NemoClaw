@@ -33,6 +33,7 @@ function runRestoreScenario(options: {
   freshConfig: Record<string, unknown>;
   freshPluginInstalls: OpenClawImagePluginInstall[];
   previousPluginInstalls?: OpenClawImagePluginInstall[];
+  restoreMissingManagedChannels?: true;
 }): {
   cleanupCommand: string | undefined;
   freshMarkers: Record<string, string>;
@@ -160,6 +161,7 @@ process.exit(1);
     const restore = restoreRecreatedSandboxState("alpha", backupPath, {
       targetAgentType: "openclaw",
       freshOpenClawImagePluginInstalls: options.freshPluginInstalls,
+      ...(options.restoreMissingManagedChannels ? { restoreMissingManagedChannels: true } : {}),
     });
     const loggedCommands = fs
       .readFileSync(sshLog, "utf8")
@@ -202,6 +204,40 @@ function expectSuccessfulRestore(result: ReturnType<typeof runRestoreScenario>):
 }
 
 describe("recreated OpenClaw state restore", () => {
+  it("restores sanitized legacy Slack state during pre-upgrade recreation (#7073)", () => {
+    const result = runRestoreScenario({
+      previousPluginInstalls: [],
+      freshPluginInstalls: [],
+      backupExtensionDirs: [],
+      restoreMissingManagedChannels: true,
+      backupConfig: {
+        gateway: { auth: { token: "stale-token" } },
+        channels: {
+          slack: {
+            accounts: {
+              default: {
+                botToken: "openshell:resolve:env:v111_SLACK_BOT_TOKEN",
+                appToken: "openshell:resolve:env:v111_SLACK_APP_TOKEN",
+              },
+            },
+          },
+        },
+      },
+      freshConfig: { gateway: { auth: { token: "fresh-token" } } },
+    });
+
+    expectSuccessfulRestore(result);
+    expect(result.restoredConfig.gateway.auth.token).toBe("fresh-token");
+    expect(result.restoredConfig.channels.slack).toEqual({
+      accounts: {
+        default: {
+          botToken: "openshell:resolve:env:v111_SLACK_BOT_TOKEN",
+          appToken: "openshell:resolve:env:v111_SLACK_APP_TOKEN",
+        },
+      },
+    });
+  });
+
   it.each([
     { provenance: "missing legacy", previousPluginInstalls: undefined },
     { provenance: "known-empty", previousPluginInstalls: [] },

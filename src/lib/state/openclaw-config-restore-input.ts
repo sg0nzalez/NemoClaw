@@ -23,6 +23,7 @@ export interface OpenClawConfigRestoreFromSandboxOptions {
   freshImagePluginInstalls?: readonly OpenClawImagePluginInstall[];
   log?: (message: string) => void;
   previousImagePluginInstalls?: readonly OpenClawImagePluginInstall[];
+  restoreMissingManagedChannels?: boolean;
   specPath: string;
   sshArgs: readonly string[];
 }
@@ -94,6 +95,7 @@ export function buildOpenClawConfigRestoreInputFromSandbox({
   freshImagePluginInstalls,
   log = () => {},
   previousImagePluginInstalls,
+  restoreMissingManagedChannels = false,
   specPath,
   sshArgs,
 }: OpenClawConfigRestoreFromSandboxOptions): OpenClawConfigRestoreInputResult {
@@ -118,6 +120,10 @@ export function buildOpenClawConfigRestoreInputFromSandbox({
   return buildOpenClawConfigRestoreInput(
     backupContents,
     readCurrentOpenClawConfig(sshArgs, dir, specPath, log),
-    { freshImagePluginInstalls, previousImagePluginInstalls },
+    {
+      freshImagePluginInstalls,
+      previousImagePluginInstalls,
+      restoreMissingManagedChannels,
+    },
   );
 }

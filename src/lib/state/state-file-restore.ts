@@ -110,6 +110,7 @@ export function restoreStateFile(
   log: (message: string) => void,
   freshImagePluginInstalls?: readonly OpenClawImagePluginInstall[],
   previousImagePluginInstalls?: readonly OpenClawImagePluginInstall[],
+  restoreMissingManagedChannels = false,
 ): boolean {
   const localPath = path.join(backupPath, spec.path);
   if (!existsSync(localPath)) return true;
@@ -127,6 +128,7 @@ export function restoreStateFile(
       freshImagePluginInstalls,
       log,
       previousImagePluginInstalls,
+      restoreMissingManagedChannels,
       specPath: spec.path,
       sshArgs,
     });

@@ -19,6 +19,7 @@ import { parseReadySandboxNames } from "../runtime-recovery";
 import * as registry from "../state/registry";
 import * as sandboxState from "../state/sandbox";
 import { nemoclawStateRoot, resolveHome } from "../state/state-root";
+import * as userManagedFilesProbe from "../state/user-managed-files-probe";
 import {
   backupStartedSandboxState,
   returnSandboxContainerToStopped,
@@ -37,6 +38,14 @@ const YW = useColor ? "\x1b[1;33m" : "";
 
 export function shouldSkipUnreachableSandboxBackup(env: NodeJS.ProcessEnv): boolean {
   return env.NEMOCLAW_SKIP_UNREACHABLE_SANDBOX_BACKUP === "1";
+}
+
+export function shouldAcceptUnpreservedSandboxData(env: NodeJS.ProcessEnv): boolean {
+  return env.NEMOCLAW_ACCEPT_UNPRESERVED_SANDBOX_DATA === "1";
+}
+
+function formatUnpreservedSandboxPaths(paths: readonly string[]): string {
+  return paths.map((entry) => JSON.stringify(entry)).join(", ");
 }
 
 export function rebuildBackupsDirectory(home: string, gatewayPort: number): string {
@@ -64,6 +73,7 @@ export async function backupAll(): Promise<void> {
 
   const skipUnreachable = shouldSkipUnreachableSandboxBackup(process.env);
   const requireAll = process.env.NEMOCLAW_REQUIRE_ALL_SANDBOX_BACKUPS === "1";
+  const acceptUnpreservedSandboxData = shouldAcceptUnpreservedSandboxData(process.env);
   let backed = 0;
   let failed = 0;
   let skipped = 0;
@@ -88,11 +98,31 @@ export async function backupAll(): Promise<void> {
     console.log(`  Backing up '${sb.name}'...`);
     let result: sandboxState.BackupResult | null = null;
     let orphanManifestMessage: string | null = null;
+    let unpreservedRootEntries: string[] = [];
+    let rootProbeError: string | null = null;
     let returnedToStopped = true;
     try {
       result = startedForBackup
         ? await backupStartedSandboxState(sb.name)
         : sandboxState.backupSandboxState(sb.name);
+      // A stopped Docker sandbox may need the backup helper's SSH retry before
+      // any in-sandbox inspection is reliable. Probe after a successful
+      // snapshot, while the container is still running, and still fail the
+      // strict installer gate before it can delete or recreate the sandbox.
+      if (requireAll && result.success) {
+        try {
+          unpreservedRootEntries = userManagedFilesProbe.probeUnpreservedSandboxRootEntries(
+            sb.name,
+          ).existing;
+        } catch (err) {
+          rootProbeError = err instanceof Error ? err.message : String(err);
+        }
+      }
+      if (unpreservedRootEntries.length > 0 && acceptUnpreservedSandboxData) {
+        console.warn(
+          `  ${YW}⚠${R} ${sb.name}: explicitly accepted unpreserved sandbox data: ${formatUnpreservedSandboxPaths(unpreservedRootEntries)}`,
+        );
+      }
     } catch (err: unknown) {
       // Source-of-truth review (#5734 / #5819):
       //
@@ -149,6 +179,23 @@ export async function backupAll(): Promise<void> {
     if (orphanManifestMessage) {
       console.log(`  ${YW}⚠${R} Skipped '${sb.name}' (orphan manifest): ${orphanManifestMessage}`);
       skipped++;
+      continue;
+    }
+    if (rootProbeError !== null) {
+      console.error(
+        `  ${RD}✗${R} ${sb.name}: strict pre-upgrade backup could not verify unpreserved /sandbox data (${rootProbeError})`,
+      );
+      failed++;
+      continue;
+    }
+    if (unpreservedRootEntries.length > 0 && !acceptUnpreservedSandboxData) {
+      console.error(
+        `  ${RD}✗${R} ${sb.name}: strict pre-upgrade backup does not preserve these /sandbox paths: ${formatUnpreservedSandboxPaths(unpreservedRootEntries)}`,
+      );
+      console.error(
+        "    Move or download them before upgrading. To explicitly accept their loss, rerun with NEMOCLAW_ACCEPT_UNPRESERVED_SANDBOX_DATA=1.",
+      );
+      failed++;
       continue;
     }
     if (!result) throw new Error(`Backup for '${sb.name}' completed without a result`);
