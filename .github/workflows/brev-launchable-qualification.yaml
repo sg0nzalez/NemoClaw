@@ -106,6 +106,11 @@ jobs:
         with:
           node-version: "22"
 
+      - name: Prepare E2E workspace
+        uses: NVIDIA/NemoClaw/.github/actions/prepare-e2e@50281ee84c4a6fc759da95ea28fc0b7d9c378a28
+        with:
+          build-cli: "false"
+
       - id: workspace
         name: Create private evidence workspace
         shell: bash
@@ -222,21 +227,19 @@ jobs:
           instance_name="nclaw-e2e-${short_sha}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           printf 'instance_name=%s\n' "$instance_name" >> "$GITHUB_OUTPUT"
 
-      - name: Deploy the configured staging Launchable
+      - name: Run exact staging Launchable live test
         env:
           BREV_LAUNCHABLE_ID: ${{ vars.NEMOCLAW_STAGING_LAUNCHABLE_ID }}
-          INSTANCE_NAME: ${{ steps.brev-workspace.outputs.instance_name }}
-          WORK_DIR: ${{ steps.workspace.outputs.work_dir }}
-        run: tools/e2e/brev-launchable-runtime.sh deploy
-
-      - name: Verify exact boot image and run preinstalled-image smoke
-        env:
           CANDIDATE_SHA: ${{ inputs.candidate_sha }}
           INSTANCE_NAME: ${{ steps.brev-workspace.outputs.instance_name }}
+          NEMOCLAW_RUN_EXACT_STAGING_LAUNCHABLE: "1"
+          NEMOCLAW_RUN_LIVE_E2E: "1"
           NVIDIA_INFERENCE_API_KEY: ${{ secrets.NVIDIA_INFERENCE_API_KEY }}
           VALIDATED_MANIFEST: ${{ steps.workspace.outputs.work_dir }}/validated-manifest.v1.json
           WORK_DIR: ${{ steps.workspace.outputs.work_dir }}
-        run: tools/e2e/brev-launchable-runtime.sh qualify
+        run: >-
+          npx tsx tools/e2e/live-vitest-invocation.mts run
+          --test-path test/e2e/live/exact-staging-launchable.test.ts
 
       - name: Redact runtime evidence
         if: ${{ always() && steps.workspace.outputs.work_dir != '' }}

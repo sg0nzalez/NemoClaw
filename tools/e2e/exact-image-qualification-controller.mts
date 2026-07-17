@@ -671,8 +671,13 @@ function readDispatchIntent(workDir: string): ExactImageDispatchIntent | null {
   persistedString(request, "candidateSha", "dispatch intent candidate SHA", FULL_SHA_PATTERN);
   persistedString(request, "correlationId", "dispatch intent correlation ID", UUID_V4_PATTERN);
   validatePersistedReason(request.reason, "dispatch intent reason");
-  if (request.requesterRunAttempt !== 1) {
-    fail("PROVENANCE_MISMATCH", "dispatch intent requester run attempt must equal 1");
+  const requesterRunAttempt = request.requesterRunAttempt;
+  if (
+    typeof requesterRunAttempt !== "number" ||
+    !Number.isSafeInteger(requesterRunAttempt) ||
+    requesterRunAttempt < 1
+  ) {
+    fail("PROVENANCE_MISMATCH", "dispatch intent requester run attempt must be positive");
   }
   persistedString(
     request,
@@ -810,8 +815,13 @@ function validatePersistedRequest(value: unknown): void {
   persistedString(request, "candidateSha", "controller state candidate SHA", FULL_SHA_PATTERN);
   persistedString(request, "correlationId", "controller state correlation ID", UUID_V4_PATTERN);
   validatePersistedReason(request.reason, "controller state reason");
-  if (request.requesterRunAttempt !== 1) {
-    fail("PROVENANCE_MISMATCH", "controller state requester run attempt must equal 1");
+  const requesterRunAttempt = request.requesterRunAttempt;
+  if (
+    typeof requesterRunAttempt !== "number" ||
+    !Number.isSafeInteger(requesterRunAttempt) ||
+    requesterRunAttempt < 1
+  ) {
+    fail("PROVENANCE_MISMATCH", "controller state requester run attempt must be positive");
   }
   persistedString(
     request,

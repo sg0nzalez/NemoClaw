@@ -76,10 +76,14 @@ wait_for_workspace_ready() {
 
 deploy() {
   validate_common
+  local existing
   require_env BREV_LAUNCHABLE_ID
   [[ "$BREV_LAUNCHABLE_ID" =~ ^env-[A-Za-z0-9]+$ ]] \
     || die "BREV_LAUNCHABLE_ID must be one opaque env-* ID"
-  if [ -n "$(workspace_record)" ]; then
+  if ! existing="$(workspace_record)"; then
+    die "unable to inventory Brev workspaces before deploy"
+  fi
+  if [ -n "$existing" ]; then
     die "refusing to reuse pre-existing workspace $INSTANCE_NAME"
   fi
   printf '{"schemaVersion":1,"launchableId":%s,"workspaceName":%s,"requestedAt":%s}\n' \
@@ -115,6 +119,8 @@ verify_identity() {
     || die "the baked provision metadata is missing or malformed"
   printf '%s\n' "$provision" >"$WORK_DIR/brev-provision.json"
   provision_sha="$(jq -r '.gitSha' <<<"$provision")"
+  [[ "$provision_sha" =~ ^[0-9a-f]{7,40}$ ]] \
+    || die "provision metadata SHA must be a lowercase Git SHA"
 
   # HOME and repo are intentionally expanded by the remote host shell.
   # shellcheck disable=SC2016

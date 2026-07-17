@@ -36,7 +36,7 @@ export const REQUEST: ExactImageQualificationRequest = {
   eventName: "workflow_dispatch",
   reason: "Qualify the current daily candidate before tagging",
   ref: "refs/heads/main",
-  requesterRunAttempt: 1,
+  requesterRunAttempt: 2,
   requesterRunId: "97531",
   workflowSha: WORKFLOW_SHA,
 };

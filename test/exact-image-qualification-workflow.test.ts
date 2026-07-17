@@ -11,6 +11,7 @@ import {
 } from "./helpers/e2e-workflow-contract";
 
 const WORKFLOW_PATH = ".github/workflows/brev-launchable-qualification.yaml";
+const E2E_WORKFLOW_PATH = ".github/workflows/e2e.yaml";
 const CONTROLLER_PATH = "tools/e2e/exact-image-qualification-controller.mts";
 const RUNTIME_PATH = "tools/e2e/brev-launchable-runtime.sh";
 
@@ -31,7 +32,7 @@ function strings(value: unknown): string[] {
         : [];
 }
 
-function job(workflow: QualificationWorkflow, name: string): WorkflowJob {
+function job(workflow: Workflow, name: string): WorkflowJob {
   const value = workflow.jobs[name];
   expect(value, `missing ${name} job`).toBeDefined();
   return value!;
@@ -40,11 +41,13 @@ function job(workflow: QualificationWorkflow, name: string): WorkflowJob {
 // source-shape-contract: security -- Exact-image qualification must remain manual/reusable, protected, fixed-target, least-privilege, identity-gated, and cleanup-verifying
 it("keeps exact-image Launchable qualification protected, reusable, and fail-closed", () => {
   const workflow = readYaml<QualificationWorkflow>(WORKFLOW_PATH);
+  const e2eWorkflow = readYaml<Workflow>(E2E_WORKFLOW_PATH);
   const source = readRepoText(WORKFLOW_PATH);
   const controller = readRepoText(CONTROLLER_PATH);
   const runtime = readRepoText(RUNTIME_PATH);
   const preflight = job(workflow, "preflight");
   const qualify = job(workflow, "qualify");
+  const caller = job(e2eWorkflow, "staging-brev-launchable");
   const workflowStrings = strings(workflow);
 
   expect(workflow.name).toBe("E2E / Exact Staging Brev Launchable");
@@ -65,6 +68,12 @@ it("keeps exact-image Launchable qualification protected, reusable, and fail-clo
     "NVIDIA_INFERENCE_API_KEY",
   ]);
   expect(workflow.permissions).toEqual({});
+  expect(caller.secrets).toEqual({
+    NEMOCLAW_IMAGE_DISPATCH_TOKEN: "${{ secrets.NEMOCLAW_IMAGE_DISPATCH_TOKEN }}",
+    BREV_API_KEY: "${{ secrets.BREV_API_KEY }}",
+    BREV_ORG_ID: "${{ secrets.BREV_ORG_ID }}",
+    NVIDIA_INFERENCE_API_KEY: "${{ secrets.NVIDIA_INFERENCE_API_KEY }}",
+  });
   expect(workflow.concurrency).toEqual({
     group: "brev-launchable-qualification-${{ inputs.candidate_sha }}",
     "cancel-in-progress": false,
@@ -86,7 +95,7 @@ it("keeps exact-image Launchable qualification protected, reusable, and fail-clo
     expect(step.run ?? "").not.toContain("${{ inputs.");
   }
 
-  const actionUses = workflowStrings.filter((value) => value.includes("actions/"));
+  const actionUses = workflowStrings.filter((value) => value.startsWith("actions/"));
   expect(actionUses.length).toBeGreaterThan(0);
   for (const use of actionUses) expect(use).toMatch(/^actions\/[a-z-]+@[0-9a-f]{40}$/u);
   for (const checkout of qualify.steps?.filter((step) =>
@@ -130,7 +139,9 @@ it("keeps exact-image Launchable qualification protected, reusable, and fail-clo
   expect(source).toContain("--mode finalize");
   expect(runtime).toContain("brev create");
   expect(runtime).toContain("--launchable");
-  expect(source).toContain("brev-launchable-runtime.sh qualify");
+  expect(source).toContain("tools/e2e/live-vitest-invocation.mts run");
+  expect(source).toContain("test/e2e/live/exact-staging-launchable.test.ts");
+  expect(source).not.toContain("brev-launchable-runtime.sh qualify");
   expect(source).toContain("brev-launchable-runtime.sh cleanup");
   expect(source).toContain("brev-cleanup-evidence.json");
   expect(source).toContain("NEMOCLAW_STAGING_LAUNCHABLE_ID");
