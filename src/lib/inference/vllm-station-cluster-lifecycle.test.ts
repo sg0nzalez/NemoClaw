@@ -237,6 +237,15 @@ describe("dual-Station managed vLLM run argv", () => {
     expect(args).toEqual(
       expect.arrayContaining(["--network", "host", "--shm-size", "16g", "--read-only"]),
     );
+    expect(
+      args.some(
+        (arg) =>
+          arg === "-p" ||
+          arg === "--publish" ||
+          arg.startsWith("-p=") ||
+          arg.startsWith("--publish="),
+      ),
+    ).toBe(false);
     expect(dockerValues(args, "--workdir")).toEqual(["/home/vllm"]);
     expect(dockerValues(args, "--tmpfs")).toEqual([
       "/tmp:rw,nosuid,nodev,size=17179869184",

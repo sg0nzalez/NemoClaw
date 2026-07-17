@@ -258,8 +258,9 @@ export const VLLM_MODELS: readonly VllmModelDef[] = [
       imageDownloadSizeBytes: NEMOTRON_ULTRA_STATION_IMAGE.arm64.downloadSizeBytes,
       modelDownloadSizeBytes: 352_381_245_521,
       loadTimeoutSec: 3600,
-      // Keep NemoClaw's bridge-networked local-inference boundary instead of
-      // importing the playbook's host-network setting.
+      // The single-host runtime keeps NemoClaw's bridge-networked local-
+      // inference boundary. The qualified dual-Station lifecycle intentionally
+      // builds a separate host-networked launch contract for NCCL/RDMA.
       dockerRunArgs: ["--shm-size", "16g", "--ulimit", "memlock=-1", "--ulimit", "stack=67108864"],
     },
     // The digest-pinned vLLM image already contains the serving package, and
