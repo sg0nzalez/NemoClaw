@@ -137,6 +137,46 @@ describe("mergeOpenClawRestoredConfig", () => {
     ).toBeUndefined();
   });
 
+  it("restores missing managed channels only for legacy pre-upgrade recovery (#7073)", () => {
+    const merged = mergeOpenClawRestoredConfig(
+      {
+        channels: {
+          slack: {
+            accounts: {
+              default: {
+                botToken: "openshell:resolve:env:v111_SLACK_BOT_TOKEN",
+                appToken: "openshell:resolve:env:v111_SLACK_APP_TOKEN",
+              },
+            },
+          },
+          telegram: { accounts: { default: { token: "stale-token" } } },
+        },
+      },
+      {
+        gateway: { auth: { token: "fresh-token" } },
+        channels: {
+          telegram: { accounts: { default: { token: "fresh-token" } } },
+        },
+      },
+      { restoreMissingManagedChannels: true },
+    );
+
+    expect(merged).toMatchObject({
+      gateway: { auth: { token: "fresh-token" } },
+      channels: {
+        slack: {
+          accounts: {
+            default: {
+              botToken: "openshell:resolve:env:v111_SLACK_BOT_TOKEN",
+              appToken: "openshell:resolve:env:v111_SLACK_APP_TOKEN",
+            },
+          },
+        },
+        telegram: { accounts: { default: { token: "fresh-token" } } },
+      },
+    });
+  });
+
   it("preserves backup provider and plugin entries when current entry maps are absent", () => {
     const merged = mergeOpenClawRestoredConfig(
       {

@@ -258,4 +258,26 @@ describe("probeUserManagedFiles", () => {
     expect(result.declared).toEqual([]);
     expect(result.existing).toEqual([]);
   });
+
+  it("finds top-level sandbox data outside image-owned entries and the agent config root (#7073)", () => {
+    stubSpawnSync(".profile\0user-data\0.fake-data\0.fake\0.bash_history\0.nemoclaw\0.bashrc\0", 0);
+    const { probeUnpreservedSandboxRootEntries } = loadProbe();
+
+    expect(probeUnpreservedSandboxRootEntries("alpha")).toEqual({
+      existing: ["/sandbox/.bash_history", "/sandbox/user-data"],
+    });
+    const lastArgs = recordedArgs[0] ?? [];
+    const probeCmd = lastArgs[lastArgs.length - 1] ?? "";
+    expect(probeCmd).toContain("find -P '/sandbox' -mindepth 1 -maxdepth 1");
+    expect(probeCmd).toContain("-printf '%f\\0'");
+  });
+
+  it("fails closed when top-level sandbox data cannot be inspected (#7073)", () => {
+    stubSpawnSync("", 1, "permission denied");
+    const { probeUnpreservedSandboxRootEntries } = loadProbe();
+
+    expect(() => probeUnpreservedSandboxRootEntries("alpha")).toThrow(
+      /unpreserved sandbox-root probe failed: permission denied/,
+    );
+  });
 });

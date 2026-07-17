@@ -74,6 +74,7 @@ function mergeOpenClawChannels(
   backupChannels: unknown,
   currentChannels: unknown,
   previousImagePluginIds?: ReadonlySet<string>,
+  restoreMissingManagedChannels = false,
 ): unknown {
   if (!isPlainObject(backupChannels)) return cloneJson(currentChannels);
 
@@ -95,6 +96,18 @@ function mergeOpenClawChannels(
       // revisions and current start/stop/add/remove state. Never resurrect a
       // managed channel that the fresh config omitted, and never overwrite a
       // present managed channel with a stale backed-up account block.
+      //
+      // Legacy pre-upgrade recreation is the one exception: those registry
+      // rows predate persisted messaging intent, so the fresh image cannot
+      // regenerate a configured channel. Restore only a missing managed block
+      // from the sanitized backup; an explicit fresh block still wins.
+      if (
+        restoreMissingManagedChannels &&
+        MANAGED_OPENCLAW_CHANNELS.has(key) &&
+        !Object.hasOwn(merged, key)
+      ) {
+        merged[key] = cloneJson(value);
+      }
       continue;
     }
 
@@ -420,6 +433,7 @@ function mergeOpenClawPlugins(
 export interface OpenClawConfigMergeOptions {
   freshImagePluginInstalls?: readonly OpenClawImagePluginInstall[];
   previousImagePluginInstalls?: readonly OpenClawImagePluginInstall[];
+  restoreMissingManagedChannels?: boolean;
 }
 
 export function mergeOpenClawRestoredConfig(
@@ -450,6 +464,7 @@ export function mergeOpenClawRestoredConfig(
     backedUpConfig.channels,
     currentConfig.channels,
     previousOwnership.ids,
+    options.restoreMissingManagedChannels === true,
   );
   merged.models = mergeOpenClawModels(backedUpConfig.models, currentConfig.models);
   merged.plugins = mergeOpenClawPlugins(

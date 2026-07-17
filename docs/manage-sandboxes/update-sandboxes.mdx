@@ -57,6 +57,20 @@ After backup, the installer compares the installed OpenShell version with the su
 It retires the running gateway before replacing an out-of-range OpenShell installation, keeps the gateway when the installed version is supported, and stops without retiring it when the installed version or supported range cannot be validated.
 If the installed OpenShell release cannot retire its gateway through a supported lifecycle command or the verified NemoClaw-owned gateway PID, the installer also stops after backup with the sandbox backups preserved.
 
+The strict pre-upgrade backup checks the top level of `/sandbox` for entries outside the image-managed entries and the agent config root.
+If the installer reports an unpreserved path, move or download that path and rerun the installer.
+
+<Warning>
+Set `NEMOCLAW_ACCEPT_UNPRESERVED_SANDBOX_DATA=1` only when you intend to discard every reported path.
+The setting acknowledges the loss and does not include those paths in the snapshot.
+</Warning>
+
+Pass the setting to the installer on the `bash` side of the pipeline:
+
+```bash
+curl -fsSL https://www.nvidia.com/nemoclaw.sh | NEMOCLAW_ACCEPT_UNPRESERVED_SANDBOX_DATA=1 bash
+```
+
 After the host CLI and OpenShell update, the installer runs `$$nemoclaw upgrade-sandboxes --auto` to reconcile the existing sandboxes.
 
 If an existing sandbox is not Ready, the automatic path requires a validated latest backup whose sandbox and agent identity match the registry and positive evidence that NemoClaw managed the image.
