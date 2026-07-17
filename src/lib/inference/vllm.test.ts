@@ -129,7 +129,7 @@ function vllmContainerRow(
 
 function mockSuccessfulVllmInstall(
   containerName: string,
-  ownershipResponses: readonly (() => string)[] = [() => "", () => ""],
+  ownershipResponses: readonly (() => string)[] = [() => "", () => "", () => "", () => ""],
 ): void {
   const runCaptureByCommand: Record<string, string> = {
     curl: '{"data":[]}',
@@ -153,7 +153,7 @@ function mockSuccessfulVllmInstall(
     ["ps", () => `${containerName}\n`],
   ]);
   const dockerCaptureByContextAndCommand = new Map<string, () => string>([
-    ["default:container", () => ""],
+    ["default:container", () => (ownershipQueue.shift() ?? (() => ""))()],
   ]);
   mocks.dockerCapture.mockImplementation(
     (args: readonly string[], options?: { env?: NodeJS.ProcessEnv }) =>
@@ -1273,7 +1273,8 @@ describe("installVllm model resolution", () => {
   it("replaces only an existing managed container by its inspected ID", async () => {
     const profile = detectVllmProfile({ platform: "spark", type: "nvidia" })!;
     const managed = vllmContainerRow(profile.containerName);
-    mockSuccessfulVllmInstall(profile.containerName, [() => managed, () => managed]);
+    const managedResponses = Array.from({ length: 4 }, () => () => managed);
+    mockSuccessfulVllmInstall(profile.containerName, managedResponses);
     mocks.dockerImageInspectFormat.mockReturnValue("sha256:cached-image");
 
     const result = await installVllm(profile, {
@@ -1405,9 +1406,8 @@ describe("installVllm model resolution", () => {
     "false",
   ])("preserves a same-name container with managed label %j before downloads", async (label) => {
     const profile = detectVllmProfile({ platform: "spark", type: "nvidia" })!;
-    mockSuccessfulVllmInstall(profile.containerName, [
-      () => vllmContainerRow(profile.containerName, { label }),
-    ]);
+    const foreign = vllmContainerRow(profile.containerName, { label });
+    mockSuccessfulVllmInstall(profile.containerName, [() => foreign, () => foreign]);
 
     const result = await installVllm(profile, {
       hasImage: true,
@@ -1452,10 +1452,12 @@ describe("installVllm model resolution", () => {
 
   it("rechecks ownership after downloads and preserves a replacement container", async () => {
     const profile = detectVllmProfile({ platform: "spark", type: "nvidia" })!;
-    mockSuccessfulVllmInstall(profile.containerName, [
-      () => vllmContainerRow(profile.containerName),
-      () => vllmContainerRow(profile.containerName, { label: "" }),
-    ]);
+    const managed = vllmContainerRow(profile.containerName);
+    const foreign = vllmContainerRow(profile.containerName, { label: "" });
+    mockSuccessfulVllmInstall(
+      profile.containerName,
+      [managed, managed, foreign, foreign].map((row) => () => row),
+    );
     mocks.dockerImageInspectFormat.mockReturnValue("sha256:cached-image");
 
     const result = await installVllm(profile, {

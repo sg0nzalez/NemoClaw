@@ -473,6 +473,43 @@ shutil.disk_usage = lambda _path: _NemoClawDiskUsage()
     }
   });
 
+  it("does not credit a full-sized corrupt partial file toward remote capacity", async () => {
+    const remoteRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-model-peer-corrupt-"));
+    const peerHome = path.join(remoteRoot, "peer-home");
+    fs.mkdirSync(peerHome, { mode: 0o700 });
+    const fixturePlan = plan();
+    fixturePlan.peer.home = peerHome;
+    const peerStaging = peerStagingForPlan(fixturePlan);
+    fs.mkdirSync(peerStaging, { mode: 0o700, recursive: true });
+    fs.writeFileSync(path.join(peerStaging, "config.json"), "xx");
+    const statfs = sufficientStatfs();
+    const headroomOnly = `import shutil
+class _NemoClawDiskUsage:
+    free = 5 * 1024 * 1024 * 1024
+shutil.disk_usage = lambda _path: _NemoClawDiskUsage()
+`;
+    const runCommand = createManifestPeerPythonRunner({
+      localManifest: manifest(),
+      peerHome,
+      peerInputPrefix: headroomOnly,
+    });
+
+    try {
+      await expect(
+        stageDualStationModelSnapshot(fixturePlan, { runCommand, statfs }),
+      ).resolves.toEqual({
+        ok: false,
+        reason:
+          "peer snapshot preflight failed: peer model cache does not have enough free space for the pinned snapshot",
+      });
+      expect(runCommand.mock.calls.map((call) => call[0])).toEqual(["python3", "ssh"]);
+      expect(statfs).not.toHaveBeenCalled();
+      expect(fs.readFileSync(path.join(peerStaging, "config.json"), "utf8")).toBe("xx");
+    } finally {
+      fs.rmSync(remoteRoot, { force: true, recursive: true });
+    }
+  });
+
   it("gives concurrent reversed and different local heads disjoint retry-safe staging paths", async () => {
     const original = plan();
     const reversed = plan();

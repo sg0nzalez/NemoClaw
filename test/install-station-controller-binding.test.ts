@@ -109,13 +109,20 @@ config_dir="$HOME/etc/nemoclaw"
 binding_file="$config_dir/dual-station-controller-uid"
 mkdir -p "$HOME/etc"
 controller_uid=1001
+binding_owned=0
 preparation_controller_uid() { printf '%s\\n' "$controller_uid"; }
 ensure_root_directory_safe() { mkdir -p "$1"; }
 assert_root_directory_safe() { [[ -d "$1" ]]; }
-root_regular_file_is_safe() { [[ -f "$1" ]]; }
+root_regular_file_is_safe() { ((binding_owned == 1)) && [[ -f "$1" ]]; }
 root_directory_is_safe_unprivileged() { [[ -d "$1" ]]; }
-root_regular_file_is_safe_unprivileged() { [[ -f "$1" ]]; }
-sudo() { if [[ "$1" == "chown" ]]; then return 0; fi; "$@"; }
+root_regular_file_is_safe_unprivileged() { ((binding_owned == 1)) && [[ -f "$1" ]]; }
+sudo() {
+  if [[ "$1" == "chown" && "$2" == "root:root" && "$3" == "\${config_dir}/.dual-station-controller-uid."* ]]; then
+    binding_owned=1
+    return 0
+  fi
+  "$@"
+}
 ensure_dual_station_controller_uid_binding "$config_dir" "$binding_file"
 ensure_dual_station_controller_uid_binding "$config_dir" "$binding_file"
 controller_uid=1002

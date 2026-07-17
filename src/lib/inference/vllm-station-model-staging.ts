@@ -549,7 +549,7 @@ def verify_parent_chain():
 def verify_partial(root):
     if root.is_symlink() or not root.is_dir():
         fail("peer staging path is unsafe")
-    expected_files = {item["path"]: item["size"] for item in EXPECTED["files"]}
+    expected_files = {item["path"]: item for item in EXPECTED["files"]}
     expected_directories = set(EXPECTED["directories"])
     entry_count = 0
     reusable_bytes = 0
@@ -569,14 +569,21 @@ def verify_partial(root):
             relative = relative_name(root, candidate)
             mode = candidate.lstat().st_mode
             size = candidate.stat().st_size
+            expected = expected_files.get(relative)
             if (
                 stat.S_ISLNK(mode)
                 or not stat.S_ISREG(mode)
-                or relative not in expected_files
-                or size > expected_files[relative]
+                or expected is None
+                or size > expected["size"]
             ):
                 fail("peer staging path contains an unsafe entry")
-            reusable_bytes += size
+            if size == expected["size"]:
+                digest = hashlib.sha256()
+                with candidate.open("rb") as handle:
+                    for chunk in iter(lambda: handle.read(8 * 1024 * 1024), b""):
+                        digest.update(chunk)
+                if digest.hexdigest() == expected["sha256"]:
+                    reusable_bytes += size
             entry_count += 1
             if entry_count > 8192:
                 fail("peer staging path exceeds the safety bound")
