@@ -260,7 +260,17 @@ function openclawConnectionState(connected: boolean, healthState: string | null)
   return healthState === "starting" || healthState === "stale" ? "connecting" : "close";
 }
 
-// Never emit raw error text or self.* PII. Only healthState (an enum) and
+// The documented healthState enum. `readStringValue` would otherwise pass
+// arbitrary external text through, so any non-enum value is mapped to a fixed
+// "unknown" token before it can reach diagnostics (redaction contract).
+const KNOWN_HEALTH_STATES: ReadonlySet<string> = new Set([
+  "starting",
+  "healthy",
+  "stale",
+  "stopped",
+]);
+
+// Never emit raw error text or self.* PII. Only the healthState enum and
 // reconnectAttempts (a non-negative integer) are surfaced, and only when they
 // carry non-healthy signal.
 function summarizeOpenclawLive(
@@ -268,8 +278,8 @@ function summarizeOpenclawLive(
   reconnectAttemptsRaw: unknown,
 ): readonly string[] {
   const parts: string[] = [];
-  if (healthState && healthState !== "healthy") {
-    parts.push(`healthState=${healthState}`);
+  if (healthState !== null && healthState !== "healthy") {
+    parts.push(`healthState=${KNOWN_HEALTH_STATES.has(healthState) ? healthState : "unknown"}`);
   }
   const reconnectAttempts =
     typeof reconnectAttemptsRaw === "number" && Number.isFinite(reconnectAttemptsRaw)

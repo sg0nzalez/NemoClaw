@@ -183,6 +183,17 @@ describe("whatsapp.statusHealth openclaw CLI probe", () => {
     expect(serialized).not.toContain("disconnect from");
   });
 
+  it("maps an unrecognized healthState to a fixed token so free text cannot leak", () => {
+    // healthState is external JSON text; a compromised gateway could stuff PII
+    // into it. Only the documented enum may be surfaced verbatim.
+    const wa: WaFixture = { ...HEALTHY_WA, healthState: `leaked ${REDACTION_PHONE}` };
+    const exec = makeExec({ status: 0, stdout: openclawJson(wa), stderr: "" });
+    const result = createWhatsappStatusHealthHook({ executeSandboxCommand: exec })(context());
+    const serialized = stringifyReport(result);
+    expect(serialized).not.toContain(REDACTION_PHONE);
+    expect(serialized).toContain("healthState=unknown");
+  });
+
   it("reports whatsapp not configured when the gateway returns an unknown-channel error", () => {
     const exec = makeExec({ status: 0, stdout: openclawJson(null), stderr: "" });
     const report = reportOf(
