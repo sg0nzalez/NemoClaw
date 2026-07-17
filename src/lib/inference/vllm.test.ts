@@ -152,13 +152,18 @@ function mockSuccessfulVllmInstall(
     ["container", () => (ownershipQueue.shift() ?? (() => ""))()],
     ["ps", () => `${containerName}\n`],
   ]);
+  const dockerCaptureByContextAndCommand = new Map<string, () => string>([
+    ["default:container", () => ""],
+  ]);
   mocks.dockerCapture.mockImplementation(
-    (args: readonly string[], options?: { env?: NodeJS.ProcessEnv }) => {
-      if (args[0] === "container" && options?.env?.DOCKER_CONTEXT === "default") {
-        return "";
-      }
-      return (dockerCaptureByCommand.get(args[0] ?? "") ?? (() => ""))();
-    },
+    (args: readonly string[], options?: { env?: NodeJS.ProcessEnv }) =>
+      (
+        dockerCaptureByContextAndCommand.get(
+          `${options?.env?.DOCKER_CONTEXT ?? "ambient"}:${args[0] ?? ""}`,
+        ) ??
+        dockerCaptureByCommand.get(args[0] ?? "") ??
+        (() => "")
+      )(),
   );
 }
 
@@ -1325,13 +1330,22 @@ describe("installVllm model resolution", () => {
     delete process.env.DOCKER_CONTEXT;
     const profile = detectVllmProfile({ platform: "spark", type: "nvidia" })!;
     mockSuccessfulVllmInstall(profile.containerName);
-    mocks.dockerCapture.mockImplementation(
-      (args: readonly string[], options?: { env?: NodeJS.ProcessEnv }) => {
-        if (args[0] === "container" && options?.env?.DOCKER_CONTEXT === "default") {
+    const dockerCaptureByContextAndCommand = new Map<string, () => string>([
+      [
+        "default:container",
+        () => {
           throw new Error("canonical Docker unavailable");
-        }
-        return vllmContainerRow(profile.containerName);
-      },
+        },
+      ],
+      ["ambient:container", () => vllmContainerRow(profile.containerName)],
+    ]);
+    mocks.dockerCapture.mockImplementation(
+      (args: readonly string[], options?: { env?: NodeJS.ProcessEnv }) =>
+        (
+          dockerCaptureByContextAndCommand.get(
+            `${options?.env?.DOCKER_CONTEXT ?? "ambient"}:${args[0] ?? ""}`,
+          ) ?? (() => vllmContainerRow(profile.containerName))
+        )(),
     );
 
     const result = await installVllm(profile, {

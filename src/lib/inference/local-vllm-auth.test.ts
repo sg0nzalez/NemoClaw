@@ -36,6 +36,11 @@ import {
 const BASE_URL = "http://10.40.0.1:8000";
 const API_KEY = "e".repeat(64);
 const OTHER_API_KEY = "f".repeat(64);
+const MANAGED_BASE_URL_BY_API_KEY = new Map<string | null | undefined, string | null>([
+  [undefined, BASE_URL],
+  [API_KEY, BASE_URL],
+  [null, null],
+]);
 
 let actualLifecycle: typeof import("./vllm-station-cluster-lifecycle");
 
@@ -76,10 +81,9 @@ function productionManagedBaseUrlResolver(
 beforeEach(() => {
   vi.stubEnv(LOCAL_INFERENCE_SANDBOX_HOST_URL_ENV, undefined);
   lifecycle.baseUrl.mockReset();
-  lifecycle.baseUrl.mockImplementation((overrides) => {
-    if (!overrides?.loadApiKey) return BASE_URL;
-    return overrides.loadApiKey() === API_KEY ? BASE_URL : null;
-  });
+  lifecycle.baseUrl.mockImplementation(
+    (overrides) => MANAGED_BASE_URL_BY_API_KEY.get(overrides?.loadApiKey?.()) ?? null,
+  );
 });
 
 afterEach(() => vi.unstubAllEnvs());

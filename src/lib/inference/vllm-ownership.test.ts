@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   dockerCapture: vi.fn(),
@@ -40,6 +40,7 @@ function vllmContainerRow(
 }
 
 beforeEach(() => vi.clearAllMocks());
+afterEach(() => vi.unstubAllEnvs());
 
 describe("managed vLLM ownership", () => {
   it("recognizes only the exact running container with the managed label", () => {
@@ -85,10 +86,8 @@ describe("managed vLLM ownership", () => {
   });
 
   it("checks the canonical local daemon before an ambient remote Docker host", () => {
-    const previousDockerHost = process.env.DOCKER_HOST;
-    const previousDockerContext = process.env.DOCKER_CONTEXT;
-    process.env.DOCKER_HOST = "ssh://builder.example.test";
-    delete process.env.DOCKER_CONTEXT;
+    vi.stubEnv("DOCKER_HOST", "ssh://builder.example.test");
+    vi.stubEnv("DOCKER_CONTEXT", undefined);
     mocks.dockerCapture.mockImplementation(
       (_args: readonly string[], options?: { env?: NodeJS.ProcessEnv }) =>
         options?.env?.DOCKER_CONTEXT === "default"
@@ -101,19 +100,12 @@ describe("managed vLLM ownership", () => {
           : "",
     );
 
-    try {
-      expect(isNemoClawManagedVllmRunning()).toBe(true);
-      expect(mocks.dockerCapture).toHaveBeenCalledTimes(1);
-      expect(mocks.dockerCapture.mock.calls[0]?.[1]?.env).toMatchObject({
-        DOCKER_CONTEXT: "default",
-      });
-      expect(mocks.dockerCapture.mock.calls[0]?.[1]?.env).not.toHaveProperty("DOCKER_HOST");
-    } finally {
-      if (previousDockerHost === undefined) delete process.env.DOCKER_HOST;
-      else process.env.DOCKER_HOST = previousDockerHost;
-      if (previousDockerContext === undefined) delete process.env.DOCKER_CONTEXT;
-      else process.env.DOCKER_CONTEXT = previousDockerContext;
-    }
+    expect(isNemoClawManagedVllmRunning()).toBe(true);
+    expect(mocks.dockerCapture).toHaveBeenCalledTimes(1);
+    expect(mocks.dockerCapture.mock.calls[0]?.[1]?.env).toMatchObject({
+      DOCKER_CONTEXT: "default",
+    });
+    expect(mocks.dockerCapture.mock.calls[0]?.[1]?.env).not.toHaveProperty("DOCKER_HOST");
   });
 
   it.each([

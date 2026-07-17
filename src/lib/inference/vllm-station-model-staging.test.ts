@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -9,14 +8,19 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { resolveDualStationSimulationFixturePython } from "../../../scripts/simulate-dual-station.mts";
-
 import { DUAL_STATION_VLLM_RUNTIME, type DualStationVllmPlan } from "./vllm-station-cluster";
 import {
-  type ModelStagingCommandOptions,
   type ModelStagingCommandResult,
   stageDualStationModelSnapshot,
 } from "./vllm-station-model-staging";
+import {
+  createAtomicIdentityReplacementRunner,
+  createBetweenAuditMutationRunner,
+  createManifestPeerPythonRunner,
+  createPeerIntegrityRunner,
+  createPostAuditMutationRunner,
+  createPythonOnlyRunner,
+} from "./vllm-station-model-staging.test-support";
 import {
   createDualStationSshBindingFixture,
   type DualStationSshBindingFixture,
@@ -156,25 +160,6 @@ function sufficientStatfs() {
   return vi.fn().mockResolvedValue({ bavail: 1024n * 1024n * 1024n, bsize: 4096n });
 }
 
-function runPython(
-  args: readonly string[],
-  options: ModelStagingCommandOptions,
-): ModelStagingCommandResult {
-  const completed = spawnSync(resolveDualStationSimulationFixturePython(), [...args], {
-    encoding: "utf8",
-    env: options.env,
-    input: options.input,
-    timeout: options.timeoutMs,
-  });
-  return {
-    status: completed.status,
-    stdout: completed.stdout ?? "",
-    stderr: completed.stderr ?? "",
-    error: completed.error?.message,
-    timedOut: (completed.error as NodeJS.ErrnoException | undefined)?.code === "ETIMEDOUT",
-  };
-}
-
 function createLocalSnapshotFixture(): { root: string; home: string; snapshot: string } {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-model-snapshot-"));
   const home = path.join(root, "home");
@@ -298,52 +283,19 @@ describe("dual-Station pinned model staging", () => {
     const fixture = createLocalSnapshotFixture();
     const fixturePlan = plan();
     fixturePlan.local.home = fixture.home;
-    let pythonCall = 0;
-    let sshCall = 0;
-    let transferSource = "";
-    let transferredConfig = "";
-    let snapshotMode = 0;
-    let configMode = 0;
-    const runCommand = vi.fn(
-      async (
-        file: string,
-        args: readonly string[],
-        options: ModelStagingCommandOptions,
-      ): Promise<ModelStagingCommandResult> => {
-        if (file === "python3") {
-          pythonCall += 1;
-          const audit = runPython(args, options);
-          if (pythonCall === 2 && audit.status === 0) {
-            fs.writeFileSync(path.join(fixture.snapshot, "config.json"), "changed-after-audit");
-          }
-          return audit;
-        }
-        if (file === "ssh") {
-          sshCall += 1;
-          return result(sshCall <= 2 ? '{"state":"transfer"}' : '{"state":"ready"}');
-        }
-        if (file === "rsync") {
-          transferSource = String(args.at(-2)).replace(/\/$/, "");
-          transferredConfig = fs.readFileSync(path.join(transferSource, "config.json"), "utf8");
-          snapshotMode = fs.statSync(transferSource).mode & 0o777;
-          configMode = fs.statSync(path.join(transferSource, "config.json")).mode & 0o777;
-          return result();
-        }
-        throw new Error(`unexpected command: ${file}`);
-      },
-    );
+    const { runCommand, state } = createPostAuditMutationRunner(fixture.snapshot);
     const statfs = sufficientStatfs();
 
     try {
       await expect(
         stageDualStationModelSnapshot(fixturePlan, { runCommand, statfs }),
       ).resolves.toEqual({ ok: true, transferred: true });
-      expect(transferredConfig).toBe("{}");
-      expect(snapshotMode).toBe(0o500);
-      expect(configMode).toBe(0o400);
-      expect(transferSource).not.toBe(fixture.snapshot);
-      expect(path.dirname(path.dirname(transferSource))).toBe(modelRootForHome(fixture.home));
-      expect(fs.existsSync(transferSource)).toBe(false);
+      expect(state.transferredConfig).toBe("{}");
+      expect(state.snapshotMode).toBe(0o500);
+      expect(state.configMode).toBe(0o400);
+      expect(state.transferSource).not.toBe(fixture.snapshot);
+      expect(path.dirname(path.dirname(state.transferSource))).toBe(modelRootForHome(fixture.home));
+      expect(fs.existsSync(state.transferSource)).toBe(false);
     } finally {
       fs.rmSync(fixture.root, { force: true, recursive: true });
     }
@@ -353,29 +305,7 @@ describe("dual-Station pinned model staging", () => {
     const fixture = createLocalSnapshotFixture();
     const fixturePlan = plan();
     fixturePlan.local.home = fixture.home;
-    let pythonCall = 0;
-    let materializedSnapshot = "";
-    const runCommand = vi.fn(
-      async (
-        file: string,
-        args: readonly string[],
-        options: ModelStagingCommandOptions,
-      ): Promise<ModelStagingCommandResult> => {
-        if (file === "python3") {
-          pythonCall += 1;
-          if (args[3] !== undefined) materializedSnapshot = String(args[3]);
-          const audit = runPython(args, options);
-          if (pythonCall === 1 && audit.status === 0) {
-            fs.writeFileSync(path.join(fixture.snapshot, "config.json"), "changed-between-audits");
-          }
-          return audit;
-        }
-        if (file === "ssh") {
-          return result(pythonCall === 1 ? '{"state":"transfer"}' : '{"state":"cleaned"}');
-        }
-        throw new Error(`unexpected command: ${file}`);
-      },
-    );
+    const { runCommand, state } = createBetweenAuditMutationRunner(fixture.snapshot);
 
     try {
       await expect(
@@ -393,7 +323,7 @@ describe("dual-Station pinned model staging", () => {
         "python3",
         "ssh",
       ]);
-      expect(fs.existsSync(materializedSnapshot)).toBe(false);
+      expect(fs.existsSync(state.materializedSnapshot)).toBe(false);
       expect(runCommand).not.toHaveBeenCalledWith("rsync", expect.anything(), expect.anything());
     } finally {
       fs.rmSync(fixture.root, { force: true, recursive: true });
@@ -409,16 +339,7 @@ describe("dual-Station pinned model staging", () => {
     fs.writeFileSync(outside, "{}");
     fs.unlinkSync(tokenizer);
     fs.symlinkSync(outside, tokenizer);
-    const runCommand = vi.fn(
-      async (
-        file: string,
-        args: readonly string[],
-        options: ModelStagingCommandOptions,
-      ): Promise<ModelStagingCommandResult> => {
-        if (file !== "python3") throw new Error(`unexpected command: ${file}`);
-        return runPython(args, options);
-      },
-    );
+    const runCommand = createPythonOnlyRunner();
 
     try {
       await expect(
@@ -474,22 +395,10 @@ describe("dual-Station pinned model staging", () => {
     fs.mkdirSync(peerStaging, { mode: 0o700 });
     fs.writeFileSync(path.join(peerStaging, "config.json"), "{");
     const statfs = sufficientStatfs();
-    const runCommand = vi.fn(
-      async (
-        file: string,
-        _args: readonly string[],
-        options: ModelStagingCommandOptions,
-      ): Promise<ModelStagingCommandResult> => {
-        if (file === "python3") return result(manifest());
-        if (file === "ssh") {
-          return runPython(["-"], {
-            ...options,
-            env: { ...options.env, HOME: peerHome },
-          });
-        }
-        throw new Error(`unexpected command: ${file}`);
-      },
-    );
+    const runCommand = createManifestPeerPythonRunner({
+      localManifest: manifest(),
+      peerHome,
+    });
 
     try {
       await expect(
@@ -534,28 +443,16 @@ describe("dual-Station pinned model staging", () => {
     const fixturePlan = plan();
     fixturePlan.peer.home = peerHome;
     const statfs = sufficientStatfs();
-    const runCommand = vi.fn(
-      async (
-        file: string,
-        _args: readonly string[],
-        options: ModelStagingCommandOptions,
-      ): Promise<ModelStagingCommandResult> => {
-        if (file === "python3") return result(manifest());
-        if (file === "ssh") {
-          const noCapacity = `import shutil
+    const noCapacity = `import shutil
 class _NemoClawDiskUsage:
     free = 0
 shutil.disk_usage = lambda _path: _NemoClawDiskUsage()
 `;
-          return runPython(["-"], {
-            ...options,
-            env: { ...options.env, HOME: peerHome },
-            input: `${noCapacity}${options.input ?? ""}`,
-          });
-        }
-        throw new Error(`unexpected command: ${file}`);
-      },
-    );
+    const runCommand = createManifestPeerPythonRunner({
+      localManifest: manifest(),
+      peerHome,
+      peerInputPrefix: noCapacity,
+    });
 
     try {
       await expect(
@@ -667,30 +564,10 @@ shutil.disk_usage = lambda _path: _NemoClawDiskUsage()
     fs.mkdirSync(peerHome, { mode: 0o700 });
     const fixturePlan = plan();
     fixturePlan.peer.home = peerHome;
-    let stagingPath = "";
-    const runCommand = vi.fn(
-      async (
-        file: string,
-        args: readonly string[],
-        options: ModelStagingCommandOptions,
-      ): Promise<ModelStagingCommandResult> => {
-        if (file === "python3") return result(manifest());
-        if (file === "ssh") {
-          return runPython(["-"], {
-            ...options,
-            env: { ...options.env, HOME: peerHome },
-          });
-        }
-        if (file === "rsync") {
-          const destination = String(args.at(-1));
-          stagingPath = destination.slice(destination.indexOf(":") + 1).replace(/\/$/, "");
-          fs.mkdirSync(stagingPath, { mode: 0o700, recursive: true });
-          fs.writeFileSync(path.join(stagingPath, "config.json"), "xx");
-          return result();
-        }
-        throw new Error(`unexpected command: ${file}`);
-      },
-    );
+    const { runCommand, state } = createPeerIntegrityRunner({
+      localManifest: manifest(),
+      peerHome,
+    });
     const statfs = sufficientStatfs();
 
     try {
@@ -710,7 +587,7 @@ shutil.disk_usage = lambda _path: _NemoClawDiskUsage()
         "ssh",
         "ssh",
       ]);
-      expect(fs.existsSync(stagingPath)).toBe(false);
+      expect(fs.existsSync(state.stagingPath)).toBe(false);
     } finally {
       fs.rmSync(remoteRoot, { force: true, recursive: true });
     }
@@ -724,56 +601,7 @@ shutil.disk_usage = lambda _path: _NemoClawDiskUsage()
     const fixturePlan = plan();
     fixturePlan.local.home = fixture.home;
     fixturePlan.peer.home = peerHome;
-    let sshCall = 0;
-    let materializedSnapshot = "";
-    const runCommand = vi.fn(
-      async (
-        file: string,
-        args: readonly string[],
-        options: ModelStagingCommandOptions,
-      ): Promise<ModelStagingCommandResult> => {
-        if (file === "python3") {
-          if (args[3] !== undefined) materializedSnapshot = String(args[3]);
-          return runPython(args, options);
-        }
-        if (file === "ssh") {
-          sshCall += 1;
-          const ampleCapacity = `import shutil
-class _NemoClawDiskUsage:
-    free = 1 << 50
-shutil.disk_usage = lambda _path: _NemoClawDiskUsage()
-`;
-          const replaceInstalledIdentity =
-            sshCall === 3
-              ? `import os
-_nemoclaw_original_rename = os.rename
-def _nemoclaw_replace_after_rename(source, destination):
-    _nemoclaw_original_rename(source, destination)
-    _nemoclaw_original_rename(destination, str(destination) + ".nemoclaw-test-original")
-    os.mkdir(destination, 0o700)
-os.rename = _nemoclaw_replace_after_rename
-`
-              : "";
-          return runPython(["-"], {
-            ...options,
-            env: { ...options.env, HOME: peerHome },
-            input: `${ampleCapacity}${replaceInstalledIdentity}${options.input ?? ""}`,
-          });
-        }
-        if (file === "rsync") {
-          const source = String(args.at(-2)).replace(/\/$/, "");
-          const destination = String(args.at(-1));
-          const stagingPath = destination.slice(destination.indexOf(":") + 1).replace(/\/$/, "");
-          for (const entry of fs.readdirSync(source)) {
-            fs.cpSync(path.join(source, entry), path.join(stagingPath, entry), {
-              recursive: true,
-            });
-          }
-          return result();
-        }
-        throw new Error(`unexpected command: ${file}`);
-      },
-    );
+    const { runCommand, state } = createAtomicIdentityReplacementRunner(peerHome);
 
     try {
       await expect(
@@ -795,7 +623,7 @@ os.rename = _nemoclaw_replace_after_rename
         "ssh",
         "ssh",
       ]);
-      expect(fs.existsSync(materializedSnapshot)).toBe(false);
+      expect(fs.existsSync(state.materializedSnapshot)).toBe(false);
       expect(fs.existsSync(snapshotForHome(peerHome))).toBe(true);
       expect(fs.existsSync(`${snapshotForHome(peerHome)}.nemoclaw-test-original`)).toBe(true);
     } finally {

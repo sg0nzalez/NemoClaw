@@ -610,11 +610,46 @@ describe("dual DGX Station vLLM install orchestration", () => {
   });
 
   it.each([
-    "readiness",
-    "authentication",
-    "final running check",
-    "commit validation",
-  ])("restores legacy state when external %s fails", async (failure) => {
+    {
+      failure: "readiness",
+      configureFailure: () => {
+        mocks.runCurlProbe.mockReturnValue({ ok: false, httpStatus: 503, message: "loading" });
+        mocks.dockerCapture.mockReturnValue("");
+      },
+      expectedCommitCalls: 0,
+    },
+    {
+      failure: "authentication",
+      configureFailure: () => {
+        mocks.runCurlProbe.mockImplementation((args: string[]) => ({
+          ok: true,
+          httpStatus: 200,
+          message: "ok",
+          body: args.at(-1)?.endsWith("/v1/models")
+            ? JSON.stringify({ data: [{ id: "nvidia/nemotron-3-ultra-550b-a55b" }] })
+            : "",
+        }));
+      },
+      expectedCommitCalls: 0,
+    },
+    {
+      failure: "final running check",
+      configureFailure: () => mocks.areContainersRunning.mockReturnValue(false),
+      expectedCommitCalls: 0,
+    },
+    {
+      failure: "commit validation",
+      configureFailure: () =>
+        mocks.commitLegacyMigration.mockResolvedValue({
+          ok: false,
+          reason: "new dual-Station transaction changed before commit",
+        }),
+      expectedCommitCalls: 1,
+    },
+  ])("restores legacy state when external $failure fails", async ({
+    configureFailure,
+    expectedCommitCalls,
+  }) => {
     mocks.startManaged.mockReturnValue({
       ok: true,
       baseUrl: HEAD_BASE_URL,
@@ -623,26 +658,7 @@ describe("dual DGX Station vLLM install orchestration", () => {
       reusedExisting: false,
       legacyMigration: LEGACY_MIGRATION,
     });
-    if (failure === "readiness") {
-      mocks.runCurlProbe.mockReturnValue({ ok: false, httpStatus: 503, message: "loading" });
-      mocks.dockerCapture.mockReturnValue("");
-    } else if (failure === "authentication") {
-      mocks.runCurlProbe.mockImplementation((args: string[]) => ({
-        ok: true,
-        httpStatus: 200,
-        message: "ok",
-        body: args.at(-1)?.endsWith("/v1/models")
-          ? JSON.stringify({ data: [{ id: "nvidia/nemotron-3-ultra-550b-a55b" }] })
-          : "",
-      }));
-    } else if (failure === "final running check") {
-      mocks.areContainersRunning.mockReturnValue(false);
-    } else {
-      mocks.commitLegacyMigration.mockResolvedValue({
-        ok: false,
-        reason: "new dual-Station transaction changed before commit",
-      });
-    }
+    configureFailure();
     const profile = detectVllmProfile({ platform: "station", type: "nvidia" });
 
     await expect(
@@ -651,7 +667,7 @@ describe("dual DGX Station vLLM install orchestration", () => {
 
     expect(mocks.rollbackLegacyMigration).toHaveBeenCalledWith(plan(), LEGACY_MIGRATION);
     expect(mocks.cleanup).not.toHaveBeenCalled();
-    expect(mocks.commitLegacyMigration.mock.calls.length > 0).toBe(failure === "commit validation");
+    expect(mocks.commitLegacyMigration).toHaveBeenCalledTimes(expectedCommitCalls);
   });
 
   it("rolls back a new pair when unauthenticated model inventory is exposed", async () => {

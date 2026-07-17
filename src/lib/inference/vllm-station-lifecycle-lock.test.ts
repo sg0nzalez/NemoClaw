@@ -56,13 +56,25 @@ describe("dual-Station controller UID binding", () => {
   });
 
   it.each([
-    ["group-writable parent", controllerUidStat("directory", { mode: 0o40775 }), null, "1001\n"],
-    ["non-traversable parent", controllerUidStat("directory", { mode: 0o40700 }), null, "1001\n"],
-    ["non-root-owned file", controllerUidStat("directory"), { uid: 1001 }, "1001\n"],
-    ["wrong file mode", controllerUidStat("directory"), { mode: 0o100664 }, "1001\n"],
-    ["root UID content", controllerUidStat("directory"), null, "0\n"],
-    ["multiple UID lines", controllerUidStat("directory"), { size: 10 }, "1001\n1002\n"],
-  ])("rejects an unsafe controller binding: %s", (_case, directory, fileOverride, contents) => {
+    [
+      "group-writable parent",
+      controllerUidStat("directory", { mode: 0o40775 }),
+      null,
+      "1001\n",
+      [],
+    ],
+    [
+      "non-traversable parent",
+      controllerUidStat("directory", { mode: 0o40700 }),
+      null,
+      "1001\n",
+      [],
+    ],
+    ["non-root-owned file", controllerUidStat("directory"), { uid: 1001 }, "1001\n", [[19]]],
+    ["wrong file mode", controllerUidStat("directory"), { mode: 0o100664 }, "1001\n", [[19]]],
+    ["root UID content", controllerUidStat("directory"), null, "0\n", [[19]]],
+    ["multiple UID lines", controllerUidStat("directory"), { size: 10 }, "1001\n1002\n", [[19]]],
+  ])("rejects an unsafe controller binding: %s", (_case, directory, fileOverride, contents, expectedCloseCalls) => {
     const close = vi.fn();
     expect(() =>
       readDualStationControllerUid({
@@ -73,7 +85,7 @@ describe("dual-Station controller UID binding", () => {
         close,
       }),
     ).toThrow(/Dual-Station controller/u);
-    if ((directory.mode & 0o7777) === 0o755) expect(close).toHaveBeenCalledWith(19);
+    expect(close.mock.calls).toEqual(expectedCloseCalls);
   });
 
   it("refuses a direct lock call from an account other than the prepared controller", () => {
