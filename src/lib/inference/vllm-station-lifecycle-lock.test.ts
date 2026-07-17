@@ -89,24 +89,28 @@ describe("dual-Station controller UID binding", () => {
   });
 
   it("refuses a direct lock call from an account other than the prepared controller", () => {
-    const stateDir = path.join(os.tmpdir(), `nemoclaw-station-refused-lock-${String(process.pid)}`);
-    fs.rmSync(stateDir, { recursive: true, force: true });
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-station-refused-lock-"));
+    const stateDir = path.join(root, "state");
     const effectiveUid = process.getuid?.() ?? 0;
     const operation = vi.fn();
 
-    expect(() =>
-      withDualStationVllmLifecycleLock(
-        operation,
-        { stateDir, pollIntervalMs: 5, timeoutMs: 250, corruptLockGraceMs: 5 },
-        {
-          readControllerUid: () => (effectiveUid > 0 ? effectiveUid + 1 : 1),
-          effectiveControllerUid: () => effectiveUid,
-        },
-      ),
-    ).toThrow(
-      /requires a non-root effective controller UID|does not match prepared controller UID/u,
-    );
-    expect(operation).not.toHaveBeenCalled();
-    expect(fs.existsSync(stateDir)).toBe(false);
+    try {
+      expect(() =>
+        withDualStationVllmLifecycleLock(
+          operation,
+          { stateDir, pollIntervalMs: 5, timeoutMs: 250, corruptLockGraceMs: 5 },
+          {
+            readControllerUid: () => (effectiveUid > 0 ? effectiveUid + 1 : 1),
+            effectiveControllerUid: () => effectiveUid,
+          },
+        ),
+      ).toThrow(
+        /requires a non-root effective controller UID|does not match prepared controller UID/u,
+      );
+      expect(operation).not.toHaveBeenCalled();
+      expect(fs.existsSync(stateDir)).toBe(false);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 });
