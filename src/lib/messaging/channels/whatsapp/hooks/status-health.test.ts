@@ -86,7 +86,7 @@ type WaFixture = {
 function openclawJson(wa: WaFixture | null): string {
   const payload =
     wa === null
-      ? { gatewayReachable: true, error: "unknown channel: whatsapp", configOnly: true }
+      ? { gatewayReachable: false, error: "unknown channel: whatsapp", configOnly: true }
       : { gatewayReachable: true, channels: { whatsapp: wa } };
   return JSON.stringify(payload);
 }
@@ -194,7 +194,7 @@ describe("whatsapp.statusHealth openclaw CLI probe", () => {
     expect(serialized).toContain("healthState=unknown");
   });
 
-  it("reports whatsapp not configured when the gateway returns an unknown-channel error", () => {
+  it("reports unknown for the bounded unconfigured response with no channel state", () => {
     const exec = makeExec({ status: 0, stdout: openclawJson(null), stderr: "" });
     const report = reportOf(
       createWhatsappStatusHealthHook({ executeSandboxCommand: exec })(context()),
@@ -224,6 +224,22 @@ describe("whatsapp.statusHealth openclaw CLI probe", () => {
         error: "unknown channel: whatsapp",
         configOnly: true,
         channels: { whatsapp: UNPAIRED_WA },
+      },
+    },
+    {
+      label: "unknown-channel error for a different channel",
+      payload: {
+        gatewayReachable: false,
+        error: "unknown channel: telegram",
+        configOnly: true,
+      },
+    },
+    {
+      label: "embellished unknown-channel error text",
+      payload: {
+        gatewayReachable: false,
+        error: "prefix unknown channel: whatsapp",
+        configOnly: true,
       },
     },
   ])("fails closed when the gateway is unreachable despite $label", ({ payload }) => {
