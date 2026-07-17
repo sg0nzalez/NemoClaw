@@ -1,12 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { spawnSync } from "node:child_process";
 import { describe, expect, it, vi } from "vitest";
 import type { MessagingHookContext, MessagingHookResult } from "../../../hooks/types";
 import type { ChannelHealthReport } from "../../channel-health";
 import { createWhatsappStatusHealthHook } from "./status-health";
-import type { WhatsappDiagnosticReport } from "./status-health-eval";
 
 const BASE_INPUTS = {
   currentSandbox: "alpha",
@@ -16,6 +14,10 @@ const BASE_INPUTS = {
   presetInRegistry: true,
   presetOnGateway: true,
 };
+
+// A parseable phone number the redaction assertions treat as sentinel PII.
+// The hook must never propagate it out of the sandbox JSON to the report.
+const REDACTION_PHONE = "+14155551212";
 
 function context(
   inputs: Record<string, unknown> = BASE_INPUTS,
@@ -35,238 +37,273 @@ function makeExec(result: ExecResult) {
   return vi.fn((_sandbox: string, _command: string, _timeout: number): ExecResult => result);
 }
 
-// The hook is synchronous; the handler type is a sync|Promise union, so narrow.
-function reportOf(
-  result: MessagingHookResult | Promise<MessagingHookResult>,
-): WhatsappDiagnosticReport | undefined {
-  const value = (result as MessagingHookResult).outputs?.channelHealth?.value as unknown as
-    | { report?: WhatsappDiagnosticReport }
-    | undefined;
-  return value?.report;
+// Sequential mock: each invocation of the hook only issues one exec call, but
+// some tests want to exercise multiple hook invocations against a scripted
+// list of responses.
+function makeSequentialExec(results: readonly ExecResult[]) {
+  let call = 0;
+  return vi.fn((_sandbox: string, _command: string, _timeout: number): ExecResult => {
+    const value = results[call] ?? results[results.length - 1] ?? null;
+    call += 1;
+    return value;
+  });
 }
 
-function baseReportOf(
+function reportOf(
   result: MessagingHookResult | Promise<MessagingHookResult>,
 ): ChannelHealthReport | undefined {
-  return reportOf(result);
+  const value = (result as MessagingHookResult).outputs?.channelHealth?.value as unknown as
+    | { report?: ChannelHealthReport }
+    | undefined;
+  return value?.report;
 }
 
 function outputsOf(result: MessagingHookResult | Promise<MessagingHookResult>) {
   return (result as MessagingHookResult).outputs;
 }
 
-function makeProbeStdout(
-  parts: {
-    reachable?: boolean;
-    dirs?: readonly { path: string; state: "MISSING" | "EMPTY" | "POPULATED" }[];
-    heartbeat?: string | null;
-    logLines?: readonly string[];
-    procLines?: readonly string[];
-    procDone?: boolean;
-    gwAlive?: boolean;
-    gwLastInbound?: string | null;
-  } = {},
-): string {
-  const shellOk = parts.reachable === false ? [] : ["NEMOCLAW_WA_DIAG_OK"];
-  const dirLines = (parts.dirs ?? []).map((dir) => `DIR ${dir.path} ${dir.state}`);
-  const heartbeatBlock =
-    parts.heartbeat == null
-      ? []
-      : ["NEMOCLAW_WA_HEARTBEAT_BEGIN", parts.heartbeat, "NEMOCLAW_WA_HEARTBEAT_END"];
-  const logBlock = ["NEMOCLAW_WA_LOG_BEGIN", ...(parts.logLines ?? []), "NEMOCLAW_WA_LOG_END"];
-  const gwAliveLine = parts.gwAlive ? ["NEMOCLAW_WA_GW_ALIVE"] : [];
-  const gwInboundLine = parts.gwLastInbound
-    ? [`NEMOCLAW_WA_GW_LAST_INBOUND ${parts.gwLastInbound}`]
-    : [];
-  const procBlock = parts.procLines ?? [];
-  const procDoneLine = parts.procDone === false ? [] : ["NEMOCLAW_WA_PROC_DONE"];
-  return [
-    ...shellOk,
-    ...dirLines,
-    ...heartbeatBlock,
-    ...logBlock,
-    ...gwAliveLine,
-    ...gwInboundLine,
-    ...procBlock,
-    ...procDoneLine,
-  ].join("\n");
+function stringifyReport(result: MessagingHookResult | Promise<MessagingHookResult>): string {
+  return JSON.stringify(reportOf(result));
 }
 
-describe("whatsapp.statusHealth hook", () => {
-  it("probes the state dirs and reports healthy when heartbeat shows recent inbound (#4386)", () => {
-    const heartbeat = JSON.stringify({
-      lastInboundAt: "2026-07-13T23:59:30.000Z",
-      messagesHandled: 4,
-      connectionState: "open",
-    });
+// Canonical stdout builder for the openclaw CLI. The runtime `wa` object
+// carries redaction-sensitive `self.*` and `lastError` keys so tests can
+// assert none of that leaks into the diagnostic.
+type WaFixture = {
+  readonly configured?: boolean;
+  readonly statusState?: string;
+  readonly linked?: boolean;
+  readonly running?: boolean;
+  readonly connected?: boolean;
+  readonly healthState?: string;
+  readonly lastInboundAt?: number | null;
+  readonly lastStopAt?: number | null;
+  readonly reconnectAttempts?: number;
+  readonly self?: Record<string, string>;
+  readonly lastError?: string | null;
+};
+
+function openclawJson(wa: WaFixture | null): string {
+  const payload =
+    wa === null
+      ? { gatewayReachable: false, error: "unknown channel: whatsapp", configOnly: true }
+      : { channels: { whatsapp: wa } };
+  return JSON.stringify(payload);
+}
+
+const HEALTHY_WA: WaFixture = {
+  configured: true,
+  statusState: "linked",
+  linked: true,
+  running: true,
+  connected: true,
+  healthState: "healthy",
+  lastInboundAt: Date.parse("2026-07-13T23:59:30.000Z"),
+  reconnectAttempts: 0,
+  self: { e164: REDACTION_PHONE, jid: `${REDACTION_PHONE}@s.whatsapp.net`, lid: "1@lid" },
+  lastError: null,
+};
+
+// The exact PRA-1 / CR3 shape: the bridge went from linked+running to
+// linked+stopped. `lastInboundAt` is still recent (last delivered message
+// before the stop) but every liveness bit says "not running". This must not
+// render as healthy.
+const STOPPED_WA: WaFixture = {
+  configured: true,
+  statusState: "linked",
+  linked: true,
+  running: false,
+  connected: false,
+  healthState: "stopped",
+  lastInboundAt: Date.parse("2026-07-13T23:59:30.000Z"),
+  lastStopAt: Date.parse("2026-07-13T23:59:45.000Z"),
+  reconnectAttempts: 0,
+  self: { e164: REDACTION_PHONE, jid: `${REDACTION_PHONE}@s.whatsapp.net`, lid: "1@lid" },
+  lastError: `disconnect from ${REDACTION_PHONE}`,
+};
+
+const UNPAIRED_WA: WaFixture = {
+  configured: true,
+  statusState: "unpaired",
+  linked: false,
+  running: false,
+  connected: false,
+  healthState: "stopped",
+  lastInboundAt: null,
+  reconnectAttempts: 0,
+};
+
+describe("whatsapp.statusHealth openclaw CLI probe", () => {
+  it.each([
+    // Verdict, wa fixture, and a short label. Table-driven so branching is
+    // pushed into it.each iteration rather than test-body control flow.
+    {
+      label: "healthy: linked+running+connected+recent inbound",
+      wa: HEALTHY_WA,
+      verdict: "healthy",
+    },
+    {
+      label: "stopped: linked+lastInboundAt fresh BUT running=false (PRA-1 / CR3 regression)",
+      wa: STOPPED_WA,
+      verdict: "idle",
+    },
+    { label: "unpaired: linked=false", wa: UNPAIRED_WA, verdict: "unpaired" },
+  ] as const)("reports verdict $verdict for $label", ({ wa, verdict }) => {
+    const exec = makeExec({ status: 0, stdout: openclawJson(wa), stderr: "" });
+    const result = createWhatsappStatusHealthHook({ executeSandboxCommand: exec })(context());
+    expect(reportOf(result)?.verdict).toBe(verdict);
+    // The healthy path is the only case that must produce `healthy` — every
+    // non-healthy fixture must render as something else so the PRA-1 root
+    // cause (false-positive healthy on stopped) cannot regress.
+    expect(reportOf(result)?.verdict === "healthy").toBe(verdict === "healthy");
+  });
+
+  it("stopped bridge never emits verdict=healthy (PRA-1 explicit guard)", () => {
+    const exec = makeExec({ status: 0, stdout: openclawJson(STOPPED_WA), stderr: "" });
+    const report = reportOf(
+      createWhatsappStatusHealthHook({ executeSandboxCommand: exec })(context()),
+    );
+    expect(report?.verdict).not.toBe("healthy");
+    const bridge = report?.signals.find((s) => s.label === "Bridge process");
+    expect(bridge?.severity).toBe("fail");
+  });
+
+  it.each([
+    // Redaction guard: none of these known-PII bytes may appear in the
+    // emitted JSON, regardless of whether the fixture is healthy or stopped.
+    { fixture: HEALTHY_WA, label: "healthy" },
+    { fixture: STOPPED_WA, label: "stopped" },
+  ])("never propagates self.* or lastError values ($label)", ({ fixture }) => {
+    const exec = makeExec({ status: 0, stdout: openclawJson(fixture), stderr: "" });
+    const result = createWhatsappStatusHealthHook({ executeSandboxCommand: exec })(context());
+    const serialized = stringifyReport(result);
+    expect(serialized).not.toContain(REDACTION_PHONE);
+    expect(serialized).not.toContain("@s.whatsapp.net");
+    expect(serialized).not.toContain("@lid");
+    expect(serialized).not.toContain("disconnect from");
+  });
+
+  it("gateway-unreachable JSON yields a non-healthy verdict without crashing", () => {
+    const exec = makeExec({ status: 0, stdout: openclawJson(null), stderr: "" });
+    const report = reportOf(
+      createWhatsappStatusHealthHook({ executeSandboxCommand: exec })(context()),
+    );
+    expect(report?.verdict).not.toBe("healthy");
+    // stateDirPopulated stays null in this branch, so the evaluator lands on
+    // "unknown" (a non-fail, non-idle verdict) — an honest report that the
+    // gateway didn't answer rather than a fabricated healthy.
+    expect(report?.verdict).toBe("unknown");
+    const logSignal = report?.signals.find((s) => s.label === "Recent log signals");
+    expect(logSignal?.detail).toMatch(/gateway not reachable/);
+  });
+
+  it.each([
+    {
+      label: "non-zero exec",
+      exec: { status: 124, stdout: openclawJson(HEALTHY_WA), stderr: "timed out" },
+    },
+    { label: "null exec (sandbox down)", exec: null as ExecResult },
+    { label: "empty stdout", exec: { status: 0, stdout: "", stderr: "" } },
+    { label: "non-JSON stdout", exec: { status: 0, stdout: "not json at all", stderr: "" } },
+    { label: "JSON but not an object", exec: { status: 0, stdout: '"hello"', stderr: "" } },
+  ] as const)("verdict=probe_failed when $label", ({ exec }) => {
+    const runner = makeExec(exec);
+    const report = reportOf(
+      createWhatsappStatusHealthHook({ executeSandboxCommand: runner })(context()),
+    );
+    expect(report?.verdict).toBe("probe_failed");
+  });
+
+  it("invokes the openclaw CLI with the JSON + timeout flags", () => {
+    const exec = makeExec({ status: 0, stdout: openclawJson(HEALTHY_WA), stderr: "" });
+    createWhatsappStatusHealthHook({ executeSandboxCommand: exec, timeoutMs: 4500 })(context());
+    const command = String(exec.mock.calls[0]?.[1] ?? "");
+    expect(command).toContain("openclaw channels status --channel whatsapp --json");
+    expect(command).toContain("--timeout 4500");
+    // The hook must not fall back to the old log-scraping / pgrep / dir-listing
+    // probe: the new implementation never issues those commands.
+    expect(command).not.toContain("/tmp/gateway.log");
+    expect(command).not.toMatch(/pgrep/);
+    expect(command).not.toMatch(/DIR .* POPULATED/);
+  });
+
+  it("healthState surfaces neutral state signal only when non-healthy", () => {
+    const stale: WaFixture = {
+      ...HEALTHY_WA,
+      healthState: "stale",
+      reconnectAttempts: 3,
+      connected: false,
+    };
+    const exec = makeSequentialExec([
+      { status: 0, stdout: openclawJson(HEALTHY_WA), stderr: "" },
+      { status: 0, stdout: openclawJson(stale), stderr: "" },
+    ]);
+    const hook = createWhatsappStatusHealthHook({ executeSandboxCommand: exec });
+    const healthyReport = reportOf(hook(context()));
+    // Healthy runs stay clean (no "Recent log signals" row from healthState).
+    expect(healthyReport?.signals.some((s) => s.label === "Recent log signals")).toBe(false);
+    const staleReport = reportOf(hook(context()));
+    const staleLogs = staleReport?.signals.find((s) => s.label === "Recent log signals");
+    expect(staleLogs?.detail).toMatch(/healthState=stale/);
+    expect(staleLogs?.detail).toMatch(/reconnectAttempts=3/);
+  });
+});
+
+describe("whatsapp.statusHealth hermes credentials probe", () => {
+  it.each([
+    {
+      label: "session creds present",
+      stdout: "NEMOCLAW_WA_HERMES_SESSION_PRESENT\n",
+      populated: true,
+    },
+    {
+      label: "session creds absent",
+      stdout: "NEMOCLAW_WA_HERMES_SESSION_ABSENT\n",
+      populated: false,
+    },
+  ] as const)("reports stateDirPopulated=$populated for $label", ({ stdout, populated }) => {
+    const exec = makeExec({ status: 0, stdout, stderr: "" });
+    const result = createWhatsappStatusHealthHook({ executeSandboxCommand: exec })(
+      context({ ...BASE_INPUTS, agent: "hermes" }),
+    );
+    const pairing = reportOf(result)?.signals.find((s) => s.label === "Pairing / session");
+    expect(pairing?.severity).toBe(populated ? "ok" : "warn");
+  });
+
+  it("targets the authoritative session credentials file, not a dir listing", () => {
     const exec = makeExec({
       status: 0,
-      stdout: makeProbeStdout({
-        dirs: [{ path: "/sandbox/.openclaw/whatsapp", state: "POPULATED" }],
-        heartbeat,
-        procLines: ["PROC 1234 openclaw-whatsapp"],
-      }),
+      stdout: "NEMOCLAW_WA_HERMES_SESSION_PRESENT\n",
       stderr: "",
     });
-    const result = createWhatsappStatusHealthHook({ executeSandboxCommand: exec })(context());
-    expect(reportOf(result)?.verdict).toBe("healthy");
-    // Extension type: the base guard should still classify this as a health
-    // report even with the extra heartbeat field.
-    expect(baseReportOf(result)?.channel).toBe("whatsapp");
-  });
-
-  it("probes the credentials/whatsapp path (OpenClaw 2026.6.10+) as populated evidence", () => {
-    // Regression guard: OpenClaw 2026.6.10+ stores the paired Baileys session
-    // under `credentials/whatsapp/<account>/creds.json`. When only that dir is
-    // POPULATED (and the legacy `whatsapp/` path is MISSING) the diagnostic
-    // must still see the sandbox as paired.
-    const exec = makeExec({
-      status: 0,
-      stdout: makeProbeStdout({
-        dirs: [
-          { path: "/sandbox/.openclaw/whatsapp", state: "MISSING" },
-          { path: "/sandbox/.openclaw/credentials/whatsapp", state: "POPULATED" },
-        ],
-        heartbeat: JSON.stringify({
-          lastInboundAt: "2026-07-13T23:59:30.000Z",
-          messagesHandled: 2,
-          connectionState: "open",
-        }),
-        procLines: ["PROC 1234 openclaw-whatsapp"],
-      }),
-      stderr: "",
-    });
-    const result = createWhatsappStatusHealthHook({ executeSandboxCommand: exec })(context());
-    const report = reportOf(result);
-    expect(report?.verdict).toBe("healthy");
-    const pairing = report?.signals.find((s) => s.label === "Pairing / session");
-    expect(pairing?.severity).toBe("ok");
-  });
-
-  it("synthesizes a heartbeat from GW_ALIVE + GW_LAST_INBOUND when no heartbeat file exists", () => {
-    // Part 2 (gateway-log liveness): the in-process bridge does not publish a
-    // heartbeat file, but its provider-ready + inbound breadcrumbs are in the
-    // gateway log. The hook must synthesize a heartbeat + alive bridge so the
-    // "paired but no inbound observed" warning does not fire for a healthy
-    // in-process bridge.
-    const exec = makeExec({
-      status: 0,
-      stdout: makeProbeStdout({
-        dirs: [{ path: "/sandbox/.openclaw/whatsapp", state: "POPULATED" }],
-        heartbeat: null,
-        gwAlive: true,
-        gwLastInbound: "2026-07-13T23:59:30.000Z",
-        procDone: true,
-      }),
-      stderr: "",
-    });
-    const result = createWhatsappStatusHealthHook({ executeSandboxCommand: exec })(context());
-    const report = reportOf(result);
-    expect(report?.verdict).toBe("healthy");
-    expect(report?.heartbeat?.connectionState).toBe("open");
-    expect(report?.heartbeat?.lastInboundAt).toBe("2026-07-13T23:59:30.000Z");
-    const proc = report?.signals.find((s) => s.label === "Bridge process");
-    expect(proc?.severity).toBe("ok");
-  });
-
-  it("emits a syntactically valid /bin/sh probe script", () => {
-    // The probe is a multiline sh script (for/if/grep pipelines, marker
-    // sequencing, and the gateway-log block). A shell syntax regression would
-    // fail every real probe while mocked-stdout tests stay green; validate the
-    // generated command with `sh -n`.
-    const exec = makeExec({ status: 0, stdout: makeProbeStdout(), stderr: "" });
-    createWhatsappStatusHealthHook({ executeSandboxCommand: exec })(context());
-    const command = exec.mock.calls[0]?.[1] ?? "";
-    const validation = spawnSync("sh", ["-n", "-c", command], { encoding: "utf-8" });
-    expect(validation.status, validation.stderr || validation.stdout).toBe(0);
-    // The probe must filter its own pgrep line out of the process results.
-    expect(command).toMatch(/__nemoclaw_wa_self_pid/);
-    expect(command).toMatch(/pgrep -fa/);
-    // Part 2: gateway-log block scoped to whatsapp lines only. The bracket
-    // form appears in the emitted shell as `\[whatsapp\]` (grep -E literal).
-    expect(command).toMatch(/channels\/whatsapp/);
-    expect(command).toMatch(/\\\[whatsapp\\\]/);
-    expect(command).toMatch(/NEMOCLAW_WA_GW_ALIVE/);
-    expect(command).toMatch(/NEMOCLAW_WA_GW_LAST_INBOUND/);
-    // Part 2 must read the canonical in-sandbox gateway log (where NemoClaw
-    // redirects gateway stdout, same as the telegram hook), NOT the OpenClaw
-    // internal dated log — the latter is not guaranteed to exist on every
-    // sandbox and would silently disable in-process bridge liveness detection.
-    expect(command).toContain("/tmp/gateway.log");
-    expect(command).not.toContain("/tmp/openclaw-");
-  });
-
-  it("selects the hermes state-dir path when the agent is hermes", () => {
-    const exec = makeExec({ status: 0, stdout: makeProbeStdout(), stderr: "" });
     createWhatsappStatusHealthHook({ executeSandboxCommand: exec })(
       context({ ...BASE_INPUTS, agent: "hermes" }),
     );
-    const command = exec.mock.calls[0]?.[1] ?? "";
-    expect(command).toContain("/sandbox/.hermes/platforms/whatsapp/session");
-    expect(command).not.toContain("/sandbox/.openclaw/");
+    const command = String(exec.mock.calls[0]?.[1] ?? "");
+    expect(command).toContain("/sandbox/.hermes/platforms/whatsapp/session/creds.json");
+    // A missing creds file must be authoritative — the old dir-listing logic
+    // that treated any non-empty dir as "populated" is gone.
+    expect(command).not.toMatch(/ls -A/);
+    // Hermes does not carry the openclaw CLI.
+    expect(command).not.toContain("openclaw channels status");
   });
 
-  it("selects the openclaw state-dir paths by default (both whatsapp and credentials/whatsapp)", () => {
-    const exec = makeExec({ status: 0, stdout: makeProbeStdout(), stderr: "" });
-    createWhatsappStatusHealthHook({ executeSandboxCommand: exec })(context());
-    const command = exec.mock.calls[0]?.[1] ?? "";
-    expect(command).toContain("/sandbox/.openclaw/whatsapp");
-    expect(command).toContain("/sandbox/.openclaw/credentials/whatsapp");
-  });
-
-  it("reports probe_failed when the sandbox exec fails (null result)", () => {
-    const exec = makeExec(null);
-    const result = createWhatsappStatusHealthHook({ executeSandboxCommand: exec })(context());
-    expect(reportOf(result)?.verdict).toBe("probe_failed");
-  });
-
-  it("reports probe_failed when stdout omits the shell-OK marker", () => {
+  it("hermes probe with neither marker present classifies as probe_failed", () => {
+    // A malformed exec (e.g. `sh` errors before either branch fires) must not
+    // be read as a fabricated verdict; require one of the two literal markers.
     const exec = makeExec({ status: 0, stdout: "", stderr: "" });
-    const result = createWhatsappStatusHealthHook({ executeSandboxCommand: exec })(context());
-    expect(reportOf(result)?.verdict).toBe("probe_failed");
-  });
-
-  it("reports probe_failed on a non-zero exec even when partial stdout carries healthy markers", () => {
-    // A timed-out/killed exec can flush partial stdout that already contains
-    // SHELL_OK (printed first) plus a populated dir and heartbeat. Without the
-    // `exec.status === 0` guard this would read as `healthy` off partial data;
-    // the clean-exit requirement keeps it classified as probe_failed.
-    const exec = makeExec({
-      status: 124,
-      stdout: makeProbeStdout({
-        dirs: [{ path: "/sandbox/.openclaw/whatsapp", state: "POPULATED" }],
-        heartbeat: JSON.stringify({
-          lastInboundAt: "2026-07-13T23:59:30.000Z",
-          messagesHandled: 4,
-          connectionState: "open",
-        }),
-        procLines: ["PROC 1234 openclaw-whatsapp"],
-      }),
-      stderr: "timed out",
-    });
-    const result = createWhatsappStatusHealthHook({ executeSandboxCommand: exec })(context());
-    expect(reportOf(result)?.verdict).toBe("probe_failed");
-  });
-
-  it("derives config_gap / policy_gap from the host-fact inputs", () => {
-    const exec = makeExec({
-      status: 0,
-      stdout: makeProbeStdout({
-        dirs: [{ path: "/sandbox/.openclaw/whatsapp", state: "POPULATED" }],
-      }),
-      stderr: "",
-    });
-    const hook = createWhatsappStatusHealthHook({ executeSandboxCommand: exec });
-    expect(
-      reportOf(hook(context({ ...BASE_INPUTS, channelEnabledInRegistry: false })))?.verdict,
-    ).toBe("config_gap");
-    expect(reportOf(hook(context({ ...BASE_INPUTS, presetInRegistry: false })))?.verdict).toBe(
-      "policy_gap",
+    const report = reportOf(
+      createWhatsappStatusHealthHook({ executeSandboxCommand: exec })(
+        context({ ...BASE_INPUTS, agent: "hermes" }),
+      ),
     );
+    expect(report?.verdict).toBe("probe_failed");
   });
+});
 
+describe("whatsapp.statusHealth wiring guards", () => {
   it("no-ops for a non-whatsapp channel or without an exec runner", () => {
-    const exec = makeExec({ status: 0, stdout: makeProbeStdout(), stderr: "" });
+    const exec = makeExec({ status: 0, stdout: openclawJson(HEALTHY_WA), stderr: "" });
     expect(
       outputsOf(
         createWhatsappStatusHealthHook({ executeSandboxCommand: exec })(
@@ -276,5 +313,14 @@ describe("whatsapp.statusHealth hook", () => {
     ).toBeUndefined();
     expect(outputsOf(createWhatsappStatusHealthHook({})(context()))).toBeUndefined();
     expect(exec).not.toHaveBeenCalled();
+  });
+
+  it("derives config_gap / policy_gap from the host-fact inputs", () => {
+    const exec = makeExec({ status: 0, stdout: openclawJson(HEALTHY_WA), stderr: "" });
+    const hook = createWhatsappStatusHealthHook({ executeSandboxCommand: exec });
+    const configGap = reportOf(hook(context({ ...BASE_INPUTS, channelEnabledInRegistry: false })));
+    expect(configGap?.verdict).toBe("config_gap");
+    const policyGap = reportOf(hook(context({ ...BASE_INPUTS, presetInRegistry: false })));
+    expect(policyGap?.verdict).toBe("policy_gap");
   });
 });

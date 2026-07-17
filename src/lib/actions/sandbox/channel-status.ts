@@ -24,7 +24,6 @@ import {
   type DiagnosticSeverity,
   type DiagnosticSignal,
 } from "../../messaging/channels/channel-health";
-import type { WhatsappDiagnosticReport } from "../../messaging/channels/whatsapp/hooks/status-health-eval";
 import {
   collectBuiltInMessagingChannelDiagnostics,
   type MessagingChannelDiagnosticSpec,
@@ -82,7 +81,7 @@ type ChannelStatusSingleReport =
       schemaVersion: 1;
       sandbox: string;
       channel: string;
-      report: WhatsappDiagnosticReport | ChannelHealthReport;
+      report: ChannelHealthReport;
     }
   | {
       schemaVersion: 1;
@@ -337,6 +336,21 @@ function channelSupportedByAgent(channelName: string, agent: AgentDefinition): b
     .some((manifest) => manifest.id === channelName);
 }
 
+// Manifest-first gate for `runChannelHealthHook`: returns true when the
+// channel declares a `phase: "status"` hook that emits a `channelHealth`
+// output. That is the output id `readChannelHealthOutputs` looks for, so
+// keying the gate off it keeps orchestration + hook wiring in sync without
+// hard-coding channel names or `deepProbe` strings.
+function channelHasChannelHealthStatusHook(channelName: string): boolean {
+  const manifest = channelManifestRegistry.get(channelName);
+  if (!manifest) return false;
+  return manifest.hooks.some(
+    (hook) =>
+      hook.phase === "status" &&
+      hook.outputs?.some((output) => output.id === "channelHealth") === true,
+  );
+}
+
 // Runs a deep-probe channel's `phase:"status"` health hook through the
 // generic status-hook runner and returns its channel-health report. All
 // channel-specific probing + classification lives in the channel's own hook
@@ -464,14 +478,16 @@ export async function showSandboxChannelStatus(
   const disabledChannels = new Set(registry.getDisabledMessagingChannelsFromEntry(entry));
   const channelIsPaused = disabledChannels.has(channelName);
 
-  // A deep-probe channel (log-tail or in-sandbox-qr) runs its `phase:"status"`
-  // health hook via the generic status-hook runner (the hook lives in the
-  // channel folder). The hook's `agents` gate skips channels with no
-  // breadcrumb producer for this agent (e.g. Hermes telegram), so those fall
-  // back to the basic config report.
+  // Manifest-first gating: a channel opts into a deep runtime probe by
+  // declaring a `phase: "status"` hook whose output includes a
+  // `channelHealth`-shaped status. The generic status-hook runner then owns
+  // dispatch, and this orchestrator stays channel-agnostic. Keeping the
+  // check tied to the `channelHealth` output id (rather than "any status
+  // hook") preserves the existing target set — whatsapp and telegram — so
+  // slack/teams status hooks that produce different output kinds do not get
+  // pulled in here.
   const healthReport =
-    (diagnostic.deepProbe === "log-tail" || diagnostic.deepProbe === "in-sandbox-qr") &&
-    !channelIsPaused
+    channelHasChannelHealthStatusHook(channelName) && !channelIsPaused
       ? runChannelHealthHook(sandboxName, channelName, agent, deps, diagnostic)
       : undefined;
   let report: ChannelStatusReport;

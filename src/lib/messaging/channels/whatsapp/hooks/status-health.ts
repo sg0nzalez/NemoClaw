@@ -8,25 +8,35 @@
  * command via the status-hook runner, so no whatsapp-specific code lives in
  * the generic status orchestrator.
  *
- * WhatsApp has two supported bridge shapes:
+ * The probe reads OpenClaw's authoritative live status JSON:
  *
- *   1. OpenClaw: a Baileys session under either `<configDir>/whatsapp` or the
- *      newer `<configDir>/credentials/whatsapp` layout (OpenClaw 2026.6.10+
- *      stores the paired session there). The bridge may either run inside the
- *      gateway process (in which case the pgrep probe cannot enumerate it,
- *      and gateway-log breadcrumbs become the liveness signal) or as a
- *      dedicated `openclaw-whatsapp` process with its own heartbeat file.
+ *   openclaw channels status --channel whatsapp --json --timeout <ms>
  *
- *   2. Hermes: a session under `<configDir>/platforms/whatsapp/session`.
+ * That JSON already reflects the live `linked`/`running`/`connected` /
+ * `healthState` state kept by the in-process bridge, so the probe never
+ * needs to scrape gateway-log breadcrumbs, list a credentials directory,
+ * or grep for a bridge process — all three signals were misleading in
+ * different real cases:
  *
- * The probe inspects both layouts, the heartbeat file, a bounded slice of
- * bridge logs, running processes, and the OpenClaw gateway log (which
- * whatsapp lines are scoped to via `channels/whatsapp` and `[whatsapp]`).
- * The gateway-log liveness markers synthesize a heartbeat when the in-process
- * bridge is up and has recorded inbound traffic without publishing a
- * heartbeat file — this closes the "paired-looking with no observable
- * inbound" gap reported in issue #4386 for the current OpenClaw in-process
- * bridge.
+ *   - Append-only `starting provider` breadcrumbs in `/tmp/gateway.log`
+ *     survive across restarts, so a stopped bridge would still read
+ *     "provider ready" (false-positive healthy).
+ *   - A non-empty `credentials/whatsapp` dir does not imply a valid paired
+ *     session — half-written state or credentials from a prior tenant
+ *     read as "populated" without actually pairing.
+ *   - The bridge runs inside the OpenClaw gateway process, so `pgrep`
+ *     could not enumerate it and the probe would report "unpaired" for
+ *     a working bridge.
+ *
+ * For Hermes (secondary), which has no `openclaw` CLI in the sandbox, the
+ * probe checks for an authoritative session credentials file (Baileys
+ * `creds.json`) under `<hermes>/platforms/whatsapp/session` instead of a
+ * loose directory-listing check.
+ *
+ * Redaction contract: this probe never reads, stores, logs, or emits the
+ * self.e164 / self.jid / self.lid values or the raw `lastError` string
+ * from the OpenClaw JSON — those can carry phone numbers. Only booleans,
+ * state-string enums, and epoch timestamps make it into the report.
  */
 
 import { shellQuote as quotePath } from "../../../../core/shell-quote";
@@ -38,8 +48,6 @@ import {
 } from "../../channel-health";
 import {
   evaluateWhatsappDiagnostics,
-  parseWhatsappHeartbeat,
-  summarizeWhatsappLogLines,
   type WhatsappHeartbeat,
   type WhatsappProbeInput,
 } from "./status-health-eval";
@@ -47,30 +55,19 @@ import {
 export const WHATSAPP_STATUS_HEALTH_HOOK_HANDLER_ID = "whatsapp.statusHealth";
 
 // Bound how long we are willing to block inside an `openshell sandbox exec`
-// for the inline diagnostic snippet. WhatsApp's bridge sometimes goes
-// unresponsive when the Noise WebSocket is stuck; a fast hard cap keeps
-// channels status from inheriting that hang.
+// for the diagnostic. WhatsApp's in-process bridge can go unresponsive when
+// the Noise WebSocket is stuck; a fast hard cap keeps channels status from
+// inheriting that hang.
 const DEFAULT_TIMEOUT_MS = 8_000;
-
-const SHELL_OK = "NEMOCLAW_WA_DIAG_OK";
-const HEARTBEAT_BEGIN = "NEMOCLAW_WA_HEARTBEAT_BEGIN";
-const HEARTBEAT_END = "NEMOCLAW_WA_HEARTBEAT_END";
-const LOG_BEGIN = "NEMOCLAW_WA_LOG_BEGIN";
-const LOG_END = "NEMOCLAW_WA_LOG_END";
-const PROC_DONE = "NEMOCLAW_WA_PROC_DONE";
-// Part 2 (gateway-log liveness for the in-process bridge): the probe emits
-// only these two markers plus the extracted ISO timestamp — never a raw log
-// line, so phone numbers embedded in an "Inbound message …" line cannot
-// escape the sandbox. Scoped to whatsapp lines via `channels/whatsapp` and
-// `[whatsapp]` so telegram breadcrumbs never get miscounted as WA liveness.
-const GW_ALIVE = "NEMOCLAW_WA_GW_ALIVE";
-const GW_LAST_INBOUND = "NEMOCLAW_WA_GW_LAST_INBOUND";
-// The canonical in-sandbox gateway log. NemoClaw launches the OpenClaw gateway
-// with stdout+stderr redirected here (see agent/gateway-script-shared.ts), so
-// every `[whatsapp] …` breadcrumb lands in this one file — the same log the
-// telegram status hook reads. The OpenClaw-internal dated log under
-// /tmp/openclaw-<uid>/ is not guaranteed to exist or to hold these lines.
-const OPENCLAW_GATEWAY_LOG_FILE = "/tmp/gateway.log";
+// The Hermes credentials probe emits one of these two literal markers so the
+// host parser can tell "session file present" from "session file missing" or
+// "probe failed". Absent stdout is treated as probe failure.
+const HERMES_SESSION_PRESENT = "NEMOCLAW_WA_HERMES_SESSION_PRESENT";
+const HERMES_SESSION_ABSENT = "NEMOCLAW_WA_HERMES_SESSION_ABSENT";
+// Baileys writes the paired session under `<sessionDir>/creds.json`. Hermes'
+// WhatsApp adapter follows that convention, so a present `creds.json` is the
+// authoritative pairing signal — a non-empty session dir alone is not.
+const HERMES_SESSION_CREDS_FILE = "/sandbox/.hermes/platforms/whatsapp/session/creds.json";
 
 /** WhatsApp uses the generic channel-health hook options unchanged. */
 export type WhatsappStatusHealthHookOptions = ChannelStatusHealthHookOptions;
@@ -90,55 +87,20 @@ export function createWhatsappStatusHealthHook(
     const agent = normalizeString(context.inputs?.agent) ?? "openclaw";
     const stateDirs = resolveWhatsappStateDirs(agent);
     const timeoutMs = normalizeTimeoutMs(options.timeoutMs);
-    const script = buildWhatsappProbeScript(stateDirs);
-    const exec = execute(sandboxName, script, timeoutMs);
-    const parsed = parseProbeOutput(String(exec?.stdout ?? ""));
-    // A non-zero exec (timeout/kill/unhealthy sandbox) can still carry partial
-    // stdout that already contains the SHELL_OK marker (it is printed first),
-    // so require a clean exit before trusting the probe. Otherwise a stalled
-    // probe reads a verdict off partial data instead of classifying as
-    // probe_failed. Mirrors the telegram status-health hook.
-    const reachable = parsed.reachable && exec?.status === 0;
-
-    let heartbeat: WhatsappHeartbeat | null = null;
-    let heartbeatParseError: string | null = null;
-    if (parsed.heartbeatRaw) {
-      const parseResult = parseWhatsappHeartbeat(parsed.heartbeatRaw);
-      if ("heartbeat" in parseResult) {
-        heartbeat = parseResult.heartbeat;
-      } else {
-        heartbeatParseError = parseResult.parseError;
-      }
-    }
-
-    // Part 2 (gateway-log liveness): when the probe found the whatsapp
-    // provider listening in the gateway log, treat that as bridge liveness
-    // — the in-process bridge does not show under pgrep. When there is no
-    // heartbeat file but the gateway log shows recent inbound, synthesize a
-    // minimal heartbeat so the "paired but no inbound observed" warning is
-    // replaced with the actual last-inbound timestamp.
-    let bridgeProcessAlive = parsed.bridgeProcessAlive;
-    if (parsed.gatewayProviderAlive) {
-      bridgeProcessAlive = true;
-    }
-    if (!heartbeat && parsed.gatewayProviderAlive) {
-      heartbeat = {
-        connectionState: "open",
-        lastInboundAt: parsed.gatewayLastInboundAt,
-        messagesHandled: null,
-        noteCategory: null,
-      };
-    }
+    const probe =
+      agent === "hermes"
+        ? runHermesSessionProbe(execute, sandboxName, timeoutMs)
+        : runOpenclawStatusProbe(execute, sandboxName, timeoutMs);
 
     const input: WhatsappProbeInput = {
       agent,
       stateDirs,
-      stateDirPopulated: parsed.stateDirPopulated,
-      heartbeat,
-      heartbeatParseError,
-      bridgeProcessAlive,
-      recentLogSignals: summarizeWhatsappLogLines(parsed.logLines),
-      probeReachable: reachable,
+      stateDirPopulated: probe.stateDirPopulated,
+      heartbeat: probe.heartbeat,
+      heartbeatParseError: null,
+      bridgeProcessAlive: probe.bridgeProcessAlive,
+      recentLogSignals: probe.recentLogSignals,
+      probeReachable: probe.probeReachable,
       probedAt: normalizeString(context.inputs?.probedAt) ?? "",
       presetInRegistry: Boolean(context.inputs?.presetInRegistry),
       presetOnGateway: normalizeTristate(context.inputs?.presetOnGateway),
@@ -169,207 +131,223 @@ export function createWhatsappStatusHealthHookRegistration(
 }
 
 /**
- * The two known WhatsApp bridge state layouts, keyed by agent name. The hook
- * has no AgentDefinition — the parent runner threads only serializable
- * facts through the manifest hook contract — so paths are derived from the
- * agent string and the fixed in-sandbox config dir convention. Non-existent
- * candidates simply yield "MISSING" in the probe output.
+ * The two known WhatsApp bridge state layouts, keyed by agent name. The
+ * OpenClaw entries are informational — the openclaw probe no longer inspects
+ * these directories (it reads the CLI's live JSON instead) but the paths are
+ * still surfaced in the "Pairing / session" signal detail so the operator
+ * knows where the session material lives if they need to intervene. The
+ * Hermes entry is the actual credentials-file parent the hermes probe stats.
  */
 export function resolveWhatsappStateDirs(agent: string): string[] {
   if (agent === "hermes") {
     return ["/sandbox/.hermes/platforms/whatsapp/session"];
   }
-  // Default to the OpenClaw layout. OpenClaw 2026.6.10+ writes the paired
-  // Baileys session under `credentials/whatsapp/<account>/creds.json`, not
-  // `<configDir>/whatsapp`, so probe both shapes (Part 1 fix).
+  // OpenClaw 2026.6.10+ writes the paired Baileys session under
+  // `credentials/whatsapp/<account>/creds.json`, not `<configDir>/whatsapp`.
   return ["/sandbox/.openclaw/whatsapp", "/sandbox/.openclaw/credentials/whatsapp"];
 }
 
-function buildWhatsappProbeScript(stateDirs: readonly string[]): string {
-  // The script:
-  //  1. Marks success with SHELL_OK so we can disambiguate "exec failed" from
-  //     "exec succeeded but produced nothing".
-  //  2. Lists each candidate state directory and emits a single "POPULATED"
-  //     or "EMPTY" / "MISSING" line per dir.
-  //  3. Cats the first heartbeat-shaped file it finds, wrapped in begin/end
-  //     markers so the parser can extract it without parsing find output.
-  //  4. Tails up to 200 lines of bridge log files and forwards only short
-  //     lines that match the diagnostic regex set. The host parser further
-  //     filters to summary phrases.
-  //  5. Scans the OpenClaw gateway log for whatsapp-scoped liveness lines
-  //     (Part 2) — provider-ready plus the newest inbound timestamp — and
-  //     emits only the fixed markers + the parsed ISO string. Never a raw
-  //     log line: gateway inbound lines can carry phone numbers.
-  //  6. Runs pgrep for known bridge process names, then filters out the probe
-  //     shell itself and the pgrep call so the diagnostic does not report a
-  //     bridge as "running" when the only match is our own command line.
-  // The script is joined with newlines so the embedded `for` / `if`
-  // constructs parse as compound statements. Joining the whole thing with
-  // ` && ` corrupts the grammar (e.g. `do && if`), which `/bin/sh` rejects
-  // before the SHELL_OK marker prints and every live probe gets misread as
-  // unreachable. The leading `set +e` makes the probe survive missing log
-  // files and empty pgrep matches without aborting at the first non-zero
-  // exit.
-  const quotedDirs = stateDirs.map(quotePath).join(" ");
-  return [
-    `set +e`,
-    `printf '%s\\n' ${quotePath(SHELL_OK)}`,
-    `for dir in ${quotedDirs}; do`,
-    `  if [ ! -d "$dir" ]; then printf 'DIR %s MISSING\\n' "$dir"; continue; fi`,
-    `  if [ -z "$(ls -A "$dir" 2>/dev/null)" ]; then`,
-    `    printf 'DIR %s EMPTY\\n' "$dir"`,
-    `  else`,
-    `    printf 'DIR %s POPULATED\\n' "$dir"`,
-    `  fi`,
-    `done`,
-    `for dir in ${quotedDirs}; do`,
-    `  for candidate in heartbeat.json status.json health.json bridge-status.json; do`,
-    `    if [ -f "$dir/$candidate" ]; then`,
-    `      printf '%s\\n' ${quotePath(HEARTBEAT_BEGIN)}`,
-    `      cat "$dir/$candidate" 2>/dev/null | head -c 8192`,
-    `      printf '\\n%s\\n' ${quotePath(HEARTBEAT_END)}`,
-    `      break 2`,
-    `    fi`,
-    `  done`,
-    `done`,
-    `printf '%s\\n' ${quotePath(LOG_BEGIN)}`,
-    `for dir in ${quotedDirs}; do`,
-    `  for log in "$dir"/*.log "$dir"/logs/*.log; do`,
-    `    [ -f "$log" ] || continue`,
-    `    tail -n 200 "$log" 2>/dev/null | grep -E 'connection\\.(open|close|update|update.*restart)|ws (open|close)|401|unauthorized|qr.*(expired|timeout)|restartRequired|loggedOut|logged out|getMessage' | tail -n 20`,
-    `  done`,
-    `done`,
-    `printf '%s\\n' ${quotePath(LOG_END)}`,
-    // Part 2 (gateway-log liveness). The canonical gateway log holds plaintext
-    // `[whatsapp] … starting provider` / `[whatsapp] … Listening for WhatsApp
-    // inbound` / `[whatsapp] … Inbound message …` breadcrumbs. Scope grep to
-    // whatsapp so telegram lines are not miscounted, and emit ONLY the markers
-    // + the ISO timestamp — never a raw log line (an inbound line carries a
-    // phone number). Absent for a hermes runtime → the block is a no-op.
-    `__wa_scoped=$(tail -n 500 ${quotePath(OPENCLAW_GATEWAY_LOG_FILE)} 2>/dev/null | grep -aE 'channels/whatsapp|\\[whatsapp\\]')`,
-    `printf '%s' "$__wa_scoped" | grep -qE 'starting provider|Listening for WhatsApp inbound' && printf '%s\\n' ${quotePath(GW_ALIVE)}`,
-    `__wa_last=$(printf '%s' "$__wa_scoped" | grep -E 'Inbound message' | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+([+-][0-9:]+|Z)?' | tail -n 1)`,
-    `[ -n "$__wa_last" ] && printf '%s %s\\n' ${quotePath(GW_LAST_INBOUND)} "$__wa_last"`,
-    `__nemoclaw_wa_self_pid=$$`,
-    // Match both process-name-with-whatsapp and processes whose argv
-    // mentions the WhatsApp state directory or known plugin paths. A
-    // bridge that runs inside the parent agent process (e.g. an OpenClaw
-    // plugin loaded via a generic `node` entry point) usually carries the
-    // platforms/whatsapp path on its command line via `--state-dir` or
-    // similar.
-    `pgrep -fa 'whatsapp|baileys|platforms/whatsapp|openclaw-whatsapp|hermes.*whatsapp' 2>/dev/null | awk -v self="$__nemoclaw_wa_self_pid" '$1 != self && $0 !~ /pgrep -fa/ && $0 !~ /NEMOCLAW_WA_DIAG_OK/ { print "PROC " $0 }' | head -n 5`,
-    // Always emit PROC_DONE after the pgrep pipeline so the parser can tell
-    // apart "pgrep completed with no matches" (the bridge runs under a
-    // process name that does not contain `whatsapp` or `baileys`, or has
-    // crashed) from "the probe never reached pgrep" (script aborted
-    // mid-flight). Without this marker both cases collapse to `null`.
-    `printf '%s\\n' ${quotePath(PROC_DONE)}`,
-  ].join("\n");
-}
-
-type ParsedProbe = {
-  reachable: boolean;
-  stateDirPopulated: boolean | null;
-  heartbeatRaw: string | null;
-  logLines: string[];
-  bridgeProcessAlive: boolean | null;
-  gatewayProviderAlive: boolean;
-  gatewayLastInboundAt: string | null;
+type OpenclawWhatsappState = {
+  readonly configured?: unknown;
+  readonly statusState?: unknown;
+  readonly linked?: unknown;
+  readonly running?: unknown;
+  readonly connected?: unknown;
+  readonly healthState?: unknown;
+  readonly lastInboundAt?: unknown;
+  readonly lastStopAt?: unknown;
+  readonly lastDisconnect?: unknown;
+  readonly reconnectAttempts?: unknown;
 };
 
-function parseProbeOutput(stdout: string): ParsedProbe {
-  const lines = stdout.split(/\r?\n/);
-  if (!lines.includes(SHELL_OK)) {
+type ProbeResult = {
+  readonly probeReachable: boolean;
+  readonly stateDirPopulated: boolean | null;
+  readonly bridgeProcessAlive: boolean | null;
+  readonly heartbeat: WhatsappHeartbeat | null;
+  readonly recentLogSignals: readonly string[];
+};
+
+const PROBE_UNREACHABLE: ProbeResult = {
+  probeReachable: false,
+  stateDirPopulated: null,
+  bridgeProcessAlive: null,
+  heartbeat: null,
+  recentLogSignals: [],
+};
+
+/**
+ * OpenClaw branch. Runs `openclaw channels status --channel whatsapp --json`
+ * inside the sandbox and translates the authoritative response into the
+ * evaluator's probe-input shape. The CLI shells out to the gateway, which
+ * reflects the in-process bridge's current state, so this replaces the old
+ * log-scraping + pgrep + dir-listing signals with a single trusted source.
+ */
+function runOpenclawStatusProbe(
+  execute: NonNullable<WhatsappStatusHealthHookOptions["executeSandboxCommand"]>,
+  sandboxName: string,
+  timeoutMs: number,
+): ProbeResult {
+  const command = `openclaw channels status --channel whatsapp --json --timeout ${timeoutMs}`;
+  const exec = execute(sandboxName, command, timeoutMs);
+  // A non-zero exec (timeout/kill/unhealthy sandbox) can still carry partial
+  // stdout; require a clean exit before trusting the probe. Otherwise a
+  // stalled openclaw invocation could yield unparseable JSON that reads as a
+  // fabricated verdict instead of classifying as probe_failed.
+  if (!exec || exec.status !== 0) return PROBE_UNREACHABLE;
+  const json = parseOpenclawJson(String(exec.stdout ?? ""));
+  if (!json) return PROBE_UNREACHABLE;
+
+  const channels = readObject(json.channels);
+  const wa = channels ? readObject(channels.whatsapp) : null;
+  if (!wa) {
+    // No `channels.whatsapp` — the CLI is reporting the gateway is
+    // unreachable or the channel is not on the gateway yet
+    // (`{ gatewayReachable: false, error: "unknown channel: ...", ... }`).
+    // Signal probe-reachable (we did get a clean exit and valid JSON) but
+    // leave the runtime fields null so the evaluator lands on "unknown".
     return {
-      reachable: false,
+      probeReachable: true,
       stateDirPopulated: null,
-      heartbeatRaw: null,
-      logLines: [],
       bridgeProcessAlive: null,
-      gatewayProviderAlive: false,
-      gatewayLastInboundAt: null,
+      heartbeat: null,
+      recentLogSignals: ["gateway not reachable — live WhatsApp health unavailable"],
     };
   }
-  let stateDirPopulated: boolean | null = false;
-  let sawAnyDir = false;
-  let heartbeatRaw: string | null = null;
-  let inHeartbeat = false;
-  let inLogs = false;
-  const heartbeatBuf: string[] = [];
-  const logLines: string[] = [];
-  let sawProcMatch = false;
-  let sawProcDone = false;
-  let gatewayProviderAlive = false;
-  let gatewayLastInboundAt: string | null = null;
+  return mapOpenclawWaState(wa);
+}
 
-  for (const line of lines) {
-    if (line === HEARTBEAT_BEGIN) {
-      inHeartbeat = true;
-      continue;
-    }
-    if (line === HEARTBEAT_END) {
-      inHeartbeat = false;
-      heartbeatRaw = heartbeatBuf.join("\n").trim();
-      continue;
-    }
-    if (line === LOG_BEGIN) {
-      inLogs = true;
-      continue;
-    }
-    if (line === LOG_END) {
-      inLogs = false;
-      continue;
-    }
-    if (inHeartbeat) {
-      heartbeatBuf.push(line);
-      continue;
-    }
-    if (inLogs) {
-      const trimmed = line.trim();
-      if (trimmed.length > 0) logLines.push(trimmed);
-      continue;
-    }
-    const dirMatch = line.match(/^DIR\s+\S+\s+(MISSING|EMPTY|POPULATED)$/);
-    if (dirMatch) {
-      sawAnyDir = true;
-      if (dirMatch[1] === "POPULATED") stateDirPopulated = true;
-      continue;
-    }
-    if (line.startsWith("PROC ")) {
-      sawProcMatch = true;
-      continue;
-    }
-    if (line === PROC_DONE) {
-      sawProcDone = true;
-      continue;
-    }
-    if (line === GW_ALIVE) {
-      gatewayProviderAlive = true;
-      continue;
-    }
-    if (line.startsWith(`${GW_LAST_INBOUND} `)) {
-      gatewayLastInboundAt = line.slice(GW_LAST_INBOUND.length + 1).trim() || null;
-      continue;
+function mapOpenclawWaState(wa: OpenclawWhatsappState): ProbeResult {
+  const linked = wa.linked === true;
+  const running = wa.running === true;
+  const connected = wa.connected === true;
+  const healthState = readStringValue(wa.healthState);
+  const heartbeat: WhatsappHeartbeat | null = running
+    ? {
+        connectionState: openclawConnectionState(connected, healthState),
+        lastInboundAt: epochMsToIso(wa.lastInboundAt),
+        // The OpenClaw JSON does not expose a cumulative inbound counter —
+        // the evaluator treats `null` here as "not reported" rather than
+        // "zero", which is the accurate reading.
+        messagesHandled: null,
+        // Never copy the bridge's free-text `lastError` — it can carry phone
+        // numbers and message bodies. If the evaluator needs error signal it
+        // reads healthState/connectionState instead.
+        noteCategory: null,
+      }
+    : null;
+  return {
+    probeReachable: true,
+    // linked is the authoritative pairing bit; the credentials-directory
+    // check that used to sit here mistook half-written state as "populated".
+    stateDirPopulated: linked,
+    // running is the authoritative liveness bit; the pgrep check that used
+    // to sit here could not see the in-process bridge, and the gateway-log
+    // breadcrumbs are append-only so they survived a stopped bridge.
+    bridgeProcessAlive: running,
+    heartbeat,
+    recentLogSignals: summarizeOpenclawLive(healthState, wa.reconnectAttempts),
+  };
+}
+
+function openclawConnectionState(connected: boolean, healthState: string | null): string {
+  if (connected) return "open";
+  return healthState === "starting" || healthState === "stale" ? "connecting" : "close";
+}
+
+// Never emit raw error text or self.* PII. Only healthState (an enum) and
+// reconnectAttempts (a non-negative integer) are surfaced, and only when they
+// carry non-healthy signal.
+function summarizeOpenclawLive(
+  healthState: string | null,
+  reconnectAttemptsRaw: unknown,
+): readonly string[] {
+  const parts: string[] = [];
+  if (healthState && healthState !== "healthy") {
+    parts.push(`healthState=${healthState}`);
+  }
+  const reconnectAttempts =
+    typeof reconnectAttemptsRaw === "number" && Number.isFinite(reconnectAttemptsRaw)
+      ? reconnectAttemptsRaw
+      : null;
+  if (reconnectAttempts !== null && reconnectAttempts > 0) {
+    parts.push(`reconnectAttempts=${reconnectAttempts}`);
+  }
+  return parts.length > 0 ? [parts.join("; ")] : [];
+}
+
+/**
+ * Hermes branch. Hermes' sandbox has no `openclaw` CLI, so the probe checks
+ * for the actual Baileys session artifact (`creds.json`) under the platform's
+ * session directory. A missing file is authoritative "not paired"; a present
+ * file is authoritative "session material exists". Bridge liveness/heartbeat
+ * are not available from a session file alone, so those stay null and the
+ * evaluator lands on "idle" for a paired-but-unprobed hermes runtime — that
+ * is honest for a secondary agent whose runtime we cannot inspect further.
+ */
+function runHermesSessionProbe(
+  execute: NonNullable<WhatsappStatusHealthHookOptions["executeSandboxCommand"]>,
+  sandboxName: string,
+  timeoutMs: number,
+): ProbeResult {
+  const command = [
+    `set +e`,
+    `if [ -f ${quotePath(HERMES_SESSION_CREDS_FILE)} ]; then`,
+    `  printf '%s\\n' ${quotePath(HERMES_SESSION_PRESENT)}`,
+    `else`,
+    `  printf '%s\\n' ${quotePath(HERMES_SESSION_ABSENT)}`,
+    `fi`,
+  ].join("\n");
+  const exec = execute(sandboxName, command, timeoutMs);
+  if (!exec || exec.status !== 0) return PROBE_UNREACHABLE;
+  const lines = String(exec.stdout ?? "").split(/\r?\n/);
+  const present = lines.includes(HERMES_SESSION_PRESENT);
+  const absent = lines.includes(HERMES_SESSION_ABSENT);
+  if (!present && !absent) return PROBE_UNREACHABLE;
+  return {
+    probeReachable: true,
+    stateDirPopulated: present,
+    bridgeProcessAlive: null,
+    heartbeat: null,
+    recentLogSignals: [],
+  };
+}
+
+function parseOpenclawJson(stdout: string): Record<string, unknown> | null {
+  const trimmed = stdout.trim();
+  if (trimmed.length === 0) return null;
+  const attempts: string[] = [trimmed];
+  // Fall back to substring parsing if the CLI ever emits a leading warning
+  // line on stdout — stdout should be clean JSON but be defensive.
+  const braceIdx = trimmed.indexOf("{");
+  if (braceIdx > 0) attempts.push(trimmed.slice(braceIdx));
+  for (const candidate of attempts) {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (isObjectRecord(parsed)) return parsed;
+    } catch {
+      // Try the next candidate.
     }
   }
-  // Three states:
-  //   true  → pgrep printed at least one matching process
-  //   false → pgrep completed with no matches; either the bridge is dead
-  //           OR it runs inside the parent agent process under a name that
-  //           does not contain `whatsapp`/`baileys`. The evaluator resolves
-  //           that ambiguity using heartbeat freshness.
-  //   null  → the probe aborted before reaching pgrep (timeout, exec
-  //           failure); we cannot infer anything about the bridge state.
-  const bridgeProcessAliveOut = sawProcMatch ? true : sawProcDone ? false : null;
-  return {
-    reachable: true,
-    stateDirPopulated: sawAnyDir ? stateDirPopulated : null,
-    heartbeatRaw,
-    logLines,
-    bridgeProcessAlive: bridgeProcessAliveOut,
-    gatewayProviderAlive,
-    gatewayLastInboundAt,
-  };
+  return null;
+}
+
+function readObject(value: unknown): Record<string, unknown> | null {
+  return isObjectRecord(value) ? value : null;
+}
+
+function readStringValue(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function epochMsToIso(value: unknown): string | null {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return null;
+  const iso = new Date(value).toISOString();
+  return iso;
 }
 
 function normalizeString(value: unknown): string | null {
