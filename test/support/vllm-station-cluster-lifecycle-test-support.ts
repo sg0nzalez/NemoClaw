@@ -3,7 +3,10 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import { vi } from "vitest";
-import { DUAL_STATION_VLLM_RUNTIME, type DualStationVllmPlan } from "./vllm-station-cluster";
+import {
+  DUAL_STATION_VLLM_RUNTIME,
+  type DualStationVllmPlan,
+} from "../../src/lib/inference/vllm-station-cluster";
 import {
   DUAL_STATION_VLLM_API_KEY_FINGERPRINT_LABEL,
   DUAL_STATION_VLLM_CLUSTER_LABEL,
@@ -21,8 +24,8 @@ import {
   type DualStationLegacyMigration,
   type DualStationVllmLifecycleDeps,
   type StartDualStationVllmResult,
-} from "./vllm-station-cluster-lifecycle";
-import type { DualStationSshBinding } from "./vllm-station-ssh-binding";
+} from "../../src/lib/inference/vllm-station-cluster-lifecycle";
+import type { DualStationSshBinding } from "../../src/lib/inference/vllm-station-ssh-binding";
 
 export type LifecycleFakeContainer = {
   id: string;

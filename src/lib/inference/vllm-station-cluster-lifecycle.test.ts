@@ -5,6 +5,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  createDualStationLifecycleHarness,
+  dualStationDockerValues as dockerValues,
+  type LifecycleFakeContainer as FakeContainer,
+  type LifecycleHarnessOptions as HarnessOptions,
+  requireLegacyMigration,
+} from "../../../test/support/vllm-station-cluster-lifecycle-test-support";
 import { DUAL_STATION_VLLM_RUNTIME, type DualStationVllmPlan } from "./vllm-station-cluster";
 import {
   areDualStationManagedVllmContainersRunning,
@@ -35,13 +42,6 @@ import {
   startDualStationManagedVllm,
   withDualStationManagedVllmLifecycle,
 } from "./vllm-station-cluster-lifecycle";
-import {
-  createDualStationLifecycleHarness,
-  dualStationDockerValues as dockerValues,
-  type LifecycleFakeContainer as FakeContainer,
-  type LifecycleHarnessOptions as HarnessOptions,
-  requireLegacyMigration,
-} from "./vllm-station-cluster-lifecycle.test-support";
 import { withDualStationVllmLifecycleLock } from "./vllm-station-lifecycle-lock";
 import {
   createDualStationSshBindingFixture,

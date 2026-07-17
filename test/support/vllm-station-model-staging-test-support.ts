@@ -7,12 +7,12 @@ import path from "node:path";
 
 import { vi } from "vitest";
 
-import { resolveDualStationSimulationFixturePython } from "../../../scripts/simulate-dual-station.mts";
+import { resolveDualStationSimulationFixturePython } from "../../scripts/simulate-dual-station.mts";
 
 import type {
   ModelStagingCommandOptions,
   ModelStagingCommandResult,
-} from "./vllm-station-model-staging";
+} from "../../src/lib/inference/vllm-station-model-staging";
 
 type ModelStagingFixtureCommand = (
   file: string,

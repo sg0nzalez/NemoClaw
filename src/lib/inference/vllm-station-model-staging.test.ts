@@ -7,12 +7,6 @@ import os from "node:os";
 import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
-import { DUAL_STATION_VLLM_RUNTIME, type DualStationVllmPlan } from "./vllm-station-cluster";
-import {
-  type ModelStagingCommandResult,
-  stageDualStationModelSnapshot,
-} from "./vllm-station-model-staging";
 import {
   createAtomicIdentityReplacementRunner,
   createBetweenAuditMutationRunner,
@@ -20,7 +14,12 @@ import {
   createPeerIntegrityRunner,
   createPostAuditMutationRunner,
   createPythonOnlyRunner,
-} from "./vllm-station-model-staging.test-support";
+} from "../../../test/support/vllm-station-model-staging-test-support";
+import { DUAL_STATION_VLLM_RUNTIME, type DualStationVllmPlan } from "./vllm-station-cluster";
+import {
+  type ModelStagingCommandResult,
+  stageDualStationModelSnapshot,
+} from "./vllm-station-model-staging";
 import {
   createDualStationSshBindingFixture,
   type DualStationSshBindingFixture,
