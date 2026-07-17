@@ -241,9 +241,12 @@ describe("dual-Station managed vLLM run argv", () => {
       args.some(
         (arg) =>
           arg === "-p" ||
+          arg === "-P" ||
           arg === "--publish" ||
+          arg === "--publish-all" ||
           arg.startsWith("-p=") ||
-          arg.startsWith("--publish="),
+          arg.startsWith("--publish=") ||
+          arg.startsWith("--publish-all="),
       ),
     ).toBe(false);
     expect(dockerValues(args, "--workdir")).toEqual(["/home/vllm"]);
