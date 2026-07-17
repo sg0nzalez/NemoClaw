@@ -66,17 +66,26 @@ afterEach(() => {
 });
 
 describe("exact image qualification request", () => {
-  it("accepts only a first-attempt manual current-workflow candidate", () => {
+  it("accepts trusted manual and scheduled candidates while rejecting malformed boundaries", () => {
     expect(validateExactImageQualificationRequest(REQUEST)).toEqual(REQUEST);
-    expect(() =>
+    expect(
       validateExactImageQualificationRequest({
         ...REQUEST,
         candidateSha: "c".repeat(40),
+        eventName: "schedule",
+        requesterRunAttempt: 2,
       }),
-    ).toThrowError(ExactImageQualificationError);
+    ).toMatchObject({
+      candidateSha: "c".repeat(40),
+      eventName: "schedule",
+      requesterRunAttempt: 2,
+    });
     expect(() =>
-      validateExactImageQualificationRequest({ ...REQUEST, requesterRunAttempt: 2 }),
-    ).toThrow(/reruns/u);
+      validateExactImageQualificationRequest({ ...REQUEST, eventName: "pull_request" }),
+    ).toThrow(/workflow_dispatch or schedule/u);
+    expect(() =>
+      validateExactImageQualificationRequest({ ...REQUEST, ref: "refs/pull/1/merge" }),
+    ).toThrow(/branch ref/u);
     expect(() => validateExactImageQualificationRequest({ ...REQUEST, reason: " bad " })).toThrow(
       /reason/u,
     );

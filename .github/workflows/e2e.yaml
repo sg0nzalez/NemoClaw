@@ -185,6 +185,16 @@ jobs:
             fi
           fi
 
+  staging-brev-launchable:
+    name: Exact staging Brev Launchable
+    needs: generate-matrix
+    if: ${{ github.repository == 'NVIDIA/NemoClaw' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
+    uses: ./.github/workflows/brev-launchable-qualification.yaml
+    with:
+      candidate_sha: ${{ inputs.checkout_sha || github.sha }}
+      reason: E2E run ${{ github.run_id }} qualifying the exact checked-out NemoClaw candidate
+    secrets: inherit
+
   live:
     needs: generate-matrix
     if: ${{ needs.generate-matrix.outputs.matrix != '[]' }}
@@ -4906,6 +4916,7 @@ jobs:
     needs: &e2e-result-jobs
       [
         generate-matrix,
+        staging-brev-launchable,
         live,
         shared-e2e,
         openshell-gateway-auth-contract,

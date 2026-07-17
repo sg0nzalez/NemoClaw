@@ -12,8 +12,9 @@ import {
 
 const WORKFLOW_PATH = ".github/workflows/brev-launchable-qualification.yaml";
 const CONTROLLER_PATH = "tools/e2e/exact-image-qualification-controller.mts";
+const RUNTIME_PATH = "tools/e2e/brev-launchable-runtime.sh";
 
-type DraftQualificationWorkflow = Workflow & {
+type QualificationWorkflow = Workflow & {
   name: string;
   on: Record<string, unknown>;
   permissions: Record<string, string>;
@@ -30,31 +31,36 @@ function strings(value: unknown): string[] {
         : [];
 }
 
-function job(workflow: DraftQualificationWorkflow, name: string): WorkflowJob {
+function job(workflow: QualificationWorkflow, name: string): WorkflowJob {
   const value = workflow.jobs[name];
   expect(value, `missing ${name} job`).toBeDefined();
   return value!;
 }
 
-// source-shape-contract: security -- The draft cross-repository image handoff must remain manual, protected, fixed-target, least-privilege, and stop before any Brev deployment
-it("keeps draft exact-image qualification manual, protected, and evidence-only", () => {
-  const workflow = readYaml<DraftQualificationWorkflow>(WORKFLOW_PATH);
+// source-shape-contract: security -- Exact-image qualification must remain manual/reusable, protected, fixed-target, least-privilege, identity-gated, and cleanup-verifying
+it("keeps exact-image Launchable qualification protected, reusable, and fail-closed", () => {
+  const workflow = readYaml<QualificationWorkflow>(WORKFLOW_PATH);
   const source = readRepoText(WORKFLOW_PATH);
   const controller = readRepoText(CONTROLLER_PATH);
+  const runtime = readRepoText(RUNTIME_PATH);
   const preflight = job(workflow, "preflight");
   const qualify = job(workflow, "qualify");
   const workflowStrings = strings(workflow);
 
-  expect(workflow.name).toBe("Draft / Brev Launchable Qualification");
-  expect(Object.keys(workflow.on)).toEqual(["workflow_dispatch"]);
+  expect(workflow.name).toBe("E2E / Exact Staging Brev Launchable");
+  expect(Object.keys(workflow.on)).toEqual(["workflow_dispatch", "workflow_call"]);
   expect(source).not.toMatch(/^\s+(?:push|schedule|workflow_run|pull_request):/mu);
   expect(Object.keys((workflow.on.workflow_dispatch as { inputs: object }).inputs)).toEqual([
     "candidate_sha",
     "reason",
   ]);
+  expect(Object.keys((workflow.on.workflow_call as { inputs: object }).inputs)).toEqual([
+    "candidate_sha",
+    "reason",
+  ]);
   expect(workflow.permissions).toEqual({});
   expect(workflow.concurrency).toEqual({
-    group: "draft-brev-launchable-qualification-${{ inputs.candidate_sha }}",
+    group: "brev-launchable-qualification-${{ inputs.candidate_sha }}",
     "cancel-in-progress": false,
   });
 
@@ -116,7 +122,11 @@ it("keeps draft exact-image qualification manual, protected, and evidence-only",
   expect(source).toContain("dispatch-reconciliation.v1.json");
   expect(source).toContain("controller-state.corrupt-*.json");
   expect(source).toContain("--mode finalize");
-  expect(source).not.toMatch(/\b(?:brev|gcloud)\s+(?:launch|deploy|set|create|update)\b/iu);
-  expect(source).not.toContain("launchable_id");
+  expect(runtime).toContain("brev create");
+  expect(runtime).toContain("--launchable");
+  expect(source).toContain("brev-launchable-runtime.sh qualify");
+  expect(source).toContain("brev-launchable-runtime.sh cleanup");
+  expect(source).toContain("brev-cleanup-evidence.json");
+  expect(source).toContain("NEMOCLAW_STAGING_LAUNCHABLE_ID");
   expect(source).not.toContain("image_family");
 });

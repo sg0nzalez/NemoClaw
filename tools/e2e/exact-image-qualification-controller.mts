@@ -39,6 +39,7 @@ const DECIMAL_ID_PATTERN = /^[1-9][0-9]*$/u;
 const ARTIFACT_DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/u;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
 const GITHUB_LOGIN_PATTERN = /^(?!-)[A-Za-z0-9-]{1,39}(?<!-)$/u;
+const HEAD_REF_PATTERN = /^refs\/heads\/[A-Za-z0-9](?:[A-Za-z0-9._/-]{0,252}[A-Za-z0-9])?$/u;
 const MAX_REASON_BYTES = 500;
 const MAX_STATE_BYTES = 128 * 1024;
 const MAX_MANIFEST_BYTES = 64 * 1024;
@@ -404,23 +405,24 @@ function acceptanceDeadline(
 export function validateExactImageQualificationRequest(
   request: ExactImageQualificationRequest,
 ): ExactImageQualificationRequest {
-  if (request.eventName !== "workflow_dispatch") {
-    fail("REQUEST_INVALID", "qualification must be started by workflow_dispatch");
+  if (request.eventName !== "workflow_dispatch" && request.eventName !== "schedule") {
+    fail("REQUEST_INVALID", "qualification must be started by workflow_dispatch or schedule");
   }
-  if (request.ref !== "refs/heads/main") {
-    fail("REQUEST_INVALID", "qualification must run from refs/heads/main");
+  if (
+    !HEAD_REF_PATTERN.test(request.ref) ||
+    request.ref.includes("..") ||
+    request.ref.includes("//")
+  ) {
+    fail("REQUEST_INVALID", "qualification must run from a valid branch ref");
   }
-  if (request.requesterRunAttempt !== 1) {
-    fail("REQUEST_INVALID", "qualification does not accept GitHub UI reruns");
+  if (!Number.isSafeInteger(request.requesterRunAttempt) || request.requesterRunAttempt < 1) {
+    fail("REQUEST_INVALID", "requester run attempt must be a positive integer");
   }
   if (!FULL_SHA_PATTERN.test(request.candidateSha)) {
     fail("REQUEST_INVALID", "candidate SHA must be a lowercase full commit SHA");
   }
   if (!FULL_SHA_PATTERN.test(request.workflowSha)) {
     fail("REQUEST_INVALID", "workflow SHA must be a lowercase full commit SHA");
-  }
-  if (request.candidateSha !== request.workflowSha) {
-    fail("REQUEST_INVALID", "candidate SHA must equal the trusted workflow SHA");
   }
   if (!DECIMAL_ID_PATTERN.test(request.requesterRunId)) {
     fail("REQUEST_INVALID", "requester run ID must be a positive decimal string");
@@ -439,15 +441,19 @@ export function validateExactImageQualificationRequest(
   return request;
 }
 
-function validateMainRef(value: unknown, repository: string): string {
-  const payload = record(value, `${repository} main ref`);
-  requireExactString(payload.ref, "refs/heads/main", `${repository} ref`);
+function validateRequesterRef(value: unknown, repository: string, expectedRef: string): string {
+  const payload = record(value, `${repository} requester ref`);
+  requireExactString(payload.ref, expectedRef, `${repository} ref`);
   const object = record(payload.object, `${repository} ref object`);
   requireExactString(object.type, "commit", `${repository} ref object type`);
   if (typeof object.sha !== "string" || !FULL_SHA_PATTERN.test(object.sha)) {
     fail("PROVENANCE_MISMATCH", `${repository} main did not resolve to a full commit SHA`);
   }
   return object.sha;
+}
+
+function validateMainRef(value: unknown, repository: string): string {
+  return validateRequesterRef(value, repository, "refs/heads/main");
 }
 
 function validateProducerWorkflow(value: unknown): string {
@@ -464,9 +470,20 @@ async function authorizeRequest(
   api: GitHubApiClient,
 ): Promise<void> {
   validateExactImageQualificationRequest(request);
-  const main = await api<unknown>(`repos/${REQUESTER_REPOSITORY}/git/ref/heads/main`, token);
-  if (validateMainRef(main, REQUESTER_REPOSITORY) !== request.candidateSha) {
-    fail("DISPATCH_FORBIDDEN", "candidate SHA is no longer the current NemoClaw main commit");
+  const branchPath = request.ref.slice("refs/heads/".length);
+  const branch = await api<unknown>(
+    `repos/${REQUESTER_REPOSITORY}/git/ref/heads/${encodeURIComponent(branchPath)}`,
+    token,
+  );
+  if (validateRequesterRef(branch, REQUESTER_REPOSITORY, request.ref) !== request.workflowSha) {
+    fail("DISPATCH_FORBIDDEN", "workflow SHA is no longer the requested branch head");
+  }
+  const candidate = record(
+    await api<unknown>(`repos/${REQUESTER_REPOSITORY}/git/commits/${request.candidateSha}`, token),
+    "candidate commit",
+  );
+  if (candidate.sha !== request.candidateSha) {
+    fail("DISPATCH_FORBIDDEN", "candidate SHA does not identify an exact NemoClaw commit");
   }
   const permission = record(
     await api<unknown>(

@@ -110,6 +110,10 @@ describe("Vitest opaque-input watch triggers", () => {
     expect(triggeredBy(".github/workflows/brev-launchable-qualification.yaml")).toEqual([
       "test/exact-image-qualification-workflow.test.ts",
     ]);
+    expect(triggeredBy("tools/e2e/brev-launchable-runtime.sh")).toEqual([
+      "test/brev-launchable-runtime.test.ts",
+      "test/exact-image-qualification-workflow.test.ts",
+    ]);
     expect(triggeredBy(".github/workflows/platform-vitest-main.yaml")).toEqual([
       "test/platform-vitest-main-workflow.test.ts",
     ]);

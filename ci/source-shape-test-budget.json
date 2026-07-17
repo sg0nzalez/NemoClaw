@@ -128,7 +128,7 @@
     },
     {
       "file": "test/exact-image-qualification-workflow.test.ts",
-      "test": "keeps draft exact-image qualification manual, protected, and evidence-only",
+      "test": "keeps exact-image Launchable qualification protected, reusable, and fail-closed",
       "category": "security"
     },
     {

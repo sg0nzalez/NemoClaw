@@ -125,6 +125,9 @@ export function createApi(options: ApiOptions = {}) {
     if (apiPath === "repos/NVIDIA/NemoClaw/git/ref/heads/main") {
       return mainRef(options.requesterSha ?? CANDIDATE_SHA);
     }
+    if (apiPath === `repos/NVIDIA/NemoClaw/git/commits/${CANDIDATE_SHA}`) {
+      return { sha: CANDIDATE_SHA };
+    }
     if (apiPath.includes("/collaborators/")) {
       return {
         permission: options.permission ?? "write",
