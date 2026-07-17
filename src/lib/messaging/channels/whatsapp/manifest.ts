@@ -125,7 +125,7 @@ export const whatsappManifest = {
       id: "whatsapp-status-health",
       phase: "status",
       handler: "whatsapp.statusHealth",
-      agents: ["openclaw", "hermes"],
+      agents: ["openclaw"],
       outputs: [
         {
           id: "channelHealth",

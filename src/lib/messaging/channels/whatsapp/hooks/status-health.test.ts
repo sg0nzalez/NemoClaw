@@ -86,8 +86,8 @@ type WaFixture = {
 function openclawJson(wa: WaFixture | null): string {
   const payload =
     wa === null
-      ? { gatewayReachable: false, error: "unknown channel: whatsapp", configOnly: true }
-      : { channels: { whatsapp: wa } };
+      ? { gatewayReachable: true, error: "unknown channel: whatsapp", configOnly: true }
+      : { gatewayReachable: true, channels: { whatsapp: wa } };
   return JSON.stringify(payload);
 }
 
@@ -208,18 +208,31 @@ describe("whatsapp.statusHealth openclaw CLI probe", () => {
     expect(logSignal?.detail).toMatch(/not configured on the gateway/);
   });
 
-  it("reports gateway unreachable when no unknown-channel error is present", () => {
-    const exec = makeExec({
-      status: 0,
-      stdout: JSON.stringify({ gatewayReachable: false }),
-      stderr: "",
-    });
+  it.each([
+    {
+      label: "stale healthy channel state",
+      payload: {
+        gatewayReachable: false,
+        configOnly: true,
+        channels: { whatsapp: HEALTHY_WA },
+      },
+    },
+    {
+      label: "misleading unknown-channel error with populated channel state",
+      payload: {
+        gatewayReachable: false,
+        error: "unknown channel: whatsapp",
+        configOnly: true,
+        channels: { whatsapp: UNPAIRED_WA },
+      },
+    },
+  ])("fails closed when the gateway is unreachable despite $label", ({ payload }) => {
+    const exec = makeExec({ status: 0, stdout: JSON.stringify(payload), stderr: "" });
     const report = reportOf(
       createWhatsappStatusHealthHook({ executeSandboxCommand: exec })(context()),
     );
-    expect(report?.verdict).not.toBe("healthy");
-    const logSignal = report?.signals.find((s) => s.label === "Recent log signals");
-    expect(logSignal?.detail).toMatch(/gateway not reachable/);
+    expect(report?.verdict).toBe("probe_failed");
+    expect(report?.signals.some((signal) => signal.label === "Recent log signals")).toBe(false);
   });
 
   it("degrades an out-of-range lastInboundAt to null instead of crashing", () => {
@@ -236,10 +249,10 @@ describe("whatsapp.statusHealth openclaw CLI probe", () => {
     expect(reportOf(run())?.verdict).toBeDefined();
   });
 
-  it("no-ops for an agent that is neither openclaw nor hermes", () => {
+  it("no-ops for Hermes because the live status contract is OpenClaw-only", () => {
     const exec = makeExec({ status: 0, stdout: openclawJson(HEALTHY_WA), stderr: "" });
     const result = createWhatsappStatusHealthHook({ executeSandboxCommand: exec })(
-      context({ ...BASE_INPUTS, agent: "gemini" }),
+      context({ ...BASE_INPUTS, agent: "hermes" }),
     );
     expect(outputsOf(result)).toBeUndefined();
     expect(exec).not.toHaveBeenCalled();
@@ -253,6 +266,14 @@ describe("whatsapp.statusHealth openclaw CLI probe", () => {
     { label: "null exec (sandbox down)", exec: null as ExecResult },
     { label: "empty stdout", exec: { status: 0, stdout: "", stderr: "" } },
     { label: "non-JSON stdout", exec: { status: 0, stdout: "not json at all", stderr: "" } },
+    {
+      label: "arbitrary stdout preamble before valid JSON",
+      exec: {
+        status: 0,
+        stdout: `warning: untrusted preamble\n${openclawJson(HEALTHY_WA)}`,
+        stderr: "",
+      },
+    },
     { label: "JSON but not an object", exec: { status: 0, stdout: '"hello"', stderr: "" } },
   ] as const)("verdict=probe_failed when $label", ({ exec }) => {
     const runner = makeExec(exec);
@@ -294,58 +315,6 @@ describe("whatsapp.statusHealth openclaw CLI probe", () => {
     const staleLogs = staleReport?.signals.find((s) => s.label === "Recent log signals");
     expect(staleLogs?.detail).toMatch(/healthState=stale/);
     expect(staleLogs?.detail).toMatch(/reconnectAttempts=3/);
-  });
-});
-
-describe("whatsapp.statusHealth hermes credentials probe", () => {
-  it.each([
-    {
-      label: "session creds present",
-      stdout: "NEMOCLAW_WA_HERMES_SESSION_PRESENT\n",
-      populated: true,
-    },
-    {
-      label: "session creds absent",
-      stdout: "NEMOCLAW_WA_HERMES_SESSION_ABSENT\n",
-      populated: false,
-    },
-  ] as const)("reports stateDirPopulated=$populated for $label", ({ stdout, populated }) => {
-    const exec = makeExec({ status: 0, stdout, stderr: "" });
-    const result = createWhatsappStatusHealthHook({ executeSandboxCommand: exec })(
-      context({ ...BASE_INPUTS, agent: "hermes" }),
-    );
-    const pairing = reportOf(result)?.signals.find((s) => s.label === "Pairing / session");
-    expect(pairing?.severity).toBe(populated ? "ok" : "warn");
-  });
-
-  it("targets the authoritative session credentials file, not a dir listing", () => {
-    const exec = makeExec({
-      status: 0,
-      stdout: "NEMOCLAW_WA_HERMES_SESSION_PRESENT\n",
-      stderr: "",
-    });
-    createWhatsappStatusHealthHook({ executeSandboxCommand: exec })(
-      context({ ...BASE_INPUTS, agent: "hermes" }),
-    );
-    const command = String(exec.mock.calls[0]?.[1] ?? "");
-    expect(command).toContain("/sandbox/.hermes/platforms/whatsapp/session/creds.json");
-    // A missing creds file must be authoritative — the old dir-listing logic
-    // that treated any non-empty dir as "populated" is gone.
-    expect(command).not.toMatch(/ls -A/);
-    // Hermes does not carry the openclaw CLI.
-    expect(command).not.toContain("openclaw channels status");
-  });
-
-  it("hermes probe with neither marker present classifies as probe_failed", () => {
-    // A malformed exec (e.g. `sh` errors before either branch fires) must not
-    // be read as a fabricated verdict; require one of the two literal markers.
-    const exec = makeExec({ status: 0, stdout: "", stderr: "" });
-    const report = reportOf(
-      createWhatsappStatusHealthHook({ executeSandboxCommand: exec })(
-        context({ ...BASE_INPUTS, agent: "hermes" }),
-      ),
-    );
-    expect(report?.verdict).toBe("probe_failed");
   });
 });
 

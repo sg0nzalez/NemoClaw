@@ -28,18 +28,12 @@
  *     could not enumerate it and the probe would report "unpaired" for
  *     a working bridge.
  *
- * For Hermes (secondary), which has no `openclaw` CLI in the sandbox, the
- * probe checks for an authoritative session credentials file (Baileys
- * `creds.json`) under `<hermes>/platforms/whatsapp/session` instead of a
- * loose directory-listing check.
- *
  * Redaction contract: this probe never reads, stores, logs, or emits the
  * self.e164 / self.jid / self.lid values or the raw `lastError` string
  * from the OpenClaw JSON — those can carry phone numbers. Only booleans,
  * state-string enums, and epoch timestamps make it into the report.
  */
 
-import { shellQuote as quotePath } from "../../../../core/shell-quote";
 import type { MessagingHookHandler, MessagingHookRegistration } from "../../../hooks/types";
 import type { MessagingSerializableValue } from "../../../manifest";
 import {
@@ -59,15 +53,10 @@ export const WHATSAPP_STATUS_HEALTH_HOOK_HANDLER_ID = "whatsapp.statusHealth";
 // the Noise WebSocket is stuck; a fast hard cap keeps channels status from
 // inheriting that hang.
 const DEFAULT_TIMEOUT_MS = 8_000;
-// The Hermes credentials probe emits one of these two literal markers so the
-// host parser can tell "session file present" from "session file missing" or
-// "probe failed". Absent stdout is treated as probe failure.
-const HERMES_SESSION_PRESENT = "NEMOCLAW_WA_HERMES_SESSION_PRESENT";
-const HERMES_SESSION_ABSENT = "NEMOCLAW_WA_HERMES_SESSION_ABSENT";
-// Baileys writes the paired session under `<sessionDir>/creds.json`. Hermes'
-// WhatsApp adapter follows that convention, so a present `creds.json` is the
-// authoritative pairing signal — a non-empty session dir alone is not.
-const HERMES_SESSION_CREDS_FILE = "/sandbox/.hermes/platforms/whatsapp/session/creds.json";
+const OPENCLAW_WHATSAPP_STATE_DIRS = [
+  "/sandbox/.openclaw/whatsapp",
+  "/sandbox/.openclaw/credentials/whatsapp",
+] as const;
 
 /** WhatsApp uses the generic channel-health hook options unchanged. */
 export type WhatsappStatusHealthHookOptions = ChannelStatusHealthHookOptions;
@@ -85,21 +74,16 @@ export function createWhatsappStatusHealthHook(
     if (!execute || !sandboxName) return {};
 
     const agent = normalizeString(context.inputs?.agent) ?? "openclaw";
-    // Only openclaw and hermes have a defined WhatsApp bridge shape. The
-    // manifest already gates this hook to those agents; guard explicitly so a
-    // future agent added to the manifest without a probe here degrades to the
-    // basic report instead of silently running the openclaw CLI against it.
-    if (agent !== "openclaw" && agent !== "hermes") return {};
-    const stateDirs = resolveWhatsappStateDirs(agent);
+    // This hook consumes an OpenClaw-specific status contract. The manifest
+    // gates it to OpenClaw; keep the handler fail-safe when invoked directly
+    // so another agent never receives an unsupported health verdict.
+    if (agent !== "openclaw") return {};
     const timeoutMs = normalizeTimeoutMs(options.timeoutMs);
-    const probe =
-      agent === "hermes"
-        ? runHermesSessionProbe(execute, sandboxName, timeoutMs)
-        : runOpenclawStatusProbe(execute, sandboxName, timeoutMs);
+    const probe = runOpenclawStatusProbe(execute, sandboxName, timeoutMs);
 
     const input: WhatsappProbeInput = {
       agent,
-      stateDirs,
+      stateDirs: OPENCLAW_WHATSAPP_STATE_DIRS,
       stateDirPopulated: probe.stateDirPopulated,
       heartbeat: probe.heartbeat,
       heartbeatParseError: null,
@@ -133,23 +117,6 @@ export function createWhatsappStatusHealthHookRegistration(
     id: WHATSAPP_STATUS_HEALTH_HOOK_HANDLER_ID,
     handler: createWhatsappStatusHealthHook(options),
   };
-}
-
-/**
- * The two known WhatsApp bridge state layouts, keyed by agent name. The
- * OpenClaw entries are informational — the openclaw probe no longer inspects
- * these directories (it reads the CLI's live JSON instead) but the paths are
- * still surfaced in the "Pairing / session" signal detail so the operator
- * knows where the session material lives if they need to intervene. The
- * Hermes entry is the actual credentials-file parent the hermes probe stats.
- */
-export function resolveWhatsappStateDirs(agent: string): string[] {
-  if (agent === "hermes") {
-    return ["/sandbox/.hermes/platforms/whatsapp/session"];
-  }
-  // OpenClaw 2026.6.10+ writes the paired Baileys session under
-  // `credentials/whatsapp/<account>/creds.json`, not `<configDir>/whatsapp`.
-  return ["/sandbox/.openclaw/whatsapp", "/sandbox/.openclaw/credentials/whatsapp"];
 }
 
 type OpenclawWhatsappState = {
@@ -202,6 +169,10 @@ function runOpenclawStatusProbe(
   if (!exec || exec.status !== 0) return PROBE_UNREACHABLE;
   const json = parseOpenclawJson(String(exec.stdout ?? ""));
   if (!json) return PROBE_UNREACHABLE;
+  // The CLI can include config-only/stale channel state when the gateway is
+  // unreachable. That root reachability bit is authoritative and must win
+  // before any nested WhatsApp fields are interpreted.
+  if (json.gatewayReachable === false) return PROBE_UNREACHABLE;
 
   const channels = readObject(json.channels);
   const wa = channels ? readObject(channels.whatsapp) : null;
@@ -291,60 +262,18 @@ function summarizeOpenclawLive(
   return parts.length > 0 ? [parts.join("; ")] : [];
 }
 
-/**
- * Hermes branch. Hermes' sandbox has no `openclaw` CLI, so the probe checks
- * for the actual Baileys session artifact (`creds.json`) under the platform's
- * session directory. A missing file is authoritative "not paired"; a present
- * file is authoritative "session material exists". Bridge liveness/heartbeat
- * are not available from a session file alone, so those stay null and the
- * evaluator lands on "idle" for a paired-but-unprobed hermes runtime — that
- * is honest for a secondary agent whose runtime we cannot inspect further.
- */
-function runHermesSessionProbe(
-  execute: NonNullable<WhatsappStatusHealthHookOptions["executeSandboxCommand"]>,
-  sandboxName: string,
-  timeoutMs: number,
-): ProbeResult {
-  const command = [
-    `set +e`,
-    `if [ -f ${quotePath(HERMES_SESSION_CREDS_FILE)} ]; then`,
-    `  printf '%s\\n' ${quotePath(HERMES_SESSION_PRESENT)}`,
-    `else`,
-    `  printf '%s\\n' ${quotePath(HERMES_SESSION_ABSENT)}`,
-    `fi`,
-  ].join("\n");
-  const exec = execute(sandboxName, command, timeoutMs);
-  if (!exec || exec.status !== 0) return PROBE_UNREACHABLE;
-  const lines = String(exec.stdout ?? "").split(/\r?\n/);
-  const present = lines.includes(HERMES_SESSION_PRESENT);
-  const absent = lines.includes(HERMES_SESSION_ABSENT);
-  if (!present && !absent) return PROBE_UNREACHABLE;
-  return {
-    probeReachable: true,
-    stateDirPopulated: present,
-    bridgeProcessAlive: null,
-    heartbeat: null,
-    recentLogSignals: [],
-  };
-}
-
 function parseOpenclawJson(stdout: string): Record<string, unknown> | null {
   const trimmed = stdout.trim();
   if (trimmed.length === 0) return null;
-  const attempts: string[] = [trimmed];
-  // Fall back to substring parsing if the CLI ever emits a leading warning
-  // line on stdout — stdout should be clean JSON but be defensive.
-  const braceIdx = trimmed.indexOf("{");
-  if (braceIdx > 0) attempts.push(trimmed.slice(braceIdx));
-  for (const candidate of attempts) {
-    try {
-      const parsed = JSON.parse(candidate);
-      if (isObjectRecord(parsed)) return parsed;
-    } catch {
-      // Try the next candidate.
-    }
+  try {
+    const parsed = JSON.parse(trimmed);
+    return isObjectRecord(parsed) ? parsed : null;
+  } catch {
+    // `--json` is a strict machine-readable contract. Do not scan past an
+    // arbitrary stdout preamble and then trust a later object as gateway
+    // status; an exact documented prefix can be handled here if one exists.
+    return null;
   }
-  return null;
 }
 
 function readObject(value: unknown): Record<string, unknown> | null {

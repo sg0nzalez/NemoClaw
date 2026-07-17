@@ -2,12 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it, vi } from "vitest";
-import {
-  type ExecResult,
-  entry,
-  makeDeps,
-  showSandboxChannelStatus,
-} from "./channel-status.test-helpers";
+import { entry, makeDeps, showSandboxChannelStatus } from "./channel-status.test-helpers";
 
 // The whatsapp status hook now reads OpenClaw's authoritative live status JSON
 // (`openclaw channels status --channel whatsapp --json`) instead of scraping
@@ -193,61 +188,22 @@ describe("showSandboxChannelStatus (whatsapp)", () => {
     expect(threw?.message).toBe("process.exit(1)");
   });
 
-  it("uses the hermes pairing hint when the agent is hermes and no session file exists", async () => {
-    // Hermes has no `openclaw` CLI in the sandbox; the probe stats for the
-    // Baileys `creds.json` session artifact and emits a present/absent marker.
-    const stdout = "NEMOCLAW_WA_HERMES_SESSION_ABSENT\n";
-    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
-      throw new Error(`process.exit(${code})`);
-    }) as never);
-    const { deps, out_lines } = makeDeps({
-      exec: () => ({ status: 0, stdout, stderr: "" }),
+  it("falls back to basic status for Hermes without running the OpenClaw probe", async () => {
+    const exec = vi.fn((_sandbox: string, _command: string, _timeoutMs?: number) => ({
+      status: 0,
+      stdout: "",
+      stderr: "",
+    }));
+    const { deps } = makeDeps({
+      exec,
       agentName: "hermes",
+      sandbox: entry(["whatsapp"], [], {}, "hermes"),
     });
-    try {
-      await showSandboxChannelStatus("alpha", { deps, channel: "whatsapp" });
-    } catch {
-      /* expected exit(1) for unpaired */
-    } finally {
-      exitSpy.mockRestore();
-    }
-    const dump = out_lines.join("\n");
-    expect(dump).toMatch(/hermes whatsapp/);
-    expect(dump).toMatch(/Verdict:.*unpaired/);
-  });
-
-  it("emits a syntactically valid /bin/sh program for the hermes session probe", async () => {
-    // Regression guard: the hermes branch is the only remaining probe that
-    // builds a multi-line shell script. Validate it with `sh -n` so a future
-    // edit cannot ship a script that fails to parse and reads as exec failure.
-    let capturedCmd: string | null = null;
-    const exec = (_sb: string, cmd: string): ExecResult | null => {
-      capturedCmd = cmd;
-      return {
-        status: 0,
-        stdout: "NEMOCLAW_WA_HERMES_SESSION_ABSENT\n",
-        stderr: "",
-      };
-    };
-    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
-      throw new Error(`process.exit(${code})`);
-    }) as never);
-    const { deps } = makeDeps({ exec, agentName: "hermes" });
-    try {
-      await showSandboxChannelStatus("alpha", { deps, channel: "whatsapp" });
-    } catch {
-      /* unpaired path exits 1 */
-    } finally {
-      exitSpy.mockRestore();
-    }
-    expect(capturedCmd).not.toBeNull();
-    const { spawnSync } = await import("node:child_process");
-    const validation = spawnSync("sh", ["-n", "-c", capturedCmd as unknown as string], {
-      encoding: "utf-8",
-    });
-    expect(validation.status, validation.stderr || validation.stdout).toBe(0);
-    // The hermes probe stats the authoritative Baileys credentials artifact.
-    expect(capturedCmd as unknown as string).toMatch(/creds\.json/);
+    const result = await showSandboxChannelStatus("alpha", { deps, channel: "whatsapp" });
+    const commands = exec.mock.calls.map((call) => String(call[1] ?? "")).join("\n");
+    expect(commands).not.toContain("openclaw channels status");
+    expect(commands).not.toContain("platforms/whatsapp/session/creds.json");
+    expect(result && "verdict" in result && result.verdict).toBe("info");
   });
 
   it("skips the deep probe and reports paused state when WhatsApp is in disabledChannels", async () => {
