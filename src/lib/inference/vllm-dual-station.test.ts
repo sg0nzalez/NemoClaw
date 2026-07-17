@@ -111,12 +111,14 @@ function plan(): DualStationVllmPlan {
       hostname: "station-a",
       home: "/home/nvidia",
       uid: 1000,
+      gid: 1000,
       gpu: { index: 0, name: "NVIDIA GB300", uuid: "GPU-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" },
     },
     peer: {
       hostname: "station-b",
       home: "/home/nvidia",
       uid: 1000,
+      gid: 1000,
       gpu: { index: 0, name: "NVIDIA GB300", uuid: "GPU-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb" },
     },
     rails: [

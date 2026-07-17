@@ -33,8 +33,11 @@ export const DUAL_STATION_VLLM_GPU_SMOKE_LABEL = "com.nvidia.nemoclaw.gpu-smoke"
 export const DUAL_STATION_VLLM_MASTER_PORT = 29501;
 
 const HEAD_API_PORT = 8000;
-const HF_CACHE_CONTAINER_DIR = "/root/.cache/huggingface";
-const HF_HUB_CACHE_CONTAINER_DIR = `${HF_CACHE_CONTAINER_DIR}/hub`;
+// The pinned vLLM 0.22 image ships a non-root-ready /home/vllm. Each Station
+// mounts an owner-only tmpfs there and runs as the probed model-cache owner.
+const VLLM_RUNTIME_HOME = "/home/vllm";
+const HF_CACHE_CONTAINER_DIR = `${VLLM_RUNTIME_HOME}/.cache/huggingface`;
+const HF_HUB_CACHE_CONTAINER_DIR = "/model-cache";
 const DOCKER_INSPECT_TIMEOUT_MS = 10_000;
 const DOCKER_MUTATION_TIMEOUT_MS = 60_000;
 const DOCKER_GPU_SMOKE_TIMEOUT_MS = 30_000;
@@ -213,6 +216,18 @@ function assertSafePlan(plan: DualStationVllmPlan): void {
     ) {
       throw new Error(`Dual-Station ${role} home must be a normalized absolute POSIX path.`);
     }
+    if (
+      !Number.isInteger(node.uid) ||
+      node.uid <= 0 ||
+      node.uid > 2_147_483_647 ||
+      !Number.isInteger(node.gid) ||
+      node.gid <= 0 ||
+      node.gid > 2_147_483_647
+    ) {
+      throw new Error(
+        `Dual-Station ${role} runtime identity must use non-root UID and GID values.`,
+      );
+    }
     if (!SAFE_GPU_UUID_PATTERN.test(node.gpu.uuid)) {
       throw new Error(`Dual-Station ${role} GB300 UUID is invalid.`);
     }
@@ -308,6 +323,20 @@ function appendEnv(args: string[], name: string, value: string): void {
   args.push("--env", `${name}=${value}`);
 }
 
+function runtimeUser(node: DualStationVllmPlan["local"]): string {
+  return `${String(node.uid)}:${String(node.gid)}`;
+}
+
+function runtimeHomeTmpfs(node: DualStationVllmPlan["local"]): string {
+  return `${VLLM_RUNTIME_HOME}:rw,nosuid,nodev,uid=${String(node.uid)},gid=${String(node.gid)},mode=0700,size=68719476736`;
+}
+
+function appendRuntimeHomeEnv(args: string[]): void {
+  appendEnv(args, "HOME", VLLM_RUNTIME_HOME);
+  appendEnv(args, "USER", "vllm");
+  appendEnv(args, "LOGNAME", "vllm");
+}
+
 /** Build the deterministic shell-free launch argv before per-operation labels. */
 function buildDualStationVllmBaseRunArgs(
   plan: DualStationVllmPlan,
@@ -327,16 +356,20 @@ function buildDualStationVllmBaseRunArgs(
     "--shm-size",
     "16g",
     "--read-only",
+    "--workdir",
+    VLLM_RUNTIME_HOME,
+    "--user",
+    runtimeUser(node),
+    "--security-opt",
+    "no-new-privileges:true",
     "--tmpfs",
     "/tmp:rw,nosuid,nodev,size=17179869184",
     "--tmpfs",
-    "/root/.cache:rw,nosuid,nodev,size=68719476736",
+    runtimeHomeTmpfs(node),
     "--cap-drop",
     "ALL",
-    "--cap-add",
-    "IPC_LOCK",
-    "--cap-add",
-    "DAC_READ_SEARCH",
+    // Non-root GPU/RDMA memory registration is bounded by this explicit rlimit;
+    // no Linux capabilities remain in the effective or permitted set.
     "--ulimit",
     "memlock=-1",
     "--ulimit",
@@ -363,6 +396,9 @@ function buildDualStationVllmBaseRunArgs(
   ];
 
   appendEnv(args, "HF_HOME", HF_CACHE_CONTAINER_DIR);
+  appendEnv(args, "HF_HUB_CACHE", HF_HUB_CACHE_CONTAINER_DIR);
+  appendEnv(args, "HUGGINGFACE_HUB_CACHE", HF_HUB_CACHE_CONTAINER_DIR);
+  appendRuntimeHomeEnv(args);
   appendEnv(args, "HF_HUB_OFFLINE", "1");
   appendEnv(args, "TRANSFORMERS_OFFLINE", "1");
   appendEnv(args, "VLLM_HOST_IP", endpoints[0].address);
@@ -447,7 +483,7 @@ export function buildDualStationVllmRunArgs(
   return args;
 }
 
-/** Build a no-network, no-pull GPU runtime probe that only executes nvidia-smi. */
+/** Build a no-network, no-pull GPU/RDMA runtime probe that finishes with nvidia-smi. */
 export function buildDualStationGpuSmokeRunArgs(
   plan: DualStationVllmPlan,
   role: DualStationVllmRole,
@@ -458,29 +494,56 @@ export function buildDualStationGpuSmokeRunArgs(
     throw new Error("Dual-Station GPU smoke nonce is invalid.");
   }
   const node = role === "head" ? plan.local : plan.peer;
+  const endpoints = plan.rails.map((rail) => (role === "head" ? rail.local : rail.peer));
   const containerName = `${GPU_SMOKE_CONTAINER_PREFIX}-${role}-${nonce}`;
+  const command = [
+    "set -euo pipefail",
+    `test \"$(id -u)\" = \"${String(node.uid)}\"`,
+    `test \"$(id -g)\" = \"${String(node.gid)}\"`,
+    "grep -Eq '^NoNewPrivs:[[:space:]]+1$' /proc/self/status",
+    "! grep -Eq '^Cap(Inh|Prm|Eff|Bnd|Amb):[[:space:]]+[0-9a-fA-F]*[1-9a-fA-F][0-9a-fA-F]*$' /proc/self/status",
+    'test "$(ulimit -l)" = "unlimited"',
+    `for device in ${endpoints.map((endpoint) => endpoint.uverbsDevice).join(" ")}; do test -c "$device"; test -r "$device"; test -w "$device"; exec 3<>"$device"; exec 3>&-; done`,
+    'mkdir -p "$HOME/.cache/torch" "$HF_HOME"',
+    'probe="$HOME/.cache/torch/.nemoclaw-write-probe"; : > "$probe"; rm -f "$probe"',
+    'probe="$HF_HOME/.nemoclaw-write-probe"; : > "$probe"; rm -f "$probe"',
+    "exec nvidia-smi --query-gpu=uuid --format=csv,noheader",
+  ].join("; ");
+  const args = [
+    "--pull=never",
+    "--network",
+    "none",
+    "--read-only",
+    "--workdir",
+    VLLM_RUNTIME_HOME,
+    "--user",
+    runtimeUser(node),
+    "--security-opt",
+    "no-new-privileges:true",
+    "--tmpfs",
+    "/tmp:rw,nosuid,nodev,size=17179869184",
+    "--tmpfs",
+    runtimeHomeTmpfs(node),
+    "--cap-drop",
+    "ALL",
+    "--ulimit",
+    "memlock=-1",
+    "--gpus",
+    `device=${node.gpu.uuid}`,
+    ...endpoints.flatMap((endpoint) => ["--device", endpoint.uverbsDevice]),
+    "--label",
+    `${DUAL_STATION_VLLM_GPU_SMOKE_LABEL}=${nonce}`,
+    "--label",
+    `${DUAL_STATION_VLLM_ROLE_LABEL}=${role}`,
+    "--name",
+    containerName,
+  ];
+  appendEnv(args, "HF_HOME", HF_CACHE_CONTAINER_DIR);
+  appendRuntimeHomeEnv(args);
+  args.push("--entrypoint", "/bin/bash", plan.runtime.image, "-c", command);
   return {
     containerName,
-    args: [
-      "--pull=never",
-      "--network",
-      "none",
-      "--cap-drop",
-      "ALL",
-      "--gpus",
-      `device=${node.gpu.uuid}`,
-      "--label",
-      `${DUAL_STATION_VLLM_GPU_SMOKE_LABEL}=${nonce}`,
-      "--label",
-      `${DUAL_STATION_VLLM_ROLE_LABEL}=${role}`,
-      "--name",
-      containerName,
-      "--entrypoint",
-      "nvidia-smi",
-      plan.runtime.image,
-      "--query-gpu=uuid",
-      "--format=csv,noheader",
-    ],
+    args,
   };
 }
 

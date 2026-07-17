@@ -65,6 +65,7 @@ function fixturePlan(): DualStationVllmPlan {
       hostname: "station-a",
       home: "/home/local",
       uid: 1000,
+      gid: 1000,
       gpu: {
         index: 0,
         name: "NVIDIA GB300",
@@ -75,6 +76,7 @@ function fixturePlan(): DualStationVllmPlan {
       hostname: "station-b",
       home: "/home/nvidia",
       uid: 1001,
+      gid: 1001,
       gpu: {
         index: 1,
         name: "NVIDIA GB300 Grace Blackwell Superchip",
@@ -446,20 +448,19 @@ describe("dual-Station managed vLLM run argv", () => {
     expect(args).toEqual(
       expect.arrayContaining(["--network", "host", "--shm-size", "16g", "--read-only"]),
     );
+    expect(dockerValues(args, "--workdir")).toEqual(["/home/vllm"]);
     expect(dockerValues(args, "--tmpfs")).toEqual([
       "/tmp:rw,nosuid,nodev,size=17179869184",
-      "/root/.cache:rw,nosuid,nodev,size=68719476736",
+      `/home/vllm:rw,nosuid,nodev,uid=${String(expectedNode.uid)},gid=${String(expectedNode.gid)},mode=0700,size=68719476736`,
     ]);
-    expect(args).toEqual(
-      expect.arrayContaining([
-        "--cap-drop",
-        "ALL",
-        "--cap-add",
-        "IPC_LOCK",
-        "--cap-add",
-        "DAC_READ_SEARCH",
-      ]),
-    );
+    expect(dockerValues(args, "--user")).toEqual([
+      `${String(expectedNode.uid)}:${String(expectedNode.gid)}`,
+    ]);
+    expect(dockerValues(args, "--security-opt")).toEqual(["no-new-privileges:true"]);
+    expect(dockerValues(args, "--cap-drop")).toEqual(["ALL"]);
+    expect(dockerValues(args, "--cap-add")).toEqual([]);
+    expect(args).not.toContain("DAC_READ_SEARCH");
+    expect(args).not.toContain("IPC_LOCK");
     expect(dockerValues(args, "--ulimit")).toEqual([
       "memlock=-1",
       "stack=67108864",
@@ -471,7 +472,7 @@ describe("dual-Station managed vLLM run argv", () => {
       "--device=/dev/infiniband/uverbs1",
     ]);
     expect(dockerValues(args, "--volume")).toEqual([
-      `${expectedNode.home}/.cache/huggingface/hub:/root/.cache/huggingface/hub:ro`,
+      `${expectedNode.home}/.cache/huggingface/hub:/model-cache:ro`,
     ]);
     expect(dockerValues(args, "--volume").join("\n")).not.toContain("/huggingface/token");
     expect(env).toEqual(
@@ -489,6 +490,12 @@ describe("dual-Station managed vLLM run argv", () => {
         "UCX_IB_GID_INDEX=3",
         "HF_HUB_OFFLINE=1",
         "TRANSFORMERS_OFFLINE=1",
+        "HF_HOME=/home/vllm/.cache/huggingface",
+        "HF_HUB_CACHE=/model-cache",
+        "HUGGINGFACE_HUB_CACHE=/model-cache",
+        "HOME=/home/vllm",
+        "USER=vllm",
+        "LOGNAME=vllm",
       ]),
     );
     expect(args).toContain(plan.runtime.image);
@@ -531,7 +538,32 @@ describe("dual-Station managed vLLM run argv", () => {
       `device=${role === "head" ? fixturePlan().local.gpu.uuid : fixturePlan().peer.gpu.uuid}`,
     ]);
     expect(dockerValues(args, "--network")).toEqual(["none"]);
+    const expectedNode = role === "head" ? fixturePlan().local : fixturePlan().peer;
+    const expectedDevices = fixturePlan().rails.map((rail) =>
+      role === "head" ? rail.local.uverbsDevice : rail.peer.uverbsDevice,
+    );
+    expect(args).toContain("--read-only");
+    expect(dockerValues(args, "--workdir")).toEqual(["/home/vllm"]);
+    expect(dockerValues(args, "--user")).toEqual([
+      `${String(expectedNode.uid)}:${String(expectedNode.gid)}`,
+    ]);
+    expect(dockerValues(args, "--security-opt")).toEqual(["no-new-privileges:true"]);
     expect(dockerValues(args, "--cap-drop")).toEqual(["ALL"]);
+    expect(dockerValues(args, "--cap-add")).toEqual([]);
+    expect(dockerValues(args, "--ulimit")).toEqual(["memlock=-1"]);
+    expect(dockerValues(args, "--device")).toEqual(expectedDevices);
+    expect(dockerValues(args, "--tmpfs")).toEqual([
+      "/tmp:rw,nosuid,nodev,size=17179869184",
+      `/home/vllm:rw,nosuid,nodev,uid=${String(expectedNode.uid)},gid=${String(expectedNode.gid)},mode=0700,size=68719476736`,
+    ]);
+    expect(dockerValues(args, "--env")).toEqual(
+      expect.arrayContaining([
+        "HF_HOME=/home/vllm/.cache/huggingface",
+        "HOME=/home/vllm",
+        "USER=vllm",
+        "LOGNAME=vllm",
+      ]),
+    );
     expect(dockerValues(args, "--label")).toEqual(
       expect.arrayContaining([
         `${DUAL_STATION_VLLM_GPU_SMOKE_LABEL}=${nonce}`,
@@ -540,9 +572,48 @@ describe("dual-Station managed vLLM run argv", () => {
     );
     expect(args).toContain("--pull=never");
     expect(args).toContain(DUAL_STATION_VLLM_RUNTIME.image);
-    expect(args).toEqual(expect.arrayContaining(["--entrypoint", "nvidia-smi"]));
+    expect(args).toEqual(expect.arrayContaining(["--entrypoint", "/bin/bash"]));
+    expect(args.slice(-3, -1)).toEqual([DUAL_STATION_VLLM_RUNTIME.image, "-c"]);
+    const command = args.at(-1) ?? "";
+    expect(command).toContain("NoNewPrivs");
+    expect(command).toContain("Cap(Inh|Prm|Eff|Bnd|Amb)");
+    expect(command).toContain('test "$(ulimit -l)" = "unlimited"');
+    expect(command).toContain(
+      `for device in ${expectedDevices.join(" ")}; do test -c "$device"; test -r "$device"; test -w "$device"; exec 3<>"$device"; exec 3>&-; done`,
+    );
+    expect(command).toContain("$HOME/.cache/torch/.nemoclaw-write-probe");
+    expect(command).toContain("$HF_HOME/.nemoclaw-write-probe");
+    expect(command).toContain("exec nvidia-smi --query-gpu=uuid --format=csv,noheader");
+    expect(dockerValues(args, "--volume")).toEqual([]);
     expect(args).not.toContain("--rm");
     expect(args.join("\n")).not.toContain("VLLM_API_KEY");
+  });
+
+  it("binds the managed launch contract to both runtime owner IDs", () => {
+    const baseline = fixturePlan();
+    const changedUid = fixturePlan();
+    const changedGid = fixturePlan();
+    changedUid.local.uid += 1;
+    changedGid.local.gid += 1;
+
+    expect(dualStationVllmLaunchContract(changedUid, "head")).not.toBe(
+      dualStationVllmLaunchContract(baseline, "head"),
+    );
+    expect(dualStationVllmLaunchContract(changedGid, "head")).not.toBe(
+      dualStationVllmLaunchContract(baseline, "head"),
+    );
+  });
+
+  it.each([
+    ["root uid", (plan: DualStationVllmPlan) => (plan.local.uid = 0)],
+    ["root gid", (plan: DualStationVllmPlan) => (plan.peer.gid = 0)],
+  ])("rejects an unsafe %s runtime identity", (_label, mutate) => {
+    const plan = fixturePlan();
+    mutate(plan);
+
+    expect(() =>
+      buildDualStationVllmRunArgs(plan, "head", TRANSACTION_ID, API_KEY_FINGERPRINT),
+    ).toThrow("runtime identity must use non-root UID and GID values");
   });
 
   it.each([

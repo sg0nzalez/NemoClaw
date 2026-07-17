@@ -100,6 +100,7 @@ export interface StationHostProbe {
   architecture: string;
   home: string;
   uid: number;
+  gid: number;
   gpus: StationGpuProbe[];
   docker: {
     reachable: boolean;
@@ -178,6 +179,7 @@ export interface DualStationPlanNode {
   hostname: string;
   home: string;
   uid: number;
+  gid: number;
   gpu: StationGpuProbe;
 }
 
@@ -535,6 +537,7 @@ payload = {
     "architecture": platform.machine(),
     "home": str(Path.home()),
     "uid": os.getuid(),
+    "gid": os.getgid(),
     "gpus": gpu_inventory(),
     "docker": docker_state(),
     "rsyncAvailable": shutil.which("rsync") is not None,
@@ -955,7 +958,8 @@ export function parseStationHostProbe(stdout: string): StationHostProbe {
     productName: requireString(record.productName, "host probe.productName", 512),
     architecture: requireString(record.architecture, "host probe.architecture", 64),
     home,
-    uid: requireInteger(record.uid, "host probe.uid", 0, 2_147_483_647),
+    uid: requireInteger(record.uid, "host probe.uid", 1, 2_147_483_647),
+    gid: requireInteger(record.gid, "host probe.gid", 1, 2_147_483_647),
     gpus: requireArray(record.gpus, "host probe.gpus", 64).map((entry, index) =>
       parseGpu(entry, `host probe.gpus[${String(index)}]`),
     ),
@@ -1412,12 +1416,14 @@ function buildStaticPlan(
         hostname: local.hostname,
         home: local.home,
         uid: local.uid,
+        gid: local.gid,
         gpu: localGpu,
       },
       peer: {
         hostname: peer.hostname,
         home: peer.home,
         uid: peer.uid,
+        gid: peer.gid,
         gpu: peerGpu,
       },
       rails,

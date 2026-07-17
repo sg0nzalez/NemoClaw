@@ -84,6 +84,7 @@ function stationHost(side: "local" | "peer"): StationHostProbe {
     architecture: "aarch64",
     home,
     uid: local ? 1000 : 1001,
+    gid: local ? 1000 : 1001,
     gpus: [
       {
         index: 0,

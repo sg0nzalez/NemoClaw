@@ -121,6 +121,7 @@ function hostFixture(side: "local" | "peer"): StationHostProbe {
     architecture: "aarch64",
     home,
     uid: isLocal ? 1000 : 1001,
+    gid: isLocal ? 1000 : 1001,
     gpus: isLocal
       ? [{ index: 0, name: "NVIDIA GB300", uuid: "GPU-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" }]
       : [
@@ -393,10 +394,16 @@ describe("probeDualStationVllmCapability", () => {
           tensorParallelSize: 2,
           nodeCount: 2,
         },
-        local: { home: LOCAL_HOME, uid: 1000, gpu: { index: 0, name: "NVIDIA GB300" } },
+        local: {
+          home: LOCAL_HOME,
+          uid: 1000,
+          gid: 1000,
+          gpu: { index: 0, name: "NVIDIA GB300" },
+        },
         peer: {
           home: PEER_HOME,
           uid: 1001,
+          gid: 1001,
           gpu: { index: 1, name: "NVIDIA GB300 Grace Blackwell Superchip" },
         },
         masterAddress: "192.168.240.1",
@@ -869,6 +876,7 @@ describe("probe command boundary", () => {
     expect(options.env?.DOCKER_CONTEXT).toBe("default");
     expect(options.env?.DOCKER_HOST).toBeUndefined();
     expect(options.env?.DOCKER_CONFIG).toBeUndefined();
+    expect(options.input).toEqual(expect.stringContaining('"gid": os.getgid()'));
   });
 
   it("passes only validated discovered rail values to the fixed peer connectivity script", () => {
@@ -927,5 +935,15 @@ describe("parseStationHostProbe", () => {
     const unsafeUverbs = hostFixture("local");
     unsafeUverbs.rails[0].uverbsDevice = "/dev/infiniband/../mem";
     expect(() => parseStationHostProbe(JSON.stringify(unsafeUverbs))).toThrow(/uverbs/);
+  });
+
+  it("rejects root or invalid runtime cache-owner identities", () => {
+    const root = hostFixture("local");
+    root.uid = 0;
+    expect(() => parseStationHostProbe(JSON.stringify(root))).toThrow(/host probe\.uid/);
+
+    const rootGroup = hostFixture("peer");
+    rootGroup.gid = 0;
+    expect(() => parseStationHostProbe(JSON.stringify(rootGroup))).toThrow(/host probe\.gid/);
   });
 });
