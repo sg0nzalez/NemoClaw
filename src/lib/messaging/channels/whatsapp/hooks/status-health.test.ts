@@ -183,18 +183,55 @@ describe("whatsapp.statusHealth openclaw CLI probe", () => {
     expect(serialized).not.toContain("disconnect from");
   });
 
-  it("gateway-unreachable JSON yields a non-healthy verdict without crashing", () => {
+  it("reports whatsapp not configured when the gateway returns an unknown-channel error", () => {
     const exec = makeExec({ status: 0, stdout: openclawJson(null), stderr: "" });
     const report = reportOf(
       createWhatsappStatusHealthHook({ executeSandboxCommand: exec })(context()),
     );
     expect(report?.verdict).not.toBe("healthy");
-    // stateDirPopulated stays null in this branch, so the evaluator lands on
-    // "unknown" (a non-fail, non-idle verdict) — an honest report that the
-    // gateway didn't answer rather than a fabricated healthy.
+    // stateDirPopulated stays null here, so the evaluator lands on "unknown" —
+    // an honest "the gateway did not report whatsapp" rather than a fabricated
+    // healthy. openclawJson(null) carries `error: "unknown channel: …"`.
     expect(report?.verdict).toBe("unknown");
     const logSignal = report?.signals.find((s) => s.label === "Recent log signals");
+    expect(logSignal?.detail).toMatch(/not configured on the gateway/);
+  });
+
+  it("reports gateway unreachable when no unknown-channel error is present", () => {
+    const exec = makeExec({
+      status: 0,
+      stdout: JSON.stringify({ gatewayReachable: false }),
+      stderr: "",
+    });
+    const report = reportOf(
+      createWhatsappStatusHealthHook({ executeSandboxCommand: exec })(context()),
+    );
+    expect(report?.verdict).not.toBe("healthy");
+    const logSignal = report?.signals.find((s) => s.label === "Recent log signals");
     expect(logSignal?.detail).toMatch(/gateway not reachable/);
+  });
+
+  it("degrades an out-of-range lastInboundAt to null instead of crashing", () => {
+    // A finite-but-out-of-Date-range epoch (e.g. 1e300) passes Number.isFinite
+    // yet makes `new Date(v).toISOString()` throw RangeError. The probe must
+    // degrade it to null, not crash the whole status command.
+    const exec = makeExec({
+      status: 0,
+      stdout: openclawJson({ ...HEALTHY_WA, lastInboundAt: 1e300 }),
+      stderr: "",
+    });
+    const run = () => createWhatsappStatusHealthHook({ executeSandboxCommand: exec })(context());
+    expect(run).not.toThrow();
+    expect(reportOf(run())?.verdict).toBeDefined();
+  });
+
+  it("no-ops for an agent that is neither openclaw nor hermes", () => {
+    const exec = makeExec({ status: 0, stdout: openclawJson(HEALTHY_WA), stderr: "" });
+    const result = createWhatsappStatusHealthHook({ executeSandboxCommand: exec })(
+      context({ ...BASE_INPUTS, agent: "gemini" }),
+    );
+    expect(outputsOf(result)).toBeUndefined();
+    expect(exec).not.toHaveBeenCalled();
   });
 
   it.each([

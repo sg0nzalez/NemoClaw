@@ -85,6 +85,11 @@ export function createWhatsappStatusHealthHook(
     if (!execute || !sandboxName) return {};
 
     const agent = normalizeString(context.inputs?.agent) ?? "openclaw";
+    // Only openclaw and hermes have a defined WhatsApp bridge shape. The
+    // manifest already gates this hook to those agents; guard explicitly so a
+    // future agent added to the manifest without a probe here degrades to the
+    // basic report instead of silently running the openclaw CLI against it.
+    if (agent !== "openclaw" && agent !== "hermes") return {};
     const stateDirs = resolveWhatsappStateDirs(agent);
     const timeoutMs = normalizeTimeoutMs(options.timeoutMs);
     const probe =
@@ -201,17 +206,17 @@ function runOpenclawStatusProbe(
   const channels = readObject(json.channels);
   const wa = channels ? readObject(channels.whatsapp) : null;
   if (!wa) {
-    // No `channels.whatsapp` — the CLI is reporting the gateway is
-    // unreachable or the channel is not on the gateway yet
-    // (`{ gatewayReachable: false, error: "unknown channel: ...", ... }`).
-    // Signal probe-reachable (we did get a clean exit and valid JSON) but
-    // leave the runtime fields null so the evaluator lands on "unknown".
+    // No `channels.whatsapp`. Two distinct causes the CLI reports, told apart
+    // by the `error` string: the gateway is up but whatsapp is not configured
+    // on it (`error: "unknown channel: …"`), or the gateway is unreachable.
+    // Either way leave the runtime fields null so the evaluator lands on
+    // "unknown"; only the diagnostic wording differs.
     return {
       probeReachable: true,
       stateDirPopulated: null,
       bridgeProcessAlive: null,
       heartbeat: null,
-      recentLogSignals: ["gateway not reachable — live WhatsApp health unavailable"],
+      recentLogSignals: [describeMissingWaChannel(json)],
     };
   }
   return mapOpenclawWaState(wa);
@@ -340,14 +345,30 @@ function readStringValue(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
+// The CLI reports a missing `channels.whatsapp` for two different reasons;
+// an `error: "unknown channel: …"` means the gateway is up but whatsapp is
+// not configured on it, otherwise treat the gateway as unreachable. Emit a
+// fixed diagnostic string — never the raw `error`, which can carry PII.
+function describeMissingWaChannel(json: Record<string, unknown>): string {
+  const error = readStringValue(json.error);
+  return error !== null && /unknown channel/i.test(error)
+    ? "whatsapp is not configured on the gateway — live health unavailable"
+    : "gateway not reachable — live WhatsApp health unavailable";
+}
+
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+// The largest timestamp the ECMAScript Date type can represent; beyond it
+// `new Date(v).toISOString()` throws RangeError. A garbage `lastInboundAt`
+// from the gateway JSON must degrade to null, not crash the status command.
+const MAX_ECMASCRIPT_DATE_MS = 8_640_000_000_000_000;
+
 function epochMsToIso(value: unknown): string | null {
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return null;
-  const iso = new Date(value).toISOString();
-  return iso;
+  if (value > MAX_ECMASCRIPT_DATE_MS) return null;
+  return new Date(value).toISOString();
 }
 
 function normalizeString(value: unknown): string | null {
