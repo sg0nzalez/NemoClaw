@@ -1,6 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import type { AgentMcpAdapter } from "../../agent/defs";
@@ -33,8 +37,8 @@ describe("MCP tool discovery host boundary (#6901)", () => {
   it("launches the same shared runtime below every adapter policy ancestor", () => {
     const expectedAncestor: Record<AgentMcpAdapter, string> = {
       mcporter: "nemoclaw-start node -e",
-      "hermes-config": "/opt/hermes/.venv/bin/python -c",
-      "deepagents-config": "/opt/venv/bin/python3 -c",
+      "hermes-config": "/opt/hermes/.venv/bin/python -I -c",
+      "deepagents-config": "/opt/venv/bin/python3 -I -c",
     };
 
     for (const adapter of Object.keys(expectedAncestor) as AgentMcpAdapter[]) {
@@ -49,6 +53,28 @@ describe("MCP tool discovery host boundary (#6901)", () => {
       expect(built?.command).not.toContain("openshell:resolve:env:GITHUB_TOKEN");
       expect(built?.command).not.toContain("tools/call");
       expect(built?.command).toContain("rebuild the sandbox");
+    }
+  });
+
+  it("isolates Python adapter wrappers from a sandbox-controlled subprocess module", () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-mcp-python-isolation-"));
+    const importedMarker = path.join(tmpDir, "shadow-imported");
+    fs.writeFileSync(
+      path.join(tmpDir, "subprocess.py"),
+      `from pathlib import Path\nPath(${JSON.stringify(importedMarker)}).write_text("imported")\n`,
+    );
+    const runner =
+      "import subprocess, sys; raise SystemExit(subprocess.run(sys.argv[1:], check=False).returncode)";
+
+    try {
+      const result = spawnSync("python3", ["-I", "-c", runner, "/bin/true"], {
+        cwd: tmpDir,
+        encoding: "utf8",
+      });
+      expect(result.status, `${result.stdout}${result.stderr}`).toBe(0);
+      expect(fs.existsSync(importedMarker)).toBe(false);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   });
 
@@ -144,6 +170,27 @@ describe("MCP tool discovery host boundary (#6901)", () => {
   it("fails closed on malformed, duplicate, unsorted, or unframed results", () => {
     for (const result of [
       framedResult({ protocol: 1, ok: true, count: 1, tools: ["bad\nname"], truncated: false }),
+      framedResult({
+        protocol: 1,
+        ok: true,
+        count: 1,
+        tools: ["safe\u202eevil"],
+        truncated: false,
+      }),
+      framedResult({
+        protocol: 1,
+        ok: true,
+        count: 1,
+        tools: ["safe\u2066evil"],
+        truncated: false,
+      }),
+      framedResult({
+        protocol: 1,
+        ok: true,
+        count: 1,
+        tools: ["safe\u2028evil"],
+        truncated: false,
+      }),
       framedResult({
         protocol: 1,
         ok: true,

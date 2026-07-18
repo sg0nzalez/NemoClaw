@@ -32,7 +32,7 @@ const AUTHENTICATED_TOOL_DISCOVERY_DISABLED_DETAIL =
 // tool names. Keep that worst case inside the host boundary while retaining a
 // strict cap on sandbox output.
 const MCP_TOOL_DISCOVERY_MAX_OUTPUT_BYTES = 256 * 1_024;
-const UNSAFE_TEXT = /[\u0000-\u001f\u007f-\u009f]/u;
+const UNSAFE_TEXT = /[\p{Cc}\p{Cf}\u2028\u2029]/u;
 
 export interface McpToolDiscoveryReadiness {
   policyGatewayPresent: boolean | null;

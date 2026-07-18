@@ -41,12 +41,12 @@ export function wrapMcpRuntimeCommand(
     case "hermes-config": {
       const runner =
         "import subprocess, sys; raise SystemExit(subprocess.run(sys.argv[1:], check=False).returncode)";
-      return `/opt/hermes/.venv/bin/python -c ${shellQuote(runner)} ${quotedCommand}`;
+      return `/opt/hermes/.venv/bin/python -I -c ${shellQuote(runner)} ${quotedCommand}`;
     }
     case "deepagents-config": {
       const runner =
         "import subprocess, sys; raise SystemExit(subprocess.run(sys.argv[1:], check=False).returncode)";
-      return `/opt/venv/bin/python3 -c ${shellQuote(runner)} ${quotedCommand}`;
+      return `/opt/venv/bin/python3 -I -c ${shellQuote(runner)} ${quotedCommand}`;
     }
     default:
       return unsupportedAdapter(adapter);

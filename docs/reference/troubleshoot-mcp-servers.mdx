@@ -9,8 +9,6 @@ keywords: ["troubleshoot nemoclaw mcp", "mcp credential resolution", "mcp policy
 content:
   type: "troubleshooting"
 ---
-import { AgentOnly } from "../_components/AgentGuide";
-
 Use the reported status or lifecycle error to choose the matching remediation.
 
 ## Credential Resolution Is Unknown
@@ -29,6 +27,9 @@ Compare status for the same server on a known-good host.
 
 A `credential resolution: unknown` verdict with an endpoint or policy detail means the probe could not reach a judgment.
 Fix the reported endpoint or policy condition, then rerun status.
+
+A detail containing `CONNECT 503` means OpenShell failed closed before TLS setup because gateway TLS termination state was unavailable.
+Inspect the OpenShell gateway's ephemeral CA generation and CA-file initialization, repair the reported condition, and rerun `mcp status <server>`.
 
 ## Provider Is Missing During Restart
 

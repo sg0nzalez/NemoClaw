@@ -92,6 +92,7 @@ function stageLegacySandboxBuildContext(
   fs.cpSync(path.join(rootDir, "scripts"), path.join(buildCtx, "scripts"), {
     recursive: true,
   });
+  normalizeReadModesForDockerCopy(path.join(buildCtx, "scripts"));
   fs.cpSync(
     path.join(rootDir, "src", "lib", "messaging"),
     path.join(buildCtx, "src", "lib", "messaging"),
@@ -264,8 +265,8 @@ function stageOptimizedSandboxBuildContext(
     path.join(stagedScriptsDir, "patch-openclaw-mcp-npx.mts"),
   );
   fs.copyFileSync(
-    path.join(rootDir, "scripts", "patch-openclaw-issue-4434-diagnostics.ts"),
-    path.join(stagedScriptsDir, "patch-openclaw-issue-4434-diagnostics.ts"),
+    path.join(rootDir, "scripts", "patch-openclaw-issue-4434-diagnostics.mts"),
+    path.join(stagedScriptsDir, "patch-openclaw-issue-4434-diagnostics.mts"),
   );
   fs.copyFileSync(
     path.join(rootDir, "scripts", "patch-openclaw-device-self-approval.mts"),
@@ -280,6 +281,7 @@ function stageOptimizedSandboxBuildContext(
     path.join(rootDir, "scripts", "lib", "reviewed-npm-archive.mts"),
     path.join(stagedScriptsDir, "lib", "reviewed-npm-archive.mts"),
   );
+  normalizeReadModesForDockerCopy(stagedScriptsDir);
 
   return { buildCtx, stagedDockerfile };
 }
