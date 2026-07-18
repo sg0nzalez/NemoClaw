@@ -205,11 +205,14 @@ cleanup() {
   validate_common
   local requested_at verified_at deadline output record status=0 absent_count=0
   requested_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  record="$(workspace_record)"
-  if [ -n "$record" ]; then
-    output="$(timeout 60s brev delete "$INSTANCE_NAME" 2>&1)" || status=$?
-    printf '%s\n' "$output"
-    [ "$status" -eq 0 ] || printf 'brev delete returned %s; verifying absence before failing\n' "$status" >&2
+  if record="$(workspace_record)"; then
+    if [ -n "$record" ]; then
+      output="$(timeout 60s brev delete "$INSTANCE_NAME" 2>&1)" || status=$?
+      printf '%s\n' "$output"
+      [ "$status" -eq 0 ] || printf 'brev delete returned %s; verifying absence before failing\n' "$status" >&2
+    fi
+  else
+    printf 'brev ls failed before cleanup; verifying absence with retries\n' >&2
   fi
   deadline=$((SECONDS + ${BREV_DELETE_TIMEOUT_SECONDS:-600}))
   while [ "$SECONDS" -lt "$deadline" ]; do

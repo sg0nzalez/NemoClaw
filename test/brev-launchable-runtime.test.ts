@@ -13,7 +13,7 @@ const roots: string[] = [];
 const candidateSha = "a".repeat(40);
 
 type FixtureOptions = {
-  lsMode?: "ok" | "fail" | "malformed";
+  lsMode?: "ok" | "fail" | "fail-once" | "malformed";
   provisionSha?: string;
   repoSha?: string;
 };
@@ -33,6 +33,7 @@ function fixture(options: FixtureOptions = {}) {
   const workDir = path.join(root, "evidence");
   const home = path.join(root, "home");
   const state = path.join(root, "state.json");
+  const lsCount = path.join(root, "ls-count");
   const log = path.join(root, "brev.log");
   const manifest = path.join(workDir, "validated-manifest.v1.json");
   fs.mkdirSync(bin);
@@ -47,6 +48,10 @@ printf '%s\\n' "$*" >> "$FAKE_BREV_LOG"
 case "$1" in
   ls)
     [ "$FAKE_BREV_LS_MODE" != fail ] || exit 9
+    if [ "$FAKE_BREV_LS_MODE" = fail-once ] && [ ! -f "$FAKE_BREV_LS_COUNT" ]; then
+      : >"$FAKE_BREV_LS_COUNT"
+      exit 9
+    fi
     if [ "$FAKE_BREV_LS_MODE" = malformed ]; then printf '{}\\n'; exit 0; fi
     if [ -f "$FAKE_BREV_STATE" ]; then cat "$FAKE_BREV_STATE"; else printf '{"workspaces":[]}\\n'; fi
     ;;
@@ -135,6 +140,7 @@ exec "$@"
     CANDIDATE_SHA: candidateSha,
     FAKE_BREV_LS_MODE: options.lsMode ?? "ok",
     FAKE_BREV_LOG: log,
+    FAKE_BREV_LS_COUNT: lsCount,
     FAKE_BREV_STATE: state,
     FAKE_PROVISION_SHA: options.provisionSha ?? candidateSha.slice(0, 7),
     FAKE_REPO_SHA: options.repoSha ?? candidateSha,
@@ -194,6 +200,17 @@ describe("exact staging Brev Launchable runtime", () => {
     expect(deploy.status).not.toBe(0);
     expect(deploy.stderr).toContain("unable to inventory Brev workspaces before deploy");
     expect(fs.readFileSync(log, "utf8")).not.toContain("create ");
+  });
+
+  it("retries cleanup when the initial Brev inventory request fails", () => {
+    const { env, workDir } = fixture({ lsMode: "fail-once" });
+    const cleanup = run("cleanup", env);
+
+    expect(cleanup.status, [cleanup.stderr, cleanup.stdout].join("\n")).toBe(0);
+    expect(cleanup.stderr).toContain("brev ls failed before cleanup");
+    expect(
+      JSON.parse(fs.readFileSync(path.join(workDir, "brev-cleanup-evidence.json"), "utf8")),
+    ).toMatchObject({ terminalState: "ABSENT", workspaceName: "nclaw-e2e-test-1" });
   });
 
   it("rejects an empty provision SHA before onboarding", () => {
