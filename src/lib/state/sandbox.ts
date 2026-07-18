@@ -1081,9 +1081,11 @@ export function isSandboxExecTransportFailure(result: {
   const code = (result.error as NodeJS.ErrnoException | undefined)?.code;
   // Both transports use ENOBUFS for the shared raw-output cap. The canonical
   // request validator uses OPENSHELL_EXEC_INVALID_ARGUMENT. Neither can be
-  // repaired by retrying or by treating the sandbox as unreachable.
+  // repaired by retrying or by treating the sandbox as unreachable. OpenShell
+  // status 255 and stale signal fields are terminal remote results, not SSH
+  // transport conventions.
   if (code === "ENOBUFS" || code === "OPENSHELL_EXEC_INVALID_ARGUMENT") return false;
-  return Boolean(result.error || result.signal || result.status === null);
+  return Boolean(result.error || result.status === null);
 }
 
 /** @internal Pin the binary state-file result contract independently of filesystem writes. */
@@ -1145,8 +1147,6 @@ async function backupStateFile(
  * Back up all state directories from a running sandbox.
  * Uses the agent manifest to determine which directories contain state.
  */
-
-export { isSshTransportFailure } from "./ssh-transport.js";
 
 export async function backupSandboxState(
   sandboxName: string,

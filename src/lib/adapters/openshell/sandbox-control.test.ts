@@ -226,10 +226,10 @@ describe("OpenShell exec request validation", () => {
 });
 
 describe("CLI OpenShell sandbox control", () => {
-  it("maps a typed exec request to the existing CLI contract", async () => {
+  it("maps a typed exec request and preserves exit status 255", async () => {
     const capture = vi.fn(
       (): CaptureOpenshellBinaryResult => ({
-        status: 0,
+        status: 255,
         stdout: Buffer.from("hello\n"),
         stderr: Buffer.from("warning\n"),
       }),
@@ -253,7 +253,7 @@ describe("CLI OpenShell sandbox control", () => {
       },
     );
     expect(result).toEqual({
-      status: 0,
+      status: 255,
       stdout: "hello\n",
       stderr: "warning\n",
     });

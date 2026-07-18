@@ -510,9 +510,9 @@ describe("backupSandboxState OpenShell directory transport", () => {
   });
 
   it.each([
-    ["error", { error: new Error("sandbox exec stream reset") }],
-    ["signal", { signal: "SIGTERM" as const }],
-  ])("rejects tar bytes returned with a transport %s even when tar reports success", async (_failureKind, transportFailure) => {
+    ["transport error", { error: new Error("sandbox exec stream reset") }, true],
+    ["stale signal", { signal: "SIGTERM" as const }, false],
+  ])("rejects tar bytes returned with a %s even when tar reports success", async (_failureKind, transportFailure, expectedUnreachable) => {
     const { archive } = createBinaryTarArchive();
     queueSuccessfulProbeAndAudit();
     mocks.execSandboxReadOnlyWithGrpcFallback.mockResolvedValueOnce({
@@ -525,7 +525,7 @@ describe("backupSandboxState OpenShell directory transport", () => {
 
     expect(result).toMatchObject({
       success: false,
-      unreachable: true,
+      unreachable: expectedUnreachable,
       backedUpDirs: [],
       failedDirs: ["state"],
     });

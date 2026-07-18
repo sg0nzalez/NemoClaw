@@ -166,10 +166,38 @@ describe("state-file backup exec request", () => {
 
     expect(isSandboxExecTransportFailure({ status: null, error: outputLimit })).toBe(false);
     expect(isSandboxExecTransportFailure({ status: null, error: invalidRequest })).toBe(false);
+    expect(isSandboxExecTransportFailure({ status: 255 })).toBe(false);
+    expect(isSandboxExecTransportFailure({ status: 0, signal: "SIGKILL" })).toBe(false);
+    expect(isSandboxExecTransportFailure({ status: 1, signal: "SIGINT" })).toBe(false);
+    expect(isSandboxExecTransportFailure({ status: null })).toBe(true);
     expect(isSandboxExecTransportFailure({ status: null, error: new Error("UNAVAILABLE") })).toBe(
       true,
     );
     expect(isSandboxExecTransportFailure({ status: null, signal: "SIGKILL" })).toBe(true);
+  });
+
+  it.each([
+    ["a non-zero status", "terminal-status", { status: 255, stdout: "", stderr: "" }],
+    [
+      "a terminal signal",
+      "terminal-signal",
+      { status: 0, stdout: "", stderr: "", signal: "SIGKILL" as const },
+    ],
+  ])("keeps state-file backup failure from %s reachable without persisting bytes", async (_failureKind, backupName, execResult) => {
+    execReadOnly.mockResolvedValue(execResult);
+
+    const result = await backupSandboxState("hermes", { name: backupName });
+
+    expect(result).toMatchObject({
+      success: false,
+      backedUpFiles: [],
+      failedFiles: ["runtime/state.db"],
+      unreachable: false,
+    });
+    expect(execReadOnly).toHaveBeenCalledTimes(1);
+    expect(fs.existsSync(path.join(result.manifest!.backupPath, "runtime", "state.db"))).toBe(
+      false,
+    );
   });
 
   it("persists binary state-file bytes with private mode and complete backup bookkeeping", async () => {
