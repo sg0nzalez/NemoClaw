@@ -86,7 +86,7 @@ type WaFixture = {
 function openclawJson(wa: WaFixture | null): string {
   const payload =
     wa === null
-      ? { gatewayReachable: false, error: "unknown channel: whatsapp", configOnly: true }
+      ? { gatewayReachable: true, error: "unknown channel: whatsapp", configOnly: true }
       : { gatewayReachable: true, channels: { whatsapp: wa } };
   return JSON.stringify(payload);
 }
@@ -215,6 +215,14 @@ describe("whatsapp.statusHealth openclaw CLI probe", () => {
         gatewayReachable: false,
         configOnly: true,
         channels: { whatsapp: HEALTHY_WA },
+      },
+    },
+    {
+      label: "unknown-channel error without channel state",
+      payload: {
+        gatewayReachable: false,
+        error: "unknown channel: whatsapp",
+        configOnly: true,
       },
     },
     {

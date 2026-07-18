@@ -167,13 +167,8 @@ function runOpenclawStatusProbe(
   const wa = channels ? readObject(channels.whatsapp) : null;
   // The CLI can include config-only/stale channel state when the gateway is
   // unreachable. That root reachability bit is authoritative and must win
-  // before any nested WhatsApp fields are interpreted. The one bounded
-  // exception is OpenClaw's known unconfigured response: it carries the fixed
-  // unknown-channel error without nested WhatsApp state even though its root
-  // reachability bit is false.
-  if (json.gatewayReachable === false && !isKnownUnconfiguredWhatsappResponse(json, channels)) {
-    return PROBE_UNREACHABLE;
-  }
+  // before any nested WhatsApp fields or free-form error text are interpreted.
+  if (json.gatewayReachable === false) return PROBE_UNREACHABLE;
 
   if (!wa) {
     // No `channels.whatsapp`. Two distinct causes the CLI reports, told apart
@@ -281,14 +276,6 @@ function readObject(value: unknown): Record<string, unknown> | null {
 
 function readStringValue(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
-}
-
-function isKnownUnconfiguredWhatsappResponse(
-  json: Record<string, unknown>,
-  channels: Record<string, unknown> | null,
-): boolean {
-  if (channels !== null && Object.hasOwn(channels, "whatsapp")) return false;
-  return hasUnknownChannelError(json);
 }
 
 function hasUnknownChannelError(json: Record<string, unknown>): boolean {
