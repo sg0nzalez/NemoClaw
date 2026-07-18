@@ -6,11 +6,12 @@ import os from "node:os";
 import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
+import ts from "typescript";
 
 import {
   extractTrustedCreateRequireAllowlists,
   trustedCreateRequireExpansionFailure,
-} from "../.github/actions/ci-static-checks/create-require-ratchet.mts";
+} from "../.github/actions/ci-static-checks/create-require-ratchet-core.mts";
 import {
   collectProductionCreateRequireSources,
   collectTestSupportCreateRequireSources,
@@ -186,14 +187,14 @@ describe("CLI createRequire budget", () => {
 
     expect(
       trustedCreateRequireExpansionFailure(
-        extractTrustedCreateRequireAllowlists(currentSource),
-        extractTrustedCreateRequireAllowlists(baselineSource),
+        extractTrustedCreateRequireAllowlists(ts, currentSource, "current-checker.mts"),
+        extractTrustedCreateRequireAllowlists(ts, baselineSource, "baseline-checker.mts"),
       ),
     ).toContain("src/new.test.ts");
     expect(
       trustedCreateRequireExpansionFailure(
-        extractTrustedCreateRequireAllowlists(currentSource),
-        extractTrustedCreateRequireAllowlists(baselineSource),
+        extractTrustedCreateRequireAllowlists(ts, currentSource, "current-checker.mts"),
+        extractTrustedCreateRequireAllowlists(ts, baselineSource, "baseline-checker.mts"),
       ),
     ).toContain("test/new.ts");
   });
