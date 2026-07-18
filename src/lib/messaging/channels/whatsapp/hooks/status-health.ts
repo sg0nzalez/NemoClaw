@@ -53,11 +53,6 @@ export const WHATSAPP_STATUS_HEALTH_HOOK_HANDLER_ID = "whatsapp.statusHealth";
 // the Noise WebSocket is stuck; a fast hard cap keeps channels status from
 // inheriting that hang.
 const DEFAULT_TIMEOUT_MS = 8_000;
-const OPENCLAW_WHATSAPP_STATE_DIRS = [
-  "/sandbox/.openclaw/whatsapp",
-  "/sandbox/.openclaw/credentials/whatsapp",
-] as const;
-
 /** WhatsApp uses the generic channel-health hook options unchanged. */
 export type WhatsappStatusHealthHookOptions = ChannelStatusHealthHookOptions;
 
@@ -83,8 +78,7 @@ export function createWhatsappStatusHealthHook(
 
     const input: WhatsappProbeInput = {
       agent,
-      stateDirs: OPENCLAW_WHATSAPP_STATE_DIRS,
-      stateDirPopulated: probe.stateDirPopulated,
+      paired: probe.paired,
       heartbeat: probe.heartbeat,
       heartbeatParseError: null,
       bridgeProcessAlive: probe.bridgeProcessAlive,
@@ -134,7 +128,7 @@ type OpenclawWhatsappState = {
 
 type ProbeResult = {
   readonly probeReachable: boolean;
-  readonly stateDirPopulated: boolean | null;
+  readonly paired: boolean | null;
   readonly bridgeProcessAlive: boolean | null;
   readonly heartbeat: WhatsappHeartbeat | null;
   readonly recentLogSignals: readonly string[];
@@ -142,7 +136,7 @@ type ProbeResult = {
 
 const PROBE_UNREACHABLE: ProbeResult = {
   probeReachable: false,
-  stateDirPopulated: null,
+  paired: null,
   bridgeProcessAlive: null,
   heartbeat: null,
   recentLogSignals: [],
@@ -189,7 +183,7 @@ function runOpenclawStatusProbe(
     // "unknown"; only the diagnostic wording differs.
     return {
       probeReachable: true,
-      stateDirPopulated: null,
+      paired: null,
       bridgeProcessAlive: null,
       heartbeat: null,
       recentLogSignals: [describeMissingWaChannel(json)],
@@ -220,8 +214,8 @@ function mapOpenclawWaState(wa: OpenclawWhatsappState): ProbeResult {
   return {
     probeReachable: true,
     // linked is the authoritative pairing bit; the credentials-directory
-    // check that used to sit here mistook half-written state as "populated".
-    stateDirPopulated: linked,
+    // check that used to sit here mistook half-written state as pairing.
+    paired: linked,
     // running is the authoritative liveness bit; the pgrep check that used
     // to sit here could not see the in-process bridge, and the gateway-log
     // breadcrumbs are append-only so they survived a stopped bridge.

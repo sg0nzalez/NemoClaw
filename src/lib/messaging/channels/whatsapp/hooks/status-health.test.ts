@@ -200,7 +200,7 @@ describe("whatsapp.statusHealth openclaw CLI probe", () => {
       createWhatsappStatusHealthHook({ executeSandboxCommand: exec })(context()),
     );
     expect(report?.verdict).not.toBe("healthy");
-    // stateDirPopulated stays null here, so the evaluator lands on "unknown" —
+    // paired stays null here, so the evaluator lands on "unknown" —
     // an honest "the gateway did not report whatsapp" rather than a fabricated
     // healthy. openclawJson(null) carries `error: "unknown channel: …"`.
     expect(report?.verdict).toBe("unknown");
