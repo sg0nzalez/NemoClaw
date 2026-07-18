@@ -11,8 +11,6 @@ const source = `---
 title: "Example"
 description-agent: "Use when looking up $$nemoclaw commands."
 ---
-import { AgentCli, AgentOnly } from "../_components/AgentGuide";
-
 <AgentOnly variant="openclaw">
 OpenClaw only.
 </AgentOnly>
@@ -30,7 +28,7 @@ Gateway agents only.
 $$nemoclaw list
 \`\`\`
 
-Use <AgentCli /> for the current variant.
+Use \`$$nemoclaw\` for the current variant.
 `;
 
 describe("agent variant docs", () => {
@@ -113,9 +111,45 @@ OpenClaw content.
     expect(() => renderAgentVariantPage(nested, "openclaw")).toThrow("nested AgentOnly block");
   });
 
+  it("rejects inline AgentOnly directives before they reach Fern", () => {
+    const inline = `---
+title: "Example"
+---
+<AgentOnly variant="openclaw">OpenClaw only.</AgentOnly>
+`;
+
+    expect(() => renderAgentVariantPage(inline, "openclaw")).toThrow(
+      "unresolved AgentOnly directive",
+    );
+  });
+
+  it("rejects runtime agent components before they reach Fern", () => {
+    const runtimeComponent = `---
+title: "Example"
+---
+Use <AgentCli /> for the current variant.
+`;
+
+    expect(() => renderAgentVariantPage(runtimeComponent, "hermes")).toThrow(
+      "unresolved runtime agent component",
+    );
+  });
+
+  it("rejects AgentGuide imports before they reach Fern", () => {
+    const runtimeImport = `---
+title: "Example"
+---
+import { AgentOnly } from "../_components/AgentGuide";
+`;
+
+    expect(() => renderAgentVariantPage(runtimeImport, "deepagents")).toThrow(
+      "unresolved AgentGuide import",
+    );
+  });
+
   it("rewrites relative imports but preserves Fern route links for generated build output", () => {
     const rendered = renderAgentVariantPage(
-      `${source}\nSee [Commands](../reference/commands#$$nemoclaw-list).\nSee [Backup](backup-restore).\n![Diagram](images/diagram.png)\n`,
+      `${source}\nimport { Example } from "../_components/Example";\n\nSee [Commands](../reference/commands#$$nemoclaw-list).\nSee [Backup](backup-restore).\n![Diagram](images/diagram.png)\n`,
       "hermes",
       {
         outputPath:
@@ -124,9 +158,7 @@ OpenClaw content.
       },
     );
 
-    expect(rendered).toContain(
-      'import { AgentCli, AgentOnly } from "../../../_components/AgentGuide";',
-    );
+    expect(rendered).toContain('import { Example } from "../../../_components/Example";');
     expect(rendered).toContain("[Commands](../reference/commands#nemohermes-list)");
     expect(rendered).toContain("[Backup](backup-restore)");
     expect(rendered).toContain("![Diagram](../../../manage-sandboxes/images/diagram.png)");
