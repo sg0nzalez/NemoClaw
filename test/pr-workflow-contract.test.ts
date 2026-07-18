@@ -276,6 +276,7 @@ function codeFilterMatchesChangedPaths(workflow: CiWorkflow, paths: string[]): b
 describe("pull request and main workflow contracts", () => {
   const prWorkflow = readYaml<CiWorkflow>(".github/workflows/pr.yaml");
   const mainWorkflow = readYaml<CiWorkflow>(".github/workflows/main.yaml");
+  const dcoWorkflow = readYaml<CiWorkflow>(".github/workflows/dco-check.yaml");
   const installerHashWorkflow = readYaml<CiWorkflow>(".github/workflows/installer-hash-check.yaml");
   const installerHashAction = readYaml<InstallerHashAction>(
     ".github/actions/ci-installer-hash-check/action.yaml",
@@ -299,6 +300,35 @@ describe("pull request and main workflow contracts", () => {
       ".github/actions/ci-installer-integration/action.yaml",
     ),
   };
+
+  // source-shape-contract: security -- Base retargets must rerun trusted installer verification without minting skipped required evidence
+  it("reruns installer hash verification after a pull request base retarget", () => {
+    expect(installerHashWorkflow.on?.pull_request?.types).toEqual([
+      "opened",
+      "synchronize",
+      "reopened",
+      "edited",
+    ]);
+    expect(installerHashWorkflow.jobs["check-hash"].if).toBe(
+      "github.repository == 'NVIDIA/NemoClaw'",
+    );
+  });
+
+  // source-shape-contract: security -- Dependabot's bounded DCO exemption must report an explicit successful required check
+  it("records the Dependabot DCO bypass as a successful required job", () => {
+    const job = dcoWorkflow.jobs["dco-check"];
+    const bypass = requiredWorkflowStep(job, "Check Dependabot DCO bypass");
+    const declaration = requiredWorkflowStep(job, "Check PR body for Signed-off-by");
+
+    expect(job.if).toBeUndefined();
+    expect(job.steps?.some((step) => step.uses?.startsWith("actions/checkout@"))).toBe(false);
+    expect(bypass.env?.USERNAME).toBe("${{ github.event.pull_request.user.login }}");
+    expect(bypass.run).toContain('"$USERNAME" == "dependabot[bot]"');
+    expect(bypass.run).toContain('"$USERNAME" == "app/dependabot"');
+    expect(bypass.run).not.toContain(".github/dco-bypass.txt");
+    expect(declaration.if).toBe("${{ steps.dco-bypass.outputs.bypass != 'true' }}");
+  });
+
   // source-shape-contract: security -- Installer hashes must be verified by base-trusted or immutable bootstrap code
   it("runs pull request installer verification from immutable trusted code", () => {
     const job = installerHashWorkflow.jobs["check-hash"];
@@ -338,6 +368,18 @@ describe("pull request and main workflow contracts", () => {
     );
 
     expect(installerHashWorkflow.on?.pull_request?.paths).toBeUndefined();
+    expect(installerHashWorkflow.on?.pull_request?.types).toEqual([
+      "opened",
+      "synchronize",
+      "reopened",
+      "edited",
+    ]);
+    expect(installerHashWorkflow["run-name"]).toContain(
+      "Installer Hash PR #{0} head {1} base {2} gate true",
+    );
+    expect(installerHashWorkflow["run-name"]).toContain("github.event.pull_request.base.sha");
+    expect(installerHashWorkflow["run-name"]).not.toContain("github.event.changes.base");
+    expect(job.if).toBe("github.repository == 'NVIDIA/NemoClaw'");
     expect(installerHashWorkflow.permissions).toEqual({ contents: "read" });
     expect(parserRuntimeSetup.uses).toBe(trustedSetupNodeAction);
     expect(parserRuntimeSetup.with?.["node-version"]).toBe("22.19.0");
@@ -599,7 +641,7 @@ describe("pull request and main workflow contracts", () => {
       "scripts/install-openshell.sh",
       "scripts/update-hermes-agent.sh",
       "src/lib/actions/sandbox/mcp-bridge-validation.ts",
-      "src/lib/actions/sandbox/openshell-child-visible-credentials.v0.0.72.json",
+      "src/lib/actions/sandbox/openshell-child-visible-credentials.v0.0.85.json",
     ]) {
       expect(files.test(path), path).toBe(true);
     }
@@ -1018,12 +1060,57 @@ describe("pull request and main workflow contracts", () => {
     expect(stepRuns(sharedActions.staticChecks).join("\n")).not.toContain(
       "skills-frontmatter.test.ts",
     );
+    const trustedRatchetDependencies = requiredStep(
+      sharedActions.staticChecks,
+      "Install base-trusted createRequire verifier dependencies",
+    );
+    const trustedRatchet = requiredStep(
+      sharedActions.staticChecks,
+      "Enforce base-trusted createRequire allowlist ratchet",
+    );
+    expect(trustedRatchetDependencies.run).toBe(
+      'npm ci --ignore-scripts --no-audit --no-fund --prefix "$GITHUB_ACTION_PATH"',
+    );
+    expect(trustedRatchet.run).toBe(
+      'node --experimental-strip-types "$GITHUB_ACTION_PATH/create-require-ratchet.mts"',
+    );
     expect(
-      requiredStep(
+      requiredStepIndex(
+        sharedActions.staticChecks,
+        "Install base-trusted createRequire verifier dependencies",
+      ),
+    ).toBeLessThan(
+      requiredStepIndex(
         sharedActions.staticChecks,
         "Enforce base-trusted createRequire allowlist ratchet",
-      ).run,
-    ).toBe('npx tsx "$GITHUB_ACTION_PATH/create-require-ratchet.mts"');
+      ),
+    );
+    expect(
+      requiredStepIndex(
+        sharedActions.staticChecks,
+        "Enforce base-trusted createRequire allowlist ratchet",
+      ),
+    ).toBeLessThan(requiredStepIndex(sharedActions.staticChecks, "Install dependencies"));
+
+    const ratchetPackage = JSON.parse(
+      readFileSync(".github/actions/ci-static-checks/package.json", "utf8"),
+    ) as { dependencies?: Record<string, string> };
+    const ratchetLock = JSON.parse(
+      readFileSync(".github/actions/ci-static-checks/package-lock.json", "utf8"),
+    ) as {
+      packages?: Record<string, { integrity?: string; version?: string }>;
+    };
+    const ratchetRuntime = readFileSync(
+      ".github/actions/ci-static-checks/create-require-ratchet.mts",
+      "utf8",
+    );
+    expect(ratchetPackage.dependencies).toEqual({ typescript: "6.0.3" });
+    expect(ratchetLock.packages?.["node_modules/typescript"]?.version).toBe("6.0.3");
+    expect(ratchetLock.packages?.["node_modules/typescript"]?.integrity).toMatch(/^sha512-/);
+    expect(ratchetRuntime).toContain(
+      'import ts from "./node_modules/typescript/lib/typescript.js";',
+    );
+    expect(ratchetRuntime).not.toMatch(/from ["']typescript["']/);
   });
 
   // source-shape-contract: security -- Downloaded CI tooling must use a committed digest rather than upstream metadata
