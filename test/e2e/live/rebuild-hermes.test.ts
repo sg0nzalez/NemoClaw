@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { shellQuote } from "../../../src/lib/core/shell-quote";
+import { readSandboxBaseImageResolutionMetadata } from "../../../src/lib/sandbox-base-image";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
 import { assertCleanupSucceededOrAbsent } from "../fixtures/cleanup-resources.ts";
 import { assertExitZero as expectExitZero } from "../fixtures/clients/command.ts";
@@ -22,7 +23,7 @@ import {
 import { REPO_ROOT } from "../fixtures/paths.ts";
 import { listCredentialLeakPaths } from "../fixtures/phases/state-validation.ts";
 import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
-import { buildRebuildHermesChildEnv } from "./rebuild-hermes-env.ts";
+import { buildRebuildHermesChildEnv, planRebuildHermesBaseReuse } from "./rebuild-hermes-env.ts";
 import {
   cleanupTrackedRebuildHermesImage,
   type RebuildHermesRegistryImageState,
@@ -78,6 +79,7 @@ const HOSTED_MODEL =
   "nvidia/nvidia/nemotron-3-ultra";
 const OLD_BASE_TAG = `nemoclaw-hermes-old-base:${SANDBOX_NAME.toLowerCase().replace(/[^a-z0-9_.-]+/g, "-")}`;
 const CURRENT_BASE_TAG = "ghcr.io/nvidia/nemoclaw/hermes-sandbox-base:latest";
+const CURRENT_BASE_REUSE_TAG = `nemoclaw-hermes-sandbox-base-local:e2e-current-${SANDBOX_NAME.toLowerCase().replace(/[^a-z0-9_.-]+/g, "-")}`;
 
 const INSTALL_TIMEOUT_MS = 60 * 60_000;
 const DOCKER_BUILD_TIMEOUT_MS = 35 * 60_000;
@@ -175,12 +177,14 @@ async function bestEffortPrecleanHermesResources(
         "if command -v openshell >/dev/null 2>&1; then openshell forward stop 8642 >/dev/null 2>&1 || true; fi",
         'if command -v openshell >/dev/null 2>&1; then openshell provider delete "$DISCORD_PROVIDER" >/dev/null 2>&1 || true; fi',
         'docker rmi "$OLD_BASE_TAG" >/dev/null 2>&1 || true',
+        'docker rmi "$CURRENT_BASE_REUSE_TAG" >/dev/null 2>&1 || true',
         "exit 0",
       ].join("\n"),
     ],
     {
       artifactName,
       env: testEnv(apiKey, {
+        CURRENT_BASE_REUSE_TAG,
         DISCORD_PROVIDER: `${SANDBOX_NAME}-discord-bridge`,
         OLD_BASE_TAG,
       }),
@@ -192,6 +196,7 @@ async function bestEffortPrecleanHermesResources(
 
 function hermesCleanupEnv(apiKey: string | undefined): NodeJS.ProcessEnv {
   return testEnv(apiKey, {
+    CURRENT_BASE_REUSE_TAG,
     DISCORD_PROVIDER: `${SANDBOX_NAME}-discord-bridge`,
     OLD_BASE_TAG,
   });
@@ -459,7 +464,7 @@ test(STALE_BASE_REBUILD
     markerFile: MARKER_FILE,
     preservedBoundaries: [
       "bash install.sh --non-interactive",
-      "docker build agents/hermes/Dockerfile.base for old/current Hermes base images",
+      "phase 1 current Hermes base resolution plus old Hermes base construction",
       "openshell provider create/update and sandbox create/exec/list",
       "curated local ~/.nemoclaw registry and onboard-session rebuild metadata",
       "real nemoclaw <sandbox> rebuild --yes --verbose",
@@ -492,9 +497,18 @@ test(STALE_BASE_REBUILD
   await bestEffortPrecleanHermesResources(host, apiKey, "pre-cleanup-hermes-rebuild-resources");
 
   let phase1ImageTag: string | null = null;
+  let currentBaseReuseTag: string | null = null;
   let oldSandboxImageState: RebuildHermesRegistryImageState | null = null;
   cleanup.trackDisposable(`remove old Hermes base image ${OLD_BASE_TAG}`, () =>
     cleanupOldHermesBaseImage(host, apiKey),
+  );
+  cleanup.trackDisposable("remove current Hermes base reuse tag", () =>
+    cleanupTrackedRebuildHermesImage(currentBaseReuseTag, (imageTag) =>
+      removeHermesFixtureImage(host, apiKey, imageTag, {
+        artifactName: "cleanup-hermes-rebuild-resources-docker-rmi-current-base-reuse",
+        label: `cleanup current Hermes base reuse tag ${imageTag}`,
+      }),
+    ),
   );
   cleanup.trackGateway(host, "nemoclaw", {
     artifactName: "cleanup-hermes-rebuild-resources-gateway",
@@ -583,7 +597,31 @@ test(STALE_BASE_REBUILD
     "initial Hermes onboard must persist the dashboard port used by authoritative rebuild",
   ).toBe(true);
   phase1ImageTag = requireRebuildHermesInitialImageTag(registrySandbox().imageTag, SANDBOX_NAME);
-  await artifacts.writeJson("phase-1-owned-image.json", { imageTag: phase1ImageTag });
+  const phase1BaseResolution = readSandboxBaseImageResolutionMetadata(phase1ImageTag);
+  const baseReusePlan = planRebuildHermesBaseReuse(
+    STALE_BASE_REBUILD,
+    phase1BaseResolution,
+    CURRENT_BASE_REUSE_TAG,
+  );
+  if (baseReusePlan) {
+    const tagCurrentBase = await host.command(
+      "docker",
+      ["tag", baseReusePlan.sourceRef, baseReusePlan.preparedRef],
+      {
+        artifactName: "phase-1-tag-current-hermes-base-for-reuse",
+        env: testEnv(apiKey),
+        redactionValues,
+        timeoutMs: OPENSHELL_TIMEOUT_MS,
+      },
+    );
+    expectExitZero(tagCurrentBase, "tag current Hermes base for rebuild reuse");
+    currentBaseReuseTag = baseReusePlan.preparedRef;
+  }
+  await artifacts.writeJson("phase-1-owned-image.json", {
+    imageTag: phase1ImageTag,
+    baseResolutionSource: phase1BaseResolution?.source ?? null,
+    reusedBaseImageRef: baseReusePlan?.preparedRef ?? null,
+  });
 
   await sandbox.cleanupSandbox(SANDBOX_NAME, {
     artifactName: "phase-1-delete-current-sandbox",
@@ -814,18 +852,14 @@ test(STALE_BASE_REBUILD
   });
 
   switch (STALE_BASE_REBUILD) {
-    case false:
-      // The authoritative `nemoclaw <sandbox> rebuild` below constructs the
-      // current Hermes base exactly once through its forced-build path: the
-      // seeded old sandbox carries no resolvable base-image metadata, so rebuild
-      // rebuilds the base from Dockerfile.base. Building the same base here
-      // during setup prepared the identical expensive apt/uv/npm layers twice in
-      // one job without adding coverage, so the redundant setup build is gone
-      // while phase 6 keeps exercising the real forced-build path (#7144).
-      progress.phase("phase 5 current base built by authoritative rebuild");
+    case false: {
+      progress.phase("phase 5 current base reuse");
+      const reusedBaseImageRef =
+        baseReusePlan?.preparedRef ??
+        fail("normal rebuild-Hermes lane did not prepare a reusable current base image");
       await artifacts.writeText(
-        "phase-5-current-base-note.txt",
-        "Current Hermes base is constructed once by the authoritative rebuild in phase 6; the redundant setup build was removed. (#7144)\n",
+        "phase-5-current-base-reuse.txt",
+        `Reusing phase 1 Hermes base ${reusedBaseImageRef}; rebuild must not construct it again.\n`,
       );
       break;
     case true:
@@ -839,7 +873,10 @@ test(STALE_BASE_REBUILD
   progress.phase("phase 6 nemoclaw rebuild");
   const rebuild = await host.command("nemoclaw", [SANDBOX_NAME, "rebuild", "--yes", "--verbose"], {
     artifactName: "phase-6-nemoclaw-rebuild-hermes",
-    env: testEnv(apiKey, { NEMOCLAW_REBUILD_VERBOSE: "1" }),
+    env: testEnv(apiKey, {
+      NEMOCLAW_REBUILD_VERBOSE: "1",
+      ...baseReusePlan?.childEnv,
+    }),
     redactionValues,
     timeoutMs: REBUILD_TIMEOUT_MS,
     captureLimitBytes: LONG_COMMAND_CAPTURE_LIMIT_BYTES,
