@@ -3499,7 +3499,25 @@ run_station_host_preparation() {
   if [ "${FORCE_STATION_INSTALL:-}" = "1" ]; then
     helper_args+=(--force-station-install)
   fi
-  bash "$helper" "${helper_args[@]}"
+  bash "$helper" "${helper_args[@]}" 2>&1 | filter_station_host_preparation_output
+}
+
+filter_station_host_preparation_output() {
+  local line detail
+  while IFS= read -r line; do
+    case "$line" in
+      *" version="*" log="*)
+        info "DGX Station host preparation log: ${line##* log=}"
+        ;;
+      *" WARNING: "*)
+        detail="${line#* WARNING: }"
+        warn "$detail"
+        ;;
+      *" ERROR: "*)
+        printf '%s\n' "$line" >&2
+        ;;
+    esac
+  done
 }
 
 ensure_station_express_host() {
