@@ -19,9 +19,9 @@ import { parseGatewayInference } from "../../inference/config";
 import { resolveGatewayName, resolveSandboxGatewayName } from "../../onboard/gateway-binding";
 import { executeSandboxCommandForVerification } from "../../onboard/sandbox-verification-exec";
 import { getSandboxBaselineEntryDigest } from "../../policy";
+import { BASELINE_EXCLUSION_SUPPORT_IMPACT } from "../../policy/baseline-exclusion";
 import { ROOT } from "../../runner";
 import { parseLiveSandboxNames } from "../../runtime-recovery";
-import { BASELINE_EXCLUSION_SUPPORT_IMPACT } from "../../policy/baseline-exclusion";
 import * as sandboxVersion from "../../sandbox/version";
 import * as shields from "../../shields";
 import type { SandboxEntry } from "../../state/registry";
@@ -355,25 +355,51 @@ function shieldsDoctorCheck(sandboxName: string): DoctorCheck {
   };
 }
 
+type BaselineExclusionDriftState = "excluded" | "content-changed" | "no-longer-in-baseline";
+
+function baselineExclusionDriftState(
+  currentDigest: string | null,
+  exclusionDigest: string,
+): BaselineExclusionDriftState {
+  if (currentDigest === null) return "no-longer-in-baseline";
+  return currentDigest === exclusionDigest ? "excluded" : "content-changed";
+}
+
+function baselineExclusionCheckFields(
+  sandboxName: string,
+  key: string,
+  driftState: BaselineExclusionDriftState,
+): Pick<DoctorCheck, "status" | "detail" | "hint"> {
+  const restoreCommand = `${CLI_NAME} ${sandboxName} policy restore ${key}`;
+  if (driftState === "excluded") {
+    return {
+      status: "info",
+      detail: `Baseline entry '${key}' excluded. ${BASELINE_EXCLUSION_SUPPORT_IMPACT}`,
+      hint: `restore with \`${restoreCommand}\``,
+    };
+  }
+  if (driftState === "no-longer-in-baseline") {
+    return {
+      status: "warn",
+      detail: `Baseline entry '${key}' no longer exists; rebuild fails closed until the stale exclusion is reviewed.`,
+      hint: `key no longer exists in the baseline; run \`${restoreCommand}\` to clear the stale record`,
+    };
+  }
+  return {
+    status: "warn",
+    detail: `Baseline entry '${key}' changed since exclusion was approved; rebuild fails closed until re-approved.`,
+    hint: `run \`${restoreCommand}\`, review with \`${CLI_NAME} ${sandboxName} policy exclude ${key} --dry-run\`, then re-approve`,
+  };
+}
+
 function baselineExclusionDoctorChecks(sandboxName: string): DoctorCheck[] {
   return registry.getBaselineExclusions(sandboxName).map((exclusion) => {
     const currentDigest = getSandboxBaselineEntryDigest(sandboxName, exclusion.key);
-    const status: DoctorStatus = currentDigest === exclusion.digest ? "info" : "warn";
-    const detail =
-      currentDigest === null
-        ? `Baseline entry '${exclusion.key}' no longer exists; rebuild fails closed until the stale exclusion is reviewed.`
-        : currentDigest !== exclusion.digest
-          ? `Baseline entry '${exclusion.key}' changed since exclusion was approved; rebuild fails closed until re-approved.`
-          : `Baseline entry '${exclusion.key}' excluded. ${BASELINE_EXCLUSION_SUPPORT_IMPACT}`;
+    const driftState = baselineExclusionDriftState(currentDigest, exclusion.digest);
     return {
       group: "Sandbox",
       label: `Baseline exclusion: ${exclusion.key}`,
-      status,
-      detail,
-      hint:
-        status === "warn"
-          ? `run \`${CLI_NAME} ${sandboxName} policy restore ${exclusion.key}\`, review with \`${CLI_NAME} ${sandboxName} policy exclude ${exclusion.key} --dry-run\`, then re-approve`
-          : `restore with \`${CLI_NAME} ${sandboxName} policy restore ${exclusion.key}\``,
+      ...baselineExclusionCheckFields(sandboxName, exclusion.key, driftState),
     };
   });
 }

@@ -288,6 +288,11 @@ describe("runSandboxDoctor flow", () => {
           digest: "digest-stale",
           acknowledgedAt: "2026-07-18T00:00:00.000Z",
         },
+        {
+          key: "dropped_entry",
+          digest: "digest-2",
+          acknowledgedAt: "2026-07-17T00:00:00.000Z",
+        },
       ]);
       const currentDigests: Record<string, string> = {
         nous_research: "digest-1",
@@ -311,6 +316,12 @@ describe("runSandboxDoctor flow", () => {
             label: "Baseline exclusion: changed_entry",
             status: "warn",
             hint: expect.stringContaining("policy restore changed_entry"),
+          }),
+          expect.objectContaining({
+            group: "Sandbox",
+            label: "Baseline exclusion: dropped_entry",
+            status: "warn",
+            hint: "key no longer exists in the baseline; run `nemoclaw alpha policy restore dropped_entry` to clear the stale record",
           }),
         ]),
       );

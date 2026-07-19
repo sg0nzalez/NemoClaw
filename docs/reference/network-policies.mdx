@@ -309,12 +309,20 @@ The exclusion is bound to the reviewed entry content, recorded in the sandbox re
 If a later release changes or removes that entry, create and rebuild fail closed and require re-review.
 The critical `managed_inference` entry cannot currently be excluded pending product direction.
 
-To recover from baseline drift, clear the stale record, review the current scope, and explicitly approve it again only if you still accept the impact:
+To recover from baseline drift, first check whether the release changed the entry's content or removed it entirely (`$$nemoclaw <sandbox-name> policy explain` or `doctor` reports which).
+
+If the entry still exists with different content, clear the stale record, review the current scope, and explicitly approve it again only if you still accept the impact:
 
 ```bash
 $$nemoclaw <sandbox-name> policy restore <key>
 $$nemoclaw <sandbox-name> policy exclude <key> --dry-run
 $$nemoclaw <sandbox-name> policy exclude <key> --force
+```
+
+If the release removed the entry entirely, `policy exclude <key>` fails with "Unknown baseline entry" because there is nothing left to exclude. Clear the stale record instead:
+
+```bash
+$$nemoclaw <sandbox-name> policy restore <key>
 ```
 
 List active exclusions with `policy list`.
