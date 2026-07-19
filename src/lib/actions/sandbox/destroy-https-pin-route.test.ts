@@ -47,10 +47,12 @@ describe("destroy HTTPS-pin route cleanup (#6141)", () => {
 
     await expect(
       revokeDestroyedSandboxHttpsPinRoute(GATEWAY_NAME, ROUTE_ID, {
-        listSandboxes: () => {
-          if (failure === "list") throw new Error("registry unavailable");
-          return { sandboxes: [], defaultSandbox: null };
-        },
+        listSandboxes:
+          failure === "list"
+            ? () => {
+                throw new Error("registry unavailable");
+              }
+            : () => ({ sandboxes: [], defaultSandbox: null }),
         revokeRoute: async () => {
           throw new Error("delete unavailable");
         },

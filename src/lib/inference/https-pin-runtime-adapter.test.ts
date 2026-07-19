@@ -84,8 +84,9 @@ function sendRawHttpMethod(
     });
     socket.on("end", () => {
       const match = response.match(/^HTTP\/1\.1 (\d{3})/u);
-      if (!match) reject(new Error(`Invalid raw HTTP response: ${response}`));
-      else resolve(Number(match[1]));
+      match
+        ? resolve(Number(match[1]))
+        : reject(new Error(`Invalid raw HTTP response: ${response}`));
     });
     socket.on("error", reject);
   });

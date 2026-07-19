@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it, vi } from "vitest";
-import { ensureHttpsPinRuntimeAdapter as realEnsureHttpsPinRuntimeAdapter } from "../inference/https-pin-runtime-adapter";
 import { HTTPS_PIN_RUNTIME_ADAPTER_PROVIDER_CREDENTIAL_ENV } from "../inference/https-pin-runtime";
+import { ensureHttpsPinRuntimeAdapter as realEnsureHttpsPinRuntimeAdapter } from "../inference/https-pin-runtime-adapter";
 import type { ConfigObject } from "../security/credential-filter";
 import { runInferenceSet } from "./inference-set";
 import { baseSession, createDeps } from "./inference-set.test-support";
@@ -181,19 +181,24 @@ describe("runInferenceSet compatible providers", () => {
   it("preserves explicit inference API through the final registry and session sync", async () => {
     let providerVersion = 1;
     const captureOpenshell = vi.fn((args: string[]) => {
-      if (args[0] === "provider" && args[1] === "get") {
-        const output = [
-          "Name: compatible-endpoint",
-          "Id: 11111111-2222-4333-8444-555555555555",
-          "Type: openai",
-          `Resource version: ${providerVersion}`,
-          "Credential keys: COMPATIBLE_API_KEY",
-          "Config keys: OPENAI_BASE_URL",
-        ].join("\n");
-        return { status: 0, output, stdout: output, stderr: "" };
+      switch (`${args[0]}:${args[1]}`) {
+        case "provider:get": {
+          const output = [
+            "Name: compatible-endpoint",
+            "Id: 11111111-2222-4333-8444-555555555555",
+            "Type: openai",
+            `Resource version: ${providerVersion}`,
+            "Credential keys: COMPATIBLE_API_KEY",
+            "Config keys: OPENAI_BASE_URL",
+          ].join("\n");
+          return { status: 0, output, stdout: output, stderr: "" };
+        }
+        case "provider:update":
+          providerVersion += 1;
+          return { status: 0, output: "", stdout: "", stderr: "" };
+        default:
+          return { status: 0, output: "", stdout: "", stderr: "" };
       }
-      if (args[0] === "provider" && args[1] === "update") providerVersion += 1;
-      return { status: 0, output: "", stdout: "", stderr: "" };
     });
     const config: ConfigObject = {
       agents: { defaults: { model: { primary: "inference/nvidia/model-a" } } },

@@ -40,11 +40,13 @@ function providerOutput(options: {
 function captureSequence(
   results: Array<{ status: number; stdout?: string; stderr?: string; output?: string }>,
 ): InferenceSetDeps["captureOpenshell"] & ReturnType<typeof vi.fn> {
-  return vi.fn(() => {
-    const result = results.shift();
-    if (!result) throw new Error("unexpected OpenShell call");
-    return result;
-  }) as InferenceSetDeps["captureOpenshell"] & ReturnType<typeof vi.fn>;
+  return vi.fn(
+    () =>
+      results.shift() ??
+      (() => {
+        throw new Error("unexpected OpenShell call");
+      })(),
+  ) as InferenceSetDeps["captureOpenshell"] & ReturnType<typeof vi.fn>;
 }
 
 describe("HTTPS-pin provider binding", () => {
@@ -164,13 +166,16 @@ describe("HTTPS-pin provider binding", () => {
     const makeCapture = (id: string): InferenceSetDeps["captureOpenshell"] => {
       let version = 1;
       return (args, opts) => {
-        if (args[1] === "get") {
-          const output = providerOutput({ id, resourceVersion: version });
-          return { status: 0, stdout: output, stderr: "", output };
+        switch (args[1]) {
+          case "get": {
+            const output = providerOutput({ id, resourceVersion: version });
+            return { status: 0, stdout: output, stderr: "", output };
+          }
+          default:
+            mutations.push(opts?.env);
+            version += 1;
+            return { status: 0, stdout: "", stderr: "", output: "" };
         }
-        mutations.push(opts?.env);
-        version += 1;
-        return { status: 0, stdout: "", stderr: "", output: "" };
       };
     };
 

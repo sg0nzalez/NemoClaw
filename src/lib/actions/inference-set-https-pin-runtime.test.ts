@@ -42,13 +42,29 @@ function providerCapture(options: {
       `Config keys: ${configKey}`,
     ].join("\n");
   return vi.fn((args: string[]) => {
-    if (args[0] === "provider" && args[1] === "get") {
-      const text = output();
-      return { status: 0, stdout: text, stderr: "", output: text };
+    switch (`${args[0]}:${args[1]}`) {
+      case "provider:get": {
+        const text = output();
+        return { status: 0, stdout: text, stderr: "", output: text };
+      }
+      case "provider:update":
+        resourceVersion += 1;
+        return { status: 0, stdout: "", stderr: "", output: "" };
+      default:
+        return { status: 0, stdout: "", stderr: "", output: "" };
     }
-    if (args[0] === "provider" && args[1] === "update") resourceVersion += 1;
-    return { status: 0, stdout: "", stderr: "", output: "" };
   }) as InferenceSetDeps["captureOpenshell"] & ReturnType<typeof vi.fn>;
+}
+
+function failRegistryRead(): never {
+  throw new Error("registry unavailable");
+}
+
+function failRegistryReadAfterTwoCalls(
+  originalListSandboxes: InferenceSetDeps["listSandboxes"],
+): InferenceSetDeps["listSandboxes"] {
+  let listCalls = 0;
+  return () => (listCalls++ < 2 ? originalListSandboxes() : failRegistryRead());
 }
 
 describe("runInferenceSet HTTPS-pin route credential handoff (#6141)", () => {
@@ -190,12 +206,11 @@ describe("runInferenceSet HTTPS-pin route credential handoff (#6141)", () => {
       credentialEnv: "COMPATIBLE_API_KEY",
     });
     const original = capture.getMockImplementation() as InferenceSetDeps["captureOpenshell"];
-    capture.mockImplementation((args, opts) => {
-      if (args[0] === "inference" && args[1] === "set") {
-        return { status: 1, stdout: "", stderr: "selection failed", output: "selection failed" };
-      }
-      return original(args, opts);
-    });
+    capture.mockImplementation((args, opts) =>
+      args[0] === "inference" && args[1] === "set"
+        ? { status: 1, stdout: "", stderr: "selection failed", output: "selection failed" }
+        : original(args, opts),
+    );
     const deps = createDeps({
       config: {},
       entry: { name: "alpha", agent: "openclaw", provider: "nvidia-prod", model: "old" },
@@ -377,14 +392,8 @@ describe("runInferenceSet HTTPS-pin route credential handoff (#6141)", () => {
         credentialEnv: "COMPATIBLE_API_KEY",
       }),
     });
-    if (failure === "list") {
-      const originalListSandboxes = deps.listSandboxes;
-      let listCalls = 0;
-      deps.listSandboxes = () => {
-        if (listCalls++ < 2) return originalListSandboxes();
-        throw new Error("registry unavailable");
-      };
-    }
+    deps.listSandboxes =
+      failure === "list" ? failRegistryReadAfterTwoCalls(deps.listSandboxes) : deps.listSandboxes;
 
     await expect(
       runInferenceSet(
