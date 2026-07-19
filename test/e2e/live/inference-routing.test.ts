@@ -396,9 +396,12 @@ test("TC-INF-11 DNS-backed HTTPS custom endpoint routes through the local pinnin
   // onboards successfully with -- then switch to the DNS-backed HTTPS
   // endpoint through `inference set --endpoint-url`, the actual #6141 call
   // site this test exercises.
+  // Advertise localhost so onboarding exercises its host-bridge rewrite, but
+  // listen beyond host loopback so the resulting sandbox route can reach it.
   const placeholder = await startFakeOpenAiCompatibleServer({
     apiKey,
     chatContent: "placeholder",
+    host: "0.0.0.0",
     model,
     publicHost: "localhost",
     requireAuth: true,
