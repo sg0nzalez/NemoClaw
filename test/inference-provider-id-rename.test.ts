@@ -52,6 +52,7 @@ function stageDockerfile(providerArgLine: string): string {
 }
 
 const MANAGED_DOCKERFILES = [
+  "Dockerfile",
   "agents/hermes/Dockerfile",
   "agents/langchain-deepagents-code/Dockerfile",
 ];
