@@ -73,6 +73,13 @@ export class OpenShellGrpcOutputLimitError extends Error {
   }
 }
 
+export class OpenShellGrpcPreDispatchError extends Error {
+  constructor(readonly cause: Error) {
+    super(cause.message, { cause });
+    this.name = "OpenShellGrpcPreDispatchError";
+  }
+}
+
 function isLoopback(hostname: string): boolean {
   const normalized = hostname.replace(/^\[|\]$/g, "").toLowerCase();
   const version = isIP(normalized);
@@ -127,6 +134,12 @@ function validateTlsMaterial(config: OpenShellGrpcClientConfig, secure: boolean)
   }
 }
 
+export function validateOpenShellGrpcClientConfig(config: OpenShellGrpcClientConfig): void {
+  const { secure } = parseEndpoint(config.endpoint);
+  validateBearerToken(config.bearerToken, secure);
+  validateTlsMaterial(config, secure);
+}
+
 function createChannelCredentials(
   config: OpenShellGrpcClientConfig,
   secure: boolean,
@@ -150,8 +163,8 @@ function protocolPath(): string {
 }
 
 export function createOpenShellGrpcApi(config: OpenShellGrpcClientConfig): OpenShellGrpcApi {
+  validateOpenShellGrpcClientConfig(config);
   const { target, secure } = parseEndpoint(config.endpoint);
-  validateBearerToken(config.bearerToken, secure);
   const credentials = createChannelCredentials(config, secure);
   const protoFile = protocolPath();
   const packageDefinition = protoLoader.loadSync(protoFile, {
@@ -270,9 +283,7 @@ export function createGrpcOpenShellSandboxControl(
   config: OpenShellGrpcClientConfig,
   injectedClient?: OpenShellGrpcApi,
 ): GrpcOpenShellSandboxControl {
-  const { secure } = parseEndpoint(config.endpoint);
-  validateBearerToken(config.bearerToken, secure);
-  validateTlsMaterial(config, secure);
+  validateOpenShellGrpcClientConfig(config);
   const client = injectedClient ?? createOpenShellGrpcApi(config);
   return {
     close: () => client.close(),
@@ -307,7 +318,13 @@ export function createGrpcOpenShellSandboxControl(
       try {
         id = await sandboxId(client, request.sandboxName, metadata, options);
       } catch (error) {
-        return { status: null, stdout: "", stderr: "", error: error as Error };
+        const cause = error instanceof Error ? error : new Error(String(error));
+        return {
+          status: null,
+          stdout: "",
+          stderr: "",
+          error: new OpenShellGrpcPreDispatchError(cause),
+        };
       }
       return execute(client, id, request, metadata, options);
     },

@@ -3,13 +3,26 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const captureMock = vi.hoisted(() => vi.fn());
+const readOnlyExecMock = vi.hoisted(() => vi.fn());
+const legacyCliExecMock = vi.hoisted(() => vi.fn());
 const execMock = vi.hoisted(() => vi.fn(async () => {}));
 const ensureLiveMock = vi.hoisted(() => vi.fn(async () => ({})));
-const getSandboxMock = vi.hoisted(() => vi.fn(() => null as { agent?: string } | null));
+const getSandboxMock = vi.hoisted(() =>
+  vi.fn(
+    () =>
+      null as {
+        agent?: string;
+        gatewayName?: string;
+        gatewayPort?: number;
+      } | null,
+  ),
+);
 
-vi.mock("../../../adapters/openshell/runtime", () => ({
-  captureOpenshell: captureMock,
+vi.mock("../../../adapters/openshell/sandbox-control-routing", () => ({
+  execSandboxReadOnlyWithGrpcFallback: readOnlyExecMock,
+}));
+vi.mock("../../../adapters/openshell/sandbox-control", () => ({
+  openShellSandboxControl: { exec: legacyCliExecMock },
 }));
 vi.mock("../exec", async () => {
   const actual = await vi.importActual<typeof import("../exec")>("../exec");
@@ -217,11 +230,12 @@ describe("runSessionsPassthrough", () => {
   let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    captureMock.mockReset();
+    readOnlyExecMock.mockReset();
+    legacyCliExecMock.mockReset();
     execMock.mockClear();
     ensureLiveMock.mockClear();
     getSandboxMock.mockReset();
-    getSandboxMock.mockReturnValue(null);
+    getSandboxMock.mockReturnValue({ agent: "openclaw" });
     stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -234,13 +248,14 @@ describe("runSessionsPassthrough", () => {
   });
 
   it("captures and filters `sessions list --json` instead of streaming warm-up entries", async () => {
-    captureMock.mockReturnValueOnce({
+    readOnlyExecMock.mockResolvedValueOnce({
       status: 0,
-      output: JSON.stringify({
+      stdout: JSON.stringify({
         count: 1,
         totalCount: 1,
         sessions: [{ key: "agent:main:explicit:warm", sessionId: `${WARMUP_SESSION_ID_PREFIX}1` }],
       }),
+      stderr: "",
     });
 
     await runSessionsPassthrough("alpha", {
@@ -250,22 +265,11 @@ describe("runSessionsPassthrough", () => {
 
     expect(ensureLiveMock).toHaveBeenCalledWith("alpha", { allowNonReadyPhase: true });
     expect(execMock).not.toHaveBeenCalled();
-    expect(captureMock).toHaveBeenCalledWith(
-      [
-        "sandbox",
-        "exec",
-        "--name",
-        "alpha",
-        "--",
-        "openclaw",
-        "sessions",
-        "list",
-        "--agent",
-        "main",
-        "--json",
-      ],
-      { ignoreError: true, includeStreams: true, maxBuffer: 64 * 1024 * 1024 },
-    );
+    expect(readOnlyExecMock).toHaveBeenCalledWith("nemoclaw", {
+      sandboxName: "alpha",
+      command: ["openclaw", "sessions", "list", "--agent", "main", "--json"],
+      maxOutputBytes: 64 * 1024 * 1024,
+    });
     expect(JSON.parse(String(stdoutSpy.mock.calls[0]?.[0]))).toEqual({
       count: 0,
       totalCount: 0,
@@ -274,40 +278,38 @@ describe("runSessionsPassthrough", () => {
   });
 
   it("captures and filters text `sessions list` output", async () => {
-    captureMock.mockReturnValueOnce({
+    readOnlyExecMock.mockResolvedValueOnce({
       status: 0,
       stdout: [
         "Sessions listed: 1",
         `direct  agent:main:expli...  1m ago  model  id:${WARMUP_SESSION_ID_PREFIX}1`,
       ].join("\n"),
       stderr: "warning: noisy but non-fatal\n",
-      output: [
-        "Sessions listed: 1",
-        `direct  agent:main:expli...  1m ago  model  id:${WARMUP_SESSION_ID_PREFIX}1`,
-      ].join("\n"),
     });
 
     await runSessionsPassthrough("alpha", { verb: "list", extraArgs: ["--agent", "main"] });
 
     expect(execMock).not.toHaveBeenCalled();
-    expect(captureMock).toHaveBeenCalled();
+    expect(readOnlyExecMock).toHaveBeenCalled();
     expect(String(stdoutSpy.mock.calls[0]?.[0])).toBe("Sessions listed: 0\n");
     expect(String(stderrSpy.mock.calls[0]?.[0])).toBe("warning: noisy but non-fatal\n");
   });
 
   it("also filters the parent `sessions` list shorthand", async () => {
-    captureMock.mockReturnValueOnce({
+    readOnlyExecMock.mockResolvedValueOnce({
       status: 0,
-      output: `Sessions listed: 1\nid:${WARMUP_SESSION_ID_PREFIX}1`,
+      stdout: `Sessions listed: 1\nid:${WARMUP_SESSION_ID_PREFIX}1`,
+      stderr: "",
     });
 
     await runSessionsPassthrough("alpha", { extraArgs: [] });
 
     expect(execMock).not.toHaveBeenCalled();
-    expect(captureMock).toHaveBeenCalledWith(
-      ["sandbox", "exec", "--name", "alpha", "--", "openclaw", "sessions"],
-      { ignoreError: true, includeStreams: true, maxBuffer: 64 * 1024 * 1024 },
-    );
+    expect(readOnlyExecMock).toHaveBeenCalledWith("nemoclaw", {
+      sandboxName: "alpha",
+      command: ["openclaw", "sessions"],
+      maxOutputBytes: 64 * 1024 * 1024,
+    });
     expect(String(stdoutSpy.mock.calls[0]?.[0])).toBe("Sessions listed: 0\n");
   });
 
@@ -317,11 +319,12 @@ describe("runSessionsPassthrough", () => {
     ) => {
       throw new Error(`process.exit:${code}`);
     }) as never);
-    captureMock.mockReturnValueOnce({
+    readOnlyExecMock.mockResolvedValueOnce({
       status: 0,
-      output: JSON.stringify({
+      stdout: JSON.stringify({
         records: [{ sid: `${WARMUP_SESSION_ID_PREFIX}1` }],
       }),
+      stderr: "",
     });
 
     try {
@@ -338,9 +341,10 @@ describe("runSessionsPassthrough", () => {
 
   it("passes through unrecognised JSON when it cannot leak a warm-up session", async () => {
     const raw = JSON.stringify({ records: [{ key: "agent:main:main", sessionId: "sid-real" }] });
-    captureMock.mockReturnValueOnce({
+    readOnlyExecMock.mockResolvedValueOnce({
       status: 0,
-      output: raw,
+      stdout: raw,
+      stderr: "",
     });
 
     await runSessionsPassthrough("alpha", { verb: "list", extraArgs: ["--json"] });
@@ -355,9 +359,8 @@ describe("runSessionsPassthrough", () => {
     ) => {
       throw new Error(`process.exit:${code}`);
     }) as never);
-    captureMock.mockReturnValueOnce({
+    readOnlyExecMock.mockResolvedValueOnce({
       status: null,
-      output: "",
       stdout: "",
       stderr: "",
       error: Object.assign(new Error("spawnSync openshell ENOBUFS"), { code: "ENOBUFS" }),
@@ -371,10 +374,10 @@ describe("runSessionsPassthrough", () => {
       exitSpy.mockRestore();
     }
 
-    expect(captureMock).toHaveBeenCalledWith(expect.any(Array), {
-      ignoreError: true,
-      includeStreams: true,
-      maxBuffer: 64 * 1024 * 1024,
+    expect(readOnlyExecMock).toHaveBeenCalledWith("nemoclaw", {
+      sandboxName: "alpha",
+      command: ["openclaw", "sessions", "list", "--all-agents", "--json"],
+      maxOutputBytes: 64 * 1024 * 1024,
     });
     expect(consoleErrorSpy).toHaveBeenCalledWith(
       expect.stringContaining("output exceeded NemoClaw's 64 MiB filtering buffer"),
@@ -388,21 +391,30 @@ describe("runSessionsPassthrough", () => {
 
     await runSessionsPassthrough("hermes", { extraArgs: [] });
 
-    expect(captureMock).not.toHaveBeenCalled();
+    expect(readOnlyExecMock).not.toHaveBeenCalled();
     expect(execMock).toHaveBeenCalledWith("hermes", ["hermes", "sessions", "list"]);
   });
 
   it("uses openclaw binary for openclaw-agent sandboxes (#6247)", async () => {
-    getSandboxMock.mockReturnValue({ agent: "openclaw" });
-    captureMock.mockReturnValueOnce({ status: 0, output: "Sessions listed: 0\n" });
+    getSandboxMock.mockReturnValue({
+      agent: "openclaw",
+      gatewayName: "nemoclaw-9090",
+      gatewayPort: 9090,
+    });
+    readOnlyExecMock.mockResolvedValueOnce({
+      status: 0,
+      stdout: "Sessions listed: 0\n",
+      stderr: "",
+    });
 
     await runSessionsPassthrough("alpha", { extraArgs: [] });
 
     expect(execMock).not.toHaveBeenCalled();
-    expect(captureMock).toHaveBeenCalledWith(
-      ["sandbox", "exec", "--name", "alpha", "--", "openclaw", "sessions"],
-      { ignoreError: true, includeStreams: true, maxBuffer: 64 * 1024 * 1024 },
-    );
+    expect(readOnlyExecMock).toHaveBeenCalledWith("nemoclaw-9090", {
+      sandboxName: "alpha",
+      command: ["openclaw", "sessions"],
+      maxOutputBytes: 64 * 1024 * 1024,
+    });
   });
 
   it("routes hermes `sessions list` with forwarded flags via execSandbox (#6247)", async () => {
@@ -413,34 +425,45 @@ describe("runSessionsPassthrough", () => {
       extraArgs: ["--limit", "5"],
     });
 
-    expect(captureMock).not.toHaveBeenCalled();
+    expect(readOnlyExecMock).not.toHaveBeenCalled();
     expect(execMock).toHaveBeenCalledWith("hermes", ["hermes", "sessions", "list", "--limit", "5"]);
   });
 
   it("defaults to the openclaw binary + filter path when the registry has no entry (#6247)", async () => {
     getSandboxMock.mockReturnValue(null);
-    captureMock.mockReturnValueOnce({ status: 0, output: "Sessions listed: 0\n" });
+    legacyCliExecMock.mockResolvedValueOnce({
+      status: 0,
+      stdout: "Sessions listed: 0\n",
+      stderr: "",
+    });
 
     await runSessionsPassthrough("alpha", { extraArgs: [] });
 
     expect(execMock).not.toHaveBeenCalled();
-    expect(captureMock).toHaveBeenCalledWith(
-      ["sandbox", "exec", "--name", "alpha", "--", "openclaw", "sessions"],
-      { ignoreError: true, includeStreams: true, maxBuffer: 64 * 1024 * 1024 },
-    );
+    expect(readOnlyExecMock).not.toHaveBeenCalled();
+    expect(legacyCliExecMock).toHaveBeenCalledWith({
+      sandboxName: "alpha",
+      command: ["openclaw", "sessions"],
+      maxOutputBytes: 64 * 1024 * 1024,
+    });
   });
 
   it("defaults to the openclaw binary for an unknown agent value (#6247)", async () => {
     getSandboxMock.mockReturnValue({ agent: "custom-future-agent" });
-    captureMock.mockReturnValueOnce({ status: 0, output: "Sessions listed: 0\n" });
+    readOnlyExecMock.mockResolvedValueOnce({
+      status: 0,
+      stdout: "Sessions listed: 0\n",
+      stderr: "",
+    });
 
     await runSessionsPassthrough("alpha", { extraArgs: [] });
 
     expect(execMock).not.toHaveBeenCalled();
-    expect(captureMock).toHaveBeenCalledWith(
-      ["sandbox", "exec", "--name", "alpha", "--", "openclaw", "sessions"],
-      { ignoreError: true, includeStreams: true, maxBuffer: 64 * 1024 * 1024 },
-    );
+    expect(readOnlyExecMock).toHaveBeenCalledWith("nemoclaw", {
+      sandboxName: "alpha",
+      command: ["openclaw", "sessions"],
+      maxOutputBytes: 64 * 1024 * 1024,
+    });
   });
 
   it("prints captured output when OpenClaw exits non-zero", async () => {
@@ -449,9 +472,8 @@ describe("runSessionsPassthrough", () => {
     ) => {
       throw new Error(`process.exit:${code}`);
     }) as never);
-    captureMock.mockReturnValueOnce({
+    readOnlyExecMock.mockResolvedValueOnce({
       status: 2,
-      output: "",
       stdout: "",
       stderr: "unknown flag: --bad\n",
     });

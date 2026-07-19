@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { openShellSandboxControl } from "../../../adapters/openshell/sandbox-control";
+import { execSandboxReadOnlyWithGrpcFallback } from "../../../adapters/openshell/sandbox-control-routing";
 import { CLI_NAME } from "../../../cli/branding";
+import { resolveSandboxGatewayName } from "../../../onboard/gateway-binding";
 import * as registry from "../../../state/registry";
 import { computeExitCode, execSandbox } from "../exec";
 import { ensureLiveSandboxOrExit } from "../gateway-state";
@@ -36,11 +38,11 @@ export function printSessionsPassthroughHelp(verb?: SessionsPassthroughVerb): vo
   console.log(
     `  Pass-through to the sandbox agent's \`sessions${usageSuffix} ...\` command inside the sandbox`,
   );
-  console.log("  via `openshell sandbox exec` — `openclaw sessions ...` for OpenClaw sandboxes,");
+  console.log("  via OpenShell's supported sandbox execution API — `openclaw sessions ...` for");
   console.log(
-    `  \`hermes sessions${hermesUsageSuffix} ...\` for Hermes sandboxes; the in-sandbox binary is picked`,
+    `  OpenClaw sandboxes, \`hermes sessions${hermesUsageSuffix} ...\` for Hermes sandboxes; the`,
   );
-  console.log("  from the sandbox's agent.");
+  console.log("  in-sandbox binary is picked from the sandbox's agent.");
   console.log(
     "  On OpenClaw sandboxes, internal NemoClaw onboard warm-up sessions are hidden from default",
   );
@@ -223,18 +225,25 @@ export async function runSessionsPassthrough(
   // `~/.nemoclaw/sandboxes.json` registry (`REGISTRY_FILE`). Sandbox processes
   // cannot access the host filesystem to change this agent selection; unknown
   // or missing values deliberately default to `openclaw` below.
-  const sandboxAgent = registry.getSandbox(sandboxName)?.agent;
+  const sandbox = registry.getSandbox(sandboxName);
+  const sandboxAgent = sandbox?.agent;
   const inSandboxBinary = sandboxAgent === "hermes" ? "hermes" : "openclaw";
   const command = [inSandboxBinary, "sessions"];
   if (verb) command.push(verb);
   else if (inSandboxBinary === "hermes") command.push("list");
   for (const arg of extraArgs) command.push(arg);
   if (isFilterableListPassthrough(verb) && inSandboxBinary === "openclaw") {
-    const result = await openShellSandboxControl.exec({
+    const request = {
       sandboxName,
       command,
       maxOutputBytes: SESSIONS_LIST_CAPTURE_MAX_BUFFER_BYTES,
-    });
+    };
+    // Without a registry row, the live check above may have validated the
+    // sandbox on whichever gateway is currently active. Preserve that legacy
+    // CLI route instead of guessing the default gateway for direct gRPC.
+    const result = sandbox
+      ? await execSandboxReadOnlyWithGrpcFallback(resolveSandboxGatewayName(sandbox), request)
+      : await openShellSandboxControl.exec(request);
     const { code, errorMessage } = computeExitCode(result);
     const capturedOutput = capturedStdout(result);
     const capturedError = capturedStderr(result);
