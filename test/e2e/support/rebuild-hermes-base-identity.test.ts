@@ -258,7 +258,7 @@ describe("rebuild-Hermes base identity", () => {
         imageInspect({
           id: finalImageId,
           layers: [...rootFsLayers, `sha256:${"7".repeat(64)}`],
-          labels: staleBaseMode ? resolutionLabels(expected) : {},
+          labels: resolutionLabels(expected),
         }),
       ),
     ).toMatchObject({
@@ -276,8 +276,34 @@ describe("rebuild-Hermes base identity", () => {
       finalLayerCount: rootFsLayers.length + 1,
       currentBaseRootFsChain: expect.stringMatching(/^[0-9a-f]{64}$/),
       oldBaseRootFsChain: expect.stringMatching(/^[0-9a-f]{64}$/),
-      resolutionLabelsVerified: staleBaseMode,
+      resolutionLabelsVerified: true,
     });
+  });
+
+  it.each([
+    false,
+    true,
+  ])("fails when final provenance is missing for stale mode %s (#7144)", (staleBaseMode) => {
+    const expected = currentMetadata();
+    const old = oldMetadata();
+
+    expect(() =>
+      verifyRebuildHermesFinalBaseIdentity(
+        staleBaseMode,
+        expected,
+        old,
+        imageInspect({ id: imageId, repoDigests: [expected.ref] }),
+        imageInspect({
+          id: old.imageId,
+          repoDigests: [old.ref],
+          layers: oldRootFsLayers,
+        }),
+        imageInspect({
+          id: `sha256:${"f".repeat(64)}`,
+          layers: [...rootFsLayers, `sha256:${"7".repeat(64)}`],
+        }),
+      ),
+    ).toThrow("did not retain the resolved phase 1 base metadata");
   });
 
   it("fails closed on mutable metadata or a different final filesystem (#7144)", () => {
@@ -336,19 +362,6 @@ describe("rebuild-Hermes base identity", () => {
         }),
       ),
     ).toThrow("old Hermes fixture root filesystem was not distinct from phase 1");
-    expect(() =>
-      verifyRebuildHermesFinalBaseIdentity(
-        true,
-        expected,
-        old,
-        currentInspect,
-        oldInspect,
-        imageInspect({
-          id: `sha256:${"f".repeat(64)}`,
-          layers: [...rootFsLayers, `sha256:${"7".repeat(64)}`],
-        }),
-      ),
-    ).toThrow("did not retain the resolved phase 1 base metadata");
     expect(() =>
       verifyRebuildHermesFinalBaseIdentity(
         false,

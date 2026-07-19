@@ -404,10 +404,7 @@ export function verifyRebuildHermesFinalBaseIdentity(
   }
 
   const finalResolutionMetadata = parseSandboxBaseImageResolutionLabels(finalImage.Config?.Labels);
-  if (
-    (staleBaseMode || finalResolutionMetadata !== null) &&
-    !resolutionMetadataMatches(finalResolutionMetadata, expected)
-  ) {
+  if (!resolutionMetadataMatches(finalResolutionMetadata, expected)) {
     throw new Error("rebuilt Hermes sandbox did not retain the resolved phase 1 base metadata");
   }
 
