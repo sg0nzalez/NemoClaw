@@ -1184,8 +1184,9 @@ Use this form when you care about a specific sandbox's live OpenShell state, age
 Do not pass a sandbox name to `$$nemoclaw status`; that command is the global all-sandbox/service overview.
 
 Pass `--json` to emit a structured per-sandbox report instead of the text renderer.
-The JSON output includes at least `schemaVersion`, `name`, `found`, `agent`, `agentDisplayName`, `agentRuntime`, `dcodeAutoApprovalMode`, `model`, `provider`, `recordedRoute`, `liveRoute`, `routeDrift`, `phase`, `gatewayState`, `inferenceHealth`, `rpcIssue`, `hostGpuDetected`, `sandboxGpuEnabled`, `sandboxGpuMode`, `sandboxGpuDevice`, `openshellDriver`, `openshellVersion`, `policies`, `baselineExclusions`, `failureLayer`, `terminalRuntimeHealth`, `servingProcessHealth`, and `dockerPaused`.
+The JSON output includes at least `schemaVersion`, `name`, `found`, `agent`, `agentDisplayName`, `agentRuntime`, `dcodeAutoApprovalMode`, `model`, `provider`, `recordedRoute`, `liveRoute`, `routeDrift`, `phase`, `gatewayState`, `inferenceHealth`, `rpcIssue`, `hostGpuDetected`, `sandboxGpuEnabled`, `sandboxGpuMode`, `sandboxGpuDevice`, `openshellDriver`, `openshellVersion`, `policies`, `baselineExclusions`, `baselineExclusionTransition`, `failureLayer`, `terminalRuntimeHealth`, `servingProcessHealth`, and `dockerPaused`.
 `baselineExclusions` is an array of exact baseline keys recorded for durable replay and is empty when the sandbox has none.
+`baselineExclusionTransition` is `null` when policy state is settled; otherwise it identifies the interrupted `exclude` or `restore` key that must be reconciled before sandbox creation or recreation, rebuild, or cross-sandbox snapshot cloning.
 The schema-version `1` `model` and `provider` fields keep their established live-route meaning when the gateway route is readable.
 Use `recordedRoute` for the sandbox's durable provider and model and `liveRoute` for the gateway-global route.
 When the live shared route differs, text output prints both routes and JSON output sets `routeDrift.live`, `routeDrift.recorded`, and `routeDrift.canConnect`.
@@ -1705,6 +1706,7 @@ This catches desync caused by external edits to the gateway policy or stale regi
 Preset summaries come only from the YAML `preset.description` field.
 NemoClaw does not render network-policy rule bodies as prose in `policy list` output.
 Recorded baseline exclusions appear in a separate section: `active` means the reviewed digest still matches, `baseline changed — re-review required` means the current entry differs, and `baseline entry removed — restore to clear` means the current release no longer defines the key.
+`repair required — interrupted exclude/restore; rebuild blocked` means NemoClaw preserved a durable transaction journal after a crash or persistence failure; rerun the displayed exact policy command to reconcile it before sandbox creation or recreation, rebuild, or cross-sandbox snapshot cloning.
 
 Each active preset is annotated with its provenance so you can tell why it is applied:
 
@@ -1767,6 +1769,8 @@ When a release removes the entry, run `policy restore <key>` only to clear the s
 
 Restore a previously excluded entry from the current agent baseline and clear its durable exclusion record.
 Use `--dry-run` to preview the egress that would be restored.
+If a restore is interrupted, NemoClaw finalizes it only when the durable exclusion still exactly matches the staged exclusion and the current release baseline still exactly matches the journaled live target.
+If either value changed or the current baseline is unreadable, the journal remains in `repair required` state so you can inspect and re-review the current scope instead of silently accepting a different entry.
 
 ```bash
 $$nemoclaw my-assistant policy restore nous_research --dry-run
@@ -2530,6 +2534,7 @@ With `--force`, NemoClaw preserves any captured loose files in the partial manif
 If the backup produced nothing usable, it continues from recorded registry metadata without restoring prior sandbox state.
 Use this recovery path only when losing the state that could not be backed up is acceptable.
 Before backup or deletion, `rebuild` also refuses an incomplete MCP destroy transaction.
+It also refuses a pending baseline exclusion transaction before opening a shields-down window, starting backup, or deleting the sandbox, and prints the exact `policy exclude` or `policy restore` command to rerun.
 For a prepared-only transaction, the redacted diagnostic points to `$$nemoclaw <name> mcp remove <server> --force` when the sandbox is still live.
 For a pending or both-marker transaction, it points to `$$nemoclaw <name> destroy` because the registry records that OpenShell deletion was already confirmed.
 Before backup or deletion, rebuild checks the staged messaging configuration for credentials or channel resources already used by another registered sandbox.
@@ -2682,6 +2687,7 @@ The selector accepts any of:
 Pass `--to <dst>` to restore the snapshot into a different sandbox instead of the source.
 When `dst` does not exist, it is auto-created by reusing the source sandbox's container image.
 No re-onboarding is needed.
+A cross-sandbox restore refuses to clone a source or replace an existing destination whose baseline exclusion transaction needs repair, before it creates or deletes anything.
 When `dst` already exists, `snapshot restore --to <dst>` refuses by default to avoid silently mutating the destination's filesystem.
 To overwrite an existing destination, pass `--force`: the command deletes `dst`, then recreates it from the source's image and restores the snapshot into the fresh copy.
 If the existing destination has an active shields timer, the force path restores and verifies lockdown, revokes the timer, and then deletes the destination.

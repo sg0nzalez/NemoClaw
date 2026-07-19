@@ -306,6 +306,11 @@ $$nemoclaw <sandbox-name> policy exclude <key> --force
 
 The command prints every endpoint, method/path rule, and binary the exclusion removes, and requires explicit acknowledgement (`--force` in non-interactive use).
 The exclusion is bound to the reviewed entry content, recorded in the sandbox registry, and replayed on rebuild.
+NemoClaw journals the cross-system update before changing the live OpenShell policy and verifies the exact live result before publishing the durable intent.
+If the process or persistence layer fails between those steps, `policy list`, `policy explain`, and `status` report `repair required`.
+Sandbox creation or recreation, rebuild, and cross-sandbox snapshot cloning stop before destructive work, and rerunning the same `policy exclude` or `policy restore` command reconciles only an exact source or target state.
+An unreadable or third live state remains fail-closed for manual inspection instead of being guessed or overwritten.
+An interrupted restore finalizes only when the durable exclusion still exactly matches the staged exclusion and the current release baseline still exactly matches the journaled target; if either changes or becomes unreadable, the journal remains pending for inspection and re-review.
 If a later release changes that entry, create and rebuild fail closed until re-review; if the release removes it, they fail closed until the stale record is cleared.
 The critical `managed_inference` entry cannot currently be excluded pending product direction.
 
