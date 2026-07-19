@@ -12,6 +12,7 @@ import { resultText } from "../fixtures/clients/command.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
 import { startFakeOpenAiCompatibleServer } from "../fixtures/fake-openai-compatible.ts";
 import { REPO_ROOT } from "../fixtures/paths.ts";
+import { resolveVerifiedCloudflaredBinary } from "./cloudflared-prerequisite.ts";
 import {
   remapDnsRebindingHostname,
   restoreDnsRebindingHostsFixture,
@@ -358,7 +359,9 @@ test("TC-INF-11 DNS-backed HTTPS custom endpoint routes through the local pinnin
   // addresses, and only a real TLS trust chain exercises its SNI-pinned
   // certificate validation. This reuses the same trycloudflare.com quick
   // tunnel mechanism as the MCP-bridge DNS-rebinding coverage.
+  const cloudflaredBin = await resolveVerifiedCloudflaredBinary(cleanup);
   const tunnel = await startPublicMcpHttpsTunnel({
+    cloudflaredBin,
     cleanup,
     label: "https-pin inference routing",
     readinessPath: "/v1/models",
