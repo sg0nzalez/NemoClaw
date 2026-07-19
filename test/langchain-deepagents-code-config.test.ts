@@ -34,6 +34,9 @@ function runGeneratorProcess(
     "langchain-deepagents-code",
     "generate-config.ts",
   );
+  const definedOverrides = Object.fromEntries(
+    Object.entries(env).filter(([, value]) => value !== undefined),
+  );
   const childEnv: NodeJS.ProcessEnv = {
     ...process.env,
     HOME: home,
@@ -42,14 +45,11 @@ function runGeneratorProcess(
     NEMOCLAW_UPSTREAM_PROVIDER: "nvidia-prod",
     NEMOCLAW_INFERENCE_BASE_URL: "https://inference.local/v1",
     NEMOCLAW_INFERENCE_API: "openai-completions",
+    ...definedOverrides,
   };
-  for (const [name, value] of Object.entries(env)) {
-    if (value === undefined) {
-      delete childEnv[name];
-    } else {
-      childEnv[name] = value;
-    }
-  }
+  Object.entries(env)
+    .filter(([, value]) => value === undefined)
+    .forEach(([name]) => Reflect.deleteProperty(childEnv, name));
   return {
     ...spawnSync(process.execPath, ["--experimental-strip-types", script], {
       cwd: process.cwd(),
