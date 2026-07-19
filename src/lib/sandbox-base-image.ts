@@ -92,6 +92,15 @@ function getRepoDigest(
   imageName: string,
   imageRef: string,
 ): { digest: string; ref: string } | null {
+  const referencesExpectedRepository =
+    imageRef === imageName ||
+    imageRef.startsWith(`${imageName}:`) ||
+    imageRef.startsWith(`${imageName}@`);
+  // A directly tagged local override can retain the upstream RepoDigest of
+  // its source image. Keep the caller's explicit repository boundary instead
+  // of silently converting that trusted local ref back into a remote digest.
+  if (!referencesExpectedRepository) return null;
+
   const atIndex = imageRef.indexOf("@sha256:");
   const pinnedDigest =
     atIndex !== -1 ? { digest: imageRef.slice(atIndex + 1), ref: imageRef } : null;

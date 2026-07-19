@@ -188,6 +188,37 @@ describe("sandbox base-image warm resolution", () => {
 
     expect(resolved).toMatchObject({ ref: REF, digest: DIGEST, source: "override" });
     expect(dockerMocks.pull).not.toHaveBeenCalled();
+    expect(traceMocks.add).toHaveBeenCalledWith("nemoclaw.sandbox_base_image.cache_stale", {
+      reason: "key_mismatch",
+    });
+  });
+
+  it("preserves a local override that retains an upstream repository digest (#7144)", () => {
+    const localRef = "nemoclaw-sandbox-base-local:e2e-current";
+    const options = {
+      ...resolutionOptions(),
+      envVar: "NEMOCLAW_SANDBOX_BASE_IMAGE_REF",
+      env: {
+        ...resolutionOptions().env,
+        NEMOCLAW_SANDBOX_BASE_IMAGE_REF: localRef,
+      },
+    };
+    dockerMocks.imageInspect.mockReturnValue({ status: 0 });
+
+    const resolved = resolveSandboxBaseImage(options);
+
+    expect(resolved).toEqual({
+      ref: localRef,
+      digest: null,
+      source: "override",
+      glibcVersion: null,
+    });
+    expect(dockerMocks.imageInspect).toHaveBeenCalledWith(localRef, {
+      ignoreError: true,
+      suppressOutput: true,
+    });
+    expect(dockerMocks.imageInspectFormat).not.toHaveBeenCalled();
+    expect(dockerMocks.pull).not.toHaveBeenCalled();
   });
 
   it("fails closed when offline and no cached image can be validated (#4680)", () => {
