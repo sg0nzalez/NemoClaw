@@ -170,18 +170,18 @@ function runOpenclawStatusProbe(
   const json = parseOpenclawJson(String(exec.stdout ?? ""));
   if (!json) return PROBE_UNREACHABLE;
   const channels = readObject(json.channels);
+  // Successful OpenClaw responses expose the live `channels` map and omit
+  // `gatewayReachable`; only the CLI's config-only failure response sets that
+  // field to false. Honor an explicit reachability bit when present, while
+  // accepting the canonical successful shape only when its channel map exists.
+  if (!isReachableGatewayStatusPayload(json, channels)) return PROBE_UNREACHABLE;
   const wa = channels ? readObject(channels.whatsapp) : null;
-  // The CLI can include config-only/stale channel state when the gateway is
-  // unreachable. That root reachability bit is authoritative and must win
-  // before any nested WhatsApp fields or free-form error text are interpreted.
-  if (json.gatewayReachable !== true) return PROBE_UNREACHABLE;
 
   if (!wa) {
-    // No `channels.whatsapp`. Two distinct causes the CLI reports, told apart
-    // by the `error` string: the gateway is up but whatsapp is not configured
-    // on it (`error: "unknown channel: whatsapp"`), or the gateway is unreachable.
-    // Either way leave the runtime fields null so the evaluator lands on
-    // "unknown"; only the diagnostic wording differs.
+    // No `channels.whatsapp`. The exact legacy unknown-channel error means
+    // WhatsApp is not configured; otherwise the reachable gateway simply did
+    // not include live WhatsApp status. Leave runtime fields null so the
+    // evaluator lands on an honest "unknown" verdict in either case.
     return {
       probeReachable: true,
       paired: null,
@@ -285,6 +285,16 @@ function parseOpenclawJson(stdout: string): Record<string, unknown> | null {
   }
 }
 
+function isReachableGatewayStatusPayload(
+  json: Record<string, unknown>,
+  channels: Record<string, unknown> | null,
+): boolean {
+  if (Object.prototype.hasOwnProperty.call(json, "gatewayReachable")) {
+    return json.gatewayReachable === true;
+  }
+  return channels !== null;
+}
+
 function readObject(value: unknown): Record<string, unknown> | null {
   return isObjectRecord(value) ? value : null;
 }
@@ -297,14 +307,14 @@ function hasUnknownChannelError(json: Record<string, unknown>): boolean {
   return readStringValue(json.error) === "unknown channel: whatsapp";
 }
 
-// The CLI reports a missing `channels.whatsapp` for two different reasons;
-// the exact `error: "unknown channel: whatsapp"` means the gateway is up but whatsapp is
-// not configured on it, otherwise treat the gateway as unreachable. Emit a
-// fixed diagnostic string — never the raw `error`, which can carry PII.
+// The CLI can report a missing `channels.whatsapp` with the exact
+// `error: "unknown channel: whatsapp"` when WhatsApp is not configured. A
+// canonical successful payload can also omit that channel without an error.
+// Emit fixed diagnostic strings only — never the raw error, which can carry PII.
 function describeMissingWaChannel(json: Record<string, unknown>): string {
   return hasUnknownChannelError(json)
     ? "whatsapp is not configured on the gateway — live health unavailable"
-    : "gateway not reachable — live WhatsApp health unavailable";
+    : "gateway returned no live WhatsApp status";
 }
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {

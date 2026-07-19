@@ -86,8 +86,8 @@ type WaFixture = {
 function openclawJson(wa: WaFixture | null): string {
   const payload =
     wa === null
-      ? { gatewayReachable: true, error: "unknown channel: whatsapp", configOnly: true }
-      : { gatewayReachable: true, channels: { whatsapp: wa } };
+      ? { channels: {}, error: "unknown channel: whatsapp" }
+      : { channels: { whatsapp: wa } };
   return JSON.stringify(payload);
 }
 
@@ -208,6 +208,15 @@ describe("whatsapp.statusHealth openclaw CLI probe", () => {
     expect(logSignal?.detail).toMatch(/not configured on the gateway/);
   });
 
+  it("accepts the canonical successful payload without the failure-only reachability field", () => {
+    const payload = { channels: { whatsapp: HEALTHY_WA } };
+    const exec = makeExec({ status: 0, stdout: JSON.stringify(payload), stderr: "" });
+    const report = reportOf(
+      createWhatsappStatusHealthHook({ executeSandboxCommand: exec })(context()),
+    );
+    expect(report?.verdict).toBe("healthy");
+  });
+
   it.each([
     {
       label: "stale healthy channel state",
@@ -261,8 +270,8 @@ describe("whatsapp.statusHealth openclaw CLI probe", () => {
 
   it.each([
     {
-      label: "gatewayReachable is absent",
-      payload: { channels: { whatsapp: HEALTHY_WA } },
+      label: "both gatewayReachable and the canonical channels map are absent",
+      payload: {},
     },
     {
       label: "gatewayReachable is non-boolean",
