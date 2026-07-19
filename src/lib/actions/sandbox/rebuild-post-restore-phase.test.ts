@@ -114,4 +114,21 @@ describe("rebuild post-restore session model reconciliation (#7102)", () => {
     expect(sessionModels.reconcileStalePinnedSessionModelsAfterRebuild).not.toHaveBeenCalled();
     expect(processRecovery.executeSandboxCommand).not.toHaveBeenCalled();
   });
+
+  it("discloses carried-over baseline exclusions in the successful rebuild summary (#7194)", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    vi.spyOn(registry, "getBaselineExclusions").mockReturnValue([
+      { key: "nous_research", digest: "digest-1", acknowledgedAt: "2026-07-19T00:00:00.000Z" },
+    ]);
+
+    await runRebuildPostRestorePhase(input());
+
+    expect(
+      logSpy.mock.calls.some(
+        (call) =>
+          typeof call[0] === "string" &&
+          call[0].includes("Baseline exclusions carried over: nous_research"),
+      ),
+    ).toBe(true);
+  });
 });

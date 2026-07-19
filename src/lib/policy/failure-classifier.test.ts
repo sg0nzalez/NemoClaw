@@ -6,11 +6,13 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("../state/registry", () => ({
   getSandbox: vi.fn(),
   getCustomPolicies: vi.fn(() => []),
+  getBaselineExclusions: vi.fn(() => []),
 }));
 
 vi.mock(".", () => ({
   getPresetEndpoints: vi.fn(),
   getGatewayPresets: vi.fn(() => null),
+  getSandboxBaselineEntryDigest: vi.fn(() => null),
   listCustomPresets: vi.fn(),
   listPresets: vi.fn(),
   loadPreset: vi.fn(),

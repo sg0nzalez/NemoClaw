@@ -6,11 +6,13 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("../state/registry", () => ({
   getSandbox: vi.fn(),
   getCustomPolicies: vi.fn(() => []),
+  getBaselineExclusions: vi.fn(() => []),
 }));
 
 vi.mock(".", () => ({
   getPresetEndpoints: vi.fn(),
   getGatewayPresets: vi.fn(() => null),
+  getSandboxBaselineEntryDigest: vi.fn(() => null),
   listCustomPresets: vi.fn(),
   listPresets: vi.fn(),
   loadPreset: vi.fn(),
@@ -101,6 +103,10 @@ function resetMocks() {
   vi.mocked(policies.getPresetEndpoints).mockReset();
   vi.mocked(policies.getGatewayPresets).mockReset();
   vi.mocked(policies.getGatewayPresets).mockReturnValue(null);
+  vi.mocked(registry.getBaselineExclusions).mockReset();
+  vi.mocked(registry.getBaselineExclusions).mockReturnValue([]);
+  vi.mocked(policies.getSandboxBaselineEntryDigest).mockReset();
+  vi.mocked(policies.getSandboxBaselineEntryDigest).mockReturnValue(null);
   vi.mocked(getTier).mockReset();
 }
 
@@ -242,6 +248,52 @@ describe("buildPolicyContext", () => {
     const internal = ctx.activePresets.find((p) => p.name === "internal");
     expect(internal?.allowedHostCategories).toEqual(["internal.example.com"]);
   });
+
+  it("reports baseline exclusions with a status per current digest agreement (#7194)", () => {
+    resetMocks();
+    mockBuiltinPresets();
+    vi.mocked(getTier).mockReturnValue(null);
+    stubRegistry({ policies: [], policyTier: undefined });
+    vi.mocked(registry.getBaselineExclusions).mockReturnValue([
+      { key: "nous_research", digest: "digest-1", acknowledgedAt: "2026-07-19T00:00:00.000Z" },
+      { key: "changed_entry", digest: "digest-stale", acknowledgedAt: "2026-07-18T00:00:00.000Z" },
+      { key: "dropped_entry", digest: "digest-2", acknowledgedAt: "2026-07-17T00:00:00.000Z" },
+    ]);
+    vi.mocked(policies.getSandboxBaselineEntryDigest).mockImplementation((_sandbox, key) => {
+      if (key === "nous_research") return "digest-1";
+      if (key === "changed_entry") return "digest-current";
+      return null;
+    });
+
+    const ctx = buildPolicyContext(SANDBOX);
+
+    expect(ctx.baselineExclusions).toEqual([
+      {
+        key: "changed_entry",
+        digest: "digest-stale",
+        acknowledgedAt: "2026-07-18T00:00:00.000Z",
+        status: "content-changed",
+        supportImpact:
+          "Excluded egress leaves dependent agent features unsupported for this sandbox.",
+      },
+      {
+        key: "dropped_entry",
+        digest: "digest-2",
+        acknowledgedAt: "2026-07-17T00:00:00.000Z",
+        status: "no-longer-in-baseline",
+        supportImpact:
+          "Excluded egress leaves dependent agent features unsupported for this sandbox.",
+      },
+      {
+        key: "nous_research",
+        digest: "digest-1",
+        acknowledgedAt: "2026-07-19T00:00:00.000Z",
+        status: "excluded",
+        supportImpact:
+          "Excluded egress leaves dependent agent features unsupported for this sandbox.",
+      },
+    ]);
+  });
 });
 
 describe("renderPolicyContextMarkdown", () => {
@@ -273,5 +325,35 @@ describe("renderPolicyContextMarkdown", () => {
       buildPolicyContext(SANDBOX, { gatewayPresets: ["slack"] }),
     );
     expect(md).toContain("status: verified");
+  });
+
+  it("discloses excluded baseline entries and their support impact (#7194)", () => {
+    resetMocks();
+    mockBuiltinPresets();
+    stubTier();
+    stubRegistry({ policies: ["slack"], policyTier: "balanced" });
+    vi.mocked(registry.getBaselineExclusions).mockReturnValue([
+      { key: "nous_research", digest: "digest-1", acknowledgedAt: "2026-07-19T00:00:00.000Z" },
+    ]);
+    vi.mocked(policies.getSandboxBaselineEntryDigest).mockReturnValue("digest-1");
+
+    const md = renderPolicyContextMarkdown(buildPolicyContext(SANDBOX));
+
+    expect(md).toContain("## Baseline exclusions");
+    expect(md).toContain("`nous_research`");
+    expect(md).toContain("status: excluded");
+    expect(md).toContain("Excluded egress leaves dependent agent features unsupported");
+  });
+
+  it("reports no baseline exclusions when none are recorded", () => {
+    resetMocks();
+    mockBuiltinPresets();
+    stubTier();
+    stubRegistry({ policies: ["slack"], policyTier: "balanced" });
+
+    const md = renderPolicyContextMarkdown(buildPolicyContext(SANDBOX));
+
+    expect(md).toContain("## Baseline exclusions");
+    expect(md).toMatch(/## Baseline exclusions\n- none/);
   });
 });

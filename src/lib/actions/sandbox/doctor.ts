@@ -18,6 +18,7 @@ import {
 import { parseGatewayInference } from "../../inference/config";
 import { resolveGatewayName, resolveSandboxGatewayName } from "../../onboard/gateway-binding";
 import { executeSandboxCommandForVerification } from "../../onboard/sandbox-verification-exec";
+import { getSandboxBaselineEntryDigest } from "../../policy";
 import { ROOT } from "../../runner";
 import { parseLiveSandboxNames } from "../../runtime-recovery";
 import * as sandboxVersion from "../../sandbox/version";
@@ -353,6 +354,29 @@ function shieldsDoctorCheck(sandboxName: string): DoctorCheck {
   };
 }
 
+function baselineExclusionDoctorChecks(sandboxName: string): DoctorCheck[] {
+  return registry.getBaselineExclusions(sandboxName).map((exclusion) => {
+    const currentDigest = getSandboxBaselineEntryDigest(sandboxName, exclusion.key);
+    const status: DoctorStatus =
+      currentDigest !== null && currentDigest !== exclusion.digest ? "warn" : "info";
+    const detail =
+      status === "warn"
+        ? `Baseline entry '${exclusion.key}' changed since exclusion was approved; rebuild fails closed until re-approved.`
+        : `Baseline entry '${exclusion.key}' excluded; dependent agent features remain unsupported for this sandbox.`;
+    return {
+      group: "Sandbox",
+      label: `Baseline exclusion: ${exclusion.key}`,
+      status,
+      detail,
+      ...(status === "warn"
+        ? {
+            hint: `run \`${CLI_NAME} ${sandboxName} policy exclude ${exclusion.key} --force\` to re-approve`,
+          }
+        : {}),
+    };
+  });
+}
+
 function collectRegisteredSandboxChecks(
   sandboxName: string,
   sb: SandboxEntry | null | undefined,
@@ -368,6 +392,7 @@ function collectRegisteredSandboxChecks(
   });
   if (permsCheck) checks.push(permsCheck);
   checks.push(...collectMessagingDoctorChecks(sandboxName, sb, sandboxReachable));
+  checks.push(...baselineExclusionDoctorChecks(sandboxName));
   return checks;
 }
 

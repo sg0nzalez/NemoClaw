@@ -39,6 +39,7 @@ import {
   type BaselineExclusionEntry,
   getBaselineExclusions,
   type SandboxEntry,
+  type SandboxRemovalReceipt,
 } from "../../../state/registry";
 import { getSandboxEntryInference } from "../../../state/registry-entry-view";
 import { toolDisclosureOrDefault } from "../../../tool-disclosure";
@@ -177,7 +178,8 @@ export interface SandboxStateOptions<
     getSandboxRegistryEntry(sandboxName: string): SandboxEntry | null;
     normalizeHermesToolGatewaySelections(value: unknown): string[];
     stringSetsEqual(left: string[], right: string[]): boolean;
-    removeSandboxFromRegistry(sandboxName: string): void;
+    removeSandboxFromRegistry(sandboxName: string): SandboxRemovalReceipt | null;
+    restoreSandboxRegistryEntryIfMissing(receipt: SandboxRemovalReceipt): boolean;
     repairRecordedSandbox(sandboxName: string | null): void;
     ensureValidatedWebSearchCredential(config: WebSearchConfig): Promise<unknown>;
     isBackToSelection(value: unknown): boolean;
@@ -1196,37 +1198,51 @@ class SandboxStateFlow<
         current.messagingPlan = messagingPlan;
         return current;
       });
-      await applySandboxResumeDecision(decision, state.sandboxName, this.deps);
+      const removalReceipt = await applySandboxResumeDecision(
+        decision,
+        state.sandboxName,
+        this.deps,
+      );
       if (this.options.fresh) {
         this.deps.stopStaleDashboardListenersForSandbox(
           this.deps.listRegistrySandboxes().sandboxes,
           requestedSandboxName,
         );
       }
-      const sandboxName = await withSandboxPhaseTrace(
-        requestedSandboxName,
-        this.options.provider,
-        this.options.model,
-        (this.options.agent as { name?: string } | null)?.name,
-        () =>
-          this.deps.createSandbox(
-            this.options.gpu,
-            this.options.model,
-            this.options.provider,
-            this.options.preferredInferenceApi,
-            requestedSandboxName,
-            state.webSearchConfig,
-            state.selectedMessagingChannels,
-            this.options.fromDockerfile,
-            this.options.agent,
-            this.options.controlUiPort,
-            this.options.sandboxGpuConfig,
-            resourceProfile,
-            effectiveHermesToolGateways,
-            this.options.hermesAuthMethod,
-            createIntent,
-          ),
-      );
+      let sandboxName: string;
+      try {
+        sandboxName = await withSandboxPhaseTrace(
+          requestedSandboxName,
+          this.options.provider,
+          this.options.model,
+          (this.options.agent as { name?: string } | null)?.name,
+          () =>
+            this.deps.createSandbox(
+              this.options.gpu,
+              this.options.model,
+              this.options.provider,
+              this.options.preferredInferenceApi,
+              requestedSandboxName,
+              state.webSearchConfig,
+              state.selectedMessagingChannels,
+              this.options.fromDockerfile,
+              this.options.agent,
+              this.options.controlUiPort,
+              this.options.sandboxGpuConfig,
+              resourceProfile,
+              effectiveHermesToolGateways,
+              this.options.hermesAuthMethod,
+              createIntent,
+            ),
+        );
+      } catch (error) {
+        // Replacement creation failed after the destructive resume decision
+        // removed the durable registry row. Restore it (unless a retry loop
+        // already registered a replacement) so its baseline exclusion records
+        // and other durable state are not silently lost.
+        if (removalReceipt) this.deps.restoreSandboxRegistryEntryIfMissing(removalReceipt);
+        throw error;
+      }
       // createSandbox() owns the build fingerprint. In particular, reusing an
       // image must not stamp it with the current version and hide build drift.
       const { nemoclawVersion: _builtFingerprint, ...agentRegistryFields } =

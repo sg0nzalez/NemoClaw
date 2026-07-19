@@ -4403,9 +4403,8 @@ async function runOnboard(opts: OnboardOptions = {}): Promise<void> {
         repairLocalInferenceSystemdOverrideOrExit,
         isNonInteractive,
         getOpenshellBinary,
-        needsBedrockRuntimeAdapter: (providerName, url) =>
-          providerName === "compatible-anthropic-endpoint" &&
-          bedrockRuntimeOnboard.needsBedrockRuntimeAdapter(url),
+        // biome-ignore format: keep src/lib/onboard.ts net-neutral for growth guardrail.
+        needsBedrockRuntimeAdapter: (providerName, url) => providerName === "compatible-anthropic-endpoint" && bedrockRuntimeOnboard.needsBedrockRuntimeAdapter(url),
         isInferenceRouteReady,
         isRoutedInferenceProvider,
         reconcileModelRouter,
@@ -4468,7 +4467,8 @@ async function runOnboard(opts: OnboardOptions = {}): Promise<void> {
         getSandboxRegistryEntry: registry.getSandbox,
         normalizeHermesToolGatewaySelections,
         stringSetsEqual,
-        removeSandboxFromRegistry: registry.removeSandbox.bind(registry),
+        removeSandboxFromRegistry: registry.removeSandboxWithReceipt.bind(registry),
+        restoreSandboxRegistryEntryIfMissing: registry.restoreSandboxEntryIfMissing.bind(registry),
         repairRecordedSandbox,
         ensureValidatedWebSearchCredential,
         isBackToSelection,

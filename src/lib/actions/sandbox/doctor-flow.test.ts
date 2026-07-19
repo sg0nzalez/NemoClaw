@@ -19,6 +19,8 @@ function createDoctorHarness(): {
   captureHostCommandSpy: MockInstance;
   configuredMessagingChannelsSpy: MockInstance;
   executeSandboxCommandForVerificationSpy: MockInstance;
+  getBaselineExclusionsSpy: MockInstance;
+  getSandboxBaselineEntryDigestSpy: MockInstance;
   getSandboxSpy: MockInstance;
   getNamedGatewayLifecycleStateSpy: MockInstance;
   healthProbeSpy: MockInstance;
@@ -45,6 +47,7 @@ function createDoctorHarness(): {
   const health = requireDist("../../inference/health.js");
   const dockerDriverPlatform = requireDist("../../onboard/docker-driver-platform.js");
   const gatewayBinding = requireDist("../../onboard/gateway-binding.js");
+  const policy = requireDist("../../policy/index.js");
   const sandboxVerificationExec = requireDist("../../onboard/sandbox-verification-exec.js");
   const sandboxVersion = requireDist("../../sandbox/version.js");
   const shields = requireDist("../../shields/index.js");
@@ -69,6 +72,10 @@ function createDoctorHarness(): {
     .spyOn(registry, "getConfiguredMessagingChannelsFromEntry")
     .mockReturnValue([]);
   vi.spyOn(registry, "getDisabledMessagingChannelsFromEntry").mockReturnValue([]);
+  const getBaselineExclusionsSpy = vi.spyOn(registry, "getBaselineExclusions").mockReturnValue([]);
+  const getSandboxBaselineEntryDigestSpy = vi
+    .spyOn(policy, "getSandboxBaselineEntryDigest")
+    .mockReturnValue(null);
   const resolveOpenShellSpy = vi
     .spyOn(resolve, "resolveOpenshell")
     .mockReturnValue("/usr/bin/openshell");
@@ -197,6 +204,8 @@ function createDoctorHarness(): {
     captureHostCommandSpy,
     configuredMessagingChannelsSpy,
     executeSandboxCommandForVerificationSpy,
+    getBaselineExclusionsSpy,
+    getSandboxBaselineEntryDigestSpy,
     getSandboxSpy,
     getNamedGatewayLifecycleStateSpy,
     healthProbeSpy,
@@ -264,6 +273,44 @@ describe("runSandboxDoctor flow", () => {
       );
       expect(exitSpy).not.toHaveBeenCalled();
       expect(harness.logSpy).not.toHaveBeenCalled();
+    },
+  );
+
+  it(
+    "reports baseline exclusions and flags content drift since approval (#7194)",
+    testTimeoutOptions(30_000),
+    async () => {
+      const harness = createDoctorHarness();
+      harness.getBaselineExclusionsSpy.mockReturnValue([
+        { key: "nous_research", digest: "digest-1", acknowledgedAt: "2026-07-19T00:00:00.000Z" },
+        {
+          key: "changed_entry",
+          digest: "digest-stale",
+          acknowledgedAt: "2026-07-18T00:00:00.000Z",
+        },
+      ]);
+      harness.getSandboxBaselineEntryDigestSpy.mockImplementation((_sandbox, key) => {
+        if (key === "nous_research") return "digest-1";
+        if (key === "changed_entry") return "digest-current";
+        return null;
+      });
+
+      const report = await harness.runSandboxDoctor("alpha", ["--json"], { quietJson: true });
+
+      expect(report?.checks).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            group: "Sandbox",
+            label: "Baseline exclusion: nous_research",
+            status: "info",
+          }),
+          expect.objectContaining({
+            group: "Sandbox",
+            label: "Baseline exclusion: changed_entry",
+            status: "warn",
+          }),
+        ]),
+      );
     },
   );
 

@@ -10,8 +10,8 @@ vi.mock("../../policy/context", () => ({
 
 import type { PolicyContext } from "../../policy/context";
 import {
-  POLICY_CONTEXT_SANDBOX_PATH,
   explainSandboxPolicy,
+  POLICY_CONTEXT_SANDBOX_PATH,
   writePolicyContextToSandbox,
 } from "./policy-explain";
 
@@ -21,6 +21,7 @@ function fakeContext(sandboxName: string): PolicyContext {
     tier: null,
     activePresets: [],
     knownUnappliedPresets: [],
+    baselineExclusions: [],
     approvalPath: {
       inspect: `nemoclaw ${sandboxName} policy-list`,
       add: `nemoclaw ${sandboxName} policy-add <preset>`,

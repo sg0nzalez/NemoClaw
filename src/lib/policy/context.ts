@@ -5,6 +5,7 @@ import * as registry from "../state/registry";
 import {
   getGatewayPresets,
   getPresetEndpoints,
+  getSandboxBaselineEntryDigest,
   listCustomPresets,
   listPresets,
   loadPresetForSandbox,
@@ -63,11 +64,31 @@ export interface PolicyContextApprovalPath {
   documentation: string;
 }
 
+export type PolicyContextExclusionStatus = "excluded" | "content-changed" | "no-longer-in-baseline";
+
+export interface PolicyContextExclusion {
+  key: string;
+  digest: string;
+  acknowledgedAt: string | null;
+  /**
+   * `excluded` — the current baseline still defines this key at the reviewed
+   * digest, so the exclusion applies as recorded.
+   * `content-changed` — a release redefined this key's content since
+   * approval; rebuild fails closed and requires re-approval before the
+   * exclusion applies again.
+   * `no-longer-in-baseline` — the current baseline no longer defines this
+   * key; the exclusion record is inert until restored or replaced.
+   */
+  status: PolicyContextExclusionStatus;
+  supportImpact: string;
+}
+
 export interface PolicyContext {
   sandboxName: string;
   tier: PolicyContextTier | null;
   activePresets: PolicyContextPreset[];
   knownUnappliedPresets: PolicyContextPreset[];
+  baselineExclusions: PolicyContextExclusion[];
   approvalPath: PolicyContextApprovalPath;
   supportBoundaries: PolicyContextSupportBoundary[];
   generatedAt: string;
@@ -164,6 +185,31 @@ function partitionPresets(
     active.push(presetEntry(info, "custom", customByName.get(info.name) ?? null, verification));
   }
   return { active, unapplied };
+}
+
+const BASELINE_EXCLUSION_SUPPORT_IMPACT =
+  "Excluded egress leaves dependent agent features unsupported for this sandbox.";
+
+function buildBaselineExclusions(sandboxName: string): PolicyContextExclusion[] {
+  return registry
+    .getBaselineExclusions(sandboxName)
+    .map((exclusion) => {
+      const currentDigest = getSandboxBaselineEntryDigest(sandboxName, exclusion.key);
+      const status: PolicyContextExclusionStatus =
+        currentDigest === null
+          ? "no-longer-in-baseline"
+          : currentDigest === exclusion.digest
+            ? "excluded"
+            : "content-changed";
+      return {
+        key: exclusion.key,
+        digest: exclusion.digest,
+        acknowledgedAt: exclusion.acknowledgedAt ?? null,
+        status,
+        supportImpact: BASELINE_EXCLUSION_SUPPORT_IMPACT,
+      };
+    })
+    .sort((a, b) => a.key.localeCompare(b.key));
 }
 
 function buildApprovalPath(sandboxName: string): PolicyContextApprovalPath {
@@ -290,6 +336,7 @@ export function buildPolicyContext(
     tier,
     activePresets: active.sort((a, b) => a.name.localeCompare(b.name)),
     knownUnappliedPresets: unapplied.sort((a, b) => a.name.localeCompare(b.name)),
+    baselineExclusions: buildBaselineExclusions(sandboxName),
     approvalPath: buildApprovalPath(sandboxName),
     supportBoundaries: buildSupportBoundaries(tier),
     generatedAt: new Date().toISOString(),
@@ -307,6 +354,25 @@ function verificationTag(verification: PolicyContextPresetVerification): string 
     case "gateway-unavailable":
       return "gateway-unavailable";
   }
+}
+
+function exclusionStatusTag(status: PolicyContextExclusionStatus): string {
+  switch (status) {
+    case "excluded":
+      return "excluded";
+    case "content-changed":
+      return "content-changed (release redefined this entry; rebuild requires re-approval)";
+    case "no-longer-in-baseline":
+      return "no-longer-in-baseline (record is inert)";
+  }
+}
+
+function formatExclusionLine(exclusion: PolicyContextExclusion): string {
+  return [
+    `- \`${exclusion.key}\` — status: ${exclusionStatusTag(exclusion.status)}`,
+    `  acknowledged: ${exclusion.acknowledgedAt ?? "(unknown)"}`,
+    `  impact: ${exclusion.supportImpact}`,
+  ].join("\n");
 }
 
 function formatPresetLine(preset: PolicyContextPreset): string {
@@ -359,6 +425,15 @@ export function renderPolicyContextMarkdown(ctx: PolicyContext): string {
   } else {
     for (const preset of ctx.knownUnappliedPresets) {
       lines.push(`- \`${preset.name}\` — ${preset.description || "(no description)"}`);
+    }
+  }
+  lines.push("");
+  lines.push("## Baseline exclusions");
+  if (ctx.baselineExclusions.length === 0) {
+    lines.push("- none");
+  } else {
+    for (const exclusion of ctx.baselineExclusions) {
+      lines.push(formatExclusionLine(exclusion));
     }
   }
   lines.push("");

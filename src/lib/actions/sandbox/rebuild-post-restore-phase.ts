@@ -61,6 +61,19 @@ interface SuccessfulRebuildSummaryInput {
   expectedVersion: string | null;
 }
 
+/** Disclose carried-over baseline exclusions and their support impact after a rebuild. */
+export function printBaselineExclusionsRebuildSummary(
+  sandboxName: string,
+  writeLine: (message: string) => void = console.log,
+): void {
+  const exclusions = registry.getBaselineExclusions(sandboxName);
+  if (exclusions.length === 0) return;
+  const keys = exclusions.map((exclusion) => exclusion.key).join(", ");
+  writeLine(
+    `    Baseline exclusions carried over: ${keys} \u2014 excluded egress remains unsupported for this sandbox.`,
+  );
+}
+
 export function printSuccessfulRebuildSummary(
   input: SuccessfulRebuildSummaryInput,
   writeLine: (message: string) => void = console.log,
@@ -78,6 +91,7 @@ export function printSuccessfulRebuildSummary(
   if (input.expectedVersion) {
     writeLine(`    Now running: ${input.rebuiltAgentName} v${input.expectedVersion}`);
   }
+  printBaselineExclusionsRebuildSummary(input.sandboxName, writeLine);
 }
 
 export function resolveRestoredPolicyRegistryState(
@@ -291,6 +305,7 @@ export async function runRebuildPostRestorePhase(
     }
     printHermesGatewayRestoreRecovery(sandboxName, hermesGatewayRestoreState);
     printMcpRestoreRecovery(sandboxName, mcpBridgeRestoreUnverified);
+    printBaselineExclusionsRebuildSummary(sandboxName);
     if (policyPresetRestoreIncomplete) {
       if (failedPresets.length > 0) {
         console.log(
