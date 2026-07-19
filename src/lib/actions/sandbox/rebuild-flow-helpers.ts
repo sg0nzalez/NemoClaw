@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { dockerRmi } from "../../adapters/docker/image";
 import {
   detectOpenShellStateRpcResultIssue,
   printOpenShellStateRpcIssue,
@@ -57,7 +58,52 @@ export type RebuildAgentBaseImagePreflight = {
   imageRef: string | null;
   overrideEnvVar: string | null;
   resolutionMetadata?: SandboxBaseImageResolutionMetadata;
+  disposeImageRef?: () => boolean;
 };
+
+const rebuildAgentBaseImageDisposalResults = new WeakMap<RebuildAgentBaseImagePreflight, boolean>();
+
+function isCanonicalLocalBaseImageRef(agentName: string, imageRef: string): boolean {
+  const escapedAgentName = agentName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(
+    `^nemoclaw-${escapedAgentName}-sandbox-base-local:image-[0-9a-f]{64}$`,
+    "i",
+  ).test(imageRef);
+}
+
+export function disposeRebuildAgentBaseImagePreflight(
+  preflight: RebuildAgentBaseImagePreflight | null | undefined,
+): boolean {
+  if (!preflight?.disposeImageRef) return true;
+  const priorResult = rebuildAgentBaseImageDisposalResults.get(preflight);
+  if (priorResult === true) return true;
+  const result = preflight.disposeImageRef();
+  if (result) rebuildAgentBaseImageDisposalResults.set(preflight, true);
+  return result;
+}
+
+function createTemporaryBaseImageHandoffDisposer(imageRef: string): () => boolean {
+  let removed = false;
+  const dispose = (): boolean => {
+    if (removed) return true;
+    try {
+      const removal = dockerRmi(imageRef, {
+        ignoreError: true,
+        suppressOutput: true,
+      });
+      if (!removal.error && removal.status === 0) {
+        removed = true;
+        process.removeListener("exit", dispose);
+        return true;
+      }
+    } catch {
+      // The caller reports the safe cleanup warning and can retry.
+    }
+    return false;
+  };
+  process.on("exit", dispose);
+  return dispose;
+}
 
 /**
  * Select, health-check, and process-pin the gateway recorded for this sandbox
@@ -225,14 +271,24 @@ export function ensureRebuildAgentBaseImage(
         ? { forceBaseImageRefresh: options.forceBaseImageRefresh }
         : {}),
     });
+    const needsTemporaryHandoff =
+      result.imageTag !== null && !isCanonicalLocalBaseImageRef(agentDef.name, result.imageTag);
     const imageRef = result.imageTag
-      ? pinAgentSandboxBaseImageRef(agentDef.name, result.imageTag, { forceLocal: true })
+      ? pinAgentSandboxBaseImageRef(agentDef.name, result.imageTag, {
+          forceLocal: true,
+          ...(needsTemporaryHandoff ? { temporary: true } : {}),
+        })
       : result.imageTag;
+    const disposeImageRef =
+      needsTemporaryHandoff && imageRef && imageRef !== result.imageTag
+        ? createTemporaryBaseImageHandoffDisposer(imageRef)
+        : undefined;
     return {
       ok: true,
       imageRef,
       overrideEnvVar,
       ...(result.resolutionMetadata ? { resolutionMetadata: result.resolutionMetadata } : {}),
+      ...(disposeImageRef ? { disposeImageRef } : {}),
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

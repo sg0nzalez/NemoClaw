@@ -22,6 +22,7 @@ import type { PreparedRebuildImage } from "./rebuild-custom-image-preflight";
 import { isDcodeRebuildAgent } from "./rebuild-dcode-orchestrator";
 import { validatedRebuildRegistryUpdate } from "./rebuild-durable-config";
 import {
+  disposeRebuildAgentBaseImagePreflight,
   ensureRebuildAgentBaseImage,
   ensureRebuildTargetGatewaySelected,
   pinRebuildAgentBaseImageForRecreate,
@@ -84,7 +85,13 @@ export function stageRebuildBaseImageResolutionHandoff(
   const metadata = preflight.resolutionMetadata;
   if (!metadata) return;
   const imageId = metadata.imageId.match(/^sha256:([0-9a-f]{64})$/i)?.[1]?.toLowerCase();
-  if (!imageId || !preflight.imageRef?.endsWith(`:image-${imageId}`)) {
+  const localHandoffPattern = imageId
+    ? new RegExp(
+        `^nemoclaw-[a-z0-9][a-z0-9._-]*-sandbox-base-local:(?:image-|rebuild-[1-9][0-9]*-[0-9a-f]{16}-image-)${imageId}$`,
+        "i",
+      )
+    : null;
+  if (!localHandoffPattern?.test(preflight.imageRef ?? "")) {
     throw new Error("Rebuild base-image provenance did not match its immutable local handoff");
   }
   recreateOptions.preResolvedBaseImageMetadata = metadata;
@@ -218,72 +225,80 @@ export async function prepareRebuildTargetPreflights(args: {
         forceBaseImageRefresh,
       });
   if (!baseImagePreflight.ok) return null;
-  stageRebuildBaseImageResolutionHandoff(recreateOptions, baseImagePreflight);
-  const restoreBaseImageOverride = pinRebuildAgentBaseImageForRecreate(baseImagePreflight);
-  let targetRuntimePreflight: Awaited<ReturnType<typeof preflightRebuildTargetRuntime>> = {
-    ok: false,
-  };
+  let retainBaseImagePreflight = false;
   try {
-    targetRuntimePreflight = await preflightRebuildTargetRuntime(
-      targetConfig,
-      sandboxEntry,
-      recreateOptions,
-      log,
-      bail,
-      {
-        allowMissingGatewayProviderWithHostCredential: preparedBackupRecovery,
-        skipImagePreflight: rebuildsDcodeSandbox,
-      },
-    );
-  } finally {
-    restoreBaseImageOverride();
-  }
-  if (!targetRuntimePreflight.ok) return null;
-
-  if (targetRuntimePreflight.requiresGatewayProviderReconfigure) {
-    if (!resumeConfig.credentialEnv) {
-      bail("Prepared provider reconfiguration is missing its credential binding");
-      return null;
-    }
-    recreateOptions.rebuildProviderReconfigure = createRebuildProviderReconfigureHandoff({
-      sandboxName,
-      provider: resumeConfig.provider,
-      model: resumeConfig.model,
-      credentialEnv: resumeConfig.credentialEnv,
-      endpointUrl: resumeConfig.endpointUrl,
-    });
-  }
-
-  const preparedImage = targetRuntimePreflight.preparedImage;
-  let retainPreparedImage = false;
-  try {
-    const validatedRegistryUpdate = validatedRebuildRegistryUpdate(
-      resumeConfig,
-      durableConfig,
-      fromDockerfile,
-      credentialEnv,
-    );
-    if (!registry.updateSandbox(sandboxName, validatedRegistryUpdate)) {
-      bail("Sandbox registry entry disappeared during rebuild preflight");
-      return null;
-    }
-    Object.assign(sandboxEntry, validatedRegistryUpdate);
-    if (preparedImage) {
-      recreateOptions.preparedImageRebuild = {
-        buildContext: preparedImage,
-        gatewayName: recreateOptions.targetGatewayName,
-      };
-    }
-
-    retainPreparedImage = true;
-    return {
-      targetConfig,
-      recreateOptions,
-      messagingPlan,
-      baseImagePreflight,
-      preparedImage,
+    stageRebuildBaseImageResolutionHandoff(recreateOptions, baseImagePreflight);
+    const restoreBaseImageOverride = pinRebuildAgentBaseImageForRecreate(baseImagePreflight);
+    let targetRuntimePreflight: Awaited<ReturnType<typeof preflightRebuildTargetRuntime>> = {
+      ok: false,
     };
+    try {
+      targetRuntimePreflight = await preflightRebuildTargetRuntime(
+        targetConfig,
+        sandboxEntry,
+        recreateOptions,
+        log,
+        bail,
+        {
+          allowMissingGatewayProviderWithHostCredential: preparedBackupRecovery,
+          skipImagePreflight: rebuildsDcodeSandbox,
+        },
+      );
+    } finally {
+      restoreBaseImageOverride();
+    }
+    if (!targetRuntimePreflight.ok) return null;
+
+    if (targetRuntimePreflight.requiresGatewayProviderReconfigure) {
+      if (!resumeConfig.credentialEnv) {
+        bail("Prepared provider reconfiguration is missing its credential binding");
+        return null;
+      }
+      recreateOptions.rebuildProviderReconfigure = createRebuildProviderReconfigureHandoff({
+        sandboxName,
+        provider: resumeConfig.provider,
+        model: resumeConfig.model,
+        credentialEnv: resumeConfig.credentialEnv,
+        endpointUrl: resumeConfig.endpointUrl,
+      });
+    }
+
+    const preparedImage = targetRuntimePreflight.preparedImage;
+    let retainPreparedImage = false;
+    try {
+      const validatedRegistryUpdate = validatedRebuildRegistryUpdate(
+        resumeConfig,
+        durableConfig,
+        fromDockerfile,
+        credentialEnv,
+      );
+      if (!registry.updateSandbox(sandboxName, validatedRegistryUpdate)) {
+        bail("Sandbox registry entry disappeared during rebuild preflight");
+        return null;
+      }
+      Object.assign(sandboxEntry, validatedRegistryUpdate);
+      if (preparedImage) {
+        recreateOptions.preparedImageRebuild = {
+          buildContext: preparedImage,
+          gatewayName: recreateOptions.targetGatewayName,
+        };
+      }
+
+      retainPreparedImage = true;
+      retainBaseImagePreflight = true;
+      return {
+        targetConfig,
+        recreateOptions,
+        messagingPlan,
+        baseImagePreflight,
+        preparedImage,
+      };
+    } finally {
+      if (!retainPreparedImage && preparedImage) disposePreparedBuildContext(preparedImage);
+    }
   } finally {
-    if (!retainPreparedImage && preparedImage) disposePreparedBuildContext(preparedImage);
+    if (!retainBaseImagePreflight && !disposeRebuildAgentBaseImagePreflight(baseImagePreflight)) {
+      console.warn("  Warning: temporary rebuild base-image handoff could not be removed.");
+    }
   }
 }

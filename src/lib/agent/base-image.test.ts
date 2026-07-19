@@ -307,6 +307,34 @@ describe("agent base image provisioning", () => {
     );
   });
 
+  it("creates a unique temporary handoff for a disposable rebuild pin (#7144)", () => {
+    withMockedDocker(
+      ({ pinAgentSandboxBaseImageRef, dockerImageInspectFormatMock, dockerTagMock }) => {
+        const remoteRef = `ghcr.io/nvidia/nemoclaw/hermes-sandbox-base@sha256:${"a".repeat(64)}`;
+        const imageId = `sha256:${"c".repeat(64)}`;
+        dockerImageInspectFormatMock.mockReturnValue(imageId);
+
+        const firstPinned = pinAgentSandboxBaseImageRef("hermes", remoteRef, {
+          forceLocal: true,
+          temporary: true,
+        });
+        const secondPinned = pinAgentSandboxBaseImageRef("hermes", remoteRef, {
+          forceLocal: true,
+          temporary: true,
+        });
+
+        const temporaryRefPattern = new RegExp(
+          `^nemoclaw-hermes-sandbox-base-local:rebuild-[1-9][0-9]*-[0-9a-f]{16}-image-${"c".repeat(64)}$`,
+        );
+        expect(firstPinned).toMatch(temporaryRefPattern);
+        expect(secondPinned).toMatch(temporaryRefPattern);
+        expect(secondPinned).not.toBe(firstPinned);
+        expect(dockerTagMock).toHaveBeenCalledWith(imageId, firstPinned, { ignoreError: true });
+        expect(dockerTagMock).toHaveBeenCalledWith(imageId, secondPinned, { ignoreError: true });
+      },
+    );
+  });
+
   it("does not trust a moved image-ID-shaped tag without inspecting it", () => {
     withMockedDocker(
       ({ pinAgentSandboxBaseImageRef, dockerImageInspectFormatMock, dockerTagMock }) => {
@@ -333,5 +361,29 @@ describe("agent base image provisioning", () => {
         pinAgentSandboxBaseImageRef("hermes", "nemoclaw-hermes-sandbox-base-local:caller"),
       ).toThrow("Pinned hermes base image did not retain its inspected image ID");
     });
+  });
+
+  it("removes a temporary handoff that fails image-ID verification (#7144)", () => {
+    withMockedDocker(
+      ({ pinAgentSandboxBaseImageRef, dockerImageInspectFormatMock, dockerRmiMock }) => {
+        dockerImageInspectFormatMock
+          .mockReturnValueOnce(`sha256:${"a".repeat(64)}`)
+          .mockReturnValueOnce(`sha256:${"b".repeat(64)}`);
+
+        expect(() =>
+          pinAgentSandboxBaseImageRef("hermes", "nemoclaw-hermes-sandbox-base-local:caller", {
+            temporary: true,
+          }),
+        ).toThrow("Pinned hermes base image did not retain its inspected image ID");
+        expect(dockerRmiMock).toHaveBeenCalledWith(
+          expect.stringMatching(
+            new RegExp(
+              `^nemoclaw-hermes-sandbox-base-local:rebuild-[1-9][0-9]*-[0-9a-f]{16}-image-${"a".repeat(64)}$`,
+            ),
+          ),
+          { ignoreError: true, suppressOutput: true },
+        );
+      },
+    );
   });
 });

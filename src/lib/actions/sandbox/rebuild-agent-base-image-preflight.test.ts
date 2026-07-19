@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 type RebuildFlowHelpersModule = typeof import("./rebuild-flow-helpers");
 type AgentDefsModule = typeof import("../../agent/defs");
 type AgentOnboardModule = typeof import("../../agent/onboard");
+type DockerImageModule = typeof import("../../adapters/docker/image");
 type SandboxBaseImageResolutionMetadata =
   import("../../sandbox-base-image").SandboxBaseImageResolutionMetadata;
 
@@ -15,6 +16,7 @@ const requireDist = createRequire(import.meta.url);
 const rebuildFlowHelpersPath = "./rebuild-flow-helpers.js";
 const agentDefsPath = "../../agent/defs.js";
 const agentOnboardPath = "../../agent/onboard.js";
+const dockerImagePath = "../../adapters/docker/image.js";
 const overrideEnvVar = "NEMOCLAW_HERMES_SANDBOX_BASE_IMAGE_REF";
 
 function loadRebuildFlowHelpers(): RebuildFlowHelpersModule {
@@ -33,6 +35,10 @@ function loadAgentDefs(): AgentDefsModule {
 
 function loadAgentOnboard(): AgentOnboardModule {
   return requireDist(agentOnboardPath);
+}
+
+function loadDockerImage(): DockerImageModule {
+  return requireDist(dockerImagePath);
 }
 
 function makeBail(): (msg: string, code?: number) => never {
@@ -72,7 +78,10 @@ describe("ensureRebuildAgentBaseImage", () => {
     const pinAgentSandboxBaseImageRef = vi
       .spyOn(loadAgentOnboard(), "pinAgentSandboxBaseImageRef")
       .mockImplementation((_agentName, imageRef) => imageRef);
-    return { agent, ensureAgentBaseImage, pinAgentSandboxBaseImageRef };
+    const dockerRmi = vi
+      .spyOn(loadDockerImage(), "dockerRmi")
+      .mockReturnValue({ status: 0 } as never);
+    return { agent, ensureAgentBaseImage, pinAgentSandboxBaseImageRef, dockerRmi };
   }
 
   it("forwards a recorded hint for cache validation without forcing a legacy rebuild (#4680)", () => {
@@ -145,7 +154,7 @@ describe("ensureRebuildAgentBaseImage", () => {
   });
 
   it("preserves resolved provenance with the immutable local recreate handoff (#7144)", () => {
-    const { ensureAgentBaseImage, pinAgentSandboxBaseImageRef } = setup();
+    const { ensureAgentBaseImage, pinAgentSandboxBaseImageRef, dockerRmi } = setup();
     const resolutionMetadata = { key: "current-base" } as SandboxBaseImageResolutionMetadata;
     const platformRef = "ghcr.io/nvidia/nemoclaw/hermes-sandbox-base@sha256:platform";
     const localRef = "nemoclaw-hermes-sandbox-base-local:image-current";
@@ -156,12 +165,51 @@ describe("ensureRebuildAgentBaseImage", () => {
     });
     pinAgentSandboxBaseImageRef.mockReturnValue(localRef);
     const { ensureRebuildAgentBaseImage } = loadRebuildFlowHelpers();
+    const exitListenersBefore = process.listenerCount("exit");
 
-    expect(ensureRebuildAgentBaseImage("hermes", makeBail(), { resolutionHint: hint })).toEqual({
+    const result = ensureRebuildAgentBaseImage("hermes", makeBail(), { resolutionHint: hint });
+
+    expect(result).toEqual({
       ok: true,
       imageRef: localRef,
       overrideEnvVar,
       resolutionMetadata,
+      disposeImageRef: expect.any(Function),
     });
+    expect(pinAgentSandboxBaseImageRef).toHaveBeenCalledWith("hermes", platformRef, {
+      forceLocal: true,
+      temporary: true,
+    });
+    expect(process.listenerCount("exit")).toBe(exitListenersBefore + 1);
+    expect(result.disposeImageRef?.()).toBe(true);
+    expect(result.disposeImageRef?.()).toBe(true);
+    expect(process.listenerCount("exit")).toBe(exitListenersBefore);
+    expect(dockerRmi).toHaveBeenCalledOnce();
+    expect(dockerRmi).toHaveBeenCalledWith(localRef, {
+      ignoreError: true,
+      suppressOutput: true,
+    });
+  });
+
+  it("retains exit cleanup until a failed temporary removal succeeds (#7144)", () => {
+    const { ensureAgentBaseImage, pinAgentSandboxBaseImageRef, dockerRmi } = setup();
+    const platformRef = `ghcr.io/nvidia/nemoclaw/hermes-sandbox-base@sha256:${"a".repeat(64)}`;
+    const localRef = `nemoclaw-hermes-sandbox-base-local:rebuild-123-${"b".repeat(16)}-image-${"c".repeat(64)}`;
+    ensureAgentBaseImage.mockReturnValue({ imageTag: platformRef, built: false });
+    pinAgentSandboxBaseImageRef.mockReturnValue(localRef);
+    dockerRmi
+      .mockReturnValueOnce({ status: 23 } as never)
+      .mockReturnValueOnce({ status: 0 } as never);
+    const { ensureRebuildAgentBaseImage } = loadRebuildFlowHelpers();
+    const exitListenersBefore = process.listenerCount("exit");
+
+    const result = ensureRebuildAgentBaseImage("hermes", makeBail(), { resolutionHint: hint });
+
+    expect(process.listenerCount("exit")).toBe(exitListenersBefore + 1);
+    expect(result.disposeImageRef?.()).toBe(false);
+    expect(process.listenerCount("exit")).toBe(exitListenersBefore + 1);
+    expect(result.disposeImageRef?.()).toBe(true);
+    expect(process.listenerCount("exit")).toBe(exitListenersBefore);
+    expect(dockerRmi).toHaveBeenCalledTimes(2);
   });
 });

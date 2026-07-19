@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
-
+import * as dockerImage from "../../adapters/docker/image";
 import * as agentDefs from "../../agent/defs";
 import * as agentOnboard from "../../agent/onboard";
 import * as gatewayRuntime from "../../gateway-runtime-action";
@@ -10,6 +10,7 @@ import * as sandboxState from "../../state/sandbox";
 import * as userManagedFilesProbe from "../../state/user-managed-files-probe";
 import {
   backupSandboxStateForRebuild,
+  disposeRebuildAgentBaseImagePreflight,
   ensureRebuildAgentBaseImage,
   ensureRebuildTargetGatewaySelected,
   pinRebuildAgentBaseImageForRecreate,
@@ -141,7 +142,8 @@ describe("rebuild agent base image preflight", () => {
     const pinAgentSandboxBaseImageRef = vi
       .spyOn(agentOnboard, "pinAgentSandboxBaseImageRef")
       .mockImplementation((_agentName, ref) => String(ref));
-    return { ensureAgentBaseImage, pinAgentSandboxBaseImageRef };
+    const dockerRmi = vi.spyOn(dockerImage, "dockerRmi").mockReturnValue({ status: 0 } as never);
+    return { ensureAgentBaseImage, pinAgentSandboxBaseImageRef, dockerRmi };
   }
 
   it("forces a repository-local build and returns its exact ref when no override exists", () => {
@@ -171,8 +173,15 @@ describe("rebuild agent base image preflight", () => {
     });
     expect(pinAgentSandboxBaseImageRef).toHaveBeenCalledWith("hermes", mutableRef, {
       forceLocal: true,
+      temporary: true,
     });
-    expect(result).toEqual({ ok: true, imageRef: immutableRef, overrideEnvVar });
+    expect(result).toEqual({
+      ok: true,
+      imageRef: immutableRef,
+      overrideEnvVar,
+      disposeImageRef: expect.any(Function),
+    });
+    expect(disposeRebuildAgentBaseImagePreflight(result)).toBe(true);
   });
 
   it("hands a resolved platform digest to recreation through an immutable local ref (#7144)", () => {
@@ -187,8 +196,43 @@ describe("rebuild agent base image preflight", () => {
 
     expect(pinAgentSandboxBaseImageRef).toHaveBeenCalledWith("hermes", platformRef, {
       forceLocal: true,
+      temporary: true,
     });
-    expect(result).toEqual({ ok: true, imageRef: immutableRef, overrideEnvVar });
+    expect(result).toEqual({
+      ok: true,
+      imageRef: immutableRef,
+      overrideEnvVar,
+      disposeImageRef: expect.any(Function),
+    });
+    expect(disposeRebuildAgentBaseImagePreflight(result)).toBe(true);
+  });
+
+  it("disposes a temporary recreate handoff at most once (#7144)", () => {
+    const disposeImageRef = vi.fn(() => true);
+    const preflight = {
+      ok: true,
+      imageRef: `nemoclaw-hermes-sandbox-base-local:rebuild-1-${"a".repeat(16)}-image-${"b".repeat(64)}`,
+      overrideEnvVar,
+      disposeImageRef,
+    };
+
+    expect(disposeRebuildAgentBaseImagePreflight(preflight)).toBe(true);
+    expect(disposeRebuildAgentBaseImagePreflight(preflight)).toBe(true);
+    expect(disposeImageRef).toHaveBeenCalledOnce();
+  });
+
+  it("retries a temporary recreate handoff after cleanup fails (#7144)", () => {
+    const disposeImageRef = vi.fn().mockReturnValueOnce(false).mockReturnValueOnce(true);
+    const preflight = {
+      ok: true,
+      imageRef: `nemoclaw-hermes-sandbox-base-local:rebuild-1-${"a".repeat(16)}-image-${"b".repeat(64)}`,
+      overrideEnvVar,
+      disposeImageRef,
+    };
+
+    expect(disposeRebuildAgentBaseImagePreflight(preflight)).toBe(false);
+    expect(disposeRebuildAgentBaseImagePreflight(preflight)).toBe(true);
+    expect(disposeImageRef).toHaveBeenCalledTimes(2);
   });
 
   it("pins the preflighted ref only for recreation and restores caller state", () => {

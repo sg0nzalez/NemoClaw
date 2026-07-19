@@ -47,7 +47,7 @@ export function getAgentSandboxBaseImageEnvVar(agentName: string): string {
 export function pinAgentSandboxBaseImageRef(
   agentName: string,
   imageRef: string,
-  options: { forceLocal?: boolean } = {},
+  options: { forceLocal?: boolean; temporary?: boolean } = {},
 ): string {
   return baseImage.pinAgentSandboxBaseImageRef(agentName, imageRef, options);
 }

@@ -23,9 +23,9 @@ import {
   getImageGlibcVersion,
   type ResolveBaseImageOptions,
   resolveSandboxBaseImage,
-  SandboxBaseImageResolutionError,
   SANDBOX_BASE_TAG,
   type SandboxBaseImageResolution,
+  SandboxBaseImageResolutionError,
   type SandboxBaseImageResolutionMetadata,
 } from "../sandbox-base-image";
 import { createDeepAgentsCodeBaseImageResolutionOptions } from "./deep-agents-code-base-image";
@@ -59,28 +59,46 @@ export function getAgentSandboxBaseImageEnvVar(agentName: string): string {
   return `NEMOCLAW_${agentName.toUpperCase().replace(/[^A-Z0-9]+/g, "_")}_SANDBOX_BASE_IMAGE_REF`;
 }
 
-function immutableLocalBaseImageTag(agentName: string, imageId: string): string {
+function immutableLocalBaseImageTag(agentName: string, imageId: string, temporary = false): string {
   const match = imageId.trim().match(/^sha256:([0-9a-f]{64})$/i);
   if (!match) {
     throw new Error(`Docker returned an invalid image ID for ${agentName} base image`);
   }
-  return `nemoclaw-${agentName}-sandbox-base-local:image-${match[1].toLowerCase()}`;
+  const imageIdHex = match[1].toLowerCase();
+  return temporary
+    ? `nemoclaw-${agentName}-sandbox-base-local:rebuild-${process.pid}-${crypto.randomBytes(8).toString("hex")}-image-${imageIdHex}`
+    : `nemoclaw-${agentName}-sandbox-base-local:image-${imageIdHex}`;
+}
+
+function removeTemporaryBaseImageTag(imageRef: string): void {
+  const remove = (): boolean => {
+    try {
+      const result = dockerRmi(imageRef, { ignoreError: true, suppressOutput: true });
+      return !result.error && result.status === 0;
+    } catch {
+      return false;
+    }
+  };
+  if (!remove()) process.once("exit", remove);
 }
 
 export function pinAgentSandboxBaseImageRef(
   agentName: string,
   imageRef: string,
-  options: { forceLocal?: boolean } = {},
+  options: { forceLocal?: boolean; temporary?: boolean } = {},
 ): string {
   // Rebuild forces a local image-ID alias even for a remote digest so its
   // inner-onboard handoff cannot discard the outer resolver's provenance.
   if (imageRef.includes("@sha256:") && options.forceLocal !== true) return imageRef;
   const imageId = dockerImageInspectFormat("{{.Id}}", imageRef, { ignoreError: true });
-  const pinnedRef = immutableLocalBaseImageTag(agentName, imageId);
+  const pinnedRef = immutableLocalBaseImageTag(agentName, imageId, options.temporary === true);
   // Tag the inspected immutable object, not the caller's potentially mutable
   // name. Otherwise the source tag could move between inspect and tag.
   const tagResult = dockerTag(imageId, pinnedRef, { ignoreError: true });
   if (tagResult.error || tagResult.status !== 0) {
+    if (options.temporary === true) {
+      removeTemporaryBaseImageTag(pinnedRef);
+    }
     const detail = tagResult.error
       ? `: ${tagResult.error.message}`
       : ` (exit ${tagResult.status ?? "unknown"})`;
@@ -88,6 +106,9 @@ export function pinAgentSandboxBaseImageRef(
   }
   const pinnedImageId = dockerImageInspectFormat("{{.Id}}", pinnedRef, { ignoreError: true });
   if (pinnedImageId !== imageId) {
+    if (options.temporary === true) {
+      removeTemporaryBaseImageTag(pinnedRef);
+    }
     throw new Error(`Pinned ${agentName} base image did not retain its inspected image ID`);
   }
   return pinnedRef;

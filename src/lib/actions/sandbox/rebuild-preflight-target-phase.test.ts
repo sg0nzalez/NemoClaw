@@ -75,6 +75,22 @@ describe("stageRebuildBaseImageResolutionHandoff", () => {
     expect(recreateOptions.preResolvedBaseImageMetadata).toBe(current);
   });
 
+  it("binds provenance to a temporary immutable rebuild handoff (#7144)", () => {
+    const imageId = `sha256:${"a".repeat(64)}`;
+    const current = { key: "current", imageId } as SandboxBaseImageResolutionMetadata;
+    const recreateOptions: { preResolvedBaseImageMetadata?: SandboxBaseImageResolutionMetadata } =
+      {};
+
+    stageRebuildBaseImageResolutionHandoff(recreateOptions, {
+      ok: true,
+      imageRef: `nemoclaw-hermes-sandbox-base-local:rebuild-123-${"b".repeat(16)}-image-${"a".repeat(64)}`,
+      overrideEnvVar: "NEMOCLAW_HERMES_SANDBOX_BASE_IMAGE_REF",
+      resolutionMetadata: current,
+    });
+
+    expect(recreateOptions.preResolvedBaseImageMetadata).toBe(current);
+  });
+
   it("rejects provenance that is not bound to the immutable local handoff", () => {
     const current = {
       key: "current",
