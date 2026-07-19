@@ -403,6 +403,7 @@ test("TC-INF-11 DNS-backed HTTPS custom endpoint routes through the local pinnin
     chatContent: "placeholder",
     host: "0.0.0.0",
     model,
+    port: 8000,
     publicHost: "localhost",
     requireAuth: true,
     requireAuthModels: true,
