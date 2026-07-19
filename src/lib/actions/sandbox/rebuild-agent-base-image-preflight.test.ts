@@ -75,13 +75,22 @@ describe("ensureRebuildAgentBaseImage", () => {
             : "hermes:rebuilt",
         built: !options.resolutionHint,
       }));
+    const bindLocalAgentBaseImageToPinnedProvenance = vi
+      .spyOn(loadAgentOnboard(), "bindLocalAgentBaseImageToPinnedProvenance")
+      .mockReturnValue(null);
     const pinAgentSandboxBaseImageRef = vi
       .spyOn(loadAgentOnboard(), "pinAgentSandboxBaseImageRef")
       .mockImplementation((_agentName, imageRef) => imageRef);
     const dockerRmi = vi
       .spyOn(loadDockerImage(), "dockerRmi")
       .mockReturnValue({ status: 0 } as never);
-    return { agent, ensureAgentBaseImage, pinAgentSandboxBaseImageRef, dockerRmi };
+    return {
+      agent,
+      ensureAgentBaseImage,
+      bindLocalAgentBaseImageToPinnedProvenance,
+      pinAgentSandboxBaseImageRef,
+      dockerRmi,
+    };
   }
 
   it("forwards a recorded hint for cache validation without forcing a legacy rebuild (#4680)", () => {
@@ -189,6 +198,44 @@ describe("ensureRebuildAgentBaseImage", () => {
       ignoreError: true,
       suppressOutput: true,
     });
+  });
+
+  it("binds an explicit local override after its immutable recreate handoff (#7144)", () => {
+    vi.stubEnv(overrideEnvVar, "hermes:override");
+    const {
+      agent,
+      ensureAgentBaseImage,
+      bindLocalAgentBaseImageToPinnedProvenance,
+      pinAgentSandboxBaseImageRef,
+    } = setup();
+    const resolutionMetadata = { key: "canonical-base" } as SandboxBaseImageResolutionMetadata;
+    const immutableRef = `nemoclaw-hermes-sandbox-base-local:rebuild-123-${"b".repeat(16)}-image-${"c".repeat(64)}`;
+    ensureAgentBaseImage.mockReturnValue({ imageTag: "hermes:override", built: false });
+    pinAgentSandboxBaseImageRef.mockReturnValue(immutableRef);
+    bindLocalAgentBaseImageToPinnedProvenance.mockReturnValue(resolutionMetadata);
+    const { ensureRebuildAgentBaseImage } = loadRebuildFlowHelpers();
+
+    const result = ensureRebuildAgentBaseImage("hermes", makeBail());
+
+    expect(result).toEqual({
+      ok: true,
+      imageRef: immutableRef,
+      overrideEnvVar,
+      resolutionMetadata,
+      disposeImageRef: expect.any(Function),
+    });
+    expect(ensureAgentBaseImage).toHaveBeenCalledWith(agent, {
+      forceBaseImageRebuild: false,
+    });
+    expect(pinAgentSandboxBaseImageRef).toHaveBeenCalledWith("hermes", "hermes:override", {
+      forceLocal: true,
+      temporary: true,
+    });
+    expect(bindLocalAgentBaseImageToPinnedProvenance).toHaveBeenCalledWith(agent, immutableRef);
+    expect(pinAgentSandboxBaseImageRef.mock.invocationCallOrder[0]).toBeLessThan(
+      bindLocalAgentBaseImageToPinnedProvenance.mock.invocationCallOrder[0],
+    );
+    expect(result.disposeImageRef?.()).toBe(true);
   });
 
   it("retains exit cleanup until a failed temporary removal succeeds (#7144)", () => {

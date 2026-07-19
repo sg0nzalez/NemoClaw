@@ -8,6 +8,7 @@ import {
 } from "../../adapters/openshell/gateway-drift";
 import { loadAgent } from "../../agent/defs";
 import {
+  bindLocalAgentBaseImageToPinnedProvenance,
   ensureAgentBaseImage,
   getAgentSandboxBaseImageEnvVar,
   pinAgentSandboxBaseImageRef,
@@ -283,11 +284,16 @@ export function ensureRebuildAgentBaseImage(
       needsTemporaryHandoff && imageRef && imageRef !== result.imageTag
         ? createTemporaryBaseImageHandoffDisposer(imageRef)
         : undefined;
+    const resolutionMetadata =
+      result.resolutionMetadata ??
+      (hasExplicitOverride && imageRef
+        ? bindLocalAgentBaseImageToPinnedProvenance(agentDef, imageRef)
+        : null);
     return {
       ok: true,
       imageRef,
       overrideEnvVar,
-      ...(result.resolutionMetadata ? { resolutionMetadata: result.resolutionMetadata } : {}),
+      ...(resolutionMetadata ? { resolutionMetadata } : {}),
       ...(disposeImageRef ? { disposeImageRef } : {}),
     };
   } catch (err) {

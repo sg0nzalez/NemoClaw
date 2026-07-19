@@ -139,11 +139,19 @@ describe("rebuild agent base image preflight", () => {
     const ensureAgentBaseImage = vi
       .spyOn(agentOnboard, "ensureAgentBaseImage")
       .mockReturnValue({ imageTag: imageRef, built: true });
+    const bindLocalAgentBaseImageToPinnedProvenance = vi
+      .spyOn(agentOnboard, "bindLocalAgentBaseImageToPinnedProvenance")
+      .mockReturnValue(null);
     const pinAgentSandboxBaseImageRef = vi
       .spyOn(agentOnboard, "pinAgentSandboxBaseImageRef")
       .mockImplementation((_agentName, ref) => String(ref));
     const dockerRmi = vi.spyOn(dockerImage, "dockerRmi").mockReturnValue({ status: 0 } as never);
-    return { ensureAgentBaseImage, pinAgentSandboxBaseImageRef, dockerRmi };
+    return {
+      ensureAgentBaseImage,
+      bindLocalAgentBaseImageToPinnedProvenance,
+      pinAgentSandboxBaseImageRef,
+      dockerRmi,
+    };
   }
 
   it("forces a repository-local build and returns its exact ref when no override exists", () => {
@@ -162,8 +170,11 @@ describe("rebuild agent base image preflight", () => {
     process.env[overrideEnvVar] = "nemoclaw-hermes-sandbox-base-local:caller";
     const mutableRef = "nemoclaw-hermes-sandbox-base-local:resolved";
     const immutableRef = `nemoclaw-hermes-sandbox-base-local:image-${"a".repeat(64)}`;
-    const { ensureAgentBaseImage, pinAgentSandboxBaseImageRef } =
-      mockBaseImagePreflight(mutableRef);
+    const {
+      ensureAgentBaseImage,
+      bindLocalAgentBaseImageToPinnedProvenance,
+      pinAgentSandboxBaseImageRef,
+    } = mockBaseImagePreflight(mutableRef);
     pinAgentSandboxBaseImageRef.mockReturnValue(immutableRef);
 
     const result = ensureRebuildAgentBaseImage("hermes", makeBail());
@@ -175,6 +186,10 @@ describe("rebuild agent base image preflight", () => {
       forceLocal: true,
       temporary: true,
     });
+    expect(bindLocalAgentBaseImageToPinnedProvenance).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "hermes" }),
+      immutableRef,
+    );
     expect(result).toEqual({
       ok: true,
       imageRef: immutableRef,
