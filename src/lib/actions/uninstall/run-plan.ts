@@ -37,7 +37,10 @@ import {
   registryEntryGatewayPort,
 } from "../../state/gateway-registry";
 import { GATEWAYS_SUBDIR } from "../../state/state-root";
-import { stopOpenRouterRuntimeAdapter } from "./openrouter-runtime-adapter-cleanup";
+import {
+  stopHttpsPinRuntimeAdapter,
+  stopOpenRouterRuntimeAdapter,
+} from "./openrouter-runtime-adapter-cleanup";
 import { classifyShimPath, type FileSystemDeps } from "./plan";
 
 export interface RunResult {
@@ -200,6 +203,14 @@ const PRESERVED_USER_DATA_ENTRIES: readonly string[] = [
   "sandboxes.json",
 ];
 
+const HTTPS_PIN_RUNTIME_ADAPTER_STATE_ENTRIES: readonly string[] = [
+  "https-pin-runtime-adapter.pid",
+  "https-pin-runtime-adapter-token",
+  "https-pin-runtime-adapter.json",
+  "https-pin-runtime-adapter.lock",
+  "https-pin-runtime-adapter.log",
+];
+
 // These entries can exist in the shared root without representing a running
 // default-port environment. Any other shared-root entry is treated
 // conservatively as default-port state when uninstalling a non-default port.
@@ -208,6 +219,7 @@ const SHARED_HOST_STATE_ENTRIES = new Set([
   "source",
   GATEWAYS_SUBDIR,
   "managed_swap",
+  ...HTTPS_PIN_RUNTIME_ADAPTER_STATE_ENTRIES,
 ]);
 
 function removePathExcept(
@@ -1315,6 +1327,11 @@ function executePlan(
       stopOpenRouterRuntimeAdapter(paths, runtime, {
         scanOrphans: !scopedToSelectedGateway,
       });
+      if (scopedToSelectedGateway) {
+        runtime.log("Sibling gateways remain; kept the shared HTTPS Pin Runtime adapter.");
+      } else {
+        stopHttpsPinRuntimeAdapter(paths, runtime);
+      }
       stopModelRouter(paths, runtime, !scopedToSelectedGateway);
     } else if (step.name === "OpenShell resources") {
       if (!removeOpenShellResources(options, runtime, scopedToSelectedGateway, sandboxNames)) {
@@ -1404,6 +1421,7 @@ function executePlan(
               ? [GATEWAYS_SUBDIR, path.basename(paths.managedSwapMarkerPath)]
               : []),
             ...(scopedToSelectedGateway && selectedIsDefault ? ["source"] : []),
+            ...(scopedToSelectedGateway ? HTTPS_PIN_RUNTIME_ADAPTER_STATE_ENTRIES : []),
           ],
           runtime,
         )

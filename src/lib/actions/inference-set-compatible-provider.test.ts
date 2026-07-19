@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it, vi } from "vitest";
+import { ensureHttpsPinRuntimeAdapter as realEnsureHttpsPinRuntimeAdapter } from "../inference/https-pin-runtime-adapter";
+import { HTTPS_PIN_RUNTIME_ADAPTER_PROVIDER_CREDENTIAL_ENV } from "../inference/https-pin-runtime";
 import type { ConfigObject } from "../security/credential-filter";
 import { runInferenceSet } from "./inference-set";
 import { baseSession, createDeps } from "./inference-set.test-support";
@@ -177,6 +179,22 @@ describe("runInferenceSet compatible providers", () => {
   });
 
   it("preserves explicit inference API through the final registry and session sync", async () => {
+    let providerVersion = 1;
+    const captureOpenshell = vi.fn((args: string[]) => {
+      if (args[0] === "provider" && args[1] === "get") {
+        const output = [
+          "Name: compatible-endpoint",
+          "Id: 11111111-2222-4333-8444-555555555555",
+          "Type: openai",
+          `Resource version: ${providerVersion}`,
+          "Credential keys: COMPATIBLE_API_KEY",
+          "Config keys: OPENAI_BASE_URL",
+        ].join("\n");
+        return { status: 0, output, stdout: output, stderr: "" };
+      }
+      if (args[0] === "provider" && args[1] === "update") providerVersion += 1;
+      return { status: 0, output: "", stdout: "", stderr: "" };
+    });
     const config: ConfigObject = {
       agents: { defaults: { model: { primary: "inference/nvidia/model-a" } } },
       models: { providers: { inference: { api: "openai-completions", models: [] } } },
@@ -196,6 +214,7 @@ describe("runInferenceSet compatible providers", () => {
         credentialEnv: "NVIDIA_INFERENCE_API_KEY",
         preferredInferenceApi: "openai-completions",
       }),
+      captureOpenshell,
     });
 
     await runInferenceSet(
@@ -218,12 +237,18 @@ describe("runInferenceSet compatible providers", () => {
         },
       },
     });
+    // The DNS-backed HTTPS endpoint is pinned via the HTTPS-pin runtime
+    // adapter, so the persisted endpointUrl is the adapter's local route base
+    // URL, not the raw operator-supplied hostname — mirroring the existing
+    // HTTP precedent of persisting the validated/pinned address. The
+    // The canonical provider key stays stable while its invocation-local
+    // value is replaced by the route-scoped adapter token.
     expect(deps.calls.updateSandbox.mock.calls.at(-1)).toEqual([
       "alpha",
       expect.objectContaining({
         provider: "compatible-endpoint",
         model: "mock-responses-model",
-        endpointUrl: "https://compatible.example/v1",
+        endpointUrl: "http://host.openshell.internal:11438/route/test-route",
         credentialEnv: "COMPATIBLE_API_KEY",
         preferredInferenceApi: "openai-responses",
       }),
@@ -231,7 +256,7 @@ describe("runInferenceSet compatible providers", () => {
     expect(deps.getSession()).toMatchObject({
       provider: "compatible-endpoint",
       model: "mock-responses-model",
-      endpointUrl: "https://compatible.example/v1",
+      endpointUrl: "http://host.openshell.internal:11438/route/test-route",
       credentialEnv: "COMPATIBLE_API_KEY",
       preferredInferenceApi: "openai-responses",
     });
@@ -317,6 +342,12 @@ describe("runInferenceSet compatible providers", () => {
         },
         rewriteConfigUrlsWithDnsPinning: (value) =>
           actualConfig.rewriteConfigUrlsWithDnsPinning(value, lookup),
+        // DNS-backed HTTPS endpoints (the "DNS-private" case below) route
+        // through the HTTPS-pin runtime adapter instead of
+        // rewriteConfigUrlsWithDnsPinning, so its real SSRF preflight is
+        // exercised here too, with the same injected DNS lookup.
+        ensureHttpsPinRuntimeAdapter: (adapterOptions) =>
+          realEnsureHttpsPinRuntimeAdapter({ ...adapterOptions, lookup }),
       });
 
       await expect(

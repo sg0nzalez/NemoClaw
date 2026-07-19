@@ -24,6 +24,7 @@ import {
   normalizeInferenceSetProvider,
   runInferenceSet,
 } from "./inference-set";
+import type { EnsureHttpsPinRuntimeAdapterOptions } from "./inference-set-route-containment";
 import { baseSession, createDeps } from "./inference-set.test-support";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -279,6 +280,29 @@ describe("runInferenceSet SSRF-block guidance — facet 2 (#6321)", () => {
     });
   }
 
+  // A DNS-backed HTTPS endpoint (the shape every URL in this suite uses) never
+  // reaches rewriteConfigUrlsWithDnsPinning/ssrfGuard above — it is eligible for
+  // the HTTPS-pin runtime adapter, whose real implementation runs its own SSRF
+  // preflight (assertEndpointResolvesPublic) before registering a route. This
+  // stand-in mirrors that preflight against the same STUB_INTERNAL_HOSTS set.
+  function httpsPinAdapterGuard() {
+    return vi.fn(async (options: EnsureHttpsPinRuntimeAdapterOptions) => {
+      const host = new URL(options.endpointUrl).hostname;
+      return STUB_INTERNAL_HOSTS.has(host)
+        ? Promise.reject(
+            new Error(
+              `URL hostname "${host}" resolves to private/internal address "10.48.203.205". This could expose internal services to the sandbox.`,
+            ),
+          )
+        : Promise.resolve({
+            baseUrl: "http://host.openshell.internal:11438/route/test-route",
+            credentialEnv: "NEMOCLAW_HTTPS_PIN_RUNTIME_ADAPTER_TOKEN",
+            token: "test-adapter-token",
+            routeId: "test-route",
+          });
+    });
+  }
+
   it("keeps the SSRF guard AND adds an actionable hint when the sandbox is already on this provider", async () => {
     // The reporter's case: a sandbox onboarded on compatible-endpoint against an
     // internal Hub. `inference set --endpoint-url <internal>` still (correctly)
@@ -295,7 +319,7 @@ describe("runInferenceSet SSRF-block guidance — facet 2 (#6321)", () => {
         credentialEnv: "COMPATIBLE_API_KEY",
         preferredInferenceApi: "openai-completions",
       },
-      rewriteConfigUrlsWithDnsPinning: ssrfGuard(),
+      ensureHttpsPinRuntimeAdapter: httpsPinAdapterGuard(),
     });
 
     const attempt = runInferenceSet(
@@ -334,7 +358,7 @@ describe("runInferenceSet SSRF-block guidance — facet 2 (#6321)", () => {
         credentialEnv: "COMPATIBLE_ANTHROPIC_API_KEY",
         preferredInferenceApi: "anthropic-messages",
       },
-      rewriteConfigUrlsWithDnsPinning: ssrfGuard(),
+      ensureHttpsPinRuntimeAdapter: httpsPinAdapterGuard(),
     });
     const attempt = runInferenceSet(
       {
@@ -359,7 +383,7 @@ describe("runInferenceSet SSRF-block guidance — facet 2 (#6321)", () => {
     // internal URL therefore still goes through the DNS-pinning SSRF guard and is
     // rejected — with actionable guidance to omit --endpoint-url for a model-only
     // switch on the already-established route (see the guided-path test below).
-    const guard = ssrfGuard();
+    const guard = httpsPinAdapterGuard();
     const deps = createDeps({
       config: {
         agents: { defaults: { model: { primary: "inference/nvidia/model-a" } } },
@@ -374,7 +398,7 @@ describe("runInferenceSet SSRF-block guidance — facet 2 (#6321)", () => {
         credentialEnv: "COMPATIBLE_API_KEY",
         preferredInferenceApi: "openai-completions",
       },
-      rewriteConfigUrlsWithDnsPinning: guard,
+      ensureHttpsPinRuntimeAdapter: guard,
     });
 
     const attempt = runInferenceSet(
@@ -469,7 +493,7 @@ describe("runInferenceSet SSRF-block guidance — facet 2 (#6321)", () => {
         provider: "nvidia-prod",
         model: "nvidia/model-a",
       },
-      rewriteConfigUrlsWithDnsPinning: ssrfGuard(),
+      ensureHttpsPinRuntimeAdapter: httpsPinAdapterGuard(),
     });
 
     const attempt = runInferenceSet(

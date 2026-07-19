@@ -15,6 +15,11 @@ import {
 } from "../inference/config";
 import { resolveContextWindowForModel } from "../inference/context-window";
 import { withGatewayRouteMutationLock } from "../inference/gateway-route-mutation-lock";
+import { parseHttpsPinRouteId } from "../inference/https-pin-runtime";
+import {
+  ensureHttpsPinRuntimeAdapter,
+  revokeHttpsPinRuntimeAdapterRoute,
+} from "../inference/https-pin-runtime-adapter";
 import { type ValidationResult, validateLocalProvider } from "../inference/local";
 import { inferenceSelectionRegistryFields } from "../inference/selection";
 import { resolveSandboxGatewayName } from "../onboard/gateway-binding";
@@ -57,12 +62,14 @@ import {
   type InferenceMutation,
   readPreviousOpenClawInferenceApi,
 } from "./inference-set-gateway-restart";
+import { applyHttpsPinProviderBinding } from "./inference-set-https-pin-provider";
 import { buildInferenceSetFailure } from "./inference-set-provider-diagnostics";
 import {
   applyOpenClawAnthropicReplyBudget,
   readOpenClawPrimaryReplyBudget,
 } from "./inference-set-reply-budget";
 import {
+  type EnsureHttpsPinRuntimeAdapterFn,
   finalizeInferenceSetRoute,
   prepareInferenceSetRoute,
   type RegistryInferenceMetadata,
@@ -127,7 +134,7 @@ export interface InferenceSetDeps extends InferenceGatewayRestartDeps {
     args: string[],
     opts?: Pick<
       CaptureOpenshellOptions,
-      "ignoreError" | "includeStreams" | "maxBuffer" | "timeout"
+      "env" | "ignoreError" | "includeStreams" | "maxBuffer" | "timeout"
     >,
   ) => CaptureOpenshellResult;
   isLocalInferenceProvider: (provider: string) => boolean;
@@ -136,6 +143,8 @@ export interface InferenceSetDeps extends InferenceGatewayRestartDeps {
   resolveContextWindowForModel: (provider: string, model: string) => number | null;
   isSandboxConfigMutable: (sandboxName: string) => boolean;
   rewriteConfigUrlsWithDnsPinning: (value: ConfigValue) => Promise<ConfigValue>;
+  ensureHttpsPinRuntimeAdapter: EnsureHttpsPinRuntimeAdapterFn;
+  revokeHttpsPinRuntimeAdapterRoute: (routeId: string) => Promise<boolean>;
   withGatewayRouteMutationLock: typeof withGatewayRouteMutationLock;
 }
 
@@ -237,6 +246,8 @@ function defaultDeps(): InferenceSetDeps {
     ensureLocalProviderReachable,
     resolveContextWindowForModel,
     rewriteConfigUrlsWithDnsPinning,
+    ensureHttpsPinRuntimeAdapter,
+    revokeHttpsPinRuntimeAdapterRoute,
     withGatewayRouteMutationLock,
     restartSandboxGateway: defaultInferenceGatewayRestart,
     isSandboxConfigMutable: (sandboxName) => {
@@ -540,6 +551,7 @@ function assertHermesCompatibleAnthropicOpenAiProvider(
   provider: string,
   endpointUrl: string | null,
   deps: InferenceSetDeps,
+  httpsPinProviderBinding: { providerType: "openai" | "anthropic" } | null = null,
 ): void {
   if (
     agentName !== "hermes" ||
@@ -548,6 +560,7 @@ function assertHermesCompatibleAnthropicOpenAiProvider(
   ) {
     return;
   }
+  if (httpsPinProviderBinding?.providerType === "openai") return;
 
   const result = deps.captureOpenshell(["provider", "get", "-g", gatewayName, provider], {
     ignoreError: true,
@@ -623,6 +636,7 @@ async function runInferenceSetWithoutHostLock(
   }
 
   const { sandboxName, entry, agentName } = resolveTargetSandbox(options.sandboxName, deps);
+  const priorHttpsPinRouteId = parseHttpsPinRouteId(entry.endpointUrl);
   if (agentName !== "openclaw" && agentName !== "hermes") {
     // #6321: Deep Agents Code (langchain-deepagents-code) bakes its model into
     // the sandbox image at build time (agents/langchain-deepagents-code/Dockerfile
@@ -725,20 +739,24 @@ async function runInferenceSetWithoutHostLock(
       2,
     );
   }
-  const { registryMetadata, explicitPreferredInferenceApi } = await finalizeInferenceSetRoute({
-    prepared: preparedRoute,
-    sandboxName,
-    provider,
-    model,
-    canReuseRecordedRoute:
-      entry.provider === provider &&
-      typeof entry.endpointUrl === "string" &&
-      entry.endpointUrl.trim().length > 0 &&
-      typeof entry.preferredInferenceApi === "string" &&
-      entry.preferredInferenceApi.trim().length > 0,
-    getSandboxes: () => deps.listSandboxes().sandboxes,
-    rewriteUrlWithDnsPinning: deps.rewriteConfigUrlsWithDnsPinning,
-  });
+  const { registryMetadata, explicitPreferredInferenceApi, httpsPinProviderBinding } =
+    await finalizeInferenceSetRoute({
+      prepared: preparedRoute,
+      sandboxName,
+      provider,
+      model,
+      canReuseRecordedRoute:
+        entry.provider === provider &&
+        typeof entry.endpointUrl === "string" &&
+        entry.endpointUrl.trim().length > 0 &&
+        typeof entry.preferredInferenceApi === "string" &&
+        entry.preferredInferenceApi.trim().length > 0,
+      getSandboxes: () => deps.listSandboxes().sandboxes,
+      rewriteUrlWithDnsPinning: deps.rewriteConfigUrlsWithDnsPinning,
+      ensureHttpsPinRuntimeAdapter: deps.ensureHttpsPinRuntimeAdapter,
+      effectiveInferenceApi:
+        preparedRoute.preliminaryExplicitMetadata?.preferredInferenceApi ?? null,
+    });
 
   // Local providers (ollama-local, vllm-local) route through the sandbox-facing
   // host.openshell.internal hostname, which the host-side `openshell inference set`
@@ -747,6 +765,10 @@ async function runInferenceSetWithoutHostLock(
   // verify. Only a genuinely-unreachable host stack hard-fails here, before the
   // route is touched.
   let effectiveNoVerify = options.noVerify === true;
+  // The adapter origin resolves only from inside the sandbox network. The
+  // host-side OpenShell verifier cannot resolve host.openshell.internal, so
+  // adapter registration + local health are the verification boundary.
+  if (httpsPinProviderBinding) effectiveNoVerify = true;
   if (deps.isLocalInferenceProvider(provider)) {
     const localValidation = deps.validateLocalProvider(provider);
     if (localValidation.ok) {
@@ -779,6 +801,7 @@ async function runInferenceSetWithoutHostLock(
     provider,
     registryMetadata.endpointUrl ?? null,
     deps,
+    httpsPinProviderBinding,
   );
 
   // Read the in-sandbox config *before* mutating the gateway route or registry.
@@ -788,181 +811,232 @@ async function runInferenceSetWithoutHostLock(
   // leaving a half-applied switch across the three config layers (#6997).
   const config = readInSandboxConfigOrFail(deps, sandboxName, target);
 
-  deps.log(`  Setting OpenShell inference route: ${provider} / ${model}`);
-  const setResult = deps.captureOpenshell(
-    openshellInferenceSetArgs({
-      gatewayName: preparedRoute.gatewayName,
-      provider,
-      model,
-      noVerify: effectiveNoVerify,
-    }),
-    {
-      ignoreError: true,
-      includeStreams: true,
-      maxBuffer: OPEN_SHELL_FAILURE_CAPTURE_MAX_BUFFER,
-    },
-  );
-  if (setResult.status !== 0) {
-    const failure = buildInferenceSetFailure(setResult, provider, deps);
-    throw new InferenceSetError(failure.message, failure.exitCode);
-  }
-
-  // Write minimal registry state before any sandbox-facing config read so the
-  // gateway and registry cannot split if the in-sandbox layer is unavailable.
-  const registryFields = (preferredInferenceApi: string | null) =>
-    inferenceSelectionRegistryFields({
-      provider,
-      model,
-      endpointUrl: registryMetadata.endpointUrl ?? null,
-      credentialEnv: registryMetadata.credentialEnv ?? null,
-      preferredInferenceApi,
-      nimContainer: registryMetadata.nimContainer ?? null,
-    });
-  if (
-    !deps.updateSandbox(
-      sandboxName,
-      registryFields(
-        resolveAgentInferenceApi(
-          agentName,
-          provider,
-          registryMetadata.preferredInferenceApi ?? null,
-        ),
-      ),
-    )
-  ) {
-    throw new InferenceSetError(`Failed to update NemoClaw registry for sandbox '${sandboxName}'.`);
-  }
-
-  const previousOpenClawInferenceApi = readPreviousOpenClawInferenceApi(agentName, config);
-  const preferredInferenceApi =
-    explicitPreferredInferenceApi ??
-    resolveRuntimeInferenceApi({
-      agentName,
-      config,
-      currentProvider: entry.provider,
-      provider,
-      sandboxName,
-      session,
-    });
-  const effectiveRegistryMetadata: RegistryInferenceMetadata = {
-    ...registryMetadata,
-    preferredInferenceApi,
-  };
-  // Refresh the registry with config-derived API-family metadata before the
-  // crash-prone in-sandbox sync (#3725/#3726). Explicit operator-supplied
-  // metadata remains authoritative when present.
-  if (!deps.updateSandbox(sandboxName, registryFields(preferredInferenceApi))) {
-    throw new InferenceSetError(`Failed to update NemoClaw registry for sandbox '${sandboxName}'.`);
-  }
-
-  let patched: { changed: boolean; route: SandboxInferenceConfig };
-  if (agentName === "hermes") {
-    patched = patchHermesInferenceConfig(config, provider, model, preferredInferenceApi);
-  } else {
-    // Recompute the context window for the model being switched to, so it does
-    // not inherit the prior model's window (#context-window-on-switch).
-    const contextWindow = deps.resolveContextWindowForModel(provider, model);
-    if (contextWindow != null) {
-      deps.log(`  Context window for '${model}': ${contextWindow} tokens`);
-    } else {
-      deps.log(
-        `  Warning: could not determine the context window for '${model}'; keeping the ` +
-          `existing value. Run '${CLI_NAME} ${sandboxName} rebuild' to re-probe it.`,
-      );
-    }
-    patched = patchOpenClawInferenceConfig(
-      config,
-      provider,
-      model,
-      preferredInferenceApi || getPreferredInferenceApi(config),
-      contextWindow ?? undefined,
-    );
-  }
-
-  deps.log(
-    agentName === "hermes"
-      ? `  Syncing Hermes model route in sandbox '${sandboxName}'...`
-      : `  Syncing OpenClaw model identity in sandbox '${sandboxName}'...`,
-  );
-  // In-sandbox config is the last, crash-prone layer (gateway + registry already consistent):
-  //   - don't abort on failure; track whether it synced, never report a false "synced"
-  // Two degraded states, both fixed by `rebuild` (regenerates openclaw.json + .config-hash from registry):
-  //   - write fails:           config left old (old .config-hash still matches it)
-  //   - hash recompute fails:  config new but .config-hash stale -> integrity-guard mismatch
-  let inSandboxConfigSynced = false;
+  let appliedHttpsPinProvider = false;
+  let appliedInferenceSelection = false;
   try {
-    deps.writeSandboxConfig(sandboxName, target, config);
-    try {
-      deps.recomputeSandboxConfigHash(sandboxName, target);
-      inSandboxConfigSynced = true;
-    } catch (hashError) {
-      const detail =
-        hashError instanceof Error && hashError.message ? hashError.message : String(hashError);
-      deps.log(
-        `  Warning: wrote the in-sandbox config for '${sandboxName}' but failed to refresh its ` +
-          `integrity hash: ${detail}`,
-      );
-      deps.log(`  Run '${CLI_NAME} ${sandboxName} rebuild' to resync the in-sandbox config.`);
+    if (httpsPinProviderBinding) {
+      applyHttpsPinProviderBinding({
+        gatewayName: preparedRoute.gatewayName,
+        providerName: provider,
+        binding: httpsPinProviderBinding,
+        captureOpenshell: deps.captureOpenshell,
+      });
+      appliedHttpsPinProvider = true;
     }
-  } catch (writeError) {
-    const detail =
-      writeError instanceof Error && writeError.message ? writeError.message : String(writeError);
-    deps.log(
-      `  Warning: gateway and registry now use ${provider} / ${model}, but writing the ` +
-        `in-sandbox config failed: ${detail}`,
-    );
-    deps.log(
-      `  Run '${CLI_NAME} ${sandboxName} rebuild' to finish applying the model inside the sandbox.`,
-    );
-  }
-  // Hermes keeps an isolated dashboard-home config that only mirrors the gateway
-  // config's model routing at sandbox startup. Re-seed it after an in-place
-  // switch so Dashboard Chat (and /api/model/info) converge on the new model
-  // instead of silently staying on the previous one (#6893).
-  //   - "converged": dashboard now matches the switch.
-  //   - "absent":    Dashboard disabled — nothing to converge, still a success.
-  //   - "failed":    warn and fail after the committed mutation is finalized so
-  //                  callers cannot accept a partially converged switch.
-  let dashboardConverged: boolean | undefined;
-  if (agentName === "hermes" && inSandboxConfigSynced) {
-    const reseed = deps.seedHermesDashboardConfig(sandboxName, target);
-    dashboardConverged = reseed !== "failed";
-    if (reseed === "failed") {
-      deps.log(
-        `  Warning: updated the Hermes model route but could not refresh the dashboard ` +
-          `config for '${sandboxName}'. Restart the sandbox to converge Dashboard Chat.`,
-      );
-    }
-  }
-  const sessionUpdated = updateMatchingOnboardSession(
-    sandboxName,
-    provider,
-    model,
-    patched.route,
-    effectiveRegistryMetadata,
-    deps,
-  );
 
-  return finalizeInferenceMutation(
-    {
-      agentName,
-      configChanged: patched.changed,
-      nextApi: patched.route.inferenceApi,
-      previousApi: previousOpenClawInferenceApi,
-      result: {
-        sandboxName,
+    deps.log(`  Setting OpenShell inference route: ${provider} / ${model}`);
+    const setResult = deps.captureOpenshell(
+      openshellInferenceSetArgs({
+        gatewayName: preparedRoute.gatewayName,
         provider,
         model,
-        primaryModelRef: patched.route.primaryModelRef,
-        providerKey: patched.route.providerKey,
-        configChanged: patched.changed,
-        sessionUpdated,
-        inSandboxConfigSynced,
-        dashboardConverged,
+        noVerify: effectiveNoVerify,
+      }),
+      {
+        ignoreError: true,
+        includeStreams: true,
+        maxBuffer: OPEN_SHELL_FAILURE_CAPTURE_MAX_BUFFER,
       },
-    },
-    deps,
-  );
+    );
+    if (setResult.status !== 0) {
+      const failure = buildInferenceSetFailure(setResult, provider, deps);
+      throw new InferenceSetError(failure.message, failure.exitCode);
+    }
+    appliedInferenceSelection = true;
+
+    // Write minimal registry state before any sandbox-facing config read so the
+    // gateway and registry cannot split if the in-sandbox layer is unavailable.
+    const registryFields = (preferredInferenceApi: string | null) =>
+      inferenceSelectionRegistryFields({
+        provider,
+        model,
+        endpointUrl: registryMetadata.endpointUrl ?? null,
+        credentialEnv: registryMetadata.credentialEnv ?? null,
+        preferredInferenceApi,
+        nimContainer: registryMetadata.nimContainer ?? null,
+      });
+    if (
+      !deps.updateSandbox(
+        sandboxName,
+        registryFields(
+          resolveAgentInferenceApi(
+            agentName,
+            provider,
+            registryMetadata.preferredInferenceApi ?? null,
+          ),
+        ),
+      )
+    ) {
+      throw new InferenceSetError(
+        `Failed to update NemoClaw registry for sandbox '${sandboxName}'.`,
+      );
+    }
+
+    const previousOpenClawInferenceApi = readPreviousOpenClawInferenceApi(agentName, config);
+    const preferredInferenceApi =
+      explicitPreferredInferenceApi ??
+      resolveRuntimeInferenceApi({
+        agentName,
+        config,
+        currentProvider: entry.provider,
+        provider,
+        sandboxName,
+        session,
+      });
+    const effectiveRegistryMetadata: RegistryInferenceMetadata = {
+      ...registryMetadata,
+      preferredInferenceApi,
+    };
+    // Refresh the registry with config-derived API-family metadata before the
+    // crash-prone in-sandbox sync (#3725/#3726). Explicit operator-supplied
+    // metadata remains authoritative when present.
+    if (!deps.updateSandbox(sandboxName, registryFields(preferredInferenceApi))) {
+      throw new InferenceSetError(
+        `Failed to update NemoClaw registry for sandbox '${sandboxName}'.`,
+      );
+    }
+
+    const currentHttpsPinRouteId = parseHttpsPinRouteId(registryMetadata.endpointUrl);
+    if (priorHttpsPinRouteId && priorHttpsPinRouteId !== currentHttpsPinRouteId) {
+      try {
+        const peerStillReferencesRoute = deps
+          .listSandboxes()
+          .sandboxes.some(
+            (candidate) =>
+              candidate.name !== sandboxName &&
+              parseHttpsPinRouteId(candidate.endpointUrl) === priorHttpsPinRouteId,
+          );
+        if (!peerStillReferencesRoute) {
+          const revoked = await deps.revokeHttpsPinRuntimeAdapterRoute(priorHttpsPinRouteId);
+          if (!revoked) throw new Error("the adapter did not confirm route revocation");
+        }
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        deps.log(
+          `  Warning: the new inference route is committed, but superseded HTTPS Pin Runtime route ` +
+            `'${priorHttpsPinRouteId}' could not be revoked: ${detail}. The raw upstream endpoint was not restored; ` +
+            `uninstall NemoClaw to stop the adapter and purge its in-memory credentials if this persists.`,
+        );
+      }
+    }
+
+    let patched: { changed: boolean; route: SandboxInferenceConfig };
+    if (agentName === "hermes") {
+      patched = patchHermesInferenceConfig(config, provider, model, preferredInferenceApi);
+    } else {
+      // Recompute the context window for the model being switched to, so it does
+      // not inherit the prior model's window (#context-window-on-switch).
+      const contextWindow = deps.resolveContextWindowForModel(provider, model);
+      if (contextWindow != null) {
+        deps.log(`  Context window for '${model}': ${contextWindow} tokens`);
+      } else {
+        deps.log(
+          `  Warning: could not determine the context window for '${model}'; keeping the ` +
+            `existing value. Run '${CLI_NAME} ${sandboxName} rebuild' to re-probe it.`,
+        );
+      }
+      patched = patchOpenClawInferenceConfig(
+        config,
+        provider,
+        model,
+        preferredInferenceApi || getPreferredInferenceApi(config),
+        contextWindow ?? undefined,
+      );
+    }
+
+    deps.log(
+      agentName === "hermes"
+        ? `  Syncing Hermes model route in sandbox '${sandboxName}'...`
+        : `  Syncing OpenClaw model identity in sandbox '${sandboxName}'...`,
+    );
+    // In-sandbox config is the last, crash-prone layer (gateway + registry already consistent):
+    //   - don't abort on failure; track whether it synced, never report a false "synced"
+    // Two degraded states, both fixed by `rebuild` (regenerates openclaw.json + .config-hash from registry):
+    //   - write fails:           config left old (old .config-hash still matches it)
+    //   - hash recompute fails:  config new but .config-hash stale -> integrity-guard mismatch
+    let inSandboxConfigSynced = false;
+    try {
+      deps.writeSandboxConfig(sandboxName, target, config);
+      try {
+        deps.recomputeSandboxConfigHash(sandboxName, target);
+        inSandboxConfigSynced = true;
+      } catch (hashError) {
+        const detail =
+          hashError instanceof Error && hashError.message ? hashError.message : String(hashError);
+        deps.log(
+          `  Warning: wrote the in-sandbox config for '${sandboxName}' but failed to refresh its ` +
+            `integrity hash: ${detail}`,
+        );
+        deps.log(`  Run '${CLI_NAME} ${sandboxName} rebuild' to resync the in-sandbox config.`);
+      }
+    } catch (writeError) {
+      const detail =
+        writeError instanceof Error && writeError.message ? writeError.message : String(writeError);
+      deps.log(
+        `  Warning: gateway and registry now use ${provider} / ${model}, but writing the ` +
+          `in-sandbox config failed: ${detail}`,
+      );
+      deps.log(
+        `  Run '${CLI_NAME} ${sandboxName} rebuild' to finish applying the model inside the sandbox.`,
+      );
+    }
+    // Hermes keeps an isolated dashboard-home config that only mirrors the gateway
+    // config's model routing at sandbox startup. Re-seed it after an in-place
+    // switch so Dashboard Chat (and /api/model/info) converge on the new model
+    // instead of silently staying on the previous one (#6893).
+    //   - "converged": dashboard now matches the switch.
+    //   - "absent":    Dashboard disabled — nothing to converge, still a success.
+    //   - "failed":    warn and fail after the committed mutation is finalized so
+    //                  callers cannot accept a partially converged switch.
+    let dashboardConverged: boolean | undefined;
+    if (agentName === "hermes" && inSandboxConfigSynced) {
+      const reseed = deps.seedHermesDashboardConfig(sandboxName, target);
+      dashboardConverged = reseed !== "failed";
+      if (reseed === "failed") {
+        deps.log(
+          `  Warning: updated the Hermes model route but could not refresh the dashboard ` +
+            `config for '${sandboxName}'. Restart the sandbox to converge Dashboard Chat.`,
+        );
+      }
+    }
+    const sessionUpdated = updateMatchingOnboardSession(
+      sandboxName,
+      provider,
+      model,
+      patched.route,
+      effectiveRegistryMetadata,
+      deps,
+    );
+
+    return finalizeInferenceMutation(
+      {
+        agentName,
+        configChanged: patched.changed,
+        nextApi: patched.route.inferenceApi,
+        previousApi: previousOpenClawInferenceApi,
+        result: {
+          sandboxName,
+          provider,
+          model,
+          primaryModelRef: patched.route.primaryModelRef,
+          providerKey: patched.route.providerKey,
+          configChanged: patched.changed,
+          sessionUpdated,
+          inSandboxConfigSynced,
+          dashboardConverged,
+        },
+      },
+      deps,
+    );
+  } catch (error) {
+    if (!appliedHttpsPinProvider) throw error;
+    const detail = error instanceof Error ? error.message : String(error);
+    const exitCode = error instanceof InferenceSetError ? error.exitCode : 1;
+    const residual = appliedInferenceSelection
+      ? "The OpenShell provider and inference selection remain committed to the safer HTTPS-pinned adapter, but NemoClaw state may not have converged. Retry this command; if convergence still fails, rebuild the sandbox."
+      : "The OpenShell provider remains on the safer HTTPS-pinned adapter, but the inference selection was not confirmed. Retry this command to converge the selection.";
+    throw new InferenceSetError(`${detail}\n  ${residual}`, exitCode);
+  }
 }
 
 export async function runInferenceSet(
