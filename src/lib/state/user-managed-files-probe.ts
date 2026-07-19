@@ -22,7 +22,10 @@ function _log(msg: string): void {
 
 export async function probeUserManagedFiles(sandboxName: string): Promise<UserManagedFilesProbe> {
   const sb = registry.getSandbox(sandboxName);
-  const agentName = sb?.agent || "openclaw";
+  if (!sb) {
+    throw new Error(`user-managed file probe failed: sandbox '${sandboxName}' is not registered`);
+  }
+  const agentName = sb.agent || "openclaw";
   const declared = [...(loadAgent(agentName).userManagedFiles ?? [])];
   if (declared.length === 0) return { declared, existing: [] };
 
@@ -42,7 +45,7 @@ export async function probeUserManagedFiles(sandboxName: string): Promise<UserMa
     timeoutMs: 30_000,
   });
   const stdout = result.stdout.trim();
-  if (result.status !== 0 && stdout.length === 0) {
+  if (result.error || result.status === null || (result.status !== 0 && stdout.length === 0)) {
     const detail = result.stderr.trim() || result.error?.message || `exit=${result.status}`;
     _log(`OpenShell probe failed: ${detail.substring(0, 200)}`);
     throw new Error(`user-managed file probe failed: ${detail.substring(0, 200)}`);

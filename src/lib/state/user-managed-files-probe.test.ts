@@ -50,6 +50,16 @@ describe("probeUserManagedFiles", () => {
     });
   });
 
+  it("fails before dispatch when the sandbox is not registered", async () => {
+    getSandbox.mockReturnValue(undefined);
+
+    await expect(probeUserManagedFiles("alpha")).rejects.toThrow(
+      "user-managed file probe failed: sandbox 'alpha' is not registered",
+    );
+    expect(loadAgent).not.toHaveBeenCalled();
+    expect(execReadOnly).not.toHaveBeenCalled();
+  });
+
   it("supports nested and shell-quoted declared paths", async () => {
     loadAgent.mockReturnValue({ userManagedFiles: [".hermes/.env", "user's.env"] });
     execReadOnly.mockResolvedValue({ status: 0, stdout: ".hermes/.env\n", stderr: "" });
@@ -81,6 +91,19 @@ describe("probeUserManagedFiles", () => {
 
     await expect(probeUserManagedFiles("alpha")).rejects.toThrow(
       "user-managed file probe failed: connection refused",
+    );
+  });
+
+  it("rejects partial output when the transport did not complete", async () => {
+    execReadOnly.mockResolvedValue({
+      status: null,
+      stdout: ".env\n",
+      stderr: "transport interrupted",
+      error: new Error("UNAVAILABLE"),
+    });
+
+    await expect(probeUserManagedFiles("alpha")).rejects.toThrow(
+      "user-managed file probe failed: transport interrupted",
     );
   });
 

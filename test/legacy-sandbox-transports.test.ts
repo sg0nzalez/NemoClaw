@@ -125,6 +125,28 @@ describe("legacy sandbox transport inventory", () => {
     ]);
   });
 
+  it("tracks runtime imports of the read-only fallback module", () => {
+    const root = fixtureRepo({
+      "src/dynamic-import.ts":
+        'async function load() { return import("./lib/adapters/openshell/sandbox-control-routing.js"); }',
+      "src/require-import.ts":
+        'const routing = require("./lib/adapters/openshell/sandbox-control-routing");',
+    });
+
+    expect(discoverLegacySandboxTransportSites(root)).toEqual([
+      {
+        relativePath: "src/dynamic-import.ts",
+        kind: "grpc-cli-read-only-fallback",
+        calls: 1,
+      },
+      {
+        relativePath: "src/require-import.ts",
+        kind: "grpc-cli-read-only-fallback",
+        calls: 1,
+      },
+    ]);
+  });
+
   it("ignores type-only fallback imports and re-exports", () => {
     const root = fixtureRepo({
       "src/type-only.ts": [

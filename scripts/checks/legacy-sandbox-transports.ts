@@ -101,6 +101,15 @@ const DOCKER_COMMAND_CALLS = new Set([
 ]);
 
 const NON_SANDBOX_SSH_ROOTS = ["src/lib/actions/dns/", "src/lib/deploy/"] as const;
+const SANDBOX_CONTROL_ROUTING_MODULE_RE = /(?:^|\/)sandbox-control-routing(?:\.js)?$/u;
+
+function isSandboxControlRoutingModule(node: ts.Node | undefined): boolean {
+  return (
+    node !== undefined &&
+    (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) &&
+    SANDBOX_CONTROL_ROUTING_MODULE_RE.test(node.text)
+  );
+}
 
 function productionTypeScriptFiles(directory: string): string[] {
   if (!existsSync(directory)) return [];
@@ -210,8 +219,7 @@ function scanSource(
   function visit(node: ts.Node): void {
     if (
       ts.isImportDeclaration(node) &&
-      ts.isStringLiteral(node.moduleSpecifier) &&
-      /(?:^|\/)sandbox-control-routing(?:\.js)?$/u.test(node.moduleSpecifier.text) &&
+      isSandboxControlRoutingModule(node.moduleSpecifier) &&
       node.importClause &&
       !node.importClause.isTypeOnly &&
       ((node.importClause.namedBindings && ts.isNamespaceImport(node.importClause.namedBindings)) ||
@@ -230,9 +238,7 @@ function scanSource(
     if (
       ts.isExportDeclaration(node) &&
       !node.isTypeOnly &&
-      node.moduleSpecifier &&
-      ts.isStringLiteral(node.moduleSpecifier) &&
-      /(?:^|\/)sandbox-control-routing(?:\.js)?$/u.test(node.moduleSpecifier.text) &&
+      isSandboxControlRoutingModule(node.moduleSpecifier) &&
       node.exportClause &&
       ts.isNamedExports(node.exportClause) &&
       node.exportClause.elements.some(
@@ -257,6 +263,14 @@ function scanSource(
     }
 
     if (ts.isCallExpression(node)) {
+      const loadsSandboxControlRoutingAtRuntime =
+        (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+          (ts.isIdentifier(node.expression) && node.expression.text === "require")) &&
+        isSandboxControlRoutingModule(node.arguments[0]);
+      if (loadsSandboxControlRoutingAtRuntime) {
+        increment(counts, "grpc-cli-read-only-fallback");
+      }
+
       const name = resolvedExpressionName(node.expression, bindings);
       const helperKind = name ? HELPER_KINDS.get(name) : undefined;
       if (helperKind) increment(counts, helperKind);
