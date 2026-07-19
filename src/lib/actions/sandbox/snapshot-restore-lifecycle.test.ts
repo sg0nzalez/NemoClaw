@@ -10,11 +10,12 @@ import { withSandboxMutationLock } from "../../state/mcp-lifecycle-lock";
 import * as f from "./snapshot-restore-test-fixture";
 
 beforeEach(f.resetSnapshotRestoreMocks);
-let tempHome: string | null = null;
+const tempHomes: string[] = [];
 afterEach(() => {
   f.cleanupSnapshotRestoreMocks();
-  if (tempHome) fs.rmSync(tempHome, { recursive: true, force: true });
-  tempHome = null;
+  for (const tempHome of tempHomes.splice(0)) {
+    fs.rmSync(tempHome, { recursive: true, force: true });
+  }
 });
 describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
   it("restores the latest snapshot into the source sandbox", async () => {
@@ -198,7 +199,8 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
   });
 
   it("holds the source and destination mutation locks until a cross-sandbox restore finishes (#7194)", async () => {
-    tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-snapshot-locks-"));
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-snapshot-locks-"));
+    tempHomes.push(tempHome);
     vi.stubEnv("HOME", tempHome);
     const events: string[] = [];
     let cloneCreated = false;
@@ -274,31 +276,32 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
   });
 
   it("blocks a cross-sandbox clone before deleting the target when source policy repair is pending (#7194)", async () => {
+    const common = {
+      agent: "openclaw",
+      openshellDriver: "docker",
+      provider: "nvidia-nim",
+      model: "nvidia/model-a",
+    };
     f.getSandboxMock.mockImplementation((name) => {
-      const common = {
-        agent: "openclaw",
-        openshellDriver: "docker",
-        provider: "nvidia-nim",
-        model: "nvidia/model-a",
-      };
-      if (name === "alpha") {
-        return {
-          ...common,
-          name: "alpha",
-          imageTag: "nemoclaw-alpha:test",
-          baselineExclusionTransition: {
-            id: "0b2f3297-a9ab-4c2f-80da-bf1760a1afbf",
-            operation: "restore",
-            exclusion: {
-              key: "agents.openclaw.default",
-              digest: "a".repeat(64),
+      return name === "alpha"
+        ? {
+            ...common,
+            name: "alpha",
+            imageTag: "nemoclaw-alpha:test",
+            baselineExclusionTransition: {
+              id: "0b2f3297-a9ab-4c2f-80da-bf1760a1afbf",
+              operation: "restore",
+              exclusion: {
+                key: "agents.openclaw.default",
+                digest: "a".repeat(64),
+              },
+              startedAt: "2026-07-19T00:00:00.000Z",
+              targetLiveDigest: "b".repeat(64),
             },
-            startedAt: "2026-07-19T00:00:00.000Z",
-            targetLiveDigest: "b".repeat(64),
-          },
-        };
-      }
-      return name === "beta" ? { ...common, name: "beta", imageTag: "nemoclaw-beta:test" } : null;
+          }
+        : name === "beta"
+          ? { ...common, name: "beta", imageTag: "nemoclaw-beta:test" }
+          : null;
     });
     f.parseLiveSandboxNamesMock.mockReturnValue(new Set(["alpha", "beta"]));
     f.captureOpenshellMock.mockImplementation((args) =>
