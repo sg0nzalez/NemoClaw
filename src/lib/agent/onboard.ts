@@ -52,6 +52,13 @@ export function pinAgentSandboxBaseImageRef(
   return baseImage.pinAgentSandboxBaseImageRef(agentName, imageRef, options);
 }
 
+export function bindLocalAgentBaseImageToPinnedProvenance(
+  agent: AgentDefinition,
+  imageRef: string,
+): ReturnType<typeof baseImage.bindLocalAgentBaseImageToPinnedProvenance> {
+  return baseImage.bindLocalAgentBaseImageToPinnedProvenance(agent, imageRef);
+}
+
 export function hermesBaseImageSupportsMcp(imageRef: string): boolean {
   return baseImage.hermesBaseImageSupportsMcp(imageRef);
 }

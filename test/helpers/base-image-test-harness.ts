@@ -71,6 +71,7 @@ export function makeAgent(overrides: Partial<AgentDefinition> = {}): AgentDefini
 export function withMockedDocker<T>(
   run: (deps: {
     ensureAgentBaseImage: AgentOnboardModule["ensureAgentBaseImage"];
+    bindLocalAgentBaseImageToPinnedProvenance: AgentOnboardModule["bindLocalAgentBaseImageToPinnedProvenance"];
     pinAgentSandboxBaseImageRef: AgentOnboardModule["pinAgentSandboxBaseImageRef"];
     dockerBuildMock: ReturnType<typeof vi.fn>;
     dockerCaptureMock: ReturnType<typeof vi.fn>;
@@ -144,6 +145,8 @@ export function withMockedDocker<T>(
     const agentOnboardModule = requireSource("./onboard.js") as AgentOnboardModule;
     return run({
       ensureAgentBaseImage: agentOnboardModule.ensureAgentBaseImage,
+      bindLocalAgentBaseImageToPinnedProvenance:
+        agentOnboardModule.bindLocalAgentBaseImageToPinnedProvenance,
       pinAgentSandboxBaseImageRef: agentOnboardModule.pinAgentSandboxBaseImageRef,
       dockerBuildMock,
       dockerCaptureMock,

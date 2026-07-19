@@ -21,12 +21,15 @@ import {
   createSandboxBaseImageResolutionKey,
   createSandboxBaseImageResolutionMetadata,
   getImageGlibcVersion,
+  inspectLocalImageMetadata,
+  OPENSHELL_SANDBOX_MIN_GLIBC,
   type ResolveBaseImageOptions,
   resolveSandboxBaseImage,
   SANDBOX_BASE_TAG,
   type SandboxBaseImageResolution,
   SandboxBaseImageResolutionError,
   type SandboxBaseImageResolutionMetadata,
+  versionGte,
 } from "../sandbox-base-image";
 import { createDeepAgentsCodeBaseImageResolutionOptions } from "./deep-agents-code-base-image";
 import type { AgentDefinition } from "./defs";
@@ -219,6 +222,82 @@ function createAgentBaseImageResolutionOptions(
     preferPinnedRemoteRef: agent.name === "hermes" && pinnedRemoteRef !== undefined,
     ...validationOptions,
   };
+}
+
+/**
+ * Bind a local Hermes alias to the tracked official base only when Docker
+ * proves both refs name the same immutable image. This narrow rebuild helper
+ * does not change the resolver's rule that arbitrary local overrides have no
+ * inherited remote provenance.
+ */
+export function bindLocalAgentBaseImageToPinnedProvenance(
+  agent: AgentDefinition,
+  imageRef: string,
+): SandboxBaseImageResolutionMetadata | null {
+  const dockerfilePath = agent.dockerfileBasePath;
+  const pinnedRemoteRef = getHermesPinnedRemoteBaseRef(agent);
+  if (!dockerfilePath || !pinnedRemoteRef) return null;
+
+  const local = inspectLocalImageMetadata(imageRef);
+  const pinned = inspectLocalImageMetadata(pinnedRemoteRef);
+  const localId = typeof local?.Id === "string" ? local.Id : "";
+  const pinnedId = typeof pinned?.Id === "string" ? pinned.Id : "";
+  const localOs = typeof local?.Os === "string" ? local.Os : "";
+  const pinnedOs = typeof pinned?.Os === "string" ? pinned.Os : "";
+  const localArchitecture = typeof local?.Architecture === "string" ? local.Architecture : "";
+  const pinnedArchitecture = typeof pinned?.Architecture === "string" ? pinned.Architecture : "";
+  const localRepoDigests = Array.isArray(local?.RepoDigests) ? local.RepoDigests.map(String) : [];
+  const pinnedRepoDigests = Array.isArray(pinned?.RepoDigests)
+    ? pinned.RepoDigests.map(String)
+    : [];
+  const resolvedRemoteRef = pinnedRepoDigests.find((ref) =>
+    HERMES_OFFICIAL_BASE_DIGEST_REF.test(ref),
+  );
+  if (
+    !localId ||
+    localId !== pinnedId ||
+    !localOs ||
+    localOs !== pinnedOs ||
+    !localArchitecture ||
+    localArchitecture !== pinnedArchitecture ||
+    !resolvedRemoteRef ||
+    !localRepoDigests.includes(resolvedRemoteRef)
+  ) {
+    return null;
+  }
+
+  const canonicalEnv = { ...process.env };
+  delete canonicalEnv[getAgentSandboxBaseImageEnvVar(agent.name)];
+  const resolutionOptions = {
+    ...createAgentBaseImageResolutionOptions(agent, dockerfilePath, {}),
+    env: canonicalEnv,
+  };
+  const glibcVersion = getImageGlibcVersion(imageRef);
+  const minGlibcVersion = resolutionOptions.minGlibcVersion || OPENSHELL_SANDBOX_MIN_GLIBC;
+  if (
+    resolutionOptions.requireOpenshellSandboxAbi === true &&
+    (!glibcVersion || !versionGte(glibcVersion, minGlibcVersion))
+  ) {
+    return null;
+  }
+  if (resolutionOptions.validateImage && !resolutionOptions.validateImage(imageRef)) return null;
+  const digest = resolvedRemoteRef.slice(resolvedRemoteRef.indexOf("@") + 1);
+  const metadata = createSandboxBaseImageResolutionMetadata(
+    resolutionOptions,
+    createSandboxBaseImageResolutionKey(resolutionOptions),
+    {
+      ref: resolvedRemoteRef,
+      digest,
+      source: "pinned",
+      pinnedRemoteRef,
+      glibcVersion,
+    },
+  );
+  return metadata?.imageId === localId &&
+    metadata.os === localOs &&
+    metadata.architecture === localArchitecture
+    ? metadata
+    : null;
 }
 
 function createLocalResolutionMetadata(
