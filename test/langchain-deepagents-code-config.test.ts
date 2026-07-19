@@ -42,7 +42,7 @@ function runGeneratorProcess(
         ...process.env,
         HOME: home,
         NEMOCLAW_MODEL: "nvidia/nemotron-3-super-120b-a12b",
-        NEMOCLAW_PROVIDER_KEY: "inference",
+        NEMOCLAW_INFERENCE_PROVIDER_ID: "inference",
         NEMOCLAW_UPSTREAM_PROVIDER: "nvidia-prod",
         NEMOCLAW_INFERENCE_BASE_URL: "https://inference.local/v1",
         NEMOCLAW_INFERENCE_API: "openai-completions",
@@ -195,7 +195,7 @@ describe("LangChain Deep Agents Code config generator", () => {
   });
 
   it.each([
-    ["NEMOCLAW_PROVIDER_KEY", "inference\n[update]\nauto_update = true"],
+    ["NEMOCLAW_INFERENCE_PROVIDER_ID", "inference\n[update]\nauto_update = true"],
     ["NEMOCLAW_UPSTREAM_PROVIDER", "nvidia-prod\r[update]\nauto_update = true"],
     ["NEMOCLAW_INFERENCE_API", "openai-completions\n[update]\nauto_update = true"],
   ])("rejects control characters in %s before writing config", (envName, value) => {
@@ -237,7 +237,7 @@ describe("LangChain Deep Agents Code config generator", () => {
     // patched Dockerfile ARG -> ENV -> generate-config chain at image build.
     const config = runGenerator({
       NEMOCLAW_MODEL: "nvidia/nvidia/nemotron-3-super-v3",
-      NEMOCLAW_PROVIDER_KEY: route.providerKey,
+      NEMOCLAW_INFERENCE_PROVIDER_ID: route.providerKey,
       NEMOCLAW_UPSTREAM_PROVIDER: "compatible-anthropic-endpoint",
       NEMOCLAW_INFERENCE_BASE_URL: route.inferenceBaseUrl,
       NEMOCLAW_INFERENCE_API: route.inferenceApi,

@@ -2395,11 +2395,13 @@ write_auth_profile() {
     return
   fi
 
-  # Read the provider key from the NEMOCLAW_PROVIDER_KEY env var (exported at
-  # Dockerfile:99 from the build-time ARG). This avoids parsing openclaw.json
-  # and ensures the auth profile matches the provider key in the model config.
+  # Read the route identifier from the NEMOCLAW_INFERENCE_PROVIDER_ID env var
+  # (exported from the build-time ARG). This avoids parsing openclaw.json and
+  # ensures the auth profile matches the route identifier in the model config.
+  # NEMOCLAW_PROVIDER_KEY is the legacy image-variable name, read as a fallback
+  # for one release so pre-existing custom images keep routing.
   # See: https://github.com/NVIDIA/NemoClaw/issues/1332
-  local provider_key="${NEMOCLAW_PROVIDER_KEY:-inference}"
+  local provider_key="${NEMOCLAW_INFERENCE_PROVIDER_ID:-${NEMOCLAW_PROVIDER_KEY:-inference}}"
 
   python3 - "$provider_key" <<'PYAUTH'
 import json

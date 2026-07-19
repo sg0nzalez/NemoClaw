@@ -262,10 +262,12 @@ RUN mv /usr/local/bin/hermes /usr/local/bin/hermes.real \
 
 # Build args for config that varies per deployment.
 ARG NEMOCLAW_MODEL=nvidia/nemotron-3-super-120b-a12b
-ARG NEMOCLAW_PROVIDER_KEY=custom
+# Non-secret managed inference route identifier ("inference" for proxied
+# providers, or a provider family such as "openai"). Never a credential.
+ARG NEMOCLAW_INFERENCE_PROVIDER_ID=custom
 # User-selected upstream provider name (nvidia-prod, hermes-provider, ...).
-# Distinct from NEMOCLAW_PROVIDER_KEY, which carries the managed route key
-# ("inference" for proxied providers) needed at routing/runtime.
+# Distinct from NEMOCLAW_INFERENCE_PROVIDER_ID, which carries the managed route
+# identifier ("inference" for proxied providers) needed at routing/runtime.
 ARG NEMOCLAW_UPSTREAM_PROVIDER=custom
 ARG NEMOCLAW_INFERENCE_BASE_URL=https://inference.local/v1
 ARG NEMOCLAW_INFERENCE_API=openai-completions
@@ -298,7 +300,7 @@ ARG NEMOCLAW_CONTEXT_WINDOW=
 # NEMOCLAW_MESSAGING_PLAN_B64 intentionally remains ARG-only: Docker exposes it
 # to build RUN processes without retaining the full plan in the final image env.
 ENV NEMOCLAW_MODEL=${NEMOCLAW_MODEL} \
-    NEMOCLAW_PROVIDER_KEY=${NEMOCLAW_PROVIDER_KEY} \
+    NEMOCLAW_INFERENCE_PROVIDER_ID=${NEMOCLAW_INFERENCE_PROVIDER_ID} \
     NEMOCLAW_UPSTREAM_PROVIDER=${NEMOCLAW_UPSTREAM_PROVIDER} \
     NEMOCLAW_INFERENCE_BASE_URL=${NEMOCLAW_INFERENCE_BASE_URL} \
     NEMOCLAW_INFERENCE_API=${NEMOCLAW_INFERENCE_API} \
