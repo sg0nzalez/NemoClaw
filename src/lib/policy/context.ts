@@ -67,7 +67,13 @@ export interface PolicyContextApprovalPath {
   documentation: string;
 }
 
-export type PolicyContextExclusionStatus = "excluded" | "content-changed" | "no-longer-in-baseline";
+export type PolicyContextExclusionStatus =
+  | "excluded"
+  | "content-changed"
+  | "no-longer-in-baseline"
+  | "baseline-unreadable"
+  | "pending-exclude-repair"
+  | "pending-restore-repair";
 
 export interface PolicyContextExclusion {
   key: string;
@@ -81,6 +87,8 @@ export interface PolicyContextExclusion {
    * exclusion applies again.
    * `no-longer-in-baseline` — the current baseline no longer defines this
    * key; the exclusion record is inert until restored or replaced.
+   * `pending-*-repair` — the live mutation was interrupted; its durable
+   * journal blocks rebuild until the exact policy command reconciles it.
    */
   status: PolicyContextExclusionStatus;
   supportImpact: string;
@@ -190,26 +198,61 @@ function partitionPresets(
   return { active, unapplied };
 }
 
-function buildBaselineExclusions(sandboxName: string): PolicyContextExclusion[] {
-  return registry
-    .getBaselineExclusions(sandboxName)
-    .map((exclusion) => {
-      const currentDigest = getSandboxBaselineEntryDigest(sandboxName, exclusion.key);
+function buildBaselineExclusions(
+  sandboxName: string,
+  transition: registry.BaselineExclusionTransition | null,
+): PolicyContextExclusion[] {
+  const pendingKey = transition?.exclusion.key ?? null;
+  const byKey = new Map<string, PolicyContextExclusion>(
+    registry.getBaselineExclusions(sandboxName).map((exclusion) => {
+      // Pending repair state is self-describing and must survive an unreadable
+      // release baseline. The explicit retry performs baseline validation.
+      let currentDigest: string | null | undefined;
+      if (exclusion.key === pendingKey) {
+        currentDigest = null;
+      } else {
+        try {
+          currentDigest = getSandboxBaselineEntryDigest(sandboxName, exclusion.key);
+        } catch {
+          currentDigest = undefined;
+        }
+      }
       const status: PolicyContextExclusionStatus =
-        currentDigest === null
-          ? "no-longer-in-baseline"
-          : currentDigest === exclusion.digest
-            ? "excluded"
-            : "content-changed";
-      return {
-        key: exclusion.key,
-        digest: exclusion.digest,
-        acknowledgedAt: exclusion.acknowledgedAt ?? null,
-        status,
-        supportImpact: BASELINE_EXCLUSION_SUPPORT_IMPACT,
-      };
-    })
-    .sort((a, b) => a.key.localeCompare(b.key));
+        exclusion.key === pendingKey
+          ? transition?.operation === "exclude"
+            ? "pending-exclude-repair"
+            : "pending-restore-repair"
+          : currentDigest === undefined
+            ? "baseline-unreadable"
+            : currentDigest === null
+              ? "no-longer-in-baseline"
+              : currentDigest === exclusion.digest
+                ? "excluded"
+                : "content-changed";
+      return [
+        exclusion.key,
+        {
+          key: exclusion.key,
+          digest: exclusion.digest,
+          acknowledgedAt: exclusion.acknowledgedAt ?? null,
+          status,
+          supportImpact: BASELINE_EXCLUSION_SUPPORT_IMPACT,
+        },
+      ] as const;
+    }),
+  );
+  if (transition) {
+    const exclusion = transition.exclusion;
+    byKey.set(exclusion.key, {
+      key: exclusion.key,
+      digest: exclusion.digest,
+      acknowledgedAt: exclusion.acknowledgedAt ?? null,
+      status:
+        transition.operation === "exclude" ? "pending-exclude-repair" : "pending-restore-repair",
+      supportImpact: BASELINE_EXCLUSION_SUPPORT_IMPACT,
+    });
+  }
+  return [...byKey.values()].sort((a, b) => a.key.localeCompare(b.key));
 }
 
 function buildApprovalPath(sandboxName: string): PolicyContextApprovalPath {
@@ -338,7 +381,10 @@ export function buildPolicyContext(
     tier,
     activePresets: active.sort((a, b) => a.name.localeCompare(b.name)),
     knownUnappliedPresets: unapplied.sort((a, b) => a.name.localeCompare(b.name)),
-    baselineExclusions: buildBaselineExclusions(sandboxName),
+    baselineExclusions: buildBaselineExclusions(
+      sandboxName,
+      sandbox?.baselineExclusionTransition ?? null,
+    ),
     approvalPath: buildApprovalPath(sandboxName),
     supportBoundaries: buildSupportBoundaries(tier),
     generatedAt: new Date().toISOString(),
@@ -366,6 +412,12 @@ function exclusionStatusTag(status: PolicyContextExclusionStatus): string {
       return "content-changed (release redefined this entry; rebuild requires re-approval)";
     case "no-longer-in-baseline":
       return "no-longer-in-baseline (record is inert)";
+    case "baseline-unreadable":
+      return "baseline-unreadable (current release scope could not be inspected)";
+    case "pending-exclude-repair":
+      return "repair-required (exclude transaction was interrupted; rebuild blocked)";
+    case "pending-restore-repair":
+      return "repair-required (restore transaction was interrupted; rebuild blocked)";
   }
 }
 

@@ -146,6 +146,27 @@ describe("showSandboxStatus flow", () => {
     expect(output).toContain("policy restore <key>");
   });
 
+  it("reports interrupted baseline policy repair and the exact reconciliation command (#7178)", async () => {
+    const harness = createStatusFlowHarness({
+      sandboxEntry: {
+        baselineExclusionTransition: {
+          id: "tx-1",
+          operation: "restore",
+          exclusion: { key: "nous_research", digest: "digest" },
+          targetLiveDigest: "current-digest",
+          startedAt: "2026-07-19T00:00:00.000Z",
+        },
+      },
+    });
+
+    await expect(harness.showSandboxStatus("alpha")).resolves.toBeUndefined();
+
+    const output = harness.logSpy.mock.calls.flat().join("\n");
+    expect(output).toContain("Baseline policy repair required: interrupted restore");
+    expect(output).toContain("rebuild blocked");
+    expect(output).toContain("nemoclaw alpha policy restore nous_research");
+  });
+
   it("omits serving-process status when the gateway is unavailable (#7003)", async () => {
     const harness = createStatusFlowHarness({
       lookupState: "missing",

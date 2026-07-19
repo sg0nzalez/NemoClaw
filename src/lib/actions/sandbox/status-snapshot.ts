@@ -167,6 +167,11 @@ export interface SandboxStatusReport {
   policies: string[];
   /** Baseline network policy keys the operator has excluded, replayed on rebuild. */
   baselineExclusions: string[];
+  /** Interrupted cross-system policy mutation that must be reconciled before rebuild. */
+  baselineExclusionTransition: {
+    operation: registry.BaselineExclusionTransitionOperation;
+    key: string;
+  } | null;
   failureLayer: SandboxStatusFailureLayer | null;
   terminalRuntimeHealth: TerminalRuntimeOomProbeResult | null;
   /**
@@ -468,6 +473,12 @@ async function buildSandboxStatusReport(
       ? sb.policies.filter((policy): policy is string => typeof policy === "string")
       : [];
   const baselineExclusions = sb?.baselineExclusions?.map((exclusion) => exclusion.key) ?? [];
+  const baselineExclusionTransition = sb?.baselineExclusionTransition
+    ? {
+        operation: sb.baselineExclusionTransition.operation,
+        key: sb.baselineExclusionTransition.exclusion.key,
+      }
+    : null;
   const agent = resolveSandboxStatusAgent(sb?.agent || "openclaw");
   return {
     schemaVersion: 1,
@@ -500,6 +511,7 @@ async function buildSandboxStatusReport(
     openshellVersion: (sb && sb.openshellVersion) || "unknown",
     policies,
     baselineExclusions,
+    baselineExclusionTransition,
     failureLayer: effectivePreflight.failureLayer,
     terminalRuntimeHealth,
     dockerPaused: !!dockerRuntime?.paused,

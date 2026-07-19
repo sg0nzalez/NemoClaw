@@ -306,18 +306,44 @@ export function listSandboxPolicies(sandboxName: string) {
   });
 
   const exclusions = registry.getBaselineExclusions(sandboxName);
-  if (exclusions.length > 0) {
+  const exclusionTransition = registry.getBaselineExclusionTransition(sandboxName);
+  if (exclusions.length > 0 || exclusionTransition) {
     console.log("");
     console.log("  Baseline exclusions (unsupported egress removed):");
-    for (const exclusion of exclusions) {
-      const currentDigest = policies.getSandboxBaselineEntryDigest(sandboxName, exclusion.key);
-      const status =
-        currentDigest === null
-          ? `${YW}baseline entry removed — restore to clear${R}`
-          : currentDigest === exclusion.digest
-            ? "active"
-            : `${YW}baseline changed — re-review required${R}`;
+    const listed = new Map(exclusions.map((exclusion) => [exclusion.key, exclusion]));
+    if (exclusionTransition) {
+      listed.set(exclusionTransition.exclusion.key, exclusionTransition.exclusion);
+    }
+    for (const exclusion of listed.values()) {
+      const isPending = exclusionTransition?.exclusion.key === exclusion.key;
+      // A repair command must remain visible even if the current agent
+      // baseline cannot be loaded. Resolving that baseline is part of the
+      // explicit retry, not a prerequisite for displaying the journal.
+      let currentDigest: string | null | undefined;
+      if (isPending) {
+        currentDigest = null;
+      } else {
+        try {
+          currentDigest = policies.getSandboxBaselineEntryDigest(sandboxName, exclusion.key);
+        } catch {
+          currentDigest = undefined;
+        }
+      }
+      const status = isPending
+        ? `${YW}repair required — interrupted ${exclusionTransition.operation}; rebuild blocked${R}`
+        : currentDigest === undefined
+          ? `${YW}release baseline unreadable — inspection required${R}`
+          : currentDigest === null
+            ? `${YW}baseline entry removed — restore to clear${R}`
+            : currentDigest === exclusion.digest
+              ? "active"
+              : `${YW}baseline changed — re-review required${R}`;
       console.log(`    - ${exclusion.key} (${status})`);
+      if (isPending) {
+        console.log(
+          `      Re-run: ${CLI_NAME} ${sandboxName} policy ${exclusionTransition.operation} ${exclusion.key}`,
+        );
+      }
     }
   }
 

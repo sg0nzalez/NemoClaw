@@ -393,15 +393,41 @@ function baselineExclusionCheckFields(
 }
 
 function baselineExclusionDoctorChecks(sandboxName: string): DoctorCheck[] {
-  return registry.getBaselineExclusions(sandboxName).map((exclusion) => {
-    const currentDigest = getSandboxBaselineEntryDigest(sandboxName, exclusion.key);
+  const transition = registry.getBaselineExclusionTransition(sandboxName);
+  const checks: DoctorCheck[] = [];
+  for (const exclusion of registry.getBaselineExclusions(sandboxName)) {
+    if (transition?.exclusion.key === exclusion.key) continue;
+    let currentDigest: string | null;
+    try {
+      currentDigest = getSandboxBaselineEntryDigest(sandboxName, exclusion.key);
+    } catch {
+      checks.push({
+        group: "Sandbox",
+        label: `Baseline exclusion: ${exclusion.key}`,
+        status: "warn",
+        detail: "Current release baseline is unreadable; exclusion scope could not be verified.",
+        hint: `inspect \`${CLI_NAME} ${sandboxName} policy list\` before rebuilding`,
+      });
+      continue;
+    }
     const driftState = baselineExclusionDriftState(currentDigest, exclusion.digest);
-    return {
+    checks.push({
       group: "Sandbox",
       label: `Baseline exclusion: ${exclusion.key}`,
       ...baselineExclusionCheckFields(sandboxName, exclusion.key, driftState),
-    };
-  });
+    });
+  }
+  if (transition) {
+    const key = transition.exclusion.key;
+    checks.push({
+      group: "Sandbox",
+      label: `Baseline exclusion: ${key}`,
+      status: "warn",
+      detail: `Baseline policy ${transition.operation} for '${key}' was interrupted; rebuild is blocked until live and durable state are reconciled.`,
+      hint: `re-run \`${CLI_NAME} ${sandboxName} policy ${transition.operation} ${key}\``,
+    });
+  }
+  return checks;
 }
 
 function collectRegisteredSandboxChecks(

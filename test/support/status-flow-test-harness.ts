@@ -12,6 +12,7 @@ import type {
   ServingProcessHealth,
 } from "../../src/lib/actions/sandbox/status-snapshot";
 import type { ProviderHealthStatus } from "../../src/lib/inference/health";
+import type { BaselineExclusionTransition } from "../../src/lib/state/registry";
 
 type ShowSandboxStatus = typeof import("../../src/lib/actions/sandbox/status")["showSandboxStatus"];
 
@@ -68,6 +69,7 @@ export type StatusFlowHarnessOptions = {
     agentVersion?: string | null;
     dcodeAutoApprovalMode?: "disabled" | "thread-opt-in";
     baselineExclusions?: Array<{ key: string; digest: string }>;
+    baselineExclusionTransition?: BaselineExclusionTransition;
   };
   shieldsPosture?: {
     mode: "locked" | "mutable_default" | "mutable";

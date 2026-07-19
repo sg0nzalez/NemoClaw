@@ -300,6 +300,94 @@ describe("buildPolicyContext", () => {
       },
     ]);
   });
+
+  it("surfaces an interrupted live-policy transaction as repair-required (#7178)", () => {
+    resetMocks();
+    mockBuiltinPresets();
+    vi.mocked(getTier).mockReturnValue(null);
+    vi.mocked(registry.getSandbox).mockReturnValue({
+      name: SANDBOX,
+      policies: [],
+      baselineExclusionTransition: {
+        id: "tx-1",
+        operation: "exclude",
+        exclusion: {
+          key: "nous_research",
+          digest: "digest-1",
+          acknowledgedAt: "2026-07-19T00:00:00.000Z",
+        },
+        targetLiveDigest: null,
+        startedAt: "2026-07-19T00:00:00.000Z",
+      },
+    });
+
+    const ctx = buildPolicyContext(SANDBOX);
+
+    expect(ctx.baselineExclusions).toEqual([
+      expect.objectContaining({
+        key: "nous_research",
+        status: "pending-exclude-repair",
+      }),
+    ]);
+    const markdown = renderPolicyContextMarkdown(ctx);
+    expect(markdown).toContain("repair-required");
+    expect(markdown).toContain("exclude transaction was interrupted");
+    expect(markdown).toContain("rebuild blocked");
+  });
+
+  it.each([
+    "exclude",
+    "restore",
+  ] as const)("surfaces pending %s repair even when the release baseline is unreadable (#7194)", (operation) => {
+    resetMocks();
+    mockBuiltinPresets();
+    vi.mocked(getTier).mockReturnValue(null);
+    vi.mocked(registry.getBaselineExclusions).mockReturnValue([
+      {
+        key: "another_entry",
+        digest: "c".repeat(64),
+        acknowledgedAt: "2026-07-18T00:00:00.000Z",
+      },
+      {
+        key: "nous_research",
+        digest: "a".repeat(64),
+        acknowledgedAt: "2026-07-19T00:00:00.000Z",
+      },
+    ]);
+    vi.mocked(registry.getSandbox).mockReturnValue({
+      name: SANDBOX,
+      policies: [],
+      baselineExclusionTransition: {
+        id: "00000000-0000-4000-8000-000000000001",
+        operation,
+        exclusion: {
+          key: "nous_research",
+          digest: "a".repeat(64),
+          acknowledgedAt: "2026-07-19T00:00:00.000Z",
+        },
+        targetLiveDigest: operation === "restore" ? "b".repeat(64) : null,
+        startedAt: "2026-07-19T00:00:00.000Z",
+      },
+    });
+    vi.mocked(policies.getSandboxBaselineEntryDigest).mockImplementation(() => {
+      throw new Error("release baseline unavailable");
+    });
+
+    const ctx = buildPolicyContext(SANDBOX);
+
+    expect(ctx.baselineExclusions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: "another_entry", status: "baseline-unreadable" }),
+        expect.objectContaining({
+          key: "nous_research",
+          status: operation === "exclude" ? "pending-exclude-repair" : "pending-restore-repair",
+        }),
+      ]),
+    );
+    expect(ctx.baselineExclusions).toHaveLength(2);
+    expect(policies.getSandboxBaselineEntryDigest).toHaveBeenCalledOnce();
+    expect(policies.getSandboxBaselineEntryDigest).toHaveBeenCalledWith(SANDBOX, "another_entry");
+  });
 });
 
 describe("renderPolicyContextMarkdown", () => {

@@ -20,6 +20,7 @@ function createDoctorHarness(): {
   configuredMessagingChannelsSpy: MockInstance;
   executeSandboxCommandForVerificationSpy: MockInstance;
   getBaselineExclusionsSpy: MockInstance;
+  getBaselineExclusionTransitionSpy: MockInstance;
   getSandboxBaselineEntryDigestSpy: MockInstance;
   getSandboxSpy: MockInstance;
   getNamedGatewayLifecycleStateSpy: MockInstance;
@@ -73,6 +74,9 @@ function createDoctorHarness(): {
     .mockReturnValue([]);
   vi.spyOn(registry, "getDisabledMessagingChannelsFromEntry").mockReturnValue([]);
   const getBaselineExclusionsSpy = vi.spyOn(registry, "getBaselineExclusions").mockReturnValue([]);
+  const getBaselineExclusionTransitionSpy = vi
+    .spyOn(registry, "getBaselineExclusionTransition")
+    .mockReturnValue(null);
   const getSandboxBaselineEntryDigestSpy = vi
     .spyOn(policy, "getSandboxBaselineEntryDigest")
     .mockReturnValue(null);
@@ -205,6 +209,7 @@ function createDoctorHarness(): {
     configuredMessagingChannelsSpy,
     executeSandboxCommandForVerificationSpy,
     getBaselineExclusionsSpy,
+    getBaselineExclusionTransitionSpy,
     getSandboxBaselineEntryDigestSpy,
     getSandboxSpy,
     getNamedGatewayLifecycleStateSpy,
@@ -329,6 +334,66 @@ describe("runSandboxDoctor flow", () => {
       );
     },
   );
+
+  it("flags an interrupted baseline transaction as a rebuild-blocking repair (#7178)", async () => {
+    const harness = createDoctorHarness();
+    harness.getBaselineExclusionTransitionSpy.mockReturnValue({
+      id: "tx-1",
+      operation: "restore",
+      exclusion: { key: "nous_research", digest: "approved" },
+      targetLiveDigest: "current",
+      startedAt: "2026-07-19T00:00:00.000Z",
+    });
+
+    const report = await harness.runSandboxDoctor("alpha", ["--json"], { quietJson: true });
+
+    expect(report?.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          group: "Sandbox",
+          label: "Baseline exclusion: nous_research",
+          status: "warn",
+          detail: expect.stringContaining("interrupted"),
+          hint: "re-run `nemoclaw alpha policy restore nous_research`",
+        }),
+      ]),
+    );
+  });
+
+  it("keeps repair guidance visible when another exclusion baseline is unreadable (#7194)", async () => {
+    const harness = createDoctorHarness();
+    harness.getBaselineExclusionsSpy.mockReturnValue([
+      { key: "another_entry", digest: "c".repeat(64) },
+      { key: "nous_research", digest: "a".repeat(64) },
+    ]);
+    harness.getBaselineExclusionTransitionSpy.mockReturnValue({
+      id: "0b2f3297-a9ab-4c2f-80da-bf1760a1afbf",
+      operation: "restore",
+      exclusion: { key: "nous_research", digest: "a".repeat(64) },
+      targetLiveDigest: "b".repeat(64),
+      startedAt: "2026-07-19T00:00:00.000Z",
+    });
+    harness.getSandboxBaselineEntryDigestSpy.mockImplementation(() => {
+      throw new Error("release baseline unavailable");
+    });
+
+    const report = await harness.runSandboxDoctor("alpha", ["--json"], { quietJson: true });
+
+    expect(report?.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: "Baseline exclusion: another_entry",
+          status: "warn",
+          detail: expect.stringContaining("unreadable"),
+        }),
+        expect.objectContaining({
+          label: "Baseline exclusion: nous_research",
+          status: "warn",
+          detail: expect.stringContaining("interrupted"),
+        }),
+      ]),
+    );
+  });
 
   it.each([
     "openclaw",

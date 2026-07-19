@@ -321,6 +321,15 @@ export function printSandboxDetails(context: SandboxStatusTextContext): SandboxS
       `      Review or restore with \`${CLI_NAME} ${sandboxName} policy list\` or \`${CLI_NAME} ${sandboxName} policy restore <key>\`.`,
     );
   }
+  if (sb.baselineExclusionTransition) {
+    const transition = sb.baselineExclusionTransition;
+    console.log(
+      `    Baseline policy repair required: interrupted ${transition.operation} for ${transition.exclusion.key} (rebuild blocked)`,
+    );
+    console.log(
+      `      Re-run \`${CLI_NAME} ${sandboxName} policy ${transition.operation} ${transition.exclusion.key}\` to reconcile live and durable state.`,
+    );
+  }
   const agentExitCode = printAgentHarness(context);
   printActiveSessions(sandboxName);
   printShieldsPosture(sandboxName);
