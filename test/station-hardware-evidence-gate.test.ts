@@ -387,6 +387,7 @@ describe("Station hardware evidence workflow boundary", () => {
     });
     const setupNode = workflow.jobs["station-hardware-evidence"].steps[1];
     expect(setupNode.uses).toMatch(/^actions\/setup-node@[0-9a-f]{40}$/u);
+    expect(setupNode.with).toMatchObject({ "node-version": "22.19.0" });
     const revalidation = workflow.jobs["revalidate-edited-comment"];
     expect(revalidation.if).toContain("github.event.issue.pull_request != null");
     expect(revalidation.permissions).toEqual({
@@ -401,6 +402,7 @@ describe("Station hardware evidence workflow boundary", () => {
       ref: "${{ github.workflow_sha }}",
     });
     expect(revalidation.steps[1].uses).toMatch(/^actions\/setup-node@[0-9a-f]{40}$/u);
+    expect(revalidation.steps[1].with).toMatchObject({ "node-version": "22.19.0" });
     expect(revalidation.steps[2].env).toMatchObject({
       PR_NUMBER: "${{ github.event.issue.number }}",
       PUBLISH_HEAD_CHECK: "true",
