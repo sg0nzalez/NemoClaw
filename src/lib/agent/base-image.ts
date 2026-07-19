@@ -77,13 +77,18 @@ export function pinAgentSandboxBaseImageRef(
   if (imageRef.includes("@sha256:") && options.forceLocal !== true) return imageRef;
   const imageId = dockerImageInspectFormat("{{.Id}}", imageRef, { ignoreError: true });
   const pinnedRef = immutableLocalBaseImageTag(agentName, imageId);
-  if (imageRef === pinnedRef) return pinnedRef;
-  const tagResult = dockerTag(imageRef, pinnedRef, { ignoreError: true });
+  // Tag the inspected immutable object, not the caller's potentially mutable
+  // name. Otherwise the source tag could move between inspect and tag.
+  const tagResult = dockerTag(imageId, pinnedRef, { ignoreError: true });
   if (tagResult.error || tagResult.status !== 0) {
     const detail = tagResult.error
       ? `: ${tagResult.error.message}`
       : ` (exit ${tagResult.status ?? "unknown"})`;
     throw new Error(`Failed to pin ${agentName} base image${detail}`);
+  }
+  const pinnedImageId = dockerImageInspectFormat("{{.Id}}", pinnedRef, { ignoreError: true });
+  if (pinnedImageId !== imageId) {
+    throw new Error(`Pinned ${agentName} base image did not retain its inspected image ID`);
   }
   return pinnedRef;
 }

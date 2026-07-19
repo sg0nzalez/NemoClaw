@@ -180,11 +180,9 @@ describe("agent base image provisioning", () => {
           expect.stringMatching(/^nemoclaw-hermes-sandbox-base-local:build-\d+-[0-9a-f]{16}$/),
           { ignoreError: true },
         );
-        expect(dockerTagMock).toHaveBeenCalledWith(
-          expect.stringMatching(/^nemoclaw-hermes-sandbox-base-local:build-\d+-[0-9a-f]{16}$/),
-          result.imageTag,
-          { ignoreError: true },
-        );
+        expect(dockerTagMock).toHaveBeenCalledWith(`sha256:${"a".repeat(64)}`, result.imageTag, {
+          ignoreError: true,
+        });
         expect(dockerRmiMock).toHaveBeenCalledWith(
           expect.stringMatching(/^nemoclaw-hermes-sandbox-base-local:build-\d+-[0-9a-f]{16}$/),
           { ignoreError: true, suppressOutput: true },
@@ -250,10 +248,15 @@ describe("agent base image provisioning", () => {
   it("pins different image IDs to different recreate refs at the same source revision", () => {
     withMockedDocker(
       ({ ensureAgentBaseImage, dockerImageInspectFormatMock, resolveSandboxBaseImageMock }) => {
-        dockerImageInspectFormatMock
-          .mockReturnValueOnce(`sha256:${"a".repeat(64)}`)
-          .mockReturnValueOnce("")
-          .mockReturnValueOnce(`sha256:${"b".repeat(64)}`);
+        const inspectedIds = [
+          `sha256:${"a".repeat(64)}`,
+          `sha256:${"a".repeat(64)}`,
+          `sha256:${"b".repeat(64)}`,
+          `sha256:${"b".repeat(64)}`,
+        ];
+        dockerImageInspectFormatMock.mockImplementation((format: string) =>
+          format === "{{.Id}}" ? (inspectedIds.shift() ?? "") : "",
+        );
         resolveSandboxBaseImageMock.mockImplementation((options) => ({
           ref: options.env?.[options.envVar],
           digest: null,
@@ -281,11 +284,9 @@ describe("agent base image provisioning", () => {
         );
 
         expect(pinned).toBe(`nemoclaw-hermes-sandbox-base-local:image-${"c".repeat(64)}`);
-        expect(dockerTagMock).toHaveBeenCalledWith(
-          "nemoclaw-hermes-sandbox-base-local:caller",
-          pinned,
-          { ignoreError: true },
-        );
+        expect(dockerTagMock).toHaveBeenCalledWith(`sha256:${"c".repeat(64)}`, pinned, {
+          ignoreError: true,
+        });
       },
     );
   });
@@ -299,7 +300,9 @@ describe("agent base image provisioning", () => {
         const pinned = pinAgentSandboxBaseImageRef("hermes", remoteRef, { forceLocal: true });
 
         expect(pinned).toBe(`nemoclaw-hermes-sandbox-base-local:image-${"c".repeat(64)}`);
-        expect(dockerTagMock).toHaveBeenCalledWith(remoteRef, pinned, { ignoreError: true });
+        expect(dockerTagMock).toHaveBeenCalledWith(`sha256:${"c".repeat(64)}`, pinned, {
+          ignoreError: true,
+        });
       },
     );
   });
@@ -313,8 +316,22 @@ describe("agent base image provisioning", () => {
         const pinned = pinAgentSandboxBaseImageRef("hermes", claimed);
 
         expect(pinned).toBe(`nemoclaw-hermes-sandbox-base-local:image-${"d".repeat(64)}`);
-        expect(dockerTagMock).toHaveBeenCalledWith(claimed, pinned, { ignoreError: true });
+        expect(dockerTagMock).toHaveBeenCalledWith(`sha256:${"d".repeat(64)}`, pinned, {
+          ignoreError: true,
+        });
       },
     );
+  });
+
+  it("fails closed when the immutable handoff does not retain the inspected image ID", () => {
+    withMockedDocker(({ pinAgentSandboxBaseImageRef, dockerImageInspectFormatMock }) => {
+      dockerImageInspectFormatMock
+        .mockReturnValueOnce(`sha256:${"a".repeat(64)}`)
+        .mockReturnValueOnce(`sha256:${"b".repeat(64)}`);
+
+      expect(() =>
+        pinAgentSandboxBaseImageRef("hermes", "nemoclaw-hermes-sandbox-base-local:caller"),
+      ).toThrow("Pinned hermes base image did not retain its inspected image ID");
+    });
   });
 });
