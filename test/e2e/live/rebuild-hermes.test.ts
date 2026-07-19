@@ -70,6 +70,7 @@ SANDBOX_NAME.startsWith(TEST_SANDBOX_PREFIX) ||
 
 const MARKER_FILE = "/sandbox/.hermes/memories/rebuild-marker.txt";
 const MARKER_CONTENT = `REBUILD_HM_E2E_${Date.now()}`;
+const KANBAN_FILE = "/sandbox/.hermes/kanban.db";
 const KANBAN_TASK_TITLE = `NEMOCLAW_REBUILD_KANBAN_${Date.now()}`;
 const EXCLUDED_KANBAN_FILE = "/sandbox/.hermes/kanban/excluded-rebuild-marker.txt";
 const DISCORD_PLACEHOLDER = "openshell:resolve:env:DISCORD_BOT_TOKEN";
@@ -85,6 +86,18 @@ const HOSTED_MODEL =
   "nvidia/nvidia/nemotron-3-ultra";
 const OLD_BASE_TAG = `nemoclaw-hermes-old-base:${SANDBOX_NAME.toLowerCase().replace(/[^a-z0-9_.-]+/g, "-")}`;
 const CURRENT_BASE_REUSE_TAG = `nemoclaw-hermes-sandbox-base-local:e2e-current-${SANDBOX_NAME.toLowerCase().replace(/[^a-z0-9_.-]+/g, "-")}`;
+
+const KANBAN_TASK_PROBE = [
+  "import json, sqlite3, sys",
+  "db_path, expected = sys.argv[1:]",
+  "db = sqlite3.connect(f'file:{db_path}?mode=ro', uri=True)",
+  "try:",
+  "    titles = [row[0] for row in db.execute('SELECT title FROM tasks ORDER BY title')]",
+  "finally:",
+  "    db.close()",
+  "print(json.dumps(titles))",
+  "raise SystemExit(0 if expected in titles else 4)",
+].join("\n");
 
 const ONBOARD_TIMEOUT_MS = 60 * 60_000;
 const DOCKER_PULL_TIMEOUT_MS = 20 * 60_000;
@@ -885,6 +898,30 @@ test(STALE_BASE_REBUILD
   });
 
   progress.phase("phase 4 seed rebuild state");
+  const seededKanban = await host.command(
+    "openshell",
+    [
+      "sandbox",
+      "exec",
+      "--name",
+      SANDBOX_NAME,
+      "--",
+      "/usr/bin/python3",
+      "-c",
+      KANBAN_TASK_PROBE,
+      KANBAN_FILE,
+      KANBAN_TASK_TITLE,
+    ],
+    {
+      artifactName: "phase-4-verify-seeded-kanban",
+      env: testEnv(apiKey),
+      redactionValues,
+      timeoutMs: OPENSHELL_TIMEOUT_MS,
+    },
+  );
+  expectExitZero(seededKanban, "verify historical Hermes kanban seed before rebuild");
+  expect(resultText(seededKanban)).toContain(KANBAN_TASK_TITLE);
+
   const writeMarker = await host.command(
     "openshell",
     [
@@ -1065,6 +1102,30 @@ test(STALE_BASE_REBUILD
     expectedVersion,
     `Hermes version output did not include expected release ${expectedVersion}: ${hermesVersionText}`,
   );
+
+  const restoredKanbanDatabase = await host.command(
+    "openshell",
+    [
+      "sandbox",
+      "exec",
+      "--name",
+      SANDBOX_NAME,
+      "--",
+      "/usr/bin/python3",
+      "-c",
+      KANBAN_TASK_PROBE,
+      KANBAN_FILE,
+      KANBAN_TASK_TITLE,
+    ],
+    {
+      artifactName: "phase-7-verify-restored-kanban-database",
+      env: testEnv(apiKey),
+      redactionValues,
+      timeoutMs: OPENSHELL_TIMEOUT_MS,
+    },
+  );
+  expectExitZero(restoredKanbanDatabase, "verify restored Hermes kanban database");
+  expect(resultText(restoredKanbanDatabase)).toContain(KANBAN_TASK_TITLE);
 
   const restoredKanban = await host.command(
     "openshell",
