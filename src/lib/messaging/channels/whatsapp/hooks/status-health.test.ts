@@ -376,6 +376,16 @@ describe("whatsapp.statusHealth openclaw CLI probe", () => {
     expect(report?.verdict).toBe("probe_failed");
   });
 
+  it("reports probe_failed when the sandbox exec runner throws", () => {
+    const exec = vi.fn(() => {
+      throw new Error("sandbox exec unavailable");
+    });
+    const report = reportOf(
+      createWhatsappStatusHealthHook({ executeSandboxCommand: exec })(context()),
+    );
+    expect(report?.verdict).toBe("probe_failed");
+  });
+
   it("invokes the openclaw CLI with the JSON + timeout flags", () => {
     const exec = makeExec({ status: 0, stdout: openclawJson(HEALTHY_WA), stderr: "" });
     createWhatsappStatusHealthHook({ executeSandboxCommand: exec, timeoutMs: 4500 })(context());

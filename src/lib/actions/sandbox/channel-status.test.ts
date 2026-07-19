@@ -140,6 +140,27 @@ describe("showSandboxChannelStatus (whatsapp)", () => {
     expect(threw?.message).toBe("process.exit(1)");
   });
 
+  it("returns probe_failed when the openclaw status command throws", async () => {
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
+      throw new Error(`process.exit(${code})`);
+    }) as never);
+    const { deps, out_lines } = makeDeps({
+      exec: () => {
+        throw new Error("sandbox exec unavailable");
+      },
+    });
+    let threw: Error | null = null;
+    try {
+      await showSandboxChannelStatus("alpha", { deps, channel: "whatsapp" });
+    } catch (err) {
+      threw = err as Error;
+    } finally {
+      exitSpy.mockRestore();
+    }
+    expect(threw?.message).toBe("process.exit(1)");
+    expect(out_lines.join("\n")).toMatch(/Verdict:.*probe_failed/);
+  });
+
   it("returns probe_failed when openshell exec returns null (timeout)", async () => {
     const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
       throw new Error(`process.exit(${code})`);

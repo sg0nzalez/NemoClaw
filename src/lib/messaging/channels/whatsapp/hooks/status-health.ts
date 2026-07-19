@@ -161,7 +161,12 @@ function runOpenclawStatusProbe(
   timeoutMs: number,
 ): ProbeResult {
   const command = `openclaw channels status --channel whatsapp --json --timeout ${timeoutMs}`;
-  const exec = execute(sandboxName, command, timeoutMs);
+  let exec: ReturnType<typeof execute>;
+  try {
+    exec = execute(sandboxName, command, timeoutMs);
+  } catch {
+    return PROBE_UNREACHABLE;
+  }
   // A non-zero exec (timeout/kill/unhealthy sandbox) can still carry partial
   // stdout; require a clean exit before trusting the probe. Otherwise a
   // stalled openclaw invocation could yield unparseable JSON that reads as a
