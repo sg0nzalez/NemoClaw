@@ -372,7 +372,7 @@ describe("Station hardware evidence workflow boundary", () => {
       "reopened",
       "ready_for_review",
     ]);
-    expect(workflow.on.issue_comment.types).toEqual(["edited", "deleted"]);
+    expect(workflow.on.issue_comment.types).toEqual(["created", "edited", "deleted"]);
     expect(workflow.permissions).toEqual({});
     expect(workflow.jobs["station-hardware-evidence"].permissions).toEqual({
       contents: "read",
@@ -388,7 +388,8 @@ describe("Station hardware evidence workflow boundary", () => {
     const setupNode = workflow.jobs["station-hardware-evidence"].steps[1];
     expect(setupNode.uses).toMatch(/^actions\/setup-node@[0-9a-f]{40}$/u);
     expect(setupNode.with).toMatchObject({ "node-version": "22.19.0" });
-    const revalidation = workflow.jobs["revalidate-edited-comment"];
+    const revalidation = workflow.jobs["revalidate-comment"];
+    expect(revalidation.if).toContain("github.event_name == 'issue_comment'");
     expect(revalidation.if).toContain("github.event.issue.pull_request != null");
     expect(revalidation.permissions).toEqual({
       checks: "write",

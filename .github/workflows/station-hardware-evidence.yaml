@@ -9,7 +9,7 @@ on:
   pull_request_target:
     types: [opened, edited, synchronize, reopened, ready_for_review]
   issue_comment:
-    types: [edited, deleted]
+    types: [created, edited, deleted]
 
 permissions: {}
 
@@ -45,8 +45,8 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: node --experimental-strip-types tools/station-hardware-evidence/gate.mts
 
-  revalidate-edited-comment:
-    name: Revalidate edited Station evidence comment
+  revalidate-comment:
+    name: Revalidate Station evidence comment
     if: ${{ github.event_name == 'issue_comment' && github.repository == 'NVIDIA/NemoClaw' && github.event.issue.pull_request != null }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
