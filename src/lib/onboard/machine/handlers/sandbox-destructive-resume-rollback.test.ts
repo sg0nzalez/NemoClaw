@@ -86,7 +86,8 @@ describe("handleSandboxState destructive resume rollback (#7194)", () => {
       event: string | symbol,
       listener: (...args: unknown[]) => void,
     ) => {
-      if (event === "exit") exitListener = listener as (code: number) => void;
+      expect(event).toBe("exit");
+      exitListener = listener as (code: number) => void;
       return process;
     }) as typeof process.once);
     const processRemoveListener = vi
