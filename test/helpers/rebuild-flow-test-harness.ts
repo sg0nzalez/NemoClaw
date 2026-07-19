@@ -384,6 +384,14 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
       const argv = Array.isArray(args) ? args.map(String) : [];
       return overrides.runOpenshell ? overrides.runOpenshell(argv) : { status: 0, output: "" };
     });
+  const captureOpenshellSpy = vi
+    .spyOn(openshellRuntime, "captureOpenshell")
+    .mockImplementation((args: unknown, options?: unknown) => {
+      const argv = Array.isArray(args) ? args.map(String) : [];
+      return overrides.captureOpenshell
+        ? overrides.captureOpenshell(argv, options as Record<string, unknown> | undefined)
+        : { status: 1, output: "", stderr: "Not Found: sandbox not found" };
+    });
   const defaultRemovalReceipt = {
     entry: preDeleteSandboxEntry,
     wasDefault: preDeleteDefaultSandbox === "alpha",
@@ -541,6 +549,7 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
     releaseOnboardLockSpy,
     relockSpy,
     restoreSandboxStateSpy,
+    captureOpenshellSpy,
     runOpenshellSpy,
     messagingRebuildPlanSpy,
     prepareMcpBridgesForAbsentSandboxRebuildSpy,

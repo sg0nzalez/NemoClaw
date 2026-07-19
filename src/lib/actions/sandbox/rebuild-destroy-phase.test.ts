@@ -20,7 +20,7 @@ vi.mock("./rebuild-mcp-phase", async (importOriginal) => ({
   reattachMcpAfterDeleteFailure: mocks.reattachMcpAfterDeleteFailure,
 }));
 
-import { runRebuildDestroyPhase } from "./rebuild-destroy-phase";
+import { runRebuildDestroyPhase, waitForRebuildDeleteAbsence } from "./rebuild-destroy-phase";
 
 describe("rebuild destroy validation diagnostics", () => {
   beforeEach(() => {
@@ -69,5 +69,37 @@ describe("rebuild destroy validation diagnostics", () => {
     expect(diagnostics).not.toContain(secret);
     expect(mocks.reattachMcpAfterDeleteFailure).toHaveBeenCalledOnce();
     expect(relockShieldsIfNeeded).toHaveBeenCalledWith(true);
+  });
+
+  it("bounds delete convergence without treating timeout or gateway errors as absence (#7194)", () => {
+    let currentMs = 0;
+    let attempts = 0;
+    const timeout = Object.assign(new Error("sandbox get timed out"), { code: "ETIMEDOUT" });
+    const probeFailures = [
+      { status: null, error: timeout },
+      { status: 1, stderr: "gateway transport unavailable" },
+      { status: 1, stderr: 'status: NotFound, message: "gateway not found"' },
+    ];
+    const captureSandboxGet = vi.fn(() => {
+      const failure = probeFailures[attempts % probeFailures.length];
+      attempts += 1;
+      return failure;
+    });
+    const sleep = vi.fn((milliseconds: number) => {
+      currentMs += milliseconds;
+    });
+
+    expect(
+      waitForRebuildDeleteAbsence("alpha", vi.fn(), {
+        captureSandboxGet,
+        now: () => currentMs,
+        sleep,
+      }),
+    ).toBe(false);
+
+    expect(captureSandboxGet.mock.calls.length).toBeGreaterThan(1);
+    expect(captureSandboxGet.mock.calls.length).toBeLessThanOrEqual(20);
+    expect(sleep).toHaveBeenCalled();
+    expect(currentMs).toBeLessThanOrEqual(15_000);
   });
 });
