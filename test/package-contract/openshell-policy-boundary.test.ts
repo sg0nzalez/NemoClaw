@@ -198,7 +198,7 @@ describe("OpenShell policy boundary package contract", () => {
     try {
       const packed = spawnSync(
         "npm",
-        ["pack", "--json", "--ignore-scripts", "--pack-destination", tempDir],
+        ["pack", "--ignore-scripts", "--silent", "--pack-destination", tempDir],
         {
           cwd: repoRoot,
           encoding: "utf8",
@@ -206,17 +206,19 @@ describe("OpenShell policy boundary package contract", () => {
         },
       );
       expect(packed.status, `${packed.stdout}${packed.stderr}`).toBe(0);
-      const report = JSON.parse(packed.stdout) as Array<{
-        filename: string;
-        files?: Array<{ path?: string }>;
-      }>;
-      const packedPaths = new Set((report[0]?.files ?? []).map((entry) => entry.path));
-      expect(packedPaths).toContain("schemas/sandbox-policy.schema.json");
-      expect(packedPaths).toContain("dist/lib/policy/sandbox-policy-validation.js");
-
-      const archivePath = path.join(tempDir, path.basename(report[0]!.filename));
+      const archives = fs.readdirSync(tempDir).filter((entry) => entry.endsWith(".tgz"));
+      expect(archives).toHaveLength(1);
+      const archivePath = path.join(tempDir, archives[0]!);
       execFileSync("tar", ["-xzf", archivePath, "-C", tempDir]);
       const installedRoot = path.join(tempDir, "package");
+      expect(fs.existsSync(path.join(installedRoot, "schemas", "sandbox-policy.schema.json"))).toBe(
+        true,
+      );
+      expect(
+        fs.existsSync(
+          path.join(installedRoot, "dist", "lib", "policy", "sandbox-policy-validation.js"),
+        ),
+      ).toBe(true);
       const installedNodeModules = path.join(installedRoot, "node_modules");
       for (const dependency of [
         "ajv",
