@@ -9,6 +9,7 @@ import type { GatewayReuseState } from "../../../state/gateway";
 import { createSession, type Session } from "../../../state/onboard-session";
 import { flushTrace, resetTraceForTests, TRACE_FILE_ENV, type TraceArtifact } from "../../../trace";
 import type { GatewayContainerState } from "../../gateway-container-running";
+import { createGatewayReuseHelpers } from "../../gateway-reuse";
 import { ONBOARD_TRACE_PHASE_NAMES } from "../../tracing";
 import { type GatewayStateOptions, handleGatewayState } from "./gateway";
 
@@ -132,6 +133,36 @@ describe("handleGatewayState", () => {
       updates: undefined,
       metadata: { state: "gateway", gatewayReuseState: "missing" },
     });
+  });
+
+  it("starts the gateway when stderr-only status marks the selected gateway stale (#7087)", async () => {
+    const statusOutput = [
+      "Server Status",
+      "",
+      "Gateway: nemoclaw",
+      "Error: Connection refused",
+    ].join("\n");
+    const gatewayReuseSnapshot = createGatewayReuseHelpers({
+      gatewayName: "nemoclaw",
+      runCaptureOpenshell: vi.fn((args: string[], opts?: Record<string, unknown>) =>
+        args[0] === "status" && opts?.includeStderr === true ? statusOutput : "",
+      ),
+      runOpenshell: vi.fn(() => ({ status: 0 })),
+      cliDisplayName: () => "NemoClaw",
+    }).getGatewayReuseSnapshot();
+    const { deps, calls } = createDeps();
+
+    const result = await handleGatewayState(
+      baseOptions(deps, gatewayReuseSnapshot.gatewayReuseState),
+    );
+
+    expect(gatewayReuseSnapshot.gatewayReuseState).toBe("stale");
+    expect(calls.skipped).not.toHaveBeenCalled();
+    expect(calls.recordSkip).not.toHaveBeenCalled();
+    expect(calls.startStep).toHaveBeenCalledWith("gateway");
+    expect(calls.startGateway).toHaveBeenCalledWith({ type: "nvidia" }, { gpuPassthrough: true });
+    expect(calls.retireLegacy).not.toHaveBeenCalled();
+    expect(result.gatewayReuseState).toBe("stale");
   });
 
   it("reuses healthy gateways on fresh runs", async () => {

@@ -25,6 +25,11 @@ type RunnerOptions = SpawnSyncOptions & {
 
 type CaptureOptions = Omit<SpawnSyncOptionsWithStringEncoding, "encoding"> & {
   ignoreError?: boolean;
+  /**
+   * Append captured stderr to the returned stdout. This opt-in output is raw
+   * and unredacted; callers must not log it without applying redaction first.
+   */
+  includeStderr?: boolean;
 };
 
 type SpawnResult = SpawnSyncReturns<string | Buffer>;
@@ -242,17 +247,29 @@ function runFile(
 /**
  * Run a program directly with argv-style arguments and capture trimmed stdout.
  * Throws a redacted error on failure, or returns '' when opts.ignoreError is true.
+ * When opts.includeStderr is true, the returned stderr is raw and unredacted;
+ * callers must not log the combined output without applying redaction first.
  *
  * Shell-string capture is intentionally unsupported. If you truly need shell
  * parsing, spell it out explicitly at the call site (for example
  * ["sh", "-c", script]) so reviews and static checks can see the boundary.
  */
+function capturedRunCaptureOutput(
+  result: SpawnSyncReturns<string>,
+  includeStderr: boolean,
+): string {
+  const stdout = (result.stdout || "").trim();
+  if (!includeStderr) return stdout;
+  const stderr = (result.stderr || "").trim();
+  return [stdout, stderr].filter(Boolean).join("\n").trim();
+}
+
 function runCapture(cmd: readonly string[], opts: CaptureOptions = {}): string {
   if (!Array.isArray(cmd)) {
     throw new Error("runCapture no longer accepts shell strings; pass an argv array instead");
   }
   const [exe, args] = normalizeArgv(cmd, "runCapture");
-  const { ignoreError, env: extraEnv, stdio: _stdio, ...spawnOpts } = opts;
+  const { ignoreError, includeStderr, env: extraEnv, stdio: _stdio, ...spawnOpts } = opts;
 
   // Guard: re-enabling shell interpretation defeats the purpose of argv arrays.
   if (spawnOpts.shell) {
@@ -276,16 +293,17 @@ function runCapture(cmd: readonly string[], opts: CaptureOptions = {}): string {
 
     // Check result.error first — spawnSync sets this (with status === null) when
     // the executable is missing (ENOENT), the call times out, or the spawn fails.
+    const output = capturedRunCaptureOutput(result, includeStderr === true);
     if (result.error) {
-      if (ignoreError) return "";
+      if (ignoreError) return output;
       throw result.error;
     }
     if (result.status !== 0) {
-      if (ignoreError) return "";
+      if (ignoreError) return output;
       throw new Error(`Command failed with status ${result.status}`);
     }
 
-    return (result.stdout || "").trim();
+    return output;
   } catch (err) {
     if (ignoreError) return "";
     throw redactError(err);

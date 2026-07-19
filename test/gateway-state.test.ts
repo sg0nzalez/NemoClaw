@@ -50,6 +50,14 @@ const STATUS_SERVER_STATUS_REFUSED_ANSI = `\x1b[1mServer Status\x1b[0m
 \x1b[31mError: Connection refused (os error 61)\x1b[0m
 `;
 
+const STATUS_SERVER_STATUS_AUTH_ERROR = `
+Server Status
+
+Gateway: nemoclaw
+Server: https://127.0.0.1:8080/
+Error: authentication failed
+`;
+
 const GW_INFO_BASE = `
 Gateway Info
 
@@ -161,6 +169,10 @@ describe("isGatewayConnected", () => {
 
   it("does not treat ANSI-wrapped Server Status refusals as connected", () => {
     expect(isGatewayConnected(STATUS_SERVER_STATUS_REFUSED_ANSI)).toBe(false);
+  });
+
+  it("does not treat non-connection status errors as connected", () => {
+    expect(isGatewayConnected(STATUS_SERVER_STATUS_AUTH_ERROR)).toBe(false);
   });
 
   it("returns false for empty string", () => {
@@ -290,6 +302,43 @@ describe("getGatewayReuseState", () => {
   it("returns 'stale' when named gateway exists but status reports connection refused", () => {
     expect(getGatewayReuseState(STATUS_SERVER_STATUS_REFUSED, GW_INFO_NAMED, GW_INFO_ACTIVE)).toBe(
       "stale",
+    );
+  });
+
+  it("returns 'stale' when selected gateway status is refused but gateway info is unavailable (#7087)", () => {
+    expect(getGatewayReuseState(STATUS_SERVER_STATUS_REFUSED_ANSI, "", "")).toBe("stale");
+  });
+
+  it("does not classify selected-gateway non-connection errors as stale", () => {
+    expect(getGatewayReuseState(STATUS_SERVER_STATUS_AUTH_ERROR, "", "")).toBe("missing");
+  });
+
+  it.each([
+    ["authentication", "Error: authentication failed"],
+    ["configuration", "Error: invalid gateway configuration"],
+    ["TLS", "Error: transport error: invalid peer certificate: UnknownIssuer"],
+    ["CLI", "Error: unexpected argument '--gateway'"],
+  ])("keeps named active metadata non-stale for mixed stdout and %s stderr", (_kind, stderr) => {
+    const mixedStatusOutput = [STATUS_SERVER_STATUS_ONLY.trim(), stderr].join("\n");
+
+    expect(getGatewayReuseState(mixedStatusOutput, GW_INFO_NAMED, GW_INFO_ACTIVE)).toBe("missing");
+  });
+
+  it.each([
+    "transport error",
+    "Connection reset",
+    "Connection aborted",
+    "Connection closed",
+  ])("uses explicit status error evidence before treating %s as stale", (detail) => {
+    const errorOutput = [STATUS_SERVER_STATUS_ONLY.trim(), `Error: ${detail}`].join("\n");
+    const informationalOutput = [
+      STATUS_SERVER_STATUS_ONLY.trim(),
+      `Previous diagnostic: ${detail}`,
+    ].join("\n");
+
+    expect(getGatewayReuseState(errorOutput, GW_INFO_NAMED, GW_INFO_ACTIVE)).toBe("stale");
+    expect(getGatewayReuseState(informationalOutput, GW_INFO_NAMED, GW_INFO_ACTIVE)).toBe(
+      "healthy",
     );
   });
 
