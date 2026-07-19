@@ -325,6 +325,7 @@ describe("getGatewayReuseState", () => {
   });
 
   it.each([
+    "Connection refused",
     "transport error",
     "Connection reset",
     "Connection aborted",

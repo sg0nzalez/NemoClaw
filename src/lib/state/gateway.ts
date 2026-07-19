@@ -125,22 +125,17 @@ function hasGatewayConnectionError(output = ""): boolean {
   ) {
     return false;
   }
-  if (
-    /\bConnection refused\b/i.test(clean) ||
-    /\bNo active gateway\b/i.test(clean) ||
-    /\btcp connect error\b/i.test(clean) ||
-    /\berror trying to connect\b/i.test(clean) ||
-    /\bclient error\s*\(\s*Connect\s*\)/i.test(clean)
-  ) {
-    return true;
-  }
-
-  // These phrases can also appear in successful status details. Only treat
-  // them as lifecycle evidence when the status command emitted an actual
-  // error line (including stderr appended by runCapture).
+  // Connection phrases can also appear in successful status details. Only
+  // treat them as lifecycle evidence when the status command emitted an
+  // actual error line (including stderr appended by runCapture).
   return (
     statusError.length > 0 &&
-    (/\btransport error\b/i.test(statusError) ||
+    (/\bConnection refused\b/i.test(statusError) ||
+      /\bNo active gateway\b/i.test(statusError) ||
+      /\btcp connect error\b/i.test(statusError) ||
+      /\berror trying to connect\b/i.test(statusError) ||
+      /\bclient error\s*\(\s*Connect\s*\)/i.test(statusError) ||
+      /\btransport error\b/i.test(statusError) ||
       /\bConnection (?:reset|aborted|closed)\b/i.test(statusError))
   );
 }
