@@ -7,7 +7,12 @@ import { inferenceSelectionRegistryFields } from "../inference/selection";
 import { type WebSearchConfig, webSearchProviderForConfig } from "../inference/web-search";
 import * as onboardSession from "../state/onboard-session";
 import type { OpenClawImagePluginInstall } from "../state/openclaw-plugin-restore";
-import type { SandboxEntry, SandboxMcpState, SandboxMessagingState } from "../state/registry";
+import type {
+  BaselineExclusionEntry,
+  SandboxEntry,
+  SandboxMcpState,
+  SandboxMessagingState,
+} from "../state/registry";
 import * as registry from "../state/registry";
 import { DEFAULT_TOOL_DISCLOSURE, type ToolDisclosure } from "../tool-disclosure";
 import type { DcodeAutoApprovalMode } from "./dcode-auto-approval";
@@ -42,6 +47,7 @@ export interface CreatedSandboxRegistryEntryInput {
   observabilityEnabled?: boolean;
   dcodeAutoApprovalMode?: DcodeAutoApprovalMode;
   policyTier?: SandboxEntry["policyTier"];
+  baselineExclusions?: readonly BaselineExclusionEntry[];
   webSearchEnabled?: boolean;
   webSearchProvider?: SandboxEntry["webSearchProvider"];
   fromDockerfile?: string | null;
@@ -69,6 +75,7 @@ export function creationFidelity(
   fromDockerfile: string | null,
   hermesAuthMethod: "oauth" | "api_key" | null,
   dashboardRemoteBindPrepared?: boolean,
+  baselineExclusions?: readonly BaselineExclusionEntry[],
 ): Pick<
   SandboxEntry,
   | "webSearchEnabled"
@@ -76,6 +83,7 @@ export function creationFidelity(
   | "fromDockerfile"
   | "hermesAuthMethod"
   | "dashboardRemoteBindPrepared"
+  | "baselineExclusions"
 > {
   return {
     webSearchEnabled: webSearchConfig?.fetchEnabled === true,
@@ -83,7 +91,13 @@ export function creationFidelity(
     fromDockerfile,
     hermesAuthMethod,
     dashboardRemoteBindPrepared: dashboardRemoteBindPrepared === true,
+    baselineExclusions: baselineExclusions?.map((exclusion) => ({ ...exclusion })),
   };
+}
+
+/** Snapshot complete exclusion records before a destructive create removes registry state. */
+export function baselineExclusionsForCreate(sandboxName: string): BaselineExclusionEntry[] {
+  return registry.getBaselineExclusions(sandboxName).map((exclusion) => ({ ...exclusion }));
 }
 
 export function selection(
@@ -133,6 +147,7 @@ export function buildCreatedSandboxRegistryEntry(
         }
       : {}),
     policies: input.appliedPolicies,
+    baselineExclusions: input.baselineExclusions?.map((exclusion) => ({ ...exclusion })),
     toolDisclosure: input.toolDisclosure ?? DEFAULT_TOOL_DISCLOSURE,
     observabilityEnabled: input.observabilityEnabled === true,
     ...(input.dcodeAutoApprovalMode !== undefined

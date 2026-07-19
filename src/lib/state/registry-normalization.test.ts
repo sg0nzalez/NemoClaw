@@ -134,6 +134,14 @@ describe("baseline exclusion normalization (#7178)", () => {
     ]);
   });
 
+  it("preserves an explicitly unknown applied agent version", () => {
+    expect(
+      normalizeBaselineExclusions([
+        { key: "nous_research", digest: "abc", appliedAgentVersion: null },
+      ]),
+    ).toEqual([{ key: "nous_research", digest: "abc", appliedAgentVersion: null }]);
+  });
+
   it("drops malformed records missing a key or digest", () => {
     expect(
       normalizeBaselineExclusions([
@@ -168,12 +176,20 @@ describe("baseline exclusion registry helpers (#7178)", () => {
 
     expect(registry.getBaselineExclusions("alpha")).toEqual([]);
 
-    expect(registry.addBaselineExclusion("alpha", { key: "nous_research", digest: "d1" })).toBe(
-      true,
-    );
+    expect(
+      registry.addBaselineExclusion("alpha", {
+        key: "nous_research",
+        digest: "d1",
+        appliedAgentVersion: null,
+      }),
+    ).toBe(true);
     const stored = registry.getBaselineExclusions("alpha");
     expect(stored).toHaveLength(1);
-    expect(stored[0]).toMatchObject({ key: "nous_research", digest: "d1" });
+    expect(stored[0]).toMatchObject({
+      key: "nous_research",
+      digest: "d1",
+      appliedAgentVersion: null,
+    });
     expect(typeof stored[0].acknowledgedAt).toBe("string");
 
     expect(registry.removeBaselineExclusion("alpha", "nous_research")).toBe(true);

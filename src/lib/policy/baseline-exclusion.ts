@@ -55,6 +55,7 @@ export function digestBaselineEntry(entry: PolicyValue): string {
 export function getBaselineEntry(basePolicyContent: string, key: string): PolicyObject | null {
   const networkPolicies = parseNetworkPolicies(basePolicyContent);
   if (!networkPolicies) return null;
+  if (!Object.prototype.hasOwnProperty.call(networkPolicies, key)) return null;
   const entry = networkPolicies[key];
   return isPolicyObject(entry) ? entry : null;
 }
@@ -121,8 +122,9 @@ export function applyBaselineExclusions(
     const resolution = resolveBaselineExclusion(content, request);
     if (resolution.drift) throw new BaselineExclusionDriftError(request.key, resolution.drift);
     const removal = removeBaselineEntryFromPolicy(content, request.key);
+    if (!removal.removed) throw new BaselineExclusionDriftError(request.key, "missing");
     content = removal.policy;
-    if (removal.removed) excludedKeys.push(request.key);
+    excludedKeys.push(request.key);
   }
   return { content, excludedKeys };
 }

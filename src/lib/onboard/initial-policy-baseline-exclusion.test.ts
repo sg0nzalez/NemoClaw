@@ -46,8 +46,8 @@ function writeBasePolicy(): string {
 
 function digestOf(key: string): string {
   const entry = getBaselineEntry(BASE_POLICY, key);
-  if (!entry) throw new Error(`missing ${key}`);
-  return digestBaselineEntry(entry);
+  expect(entry).not.toBeNull();
+  return digestBaselineEntry(entry!);
 }
 
 afterEach(() => {

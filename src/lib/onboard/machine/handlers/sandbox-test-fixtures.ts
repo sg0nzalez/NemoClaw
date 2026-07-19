@@ -128,6 +128,12 @@ export function createDeps(
         sandboxName: string;
         extraProviders: readonly string[];
         staleExtraProviders: readonly string[];
+        baselineExclusions?: readonly {
+          key: string;
+          digest: string;
+          acknowledgedAt?: string;
+          appliedAgentVersion?: string | null;
+        }[];
       }) => ({
         sandboxName: input.sandboxName,
         activeMessagingChannels: [],
@@ -143,7 +149,8 @@ export function createDeps(
             directGpu: false,
             additionalPresets: [],
             policyTier: null,
-            baselineExclusions: [],
+            baselineExclusions:
+              input.baselineExclusions?.map((exclusion) => ({ ...exclusion })) ?? [],
           },
         },
         gpuCreateArgs: [],

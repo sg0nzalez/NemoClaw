@@ -41,30 +41,30 @@ network_policies:
 
 function digestOf(key: string, policy = BASE_POLICY): string {
   const entry = getBaselineEntry(policy, key);
-  if (!entry) throw new Error(`missing ${key}`);
-  return digestBaselineEntry(entry);
+  expect(entry).not.toBeNull();
+  return digestBaselineEntry(entry!);
 }
 
 describe("baseline-exclusion digest (#7178)", () => {
   it("is stable across key ordering and whitespace", () => {
     const entry = getBaselineEntry(BASE_POLICY, "nous_research");
-    if (!entry) throw new Error("missing entry");
+    expect(entry).not.toBeNull();
     const reordered = YAML.parse(
       YAML.stringify({
-        binaries: entry.binaries,
-        endpoints: entry.endpoints,
-        name: entry.name,
+        binaries: entry!.binaries,
+        endpoints: entry!.endpoints,
+        name: entry!.name,
       }),
     );
-    expect(digestBaselineEntry(reordered)).toBe(digestBaselineEntry(entry));
+    expect(digestBaselineEntry(reordered)).toBe(digestBaselineEntry(entry!));
   });
 
   it("changes when the entry content changes", () => {
     const entry = getBaselineEntry(BASE_POLICY, "nous_research");
-    if (!entry) throw new Error("missing entry");
-    const widened = YAML.parse(YAML.stringify(entry));
+    expect(entry).not.toBeNull();
+    const widened = YAML.parse(YAML.stringify(entry!));
     (widened.endpoints as { host: string }[]).push({ host: "evil.example" });
-    expect(digestBaselineEntry(widened)).not.toBe(digestBaselineEntry(entry));
+    expect(digestBaselineEntry(widened)).not.toBe(digestBaselineEntry(entry!));
   });
 });
 
@@ -75,6 +75,10 @@ describe("baseline-exclusion enumeration (#7178)", () => {
 
   it("returns null for an absent key", () => {
     expect(getBaselineEntry(BASE_POLICY, "absent")).toBeNull();
+  });
+
+  it("does not treat inherited object properties as baseline keys", () => {
+    expect(getBaselineEntry(BASE_POLICY, "__proto__")).toBeNull();
   });
 });
 
@@ -108,8 +112,8 @@ describe("baseline-exclusion drift resolution (#7178)", () => {
 describe("baseline-exclusion scope render (#7178)", () => {
   it("previews host, method/path rules, and binaries", () => {
     const entry = getBaselineEntry(BASE_POLICY, "nous_research");
-    if (!entry) throw new Error("missing entry");
-    const lines = renderBaselineEntryScope("nous_research", entry).join("\n");
+    expect(entry).not.toBeNull();
+    const lines = renderBaselineEntryScope("nous_research", entry!).join("\n");
     expect(lines).toContain("nous_research");
     expect(lines).toContain("nousresearch.com:443");
     expect(lines).toContain("GET /**");
@@ -134,9 +138,9 @@ describe("baseline-exclusion policy edits (#7178)", () => {
 
   it("merges a baseline entry back under its key", () => {
     const entry = getBaselineEntry(BASE_POLICY, "nous_research");
-    if (!entry) throw new Error("missing entry");
+    expect(entry).not.toBeNull();
     const { policy: removedPolicy } = removeBaselineEntryFromPolicy(BASE_POLICY, "nous_research");
-    const restored = mergeBaselineEntryIntoPolicy(removedPolicy, "nous_research", entry);
+    const restored = mergeBaselineEntryIntoPolicy(removedPolicy, "nous_research", entry!);
     expect(Object.keys(YAML.parse(restored).network_policies).sort()).toEqual([
       "managed_inference",
       "nous_research",

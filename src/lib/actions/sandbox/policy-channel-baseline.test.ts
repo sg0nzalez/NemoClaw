@@ -53,8 +53,8 @@ async function captureExit(action: () => Promise<void>): Promise<number | undefi
   try {
     await action();
   } catch (error) {
-    if (error instanceof ExitError) return error.code;
-    throw error;
+    expect(error).toBeInstanceOf(ExitError);
+    return (error as ExitError).code;
   }
   throw new Error("Expected process.exit to be called");
 }

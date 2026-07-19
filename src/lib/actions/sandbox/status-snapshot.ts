@@ -467,9 +467,7 @@ async function buildSandboxStatusReport(
     sb && Array.isArray(sb.policies)
       ? sb.policies.filter((policy): policy is string => typeof policy === "string")
       : [];
-  const baselineExclusions = sb
-    ? registry.getBaselineExclusions(sandboxName).map((exclusion) => exclusion.key)
-    : [];
+  const baselineExclusions = sb?.baselineExclusions?.map((exclusion) => exclusion.key) ?? [];
   const agent = resolveSandboxStatusAgent(sb?.agent || "openclaw");
   return {
     schemaVersion: 1,

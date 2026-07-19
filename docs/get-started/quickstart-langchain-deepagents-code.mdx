@@ -273,9 +273,9 @@ The policy preset is a per-sandbox managed-Python opt-in, but provider registrat
 
 ```bash
 # Preview the endpoints the preset opens:
-nemo-deepagents <sandbox-name> policy-add tavily --dry-run
+nemo-deepagents <sandbox-name> policy add tavily --dry-run
 # Apply it:
-nemo-deepagents <sandbox-name> policy-add tavily --yes
+nemo-deepagents <sandbox-name> policy add tavily --yes
 # Export the key on the host (NemoClaw reads it from the current shell):
 export TAVILY_API_KEY=tvly-...
 # Register the provider with the gateway:
@@ -295,7 +295,7 @@ Because OpenShell attributes the harness's calls to the sandbox `python3` interp
 Remove the target sandbox's managed-Python opt-in when it is no longer needed.
 
 ```bash
-nemo-deepagents <sandbox-name> policy-remove tavily --yes
+nemo-deepagents <sandbox-name> policy remove tavily --yes
 ```
 
 This does not unregister the gateway-wide `tavily-search` provider; its credential and Node/curl routes remain available to sandboxes that attach it.
@@ -391,14 +391,14 @@ On an existing sandbox, skip mode leaves the current live policy unchanged.
 Inspect the effective policy first.
 
 ```bash
-nemo-deepagents "$SANDBOX_NAME" policy-list
+nemo-deepagents "$SANDBOX_NAME" policy list
 ```
 
 If `observability-otlp-local` is not active, preview and apply it.
 
 ```bash
-nemo-deepagents "$SANDBOX_NAME" policy-add observability-otlp-local --dry-run
-nemo-deepagents "$SANDBOX_NAME" policy-add observability-otlp-local --yes
+nemo-deepagents "$SANDBOX_NAME" policy add observability-otlp-local --dry-run
+nemo-deepagents "$SANDBOX_NAME" policy add observability-otlp-local --yes
 ```
 
 The preset permits only `POST /v1/traces` to `host.openshell.internal:4318` from `/opt/venv/bin/python3*`.
@@ -646,7 +646,7 @@ This does not change the recorded observability choice.
 A later rebuild restores the matching preset on Balanced and Open tiers, while Restricted continues to suppress it.
 
 ```bash
-nemo-deepagents "$SANDBOX_NAME" policy-remove observability-otlp-local --yes
+nemo-deepagents "$SANDBOX_NAME" policy remove observability-otlp-local --yes
 ```
 
 To disable instrumentation persistently, use the transactional rebuild negative flag.
@@ -674,7 +674,7 @@ For additional collector diagnostics, refer to [Troubleshooting the OpenTelemetr
 | --- | --- |
 | Collector exits at startup | Run the validation command again, then inspect `docker logs nemoclaw-otel-langsmith`. Confirm that the image is the Contrib `0.155.0` image and that all four `LANGSMITH_*` variables were set when the container was created. |
 | Port `4318` is already allocated | Run `ss -ltnp 'sport = :4318'` and stop the conflicting listener. The managed sandbox endpoint is fixed, so changing the collector port does not work. |
-| Collector is healthy but logs no trace count | Run `policy-list` and add `observability-otlp-local` if it is absent. Confirm that `docker port` shows the current `$OTLP_BIND_IP`. Run `nemo-deepagents <sandbox> rebuild --observability --yes` if the existing sandbox was originally started without the opt-in. |
+| Collector is healthy but logs no trace count | Run `policy list` and add `observability-otlp-local` if it is absent. Confirm that `docker port` shows the current `$OTLP_BIND_IP`. Run `nemo-deepagents <sandbox> rebuild --observability --yes` if the existing sandbox was originally started without the opt-in. |
 | Collector logs `401` | Replace an invalid or expired LangSmith API key, then recreate the collector container. |
 | Collector logs `403` | Confirm the service key can write to the target workspace and that `LANGSMITH_WORKSPACE_ID` matches that workspace. Organization-scoped service keys require `X-Tenant-Id`. |
 | Collector logs `404` | Confirm that `LANGSMITH_OTLP_TRACES_ENDPOINT` uses the correct US, EU, GCP-hosted APAC, AWS-hosted US, or self-hosted API base and ends in `/otel/v1/traces`. |

@@ -865,10 +865,22 @@ function excludeBaselineEntry(
     console.error(`  Could not read current policy for sandbox '${sandboxName}'.`);
     return false;
   }
+  const liveEntry = getBaselineEntry(currentPolicy, key);
+  if (liveEntry && digestBaselineEntry(liveEntry) !== digest) {
+    console.error(
+      `  Baseline entry '${key}' changed after preview. Re-run the command to review its current scope; no policy changes were made.`,
+    );
+    return false;
+  }
   const { policy: updated, removed } = removeBaselineEntryFromPolicy(currentPolicy, key);
   if (removed && !pushPolicyYaml(sandboxName, updated, options)) return false;
   const appliedAgentVersion = registry.getSandbox(sandboxName)?.agentVersion ?? null;
-  registry.addBaselineExclusion(sandboxName, { key, digest, appliedAgentVersion });
+  if (!registry.addBaselineExclusion(sandboxName, { key, digest, appliedAgentVersion })) {
+    console.error(
+      `  The live policy was updated, but the exclusion could not be recorded for '${sandboxName}'. Re-onboard the sandbox before rebuilding it.`,
+    );
+    return false;
+  }
   return true;
 }
 

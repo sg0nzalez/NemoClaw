@@ -2280,9 +2280,8 @@ async function createSandboxWithBaseImageResolution(
   enabledChannels = filterEnabledChannelsByAgent(enabledChannels, agent);
   const effectiveSandboxGpuConfig =
     sandboxGpuConfig ?? resolveSandboxGpuConfig(gpu, { flag: null, device: null });
-  const extraProviderPlan = createIntent?.extraProviders
-    ? { extraProviders: createIntent.extraProviders, staleExtraProviders: [] }
-    : planRegisteredExtraProviders(GATEWAY_NAME, { runOpenshell });
+  // biome-ignore format: keep src/lib/onboard.ts net-neutral for growth guardrail.
+  const extraProviderPlan = createIntent?.extraProviders ? { extraProviders: createIntent.extraProviders, staleExtraProviders: [] } : planRegisteredExtraProviders(GATEWAY_NAME, { runOpenshell });
   const resolvedCreateIntent =
     createIntent?.resolved ??
     (await sandboxCreateIntentResolver.resolve({
@@ -2295,9 +2294,7 @@ async function createSandboxWithBaseImageResolution(
       hermesToolGateways,
       extraProviders: extraProviderPlan.extraProviders,
       staleExtraProviders: extraProviderPlan.staleExtraProviders,
-      baselineExclusions: registry
-        .getBaselineExclusions(sandboxName)
-        .map((exclusion) => ({ key: exclusion.key, digest: exclusion.digest })),
+      baselineExclusions: sandboxRegistration.baselineExclusionsForCreate(sandboxName),
       ...(createIntent?.reuseRegisteredCredentials ? { reuseRegisteredCredentials: true } : {}),
       ...(createIntent?.policyTier !== undefined ? { policyTier: createIntent.policyTier } : {}),
     }));
@@ -2920,7 +2917,7 @@ async function createSandboxWithBaseImageResolution(
           ...(isManagedDcodeAgent ? { dcodeAutoApprovalMode: dcodeAutoApprovalPlan.mode } : {}),
           policyTier: resolvedCreatePolicyTier,
           // biome-ignore format: keep src/lib/onboard.ts net-neutral for growth guardrail.
-          ...sandboxRegistration.creationFidelity(webSearchConfig, fromDockerfile, normalizeHermesAuthMethod(hermesAuthMethod), dashboardRemoteBindPrepared),
+          ...sandboxRegistration.creationFidelity(webSearchConfig, fromDockerfile, normalizeHermesAuthMethod(hermesAuthMethod), dashboardRemoteBindPrepared, resolvedCreateIntent.policy.options.baselineExclusions),
           plannedMessagingState,
           preservedMcpState,
           hermesToolGateways,

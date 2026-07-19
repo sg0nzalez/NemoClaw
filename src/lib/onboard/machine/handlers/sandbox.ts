@@ -17,7 +17,6 @@ import {
   webSearchProviderForConfig,
 } from "../../../inference/web-search";
 import type { SandboxMessagingPlan } from "../../../messaging/manifest";
-import type { BaselineExclusionRequest } from "../../../policy/baseline-exclusion";
 import {
   decisionValue,
   isDecisionSelected,
@@ -36,7 +35,11 @@ import type {
   SessionResourceProfile,
   SessionUpdates,
 } from "../../../state/onboard-session";
-import { getBaselineExclusions, type SandboxEntry } from "../../../state/registry";
+import {
+  type BaselineExclusionEntry,
+  getBaselineExclusions,
+  type SandboxEntry,
+} from "../../../state/registry";
 import { getSandboxEntryInference } from "../../../state/registry-entry-view";
 import { toolDisclosureOrDefault } from "../../../tool-disclosure";
 import {
@@ -228,7 +231,7 @@ export interface SandboxStateOptions<
       extraProviders: readonly string[];
       staleExtraProviders: readonly string[];
       policyTier?: string | null;
-      baselineExclusions?: readonly BaselineExclusionRequest[];
+      baselineExclusions?: readonly BaselineExclusionEntry[];
       reuseRegisteredCredentials?: boolean;
     }): Promise<ResolvedSandboxCreateIntent>;
     createSandbox(
@@ -1125,10 +1128,7 @@ class SandboxStateFlow<
       hermesToolGateways,
       extraProviders,
       staleExtraProviders,
-      baselineExclusions: getBaselineExclusions(sandboxName).map((exclusion) => ({
-        key: exclusion.key,
-        digest: exclusion.digest,
-      })),
+      baselineExclusions: getBaselineExclusions(sandboxName).map((exclusion) => ({ ...exclusion })),
       ...(reuseRegisteredCredentials ? { reuseRegisteredCredentials: true } : {}),
       ...(this.options.authoritativePolicyTier !== undefined
         ? { policyTier: this.options.authoritativePolicyTier }

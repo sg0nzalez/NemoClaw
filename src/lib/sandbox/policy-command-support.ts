@@ -45,3 +45,5 @@ export const policyMutationFlags = {
   force: forceFlag(),
   "dry-run": dryRunFlag(),
 };
+
+export const policyBaselineRestoreFlags = { "dry-run": dryRunFlag() };

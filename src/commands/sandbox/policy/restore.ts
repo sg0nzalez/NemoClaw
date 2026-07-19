@@ -7,7 +7,7 @@ import { NemoClawCommand } from "../../../lib/cli/nemoclaw-oclif-command";
 import {
   commonPolicyOptions,
   policyBaselineArgs,
-  policyMutationFlags,
+  policyBaselineRestoreFlags,
 } from "../../../lib/sandbox/policy-command-support";
 
 export default class PolicyRestoreCommand extends NemoClawCommand {
@@ -22,7 +22,7 @@ export default class PolicyRestoreCommand extends NemoClawCommand {
     "<%= config.bin %> sandbox policy restore alpha nous_research --dry-run",
   ];
   static args = policyBaselineArgs;
-  static flags = policyMutationFlags;
+  static flags = policyBaselineRestoreFlags;
 
   public async run(): Promise<void> {
     const { args, flags } = await this.parse(PolicyRestoreCommand);

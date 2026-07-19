@@ -537,6 +537,7 @@ export function registerSandbox(entry: SandboxEntry): void {
       openshellDriver: entry.openshellDriver || null,
       openshellVersion: entry.openshellVersion || null,
       policies: entry.policies || [],
+      baselineExclusions: normalizeBaselineExclusions(entry.baselineExclusions),
       policyTier: entry.policyTier || null,
       webSearchEnabled:
         typeof entry.webSearchEnabled === "boolean" ? entry.webSearchEnabled : undefined,

@@ -6,9 +6,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const requireDist = createRequire(import.meta.url);
 const onboardSession = requireDist("../state/onboard-session.js");
-const { buildCreatedSandboxRegistryEntry, registerCreatedSandbox, selection } = requireDist(
-  "./sandbox-registration.ts",
-) as typeof import("./sandbox-registration");
+const { buildCreatedSandboxRegistryEntry, creationFidelity, registerCreatedSandbox, selection } =
+  requireDist("./sandbox-registration.ts") as typeof import("./sandbox-registration");
 
 const runtimeFields = {
   gpuEnabled: true,
@@ -211,6 +210,49 @@ describe("buildCreatedSandboxRegistryEntry", () => {
     expect(entry.mcp?.bridges.github?.providerName).toBe("demo-mcp-github");
     expect(entry.compatibleEndpointReasoning).toBe("true");
     expect(entry.toolDisclosure).toBe("direct");
+  });
+
+  it("carries complete baseline exclusion records through consecutive registrations", () => {
+    const baselineExclusions = [
+      {
+        key: "nous_research",
+        digest: "abc",
+        acknowledgedAt: "2026-07-19T00:00:00.000Z",
+        appliedAgentVersion: null,
+      },
+    ];
+    const fidelity = creationFidelity(null, null, null, false, baselineExclusions);
+    const common = {
+      sandboxName: "demo",
+      inferenceSelection: {
+        model: "llama",
+        provider: "compatible-endpoint",
+        endpointUrl: null,
+        credentialEnv: null,
+        preferredInferenceApi: null,
+        compatibleEndpointReasoning: null,
+        nimContainer: null,
+      },
+      runtimeFields,
+      agent: null,
+      agentVersionKnown: true,
+      imageTag: null,
+      appliedPolicies: [],
+      plannedMessagingState: undefined,
+      hermesToolGateways: [],
+      hermesDashboardState: { enabled: false as const, config: null },
+      dashboardPort: 18789,
+      gatewayName: "nemoclaw",
+      gatewayPort: 8080,
+    };
+
+    const first = buildCreatedSandboxRegistryEntry({ ...common, ...fidelity });
+    const secondFidelity = creationFidelity(null, null, null, false, first.baselineExclusions);
+    const second = buildCreatedSandboxRegistryEntry({ ...common, ...secondFidelity });
+
+    expect(second.baselineExclusions).toEqual(baselineExclusions);
+    expect(second.baselineExclusions).not.toBe(first.baselineExclusions);
+    expect(second.baselineExclusions?.[0]).not.toBe(first.baselineExclusions?.[0]);
   });
 
   it("normalizes invalid preferred inference API values", () => {

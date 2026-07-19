@@ -20,7 +20,9 @@ export function normalizeBaselineExclusions(value: unknown): BaselineExclusionEn
     if (!key || !digest) continue;
     const entry: BaselineExclusionEntry = { key, digest };
     if (typeof item.acknowledgedAt === "string") entry.acknowledgedAt = item.acknowledgedAt;
-    if (typeof item.appliedAgentVersion === "string") {
+    if (item.appliedAgentVersion === null) {
+      entry.appliedAgentVersion = null;
+    } else if (typeof item.appliedAgentVersion === "string") {
       entry.appliedAgentVersion = item.appliedAgentVersion;
     }
     byKey.set(key, entry);

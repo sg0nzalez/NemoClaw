@@ -9,7 +9,6 @@ import {
   translatePublicSandboxArgv,
 } from "../../../dist/lib/cli/public-argv-translation";
 import {
-  SANDBOX_LEGACY_ROUTE_ALIASES,
   SANDBOX_ROUTE_OVERRIDES,
   sandboxRouteTokens,
 } from "../../../dist/lib/cli/public-route-metadata";
@@ -94,38 +93,35 @@ describe("public route/display separation", () => {
     expect(sandboxRouteTokens("sandbox:config:rotate-token")).toEqual(["config", "rotate-token"]);
   });
 
-  it("canonicalizes the policy group to two-token routes with legacy hyphen aliases", () => {
-    expect(Object.keys(SANDBOX_LEGACY_ROUTE_ALIASES).sort()).toEqual([
-      "sandbox:policy:add",
-      "sandbox:policy:explain",
-      "sandbox:policy:get",
-      "sandbox:policy:list",
-      "sandbox:policy:remove",
-    ]);
-    // Canonical route is the derived two-token form.
-    expect(sandboxRouteTokens("sandbox:policy:add")).toEqual(["policy", "add"]);
-    expect(sandboxRouteTokens("sandbox:policy:remove")).toEqual(["policy", "remove"]);
-    expect(sandboxRouteTokens("sandbox:policy:exclude")).toEqual(["policy", "exclude"]);
-    // Legacy hyphenated form still recognized.
-    expect(SANDBOX_LEGACY_ROUTE_ALIASES["sandbox:policy:add"]).toEqual([["policy-add"]]);
+  it.each([
+    { verb: "add", args: ["github", "--yes"] },
+    { verb: "explain", args: ["--json"] },
+    { verb: "get", args: ["--raw"] },
+    { verb: "list", args: [] },
+    { verb: "remove", args: ["github", "--yes"] },
+  ])("routes canonical and legacy policy $verb spellings to the same command", ({ verb, args }) => {
+    const commandId = `sandbox:policy:${verb}`;
+    const expectedArgs = ["alpha", ...args];
+    expect(sandboxRouteTokens(commandId)).toEqual(["policy", verb]);
+    expectNative(
+      translatePublicSandboxArgv("alpha", "policy", [verb, ...args]),
+      commandId,
+      expectedArgs,
+    );
+    expectNative(
+      translatePublicSandboxArgv("alpha", `policy-${verb}`, args),
+      commandId,
+      expectedArgs,
+    );
   });
 
-  it("routes both canonical and legacy policy spellings to the same command", () => {
-    expectNative(
-      translatePublicSandboxArgv("alpha", "policy", ["add", "github", "--yes"]),
-      "sandbox:policy:add",
-      ["alpha", "github", "--yes"],
-    );
-    expectNative(
-      translatePublicSandboxArgv("alpha", "policy-add", ["github", "--yes"]),
-      "sandbox:policy:add",
-      ["alpha", "github", "--yes"],
-    );
+  it("routes new policy subcommands only through their canonical two-token spelling", () => {
     expectNative(
       translatePublicSandboxArgv("alpha", "policy", ["exclude", "nous_research", "--force"]),
       "sandbox:policy:exclude",
       ["alpha", "nous_research", "--force"],
     );
+    expect(sandboxRouteTokens("sandbox:policy:restore")).toEqual(["policy", "restore"]);
   });
 });
 

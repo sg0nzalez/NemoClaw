@@ -169,6 +169,14 @@ describe("resolveSandboxCreateIntent", () => {
       extraPlaceholderKeys: ["TELEGRAM_BOT_TOKEN_AGENT_A"],
       agentName: "hermes",
       policyTier: "balanced",
+      baselineExclusions: [
+        {
+          key: "nous_research",
+          digest: "abc",
+          acknowledgedAt: "2026-07-19T00:00:00.000Z",
+          appliedAgentVersion: null,
+        },
+      ],
     };
 
     const first = resolveSandboxCreateIntent(input);
@@ -193,7 +201,14 @@ describe("resolveSandboxCreateIntent", () => {
         additionalPresets: ["github"],
         agentName: "hermes",
         policyTier: "balanced",
-        baselineExclusions: [],
+        baselineExclusions: [
+          {
+            key: "nous_research",
+            digest: "abc",
+            acknowledgedAt: "2026-07-19T00:00:00.000Z",
+            appliedAgentVersion: null,
+          },
+        ],
       },
     });
     expect(JSON.parse(JSON.stringify(first))).toEqual(first);
