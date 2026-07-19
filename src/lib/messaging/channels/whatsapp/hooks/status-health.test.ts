@@ -259,6 +259,66 @@ describe("whatsapp.statusHealth openclaw CLI probe", () => {
     expect(report?.signals.some((signal) => signal.label === "Recent log signals")).toBe(false);
   });
 
+  it.each([
+    {
+      label: "gatewayReachable is absent",
+      payload: { channels: { whatsapp: HEALTHY_WA } },
+    },
+    {
+      label: "gatewayReachable is non-boolean",
+      payload: { gatewayReachable: "true", channels: { whatsapp: HEALTHY_WA } },
+    },
+    {
+      label: "linked is absent",
+      payload: {
+        gatewayReachable: true,
+        channels: { whatsapp: { ...HEALTHY_WA, linked: undefined } },
+      },
+    },
+    {
+      label: "linked is non-boolean",
+      payload: {
+        gatewayReachable: true,
+        channels: { whatsapp: { ...HEALTHY_WA, linked: "true" } },
+      },
+    },
+    {
+      label: "running is absent",
+      payload: {
+        gatewayReachable: true,
+        channels: { whatsapp: { ...HEALTHY_WA, running: undefined } },
+      },
+    },
+    {
+      label: "running is non-boolean",
+      payload: {
+        gatewayReachable: true,
+        channels: { whatsapp: { ...HEALTHY_WA, running: 1 } },
+      },
+    },
+    {
+      label: "connected is absent",
+      payload: {
+        gatewayReachable: true,
+        channels: { whatsapp: { ...HEALTHY_WA, connected: undefined } },
+      },
+    },
+    {
+      label: "connected is non-boolean",
+      payload: {
+        gatewayReachable: true,
+        channels: { whatsapp: { ...HEALTHY_WA, connected: "yes" } },
+      },
+    },
+  ])("fails closed when the live-status contract is invalid: $label (#7016)", ({ payload }) => {
+    const exec = makeExec({ status: 0, stdout: JSON.stringify(payload), stderr: "" });
+    const result = createWhatsappStatusHealthHook({ executeSandboxCommand: exec })(context());
+    const report = reportOf(result);
+    expect(report?.verdict).toBe("probe_failed");
+    expect(stringifyReport(result)).not.toContain("channel runtime reports WhatsApp is not paired");
+    expect(stringifyReport(result)).not.toContain("no bridge process");
+  });
+
   it("degrades an out-of-range lastInboundAt to null instead of crashing", () => {
     // A finite-but-out-of-Date-range epoch (e.g. 1e300) passes Number.isFinite
     // yet makes `new Date(v).toISOString()` throw RangeError. The probe must

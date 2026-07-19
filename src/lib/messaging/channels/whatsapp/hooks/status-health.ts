@@ -126,6 +126,12 @@ type OpenclawWhatsappState = {
   readonly reconnectAttempts?: unknown;
 };
 
+type ValidatedOpenclawWhatsappState = OpenclawWhatsappState & {
+  readonly linked: boolean;
+  readonly running: boolean;
+  readonly connected: boolean;
+};
+
 type ProbeResult = {
   readonly probeReachable: boolean;
   readonly paired: boolean | null;
@@ -168,7 +174,7 @@ function runOpenclawStatusProbe(
   // The CLI can include config-only/stale channel state when the gateway is
   // unreachable. That root reachability bit is authoritative and must win
   // before any nested WhatsApp fields or free-form error text are interpreted.
-  if (json.gatewayReachable === false) return PROBE_UNREACHABLE;
+  if (json.gatewayReachable !== true) return PROBE_UNREACHABLE;
 
   if (!wa) {
     // No `channels.whatsapp`. Two distinct causes the CLI reports, told apart
@@ -184,13 +190,22 @@ function runOpenclawStatusProbe(
       recentLogSignals: [describeMissingWaChannel(json)],
     };
   }
+  if (!hasRequiredWhatsappLiveness(wa)) return PROBE_UNREACHABLE;
   return mapOpenclawWaState(wa);
 }
 
-function mapOpenclawWaState(wa: OpenclawWhatsappState): ProbeResult {
-  const linked = wa.linked === true;
-  const running = wa.running === true;
-  const connected = wa.connected === true;
+function hasRequiredWhatsappLiveness(
+  wa: OpenclawWhatsappState,
+): wa is ValidatedOpenclawWhatsappState {
+  return (
+    typeof wa.linked === "boolean" &&
+    typeof wa.running === "boolean" &&
+    typeof wa.connected === "boolean"
+  );
+}
+
+function mapOpenclawWaState(wa: ValidatedOpenclawWhatsappState): ProbeResult {
+  const { linked, running, connected } = wa;
   const healthState = readStringValue(wa.healthState);
   const heartbeat: WhatsappHeartbeat | null = running
     ? {

@@ -9,7 +9,7 @@ import { entry, makeDeps, showSandboxChannelStatus } from "./channel-status.test
 // shell markers, so these integration tests feed that JSON shape through the
 // mocked sandbox exec. `wa` is the per-channel object under `channels.whatsapp`.
 function waStatusJson(wa: Record<string, unknown>): string {
-  return JSON.stringify({ channels: { whatsapp: wa } });
+  return JSON.stringify({ gatewayReachable: true, channels: { whatsapp: wa } });
 }
 
 describe("showSandboxChannelStatus (whatsapp)", () => {
