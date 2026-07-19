@@ -252,6 +252,59 @@ describe("Station hardware evidence gate", () => {
     );
   });
 
+  it.each([
+    ["a missing required field", deferralComment().replace(/^reason=.*\n/mu, ""), "missing reason"],
+    [
+      "a duplicate required field",
+      `${deferralComment()}reason=Second reason must be rejected.\n`,
+      "duplicate reason fields",
+    ],
+    [
+      "an undersized reason",
+      deferralComment().replace(
+        "reason=Physical Station capacity is temporarily unavailable.",
+        "reason=short",
+      ),
+      "reason is too short",
+    ],
+    [
+      "an undersized remaining risk",
+      deferralComment().replace(
+        "remaining_risk=The clean-host package transaction remains unqualified.",
+        "remaining_risk=short",
+      ),
+      "remaining_risk is too short",
+    ],
+    [
+      "a malformed follow-up URL",
+      deferralComment().replace(
+        `follow_up=https://github.com/${REPOSITORY}/issues/7191`,
+        "follow_up=not-a-url",
+      ),
+      "must link an issue in this repository",
+    ],
+    [
+      "a cross-repository follow-up URL",
+      deferralComment().replace(REPOSITORY, "another/repository"),
+      "must link an issue in this repository",
+    ],
+  ])("rejects deferral metadata with %s (#7191)", async (_case, body, expected) => {
+    await expect(
+      evaluateStationHardwareGate(
+        input({
+          api: api({
+            getIssueComment: async () => ({
+              body,
+              issue_url: `https://api.github.com/repos/${REPOSITORY}/issues/${PR_NUMBER}`,
+              user: { login: "maintainer" },
+            }),
+          }),
+          body: prBody({ deferral: true, deferralUrl: DEFERRAL_URL }),
+        }),
+      ),
+    ).rejects.toThrow(expected);
+  });
+
   it("rejects a deferral whose follow-up issue is closed (#7191)", async () => {
     await expect(
       evaluateStationHardwareGate(
@@ -302,6 +355,7 @@ describe("Station hardware evidence workflow boundary", () => {
       "reopened",
       "ready_for_review",
     ]);
+    expect(workflow.on.issue_comment.types).toEqual(["edited", "deleted"]);
     expect(workflow.permissions).toEqual({});
     expect(workflow.jobs["station-hardware-evidence"].permissions).toEqual({
       contents: "read",
@@ -313,6 +367,26 @@ describe("Station hardware evidence workflow boundary", () => {
     expect(checkout.with).toMatchObject({
       "persist-credentials": false,
       ref: "${{ github.workflow_sha }}",
+    });
+    const setupNode = workflow.jobs["station-hardware-evidence"].steps[1];
+    expect(setupNode.uses).toMatch(/^actions\/setup-node@[0-9a-f]{40}$/u);
+    const revalidation = workflow.jobs["revalidate-edited-comment"];
+    expect(revalidation.if).toContain("github.event.issue.pull_request != null");
+    expect(revalidation.permissions).toEqual({
+      checks: "write",
+      contents: "read",
+      issues: "read",
+      "pull-requests": "read",
+    });
+    expect(revalidation.steps[0].uses).toMatch(/^actions\/checkout@[0-9a-f]{40}$/u);
+    expect(revalidation.steps[0].with).toMatchObject({
+      "persist-credentials": false,
+      ref: "${{ github.workflow_sha }}",
+    });
+    expect(revalidation.steps[1].uses).toMatch(/^actions\/setup-node@[0-9a-f]{40}$/u);
+    expect(revalidation.steps[2].env).toMatchObject({
+      PR_NUMBER: "${{ github.event.issue.number }}",
+      PUBLISH_HEAD_CHECK: "true",
     });
     expect(workflowSource).not.toContain("github.event.pull_request.head.sha");
   });

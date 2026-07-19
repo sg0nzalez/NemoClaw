@@ -10,6 +10,7 @@ export const STATION_PREPARE_PATH = "scripts/prepare-dgx-station-host.sh";
 export const HARDWARE_MARKER = "STATION_HARDWARE_EVIDENCE";
 export const DEFERRAL_MARKER = "STATION_HARDWARE_DEFERRAL";
 const GITHUB_CHANGED_FILE_LIMIT = 3_000;
+const HEAD_CHECK_NAME = "Station / Hardware Evidence";
 
 type ChangedFile = {
   filename: string;
@@ -287,6 +288,11 @@ export async function evaluateStationHardwareGate(
 
 type GitHubBlob = { content: string; encoding: string };
 type GitHubContent = { content: string; encoding: string; type: string };
+type GitHubCheckRun = { id: number };
+type RequestOptions = {
+  body?: unknown;
+  method?: "GET" | "PATCH" | "POST";
+};
 
 function splitRepository(repository: string): [string, string] {
   const match = /^([^/]+)\/([^/]+)$/u.exec(repository);
@@ -301,17 +307,64 @@ function apiPath(repository: string, suffix: string): string {
   return `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}${suffix}`;
 }
 
-async function requestJson<T>(token: string, path: string): Promise<T> {
+async function requestJson<T>(
+  token: string,
+  path: string,
+  options: RequestOptions = {},
+): Promise<T> {
   const response = await fetch(`https://api.github.com${path}`, {
+    body: options.body === undefined ? undefined : JSON.stringify(options.body),
     headers: {
       Accept: "application/vnd.github+json",
       Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
       "User-Agent": "nemoclaw-station-hardware-evidence-gate",
       "X-GitHub-Api-Version": "2022-11-28",
     },
+    method: options.method ?? "GET",
+    signal: AbortSignal.timeout(30_000),
   });
   response.ok || fail(`GitHub API request failed with HTTP ${response.status}.`);
   return (await response.json()) as T;
+}
+
+async function createHeadCheck(
+  token: string,
+  repository: string,
+  headSha: string,
+): Promise<number> {
+  const check = await requestJson<GitHubCheckRun>(token, apiPath(repository, "/check-runs"), {
+    body: {
+      head_sha: headSha,
+      name: HEAD_CHECK_NAME,
+      status: "in_progress",
+    },
+    method: "POST",
+  });
+  return check.id;
+}
+
+async function completeHeadCheck(
+  token: string,
+  repository: string,
+  checkId: number,
+  conclusion: "failure" | "success",
+  summary: string,
+): Promise<void> {
+  await requestJson<GitHubCheckRun>(token, apiPath(repository, `/check-runs/${checkId}`), {
+    body: {
+      conclusion,
+      output: {
+        summary,
+        title:
+          conclusion === "success"
+            ? "Station evidence remains valid"
+            : "Station evidence is no longer valid",
+      },
+      status: "completed",
+    },
+    method: "PATCH",
+  });
 }
 
 function decodeGitHubContent(payload: GitHubBlob | GitHubContent): Buffer {
@@ -376,18 +429,33 @@ async function main(): Promise<void> {
     token,
     apiPath(repository, `/pulls/${prNumber}`),
   );
-  const changedFileListing = await loadChangedFiles(token, repository, prNumber);
-  const result = await evaluateStationHardwareGate({
-    api: githubApi(token, repository),
-    changedFiles: changedFileListing.files,
-    changedFilesComplete: changedFileListing.complete,
-    pullRequest,
-    repository,
-  });
-  console.log(result.summary);
-  const summaryFile = process.env.GITHUB_STEP_SUMMARY;
-  summaryFile &&
-    appendFileSync(summaryFile, `## Station hardware evidence\n\n${result.summary}\n`, "utf8");
+  const publishHeadCheck = process.env.PUBLISH_HEAD_CHECK === "true";
+  const checkId = publishHeadCheck
+    ? await createHeadCheck(token, repository, pullRequest.head.sha)
+    : undefined;
+
+  try {
+    const changedFileListing = await loadChangedFiles(token, repository, prNumber);
+    const result = await evaluateStationHardwareGate({
+      api: githubApi(token, repository),
+      changedFiles: changedFileListing.files,
+      changedFilesComplete: changedFileListing.complete,
+      pullRequest,
+      repository,
+    });
+    checkId !== undefined &&
+      (await completeHeadCheck(token, repository, checkId, "success", result.summary));
+    console.log(result.summary);
+    const summaryFile = process.env.GITHUB_STEP_SUMMARY;
+    summaryFile &&
+      appendFileSync(summaryFile, `## Station hardware evidence\n\n${result.summary}\n`, "utf8");
+  } catch (error: unknown) {
+    const message =
+      error instanceof Error ? error.message : "Unknown Station hardware evidence failure.";
+    checkId !== undefined &&
+      (await completeHeadCheck(token, repository, checkId, "failure", message));
+    throw error;
+  }
 }
 
 const invokedPath = process.argv[1] ? resolve(process.argv[1]) : "";
