@@ -276,6 +276,7 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
   const session = createRebuildFlowSession(onboardSession.MACHINE_SNAPSHOT_VERSION);
   const rebuildShieldsWindow = { relocked: false, wasLocked: false };
   const agentName = overrides.agentName ?? "openclaw";
+  const agentBaseImageRef = `nemoclaw-${agentName}-base:test`;
   const agentDef = {
     name: agentName,
     expectedVersion: "0.2.0",
@@ -295,15 +296,23 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
     imageTag: null,
   });
   const dcodeBaseImageIds = [...(overrides.dcodeBaseImageIds ?? [])];
-  vi.spyOn(dockerInspect, "dockerImageInspectFormat").mockImplementation((...args: unknown[]) =>
-    args[0] === "{{json .Config.Labels}}" && overrides.sandboxBaseImageLabelsOutput !== undefined
-      ? overrides.sandboxBaseImageLabelsOutput
-      : (dcodeBaseImageIds.shift() ?? "sha256:dcode-base"),
-  );
+  vi.spyOn(dockerInspect, "dockerImageInspectFormat").mockImplementation((...args: unknown[]) => {
+    if (
+      args[0] === "{{json .Config.Labels}}" &&
+      overrides.sandboxBaseImageLabelsOutput !== undefined
+    ) {
+      return overrides.sandboxBaseImageLabelsOutput;
+    }
+    if (args[0] === "{{.Id}}" && args[1] === agentBaseImageRef) {
+      return `sha256:${"a".repeat(64)}`;
+    }
+    return dcodeBaseImageIds.shift() ?? "sha256:dcode-base";
+  });
   vi.spyOn(dockerImage, "dockerRmi").mockReturnValue({ status: 0 });
+  vi.spyOn(dockerImage, "dockerTag").mockReturnValue({ status: 0 });
   vi.spyOn(agentDefs, "loadAgent").mockReturnValue(agentDef);
   const ensureAgentBaseImageSpy = vi.spyOn(agentOnboard, "ensureAgentBaseImage").mockReturnValue({
-    imageTag: `nemoclaw-${agentName}-base:test`,
+    imageTag: agentBaseImageRef,
     built: true,
   });
   const sessionAgentName =
