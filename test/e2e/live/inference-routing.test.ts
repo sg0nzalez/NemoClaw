@@ -500,13 +500,32 @@ test("TC-INF-11 DNS-backed HTTPS custom endpoint routes through the local pinnin
   expect(policyText).not.toContain(endpointHostname);
 
   const sandboxRequestOffset = fake.requests().length;
-  await expectOpenAiChatThroughSandbox(
-    sandbox,
-    sandboxName,
-    model,
-    [apiKey],
-    "https-pin-endpoint-inference-local-chat",
-  );
+  // OpenShell 0.0.85 refreshes the sandbox-side inference bundle every five
+  // seconds. Because this switch intentionally keeps the same provider/model
+  // identity while replacing only its endpoint binding, an immediate request
+  // can still use the placeholder route cached before `inference set`. Poll
+  // through two refresh intervals, but accept success only after the real
+  // pinned upstream records the authenticated request.
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    await expectOpenAiChatThroughSandbox(
+      sandbox,
+      sandboxName,
+      model,
+      [apiKey],
+      `https-pin-endpoint-inference-local-chat-${attempt}`,
+    );
+    const routed = fake
+      .requests()
+      .slice(sandboxRequestOffset)
+      .some(
+        (request) =>
+          request.auth === "ok" &&
+          request.method === "POST" &&
+          request.path === "/v1/chat/completions",
+      );
+    if (routed) break;
+    if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, 5_000));
+  }
   expect(fake.requests().slice(sandboxRequestOffset)).toContainEqual(
     expect.objectContaining({
       auth: "ok",
