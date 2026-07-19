@@ -262,6 +262,7 @@ process.exit(0);
     expect(fs.readFileSync(externalWorktreeFile, "utf-8")).toBe("fresh external worktree\n");
 
     const loggedCommands = fs.readFileSync(sshLog, "utf-8");
+    expect(loggedCommands).toContain("/usr/bin/python3 -I -S -c");
     expect(loggedCommands).toContain("sqlite3.connect");
     expect(loggedCommands).not.toContain("tar -cf -");
     expect(loggedCommands).not.toContain("kanban/boards/release-board");
