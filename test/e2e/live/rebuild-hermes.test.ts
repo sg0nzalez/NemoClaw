@@ -7,10 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { shellQuote } from "../../../src/lib/core/shell-quote";
-import {
-  formatSandboxBaseImageResolutionLabels,
-  readSandboxBaseImageResolutionMetadata,
-} from "../../../src/lib/sandbox-base-image";
+import { readSandboxBaseImageResolutionMetadata } from "../../../src/lib/sandbox-base-image";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
 import { assertCleanupSucceededOrAbsent } from "../fixtures/cleanup-resources.ts";
 import { assertExitZero as expectExitZero } from "../fixtures/clients/command.ts";
@@ -44,6 +41,7 @@ import {
   REBUILD_HERMES_OLD_BASE_FIXTURE,
   verifyRebuildHermesOldBaseFixture,
 } from "./rebuild-hermes-old-base-fixture.ts";
+import { buildRebuildHermesOldSandboxDockerfile } from "./rebuild-hermes-old-sandbox.ts";
 import { startRebuildHermesProgress } from "./rebuild-hermes-progress.ts";
 import { buildRebuildHermesTimingSummary, describeRunnerClass } from "./rebuild-hermes-timing.ts";
 
@@ -280,41 +278,6 @@ async function removeHermesFixtureImage(
     /No such image|No such object|image .* not found/iu,
     options.label,
   );
-}
-
-function oldHermesDockerfile(
-  baseResolutionMetadata: Parameters<typeof formatSandboxBaseImageResolutionLabels>[0] | null,
-): string {
-  return [
-    `FROM ${OLD_BASE_TAG}`,
-    ...(baseResolutionMetadata
-      ? [formatSandboxBaseImageResolutionLabels(baseResolutionMetadata)]
-      : []),
-    "USER sandbox",
-    "WORKDIR /sandbox",
-    "RUN mkdir -p /sandbox/.hermes/memories \\",
-    "             /sandbox/.hermes/sessions \\",
-    "             /sandbox/.hermes/workspace \\",
-    "    && printf '%s\\n' \\",
-    "      '_config_version: 12' \\",
-    "      'platforms:' \\",
-    "      '  discord:' \\",
-    "      '    enabled: true' \\",
-    `      '    token: "${DISCORD_PLACEHOLDER}"' \\`,
-    "      '  api_server:' \\",
-    "      '    enabled: true' \\",
-    "      '    extra:' \\",
-    "      '      port: 18642' \\",
-    "      '      host: 127.0.0.1' \\",
-    "      > /sandbox/.hermes/config.yaml \\",
-    "    && printf '%s\\n' \\",
-    "      'API_SERVER_PORT=18642' \\",
-    "      'API_SERVER_HOST=127.0.0.1' \\",
-    `      'DISCORD_BOT_TOKEN=${DISCORD_PLACEHOLDER}' \\`,
-    "      > /sandbox/.hermes/.env",
-    'CMD ["/bin/bash"]',
-    "",
-  ].join("\n");
 }
 
 async function waitForSandboxReady(host: HostCliClient, apiKey: string): Promise<void> {
@@ -827,7 +790,12 @@ test(STALE_BASE_REBUILD
   const oldDockerfile = path.join(oldDockerfileDir, "Dockerfile");
   fs.writeFileSync(
     oldDockerfile,
-    oldHermesDockerfile(STALE_BASE_REBUILD ? oldBaseResolutionMetadata : null),
+    buildRebuildHermesOldSandboxDockerfile({
+      baseTag: OLD_BASE_TAG,
+      baseResolutionMetadata: STALE_BASE_REBUILD ? oldBaseResolutionMetadata : null,
+      discordPlaceholder: DISCORD_PLACEHOLDER,
+      kanbanTaskTitle: KANBAN_TASK_TITLE,
+    }),
     "utf8",
   );
   try {
@@ -938,7 +906,7 @@ test(STALE_BASE_REBUILD
   );
   expectExitZero(writeMarker, "write Hermes marker");
 
-  const seedKanban = await host.command(
+  const writeExcludedKanbanMarker = await host.command(
     "openshell",
     [
       "sandbox",
@@ -947,22 +915,20 @@ test(STALE_BASE_REBUILD
       SANDBOX_NAME,
       "--",
       "sh",
-      "-lc",
+      "-c",
       [
-        "hermes kanban init",
-        `hermes kanban create ${shellQuote(KANBAN_TASK_TITLE)} --initial-status blocked --json`,
         `mkdir -p ${shellQuote(path.dirname(EXCLUDED_KANBAN_FILE))}`,
         `printf '%s' ${shellQuote(MARKER_CONTENT)} > ${shellQuote(EXCLUDED_KANBAN_FILE)}`,
       ].join(" && "),
     ],
     {
-      artifactName: "phase-4-seed-hermes-kanban",
+      artifactName: "phase-4-write-excluded-kanban-marker",
       env: testEnv(apiKey),
       redactionValues,
       timeoutMs: OPENSHELL_TIMEOUT_MS,
     },
   );
-  expectExitZero(seedKanban, "seed Hermes default kanban board");
+  expectExitZero(writeExcludedKanbanMarker, "write excluded Hermes kanban marker");
 
   const preEnv = await host.command(
     "openshell",

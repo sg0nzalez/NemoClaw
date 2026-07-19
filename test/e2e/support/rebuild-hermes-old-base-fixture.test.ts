@@ -6,6 +6,7 @@ import {
   REBUILD_HERMES_OLD_BASE_FIXTURE,
   verifyRebuildHermesOldBaseFixture,
 } from "../live/rebuild-hermes-old-base-fixture.ts";
+import { buildRebuildHermesOldSandboxDockerfile } from "../live/rebuild-hermes-old-sandbox.ts";
 
 const fixture = REBUILD_HERMES_OLD_BASE_FIXTURE;
 const validLabels = JSON.stringify({
@@ -16,6 +17,26 @@ const validLabels = JSON.stringify({
 const validVersion = `Hermes Agent v${fixture.hermesSemver} (${fixture.hermesCalver})`;
 
 describe("rebuild-Hermes historical base fixture", () => {
+  it("seeds kanban with the historical CLI before OpenShell isolation (#7144)", () => {
+    const dockerfile = buildRebuildHermesOldSandboxDockerfile({
+      baseTag: "nemoclaw-hermes-old-base:test",
+      baseResolutionMetadata: null,
+      discordPlaceholder: "openshell:resolve:env:DISCORD_BOT_TOKEN",
+      kanbanTaskTitle: "NEMOCLAW_REBUILD_KANBAN_TEST",
+    });
+
+    expect(dockerfile).toContain("FROM nemoclaw-hermes-old-base:test");
+    expect(dockerfile).toContain("RUN /usr/local/bin/hermes kanban init \\");
+    expect(dockerfile).toContain(
+      "&& /usr/local/bin/hermes kanban create 'NEMOCLAW_REBUILD_KANBAN_TEST' --initial-status blocked --json",
+    );
+    expect(dockerfile).toContain("&& test -s /sandbox/.hermes/kanban.db");
+    expect(dockerfile.indexOf("hermes kanban init")).toBeLessThan(
+      dockerfile.indexOf('CMD ["/bin/bash"]'),
+    );
+    expect(dockerfile).not.toContain("openshell sandbox exec");
+  });
+
   it("accepts the exact immutable fixture and published provenance (#7144)", () => {
     expect(verifyRebuildHermesOldBaseFixture(fixture.imageRef, validLabels, validVersion)).toEqual({
       imageRef: fixture.imageRef,
