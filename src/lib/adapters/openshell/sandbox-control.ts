@@ -8,6 +8,7 @@ export interface SandboxExecRequest {
   sandboxName: string;
   command: readonly string[];
   maxOutputBytes?: number;
+  timeoutMs?: number;
 }
 
 export interface SandboxExecResult {
@@ -106,7 +107,7 @@ function openShellEscapedArgumentByteLength(argument: string): number {
 export function validateOpenShellExecCommand(
   command: readonly string[],
 ): OpenShellExecRequestValidationError | null {
-  if (command.length === 0) {
+  if (command.length === 0 || command[0]?.trim().length === 0) {
     return new OpenShellExecRequestValidationError({ kind: "empty-command" });
   }
   if (command.length > OPENSHELL_V0072_MAX_EXEC_COMMAND_ARGS) {
@@ -190,6 +191,7 @@ export function createCliOpenShellSandboxControl(
           ignoreError: true,
           includeStreams: true,
           maxBuffer: request.maxOutputBytes,
+          timeout: request.timeoutMs,
         },
       );
       return normalizeExecResult(result);

@@ -22,6 +22,8 @@ function expectValidationIssue(
 describe("OpenShell exec command validation", () => {
   it("requires a command", () => {
     expectValidationIssue([], { kind: "empty-command" });
+    expectValidationIssue([""], { kind: "empty-command" });
+    expectValidationIssue([" \t"], { kind: "empty-command" });
   });
 
   it("allows 1024 arguments and rejects 1025", () => {
@@ -111,11 +113,12 @@ describe("CLI OpenShell sandbox control", () => {
       sandboxName: "alpha",
       command: ["openclaw", "sessions", "list", "--json"],
       maxOutputBytes: 4096,
+      timeoutMs: 30_000,
     });
 
     expect(capture).toHaveBeenCalledWith(
       ["sandbox", "exec", "--name", "alpha", "--", "openclaw", "sessions", "list", "--json"],
-      { ignoreError: true, includeStreams: true, maxBuffer: 4096 },
+      { ignoreError: true, includeStreams: true, maxBuffer: 4096, timeout: 30_000 },
     );
     expect(result).toEqual({
       status: 0,

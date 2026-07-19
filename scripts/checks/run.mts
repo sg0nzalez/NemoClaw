@@ -51,7 +51,7 @@ export const CHECKS: readonly CheckCommand[] = [
   {
     name: "legacy-sandbox-transports",
     command: TSX,
-    args: ["scripts/checks/legacy-sandbox-transports.ts"],
+    args: ["scripts/checks/legacy-sandbox-transports.mts"],
   },
   {
     name: "dependency-pins",

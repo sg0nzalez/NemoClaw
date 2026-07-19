@@ -9,7 +9,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   auditLegacySandboxTransports,
   discoverLegacySandboxTransportSites,
-} from "../scripts/checks/legacy-sandbox-transports";
+  loadReviewedLegacySandboxTransportSites,
+} from "../scripts/checks/legacy-sandbox-transports.mts";
 
 const fixtures: string[] = [];
 
@@ -44,17 +45,20 @@ describe("legacy sandbox transport inventory", () => {
         'privilegedSandboxExecArgv("alpha", ["true"]);',
         'dockerExecArgv("openshell-cluster-nemoclaw", ["true"]);',
         'dockerSpawnSync(["exec", "openshell-cluster-nemoclaw", "true"]);',
+        'exec("ssh sandbox");',
+        'execSync("sshfs sandbox:/ /mnt");',
+        'exec("docker exec openshell-cluster-nemoclaw true");',
       ].join("\n"),
     });
 
     expect(discoverLegacySandboxTransportSites(root)).toEqual([
       { relativePath: "src/transport.ts", kind: "docker-exec-builder", calls: 1 },
-      { relativePath: "src/transport.ts", kind: "docker-exec-command", calls: 1 },
+      { relativePath: "src/transport.ts", kind: "docker-exec-command", calls: 2 },
       { relativePath: "src/transport.ts", kind: "openshell-ssh-config", calls: 2 },
       { relativePath: "src/transport.ts", kind: "privileged-sandbox-exec", calls: 1 },
-      { relativePath: "src/transport.ts", kind: "ssh-command", calls: 3 },
+      { relativePath: "src/transport.ts", kind: "ssh-command", calls: 4 },
       { relativePath: "src/transport.ts", kind: "ssh-temp-config", calls: 1 },
-      { relativePath: "src/transport.ts", kind: "sshfs-command", calls: 1 },
+      { relativePath: "src/transport.ts", kind: "sshfs-command", calls: 2 },
     ]);
   });
 
@@ -107,5 +111,24 @@ describe("legacy sandbox transport inventory", () => {
     expect(auditLegacySandboxTransports(root, [])).toEqual([
       "src/new-path.ts:ssh-command: found 1 unreviewed legacy transport call(s)",
     ]);
+  });
+
+  it("loads the reviewed baseline from the separate CI inventory", () => {
+    const reviewed = [{ relativePath: "src/reviewed.ts", kind: "ssh-command", calls: 1 }] as const;
+    const root = fixtureRepo({
+      "ci/legacy-sandbox-transports.json": JSON.stringify(reviewed),
+      "src/reviewed.ts": 'spawnSync("ssh", ["sandbox"]);',
+    });
+
+    expect(loadReviewedLegacySandboxTransportSites(root)).toEqual(reviewed);
+    expect(auditLegacySandboxTransports(root)).toEqual([]);
+  });
+
+  it("fails closed when the separate CI inventory is malformed", () => {
+    const root = fixtureRepo({
+      "ci/legacy-sandbox-transports.json": JSON.stringify({ reviewed: [] }),
+    });
+
+    expect(() => loadReviewedLegacySandboxTransportSites(root)).toThrow("must contain an array");
   });
 });

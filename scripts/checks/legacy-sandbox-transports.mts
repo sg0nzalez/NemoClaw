@@ -29,49 +29,71 @@ export interface LegacySandboxTransportSite {
 }
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const REVIEWED_INVENTORY_PATH = "ci/legacy-sandbox-transports.json";
+const LEGACY_SANDBOX_TRANSPORT_KINDS = new Set<LegacySandboxTransportKind>([
+  "docker-exec-command",
+  "docker-exec-builder",
+  "openshell-ssh-config",
+  "privileged-sandbox-exec",
+  "ssh-command",
+  "ssh-temp-config",
+  "sshfs-command",
+]);
 
-type ReviewedSiteTuple = readonly [string, LegacySandboxTransportKind, number];
+/** Load the reviewed baseline from the CODEOWNERS-protected CI inventory. */
+export function loadReviewedLegacySandboxTransportSites(
+  repoRoot = REPO_ROOT,
+): readonly LegacySandboxTransportSite[] {
+  const inventoryPath = path.join(repoRoot, REVIEWED_INVENTORY_PATH);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(inventoryPath, "utf8"));
+  } catch (error) {
+    throw new Error(
+      `Failed to read reviewed legacy sandbox transport inventory ${inventoryPath}: ${(error as Error).message}`,
+    );
+  }
+  if (!Array.isArray(parsed)) {
+    throw new Error(`${REVIEWED_INVENTORY_PATH} must contain an array`);
+  }
 
-const REVIEWED_SITE_TUPLES = [
-  ["src/lib/actions/dns/index.ts", "docker-exec-command", 4],
-  ["src/lib/actions/sandbox/host-aliases.ts", "docker-exec-command", 1],
-  ["src/lib/actions/sandbox/process-recovery.ts", "openshell-ssh-config", 1],
-  ["src/lib/actions/sandbox/process-recovery.ts", "privileged-sandbox-exec", 2],
-  ["src/lib/actions/sandbox/process-recovery.ts", "ssh-command", 1],
-  ["src/lib/actions/sandbox/process-recovery.ts", "ssh-temp-config", 1],
-  ["src/lib/actions/sandbox/skill-install.ts", "openshell-ssh-config", 2],
-  ["src/lib/actions/sandbox/skill-install.ts", "ssh-temp-config", 2],
-  ["src/lib/actions/sandbox/snapshot.ts", "docker-exec-command", 1],
-  ["src/lib/adapters/docker/container.ts", "docker-exec-command", 1],
-  ["src/lib/adapters/openshell/client.ts", "openshell-ssh-config", 1],
-  ["src/lib/adapters/openshell/runtime.ts", "openshell-ssh-config", 1],
-  ["src/lib/diagnostics/debug.ts", "openshell-ssh-config", 1],
-  ["src/lib/diagnostics/debug.ts", "ssh-command", 4],
-  ["src/lib/onboard.ts", "docker-exec-builder", 1],
-  ["src/lib/resources-cmd.ts", "docker-exec-command", 1],
-  ["src/lib/sandbox/config.ts", "privileged-sandbox-exec", 2],
-  ["src/lib/sandbox/version.ts", "openshell-ssh-config", 1],
-  ["src/lib/sandbox/version.ts", "ssh-command", 1],
-  ["src/lib/sandbox/version.ts", "ssh-temp-config", 1],
-  ["src/lib/share-command-deps.ts", "openshell-ssh-config", 1],
-  ["src/lib/share-command.ts", "sshfs-command", 1],
-  ["src/lib/shields/index.ts", "privileged-sandbox-exec", 4],
-  ["src/lib/shields/mutable-config-repair.ts", "privileged-sandbox-exec", 2],
-  ["src/lib/skill-remote.ts", "ssh-command", 1],
-  ["src/lib/state/openclaw-config-restore-input.ts", "ssh-command", 1],
-  ["src/lib/state/openclaw-plugin-restore.ts", "ssh-command", 2],
-  ["src/lib/state/openclaw-plugin-restore.ts", "ssh-temp-config", 1],
-  ["src/lib/state/sandbox.ts", "openshell-ssh-config", 1],
-  ["src/lib/state/sandbox.ts", "ssh-command", 8],
-  ["src/lib/state/sandbox.ts", "ssh-temp-config", 2],
-  ["src/lib/state/state-file-restore.ts", "ssh-command", 1],
-  ["src/lib/state/user-managed-files-probe.ts", "ssh-command", 1],
-  ["src/lib/state/user-managed-files-probe.ts", "ssh-temp-config", 1],
-  ["src/lib/tunnel/sandbox-gateway-stop.ts", "docker-exec-command", 2],
-] as const satisfies readonly ReviewedSiteTuple[];
-
-export const REVIEWED_LEGACY_SANDBOX_TRANSPORT_SITES: readonly LegacySandboxTransportSite[] =
-  REVIEWED_SITE_TUPLES.map(([relativePath, kind, calls]) => ({ relativePath, kind, calls }));
+  const seen = new Set<string>();
+  return parsed.map((entry, index) => {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+      throw new Error(`${REVIEWED_INVENTORY_PATH}[${String(index)}] must be an object`);
+    }
+    const { relativePath, kind, calls } = entry as Record<string, unknown>;
+    if (
+      typeof relativePath !== "string" ||
+      !relativePath ||
+      path.isAbsolute(relativePath) ||
+      relativePath.includes("\\") ||
+      relativePath.split("/").includes("..")
+    ) {
+      throw new Error(
+        `${REVIEWED_INVENTORY_PATH}[${String(index)}].relativePath must be a safe repository-relative path`,
+      );
+    }
+    if (
+      typeof kind !== "string" ||
+      !LEGACY_SANDBOX_TRANSPORT_KINDS.has(kind as LegacySandboxTransportKind)
+    ) {
+      throw new Error(`${REVIEWED_INVENTORY_PATH}[${String(index)}].kind is invalid`);
+    }
+    if (!Number.isSafeInteger(calls) || (calls as number) < 1) {
+      throw new Error(`${REVIEWED_INVENTORY_PATH}[${String(index)}].calls must be positive`);
+    }
+    const site = {
+      relativePath,
+      kind: kind as LegacySandboxTransportKind,
+      calls: calls as number,
+    };
+    const key = `${site.relativePath}:${site.kind}`;
+    if (seen.has(key)) throw new Error(`${REVIEWED_INVENTORY_PATH} contains duplicate ${key}`);
+    seen.add(key);
+    return site;
+  });
+}
 
 const HELPER_KINDS = new Map<string, LegacySandboxTransportKind>([
   ["captureSandboxSshConfig", "openshell-ssh-config"],
@@ -91,6 +113,8 @@ const COMMAND_CALLS = new Set([
   "spawn",
   "spawnSync",
 ]);
+
+const SHELL_COMMAND_CALLS = new Set(["exec", "execSync"]);
 
 const DOCKER_COMMAND_CALLS = new Set([
   "dockerCapture",
@@ -187,6 +211,18 @@ function commandFromArgument(
   return first && ts.isExpression(first) ? literalText(resolveAlias(first, bindings)) : null;
 }
 
+function shellCommandPrefix(
+  argument: ts.Expression | undefined,
+  bindings: ConstBindings,
+): readonly [string, string | undefined] | null {
+  if (!argument) return null;
+  const command = literalText(resolveAlias(argument, bindings));
+  if (command === null) return null;
+  const [executable, subcommand] = command.trimStart().split(/\s+/u, 2);
+  if (!executable) return null;
+  return [path.posix.basename(executable), subcommand];
+}
+
 function increment(
   counts: Map<LegacySandboxTransportKind, number>,
   kind: LegacySandboxTransportKind,
@@ -238,6 +274,17 @@ function scanSource(
         if (scansSandboxSsh && command === "ssh") increment(counts, "ssh-command");
         if (command === "sshfs") increment(counts, "sshfs-command");
       }
+      if (name !== null && SHELL_COMMAND_CALLS.has(name)) {
+        const prefix = shellCommandPrefix(node.arguments[0], bindings);
+        const scansSandboxSsh = !NON_SANDBOX_SSH_ROOTS.some((root) =>
+          relativePath.startsWith(root),
+        );
+        if (scansSandboxSsh && prefix?.[0] === "ssh") increment(counts, "ssh-command");
+        if (prefix?.[0] === "sshfs") increment(counts, "sshfs-command");
+        if (prefix?.[0] === "docker" && prefix[1] === "exec") {
+          increment(counts, "docker-exec-command");
+        }
+      }
     }
 
     ts.forEachChild(node, visit);
@@ -270,7 +317,9 @@ function siteKey(site: Pick<LegacySandboxTransportSite, "relativePath" | "kind">
 
 export function auditLegacySandboxTransports(
   repoRoot = REPO_ROOT,
-  reviewedSites: readonly LegacySandboxTransportSite[] = REVIEWED_LEGACY_SANDBOX_TRANSPORT_SITES,
+  reviewedSites: readonly LegacySandboxTransportSite[] = loadReviewedLegacySandboxTransportSites(
+    repoRoot,
+  ),
 ): string[] {
   const violations: string[] = [];
   const discovered = new Map(
