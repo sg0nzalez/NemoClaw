@@ -7,7 +7,10 @@ import os from "node:os";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { shellQuote } from "../../../src/lib/core/shell-quote";
-import { readSandboxBaseImageResolutionMetadata } from "../../../src/lib/sandbox-base-image";
+import {
+  formatSandboxBaseImageResolutionLabels,
+  readSandboxBaseImageResolutionMetadata,
+} from "../../../src/lib/sandbox-base-image";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
 import { assertCleanupSucceededOrAbsent } from "../fixtures/cleanup-resources.ts";
 import { assertExitZero as expectExitZero } from "../fixtures/clients/command.ts";
@@ -23,6 +26,13 @@ import {
 import { REPO_ROOT } from "../fixtures/paths.ts";
 import { listCredentialLeakPaths } from "../fixtures/phases/state-validation.ts";
 import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
+import {
+  createRebuildHermesOldBaseResolutionMetadata,
+  requireRebuildHermesCurrentBaseIdentity,
+  verifyRebuildHermesCurrentBaseReuse,
+  verifyRebuildHermesFinalBaseIdentity,
+  verifyRebuildHermesOldBaseIsStale,
+} from "./rebuild-hermes-base-identity.ts";
 import { buildRebuildHermesChildEnv, planRebuildHermesBaseReuse } from "./rebuild-hermes-env.ts";
 import {
   cleanupTrackedRebuildHermesImage,
@@ -77,7 +87,6 @@ const HOSTED_MODEL =
   process.env.NEMOCLAW_COMPAT_MODEL ??
   "nvidia/nvidia/nemotron-3-ultra";
 const OLD_BASE_TAG = `nemoclaw-hermes-old-base:${SANDBOX_NAME.toLowerCase().replace(/[^a-z0-9_.-]+/g, "-")}`;
-const CURRENT_BASE_TAG = "ghcr.io/nvidia/nemoclaw/hermes-sandbox-base:latest";
 const CURRENT_BASE_REUSE_TAG = `nemoclaw-hermes-sandbox-base-local:e2e-current-${SANDBOX_NAME.toLowerCase().replace(/[^a-z0-9_.-]+/g, "-")}`;
 
 const INSTALL_TIMEOUT_MS = 60 * 60_000;
@@ -183,8 +192,8 @@ async function bestEffortPrecleanHermesResources(
     {
       artifactName,
       env: testEnv(apiKey, {
-        CURRENT_BASE_REUSE_TAG,
         DISCORD_PROVIDER: `${SANDBOX_NAME}-discord-bridge`,
+        CURRENT_BASE_REUSE_TAG,
         OLD_BASE_TAG,
       }),
       redactionValues: [apiKey ?? "", DISCORD_FAKE_TOKEN],
@@ -269,9 +278,14 @@ async function removeHermesFixtureImage(
   );
 }
 
-function oldHermesDockerfile(): string {
+function oldHermesDockerfile(
+  baseResolutionMetadata: Parameters<typeof formatSandboxBaseImageResolutionLabels>[0] | null,
+): string {
   return [
     `FROM ${OLD_BASE_TAG}`,
+    ...(baseResolutionMetadata
+      ? [formatSandboxBaseImageResolutionLabels(baseResolutionMetadata)]
+      : []),
     "USER sandbox",
     "WORKDIR /sandbox",
     "RUN mkdir -p /sandbox/.hermes/memories \\",
@@ -426,10 +440,6 @@ function seedRegistryAndSession(
   };
 }
 
-function registryVersion(): unknown {
-  return registrySandbox().agentVersion;
-}
-
 function registrySandbox(): Record<string, unknown> {
   const sandbox = readJsonFileOr<RegistryData>(REGISTRY_FILE, {}).sandboxes?.[SANDBOX_NAME];
   expect(sandbox, `registry entry missing for ${SANDBOX_NAME}`).toBeDefined();
@@ -498,15 +508,26 @@ test(STALE_BASE_REBUILD
 
   let phase1ImageTag: string | null = null;
   let currentBaseReuseTag: string | null = null;
+  let currentBasePinnedReuseTag: string | null = null;
+  let currentBaseSourceInspect: ShellProbeResult | null = null;
+  let staleBaseClassification: ReturnType<typeof verifyRebuildHermesOldBaseIsStale> | null = null;
   let oldSandboxImageState: RebuildHermesRegistryImageState | null = null;
   cleanup.trackDisposable(`remove old Hermes base image ${OLD_BASE_TAG}`, () =>
     cleanupOldHermesBaseImage(host, apiKey),
   );
-  cleanup.trackDisposable("remove current Hermes base reuse tag", () =>
+  cleanup.trackDisposable("remove current Hermes base reuse alias", () =>
     cleanupTrackedRebuildHermesImage(currentBaseReuseTag, (imageTag) =>
       removeHermesFixtureImage(host, apiKey, imageTag, {
         artifactName: "cleanup-hermes-rebuild-resources-docker-rmi-current-base-reuse",
-        label: `cleanup current Hermes base reuse tag ${imageTag}`,
+        label: `cleanup current Hermes base reuse alias ${imageTag}`,
+      }),
+    ),
+  );
+  cleanup.trackDisposable("remove pinned current Hermes base reuse alias", () =>
+    cleanupTrackedRebuildHermesImage(currentBasePinnedReuseTag, (imageTag) =>
+      removeHermesFixtureImage(host, apiKey, imageTag, {
+        artifactName: "cleanup-hermes-rebuild-resources-docker-rmi-pinned-current-base-reuse",
+        label: `cleanup pinned current Hermes base reuse alias ${imageTag}`,
       }),
     ),
   );
@@ -597,30 +618,66 @@ test(STALE_BASE_REBUILD
     "initial Hermes onboard must persist the dashboard port used by authoritative rebuild",
   ).toBe(true);
   phase1ImageTag = requireRebuildHermesInitialImageTag(registrySandbox().imageTag, SANDBOX_NAME);
-  const phase1BaseResolution = readSandboxBaseImageResolutionMetadata(phase1ImageTag);
+  const phase1BaseResolution = requireRebuildHermesCurrentBaseIdentity(
+    readSandboxBaseImageResolutionMetadata(phase1ImageTag),
+  );
+  currentBasePinnedReuseTag = `nemoclaw-hermes-sandbox-base-local:image-${phase1BaseResolution.imageId.slice("sha256:".length)}`;
+  currentBaseSourceInspect = await host.command(
+    "docker",
+    ["image", "inspect", "--format", "{{json .}}", phase1BaseResolution.ref],
+    {
+      artifactName: "phase-1-inspect-current-hermes-base-source",
+      env: buildAvailabilityProbeEnv(),
+      redactionValues,
+      timeoutMs: OPENSHELL_TIMEOUT_MS,
+    },
+  );
+  expectExitZero(currentBaseSourceInspect, "inspect phase 1 current Hermes base source");
   const baseReusePlan = planRebuildHermesBaseReuse(
     STALE_BASE_REBUILD,
     phase1BaseResolution,
     CURRENT_BASE_REUSE_TAG,
   );
+  let currentBaseReuseEvidence: ReturnType<typeof verifyRebuildHermesCurrentBaseReuse> | null =
+    null;
   if (baseReusePlan) {
     const tagCurrentBase = await host.command(
       "docker",
       ["tag", baseReusePlan.sourceRef, baseReusePlan.preparedRef],
       {
         artifactName: "phase-1-tag-current-hermes-base-for-reuse",
-        env: testEnv(apiKey),
+        env: buildAvailabilityProbeEnv(),
         redactionValues,
         timeoutMs: OPENSHELL_TIMEOUT_MS,
       },
     );
     expectExitZero(tagCurrentBase, "tag current Hermes base for rebuild reuse");
     currentBaseReuseTag = baseReusePlan.preparedRef;
+    const currentBaseReuseInspect = await host.command(
+      "docker",
+      ["image", "inspect", "--format", "{{json .}}", baseReusePlan.preparedRef],
+      {
+        artifactName: "phase-1-inspect-current-hermes-base-reuse-alias",
+        env: buildAvailabilityProbeEnv(),
+        redactionValues,
+        timeoutMs: OPENSHELL_TIMEOUT_MS,
+      },
+    );
+    expectExitZero(currentBaseReuseInspect, "inspect current Hermes base reuse alias");
+    currentBaseReuseEvidence = verifyRebuildHermesCurrentBaseReuse(
+      phase1BaseResolution,
+      baseReusePlan.preparedRef,
+      currentBaseSourceInspect.stdout.trim(),
+      currentBaseReuseInspect.stdout.trim(),
+    );
+    expect(currentBaseReuseEvidence.pinnedReuseRef).toBe(currentBasePinnedReuseTag);
   }
   await artifacts.writeJson("phase-1-owned-image.json", {
     imageTag: phase1ImageTag,
-    baseResolutionSource: phase1BaseResolution?.source ?? null,
-    reusedBaseImageRef: baseReusePlan?.preparedRef ?? null,
+    baseResolution: phase1BaseResolution,
+    reuseAlias: currentBaseReuseEvidence
+      ? { imageTag: CURRENT_BASE_REUSE_TAG, ...currentBaseReuseEvidence }
+      : null,
   });
 
   await sandbox.cleanupSandbox(SANDBOX_NAME, {
@@ -673,6 +730,18 @@ test(STALE_BASE_REBUILD
   );
   expectExitZero(oldBaseLabels, "inspect immutable old Hermes base fixture labels");
 
+  const oldBaseIdentity = await host.command(
+    "docker",
+    ["image", "inspect", "--format", "{{json .}}", REBUILD_HERMES_OLD_BASE_FIXTURE.imageRef],
+    {
+      artifactName: "phase-2-inspect-old-hermes-base-fixture-identity",
+      env: buildAvailabilityProbeEnv(),
+      redactionValues,
+      timeoutMs: OPENSHELL_TIMEOUT_MS,
+    },
+  );
+  expectExitZero(oldBaseIdentity, "inspect immutable old Hermes base fixture identity");
+
   const oldBaseVersion = await host.command(
     "docker",
     [
@@ -692,12 +761,38 @@ test(STALE_BASE_REBUILD
   );
   expectExitZero(oldBaseVersion, "probe immutable old Hermes base fixture version");
 
+  const oldBaseGlibcVersion = await host.command(
+    "docker",
+    [
+      "run",
+      "--rm",
+      "--entrypoint",
+      "/usr/bin/ldd",
+      REBUILD_HERMES_OLD_BASE_FIXTURE.imageRef,
+      "--version",
+    ],
+    {
+      artifactName: "phase-2-probe-old-hermes-base-fixture-glibc",
+      env: buildAvailabilityProbeEnv(),
+      redactionValues,
+      timeoutMs: OPENSHELL_TIMEOUT_MS,
+    },
+  );
+  expectExitZero(oldBaseGlibcVersion, "probe immutable old Hermes base fixture glibc version");
+
   const oldBaseEvidence = verifyRebuildHermesOldBaseFixture(
     REBUILD_HERMES_OLD_BASE_FIXTURE.imageRef,
     oldBaseLabels.stdout.trim(),
     resultText(oldBaseVersion),
   );
-  await artifacts.writeJson("phase-2-old-base-fixture.json", oldBaseEvidence);
+  const oldBaseResolutionMetadata = createRebuildHermesOldBaseResolutionMetadata(
+    oldBaseIdentity.stdout.trim(),
+    resultText(oldBaseGlibcVersion),
+  );
+  await artifacts.writeJson("phase-2-old-base-fixture.json", {
+    ...oldBaseEvidence,
+    baseResolution: oldBaseResolutionMetadata,
+  });
 
   const tagOldBase = await host.command(
     "docker",
@@ -711,26 +806,13 @@ test(STALE_BASE_REBUILD
   );
   expectExitZero(tagOldBase, "tag immutable old Hermes base fixture for sandbox creation");
 
-  switch (STALE_BASE_REBUILD) {
-    case true: {
-      const tagOldAsCurrent = await host.command(
-        "docker",
-        ["tag", OLD_BASE_TAG, CURRENT_BASE_TAG],
-        {
-          artifactName: "phase-2-tag-old-base-as-current-cache",
-          env: testEnv(apiKey),
-          redactionValues,
-          timeoutMs: OPENSHELL_TIMEOUT_MS,
-        },
-      );
-      expectExitZero(tagOldAsCurrent, "tag old Hermes base as current cache");
-      break;
-    }
-  }
-
   const oldDockerfileDir = fs.mkdtempSync(path.join(os.tmpdir(), "e2e-rebuild-hermes-"));
   const oldDockerfile = path.join(oldDockerfileDir, "Dockerfile");
-  fs.writeFileSync(oldDockerfile, oldHermesDockerfile(), "utf8");
+  fs.writeFileSync(
+    oldDockerfile,
+    oldHermesDockerfile(STALE_BASE_REBUILD ? oldBaseResolutionMetadata : null),
+    "utf8",
+  );
   try {
     const provider = await host.command(
       "bash",
@@ -789,6 +871,29 @@ test(STALE_BASE_REBUILD
   const seededOldSandboxImageState =
     oldSandboxImageState ?? fail("old Hermes sandbox create did not produce managed image state");
   await waitForSandboxReady(host, apiKey);
+  const seededOldBaseResolution = readSandboxBaseImageResolutionMetadata(
+    seededOldSandboxImageState.imageTag,
+  );
+  if (STALE_BASE_REBUILD) {
+    expect(
+      seededOldBaseResolution,
+      "synthetic old Hermes sandbox must retain its stale immutable base identity",
+    ).toEqual(oldBaseResolutionMetadata);
+    staleBaseClassification = verifyRebuildHermesOldBaseIsStale(
+      seededOldBaseResolution ?? fail("synthetic old Hermes sandbox base identity disappeared"),
+      phase1BaseResolution,
+      oldBaseIdentity.stdout.trim(),
+    );
+  } else {
+    expect(
+      seededOldBaseResolution,
+      "normal rebuild lane must not manufacture a stale base-resolution hint",
+    ).toBeNull();
+  }
+  await artifacts.writeJson("phase-3-old-sandbox-base-identity.json", {
+    resolutionMetadata: seededOldBaseResolution,
+    staleClassification: staleBaseClassification,
+  });
   await removeHermesFixtureImage(host, apiKey, OLD_BASE_TAG, {
     artifactName: "phase-3-release-old-hermes-base-tag",
     label: `release old Hermes base tag ${OLD_BASE_TAG}`,
@@ -893,19 +998,18 @@ test(STALE_BASE_REBUILD
   switch (STALE_BASE_REBUILD) {
     case false: {
       progress.phase("phase 5 current base reuse");
-      const reusedBaseImageRef =
-        baseReusePlan?.preparedRef ??
-        fail("normal rebuild-Hermes lane did not prepare a reusable current base image");
       await artifacts.writeText(
         "phase-5-current-base-reuse.txt",
-        `Reusing phase 1 Hermes base ${reusedBaseImageRef}; rebuild must not construct it again.\n`,
+        `Reusing phase 1 Hermes base ${phase1BaseResolution.ref} (${phase1BaseResolution.digest ?? phase1BaseResolution.imageId}) through ${CURRENT_BASE_REUSE_TAG}; rebuild must not construct it again.\n`,
       );
       break;
     case true:
       progress.phase("phase 5 stale base setup");
+      const classification =
+        staleBaseClassification ?? fail("stale rebuild lane did not classify its old base hint");
       await artifacts.writeText(
         "phase-5-stale-base-note.txt",
-        `Left ${CURRENT_BASE_TAG} pointing at ${OLD_HERMES_VERSION}; rebuild must refresh the base cache.\n`,
+        `Recorded ${OLD_HERMES_VERSION} as the sandbox's validated old resolution hint; rebuild must reject its ${classification.reason} and refresh to ${phase1BaseResolution.digest ?? phase1BaseResolution.imageId}.\n`,
       );
   }
 
@@ -922,6 +1026,11 @@ test(STALE_BASE_REBUILD
     onOutput: progress.onOutput,
   });
   expectExitZero(rebuild, "nemoclaw rebuild Hermes sandbox");
+  const rebuildOutput = resultText(rebuild);
+  expect(rebuildOutput).toContain(
+    `Using Hermes Agent base image: ${baseReusePlan?.preparedRef ?? phase1BaseResolution.ref}`,
+  );
+  expect(rebuildOutput).not.toContain("Rebuilding Hermes Agent base image");
 
   const oldImageInspect = await host.command(
     "docker",
@@ -1024,9 +1133,39 @@ test(STALE_BASE_REBUILD
   expectExitZero(restoredConfig, "read Hermes config.yaml after rebuild");
   expect(restoredConfig.stdout).toContain("discord:");
 
-  const updatedRegistryVersion = registryVersion();
+  const rebuiltRegistry = registrySandbox();
+  const updatedRegistryVersion = rebuiltRegistry.agentVersion;
   expect(updatedRegistryVersion).toEqual(expect.any(String));
   expect(updatedRegistryVersion).not.toBe(OLD_HERMES_REGISTRY_VERSION);
+  const rebuiltImageTag = requireRebuildHermesInitialImageTag(
+    rebuiltRegistry.imageTag,
+    SANDBOX_NAME,
+  );
+  const finalImageInspect = await host.command(
+    "docker",
+    ["image", "inspect", "--format", "{{json .}}", rebuiltImageTag],
+    {
+      artifactName: "phase-7-inspect-final-hermes-base-identity",
+      env: buildAvailabilityProbeEnv(),
+      redactionValues,
+      timeoutMs: OPENSHELL_TIMEOUT_MS,
+    },
+  );
+  expectExitZero(finalImageInspect, "inspect final Hermes base identity");
+  const finalBaseEvidence = verifyRebuildHermesFinalBaseIdentity(
+    STALE_BASE_REBUILD,
+    phase1BaseResolution,
+    oldBaseResolutionMetadata,
+    currentBaseSourceInspect?.stdout.trim() ??
+      fail("phase 1 current Hermes base inspection disappeared"),
+    oldBaseIdentity.stdout.trim(),
+    finalImageInspect.stdout.trim(),
+  );
+  await artifacts.writeJson("phase-7-final-base-identity.json", {
+    rebuiltImageTag,
+    resolutionMetadata: readSandboxBaseImageResolutionMetadata(rebuiltImageTag),
+    ...finalBaseEvidence,
+  });
 
   const inferencePayload = JSON.stringify({
     model: HOSTED_MODEL,

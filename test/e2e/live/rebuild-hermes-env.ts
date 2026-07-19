@@ -15,12 +15,7 @@ export interface RebuildHermesBaseReusePlan {
   childEnv: NodeJS.ProcessEnv;
 }
 
-/**
- * Retag the trusted current base selected during initial onboarding under a
- * test-owned local ref. The local ref preserves Hermes' explicit-override
- * trust boundary even when Docker normalizes a pinned multi-arch digest to a
- * platform digest.
- */
+/** Select the normal lane's exact phase 1 image under a test-owned local alias. */
 export function planRebuildHermesBaseReuse(
   staleBaseMode: boolean,
   metadata: SandboxBaseImageResolutionMetadata | null,
