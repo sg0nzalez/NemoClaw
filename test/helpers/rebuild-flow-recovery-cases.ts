@@ -462,10 +462,16 @@ export function registerRebuildFlowRecoveryTests(): void {
           entries: [attached, alreadyDetached],
           detachedProviderEntries: [attached],
         },
-        runOpenshell: (args) =>
-          args.join(" ") === "sandbox delete alpha"
-            ? { status: 7, output: "delete failed", stderr: "delete failed" }
-            : { status: 0, output: "" },
+        runOpenshell: (args) => {
+          const command = args.join(" ");
+          if (command === "sandbox delete alpha") {
+            return { status: 7, output: "delete failed", stderr: "delete failed" };
+          }
+          if (command === "sandbox get -g nemoclaw alpha") {
+            return { status: 0, output: "Phase: Ready", stdout: "Phase: Ready", stderr: "" };
+          }
+          return { status: 0, output: "" };
+        },
       });
 
       await expect(

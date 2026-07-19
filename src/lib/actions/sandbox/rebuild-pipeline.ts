@@ -137,6 +137,7 @@ async function rebuildSandboxUnlocked(
       relock: relockShieldsIfNeeded,
     } = shieldsPhase;
     let sandboxStillExists = true;
+    let sandboxExistenceAmbiguous = false;
 
     try {
       const preDeleteRecovery = revalidatePreparedRecoveryBeforeDelete(
@@ -242,6 +243,9 @@ async function rebuildSandboxUnlocked(
         onDeleted: () => {
           sandboxStillExists = false;
         },
+        onDeleteStateAmbiguous: () => {
+          sandboxExistenceAmbiguous = true;
+        },
       });
       if (!mcpPreparation) return;
       registryRollback.recordRemoval(mcpPreparation.removalReceipt);
@@ -333,7 +337,9 @@ async function rebuildSandboxUnlocked(
         bail,
       });
     } finally {
-      if (!rebuildShieldsWindow.relocked) relockShieldsIfNeeded(sandboxStillExists);
+      if (!rebuildShieldsWindow.relocked && !sandboxExistenceAmbiguous) {
+        relockShieldsIfNeeded(sandboxStillExists);
+      }
     }
   } finally {
     dcodePreflight.cleanup();

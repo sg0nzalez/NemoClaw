@@ -2,12 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { runOpenshell } from "../../adapters/openshell/runtime";
+import { OPENSHELL_PROBE_TIMEOUT_MS } from "../../adapters/openshell/timeouts";
 import { G, R } from "../../cli/terminal-style";
 import { getSandboxDeleteOutcome } from "../../domain/sandbox/destroy";
 import * as nim from "../../inference/nim";
+import { resolveSandboxGatewayName } from "../../onboard/gateway-binding";
 import { redactFull } from "../../security/redact";
+import { parseSandboxPhase } from "../../state/gateway";
 import * as registry from "../../state/registry";
 import { removeSandboxRegistryEntryWithReceipt } from "./destroy";
+import { isMissingSandboxGatewayOutput } from "./gateway-state";
 import type { RebuildBackupManifest } from "./rebuild-backup-phase";
 import type { RebuildBail, RebuildLog } from "./rebuild-credential-preflight";
 import { type RebuildSandboxEntry, warnUnpreservedUserManagedFiles } from "./rebuild-flow-helpers";
@@ -33,14 +37,70 @@ export interface RebuildDestroyPhaseInput {
   force?: boolean;
   validateAfterMcpPreparation?: () => Promise<RebuildDeleteValidationResult>;
   onDeleted: () => void;
+  onDeleteStateAmbiguous?: () => void;
 }
 
 export type RebuildDestroyPhaseResult = McpRebuildPreparation & {
   removalReceipt: registry.SandboxRemovalReceipt | null;
 };
 
+type PostDeleteReconciliation =
+  | { state: "deleted"; phase: null; status: number | null }
+  | { state: "intact"; phase: "Ready" | "Running"; status: 0 }
+  | { state: "ambiguous"; phase: string | null; status: number | null };
+
 /**
- * Detach owned MCP state, stop inference, and delete the old sandbox.
+ * A nonzero delete may be reported after OpenShell has already changed the
+ * sandbox. Query the exact recorded gateway and classify only an explicit
+ * NotFound as deleted or a live Ready/Running phase as intact. Everything else
+ * stays ambiguous so recovery never invents an ownership boundary.
+ */
+function reconcileFailedSandboxDelete(
+  sandboxName: string,
+  sandboxEntry: RebuildSandboxEntry,
+  log: RebuildLog,
+): PostDeleteReconciliation {
+  let gatewayName: string;
+  try {
+    gatewayName = resolveSandboxGatewayName(sandboxEntry);
+  } catch {
+    log("Post-delete reconciliation could not resolve the recorded sandbox gateway.");
+    return { state: "ambiguous", phase: null, status: null };
+  }
+
+  let probe: ReturnType<typeof runOpenshell>;
+  try {
+    probe = runOpenshell(["sandbox", "get", "-g", gatewayName, sandboxName], {
+      ignoreError: true,
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: OPENSHELL_PROBE_TIMEOUT_MS,
+    });
+  } catch {
+    log(`Post-delete reconciliation could not query recorded gateway '${gatewayName}'.`);
+    return { state: "ambiguous", phase: null, status: null };
+  }
+  if (probe.error) {
+    log(`Post-delete reconciliation could not complete on recorded gateway '${gatewayName}'.`);
+    return { state: "ambiguous", phase: null, status: probe.status };
+  }
+  const probeOutput = `${probe.stdout || ""}\n${probe.stderr || ""}`;
+  if (probe.status !== 0 && isMissingSandboxGatewayOutput(probeOutput)) {
+    log(`Post-delete reconciliation on '${gatewayName}': sandbox is absent.`);
+    return { state: "deleted", phase: null, status: probe.status };
+  }
+  const phase = probe.status === 0 ? parseSandboxPhase(probeOutput) : null;
+  if (probe.status === 0 && (phase === "Ready" || phase === "Running")) {
+    log(`Post-delete reconciliation on '${gatewayName}': sandbox remains ${phase}.`);
+    return { state: "intact", phase, status: 0 };
+  }
+  log(
+    `Post-delete reconciliation on '${gatewayName}' is ambiguous: exit=${probe.status}, phase=${phase ?? "unknown"}.`,
+  );
+  return { state: "ambiguous", phase, status: probe.status };
+}
+
+/**
+ * Detach owned MCP state, delete the old sandbox, and then stop inference.
  * Boundary coverage: rebuild-flow.test.ts exercises success, stale recovery,
  * delete failure, provider reattach failure, and MCP-bearing registry retention.
  */
@@ -66,15 +126,34 @@ export async function runRebuildDestroyPhase(
   log(
     `Registry entry: agent=${sbMeta?.agent}, agentVersion=${sbMeta?.agentVersion}, nimContainer=${sbMeta?.nimContainer}`,
   );
+  const stopNimBestEffort = (): void => {
+    try {
+      if (sbMeta && sbMeta.nimContainer) {
+        log(`Stopping NIM container: ${sbMeta.nimContainer}`);
+        nim.stopNimContainerByName(sbMeta.nimContainer);
+      } else {
+        // Best-effort cleanup — see comment in sandboxDestroy.
+        nim.stopNimContainer(sandboxName, { silent: true });
+      }
+    } catch (error) {
+      // Keep the established best-effort contract if the local runtime throws;
+      // recreate force-removes the old name after a successful sandbox delete.
+      log(
+        `Best-effort NIM stop failed; continuing rebuild: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  };
   const mcpPreparation = await prepareMcpBeforeBestEffortNimStop({
-    prepareMcp: () =>
-      prepareMcpForRebuild(
+    prepareMcp: async () => {
+      const preparation = await prepareMcpForRebuild(
         sandboxName,
         staleRecovery,
         input.force === true,
         relockShieldsIfNeeded,
         bail,
-      ),
+      );
+      return preparation;
+    },
     afterPrepare: async (preparation) => {
       // MCP preparation removes only adapter entries whose exact ownership
       // fingerprints match the registry. Probe afterward so a Deep Agents
@@ -108,21 +187,34 @@ export async function runRebuildDestroyPhase(
         );
       }
     },
-    stopNim: () => {
-      if (sbMeta && sbMeta.nimContainer) {
-        log(`Stopping NIM container: ${sbMeta.nimContainer}`);
-        nim.stopNimContainerByName(sbMeta.nimContainer);
-      } else {
-        // Best-effort cleanup — see comment in sandboxDestroy.
-        nim.stopNimContainer(sandboxName, { silent: true });
-      }
-    },
+    // A nonzero OpenShell delete may arrive after partial mutation. Keep local
+    // inference alive until deletion is positively confirmed for every rebuild
+    // path, not only read-only MCP recovery.
+    stopNim: () => undefined,
     log,
   });
   if (!mcpPreparation) return null;
   const rebuildMcpEntries = mcpPreparation.entries;
   const rebuildDetachedMcpProviderEntries = mcpPreparation.detachedProviderEntries;
   const rebuildScrubbedMcpAdapterEntries = mcpPreparation.scrubbedAdapterEntries;
+
+  // Exec-unavailable recovery deliberately made no MCP mutation during
+  // preparation. Re-prove target, policy, provider, and registry state while
+  // the original sandbox and local NIM are still intact. Then run one final
+  // synchronous registry check at the no-await edge immediately before delete.
+  if (mcpPreparation.revalidateBeforeDelete || mcpPreparation.assertDeleteEdgeUnchanged) {
+    try {
+      await mcpPreparation.revalidateBeforeDelete?.();
+      mcpPreparation.assertDeleteEdgeUnchanged?.();
+    } catch (error) {
+      relockShieldsIfNeeded(true);
+      const detail = error instanceof Error ? error.message : String(error);
+      bail(
+        `Failed to revalidate read-only MCP recovery before sandbox deletion: ${redactFull(detail)}`,
+      );
+      return null;
+    }
+  }
 
   log(`Running: openshell sandbox delete ${sandboxName}`);
   const deleteResult = runOpenshell(["sandbox", "delete", sandboxName], {
@@ -131,30 +223,55 @@ export async function runRebuildDestroyPhase(
   });
   const { alreadyGone } = getSandboxDeleteOutcome(deleteResult);
   log(`Delete result: exit=${deleteResult.status}, alreadyGone=${alreadyGone}`);
-  if (deleteResult.status !== 0 && !alreadyGone) {
-    console.error("  Failed to delete sandbox. Aborting rebuild.");
-    const mcpRecoveryFailure = await reattachMcpAfterDeleteFailure(
-      sandboxName,
-      rebuildDetachedMcpProviderEntries,
-      rebuildScrubbedMcpAdapterEntries,
-    );
-    if (mcpRecoveryFailure) {
+  if (deleteResult.status !== 0) {
+    const reconciledDelete = reconcileFailedSandboxDelete(sandboxName, input.sandboxEntry, log);
+    if (reconciledDelete.state === "deleted") {
+      log("Delete returned nonzero, but exact post-delete state confirms sandbox removal.");
+    } else if (reconciledDelete.state === "intact") {
+      console.error("  Failed to delete sandbox. Aborting rebuild.");
       console.error(
-        `  Failed to reattach MCP providers to the existing sandbox: ${mcpRecoveryFailure}`,
+        `  Exact post-delete verification confirms the original sandbox remains ${reconciledDelete.phase}.`,
       );
+      const mcpRecoveryFailure = await reattachMcpAfterDeleteFailure(
+        sandboxName,
+        rebuildDetachedMcpProviderEntries,
+        rebuildScrubbedMcpAdapterEntries,
+      );
+      if (mcpRecoveryFailure) {
+        console.error(
+          `  Failed to reattach MCP providers to the existing sandbox: ${mcpRecoveryFailure}`,
+        );
+      }
+      if (backupManifest) {
+        console.error("  State backup is preserved at: " + backupManifest.backupPath);
+      }
+      relockShieldsIfNeeded(true);
+      bail(
+        mcpRecoveryFailure
+          ? `Failed to delete sandbox; MCP provider recovery also failed: ${mcpRecoveryFailure}`
+          : "Failed to delete sandbox.",
+        deleteResult.status || 1,
+      );
+      return null;
+    } else {
+      console.error(
+        "  Sandbox deletion returned an error, and exact post-delete state is ambiguous.",
+      );
+      console.error(
+        "  MCP ownership and recovery metadata were preserved; local NIM was not stopped.",
+      );
+      if (backupManifest) {
+        console.error("  State backup is preserved at: " + backupManifest.backupPath);
+      }
+      input.onDeleteStateAmbiguous?.();
+      bail(
+        "Sandbox delete failed and exact post-delete state is ambiguous; recovery state was preserved.",
+        deleteResult.status || 1,
+      );
+      return null;
     }
-    if (backupManifest) {
-      console.error("  State backup is preserved at: " + backupManifest.backupPath);
-    }
-    relockShieldsIfNeeded(true);
-    bail(
-      mcpRecoveryFailure
-        ? `Failed to delete sandbox; MCP provider recovery also failed: ${mcpRecoveryFailure}`
-        : "Failed to delete sandbox.",
-      deleteResult.status || 1,
-    );
-    return null;
   }
+  stopNimBestEffort();
   onDeleted();
   let removalReceipt: registry.SandboxRemovalReceipt | null = null;
   if (rebuildMcpEntries.length === 0) {

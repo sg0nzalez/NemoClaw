@@ -92,6 +92,13 @@ function gatewayEndpointOverrideState(): SandboxGatewayState | null {
   }
 }
 
+/** Canonical OpenShell response classifier for an absent sandbox record. */
+export function isMissingSandboxGatewayOutput(output = ""): boolean {
+  return /\bNotFound\b|\bNot Found\b|sandbox not found|sandbox has no spec/i.test(
+    stripAnsi(String(output)),
+  );
+}
+
 function formatGatewaySchemaMismatchOutput(
   issue: OpenShellStateRpcIssue,
   action: string,
@@ -181,7 +188,7 @@ export function getSandboxGatewayState(
   // sibling; an owner-scoped lookup means the sandbox is genuinely absent
   // from its recorded gateway. Both remain `missing`, and reconciliation uses
   // the presence of the explicit owner pin to distinguish those cases.
-  if (/\bNotFound\b|\bNot Found\b|sandbox not found|sandbox has no spec/i.test(output)) {
+  if (isMissingSandboxGatewayOutput(output)) {
     return { state: "missing", output };
   }
   if (
@@ -248,7 +255,7 @@ export async function getSandboxGatewayStateForStatus(
     }
     return { state: "present", output };
   }
-  if (/\bNotFound\b|\bNot Found\b|sandbox not found|sandbox has no spec/i.test(output)) {
+  if (isMissingSandboxGatewayOutput(output)) {
     return { state: "missing", output };
   }
   if (

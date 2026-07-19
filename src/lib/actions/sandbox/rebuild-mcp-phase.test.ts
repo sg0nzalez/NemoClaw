@@ -6,11 +6,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   executeSandboxCommand: vi.fn(),
   prepareAbsent: vi.fn(),
+  prepareExecUnavailable: vi.fn(),
   prepareLive: vi.fn(),
 }));
 
 vi.mock("./mcp-bridge", () => ({
   prepareMcpBridgesForAbsentSandboxRebuild: mocks.prepareAbsent,
+  prepareMcpBridgesForExecUnavailableRebuild: mocks.prepareExecUnavailable,
   prepareMcpBridgesForRebuild: mocks.prepareLive,
   reattachMcpProvidersAfterRebuildAbort: vi.fn(),
   restoreMcpBridgesAfterRebuild: vi.fn(),
@@ -38,6 +40,7 @@ describe("forced rebuild MCP preparation", () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     mocks.executeSandboxCommand.mockReturnValue({ status: 0, stdout: "", stderr: "" });
     mocks.prepareAbsent.mockResolvedValue(emptyPreparation);
+    mocks.prepareExecUnavailable.mockResolvedValue(emptyPreparation);
     mocks.prepareLive.mockResolvedValue(emptyPreparation);
   });
 
@@ -53,8 +56,28 @@ describe("forced rebuild MCP preparation", () => {
     );
 
     expect(mocks.executeSandboxCommand).toHaveBeenCalledWith("alpha", ":");
-    expect(mocks.prepareAbsent).toHaveBeenCalledWith("alpha");
+    expect(mocks.prepareExecUnavailable).toHaveBeenCalledWith("alpha");
+    expect(mocks.prepareAbsent).not.toHaveBeenCalled();
     expect(mocks.prepareLive).not.toHaveBeenCalled();
+    expect(relock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    1, 64, 126, 127, 255,
+  ])("routes every nonzero exec result (%i) through explicit force recovery (#7062)", async (status) => {
+    mocks.executeSandboxCommand.mockReturnValue({ status, stdout: "", stderr: "exec failed" });
+    const relock = vi.fn(() => true);
+    const bail = vi.fn((message: string): never => {
+      throw new Error(message);
+    });
+
+    await expect(prepareMcpForRebuild("alpha", false, true, relock, bail)).resolves.toEqual(
+      emptyPreparation,
+    );
+
+    expect(mocks.prepareExecUnavailable).toHaveBeenCalledWith("alpha");
+    expect(mocks.prepareLive).not.toHaveBeenCalled();
+    expect(mocks.prepareAbsent).not.toHaveBeenCalled();
     expect(relock).not.toHaveBeenCalled();
   });
 
@@ -76,7 +99,7 @@ describe("forced rebuild MCP preparation", () => {
 
   it("fails closed when host-side recovery cannot prove durable ownership (#7062)", async () => {
     mocks.executeSandboxCommand.mockReturnValue({ status: 255, stdout: "", stderr: "relay EOF" });
-    mocks.prepareAbsent.mockRejectedValue(new Error("provider ownership is ambiguous"));
+    mocks.prepareExecUnavailable.mockRejectedValue(new Error("provider ownership is ambiguous"));
     const relock = vi.fn(() => true);
     const bail = vi.fn((message: string): never => {
       throw new Error(message);
@@ -87,6 +110,7 @@ describe("forced rebuild MCP preparation", () => {
     );
 
     expect(mocks.prepareLive).not.toHaveBeenCalled();
+    expect(mocks.prepareAbsent).not.toHaveBeenCalled();
     expect(relock).toHaveBeenCalledWith(true);
   });
 
@@ -102,6 +126,7 @@ describe("forced rebuild MCP preparation", () => {
 
     expect(mocks.executeSandboxCommand).not.toHaveBeenCalled();
     expect(mocks.prepareLive).toHaveBeenCalledWith("alpha");
+    expect(mocks.prepareExecUnavailable).not.toHaveBeenCalled();
     expect(mocks.prepareAbsent).not.toHaveBeenCalled();
   });
 
@@ -117,6 +142,7 @@ describe("forced rebuild MCP preparation", () => {
 
     expect(mocks.executeSandboxCommand).not.toHaveBeenCalled();
     expect(mocks.prepareAbsent).toHaveBeenCalledWith("alpha");
+    expect(mocks.prepareExecUnavailable).not.toHaveBeenCalled();
     expect(mocks.prepareLive).not.toHaveBeenCalled();
   });
 });

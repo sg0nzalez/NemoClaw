@@ -17,6 +17,7 @@ import {
 import { redactBridgeSecretsForDisplay } from "./mcp-bridge-output";
 import {
   prepareMcpBridgesForAbsentSandboxRebuild as prepareMcpBridgesForAbsentSandboxRebuildLifecycle,
+  prepareMcpBridgesForExecUnavailableRebuild as prepareMcpBridgesForExecUnavailableRebuildLifecycle,
   prepareMcpBridgesForRebuild as prepareMcpBridgesForRebuildLifecycle,
   reattachMcpProvidersAfterRebuildAbort as reattachMcpProvidersAfterRebuildAbortLifecycle,
   restoreMcpBridgesAfterRebuild as restoreMcpBridgesAfterRebuildLifecycle,
@@ -94,6 +95,10 @@ export interface McpRebuildPreparation {
   entries: McpBridgeEntry[];
   detachedProviderEntries: McpBridgeEntry[];
   scrubbedAdapterEntries: McpBridgeEntry[];
+  /** Full read-only target, policy, provider, and registry proof before delete. */
+  revalidateBeforeDelete?: () => Promise<void>;
+  /** Final synchronous registry-only proof immediately before delete. */
+  assertDeleteEdgeUnchanged?: () => void;
 }
 
 export async function addMcpBridge(
@@ -147,6 +152,12 @@ export async function prepareMcpBridgesForAbsentSandboxRebuild(
   sandboxName: string,
 ): Promise<McpRebuildPreparation> {
   return prepareMcpBridgesForAbsentSandboxRebuildLifecycle(sandboxName);
+}
+
+export async function prepareMcpBridgesForExecUnavailableRebuild(
+  sandboxName: string,
+): Promise<McpRebuildPreparation> {
+  return prepareMcpBridgesForExecUnavailableRebuildLifecycle(sandboxName);
 }
 
 export async function prepareMcpBridgesForRebuild(
