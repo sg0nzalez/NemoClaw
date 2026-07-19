@@ -88,15 +88,26 @@ const OLD_BASE_TAG = `nemoclaw-hermes-old-base:${SANDBOX_NAME.toLowerCase().repl
 const CURRENT_BASE_REUSE_TAG = `nemoclaw-hermes-sandbox-base-local:e2e-current-${SANDBOX_NAME.toLowerCase().replace(/[^a-z0-9_.-]+/g, "-")}`;
 
 const KANBAN_TASK_PROBE = [
-  "import json, sqlite3, sys",
+  "import json, os, sqlite3, sys",
   "db_path, expected = sys.argv[1:]",
   "db = sqlite3.connect(f'file:{db_path}?mode=ro', uri=True)",
   "try:",
-  "    titles = [row[0] for row in db.execute('SELECT title FROM tasks ORDER BY title')]",
+  "    tables = [row[0] for row in db.execute(\"SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name\")]",
+  "    titles = [row[0] for row in db.execute('SELECT title FROM tasks ORDER BY title')] if 'tasks' in tables else []",
+  "    evidence = {",
+  "        'path': db_path,",
+  "        'sizeBytes': os.path.getsize(db_path),",
+  "        'journalMode': db.execute('PRAGMA journal_mode').fetchone()[0],",
+  "        'quickCheck': db.execute('PRAGMA quick_check').fetchone()[0],",
+  "        'tables': tables,",
+  "        'titles': titles,",
+  "    }",
   "finally:",
   "    db.close()",
-  "print(json.dumps(titles))",
-  "raise SystemExit(0 if expected in titles else 4)",
+  "serialized = json.dumps(evidence, sort_keys=True)",
+  "print(serialized)",
+  "if expected not in titles:",
+  "    raise SystemExit(f'missing expected task: {expected}; evidence={serialized}')",
 ].join("\n");
 
 const ONBOARD_TIMEOUT_MS = 60 * 60_000;
