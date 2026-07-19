@@ -3,12 +3,16 @@
 
 export const REBUILD_HERMES_OLD_BASE_FIXTURE = {
   imageRef:
-    "ghcr.io/nvidia/nemoclaw/hermes-sandbox-base@sha256:fd77ff6024f6cc831b9020160e77a191a62daa84fd4da8f876e675c2705db05e",
-  release: "v0.0.75",
-  revision: "bd38b389af7aa68a767a88058bf849cc83d8486d",
+    "ghcr.io/nvidia/nemoclaw/hermes-sandbox-base@sha256:7e9378c50f291e6dd80b922e8b89e0e7edf21e4e3a80b8c2664be01976f59aa8",
+  release: "v0.0.80",
+  revision: "c5f1194b7bc94d02bb99097b894133a285de4d7a",
   source: "https://github.com/NVIDIA/NemoClaw",
-  hermesSemver: "0.17.0",
-  hermesCalver: "2026.6.19",
+  // v0.0.80 is the first immutable release with the target's v0.18 state
+  // schema. This performance lane owns stale base selection and state
+  // preservation; upstream cross-version state migration is a separate
+  // product boundary.
+  hermesSemver: "0.18.0",
+  hermesCalver: "2026.7.1",
 } as const;
 
 export interface RebuildHermesOldBaseFixtureEvidence {

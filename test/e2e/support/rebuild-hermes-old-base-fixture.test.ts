@@ -48,7 +48,7 @@ describe("rebuild-Hermes historical base fixture", () => {
   });
 
   it.each([
-    "ghcr.io/nvidia/nemoclaw/hermes-sandbox-base:v0.0.75",
+    "ghcr.io/nvidia/nemoclaw/hermes-sandbox-base:v0.0.80",
     `ghcr.io/other/nemoclaw/hermes-sandbox-base@sha256:${"a".repeat(64)}`,
     `${fixture.imageRef.slice(0, -1)}0`,
   ])("rejects a mutable or unreviewed fixture reference %s (#7144)", (imageRef) => {

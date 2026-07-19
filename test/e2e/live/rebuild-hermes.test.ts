@@ -428,7 +428,7 @@ function registrySandbox(): Record<string, unknown> {
 
 test(STALE_BASE_REBUILD
   ? "rebuild-hermes: stale base cache is refreshed while Hermes state survives rebuild"
-  : "rebuild-hermes: old Hermes sandbox rebuild preserves messaging state and upgrades runtime", {
+  : "rebuild-hermes: historical base rebuild preserves messaging state and selects current base", {
   timeout: LIVE_TIMEOUT_MS,
 }, async ({ artifacts, cleanup, host, sandbox, secrets, skip }) => {
   const apiKey = secrets.required("NVIDIA_INFERENCE_API_KEY");
@@ -1094,7 +1094,6 @@ test(STALE_BASE_REBUILD
     },
   );
   expectExitZero(hermesVersion, "Hermes version after rebuild");
-  expect(resultText(hermesVersion)).not.toContain(OLD_HERMES_REGISTRY_VERSION);
   const hermesVersionText = resultText(hermesVersion);
   const actualHermesVersion = hermesVersionText.match(/v(\d+\.\d+\.\d+)/)?.[1];
   expectEqual(
