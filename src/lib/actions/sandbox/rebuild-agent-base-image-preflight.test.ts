@@ -69,7 +69,10 @@ describe("ensureRebuildAgentBaseImage", () => {
             : "hermes:rebuilt",
         built: !options.resolutionHint,
       }));
-    return { agent, ensureAgentBaseImage };
+    const pinAgentSandboxBaseImageRef = vi
+      .spyOn(loadAgentOnboard(), "pinAgentSandboxBaseImageRef")
+      .mockImplementation((_agentName, imageRef) => imageRef);
+    return { agent, ensureAgentBaseImage, pinAgentSandboxBaseImageRef };
   }
 
   it("forwards a recorded hint for cache validation without forcing a legacy rebuild (#4680)", () => {
@@ -138,6 +141,27 @@ describe("ensureRebuildAgentBaseImage", () => {
       forceBaseImageRebuild: false,
       resolutionHint: hint,
       forceBaseImageRefresh: true,
+    });
+  });
+
+  it("preserves resolved provenance with the immutable local recreate handoff (#7144)", () => {
+    const { ensureAgentBaseImage, pinAgentSandboxBaseImageRef } = setup();
+    const resolutionMetadata = { key: "current-base" } as SandboxBaseImageResolutionMetadata;
+    const platformRef = "ghcr.io/nvidia/nemoclaw/hermes-sandbox-base@sha256:platform";
+    const localRef = "nemoclaw-hermes-sandbox-base-local:image-current";
+    ensureAgentBaseImage.mockReturnValue({
+      imageTag: platformRef,
+      built: false,
+      resolutionMetadata,
+    });
+    pinAgentSandboxBaseImageRef.mockReturnValue(localRef);
+    const { ensureRebuildAgentBaseImage } = loadRebuildFlowHelpers();
+
+    expect(ensureRebuildAgentBaseImage("hermes", makeBail(), { resolutionHint: hint })).toEqual({
+      ok: true,
+      imageRef: localRef,
+      overrideEnvVar,
+      resolutionMetadata,
     });
   });
 });

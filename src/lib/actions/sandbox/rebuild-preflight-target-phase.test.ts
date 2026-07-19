@@ -7,7 +7,11 @@ import type {
   ProviderRecoveryReceipt,
   RegistryInferenceRoute,
 } from "../../onboard/rebuild-route-handoff";
-import { stageRegistryProviderRecoveryReceipt } from "./rebuild-preflight-target-phase";
+import type { SandboxBaseImageResolutionMetadata } from "../../sandbox-base-image";
+import {
+  stageRebuildBaseImageResolutionHandoff,
+  stageRegistryProviderRecoveryReceipt,
+} from "./rebuild-preflight-target-phase";
 
 const target = {
   sandboxName: "alpha",
@@ -51,5 +55,41 @@ describe("stageRegistryProviderRecoveryReceipt", () => {
       expiresAtMs: 1_000,
       sessionId: null,
     });
+  });
+});
+
+describe("stageRebuildBaseImageResolutionHandoff", () => {
+  it("binds outer resolver provenance to its immutable local handoff (#7144)", () => {
+    const imageId = `sha256:${"a".repeat(64)}`;
+    const current = { key: "current", imageId } as SandboxBaseImageResolutionMetadata;
+    const recreateOptions: { preResolvedBaseImageMetadata?: SandboxBaseImageResolutionMetadata } =
+      {};
+
+    stageRebuildBaseImageResolutionHandoff(recreateOptions, {
+      ok: true,
+      imageRef: `nemoclaw-hermes-sandbox-base-local:image-${"a".repeat(64)}`,
+      overrideEnvVar: "NEMOCLAW_HERMES_SANDBOX_BASE_IMAGE_REF",
+      resolutionMetadata: current,
+    });
+
+    expect(recreateOptions.preResolvedBaseImageMetadata).toBe(current);
+  });
+
+  it("rejects provenance that is not bound to the immutable local handoff", () => {
+    const current = {
+      key: "current",
+      imageId: `sha256:${"a".repeat(64)}`,
+    } as SandboxBaseImageResolutionMetadata;
+    const recreateOptions: { preResolvedBaseImageMetadata?: SandboxBaseImageResolutionMetadata } =
+      {};
+
+    expect(() =>
+      stageRebuildBaseImageResolutionHandoff(recreateOptions, {
+        ok: true,
+        imageRef: `nemoclaw-hermes-sandbox-base-local:image-${"b".repeat(64)}`,
+        overrideEnvVar: "NEMOCLAW_HERMES_SANDBOX_BASE_IMAGE_REF",
+        resolutionMetadata: current,
+      }),
+    ).toThrow("provenance did not match its immutable local handoff");
   });
 });

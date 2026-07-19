@@ -169,7 +169,25 @@ describe("rebuild agent base image preflight", () => {
     expect(ensureAgentBaseImage).toHaveBeenCalledWith(expect.objectContaining({ name: "hermes" }), {
       forceBaseImageRebuild: false,
     });
-    expect(pinAgentSandboxBaseImageRef).toHaveBeenCalledWith("hermes", mutableRef);
+    expect(pinAgentSandboxBaseImageRef).toHaveBeenCalledWith("hermes", mutableRef, {
+      forceLocal: true,
+    });
+    expect(result).toEqual({ ok: true, imageRef: immutableRef, overrideEnvVar });
+  });
+
+  it("hands a resolved platform digest to recreation through an immutable local ref (#7144)", () => {
+    const platformRef = `ghcr.io/nvidia/nemoclaw/hermes-sandbox-base@sha256:${"a".repeat(64)}`;
+    const immutableRef = `nemoclaw-hermes-sandbox-base-local:image-${"b".repeat(64)}`;
+    const { pinAgentSandboxBaseImageRef } = mockBaseImagePreflight(platformRef);
+    pinAgentSandboxBaseImageRef.mockReturnValue(immutableRef);
+
+    const result = ensureRebuildAgentBaseImage("hermes", makeBail(), {
+      resolutionHint: { key: "stale-base" } as never,
+    });
+
+    expect(pinAgentSandboxBaseImageRef).toHaveBeenCalledWith("hermes", platformRef, {
+      forceLocal: true,
+    });
     expect(result).toEqual({ ok: true, imageRef: immutableRef, overrideEnvVar });
   });
 

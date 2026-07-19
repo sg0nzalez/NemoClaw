@@ -67,8 +67,14 @@ function immutableLocalBaseImageTag(agentName: string, imageId: string): string 
   return `nemoclaw-${agentName}-sandbox-base-local:image-${match[1].toLowerCase()}`;
 }
 
-export function pinAgentSandboxBaseImageRef(agentName: string, imageRef: string): string {
-  if (imageRef.includes("@sha256:")) return imageRef;
+export function pinAgentSandboxBaseImageRef(
+  agentName: string,
+  imageRef: string,
+  options: { forceLocal?: boolean } = {},
+): string {
+  // Rebuild forces a local image-ID alias even for a remote digest so its
+  // inner-onboard handoff cannot discard the outer resolver's provenance.
+  if (imageRef.includes("@sha256:") && options.forceLocal !== true) return imageRef;
   const imageId = dockerImageInspectFormat("{{.Id}}", imageRef, { ignoreError: true });
   const pinnedRef = immutableLocalBaseImageTag(agentName, imageId);
   if (imageRef === pinnedRef) return pinnedRef;

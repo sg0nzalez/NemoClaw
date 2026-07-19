@@ -44,8 +44,12 @@ export function getAgentSandboxBaseImageEnvVar(agentName: string): string {
   return baseImage.getAgentSandboxBaseImageEnvVar(agentName);
 }
 
-export function pinAgentSandboxBaseImageRef(agentName: string, imageRef: string): string {
-  return baseImage.pinAgentSandboxBaseImageRef(agentName, imageRef);
+export function pinAgentSandboxBaseImageRef(
+  agentName: string,
+  imageRef: string,
+  options: { forceLocal?: boolean } = {},
+): string {
+  return baseImage.pinAgentSandboxBaseImageRef(agentName, imageRef, options);
 }
 
 export function hermesBaseImageSupportsMcp(imageRef: string): boolean {

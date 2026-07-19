@@ -56,6 +56,7 @@ export type RebuildAgentBaseImagePreflight = {
   ok: boolean;
   imageRef: string | null;
   overrideEnvVar: string | null;
+  resolutionMetadata?: SandboxBaseImageResolutionMetadata;
 };
 
 /**
@@ -224,11 +225,15 @@ export function ensureRebuildAgentBaseImage(
         ? { forceBaseImageRefresh: options.forceBaseImageRefresh }
         : {}),
     });
-    const imageRef =
-      hasExplicitOverride && result.imageTag
-        ? pinAgentSandboxBaseImageRef(agentDef.name, result.imageTag)
-        : result.imageTag;
-    return { ok: true, imageRef, overrideEnvVar };
+    const imageRef = result.imageTag
+      ? pinAgentSandboxBaseImageRef(agentDef.name, result.imageTag, { forceLocal: true })
+      : result.imageTag;
+    return {
+      ok: true,
+      imageRef,
+      overrideEnvVar,
+      ...(result.resolutionMetadata ? { resolutionMetadata: result.resolutionMetadata } : {}),
+    };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("");

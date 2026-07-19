@@ -76,6 +76,20 @@ export interface RebuildPreparedTarget {
   preparedImage: PreparedRebuildImage | null;
 }
 
+/** Carry the outer resolver's verified provenance into the inner onboard build. */
+export function stageRebuildBaseImageResolutionHandoff(
+  recreateOptions: Pick<RebuildRecreateOnboardOpts, "preResolvedBaseImageMetadata">,
+  preflight: RebuildAgentBaseImagePreflight,
+): void {
+  const metadata = preflight.resolutionMetadata;
+  if (!metadata) return;
+  const imageId = metadata.imageId.match(/^sha256:([0-9a-f]{64})$/i)?.[1]?.toLowerCase();
+  if (!imageId || !preflight.imageRef?.endsWith(`:image-${imageId}`)) {
+    throw new Error("Rebuild base-image provenance did not match its immutable local handoff");
+  }
+  recreateOptions.preResolvedBaseImageMetadata = metadata;
+}
+
 /** Resolve, validate, and persist the complete non-destructive recreate target. */
 export async function prepareRebuildTargetPreflights(args: {
   sandboxName: string;
@@ -204,6 +218,7 @@ export async function prepareRebuildTargetPreflights(args: {
         forceBaseImageRefresh,
       });
   if (!baseImagePreflight.ok) return null;
+  stageRebuildBaseImageResolutionHandoff(recreateOptions, baseImagePreflight);
   const restoreBaseImageOverride = pinRebuildAgentBaseImageForRecreate(baseImagePreflight);
   let targetRuntimePreflight: Awaited<ReturnType<typeof preflightRebuildTargetRuntime>> = {
     ok: false,

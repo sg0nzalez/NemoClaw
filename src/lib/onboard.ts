@@ -676,6 +676,10 @@ type OnboardOptions = SharedOnboardOptions & {
   baseImageResolutionHint?:
     | import("./sandbox-base-image").SandboxBaseImageResolutionMetadata
     | null;
+  /** Internal rebuild handoff for provenance already bound to an immutable local base ref. */
+  preResolvedBaseImageMetadata?:
+    | import("./sandbox-base-image").SandboxBaseImageResolutionMetadata
+    | null;
 };
 // Non-interactive mode: set by --non-interactive flag or env var.
 // When active, all prompts use env var overrides or sensible defaults.
@@ -4043,6 +4047,7 @@ async function runOnboard(opts: OnboardOptions = {}): Promise<void> {
   const baseImageResolutionContext = baseImageResolutionFlow.createBaseImageResolutionContext({
     fresh,
     initialHint: opts.baseImageResolutionHint,
+    initialPreResolvedMetadata: opts.preResolvedBaseImageMetadata,
   });
   if (isNonInteractive()) policyTierEnv.validatePolicyTierEnvEarly();
   const noticeAccepted = await ensureUsageNoticeConsent({

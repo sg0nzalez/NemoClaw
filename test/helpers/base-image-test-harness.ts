@@ -12,7 +12,9 @@ type AgentOnboardModule = typeof import("../../src/lib/agent/onboard");
 type DockerRunModule = typeof import("../../src/lib/adapters/docker/run");
 type DockerImageModule = typeof import("../../src/lib/adapters/docker/image");
 type DockerInspectModule = typeof import("../../src/lib/adapters/docker/inspect");
+type DockerInfoModule = typeof import("../../src/lib/adapters/docker/info");
 type SandboxBaseImageModule = typeof import("../../src/lib/sandbox-base-image");
+type SourceIdentityModule = typeof import("../../src/lib/sandbox-base-image/source-identity");
 
 const requireSource = createRequire(
   new URL("../../src/lib/agent/base-image.test.ts", import.meta.url),
@@ -84,9 +86,13 @@ export function withMockedDocker<T>(
   const dockerRunModule = requireSource("../adapters/docker/run.js") as DockerRunModule;
   const dockerImageModule = requireSource("../adapters/docker/image.js") as DockerImageModule;
   const dockerInspectModule = requireSource("../adapters/docker/inspect.js") as DockerInspectModule;
+  const dockerInfoModule = requireSource("../adapters/docker/info.js") as DockerInfoModule;
   const sandboxBaseImageModule = requireSource(
     "../sandbox-base-image.js",
   ) as SandboxBaseImageModule;
+  const sourceIdentityModule = requireSource(
+    "../sandbox-base-image/source-identity.js",
+  ) as SourceIdentityModule;
   const runnerModule = requireSource("../runner.js") as { ROOT: string };
   const originalDockerCapture = dockerRunModule.dockerCapture;
   const originalDockerBuild = dockerImageModule.dockerBuild;
@@ -94,7 +100,12 @@ export function withMockedDocker<T>(
   const originalDockerTag = dockerImageModule.dockerTag;
   const originalDockerImageInspect = dockerInspectModule.dockerImageInspect;
   const originalDockerImageInspectFormat = dockerInspectModule.dockerImageInspectFormat;
+  const originalDockerInfoFormat = dockerInfoModule.dockerInfoFormat;
   const originalResolveSandboxBaseImage = sandboxBaseImageModule.resolveSandboxBaseImage;
+  const originalGetVersionedBaseImageTags = sourceIdentityModule.getVersionedBaseImageTags;
+  const originalGetNearestVersionedBaseImageTags =
+    sourceIdentityModule.getNearestVersionedBaseImageTags;
+  const originalGetSourceShortShaTags = sourceIdentityModule.getSourceShortShaTags;
   const agentOnboardModulePath = requireSource.resolve("./onboard.js");
   delete require.cache[agentOnboardModulePath];
 
@@ -104,6 +115,7 @@ export function withMockedDocker<T>(
   const dockerTagMock = vi.fn().mockReturnValue({ status: 0 });
   const dockerImageInspectMock = vi.fn();
   const dockerImageInspectFormatMock = vi.fn().mockReturnValue(`sha256:${"a".repeat(64)}`);
+  const dockerInfoFormatMock = vi.fn().mockReturnValue("linux/amd64");
   const resolveSandboxBaseImageMock = vi.fn().mockImplementation((options) => {
     const override = options.env?.[options.envVar];
     return {
@@ -121,8 +133,12 @@ export function withMockedDocker<T>(
     dockerImageInspectMock as DockerInspectModule["dockerImageInspect"];
   dockerInspectModule.dockerImageInspectFormat =
     dockerImageInspectFormatMock as DockerInspectModule["dockerImageInspectFormat"];
+  dockerInfoModule.dockerInfoFormat = dockerInfoFormatMock as DockerInfoModule["dockerInfoFormat"];
   sandboxBaseImageModule.resolveSandboxBaseImage =
     resolveSandboxBaseImageMock as SandboxBaseImageModule["resolveSandboxBaseImage"];
+  sourceIdentityModule.getVersionedBaseImageTags = () => [];
+  sourceIdentityModule.getNearestVersionedBaseImageTags = () => [];
+  sourceIdentityModule.getSourceShortShaTags = () => [];
 
   try {
     const agentOnboardModule = requireSource("./onboard.js") as AgentOnboardModule;
@@ -146,7 +162,12 @@ export function withMockedDocker<T>(
     dockerImageModule.dockerTag = originalDockerTag;
     dockerInspectModule.dockerImageInspect = originalDockerImageInspect;
     dockerInspectModule.dockerImageInspectFormat = originalDockerImageInspectFormat;
+    dockerInfoModule.dockerInfoFormat = originalDockerInfoFormat;
     sandboxBaseImageModule.resolveSandboxBaseImage = originalResolveSandboxBaseImage;
+    sourceIdentityModule.getVersionedBaseImageTags = originalGetVersionedBaseImageTags;
+    sourceIdentityModule.getNearestVersionedBaseImageTags =
+      originalGetNearestVersionedBaseImageTags;
+    sourceIdentityModule.getSourceShortShaTags = originalGetSourceShortShaTags;
     delete require.cache[agentOnboardModulePath];
   }
 }

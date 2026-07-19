@@ -290,6 +290,20 @@ describe("agent base image provisioning", () => {
     );
   });
 
+  it("creates a local immutable handoff for a resolved remote digest (#7144)", () => {
+    withMockedDocker(
+      ({ pinAgentSandboxBaseImageRef, dockerImageInspectFormatMock, dockerTagMock }) => {
+        const remoteRef = `ghcr.io/nvidia/nemoclaw/hermes-sandbox-base@sha256:${"a".repeat(64)}`;
+        dockerImageInspectFormatMock.mockReturnValue(`sha256:${"c".repeat(64)}`);
+
+        const pinned = pinAgentSandboxBaseImageRef("hermes", remoteRef, { forceLocal: true });
+
+        expect(pinned).toBe(`nemoclaw-hermes-sandbox-base-local:image-${"c".repeat(64)}`);
+        expect(dockerTagMock).toHaveBeenCalledWith(remoteRef, pinned, { ignoreError: true });
+      },
+    );
+  });
+
   it("does not trust a moved image-ID-shaped tag without inspecting it", () => {
     withMockedDocker(
       ({ pinAgentSandboxBaseImageRef, dockerImageInspectFormatMock, dockerTagMock }) => {
