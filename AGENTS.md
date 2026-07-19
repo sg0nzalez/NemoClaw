@@ -266,5 +266,6 @@ Follow `.agents/skills/_shared/pr-follow-up.md`: after opening or pushing to a P
 - Run targeted tests once per relevant change set, rerunning after later behavior-affecting edits or hook autofixes, and run `npm run docs` for doc changes
 - Count successful normal hooks as verification; if hooks were skipped or unavailable, refresh `origin/main` and use `npm run check:diff`
 - Follow PR template (`.github/PULL_REQUEST_TEMPLATE.md`)
+- PRs that change `scripts/prepare-dgx-station-host.sh` must provide real DGX Station evidence whose script SHA-256 matches the current PR head, or link a deferral comment from a collaborator with `maintain` or `admin` permission. A deferral accepts merge risk but is not Station qualification; it must state the reason and remaining risk and link an open follow-up issue.
 - No secrets, API keys, or credentials committed
 - Limit open PRs to fewer than 10

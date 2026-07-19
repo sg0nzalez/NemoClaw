@@ -26,6 +26,15 @@
 - [ ] Sensitive-path review completed or maintainer-approved waiver recorded — reviewer/approval link/justification:
 - [ ] Non-success, skipped, or missing CI check accepted by maintainer — check name, approval link, and follow-up issue:
 
+## DGX Station Hardware Validation
+<!-- Required only when scripts/prepare-dgx-station-host.sh changes. Select exactly one outcome and link a comment on this PR. Leave both unchecked and links blank when the file is unchanged. -->
+<!-- Hardware comment format: STATION_HARDWARE_EVIDENCE followed by result=PASS, tested_commit=<40-character SHA>, prepare_script_sha256=<SHA-256>, and profile=<Station profile>, each on its own line. -->
+<!-- Deferral comment format: STATION_HARDWARE_DEFERRAL followed by prepare_script_sha256=<SHA-256>, reason=<reason>, remaining_risk=<risk>, and follow_up=https://github.com/NVIDIA/NemoClaw/issues/NNNN, each on its own line. The comment author must have maintain or admin permission. -->
+- [ ] Real DGX Station validation passed
+- [ ] Maintainer-approved deferral recorded
+Evidence comment:
+Deferral comment:
+
 ## Verification
 <!-- Check each applicable item only when supported by the requested evidence. Run targeted tests once per relevant change set and rerun after later edits or hook autofixes that can affect the tested behavior. Do not rerun hook-covered checks. -->
 - [ ] PR description includes a `Signed-off-by:` line and every commit appears as `Verified` in GitHub
