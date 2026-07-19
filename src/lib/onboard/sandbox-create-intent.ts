@@ -130,6 +130,7 @@ export function resolveSandboxCreateMessagingProviderRequests(
 export function resolveSandboxCreateIntent({
   basePolicyPath,
   sandboxName,
+  inferenceProvider,
   channels,
   enabledChannels,
   disabledChannelNames,
@@ -169,8 +170,11 @@ export function resolveSandboxCreateIntent({
     disabledChannelNames,
   );
 
+  const normalizedInferenceProvider = inferenceProvider?.trim() || null;
+
   return {
     sandboxName,
+    inferenceProvider: normalizedInferenceProvider,
     activeMessagingChannels,
     messagingProviderRequests: messagingProviderRequests.map((request) => ({ ...request })),
     reusableMessagingProviders: enabledReusableMessagingProviders,

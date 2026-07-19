@@ -21,6 +21,7 @@ import {
 
 export type CompleteSandboxCreateIntentInput<Agent, ResourceProfile> = {
   sandboxName: string;
+  inferenceProvider?: string | null;
   enabledChannels: readonly string[] | null;
   webSearchConfig: WebSearchConfig | null;
   agent: Agent;
@@ -119,6 +120,7 @@ export function createSandboxCreateIntentResolver<
     return resolveSandboxCreateIntent({
       basePolicyPath: deps.getAgentPolicyPath(input.agent) || deps.defaultPolicyPath,
       sandboxName: input.sandboxName,
+      inferenceProvider: input.inferenceProvider,
       channels: deps.channels,
       enabledChannels: filterEnabledChannels(input.enabledChannels, input.agent),
       disabledChannelNames: messaging.disabledChannelNames,

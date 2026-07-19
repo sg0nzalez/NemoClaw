@@ -2280,24 +2280,11 @@ async function createSandboxWithBaseImageResolution(
   enabledChannels = filterEnabledChannelsByAgent(enabledChannels, agent);
   const effectiveSandboxGpuConfig =
     sandboxGpuConfig ?? resolveSandboxGpuConfig(gpu, { flag: null, device: null });
+  const extraProviderPlan = createIntent?.extraProviders
+    ? { extraProviders: createIntent.extraProviders, staleExtraProviders: [] }
+    : planRegisteredExtraProviders(GATEWAY_NAME, { runOpenshell });
   // biome-ignore format: keep src/lib/onboard.ts net-neutral for growth guardrail.
-  const extraProviderPlan = createIntent?.extraProviders ? { extraProviders: createIntent.extraProviders, staleExtraProviders: [] } : planRegisteredExtraProviders(GATEWAY_NAME, { runOpenshell });
-  const resolvedCreateIntent =
-    createIntent?.resolved ??
-    (await sandboxCreateIntentResolver.resolve({
-      sandboxName,
-      enabledChannels,
-      webSearchConfig,
-      agent,
-      sandboxGpuConfig: effectiveSandboxGpuConfig,
-      resourceProfile,
-      hermesToolGateways,
-      extraProviders: extraProviderPlan.extraProviders,
-      staleExtraProviders: extraProviderPlan.staleExtraProviders,
-      baselineExclusions: sandboxRegistration.baselineExclusionsForCreate(sandboxName),
-      ...(createIntent?.reuseRegisteredCredentials ? { reuseRegisteredCredentials: true } : {}),
-      ...(createIntent?.policyTier !== undefined ? { policyTier: createIntent.policyTier } : {}),
-    }));
+  const resolvedCreateIntent = createIntent?.resolved ?? (await sandboxCreateIntentResolver.resolve({ sandboxName, inferenceProvider: provider, enabledChannels, webSearchConfig, agent, sandboxGpuConfig: effectiveSandboxGpuConfig, resourceProfile, hermesToolGateways, extraProviders: extraProviderPlan.extraProviders, staleExtraProviders: extraProviderPlan.staleExtraProviders, baselineExclusions: sandboxRegistration.baselineExclusionsForCreate(sandboxName), ...(createIntent?.reuseRegisteredCredentials ? { reuseRegisteredCredentials: true } : {}), ...(createIntent?.policyTier !== undefined ? { policyTier: createIntent.policyTier } : {}) }));
   const messagingCapabilities = await sandboxCreateIntentResolver.rebind(
     {
       sandboxName,
