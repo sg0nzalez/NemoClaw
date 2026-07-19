@@ -304,10 +304,14 @@ async function removeHermesFixtureImage(
   );
 }
 
-async function waitForSandboxReady(host: HostCliClient, apiKey: string): Promise<void> {
+async function waitForSandboxReady(
+  host: HostCliClient,
+  apiKey: string,
+  artifactPrefix: string,
+): Promise<void> {
   for (let attempt = 1; attempt <= 30; attempt += 1) {
     const list = await host.command("openshell", ["sandbox", "list"], {
-      artifactName: `phase-3-sandbox-list-${attempt}`,
+      artifactName: `${artifactPrefix}-sandbox-list-${attempt}`,
       env: testEnv(apiKey),
       redactionValues: [apiKey],
       timeoutMs: 30_000,
@@ -871,7 +875,7 @@ test(STALE_BASE_REBUILD
   }
   const seededOldSandboxImageState =
     oldSandboxImageState ?? fail("old Hermes sandbox create did not produce managed image state");
-  await waitForSandboxReady(host, apiKey);
+  await waitForSandboxReady(host, apiKey, "phase-3");
   const seededOldBaseResolution = readSandboxBaseImageResolutionMetadata(
     seededOldSandboxImageState.imageTag,
   );
@@ -1055,6 +1059,7 @@ test(STALE_BASE_REBUILD
     `Using Hermes Agent base image: ${baseReusePlan?.preparedRef ?? phase1BaseResolution.ref}`,
   );
   expect(rebuildOutput).not.toContain("Rebuilding Hermes Agent base image");
+  await waitForSandboxReady(host, apiKey, "phase-6-post-rebuild");
 
   const backupPathText = rebuildOutput.match(/^\s*Backup:\s+(.+)$/mu)?.[1]?.trim();
   const rebuildBackupPath = backupPathText
@@ -1215,6 +1220,10 @@ test(STALE_BASE_REBUILD
     rebuiltRegistry.imageTag,
     SANDBOX_NAME,
   );
+  expect(
+    rebuiltImageTag,
+    "Hermes rebuild must replace the seeded derived image with a new managed image",
+  ).not.toBe(seededOldSandboxImageState.imageTag);
   const finalImageInspect = await host.command(
     "docker",
     ["image", "inspect", "--format", "{{json .}}", rebuiltImageTag],
