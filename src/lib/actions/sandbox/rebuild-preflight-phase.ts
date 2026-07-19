@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { CLI_NAME } from "../../cli/branding";
 import type { RebuildSandboxOptions } from "../../domain/lifecycle/options";
 import type { SandboxMessagingPlan } from "../../messaging";
 import { hydrateCredentialEnv } from "../../onboard/credential-env";
@@ -89,9 +90,22 @@ export async function runRebuildPreflightPhase(
     requestedObservabilityEnabled,
     skipConfirm,
   } = createRebuildCommandContext(options, opts);
-  const activeSessionCount = countActiveSandboxSessionsForRebuild(sandboxName);
   const sandboxEntry = getRebuildSandboxEntryOrBail(sandboxName, bail);
   if (!sandboxEntry) return null;
+  const baselineTransition = sandboxEntry.baselineExclusionTransition;
+  if (baselineTransition) {
+    const key = baselineTransition.exclusion.key;
+    console.error("");
+    console.error(
+      `  Baseline policy ${baselineTransition.operation} for '${key}' needs repair before rebuild.`,
+    );
+    console.error(
+      `  Re-run: ${CLI_NAME} ${sandboxName} policy ${baselineTransition.operation} ${key}`,
+    );
+    bail(`Pending baseline policy ${baselineTransition.operation} for '${key}' blocks rebuild.`, 1);
+    return null;
+  }
+  const activeSessionCount = countActiveSandboxSessionsForRebuild(sandboxName);
   // #6376: refuse a stuck MCP destroy transaction up front — before backup,
   // image prep, or the old-sandbox delete. The only MCP marker check used to
   // live inside the destroy phase, which runs AFTER the backup phase, so a

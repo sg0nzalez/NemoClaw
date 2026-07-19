@@ -131,6 +131,19 @@ export async function runRebuildDestroyPhase(
     onDeleted,
   } = input;
 
+  const baselineTransition = input.sandboxEntry.baselineExclusionTransition;
+  if (baselineTransition) {
+    const key = baselineTransition.exclusion.key;
+    console.error(
+      `  Baseline policy ${baselineTransition.operation} for '${key}' needs repair before rebuild.`,
+    );
+    console.error(
+      `  Re-run '${baselineTransition.operation === "exclude" ? "policy exclude" : "policy restore"} ${key}' to reconcile the durable journal with the live policy.`,
+    );
+    bail(`Pending baseline policy ${baselineTransition.operation} for '${key}' blocks rebuild.`, 1);
+    return null;
+  }
+
   // Step 3: Delete sandbox without tearing down gateway or session.
   // sandboxDestroy() cleans up the gateway when it's the last sandbox and
   // nulls session.sandboxName — both break the immediate onboard --resume.

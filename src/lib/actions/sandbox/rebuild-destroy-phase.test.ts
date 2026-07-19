@@ -38,6 +38,40 @@ describe("rebuild destroy validation diagnostics", () => {
     vi.restoreAllMocks();
   });
 
+  it("blocks rebuild before MCP or sandbox mutation when baseline repair is pending (#7178)", async () => {
+    const bail = vi.fn((message: string): never => {
+      throw new Error(message);
+    });
+
+    await expect(
+      runRebuildDestroyPhase({
+        sandboxName: "alpha",
+        sandboxEntry: {
+          name: "alpha",
+          baselineExclusionTransition: {
+            id: "tx-1",
+            operation: "restore",
+            exclusion: { key: "nous_research", digest: "approved-digest" },
+            targetLiveDigest: "current-digest",
+            startedAt: "2026-07-19T00:00:00.000Z",
+          },
+        },
+        staleRecovery: false,
+        backupManifest: null,
+        log: vi.fn(),
+        bail,
+        relockShieldsIfNeeded: vi.fn(() => true),
+        onDeleted: vi.fn(),
+      }),
+    ).rejects.toThrow("Pending baseline policy restore");
+
+    expect(mocks.prepareMcpForRebuild).not.toHaveBeenCalled();
+    expect(bail).toHaveBeenCalledWith(
+      "Pending baseline policy restore for 'nous_research' blocks rebuild.",
+      1,
+    );
+  });
+
   it("retains unexpected delete-edge diagnostics without logging credentials (#6195)", async () => {
     const secret = `nvapi-${"a".repeat(32)}`;
     const log = vi.fn();

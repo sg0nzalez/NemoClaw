@@ -278,6 +278,12 @@ async function prepareSnapshotClonePolicy(srcEntry: SandboxEntry): Promise<{
   policyPath: string;
   cleanup?: () => boolean;
 }> {
+  if (srcEntry.baselineExclusionTransition) {
+    const transition = srcEntry.baselineExclusionTransition;
+    throw new Error(
+      `Cannot clone baseline policy while '${transition.operation} ${transition.exclusion.key}' needs repair. Re-run that policy command on '${srcEntry.name}' first.`,
+    );
+  }
   const defaultPolicyPath = path.join(
     ROOT,
     "nemoclaw-blueprint",
@@ -892,9 +898,13 @@ async function runSnapshotRestore(
   const target = request.to ?? sandboxName;
   const targetSandbox =
     target === sandboxName ? sandboxName : validateName(target, "target sandbox name");
-  return withSandboxMutationLock(targetSandbox, () =>
-    runSnapshotRestoreUnlocked(sandboxName, request, targetSandbox),
-  );
+  const lockNames = targetSandbox === sandboxName ? [sandboxName] : [sandboxName, targetSandbox];
+  const orderedNames = [...new Set(lockNames)].sort();
+  const acquire = (index: number): Promise<void> =>
+    index === orderedNames.length
+      ? runSnapshotRestoreUnlocked(sandboxName, request, targetSandbox)
+      : withSandboxMutationLock(orderedNames[index], () => acquire(index + 1));
+  return acquire(0);
 }
 
 async function runSnapshotRestoreUnlocked(
@@ -909,6 +919,16 @@ async function runSnapshotRestoreUnlocked(
   const isCrossSandboxRestore = targetSandbox !== sandboxName;
   const targetEntry = isCrossSandboxRestore ? registry.getSandbox(targetSandbox) : null;
   const targetExists = sourceLiveNames.has(targetSandbox) || Boolean(targetEntry);
+  if (targetEntry?.baselineExclusionTransition) {
+    const transition = targetEntry.baselineExclusionTransition;
+    console.error(
+      `  Cannot replace destination '${targetSandbox}' while baseline policy '${transition.operation} ${transition.exclusion.key}' needs repair.`,
+    );
+    console.error(
+      `  Re-run that policy command on '${targetSandbox}' before restoring into it with --force.`,
+    );
+    snapshotExit(1);
+  }
 
   // #3756 P1 preflight: resolve the snapshot selector AND the source pod
   // image before any destructive action. A bad selector, missing snapshot,
@@ -1086,9 +1106,10 @@ async function runSnapshotRestoreUnlocked(
         clonePolicy.cleanup?.();
       }
     };
-    // Lock order matches onboard: sandbox (outer caller), host dashboard,
-    // gateway route. The host-wide lease stays held from port selection until
-    // the clone is durably registered, including across different gateways.
+    // Lock order is both sandbox names (sorted by the outer caller), host
+    // dashboard, then gateway route. The host-wide lease stays held from port
+    // selection until the clone is durably registered, including across
+    // different gateways.
     await withDashboardPortReservationLock(() =>
       withGatewayRouteMutationLock(sourceGatewayName, createAndRegisterClone),
     );

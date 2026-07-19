@@ -37,7 +37,6 @@ import type {
 } from "../../../state/onboard-session";
 import {
   type BaselineExclusionEntry,
-  getBaselineExclusions,
   type SandboxEntry,
   type SandboxRemovalReceipt,
 } from "../../../state/registry";
@@ -78,6 +77,10 @@ import {
   isDcodeAgent,
 } from "../../observability-policy-presets";
 import type { SandboxCreateIntent as ResolvedSandboxCreateIntent } from "../../sandbox-create-intent-types";
+import {
+  assertBaselineExclusionsMatchCreateIntent,
+  baselineExclusionsForCreate,
+} from "../../sandbox-registration";
 import { withSandboxPhaseTrace } from "../../tracing";
 import type { SandboxCreateIntent } from "../../types";
 import { branchTo, type OnboardStateTransitionResult } from "../result";
@@ -1132,7 +1135,7 @@ class SandboxStateFlow<
       hermesToolGateways,
       extraProviders,
       staleExtraProviders,
-      baselineExclusions: getBaselineExclusions(sandboxName).map((exclusion) => ({ ...exclusion })),
+      baselineExclusions: baselineExclusionsForCreate(sandboxName),
       ...(reuseRegisteredCredentials ? { reuseRegisteredCredentials: true } : {}),
       ...(this.options.authoritativePolicyTier !== undefined
         ? { policyTier: this.options.authoritativePolicyTier }
@@ -1174,16 +1177,19 @@ class SandboxStateFlow<
       this.options.hermesToolGateways,
     );
     const extraProviderPlan = this.deps.planRegisteredExtraProviders(this.options.gatewayName);
-    const createIntent = await this.buildSandboxCreateIntent(
-      state,
-      requestedSandboxName,
-      decision,
-      extraProviderPlan.extraProviders,
-      extraProviderPlan.staleExtraProviders,
-      resourceProfile,
-      effectiveHermesToolGateways,
-    );
     const createAndRecord = async (): Promise<SandboxStepState<WebSearchConfig>> => {
+      // Build the complete create plan after acquiring the sandbox lock. A
+      // baseline transaction may have started while onboarding waited, and a
+      // pre-lock snapshot must never survive a destructive recreate.
+      const createIntent = await this.buildSandboxCreateIntent(
+        state,
+        requestedSandboxName,
+        decision,
+        extraProviderPlan.extraProviders,
+        extraProviderPlan.staleExtraProviders,
+        resourceProfile,
+        effectiveHermesToolGateways,
+      );
       this.assertGatewayRouteCompatible(requestedSandboxName);
       this.assertCheckpointBindingsStillLive(state);
       this.assertCheckpointCreateInputsStillMatch(
@@ -1200,6 +1206,13 @@ class SandboxStateFlow<
         current.messagingPlan = messagingPlan;
         return current;
       });
+      // Re-read at the destructive edge. The lock prevents cooperating
+      // writers from changing this state; the equality check also catches a
+      // direct registry writer that bypassed the lock.
+      assertBaselineExclusionsMatchCreateIntent(
+        requestedSandboxName,
+        createIntent.resolved.policy.options.baselineExclusions,
+      );
       const removalReceipt = await applySandboxResumeDecision(
         decision,
         state.sandboxName,

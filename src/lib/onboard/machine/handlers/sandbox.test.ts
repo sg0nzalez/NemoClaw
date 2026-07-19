@@ -120,9 +120,7 @@ describe("handleSandboxState", () => {
       acknowledgedAt: "2026-07-19T00:00:00.000Z",
       appliedAgentVersion: null,
     };
-    const exclusionsSpy = vi
-      .spyOn(registry, "getBaselineExclusions")
-      .mockReturnValueOnce([exclusion]);
+    const exclusionsSpy = vi.spyOn(registry, "getBaselineExclusions").mockReturnValue([exclusion]);
     try {
       const { deps, calls } = createDeps();
       await handleSandboxState(baseOptions(deps));

@@ -6,8 +6,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const requireDist = createRequire(import.meta.url);
 const onboardSession = requireDist("../state/onboard-session.js");
-const { buildCreatedSandboxRegistryEntry, creationFidelity, registerCreatedSandbox, selection } =
-  requireDist("./sandbox-registration.ts") as typeof import("./sandbox-registration");
+const {
+  assertBaselineExclusionsMatchCreateIntent,
+  baselineExclusionsForCreate,
+  buildCreatedSandboxRegistryEntry,
+  creationFidelity,
+  registerCreatedSandbox,
+  selection,
+} = requireDist("./sandbox-registration.ts") as typeof import("./sandbox-registration");
 
 const runtimeFields = {
   gpuEnabled: true,
@@ -20,6 +26,51 @@ const runtimeFields = {
 };
 
 describe("buildCreatedSandboxRegistryEntry", () => {
+  it("blocks create intent while a baseline policy transaction needs repair (#7178)", () => {
+    const registry = requireDist("../state/registry.js");
+    const transitionSpy = vi.spyOn(registry, "getBaselineExclusionTransition").mockReturnValue({
+      id: "tx-1",
+      operation: "exclude",
+      exclusion: { key: "nous_research", digest: "approved" },
+      targetLiveDigest: null,
+      startedAt: "2026-07-19T00:00:00.000Z",
+    });
+
+    expect(() => baselineExclusionsForCreate("alpha")).toThrow(
+      /policy exclude.*needs repair before sandbox creation/i,
+    );
+
+    transitionSpy.mockRestore();
+  });
+
+  it("rejects a resolved create intent when durable baseline exclusions changed (#7194)", () => {
+    const registry = requireDist("../state/registry.js");
+    const transitionSpy = vi
+      .spyOn(registry, "getBaselineExclusionTransition")
+      .mockReturnValue(null);
+    const exclusionsSpy = vi.spyOn(registry, "getBaselineExclusions").mockReturnValue([
+      {
+        key: "nous_research",
+        digest: "b".repeat(64),
+        acknowledgedAt: "2026-07-19T00:00:00.000Z",
+      },
+    ]);
+    try {
+      expect(() =>
+        assertBaselineExclusionsMatchCreateIntent("alpha", [
+          {
+            key: "nous_research",
+            digest: "a".repeat(64),
+            acknowledgedAt: "2026-07-19T00:00:00.000Z",
+          },
+        ]),
+      ).toThrow(/changed while sandbox creation was being prepared/i);
+    } finally {
+      exclusionsSpy.mockRestore();
+      transitionSpy.mockRestore();
+    }
+  });
+
   it("records the final created sandbox metadata with configured messaging channels", () => {
     const plannedMessagingState = {
       schemaVersion: 1 as const,

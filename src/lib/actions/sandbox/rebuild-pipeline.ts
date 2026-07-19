@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { CLI_NAME } from "../../cli/branding";
 import type { RebuildSandboxOptions } from "../../domain/lifecycle/options";
 import { normalizeRebuildSandboxOptions } from "../../domain/lifecycle/options";
 import { BRAVE_API_KEY_ENV, TAVILY_API_KEY_ENV } from "../../inference/web-search";
@@ -124,6 +125,22 @@ async function rebuildSandboxUnlocked(
     log,
   });
   try {
+    const baselineTransition = sandboxEntry.baselineExclusionTransition;
+    if (baselineTransition) {
+      const key = baselineTransition.exclusion.key;
+      console.error("");
+      console.error(
+        `  Baseline policy ${baselineTransition.operation} for '${key}' needs repair before rebuild.`,
+      );
+      console.error(
+        `  Re-run: ${CLI_NAME} ${sandboxName} policy ${baselineTransition.operation} ${key}`,
+      );
+      bail(
+        `Pending baseline policy ${baselineTransition.operation} for '${key}' blocks rebuild.`,
+        1,
+      );
+      return;
+    }
     const shieldsPhase = runRebuildShieldsPhase(
       sandboxName,
       recoveryRecreate,

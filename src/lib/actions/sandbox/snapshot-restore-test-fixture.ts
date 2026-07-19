@@ -16,6 +16,18 @@ export type OpenshellCaptureResult = {
 export type SandboxRecord = {
   name: string;
   agent?: string | null;
+  baselineExclusionTransition?: {
+    id: string;
+    operation: "exclude" | "restore";
+    exclusion: {
+      key: string;
+      digest: string;
+      acknowledgedAt?: string;
+      appliedAgentVersion?: string | null;
+    };
+    startedAt: string;
+    targetLiveDigest: string | null;
+  };
   baselineExclusions?: Array<{
     key: string;
     digest: string;
@@ -315,6 +327,12 @@ export function resetSnapshotRestoreMocks(): void {
     failedDirs: [],
     failedFiles: [],
   });
+  streamSandboxCreateMock.mockImplementation(async () => ({
+    status: 0,
+    output: "",
+    sawProgress: false,
+    forcedReady: false,
+  }));
   parseLiveSandboxNamesMock.mockReturnValue(new Set(["alpha"]));
 }
 
