@@ -67,6 +67,7 @@ function printDaemonJsonDnsPatch(opts: DaemonJsonDnsPatchOpts): void {
   console.error(`${indent}${sudoPrefix}sh -c '${shBody.replace(/'/g, "'\"'\"'")}'`);
 }
 
+import { detectSandboxFallbackDns } from "./docker-gpu-dns-fallback";
 import {
   BUSYBOX_PROBE_IMAGE,
   DEFAULT_HOST_DNS_PROBE_HOSTNAME,
@@ -190,11 +191,19 @@ export function assertDockerBridgeAndContainerDnsHealthy(
   // blocks outbound UDP:53 to public resolvers leaves the sandbox build
   // unable to resolve registry.npmjs.org; npm then retries for ~15 min and
   // prints the cryptic `Exit handler never called`.
-  const dns = probeContainerDns();
+  // Test the exact resolver a recreated sandbox will inject via `docker run
+  // --dns`, not Docker defaults — otherwise preflight validates a different
+  // network path and passes even when the injected resolver is unreachable
+  // from the container (#7172).
+  const sandboxFallbackDns = detectSandboxFallbackDns();
+  const dns = probeContainerDns({ dnsServer: sandboxFallbackDns });
+  const testedResolverSuffix = sandboxFallbackDns
+    ? ` (tested with --dns ${sandboxFallbackDns})`
+    : "";
   const dnsIsFatal = isFatalContainerDnsProbeFailure(dns);
 
   if (dns.ok) {
-    console.log("  ✓ Container DNS resolution works");
+    console.log(`  ✓ Container DNS resolution works${testedResolverSuffix}`);
     return;
   }
   if (!dnsIsFatal) {
@@ -208,7 +217,9 @@ export function assertDockerBridgeAndContainerDnsHealthy(
       );
     } else {
       console.warn(
-        warnLine(`Container DNS probe inconclusive (reason: ${dns.reason ?? "unknown"}).`),
+        warnLine(
+          `Container DNS probe inconclusive (reason: ${dns.reason ?? "unknown"})${testedResolverSuffix}.`,
+        ),
       );
     }
     if (dns.details) {

@@ -1277,6 +1277,38 @@ describe("probeContainerDns", () => {
     expect(seen).toEqual(["echo", "OVERRIDDEN"]);
   });
 
+  it("injects --dns <resolver> so it tests the recreated sandbox's DNS path (#7172)", () => {
+    let seenScript = "";
+    probeContainerDns({
+      dnsServer: "169.254.169.253",
+      probeName: "pinned-test.invalid",
+      runCaptureImpl: (command) => {
+        seenScript = command[2] ?? "";
+        return "Name:\tpinned-test.invalid\nAddress: 1.2.3.4\n";
+      },
+    });
+    expect(seenScript).toContain("docker run --rm --pull=missing --dns 169.254.169.253 ");
+    expect(seenScript).toContain("nslookup pinned-test.invalid");
+  });
+
+  it("omits --dns when no fallback resolver is provided (#7172)", () => {
+    let seenScript = "";
+    probeContainerDns({
+      probeName: "pinned-test.invalid",
+      runCaptureImpl: (command) => {
+        seenScript = command[2] ?? "";
+        return "Name:\tpinned-test.invalid\nAddress: 1.2.3.4\n";
+      },
+    });
+    expect(seenScript).not.toContain("--dns");
+  });
+
+  it("rejects a non-IP dnsServer to prevent sh -c injection (#7172)", () => {
+    expect(() =>
+      probeContainerDns({ dnsServer: "8.8.8.8; rm -rf /", runCaptureImpl: () => "" }),
+    ).toThrow(/dnsServer must be an IP address/);
+  });
+
   it("uses a random .invalid probe per call to bypass Docker embedded DNS cache (#3630)", () => {
     // Before #3630 the probe queried `registry.npmjs.org`, whose answer
     // Docker's embedded DNS resolver could serve from cache even when
