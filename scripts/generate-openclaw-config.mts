@@ -1152,7 +1152,7 @@ export function buildConfig(env: Env = process.env): JsonObject {
   ) {
     chatUiUrl = `http://127.0.0.1:${gatewayPort}`;
   }
-  const providerKey = (env.NEMOCLAW_INFERENCE_PROVIDER_ID ?? env.NEMOCLAW_PROVIDER_KEY) as string;
+  const providerKey = (env.NEMOCLAW_INFERENCE_PROVIDER_ID || env.NEMOCLAW_PROVIDER_KEY) as string;
   const primaryModelRef = env.NEMOCLAW_PRIMARY_MODEL_REF as string;
   const inferenceBaseUrl = env.NEMOCLAW_INFERENCE_BASE_URL as string;
   const inferenceApi = env.NEMOCLAW_INFERENCE_API as string;

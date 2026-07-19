@@ -9,6 +9,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { readHermesBuildSettings } from "../agents/hermes/config/build-env.ts";
+import { buildConfig } from "../scripts/generate-openclaw-config.mts";
 import { patchStagedDockerfile } from "../src/lib/onboard/dockerfile-patch";
 
 const START_SCRIPT = path.join(import.meta.dirname, "..", "scripts", "nemoclaw-start.sh");
@@ -112,6 +113,23 @@ describe("inference provider route identifier rename (#7177)", () => {
       NEMOCLAW_PROVIDER_KEY: "anthropic",
     } as NodeJS.ProcessEnv);
     expect(settings.providerKey).toBe("openai");
+  });
+
+  it("falls back to the legacy route identifier when the new value is blank", () => {
+    const config = buildConfig({
+      NEMOCLAW_MODEL: "test-model",
+      NEMOCLAW_PRIMARY_MODEL_REF: "test-ref",
+      NEMOCLAW_INFERENCE_PROVIDER_ID: "",
+      NEMOCLAW_PROVIDER_KEY: "openai",
+      NEMOCLAW_INFERENCE_BASE_URL: "https://api.openai.com/v1",
+      NEMOCLAW_INFERENCE_API: "openai-completions",
+      NEMOCLAW_INFERENCE_COMPAT_B64: Buffer.from("{}").toString("base64"),
+    });
+
+    expect(config).toHaveProperty("models.providers.openai");
+    expect(
+      Object.keys((config.models as { providers: Record<string, unknown> }).providers),
+    ).toEqual(["openai"]);
   });
 });
 
