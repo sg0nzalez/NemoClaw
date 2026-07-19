@@ -321,6 +321,23 @@ describe("Station hardware evidence gate", () => {
     ).rejects.toThrow("follow_up issue must be open");
   });
 
+  it("rejects a deferral whose follow-up resolves to a pull request (#7191)", async () => {
+    await expect(
+      evaluateStationHardwareGate(
+        input({
+          api: api({
+            getFollowUpIssue: async () => ({
+              html_url: `https://github.com/${REPOSITORY}/pull/7191`,
+              pull_request: {},
+              state: "open",
+            }),
+          }),
+          body: prBody({ deferral: true, deferralUrl: DEFERRAL_URL }),
+        }),
+      ),
+    ).rejects.toThrow("follow_up must be an issue, not a PR");
+  });
+
   it("fails closed when the preparation script is removed or renamed (#7191)", async () => {
     await expect(
       evaluateStationHardwareGate(
