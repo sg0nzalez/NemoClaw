@@ -52,8 +52,6 @@ describe("read-only OpenShell sandbox control routing", () => {
       ["openclaw", "sessions", "list", "é".repeat(16 * 1024 + 1)],
     ],
     ["a NUL session argument", ["openclaw", "sessions", "list", "bad\0arg"]],
-    ["an LF session argument", ["openclaw", "sessions", "list", "bad\narg"]],
-    ["a CR session argument", ["openclaw", "sessions", "list", "bad\rarg"]],
   ])("rejects %s before creating either transport", async (_label, command) => {
     const test = dependencies({ status: 0, stdout: "unused", stderr: "" });
 
@@ -68,6 +66,21 @@ describe("read-only OpenShell sandbox control routing", () => {
     expect(test.grpcExec).not.toHaveBeenCalled();
     expect(test.cliExec).not.toHaveBeenCalled();
     expect(test.createCli).not.toHaveBeenCalled();
+  });
+
+  it("routes session arguments containing line endings without rewriting them", async () => {
+    const test = dependencies({ status: 0, stdout: "grpc", stderr: "" });
+    const multilineRequest = { ...request, command: [...request.command, "line one\nline two\r"] };
+
+    await expect(
+      execSandboxReadOnlyWithGrpcFallback("nemoclaw", multilineRequest, test.deps),
+    ).resolves.toMatchObject({ status: 0 });
+
+    expect(test.grpcExec).toHaveBeenCalledWith({
+      ...multilineRequest,
+      timeoutMs: OPENSHELL_OPERATION_TIMEOUT_MS,
+    });
+    expect(test.cliExec).not.toHaveBeenCalled();
   });
 
   it("accepts the exact session count and UTF-8 byte boundaries", async () => {

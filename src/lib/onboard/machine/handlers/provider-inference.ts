@@ -3,14 +3,18 @@
 
 import { clearAutoDetectedCompatibleContextWindow } from "../../../inference/compatible-endpoint-context";
 import { resolveAgentProviderInferenceApi } from "../../../inference/config";
-import type {
-  CurrentGatewayRouteCompatibilityCheck,
-  CurrentGatewayRouteDiscoveryPreflight,
-  GatewayRouteDiscoveryConstraints,
+import type { TrustedPrivateEndpointCapability } from "../../../inference/endpoint-ssrf-preflight";
+import {
+  type CurrentGatewayRouteCompatibilityCheck,
+  type CurrentGatewayRouteDiscoveryPreflight,
+  type GatewayRouteDiscoveryConstraints,
+  isAdvisoryGatewayRouteConflict,
 } from "../../../inference/gateway-route-compatibility";
+import { getOllamaContextWindowFloorForAgent } from "../../../inference/ollama-runtime-context";
 import type { WebSearchConfig } from "../../../inference/web-search";
 import type { HermesAuthMethod, Session, SessionUpdates } from "../../../state/onboard-session";
 import type { OnboardInferenceCapabilityCache } from "../../inference-capability-cache";
+import type { RepairLocalInferenceSystemdOverrideOptions } from "../../local-inference-topology";
 import type {
   createProviderRecoveryReceiptLedger,
   ProviderRecoveryReceipt,
@@ -40,6 +44,8 @@ export interface ProviderInferenceSetupOptions {
   preferredInferenceApi?: string | null;
   /** Public addresses approved for custom endpoint host probes. */
   endpointPinnedAddresses?: readonly string[];
+  /** Non-forgeable proof of the exact private subset admitted by the custom preflight. */
+  endpointTrustedPrivateCapability?: TrustedPrivateEndpointCapability;
   /** One-shot host capability cache carried only through this onboarding run. */
   inferenceCapabilityCache?: OnboardInferenceCapabilityCache;
   /** Onboard session that owns the route reservation this setup creates. */
@@ -63,7 +69,10 @@ export interface ProviderSelectionResult {
   reuseGatewayCredentialWithoutLocalKey?: boolean;
   recoveredFromSandbox?: boolean;
   endpointPinnedAddresses?: string[];
+  endpointTrustedPrivateCapability?: TrustedPrivateEndpointCapability;
   inferenceCapabilityCache?: OnboardInferenceCapabilityCache;
+  /** Checkpoint identity proven while validating a local vLLM served alias. */
+  vllmModelIdentity?: string;
 }
 
 export interface ProviderInferenceStateOptions<Gpu, Agent, Host> {
@@ -170,8 +179,7 @@ export interface ProviderInferenceStateOptions<Gpu, Agent, Host> {
     configureCompatibleEndpointReasoning(storedValue?: string | null): Promise<"true" | "false">;
     clearCompatibleEndpointReasoning(): null;
     repairLocalInferenceSystemdOverrideOrExit(
-      provider: string | null,
-      isNonInteractive: () => boolean,
+      options: RepairLocalInferenceSystemdOverrideOptions,
     ): void;
     isNonInteractive(): boolean;
     getOpenshellBinary(): string;
@@ -343,7 +351,9 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
   let skipHostInferenceSmoke = false;
   let reuseGatewayCredentialWithoutLocalKey = false;
   let endpointPinnedAddresses: string[] | undefined;
+  let endpointTrustedPrivateCapability: TrustedPrivateEndpointCapability | undefined;
   let inferenceCapabilityCache: OnboardInferenceCapabilityCache | undefined;
+  let vllmModelIdentity: string | undefined;
   const effectiveResume = resume && !fresh;
   const stateResults: OnboardStateTransitionResult[] = [];
   const retryStateResults: OnboardStateTransitionResult[] = [];
@@ -375,6 +385,7 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
         provider,
         model,
         endpointUrl,
+        credentialEnv,
         preferredInferenceApi,
       });
       const recovery = await deps.ensureResumeProviderReady(gatewayName, provider, credentialEnv);
@@ -437,6 +448,15 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
         deps.log("  [resume] Refreshing compatible-endpoint inference route for messaging.");
       }
       deps.skippedStepMessage("provider_selection", `${provider} / ${model}`);
+      const selectedAgentName = (agent as { name?: string } | null)?.name;
+      if (
+        (!selectedAgentName || selectedAgentName === "openclaw") &&
+        sandboxName &&
+        session?.sandboxPromptProgress?.sandboxName === true &&
+        session.sandboxName === sandboxName
+      ) {
+        deps.log(`  [resume] Reusing sandbox name: ${sandboxName}.`);
+      }
       await deps.recordStateSkipped("provider_selection", {
         reason: "resume",
         provider,
@@ -446,6 +466,12 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
         provider === "compatible-endpoint"
           ? await deps.configureCompatibleEndpointReasoning(compatibleEndpointReasoning)
           : deps.clearCompatibleEndpointReasoning();
+      const localInferenceRepairOptions = {
+        provider,
+        model,
+        contextWindowFloor: getOllamaContextWindowFloorForAgent(agentName(agent)),
+        isNonInteractive: deps.isNonInteractive,
+      };
       if (provider === "ollama-local") {
         const repairMetadata = { repair: "ollama-systemd-loopback" };
         await deps.recordRepairEvent("state.repair.started", {
@@ -453,7 +479,7 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
           metadata: repairMetadata,
         });
         try {
-          deps.repairLocalInferenceSystemdOverrideOrExit(provider, deps.isNonInteractive);
+          deps.repairLocalInferenceSystemdOverrideOrExit(localInferenceRepairOptions);
         } catch (err) {
           await deps.recordRepairEvent("state.repair.failed", {
             state: "provider_selection",
@@ -467,9 +493,13 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
           metadata: repairMetadata,
         });
       } else {
-        deps.repairLocalInferenceSystemdOverrideOrExit(provider, deps.isNonInteractive);
+        deps.repairLocalInferenceSystemdOverrideOrExit(localInferenceRepairOptions);
       }
     } else {
+      // An incomplete Station Express resume intentionally retries setupNim here. The outer
+      // Station resume wrapper restores the exact provider/model as non-interactive env input,
+      // so this re-runs the failed managed install without presenting selection prompts and
+      // obtains a fresh checkpoint identity before the provider step is committed.
       await deps.startRecordedStep("provider_selection");
       const recoverRecordedProvider = providerRecovery.shouldRecover();
       const selection = await withProviderSelectionTrace(
@@ -483,8 +513,8 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
             recoverRecordedProvider,
             gatewayName,
             (route) => guardProviderInferenceRouteSelection(deps, gatewayName, sandboxName, route),
-            (provider) =>
-              deps.preflightGatewayRouteDiscovery({
+            (provider) => {
+              const preflight = deps.preflightGatewayRouteDiscovery({
                 gatewayName,
                 sandboxName,
                 route: {
@@ -494,7 +524,9 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
                   preferredInferenceApi: null,
                   credentialEnv: null,
                 },
-              }).ok,
+              });
+              return preflight.ok || isAdvisoryGatewayRouteConflict(preflight.result);
+            },
             providerRecovery.sessionId,
           ),
       );
@@ -514,7 +546,9 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
       recoveredRecordedProvider = selection.recoveredFromSandbox === true;
       forceInferenceSetup ||= recoveredRecordedProvider;
       endpointPinnedAddresses = selection.endpointPinnedAddresses;
+      endpointTrustedPrivateCapability = selection.endpointTrustedPrivateCapability;
       inferenceCapabilityCache = selection.inferenceCapabilityCache;
+      vllmModelIdentity = selection.vllmModelIdentity;
       shouldRecordProviderSelection = true;
     }
 
@@ -538,6 +572,7 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
         provider,
         model,
         endpointUrl,
+        credentialEnv,
         preferredInferenceApi,
       });
     }
@@ -559,6 +594,7 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
             : preferredInferenceApi,
           compatibleEndpointReasoning,
           nimContainer,
+          stationExpressModelIdentity: vllmModelIdentity,
         }),
       );
     }
@@ -590,6 +626,7 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
               : {}),
             ...(preferredInferenceApi ? { preferredInferenceApi } : {}),
             ...(endpointPinnedAddresses ? { endpointPinnedAddresses } : {}),
+            ...(endpointTrustedPrivateCapability ? { endpointTrustedPrivateCapability } : {}),
             ...(inferenceCapabilityCache ? { inferenceCapabilityCache } : {}),
             reservationSessionId: session?.sessionId,
           };
@@ -652,6 +689,7 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
             provider: selectedProvider,
             model: selectedModel,
             endpointUrl,
+            credentialEnv,
             preferredInferenceApi,
           });
           try {
@@ -701,6 +739,7 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
             provider: selectedProvider,
             model: selectedModel,
             endpointUrl,
+            credentialEnv,
             preferredInferenceApi,
           });
           return deps.reserveSandboxInferenceRoute(resumeReservationName, {
@@ -777,6 +816,7 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
         ...(reuseGatewayCredentialWithoutLocalKey ? { reuseGatewayCredentialWithoutLocalKey } : {}),
         ...(preferredInferenceApi ? { preferredInferenceApi } : {}),
         ...(endpointPinnedAddresses ? { endpointPinnedAddresses } : {}),
+        ...(endpointTrustedPrivateCapability ? { endpointTrustedPrivateCapability } : {}),
         ...(inferenceCapabilityCache ? { inferenceCapabilityCache } : {}),
         ...providerRecovery.setupOptions(
           recoveredRecordedProvider,

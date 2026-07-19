@@ -33,7 +33,7 @@ const defaultDependencies: ReadOnlyRoutingDependencies = {
 /**
  * Prefer direct gRPC for the OpenClaw session-list read and retry through the
  * OpenShell CLI only when configuration or sandbox lookup fails before Exec is
- * dispatched. OpenShell v0.0.72 can persist `auth_mode: "cloudflare_jwt"`;
+ * dispatched. OpenShell v0.0.85 can persist `auth_mode: "cloudflare_jwt"`;
  * only its CLI can establish that OpenShell-owned edge tunnel and manage the
  * associated credential lifecycle, so NemoClaw cannot replace that path here.
  *

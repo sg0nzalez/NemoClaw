@@ -18,7 +18,7 @@ import {
 } from "./sandbox-control";
 
 const DEFAULT_EXEC_MAX_OUTPUT_BYTES = 1024 * 1024;
-const PROTO_VERSION = "0.0.72";
+const PROTO_VERSION = "0.0.85";
 
 interface GetSandboxResponse {
   sandbox?: { metadata?: { id?: string } };
@@ -180,7 +180,12 @@ export function createOpenShellGrpcApi(config: OpenShellGrpcClientConfig): OpenS
   const loaded = grpc.loadPackageDefinition(packageDefinition) as unknown as {
     openshell: { v1: { OpenShell: grpc.ServiceClientConstructor } };
   };
-  return new loaded.openshell.v1.OpenShell(target, credentials) as unknown as OpenShellGrpcApi;
+  const channelOptions: grpc.ChannelOptions = secure ? {} : { "grpc.enable_http_proxy": 0 };
+  return new loaded.openshell.v1.OpenShell(
+    target,
+    credentials,
+    channelOptions,
+  ) as unknown as OpenShellGrpcApi;
 }
 
 function callMetadata(bearerToken: string | undefined): grpc.Metadata {

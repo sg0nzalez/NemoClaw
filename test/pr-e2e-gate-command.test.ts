@@ -135,11 +135,11 @@ describe("PR E2E controller commands", () => {
     });
   });
 
-  it("parses a fork-exception resolution", () => {
+  it("parses a fork credentialed E2E skip resolution", () => {
     expect(
       parseControllerCommand([
         "--mode",
-        "resolve-fork",
+        "record-fork-e2e-skip",
         "--pr",
         "42",
         "--head",
@@ -156,7 +156,7 @@ describe("PR E2E controller commands", () => {
         "https://github.com/NVIDIA/NemoClaw/actions/runs/123",
       ]),
     ).toEqual({
-      mode: "resolve-fork",
+      mode: "record-fork-e2e-skip",
       prNumber: 42,
       headSha: HEAD_SHA,
       baseSha: BASE_SHA,
@@ -207,7 +207,7 @@ describe("PR E2E controller commands", () => {
     });
   });
 
-  it("rejects the removed control-plane exception mode", () => {
+  it("rejects the removed control-plane bypass mode", () => {
     expect(() => parseControllerCommand(["--mode", "resolve-control-plane"])).toThrow(
       /--mode must be/u,
     );
@@ -217,6 +217,42 @@ describe("PR E2E controller commands", () => {
     expect(
       parseControllerCommand(["--mode", "abandon", "--check-id", "17", "--run-id", "23"]),
     ).toEqual({ mode: "abandon", checkRunId: 17, childRunId: 23 });
+  });
+
+  it("parses a wait command", () => {
+    expect(parseControllerCommand(["--mode", "wait", "--run-id", "23"])).toEqual({
+      mode: "wait",
+      childRunId: 23,
+    });
+  });
+
+  it("rejects a wait command without a positive run ID", () => {
+    expect(() => parseControllerCommand(["--mode", "wait", "--run-id", "0"])).toThrow(
+      /positive integer/u,
+    );
+  });
+
+  it("parses a download command into the private evidence workspace", () => {
+    withPrivateWorkDir((workDir) => {
+      expect(
+        parseControllerCommand(["--mode", "download", "--run-id", "23", "--work-dir", workDir]),
+      ).toEqual({
+        mode: "download",
+        childRunId: 23,
+        planPath: path.join(workDir, "risk-plan.json"),
+        statePath: path.join(workDir, "controller-state.json"),
+        evidencePath: path.join(workDir, "evidence"),
+      });
+    });
+  });
+
+  it("rejects a download workspace that is not private", () => {
+    withPrivateWorkDir((workDir) => {
+      fs.chmodSync(workDir, 0o755);
+      expect(() =>
+        parseControllerCommand(["--mode", "download", "--run-id", "23", "--work-dir", workDir]),
+      ).toThrow(/owned private absolute directory/u);
+    });
   });
 
   it("rejects an unsafe pull request number", () => {

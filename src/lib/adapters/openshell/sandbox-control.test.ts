@@ -23,6 +23,8 @@ function expectValidationIssue(
 describe("OpenShell exec command validation", () => {
   it("requires a command", () => {
     expectValidationIssue([], { kind: "empty-command" });
+    expectValidationIssue([""], { kind: "empty-command" });
+    expectValidationIssue([" \t"], { kind: "empty-command" });
   });
 
   it("allows 1024 arguments and rejects 1025", () => {
@@ -79,20 +81,18 @@ describe("OpenShell exec command validation", () => {
     });
   });
 
-  it.each([
-    ["nul", "\0"],
-    ["lf", "\n"],
-    ["cr", "\r"],
-  ] as const)("rejects %s characters", (character, value) => {
-    expectValidationIssue(["sh", `bad${value}argument`], {
+  it("rejects NUL characters", () => {
+    expectValidationIssue(["sh", "bad\0argument"], {
       kind: "argument-control-character",
       index: 1,
-      character,
+      character: "nul",
     });
   });
 
-  it("allows tabs, shell metacharacters, and empty non-command arguments", () => {
-    expect(validateOpenShellExecCommand(["sh", "", "\t; | & $() <> * ?"])).toBeNull();
+  it("allows line endings, tabs, shell metacharacters, and empty non-command arguments", () => {
+    expect(
+      validateOpenShellExecCommand(["sh", "", "line one\nline two\r", "\t; | & $() <> * ?"]),
+    ).toBeNull();
   });
 });
 
@@ -181,7 +181,7 @@ describe("CLI OpenShell sandbox control", () => {
     const capture = vi.fn<() => CaptureOpenshellResult>();
     const control = createCliOpenShellSandboxControl(capture);
 
-    const result = await control.exec({ sandboxName: "alpha", command: ["bad\ncommand"] });
+    const result = await control.exec({ sandboxName: "alpha", command: ["bad\0command"] });
 
     expect(capture).not.toHaveBeenCalled();
     expect(result).toMatchObject({ status: null, stdout: "", stderr: "" });
@@ -189,7 +189,7 @@ describe("CLI OpenShell sandbox control", () => {
     expect((result.error as OpenShellExecRequestValidationError).issue).toEqual({
       kind: "argument-control-character",
       index: 0,
-      character: "lf",
+      character: "nul",
     });
   });
 

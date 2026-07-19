@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { verifyOpenShellGrpcProtoPin } from "../scripts/checks/openshell-grpc-proto-pin";
+import { verifyOpenShellGrpcProtoPin } from "../scripts/checks/openshell-grpc-proto-pin.mts";
 
 function withFixture(
   blueprintVersion: string,

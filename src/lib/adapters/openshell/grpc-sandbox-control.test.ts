@@ -114,7 +114,7 @@ describe("gRPC OpenShell sandbox control", () => {
       fake.api,
     );
 
-    const result = await control.exec({ sandboxName: "alpha", command: ["bad\ncommand"] });
+    const result = await control.exec({ sandboxName: "alpha", command: ["bad\0command"] });
 
     expect(result).toMatchObject({ status: null, stdout: "", stderr: "" });
     expect(result.error).toBeInstanceOf(OpenShellExecRequestValidationError);
@@ -184,7 +184,7 @@ describe("gRPC OpenShell sandbox control", () => {
   it("executes against the pinned OpenShell service definition", async () => {
     const protoFile = path.resolve(
       __dirname,
-      "../../../../third_party/openshell/v0.0.72/proto/openshell.proto",
+      "../../../../third_party/openshell/v0.0.85/proto/openshell.proto",
     );
     const loaded = loadPackageDefinition(
       protoLoader.loadSync(protoFile, {
@@ -224,12 +224,28 @@ describe("gRPC OpenShell sandbox control", () => {
       },
     });
     const port = await bind(server);
-    const control = createGrpcOpenShellSandboxControl({
-      endpoint: `http://127.0.0.1:${port}`,
-    });
+    const proxyEnvironment = {
+      grpc_proxy: process.env.grpc_proxy,
+      no_grpc_proxy: process.env.no_grpc_proxy,
+      no_proxy: process.env.no_proxy,
+    };
+    process.env.grpc_proxy = "http://127.0.0.1:1";
+    process.env.no_grpc_proxy = "";
+    process.env.no_proxy = "";
+    let control: ReturnType<typeof createGrpcOpenShellSandboxControl>;
+    try {
+      control = createGrpcOpenShellSandboxControl({
+        endpoint: `http://127.0.0.1:${port}`,
+      });
+    } finally {
+      for (const [name, value] of Object.entries(proxyEnvironment)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
     try {
       await expect(
-        control.exec({ sandboxName: "alpha", command: ["printf", "wire"] }),
+        control.exec({ sandboxName: "alpha", command: ["printf", "wire one\nwire two\r"] }),
       ).resolves.toEqual({
         status: 0,
         stdout: "wire stdout",
@@ -237,7 +253,7 @@ describe("gRPC OpenShell sandbox control", () => {
       });
       expect(requests).toEqual([
         { name: "alpha" },
-        { sandboxId: "wire-id", command: ["printf", "wire"] },
+        { sandboxId: "wire-id", command: ["printf", "wire one\nwire two\r"] },
       ]);
     } finally {
       control.close();
