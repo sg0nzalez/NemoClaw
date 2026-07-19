@@ -1020,6 +1020,7 @@ test(STALE_BASE_REBUILD
         `Reusing phase 1 Hermes base ${phase1BaseResolution.ref} (${phase1BaseResolution.digest ?? phase1BaseResolution.imageId}) through ${CURRENT_BASE_REUSE_TAG}; rebuild must not construct it again.\n`,
       );
       break;
+    }
     case true:
       progress.phase("phase 5 stale base setup");
       const classification =
