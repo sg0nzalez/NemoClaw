@@ -1096,6 +1096,15 @@ describe("revokeHttpsPinRuntimeAdapterRoute input validation (#6141)", () => {
 });
 
 describe("computeRespawnState orphaned-route bookkeeping (#6141)", () => {
+  it("records the source limitation and removal condition for orphan recovery", () => {
+    expect(__test.ORPHANED_ROUTE_RECOVERY_BOUNDARY).toEqual({
+      whyNotSourceFix:
+        "Durable recovery metadata intentionally omits the upstream URL, pinned addresses, and credential; only the owning inference set caller can supply all three.",
+      removalCondition:
+        "Retire orphaning/manual re-registration only when a reviewed secure recovery source or capability can rehydrate every registered route after respawn without persisting plaintext credentials, exposing them to OpenShell or a sandbox, or weakening per-route token and pinned-address isolation.",
+    });
+  });
+
   it("marks every persisted route except the one being bootstrapped as orphaned", () => {
     const priorRoutes = {
       a: {

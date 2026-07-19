@@ -23,6 +23,16 @@
  * their credentials), so it can answer them with an actionable
  * `route_needs_recovery` response instead of a 404 indistinguishable from a
  * route that never existed (#6141).
+ *
+ * Recovery boundary:
+ * - whyNotSourceFix: the durable row intentionally omits the upstream URL,
+ *   pinned addresses, and credential. Only the owning `inference set` caller
+ *   holds all three, so a respawn cannot reconstruct another route safely.
+ * - removalCondition: retire orphaning/manual re-registration only when a
+ *   reviewed secure recovery source or capability can rehydrate every
+ *   registered route after respawn without persisting plaintext credentials,
+ *   exposing them to OpenShell or a sandbox, or weakening per-route token and
+ *   pinned-address isolation.
  */
 
 import crypto from "node:crypto";
@@ -117,6 +127,14 @@ interface RoutePersistedMeta {
 }
 
 type OrphanedRouteMeta = Pick<RoutePersistedMeta, "providerType" | "generation">;
+
+/** Executable architecture contract mirrored by the orphan-recovery tests. */
+const ORPHANED_ROUTE_RECOVERY_BOUNDARY = {
+  whyNotSourceFix:
+    "Durable recovery metadata intentionally omits the upstream URL, pinned addresses, and credential; only the owning inference set caller can supply all three.",
+  removalCondition:
+    "Retire orphaning/manual re-registration only when a reviewed secure recovery source or capability can rehydrate every registered route after respawn without persisting plaintext credentials, exposing them to OpenShell or a sandbox, or weakening per-route token and pinned-address isolation.",
+} as const;
 
 type AdapterLogFields = Record<string, string | number | boolean | null | undefined>;
 type AdapterLogger = (event: string, fields?: AdapterLogFields) => void;
@@ -995,6 +1013,12 @@ function removeRouteState(routeId: string): void {
  * accordingly instead of a bare 404 either way -- plus the persisted-state
  * shape that keeps them recorded (still without credentials) until their
  * owner re-runs `inference set` and `persistRouteState` supersedes them.
+ *
+ * The module-level `whyNotSourceFix` and `removalCondition` define the exit
+ * criterion for this deliberately degraded state: this function must keep
+ * orphaning non-bootstrap routes until a reviewed recovery source can
+ * rehydrate every route while preserving the same credential and route
+ * isolation boundaries.
  */
 function computeRespawnState(
   priorRoutes: Record<string, JsonObject>,
@@ -1349,6 +1373,7 @@ async function ensureAdapterProcessLocked(bootstrap: {
 }
 
 export const __test = {
+  ORPHANED_ROUTE_RECOVERY_BOUNDARY,
   deriveRouteToken,
   buildContainedForwardPath,
   waitForAdapterProcessExit,
