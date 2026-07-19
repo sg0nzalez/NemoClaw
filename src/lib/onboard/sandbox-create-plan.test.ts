@@ -193,6 +193,7 @@ describe("resolveSandboxCreateIntent", () => {
         additionalPresets: ["github"],
         agentName: "hermes",
         policyTier: "balanced",
+        baselineExclusions: [],
       },
     });
     expect(JSON.parse(JSON.stringify(first))).toEqual(first);
@@ -408,6 +409,7 @@ describe("prepareSandboxCreatePlan", () => {
         additionalPresets: ["github"],
         agentName: "langchain-deepagents-code",
         policyTier: "restricted",
+        baselineExclusions: [],
       },
     );
     expect(result.policyTier).toBe("restricted");

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { BaselineExclusionRequest } from "../policy/baseline-exclusion";
 import type { DockerGpuRoutePlan } from "./docker-gpu-route";
 import type { MessagingTokenDef } from "./messaging-prep";
 import type { MessagingChannel } from "./messaging-state";
@@ -25,6 +26,7 @@ export type SandboxCreatePolicyRequest = {
     readonly additionalPresets: readonly string[];
     readonly agentName?: string | null;
     readonly policyTier: string | null;
+    readonly baselineExclusions: readonly BaselineExclusionRequest[];
   };
 };
 
@@ -76,6 +78,7 @@ export type ResolveSandboxCreateIntentInput = {
   extraPlaceholderKeys?: readonly string[];
   agentName?: string | null;
   policyTier: string | null;
+  baselineExclusions?: readonly BaselineExclusionRequest[];
 };
 
 export type MaterializeSandboxCreatePlanInput = {

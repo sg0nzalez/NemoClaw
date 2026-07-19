@@ -24,6 +24,12 @@ import {
 import { ROOT, run, runCapture } from "../runner";
 import * as registry from "../state/registry";
 import {
+  digestBaselineEntry,
+  getBaselineEntry,
+  mergeBaselineEntryIntoPolicy,
+  removeBaselineEntryFromPolicy,
+} from "./baseline-exclusion";
+import {
   buildPolicyGetCommand,
   buildPolicyGetFullCommand,
   buildPolicySetCommand,
@@ -774,6 +780,122 @@ function removePreset(
   return true;
 }
 
+/** Push a policy YAML body to a sandbox's live gateway via a private temp file. */
+function pushPolicyYaml(
+  sandboxName: string,
+  updatedPolicy: string,
+  options: { nonFatal?: boolean } = {},
+): boolean {
+  if (!assertOpenshellResolvable(options)) return false;
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-policy-"));
+  const tmpFile = path.join(tmpDir, "policy.yaml");
+  fs.writeFileSync(tmpFile, updatedPolicy, { encoding: "utf-8", mode: 0o600 });
+  try {
+    return setPolicyFile(tmpFile, sandboxName, options);
+  } finally {
+    try {
+      fs.unlinkSync(tmpFile);
+    } catch {
+      /* ignored */
+    }
+    try {
+      fs.rmdirSync(tmpDir);
+    } catch {
+      /* ignored */
+    }
+  }
+}
+
+/** Round-trippable live policy body from `--base`, or null when unreadable. */
+function readCurrentSandboxPolicy(sandboxName: string): string | null {
+  let rawPolicy = "";
+  try {
+    rawPolicy = runCapture(buildPolicyGetCommand(sandboxName));
+  } catch {
+    /* ignored */
+  }
+  return parseCurrentPolicyOrEmpty(rawPolicy) || null;
+}
+
+/**
+ * Resolve the reviewed baseline policy source for a sandbox: the active agent's
+ * `policy-additions.yaml`, or the default OpenClaw sandbox base policy.
+ */
+function resolveSandboxBaselinePolicy(
+  sandboxName: string,
+): { policyPath: string; content: string } | null {
+  const agentName = registry.getSandbox(sandboxName)?.agent ?? null;
+  const agent = agentName ? loadAgent(agentName) : null;
+  const additions = agent?.policyAdditionsPath;
+  const policyPath =
+    additions && fs.existsSync(additions)
+      ? additions
+      : path.join(ROOT, "nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml");
+  try {
+    return { policyPath, content: fs.readFileSync(policyPath, "utf-8") };
+  } catch {
+    return null;
+  }
+}
+
+/** The current baseline entry for a key, or null when the baseline omits it. */
+function getSandboxBaselineEntry(sandboxName: string, key: string): PolicyObject | null {
+  const baseline = resolveSandboxBaselinePolicy(sandboxName);
+  return baseline ? getBaselineEntry(baseline.content, key) : null;
+}
+
+/** Content digest of a sandbox's current baseline entry, or null when absent. */
+function getSandboxBaselineEntryDigest(sandboxName: string, key: string): string | null {
+  const entry = getSandboxBaselineEntry(sandboxName, key);
+  return entry ? digestBaselineEntry(entry) : null;
+}
+
+/**
+ * Exclude a baseline entry from the running sandbox policy and record the
+ * approval, bound to `digest`, in the registry so create/rebuild replay it.
+ */
+function excludeBaselineEntry(
+  sandboxName: string,
+  key: string,
+  digest: string,
+  options: { nonFatal?: boolean } = {},
+): boolean {
+  const currentPolicy = readCurrentSandboxPolicy(sandboxName);
+  if (!currentPolicy) {
+    console.error(`  Could not read current policy for sandbox '${sandboxName}'.`);
+    return false;
+  }
+  const { policy: updated, removed } = removeBaselineEntryFromPolicy(currentPolicy, key);
+  if (removed && !pushPolicyYaml(sandboxName, updated, options)) return false;
+  const appliedAgentVersion = registry.getSandbox(sandboxName)?.agentVersion ?? null;
+  registry.addBaselineExclusion(sandboxName, { key, digest, appliedAgentVersion });
+  return true;
+}
+
+/**
+ * Restore a previously excluded baseline entry against the current release
+ * baseline and drop its recorded exclusion. When the release removed the entry
+ * entirely, only the registry record is cleared.
+ */
+function restoreBaselineEntry(
+  sandboxName: string,
+  key: string,
+  options: { nonFatal?: boolean } = {},
+): boolean {
+  const currentPolicy = readCurrentSandboxPolicy(sandboxName);
+  if (!currentPolicy) {
+    console.error(`  Could not read current policy for sandbox '${sandboxName}'.`);
+    return false;
+  }
+  const entry = getSandboxBaselineEntry(sandboxName, key);
+  if (entry) {
+    const updated = mergeBaselineEntryIntoPolicy(currentPolicy, key, entry);
+    if (updated !== currentPolicy && !pushPolicyYaml(sandboxName, updated, options)) return false;
+  }
+  registry.removeBaselineExclusion(sandboxName, key);
+  return true;
+}
+
 /**
  * Interactive preset picker for the `policy-remove` command. Prompts on
  * stderr and resolves to the chosen preset name, or `null` if the user
@@ -998,7 +1120,7 @@ function applyPresetContent(
     console.error(
       `  Warning: '${presetName}' was applied to the gateway but could not be ` +
         `recorded locally because sandbox '${sandboxName}' is not in the ` +
-        `registry, so it will not appear in policy-list or status. Recover or ` +
+        `registry, so it will not appear in policy list or status. Recover or ` +
         `re-onboard the sandbox, then re-apply.`,
     );
     return false;
@@ -1524,6 +1646,7 @@ export {
   buildPolicySetCommand,
   clampSetupPolicyPresetNames,
   customPresetOwnsNetworkPolicyKey,
+  excludeBaselineEntry,
   extractPresetEntries,
   filterSetupPolicyPresets,
   getAppliedPresets,
@@ -1531,6 +1654,8 @@ export {
   getPresetContentGatewayState,
   getPresetEndpoints,
   getPresetValidationWarning,
+  getSandboxBaselineEntry,
+  getSandboxBaselineEntryDigest,
   isMessagingChannelPolicyPreset,
   listCustomPresets,
   listPresets,
@@ -1550,6 +1675,8 @@ export {
   removePreset,
   removePresetFromPolicy,
   resolvePermissivePolicyPath,
+  resolveSandboxBaselinePolicy,
+  restoreBaselineEntry,
   selectForRemoval,
   selectFromList,
   setupPolicyPresetSupported,

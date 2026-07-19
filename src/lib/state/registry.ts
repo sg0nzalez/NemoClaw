@@ -27,7 +27,11 @@ import {
   serializeSandboxMcpStateForDisk,
 } from "./registry-mcp";
 import type { SandboxMessagingState } from "./registry-messaging";
-import { parseSandboxRegistryEntries, retainedDefaultSandbox } from "./registry-normalization";
+import {
+  normalizeBaselineExclusions,
+  parseSandboxRegistryEntries,
+  retainedDefaultSandbox,
+} from "./registry-normalization";
 import * as reversibleRemoval from "./registry-reversible-removal";
 import { nemoclawStateRoot } from "./state-root";
 
@@ -70,6 +74,17 @@ export interface CustomPolicyEntry {
   appliedAt?: string;
 }
 
+export interface BaselineExclusionEntry {
+  /** Exact baseline network policy key excluded, e.g. "nous_research". */
+  key: string;
+  /** Digest of the reviewed baseline entry content the approval was bound to. */
+  digest: string;
+  /** When the exclusion was acknowledged. */
+  acknowledgedAt?: string;
+  /** Agent build/version recorded when the exclusion was last applied. */
+  appliedAgentVersion?: string | null;
+}
+
 // Outcome of the last live sandbox GPU proof run during onboarding/recovery.
 // `status` separates a configured-but-unverified GPU from one whose CUDA
 // usability was actually proven (`verified`) or actively failed a live proof
@@ -106,6 +121,8 @@ export interface SandboxEntry extends Partial<InferenceSelection> {
   openshellVersion?: string | null;
   policies?: string[];
   customPolicies?: CustomPolicyEntry[];
+  /** Operator exclusions from the agent baseline policy, replayed on rebuild. */
+  baselineExclusions?: BaselineExclusionEntry[];
   policyTier?: string | null;
   // True once the onboard policy step has fully completed and reconciled the
   // effective preset selection (set by the post-policy registry write). Absent
@@ -428,11 +445,18 @@ function serializeRegistryForDisk(data: SandboxRegistry): SandboxRegistry {
 function normalizeSandboxEntryForRuntime(entry: SandboxEntry): SandboxEntry {
   const messaging = cloneSandboxMessagingState(entry.messaging);
   const mcp = normalizeSandboxMcpState(entry.mcp);
-  const { messaging: _messaging, mcp: _mcp, ...rest } = entry;
+  const baselineExclusions = normalizeBaselineExclusions(entry.baselineExclusions);
+  const {
+    messaging: _messaging,
+    mcp: _mcp,
+    baselineExclusions: _baselineExclusions,
+    ...rest
+  } = entry;
   return {
     ...rest,
     ...(messaging ? { messaging } : {}),
     ...(mcp ? { mcp } : {}),
+    ...(baselineExclusions ? { baselineExclusions } : {}),
   };
 }
 
@@ -458,12 +482,19 @@ function serializeSandboxEntryForDisk(entry: SandboxEntry): SandboxEntry {
   };
   const messaging = serializeSandboxMessagingStateForDisk(durable.messaging);
   const mcp = serializeSandboxMcpStateForDisk(durable.mcp);
-  const { messaging: _messaging, mcp: _mcp, ...rest } = durable;
+  const baselineExclusions = normalizeBaselineExclusions(durable.baselineExclusions);
+  const {
+    messaging: _messaging,
+    mcp: _mcp,
+    baselineExclusions: _baselineExclusions,
+    ...rest
+  } = durable;
   return {
     ...rest,
     ...(rest.dashboardPort === 0 ? { dashboardPort: null } : {}),
     ...(messaging ? { messaging } : {}),
     ...(mcp ? { mcp } : {}),
+    ...(baselineExclusions ? { baselineExclusions } : {}),
   };
 }
 
@@ -744,6 +775,41 @@ export function removeCustomPolicyByName(name: string, presetName: string): bool
     const next = list.filter((p) => p.name !== presetName);
     if (next.length === list.length) return false;
     sandbox.customPolicies = next.length > 0 ? next : undefined;
+    save(data);
+    return true;
+  });
+}
+
+/** Return the baseline exclusions recorded for a sandbox (never null). */
+export function getBaselineExclusions(name: string): BaselineExclusionEntry[] {
+  const data = load();
+  return data.sandboxes[name]?.baselineExclusions ?? [];
+}
+
+/** Upsert a baseline exclusion by key. Replaces any existing entry for the key. */
+export function addBaselineExclusion(name: string, entry: BaselineExclusionEntry): boolean {
+  return withLock(() => {
+    const data = load();
+    const sandbox = data.sandboxes[name];
+    if (!sandbox) return false;
+    const list = (sandbox.baselineExclusions ?? []).filter((e) => e.key !== entry.key);
+    list.push({ ...entry, acknowledgedAt: entry.acknowledgedAt ?? new Date().toISOString() });
+    sandbox.baselineExclusions = list;
+    save(data);
+    return true;
+  });
+}
+
+/** Remove a baseline exclusion by key. Returns true if an entry was removed. */
+export function removeBaselineExclusion(name: string, key: string): boolean {
+  return withLock(() => {
+    const data = load();
+    const sandbox = data.sandboxes[name];
+    if (!sandbox) return false;
+    const list = sandbox.baselineExclusions ?? [];
+    const next = list.filter((e) => e.key !== key);
+    if (next.length === list.length) return false;
+    sandbox.baselineExclusions = next.length > 0 ? next : undefined;
     save(data);
     return true;
   });

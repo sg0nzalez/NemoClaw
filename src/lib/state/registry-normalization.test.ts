@@ -7,6 +7,8 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { normalizeBaselineExclusions } from "./registry-normalization";
+
 const originalHome = process.env.HOME;
 const temporaryHomes: string[] = [];
 
@@ -113,5 +115,94 @@ describe("sandbox registry normalization", () => {
     ) as { defaultSandbox?: unknown; defaultSelectionRevision?: unknown };
     expect(persisted.defaultSandbox).toBeNull();
     expect(persisted.defaultSelectionRevision).toBe(1);
+  });
+});
+
+describe("baseline exclusion normalization (#7178)", () => {
+  it("keeps well-formed entries and trims key/digest", () => {
+    expect(
+      normalizeBaselineExclusions([
+        {
+          key: "  nous_research  ",
+          digest: "  abc  ",
+          acknowledgedAt: "t",
+          appliedAgentVersion: "1",
+        },
+      ]),
+    ).toEqual([
+      { key: "nous_research", digest: "abc", acknowledgedAt: "t", appliedAgentVersion: "1" },
+    ]);
+  });
+
+  it("drops malformed records missing a key or digest", () => {
+    expect(
+      normalizeBaselineExclusions([
+        { key: "", digest: "abc" },
+        { key: "no_digest" },
+        "not-an-object",
+        { key: "good", digest: "def" },
+      ]),
+    ).toEqual([{ key: "good", digest: "def" }]);
+  });
+
+  it("collapses duplicate keys, last wins", () => {
+    expect(
+      normalizeBaselineExclusions([
+        { key: "dup", digest: "first" },
+        { key: "dup", digest: "second" },
+      ]),
+    ).toEqual([{ key: "dup", digest: "second" }]);
+  });
+
+  it("returns undefined for a legacy registry without the field", () => {
+    expect(normalizeBaselineExclusions(undefined)).toBeUndefined();
+    expect(normalizeBaselineExclusions("nope")).toBeUndefined();
+    expect(normalizeBaselineExclusions([{ key: "", digest: "" }])).toBeUndefined();
+  });
+});
+
+describe("baseline exclusion registry helpers (#7178)", () => {
+  it("round-trips add, get, and remove keyed by baseline entry", async () => {
+    const registry = await loadRegistryWith({});
+    registry.registerSandbox({ name: "alpha", agent: "hermes" });
+
+    expect(registry.getBaselineExclusions("alpha")).toEqual([]);
+
+    expect(registry.addBaselineExclusion("alpha", { key: "nous_research", digest: "d1" })).toBe(
+      true,
+    );
+    const stored = registry.getBaselineExclusions("alpha");
+    expect(stored).toHaveLength(1);
+    expect(stored[0]).toMatchObject({ key: "nous_research", digest: "d1" });
+    expect(typeof stored[0].acknowledgedAt).toBe("string");
+
+    expect(registry.removeBaselineExclusion("alpha", "nous_research")).toBe(true);
+    expect(registry.getBaselineExclusions("alpha")).toEqual([]);
+    expect(registry.removeBaselineExclusion("alpha", "nous_research")).toBe(false);
+  });
+
+  it("keeps exclusions independent from a same-named custom preset", async () => {
+    const registry = await loadRegistryWith({});
+    registry.registerSandbox({ name: "alpha", agent: "hermes" });
+
+    registry.addCustomPolicy("alpha", { name: "brave", content: "version: 1\n" });
+    registry.addBaselineExclusion("alpha", { key: "brave", digest: "d1" });
+
+    expect(registry.getCustomPolicies("alpha").map((p) => p.name)).toEqual(["brave"]);
+    expect(registry.getBaselineExclusions("alpha").map((e) => e.key)).toEqual(["brave"]);
+
+    registry.removeBaselineExclusion("alpha", "brave");
+    expect(registry.getCustomPolicies("alpha").map((p) => p.name)).toEqual(["brave"]);
+    expect(registry.getBaselineExclusions("alpha")).toEqual([]);
+  });
+
+  it("normalizes malformed persisted exclusions on load", async () => {
+    const registry = await loadRegistryWith({
+      alpha: {
+        name: "alpha",
+        baselineExclusions: [{ key: "good", digest: "d1" }, { key: "", digest: "d2" }, "junk"],
+      },
+    });
+    expect(registry.getBaselineExclusions("alpha")).toEqual([{ key: "good", digest: "d1" }]);
   });
 });

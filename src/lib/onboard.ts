@@ -2295,6 +2295,9 @@ async function createSandboxWithBaseImageResolution(
       hermesToolGateways,
       extraProviders: extraProviderPlan.extraProviders,
       staleExtraProviders: extraProviderPlan.staleExtraProviders,
+      baselineExclusions: registry
+        .getBaselineExclusions(sandboxName)
+        .map((exclusion) => ({ key: exclusion.key, digest: exclusion.digest })),
       ...(createIntent?.reuseRegisteredCredentials ? { reuseRegisteredCredentials: true } : {}),
       ...(createIntent?.policyTier !== undefined ? { policyTier: createIntent.policyTier } : {}),
     }));

@@ -294,12 +294,12 @@ export async function runRebuildPostRestorePhase(
     if (policyPresetRestoreIncomplete) {
       if (failedPresets.length > 0) {
         console.log(
-          `    Policy presets failed to reapply: ${failedPresets.join(", ")} \u2014 re-apply manually with \`${CLI_NAME} ${sandboxName} policy-add\``,
+          `    Policy presets failed to reapply: ${failedPresets.join(", ")} \u2014 re-apply manually with \`${CLI_NAME} ${sandboxName} policy add\``,
         );
       }
       if (failedPresetRemovals.length > 0 || !policyPresetReconciliationVerified) {
         console.log(
-          `    Exact live policy reconciliation was incomplete${failedPresetRemovals.length > 0 ? `; remove failed: ${failedPresetRemovals.join(", ")}` : ""} \u2014 reconcile manually with \`${CLI_NAME} ${sandboxName} policy-add\` or \`${CLI_NAME} ${sandboxName} policy-remove\``,
+          `    Exact live policy reconciliation was incomplete${failedPresetRemovals.length > 0 ? `; remove failed: ${failedPresetRemovals.join(", ")}` : ""} \u2014 reconcile manually with \`${CLI_NAME} ${sandboxName} policy add\` or \`${CLI_NAME} ${sandboxName} policy remove\``,
         );
       }
     }

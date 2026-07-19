@@ -136,6 +136,7 @@ Apply maintained presets such as `github`, `pypi`, or `tavily` only when the san
 
 During onboarding, the wizard prompts for a policy tier that determines the default set of presets applied on top of the baseline policy.
 The baseline policy is always applied regardless of the selected tier.
+An operator can persistently exclude a specific baseline entry with [`policy exclude`](#excluding-a-baseline-entry) when they accept reduced, unsupported functionality; excluded entries are the only baseline changes that survive rebuild.
 
 | Tier | Presets included | Description |
 |------|------------------|-------------|
@@ -290,3 +291,27 @@ Edit or review `current-policy.yaml`, then apply it:
 ```bash
 openshell policy set --policy current-policy.yaml --wait <sandbox-name>
 ```
+
+### Excluding a baseline entry
+
+The baseline policy applies to every sandbox, but an operator can persistently exclude a specific baseline entry when they accept reduced, unsupported functionality in exchange for tighter egress.
+
+Preview the exact scope, then exclude an exact baseline key:
+
+```bash
+$$nemoclaw <sandbox-name> policy exclude <key> --dry-run
+$$nemoclaw <sandbox-name> policy exclude <key> --force
+```
+
+The command prints every endpoint, method/path rule, and binary the exclusion removes, and requires explicit acknowledgement (`--force` in non-interactive use).
+The exclusion is bound to the reviewed entry content, recorded in the sandbox registry, and replayed on rebuild.
+If a later release changes or removes that entry, create and rebuild fail closed and require re-review.
+
+List active exclusions with `policy list`.
+Restore an entry against the current baseline and clear its exclusion:
+
+```bash
+$$nemoclaw <sandbox-name> policy restore <key>
+```
+
+Excluding a baseline entry leaves agent features that depend on it unsupported for that sandbox.

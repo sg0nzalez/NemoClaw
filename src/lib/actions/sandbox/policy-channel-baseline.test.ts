@@ -1,0 +1,151 @@
+// SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
+
+import * as store from "../../credentials/store";
+import * as policies from "../../policy";
+import type { PolicyObject } from "../../policy/preset-parsing";
+import * as registry from "../../state/registry";
+
+vi.mock("../../state/mcp-lifecycle-lock", () => ({
+  withSandboxMutationLock: <T>(_name: string, action: () => Promise<T>) => action(),
+}));
+vi.mock("./policy-context-refresh", () => ({
+  refreshSandboxPolicyContextFile: vi.fn(),
+}));
+
+import { excludeSandboxBaseline, restoreSandboxBaseline } from "./policy-channel";
+
+class ExitError extends Error {
+  constructor(public readonly code: number | undefined) {
+    super(`process.exit(${code})`);
+  }
+}
+
+const BASE_CONTENT = `version: 1
+network_policies:
+  nous_research:
+    name: nous_research
+    endpoints:
+      - host: nousresearch.com
+        port: 443
+        rules:
+          - allow: { method: GET, path: "/**" }
+  managed_inference:
+    name: managed_inference
+    endpoints:
+      - host: inference.local
+`;
+
+const NOUS_ENTRY: PolicyObject = {
+  name: "nous_research",
+  endpoints: [{ host: "nousresearch.com", port: 443 }],
+};
+
+let exitSpy: MockInstance;
+let promptMock: MockInstance;
+let excludeBaselineEntryMock: MockInstance;
+let restoreBaselineEntryMock: MockInstance;
+let getBaselineExclusionsMock: MockInstance;
+
+async function captureExit(action: () => Promise<void>): Promise<number | undefined> {
+  try {
+    await action();
+  } catch (error) {
+    if (error instanceof ExitError) return error.code;
+    throw error;
+  }
+  throw new Error("Expected process.exit to be called");
+}
+
+beforeEach(() => {
+  delete process.env.NEMOCLAW_NON_INTERACTIVE;
+  vi.spyOn(console, "log").mockImplementation(() => undefined);
+  vi.spyOn(console, "error").mockImplementation(() => undefined);
+  exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
+    throw new ExitError(code);
+  }) as never);
+  promptMock = vi.spyOn(store, "prompt").mockResolvedValue("y");
+
+  vi.spyOn(registry, "getSandbox").mockReturnValue({ name: "alpha", agent: "hermes" });
+  getBaselineExclusionsMock = vi.spyOn(registry, "getBaselineExclusions").mockReturnValue([]);
+
+  vi.spyOn(policies, "resolveSandboxBaselinePolicy").mockReturnValue({
+    policyPath: "/repo/policy-additions.yaml",
+    content: BASE_CONTENT,
+  });
+  vi.spyOn(policies, "getSandboxBaselineEntry").mockImplementation((_sandbox, key) =>
+    key === "nous_research" ? NOUS_ENTRY : null,
+  );
+  vi.spyOn(policies, "getSandboxBaselineEntryDigest").mockReturnValue("digest-1");
+  excludeBaselineEntryMock = vi.spyOn(policies, "excludeBaselineEntry").mockReturnValue(true);
+  restoreBaselineEntryMock = vi.spyOn(policies, "restoreBaselineEntry").mockReturnValue(true);
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  delete process.env.NEMOCLAW_NON_INTERACTIVE;
+});
+
+describe("excludeSandboxBaseline (#7178)", () => {
+  it("exits on an unknown baseline key without mutating", async () => {
+    const code = await captureExit(() =>
+      excludeSandboxBaseline("alpha", { key: "absent", force: true }),
+    );
+    expect(code).toBe(1);
+    expect(excludeBaselineEntryMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses to exclude a protected baseline entry", async () => {
+    vi.spyOn(policies, "getSandboxBaselineEntry").mockReturnValue({ name: "managed_inference" });
+    const code = await captureExit(() =>
+      excludeSandboxBaseline("alpha", { key: "managed_inference", force: true }),
+    );
+    expect(code).toBe(1);
+    expect(excludeBaselineEntryMock).not.toHaveBeenCalled();
+  });
+
+  it("requires explicit acknowledgement in non-interactive mode", async () => {
+    process.env.NEMOCLAW_NON_INTERACTIVE = "1";
+    const code = await captureExit(() => excludeSandboxBaseline("alpha", { key: "nous_research" }));
+    expect(code).toBe(1);
+    expect(excludeBaselineEntryMock).not.toHaveBeenCalled();
+  });
+
+  it("excludes with a bound digest when acknowledged via --force", async () => {
+    await excludeSandboxBaseline("alpha", { key: "nous_research", force: true });
+    expect(promptMock).not.toHaveBeenCalled();
+    expect(excludeBaselineEntryMock).toHaveBeenCalledWith(
+      "alpha",
+      "nous_research",
+      expect.any(String),
+    );
+  });
+
+  it("does not mutate on --dry-run", async () => {
+    await excludeSandboxBaseline("alpha", { key: "nous_research", dryRun: true });
+    expect(excludeBaselineEntryMock).not.toHaveBeenCalled();
+  });
+
+  it("aborts when the interactive confirmation is declined", async () => {
+    promptMock.mockResolvedValue("n");
+    await excludeSandboxBaseline("alpha", { key: "nous_research" });
+    expect(excludeBaselineEntryMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("restoreSandboxBaseline (#7178)", () => {
+  it("exits when the key is not excluded", async () => {
+    getBaselineExclusionsMock.mockReturnValue([]);
+    const code = await captureExit(() => restoreSandboxBaseline("alpha", { key: "nous_research" }));
+    expect(code).toBe(1);
+    expect(restoreBaselineEntryMock).not.toHaveBeenCalled();
+  });
+
+  it("restores a recorded exclusion", async () => {
+    getBaselineExclusionsMock.mockReturnValue([{ key: "nous_research", digest: "digest-1" }]);
+    await restoreSandboxBaseline("alpha", { key: "nous_research" });
+    expect(restoreBaselineEntryMock).toHaveBeenCalledWith("alpha", "nous_research");
+  });
+});

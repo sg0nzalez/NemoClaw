@@ -165,6 +165,8 @@ export interface SandboxStatusReport {
   openshellDriver: string;
   openshellVersion: string;
   policies: string[];
+  /** Baseline network policy keys the operator has excluded, replayed on rebuild. */
+  baselineExclusions: string[];
   failureLayer: SandboxStatusFailureLayer | null;
   terminalRuntimeHealth: TerminalRuntimeOomProbeResult | null;
   /**
@@ -465,6 +467,9 @@ async function buildSandboxStatusReport(
     sb && Array.isArray(sb.policies)
       ? sb.policies.filter((policy): policy is string => typeof policy === "string")
       : [];
+  const baselineExclusions = sb
+    ? registry.getBaselineExclusions(sandboxName).map((exclusion) => exclusion.key)
+    : [];
   const agent = resolveSandboxStatusAgent(sb?.agent || "openclaw");
   return {
     schemaVersion: 1,
@@ -496,6 +501,7 @@ async function buildSandboxStatusReport(
     openshellDriver: (sb && sb.openshellDriver) || "unknown",
     openshellVersion: (sb && sb.openshellVersion) || "unknown",
     policies,
+    baselineExclusions,
     failureLayer: effectivePreflight.failureLayer,
     terminalRuntimeHealth,
     dockerPaused: !!dockerRuntime?.paused,

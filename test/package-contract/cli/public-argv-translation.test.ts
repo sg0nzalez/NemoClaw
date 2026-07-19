@@ -9,6 +9,7 @@ import {
   translatePublicSandboxArgv,
 } from "../../../dist/lib/cli/public-argv-translation";
 import {
+  SANDBOX_LEGACY_ROUTE_ALIASES,
   SANDBOX_ROUTE_OVERRIDES,
   sandboxRouteTokens,
 } from "../../../dist/lib/cli/public-route-metadata";
@@ -88,14 +89,43 @@ describe("public route/display separation", () => {
       "sandbox:hosts:add",
       "sandbox:hosts:list",
       "sandbox:hosts:remove",
+    ]);
+    expect(sandboxRouteTokens("sandbox:gateway:token")).toEqual(["gateway-token"]);
+    expect(sandboxRouteTokens("sandbox:config:rotate-token")).toEqual(["config", "rotate-token"]);
+  });
+
+  it("canonicalizes the policy group to two-token routes with legacy hyphen aliases", () => {
+    expect(Object.keys(SANDBOX_LEGACY_ROUTE_ALIASES).sort()).toEqual([
       "sandbox:policy:add",
       "sandbox:policy:explain",
       "sandbox:policy:get",
       "sandbox:policy:list",
       "sandbox:policy:remove",
     ]);
-    expect(sandboxRouteTokens("sandbox:gateway:token")).toEqual(["gateway-token"]);
-    expect(sandboxRouteTokens("sandbox:config:rotate-token")).toEqual(["config", "rotate-token"]);
+    // Canonical route is the derived two-token form.
+    expect(sandboxRouteTokens("sandbox:policy:add")).toEqual(["policy", "add"]);
+    expect(sandboxRouteTokens("sandbox:policy:remove")).toEqual(["policy", "remove"]);
+    expect(sandboxRouteTokens("sandbox:policy:exclude")).toEqual(["policy", "exclude"]);
+    // Legacy hyphenated form still recognized.
+    expect(SANDBOX_LEGACY_ROUTE_ALIASES["sandbox:policy:add"]).toEqual([["policy-add"]]);
+  });
+
+  it("routes both canonical and legacy policy spellings to the same command", () => {
+    expectNative(
+      translatePublicSandboxArgv("alpha", "policy", ["add", "github", "--yes"]),
+      "sandbox:policy:add",
+      ["alpha", "github", "--yes"],
+    );
+    expectNative(
+      translatePublicSandboxArgv("alpha", "policy-add", ["github", "--yes"]),
+      "sandbox:policy:add",
+      ["alpha", "github", "--yes"],
+    );
+    expectNative(
+      translatePublicSandboxArgv("alpha", "policy", ["exclude", "nous_research", "--force"]),
+      "sandbox:policy:exclude",
+      ["alpha", "nous_research", "--force"],
+    );
   });
 });
 

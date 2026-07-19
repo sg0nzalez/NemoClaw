@@ -230,6 +230,7 @@ function createPhases(
               directGpu: false,
               additionalPresets: [],
               policyTier: null,
+              baselineExclusions: [],
             },
           },
           gpuCreateArgs: [],

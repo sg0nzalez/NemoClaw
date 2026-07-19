@@ -168,9 +168,9 @@ function partitionPresets(
 
 function buildApprovalPath(sandboxName: string): PolicyContextApprovalPath {
   return {
-    inspect: `nemoclaw ${sandboxName} policy-list`,
-    add: `nemoclaw ${sandboxName} policy-add <preset>`,
-    remove: `nemoclaw ${sandboxName} policy-remove <preset>`,
+    inspect: `nemoclaw ${sandboxName} policy list`,
+    add: `nemoclaw ${sandboxName} policy add <preset>`,
+    remove: `nemoclaw ${sandboxName} policy remove <preset>`,
     documentation: POLICY_DOC_URL,
   };
 }

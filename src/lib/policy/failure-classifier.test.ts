@@ -23,8 +23,8 @@ vi.mock("./tiers", () => ({
 
 import * as registry from "../state/registry";
 import * as policies from ".";
-import { getTier } from "./tiers";
 import { classifyAccessFailure } from "./failure-classifier";
+import { getTier } from "./tiers";
 
 const SANDBOX = "alpha";
 
@@ -140,7 +140,7 @@ describe("classifyAccessFailure", () => {
     expect(result.matchedPreset).toBe("slack");
     expect(result.confidence).toBe("low");
     expect(result.reason).toContain("drift");
-    expect(result.nextStep).toContain("policy-list");
+    expect(result.nextStep).toContain("policy list");
   });
 
   it("downgrades a matched 401 to low confidence when the gateway is unavailable", () => {
@@ -192,7 +192,7 @@ describe("classifyAccessFailure", () => {
 
     expect(result.kind).toBe("blocked-by-policy");
     expect(result.matchedPreset).toBe("github");
-    expect(result.nextStep).toContain("policy-add github");
+    expect(result.nextStep).toContain("policy add github");
   });
 
   it("returns blocked-by-policy when no preset declares the host and the request is refused", () => {
@@ -326,7 +326,7 @@ describe("classifyAccessFailure", () => {
     expect(result.matchedPreset).toBe("slack");
     expect(result.confidence).toBe("low");
     expect(result.reason).toContain(code);
-    expect(result.nextStep).toContain("policy-list");
+    expect(result.nextStep).toContain("policy list");
   });
 
   it("classifies a gateway-unavailable active-preset host hitting EHOSTUNREACH as blocked-by-policy advisory", () => {

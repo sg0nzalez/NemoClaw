@@ -2,7 +2,31 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { isObjectRecord } from "../core/json-types";
-import type { SandboxEntry } from "./registry";
+import type { BaselineExclusionEntry, SandboxEntry } from "./registry";
+
+/**
+ * Coerce a persisted `baselineExclusions` value into well-formed entries,
+ * dropping malformed records and collapsing duplicate keys (last wins). A
+ * legacy registry without the field yields `undefined`, so old state loads
+ * unchanged.
+ */
+export function normalizeBaselineExclusions(value: unknown): BaselineExclusionEntry[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const byKey = new Map<string, BaselineExclusionEntry>();
+  for (const item of value) {
+    if (!isObjectRecord(item)) continue;
+    const key = typeof item.key === "string" ? item.key.trim() : "";
+    const digest = typeof item.digest === "string" ? item.digest.trim() : "";
+    if (!key || !digest) continue;
+    const entry: BaselineExclusionEntry = { key, digest };
+    if (typeof item.acknowledgedAt === "string") entry.acknowledgedAt = item.acknowledgedAt;
+    if (typeof item.appliedAgentVersion === "string") {
+      entry.appliedAgentVersion = item.appliedAgentVersion;
+    }
+    byKey.set(key, entry);
+  }
+  return byKey.size > 0 ? [...byKey.values()] : undefined;
+}
 
 export function parseSandboxRegistryEntries(value: unknown): Array<[string, SandboxEntry]> {
   const sandboxes = isObjectRecord(value) ? value : {};

@@ -23,8 +23,8 @@ vi.mock("./tiers", () => ({
 
 import * as registry from "../state/registry";
 import * as policies from ".";
-import { getTier } from "./tiers";
 import { buildPolicyContext, renderPolicyContextMarkdown } from "./context";
+import { getTier } from "./tiers";
 
 const SANDBOX = "alpha";
 
@@ -125,9 +125,9 @@ describe("buildPolicyContext", () => {
     expect(ctx.activePresets[0].redactedHostCount).toBe(0);
     expect(ctx.activePresets[0].verification).toBe("gateway-unavailable");
     expect(ctx.knownUnappliedPresets.map((p) => p.name)).toEqual(["github"]);
-    expect(ctx.approvalPath.inspect).toBe(`nemoclaw ${SANDBOX} policy-list`);
-    expect(ctx.approvalPath.add).toBe(`nemoclaw ${SANDBOX} policy-add <preset>`);
-    expect(ctx.approvalPath.remove).toBe(`nemoclaw ${SANDBOX} policy-remove <preset>`);
+    expect(ctx.approvalPath.inspect).toBe(`nemoclaw ${SANDBOX} policy list`);
+    expect(ctx.approvalPath.add).toBe(`nemoclaw ${SANDBOX} policy add <preset>`);
+    expect(ctx.approvalPath.remove).toBe(`nemoclaw ${SANDBOX} policy remove <preset>`);
     expect(ctx.supportBoundaries.some((b) => b.capability === "host allowlist enforcement")).toBe(
       true,
     );

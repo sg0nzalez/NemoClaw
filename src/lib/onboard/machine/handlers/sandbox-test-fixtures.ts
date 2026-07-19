@@ -143,6 +143,7 @@ export function createDeps(
             directGpu: false,
             additionalPresets: [],
             policyTier: null,
+            baselineExclusions: [],
           },
         },
         gpuCreateArgs: [],

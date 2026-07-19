@@ -9,6 +9,10 @@ import { isObjectRecord } from "../core/json-types";
 import { getMessagingPolicyKeysByChannel } from "../messaging/channels";
 import * as policies from "../policy";
 import {
+  applyBaselineExclusions,
+  type BaselineExclusionRequest,
+} from "../policy/baseline-exclusion";
+import {
   allMessagingChannelPolicyPresets,
   requiredMessagingChannelPolicyPresets,
 } from "./messaging-policy-presets";
@@ -325,6 +329,7 @@ export function prepareInitialSandboxCreatePolicy(
     additionalPresets?: string[];
     agentName?: string | null;
     policyTier?: string | null;
+    baselineExclusions?: readonly BaselineExclusionRequest[];
   } = {},
 ): InitialSandboxPolicy {
   const directGpuPolicy = options.directGpu
@@ -388,6 +393,21 @@ export function prepareInitialSandboxCreatePolicy(
         fs.writeFileSync(policyPath, filtered.content, { encoding: "utf-8", mode: 0o600 });
         effectiveBasePolicyPath = policyPath;
         basePolicy = filtered.content;
+      }
+    }
+
+    // Replay operator baseline exclusions before presets merge on top. Fails
+    // closed via applyBaselineExclusions when a recorded approval no longer
+    // matches the current baseline, so a changed release forces re-review.
+    const baselineExclusions = options.baselineExclusions ?? [];
+    if (baselineExclusions.length > 0) {
+      const excluded = applyBaselineExclusions(basePolicy, baselineExclusions);
+      if (excluded.excludedKeys.length > 0) {
+        const policyPath = secureTempFile("nemoclaw-agent-policy", ".yaml");
+        cleanupFns.push(createPolicyTempCleanup(policyPath, "nemoclaw-agent-policy"));
+        fs.writeFileSync(policyPath, excluded.content, { encoding: "utf-8", mode: 0o600 });
+        effectiveBasePolicyPath = policyPath;
+        basePolicy = excluded.content;
       }
     }
 
