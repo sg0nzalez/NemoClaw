@@ -3,12 +3,12 @@
 
 export const REBUILD_HERMES_OLD_BASE_FIXTURE = {
   imageRef:
-    "ghcr.io/nvidia/nemoclaw/hermes-sandbox-base@sha256:48c758b7f69982740a7aa52e666c11d7f1be1faaf74550cab52b657fbfa238be",
-  release: "v0.0.50",
-  revision: "14b2be2933ca8e001f66575a1e7bb4f166f401d8",
+    "ghcr.io/nvidia/nemoclaw/hermes-sandbox-base@sha256:fd77ff6024f6cc831b9020160e77a191a62daa84fd4da8f876e675c2705db05e",
+  release: "v0.0.75",
+  revision: "bd38b389af7aa68a767a88058bf849cc83d8486d",
   source: "https://github.com/NVIDIA/NemoClaw",
-  hermesSemver: "0.14.0",
-  hermesCalver: "2026.5.16",
+  hermesSemver: "0.17.0",
+  hermesCalver: "2026.6.19",
 } as const;
 
 export interface RebuildHermesOldBaseFixtureEvidence {
