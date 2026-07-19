@@ -63,6 +63,9 @@ export type RebuildFlowOverrides = {
   };
   restoreMcpBridgesAfterRebuild?: () => Promise<void>;
   buildMessagingRebuildPlan?: () => Promise<unknown> | unknown;
+  agentPolicyAdditionsContent?: string;
+  preflightWithProductionBaselineResolver?: boolean;
+  preflightAuthoritativeRebuildTarget?: (options: Record<string, unknown>) => Promise<void> | void;
   sandboxEntry?: Record<string, unknown>;
   sandboxBaseImageLabelsOutput?: string;
   sessionSandboxName?: string;

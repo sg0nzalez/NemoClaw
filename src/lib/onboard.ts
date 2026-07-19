@@ -3953,6 +3953,7 @@ async function preflightAuthoritativeRebuildTarget(
     await authoritativeRebuildTarget.preflightAuthoritativeRebuildTarget(
       { ...opts, controlUiPort: opts.controlUiPort ?? null },
       {
+        resolveBaselinePolicy: (sandboxName) => policies.resolveSandboxBaselinePolicy(sandboxName),
         runFatalRuntimePreflight: () =>
           fatalRuntimePreflight.runFatalOnboardRuntimePreflight(
             {

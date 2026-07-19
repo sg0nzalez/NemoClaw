@@ -153,6 +153,50 @@ export function registerRebuildFlowLifecycleTests(): void {
       expect(harness.restoreSandboxEntryIfMissingSpy).not.toHaveBeenCalled();
     });
 
+    it("rejects a schema-invalid recorded-agent baseline before registry or live sandbox mutation (#7194)", async () => {
+      const harness = createRebuildFlowHarness({
+        agentPolicyAdditionsContent: `
+version: 1
+network_policies:
+  unsafe_entry:
+    name: unsafe_entry
+    endpoints:
+      - host: api.example.test
+        port: 443
+        access: full
+`,
+        preflightWithProductionBaselineResolver: true,
+        sandboxEntry: {
+          agent: "hermes",
+          baselineExclusions: [
+            {
+              key: "nous_research",
+              digest: "baseline-digest",
+              acknowledgedAt: "2026-07-19T00:00:00.000Z",
+            },
+          ],
+        },
+      });
+
+      await expect(
+        harness.rebuildSandbox("alpha", ["--yes", "--verbose"], { throwOnError: true }),
+      ).rejects.toThrow("Replacement onboarding preflight failed");
+
+      expect(harness.errorSpy.mock.calls.flat().join("\n")).toContain(
+        "does not satisfy the shipped sandbox policy schema",
+      );
+      expect(harness.registryUpdateSpy).not.toHaveBeenCalled();
+      expect(harness.backupSandboxStateSpy).not.toHaveBeenCalled();
+      expect(harness.prepareMcpBridgesForRebuildSpy).not.toHaveBeenCalled();
+      expect(harness.removeSandboxRegistryEntryWithReceiptSpy).not.toHaveBeenCalled();
+      expect(harness.onboardSpy).not.toHaveBeenCalled();
+      expect(
+        harness.runOpenshellSpy.mock.calls.some(
+          ([args]) => Array.isArray(args) && args.join(" ") === "sandbox delete alpha",
+        ),
+      ).toBe(false);
+    });
+
     it("keeps baseline-exclusion retry metadata when inner replacement creation fails (#7194)", async () => {
       const harness = createRebuildFlowHarness({
         sandboxEntry: {

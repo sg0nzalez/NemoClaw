@@ -1757,6 +1757,12 @@ async function restoreSandboxBaselineUnlocked(
     process.exit(1);
   }
 
+  const baseline = policies.resolveSandboxBaselinePolicy(sandboxName);
+  if (!baseline) {
+    console.error(`  Could not read the baseline policy for sandbox '${sandboxName}'.`);
+    process.exit(1);
+  }
+
   const entry = policies.getSandboxBaselineEntry(sandboxName, key);
   if (entry) {
     printBaselineEntryScope(

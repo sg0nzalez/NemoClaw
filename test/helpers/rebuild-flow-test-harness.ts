@@ -68,10 +68,18 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
 
   const session = createRebuildFlowSession(onboardSession.MACHINE_SNAPSHOT_VERSION);
   const rebuildShieldsWindow = { relocked: false, wasLocked: false };
+  let policyAdditionsPath: string | null = null;
+  if (typeof overrides.agentPolicyAdditionsContent === "string") {
+    const policyDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-rebuild-agent-policy-"));
+    harnessTempDirs.push(policyDir);
+    policyAdditionsPath = path.join(policyDir, "policy-additions.yaml");
+    fs.writeFileSync(policyAdditionsPath, overrides.agentPolicyAdditionsContent);
+  }
   const agentDef = {
     name:
       typeof overrides.sandboxEntry?.agent === "string" ? overrides.sandboxEntry.agent : "openclaw",
     expectedVersion: "0.2.0",
+    policyAdditionsPath,
   };
 
   vi.spyOn(gatewayDrift, "detectOpenShellStateRpcPreflightIssue").mockReturnValue(null);
@@ -430,8 +438,14 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
       const options = args[0] as RebuildRecreateOnboardOpts;
       await overrides.onboard?.(session, options);
     });
-  vi.spyOn(rebuildOnboardDependencies, "preflightAuthoritativeRebuildTarget").mockResolvedValue(
-    undefined,
+  vi.spyOn(rebuildOnboardDependencies, "preflightAuthoritativeRebuildTarget").mockImplementation(
+    async (options: unknown) => {
+      const preflightOptions = (options ?? {}) as Record<string, unknown>;
+      if (overrides.preflightWithProductionBaselineResolver) {
+        policies.resolveSandboxBaselinePolicy(String(preflightOptions.sandboxName ?? ""));
+      }
+      await overrides.preflightAuthoritativeRebuildTarget?.(preflightOptions);
+    },
   );
   const ensureValidatedBraveSearchCredentialSpy = vi
     .spyOn(rebuildOnboardDependencies, "ensureValidatedWebSearchCredential")

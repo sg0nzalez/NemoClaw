@@ -89,6 +89,18 @@ afterEach(() => {
 });
 
 describe("excludeSandboxBaseline (#7178)", () => {
+  it("does not mutate when a recorded agent baseline cannot be resolved (#7194)", async () => {
+    vi.mocked(policies.resolveSandboxBaselinePolicy).mockImplementation(() => {
+      throw new Error("Refusing to substitute the OpenClaw baseline");
+    });
+
+    await expect(
+      excludeSandboxBaseline("alpha", { key: "nous_research", force: true }),
+    ).rejects.toThrow("Refusing to substitute the OpenClaw baseline");
+
+    expect(excludeBaselineEntryMock).not.toHaveBeenCalled();
+  });
+
   it("exits on an unknown baseline key without mutating", async () => {
     const code = await captureExit(() =>
       excludeSandboxBaseline("alpha", { key: "absent", force: true }),
@@ -147,5 +159,18 @@ describe("restoreSandboxBaseline (#7178)", () => {
     getBaselineExclusionsMock.mockReturnValue([{ key: "nous_research", digest: "digest-1" }]);
     await restoreSandboxBaseline("alpha", { key: "nous_research" });
     expect(restoreBaselineEntryMock).toHaveBeenCalledWith("alpha", "nous_research");
+  });
+
+  it("does not mutate when a recorded agent baseline cannot be resolved (#7194)", async () => {
+    getBaselineExclusionsMock.mockReturnValue([{ key: "nous_research", digest: "digest-1" }]);
+    vi.mocked(policies.resolveSandboxBaselinePolicy).mockImplementation(() => {
+      throw new Error("Refusing to substitute the OpenClaw baseline");
+    });
+
+    await expect(restoreSandboxBaseline("alpha", { key: "nous_research" })).rejects.toThrow(
+      "Refusing to substitute the OpenClaw baseline",
+    );
+
+    expect(restoreBaselineEntryMock).not.toHaveBeenCalled();
   });
 });

@@ -12,7 +12,7 @@ import YAML from "yaml";
 
 // Namespace access keeps resolveOpenshell spyable in focused policy tests.
 import * as openshellResolveModule from "../adapters/openshell/resolve";
-import { loadAgent } from "../agent/defs";
+import { loadAgent, requireAgentPolicyAdditionsPath } from "../agent/defs";
 import {
   getMessagingPolicyKeyAliases,
   getMessagingPolicyPresetValidationWarnings,
@@ -52,6 +52,7 @@ import {
   parseNetworkPolicies,
 } from "./preset-parsing";
 import { escapeTerminalText, logPresetScope, renderPresetScope } from "./preset-scope-render";
+import { parseAndValidateSandboxPolicy } from "./sandbox-policy-validation";
 import { splitSemanticFindings, validatePolicySemantics } from "./semantic-validation";
 
 const PRESETS_DIR = path.join(ROOT, "nemoclaw-blueprint", "policies", "presets");
@@ -887,17 +888,23 @@ function resolveSandboxBaselinePolicy(
   sandboxName: string,
 ): { policyPath: string; content: string } | null {
   const agentName = registry.getSandbox(sandboxName)?.agent ?? null;
-  const agent = agentName ? loadAgent(agentName) : null;
-  const additions = agent?.policyAdditionsPath;
-  const policyPath =
-    additions && fs.existsSync(additions)
-      ? additions
-      : path.join(ROOT, "nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml");
+  const usesOpenClawBaseline = !agentName || agentName === "openclaw";
+  const policyPath = usesOpenClawBaseline
+    ? path.join(ROOT, "nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml")
+    : requireAgentPolicyAdditionsPath(loadAgent(agentName));
+  let content: string;
   try {
-    return { policyPath, content: fs.readFileSync(policyPath, "utf-8") };
+    content = fs.readFileSync(policyPath, "utf-8");
   } catch {
+    if (!usesOpenClawBaseline) {
+      throw new Error(
+        `Agent '${agentName}' baseline policy became unreadable. Refusing to substitute the OpenClaw baseline.`,
+      );
+    }
     return null;
   }
+  parseAndValidateSandboxPolicy(content);
+  return { policyPath, content };
 }
 
 /** The current baseline entry for a key, or null when the baseline omits it. */
@@ -969,6 +976,10 @@ function restoreBaselineEntry(
   key: string,
   options: { nonFatal?: boolean } = {},
 ): boolean {
+  // Resolve the current agent baseline before changing either durable or live
+  // state. A missing non-OpenClaw baseline must not be mistaken for a release
+  // that intentionally removed this key.
+  const entry = getSandboxBaselineEntry(sandboxName, key);
   const currentPolicy = readCurrentSandboxPolicy(sandboxName);
   if (!currentPolicy) {
     console.error(`  Could not read current policy for sandbox '${sandboxName}'.`);
@@ -983,7 +994,6 @@ function restoreBaselineEntry(
     );
     return false;
   }
-  const entry = getSandboxBaselineEntry(sandboxName, key);
   if (entry) {
     const updated = mergeBaselineEntryIntoPolicy(currentPolicy, key, entry);
     if (updated !== currentPolicy && !pushPolicyYaml(sandboxName, updated, options)) {

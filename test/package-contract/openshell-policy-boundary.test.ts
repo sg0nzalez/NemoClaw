@@ -1,9 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import { createRequire } from "node:module";
+import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -176,6 +177,112 @@ describe("OpenShell policy boundary package contract", () => {
         path.join(repoRoot, "nemoclaw", "dist", "shared", "openshell-policy-boundary.js"),
       ),
     ).toBe(false);
+  });
+
+  it("ships an out-of-tree runtime sandbox-policy schema validator", { timeout: 30_000 }, () => {
+    const productionDependencyTree = spawnSync(
+      "npm",
+      ["ls", "ajv", "--omit=dev", "--all", "--json"],
+      { cwd: repoRoot, encoding: "utf8" },
+    );
+    expect(
+      productionDependencyTree.status,
+      `${productionDependencyTree.stdout}${productionDependencyTree.stderr}`,
+    ).toBe(0);
+    const productionDependencies = JSON.parse(productionDependencyTree.stdout) as {
+      dependencies?: { ajv?: { version?: string } };
+    };
+    expect(productionDependencies.dependencies?.ajv?.version).toMatch(/^8\./u);
+
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-policy-package-"));
+    try {
+      const packed = spawnSync(
+        "npm",
+        ["pack", "--json", "--ignore-scripts", "--pack-destination", tempDir],
+        {
+          cwd: repoRoot,
+          encoding: "utf8",
+          env: { ...process.env, npm_config_cache: path.join(tempDir, "npm-cache") },
+        },
+      );
+      expect(packed.status, `${packed.stdout}${packed.stderr}`).toBe(0);
+      const report = JSON.parse(packed.stdout) as Array<{
+        filename: string;
+        files?: Array<{ path?: string }>;
+      }>;
+      const packedPaths = new Set((report[0]?.files ?? []).map((entry) => entry.path));
+      expect(packedPaths).toContain("schemas/sandbox-policy.schema.json");
+      expect(packedPaths).toContain("dist/lib/policy/sandbox-policy-validation.js");
+
+      const archivePath = path.join(tempDir, path.basename(report[0]!.filename));
+      execFileSync("tar", ["-xzf", archivePath, "-C", tempDir]);
+      const installedRoot = path.join(tempDir, "package");
+      const installedNodeModules = path.join(installedRoot, "node_modules");
+      for (const dependency of [
+        "ajv",
+        "fast-deep-equal",
+        "fast-uri",
+        "json-schema-traverse",
+        "require-from-string",
+        "yaml",
+      ]) {
+        fs.cpSync(
+          path.join(repoRoot, "node_modules", dependency),
+          path.join(installedNodeModules, dependency),
+          { recursive: true },
+        );
+      }
+
+      const validatorPath = path.join(
+        installedRoot,
+        "dist",
+        "lib",
+        "policy",
+        "sandbox-policy-validation.js",
+      );
+      const probe = spawnSync(
+        process.execPath,
+        [
+          "-e",
+          `
+const { parseAndValidateSandboxPolicy } = require(process.argv[1]);
+const valid = [
+  "version: 1",
+  "network_policies:",
+  "  safe:",
+  "    name: safe",
+  "    endpoints:",
+  "      - host: api.example.test",
+  "        port: 443",
+  "        access: full",
+  "    binaries:",
+  "      - path: /usr/bin/node",
+].join("\\n");
+if (parseAndValidateSandboxPolicy(valid).version !== 1) process.exit(2);
+const sensitivePolicyKey = "OPENAI_API_KEY_SUPERSECRET_VALUE";
+try {
+  parseAndValidateSandboxPolicy(
+    "version: 1\\nnetwork_policies:\\n  " +
+      sensitivePolicyKey +
+      ": {name: unsafe, endpoints: []}",
+  );
+  process.exit(3);
+} catch (error) {
+  const message = String(error.message);
+  if (!message.includes("shipped sandbox policy schema")) process.exit(4);
+  if (message.includes(sensitivePolicyKey) || message.length > 600) process.exit(5);
+}
+process.stdout.write("validated");
+`,
+          validatorPath,
+        ],
+        { cwd: installedRoot, encoding: "utf8" },
+      );
+      expect(probe.status, `${probe.stdout}${probe.stderr}`).toBe(0);
+      expect(probe.stdout).toBe("validated");
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 
   it("locks the generated sandbox boundary to its reviewed direct dependency", () => {
