@@ -24,7 +24,7 @@ afterEach(() => {
 });
 
 function runGeneratorProcess(
-  env: Record<string, string>,
+  env: Record<string, string | undefined>,
 ): SpawnSyncReturns<string> & { home: string } {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-dcode-config-"));
   tmpHomes.push(home);
@@ -34,26 +34,33 @@ function runGeneratorProcess(
     "langchain-deepagents-code",
     "generate-config.ts",
   );
+  const childEnv: NodeJS.ProcessEnv = {
+    ...process.env,
+    HOME: home,
+    NEMOCLAW_MODEL: "nvidia/nemotron-3-super-120b-a12b",
+    NEMOCLAW_INFERENCE_PROVIDER_ID: "inference",
+    NEMOCLAW_UPSTREAM_PROVIDER: "nvidia-prod",
+    NEMOCLAW_INFERENCE_BASE_URL: "https://inference.local/v1",
+    NEMOCLAW_INFERENCE_API: "openai-completions",
+  };
+  for (const [name, value] of Object.entries(env)) {
+    if (value === undefined) {
+      delete childEnv[name];
+    } else {
+      childEnv[name] = value;
+    }
+  }
   return {
     ...spawnSync(process.execPath, ["--experimental-strip-types", script], {
       cwd: process.cwd(),
       encoding: "utf8",
-      env: {
-        ...process.env,
-        HOME: home,
-        NEMOCLAW_MODEL: "nvidia/nemotron-3-super-120b-a12b",
-        NEMOCLAW_INFERENCE_PROVIDER_ID: "inference",
-        NEMOCLAW_UPSTREAM_PROVIDER: "nvidia-prod",
-        NEMOCLAW_INFERENCE_BASE_URL: "https://inference.local/v1",
-        NEMOCLAW_INFERENCE_API: "openai-completions",
-        ...env,
-      },
+      env: childEnv,
     }),
     home,
   };
 }
 
-function runGenerator(env: Record<string, string>): string {
+function runGenerator(env: Record<string, string | undefined>): string {
   const result = runGeneratorProcess(env);
   expect(result.status).toBe(0);
   return fs.readFileSync(path.join(result.home, ".deepagents", "config.toml"), "utf8");
@@ -76,6 +83,19 @@ describe("LangChain Deep Agents Code config generator", () => {
     expect(config).toContain("[warnings]");
     expect(config).toContain('suppress = ["tavily"]');
     expect(config).not.toMatch(/NVIDIA_API_KEY|OPENAI_API_KEY=|sk-/);
+  });
+
+  it("keeps the legacy provider key when the renamed route variables are absent", () => {
+    const config = runGenerator({
+      NEMOCLAW_PROVIDER_KEY: "legacy-route",
+      NEMOCLAW_INFERENCE_PROVIDER_ID: undefined,
+      NEMOCLAW_UPSTREAM_PROVIDER: undefined,
+    });
+
+    expect(config).toContain('default = "openai:nvidia/nemotron-3-super-120b-a12b"');
+    expect(config).toContain(
+      "# NemoClaw provider route: legacy-route; upstream provider: legacy-route; API: openai-completions.",
+    );
   });
 
   it("does not double-prefix provider-qualified model names", () => {
