@@ -233,18 +233,26 @@ describe("e2e workflow boundary", () => {
     }
   });
 
-  // source-shape-contract: security -- Mutates the shipped workflow to prove PR-safe routing rejects credential-backed smokes
+  // source-shape-contract: security -- Mutates the shipped workflow to prove PR-safe routing rejects credential-backed smokes and mutable tunnel tooling
   it("rejects credential-backed provider smokes in the PR-safe inference-routing job", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "e2e-inference-routing-workflow-"));
     const workflowPath = path.join(tmp, "workflow.yaml");
     const workflow = readWorkflow() as {
-      jobs: Record<string, { steps?: Array<{ name?: string; run?: string }> }>;
+      jobs: Record<
+        string,
+        { steps?: Array<{ name?: string; run?: string; env?: Record<string, string> }> }
+      >;
     };
     const run = workflow.jobs["inference-routing"]?.steps?.find(
       (step) => step.name === "Run inference routing live test",
     );
     expect(run).toBeDefined();
     run!.run = "npx vitest run --project e2e-live inference-routing-provider-smoke.test.ts";
+    const prerequisite = workflow.jobs["inference-routing"]?.steps?.find(
+      (step) => step.name === "Install and verify cloudflared prerequisite",
+    );
+    expect(prerequisite?.env).toBeDefined();
+    prerequisite!.env!.CLOUDFLARED_VERSION = "latest";
     fs.writeFileSync(workflowPath, YAML.stringify(workflow));
 
     try {
@@ -252,6 +260,7 @@ describe("e2e workflow boundary", () => {
         expect.arrayContaining([
           "step 'Run inference routing live test' run script must include test/e2e/live/inference-routing.test.ts",
           "step 'Run inference routing live test' run script must not include inference-routing-provider-smoke.test.ts",
+          "inference-routing cloudflared prerequisite step must pin CLOUDFLARED_VERSION=2026.6.1",
         ]),
       );
     } finally {
