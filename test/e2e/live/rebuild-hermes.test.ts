@@ -512,14 +512,6 @@ test(STALE_BASE_REBUILD
       }),
     ),
   );
-  cleanup.trackDisposable("remove pinned current Hermes base reuse alias", () =>
-    cleanupTrackedRebuildHermesImage(currentBasePinnedReuseTag, (imageTag) =>
-      removeHermesFixtureImage(host, apiKey, imageTag, {
-        artifactName: "cleanup-hermes-rebuild-resources-docker-rmi-pinned-current-base-reuse",
-        label: `cleanup pinned current Hermes base reuse alias ${imageTag}`,
-      }),
-    ),
-  );
   cleanup.trackGateway(host, "nemoclaw", {
     artifactName: "cleanup-hermes-rebuild-resources-gateway",
     env: hermesCleanupEnv(apiKey),
