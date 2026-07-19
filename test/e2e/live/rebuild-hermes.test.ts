@@ -1045,6 +1045,33 @@ test(STALE_BASE_REBUILD
   );
   expect(rebuildOutput).not.toContain("Rebuilding Hermes Agent base image");
 
+  const backupPathText = rebuildOutput.match(/^\s*Backup:\s+(.+)$/mu)?.[1]?.trim();
+  const rebuildBackupPath = backupPathText
+    ? path.resolve(backupPathText)
+    : fail("Hermes rebuild did not report its state backup path");
+  const resolvedBackupRoot = path.resolve(sandboxBackupRoot);
+  expect(
+    rebuildBackupPath.startsWith(`${resolvedBackupRoot}${path.sep}`),
+    "Hermes rebuild backup must remain under the test-owned sandbox backup root",
+  ).toBe(true);
+  const backedUpKanbanDatabase = await host.command(
+    "/usr/bin/python3",
+    [
+      "-c",
+      KANBAN_TASK_PROBE,
+      path.join(rebuildBackupPath, path.basename(KANBAN_FILE)),
+      KANBAN_TASK_TITLE,
+    ],
+    {
+      artifactName: "phase-6-verify-backed-up-kanban-database",
+      env: buildAvailabilityProbeEnv(),
+      redactionValues,
+      timeoutMs: OPENSHELL_TIMEOUT_MS,
+    },
+  );
+  expectExitZero(backedUpKanbanDatabase, "verify backed-up Hermes kanban database");
+  expect(resultText(backedUpKanbanDatabase)).toContain(KANBAN_TASK_TITLE);
+
   const oldImageInspect = await host.command(
     "docker",
     ["image", "inspect", seededOldSandboxImageState.imageTag],
