@@ -2475,7 +2475,7 @@ $$nemoclaw my-assistant rebuild [--yes|-y|--force] [--verbose|-v] [--tool-disclo
 | Flag | Description |
 |------|-------------|
 | `--yes`, `-y` | Skip the confirmation prompt. |
-| `--force` | Skip the confirmation prompt and continue when no state directory was preserved. NemoClaw restores any captured loose files; after a total failure, it recreates from registry metadata only. |
+| `--force` | Skip the confirmation prompt and continue when no state directory was preserved. NemoClaw restores any captured loose files; after a total failure, it recreates from registry metadata only. If a pre-mutation no-op cannot execute in a sandbox with managed MCP servers, it may preserve the exact registered MCP intent through host-side recovery. |
 | `--verbose`, `-v` | Log SSH commands, exit codes, and session state (also enabled by `NEMOCLAW_REBUILD_VERBOSE=1`) |
 | `--tool-disclosure <progressive\|direct>` | Change the model-visible tool catalog during this transactional rebuild. Use this path for sandboxes with managed MCP servers so their providers and adapter state are preserved. |
 | `--dcode-auto-approval <disabled\|thread-opt-in>` | Change the managed Deep Agents Code thread auto-approval capability. `thread-opt-in` is accepted only for managed Deep Agents Code sandboxes and is rejected for other agents or custom images. Enabling prints a warning, and either value requires sandbox recreation. |
@@ -2490,6 +2490,9 @@ If every state directory fails, `rebuild` exits before destroying the original s
 With `--force`, NemoClaw preserves any captured loose files in the partial manifest and restores them after recreation.
 If the backup produced nothing usable, it continues from recorded registry metadata without restoring prior sandbox state.
 Use this recovery path only when losing the state that could not be backed up is acceptable.
+For a sandbox with managed MCP servers, `--force` probes sandbox execution before MCP teardown.
+If that no-op cannot run, NemoClaw uses the durable registry and host-side provider identities to preserve MCP intent without trying an in-sandbox adapter scrub.
+Ownership, target, or provider validation failures still stop before sandbox deletion, and failures after a successful exec probe do not switch to the host-side path.
 Before backup or deletion, `rebuild` also refuses an incomplete MCP destroy transaction.
 For a prepared-only transaction, the redacted diagnostic points to `$$nemoclaw <name> mcp remove <server> --force` when the sandbox is still live.
 For a pending or both-marker transaction, it points to `$$nemoclaw <name> destroy` because the registry records that OpenShell deletion was already confirmed.

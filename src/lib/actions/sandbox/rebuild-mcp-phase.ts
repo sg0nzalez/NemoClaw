@@ -13,17 +13,37 @@ import {
   reattachMcpProvidersAfterRebuildAbort,
   restoreMcpBridgesAfterRebuild,
 } from "./mcp-bridge";
+import { executeSandboxCommand } from "./process-recovery";
 import type { RebuildBail } from "./rebuild-credential-preflight";
 import type { RebuildSandboxEntry } from "./rebuild-flow-helpers";
 
 export type McpRebuildPreparation = Awaited<ReturnType<typeof prepareMcpBridgesForRebuild>>;
 
+function canExecuteSandboxNoop(sandboxName: string): boolean {
+  const probe = executeSandboxCommand(sandboxName, ":");
+  return probe !== null && probe.status === 0;
+}
+
 export async function prepareMcpForRebuild(
   sandboxName: string,
   staleRecovery: boolean,
+  force: boolean,
   relockShieldsIfNeeded: (sandboxStillExists: boolean) => boolean,
-  bail: (message: string, code?: number) => never,
+  bail: RebuildBail,
 ): Promise<McpRebuildPreparation | null> {
+  if (force && !staleRecovery && !canExecuteSandboxNoop(sandboxName)) {
+    console.error(`  ${YW}⚠${R} Sandbox exec probe failed; --force using host-side MCP recovery`);
+    try {
+      return await prepareMcpBridgesForAbsentSandboxRebuild(sandboxName);
+    } catch (error) {
+      relockShieldsIfNeeded(true);
+      bail(
+        `Failed to preserve MCP bridges before rebuild (--force host-side recovery): ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return null;
+    }
+  }
+
   try {
     return await (staleRecovery
       ? prepareMcpBridgesForAbsentSandboxRebuild(sandboxName)

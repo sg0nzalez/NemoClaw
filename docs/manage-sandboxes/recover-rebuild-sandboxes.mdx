@@ -121,6 +121,8 @@ If every state directory fails, NemoClaw stops before deleting the original sand
 `rebuild --force` can continue when no state directory was preserved.
 NemoClaw restores any loose files captured in the partial backup; if nothing usable was captured, it recreates the sandbox from recorded registry metadata without restoring prior sandbox state.
 Use this recovery path only when losing the state that could not be backed up is acceptable.
+When a sandbox with managed MCP servers cannot run a pre-mutation no-op, explicit `--force` uses the exact host-side registry and provider identities to preserve MCP intent without scrubbing the unreachable in-sandbox adapter.
+This recovery remains fail-closed for ambiguous ownership, target, policy-registration, or provider state; an error after a successful no-op does not fall back to the host-side path.
 </Warning>
 
 When rebuild starts with shields up, NemoClaw opens a 30-minute shields-down window for backup and recreation.
