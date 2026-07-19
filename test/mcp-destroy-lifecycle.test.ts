@@ -128,13 +128,16 @@ function ownedPolicy(
 ) {
   const entry = options.entry ?? bridgeEntries[server];
   const adapter = options.adapter ?? entry.adapter;
-  if (!isAgentMcpAdapter(adapter)) {
-    throw new Error("MCP policy fixture requires an explicit adapter");
-  }
+  expect(isAgentMcpAdapter(adapter), "MCP policy fixture requires an explicit adapter").toBe(true);
   const resolvedAddresses = options.resolvedAddresses ?? [new URL(entry.url).hostname];
   return {
     name: entry.policyName,
-    content: bridge.buildMcpBridgePolicyYaml(entry.server, entry.url, adapter, resolvedAddresses),
+    content: bridge.buildMcpBridgePolicyYaml(
+      entry.server,
+      entry.url,
+      adapter as AgentMcpAdapter,
+      resolvedAddresses,
+    ),
     sourcePath: "generated:nemoclaw-mcp-bridge",
   };
 }
