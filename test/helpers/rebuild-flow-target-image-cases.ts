@@ -109,6 +109,30 @@ export function registerRebuildFlowTargetImageTests(): void {
       expect(harness.onboardSpy).not.toHaveBeenCalled();
     });
 
+    it("disposes the base-image handoff when replacement image preflight fails (#7144)", async () => {
+      const disposeImageRef = vi.fn(() => true);
+      const harness = createRebuildFlowHarness({
+        baseImagePreflight: {
+          ok: true,
+          imageRef: `nemoclaw-hermes-sandbox-base-local:rebuild-123-${"a".repeat(16)}-image-${"b".repeat(64)}`,
+          overrideEnvVar: "NEMOCLAW_HERMES_SANDBOX_BASE_IMAGE_REF",
+          disposeImageRef,
+        },
+        customImagePreflight: {
+          ok: false,
+          detail: "replacement build failed",
+        },
+      });
+
+      await expect(
+        harness.rebuildSandbox("alpha", ["--yes"], { throwOnError: true }),
+      ).rejects.toThrow("Replacement sandbox image preflight failed");
+
+      expect(disposeImageRef).toHaveBeenCalledOnce();
+      expect(harness.backupSandboxStateSpy).not.toHaveBeenCalled();
+      expect(harness.onboardSpy).not.toHaveBeenCalled();
+    });
+
     it("recreates from the retained context after the source Dockerfile symlink changes", async () => {
       const sourceDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-rebuild-source-link-"));
       const preparedDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-rebuild-prepared-"));
@@ -355,6 +379,7 @@ export function registerRebuildFlowTargetImageTests(): void {
     it("marks recreate onboarding failures as terminal and preserves retry cleanup", async () => {
       const overrideEnvVar = "NEMOCLAW_HERMES_SANDBOX_BASE_IMAGE_REF";
       const restoreEnv = snapshotEnv([overrideEnvVar]);
+      const disposeImageRef = vi.fn(() => true);
       process.env[overrideEnvVar] = "nemoclaw-hermes-sandbox-base-local:image-caller";
       try {
         const harness = createRebuildFlowHarness({
@@ -362,6 +387,7 @@ export function registerRebuildFlowTargetImageTests(): void {
             ok: true,
             imageRef: "nemoclaw-hermes-sandbox-base-local:image-preflighted",
             overrideEnvVar,
+            disposeImageRef,
           },
           onboard: (session) => {
             expect(process.env[overrideEnvVar]).toBe(
@@ -382,6 +408,7 @@ export function registerRebuildFlowTargetImageTests(): void {
           "sandbox",
           "Rebuild recreate failed",
         );
+        expect(disposeImageRef).toHaveBeenCalledOnce();
         expect(harness.session).toMatchObject({
           status: "failed",
           failure: { step: "sandbox", message: "Rebuild recreate failed" },
