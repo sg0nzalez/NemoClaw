@@ -3,7 +3,10 @@
 
 import { describe, expect, it } from "vitest";
 import type { SandboxBaseImageResolutionMetadata } from "../../../src/lib/sandbox-base-image/types";
-import { planRebuildHermesBaseReuse } from "../live/rebuild-hermes-env.ts";
+import {
+  buildRebuildHermesChildEnv,
+  planRebuildHermesBaseReuse,
+} from "../live/rebuild-hermes-env.ts";
 
 const digest = "a".repeat(64);
 const pinnedRef = `ghcr.io/nvidia/nemoclaw/hermes-sandbox-base@sha256:${digest}`;
@@ -72,5 +75,24 @@ describe("rebuild-Hermes base reuse", () => {
   it("leaves stale-base rebuilds unoverridden (#7144)", () => {
     expect(planRebuildHermesBaseReuse(true, metadata(), preparedRef)).toBeNull();
     expect(planRebuildHermesBaseReuse(true, null, preparedRef)).toBeNull();
+  });
+
+  it("forwards only supported OpenShell compatibility inputs (#7144)", () => {
+    const childEnv = buildRebuildHermesChildEnv(
+      {
+        HOME: process.env.HOME,
+        PATH: process.env.PATH,
+        BUILDX_BUILDER: "external-builder",
+        NEMOCLAW_ACCEPT_DEV_UNVERIFIED_INSTALL: "1",
+        NEMOCLAW_OPENSHELL_CHANNEL: "dev",
+        NVIDIA_API_KEY: "must-not-reach-child",
+      },
+      {},
+    );
+
+    expect(childEnv.NEMOCLAW_ACCEPT_DEV_UNVERIFIED_INSTALL).toBe("1");
+    expect(childEnv.NEMOCLAW_OPENSHELL_CHANNEL).toBe("dev");
+    expect(childEnv.NVIDIA_API_KEY).toBeUndefined();
+    expect(childEnv.BUILDX_BUILDER).toBeUndefined();
   });
 });

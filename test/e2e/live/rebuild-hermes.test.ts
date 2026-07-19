@@ -23,7 +23,7 @@ import {
   snapshotFile,
   writeJsonFile,
 } from "../fixtures/file-state.ts";
-import { REPO_ROOT } from "../fixtures/paths.ts";
+import { CLI_ENTRYPOINT, REPO_ROOT } from "../fixtures/paths.ts";
 import { listCredentialLeakPaths } from "../fixtures/phases/state-validation.ts";
 import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
 import {
@@ -47,13 +47,12 @@ import {
 import { startRebuildHermesProgress } from "./rebuild-hermes-progress.ts";
 import { buildRebuildHermesTimingSummary, describeRunnerClass } from "./rebuild-hermes-timing.ts";
 
-// The migrated scope is the legacy non-interactive shell regression: install.sh,
-// Docker base-image builds, OpenShell provider/sandbox commands, direct Hermes
-// sandbox exec, curated local NemoClaw registry/session state, and
-// `nemoclaw <name> rebuild --yes`. Literal interactive issue #3025 reproduction
-// paths (`./bin/nemoclaw.js onboard --agent hermes`, `hermes rebuild`, modal
-// prompt, and `Y` confirmation) are outside this shell-lane migration.
-// Vitest.
+// The rebuild regression invokes the checked-out CLI directly. Full install.sh
+// coverage remains in hermes-e2e; this lane owns Docker base-image builds,
+// OpenShell provider/sandbox commands, direct Hermes sandbox exec, curated
+// local NemoClaw registry/session state, and `nemoclaw <name> rebuild --yes`.
+// Literal interactive issue #3025 reproduction paths (`hermes rebuild`, modal
+// prompt, and `Y` confirmation) remain outside this Vitest migration.
 
 const HERMES_MANIFEST = path.join(REPO_ROOT, "agents", "hermes", "manifest.yaml");
 const OLD_HERMES_VERSION = `v${REBUILD_HERMES_OLD_BASE_FIXTURE.hermesCalver}`;
@@ -89,13 +88,13 @@ const HOSTED_MODEL =
 const OLD_BASE_TAG = `nemoclaw-hermes-old-base:${SANDBOX_NAME.toLowerCase().replace(/[^a-z0-9_.-]+/g, "-")}`;
 const CURRENT_BASE_REUSE_TAG = `nemoclaw-hermes-sandbox-base-local:e2e-current-${SANDBOX_NAME.toLowerCase().replace(/[^a-z0-9_.-]+/g, "-")}`;
 
-const INSTALL_TIMEOUT_MS = 60 * 60_000;
+const ONBOARD_TIMEOUT_MS = 60 * 60_000;
 const DOCKER_PULL_TIMEOUT_MS = 20 * 60_000;
 const OPENSHELL_TIMEOUT_MS = 2 * 60_000;
 const SANDBOX_CREATE_TIMEOUT_MS = 10 * 60_000;
 const REBUILD_TIMEOUT_MS = 45 * 60_000;
 const LIVE_TIMEOUT_MS = 100 * 60_000;
-// Long Docker and installer commands can become noisy when they wedge. Keep a
+// Long Docker and onboard commands can become noisy when they wedge. Keep a
 // generous diagnostic tail without letting a stuck child exhaust the hosted
 // runner by growing the fixture's in-memory stdout/stderr buffers forever.
 const LONG_COMMAND_CAPTURE_LIMIT_BYTES = 4 * 1024 * 1024;
@@ -174,13 +173,18 @@ async function bestEffortPrecleanHermesResources(
   apiKey: string | undefined,
   artifactName: string,
 ): Promise<void> {
+  await host.nemoclaw([SANDBOX_NAME, "destroy", "--yes", "--cleanup-gateway"], {
+    artifactName: `${artifactName}-nemoclaw-destroy`,
+    env: testEnv(apiKey),
+    redactionValues: [apiKey ?? "", DISCORD_FAKE_TOKEN],
+    timeoutMs: 3 * 60_000,
+  });
   await host.command(
     "bash",
     [
       "-lc",
       [
         "set +e",
-        'if command -v nemoclaw >/dev/null 2>&1; then nemoclaw "$SANDBOX_NAME" destroy --yes --cleanup-gateway >/dev/null 2>&1 || true; fi',
         'if command -v openshell >/dev/null 2>&1; then openshell sandbox delete "$SANDBOX_NAME" >/dev/null 2>&1 || true; fi',
         "if command -v openshell >/dev/null 2>&1; then openshell forward stop 8642 >/dev/null 2>&1 || true; fi",
         'if command -v openshell >/dev/null 2>&1; then openshell provider delete "$DISCORD_PROVIDER" >/dev/null 2>&1 || true; fi',
@@ -218,7 +222,7 @@ async function cleanupHermesNemoClawSandbox(
   host: HostCliClient,
   apiKey: string | undefined,
 ): Promise<void> {
-  const result = await host.command("nemoclaw", [SANDBOX_NAME, "destroy", "--yes"], {
+  const result = await host.nemoclaw([SANDBOX_NAME, "destroy", "--yes"], {
     artifactName: "cleanup-hermes-rebuild-resources-nemoclaw-destroy",
     env: hermesCleanupEnv(apiKey),
     redactionValues: hermesCleanupRedactions(apiKey),
@@ -473,7 +477,7 @@ test(STALE_BASE_REBUILD
     expectedHermesVersion: expectedVersion,
     markerFile: MARKER_FILE,
     preservedBoundaries: [
-      "bash install.sh --non-interactive",
+      "checked-out NemoClaw CLI non-interactive Hermes onboard",
       "phase 1 current Hermes base resolution plus immutable old Hermes base fixture",
       "openshell provider create/update and sandbox create/exec/list",
       "curated local ~/.nemoclaw registry and onboard-session rebuild metadata",
@@ -482,10 +486,19 @@ test(STALE_BASE_REBUILD
       "backup credential leak scan under ~/.nemoclaw/rebuild-backups",
     ],
     outOfScope: [
-      "interactive ./bin/nemoclaw.js onboard --agent hermes reproduction path",
+      "install.sh behavior retained by hermes-e2e",
       "interactive hermes rebuild modal prompt and Y confirmation",
     ],
   });
+
+  expect(
+    fs.existsSync(CLI_ENTRYPOINT),
+    "bin/nemoclaw.js missing — build the checked-out CLI before live rebuild coverage",
+  ).toBe(true);
+  expect(
+    path.resolve(host.commandPath),
+    "rebuild-Hermes must invoke the checked-out CLI through NEMOCLAW_CLI_BIN",
+  ).toBe(CLI_ENTRYPOINT);
 
   const dockerInfo = await host.command("docker", ["info"], {
     artifactName: "prereq-docker-info",
@@ -577,29 +590,33 @@ test(STALE_BASE_REBUILD
   );
   cleanup.trackDisposable("mark Hermes rebuild cleanup progress", () => progress.phase("cleanup"));
 
-  progress.phase("phase 1 install");
-  const install = await host.command("bash", ["install.sh", "--non-interactive"], {
-    artifactName: "phase-1-install-hermes",
+  progress.phase("phase 1 current onboard");
+  const cliProbe = await host.nemoclaw(["--help"], {
+    artifactName: "phase-1-cli-probe",
+    env: testEnv(apiKey),
+    redactionValues,
+    timeoutMs: 30_000,
+  });
+  expectExitZero(cliProbe, "checked-out NemoClaw CLI");
+
+  const openshellProbe = await host.command("openshell", ["--version"], {
+    artifactName: "phase-1-openshell-probe",
+    env: testEnv(apiKey),
+    redactionValues,
+    timeoutMs: 30_000,
+  });
+  expectExitZero(openshellProbe, "workflow-installed OpenShell CLI");
+
+  const onboard = await host.nemoclaw(["onboard", "--non-interactive"], {
+    artifactName: "phase-1-onboard-current-hermes",
     cwd: REPO_ROOT,
     env: testEnv(apiKey),
     redactionValues,
-    timeoutMs: INSTALL_TIMEOUT_MS,
+    timeoutMs: ONBOARD_TIMEOUT_MS,
     captureLimitBytes: LONG_COMMAND_CAPTURE_LIMIT_BYTES,
     onOutput: progress.onOutput,
   });
-  expectExitZero(install, "NemoClaw install.sh");
-
-  const cliProbe = await host.command(
-    "bash",
-    ["-lc", "command -v nemoclaw && command -v openshell && nemoclaw --help >/dev/null"],
-    {
-      artifactName: "phase-1-cli-probe",
-      env: testEnv(apiKey),
-      redactionValues,
-      timeoutMs: 30_000,
-    },
-  );
-  expectExitZero(cliProbe, "NemoClaw/OpenShell installed by install.sh");
+  expectExitZero(onboard, "checked-out NemoClaw Hermes onboard");
 
   const gatewayProbe = await host.command("openshell", ["gateway", "info", "-g", "nemoclaw"], {
     artifactName: "phase-1-gateway-probe",
@@ -607,7 +624,7 @@ test(STALE_BASE_REBUILD
     redactionValues,
     timeoutMs: 30_000,
   });
-  expectExitZero(gatewayProbe, "NemoClaw install must leave a reusable 'nemoclaw' gateway");
+  expectExitZero(gatewayProbe, "NemoClaw onboard must leave a reusable 'nemoclaw' gateway");
 
   const phase1DashboardPort = registrySandbox().dashboardPort;
   expect(
@@ -1014,7 +1031,7 @@ test(STALE_BASE_REBUILD
   }
 
   progress.phase("phase 6 nemoclaw rebuild");
-  const rebuild = await host.command("nemoclaw", [SANDBOX_NAME, "rebuild", "--yes", "--verbose"], {
+  const rebuild = await host.nemoclaw([SANDBOX_NAME, "rebuild", "--yes", "--verbose"], {
     artifactName: "phase-6-nemoclaw-rebuild-hermes",
     env: testEnv(apiKey, {
       NEMOCLAW_REBUILD_VERBOSE: "1",

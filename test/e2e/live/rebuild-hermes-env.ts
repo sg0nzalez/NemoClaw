@@ -59,8 +59,8 @@ export function planRebuildHermesBaseReuse(
 /**
  * Build the explicit child environment used by the Hermes rebuild scenario.
  * The fixture-wide allowlist intentionally remains narrow; the selected
- * OpenShell channel and its explicit dev-artifact opt-in are non-secret
- * integration inputs needed by install.sh.
+ * OpenShell channel and its explicit dev-artifact opt-in are the only extra
+ * non-secret compatibility inputs forwarded from the parent test process.
  */
 export function buildRebuildHermesChildEnv(
   base: NodeJS.ProcessEnv,
