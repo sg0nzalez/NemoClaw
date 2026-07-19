@@ -13,6 +13,13 @@ import { buildConfig } from "../scripts/generate-openclaw-config.mts";
 import { patchStagedDockerfile } from "../src/lib/onboard/dockerfile-patch";
 
 const START_SCRIPT = path.join(import.meta.dirname, "..", "scripts", "nemoclaw-start.sh");
+const SECRET_BOUNDARY_VALIDATOR = path.join(
+  import.meta.dirname,
+  "..",
+  "agents",
+  "hermes",
+  "validate-env-secret-boundary.py",
+);
 
 const tmpDirs: string[] = [];
 
@@ -182,5 +189,40 @@ describe("write_auth_profile route identifier migration (#7177)", () => {
     const profile = JSON.parse(fs.readFileSync(authPath, "utf-8"));
     expect(profile).toHaveProperty("openai:manual");
     expect(profile).not.toHaveProperty("anthropic:manual");
+  });
+});
+
+describe("Hermes runtime provider route identifier boundary (#7177)", () => {
+  function runRuntimeEnvValidator(env: Record<string, string>) {
+    return spawnSync("python3", [SECRET_BOUNDARY_VALIDATOR, "runtime-env"], {
+      encoding: "utf-8",
+      timeout: 5000,
+      env: {
+        HOME: os.tmpdir(),
+        PATH: process.env.PATH ?? "",
+        ...env,
+      },
+    });
+  }
+
+  it("allows the non-secret NEMOCLAW_INFERENCE_PROVIDER_ID metadata", () => {
+    const result = runRuntimeEnvValidator({
+      NEMOCLAW_INFERENCE_PROVIDER_ID: "openai",
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr).toBe("");
+  });
+
+  it("still rejects unrelated raw secrets without printing their value", () => {
+    const rawSecret = "raw-value";
+    const result = runRuntimeEnvValidator({
+      NEMOCLAW_INFERENCE_PROVIDER_ID: "openai",
+      EXAMPLE_SECRET: rawSecret,
+    });
+
+    expect(result.status, result.stderr).toBe(1);
+    expect(result.stderr).toContain("EXAMPLE_SECRET");
+    expect(result.stderr).not.toContain(rawSecret);
   });
 });
