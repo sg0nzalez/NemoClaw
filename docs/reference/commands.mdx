@@ -2631,6 +2631,7 @@ Create a timestamped snapshot of sandbox state.
 Snapshots are stored in `~/.nemoclaw/rebuild-backups/<name>/`.
 The command requires shields to be down and keeps the shields check and backup under one per-sandbox transition.
 An expired auto-restore timer can interrupt a long-running backup and restore lockdown.
+When the sandbox has active baseline exclusions, successful output lists their keys and repeats that excluded egress leaves dependent agent features unsupported for that sandbox.
 
 ```bash
 $$nemoclaw my-assistant snapshot create
