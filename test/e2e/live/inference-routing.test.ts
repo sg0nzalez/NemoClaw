@@ -506,26 +506,31 @@ test("TC-INF-11 DNS-backed HTTPS custom endpoint routes through the local pinnin
   // can still use the placeholder route cached before `inference set`. Poll
   // through two refresh intervals, but accept success only after the real
   // pinned upstream records the authenticated request.
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
-    await expectOpenAiChatThroughSandbox(
-      sandbox,
-      sandboxName,
-      model,
-      [apiKey],
-      `https-pin-endpoint-inference-local-chat-${attempt}`,
-    );
-    const routed = fake
-      .requests()
-      .slice(sandboxRequestOffset)
-      .some(
-        (request) =>
-          request.auth === "ok" &&
-          request.method === "POST" &&
-          request.path === "/v1/chat/completions",
-      );
-    if (routed) break;
-    if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, 5_000));
-  }
+  let routeProbeAttempt = 0;
+  await expect
+    .poll(
+      async () => {
+        routeProbeAttempt += 1;
+        await expectOpenAiChatThroughSandbox(
+          sandbox,
+          sandboxName,
+          model,
+          [apiKey],
+          `https-pin-endpoint-inference-local-chat-${routeProbeAttempt}`,
+        );
+        return fake
+          .requests()
+          .slice(sandboxRequestOffset)
+          .some(
+            (request) =>
+              request.auth === "ok" &&
+              request.method === "POST" &&
+              request.path === "/v1/chat/completions",
+          );
+      },
+      { interval: 5_000, timeout: 11_000 },
+    )
+    .toBe(true);
   expect(fake.requests().slice(sandboxRequestOffset)).toContainEqual(
     expect.objectContaining({
       auth: "ok",
