@@ -54,6 +54,7 @@ import {
   validateHttpsPinRuntimeAdapterPort,
 } from "../core/ports";
 import { compactText } from "../core/url-utils";
+import { getVersion } from "../core/version";
 import { ROOT, run, runCapture } from "../runner";
 import { buildMinimalCredentialAdapterEnv } from "../subprocess-env";
 import { assertEndpointResolvesPublic, type EndpointDnsLookupFn } from "./endpoint-ssrf-preflight";
@@ -111,6 +112,25 @@ const LOCK_RETRY_MS = 100;
 const STALE_LOCK_MS = 30_000;
 const PROCESS_EXIT_WAIT_ATTEMPTS = 30;
 const PROCESS_EXIT_WAIT_MS = 100;
+const ADAPTER_PROTOCOL_VERSION = "2";
+
+interface AdapterIdentity {
+  protocolVersion: string;
+  buildId: string;
+}
+
+/**
+ * Captured once per process so an adapter that survives an upgrade keeps
+ * proving the build it actually started from, not the files currently on
+ * disk. The opaque digest avoids exposing local version or source metadata.
+ */
+const CURRENT_ADAPTER_IDENTITY: Readonly<AdapterIdentity> = Object.freeze({
+  protocolVersion: ADAPTER_PROTOCOL_VERSION,
+  buildId: crypto
+    .createHash("sha256")
+    .update(`nemoclaw:https-pin-adapter-build:v1\0${getVersion()}`)
+    .digest("hex"),
+});
 
 interface RouteRuntime {
   targetBaseUrl: string;
@@ -235,10 +255,16 @@ function isPrivateNetworkRemoteAddress(remoteAddress: string | undefined): boole
   return /^f[cd][0-9a-f]{2}:/.test(lower) || /^fe[89ab][0-9a-f]:/.test(lower);
 }
 
-function controlChallengeProof(controlToken: string, nonce: string): string {
+function controlChallengeProof(
+  controlToken: string,
+  nonce: string,
+  identity: Readonly<AdapterIdentity>,
+): string {
   return crypto
     .createHmac("sha256", controlToken)
-    .update(`nemoclaw:https-pin-control-challenge:v1\0${nonce}`)
+    .update(
+      `nemoclaw:https-pin-control-challenge:v2\0${identity.protocolVersion}\0${identity.buildId}\0${nonce}`,
+    )
     .digest("hex");
 }
 
@@ -394,8 +420,10 @@ export function createHttpsPinRuntimeAdapterServer(options: {
   initialRoutes?: Record<string, RouteRuntime>;
   orphanedRoutes?: Record<string, OrphanedRouteMeta>;
   logger?: AdapterLogger;
+  adapterIdentity?: Readonly<AdapterIdentity>;
 }): http.Server {
   const logger = options.logger || defaultAdapterLogger;
+  const adapterIdentity = options.adapterIdentity || CURRENT_ADAPTER_IDENTITY;
   const routes = new Map<string, RouteRuntime>(Object.entries(options.initialRoutes || {}));
   const orphanedRoutes = new Map<string, OrphanedRouteMeta>(
     Object.entries(options.orphanedRoutes || {}),
@@ -435,7 +463,9 @@ export function createHttpsPinRuntimeAdapterServer(options: {
         }
         sendJson(res, 200, {
           ok: true,
-          proof: controlChallengeProof(options.controlToken, nonce),
+          protocolVersion: adapterIdentity.protocolVersion,
+          buildId: adapterIdentity.buildId,
+          proof: controlChallengeProof(options.controlToken, nonce, adapterIdentity),
         });
         return;
       }
@@ -787,9 +817,11 @@ function probeAdapterControlHealth(options: {
   port?: number;
   nonce?: string;
   timeoutMs?: number;
+  expectedIdentity?: Readonly<AdapterIdentity>;
 }): Promise<boolean> {
   const nonce = options.nonce || crypto.randomBytes(32).toString("hex");
-  const expectedProof = controlChallengeProof(options.controlToken, nonce);
+  const expectedIdentity = options.expectedIdentity || CURRENT_ADAPTER_IDENTITY;
+  const expectedProof = controlChallengeProof(options.controlToken, nonce, expectedIdentity);
   return new Promise((resolve) => {
     let settled = false;
     let absoluteDeadline: NodeJS.Timeout | null = null;
@@ -828,6 +860,16 @@ function probeAdapterControlHealth(options: {
           }
           try {
             const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as JsonObject;
+            const protocolVersion =
+              typeof body.protocolVersion === "string" ? body.protocolVersion : "";
+            const buildId = typeof body.buildId === "string" ? body.buildId : "";
+            if (
+              protocolVersion !== expectedIdentity.protocolVersion ||
+              buildId !== expectedIdentity.buildId
+            ) {
+              settle(false);
+              return;
+            }
             const proof = typeof body.proof === "string" ? body.proof : "";
             const expected = Buffer.from(expectedProof);
             const received = Buffer.from(proof);
@@ -1287,10 +1329,18 @@ function validateAdapterPortConfiguration(): void {
 
 async function findReusableAdapterControlToken(
   priorToken: string | null,
-  probeHealth: (options: { controlToken: string }) => Promise<boolean> = probeAdapterControlHealth,
+  probeHealth: (options: {
+    controlToken: string;
+    expectedIdentity?: Readonly<AdapterIdentity>;
+  }) => Promise<boolean> = probeAdapterControlHealth,
 ): Promise<string | null> {
   if (!priorToken) return null;
-  return (await probeHealth({ controlToken: priorToken })) ? priorToken : null;
+  return (await probeHealth({
+    controlToken: priorToken,
+    expectedIdentity: CURRENT_ADAPTER_IDENTITY,
+  }))
+    ? priorToken
+    : null;
 }
 
 /** Returns the host-only control token, reusing the running process when possible or spawning fresh. */
@@ -1304,9 +1354,10 @@ async function ensureAdapterProcessLocked(bootstrap: {
 }): Promise<string> {
   validateAdapterPortConfiguration();
   const priorToken = readLocalAdapterTextFile(TOKEN_PATH);
-  // The authenticated health response is stronger identity evidence than a
-  // PID file. Reuse the live adapter even if its PID metadata is absent or
-  // stale, avoiding a competing bind and a dead-child PID overwrite.
+  // The authenticated, build-bound health response is stronger identity
+  // evidence than a PID file. Reuse the live adapter even if its PID metadata
+  // is absent or stale, but replace it when the protocol or build differs so
+  // an upgrade cannot keep older forwarding security behavior alive.
   const reusableToken = await findReusableAdapterControlToken(priorToken);
   if (reusableToken) return reusableToken;
 
@@ -1374,6 +1425,7 @@ async function ensureAdapterProcessLocked(bootstrap: {
 
 export const __test = {
   ORPHANED_ROUTE_RECOVERY_BOUNDARY,
+  CURRENT_ADAPTER_IDENTITY,
   deriveRouteToken,
   buildContainedForwardPath,
   waitForAdapterProcessExit,

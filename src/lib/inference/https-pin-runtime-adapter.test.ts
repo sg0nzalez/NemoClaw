@@ -122,6 +122,33 @@ describe("createHttpsPinRuntimeAdapterServer health and auth (#6141)", () => {
     ).resolves.toBe(false);
   });
 
+  it.each([
+    ["protocol version", { ...__test.CURRENT_ADAPTER_IDENTITY, protocolVersion: "stale-protocol" }],
+    ["build id", { ...__test.CURRENT_ADAPTER_IDENTITY, buildId: "0".repeat(64) }],
+  ])("rejects a token-authenticated adapter with a stale %s", async (_label, staleIdentity) => {
+    const adapter = createHttpsPinRuntimeAdapterServer({
+      controlToken: TEST_CONTROL_TOKEN,
+      adapterIdentity: staleIdentity,
+    });
+    const baseUrl = await listen(adapter);
+    const port = Number(new URL(baseUrl).port);
+
+    // The stale process can still prove control-token possession for its own
+    // identity, but the current build must not reuse it.
+    await expect(
+      __test.probeAdapterControlHealth({
+        controlToken: TEST_CONTROL_TOKEN,
+        expectedIdentity: staleIdentity,
+        port,
+      }),
+    ).resolves.toBe(true);
+    await expect(
+      __test.findReusableAdapterControlToken(TEST_CONTROL_TOKEN, (options) =>
+        __test.probeAdapterControlHealth({ ...options, port }),
+      ),
+    ).resolves.toBeNull();
+  });
+
   it("does not trust an impostor that replays the former public token hash", async () => {
     const seenRequests: Array<{ headers: http.IncomingHttpHeaders; url?: string }> = [];
     const oldPublicHash = crypto.createHash("sha256").update(TEST_CONTROL_TOKEN).digest("hex");
@@ -967,6 +994,7 @@ describe("adapter recovery lock (#6141)", () => {
     ).resolves.toBe("persisted-control-token");
     expect(probeHealth).toHaveBeenCalledWith({
       controlToken: "persisted-control-token",
+      expectedIdentity: __test.CURRENT_ADAPTER_IDENTITY,
     });
   });
 
