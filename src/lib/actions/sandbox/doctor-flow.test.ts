@@ -289,11 +289,13 @@ describe("runSandboxDoctor flow", () => {
           acknowledgedAt: "2026-07-18T00:00:00.000Z",
         },
       ]);
-      harness.getSandboxBaselineEntryDigestSpy.mockImplementation((_sandbox, key) => {
-        if (key === "nous_research") return "digest-1";
-        if (key === "changed_entry") return "digest-current";
-        return null;
-      });
+      const currentDigests: Record<string, string> = {
+        nous_research: "digest-1",
+        changed_entry: "digest-current",
+      };
+      harness.getSandboxBaselineEntryDigestSpy.mockImplementation(
+        (_sandbox, key) => currentDigests[key] ?? null,
+      );
 
       const report = await harness.runSandboxDoctor("alpha", ["--json"], { quietJson: true });
 
