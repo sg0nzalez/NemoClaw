@@ -381,7 +381,7 @@ function baselineExclusionCheckFields(
   if (driftState === "no-longer-in-baseline") {
     return {
       status: "warn",
-      detail: `Baseline entry '${key}' no longer exists; rebuild fails closed until the stale exclusion is reviewed.`,
+      detail: `Baseline entry '${key}' no longer exists; rebuild fails closed until the stale exclusion is cleared.`,
       hint: `key no longer exists in the baseline; run \`${restoreCommand}\` to clear the stale record`,
     };
   }

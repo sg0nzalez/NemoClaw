@@ -321,6 +321,8 @@ describe("runSandboxDoctor flow", () => {
             group: "Sandbox",
             label: "Baseline exclusion: dropped_entry",
             status: "warn",
+            detail:
+              "Baseline entry 'dropped_entry' no longer exists; rebuild fails closed until the stale exclusion is cleared.",
             hint: "key no longer exists in the baseline; run `nemoclaw alpha policy restore dropped_entry` to clear the stale record",
           }),
         ]),

@@ -101,7 +101,7 @@ export class BaselineExclusionDriftError extends Error {
   constructor(key: string, reason: BaselineDriftReason) {
     super(
       reason === "missing"
-        ? `Baseline entry '${key}' no longer exists in the current agent baseline; its exclusion approval is stale. Restore it with 'policy restore', or re-review and re-exclude it.`
+        ? `Baseline entry '${key}' no longer exists in the current agent baseline; its exclusion approval is stale. Clear it with 'policy restore'.`
         : `Baseline entry '${key}' changed since it was excluded; the exclusion approval is invalid. Re-review and re-exclude it, or restore it with 'policy restore'.`,
     );
     this.name = "BaselineExclusionDriftError";

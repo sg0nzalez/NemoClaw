@@ -172,5 +172,7 @@ describe("applyBaselineExclusions fail-closed (#7178)", () => {
     }
     expect(error).toBeInstanceOf(BaselineExclusionDriftError);
     expect((error as BaselineExclusionDriftError).reason).toBe("missing");
+    expect((error as Error).message).toContain("Clear it with 'policy restore'.");
+    expect((error as Error).message).not.toContain("re-exclude");
   });
 });

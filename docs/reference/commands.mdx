@@ -1756,7 +1756,8 @@ $$nemoclaw my-assistant policy exclude nous_research --dry-run
 $$nemoclaw my-assistant policy exclude nous_research --force
 ```
 
-When a release changes or removes an excluded entry, first run `policy restore <key>` to clear the stale record, preview the current scope with `policy exclude <key> --dry-run`, and then explicitly exclude it again if you still accept the support impact.
+When a release changes an excluded entry, first run `policy restore <key>` to clear the stale record, preview the current scope with `policy exclude <key> --dry-run`, and then explicitly exclude it again if you still accept the support impact.
+When a release removes the entry, run `policy restore <key>` only to clear the stale exclusion record; there is no replacement scope to review or re-approve.
 
 ### `$$nemoclaw <name> policy restore`
 

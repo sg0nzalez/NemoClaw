@@ -306,7 +306,7 @@ $$nemoclaw <sandbox-name> policy exclude <key> --force
 
 The command prints every endpoint, method/path rule, and binary the exclusion removes, and requires explicit acknowledgement (`--force` in non-interactive use).
 The exclusion is bound to the reviewed entry content, recorded in the sandbox registry, and replayed on rebuild.
-If a later release changes or removes that entry, create and rebuild fail closed and require re-review.
+If a later release changes that entry, create and rebuild fail closed until re-review; if the release removes it, they fail closed until the stale record is cleared.
 The critical `managed_inference` entry cannot currently be excluded pending product direction.
 
 To recover from baseline drift, first check whether the release changed the entry's content or removed it entirely (`$$nemoclaw <sandbox-name> policy explain` or `doctor` reports which).
