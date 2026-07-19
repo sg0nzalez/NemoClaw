@@ -35,6 +35,44 @@ export class ForwardHttpError extends Error {
   }
 }
 
+export function describeForwardHttpError(err: unknown): {
+  status: number;
+  code: string;
+  message: string;
+} {
+  if (!(err instanceof ForwardHttpError)) {
+    return {
+      status: 502,
+      code: "https_pin_runtime_error",
+      message: "Upstream request failed.",
+    };
+  }
+  // Keep the client-facing status on a closed set of literal values. Some
+  // errors originate in Node's upstream HTTP stack, so an attacker-influenced
+  // object must never become a dynamic writeHead status/reason argument.
+  let status: number;
+  switch (err.status) {
+    case 400:
+      status = 400;
+      break;
+    case 404:
+      status = 404;
+      break;
+    case 408:
+      status = 408;
+      break;
+    case 413:
+      status = 413;
+      break;
+    case 504:
+      status = 504;
+      break;
+    default:
+      status = 502;
+  }
+  return { status, code: err.code, message: err.message };
+}
+
 /**
  * The pinned outbound peer for one forwarded request: the validated public
  * address to connect to, and the real hostname to present as TLS SNI / send
@@ -129,9 +167,7 @@ export function sendForwardError(
   err: unknown,
   req?: http.IncomingMessage,
 ): number {
-  const status = err instanceof ForwardHttpError ? err.status : 502;
-  const code = err instanceof ForwardHttpError ? err.code : "https_pin_runtime_error";
-  const message = err instanceof ForwardHttpError ? err.message : "Upstream request failed.";
+  const { status, code, message } = describeForwardHttpError(err);
   // Only the body-read timeout leaves the client still writing indefinitely
   // -- every other rejection (e.g. an oversized body) responds without
   // needing the rest of the client's upload, and destroying the shared
@@ -236,10 +272,12 @@ export async function forwardHttpsPinnedRequest(options: {
           return;
         }
         res.writeHead(status, buildForwardResponseHeaders(upstreamRes.headers));
-        upstreamRes.once("aborted", () => {
-          failRequest(
-            new ForwardHttpError(502, "Upstream response aborted.", "upstream_response_aborted"),
-          );
+        upstreamRes.once("close", () => {
+          if (!upstreamRes.readableEnded) {
+            failRequest(
+              new ForwardHttpError(502, "Upstream response aborted.", "upstream_response_aborted"),
+            );
+          }
         });
         upstreamRes.once("error", failRequest);
         upstreamRes.pipe(res);

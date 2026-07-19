@@ -39,20 +39,30 @@ describe("destroy HTTPS-pin route cleanup (#6141)", () => {
     expect(revokeRoute).not.toHaveBeenCalled();
   });
 
-  it.each([
-    ["registry read", "list"],
-    ["adapter DELETE", "revoke"],
-  ] as const)("keeps successful sandbox deletion non-fatal when %s fails", async (_name, failure) => {
+  it("keeps successful sandbox deletion non-fatal when the registry read fails", async () => {
     const warn = vi.fn();
 
     await expect(
       revokeDestroyedSandboxHttpsPinRoute(GATEWAY_NAME, ROUTE_ID, {
-        listSandboxes:
-          failure === "list"
-            ? () => {
-                throw new Error("registry unavailable");
-              }
-            : () => ({ sandboxes: [], defaultSandbox: null }),
+        listSandboxes: () => {
+          throw new Error("registry unavailable");
+        },
+        revokeRoute: async () => {
+          throw new Error("delete unavailable");
+        },
+        warn,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("could not be revoked"));
+  });
+
+  it("keeps successful sandbox deletion non-fatal when adapter route revocation fails", async () => {
+    const warn = vi.fn();
+
+    await expect(
+      revokeDestroyedSandboxHttpsPinRoute(GATEWAY_NAME, ROUTE_ID, {
+        listSandboxes: () => ({ sandboxes: [], defaultSandbox: null }),
         revokeRoute: async () => {
           throw new Error("delete unavailable");
         },

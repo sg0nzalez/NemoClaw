@@ -25,6 +25,7 @@ export interface FakeHttpsCompatibleRequest {
 
 export interface FakeHttpsCompatibleServer extends StartedHttpServer {
   requests(): readonly FakeHttpsCompatibleRequest[];
+  setChatRedirect(location: string | null): void;
 }
 
 function requireTcpPort(server: https.Server): number {
@@ -83,6 +84,7 @@ export async function startFakeHttpsCompatibleServer(options: {
   const tls = generateEphemeralTlsMaterial();
   const requests: FakeHttpsCompatibleRequest[] = [];
   const chatContent = options.chatContent ?? "ok";
+  let chatRedirectLocation: string | null = null;
 
   const server = https.createServer({ cert: tls.cert, key: tls.key }, async (req, res) => {
     const requestPath = new URL(req.url ?? "/", "https://https-pin.local").pathname;
@@ -119,6 +121,11 @@ export async function startFakeHttpsCompatibleServer(options: {
       req.method === "POST" &&
       ["/chat/completions", "/v1/chat/completions"].includes(requestPath)
     ) {
+      if (chatRedirectLocation) {
+        res.writeHead(302, { Location: chatRedirectLocation });
+        res.end();
+        return;
+      }
       jsonResponse(res, 200, {
         id: "chatcmpl-https-pin",
         object: "chat.completion",
@@ -137,6 +144,9 @@ export async function startFakeHttpsCompatibleServer(options: {
   return {
     port: requireTcpPort(server),
     requests: () => requests,
+    setChatRedirect: (location) => {
+      chatRedirectLocation = location;
+    },
     close: async () => {
       await closeServer(server);
       fs.rmSync(tls.dir, { recursive: true, force: true });

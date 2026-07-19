@@ -60,6 +60,7 @@ import {
   resolveHttpsPinCredentialHeader,
 } from "./https-pin-runtime";
 import {
+  describeForwardHttpError,
   ForwardHttpError,
   forwardHttpsPinnedRequest,
   type HttpsPinTarget,
@@ -601,8 +602,7 @@ export function createHttpsPinRuntimeAdapterServer(options: {
 
       sendJson(res, 404, { error: { message: "Not found", type: "not_found", code: "not_found" } });
     } catch (err) {
-      const status = err instanceof ForwardHttpError ? err.status : 502;
-      const code = err instanceof ForwardHttpError ? err.code : "https_pin_runtime_error";
+      const { status, code } = describeForwardHttpError(err);
       logAdapterEvent(logger, "request_failed", {
         routeId,
         status,
@@ -862,6 +862,10 @@ function putRoute(options: {
       credentialValue: options.credentialValue,
       generation: options.generation,
     });
+    // The file-backed value here is a purpose-specific 0600 control token,
+    // intentionally sent only to the fixed loopback adapter after its HMAC
+    // health challenge proved that the expected process owns this port. The
+    // destination and request path never derive from file data.
     const req = http.request(
       {
         hostname: HTTPS_PIN_RUNTIME_ADAPTER_LOOPBACK_HOST,
@@ -901,6 +905,9 @@ function putRoute(options: {
 
 function deleteRoute(controlToken: string, routeId: string): Promise<void> {
   return new Promise((resolve, reject) => {
+    // This is the same fixed-loopback authenticated control boundary as PUT;
+    // callers prove adapter identity with the HMAC health challenge before
+    // transmitting the purpose-specific token read from its 0600 state file.
     const req = http.request(
       {
         hostname: HTTPS_PIN_RUNTIME_ADAPTER_LOOPBACK_HOST,

@@ -50,15 +50,6 @@ function routeToken(routeId: string, generation = TEST_ROUTE_GENERATION): string
   return __test.deriveRouteToken(TEST_CONTROL_TOKEN, routeId, generation);
 }
 
-function readRequestBody(req: http.IncomingMessage): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    req.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
-    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
-    req.on("error", reject);
-  });
-}
-
 function sendRawHttpMethod(
   baseUrl: string,
   method: string,

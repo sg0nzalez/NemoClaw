@@ -377,6 +377,7 @@ test("TC-INF-11 DNS-backed HTTPS custom endpoint routes through the local pinnin
       "OpenShell's own policy view never references the real upstream hostname",
       "a real chat completion round-trips through the pinned TLS connection to the public endpoint",
       "a DNS rebind of the upstream hostname after inference set does not redirect adapter traffic",
+      "an upstream redirect to a private target is rejected without relaying Location or reaching the target",
     ],
     endpointUrl,
     model,
@@ -545,4 +546,43 @@ test("TC-INF-11 DNS-backed HTTPS custom endpoint routes through the local pinnin
   );
 
   await restoreDnsRebindingHostsFixture(host, sandboxName, hostsFixture);
+
+  const privateTargetRequestOffset = placeholder.requests().length;
+  const redirectTarget = new URL("chat/completions", `${placeholder.baseUrl}/`).toString();
+  fake.setChatRedirect(redirectTarget);
+  const redirectPayload = JSON.stringify({
+    model,
+    messages: [{ role: "user", content: "Reply with exactly one word: PONG" }],
+    max_tokens: 50,
+  });
+  const redirect = await sandbox.exec(
+    sandboxName,
+    [
+      "curl",
+      "-sS",
+      "--include",
+      "--location",
+      "--max-redirs",
+      "3",
+      "--max-time",
+      "60",
+      "https://inference.local/v1/chat/completions",
+      "-H",
+      "Content-Type: application/json",
+      "--data-raw",
+      redirectPayload,
+    ],
+    {
+      artifactName: "tc-inf-11-private-redirect-rejection",
+      env: buildAvailabilityProbeEnv(),
+      redactionValues: [apiKey],
+      timeoutMs: 90_000,
+    },
+  );
+  const redirectText = resultText(redirect);
+  expect(redirect.exitCode, redirectText).toBe(0);
+  expect(redirectText).toMatch(/HTTP\/1\.[01] 502/u);
+  expect(redirectText).toContain("redirect_blocked");
+  expect(redirectText.toLowerCase()).not.toContain("location:");
+  expect(placeholder.requests()).toHaveLength(privateTargetRequestOffset);
 });

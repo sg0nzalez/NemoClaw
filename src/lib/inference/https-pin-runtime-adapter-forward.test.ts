@@ -15,6 +15,8 @@ import {
   startTlsServer,
 } from "../../../test/helpers/corporate-ca-support";
 import {
+  describeForwardHttpError,
+  ForwardHttpError,
   forwardHttpsPinnedRequest,
   HTTPS_PIN_RUNTIME_ADAPTER_MAX_BODY_BYTES,
   type HttpsPinTarget,
@@ -48,6 +50,16 @@ function listen(server: http.Server): Promise<{ baseUrl: string; port: number }>
 }
 
 const TEST_CREDENTIAL = { name: "x-api-key", value: "secret-upstream-credential" };
+
+describe("HTTPS-pin forwarding error responses (#6141)", () => {
+  it("maps an unrecognized error status to the fixed upstream-failure response", () => {
+    expect(describeForwardHttpError(new ForwardHttpError(599, "untrusted", "untrusted"))).toEqual({
+      status: 502,
+      code: "untrusted",
+      message: "untrusted",
+    });
+  });
+});
 
 /** A minimal server that forwards every request through `forwardHttpsPinnedRequest` against `target`. */
 function createForwardTestServer(
