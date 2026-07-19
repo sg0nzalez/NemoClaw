@@ -7,7 +7,10 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { normalizeBaselineExclusions } from "./registry-normalization";
+import {
+  normalizeBaselineExclusions,
+  normalizeBaselineExclusionTransition,
+} from "./registry-normalization";
 
 const originalHome = process.env.HOME;
 const temporaryHomes: string[] = [];
@@ -173,6 +176,51 @@ describe("baseline exclusion normalization (#7178)", () => {
   });
 });
 
+describe("baseline exclusion transition normalization (#7178)", () => {
+  const sourceDigest = "a".repeat(64);
+  const targetDigest = "b".repeat(64);
+  const restoreTransition = {
+    id: "123e4567-e89b-42d3-a456-426614174000",
+    operation: "restore" as const,
+    exclusion: { key: "nous_research", digest: sourceDigest },
+    targetLiveDigest: targetDigest,
+    startedAt: "2026-07-19T00:00:00.000Z",
+  };
+
+  it("preserves an exact well-formed journal", () => {
+    expect(normalizeBaselineExclusionTransition(restoreTransition)).toEqual(restoreTransition);
+    expect(normalizeBaselineExclusionTransition(undefined)).toBeUndefined();
+  });
+
+  it("fails closed for partial operations or invalid live targets", () => {
+    expect(() =>
+      normalizeBaselineExclusionTransition({ ...restoreTransition, operation: "unknown" }),
+    ).toThrow(/incomplete baseline exclusion transition.*before rebuilding/i);
+    expect(() =>
+      normalizeBaselineExclusionTransition({ ...restoreTransition, targetLiveDigest: null }),
+    ).toThrow(/invalid live target.*before rebuilding/i);
+    expect(() =>
+      normalizeBaselineExclusionTransition({
+        ...restoreTransition,
+        operation: "exclude",
+        targetLiveDigest: "must-be-absent",
+      }),
+    ).toThrow(/invalid live target.*before rebuilding/i);
+  });
+
+  it.each([
+    ["non-UUID id", { id: "tx-1" }],
+    ["non-canonical timestamp", { startedAt: "yesterday" }],
+    ["unsafe key", { exclusion: { key: "bad key\nnext", digest: sourceDigest } }],
+    ["non-SHA source digest", { exclusion: { key: "nous_research", digest: "short" } }],
+    ["non-SHA target digest", { targetLiveDigest: "short" }],
+  ])("rejects a journal with %s (#7178)", (_label, override) => {
+    expect(() =>
+      normalizeBaselineExclusionTransition({ ...restoreTransition, ...override }),
+    ).toThrow(/baseline exclusion transition.*before rebuilding/i);
+  });
+});
+
 describe("baseline exclusion registry helpers (#7178)", () => {
   it("round-trips add, get, and remove keyed by baseline entry", async () => {
     const registry = await loadRegistryWith({});
@@ -214,6 +262,99 @@ describe("baseline exclusion registry helpers (#7178)", () => {
     registry.removeBaselineExclusion("alpha", "brave");
     expect(registry.getCustomPolicies("alpha").map((p) => p.name)).toEqual(["brave"]);
     expect(registry.getBaselineExclusions("alpha")).toEqual([]);
+  });
+
+  it("journals and atomically commits an exclude or restore transition", async () => {
+    const registry = await loadRegistryWith({});
+    registry.registerSandbox({ name: "alpha", agent: "hermes" });
+    const exclude = {
+      id: "123e4567-e89b-42d3-a456-426614174001",
+      operation: "exclude" as const,
+      exclusion: {
+        key: "nous_research",
+        digest: "a".repeat(64),
+        acknowledgedAt: "2026-07-19T00:00:00.000Z",
+      },
+      targetLiveDigest: null,
+      startedAt: "2026-07-19T00:00:01.000Z",
+    };
+
+    expect(registry.beginBaselineExclusionTransition("alpha", exclude)).toBe(true);
+    expect(
+      registry.beginBaselineExclusionTransition("alpha", {
+        ...exclude,
+        id: "123e4567-e89b-42d3-a456-426614174002",
+      }),
+    ).toBe(false);
+    expect(registry.getBaselineExclusionTransition("alpha")).toEqual(exclude);
+    expect(registry.getBaselineExclusions("alpha")).toEqual([]);
+    expect(registry.commitBaselineExclusionTransition("alpha", "wrong-id")).toBe(false);
+    expect(registry.commitBaselineExclusionTransition("alpha", exclude.id)).toBe(true);
+    expect(registry.getBaselineExclusionTransition("alpha")).toBeNull();
+    expect(registry.getBaselineExclusions("alpha")).toEqual([exclude.exclusion]);
+
+    const restore = {
+      id: "123e4567-e89b-42d3-a456-426614174003",
+      operation: "restore" as const,
+      exclusion: exclude.exclusion,
+      targetLiveDigest: "b".repeat(64),
+      startedAt: "2026-07-19T00:00:02.000Z",
+    };
+    expect(registry.beginBaselineExclusionTransition("alpha", restore)).toBe(true);
+    expect(registry.commitBaselineExclusionTransition("alpha", restore.id)).toBe(true);
+    expect(registry.getBaselineExclusions("alpha")).toEqual([]);
+    expect(registry.getBaselineExclusionTransition("alpha")).toBeNull();
+  });
+
+  it("clears only the exact journal without changing committed exclusions", async () => {
+    const registry = await loadRegistryWith({});
+    registry.registerSandbox({
+      name: "alpha",
+      baselineExclusions: [{ key: "nous_research", digest: "d1" }],
+    });
+    const transition = {
+      id: "123e4567-e89b-42d3-a456-426614174004",
+      operation: "restore" as const,
+      exclusion: { key: "nous_research", digest: "a".repeat(64) },
+      targetLiveDigest: "b".repeat(64),
+      startedAt: "2026-07-19T00:00:02.000Z",
+    };
+    expect(registry.beginBaselineExclusionTransition("alpha", transition)).toBe(true);
+    expect(registry.addBaselineExclusion("alpha", { key: "other", digest: "d2" })).toBe(false);
+    expect(registry.removeBaselineExclusion("alpha", "nous_research")).toBe(false);
+    expect(registry.clearBaselineExclusionTransition("alpha", "wrong-id")).toBe(false);
+    expect(registry.clearBaselineExclusionTransition("alpha", transition.id)).toBe(true);
+    expect(registry.getBaselineExclusions("alpha")).toEqual([
+      expect.objectContaining({ key: "nous_research", digest: "d1" }),
+    ]);
+  });
+
+  it("preserves a restore journal when the committed exclusion changed (#7178)", async () => {
+    const source = {
+      key: "nous_research",
+      digest: "a".repeat(64),
+      acknowledgedAt: "2026-07-19T00:00:00.000Z",
+    };
+    const registry = await loadRegistryWith({});
+    registry.registerSandbox({ name: "alpha", baselineExclusions: [source] });
+    const transition = {
+      id: "123e4567-e89b-42d3-a456-426614174005",
+      operation: "restore" as const,
+      exclusion: source,
+      targetLiveDigest: "b".repeat(64),
+      startedAt: "2026-07-19T00:00:01.000Z",
+    };
+    expect(registry.beginBaselineExclusionTransition("alpha", transition)).toBe(true);
+
+    const document = registry.load();
+    document.sandboxes.alpha.baselineExclusions = [{ ...source, digest: "c".repeat(64) }];
+    registry.save(document);
+
+    expect(registry.commitBaselineExclusionTransition("alpha", transition.id)).toBe(false);
+    expect(registry.getBaselineExclusionTransition("alpha")).toEqual(transition);
+    expect(registry.getBaselineExclusions("alpha")).toEqual([
+      { ...source, digest: "c".repeat(64) },
+    ]);
   });
 
   it("refuses to load mixed valid and malformed persisted exclusions", async () => {

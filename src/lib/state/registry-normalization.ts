@@ -2,7 +2,49 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { isObjectRecord } from "../core/json-types";
-import type { BaselineExclusionEntry, SandboxEntry } from "./registry";
+import type { BaselineExclusionEntry, BaselineExclusionTransition, SandboxEntry } from "./registry";
+
+const BASELINE_TRANSITION_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const BASELINE_TRANSITION_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
+const SHA256_DIGEST_PATTERN = /^[a-f0-9]{64}$/;
+
+function isCanonicalIsoTimestamp(value: string): boolean {
+  const parsed = new Date(value);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString() === value;
+}
+
+function normalizeBaselineExclusionEntry(item: unknown): BaselineExclusionEntry {
+  if (!isObjectRecord(item)) {
+    throw new Error(
+      "Sandbox registry contains a malformed baseline exclusion; repair the registry before rebuilding",
+    );
+  }
+  const key = typeof item.key === "string" ? item.key.trim() : "";
+  const digest = typeof item.digest === "string" ? item.digest.trim() : "";
+  if (!key || !digest) {
+    throw new Error(
+      "Sandbox registry contains a baseline exclusion without a key or digest; repair the registry before rebuilding",
+    );
+  }
+  const entry: BaselineExclusionEntry = { key, digest };
+  if (item.acknowledgedAt !== undefined && typeof item.acknowledgedAt !== "string") {
+    throw new Error(
+      `Sandbox registry baseline exclusion '${key}' has an invalid acknowledgement timestamp; repair the registry before rebuilding`,
+    );
+  }
+  if (typeof item.acknowledgedAt === "string") entry.acknowledgedAt = item.acknowledgedAt;
+  if (item.appliedAgentVersion === null) {
+    entry.appliedAgentVersion = null;
+  } else if (typeof item.appliedAgentVersion === "string") {
+    entry.appliedAgentVersion = item.appliedAgentVersion;
+  } else if (item.appliedAgentVersion !== undefined) {
+    throw new Error(
+      `Sandbox registry baseline exclusion '${key}' has an invalid agent version; repair the registry before rebuilding`,
+    );
+  }
+  return entry;
+}
 
 /**
  * Coerce a persisted `baselineExclusions` value into well-formed entries.
@@ -19,37 +61,61 @@ export function normalizeBaselineExclusions(value: unknown): BaselineExclusionEn
   }
   const byKey = new Map<string, BaselineExclusionEntry>();
   for (const item of value) {
-    if (!isObjectRecord(item)) {
-      throw new Error(
-        "Sandbox registry contains a malformed baseline exclusion; repair the registry before rebuilding",
-      );
-    }
-    const key = typeof item.key === "string" ? item.key.trim() : "";
-    const digest = typeof item.digest === "string" ? item.digest.trim() : "";
-    if (!key || !digest) {
-      throw new Error(
-        "Sandbox registry contains a baseline exclusion without a key or digest; repair the registry before rebuilding",
-      );
-    }
-    const entry: BaselineExclusionEntry = { key, digest };
-    if (item.acknowledgedAt !== undefined && typeof item.acknowledgedAt !== "string") {
-      throw new Error(
-        `Sandbox registry baseline exclusion '${key}' has an invalid acknowledgement timestamp; repair the registry before rebuilding`,
-      );
-    }
-    if (typeof item.acknowledgedAt === "string") entry.acknowledgedAt = item.acknowledgedAt;
-    if (item.appliedAgentVersion === null) {
-      entry.appliedAgentVersion = null;
-    } else if (typeof item.appliedAgentVersion === "string") {
-      entry.appliedAgentVersion = item.appliedAgentVersion;
-    } else if (item.appliedAgentVersion !== undefined) {
-      throw new Error(
-        `Sandbox registry baseline exclusion '${key}' has an invalid agent version; repair the registry before rebuilding`,
-      );
-    }
+    const entry = normalizeBaselineExclusionEntry(item);
+    const { key } = entry;
     byKey.set(key, entry);
   }
   return byKey.size > 0 ? [...byKey.values()] : undefined;
+}
+
+/** Normalize the crash-recovery journal, rejecting partial or forged states. */
+export function normalizeBaselineExclusionTransition(
+  value: unknown,
+): BaselineExclusionTransition | undefined {
+  if (value === undefined) return undefined;
+  if (!isObjectRecord(value)) {
+    throw new Error(
+      "Sandbox registry contains a malformed baseline exclusion transition; repair the registry before rebuilding",
+    );
+  }
+  const id = typeof value.id === "string" ? value.id.trim() : "";
+  const operation = value.operation;
+  const startedAt = typeof value.startedAt === "string" ? value.startedAt.trim() : "";
+  if (
+    !BASELINE_TRANSITION_ID_PATTERN.test(id) ||
+    (operation !== "exclude" && operation !== "restore") ||
+    !isCanonicalIsoTimestamp(startedAt)
+  ) {
+    throw new Error(
+      "Sandbox registry contains an incomplete baseline exclusion transition; repair the registry before rebuilding",
+    );
+  }
+  const exclusion = normalizeBaselineExclusionEntry(value.exclusion);
+  if (
+    !BASELINE_TRANSITION_KEY_PATTERN.test(exclusion.key) ||
+    !SHA256_DIGEST_PATTERN.test(exclusion.digest) ||
+    (exclusion.acknowledgedAt !== undefined && !isCanonicalIsoTimestamp(exclusion.acknowledgedAt))
+  ) {
+    throw new Error(
+      "Sandbox registry contains an invalid baseline exclusion transition source; repair the registry before rebuilding",
+    );
+  }
+  const targetLiveDigest =
+    value.targetLiveDigest === null
+      ? null
+      : typeof value.targetLiveDigest === "string"
+        ? value.targetLiveDigest.trim()
+        : "";
+  if (
+    (operation === "exclude" && targetLiveDigest !== null) ||
+    (operation === "restore" &&
+      (targetLiveDigest === null || !SHA256_DIGEST_PATTERN.test(targetLiveDigest)))
+  ) {
+    throw new Error(
+      `Sandbox registry baseline exclusion transition '${exclusion.key}' has an invalid live target; repair the registry before rebuilding`,
+    );
+  }
+  return { id, operation, exclusion, targetLiveDigest, startedAt };
 }
 
 export function parseSandboxRegistryEntries(value: unknown): Array<[string, SandboxEntry]> {
