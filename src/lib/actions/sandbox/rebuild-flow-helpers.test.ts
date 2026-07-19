@@ -407,6 +407,59 @@ describe("backupSandboxStateForRebuild with --force", () => {
     );
   });
 
+  it("aborts before replacement when a required state file backup fails (#7144)", () => {
+    backupSpy.mockReturnValue({
+      success: false,
+      backedUpDirs: ["memories", "sessions"],
+      backedUpFiles: ["SOUL.md"],
+      failedDirs: [],
+      failedFiles: ["kanban.db"],
+      manifest: makeBackupResult().manifest,
+    });
+
+    expect(() =>
+      backupSandboxStateForRebuild(
+        "alpha",
+        makeSandboxEntry(),
+        false,
+        () => undefined,
+        () => true,
+        makeBail(),
+      ),
+    ).toThrow("bail: Failed to back up sandbox state.");
+
+    const errorLines = errorSpy.mock.calls.map((args: unknown[]) => String(args[0]));
+    expect(errorLines.some((line: string) => line.includes("Failed files: kanban.db"))).toBe(true);
+    const warnLines = warnSpy.mock.calls.map((args: unknown[]) => String(args[0]));
+    expect(warnLines.some((line: string) => line.includes("Rebuild will continue"))).toBe(false);
+  });
+
+  it("allows a required state file backup failure only with --force (#7144)", () => {
+    const manifest = makeBackupResult().manifest!;
+    backupSpy.mockReturnValue({
+      success: false,
+      backedUpDirs: ["memories", "sessions"],
+      backedUpFiles: ["SOUL.md"],
+      failedDirs: [],
+      failedFiles: ["kanban.db"],
+      manifest,
+    });
+
+    const result = backupSandboxStateForRebuild(
+      "alpha",
+      makeSandboxEntry(),
+      false,
+      () => undefined,
+      () => true,
+      makeBail(),
+      { force: true },
+    );
+
+    expect(result).toBe(manifest);
+    const warnLines = warnSpy.mock.calls.map((args: unknown[]) => String(args[0]));
+    expect(warnLines.some((line: string) => line.includes("--force was specified"))).toBe(true);
+  });
+
   it("keeps the salvageable partial manifest when all dirs failed but --force is set (#6972)", () => {
     const manifest = makeBackupResult().manifest!;
     manifest.stateDirs = ["memories", "sessions"];

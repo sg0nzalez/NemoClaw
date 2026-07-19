@@ -295,7 +295,11 @@ export function backupSandboxStateForRebuild(
   // state dir unreadable, the sandbox-user tar backed up only 3 loose files,
   // and the old code proceeded and destroyed all 14 state directories.
   const allStateDirsFailed = backup.backedUpDirs.length === 0 && backup.failedDirs.length > 0;
-  if (!backup.success && (!hasAnyBackup || allStateDirsFailed)) {
+  // State files are individually declared durability contracts. Losing even
+  // one cannot be treated like a salvageable partial directory archive: the
+  // replacement would otherwise delete the only live copy. (#7144)
+  const requiredStateFileFailed = backup.failedFiles.length > 0;
+  if (!backup.success && (!hasAnyBackup || allStateDirsFailed || requiredStateFileFailed)) {
     if (options?.force) {
       console.warn(
         `  ${YW}⚠${R} Backup could not preserve sandbox state but --force was specified — continuing with any salvageable files and rebuilding from registry metadata.`,
