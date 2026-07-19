@@ -83,6 +83,7 @@ function input(
     api?: StationHardwareGateApi;
     body?: string;
     files?: Array<{ filename: string; previous_filename?: string; sha: string; status: string }>;
+    filesComplete?: boolean;
   } = {},
 ) {
   return {
@@ -90,6 +91,7 @@ function input(
     changedFiles: options.files ?? [
       { filename: STATION_PREPARE_PATH, sha: "blob-sha", status: "modified" },
     ],
+    changedFilesComplete: options.filesComplete ?? true,
     pullRequest: {
       body: options.body ?? prBody(),
       head: { repo: { full_name: "contributor/NemoClaw" }, sha: "b".repeat(40) },
@@ -105,6 +107,17 @@ describe("Station hardware evidence gate", () => {
       input({ files: [{ filename: "README.md", sha: "blob", status: "modified" }] }),
     );
     expect(result.mode).toBe("not-applicable");
+  });
+
+  it("fails closed when a truncated file listing cannot prove the script is unchanged (#7191)", async () => {
+    await expect(
+      evaluateStationHardwareGate(
+        input({
+          files: [{ filename: "README.md", sha: "blob", status: "modified" }],
+          filesComplete: false,
+        }),
+      ),
+    ).rejects.toThrow("file listing reached its 3,000-file limit");
   });
 
   it("fails changed preparation scripts without exactly one outcome (#7191)", async () => {
@@ -138,6 +151,44 @@ describe("Station hardware evidence gate", () => {
         }),
       ),
     ).rejects.toThrow("evidence is stale");
+  });
+
+  it.each([
+    [
+      "a duplicate required field",
+      `${evidenceComment()}tested_commit=${TESTED_COMMIT}\n`,
+      "duplicate tested_commit fields",
+    ],
+    [
+      "an invalid tested commit",
+      evidenceComment().replace(TESTED_COMMIT, "invalid-commit"),
+      "tested_commit must be a lowercase 40-character SHA",
+    ],
+    [
+      "an invalid script hash",
+      evidenceComment().replace(SCRIPT_HASH, "invalid-hash"),
+      "prepare_script_sha256 must be a lowercase SHA-256",
+    ],
+    [
+      "an invalid profile",
+      evidenceComment().replace("generic-ubuntu-24.04-arm64", "invalid profile"),
+      "profile is missing or malformed",
+    ],
+  ])("rejects hardware evidence with %s (#7191)", async (_case, body, expected) => {
+    await expect(
+      evaluateStationHardwareGate(
+        input({
+          api: api({
+            getIssueComment: async () => ({
+              body,
+              issue_url: `https://api.github.com/repos/${REPOSITORY}/issues/${PR_NUMBER}`,
+              user: { login: "author" },
+            }),
+          }),
+          body: prBody({ evidenceUrl: EVIDENCE_URL, hardware: true }),
+        }),
+      ),
+    ).rejects.toThrow(expected);
   });
 
   it("rejects a tested commit that contains different preparation bytes (#7191)", async () => {

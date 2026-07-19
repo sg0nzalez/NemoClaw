@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 export const STATION_PREPARE_PATH = "scripts/prepare-dgx-station-host.sh";
 export const HARDWARE_MARKER = "STATION_HARDWARE_EVIDENCE";
 export const DEFERRAL_MARKER = "STATION_HARDWARE_DEFERRAL";
+const GITHUB_CHANGED_FILE_LIMIT = 3_000;
 
 type ChangedFile = {
   filename: string;
@@ -49,6 +50,7 @@ export type StationHardwareGateApi = {
 export type StationHardwareGateInput = {
   api: StationHardwareGateApi;
   changedFiles: ChangedFile[];
+  changedFilesComplete: boolean;
   pullRequest: PullRequest;
   repository: string;
 };
@@ -253,6 +255,10 @@ export async function evaluateStationHardwareGate(
       file.filename === STATION_PREPARE_PATH || file.previous_filename === STATION_PREPARE_PATH,
   );
   if (relevant.length === 0) {
+    input.changedFilesComplete ||
+      fail(
+        "GitHub PR file listing reached its 3,000-file limit; cannot prove the Station preparation script is unchanged.",
+      );
     return { mode: "not-applicable", summary: `${STATION_PREPARE_PATH} was not changed.` };
   }
   relevant.length === 1 || fail("Preparation script appears more than once in the PR file list.");
@@ -317,7 +323,7 @@ async function loadChangedFiles(
   token: string,
   repository: string,
   prNumber: number,
-): Promise<ChangedFile[]> {
+): Promise<{ complete: boolean; files: ChangedFile[] }> {
   const files: ChangedFile[] = [];
   for (let page = 1; ; page += 1) {
     const batch = await requestJson<ChangedFile[]>(
@@ -325,7 +331,8 @@ async function loadChangedFiles(
       apiPath(repository, `/pulls/${prNumber}/files?per_page=100&page=${page}`),
     );
     files.push(...batch);
-    if (batch.length < 100) return files;
+    if (batch.length < 100) return { complete: true, files };
+    if (files.length >= GITHUB_CHANGED_FILE_LIMIT) return { complete: false, files };
   }
 }
 
@@ -369,10 +376,11 @@ async function main(): Promise<void> {
     token,
     apiPath(repository, `/pulls/${prNumber}`),
   );
-  const changedFiles = await loadChangedFiles(token, repository, prNumber);
+  const changedFileListing = await loadChangedFiles(token, repository, prNumber);
   const result = await evaluateStationHardwareGate({
     api: githubApi(token, repository),
-    changedFiles,
+    changedFiles: changedFileListing.files,
+    changedFilesComplete: changedFileListing.complete,
     pullRequest,
     repository,
   });
