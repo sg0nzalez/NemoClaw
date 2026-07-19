@@ -142,15 +142,16 @@ describe("baseline exclusion normalization (#7178)", () => {
     ).toEqual([{ key: "nous_research", digest: "abc", appliedAgentVersion: null }]);
   });
 
-  it("drops malformed records missing a key or digest", () => {
-    expect(
+  it("fails closed when any persisted record is malformed", () => {
+    expect(() =>
       normalizeBaselineExclusions([
-        { key: "", digest: "abc" },
-        { key: "no_digest" },
-        "not-an-object",
         { key: "good", digest: "def" },
+        { key: "", digest: "abc" },
       ]),
-    ).toEqual([{ key: "good", digest: "def" }]);
+    ).toThrow(/without a key or digest.*before rebuilding/i);
+    expect(() => normalizeBaselineExclusions(["not-an-object"])).toThrow(
+      /malformed baseline exclusion.*before rebuilding/i,
+    );
   });
 
   it("collapses duplicate keys, last wins", () => {
@@ -162,10 +163,13 @@ describe("baseline exclusion normalization (#7178)", () => {
     ).toEqual([{ key: "dup", digest: "second" }]);
   });
 
-  it("returns undefined for a legacy registry without the field", () => {
+  it("returns undefined only for a legacy registry without the field", () => {
     expect(normalizeBaselineExclusions(undefined)).toBeUndefined();
-    expect(normalizeBaselineExclusions("nope")).toBeUndefined();
-    expect(normalizeBaselineExclusions([{ key: "", digest: "" }])).toBeUndefined();
+    expect(normalizeBaselineExclusions([])).toBeUndefined();
+    expect(() => normalizeBaselineExclusions("nope")).toThrow(/must be an array/i);
+    expect(() => normalizeBaselineExclusions([{ key: "", digest: "" }])).toThrow(
+      /without a key or digest/i,
+    );
   });
 });
 
@@ -212,13 +216,17 @@ describe("baseline exclusion registry helpers (#7178)", () => {
     expect(registry.getBaselineExclusions("alpha")).toEqual([]);
   });
 
-  it("normalizes malformed persisted exclusions on load", async () => {
+  it("refuses to load mixed valid and malformed persisted exclusions", async () => {
     const registry = await loadRegistryWith({
       alpha: {
         name: "alpha",
-        baselineExclusions: [{ key: "good", digest: "d1" }, { key: "", digest: "d2" }, "junk"],
+        baselineExclusions: [
+          { key: "good", digest: "d1" },
+          { key: "", digest: "d2" },
+        ],
       },
     });
-    expect(registry.getBaselineExclusions("alpha")).toEqual([{ key: "good", digest: "d1" }]);
+
+    expect(() => registry.listSandboxes()).toThrow(/without a key or digest.*before rebuilding/i);
   });
 });

@@ -134,6 +134,10 @@ describe("buildPolicyContext", () => {
     expect(ctx.approvalPath.inspect).toBe(`nemoclaw ${SANDBOX} policy list`);
     expect(ctx.approvalPath.add).toBe(`nemoclaw ${SANDBOX} policy add <preset>`);
     expect(ctx.approvalPath.remove).toBe(`nemoclaw ${SANDBOX} policy remove <preset>`);
+    expect(ctx.approvalPath.excludeBaseline).toBe(
+      `nemoclaw ${SANDBOX} policy exclude <key> --dry-run`,
+    );
+    expect(ctx.approvalPath.restoreBaseline).toBe(`nemoclaw ${SANDBOX} policy restore <key>`);
     expect(ctx.supportBoundaries.some((b) => b.capability === "host allowlist enforcement")).toBe(
       true,
     );
@@ -345,6 +349,7 @@ describe("renderPolicyContextMarkdown", () => {
     expect(md).toContain("`nous_research`");
     expect(md).toContain("status: excluded");
     expect(md).toContain("Excluded egress leaves dependent agent features unsupported");
+    expect(md).toContain("policy restore nous_research");
   });
 
   it("reports no baseline exclusions when none are recorded", () => {

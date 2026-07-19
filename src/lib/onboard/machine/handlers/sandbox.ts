@@ -1203,14 +1203,22 @@ class SandboxStateFlow<
         state.sandboxName,
         this.deps,
       );
-      if (this.options.fresh) {
-        this.deps.stopStaleDashboardListenersForSandbox(
-          this.deps.listRegistrySandboxes().sandboxes,
-          requestedSandboxName,
-        );
-      }
+      let rollbackArmed = removalReceipt !== null;
+      const restoreRemovedRegistryEntry = () => {
+        if (!rollbackArmed || !removalReceipt) return;
+        rollbackArmed = false;
+        this.deps.restoreSandboxRegistryEntryIfMissing(removalReceipt);
+      };
+      if (rollbackArmed) process.once("exit", restoreRemovedRegistryEntry);
+
       let sandboxName: string;
       try {
+        if (this.options.fresh) {
+          this.deps.stopStaleDashboardListenersForSandbox(
+            this.deps.listRegistrySandboxes().sandboxes,
+            requestedSandboxName,
+          );
+        }
         sandboxName = await withSandboxPhaseTrace(
           requestedSandboxName,
           this.options.provider,
@@ -1235,12 +1243,13 @@ class SandboxStateFlow<
               createIntent,
             ),
         );
+        // createSandbox returns only after the replacement row is registered.
+        // From this point the receipt must not overwrite that newer entry.
+        rollbackArmed = false;
+        process.removeListener("exit", restoreRemovedRegistryEntry);
       } catch (error) {
-        // Replacement creation failed after the destructive resume decision
-        // removed the durable registry row. Restore it (unless a retry loop
-        // already registered a replacement) so its baseline exclusion records
-        // and other durable state are not silently lost.
-        if (removalReceipt) this.deps.restoreSandboxRegistryEntryIfMissing(removalReceipt);
+        restoreRemovedRegistryEntry();
+        process.removeListener("exit", restoreRemovedRegistryEntry);
         throw error;
       }
       // createSandbox() owns the build fingerprint. In particular, reusing an

@@ -99,7 +99,10 @@ describe("public route/display separation", () => {
     { verb: "get", args: ["--raw"] },
     { verb: "list", args: [] },
     { verb: "remove", args: ["github", "--yes"] },
-  ])("routes canonical and legacy policy $verb spellings to the same command", ({ verb, args }) => {
+  ])("routes canonical and legacy policy $verb spellings to the same command (#7178)", ({
+    verb,
+    args,
+  }) => {
     const commandId = `sandbox:policy:${verb}`;
     const expectedArgs = ["alpha", ...args];
     expect(sandboxRouteTokens(commandId)).toEqual(["policy", verb]);
@@ -115,7 +118,7 @@ describe("public route/display separation", () => {
     );
   });
 
-  it("routes new policy subcommands only through their canonical two-token spelling", () => {
+  it("routes new policy subcommands only through their canonical two-token spelling (#7178)", () => {
     expectNative(
       translatePublicSandboxArgv("alpha", "policy", ["exclude", "nous_research", "--force"]),
       "sandbox:policy:exclude",

@@ -13,6 +13,10 @@ import {
   parseNetworkPolicies,
 } from "./preset-parsing";
 
+/** Support posture disclosed whenever a sandbox has a baseline exclusion. */
+export const BASELINE_EXCLUSION_SUPPORT_IMPACT =
+  "Excluded egress leaves dependent agent features unsupported for this sandbox.";
+
 export interface BaselineExclusionRequest {
   readonly key: string;
   readonly digest: string;

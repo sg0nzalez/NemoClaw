@@ -131,7 +131,15 @@ describe("nemoclaw <sandbox> policy-explain (E2E)", () => {
       tier: { name: string } | null;
       activePresets: Array<{ name: string; allowedHostCategories: string[] }>;
       knownUnappliedPresets: Array<{ name: string }>;
-      approvalPath: { inspect: string; add: string; remove: string; documentation: string };
+      baselineExclusions: Array<{ key: string; status: string; supportImpact: string }>;
+      approvalPath: {
+        inspect: string;
+        add: string;
+        remove: string;
+        excludeBaseline: string;
+        restoreBaseline: string;
+        documentation: string;
+      };
       supportBoundaries: Array<{ capability: string; owner: string }>;
     };
 
@@ -143,6 +151,9 @@ describe("nemoclaw <sandbox> policy-explain (E2E)", () => {
     expect(parsed.knownUnappliedPresets.some((p) => p.name === "slack")).toBe(true);
     expect(parsed.approvalPath.inspect).toBe("nemoclaw policy-explain-json policy list");
     expect(parsed.approvalPath.add).toBe("nemoclaw policy-explain-json policy add <preset>");
+    expect(parsed.baselineExclusions).toEqual([]);
+    expect(parsed.approvalPath.excludeBaseline).toContain("policy exclude <key> --dry-run");
+    expect(parsed.approvalPath.restoreBaseline).toContain("policy restore <key>");
     expect(
       parsed.supportBoundaries.some((b) => b.capability === "host allowlist enforcement"),
     ).toBe(true);

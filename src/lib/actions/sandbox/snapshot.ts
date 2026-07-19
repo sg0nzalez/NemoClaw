@@ -71,6 +71,7 @@ import {
   selectSandboxGatewayIfRegistered,
   usesGatewayMetadataProbe,
 } from "./sandbox-gateway-routing";
+import { formatSnapshotBaselineExclusionSummary } from "./snapshot-baseline-exclusion-summary";
 
 const useColor = !process.env.NO_COLOR && !!process.stdout.isTTY;
 const trueColor =
@@ -593,6 +594,11 @@ function runSnapshotCreate(
       const itemSummary = `${result.backedUpDirs.length} directories, ${result.backedUpFiles.length} files`;
       console.log(`  ${G}✓${R} Snapshot ${v}${nameSuffix} created (${itemSummary})`);
       console.log(`    ${manifest.backupPath}`);
+      for (const line of formatSnapshotBaselineExclusionSummary(
+        registry.getBaselineExclusions(sandboxName),
+      )) {
+        console.log(`    ${line}`);
+      }
       return;
     }
     if (result.error) {

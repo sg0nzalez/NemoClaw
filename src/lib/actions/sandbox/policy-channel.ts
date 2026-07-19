@@ -41,6 +41,7 @@ import { getStoredMessagingChannelConfig } from "../../onboard/messaging-config"
 import { getMessagingToken } from "../../onboard/messaging-token";
 import * as policies from "../../policy";
 import {
+  BASELINE_EXCLUSION_SUPPORT_IMPACT,
   digestBaselineEntry,
   listBaselineEntryKeys,
   renderBaselineEntryScope,
@@ -1659,9 +1660,7 @@ async function excludeSandboxBaselineUnlocked(
     key,
     entry,
   );
-  console.log(
-    `  ${YW}Excluded egress leaves dependent agent features unsupported for this sandbox.${R}`,
-  );
+  console.log(`  ${YW}${BASELINE_EXCLUSION_SUPPORT_IMPACT}${R}`);
 
   const digest = digestBaselineEntry(entry);
   if (dryRun) {

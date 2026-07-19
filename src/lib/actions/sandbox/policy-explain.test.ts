@@ -26,6 +26,8 @@ function fakeContext(sandboxName: string): PolicyContext {
       inspect: `nemoclaw ${sandboxName} policy-list`,
       add: `nemoclaw ${sandboxName} policy-add <preset>`,
       remove: `nemoclaw ${sandboxName} policy-remove <preset>`,
+      excludeBaseline: `nemoclaw ${sandboxName} policy exclude <key> --dry-run`,
+      restoreBaseline: `nemoclaw ${sandboxName} policy restore <key>`,
       documentation: "docs/network-policy/customize-network-policy.mdx",
     },
     supportBoundaries: [],

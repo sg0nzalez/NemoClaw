@@ -55,4 +55,61 @@ describe("handleSandboxState destructive resume rollback (#7194)", () => {
     expect(calls.removeSandbox).toHaveBeenCalledWith("saved");
     expect(calls.restoreSandboxRegistryEntryIfMissing).toHaveBeenCalledWith(removalReceipt);
   });
+
+  it("restores the removed row from the exit hook before process termination", async () => {
+    const session = createSession({
+      sandboxName: "saved",
+      webSearchConfig: { fetchEnabled: true },
+      sandboxPromptProgress: {
+        sandboxName: true,
+        webSearch: true,
+        messaging: false,
+        resourceProfile: false,
+      },
+    });
+    session.steps.sandbox.status = "complete";
+    const { deps, calls } = createDeps({
+      agentSupportsWebSearch: () => false,
+      getSandboxReuseState: () => "ready",
+      updateSession: vi.fn(
+        (mutator: (value: Session) => Session | void) => mutator(session) ?? session,
+      ),
+    });
+    const removalReceipt = {
+      entry: { name: "saved", baselineExclusions: [{ key: "nous_research", digest: "abc" }] },
+      wasDefault: false,
+      fallbackDefault: null,
+      postRemovalDefaultSelectionRevision: 1,
+    };
+    let exitListener: ((code: number) => void) | null = null;
+    const processOnce = vi.spyOn(process, "once").mockImplementation(((
+      event: string | symbol,
+      listener: (...args: unknown[]) => void,
+    ) => {
+      if (event === "exit") exitListener = listener as (code: number) => void;
+      return process;
+    }) as typeof process.once);
+    const processRemoveListener = vi
+      .spyOn(process, "removeListener")
+      .mockImplementation(() => process);
+    calls.removeSandbox.mockReturnValue(removalReceipt);
+    calls.createSandbox.mockImplementationOnce(async () => {
+      exitListener?.(1);
+      throw new Error("simulated process exit");
+    });
+
+    await expect(
+      handleSandboxState({
+        ...baseOptions(deps, session),
+        resume: true,
+        sandboxName: "saved",
+        webSearchConfig: { fetchEnabled: true },
+      }),
+    ).rejects.toThrow("simulated process exit");
+
+    expect(processOnce).toHaveBeenCalledWith("exit", expect.any(Function));
+    expect(calls.restoreSandboxRegistryEntryIfMissing).toHaveBeenCalledTimes(1);
+    expect(calls.restoreSandboxRegistryEntryIfMissing).toHaveBeenCalledWith(removalReceipt);
+    expect(processRemoveListener).toHaveBeenCalledWith("exit", expect.any(Function));
+  });
 });

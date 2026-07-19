@@ -217,6 +217,7 @@ vi.mock("../../state/gateway", () => ({
 }));
 
 vi.mock("../../state/registry", () => ({
+  getBaselineExclusions: vi.fn(() => []),
   getCustomPolicies: getCustomPoliciesMock,
   getSandbox: getSandboxMock,
   listSandboxes: () => ({

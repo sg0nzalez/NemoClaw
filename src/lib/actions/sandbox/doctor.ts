@@ -21,6 +21,7 @@ import { executeSandboxCommandForVerification } from "../../onboard/sandbox-veri
 import { getSandboxBaselineEntryDigest } from "../../policy";
 import { ROOT } from "../../runner";
 import { parseLiveSandboxNames } from "../../runtime-recovery";
+import { BASELINE_EXCLUSION_SUPPORT_IMPACT } from "../../policy/baseline-exclusion";
 import * as sandboxVersion from "../../sandbox/version";
 import * as shields from "../../shields";
 import type { SandboxEntry } from "../../state/registry";
@@ -357,22 +358,22 @@ function shieldsDoctorCheck(sandboxName: string): DoctorCheck {
 function baselineExclusionDoctorChecks(sandboxName: string): DoctorCheck[] {
   return registry.getBaselineExclusions(sandboxName).map((exclusion) => {
     const currentDigest = getSandboxBaselineEntryDigest(sandboxName, exclusion.key);
-    const status: DoctorStatus =
-      currentDigest !== null && currentDigest !== exclusion.digest ? "warn" : "info";
+    const status: DoctorStatus = currentDigest === exclusion.digest ? "info" : "warn";
     const detail =
-      status === "warn"
-        ? `Baseline entry '${exclusion.key}' changed since exclusion was approved; rebuild fails closed until re-approved.`
-        : `Baseline entry '${exclusion.key}' excluded; dependent agent features remain unsupported for this sandbox.`;
+      currentDigest === null
+        ? `Baseline entry '${exclusion.key}' no longer exists; rebuild fails closed until the stale exclusion is reviewed.`
+        : currentDigest !== exclusion.digest
+          ? `Baseline entry '${exclusion.key}' changed since exclusion was approved; rebuild fails closed until re-approved.`
+          : `Baseline entry '${exclusion.key}' excluded. ${BASELINE_EXCLUSION_SUPPORT_IMPACT}`;
     return {
       group: "Sandbox",
       label: `Baseline exclusion: ${exclusion.key}`,
       status,
       detail,
-      ...(status === "warn"
-        ? {
-            hint: `run \`${CLI_NAME} ${sandboxName} policy exclude ${exclusion.key} --force\` to re-approve`,
-          }
-        : {}),
+      hint:
+        status === "warn"
+          ? `run \`${CLI_NAME} ${sandboxName} policy restore ${exclusion.key}\`, review with \`${CLI_NAME} ${sandboxName} policy exclude ${exclusion.key} --dry-run\`, then re-approve`
+          : `restore with \`${CLI_NAME} ${sandboxName} policy restore ${exclusion.key}\``,
     };
   });
 }

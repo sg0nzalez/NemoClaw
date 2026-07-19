@@ -7,6 +7,7 @@ import { CLI_NAME } from "../../cli/branding";
 import { D, G, R, YW } from "../../cli/terminal-style";
 import type { SandboxMessagingPlan } from "../../messaging";
 import { normalizePolicyTierName } from "../../onboard/policy-tier-suppression";
+import { BASELINE_EXCLUSION_SUPPORT_IMPACT } from "../../policy/baseline-exclusion";
 import type * as sandboxVersion from "../../sandbox/version";
 import * as shields from "../../shields";
 import * as registry from "../../state/registry";
@@ -70,7 +71,7 @@ export function printBaselineExclusionsRebuildSummary(
   if (exclusions.length === 0) return;
   const keys = exclusions.map((exclusion) => exclusion.key).join(", ");
   writeLine(
-    `    Baseline exclusions carried over: ${keys} \u2014 excluded egress remains unsupported for this sandbox.`,
+    `    Baseline exclusions carried over: ${keys} \u2014 ${BASELINE_EXCLUSION_SUPPORT_IMPACT}`,
   );
 }
 

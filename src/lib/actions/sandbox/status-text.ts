@@ -9,6 +9,7 @@ import { shellQuote } from "../../core/shell-quote";
 import { formatInferenceRouteDriftForDisplay } from "../../inference/config";
 import type { ProviderHealthStatus } from "../../inference/health";
 import * as nim from "../../inference/nim";
+import { BASELINE_EXCLUSION_SUPPORT_IMPACT } from "../../policy/baseline-exclusion";
 import * as sandboxVersion from "../../sandbox/version";
 import * as shields from "../../shields";
 import type { SandboxEntry, SandboxGpuProofResult } from "../../state/registry";
@@ -311,6 +312,15 @@ export function printSandboxDetails(context: SandboxStatusTextContext): SandboxS
     `    OpenShell: ${sb.openshellVersion || "unknown"} (${sb.openshellDriver || "unknown"})`,
   );
   console.log(`    Policies: ${(sb.policies || []).join(", ") || "none"}`);
+  if (sb.baselineExclusions?.length) {
+    console.log(
+      `    Baseline exclusions: ${sb.baselineExclusions.map((entry) => entry.key).join(", ")}`,
+    );
+    console.log(`      Support impact: ${BASELINE_EXCLUSION_SUPPORT_IMPACT}`);
+    console.log(
+      `      Review or restore with \`${CLI_NAME} ${sandboxName} policy list\` or \`${CLI_NAME} ${sandboxName} policy restore <key>\`.`,
+    );
+  }
   const agentExitCode = printAgentHarness(context);
   printActiveSessions(sandboxName);
   printShieldsPosture(sandboxName);

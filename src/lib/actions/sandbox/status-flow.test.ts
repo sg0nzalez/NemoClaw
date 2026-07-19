@@ -130,6 +130,22 @@ describe("showSandboxStatus flow", () => {
     expect(exitSpy).not.toHaveBeenCalled();
   });
 
+  it("reports active baseline exclusions and their support impact (#7178)", async () => {
+    const harness = createStatusFlowHarness({
+      sandboxEntry: {
+        baselineExclusions: [{ key: "nous_research", digest: "digest" }],
+      },
+    });
+
+    await expect(harness.showSandboxStatus("alpha")).resolves.toBeUndefined();
+
+    const output = harness.logSpy.mock.calls.flat().join("\n");
+    expect(output).toContain("Baseline exclusions: nous_research");
+    expect(output).toContain("Support impact:");
+    expect(output).toContain("unsupported");
+    expect(output).toContain("policy restore <key>");
+  });
+
   it("omits serving-process status when the gateway is unavailable (#7003)", async () => {
     const harness = createStatusFlowHarness({
       lookupState: "missing",

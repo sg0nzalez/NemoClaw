@@ -310,6 +310,7 @@ describe("runSandboxDoctor flow", () => {
             group: "Sandbox",
             label: "Baseline exclusion: changed_entry",
             status: "warn",
+            hint: expect.stringContaining("policy restore changed_entry"),
           }),
         ]),
       );

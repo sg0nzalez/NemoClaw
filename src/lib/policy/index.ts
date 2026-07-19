@@ -873,12 +873,25 @@ function excludeBaselineEntry(
     return false;
   }
   const { policy: updated, removed } = removeBaselineEntryFromPolicy(currentPolicy, key);
-  if (removed && !pushPolicyYaml(sandboxName, updated, options)) return false;
+  const previousExclusion = registry
+    .getBaselineExclusions(sandboxName)
+    .find((entry) => entry.key === key);
   const appliedAgentVersion = registry.getSandbox(sandboxName)?.agentVersion ?? null;
   if (!registry.addBaselineExclusion(sandboxName, { key, digest, appliedAgentVersion })) {
     console.error(
-      `  The live policy was updated, but the exclusion could not be recorded for '${sandboxName}'. Re-onboard the sandbox before rebuilding it.`,
+      `  The exclusion could not be recorded for '${sandboxName}'; no live policy changes were made.`,
     );
+    return false;
+  }
+  if (removed && !pushPolicyYaml(sandboxName, updated, options)) {
+    const compensated = previousExclusion
+      ? registry.addBaselineExclusion(sandboxName, previousExclusion)
+      : registry.removeBaselineExclusion(sandboxName, key);
+    if (!compensated) {
+      console.error(
+        `  Failed to roll back the durable exclusion for '${key}'. Repair the registry before rebuilding '${sandboxName}'.`,
+      );
+    }
     return false;
   }
   return true;
@@ -899,12 +912,27 @@ function restoreBaselineEntry(
     console.error(`  Could not read current policy for sandbox '${sandboxName}'.`);
     return false;
   }
+  const recordedExclusion = registry
+    .getBaselineExclusions(sandboxName)
+    .find((entry) => entry.key === key);
+  if (!recordedExclusion || !registry.removeBaselineExclusion(sandboxName, key)) {
+    console.error(
+      `  The exclusion for '${key}' could not be removed from the registry; no live policy changes were made.`,
+    );
+    return false;
+  }
   const entry = getSandboxBaselineEntry(sandboxName, key);
   if (entry) {
     const updated = mergeBaselineEntryIntoPolicy(currentPolicy, key, entry);
-    if (updated !== currentPolicy && !pushPolicyYaml(sandboxName, updated, options)) return false;
+    if (updated !== currentPolicy && !pushPolicyYaml(sandboxName, updated, options)) {
+      if (!registry.addBaselineExclusion(sandboxName, recordedExclusion)) {
+        console.error(
+          `  Failed to restore the durable exclusion for '${key}'. Repair the registry before rebuilding '${sandboxName}'.`,
+        );
+      }
+      return false;
+    }
   }
-  registry.removeBaselineExclusion(sandboxName, key);
   return true;
 }
 

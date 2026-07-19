@@ -10,6 +10,7 @@ import {
   listPresets,
   loadPresetForSandbox,
 } from ".";
+import { BASELINE_EXCLUSION_SUPPORT_IMPACT } from "./baseline-exclusion";
 import { hostStemsFromEndpoints } from "./host-redaction";
 import { getTier } from "./tiers";
 
@@ -61,6 +62,8 @@ export interface PolicyContextApprovalPath {
   inspect: string;
   add: string;
   remove: string;
+  excludeBaseline: string;
+  restoreBaseline: string;
   documentation: string;
 }
 
@@ -187,9 +190,6 @@ function partitionPresets(
   return { active, unapplied };
 }
 
-const BASELINE_EXCLUSION_SUPPORT_IMPACT =
-  "Excluded egress leaves dependent agent features unsupported for this sandbox.";
-
 function buildBaselineExclusions(sandboxName: string): PolicyContextExclusion[] {
   return registry
     .getBaselineExclusions(sandboxName)
@@ -217,6 +217,8 @@ function buildApprovalPath(sandboxName: string): PolicyContextApprovalPath {
     inspect: `nemoclaw ${sandboxName} policy list`,
     add: `nemoclaw ${sandboxName} policy add <preset>`,
     remove: `nemoclaw ${sandboxName} policy remove <preset>`,
+    excludeBaseline: `nemoclaw ${sandboxName} policy exclude <key> --dry-run`,
+    restoreBaseline: `nemoclaw ${sandboxName} policy restore <key>`,
     documentation: POLICY_DOC_URL,
   };
 }
@@ -367,11 +369,12 @@ function exclusionStatusTag(status: PolicyContextExclusionStatus): string {
   }
 }
 
-function formatExclusionLine(exclusion: PolicyContextExclusion): string {
+function formatExclusionLine(exclusion: PolicyContextExclusion, sandboxName: string): string {
   return [
     `- \`${exclusion.key}\` — status: ${exclusionStatusTag(exclusion.status)}`,
     `  acknowledged: ${exclusion.acknowledgedAt ?? "(unknown)"}`,
     `  impact: ${exclusion.supportImpact}`,
+    `  restore: \`nemoclaw ${sandboxName} policy restore ${exclusion.key}\``,
   ].join("\n");
 }
 
@@ -433,7 +436,7 @@ export function renderPolicyContextMarkdown(ctx: PolicyContext): string {
     lines.push("- none");
   } else {
     for (const exclusion of ctx.baselineExclusions) {
-      lines.push(formatExclusionLine(exclusion));
+      lines.push(formatExclusionLine(exclusion, ctx.sandboxName));
     }
   }
   lines.push("");
@@ -441,6 +444,8 @@ export function renderPolicyContextMarkdown(ctx: PolicyContext): string {
   lines.push(`- inspect: \`${ctx.approvalPath.inspect}\``);
   lines.push(`- add a preset: \`${ctx.approvalPath.add}\``);
   lines.push(`- remove a preset: \`${ctx.approvalPath.remove}\``);
+  lines.push(`- preview a baseline exclusion: \`${ctx.approvalPath.excludeBaseline}\``);
+  lines.push(`- restore a baseline entry: \`${ctx.approvalPath.restoreBaseline}\``);
   lines.push(`- documentation: ${ctx.approvalPath.documentation}`);
   lines.push("");
   lines.push("## Support boundaries");

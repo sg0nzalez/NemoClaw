@@ -67,6 +67,7 @@ export type StatusFlowHarnessOptions = {
     agent?: string | null;
     agentVersion?: string | null;
     dcodeAutoApprovalMode?: "disabled" | "thread-opt-in";
+    baselineExclusions?: Array<{ key: string; digest: string }>;
   };
   shieldsPosture?: {
     mode: "locked" | "mutable_default" | "mutable";
