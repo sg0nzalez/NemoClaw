@@ -233,6 +233,25 @@ describe("Station hardware evidence gate", () => {
     expect(result).toMatchObject({ mode: "deferral", prepareScriptSha256: SCRIPT_HASH });
   });
 
+  it("rejects a deferral for stale preparation-script bytes (#7191)", async () => {
+    await expect(
+      evaluateStationHardwareGate(
+        input({
+          api: api({
+            getIssueComment: async () => ({
+              body: deferralComment("0".repeat(64)),
+              issue_url: `https://api.github.com/repos/${REPOSITORY}/issues/${PR_NUMBER}`,
+              user: { login: "maintainer" },
+            }),
+          }),
+          body: prBody({ deferral: true, deferralUrl: DEFERRAL_URL }),
+        }),
+      ),
+    ).rejects.toThrow(
+      "Station hardware deferral is stale: preparation script hash does not match this PR head.",
+    );
+  });
+
   it("rejects a deferral whose follow-up issue is closed (#7191)", async () => {
     await expect(
       evaluateStationHardwareGate(
