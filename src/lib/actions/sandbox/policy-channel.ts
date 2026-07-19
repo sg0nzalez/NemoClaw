@@ -1750,6 +1750,9 @@ async function excludeSandboxBaselineUnlocked(
   }
 
   if (!policies.excludeBaselineEntry(sandboxName, key, digest)) {
+    // A failed cross-system mutation can leave a durable repair journal. Keep
+    // the in-sandbox context aligned before returning the nonzero result.
+    refreshSandboxPolicyContextFile(sandboxName);
     process.exit(1);
   }
   console.log(`  ${G}✓${R} Excluded baseline entry '${key}' for '${sandboxName}'.`);
@@ -1778,7 +1781,9 @@ async function restoreSandboxBaselineUnlocked(
   }
 
   const isExcluded = registry.getBaselineExclusions(sandboxName).some((entry) => entry.key === key);
-  if (!isExcluded) {
+  const pendingTransition = registry.getBaselineExclusionTransition(sandboxName);
+  const isPendingForKey = pendingTransition?.exclusion.key === key;
+  if (!isExcluded && !isPendingForKey) {
     console.error(`  Baseline entry '${key}' is not excluded for '${sandboxName}'.`);
     process.exit(1);
   }
@@ -1808,6 +1813,7 @@ async function restoreSandboxBaselineUnlocked(
   }
 
   if (!policies.restoreBaselineEntry(sandboxName, key)) {
+    refreshSandboxPolicyContextFile(sandboxName);
     process.exit(1);
   }
   console.log(`  ${G}✓${R} Restored baseline entry '${key}' for '${sandboxName}'.`);

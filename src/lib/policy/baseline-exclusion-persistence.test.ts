@@ -1,11 +1,18 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import fs from "node:fs";
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import YAML from "yaml";
 
 const mocks = vi.hoisted(() => ({
   addBaselineExclusion: vi.fn(),
+  beginBaselineExclusionTransition: vi.fn(),
+  clearBaselineExclusionTransition: vi.fn(),
+  commitBaselineExclusionTransition: vi.fn(),
   getBaselineExclusions: vi.fn(),
+  getBaselineExclusionTransition: vi.fn(),
   getSandbox: vi.fn(),
   removeBaselineExclusion: vi.fn(),
   run: vi.fn(),
@@ -21,7 +28,11 @@ vi.mock("../runner", async (importOriginal) => ({
 vi.mock("../state/registry", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../state/registry")>()),
   addBaselineExclusion: mocks.addBaselineExclusion,
+  beginBaselineExclusionTransition: mocks.beginBaselineExclusionTransition,
+  clearBaselineExclusionTransition: mocks.clearBaselineExclusionTransition,
+  commitBaselineExclusionTransition: mocks.commitBaselineExclusionTransition,
   getBaselineExclusions: mocks.getBaselineExclusions,
+  getBaselineExclusionTransition: mocks.getBaselineExclusionTransition,
   getSandbox: mocks.getSandbox,
   removeBaselineExclusion: mocks.removeBaselineExclusion,
 }));
@@ -39,6 +50,15 @@ network_policies:
 `;
 const LIVE_ENTRY = getBaselineEntry(LIVE_POLICY, "nous_research");
 const LIVE_DIGEST = digestBaselineEntry(LIVE_ENTRY!);
+const HERMES_BASELINE_ENTRY = getBaselineEntry(
+  fs.readFileSync("agents/hermes/policy-additions.yaml", "utf8"),
+  "nous_research",
+);
+const HERMES_BASELINE_DIGEST = digestBaselineEntry(HERMES_BASELINE_ENTRY!);
+const HERMES_RESTORED_POLICY = YAML.stringify({
+  version: 1,
+  network_policies: { nous_research: HERMES_BASELINE_ENTRY },
+});
 
 describe("excludeBaselineEntry persistence boundary (#7178)", () => {
   beforeEach(() => {
@@ -52,12 +72,17 @@ describe("excludeBaselineEntry persistence boundary (#7178)", () => {
       agentVersion: "1.2.3",
     });
     mocks.getBaselineExclusions.mockReturnValue([]);
-    mocks.addBaselineExclusion.mockReturnValue(false);
+    mocks.getBaselineExclusionTransition.mockReturnValue(null);
+    mocks.beginBaselineExclusionTransition.mockReturnValue(false);
+    mocks.clearBaselineExclusionTransition.mockReturnValue(true);
+    mocks.commitBaselineExclusionTransition.mockReturnValue(true);
+    mocks.addBaselineExclusion.mockReturnValue(true);
     mocks.removeBaselineExclusion.mockReturnValue(true);
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
     for (const mock of Object.values(mocks)) mock.mockReset();
   });
 
@@ -67,24 +92,225 @@ describe("excludeBaselineEntry persistence boundary (#7178)", () => {
     );
 
     expect(mocks.run).not.toHaveBeenCalled();
-    expect(mocks.addBaselineExclusion).toHaveBeenCalledWith("alpha", {
-      key: "nous_research",
-      digest: LIVE_DIGEST,
-      appliedAgentVersion: "1.2.3",
-    });
+    expect(mocks.beginBaselineExclusionTransition).toHaveBeenCalledWith(
+      "alpha",
+      expect.objectContaining({
+        operation: "exclude",
+        exclusion: expect.objectContaining({
+          key: "nous_research",
+          digest: LIVE_DIGEST,
+          appliedAgentVersion: "1.2.3",
+        }),
+        targetLiveDigest: null,
+      }),
+    );
     expect(console.error).toHaveBeenCalledWith(expect.stringContaining("no live policy changes"));
   });
 
-  it("removes a new durable exclusion when live narrowing fails", () => {
-    mocks.addBaselineExclusion.mockReturnValue(true);
+  it("clears a fresh transaction when live narrowing fails", () => {
+    mocks.beginBaselineExclusionTransition.mockReturnValue(true);
     mocks.run.mockReturnValue({ status: 19 });
 
     expect(excludeBaselineEntry("alpha", "nous_research", LIVE_DIGEST, { nonFatal: true })).toBe(
       false,
     );
 
-    expect(mocks.addBaselineExclusion).toHaveBeenCalledOnce();
-    expect(mocks.removeBaselineExclusion).toHaveBeenCalledWith("alpha", "nous_research");
+    const transaction = mocks.beginBaselineExclusionTransition.mock.calls[0]?.[1];
+    expect(mocks.clearBaselineExclusionTransition).toHaveBeenCalledWith("alpha", transaction.id);
+    expect(mocks.commitBaselineExclusionTransition).not.toHaveBeenCalled();
+  });
+
+  it("publishes committed intent only after exact live narrowing is verified", () => {
+    mocks.beginBaselineExclusionTransition.mockReturnValue(true);
+    mocks.runCapture
+      .mockReturnValueOnce(LIVE_POLICY)
+      .mockReturnValueOnce("version: 1\nnetwork_policies: {}\n");
+
+    expect(excludeBaselineEntry("alpha", "nous_research", LIVE_DIGEST, { nonFatal: true })).toBe(
+      true,
+    );
+
+    const transaction = mocks.beginBaselineExclusionTransition.mock.calls[0]?.[1];
+    expect(mocks.commitBaselineExclusionTransition).toHaveBeenCalledWith("alpha", transaction.id);
+    expect(mocks.clearBaselineExclusionTransition).not.toHaveBeenCalled();
+  });
+
+  it("commits when a failed OpenShell result nevertheless reached the exact live target", () => {
+    mocks.beginBaselineExclusionTransition.mockReturnValue(true);
+    mocks.run.mockReturnValue({ status: 19 });
+    mocks.runCapture
+      .mockReturnValueOnce(LIVE_POLICY)
+      .mockReturnValueOnce("version: 1\nnetwork_policies: {}\n");
+
+    expect(excludeBaselineEntry("alpha", "nous_research", LIVE_DIGEST, { nonFatal: true })).toBe(
+      true,
+    );
+
+    expect(mocks.commitBaselineExclusionTransition).toHaveBeenCalledOnce();
+    expect(mocks.clearBaselineExclusionTransition).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["returns false", () => false],
+    [
+      "throws",
+      () => {
+        throw new Error("disk unavailable");
+      },
+    ],
+  ])("preserves a verified exclusion journal when finalization %s (#7178)", (_label, finalize) => {
+    mocks.beginBaselineExclusionTransition.mockReturnValue(true);
+    mocks.commitBaselineExclusionTransition.mockImplementation(finalize);
+    mocks.runCapture
+      .mockReturnValueOnce(LIVE_POLICY)
+      .mockReturnValueOnce("version: 1\nnetwork_policies: {}\n");
+
+    expect(excludeBaselineEntry("alpha", "nous_research", LIVE_DIGEST, { nonFatal: true })).toBe(
+      false,
+    );
+
+    expect(mocks.commitBaselineExclusionTransition).toHaveBeenCalledOnce();
+    expect(mocks.clearBaselineExclusionTransition).not.toHaveBeenCalled();
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining("durable journal could not be finalized"),
+    );
+  });
+
+  it("preserves the journal when post-write live readback is unavailable (#7178)", () => {
+    mocks.beginBaselineExclusionTransition.mockReturnValue(true);
+    mocks.runCapture.mockReturnValueOnce(LIVE_POLICY).mockReturnValueOnce("");
+
+    expect(excludeBaselineEntry("alpha", "nous_research", LIVE_DIGEST, { nonFatal: true })).toBe(
+      false,
+    );
+
+    expect(mocks.commitBaselineExclusionTransition).not.toHaveBeenCalled();
+    expect(mocks.clearBaselineExclusionTransition).not.toHaveBeenCalled();
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining("Could not verify the live"),
+    );
+  });
+
+  it("pins every live read and write to the sandbox's recorded gateway (#7178)", () => {
+    vi.stubEnv("OPENSHELL_GATEWAY", "ambient-gateway");
+    mocks.getSandbox.mockReturnValue({
+      name: "alpha",
+      agent: "hermes",
+      agentVersion: "1.2.3",
+      gatewayName: "nemoclaw-18080",
+      gatewayPort: 18080,
+    });
+    mocks.beginBaselineExclusionTransition.mockReturnValue(true);
+    mocks.runCapture
+      .mockImplementationOnce((_command, options) => {
+        expect(process.env.OPENSHELL_GATEWAY).toBe("ambient-gateway");
+        expect(options).toMatchObject({ env: { OPENSHELL_GATEWAY: "nemoclaw-18080" } });
+        return LIVE_POLICY;
+      })
+      .mockImplementationOnce((_command, options) => {
+        expect(process.env.OPENSHELL_GATEWAY).toBe("ambient-gateway");
+        expect(options).toMatchObject({ env: { OPENSHELL_GATEWAY: "nemoclaw-18080" } });
+        return "version: 1\nnetwork_policies: {}\n";
+      });
+    mocks.run.mockImplementation((_command, options) => {
+      expect(process.env.OPENSHELL_GATEWAY).toBe("ambient-gateway");
+      expect(options).toMatchObject({ env: { OPENSHELL_GATEWAY: "nemoclaw-18080" } });
+      return { status: 0 };
+    });
+
+    expect(excludeBaselineEntry("alpha", "nous_research", LIVE_DIGEST, { nonFatal: true })).toBe(
+      true,
+    );
+    expect(process.env.OPENSHELL_GATEWAY).toBe("ambient-gateway");
+  });
+
+  it("rejects an ambient OpenShell gateway endpoint before live mutation (#7178)", () => {
+    vi.stubEnv("OPENSHELL_GATEWAY_ENDPOINT", "https://other.example.test");
+
+    expect(() =>
+      excludeBaselineEntry("alpha", "nous_research", LIVE_DIGEST, { nonFatal: true }),
+    ).toThrow(/OPENSHELL_GATEWAY_ENDPOINT is set/);
+    expect(mocks.runCapture).not.toHaveBeenCalled();
+    expect(mocks.run).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["returns false", () => false],
+    [
+      "throws",
+      () => {
+        throw new Error("disk unavailable");
+      },
+    ],
+  ])("preserves and reports the journal when exclusion compensation %s", (_label, compensate) => {
+    mocks.beginBaselineExclusionTransition.mockReturnValue(true);
+    mocks.run.mockReturnValue({ status: 19 });
+    mocks.clearBaselineExclusionTransition.mockImplementation(compensate);
+
+    expect(excludeBaselineEntry("alpha", "nous_research", LIVE_DIGEST, { nonFatal: true })).toBe(
+      false,
+    );
+
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining("durable journal was preserved"),
+    );
+  });
+
+  it("finalizes an interrupted exclusion when the exact live target is already present", () => {
+    mocks.runCapture.mockReturnValue("version: 1\nnetwork_policies: {}\n");
+    mocks.getBaselineExclusionTransition.mockReturnValue({
+      id: "tx-exclude",
+      operation: "exclude",
+      exclusion: { key: "nous_research", digest: LIVE_DIGEST },
+      targetLiveDigest: null,
+      startedAt: "2026-07-19T00:00:00.000Z",
+    });
+
+    expect(excludeBaselineEntry("alpha", "nous_research", LIVE_DIGEST, { nonFatal: true })).toBe(
+      true,
+    );
+
+    expect(mocks.commitBaselineExclusionTransition).toHaveBeenCalledWith("alpha", "tx-exclude");
+    expect(mocks.run).not.toHaveBeenCalled();
+  });
+
+  it("keeps an interrupted exclusion fail-closed when live policy matches neither side", () => {
+    mocks.getBaselineExclusionTransition.mockReturnValue({
+      id: "tx-exclude",
+      operation: "exclude",
+      exclusion: { key: "nous_research", digest: LIVE_DIGEST },
+      targetLiveDigest: null,
+      startedAt: "2026-07-19T00:00:00.000Z",
+    });
+    mocks.runCapture.mockReturnValue(
+      LIVE_POLICY.replace("nousresearch.com", "third-state.example.test"),
+    );
+
+    expect(excludeBaselineEntry("alpha", "nous_research", LIVE_DIGEST, { nonFatal: true })).toBe(
+      false,
+    );
+
+    expect(mocks.commitBaselineExclusionTransition).not.toHaveBeenCalled();
+    expect(mocks.clearBaselineExclusionTransition).not.toHaveBeenCalled();
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining("matches neither side"));
+  });
+
+  it("does not mistake a malformed same-key live entry for the absent exclude target", () => {
+    mocks.getBaselineExclusionTransition.mockReturnValue({
+      id: "tx-exclude",
+      operation: "exclude",
+      exclusion: { key: "nous_research", digest: LIVE_DIGEST },
+      targetLiveDigest: null,
+      startedAt: "2026-07-19T00:00:00.000Z",
+    });
+    mocks.runCapture.mockReturnValue("version: 1\nnetwork_policies:\n  nous_research: malformed\n");
+
+    expect(excludeBaselineEntry("alpha", "nous_research", LIVE_DIGEST, { nonFatal: true })).toBe(
+      false,
+    );
+
+    expect(mocks.commitBaselineExclusionTransition).not.toHaveBeenCalled();
+    expect(mocks.clearBaselineExclusionTransition).not.toHaveBeenCalled();
   });
 
   it("refuses to remove a live entry that changed after the operator preview", () => {
@@ -120,17 +346,22 @@ describe("restoreBaselineEntry persistence boundary (#7178)", () => {
       agentVersion: "1.2.3",
     });
     mocks.getBaselineExclusions.mockReturnValue([RECORDED]);
+    mocks.getBaselineExclusionTransition.mockReturnValue(null);
+    mocks.beginBaselineExclusionTransition.mockReturnValue(true);
+    mocks.clearBaselineExclusionTransition.mockReturnValue(true);
+    mocks.commitBaselineExclusionTransition.mockReturnValue(true);
     mocks.removeBaselineExclusion.mockReturnValue(true);
     mocks.addBaselineExclusion.mockReturnValue(true);
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
     for (const mock of Object.values(mocks)) mock.mockReset();
   });
 
-  it("does not widen live egress when the exclusion record cannot be removed", () => {
-    mocks.removeBaselineExclusion.mockReturnValue(false);
+  it("does not widen live egress when its durable transaction cannot be recorded", () => {
+    mocks.beginBaselineExclusionTransition.mockReturnValue(false);
 
     expect(restoreBaselineEntry("alpha", "nous_research", { nonFatal: true })).toBe(false);
 
@@ -138,12 +369,153 @@ describe("restoreBaselineEntry persistence boundary (#7178)", () => {
     expect(console.error).toHaveBeenCalledWith(expect.stringContaining("no live policy changes"));
   });
 
-  it("restores the durable exclusion when live policy restoration fails", () => {
+  it("clears the restore transaction when live policy restoration fails", () => {
     mocks.run.mockReturnValue({ status: 19 });
 
     expect(restoreBaselineEntry("alpha", "nous_research", { nonFatal: true })).toBe(false);
 
-    expect(mocks.removeBaselineExclusion).toHaveBeenCalledWith("alpha", "nous_research");
-    expect(mocks.addBaselineExclusion).toHaveBeenCalledWith("alpha", RECORDED);
+    const transaction = mocks.beginBaselineExclusionTransition.mock.calls[0]?.[1];
+    expect(mocks.clearBaselineExclusionTransition).toHaveBeenCalledWith("alpha", transaction.id);
+    expect(mocks.commitBaselineExclusionTransition).not.toHaveBeenCalled();
+  });
+
+  it("publishes the restore only after exact live widening is verified", () => {
+    expect(HERMES_BASELINE_ENTRY).not.toBeNull();
+    mocks.runCapture
+      .mockReturnValueOnce("version: 1\nnetwork_policies: {}\n")
+      .mockReturnValueOnce(HERMES_RESTORED_POLICY);
+
+    expect(restoreBaselineEntry("alpha", "nous_research", { nonFatal: true })).toBe(true);
+
+    const transaction = mocks.beginBaselineExclusionTransition.mock.calls[0]?.[1];
+    expect(mocks.commitBaselineExclusionTransition).toHaveBeenCalledWith("alpha", transaction.id);
+    expect(mocks.clearBaselineExclusionTransition).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["returns false", () => false],
+    [
+      "throws",
+      () => {
+        throw new Error("disk unavailable");
+      },
+    ],
+  ])("preserves and reports the journal when restore compensation %s", (_label, compensate) => {
+    mocks.run.mockReturnValue({ status: 19 });
+    mocks.clearBaselineExclusionTransition.mockImplementation(compensate);
+
+    expect(restoreBaselineEntry("alpha", "nous_research", { nonFatal: true })).toBe(false);
+
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining("durable journal was preserved"),
+    );
+  });
+
+  it("finalizes an interrupted restore when the exact live target is already present", () => {
+    mocks.runCapture.mockReturnValue(HERMES_RESTORED_POLICY);
+    mocks.getBaselineExclusionTransition.mockReturnValue({
+      id: "tx-restore",
+      operation: "restore",
+      exclusion: RECORDED,
+      targetLiveDigest: HERMES_BASELINE_DIGEST,
+      startedAt: "2026-07-19T00:00:00.000Z",
+    });
+
+    expect(restoreBaselineEntry("alpha", "nous_research", { nonFatal: true })).toBe(true);
+
+    expect(mocks.commitBaselineExclusionTransition).toHaveBeenCalledWith("alpha", "tx-restore");
+    expect(mocks.run).not.toHaveBeenCalled();
+  });
+
+  it("keeps an interrupted restore pending when the release baseline changed (#7178)", () => {
+    mocks.runCapture.mockReturnValue(LIVE_POLICY);
+    mocks.getBaselineExclusionTransition.mockReturnValue({
+      id: "tx-restore",
+      operation: "restore",
+      exclusion: RECORDED,
+      targetLiveDigest: LIVE_DIGEST,
+      startedAt: "2026-07-19T00:00:00.000Z",
+    });
+
+    expect(restoreBaselineEntry("alpha", "nous_research", { nonFatal: true })).toBe(false);
+
+    expect(mocks.commitBaselineExclusionTransition).not.toHaveBeenCalled();
+    expect(mocks.clearBaselineExclusionTransition).not.toHaveBeenCalled();
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining("current release baseline for 'nous_research' changed"),
+    );
+  });
+
+  it("keeps an interrupted restore pending when the release baseline removed its key (#7178)", () => {
+    const legacyTargetPolicy = YAML.stringify({
+      version: 1,
+      network_policies: { legacy_entry: LIVE_ENTRY },
+    });
+    const legacyExclusion = {
+      key: "legacy_entry",
+      digest: "a".repeat(64),
+      acknowledgedAt: "2026-07-19T00:00:00.000Z",
+    };
+    mocks.runCapture.mockReturnValue(legacyTargetPolicy);
+    mocks.getBaselineExclusions.mockReturnValue([legacyExclusion]);
+    mocks.getBaselineExclusionTransition.mockReturnValue({
+      id: "tx-restore",
+      operation: "restore",
+      exclusion: legacyExclusion,
+      targetLiveDigest: LIVE_DIGEST,
+      startedAt: "2026-07-19T00:00:00.000Z",
+    });
+
+    expect(restoreBaselineEntry("alpha", "legacy_entry", { nonFatal: true })).toBe(false);
+
+    expect(mocks.commitBaselineExclusionTransition).not.toHaveBeenCalled();
+    expect(mocks.clearBaselineExclusionTransition).not.toHaveBeenCalled();
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining("current release baseline for 'legacy_entry' changed"),
+    );
+  });
+
+  it("keeps an interrupted restore pending when its agent baseline is unreadable (#7178)", () => {
+    mocks.getSandbox.mockReturnValue({
+      name: "alpha",
+      agent: "agent-without-a-readable-baseline",
+      agentVersion: "1.2.3",
+    });
+    mocks.runCapture.mockReturnValue(LIVE_POLICY);
+    mocks.getBaselineExclusionTransition.mockReturnValue({
+      id: "tx-restore",
+      operation: "restore",
+      exclusion: RECORDED,
+      targetLiveDigest: LIVE_DIGEST,
+      startedAt: "2026-07-19T00:00:00.000Z",
+    });
+
+    expect(restoreBaselineEntry("alpha", "nous_research", { nonFatal: true })).toBe(false);
+
+    expect(mocks.commitBaselineExclusionTransition).not.toHaveBeenCalled();
+    expect(mocks.clearBaselineExclusionTransition).not.toHaveBeenCalled();
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining("current release baseline for 'nous_research' is unreadable"),
+    );
+  });
+
+  it("keeps an interrupted restore pending when durable exclusion intent changed (#7178)", () => {
+    mocks.runCapture.mockReturnValue(HERMES_RESTORED_POLICY);
+    mocks.getBaselineExclusions.mockReturnValue([{ ...RECORDED, digest: "changed" }]);
+    mocks.getBaselineExclusionTransition.mockReturnValue({
+      id: "tx-restore",
+      operation: "restore",
+      exclusion: RECORDED,
+      targetLiveDigest: HERMES_BASELINE_DIGEST,
+      startedAt: "2026-07-19T00:00:00.000Z",
+    });
+
+    expect(restoreBaselineEntry("alpha", "nous_research", { nonFatal: true })).toBe(false);
+
+    expect(mocks.commitBaselineExclusionTransition).not.toHaveBeenCalled();
+    expect(mocks.clearBaselineExclusionTransition).not.toHaveBeenCalled();
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining("durable exclusion for 'nous_research' changed"),
+    );
   });
 });

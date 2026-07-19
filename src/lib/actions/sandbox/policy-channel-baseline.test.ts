@@ -70,6 +70,7 @@ beforeEach(() => {
 
   vi.spyOn(registry, "getSandbox").mockReturnValue({ name: "alpha", agent: "hermes" });
   getBaselineExclusionsMock = vi.spyOn(registry, "getBaselineExclusions").mockReturnValue([]);
+  vi.spyOn(registry, "getBaselineExclusionTransition").mockReturnValue(null);
 
   vi.spyOn(policies, "resolveSandboxBaselinePolicy").mockReturnValue({
     policyPath: "/repo/policy-additions.yaml",
