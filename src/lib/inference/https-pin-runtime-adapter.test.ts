@@ -529,10 +529,15 @@ describe("createHttpsPinRuntimeAdapterServer control plane (#6141)", () => {
   });
 
   it.each([
-    ["/chat/completions?trace=1", "/v1/chat/completions?trace=1"],
-    ["/admin", "/v1/admin"],
-    ["/v10/chat/completions", "/v1/v10/chat/completions"],
-  ])("prepends the in-memory target base path for opaque route suffix %s", async (suffix, expectedPath) => {
+    ["/v1", "/chat/completions?trace=1", "/v1/chat/completions?trace=1"],
+    ["/v1", "/v1/chat/completions", "/v1/chat/completions"],
+    ["/gateway/v1", "/v1/chat/completions", "/gateway/v1/chat/completions"],
+    ["/v1beta/openai", "/v1/chat/completions", "/v1beta/openai/chat/completions"],
+    ["/tenant/v1/chat", "/v1/chat/completions", "/tenant/v1/chat/chat/completions"],
+    ["/tenant/messages", "/messages", "/tenant/messages/messages"],
+    ["/v1", "/admin", "/v1/admin"],
+    ["/v1", "/v10/chat/completions", "/v1/v10/chat/completions"],
+  ])("translates only the OpenAI gateway prefix when joining target base %s with suffix %s", async (targetPath, suffix, expectedPath) => {
     const upstreamPaths: string[] = [];
     const upstream = http.createServer((req, res) => {
       upstreamPaths.push(req.url || "");
@@ -544,7 +549,7 @@ describe("createHttpsPinRuntimeAdapterServer control plane (#6141)", () => {
       controlToken: TEST_CONTROL_TOKEN,
       initialRoutes: {
         scoped: {
-          targetBaseUrl: `http://real-upstream.example:${upstreamPort}/v1`,
+          targetBaseUrl: `http://real-upstream.example:${upstreamPort}${targetPath}`,
           pinnedAddresses: ["127.0.0.1"],
           providerType: "openai",
           credentialValue: "sk-scoped",
@@ -560,6 +565,23 @@ describe("createHttpsPinRuntimeAdapterServer control plane (#6141)", () => {
 
     expect(response.status).toBe(200);
     expect(upstreamPaths).toEqual([expectedPath]);
+  });
+
+  it("preserves the Anthropic v1 API suffix when joining its target base", () => {
+    expect(
+      __test.buildContainedForwardPath(
+        {
+          targetBaseUrl: "https://real-upstream.example/base",
+          pinnedAddresses: ["93.184.216.34"],
+          providerType: "anthropic",
+          credentialValue: "not-used",
+          generation: TEST_ROUTE_GENERATION,
+        },
+        "/v1/messages",
+        "?trace=1",
+        "/route/scoped/v1/messages?trace=1",
+      ),
+    ).toBe("/base/v1/messages?trace=1");
   });
 
   it("seeds routes from initialRoutes at construction, before any PUT", async () => {

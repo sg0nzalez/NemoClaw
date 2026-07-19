@@ -311,7 +311,15 @@ function buildContainedForwardPath(
 
   const targetPath = new URL(route.targetBaseUrl).pathname.replace(/\/+$/, "") || "/";
   const suffix = normalizedSuffix === "/" ? "" : normalizedSuffix;
-  const joined = targetPath === "/" ? suffix || "/" : `${targetPath}${suffix}`;
+  // OpenShell exposes OpenAI routes at the canonical `/v1` gateway surface,
+  // while targetBaseUrl is already the provider base validated by NemoClaw.
+  // Translate only that structural gateway segment; inferring arbitrary path
+  // overlap could collapse legitimate resource names such as `messages`.
+  const translatedSuffix =
+    route.providerType === "openai" && (suffix === "/v1" || suffix.startsWith("/v1/"))
+      ? suffix.slice(3)
+      : suffix;
+  const joined = targetPath === "/" ? translatedSuffix || "/" : `${targetPath}${translatedSuffix}`;
   const canonical = new URL(joined, "http://adapter.invalid").pathname;
   const contained =
     canonical === joined &&
