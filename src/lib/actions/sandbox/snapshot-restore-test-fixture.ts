@@ -16,6 +16,12 @@ export type OpenshellCaptureResult = {
 export type SandboxRecord = {
   name: string;
   agent?: string | null;
+  baselineExclusions?: Array<{
+    key: string;
+    digest: string;
+    acknowledgedAt?: string;
+    appliedAgentVersion?: string | null;
+  }>;
   fromDockerfile?: string | null;
   gatewayName?: string | null;
   imageTag?: string | null;
@@ -104,6 +110,10 @@ const lifecycleMock = vi.hoisted(() => {
 });
 
 export const backupSandboxStateMock = vi.fn();
+export const loadAgentMock = vi.fn((name: string) => ({
+  name,
+  policyAdditionsPath: name === "openclaw" ? null : `/repo/agents/${name}/policy-additions.yaml`,
+}));
 export const captureOpenshellMock = vi.fn<
   (args: string[], opts?: Record<string, unknown>) => OpenshellCaptureResult
 >((args) => defaultOpenshellResponses(args));
@@ -131,6 +141,14 @@ export const getSandboxMock = vi.fn<(name?: string) => SandboxRecord | null>(() 
 export const isGatewayHealthyMock = vi.fn(() => true);
 export const listBackupsMock = vi.fn<() => Array<Record<string, unknown>>>(() => []);
 export const parseLiveSandboxNamesMock = vi.fn(() => new Set(["alpha"]));
+export const prepareInitialSandboxCreatePolicyMock = vi.fn(
+  (
+    policyPath: string,
+  ): { policyPath: string; appliedPresets: string[]; cleanup?: () => boolean } => ({
+    policyPath,
+    appliedPresets: [],
+  }),
+);
 export const registerSandboxMock = vi.fn();
 export const updateSandboxMock = vi.fn();
 export const restoreSandboxStateMock = vi.fn();
@@ -154,6 +172,10 @@ export { lifecycleMock, shieldsMock };
 vi.mock("../../adapters/docker", () => ({
   dockerCapture: vi.fn(() => ""),
   dockerInspect: dockerInspectMock,
+}));
+
+vi.mock("../../agent/defs", () => ({
+  loadAgent: loadAgentMock,
 }));
 
 vi.mock("../../adapters/openshell/runtime", () => ({
@@ -195,6 +217,10 @@ vi.mock("../../runtime-recovery", () => ({
   parseLiveSandboxNames: parseLiveSandboxNamesMock,
 }));
 
+vi.mock("../../onboard/initial-policy", () => ({
+  prepareInitialSandboxCreatePolicy: prepareInitialSandboxCreatePolicyMock,
+}));
+
 vi.mock("../../shields", () => ({
   get isShieldsDown() {
     return shieldsMock.getIsShieldsDownExport();
@@ -223,7 +249,9 @@ vi.mock("../../state/gateway", () => ({
 }));
 
 vi.mock("../../state/registry", () => ({
+  getConfiguredMessagingChannelsFromEntry: vi.fn(() => []),
   getCustomPolicies: getCustomPoliciesMock,
+  getDisabledMessagingChannelsFromEntry: vi.fn(() => []),
   getSandbox: getSandboxMock,
   listSandboxes: () => ({
     sandboxes: ["alpha", "beta", "gamma"].map((name) => getSandboxMock(name)).filter(Boolean),
@@ -270,6 +298,14 @@ export function resetSnapshotRestoreMocks(): void {
   getSandboxMock.mockReturnValue(null);
   isGatewayHealthyMock.mockReturnValue(true);
   listBackupsMock.mockReturnValue([]);
+  loadAgentMock.mockImplementation((name: string) => ({
+    name,
+    policyAdditionsPath: name === "openclaw" ? null : `/repo/agents/${name}/policy-additions.yaml`,
+  }));
+  prepareInitialSandboxCreatePolicyMock.mockImplementation((policyPath: string) => ({
+    policyPath,
+    appliedPresets: [],
+  }));
   registerSandboxMock.mockReset();
   updateSandboxMock.mockReset();
   restoreSandboxStateMock.mockReturnValue({

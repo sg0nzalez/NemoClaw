@@ -10,6 +10,7 @@ import {
   runOpenshell,
 } from "../../adapters/openshell/runtime";
 import { OPENSHELL_PROBE_TIMEOUT_MS } from "../../adapters/openshell/timeouts";
+import { loadAgent } from "../../agent/defs";
 import { CLI_NAME } from "../../cli/branding";
 import { prompt as askPrompt } from "../../credentials/store";
 import { formatFailedBackupItems } from "../../domain/backup-failure";
@@ -273,6 +274,32 @@ function resolveCloneDashboardEnvArgs(
   return envArgs;
 }
 
+async function prepareSnapshotClonePolicy(srcEntry: SandboxEntry): Promise<{
+  policyPath: string;
+  cleanup?: () => boolean;
+}> {
+  const defaultPolicyPath = path.join(
+    ROOT,
+    "nemoclaw-blueprint",
+    "policies",
+    "openclaw-sandbox.yaml",
+  );
+  const baselineExclusions = srcEntry.baselineExclusions ?? [];
+  if (baselineExclusions.length === 0) return { policyPath: defaultPolicyPath };
+
+  const agentName = srcEntry.agent || "openclaw";
+  const basePolicyPath = loadAgent(agentName).policyAdditionsPath || defaultPolicyPath;
+  const disabledChannels = new Set(registry.getDisabledMessagingChannelsFromEntry(srcEntry));
+  const activeMessagingChannels = registry
+    .getConfiguredMessagingChannelsFromEntry(srcEntry)
+    .filter((channel) => !disabledChannels.has(channel));
+  const { prepareInitialSandboxCreatePolicy } = await import("../../onboard/initial-policy");
+  return prepareInitialSandboxCreatePolicy(basePolicyPath, activeMessagingChannels, {
+    agentName,
+    baselineExclusions,
+  });
+}
+
 // Used by `snapshot restore --to <dst>` when dst does not exist yet: reuses
 // the source's baked image so the user does not have to re-run onboarding.
 // Returns true on success; on failure, logs and throws SnapshotCommandError.
@@ -281,10 +308,10 @@ async function autoCreateSandboxFromSource(
   dstName: string,
   srcEntry: SandboxEntry | { name: string },
   fromImage: string,
+  createPolicyPath: string,
   dstDashboardPort: number | null,
   dashboardEnvArgs: readonly string[],
 ): Promise<void> {
-  const basePolicy = path.join(ROOT, "nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml");
   const openshellBin = getOpenshellBinary();
   const sourceObservabilityEnabled =
     (srcEntry as { observabilityEnabled?: boolean }).observabilityEnabled === true;
@@ -306,7 +333,7 @@ async function autoCreateSandboxFromSource(
     "--from",
     fromImage,
     "--policy",
-    basePolicy,
+    createPolicyPath,
     "--auto-providers",
     "--",
     ...startupCommand,
@@ -1034,24 +1061,30 @@ async function runSnapshotRestoreUnlocked(
       // validation the image and gateway-route checks above already do (#3756).
       const dstDashboardPort = allocateCloneDashboardPort(targetSandbox, lockedSourceEntry);
       const dashboardEnvArgs = resolveCloneDashboardEnvArgs(lockedSourceEntry, dstDashboardPort);
-      if (targetExists) {
-        if (targetEntry) {
-          verifyRestoreDestinationOnOwnGateway(targetSandbox);
+      const clonePolicy = await prepareSnapshotClonePolicy(lockedSourceEntry);
+      try {
+        if (targetExists) {
+          if (targetEntry) {
+            verifyRestoreDestinationOnOwnGateway(targetSandbox);
+          }
+          deleteSandboxForRestore(targetSandbox);
+          requireLiveSandboxesOnSandboxGateway(
+            sandboxName,
+            "  Failed to re-select source sandbox gateway after deleting destination.",
+          );
         }
-        deleteSandboxForRestore(targetSandbox);
-        requireLiveSandboxesOnSandboxGateway(
+        await autoCreateSandboxFromSource(
           sandboxName,
-          "  Failed to re-select source sandbox gateway after deleting destination.",
+          targetSandbox,
+          lockedSourceEntry,
+          lockedFromImage,
+          clonePolicy.policyPath,
+          dstDashboardPort,
+          dashboardEnvArgs,
         );
+      } finally {
+        clonePolicy.cleanup?.();
       }
-      await autoCreateSandboxFromSource(
-        sandboxName,
-        targetSandbox,
-        lockedSourceEntry,
-        lockedFromImage,
-        dstDashboardPort,
-        dashboardEnvArgs,
-      );
     };
     // Lock order matches onboard: sandbox (outer caller), host dashboard,
     // gateway route. The host-wide lease stays held from port selection until
