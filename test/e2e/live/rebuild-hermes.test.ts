@@ -30,6 +30,10 @@ import {
   rebuildHermesRegistryImageState,
   requireRebuildHermesInitialImageTag,
 } from "./rebuild-hermes-image-state.ts";
+import {
+  REBUILD_HERMES_OLD_BASE_FIXTURE,
+  verifyRebuildHermesOldBaseFixture,
+} from "./rebuild-hermes-old-base-fixture.ts";
 import { startRebuildHermesProgress } from "./rebuild-hermes-progress.ts";
 import { buildRebuildHermesTimingSummary, describeRunnerClass } from "./rebuild-hermes-timing.ts";
 
@@ -42,13 +46,8 @@ import { buildRebuildHermesTimingSummary, describeRunnerClass } from "./rebuild-
 // Vitest.
 
 const HERMES_MANIFEST = path.join(REPO_ROOT, "agents", "hermes", "manifest.yaml");
-const OLD_HERMES_VERSION = "v2026.5.16";
+const OLD_HERMES_VERSION = `v${REBUILD_HERMES_OLD_BASE_FIXTURE.hermesCalver}`;
 const OLD_HERMES_REGISTRY_VERSION = OLD_HERMES_VERSION.slice(1);
-const OLD_HERMES_SEMVER = "0.14.0";
-const OLD_HERMES_TARBALL_SHA256 =
-  "c0a554050a50ee9a62f3fa5cd288a167ba5640c42d647d100cdea084b7294143";
-const OLD_HERMES_NPM_INTEGRITY =
-  "sha512-kkHSw8iprp0JWAOf3ZZF0OHzRBj3E/BbG/QV0O4lwonxuY7AWhSepOhzSMlWo21VbQ/fTLwFkr/q3cIjDZDLBA==";
 const STALE_BASE_REBUILD = process.env.NEMOCLAW_HERMES_STALE_BASE_REBUILD_E2E === "1";
 const TEST_SANDBOX_PREFIX = STALE_BASE_REBUILD ? "e2e-rebuild-hermes-base" : "e2e-rebuild-hermes";
 const SANDBOX_NAME =
@@ -82,7 +81,7 @@ const CURRENT_BASE_TAG = "ghcr.io/nvidia/nemoclaw/hermes-sandbox-base:latest";
 const CURRENT_BASE_REUSE_TAG = `nemoclaw-hermes-sandbox-base-local:e2e-current-${SANDBOX_NAME.toLowerCase().replace(/[^a-z0-9_.-]+/g, "-")}`;
 
 const INSTALL_TIMEOUT_MS = 60 * 60_000;
-const DOCKER_BUILD_TIMEOUT_MS = 35 * 60_000;
+const DOCKER_PULL_TIMEOUT_MS = 20 * 60_000;
 const OPENSHELL_TIMEOUT_MS = 2 * 60_000;
 const SANDBOX_CREATE_TIMEOUT_MS = 10 * 60_000;
 const REBUILD_TIMEOUT_MS = 45 * 60_000;
@@ -460,11 +459,12 @@ test(STALE_BASE_REBUILD
     staleBaseMode: STALE_BASE_REBUILD,
     sandboxName: SANDBOX_NAME,
     oldHermesVersion: OLD_HERMES_VERSION,
+    oldBaseFixture: REBUILD_HERMES_OLD_BASE_FIXTURE,
     expectedHermesVersion: expectedVersion,
     markerFile: MARKER_FILE,
     preservedBoundaries: [
       "bash install.sh --non-interactive",
-      "phase 1 current Hermes base resolution plus old Hermes base construction",
+      "phase 1 current Hermes base resolution plus immutable old Hermes base fixture",
       "openshell provider create/update and sandbox create/exec/list",
       "curated local ~/.nemoclaw registry and onboard-session rebuild metadata",
       "real nemoclaw <sandbox> rebuild --yes --verbose",
@@ -640,37 +640,76 @@ test(STALE_BASE_REBUILD
     timeoutMs: OPENSHELL_TIMEOUT_MS,
   });
 
-  progress.phase("phase 2 old base build");
-  const buildOldBase = await host.command(
+  progress.phase("phase 2 old base fixture pull");
+  const pullOldBase = await host.command(
     "docker",
-    [
-      "build",
-      "--build-arg",
-      `HERMES_VERSION=${OLD_HERMES_VERSION}`,
-      "--build-arg",
-      `HERMES_SEMVER=${OLD_HERMES_SEMVER}`,
-      "--build-arg",
-      `HERMES_TARBALL_SHA256=${OLD_HERMES_TARBALL_SHA256}`,
-      "--build-arg",
-      `HERMES_NPM_INTEGRITY=${OLD_HERMES_NPM_INTEGRITY}`,
-      "--build-arg",
-      "HERMES_UV_EXTRAS=messaging mcp",
-      "-f",
-      path.join(REPO_ROOT, "agents", "hermes", "Dockerfile.base"),
-      "-t",
-      OLD_BASE_TAG,
-      REPO_ROOT,
-    ],
+    ["pull", REBUILD_HERMES_OLD_BASE_FIXTURE.imageRef],
     {
-      artifactName: "phase-2-docker-build-old-hermes-base",
-      env: testEnv(apiKey),
+      artifactName: "phase-2-docker-pull-old-hermes-base-fixture",
+      env: buildAvailabilityProbeEnv(),
       redactionValues,
-      timeoutMs: DOCKER_BUILD_TIMEOUT_MS,
+      timeoutMs: DOCKER_PULL_TIMEOUT_MS,
       captureLimitBytes: LONG_COMMAND_CAPTURE_LIMIT_BYTES,
       onOutput: progress.onOutput,
     },
   );
-  expectExitZero(buildOldBase, `docker build old Hermes base ${OLD_HERMES_VERSION}`);
+  expectExitZero(pullOldBase, `pull immutable old Hermes base ${OLD_HERMES_VERSION}`);
+
+  const oldBaseLabels = await host.command(
+    "docker",
+    [
+      "image",
+      "inspect",
+      "--format",
+      "{{json .Config.Labels}}",
+      REBUILD_HERMES_OLD_BASE_FIXTURE.imageRef,
+    ],
+    {
+      artifactName: "phase-2-inspect-old-hermes-base-fixture-labels",
+      env: buildAvailabilityProbeEnv(),
+      redactionValues,
+      timeoutMs: OPENSHELL_TIMEOUT_MS,
+    },
+  );
+  expectExitZero(oldBaseLabels, "inspect immutable old Hermes base fixture labels");
+
+  const oldBaseVersion = await host.command(
+    "docker",
+    [
+      "run",
+      "--rm",
+      "--entrypoint",
+      "hermes",
+      REBUILD_HERMES_OLD_BASE_FIXTURE.imageRef,
+      "--version",
+    ],
+    {
+      artifactName: "phase-2-probe-old-hermes-base-fixture-version",
+      env: buildAvailabilityProbeEnv(),
+      redactionValues,
+      timeoutMs: OPENSHELL_TIMEOUT_MS,
+    },
+  );
+  expectExitZero(oldBaseVersion, "probe immutable old Hermes base fixture version");
+
+  const oldBaseEvidence = verifyRebuildHermesOldBaseFixture(
+    REBUILD_HERMES_OLD_BASE_FIXTURE.imageRef,
+    oldBaseLabels.stdout.trim(),
+    resultText(oldBaseVersion),
+  );
+  await artifacts.writeJson("phase-2-old-base-fixture.json", oldBaseEvidence);
+
+  const tagOldBase = await host.command(
+    "docker",
+    ["tag", REBUILD_HERMES_OLD_BASE_FIXTURE.imageRef, OLD_BASE_TAG],
+    {
+      artifactName: "phase-2-tag-old-hermes-base-fixture",
+      env: buildAvailabilityProbeEnv(),
+      redactionValues,
+      timeoutMs: OPENSHELL_TIMEOUT_MS,
+    },
+  );
+  expectExitZero(tagOldBase, "tag immutable old Hermes base fixture for sandbox creation");
 
   switch (STALE_BASE_REBUILD) {
     case true: {
