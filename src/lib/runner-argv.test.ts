@@ -136,6 +136,14 @@ describe("runCapture with argv array", () => {
     expect(output).toBe("");
   });
 
+  it("keeps stdout out of ignored failures unless combined output is requested", () => {
+    const output = runner.runCapture(
+      [process.execPath, "-e", 'process.stdout.write("stdout-only\\n"); process.exit(2)'],
+      { ignoreError: true },
+    );
+    expect(output).toBe("");
+  });
+
   it("captures stderr from ignored failures when requested", () => {
     const output = runner.runCapture(
       [

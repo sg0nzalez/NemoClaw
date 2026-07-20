@@ -247,8 +247,8 @@ function runFile(
 /**
  * Run a program directly with argv-style arguments and capture trimmed stdout.
  * Throws a redacted error on failure, or returns '' when opts.ignoreError is true.
- * When opts.includeStderr is true, the returned stderr is raw and unredacted;
- * callers must not log the combined output without applying redaction first.
+ * When opts.includeStderr is true, ignored failures instead return combined
+ * stdout and raw, unredacted stderr; callers must redact before logging it.
  *
  * Shell-string capture is intentionally unsupported. If you truly need shell
  * parsing, spell it out explicitly at the call site (for example
@@ -295,11 +295,11 @@ function runCapture(cmd: readonly string[], opts: CaptureOptions = {}): string {
     // the executable is missing (ENOENT), the call times out, or the spawn fails.
     const output = capturedRunCaptureOutput(result, includeStderr === true);
     if (result.error) {
-      if (ignoreError) return output;
+      if (ignoreError) return includeStderr === true ? output : "";
       throw result.error;
     }
     if (result.status !== 0) {
-      if (ignoreError) return output;
+      if (ignoreError) return includeStderr === true ? output : "";
       throw new Error(`Command failed with status ${result.status}`);
     }
 
