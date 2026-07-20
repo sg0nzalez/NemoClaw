@@ -4,6 +4,6 @@
 // The trusted PR E2E workflow on main can still select this previous filename
 // while the job rename is under review. Keep that exact-head dispatch executable
 // without collecting the bootstrap test twice through the new workflow.
-if (process.env.E2E_TARGET_ID === "launchable-smoke") {
-  await import("./bootstrap-install-smoke.test.ts");
-}
+await (process.env.E2E_TARGET_ID === "launchable-smoke"
+  ? import("./bootstrap-install-smoke.test.ts")
+  : Promise.resolve());
