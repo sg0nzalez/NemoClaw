@@ -390,7 +390,7 @@ describe("deleteProviderWithRecovery", () => {
     expect(result.recoveryFailures).toEqual([]);
   });
 
-  it("parses attached sandbox(es) and retries delete after force-detach", () => {
+  it("retries delete after force-detaching a sandbox from a wrapped diagnostic", () => {
     let attempt = 0;
     const calls: string[][] = [];
     const runOpenshell = vi.fn((args: string[]) => {
@@ -402,7 +402,9 @@ describe("deleteProviderWithRecovery", () => {
             status: 1,
             stdout: "",
             stderr:
-              "Error: status: FailedPrecondition, message: \"provider 'p' is attached to sandbox(es): orphan-one\"",
+              "Error: × code: 'The system is not in a state required for the operation's\n" +
+              "│ execution', message: \"provider 'p' is attached to\n" +
+              '│ sandbox(es): orphan-one"',
           };
         }
         return { status: 0, stdout: "", stderr: "" };

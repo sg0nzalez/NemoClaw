@@ -12,10 +12,6 @@ import path from "node:path";
 import type { ArtifactSink } from "../fixtures/artifacts.ts";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
 import {
-  bedrockRuntimeForbiddenLeakPatterns,
-  findForbiddenLeaks,
-} from "../fixtures/bedrock-runtime-leak-scan.ts";
-import {
   cleanupAcquiredResource,
   cleanupExistingPath,
   terminateProcessIfRunning,
@@ -40,6 +36,15 @@ import {
   type RawArtifactOutputMode,
   summarizeSandboxSnapshot,
 } from "./bedrock-runtime-compatible-anthropic-artifacts.ts";
+import {
+  type ForbiddenLeakPattern,
+  findForbiddenLeaks,
+  frameSnapshotFile,
+  SNAPSHOT_DATA_PREFIX,
+  SNAPSHOT_FILE_PREFIX,
+  SNAPSHOT_PROBE_PID_PREFIX,
+  scanForbiddenLeaks,
+} from "./bedrock-runtime-compatible-anthropic-leaks.ts";
 import {
   BEDROCK_PRE_CONTRACT_ENDPOINT_VALIDATION_INVALID_STATE,
   BEDROCK_PRE_CONTRACT_ENDPOINT_VALIDATION_REMOVAL_CONDITION,
@@ -1157,13 +1162,14 @@ function assertAdapterLogBreadcrumbs(home: string, agent: AgentName): void {
 
 const SNAPSHOT_SCRIPT = trustedSandboxShellScript(`
 set +e
+printf '${SNAPSHOT_PROBE_PID_PREFIX}%s\\n' "$$"
 emit_file() {
   path="$1"
   [ -r "$path" ] || return 0
   size=$(wc -c <"$path" 2>/dev/null || echo 0)
   [ "$size" -le 1048576 ] || return 0
-  printf '\\n@@NEMOCLAW_E2E_FILE@@ %s\\n' "$path"
-  tr '\\000' '\\n' <"$path" 2>/dev/null || true
+  printf '\\n${SNAPSHOT_FILE_PREFIX}%s\\n' "$path"
+  tr '\\000' '\\n' <"$path" 2>/dev/null | sed 's/^/${SNAPSHOT_DATA_PREFIX}/' || true
 }
 
 for root in /sandbox/.openclaw /sandbox/.hermes /etc/nemoclaw /tmp; do
@@ -1240,11 +1246,17 @@ async function assertNoBedrockLeaks(options: {
   redact: (text: string, extraValues?: string[]) => string;
 }): Promise<void> {
   const adapterToken = readAdapterToken(options.home);
-  const patterns = bedrockRuntimeForbiddenLeakPatterns({
-    adapterToken,
-    bedrockHostname: BEDROCK_HOSTNAME,
-    compatibleKey: COMPATIBLE_KEY,
-  });
+  const patterns: ForbiddenLeakPattern[] = [
+    { name: "fake user key", value: COMPATIBLE_KEY },
+    { name: "adapter token", value: adapterToken },
+    { name: "AWS bearer env name", value: "AWS_BEARER_TOKEN_BEDROCK" },
+    {
+      name: "adapter token env name",
+      value: "NEMOCLAW_BEDROCK_RUNTIME_ADAPTER_TOKEN",
+      allowInSnapshotProbeEnvironment: true,
+    },
+    { name: "raw Bedrock hostname", value: BEDROCK_HOSTNAME },
+  ];
   const snapshot = await runRawCommand(
     "openshell",
     ["sandbox", "exec", "-n", SANDBOX_NAME, "--", ...sandboxShellArgs(SNAPSHOT_SCRIPT)],
@@ -1261,27 +1273,28 @@ async function assertNoBedrockLeaks(options: {
     ? fs.readFileSync(adapterLogPath(options.home), "utf8")
     : "";
   const hostLogs = [
-    "@@NEMOCLAW_E2E_FILE@@ onboard stdout",
-    options.onboarding.stdout,
-    "@@NEMOCLAW_E2E_FILE@@ onboard stderr",
-    options.onboarding.stderr,
-    "@@NEMOCLAW_E2E_FILE@@ adapter log",
-    adapterLog,
-    "@@NEMOCLAW_E2E_FILE@@ fake Bedrock mock log",
-    options.mock.logs.join("\n"),
+    frameSnapshotFile("onboard stdout", options.onboarding.stdout),
+    frameSnapshotFile("onboard stderr", options.onboarding.stderr),
+    frameSnapshotFile("adapter log", adapterLog),
+    frameSnapshotFile("fake Bedrock mock log", options.mock.logs.join("\n")),
   ].join("\n");
   await options.artifacts.writeText(
     "host-bedrock-runtime-logs.txt",
     options.redact(hostLogs, [COMPATIBLE_KEY, adapterToken]),
   );
 
-  const leaks = [
-    ...findForbiddenLeaks(snapshot.stdout, "sandbox snapshot", patterns),
-    ...findForbiddenLeaks(hostLogs, "host logs", patterns),
-  ];
+  const sandboxLeakScan = scanForbiddenLeaks(snapshot.stdout, "sandbox snapshot", patterns);
+  expect(
+    sandboxLeakScan.snapshotProbeEnvironmentExemptions.some(
+      (entry) => entry.name === "adapter token env name",
+    ),
+    "OpenShell no longer projects the adapter placeholder into the snapshot child; remove the probe-environment exemption",
+  ).toBe(true);
+  const leaks = [...sandboxLeakScan.leaks, ...findForbiddenLeaks(hostLogs, "host logs", patterns)];
   await options.artifacts.writeJson("sandbox-snapshot-bedrock-runtime-summary.json", {
     ...summarizeSandboxSnapshot(snapshot.stdout),
     forbiddenLeakCount: leaks.length,
+    snapshotProbeEnvironmentExemptions: sandboxLeakScan.snapshotProbeEnvironmentExemptions,
     rawContentPublished: false,
   });
   expect(leaks).toEqual([]);
