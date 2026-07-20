@@ -876,7 +876,7 @@ describe("authenticated MCP sandbox destroy lifecycle", () => {
     });
     expect(testState.executeSandboxCommand).toHaveBeenCalledWith("alpha", ":");
     expect(testState.runOpenshell).toHaveBeenCalledWith(
-      ["sandbox", "delete", "alpha"],
+      ["sandbox", "delete", "-g", "nemoclaw", "alpha"],
       expect.any(Object),
     );
     expect(testState.stopNimContainer).not.toHaveBeenCalled();

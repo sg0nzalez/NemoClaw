@@ -3,6 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { makePreparedRecoveryManifest } from "../../src/lib/actions/sandbox/rebuild-flow-test-fixtures";
+import { expectNoSandboxDelete } from "./rebuild-delete-assertions";
 import { createRebuildFlowHarness, installRebuildFlowTestHooks } from "./rebuild-flow-test-harness";
 
 type Harness = ReturnType<typeof createRebuildFlowHarness>;
@@ -225,10 +226,7 @@ export function registerRebuildFlowCredentialPreflightTests(): void {
         }),
       ).rejects.toThrow("changed during rebuild preflight");
 
-      expect(harness.runOpenshellSpy).not.toHaveBeenCalledWith(
-        ["sandbox", "delete", "alpha"],
-        expect.anything(),
-      );
+      expectNoSandboxDelete(harness.runOpenshellSpy);
       expect(harness.onboardSpy).not.toHaveBeenCalled();
     });
 
@@ -261,10 +259,7 @@ export function registerRebuildFlowCredentialPreflightTests(): void {
         }),
       ).rejects.toThrow("became unavailable before sandbox deletion");
 
-      expect(harness.runOpenshellSpy).not.toHaveBeenCalledWith(
-        ["sandbox", "delete", "alpha"],
-        expect.anything(),
-      );
+      expectNoSandboxDelete(harness.runOpenshellSpy);
       expect(harness.onboardSpy).not.toHaveBeenCalled();
     });
 
@@ -301,10 +296,7 @@ export function registerRebuildFlowCredentialPreflightTests(): void {
         }),
       ).rejects.toThrow("could not be verified before sandbox deletion");
 
-      expect(harness.runOpenshellSpy).not.toHaveBeenCalledWith(
-        ["sandbox", "delete", "alpha"],
-        expect.anything(),
-      );
+      expectNoSandboxDelete(harness.runOpenshellSpy);
       expect(harness.onboardSpy).not.toHaveBeenCalled();
     });
 

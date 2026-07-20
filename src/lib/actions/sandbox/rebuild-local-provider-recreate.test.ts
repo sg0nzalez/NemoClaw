@@ -175,7 +175,7 @@ describe("rebuild local-provider recreation", () => {
 
     const calls = harness.runOpenshellSpy.mock.calls.map((call) => call[0] as string[]);
     const deleteCall = calls.findIndex(
-      (args) => args[0] === "sandbox" && args[1] === "delete" && args[2] === "alpha",
+      (args) => args.join(" ") === "sandbox delete -g nemoclaw alpha",
     );
     const providerLookup = calls.findIndex(
       (args) => args[0] === "provider" && args[1] === "get" && args[2] === provider,

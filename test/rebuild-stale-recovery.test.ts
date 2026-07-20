@@ -28,6 +28,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { expectNoSandboxDelete } from "./helpers/rebuild-delete-assertions";
 import {
   createRebuildFlowHarness,
   installRebuildFlowTestHooks,
@@ -303,10 +304,7 @@ describe("stale sandbox rebuild recovery (#4497)", () => {
     // Must surface the wrong-gateway guidance and preserve the registry entry.
     expect(output).toContain("NOT been removed");
     expect(harness.backupSandboxStateSpy).not.toHaveBeenCalled();
-    expect(harness.runOpenshellSpy).not.toHaveBeenCalledWith(
-      ["sandbox", "delete", "alpha"],
-      expect.anything(),
-    );
+    expectNoSandboxDelete(harness.runOpenshellSpy);
     expect(harness.removeSandboxRegistryEntryWithReceiptSpy).not.toHaveBeenCalled();
     expect(harness.onboardSpy).not.toHaveBeenCalled();
   });
@@ -338,10 +336,7 @@ describe("stale sandbox rebuild recovery (#4497)", () => {
     expect(output).not.toContain("Creating new sandbox with current image");
     expect(output).toContain("openshell gateway select nemoclaw-9000");
     expect(harness.backupSandboxStateSpy).not.toHaveBeenCalled();
-    expect(harness.runOpenshellSpy).not.toHaveBeenCalledWith(
-      ["sandbox", "delete", "alpha"],
-      expect.anything(),
-    );
+    expectNoSandboxDelete(harness.runOpenshellSpy);
     expect(harness.removeSandboxRegistryEntryWithReceiptSpy).not.toHaveBeenCalled();
     expect(harness.onboardSpy).not.toHaveBeenCalled();
   });

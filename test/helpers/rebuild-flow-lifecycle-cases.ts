@@ -3,6 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { makePreparedRecoveryManifest } from "../../src/lib/actions/sandbox/rebuild-flow-test-fixtures";
+import { expectNoSandboxDelete } from "./rebuild-delete-assertions";
 import {
   createRebuildFlowHarness,
   installRebuildFlowTestHooks,
@@ -26,11 +27,7 @@ export function registerRebuildFlowLifecycleTests(): void {
       expect(harness.backupSandboxStateSpy).not.toHaveBeenCalled();
       expect(harness.onboardSpy).not.toHaveBeenCalled();
       expect(harness.removeSandboxRegistryEntryWithReceiptSpy).not.toHaveBeenCalled();
-      expect(
-        harness.runOpenshellSpy.mock.calls.some(
-          ([args]) => Array.isArray(args) && args.join(" ") === "sandbox delete alpha",
-        ),
-      ).toBe(false);
+      expectNoSandboxDelete(harness.runOpenshellSpy);
     });
 
     it("backs up, recreates, restores, reapplies policy, and relocks on a successful OpenClaw rebuild", async () => {
@@ -63,7 +60,7 @@ export function registerRebuildFlowLifecycleTests(): void {
         harness.warnUnpreservedUserManagedFilesSpy.mock.invocationCallOrder[0],
       );
       expect(harness.runOpenshellSpy).toHaveBeenCalledWith(
-        ["sandbox", "delete", "alpha"],
+        ["sandbox", "delete", "-g", "nemoclaw", "alpha"],
         expect.objectContaining({ ignoreError: true }),
       );
       expect(harness.onboardSpy).toHaveBeenCalledWith(
@@ -86,7 +83,8 @@ export function registerRebuildFlowLifecycleTests(): void {
         }),
       );
       const deleteCall = harness.runOpenshellSpy.mock.calls.findIndex(
-        (call) => Array.isArray(call[0]) && call[0].join(" ") === "sandbox delete alpha",
+        (call) =>
+          Array.isArray(call[0]) && call[0].join(" ") === "sandbox delete -g nemoclaw alpha",
       );
       expect(harness.registryUpdateSpy.mock.invocationCallOrder[0]).toBeLessThan(
         harness.runOpenshellSpy.mock.invocationCallOrder[deleteCall],
