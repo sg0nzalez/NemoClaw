@@ -38,7 +38,8 @@ on:
 permissions: {}
 
 concurrency:
-  group: brev-launchable-qualification-${{ inputs.candidate_sha }}
+  # Every candidate advances the same family consumed by the standing Launchable.
+  group: brev-launchable-qualification-staging-cpu
   cancel-in-progress: false
 
 jobs:
@@ -87,6 +88,7 @@ jobs:
   qualify:
     name: Build, deploy, and test exact staging image
     needs: preflight
+    if: ${{ github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     timeout-minutes: 120
     environment:

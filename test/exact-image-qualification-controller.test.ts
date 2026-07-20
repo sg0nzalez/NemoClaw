@@ -85,10 +85,24 @@ describe("exact image qualification request", () => {
     ).toThrow(/workflow_dispatch or schedule/u);
     expect(() =>
       validateExactImageQualificationRequest({ ...REQUEST, ref: "refs/pull/1/merge" }),
-    ).toThrow(/branch ref/u);
+    ).toThrow(/trusted main branch/u);
+    expect(() =>
+      validateExactImageQualificationRequest({ ...REQUEST, ref: "refs/heads/feature" }),
+    ).toThrow(/trusted main branch/u);
     expect(() => validateExactImageQualificationRequest({ ...REQUEST, reason: " bad " })).toThrow(
       /reason/u,
     );
+  });
+
+  it("rejects non-main requests before authorization API access", async () => {
+    const api = vi.fn();
+
+    await expect(
+      preflightExactImageQualification({ ...REQUEST, ref: "refs/heads/feature" }, "core-token", {
+        api: api as QualificationDependencies["api"],
+      }),
+    ).rejects.toMatchObject({ code: "REQUEST_INVALID" });
+    expect(api).not.toHaveBeenCalled();
   });
 
   it("parses the fixed CLI surface and rejects undeclared controls", () => {

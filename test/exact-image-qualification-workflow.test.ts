@@ -75,7 +75,7 @@ it("keeps exact-image Launchable qualification protected, reusable, and fail-clo
     NVIDIA_INFERENCE_API_KEY: "${{ secrets.NVIDIA_INFERENCE_API_KEY }}",
   });
   expect(workflow.concurrency).toEqual({
-    group: "brev-launchable-qualification-${{ inputs.candidate_sha }}",
+    group: "brev-launchable-qualification-staging-cpu",
     "cancel-in-progress": false,
   });
 
@@ -83,6 +83,7 @@ it("keeps exact-image Launchable qualification protected, reusable, and fail-clo
   expect(preflight.environment).toBeUndefined();
   expect(JSON.stringify(preflight)).not.toContain("NEMOCLAW_IMAGE_QUALIFICATION_TOKEN");
   expect(qualify.permissions).toEqual({ contents: "read" });
+  expect(qualify.if).toBe("${{ github.ref == 'refs/heads/main' }}");
   expect(qualify.environment).toEqual({
     name: "approve-brev-launchable-qualification",
     deployment: false,
@@ -112,6 +113,7 @@ it("keeps exact-image Launchable qualification protected, reusable, and fail-clo
     'export const PRODUCER_WORKFLOW_FILE = "build-qualification-image.yml"',
   );
   expect(controller).toContain('export const PRODUCER_REF = "main"');
+  expect(controller).toContain('request.ref !== "refs/heads/main"');
   expect(controller).toContain('export const GITHUB_API_VERSION = "2026-03-10"');
   expect(controller).toContain("return_run_details: true");
   expect(controller).toContain("fs.renameSync(temporary, file)");

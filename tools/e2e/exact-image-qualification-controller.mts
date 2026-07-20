@@ -39,7 +39,6 @@ const DECIMAL_ID_PATTERN = /^[1-9][0-9]*$/u;
 const ARTIFACT_DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/u;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
 const GITHUB_LOGIN_PATTERN = /^(?!-)[A-Za-z0-9-]{1,39}(?<!-)$/u;
-const HEAD_REF_PATTERN = /^refs\/heads\/[A-Za-z0-9](?:[A-Za-z0-9._/-]{0,252}[A-Za-z0-9])?$/u;
 const MAX_REASON_BYTES = 500;
 const MAX_STATE_BYTES = 128 * 1024;
 const MAX_MANIFEST_BYTES = 64 * 1024;
@@ -408,12 +407,8 @@ export function validateExactImageQualificationRequest(
   if (request.eventName !== "workflow_dispatch" && request.eventName !== "schedule") {
     fail("REQUEST_INVALID", "qualification must be started by workflow_dispatch or schedule");
   }
-  if (
-    !HEAD_REF_PATTERN.test(request.ref) ||
-    request.ref.includes("..") ||
-    request.ref.includes("//")
-  ) {
-    fail("REQUEST_INVALID", "qualification must run from a valid branch ref");
+  if (request.ref !== "refs/heads/main") {
+    fail("REQUEST_INVALID", "qualification must run from the trusted main branch");
   }
   if (!Number.isSafeInteger(request.requesterRunAttempt) || request.requesterRunAttempt < 1) {
     fail("REQUEST_INVALID", "requester run attempt must be a positive integer");
@@ -470,13 +465,12 @@ async function authorizeRequest(
   api: GitHubApiClient,
 ): Promise<void> {
   validateExactImageQualificationRequest(request);
-  const branchPath = request.ref.slice("refs/heads/".length);
   const branch = await api<unknown>(
-    `repos/${REQUESTER_REPOSITORY}/git/ref/heads/${encodeURIComponent(branchPath)}`,
+    `repos/${REQUESTER_REPOSITORY}/git/ref/heads/main`,
     token,
   );
-  if (validateRequesterRef(branch, REQUESTER_REPOSITORY, request.ref) !== request.workflowSha) {
-    fail("DISPATCH_FORBIDDEN", "workflow SHA is no longer the requested branch head");
+  if (validateMainRef(branch, REQUESTER_REPOSITORY) !== request.workflowSha) {
+    fail("DISPATCH_FORBIDDEN", "workflow SHA is no longer the trusted main branch head");
   }
   const candidate = record(
     await api<unknown>(`repos/${REQUESTER_REPOSITORY}/git/commits/${request.candidateSha}`, token),
