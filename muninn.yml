@@ -41,392 +41,1218 @@ scanners:
       - CKV_GHA_7
 
 suppressions:
-  - tool: poutine
-    rule-id: github_action_from_unverified_creator_used
+  - fingerprint: 1ba58a927666f627
     reason: >
-      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*).
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:162)
     expires: 2027-01-20T00:00:00Z
-
+  - fingerprint: 0219065570f65812
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 057f149d714fab98
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 06caa755b46a2c03
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 0abd80c817ae2363
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 0d5163e77bc03f16
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 14f65485cf95ddc7
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 1641a6a6a5173b48
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 17ff6081b02b7a2a
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 1f817b54d84c539b
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 23af08bdb90a2391
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 2f872d5ec9dc4c92
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 38e4ddaf566f86b3
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 3ec319e3d92f8cf8
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 4148693a509f0e6c
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 41a66bb012079c47
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 43656ff412c4050a
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 4668ffb625aa52b7
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 47f214cd79038e35
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 4cebcc7be919345b
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 4f5ca71c764e97be
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 522f90613beef691
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 5606204e301f61d2
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 575bf8b81caaae88
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 5c0c2fd4b1ba47ab
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 6342a062ac4a9688
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 6586729cea170ec9
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 666c0ffbe30ed948
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 6cea6ab733496e72
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 7167564c4b4d54c2
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 796a0a44c1601a8f
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 7a18b7af3a39a552
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 7bdfab29c94c16fc
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 7e6daf0385b22d3b
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 8a7bf812f533990c
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 8b8d5b5e765f7d5d
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 8c2fc872ece22d05
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 8ebe524e09f0f7d4
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 8f7519b17f1780f5
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 914516ec1ed42e5c
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 93c49c0518d2e131
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 950e91aa2240a7a5
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 98afb7406b037357
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: a1db6ce55e5302a9
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: a4b91cb420449526
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: a6fc60855d48334b
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: a911afde1b982c9f
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: ae405d8ed88ab740
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: afb19d1b8dca13ca
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: b0b480a8b3c6a288
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: b60e9f9a8936b2f3
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: b775bbb4d9ff5e04
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: b8486f609b3741a6
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: c6e6e31f16f0b018
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: c90a7f5749f45c87
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: ce45a71ee8f8907b
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: d1db71614f70cc89
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: d553c3652d78d834
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: de655d12a22a2947
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: e12105ee66fed170
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: e14db5c110647bb7
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: e1973b6dee6f09e1
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: e1bca29fab4d80bd
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: e271a9959a32146c
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: e319723c4414f045
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: e64a12a522372640
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: e725d584db84476d
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: ef36a9dd070de387
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: efd89f5951f75d17
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: f02583f910e5f7bc
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: f59252cacadebddf
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:212)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 232129105663382a
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:240)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 6df3f5661dbd995a
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:247)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 555b5734e25b3487
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:352)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: bacedaecdefab136
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:401)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 3d6d78defae106ab
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:415)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 0125d540840c9f90
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:444)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: f13a73f301394153
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:472)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: aa903867a30c4eff
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:512)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 8c7dfe1d4bafaccf
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:593)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 152604b154637445
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:635)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: f9ab560e6734fc9d
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:707)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 8804b2c89634739c
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:739)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 7e060dbef34431de
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:770)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 7c05fe86faae7d05
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:813)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: ac605f8a100fe284
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:824)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 767e851c5488c489
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:850)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 9d3724a53dbb5b58
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:864)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 92222c599624b804
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:894)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 60e6323390cfe988
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:909)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 0952ed911449352b
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:944)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 5c8e5ac63d0f82e0
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:966)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 1b990ae738223cc8
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:1001)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 10522e1a3a205b34
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:1026)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 7699cc4537f9fc8f
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:1057)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 9e0c483031c5f03b
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:1069)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: ba37bb11615de686
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:1124)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 8b1c3cc951eb510e
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:1139)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 0fc57562f4f390b6
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:1174)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 24ec763ad992a39f
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:1201)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 4c4755721d71da73
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:1229)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: d550c46842218588
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:1240)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: d1b05fa7f601aa6e
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:1272)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 85bfdfb6d64d87a9
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:1298)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 06f219f0bda0ba2a
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:1336)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: cdfa9513a5374240
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:1341)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 6158e3fced6e2809
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:1368)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 48ab91e8c2c8dc72
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:1398)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: a02d037d6ffab99a
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:1413)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: d6300e98f1dba029
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:1442)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 17feed8f0722f2e7
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:1463)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 7e0b4f740fe30588
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:1493)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: bd1b3b214a5fc6d2
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:1515)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 3fba487d12eaa5f8
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:1550)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: f9572ee324593b40
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:1566)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: f1d92e4bd2ef3687
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:1603)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 453c40aea03d473b
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:1614)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 2429662a6b2d5f65
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:1724)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 1c4724de1d0ac3fd
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:1869)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: e70e5eec4b313086
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:1907)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: b74760810d2499b1
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:1918)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: ba6b99818e95ece6
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:1950)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 5039dfb4f93b28d4
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:1968)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 9a315f6417e870f1
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:2005)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 81a3d0ad7fd4e0ba
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:2010)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 37a019a7fa71e546
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:2032)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 54b1c38629187866
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:2064)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 451ef0ec3056e798
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:2101)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: f8ac9bddb583517a
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:2132)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: a6fade8d519bb738
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:2148)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: e63fa45d358f9f22
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:2183)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: c14d2821fddbe9c0
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:2194)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 7f80d20994c21718
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:2222)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 1c77237fc6b58ae5
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:2254)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 0a10cb379db4c83c
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:2291)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 86fa0e6cd4dbaed1
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:2328)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 625fa4c419a96101
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:2366)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: faf3ba71abb3f5f7
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:2402)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: aeb35c6861911afe
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:2433)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: b6a1ff43405fff62
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:2463)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 2a81f100ed5230b2
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:2496)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 18a3d8c4aa2a5e5a
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:2526)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 6c53bb3041853f74
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:2559)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 00e21708211983e7
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:2570)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 56d55533cd7c6c8e
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:2602)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 1610a269bfcb5cb6
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:2632)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: c3533a8825de6eac
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:2664)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 29f0be5f1b36b908
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:2693)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: ce074907d294ef4d
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:2722)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 943520d6427d02bd
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:2747)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 5b431af4981d2cd9
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:2799)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 73b48bd921941498
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:2824)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 912fc6f1ed60a1ef
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:2853)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 25a14dc0b7accc31
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:2878)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: fa91dab69a3e5d0d
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:2908)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 259831b1fcd4fda4
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:2931)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 95675b69a6f40e7e
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:2962)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: bf39d5189af0ba62
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:2987)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 27cbe56a0ba7cd0a
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:3040)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 4ff798630262a201
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:3055)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: beececf894b590c9
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:3108)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: c8ef43039028d95f
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:3113)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 90588cf40d797d07
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:3170)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: c2215f60946f17dd
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:3203)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 07fb5339e9b45799
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:3226)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 4f309e5a6618065b
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:3256)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: d824ec39e3bb5bcc
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:3279)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 34ea539232ff0643
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:3310)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: fa00725db23e6a03
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:3335)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 94b5c7d281d3b1c1
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:3362)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: f65f266544f1df56
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:3384)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 1eb13c596d065d77
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:3413)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 4c04f78590b96838
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:3429)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 0fd90a91b87316c8
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:3508)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 379a406495e25ab5
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:3523)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 9384a717c4ec278b
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:3556)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 86416ff612c967db
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:3580)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 9c608f763773a7ab
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:3615)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 756933a555d1998c
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:3629)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: cc3aaf13a88bb529
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:3659)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 566865117729981e
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:3673)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 54bb934e10220ba0
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:3703)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: dc2068cea8ea4d85
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:3716)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: a742a929c0c9c214
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:3753)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 8571a6c6f34c0d0a
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:3780)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: dee369b37eb86c4c
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:3811)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 64e7e7a1a2604400
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:3826)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 8d83231b66357c1c
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:3858)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 5bfc5cd8cc3cafbd
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:3873)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 9194c8fd29489b4a
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:3924)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 213fcd2f2ccddfc8
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:3938)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 62feddd99e9d0aa5
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:3988)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 5d0a944720cd95df
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:3993)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: bfecc27a062e6761
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:4005)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: a374428a26802a34
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:4054)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 99a1c7fec689fbb0
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:4093)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 4b1bba23e1f0819b
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:4149)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 9ed52bef5ef8cceb
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:4165)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: b383280cac1cf5b5
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:4207)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 7a008d573592d15d
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:4221)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 18b96589b98c61c7
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:4251)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: ee3dbac1d4cae6ab
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:4267)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 908e4eea15979de0
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:4294)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: cc626ce6397b9727
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:4318)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 5b1036e7888a786d
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:4349)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: a85abd43f160fd28
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:4386)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: adc4658ad25b4c5d
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:4418)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 90ff9552b606c49a
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:4451)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 10e23cfcb06b3bb7
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:4490)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 93dee9345b7d3b6a
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:4528)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 07ecd23c4cf2eea6
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:4563)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 9530035b195de889
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:4596)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 408aa658cce1c560
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:4627)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: b170a54d8fbb41a7
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:4652)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 4260bc71b104c5f0
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:4684)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 0aa41a3554f3064f
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:4716)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 17d494301a8b0235
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:4748)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: dcaed7c69ed78758
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:4791)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 2d71a4634e4d8744
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:4825)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 21327051c2f44f26
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/e2e.yaml:4842)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: b6c9cd2fbfb1ef5b
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/muninn.yaml:82)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: cd95aff71ec61382
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/pr-self-hosted.yaml:37)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 476505112923ac2d
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/pr.yaml:37)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: fed294d46fc38d12
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/regression-e2e.yaml:164)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 94957d5cf129a2f7
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/regression-e2e.yaml:205)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 71b2ac70c301e7ad
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/regression-e2e.yaml:245)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: ae16c4bb86b7a73c
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/regression-e2e.yaml:273)
+    expires: 2027-01-20T00:00:00Z
   - fingerprint: 7e525957d6da6f46
     reason: >
       pull_request_target required for fork PR automation; trusted base/default ref for executable helpers. (.github/workflows/assign-linked-issue-author.yaml:10)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: c82ad2ada3c5a633
     reason: >
       pull_request_target required for fork PR automation; trusted base/default ref for executable helpers. (.github/workflows/codebase-growth-guardrails.yaml:10)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: c73482d4be4518e4
     reason: >
       PRT workflow checks out base/default (or pinned trusted SHA) for scripts; PR head is not the script source. (.github/workflows/codebase-growth-guardrails.yaml:132)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: d8bd59cd180f0845
     reason: >
       PRT workflow checks out base/default (or pinned trusted SHA) for scripts; PR head is not the script source. (.github/workflows/e2e-branch-validation.yaml:226)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: 1583d254a4845025
     reason: >
       PRT workflow checks out base/default (or pinned trusted SHA) for scripts; PR head is not the script source. (.github/workflows/e2e-branch-validation.yaml:266)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: cea765026f78a8fd
     reason: >
       PRT workflow checks out base/default (or pinned trusted SHA) for scripts; PR head is not the script source. (.github/workflows/e2e-branch-validation.yaml:269)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: 390c68c407f4e6fa
     reason: >
       pull_request_target required for fork PR automation; trusted base/default ref for executable helpers. (.github/workflows/label-merged-pr-release-target.yaml:10)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: f1ccf981d62fdcad
     reason: >
       pull_request_target required for fork PR automation; trusted base/default ref for executable helpers. (.github/workflows/pr-e2e-gate.yaml:14)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: 7ef52dca5ea7bff9
     reason: >
       PRT workflow checks out base/default (or pinned trusted SHA) for scripts; PR head is not the script source. (.github/workflows/pr-e2e-gate.yaml:74)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: f95c036234d8819d
     reason: >
       PRT workflow checks out base/default (or pinned trusted SHA) for scripts; PR head is not the script source. (.github/workflows/pr-e2e-gate.yaml:79)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: cd172cc06451e5e9
     reason: >
       PRT workflow checks out base/default (or pinned trusted SHA) for scripts; PR head is not the script source. (.github/workflows/pr-e2e-gate.yaml:114)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: d58ebfc973e2de16
     reason: >
       PRT workflow checks out base/default (or pinned trusted SHA) for scripts; PR head is not the script source. (.github/workflows/pr-e2e-gate.yaml:146)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: 270362812ef238db
     reason: >
       PRT workflow checks out base/default (or pinned trusted SHA) for scripts; PR head is not the script source. (.github/workflows/pr-e2e-gate.yaml:151)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: 9e2080b24e652598
     reason: >
       PRT workflow checks out base/default (or pinned trusted SHA) for scripts; PR head is not the script source. (.github/workflows/pr-e2e-gate.yaml:188)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: 6df5eb31e2ca22c5
     reason: >
       PRT workflow checks out base/default (or pinned trusted SHA) for scripts; PR head is not the script source. (.github/workflows/pr-e2e-gate.yaml:193)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: a8ed92ac11c1945f
     reason: >
       PRT workflow checks out base/default (or pinned trusted SHA) for scripts; PR head is not the script source. (.github/workflows/pr-e2e-gate.yaml:354)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: dec2316997d9eb9c
     reason: >
       PRT workflow checks out base/default (or pinned trusted SHA) for scripts; PR head is not the script source. (.github/workflows/pr-e2e-gate.yaml:359)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: e5836d7008137835
     reason: >
       PRT workflow checks out base/default (or pinned trusted SHA) for scripts; PR head is not the script source. (.github/workflows/pr-e2e-gate.yaml:400)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: 3efcea6269c7aedb
     reason: >
       PRT workflow checks out base/default (or pinned trusted SHA) for scripts; PR head is not the script source. (.github/workflows/pr-e2e-gate.yaml:405)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: 3bba18531b886df8
     reason: >
       pull_request_target required for fork PR automation; trusted base/default ref for executable helpers. (.github/workflows/pr-limit.yaml:11)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: df4772348a1dc367
     reason: >
       pull_request_target required for fork PR automation; trusted base/default ref for executable helpers. (.github/workflows/pr-review-advisor.yaml:6)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: 9497f9b1fe584f5a
     reason: >
       PRT workflow checks out base/default (or pinned trusted SHA) for scripts; PR head is not the script source. (.github/workflows/pr-review-advisor.yaml:143)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: 543f5a682fb524c4
     reason: >
       PRT workflow checks out base/default (or pinned trusted SHA) for scripts; PR head is not the script source. (.github/workflows/pr-review-advisor.yaml:177)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: 959d68edaa3e78ec
     reason: >
       PRT workflow checks out base/default (or pinned trusted SHA) for scripts; PR head is not the script source. (.github/workflows/pr-review-advisor.yaml:304)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: 524dd322c36ee620
     reason: >
       PRT workflow checks out base/default (or pinned trusted SHA) for scripts; PR head is not the script source. (.github/workflows/pr-review-advisor.yaml:310)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: 1558f0ef10672f8c
     reason: >
       pull_request_target required for fork PR automation; trusted base/default ref for executable helpers. (.github/workflows/require-maintainer-edits.yaml:9)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: test/redact-device-state.test.ts:aws-access-token:103
     reason: >
       Intentional fake AWS key material in unit tests. (test/redact-device-state.test.ts:103)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: test/redact-text.test.ts:aws-access-token:36
     reason: >
       Intentional fake AWS key material in unit tests. (test/redact-text.test.ts:36)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: 48d2a2d526cd0cf7
     reason: >
       Regression E2E must inherit org secrets; callers limited to trusted workflows. (.github/workflows/regression-e2e.yaml:122)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: 2cb82284c7e9c56a
     reason: >
       Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: 89ada651847e9f75
     reason: >
       Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: d0603faf8d0ee960
     reason: >
       Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: ff75c2f608f7c4f2
     reason: >
       Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: 4f9d0e51ad1bf2d0
     reason: >
       Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: dcd877bef4b96fcc
     reason: >
       Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: 49f4844edf47a037
     reason: >
       Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
     expires: 2027-01-20T00:00:00Z
-
   - id: agents/hermes/Dockerfile
     reason: >
       Sandbox/agent image must retain root for OpenShell setup; privilege drop is in sandbox lifecycle. (semgrep fingerprint unavailable without login; path-scoped).
     expires: 2027-01-20T00:00:00Z
-
   - id: src/lib/onboard/created-sandbox-failure.test.ts
     reason: >
       Intentional fake AWS key material in unit tests. (semgrep fingerprint unavailable without login; path-scoped).
     expires: 2027-01-20T00:00:00Z
-
   - id: src/lib/resources-cmd.ts
     reason: >
       CLI wrappers intentionally spawn openshell/openclaw; args from validated local config. (semgrep fingerprint unavailable without login; path-scoped).
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: test/cli/credentials-command.test.ts:generic-api-key:88
     reason: >
       Intentional fake API keys in unit tests. (test/cli/credentials-command.test.ts:88)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: test/hermes-gateway-wrapper.test.ts:generic-api-key:322
     reason: >
       Intentional fake API keys in unit tests. (test/hermes-gateway-wrapper.test.ts:322)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: test/hermes-gateway-wrapper.test.ts:generic-api-key:380
     reason: >
       Intentional fake API keys in unit tests. (test/hermes-gateway-wrapper.test.ts:380)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: test/hermes-gateway-wrapper.test.ts:generic-api-key:422
     reason: >
       Intentional fake API keys in unit tests. (test/hermes-gateway-wrapper.test.ts:422)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: test/hermes-gateway-wrapper.test.ts:generic-api-key:441
     reason: >
       Intentional fake API keys in unit tests. (test/hermes-gateway-wrapper.test.ts:441)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: test/hermes-gateway-wrapper.test.ts:generic-api-key:566
     reason: >
       Intentional fake API keys in unit tests. (test/hermes-gateway-wrapper.test.ts:566)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: test/hermes-gateway-wrapper.test.ts:generic-api-key:567
     reason: >
       Intentional fake API keys in unit tests. (test/hermes-gateway-wrapper.test.ts:567)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: test/package-contract/cli/credentials-cli-command.test.ts:generic-api-key:307
     reason: >
       Intentional fake API keys in unit tests. (test/package-contract/cli/credentials-cli-command.test.ts:307)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: test/package-contract/cli/credentials-cli-command.test.ts:generic-api-key:596
     reason: >
       Intentional fake API keys in unit tests. (test/package-contract/cli/credentials-cli-command.test.ts:596)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: test/redact-text.test.ts:generic-api-key:33
     reason: >
       Intentional fake API keys in unit tests. (test/redact-text.test.ts:33)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: test/redact-text.test.ts:generic-api-key:94
     reason: >
       Intentional fake API keys in unit tests. (test/redact-text.test.ts:94)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: 38e6efbb6f18f4d1
     reason: >
       Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: d2eb3598d9bd0628
     reason: >
       Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: 4c82acc7aa40b6d9
     reason: >
       Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: 10ac3e4aeef54cbc
     reason: >
       Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: 9bd1281778c37530
     reason: >
       Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: eec9ce8e05995f7a
     reason: >
       Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: 137110ab9fb1e9ab
     reason: >
       Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: e51ae1b0991e6480
     reason: >
       Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: 2da2d9d9bbaaeca9
     reason: >
       Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: 0e9810d801e5bf38
     reason: >
       Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: 23c4257e08c95a50
     reason: >
       Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: 0a2120a8ea1332ca
     reason: >
       Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: 04ff6b814689dd22
     reason: >
       Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: c921859b00c44b13
     reason: >
       node-tar in e2e fixture lockfile; not on production runtime path. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: 3afb008ee24d4da3
     reason: >
       Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: 8b6efd95d82a6237
     reason: >
       Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: 211efc8dc7ecfb48
     reason: >
       concurrency.queue is a supported GitHub Actions field; actionlint schema lag. (.github/workflows/label-merged-pr-release-target.yaml:29)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: 4f56b8ad4b020340
     reason: >
       Custom org permission scope code-quality unrecognized by actionlint. (.github/workflows/main.yaml:155)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: fc187a2af338cd2b
     reason: >
       Custom org permission scope code-quality unrecognized by actionlint. (.github/workflows/main.yaml:229)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: 5c660aa381198668
     reason: >
       Custom org permission scope code-quality unrecognized by actionlint. (.github/workflows/pr.yaml:362)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: 4c7450b1faf24e1e
     reason: >
       Custom org permission scope code-quality unrecognized by actionlint. (.github/workflows/pr.yaml:453)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: 8c04f5c469ff1036
     reason: >
       concurrency.queue is a supported GitHub Actions field; actionlint schema lag. (.github/workflows/release-latest-tag.yaml:26)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: b2097887a99a549d
     reason: >
       esbuild Windows-only dev-server advisory; CI/build uses Linux and does not expose esbuild serve to untrusted clients. (package-lock.json:0)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: f5984828efc2a625
     reason: >
       Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: 02994a9397add69d
     reason: >
       Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: 7722eeed983b2d1d
     reason: >
       Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
     expires: 2027-01-20T00:00:00Z
-
   - fingerprint: 3388b6cb85b733f5
     reason: >
       Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
