@@ -913,6 +913,24 @@ async function startDeploymentFixture(
   });
 }
 
+async function requireDocker(
+  host: HostCliClient,
+  artifactName: string,
+  reason: string,
+  skip: (note?: string) => never,
+): Promise<void> {
+  const docker = await host.command("docker", ["info"], {
+    artifactName,
+    env: liveEnv(),
+    timeoutMs: 30_000,
+  });
+  if (docker.exitCode === 0) return;
+  if (process.env.GITHUB_ACTIONS === "true") {
+    throw new Error(`${reason}: ${resultText(docker)}`);
+  }
+  skip(reason);
+}
+
 test("the release-baseline custom plugin loads with its exact NemoClaw and OpenShell versions (#6108)", {
   timeout: ONBOARD_TIMEOUT_MS + 15 * 60_000,
 }, async ({ artifacts, cleanup, host, sandbox, skip }) => {
@@ -934,19 +952,12 @@ test("the release-baseline custom plugin loads with its exact NemoClaw and OpenS
     openclawVersion: WEATHER_OPENCLAW_VERSION,
   });
 
-  const docker = await host.command("docker", ["info"], {
-    artifactName: "prereq-docker-info-openclaw-plugin-exdev-release",
-    env: liveEnv(),
-    timeoutMs: 30_000,
-  });
-  if (docker.exitCode !== 0) {
-    if (process.env.GITHUB_ACTIONS === "true") {
-      throw new Error(
-        `Docker is required for the OpenClaw plugin release baseline: ${resultText(docker)}`,
-      );
-    }
-    skip("Docker is required for the OpenClaw plugin release baseline");
-  }
+  await requireDocker(
+    host,
+    "prereq-docker-info-openclaw-plugin-exdev-release",
+    "Docker is required for the OpenClaw plugin release baseline",
+    skip,
+  );
 
   cleanup.trackDisposable(`delete OpenShell sandbox ${SANDBOX_NAME}`, () =>
     sandbox.cleanupSandbox(SANDBOX_NAME, {
@@ -1091,19 +1102,12 @@ test("the current-lifecycle custom plugin survives restart, recreation, and rebu
     openclawVersion: WEATHER_OPENCLAW_VERSION,
   });
 
-  const docker = await host.command("docker", ["info"], {
-    artifactName: "prereq-docker-info-openclaw-plugin-exdev",
-    env: liveEnv(),
-    timeoutMs: 30_000,
-  });
-  if (docker.exitCode !== 0) {
-    if (process.env.GITHUB_ACTIONS === "true") {
-      throw new Error(
-        `Docker is required for the OpenClaw plugin EXDEV live guard: ${resultText(docker)}`,
-      );
-    }
-    skip("Docker is required for the OpenClaw plugin EXDEV live guard");
-  }
+  await requireDocker(
+    host,
+    "prereq-docker-info-openclaw-plugin-exdev",
+    "Docker is required for the OpenClaw plugin EXDEV live guard",
+    skip,
+  );
 
   expect(
     fs.existsSync(CLI_ENTRYPOINT),
