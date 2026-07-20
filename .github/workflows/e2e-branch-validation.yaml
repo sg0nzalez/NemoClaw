@@ -294,8 +294,9 @@ jobs:
       - name: Collect Brev debug bundle on failure
         if: failure()
         continue-on-error: true
+        env:
+          INSTANCE: ${{ env.BREV_E2E_INSTANCE_NAME }}
         run: |
-          INSTANCE="${{ env.BREV_E2E_INSTANCE_NAME }}"
           mkdir -p brev-debug-bundle
           brev refresh >/dev/null 2>&1 || true
           ssh -o StrictHostKeyChecking=no -o LogLevel=ERROR \

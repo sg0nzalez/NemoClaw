@@ -243,8 +243,17 @@ jobs:
         run: |
           $script = @'
           set -euo pipefail
-          curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
-          apt-get install -y nodejs
+          NODE_VERSION="22.19.0"
+          arch="$(uname -m)"
+          case "$arch" in
+            x86_64) node_arch="x64"; node_sha="c0649af18e6a24f6fe5535a3e86b341dd49a8e71117c8b68bde973ef834f16f2" ;;
+            aarch64|arm64) node_arch="arm64"; node_sha="0b2d9f564b6594222a62c82e1df2efe119dd4a4aff29644f4dd325bf360b6bcc" ;;
+            *) echo "Unsupported architecture: $arch" >&2; exit 1 ;;
+          esac
+          tarball="node-v${NODE_VERSION}-linux-${node_arch}.tar.xz"
+          curl -fsSL -o "/tmp/${tarball}" "https://nodejs.org/dist/v${NODE_VERSION}/${tarball}"
+          printf '%s  %s\n' "$node_sha" "/tmp/${tarball}" | sha256sum -c -
+          tar -xJf "/tmp/${tarball}" -C /usr/local --strip-components=1
           node --version
           npm --version
           '@

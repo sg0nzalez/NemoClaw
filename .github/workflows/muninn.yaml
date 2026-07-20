@@ -2,7 +2,11 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Muninn all-in-one security scan. Findings are published to code scanning and
-# PR comments; fail-on: info gates the check (see muninn.yml).
+# PR comments; fail-on comes from muninn.yml (single source of truth).
+#
+# On pull_request, policy (muninn.yml) is loaded from the trusted base SHA so a
+# PR cannot weaken fail-on / suppressions by editing the head copy. Bootstrap:
+# if base has no muninn.yml yet, fall back to the head checkout's file.
 name: Security / Muninn
 
 on:
@@ -32,6 +36,41 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Checkout trusted Muninn policy (base SHA)
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: trusted-muninn-policy
+          sparse-checkout: |
+            muninn.yml
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Resolve Muninn config path
+        id: policy
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          trusted="trusted-muninn-policy/muninn.yml"
+          head_cfg="${GITHUB_WORKSPACE}/muninn.yml"
+          if [ "$EVENT_NAME" = "pull_request" ] && [ -f "$trusted" ]; then
+            # Keep policy outside the scan tree so scanners do not re-analyze it.
+            cp "$trusted" "${RUNNER_TEMP}/muninn-trusted.yml"
+            rm -rf trusted-muninn-policy
+            echo "Using trusted base muninn.yml from ${BASE_SHA}"
+            echo "config=${RUNNER_TEMP}/muninn-trusted.yml" >> "$GITHUB_OUTPUT"
+          elif [ -f "$head_cfg" ]; then
+            echo "Using workspace muninn.yml (push/schedule or bootstrap: base has no policy yet)"
+            echo "config=${head_cfg}" >> "$GITHUB_OUTPUT"
+          else
+            echo "No muninn.yml found; Muninn will use built-in defaults" >&2
+            echo "config=muninn.yml" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Run Muninn
         id: muninn
         # zizmor: ignore[github_action_from_unverified_creator_used]
@@ -40,6 +79,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           # fail-on comes from muninn.yml (single source of truth)
           format: sarif,comment
+          config: ${{ steps.policy.outputs.config }}
 
       - name: Upload SARIF
         if: always() && hashFiles('muninn.sarif') != ''

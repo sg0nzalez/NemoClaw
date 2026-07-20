@@ -45,13 +45,6 @@ suppressions:
       common trusted vendors (actions/*, dorny/*, github/*); pin review covers the risk.
     expires: ""
 
-  - tool: poutine
-    rule-id: unverified_script_exec
-    reason: >
-      Install scripts are downloaded with pinned versions and verified checksums
-      (see workflow comments); runtime execution is intentional after integrity checks.
-    expires: ""
-
   # --- pull_request_target trust model (critical) ---
   # These workflows use PRT for fork-safe write tokens. Executable code is from
   # the base/default branch or is API-only (no PR-head checkout for scripts).
@@ -70,50 +63,12 @@ suppressions:
       trusted SHA) for executable code; PR head is not used as the script source.
     expires: ""
 
-  # --- Intentional GITHUB_OUTPUT / GITHUB_ENV patterns ---
-  - tool: zizmor
-    rule-id: zizmor/github-env
-    reason: >
-      Writes to GITHUB_ENV/OUTPUT use resolver helpers that validate image refs and
-      versions before export; values are not taken from untrusted PR title/body.
-    expires: ""
-
-  # --- Template expansion in trusted CI contexts ---
-  - tool: zizmor
-    rule-id: zizmor/template-injection
-    reason: >
-      Remaining template expansions use maintainer-controlled or previously
-      validated workflow/env inputs (not raw PR title/body). Broader env: migration
-      continues separately; suppress while Muninn gates the rest of the surface.
-    expires: ""
-
-  # --- Permissions / cache / secrets inherit (accepted CI shape) ---
-  - tool: zizmor
-    rule-id: zizmor/excessive-permissions
-    reason: >
-      Remaining workflow-level writes are required by reusable/caller workflows;
-      jobs that need them are documented. Further job-scoping is follow-up work.
-    expires: ""
-
-  - tool: zizmor
-    rule-id: zizmor/cache-poisoning
-    reason: >
-      Release tagging workflow cache usage is limited to trusted release refs;
-      default-branch protection and required checks cover cache poisoning risk.
-    expires: ""
-
+  # --- Reusable workflow secrets inherit (accepted CI shape) ---
   - tool: zizmor
     rule-id: zizmor/secrets-inherit
     reason: >
       Reusable workflow secrets inherit is intentional for regression E2E which
       must receive org secrets; callers are limited to trusted workflows.
-    expires: ""
-
-  - tool: zizmor
-    rule-id: zizmor/dependabot-cooldown
-    reason: >
-      Dependabot cooldown is a policy preference; pin-by-digest and Muninn cover
-      supply-chain risk for Actions updates.
     expires: ""
 
   # --- Test fixtures with intentional fake secrets ---
@@ -185,11 +140,4 @@ suppressions:
     reason: >
       Custom permission scopes (e.g. code-quality) are org-level fine-grained
       permissions unrecognized by actionlint's built-in list.
-    expires: ""
-
-  - tool: actionlint
-    rule-id: shellcheck
-    reason: >
-      Remaining shellcheck infos are stylistic (SC2016/SC2155) in generated or
-      carefully quoted CI scripts; no command-injection risk identified.
     expires: ""

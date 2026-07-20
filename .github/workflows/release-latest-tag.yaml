@@ -95,6 +95,8 @@ jobs:
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.0.0
         with:
           node-version: 22.19.0
+          # Release workflows with contents:write must not restore caches.
+          package-manager-cache: false
 
       - name: Retire the released target label
         env:

@@ -60,7 +60,9 @@ jobs:
       - name: Run markdown link checker
         if: steps.changed.outputs.has_files == 'true'
         shell: bash
+        env:
+          DOC_FILES: ${{ steps.changed.outputs.files }}
         run: |
           set -euo pipefail
-          mapfile -t doc_files <<< "${{ steps.changed.outputs.files }}"
+          mapfile -t doc_files <<< "$DOC_FILES"
           bash test/e2e/e2e-cloud-experimental/check-docs.sh --only-links --local-only "${doc_files[@]}"

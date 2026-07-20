@@ -1061,7 +1061,8 @@ jobs:
         run: |
           set -euo pipefail
           export PATH="$HOME/.local/bin:$HOME/.npm-global/bin:$PATH"
-          export OPENSHELL_BIN="$(command -v openshell || true)"
+          OPENSHELL_BIN="$(command -v openshell || true)"
+          export OPENSHELL_BIN
           npx tsx tools/e2e/live-vitest-invocation.mts run --test-path test/e2e/live/kimi-inference-compat.test.ts
       - name: Upload Kimi compatibility artifacts
         if: always()
@@ -1130,7 +1131,8 @@ jobs:
         run: |
           set -euo pipefail
           export PATH="$HOME/.local/bin:$HOME/.npm-global/bin:$PATH"
-          export OPENSHELL_BIN="$(command -v openshell || true)"
+          OPENSHELL_BIN="$(command -v openshell || true)"
+          export OPENSHELL_BIN
           npx tsx tools/e2e/live-vitest-invocation.mts run --test-path test/e2e/live/hermes-inference-switch.test.ts
       - name: Upload Hermes inference switch artifacts
         if: always()
@@ -4954,6 +4956,7 @@ jobs:
           JOB_PR_NUMBER: ${{ inputs.pr_number }}
           JOB_TARGETS: ${{ inputs.targets }}
           JOBS: ${{ inputs.jobs }}
+          NEEDS_JSON: ${{ toJSON(needs) }}
         with:
           script: |
             const path = require('node:path');
@@ -4961,7 +4964,7 @@ jobs:
             const { resolveReportPr, loadReportJobs, renderE2eReport } = await import(
               pathToFileURL(path.join(process.env.GITHUB_WORKSPACE, 'tools/e2e/report-e2e-results.mts')).href
             );
-            const needs = ${{ toJSON(needs) }};
+            const needs = JSON.parse(process.env.NEEDS_JSON);
             const prNumber = await resolveReportPr({ github, context, core, env: process.env });
             if (prNumber === undefined) return;
             const { apiJobs, loaded } = await loadReportJobs({ github, context, core });
@@ -5010,6 +5013,7 @@ jobs:
           EXPLICIT_ONLY_JOBS: ${{ needs.generate-matrix.outputs.explicit_only_jobs }}
           JOBS: ${{ inputs.jobs }}
           TARGETS: ${{ inputs.targets }}
+          NEEDS_JSON: ${{ toJSON(needs) }}
         with:
           script: |
             const path = require('path');
@@ -5022,7 +5026,7 @@ jobs:
             const traceTiming = require(
               path.join(process.env.GITHUB_WORKSPACE, 'scripts/scorecard/analyze-trace-timing.mts'),
             );
-            const needs = ${{ toJSON(needs) }};
+            const needs = JSON.parse(process.env.NEEDS_JSON);
 
             // GitHub's jobs API is the canonical source because `needs.live`
             // collapses every matrix target into one result and has no job URL.

@@ -268,10 +268,11 @@ jobs:
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ steps.start.outputs.run_id }}
         run: >-
           node --experimental-strip-types tools/e2e/pr-e2e-gate.mts
           --mode wait
-          --run-id "${{ steps.start.outputs.run_id }}"
+          --run-id "$RUN_ID"
 
       - id: evidence
         name: Download evidence
@@ -280,39 +281,50 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_TOKEN: ${{ github.token }}
+          WORK_DIR: ${{ steps.workspace.outputs.work_dir }}
+          RUN_ID: ${{ steps.start.outputs.run_id }}
         run: >-
           node --experimental-strip-types tools/e2e/pr-e2e-gate.mts
           --mode download
-          --work-dir "${{ steps.workspace.outputs.work_dir }}"
-          --run-id "${{ steps.start.outputs.run_id }}"
+          --work-dir "$WORK_DIR"
+          --run-id "$RUN_ID"
 
       - id: finish
         name: Verify evidence
         if: ${{ always() && steps.start.outputs.dispatched == 'true' }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          WORK_DIR: ${{ steps.workspace.outputs.work_dir }}
+          STATE_HASH: ${{ steps.start.outputs.state_hash }}
+          CHECK_ID: ${{ steps.start.outputs.check_id }}
+          RUN_ID: ${{ steps.start.outputs.run_id }}
+          EVIDENCE_OUTCOME: ${{ steps.evidence.outcome }}
         run: >-
           node --experimental-strip-types tools/e2e/pr-e2e-gate.mts
           --mode finish
-          --work-dir "${{ steps.workspace.outputs.work_dir }}"
-          --state-hash "${{ steps.start.outputs.state_hash }}"
-          --check-id "${{ steps.start.outputs.check_id }}"
-          --run-id "${{ steps.start.outputs.run_id }}"
-          --evidence-outcome "${{ steps.evidence.outcome }}"
+          --work-dir "$WORK_DIR"
+          --state-hash "$STATE_HASH"
+          --check-id "$CHECK_ID"
+          --run-id "$RUN_ID"
+          --evidence-outcome "$EVIDENCE_OUTCOME"
 
       - name: Close incomplete check
         if: ${{ always() && steps.start.outputs.check_id != '' && steps.start.outputs.finalized != 'true' && steps.finish.outputs.finalized != 'true' }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          CHECK_ID: ${{ steps.start.outputs.check_id }}
+          RUN_ID: ${{ steps.start.outputs.run_id }}
         run: >-
           node --experimental-strip-types tools/e2e/pr-e2e-gate.mts
           --mode abandon
-          --check-id "${{ steps.start.outputs.check_id }}"
-          --run-id "${{ steps.start.outputs.run_id }}"
+          --check-id "$CHECK_ID"
+          --run-id "$RUN_ID"
 
       - name: Remove private workspace
         if: ${{ always() && steps.workspace.outputs.work_dir != '' }}
-        run: rm -rf -- "${{ steps.workspace.outputs.work_dir }}"
+        env:
+          WORK_DIR: ${{ steps.workspace.outputs.work_dir }}
+        run: rm -rf -- "$WORK_DIR"
 
   approve-fork-e2e-skip:
     name: Approve credentialed E2E skip for fork PR

@@ -70,7 +70,7 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$WORKFLOW_REF" == refs/heads/main ]] || { echo "::error::candidate compatibility must be dispatched from main"; exit 1; }
-          nemoclaw_sha="$(git -C candidate-source rev-parse --verify HEAD^{commit})"
+          nemoclaw_sha="$(git -C candidate-source rev-parse --verify 'HEAD^{commit}')"
           [[ "$nemoclaw_sha" =~ ^[a-f0-9]{40}$ ]] || { echo "::error::NemoClaw ref did not resolve to a full commit SHA"; exit 1; }
           [[ -z "$(git -C candidate-source status --short --untracked-files=no)" ]] || { echo "::error::checkout is not clean before candidate resolution"; exit 1; }
           node --experimental-strip-types controller/tools/candidate-compat.mts resolve \
@@ -219,6 +219,9 @@ jobs:
               --lane "$LANE" \
               --output "candidate-results/${LANE}.json"
           else
+            # Prefer env over shell interpolation inside the node -e script
+            # (shellcheck SC2016: ${} inside single quotes is intentional here).
+            # shellcheck disable=SC2016
             LANE_NAME="$LANE" node -e '
               const fs = require("node:fs");
               fs.writeFileSync(`candidate-results/${process.env.LANE_NAME}.json`, JSON.stringify({

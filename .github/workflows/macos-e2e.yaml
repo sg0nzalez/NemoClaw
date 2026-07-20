@@ -106,12 +106,16 @@ jobs:
 
       - name: Explain skipped macOS live E2E
         if: steps.docker.outputs.docker_ok != 'true' || github.ref != 'refs/heads/main' || github.event_name == 'pull_request'
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          DOCKER_OK: ${{ steps.docker.outputs.docker_ok }}
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
+          if [ "$EVENT_NAME" = "pull_request" ]; then
             echo 'Skipping secret-bearing macOS live E2E on pull_request; use trusted workflow_dispatch/push evidence for live validation.'
-          elif [ "${{ github.ref }}" != "refs/heads/main" ]; then
+          elif [ "$REF" != "refs/heads/main" ]; then
             echo 'Skipping secret-bearing macOS live E2E outside the trusted main branch.'
-          elif [ "${{ steps.docker.outputs.docker_ok }}" != "true" ]; then
+          elif [ "$DOCKER_OK" != "true" ]; then
             echo 'Skipping macOS live E2E because Docker is unavailable on this runner.'
           fi
           echo 'The workflow still validated the NemoClaw build on macOS (Apple Silicon).'

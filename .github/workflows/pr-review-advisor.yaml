@@ -129,7 +129,12 @@ jobs:
 
       - name: Set default advisor workdir
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.target_repo == '' && inputs.target_pr == '' }}
-        run: echo "ADVISOR_WORKDIR=$GITHUB_WORKSPACE/pr-workdir" >> "$GITHUB_ENV"
+        run: |
+          # Fixed path for the dispatch-without-target case. Avoid GITHUB_ENV
+          # (zizmor/github-env); consumers fall back to this directory when
+          # prepare-target-pr has not exported ADVISOR_WORKDIR.
+          mkdir -p "${GITHUB_WORKSPACE}/pr-workdir"
+          echo "Default advisor workdir: ${GITHUB_WORKSPACE}/pr-workdir"
 
       # Provision Node before the isolated workspace is fetched so the trusted
       # prepare helper (type-stripped .mts) runs from the pinned advisor
@@ -163,6 +168,7 @@ jobs:
       - name: Remove symlinks from analysis workspace
         shell: bash
         run: |
+          ADVISOR_WORKDIR="${ADVISOR_WORKDIR:-${GITHUB_WORKSPACE}/pr-workdir}"
           while IFS= read -r -d '' link; do
             rm -- "$link"
           done < <(find "$ADVISOR_WORKDIR" -type l -print0)
@@ -220,6 +226,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR_REVIEW_ADVISOR_API_KEY: ${{ secrets.PR_REVIEW_ADVISOR_API_KEY }}
         run: |
+          ADVISOR_WORKDIR="${ADVISOR_WORKDIR:-${GITHUB_WORKSPACE}/pr-workdir}"
           cd "$ADVISOR_WORKDIR"
           node --experimental-strip-types \
             "$ADVISOR_DIR/tools/pr-review-advisor/run-analysis.mts"
