@@ -12,9 +12,18 @@ import {
   appendPrivateRegularFile,
   readPrivateRegularFile,
   writePrivateRegularFile,
-} from "../tools/e2e/private-file.ts";
+} from "../tools/e2e/private-file.mts";
 
 describe("private E2E controller files", () => {
+  it("loads the private-file helper through the live tsx entrypoint", () => {
+    const result = spawnSync("npx", ["tsx", "tools/e2e/live-test-outcome.mts"], {
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+
+    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+  });
+
   it("writes private regular files without following links or truncating hardlink targets", () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-private-file-"));
     const regular = path.join(directory, "regular.json");
@@ -50,7 +59,7 @@ describe("private E2E controller files", () => {
     const fifo = path.join(directory, "state.json");
     try {
       execFileSync("mkfifo", [fifo]);
-      const moduleUrl = pathToFileURL(path.resolve("tools/e2e/private-file.ts")).href;
+      const moduleUrl = pathToFileURL(path.resolve("tools/e2e/private-file.mts")).href;
       const read = spawnSync(
         process.execPath,
         [
