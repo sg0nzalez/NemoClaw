@@ -2484,7 +2484,7 @@ $$nemoclaw my-assistant rebuild [--yes|-y|--force] [--verbose|-v] [--tool-disclo
 | Flag | Description |
 |------|-------------|
 | `--yes`, `-y` | Skip the confirmation prompt. |
-| `--force` | Skip the confirmation prompt and continue when no state directory was preserved. NemoClaw restores any captured loose files; after a total failure, it recreates from registry metadata only. |
+| `--force` | Skip the confirmation prompt and continue when no state directory was preserved or a manifest-declared state file failed. NemoClaw restores any captured entries; after a total failure, it recreates from registry metadata only. |
 | `--verbose`, `-v` | Log SSH commands, exit codes, and session state (also enabled by `NEMOCLAW_REBUILD_VERBOSE=1`) |
 | `--tool-disclosure <progressive\|direct>` | Change the model-visible tool catalog during this transactional rebuild. Use this path for sandboxes with managed MCP servers so their providers and adapter state are preserved. |
 | `--dcode-auto-approval <disabled\|thread-opt-in>` | Change the managed Deep Agents Code thread auto-approval capability. `thread-opt-in` is accepted only for managed Deep Agents Code sandboxes and is rejected for other agents or custom images. Enabling prints a warning, and either value requires sandbox recreation. |
@@ -2495,6 +2495,7 @@ Pass `--yes`, `-y`, or `--force` to skip the prompt in scripted workflows.
 
 The sandbox normally must be reachable for the backup step to succeed.
 If an archive command preserves at least one state directory, `rebuild` keeps the captured backup entries and reports the manifest-defined paths that could not be archived.
+If a manifest-declared state file fails, `rebuild` exits before destroying the original sandbox even when it preserved state directories, unless you explicitly pass `--force`.
 If every state directory fails, `rebuild` exits before destroying the original sandbox even when it captured loose files, unless you explicitly pass `--force`.
 With `--force`, NemoClaw preserves any captured loose files in the partial manifest and restores them after recreation.
 If the backup produced nothing usable, it continues from recorded registry metadata without restoring prior sandbox state.
