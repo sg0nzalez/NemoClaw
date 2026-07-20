@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { shellQuote } from "../../../src/lib/core/shell-quote";
+import { prepareInitialSandboxCreatePolicy } from "../../../src/lib/onboard/initial-policy";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
 import { assertCleanupSucceededOrAbsent } from "../fixtures/cleanup-resources.ts";
 import { assertExitZero as expectExitZero } from "../fixtures/clients/command.ts";
@@ -41,6 +42,7 @@ import { buildRebuildHermesTimingSummary, describeRunnerClass } from "./rebuild-
 // Vitest.
 
 const HERMES_MANIFEST = path.join(REPO_ROOT, "agents", "hermes", "manifest.yaml");
+const HERMES_POLICY = path.join(REPO_ROOT, "agents", "hermes", "policy-additions.yaml");
 const OLD_HERMES_VERSION = "v2026.5.16";
 const OLD_HERMES_REGISTRY_VERSION = OLD_HERMES_VERSION.slice(1);
 const OLD_HERMES_SEMVER = "0.14.0";
@@ -48,7 +50,6 @@ const OLD_HERMES_TARBALL_SHA256 =
   "c0a554050a50ee9a62f3fa5cd288a167ba5640c42d647d100cdea084b7294143";
 const OLD_HERMES_NPM_INTEGRITY =
   "sha512-kkHSw8iprp0JWAOf3ZZF0OHzRBj3E/BbG/QV0O4lwonxuY7AWhSepOhzSMlWo21VbQ/fTLwFkr/q3cIjDZDLBA==";
-const OLD_HERMES_PYTHON = "/opt/hermes/.venv/bin/python";
 const STALE_BASE_REBUILD = process.env.NEMOCLAW_HERMES_STALE_BASE_REBUILD_E2E === "1";
 const TEST_SANDBOX_PREFIX = STALE_BASE_REBUILD ? "e2e-rebuild-hermes-base" : "e2e-rebuild-hermes";
 const SANDBOX_NAME =
@@ -655,6 +656,9 @@ test(STALE_BASE_REBUILD
   const oldDockerfileDir = fs.mkdtempSync(path.join(os.tmpdir(), "e2e-rebuild-hermes-"));
   const oldDockerfile = path.join(oldDockerfileDir, "Dockerfile");
   fs.writeFileSync(oldDockerfile, oldHermesDockerfile(), "utf8");
+  const oldSandboxPolicy = prepareInitialSandboxCreatePolicy(HERMES_POLICY, ["discord"], {
+    agentName: "hermes",
+  });
   try {
     const provider = await host.command(
       "bash",
@@ -688,6 +692,8 @@ test(STALE_BASE_REBUILD
         SANDBOX_NAME,
         "--from",
         oldDockerfile,
+        "--policy",
+        oldSandboxPolicy.policyPath,
         "--gateway",
         "nemoclaw",
         "--provider",
@@ -708,6 +714,7 @@ test(STALE_BASE_REBUILD
     expectExitZero(createOldSandbox, "create old Hermes sandbox");
     oldSandboxImageState = rebuildHermesRegistryImageState(resultText(createOldSandbox));
   } finally {
+    oldSandboxPolicy.cleanup?.();
     fs.rmSync(oldDockerfileDir, { recursive: true, force: true });
   }
   const seededOldSandboxImageState =
@@ -751,8 +758,8 @@ test(STALE_BASE_REBUILD
       "sh",
       "-lc",
       [
-        `${shellQuote(OLD_HERMES_PYTHON)} -m hermes_cli.main kanban init`,
-        `${shellQuote(OLD_HERMES_PYTHON)} -m hermes_cli.main kanban create ${shellQuote(KANBAN_TASK_TITLE)} --initial-status blocked --json`,
+        "hermes kanban init",
+        `hermes kanban create ${shellQuote(KANBAN_TASK_TITLE)} --initial-status blocked --json`,
         `mkdir -p ${shellQuote(path.dirname(EXCLUDED_KANBAN_FILE))}`,
         `printf '%s' ${shellQuote(MARKER_CONTENT)} > ${shellQuote(EXCLUDED_KANBAN_FILE)}`,
       ].join(" && "),
