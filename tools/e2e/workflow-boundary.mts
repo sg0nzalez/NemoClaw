@@ -1600,6 +1600,19 @@ function validateRebuildHermesJob(
     errors.push(`${jobName} checkout step must set persist-credentials=false`);
   }
 
+  const installOpenShell = requireJobStep(errors, jobName, steps, "Install OpenShell CLI");
+  requireRunContains(errors, installOpenShell, "bash scripts/install-openshell.sh");
+  for (const envName of [
+    "DOCKER_CONFIG",
+    "DOCKERHUB_USERNAME",
+    "DOCKERHUB_TOKEN",
+    "NVIDIA_API_KEY",
+    "NVIDIA_INFERENCE_API_KEY",
+    "GITHUB_TOKEN",
+  ]) {
+    requireRunContains(errors, installOpenShell, `-u ${envName}`);
+  }
+
   const runVitest = requireJobStep(
     errors,
     jobName,
