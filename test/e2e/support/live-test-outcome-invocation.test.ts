@@ -24,6 +24,16 @@ const FIXTURE = "test/e2e/support/fixtures/live-test-outcome.fixture.test.ts";
 const CLASSIFIER = path.join(ROOT, "tools/e2e/runner-pressure.mts");
 
 describe("live-test outcome invocation contract (#7146)", () => {
+  it("loads the private-file helper through the live tsx entrypoint", () => {
+    const result = spawnSync("npx", ["tsx", "tools/e2e/live-test-outcome.mts"], {
+      cwd: ROOT,
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+
+    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+  });
+
   it.each([
     "assertion",
     "timeout",
