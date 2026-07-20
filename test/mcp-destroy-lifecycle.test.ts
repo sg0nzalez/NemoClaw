@@ -502,6 +502,74 @@ describe("authenticated MCP sandbox destroy lifecycle", () => {
     expect(testState.removePreset).not.toHaveBeenCalled();
   });
 
+  it.each([
+    [
+      "credential key",
+      /reuse the same credential key/i,
+      (entry: McpBridgeEntry): McpBridgeEntry => ({
+        ...entry,
+        env: [...bridgeEntries.github.env],
+      }),
+    ],
+    [
+      "provider name",
+      /reuse the same provider name/i,
+      (entry: McpBridgeEntry): McpBridgeEntry => ({
+        ...entry,
+        providerName: bridgeEntries.github.providerName,
+      }),
+    ],
+    [
+      "provider ID",
+      /reuse the same provider ID/i,
+      (entry: McpBridgeEntry): McpBridgeEntry => ({
+        ...entry,
+        providerId: bridgeEntries.github.providerId,
+      }),
+    ],
+    [
+      "generated policy name",
+      /reuse the same generated policy name/i,
+      (entry: McpBridgeEntry): McpBridgeEntry => ({
+        ...entry,
+        policyName: bridgeEntries.github.policyName,
+      }),
+    ],
+  ] satisfies ReadonlyArray<
+    readonly [string, RegExp, (entry: McpBridgeEntry) => McpBridgeEntry]
+  >)("rejects a cross-entry %s collision before exec-unavailable recovery can inspect or mutate state (#7062)", async (_label, expected, collide) => {
+    const collidingSlack = collide(bridgeEntries.slack);
+    registry.registerSandbox({
+      name: "alpha",
+      agent: "openclaw",
+      gatewayName: "nemoclaw",
+      mcp: {
+        bridges: {
+          github: bridgeEntries.github,
+          slack: collidingSlack,
+        },
+      },
+    });
+    registry.addCustomPolicy("alpha", ownedPolicy("github"));
+    registry.addCustomPolicy("alpha", ownedPolicy("slack", { entry: collidingSlack }));
+    const before = registry.getSandbox("alpha");
+
+    const message = await captureMessage(() =>
+      bridge.prepareMcpBridgesForExecUnavailableRebuild("alpha"),
+    );
+
+    expect(message).toMatch(expected);
+    expect(registry.getSandbox("alpha")).toEqual(before);
+    expect(testState.resolveHostAddresses).not.toHaveBeenCalled();
+    expect(testState.calls).toEqual([]);
+    expect(testState.adapterCalls).toEqual([]);
+    expect(testState.runOpenshell).not.toHaveBeenCalled();
+    expect(testState.getPresetContentGatewayState).not.toHaveBeenCalled();
+    expect(testState.recoverNamedGatewayRuntime).not.toHaveBeenCalled();
+    expect(testState.applyPresetContent).not.toHaveBeenCalled();
+    expect(testState.removePreset).not.toHaveBeenCalled();
+  });
+
   it("rejects live policy drift during exec-unavailable recovery without MCP mutations (#7062)", async () => {
     registry.registerSandbox({
       name: "alpha",

@@ -20,7 +20,7 @@ import {
   getSandboxAgent,
   getSandboxOrThrow,
 } from "./mcp-bridge-state";
-import { validateSandboxName } from "./mcp-bridge-validation";
+import { assertAuthenticatedBridgeEntry, validateSandboxName } from "./mcp-bridge-validation";
 
 type ReadOnlyValidationSnapshot = {
   policyByServer: Map<string, string>;
@@ -30,12 +30,42 @@ type ReadOnlyValidationSnapshot = {
 
 type ExplicitAdapterMcpBridgeEntry = McpBridgeEntry & { adapter: AgentMcpAdapter };
 
+type McpOwnershipField = {
+  label: string;
+  value: (entry: McpBridgeEntry) => string | undefined;
+};
+
 export interface ExecUnavailableMcpRebuildPreparation {
   entries: McpBridgeEntry[];
   detachedProviderEntries: McpBridgeEntry[];
   scrubbedAdapterEntries: McpBridgeEntry[];
   revalidateBeforeDelete: () => Promise<void>;
   assertDeleteEdgeUnchanged: () => void;
+}
+
+function assertUniqueMcpOwnership(entries: readonly McpBridgeEntry[]): void {
+  for (const entry of entries) assertAuthenticatedBridgeEntry(entry);
+
+  const ownershipFields: readonly McpOwnershipField[] = [
+    { label: "credential key", value: (entry) => entry.env[0] },
+    { label: "provider name", value: (entry) => entry.providerName },
+    { label: "provider ID", value: (entry) => entry.providerId },
+    { label: "generated policy name", value: (entry) => entry.policyName },
+  ];
+  for (const field of ownershipFields) {
+    const ownerByValue = new Map<string, string>();
+    for (const entry of entries) {
+      const value = field.value(entry);
+      if (!value) continue;
+      if (ownerByValue.has(value)) {
+        const priorOwner = ownerByValue.get(value) ?? "<unknown>";
+        throw new McpBridgeError(
+          `MCP servers '${priorOwner}' and '${entry.server}' reuse the same ${field.label} '${value}'. Refusing read-only host-side rebuild recovery.`,
+        );
+      }
+      ownerByValue.set(value, entry.server);
+    }
+  }
 }
 
 function snapshotCompleteEntries(sandboxName: string): {
@@ -64,6 +94,7 @@ function snapshotCompleteEntries(sandboxName: string): {
       "Managed MCP adapter identity is missing or incompatible with the sandbox's recorded agent. Refusing read-only host-side rebuild recovery.",
     );
   }
+  assertUniqueMcpOwnership(entries);
   return {
     entries: entries.map((entry) => ({ ...entry, adapter })),
     gatewayName: resolveSandboxGatewayName(sandbox),
