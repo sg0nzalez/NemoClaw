@@ -47,6 +47,9 @@ For the controller topology, trust boundary, health proof, and fail-closed behav
 Put the custom Dockerfile and every file it needs to `COPY` in one directory.
 `nemohermes onboard --from <Dockerfile>` sends the Dockerfile's parent directory as the Docker build context.
 
+The one exception is the managed Hermes Dockerfile itself: passing the `agents/hermes/Dockerfile` from the NemoClaw checkout the CLI runs from stages the repository root as the build context, exactly as the managed build does.
+Use that path when you want to edit the managed Dockerfile in place — for example to install extra Python packages — and rebuild the stock image with your changes.
+
 Add a `.dockerignore` next to the Dockerfile to keep local caches, generated artifacts, model files, or other unneeded paths out of the staged context.
 NemoClaw still excludes credential-like paths such as `.env*`, `.ssh/`, `.aws/`, `.npmrc`, `secrets/`, `*.pem`, and `*.key`, even if `.dockerignore` tries to include them.
 

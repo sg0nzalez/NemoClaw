@@ -629,6 +629,8 @@ The poll count is clamped to a minimum of `1` so the probe always runs at least 
 Build the sandbox image from a custom Dockerfile instead of the stock NemoClaw image.
 The supplied Dockerfile defines the complete sandbox image, and NemoClaw does not layer it on top of the stock managed runtime.
 The entire parent directory of the specified file is used as the Docker build context, so any files your Dockerfile references (scripts, config, etc.) must live alongside it.
+One exception: when the supplied path is the selected agent's own managed Dockerfile (for example `agents/hermes/Dockerfile` in the NemoClaw checkout the CLI runs from), NemoClaw stages the repository root as the build context, exactly as the managed build does, because that Dockerfile copies repository-root paths.
+This lets you edit the managed Dockerfile in place (for example to add Python packages) and rebuild from it with `--from`.
 If that directory contains a `.dockerignore`, onboarding applies those rules while calculating the context size and staging files for Docker.
 NemoClaw also applies additional secret-safety exclusions that override `.dockerignore` negation rules: credential-style files and directories such as `.env*`, `.ssh/`, `.aws/`, `.netrc`, `.npmrc`, `secrets/`, `*.pem`, and `*.key` are still skipped even if `.dockerignore` tries to include them.
 Without a `.dockerignore`, onboarding still skips common large or local-only directories (`node_modules`, `.git`, `.venv`, and `__pycache__`) while staging this context.

@@ -60,6 +60,90 @@ describe("stageCreateSandboxBuildContext", () => {
     expect(fs.existsSync(result.buildCtx)).toBe(false);
   });
 
+  it("stages the managed agent build context when --from targets the agent's own Dockerfile (#7205)", () => {
+    const repoRoot = makeTmpDir("nemoclaw-repo-root-");
+    const agentDir = path.join(repoRoot, "agents", "hermes");
+    fs.mkdirSync(agentDir, { recursive: true });
+    const agentDockerfile = path.join(agentDir, "Dockerfile");
+    fs.writeFileSync(agentDockerfile, "FROM scratch\nCOPY agents/hermes/plugin/ /opt/plugin/\n");
+    const agentBuild = {
+      buildCtx: makeTmpDir("nemoclaw-agent-staged-"),
+      stagedDockerfile: path.join(os.tmpdir(), "agent.Dockerfile"),
+    };
+    const createAgentSandbox = vi.fn(() => agentBuild);
+    const agent = { name: "hermes", displayName: "Hermes", dockerfilePath: agentDockerfile } as any;
+    const logs: string[] = [];
+
+    const result = stageCreateSandboxBuildContext({
+      root: repoRoot,
+      fromDockerfile: agentDockerfile,
+      agent,
+      createAgentSandbox,
+      log: (message) => logs.push(message),
+      exit: throwingExit,
+    });
+
+    expect(createAgentSandbox).toHaveBeenCalledWith(agent);
+    expect(result.buildCtx).toBe(agentBuild.buildCtx);
+    expect(result.origin).toBe("custom");
+    expect(logs).toEqual([
+      `  Using custom Dockerfile: ${agentDockerfile}`,
+      "  This is the managed Hermes Dockerfile; staging the repository root as the Docker build context.",
+    ]);
+  });
+
+  it("stages the managed agent build context when --from reaches the agent Dockerfile through a symlink", () => {
+    const repoRoot = makeTmpDir("nemoclaw-repo-symlink-");
+    const agentDir = path.join(repoRoot, "agents", "hermes");
+    fs.mkdirSync(agentDir, { recursive: true });
+    const agentDockerfile = path.join(agentDir, "Dockerfile");
+    fs.writeFileSync(agentDockerfile, "FROM scratch\n");
+    const linkDir = makeTmpDir("nemoclaw-linked-checkout-");
+    const linkedDockerfile = path.join(linkDir, "Dockerfile");
+    fs.symlinkSync(agentDockerfile, linkedDockerfile);
+    const agentBuild = {
+      buildCtx: makeTmpDir("nemoclaw-agent-staged-link-"),
+      stagedDockerfile: path.join(os.tmpdir(), "agent.Dockerfile"),
+    };
+    const createAgentSandbox = vi.fn(() => agentBuild);
+    const agent = { name: "hermes", displayName: "Hermes", dockerfilePath: agentDockerfile } as any;
+
+    const result = stageCreateSandboxBuildContext({
+      root: repoRoot,
+      fromDockerfile: linkedDockerfile,
+      agent,
+      createAgentSandbox,
+      log: vi.fn(),
+      exit: throwingExit,
+    });
+
+    expect(createAgentSandbox).toHaveBeenCalledWith(agent);
+    expect(result.buildCtx).toBe(agentBuild.buildCtx);
+  });
+
+  it("keeps the parent-directory contract for a standalone Dockerfile when an agent is selected", () => {
+    const buildContextDir = makeTmpDir("nemoclaw-standalone-context-");
+    const standaloneDockerfile = path.join(buildContextDir, "Dockerfile");
+    fs.writeFileSync(standaloneDockerfile, "FROM scratch\n");
+    const otherDockerfile = path.join(makeTmpDir("nemoclaw-agent-home-"), "Dockerfile");
+    fs.writeFileSync(otherDockerfile, "FROM scratch\n");
+    const createAgentSandbox = vi.fn();
+
+    const result = stageCreateSandboxBuildContext({
+      root: "/unused",
+      fromDockerfile: standaloneDockerfile,
+      agent: { name: "hermes", displayName: "Hermes", dockerfilePath: otherDockerfile } as any,
+      createAgentSandbox,
+      log: vi.fn(),
+      exit: throwingExit,
+    });
+    tmpDirs.push(result.buildCtx);
+
+    expect(createAgentSandbox).not.toHaveBeenCalled();
+    expect(result.origin).toBe("custom");
+    expect(fs.existsSync(result.stagedDockerfile)).toBe(true);
+  });
+
   it("exits when the custom Dockerfile path is missing", () => {
     const errors: string[] = [];
     const missingDockerfile = path.join(makeTmpDir("nemoclaw-missing-context-"), "Dockerfile");
