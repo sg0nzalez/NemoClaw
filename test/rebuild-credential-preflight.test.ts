@@ -282,6 +282,7 @@ process.exit(1);
 const { spawnSync } = require("child_process");
 const cmd = process.argv[process.argv.length - 1] || "";
 if (cmd.includes("[ -d")) { process.stdout.write("workspace\\n"); process.exit(0); }
+if (cmd.startsWith("src=")) { process.exit(2); }
 if (cmd.includes("tar")) {
   const result = spawnSync("tar", ["-cf", "-", "-C", ${JSON.stringify(fakeRoot)}, "workspace"], { stdio: ["ignore", "pipe", "pipe"] });
   if (result.stdout) process.stdout.write(result.stdout);

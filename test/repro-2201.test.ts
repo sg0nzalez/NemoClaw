@@ -292,9 +292,10 @@ process.exit(0);
   );
 
   // ── Fake ssh ──────────────────────────────────────────────────
-  // backupSandboxState makes two ssh calls:
+  // backupSandboxState makes fixture-relevant SSH calls for:
   //   1. dir-existence check (command has "[ -d") → print "workspace"
   //   2. tar download (command has "tar") → produce a real tar archive
+  //   3. standalone state files (command starts with "src=") → report absent
   const fakeRoot = path.join(tmpDir, "fake-sandbox-root");
   fs.writeFileSync(
     path.join(tmpDir, "ssh"),
@@ -303,6 +304,11 @@ const cmd = process.argv[process.argv.length - 1] || "";
 if (cmd.includes("[ -d")) {
   process.stdout.write("workspace\\n");
   process.exit(0);
+}
+if (cmd.startsWith("src=")) {
+  // This fixture has no standalone agent state files. Match the real backup
+  // command's missing-file exit code instead of returning an empty success.
+  process.exit(2);
 }
 if (cmd.includes("tar")) {
   const { spawnSync } = require("child_process");
