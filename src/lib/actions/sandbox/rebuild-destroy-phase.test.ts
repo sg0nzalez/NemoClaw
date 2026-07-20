@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
       stdout: string;
       stderr: string;
       error?: NodeJS.ErrnoException;
+      signal?: NodeJS.Signals | null;
     } => ({ status: 0, stdout: "", stderr: "" }),
   ),
   getSandbox: vi.fn(
@@ -257,6 +258,128 @@ describe("rebuild destroy validation diagnostics", () => {
     expect(result?.entries).toEqual([{ server: "github" }]);
     expect(onDeleted).toHaveBeenCalledOnce();
     expect(mocks.stopNimContainerByName).toHaveBeenCalledWith("nim-alpha");
+    expect(mocks.reattachMcpAfterDeleteFailure).not.toHaveBeenCalled();
+    expect(relockShieldsIfNeeded).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      "bare NotFound output",
+      {
+        status: 1,
+        stdout: "",
+        stderr: "NotFound",
+      },
+    ],
+    [
+      "generic sandbox NotFound output",
+      {
+        status: 1,
+        stdout: "",
+        stderr: 'status: NotFound, message: "sandbox not found"',
+      },
+    ],
+    [
+      "gateway NotFound output",
+      {
+        status: 1,
+        stdout: "",
+        stderr: 'status: NotFound, message: "gateway nemoclaw not found"',
+      },
+    ],
+    [
+      "provider NotFound output",
+      {
+        status: 1,
+        stdout: "",
+        stderr: 'status: NotFound, message: "provider alpha-mcp-github not found"',
+      },
+    ],
+    [
+      "signal-terminated sandbox absence output",
+      {
+        status: null,
+        signal: "SIGTERM",
+        stdout: "",
+        stderr: 'status: Internal, message: "sandbox has no spec"',
+      },
+    ],
+    [
+      "null-status sandbox absence output",
+      {
+        status: null,
+        signal: null,
+        stdout: "",
+        stderr: 'status: Internal, message: "sandbox has no spec"',
+      },
+    ],
+    [
+      "mixed gateway and sandbox absence output",
+      {
+        status: 1,
+        stdout: "",
+        stderr:
+          'status: NotFound, message: "gateway nemoclaw not found"\nstatus: Internal, message: "sandbox has no spec"',
+      },
+    ],
+    [
+      "absence output for a different sandbox",
+      {
+        status: 1,
+        stdout: "",
+        stderr: "sandbox beta not found",
+      },
+    ],
+  ] satisfies ReadonlyArray<
+    readonly [
+      string,
+      {
+        status: number | null;
+        signal?: NodeJS.Signals | null;
+        stdout: string;
+        stderr: string;
+      },
+    ]
+  >)("does not treat %s as proof of sandbox deletion (#7062)", async (_label, probe) => {
+    mocks.getSandbox.mockReturnValueOnce({
+      name: "alpha",
+      agent: "openclaw",
+      nimContainer: "nim-alpha",
+    });
+    mocks.prepareMcpForRebuild.mockResolvedValue({
+      entries: [{ server: "github" }],
+      detachedProviderEntries: [{ server: "github" }],
+      scrubbedAdapterEntries: [],
+    });
+    mocks.runOpenshell
+      .mockReturnValueOnce({ status: 9, stdout: "", stderr: "delete interrupted" })
+      .mockReturnValueOnce(probe);
+    const onDeleted = vi.fn();
+    const onDeleteStateAmbiguous = vi.fn();
+    const relockShieldsIfNeeded = vi.fn(() => true);
+
+    await expect(
+      runRebuildDestroyPhase({
+        sandboxName: "alpha",
+        sandboxEntry: { name: "alpha", agent: "openclaw", gatewayName: "nemoclaw" },
+        staleRecovery: false,
+        backupManifest: null,
+        force: true,
+        log: vi.fn(),
+        bail: vi.fn((message: string): never => {
+          throw new Error(message);
+        }),
+        relockShieldsIfNeeded,
+        onDeleted,
+        onDeleteStateAmbiguous,
+      }),
+    ).rejects.toThrow(/exact post-delete state is ambiguous.*recovery state was preserved/i);
+
+    expect(onDeleted).not.toHaveBeenCalled();
+    expect(onDeleteStateAmbiguous).toHaveBeenCalledOnce();
+    expect(mocks.removeSandboxRegistryEntryWithReceipt).not.toHaveBeenCalled();
+    expect(mocks.stopNimContainer).not.toHaveBeenCalled();
+    expect(mocks.stopNimContainerByName).not.toHaveBeenCalled();
     expect(mocks.reattachMcpAfterDeleteFailure).not.toHaveBeenCalled();
     expect(relockShieldsIfNeeded).not.toHaveBeenCalled();
   });

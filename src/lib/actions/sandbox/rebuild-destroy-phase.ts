@@ -11,7 +11,7 @@ import { redactFull } from "../../security/redact";
 import { parseSandboxPhase } from "../../state/gateway";
 import * as registry from "../../state/registry";
 import { removeSandboxRegistryEntryWithReceipt } from "./destroy";
-import { isMissingSandboxGatewayOutput } from "./gateway-state";
+import { isExplicitMissingSandboxGatewayOutput } from "./gateway-state";
 import type { RebuildBackupManifest } from "./rebuild-backup-phase";
 import type { RebuildBail, RebuildLog } from "./rebuild-credential-preflight";
 import { type RebuildSandboxEntry, warnUnpreservedUserManagedFiles } from "./rebuild-flow-helpers";
@@ -79,12 +79,12 @@ function reconcileFailedSandboxDelete(
     log(`Post-delete reconciliation could not query recorded gateway '${gatewayName}'.`);
     return { state: "ambiguous", phase: null, status: null };
   }
-  if (probe.error) {
+  if (probe.error || probe.signal || probe.status === null) {
     log(`Post-delete reconciliation could not complete on recorded gateway '${gatewayName}'.`);
     return { state: "ambiguous", phase: null, status: probe.status };
   }
   const probeOutput = `${probe.stdout || ""}\n${probe.stderr || ""}`;
-  if (probe.status !== 0 && isMissingSandboxGatewayOutput(probeOutput)) {
+  if (probe.status !== 0 && isExplicitMissingSandboxGatewayOutput(probeOutput, sandboxName)) {
     log(`Post-delete reconciliation on '${gatewayName}': sandbox is absent.`);
     return { state: "deleted", phase: null, status: probe.status };
   }
