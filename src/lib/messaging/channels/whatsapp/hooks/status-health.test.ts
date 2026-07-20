@@ -84,10 +84,16 @@ type WaFixture = {
 };
 
 function openclawJson(wa: WaFixture | null): string {
-  const payload =
-    wa === null
-      ? { channels: {}, error: "unknown channel: whatsapp" }
-      : { channels: { whatsapp: wa } };
+  const payload = {
+    channels: {
+      whatsapp: wa === null ? { configured: false } : { configured: wa.configured ?? false },
+    },
+    channelAccounts: {
+      whatsapp: wa === null ? [] : [{ ...wa, accountId: "default" }],
+    },
+    channelDefaultAccountId: { whatsapp: "default" },
+    ...(wa === null ? { error: "unknown channel: whatsapp" } : {}),
+  };
   return JSON.stringify(payload);
 }
 
@@ -209,7 +215,33 @@ describe("whatsapp.statusHealth openclaw CLI probe", () => {
   });
 
   it("accepts the canonical successful payload without the failure-only reachability field", () => {
-    const payload = { channels: { whatsapp: HEALTHY_WA } };
+    const payload = {
+      channels: { whatsapp: { configured: true } },
+      channelAccounts: {
+        whatsapp: [{ ...HEALTHY_WA, accountId: "default" }],
+      },
+      channelDefaultAccountId: { whatsapp: "default" },
+    };
+    const exec = makeExec({ status: 0, stdout: JSON.stringify(payload), stderr: "" });
+    const report = reportOf(
+      createWhatsappStatusHealthHook({ executeSandboxCommand: exec })(context()),
+    );
+    expect(report?.verdict).toBe("healthy");
+  });
+
+  it("selects the declared default account instead of trusting account-array order", () => {
+    const payload = {
+      // Keep the summary deliberately unpaired so this test also proves the
+      // probe consumes authoritative per-account state rather than the summary.
+      channels: { whatsapp: UNPAIRED_WA },
+      channelAccounts: {
+        whatsapp: [
+          { ...UNPAIRED_WA, accountId: "secondary" },
+          { ...HEALTHY_WA, accountId: "default" },
+        ],
+      },
+      channelDefaultAccountId: { whatsapp: "default" },
+    };
     const exec = makeExec({ status: 0, stdout: JSON.stringify(payload), stderr: "" });
     const report = reportOf(
       createWhatsappStatusHealthHook({ executeSandboxCommand: exec })(context()),
@@ -317,6 +349,24 @@ describe("whatsapp.statusHealth openclaw CLI probe", () => {
       payload: {
         gatewayReachable: true,
         channels: { whatsapp: { ...HEALTHY_WA, connected: "yes" } },
+      },
+    },
+    {
+      label: "default account id does not identify exactly one account",
+      payload: {
+        channels: { whatsapp: HEALTHY_WA },
+        channelAccounts: {
+          whatsapp: [{ ...HEALTHY_WA, accountId: "secondary" }],
+        },
+        channelDefaultAccountId: { whatsapp: "default" },
+      },
+    },
+    {
+      label: "per-account state is not an array",
+      payload: {
+        channels: { whatsapp: HEALTHY_WA },
+        channelAccounts: { whatsapp: HEALTHY_WA },
+        channelDefaultAccountId: { whatsapp: "default" },
       },
     },
   ])("fails closed when the live-status contract is invalid: $label (#7016)", ({ payload }) => {

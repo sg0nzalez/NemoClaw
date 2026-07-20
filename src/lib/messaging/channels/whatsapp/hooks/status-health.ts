@@ -175,18 +175,23 @@ function runOpenclawStatusProbe(
   const json = parseOpenclawJson(String(exec.stdout ?? ""));
   if (!json) return PROBE_UNREACHABLE;
   const channels = readObject(json.channels);
-  // Successful OpenClaw responses expose the live `channels` map and omit
+  const channelAccounts = readObject(json.channelAccounts);
+  // Successful OpenClaw responses expose live channel/account maps and omit
   // `gatewayReachable`; only the CLI's config-only failure response sets that
   // field to false. Honor an explicit reachability bit when present, while
-  // accepting the canonical successful shape only when its channel map exists.
-  if (!isReachableGatewayStatusPayload(json, channels)) return PROBE_UNREACHABLE;
-  const wa = channels ? readObject(channels.whatsapp) : null;
+  // accepting the canonical successful shape only when a live map exists.
+  if (!isReachableGatewayStatusPayload(json, channels, channelAccounts)) {
+    return PROBE_UNREACHABLE;
+  }
+  const waLookup = readWhatsappState(json, channels, channelAccounts);
+  if (waLookup.kind === "invalid") return PROBE_UNREACHABLE;
+  const wa = waLookup.kind === "found" ? waLookup.state : null;
 
   if (!wa) {
-    // No `channels.whatsapp`. The exact legacy unknown-channel error means
-    // WhatsApp is not configured; otherwise the reachable gateway simply did
-    // not include live WhatsApp status. Leave runtime fields null so the
-    // evaluator lands on an honest "unknown" verdict in either case.
+    // No authoritative WhatsApp account. The exact legacy unknown-channel
+    // error means WhatsApp is not configured; otherwise the reachable gateway
+    // simply did not include live WhatsApp status. Leave runtime fields null so
+    // the evaluator lands on an honest "unknown" verdict in either case.
     return {
       probeReachable: true,
       paired: null,
@@ -293,11 +298,57 @@ function parseOpenclawJson(stdout: string): Record<string, unknown> | null {
 function isReachableGatewayStatusPayload(
   json: Record<string, unknown>,
   channels: Record<string, unknown> | null,
+  channelAccounts: Record<string, unknown> | null,
 ): boolean {
   if (Object.prototype.hasOwnProperty.call(json, "gatewayReachable")) {
     return json.gatewayReachable === true;
   }
-  return channels !== null;
+  return channels !== null || channelAccounts !== null;
+}
+
+type WhatsappStateLookup =
+  | { readonly kind: "found"; readonly state: OpenclawWhatsappState }
+  | { readonly kind: "missing" }
+  | { readonly kind: "invalid" };
+
+/**
+ * OpenClaw 2026.6.10 exposes live per-account state under
+ * `channelAccounts.whatsapp` and names the authoritative account through
+ * `channelDefaultAccountId.whatsapp`. Select that exact account rather than
+ * trusting array order or the channel-level summary. The summary-only branch
+ * remains as a bounded compatibility path for older reviewed payloads.
+ */
+function readWhatsappState(
+  json: Record<string, unknown>,
+  channels: Record<string, unknown> | null,
+  channelAccounts: Record<string, unknown> | null,
+): WhatsappStateLookup {
+  if (!Object.prototype.hasOwnProperty.call(json, "channelAccounts")) {
+    const legacyState = channels ? readObject(channels.whatsapp) : null;
+    return legacyState ? { kind: "found", state: legacyState } : { kind: "missing" };
+  }
+  if (!channelAccounts) return { kind: "invalid" };
+  if (!Object.prototype.hasOwnProperty.call(channelAccounts, "whatsapp")) {
+    return { kind: "missing" };
+  }
+
+  const rawAccounts = channelAccounts.whatsapp;
+  if (!Array.isArray(rawAccounts)) return { kind: "invalid" };
+  const accounts: Record<string, unknown>[] = [];
+  for (const rawAccount of rawAccounts) {
+    const account = readObject(rawAccount);
+    if (!account) return { kind: "invalid" };
+    accounts.push(account);
+  }
+  if (accounts.length === 0) return { kind: "missing" };
+
+  const defaultAccountIds = readObject(json.channelDefaultAccountId);
+  const defaultAccountId = defaultAccountIds ? readStringValue(defaultAccountIds.whatsapp) : null;
+  if (!defaultAccountId) return { kind: "invalid" };
+  const matches = accounts.filter(
+    (account) => readStringValue(account.accountId) === defaultAccountId,
+  );
+  return matches.length === 1 ? { kind: "found", state: matches[0] } : { kind: "invalid" };
 }
 
 function readObject(value: unknown): Record<string, unknown> | null {
@@ -312,7 +363,7 @@ function hasUnknownChannelError(json: Record<string, unknown>): boolean {
   return readStringValue(json.error) === "unknown channel: whatsapp";
 }
 
-// The CLI can report a missing `channels.whatsapp` with the exact
+// The CLI can report missing WhatsApp status with the exact
 // `error: "unknown channel: whatsapp"` when WhatsApp is not configured. A
 // canonical successful payload can also omit that channel without an error.
 // Emit fixed diagnostic strings only — never the raw error, which can carry PII.

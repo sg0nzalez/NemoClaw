@@ -7,9 +7,14 @@ import { entry, makeDeps, showSandboxChannelStatus } from "./channel-status.test
 // The whatsapp status hook now reads OpenClaw's authoritative live status JSON
 // (`openclaw channels status --channel whatsapp --json`) instead of scraping
 // shell markers, so these integration tests feed that JSON shape through the
-// mocked sandbox exec. `wa` is the per-channel object under `channels.whatsapp`.
+// mocked sandbox exec. `wa` is the default-account object under
+// `channelAccounts.whatsapp` in OpenClaw 2026.6.10.
 function waStatusJson(wa: Record<string, unknown>): string {
-  return JSON.stringify({ channels: { whatsapp: wa } });
+  return JSON.stringify({
+    channels: { whatsapp: { configured: true } },
+    channelAccounts: { whatsapp: [{ ...wa, accountId: "default" }] },
+    channelDefaultAccountId: { whatsapp: "default" },
+  });
 }
 
 describe("showSandboxChannelStatus (whatsapp)", () => {
