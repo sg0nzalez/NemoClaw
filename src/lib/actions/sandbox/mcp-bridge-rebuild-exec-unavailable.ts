@@ -138,6 +138,9 @@ async function inspectReadOnlyRecoveryState(
   adapter: AgentMcpAdapter,
 ): Promise<ReadOnlyValidationSnapshot> {
   const resolvedTargets = await preflightMcpEntryTargets(entries);
+  // This may start or recover the sandbox's recorded host gateway and select
+  // it in CLI context. It does not mutate MCP ownership or sandbox contents;
+  // the provider, policy, and target checks below remain inspection-only.
   if (entries.length > 0) await ensureSandboxGatewaySelected(sandboxName);
 
   const policyByServer = new Map<string, string>();
@@ -229,8 +232,10 @@ async function revalidateBeforeDelete(
 /**
  * Preserve complete MCP intent when sandbox exec is unavailable but OpenShell
  * still reports the sandbox live. Unlike absent-sandbox recovery, this path is
- * read-only: it never discards add markers, scrubs adapters, detaches providers,
- * reconciles policy records, or otherwise mutates MCP ownership before delete.
+ * read-only with respect to MCP ownership and sandbox contents: it may recover
+ * and select the recorded host gateway for inspection, but it never discards
+ * add markers, scrubs adapters, detaches providers, reconciles policy records,
+ * or otherwise mutates MCP ownership before delete.
  */
 export async function prepareMcpBridgesForExecUnavailableRebuild(
   sandboxName: string,

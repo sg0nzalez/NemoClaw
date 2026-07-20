@@ -14,15 +14,22 @@ import {
   reattachMcpProvidersAfterRebuildAbort,
   restoreMcpBridgesAfterRebuild,
 } from "./mcp-bridge";
-import { executeSandboxCommand } from "./process-recovery";
+import { executeSandboxCommand, executeSandboxExecCommand } from "./process-recovery";
 import type { RebuildBail } from "./rebuild-credential-preflight";
 import type { RebuildSandboxEntry } from "./rebuild-flow-helpers";
 
 export type McpRebuildPreparation = Awaited<ReturnType<typeof prepareMcpBridgesForRebuild>>;
 
-function canExecuteSandboxNoop(sandboxName: string): boolean {
-  const probe = executeSandboxCommand(sandboxName, ":");
-  return probe !== null && probe.status === 0;
+function canExecuteMcpPreparation(sandboxName: string): boolean {
+  // Live MCP preparation uses both transports: SSH-backed adapter
+  // inspection/mutation and OpenShell-mediated adapter/provider operations.
+  // Prove both before any mutation. A direct Docker fallback would not prove
+  // that the OpenShell transport itself can run.
+  const sshProbe = executeSandboxCommand(sandboxName, ":");
+  const execProbe = executeSandboxExecCommand(sandboxName, ":", undefined, {
+    allowLocalDockerFallback: false,
+  });
+  return sshProbe !== null && sshProbe.status === 0 && execProbe !== null && execProbe.status === 0;
 }
 
 export async function prepareMcpForRebuild(
@@ -32,20 +39,20 @@ export async function prepareMcpForRebuild(
   relockShieldsIfNeeded: (sandboxStillExists: boolean) => boolean,
   bail: RebuildBail,
 ): Promise<McpRebuildPreparation | null> {
-  // invalidState: OpenShell still reports a live sandbox, but even the
-  // side-effect-free `:` command cannot cross its exec transport. Every
-  // nonzero result is non-authoritative, so interpreting selected exit codes
-  // as proof that in-sandbox MCP teardown can run would cross the delete edge.
-  // sourceBoundary: the pinned OpenShell sandbox-exec transport owns this
-  // liveness signal; NemoClaw owns only the explicit --force recovery policy.
+  // invalidState: OpenShell still reports a live sandbox, but the
+  // side-effect-free `:` command cannot cross every transport required by live
+  // MCP preparation. Every nonzero result is non-authoritative, so interpreting
+  // selected exit codes as proof teardown can run would cross the delete edge.
+  // sourceBoundary: the pinned OpenShell sandbox-exec and SSH transports own
+  // these liveness signals; NemoClaw owns only explicit --force recovery policy.
   // whyNotSourceFix: an unreachable retained image cannot be repaired before
   // rebuild, and OpenShell v0.0.85 exposes no stronger adapter-health proof.
   // regressionTest: rebuild-mcp-phase.test.ts exercises null and representative
   // nonzero results through this exact force-only branch.
   // removalCondition: remove this fallback only when OpenShell exposes an
-  // attested read-only adapter snapshot that is safe without sandbox exec.
-  if (force && !staleRecovery && !canExecuteSandboxNoop(sandboxName)) {
-    console.error(`  ${YW}⚠${R} Sandbox exec probe failed; --force using host-side MCP recovery`);
+  // attested read-only adapter snapshot that is safe without sandbox transport.
+  if (force && !staleRecovery && !canExecuteMcpPreparation(sandboxName)) {
+    console.error(`  ${YW}⚠${R} MCP transport probe failed; --force using host-side MCP recovery`);
     try {
       return await prepareMcpBridgesForExecUnavailableRebuild(sandboxName);
     } catch (error) {

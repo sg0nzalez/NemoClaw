@@ -296,6 +296,7 @@ beforeEach(() => {
   });
 
   testState.executeSandboxExecCommand.mockImplementation((_sandbox: string, command: string) => {
+    if (command === ":") return { status: 0, stdout: "", stderr: "" };
     const encoded = command.match(/printf '%s' '([A-Za-z0-9+/=]+)' \| base64 -d/)?.[1] ?? "";
     const proof = encoded ? Buffer.from(encoded, "base64").toString("utf8") : command;
     const isRevisionObservation = proof.includes("printf '%s\\n' absent");
@@ -850,10 +851,7 @@ describe("authenticated MCP sandbox destroy lifecycle", () => {
     });
     registry.addCustomPolicy("alpha", ownedPolicy("github"));
     const before = registry.getSandbox("alpha");
-    testState.executeSandboxCommand.mockImplementation((_sandbox: string, command: string) => {
-      testState.adapterCalls.push(command);
-      return null;
-    });
+    testState.executeSandboxExecCommand.mockReturnValue(null);
     const onDeleted = vi.fn();
 
     const result = await runRebuildDestroyPhase({
@@ -871,7 +869,10 @@ describe("authenticated MCP sandbox destroy lifecycle", () => {
     });
 
     expect(result?.entries).toEqual([bridgeEntries.github]);
-    expect(testState.executeSandboxCommand).toHaveBeenCalledOnce();
+    expect(testState.executeSandboxExecCommand).toHaveBeenCalledOnce();
+    expect(testState.executeSandboxExecCommand).toHaveBeenCalledWith("alpha", ":", undefined, {
+      allowLocalDockerFallback: false,
+    });
     expect(testState.executeSandboxCommand).toHaveBeenCalledWith("alpha", ":");
     expect(testState.runOpenshell).toHaveBeenCalledWith(
       ["sandbox", "delete", "alpha"],
@@ -882,7 +883,7 @@ describe("authenticated MCP sandbox destroy lifecycle", () => {
     expect(testState.runOpenshellProviderCommand).toHaveBeenCalledTimes(2);
     expect(testState.getPresetContentGatewayState).toHaveBeenCalledTimes(2);
     expect(testState.recoverNamedGatewayRuntime).toHaveBeenCalledTimes(2);
-    expect(testState.executeSandboxCommand.mock.invocationCallOrder[0]).toBeLessThan(
+    expect(testState.executeSandboxExecCommand.mock.invocationCallOrder[0]).toBeLessThan(
       testState.runOpenshellProviderCommand.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
     );
     expect(testState.runOpenshellProviderCommand.mock.invocationCallOrder[1]).toBeLessThan(
@@ -914,10 +915,7 @@ describe("authenticated MCP sandbox destroy lifecycle", () => {
     const beforeProviders = [...testState.providers.entries()];
     const beforeAttachments = [...testState.attachedProviders];
     const beforeAdapterRegistered = testState.adapterRegistered;
-    testState.executeSandboxCommand.mockImplementation((_sandbox: string, command: string) => {
-      testState.adapterCalls.push(command);
-      return null;
-    });
+    testState.executeSandboxExecCommand.mockReturnValue(null);
     testState.runOpenshell
       .mockReturnValueOnce({
         status: 9,

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   executeSandboxCommand: vi.fn(),
+  executeSandboxExecCommand: vi.fn(),
   prepareAbsent: vi.fn(),
   prepareExecUnavailable: vi.fn(),
   prepareLive: vi.fn(),
@@ -20,6 +21,7 @@ vi.mock("./mcp-bridge", () => ({
 
 vi.mock("./process-recovery", () => ({
   executeSandboxCommand: mocks.executeSandboxCommand,
+  executeSandboxExecCommand: mocks.executeSandboxExecCommand,
 }));
 
 import { prepareMcpForRebuild, printMcpRebuildRetryCommand } from "./rebuild-mcp-phase";
@@ -39,12 +41,34 @@ describe("forced rebuild MCP preparation", () => {
     vi.clearAllMocks();
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     mocks.executeSandboxCommand.mockReturnValue({ status: 0, stdout: "", stderr: "" });
+    mocks.executeSandboxExecCommand.mockReturnValue({ status: 0, stdout: "", stderr: "" });
     mocks.prepareAbsent.mockResolvedValue(emptyPreparation);
     mocks.prepareExecUnavailable.mockResolvedValue(emptyPreparation);
     mocks.prepareLive.mockResolvedValue(emptyPreparation);
   });
 
-  it("uses host-side recovery when the pre-mutation exec probe cannot run (#7062)", async () => {
+  it("uses host-side recovery when OpenShell exec fails even while SSH is healthy (#7062)", async () => {
+    mocks.executeSandboxExecCommand.mockReturnValue(null);
+    const relock = vi.fn(() => true);
+    const bail = vi.fn((message: string): never => {
+      throw new Error(message);
+    });
+
+    await expect(prepareMcpForRebuild("alpha", false, true, relock, bail)).resolves.toEqual(
+      emptyPreparation,
+    );
+
+    expect(mocks.executeSandboxExecCommand).toHaveBeenCalledWith("alpha", ":", undefined, {
+      allowLocalDockerFallback: false,
+    });
+    expect(mocks.executeSandboxCommand).toHaveBeenCalledWith("alpha", ":");
+    expect(mocks.prepareExecUnavailable).toHaveBeenCalledWith("alpha");
+    expect(mocks.prepareAbsent).not.toHaveBeenCalled();
+    expect(mocks.prepareLive).not.toHaveBeenCalled();
+    expect(relock).not.toHaveBeenCalled();
+  });
+
+  it("uses host-side recovery when SSH fails even while OpenShell exec is healthy (#7062)", async () => {
     mocks.executeSandboxCommand.mockReturnValue(null);
     const relock = vi.fn(() => true);
     const bail = vi.fn((message: string): never => {
@@ -56,8 +80,34 @@ describe("forced rebuild MCP preparation", () => {
     );
 
     expect(mocks.executeSandboxCommand).toHaveBeenCalledWith("alpha", ":");
+    expect(mocks.executeSandboxExecCommand).toHaveBeenCalledWith("alpha", ":", undefined, {
+      allowLocalDockerFallback: false,
+    });
     expect(mocks.prepareExecUnavailable).toHaveBeenCalledWith("alpha");
+    expect(mocks.prepareLive).not.toHaveBeenCalled();
     expect(mocks.prepareAbsent).not.toHaveBeenCalled();
+    expect(relock).not.toHaveBeenCalled();
+  });
+
+  it("uses host-side recovery when SSH exits nonzero even while OpenShell exec is healthy (#7062)", async () => {
+    mocks.executeSandboxCommand.mockReturnValue({
+      status: 255,
+      stdout: "",
+      stderr: "relay EOF",
+    });
+    const relock = vi.fn(() => true);
+    const bail = vi.fn((message: string): never => {
+      throw new Error(message);
+    });
+
+    await expect(prepareMcpForRebuild("alpha", false, true, relock, bail)).resolves.toEqual(
+      emptyPreparation,
+    );
+
+    expect(mocks.executeSandboxExecCommand).toHaveBeenCalledWith("alpha", ":", undefined, {
+      allowLocalDockerFallback: false,
+    });
+    expect(mocks.prepareExecUnavailable).toHaveBeenCalledWith("alpha");
     expect(mocks.prepareLive).not.toHaveBeenCalled();
     expect(relock).not.toHaveBeenCalled();
   });
@@ -65,7 +115,11 @@ describe("forced rebuild MCP preparation", () => {
   it.each([
     1, 64, 126, 127, 255,
   ])("routes every nonzero exec result (%i) through explicit force recovery (#7062)", async (status) => {
-    mocks.executeSandboxCommand.mockReturnValue({ status, stdout: "", stderr: "exec failed" });
+    mocks.executeSandboxExecCommand.mockReturnValue({
+      status,
+      stdout: "",
+      stderr: "exec failed",
+    });
     const relock = vi.fn(() => true);
     const bail = vi.fn((message: string): never => {
       throw new Error(message);
@@ -93,12 +147,20 @@ describe("forced rebuild MCP preparation", () => {
     );
 
     expect(mocks.prepareLive).toHaveBeenCalledWith("alpha");
+    expect(mocks.executeSandboxCommand).toHaveBeenCalledWith("alpha", ":");
+    expect(mocks.executeSandboxExecCommand).toHaveBeenCalledWith("alpha", ":", undefined, {
+      allowLocalDockerFallback: false,
+    });
     expect(mocks.prepareAbsent).not.toHaveBeenCalled();
     expect(relock).toHaveBeenCalledWith(true);
   });
 
   it("fails closed when host-side recovery cannot prove durable ownership (#7062)", async () => {
-    mocks.executeSandboxCommand.mockReturnValue({ status: 255, stdout: "", stderr: "relay EOF" });
+    mocks.executeSandboxExecCommand.mockReturnValue({
+      status: 255,
+      stdout: "",
+      stderr: "relay EOF",
+    });
     mocks.prepareExecUnavailable.mockRejectedValue(new Error("provider ownership is ambiguous"));
     const relock = vi.fn(() => true);
     const bail = vi.fn((message: string): never => {
@@ -124,6 +186,7 @@ describe("forced rebuild MCP preparation", () => {
       emptyPreparation,
     );
 
+    expect(mocks.executeSandboxExecCommand).not.toHaveBeenCalled();
     expect(mocks.executeSandboxCommand).not.toHaveBeenCalled();
     expect(mocks.prepareLive).toHaveBeenCalledWith("alpha");
     expect(mocks.prepareExecUnavailable).not.toHaveBeenCalled();
@@ -140,6 +203,7 @@ describe("forced rebuild MCP preparation", () => {
       emptyPreparation,
     );
 
+    expect(mocks.executeSandboxExecCommand).not.toHaveBeenCalled();
     expect(mocks.executeSandboxCommand).not.toHaveBeenCalled();
     expect(mocks.prepareAbsent).toHaveBeenCalledWith("alpha");
     expect(mocks.prepareExecUnavailable).not.toHaveBeenCalled();

@@ -202,6 +202,10 @@ export async function runRebuildDestroyPhase(
   // preparation. Re-prove target, policy, provider, and registry state while
   // the original sandbox and local NIM are still intact. Then run one final
   // synchronous registry check at the no-await edge immediately before delete.
+  // External control-plane state can still change after the awaited proof; the
+  // final synchronous check covers registry state only and minimizes that
+  // window. Durable MCP intent remains preserved, and restoration rechecks the
+  // external state and fails closed if later control-plane drift is observed.
   if (mcpPreparation.revalidateBeforeDelete || mcpPreparation.assertDeleteEdgeUnchanged) {
     try {
       await mcpPreparation.revalidateBeforeDelete?.();
