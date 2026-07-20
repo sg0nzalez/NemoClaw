@@ -61,6 +61,7 @@ describe("E2E fixture primitives", () => {
       "run-plan.json",
       "target.json",
       "target-result.json",
+      "test-progress.json",
       "environment.result.json",
       "onboarding.result.json",
       "state-validation.result.json",

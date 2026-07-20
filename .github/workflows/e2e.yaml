@@ -356,6 +356,7 @@ jobs:
             e2e-artifacts/live/${{ matrix.id }}/run-plan.json
             e2e-artifacts/live/${{ matrix.id }}/target.json
             e2e-artifacts/live/${{ matrix.id }}/target-result.json
+            e2e-artifacts/live/${{ matrix.id }}/test-progress.json
             e2e-artifacts/live/${{ matrix.id }}/environment.result.json
             e2e-artifacts/live/${{ matrix.id }}/onboarding.result.json
             e2e-artifacts/live/${{ matrix.id }}/state-validation.result.json
