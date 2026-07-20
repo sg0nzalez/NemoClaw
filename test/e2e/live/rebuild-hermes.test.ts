@@ -1031,7 +1031,7 @@ test(STALE_BASE_REBUILD
       );
       break;
     }
-    case true:
+    case true: {
       progress.phase("phase 5 stale base setup");
       const classification =
         staleBaseClassification ?? fail("stale rebuild lane did not classify its old base hint");
@@ -1039,6 +1039,8 @@ test(STALE_BASE_REBUILD
         "phase-5-stale-base-note.txt",
         `Recorded ${OLD_HERMES_VERSION} as the sandbox's validated old resolution hint; rebuild must reject its ${classification.reason} and refresh to ${phase1BaseResolution.digest ?? phase1BaseResolution.imageId}.\n`,
       );
+      break;
+    }
   }
 
   progress.phase("phase 6 nemoclaw rebuild");
