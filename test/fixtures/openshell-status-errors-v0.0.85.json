@@ -1,4 +1,5 @@
 {
+  "$comment": "SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.\nSPDX-License-Identifier: Apache-2.0",
   "producer": "OpenShell",
   "openshellVersion": "0.0.85",
   "command": "openshell status",
