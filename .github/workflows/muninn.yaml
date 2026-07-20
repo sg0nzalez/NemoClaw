@@ -2,11 +2,14 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Muninn all-in-one security scan. Findings are published to code scanning and
-# PR comments; fail-on comes from muninn.yml (single source of truth).
+# PR comments.
 #
-# On pull_request, policy (muninn.yml) is loaded from the trusted base SHA so a
-# PR cannot weaken fail-on / suppressions by editing the head copy. Bootstrap:
-# if base has no muninn.yml yet, fall back to the head checkout's file.
+# Gate severity (fail-on) lives in this workflow — not in muninn.yml.
+# muninn.yml holds scanner enablement and suppressions only.
+#
+# On pull_request, muninn.yml is loaded from the trusted base SHA so a PR
+# cannot expand suppressions (or disable scanners) by editing the head copy.
+# Bootstrap: if base has no muninn.yml yet, fall back to the head checkout.
 name: Security / Muninn
 
 on:
@@ -36,7 +39,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Checkout trusted Muninn policy (base SHA)
+      - name: Checkout trusted Muninn suppressions (base SHA)
         if: github.event_name == 'pull_request'
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -58,13 +61,13 @@ jobs:
           trusted="trusted-muninn-policy/muninn.yml"
           head_cfg="${GITHUB_WORKSPACE}/muninn.yml"
           if [ "$EVENT_NAME" = "pull_request" ] && [ -f "$trusted" ]; then
-            # Keep policy outside the scan tree so scanners do not re-analyze it.
+            # Keep config outside the scan tree so scanners do not re-analyze it.
             cp "$trusted" "${RUNNER_TEMP}/muninn-trusted.yml"
             rm -rf trusted-muninn-policy
-            echo "Using trusted base muninn.yml from ${BASE_SHA}"
+            echo "Using trusted base muninn.yml (suppressions) from ${BASE_SHA}"
             echo "config=${RUNNER_TEMP}/muninn-trusted.yml" >> "$GITHUB_OUTPUT"
           elif [ -f "$head_cfg" ]; then
-            echo "Using workspace muninn.yml (push/schedule or bootstrap: base has no policy yet)"
+            echo "Using workspace muninn.yml (push/schedule or bootstrap: base has no file yet)"
             echo "config=${head_cfg}" >> "$GITHUB_OUTPUT"
           else
             echo "No muninn.yml found; Muninn will use built-in defaults" >&2
@@ -77,7 +80,8 @@ jobs:
         uses: skaldlab/muninn@365628a795478e870417bf9e395a0ecc63685442 # v0.3.5
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          # fail-on comes from muninn.yml (single source of truth)
+          # Gate severity is owned by this workflow (not muninn.yml).
+          fail-on: info
           format: sarif,comment
           config: ${{ steps.policy.outputs.config }}
 

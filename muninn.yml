@@ -1,8 +1,10 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
+#
+# Scanner enablement and suppressions only. Gate severity (fail-on) is set in
+# .github/workflows/muninn.yaml so the CI check and allowlist stay separate.
 
 version: 1
-fail-on: info
 
 scanners:
   gitleaks:
