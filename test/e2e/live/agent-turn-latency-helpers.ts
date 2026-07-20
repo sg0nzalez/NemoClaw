@@ -13,8 +13,8 @@ import {
 } from "../fixtures/clients/sandbox.ts";
 import { expect } from "../fixtures/e2e-test.ts";
 import { CLI_ENTRYPOINT, REPO_ROOT } from "../fixtures/paths.ts";
+import type { TestProgress } from "../fixtures/progress.ts";
 import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
-import type { LiveProgress } from "./live-progress.ts";
 import { isTransientProviderValidationFailure } from "./network-policy-transient-provider.ts";
 
 export { REPO_ROOT };
@@ -253,7 +253,7 @@ export async function installSandbox(
   agent: "openclaw" | "hermes",
   apiKey: string,
   cleanupBeforeRetry?: () => Promise<void>,
-  progress?: Pick<LiveProgress, "onOutput" | "phase">,
+  progress?: Pick<TestProgress, "onOutput" | "phase">,
 ): Promise<ShellProbeResult> {
   let install: ShellProbeResult | undefined;
   const agentLabel = agent === "openclaw" ? "OpenClaw" : "Hermes";
@@ -293,7 +293,7 @@ export async function installSandbox(
 export async function cleanupTurnSandboxes(
   host: HostCliClient,
   sandbox: SandboxClient,
-  progress?: Pick<LiveProgress, "onOutput" | "phase">,
+  progress?: Pick<TestProgress, "onOutput" | "phase">,
 ): Promise<void> {
   for (const [name, agent] of [
     [OPENCLAW_SANDBOX, "openclaw"],
@@ -337,7 +337,7 @@ export async function cleanupTurnSandbox(
   host: HostCliClient,
   name: string,
   agent: "openclaw" | "hermes",
-  progress?: Pick<LiveProgress, "onOutput">,
+  progress?: Pick<TestProgress, "onOutput">,
 ): Promise<void> {
   const result = await host.command("node", [CLI, name, "destroy", "--yes"], {
     artifactName: `cleanup-${agent}-destroy`,
@@ -360,7 +360,7 @@ export async function route(
   sandboxName: string,
   agent: "openclaw" | "hermes",
   artifactName: string,
-  progress?: Pick<LiveProgress, "onOutput">,
+  progress?: Pick<TestProgress, "onOutput">,
 ): Promise<ShellProbeResult> {
   return await sandbox.openshell(["inference", "get", "-g", "nemoclaw"], {
     artifactName,
@@ -373,7 +373,7 @@ export async function route(
 export async function openclawTurn(
   sandbox: SandboxClient,
   apiKey: string,
-  progress?: Pick<LiveProgress, "onOutput">,
+  progress?: Pick<TestProgress, "onOutput">,
 ): Promise<{ result: ShellProbeResult; elapsedMs: number }> {
   const started = process.hrtime.bigint();
   const result = await sandbox.execShell(
@@ -394,7 +394,7 @@ export async function openclawTurn(
 
 export async function waitHermesHealth(
   sandbox: SandboxClient,
-  progress?: Pick<LiveProgress, "onOutput">,
+  progress?: Pick<TestProgress, "onOutput">,
 ): Promise<ShellProbeResult> {
   return await sandbox.execShell(
     HERMES_SANDBOX,

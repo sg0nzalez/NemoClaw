@@ -85,6 +85,28 @@ artifact so baseline aggregation stays stable.
 Older issue references to Vitest target artifacts under `e2e-artifacts/vitest/`
 map to this consolidated `e2e-artifacts/live/` registry-target artifact layout.
 
+All live Vitest targets use the automatic progress fixture. CI logs identify
+the active test immediately and print a content-free heartbeat every minute
+with its current phase, phase elapsed time, last child-output age, and runner
+resource snapshot. The heartbeat never includes child output. During fixture
+teardown, the fixture writes `test-progress.json` into each test's existing
+artifact directory for passing and failing tests. The summary records
+`E2E_TARGET_ID` and `NEMOCLAW_E2E_SHARD` when those values are set. Compare
+extracted artifacts from multiple runs with:
+
+```bash
+npm run test:runtime-audit -- path/to/run-1 path/to/run-2
+```
+
+The audit groups each test by target and optional shard, ranks the groups by
+p95 runtime, and reports variability and the slowest observed phase. Add
+`progress.phase(...)` calls only around meaningful external lifecycle
+boundaries in long scenarios; every shared shell probe already updates
+child-output liveness without exposing output contents.
+Each shared shell probe also supplies its redacted artifact name as the active
+command boundary, so an otherwise uninstrumented test still identifies the
+specific command that owns a heartbeat.
+
 ## PR E2E gate
 
 The controller, coordination check, and required job deliberately use

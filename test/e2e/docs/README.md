@@ -49,6 +49,11 @@ Live execution happens through shared fixtures:
 - `stateValidation` probes host-observable expected state.
 - `artifacts`, `secrets`, `cleanup`, and `shellProbe` provide shared fixture
   services.
+- The automatic `progress` fixture prints a start line and one content-free
+  heartbeat per minute in live runs. It reports the current phase, phase
+  elapsed time, age of the last child output, memory, workspace capacity, and
+  host load without forwarding command output or credentials. Every shell
+  probe feeds that liveness signal automatically.
 
 The `test/e2e/fixtures/` path is fixture/support code, not a test
 harness or runner. Vitest remains the only test harness.
@@ -73,6 +78,9 @@ npx vitest run --project e2e-support --silent=false --reporter=default
 
 # Opt-in live E2E targets
 npm run test:live-e2e -- --silent=false --reporter=default
+
+# Rank one or more downloaded/extracted live artifact directories
+npm run test:runtime-audit -- e2e-artifacts/run-1 e2e-artifacts/run-2
 ```
 
 The aggregate live command rebuilds the CLI before Vitest starts and runs live
@@ -83,6 +91,20 @@ on the same runner can replace the original failure with stale-lock,
 storage-exhaustion, or ownership noise. A target may retry a transient operation
 only inside its own cleanup boundary.
 Retry a full target by starting a fresh workflow run and runner.
+
+During fixture teardown, every passing or failing live test writes
+`test-progress.json` beside its other target artifacts. The runtime audit
+groups those files by target, optional shard, and test name, then reports
+median, p95, maximum, p95-minus-median variability, and the slowest observed
+phase. The summary reads the matrix identity from `E2E_TARGET_ID` and
+`NEMOCLAW_E2E_SHARD` when set. Use several recent workflow artifact directories
+to distinguish a consistently expensive test from a variable one. Long
+scenarios should call `progress.phase("meaningful phase")` at major external
+boundaries; individual commands do not need explicit logging or output
+observers.
+Shared shell probes automatically use their redacted artifact names as active
+command boundaries, so a heartbeat identifies the current command even when a
+test has no explicit phase calls.
 
 The retired `--emit-matrix` and `--plan-only` paths must not be reintroduced.
 

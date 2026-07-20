@@ -206,6 +206,7 @@ These are the primary npm scripts for day-to-day development:
 | `npm run test:watch` | Watch the CLI, plugin, and E2E-support projects and rerun affected tests |
 | `npm run test:shuffle` | Shuffle test order in the focused source projects without collecting coverage |
 | `npm run test:diagnose:leaks` | Report async-resource leaks and diagnose a Vitest process that hangs during shutdown |
+| `npm run test:runtime-audit -- <artifact-dir> [...]` | Rank captured live E2E runs by median, p95, variability, and slowest phase |
 | `npm run test:integration` | Clean-build the CLI and run root integration and installer tests |
 | `npm run test:package` | Clean-build CLI/plugin artifacts and run compiled-package contracts |
 | `npm run test:live-e2e` | Opt into live E2E scenarios (mutates real external state) |

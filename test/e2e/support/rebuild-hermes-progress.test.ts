@@ -2,10 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it, vi } from "vitest";
-import {
-  type RebuildHermesProgressOptions,
-  startRebuildHermesProgress,
-} from "../live/rebuild-hermes-progress.ts";
+import { startTestProgress, type TestProgressOptions } from "../fixtures/progress.ts";
 
 function progressHarness() {
   const state = {
@@ -14,7 +11,7 @@ function progressHarness() {
     lines: [] as string[],
     timerCallback: null as (() => void) | null,
   };
-  const options: RebuildHermesProgressOptions = {
+  const options: TestProgressOptions = {
     heartbeatIntervalMs: 60_000,
     now: () => state.clockMs,
     setTimer: (callback) => {
@@ -39,7 +36,7 @@ function progressHarness() {
 describe("Hermes rebuild live progress", () => {
   it("streams timestamp-only phase and resource heartbeats through cleanup", () => {
     const { options, state } = progressHarness();
-    const progress = startRebuildHermesProgress("phase 6 nemoclaw rebuild", options);
+    const progress = startTestProgress("rebuild-hermes", "phase 6 nemoclaw rebuild", options);
 
     progress.onOutput({ stream: "stderr", atMs: 21_000 });
     state.clockMs = 61_000;
@@ -71,7 +68,7 @@ describe("Hermes rebuild live progress", () => {
     };
 
     expect(() => {
-      const progress = startRebuildHermesProgress("phase 2 old base build", options);
+      const progress = startTestProgress("rebuild-hermes", "phase 2 old base build", options);
       progress.phase("cleanup");
       progress.stop();
     }).not.toThrow();

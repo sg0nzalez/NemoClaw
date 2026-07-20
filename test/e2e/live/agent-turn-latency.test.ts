@@ -31,13 +31,12 @@ import {
   route,
   waitHermesHealth,
 } from "./agent-turn-latency-helpers.ts";
-import { startLiveProgress } from "./live-progress.ts";
 
 const TIMEOUT_MS = 90 * 60_000;
 
 test("OpenClaw and Hermes complete real hosted inference turns within the latency cap", {
   timeout: TIMEOUT_MS,
-}, async ({ artifacts, cleanup, host, sandbox, secrets }) => {
+}, async ({ artifacts, cleanup, host, progress, sandbox, secrets }) => {
   const apiKey = secrets.required("NVIDIA_INFERENCE_API_KEY");
   const results: Record<string, unknown> = { model: MODEL, maxTurnSeconds: MAX_TURN_SECONDS };
   await artifacts.target.declare({
@@ -46,8 +45,7 @@ test("OpenClaw and Hermes complete real hosted inference turns within the latenc
     openclawSandbox: OPENCLAW_SANDBOX,
     hermesSandbox: HERMES_SANDBOX,
   });
-  const progress = startLiveProgress("agent-turn-latency", "register cleanup");
-  cleanup.trackDisposable("stop agent turn latency progress", async () => progress.stop());
+  progress.phase("register cleanup");
 
   cleanup.trackDisposable("remove gateway nemoclaw", async () => {
     progress.phase("cleanup remove OpenShell gateway");

@@ -60,6 +60,10 @@ export interface ShellProbeDeps {
   artifacts: ArtifactSink;
   redact: (text: string, extraValues?: string[]) => string;
   signal: AbortSignal;
+  /** Default timestamp-only observer applied to every command in this test. */
+  onOutput?: (event: ShellProbeOutputEvent) => void;
+  /** Content-free activity boundary applied to every command in this test. */
+  onActivity?: (label: string) => (() => void) | void;
 }
 
 const DEFAULT_TIMEOUT_MS = 60_000;
@@ -153,11 +157,15 @@ export class ShellProbe {
   private readonly artifacts: ArtifactSink;
   private readonly redact: (text: string, extraValues?: string[]) => string;
   private readonly signal: AbortSignal;
+  private readonly onOutput?: (event: ShellProbeOutputEvent) => void;
+  private readonly onActivity?: (label: string) => (() => void) | void;
 
   constructor(deps: ShellProbeDeps) {
     this.artifacts = deps.artifacts;
     this.redact = deps.redact;
     this.signal = deps.signal;
+    this.onOutput = deps.onOutput;
+    this.onActivity = deps.onActivity;
   }
 
   async run(
@@ -191,7 +199,8 @@ export class ShellProbe {
         : redacted;
     };
     const redactedCommand = [command, ...args].map(redactProbeText);
-    const artifactBase = `shell/${safeArtifactBase(redactProbeText(options.artifactName ?? command))}`;
+    const activityName = safeArtifactBase(redactProbeText(options.artifactName ?? command));
+    const artifactBase = `shell/${activityName}`;
     const writeArtifacts = async (
       result: Omit<ShellProbeResult, "artifacts">,
     ): Promise<ShellProbeResult["artifacts"]> => ({
@@ -203,6 +212,32 @@ export class ShellProbe {
     const stdout = createTextCapture(options.captureLimitBytes);
     const stderr = createTextCapture(options.captureLimitBytes);
     const startedAtMs = Date.now();
+    let finishActivity: (() => void) | undefined;
+    try {
+      finishActivity = this.onActivity?.(`command: ${activityName}`) ?? undefined;
+    } catch {
+      // Test instrumentation must not change command execution.
+    }
+    const finishActivityBestEffort = () => {
+      try {
+        finishActivity?.();
+      } catch {
+        // Test instrumentation must not change command execution.
+      }
+    };
+    const observeOutput = (event: ShellProbeOutputEvent) => {
+      try {
+        this.onOutput?.(event);
+      } catch {
+        // Test instrumentation must not change command execution.
+      }
+      if (options.onOutput === this.onOutput) return;
+      try {
+        options.onOutput?.(event);
+      } catch {
+        // Test instrumentation must not change command execution.
+      }
+    };
     const child = spawn(command, args, {
       cwd: options.cwd,
       detached: true,
@@ -215,19 +250,11 @@ export class ShellProbe {
       signal: this.signal,
       onStdout: (chunk) => {
         stdout.append(chunk);
-        try {
-          options.onOutput?.({ stream: "stdout", atMs: Date.now() });
-        } catch {
-          // Test instrumentation must not change command execution.
-        }
+        observeOutput({ stream: "stdout", atMs: Date.now() });
       },
       onStderr: (chunk) => {
         stderr.append(chunk);
-        try {
-          options.onOutput?.({ stream: "stderr", atMs: Date.now() });
-        } catch {
-          // Test instrumentation must not change command execution.
-        }
+        observeOutput({ stream: "stderr", atMs: Date.now() });
       },
     });
 
@@ -246,6 +273,7 @@ export class ShellProbe {
         stdout: redactedStdout,
         stderr: stderrWithError,
       });
+      finishActivityBestEffort();
       throw redactedError(supervised.spawnError, redactedMessage);
     }
 
@@ -259,6 +287,7 @@ export class ShellProbe {
       stderr: redactedStderr,
     };
     const artifacts = await writeArtifacts(result);
+    finishActivityBestEffort();
     return { ...result, artifacts };
   }
 }

@@ -245,6 +245,48 @@ describe("E2E fixture primitives", () => {
     }
   });
 
+  it("shell probe reports child liveness to the shared observer without duplicating it", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-e2e-shell-observer-"));
+    try {
+      const artifacts = new ArtifactSink(tmp);
+      await artifacts.ensureRoot();
+      const controller = new AbortController();
+      const events: Array<{ stream: "stdout" | "stderr"; atMs: number }> = [];
+      const activities: string[] = [];
+      const onOutput = (event: (typeof events)[number]) => events.push(event);
+      const probe = new ShellProbe({
+        artifacts,
+        redact: (text) => text,
+        signal: controller.signal,
+        onOutput,
+        onActivity: (label) => {
+          activities.push(`start ${label}`);
+          return () => activities.push(`finish ${label}`);
+        },
+      });
+
+      const result = await probe.run(
+        trustedShellCommand({
+          command: process.execPath,
+          args: ["-e", "console.log('alive')"],
+          reason: "verify shared child-output liveness observation",
+        }),
+        { artifactName: "shared-output-observer", onOutput, timeoutMs: 5_000 },
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({ stream: "stdout" });
+      expect(events[0]?.atMs).toBeGreaterThan(0);
+      expect(activities).toEqual([
+        "start command: shared-output-observer",
+        "finish command: shared-output-observer",
+      ]);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it("shell probe scrubs overlapping redactionValues longest-first when the injected redactor ignores extra values", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-e2e-shell-probe-overlap-"));
     try {

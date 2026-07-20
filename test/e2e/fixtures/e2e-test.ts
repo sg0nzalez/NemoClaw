@@ -21,6 +21,7 @@ import {
   RuntimePhaseFixture,
   StateValidationPhaseFixture,
 } from "./phases/index.ts";
+import { startTestProgress, type TestProgress } from "./progress.ts";
 import { SecretStore } from "./secrets.ts";
 import { ShellProbe } from "./shell-probe.ts";
 
@@ -41,6 +42,7 @@ export interface E2ETargetFixtures {
   lifecycle: LifecyclePhaseFixture;
   runtime: RuntimePhaseFixture;
   stateValidation: StateValidationPhaseFixture;
+  progress: TestProgress;
 }
 
 export const test = base.extend<E2ETargetFixtures>({
@@ -59,6 +61,29 @@ export const test = base.extend<E2ETargetFixtures>({
       });
     }
   },
+  progress: [
+    async ({ artifacts, secrets, task }, use) => {
+      const progress = startTestProgress(task.name, "test body", {
+        logLine:
+          process.env.NEMOCLAW_RUN_LIVE_E2E === "1"
+            ? (line) => process.stdout.write(`${secrets.redact(line)}\n`)
+            : () => {
+                // Keep fixture and support tests quiet; live runs need the heartbeat.
+              },
+      });
+      try {
+        await use(progress);
+      } finally {
+        progress.stop();
+        await artifacts.writeJson("test-progress.json", {
+          ...progress.summary(),
+          ...(process.env.E2E_TARGET_ID ? { targetId: process.env.E2E_TARGET_ID } : {}),
+          ...(process.env.NEMOCLAW_E2E_SHARD ? { shardId: process.env.NEMOCLAW_E2E_SHARD } : {}),
+        });
+      }
+    },
+    { auto: true },
+  ],
   docker: async ({ artifacts, secrets, skip }, use) => {
     const probe = new DockerProbe(artifacts, (text, extra) => secrets.redact(text, extra));
     await use(new DockerPrerequisite(probe, skip));
@@ -73,12 +98,14 @@ export const test = base.extend<E2ETargetFixtures>({
       assertCleanupPassed(result);
     }
   },
-  shellProbe: async ({ artifacts, secrets, signal }, use) => {
+  shellProbe: async ({ artifacts, progress, secrets, signal }, use) => {
     await use(
       new ShellProbe({
         artifacts,
         redact: (text, extraValues) => secrets.redact(text, extraValues),
         signal,
+        onOutput: progress.onOutput,
+        onActivity: progress.activity,
       }),
     );
   },

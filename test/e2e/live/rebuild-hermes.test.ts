@@ -29,7 +29,6 @@ import {
   rebuildHermesRegistryImageState,
   requireRebuildHermesInitialImageTag,
 } from "./rebuild-hermes-image-state.ts";
-import { startRebuildHermesProgress } from "./rebuild-hermes-progress.ts";
 
 // The migrated scope is the legacy non-interactive shell regression: install.sh,
 // Docker base-image builds, OpenShell provider/sandbox commands, direct Hermes
@@ -433,12 +432,11 @@ test(STALE_BASE_REBUILD
   ? "rebuild-hermes: stale base cache is refreshed while Hermes state survives rebuild"
   : "rebuild-hermes: old Hermes sandbox rebuild preserves messaging state and upgrades runtime", {
   timeout: LIVE_TIMEOUT_MS,
-}, async ({ artifacts, cleanup, host, sandbox, secrets, skip }) => {
+}, async ({ artifacts, cleanup, host, progress, sandbox, secrets, skip }) => {
   const apiKey = secrets.required("NVIDIA_INFERENCE_API_KEY");
   const redactionValues = [apiKey, DISCORD_FAKE_TOKEN];
   const expectedVersion = expectedHermesVersion();
-  const progress = startRebuildHermesProgress("setup");
-  cleanup.trackDisposable("stop Hermes rebuild progress", progress.stop);
+  progress.phase("setup");
 
   const registrySnapshot = snapshotFile(REGISTRY_FILE);
   const sessionSnapshot = snapshotFile(SESSION_FILE);
@@ -456,7 +454,8 @@ test(STALE_BASE_REBUILD
     markerFile: MARKER_FILE,
     preservedBoundaries: [
       "bash install.sh --non-interactive",
-      "docker build agents/hermes/Dockerfile.base for old/current Hermes base images",
+      "docker build agents/hermes/Dockerfile.base for the old Hermes base image",
+      "nemoclaw rebuild owns current Hermes base-image resolution and refresh",
       "openshell provider create/update and sandbox create/exec/list",
       "curated local ~/.nemoclaw registry and onboard-session rebuild metadata",
       "real nemoclaw <sandbox> rebuild --yes --verbose",
@@ -786,27 +785,15 @@ test(STALE_BASE_REBUILD
 
   switch (STALE_BASE_REBUILD) {
     case false: {
-      progress.phase("phase 5 current base build");
-      const buildCurrentBase = await host.command(
-        "docker",
+      progress.phase("phase 5 rebuild-owned current base");
+      await artifacts.writeText(
+        "phase-5-rebuild-owned-current-base.txt",
         [
-          "build",
-          "-f",
-          path.join(REPO_ROOT, "agents", "hermes", "Dockerfile.base"),
-          "-t",
-          CURRENT_BASE_TAG,
-          REPO_ROOT,
-        ],
-        {
-          artifactName: "phase-5-docker-build-current-hermes-base",
-          env: testEnv(apiKey),
-          redactionValues,
-          timeoutMs: DOCKER_BUILD_TIMEOUT_MS,
-          captureLimitBytes: LONG_COMMAND_CAPTURE_LIMIT_BYTES,
-          onOutput: progress.onOutput,
-        },
+          `${CURRENT_BASE_TAG} is intentionally not rebuilt again during phase 5.`,
+          "The production nemoclaw rebuild path owns current base-image resolution and refresh for the migration.",
+          "",
+        ].join("\n"),
       );
-      expectExitZero(buildCurrentBase, "docker build current Hermes base image");
       break;
     }
     case true:
