@@ -18,7 +18,13 @@ export const STATION_EXPRESS_INTENT_VERSION = 1;
 
 export interface StationExpressResumeIntent {
   version: typeof STATION_EXPRESS_INTENT_VERSION;
-  model: string;
+  // Managed-vLLM Express platform. Absent means the DGX Station Express path
+  // (the original #7048 contract). "spark" is the DGX Spark managed-vLLM path
+  // (#7231): it never carries the Station-only receipt/served/checkpoint fields
+  // and its model is optional because the default model is not resolved until
+  // after host detection, well past the up-front capture site.
+  kind?: "spark";
+  model?: string;
   sandboxName: string;
   receiptGeneration?: string;
   servedModel?: string;
@@ -74,6 +80,13 @@ const UNBOUND_RECEIPT_INTENT_KEYS = "model,receiptGeneration,sandboxName,version
 const BOUND_INTENT_KEYS = "checkpointModel,model,sandboxName,servedModel,version";
 const BOUND_RECEIPT_INTENT_KEYS =
   "checkpointModel,model,receiptGeneration,sandboxName,servedModel,version";
+// DGX Spark managed-vLLM Express intents (#7231). They only ever exist while
+// provider selection is incomplete (they are cleared, never bound, on
+// completion), so they never carry the Station-only served/checkpoint/receipt
+// fields. The model key is present only when the user pinned NEMOCLAW_VLLM_MODEL.
+const SPARK_INTENT_KEYS = "kind,sandboxName,version";
+const SPARK_INTENT_KEYS_WITH_MODEL = "kind,model,sandboxName,version";
+const SPARK_EXPRESS_PROVIDER = "install-vllm";
 const STATION_EXPRESS_INSTALLER_RESUME_FILE = "station-express-resume";
 const STATION_EXPRESS_RETIREMENT_CLAIM_PREFIX = `${STATION_EXPRESS_INSTALLER_RESUME_FILE}.retiring-`;
 const STATION_EXPRESS_RETIREMENT_CLAIM_RECEIPT = "receipt";
@@ -94,6 +107,16 @@ function stationModel(value: unknown): VllmModelDef | null {
   try {
     const model = selectVllmModelFromEnv({ NEMOCLAW_VLLM_MODEL: value });
     return model?.platforms.includes("station") ? model : null;
+  } catch {
+    return null;
+  }
+}
+
+function sparkModel(value: unknown): VllmModelDef | null {
+  if (typeof value !== "string") return null;
+  try {
+    const model = selectVllmModelFromEnv({ NEMOCLAW_VLLM_MODEL: value });
+    return model?.platforms.includes("spark") ? model : null;
   } catch {
     return null;
   }
@@ -600,9 +623,33 @@ export function cleanupStationExpressReceiptRetirementClaims(
   }
 }
 
+function parseSparkResumeIntent(
+  value: Record<string, unknown>,
+  hasModel: boolean,
+): StationExpressResumeIntent | null {
+  if (value.version !== STATION_EXPRESS_INTENT_VERSION || value.kind !== "spark") return null;
+  const sandboxName = value.sandboxName;
+  if (!validSandboxName(sandboxName)) return null;
+  let model: string | undefined;
+  if (hasModel) {
+    const resolved = sparkModel(value.model);
+    if (!resolved || value.model !== resolved.envValue) return null;
+    model = resolved.envValue;
+  }
+  return {
+    version: STATION_EXPRESS_INTENT_VERSION,
+    kind: "spark",
+    sandboxName,
+    ...(model !== undefined ? { model } : {}),
+  };
+}
+
 export function parseStationExpressResumeIntent(value: unknown): StationExpressResumeIntent | null {
   if (!isObject(value)) return null;
   const keys = Object.keys(value).sort().join(",");
+  if (keys === SPARK_INTENT_KEYS || keys === SPARK_INTENT_KEYS_WITH_MODEL) {
+    return parseSparkResumeIntent(value, keys === SPARK_INTENT_KEYS_WITH_MODEL);
+  }
   if (
     keys !== UNBOUND_INTENT_KEYS &&
     keys !== UNBOUND_RECEIPT_INTENT_KEYS &&
@@ -679,6 +726,24 @@ function expectedEnvironment(
   intent: StationExpressResumeIntent,
   includeProviderSelection = true,
 ): Partial<Record<(typeof RESUME_ENV)[number], string>> | null {
+  if (intent.kind === "spark") {
+    const expected: Partial<Record<(typeof RESUME_ENV)[number], string>> = {
+      NEMOCLAW_NON_INTERACTIVE: "1",
+      NEMOCLAW_YES: "1",
+      NEMOCLAW_SANDBOX_NAME: intent.sandboxName,
+    };
+    if (includeProviderSelection) {
+      expected.NEMOCLAW_PROVIDER = SPARK_EXPRESS_PROVIDER;
+      // Restore a pinned model only; when none was pinned the install re-runs
+      // and re-resolves the same default model deterministically for this host.
+      const pinned = intent.model ? sparkModel(intent.model) : null;
+      if (pinned) {
+        expected.NEMOCLAW_VLLM_MODEL = pinned.envValue;
+        expected.NEMOCLAW_MODEL = servedModel(pinned);
+      }
+    }
+    return expected;
+  }
   const model = stationModel(intent.model);
   if (!model) return null;
   const expected: Partial<Record<(typeof RESUME_ENV)[number], string>> = {
@@ -705,7 +770,7 @@ function equivalentEnvironmentValue(
   expected: string,
 ): boolean {
   if (name === "NEMOCLAW_VLLM_MODEL") {
-    return stationModel(actual)?.envValue === expected;
+    return (stationModel(actual)?.envValue ?? sparkModel(actual)?.envValue) === expected;
   }
   if (name === "NEMOCLAW_SANDBOX_NAME") {
     return actual.trim().toLowerCase() === expected;
@@ -727,12 +792,42 @@ function validateExpectedEnvironment(
   return null;
 }
 
+/**
+ * Capture a DGX Spark managed-vLLM Express resume intent (#7231) when the
+ * non-interactive installer selected `install-vllm` without the Station marker.
+ * Unlike Station this needs no receipt/served/checkpoint state: restoring
+ * `NEMOCLAW_PROVIDER=install-vllm` (plus the sandbox name and, when pinned, the
+ * model) is enough for resume to re-run the identical managed install instead
+ * of dropping into the interactive provider menu defaulting to NVIDIA Endpoints.
+ */
+function getSparkExpressResumeIntent(
+  env: NodeJS.ProcessEnv,
+  sandboxName: string | null,
+): IntentResult {
+  const provider = String(env.NEMOCLAW_PROVIDER ?? "")
+    .trim()
+    .toLowerCase();
+  const nonInteractive = String(env.NEMOCLAW_NON_INTERACTIVE ?? "").trim() === "1";
+  if (provider !== SPARK_EXPRESS_PROVIDER || !nonInteractive) return { ok: true, intent: null };
+  if (!sandboxName || !validSandboxName(sandboxName)) return { ok: true, intent: null };
+  const pinned = sparkModel(env.NEMOCLAW_VLLM_MODEL);
+  return {
+    ok: true,
+    intent: {
+      version: STATION_EXPRESS_INTENT_VERSION,
+      kind: "spark",
+      sandboxName,
+      ...(pinned ? { model: pinned.envValue } : {}),
+    },
+  };
+}
+
 export function getStationExpressResumeIntent(
   env: NodeJS.ProcessEnv,
   sandboxName: string | null,
 ): IntentResult {
   const marker = String(env[STATION_EXPRESS_ENV] ?? "").trim();
-  if (!marker) return { ok: true, intent: null };
+  if (!marker) return getSparkExpressResumeIntent(env, sandboxName);
   if (marker !== "1") {
     return { ok: false, message: `${STATION_EXPRESS_ENV} must be 1 when set.` };
   }

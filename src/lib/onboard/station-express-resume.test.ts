@@ -867,3 +867,121 @@ describe("DGX Station Express resume (#7048)", () => {
     expect(deps.error).toHaveBeenCalledWith(expect.stringContaining("NEMOCLAW_VLLM_MODEL"));
   });
 });
+
+const sparkModelEnv = "qwen3.6-35b-a3b-nvfp4";
+const sparkServedModel = "nvidia/Qwen3.6-35B-A3B-NVFP4";
+const sparkIntent = {
+  version: 1 as const,
+  kind: "spark" as const,
+  sandboxName: "my-assistant",
+};
+
+function sparkExpressEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  return { NEMOCLAW_PROVIDER: "install-vllm", NEMOCLAW_NON_INTERACTIVE: "1", ...overrides };
+}
+
+describe("DGX Spark managed-vLLM Express resume (#7231)", () => {
+  it("captures a marker-free spark intent from a non-interactive install-vllm run", () => {
+    expect(getStationExpressResumeIntent(sparkExpressEnv(), "my-assistant")).toEqual({
+      ok: true,
+      intent: sparkIntent,
+    });
+  });
+
+  it("pins the model only when the user set a spark NEMOCLAW_VLLM_MODEL", () => {
+    expect(
+      getStationExpressResumeIntent(
+        sparkExpressEnv({ NEMOCLAW_VLLM_MODEL: sparkModelEnv }),
+        "my-assistant",
+      ),
+    ).toEqual({ ok: true, intent: { ...sparkIntent, model: sparkModelEnv } });
+  });
+
+  it("never smuggles a Station-only model into a spark intent", () => {
+    expect(
+      getStationExpressResumeIntent(
+        sparkExpressEnv({ NEMOCLAW_VLLM_MODEL: "nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-NVFP4" }),
+        "my-assistant",
+      ),
+    ).toEqual({ ok: true, intent: sparkIntent });
+  });
+
+  it("ignores non-express, interactive, or nameless runs", () => {
+    expect(
+      getStationExpressResumeIntent(
+        sparkExpressEnv({ NEMOCLAW_PROVIDER: "build" }),
+        "my-assistant",
+      ),
+    ).toEqual({ ok: true, intent: null });
+    expect(
+      getStationExpressResumeIntent({ NEMOCLAW_PROVIDER: "install-vllm" }, "my-assistant"),
+    ).toEqual({ ok: true, intent: null });
+    expect(getStationExpressResumeIntent(sparkExpressEnv(), null)).toEqual({
+      ok: true,
+      intent: null,
+    });
+  });
+
+  it("round-trips and strictly validates a persisted spark intent", () => {
+    expect(parseStationExpressResumeIntent(sparkIntent)).toEqual(sparkIntent);
+    expect(parseStationExpressResumeIntent({ ...sparkIntent, model: sparkModelEnv })).toEqual({
+      ...sparkIntent,
+      model: sparkModelEnv,
+    });
+    expect(
+      parseStationExpressResumeIntent({ ...sparkIntent, token: "must-not-persist" }),
+    ).toBeNull();
+    expect(
+      parseStationExpressResumeIntent({ ...sparkIntent, model: "nemotron-3-ultra-550b-a55b" }),
+    ).toBeNull();
+    expect(parseStationExpressResumeIntent({ ...sparkIntent, kind: "station" })).toBeNull();
+  });
+
+  it("restores install-vllm on resume without any Station marker or policy env", async () => {
+    const env: NodeJS.ProcessEnv = { NEMOCLAW_PROVIDER: "" };
+    const failedSession = createSession({
+      mode: "non-interactive",
+      stationExpressIntent: sparkIntent,
+    });
+    failedSession.status = "failed";
+    const deps = resumeDeps(failedSession);
+    const run = vi.fn(async () => {
+      expect(env).toMatchObject({
+        NEMOCLAW_PROVIDER: "install-vllm",
+        NEMOCLAW_NON_INTERACTIVE: "1",
+        NEMOCLAW_YES: "1",
+        NEMOCLAW_SANDBOX_NAME: "my-assistant",
+      });
+      expect(env.NEMOCLAW_STATION_EXPRESS).toBeUndefined();
+      expect(env.NEMOCLAW_POLICY_MODE).toBeUndefined();
+      expect(env.NEMOCLAW_VLLM_MODEL).toBeUndefined();
+    });
+
+    await withStationExpressResumeEnvironment(run, deps, env)({ resume: true });
+
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(env).toEqual({ NEMOCLAW_PROVIDER: "" });
+  });
+
+  it("restores a pinned spark model on resume", async () => {
+    const env: NodeJS.ProcessEnv = {};
+    const failedSession = createSession({
+      mode: "non-interactive",
+      stationExpressIntent: { ...sparkIntent, model: sparkModelEnv },
+    });
+    failedSession.status = "failed";
+    const deps = resumeDeps(failedSession);
+    const run = vi.fn(async () => {
+      expect(env).toMatchObject({
+        NEMOCLAW_PROVIDER: "install-vllm",
+        NEMOCLAW_VLLM_MODEL: sparkModelEnv,
+        NEMOCLAW_MODEL: sparkServedModel,
+      });
+      expect(env.NEMOCLAW_STATION_EXPRESS).toBeUndefined();
+    });
+
+    await withStationExpressResumeEnvironment(run, deps, env)({ resume: true });
+
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+});

@@ -211,6 +211,45 @@ describe("onboard session", () => {
     expect(summary.endpointUrl).toBe(loaded.endpointUrl);
   });
 
+  it("accepts an incomplete spark Express session and rejects tampered ones (#7231)", () => {
+    const base = session.createSession({
+      mode: "non-interactive",
+      stationExpressIntent: { version: 1, kind: "spark", sandboxName: "my-assistant" },
+    }) as unknown as Record<string, unknown>;
+    base.resumable = true;
+    base.status = "failed";
+
+    const ok = requireLoadedSession(session.normalizeSession(base as never));
+    expect(ok.stationExpressIntent).toEqual({
+      version: 1,
+      kind: "spark",
+      sandboxName: "my-assistant",
+    });
+
+    // A spark Express run is inherently non-interactive.
+    expect(session.normalizeSession({ ...base, mode: "interactive" } as never)).toBeNull();
+    // provider/model must stay null until provider_selection completes.
+    expect(session.normalizeSession({ ...base, provider: "vllm-local" } as never)).toBeNull();
+  });
+
+  it("clears a spark Express intent once provider selection completes (#7231)", () => {
+    session.saveSession(
+      session.createSession({
+        mode: "non-interactive",
+        stationExpressIntent: { version: 1, kind: "spark", sandboxName: "my-assistant" },
+      }),
+    );
+    markStepCompleteLegacy(session, stepMutation, "provider_selection", {
+      provider: "vllm-local",
+      model: "nvidia/Qwen3.6-35B-A3B-NVFP4",
+      sandboxName: "my-assistant",
+    });
+
+    const loaded = requireLoadedSession(session.loadSession());
+    expect(loaded.stationExpressIntent).toBeNull();
+    expect(loaded.provider).toBe("vllm-local");
+  });
+
   it("marks steps started, completed, and failed", () => {
     session.saveSession(session.createSession());
     markStepStartedLegacy(session, stepMutation, "gateway");

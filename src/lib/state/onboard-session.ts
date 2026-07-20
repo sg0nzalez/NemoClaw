@@ -1384,8 +1384,13 @@ function markStepCompleteWithOptions(
   const updatedSession = updateSession((session) => {
     const step = session.steps[stepName];
     if (!step) return session;
+    // Spark managed-vLLM Express intents (#7231) carry no receipt/served state
+    // and exist only to re-arm the install on resume, so clear them once
+    // provider selection completes instead of binding a Station selection.
+    const sparkExpressComplete =
+      stepName === "provider_selection" && session.stationExpressIntent?.kind === "spark";
     const stationExpressIntent =
-      stepName === "provider_selection" && session.stationExpressIntent
+      stepName === "provider_selection" && session.stationExpressIntent && !sparkExpressComplete
         ? bindStationExpressProviderSelection(
             session.stationExpressIntent,
             safeUpdates.provider,
@@ -1401,6 +1406,7 @@ function markStepCompleteWithOptions(
     session.failure = null;
     Object.assign(session, safeUpdates);
     if (stationExpressIntent) session.stationExpressIntent = stationExpressIntent;
+    else if (sparkExpressComplete) session.stationExpressIntent = null;
     const nextState = nextMachineStateAfterCompletedStep(stepName, session);
     shouldEmit = Boolean(nextState && shouldUpdateMachine(options));
     if (nextState && shouldEmit) transitionMachineSnapshot(session, nextState, now);
