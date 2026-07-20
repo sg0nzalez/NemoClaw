@@ -759,7 +759,7 @@ test(STALE_BASE_REBUILD
       "-lc",
       [
         "hermes kanban init",
-        `hermes kanban create ${shellQuote(KANBAN_TASK_TITLE)} --initial-status blocked --json`,
+        `hermes kanban create ${shellQuote(KANBAN_TASK_TITLE)} --triage --json`,
         `mkdir -p ${shellQuote(path.dirname(EXCLUDED_KANBAN_FILE))}`,
         `printf '%s' ${shellQuote(MARKER_CONTENT)} > ${shellQuote(EXCLUDED_KANBAN_FILE)}`,
       ].join(" && "),
