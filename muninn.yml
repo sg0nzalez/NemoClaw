@@ -3,6 +3,9 @@
 #
 # Scanner enablement and suppressions only. Gate severity (fail-on) is set in
 # .github/workflows/muninn.yaml so the CI check and allowlist stay separate.
+#
+# Suppressions use finding fingerprints (or narrow path ids when a scanner
+# cannot supply a stable fingerprint) with explicit expiration for review.
 
 version: 1
 
@@ -38,108 +41,393 @@ scanners:
       - CKV_GHA_7
 
 suppressions:
-  # --- Third-party / local Actions creator reputation (info) ---
   - tool: poutine
     rule-id: github_action_from_unverified_creator_used
     reason: >
-      NemoClaw requires third-party and composite Actions to be pinned to commit
-      SHAs. Creator-reputation scoring flags hash-pinned NVIDIA local actions and
-      common trusted vendors (actions/*, dorny/*, github/*); pin review covers the risk.
-    expires: ""
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*).
+    expires: 2027-01-20T00:00:00Z
 
-  # --- pull_request_target trust model (critical) ---
-  # These workflows use PRT for fork-safe write tokens. Executable code is from
-  # the base/default branch or is API-only (no PR-head checkout for scripts).
-  - tool: zizmor
-    rule-id: zizmor/dangerous-triggers
+  - fingerprint: 7e525957d6da6f46
     reason: >
-      pull_request_target is required for fork PR automation. Each flagged workflow
-      either performs API-only operations with no checkout, or checks out the trusted
-      base/default ref for executable helpers and treats PR head as read-only input.
-    expires: ""
+      pull_request_target required for fork PR automation; trusted base/default ref for executable helpers. (.github/workflows/assign-linked-issue-author.yaml:10)
+    expires: 2027-01-20T00:00:00Z
 
-  - tool: poutine
-    rule-id: untrusted_checkout_exec
+  - fingerprint: c82ad2ada3c5a633
     reason: >
-      PRT workflows that run scripts check out the base/default branch (or a pinned
-      trusted SHA) for executable code; PR head is not used as the script source.
-    expires: ""
+      pull_request_target required for fork PR automation; trusted base/default ref for executable helpers. (.github/workflows/codebase-growth-guardrails.yaml:10)
+    expires: 2027-01-20T00:00:00Z
 
-  # --- Reusable workflow secrets inherit (accepted CI shape) ---
-  - tool: zizmor
-    rule-id: zizmor/secrets-inherit
+  - fingerprint: c73482d4be4518e4
     reason: >
-      Reusable workflow secrets inherit is intentional for regression E2E which
-      must receive org secrets; callers are limited to trusted workflows.
-    expires: ""
+      PRT workflow checks out base/default (or pinned trusted SHA) for scripts; PR head is not the script source. (.github/workflows/codebase-growth-guardrails.yaml:132)
+    expires: 2027-01-20T00:00:00Z
 
-  # --- Test fixtures with intentional fake secrets ---
-  - id: test/redact-
-    reason: Intentional fake AWS/API key strings used to unit-test redaction.
-    expires: ""
+  - fingerprint: d8bd59cd180f0845
+    reason: >
+      PRT workflow checks out base/default (or pinned trusted SHA) for scripts; PR head is not the script source. (.github/workflows/e2e-branch-validation.yaml:226)
+    expires: 2027-01-20T00:00:00Z
 
-  - id: test/cli/credentials-command.test.ts
-    reason: Intentional fake API keys for credentials CLI unit tests.
-    expires: ""
+  - fingerprint: 1583d254a4845025
+    reason: >
+      PRT workflow checks out base/default (or pinned trusted SHA) for scripts; PR head is not the script source. (.github/workflows/e2e-branch-validation.yaml:266)
+    expires: 2027-01-20T00:00:00Z
 
-  - id: test/hermes-gateway-wrapper.test.ts
-    reason: Intentional fake API keys for Hermes gateway unit tests.
-    expires: ""
+  - fingerprint: cea765026f78a8fd
+    reason: >
+      PRT workflow checks out base/default (or pinned trusted SHA) for scripts; PR head is not the script source. (.github/workflows/e2e-branch-validation.yaml:269)
+    expires: 2027-01-20T00:00:00Z
 
-  - id: test/package-contract/cli/credentials-cli-command.test.ts
-    reason: Intentional fake API keys for package-contract credentials tests.
-    expires: ""
+  - fingerprint: 390c68c407f4e6fa
+    reason: >
+      pull_request_target required for fork PR automation; trusted base/default ref for executable helpers. (.github/workflows/label-merged-pr-release-target.yaml:10)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: f1ccf981d62fdcad
+    reason: >
+      pull_request_target required for fork PR automation; trusted base/default ref for executable helpers. (.github/workflows/pr-e2e-gate.yaml:14)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: 7ef52dca5ea7bff9
+    reason: >
+      PRT workflow checks out base/default (or pinned trusted SHA) for scripts; PR head is not the script source. (.github/workflows/pr-e2e-gate.yaml:74)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: f95c036234d8819d
+    reason: >
+      PRT workflow checks out base/default (or pinned trusted SHA) for scripts; PR head is not the script source. (.github/workflows/pr-e2e-gate.yaml:79)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: cd172cc06451e5e9
+    reason: >
+      PRT workflow checks out base/default (or pinned trusted SHA) for scripts; PR head is not the script source. (.github/workflows/pr-e2e-gate.yaml:114)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: d58ebfc973e2de16
+    reason: >
+      PRT workflow checks out base/default (or pinned trusted SHA) for scripts; PR head is not the script source. (.github/workflows/pr-e2e-gate.yaml:146)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: 270362812ef238db
+    reason: >
+      PRT workflow checks out base/default (or pinned trusted SHA) for scripts; PR head is not the script source. (.github/workflows/pr-e2e-gate.yaml:151)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: 9e2080b24e652598
+    reason: >
+      PRT workflow checks out base/default (or pinned trusted SHA) for scripts; PR head is not the script source. (.github/workflows/pr-e2e-gate.yaml:188)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: 6df5eb31e2ca22c5
+    reason: >
+      PRT workflow checks out base/default (or pinned trusted SHA) for scripts; PR head is not the script source. (.github/workflows/pr-e2e-gate.yaml:193)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: a8ed92ac11c1945f
+    reason: >
+      PRT workflow checks out base/default (or pinned trusted SHA) for scripts; PR head is not the script source. (.github/workflows/pr-e2e-gate.yaml:354)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: dec2316997d9eb9c
+    reason: >
+      PRT workflow checks out base/default (or pinned trusted SHA) for scripts; PR head is not the script source. (.github/workflows/pr-e2e-gate.yaml:359)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: e5836d7008137835
+    reason: >
+      PRT workflow checks out base/default (or pinned trusted SHA) for scripts; PR head is not the script source. (.github/workflows/pr-e2e-gate.yaml:400)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: 3efcea6269c7aedb
+    reason: >
+      PRT workflow checks out base/default (or pinned trusted SHA) for scripts; PR head is not the script source. (.github/workflows/pr-e2e-gate.yaml:405)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: 3bba18531b886df8
+    reason: >
+      pull_request_target required for fork PR automation; trusted base/default ref for executable helpers. (.github/workflows/pr-limit.yaml:11)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: df4772348a1dc367
+    reason: >
+      pull_request_target required for fork PR automation; trusted base/default ref for executable helpers. (.github/workflows/pr-review-advisor.yaml:6)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: 9497f9b1fe584f5a
+    reason: >
+      PRT workflow checks out base/default (or pinned trusted SHA) for scripts; PR head is not the script source. (.github/workflows/pr-review-advisor.yaml:143)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: 543f5a682fb524c4
+    reason: >
+      PRT workflow checks out base/default (or pinned trusted SHA) for scripts; PR head is not the script source. (.github/workflows/pr-review-advisor.yaml:177)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: 959d68edaa3e78ec
+    reason: >
+      PRT workflow checks out base/default (or pinned trusted SHA) for scripts; PR head is not the script source. (.github/workflows/pr-review-advisor.yaml:304)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: 524dd322c36ee620
+    reason: >
+      PRT workflow checks out base/default (or pinned trusted SHA) for scripts; PR head is not the script source. (.github/workflows/pr-review-advisor.yaml:310)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: 1558f0ef10672f8c
+    reason: >
+      pull_request_target required for fork PR automation; trusted base/default ref for executable helpers. (.github/workflows/require-maintainer-edits.yaml:9)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: test/redact-device-state.test.ts:aws-access-token:103
+    reason: >
+      Intentional fake AWS key material in unit tests. (test/redact-device-state.test.ts:103)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: test/redact-text.test.ts:aws-access-token:36
+    reason: >
+      Intentional fake AWS key material in unit tests. (test/redact-text.test.ts:36)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: 48d2a2d526cd0cf7
+    reason: >
+      Regression E2E must inherit org secrets; callers limited to trusted workflows. (.github/workflows/regression-e2e.yaml:122)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: 2cb82284c7e9c56a
+    reason: >
+      Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: 89ada651847e9f75
+    reason: >
+      Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: d0603faf8d0ee960
+    reason: >
+      Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: ff75c2f608f7c4f2
+    reason: >
+      Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: 4f9d0e51ad1bf2d0
+    reason: >
+      Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: dcd877bef4b96fcc
+    reason: >
+      Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: 49f4844edf47a037
+    reason: >
+      Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
+    expires: 2027-01-20T00:00:00Z
+
+  - id: agents/hermes/Dockerfile
+    reason: >
+      Sandbox/agent image must retain root for OpenShell setup; privilege drop is in sandbox lifecycle. (semgrep fingerprint unavailable without login; path-scoped).
+    expires: 2027-01-20T00:00:00Z
 
   - id: src/lib/onboard/created-sandbox-failure.test.ts
-    reason: Intentional fake AWS key material for onboard failure-path tests.
-    expires: ""
-
-  # --- E2E fixture lockfile CVEs (not shipped to users) ---
-  - id: test/e2e/fixtures/
     reason: >
-      Deterministic e2e plugin fixture lockfiles; vulnerabilities are not part of
-      the released NemoClaw runtime and are bumped when the fixture is refreshed.
-    expires: ""
+      Intentional fake AWS key material in unit tests. (semgrep fingerprint unavailable without login; path-scoped).
+    expires: 2027-01-20T00:00:00Z
 
-  # --- Residual dependency advisories pending upstream bumps ---
-  - rule-id: GHSA-g7r4-m6w7-qqqr
+  - id: src/lib/resources-cmd.ts
     reason: >
-      esbuild Windows-only development-server advisory; NemoClaw CI/build uses
-      Linux and does not expose the esbuild serve API to untrusted clients.
-    expires: ""
+      CLI wrappers intentionally spawn openshell/openclaw; args from validated local config. (semgrep fingerprint unavailable without login; path-scoped).
+    expires: 2027-01-20T00:00:00Z
 
-  - rule-id: GHSA-vmf3-w455-68vh
+  - fingerprint: test/cli/credentials-command.test.ts:generic-api-key:88
     reason: >
-      node-tar advisory in nested tooling lockfile; not on the production runtime
-      path. Tracked for the next Dependabot/lock refresh.
-    expires: ""
+      Intentional fake API keys in unit tests. (test/cli/credentials-command.test.ts:88)
+    expires: 2027-01-20T00:00:00Z
 
-  # --- Semgrep Dockerfile / child_process in trusted contexts ---
-  - tool: semgrep
-    rule-id: dockerfile.security.last-user-is-root.last-user-is-root
+  - fingerprint: test/hermes-gateway-wrapper.test.ts:generic-api-key:322
     reason: >
-      Sandbox/agent images must retain root for OpenShell runtime setup; privilege
-      drop happens inside the managed sandbox lifecycle.
-    expires: ""
+      Intentional fake API keys in unit tests. (test/hermes-gateway-wrapper.test.ts:322)
+    expires: 2027-01-20T00:00:00Z
 
-  - tool: semgrep
-    rule-id: javascript.lang.security.detect-child-process.detect-child-process
+  - fingerprint: test/hermes-gateway-wrapper.test.ts:generic-api-key:380
     reason: >
-      CLI wrappers intentionally spawn child processes for openshell/openclaw;
-      arguments are constructed from validated local config, not untrusted input.
-    expires: ""
+      Intentional fake API keys in unit tests. (test/hermes-gateway-wrapper.test.ts:380)
+    expires: 2027-01-20T00:00:00Z
 
-  # --- actionlint syntax for GitHub-supported concurrency.queue ---
-  - tool: actionlint
-    rule-id: syntax-check
+  - fingerprint: test/hermes-gateway-wrapper.test.ts:generic-api-key:422
     reason: >
-      concurrency.queue is a supported GitHub Actions field that actionlint's
-      schema has not caught up with yet.
-    expires: ""
+      Intentional fake API keys in unit tests. (test/hermes-gateway-wrapper.test.ts:422)
+    expires: 2027-01-20T00:00:00Z
 
-  - tool: actionlint
-    rule-id: permissions
+  - fingerprint: test/hermes-gateway-wrapper.test.ts:generic-api-key:441
     reason: >
-      Custom permission scopes (e.g. code-quality) are org-level fine-grained
-      permissions unrecognized by actionlint's built-in list.
-    expires: ""
+      Intentional fake API keys in unit tests. (test/hermes-gateway-wrapper.test.ts:441)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: test/hermes-gateway-wrapper.test.ts:generic-api-key:566
+    reason: >
+      Intentional fake API keys in unit tests. (test/hermes-gateway-wrapper.test.ts:566)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: test/hermes-gateway-wrapper.test.ts:generic-api-key:567
+    reason: >
+      Intentional fake API keys in unit tests. (test/hermes-gateway-wrapper.test.ts:567)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: test/package-contract/cli/credentials-cli-command.test.ts:generic-api-key:307
+    reason: >
+      Intentional fake API keys in unit tests. (test/package-contract/cli/credentials-cli-command.test.ts:307)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: test/package-contract/cli/credentials-cli-command.test.ts:generic-api-key:596
+    reason: >
+      Intentional fake API keys in unit tests. (test/package-contract/cli/credentials-cli-command.test.ts:596)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: test/redact-text.test.ts:generic-api-key:33
+    reason: >
+      Intentional fake API keys in unit tests. (test/redact-text.test.ts:33)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: test/redact-text.test.ts:generic-api-key:94
+    reason: >
+      Intentional fake API keys in unit tests. (test/redact-text.test.ts:94)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: 38e6efbb6f18f4d1
+    reason: >
+      Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: d2eb3598d9bd0628
+    reason: >
+      Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: 4c82acc7aa40b6d9
+    reason: >
+      Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: 10ac3e4aeef54cbc
+    reason: >
+      Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: 9bd1281778c37530
+    reason: >
+      Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: eec9ce8e05995f7a
+    reason: >
+      Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: 137110ab9fb1e9ab
+    reason: >
+      Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: e51ae1b0991e6480
+    reason: >
+      Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: 2da2d9d9bbaaeca9
+    reason: >
+      Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: 0e9810d801e5bf38
+    reason: >
+      Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: 23c4257e08c95a50
+    reason: >
+      Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: 0a2120a8ea1332ca
+    reason: >
+      Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: 04ff6b814689dd22
+    reason: >
+      Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: c921859b00c44b13
+    reason: >
+      node-tar in e2e fixture lockfile; not on production runtime path. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: 3afb008ee24d4da3
+    reason: >
+      Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: 8b6efd95d82a6237
+    reason: >
+      Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: 211efc8dc7ecfb48
+    reason: >
+      concurrency.queue is a supported GitHub Actions field; actionlint schema lag. (.github/workflows/label-merged-pr-release-target.yaml:29)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: 4f56b8ad4b020340
+    reason: >
+      Custom org permission scope code-quality unrecognized by actionlint. (.github/workflows/main.yaml:155)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: fc187a2af338cd2b
+    reason: >
+      Custom org permission scope code-quality unrecognized by actionlint. (.github/workflows/main.yaml:229)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: 5c660aa381198668
+    reason: >
+      Custom org permission scope code-quality unrecognized by actionlint. (.github/workflows/pr.yaml:362)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: 4c7450b1faf24e1e
+    reason: >
+      Custom org permission scope code-quality unrecognized by actionlint. (.github/workflows/pr.yaml:453)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: 8c04f5c469ff1036
+    reason: >
+      concurrency.queue is a supported GitHub Actions field; actionlint schema lag. (.github/workflows/release-latest-tag.yaml:26)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: b2097887a99a549d
+    reason: >
+      esbuild Windows-only dev-server advisory; CI/build uses Linux and does not expose esbuild serve to untrusted clients. (package-lock.json:0)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: f5984828efc2a625
+    reason: >
+      Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: 02994a9397add69d
+    reason: >
+      Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: 7722eeed983b2d1d
+    reason: >
+      Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
+    expires: 2027-01-20T00:00:00Z
+
+  - fingerprint: 3388b6cb85b733f5
+    reason: >
+      Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
+    expires: 2027-01-20T00:00:00Z

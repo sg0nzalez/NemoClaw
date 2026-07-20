@@ -58,14 +58,16 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
+          # Config must be workspace-relative: the Muninn action runs in Docker
+          # with only GITHUB_WORKSPACE mounted (RUNNER_TEMP / host abs paths fail).
           trusted="trusted-muninn-policy/muninn.yml"
-          head_cfg="${GITHUB_WORKSPACE}/muninn.yml"
+          trusted_cfg=".muninn-trusted.yml"
+          head_cfg="muninn.yml"
           if [ "$EVENT_NAME" = "pull_request" ] && [ -f "$trusted" ]; then
-            # Keep config outside the scan tree so scanners do not re-analyze it.
-            cp "$trusted" "${RUNNER_TEMP}/muninn-trusted.yml"
+            cp "$trusted" "$trusted_cfg"
             rm -rf trusted-muninn-policy
             echo "Using trusted base muninn.yml (suppressions) from ${BASE_SHA}"
-            echo "config=${RUNNER_TEMP}/muninn-trusted.yml" >> "$GITHUB_OUTPUT"
+            echo "config=${trusted_cfg}" >> "$GITHUB_OUTPUT"
           elif [ -f "$head_cfg" ]; then
             echo "Using workspace muninn.yml (push/schedule or bootstrap: base has no file yet)"
             echo "config=${head_cfg}" >> "$GITHUB_OUTPUT"

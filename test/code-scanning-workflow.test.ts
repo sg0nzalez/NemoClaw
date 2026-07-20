@@ -8,6 +8,7 @@ import { readYaml, type Workflow } from "./helpers/e2e-workflow-contract";
 type DependabotUpdate = {
   "package-ecosystem"?: string;
   directory?: string;
+  cooldown?: { "default-days"?: number };
   groups?: Record<string, { patterns?: string[] }>;
 };
 
@@ -57,6 +58,15 @@ describe("Code scanning workflow dependency updates", () => {
     const groups = Object.values(githubActionsUpdate?.groups ?? {});
 
     expect(groups.some((group) => group.patterns?.includes("github/codeql-action/*"))).toBe(true);
+  });
+
+  // source-shape-contract: security -- Dependabot Actions cooldown reduces supply-chain flash risk
+  it("keeps a 7-day cooldown on GitHub Actions Dependabot updates", () => {
+    const githubActionsUpdate = dependabot.updates?.find(
+      (update) => update["package-ecosystem"] === "github-actions" && update.directory === "/",
+    );
+
+    expect(githubActionsUpdate?.cooldown?.["default-days"]).toBe(7);
   });
 });
 
