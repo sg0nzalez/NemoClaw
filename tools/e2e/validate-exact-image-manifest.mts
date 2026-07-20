@@ -11,7 +11,7 @@ import {
   normalizedExactImageManifestJson,
   parseAndValidateExactImageManifest,
 } from "./exact-image-manifest.mts";
-import * as privateFile from "./private-file.ts";
+import * as privateFile from "./private-file.mts";
 
 // The root TypeScript package is exposed as CommonJS under `node --import
 // tsx` / `npx tsx`, but as an ESM namespace under Node's strip-types runtime
@@ -19,7 +19,7 @@ import * as privateFile from "./private-file.ts";
 // uses the same no-follow private-file writer.
 const privateFileRuntime = (
   "default" in privateFile && privateFile.default ? privateFile.default : privateFile
-) as typeof import("./private-file.ts");
+) as typeof import("./private-file.mts");
 
 const MAX_MANIFEST_BYTES = 64 * 1024;
 const NO_FOLLOW = fs.constants.O_NOFOLLOW ?? 0;

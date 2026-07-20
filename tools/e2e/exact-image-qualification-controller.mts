@@ -10,14 +10,14 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { type GitHubRequestOptions, githubApi } from "../advisors/github.mts";
-import * as privateFile from "./private-file.ts";
+import * as privateFile from "./private-file.mts";
 
 // Root .ts files are exposed as CommonJS under tsx and as ESM under Node's
 // strip-types runtime. Normalize both forms so the workflow uses the same
 // no-follow state-file helpers in either test or production execution.
 const privateFileRuntime = (
   "default" in privateFile && privateFile.default ? privateFile.default : privateFile
-) as typeof import("./private-file.ts");
+) as typeof import("./private-file.mts");
 
 export const REQUESTER_REPOSITORY = "NVIDIA/NemoClaw";
 export const PRODUCER_REPOSITORY = "brevdev/nemoclaw-image";
