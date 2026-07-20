@@ -98,16 +98,18 @@ describe("stopSandbox", () => {
     expect(h.teardownSandboxDashboardForward).not.toHaveBeenCalled();
   });
 
-  it("does not release the dashboard forward for an already-stopped sandbox (#7227)", () => {
+  it("releases a leftover dashboard forward for an already-stopped sandbox — idempotent (#7227)", () => {
     const h = harness({
       findLabeledSandboxContainers: vi.fn(() => [container("openshell-my-sandbox", false)]),
     });
 
     const result = stopSandbox("my-sandbox", h.deps);
 
+    // No container to stop, but a repeated stop must still converge on no
+    // leftover dashboard listener (e.g. a forward orphaned by an earlier stop).
     expect(result.exitCode).toBe(0);
     expect(h.dockerStop).not.toHaveBeenCalled();
-    expect(h.teardownSandboxDashboardForward).not.toHaveBeenCalled();
+    expect(h.teardownSandboxDashboardForward).toHaveBeenCalledWith("my-sandbox");
   });
 
   it("routes channel-stop reporter lines through the action's log and warn (#6026)", () => {

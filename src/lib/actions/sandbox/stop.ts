@@ -140,6 +140,11 @@ export function stopSandbox(
   const stoppable = containers.filter((container) => !isAtRest(container.status));
   if (stoppable.length === 0) {
     log(`  Sandbox '${sandboxName}' is already stopped.`);
+    // Idempotent teardown: an earlier stop may have left the dashboard forward
+    // alive (e.g. openshell was unreachable then, or the forward was orphaned by
+    // a raw `docker stop`). Release it here too so a repeated stop always
+    // converges on no leftover listener (#7227).
+    (deps.teardownSandboxDashboardForward ?? teardownSandboxDashboardForward)(sandboxName);
     log(`  Start it again with '${CLI_NAME} ${sandboxName} start'.`);
     return { exitCode: 0 };
   }
