@@ -24,7 +24,7 @@ import { isTransientProviderValidationFailure } from "./network-policy-transient
 // This is intentionally a single live test instead of a new fixture
 // family: the contract is the real Ubuntu bootstrap path, so the test invokes
 // scripts/brev-launchable-ci-cpu.sh via sudo, then proves the bootstrap-built
-// CLI can onboard, route inference.local, and run an OpenClaw agent turn.
+// CLI can onboard, route inference.local, and run an OpenClaw agent turn
 // through Vitest.
 
 const BOOTSTRAP_SCRIPT = path.join(REPO_ROOT, "scripts", "brev-launchable-ci-cpu.sh");
