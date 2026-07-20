@@ -174,16 +174,15 @@ function runOpenclawStatusProbe(
   if (!exec || exec.status !== 0) return PROBE_UNREACHABLE;
   const json = parseOpenclawJson(String(exec.stdout ?? ""));
   if (!json) return PROBE_UNREACHABLE;
-  const channels = readObject(json.channels);
   const channelAccounts = readObject(json.channelAccounts);
   // Successful OpenClaw responses expose live channel/account maps and omit
   // `gatewayReachable`; only the CLI's config-only failure response sets that
   // field to false. Honor an explicit reachability bit when present, while
   // accepting the canonical successful shape only when a live map exists.
-  if (!isReachableGatewayStatusPayload(json, channels, channelAccounts)) {
+  if (!isReachableGatewayStatusPayload(json, channelAccounts)) {
     return PROBE_UNREACHABLE;
   }
-  const waLookup = readWhatsappState(json, channels, channelAccounts);
+  const waLookup = readWhatsappState(json, channelAccounts);
   if (waLookup.kind === "invalid") return PROBE_UNREACHABLE;
   const wa = waLookup.kind === "found" ? waLookup.state : null;
 
@@ -297,13 +296,12 @@ function parseOpenclawJson(stdout: string): Record<string, unknown> | null {
 
 function isReachableGatewayStatusPayload(
   json: Record<string, unknown>,
-  channels: Record<string, unknown> | null,
   channelAccounts: Record<string, unknown> | null,
 ): boolean {
   if (Object.prototype.hasOwnProperty.call(json, "gatewayReachable")) {
     return json.gatewayReachable === true;
   }
-  return channels !== null || channelAccounts !== null;
+  return channelAccounts !== null;
 }
 
 type WhatsappStateLookup =
@@ -315,18 +313,15 @@ type WhatsappStateLookup =
  * OpenClaw 2026.6.10 exposes live per-account state under
  * `channelAccounts.whatsapp` and names the authoritative account through
  * `channelDefaultAccountId.whatsapp`. Select that exact account rather than
- * trusting array order or the channel-level summary. The summary-only branch
- * remains as a bounded compatibility path for older reviewed payloads.
+ * trusting array order or the channel-level summary. Every supported OpenClaw
+ * producer, down to the blueprint compatibility floor, provides this account
+ * map, so a summary-only response is an unknown contract and fails closed.
  */
 function readWhatsappState(
   json: Record<string, unknown>,
-  channels: Record<string, unknown> | null,
   channelAccounts: Record<string, unknown> | null,
 ): WhatsappStateLookup {
-  if (!Object.prototype.hasOwnProperty.call(json, "channelAccounts")) {
-    const legacyState = channels ? readObject(channels.whatsapp) : null;
-    return legacyState ? { kind: "found", state: legacyState } : { kind: "missing" };
-  }
+  if (!Object.prototype.hasOwnProperty.call(json, "channelAccounts")) return { kind: "invalid" };
   if (!channelAccounts) return { kind: "invalid" };
   if (!Object.prototype.hasOwnProperty.call(channelAccounts, "whatsapp")) {
     return { kind: "missing" };

@@ -83,8 +83,8 @@ type WaFixture = {
   readonly lastError?: string | null;
 };
 
-function openclawJson(wa: WaFixture | null): string {
-  const payload = {
+function openclawPayload(wa: Record<string, unknown> | null): Record<string, unknown> {
+  return {
     channels: {
       whatsapp: wa === null ? { configured: false } : { configured: wa.configured ?? false },
     },
@@ -94,7 +94,10 @@ function openclawJson(wa: WaFixture | null): string {
     channelDefaultAccountId: { whatsapp: "default" },
     ...(wa === null ? { error: "unknown channel: whatsapp" } : {}),
   };
-  return JSON.stringify(payload);
+}
+
+function openclawJson(wa: Record<string, unknown> | null): string {
+  return JSON.stringify(openclawPayload(wa));
 }
 
 const HEALTHY_WA: WaFixture = {
@@ -307,49 +310,35 @@ describe("whatsapp.statusHealth openclaw CLI probe", () => {
     },
     {
       label: "gatewayReachable is non-boolean",
-      payload: { gatewayReachable: "true", channels: { whatsapp: HEALTHY_WA } },
+      payload: { ...openclawPayload(HEALTHY_WA), gatewayReachable: "true" },
+    },
+    {
+      label: "summary-only payload has no authoritative account state",
+      payload: { channels: { whatsapp: HEALTHY_WA } },
     },
     {
       label: "linked is absent",
-      payload: {
-        gatewayReachable: true,
-        channels: { whatsapp: { ...HEALTHY_WA, linked: undefined } },
-      },
+      payload: openclawPayload({ ...HEALTHY_WA, linked: undefined }),
     },
     {
       label: "linked is non-boolean",
-      payload: {
-        gatewayReachable: true,
-        channels: { whatsapp: { ...HEALTHY_WA, linked: "true" } },
-      },
+      payload: openclawPayload({ ...HEALTHY_WA, linked: "true" }),
     },
     {
       label: "running is absent",
-      payload: {
-        gatewayReachable: true,
-        channels: { whatsapp: { ...HEALTHY_WA, running: undefined } },
-      },
+      payload: openclawPayload({ ...HEALTHY_WA, running: undefined }),
     },
     {
       label: "running is non-boolean",
-      payload: {
-        gatewayReachable: true,
-        channels: { whatsapp: { ...HEALTHY_WA, running: 1 } },
-      },
+      payload: openclawPayload({ ...HEALTHY_WA, running: 1 }),
     },
     {
       label: "connected is absent",
-      payload: {
-        gatewayReachable: true,
-        channels: { whatsapp: { ...HEALTHY_WA, connected: undefined } },
-      },
+      payload: openclawPayload({ ...HEALTHY_WA, connected: undefined }),
     },
     {
       label: "connected is non-boolean",
-      payload: {
-        gatewayReachable: true,
-        channels: { whatsapp: { ...HEALTHY_WA, connected: "yes" } },
-      },
+      payload: openclawPayload({ ...HEALTHY_WA, connected: "yes" }),
     },
     {
       label: "default account id does not identify exactly one account",
