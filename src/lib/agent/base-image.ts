@@ -14,6 +14,7 @@ import {
   dockerRmi,
   dockerTag,
 } from "../adapters/docker";
+import { createCustomBuildContextFilter } from "../onboard/custom-build-context";
 import { ROOT } from "../runner";
 import { SANDBOX_BUILD_CONTEXT_PREFIX } from "../sandbox/build-context";
 import {
@@ -23,9 +24,9 @@ import {
   getImageGlibcVersion,
   type ResolveBaseImageOptions,
   resolveSandboxBaseImage,
-  SandboxBaseImageResolutionError,
   SANDBOX_BASE_TAG,
   type SandboxBaseImageResolution,
+  SandboxBaseImageResolutionError,
   type SandboxBaseImageResolutionMetadata,
 } from "../sandbox-base-image";
 import { createDeepAgentsCodeBaseImageResolutionOptions } from "./deep-agents-code-base-image";
@@ -41,6 +42,10 @@ export interface EnsureAgentBaseImageOptions {
   forceBaseImageRebuild?: boolean;
   resolutionHint?: SandboxBaseImageResolutionMetadata | null;
   forceBaseImageRefresh?: boolean;
+}
+
+export interface CreateAgentSandboxOptions extends EnsureAgentBaseImageOptions {
+  rootDir?: string;
 }
 
 export interface EnsureAgentBaseImageResult {
@@ -348,7 +353,7 @@ export function ensureAgentBaseImage(
 /** Stage build context for an agent-specific sandbox image. */
 export function createAgentSandbox(
   agent: AgentDefinition,
-  options: EnsureAgentBaseImageOptions = {},
+  options: CreateAgentSandboxOptions = {},
 ): CreateAgentSandboxResult {
   const agentDockerfile = agent.dockerfilePath;
 
@@ -356,14 +361,16 @@ export function createAgentSandbox(
     throw new Error(`${agent.displayName} is missing a sandbox Dockerfile`);
   }
 
-  const { imageTag: baseImageRef, resolutionMetadata } = ensureAgentBaseImage(agent, options);
+  const { rootDir = ROOT, ...baseImageOptions } = options;
+  const { imageTag: baseImageRef, resolutionMetadata } = ensureAgentBaseImage(
+    agent,
+    baseImageOptions,
+  );
   const buildCtx = fs.mkdtempSync(path.join(os.tmpdir(), SANDBOX_BUILD_CONTEXT_PREFIX));
-  fs.cpSync(ROOT, buildCtx, {
+  const shouldIncludeBuildContextPath = createCustomBuildContextFilter(rootDir);
+  fs.cpSync(rootDir, buildCtx, {
     recursive: true,
-    filter: (src) => {
-      const base = path.basename(src);
-      return !["node_modules", ".git", ".venv", "__pycache__", ".claude"].includes(base);
-    },
+    filter: (src) => path.basename(src) !== ".claude" && shouldIncludeBuildContextPath(src),
   });
   const stagedDockerfile = path.join(buildCtx, "Dockerfile");
   fs.copyFileSync(agentDockerfile, stagedDockerfile);
