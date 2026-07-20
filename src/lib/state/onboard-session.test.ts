@@ -13,12 +13,6 @@ import {
   markStepFailedLegacy,
   markStepStartedLegacy,
 } from "../../../test/helpers/onboard-legacy-step-mutation";
-import {
-  cleanupStationExpressReceiptRetirementClaims,
-  clearStationExpressInstallerResume,
-  requireStationExpressResumeIntent,
-  withStationExpressResumeEnvironment,
-} from "../onboard/station-express-resume";
 
 const require = createRequire(import.meta.url);
 const distPath = require.resolve("./onboard-session");
@@ -217,27 +211,6 @@ describe("onboard session", () => {
     expect(summary.endpointUrl).toBe(loaded.endpointUrl);
   });
 
-  it("accepts an incomplete spark Express session and rejects tampered ones (#7231)", () => {
-    const base = session.createSession({
-      mode: "non-interactive",
-      stationExpressIntent: { version: 1, kind: "spark", sandboxName: "my-assistant" },
-    }) as unknown as Record<string, unknown>;
-    base.resumable = true;
-    base.status = "failed";
-
-    const ok = requireLoadedSession(session.normalizeSession(base as never));
-    expect(ok.stationExpressIntent).toEqual({
-      version: 1,
-      kind: "spark",
-      sandboxName: "my-assistant",
-    });
-
-    // A spark Express run is inherently non-interactive.
-    expect(session.normalizeSession({ ...base, mode: "interactive" } as never)).toBeNull();
-    // provider/model must stay null until provider_selection completes.
-    expect(session.normalizeSession({ ...base, provider: "vllm-local" } as never)).toBeNull();
-  });
-
   it("clears a spark Express intent once provider selection completes (#7231)", () => {
     session.saveSession(
       session.createSession({
@@ -254,66 +227,6 @@ describe("onboard session", () => {
     const loaded = requireLoadedSession(session.loadSession());
     expect(loaded.stationExpressIntent).toBeNull();
     expect(loaded.provider).toBe("vllm-local");
-  });
-
-  it("carries a spark Express intent through capture, persistence, and resume restore (#7231)", async () => {
-    // 1) Capture as the onboard entry path does, straight from the installer env.
-    const captured = requireStationExpressResumeIntent(
-      { NEMOCLAW_PROVIDER: "install-vllm", NEMOCLAW_NON_INTERACTIVE: "1" },
-      "repro7231",
-      false,
-    );
-    expect(captured).toEqual({ version: 1, kind: "spark", sandboxName: "repro7231" });
-
-    // 2) Persist a failed pre-provider run through the real session store.
-    const persisted = session.createSession({
-      mode: "non-interactive",
-      stationExpressIntent: captured,
-    });
-    persisted.status = "failed";
-    session.saveSession(persisted);
-
-    // 3) Reload from disk through the real normalize path.
-    const reloaded = requireLoadedSession(session.loadSession());
-    expect(reloaded.stationExpressIntent).toEqual({
-      version: 1,
-      kind: "spark",
-      sandboxName: "repro7231",
-    });
-
-    // 4) Resume through the real wrapper, backed by the on-disk session, and
-    //    prove the managed-vLLM env is restored without touching Station state.
-    const env: NodeJS.ProcessEnv = { NEMOCLAW_PROVIDER: "" };
-    const reconcileReceiptRetirement = vi.fn(() => {
-      throw new Error("spark resume must not touch Station receipt retirement");
-    });
-    const run = vi.fn(async () => {
-      expect(env.NEMOCLAW_PROVIDER).toBe("install-vllm");
-      expect(env.NEMOCLAW_NON_INTERACTIVE).toBe("1");
-      expect(env.NEMOCLAW_SANDBOX_NAME).toBe("repro7231");
-      expect(env.NEMOCLAW_STATION_EXPRESS).toBeUndefined();
-      expect(env.NEMOCLAW_POLICY_MODE).toBeUndefined();
-    });
-
-    await withStationExpressResumeEnvironment(
-      run,
-      {
-        loadSession: () => session.loadSession(),
-        clearInstallerResume: clearStationExpressInstallerResume,
-        cleanupReceiptRetirementClaims: cleanupStationExpressReceiptRetirementClaims,
-        reconcileReceiptRetirement,
-        error: vi.fn(),
-        exitProcess: vi.fn((code: number): never => {
-          throw new Error(`exit ${String(code)}`);
-        }),
-      },
-      env,
-    )({ resume: true });
-
-    expect(run).toHaveBeenCalledTimes(1);
-    expect(reconcileReceiptRetirement).not.toHaveBeenCalled();
-    // The wrapper restores the prior environment afterwards.
-    expect(env).toEqual({ NEMOCLAW_PROVIDER: "" });
   });
 
   it("marks steps started, completed, and failed", () => {

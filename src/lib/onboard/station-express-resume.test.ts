@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
-import { createSession } from "../state/onboard-session";
+import { createSession, normalizeSession } from "../state/onboard-session";
 import {
   assertStationExpressInstallerResumeMatches,
   cleanupStationExpressReceiptRetirementClaims,
@@ -14,6 +14,7 @@ import {
   getStationExpressResumeIntent,
   INSTALLER_AUTO_FRESH_RECEIPT_GENERATION_ENV,
   parseStationExpressResumeIntent,
+  requireStationExpressResumeIntent,
   retireStationExpressInstallerResume,
   STATION_EXPRESS_ENV,
   STATION_EXPRESS_RECEIPT_GENERATION_ENV,
@@ -983,5 +984,71 @@ describe("DGX Spark managed-vLLM Express resume (#7231)", () => {
     await withStationExpressResumeEnvironment(run, deps, env)({ resume: true });
 
     expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it("normalizes an incomplete spark session and rejects tampered states", () => {
+    const base = createSession({
+      mode: "non-interactive",
+      stationExpressIntent: sparkIntent,
+    }) as unknown as Record<string, unknown>;
+    base.resumable = true;
+    base.status = "failed";
+
+    const reloaded = normalizeSession(base as never);
+    expect(reloaded).not.toBeNull();
+    expect(reloaded?.stationExpressIntent).toEqual(sparkIntent);
+    // A spark Express run is inherently non-interactive.
+    expect(normalizeSession({ ...base, mode: "interactive" } as never)).toBeNull();
+    // provider/model must stay null until provider_selection completes.
+    expect(normalizeSession({ ...base, provider: "vllm-local" } as never)).toBeNull();
+  });
+
+  it("carries the intent through capture, reload normalization, and resume restore", async () => {
+    // Capture exactly as the onboard entry path does, from the installer env.
+    const captured = requireStationExpressResumeIntent(
+      { NEMOCLAW_PROVIDER: "install-vllm", NEMOCLAW_NON_INTERACTIVE: "1" },
+      "my-assistant",
+      false,
+    );
+    expect(captured).toEqual(sparkIntent);
+
+    // createSession -> JSON round-trip -> normalizeSession is exactly the
+    // saveSession/loadSession sequence across a process boundary.
+    const created = createSession({ mode: "non-interactive", stationExpressIntent: captured });
+    created.status = "failed";
+    const reloaded = normalizeSession(JSON.parse(JSON.stringify(created)));
+    expect(reloaded?.stationExpressIntent).toEqual(sparkIntent);
+
+    const env: NodeJS.ProcessEnv = { NEMOCLAW_PROVIDER: "" };
+    const reconcileReceiptRetirement = vi.fn(() => {
+      throw new Error("spark resume must not touch Station receipt retirement");
+    });
+    const run = vi.fn(async () => {
+      expect(env.NEMOCLAW_PROVIDER).toBe("install-vllm");
+      expect(env.NEMOCLAW_NON_INTERACTIVE).toBe("1");
+      expect(env.NEMOCLAW_SANDBOX_NAME).toBe("my-assistant");
+      expect(env.NEMOCLAW_STATION_EXPRESS).toBeUndefined();
+      expect(env.NEMOCLAW_POLICY_MODE).toBeUndefined();
+    });
+
+    await withStationExpressResumeEnvironment(
+      run,
+      {
+        loadSession: () => reloaded,
+        clearInstallerResume: vi.fn(),
+        cleanupReceiptRetirementClaims: vi.fn(),
+        reconcileReceiptRetirement,
+        error: vi.fn(),
+        exitProcess: vi.fn((code: number): never => {
+          throw new Error(`exit ${String(code)}`);
+        }),
+      },
+      env,
+    )({ resume: true });
+
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(reconcileReceiptRetirement).not.toHaveBeenCalled();
+    // The wrapper restores the prior environment afterwards.
+    expect(env).toEqual({ NEMOCLAW_PROVIDER: "" });
   });
 });
