@@ -99,7 +99,10 @@ export function startRebuildHermesProgress(
   const sampleResources = options.sampleResources ?? defaultResourceSnapshot;
   const sampleResourceEvidence =
     options.sampleResourceEvidence ??
-    ((phase) => renderSnapshotLine(collectResourceSnapshot(resourcePhaseLabel(phase))));
+    ((phase) =>
+      renderSnapshotLine(
+        collectResourceSnapshot(resourcePhaseLabel(phase), { includeDocker: false }),
+      ));
   const recordResourceBaseline =
     options.recordResourceBaseline ??
     ((phase) => {

@@ -1,6 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
 import { describe, expect, it, vi } from "vitest";
 import {
   type RebuildHermesProgressOptions,
@@ -40,6 +44,34 @@ function progressHarness() {
 }
 
 describe("Hermes rebuild live progress", () => {
+  it("keeps long-build heartbeats from invoking Docker inspection", () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-rebuild-progress-"));
+    const dockerMarker = path.join(directory, "docker-invoked");
+    const fakeDocker = path.join(directory, "docker");
+    fs.writeFileSync(fakeDocker, `#!/bin/sh\ntouch ${JSON.stringify(dockerMarker)}\n`, {
+      mode: 0o755,
+    });
+    vi.stubEnv("PATH", `${directory}${path.delimiter}${process.env.PATH ?? ""}`);
+
+    try {
+      const { options, state } = progressHarness();
+      delete options.sampleResourceEvidence;
+      const progress = startRebuildHermesProgress("phase 1 install", options);
+      progress.stop();
+
+      expect(fs.existsSync(dockerMarker)).toBe(false);
+      const snapshotLine = state.lines.find((line) => line.startsWith("E2E_RESOURCE_SNAPSHOT "));
+      expect(snapshotLine).toBeDefined();
+      expect(JSON.parse(snapshotLine!.slice("E2E_RESOURCE_SNAPSHOT ".length))).toMatchObject({
+        containers: [],
+        dockerDisk: null,
+      });
+    } finally {
+      vi.unstubAllEnvs();
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("streams timestamp-only phase and resource heartbeats through cleanup", () => {
     const { options, state } = progressHarness();
     const progress = startRebuildHermesProgress("phase 6 nemoclaw rebuild", options);

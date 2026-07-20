@@ -106,7 +106,14 @@ function collectDisk(): ResourceSnapshot["disk"] {
   }
 }
 
-export function collectResourceSnapshot(phase: string): ResourceSnapshot {
+export interface CollectResourceSnapshotOptions {
+  includeDocker?: boolean;
+}
+
+export function collectResourceSnapshot(
+  phase: string,
+  options: CollectResourceSnapshotOptions = {},
+): ResourceSnapshot {
   const meminfoText = readTextOrNull("/proc/meminfo");
   const loadText = readTextOrNull("/proc/loadavg");
   const current = readTextOrNull(`${CGROUP_ROOT}/memory.current`);
@@ -116,8 +123,16 @@ export function collectResourceSnapshot(phase: string): ResourceSnapshot {
   const memoryPressure = readTextOrNull(`${CGROUP_ROOT}/memory.pressure`);
   const ioPressure = readTextOrNull(`${CGROUP_ROOT}/io.pressure`);
   const psText = runOrNull("ps", ["-eo", "rss="]);
-  const statsText = runOrNull("docker", ["stats", "--no-stream", "--format", "{{json .}}"]);
-  const dfText = runOrNull("docker", ["system", "df", "--format", "{{json .}}"]);
+  // Docker inspection can block behind a large BuildKit export and add load to
+  // the daemon. Long-build heartbeats keep the host evidence below while the
+  // workflow baseline and terminal classifier retain Docker-specific probes.
+  const includeDocker = options.includeDocker ?? true;
+  const statsText = includeDocker
+    ? runOrNull("docker", ["stats", "--no-stream", "--format", "{{json .}}"])
+    : null;
+  const dfText = includeDocker
+    ? runOrNull("docker", ["system", "df", "--format", "{{json .}}"])
+    : null;
   return {
     phase,
     at: new Date().toISOString(),
@@ -181,9 +196,13 @@ function assertEvidencePath(path: string | undefined, variableName: string): str
 /** Append one phase baseline without replacing the immutable workflow baseline. */
 export function appendResourcePhaseBaseline(path: string, phase: string): void {
   const validatedPath = assertEvidencePath(path, "E2E_RESOURCE_PHASE_BASELINES_FILE");
-  appendPrivateRegularFile(validatedPath, `${renderBaselineLine(collectResourceBaseline(phase))}\n`, {
-    maxBytes: PHASE_BASELINES_FILE_MAX_BYTES,
-  });
+  appendPrivateRegularFile(
+    validatedPath,
+    `${renderBaselineLine(collectResourceBaseline(phase))}\n`,
+    {
+      maxBytes: PHASE_BASELINES_FILE_MAX_BYTES,
+    },
+  );
 }
 
 /** Create the trusted evidence files before PR-controlled live tests execute. */
@@ -201,10 +220,7 @@ function runInitializeEvidence(): void {
     process.env.E2E_TERMINAL_CLASSIFICATION_FILE,
     "E2E_TERMINAL_CLASSIFICATION_FILE",
   );
-  writePrivateRegularFile(
-    baselinePath,
-    `${renderBaselineLine(collectResourceBaseline(phase))}\n`,
-  );
+  writePrivateRegularFile(baselinePath, `${renderBaselineLine(collectResourceBaseline(phase))}\n`);
   writePrivateRegularFile(phaseBaselinesPath, "");
   writePrivateRegularFile(classificationPath, "");
 }
