@@ -62,6 +62,33 @@ export function resolveSandboxDashboardPort(
 }
 
 /**
+ * Tear down the host-side dashboard port-forward this sandbox created.
+ *
+ * `stop` stops the container but must also release the forward it spawned;
+ * leaving it alive orphans an `ssh -L` listener on the dashboard port, which
+ * `status` then misreports as a foreign `sandbox_dashboard_port_conflict` and
+ * which `start`/`recover` contend with (#7227). Best-effort: a stop must still
+ * free container resources when openshell is unreachable, so errors are ignored
+ * — mirroring the `forward stop <port> <sandbox>` calls in the onboard, destroy,
+ * and forward-recovery paths.
+ */
+export function teardownSandboxDashboardForward(
+  sandboxName: string,
+  deps: {
+    resolveSandboxDashboardPort?: typeof resolveSandboxDashboardPort;
+    runOpenshell?: typeof runOpenshell;
+  } = {},
+): void {
+  const resolvePort = deps.resolveSandboxDashboardPort ?? resolveSandboxDashboardPort;
+  const run = deps.runOpenshell ?? runOpenshell;
+  const port = resolvePort(sandboxName);
+  run(["forward", "stop", String(port), sandboxName], {
+    ignoreError: true,
+    stdio: "ignore",
+  });
+}
+
+/**
  * Re-establish the dashboard port forward to the sandbox.
  * Uses the recorded dashboard port when available, including custom ports for
  * non-OpenClaw agents, then falls back to the active agent's declared port.

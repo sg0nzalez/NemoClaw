@@ -5,6 +5,7 @@ import { CLI_NAME } from "../../cli/branding";
 import { findLabeledSandboxContainers } from "../../onboard/docker-driver-sandbox-recovery";
 import * as registry from "../../state/registry";
 import { stopSandboxChannels } from "../../tunnel/sandbox-gateway-stop";
+import { teardownSandboxDashboardForward } from "./forward-recovery";
 import { isDockerRuntimeDown, printDockerRuntimeDownGuidance } from "./gateway-failure-classifier";
 
 // Lazy adapter accessor, same pattern as docker-driver-sandbox-recovery.ts:
@@ -39,6 +40,7 @@ export interface SandboxStopDeps {
   printDockerRuntimeDownGuidance?: typeof printDockerRuntimeDownGuidance;
   findLabeledSandboxContainers?: typeof findLabeledSandboxContainers;
   stopSandboxChannels?: typeof stopSandboxChannels;
+  teardownSandboxDashboardForward?: typeof teardownSandboxDashboardForward;
   dockerStop?: DockerStopFn;
   log?: (message: string) => void;
   warn?: (message: string) => void;
@@ -180,6 +182,13 @@ export function stopSandbox(
       message: `  docker stop failed for: ${failures.join(", ")}.`,
     };
   }
+
+  // Release the host-side dashboard port-forward this sandbox created. Without
+  // this, the `ssh -L` listener stays alive after the container is stopped, so
+  // `status` misreports the cleanly-stopped sandbox as a foreign
+  // `sandbox_dashboard_port_conflict` and `start`/`recover` contend with the
+  // still-held port (#7227). Best-effort — the container is already stopped.
+  (deps.teardownSandboxDashboardForward ?? teardownSandboxDashboardForward)(sandboxName);
 
   log(`  Sandbox '${sandboxName}' stopped. Workspace state is preserved.`);
   log(`  Start it again with '${CLI_NAME} ${sandboxName} start'.`);
