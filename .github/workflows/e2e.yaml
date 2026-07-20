@@ -188,7 +188,9 @@ jobs:
   staging-brev-launchable:
     name: Exact staging Brev Launchable
     needs: generate-matrix
-    if: ${{ github.repository == 'NVIDIA/NemoClaw' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
+    # Repository owners enable this only after the protected environment,
+    # producer, standing Launchable, and Brev contract are ready.
+    if: ${{ vars.NEMOCLAW_BREV_LAUNCHABLE_QUALIFICATION_ENABLED == 'true' && github.repository == 'NVIDIA/NemoClaw' && github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
     uses: ./.github/workflows/brev-launchable-qualification.yaml
     with:
       candidate_sha: ${{ inputs.checkout_sha || github.sha }}

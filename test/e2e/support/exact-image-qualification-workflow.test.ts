@@ -8,12 +8,13 @@ import {
   readYaml,
   type Workflow,
   type WorkflowJob,
-} from "./helpers/e2e-workflow-contract";
+} from "../../helpers/e2e-workflow-contract";
 
 const WORKFLOW_PATH = ".github/workflows/brev-launchable-qualification.yaml";
 const E2E_WORKFLOW_PATH = ".github/workflows/e2e.yaml";
 const CONTROLLER_PATH = "tools/e2e/exact-image-qualification-controller.mts";
 const RUNTIME_PATH = "tools/e2e/brev-launchable-runtime.sh";
+const ACTIVATION_VARIABLE = "NEMOCLAW_BREV_LAUNCHABLE_QUALIFICATION_ENABLED";
 
 type QualificationWorkflow = Workflow & {
   name: string;
@@ -62,21 +63,44 @@ it("keeps exact-image Launchable qualification protected, reusable, and fail-clo
     "reason",
   ]);
   expect((workflow.on.workflow_call as { secrets?: object }).secrets).toBeUndefined();
+  expect(JSON.stringify(workflow.on)).not.toContain(ACTIVATION_VARIABLE);
   expect(workflow.permissions).toEqual({});
   expect(caller.secrets).toBeUndefined();
+  expect(caller.if).toBe(
+    `\${{ vars.${ACTIVATION_VARIABLE} == 'true' && github.repository == 'NVIDIA/NemoClaw' && github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}`,
+  );
   expect(workflow.concurrency).toEqual({
     group: "brev-launchable-qualification-staging-cpu",
     "cancel-in-progress": false,
   });
 
   expect(preflight.permissions).toEqual({ contents: "read" });
+  expect(preflight.if).toBeUndefined();
   expect(preflight.environment).toBeUndefined();
+  const activation = preflight.steps?.[0];
+  expect(activation?.name).toBe("Require explicit repository activation");
+  expect(activation?.uses).toBeUndefined();
+  expect(activation?.env).toEqual({
+    QUALIFICATION_ENABLED: `\${{ vars.${ACTIVATION_VARIABLE} }}`,
+  });
+  expect(activation?.run).toContain('[[ "$QUALIFICATION_ENABLED" != "true" ]]');
+  expect(activation?.run).toContain(`${ACTIVATION_VARIABLE}=true`);
+  expect(activation?.run).toContain("exit 1");
   expect(qualify.permissions).toEqual({ contents: "read" });
-  expect(qualify.if).toBe("${{ github.ref == 'refs/heads/main' }}");
+  expect(qualify.if).toBe(
+    `\${{ vars.${ACTIVATION_VARIABLE} == 'true' && github.repository == 'NVIDIA/NemoClaw' && github.ref == 'refs/heads/main' }}`,
+  );
   expect(qualify.environment).toEqual({
     name: "approve-brev-launchable-qualification",
     deployment: false,
   });
+  const environmentJobs = Object.values(workflow.jobs).filter(
+    (workflowJob) => workflowJob.environment !== undefined,
+  );
+  expect(environmentJobs).toEqual([qualify]);
+  for (const environmentJob of environmentJobs) {
+    expect(environmentJob.if).toContain(`vars.${ACTIVATION_VARIABLE} == 'true'`);
+  }
   for (const secret of [
     "NEMOCLAW_IMAGE_DISPATCH_TOKEN",
     "BREV_API_KEY",
@@ -133,6 +157,7 @@ it("keeps exact-image Launchable qualification protected, reusable, and fail-clo
   }
 
   expect(source).toContain("retention-days: 90");
+  expect(source).toContain("if-no-files-found: error");
   expect(source).toContain("dispatch-intent.v1.json");
   expect(source).toContain("dispatch-reconciliation.v1.json");
   expect(source).toContain("controller-state.corrupt-*.json");

@@ -7,7 +7,7 @@
       "fast": [
         "test/brev-launchable-runtime.test.ts",
         "test/exact-image-qualification-controller.test.ts",
-        "test/exact-image-qualification-workflow.test.ts"
+        "test/e2e/support/exact-image-qualification-workflow.test.ts"
       ]
     },
     {

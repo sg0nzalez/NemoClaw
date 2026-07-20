@@ -85,6 +85,33 @@ artifact so baseline aggregation stays stable.
 Older issue references to Vitest target artifacts under `e2e-artifacts/vitest/`
 map to this consolidated `e2e-artifacts/live/` registry-target artifact layout.
 
+## Exact staging Brev Launchable qualification
+
+The exact-image staging Launchable lane is inactive by default. The scheduled
+and manual `e2e.yaml` paths call it only from `main` when the repository
+variable `NEMOCLAW_BREV_LAUNCHABLE_QUALIFICATION_ENABLED` is exactly `true`.
+A direct dispatch of `brev-launchable-qualification.yaml` applies the same
+repository, ref, and activation checks; while inactive, it fails before
+checkout, environment approval, credential access, or external API calls.
+The skipped `staging-brev-launchable` job in a routine E2E run is an inactive
+status, not successful qualification evidence.
+
+Before setting the activation variable, repository owners must:
+
+- create and protect the `approve-brev-launchable-qualification` environment
+  for `main`, with the required reviewers;
+- configure that environment with `NEMOCLAW_IMAGE_DISPATCH_TOKEN`,
+  `BREV_API_KEY`, `BREV_ORG_ID`, and `NVIDIA_INFERENCE_API_KEY`;
+- set the environment or repository variable `NEMOCLAW_STAGING_LAUNCHABLE_ID`
+  to the standing staging Launchable that consumes the staging image family;
+  and
+- verify that the producer workflow and the Brev Launchable contract are ready
+  for automated image builds, provisioning, validation, and cleanup.
+
+Set `NEMOCLAW_BREV_LAUNCHABLE_QUALIFICATION_ENABLED=true` only after those
+conditions are met. Remove the variable, or set it to any value other than
+`true`, to keep routine E2E runs from starting this cost-bearing lane.
+
 ## PR E2E gate
 
 The controller, coordination check, and required job deliberately use

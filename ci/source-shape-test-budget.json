@@ -132,7 +132,7 @@
       "category": "security"
     },
     {
-      "file": "test/exact-image-qualification-workflow.test.ts",
+      "file": "test/e2e/support/exact-image-qualification-workflow.test.ts",
       "test": "keeps exact-image Launchable qualification protected, reusable, and fail-closed",
       "category": "security"
     },

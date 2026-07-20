@@ -13,9 +13,13 @@ const roots: string[] = [];
 const candidateSha = "a".repeat(40);
 
 type FixtureOptions = {
+  bootImageId?: string;
+  bootImageSelfLink?: string;
+  deleteMode?: "remove" | "retain";
   lsMode?: "ok" | "fail" | "fail-once" | "malformed";
   provisionSha?: string;
   repoSha?: string;
+  workspaceMode?: "ready" | "pending";
 };
 
 afterEach(() => {
@@ -56,13 +60,17 @@ case "$1" in
     if [ -f "$FAKE_BREV_STATE" ]; then cat "$FAKE_BREV_STATE"; else printf '{"workspaces":[]}\\n'; fi
     ;;
   create)
-    printf '{"workspaces":[{"id":"ws-1","name":"%s","status":"RUNNING","shell_status":"READY","health_status":"HEALTHY","build_status":"COMPLETED"}]}\\n' "$INSTANCE_NAME" > "$FAKE_BREV_STATE"
+    if [ "$FAKE_BREV_WORKSPACE_MODE" = pending ]; then
+      printf '{"workspaces":[{"id":"ws-1","name":"%s","status":"PROVISIONING","shell_status":"PENDING","health_status":"PENDING","build_status":"PENDING"}]}\\n' "$INSTANCE_NAME" > "$FAKE_BREV_STATE"
+    else
+      printf '{"workspaces":[{"id":"ws-1","name":"%s","status":"RUNNING","shell_status":"READY","health_status":"HEALTHY","build_status":"COMPLETED"}]}\\n' "$INSTANCE_NAME" > "$FAKE_BREV_STATE"
+    fi
     ;;
   exec)
     shift 3
     bash -c "$*"
     ;;
-  delete) rm -f "$FAKE_BREV_STATE" ;;
+  delete) [ "$FAKE_BREV_DELETE_MODE" = retain ] || rm -f "$FAKE_BREV_STATE" ;;
   refresh) ;;
   *) exit 2 ;;
 esac
@@ -98,7 +106,10 @@ for value in "$@"; do
     */instance/zone) printf 'projects/1/zones/us-central1-a\\n'; exit 0 ;;
     */instance/disks/0/device-name) printf 'disk-1\\n'; exit 0 ;;
     */instance/service-accounts/default/token) printf '{"access_token":"token"}\\n'; exit 0 ;;
-    https://compute.googleapis.com/*) printf '{"sourceImage":"https://www.googleapis.com/compute/v1/projects/brevdevprod/global/images/image-a","sourceImageId":"123456789"}\\n'; exit 0 ;;
+    https://compute.googleapis.com/*)
+      jq -cn --arg sourceImage "$FAKE_BOOT_IMAGE_SELF_LINK" --arg sourceImageId "$FAKE_BOOT_IMAGE_ID" '{sourceImage:$sourceImage,sourceImageId:$sourceImageId}'
+      exit 0
+      ;;
     https://inference.local/*) printf '{"choices":[{"message":{"content":"PONG"}}]}\\n'; exit 0 ;;
   esac
 done
@@ -138,12 +149,18 @@ exec "$@"
     PATH: `${bin}:${process.env.PATH ?? ""}`,
     BREV_LAUNCHABLE_ID: "env-staging123",
     CANDIDATE_SHA: candidateSha,
+    FAKE_BOOT_IMAGE_ID: options.bootImageId ?? "123456789",
+    FAKE_BOOT_IMAGE_SELF_LINK:
+      options.bootImageSelfLink ??
+      "https://www.googleapis.com/compute/v1/projects/brevdevprod/global/images/image-a",
+    FAKE_BREV_DELETE_MODE: options.deleteMode ?? "remove",
     FAKE_BREV_LS_MODE: options.lsMode ?? "ok",
     FAKE_BREV_LOG: log,
     FAKE_BREV_LS_COUNT: lsCount,
     FAKE_BREV_STATE: state,
     FAKE_PROVISION_SHA: options.provisionSha ?? candidateSha.slice(0, 7),
     FAKE_REPO_SHA: options.repoSha ?? candidateSha,
+    FAKE_BREV_WORKSPACE_MODE: options.workspaceMode ?? "ready",
     HOME: home,
     INSTANCE_NAME: "nclaw-e2e-test-1",
     NVIDIA_INFERENCE_API_KEY: "nvapi-test-value",
@@ -194,6 +211,31 @@ describe("exact staging Brev Launchable runtime", () => {
     expect(run("cleanup", env).status).toBe(0);
   });
 
+  it("fails closed on a boot-image mismatch before onboarding", () => {
+    const { env, log } = fixture({ bootImageId: "987654321" });
+    expect(run("deploy", env).status).toBe(0);
+    const qualification = run("qualify", env);
+    expect(qualification.status).not.toBe(0);
+    expect(qualification.stderr).toContain("workspace boot disk does not match accepted image");
+    expect(fs.readFileSync(log, "utf8")).not.toContain("brev-quickstart");
+    expect(run("cleanup", env).status).toBe(0);
+  });
+
+  it("fails when workspace readiness does not reach its deadline", () => {
+    const { env } = fixture({ workspaceMode: "pending" });
+    const deploy = run("deploy", {
+      ...env,
+      BREV_POLL_SECONDS: "1",
+      BREV_READY_TIMEOUT_SECONDS: "1",
+    });
+
+    expect(deploy.status).not.toBe(0);
+    expect(deploy.stderr).toContain(
+      "Brev workspace did not become structurally ready before the deadline",
+    );
+    expect(run("cleanup", env).status).toBe(0);
+  });
+
   it.each(["fail", "malformed"] as const)("fails closed when Brev inventory is %s", (lsMode) => {
     const { env, log } = fixture({ lsMode });
     const deploy = run("deploy", env);
@@ -211,6 +253,19 @@ describe("exact staging Brev Launchable runtime", () => {
     expect(
       JSON.parse(fs.readFileSync(path.join(workDir, "brev-cleanup-evidence.json"), "utf8")),
     ).toMatchObject({ terminalState: "ABSENT", workspaceName: "nclaw-e2e-test-1" });
+  });
+
+  it("fails cleanup when the workspace remains after the deletion deadline", () => {
+    const { env } = fixture({ deleteMode: "retain" });
+    expect(run("deploy", env).status).toBe(0);
+    const cleanup = run("cleanup", {
+      ...env,
+      BREV_DELETE_TIMEOUT_SECONDS: "1",
+      BREV_POLL_SECONDS: "1",
+    });
+
+    expect(cleanup.status).not.toBe(0);
+    expect(cleanup.stderr).toContain("Brev workspace still exists after cleanup deadline");
   });
 
   it("rejects an empty provision SHA before onboarding", () => {

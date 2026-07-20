@@ -41,6 +41,16 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Require explicit repository activation
+        env:
+          QUALIFICATION_ENABLED: ${{ vars.NEMOCLAW_BREV_LAUNCHABLE_QUALIFICATION_ENABLED }}
+        run: |
+          set -euo pipefail
+          if [[ "$QUALIFICATION_ENABLED" != "true" ]]; then
+            echo "::error::Exact staging Brev Launchable qualification is inactive. Set NEMOCLAW_BREV_LAUNCHABLE_QUALIFICATION_ENABLED=true only after the protected environment and external dependencies are ready."
+            exit 1
+          fi
+
       - name: Checkout trusted controller
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -79,7 +89,9 @@ jobs:
   qualify:
     name: Build, deploy, and test exact staging image
     needs: preflight
-    if: ${{ github.ref == 'refs/heads/main' }}
+    # Keep the repository-owned switch outside the protected environment so an
+    # inactive run cannot request approval or credentials.
+    if: ${{ vars.NEMOCLAW_BREV_LAUNCHABLE_QUALIFICATION_ENABLED == 'true' && github.repository == 'NVIDIA/NemoClaw' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     timeout-minutes: 120
     environment:
@@ -297,7 +309,7 @@ jobs:
             ${{ steps.workspace.outputs.work_dir }}/brev-agent-response.log
             ${{ steps.workspace.outputs.work_dir }}/brev-smoke-evidence.json
             ${{ steps.workspace.outputs.work_dir }}/brev-cleanup-evidence.json
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 90
 
       - name: Remove private evidence workspace
