@@ -76,11 +76,37 @@ variable, an organization owner must:
    `NVIDIA/NemoClaw` and workflow access to
    `NVIDIA/NemoClaw/.github/workflows/e2e.yaml@refs/heads/main`.
 3. Record at least five standard-runner samples for each eligible lane,
-   including queue time, execution time, peak CPU, memory and disk use,
-   infrastructure failures, and estimated cost.
+   retaining each lane's `runner-resource-summary.json` artifact together with
+   its Actions queue time, full job duration, infrastructure result, and
+   estimated cost.
 4. Copy the larger runner's workflow label into the repository variable, then
    repeat the same measurements for at least five representative executions
    per migrated lane.
+
+Each eligible job has a best-effort initialization step for
+`runner-resource-snapshots.jsonl` immediately after the shared workspace
+preparation step. When initialization succeeds, the initial sample, automatic
+live-test heartbeats and phase changes, and an `always()`-conditioned
+best-effort final sample share that one private ledger. This keeps both
+serialized Deep Agents Vitest invocations in one job-level measurement. A
+best-effort finalizer writes `runner-resource-summary.json` before artifact
+scanning and upload. The summary
+contains the measured window, sample and valid CPU-interval counts, logical CPU
+capacity, peak sampled host CPU percentage, the highest sampled cgroup
+`memory.peak` counter (or a sampled `MemAvailable` fallback), memory capacity,
+peak workspace growth, minimum free workspace bytes, and workspace capacity.
+The cgroup peak can include activity before the ledger starts because the
+kernel counter is cumulative for that cgroup. Resource fields are numeric; the
+remaining strings are canonical timestamps and fixed lane or source labels.
+
+A comparison needs at least two snapshots to form a measured window, and CPU
+requires adjacent samples at least one second apart. Treat these values as
+sampled evidence rather than exact instantaneous peaks; the heartbeat interval
+is one minute. Queue time, full job duration, and the infrastructure result
+remain Actions metadata because they sit outside the measured job window;
+estimate cost from those records and the configured runner rate. Compare at
+least five standard and five larger-runner summaries per eligible lane, and
+retain the matching Actions run links with the decision record.
 
 Clearing `E2E_LARGER_RUNNER_LABEL` is the rollback. It sends the eligible lanes
 back to `ubuntu-latest` without changing selectors, test setup, or test

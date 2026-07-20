@@ -83,4 +83,18 @@ describe("Hermes rebuild live progress", () => {
     }).not.toThrow();
     expect(state.clearCalls).toBe(1);
   });
+
+  it("keeps the live result independent from a failed measurement append", () => {
+    const { options, state } = progressHarness();
+    options.sampleResourceEvidence = () => {
+      throw new Error("measurement ledger unavailable");
+    };
+
+    expect(() => {
+      const progress = startTestProgress("rebuild-hermes", "phase 2 old base build", options);
+      state.timerCallback?.();
+      progress.stop();
+    }).not.toThrow();
+    expect(state.clearCalls).toBe(1);
+  });
 });

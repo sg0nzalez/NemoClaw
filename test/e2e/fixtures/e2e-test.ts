@@ -1,10 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { createHash } from "node:crypto";
+
 import { test as base, expect } from "vitest";
 
 import {
   appendResourcePhaseBaseline,
+  appendResourceSnapshot,
   collectResourceSnapshot,
 } from "../../../tools/e2e/runner-pressure.mts";
 import { renderSnapshotLine } from "../../../tools/e2e/runner-pressure-core.mts";
@@ -56,7 +59,10 @@ function resourcePhaseLabel(targetId: string, phase: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/gu, "-")
     .replace(/^-|-$/gu, "");
-  return `${targetId}.${suffix}`;
+  const label = `${targetId}.${suffix}`;
+  if (label.length <= 64) return label;
+  const digest = createHash("sha256").update(label).digest("hex").slice(0, 8);
+  return `${label.slice(0, 55)}-${digest}`;
 }
 
 export const test = base.extend<E2ETargetFixtures>({
@@ -79,6 +85,7 @@ export const test = base.extend<E2ETargetFixtures>({
     async ({ artifacts, secrets, task }, use) => {
       const targetId = process.env.E2E_TARGET_ID;
       const baselinePath = process.env.E2E_RESOURCE_PHASE_BASELINES_FILE;
+      const snapshotsPath = process.env.E2E_RESOURCE_SNAPSHOTS_FILE;
       const progress = startTestProgress(task.name, "test body", {
         logLine:
           process.env.NEMOCLAW_RUN_LIVE_E2E === "1"
@@ -86,12 +93,30 @@ export const test = base.extend<E2ETargetFixtures>({
             : () => {
                 // Keep fixture and support tests quiet; live runs need the heartbeat.
               },
-        ...(targetId && baselinePath
+        ...(targetId && (baselinePath || snapshotsPath)
           ? {
-              sampleResourceEvidence: (phase: string) =>
-                renderSnapshotLine(collectResourceSnapshot(resourcePhaseLabel(targetId, phase))),
-              recordResourceBaseline: (phase: string) =>
-                appendResourcePhaseBaseline(baselinePath, resourcePhaseLabel(targetId, phase)),
+              sampleResourceEvidence: (phase: string) => {
+                const snapshot = collectResourceSnapshot(resourcePhaseLabel(targetId, phase), {
+                  includeDiagnostics: Boolean(baselinePath),
+                });
+                if (snapshotsPath) {
+                  try {
+                    appendResourceSnapshot(snapshotsPath, snapshot);
+                  } catch {
+                    // Comparison telemetry must not change the live test result.
+                  }
+                }
+                return renderSnapshotLine(snapshot);
+              },
+              ...(baselinePath
+                ? {
+                    recordResourceBaseline: (phase: string) =>
+                      appendResourcePhaseBaseline(
+                        baselinePath,
+                        resourcePhaseLabel(targetId, phase),
+                      ),
+                  }
+                : {}),
             }
           : {}),
       });

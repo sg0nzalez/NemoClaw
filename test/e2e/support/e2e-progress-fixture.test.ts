@@ -5,15 +5,26 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { afterAll, expect, vi } from "vitest";
-
+import { afterAll, expect } from "vitest";
+import { parseSnapshotLine } from "../../../tools/e2e/runner-pressure-core.mts";
 import { test } from "../fixtures/e2e-test.ts";
 import type { ProgressSummary } from "../fixtures/progress.ts";
 
 const artifactRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-progress-fixture-"));
+const resourceSnapshots = path.join(artifactRoot, "runner-resource-snapshots.jsonl");
 let progressArtifact = "";
 
-vi.stubEnv("E2E_ARTIFACT_DIR", artifactRoot);
+const fixtureEnvironment = {
+  E2E_ARTIFACT_DIR: artifactRoot,
+  E2E_TARGET_ID: "fixture-progress-target",
+  NEMOCLAW_E2E_SHARD: "fixture-progress-shard",
+  E2E_RESOURCE_SNAPSHOTS_FILE: resourceSnapshots,
+} as const;
+const previousEnvironment = Object.fromEntries(
+  Object.keys(fixtureEnvironment).map((key) => [key, process.env[key]]),
+) as Record<keyof typeof fixtureEnvironment, string | undefined>;
+Object.assign(process.env, fixtureEnvironment);
+fs.writeFileSync(resourceSnapshots, "", { mode: 0o600 });
 
 afterAll(() => {
   try {
@@ -26,9 +37,28 @@ afterAll(() => {
     });
     expect(summary.finishedAtMs).not.toBeNull();
     expect(summary.durationMs).not.toBeNull();
-    expect(summary.phases.at(-1)?.label).toBe("final fixture phase");
+    expect(summary.phases.at(-1)?.label).toBe(
+      "phase 5 current base built by authoritative rebuild",
+    );
+    const snapshots = fs
+      .readFileSync(resourceSnapshots, "utf8")
+      .trim()
+      .split("\n")
+      .map(parseSnapshotLine);
+    expect(snapshots).toHaveLength(4);
+    expect(snapshots.slice(0, 2).map((snapshot) => snapshot.phase)).toEqual([
+      "fixture-progress-target.test-body",
+      "fixture-progress-target.test-body",
+    ]);
+    const longPhaseLabels = snapshots.slice(2).map((snapshot) => snapshot.phase);
+    expect(longPhaseLabels[0]).toHaveLength(64);
+    expect(longPhaseLabels[0]).toMatch(/^fixture-progress-target\.[a-z0-9-]+-[0-9a-f]{8}$/u);
+    expect(longPhaseLabels[1]).toBe(longPhaseLabels[0]);
   } finally {
-    vi.unstubAllEnvs();
+    for (const [key, value] of Object.entries(previousEnvironment)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
     fs.rmSync(artifactRoot, { force: true, recursive: true });
   }
 });
@@ -38,7 +68,5 @@ test("automatic progress fixture writes completed target and shard evidence", as
   progress,
 }) => {
   progressArtifact = artifacts.pathFor("test-progress.json");
-  vi.stubEnv("E2E_TARGET_ID", "fixture-progress-target");
-  vi.stubEnv("NEMOCLAW_E2E_SHARD", "fixture-progress-shard");
-  progress.phase("final fixture phase");
+  progress.phase("phase 5 current base built by authoritative rebuild");
 });
