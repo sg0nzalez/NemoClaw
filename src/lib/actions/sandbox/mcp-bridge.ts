@@ -16,8 +16,8 @@ import {
 } from "./mcp-bridge-destroy";
 import { redactBridgeSecretsForDisplay } from "./mcp-bridge-output";
 import {
+  type McpRebuildPreparation,
   prepareMcpBridgesForAbsentSandboxRebuild as prepareMcpBridgesForAbsentSandboxRebuildLifecycle,
-  prepareMcpBridgesForExecUnavailableRebuild as prepareMcpBridgesForExecUnavailableRebuildLifecycle,
   prepareMcpBridgesForRebuild as prepareMcpBridgesForRebuildLifecycle,
   reattachMcpProvidersAfterRebuildAbort as reattachMcpProvidersAfterRebuildAbortLifecycle,
   restoreMcpBridgesAfterRebuild as restoreMcpBridgesAfterRebuildLifecycle,
@@ -70,6 +70,7 @@ export {
   parseMcpProviderMetadata,
   providerDetachChangedState,
 } from "./mcp-bridge-provider";
+export { prepareMcpBridgesForExecUnavailableRebuild } from "./mcp-bridge-rebuild";
 export {
   buildMcpBridgeProviderName,
   MCP_SERVER_URL_MAX_LENGTH,
@@ -79,6 +80,7 @@ export {
   validateMcpCredentialEnvName,
   validateMcpServerName,
 } from "./mcp-bridge-validation";
+export type { McpRebuildPreparation };
 export { statusMcpBridge };
 
 export interface McpDestroyPreparation {
@@ -89,16 +91,6 @@ export interface McpDestroyPreparation {
   destroyAlreadyPrepared: boolean;
   /** True when a previous destroy already confirmed the sandbox was absent. */
   destroyAlreadyPending: boolean;
-}
-
-export interface McpRebuildPreparation {
-  entries: McpBridgeEntry[];
-  detachedProviderEntries: McpBridgeEntry[];
-  scrubbedAdapterEntries: McpBridgeEntry[];
-  /** Full read-only target, policy, provider, and registry proof before delete. */
-  revalidateBeforeDelete?: () => Promise<void>;
-  /** Final synchronous registry-only proof immediately before delete. */
-  assertDeleteEdgeUnchanged?: () => void;
 }
 
 export async function addMcpBridge(
@@ -152,12 +144,6 @@ export async function prepareMcpBridgesForAbsentSandboxRebuild(
   sandboxName: string,
 ): Promise<McpRebuildPreparation> {
   return prepareMcpBridgesForAbsentSandboxRebuildLifecycle(sandboxName);
-}
-
-export async function prepareMcpBridgesForExecUnavailableRebuild(
-  sandboxName: string,
-): Promise<McpRebuildPreparation> {
-  return prepareMcpBridgesForExecUnavailableRebuildLifecycle(sandboxName);
 }
 
 export async function prepareMcpBridgesForRebuild(
