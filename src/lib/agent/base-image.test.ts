@@ -28,6 +28,22 @@ function makeResolutionMetadata(
   };
 }
 
+function makeDifferingImageInspection(
+  format: string,
+  imageRef: string,
+  localRef: string,
+  pinnedRef: string,
+): string {
+  return format === "{{json .}}"
+    ? JSON.stringify({
+        Id: imageRef === localRef ? `sha256:${"a".repeat(64)}` : `sha256:${"b".repeat(64)}`,
+        Os: "linux",
+        Architecture: "amd64",
+        RepoDigests: [pinnedRef],
+      })
+    : "";
+}
+
 describe("agent base image provisioning", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -142,15 +158,9 @@ describe("agent base image provisioning", () => {
         const localRef = "nemoclaw-hermes-sandbox-base-local:e2e-current";
         const dockerfile = fs.readFileSync(agent.dockerfilePath as string, "utf8");
         const pinnedRef = dockerfile.match(/^ARG BASE_IMAGE=(\S+)$/m)?.[1] as string;
-        dockerImageInspectFormatMock.mockImplementation((format: string, imageRef: string) => {
-          if (format !== "{{json .}}") return "";
-          return JSON.stringify({
-            Id: imageRef === localRef ? `sha256:${"a".repeat(64)}` : `sha256:${"b".repeat(64)}`,
-            Os: "linux",
-            Architecture: "amd64",
-            RepoDigests: [pinnedRef],
-          });
-        });
+        dockerImageInspectFormatMock.mockImplementation((format: string, imageRef: string) =>
+          makeDifferingImageInspection(format, imageRef, localRef, pinnedRef),
+        );
 
         expect(bindLocalAgentBaseImageToPinnedProvenance(agent, localRef)).toBeNull();
       },
