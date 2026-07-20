@@ -113,6 +113,33 @@ describe("Docker GPU recreate DNS fallback (#3579)", () => {
     expect(deps.probeContainerDns).not.toHaveBeenCalled();
   });
 
+  it("continues recreation with the selected DNS after an inconclusive probe", () => {
+    const deps = recreateDeps("9.9.9.9");
+    deps.probeContainerDns.mockReturnValue({
+      ok: false,
+      reason: "image_pull_failed",
+      details: "registry returned HTTP 503",
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    try {
+      recreateOpenShellDockerSandboxWithGpu({ sandboxName: "alpha", timeoutSecs: 1 }, deps);
+
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining(
+          "fallback DNS probe inconclusive with --dns 9.9.9.9 (reason: image_pull_failed)",
+        ),
+      );
+      expect(deps.dockerStop).toHaveBeenCalled();
+      expect(deps.dockerRunDetached).toHaveBeenCalledWith(
+        expect.arrayContaining(["--dns", "9.9.9.9"]),
+        expect.objectContaining({ ignoreError: true }),
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it.each([
     { name: "explicit DNS", dns: ["10.43.0.10"], networkMode: "bridge" },
     { name: "host networking", dns: [] as string[], networkMode: "host" },
