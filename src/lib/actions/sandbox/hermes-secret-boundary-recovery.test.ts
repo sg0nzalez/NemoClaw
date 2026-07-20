@@ -119,6 +119,21 @@ describe("enforceHermesSecretBoundaryOnRunningGateway", () => {
     expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining("Re-image the sandbox"));
   });
 
+  it("classifies an exact staged supervisor failure as transient churn (#7229)", () => {
+    mockSandboxAgent("hermes");
+    const stderr = "SUPERVISOR_UNAVAILABLE\nNEMOCLAW_CONTROL_STAGE=preflight\n";
+    const exec = vi.fn(() => makeExecResult("", stderr, 1));
+
+    const result = enforceHermesSecretBoundaryOnRunningGateway(SANDBOX, HERMES_AGENT, exec);
+
+    expect(result).toEqual({ refused: true, reason: "supervisor-churn", stderr });
+    expect(consoleErrorSpy).toHaveBeenCalledWith("  SUPERVISOR_UNAVAILABLE");
+    expect(consoleErrorSpy).toHaveBeenCalledWith("  NEMOCLAW_CONTROL_STAGE=preflight");
+    expect(consoleErrorSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining("did not complete cleanly"),
+    );
+  });
+
   it("distinguishes unrecognized validator output from infrastructure failures", () => {
     mockSandboxAgent("hermes");
     const exec = vi.fn(() => makeExecResult("unexpected output\n", "validator failed\n", 1));

@@ -1,16 +1,46 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createRebuildFlowHarness,
   resetRebuildFlowTestEnvironment,
   restoreRebuildFlowTestEnvironment,
 } from "../../../../test/helpers/rebuild-flow-harness";
+import { ensureHermesGatewayAfterStateRestore } from "./rebuild-hermes-post-restore";
 
 describe("Hermes rebuild post-restore verification", () => {
   beforeEach(resetRebuildFlowTestEnvironment);
   afterEach(restoreRebuildFlowTestEnvironment);
+
+  it("retries exact managed-supervisor churn before accepting restored Hermes state (#7229)", () => {
+    const checkAndRecoverSandboxProcesses = vi
+      .fn()
+      .mockReturnValueOnce({
+        checked: true,
+        wasRunning: true,
+        recovered: false,
+        secretBoundaryRefused: true,
+        secretBoundaryReason: "supervisor-churn",
+      })
+      .mockReturnValueOnce({
+        checked: true,
+        wasRunning: true,
+        recovered: false,
+      });
+    const sleep = vi.fn();
+
+    expect(
+      ensureHermesGatewayAfterStateRestore("alpha", "hermes", {
+        checkAndRecoverSandboxProcesses,
+        sleepSeconds: sleep,
+      }),
+    ).toBe("healthy");
+
+    expect(checkAndRecoverSandboxProcesses).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenCalledOnce();
+    expect(sleep).toHaveBeenCalledWith(3);
+  });
 
   it("fails instead of reporting readiness when restored state leaves the gateway down (#7084)", async () => {
     const mcpEntry = {

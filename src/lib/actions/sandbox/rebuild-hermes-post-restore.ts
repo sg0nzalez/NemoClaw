@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { CLI_NAME } from "../../cli/branding";
+import { sleepSeconds } from "../../core/wait";
 import * as processRecovery from "./process-recovery";
 
 export type HermesPostRestoreGatewayState =
@@ -16,6 +17,7 @@ type GatewayRecoveryObservation = {
   recovered: boolean;
   forwardRecoveryFailed?: boolean;
   secretBoundaryRefused?: boolean;
+  secretBoundaryReason?: string;
   mcpReconciliationRefused?: boolean;
 };
 
@@ -24,6 +26,36 @@ interface HermesPostRestoreGatewayDeps {
     sandboxName: string,
     options: { quiet: boolean },
   ) => GatewayRecoveryObservation;
+  sleepSeconds?: (seconds: number) => void;
+}
+
+const POST_RESTORE_SUPERVISOR_ATTEMPTS = 3;
+const POST_RESTORE_SUPERVISOR_RETRY_SECONDS = 3;
+
+function isTransientManagedSupervisorChurn(observation: GatewayRecoveryObservation): boolean {
+  // State restoration can make PID 1 replace Hermes between the healthy HTTP
+  // probe and its validator-enforced recovery request. Retry only the exact
+  // controller classification; validator and integrity output stays terminal.
+  return (
+    observation.secretBoundaryRefused === true &&
+    observation.secretBoundaryReason === "supervisor-churn"
+  );
+}
+
+function classifyGatewayObservation(
+  observation: GatewayRecoveryObservation,
+): HermesPostRestoreGatewayState {
+  if (
+    !observation.checked ||
+    observation.forwardRecoveryFailed === true ||
+    observation.secretBoundaryRefused === true ||
+    observation.mcpReconciliationRefused === true
+  ) {
+    return "unverified";
+  }
+  if (observation.wasRunning === true) return "healthy";
+  if (observation.recovered) return "recovered";
+  return "unverified";
 }
 
 /**
@@ -41,17 +73,18 @@ export function ensureHermesGatewayAfterStateRestore(
   if (agentName !== "hermes") return "not-applicable";
   const checkAndRecover =
     deps.checkAndRecoverSandboxProcesses ?? processRecovery.checkAndRecoverSandboxProcesses;
-  const observation: GatewayRecoveryObservation = checkAndRecover(sandboxName, { quiet: true });
-  if (
-    !observation.checked ||
-    observation.forwardRecoveryFailed === true ||
-    observation.secretBoundaryRefused === true ||
-    observation.mcpReconciliationRefused === true
-  ) {
-    return "unverified";
+  const wait = deps.sleepSeconds ?? sleepSeconds;
+  for (let attempt = 1; attempt <= POST_RESTORE_SUPERVISOR_ATTEMPTS; attempt += 1) {
+    const observation: GatewayRecoveryObservation = checkAndRecover(sandboxName, { quiet: true });
+    if (
+      attempt < POST_RESTORE_SUPERVISOR_ATTEMPTS &&
+      isTransientManagedSupervisorChurn(observation)
+    ) {
+      wait(POST_RESTORE_SUPERVISOR_RETRY_SECONDS);
+      continue;
+    }
+    return classifyGatewayObservation(observation);
   }
-  if (observation.wasRunning === true) return "healthy";
-  if (observation.recovered) return "recovered";
   return "unverified";
 }
 

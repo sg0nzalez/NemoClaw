@@ -11,6 +11,7 @@ export type SecretBoundaryRefusalReason =
   | "exec-failed"
   | "validator-missing"
   | "unexpected-marker"
+  | "supervisor-churn"
   | "agent-missing";
 
 export type HermesSecretBoundaryEnforcement =
@@ -32,6 +33,21 @@ function printValidatorStderr(stderr: string): void {
   for (const line of stderr.split(/\r?\n/)) {
     if (line.trim()) console.error(`  ${line}`);
   }
+}
+
+const MANAGED_CONTROL_STAGE_RE = /^NEMOCLAW_CONTROL_STAGE=[a-z][a-z-]*$/;
+
+function isStagedSupervisorUnavailable(result: SandboxCommandResult): boolean {
+  if (result.status !== 1 || result.stdout.trim() !== "") return false;
+  const lines = result.stderr
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return (
+    lines.length === 2 &&
+    lines[0] === "SUPERVISOR_UNAVAILABLE" &&
+    MANAGED_CONTROL_STAGE_RE.test(lines[1])
+  );
 }
 
 /**
@@ -90,6 +106,10 @@ export function enforceHermesSecretBoundaryOnRunningGateway(
       "  Refusing recovery because /sandbox/.hermes/.env could not be re-evaluated. Re-image the sandbox with a current Hermes build.",
     );
     return { refused: true, reason: "validator-missing", stderr: result.stderr };
+  }
+  if (isStagedSupervisorUnavailable(result)) {
+    printValidatorStderr(result.stderr);
+    return { refused: true, reason: "supervisor-churn", stderr: result.stderr };
   }
   printValidatorStderr(result.stderr);
   console.error("");
