@@ -102,6 +102,21 @@ export function getReportedGatewayName(output = ""): string | null {
   return match ? match[1] : null;
 }
 
+/**
+ * OpenShell v0.0.85 compatibility boundary: `openshell status` prints the
+ * selected gateway on stdout, then reports a failed probe on stderr as either
+ * `Error: <detail>` or `client error ...`. `runCapture` combines those streams
+ * for this probe. OpenShell is an independently versioned external CLI, so
+ * NemoClaw cannot retrofit a structured lifecycle discriminator into v0.0.85;
+ * this parser limits the compatibility fallback to the producer's error
+ * suffix instead of matching diagnostic text elsewhere in the output.
+ *
+ * Keep this contract aligned with
+ * `test/fixtures/openshell-status-errors-v0.0.85.json`. Remove the text parser
+ * once NemoClaw's entire supported OpenShell range guarantees a structured
+ * status error kind (or an equivalent stable exit-code contract) and callers
+ * consume that signal directly.
+ */
 function getGatewayStatusErrorText(output = ""): string {
   if (typeof output !== "string") return "";
   const clean = stripAnsi(output);

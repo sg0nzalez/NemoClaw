@@ -5,6 +5,7 @@
 // Covers ARM64/non-TTY fallback paths where `openshell status` returns empty output.
 // See: https://github.com/NVIDIA/NemoClaw/issues/1711
 
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { mergeLivePolicyIntoSandboxOutput } from "../src/lib/actions/sandbox/gateway-state.js";
 import {
@@ -18,6 +19,16 @@ import {
   parseSandboxPhase,
   shouldSelectNamedGatewayForReuse,
 } from "../src/lib/state/gateway.js";
+
+const OPENSHELL_STATUS_ERROR_CONTRACT = JSON.parse(
+  readFileSync(new URL("./fixtures/openshell-status-errors-v0.0.85.json", import.meta.url), "utf8"),
+) as {
+  producer: string;
+  openshellVersion: string;
+  command: string;
+  connectionRefusal: string;
+  nonLifecycleError: string;
+};
 
 // Realistic CLI outputs
 const STATUS_CONNECTED = `
@@ -291,6 +302,18 @@ describe("parseSandboxPhase", () => {
 });
 
 describe("getGatewayReuseState", () => {
+  it("classifies the pinned OpenShell status-error contract without making non-lifecycle failures stale (#7087)", () => {
+    expect(OPENSHELL_STATUS_ERROR_CONTRACT.producer).toBe("OpenShell");
+    expect(OPENSHELL_STATUS_ERROR_CONTRACT.openshellVersion).toBe("0.0.85");
+    expect(OPENSHELL_STATUS_ERROR_CONTRACT.command).toBe("openshell status");
+    expect(getGatewayReuseState(OPENSHELL_STATUS_ERROR_CONTRACT.connectionRefusal, "", "")).toBe(
+      "stale",
+    );
+    expect(getGatewayReuseState(OPENSHELL_STATUS_ERROR_CONTRACT.nonLifecycleError, "", "")).toBe(
+      "missing",
+    );
+  });
+
   it("returns 'healthy' for normal connected state", () => {
     expect(getGatewayReuseState(STATUS_CONNECTED, GW_INFO_NAMED, GW_INFO_ACTIVE)).toBe("healthy");
   });
