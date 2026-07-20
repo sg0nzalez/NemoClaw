@@ -70,6 +70,7 @@ describe("rebuild destroy validation diagnostics", () => {
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     vi.restoreAllMocks();
   });
 
@@ -130,6 +131,34 @@ describe("rebuild destroy validation diagnostics", () => {
       true,
       expect.any(Function),
       expect.any(Function),
+    );
+  });
+
+  it("pins deletion to the recorded gateway when ambient selection changes (#7062)", async () => {
+    vi.stubEnv("OPENSHELL_GATEWAY", "nemoclaw-29080");
+
+    await runRebuildDestroyPhase({
+      sandboxName: "alpha",
+      sandboxEntry: {
+        name: "alpha",
+        agent: "openclaw",
+        gatewayName: "nemoclaw-19080",
+        gatewayPort: 19080,
+      },
+      staleRecovery: false,
+      backupManifest: null,
+      force: true,
+      log: vi.fn(),
+      bail: vi.fn((message: string): never => {
+        throw new Error(message);
+      }),
+      relockShieldsIfNeeded: vi.fn(() => true),
+      onDeleted: vi.fn(),
+    });
+
+    expect(mocks.runOpenshell).toHaveBeenCalledWith(
+      ["sandbox", "delete", "-g", "nemoclaw-19080", "alpha"],
+      expect.objectContaining({ ignoreError: true }),
     );
   });
 

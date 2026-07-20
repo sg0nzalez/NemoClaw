@@ -117,6 +117,7 @@ export async function runRebuildDestroyPhase(
     validateAfterMcpPreparation,
     onDeleted,
   } = input;
+  const gatewayName = resolveSandboxGatewayName(input.sandboxEntry);
 
   // Step 3: Delete sandbox without tearing down gateway or session.
   // sandboxDestroy() cleans up the gateway when it's the last sandbox and
@@ -220,8 +221,8 @@ export async function runRebuildDestroyPhase(
     }
   }
 
-  log(`Running: openshell sandbox delete ${sandboxName}`);
-  const deleteResult = runOpenshell(["sandbox", "delete", sandboxName], {
+  log(`Running: openshell sandbox delete -g ${gatewayName} ${sandboxName}`);
+  const deleteResult = runOpenshell(["sandbox", "delete", "-g", gatewayName, sandboxName], {
     ignoreError: true,
     stdio: ["ignore", "pipe", "pipe"],
   });
