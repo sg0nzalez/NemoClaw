@@ -68,6 +68,14 @@ function percentile(sorted: readonly number[], fraction: number): number {
   return sorted[index] ?? 0;
 }
 
+function median(sorted: readonly number[]): number {
+  const middle = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 0) {
+    return ((sorted[middle - 1] ?? 0) + (sorted[middle] ?? 0)) / 2;
+  }
+  return sorted[middle] ?? 0;
+}
+
 export function auditTestRuntime(roots: readonly string[]): RuntimeAuditRow[] {
   const summaries = roots.flatMap(progressFiles).map((file) => {
     const parsed: unknown = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -96,7 +104,7 @@ export function auditTestRuntime(roots: readonly string[]): RuntimeAuditRow[] {
         (slowest, phase) => (phase.durationMs > slowest.durationMs ? phase : slowest),
         { label: "n/a", durationMs: 0 },
       );
-      const medianMs = percentile(durations, 0.5);
+      const medianMs = median(durations);
       const p95Ms = percentile(durations, 0.95);
       return {
         target: [first.targetId ?? "unlabeled", first.shardId].filter(Boolean).join("/"),

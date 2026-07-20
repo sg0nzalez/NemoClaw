@@ -58,10 +58,10 @@ describe("test runtime audit", () => {
           target: "variable test-target",
           scenario: "variable test",
           runs: 2,
-          medianMs: 10_000,
+          medianMs: 30_000,
           p95Ms: 50_000,
           maxMs: 50_000,
-          variabilityMs: 40_000,
+          variabilityMs: 20_000,
           slowestPhase: "inference",
           slowestPhaseMs: 40_000,
         },
@@ -78,7 +78,7 @@ describe("test runtime audit", () => {
         },
       ]);
       expect(formatRuntimeAudit(rows)).toContain(
-        "| variable test-target | variable test | 2 | 10.0s | 50.0s | 50.0s | 40.0s | inference (40.0s) |",
+        "| variable test-target | variable test | 2 | 30.0s | 50.0s | 50.0s | 20.0s | inference (40.0s) |",
       );
     } finally {
       fs.rmSync(root, { recursive: true, force: true });

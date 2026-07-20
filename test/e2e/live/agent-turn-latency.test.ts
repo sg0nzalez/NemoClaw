@@ -222,5 +222,4 @@ test("OpenClaw and Hermes complete real hosted inference turns within the latenc
     artifacts.pathFor("agent-turn-latency-results-legacy-path.json"),
     `${JSON.stringify(results, null, 2)}\n`,
   );
-  progress.stop();
 });
