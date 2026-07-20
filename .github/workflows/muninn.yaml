@@ -38,7 +38,7 @@ jobs:
         uses: skaldlab/muninn@365628a795478e870417bf9e395a0ecc63685442 # v0.3.5
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          fail-on: info
+          # fail-on comes from muninn.yml (single source of truth)
           format: sarif,comment
 
       - name: Upload SARIF
