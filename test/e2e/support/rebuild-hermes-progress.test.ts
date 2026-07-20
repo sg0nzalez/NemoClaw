@@ -48,7 +48,7 @@ describe("Hermes rebuild live progress", () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-rebuild-progress-"));
     const dockerMarker = path.join(directory, "docker-invoked");
     const fakeDocker = path.join(directory, "docker");
-    fs.writeFileSync(fakeDocker, `#!/bin/sh\ntouch ${JSON.stringify(dockerMarker)}\n`, {
+    fs.writeFileSync(fakeDocker, '#!/bin/sh\n: > "${0%/*}/docker-invoked"\n', {
       mode: 0o755,
     });
     vi.stubEnv("PATH", `${directory}${path.delimiter}${process.env.PATH ?? ""}`);
