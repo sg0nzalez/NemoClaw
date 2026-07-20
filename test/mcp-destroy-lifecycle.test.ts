@@ -296,7 +296,7 @@ beforeEach(() => {
   });
 
   testState.executeSandboxExecCommand.mockImplementation((_sandbox: string, command: string) => {
-    if (command === ":") return { status: 0, stdout: "", stderr: "" };
+    const isNoopProbe = command === ":";
     const encoded = command.match(/printf '%s' '([A-Za-z0-9+/=]+)' \| base64 -d/)?.[1] ?? "";
     const proof = encoded ? Buffer.from(encoded, "base64").toString("utf8") : command;
     const isRevisionObservation = proof.includes("printf '%s\\n' absent");
@@ -312,6 +312,7 @@ beforeEach(() => {
       );
     return {
       status:
+        isNoopProbe ||
         proof.includes("allow_all_known_mcp_methods") ||
         proof.includes('[ -z "${') ||
         proof.includes("openshell:resolve:env:GITHUB_TOKEN") ||
