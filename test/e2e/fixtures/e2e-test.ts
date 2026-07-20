@@ -3,6 +3,12 @@
 
 import { test as base, expect } from "vitest";
 
+import {
+  appendResourcePhaseBaseline,
+  collectResourceSnapshot,
+} from "../../../tools/e2e/runner-pressure.mts";
+import { renderSnapshotLine } from "../../../tools/e2e/runner-pressure-core.mts";
+
 import { type ArtifactSink, createArtifactSink } from "./artifacts.ts";
 import { assertCleanupPassed, CleanupRegistry } from "./cleanup.ts";
 import {
@@ -45,6 +51,14 @@ export interface E2ETargetFixtures {
   progress: TestProgress;
 }
 
+function resourcePhaseLabel(targetId: string, phase: string): string {
+  const suffix = phase
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, "-")
+    .replace(/^-|-$/gu, "");
+  return `${targetId}.${suffix}`;
+}
+
 export const test = base.extend<E2ETargetFixtures>({
   secrets: async ({ skip }, use) => {
     await use(new SecretStore(process.env, skip));
@@ -63,6 +77,8 @@ export const test = base.extend<E2ETargetFixtures>({
   },
   progress: [
     async ({ artifacts, secrets, task }, use) => {
+      const targetId = process.env.E2E_TARGET_ID;
+      const baselinePath = process.env.E2E_RESOURCE_PHASE_BASELINES_FILE;
       const progress = startTestProgress(task.name, "test body", {
         logLine:
           process.env.NEMOCLAW_RUN_LIVE_E2E === "1"
@@ -70,6 +86,14 @@ export const test = base.extend<E2ETargetFixtures>({
             : () => {
                 // Keep fixture and support tests quiet; live runs need the heartbeat.
               },
+        ...(targetId && baselinePath
+          ? {
+              sampleResourceEvidence: (phase: string) =>
+                renderSnapshotLine(collectResourceSnapshot(resourcePhaseLabel(targetId, phase))),
+              recordResourceBaseline: (phase: string) =>
+                appendResourcePhaseBaseline(baselinePath, resourcePhaseLabel(targetId, phase)),
+            }
+          : {}),
       });
       try {
         await use(progress);

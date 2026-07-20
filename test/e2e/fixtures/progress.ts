@@ -46,6 +46,13 @@ export interface TestProgressOptions {
   clearTimer?: (timer: TimerHandle) => void;
   logLine?: (line: string) => void;
   sampleResources?: () => ResourceSnapshot;
+  sampleResourceEvidence?: (phase: string) => string;
+  recordResourceBaseline?: (phase: string) => void;
+}
+
+export interface TestProgressTimeline {
+  phases: ReadonlyArray<{ label: string; elapsedMs: number }>;
+  totalMs: number;
 }
 
 export interface TestProgress {
@@ -54,6 +61,7 @@ export interface TestProgress {
   phase: (label: string) => void;
   stop: () => void;
   summary: () => ProgressSummary;
+  timeline: () => TestProgressTimeline;
 }
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 60_000;
@@ -103,14 +111,26 @@ export function startTestProgress(
   const clearTimer = options.clearTimer ?? ((timer) => clearInterval(timer as NodeJS.Timeout));
   const logLine = options.logLine ?? ((line) => process.stdout.write(`${line}\n`));
   const sampleResources = options.sampleResources ?? defaultResourceSnapshot;
+  const sampleResourceEvidence = options.sampleResourceEvidence;
+  const recordResourceBaseline = options.recordResourceBaseline;
   const scenarioStartedAt = now();
   const phases: ProgressPhase[] = [];
+  const semanticPhases: Array<{ label: string; elapsedMs: number }> = [];
   let basePhaseLabel = initialPhase;
+  let semanticPhaseStartedAt = scenarioStartedAt;
   let phaseLabel = initialPhase;
   let phaseStartedAt = scenarioStartedAt;
   let lastOutputAt: number | null = null;
   let outputEvents = 0;
   let finishedAt: number | null = null;
+
+  const recordBaselineBestEffort = () => {
+    try {
+      recordResourceBaseline?.(basePhaseLabel);
+    } catch {
+      // Diagnostics must not change the live test result.
+    }
+  };
 
   const logBestEffort = (state: "started" | "running" | "finished") => {
     try {
@@ -123,6 +143,8 @@ export function startTestProgress(
       logLine(
         `[${scenario}] ${phaseLabel} ${state} (${elapsedSeconds}s elapsed; ${outputAge}; ${formatResources(sampleResources)})`,
       );
+      const evidence = sampleResourceEvidence?.(basePhaseLabel);
+      if (evidence) logLine(evidence);
     } catch {
       // Diagnostics must not change the live test result.
     }
@@ -139,6 +161,7 @@ export function startTestProgress(
     });
   };
 
+  recordBaselineBestEffort();
   logBestEffort("started");
   const timer = setTimer(
     () => logBestEffort("running"),
@@ -177,11 +200,17 @@ export function startTestProgress(
       const current = now();
       logBestEffort("finished");
       finishPhase(current);
+      semanticPhases.push({
+        label: basePhaseLabel,
+        elapsedMs: Math.max(0, current - semanticPhaseStartedAt),
+      });
       basePhaseLabel = label;
+      semanticPhaseStartedAt = current;
       phaseLabel = basePhaseLabel;
       phaseStartedAt = current;
       lastOutputAt = null;
       outputEvents = 0;
+      recordBaselineBestEffort();
       logBestEffort("started");
     },
     stop() {
@@ -190,6 +219,10 @@ export function startTestProgress(
       clearTimer(timer);
       logBestEffort("finished");
       finishPhase(finishedAt);
+      semanticPhases.push({
+        label: basePhaseLabel,
+        elapsedMs: Math.max(0, finishedAt - semanticPhaseStartedAt),
+      });
     },
     summary() {
       return {
@@ -199,6 +232,22 @@ export function startTestProgress(
         finishedAtMs: finishedAt,
         durationMs: finishedAt === null ? null : Math.max(0, finishedAt - scenarioStartedAt),
         phases: phases.map((phase) => ({ ...phase })),
+      };
+    },
+    timeline() {
+      const current = now();
+      return {
+        phases:
+          finishedAt === null
+            ? [
+                ...semanticPhases.map((phase) => ({ ...phase })),
+                {
+                  label: basePhaseLabel,
+                  elapsedMs: Math.max(0, current - semanticPhaseStartedAt),
+                },
+              ]
+            : semanticPhases.map((phase) => ({ ...phase })),
+        totalMs: Math.max(0, (finishedAt ?? current) - scenarioStartedAt),
       };
     },
   };
