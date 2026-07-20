@@ -193,11 +193,6 @@ jobs:
     with:
       candidate_sha: ${{ inputs.checkout_sha || github.sha }}
       reason: E2E run ${{ github.run_id }} qualifying the exact checked-out NemoClaw candidate
-    secrets:
-      NEMOCLAW_IMAGE_DISPATCH_TOKEN: ${{ secrets.NEMOCLAW_IMAGE_DISPATCH_TOKEN }}
-      BREV_API_KEY: ${{ secrets.BREV_API_KEY }}
-      BREV_ORG_ID: ${{ secrets.BREV_ORG_ID }}
-      NVIDIA_INFERENCE_API_KEY: ${{ secrets.NVIDIA_INFERENCE_API_KEY }}
 
   live:
     needs: generate-matrix

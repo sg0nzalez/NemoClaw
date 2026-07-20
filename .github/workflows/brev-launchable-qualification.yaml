@@ -25,15 +25,6 @@ on:
         description: Audit reason for starting this exact-image Launchable qualification.
         required: true
         type: string
-    secrets:
-      NEMOCLAW_IMAGE_DISPATCH_TOKEN:
-        required: true
-      BREV_API_KEY:
-        required: true
-      BREV_ORG_ID:
-        required: true
-      NVIDIA_INFERENCE_API_KEY:
-        required: true
 
 permissions: {}
 

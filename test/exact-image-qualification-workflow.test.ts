@@ -61,19 +61,9 @@ it("keeps exact-image Launchable qualification protected, reusable, and fail-clo
     "candidate_sha",
     "reason",
   ]);
-  expect(Object.keys((workflow.on.workflow_call as { secrets: object }).secrets)).toEqual([
-    "NEMOCLAW_IMAGE_DISPATCH_TOKEN",
-    "BREV_API_KEY",
-    "BREV_ORG_ID",
-    "NVIDIA_INFERENCE_API_KEY",
-  ]);
+  expect((workflow.on.workflow_call as { secrets?: object }).secrets).toBeUndefined();
   expect(workflow.permissions).toEqual({});
-  expect(caller.secrets).toEqual({
-    NEMOCLAW_IMAGE_DISPATCH_TOKEN: "${{ secrets.NEMOCLAW_IMAGE_DISPATCH_TOKEN }}",
-    BREV_API_KEY: "${{ secrets.BREV_API_KEY }}",
-    BREV_ORG_ID: "${{ secrets.BREV_ORG_ID }}",
-    NVIDIA_INFERENCE_API_KEY: "${{ secrets.NVIDIA_INFERENCE_API_KEY }}",
-  });
+  expect(caller.secrets).toBeUndefined();
   expect(workflow.concurrency).toEqual({
     group: "brev-launchable-qualification-staging-cpu",
     "cancel-in-progress": false,
@@ -81,13 +71,21 @@ it("keeps exact-image Launchable qualification protected, reusable, and fail-clo
 
   expect(preflight.permissions).toEqual({ contents: "read" });
   expect(preflight.environment).toBeUndefined();
-  expect(JSON.stringify(preflight)).not.toContain("NEMOCLAW_IMAGE_QUALIFICATION_TOKEN");
   expect(qualify.permissions).toEqual({ contents: "read" });
   expect(qualify.if).toBe("${{ github.ref == 'refs/heads/main' }}");
   expect(qualify.environment).toEqual({
     name: "approve-brev-launchable-qualification",
     deployment: false,
   });
+  for (const secret of [
+    "NEMOCLAW_IMAGE_DISPATCH_TOKEN",
+    "BREV_API_KEY",
+    "BREV_ORG_ID",
+    "NVIDIA_INFERENCE_API_KEY",
+  ]) {
+    expect(JSON.stringify(preflight)).not.toContain(`secrets.${secret}`);
+    expect(JSON.stringify(qualify)).toContain(`secrets.${secret}`);
+  }
   expect(JSON.stringify(qualify)).toContain("NEMOCLAW_IMAGE_QUALIFICATION_TOKEN");
   expect(source.match(/secrets\.NEMOCLAW_IMAGE_DISPATCH_TOKEN/gu)).toHaveLength(4);
   expect(workflowStrings).not.toContain("id-token: write");
