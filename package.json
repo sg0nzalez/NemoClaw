@@ -91,6 +91,9 @@
     "smol-toml": "1.7.0",
     "yaml": "2.8.3"
   },
+  "overrides": {
+    "axios": "^1.18.1"
+  },
   "bundleDependencies": [
     "p-retry"
   ],

@@ -1,0 +1,195 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+version: 1
+fail-on: info
+
+scanners:
+  gitleaks:
+    enabled: true
+  zizmor:
+    enabled: true
+  actionlint:
+    enabled: true
+  poutine:
+    enabled: true
+  semgrep:
+    enabled: true
+    rulesets:
+      - p/security-audit
+      - p/secrets
+  osv-scanner:
+    enabled: true
+  trivy:
+    enabled: true
+    ignore-unfixed: true
+  checkov:
+    enabled: true
+    # Sandbox/agent images intentionally omit HEALTHCHECK, may run as root for
+    # OpenShell compatibility, and pin bases via digest outside "latest" checks.
+    # workflow_dispatch inputs are required for maintainer-operated rebuilds.
+    skip-checks:
+      - CKV_DOCKER_2
+      - CKV_DOCKER_3
+      - CKV_DOCKER_7
+      - CKV_DOCKER_8
+      - CKV_GHA_7
+
+suppressions:
+  # --- Third-party / local Actions creator reputation (info) ---
+  - tool: poutine
+    rule-id: github_action_from_unverified_creator_used
+    reason: >
+      NemoClaw requires third-party and composite Actions to be pinned to commit
+      SHAs. Creator-reputation scoring flags hash-pinned NVIDIA local actions and
+      common trusted vendors (actions/*, dorny/*, github/*); pin review covers the risk.
+    expires: ""
+
+  - tool: poutine
+    rule-id: unverified_script_exec
+    reason: >
+      Install scripts are downloaded with pinned versions and verified checksums
+      (see workflow comments); runtime execution is intentional after integrity checks.
+    expires: ""
+
+  # --- pull_request_target trust model (critical) ---
+  # These workflows use PRT for fork-safe write tokens. Executable code is from
+  # the base/default branch or is API-only (no PR-head checkout for scripts).
+  - tool: zizmor
+    rule-id: zizmor/dangerous-triggers
+    reason: >
+      pull_request_target is required for fork PR automation. Each flagged workflow
+      either performs API-only operations with no checkout, or checks out the trusted
+      base/default ref for executable helpers and treats PR head as read-only input.
+    expires: ""
+
+  - tool: poutine
+    rule-id: untrusted_checkout_exec
+    reason: >
+      PRT workflows that run scripts check out the base/default branch (or a pinned
+      trusted SHA) for executable code; PR head is not used as the script source.
+    expires: ""
+
+  # --- Intentional GITHUB_OUTPUT / GITHUB_ENV patterns ---
+  - tool: zizmor
+    rule-id: zizmor/github-env
+    reason: >
+      Writes to GITHUB_ENV/OUTPUT use resolver helpers that validate image refs and
+      versions before export; values are not taken from untrusted PR title/body.
+    expires: ""
+
+  # --- Template expansion in trusted CI contexts ---
+  - tool: zizmor
+    rule-id: zizmor/template-injection
+    reason: >
+      Remaining template expansions use maintainer-controlled or previously
+      validated workflow/env inputs (not raw PR title/body). Broader env: migration
+      continues separately; suppress while Muninn gates the rest of the surface.
+    expires: ""
+
+  # --- Permissions / cache / secrets inherit (accepted CI shape) ---
+  - tool: zizmor
+    rule-id: zizmor/excessive-permissions
+    reason: >
+      Remaining workflow-level writes are required by reusable/caller workflows;
+      jobs that need them are documented. Further job-scoping is follow-up work.
+    expires: ""
+
+  - tool: zizmor
+    rule-id: zizmor/cache-poisoning
+    reason: >
+      Release tagging workflow cache usage is limited to trusted release refs;
+      default-branch protection and required checks cover cache poisoning risk.
+    expires: ""
+
+  - tool: zizmor
+    rule-id: zizmor/secrets-inherit
+    reason: >
+      Reusable workflow secrets inherit is intentional for regression E2E which
+      must receive org secrets; callers are limited to trusted workflows.
+    expires: ""
+
+  - tool: zizmor
+    rule-id: zizmor/dependabot-cooldown
+    reason: >
+      Dependabot cooldown is a policy preference; pin-by-digest and Muninn cover
+      supply-chain risk for Actions updates.
+    expires: ""
+
+  # --- Test fixtures with intentional fake secrets ---
+  - id: test/redact-
+    reason: Intentional fake AWS/API key strings used to unit-test redaction.
+    expires: ""
+
+  - id: test/cli/credentials-command.test.ts
+    reason: Intentional fake API keys for credentials CLI unit tests.
+    expires: ""
+
+  - id: test/hermes-gateway-wrapper.test.ts
+    reason: Intentional fake API keys for Hermes gateway unit tests.
+    expires: ""
+
+  - id: test/package-contract/cli/credentials-cli-command.test.ts
+    reason: Intentional fake API keys for package-contract credentials tests.
+    expires: ""
+
+  - id: src/lib/onboard/created-sandbox-failure.test.ts
+    reason: Intentional fake AWS key material for onboard failure-path tests.
+    expires: ""
+
+  # --- E2E fixture lockfile CVEs (not shipped to users) ---
+  - id: test/e2e/fixtures/
+    reason: >
+      Deterministic e2e plugin fixture lockfiles; vulnerabilities are not part of
+      the released NemoClaw runtime and are bumped when the fixture is refreshed.
+    expires: ""
+
+  # --- Residual dependency advisories pending upstream bumps ---
+  - rule-id: GHSA-g7r4-m6w7-qqqr
+    reason: >
+      esbuild Windows-only development-server advisory; NemoClaw CI/build uses
+      Linux and does not expose the esbuild serve API to untrusted clients.
+    expires: ""
+
+  - rule-id: GHSA-vmf3-w455-68vh
+    reason: >
+      node-tar advisory in nested tooling lockfile; not on the production runtime
+      path. Tracked for the next Dependabot/lock refresh.
+    expires: ""
+
+  # --- Semgrep Dockerfile / child_process in trusted contexts ---
+  - tool: semgrep
+    rule-id: dockerfile.security.last-user-is-root.last-user-is-root
+    reason: >
+      Sandbox/agent images must retain root for OpenShell runtime setup; privilege
+      drop happens inside the managed sandbox lifecycle.
+    expires: ""
+
+  - tool: semgrep
+    rule-id: javascript.lang.security.detect-child-process.detect-child-process
+    reason: >
+      CLI wrappers intentionally spawn child processes for openshell/openclaw;
+      arguments are constructed from validated local config, not untrusted input.
+    expires: ""
+
+  # --- actionlint syntax for GitHub-supported concurrency.queue ---
+  - tool: actionlint
+    rule-id: syntax-check
+    reason: >
+      concurrency.queue is a supported GitHub Actions field that actionlint's
+      schema has not caught up with yet.
+    expires: ""
+
+  - tool: actionlint
+    rule-id: permissions
+    reason: >
+      Custom permission scopes (e.g. code-quality) are org-level fine-grained
+      permissions unrecognized by actionlint's built-in list.
+    expires: ""
+
+  - tool: actionlint
+    rule-id: shellcheck
+    reason: >
+      Remaining shellcheck infos are stylistic (SC2016/SC2155) in generated or
+      carefully quoted CI scripts; no command-injection risk identified.
+    expires: ""

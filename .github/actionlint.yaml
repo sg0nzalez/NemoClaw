@@ -1,0 +1,9 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Self-hosted / NVIDIA runner labels used by NemoClaw CI.
+self-hosted-runner:
+  labels:
+    - linux-amd64-cpu4
+    - linux-arm64-cpu4
+    - linux-amd64-gpu-rtxpro6000-latest-1
