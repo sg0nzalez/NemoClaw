@@ -109,8 +109,10 @@ export function registerRebuildFlowTargetImageTests(): void {
       expect(harness.onboardSpy).not.toHaveBeenCalled();
     });
 
-    it("disposes the base-image handoff when replacement image preflight fails (#7144)", async () => {
-      const disposeImageRef = vi.fn(() => true);
+    it("preserves replacement preflight failure when base-image disposal throws (#7144)", async () => {
+      const disposeImageRef = vi.fn(() => {
+        throw new Error("base-image cleanup failed");
+      });
       const harness = createRebuildFlowHarness({
         baseImagePreflight: {
           ok: true,

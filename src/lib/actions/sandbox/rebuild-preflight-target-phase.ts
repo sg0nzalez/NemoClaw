@@ -297,8 +297,14 @@ export async function prepareRebuildTargetPreflights(args: {
       if (!retainPreparedImage && preparedImage) disposePreparedBuildContext(preparedImage);
     }
   } finally {
-    if (!retainBaseImagePreflight && !disposeRebuildAgentBaseImagePreflight(baseImagePreflight)) {
-      console.warn("  Warning: temporary rebuild base-image handoff could not be removed.");
+    if (!retainBaseImagePreflight) {
+      try {
+        if (!disposeRebuildAgentBaseImagePreflight(baseImagePreflight)) {
+          console.warn("  Warning: temporary rebuild base-image handoff could not be removed.");
+        }
+      } catch {
+        // Best effort; preserve the original preflight result or error.
+      }
     }
   }
 }
