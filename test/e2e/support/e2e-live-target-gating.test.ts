@@ -79,14 +79,25 @@ describe("live E2E target gating", () => {
       "[e2e-live] test/e2e/live/launchable-smoke.test.ts > bootstrap install smoke: bootstrap, onboard, sandbox health, live inference, cleanup",
     ]);
 
-    const inactive = listLiveTests({
+    const renamed = listLiveTests({
       enabled: true,
       env: { E2E_TARGET_ID: "bootstrap-install-smoke" },
-      files: ["launchable-smoke.test.ts"],
+      files: ["bootstrap-install-smoke.test.ts"],
+    });
+
+    expect(renamed.status, renamed.stderr || renamed.stdout).toBe(0);
+    expect(linesForFile(renamed.lines, "bootstrap-install-smoke.test.ts")).toEqual([
+      "[e2e-live] test/e2e/live/bootstrap-install-smoke.test.ts > bootstrap install smoke: bootstrap, onboard, sandbox health, live inference, cleanup",
+    ]);
+
+    const inactive = listLiveTests({
+      enabled: true,
+      env: { E2E_TARGET_ID: "launchable-smoke" },
+      files: ["bootstrap-install-smoke.test.ts"],
     });
 
     expect(inactive.status, inactive.stderr || inactive.stdout).toBe(0);
-    expect(linesForFile(inactive.lines, "launchable-smoke.test.ts")).toEqual([]);
+    expect(linesForFile(inactive.lines, "bootstrap-install-smoke.test.ts")).toEqual([]);
   });
 
   it("collects no live files without project opt-in and all live files with it", () => {
