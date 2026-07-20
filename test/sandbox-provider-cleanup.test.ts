@@ -304,6 +304,14 @@ describe("parseAttachedSandboxes", () => {
     expect(parseAttachedSandboxes(output)).toEqual(["spark-nemo"]);
   });
 
+  it("parses an OpenShell diagnostic wrapped with continuation markers", () => {
+    const output =
+      "Error: × code: 'The system is not in a state required for the operation's\n" +
+      "│ execution', message: \"provider 'compatible-endpoint' is attached to\n" +
+      '│ sandbox(es): e2e-diag"';
+    expect(parseAttachedSandboxes(output)).toEqual(["e2e-diag"]);
+  });
+
   it("parses multiple sandbox names from the same diagnostic", () => {
     const output = "provider 'x' is attached to sandbox(es): alpha, beta, gamma";
     expect(parseAttachedSandboxes(output)).toEqual(["alpha", "beta", "gamma"]);
