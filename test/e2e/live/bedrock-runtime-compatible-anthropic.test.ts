@@ -12,6 +12,10 @@ import path from "node:path";
 import type { ArtifactSink } from "../fixtures/artifacts.ts";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
 import {
+  bedrockRuntimeForbiddenLeakPatterns,
+  findForbiddenLeaks,
+} from "../fixtures/bedrock-runtime-leak-scan.ts";
+import {
   cleanupAcquiredResource,
   cleanupExistingPath,
   terminateProcessIfRunning,
@@ -1180,25 +1184,6 @@ for proc_dir in /proc/[0-9]*; do
 done
 `);
 
-function findForbiddenLeaks(
-  text: string,
-  label: string,
-  patterns: Array<[string, string]>,
-): string[] {
-  const locations: string[] = [];
-  let current = label;
-  for (const line of text.split("\n")) {
-    if (line.startsWith("@@NEMOCLAW_E2E_FILE@@ ")) {
-      current = line.slice("@@NEMOCLAW_E2E_FILE@@ ".length);
-      continue;
-    }
-    for (const [name, value] of patterns) {
-      if (value && line.includes(value)) locations.push(`${name}: ${current}`);
-    }
-  }
-  return [...new Set(locations)].sort();
-}
-
 function isPreContractEndpointValidationRateLimit(options: {
   mock: MockBedrockRuntime | undefined;
   onboarding: RawRunResult;
@@ -1255,13 +1240,11 @@ async function assertNoBedrockLeaks(options: {
   redact: (text: string, extraValues?: string[]) => string;
 }): Promise<void> {
   const adapterToken = readAdapterToken(options.home);
-  const patterns: Array<[string, string]> = [
-    ["fake user key", COMPATIBLE_KEY],
-    ["adapter token", adapterToken],
-    ["AWS bearer env name", "AWS_BEARER_TOKEN_BEDROCK"],
-    ["adapter token env name", "NEMOCLAW_BEDROCK_RUNTIME_ADAPTER_TOKEN"],
-    ["raw Bedrock hostname", BEDROCK_HOSTNAME],
-  ];
+  const patterns = bedrockRuntimeForbiddenLeakPatterns({
+    adapterToken,
+    bedrockHostname: BEDROCK_HOSTNAME,
+    compatibleKey: COMPATIBLE_KEY,
+  });
   const snapshot = await runRawCommand(
     "openshell",
     ["sandbox", "exec", "-n", SANDBOX_NAME, "--", ...sandboxShellArgs(SNAPSHOT_SCRIPT)],

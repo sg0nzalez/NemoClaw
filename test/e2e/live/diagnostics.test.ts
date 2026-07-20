@@ -132,7 +132,7 @@ test("diagnostics CLI creates sanitized archives and validates sandbox/credentia
       "nemoclaw debug --output creates an extractable archive without NVIDIA credential values",
       "debug --sandbox accepts a registered sandbox and rejects an unknown sandbox without a partial archive",
       "sandbox openclaw.json is readable through real OpenShell sandbox exec and host status includes model data",
-      "credentials list hides secret values and credentials reset removes the provider credential from the gateway",
+      "credentials list hides secret values and credentials reset is blocked while attached, then removes the provider after sandbox destruction",
     ],
   });
 
@@ -342,10 +342,35 @@ test("diagnostics CLI creates sanitized archives and validates sandbox/credentia
   });
 
   let credentialsResetExercised = false;
+  let credentialsResetRejectedWhileAttached = false;
+  let sandboxDestroyedBeforeCredentialsReset = false;
   let postResetCredentialsListRedacted = false;
   let providerCredentialAbsentBeforeReset = false;
   if (credentialsText.includes(hosted.providerName)) {
     credentialsResetExercised = true;
+    const attachedReset = await host.command(
+      "node",
+      [CLI_ENTRYPOINT, "credentials", "reset", hosted.providerName, "--yes"],
+      {
+        artifactName: "diagnostics-credentials-reset-while-attached",
+        env,
+        redactionValues: [apiKey],
+        timeoutMs: 60_000,
+      },
+    );
+    expect(attachedReset.exitCode, resultText(attachedReset)).not.toBe(0);
+    expect(resultText(attachedReset)).toMatch(/attached to sandbox/i);
+    credentialsResetRejectedWhileAttached = true;
+
+    const destroy = await host.command("node", [CLI_ENTRYPOINT, SANDBOX_NAME, "destroy", "--yes"], {
+      artifactName: "diagnostics-nemoclaw-destroy-before-credentials-reset",
+      env,
+      redactionValues: [apiKey],
+      timeoutMs: 120_000,
+    });
+    expect(destroy.exitCode, resultText(destroy)).toBe(0);
+    sandboxDestroyedBeforeCredentialsReset = true;
+
     const reset = await host.command(
       "node",
       [CLI_ENTRYPOINT, "credentials", "reset", hosted.providerName, "--yes"],
@@ -403,6 +428,8 @@ test("diagnostics CLI creates sanitized archives and validates sandbox/credentia
       statusShowsModel: /Model/i.test(resultText(status)),
       credentialsListRedacted: !credentialsText.includes(apiKey),
       credentialsResetExercised,
+      credentialsResetRejectedWhileAttached,
+      sandboxDestroyedBeforeCredentialsReset,
       providerCredentialAbsentBeforeReset,
       postResetCredentialsListRedacted,
     },
