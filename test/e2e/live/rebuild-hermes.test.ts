@@ -48,6 +48,7 @@ const OLD_HERMES_TARBALL_SHA256 =
   "c0a554050a50ee9a62f3fa5cd288a167ba5640c42d647d100cdea084b7294143";
 const OLD_HERMES_NPM_INTEGRITY =
   "sha512-kkHSw8iprp0JWAOf3ZZF0OHzRBj3E/BbG/QV0O4lwonxuY7AWhSepOhzSMlWo21VbQ/fTLwFkr/q3cIjDZDLBA==";
+const OLD_HERMES_PYTHON = "/opt/hermes/.venv/bin/python";
 const STALE_BASE_REBUILD = process.env.NEMOCLAW_HERMES_STALE_BASE_REBUILD_E2E === "1";
 const TEST_SANDBOX_PREFIX = STALE_BASE_REBUILD ? "e2e-rebuild-hermes-base" : "e2e-rebuild-hermes";
 const SANDBOX_NAME =
@@ -750,8 +751,8 @@ test(STALE_BASE_REBUILD
       "sh",
       "-lc",
       [
-        "hermes kanban init",
-        `hermes kanban create ${shellQuote(KANBAN_TASK_TITLE)} --initial-status blocked --json`,
+        `${shellQuote(OLD_HERMES_PYTHON)} -m hermes_cli.main kanban init`,
+        `${shellQuote(OLD_HERMES_PYTHON)} -m hermes_cli.main kanban create ${shellQuote(KANBAN_TASK_TITLE)} --initial-status blocked --json`,
         `mkdir -p ${shellQuote(path.dirname(EXCLUDED_KANBAN_FILE))}`,
         `printf '%s' ${shellQuote(MARKER_CONTENT)} > ${shellQuote(EXCLUDED_KANBAN_FILE)}`,
       ].join(" && "),
