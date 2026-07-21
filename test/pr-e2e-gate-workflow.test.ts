@@ -502,16 +502,20 @@ describe("PR E2E gate workflow", () => {
     expect(start.run).toContain('--gate-run-id "$GATE_RUN_ID"');
     const wait = step(coordinate, "Wait for E2E run");
     expect(wait.env?.GITHUB_TOKEN).toBe("${{ github.token }}");
+    expect(wait.env?.RUN_ID).toBe("${{ steps.start.outputs.run_id }}");
     expect(wait.run).toContain("--mode wait");
-    expect(wait.run).toContain('--run-id "${{ steps.start.outputs.run_id }}"');
+    expect(wait.run).toContain('--run-id "$RUN_ID"');
     const evidence = step(coordinate, "Download evidence");
     expect(evidence.env?.GH_TOKEN).toBe("${{ github.token }}");
     expect(evidence.env?.GITHUB_TOKEN).toBe("${{ github.token }}");
+    expect(evidence.env?.WORK_DIR).toBe("${{ steps.workspace.outputs.work_dir }}");
+    expect(evidence.env?.RUN_ID).toBe("${{ steps.start.outputs.run_id }}");
     expect(evidence.run).toContain("--mode download");
-    expect(evidence.run).toContain('--work-dir "${{ steps.workspace.outputs.work_dir }}"');
-    expect(evidence.run).toContain('--run-id "${{ steps.start.outputs.run_id }}"');
+    expect(evidence.run).toContain('--work-dir "$WORK_DIR"');
+    expect(evidence.run).toContain('--run-id "$RUN_ID"');
     const finish = step(coordinate, "Verify evidence");
-    expect(finish.run).toContain('--evidence-outcome "${{ steps.evidence.outcome }}"');
+    expect(finish.env?.EVIDENCE_OUTCOME).toBe("${{ steps.evidence.outcome }}");
+    expect(finish.run).toContain('--evidence-outcome "$EVIDENCE_OUTCOME"');
     const approval = step(approveForkSkip, "Record approved credentialed E2E skip");
     expect(approval.env).toEqual({
       APPROVAL_RUN_ATTEMPT: "${{ github.run_attempt }}",
@@ -719,6 +723,7 @@ describe("PR E2E gate workflow", () => {
     const cleanup = step(coordinate, "Remove private workspace");
     expect(cleanup.if).toContain("always()");
     expect(cleanup.if).toContain("steps.workspace.outputs.work_dir");
-    expect(cleanup.run).toBe('rm -rf -- "${{ steps.workspace.outputs.work_dir }}"');
+    expect(cleanup.env?.WORK_DIR).toBe("${{ steps.workspace.outputs.work_dir }}");
+    expect(cleanup.run).toBe('rm -rf -- "$WORK_DIR"');
   });
 });
