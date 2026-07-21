@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -16,9 +17,8 @@ function extractPinnedHashes(source: string): { x64: string; arm64: string } {
   const x64 = /x86_64\) node_arch="x64"; node_sha="([a-f0-9]{64})"/.exec(source)?.[1];
   const arm64 =
     /aarch64\|arm64\) node_arch="arm64"; node_sha="([a-f0-9]{64})"/.exec(source)?.[1];
-  if (!x64 || !arm64) {
-    throw new Error("Could not parse Node tarball SHA-256 pins from workflow");
-  }
+  assert(x64, "missing x64 Node tarball SHA-256 pin");
+  assert(arm64, "missing arm64 Node tarball SHA-256 pin");
   return { x64, arm64 };
 }
 
@@ -26,7 +26,7 @@ function parseOfficialShasums(body: string): Map<string, string> {
   const map = new Map<string, string>();
   for (const line of body.split(/\r?\n/)) {
     const match = /^([a-f0-9]{64})\s+(\S+)$/.exec(line.trim());
-    if (match) map.set(match[2], match[1]);
+    match ? map.set(match[2], match[1]) : undefined;
   }
   return map;
 }
@@ -45,7 +45,7 @@ describe("Pinned Node.js dist checksums", () => {
     for (const path of WORKFLOWS) {
       const source = readFileSync(resolve(path), "utf8");
       expect(source).toContain(`NODE_VERSION="${NODE_VERSION}"`);
-      expect(source).toContain('sha256sum -c -');
+      expect(source).toContain("sha256sum -c -");
       expect(source).toContain('*) echo "Unsupported architecture: $arch" >&2; exit 1 ;;');
       const pinned = extractPinnedHashes(source);
       expect(pinned.x64, path).toBe(expectedX64);

@@ -40,20 +40,17 @@ function checkoutSteps(workflow: Workflow): WorkflowStep[] {
   );
 }
 
+function missingPersistCredentialsFalse(file: string): string[] {
+  const workflow = parseYaml(readFileSync(join(WORKFLOWS_DIR, file), "utf8")) as Workflow;
+  return checkoutSteps(workflow)
+    .filter((step) => step.with?.["persist-credentials"] !== false)
+    .map((step) => `${file}: ${step.name ?? step.uses ?? "<unnamed>"}`);
+}
+
 describe("Checkout credential persistence hardening", () => {
   // source-shape-contract: security -- persist-credentials:false stays on every hardened checkout
   it("keeps persist-credentials false on every actions/checkout in hardened workflows", () => {
-    const missing: string[] = [];
-    for (const file of HARDENED_WORKFLOWS) {
-      const path = join(WORKFLOWS_DIR, file);
-      const workflow = parseYaml(readFileSync(path, "utf8")) as Workflow;
-      for (const step of checkoutSteps(workflow)) {
-        if (step.with?.["persist-credentials"] !== false) {
-          missing.push(`${file}: ${step.name ?? step.uses ?? "<unnamed>"}`);
-        }
-      }
-    }
-    expect(missing).toEqual([]);
+    expect(HARDENED_WORKFLOWS.flatMap(missingPersistCredentialsFalse)).toEqual([]);
   });
 
   // source-shape-contract: security -- Hardened list stays aligned with workflows on disk

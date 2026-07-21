@@ -26,6 +26,51 @@ function requiredStep(jobName: string, stepName: string): WorkflowStep {
   return step;
 }
 
+function resolveScript(): string {
+  const script = requiredStep("muninn", "Resolve Muninn config path").run;
+  assert(typeof script === "string" && script.length > 0);
+  return script;
+}
+
+function writeTrustedPolicy(root: string): void {
+  mkdirSync(join(root, "trusted-muninn-policy"), { recursive: true });
+  writeFileSync(join(root, "trusted-muninn-policy", "muninn.yml"), "scanners: {}\n");
+}
+
+function writeHeadPolicy(root: string): void {
+  writeFileSync(join(root, "muninn.yml"), "scanners: {}\n");
+}
+
+function runResolveScript(
+  eventName: string,
+  prepare: (root: string) => void,
+): { log: string; config: string; status: number } {
+  const root = mkdtempSync(join(tmpdir(), "muninn-policy-"));
+  try {
+    prepare(root);
+    const githubOutput = join(root, "github-output");
+    writeFileSync(githubOutput, "");
+    const result = spawnSync("bash", ["-c", resolveScript()], {
+      cwd: root,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        EVENT_NAME: eventName,
+        BASE_SHA: "abc123",
+        GITHUB_OUTPUT: githubOutput,
+      },
+    });
+    const output = readFileSync(githubOutput, "utf8");
+    return {
+      log: `${result.stdout ?? ""}${result.stderr ?? ""}`,
+      config: /^config=(.+)$/m.exec(output)?.[1] ?? "",
+      status: result.status ?? 1,
+    };
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
 describe("Muninn workflow contract", () => {
   // source-shape-contract: security -- fail-on and formats stay owned by the workflow, not muninn.yml
   it("pins Muninn and keeps fail-on info with SARIF plus PR comment output", () => {
@@ -73,62 +118,29 @@ describe("Muninn workflow contract", () => {
     expect(resolve.run).toContain("bootstrap: base has no file yet");
   });
 
-  // source-shape-contract: security -- Resolve script selects base config when present, else head
-  it("resolves config path for PR-with-base, bootstrap, and missing-file cases", () => {
-    const resolve = requiredStep("muninn", "Resolve Muninn config path");
-    const script = resolve.run;
-    assert(typeof script === "string" && script.length > 0);
+  // source-shape-contract: security -- PR with base muninn.yml uses the trusted copy
+  it("resolves config to the trusted base file when both base and head exist", () => {
+    const result = runResolveScript("pull_request", (root) => {
+      writeTrustedPolicy(root);
+      writeHeadPolicy(root);
+    });
+    expect(result.status).toBe(0);
+    expect(result.log).toContain("Using trusted base muninn.yml");
+    expect(result.config).toBe(".muninn-trusted.yml");
+  });
 
-    const runCase = (opts: {
-      eventName: string;
-      withTrusted: boolean;
-      withHead: boolean;
-    }): { log: string; config: string; status: number } => {
-      const root = mkdtempSync(join(tmpdir(), "muninn-policy-"));
-      try {
-        if (opts.withTrusted) {
-          mkdirSync(join(root, "trusted-muninn-policy"), { recursive: true });
-          writeFileSync(join(root, "trusted-muninn-policy", "muninn.yml"), "scanners: {}\n");
-        }
-        if (opts.withHead) {
-          writeFileSync(join(root, "muninn.yml"), "scanners: {}\n");
-        }
-        const githubOutput = join(root, "github-output");
-        writeFileSync(githubOutput, "");
-        const result = spawnSync("bash", ["-c", script], {
-          cwd: root,
-          encoding: "utf8",
-          env: {
-            ...process.env,
-            EVENT_NAME: opts.eventName,
-            BASE_SHA: "abc123",
-            GITHUB_OUTPUT: githubOutput,
-          },
-        });
-        const output = readFileSync(githubOutput, "utf8");
-        const config = /^config=(.+)$/m.exec(output)?.[1] ?? "";
-        return {
-          log: `${result.stdout ?? ""}${result.stderr ?? ""}`,
-          config,
-          status: result.status ?? 1,
-        };
-      } finally {
-        rmSync(root, { recursive: true, force: true });
-      }
-    };
+  // source-shape-contract: security -- Missing base muninn.yml bootstraps from head
+  it("resolves config to the head file when the base policy is absent", () => {
+    const result = runResolveScript("pull_request", writeHeadPolicy);
+    expect(result.status).toBe(0);
+    expect(result.log).toContain("bootstrap: base has no file yet");
+    expect(result.config).toBe("muninn.yml");
+  });
 
-    const withBase = runCase({ eventName: "pull_request", withTrusted: true, withHead: true });
-    expect(withBase.status).toBe(0);
-    expect(withBase.log).toContain("Using trusted base muninn.yml");
-    expect(withBase.config).toBe(".muninn-trusted.yml");
-
-    const bootstrap = runCase({ eventName: "pull_request", withTrusted: false, withHead: true });
-    expect(bootstrap.status).toBe(0);
-    expect(bootstrap.log).toContain("bootstrap: base has no file yet");
-    expect(bootstrap.config).toBe("muninn.yml");
-
-    const push = runCase({ eventName: "push", withTrusted: false, withHead: true });
-    expect(push.status).toBe(0);
-    expect(push.config).toBe("muninn.yml");
+  // source-shape-contract: security -- Non-PR events use the workspace muninn.yml
+  it("resolves config to the workspace file on push events", () => {
+    const result = runResolveScript("push", writeHeadPolicy);
+    expect(result.status).toBe(0);
+    expect(result.config).toBe("muninn.yml");
   });
 });
