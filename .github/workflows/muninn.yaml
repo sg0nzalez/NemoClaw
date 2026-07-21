@@ -7,6 +7,13 @@
 # Gate severity (fail-on) lives in this workflow — not in muninn.yml.
 # muninn.yml holds scanner enablement and suppressions only.
 #
+# Coverage boundary: Muninn (osv-scanner/trivy/etc.) is not a substitute for
+# npm's production audit of this repository's lockfile. The companion
+# npm-audit-production job below enforces `npm audit --omit=dev` on the root
+# graph. Reviewed third-party graphs remain under ci/reviewed-npm-audit.json
+# (PR/main CI). Dev-only nested copies (e.g. coding-agent brace-expansion) are
+# out of scope for the production omit=dev gate.
+#
 # On pull_request, muninn.yml is loaded from the trusted base SHA so a PR
 # cannot expand suppressions (or disable scanners) by editing the head copy.
 # Bootstrap: if base has no muninn.yml yet, fall back to the head checkout.
@@ -92,3 +99,29 @@ jobs:
         uses: github/codeql-action/upload-sarif@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4
         with:
           sarif_file: muninn.sarif
+
+  # Root production lockfile audit — complementary to Muninn osv/trivy (see
+  # workflow header coverage boundary). Fails on any finding severity.
+  npm-audit-production:
+    name: npm audit (omit=dev)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "22.19.0"
+          cache: npm
+
+      - name: Install production dependencies
+        run: npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+
+      - name: Audit production dependency graph
+        run: npm audit --omit=dev

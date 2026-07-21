@@ -1257,3 +1257,39 @@ suppressions:
     reason: >
       Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
     expires: 2027-01-20T00:00:00Z
+  - fingerprint: 0840ca12b59ce7cc
+    reason: >
+      NemoClaw requires Actions pinned to commit SHAs; creator-reputation flags hash-pinned NVIDIA local actions and trusted vendors (actions/*, dorny/*, github/*). (.github/workflows/muninn.yaml:89)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 54389d7b1189cd7d
+    reason: >
+      Dev-only @earendil-works/pi-coding-agent nested brace-expansion 5.0.6; production graph uses 5.0.7 / filelist 2.1.2 (npm audit --omit=dev clean). Do not dishonestly override the coding-agent shrinkwrap. (package-lock.json:0)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: cab1bd569779a810
+    reason: >
+      Dev-only @earendil-works/pi-coding-agent nested protobufjs; not on the production omit=dev runtime path. (package-lock.json:0)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 2a9a849afc220125
+    reason: >
+      Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 844efe09fe8d4bf9
+    reason: >
+      Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: 869ff84897cb1871
+    reason: >
+      Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: a56393fc753fbcff
+    reason: >
+      Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: c9e291c7dafa443c
+    reason: >
+      Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
+    expires: 2027-01-20T00:00:00Z
+  - fingerprint: d7ea1d046548d9fc
+    reason: >
+      Deterministic e2e plugin fixture lockfile advisory; not part of released NemoClaw runtime. (test/e2e/fixtures/plugins/weather/package-lock.json:0)
+    expires: 2027-01-20T00:00:00Z
