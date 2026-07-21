@@ -117,6 +117,9 @@ describe("OpenShell candidate compatibility contract", () => {
       "resolve",
     ]);
     expect(source).toContain("candidate compatibility must be dispatched from main");
+    // Brace-safe quoting: unquoted HEAD^{commit} is brace-expanded by bash.
+    expect(source).toContain("rev-parse --verify 'HEAD^{commit}'");
+    expect(source).not.toMatch(/rev-parse --verify HEAD\^\{commit\}(?!')/);
     expect(source).toContain("path: controller");
     expect(source).toContain("path: candidate-source");
     expect(source).toContain("RESOLUTION_ID: ${{ needs.resolve.outputs.resolution_id }}");
@@ -143,6 +146,31 @@ describe("OpenShell candidate compatibility contract", () => {
     expect(enforce?.run).not.toContain('test "$DETERMINISTIC_RESULT"');
     expect(enforce?.if).toBe("${{ always() }}");
     expect(source).not.toMatch(/\b(?:git push|gh pr|npm publish|docker push)\b/u);
+  });
+
+  // source-shape-contract: security -- Quoted HEAD^{commit} survives bash brace expansion
+  it("resolves a quoted HEAD^{commit} rev-parse to a full SHA in bash (#candidate-compat)", () => {
+    const root = mkdtempSync(join(tmpdir(), "candidate-rev-parse-"));
+    try {
+      const init = spawnSync("git", ["init"], { cwd: root, encoding: "utf8" });
+      expect(init.status).toBe(0);
+      writeFileSync(join(root, "README"), "ok\n");
+      expect(spawnSync("git", ["add", "README"], { cwd: root }).status).toBe(0);
+      expect(
+        spawnSync("git", ["-c", "user.email=test@example.com", "-c", "user.name=test", "commit", "-m", "init"], {
+          cwd: root,
+        }).status,
+      ).toBe(0);
+
+      const quoted = spawnSync("bash", ["-c", "git rev-parse --verify 'HEAD^{commit}'"], {
+        cwd: root,
+        encoding: "utf8",
+      });
+      expect(quoted.status).toBe(0);
+      expect(quoted.stdout.trim()).toMatch(/^[a-f0-9]{40}$/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("links failed evidence to validated jobs and falls back to the workflow run", () => {
