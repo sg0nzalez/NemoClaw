@@ -75,7 +75,7 @@ describe("Muninn workflow contract", () => {
   // source-shape-contract: security -- fail-on and formats stay owned by the workflow, not muninn.yml
   it("pins Muninn and keeps fail-on info with SARIF plus PR comment output", () => {
     const run = requiredStep("muninn", "Run Muninn");
-    expect(run.uses).toBe("skaldlab/muninn@365628a795478e870417bf9e395a0ecc63685442");
+    expect(run.uses).toBe("skaldlab/muninn@daf98872b5748d015ed5bd828296175f6bc0115d");
     expect(run.with?.["fail-on"]).toBe("info");
     expect(run.with?.format).toBe("sarif,comment");
     expect(run.with?.token).toBe("${{ secrets.GITHUB_TOKEN }}");
