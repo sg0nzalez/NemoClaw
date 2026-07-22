@@ -452,6 +452,15 @@ function validateScorecard(errors: string[], workflow: OperationsWorkflow): void
   ) {
     errors.push("scorecard generator must derive explicit-only jobs from workflow inventory");
   }
+  if (generate.env?.NEEDS_JSON !== "${{ toJSON(needs) }}") {
+    errors.push("scorecard generator must pass needs through NEEDS_JSON env");
+  }
+  if (!generateScript.includes("JSON.parse(process.env.NEEDS_JSON)")) {
+    errors.push("scorecard generator must parse needs from process.env.NEEDS_JSON");
+  }
+  if (generateScript.includes("toJSON(needs)")) {
+    errors.push("scorecard generator must not inline toJSON(needs) in the script");
+  }
 
   const slack = findStep(job, "Post scorecard to Slack");
   requirePinnedAction(errors, slack, "scorecard Slack publisher");

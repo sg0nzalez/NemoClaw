@@ -4467,6 +4467,9 @@ export function validateE2eWorkflow(workflowValue: unknown): string[] {
     ) {
       errors.push("report-to-pr must derive explicit-only jobs from workflow inventory");
     }
+    if (reportEnv.NEEDS_JSON !== "${{ toJSON(needs) }}") {
+      errors.push("report-to-pr step must pass needs through NEEDS_JSON env");
+    }
     const reportScript = stringValue(asRecord(report?.with).script ?? report?.run);
     if (
       !reportScript.includes("tools/e2e/report-e2e-results.mts") ||
@@ -4474,6 +4477,11 @@ export function validateE2eWorkflow(workflowValue: unknown): string[] {
     ) {
       errors.push(
         "step 'Post E2E target results to PR' run script must load the trusted report helper from the checked-out workspace",
+      );
+    }
+    if (!reportScript.includes("JSON.parse(process.env.NEEDS_JSON)")) {
+      errors.push(
+        "step 'Post E2E target results to PR' run script must parse needs from process.env.NEEDS_JSON",
       );
     }
     const prNumberAssignment = /\b(?:const|let)\s+(\w+)\s*=\s*await\s+resolveReportPr\(/.exec(
@@ -4547,7 +4555,11 @@ export function validateE2eWorkflow(workflowValue: unknown): string[] {
         errors.push("report-to-pr must check out the report helper before the reporting step");
       }
     }
-    for (const forbidden of ["toJSON(inputs.pr_number)", "toJSON(inputs.targets)"]) {
+    for (const forbidden of [
+      "toJSON(inputs.pr_number)",
+      "toJSON(inputs.targets)",
+      "toJSON(needs)",
+    ]) {
       if (reportScript.includes(forbidden)) {
         errors.push(
           `step 'Post E2E target results to PR' run script must not include ${forbidden}`,

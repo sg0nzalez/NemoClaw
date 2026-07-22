@@ -341,11 +341,28 @@ describe("E2E operations workflow boundary", () => {
     );
   });
 
-  it("executes the scorecard workflow body and emits advisory budget warnings", async () => {
-    const script = workflowScript("scorecard", "Generate E2E scorecard").replace(
-      "${{ toJSON(needs) }}",
-      JSON.stringify({ "generate-matrix": { result: "success" } }),
+  it("rejects scorecard needs serialization drift back to inline expressions", () => {
+    const workflow = readE2eOperationsWorkflow();
+    const generate = workflow.jobs.scorecard.steps!.find(
+      (step) => step.name === "Generate E2E scorecard",
+    )!;
+    delete generate.env!.NEEDS_JSON;
+    generate.with!.script = String(generate.with!.script).replace(
+      "const needs = JSON.parse(process.env.NEEDS_JSON);",
+      "const needs = ${{ toJSON(needs) }};",
     );
+
+    expect(validateE2eOperationsWorkflow(workflow)).toEqual(
+      expect.arrayContaining([
+        "scorecard generator must pass needs through NEEDS_JSON env",
+        "scorecard generator must parse needs from process.env.NEEDS_JSON",
+        "scorecard generator must not inline toJSON(needs) in the script",
+      ]),
+    );
+  });
+
+  it("executes the scorecard workflow body and emits advisory budget warnings", async () => {
+    const script = workflowScript("scorecard", "Generate E2E scorecard");
     const warning = vi.fn();
     const setOutput = vi.fn();
     const summary = {
@@ -391,6 +408,7 @@ describe("E2E operations workflow boundary", () => {
         EXPLICIT_ONLY_JOBS: "",
         GITHUB_WORKSPACE: "/workspace",
         JOBS: "",
+        NEEDS_JSON: JSON.stringify({ "generate-matrix": { result: "success" } }),
         TARGETS: "",
       },
     };

@@ -985,6 +985,46 @@ it("rejects a report helper checkout pinned outside the trusted workflow revisio
   }
 });
 
+it("rejects report-to-pr needs serialization drift back to inline expressions", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "e2e-workflow-"));
+  const workflowPath = path.join(tmp, "workflow.yaml");
+  const workflow = readWorkflow() as {
+    jobs: Record<
+      string,
+      {
+        steps: Array<{
+          name?: string;
+          env?: Record<string, string>;
+          with?: { script?: string };
+        }>;
+      }
+    >;
+  };
+  const reportStep = workflow.jobs["report-to-pr"]?.steps?.find(
+    (step) => step.name === "Post E2E target results to PR",
+  );
+  requireFixture(reportStep?.env !== undefined, "missing report-to-pr env");
+  requireFixture(reportStep?.with !== undefined, "missing report-to-pr script step");
+  delete reportStep!.env!.NEEDS_JSON;
+  reportStep!.with!.script = String(reportStep!.with!.script).replace(
+    "const needs = JSON.parse(process.env.NEEDS_JSON);",
+    "const needs = ${{ toJSON(needs) }};",
+  );
+  fs.writeFileSync(workflowPath, YAML.stringify(workflow));
+
+  try {
+    expect(validateE2eWorkflowBoundary(workflowPath)).toEqual(
+      expect.arrayContaining([
+        "report-to-pr step must pass needs through NEEDS_JSON env",
+        "step 'Post E2E target results to PR' run script must parse needs from process.env.NEEDS_JSON",
+        "step 'Post E2E target results to PR' run script must not include toJSON(needs)",
+      ]),
+    );
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 it("rejects a report-to-pr script that references the trusted helpers without invoking them", () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "e2e-workflow-"));
   const workflowPath = path.join(tmp, "workflow.yaml");
