@@ -521,9 +521,17 @@ jobs:
           "$OPENSHELL_GATEWAY_BIN" --version
           npx tsx tools/e2e/live-vitest-invocation.mts run --test-path test/e2e/live/openshell-gateway-auth-source-contract.test.ts
 
-      - name: Upload OpenShell gateway auth contract artifacts
+      - id: artifact_safety
+        name: Validate final OpenShell gateway auth contract artifacts
         if: always()
+        run: node --experimental-strip-types --no-warnings tools/e2e/openshell-gateway-auth-artifact-safety.mts "$E2E_ARTIFACT_DIR"
+
+      - name: Upload OpenShell gateway auth contract artifacts
+        if: ${{ always() && steps.artifact_safety.outcome == 'success' && steps.artifact_safety.outputs.approved_path != '' }}
         uses: NVIDIA/NemoClaw/.github/actions/upload-e2e-artifacts@7768e15eb90d3ee2d33432f481dfe8747e4f6d57
+        with:
+          name: e2e-openshell-gateway-auth-contract
+          path: ${{ steps.artifact_safety.outputs.approved_path }}
 
       - name: Clean up Docker auth
         if: always()
