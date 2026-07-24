@@ -57,6 +57,19 @@ type ExplicitUploadContract = {
 
 const EXPLICIT_UPLOAD_CONTRACTS = new Map<string, ExplicitUploadContract>([
   [
+    "staging-brev-launchable",
+    {
+      name: "staging-brev-launchable-${{ env.CANDIDATE_SHA }}-${{ github.run_id }}",
+      path: [
+        "${{ steps.workspace.outputs.work_dir }}/lane.log",
+        "${{ steps.workspace.outputs.work_dir }}/qualification.json",
+        "${{ steps.workspace.outputs.work_dir }}/full-e2e.log",
+        "${{ steps.workspace.outputs.work_dir }}/cleanup.json",
+        "",
+      ].join("\n"),
+    },
+  ],
+  [
     "live",
     {
       name: "e2e-${{ matrix.id }}",
@@ -100,6 +113,20 @@ const EXPLICIT_UPLOAD_CONTRACTS = new Map<string, ExplicitUploadContract>([
     {
       name: "e2e-hermes-inference-switch-${{ matrix.mode }}",
       path: "e2e-artifacts/live/hermes-inference-switch/${{ matrix.mode }}/",
+    },
+  ],
+  [
+    "network-policy",
+    {
+      name: "e2e-network-policy-${{ matrix.scenario }}",
+      path: "e2e-artifacts/live/network-policy/${{ matrix.scenario }}/",
+    },
+  ],
+  [
+    "common-egress-agent",
+    {
+      name: "e2e-common-egress-agent-${{ matrix.scenario }}",
+      path: "e2e-artifacts/live/common-egress-agent/${{ matrix.scenario }}/",
     },
   ],
   [
@@ -181,6 +208,7 @@ const EXPLICIT_UPLOAD_CONTRACTS = new Map<string, ExplicitUploadContract>([
 ]);
 
 const EXPLICIT_CALLER_CONDITIONS = new Map<string, string>([
+  ["staging-brev-launchable", "${{ always() && steps.workspace.outputs.work_dir != '' }}"],
   ["mcp-bridge", MCP_SCANNED_UPLOAD_CONDITION],
   ["mcp-bridge-dev", MCP_SCANNED_UPLOAD_CONDITION],
   ["openshell-gateway-auth-contract", GATEWAY_AUTH_SCANNED_UPLOAD_CONDITION],
@@ -288,6 +316,7 @@ export function validateUploadE2eArtifactsInvocations(workflow: WorkflowRecord):
         const jobSteps = steps(job.steps);
         const env = record(job.env);
         return (
+          jobName === "staging-brev-launchable" ||
           jobName === "live" ||
           env.E2E_JOB === "1" ||
           env.NEMOCLAW_RUN_LIVE_E2E === "1" ||

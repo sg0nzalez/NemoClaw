@@ -1485,6 +1485,9 @@ openshell sandbox list
 $$nemoclaw <name> status
 ```
 
+If onboarding instead reports that the sandbox "did not re-register with OpenShell after policy application," the same timeout controls that post-policy command-readiness probe.
+Raise the budget before retrying, then inspect the same gateway and sandbox status if re-registration still fails.
+
 ### Sandbox onboard fails with "entered Error phase before it became ready"
 
 Onboarding ends with:
@@ -2314,6 +2317,11 @@ Identify the matching path before applying the recovery guidance.
 | `Cleanup could not be proven safe` | Native-to-compatibility handoff | Run the printed sandbox deletion command, verify both the gateway row and OpenShell-managed Docker containers labeled for that sandbox are absent, then rerun onboarding. |
 | The patched container exits or the compatibility attempt fails | Compatibility recreation | Inspect the saved diagnostics, repair the NVIDIA Container Toolkit/CDI configuration, clean up the failed sandbox, and rerun onboarding. |
 | A recreated container inherits only a loopback DNS stub and no usable upstream | Compatibility DNS fallback | Repair the host's `systemd-resolved` upstream configuration, then rerun onboarding. |
+
+For bridge-networked compatibility recreation without an explicit container DNS setting, NemoClaw selects a usable IPv4 upstream from `systemd-resolved` and probes that exact `--dns` path before it stops the original container.
+If the probe confirms that the resolver is unreachable, recreation stops and leaves the original container in place.
+An IPv6-only upstream list does not become a compatibility override; NemoClaw preserves Docker's default resolver path instead.
+Containers with explicit DNS settings or host networking keep their existing DNS path and do not use the fallback probe.
 
 #### Ordinary native Linux bounded fallback
 
